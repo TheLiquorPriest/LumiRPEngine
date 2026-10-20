@@ -133,8 +133,12 @@ export function setup(ctx: SpindleFrontendContext): () => void {
   cleanups.push(() => set.destroy());
   // A draft another window or an outside agent changes is reloaded in Build (DESIGN §23).
   cleanups.push(trackDraft(app));
-  // A socket that dropped may have missed a push: Build reads its draft again once the page is back.
-  const recheck = (): void => void recheckDraft(app);
+  // A socket that dropped may have missed a push: Build reads its draft again once the page is back,
+  // and the open chat resyncs, so a reply the engine prepared while it slept starts (DESIGN §5.1).
+  const recheck = (): void => {
+    void recheckDraft(app);
+    client.resync();
+  };
   const visible = (): void => {
     if (document.visibilityState === "visible") recheck();
   };

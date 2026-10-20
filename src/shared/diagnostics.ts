@@ -32,6 +32,10 @@ export interface DiagCall {
   ok: boolean;
   error?: string;
   lookup?: boolean;
+  /** This attempt failed transiently and the call was made again. */
+  retried?: boolean;
+  /** How many attempts of the call came before this one. */
+  retries?: number;
 }
 
 export interface DiagSection {
@@ -100,7 +104,7 @@ export const STEP_LABEL: Record<string, string> = {
   outline: "Writing the outline…",
   sections: "Filling the prompt…",
   book: "Waiting for another chat of this world…",
-  restart: "Starting the reply…",
+  restart: "Ready; reopen the chat to continue",
   ready: "Ready: press Send for the reply",
   reply: "Waiting for the reply…",
   read: "Reading the reply…",

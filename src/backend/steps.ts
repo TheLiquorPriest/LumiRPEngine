@@ -1,8 +1,8 @@
 // Model steps over the host (DESIGN §5.2, §9.4, D10, D31). Routing: `interpret` and `extract` on
 // the helper (a quiet JSON call on the user's connection); `npc.choose` on the
 // Decision connection, falling back to the helper, then to engine-only. No blind retry: one JSON
-// repair call when a helper reply doesn't parse (DESIGN §18.4), and `interpret` asks once more after
-// a transient failure (a network reset, a timeout, a 5xx). Prompts are model-agnostic.
+// repair call when a helper reply doesn't parse (DESIGN §18.4), and every call is made again after a
+// transient failure (a network reset, a timeout, a 429, a 5xx), twice at most. Prompts are model-agnostic.
 
 import type { DiagCall } from "../shared/diagnostics";
 import type { ActionId, EntityId, UserId } from "../shared/ids";
@@ -178,14 +178,35 @@ export function parseJsonReply(text: string): JsonValue {
 export type StepsHost = Pick<HostPort, "models" | "log">;
 
 /**
- * A failure worth one more try: the connection reset or dropped, the request timed out, or the
- * provider answered with a 5xx (the host words these as "… failed (502): …"). An abort is the
- * engine's own deadline, never retried.
+ * A failure worth another try: the connection reset or dropped, the request timed out, the provider
+ * was busy (429) or answered with a 5xx (the host words these as "… failed (502): …"). An abort is
+ * the engine's own deadline, never retried.
  */
 export function transientFailure(error: unknown): boolean {
   const text = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
   if (/\bAbortError\b/.test(text)) return false;
-  return /\b(?:ECONNRESET|ECONNREFUSED|ECONNABORTED|EPIPE|ETIMEDOUT|ESOCKETTIMEDOUT|EAI_AGAIN|ENETUNREACH|EHOSTUNREACH|UND_ERR_[A-Z_]+)\b|socket hang up|socket connection was closed|connection (?:was )?(?:reset|closed)|fetch failed|network error|timed? ?out|\(5\d\d\)|\b(?:status|HTTP)\s*:?\s*5\d\d\b/i.test(text);
+  return /\b(?:ECONNRESET|ECONNREFUSED|ECONNABORTED|EPIPE|ETIMEDOUT|ESOCKETTIMEDOUT|EAI_AGAIN|ENETUNREACH|EHOSTUNREACH|UND_ERR_[A-Z_]+)\b|socket hang up|socket connection was closed|connection (?:was )?(?:reset|closed)|fetch failed|network error|timed? ?out|too many requests|rate.?limit|\((?:5\d\d|429)\)|\b(?:status|HTTP)\s*:?\s*(?:5\d\d|429)\b/i.test(text);
+}
+
+/** How many times a call that failed transiently is made again, the first after `RETRY_PAUSE_MS`, each later one after twice the wait before it. */
+export const TRANSIENT_RETRIES = 2;
+const RETRY_PAUSE_MS = 1000;
+
+/** Waits `ms`, or until `signal` ends the step's time. */
+function pause(ms: number, signal: AbortSignal): Promise<void> {
+  const { promise, resolve } = Promise.withResolvers<void>();
+  if (signal.aborted) {
+    resolve();
+    return promise;
+  }
+  const done = (): void => {
+    clearTimeout(timer);
+    signal.removeEventListener("abort", done);
+    resolve();
+  };
+  const timer = setTimeout(done, ms);
+  signal.addEventListener("abort", done, { once: true });
+  return promise;
 }
 
 /** A decision's questions as a helper reads them, one line each. */
@@ -212,10 +233,17 @@ export class Steps {
     private readonly helperOf: (userId: UserId) => Promise<Readonly<HelperDefault>> = async () => DEFAULT_HELPER,
   ) {}
 
-  /** One metered quiet call. With `retry`, a call that fails transiently is made once more. The reply, or the call's error. */
-  private async quiet(purpose: StepPurpose, request: QuietRequest, userId: UserId, signal: AbortSignal, o: { retry: boolean; lookup: boolean }): Promise<QuietResult | Error> {
+  /**
+   * One metered quiet call. A call that fails transiently (`transientFailure`: a
+   * dropped connection, 429, 5xx) is made again, up to `TRANSIENT_RETRIES` times after a short wait,
+   * inside the step's time; an empty or cut-off answer is never asked again. The reply, or the
+   * last attempt's error. Each attempt is its own call in diagnostics; one asked again is marked
+   * `retried`, and the last carries how many came before it.
+   */
+  private async quiet(purpose: StepPurpose, request: QuietRequest, userId: UserId, signal: AbortSignal, o: { lookup: boolean }, attempt = 0): Promise<QuietResult | Error> {
     const t0 = performance.now();
     const lookup = o.lookup ? { lookup: true } : {};
+    const tried = attempt > 0 ? { retries: attempt } : {};
     const route = { purpose, via: "helper" as const, connection: request.connectionId ?? "active", maxTokens: request.maxTokens, ...lookup };
     this.onCallStart?.(userId, purpose);
     try {
@@ -223,7 +251,7 @@ export class Steps {
       const ms = performance.now() - t0;
       this.meter.record({ purpose, via: "helper", ok: true, ms, tokens: r.tokens, ...lookup }, userId);
       const answered = r.content.trim() !== "" || (r.toolCalls?.length ?? 0) > 0;
-      this.onCall?.(userId, { ...route, model: r.model ?? request.model ?? "default", tokensIn: r.tokensIn ?? null, tokensOut: answered ? (r.tokensOut ?? null) : 0, finishReason: r.finishReason, ms, ok: true });
+      this.onCall?.(userId, { ...route, model: r.model ?? request.model ?? "default", tokensIn: r.tokensIn ?? null, tokensOut: answered ? (r.tokensOut ?? null) : 0, finishReason: r.finishReason, ms, ok: true, ...tried });
       // A reply that ran out of tokens is cut off mid-JSON; say so, as it reads as no JSON.
       if (r.finishReason === "length") this.host.log("warn", `[LumiRPEngine] ${purpose} helper reply was cut off at ${request.maxTokens} tokens (${r.content.length} characters)`, userId);
       return r;
@@ -232,16 +260,18 @@ export class Steps {
       this.meter.record({ purpose, via: "helper", ok: false, ms, tokens: 0, ...lookup }, userId);
       const why = error instanceof Error ? error.message : String(error);
       const fired = firedTimeout(signal);
-      this.onCall?.(userId, { ...route, model: request.model ?? "default", tokensIn: null, tokensOut: null, finishReason: "", ms, ok: false, error: fired ? `${fired.message} (${why})` : signal.aborted ? `aborted: the step's time ran out (${why})` : why });
-      const again = o.retry && !signal.aborted && transientFailure(error);
-      this.host.log("warn", `[LumiRPEngine] ${purpose} helper call failed${again ? ", asking once more" : ""}: ${error instanceof Error ? error.message : String(error)}`, userId);
-      return again ? this.quiet(purpose, request, userId, signal, { ...o, retry: false }) : error instanceof Error ? error : new Error(String(error));
+      const again = attempt < TRANSIENT_RETRIES && !signal.aborted && transientFailure(error);
+      this.onCall?.(userId, { ...route, model: request.model ?? "default", tokensIn: null, tokensOut: null, finishReason: "", ms, ok: false, error: fired ? `${fired.message} (${why})` : signal.aborted ? `aborted: the step's time ran out (${why})` : why, ...tried, ...(again ? { retried: true } : {}) });
+      this.host.log("warn", `[LumiRPEngine] ${purpose} helper call failed${again ? ", asking again" : ""}: ${why}`, userId);
+      if (!again) return error instanceof Error ? error : new Error(why);
+      await pause(RETRY_PAUSE_MS * 2 ** attempt, signal);
+      return signal.aborted ? (error instanceof Error ? error : new Error(why)) : this.quiet(purpose, request, userId, signal, o, attempt + 1);
     }
   }
 
   /**
-   * A helper JSON call, with one repair call when the reply doesn't parse; with `retryTransient`, a
-   * call that fails transiently (`transientFailure`) is made once more. Null on failure, with why in
+   * A helper JSON call, with one repair call when the reply doesn't parse; a call that fails
+   * transiently (`transientFailure`) is made again (`quiet`). Null on failure, with why in
    * `failure` when the caller passes one: short words naming no one, fit for a player's chip.
    *
    * The preset's guidance for the step (DESIGN §6.8) follows the instructions, and the step's lore
@@ -250,7 +280,7 @@ export class Steps {
    * answers in a follow-up message and the call is made again, once per round held. A connection
    * that refuses the tools is asked again in the need form, and the refusal is kept once that works.
    */
-  async helperJson(purpose: StepPurpose, system: string, user: string, config: StepConfig | null, userId: UserId, signal: AbortSignal, options: { retryTransient?: boolean; lore?: StepLore | null; guidance?: string; usage?: { tokens: number }; failure?: { reason: string } } = {}): Promise<JsonValue | null> {
+  async helperJson(purpose: StepPurpose, system: string, user: string, config: StepConfig | null, userId: UserId, signal: AbortSignal, options: { lore?: StepLore | null; guidance?: string; usage?: { tokens: number }; failure?: { reason: string } } = {}): Promise<JsonValue | null> {
     const lore = options.lore ?? null;
     const guidance = options.guidance ? `${GUIDANCE_LEAD}\n${options.guidance}` : "";
     // The lookup round is held before anything is awaited, so steps beside this one see it taken.
@@ -259,19 +289,19 @@ export class Steps {
     const base = { ...call, maxTokens: Math.max(call.maxTokens, 1500) };
     const opening = (): QuietMessage[] => [{ role: "system", content: [system, guidance, lore?.block() ?? "", offer && lore ? lore.instructions(offer) : ""].filter((s) => s !== "").join("\n\n") }, { role: "user", content: user }];
     // JSON mode stays off while tools are offered: some providers refuse the two together.
-    const ask = async (messages: QuietMessage[], tools: boolean, o: { retry: boolean; lookup: boolean }): Promise<QuietResult | Error> => {
+    const ask = async (messages: QuietMessage[], tools: boolean, o: { lookup: boolean }): Promise<QuietResult | Error> => {
       const r = await this.quiet(purpose, { ...base, messages, json: !tools, ...(tools && lore ? { tools: [...lore.tools] } : {}) }, userId, signal, o);
       if (options.usage && !(r instanceof Error)) options.usage.tokens += r.tokens;
       return r;
     };
     let messages = opening();
-    let reply = await ask(messages, offer === "tools", { retry: options.retryTransient === true, lookup: false });
+    let reply = await ask(messages, offer === "tools", { lookup: false });
     if (reply instanceof Error && offer === "tools" && lore && !signal.aborted && !transientFailure(reply)) {
       // The connection refused the tools: the same question in the need form, on the round already held.
       const refusal = reply.message;
       offer = lore.refuseTools();
       messages = opening();
-      reply = await ask(messages, false, { retry: false, lookup: false });
+      reply = await ask(messages, false, { lookup: false });
       if (!(reply instanceof Error)) lore.keepRefusal(refusal);
     }
     while (lore && offer && !(reply instanceof Error)) {
@@ -287,7 +317,7 @@ export class Steps {
       const end = next === "tools" ? "Look up more with the lore tools if you must, or answer now as instructed." : next === "need" ? 'Reply with only {"need": [...]} once more if you must, or answer now as instructed.' : "Now answer as instructed, with what you have. Don't ask for more lore.";
       messages = [...messages, { role: "assistant", content: lore.echo(reply, offer) }, { role: "user", content: `${results}\n\n${end}` }];
       offer = next;
-      reply = await ask(messages, next === "tools", { retry: false, lookup: true });
+      reply = await ask(messages, next === "tools", { lookup: true });
     }
     if (lore && offer) lore.release();
     const failed = (reason: string): null => {
@@ -306,7 +336,7 @@ export class Steps {
           { role: "user", content: first },
         ],
         false,
-        { retry: false, lookup: false },
+        { lookup: false },
       );
       if (fixed instanceof Error) return failed("the answer wasn't JSON, and the call to repair it failed");
       try {
@@ -335,7 +365,7 @@ export class Steps {
         { role: "system", content: system },
         { role: "user", content: `State: ${JSON.stringify(state)}\nQuestions:\n${questionLines(questions).join("\n")}` },
       ];
-      return this.quiet(purpose, { messages, json: transport === "need", ...helper, ...(transport === "tools" ? { tools: [...lore.tools] } : {}) }, userId, signal, { retry: false, lookup: true });
+      return this.quiet(purpose, { messages, json: transport === "need", ...helper, ...(transport === "tools" ? { tools: [...lore.tools] } : {}) }, userId, signal, { lookup: true });
     };
     let reply = await ask(offer);
     if (reply instanceof Error && offer === "tools" && !signal.aborted && !transientFailure(reply)) {
@@ -475,8 +505,7 @@ export async function interpret(
   if (actions.length === 0) return { action: null, params: {}, probabilities: { none: 1 } };
   const catalog = actions.map((a) => `${a.id} — ${a.label}${a.params.length > 0 ? ` (params: ${a.params.join(", ")})` : ""}${a.lexicon && a.lexicon.length > 0 ? ` [said as: ${a.lexicon.slice(0, 6).join(", ")}]` : ""}`).join("\n");
   const system = `${instructions ? `${instructions}\n` : ""}You map a player's typed input in a roleplay to the engine actions it takes, in order.\n${worldBrief(world, `Scene: ${JSON.stringify(scene)}.`)}\nAction catalog:\n${catalog}\nRules: only the player character's own deliberate actions in the input count. Speech to others, requests, hypotheticals, past recaps and feelings are not actions (action null). Return the first action as "action" with its "params". If the input has more actions after it, list them in order in "more" (at most ${ACTION_QUEUE_LIMIT - 1}), each {"action": a catalog id, "params": {...}, "text": that action written as the player would type it}: "I walk to the market and buy bread" → "action" for the walk, and "more": [{"action": <the buy's id>, "params": {"item": "bread"}, "text": "I buy bread"}]. An action after them that no catalog action fits goes in "next", written as the player would type it. If the input lets time pass after its last action ("…and sleep until the next morning", "…then wait two hours", "…then skip ahead to Friday at 6 PM"), add "then": {"minutes": number}, {"until": a day part, "shift" or "commitment"} or {"at": "YYYY-MM-DD HH:MM"} for a stated day and time; time passing is never in "more" or "next", nor is anything else that isn't an action. Use world ids for params. A text param that names an item keeps its qualifiers as written (size, kind, how: "large pizza, delivered", not "pizza"). Money params are plain amounts in ${world.currency.code} as written (200 for ${world.currency.symbol}200). Output JSON only: {"action": string|null, "params": {...}, "confidence": number, "more"?: [{"action": string, "params": {...}, "text": string}], "then"?: {...}, "next"?: string}.`;
-  // A transient failure (a reset connection, a timeout) gets one more try: a turn whose action went unread runs as plain roleplay.
-  const raw = await steps.helperJson("interpret", system, text, config, userId, signal, { retryTransient: true, lore, guidance });
+  const raw = await steps.helperJson("interpret", system, text, config, userId, signal, { lore, guidance });
   if (!isRecord(raw)) return null;
   const action = typeof raw.action === "string" && actions.some((a) => a.id === raw.action) ? raw.action : null;
   const params: JsonObject = {};

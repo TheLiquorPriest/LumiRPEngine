@@ -153,11 +153,18 @@ export class PresetBinding {
 
   constructor(private readonly host: HostPort) {}
 
-  /** The frontend's report of the user's active Loom preset (`loom.activePresetId`). */
-  useLoom(userId: UserId, presetId: string | null): void {
+  /** The frontend's report of the user's active Loom preset (`loom.activePresetId`); true when it changed. */
+  useLoom(userId: UserId, presetId: string | null): boolean {
+    const changed = this.loom.get(userId) !== presetId;
     this.loom.delete(userId);
     this.loom.set(userId, presetId);
     if (this.loom.size > 1024) this.loom.delete(this.loom.keys().next().value ?? "");
+    return changed;
+  }
+
+  /** The user's active Loom preset as their frontend last reported it; undefined before any report. */
+  loomOf(userId: UserId): string | null | undefined {
+    return this.loom.get(userId);
   }
 
   /** The preset prompts assemble with, in the host's order: the active Loom preset, else the one the generation's connection links, else the one the chat's last reply used. */

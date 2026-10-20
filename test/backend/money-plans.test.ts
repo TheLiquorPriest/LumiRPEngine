@@ -66,7 +66,7 @@ const linesOf = (state: WorldState, account: string, flow: string) => journalOf(
 
 describe("a mind's plan to pay or lend someone", () => {
   test("is paid at its time from the planner to the person it's with, then done; one the money can't cover is dropped with why", async () => {
-    const rig = new Rig({ shipped: true });
+    const rig = new Rig({ shipped: true, minds: true });
     const chatId = await alderChat(rig, {
       "Danny Okafor": [
         { what: "Pay Priya back for the ferry tickets she covered", kind: "pay", when: { from: "2026-09-14 08:00", to: "2026-09-14 08:30" }, with: ["Priya Nair"], amount: 20 },
@@ -104,7 +104,7 @@ describe("a mind's plan to pay or lend someone", () => {
   });
 
   test("a GM's pay plan for the POV pays the POV, and Money below the money step still carries a plan out", async () => {
-    const rig = new Rig({ shipped: true });
+    const rig = new Rig({ shipped: true, minds: true });
     const chatId = await alderChat(rig, {}, 1);
     const at = (await stateOf(rig, chatId)).state.clock;
     rig.body(await rig.send({ type: "lre.edit", chatId, ops: [{ op: "mind_memory", entity: "danny_okafor", part: "plan", id: null, value: { what: "Pay the POV for the shift", kind: "pay", when: { from: at + 60, to: at + 90 }, with: ["pov"], cents: 1500 } }] }));

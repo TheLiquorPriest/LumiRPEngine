@@ -65,7 +65,7 @@ async function runEnd(rig: Rig, runId: string): Promise<MindsRunView> {
 
 describe("Run minds now (GM → Minds)", () => {
   test("records the chosen characters' minds from the chat so far, as one GM edit with its Undo, and tells the player nothing", async () => {
-    const rig = new Rig({ shipped: true });
+    const rig = new Rig({ shipped: true, minds: true });
     const mark = { text: "TURN-MARK" };
     fakeModels(rig, mark);
     const chatId = await alderChat(rig);
@@ -101,7 +101,7 @@ describe("Run minds now (GM → Minds)", () => {
   });
 
   test("a mind that comes back empty says why, and nothing is recorded", async () => {
-    const rig = new Rig({ shipped: true });
+    const rig = new Rig({ shipped: true, minds: true });
     fakeModels(rig, { text: "TURN-MARK" });
     const chatId = await alderChat(rig);
     rig.host.quietReply = () => "";
@@ -115,7 +115,7 @@ describe("Run minds now (GM → Minds)", () => {
 
 describe("lore pins", () => {
   test("reach the pinned character's mind, and every helper and mind call at the pinned place; a secret pinned there reaches none", async () => {
-    const rig = new Rig({ shipped: true });
+    const rig = new Rig({ shipped: true, minds: true });
     fakeModels(rig, { text: "TURN-MARK" });
     rig.body(await rig.send({ type: "lre.settings.set", patch: { modelUse: { preset: "full" } } }));
     const user = rig.host.userId;

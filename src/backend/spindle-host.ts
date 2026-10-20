@@ -118,6 +118,9 @@ const SWIPE_ACTIONS: Record<string, SwipeAction> = { added: "added", navigated: 
 
 function decodeEvent<K extends HostEventName>(event: K, p: unknown): HostEventMap[K] | null;
 function decodeEvent(event: HostEventName, p: unknown): HostEventMap[HostEventName] | null {
+  // A preset or a setting written belongs to no chat (`{ id, preset }`, `{ key, value }`).
+  if (event === "PRESET_CHANGED") return { presetId: str(p, "id") ?? null };
+  if (event === "SETTINGS_UPDATED") return { key: str(p, "key") ?? null };
   // CHAT_DELETED names its chat `id`; every other event, `chatId`.
   const chatId = str(p, event === "CHAT_DELETED" ? "id" : "chatId");
   if (!chatId) return null;

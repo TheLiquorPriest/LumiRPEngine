@@ -83,7 +83,7 @@ async function headRecord(rig: Rig, chatId: string, swipe = 0): Promise<LedgerEv
 
 describe("minds around a turn", () => {
   test("two characters with the POV: two separate mind calls, a brief Minds section, notes after the reply, recall by presence", async () => {
-    const rig = new Rig({ shipped: true });
+    const rig = new Rig({ shipped: true, minds: true });
     fakeModels(rig);
     const chatId = await alderChat(rig);
     await rig.turn(chatId, "Hello.", "Danny nods. Priya smiles at you.");
@@ -124,7 +124,7 @@ describe("minds around a turn", () => {
   });
 
   test("a travel turn: who heard the message remembers it, and whoever the POV met at its destination never recalls or notes it", async () => {
-    const rig = new Rig({ shipped: true });
+    const rig = new Rig({ shipped: true, minds: true });
     const LINE = "I'll take Helen's recipe book tonight";
     const memories: Record<string, string> = {};
     const minds: string[] = [];
@@ -181,7 +181,7 @@ describe("minds around a turn", () => {
   });
 
   test("what a memory says they told reaches only someone who was with them for the turn", async () => {
-    const rig = new Rig({ shipped: true });
+    const rig = new Rig({ shipped: true, minds: true });
     fakeModels(rig);
     const minds = rig.host.quietReply;
     rig.host.quietReply = (req) => (MEMORY.exec(req.messages[0]?.content ?? "")?.[1] === "Danny Okafor" ? JSON.stringify({ notes: [], commitments: [], resolved: [], plans: [], told: [{ to: ["Priya Nair", "Dale Whitcomb", "Jordan Ellis"], what: "DANNY-TOLD the boat is sold" }] }) : (minds?.(req) ?? "{}"));
@@ -196,7 +196,7 @@ describe("minds around a turn", () => {
   });
 
   test("full secrecy gives the narrator each monologue and intent", async () => {
-    const rig = new Rig({ shipped: true });
+    const rig = new Rig({ shipped: true, minds: true });
     fakeModels(rig);
     const chatId = await alderChat(rig, { secrecy: "full" });
     await rig.turn(chatId, "Hello.", "They look up.");
@@ -206,7 +206,7 @@ describe("minds around a turn", () => {
   });
 
   test("over its own budget the Minds section keeps the best on the ladder, and Stance tells of whoever it leaves out", async () => {
-    const rig = new Rig({ shipped: true });
+    const rig = new Rig({ shipped: true, minds: true });
     fakeModels(rig, { monologue: "word ".repeat(100).trim() });
     // Only being named scores, so the two named lead the ladder and Maddie comes last.
     const weights = { here: 0, nearby: 0, mentioned: 100, regard: 0, knows: 0, owner: 0, track: 0, roles: {}, rule: 0, pending: 0, band: { principal: 0, supporting: 0, background: 0 }, recent: 0 };
@@ -231,7 +231,7 @@ describe("minds around a turn", () => {
   });
 
   test("under full secrecy a mind reaches no helper step, no contradiction chip and no choice", async () => {
-    const rig = new Rig({ shipped: true });
+    const rig = new Rig({ shipped: true, minds: true });
     // Every step on, every turn: brief, outline, choices, contradiction, extract and the rest.
     const steps = Object.fromEntries(["interpret", "npc.choose", "contradiction", "puzzle.answer", "brief", "outline", "extract", "choices"].map((p) => [p, { enabled: true, signals: ["always"] }]));
     rig.body(await rig.send({ type: "lre.settings.set", patch: { modelUse: { preset: "full" } } }));
@@ -267,7 +267,7 @@ describe("minds around a turn", () => {
   });
 
   test("Re-narrate reuses the pre phase's minds; Re-run asks again", async () => {
-    const rig = new Rig({ shipped: true });
+    const rig = new Rig({ shipped: true, minds: true });
     fakeModels(rig);
     const chatId = await alderChat(rig);
     await rig.turn(chatId, "Hello.", "They look up.");
@@ -284,7 +284,7 @@ describe("minds around a turn", () => {
   });
 
   test("the player's own prompt wins over the world's template, which wins over the built-in", async () => {
-    const rig = new Rig({ shipped: true });
+    const rig = new Rig({ shipped: true, minds: true });
     const systems: string[] = [];
     rig.host.quietReply = (req) => {
       const system = req.messages[0]?.content ?? "";
@@ -316,7 +316,7 @@ describe("minds around a turn", () => {
   });
 
   test("the inspector lists only the minds calls of people the POV can see and has met, by name and with no text", async () => {
-    const rig = new Rig({ shipped: true });
+    const rig = new Rig({ shipped: true, minds: true });
     fakeModels(rig);
     const worldId = await rig.newWorld("Alder", "modern_slice_of_life");
     const here = STARTER_WORLDS.modern_slice_of_life?.("a", "Alder").entities.pov?.fields.place;
@@ -341,8 +341,8 @@ describe("minds around a turn", () => {
   });
 
   test("a mind's secret never reaches the narrator under brief, nor the Journal, Cast or chips", async () => {
-    const rig = new Rig({ shipped: true });
-    const probe = new Rig({ shipped: true });
+    const rig = new Rig({ shipped: true, minds: true });
+    const probe = new Rig({ shipped: true, minds: true });
     fakeModels(probe);
     const probeChat = await alderChat(probe);
     const { state, world } = await stateOf(probe, probeChat);
@@ -362,7 +362,7 @@ describe("minds around a turn", () => {
   });
 
   test("minds switched off: no mind calls, and the chat's round says so once", async () => {
-    const rig = new Rig({ shipped: true });
+    const rig = new Rig({ shipped: true, minds: true });
     fakeModels(rig);
     const chatId = await alderChat(rig);
     await rig.turn(chatId, "Hello.", "They look up.");
@@ -393,7 +393,7 @@ describe("plan times a mind writes", () => {
 
 describe("the model-use presets' minds", () => {
   test("a preset is a whole minds policy: Lean runs none, Full has no limits, and the player's own prompts and memory stay", async () => {
-    const rig = new Rig({ shipped: true });
+    const rig = new Rig({ shipped: true, minds: true });
     fakeModels(rig);
     const chatId = await alderChat(rig);
     const mine = { prompts: { consolidate: "Fold as {{character}}." }, memory: { notes: { show: 3 } } };
@@ -423,7 +423,7 @@ describe("the model-use presets' minds", () => {
 
 describe("a mind's context", () => {
   test("a moment the player says nothing in tells them why they think now, with the POV or away", async () => {
-    const rig = new Rig({ shipped: true });
+    const rig = new Rig({ shipped: true, minds: true });
     const chatId = await alderChat(rig);
     const { state, world } = await stateOf(rig, chatId);
     const ended = "The time skip ends; it is now Mon 14 Sep 2026, 18:00 (evening).";
@@ -444,7 +444,7 @@ describe("a mind's context", () => {
   });
 
   test("a character's own secrets are in their context: the tracks they own, and the secret a cue of theirs stands for", async () => {
-    const rig = new Rig({ shipped: true });
+    const rig = new Rig({ shipped: true, minds: true });
     fakeModels(rig);
     const worldId = await rig.newWorld("Alder", "modern_slice_of_life");
     const put = async (collection: string, id: string, value: JsonObject) => rig.body(await rig.send({ type: "lre.editor", op: "put", worldId, base: null, collection, id, value }));
@@ -467,7 +467,7 @@ describe("a mind's context", () => {
   });
 
   test("the Mystery Manor's culprit thinks as the culprit", async () => {
-    const rig = new Rig({ shipped: true });
+    const rig = new Rig({ shipped: true, minds: true });
     fakeModels(rig);
     const worldId = await rig.newWorld("Manor", "mystery_manor");
     rig.body(await rig.send({ type: "lre.editor", op: "set", worldId, base: null, part: "minds", value: { thresholds: { live: 900, near: 900, far: 900 }, always: { ids: ["julian_ashcombe"] } } }));
@@ -483,7 +483,7 @@ describe("a mind's context", () => {
   });
 
   test("away from the POV, a mind's lore and recall aren't chosen by what the POV says", async () => {
-    const rig = new Rig({ shipped: true });
+    const rig = new Rig({ shipped: true, minds: true });
     fakeModels(rig);
     const worldId = await rig.newWorld("Alder", "modern_slice_of_life");
     rig.body(await rig.send({ type: "lre.editor", op: "put", worldId, base: null, collection: "lore", id: "lighthouse_tale", value: { id: "lighthouse_tale", title: "The lighthouse tale", content: "LORE-MARK: the lighthouse keeper still walks the pier on foggy nights.", keys: ["lighthouse"], links: [] } }));
@@ -511,7 +511,7 @@ describe("a mind's context", () => {
   });
 
   test("their money reads in their own sentences, under no second label", async () => {
-    const rig = new Rig({ shipped: true });
+    const rig = new Rig({ shipped: true, minds: true });
     fakeModels(rig);
     const chatId = await alderChat(rig);
     await rig.turn(chatId, "Hello.", "They look up.");
@@ -521,7 +521,7 @@ describe("a mind's context", () => {
   });
 
   test("who they are includes their list fields, such as traits, as words", async () => {
-    const rig = new Rig({ shipped: true });
+    const rig = new Rig({ shipped: true, minds: true });
     fakeModels(rig);
     const chatId = await alderChat(rig);
     await rig.turn(chatId, "Hello.", "They look up.");
@@ -530,7 +530,7 @@ describe("a mind's context", () => {
   });
 
   test("the previous reply is told by how it ended, in the next mind and in the memory step", async () => {
-    const rig = new Rig({ shipped: true });
+    const rig = new Rig({ shipped: true, minds: true });
     fakeModels(rig);
     const minds: string[] = [];
     const memories: string[] = [];
@@ -555,7 +555,7 @@ describe("a mind's context", () => {
   });
 
   test("however much recall it may take, the moment is never cut, lines stay lines, and recalled turns stay whole", async () => {
-    const rig = new Rig({ shipped: true });
+    const rig = new Rig({ shipped: true, minds: true });
     fakeModels(rig);
     const contexts: string[] = [];
     const minds = rig.host.quietReply;
@@ -591,7 +591,7 @@ describe("a mind's context", () => {
 
 describe("determinism", () => {
   test("the background lane runs no model and records no mind; replay folds the same", async () => {
-    const rig = new Rig({ shipped: true });
+    const rig = new Rig({ shipped: true, minds: true });
     fakeModels(rig);
     const chatId = await alderChat(rig);
     await rig.turn(chatId, "Hello.", "They look up.");

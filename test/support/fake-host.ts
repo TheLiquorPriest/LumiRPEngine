@@ -1,20 +1,25 @@
 // The fake host (DESIGN §14; ARCHITECTURE §7): an in-memory HostPort that replays the event
 // orders and payloads recorded from a Lumiverse host (DESIGN §14). Generations are driven step
 // by step (start, then finish or stop), so tests can interleave operations while a reply streams.
+// The context handler runs as Lumiverse runs it: a non-required one that throws or runs out of time
+// is skipped, a required one stops the generation, `cancelGeneration` stops it, and the prompt reads
+// the World Info books as they are when it assembles.
 //
 // Event delivery: every host step queues its events; `settle()` delivers them in order and waits
 // for the handlers' work. Handlers always read the host's current state, as on the real host.
 
 import type { JsonObject, JsonValue } from "../../src/shared/json";
 import type { ChatId, MessageId, UserId } from "../../src/shared/ids";
-import type { BackendToFrontend } from "../../src/shared/protocol";
+import type { BackendToFrontend, GenerateAs } from "../../src/shared/protocol";
 import type { Answers } from "../../src/engine/decide";
 import type {
   ContextHandlerInput,
+  ContextVerdict,
   DecideRequest,
   DryRun,
   HostBookEntry,
   HostBookEntryInput,
+  HostCapabilities,
   HostEventMap,
   HostEventName,
   HostGenerationType,
@@ -22,8 +27,6 @@ import type {
   HostPort,
   HostPresetBlock,
   HostRegexScript,
-  InterceptorInput,
-  InterceptorResult,
   ProcessEvent,
   QuietRequest,
   QuietToolCall,
@@ -50,6 +53,16 @@ export interface FakeChat {
 
 type Handler = (payload: never, userId: UserId | null) => void;
 
+/** A World Info entry a prompt held: its text and where it sat (position, depth, role, outlet). */
+export interface AssembledEntry {
+  id: string;
+  content: string;
+  position: number;
+  depth: number;
+  role: string | null;
+  outlet: string | null;
+}
+
 export interface Generation {
   id: string;
   chatId: ChatId;
@@ -62,6 +75,8 @@ export interface Generation {
   original?: string;
   postfix: string;
   open: boolean;
+  /** The generation stopped before its prompt: the guard cancelled it, or a required handler failed. */
+  halted?: "cancelled" | "failed";
 }
 
 export interface StartOptions {
@@ -70,7 +85,7 @@ export interface StartOptions {
   messageId?: MessageId;
   /** Normal replies: the host creates the reply at the end instead of staging it (P4's other save path). */
   createAtEnd?: boolean;
-  /** The host gives up on the context handler: it runs with its signal already aborted, so nothing is planned. */
+  /** The host stops waiting for the context handler (its timeout): a required one stops the generation, any other is skipped. */
   abandonContext?: boolean;
 }
 
@@ -103,10 +118,15 @@ export class FakeHost implements HostPort {
   }
   private readonly handlers = new Map<HostEventName, Set<Handler>>();
   private readonly frontendHandlers = new Set<(message: unknown, userId: UserId, sessionId?: string) => void>();
-  private contextHandler: ((input: ContextHandlerInput, signal: AbortSignal) => Promise<void>) | null = null;
+  private contextHandler: ((input: ContextHandlerInput, signal: AbortSignal) => Promise<ContextVerdict>) | null = null;
   /** The context handler's registered timeout (the host would give up on it after this). */
   contextTimeoutMs = 0;
-  private interceptor: ((input: InterceptorInput) => Promise<InterceptorResult | null>) | null = null;
+  /** Whether the handler registered as required: its failure or timeout stops the generation. */
+  contextRequired = false;
+  /** What this host does with the handler's answer (`cancelGeneration`, `required`); a test plays an older host by switching one off. */
+  capabilities: HostCapabilities = { cancel: true, required: true };
+  /** The frontend's side of `lre.generate` (DESIGN §5.1): what the engine asked to start, in order, until `start` plays it. */
+  readonly restarts: { chatId: ChatId; as: GenerateAs }[] = [];
   private readonly queue: { event: HostEventName; payload: HostEventMap[HostEventName] }[] = [];
   private readonly inFlight = new Map<string, Generation>();
   private nextId = 0;
@@ -143,6 +163,14 @@ export class FakeHost implements HostPort {
     active: async () => this.activeChat,
     // The real host lists only its owner's chats.
     list: async (userId) => (userId === this.userId ? [...this.chatsById.values()].reverse().map((c) => ({ id: c.id, name: c.name, metadata: structuredClone(c.metadata) })) : []),
+    // `chat.updateMessage` with swipes: MESSAGE_EDITED (and SWIPE_EDITED, which the port doesn't hear).
+    setSwipes: async (chatId, messageId, swipes, swipeId) => {
+      const m = this.message(chatId, messageId);
+      if (swipes.length === 0 || swipeId < 0 || swipeId >= swipes.length) throw new Error("updateMessage: swipe_id out of range");
+      m.swipes = [...swipes];
+      m.swipeId = swipeId;
+      this.emit("MESSAGE_EDITED", { chatId, message: this.hostMessage(chatId, messageId) });
+    },
   };
 
   /** The chat the user has open (`chats.getActive`). */
@@ -265,13 +293,10 @@ export class FakeHost implements HostPort {
     return () => set.delete(h);
   }
 
-  registerContextHandler(handler: (input: ContextHandlerInput, signal: AbortSignal) => Promise<void>, timeoutMs: number): void {
+  registerContextHandler(handler: (input: ContextHandlerInput, signal: AbortSignal) => Promise<ContextVerdict>, options: { timeoutMs: number; required: boolean }): void {
     this.contextHandler = handler;
-    this.contextTimeoutMs = timeoutMs;
-  }
-
-  registerInterceptor(handler: (input: InterceptorInput) => Promise<InterceptorResult | null>): void {
-    this.interceptor = handler;
+    this.contextTimeoutMs = options.timeoutMs;
+    this.contextRequired = options.required && this.capabilities.required;
   }
 
   /**
@@ -315,6 +340,8 @@ export class FakeHost implements HostPort {
     send: (message, userId, frontendSessionId) => {
       this.sent.push(message);
       this.sentTo.push({ userId, ...(frontendSessionId !== undefined ? { session: frontendSessionId } : {}) });
+      // The frontend open on the chat starts the generation the engine prepared (`start` plays it).
+      if (message.type === "lre.generate") this.restarts.push({ chatId: message.chatId, as: message.as });
       for (const waiter of this.sendWaiters.filter((w) => w.match(message))) {
         this.sendWaiters.splice(this.sendWaiters.indexOf(waiter), 1);
         waiter.resolve(message);
@@ -511,9 +538,9 @@ export class FakeHost implements HostPort {
     }
     this.inFlight.clear();
     this.queue.length = 0;
+    this.restarts.length = 0;
     this.handlers.clear();
     this.contextHandler = null;
-    this.interceptor = null;
     this.frontendHandlers.clear();
     this.processHandlers.clear();
     this.lifecycleHandlers.clear();
@@ -522,12 +549,39 @@ export class FakeHost implements HostPort {
 
   // ------------------------------------------------------------------ generations
 
+  /**
+   * A generation as the player starts it (Send, Regenerate, swipe, Continue). When the guard stops it
+   * to run the engine first, the engine asks the frontend to start it again (`lre.generate`), as this
+   * plays: the frontend's Regenerate or Continue, or for a new reply after a reply the player's Send
+   * again. The generation returned is the one the reply streams in (DESIGN §5.1); a run that failed
+   * returns the stopped one (`halted`).
+   */
   async start(chatId: ChatId, opts: StartOptions): Promise<Generation> {
+    let g = await this.begin(chatId, opts);
+    for (let round = 0; g.halted === "cancelled" && round < 3; round++) {
+      const at = this.restarts.findIndex((r) => r.chatId === chatId);
+      if (at < 0) return g;
+      const [restart] = this.restarts.splice(at, 1);
+      const type: HostGenerationType = restart?.as === "continue" ? "continue" : restart?.as === "send" ? "normal" : "regenerate";
+      g = await this.begin(chatId, { type, ...(opts.createAtEnd ? { createAtEnd: true } : {}) });
+    }
+    return g;
+  }
+
+  /**
+   * One generation as Lumiverse runs it, up to its streaming: its target staged, GENERATION_STARTED,
+   * the context handler, and then either the prompt (World Info read from the books as they are now,
+   * WORLD_INFO_ACTIVATED, GENERATION_IN_PROGRESS) or a stop before it.
+   */
+  async begin(chatId: ChatId, opts: StartOptions): Promise<Generation> {
     const c = this.chat(chatId);
-    const g: Generation = { id: this.newId("gen"), chatId, type: opts.type, swipeId: 0, postfix: "", open: true };
+    // Lumiverse's fallback (generate.service.ts:1541-1549): a Regenerate, swipe or Continue with no
+    // target, in a chat that ends with the player's message, is a new reply.
+    const type: HostGenerationType = (opts.type === "regenerate" || opts.type === "swipe" || opts.type === "continue") && !opts.messageId && c.messages.at(-1)?.isUser !== false ? "normal" : opts.type;
+    const g: Generation = { id: this.newId("gen"), chatId, type, swipeId: 0, postfix: "", open: true };
     let targetMessageId: MessageId | null = null;
     let targetSwipeId: number | null = 0;
-    if (opts.type === "normal") {
+    if (type === "normal") {
       if (!opts.createAtEnd) {
         const m: FakeMessage = { id: this.newId("m"), isUser: false, name: "Narrator", swipes: [""], swipeId: 0, bag: {} };
         c.messages.push(m);
@@ -537,7 +591,7 @@ export class FakeHost implements HostPort {
       } else {
         targetSwipeId = null;
       }
-    } else if (opts.type === "regenerate" || opts.type === "swipe") {
+    } else if (type === "regenerate" || type === "swipe") {
       const target = opts.messageId ? this.message(chatId, opts.messageId) : this.head(chatId);
       if (!target) throw new Error("no assistant message to regenerate");
       target.swipes.push("");
@@ -547,7 +601,7 @@ export class FakeHost implements HostPort {
       g.swipeId = target.swipeId;
       targetMessageId = target.id;
       targetSwipeId = target.swipeId;
-    } else if (opts.type === "continue") {
+    } else if (type === "continue") {
       const target = opts.messageId ? this.message(chatId, opts.messageId) : this.head(chatId);
       if (!target) throw new Error("no assistant message to continue");
       g.messageId = target.id;
@@ -559,30 +613,59 @@ export class FakeHost implements HostPort {
       targetSwipeId = null;
     }
     this.inFlight.set(g.id, g);
-    this.emit("GENERATION_STARTED", { generationId: g.id, chatId, model: "fake", targetMessageId, targetSwipeId, characterId: null, characterName: "Narrator", generationType: opts.type });
+    this.emit("GENERATION_STARTED", { generationId: g.id, chatId, model: "fake", targetMessageId, targetSwipeId, characterId: null, characterName: "Narrator", generationType: type });
     await this.settle();
-    const context = new AbortController();
-    if (opts.abandonContext) context.abort();
-    if (this.contextHandler) await this.contextHandler({ chatId, userId: this.userId, generationType: opts.type, dryRun: false, connectionId: this.contextConnectionId, personaId: null }, context.signal);
-    await this.runInterceptor(chatId);
-    if (this.options.wiBook) this.emit("WORLD_INFO_ACTIVATED", { chatId, entries: [], stats: {} });
+    const verdict = await this.runContext({ chatId, userId: this.userId, generationType: type, dryRun: false, connectionId: this.contextConnectionId, personaId: null }, opts.abandonContext === true);
+    if (verdict !== "go") return this.halt(g, verdict);
+    const prompt = this.worldInfo(chatId);
+    this.assembled = prompt.placed;
+    if (this.options.wiBook) this.emit("WORLD_INFO_ACTIVATED", { chatId, entries: prompt.activated.map((e) => ({ id: e.id, comment: e.comment, source: "constant", bookId: e.bookId })), stats: {} });
     this.emit("GENERATION_IN_PROGRESS", { generationId: g.id, chatId, model: "fake", targetMessageId, targetSwipeId, characterId: null, characterName: "Narrator" });
     await this.settle();
     return g;
   }
 
-  /** A dry run: the context handler and interceptor run with `dryRun`; the assembly is returned, nothing is written. */
+  /**
+   * The context handler as Lumiverse calls it (context-handler.ts): one that throws, or that the host
+   * stops waiting for, is skipped, unless it registered as required; `cancel` stops the generation.
+   */
+  private async runContext(input: ContextHandlerInput, abandon: boolean): Promise<"go" | "cancelled" | "failed"> {
+    if (!this.contextHandler) return "go";
+    const context = new AbortController();
+    if (abandon) context.abort();
+    try {
+      const verdict = await this.contextHandler(input, context.signal);
+      if (abandon) return this.contextRequired ? "failed" : "go";
+      return verdict === "cancel" && this.capabilities.cancel ? "cancelled" : "go";
+    } catch {
+      return this.contextRequired ? "failed" : "go";
+    }
+  }
+
+  /**
+   * Lumiverse stops a generation before its prompt (generate.service.ts:2903-2938): a new reply's
+   * staged message is deleted, a swipe's blank one stays; `cancelGeneration` ends it with
+   * GENERATION_STOPPED, a required handler's failure with GENERATION_ENDED and an error.
+   */
+  private async halt(g: Generation, how: "cancelled" | "failed"): Promise<Generation> {
+    g.open = false;
+    g.halted = how;
+    this.inFlight.delete(g.id);
+    if (g.type === "normal" && g.messageId) {
+      const c = this.chat(g.chatId);
+      c.messages = c.messages.filter((m) => m.id !== g.messageId);
+      this.emit("MESSAGE_DELETED", { chatId: g.chatId, messageId: g.messageId });
+    }
+    if (how === "cancelled") this.emit("GENERATION_STOPPED", { generationId: g.id, chatId: g.chatId, content: "" });
+    else this.emit("GENERATION_ENDED", { generationId: g.id, chatId: g.chatId, content: "", generationType: g.type, error: "a required context handler failed" });
+    await this.settle();
+    return g;
+  }
+
+  /** A dry run: the context handler is asked with `dryRun` (its answer can't stop it); the assembly is returned, nothing is written. */
   async dryRun(chatId: ChatId): Promise<DryRun> {
     if (this.contextHandler) await this.contextHandler({ chatId, userId: this.userId, generationType: "normal", dryRun: true, connectionId: null, personaId: null }, new AbortController().signal);
-    const result = await this.runInterceptor(chatId);
-    const lore: string[] = [];
-    for (const m of result?.mutated ?? []) {
-      if (m.content === undefined || !(result?.enabled.includes(m.id) || result?.forced.includes(m.id))) continue;
-      // An outlet-only entry with no placement of its own reaches the prompt only where an assembled block holds its outlet.
-      const stored = this.storedEntry(m.id);
-      if (stored?.position === 8 && !m.placement && this.assembledOutlets !== null && !this.assembledOutlets.has(stored.outlet ?? "")) continue;
-      lore.push(m.content);
-    }
+    const lore = this.worldInfo(chatId).placed.map((e) => e.content);
     const chat = this.chat(chatId).messages.filter((m) => m.isUser || (m.swipes[m.swipeId] ?? "") !== "").map((m) => ({ role: m.isUser ? "user" : "assistant", content: m.swipes[m.swipeId] ?? "" }));
     return { messages: [...lore.map((content) => ({ role: "system", content })), ...chat], blocks: structuredClone(this.preset.blocks), maxTokens: this.preset.maxTokens, model: this.preset.model };
   }
@@ -590,20 +673,29 @@ export class FakeHost implements HostPort {
   /** The outlets a test build's prompt holds (null: every outlet an entry names). */
   assembledOutlets: Set<string> | null = null;
 
-  private async runInterceptor(chatId: ChatId): Promise<InterceptorResult | null> {
-    if (!this.interceptor) return null;
+  /**
+   * The World Info a prompt gets, read from the chat's books as they are now: every enabled constant
+   * entry with text activates; an outlet-only one (position 8) reaches the prompt only where an
+   * assembled block holds its outlet.
+   */
+  private worldInfo(chatId: ChatId): { activated: (HostBookEntry & { outlet: string | null })[]; placed: AssembledEntry[] } {
     const ids = this.chat(chatId).metadata.chat_world_book_ids;
-    const entries: InterceptorInput["entries"] = [];
+    const activated: (HostBookEntry & { outlet: string | null })[] = [];
     for (const bookId of Array.isArray(ids) ? ids : []) {
       if (typeof bookId !== "string") continue;
-      for (const e of this.bookStore.get(bookId)?.entries.values() ?? []) entries.push({ id: e.id, bookId, extensions: e.extensions });
+      for (const e of this.bookStore.get(bookId)?.entries.values() ?? []) if (!e.disabled && e.constant && e.content !== "") activated.push(structuredClone(e));
     }
-    this.lastInterceptor = await this.interceptor({ chatId, userId: this.userId, entries });
-    return this.lastInterceptor;
+    const placed = activated.filter((e) => e.position !== 8 || this.assembledOutlets === null || this.assembledOutlets.has(e.outlet ?? "")).map((e) => ({ id: e.id, content: e.content, position: e.position, depth: e.depth, role: e.role, outlet: e.outlet }));
+    return { activated, placed };
   }
 
-  /** The interceptor's last answer (tests inspect the slots it filled). */
-  lastInterceptor: InterceptorResult | null = null;
+  /** The World Info the last generation's prompt held (tests read the sections it carried). */
+  assembled: AssembledEntry[] = [];
+
+  /** The text of the section the last prompt held under `[label]`, or "" when it held none. */
+  section(label: string): string {
+    return this.assembled.find((e) => e.content.startsWith(`[${label}]`))?.content ?? "";
+  }
 
   // ------------------------------------------------------------------ lore books and processes
 
@@ -656,6 +748,13 @@ export class FakeHost implements HostPort {
         if (e) book.entries.set(entryId, { ...e, ...structuredClone(placement), extensions: structuredClone(extensions) });
       }
     },
+    fill: async (entryId, content) => {
+      this.fills.push({ entryId, content });
+      for (const book of this.bookStore.values()) {
+        const e = book.entries.get(entryId);
+        if (e) book.entries.set(entryId, { ...e, content: content ?? "", disabled: content === null, constant: content !== null });
+      }
+    },
     deleteEntry: async (entryId) => {
       for (const book of this.bookStore.values()) book.entries.delete(entryId);
     },
@@ -663,6 +762,8 @@ export class FakeHost implements HostPort {
 
   /** Entries the backend moved, in order. */
   readonly placed: string[] = [];
+  /** Every entry fill, in order: its text, or null for emptied and switched off. */
+  readonly fills: { entryId: string; content: string | null }[] = [];
 
   /** Payloads sent to spawned lanes, by process id. */
   readonly processMail = new Map<string, unknown[]>();

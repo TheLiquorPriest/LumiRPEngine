@@ -76,6 +76,11 @@ export interface RunMindsInput {
   concurrency?: number;
   /** Hears each mind start thinking, then how it went (a GM's run shows its progress, DESIGN §24.9). */
   progress?: (entry: MindsRunEntry) => void;
+  /**
+   * What minds answered in an engine run that failed, from exactly this state and moment (DESIGN
+   * §5.1): each is kept, not asked again, so a Retry asks only the minds that failed.
+   */
+  kept?: ReadonlyMap<EntityId, MindEventData>;
 }
 
 export interface RunMindsResult {
@@ -280,6 +285,8 @@ export async function runMinds(deps: MindsDeps, input: RunMindsInput): Promise<R
     const prompt = mindPrompt("mind", world, settings.minds, varsFor(world, state, who));
     if (!e) return { data: null, trace: { ...base, outcome: "failed", ms: 0, tokens: 0, prompt: prompt.source }, entry: { entity: who, name, level, status: "failed", reason: "they aren't in the world any more" } };
     if (input.signal.aborted) return { data: null, trace: { ...base, outcome: "failed", ms: 0, tokens: 0, prompt: prompt.source }, entry: { entity: who, name, level, status: "cancelled", reason: "the run stopped before they were asked" } };
+    const kept = input.kept?.get(who);
+    if (kept) return { data: kept, trace: { ...base, outcome: "recorded", ms: 0, tokens: 0, prompt: prompt.source }, entry: { entity: who, name, level, status: "recorded", ms: 0, tokens: 0 } };
     input.progress?.({ entity: who, name, level, status: "thinking" });
     const pinned = (refs.get(who) ?? []).flatMap((r) => {
       const t = texts.get(r.key);
@@ -357,6 +364,8 @@ export interface PreMindsInput {
   timelapse: boolean;
   signal: AbortSignal;
   guidance?: string;
+  /** What minds answered in a failed engine run from this same state (`RunMindsInput.kept`). */
+  kept?: ReadonlyMap<EntityId, MindEventData>;
 }
 
 /**
@@ -383,8 +392,8 @@ export async function preMinds(deps: MindsDeps, input: PreMindsInput): Promise<R
   }
   // Each thinks for their own refresh reason; the moment itself is the player's message.
   const moment: MindMoment = { kind: "turn", at: w.state.clock, reason: "", user: input.user, reply: input.reply };
-  const ran = await runMinds(deps, { chatId: input.chatId, userId: input.userId, world: input.world, state: w.state, who: picks.map((p) => p.entity), moment, levels, reasons, signal: input.signal, ...(input.guidance !== undefined ? { guidance: input.guidance } : {}), phase: "pre" });
-  return { events: [round, ...ran.events], traces: ran.traces };
+  const ran = await runMinds(deps, { chatId: input.chatId, userId: input.userId, world: input.world, state: w.state, who: picks.map((p) => p.entity), moment, levels, reasons, signal: input.signal, ...(input.guidance !== undefined ? { guidance: input.guidance } : {}), ...(input.kept ? { kept: input.kept } : {}), phase: "pre" });
+  return { events: [round, ...ran.events], traces: ran.traces, ...(ran.report ? { report: ran.report } : {}) };
 }
 
 export interface PostMindsInput {

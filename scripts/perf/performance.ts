@@ -1,9 +1,9 @@
 // Performance gate with the real packs (DESIGN §18.5): fold at 1k and 5k turns with a level-4
 // ledger, a rebased view over 1k later turns (cold), record size per preset, a coarsened timelapse
-// record, interceptor apply, and chat-open payload growth. Ledgers come from the real ledger core
+// record, the engine run's section delivery, and chat-open payload growth. Ledgers come from the real ledger core
 // driving the real simulation (planTurn/postTurn, every pack) on the Riverton test world; no model.
 // Main-process assembly cost (extension on versus off) is `bun scripts/perf/assembly.ts` (real host).
-// Usage: bun scripts/perf/performance.ts [fold|presets|timelapse|interceptor|payload|all]
+// Usage: bun scripts/perf/performance.ts [fold|presets|timelapse|sections|payload|all]
 
 import { writeFileSync } from "node:fs";
 import { hashJson } from "../../src/shared/hash";
@@ -184,7 +184,7 @@ if (which === "timelapse" || which === "all") {
   report.timelapse = out;
 }
 
-if (which === "interceptor" || which === "payload" || which === "all") {
+if (which === "sections" || which === "payload" || which === "all") {
   const host = new FakeHost();
   const world = withLevels(modernUsWorld("w_bench", "Riverton"), "simulation");
   const rt = new Runtime({ host, packs: ALL_PACKS, pipeline: { plan: planTurn, post: postTurn }, templates: { riverton: () => structuredClone(world) } });
@@ -211,24 +211,25 @@ if (which === "interceptor" || which === "payload" || which === "all") {
   await send({ type: "lre.world", op: "attach", worldId, chatId });
   const payload: Record<string, JsonValue> = {};
   const marks = new Set([0, 100, 500, 1000]);
-  const interceptMs: Record<string, JsonValue> = {};
+  const sectionsMs: Record<string, JsonValue> = {};
   for (let t = 0; t <= 1000; t++) {
     if (marks.has(t)) {
       payload[`turns${t}`] = JSON.stringify(await rt.view(chatId, host.userId)).length;
-      const ids = host.chat(chatId).metadata.chat_world_book_ids;
-      const entries = [];
-      for (const bookId of Array.isArray(ids) ? ids : []) {
-        if (typeof bookId !== "string") continue;
-        for (const e of await host.books.entries(bookId, host.userId)) entries.push({ id: e.id, bookId, extensions: e.extensions });
-      }
+      // The engine run's last step, rendering the sections and writing them into the book, as a turn of its own.
       const xs: number[] = [];
       for (let i = 0; i < 12; i++) {
-        const t0 = performance.now();
-        await rt.intercept({ chatId, userId: host.userId, entries });
-        xs.push(performance.now() - t0);
+        await rt.ledger.with(chatId, host.userId, async (core, observed) => {
+          const id = `bench-${t}-${i}`;
+          core.prepare({ generationId: id, kind: "normal", targetMessageId: null, targetSwipeId: 0 }, observed);
+          const t0 = performance.now();
+          const delivered = await rt.deliver({ chatId, userId: host.userId, core, observed, generationId: id });
+          xs.push(performance.now() - t0);
+          core.take(id);
+          await rt.clear(chatId, host.userId, delivered);
+        });
       }
-      interceptMs[`turns${t}`] = { medianMs: r1(median(xs.slice(2))), p95Ms: r1(p95(xs.slice(2))), entries: entries.length };
-      console.error(`turn ${t}: payload ${String(payload[`turns${t}`])} B, intercept ${JSON.stringify(interceptMs[`turns${t}`])}`);
+      sectionsMs[`turns${t}`] = { medianMs: r1(median(xs.slice(2))), p95Ms: r1(p95(xs.slice(2))) };
+      console.error(`turn ${t}: payload ${String(payload[`turns${t}`])} B, sections ${JSON.stringify(sectionsMs[`turns${t}`])}`);
     }
     if (t === 1000) break;
     host.sendUser(chatId, TEXTS[t % TEXTS.length] ?? "look around");
@@ -237,7 +238,7 @@ if (which === "interceptor" || which === "payload" || which === "all") {
     await host.finish(g, `Turn ${t} narration.`);
   }
   report.payloadBytes = payload;
-  report.interceptor = interceptMs;
+  report.sections = sectionsMs;
   report.errors = rt.ledger.errors.slice(0, 5);
 }
 

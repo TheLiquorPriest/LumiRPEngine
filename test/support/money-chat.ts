@@ -117,7 +117,7 @@ export class MoneyChat {
     this.rig.body(await this.rig.send(actionRequest(this.chatId, body)));
     await this.rig.host.settle();
     const generation = await this.rig.host.start(this.chatId, { type: "normal" });
-    const outcome = this.rig.host.lastInterceptor?.mutated.find((m) => m.content?.startsWith("[Outcome]"))?.content ?? "";
+    const outcome = this.rig.host.section("Outcome");
     await this.rig.host.finish(generation, "Done.");
     await this.rig.rt.push.settle();
     return outcome;

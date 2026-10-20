@@ -18,6 +18,7 @@ import { DEFAULT_CURRENCY, type WorldCurrency } from "../shared/world";
 import { useApp, useView } from "./app";
 import { chipRole, chipTone } from "./chip-roles";
 import { Badge, Button, Field, useBusy } from "./components";
+import { openDiagnostics } from "./diagnostics";
 import type { IconName } from "./icons";
 import { Icon } from "./icons";
 import { MoneyInput } from "./money-input";
@@ -155,6 +156,8 @@ function useChipAction(chip: Chip, chatId: ChatId): [boolean, (choice: string, p
     busy,
     (choice, payload) =>
       run(async () => {
+        // A failed engine run's way to what failed (DESIGN §5.1): the drawer at Settings → Diagnostics.
+        if (choice === "diagnostics") return openDiagnostics();
         const intent = chipIntent(chip, choice, chatId, payload);
         if (intent.request) {
           const message = await app.send(intent.request);

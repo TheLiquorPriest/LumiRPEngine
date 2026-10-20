@@ -124,6 +124,16 @@ export interface ChatDeletedEvent {
   chatId: ChatId;
 }
 
+/** A preset was written (`PRESET_CHANGED`): its blocks, and so the outlets it places, may differ now. */
+export interface PresetChangedEvent {
+  presetId: string | null;
+}
+
+/** One of the user's Lumiverse settings was written (`SETTINGS_UPDATED`), the active preset among them. */
+export interface SettingsUpdatedEvent {
+  key: string | null;
+}
+
 export interface HostEventMap {
   GENERATION_STARTED: GenerationStartedEvent;
   GENERATION_IN_PROGRESS: GenerationInProgressEvent;
@@ -135,6 +145,8 @@ export interface HostEventMap {
   MESSAGE_DELETED: MessageDeletedEvent;
   WORLD_INFO_ACTIVATED: WorldInfoActivatedEvent;
   CHAT_DELETED: ChatDeletedEvent;
+  PRESET_CHANGED: PresetChangedEvent;
+  SETTINGS_UPDATED: SettingsUpdatedEvent;
 }
 
 export type HostEventName = keyof HostEventMap;

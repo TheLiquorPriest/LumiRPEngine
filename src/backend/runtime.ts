@@ -3,7 +3,7 @@
 // into the world's book before the reply, extract before the commit, chips after it) and the state push.
 
 import { hashParts } from "../shared/hash";
-import type { ChatId, ChipId, InterruptClass, MessageId, RevisionId, UserId, WorldId } from "../shared/ids";
+import type { ChatId, ChipId, EntityId, InterruptClass, MessageId, RevisionId, UserId, WorldId } from "../shared/ids";
 import type { JsonObject, JsonValue } from "../shared/json";
 import { heldBy } from "../shared/finance";
 import { hasOwn, isRecord } from "../shared/json";
@@ -16,9 +16,9 @@ import { EXTRACTION_TYPES, helperCallOf, stepLoreOf } from "../shared/settings";
 import type { ChipAction, ContextGeneration, ContextView, LoreStepTrace, StateView } from "../shared/state-view";
 import type { ActionDef, AdjudicationDef, SectionTemplate, StepPurpose, WorldDoc } from "../shared/world";
 import { formatMoney, offersAction } from "../shared/world";
-import { MINDS_SLOT, worldMindsOf, type MindCallTrace } from "../shared/minds";
+import { MINDS_EVENTS, MINDS_SLOT, worldMindsOf, type MindCallTrace, type MindEventData } from "../shared/minds";
 import { firedTimeout, TimeoutFired, TIMEOUTS } from "../shared/timeouts";
-import { mindsOn, postMinds, preMinds, runMinds, type MindsDeps } from "./minds";
+import { mindsOn, postMinds, preMinds, runMinds, type MindsDeps, type RunMindsResult } from "./minds";
 import { runSkip, type BeatMinds, type SkipRun } from "./skip";
 import { fightOffers } from "../packs/combat/core/index";
 import { fitMindLines, mindLines } from "../packs/minds/core/section";
@@ -471,6 +471,19 @@ function lruSet<K, V>(map: Map<K, V>, key: K, value: V, cap: number): void {
   trimMap(map, cap);
 }
 
+/** The minds an engine run got answers from, under the key of what that run was made from. */
+interface KeptMinds {
+  key: string;
+  minds: Map<EntityId, MindEventData>;
+}
+
+/** Each mind that answered, from a run's events: what a Retry of the run keeps (DESIGN §5.1). */
+function mindsAnswered(events: readonly LedgerEvent[]): Map<EntityId, MindEventData> {
+  const minds = new Map<EntityId, MindEventData>();
+  for (const e of events) if (e.type === MINDS_EVENTS.mind && typeof e.data.entity === "string") minds.set(e.data.entity, e.data as unknown as MindEventData);
+  return minds;
+}
+
 /** Moves `from`'s value to `to` (a prepared turn's records, once its generation takes it). */
 function rekey<V>(map: Map<string, V>, from: string, to: string): void {
   const value = map.get(from);
@@ -541,6 +554,8 @@ export class Runtime implements TurnHooks {
   private readonly caveatRuns = new Map<string, Promise<PresetCaveat[]>>();
   /** Preset checks running after their request's reply (`checkPresetLater`). */
   private readonly presetChecks = new Set<Promise<void>>();
+  /** Presets written and active presets switched, counted per user (`PRESET_CHANGED`, `SETTINGS_UPDATED`): a freshness input (DESIGN §5.1). */
+  private readonly presetWrites = new Map<UserId, number>();
   /** Each open chat's pinned world revisions, by `user \0 chat`. */
   private readonly pins = new Map<string, Map<RevisionId, WorldDoc>>();
   /** The pre-phase call budget per generation, shared by `beforePlan` and `afterPlan`. */
@@ -553,6 +568,10 @@ export class Runtime implements TurnHooks {
   private readonly loreTraces = new Map<string, LoreStepTrace[]>();
   /** Each generation's minds calls, with no text (the inspector shows them, DESIGN §24.5). */
   private readonly mindTraces = new Map<string, MindCallTrace[]>();
+  /** What minds answered in each engine run, by its turn id; a run that fails keeps them for its Retry (`keptMinds`). */
+  private readonly answeredMinds = new Map<string, KeptMinds>();
+  /** A failed engine run's answered minds, by chat, for the next run of the same turn (DESIGN §5.1). */
+  private readonly keptMinds = new Map<ChatId, KeptMinds>();
   /** What the minds need of the backend: the runner, the pre and post phases and the time skip read it (`backend/minds.ts`). */
   readonly minds: MindsDeps;
   /** The minds a time skip runs at its beats (DESIGN §24.7): `runMinds` on this runtime's deps, which tests replace with a fake. */
@@ -567,8 +586,12 @@ export class Runtime implements TurnHooks {
     this.templates = options.templates ?? {};
     this.templateInfo = options.templateInfo ?? [];
     this.worlds = new WorldStore(this.host, this.registry);
-    // The guard asks Lumiverse to wait as long as the users' guard timeouts say.
-    this.settings = new SettingsStore(this.host, (userId, settings) => this.ledger.guardBudget(userId, settings.timeouts.guardMs));
+    // The guard asks Lumiverse to wait as long as the users' guard timeouts say; a settings change
+    // stales a turn the engine prepared (its sections were made with the old ones).
+    this.settings = new SettingsStore(this.host, (userId, settings) => {
+      this.ledger.guardBudget(userId, settings.timeouts.guardMs);
+      this.ledger.inputsChanged(userId);
+    });
     this.chips = new ChipStore(this.host);
     this.planNotes = new PlanNotes(this.host);
     this.outcomeNotes = new OutcomeNotes(this.host);
@@ -609,6 +632,16 @@ export class Runtime implements TurnHooks {
       if (e.action === "deleted" && userId) this.swipeDeleted(e.chatId, userId, e.message.id, e.swipeId).catch((error: unknown) => this.host.log("warn", `[LumiRPEngine] chat ${e.chatId}: chips didn't follow a deleted swipe (${error instanceof Error ? error.message : String(error)})`, userId));
     });
     this.host.on("WORLD_INFO_ACTIVATED", (e) => this.onActivated(e.chatId, e.entries.map((x) => x.id)));
+    // A preset written, or the active one switched, may place other outlets: a waiting turn is stale (DESIGN §5.1).
+    const presetWritten = (userId: UserId | null): void => {
+      if (!userId) return;
+      lruSet(this.presetWrites, userId, (this.presetWrites.get(userId) ?? 0) + 1, 1024);
+      this.ledger.inputsChanged(userId);
+    };
+    this.host.on("PRESET_CHANGED", (_e, userId) => presetWritten(userId));
+    this.host.on("SETTINGS_UPDATED", (e, userId) => {
+      if (e.key === null || /preset/i.test(e.key)) presetWritten(userId);
+    });
     // The host keeps a deleted chat's chat-scoped regex scripts, so the engine removes its own (DESIGN §6.7).
     this.host.on("CHAT_DELETED", (e, userId) => {
       if (userId) this.jsonHiding.removeChat(e.chatId, userId).catch((error: unknown) => this.host.log("warn", `[LumiRPEngine] chat ${e.chatId}: its JSON regex scripts weren't removed (${error instanceof Error ? error.message : String(error)})`, userId));
@@ -717,7 +750,7 @@ export class Runtime implements TurnHooks {
    * `puzzle.answer` when an answer needs judging, and `judge` when the adjudication policy weighs the
    * player's words or leaves the check to the story. One call budget covers this and `afterPlan`.
    */
-  async beforePlan(input: { chatId: ChatId; userId: UserId; core: LedgerCore; observed: ChainMessage[]; generationId: string; connectionId: string | null; signal: AbortSignal }): Promise<void> {
+  async beforePlan(input: { chatId: ChatId; userId: UserId; core: LedgerCore; observed: ChainMessage[]; generationId: string; connectionId: string | null; runKey: string; signal: AbortSignal }): Promise<void> {
     const bridge = this.bridges.get(input.chatId);
     const p = input.core.journal.pending[input.generationId];
     // A Re-narrate copies its source's plan (P3): no resolve, simulate or model calls before it.
@@ -772,7 +805,13 @@ export class Runtime implements TurnHooks {
     // Character minds (DESIGN §24) think beside the judge: separate calls, on the phase's wall clock,
     // apart from its call count. A timelapse's minds think at its beats instead (`skip.ts`).
     const lastReply = before.findLast((m) => !m.isUser);
-    const mindsTask = preMinds(this.minds, { chatId: input.chatId, userId: input.userId, world: render.world, state: render.state, user: text, reply: lastReply ? (lastReply.swipes[lastReply.swipeId] ?? "") : "", timelapse: bridge.intentOf(text)?.action === TIMELAPSE_ACTION, signal: budget.signal, guidance: preset.guidance.mind ?? "" });
+    // A Retry of a run that failed keeps the minds it got from this same chain, journal and inputs,
+    // and asks only the others (DESIGN §5.1).
+    const runAt: DiagAt = { chatId: input.chatId, userId: input.userId, turn: p.generationId };
+    const mindsKey = `${input.runKey}\u0000${text}`;
+    const kept = this.keptMinds.get(input.chatId);
+    this.keptMinds.delete(input.chatId);
+    const mindsTask = preMinds(this.minds, { chatId: input.chatId, userId: input.userId, world: render.world, state: render.state, user: text, reply: lastReply ? (lastReply.swipes[lastReply.swipeId] ?? "") : "", timelapse: bridge.intentOf(text)?.action === TIMELAPSE_ACTION, signal: budget.signal, guidance: preset.guidance.mind ?? "", ...(kept?.key === mindsKey ? { kept: kept.minds } : {}) });
     await this.judgeAnswer(bridge, text, render, settings, facts, budget, at);
     if (described) await this.judgeApproach(bridge, text, render, settings, facts, budget, at);
     const decisions = early ?? (choose && budget.take() ? await choose() : []);
@@ -780,6 +819,8 @@ export class Runtime implements TurnHooks {
     const minds = await mindsTask;
     bridge.setMinds(text, minds.events);
     this.addMindTraces(input.chatId, p.generationId, minds.traces, true);
+    lruSet(this.answeredMinds, p.generationId, { key: mindsKey, minds: mindsAnswered(minds.events) }, 64);
+    this.mindsMissed(runAt, "pre", minds);
     if (text.trim() !== "") this.host.log("info", `[LumiRPEngine] plan ${String(input.generationId).slice(0, 8)}: intent ${bridge.intentOf(text)?.action ?? "none"} ${JSON.stringify(bridge.intentOf(text)?.params ?? {}).slice(0, 240)}, ${decisions.length} npc decision(s), ${minds.traces.length} mind(s), ${budget.spent} pre call(s)`, input.userId);
     // A timelapse with minds on is a time skip (DESIGN §24.7): its beats and the minds at them are
     // found and recorded now, from exactly the state the plan starts from, and the plan replays them.
@@ -789,14 +830,35 @@ export class Runtime implements TurnHooks {
     if (intent && base) {
       const start = new Working(this.registry, base.world, base.state);
       start.applyAll(bridge.prePlan(text));
+      // Every mind at its beats must answer too: one that doesn't fails the run.
+      const beats: RunMindsResult[] = [];
+      const beatMinds: BeatMinds = async (i) => {
+        const ran = await this.beatMinds(i);
+        beats.push(ran);
+        return ran;
+      };
       try {
-        skip = await runSkip({ registry: this.registry, steps: this.steps, minds: this.beatMinds }, { chatId: input.chatId, userId: input.userId, world: base.world, state: start.state, intent, runSeed: bridge.runSeed, settings, guidance: preset.guidance, signal: budget.signal });
+        skip = await runSkip({ registry: this.registry, steps: this.steps, minds: beatMinds }, { chatId: input.chatId, userId: input.userId, world: base.world, state: start.state, intent, runSeed: bridge.runSeed, settings, guidance: preset.guidance, signal: budget.signal });
       } catch (error) {
-        this.host.log("warn", `[LumiRPEngine] time skip not run: ${error instanceof Error ? error.message : String(error)}`, input.userId);
+        this.diag.failed(runAt, "skip", "skip", `the time skip didn't run: ${error instanceof Error ? error.message : String(error)}`);
       }
       if (skip) this.addMindTraces(input.chatId, p.generationId, skip.traces);
+      for (const ran of beats) this.mindsMissed(runAt, "skip", ran);
     }
     bridge.setSkip(text, skip?.record ?? null);
+  }
+
+  /**
+   * Minds that didn't answer fail the engine run (DESIGN §5.1): one record saying who, named where
+   * the player may know them (the inspector's traces list only those), and why.
+   */
+  private mindsMissed(at: DiagAt, phase: "pre" | "skip", ran: RunMindsResult): void {
+    const missed = (ran.report ?? []).filter((e) => e.status === "failed" || e.status === "cancelled");
+    if (missed.length === 0) return;
+    const known = new Set(ran.traces.filter((t) => t.outcome === "failed").map((t) => t.who));
+    // Someone the player doesn't know is "a mind", and why theirs failed says nothing of them.
+    const line = (e: (typeof missed)[number]): string => (known.has(e.name) ? `${e.name}'s mind: ${e.reason ?? "it didn't answer"}` : `a mind: ${e.reason?.startsWith("it didn't fit") ? "its answer didn't fit the world as it is now" : (e.reason ?? "it didn't answer")}`);
+    this.diag.failed(at, phase, "mind", missed.map(line).join("; "));
   }
 
   /**
@@ -1746,6 +1808,15 @@ export class Runtime implements TurnHooks {
   }
 
   /**
+   * What a chat's sections are made from besides its messages and journal, read from memory for the
+   * guard (DESIGN §5.1): the chat's world revision, the user's settings revision (section budgets,
+   * secrecy, minds), the active Loom preset and the presets written since start (which outlets it places).
+   */
+  inputs(chatId: ChatId, userId: UserId): string {
+    return [this.runs.get(`${userId}\u0000${chatId}`)?.revision ?? "", this.settings.revision(userId), this.presets.loomOf(userId) ?? "", this.presetWrites.get(userId) ?? 0].join("\u0000");
+  }
+
+  /**
    * The engine run's last step (DESIGN §5.1, §6.4): the prepared turn's sections, rendered from its
    * plan and the fold on the section budget, written into the world's book. Each goes into its
    * section's entry, or the preset outlet's twin, switched on as a constant entry, and every other
@@ -1914,14 +1985,22 @@ export class Runtime implements TurnHooks {
   }
 
   /**
-   * The engine run failed (DESIGN §5.1): nothing was generated. The chat's last message says which
-   * step failed and why, with a Retry that runs the engine again and then the reply.
+   * The engine run failed (DESIGN §5.1): nothing was generated. The chat's last message says what
+   * failed and why ("Maya's mind: connection reset (after 2 retries)"), with a Retry that runs the
+   * engine again, then the reply, and a way to Diagnostics. The minds that answered are kept for the
+   * Retry, which asks only the others while nothing they were made from changes.
    */
   async failed(input: { chatId: ChatId; userId: UserId; turn: string; step: string; reason: string }): Promise<void> {
+    const answered = this.answeredMinds.get(input.turn);
+    this.answeredMinds.delete(input.turn);
+    if (answered && answered.minds.size > 0) lruSet(this.keptMinds, input.chatId, answered, 256);
     const last = (await this.host.chats.messages(input.chatId, input.userId)).at(-1);
     if (!last) return;
-    const step = (STEP_LABEL[input.step] ?? input.step).replace(/…$/, "");
-    await this.chips.add(input.chatId, input.userId, [{ id: `engine_failed:${input.turn}`, kind: "engine_failed", messageId: last.id, label: "The engine didn't finish, so nothing was generated", detail: `${step}: ${input.reason}`, actions: [{ id: "regenerate", label: "Retry", style: "primary" }], expires: "next_send", payload: {} }]);
+    // "interpret call failed: …" reads as "Reading your action: …"; a mind's record already says whose.
+    const why = (input.reason.startsWith(`${input.step} `) ? input.reason.slice(input.step.length + 1) : input.reason).replace(/(?:^|\b)(?:the )?call failed: /g, "");
+    const said = input.step === "mind" ? why : `${(STEP_LABEL[input.step] ?? input.step).replace(/…$/, "")}: ${why}`;
+    const detail = said.charAt(0).toUpperCase() + said.slice(1);
+    await this.chips.add(input.chatId, input.userId, [{ id: `engine_failed:${input.turn}`, kind: "engine_failed", messageId: last.id, label: "The engine didn't finish, so nothing was generated", detail, actions: [{ id: "regenerate", label: "Retry", style: "primary" }, { id: "diagnostics", label: "Diagnostics" }], expires: "next_send", payload: {} }]);
     this.push.changed(input.chatId, input.userId);
   }
 

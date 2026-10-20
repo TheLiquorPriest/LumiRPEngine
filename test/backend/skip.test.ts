@@ -37,7 +37,7 @@ async function folded(rig: Rig, chatId: string) {
 
 /** Port Alder after one ordinary turn, with every helper call answered with nothing. */
 async function portAlder(): Promise<{ rig: Rig; chatId: string; day: number; at: (day: number, hhmm: string) => number }> {
-  const rig = new Rig({ shipped: true });
+  const rig = new Rig({ shipped: true, minds: true });
   rig.host.quietReply = () => "{}";
   const worldId = await rig.newWorld("Port Alder", "modern_slice_of_life");
   const chatId = rig.host.createChat("Morning.");
@@ -296,7 +296,7 @@ describe("time skips", () => {
   });
 
   test("no skip runs while a fight holds the clock: no one is asked, and the turn notes why", async () => {
-    const rig = new Rig({ shipped: true });
+    const rig = new Rig({ shipped: true, minds: true });
     rig.host.quietReply = () => "{}";
     const worldId = await rig.newWorld("Port Alder", "modern_slice_of_life");
     // The Modern profile brings combat.

@@ -54,6 +54,8 @@ export class Harness {
   /** Makes the next swipe or regenerate a Re-narrate (P3), as the swipe-option chip does. */
   renarrateNext = false;
   readonly plays: Plays = { queued: 0, check: 0, failure: 0, interruption: 0 };
+  /** Each engine run that failed, as `step: reason` (a failed run generates nothing). */
+  readonly failures: string[] = [];
   private readonly model: TurnModel;
   private readonly settings: UserSettings;
 
@@ -105,6 +107,18 @@ export class Harness {
     this.service.hooks = {
       beforePlan: noop,
       afterPlan: noop,
+      // No sections here: the engine run plans, and its reply starts again (DESIGN §5.1).
+      deliver: async () => ({ bookId: "", entries: [] }),
+      clear: noop,
+      adopted: noop,
+      failed: async ({ step, reason }) => {
+        this.failures.push(`${step}: ${reason}`);
+      },
+      worldOf: async (chatId) => {
+        const raw = (await this.host.chats.chatMetadata(chatId, this.host.userId))[LEDGER_NAMESPACE];
+        return isRecord(raw) && typeof raw.worldId === "string" ? raw.worldId : null;
+      },
+      inputs: () => "",
       beforeCommit: noop,
       afterCommit: noop,
       changed: () => undefined,

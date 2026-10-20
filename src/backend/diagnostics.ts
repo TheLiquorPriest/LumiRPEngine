@@ -309,17 +309,21 @@ export class Diagnostics {
 
   /**
    * The first failure of a turn so far (the engine run halts on it, DESIGN §5.1): a model call that
-   * failed, was cut off or came back empty, or a step that failed. A Decision call the helper answered
-   * after is the helper's, and lore lookups don't count: a step answers without them.
+   * failed, was cut off or came back empty, or a step that failed. An attempt made again after a
+   * transient failure is the next attempt's; a Decision call the helper answered after is the
+   * helper's; a lore lookup a later call of its step answered after doesn't count.
    */
   failure(at: DiagAt): { step: string; reason: string } | null {
     for (const r of this.chats.get(at.chatId)?.records ?? []) {
       if (r.turn !== at.turn) continue;
       const calls = r.calls ?? [];
       for (const [i, c] of calls.entries()) {
-        const failed = c.lookup ? null : callFailure([c]);
-        if (!failed || (c.via === "decision" && calls.slice(i + 1).some((d) => d.purpose === c.purpose && d.via === "helper" && !callFailure([d])))) continue;
-        return { step: c.purpose, reason: failed.reason };
+        const failed = c.retried ? null : callFailure([c]);
+        if (!failed) continue;
+        const answeredAfter = calls.slice(i + 1).some((d) => d.purpose === c.purpose && !d.retried && !callFailure([d]) && (c.lookup === true || (c.via === "decision" && d.via === "helper")));
+        if (answeredAfter) continue;
+        const retries = c.retries ?? 0;
+        return { step: c.purpose, reason: retries > 0 ? `${failed.reason} (after ${retries} ${retries === 1 ? "retry" : "retries"})` : failed.reason };
       }
       if (r.status === "failed") return { step: r.step, reason: r.reason ?? "it failed" };
     }
