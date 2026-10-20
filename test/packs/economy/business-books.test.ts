@@ -144,6 +144,8 @@ describe("business books: dashboards", () => {
   test("the player's view of their business names nobody they can't see, by name or by id", () => {
     const b = cafe(hiddenPartner(), true);
     expect(b?.owners.map((o) => o.name)).toEqual(["Alex Rivera", "an owner"]);
+    // A masked owner goes out with no id, as every masked party in the money view does.
+    expect(b?.owners.map((o) => o.party)).toEqual(["you", null]);
     expect(b?.employees.map((j) => j.worker)).toEqual(["an employee"]);
     expect(b?.invoices.map((i) => i.customerName)).toEqual(["a customer"]);
     expect(JSON.stringify(b).toLowerCase()).not.toContain("dana");
