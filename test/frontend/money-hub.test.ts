@@ -73,11 +73,12 @@ const TOP = FINANCE_FEATURES.filter((f) => featureOn(4, f));
 
 const reg = createRegistry(ALL_PACKS);
 
-/** The POV's money in Port Alder at a Money level with the world's toggles, as the backend builds it and the hub decodes it. */
-function portAlderMoney(level: Level, toggles: JsonObject): FinanceView {
+/** A party's money in Port Alder (the POV's unless `pov` names another) at a Money level with the world's toggles, as the backend builds it and the hub decodes it. */
+function portAlderMoney(level: Level, toggles: JsonObject, pov?: string): FinanceView {
   const world = (STARTER_WORLDS.modern_slice_of_life as (id: string, name: string) => WorldDoc)("pa", "Port Alder");
   world.realism.levels.money = level;
   world.packs.economy = { ...world.packs.economy, config: { ...(world.packs.economy?.config ?? {}), features: toggles } };
+  if (pov !== undefined) world.pov = pov;
   const w = new Working(reg, world, startState(world));
   materializeAll(reg, w, world.pov, "run");
   const decoded = decodeFinanceView(JSON.parse(JSON.stringify(w.ctx.query("economy.finance")(w.ctx, world.pov, true))));
@@ -159,6 +160,12 @@ describe("realism gating", () => {
     expect(hubTabs(view({ partyKind: "business", accounts: [checking] }), "gm").map((t) => t.id)).toEqual(["overview", "accounts", "flows", "properties"]);
     // A band and no accounts yet: what the GM adds wouldn't show.
     expect(hubTabs(view({ overview: null, cash: { band: "modest" } }), "gm").map((t) => t.id)).toEqual(["overview"]);
+  });
+
+  test("the house its owner lives in has nothing to let, so Properties asks nothing of Marcus", () => {
+    const marcus = portAlderMoney(3, {}, "marcus_delgado");
+    expect(marcus.properties.find((p) => p.id === "prop_birch_lane_12")?.leases).toEqual([]);
+    expect(hubTabs(marcus, "player").find((t) => t.id === "properties")).toMatchObject({ dot: false });
   });
 
   test("below the top level an account shows its balance and a few lines, never its terms, statements, pending lines or holds", () => {
