@@ -14,12 +14,13 @@ import { neutralizeMacros } from "../shared/macros";
 import type { ExtractionType, StepConfig, UserSettings } from "../shared/settings";
 import { EXTRACTION_TYPES, stepLoreOf } from "../shared/settings";
 import type { ChipAction, ContextGeneration, ContextView, LoreStepTrace, StateView } from "../shared/state-view";
-import type { ActionDef, AdjudicationDef, StepPurpose, WorldDoc } from "../shared/world";
+import type { ActionDef, AdjudicationDef, SectionTemplate, StepPurpose, WorldDoc } from "../shared/world";
 import { formatMoney, offersAction } from "../shared/world";
 import { MINDS_SLOT, worldMindsOf, type MindCallTrace } from "../shared/minds";
 import { mindsOn, postMinds, preMinds, runMinds, type MindsDeps } from "./minds";
 import { runSkip, type BeatMinds, type SkipRun } from "./skip";
 import { fightOffers } from "../packs/combat/core/index";
+import { fitMindLines, mindLines } from "../packs/minds/core/section";
 import { matchCatalog, transferCents } from "../packs/economy/core/index";
 import { itemName, stem } from "../packs/economy/core/items";
 import { needsJudge, outcomeChoices, policyFor, policyOf, type Verdict } from "../engine/adjudication";
@@ -384,6 +385,8 @@ export interface ReadInput {
   world: WorldDoc;
   seed: string;
   pre: LedgerEvent[];
+  /** The state before `pre`: where the player's message was said, and who heard it (DESIGN §24.4). */
+  start: WorldState;
   /** The Journal's latest turn lines before the reply (`{{recent}}`). */
   recent: string[];
 }
@@ -1221,7 +1224,7 @@ export class Runtime implements TurnHooks {
     if (input.kind === "continue") {
       const head = input.core.fold(input.observed.slice(0, index + 1));
       const world = input.core.worldAt(head.state.revision);
-      context = world ? { state: head.state, world, seed: "", pre: [], recent } : null;
+      context = world ? { state: head.state, world, seed: "", pre: [], start: head.state, recent } : null;
     } else {
       const at = input.core.commitContext(input.generationId, input.messageId, input.observed);
       context = at ? { ...at, recent } : null;
@@ -1283,7 +1286,7 @@ export class Runtime implements TurnHooks {
     const choiceTasks = choiceRuns.map((r) => (post && budget.take() ? promptedText(this.steps, r, "choices", vars, secrets, userId, budget.signal, lore(r)).then((lines) => lines ?? []) : Promise.resolve([])));
     // The minds' post phase (DESIGN §24.4): who was present, their memory of what was written, and
     // consolidation, beside the reply's other steps, on the phase's wall clock.
-    const mindsTask = post ? postMinds(this.minds, { chatId, userId, world: context.world, state: context.state, pre: context.pre, messageId, user: pre?.text ?? "", reply: text, signal: budget.signal, guidance: { memory: guidance.memory ?? "", consolidate: guidance.consolidate ?? "" } }) : Promise.resolve({ events: [], traces: [] });
+    const mindsTask = post ? postMinds(this.minds, { chatId, userId, world: context.world, start: context.start, state: context.state, pre: context.pre, messageId, user: pre?.text ?? "", reply: text, signal: budget.signal, guidance: { memory: guidance.memory ?? "", consolidate: guidance.consolidate ?? "" } }) : Promise.resolve({ events: [], traces: [] });
     const [extracted, effects, decisions, contradicted, choices, minded] = await Promise.all([extractTask, Promise.all(effectsTasks), npcTask, contradictionTask, Promise.all(choiceTasks), mindsTask]);
     this.addMindTraces(chatId, key, minded.traces);
     // The reply's lore traces join its generation's inspector record (the pre phase's are there already).
@@ -1694,7 +1697,6 @@ export class Runtime implements TurnHooks {
     const entries: BookEntries = bookId ? await this.book.entriesOf(bookId, input.userId) : { slots: new Map(), twins: new Map(), atOutlet: new Set(), narrator: null, narratorOutlet: null };
     const slotIds = entries.slots;
     const present = new Set(input.entries.filter((e) => e.bookId === bookId).map((e) => e.id));
-    const ctx = this.registry.context(world, state);
     const secrets = unrevealedSecrets(this.registry, world, state);
     const plan = Object.values(core.journal.pending).filter((p) => p.planned).at(-1);
     const turnPlan = plan ? this.bridges.get(input.chatId)?.planFor(plan.seed) : undefined;
@@ -1734,7 +1736,8 @@ export class Runtime implements TurnHooks {
     const uncounted: string[] = [];
     // Sections with hint lines (Stance's cues, §6.6), which ride once every section has its place.
     const hinted: { entry: { content?: string }; label: string; template: string; lines: string[]; hints: string[]; cost: number }[] = [];
-    for (const section of sectionsOf(world)) {
+    // The entry a section fills, and whether the preset's outlet places it.
+    const entryOf = (section: SectionTemplate): { id: string; routed: boolean } | null => {
       // The preset places the section itself when an enabled block holds `{{outlet::lre_<slot>}}`
       // (DESIGN §6.8): its outlet twin is filled instead, and the world's placement waits.
       const twin = entries.twins.get(section.id);
@@ -1742,12 +1745,30 @@ export class Runtime implements TurnHooks {
       // A later revision may have moved the section's own entry to an outlet while this chat's revision
       // places it in the chat: filled, that entry would land at both, so its twin takes the placement.
       const astray = !routed && section.position.type === "chat_depth" && entries.atOutlet.has(section.id) && twin !== undefined && present.has(twin);
-      const entryId = routed || astray ? twin : slotIds.get(section.id);
-      if (!entryId || !present.has(entryId)) continue;
-      const lines: string[] = [];
+      const id = routed || astray ? twin : slotIds.get(section.id);
+      return id && present.has(id) ? { id, routed } : null;
+    };
+    const sectionCost = (content: string): number => this.tokenCounts.get(hashParts("lre.tokens", input.userId, content)) ?? sectionTokens(content);
+    // The Minds section on its own budget (DESIGN §24.3): the best on the ladder first, the lowest left
+    // out until it fits. Under `full` the narrator gets each mind whole, to depict and never state;
+    // under `brief` the lines are leak-checked once more after their own screens. Only those it tells
+    // of are out of Stance, which tells of everyone else.
+    const mindsSection = sectionsOf(world).find((s) => s.id === MINDS_SLOT);
+    const read = this.registry.context(world, state);
+    const allMinds = mindsSection && entryOf(mindsSection) ? mindLines(read).filter((l) => fullMinds || findLeaks(l.line, secrets).length === 0) : [];
+    const said = plan ? (this.prePhase.get(plan.generationId)?.text ?? "") : "";
+    const ladder = (optionalQuery(read, "minds.fidelity")?.(read, { user: said, reply: "" }) ?? []).map((s) => s.entity);
+    const mindsFit = mindsSection ? fitMindLines(allMinds, ladder, mindsBudget, (kept) => sectionCost(renderSection(mindsSection.label, mindsSection.template, kept.map((l) => l.line)))) : [];
+    const ctx = this.registry.context(world, state, { "minds.minded": () => mindsFit.map((l) => l.entity) });
+    for (const section of sectionsOf(world)) {
+      const at = entryOf(section);
+      if (!at) continue;
+      const { id: entryId, routed } = at;
+      const minds = section.id === MINDS_SLOT;
+      const lines: string[] = minds ? mindsFit.map((l) => l.line) : [];
       const hints: string[] = [];
       for (const r of this.registry.renderers) {
-        if (r.slot !== section.id) continue;
+        if (r.slot !== section.id || minds) continue;
         try {
           (r.hint ? hints : lines).push(...r.render(ctx));
         } catch (error) {
@@ -1763,12 +1784,13 @@ export class Runtime implements TurnHooks {
       // The turn's resolution leads the Outcome slot; a timelapse's Montage fills its own.
       if (section.id === "outcome") lines.unshift(...planned.outcome);
       if (section.id === "montage") lines.push(...planned.montage);
-      // Under `full` secrecy the narrator gets each mind whole, to depict and never state (DESIGN §24.3);
-      // everything else is leak-checked, the Minds section in `brief` once more after its own screens.
-      const minds = section.id === MINDS_SLOT;
-      const safe = minds && fullMinds ? lines : lines.filter((l) => findLeaks(l, secrets).length === 0);
-      // Hints alone never make a section: its being there would tell of them.
-      if (safe.length === 0) continue;
+      const safe = minds ? lines : lines.filter((l) => findLeaks(l, secrets).length === 0);
+      if (safe.length === 0) {
+        // A Minds section whose best line alone is over its budget is left out whole.
+        if (minds && allMinds.length > 0) record.sections.push({ slot: section.id, label: section.label, tokens: sectionCost(renderSection(section.label, section.template, allMinds.map((l) => l.line))), clipped: true, cut: allMinds.length, delivery: "unchecked" });
+        // Hints alone never make a section: its being there would tell of them.
+        continue;
+      }
       const content = renderSection(section.label, section.template, safe);
       const key = hashParts("lre.tokens", input.userId, content);
       const counted = this.tokenCounts.get(key);
@@ -1776,7 +1798,7 @@ export class Runtime implements TurnHooks {
       const cost = counted ?? sectionTokens(content);
       const clipped = minds ? cost > mindsBudget : section.rank > 0 && cost > budget;
       // A clipped section wasn't in the prompt, so an earlier delivery check says nothing about it.
-      record.sections.push({ slot: section.id, label: section.label, tokens: cost, clipped, delivery: clipped ? "unchecked" : (delivery[section.id] ?? "unchecked") });
+      record.sections.push({ slot: section.id, label: section.label, tokens: cost, clipped, ...(minds && mindsFit.length < allMinds.length ? { cut: allMinds.length - mindsFit.length } : {}), delivery: clipped ? "unchecked" : (delivery[section.id] ?? "unchecked") });
       if (clipped) continue;
       if (!minds) budget -= cost;
       if (routed) routedSlots.add(section.id);

@@ -2791,7 +2791,12 @@
       "label": "Julian's agenda",
       "start": "play_the_friend",
       "stages": {
-        "play_the_friend": {"label": "Be the family's friend", "next": [{"to": "destroy_evidence", "when": "flag('body_found')"}], "priority": 4},
+        "play_the_friend": {
+          "label": "Be the family's friend",
+          "next": [{"to": "destroy_evidence", "when": "flag('body_found')"}],
+          "truth": "Julian has taken about eleven thousand four hundred pounds from the Thorne Trust over six years, paid to a fictitious 'M. Rutherford'. Sir Alaric found out on Thursday and meant to confront him on Saturday with the valuer as a witness, so late on Friday night, over a brandy in the library, Julian put a lethal dose of digitalis tincture from Dr. Farrant's bag into his glass, knowing his weak heart would make it pass as natural. He rinsed his own glass, burned a page of the ledger and left by the conservatory door. Nobody suspects him, and he means to keep it that way.",
+          "priority": 4
+        },
         "destroy_evidence": {"label": "Finish what he started", "next": [{"to": "shift_suspicion", "when": "not flag('ledger_page_intact')"}], "priority": 8},
         "shift_suspicion": {"label": "Point elsewhere", "next": [{"to": "slip_away", "when": "flag('clue_trust_ledger') and flag('clue_burnt_page')"}], "priority": 9},
         "slip_away": {"label": "Leave before the constable comes", "next": [], "priority": 10}

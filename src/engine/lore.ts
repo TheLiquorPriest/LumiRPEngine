@@ -6,6 +6,8 @@
 //     whatever its audience says (the secrecy batching rule); once its gate holds it reads as public.
 //     An entry is secret unless `secret` is `false` or absent (`loreIsSecret`), so a malformed
 //     value keeps it hidden;
+//   - read as a character (a mind), a secret entry is read only when it is their own (`loreHeldBy`),
+//     whether or not its gate holds: the POV uncovering a secret tells nobody else of it;
 //   - a `known_by` entry is read only once the POV knows every person and place it links; one with
 //     no links, a link to anything else, or a visibility this reader doesn't know stays hidden;
 //   - an AI-written entry still waiting for review is read by nobody but the GM;
@@ -18,6 +20,7 @@ import type { EntityId } from "../shared/ids";
 import { hasOwn, isRecord } from "../shared/json";
 import { loreIsSecret, loreSourceOf, PROSE_STEPS, topicIdOf } from "../shared/lore";
 import type { LoreEntryDef, StepPurpose, WorldDoc } from "../shared/world";
+import { cuesOf } from "./cues";
 import { playerKnows } from "./player-events";
 import type { Registry } from "./registry-impl";
 import type { WorldState } from "./state";
@@ -54,8 +57,8 @@ export interface LoreQuery {
   skip?: ReadonlySet<string>;
   /**
    * Read as this character (a mind, DESIGN §24.5): `known_by` entries by what they know rather than
-   * the POV, and of the secrets whose gate doesn't hold only their own (an entry that links them),
-   * whatever its audience says.
+   * the POV, and of the secret entries only their own (`loreHeldBy`), gate or no gate, whatever their
+   * audience says.
    */
   as?: EntityId;
 }
@@ -109,6 +112,15 @@ function wordsOf(text: string): string[] {
 const listOf = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : []);
 
 /**
+ * Whether a secret entry is `who`'s own (DESIGN §24.5): its `holders` name them, or one of their cues
+ * stands for it (the mapping Stance's cues use, `engine/cues.ts`). Linking them doesn't make it theirs:
+ * an entry's links are what it is about.
+ */
+export function loreHeldBy(world: WorldDoc, entry: LoreEntryDef, who: EntityId): boolean {
+  return listOf(entry.holders).includes(who) || cuesOf(world, who).some((c) => c.secret.kind === "lore" && c.secret.id === entry.id);
+}
+
+/**
  * Whether `purpose` may read the entry now (see the header), or, with `as`, the character `as` (a
  * mind). `open` reads gates against this state; pass one reader when checking many entries.
  */
@@ -116,7 +128,8 @@ export function loreReadable(reg: Registry, world: WorldDoc, state: Readonly<Wor
   if (purpose === "gm") return true;
   const source = loreSourceOf(entry.source);
   if (source.kind === "ai" && source.status === "pending") return false;
-  if (loreIsSecret(entry) && !open(entry)) return !effects && (as !== undefined ? listOf(entry.links).includes(as) : !PROSE_STEPS.includes(purpose) && listOf(entry.audience).includes(purpose));
+  if (as !== undefined && loreIsSecret(entry)) return loreHeldBy(world, entry, as);
+  if (loreIsSecret(entry) && !open(entry)) return !effects && !PROSE_STEPS.includes(purpose) && listOf(entry.audience).includes(purpose);
   const v: unknown = entry.visibility;
   if (v === undefined || v === "public") return true;
   if (v !== "known_by") return false;

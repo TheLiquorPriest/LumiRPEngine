@@ -16,6 +16,7 @@ import type { LedgerEvent } from "../shared/ledger";
 import type { LookupLimits, ModelUseSettings, StepConfig } from "../shared/settings";
 import { stepConfigOf } from "../shared/settings";
 import type { StepSignal } from "../shared/steps";
+import { MINDS_SLOT } from "../shared/minds";
 import type { ActionDef, ParamDef, StepPurpose, StepTemplateDef, WorldCurrency, WorldDoc } from "../shared/world";
 import { calendarOf, dateAt, dayPartAt, formatClock } from "../engine/calendar";
 import type { Judgement } from "../engine/adjudication";
@@ -39,7 +40,8 @@ import { inMinorUnits, type Steps } from "./steps";
 /**
  * Player-visible fact lines (the engine's slot renders, minus the turn's own), leak-checked. Stance
  * is left out: its cues are hints for the narrator to play, and a prose helper given one could state
- * it (DESIGN §6.6).
+ * it (DESIGN §6.6). So is the Minds section: under `full` it carries each mind whole, which only the
+ * narrator may read, to depict and never state (DESIGN §24.3).
  */
 export function factLines(registry: Registry, world: WorldDoc, state: Readonly<WorldState>, secrets: readonly string[]): string[] {
   const ctx = registry.context(world, state);
@@ -49,7 +51,7 @@ export function factLines(registry: Registry, world: WorldDoc, state: Readonly<W
   const place = povPlace(registry, world, state);
   out.push(`${pov?.name ?? world.pov} is ${place === null ? "at an unknown place" : place.id === null ? "somewhere" : `at ${place.name}`}; it is ${formatClock(calendarOf(world), state.clock)}.`);
   for (const r of registry.renderers) {
-    if (r.slot === "outcome" || r.slot === "montage" || r.slot === "outline" || r.slot === "stance") continue;
+    if (r.slot === "outcome" || r.slot === "montage" || r.slot === "outline" || r.slot === "stance" || r.slot === MINDS_SLOT) continue;
     try {
       for (const line of r.render(ctx)) if (findLeaks(line, secrets).length === 0 && !out.includes(line)) out.push(line);
     } catch {

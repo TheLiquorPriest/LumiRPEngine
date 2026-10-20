@@ -380,6 +380,7 @@ export const COLLECTION_SPECS: Record<WorldCollection, FieldSpec[]> = {
     // The engine treats any `secret` but false as secret, so the box shows it ticked (lint warns of the value).
     { kind: "bool", key: "secret", label: "Secret", hint: "Only the helpers you pick read it, until the gate holds", reads: (secret) => loreIsSecret({ secret }) },
     { kind: "expr", key: "gate", label: "Gate (revealed once it holds)", optional: true },
+    { kind: "refs", key: "holders", label: "Whose own secret it is (their minds read it, gate or no gate)", collections: ["entities"] },
   ],
   classifications: [
     { kind: "text", key: "label", label: "Label" },

@@ -1,8 +1,9 @@
 // Build → Lore (DESIGN §4.2): the entries, searchable by title, alias, topic, keyword and text, with
 // the lookup table a tap away; and the entry form: title and text, aliases and topics as chips,
 // keywords and links, the source (read-only; an entry indexed from a World Info book whose entry
-// changed since can take the book's new text), who may read it, and secrecy: the gate, and the
-// helpers that may read the secret, with a note on those whose output reaches the player.
+// changed since can take the book's new text), who may read it, and secrecy: the gate, whose own
+// secret it is, and the helpers that may read the secret, with a note on those whose output reaches
+// the player.
 
 import { useEffect, useMemo, useState } from "preact/hooks";
 import type { JsonObject } from "../../shared/json";
@@ -30,7 +31,7 @@ const specs = (keys: readonly string[]) => COLLECTION_SPECS.lore.filter((s) => k
 const TEXT = specs(["title", "content"]);
 const MORE = specs(["keys", "links", "group", "priority"]);
 const SECRET = specs(["visibility", "secret"]);
-const GATE = specs(["gate"]);
+const GATE = specs(["gate", "holders"]);
 
 /** The world's book-sourced entries (or just `id`) whose book entry changed or is gone: asked again whenever their sources change. */
 function useDrift(app: App, worldId: string, lore: Readonly<Record<string, LoreEntryDef>>, id?: string): Record<string, LoreDrift> | null {

@@ -5,11 +5,13 @@
 import { describe, expect, test } from "bun:test";
 import type { LedgerEvent } from "../../../src/shared/ledger";
 import type { MindsSettings } from "../../../src/shared/minds";
-import { MINDS_DEFAULTS } from "../../../src/shared/minds";
+import { DEFAULT_WORLD_MINDS, MINDS_DEFAULTS } from "../../../src/shared/minds";
 import type { WorldDoc } from "../../../src/shared/world";
+import { lintWorld } from "../../../src/engine/authoring";
 import { playerLines } from "../../../src/engine/player-events";
 import { createRegistry } from "../../../src/engine/registry-impl";
 import type { WorldState } from "../../../src/engine/state";
+import { placeOfEntity } from "../../../src/engine/scope";
 import { unrevealedSecrets } from "../../../src/engine/visibility";
 import { ALL_PACKS } from "../../../src/packs/index";
 import { mindEdit } from "../../../src/packs/minds/core/edit";
@@ -39,7 +41,7 @@ function round(state: WorldState): LedgerEvent {
   return { type: "minds.round", data: { at: state.clock, on: true } };
 }
 
-function mind(state: WorldState, entity: string, rest: { monologue?: string; depiction?: string; level?: string; place?: string | null; interrupt?: string } = {}): LedgerEvent {
+function mind(state: WorldState, entity: string, rest: { monologue?: string; depiction?: string; level?: string; place?: string | null; interrupt?: string; moment?: "turn" | "beat" } = {}): LedgerEvent {
   return {
     type: "minds.mind",
     data: {
@@ -47,7 +49,7 @@ function mind(state: WorldState, entity: string, rest: { monologue?: string; dep
       at: state.clock,
       place: rest.place ?? null,
       level: rest.level ?? "live",
-      moment: "turn",
+      moment: rest.moment ?? "turn",
       reason: "live",
       monologue: rest.monologue ?? "I should keep my head down today.",
       depiction: rest.depiction ?? "keeps glancing at the door while wiping the counter",
@@ -126,6 +128,72 @@ describe("the fidelity ladder", () => {
     const pinned = fold(reg, w, base, [{ type: "minds.pin", data: { entity: "maya", level: "live" } }]);
     expect(score(w, pinned, "maya")?.level).toBe("live");
   });
+
+  test("regard either way, knowing the POV, a world rule naming them and what is pending with the POV each move them up", () => {
+    const s0 = startState(world());
+    const before = score(world(), s0, "jordan");
+    if (!before) throw new Error("no Jordan");
+    /** What `patch` adds to Jordan's score, and the reasons with points it gives. */
+    const gain = (patch: (w: WorldDoc) => void) => {
+      const w = world(patch);
+      const f = score(w, startState(w), "jordan");
+      return { points: Math.round(((f?.score ?? 0) - before.score) * 10) / 10, reasons: (f?.reasons ?? []).filter((r) => r.points !== 0 && !before.reasons.some((b) => b.label === r.label)).map((r) => r.label) };
+    };
+    // Regard counts its stronger way round, as a share of 100, warm or hostile alike.
+    expect(gain((w) => w.entities.you?.relations.push({ type: "regard", to: "jordan", fields: { warmth: -90, trust: -90, respect: -90 } }))).toEqual({ points: 9, reasons: ["Regard with you"] });
+    expect(gain((w) => w.entities.jordan?.relations.push({ type: "regard", to: "you", fields: { warmth: 40, trust: 40, respect: 40 } }))).toEqual({ points: 4, reasons: ["Regard with you"] });
+    // Knowing the POV, or being known by it.
+    expect(gain((w) => w.entities.jordan?.relations.push({ type: "knows", to: "you" }))).toEqual({ points: 10, reasons: ["Knows you"] });
+    expect(gain((w) => w.entities.you?.relations.push({ type: "knows", to: "jordan" }))).toEqual({ points: 10, reasons: ["Knows you"] });
+    // A world rule that names them.
+    expect(gain((w) => void (w.rules.audit = { id: "audit", on: { tick: "turn" }, when: "jordan.cash < 0", do: [] }))).toEqual({ points: 5, reasons: ["Named by a world rule"] });
+    // What is pending with the POV, three at most: an appointment together still to come counts; one past doesn't.
+    const appointments = (...offsets: number[]) => (w: WorldDoc) => void (w.entities.jordan!.fields.appointments = offsets.map((m) => ({ at: s0.clock + m, with: ["you"] })));
+    expect(gain(appointments(60))).toEqual({ points: 15, reasons: ["1 pending with you"] });
+    expect(gain(appointments(60, 120, 180, 240, 300))).toEqual({ points: 45, reasons: ["3 pending with you"] });
+    expect(gain(appointments(-60))).toEqual({ points: 0, reasons: [] });
+  });
+});
+
+describe("minds lint", () => {
+  test("a minds config the engine can't play as written says so, part by part; a minds template's signals are ignored", () => {
+    const w = world((x) => {
+      x.minds = {
+        secrecy: "loud",
+        weights: { here: 500, regard: 5, roles: { hero: 10 }, charm: 3 },
+        thresholds: { live: 10, near: 50, far: 60 },
+        always: {},
+        never: { kind: "spaceship" },
+        memory: { notes: { show: 2.5 }, consolidate: { enabled: "yes" }, dreams: {} },
+        colour: "blue",
+      } as unknown as WorldDoc["minds"];
+      x.steps.mind_x = { id: "mind_x", purpose: "mind", template: "Think as {{character}}.", output: "text", signals: ["always"] };
+    });
+    const issues = lintWorld(w, reg).filter((i) => i.code.startsWith("minds."));
+    expect(issues.map((i) => `${i.severity} ${i.code} ${i.path}`).sort()).toEqual(
+      [
+        "error minds.config minds.secrecy",
+        "error minds.config minds.weights.here",
+        "warning minds.config minds.weights.roles.hero",
+        "warning minds.config minds.weights.charm",
+        "warning minds.config minds.thresholds.live",
+        "warning minds.config minds.thresholds.near",
+        "warning minds.config minds.always",
+        "error minds.config minds.never",
+        "error minds.config minds.memory.notes.show",
+        "error minds.config minds.memory.consolidate.enabled",
+        "warning minds.config minds.memory.dreams",
+        "warning minds.config minds.colour",
+        "info minds.step_signals steps.mind_x.signals",
+      ].sort(),
+    );
+    // The defaults, written out, are clean where the world has the role their weights name.
+    const clean = world((x) => {
+      x.classifications.role = { id: "role", label: "Role", multiple: false, values: { antagonist: { label: "Antagonist" } } };
+      x.minds = structuredClone(DEFAULT_WORLD_MINDS) as unknown as WorldDoc["minds"];
+    });
+    expect(lintWorld(clean, reg).filter((i) => i.code.startsWith("minds."))).toEqual([]);
+  });
 });
 
 describe("which minds run", () => {
@@ -195,6 +263,21 @@ describe("the Minds section", () => {
     // A mind from an earlier round isn't this turn's.
     const stale = fold(reg, brief, leaky, [round(leaky)]);
     expect(mindLines(reg.context(brief, stale))).toEqual([]);
+  });
+
+  test("a time skip's earlier beats are past: a beat's mind is told only at the beat the skip ended on, a turn's whatever the clock", () => {
+    const w = world();
+    const s0 = at(w, startState(w), "maya", "apartment");
+    const later = (s: WorldState): WorldState => fold(reg, w, s, [{ type: "clock", minutes: 180, cause: "tick" }]);
+    const told = (s: WorldState): string[] => mindLines(reg.context(w, s)).map((l) => l.entity);
+    // Maya thought at a beat, then the skip ran on three hours: what she thought then is past.
+    const beat = later(fold(reg, w, s0, [round(s0), mind(s0, "maya", { moment: "beat", place: "apartment" })]));
+    expect(placeOfEntity(beat, "maya")).toBe("apartment");
+    expect(told(beat)).toEqual([]);
+    // Asked again at the beat it ended on, she is told.
+    expect(told(fold(reg, w, beat, [mind(beat, "maya", { moment: "beat", place: "apartment" })]))).toEqual(["maya"]);
+    // A turn's mind, asked before the turn's own time passed, is the turn's.
+    expect(told(later(fold(reg, w, s0, [round(s0), mind(s0, "maya", { place: "apartment" })])))).toEqual(["maya"]);
   });
 
   test("no player line ever tells a mind or a memory", () => {

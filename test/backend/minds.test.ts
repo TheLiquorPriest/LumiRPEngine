@@ -6,16 +6,20 @@
 import { describe, expect, test } from "bun:test";
 import type { JsonObject } from "../../src/shared/json";
 import type { LedgerEvent } from "../../src/shared/ledger";
-import { DEFAULT_MINDS_MEMORY } from "../../src/shared/minds";
+import { DEFAULT_MINDS_MEMORY, type MindMoment } from "../../src/shared/minds";
 import type { WorldDoc } from "../../src/shared/world";
 import { toChain } from "../../src/backend/ledger-io";
 import type { QuietRequest } from "../../src/backend/host";
-import { presentTurns, recallFor } from "../../src/backend/minds-context";
+import { localTime } from "../../src/backend/minds";
+import { mindContext, presentTurns, recallFor } from "../../src/backend/minds-context";
+import { calendarOf, clockOfStamp } from "../../src/engine/calendar";
+import { modernUsWorld } from "../packs/riverton";
 import { playtestStart, playtestTurn } from "../../src/engine/authoring";
 import type { WorldState } from "../../src/engine/state";
 import { planTurn, postTurn } from "../../src/engine/turn";
 import { unrevealedSecrets } from "../../src/engine/visibility";
 import { readCharacter, readSlice } from "../../src/packs/minds/core/state";
+import { STARTER_WORLDS } from "../../src/packs/index";
 import { placeOfEntity } from "../../src/engine/scope";
 import { Rig } from "../support/rig";
 
@@ -47,12 +51,12 @@ async function stateOf(rig: Rig, chatId: string): Promise<{ state: WorldState; w
 }
 
 /**
- * A Port Alder chat with Danny and Priya with the POV, the only Live minds: the author's `always`
- * pins them, the thresholds keep everyone else Background, and Near refreshes are off.
+ * A Port Alder chat with Danny and Priya (or `people`) with the POV, the only Live minds: the author's
+ * `always` pins them, the thresholds keep everyone else Background, and Near refreshes are off.
  */
-async function alderChat(rig: Rig, minds: JsonObject = {}): Promise<string> {
+async function alderChat(rig: Rig, minds: JsonObject = {}, people: readonly string[] = PEOPLE): Promise<string> {
   const worldId = await rig.newWorld("Alder", "modern_slice_of_life");
-  rig.body(await rig.send({ type: "lre.editor", op: "set", worldId, base: null, part: "minds", value: { thresholds: { live: 900, near: 900, far: 900 }, always: { ids: [...PEOPLE] }, ...minds } }));
+  rig.body(await rig.send({ type: "lre.editor", op: "set", worldId, base: null, part: "minds", value: { thresholds: { live: 900, near: 900, far: 900 }, always: { ids: [...people] }, ...minds } }));
   rig.body(await rig.send({ type: "lre.world", op: "commit", worldId, base: null }));
   const chatId = rig.host.createChat("Morning.");
   rig.body(await rig.send({ type: "lre.world", op: "attach", worldId, chatId }));
@@ -60,7 +64,7 @@ async function alderChat(rig: Rig, minds: JsonObject = {}): Promise<string> {
   const { state } = await stateOf(rig, chatId);
   const here = placeOfEntity(state, "pov");
   if (!here) throw new Error("the POV is nowhere");
-  rig.body(await rig.send({ type: "lre.edit", chatId, ops: PEOPLE.map((entity) => ({ op: "move", entity, to: here })) }));
+  rig.body(await rig.send({ type: "lre.edit", chatId, ops: people.map((entity) => ({ op: "move", entity, to: here })) }));
   return chatId;
 }
 
@@ -113,10 +117,82 @@ describe("minds around a turn", () => {
     expect(presentTurns(state, "priya_nair").length).toBe(1);
     const messages = await rig.host.chats.messages(chatId, rig.host.userId);
     const memory = { ...DEFAULT_MINDS_MEMORY, recall: { ...DEFAULT_MINDS_MEMORY.recall, tokens: 4000 } };
-    const recall = (who: string) => recallFor({ state, who, memory, messages, hideJson: true, moment: { kind: "turn", at: state.clock, reason: "a turn", user: "", reply: "" } }).map((t) => t.text).join("\n");
+    const recall = (who: string) => recallFor({ state, who, memory, messages, hideJson: true }, "").map((t) => t.text).join("\n");
     expect(recall(stayed)).toContain("SECOND-MARK");
     expect(recall("priya_nair")).not.toContain("SECOND-MARK");
     expect(recall("priya_nair")).toContain("Priya smiles at you");
+  });
+
+  test("a travel turn: who heard the message remembers it, and whoever the POV met at its destination never recalls or notes it", async () => {
+    const rig = new Rig({ shipped: true });
+    const LINE = "I'll take Helen's recipe book tonight";
+    const memories: Record<string, string> = {};
+    const minds: string[] = [];
+    rig.host.quietReply = (req) => {
+      const system = req.messages[0]?.content ?? "";
+      const user = req.messages[1]?.content ?? "";
+      if (system.includes("You map a player's typed input")) return JSON.stringify(user.includes("recipe book") ? { action: "go", params: { to: "harbor_street_114" }, confidence: 0.9 } : { action: null, params: {}, confidence: 0.9 });
+      const mind = MIND.exec(system)?.[1];
+      if (mind) {
+        minds.push(`${mind}\n${user}`);
+        return JSON.stringify({ monologue: "Thinking it over.", depiction: `${mind} looks up`, intent: "", reactions: [], plans: [], mood: "calm" });
+      }
+      const memory = MEMORY.exec(system)?.[1];
+      if (memory) {
+        memories[memory] = user;
+        return JSON.stringify({ notes: [{ text: `${memory} remembers the turn`, salience: 3 }], commitments: [], resolved: [], plans: [], told: [] });
+      }
+      return JSON.stringify({ proposals: [] });
+    };
+    const worldId = await rig.newWorld("Alder", "modern_slice_of_life");
+    rig.body(await rig.send({ type: "lre.editor", op: "set", worldId, base: null, part: "minds", value: { thresholds: { live: 900, near: 900, far: 900 }, always: { ids: ["marcus_delgado", "helen_kowalczyk"] } } }));
+    rig.body(await rig.send({ type: "lre.world", op: "commit", worldId, base: null }));
+    const chatId = rig.host.createChat("Morning.");
+    rig.body(await rig.send({ type: "lre.world", op: "attach", worldId, chatId }));
+    rig.body(await rig.send({ type: "lre.settings.set", patch: { minds: { refreshLimit: 0 } } }));
+    rig.body(await rig.send({ type: "lre.edit", chatId, ops: [{ op: "move", entity: "pov", to: "birch_lane_12" }, { op: "move", entity: "marcus_delgado", to: "birch_lane_12" }, { op: "move", entity: "helen_kowalczyk", to: "harbor_street_114" }] }));
+    await rig.turn(chatId, `I tell Marcus ${LINE}, then head to Helen's.`, `You tell Marcus ${LINE}, then drive over to Helen's, where she waves you in.`);
+    const { state } = await stateOf(rig, chatId);
+    expect(placeOfEntity(state, "pov")).toBe("harbor_street_114");
+    // Marcus heard it, and remembers it, knowing he was left behind; Helen didn't, and has no memory of it.
+    expect(memories["Marcus Delgado"]).toContain(LINE);
+    expect(memories["Marcus Delgado"]).toContain("left you partway through");
+    // He saw the POV go, worded for an onlooker: never as "you".
+    expect(memories["Marcus Delgado"]).toMatch(/saw: the player character → /);
+    expect(memories["Marcus Delgado"]).not.toMatch(/saw: You\b/);
+    expect(memories["Helen Kowalczyk"]).toBeUndefined();
+    const presence = readSlice(state).presence;
+    const said = presence.find((p) => p.msg !== null);
+    expect(said?.place).toBe("birch_lane_12");
+    expect(said?.who).toContain("marcus_delgado");
+    expect(said?.who).not.toContain("helen_kowalczyk");
+    expect(presence.find((p) => p.msg === null && p.place === "harbor_street_114")?.who).toContain("helen_kowalczyk");
+    // Recall: the turn is Marcus's, never Helen's.
+    const messages = await rig.host.chats.messages(chatId, rig.host.userId);
+    const recall = (who: string) => recallFor({ state, who, memory: DEFAULT_MINDS_MEMORY, messages, hideJson: true }, "").map((t) => t.text).join("\n");
+    expect(recall("marcus_delgado")).toContain(LINE);
+    expect(presentTurns(state, "helen_kowalczyk")).toEqual([]);
+    // Her next mind, with the POV at her place, isn't told how that turn went either.
+    minds.length = 0;
+    await rig.turn(chatId, "Hello, Helen.", "She smiles.");
+    const helen = minds.find((m) => m.startsWith("Helen Kowalczyk\n")) ?? "";
+    expect(helen).toContain("Now Jordan Ellis says or does: Hello, Helen.");
+    expect(helen).not.toContain("recipe book");
+  });
+
+  test("what a memory says they told reaches only someone who was with them for the turn", async () => {
+    const rig = new Rig({ shipped: true });
+    fakeModels(rig);
+    const minds = rig.host.quietReply;
+    rig.host.quietReply = (req) => (MEMORY.exec(req.messages[0]?.content ?? "")?.[1] === "Danny Okafor" ? JSON.stringify({ notes: [], commitments: [], resolved: [], plans: [], told: [{ to: ["Priya Nair", "Dale Whitcomb", "Jordan Ellis"], what: "DANNY-TOLD the boat is sold" }] }) : (minds?.(req) ?? "{}"));
+    const chatId = await alderChat(rig);
+    await rig.turn(chatId, "Hello.", "They look up.");
+    const { state } = await stateOf(rig, chatId);
+    expect(readCharacter(state, "priya_nair").witness.filter((w) => w.how === "told").map((w) => [w.by, w.what])).toEqual([["danny_okafor", "DANNY-TOLD the boat is sold"]]);
+    // Dale is at the marina, and the POV has no mind: neither hears it from Danny's memory.
+    expect(placeOfEntity(state, "dale_whitcomb")).not.toBe(placeOfEntity(state, "pov"));
+    expect(readCharacter(state, "dale_whitcomb").witness).toEqual([]);
+    expect(readCharacter(state, "pov").witness).toEqual([]);
   });
 
   test("full secrecy gives the narrator each monologue and intent", async () => {
@@ -127,6 +203,67 @@ describe("minds around a turn", () => {
     const minds = section(rig, "Minds");
     expect(minds).toContain("Danny Okafor's mind: PRIVATE thoughts of Danny Okafor");
     expect(minds).toContain("Intends: Danny Okafor means to ask about the weekend.");
+  });
+
+  test("over its own budget the Minds section keeps the best on the ladder, and Stance tells of whoever it leaves out", async () => {
+    const rig = new Rig({ shipped: true });
+    fakeModels(rig, { monologue: "word ".repeat(100).trim() });
+    // Only being named scores, so the two named lead the ladder and Maddie comes last.
+    const weights = { here: 0, nearby: 0, mentioned: 100, regard: 0, knows: 0, owner: 0, track: 0, roles: {}, rule: 0, pending: 0, band: { principal: 0, supporting: 0, background: 0 }, recent: 0 };
+    const chatId = await alderChat(rig, { secrecy: "full", weights }, [...PEOPLE, "maddie_kowalczyk"]);
+    // Standard's Minds budget; the shared section budget roomy enough that Stance goes in.
+    rig.body(await rig.send({ type: "lre.settings.set", patch: { modelUse: { tokens: { sections: 4000 } } } }));
+    expect((await rig.rt.settings.get(rig.host.userId)).minds.tokens).toBe(600);
+    await rig.turn(chatId, "Morning, Danny. Morning, Priya.", "They look up.");
+    expect(mindCalls(rig).length).toBe(3);
+    const minds = section(rig, "Minds");
+    expect(minds).toContain("Danny Okafor's mind:");
+    expect(minds).toContain("Priya Nair's mind:");
+    expect(minds).not.toContain("Maddie Kowalczyk");
+    // Stance tells of the one left out, and of no one the Minds section tells of.
+    const stance = section(rig, "Stance");
+    expect(stance).toContain("Maddie Kowalczyk");
+    expect(stance).not.toContain("Danny Okafor");
+    expect(stance).not.toContain("Priya Nair");
+    const record = rig.rt.inspectorRecords(chatId)?.at(-1)?.sections.find((s) => s.slot === "minds");
+    expect(record).toMatchObject({ clipped: false, cut: 1 });
+    expect(record?.tokens).toBeLessThanOrEqual(600);
+  });
+
+  test("under full secrecy a mind reaches no helper step, no contradiction chip and no choice", async () => {
+    const rig = new Rig({ shipped: true });
+    // Every step on, every turn: brief, outline, choices, contradiction, extract and the rest.
+    const steps = Object.fromEntries(["interpret", "npc.choose", "contradiction", "puzzle.answer", "brief", "outline", "extract", "choices"].map((p) => [p, { enabled: true, signals: ["always"] }]));
+    rig.body(await rig.send({ type: "lre.settings.set", patch: { modelUse: { preset: "full" } } }));
+    rig.body(await rig.send({ type: "lre.settings.set", patch: { modelUse: { preset: "custom", steps } } }));
+    fakeModels(rig);
+    const minds = rig.host.quietReply;
+    // A choices helper that suggests whatever intent it is shown, and a contradiction helper that calls
+    // any mind among the facts contradicted: either would carry the mind onto a chip.
+    rig.host.quietReply = (req) => {
+      const system = req.messages[0]?.content ?? "";
+      const user = req.messages[1]?.content ?? "";
+      if (system.includes("Suggest three short")) return JSON.stringify({ choices: [/Intends: ([^.\n]+)/.exec(user)?.[1] ?? "I wave back"] });
+      const asked = /^"contradicts": .* Criteria: (\{.*\})$/m.exec(user)?.[1];
+      if (system.startsWith("Answer each question about the state") && asked) {
+        const criteria: Record<string, string> = JSON.parse(asked);
+        const pick = Object.keys(criteria).find((k) => criteria[k]?.includes("PRIVATE")) ?? "none";
+        return JSON.stringify({ contradicts: { probabilities: { [pick]: 1 } } });
+      }
+      return minds?.(req) ?? "{}";
+    };
+    const chatId = await alderChat(rig, { secrecy: "full" });
+    await rig.turn(chatId, "Hello.", "They look up.");
+    // The narrator has the minds whole; nothing else does.
+    expect(section(rig, "Minds")).toContain("PRIVATE thoughts of Danny Okafor");
+    const leaks = /PRIVATE|means to ask about the weekend/;
+    const helpers = rig.host.quietCalls.filter((c) => !MIND.test(c.messages[0]?.content ?? "") && !MEMORY.test(c.messages[0]?.content ?? ""));
+    const asked = helpers.map((c) => /You brief|You outline|Suggest three short|propose concrete state changes|"contradicts"/.exec(`${c.messages[0]?.content ?? ""} ${c.messages[1]?.content ?? ""}`)?.[0]);
+    for (const step of ["You brief", "You outline", "Suggest three short", "propose concrete state changes", '"contradicts"']) expect(asked).toContain(step);
+    for (const c of helpers) expect(JSON.stringify(c.messages)).not.toMatch(leaks);
+    const chips = (await rig.rt.view(chatId, rig.host.userId)).chips;
+    expect(chips.some((c) => c.kind === "choice")).toBe(true);
+    expect(JSON.stringify(chips)).not.toMatch(leaks);
   });
 
   test("Re-narrate reuses the pre phase's minds; Re-run asks again", async () => {
@@ -146,19 +283,61 @@ describe("minds around a turn", () => {
     expect(mindCalls(rig).length).toBe(asked + 2);
   });
 
-  test("the inspector lists each minds call, with no text and strangers unnamed", async () => {
+  test("the player's own prompt wins over the world's template, which wins over the built-in", async () => {
+    const rig = new Rig({ shipped: true });
+    const systems: string[] = [];
+    rig.host.quietReply = (req) => {
+      const system = req.messages[0]?.content ?? "";
+      if (!system.includes('{"monologue": "...", "depiction"')) return JSON.stringify({ proposals: [] });
+      systems.push(system);
+      return JSON.stringify({ monologue: "Thinking.", depiction: "Looks up", intent: "", reactions: [], plans: [], mood: "calm" });
+    };
+    const worldId = await rig.newWorld("Alder", "modern_slice_of_life");
+    // A blank template sorts first and is skipped.
+    for (const [id, template] of [["a_blank", "  "], ["mind_world", "WORLD-PROMPT for {{character}}."]] as const) rig.body(await rig.send({ type: "lre.editor", op: "put", worldId, base: null, collection: "steps", id, value: { id, purpose: "mind", template, output: "text", signals: [] } }));
+    rig.body(await rig.send({ type: "lre.editor", op: "set", worldId, base: null, part: "minds", value: { thresholds: { live: 900, near: 900, far: 900 }, always: { ids: ["danny_okafor"] } } }));
+    rig.body(await rig.send({ type: "lre.world", op: "commit", worldId, base: null }));
+    const chatId = rig.host.createChat("Morning.");
+    rig.body(await rig.send({ type: "lre.world", op: "attach", worldId, chatId }));
+    const here = placeOfEntity((await stateOf(rig, chatId)).state, "pov") ?? "";
+    const stay = async () => rig.body(await rig.send({ type: "lre.edit", chatId, ops: [{ op: "move", entity: "danny_okafor", to: here }, { op: "move", entity: "pov", to: here }] }));
+    const prompts = () => (rig.rt.inspectorRecords(chatId)?.at(-1)?.minds ?? []).filter((t) => t.purpose === "mind").map((t) => t.prompt);
+    await stay();
+    await rig.turn(chatId, "Hello.", "He looks up.");
+    expect(systems.at(-1)?.startsWith("WORLD-PROMPT for Danny Okafor.")).toBe(true);
+    expect(prompts()).toEqual(["world"]);
+    rig.body(await rig.send({ type: "lre.settings.set", patch: { minds: { prompts: { mind: "USER-PROMPT for {{character}}." } } } }));
+    await stay();
+    await rig.turn(chatId, "Again.", "He nods.");
+    expect(systems.at(-1)?.startsWith("USER-PROMPT for Danny Okafor.")).toBe(true);
+    expect(systems.at(-1)).not.toContain("WORLD-PROMPT");
+    expect(systems.at(-1)).toContain('{"monologue": "...", "depiction"');
+    expect(prompts()).toEqual(["override"]);
+  });
+
+  test("the inspector lists only the minds calls of people the POV can see and has met, by name and with no text", async () => {
     const rig = new Rig({ shipped: true });
     fakeModels(rig);
-    const chatId = await alderChat(rig);
+    const worldId = await rig.newWorld("Alder", "modern_slice_of_life");
+    const here = STARTER_WORLDS.modern_slice_of_life?.("a", "Alder").entities.pov?.fields.place;
+    // One hidden in the POV's room, one public but never met, away at the marina: both Live, by `always`.
+    for (const [id, name, place, extra] of [["lurker", "The Lurker", here, { visibility: "secret" }], ["drifter", "Vera Drift", "alder_harbor_marina", {}]] as const) rig.body(await rig.send({ type: "lre.editor", op: "put", worldId, base: null, collection: "entities", id, value: { id, kind: "person", name, tier: "background", fields: { place }, relations: [], ...extra } }));
+    rig.body(await rig.send({ type: "lre.editor", op: "set", worldId, base: null, part: "minds", value: { thresholds: { live: 900, near: 900, far: 900 }, always: { ids: ["danny_okafor", "lurker", "drifter"] } } }));
+    rig.body(await rig.send({ type: "lre.world", op: "commit", worldId, base: null }));
+    const chatId = rig.host.createChat("Morning.");
+    rig.body(await rig.send({ type: "lre.world", op: "attach", worldId, chatId }));
+    rig.body(await rig.send({ type: "lre.settings.set", patch: { minds: { refreshLimit: 0 } } }));
+    rig.body(await rig.send({ type: "lre.edit", chatId, ops: [{ op: "move", entity: "danny_okafor", to: here ?? "" }] }));
     await rig.turn(chatId, "Hello.", "They look up.");
-    const record = rig.rt.inspectorRecords(chatId)?.at(-1);
-    const traces = record?.minds ?? [];
-    expect(traces.filter((t) => t.purpose === "mind").map((t) => [t.phase, t.outcome, t.prompt])).toEqual([
-      ["pre", "recorded", "default"],
-      ["pre", "recorded", "default"],
+    // Each of them thought, and the two in the room remembered.
+    expect(mindCalls(rig).map((c) => MIND.exec(c.messages[0]?.content ?? "")?.[1]).sort()).toEqual(["Danny Okafor", "The Lurker", "Vera Drift"]);
+    expect(rig.host.quietCalls.map((c) => MEMORY.exec(c.messages[0]?.content ?? "")?.[1]).filter(Boolean).sort()).toEqual(["Danny Okafor", "The Lurker"]);
+    const traces = rig.rt.inspectorRecords(chatId)?.at(-1)?.minds ?? [];
+    expect(traces.map((t) => [t.who, t.purpose, t.phase, t.outcome, t.prompt])).toEqual([
+      ["Danny Okafor", "mind", "pre", "recorded", "default"],
+      ["Danny Okafor", "memory", "post", "recorded", "default"],
     ]);
-    expect(traces.filter((t) => t.purpose === "memory").length).toBe(2);
-    expect(JSON.stringify(traces)).not.toContain("PRIVATE");
+    for (const word of ["Someone", "Lurker", "Drift", "PRIVATE"]) expect(JSON.stringify(traces)).not.toContain(word);
   });
 
   test("a mind's secret never reaches the narrator under brief, nor the Journal, Cast or chips", async () => {
@@ -196,6 +375,217 @@ describe("minds around a turn", () => {
     expect(rounds).toEqual([]);
     const { state } = await stateOf(rig, chatId);
     expect(rig.rt.registry.context((await stateOf(rig, chatId)).world, state).query("minds.on")(rig.rt.registry.context((await stateOf(rig, chatId)).world, state))).toBe(false);
+  });
+});
+
+describe("plan times a mind writes", () => {
+  test("read strictly: a day the calendar lacks, or a time past 23:59, is no time at all", () => {
+    const world = modernUsWorld("t", "R");
+    const cal = calendarOf(world);
+    const now = clockOfStamp(cal, "2026-10-19 09:00") ?? 0;
+    expect(localTime(world, now, "2026-10-19 18:30")).toBe(clockOfStamp(cal, "2026-10-19 18:30"));
+    expect(localTime(world, now, "2026-10-20")).toBe(clockOfStamp(cal, "2026-10-20 00:00"));
+    expect(localTime(world, now, "18:30")).toBe(clockOfStamp(cal, "2026-10-19 18:30"));
+    expect(localTime(world, now, "08:30")).toBe(clockOfStamp(cal, "2026-10-20 08:30"));
+    for (const bad of ["2026-13-01 10:00", "2026-02-30 10:00", "2026-10-19 25:30", "2026-02-30", "25:30", "24:00", "18:75", "tomorrow"]) expect(localTime(world, now, bad)).toBeNull();
+  });
+});
+
+describe("the model-use presets' minds", () => {
+  test("a preset is a whole minds policy: Lean runs none, Full has no limits, and the player's own prompts and memory stay", async () => {
+    const rig = new Rig({ shipped: true });
+    fakeModels(rig);
+    const chatId = await alderChat(rig);
+    const mine = { prompts: { consolidate: "Fold as {{character}}." }, memory: { notes: { show: 3 } } };
+    rig.body(await rig.send({ type: "lre.settings.set", patch: { minds: mine } }));
+    const minds = async () => (await rig.rt.settings.get(rig.host.userId)).minds;
+
+    rig.body(await rig.send({ type: "lre.settings.set", patch: { modelUse: { preset: "lean" } } }));
+    let s = await minds();
+    expect([s.enabled, s.memoryLevels, s.prompts, s.memory]).toEqual([false, [], mine.prompts, mine.memory]);
+    const before = rig.host.quietCalls.length;
+    await rig.turn(chatId, "Hello.", "They look up.");
+    expect(mindCalls(rig).length).toBe(0);
+    expect(rig.host.quietCalls.slice(before).some((c) => MEMORY.test(c.messages[0]?.content ?? ""))).toBe(false);
+
+    rig.body(await rig.send({ type: "lre.settings.set", patch: { modelUse: { preset: "full" } } }));
+    s = await minds();
+    expect([s.enabled, s.liveLimit, s.refreshLimit, s.memoryLevels, s.skip, s.prompts, s.memory]).toEqual([true, "none", "none", ["live", "near"], { maxBeats: "none", maxMindsPerBeat: "none" }, mine.prompts, mine.memory]);
+    await rig.turn(chatId, "Hello again.", "They nod.");
+    expect(mindCalls(rig).map((c) => MIND.exec(c.messages[0]?.content ?? "")?.[1]).sort()).toEqual(["Danny Okafor", "Priya Nair"]);
+
+    // Standard again: its limits and memory for Live alone, and still the player's own.
+    rig.body(await rig.send({ type: "lre.settings.set", patch: { modelUse: { preset: "standard" } } }));
+    s = await minds();
+    expect([s.enabled, s.liveLimit, s.refreshLimit, s.memoryLevels, s.tokens, s.prompts, s.memory]).toEqual([true, 3, 2, ["live"], 600, mine.prompts, mine.memory]);
+  });
+});
+
+describe("a mind's context", () => {
+  test("a moment the player says nothing in tells them why they think now, with the POV or away", async () => {
+    const rig = new Rig({ shipped: true });
+    const chatId = await alderChat(rig);
+    const { state, world } = await stateOf(rig, chatId);
+    const ended = "The time skip ends; it is now Mon 14 Sep 2026, 18:00 (evening).";
+    const now = (who: string, moment: MindMoment): string => {
+      const text = mindContext({ reg: rig.rt.registry, world, state, who, memory: DEFAULT_MINDS_MEMORY, messages: [], hideJson: true, moment, loreTokens: 0 });
+      return text.slice(text.indexOf("## Now"));
+    };
+    const turn = (reason: string, user = ""): MindMoment => ({ kind: "turn", at: state.clock, reason, user, reply: "" });
+    // Danny is with the POV; Dale is away at the marina.
+    expect(placeOfEntity(state, "dale_whitcomb")).not.toBe(placeOfEntity(state, "pov"));
+    for (const who of ["danny_okafor", "dale_whitcomb"]) expect(now(who, turn(ended))).toContain(ended);
+    // The player's words are the moment, and a plain turn tells no reason.
+    expect(now("danny_okafor", turn(ended, "Hello."))).not.toContain(ended);
+    expect(now("danny_okafor", turn(""))).toMatch(/is here with you\.$/);
+    // A beat's reason reads as one sentence.
+    expect(now("danny_okafor", { kind: "beat", at: state.clock, reason: "Marcus's appointment", user: "", reply: "" })).toMatch(/\. Marcus's appointment\.$/);
+    expect(now("danny_okafor", { kind: "beat", at: state.clock, reason: ended, user: "", reply: "" })).not.toContain("..");
+  });
+
+  test("a character's own secrets are in their context: the tracks they own, and the secret a cue of theirs stands for", async () => {
+    const rig = new Rig({ shipped: true });
+    fakeModels(rig);
+    const worldId = await rig.newWorld("Alder", "modern_slice_of_life");
+    const put = async (collection: string, id: string, value: JsonObject) => rig.body(await rig.send({ type: "lre.editor", op: "put", worldId, base: null, collection, id, value }));
+    await put("tracks", "s_till", { id: "s_till", kind: "secret", label: "The till", owner: "danny_okafor", start: "hidden", visibility: "secret", stages: { hidden: { label: "Hidden", next: [], truth: "TILL-TRUTH: Danny skims the till every Friday." } } });
+    await put("tracks", "s_boat", { id: "s_boat", kind: "secret", label: "The boat", start: "hidden", visibility: "secret", stages: { hidden: { label: "Hidden", next: [], truth: "BOAT-TRUTH: Priya sold the club's boat." } } });
+    const { draft } = rig.body(await rig.send({ type: "lre.editor", op: "get", worldId })) as { draft: { entities: Record<string, JsonObject> } };
+    await put("entities", "priya_nair", { ...draft.entities.priya_nair, cues: [{ text: "Changes the subject when boats come up", track: "s_boat" }] });
+    rig.body(await rig.send({ type: "lre.editor", op: "set", worldId, base: null, part: "minds", value: { thresholds: { live: 900, near: 900, far: 900 }, always: { ids: [...PEOPLE] } } }));
+    rig.body(await rig.send({ type: "lre.world", op: "commit", worldId, base: null }));
+    const chatId = rig.host.createChat("Morning.");
+    rig.body(await rig.send({ type: "lre.world", op: "attach", worldId, chatId }));
+    const here = placeOfEntity((await stateOf(rig, chatId)).state, "pov") ?? "";
+    rig.body(await rig.send({ type: "lre.edit", chatId, ops: PEOPLE.map((entity) => ({ op: "move", entity, to: here })) }));
+    await rig.turn(chatId, "Hello.", "They look up.");
+    const contextOf = (name: string) => mindCalls(rig).find((c) => MIND.exec(c.messages[0]?.content ?? "")?.[1] === name)?.messages[1]?.content ?? "";
+    expect(contextOf("Danny Okafor")).toContain("- Your secret, The till: TILL-TRUTH: Danny skims the till every Friday.");
+    expect(contextOf("Danny Okafor")).not.toContain("BOAT-TRUTH");
+    expect(contextOf("Priya Nair")).toContain("- Your secret, The boat: BOAT-TRUTH: Priya sold the club's boat.");
+    expect(contextOf("Priya Nair")).not.toContain("TILL-TRUTH");
+  });
+
+  test("the Mystery Manor's culprit thinks as the culprit", async () => {
+    const rig = new Rig({ shipped: true });
+    fakeModels(rig);
+    const worldId = await rig.newWorld("Manor", "mystery_manor");
+    rig.body(await rig.send({ type: "lre.editor", op: "set", worldId, base: null, part: "minds", value: { thresholds: { live: 900, near: 900, far: 900 }, always: { ids: ["julian_ashcombe"] } } }));
+    rig.body(await rig.send({ type: "lre.world", op: "commit", worldId, base: null }));
+    const chatId = rig.host.createChat("Morning.");
+    rig.body(await rig.send({ type: "lre.world", op: "attach", worldId, chatId }));
+    const here = placeOfEntity((await stateOf(rig, chatId)).state, "pov") ?? "";
+    rig.body(await rig.send({ type: "lre.edit", chatId, ops: [{ op: "move", entity: "julian_ashcombe", to: here }] }));
+    await rig.turn(chatId, "Good morning.", "He nods.");
+    const julian = mindCalls(rig).find((c) => MIND.exec(c.messages[0]?.content ?? "")?.[1] === "Julian Ashcombe")?.messages[1]?.content ?? "";
+    expect(julian).toContain("- Your secret, Julian's agenda: Julian has taken");
+    expect(julian).toContain("a lethal dose of digitalis tincture");
+  });
+
+  test("away from the POV, a mind's lore and recall aren't chosen by what the POV says", async () => {
+    const rig = new Rig({ shipped: true });
+    fakeModels(rig);
+    const worldId = await rig.newWorld("Alder", "modern_slice_of_life");
+    rig.body(await rig.send({ type: "lre.editor", op: "put", worldId, base: null, collection: "lore", id: "lighthouse_tale", value: { id: "lighthouse_tale", title: "The lighthouse tale", content: "LORE-MARK: the lighthouse keeper still walks the pier on foggy nights.", keys: ["lighthouse"], links: [] } }));
+    rig.body(await rig.send({ type: "lre.editor", op: "set", worldId, base: null, part: "minds", value: { thresholds: { live: 900, near: 900, far: 900 }, always: { ids: [...PEOPLE] } } }));
+    rig.body(await rig.send({ type: "lre.world", op: "commit", worldId, base: null }));
+    const chatId = rig.host.createChat("Morning.");
+    rig.body(await rig.send({ type: "lre.world", op: "attach", worldId, chatId }));
+    rig.body(await rig.send({ type: "lre.settings.set", patch: { minds: { refreshLimit: 0, memory: { recall: { recent: 0, relevant: 1, tokens: 4000 } } } } }));
+    const here = placeOfEntity((await stateOf(rig, chatId)).state, "pov") ?? "";
+    rig.body(await rig.send({ type: "lre.edit", chatId, ops: PEOPLE.map((entity) => ({ op: "move", entity, to: here })) }));
+    await rig.turn(chatId, "Tell me about the lighthouse.", "ZEPHYRMARK: they talk about the lighthouse keeper.");
+    // Danny goes off; the GM asks for his mind, and the POV talks of the lighthouse without him.
+    const marina = "alder_harbor_marina";
+    rig.body(await rig.send({ type: "lre.edit", chatId, ops: [{ op: "move", entity: "danny_okafor", to: marina }, { op: "mind_refresh", entity: "danny_okafor" }] }));
+    const before = mindCalls(rig).length;
+    await rig.turn(chatId, "What about the lighthouse?", "Priya shrugs.");
+    const danny = mindCalls(rig).slice(before).find((c) => MIND.exec(c.messages[0]?.content ?? "")?.[1] === "Danny Okafor")?.messages[1]?.content ?? "";
+    expect(danny).toContain("You aren't with");
+    expect(danny).not.toContain("LORE-MARK");
+    expect(danny).not.toContain("ZEPHYRMARK");
+    // With the POV, the same words find both.
+    const priya = mindCalls(rig).slice(before).find((c) => MIND.exec(c.messages[0]?.content ?? "")?.[1] === "Priya Nair")?.messages[1]?.content ?? "";
+    expect(priya).toContain("LORE-MARK");
+    expect(priya).toContain("ZEPHYRMARK");
+  });
+
+  test("their money reads in their own sentences, under no second label", async () => {
+    const rig = new Rig({ shipped: true });
+    fakeModels(rig);
+    const chatId = await alderChat(rig);
+    await rig.turn(chatId, "Hello.", "They look up.");
+    const danny = mindCalls(rig).find((c) => MIND.exec(c.messages[0]?.content ?? "")?.[1] === "Danny Okafor")?.messages[1]?.content ?? "";
+    expect(danny).toMatch(/\n- You have \$[\d,.]+ in cash and \$[\d,.]+ in the bank\.\n/);
+    expect(danny).not.toContain("- Money: ");
+  });
+
+  test("who they are includes their list fields, such as traits, as words", async () => {
+    const rig = new Rig({ shipped: true });
+    fakeModels(rig);
+    const chatId = await alderChat(rig);
+    await rig.turn(chatId, "Hello.", "They look up.");
+    const danny = mindCalls(rig).find((c) => MIND.exec(c.messages[0]?.content ?? "")?.[1] === "Danny Okafor")?.messages[1]?.content ?? "";
+    expect(danny).toMatch(/\n- Traits: funny, competitive, loyal\n/i);
+  });
+
+  test("the previous reply is told by how it ended, in the next mind and in the memory step", async () => {
+    const rig = new Rig({ shipped: true });
+    fakeModels(rig);
+    const minds: string[] = [];
+    const memories: string[] = [];
+    const fake = rig.host.quietReply;
+    rig.host.quietReply = (req) => {
+      const system = req.messages[0]?.content ?? "";
+      if (MIND.exec(system)?.[1] === "Danny Okafor") minds.push(req.messages[1]?.content ?? "");
+      if (MEMORY.exec(system)?.[1] === "Danny Okafor") memories.push(req.messages[1]?.content ?? "");
+      return fake?.(req) ?? "{}";
+    };
+    const chatId = await alderChat(rig);
+    const long = `START-MARK ${"the gulls wheel over the breakwater and the tide comes in ".repeat(70).trim()} END-MARK`;
+    expect(long.length).toBeGreaterThan(3200);
+    await rig.turn(chatId, "Hello.", long);
+    expect(memories.at(-1)).toContain("END-MARK");
+    expect(memories.at(-1)).not.toContain("START-MARK");
+    await rig.turn(chatId, "And then?", "They shrug.");
+    const now = (minds.at(-1) ?? "").split("## Now\n")[1] ?? "";
+    expect(now).toContain("The story so far ended: …");
+    expect(now).toContain("END-MARK");
+    expect(now).not.toContain("START-MARK");
+  });
+
+  test("however much recall it may take, the moment is never cut, lines stay lines, and recalled turns stay whole", async () => {
+    const rig = new Rig({ shipped: true });
+    fakeModels(rig);
+    const contexts: string[] = [];
+    const minds = rig.host.quietReply;
+    rig.host.quietReply = (req) => {
+      if (MIND.exec(req.messages[0]?.content ?? "")?.[1] === "Danny Okafor") contexts.push(req.messages[1]?.content ?? "");
+      return minds?.(req) ?? "{}";
+    };
+    const chatId = await alderChat(rig);
+    rig.body(await rig.send({ type: "lre.settings.set", patch: { minds: { memory: { recall: { recent: 8, relevant: 0, tokens: 8000 } } } } }));
+    const here = placeOfEntity((await stateOf(rig, chatId)).state, "pov") ?? "";
+    // Danny stays with the POV for every turn, so every one is his to recall.
+    const stay = async () => rig.body(await rig.send({ type: "lre.edit", chatId, ops: [{ op: "move", entity: "danny_okafor", to: here }, { op: "move", entity: "pov", to: here }] }));
+    for (let k = 1; k <= 8; k++) {
+      await stay();
+      await rig.turn(chatId, `Turn ${k}.`, `REPLY-${k} ${"and the harbor wind keeps on blowing ".repeat(41).trim()} END-${k}`);
+    }
+    await stay();
+    await rig.turn(chatId, "NOW-MARK: what do you think?", "They think.");
+    const context = contexts.at(-1) ?? "";
+    expect(context.length).toBeLessThanOrEqual(16_000);
+    expect(context).toContain("## Now\n");
+    expect(context).toContain("Now Jordan Ellis says or does: NOW-MARK: what do you think?");
+    expect(context.split("\n").length).toBeGreaterThan(20);
+    // The recall the room left: the latest turns, each whole.
+    const recall = context.slice(context.indexOf("## Turns you were there for"), context.indexOf("## Now"));
+    const recalled = [...recall.matchAll(/REPLY-(\d+)/g)].map((m) => Number(m[1]));
+    expect(recalled.length).toBeGreaterThan(0);
+    expect(recalled.length).toBeLessThan(8);
+    expect(recalled.at(-1)).toBe(8);
+    for (const k of recalled) expect(recall).toContain(`END-${k}`);
   });
 });
 

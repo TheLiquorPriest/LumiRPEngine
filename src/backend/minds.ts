@@ -13,14 +13,14 @@ import type { ChatId, EntityId, MessageId, UserId } from "../shared/ids";
 import type { JsonObject, JsonValue } from "../shared/json";
 import { isRecord } from "../shared/json";
 import type { LedgerEvent } from "../shared/ledger";
-import type { CommitmentKind, Fidelity, MindCallTrace, MindCommitment, MindEventData, MindMoment, MindNote, MindPlan, MindPurpose, MindsSettings, PlanKind } from "../shared/minds";
-import { COMMITMENT_KINDS, effectiveMemory, MIND_ANSWER_FORMATS, MIND_PROMPT_DEFAULTS, MIND_TEXT_CAPS, MINDS_EVENTS, PLAN_KINDS, PLAN_PRIORITY, worldMindsOf } from "../shared/minds";
+import type { CommitmentKind, Fidelity, MindCallTrace, MindCommitment, MindEventData, MindMoment, MindNote, MindPlan, MindPurpose, MindsSettings, PlanKind, PresenceEventData } from "../shared/minds";
+import { COMMITMENT_KINDS, effectiveMemory, MIND_ANSWER_FORMATS, MIND_PROMPT_DEFAULTS, MIND_TEXT_CAPS, MINDS_EVENTS, PLAN_KINDS, PLAN_PRIORITY, worldMindsOf, worldMindTemplate } from "../shared/minds";
 import type { ModelUseSettings, StepConfig } from "../shared/settings";
 import { stepConfigOf } from "../shared/settings";
 import type { WorldDoc } from "../shared/world";
-import { calendarOf, clockOfLocal, formatClock, nextTimeOfDay, parseHHMM } from "../engine/calendar";
+import { calendarOf, clockOfStamp, formatClock, nextTimeOfDay } from "../engine/calendar";
 import { own } from "../engine/pack-kit";
-import { hiddenNameCheck, playerKnows, playerLines } from "../engine/player-events";
+import { hiddenNameCheck, playerKnows, witnessLines } from "../engine/player-events";
 import type { Registry } from "../engine/registry-impl";
 import { isGone, kindIs, placeOfEntity } from "../engine/scope";
 import type { WorldState } from "../engine/state";
@@ -37,7 +37,7 @@ import type { SettingsStore } from "./settings-store";
 import type { Steps } from "./steps";
 import { renderTemplate } from "./turn-steps";
 
-/** What the minds need of the backend: the host (chat, cards), the registry, the steps, the user's settings and preset. */
+/** What the minds need of the backend: the host (the chat's messages), the registry, the steps, the user's settings and preset. */
 export interface MindsDeps {
   host: HostPort;
   registry: Registry;
@@ -86,16 +86,15 @@ export function mindsOn(settings: { minds: MindsSettings; modelUse: ModelUseSett
 }
 
 /**
- * A minds step's instructions (DESIGN §24.5): the world's template for the purpose (the first by id),
- * else the user's own prompt, else the built-in; then the answer format, which no template replaces.
+ * A minds step's instructions (DESIGN §24.5): the user's own prompt, else the world's template for the
+ * purpose (`worldMindTemplate`: the first by id with any text), else the built-in; then the answer
+ * format, which no prompt replaces.
  */
 export function mindPrompt(purpose: MindPurpose, world: WorldDoc, settings: MindsSettings, vars: Readonly<Record<string, string>>): { text: string; source: MindCallTrace["prompt"] } {
-  const template = Object.values(world.steps)
-    .filter((t) => t.purpose === purpose && t.template.trim() !== "")
-    .sort((a, b) => a.id.localeCompare(b.id))[0];
-  const own = settings.prompts[purpose];
-  const source: MindCallTrace["prompt"] = template ? "world" : own ? "override" : "default";
-  const text = template?.template ?? own ?? MIND_PROMPT_DEFAULTS[purpose];
+  const own = settings.prompts[purpose]?.trim() ? settings.prompts[purpose] : undefined;
+  const template = own === undefined ? worldMindTemplate(world, purpose) : undefined;
+  const source: MindCallTrace["prompt"] = own !== undefined ? "override" : template ? "world" : "default";
+  const text = own ?? template?.template ?? MIND_PROMPT_DEFAULTS[purpose];
   return { text: `${renderTemplate(text, vars)}\n\n${MIND_ANSWER_FORMATS[purpose]}`, source };
 }
 
@@ -106,17 +105,20 @@ function varsFor(world: WorldDoc, state: Readonly<WorldState>, who: EntityId): R
 
 const str = (v: JsonValue | undefined): string => (typeof v === "string" ? v : "");
 
-/** A local time a model wrote ("2026-10-19 18:30", "2026-10-19", "18:30" for the next such time) as game minutes; null when it isn't one. */
+/**
+ * A local time a model wrote ("2026-10-19 18:30", "2026-10-19" for its midnight, "18:30" for the next
+ * such time) as game minutes; null unless it is a day the calendar has at a time from 00:00 to 23:59
+ * (`clockOfStamp`), never a guess at what was meant.
+ */
 export function localTime(world: WorldDoc, now: number, text: string): number | null {
-  const t = text.trim().replace(" ", "T");
+  const t = text.trim();
   const cal = calendarOf(world);
-  try {
-    if (/^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2})?$/.test(t)) return clockOfLocal(cal, t);
-    if (/^\d{1,2}:\d{2}$/.test(t)) return nextTimeOfDay(cal, now - 1, parseHHMM(t.padStart(5, "0")));
-  } catch {
-    return null;
-  }
-  return null;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(t)) return clockOfStamp(cal, `${t} 00:00`);
+  const hm = /^(\d{1,2}):(\d{2})$/.exec(t);
+  if (!hm) return clockOfStamp(cal, t);
+  const hours = Number(hm[1]);
+  const minutes = Number(hm[2]);
+  return hours <= 23 && minutes <= 59 ? nextTimeOfDay(cal, now - 1, hours * 60 + minutes) : null;
 }
 
 /** A person named by a model: by id, whole name, or a word of their name that is no one else's. */
@@ -194,9 +196,12 @@ export function mindData(reg: Registry, world: WorldDoc, state: Readonly<WorldSt
   };
 }
 
-/** How the inspector names someone (DESIGN §6.5): by name only when the POV knows them. */
-function traceName(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, who: EntityId): string {
-  return playerKnows(reg, world, state, world.pov, who) ? (own(state.entities, who)?.name ?? "Someone") : "Someone";
+/**
+ * Whether the inspector lists a minds call for someone (DESIGN §6.5): only when the POV may see and
+ * has met them, so it never tells of anyone hidden or unknown. It names them; it shows no text.
+ */
+function traced(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, who: EntityId): boolean {
+  return playerKnows(reg, world, state, world.pov, who);
 }
 
 async function chatMessages(deps: MindsDeps, chatId: ChatId, userId: UserId): Promise<HostMessage[]> {
@@ -226,7 +231,7 @@ export async function runMinds(deps: MindsDeps, input: RunMindsInput): Promise<R
   const calls = input.who.map(async (who): Promise<{ data: MindEventData | null; trace: MindCallTrace }> => {
     const level = input.levels[who] ?? "near";
     const e = own(state.entities, who);
-    const base = { purpose: "mind" as const, phase, who: traceName(reg, world, state, who), level };
+    const base = { purpose: "mind" as const, phase, who: e?.name ?? who, level };
     const prompt = mindPrompt("mind", world, settings.minds, varsFor(world, state, who));
     if (!e) return { data: null, trace: { ...base, outcome: "failed", ms: 0, tokens: 0, prompt: prompt.source } };
     const scope: MindScope = { reg, world, state, who, memory, messages, hideJson: settings.hideJsonBlocks, moment: input.moment, loreTokens };
@@ -246,7 +251,7 @@ export async function runMinds(deps: MindsDeps, input: RunMindsInput): Promise<R
     const event: LedgerEvent = { type: MINDS_EVENTS.mind, data: r.data as unknown as JsonObject };
     if (!w.apply(event)) events.push(event);
   }
-  return { events, traces: results.map((r) => r.trace) };
+  return { events, traces: results.flatMap((r, i) => (traced(reg, world, state, input.who[i] ?? "") ? [r.trace] : [])) };
 }
 
 export interface PreMindsInput {
@@ -286,7 +291,8 @@ export async function preMinds(deps: MindsDeps, input: PreMindsInput): Promise<R
     levels[p.entity] = p.level;
     reasons[p.entity] = p.reason;
   }
-  const moment: MindMoment = { kind: "turn", at: w.state.clock, reason: "a turn", user: input.user, reply: input.reply };
+  // Each thinks for their own refresh reason; the moment itself is the player's message.
+  const moment: MindMoment = { kind: "turn", at: w.state.clock, reason: "", user: input.user, reply: input.reply };
   const ran = await runMinds(deps, { chatId: input.chatId, userId: input.userId, world: input.world, state: w.state, who: picks.map((p) => p.entity), moment, levels, reasons, signal: input.signal, ...(input.guidance !== undefined ? { guidance: input.guidance } : {}), phase: "pre" });
   return { events: [round, ...ran.events], traces: ran.traces };
 }
@@ -295,6 +301,8 @@ export interface PostMindsInput {
   chatId: ChatId;
   userId: UserId;
   world: WorldDoc;
+  /** The state the turn started from: where the player's message was said, and who heard it. */
+  start: Readonly<WorldState>;
   /** The state the reply was written in: the fold prefix and the turn's planned events. */
   state: Readonly<WorldState>;
   /** The turn's planned events: what present characters saw happen. */
@@ -308,7 +316,7 @@ export interface PostMindsInput {
   guidance?: { memory?: string; consolidate?: string };
 }
 
-/** Who was in the POV's scene: everyone acting at its place but the POV, whether it sees them or not. */
+/** Who is in the POV's scene in `state`: everyone acting at its place but the POV, whether it sees them or not. */
 export function presentWith(reg: Registry, world: WorldDoc, state: Readonly<WorldState>): EntityId[] {
   const here = placeOfEntity(state, world.pov);
   if (here === null) return [];
@@ -317,8 +325,50 @@ export function presentWith(reg: Registry, world: WorldDoc, state: Readonly<Worl
     .filter((id) => id !== world.pov && placeOfEntity(state, id) === here && kindIs(reg, world, own(state.entities, id)?.kind ?? "", "person") && !isGone(state, id) && acts(world, state, id));
 }
 
-/** The `memory` step's answer as event data. */
-function memoryData(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, who: EntityId, raw: JsonValue): JsonObject | null {
+/**
+ * A turn's presence (DESIGN §24.4): who heard the player's message, where it was said, and what they
+ * saw happen until the POV left them (`said`); then whoever the POV is with at the turn's end that
+ * didn't hear it, with no message, so they never recall it or remember it (`met`). When the POV ends
+ * the turn somewhere else, that is everyone at the destination, a companion who came along included,
+ * with what they saw from its arrival; otherwise someone who came in while the turn played. `left`:
+ * those who heard it and stayed behind.
+ */
+export function turnPresence(reg: Registry, world: WorldDoc, input: Pick<PostMindsInput, "start" | "state" | "pre" | "messageId">): { said: PresenceEventData; met: PresenceEventData | null; left: EntityId[] } {
+  const { start, state, pre } = input;
+  const pov = world.pov;
+  const from = placeOfEntity(start, pov);
+  const to = placeOfEntity(state, pov);
+  const heard = presentWith(reg, world, start);
+  const there = presentWith(reg, world, state);
+  const saw = (events: readonly LedgerEvent[]): string[] => witnessLines(reg, world, state, pov, events, 3);
+  if (from === to) {
+    const came = there.filter((id) => !heard.includes(id));
+    return { said: { msg: input.messageId, at: state.clock, place: from, who: heard, saw: saw(pre) }, met: came.length > 0 ? { msg: null, at: state.clock, place: to, who: came, saw: [] } : null, left: [] };
+  }
+  // Where the POV was as each planned event happened: the event that took it away, and the one that
+  // brought it where it ended.
+  const w = new Working(reg, world, start);
+  let away = -1;
+  let awayAt = start.clock;
+  let arrived = 0;
+  pre.forEach((e, i) => {
+    w.apply(e);
+    const at = placeOfEntity(w.state, pov);
+    if (away < 0 && at !== from) {
+      away = i;
+      awayAt = w.state.clock;
+    }
+    if (at !== to) arrived = i + 1;
+  });
+  return {
+    said: { msg: input.messageId, at: awayAt, place: from, who: heard, saw: saw(away < 0 ? pre : pre.slice(0, away + 1)) },
+    met: there.length > 0 ? { msg: null, at: state.clock, place: to, who: there, saw: saw(pre.slice(arrived)) } : null,
+    left: heard.filter((id) => !there.includes(id)),
+  };
+}
+
+/** The `memory` step's answer as event data; what they told reaches only `listeners`, who were with them for the turn. */
+function memoryData(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, who: EntityId, raw: JsonValue, listeners: readonly EntityId[]): JsonObject | null {
   if (!isRecord(raw)) return null;
   const now = state.clock;
   const notes: MindNote[] = (Array.isArray(raw.notes) ? raw.notes : []).slice(0, MIND_TEXT_CAPS.notes).flatMap((n, i) => {
@@ -340,7 +390,7 @@ function memoryData(reg: Registry, world: WorldDoc, state: Readonly<WorldState>,
   const told = (Array.isArray(raw.told) ? raw.told : []).slice(0, MIND_TEXT_CAPS.tolds).flatMap((t) => {
     if (!isRecord(t)) return [];
     const what = capText(str(t.what), MIND_TEXT_CAPS.told);
-    const to = [...new Set((Array.isArray(t.to) ? t.to : []).map((n) => personNamed(reg, world, state, str(n))).filter((n): n is EntityId => n !== null && n !== who))];
+    const to = [...new Set((Array.isArray(t.to) ? t.to : []).map((n) => personNamed(reg, world, state, str(n))).filter((n): n is EntityId => n !== null && n !== who && listeners.includes(n)))];
     return what === "" || to.length === 0 ? [] : [{ to, what }];
   });
   const summary = capText(str(raw.summary), MIND_TEXT_CAPS.summary);
@@ -351,27 +401,28 @@ function memoryData(reg: Registry, world: WorldDoc, state: Readonly<WorldState>,
 const CONSOLIDATIONS_PER_TURN = 2;
 
 /**
- * The post phase (DESIGN §24.4): who was present for the turn (and what they saw happen), then the
- * `memory` step for each present character whose level the user chose, from what was written, then
- * `consolidate` for those whose notes overflow or fade, at most once per period each.
+ * The post phase (DESIGN §24.4): who heard the turn and who the POV met in it (and what each saw
+ * happen), then the `memory` step for each who heard it at a level the user chose, from what was
+ * written, then `consolidate` for those whose notes overflow or fade, at most once per period each.
  */
 export async function postMinds(deps: MindsDeps, input: PostMindsInput): Promise<RunMindsResult> {
   const { registry: reg } = deps;
   const { world, state, userId } = input;
   const settings = await deps.settings.get(userId);
   if (!mindsOn(settings)) return { events: [], traces: [] };
-  const who = presentWith(reg, world, state);
-  const saw = playerLines(reg, world, state, world.pov, input.pre, 3);
-  const presence: LedgerEvent = { type: MINDS_EVENTS.presence, data: { msg: input.messageId, at: state.clock, place: placeOfEntity(state, world.pov), who, saw } };
+  const { said, met, left } = turnPresence(reg, world, input);
   const w = new Working(reg, world, state);
-  w.apply(presence);
-  const events: LedgerEvent[] = [presence];
+  const events: LedgerEvent[] = [];
+  for (const data of met ? [said, met] : [said]) {
+    const presence: LedgerEvent = { type: MINDS_EVENTS.presence, data };
+    if (!w.apply(presence)) events.push(presence);
+  }
   const traces: MindCallTrace[] = [];
   const memory = effectiveMemory(world, settings.minds);
-  const ctx = reg.context(world, w.state);
-  const levels = new Map(fidelityOf(ctx, { user: input.user, reply: input.reply }).map((s) => [s.entity, s.level]));
+  // Their level as they heard it: where the message was said.
+  const levels = new Map(fidelityOf(reg.context(world, input.start), { user: input.user, reply: input.reply }).map((s) => [s.entity, s.level]));
   const memoryConfig = mindsStepConfig(settings.modelUse, "memory");
-  const remembering = memoryConfig ? who.filter((id) => settings.minds.memoryLevels.includes(levels.get(id) ?? "background")) : [];
+  const remembering = memoryConfig ? said.who.filter((id) => settings.minds.memoryLevels.includes(levels.get(id) ?? "background")) : [];
   const messages = remembering.length > 0 ? await chatMessages(deps, input.chatId, userId) : [];
   const moment: MindMoment = { kind: "turn", at: state.clock, reason: "after the reply", user: input.user, reply: input.reply };
   const remembered = await Promise.all(
@@ -380,9 +431,11 @@ export async function postMinds(deps: MindsDeps, input: PostMindsInput): Promise
       const scope: MindScope = { reg, world, state: w.state, who: id, memory, messages, hideJson: settings.hideJsonBlocks, moment, loreTokens: 0 };
       const usage = { tokens: 0 };
       const t0 = performance.now();
-      const raw = input.signal.aborted ? null : await deps.steps.helperJson("memory", prompt.text, memoryContext(scope, { user: input.user, reply: input.reply }), memoryConfig, userId, input.signal, { guidance: input.guidance?.memory ?? deps.presets.last(userId).guidance.memory ?? "", usage });
-      const data = raw === null ? null : memoryData(reg, world, w.state, id, raw);
-      traces.push({ purpose: "memory", phase: "post", who: traceName(reg, world, state, id), level: levels.get(id) ?? "near", outcome: data ? "recorded" : "failed", ms: Math.round(performance.now() - t0), tokens: usage.tokens, prompt: prompt.source });
+      const raw = input.signal.aborted ? null : await deps.steps.helperJson("memory", prompt.text, memoryContext(scope, { user: input.user, reply: input.reply, left: left.includes(id) }), memoryConfig, userId, input.signal, { guidance: input.guidance?.memory ?? deps.presets.last(userId).guidance.memory ?? "", usage });
+      // Their listeners: who heard the turn with them, and, unless the POV left them, whoever it met.
+      const listeners = left.includes(id) ? said.who : [...said.who, ...(met?.who ?? [])];
+      const data = raw === null ? null : memoryData(reg, world, w.state, id, raw, listeners);
+      if (traced(reg, world, state, id)) traces.push({ purpose: "memory", phase: "post", who: own(state.entities, id)?.name ?? id, level: levels.get(id) ?? "near", outcome: data ? "recorded" : "failed", ms: Math.round(performance.now() - t0), tokens: usage.tokens, prompt: prompt.source });
       return data;
     }),
   );
@@ -414,7 +467,7 @@ export async function postMinds(deps: MindsDeps, input: PostMindsInput): Promise
         const t0 = performance.now();
         const raw = input.signal.aborted ? null : await deps.steps.helperJson("consolidate", prompt.text, consolidateContext({ state: w.state, world, who: id }, fold), consolidateConfig, userId, input.signal, { guidance: input.guidance?.consolidate ?? deps.presets.last(userId).guidance.consolidate ?? "", usage });
         const summary = isRecord(raw) ? capText(str(raw.summary), MIND_TEXT_CAPS.summary) : "";
-        traces.push({ purpose: "consolidate", phase: "post", who: traceName(reg, world, state, id), level: levels.get(id) ?? "background", outcome: summary === "" ? "failed" : "recorded", ms: Math.round(performance.now() - t0), tokens: usage.tokens, prompt: prompt.source });
+        if (traced(reg, world, state, id)) traces.push({ purpose: "consolidate", phase: "post", who: own(state.entities, id)?.name ?? id, level: levels.get(id) ?? "background", outcome: summary === "" ? "failed" : "recorded", ms: Math.round(performance.now() - t0), tokens: usage.tokens, prompt: prompt.source });
         return summary === "" ? null : ({ type: MINDS_EVENTS.consolidated, data: { entity: id, at: now, notes: fold.map((n) => n.id), summary } } satisfies LedgerEvent);
       }),
     );

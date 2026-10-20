@@ -401,8 +401,8 @@ export interface ContextGeneration {
   at: number;
   /** `confirmed` once `WORLD_INFO_ACTIVATED` showed every forced entry; `unconfirmed` until then, or when one didn't activate. */
   activation: "confirmed" | "unconfirmed";
-  /** `delivery`: found in a dry-run assembly when the inspector opened (`verified`), not found (`unverified`), or not yet checked. */
-  sections: { slot: string; label: string; tokens: number; clipped: boolean; delivery: "verified" | "unverified" | "unchecked" }[];
+  /** `delivery`: found in a dry-run assembly when the inspector opened (`verified`), not found (`unverified`), or not yet checked. `cut`: lines left out over the section's own budget (the Minds section, DESIGN §24.3). */
+  sections: { slot: string; label: string; tokens: number; clipped: boolean; cut?: number; delivery: "verified" | "unverified" | "unchecked" }[];
   budget: { sections: number; used: number };
   /** What the turn's model steps read of the world's lore, step by step (absent: none read any). */
   lore?: LoreStepTrace[];

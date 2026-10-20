@@ -758,7 +758,7 @@ export interface MindMoment {
   kind: "turn" | "beat";
   /** Game minutes they think at. */
   at: number;
-  /** Why now, in words: "a turn", or the beat's reason ("Marcus's appointment"). */
+  /** Why now, in words, which a mind is told when the player said nothing: a beat's reason ("Marcus's appointment") or a time skip's end; "" on a plain turn. */
   reason: string;
   /** The player's latest message and the reply before it, on a turn; empty at a beat. */
   user: string;
@@ -769,7 +769,7 @@ export interface MindMoment {
 
 /**
  * The built-in instructions for each minds step (DESIGN §24.5): who the model is and how it thinks.
- * A world template for the purpose wins, then the user's override; `{{character}}` is the character's
+ * The user's own prompt for the purpose wins, then a world template; `{{character}}` is the character's
  * name and `{{world}}` the world's. Whichever is used, the engine appends the purpose's answer format
  * (`MIND_ANSWER_FORMATS`), which no template replaces, then the preset's `RPEngine · <purpose>`
  * block; the character's scoped context follows as the user message.

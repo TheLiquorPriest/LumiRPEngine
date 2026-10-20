@@ -94,4 +94,16 @@ describe("GM view → Minds round trip", () => {
     const refused = await rig.send(editRequest(chatId, [pinOp(pov, "live")]) as unknown as Record<string, unknown>);
     expect(refused.type).toBe("lre.error");
   });
+
+  test("a commitment or plan is with people only: naming a thing or a vehicle is refused", async () => {
+    const rig = new Rig({ shipped: true });
+    const worldId = await rig.newWorld("Alder", "modern_slice_of_life");
+    const chatId = rig.host.createChat("Morning.");
+    rig.body(await rig.send({ type: "lre.world", op: "attach", worldId, chatId }));
+    const refused = await rig.send(editRequest(chatId, [commitmentOp("danny_okafor", null, { ...commitmentDraft(), kind: "debt", text: "Owes the truck a wash", with: ["pov_truck"] })].flatMap((op) => (op ? [op] : []))) as unknown as Record<string, unknown>);
+    expect(refused.type).toBe("lre.error");
+    expect(JSON.stringify(refused)).toContain("isn't a person");
+    await edit(rig, chatId, commitmentOp("danny_okafor", null, { ...commitmentDraft(), kind: "debt", text: "Owes Priya a coffee", with: ["priya_nair"] }));
+    expect((await character(rig, chatId, "danny_okafor")).commitments.map((c) => c.with)).toEqual([["priya_nair"]]);
+  });
 });
