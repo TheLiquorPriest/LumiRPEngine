@@ -471,6 +471,18 @@ describe("holdings: property", () => {
     expect(trialBalance(w.state)).toBe(0);
   });
 
+  test("on the buyer's money, the mortgage's money goes to the closing, and no line names a key", () => {
+    const w = setup((world) => {
+      world.entities.cabin = { id: "cabin", kind: "property", name: "The cabin", tier: "background", fields: { place: "apartment", owners: [], value: 20_000_000, asking_price: 20_000_000 }, relations: [] };
+      world.entities.savings!.fields.opening = 6_500_000;
+    });
+    run(w, "economy.property_buy", { party: "you", property: "cabin", from: "savings", down: 4_000_000, term_months: 360 });
+    const mortgage = String(w.state.entities.cabin?.fields.mortgage ?? "");
+    const view = w.ctx.query("economy.finance")(w.ctx, "you", true);
+    expect(view.accounts.find((a) => a.id === mortgage)?.transactions.map((t) => t.counterparty)).toContain("Closing");
+    expect(view.accounts.flatMap((a) => a.transactions).flatMap((t) => (t.counterparty?.includes(":") ? [t.counterparty] : []))).toEqual([]);
+  });
+
   test("net worth counts each owner's share of a property's value, which moves on the 1st", () => {
     const w = setup((world) => duplex(world, { owners: [{ party: "you", role: "owner", share: 60 }, { party: "jordan", role: "owner", share: 40 }] }));
     const without = setup();
