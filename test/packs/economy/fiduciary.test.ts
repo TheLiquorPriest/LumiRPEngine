@@ -3,6 +3,7 @@
 // work module's Riverton, with a family trust where a test needs one.
 
 import { describe, expect, test } from "bun:test";
+import type { JsonObject } from "../../../src/shared/json";
 import { account, act, entity, lapse, setup } from "./work-world";
 
 const DAY = 1440;
@@ -34,5 +35,28 @@ describe("a business or a trust paying as a party pays for itself, whatever its 
     expect(refusal(act(w, "economy.flow_create", { who: "you", label: "Top up", from: "db_operating", to: "checking", amount: 1_000_000, every: "day", shortfall: "fallback", fallback: "daybreak" }))).toContain("Daybreak Café pays for itself");
     lapse(w, 2 * DAY);
     expect(w.state.accounts.db_savings).toBe(5_000_000);
+  });
+});
+
+describe("what a manager does for the money's own holder still plays", () => {
+  test("the café's owner moves its savings into its own operating account, though he holds an authorized user's card on that account; his own checking it still doesn't pay", () => {
+    const { w } = setup((wd) => {
+      Object.assign(wd.entities.daybreak!.fields, { owners: [{ party: "you", role: "owner", share: 100 }] });
+      wd.entities.db_operating!.fields.owners = [{ party: "daybreak", role: "owner" }, { party: "you", role: "authorized_user" }];
+      wd.entities.db_savings = account("db_savings", "daybreak", "savings", 5_000_000);
+    });
+    expect(refusal(act(w, "economy.flow_create", { who: "you", label: "Top up the till", from: "db_savings", to: "db_operating", amount: 100_000, every: "week", weekday: 1 }))).toBe("");
+    expect(refusal(act(w, "economy.flow_create", { who: "you", label: "Pay me", from: "db_savings", to: "checking", amount: 100_000, every: "week", weekday: 1 }))).toContain("pays for Daybreak Café");
+  });
+
+  test("a custodian sets a custodial card's autopay from the custodial savings, which is the child's money, though never from his own checking", () => {
+    const custodial: JsonObject[] = [{ party: "you", role: "custodian" }, { party: "maya", role: "beneficiary", share: 100 }];
+    const { w } = setup((wd) => {
+      wd.entities.kid_savings = entity("kid_savings", "account", "Maya's savings", { owners: custodial, product: "savings", opening: 300_000 });
+      wd.entities.kid_card = entity("kid_card", "account", "Maya's card", { owners: custodial, product: "credit_card", opening: -5_000 });
+    });
+    expect(refusal(act(w, "economy.set_autopay", { who: "you", account: "kid_card", mode: "full", from: "kid_savings" }))).toBe("");
+    expect(w.state.entities.kid_card?.fields.autopay_from).toBe("kid_savings");
+    expect(refusal(act(w, "economy.set_autopay", { who: "you", account: "kid_card", mode: "full", from: "checking" }))).toContain("Maya's card is paid from Maya");
   });
 });
