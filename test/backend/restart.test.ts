@@ -26,7 +26,7 @@ async function jobsOf(rig: Rig, worldId: string): Promise<JobSummary[]> {
 }
 
 function outcomeText(rig: Rig): string {
-  return rig.host.lastInterceptor?.mutated.find((m) => m.content?.startsWith("[Outcome]"))?.content ?? "";
+  return rig.host.section("Outcome");
 }
 
 /** Lets the queued storage work run (the fake host's storage settles on microtasks) until `ready` holds. */

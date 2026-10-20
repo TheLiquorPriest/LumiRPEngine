@@ -87,14 +87,17 @@ describe("diagnostics records", () => {
     expect(records[0]).toMatchObject({ kind: "slow", step: "lre.gm", level: "warn" });
   });
 
-  test("the interceptor run fails when no section had text for any outlet", async () => {
+  test("writing the sections fails when no section had text for any outlet", async () => {
     const diag = new Diagnostics(new FakeHost());
-    diag.interceptor(at(), "normal turn", [{ slot: "scene", outlet: "lre_scene", filled: false }, { slot: "people", outlet: null, filled: false }], Date.now());
-    diag.interceptor(at("gen-2"), "normal turn", [{ slot: "scene", outlet: "lre_scene", filled: true }], Date.now());
+    diag.sections(at(), "normal turn", [{ slot: "scene", outlet: "lre_scene", filled: false }, { slot: "people", outlet: null, filled: false }], Date.now());
+    diag.sections(at("gen-2"), "normal turn", [{ slot: "scene", outlet: "lre_scene", filled: true }], Date.now());
     const [empty, filled] = await diag.records("chat-1", "u1");
-    expect(empty).toMatchObject({ kind: "interceptor", status: "failed", path: "normal turn" });
+    expect(empty).toMatchObject({ kind: "sections", status: "failed", path: "normal turn" });
     expect(empty?.fix).toContain("outlet");
     expect(filled?.status).toBe("ok");
+    // The engine run halts on it, with the reason.
+    expect(diag.failure(at())).toMatchObject({ step: "sections" });
+    expect(diag.failure(at("gen-2"))).toBeNull();
   });
 });
 

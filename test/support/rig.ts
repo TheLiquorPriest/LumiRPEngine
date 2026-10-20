@@ -31,8 +31,10 @@ export class Rig {
 
   constructor(private readonly options: RigOptions = {}) {
     this.host = options.host ?? new FakeHost();
-    // The fake host answers no model call it isn't given, and a failed mind stops the turn
-    // (DESIGN §5.1), so a rig runs with minds off unless the test asks for them.
+    // A failed step stops the turn (DESIGN §5.1). Unless a test scripts the helper (`quietReply`),
+    // it answers every call with nothing ("{}"): each step that runs falls back as when it finds
+    // nothing to do. Minds stay off unless the test asks for them, since a mind that says nothing fails.
+    this.host.quietReply ??= () => "{}";
     const settingsFile = `${this.host.userId}/settings.json`;
     if (!options.minds && !this.host.files.has(settingsFile)) this.host.files.set(settingsFile, JSON.stringify({ v: 1, minds: { enabled: false } }));
     this.rt = options.shipped
@@ -51,6 +53,11 @@ export class Rig {
       await this.rt.inspector.settle();
       await this.rt.meter.settle();
       await this.rt.diag.settle();
+    };
+    // The page asked to start a prepared reply claims it first, as the frontend does (DESIGN §5.1).
+    this.host.claimRestart = async (restart) => {
+      const reply = await this.send({ type: "lre.restart", chatId: restart.chatId, turn: restart.turn }, restart.session);
+      return reply.type === "lre.result" && reply.request === "lre.restart" && reply.body.start;
     };
   }
 

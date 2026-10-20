@@ -1,8 +1,8 @@
 // Section placement in the engine's book (DESIGN §4.2, §6.4): a section whose Position is an outlet
-// is stored outlet-only with its `outlet_name`, so it lands at `{{outlet::name}}` and nowhere else, and
-// the interceptor fills it without a placement of its own; a chat-depth section is stored at its depth.
-// When a section's Position changes, its existing entry follows; a move in the host's editor stands
-// until then, and a native entry an earlier build made keeps its place.
+// is stored outlet-only with its `outlet_name`, so it lands at `{{outlet::name}}` and nowhere else,
+// where the engine run fills it; a chat-depth section is stored at its depth, which Lumiverse counts
+// from the end. When a section's Position changes, its existing entry follows; a move in the host's
+// editor stands until then, and a native entry an earlier build made keeps its place.
 
 import { describe, expect, test } from "bun:test";
 import { slotOfEntry } from "../../src/backend/book";
@@ -71,7 +71,7 @@ describe("a section's entry follows its Position", () => {
     expect(rig.host.placed).not.toContain(id);
   });
 
-  test("the interceptor fills an outlet section's entry with no placement of its own; a chat-depth section gets its own", async () => {
+  test("the engine run fills an outlet section's own entry, which reaches the prompt at its outlet; a chat on the revision that moved it to the chat gets it at that depth", async () => {
     const rig = new Rig();
     const worldId = await rig.newWorld();
     await placeScene(rig, worldId, { type: "outlet", name: "my_scene" });
@@ -79,16 +79,15 @@ describe("a section's entry follows its Position", () => {
     rig.body(await rig.send({ type: "lre.world", op: "attach", worldId, chatId }));
     const id = await sceneEntry(rig, worldId);
     await rig.turn(chatId, "I look around.", "The square is quiet.");
-    const filled = rig.host.lastInterceptor?.mutated.find((m) => m.id === id);
+    const filled = rig.host.assembled.find((e) => e.id === id);
     expect(filled?.content).toMatch(/^\[Scene\]\n/);
-    expect(filled?.placement).toBeUndefined();
-    expect(rig.host.lastInterceptor?.enabled).toContain(id);
-    // A chat started on the revision that moved it gets the section's own chat-depth placement.
+    expect(filled).toMatchObject({ position: 8, outlet: "my_scene" });
+    // A chat started on the revision that moved it gets it at that chat depth, counted from the end.
     await placeScene(rig, worldId, { type: "chat_depth", role: "system", depth: 1, direction: "from_start" });
     const later = rig.host.createChat("Morning, Sam.");
     rig.body(await rig.send({ type: "lre.world", op: "attach", worldId, chatId: later }));
     await rig.turn(later, "I wait.", "Nothing moves.");
-    expect(rig.host.lastInterceptor?.mutated.find((m) => m.id === id)?.placement).toEqual({ type: "chat_depth", role: "system", depth: 1, direction: "from_start" });
+    expect(rig.host.assembled.find((e) => e.id === id)).toMatchObject({ position: 4, depth: 1, role: "system", outlet: null });
   });
 
   test("a chat on an older revision that places the section in the chat gets it there once after a later revision moves it to an outlet", async () => {
@@ -102,10 +101,8 @@ describe("a section's entry follows its Position", () => {
     await placeScene(rig, worldId, { type: "outlet", name: "my_scene" });
     expect(rig.host.storedEntry(id)?.outlet).toBe("my_scene");
     await rig.turn(chatId, "I look around.", "The square is quiet.");
-    const mutated = rig.host.lastInterceptor?.mutated ?? [];
-    expect(mutated.some((m) => m.id === id)).toBe(false);
-    const scene = mutated.filter((m) => (m.content ?? "").startsWith("[Scene]\n"));
+    const scene = rig.host.assembled.filter((e) => e.content.startsWith("[Scene]\n"));
     expect(scene).toHaveLength(1);
-    expect(scene[0]?.placement).toEqual({ type: "chat_depth", role: "system", depth: 1, direction: "from_end" });
+    expect(scene[0]).toMatchObject({ position: 4, depth: 1, role: "system", outlet: null });
   });
 });

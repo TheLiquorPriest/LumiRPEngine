@@ -65,6 +65,8 @@ interface Pending {
 const REQUEST_TYPES: Record<keyof ResultBodies, true> = {
   "lre.hello": true,
   "lre.state.resync": true,
+  "lre.restart": true,
+  "lre.page": true,
   "lre.action": true,
   "lre.chip": true,
   "lre.view.open": true,
@@ -171,10 +173,13 @@ export class ProtocolClient {
   /** The active Loom preset the frontend's state reports (`loom.activePresetId`), sent with each hello; undefined when it can't say. */
   presetId: string | null | undefined = undefined;
 
+  /** Whether this page's document is on screen (setup reads `document.visibilityState`); sent with each hello, resync and `page`. */
+  visible: () => boolean = () => true;
+
   /** Switches to a chat (or none) and asks for its snapshot. Pushes for any other chat are ignored. */
   open(chatId: ChatId | null): Promise<ResultMessage | ErrorMessage> {
     this.update({ chatId, rev: null, view: null, status: chatId === null ? "closed" : "syncing", resyncs: 0, activity: null, canStop: this.state.canStop });
-    const reply = this.request({ type: "lre.hello", chatId, ...(this.presetId !== undefined ? { presetId: this.presetId } : {}) });
+    const reply = this.request({ type: "lre.hello", chatId, viewing: chatId !== null && this.visible(), ...(this.presetId !== undefined ? { presetId: this.presetId } : {}) });
     void reply.then((message) => {
       if (message.type === "lre.error" && this.state.chatId === chatId) {
         this.update({ ...this.state, status: "closed" });
@@ -189,12 +194,17 @@ export class ProtocolClient {
     const chatId = this.state.chatId;
     if (chatId === null || this.state.status === "resyncing") return;
     this.update({ ...this.state, status: "resyncing", resyncs: this.state.resyncs + 1 });
-    void this.request({ type: "lre.state.resync", chatId }).then((message) => {
+    void this.request({ type: "lre.state.resync", chatId, viewing: this.visible() }).then((message) => {
       if (message.type !== "lre.error" || this.state.chatId !== chatId || this.state.status !== "resyncing") return;
       // Leave resyncing so the next delta can ask again; surface the failure once.
       this.update({ ...this.state, status: this.state.view ? "live" : "syncing" });
       this.emitError(message);
     });
+  }
+
+  /** Tells the backend whether this page shows its chat on screen now (DESIGN §5.1: who starts a prepared reply). */
+  page(): void {
+    void this.request({ type: "lre.page", chatId: this.state.chatId, viewing: this.state.chatId !== null && this.visible() });
   }
 
   dispose(): void {

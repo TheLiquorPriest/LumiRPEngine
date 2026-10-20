@@ -149,7 +149,7 @@ describe("answering a puzzle as the player sees it", () => {
   async function answer(rig: Rig, chatId: string, params: JsonObject): Promise<{ decline: string; outcome: string }> {
     rig.body(await rig.send({ type: "lre.action", chatId, action: "answer", params, source: "palette" }));
     const g = await rig.host.start(chatId, { type: "normal" });
-    const outcome = rig.host.lastInterceptor?.mutated.find((m) => m.content?.startsWith("[Outcome]"))?.content ?? "";
+    const outcome = rig.host.section("Outcome");
     await rig.host.finish(g, "You try it.");
     const decline = (await rig.rt.view(chatId, rig.host.userId)).chips.find((c) => c.kind === "decline");
     return { decline: `${decline?.label ?? ""} ${decline?.detail ?? ""}`, outcome };
@@ -404,7 +404,7 @@ describe("the narrator's sections", () => {
     // Read the past-due notice needs Port Alder's secret at its notice stage; the chat starts on its cue.
     rig.body(await rig.send({ type: "lre.action", chatId, action: "read_past_due_notice", params: {}, source: "palette" }));
     const g = await rig.host.start(chatId, { type: "normal" });
-    const sections = (rig.host.lastInterceptor?.mutated ?? []).map((m) => m.content ?? "").join("\n");
+    const sections = rig.host.assembled.map((e) => e.content).join("\n");
     await rig.host.finish(g, "The desk is bare.");
     expect(sections).toContain("Read the past-due notice: it didn't happen (Not possible here and now)");
     for (const said of ["s_shop_trouble", "stage("]) expect(sections).not.toContain(said);

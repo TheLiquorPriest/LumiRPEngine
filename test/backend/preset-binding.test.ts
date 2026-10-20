@@ -36,19 +36,17 @@ describe("the preset's outlets", () => {
     const own = (await rig.rt.book.slotEntries((await rig.rt.worlds.index((await rig.rt.runOf(chatId, rig.host.userId))?.worldId ?? "", rig.host.userId))?.loreBookId ?? "", rig.host.userId)).get("scene") ?? "";
     rig.host.presetBlocks = [block("Story", "The story so far.\n{{outlet::LRE_Scene}}", true)];
     await rig.turn(chatId, "I look around.", "The square is quiet.");
-    let result = rig.host.lastInterceptor;
-    expect(result?.enabled).toContain(twin);
-    expect(result?.mutated.find((m) => m.id === twin)?.content).toMatch(/^\[Scene\]\n/);
-    expect(result?.mutated.find((m) => m.id === twin)?.placement).toBeUndefined();
-    expect(result?.disabled).toContain(own);
+    const at = (id: string) => rig.host.assembled.find((e) => e.id === id);
+    expect(at(twin)?.content).toMatch(/^\[Scene\]\n/);
+    expect(at(twin)).toMatchObject({ position: 8, outlet: "lre_scene" });
+    expect(at(own)).toBeUndefined();
     // A switched-off block, or one limited to some generation types, places nothing.
     rig.host.presetBlocks = [block("Story", "{{outlet::lre_scene}}", false), block("Swipes", "{{outlet::lre_scene}}", true, { injectionTrigger: ["swipe"] })];
     rig.host.presetRevision++;
     await rig.turn(chatId, "I wait.", "Nothing moves.");
-    result = rig.host.lastInterceptor;
-    expect(result?.enabled).toContain(own);
-    expect(result?.mutated.find((m) => m.id === own)?.placement).toEqual({ type: "chat_depth", role: "system", depth: 1, direction: "from_end" });
-    expect(result?.disabled).toContain(twin);
+    expect(at(own)?.content).toMatch(/^\[Scene\]\n/);
+    expect(at(own)).toMatchObject({ position: 4, depth: 1, role: "system", outlet: null });
+    expect(at(twin)).toBeUndefined();
   });
 });
 
@@ -99,13 +97,14 @@ describe("the preset's guidance", () => {
     const outlet = await entryWith(rig, chatId, "narrator", "outlet");
     rig.host.presetBlocks = [block("RPEngine · narrator", "Trust the Outcome.", false)];
     await rig.turn(chatId, "I look around.", "Quiet.");
-    expect(rig.host.lastInterceptor?.mutated.find((m) => m.id === rules)?.content).toBe("[Narrator rules]\nTrust the Outcome.");
-    expect(rig.host.lastInterceptor?.disabled).toContain(outlet);
+    const at = (id: string) => rig.host.assembled.find((e) => e.id === id);
+    expect(at(rules)?.content).toBe("[Narrator rules]\nTrust the Outcome.");
+    expect(at(outlet)).toBeUndefined();
     rig.host.presetBlocks = [...rig.host.presetBlocks, block("Rules", "{{outlet::lre_narrator}}", true)];
     rig.host.presetRevision++;
     await rig.turn(chatId, "I wait.", "Quiet.");
-    expect(rig.host.lastInterceptor?.mutated.find((m) => m.id === outlet)?.content).toBe("[Narrator rules]\nTrust the Outcome.");
-    expect(rig.host.lastInterceptor?.disabled).toContain(rules);
+    expect(at(outlet)?.content).toBe("[Narrator rules]\nTrust the Outcome.");
+    expect(at(rules)).toBeUndefined();
   });
 
   test("Add RPEngine blocks adds each missing block switched off, notes only, under an RPEngine category; again adds nothing", async () => {
@@ -143,7 +142,7 @@ describe("which preset counts", () => {
     const twin = await entryWith(rig, chatId, "twin", "scene");
     const routed = async (text: string): Promise<boolean> => {
       await rig.turn(chatId, text, "Quiet.");
-      return rig.host.lastInterceptor?.enabled.includes(twin) === true;
+      return rig.host.assembled.some((e) => e.id === twin);
     };
     // Without a Loom preset, the one the generation's connection links places Scene.
     expect(await routed("I look around.")).toBe(true);
@@ -175,31 +174,12 @@ describe("outlets the host won't assemble", () => {
       rig.host.presetBlocks = blocks;
       rig.host.presetRevision++;
       await rig.turn(chatId, "I look around.", "Quiet.");
-      return rig.host.lastInterceptor?.enabled.includes(twin) === true;
+      return rig.host.assembled.some((e) => e.id === twin);
     };
     expect(await routed([block("Tagged", "{{outlet::lre_scene}}", true, { characterTagTrigger: ["rpg"] })])).toBe(false);
     const styles = block("Styles", "", true, { marker: "category", categoryMode: "radio" });
     expect(await routed([styles, block("Plain", "Write plainly.", true), block("Fancy", "{{outlet::lre_scene}}", true)])).toBe(false);
     expect(await routed([styles, block("Fancy", "{{outlet::lre_scene}}", true), block("Plain", "Write plainly.", true)])).toBe(true);
     expect(await routed([{ ...styles, categoryMode: "checkbox" }, block("Plain", "Write plainly.", true), block("Fancy", "{{outlet::lre_scene}}", true)])).toBe(true);
-  });
-
-  test("a routed section the test build doesn't find goes back to the world's placement while that preset revision stands", async () => {
-    const rig = new Rig();
-    const chatId = await rig.worldChat();
-    const twin = await entryWith(rig, chatId, "twin", "scene");
-    rig.host.presetBlocks = [block("Story", "{{outlet::lre_scene}}", true)];
-    // The host leaves the block out (a profile switched it off, say): no assembled prompt holds the outlet.
-    rig.host.assembledOutlets = new Set();
-    await rig.turn(chatId, "I look around.", "Quiet.");
-    expect(rig.host.lastInterceptor?.enabled).toContain(twin);
-    rig.body(await rig.send({ type: "lre.view.open", chatId, panel: "core.context", entity: null }));
-    await rig.turn(chatId, "I wait.", "Quiet.");
-    expect(rig.host.lastInterceptor?.enabled).not.toContain(twin);
-    expect(rig.host.lastInterceptor?.mutated.find((m) => m.id !== twin && m.content?.startsWith("[Scene]"))?.placement).toEqual({ type: "chat_depth", role: "system", depth: 1, direction: "from_end" });
-    // The preset's next revision is tried again.
-    rig.host.presetRevision++;
-    await rig.turn(chatId, "I wait more.", "Quiet.");
-    expect(rig.host.lastInterceptor?.enabled).toContain(twin);
   });
 });

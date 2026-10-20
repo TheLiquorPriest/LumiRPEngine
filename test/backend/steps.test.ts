@@ -86,7 +86,7 @@ describe("model calls per preset (DESIGN §5.3)", () => {
     expect(counts).toEqual({ interpret: 1, "npc.choose": 2, brief: 1, outline: 1, extract: 1, contradiction: 1 });
     expect(total).toBe(7);
     // The brief and prose outline reach the narrator through the Outline slot.
-    const outline = rig.host.lastInterceptor?.mutated.find((m) => m.content?.startsWith("[Outline]"))?.content ?? "";
+    const outline = rig.host.section("Outline");
     expect(outline).toContain("Brief: Sam waits at home for the ferry.");
     expect(outline).toContain("The horn sounds.");
   });
@@ -120,7 +120,7 @@ describe("model calls per preset (DESIGN §5.3)", () => {
     expect(clean.length).toBeGreaterThan(600);
     const outlineFor = async (brief: string): Promise<string> => {
       const { rig } = await turnCalls("full", undefined, (req) => (req.messages[0]?.content.includes("You brief a roleplay narrator") ? JSON.stringify({ text: brief }) : quiet(req)));
-      return rig.host.lastInterceptor?.mutated.find((m) => m.content?.startsWith("[Outline]"))?.content ?? "";
+      return rig.host.section("Outline");
     };
     const withheld = await outlineFor(leaky);
     expect(withheld).not.toContain("Brief:");

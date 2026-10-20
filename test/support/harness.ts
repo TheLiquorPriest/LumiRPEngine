@@ -130,6 +130,7 @@ export class Harness {
     };
     this.service.attach();
     this.host.idle = () => this.service.idle();
+    this.host.claimRestart = async (restart) => this.service.claimRestart(restart.chatId, this.host.userId, restart.session, restart.turn);
   }
 
   async newChat(greeting = "Morning, Sam."): Promise<ChatId> {

@@ -91,22 +91,26 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     setTimeout(() => toasts.update((all) => all.filter((entry) => entry.id !== id)), tone === "error" ? 6000 : 3500);
   };
   cleanups.push(client.onError((error) => toast(error.message, "error")));
-  // The engine ran before a reply the guard stopped (DESIGN §5.1): the frontend open on that chat
-  // starts it again with Lumiverse's own command, once per prepared turn however often it is asked;
-  // a new reply after a reply only Send can start.
+  // The engine ran before a reply the guard stopped (DESIGN §5.1): a page showing that chat on screen
+  // starts it again with Lumiverse's own command, once it has claimed the turn (the backend says yes
+  // to one page, once), so a page that wakes with an old ask never starts a second reply; a new
+  // reply after a reply only Send can start.
+  client.visible = () => document.visibilityState === "visible";
   const startedTurns = new Set<string>();
   cleanups.push(
     client.onGenerate((push) => {
-      if (host.activeChat() !== push.chatId || startedTurns.has(push.turn)) return;
+      if (host.activeChat() !== push.chatId || !client.visible() || startedTurns.has(push.turn)) return;
       if (push.as === "send") {
         toast("The engine is ready: press Send for the reply.", "info");
         return;
       }
       startedTurns.add(push.turn);
       if (startedTurns.size > 64) startedTurns.delete(startedTurns.values().next().value ?? "");
-      const command = push.as === "continue" ? "Continue" : "Regenerate";
-      void host.generate(push.as).then((started) => {
-        if (!started) toast(`The engine is ready, but ${command} couldn't start here: use ${command} on the last message.`, "error");
+      const as = push.as;
+      const command = as === "continue" ? "Continue" : "Regenerate";
+      void client.send({ type: "lre.restart", chatId: push.chatId, turn: push.turn }).then(async (claim) => {
+        if (claim.type !== "lre.result" || claim.request !== "lre.restart" || !claim.body.start) return;
+        if (!(await host.generate(as))) toast(`The engine is ready, but ${command} couldn't start here: use ${command} on the last message.`, "error");
       });
     }),
   );
@@ -143,8 +147,10 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     void recheckDraft(app);
     client.resync();
   };
+  // A page going out of view says so, so another page showing the chat can start a waiting reply.
   const visible = (): void => {
     if (document.visibilityState === "visible") recheck();
+    else client.page();
   };
   window.addEventListener("online", recheck);
   document.addEventListener("visibilitychange", visible);

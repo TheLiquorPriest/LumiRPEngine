@@ -86,7 +86,7 @@ async function nextTurn(rig: Rig, chatId: string, text: string): Promise<string>
   rig.host.sendUser(chatId, text);
   await rig.host.settle();
   const g = await rig.host.start(chatId, { type: "normal" });
-  const outcome = rig.host.lastInterceptor?.mutated.find((m) => m.content?.startsWith("[Outcome]"))?.content ?? "";
+  const outcome = rig.host.section("Outcome");
   await rig.host.finish(g, "A quiet moment passes.");
   return outcome;
 }
@@ -325,7 +325,7 @@ describe("several actions in one message (the action queue)", () => {
       text.startsWith("I walk") ? { action: "go", params: { to: "bluebird_coffee" }, confidence: 0.9, more } : { action: "buy", params: { item: "muffin" }, confidence: 0.9 };
   const buying = (item: string, extra: JsonObject = {}): JsonObject => ({ action: "buy", params: { item, ...extra }, text: `I buy a ${item}` });
   const bought = async (rig: Rig, chatId: string, item: RegExp): Promise<number> => (await history(rig, chatId)).filter((h) => isRecord(h) && typeof h.memo === "string" && item.test(h.memo)).length;
-  const outcomeLines = (rig: Rig): string[] => (rig.host.lastInterceptor?.mutated.find((m) => m.content?.startsWith("[Outcome]"))?.content ?? "").split("\n").map((line) => line.replace(/^- /, ""));
+  const outcomeLines = (rig: Rig): string[] => (rig.host.section("Outcome")).split("\n").map((line) => line.replace(/^- /, ""));
 
   test("'I walk to Bluebird Coffee and buy a latte' walks there and buys it in one turn, and the narrator is told both, in order", async () => {
     const { rig, chatId } = await chat();

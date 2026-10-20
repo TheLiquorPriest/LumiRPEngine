@@ -62,10 +62,30 @@ export interface HelloRequest extends Request<"lre.hello"> {
   presetId?: string | null;
   /** An outside client (the `lumirpengine` CLI or MCP server, DESIGN §23) names itself: its commits are labelled `agent`, and the log says who connected. */
   client?: { name: string; version: string };
+  /** The page shows the chat on screen (its route is the chat and the document is visible); absent: it does. */
+  viewing?: boolean;
 }
 
+/** Sent on reconnecting and on coming back into view (`viewing`, as on hello). */
 export interface ResyncRequest extends Request<"lre.state.resync"> {
   chatId: ChatId;
+  viewing?: boolean;
+}
+
+/** The page's chat went out of view or came back (DESIGN §5.1): which chat it shows, and whether on screen. */
+export interface PageRequest extends Request<"lre.page"> {
+  chatId: ChatId | null;
+  viewing: boolean;
+}
+
+/**
+ * A page asked to start a prepared reply (`lre.generate`) claims it before starting it (DESIGN
+ * §5.1): the backend says start only to the page that holds the turn, once, so a page that wakes
+ * with an old ask never starts a second reply.
+ */
+export interface RestartRequest extends Request<"lre.restart"> {
+  chatId: ChatId;
+  turn: string;
 }
 
 /** A palette, map, command or chip action; the backend appends a user message with `intent` and triggers a generation. */
@@ -553,6 +573,8 @@ export interface PresetCard {
 export type FrontendToBackend =
   | HelloRequest
   | ResyncRequest
+  | RestartRequest
+  | PageRequest
   | ActionRequest
   | ChipRequest
   | ViewOpenRequest
@@ -611,6 +633,8 @@ export interface ResultBodies {
    */
   "lre.hello": { accepted: true; agentApi: number; requestMs: Limit; canStop: boolean };
   "lre.state.resync": { accepted: true };
+  "lre.restart": { start: boolean };
+  "lre.page": { accepted: true };
   "lre.action": { messageId: MessageId };
   "lre.chip": { applied: boolean; pending: boolean };
   "lre.view.open": { materialized: boolean; pending: boolean };
