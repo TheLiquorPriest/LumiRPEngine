@@ -32,15 +32,21 @@ export interface Occasion {
 }
 
 /**
- * A `birthday` field: `MM-DD`, or a full `YYYY-MM-DD` whose year counts their age. Null for anything
- * else (lint names it).
+ * A `birthday` field as a date of the world's calendar: `MM-DD`, or a full `YYYY-MM-DD` whose year
+ * counts their age. A year makes it a date of that year (1996-02-29, never 1994-02-29); without one,
+ * a day its month has in some year (02-29, which falls on the 28th in a common year). Null for
+ * anything else (lint names it), so it is no occasion either.
  */
-export function birthdayOf(v: JsonValue | undefined): { month: number; day: number; year: number | null } | null {
+export function birthdayOf(cal: Calendar, v: JsonValue | undefined): { month: number; day: number; year: number | null } | null {
   const m = typeof v === "string" ? /^\s*(?:(-?\d{1,6})-)?(\d{1,2})-(\d{1,2})\s*$/.exec(v) : null;
   if (!m) return null;
   const month = Number(m[2]);
   const day = Number(m[3]);
-  return month >= 1 && day >= 1 && day <= 31 ? { month, day, year: m[1] === undefined ? null : Number(m[1]) } : null;
+  const year = m[1] === undefined ? null : Number(m[1]);
+  if (month < 1 || month > cal.system.months || day < 1) return null;
+  // The longest the month runs: in the year given, else in any year of a four-year leap cycle.
+  const longest = year !== null ? cal.system.monthLength(year, month) : Math.max(...[0, 1, 2, 3].map((y) => cal.system.monthLength(y, month)));
+  return day <= longest ? { month, day, year } : null;
 }
 
 /**
@@ -48,7 +54,7 @@ export function birthdayOf(v: JsonValue | undefined): { month: number; day: numb
  * 29th of February in a common year), its last day.
  */
 export function birthdayOn(cal: Calendar, v: JsonValue | undefined, date: CalDate): boolean {
-  const b = birthdayOf(v);
+  const b = birthdayOf(cal, v);
   if (!b || b.month !== date.month) return false;
   const last = cal.system.monthLength(date.year, date.month);
   return b.day === date.day || (b.day > last && date.day === last);

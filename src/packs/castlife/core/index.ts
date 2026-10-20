@@ -929,10 +929,12 @@ export const castlifePack: PackDef = {
     // A birthday the planner can't read is no occasion: say so where it is written.
     r.lint({
       code: "castlife.birthday",
-      check: (world) =>
-        Object.values(world.entities).flatMap((e) =>
-          e.fields.birthday === undefined || e.fields.birthday === null || birthdayOf(e.fields.birthday) ? [] : [{ severity: "warning" as const, code: "castlife.birthday", message: `${e.name}'s birthday doesn't read as a date: write it MM-DD, or YYYY-MM-DD with the year they were born.`, path: `entities.${e.id}.fields.birthday` }],
-        ),
+      check: (world) => {
+        const cal = calendarOf(world);
+        return Object.values(world.entities).flatMap((e) =>
+          e.fields.birthday === undefined || e.fields.birthday === null || birthdayOf(cal, e.fields.birthday) ? [] : [{ severity: "warning" as const, code: "castlife.birthday", message: `${e.name}'s birthday doesn't read as a date of the world's calendar: write it MM-DD, or YYYY-MM-DD with the year they were born.`, path: `entities.${e.id}.fields.birthday` }],
+        );
+      },
     });
 
     // Two schedules setting the same field of the same person at once are the engine's

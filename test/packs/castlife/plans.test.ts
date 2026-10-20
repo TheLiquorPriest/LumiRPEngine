@@ -233,15 +233,20 @@ describe("castlife: occasions", () => {
     expect(dayPlan(w.ctx, "rosa", 3).blocks.some((b) => b.label === "Harvest Fair")).toBe(true);
   });
 
-  test("a 29 February birthday falls on the 28th in a common year, and an unreadable one is flagged", () => {
+  test("a 29 February birthday falls on the 28th in a common year, and lint flags one that isn't a date of the world's calendar", () => {
     const world = modernUsWorld("w", "R");
     const cal = calendarOf(world);
     expect(birthdayOn(cal, "02-29", dateAt(cal, clockAt(cal, dayIndexOf(cal, 2027, 2, 28), 0)))).toBe(true);
     expect(birthdayOn(cal, "02-29", dateAt(cal, clockAt(cal, dayIndexOf(cal, 2028, 2, 28), 0)))).toBe(false);
-    if (world.entities.rosa) world.entities.rosa.fields.birthday = "31/12";
-    if (world.entities.maya) world.entities.maya.fields.birthday = "1994-02-29";
-    const issues = reg.lints.flatMap((rule) => rule.check(world)).filter((i) => i.code === "castlife.birthday");
-    expect(issues.map((i) => i.path)).toEqual(["entities.rosa.fields.birthday"]);
+    const flagged = (birthday: string): boolean => {
+      const w = modernUsWorld("w", "R");
+      if (w.entities.rosa) w.entities.rosa.fields.birthday = birthday;
+      return reg.lints.flatMap((rule) => rule.check(w)).some((i) => i.code === "castlife.birthday" && i.path === "entities.rosa.fields.birthday");
+    };
+    const values = ["02-29", "1996-02-29", "10-17", "1990-11-30", "31/12", "Feb 3", "1994-02-29", "1993-02-29", "02-30", "04-31", "1990-11-31", "13-05", "99-01"];
+    expect(values.filter(flagged)).toEqual(["31/12", "Feb 3", "1994-02-29", "1993-02-29", "02-30", "04-31", "1990-11-31", "13-05", "99-01"]);
+    // A birthday that isn't a date is no occasion: "02-30" doesn't fall on the last of February.
+    expect(birthdayOn(cal, "02-30", dateAt(cal, clockAt(cal, dayIndexOf(cal, 2028, 2, 29), 0)))).toBe(false);
   });
 });
 
