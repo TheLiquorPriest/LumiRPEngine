@@ -3,8 +3,63 @@
 
 import { describe, expect, test } from "bun:test";
 import type { BusinessView } from "../../../src/shared/finance";
+import { calendarOf, clockOfLocal, dateAt } from "../../../src/engine/calendar";
 import type { Working } from "../../../src/engine/working";
-import { account, act, entity, line, packEvents, posts, setup } from "./work-world";
+import { account, act, entity, ext, lapse, line, packEvents, posts, setup } from "./work-world";
+
+const DAY = 1440;
+
+/**
+ * The café taking $500 a trading day from walk-in customers, give or take 30%, and paying out half
+ * of each month's profit, from Friday 16 October to Wednesday 11 November.
+ */
+function tradingCafe(): Working {
+  const { w } = setup((wd) => void Object.assign(wd.entities.daybreak!.fields, { daily_sales: 50_000, sales_spread_pct: 30, distribution_pct: 50, distribution_every: "month" }));
+  lapse(w, 26 * DAY);
+  return w;
+}
+
+describe("business books: takings and payables", () => {
+  test("walk-in customers pay at closing on trading days, about the day's takings, with the sales tax on top", () => {
+    const w = tradingCafe();
+    const cal = calendarOf(w.world);
+    const sales = packEvents(w, "economy.sale").map((e) => e.data);
+    const takings = posts(w, /^Walk-in takings/);
+    expect(takings).toHaveLength(sales.length);
+    // At 17:00 on weekdays only, from Friday the 16th to Tuesday 10 November: eighteen of them.
+    const closes = packEvents(w, "economy.flow_run").filter((e) => e.data.flow === "walkin:daybreak").map((e) => dateAt(cal, e.data.at as number));
+    expect(closes.every((d) => d.weekday >= 1 && d.weekday <= 5 && d.minuteOfDay === 17 * 60)).toBe(true);
+    expect(sales).toHaveLength(18);
+    for (const [i, s] of sales.entries()) {
+      expect(s.cents as number).toBeGreaterThanOrEqual(35_000);
+      expect(s.cents as number).toBeLessThanOrEqual(65_000);
+      expect(s.tax).toBe(Math.round(((s.cents as number) * 7) / 100));
+      expect(s.cogs).toBe(Math.round(((s.cents as number) * 40) / 100));
+      expect(line(takings[i]!, "db_operating")).toBe((s.cents as number) + (s.tax as number));
+    }
+  });
+
+  test("the café pays its suppliers on the 10th and remits the sales tax it collected on the 20th", () => {
+    const w = tradingCafe();
+    const sales = packEvents(w, "economy.sale").map((e) => e.data);
+    const sum = (key: string, before: number): number => sales.filter((_, i) => i < before).reduce((a, s) => a + (s.cents === undefined ? 0 : (s[key] as number)), 0);
+    // Tuesday 20 October's 09:00 remittance covers the sales of the 16th and the 19th.
+    const [tax] = posts(w, /^Sales tax/);
+    expect(tax?.lines).toEqual([{ account: "db_operating", amount: -sum("tax", 2) }, { account: ext("tax:sales:us"), amount: sum("tax", 2) }]);
+    // Tuesday 10 November's 09:00 payment covers what every sale before it cost: all but that day's.
+    const [suppliers] = posts(w, /^Suppliers/);
+    expect(suppliers?.lines).toEqual([{ account: "db_operating", amount: -sum("cogs", 17) }, { account: ext("suppliers:daybreak"), amount: sum("cogs", 17) }]);
+  });
+
+  test("a monthly distribution policy pays out half of last month's profit on the 10th", () => {
+    const w = tradingCafe();
+    const cal = calendarOf(w.world);
+    const october = w.ctx.query("economy.business_books")(w.ctx, "daybreak", clockOfLocal(cal, "2026-10-01T00:00"), clockOfLocal(cal, "2026-11-01T00:00"));
+    expect(october.profit).toBeGreaterThan(0);
+    const [payout] = posts(w, /^Profit distribution/);
+    expect(payout?.lines).toEqual([{ account: "db_operating", amount: -Math.round(october.profit / 2) }, { account: "maya_checking", amount: Math.round(october.profit / 2) }]);
+  });
+});
 
 describe("business books: payouts", () => {
   test("paying out profit twice pays each sale's profit once", () => {
