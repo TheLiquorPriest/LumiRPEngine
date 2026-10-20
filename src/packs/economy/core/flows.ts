@@ -11,6 +11,7 @@ import type { LedgerEvent, PostingLine } from "../../../shared/ledger";
 import { FINANCE_EVENTS, FLOW_KINDS, FLOW_SHORTFALLS, featureOn, type Flow, type FlowAmount, type FlowKind, type FlowOutcome, type FlowRunState, type FlowSchedule, type FlowShortfall, type FlowSplit } from "../../../shared/finance";
 import { formatMoney } from "../../../shared/world";
 import { calendarOf, clockAt, clockOfLocal, dateAt, dayIndexOfText, holidaysOn, parseHHMM, type Calendar } from "../../../engine/calendar";
+import { EXTERNAL_ACCOUNT_PREFIX } from "../../../engine/events";
 import { evalNumber } from "../../../engine/expr";
 import { labelOf, numOf, objOf, optionalQuery, own, strOf } from "../../../engine/pack-kit";
 import type { ReadContext, Rejection } from "../../../engine/registry";
@@ -18,7 +19,7 @@ import type { Rng } from "../../../engine/rng";
 import { isGone, kindIs, scopeEnv } from "../../../engine/scope";
 import type { FinanceHooks, FlowPosting } from "./module";
 import { cycleOf, flowRunOf, reject } from "./journal";
-import { accountsOf, availableOf, balance, canSpend, classOf, external, hasLedger, holdersOf, priceOf, productOf, statusOf, traitsOf } from "./model";
+import { accountsOf, availableOf, balance, canSpend, classOf, hasLedger, holdersOf, outsideAccount, priceOf, productOf, statusOf, traitsOf } from "./model";
 import { accountLevel, asUnit, charge, chooseSource, depositAccount, isParty, isRejection, overdraftEvents, overdraftRoom, payeeSide, posting, signal, toggles, type PayMethod } from "./pay";
 import { Run } from "./run";
 
@@ -336,10 +337,6 @@ export function flowLevel(ctx: ReadContext, flow: Flow): number {
   return level(sideOf(ctx, flow.from)) ?? level(sideOf(ctx, flow.to)) ?? 0;
 }
 
-function outsideAccount(name: string): string {
-  return external(name.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "") || "outside");
-}
-
 /** Where a payment to a side lands: an account, a party's deposit account, or outside; and who the payer's journal line names (an id, or the outside name). */
 function landing(ctx: ReadContext, to: string, cents: number): { account: string; extra: LedgerEvent[]; counterparty: string } {
   const side = sideOf(ctx, to);
@@ -348,7 +345,8 @@ function landing(ctx: ReadContext, to: string, cents: number): { account: string
     const dest = payeeSide(ctx, { payee: side.party }, cents);
     return { ...dest, counterparty: side.party };
   }
-  return { account: outsideAccount(side.outside), extra: [], counterparty: side.outside.replace(/_/g, " ") };
+  // The outside payee by its name, never its account id: a person's payment names it, and an account's, so both land in one account.
+  return { account: outsideAccount(side.outside), extra: [], counterparty: (side.outside.startsWith(EXTERNAL_ACCOUNT_PREFIX) ? side.outside.slice(EXTERNAL_ACCOUNT_PREFIX.length) : side.outside).replace(/_/g, " ") };
 }
 
 // ---------------------------------------------------------------- amounts

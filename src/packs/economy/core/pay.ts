@@ -43,6 +43,7 @@ import {
   rightsOf,
   statusOf,
   traitsOf,
+  outsideAccount,
   wealthBand,
   type TableBooks,
 } from "./model";
@@ -400,7 +401,7 @@ export function payeeSide(ctx: ReadContext, opts: Pick<ChargeOptions, "payee" | 
     const extra = ctx.levelOf(payee, "money") >= 1 && !hasLedger(ctx, payee) ? l1Move(ctx.state, payee, cents) : [];
     return { account: external(payee), extra };
   }
-  return { account: external(opts.counterparty ?? "market"), extra: [] };
+  return { account: outsideAccount(opts.counterparty ?? "market"), extra: [] };
 }
 
 // ---------------------------------------------------------------- journal lines and units

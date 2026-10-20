@@ -48,6 +48,18 @@ export function external(id: string): string {
   return `${EXTERNAL_ACCOUNT_PREFIX}${id}`;
 }
 
+/**
+ * The outside account an outside payee's name stands for, the same whoever pays it: the name as an
+ * id (lower case, `:` kept between its parts, any other run of characters as `_`), an outside
+ * account id read as its name. So "Harbor Gym" is `economy.external:harbor_gym`, and `tax:federal`
+ * and `economy.external:tax:federal` are both `economy.external:tax:federal`, as `api.outside`
+ * names it.
+ */
+export function outsideAccount(name: string): string {
+  const bare = name.startsWith(EXTERNAL_ACCOUNT_PREFIX) ? name.slice(EXTERNAL_ACCOUNT_PREFIX.length) : name;
+  return external(bare.toLowerCase().replace(/[^a-z0-9:]+/g, "_").replace(/^_+|_+$/g, "") || "outside");
+}
+
 export function bankSide(institution: string): string {
   return `${BANK_PREFIX}${institution || "bank"}`;
 }

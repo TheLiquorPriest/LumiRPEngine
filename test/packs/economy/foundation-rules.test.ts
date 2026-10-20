@@ -382,3 +382,21 @@ describe("a lender extends no more than the applicant's score earns", () => {
     expect(Number(charge?.limit)).toBeGreaterThan(0);
   });
 });
+
+describe("an outside payee is one outside account whoever pays it", () => {
+  test("a person's payment and an account's to the same outside payee land in the same outside account", () => {
+    const w = setup((world) => {
+      const bills: [string, string, string][] = [
+        ["by_person", "you", "tax:federal"],
+        ["by_account", "checking", "tax:federal"],
+        ["by_id", "you", "economy.external:tax:federal"],
+        ["gym_person", "you", "Harbor_Gym"],
+        ["gym_account", "checking", "Harbor Gym"],
+      ];
+      for (const [id, from, to] of bills) world.entities[id] = entity(id, "flow", { flow_kind: "bill", from, to, amount_cents: 1_000, once: "2026-10-17T09:00", shortfall: "skip", status: "active" });
+    });
+    lapse(w, 2);
+    const outside = Object.entries(w.state.accounts).filter(([id, cents]) => id.startsWith("economy.external:") && cents !== 0 && /tax|gym/.test(id));
+    expect(Object.fromEntries(outside)).toEqual({ "economy.external:tax:federal": 3_000, "economy.external:harbor_gym": 2_000 });
+  });
+});
