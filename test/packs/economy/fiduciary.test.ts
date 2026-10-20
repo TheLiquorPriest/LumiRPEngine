@@ -60,3 +60,58 @@ describe("what a manager does for the money's own holder still plays", () => {
     expect(refusal(act(w, "economy.set_autopay", { who: "you", account: "kid_card", mode: "full", from: "checking" }))).toContain("Maya's card is paid from Maya");
   });
 });
+
+describe("money a manager only manages reaches none of their own interests", () => {
+  /** A family trust the player is trustee of for Maya, and a household the player shares with Rosa. */
+  function trustee(patch: Parameters<typeof setup>[0] = () => undefined) {
+    return setup((wd) => {
+      wd.entities.family_trust = entity("family_trust", "trust", "Chen Family Trust", { owners: [{ party: "you", role: "trustee" }, { party: "maya", role: "beneficiary", share: 100 }] }, "principal");
+      wd.entities.trust_acct = entity("trust_acct", "account", "Trust account", { owners: [{ party: "family_trust", role: "owner" }], product: "checking", opening: 5_000_000 });
+      wd.entities.home = entity("home", "household", "The household", {});
+      for (const id of ["you", "rosa"]) wd.entities[id]!.relations.push({ type: "member_of", to: "home" });
+      patch?.(wd);
+    });
+  }
+  const once = { amount: 2_000_000, every: "once", once: "2026-10-17T09:00" };
+
+  test("a trustee can't pay the trust's money into a business he owns or to someone of his household, though it pays its beneficiary", () => {
+    const { w } = trustee((wd) => Object.assign(wd.entities.daybreak!.fields, { owners: [{ party: "you", role: "owner", share: 100 }] }));
+    expect(refusal(act(w, "economy.flow_create", { who: "you", label: "Consulting", from: "trust_acct", to: "db_operating", ...once }))).toContain("Trust account pays for Chen Family Trust");
+    expect(refusal(act(w, "economy.flow_create", { who: "you", label: "Consulting", from: "trust_acct", to: "daybreak", ...once }))).toContain("pays for Chen Family Trust");
+    expect(refusal(act(w, "economy.flow_create", { who: "you", label: "Help", from: "trust_acct", to: "rosa_checking", ...once }))).toContain("pays for Chen Family Trust");
+    expect(refusal(act(w, "economy.flow_create", { who: "you", label: "Allowance", from: "trust_acct", to: "maya_checking", ...once }))).toBe("");
+  });
+
+  test("a trust pays its beneficiary though she's of the trustee's household", () => {
+    const { w } = trustee((wd) => wd.entities.maya!.relations.push({ type: "member_of", to: "home" }));
+    expect(refusal(act(w, "economy.flow_create", { who: "you", label: "Allowance", from: "trust_acct", to: "maya_checking", ...once }))).toBe("");
+    expect(refusal(act(w, "economy.flow_create", { who: "you", label: "Help", from: "trust_acct", to: "rosa_checking", ...once }))).toContain("pays for Chen Family Trust");
+  });
+
+  test("Brightline's custodian, who owns the café, can't bill Brightline for the café, nor pay the café's invoice as Brightline's custodian", () => {
+    const { w } = setup((wd) => {
+      Object.assign(wd.entities.brightline!.fields, { owners: [{ party: "you", role: "custodian" }, { party: "jordan", role: "beneficiary", share: 100 }] });
+      Object.assign(wd.entities.daybreak!.fields, { owners: [{ party: "you", role: "owner", share: 100 }] });
+      wd.entities.inv_consulting = entity("inv_consulting", "invoice", "Consulting", { business: "daybreak", customer: "brightline", cents: 3_000_000, memo: "Consulting", issued: "2026-09-01", due: "2026-10-30", state: "open" });
+    });
+    lapse(w, DAY);
+    expect(refusal(act(w, "economy.invoice_issue", { business: "daybreak", customer: "brightline", cents: 3_000_000, memo: "More consulting", by: "you" }))).toContain("runs Brightline Logistics for others");
+    const brightline = w.state.accounts.bl_operating ?? 0;
+    expect(refusal(act(w, "economy.invoice_pay", { invoice: "inv_consulting", by: "you" }))).toContain("Brightline Logistics pays for itself");
+    expect(w.state.accounts.bl_operating).toBe(brightline);
+    // The café bills someone else as it likes.
+    expect(refusal(act(w, "economy.invoice_issue", { business: "daybreak", customer: "rosa", cents: 50_000, memo: "Catering", by: "you" }))).toBe("");
+  });
+
+  test("a custodian puts neither himself on the café's payroll nor up his own pay there; an owner hires himself as he likes", () => {
+    const custodian = setup((wd) => {
+      Object.assign(wd.entities.daybreak!.fields, { owners: [{ party: "you", role: "custodian" }, { party: "maya", role: "beneficiary", share: 100 }] });
+      wd.entities.job_you_cafe = entity("job_you_cafe", "job", "Your café shifts", { worker: "you", employer: "daybreak", title: "Barista", basis: "hourly", rate: 1_800, hours: "contract", hours_per_week: 10, pay_every: "weekly", start: "2026-01-05" });
+    }).w;
+    expect(refusal(act(custodian, "economy.hire", { business: "daybreak", worker: "you", title: "General manager", basis: "salary", rate: 20_000_000, pay_every: "weekly", by: "you" }))).toContain("runs Daybreak Café for others");
+    expect(refusal(act(custodian, "economy.job_raise", { job: "job_you_cafe", rate: 4_000, by: "you" }))).toContain("can't set their own pay");
+    expect(refusal(act(custodian, "economy.hire", { business: "daybreak", worker: "rosa", title: "Barista", basis: "hourly", rate: 1_800, pay_every: "weekly", by: "you" }))).toBe("");
+    const owner = setup((wd) => Object.assign(wd.entities.daybreak!.fields, { owners: [{ party: "you", role: "owner", share: 100 }] })).w;
+    expect(refusal(act(owner, "economy.hire", { business: "daybreak", worker: "you", title: "General manager", basis: "salary", rate: 20_000_000, pay_every: "weekly", by: "you" }))).toBe("");
+  });
+});

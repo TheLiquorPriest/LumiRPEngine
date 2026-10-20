@@ -348,6 +348,8 @@ function issueInvoice(ctx: EffectContext, api: FinanceApi, args: Record<string, 
   if (by !== "" && !managesParty(ctx.state, business, by)) return reject("not_owner", `${labelOf(ctx, by)} doesn't run ${labelOf(ctx, business)}`);
   const customer = strOf(args.customer) || strOf(args.customer_name).trim();
   if (customer === "" || customer === business) return reject("bad_party", "an invoice needs someone to bill");
+  // A business the manager runs for others can't be billed by one that is theirs: its money would pay them (DESIGN §25.1).
+  if (by !== "" && customer !== by && managesParty(ctx.state, customer, by) && api.paysFor(ctx, by, business, customer)) return reject("not_owner", `${labelOf(ctx, by)} runs ${labelOf(ctx, customer)} for others, so can't bill it for ${labelOf(ctx, business)}`);
   const cents = typeof args.cents === "number" ? Math.round(args.cents) : NaN;
   if (!(cents > 0)) return reject("bad_amount", "an invoice needs an amount");
   // A customer outside the world pays what it is billed from money nobody in the world had, so what a
@@ -376,6 +378,7 @@ function payInvoice(ctx: EffectContext, api: FinanceApi, args: Record<string, Js
   const by = strOf(args.by);
   const payer = inv.party ?? inv.customer;
   if (by !== "" && by !== inv.party && !(inv.party && isBusiness(ctx, inv.party) && managesParty(ctx.state, inv.party, by))) return reject("not_customer", `${labelOf(ctx, by)} isn't billed for ${inv.memo}`);
+  if (by !== "" && inv.party && by !== inv.party && api.paysFor(ctx, by, inv.business, inv.party)) return reject("not_owner", `${labelOf(ctx, inv.party)} pays for itself, not for ${labelOf(ctx, by)}`);
   const deposit = operatingAccount(api, ctx, inv.business);
   const paid = inv.party ? api.pay(ctx, { from: inv.party, to: inv.business, cents: inv.left, memo: `Invoice: ${inv.memo}`, kind: "payment", category: "invoice", method: "account", ...(deposit ? { deposit } : {}) }) : api.post(ctx, [{ account: api.outside(`customer:${payer}`), amount: -inv.left }, { account: deposit ?? api.outside(inv.business), amount: inv.left }], { memo: `Invoice: ${inv.memo}`, kind: "payment", category: "invoice", payer });
   if (!Array.isArray(paid)) return paid;

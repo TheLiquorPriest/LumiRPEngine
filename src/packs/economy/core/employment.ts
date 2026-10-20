@@ -837,6 +837,8 @@ function hire(api: FinanceApi, args: Record<string, JsonValue>, ctx: EffectConte
   if (!own(ctx.state.entities, worker) || isGone(ctx.state, worker) || !kindIs(ctx.registry, ctx.world, own(ctx.state.entities, worker)?.kind ?? "", "person")) return reject("missing_entity", `no person ${labelOf(ctx, worker)}`);
   const by = strOf(args.by);
   if (by !== "" && !managesParty(ctx.state, business, by)) return reject("not_owner", `${labelOf(ctx, by)} doesn't run ${labelOf(ctx, business)}`);
+  // Running a business for others, a manager puts neither themselves nor their own on its payroll: they'd pay themselves from its money (DESIGN §25.1).
+  if (by !== "" && api.interestsOf(ctx, by).has(worker) && api.shareOf(ctx.state, business, by) <= 0) return reject("not_owner", `${labelOf(ctx, by)} runs ${labelOf(ctx, business)} for others, so can't put ${worker === by ? "themselves" : labelOf(ctx, worker)} on its payroll`);
   const jobs = allJobs(ctx);
   if (jobs.some((j) => j.worker === worker && j.business === business && j.status !== "ended")) return reject("exists", `${labelOf(ctx, worker)} already works for ${labelOf(ctx, business)}`);
   const cal = calendarOf(ctx.world);
@@ -875,6 +877,7 @@ function raise(api: FinanceApi, args: Record<string, JsonValue>, ctx: EffectCont
   if (!job) return reject("missing_entity", `no job ${labelOf(ctx, strOf(args.job))}`);
   const by = strOf(args.by);
   if (by !== "" && !(job.business && managesParty(ctx.state, job.business, by))) return reject("not_owner", `${labelOf(ctx, by)} doesn't set that pay`);
+  if (by !== "" && job.business && api.interestsOf(ctx, by).has(job.worker) && api.shareOf(ctx.state, job.business, by) <= 0) return reject("not_owner", `${labelOf(ctx, by)} runs ${labelOf(ctx, job.business)} for others, so can't set ${job.worker === by ? "their own" : `${labelOf(ctx, job.worker)}'s`} pay`);
   const rate = typeof args.rate === "number" && args.rate > 0 ? Math.round(args.rate) : typeof args.pct === "number" && args.pct > -100 ? Math.round(job.rate * (1 + args.pct / 100)) : NaN;
   if (!(rate > 0)) return reject("bad_amount", "a raise needs a new rate above nothing, or a percentage");
   return [{ type: "set", entity: job.id, field: "rate", value: rate }];
