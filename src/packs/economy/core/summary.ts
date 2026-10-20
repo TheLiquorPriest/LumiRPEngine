@@ -27,7 +27,9 @@ export function moneySummary(hooks: FinanceHooks, ctx: ReadContext, who: EntityI
   const day = (at: number): string => formatClock(cal, at).split(",")[0] ?? "";
   const shown = (id: EntityId): number => balance(ctx.state, id) + (isOpened(ctx.state, id, openerOf(ctx.state, id)) ? 0 : Math.round(numOf(own(ctx.state.entities, id)?.fields.opening)));
   const lines: string[] = [];
-  const mine = accountsOf(ctx, who);
+  // Their own money: accounts whose worth is theirs. One they may only spend from (an authorized
+  // user's card, a custodian's hold on a child's account) is someone else's.
+  const mine = accountsOf(ctx, who, "worth");
   const cash = mine.filter((id) => classOf(ctx, id) === "cash" && rightsOf(ctx.state, id, who)?.spend).reduce((a, id) => a + shown(id), 0);
   const bank = mine.filter((id) => traitsOf(ctx, id)?.asset && !traitsOf(ctx, id)?.cash && rightsOf(ctx.state, id, who)?.spend && !traitsOf(ctx, id)?.locked);
   const inBank = bank.reduce((a, id) => a + shown(id), 0);
@@ -56,7 +58,7 @@ export function moneySummary(hooks: FinanceHooks, ctx: ReadContext, who: EntityI
     const soon: { at: number; text: string; cents: number; out: boolean; label: string }[] = [];
     for (const f of allFlows(hooks, ctx)) {
       if (f.status !== "active" || flowRunOf(ctx.state, f.id).ended) continue;
-      const fromMine = f.from === who || (own(ctx.state.entities, f.from)?.kind === "account" && rightsOf(ctx.state, f.from, who)?.spend === true);
+      const fromMine = f.from === who || (own(ctx.state.entities, f.from)?.kind === "account" && rightsOf(ctx.state, f.from, who)?.worth === true);
       const toMine = f.to === who || (own(ctx.state.entities, f.to)?.kind === "account" && rightsOf(ctx.state, f.to, who)?.worth === true);
       if (fromMine === toMine) continue;
       const next = occurrences(ctx, f.schedule, now, now + 14 * DAY, f.start, f.end)[0];

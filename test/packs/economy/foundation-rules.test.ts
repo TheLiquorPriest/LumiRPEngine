@@ -4,7 +4,7 @@
 
 import { describe, expect, test } from "bun:test";
 import type { JsonObject } from "../../../src/shared/json";
-import type { EntityDef, WorldDoc } from "../../../src/shared/world";
+import { formatMoney, type EntityDef, type WorldDoc } from "../../../src/shared/world";
 import { lintWorld } from "../../../src/engine/authoring";
 import { calendarOf, dateAt } from "../../../src/engine/calendar";
 import { applyEffects } from "../../../src/engine/effects";
@@ -709,5 +709,23 @@ describe("only the overdraft policy pays into overdraft", () => {
     lapse(w, 2);
     expect(flowRuns(w, "big").map((r) => r.outcome)).toEqual(["paid"]);
     expect(w.state.accounts["economy.external:landlord"]).toBe(250_000);
+  });
+});
+
+describe("a character's money summary is their own money alone", () => {
+  test("an authorized user's summary leaves out the primary's checking and the bills it pays", () => {
+    const w = setup((world) => {
+      mayaChecking(world);
+      world.entities.checking!.fields.owners = [
+        { party: "you", role: "owner" },
+        { party: "maya", role: "authorized_user" },
+      ];
+      delete world.entities.checking!.fields.owner;
+      world.entities.gym = entity("gym", "flow", { flow_kind: "subscription", from: "checking", to: "Harbor Gym", amount_cents: 4_000, every: "week", weekdays: [1], shortfall: "skip", status: "active" });
+    }, ["maya"]);
+    const summary = w.ctx.query("economy.summary")(w.ctx, "maya");
+    // Maya's own checking alone: the primary's $2,140 isn't hers.
+    expect(summary.lines[0]).toEndWith(`and ${formatMoney(500_000, w.world.currency)} in the bank.`);
+    expect(summary.lines.some((l) => l.startsWith("gym"))).toBe(false);
   });
 });

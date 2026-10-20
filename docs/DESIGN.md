@@ -1343,7 +1343,7 @@ A party is a person, a business, a trust or a household. An account, a holding, 
 
 ### 25.3 Cards
 
-A card is an entity on an account, in a holder's hands. It carries a network (debit, credit or charge), a state (active, frozen, lost or cancelled), daily purchase and cash limits, and optionally the gear item that is the physical card. Freezing and reporting a card lost are the holder's actions. A replacement is a new card on the same account; the old one is cancelled, and its gear card is replaced where gear runs. A purchase by card posts at once, pending until it settles a day later where holds run.
+A card is an entity on an account, in a holder's hands. It carries a network (debit, credit or charge), a state (active, frozen, lost or cancelled), daily purchase and cash limits, and optionally the gear item that is the physical card. Freezing and reporting a card lost are the holder's actions. A replacement is a new card on the same account, with a new gear card where gear runs; the old card is cancelled, and its gear card, if the holder still has it, stays with them as a card that no longer works. A purchase by card posts at once, pending until it settles a day later where holds run.
 
 ### 25.4 One statement cycle
 
@@ -1379,7 +1379,7 @@ Each person has a credit report: inquiries, accounts opened, on-time and late pa
 
 ### 25.8 Payment preferences
 
-A person's `pay_prefs` lists ways to pay, in order: cash, debit, credit, charge, checking, savings, or a named card or account. Each tier can set `min`, `max`, `categories` and `except`. A payment takes the first tier that fits and can cover it, then any account the payer can spend from. Cash needs a till, an in-person sale where the payer is. A method or account the player names ("with my card") goes before the preferences.
+A person's `pay_prefs` lists ways to pay, in order: cash, debit, credit, charge, checking, savings, or a named card or account. Each tier can set `min`, `max`, `categories` and `except`. A payment takes the first tier that fits and can cover it, then cash, debit, credit or a charge card, whichever covers it first; savings, a money market or a trust account pays only when a tier or the payer names it, and a bill's way (`account`) tries checking, credit, charge and then savings. Cash needs a till, an in-person sale where the payer is. A method or account the player names ("with my card") goes before the preferences.
 
 ### 25.9 Cash, machines and branches
 
@@ -1410,7 +1410,7 @@ Each feature in `FEATURE_DEFS` has a floor (the lowest level it can run at) and 
 
 ### 25.13 Minds
 
-`economy.summary` is a character's own money in plain second-person lines, for their mind: cash and the bank, what they owe and when it's due, what comes in and goes out in the next two weeks, the modules' lines (their pay, their business), and what's pressing. It also returns the band and roughly what they could spend today. It never says anything about anyone else's money.
+`economy.summary` is a character's own money in plain second-person lines, for their mind: cash and the bank, what they owe and when it's due, what comes in and goes out in the next two weeks, the modules' lines (their pay, their business), and what's pressing. It also returns the band and roughly what they could spend today. It counts only accounts whose worth is theirs, so an account they may only spend from (an authorized user's, a custodian's) and its bills aren't in it; it never says anything about anyone else's money.
 
 ### 25.14 Older worlds
 
