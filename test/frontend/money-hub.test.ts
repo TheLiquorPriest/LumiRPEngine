@@ -17,7 +17,7 @@ import { ALL_PACKS, STARTER_WORLDS } from "../../src/packs/index";
 import { startState } from "../packs/support";
 import { ListRow } from "../../src/frontend/components";
 import { decodeFinanceView } from "../../src/packs/economy/ui/decode";
-import { accountBlocks, accountControls, autopaySources, businessAccounts, businessControls, cardControls, creditBlocks, endableLeases, fallbackSources, findAccount, flowControls, flowSources, flowTargets, gmKindIs, gmParties, hireable, holdingControls, householdRows, hubTabs, invoiceControls, investmentBlocks, mortgageTermChoices, overviewBlocks, payeeProblem, propertyControls, transferTargets, workBlocks } from "../../src/packs/economy/ui/layout";
+import { accountBlocks, accountControls, autopaySources, businessAccounts, businessControls, cardControls, creditBlocks, endableLeases, fallbackSources, findAccount, flowControls, flowSources, flowTargets, gmAutopaySources, gmKindIs, gmParties, hireable, holdingControls, householdRows, hubTabs, invoiceControls, investmentBlocks, mortgageTermChoices, overviewBlocks, payeeProblem, propertyControls, transferTargets, workBlocks } from "../../src/packs/economy/ui/layout";
 import { OwnerRows } from "../../src/packs/economy/ui/lines";
 import { gmFixture } from "../../dev/preview/fixtures";
 import {
@@ -564,5 +564,29 @@ describe("the GM view's kinds", () => {
     const money = w.ctx.query("economy.people_money")(w.ctx) as FinanceView[];
     expect(money.length).toBeGreaterThan(3);
     for (const v of money) expect([v.party, kinds.get(v.party)]).toEqual([v.party, v.partyKind]);
+  });
+});
+
+describe("the GM's autopay page", () => {
+  test("opened from the page of someone who only holds a card, it offers the card's debtor's accounts, its source in force among them", () => {
+    // Port Alder, with Danny an authorized user on the POV's credit card.
+    const world = (STARTER_WORLDS.modern_slice_of_life as (id: string, name: string) => WorldDoc)("pa", "Port Alder");
+    const visa = world.entities.acct_pov_card;
+    if (!visa || !Array.isArray(visa.fields.owners)) throw new Error("Port Alder has no POV card");
+    visa.fields.owners = [...visa.fields.owners, { party: "danny_okafor", role: "authorized_user" }];
+    const w = new Working(reg, world, startState(world));
+    materializeAll(reg, w, world.pov, "run");
+    const money = w.ctx.query("economy.people_money")(w.ctx) as FinanceView[];
+    const danny = money.find((v) => v.party === "danny_okafor");
+    const card = danny ? findAccount(danny, "acct_pov_card") : null;
+    if (!danny || !card) throw new Error("Danny's page doesn't show the card");
+    // Danny manages nothing on it, so his own view lists no source for its autopay, though one is in force.
+    expect(card).toMatchObject({ role: "authorized_user", manages: false, autopay: { from: "acct_pov_checking" } });
+    expect(autopaySources(danny, card)).toEqual([]);
+    // The GM gets the debtor's: the POV's checking and savings, never wallet cash, as from the POV's own page.
+    expect(gmAutopaySources(money, "acct_pov_card").map((a) => a.id)).toEqual(["acct_pov_checking", "acct_pov_savings"]);
+    const pov = money.find((v) => v.party === "pov");
+    const own = pov ? findAccount(pov, "acct_pov_card") : null;
+    expect(pov && own ? autopaySources(pov, own).map((a) => a.id) : null).toEqual(["acct_pov_checking", "acct_pov_savings"]);
   });
 });

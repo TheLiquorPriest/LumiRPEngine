@@ -319,6 +319,21 @@ export function autopaySources(view: FinanceView, account: AccountView): Account
 }
 
 /**
+ * Where the GM may point a credit account's autopay, whichever party's page shows it: what each
+ * party's view lists for it, without repeats. A view lists sources only where its party manages the
+ * account, so a card opened from the page of someone who only holds it (an authorized user) gets
+ * its debtor's sources from the debtor's view.
+ */
+export function gmAutopaySources(views: readonly FinanceView[], account: EntityId): AccountView[] {
+  const out: AccountView[] = [];
+  for (const v of views) {
+    const a = findAccount(v, account);
+    if (a) for (const s of autopaySources(v, a)) if (!out.some((o) => o.id === s.id)) out.push(s);
+  }
+  return out;
+}
+
+/**
  * What may back a standing payment from `from` when it can't cover it: the payer's own accounts, as
  * the view says (`fallbacks`; for a payment from the party itself, the GM's, what they spend from),
  * of those that can pay. Money the party only manages pays for its holder, so none of it backs a
