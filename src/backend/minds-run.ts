@@ -17,12 +17,11 @@ import { fidelityOf } from "../packs/minds/core/fidelity";
 import { latestTexts } from "./gm";
 import { toChain } from "./ledger-io";
 import { mindsStepConfig, runMinds } from "./minds";
+import { TimeoutFired, within } from "../shared/timeouts";
 import type { Runtime } from "./runtime";
 
 /** Calls a run makes at once: a long list of minds never floods the connection. */
 const RUN_CONCURRENCY = 4;
-/** The longest a run may take before what is still thinking is stopped. */
-const RUN_DEADLINE_MS = 10 * 60_000;
 /** What a mind is told when the player hasn't said anything since the latest reply. */
 const BETWEEN_TURNS = "Nothing new has been said since; take stock of where things stand now.";
 
@@ -102,19 +101,19 @@ export class MindsRuns {
       run.view.entries = run.view.entries.map((e) => (e.entity === entry.entity ? { ...entry } : e));
       push();
     };
-    const deadline = setTimeout(() => run.stop.abort(), RUN_DEADLINE_MS);
+    // The run's own limit is the user's (Settings → Timeouts → Minds run on demand); "none" runs until it ends.
+    const signal = within(run.stop.signal, "mindsRunMs", settings.timeouts.mindsRunMs);
     void (async () => {
       try {
-        const ran = await runMinds(this.rt.minds, { chatId, userId, world, state, who: picked, moment, levels, reasons: Object.fromEntries(picked.map((id) => [id, "gm"])), signal: run.stop.signal, messages, concurrency: RUN_CONCURRENCY, progress });
+        const ran = await runMinds(this.rt.minds, { chatId, userId, world, state, who: picked, moment, levels, reasons: Object.fromEntries(picked.map((id) => [id, "gm"])), signal, messages, concurrency: RUN_CONCURRENCY, progress });
         for (const entry of ran.report ?? []) progress(run.cancelled && entry.status !== "recorded" ? { ...entry, status: "cancelled", reason: "you cancelled the run" } : entry);
         if (run.cancelled) return this.end(run, "cancelled", "Cancelled: nothing was recorded.");
-        if (ran.events.length === 0) return this.end(run, "failed", "No mind came back, so nothing was recorded; each one says why.");
+        if (ran.events.length === 0) return this.end(run, "failed", signal.reason instanceof TimeoutFired ? "The run reached its time limit before any mind came back, so nothing was recorded: raise Minds run on demand in Settings → Timeouts." : "No mind came back, so nothing was recorded; each one says why.");
         await this.record(chatId, userId, run, ran.events);
       } catch (error) {
         this.rt.host.log("error", `[LumiRPEngine] minds run in chat ${chatId}: ${error instanceof Error ? (error.stack ?? error.message) : String(error)}`, userId);
         this.end(run, "failed", `The run failed: ${error instanceof Error ? error.message : String(error)}`);
       } finally {
-        clearTimeout(deadline);
         push();
       }
     })();
