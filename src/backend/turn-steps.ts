@@ -136,9 +136,11 @@ export interface UnfitRef {
  * every one does: an entity of the param's kind (with inheritance), or a place where the param takes
  * places. Typed text that names nothing that fits ("I take the cash" when cash is an account, not an
  * item) is roleplay for the narrator and `extract`, not an action that would fail; its reply says why
- * on a decline chip (DESIGN §9.4).
+ * on a decline chip (DESIGN §9.4). An entity the POV may not know of (`mayKnow`) counts as nothing:
+ * a guessed id of a hidden thing must read as one nothing has, or the outcome would tell the player
+ * it exists.
  */
-export function unfitRef(registry: Registry, action: ActionDef, params: JsonObject, world: WorldDoc, state: Readonly<WorldState>): UnfitRef | null {
+export function unfitRef(registry: Registry, action: ActionDef, params: JsonObject, world: WorldDoc, state: Readonly<WorldState>, mayKnow: (id: EntityId) => boolean): UnfitRef | null {
   for (const [name, def] of Object.entries(action.params)) {
     if (def.type !== "ref") continue;
     const value = params[name];
@@ -149,7 +151,7 @@ export function unfitRef(registry: Registry, action: ActionDef, params: JsonObje
     if (!safeKey(value)) return { def, value };
     const entity = hasOwn(state.entities, value) ? state.entities[value] : undefined;
     if (entity) {
-      if (def.ref && !kindIs(registry, world, entity.kind, def.ref)) return { def, value };
+      if (!mayKnow(value) || (def.ref && !kindIs(registry, world, entity.kind, def.ref))) return { def, value };
       continue;
     }
     if (!hasOwn(world.places, value) || (def.ref !== undefined && def.ref !== "place")) return { def, value };
