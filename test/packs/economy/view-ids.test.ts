@@ -95,4 +95,15 @@ describe("a label or a memo names a hidden person by no word of their name", () 
     expect(view.flows.map((f) => f.label)).toEqual(expect.arrayContaining(said));
     expect(view.accounts.find((a) => a.id === "checking")?.transactions.map((t) => t.memo)).toEqual(expect.arrayContaining(said));
   });
+
+  test("the flow as stored, which the edit form opens on, reads its label as its row does, and as written for the GM", () => {
+    const { w } = setup((wd) => {
+      wd.entities.rosa!.visibility = "secret";
+      wd.entities.tab = daily("tab", "Rosa's tab", "checking", "savings");
+    });
+    const tab = (player: boolean) => (w.ctx.query("economy.finance")(w.ctx, "you", player) as FinanceView).flows.find((f) => f.id === "tab");
+    expect([tab(true)?.label, tab(true)?.spec?.label]).toEqual(["Someone's tab", "Someone's tab"]);
+    expect(JSON.stringify(w.ctx.query("economy.finance")(w.ctx, "you", true))).not.toContain("Rosa");
+    expect(tab(false)?.spec?.label).toBe("Rosa's tab");
+  });
 });

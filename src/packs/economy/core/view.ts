@@ -449,7 +449,8 @@ function flowView(hooks: FinanceHooks, ctx: ReadContext, viewer: Viewer, party: 
     done: run.done,
     missed: run.missed,
     deferred: run.deferred ?? 0,
-    spec: seen ? f : null,
+    // The edit form opens on it, so its label reads as the row's: the hub sends a label only when the player changes it.
+    spec: seen ? { ...f, label: says(viewer, f.label) } : null,
   };
 }
 
