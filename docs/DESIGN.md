@@ -1338,6 +1338,8 @@ The economy pack's core (`src/packs/economy/core/`) is one double-entry ledger w
 
 A party is a person, a business, a trust or a household. An account, a holding, a property or a business lists `owners: [{party, role, share?}]`. The role grants the rights: `owner` and `joint` spend, manage and count it; `authorized_user` spends; `custodian` and `trustee` manage it for a `beneficiary`, who counts it. Every "your own things" read in the engine goes through `heldBy`, so held accounts and cards count as a character's own. The first owner opens the account. A joint account opens once, by `economy.open`, whichever owner's money materializes first. Shares split what a shared account is worth among its owners.
 
+**Managing through a business or a trust.** Whoever manages a business or a trust, by a managing role on it (`owner`, `joint`, `custodian` or `trustee`), manages every account it holds a managing role on, by that role: its standing payments, its autopay and its cards, as they would an account of their own (`managesAccount`; the `manages(who, thing)` formula reads an account or a party). The same role runs the business itself: hiring, invoicing, draws and payouts (§26.2). It is management only: they spend from the business's accounts for themselves only by a role of their own on them (an authorized user's card), and those accounts count toward their worth only through their share of the business. An employee holds no role on the business and manages none of it. A role that only spends (`authorized_user`) or only counts (`beneficiary`) manages nothing.
+
 ### 25.2 Products and classes
 
 `product` names a world product (`packs.economy.config.products`) or a class. Classes are cash, checking, business checking, savings, money market, CD, trust, escrow, credit card, charge card, line of credit, loan, mortgage, brokerage and retirement. A product gives terms (APR or APY, fees, grace days, minimum rule, limits, hold days, term); the finance table's class defaults fill whatever it leaves out. Rules read class traits (`CLASS_TRAITS`: asset, liability, pays, revolving, installment, locked, …), never a class name. A locked class (retirement, CD) can't be chosen to pay, moved from or drawn on by a flow; its own module may post from it.
@@ -1505,7 +1507,7 @@ A business doesn't sell to itself. One with no accounts is paid as any party wit
 - **Late.** An invoice still unpaid when its due day ends goes `late` and takes the business's `late_fee_pct` of the amount, and the fee again every 30 days it stays unpaid. The customer and the business's owners are told.
 - **Paying it now** (`invoice_pay`) is the customer's own action. **Voiding it** (`invoice_void`) is the owner's.
 
-**Expenses** are flows the owners set up from the business's accounts: rent, utilities, loan payments. They reach the books through the journal.
+**Expenses** are flows the owners set up from the business's accounts, which they manage by their role on the business (§25.1): rent, utilities, loan payments. They reach the books through the journal.
 
 **Owners are paid** in two ways:
 - **Draws.** An owner or joint owner takes a draw (`owner_draw`) from the operating account. A corporation has none: it pays its owners by salary or dividends.

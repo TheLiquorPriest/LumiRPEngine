@@ -315,6 +315,27 @@ export function canSpend(state: Readonly<WorldState>, account: EntityId, party: 
   return rightsOf(state, account, party)?.spend === true;
 }
 
+/**
+ * Whether `who` manages a party by a role on it (DESIGN §25.1): a managing role (`owner`, `joint`,
+ * `custodian`, `trustee`) on a business or a trust. A person or a household lists no owners, so no
+ * one else manages it.
+ */
+export function managesParty(state: Readonly<WorldState>, party: EntityId, who: EntityId): boolean {
+  return ownersOf(state, party).some((o) => o.party === who && ROLE_RIGHTS[o.role].manage);
+}
+
+/**
+ * Whether `who` manages an account (DESIGN §25.1): by a managing role on it, or by managing a
+ * business or a trust that holds one, so a business's owners manage its accounts by their role on
+ * the business. Managing is setting up and changing what the account pays (its standing payments,
+ * its autopay) and its cards; it isn't spending, which only a role on the account gives, and an
+ * employee, holding no role on the business, manages none of it.
+ */
+export function managesAccount(books: Books, account: EntityId, who: EntityId): boolean {
+  if (!classOf(books, account)) return false;
+  return ownersOf(books.state, account).some((o) => ROLE_RIGHTS[o.role].manage && (o.party === who || managesParty(books.state, o.party, who)));
+}
+
 /** A party's share of an entity's worth, in percent. */
 export function shareOf(state: Readonly<WorldState>, id: EntityId, party: EntityId): number {
   return own(worthShares(ownersOf(state, id)), party) ?? 0;

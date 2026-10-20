@@ -137,6 +137,7 @@ function account(o: Obj): AccountView | null {
     available: nullableNum(o.available),
     owners: list(o.owners, ownerLine),
     role: nullableOf(o.role, OWNER_ROLES),
+    manages: o.manages === true,
     limit: nullableNum(o.limit),
     aprPct: nullableNum(o.aprPct),
     apyPct: nullableNum(o.apyPct),

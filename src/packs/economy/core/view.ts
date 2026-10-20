@@ -20,7 +20,7 @@ import { statementState } from "./cycle";
 import { creditReport } from "./credit";
 import { allFlows, occurrences, occurrenceAmount } from "./flows";
 import { cycleOf, flowRunOf, isOpened, journalOf, NOTES_CAP } from "./journal";
-import { accountsOf, availableOf, balance, classOf, holdersOf, holdsOn, openerOf, outsideName, ownersOf, productOf, rightsOf, statusOf, traitsOf, wealthBand } from "./model";
+import { accountsOf, availableOf, balance, classOf, holdersOf, holdsOn, managesAccount, managesParty, openerOf, outsideName, ownersOf, productOf, rightsOf, statusOf, traitsOf, wealthBand } from "./model";
 import { cardsOn, cardRoom, featureFor, isParty, overdraftRoom, tiersOf, toggles } from "./pay";
 import { netWorthParts } from "./worth";
 import { createRng } from "../../../engine/rng";
@@ -217,6 +217,7 @@ function accountView(ctx: ReadContext, viewer: Viewer, party: EntityId, account:
     available: level >= 2 ? (t.liability ? (p?.limit === null && cls === "charge_card" ? null : shownAvailable(ctx, account)) : shownAvailable(ctx, account) + overdraftRoom(ctx, account)) : null,
     owners: owners.map((o) => ({ party: idFor(ctx, viewer, o.party), name: nameFor(ctx, viewer, o.party), role: o.role, share: Math.round((own(shares, o.party) ?? 0) * 100) / 100 })),
     role,
+    manages: managesAccount(ctx, account, party),
     limit: level >= 3 && t.liability ? (p?.limit ?? null) : null,
     aprPct: level >= 4 && t.liability ? (p?.apr_pct ?? null) : null,
     apyPct: level >= 4 && t.earns ? (p?.apy_pct ?? null) : null,
@@ -288,7 +289,8 @@ function flowView(hooks: FinanceHooks, ctx: ReadContext, viewer: Viewer, party: 
     cents = a && !("code" in a) ? a.cents : null;
   }
   const fromSide = own(ctx.state.entities, f.from);
-  const payerHolds = fromSide?.kind === "account" ? rightsOf(ctx.state, f.from, party)?.manage === true : f.from === party;
+  // The party changes it when they manage what pays it: the account (by their role on it, or on the business or trust that holds it), or the business or trust paying.
+  const payerHolds = fromSide?.kind === "account" ? managesAccount(ctx, f.from, party) : f.from === party || managesParty(ctx.state, f.from, party);
   // The flow as stored goes out only when every side of it is someone the viewer can see.
   const sides = [f.from, f.to, f.fallback ?? "", f.link ?? "", ...(f.splits ?? []).map((s) => s.to), ...(f.shares ?? []).flatMap((s) => [s.party, s.from ?? ""])].filter((id) => id !== "");
   const seen = sides.every((id) => visible(ctx, viewer, id));

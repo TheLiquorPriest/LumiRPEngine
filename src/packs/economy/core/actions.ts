@@ -17,7 +17,7 @@ import { placeOfEntity } from "../../../engine/scope";
 import { decide, type Decision } from "./credit";
 import type { OpenAccount } from "./module";
 import { isOpened, reject, spendOf } from "./journal";
-import { availableOf, balance, bankSide, canSpend, classOf, external, holdersOf, openerOf, productOf, rightsOf, statusOf, traitsOf, worldProducts } from "./model";
+import { availableOf, balance, bankSide, canSpend, classOf, external, holdersOf, managesAccount, managesParty, openerOf, productOf, rightsOf, statusOf, traitsOf, worldProducts } from "./model";
 import { accountFeature, asUnit, cardProblem, cardRoom, cardsOn, cashAccount, cashAdvanceFee, depositAccount, featureFor, isParty, mayUse, posting, signal } from "./pay";
 
 function money(ctx: ReadContext, cents: number): string {
@@ -158,7 +158,7 @@ export function deposit(ctx: ReadContext, who: EntityId, account: EntityId, raw:
 export function setCardState(ctx: ReadContext, who: EntityId, card: EntityId, state: string): LedgerEvent[] | Rejection {
   const e = own(ctx.state.entities, card);
   if (e?.kind !== "card") return reject("not_card", `${labelOf(ctx, card)} isn't a payment card`);
-  if (strOf(e.fields.holder) !== who && !rightsOf(ctx.state, strOf(e.fields.account), who)?.manage) return reject("not_owner", `${e.name} isn't ${labelOf(ctx, who)}'s`);
+  if (strOf(e.fields.holder) !== who && !managesAccount(ctx, strOf(e.fields.account), who)) return reject("not_owner", `${e.name} isn't ${labelOf(ctx, who)}'s`);
   if (!(CARD_STATES as readonly string[]).includes(state)) return reject("bad_state", `a card can't be ${state}`);
   const now = strOf(e.fields.state, "active");
   if (now === state) return [];
@@ -171,7 +171,7 @@ export function replaceCard(ctx: EffectContext, who: EntityId, card: EntityId): 
   const e = own(ctx.state.entities, card);
   if (e?.kind !== "card") return reject("not_card", `${labelOf(ctx, card)} isn't a payment card`);
   const holder = strOf(e.fields.holder);
-  if (holder !== who && !rightsOf(ctx.state, strOf(e.fields.account), who)?.manage) return reject("not_owner", `${e.name} isn't ${labelOf(ctx, who)}'s`);
+  if (holder !== who && !managesAccount(ctx, strOf(e.fields.account), who)) return reject("not_owner", `${e.name} isn't ${labelOf(ctx, who)}'s`);
   if (strOf(e.fields.state) === "cancelled" && strOf(e.fields.replaced_by) !== "") return reject("bad_state", `${e.name} was already replaced`);
   let n = 2;
   while (own(ctx.state.entities, `${card}_r${n}`)) n++;
@@ -198,13 +198,13 @@ export function replaceCard(ctx: EffectContext, who: EntityId, card: EntityId): 
   return asUnit(out);
 }
 
-/** A credit account's autopay: how much, and from which account the holder can spend from. */
+/** A credit account's autopay, by whoever manages it: how much, and from an account they may spend from or manage (a business's, for its owner). */
 export function setAutopay(ctx: ReadContext, who: EntityId, account: EntityId, mode: string, from: string, cents: number): LedgerEvent[] | Rejection {
   const cls = classOf(ctx, account);
   if (!cls || !isCredit(cls)) return reject("not_credit", `${labelOf(ctx, account)} isn't a card or a loan`);
-  if (!rightsOf(ctx.state, account, who)?.manage) return reject("not_owner", `${labelOf(ctx, account)} isn't ${labelOf(ctx, who)}'s to change`);
+  if (!managesAccount(ctx, account, who)) return reject("not_owner", `${labelOf(ctx, account)} isn't ${labelOf(ctx, who)}'s to change`);
   if (!(AUTOPAY_MODES as readonly string[]).includes(mode)) return reject("bad_mode", `autopay can't be ${mode}`);
-  if (from !== "" && (!canSpend(ctx.state, from, who) || !traitsOf(ctx, from)?.pays || traitsOf(ctx, from)?.liability)) return reject("bad_account", `${labelOf(ctx, who)} can't pay from ${labelOf(ctx, from)}`);
+  if (from !== "" && ((!canSpend(ctx.state, from, who) && !managesAccount(ctx, from, who)) || !traitsOf(ctx, from)?.pays || traitsOf(ctx, from)?.liability)) return reject("bad_account", `${labelOf(ctx, who)} can't pay from ${labelOf(ctx, from)}`);
   if (mode === "fixed" && !(cents > 0)) return reject("bad_amount", "fixed autopay needs an amount");
   const out: LedgerEvent[] = [{ type: "set", entity: account, field: "autopay", value: mode }];
   if (from !== "") out.push({ type: "set", entity: account, field: "autopay_from", value: from });
@@ -250,12 +250,12 @@ function flowFields(args: Record<string, JsonValue>): { fields: JsonObject; labe
 }
 
 /**
- * Whether a party may run a flow that pays from `from`: themselves, or an account (or business)
- * they manage. A role that may only spend, an authorized user's, makes payments but sets up and
- * changes no standing ones.
+ * Whether a party may run a flow that pays from `from` (DESIGN §25.1): themselves, a business or a
+ * trust they manage, or an account they manage, by their role on it or on its owner. A role that
+ * may only spend, an authorized user's, makes payments but sets up and changes no standing ones.
  */
 function mayPayFrom(ctx: ReadContext, who: EntityId, from: string): boolean {
-  return from === who || (canSpend(ctx.state, from, who) && rightsOf(ctx.state, from, who)?.manage === true);
+  return from === who || (isParty(ctx, from) && managesParty(ctx.state, from, who)) || managesAccount(ctx, from, who);
 }
 
 /**
