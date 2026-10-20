@@ -16,7 +16,7 @@ import { ALL_PACKS, STARTER_WORLDS } from "../../src/packs/index";
 import { startState } from "../packs/support";
 import { ListRow } from "../../src/frontend/components";
 import { decodeFinanceView } from "../../src/packs/economy/ui/decode";
-import { accountBlocks, accountControls, autopaySources, businessAccounts, businessControls, cardControls, creditBlocks, endableLeases, findAccount, flowControls, flowSources, gmKindIs, gmParties, holdingControls, householdRows, hubTabs, invoiceControls, investmentBlocks, overviewBlocks, propertyControls, transferTargets, workBlocks } from "../../src/packs/economy/ui/layout";
+import { accountBlocks, accountControls, autopaySources, businessAccounts, businessControls, cardControls, creditBlocks, endableLeases, findAccount, flowControls, flowSources, gmKindIs, gmParties, holdingControls, householdRows, hubTabs, invoiceControls, investmentBlocks, mortgageTermChoices, overviewBlocks, propertyControls, transferTargets, workBlocks } from "../../src/packs/economy/ui/layout";
 import { OwnerRows } from "../../src/packs/economy/ui/lines";
 import { gmFixture } from "../../dev/preview/fixtures";
 import {
@@ -324,6 +324,31 @@ describe("what a party's roles allow", () => {
     expect(endableLeases({ ...books, features: [] }, duplex)).toEqual([]);
     expect(propertyControls(books, { ...duplex, share: 0 })).toEqual([]);
     expect(propertyControls(books, { ...duplex, share: 0, forSale: 30000000 })).toEqual(["buy"]);
+  });
+
+  test("the Buy page offers the mortgage terms the property's lenders offer, as the view sends them, with the usual one marked", () => {
+    // 114 Harbor Street put up for sale, as Jordan sees it: Port Alder's lenders offer 30, 20 and 15 years.
+    const world = (STARTER_WORLDS.modern_slice_of_life as (id: string, name: string) => WorldDoc)("pa", "Port Alder");
+    const harbor = world.entities.prop_harbor_114;
+    if (!harbor) throw new Error("Port Alder has no 114 Harbor Street");
+    harbor.fields.asking_price = 54900000;
+    const w = new Working(reg, world, startState(world));
+    materializeAll(reg, w, world.pov, "run");
+    const jordan = decodeFinanceView(JSON.parse(JSON.stringify(w.ctx.query("economy.finance")(w.ctx, world.pov, true))));
+    const listed = jordan?.properties.find((p) => p.id === "prop_harbor_114");
+    if (!jordan || !listed) throw new Error("Jordan doesn't see the listing");
+    expect(propertyControls(jordan, listed)).toEqual(["buy"]);
+    expect(mortgageTermChoices(listed)).toEqual([
+      { value: "360", label: "30 years", detail: "The usual" },
+      { value: "240", label: "20 years" },
+      { value: "180", label: "15 years" },
+    ]);
+    // A world whose lenders offer one term offers just that; a term that isn't whole years reads in months; one the player can't buy offers none.
+    const offered = (terms: PropertyView["mortgageTerms"]): PropertyView => ({ ...listed, mortgageTerms: terms });
+    expect(mortgageTermChoices(offered([{ months: 360, usual: true }]))).toEqual([{ value: "360", label: "30 years", detail: "The usual" }]);
+    expect(mortgageTermChoices(offered([{ months: 18, usual: false }, { months: 12, usual: true }])).map((c) => c.label)).toEqual(["18 months", "1 year"]);
+    expect(mortgageTermChoices(offered(undefined))).toEqual([]);
+    expect(decodeFinanceView(JSON.parse(JSON.stringify(jordan)))?.properties.find((p) => p.id === "prop_harbor_114")?.mortgageTerms).toEqual(listed.mortgageTerms);
   });
 });
 

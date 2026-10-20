@@ -257,6 +257,18 @@ export function endableLeases(view: FinanceView, property: PropertyView): string
 }
 
 /**
+ * A property's Mortgage over choices on its Buy page: the terms its lenders offer, as the view sends
+ * them (longest first; none on a property the player can't buy), in years where they come to whole
+ * years, the one a purchase gets unless another is chosen marked as the usual.
+ */
+export function mortgageTermChoices(property: PropertyView): { value: string; label: string; detail?: string }[] {
+  return (property.mortgageTerms ?? []).map((t) => {
+    const [n, unit] = t.months % 12 === 0 ? [t.months / 12, "year"] : [t.months, "month"];
+    return { value: String(t.months), label: `${n} ${unit}${n === 1 ? "" : "s"}`, ...(t.usual ? { detail: "The usual" } : {}) };
+  });
+}
+
+/**
  * Where a new standing payment can come from: a non-cash account that pays and that the party
  * manages, by their role on it or on the business that holds it, a business's own account they
  * hold no role on included: the business pays it. Flows never draw on wallet cash, and an
