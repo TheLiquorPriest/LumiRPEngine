@@ -349,7 +349,7 @@ Not everyone needs to be simulated in depth. Every character has a **tier**, one
 
 A tier can make its people **live their own day (agendas and plans) by default**, and a world names the tier **new people join** (by default its first Background tier): people the story introduces, and anything spawned without a tier. How many people the story may introduce in one chat is the world's **People replies may introduce in a chat**, in **Build → World**: 24 unless you set another, up to 500, and 0 for none.
 
-People you mark as **Lives their own day (agendas and plans)** in their entity editor get goals and agendas that feed their choices, even on Story. They are consulted by the AI only on close calls or invitations. Everyone else follows schedules and seeded incidents.
+People you mark as **Lives their own day (agendas and plans)** in their entity editor get goals and agendas that feed their choices, even on Story. They are consulted by the AI only on close calls or invitations. Everyone else follows schedules and seeded incidents. Only they live the plans their minds make (from Cast life 3): someone else with a mind still thinks, but their plans are never lived, never ask you along, and are dropped once their time has passed.
 
 **Life and death.** Everyone is **Alive**, **Dying**, **Dead**, or in a state the world adds in **Build → World → Life states** (a label, whether someone in it still acts, and how the narrator reads it, such as "lies unconscious"); an entity's editor sets the state it starts in. Someone who doesn't act keeps no routine or day plan, makes no choices and takes no turn in a fight, and their body stays where it lies, still there to find. You learn of it by seeing it happen, by walking in on it, or by being told (the story, a rule or the GM); until then Cast, Scene and the narrator show what you last knew. Rules change it with the `life` effect, and a world's combat can send the fallen into a state of its own (**down** → life state).
 A death reaches the Journal on the turn it happened only if you saw it; otherwise it appears when you hear of it. Other people's comings and goings stay out of the Journal (Scene and People show who is around), and a reply can't walk a body anywhere. An entity's editor can also say **Who knows how it starts**: everyone else takes it for alive until they find out.
@@ -491,7 +491,7 @@ Every turn, and at each beat of a time skip, each character gets a focus score a
 
 - **Live**: they think every turn, best score first, up to your Live limit. Only people at hand are Live: in your scene, or named this turn. Anyone else is Near at most, however much of the story they carry.
 - **Near**: they think again when something calls for it: they come into the scene, they are named, or their mind is old enough (the Near refresh).
-- **Far**: they think now and then, on the Far refresh period, and their plans shape their day.
+- **Far**: they think now and then, on the Far refresh period, and their plans shape their day if they live their own day.
 - **Background**: no mind; they follow their routine.
 
 The score adds up proximity, being named, their feelings toward you, how they figure in the story (quests, secrets, agendas, story roles, rules that name them), what is pending between you (invitations, appointments, plans, commitments), their tier and how recently you saw them. The world sets the weights and thresholds, and who is always Live or never gets a mind ([Character minds in a world](#character-minds-in-a-world)); the GM view can pin anyone at a level.

@@ -44,7 +44,7 @@ import { agendaFor } from "../../../engine/tracks";
 import { lastSighting } from "../../../engine/seen";
 import { hiddenNameCheck, playerKnows } from "../../../engine/player-events";
 import { canSeeEntity, canSeeField, canSeePlace, findLeaks, HIDDEN_PLACE_NAME, knows, unrevealedSecrets, visibilityOf } from "../../../engine/visibility";
-import { commitments, laidPlans, planTier, plansOf, type CommitmentBlock } from "./commitments";
+import { commitments, laidPlans, livesPlans, planTier, plansOf, type CommitmentBlock } from "./commitments";
 import { cueIssues, cuesFor } from "./cues";
 import { birthdayOf, FOND, occasionOf } from "./occasions";
 import { homeOf, placeOfType } from "./places";
@@ -101,7 +101,7 @@ function needIn(ctx: ReadContext, who: EntityId, need: string, at: number, block
  */
 export function needValue(ctx: ReadContext, who: EntityId, need: string, at = ctx.state.clock): number {
   const recorded = typeof objOf(own(objOf(own(ctx.state.entities, who)?.fields.needs), need)).t === "number";
-  const planned = !recorded && who !== ctx.world.pov && own(ctx.state.entities, who)?.agent === true && ctx.levelOf(who, "castlife") >= 3;
+  const planned = !recorded && livesPlans(ctx, who);
   return needIn(ctx, who, need, at, planned ? dayPlan(ctx, who, dateAt(calendarOf(ctx.world), at).dayIndex).blocks : []);
 }
 
@@ -455,6 +455,22 @@ function stepAgent(slot: SlotInfo, ctx: ReadContext, rngFor: (entity: EntityId) 
 function invitationText(ctx: ReadContext, agent: EntityId, place: PlaceId | null, at: number, viewer?: EntityId): string {
   const named = place !== null && (viewer === undefined || canSeePlace(ctx.registry, ctx.world, ctx.state, viewer, place)) ? (own(ctx.world.places, place)?.name ?? place) : null;
   return `${own(ctx.state.entities, agent)?.name ?? agent} invites you to ${named ?? "meet up"} at ${formatHHMM(dateAt(calendarOf(ctx.world), at).minuteOfDay)}.`;
+}
+
+/**
+ * Plans of people the planner doesn't live them for (DESIGN §24.8, `livesPlans`): anyone but an LOD1
+ * agent from Cast life 3 follows routine only, so each of their plans is dropped once its window has
+ * passed, as a Background character's is, with its own time, so a late step settles it alike.
+ */
+function dropUnlived(slot: SlotInfo, ctx: ReadContext): LedgerEvent[] {
+  const plans = optionalQuery(ctx, "minds.plans");
+  if (!plans) return [];
+  const out: LedgerEvent[] = [];
+  for (const who of Object.keys(ctx.state.entities).sort()) {
+    if (who === ctx.world.pov || livesPlans(ctx, who)) continue;
+    for (const p of plans(ctx, who)) if (p.status === "open" && p.when.to <= slot.end) out.push({ type: MINDS_EVENTS.plan, data: { entity: who, plan: p.id, status: "dropped", at: p.when.to, reason: "routine only" } });
+  }
+  return out;
 }
 
 /**
@@ -822,6 +838,8 @@ export const castlifePack: PackDef = {
     for (const def of EVENTS) r.event(def);
     r.process({ id: "castlife.agents", domain: "castlife", minLevel: 3, scope: "agent", step: (slot, ctx, rng, agent) => (agent ? stepAgent(slot, ctx, rng, agent) : []), instants: planMoments, atInstant: atPlanMoment });
     r.process({ id: "castlife.trips", domain: "castlife", minLevel: 1, step: (slot, ctx) => stepTrips(slot, ctx) });
+    // Whatever the level: a plan nothing lives is still settled.
+    r.process({ id: "castlife.plans", domain: "castlife", minLevel: 0, step: (slot, ctx) => dropUnlived(slot, ctx) });
     r.query("castlife.activity", shownActivity);
     r.query("castlife.commitments", (ctx, who, start, end) => commitments(ctx, who, start, end).map((c) => ({ start: c.start, end: c.end, activity: c.activity, place: c.place ?? null, kind: c.kind, label: c.label, ...(c.plan !== undefined ? { plan: c.plan } : {}) })));
     r.query("castlife.tie_zones", (ctx) => {

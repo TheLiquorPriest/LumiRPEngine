@@ -200,6 +200,19 @@ describe("castlife: characters' own plans", () => {
     const invites = w.events.flatMap((e) => (e.type === "castlife.invitation" && "data" in e ? [e.data] : []));
     expect(invites).toEqual([{ agent: "maya", place: "cafe", at: now + 1, text: `Maya Chen invites you to Daybreak Café at ${formatHHMM(dateAt(calendarOf(w.world), now + 1).minuteOfDay)}.`, key: "maya:plan:coffee" }]);
   });
+
+  test("a minded character who isn't an LOD1 agent follows routine only: their plan isn't laid or lived, and it is dropped once its window has passed", () => {
+    const w = riverton((wd) => {
+      const jordan = wd.entities.jordan;
+      if (jordan) jordan.agent = false;
+    });
+    record(w, [pin("jordan", "live"), planEdit("jordan", plan(w, "p1", {}))]);
+    expect(w.ctx.query("castlife.commitments")(w.ctx, "jordan", at(w, 0, "00:00"), at(w, 1, "00:00")).some((c) => c.kind === "plan")).toBe(false);
+    lapse(w, at(w, 0, "10:30"));
+    expect(w.state.entities.jordan?.fields.place).toBe("office");
+    lapse(w, at(w, 0, "13:00"));
+    expect(outcomes(w)).toEqual([{ type: "minds.plan", data: { entity: "jordan", plan: "p1", status: "dropped", at: at(w, 0, "11:00"), reason: "routine only" } }]);
+  });
 });
 
 describe("castlife: occasions", () => {

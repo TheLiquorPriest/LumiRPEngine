@@ -142,6 +142,16 @@ export function planTier(ctx: ReadContext, who: EntityId): Fidelity {
   return optionalQuery(ctx, "minds.tier")?.(ctx, who) ?? "background";
 }
 
+/**
+ * Whether the planner lives someone's plans (DESIGN §24.8): an LOD1 agent from Cast life 3, whose
+ * days the planner plans, never the player character, whose plans are the player's. Anyone else
+ * follows routine only: their plans are never laid, and `castlife.plans` drops each once its window
+ * has passed.
+ */
+export function livesPlans(ctx: ReadContext, who: EntityId): boolean {
+  return who !== ctx.world.pov && own(ctx.state.entities, who)?.agent === true && ctx.levelOf(who, "castlife") >= 3;
+}
+
 /** A plan as the planner lays it. */
 interface Layable {
   p: MindPlan;
@@ -155,11 +165,11 @@ interface Layable {
 /**
  * The plans that shape a person's days (DESIGN §24.8): the open ones, and the settled ones for the
  * times before they were settled, so settling a plan never changes the day it had, nor what another
- * plan was cut to. None for a Background character, who follows routine only, nor for the player
- * character, whose plans are the player's.
+ * plan was cut to. None for a Background character, who follows routine only, nor for anyone whose
+ * plans the planner doesn't live.
  */
 function layable(ctx: ReadContext, who: EntityId, tier: Fidelity): Layable[] {
-  if (tier === "background" || who === ctx.world.pov) return [];
+  if (tier === "background" || !livesPlans(ctx, who)) return [];
   return (optionalQuery(ctx, "minds.plans")?.(ctx, who) ?? []).flatMap((p) => {
     const from = Math.max(p.when.from, p.made + 1);
     const until = p.status === "open" ? Infinity : (p.closed ?? from);

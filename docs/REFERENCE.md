@@ -242,6 +242,7 @@ Panels: `castlife.cast`. Slots it writes: `people`, `stance`.
 | Process | Domain | From level | Steps |
 |---|---|---|---|
 | `castlife.agents` | `castlife` | 3 | each agent |
+| `castlife.plans` | `castlife` | 0 | the world |
 | `castlife.trips` | `castlife` | 1 | the world |
 
 ### Lint codes
