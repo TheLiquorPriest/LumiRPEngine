@@ -25,7 +25,7 @@ export type Dest = "now" | "me" | "people" | "places" | "story";
 /** Where a panel lives: a Play destination, or GM mode. */
 export type PanelHome = Dest | "gm";
 
-export type SheetKind = "person" | "place" | "item" | "account" | "quest";
+export type SheetKind = "person" | "place" | "item" | "account" | "quest" | "money";
 
 /** A detail sheet opened over a Play destination (contract §4.3). */
 export interface SheetRoute {

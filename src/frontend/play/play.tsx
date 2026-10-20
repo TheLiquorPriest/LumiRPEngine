@@ -49,7 +49,7 @@ export function destinations(catalog: UiCatalog, view: StateView): Destination[]
   });
 }
 
-const SHEET_TITLE: Record<SheetKind, string> = { person: "Person", place: "Place", item: "Item", account: "Account", quest: "Quest" };
+const SHEET_TITLE: Record<SheetKind, string> = { person: "Person", place: "Place", item: "Item", account: "Account", quest: "Quest", money: "Money" };
 
 export function Play() {
   const app = useApp();

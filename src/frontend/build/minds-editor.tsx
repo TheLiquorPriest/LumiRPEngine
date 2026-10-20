@@ -1,19 +1,25 @@
-// Build → World → Minds (DESIGN §24.2): what the narrator gets of a mind (secrecy), the fidelity
-// ladder's focus weights and thresholds, who is always Live and who never gets a mind, the memory
-// defaults, and the world's own step templates for the minds steps, written in the step-template
-// editor. Saved whole as `lre.editor set part minds`; a world left at the defaults keeps no config.
+// Build → World → Minds (DESIGN §24.2; contract §4.6): what the narrator gets of a mind (secrecy),
+// the fidelity ladder's thresholds and focus weights, who is always Live and who never gets a mind,
+// the memory defaults, and the world's own step templates for the minds steps, written in the
+// step-template editor. Saved whole as `lre.editor set part minds` from the sticky bar; a world left
+// at the defaults keeps no config. Each group shows the lint under its own path. Styles:
+// styles/minds.ts (M3) and styles/forms.ts.
 
 import { useMemo, useState } from "preact/hooks";
 import type { JsonObject } from "../../shared/json";
 import type { FidelityWeights, MindPurpose, MindsSecrecy, WorldMindsConfig } from "../../shared/minds";
 import { DEFAULT_WORLD_MINDS, MIND_PROMPT_DEFAULTS, MIND_PURPOSES, MINDS_RANGES, worldMindsOf } from "../../shared/minds";
+import type { LintIssue } from "../../shared/protocol";
 import type { WorldDoc } from "../../shared/world";
 import { useApp } from "../app";
-import { Card, HostSwitch, NumberStepper, Row, Seg, useBusy } from "../components";
+import { Badge, Button, Disclosure, IconButton, IdText, NumberStepper, PageHeader, SaveBar, useBusy } from "../components";
+import { Icon } from "../icons";
 import { STEP_LABEL } from "../settings/steps";
 import { MEMORY_FIELDS, memoryValue } from "../settings/minds-patch";
 import { useSelect } from "../store";
+import { itemLabel, PART_INFO } from "./chrome";
 import { draftSend } from "./draft";
+import { AddPicker, CheckField, FormGroup, Issues, ItemRow } from "./form-kit";
 import { useHeld } from "./held";
 import { lintAt } from "./schema-form";
 import { SelectorEditor } from "./selector-editor";
@@ -22,7 +28,7 @@ import { FIDELITY_LABEL } from "../../packs/minds/ui/ops";
 export const SECRECY_EXPLAINED: Record<MindsSecrecy, { label: string; text: string }> = {
   brief: {
     label: "Brief",
-    text: "The narrator gets only a short description of how each character comes across: what they do, how they look and sound. It is checked first, and left out if it would give away a secret or someone you haven't met. Their private thoughts and what they mean to do stay in the GM view. Safest against spoilers; the narrator has less to work with.",
+    text: "The narrator gets only a short description of how each character comes across: what they do, how they look and sound. It is checked first, and left out if it would give away a secret or someone you haven't met. Their private thoughts and what they mean to do stay in GM mode. Safest against spoilers; the narrator has less to work with.",
   },
   full: {
     label: "Full",
@@ -47,6 +53,9 @@ const WEIGHT_LABEL: Record<FlatWeight, string> = {
 
 const BAND_LABEL: Record<keyof FidelityWeights["band"], string> = { principal: "Tier band: leads", supporting: "Tier band: supporting", background: "Tier band: background" };
 
+/** The config's parts with a group of their own here; lint under any other path shows at the top. */
+const GROUPED = ["minds.secrecy", "minds.thresholds", "minds.weights", "minds.always", "minds.never", "minds.memory"] as const;
+
 /** The value the editor saves: none at all when it is the defaults, so the world keeps no config; an unset selector is left out. */
 export function mindsPartValue(config: WorldMindsConfig): JsonObject {
   if (JSON.stringify(config) === JSON.stringify(DEFAULT_WORLD_MINDS)) return {};
@@ -65,44 +74,38 @@ function Weight(props: { label: string; value: number; disabled: boolean; onChan
   return <NumberStepper label={props.label} value={props.value} min={MINDS_RANGES.weight[0]} max={MINDS_RANGES.weight[1]} step={5} disabled={props.disabled} onChange={props.onChange} />;
 }
 
-function Roles(props: { doc: WorldDoc; roles: Record<string, number>; disabled: boolean; onChange(next: Record<string, number>): void }) {
+/** Role weights by classification value: each by name with its points and Remove; a picker adds one at 20 points. */
+function Roles(props: { doc: WorldDoc; roles: Record<string, number>; lint: readonly LintIssue[]; disabled: boolean; onChange(next: Record<string, number>): void }) {
   const options = roleOptions(props.doc);
-  const [pick, setPick] = useState("");
   const left = options.filter((o) => props.roles[o.value] === undefined);
   return (
-    <div class="lre-stack" data-lre-minds-roles>
-      <span class="lre-small lre-muted">Role values (a value nested under one counts as it), such as an antagonist</span>
-      {Object.entries(props.roles).map(([id, pts]) => (
-        <div key={id} class="lre-inline">
-          <Weight label={options.find((o) => o.value === id)?.label ?? id} value={pts} disabled={props.disabled} onChange={(v) => props.onChange({ ...props.roles, [id]: v })} />
-          <button type="button" class="lre-btn small ghost" aria-label={`Remove ${id}`} disabled={props.disabled} onClick={() => props.onChange(Object.fromEntries(Object.entries(props.roles).filter(([k]) => k !== id)))}>
-            ✕
-          </button>
-        </div>
-      ))}
+    <div class="lre-minds-roles" data-lre-minds-roles>
+      <span class="lre-minds-subhead">Roles</span>
+      <p class="lre-minds-note">Role values (a value nested under one counts as it), such as an antagonist.</p>
+      {Object.entries(props.roles).map(([id, pts]) => {
+        const name = options.find((o) => o.value === id)?.label ?? id;
+        return (
+          <div key={id} class="lre-minds-role">
+            <div class="lre-minds-role-field">
+              <Weight label={name} value={pts} disabled={props.disabled} onChange={(v) => props.onChange({ ...props.roles, [id]: v })} />
+              <IdText id={id} />
+              <Issues issues={lintAt(props.lint, `minds.weights.roles.${id}`)} />
+            </div>
+            <IconButton icon="trash" label={`Remove ${name}`} disabled={props.disabled} onClick={() => props.onChange(Object.fromEntries(Object.entries(props.roles).filter(([k]) => k !== id)))} />
+          </div>
+        );
+      })}
       {left.length > 0 ? (
-        <div class="lre-inline">
-          <select class="lre-input" aria-label="Role value" value={pick} disabled={props.disabled} onChange={(event) => setPick(event.currentTarget.value)}>
-            <option value="">Pick a value…</option>
-            {left.map((o) => (
-              <option key={o.value} value={o.value}>
-                {o.label}
-              </option>
-            ))}
-          </select>
-          <button type="button" class="lre-btn small" disabled={props.disabled || pick === ""} onClick={() => (props.onChange({ ...props.roles, [pick]: 20 }), setPick(""))}>
-            Add
-          </button>
-        </div>
+        <AddPicker label="Add a role value" placeholder="Add a role value…" options={left} disabled={props.disabled} onAdd={(value) => props.onChange({ ...props.roles, [value]: 20 })} />
       ) : options.length === 0 ? (
-        <span class="lre-small lre-muted">This world has no classifications yet.</span>
+        <p class="lre-minds-note">This world has no classifications yet.</p>
       ) : null}
     </div>
   );
 }
 
 /** The world's step templates for the minds steps: each opens in the step-template editor; a new one starts from the built-in prompt. */
-function MindTemplates(props: { doc: WorldDoc; worldId: string }) {
+function MindTemplates(props: { doc: WorldDoc; worldId: string; unsaved: boolean }) {
   const app = useApp();
   const send = useMemo(() => draftSend(app), [app]);
   const [busy, run] = useBusy();
@@ -116,38 +119,39 @@ function MindTemplates(props: { doc: WorldDoc; worldId: string }) {
       if (message.type === "lre.result") open(id);
     });
   return (
-    <Card title="Step templates">
-      <div class="lre-small lre-muted">A world's template for a step wins over the player's own prompt and the built-in one; only a step's first template (by id) is used, and its signals are ignored. A new template starts from the built-in prompt.</div>
+    <FormGroup title="Step templates">
+      <p class="lre-minds-note">A world's template for a step wins over the player's own prompt and the built-in one; only a step's first template (by id) is used, and its signals are ignored. A new template starts from the built-in prompt and goes into the draft straight away, as its own item in Step templates.</p>
+      {/* A new template opens its own page, which would drop the edits above. */}
+      {props.unsaved && MIND_PURPOSES.some((purpose) => !Object.values(props.doc.steps).some((t) => t.purpose === purpose)) ? <p class="lre-minds-note">Save or revert your changes first.</p> : null}
       {MIND_PURPOSES.map((purpose) => {
-        const templates = Object.values(props.doc.steps).filter((t) => t.purpose === purpose).sort((a, b) => a.id.localeCompare(b.id));
+        const templates = Object.values(props.doc.steps)
+          .filter((t) => t.purpose === purpose)
+          .sort((a, b) => a.id.localeCompare(b.id));
         return (
-          <div key={purpose} class="lre-stack" style={{ gap: "2px" }} data-lre-minds-templates={purpose}>
-            <Row
-              k={STEP_LABEL[purpose]}
-              v={
-                templates.length === 0 ? (
-                  <button type="button" class="lre-btn small" disabled={busy} onClick={() => add(purpose)}>
-                    New template
-                  </button>
-                ) : undefined
-              }
-              sub={templates.length === 0 ? "None: the player's prompt, else the built-in" : undefined}
-            />
-            {templates.map((t, i) => (
-              <button key={t.id} type="button" class="lre-item" onClick={() => open(t.id)}>
-                <span class="grow">
-                  <code>{t.id}</code>
-                </span>
-                {i > 0 ? <span class="lre-badge warn">Not used</span> : null}
-                <span class="lre-dim" aria-hidden="true">
-                  ›
-                </span>
-              </button>
-            ))}
+          <div key={purpose} class="lre-minds-tpl" data-lre-minds-templates={purpose}>
+            <div class="lre-minds-tpl-head">
+              <span class="lre-minds-tpl-text">
+                <span class="lre-minds-subhead">{STEP_LABEL[purpose]}</span>
+                {templates.length === 0 ? <span class="lre-minds-note">None: the player's prompt, else the built-in</span> : null}
+              </span>
+              {templates.length === 0 ? (
+                <Button size="sm" icon="plus" disabled={props.unsaved} busy={busy} onClick={() => add(purpose)}>
+                  New template
+                </Button>
+              ) : null}
+            </div>
+            {templates.length > 0 ? (
+              <div class="lre-form-items">
+                {templates.map((t, i) => {
+                  const name = itemLabel("steps", t.id, t);
+                  return <ItemRow key={t.id} title={name} subtitle={<IdText id={t.id} />} badge={i > 0 ? <Badge tone="warn">Not used</Badge> : undefined} openLabel={`Open the template ${name}`} onOpen={() => open(t.id)} />;
+                })}
+              </div>
+            ) : null}
           </div>
         );
       })}
-    </Card>
+    </FormGroup>
   );
 }
 
@@ -166,67 +170,102 @@ export function MindsEditor() {
   const t = value.thresholds;
   const ordered = t.live >= t.near && t.near >= t.far;
   const save = (next: JsonObject) => run(() => send({ type: "lre.editor", worldId: draft.worldId, base: draft.base, op: "set", part: "minds", value: next }));
+  const loose = lintAt(draft.lint, "minds").filter((issue) => !GROUPED.some((path) => issue.path === path || issue.path.startsWith(`${path}.`)));
   return (
-    <div class="lre-stack" data-lre-editor="part:minds">
-      <div class="lre-h2">Minds</div>
-      {lintAt(draft.lint, "minds").map((issue, i) => (
-        <div key={`${issue.code}:${i}`} class={issue.severity === "error" ? "lre-banner warn" : "lre-banner info"}>
-          {issue.message}
+    <div class="lre-build-page lre-minds-build" data-lre-editor="part:minds">
+      <PageHeader title={PART_INFO.minds.label} subtitle={PART_INFO.minds.hint} />
+      <Issues issues={loose} />
+      <FormGroup title="What the narrator gets of a mind">
+        <div class="lre-minds-choices" role="radiogroup" aria-label="Secrecy">
+          {(["brief", "full"] as const).map((s) => {
+            const checked = value.secrecy === s;
+            return (
+              <button key={s} type="button" role="radio" aria-checked={checked} class="lre-minds-choice" data-lre-secrecy={s} disabled={busy} onClick={() => (checked ? undefined : setValue({ ...value, secrecy: s }))}>
+                <span class="lre-minds-choice-head">
+                  <span class="lre-minds-choice-name">{SECRECY_EXPLAINED[s].label}</span>
+                  {checked ? (
+                    <span class="lre-minds-choice-mark">
+                      <Icon name="check" size={16} />
+                      In use
+                    </span>
+                  ) : null}
+                </span>
+                <span class="lre-minds-choice-text">{SECRECY_EXPLAINED[s].text}</span>
+              </button>
+            );
+          })}
         </div>
-      ))}
-      <Card title="What the narrator gets of a mind">
-        <Seg<MindsSecrecy> label="Secrecy" value={value.secrecy} options={(["brief", "full"] as const).map((s) => ({ value: s, label: SECRECY_EXPLAINED[s].label }))} disabled={busy} onChange={(secrecy) => setValue({ ...value, secrecy })} />
-        {(["brief", "full"] as const).map((s) => (
-          <Row key={s} k={SECRECY_EXPLAINED[s].label} sub={SECRECY_EXPLAINED[s].text} tone={s === value.secrecy ? undefined : "muted"} />
-        ))}
-        <div class="lre-small lre-muted">Either way, the player never sees a mind; the GM view shows them all.</div>
-      </Card>
-      <Card title="Focus weights">
-        <div class="lre-small lre-muted">Points each thing adds to a character's focus score; the score decides how closely they are simulated. Negative points push them away.</div>
-        {(Object.keys(WEIGHT_LABEL) as FlatWeight[]).map((key) => (
-          <Weight key={key} label={WEIGHT_LABEL[key]} value={w[key]} disabled={busy} onChange={(v) => setWeights({ [key]: v })} />
-        ))}
-        {(Object.keys(BAND_LABEL) as (keyof FidelityWeights["band"])[]).map((key) => (
-          <Weight key={key} label={BAND_LABEL[key]} value={w.band[key]} disabled={busy} onChange={(v) => setWeights({ band: { ...w.band, [key]: v } })} />
-        ))}
-        <Roles doc={draft.doc} roles={w.roles} disabled={busy} onChange={(roles) => setWeights({ roles })} />
-      </Card>
-      <Card title="Thresholds">
-        <div class="lre-small lre-muted">The lowest score for each level. Live characters think every turn; Near ones when something calls for it; Far ones now and then; under Far, Background characters follow their routine.</div>
-        {(["live", "near", "far"] as const).map((key) => (
-          <NumberStepper key={key} label={FIDELITY_LABEL[key]} value={t[key]} min={MINDS_RANGES.threshold[0]} max={MINDS_RANGES.threshold[1]} step={5} integer disabled={busy} onChange={(v) => setValue({ ...value, thresholds: { ...t, [key]: v } })} />
-        ))}
-        {ordered ? null : <div class="lre-small lre-warn">Live should be at least Near, and Near at least Far; out of order, the lower ones are raised to match.</div>}
-      </Card>
-      <Card title="Who always, and who never">
+        <p class="lre-minds-note">Either way, the player never sees a mind; GM mode shows them all.</p>
+        <Issues issues={lintAt(draft.lint, "minds.secrecy")} />
+      </FormGroup>
+      <FormGroup title="Thresholds">
+        <p class="lre-minds-note">The lowest focus score for each level. Live characters think every turn; Near ones when something calls for it; Far ones now and then; under Far, Background characters follow their routine.</p>
+        <div class="lre-minds-fields">
+          {(["live", "near", "far"] as const).map((key) => (
+            <NumberStepper key={key} label={FIDELITY_LABEL[key]} value={t[key]} min={MINDS_RANGES.threshold[0]} max={MINDS_RANGES.threshold[1]} step={5} integer disabled={busy} onChange={(v) => setValue({ ...value, thresholds: { ...t, [key]: v } })} />
+          ))}
+        </div>
+        {ordered ? null : (
+          <span class="lre-form-issue warn" role="note">
+            <Icon name="alert" size={16} />
+            <span>Live should be at least Near, and Near at least Far; out of order, the lower ones are raised to match.</span>
+          </span>
+        )}
+        <Issues issues={lintAt(draft.lint, "minds.thresholds")} />
+      </FormGroup>
+      <FormGroup title="Focus weights">
+        <p class="lre-minds-note">Points each thing adds to a character's focus score; the score decides how closely they are simulated. Negative points push them away.</p>
+        <Disclosure summary="What counts toward the score">
+          <div class="lre-minds-fields">
+            {(Object.keys(WEIGHT_LABEL) as FlatWeight[]).map((key) => (
+              <Weight key={key} label={WEIGHT_LABEL[key]} value={w[key]} disabled={busy} onChange={(v) => setWeights({ [key]: v })} />
+            ))}
+          </div>
+        </Disclosure>
+        <Disclosure summary="Tier bands">
+          <div class="lre-minds-fields">
+            {(Object.keys(BAND_LABEL) as (keyof FidelityWeights["band"])[]).map((key) => (
+              <Weight key={key} label={BAND_LABEL[key]} value={w.band[key]} disabled={busy} onChange={(v) => setWeights({ band: { ...w.band, [key]: v } })} />
+            ))}
+          </div>
+        </Disclosure>
+        <Roles doc={draft.doc} roles={w.roles} lint={draft.lint} disabled={busy} onChange={(roles) => setWeights({ roles })} />
+        <Issues issues={lintAt(draft.lint, "minds.weights").filter((issue) => !issue.path.startsWith("minds.weights.roles."))} />
+      </FormGroup>
+      <FormGroup title="Who always, and who never">
         <SelectorEditor label="Always Live" value={value.always ?? undefined} doc={draft.doc} optional onChange={(next) => setValue({ ...value, always: next ?? null })} />
+        <Issues issues={lintAt(draft.lint, "minds.always")} />
         <SelectorEditor label="Never a mind (wins over Always Live)" value={value.never ?? undefined} doc={draft.doc} optional onChange={(next) => setValue({ ...value, never: next ?? null })} />
-        <div class="lre-small lre-muted">A selector with nothing in it picks no one. The player's own character never gets a mind.</div>
-      </Card>
-      <Card title="Memory defaults">
-        <div class="lre-small lre-muted">How this world's characters remember. A player's own Settings → Minds → Memory wins.</div>
-        {MEMORY_FIELDS.map((field) => {
-          const current = memoryValue(value.memory, field);
-          const set = (v: number | boolean) => setValue({ ...value, memory: { ...value.memory, [field.part]: { ...(value.memory[field.part] as unknown as JsonObject), [field.key]: v } } });
-          return field.range ? (
-            <NumberStepper key={`${field.part}.${field.key}`} label={field.label} value={typeof current === "number" ? current : null} min={field.range[0]} max={field.range[1]} step={field.step ?? 1} integer={field.integer === true} disabled={busy} onChange={set} />
-          ) : (
-            <HostSwitch key={`${field.part}.${field.key}`} label={field.label} checked={current === true} disabled={busy} onChange={set} />
-          );
-        })}
-      </Card>
-      <div class="lre-savebar">
-        <button type="button" class="lre-btn primary" disabled={!changed || busy} onClick={() => save(mindsPartValue(value))}>
+        <Issues issues={lintAt(draft.lint, "minds.never")} />
+        <p class="lre-minds-note">A selector with nothing in it picks no one. The player's own character never gets a mind.</p>
+      </FormGroup>
+      <FormGroup title="Memory defaults">
+        <p class="lre-minds-note">How this world's characters remember. A player's own Settings → Minds → Memory wins.</p>
+        <div class="lre-minds-fields">
+          {MEMORY_FIELDS.map((field) => {
+            const current = memoryValue(value.memory, field);
+            const set = (v: number | boolean) => setValue({ ...value, memory: { ...value.memory, [field.part]: { ...(value.memory[field.part] as unknown as JsonObject), [field.key]: v } } });
+            return field.range ? (
+              <NumberStepper key={`${field.part}.${field.key}`} label={field.label} value={typeof current === "number" ? current : null} min={field.range[0]} max={field.range[1]} step={field.step ?? 1} integer={field.integer === true} disabled={busy} onChange={set} />
+            ) : (
+              <CheckField key={`${field.part}.${field.key}`} label={field.label} checked={current === true} disabled={busy} onChange={set} />
+            );
+          })}
+        </div>
+        <Issues issues={lintAt(draft.lint, "minds.memory")} />
+      </FormGroup>
+      <MindTemplates doc={draft.doc} worldId={draft.worldId} unsaved={changed} />
+      <SaveBar>
+        <Button variant="primary" disabled={!changed} busy={busy} onClick={() => save(mindsPartValue(value))}>
           Save to draft
-        </button>
-        <button type="button" class="lre-btn ghost" disabled={!changed || busy} onClick={() => setValue(initial)}>
+        </Button>
+        <Button variant="ghost" disabled={!changed || busy} onClick={() => setValue(initial)}>
           Revert
-        </button>
-        <button type="button" class="lre-btn ghost" disabled={busy || draft.doc.minds === undefined} onClick={() => save({})}>
+        </Button>
+        <Button variant="ghost" disabled={busy || draft.doc.minds === undefined} onClick={() => save({})}>
           Use the defaults
-        </button>
-      </div>
-      <MindTemplates doc={draft.doc} worldId={draft.worldId} />
+        </Button>
+      </SaveBar>
     </div>
   );
 }
