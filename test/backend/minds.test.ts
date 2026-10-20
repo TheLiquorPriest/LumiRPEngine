@@ -153,6 +153,9 @@ describe("minds around a turn", () => {
     // Marcus heard it, and remembers it, knowing he was left behind; Helen didn't, and has no memory of it.
     expect(memories["Marcus Delgado"]).toContain(LINE);
     expect(memories["Marcus Delgado"]).toContain("left you partway through");
+    // He saw the POV go, worded for an onlooker: never as "you".
+    expect(memories["Marcus Delgado"]).toMatch(/saw: the player character → /);
+    expect(memories["Marcus Delgado"]).not.toMatch(/saw: You\b/);
     expect(memories["Helen Kowalczyk"]).toBeUndefined();
     const presence = readSlice(state).presence;
     const said = presence.find((p) => p.msg !== null);

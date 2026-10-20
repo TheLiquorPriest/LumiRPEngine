@@ -19,7 +19,7 @@ import type { ModelUseSettings, StepConfig } from "../shared/settings";
 import type { WorldDoc } from "../shared/world";
 import { calendarOf, clockOfLocal, formatClock, nextTimeOfDay, parseHHMM } from "../engine/calendar";
 import { own } from "../engine/pack-kit";
-import { hiddenNameCheck, playerKnows, playerLines } from "../engine/player-events";
+import { hiddenNameCheck, playerKnows, witnessLines } from "../engine/player-events";
 import type { Registry } from "../engine/registry-impl";
 import { isGone, kindIs, placeOfEntity } from "../engine/scope";
 import type { WorldState } from "../engine/state";
@@ -334,7 +334,7 @@ export function turnPresence(reg: Registry, world: WorldDoc, input: Pick<PostMin
   const to = placeOfEntity(state, pov);
   const heard = presentWith(reg, world, start);
   const there = presentWith(reg, world, state);
-  const saw = (events: readonly LedgerEvent[]): string[] => playerLines(reg, world, state, pov, events, 3);
+  const saw = (events: readonly LedgerEvent[]): string[] => witnessLines(reg, world, state, pov, events, 3);
   if (from === to) {
     const came = there.filter((id) => !heard.includes(id));
     return { said: { msg: input.messageId, at: state.clock, place: from, who: heard, saw: saw(pre) }, met: came.length > 0 ? { msg: null, at: state.clock, place: to, who: came, saw: [] } : null, left: [] };

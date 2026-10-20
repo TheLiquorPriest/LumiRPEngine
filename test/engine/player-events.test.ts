@@ -4,7 +4,7 @@ import { describe, expect, test } from "bun:test";
 import type { LedgerEvent } from "../../src/shared/ledger";
 import { createRegistry } from "../../src/engine/registry-impl";
 import { outline } from "../../src/engine/beats";
-import { metBy, playerDrop, playerLine, playerLines, UNSEEN_DROP } from "../../src/engine/player-events";
+import { metBy, playerDrop, playerLine, playerLines, UNSEEN_DROP, witnessLines } from "../../src/engine/player-events";
 import { createRng } from "../../src/engine/rng";
 import { buildGarageView } from "../../src/packs/vehicles/core/view";
 import type { WorldState } from "../../src/engine/state";
@@ -126,6 +126,23 @@ describe("player-facing event lines", () => {
     expect(unmet.text).not.toMatch(/Maya|maya|\$/);
     expect(playerDrop(reg, world, state, "you", { type: "stage", track: "tips", to: "noticed" }, `stage ${TRUTH}`).text).toBe(UNSEEN_DROP);
     expect(playerDrop(reg, world, state, "you", null, "marker 12 made on another branch").text).toBe(UNSEEN_DROP);
+  });
+
+  test("a witness log's lines are an onlooker's: the POV in the third person, and none of its own matters", () => {
+    const { world, state } = setup();
+    world.tracks.fair = { id: "fair", kind: "quest", label: "The fair", start: "a", visibility: "public", stages: { a: { label: "Start", next: [] }, b: { label: "Find the fair", next: [] } } };
+    const events: LedgerEvent[] = [
+      { type: "set", entity: "you", field: "place", value: "cafe" },
+      { type: "post", memo: "Rent to landlord", lines: [{ account: "checking", amount: -120000 }, { account: "economy.external:landlord", amount: 120000 }] },
+      { type: "set", entity: "you", field: "hunger", value: 80 },
+      { type: "link", rel: "knows", from: "you", to: "maya" },
+      { type: "stage", track: "fair", to: "b" },
+      { type: "link", rel: "uses", from: "you", to: "truck" },
+    ];
+    // The player sees all of it as their own.
+    expect(playerLines(reg, world, state, "you", events)).toContain("You → Daybreak Café");
+    expect(playerLines(reg, world, state, "you", events).some((l) => l.startsWith("Rent to landlord"))).toBe(true);
+    expect(witnessLines(reg, world, state, "you", events, 8)).toEqual(["the player character → Daybreak Café", `the player character borrows ${state.entities.truck!.name}`]);
   });
 });
 

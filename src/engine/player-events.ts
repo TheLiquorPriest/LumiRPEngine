@@ -219,8 +219,9 @@ export function playerEventVisible(reg: Registry, world: WorldDoc, state: Readon
   return true;
 }
 
-function nameOf(world: WorldDoc, state: Readonly<WorldState>, pov: EntityId, id: string): string {
-  if (id === pov) return "You";
+/** An entity's, place's or track's name; the POV is `you` ("You" on a player's line). */
+function nameOf(world: WorldDoc, state: Readonly<WorldState>, pov: EntityId, id: string, you = "You"): string {
+  if (id === pov) return you;
   return own(state.entities, id)?.name ?? own(world.places, id)?.name ?? own(world.tracks, id)?.label ?? id;
 }
 
@@ -228,11 +229,11 @@ function humanize(field: string): string {
   return field.replace(/_/g, " ");
 }
 
-function valueText(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, pov: EntityId, kind: string, field: string, v: JsonValue): string | null {
+function valueText(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, pov: EntityId, kind: string, field: string, v: JsonValue, you: string): string | null {
   if (v === null) return "cleared";
   if (typeof v === "boolean") return v ? "yes" : "no";
   if (typeof v === "string") {
-    if (hasOwn(state.entities, v) || hasOwn(world.places, v)) return nameOf(world, state, pov, v);
+    if (hasOwn(state.entities, v) || hasOwn(world.places, v)) return nameOf(world, state, pov, v, you);
     // An enum value or a code-like word (`needs_service`) reads as words ("needs service").
     if (fieldDef(reg, world, kind, field)?.type === "enum" || /^[a-z0-9]+(?:_[a-z0-9]+)+$/.test(v)) return humanize(v);
     return v.length > 80 ? `${v.slice(0, 79)}…` : v;
@@ -262,11 +263,11 @@ function relationLine(rel: string, from: string, to: string, linked: boolean): s
 }
 
 /** Replaces each referenced id in a pack describer's line with its name or label. */
-function relabel(line: string, refs: readonly Ref[], world: WorldDoc, state: Readonly<WorldState>, pov: EntityId): string {
+function relabel(line: string, refs: readonly Ref[], world: WorldDoc, state: Readonly<WorldState>, pov: EntityId, you: string): string {
   let out = line;
   const ids = [...new Set(refs.map((r) => r.id))].sort((a, b) => b.length - a.length);
   for (const id of ids) {
-    const name = nameOf(world, state, pov, id);
+    const name = nameOf(world, state, pov, id, you);
     if (name.toLowerCase() === id.toLowerCase()) continue;
     out = out.replace(new RegExp(`(?<![\\w.])${id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\w])`, "g"), name);
   }
@@ -318,9 +319,9 @@ export function namesHidden(reg: Registry, world: WorldDoc, state: Readonly<Worl
   return hiddenNameCheck(reg, world, state, world.pov)(text);
 }
 
-/** An event's line, worded for `pov` when it is a player's (`player`), else for the GM or the author. */
-function rawLine(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, pov: EntityId, e: LedgerEvent, player: boolean): string | null {
-  const name = (id: string): string => nameOf(world, state, pov, id);
+/** An event's line, worded for `pov` when it is a player's (`player`), else for the GM or the author; the POV is named `you`. */
+function rawLine(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, pov: EntityId, e: LedgerEvent, player: boolean, you: string): string | null {
+  const name = (id: string): string => nameOf(world, state, pov, id, you);
   switch (e.type) {
     case "set": {
       if (INTERNAL_FIELD.test(e.field)) return null;
@@ -333,7 +334,7 @@ function rawLine(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, po
       const ctx = player && e.field === "activity" && typeof e.value === "string" ? reg.context(world, state) : null;
       const shownActivity = ctx ? optionalQuery(ctx, "castlife.activity") : null;
       const value = ctx && shownActivity && typeof e.value === "string" ? shownActivity(ctx, e.entity, e.value) : e.value;
-      const v = valueText(reg, world, state, pov, kind, e.field, value);
+      const v = valueText(reg, world, state, pov, kind, e.field, value, you);
       if (v === null) return null;
       if (e.field === "activity") return `${name(e.entity)}: ${v}`;
       return `${name(e.entity)}: ${fieldDef(reg, world, kind, e.field)?.label ?? humanize(e.field)} ${v}`;
@@ -361,7 +362,7 @@ function rawLine(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, po
       if (!def) return null;
       try {
         const line = def.describe(e, reg.context(world, state), player ? pov : undefined);
-        return line ? relabel(line, refsOf(world, state, e), world, state, pov) : null;
+        return line ? relabel(line, refsOf(world, state, e), world, state, pov, you) : null;
       } catch {
         // A describer that can't word this event against this state is skipped.
         return null;
@@ -406,7 +407,24 @@ export function authorLines(reg: Registry, world: WorldDoc, state: Readonly<Worl
   return wordedLines(reg, world, state, world.pov, events, max, false);
 }
 
-function wordedLines(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, pov: EntityId, events: readonly LedgerEvent[], max: number, player: boolean): string[] {
+/** What anyone in the POV's scene sees of its events: people coming and going and what they do, things taken, handed over or lent, and someone appearing. */
+function witnessed(e: LedgerEvent): boolean {
+  if (e.type === "set") return e.field === "place" || e.field === "activity";
+  if (e.type === "link" || e.type === "unlink") return e.rel === "in" || e.rel === "uses" || e.rel === "owns";
+  return e.type === "spawn";
+}
+
+/**
+ * The lines someone in the POV's scene saw of its events (a mind's witness log, DESIGN §24.4): only
+ * what anyone there could see, filtered and screened as `playerLines` does, with the POV named "the
+ * player character", never "you". The POV's own matters (its accounts, needs, what it learns or
+ * uncovers, invitations to it) are none of an onlooker's.
+ */
+export function witnessLines(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, pov: EntityId, events: readonly LedgerEvent[], max: number): string[] {
+  return wordedLines(reg, world, state, pov, events.filter(witnessed), max, true, "the player character");
+}
+
+function wordedLines(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, pov: EntityId, events: readonly LedgerEvent[], max: number, player: boolean, you = "You"): string[] {
   const lines: { at: number; rank: number; text: string }[] = [];
   let secrets: string[] | null = null;
   const lastSet = new Map<string, number>();
@@ -422,7 +440,7 @@ function wordedLines(reg: Registry, world: WorldDoc, state: Readonly<WorldState>
     if (BOOKKEEPING.has(e.type)) continue;
     if (player && !playerEventVisible(reg, world, state, pov, e)) continue;
     const banded = ctx && hpLine ? hpLine(ctx, e) : undefined;
-    const text = banded === undefined ? rawLine(reg, world, state, pov, e, player) : banded;
+    const text = banded === undefined ? rawLine(reg, world, state, pov, e, player, you) : banded;
     if (!text || lines.some((l) => l.text === text)) continue;
     if (player) {
       // Text that must never reach a player line: unrevealed truths and gated secret lore, and hidden names.
