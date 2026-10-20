@@ -15,7 +15,7 @@ import { ALL_PACKS, STARTER_WORLDS } from "../../src/packs/index";
 import { startState } from "../packs/support";
 import { Row } from "../../src/frontend/components";
 import { decodeFinanceView } from "../../src/packs/economy/ui/decode";
-import { accountBlocks, accountControls, businessControls, cardControls, creditBlocks, endableLeases, flowControls, holdingControls, householdRows, hubTabs, invoiceControls, investmentBlocks, overviewBlocks, propertyControls, transferTargets, workBlocks } from "../../src/packs/economy/ui/layout";
+import { accountBlocks, accountControls, businessControls, cardControls, creditBlocks, endableLeases, flowControls, flowSources, holdingControls, householdRows, hubTabs, invoiceControls, investmentBlocks, overviewBlocks, propertyControls, transferTargets, workBlocks } from "../../src/packs/economy/ui/layout";
 import { OwnerRows } from "../../src/packs/economy/ui/lines";
 import { gmFixture } from "../../dev/preview/fixtures";
 import {
@@ -218,6 +218,11 @@ describe("what a party's roles allow", () => {
     const closed = account({ id: "old", class: "checking", status: "closed" });
     expect(accountControls(view({ accounts: [checking, closed] }), closed)).toEqual([]);
     expect(accountControls(view({ level: 1, accounts: [cash, checking, savings] }), checking)).toEqual([]);
+  });
+
+  test("a standing payment comes from an account the party manages: never cash, nor one an authorized user only spends from", () => {
+    const shared = account({ id: "mom", class: "checking", role: "authorized_user" });
+    expect(flowSources(view({ accounts: [cash, checking, savings, shared] })).map((s) => s.id)).toEqual(["chk", "sav"]);
   });
 
   test("a card's holder changes its state as the state allows; someone else's card on an account they don't manage, never", () => {

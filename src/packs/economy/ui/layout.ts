@@ -216,10 +216,14 @@ export function endableLeases(view: FinanceView, property: PropertyView): string
   return property.leases.filter((l) => l.state === "let" && view.flows.some((f) => f.id === l.flow)).map((l) => l.flow);
 }
 
-/** Where a new standing payment can come from: a non-cash account the party may pay from (flows never draw on wallet cash). */
+/**
+ * Where a new standing payment can come from: a non-cash account the party may pay from and
+ * manages (flows never draw on wallet cash; an authorized user spends on a card but sets up no
+ * standing payments).
+ */
 export function flowSources(view: FinanceView): { id: string; label: string }[] {
   return paySources(view)
-    .filter((a) => !CLASS_TRAITS[a.class].cash)
+    .filter((a) => !CLASS_TRAITS[a.class].cash && rights(a.role).manage)
     .map((a) => ({ id: a.id, label: a.name }));
 }
 
