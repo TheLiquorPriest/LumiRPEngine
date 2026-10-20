@@ -8,7 +8,7 @@
 import { useMemo, useState } from "preact/hooks";
 import type { JsonObject } from "../../shared/json";
 import type { FidelityWeights, MindPurpose, MindsSecrecy, WorldMindsConfig } from "../../shared/minds";
-import { DEFAULT_WORLD_MINDS, MIND_PROMPT_DEFAULTS, MIND_PURPOSES, MINDS_RANGES, worldMindsOf } from "../../shared/minds";
+import { DEFAULT_WORLD_MINDS, MIND_PROMPT_DEFAULTS, MIND_PURPOSES, MINDS_RANGES, worldMindsOf, worldMindTemplate } from "../../shared/minds";
 import type { LintIssue } from "../../shared/protocol";
 import type { WorldDoc } from "../../shared/world";
 import { useApp } from "../app";
@@ -120,13 +120,14 @@ function MindTemplates(props: { doc: WorldDoc; worldId: string; unsaved: boolean
     });
   return (
     <FormGroup title="Step templates">
-      <p class="lre-minds-note">A world's template for a step wins over the player's own prompt and the built-in one; only a step's first template (by id) is used, and its signals are ignored. A new template starts from the built-in prompt and goes into the draft straight away, as its own item in Step templates.</p>
+      <p class="lre-minds-note">A world's template for a step wins over the built-in prompt, and a player's own prompt wins over it; only a step's first template (by id) with any text is used, and its signals are ignored. A new template starts from the built-in prompt and goes into the draft straight away, as its own item in Step templates.</p>
       {/* A new template opens its own page, which would drop the edits above. */}
       {props.unsaved && MIND_PURPOSES.some((purpose) => !Object.values(props.doc.steps).some((t) => t.purpose === purpose)) ? <p class="lre-minds-note">Save or revert your changes first.</p> : null}
       {MIND_PURPOSES.map((purpose) => {
         const templates = Object.values(props.doc.steps)
           .filter((t) => t.purpose === purpose)
           .sort((a, b) => a.id.localeCompare(b.id));
+        const used = worldMindTemplate(props.doc, purpose);
         return (
           <div key={purpose} class="lre-minds-tpl" data-lre-minds-templates={purpose}>
             <div class="lre-minds-tpl-head">
@@ -142,9 +143,9 @@ function MindTemplates(props: { doc: WorldDoc; worldId: string; unsaved: boolean
             </div>
             {templates.length > 0 ? (
               <div class="lre-form-items">
-                {templates.map((t, i) => {
+                {templates.map((t) => {
                   const name = itemLabel("steps", t.id, t);
-                  return <ItemRow key={t.id} title={name} subtitle={<IdText id={t.id} />} badge={i > 0 ? <Badge tone="warn">Not used</Badge> : undefined} openLabel={`Open the template ${name}`} onOpen={() => open(t.id)} />;
+                  return <ItemRow key={t.id} title={name} subtitle={<IdText id={t.id} />} badge={t === used ? undefined : <Badge tone="warn">{t.template.trim() === "" ? "Blank: not used" : "Not used"}</Badge>} openLabel={`Open the template ${name}`} onOpen={() => open(t.id)} />;
                 })}
               </div>
             ) : null}
