@@ -115,11 +115,14 @@ function shownAvailable(ctx: ReadContext, account: EntityId): number {
   return availableOf(ctx, account) + shown(ctx, account) - balance(ctx.state, account);
 }
 
-function journalLine(ctx: ReadContext, viewer: Viewer, j: JournalEntry): JournalLine {
-  // A line whose other side is its own account's holder names no one: money between their own
-  // accounts, or a line kept from before each line named its own side, when it named the payee on both.
-  const self = holdersOf(ctx.state, j.account).find((h) => own(ctx.state.entities, h)) ?? j.account;
-  const counterparty = j.counterparty && j.counterparty !== self ? counterpartyName(ctx, viewer, j.counterparty) : null;
+function journalLine(ctx: ReadContext, viewer: Viewer, party: EntityId, j: JournalEntry): JournalLine {
+  // A line names no one where its other side is the party reading it, or the one party whose money
+  // the account is: money between their own accounts (a business's too, read by its manager), or a
+  // line kept from before each line named its own side, when it named the payee on both. On an
+  // account two hold, money one of them paid in reads by their name to the other.
+  const worth = Object.entries(worthShares(ownersOf(ctx.state, j.account))).filter(([, share]) => share > 0);
+  const whose = worth.length === 1 ? (worth[0]?.[0] ?? j.account) : j.account;
+  const counterparty = j.counterparty && j.counterparty !== party && j.counterparty !== whose ? counterpartyName(ctx, viewer, j.counterparty) : null;
   return { id: j.id, at: when(ctx, j.at), memo: j.memo, cents: j.cents, account: nameFor(ctx, viewer, j.account), accountId: j.account, kind: j.kind ?? null, category: j.category ?? null, counterparty, card: j.card ? nameFor(ctx, viewer, j.card) : null, status: j.status };
 }
 
@@ -242,9 +245,9 @@ function accountView(ctx: ReadContext, viewer: Viewer, party: EntityId, account:
     due: statements ? due : null,
     statements: statements && (t.revolving || t.installment) ? [statementView(ctx, cycle), ...pastStatements(ctx, account)].filter((s): s is StatementView => s !== null) : [],
     cards: cards ? cardsOn(ctx.state, account).map((c) => cardView(ctx, viewer, c)) : [],
-    pending: holds ? journal.filter((j) => j.status === "pending").reverse().map((j) => journalLine(ctx, viewer, j)) : [],
+    pending: holds ? journal.filter((j) => j.status === "pending").reverse().map((j) => journalLine(ctx, viewer, party, j)) : [],
     holds: holds ? holdsOn(ctx.state, account).map((h) => ({ id: h.id, cents: h.cents, until: day(ctx, h.until), kind: h.kind, memo: h.memo })) : [],
-    transactions: level >= 2 ? journal.slice(-(level >= 4 ? 40 : 20)).reverse().map((j) => journalLine(ctx, viewer, j)) : [],
+    transactions: level >= 2 ? journal.slice(-(level >= 4 ? 40 : 20)).reverse().map((j) => journalLine(ctx, viewer, party, j)) : [],
     securedBy: securedBy !== "" && own(ctx.state.entities, securedBy) && visible(ctx, viewer, securedBy) ? { id: securedBy, name: nameFor(ctx, viewer, securedBy) } : null,
     loan: t.installment && level >= 3 ? { payment: typeof e?.fields.payment === "number" ? e.fields.payment : (cycle?.minimum ?? 0), monthsLeft: cycle?.months_left ?? numOf(e?.fields.months_left, numOf(e?.fields.remaining_months, p?.term_months ?? 0)), payoff: Math.max(0, -cents) } : null,
   };
@@ -472,7 +475,7 @@ export function buildFinanceView(hooks: FinanceHooks, ctx: ReadContext, party: E
     .flatMap((id) => journalOf(ctx.state, id))
     .sort((a, b) => b.at - a.at || (a.id < b.id ? 1 : -1))
     .slice(0, 10)
-    .map((j) => journalLine(ctx, viewer, j));
+    .map((j) => journalLine(ctx, viewer, party, j));
   const notesRaw = own(objOf(sliceOf(ctx.state, "economy").notes), party);
   const notes = player ? [] : (Array.isArray(notesRaw) ? notesRaw : []).slice(-NOTES_CAP).map((n) => objOf(n)).reverse().map((n) => ({ at: when(ctx, numOf(n.at)), text: strOf(n.text) }));
   const household = kind === "household" ? party : householdOf(ctx, party);
