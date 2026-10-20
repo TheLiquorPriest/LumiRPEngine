@@ -47,12 +47,12 @@ async function stateOf(rig: Rig, chatId: string): Promise<{ state: WorldState; w
 }
 
 /**
- * A Port Alder chat with Danny and Priya with the POV, the only Live minds: the author's `always`
- * pins them, the thresholds keep everyone else Background, and Near refreshes are off.
+ * A Port Alder chat with Danny and Priya (or `people`) with the POV, the only Live minds: the author's
+ * `always` pins them, the thresholds keep everyone else Background, and Near refreshes are off.
  */
-async function alderChat(rig: Rig, minds: JsonObject = {}): Promise<string> {
+async function alderChat(rig: Rig, minds: JsonObject = {}, people: readonly string[] = PEOPLE): Promise<string> {
   const worldId = await rig.newWorld("Alder", "modern_slice_of_life");
-  rig.body(await rig.send({ type: "lre.editor", op: "set", worldId, base: null, part: "minds", value: { thresholds: { live: 900, near: 900, far: 900 }, always: { ids: [...PEOPLE] }, ...minds } }));
+  rig.body(await rig.send({ type: "lre.editor", op: "set", worldId, base: null, part: "minds", value: { thresholds: { live: 900, near: 900, far: 900 }, always: { ids: [...people] }, ...minds } }));
   rig.body(await rig.send({ type: "lre.world", op: "commit", worldId, base: null }));
   const chatId = rig.host.createChat("Morning.");
   rig.body(await rig.send({ type: "lre.world", op: "attach", worldId, chatId }));
@@ -60,7 +60,7 @@ async function alderChat(rig: Rig, minds: JsonObject = {}): Promise<string> {
   const { state } = await stateOf(rig, chatId);
   const here = placeOfEntity(state, "pov");
   if (!here) throw new Error("the POV is nowhere");
-  rig.body(await rig.send({ type: "lre.edit", chatId, ops: PEOPLE.map((entity) => ({ op: "move", entity, to: here })) }));
+  rig.body(await rig.send({ type: "lre.edit", chatId, ops: people.map((entity) => ({ op: "move", entity, to: here })) }));
   return chatId;
 }
 
@@ -181,6 +181,31 @@ describe("minds around a turn", () => {
     const minds = section(rig, "Minds");
     expect(minds).toContain("Danny Okafor's mind: PRIVATE thoughts of Danny Okafor");
     expect(minds).toContain("Intends: Danny Okafor means to ask about the weekend.");
+  });
+
+  test("over its own budget the Minds section keeps the best on the ladder, and Stance tells of whoever it leaves out", async () => {
+    const rig = new Rig({ shipped: true });
+    fakeModels(rig, { monologue: "word ".repeat(100).trim() });
+    // Only being named scores, so the two named lead the ladder and Maddie comes last.
+    const weights = { here: 0, nearby: 0, mentioned: 100, regard: 0, knows: 0, owner: 0, track: 0, roles: {}, rule: 0, pending: 0, band: { principal: 0, supporting: 0, background: 0 }, recent: 0 };
+    const chatId = await alderChat(rig, { secrecy: "full", weights }, [...PEOPLE, "maddie_kowalczyk"]);
+    // Standard's Minds budget; the shared section budget roomy enough that Stance goes in.
+    rig.body(await rig.send({ type: "lre.settings.set", patch: { modelUse: { tokens: { sections: 4000 } } } }));
+    expect((await rig.rt.settings.get(rig.host.userId)).minds.tokens).toBe(600);
+    await rig.turn(chatId, "Morning, Danny. Morning, Priya.", "They look up.");
+    expect(mindCalls(rig).length).toBe(3);
+    const minds = section(rig, "Minds");
+    expect(minds).toContain("Danny Okafor's mind:");
+    expect(minds).toContain("Priya Nair's mind:");
+    expect(minds).not.toContain("Maddie Kowalczyk");
+    // Stance tells of the one left out, and of no one the Minds section tells of.
+    const stance = section(rig, "Stance");
+    expect(stance).toContain("Maddie Kowalczyk");
+    expect(stance).not.toContain("Danny Okafor");
+    expect(stance).not.toContain("Priya Nair");
+    const record = rig.rt.inspectorRecords(chatId)?.at(-1)?.sections.find((s) => s.slot === "minds");
+    expect(record).toMatchObject({ clipped: false, cut: 1 });
+    expect(record?.tokens).toBeLessThanOrEqual(600);
   });
 
   test("under full secrecy a mind reaches no helper step, no contradiction chip and no choice", async () => {

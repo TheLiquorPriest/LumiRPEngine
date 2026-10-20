@@ -46,8 +46,12 @@ export interface Registry extends EventTypes {
   readonly proposals: ReadonlyMap<string, ProposalChannelDef>;
   readonly lints: readonly LintRule[];
   readonly views: readonly PanelViewDef[];
-  /** A read context over a world document and a state. */
-  context(world: WorldDoc, state: Readonly<WorldState>): ReadContext;
+  /**
+   * A read context over a world document and a state. `queries` stand in for registered ones in this
+   * context only: what a caller knows of one read that the state doesn't hold (the minds the Minds
+   * section delivered, which Stance leaves out, DESIGN §24.3).
+   */
+  context(world: WorldDoc, state: Readonly<WorldState>, queries?: Partial<QueryMap>): ReadContext;
 }
 
 export class RegistryError extends Error {
@@ -137,7 +141,7 @@ export function createRegistry(packs: readonly PackDef[]): Registry {
     lints,
     views,
     get: (type) => events.get(type),
-    context(world, state) {
+    context(world, state, overrides) {
       return {
         registry,
         world,
@@ -149,6 +153,8 @@ export function createRegistry(packs: readonly PackDef[]): Registry {
           return services.get(String(name)) as ServiceMap[K];
         },
         query<K extends keyof QueryMap>(name: K): QueryMap[K] {
+          const given = overrides?.[name];
+          if (given !== undefined) return given;
           if (!queries.has(String(name))) throw new RegistryError(`no query ${String(name)}`);
           return queries.get(String(name)) as QueryMap[K];
         },

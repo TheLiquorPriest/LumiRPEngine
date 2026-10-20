@@ -16,7 +16,11 @@ declare module "../../../engine/registry" {
     "minds.plans": (ctx: ReadContext, who: EntityId) => MindPlan[];
     /** A character's fidelity as recorded, with no turn texts: the GM's pin, else the level of their latest mind, else Background. */
     "minds.tier": (ctx: ReadContext, who: EntityId) => Fidelity;
-    /** The people the Minds section tells of this round: at the POV's place now and visible to it, or whose mind interrupted a skip. Stance leaves them out (DESIGN §6.6, §24.3). */
+    /**
+     * The people the Minds section tells of this round: at the POV's place now and visible to it, or
+     * whose mind interrupted a skip. Stance leaves them out (DESIGN §6.6, §24.3). The interceptor's
+     * context gives only those whose line fit the section's budget, so Stance tells of the rest.
+     */
     "minds.minded": (ctx: ReadContext) => EntityId[];
     /** Whether minds were on at the chat's latest round: the castlife planner's formula invitations run only while they're off. */
     "minds.on": (ctx: ReadContext) => boolean;

@@ -508,7 +508,7 @@ Each character remembers in four layers: a **witness log** of what they saw happ
 - **Far refresh**: every so many game minutes, or never.
 - **Near and Far refreshes a turn**: how many Near and Far minds may think in one turn besides the Live ones, the most pressing first, or **no limit**. A refresh you ask for in the GM view always runs.
 - **Memory notes after the reply**: which levels of the characters who heard your message get the memory step. On a turn that takes you somewhere else, the people you leave remember it, and the people you meet there don't, since they weren't there to hear it.
-- **Minds section budget (tokens)**: the narrator's Minds section has its own budget, apart from the section budget, so minds never crowd out Scene or People.
+- **Minds section budget (tokens)**: the narrator's Minds section has its own budget, apart from the section budget, so minds never crowd out Scene or People. When the minds don't all fit, the characters lowest on the ladder are left out of it first, and the Stance section tells of them instead.
 - **Time skips**: how many beats a skip may stop at, and how many minds think at each beat; either can be **no limit**.
 - **Memory**: your own value for any of the world's memory settings (see [Character minds in a world](#character-minds-in-a-world)); **Use the world's** goes back to the world's.
 - **Prompts**: the instructions for each minds step (Character minds, Character memory, Time-skip beats, Memory consolidation), each with its built-in default shown beneath it. **Save** keeps your own; **Reset to the default** goes back to the built-in. Saving the built-in text unchanged keeps no copy, so you get later improvements to it. A world's own step template for a step wins over yours.
