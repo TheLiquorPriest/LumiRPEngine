@@ -2106,6 +2106,14 @@ const REQUIREMENT_WORDS: readonly [RegExp, string][] = [
   [/\blevel\.(\w+)\s*>=/, "this world doesn't simulate that in enough detail"],
   // A money feature the world's switches leave off (`money_feature`, DESIGN §25.12): the world, not the place or the hour, rules it out.
   [/\bmoney_feature\(/, "this world doesn't keep track of that"],
+  // Money (DESIGN §25): enough of it, and whose account it is. Whose money comes before who runs it, so a
+  // card change refused to someone who neither holds the card nor runs its account reads as the card.
+  [/\bcan_afford\(/, "you can't afford it"],
+  [/\b(?:spends|holds)\(self\b/, "that account isn't yours to use"],
+  [/\bmay_draw\(/, "you can't take a draw from it"],
+  [/\bmanages\(self\b/, "you don't run it"],
+  [/\bis_credit\(/, "that isn't a card, a credit line or a loan"],
+  [/\bemploys\(/, "they already work there"],
   [/\bowner\s*==\s*self\b/, "it isn't yours"],
   [/\bcarries\(self/, "you need to have it with you"],
   [/\blent_out\(/, "it isn't lent out"],

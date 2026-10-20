@@ -700,6 +700,9 @@ describe("typed timelapse", () => {
     expect(playerReason({ code: "requirement", reason: "requires at(kitchen)" })).toBe("Not possible here and now: it has to be here.");
     expect(playerReason({ code: "requirement", reason: "requires item.owner == self", requirement: "item.owner == self" })).toBe("Not possible here and now: it isn't yours.");
     expect(playerReason({ code: "requirement", reason: "requires weird_thing()" })).toBe("Not possible here and now.");
+    // A money refusal says why, to the player and to the narrator's Outcome alike.
+    expect(playerReason({ code: "requirement", reason: "requires can_afford(self, amount)", requirement: "can_afford(self, amount)" })).toBe("Not possible here and now: you can't afford it.");
+    expect(playerReason({ code: "requirement", reason: "requires holds(self, card) or manages(self, card.account)", requirement: "holds(self, card) or manages(self, card.account)" })).toBe("Not possible here and now: that account isn't yours to use.");
     expect(playerReason({ code: "declined", reason: "Sam can't afford $90" })).toBe("Sam can't afford $90");
   });
 });
