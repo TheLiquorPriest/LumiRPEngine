@@ -1309,7 +1309,7 @@ The Cast life planner (§8) lays each character's own plans into their days and 
   - **A day off** (the weekend, or a holiday that gives one) makes a slow morning (breakfast 7 to 11) and more time for leisure and friends.
   - **Holidays and observances** (Calendar 4) each bring an option of their own.
   - **Birthdays:** a person's own birthday and a close friend's (regard 30 and up) bring theirs. The `birthday` field is `MM-DD`, or `YYYY-MM-DD` with the year they were born. 29 February falls on the 28th in a common year. A birthday that isn't a date of the world's calendar (`02-30`, `13-05`, or `1994-02-29`, a common year) is no occasion, and lint flags it.
-  - **Season and weather:** summer draws people outdoors, winter and bad weather keep them in.
+  - **Season and weather:** summer draws people out to their time out and winter holds them back from it, though where they go for it stays the same. Bad weather keeps them in: their time out is at home, and they see friends less.
 - **Needs** (Cast life 4) follow the plan. An NPC's need is met at the end of the latest block that meets it, or now while they're in it, and the routine's times stand in before the day has met it. Options weigh needs as the day so far leaves them, so a plan through the lunch hour leaves them hungry for dinner.
 - **Invitations** (Cast life 4) come from plans with the POV. One is asked at most 6 hours before the meeting, never before the meeting's day, and at the earliest the moment after the plan was made, so one for "now" is asked in time; and only once (it is keyed by the plan). Its text never names a place the POV can't see. The old formula invitations run only while minds are off.
 - **Stance** leaves out whoever the Minds section tells of (§6.6, §24.3).

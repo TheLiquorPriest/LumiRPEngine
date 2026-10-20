@@ -137,7 +137,8 @@ export function shownActivity(ctx: ReadContext, who: EntityId, activity: string)
  * The planner's options for one agent and day: sleep, meals, socializing, leisure, chores, agenda
  * steps and retrievals, shaped by the day's occasion (DESIGN §24.8). A day off makes a slow morning
  * and more time for friends and leisure; a holiday, an observance, their own birthday or a close
- * friend's brings an option of its own; summer draws people out, winter and bad weather keep them in.
+ * friend's brings an option of its own; summer draws people out to their time out and winter holds
+ * them back from it, at the same place; bad weather keeps them in, with their time out at home.
  */
 export function dayOptions(ctx: ReadContext, who: EntityId, dayStart: number): PlanOption[] {
   const level = ctx.levelOf(who, "castlife");
