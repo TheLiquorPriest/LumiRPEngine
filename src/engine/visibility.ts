@@ -375,10 +375,38 @@ export interface Spelling {
 
 /**
  * A text's words as name checks compare them: lowercase runs of letters, marks and digits ("Vex's"
- * is "vex" and "s"; "राम" keeps its vowel sign), composed alike however they were typed.
+ * is "vex" and "s"; "राम" keeps its vowel sign), composed alike however they were typed. A short
+ * text (a name, a label) is spelt once while among the latest spelt: a name check spells every
+ * hidden name against each line (DESIGN §9.6). Callers never change what it gives.
  */
 function spellings(text: string): Spelling[] {
+  if (text.length > SPELT_LENGTH) return spell(text);
+  const known = SPELT.get(text);
+  if (known) return known;
+  const words = spell(text);
+  if (SPELT.size >= KEPT) SPELT.delete(SPELT.keys().next().value ?? "");
+  SPELT.set(text, words);
+  return words;
+}
+
+function spell(text: string): Spelling[] {
   return (text.normalize("NFC").toLowerCase().match(/[\p{L}\p{M}\p{N}]+/gu) ?? []).map((written) => ({ written, plain: unaccented(written).replace(/[øæœßđłıðþ]/g, (c) => PLAIN_LETTERS[c] ?? c) }));
+}
+
+/** How long a text may be to be spelt once and kept; how many spellings and patterns are kept. */
+const SPELT_LENGTH = 160;
+const KEPT = 8192;
+const SPELT = new Map<string, Spelling[]>();
+const PATTERNS = new Map<string, RegExp>();
+
+/** A name check's pattern, compiled once while among the latest used (only `test`, so none holds state). */
+function patternOf(source: string): RegExp {
+  const known = PATTERNS.get(source);
+  if (known) return known;
+  const re = new RegExp(source, "u");
+  if (PATTERNS.size >= KEPT) PATTERNS.delete(PATTERNS.keys().next().value ?? "");
+  PATTERNS.set(source, re);
+  return re;
 }
 
 /** Words too common to name anything on their own: "The Vault of Sorrows" is said by "vault" and "sorrows". */
@@ -406,7 +434,7 @@ export function wordPattern(w: string): string {
 
 /** Whether `words` come in `said` (a text's words joined by spaces) in order, each said as `wordPattern` reads it, each later in the same word as the one before or in the next. */
 function saysInOrder(said: string, words: readonly string[]): boolean {
-  return new RegExp(words.map(wordPattern).join(`${WORD_CHAR}*(?: ${WORD_CHAR}*)?`), "u").test(said);
+  return patternOf(words.map(wordPattern).join(`${WORD_CHAR}*(?: ${WORD_CHAR}*)?`)).test(said);
 }
 
 /** What a text says, read for name checks: its words as written and plain, with and without words like "the". */
@@ -422,7 +450,7 @@ function sayings(text: string): { says(words: readonly Spelling[], all: boolean)
   return {
     // Plain, "Zoe" says Zoë; as written, an inflected "Łukaszem" still says Łukasz.
     says: (parts, all) => saysInOrder(all ? texts.plainAll : texts.plain, parts.map((p) => p.plain)) || saysInOrder(all ? texts.writtenAll : texts.written, parts.map((p) => p.written)),
-    capital: (letter) => new RegExp(`(?<!${WORD_CHAR})${letter}(?!${WORD_CHAR})`, "u").test(cased),
+    capital: (letter) => patternOf(`(?<!${WORD_CHAR})${letter}(?!${WORD_CHAR})`).test(cased),
   };
 }
 
