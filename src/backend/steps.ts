@@ -504,6 +504,12 @@ export async function interpret(
     `Return the first action as "action" with its "params". If the input has more actions after it, list them in order in "more" (at most ${ACTION_QUEUE_LIMIT - 1}), each {"action": a catalog id, "params": {...}, "text": that action written as the player would type it}: "I walk to the market and buy bread" → "action" for the walk, and "more": [{"action": <the buy's id>, "params": {"item": "bread"}, "text": "I buy bread"}]. An action after them that no catalog action fits goes in "next", written as the player would type it.`,
     `If the input lets time pass after its last action ("…and sleep until the next morning", "…then wait two hours", "…then skip ahead to Friday at 6 PM"), add "then": {"minutes": number}, {"until": a day part, "shift" or "commitment"} or {"at": "YYYY-MM-DD HH:MM"} for a stated day and time; time passing is never in "more" or "next", nor is anything else that isn't an action.`,
   ];
+  // A message can take for granted a move the engine never made, or what the last message left
+  // unplayed (DESIGN §5.2): read those first, so the engine has the POV where the story does.
+  const presumed = [
+    `When the input takes for granted that ${pov.name} is somewhere other than the scene's place (beside someone who isn't here, at a fixture of another place), read the move there first, as "I go there" is read: to where that person was last seen, or the place with that fixture.`,
+    `When it takes for granted that what the scene lists as left from the last message happened, read those actions first, in order.`,
+  ];
   const system = [
     instructions ?? "",
     "You map a player's typed input in a roleplay to the engine actions it takes, in order.",
@@ -513,6 +519,7 @@ export async function interpret(
     scene.recent.length > 0 ? `Recent messages, oldest first:\n${scene.recent.join("\n")}` : "",
     `Action catalog:\n${actions.map(catalogLine).join("\n")}`,
     `Rules:\n${rules.map((r) => `- ${r}`).join("\n")}`,
+    presumed.map((r) => `- ${r}`).join("\n"),
     `Output JSON only, exactly this shape: {"action": string|null, "params": {...}, "confidence": number, "reason"?: string, "more"?: [{"action": string, "params": {...}, "text": string}], "then"?: {...}, "next"?: string}.`,
   ]
     .filter((part) => part !== "")
@@ -578,7 +585,16 @@ export const EXTRACT_STRICT_RULES = [
   "Never duplicate a change. When unsure, leave it out.",
 ];
 
-/** `extract`: proposals read from a reply (DESIGN §9.4). `instructions` (a world text template) lead the prompt; the contract stays; the preset's guidance and the step's lore follow. Empty on failure. */
+/** What `extract` reads from a reply: the changes it proposes, and the place it leaves the player character in (a place id as the model gave it; null when it doesn't say). */
+export interface ExtractRead {
+  proposals: JsonObject[];
+  where: string | null;
+}
+
+/** Where the reply leaves the player character, asked beside the changes: a reply can take a move as given without telling it, and no change holds that (DESIGN §9.4). */
+const EXTRACT_WHERE = `Beside "proposals", give "where": the id of the place where the reply leaves the player character at its end, whether it tells how they got there or takes it as given; null when it doesn't say.`;
+
+/** `extract`: proposals read from a reply (DESIGN §9.4), and where it leaves the player character (`where`, asked while `location` is a channel). `instructions` (a world text template) lead the prompt; the contract stays; the preset's guidance and the step's lore follow. Empty on failure. */
 export async function extract(
   steps: Steps,
   narration: string,
@@ -592,14 +608,15 @@ export async function extract(
   instructions?: string,
   lore: StepLore | null = null,
   guidance = "",
-): Promise<JsonObject[]> {
+): Promise<ExtractRead> {
   const types =
     `time_advance{minutes} · location{entity,place} · purchase{item,category,payer?,qty?,price?,method?} (payer: the person who pays, an entity id, never an account or a card; method: how the prose says they paid, in its words, e.g. "cash", "debit card", "credit card" or "savings"; leave it out when not said) · transfer{from,to,amount,method?} (from and to: people, entity ids, or a person's own cash, checking, savings or card account, never things; method: "cash" when bills or coins change hands in person, as in "hands me $20" or "slips her a twenty"; leave it out for a bank transfer, an app payment or a card) · give{item,from,to,amount?} (amount: for cash or money handed over, the amount) · quantity{entity,item,delta} · condition{who,condition,minutes?,clear?} (a named condition such as tired or injured; clear:true when it ends) · regard{from,to,axis,delta} (axis trust|affection|respect; delta -3..3) · knows{who,fact} (public facts only) · spawn{kind,name,place?,role?} · life{entity,state} (state: ${lifeStatesOf(world)
       .map(([id]) => id)
       .join("|")})`;
   const allowed = channels.length > 0 ? `Only these types are enabled: ${channels.join(", ")}.` : "";
   const system = `${instructions ? `${instructions}\n` : ""}You read a narrator's roleplay reply and propose concrete state changes that the prose states actually happened.\n${worldBrief(world, `Minutes already applied this turn: ${appliedMinutes}.`)}\nProposal types: ${types}. ${allowed}\nRules: no considered, refused or hypothetical changes; use world ids where they exist; one proposal per change. Money amounts are plain amounts in ${world.currency.code} as written (8 for ${world.currency.symbol}8).\nStrict rules:\n- ${EXTRACT_STRICT_RULES.join("\n- ")}\nOutput JSON only: {"proposals":[{"type":...}, ...]}.`;
-  const raw = await steps.helperJson("extract", system, `State before: ${JSON.stringify(prefix)}\nNarration:\n${narration}`, config, userId, signal, { lore, guidance });
+  const asked = channels.length === 0 || channels.includes("location") ? `${system}\n${EXTRACT_WHERE}` : system;
+  const raw = await steps.helperJson("extract", asked, `State before: ${JSON.stringify(prefix)}\nNarration:\n${narration}`, config, userId, signal, { lore, guidance });
   const list = isRecord(raw) && Array.isArray(raw.proposals) ? raw.proposals : Array.isArray(raw) ? raw : [];
   const proposals: JsonObject[] = [];
   for (const p of list) {
@@ -607,7 +624,8 @@ export async function extract(
     // Scaled once: a cash give becomes a transfer carrying its scaled amount.
     proposals.push(inMinorUnits(JSON.parse(JSON.stringify(p)) as JsonObject, world.currency));
   }
-  return dedupeProposals(proposals, world.pov);
+  const where = asked !== system && isRecord(raw) && typeof raw.where === "string" && raw.where.trim() !== "" ? raw.where.trim() : null;
+  return { proposals: dedupeProposals(proposals, world.pov), where };
 }
 
 /**

@@ -35,6 +35,8 @@ function isStoredChip(raw: unknown): raw is StoredChip {
 export class ChipStore {
   /** Chips by `user \0 chat`: one user's cache never answers another. */
   private readonly chips = new Map<string, StoredChip[]>();
+  /** The chips each chat's latest lapse took, by `user \0 chat`: a turn sent after it may still read them (`recent`), a message sent again in its place included. */
+  private readonly lapsed = new Map<string, StoredChip[]>();
 
   constructor(private readonly host: HostPort) {}
 
@@ -97,12 +99,27 @@ export class ChipStore {
     const list = await this.list(chatId, userId);
     const gone = list.filter((c) => c.expires === "next_send");
     if (gone.length === 0) return [];
+    const key = this.key(chatId, userId);
+    this.lapsed.delete(key);
+    this.lapsed.set(key, gone);
+    if (this.lapsed.size > 256) this.lapsed.delete(this.lapsed.keys().next().value ?? "");
     this.chips.set(
-      this.key(chatId, userId),
+      key,
       list.filter((c) => c.expires !== "next_send"),
     );
     await this.save(chatId, userId);
     return gone;
+  }
+
+  /**
+   * A chip by id, stored or taken by the chat's latest lapse: the turn a send starts reads what the
+   * reply before it left (its Send chip, DESIGN §5.2), whether or not that send's lapse ran first,
+   * and so does a message sent again after one deleted. Ids name their message, so an older lapse's
+   * chip never answers for another reply.
+   */
+  async recent(chatId: ChatId, userId: UserId, id: ChipId): Promise<StoredChip | null> {
+    const stored = (await this.list(chatId, userId)).find((c) => c.id === id);
+    return stored ?? this.lapsed.get(this.key(chatId, userId))?.find((c) => c.id === id) ?? null;
   }
 
   /** Chips on messages that no longer exist go. */
@@ -135,6 +152,10 @@ export class ChipStore {
         list.splice(i, 1);
       } else list[i] = { ...c, id: idAfterSwipeDelete(c.id, messageId, deleted) ?? c.id, swipeId: c.swipeId - 1 };
     }
+    // What the latest lapse took of the message goes too: its ids may now name another swipe.
+    const key = this.key(chatId, userId);
+    const lapsed = this.lapsed.get(key);
+    if (lapsed?.some((c) => c.messageId === messageId)) this.lapsed.set(key, lapsed.filter((c) => c.messageId !== messageId));
     if (changed) await this.save(chatId, userId);
     return dropped;
   }
