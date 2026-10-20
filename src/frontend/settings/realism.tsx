@@ -118,7 +118,7 @@ const CLAIM_CHOICES = CLAIM_MODES.map((mode) => ({ value: mode, label: CLAIM_MOD
  */
 export function ClaimsControl(props: { value: ClaimsPolicy; disabled?: boolean; onChange(next: ClaimsPolicy): void }) {
   const { mode, capped } = props.value;
-  const help = mode === "real" ? (capped ? "It's added where your action needs it, unless it costs more than the world's claim cap: then you're asked first." : "It's added where your action needs it, at any price.") : mode === "ask" ? "The turn waits for your answer: Add it, or Not an action." : "The action doesn't play, and a chip says why.";
+  const help = mode === "real" ? (capped ? "It's added where your action needs it, unless it costs more than the world's claim cap: then you're asked first." : "It's added where your action needs it, at any price.") : mode === "ask" ? "The turn waits for your answer: Add, or Not an action." : "The action doesn't play, and a chip says why.";
   return (
     <div class="lre-stack" data-lre-claims>
       <div class="lre-field">
