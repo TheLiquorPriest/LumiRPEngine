@@ -324,16 +324,20 @@ function whoseMoney(ctx: ReadContext, side: string): Set<EntityId> {
  * household's: "Jordan Ellis", " POV "), which the hub refuses by the same keys. A payment among
  * whom the money itself is for (`whoseMoney`), the manager aside, is the money's own: the café's
  * savings topping up its operating account, a trust paying its beneficiary though she's the
- * trustee's daughter. A role that doesn't count an account's worth (an authorized user's card)
- * doesn't make it theirs.
+ * trustee's daughter. An account the manager may spend by a role of their own (an authorized
+ * user's card, a custodian's or a trustee's) is theirs too, whoever's worth it is, as they could
+ * move the money on from it, unless they hold a share of the money themselves: then it's partly
+ * theirs, and the account no way round anyone else's.
  */
 export function paysFor(ctx: ReadContext, who: EntityId, to: string, from: string, interests: ReadonlySet<EntityId> = interestsOf(ctx, who)): boolean {
   const forHolder = whoseMoney(ctx, from);
+  const stake = forHolder.has(who);
   forHolder.delete(who);
   const mine = (party: string): boolean => interests.has(party) && !forHolder.has(party);
   const id = to.startsWith(EXTERNAL_ACCOUNT_PREFIX) ? to.slice(EXTERNAL_ACCOUNT_PREFIX.length) : to;
   const e = own(ctx.state.entities, id);
-  if (e) return e.kind === "account" ? worthHolders(ctx, id).some(mine) : mine(id);
+  if (e?.kind === "account") return (!stake && canSpend(ctx.state, id, who)) || worthHolders(ctx, id).some(mine);
+  if (e) return mine(id);
   const key = payeeKey(id);
   const household = householdOf(ctx, who);
   return key !== "" && [who, household].some((p) => p !== null && (key === payeeKey(p) || key === payeeKey(own(ctx.state.entities, p)?.name ?? "")));
