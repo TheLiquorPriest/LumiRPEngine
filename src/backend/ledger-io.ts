@@ -407,8 +407,9 @@ interface Prepared {
   /** How the frontend starts the generation again (asked again when a frontend comes back to the chat). */
   as: GenerateAs;
   /**
-   * The one page asked to start it (DESIGN §5.1): the page the stopped generation ran for, else the
-   * first to open the chat; another page gets it only once this one disconnects. Null: none yet.
+   * The one page asked to start it (DESIGN §5.1): a page showing the chat on screen, the one the
+   * stopped generation ran for first. A page showing the chat takes it from a holder that doesn't,
+   * and it passes on when its page closes. Null: no page shows the chat yet.
    */
   holder: string | null;
   /** The generation the guard let through with it; null until one came: then it is consumed. */
@@ -463,6 +464,8 @@ export class LedgerService {
   private readonly damaged = new Map<string, Set<string>>();
   /** Each world chat's guard state (DESIGN §5.1). */
   private readonly gates = new Map<ChatId, Gate>();
+  /** Each of the users' pages: the chat it shows and whether on screen, newest report last (`page`). */
+  private readonly pages = new Map<string, { userId: UserId; chatId: ChatId | null; viewing: boolean }>();
   /** The latest generation the host started in each chat, as its event arrived: the guard's generation. */
   private readonly started = new Map<ChatId, GenerationStartedEvent>();
   /** The chat whose sections each world's book holds now, and how to wait for it to let go (DESIGN §6.8). */
@@ -678,10 +681,45 @@ export class LedgerService {
   }
 
   /**
+   * A page said which chat it shows and whether that is on screen (hello, resync, `lre.page`; DESIGN
+   * §5.1). A waiting reply whose page stops showing its chat goes to a page that shows it.
+   */
+  page(session: string, userId: UserId, chatId: ChatId | null, viewing: boolean): void {
+    this.pages.delete(session);
+    this.pages.set(session, { userId, chatId, viewing });
+    if (this.pages.size > 1024) this.pages.delete(this.pages.keys().next().value ?? "");
+    for (const [id, gate] of this.gates) {
+      const p = gate.prepared;
+      if (p && p.generationId === null && p.holder === session && !this.shows(session, id)) this.handOver(id, gate.userId, p);
+    }
+  }
+
+  /** Whether a page shows the chat on screen, as it last said; a page that said nothing yet is taken at the host's word. */
+  private shows(session: string, chatId: ChatId): boolean {
+    const page = this.pages.get(session);
+    return page === undefined || (page.chatId === chatId && page.viewing);
+  }
+
+  /** The page that last said it shows the chat on screen, or null. */
+  private viewerOf(chatId: ChatId, userId: UserId): string | null {
+    let last: string | null = null;
+    for (const [session, page] of this.pages) if (page.userId === userId && page.chatId === chatId && page.viewing) last = session;
+    return last;
+  }
+
+  /** A waiting reply's page no longer shows its chat or closed: the claim goes to a page that shows it, else to the next one that opens it. */
+  private handOver(chatId: ChatId, userId: UserId, p: Prepared): void {
+    p.holder = this.viewerOf(chatId, userId);
+    if (p.holder !== null) this.host.frontend.send(restartPush(chatId, p), userId, p.holder);
+    else this.host.frontend.send({ lre: PROTOCOL_VERSION, type: "lre.activity", chatId, activity: this.diag?.activityOf(chatId) ?? null }, userId);
+  }
+
+  /**
    * A frontend said hello to the chat, or resynced: a turn the engine prepared that no generation
    * took yet is asked for again (DESIGN §5.1), so a page that slept through the first ask starts it.
-   * Only the page holding the turn's claim is asked; the first page to come when none holds it takes
-   * it, and any other page's activity line says the reply already started elsewhere.
+   * Only the page holding the turn's claim is asked. A page showing the chat takes the claim when
+   * none holds it or its holder doesn't show the chat; any other page's activity line says the
+   * reply already started elsewhere.
    */
   askAgain(chatId: ChatId, userId: UserId, session?: string): void {
     const gate = this.gates.get(chatId);
@@ -692,21 +730,34 @@ export class LedgerService {
       this.host.frontend.send(restartPush(chatId, p), userId);
       return;
     }
-    p.holder ??= session;
+    const here = this.shows(session, chatId);
+    if (here && p.holder !== session && (p.holder === null || !this.shows(p.holder, chatId))) p.holder = session;
     if (p.holder === session) this.host.frontend.send(restartPush(chatId, p), userId, session);
-    else this.host.frontend.send({ lre: PROTOCOL_VERSION, type: "lre.activity", chatId, activity: { chatId, turn: p.id, state: "running", label: STEP_LABEL.elsewhere ?? "Already started in another window", since: Date.now() } }, userId, session);
+    else if (here) this.host.frontend.send({ lre: PROTOCOL_VERSION, type: "lre.activity", chatId, activity: { chatId, turn: p.id, state: "running", label: STEP_LABEL.elsewhere ?? "Already started in another window", since: Date.now() } }, userId, session);
   }
 
   /**
-   * A page disconnected: a waiting reply whose claim it held goes to the next page that opens or
-   * resyncs its chat (`askAgain`), and the user's pages show the chat's own activity line again.
+   * A page asked to start a prepared reply claims it before it starts it (`lre.restart`): yes only to
+   * the page holding the turn, while no generation has taken it. A page that wakes with an ask the
+   * claim has since passed on from is told no, so the reply starts once.
+   */
+  claimRestart(chatId: ChatId, userId: UserId, session: string | undefined, turn: string): boolean {
+    const gate = this.gates.get(chatId);
+    const p = gate?.prepared;
+    if (!gate || gate.userId !== userId || !p || p.id !== turn || p.generationId !== null) return false;
+    return !this.host.capabilities.sessions || session === undefined || p.holder === session;
+  }
+
+  /**
+   * A page disconnected: it shows nothing now, and a waiting reply whose claim it held goes to a
+   * page that shows its chat, else to the next page that opens it (`askAgain`).
    */
   private sessionClosed(session: string, userId: UserId | null): void {
+    this.pages.delete(session);
     for (const [chatId, gate] of this.gates) {
       const p = gate.prepared;
       if (!p || p.generationId !== null || p.holder !== session || (userId !== null && gate.userId !== userId)) continue;
-      p.holder = null;
-      this.host.frontend.send({ lre: PROTOCOL_VERSION, type: "lre.activity", chatId, activity: this.diag?.activityOf(chatId) ?? null }, gate.userId);
+      this.handOver(chatId, gate.userId, p);
     }
   }
 
@@ -885,14 +936,16 @@ export class LedgerService {
       }
       const turn = core.take(halt.id);
       const as = restartAs(halt.type, observed);
-      const prepared: Prepared = { id: halt.id, type: halt.type, target: target?.id ?? null, turn: turn?.planned ? turn : null, stamp, epoch, inputs, worldId: gate.worldId, delivered, as, holder: halt.session ?? null, generationId: null };
+      // The page to start it: the one the stopped generation ran for when it shows the chat, else the
+      // page that last said it shows it; with none, the first page to show the chat claims it (`askAgain`).
+      const holder = halt.session !== undefined && this.shows(halt.session, chatId) ? halt.session : this.viewerOf(chatId, userId);
+      const prepared: Prepared = { id: halt.id, type: halt.type, target: target?.id ?? null, turn: turn?.planned ? turn : null, stamp, epoch, inputs, worldId: gate.worldId, delivered, as, holder, generationId: null };
       gate.prepared = prepared;
       // Anything that changed while the engine ran makes the turn stale at once: nothing is generated.
       this.dropIfStale(chatId);
       if (this.gates.get(chatId)?.prepared !== prepared) return;
       this.diag?.rest(at, as === "send" ? (STEP_LABEL.ready ?? "Ready: press Send for the reply") : (STEP_LABEL.restart ?? "Ready; reopen the chat to continue"));
-      // The page the stopped generation ran for starts it; with none named, the first page to open the
-      // chat claims it (`askAgain`). A host that names no page asks every page.
+      // A host that names no page asks every page.
       if (prepared.holder !== null) this.host.frontend.send(restartPush(chatId, prepared), userId, prepared.holder);
       else if (!this.host.capabilities.sessions) this.host.frontend.send(restartPush(chatId, prepared), userId);
     });

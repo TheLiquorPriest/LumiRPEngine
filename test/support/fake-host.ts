@@ -560,10 +560,10 @@ export class FakeHost implements HostPort {
 
   /**
    * A generation as the player starts it (Send, Regenerate, swipe, Continue). When the guard stops it
-   * to run the engine first, the engine asks the frontend to start it again (`lre.generate`), as this
-   * plays: the frontend's Regenerate or Continue, or for a new reply after a reply the player's Send
-   * again. The generation returned is the one the reply streams in (DESIGN §5.1); a run that failed
-   * returns the stopped one (`halted`).
+   * to run the engine first, the engine asks a page to start it again (`lre.generate`), as this
+   * plays: that page claims the turn (`claimRestart`) and runs the frontend's Regenerate or Continue,
+   * or for a new reply after a reply the player's Send again. The generation returned is the one the
+   * reply streams in (DESIGN §5.1); a run that failed, or a claim refused, returns the stopped one.
    */
   async start(chatId: ChatId, opts: StartOptions): Promise<Generation> {
     let g = await this.begin(chatId, opts);
@@ -571,11 +571,15 @@ export class FakeHost implements HostPort {
       const at = this.restarts.findIndex((r) => r.chatId === chatId);
       if (at < 0) return g;
       const [restart] = this.restarts.splice(at, 1);
-      const type: HostGenerationType = restart?.as === "continue" ? "continue" : restart?.as === "send" ? "normal" : "regenerate";
-      g = await this.begin(chatId, { type, ...(opts.createAtEnd ? { createAtEnd: true } : {}), ...(restart?.session !== undefined ? { session: restart.session } : {}) });
+      if (!restart || (restart.as !== "send" && this.claimRestart && !(await this.claimRestart(restart)))) return g;
+      const type: HostGenerationType = restart.as === "continue" ? "continue" : restart.as === "send" ? "normal" : "regenerate";
+      g = await this.begin(chatId, { type, ...(opts.createAtEnd ? { createAtEnd: true } : {}), ...(restart.session !== undefined ? { session: restart.session } : {}) });
     }
     return g;
   }
+
+  /** How a page claims a prepared turn before it starts it (`lre.restart`); the rig sends the request, the ledger harness asks the service. */
+  claimRestart: ((restart: { chatId: ChatId; turn: string; session?: string }) => Promise<boolean>) | null = null;
 
   /**
    * One generation as Lumiverse runs it, up to its streaming: its target staged, GENERATION_STARTED,

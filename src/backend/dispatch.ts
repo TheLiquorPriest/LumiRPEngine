@@ -183,6 +183,8 @@ export class Dispatcher {
         } else reply("lre.state.resync", { accepted: true });
         // The frontend says which Loom preset is active: the preset prompts assemble with (DESIGN §6.8).
         if (r.type === "lre.hello" && r.presetId !== undefined && this.rt.presets.useLoom(userId, typeof r.presetId === "string" ? r.presetId : null)) this.rt.ledger.inputsChanged(userId);
+        // Which chat this page shows, and whether on screen: who starts a prepared reply (DESIGN §5.1). An outside client is no page.
+        if (session !== undefined && !(r.type === "lre.hello" && r.client !== undefined)) this.rt.ledger.page(session, userId, r.chatId, r.chatId !== null && r.viewing !== false);
         if (r.chatId) {
           const run = await this.rt.runOf(r.chatId, userId);
           if (run) {
@@ -192,11 +194,21 @@ export class Dispatcher {
           await this.rt.push.snapshot(r.chatId, userId, session);
           // A frontend that opens mid-turn (or after a failed one) shows the activity line at once.
           this.rt.host.frontend.send({ lre: PROTOCOL_VERSION, type: "lre.activity", chatId: r.chatId, activity: this.rt.diag.activityOf(r.chatId) }, userId, session);
-          // A reply the engine prepared while this tab slept is started now (DESIGN §5.1).
+          // A reply the engine prepared while this page slept, or that another page held, starts here now.
           this.rt.ledger.askAgain(r.chatId, userId, session);
         }
         return;
       }
+      case "lre.page": {
+        reply("lre.page", { accepted: true });
+        if (session === undefined) return;
+        this.rt.ledger.page(session, userId, r.chatId, r.chatId !== null && r.viewing);
+        if (r.chatId && r.viewing) this.rt.ledger.askAgain(r.chatId, userId, session);
+        return;
+      }
+      case "lre.restart":
+        reply("lre.restart", { start: this.rt.ledger.claimRestart(r.chatId, userId, session, r.turn) });
+        return;
       case "lre.action": {
         await this.requireWorldChat(r.chatId, userId);
         const bridge = this.rt.bridgeOf(r.chatId);

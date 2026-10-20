@@ -257,6 +257,65 @@ describe("engine first", () => {
     expect(rig.host.restarts.map((r) => r.session)).toEqual(["phone"]);
     expect((await rig.host.begin(chatId, { type: "regenerate", session: "phone" })).halted).toBeUndefined();
   });
+
+  test("the sending page showing the chat gets the restart while a newer page sits on home, though the reply ran for the newer one", async () => {
+    const rig = new Rig();
+    const chatId = await rig.worldChat();
+    rig.body(await rig.send({ type: "lre.hello", chatId }, "desk"));
+    rig.body(await rig.send({ type: "lre.hello", chatId: null }, "phone"));
+    rig.host.sendUser(chatId, "I look around.");
+    await rig.host.settle();
+    // Lumiverse runs new work for its newest page, the phone on home.
+    expect((await rig.host.begin(chatId, { type: "normal", session: "phone" })).halted).toBe("cancelled");
+    expect(rig.host.restarts.map((r) => r.session)).toEqual(["desk"]);
+    const reply = await rig.host.start(chatId, { type: "regenerate", session: "desk" });
+    expect(reply.halted).toBeUndefined();
+  });
+
+  test("a page that opens the chat takes the restart from a holder that went home; the old holder's claim is refused, so one reply comes", async () => {
+    const rig = new Rig();
+    const chatId = await rig.worldChat();
+    rig.body(await rig.send({ type: "lre.hello", chatId }, "desk"));
+    rig.host.sendUser(chatId, "I look around.");
+    await rig.host.settle();
+    expect((await rig.host.begin(chatId, { type: "normal", session: "desk" })).halted).toBe("cancelled");
+    const [offered] = rig.host.restarts.splice(0);
+    expect(offered?.session).toBe("desk");
+    // The desk goes home before starting it; the phone opens the chat and takes it.
+    rig.body(await rig.send({ type: "lre.page", chatId: null, viewing: false }, "desk"));
+    rig.body(await rig.send({ type: "lre.hello", chatId }, "phone"));
+    expect(rig.host.restarts.map((r) => r.session)).toEqual(["phone"]);
+    // The desk's old ask is refused; the phone's claim starts the one reply.
+    expect(rig.body(await rig.send({ type: "lre.restart", chatId, turn: offered?.turn ?? "" }, "desk")).start).toBe(false);
+    const turn = rig.host.restarts[0]?.turn ?? "";
+    expect(rig.body(await rig.send({ type: "lre.restart", chatId, turn }, "phone")).start).toBe(true);
+    const reply = await rig.host.begin(chatId, { type: "regenerate", session: "phone" });
+    expect(reply.halted).toBeUndefined();
+    await rig.host.finish(reply, "The square is quiet.");
+    expect(rig.host.chat(chatId).messages.filter((m) => !m.isUser).at(-1)?.swipes).toEqual(["The square is quiet."]);
+  });
+
+  test("two pages both showing the chat: one is asked, the other's claim is refused, and one reply comes", async () => {
+    const rig = new Rig();
+    const chatId = await rig.worldChat();
+    rig.body(await rig.send({ type: "lre.hello", chatId }, "desk"));
+    rig.body(await rig.send({ type: "lre.hello", chatId }, "phone"));
+    rig.host.sendUser(chatId, "I look around.");
+    await rig.host.settle();
+    expect((await rig.host.begin(chatId, { type: "normal", session: "phone" })).halted).toBe("cancelled");
+    const [offered] = rig.host.restarts;
+    expect(rig.host.restarts.map((r) => r.session)).toEqual(["phone"]);
+    // The desk resyncs: it isn't asked, and its claim, should it try, is refused.
+    rig.body(await rig.send({ type: "lre.state.resync", chatId }, "desk"));
+    expect(rig.host.restarts).toHaveLength(1);
+    expect(rig.body(await rig.send({ type: "lre.restart", chatId, turn: offered?.turn ?? "" }, "desk")).start).toBe(false);
+    const reply = await rig.host.start(chatId, { type: "regenerate", session: "phone" });
+    expect(reply.halted).toBeUndefined();
+    await rig.host.finish(reply, "Quiet.");
+    // Consumed: a late claim from either page is refused.
+    for (const page of ["desk", "phone"]) expect(rig.body(await rig.send({ type: "lre.restart", chatId, turn: offered?.turn ?? "" }, page)).start).toBe(false);
+    expect(rig.host.chat(chatId).messages.filter((m) => !m.isUser).at(-1)?.swipes).toEqual(["Quiet."]);
+  });
 });
 
 /** The activity lines sent to one page since `from` in the host's sends. */
