@@ -46,6 +46,7 @@ export function stateFixture(chatId: string): StateView {
       weather: "Rain, 12 °C",
       cash: { cents: 4600 },
       fixes: {
+        time: { type: "time", value: "2026-10-20 07:42", gregorian: true, months: ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"].map((name, i) => ({ name, days: [31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31][i] ?? 30 })) },
         place: { entity: "pov", field: "place", type: "ref", value: "diner", options: [{ value: "diner", label: "Rosie's Diner" }, { value: "apartment", label: "Apartment 4B" }, { value: "garage", label: "Kim's Garage" }] },
         cash: { entity: "pov", field: "cash", type: "money", value: 4600, min: 0 },
         weather: { entity: "region_maple", field: "weather", type: "text", value: "rain", options: [{ value: "clear", label: "Clear" }, { value: "cloudy", label: "Overcast" }, { value: "rain", label: "Rain" }, { value: "storm", label: "A storm" }, { value: "fog", label: "Fog" }, { value: "snow", label: "Snow" }] },

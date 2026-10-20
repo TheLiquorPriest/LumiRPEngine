@@ -42,8 +42,11 @@ export interface ClockView {
   scale: number;
 }
 
-/** A ✎ fix target: what `lre.fix` writes (DESIGN §12 HUD, §9.2). */
-export interface FixTarget {
+/** A ✎ fix target (DESIGN §12): a field `lre.fix` sets, or the clock. */
+export type FixTarget = FieldFixTarget | TimeFixTarget;
+
+/** A field a ✎ fix sets: what `lre.fix` writes as one typed `set` (DESIGN §12 HUD, §9.2). */
+export interface FieldFixTarget {
   entity: EntityId;
   field: FieldId;
   type: FieldType;
@@ -51,6 +54,20 @@ export interface FixTarget {
   options?: { value: JsonValue; label: string }[];
   min?: number;
   max?: number;
+}
+
+/**
+ * The clock's ✎ (DESIGN §9.2, §12): a date and a time of day in the world's calendar, local to the
+ * POV's place as the HUD reads it, which `lre.fix` sends as `time`.
+ */
+export interface TimeFixTarget {
+  type: "time";
+  /** Now, `YYYY-MM-DD HH:MM`: where the editor starts. */
+  value: string;
+  /** The calendar's months in order, each with its name and days (February's 29 in a Gregorian calendar). */
+  months: { name: string; days: number }[];
+  /** A Gregorian calendar, whose February has 29 days only in a leap year. */
+  gregorian: boolean;
 }
 
 /** One row of a character sheet: Play → You, the Sheet Designer's preview, anyone's sheet in a GM view. */
@@ -62,7 +79,7 @@ export interface SheetRowView {
   pool?: { current: number; min: number; max: number | null };
   /** A progression: the level, the XP, the XP that level needed and the next level needs (null at the top). */
   progress?: { level: number; xp: number; from: number; next: number | null };
-  fix?: FixTarget;
+  fix?: FieldFixTarget;
 }
 
 export interface SheetSectionView {
@@ -77,8 +94,8 @@ export interface HudView {
   weather: string | null;
   /** Cash shown at the POV's Money level: a band at level 1, cents from level 2. */
   cash: { band: string } | { cents: number } | null;
-  /** ✎ fix targets for the HUD fields that have one. */
-  fixes: Partial<Record<"place" | "weather" | "cash" | "scene", FixTarget>>;
+  /** ✎ fix targets for the HUD values that have one: the clock and the fields. */
+  fixes: Partial<Record<"place" | "weather" | "cash" | "scene", FieldFixTarget>> & { time?: TimeFixTarget };
 }
 
 export interface SceneView {

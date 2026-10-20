@@ -12,6 +12,9 @@
 //   4. slot and day rules (event rules fire as events land), then tracks.
 // Off-screen LOD1 agents outside a timelapse catch up K per turn from a round-robin queue
 // (`catchUp`); whatever is left is the deterministic backlog: each agent's cursor trails the clock.
+// A ✎ fix that sets the clock back (DESIGN §9.2) leaves the world where it had run (`ranTo`):
+// passing that window again moves only the clock, since every slot, schedule edge and agent's
+// moment in it already ran, and the agents' cursors already stand past it (L48).
 // Every bound is a deterministic unit (slots, agent-days, events), never wall clock.
 
 import type { EntityId, InterruptClass, InterruptPolicy } from "../shared/ids";
@@ -65,6 +68,15 @@ export function agentCursor(world: ReadContext["world"], state: Readonly<WorldSt
 /** The last fully completed slot at the current clock. */
 export function completedSlot(world: ReadContext["world"], state: Readonly<WorldState>): number {
   return slotIndexAt(calendarOf(world), state.clock) - 1;
+}
+
+/**
+ * How far the world has run: the clock, or where it stood before a ✎ fix set it back (DESIGN §9.2),
+ * until it passes that again. Everything time-driven up to it already happened (L48).
+ */
+export function ranTo(state: Readonly<WorldState>): number {
+  const reached = readEngineSlice(state).reached;
+  return reached !== null && reached > state.clock ? reached : state.clock;
 }
 
 export interface AdvanceOptions {
@@ -192,9 +204,12 @@ export function advance(reg: Registry, w: Working, to: number, opts: AdvanceOpti
   const result: AdvanceResult = { from, to: from, requested: to, slots: 0, stop: "target", stoppedBy: null, stops: [], notes: [], agentDays: 0, events: 0, rules: [], tracks: [], open: opts.open ?? null };
   if (to <= from) return result;
   const cal = calendarOf(w.world);
+  // Up to how far the world has run (after the clock was set back), everything already happened:
+  // the run moves the clock across it and steps only what lies past it (L48).
+  const since = ranTo(w.state);
   const schedules = allSchedules(reg, w.world);
-  const instants = scheduleInstants(w.world, schedules, from, to);
-  const slots = slotsEnding(cal, from, to);
+  const instants = scheduleInstants(w.world, schedules, since, to);
+  const slots = slotsEnding(cal, since, to);
   const e = emitter(reg, w, opts.runSeed, result.rules);
   const timelapse = opts.mode === "timelapse";
   /**
@@ -217,14 +232,15 @@ export function advance(reg: Registry, w: Working, to: number, opts: AdvanceOpti
   let next = 0;
 
   /**
-   * The agents' own moments inside a slot after the clock and up to `until` (`ProcessDef.instants`):
+   * The agents' own moments inside a slot after the clock (and after how far the world has run) and
+   * up to `until` (`ProcessDef.instants`):
    * for every agent stepped through the slot before (in a turn the LOD1 agents caught up, in a
    * timelapse those it steps), in time order, then by agent and process.
    */
   const agentInstants = (slot: Slot, until: number): { at: number; agent: EntityId; def: ProcessDef; instant: AgentInstant }[] => {
     const timed = reg.processes.filter((d) => d.scope === "agent" && d.instants);
     if (timed.length === 0) return [];
-    const after = w.state.clock;
+    const after = Math.max(w.state.clock, since);
     const who = timelapse ? stepping() : lod1Agents(w.world, w.state).filter((a) => a !== w.world.pov);
     const info: SlotInfo = { start: slot.start, end: slot.end, index: slot.index };
     const out: { at: number; agent: EntityId; def: ProcessDef; instant: AgentInstant }[] = [];
@@ -355,7 +371,7 @@ export function advance(reg: Registry, w: Working, to: number, opts: AdvanceOpti
     // so that piece can still go back to it.
     let open = tail.start < to && result.slots === 0 && opts.open?.slot === tail.index ? opts.open : null;
     if (tail.start < to && !open) {
-      const stepped = timelapse && opts.segmentTo !== undefined && tail.end <= opts.segmentTo && result.slots + spent.slots > 0;
+      const stepped = timelapse && opts.segmentTo !== undefined && tail.end <= opts.segmentTo && tail.end > since && result.slots + spent.slots > 0;
       if (stepped && (overDays(tail, stepping().length) || spent.events + w.events.length - startEvents >= cap.events)) result.stop = "cap";
       else {
         let mark: WorkingMark | null = null;

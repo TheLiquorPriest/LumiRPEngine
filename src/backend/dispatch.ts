@@ -25,7 +25,7 @@ import { TIME_CONTROLS, validMarkerBody } from "../engine/events";
 import { materializeIfNeeded } from "../engine/materialize";
 import { optionalService } from "../engine/pack-kit";
 import { rulesetFloor } from "../engine/registry-impl";
-import { applyTimeAdvance, IN_FIGHT, parseOverrides, parseTarget } from "../engine/time";
+import { applyTimeAdvance, clockFix, IN_FIGHT, parseOverrides, parseTarget } from "../engine/time";
 import { timelapseIntent } from "../engine/turn";
 import { definitionsLag, planUpgrade } from "../engine/upgrade";
 import { actionOdds } from "../engine/resolve";
@@ -268,9 +268,19 @@ export class Dispatcher {
       }
       case "lre.fix": {
         const { state, world } = await this.head(r.chatId, userId);
-        const edit = resolveEdit(this.rt.registry, world, state, [{ op: "set", entity: r.entity, field: r.field, value: r.value }], { gm: false, runSeed: this.runSeedOf(r.chatId) });
-        if ("rejection" in edit) throw new RequestError("validation", edit.rejection.reason);
-        const result = edit.events.length > 0 ? await this.write(r.chatId, userId, { kind: "post", id: this.nextId(), target: "head", entry: { kind: "fix", events: edit.events } }) : { pending: false };
+        let events: LedgerEvent[];
+        if ("time" in r) {
+          // The clock's ✎ (DESIGN §9.2, §12): later runs the time between as an applied advance, earlier sets the clock back (L48).
+          if (typeof r.time !== "string") throw new RequestError("bad_request", "a time is a date and time of day, YYYY-MM-DD HH:MM");
+          const fixed = clockFix(this.rt.registry, world, state, r.time, this.runSeedOf(r.chatId));
+          if ("code" in fixed) throw new RequestError("validation", fixed.reason);
+          events = fixed.events;
+        } else {
+          const edit = resolveEdit(this.rt.registry, world, state, [{ op: "set", entity: r.entity, field: r.field, value: r.value }], { gm: false, runSeed: this.runSeedOf(r.chatId) });
+          if ("rejection" in edit) throw new RequestError("validation", edit.rejection.reason);
+          events = edit.events;
+        }
+        const result = events.length > 0 ? await this.write(r.chatId, userId, { kind: "post", id: this.nextId(), target: "head", entry: { kind: "fix", events } }) : { pending: false };
         reply("lre.fix", { pending: result.pending });
         return;
       }

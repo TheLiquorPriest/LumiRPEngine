@@ -6,7 +6,7 @@
 import type { EntityId, KindId } from "../shared/ids";
 import type { JsonValue } from "../shared/json";
 import { isRecord } from "../shared/json";
-import type { FixTarget, SheetRowView, SheetSectionView } from "../shared/state-view";
+import type { FieldFixTarget, SheetRowView, SheetSectionView } from "../shared/state-view";
 import type { FieldDef, ProgressionDef, SheetRowDef, WorldDoc } from "../shared/world";
 import { formatMoney } from "../shared/world";
 import type { ReadContext } from "./registry";
@@ -102,7 +102,7 @@ function display(ctx: ReadContext, def: FieldDef | undefined, v: JsonValue | und
 
 const FIXABLE: Readonly<Record<string, true>> = { number: true, text: true, bool: true, enum: true, money: true, duration: true };
 
-function fixOf(entity: EntityId, field: string, def: FieldDef, value: JsonValue | undefined, bounds: { min?: number; max?: number }): FixTarget | undefined {
+function fixOf(entity: EntityId, field: string, def: FieldDef, value: JsonValue | undefined, bounds: { min?: number; max?: number }): FieldFixTarget | undefined {
   if (def.derived !== undefined || !own(FIXABLE, def.type)) return undefined;
   return {
     entity,

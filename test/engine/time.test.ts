@@ -2,11 +2,13 @@ import { describe, expect, test } from "bun:test";
 import { hashJson } from "../../src/shared/hash";
 import { applyMarker } from "../../src/engine/events";
 import type { PackDef } from "../../src/engine/registry";
+import type { Registry } from "../../src/engine/registry-impl";
 import { createRng } from "../../src/engine/rng";
 import type { WorldState } from "../../src/engine/state";
-import { applyTimeAdvance, buildMontage, clockPaused, minimumUnitCap, parseTarget, pauseBookkeeping, resolveTarget, runTimelapse, speedThrough, tickMinutes, turnElapsed } from "../../src/engine/time";
+import { applyTimeAdvance, buildMontage, clockFix, clockPaused, minimumUnitCap, parseTarget, pauseBookkeeping, resolveTarget, runTimelapse, speedThrough, tickMinutes, turnElapsed } from "../../src/engine/time";
 import { planTurn, postTurn, timelapseIntent } from "../../src/engine/turn";
-import { ALL_NOTE } from "../../src/engine/simulate";
+import { ALL_NOTE, ranTo } from "../../src/engine/simulate";
+import { placeOfEntity } from "../../src/engine/scope";
 import { Working } from "../../src/engine/working";
 import type { WorldDoc } from "../../src/shared/world";
 import { baseWorld, fold, POV, registryOf, startState, trialBalance } from "../packs/support";
@@ -216,6 +218,89 @@ describe("the time.advance channel", () => {
   test("lint helper: the smallest cap that fits one slot for every agent plus the POV", () => {
     const world = timeWorld();
     expect(minimumUnitCap(world, startState(world))).toBe((2 * 360) / 1440);
+  });
+});
+
+describe("the clock's ✎ fix (DESIGN §9.2, §12)", () => {
+  /** The pay pack pays at noon (the morning slot's end); Dev spends 10:00 to 16:00 at Sam's home every day. */
+  function fixWorld(): { world: WorldDoc; reg: Registry; s0: WorldState } {
+    const world = timeWorld();
+    world.entities.acct = { id: "acct", kind: "person", name: "Checking", tier: "background", fields: { owner: POV }, relations: [] };
+    world.schedules.visit = { id: "visit", owner: "dev", target: "place", recurrence: { every: "week", weekdays: [0, 1, 2, 3, 4, 5, 6] }, slots: [{ start: "10:00", end: "16:00", value: "home" }] };
+    return { world, reg: registryOf([payPack]), s0: startState(world) };
+  }
+
+  /** The state once the clock's ✎ sets a local `YYYY-MM-DD HH:MM` (the POV's place keeps the world's own time zone). */
+  function fixed(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, at: string): WorldState {
+    const fix = clockFix(reg, world, state, at, "run");
+    if ("code" in fix) throw new Error(fix.reason);
+    return fold(reg, world, state, fix.events);
+  }
+
+  test("later, the time passes as a timelapse to then with every class at note does (L28), recorded as one unit", () => {
+    const { world, reg, s0 } = fixWorld();
+    const fix = clockFix(reg, world, s0, "2026-10-16 14:00", "run");
+    if ("code" in fix) throw new Error(fix.reason);
+    // One unit: a rebased view, a held write or a Re-run keeps or drops the whole of it.
+    expect([...new Set(fix.events.map((e) => e.group))]).toEqual([expect.stringMatching(/^time:/)]);
+    const after = fold(reg, world, s0, fix.events);
+    const lapsed = new Working(reg, world, s0);
+    runTimelapse(reg, lapsed, { type: "at", at: 14 * 60 }, { runSeed: "run", overrides: ALL_NOTE });
+    expect([after.clock, after.accounts, after.entities]).toEqual([lapsed.state.clock, lapsed.state.accounts, lapsed.state.entities]);
+    expect([after.accounts.acct, placeOfEntity(after, "dev")]).toEqual([7500, "home"]);
+  });
+
+  test("earlier, the clock goes back: nothing that ran up to where it stood is undone or runs again (L48), and past there the world steps as it would have", () => {
+    const { world, reg, s0 } = fixWorld();
+    const ran = fixed(reg, world, s0, "2026-10-16 14:00");
+    // Back to 09:00, before the noon pay and Dev's 10:00 visit: both stand.
+    const back = fixed(reg, world, ran, "2026-10-16 09:00");
+    expect([back.clock, back.accounts.acct, placeOfEntity(back, "dev")]).toEqual([9 * 60, 7500, "home"]);
+    // The GM sends Dev back to the cafe. Passing 10:00 and noon again pays nothing and moves no one,
+    // by turns, a Timelapse, a narrated advance or the ✎ again.
+    const moved = fold(reg, world, back, [{ type: "set", entity: "dev", field: "place", value: "cafe" }]);
+    let turns = moved;
+    for (let i = 0; turns.clock < 14 * 60; i++) {
+      const plan = planTurn({ registry: reg, world, state: turns, runSeed: "run", seed: `wait${i}`, kind: "normal", userTexts: ["I wait."], intent: null });
+      const planned = fold(reg, world, turns, plan.events);
+      turns = fold(reg, world, planned, postTurn({ registry: reg, world, state: planned, runSeed: "run", seed: `wait${i}`, appliedMinutes: plan.elapsedMinutes, extracted: [] }));
+    }
+    const lapse = new Working(reg, world, moved);
+    runTimelapse(reg, lapse, { type: "at", at: 14 * 60 }, { runSeed: "run" });
+    const narrated = new Working(reg, world, moved);
+    expect(applyTimeAdvance(reg, narrated, 5 * 60, { runSeed: "run", capMinutes: 720 }).applied).toBe(true);
+    const again = fixed(reg, world, moved, "2026-10-16 14:00");
+    for (const s of [turns, lapse.state, narrated.state, again]) expect([s.clock, s.accounts.acct, placeOfEntity(s, "dev")]).toEqual([14 * 60, 7500, "cafe"]);
+    // Past where the clock had stood, the world steps as it would have: the next noon pays, and Dev visits at 10:00.
+    const next = fixed(reg, world, again, "2026-10-17 12:00");
+    expect([next.accounts.acct, placeOfEntity(next, "dev")]).toEqual([15000, "home"]);
+    expect(trialBalance(next)).toBe(0);
+  });
+
+  test("a second set-back inside the window keeps how far the clock had run", () => {
+    const { world, reg, s0 } = fixWorld();
+    const back = fixed(reg, world, fixed(reg, world, fixed(reg, world, s0, "2026-10-16 14:00"), "2026-10-16 11:00"), "2026-10-16 09:00");
+    expect([back.clock, ranTo(back)]).toEqual([9 * 60, 14 * 60]);
+    expect(fixed(reg, world, back, "2026-10-16 13:00").accounts.acct).toBe(7500);
+  });
+
+  test("it reads the world's calendar where the POV is, and refuses with why: no such day, before the story starts, past the unit cap or the timelapse reach, Calendar & time off", () => {
+    const { world, reg, s0 } = fixWorld();
+    const refusal = (state: Readonly<WorldState>, at: string): string => {
+      const fix = clockFix(reg, world, state, at, "run");
+      return "code" in fix ? fix.reason : "applied";
+    };
+    expect(refusal(s0, "2026-02-30 10:00")).toContain("isn't a date and time of day");
+    expect(refusal(s0, "2026-10-16 07:59")).toBe("the story starts at Fri 16 Oct 2026, 08:00");
+    const tight = structuredClone(s0);
+    tight.time.unitCap = { agentDays: 1, events: 5000 };
+    expect(refusal(tight, "2026-10-20 08:00")).toContain("a Timelapse to that time gets there in steps");
+    expect(refusal(s0, "2027-12-01 08:00")).toBe("the clock moves on at most 366 days at a time");
+    const off = structuredClone(s0);
+    off.realism.levels.calendar = 0;
+    expect(refusal(off, "2026-10-16 09:00")).toBe("Calendar & time is off");
+    // Already that time: nothing to record.
+    expect(clockFix(reg, world, s0, "2026-10-16 08:00", "run")).toEqual({ events: [] });
   });
 });
 

@@ -16,7 +16,7 @@
 
 import type { JsonObject, JsonValue } from "../../../shared/json";
 import type { EntityId, PlaceId } from "../../../shared/ids";
-import type { FixTarget } from "../../../shared/state-view";
+import type { FieldFixTarget } from "../../../shared/state-view";
 import type { LedgerEvent } from "../../../shared/ledger";
 import type { KindDef } from "../../../shared/world";
 import { calendarOf, dateAt, dayPartAt } from "../../../engine/calendar";
@@ -134,7 +134,7 @@ declare module "../../../engine/registry" {
      * The HUD's ✎ weather fix: the `weather` field of the region over the player, with its climate's
      * states as options; null below Weather 2 (no simulated state to correct) or without a region.
      */
-    "weather.fix": (ctx: ReadContext) => FixTarget | null;
+    "weather.fix": (ctx: ReadContext) => FieldFixTarget | null;
     /** The season at a time (the calendar's month), or null with Weather off: the day planner's occasions read it (DESIGN §24.8). */
     "weather.season": (ctx: ReadContext, at: number) => Season | null;
     /** Whether the sky over a place keeps people in (its state slows or closes travel), or null below Weather 2 (DESIGN §24.8). */

@@ -5,7 +5,7 @@
 import { useState } from "preact/hooks";
 import { isRecord } from "../../../shared/json";
 import type { JsonValue } from "../../../shared/json";
-import type { FixTarget, SheetRowView, SheetSectionView } from "../../../shared/state-view";
+import type { FieldFixTarget, SheetRowView, SheetSectionView } from "../../../shared/state-view";
 import { Avatar, Badge, Empty, IconButton, JsonView, Meter, Section } from "../../../frontend/components";
 import { list, obj, optStr, str, strings } from "../../../frontend/decode";
 import { FixEditor } from "../../../frontend/fix-editor";
@@ -47,8 +47,8 @@ function progressMeter(row: SheetRowView): { value: number; min: number; max: nu
 
 const FIELD_TYPES = ["number", "text", "bool", "enum", "ref", "list", "dice", "money", "date", "duration"] as const;
 
-/** A FixTarget from JSON, or undefined when it lacks entity and field. */
-export function decodeFix(value: unknown): FixTarget | undefined {
+/** A sheet row's field fix target from JSON, or undefined when it lacks entity and field. */
+export function decodeFix(value: unknown): FieldFixTarget | undefined {
   const fix = obj(value);
   if (!fix || typeof fix.entity !== "string" || typeof fix.field !== "string") return undefined;
   const type = FIELD_TYPES.find((candidate) => candidate === fix.type) ?? "text";

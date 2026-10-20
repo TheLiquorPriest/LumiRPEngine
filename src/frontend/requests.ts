@@ -6,7 +6,7 @@ import type { ChatId, DomainId, EntityId, InterruptClass, InterruptPolicy, Level
 import type { EntityUpgradePick, KeepLine, ResolveScope, TimeControl, TimelapseTarget, TimeScope, UpgradePicks } from "../shared/ledger";
 import { parseMoneyInput } from "../shared/money";
 import type { EditOp, UpgradePreview } from "../shared/protocol";
-import type { Chip, FixTarget, GmEntity, GmView, PaletteEntry, PaletteOption, TimelapseView } from "../shared/state-view";
+import type { Chip, FieldFixTarget, GmEntity, GmView, PaletteEntry, PaletteOption, TimelapseView } from "../shared/state-view";
 import type { AdjudicationDef, FacetId, FacetValueId, WorldCurrency } from "../shared/world";
 import type { RequestBody } from "./registry";
 
@@ -84,8 +84,13 @@ export function travelRequest(action: string, params: JsonObject, chatId: ChatId
   return { type: "lre.action", chatId, action, params: { ...params }, source: "map" };
 }
 
-export function fixRequest(target: FixTarget, value: JsonValue, chatId: ChatId): Req<"lre.fix"> {
+export function fixRequest(target: FieldFixTarget, value: JsonValue, chatId: ChatId): Req<"lre.fix"> {
   return { type: "lre.fix", chatId, entity: target.entity, field: target.field, value };
+}
+
+/** The clock's ✎ (DESIGN §12): the clock set to `time`, a date and time of day (`YYYY-MM-DD HH:MM`) in the world's calendar, local to where the POV is. */
+export function timeFixRequest(time: string, chatId: ChatId): Req<"lre.fix"> {
+  return { type: "lre.fix", chatId, time };
 }
 
 /** A GM edit: the operations in order, applied all or none as one fix with its own Undo (DESIGN §7). */

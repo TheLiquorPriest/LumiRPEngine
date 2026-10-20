@@ -1,10 +1,11 @@
 // The built-in `engine` pack: bookkeeping events the runtime records (rule firings, interrupt
-// signals, agent catch-up cursors, recorded choices, puzzle attempts, reveals, the paused scene,
-// checks rolled by the `check` effect), GM edits of an entity's tier, agent flag and levels and of
-// its classes and tags, life states (`engine/life`: the events, the `life` effect, the `life`
-// channel and `life_of`), the engine's narration channels (`knows`, `spawn`) and the taxonomy
-// formulas (`kind_is`, `in_class`, `has_tag`, `member_of`, `tier_of`, `band_of`). Every registry is
-// built with it first: `createRegistry([enginePack, ...packs])`. Its state lives in `state.packs.engine`.
+// signals, agent catch-up cursors, the clock set back by a ✎ fix and how far it had run, recorded
+// choices, puzzle attempts, reveals, the paused scene, checks rolled by the `check` effect), GM
+// edits of an entity's tier, agent flag and levels and of its classes and tags, life states
+// (`engine/life`: the events, the `life` effect, the `life` channel and `life_of`), the engine's
+// narration channels (`knows`, `spawn`) and the taxonomy formulas (`kind_is`, `in_class`,
+// `has_tag`, `member_of`, `tier_of`, `band_of`). Every registry is built with it first:
+// `createRegistry([enginePack, ...packs])`. Its state lives in `state.packs.engine`.
 
 import { facetsInOrder } from "../shared/classes";
 import { isLifeState, lifeStateOf, type FacetDef } from "../shared/world";
@@ -17,13 +18,14 @@ import type { PackEvent } from "../shared/ledger";
 import type { EventTypeDef, PackDef, ReadContext, Rejection } from "./registry";
 import type { Value } from "./expr";
 import { acts, applyLife, lifeChannel, lifeEffect, lifeKnownTo, lifeOf, tellLife } from "./life";
-import { calendarOf, slotIndexAt } from "./calendar";
+import { calendarOf, formatClock, placeOffset, slotIndexAt } from "./calendar";
 import { knowsChannel, spawnChannel } from "./narration-channels";
-import { kindIs } from "./scope";
+import { kindIs, placeOfEntity } from "./scope";
 import { restoreObservations } from "./seen";
 import { classOf, classProblems, inClass, isMemberOf, tagsOf } from "./selector";
 import type { EntityState, WorldState } from "./state";
 import { own } from "./pack-kit";
+import { minutesBetween } from "./world-state";
 
 export const ENGINE_PACK = "engine";
 
@@ -53,6 +55,11 @@ export const ENGINE_EVENTS = {
   life: "engine.life",
   /** People told an entity's life state as it is. */
   told: "engine.told",
+  /**
+   * The clock set back by a ✎ fix of the time (DESIGN §9.2, §12), `minutes` before where it stood.
+   * How far it had run stays recorded (`reached`), so nothing up to there runs again (L48).
+   */
+  rewind: "engine.rewind",
 } as const;
 
 /** An action's latest attempt at a check, as a retry rule reads it (DESIGN §11). */
@@ -83,6 +90,12 @@ export interface EngineSlice {
   pauseScene: string | null;
   /** Each action's latest attempt at a check, keyed by actor, action and parameters (`engine.adjudged`). */
   tries: Record<string, TryRecord>;
+  /**
+   * How far the clock had run when a ✎ fix last set it back (DESIGN §9.2, L48); null when none did.
+   * Everything time-driven up to it already happened, so until the clock passes it again, the clock
+   * is all that moves (`ranTo`).
+   */
+  reached: number | null;
 }
 
 export function readEngineSlice(state: Readonly<WorldState>): EngineSlice {
@@ -110,6 +123,7 @@ export function readEngineSlice(state: Readonly<WorldState>): EngineSlice {
     agents,
     rr: typeof s.rr === "number" ? s.rr : 0,
     pauseScene: typeof s.pauseScene === "string" ? s.pauseScene : null,
+    reached: typeof s.reached === "number" ? s.reached : null,
     tries,
   };
 }
@@ -251,6 +265,26 @@ const events: EventTypeDef<PackEvent>[] = [
       slice(state).pauseScene = typeof e.data.scene === "string" ? e.data.scene : null;
     },
     describe: () => "clock pause",
+  },
+  {
+    type: ENGINE_EVENTS.rewind,
+    // Never before the story starts: nothing in the world was there to be set back to.
+    validate: (e, ctx) => {
+      const minutes = e.data.minutes;
+      if (typeof minutes !== "number" || !Number.isInteger(minutes) || minutes <= 0) return { code: "bad_event", reason: "a clock set back needs whole minutes above zero" };
+      const start = minutesBetween(ctx.world.calendar.epoch, ctx.world.start.at);
+      if (ctx.state.clock - minutes >= start) return null;
+      return { code: "before_start", reason: `the story starts at ${formatClock(calendarOf(ctx.world), start, placeOffset(ctx.world, start, placeOfEntity(ctx.state, ctx.world.pov)))}` };
+    },
+    // A second set-back inside the window keeps the furthest the clock had run, not where it stood.
+    apply: (e, state) => {
+      const minutes = e.data.minutes;
+      if (typeof minutes !== "number") return;
+      const s = slice(state);
+      s.reached = Math.max(typeof s.reached === "number" ? s.reached : state.clock, state.clock);
+      state.clock -= minutes;
+    },
+    describe: (e) => `clock set back ${String(e.data.minutes)} min`,
   },
   {
     type: ENGINE_EVENTS.check,
