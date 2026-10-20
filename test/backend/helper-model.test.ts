@@ -72,7 +72,8 @@ describe("the helper model", () => {
 
   test("the model, parameters and effort reach Lumiverse's generation call; the connection's own reasoning sends no override", async () => {
     const sent: Record<string, unknown>[] = [];
-    const spindle = { generate: { quiet: async (request: Record<string, unknown>) => (sent.push(request), { content: "{}", finish_reason: "stop" }) } };
+    const connections = [{ id: "c", provider: "deepseek", is_default: false }];
+    const spindle = { generate: { quiet: async (request: Record<string, unknown>) => (sent.push(request), { content: "{}", finish_reason: "stop" }) }, connections: { list: async () => connections } };
     Object.assign(globalThis, { spindle });
     try {
       const host = createSpindleHost();
@@ -83,6 +84,28 @@ describe("the helper model", () => {
       expect(sent.map((r) => r.reasoning)).toEqual([{ source: "custom", apiReasoning: true, effort: "high" }, { source: "off" }, undefined]);
       expect(sent[0]?.connection_id).toBe("c");
       expect(sent[0]?.parameters).toEqual({ temperature: 0.4, top_k: 20, max_tokens: 8192, response_format: { type: "json_object" }, model: "flash" });
+    } finally {
+      Object.assign(globalThis, { spindle: undefined });
+    }
+  });
+
+  test("JSON mode goes only to providers that take it: an Anthropic or Google connection, named or the default, gets none", async () => {
+    const sent: Record<string, unknown>[] = [];
+    const connections = [
+      { id: "claude", provider: "anthropic", is_default: true },
+      { id: "gemini", provider: "google", is_default: false },
+      { id: "ds", provider: "deepseek", is_default: false },
+    ];
+    const spindle = { generate: { quiet: async (request: Record<string, unknown>) => (sent.push(request), { content: "{}", finish_reason: "stop" }) }, connections: { list: async () => connections } };
+    Object.assign(globalThis, { spindle });
+    try {
+      const host = createSpindleHost();
+      const ask = (connectionId?: string) => host.models.quiet({ messages: [{ role: "user" as const, content: "x" }], maxTokens: 100, json: true, ...(connectionId ? { connectionId } : {}) }, "u", signal());
+      await ask("claude");
+      await ask("gemini");
+      await ask();
+      await ask("ds");
+      expect(sent.map((r) => (r.parameters as Record<string, unknown>).response_format ?? null)).toEqual([null, null, null, { type: "json_object" }]);
     } finally {
       Object.assign(globalThis, { spindle: undefined });
     }

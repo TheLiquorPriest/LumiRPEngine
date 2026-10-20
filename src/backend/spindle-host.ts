@@ -241,6 +241,20 @@ export const DIAGNOSTICS_LOG = "diagnostics/backend.log";
 export const USER_DIAGNOSTICS_LOG = "diagnostics.log";
 
 /**
+ * Providers whose APIs take OpenAI's JSON mode (`response_format`). Lumiverse passes the field
+ * through as is, and Anthropic's and Google's APIs reject it, so any other provider gets the
+ * prompt's "Output JSON only" (and the read's repair) alone.
+ */
+const JSON_MODE_PROVIDERS: ReadonlySet<string> = new Set(["openai", "deepseek", "openrouter", "mistral", "xai", "groq", "fireworks", "moonshot", "zai", "siliconflow"]);
+
+/** Whether the call's connection (the user's default when it names none) takes JSON mode. */
+async function takesJsonMode(connectionId: string | null | undefined, userId: string): Promise<boolean> {
+  const list = await spindle.connections.list(userId);
+  const c = connectionId ? list.find((x) => x.id === connectionId) : list.find((x) => x.is_default);
+  return c !== undefined && JSON_MODE_PROVIDERS.has(c.provider);
+}
+
+/**
  * A call's effort as the host's per-request reasoning override: none for `inherit` (the
  * connection's reasoning binding, else the user's setting, stands), the off-switch for `off`, else
  * that effort, which the host maps to the provider's own field.
@@ -408,7 +422,7 @@ export function createSpindleHost(): HostPort {
       async quiet(request, userId, signal) {
         // The host merges these over the connection's preset parameters, so one left out stays the connection's own.
         const parameters: Record<string, unknown> = { ...request.params, max_tokens: request.maxTokens };
-        if (request.json) parameters.response_format = { type: "json_object" };
+        if (request.json && (await takesJsonMode(request.connectionId, userId))) parameters.response_format = { type: "json_object" };
         // The host reads `parameters.model` as a per-request model override.
         if (request.model) parameters.model = request.model;
         const reasoning = reasoningOverride(request.effort);
