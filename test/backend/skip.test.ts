@@ -1,18 +1,24 @@
 // Time skips (DESIGN §24.7) on the whole backend with fake steps: the beats a skip finds, the minds at
 // them, a mind's interrupt stopping the skip at its time with the stop chip, the caps, the `skip`
-// step's beats recorded, the before-the-reply clock running out, Re-run asking again and replay.
+// step's beats recorded, the before-the-reply clock running out, Re-run asking again and replay; and
+// the beat scan and the beats cap on their own.
 
 import { describe, expect, test } from "bun:test";
 import type { LedgerEvent } from "../../src/shared/ledger";
 import type { JsonObject } from "../../src/shared/json";
-import { calendarOf, clockAt, dateAt, formatHHMM, formatStamp } from "../../src/engine/calendar";
+import { calendarOf, clockAt, clockOfLocal, dateAt, formatHHMM, formatStamp } from "../../src/engine/calendar";
+import { createRegistry } from "../../src/engine/registry-impl";
+import { ALL_NOTE } from "../../src/engine/simulate";
 import { placeOfEntity } from "../../src/engine/scope";
 import { replaySkip, runTimelapse } from "../../src/engine/time";
 import { timelapseIntent, turnStart } from "../../src/engine/turn";
 import { Working } from "../../src/engine/working";
 import { toChain } from "../../src/backend/ledger-io";
 import { readRun } from "../../src/backend/runtime";
-import { runSkip, type BeatMinds } from "../../src/backend/skip";
+import { capBeats, runSkip, scanBeats, type Beat, type BeatMinds } from "../../src/backend/skip";
+import { ALL_PACKS } from "../../src/packs/index";
+import { modernUsWorld } from "../packs/riverton";
+import { startState } from "../packs/support";
 import { decodeContextView } from "../../src/frontend/play/context";
 import { Rig } from "../support/rig";
 
@@ -349,5 +355,69 @@ describe("time skips", () => {
     expect(stopper).toBeDefined();
     const interrupting = ofType(record?.events, "minds.mind").flatMap((e) => ("data" in e && e.data.interrupt !== null ? [e.data.entity] : []));
     expect(interrupting).toEqual([stopper ?? ""]);
+  });
+});
+
+describe("the beat scan and the beats cap", () => {
+  test("the scan finds the player character's appointments, the story's moments and their money, up to where the skip would end", () => {
+    const reg = createRegistry(ALL_PACKS);
+    // Riverton, from Friday 16 October 2026 at 07:30: a time rule, and three appointments, one in the span.
+    const world = modernUsWorld("w", "R");
+    const cal = calendarOf(world);
+    world.rules.siren = { id: "siren", on: { at: "hour >= 18" }, do: [{ type: "signal", args: { class: "incident", text: "A siren wails." } }], once: true, interrupt: true };
+    const you = world.entities.you;
+    if (!you) throw new Error("no POV");
+    you.fields.appointments = ["2026-10-16T06:00", "2026-10-19T15:00", "2026-11-05T10:00"].map((at, i) => ({ at: clockOfLocal(cal, at), minutes: 60, place: "park", label: ["Before", "Dentist", "After"][i] ?? "" }));
+    const state = startState(world);
+    const found = (overrides?: Record<string, string>): string[][] => {
+      const scan = scanBeats(reg, world, state, timelapseIntent({ type: "duration", minutes: 19 * 1440 }, overrides), "seed");
+      if (!scan) throw new Error("no scan");
+      expect([scan.from, scan.to]).toEqual([state.clock, state.clock + 19 * 1440]);
+      return [...scan.beats].sort((a, b) => a.at - b.at || a.reason.localeCompare(b.reason)).map((b) => [formatStamp(cal, b.at, 0), b.reason]);
+    };
+    // Run whole, every class only noting: the rule and the quest's stage, the appointment in the span, and the card's bills.
+    expect(found(ALL_NOTE)).toEqual([
+      ["2026-10-16 18:00", "a story moment: Settle in"],
+      ["2026-10-16 18:00", "the rule siren"],
+      ["2026-10-19 15:00", "the player character's appointment: Dentist"],
+      ["2026-11-01 09:00", "the player character's money: Insurance: Pickup truck: $225.00 paid."],
+      ["2026-11-03 08:30", "the player character's money: Visa card statement: $380.00; minimum $35.00 due 28 Nov."],
+    ]);
+    // Under the world's own policy the quest's stage stops it that evening, so nothing after is a beat.
+    expect(found()).toEqual([
+      ["2026-10-16 18:00", "a story moment: Settle in"],
+      ["2026-10-16 18:00", "the rule siren"],
+    ]);
+  });
+
+  test("the cap keeps the weightiest beats, earliest first among equals, each minute's beats as one, in time order", () => {
+    const beat = (at: number, rank: number, reason: string, source: Beat["source"] = "scan", who: string[] = []): Beat => ({ at, reason, source, who, rank });
+    const beats = [
+      beat(50, 6, "the step's", "model"),
+      beat(10, 5, "money"),
+      beat(40, 1, "Maya's plan", "scan", ["maya"]),
+      beat(20, 3, "an appointment"),
+      beat(40, 6, "a model's at the same minute", "model", ["jordan", "maya"]),
+      beat(30, 2, "Rosa's invitation", "scan", ["rosa"]),
+      beat(60, 4, "a story moment"),
+      beat(70, 4, "a later story moment"),
+      beat(50, 6, "the step's again", "model", ["rosa"]),
+    ];
+    expect(capBeats(beats, 4)).toEqual([
+      beat(20, 3, "an appointment"),
+      beat(30, 2, "Rosa's invitation", "scan", ["rosa"]),
+      beat(40, 1, "Maya's plan", "scan", ["maya", "jordan"]),
+      beat(60, 4, "a story moment"),
+    ]);
+    expect(capBeats(beats, Infinity)).toEqual([
+      beat(10, 5, "money"),
+      beat(20, 3, "an appointment"),
+      beat(30, 2, "Rosa's invitation", "scan", ["rosa"]),
+      beat(40, 1, "Maya's plan", "scan", ["maya", "jordan"]),
+      beat(50, 6, "the step's", "model", ["rosa"]),
+      beat(60, 4, "a story moment"),
+      beat(70, 4, "a later story moment"),
+    ]);
+    expect(capBeats(beats, 0)).toEqual([]);
   });
 });
