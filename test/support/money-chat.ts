@@ -12,7 +12,7 @@ import { DEFAULT_CURRENCY, type WorldCurrency } from "../../src/shared/world";
 import { editRequest, resolveMarker, timelapseRequest } from "../../src/frontend/requests";
 import { decodeFinanceView } from "../../src/packs/economy/ui/decode";
 import { actionRequest, amountOf, type ActionBody } from "../../src/packs/economy/ui/requests";
-import { Rig } from "./rig";
+import { plainMinds, Rig } from "./rig";
 
 /** The GM view's Money tab: everyone's money as it decodes `lre.gm`, and each entity's declared fields (what its ✎ forms edit) with their values. */
 export interface GmMoney {
@@ -41,7 +41,9 @@ export class MoneyChat {
 
   /** Port Alder with `patch` committed to the world, a chat attached, and Play → Money opened as picking the tab opens it. */
   static async start(patch: WorldPatch = {}): Promise<MoneyChat> {
-    const rig = new Rig({ shipped: true });
+    // Minds on, as Settings has them by default: they decide the people's invitations a timelapse meets.
+    const rig = new Rig({ shipped: true, minds: true });
+    rig.host.quietReply = plainMinds;
     const worldId = await rig.newWorld("Port Alder", "modern_slice_of_life");
     const secret = new Set(patch.secret ?? []);
     const touched = [...new Set([...Object.keys(patch.entities ?? {}), ...secret])];

@@ -43,6 +43,8 @@ describe("host token counts of sections", () => {
     expect(counted.length).toBeGreaterThan(0);
     // A second user of the same backend plays the same world (the fake host serves one user at a time).
     Object.assign(rig.host, { userId: "user-2" });
+    // Minds off for them too, as the rig keeps them for its first user.
+    rig.body(await rig.send({ type: "lre.settings.set", patch: { minds: { enabled: false } } }));
     const second = await rig.worldChat();
     await rig.turn(second, "I look around.", "Quiet.");
     const theirs = sections(rig, second).filter((s) => s.text !== "");

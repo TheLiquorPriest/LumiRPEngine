@@ -625,10 +625,11 @@ describe("pushes and hello", () => {
 
   test("hello answers the agent level, and an outside client's hello is logged to the user's diagnostics", async () => {
     const rig = new Rig();
-    // The hello also tells the tab how long to wait for an answer (Settings → Timeouts → Engine requests).
+    // The hello also tells the tab how long to wait for an answer (Settings → Timeouts → Engine requests)
+    // and whether this Lumiverse can stop a generation for the engine run (DESIGN §5.1).
     const { requestMs } = (await rig.rt.settings.get(rig.host.userId)).timeouts;
-    expect(rig.body(await rig.send({ type: "lre.hello", chatId: null }, "browser"))).toEqual({ accepted: true, agentApi: AGENT_API, requestMs });
-    expect(rig.body(await rig.send({ type: "lre.hello", chatId: null, client: { name: "lumirpengine\nforged: line", version: "0.1.0" } }, "cli"))).toEqual({ accepted: true, agentApi: AGENT_API, requestMs });
+    expect(rig.body(await rig.send({ type: "lre.hello", chatId: null }, "browser"))).toEqual({ accepted: true, agentApi: AGENT_API, requestMs, canStop: true });
+    expect(rig.body(await rig.send({ type: "lre.hello", chatId: null, client: { name: "lumirpengine\nforged: line", version: "0.1.0" } }, "cli"))).toEqual({ accepted: true, agentApi: AGENT_API, requestMs, canStop: true });
     expect(rig.host.userLogs.get(rig.host.userId)?.filter((l) => l.includes("outside client"))).toEqual(["info: [LumiRPEngine] outside client connected: lumirpengine forged: line 0.1.0"]);
     // The browser's session stays Build's.
     const worldId = await rig.newWorld();

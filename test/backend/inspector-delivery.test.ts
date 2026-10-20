@@ -1,6 +1,6 @@
 // The context inspector's section rows: a section left out over the section budget wasn't in the
 // prompt, so it never reads as delivered, whatever an earlier delivery check found for that slot.
-// Opening the inspector answers at once: its delivery check waits on a dry run of the whole prompt,
+// Opening the inspector answers at once: its preset check waits on a dry run of the whole prompt,
 // and lands with the next state push.
 
 import { describe, expect, test } from "bun:test";
@@ -32,12 +32,15 @@ describe("inspector delivery of clipped sections", () => {
 });
 
 describe("opening the inspector", () => {
-  test("answers before its dry run ends, and the check lands with the next push", async () => {
+  test("answers before its dry run ends, and the preset check lands with the next push", async () => {
     const rig = new Rig({ shipped: true });
     const worldId = await rig.newWorld("Alder", "modern_slice_of_life");
     const chatId = rig.host.createChat("Morning.");
     rig.body(await rig.send({ type: "lre.world", op: "attach", worldId, chatId }));
     await rig.turn(chatId, "I wait an hour on the porch.", "The street wakes up around you.");
+    rig.body(await rig.send({ type: "lre.hello", chatId }));
+    // The active preset now asks the narrator for JSON, which the check of a dry run warns of.
+    rig.host.preset = { name: "Default", blocks: [{ id: "b1", name: "Ledger (JSON)", content: "End every reply with the updated ledger as JSON:\n<json>{}</json>" }], maxTokens: 4000, model: "deepseek-v4-flash" };
     // The host takes its time over the dry run.
     const started = Promise.withResolvers<void>();
     const gate = Promise.withResolvers<void>();
@@ -52,12 +55,14 @@ describe("opening the inspector", () => {
     const handled = rig.dispatch.handle(open, rig.host.userId);
     await started.promise;
     expect(rig.host.sent.slice(sent).some((m) => m.type === "lre.result" && m.reqId === "inspect")).toBe(true);
-    const delivered = (): string[] => (rig.rt.inspectorRecords(chatId)?.at(-1)?.sections ?? []).filter((s) => s.delivery === "verified").map((s) => s.slot);
-    expect(delivered()).toEqual([]);
+    const warned = (): boolean => JSON.stringify(rig.rt.inspectorView(chatId, rig.host.userId)).includes("asks the narrator for JSON");
+    expect(warned()).toBe(false);
+    const answered = rig.host.sent.length;
     gate.resolve();
     await handled;
     await rig.host.settle();
-    expect(delivered().length).toBeGreaterThan(1);
-    expect(rig.latestView(chatId)).not.toBeNull();
+    await rig.rt.push.settle();
+    expect(warned()).toBe(true);
+    expect(rig.host.sent.slice(answered).some((m) => (m.type === "lre.state.snapshot" || m.type === "lre.state.delta") && m.chatId === chatId)).toBe(true);
   });
 });

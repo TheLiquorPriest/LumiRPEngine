@@ -125,7 +125,7 @@ describe("activity line", () => {
 });
 
 describe("diagnostics on a running chat", () => {
-  test("a turn records its phases, the interceptor's fills and the turn, and keeps them in the chat's run folder", async () => {
+  test("a turn records its phases, the engine run's fills and the turn, and keeps them in the chat's run folder", async () => {
     const rig = new Rig();
     const chatId = await rig.worldChat();
     // A model that answers every step (with nothing to change).
@@ -136,7 +136,7 @@ describe("diagnostics on a running chat", () => {
     const turn = records.find((r) => r.kind === "turn");
     expect(turn).toBeDefined();
     const steps = records.filter((r) => r.turn === turn?.turn).map((r) => `${r.kind}:${r.phase}/${r.step}`);
-    for (const phase of ["step:pre/pre", "step:plan/plan", "interceptor:sections/interceptor", "step:read/read", "step:memory/memory"]) expect(steps).toContain(phase);
+    for (const phase of ["step:pre/pre", "step:plan/plan", "sections:sections/sections", "step:read/read", "step:memory/memory"]) expect(steps).toContain(phase);
     expect(rig.host.files.has(`${rig.host.userId}/runs/${chatId}/diagnostics.json`)).toBe(true);
     // The turn is over: the activity line went idle.
     expect(reply.activity).toBeNull();

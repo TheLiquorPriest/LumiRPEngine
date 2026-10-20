@@ -179,15 +179,27 @@ describe("an action the helper couldn't read", () => {
     expect((await rig.rt.view(chatId, rig.host.userId)).chips.some((c) => c.kind === "read_failed")).toBe(false);
   });
 
-  test("still failing, it leaves a chip whose Retry re-runs the turn", async () => {
+  test("still failing after its retries, it stops the engine run: nothing is generated, and the flag's Retry reads it again", async () => {
     const { rig, chatId } = await chat();
+    let down = true;
     script(rig, [], () => {
-      throw new Error("ECONNRESET");
+      if (down) throw new Error("ECONNRESET");
+      return JSON.stringify({ action: "buy", params: { item: "kazoo", price: 3 }, confidence: 0.9 });
     });
-    await rig.turn(chatId, "I buy a kazoo for $3.", "The clerk rings it up.");
-    const chip = (await rig.rt.view(chatId, rig.host.userId)).chips.find((c) => c.kind === "read_failed");
-    expect(chip?.actions.map((a) => a.id)).toEqual(["rerun"]);
-    expect(rig.body(await rig.send({ type: "lre.chip", chatId, chip: chip?.id ?? "", choice: "rerun" }))).toMatchObject({ applied: true });
+    rig.host.sendUser(chatId, "I buy a kazoo for $3.");
+    await rig.host.settle();
+    const g = await rig.host.start(chatId, { type: "normal" });
+    expect(g.halted).toBe("cancelled");
+    expect(rig.host.chat(chatId).messages.at(-1)?.isUser).toBe(true);
+    const flag = (await rig.rt.view(chatId, rig.host.userId)).chips.find((c) => c.kind === "engine_failed");
+    expect(flag?.detail).toBe("Reading your action: ECONNRESET (after 2 retries)");
+    expect(flag?.actions.map((a) => a.id)).toEqual(["regenerate", "diagnostics"]);
+    // The connection is back: Retry (Lumiverse's Regenerate) runs the engine again, then the reply.
+    down = false;
+    const reply = await rig.host.start(chatId, { type: "regenerate" });
+    expect(reply.halted).toBeUndefined();
+    await rig.host.finish(reply, "The clerk rings it up.");
+    expect((await bought(rig, chatId)).map((b) => b.memo)).toEqual(["Bought kazoo"]);
   });
 });
 
