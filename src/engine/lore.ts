@@ -100,8 +100,8 @@ function plain(text: string): string {
   return words === "" ? "" : ` ${words} `;
 }
 
-/** The words a query scores entries by: no stop words, no short ones, a plural's final `s` dropped. */
-function wordsOf(text: string): string[] {
+/** The words a query scores entries by: no stop words, no short ones, a plural's final `s` dropped. The story pack matches a puzzle's name by them too. */
+export function wordsOf(text: string): string[] {
   return plain(text)
     .trim()
     .split(" ")

@@ -523,8 +523,8 @@ export function useShowIds(): boolean {
 
 /**
  * Whether the surface shows ids when Show ids is on: Build and GM provide true. Play's panels, sheets
- * and overlays keep the default, false: a view id there can name what its label hides (a secret quest
- * shown as "Something is going on" still goes by its own track id).
+ * and overlays keep the default, false: Play never shows ids, and names things only as the player's
+ * character knows them.
  */
 export const IdsSurface = createContext(false);
 
