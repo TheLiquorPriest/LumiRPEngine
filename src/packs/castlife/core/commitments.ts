@@ -46,9 +46,10 @@ interface Played {
 /**
  * How each kind of plan plays: how long it takes when its window leaves that open, the hours of the
  * day it keeps then, what the person is doing, and how the player reads the block. The plan's own
- * words are the character's private intent, so no player surface ever shows them.
+ * words are the character's private intent, so no player surface ever shows them. A kind with no
+ * entry is no block of anyone's day: another pack carries it out and settles it.
  */
-const PLAYED: Readonly<Record<PlanKind, Played>> = {
+const PLAYED: Readonly<Partial<Record<PlanKind, Played>>> = {
   errand: { minutes: 45, hours: [9, 18], activity: "errand", label: "Errand" },
   meet: { minutes: 90, hours: [10, 22], activity: "socialize", label: "Meeting someone" },
   visit: { minutes: 120, hours: [10, 21], activity: "visiting", label: "A visit" },
@@ -57,6 +58,11 @@ const PLAYED: Readonly<Record<PlanKind, Played>> = {
   leisure: { minutes: 90, hours: [9, 22], activity: "leisure", label: "Time out" },
   other: { minutes: 60, hours: [8, 21], activity: "busy", label: "Busy" },
 };
+
+/** Whether a plan is the planner's to lay and settle: one of the kinds it plays as a block of someone's day. */
+export function isPlayed(p: MindPlan): boolean {
+  return PLAYED[p.kind] !== undefined;
+}
 
 /** The furthest a plan's window is searched for room: a plan for "sometime this month" lands in its first fortnight or not at all. */
 const SEARCH_DAYS = 14;
@@ -171,9 +177,10 @@ interface Layable {
 function layable(ctx: ReadContext, who: EntityId, tier: Fidelity): Layable[] {
   if (tier === "background" || !livesPlans(ctx, who)) return [];
   return (optionalQuery(ctx, "minds.plans")?.(ctx, who) ?? []).flatMap((p) => {
+    const played = PLAYED[p.kind];
     const from = Math.max(p.when.from, p.made + 1);
     const until = p.status === "open" ? Infinity : (p.closed ?? from);
-    return p.when.to > from && until > from ? [{ p, played: PLAYED[p.kind], from, until }] : [];
+    return played && p.when.to > from && until > from ? [{ p, played, from, until }] : [];
   });
 }
 

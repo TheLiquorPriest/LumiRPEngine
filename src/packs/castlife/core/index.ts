@@ -44,7 +44,7 @@ import { agendaFor } from "../../../engine/tracks";
 import { lastSighting } from "../../../engine/seen";
 import { hiddenNameCheck, playerKnows } from "../../../engine/player-events";
 import { canSeeEntity, canSeeField, canSeePlace, findLeaks, HIDDEN_PLACE_NAME, knows, unrevealedSecrets, visibilityOf } from "../../../engine/visibility";
-import { commitments, laidPlans, livesPlans, planTier, plansOf, type CommitmentBlock } from "./commitments";
+import { commitments, isPlayed, laidPlans, livesPlans, planTier, plansOf, type CommitmentBlock } from "./commitments";
 import { cueIssues, cuesFor } from "./cues";
 import { birthdayOf, FOND, occasionOf } from "./occasions";
 import { homeOf, placeOfType } from "./places";
@@ -289,7 +289,7 @@ function takeUp(ctx: ReadContext, who: EntityId, place: PlaceId | null, activity
  */
 function planOutcomes(ctx: ReadContext, who: EntityId, slot: SlotInfo): LedgerEvent[] {
   if (who === ctx.world.pov) return [];
-  const due = (optionalQuery(ctx, "minds.plans")?.(ctx, who) ?? []).filter((p) => p.status === "open" && p.when.from <= slot.end);
+  const due = (optionalQuery(ctx, "minds.plans")?.(ctx, who) ?? []).filter((p) => p.status === "open" && isPlayed(p) && p.when.from <= slot.end);
   if (due.length === 0) return [];
   const tier = planTier(ctx, who);
   const laid = laidPlans(ctx, who, tier === "background" ? [] : due);
@@ -468,7 +468,7 @@ function dropUnlived(slot: SlotInfo, ctx: ReadContext): LedgerEvent[] {
   const out: LedgerEvent[] = [];
   for (const who of Object.keys(ctx.state.entities).sort()) {
     if (who === ctx.world.pov || livesPlans(ctx, who)) continue;
-    for (const p of plans(ctx, who)) if (p.status === "open" && p.when.to <= slot.end) out.push({ type: MINDS_EVENTS.plan, data: { entity: who, plan: p.id, status: "dropped", at: p.when.to, reason: "routine only" } });
+    for (const p of plans(ctx, who)) if (p.status === "open" && isPlayed(p) && p.when.to <= slot.end) out.push({ type: MINDS_EVENTS.plan, data: { entity: who, plan: p.id, status: "dropped", at: p.when.to, reason: "routine only" } });
   }
   return out;
 }
