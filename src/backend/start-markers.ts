@@ -1,10 +1,12 @@
-// A new chat's starting markers (DESIGN §4.3, §9.1, §9.2, §11): the world revision, every domain
-// level, the band caps, every time control and the adjudication policy, written once, with the first
-// record that holds events. The world's own realism and time defaults come first and the user's
-// settings fill in what the world leaves out; with "Use my settings" on, the user's settings replace
-// the world's. The policy is the world ruleset's, unless the user's own replaces it or the world sets none.
+// A new chat's starting markers (DESIGN §4.3, §9.1, §9.2, §9.4, §11): the world revision, every
+// domain level, the band caps, every time control, the player-claims policy and the adjudication
+// policy, written once, with the first record that holds events. The world's own realism (its
+// claims policy included) and time defaults come first and the user's settings fill in what the
+// world leaves out; with "Use my settings" on, the user's settings replace the world's. The
+// adjudication policy is the world ruleset's, unless the user's own replaces it or the world sets none.
 
 import { readAdjudication } from "../shared/adjudication";
+import { readClaims } from "../shared/claims";
 import type { Level } from "../shared/ids";
 import { BANDS, DOMAINS, INTERRUPT_CLASSES } from "../shared/ids";
 import { hasOwn, isRecord, safeKey } from "../shared/json";
@@ -53,7 +55,7 @@ function worldFirstTime(user: TimeSettings, world: WorldDoc): TimeSettings {
 
 /**
  * Starting markers for a chat on `revision` of `world`: `migrate`, a `resolve` for every domain's
- * level and for the band caps, a `time` marker for every time control, and `adjudicate`.
+ * level and for the band caps, a `time` marker for every time control, `claims` and `adjudicate`.
  */
 export function startMarkersFrom(settings: UserSettings, world: WorldDoc, revision: string): MarkerBody[] {
   const mine = settings.overrideWorldDefaults;
@@ -76,6 +78,7 @@ export function startMarkersFrom(settings: UserSettings, world: WorldDoc, revisi
   for (const [activity, policy] of Object.entries(t.speedThrough)) out.push({ kind: "time", control: "speed_through", scope: { activity }, to: { mode: policy.mode, thresholdMinutes: policy.thresholdMinutes } });
   out.push({ kind: "time", control: "montage", scope: { all: true }, to: t.montage });
   out.push({ kind: "time", control: "unit_cap", scope: { all: true }, to: { agentDays: t.unitCap.agentDays, events: t.unitCap.events } });
+  out.push({ kind: "claims", to: (mine ? null : readClaims(world.realism.claims)) ?? { ...settings.realism.claims } });
   const authored = readAdjudication(world.ruleset?.adjudication);
   out.push({ kind: "adjudicate", to: authored && !settings.overrideWorldAdjudication ? authored : settings.adjudication });
   return out;

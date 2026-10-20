@@ -35,6 +35,8 @@ async function chat(extra: { hidden?: string; truth?: boolean; secretAlias?: str
   if (extra.secretAlias) await put("lore", "courier", { id: "courier", title: "The masked courier", content: "The masked courier carries letters nobody else may read.", keys: [], aliases: [extra.secretAlias], links: [], secret: true, gate: "false", audience: [] });
   for (const [collection, value] of extra.puts ?? []) await put(collection, String(value.id), value);
   if (Object.keys(extra).length > 0) rig.body(await rig.send({ type: "lre.world", op: "commit", worldId, base: null }));
+  // These chats hold the player to the world (DESIGN §9.4): a thing the world doesn't have drops its action, as before claims.
+  rig.body(await rig.send({ type: "lre.settings.set", patch: { realism: { preset: "custom", claims: { mode: "hold", capped: false } } } }));
   const chatId = rig.host.createChat("Morning.");
   rig.body(await rig.send({ type: "lre.world", op: "attach", worldId, chatId }));
   return { rig, chatId };

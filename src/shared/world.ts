@@ -50,6 +50,7 @@ import type {
   PlaceVisibility,
   WorldId,
 } from "./ids";
+import type { ClaimPlace, ClaimsPolicy } from "./claims";
 import type { DataTable } from "./tables";
 import type { WorldMindsConfig } from "./minds";
 
@@ -432,6 +433,12 @@ export interface ParamDef {
    * per row, labelled by the row's `label`, and the resolver takes a row id or label and refuses others.
    */
   table?: TableId;
+  /**
+   * A ref param a thing the player says they have may fill when the world doesn't have it, as the POV
+   * sees it (DESIGN §9.4 player claims): it is made where the action expects it, in the actor's
+   * hands (`held`) or where the actor is (`here`), under the chat's claims policy.
+   */
+  claim?: ClaimPlace;
 }
 
 /**
@@ -693,6 +700,8 @@ export interface RealismDefaults {
   levels: Record<DomainId, Level>;
   /** Caps per detail band, keyed by band id; the POV is never capped. */
   tierCaps: Record<Band, Partial<Record<DomainId, Level>>>;
+  /** What a typed action's thing the world doesn't have becomes in new chats (DESIGN §9.4); absent, the user's setting fills in. */
+  claims?: ClaimsPolicy;
 }
 
 /**

@@ -453,8 +453,17 @@ function worldBrief(world: WorldDoc, extra: string): string {
   return `World: ${world.name}. The player character is ${pov?.name ?? world.pov} (id ${world.pov}). Entities: ${people || "none"}. Places: ${places || "none"}. ${extra}`;
 }
 
-/** `interpret`'s read: the intent, and the reason it gave when it read no action. */
-export type InterpretRead = InterpretOutput & { reason?: string };
+/** What `interpret` may say a thing the player says they have is, for a claim (DESIGN §9.4): food and drink are used up, keys, weapons and documents ask first, money is never made. */
+export type ThingSort = "food" | "drink" | "weapon" | "key" | "document" | "money" | "other";
+const THING_SORTS: readonly ThingSort[] = ["food", "drink", "weapon", "key", "document", "money", "other"];
+
+/** One of the input's actions after the first as `interpret` read it, with what it says the thing it uses is. */
+export interface ReadAction extends QueuedAction {
+  thing?: ThingSort;
+}
+
+/** `interpret`'s read: the intent, the reason it gave when it read no action, and what it says each action's thing is. */
+export type InterpretRead = Omit<InterpretOutput, "queue"> & { reason?: string; thing?: ThingSort; queue?: ReadAction[] };
 
 /** What `interpret` is told of the world besides the catalog: its name and money, the player character, and the scene as the POV knows it (`interpretScene`). */
 export interface InterpretContext {
@@ -498,9 +507,10 @@ export async function interpret(
     `Read what the player character does in the input. Work out what it refers to ("what she offered", "there", "him") from the scene and the recent messages.`,
     `Only the player character's own deliberate actions count, whether said in the first person ("I", "we"), as a stage direction ("[${pov.name} heads to the roof]") or as narration about ${pov.name} in the third person. "I'll …" about what the player character does now is an action.`,
     `No action ("action": null) for speech alone, out-of-character text ("OOC:", "((…))"), questions, requests to others, what someone else does, hypotheticals, plans for another time, recaps or feelings.`,
-    `Use only the catalog's actions, as described there: never invent one. When no catalog action fits, "action" is null. An incidental action that fits none, or names nothing listed ("I pull on my jacket" with no jacket listed), is left out: it never hides the actions after it.`,
+    `Use only the catalog's actions, as described there: never invent one. When no catalog action fits, "action" is null. An incidental action that fits none, or names someone or somewhere nothing lists, is left out: it never hides the actions after it.`,
+    `An action on a thing the player says they have that nothing lists ("I pour Theresa a coffee" with no coffee listed) is still read, in order with the rest: its param holds the thing in the input's own words ("coffee"), and "thing" says what sort of thing it is: "food", "drink", "weapon", "key", "document", "money" or "other".`,
     `When the input and its context still leave it unclear which action or which target is meant, give "action": null and a short "reason"; never guess.`,
-    `Params are world ids, from the scene, Places and the catalog's lists. A text param that names an item keeps its qualifiers as written ("large pizza, delivered", not "pizza"). Money params are plain amounts in ${world.currency.code} as written (200 for ${world.currency.symbol}200).`,
+    `Params are world ids, from the scene, Places and the catalog's lists, except a thing nothing lists, which keeps the input's own words. A text param that names an item keeps its qualifiers as written ("large pizza, delivered", not "pizza"). Money params are plain amounts in ${world.currency.code} as written (200 for ${world.currency.symbol}200).`,
     `Read every action in the input, in order, not only the first. Return the first as "action" with its "params". If the input has more actions after it, list them in order in "more" (at most ${ACTION_QUEUE_LIMIT - 1}), each {"action": a catalog id, "params": {...}, "text": that action written as the player would type it}: "I walk to the market and buy bread" → "action" for the walk, and "more": [{"action": <the buy's id>, "params": {"item": "bread"}, "text": "I buy bread"}]. An action after them that no catalog action fits goes in "next", written as the player would type it.`,
     `If the input lets time pass after its last action ("…and sleep until the next morning", "…then wait two hours", "…then skip ahead to Friday at 6 PM"), add "then": {"minutes": number}, {"until": a day part, "shift" or "commitment"} or {"at": "YYYY-MM-DD HH:MM"} for a stated day and time; time passing is never in "more" or "next", nor is anything else that isn't an action.`,
   ];
@@ -520,7 +530,7 @@ export async function interpret(
     `Action catalog:\n${actions.map(catalogLine).join("\n")}`,
     `Rules:\n${rules.map((r) => `- ${r}`).join("\n")}`,
     presumed.map((r) => `- ${r}`).join("\n"),
-    `Output JSON only, exactly this shape: {"action": string|null, "params": {...}, "confidence": number, "reason"?: string, "more"?: [{"action": string, "params": {...}, "text": string}], "then"?: {...}, "next"?: string}.`,
+    `Output JSON only, exactly this shape: {"action": string|null, "params": {...}, "thing"?: string, "confidence": number, "reason"?: string, "more"?: [{"action": string, "params": {...}, "text": string, "thing"?: string}], "then"?: {...}, "next"?: string}.`,
   ]
     .filter((part) => part !== "")
     .join("\n");
@@ -539,7 +549,7 @@ export async function interpret(
   };
   // The further actions, in order, up to the queue's bound. One no catalog action reads ends the
   // queue: it and every one after it (and any past the bound) are left in words, as `next` is.
-  const queue: QueuedAction[] = [];
+  const queue: ReadAction[] = [];
   const rest: string[] = [];
   for (const entry of action && Array.isArray(raw.more) ? raw.more.slice(0, 16) : []) {
     const said = isRecord(entry) ? words(entry.text) : "";
@@ -547,13 +557,15 @@ export async function interpret(
     if (rest.length === 0 && queue.length < ACTION_QUEUE_LIMIT - 1 && isRecord(entry) && id !== null && actions.some((a) => a.id === id)) {
       const own: JsonObject = {};
       if (isRecord(entry.params)) for (const [k, v] of Object.entries(entry.params)) own[k] = JSON.parse(JSON.stringify(v ?? null)) as JsonValue;
-      queue.push({ action: id, params: own, text: said });
+      const thing = THING_SORTS.find((s) => s === entry.thing);
+      queue.push({ action: id, params: own, text: said, ...(thing ? { thing } : {}) });
     } else if (said !== "") rest.push(said);
   }
   const next = [...rest, words(raw.next)].filter((s) => s !== "");
   // Why it read no action, for the log: a line at most.
   const reason = !action && typeof raw.reason === "string" ? raw.reason.replace(/\s+/g, " ").trim().slice(0, 200) : "";
-  return { action, params: action ? params : {}, probabilities: action ? { [action]: confidence, none: 1 - confidence } : { none: 1 }, ...(then ? { then } : {}), ...(queue.length > 0 ? { queue } : {}), ...(next.length > 0 ? { next } : {}), ...(reason !== "" ? { reason } : {}) };
+  const thing = action ? THING_SORTS.find((s) => s === raw.thing) : undefined;
+  return { action, params: action ? params : {}, probabilities: action ? { [action]: confidence, none: 1 - confidence } : { none: 1 }, ...(thing ? { thing } : {}), ...(then ? { then } : {}), ...(queue.length > 0 ? { queue } : {}), ...(next.length > 0 ? { next } : {}), ...(reason !== "" ? { reason } : {}) };
 }
 
 /** A way of paying said as a payment: a preposition or "use" before it ("pay with my credit card", "on my debit card", "in cash", "from savings"), and not a thing named after it ("a credit card holder"). */

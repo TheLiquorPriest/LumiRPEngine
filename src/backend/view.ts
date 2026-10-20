@@ -23,7 +23,7 @@ import { optionalQuery, own } from "../engine/pack-kit";
 import { playerDrop, playerLines, UNSEEN_DROP } from "../engine/player-events";
 import type { ReadContext } from "../engine/registry";
 import { readPass } from "../engine/read-pass";
-import { presetOf } from "../engine/realism";
+import { claimsOf, presetOf } from "../engine/realism";
 import { levelFloors, type Registry } from "../engine/registry-impl";
 import { actionOdds, paramCandidates } from "../engine/resolve";
 import { isGone, kindIs, placeOfEntity } from "../engine/scope";
@@ -297,7 +297,7 @@ function palette(world: WorldDoc, state: WorldState, registry: Registry): Palett
 function controls(world: WorldDoc, state: WorldState, sceneType: string): ControlsView {
   return {
     // The chat's own preset: a new chat may start from the user's settings, and This chat changes it.
-    realism: { preset: presetOf(state.realism), levels: { ...state.realism.levels }, tierCaps: structuredClone(state.realism.tierCaps), bandTiers: bandTiers(world), floors: levelFloors(world) },
+    realism: { preset: presetOf(state.realism), levels: { ...state.realism.levels }, tierCaps: structuredClone(state.realism.tierCaps), bandTiers: bandTiers(world), floors: levelFloors(world), claims: claimsOf(world, state) },
     adjudication: policyOf(world, state),
     time: {
       sceneType,

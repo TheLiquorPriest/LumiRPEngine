@@ -3,6 +3,7 @@
 // windows (P2: `pending: true`).
 
 import type { Band, ChatId, DomainId, RevisionId, UserId, WorldId } from "../shared/ids";
+import { CLAIM_MODE_LABEL } from "../shared/claims";
 import { DOMAINS, pathSafe } from "../shared/ids";
 import type { JsonObject, JsonValue } from "../shared/json";
 import { hasOwn, isRecord, safeKey } from "../shared/json";
@@ -312,7 +313,7 @@ export class Dispatcher {
         return;
       }
       case "lre.marker": {
-        const body = validMarkerBody(r.kind === "resolve" ? { kind: "resolve", domain: r.domain, scope: r.scope, to: r.to } : r.kind === "time" ? { kind: "time", control: r.control, scope: r.scope, to: r.to } : r.kind === "adjudicate" ? { kind: "adjudicate", to: r.to } : { kind: "migrate", to: r.to, merge: r.merge });
+        const body = validMarkerBody(r.kind === "resolve" ? { kind: "resolve", domain: r.domain, scope: r.scope, to: r.to } : r.kind === "time" ? { kind: "time", control: r.control, scope: r.scope, to: r.to } : r.kind === "claims" ? { kind: "claims", to: r.to } : r.kind === "adjudicate" ? { kind: "adjudicate", to: r.to } : { kind: "migrate", to: r.to, merge: r.merge });
         // A retired control (an earlier build's starting markers) stays readable in stored ledgers, but nothing sets it now.
         if (!body || (body.kind === "time" && !TIME_CONTROLS.some((c) => c === body.control))) throw new RequestError("bad_request", "not a valid settings change");
         if (body.kind === "migrate") {
@@ -680,6 +681,8 @@ export class Dispatcher {
       if (to > from && to >= 2) lines.push({ text: `People without ${name.toLowerCase()} detail get it from the pinned tables when you open them.`, tone: "materialize" });
     } else if (body.kind === "time") {
       lines.push({ text: `${body.control} changes from the next turn; earlier turns keep the setting they were planned with.`, tone: "info" });
+    } else if (body.kind === "claims") {
+      lines.push({ text: `What you say you have that the world doesn't: ${CLAIM_MODE_LABEL[body.to.mode]}${body.to.mode === "real" ? (body.to.capped ? ", asking above the world's claim cap" : ", at any price") : ""}, from the next turn; earlier turns keep what theirs did.`, tone: "info" });
     } else if (body.kind === "adjudicate") {
       lines.push({ text: "Checks are decided this way from the next turn; earlier turns keep how theirs were decided.", tone: "info" });
     } else {
@@ -924,6 +927,24 @@ export class Dispatcher {
         if (!m || !rec) throw new RequestError("not_found", "the turn is gone");
         // A Re-run of this turn plays the text as plain roleplay from now on.
         if (typeof chip.payload.text === "string") this.rt.bridgeOf(chatId)?.setIntent(chip.payload.text, null);
+        const refs = Runtime.refsOf(rec, Array.isArray(chip.payload.events) ? chip.payload.events : [], 0);
+        if (refs.length === 0) return { applied: false, pending: false };
+        const result = await this.write(chatId, userId, { kind: "undo", id: this.nextId(), messageId: m.id, swipeId: m.swipeId, refs });
+        return { applied: result.applied, pending: result.pending };
+      }
+      case "claim": {
+        // The answer to a claim's question (DESIGN §9.4): kept with the read; the frontend's Regenerate then resumes the turn.
+        if (choice !== "add" && choice !== "drop") throw new RequestError("bad_request", `unknown choice ${choice}`);
+        const text = typeof chip.payload.text === "string" ? chip.payload.text : "";
+        const index = typeof chip.payload.index === "number" ? chip.payload.index : -1;
+        return { applied: this.rt.answerClaim(chatId, text, index, choice === "add"), pending: false };
+      }
+      case "claimed": {
+        // Undo of a thing the player said they had: it goes, with what its action did (DESIGN §9.4).
+        const core = await this.rt.ledger.core(chatId, userId);
+        const m = core?.chain(observed).find((x) => x.id === chip.messageId);
+        const rec = m?.ledger?.swipes[String(m.swipeId)];
+        if (!m || !rec) throw new RequestError("not_found", "the turn is gone");
         const refs = Runtime.refsOf(rec, Array.isArray(chip.payload.events) ? chip.payload.events : [], 0);
         if (refs.length === 0) return { applied: false, pending: false };
         const result = await this.write(chatId, userId, { kind: "undo", id: this.nextId(), messageId: m.id, swipeId: m.swipeId, refs });

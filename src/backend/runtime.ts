@@ -38,6 +38,7 @@ import type { PackDef, ReadContext } from "../engine/registry";
 import { createRegistry, type Registry } from "../engine/registry-impl";
 import { createRng } from "../engine/rng";
 import { readPass } from "../engine/read-pass";
+import { claimsOf } from "../engine/realism";
 import { kindIs, placeOfEntity, placeWithin } from "../engine/scope";
 import type { WorldState } from "../engine/state";
 import { actionOdds, findAction, type Resolution } from "../engine/resolve";
@@ -55,24 +56,25 @@ import { DEFAULT_SECTIONS, EngineBook, renderSection, sectionsOf, sectionTokens 
 import { ChatPrefs } from "./chat-prefs";
 import { ChipStore, idAfterSwipeDelete, type StoredChip } from "./chips";
 import type { DryRun, HostPort } from "./host";
-import { LedgerService, toChain, type Delivered, type TurnContext, type TurnHooks } from "./ledger-io";
+import { LedgerService, toChain, type Delivered, type PreOutcome, type TurnContext, type TurnHooks } from "./ledger-io";
 import { MessageCache } from "./message-cache";
 import { StatePush } from "./push";
 import { effectiveMode, recordOutcome, SettingsStore } from "./settings-store";
 import { startMarkersFrom } from "./start-markers";
+import { claimFor } from "./claims";
 import { StepLore, ToolSupport, type LoreInputs, type LookupTransport } from "./lore-steps";
 import { readPins } from "./lore-pins";
 import { interpretCatalog, interpretScene, timelapseEntry } from "./interpret-context";
 import { failureWords } from "./requirement-words";
 import { missingSections, withoutMissing } from "./section-refs";
-import { CallMeter, dedupeProposals, extract, interpret, saidPayMethod, Steps, type InterpretContext, type InterpretRead } from "./steps";
+import { CallMeter, dedupeProposals, extract, interpret, saidPayMethod, Steps, type InterpretContext, type InterpretRead, type ThingSort } from "./steps";
 import { PlanNotes } from "./plan-notes";
 import { OutcomeNotes } from "./outcome-notes";
 import { InspectorLog, type InspectorRecord } from "./inspector-log";
 import { JsonHiding, readableReply } from "./json-hiding";
 import { GUIDANCE_PREFIX, GUIDANCE_TARGETS, NARRATOR_OUTLET, outletOf, PresetBinding, type Guidance, type PresetConfig } from "./preset-binding";
 import { presetCaveats, type PresetCaveat } from "./preset-lint";
-import { applyProposals, type EnginePipeline, type PlanProse, TIME_ADVANCE_CAP, TurnBridge, type UnfitAction } from "./turn-model";
+import { applyProposals, type EnginePipeline, type PlanProse, type ReadStep, TIME_ADVANCE_CAP, TurnBridge, type UnfitAction } from "./turn-model";
 import { agentsActHere, contradiction, factLines, judge, noFacts, npcChoose, phaseBudget, planFacts, presentNames, promptedEffects, promptedText, puzzleAnswer, renderTemplate, runsOf, safeVars, type StepBudget, tiesOf, unfitRef, type PlanStart, type SignalFacts, type StepRun, type Tie, type UnfitRef } from "./turn-steps";
 import { buildView, clockMinutes, compactSpan, notWorldView, recentLines, spanText, TIMELAPSE_ACTION } from "./view";
 import { StudioBridge } from "./studio";
@@ -781,7 +783,7 @@ export class Runtime implements TurnHooks {
    * `puzzle.answer` when an answer needs judging, and `judge` when the adjudication policy weighs the
    * player's words or leaves the check to the story. One call budget covers this and `afterPlan`.
    */
-  async beforePlan(input: { chatId: ChatId; userId: UserId; core: LedgerCore; observed: ChainMessage[]; generationId: string; connectionId: string | null; runKey: string; signal: AbortSignal }): Promise<void> {
+  async beforePlan(input: { chatId: ChatId; userId: UserId; core: LedgerCore; observed: ChainMessage[]; generationId: string; connectionId: string | null; runKey: string; signal: AbortSignal }): Promise<PreOutcome | undefined> {
     const bridge = this.bridges.get(input.chatId);
     const p = input.core.journal.pending[input.generationId];
     // A Re-narrate copies its source's plan (P3): no resolve, simulate or model calls before it.
@@ -824,7 +826,7 @@ export class Runtime implements TurnHooks {
     const earlier = lastUser ? before.slice(0, before.indexOf(lastUser)) : before;
     // What the reply before it left unplayed of the last message, which this one may take as done (DESIGN §5.2).
     const left = text.trim() === "" ? "" : await this.leftUnplayed(input.chatId, input.userId, earlier, text);
-    const intentTask = text.trim() === "" || bridge.hasIntent(text) ? Promise.resolve() : this.readIntent(bridge, text, recorded, render, all, earlier, settings, facts, budget, at, left);
+    const intentTask = text.trim() === "" || bridge.hasIntent(text) || bridge.isHeld(text) ? Promise.resolve() : this.readIntent(bridge, text, recorded, render, all, earlier, settings, facts, budget, at, left);
     // The judge's call for the player's own action comes before npc.choose's (DESIGN §11). Present
     // agents' choices run beside the intent only while a call stays free for the judge; otherwise
     // they take what is left once it has run. Before `interpret` names the action, the judge may
@@ -834,6 +836,15 @@ export class Runtime implements TurnHooks {
     const npcRun = runsOf(settings.modelUse, render.world, "npc.choose", facts, { guidance: at.guidance })[0];
     const choose = npcRun && ties.present.length > 0 ? () => npcChoose(this.steps, npcRun, ties.present, (t) => this.describeTie(t, render.world, render.state), createRng(hashParts("lre.npc.pre", bridge.runSeed, p.generationId)), input.userId, budget.signal, this.stepLore(npcRun, at, this.tieInputs(ties.present, render.world, render.state))) : null;
     const [, early] = await Promise.all([intentTask, choose && budget.take(judging ? 1 : 0) ? choose() : null]);
+    // A claim waits on the player's answer (DESIGN §9.4 player claims): nothing is generated; the
+    // chat asks, on the player's message, and the answer's Regenerate runs the engine again with
+    // the read kept, so exactly one reply follows.
+    const asked = bridge.askOf(text);
+    if (asked && lastUser) {
+      await this.chips.add(input.chatId, input.userId, [{ id: `claim:${lastUser.id}`, kind: "claim", messageId: lastUser.id, label: asked.question, detail: asked.detail, actions: [{ id: "add", label: "Add", style: "primary" }, { id: "drop", label: "Not an action" }], expires: "next_send", payload: { text, index: asked.index } }]);
+      this.push.changed(input.chatId, input.userId);
+      return { waiting: `waiting for the player's answer: ${asked.question}` };
+    }
     this.prePhase.set(p.generationId, { facts, text, start: { place: placeOfEntity(render.state, render.world.pov), clock: render.state.clock }, connectionId: input.connectionId, preset });
     trimMap(this.prePhase);
     // Character minds (DESIGN §24) think beside the judge: separate calls, on the phase's wall clock,
@@ -1120,19 +1131,32 @@ export class Runtime implements TurnHooks {
     const chosen = result.action ? all.find((a) => a.id === result.action) : undefined;
     const params = chosen ? playable(chosen, result.params, render.world, [text]) : result.params;
     // An action whose params name nothing in the world that fits, as the POV knows it ("I pay Rena"
-    // where Rena is no one in it, "I pull on my work jacket" with no jacket), is dropped on its own,
-    // the first as much as a queued one, and its reply says why on a decline chip (DESIGN §9.4). The
-    // rest of the message still plays: an incidental action that names nothing never displaces the
-    // move the turn is about. With nothing left to play, the turn is plain roleplay.
+    // where Rena is no one in it), is dropped on its own, the first as much as a queued one, and its
+    // reply says why on a decline chip (DESIGN §9.4). The rest of the message still plays: an
+    // incidental action that names nothing never displaces the move the turn is about. With nothing
+    // left to play, the turn is plain roleplay. A thing the player says they have that the world
+    // doesn't ("I pour Theresa a coffee" with no coffee) is a claim the chat's policy decides
+    // (`claimFor`): made real, asked about first, or dropped as above; money never is made.
+    const policy = claimsOf(render.world, render.state);
     const dropped: UnfitAction[] = [];
-    const drop = (def: ActionDef, ref: UnfitRef, given: JsonObject): void => {
-      this.host.log("info", `[LumiRPEngine] interpret: ${def.id} names nothing in the world (${JSON.stringify(given)}); dropped`, userId);
-      dropped.push({ label: def.label, reason: unfitReason(this.registry, render.world, render.state, ref, text, secrets, mayKnow) });
+    const steps: ReadStep[] = [];
+    const take = (def: ActionDef, given: JsonObject, words: string, thing: ThingSort | undefined, said: readonly string[]): void => {
+      const ref = unfitRef(this.registry, def, given, render.world, render.state, mayKnow);
+      if (!ref) {
+        steps.push({ action: def.id, params: given, text: words });
+        return;
+      }
+      const verdict = claimFor({ registry: this.registry, world: render.world, state: render.state, action: def, params: given, unfit: ref, said, thing, policy, mayKnow });
+      // A thing the POV may know by those words keeps its own rules: the action takes it, and fits or fails as it would.
+      if (verdict?.kind === "known") return take(def, verdict.params, words, undefined, said);
+      if (verdict?.kind === "real") steps.push({ action: def.id, params: given, text: words, claim: verdict.claim });
+      else if (verdict?.kind === "ask") steps.push({ action: def.id, params: given, text: words, claim: verdict.claim, ask: { question: verdict.question, detail: verdict.detail } });
+      else {
+        this.host.log("info", `[LumiRPEngine] interpret: ${def.id} names nothing in the world (${JSON.stringify(given)}); dropped`, userId);
+        dropped.push({ label: def.label, reason: verdict?.kind === "hold" && verdict.reason ? verdict.reason : unfitReason(this.registry, render.world, render.state, ref, text, secrets, mayKnow) });
+      }
     };
-    const playing: QueuedAction[] = [];
-    const unfit = chosen ? unfitRef(this.registry, chosen, params, render.world, render.state, mayKnow) : null;
-    if (chosen && unfit) drop(chosen, unfit, params);
-    else if (chosen) playing.push({ action: chosen.id, params, text: "" });
+    if (chosen) take(chosen, params, "", result.thing, [text]);
     // The further actions (DESIGN §11 action queue), each read as the first is. Time passing is never
     // queued: as the last it is the input's `then`, and earlier it ends the queue and is left in words.
     // One carrying a secret is dropped on its own, as a second action carrying one always was, and
@@ -1152,19 +1176,12 @@ export class Runtime implements TurnHooks {
         break;
       }
       const ready = playable(def, q.params, render.world, [q.text, text]);
-      const ref = unfitRef(this.registry, def, ready, render.world, render.state, mayKnow);
-      if (ref) drop(def, ref, ready);
-      else playing.push({ action: def.id, params: ready, text: chipText(q.text) });
+      take(def, ready, chipText(q.text), q.thing, [q.text, text]);
     }
     bridge.setNext(text, joinActions(next) || null);
     bridge.setOffer(text, then ? interpretedTarget(then, render.world, render.state, text) : null);
-    // The first action that plays leads, with the read's confidence; the others queue behind it.
-    const [first, ...queue] = playing;
-    const confidence = result.action ? (result.probabilities[result.action] ?? 1) : 1;
-    const probabilities = !first || first.action === result.action ? result.probabilities : { [first.action]: confidence, none: 1 - confidence };
-    const intent: InterpretOutput | null = chosen && !first ? null : { action: first?.action ?? result.action, params: first?.params ?? params, probabilities, ...(then ? { then } : {}), ...(queue.length > 0 ? { queue } : {}) };
-    if (dropped.length > 0) bridge.setUnfit(text, dropped, intent);
-    else bridge.setIntent(text, intent, true);
+    // A claim waiting on the player holds the read until it is answered (`TurnBridge.setRead`).
+    bridge.setRead(text, { lead: result.action, params, probabilities: result.probabilities, chosen: chosen !== undefined, ...(then ? { then } : {}), steps, dropped });
   }
 
   /** `puzzle.answer` (DESIGN §10): an Answer the stage can't match exactly is judged, then retried with the probability. */
@@ -1733,6 +1750,8 @@ export class Runtime implements TurnHooks {
         if (chip) stored.push({ id: `roll:${at}${n}`, kind: "roll", ...base, label: chip.label, detail: chip.detail, actions: [], expires: "never", payload: {} });
         if (!res.ok && res.failed) stored.push({ id: `decline:${at}${n}`, kind: "decline", ...base, label: `${label}: couldn't`, detail: playerReason(res.failed), actions: [], expires: "next_send", payload: {} });
         else if (res.rejected.length > 0) stored.push({ id: `decline:${at}${n}`, kind: "decline", ...base, label: `${label}: declined`, detail: res.rejected.map((r) => r.rejection.reason).join("; "), actions: [], expires: "next_send", payload: {} });
+        // A thing the player said they had, made real for this action (DESIGN §9.4): Undo takes it back, with what the action did.
+        if (res.claimed && input.kind !== "renarrate" && input.kind !== "continue") stored.push({ id: `claimed:${at}${n}`, kind: "claimed", ...base, label: `Added: ${/^[aeiou]/i.test(res.claimed.name) ? "an" : "a"} ${res.claimed.name}`, detail: "You said you had it, so the world has it now. Undo takes it back, with what you did with it.", actions: [{ id: "undo", label: "Undo", style: "danger" }], expires: "next_send", payload: { events: JSON.parse(JSON.stringify(res.claimed.events)) as JsonValue } });
       }
       // Typed text `interpret` read as actions (DESIGN §9.4, §11): one tap undoes what they did.
       const done = played.filter((res) => res.ok && res.events.length > 0);
@@ -1835,6 +1854,11 @@ export class Runtime implements TurnHooks {
 
   setSwipeChoice(chatId: ChatId, mode: "rerun" | "renarrate"): void {
     lruSet(this.swipeChoice, chatId, mode, 256);
+  }
+
+  /** The player's answer to a claim's question (DESIGN §9.4): kept with the read, so the Regenerate that follows resumes the turn. */
+  answerClaim(chatId: ChatId, text: string, index: number, add: boolean): boolean {
+    return this.bridges.get(chatId)?.answerClaim(text, index, add) ?? false;
   }
 
   async kindOf(input: { chatId: ChatId; userId: UserId; kind: GenerationKind }): Promise<GenerationKind> {
@@ -2073,7 +2097,7 @@ export class Runtime implements TurnHooks {
       record.id = to;
       this.inspector.save(chatId);
     }
-    await this.chips.removeWhere(chatId, userId, (chip) => chip.kind === "engine_failed");
+    await this.chips.removeWhere(chatId, userId, (chip) => chip.kind === "engine_failed" || chip.kind === "claim");
   }
 
   /**
