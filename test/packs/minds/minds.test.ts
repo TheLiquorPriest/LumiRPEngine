@@ -10,6 +10,7 @@ import type { WorldDoc } from "../../../src/shared/world";
 import { playerLines } from "../../../src/engine/player-events";
 import { createRegistry } from "../../../src/engine/registry-impl";
 import type { WorldState } from "../../../src/engine/state";
+import { placeOfEntity } from "../../../src/engine/scope";
 import { unrevealedSecrets } from "../../../src/engine/visibility";
 import { ALL_PACKS } from "../../../src/packs/index";
 import { mindEdit } from "../../../src/packs/minds/core/edit";
@@ -39,7 +40,7 @@ function round(state: WorldState): LedgerEvent {
   return { type: "minds.round", data: { at: state.clock, on: true } };
 }
 
-function mind(state: WorldState, entity: string, rest: { monologue?: string; depiction?: string; level?: string; place?: string | null; interrupt?: string } = {}): LedgerEvent {
+function mind(state: WorldState, entity: string, rest: { monologue?: string; depiction?: string; level?: string; place?: string | null; interrupt?: string; moment?: "turn" | "beat" } = {}): LedgerEvent {
   return {
     type: "minds.mind",
     data: {
@@ -47,7 +48,7 @@ function mind(state: WorldState, entity: string, rest: { monologue?: string; dep
       at: state.clock,
       place: rest.place ?? null,
       level: rest.level ?? "live",
-      moment: "turn",
+      moment: rest.moment ?? "turn",
       reason: "live",
       monologue: rest.monologue ?? "I should keep my head down today.",
       depiction: rest.depiction ?? "keeps glancing at the door while wiping the counter",
@@ -195,6 +196,21 @@ describe("the Minds section", () => {
     // A mind from an earlier round isn't this turn's.
     const stale = fold(reg, brief, leaky, [round(leaky)]);
     expect(mindLines(reg.context(brief, stale))).toEqual([]);
+  });
+
+  test("a time skip's earlier beats are past: a beat's mind is told only at the beat the skip ended on, a turn's whatever the clock", () => {
+    const w = world();
+    const s0 = at(w, startState(w), "maya", "apartment");
+    const later = (s: WorldState): WorldState => fold(reg, w, s, [{ type: "clock", minutes: 180, cause: "tick" }]);
+    const told = (s: WorldState): string[] => mindLines(reg.context(w, s)).map((l) => l.entity);
+    // Maya thought at a beat, then the skip ran on three hours: what she thought then is past.
+    const beat = later(fold(reg, w, s0, [round(s0), mind(s0, "maya", { moment: "beat", place: "apartment" })]));
+    expect(placeOfEntity(beat, "maya")).toBe("apartment");
+    expect(told(beat)).toEqual([]);
+    // Asked again at the beat it ended on, she is told.
+    expect(told(fold(reg, w, beat, [mind(beat, "maya", { moment: "beat", place: "apartment" })]))).toEqual(["maya"]);
+    // A turn's mind, asked before the turn's own time passed, is the turn's.
+    expect(told(later(fold(reg, w, s0, [round(s0), mind(s0, "maya", { place: "apartment" })])))).toEqual(["maya"]);
   });
 
   test("no player line ever tells a mind or a memory", () => {

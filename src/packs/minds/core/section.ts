@@ -1,5 +1,6 @@
 // The narrator's Minds section (DESIGN §24.3): this round's minds for the people at the POV's place
-// it can see, and anyone whose mind interrupted a skip. The world's `minds.secrecy` decides what goes:
+// it can see, and anyone whose mind interrupted a skip; a mind from a time skip's beat only when the
+// skip ended on that beat, as the run went past any other. The world's `minds.secrecy` decides what goes:
 // `full` gives each monologue and intent, to be depicted and never stated; `brief` gives only the
 // depiction, written as behaviour, and only when it carries no unrevealed secret and names no one the
 // POV can't see (the screens Stance uses), checked again here whatever was checked when it was
@@ -49,6 +50,8 @@ export function mindLines(ctx: ReadContext): MindLine[] {
     const m = own(slice.chars, id)?.mind;
     const e = own(state.entities, id);
     if (!m || !e || m.round !== slice.round || id === pov || isGone(state, id) || !acts(world, state, id)) continue;
+    // An earlier beat of the skip is past: the clock ran on after it.
+    if (m.moment === "beat" && m.at !== state.clock) continue;
     const present = here !== null && placeOfEntity(state, id) === here && canSeeEntity(reg, world, state, pov, id);
     if (!present && m.interrupt === null) continue;
     // Someone reaching the POV from elsewhere is named only when the POV knows them.

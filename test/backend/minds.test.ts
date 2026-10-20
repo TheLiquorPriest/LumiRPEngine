@@ -6,12 +6,12 @@
 import { describe, expect, test } from "bun:test";
 import type { JsonObject } from "../../src/shared/json";
 import type { LedgerEvent } from "../../src/shared/ledger";
-import { DEFAULT_MINDS_MEMORY } from "../../src/shared/minds";
+import { DEFAULT_MINDS_MEMORY, type MindMoment } from "../../src/shared/minds";
 import type { WorldDoc } from "../../src/shared/world";
 import { toChain } from "../../src/backend/ledger-io";
 import type { QuietRequest } from "../../src/backend/host";
 import { localTime } from "../../src/backend/minds";
-import { presentTurns, recallFor } from "../../src/backend/minds-context";
+import { mindContext, presentTurns, recallFor } from "../../src/backend/minds-context";
 import { calendarOf, clockOfStamp } from "../../src/engine/calendar";
 import { modernUsWorld } from "../packs/riverton";
 import { playtestStart, playtestTurn } from "../../src/engine/authoring";
@@ -392,6 +392,27 @@ describe("plan times a mind writes", () => {
 });
 
 describe("a mind's context", () => {
+  test("a moment the player says nothing in tells them why they think now, with the POV or away", async () => {
+    const rig = new Rig({ shipped: true });
+    const chatId = await alderChat(rig);
+    const { state, world } = await stateOf(rig, chatId);
+    const ended = "The time skip ends; it is now Mon 14 Sep 2026, 18:00 (evening).";
+    const now = (who: string, moment: MindMoment): string => {
+      const text = mindContext({ reg: rig.rt.registry, world, state, who, memory: DEFAULT_MINDS_MEMORY, messages: [], hideJson: true, moment, loreTokens: 0 });
+      return text.slice(text.indexOf("## Now"));
+    };
+    const turn = (reason: string, user = ""): MindMoment => ({ kind: "turn", at: state.clock, reason, user, reply: "" });
+    // Danny is with the POV; Dale is away at the marina.
+    expect(placeOfEntity(state, "dale_whitcomb")).not.toBe(placeOfEntity(state, "pov"));
+    for (const who of ["danny_okafor", "dale_whitcomb"]) expect(now(who, turn(ended))).toContain(ended);
+    // The player's words are the moment, and a plain turn tells no reason.
+    expect(now("danny_okafor", turn(ended, "Hello."))).not.toContain(ended);
+    expect(now("danny_okafor", turn(""))).toMatch(/is here with you\.$/);
+    // A beat's reason reads as one sentence.
+    expect(now("danny_okafor", { kind: "beat", at: state.clock, reason: "Marcus's appointment", user: "", reply: "" })).toMatch(/\. Marcus's appointment\.$/);
+    expect(now("danny_okafor", { kind: "beat", at: state.clock, reason: ended, user: "", reply: "" })).not.toContain("..");
+  });
+
   test("a character's own secrets are in their context: the tracks they own, and the secret a cue of theirs stands for", async () => {
     const rig = new Rig({ shipped: true });
     fakeModels(rig);

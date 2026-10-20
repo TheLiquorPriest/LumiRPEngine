@@ -65,6 +65,12 @@ function tail(text: string, max: number): string {
   return t.length <= max ? t : `…${t.slice(t.length - max + 1).replace(/^\S*\s+/, "")}`;
 }
 
+/** Text as one sentence: its first letter capitalised and a full stop added unless it ends in one; "" stays "". */
+function sentence(text: string): string {
+  const t = text.trim();
+  return t === "" ? "" : `${t[0]?.toUpperCase() ?? ""}${t.slice(1)}${/[.!?…]$/.test(t) ? "" : "."}`;
+}
+
 /** A block of as many of `lines` as fit in `room` characters, whole and in order. */
 function blockWithin(title: string, lines: readonly string[], room: number): string {
   const kept: string[] = [];
@@ -310,12 +316,14 @@ export function mindContext(scope: MindScope): string {
   // came in since, wasn't there for what it tells (DESIGN §24.4).
   const said = readSlice(state).presence.findLast((p) => p.msg !== null);
   const heardLast = said === undefined || said.who.includes(who);
+  // A moment the player said nothing in (a time skip's end) tells why they think now.
+  const why = moment.user.trim() === "" ? sentence(moment.reason) : "";
   const now =
     moment.kind === "beat"
-      ? [`It is ${formatClock(cal, moment.at)}. ${moment.reason}.`]
+      ? [`It is ${formatClock(cal, moment.at)}. ${sentence(moment.reason)}`.trim()]
       : withPov
-        ? [heardLast && moment.reply.trim() !== "" ? `The story so far ended: ${tail(readableReply(moment.reply, scope.hideJson), RECALL_SIDE)}` : "", moment.user.trim() !== "" ? `Now ${povLabel(scope)} says or does: ${clip(moment.user, RECALL_SIDE)}` : `${povLabel(scope)} is here with you.`].filter((l) => l !== "")
-        : [`You aren't with ${povLabel(scope)} right now; carry on with your own day.`];
+        ? [heardLast && moment.reply.trim() !== "" ? `The story so far ended: ${tail(readableReply(moment.reply, scope.hideJson), RECALL_SIDE)}` : "", why, moment.user.trim() !== "" ? `Now ${povLabel(scope)} says or does: ${clip(moment.user, RECALL_SIDE)}` : `${povLabel(scope)} is here with you.`].filter((l) => l !== "")
+        : [`You aren't with ${povLabel(scope)} right now; carry on with your own day.`, why].filter((l) => l !== "");
   // What the moment is to them, which ranks their lore and recall: what the POV says and how the last
   // reply ended when they are there to hear it, else where they are.
   const about = withPov && moment.kind === "turn" ? `${moment.user}\n${heardLast ? moment.reply : ""}` : place ? nameOf(scope, place) : "";

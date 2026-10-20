@@ -291,7 +291,8 @@ export async function preMinds(deps: MindsDeps, input: PreMindsInput): Promise<R
     levels[p.entity] = p.level;
     reasons[p.entity] = p.reason;
   }
-  const moment: MindMoment = { kind: "turn", at: w.state.clock, reason: "a turn", user: input.user, reply: input.reply };
+  // Each thinks for their own refresh reason; the moment itself is the player's message.
+  const moment: MindMoment = { kind: "turn", at: w.state.clock, reason: "", user: input.user, reply: input.reply };
   const ran = await runMinds(deps, { chatId: input.chatId, userId: input.userId, world: input.world, state: w.state, who: picks.map((p) => p.entity), moment, levels, reasons, signal: input.signal, ...(input.guidance !== undefined ? { guidance: input.guidance } : {}), phase: "pre" });
   return { events: [round, ...ran.events], traces: ran.traces };
 }

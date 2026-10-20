@@ -754,7 +754,7 @@ export interface MindMoment {
   kind: "turn" | "beat";
   /** Game minutes they think at. */
   at: number;
-  /** Why now, in words: "a turn", or the beat's reason ("Marcus's appointment"). */
+  /** Why now, in words, which a mind is told when the player said nothing: a beat's reason ("Marcus's appointment") or a time skip's end; "" on a plain turn. */
   reason: string;
   /** The player's latest message and the reply before it, on a turn; empty at a beat. */
   user: string;
