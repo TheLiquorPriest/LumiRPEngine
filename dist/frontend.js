@@ -859,6 +859,7 @@ function hashJson(value) {
 }
 
 // src/shared/steps.ts
+var RETIRED_SIGNALS = new Map([["classifier", "typed_input"]]);
 var STEP_OUTPUTS = {
   interpret: ["decision", "text"],
   "npc.choose": ["decision", "text"],
@@ -2573,6 +2574,7 @@ var COLLECTION_SPECS = {
   ],
   actions: [
     { kind: "text", key: "label", label: "Label" },
+    { kind: "text", key: "description", label: "Description", multiline: true, optional: true, hint: "What it does, in a line: the model that reads typed messages is told it" },
     {
       kind: "record",
       key: "params",
@@ -12007,6 +12009,10 @@ function stepConfigOf(steps, purpose) {
   const signals = ["always"];
   return saved ? saved.signals.length > 0 ? saved : { ...saved, signals } : { enabled: true, signals };
 }
+var DEFAULT_RECENT = Object.freeze({ messages: 8, tokens: 3000 });
+function recentOf(config) {
+  return config?.recent ?? DEFAULT_RECENT;
+}
 var SPEED_ACTIVITIES = ["sleep", "work_shift", "travel", "waiting"];
 var SPEED_DEFAULT = Object.freeze({ mode: "offer", thresholdMinutes: 30 });
 var SPEED_THRESHOLD_MINUTES = [1, 7 * 1440];
@@ -12038,9 +12044,9 @@ var PRESETS2 = [
   { value: "custom", label: "Custom" }
 ];
 var PRESET_PLAIN = {
-  lean: "The fewest calls: quickest and cheapest. A model reads your typed actions and the reply; people's choices follow the engine's own rules.",
+  lean: "The fewest calls: quickest and cheapest. A model reads each message you type for its actions, and the reply; people's choices follow the engine's own rules.",
   standard: "The default. A model also judges your approach when the rules for checks need it, and decides close calls for the people around you.",
-  full: "The most calls, so the slowest and costliest. A model reads every message you type, decides for everyone present, writes a brief and an outline for the narrator, and checks the reply against the facts.",
+  full: "The most calls, so the slowest and costliest. A model decides for everyone present, writes a brief and an outline for the narrator, and checks the reply against the facts.",
   custom: "Your own mix, set step by step in Steps and connections."
 };
 var PRESET_NOTE = {
@@ -12344,6 +12350,8 @@ function stepUpdatePatch(purpose, config) {
     out.template = config.template;
   if (config.lore)
     out.lore = { policy: config.lore.policy, tokens: config.lore.tokens, ...config.lore.transport ? { transport: config.lore.transport } : {} };
+  if (config.recent)
+    out.recent = { messages: config.recent.messages, tokens: config.recent.tokens };
   return { modelUse: { preset: "custom", steps: { [purpose]: out } } };
 }
 function useConnections() {
@@ -12588,6 +12596,7 @@ function StepCard(props) {
   const call = helperCallOf({ ...config, route }, props.helper);
   const lowTokens = route.provider === "helper" && call.maxTokens < LOW_TOKENS;
   const lore = stepLoreOf(config);
+  const recent = recentOf(config);
   const where = route.provider === "decision" ? `Decision · ${route.connectionId ? placeOf2(route, props.connections) : "the Decisions API's default"}` : `Helper · ${placeOf2(call, props.connections)} · ${paramsSummary(call)}`;
   const summary = config.enabled ? where : "Off";
   const setParam = (key, value) => {
@@ -12723,6 +12732,30 @@ function StepCard(props) {
                 disabled: busy,
                 onChange: (value) => setParam(p.key, value)
               }, p.key, false, undefined, this))
+            }, undefined, false, undefined, this)
+          ]
+        }, undefined, true, undefined, this) : null,
+        purpose === "interpret" ? /* @__PURE__ */ u3(Field, {
+          label: "Recent messages",
+          help: "The messages before yours it reads to work out what you mean (what she offered, there, him), newest first, up to both limits.",
+          children: [
+            /* @__PURE__ */ u3(NumberStepper, {
+              label: "Messages",
+              value: recent.messages,
+              min: 0,
+              step: 1,
+              integer: true,
+              disabled: busy,
+              onChange: (messages) => update({ ...config, recent: { ...recent, messages } })
+            }, undefined, false, undefined, this),
+            /* @__PURE__ */ u3(NumberStepper, {
+              label: "Tokens",
+              value: recent.tokens,
+              min: 0,
+              step: 500,
+              integer: true,
+              disabled: busy,
+              onChange: (tokens) => update({ ...config, recent: { ...recent, tokens } })
             }, undefined, false, undefined, this)
           ]
         }, undefined, true, undefined, this) : null,

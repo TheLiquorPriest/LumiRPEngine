@@ -3704,7 +3704,6 @@ function hashJson(value) {
 // src/shared/steps.ts
 var STEP_SIGNALS = [
   "typed_input",
-  "classifier",
   "reply",
   "scene_change",
   "slot_crossed",
@@ -3720,8 +3719,21 @@ var STEP_SIGNALS = [
   "always",
   "never"
 ];
+var RETIRED_SIGNALS = new Map([["classifier", "typed_input"]]);
 function knownSignal(s) {
   return STEP_SIGNALS.includes(s) || /^every_n:[1-9]\d*$/.test(s);
+}
+function currentSignals(signals) {
+  const out = [];
+  for (const s of signals) {
+    const now = RETIRED_SIGNALS.get(s) ?? s;
+    if (!out.includes(now))
+      out.push(now);
+  }
+  return out;
+}
+function hasRetiredSignal(signals) {
+  return signals.some((s) => RETIRED_SIGNALS.has(s));
 }
 var STEP_PLACEHOLDERS = ["world", "pov", "place", "clock", "scene", "present", "facts", "outcome", "beats", "brief", "user", "reply", "recent", "character"];
 var STEP_OUTPUTS = {
@@ -5968,6 +5980,10 @@ function stepConfigOf(steps, purpose) {
     return saved ?? { enabled: false, signals: [] };
   const signals = ["always"];
   return saved ? saved.signals.length > 0 ? saved : { ...saved, signals } : { enabled: true, signals };
+}
+var DEFAULT_RECENT = Object.freeze({ messages: 8, tokens: 3000 });
+function recentOf(config) {
+  return config?.recent ?? DEFAULT_RECENT;
 }
 var SPEED_ACTIVITIES = ["sleep", "work_shift", "travel", "waiting"];
 var SPEED_DEFAULT = Object.freeze({ mode: "offer", thresholdMinutes: 30 });
@@ -10787,6 +10803,7 @@ var spacePack = {
     r.action({
       id: "go",
       label: "Go to",
+      description: "Walk to another place: a room, a building, a street, another part of town.",
       pack: "space",
       params: { to: { type: "ref", ref: "place", label: "Place" } },
       requires: ["to != here", "level.space < 2 or route_exists(here, to, 'walk')"],
@@ -10799,6 +10816,7 @@ var spacePack = {
     r.action({
       id: "step",
       label: "Move on the map",
+      description: "Walk to a square of the grid you stand on.",
       pack: "space",
       params: { x: { type: "number" }, y: { type: "number" } },
       requires: ["level.space >= 3", "grid_reachable(here, x, y)"],
@@ -12721,9 +12739,9 @@ function registerEmployment(r) {
   core.effect({ type: "economy.job_end", args: ["job", "end?", "by?"], resolve: (args, ctx) => endJob(api, args, ctx) });
   core.effect({ type: "economy.job_raise", args: ["job", "rate?", "pct?", "by?"], resolve: (args, ctx) => raise(api, args, ctx) });
   core.formula("employs", (ctx, business, who) => allJobs(ctx).some((j) => j.business === String(business ?? "") && j.worker === String(who ?? "") && j.status !== "ended"));
-  core.action({ id: "job_hire", label: "Hire", pack: "economy", params: { business: { type: "ref", ref: "business" }, worker: { type: "ref", ref: "person" }, title: { type: "text", optional: true }, basis: { type: "text", optional: true, label: "Pay basis" }, rate: { type: "money", optional: true, label: "Pay rate" }, hours_per_week: { type: "number", optional: true }, pay_every: { type: "text", optional: true, label: "Paid every" } }, requires: ["manages(self, business)", "not employs(business, worker)", "level.money >= 3"], outcomes: { default: [{ type: "economy.hire", args: { business: "business", worker: "worker", title: "=params.title", basis: "=params.basis", rate: "=params.rate", hours_per_week: "=params.hours_per_week", pay_every: "=params.pay_every", by: "self" } }] }, duration: "15", lexicon: ["hire", "take on", "give a job to"], observable: "talks business" });
-  core.action({ id: "job_end", label: "End a job", pack: "economy", params: { job: { type: "ref", ref: JOB_KIND } }, requires: ["job.worker == self or manages(self, job.employer)", "job.status != 'ended'", "level.money >= 3"], outcomes: { default: [{ type: "economy.job_end", args: { job: "job", by: "self" } }] }, duration: "10", lexicon: ["fire", "let go", "quit", "resign", "hand in my notice"], observable: "talks business" });
-  core.action({ id: "job_raise", label: "Give a raise", pack: "economy", params: { job: { type: "ref", ref: JOB_KIND }, rate: { type: "money", label: "New rate" } }, requires: ["manages(self, job.employer)", "rate > 0", "level.money >= 3"], outcomes: { default: [{ type: "economy.job_raise", args: { job: "job", rate: "=rate", by: "self" } }] }, duration: "5", lexicon: ["give a raise", "raise the pay", "pay more"], observable: "talks business" });
+  core.action({ id: "job_hire", label: "Hire", description: "Hire someone into a business you run, with a title and pay.", pack: "economy", params: { business: { type: "ref", ref: "business" }, worker: { type: "ref", ref: "person" }, title: { type: "text", optional: true }, basis: { type: "text", optional: true, label: "Pay basis" }, rate: { type: "money", optional: true, label: "Pay rate" }, hours_per_week: { type: "number", optional: true }, pay_every: { type: "text", optional: true, label: "Paid every" } }, requires: ["manages(self, business)", "not employs(business, worker)", "level.money >= 3"], outcomes: { default: [{ type: "economy.hire", args: { business: "business", worker: "worker", title: "=params.title", basis: "=params.basis", rate: "=params.rate", hours_per_week: "=params.hours_per_week", pay_every: "=params.pay_every", by: "self" } }] }, duration: "15", lexicon: ["hire", "take on", "give a job to"], observable: "talks business" });
+  core.action({ id: "job_end", label: "End a job", description: "End a job: quit your own, or let someone go from a business you run.", pack: "economy", params: { job: { type: "ref", ref: JOB_KIND } }, requires: ["job.worker == self or manages(self, job.employer)", "job.status != 'ended'", "level.money >= 3"], outcomes: { default: [{ type: "economy.job_end", args: { job: "job", by: "self" } }] }, duration: "10", lexicon: ["fire", "let go", "quit", "resign", "hand in my notice"], observable: "talks business" });
+  core.action({ id: "job_raise", label: "Give a raise", description: "Change the pay of someone who works for a business you run.", pack: "economy", params: { job: { type: "ref", ref: JOB_KIND }, rate: { type: "money", label: "New rate" } }, requires: ["manages(self, job.employer)", "rate > 0", "level.money >= 3"], outcomes: { default: [{ type: "economy.job_raise", args: { job: "job", rate: "=rate", by: "self" } }] }, duration: "5", lexicon: ["give a raise", "raise the pay", "pay more"], observable: "talks business" });
   r.view((ctx, party, _view, viewer) => api.partyKind(ctx, party) === "person" ? { jobs: allJobs(ctx).filter((j) => j.worker === party).map((j) => jobView(ctx, api, j, viewer)) } : {});
   r.summary((ctx, who) => allJobs(ctx).filter((j) => j.worker === who && j.status === "active").map((j) => `${j.title} for ${employerName(ctx, j, null) || "an outside employer"}, ${api.money(ctx, j.rate)} ${BASIS_WORDS[j.basis]}, paid ${j.every === null ? "nothing" : j.every.replace("_", " ")}.`));
 }
@@ -13319,11 +13337,11 @@ function registerBusiness(r) {
   core.effect({ type: "economy.owner_draw", args: ["business", "cents", "owner?", "by?"], resolve: (args, ctx) => ownerDraw(ctx, api, args) });
   core.effect({ type: "economy.distribute", args: ["business", "cents?", "by?"], resolve: (args, ctx) => distribute(ctx, api, args) });
   core.formula("may_draw", (ctx, who, business) => mayDraw(api, ctx.state, String(who ?? ""), String(business ?? "")));
-  core.action({ id: "invoice_issue", label: "Send an invoice", pack: "economy", params: { business: { type: "ref", ref: "business" }, customer: { type: "ref", optional: true, label: "Bill (someone here)" }, customer_name: { type: "text", optional: true, label: "Or bill (a name)" }, amount: { type: "money" }, memo: { type: "text", optional: true, label: "For" }, days: { type: "number", optional: true, label: "Days to pay" } }, requires: ["manages(self, business)", "amount > 0", "level.money >= 3"], outcomes: { default: [{ type: "economy.invoice_issue", args: { business: "business", customer: "=params.customer", customer_name: "=params.customer_name", cents: "=amount", memo: "=params.memo", days: "=params.days", by: "self" } }] }, duration: "10", lexicon: ["send an invoice", "invoice", "bill them"], observable: "does paperwork" });
-  core.action({ id: "invoice_pay", label: "Pay an invoice", pack: "economy", params: { invoice: { type: "ref", ref: INVOICE_KIND } }, requires: ["invoice.customer == self or manages(self, invoice.customer)", "invoice.state == 'open' or invoice.state == 'late'", "level.money >= 3"], outcomes: { default: [{ type: "economy.invoice_pay", args: { invoice: "invoice", by: "self" } }] }, duration: "5", lexicon: ["pay the invoice", "settle the bill"], observable: "checks their phone" });
-  core.action({ id: "invoice_void", label: "Void an invoice", pack: "economy", params: { invoice: { type: "ref", ref: INVOICE_KIND } }, requires: ["manages(self, invoice.business)", "invoice.state == 'open' or invoice.state == 'late'", "level.money >= 3"], outcomes: { default: [{ type: "economy.invoice_void", args: { invoice: "invoice", by: "self" } }] }, duration: "5", lexicon: ["void the invoice", "cancel the invoice", "write it off"], observable: "does paperwork" });
-  core.action({ id: "owner_draw", label: "Take an owner's draw", pack: "economy", params: { business: { type: "ref", ref: "business" }, amount: { type: "money" } }, requires: ["may_draw(self, business)", "amount > 0", "level.money >= 3"], outcomes: { default: [{ type: "economy.owner_draw", args: { business: "business", cents: "=amount", owner: "self", by: "self" } }] }, duration: "5", lexicon: ["take a draw", "pay myself", "take money out of the business"], observable: "checks their phone" });
-  core.action({ id: "distribute_profit", label: "Distribute profit", pack: "economy", params: { business: { type: "ref", ref: "business" }, amount: { type: "money", optional: true, label: "Amount (else its share of the profit)" } }, requires: ["manages(self, business)", "level.money >= 3"], outcomes: { default: [{ type: "economy.distribute", args: { business: "business", cents: "=params.amount", by: "self" } }] }, duration: "10", lexicon: ["distribute profit", "pay dividends", "pay out the owners"], observable: "does paperwork" });
+  core.action({ id: "invoice_issue", label: "Send an invoice", description: "Bill a customer from a business you run.", pack: "economy", params: { business: { type: "ref", ref: "business" }, customer: { type: "ref", optional: true, label: "Bill (someone here)" }, customer_name: { type: "text", optional: true, label: "Or bill (a name)" }, amount: { type: "money" }, memo: { type: "text", optional: true, label: "For" }, days: { type: "number", optional: true, label: "Days to pay" } }, requires: ["manages(self, business)", "amount > 0", "level.money >= 3"], outcomes: { default: [{ type: "economy.invoice_issue", args: { business: "business", customer: "=params.customer", customer_name: "=params.customer_name", cents: "=amount", memo: "=params.memo", days: "=params.days", by: "self" } }] }, duration: "10", lexicon: ["send an invoice", "invoice", "bill them"], observable: "does paperwork" });
+  core.action({ id: "invoice_pay", label: "Pay an invoice", description: "Pay an invoice billed to you or to a business you run.", pack: "economy", params: { invoice: { type: "ref", ref: INVOICE_KIND } }, requires: ["invoice.customer == self or manages(self, invoice.customer)", "invoice.state == 'open' or invoice.state == 'late'", "level.money >= 3"], outcomes: { default: [{ type: "economy.invoice_pay", args: { invoice: "invoice", by: "self" } }] }, duration: "5", lexicon: ["pay the invoice", "settle the bill"], observable: "checks their phone" });
+  core.action({ id: "invoice_void", label: "Void an invoice", description: "Cancel an invoice that a business you run sent.", pack: "economy", params: { invoice: { type: "ref", ref: INVOICE_KIND } }, requires: ["manages(self, invoice.business)", "invoice.state == 'open' or invoice.state == 'late'", "level.money >= 3"], outcomes: { default: [{ type: "economy.invoice_void", args: { invoice: "invoice", by: "self" } }] }, duration: "5", lexicon: ["void the invoice", "cancel the invoice", "write it off"], observable: "does paperwork" });
+  core.action({ id: "owner_draw", label: "Take an owner's draw", description: "Take money out of a business you own, for yourself.", pack: "economy", params: { business: { type: "ref", ref: "business" }, amount: { type: "money" } }, requires: ["may_draw(self, business)", "amount > 0", "level.money >= 3"], outcomes: { default: [{ type: "economy.owner_draw", args: { business: "business", cents: "=amount", owner: "self", by: "self" } }] }, duration: "5", lexicon: ["take a draw", "pay myself", "take money out of the business"], observable: "checks their phone" });
+  core.action({ id: "distribute_profit", label: "Distribute profit", description: "Pay a business's profit out to its owners.", pack: "economy", params: { business: { type: "ref", ref: "business" }, amount: { type: "money", optional: true, label: "Amount (else its share of the profit)" } }, requires: ["manages(self, business)", "level.money >= 3"], outcomes: { default: [{ type: "economy.distribute", args: { business: "business", cents: "=params.amount", by: "self" } }] }, duration: "10", lexicon: ["distribute profit", "pay dividends", "pay out the owners"], observable: "does paperwork" });
   core.query("economy.business_books", (ctx, business, from, to) => {
     const b = businessBooks(api, ctx, business, from, to);
     return { revenue: b.revenue, expenses: b.expenses, profit: b.profit, receivables: b.receivables, payables: b.payables };
@@ -14629,6 +14647,7 @@ function registerHoldings(r) {
   r.core.action({
     id: "trade",
     label: "Buy or sell investments",
+    description: "Buy or sell investments: stocks, funds, bonds, crypto.",
     pack: "economy",
     params: {
       side: { type: "text", label: "Buy or sell", optional: true },
@@ -15024,6 +15043,7 @@ function registerOptions(r) {
   r.core.action({
     id: "exercise_option",
     label: "Exercise an option",
+    description: "Exercise an option contract you hold.",
     pack: "economy",
     params: { holding: { type: "ref", ref: "holding" }, qty: { type: "number", label: "Contracts", optional: true }, from: { type: "ref", ref: "account", label: "Pay the strike from", optional: true }, to: { type: "ref", ref: "account", label: "Strike to", optional: true } },
     requires: ["money_feature('options', self)"],
@@ -16101,6 +16121,7 @@ function registerProperty(r) {
   r.core.action({
     id: "property_buy",
     label: "Buy a property",
+    description: "Buy a property, outright or with a mortgage.",
     pack: "economy",
     params: { property: { type: "ref", ref: "property" }, price: { type: "money", label: "Offer", optional: true }, from: { type: "ref", ref: "account", label: "Pay from", optional: true }, down: { type: "money", label: "Down payment (the rest on a mortgage)", optional: true }, term_months: { type: "number", label: "Mortgage term, months (one a lender offers)", optional: true } },
     requires,
@@ -16112,6 +16133,7 @@ function registerProperty(r) {
   r.core.action({
     id: "property_sell",
     label: "Sell a property",
+    description: "Sell a property you own.",
     pack: "economy",
     params: { property: { type: "ref", ref: "property" }, price: { type: "money", label: "Price" }, buyer: { type: "ref", ref: "person", label: "Buyer", optional: true }, to: { type: "ref", ref: "account", label: "Proceeds to", optional: true } },
     requires,
@@ -16123,6 +16145,7 @@ function registerProperty(r) {
   r.core.action({
     id: "lease_start",
     label: "Let a unit",
+    description: "Let a unit of a property you own to a tenant, for rent each month.",
     pack: "economy",
     params: { property: { type: "ref", ref: "property" }, tenant: { type: "ref", ref: "person", label: "Tenant" }, rent: { type: "money", label: "Rent a month" }, months: { type: "number", label: "Term, months", optional: true }, day: { type: "number", label: "Rent day", optional: true }, unit: { type: "text", label: "Unit", optional: true } },
     requires,
@@ -16134,6 +16157,7 @@ function registerProperty(r) {
   r.core.action({
     id: "lease_end",
     label: "End a lease",
+    description: "End a tenant's lease.",
     pack: "economy",
     params: { lease: { type: "ref", ref: "flow" }, on: { type: "text", label: "Last day (YYYY-MM-DD)", optional: true } },
     requires,
@@ -16339,6 +16363,7 @@ function registerStakes(r) {
   r.core.action({
     id: "stake_sell",
     label: "Sell a share of a business",
+    description: "Sell part of your share of a business.",
     pack: "economy",
     params: { business: { type: "ref", ref: "business" }, share: { type: "number", label: "Share, %" }, price: { type: "money", label: "Price" }, buyer: { type: "ref", ref: "person", label: "Buyer", optional: true }, to: { type: "ref", ref: "account", label: "Proceeds to", optional: true } },
     requires: ["money_feature('investments', self)"],
@@ -16472,6 +16497,7 @@ function registerAssets(r) {
   r.core.action({
     id: "route_distributions",
     label: "Route dividends, rent or profits",
+    description: "Choose where dividends, rent or profits are paid: reinvested, or into an account.",
     pack: "economy",
     params: {
       holding: { type: "ref", ref: "holding", optional: true },
@@ -21267,19 +21293,19 @@ function registerEffects(r, hooks) {
 }
 function registerActions(r) {
   const phone = { duration: "2", observable: "checks their phone" };
-  r.action({ id: "buy", label: "Buy", pack: "economy", params: { item: { type: "text", label: "Item or category" }, qty: { type: "number", optional: true }, price: { type: "money", optional: true, label: "Stated price" }, method: { type: "text", optional: true, label: "Paid with (cash, card, debit or savings)" }, cashback: { type: "money", optional: true, label: "Cash back" } }, requires: ["level.money >= 1"], outcomes: { default: [{ type: "economy.buy", args: { payer: "self", item: "=item", qty: "=qty", price: "=price", method: "=params.method", cashback: "=params.cashback", stated: true } }] }, duration: "5", lexicon: ["buy", "purchase", "order", "pick up a"], observable: "pays for something" });
-  r.action({ id: "pay", label: "Pay", pack: "economy", params: { to: { type: "ref", ref: "person" }, amount: { type: "money" } }, requires: ["amount > 0", "can_afford(self, amount)"], outcomes: { default: [{ type: "economy.transfer", args: { from: "self", to: "to", cents: "=amount", memo: "Payment" } }] }, duration: "1", lexicon: ["pay", "give money", "send money", "venmo"], observable: "pays someone" });
-  r.action({ id: "move_money", label: "Transfer between accounts", pack: "economy", params: { from: { type: "ref", ref: "account" }, to: { type: "ref", ref: "account" }, amount: { type: "money" } }, requires: ["spends(self, from)", "holds(self, to)", "amount > 0"], outcomes: { default: [{ type: "economy.move", args: { from: "from", to: "to", cents: "=amount", memo: "Transfer" } }] }, lexicon: ["transfer", "move money", "put into savings"], ...phone });
-  r.action({ id: "pay_card", label: "Pay card or loan", pack: "economy", params: { card: { type: "ref", ref: "account" }, from: { type: "ref", ref: "account", optional: true }, amount: { type: "money", optional: true } }, requires: ["holds(self, card)", "is_credit(card)", "level.money >= 3"], outcomes: { default: [{ type: "economy.pay_card", args: { card: "card", from: "=params.from", cents: "=amount > 0 ? amount : 0 - balance(card)", who: "self" } }] }, lexicon: ["pay off the card", "pay the card", "pay my credit card", "make a loan payment"], ...phone });
-  r.action({ id: "withdraw_cash", label: "Withdraw cash", pack: "economy", params: { account: { type: "ref", ref: "account" }, amount: { type: "money" } }, requires: ["spends(self, account)", "amount > 0", "level.money >= 2"], outcomes: { default: [{ type: "economy.withdraw", args: { account: "account", cents: "=amount", who: "self" } }] }, duration: "3", lexicon: ["withdraw", "take out cash", "hit the atm", "get cash"], observable: "takes out cash" });
-  r.action({ id: "deposit_cash", label: "Deposit cash", pack: "economy", params: { account: { type: "ref", ref: "account" }, amount: { type: "money" } }, requires: ["holds(self, account)", "amount > 0", "level.money >= 2"], outcomes: { default: [{ type: "economy.deposit", args: { account: "account", cents: "=amount", who: "self" } }] }, duration: "3", lexicon: ["deposit", "pay in cash", "bank the cash"], observable: "pays cash into the bank" });
+  r.action({ id: "buy", label: "Buy", description: "Buy something: food, drinks, goods or a service, here or delivered.", pack: "economy", params: { item: { type: "text", label: "Item or category" }, qty: { type: "number", optional: true }, price: { type: "money", optional: true, label: "Stated price" }, method: { type: "text", optional: true, label: "Paid with (cash, card, debit or savings)" }, cashback: { type: "money", optional: true, label: "Cash back" } }, requires: ["level.money >= 1"], outcomes: { default: [{ type: "economy.buy", args: { payer: "self", item: "=item", qty: "=qty", price: "=price", method: "=params.method", cashback: "=params.cashback", stated: true } }] }, duration: "5", lexicon: ["buy", "purchase", "order", "pick up a"], observable: "pays for something" });
+  r.action({ id: "pay", label: "Pay", description: "Give someone money: settle up, pay them back, tip them.", pack: "economy", params: { to: { type: "ref", ref: "person" }, amount: { type: "money" } }, requires: ["amount > 0", "can_afford(self, amount)"], outcomes: { default: [{ type: "economy.transfer", args: { from: "self", to: "to", cents: "=amount", memo: "Payment" } }] }, duration: "1", lexicon: ["pay", "give money", "send money", "venmo"], observable: "pays someone" });
+  r.action({ id: "move_money", label: "Transfer between accounts", description: "Move money between your own accounts: checking, savings, cash.", pack: "economy", params: { from: { type: "ref", ref: "account" }, to: { type: "ref", ref: "account" }, amount: { type: "money" } }, requires: ["spends(self, from)", "holds(self, to)", "amount > 0"], outcomes: { default: [{ type: "economy.move", args: { from: "from", to: "to", cents: "=amount", memo: "Transfer" } }] }, lexicon: ["transfer", "move money", "put into savings"], ...phone });
+  r.action({ id: "pay_card", label: "Pay card or loan", description: "Pay off some or all of a card or loan balance.", pack: "economy", params: { card: { type: "ref", ref: "account" }, from: { type: "ref", ref: "account", optional: true }, amount: { type: "money", optional: true } }, requires: ["holds(self, card)", "is_credit(card)", "level.money >= 3"], outcomes: { default: [{ type: "economy.pay_card", args: { card: "card", from: "=params.from", cents: "=amount > 0 ? amount : 0 - balance(card)", who: "self" } }] }, lexicon: ["pay off the card", "pay the card", "pay my credit card", "make a loan payment"], ...phone });
+  r.action({ id: "withdraw_cash", label: "Withdraw cash", description: "Take cash out of a bank account.", pack: "economy", params: { account: { type: "ref", ref: "account" }, amount: { type: "money" } }, requires: ["spends(self, account)", "amount > 0", "level.money >= 2"], outcomes: { default: [{ type: "economy.withdraw", args: { account: "account", cents: "=amount", who: "self" } }] }, duration: "3", lexicon: ["withdraw", "take out cash", "hit the atm", "get cash"], observable: "takes out cash" });
+  r.action({ id: "deposit_cash", label: "Deposit cash", description: "Put cash into a bank account.", pack: "economy", params: { account: { type: "ref", ref: "account" }, amount: { type: "money" } }, requires: ["holds(self, account)", "amount > 0", "level.money >= 2"], outcomes: { default: [{ type: "economy.deposit", args: { account: "account", cents: "=amount", who: "self" } }] }, duration: "3", lexicon: ["deposit", "pay in cash", "bank the cash"], observable: "pays cash into the bank" });
   const card = { card: { type: "ref", ref: "card" } };
   const cardBy = ["holds(self, card) or manages(self, card.account)", "money_feature('cards', self)"];
-  r.action({ id: "card_freeze", label: "Freeze card", pack: "economy", params: card, requires: cardBy, outcomes: { default: [{ type: "economy.card_state", args: { card: "card", state: "frozen", who: "self" } }] }, lexicon: ["freeze my card", "lock my card"], ...phone });
-  r.action({ id: "card_unfreeze", label: "Unfreeze card", pack: "economy", params: card, requires: cardBy, outcomes: { default: [{ type: "economy.card_state", args: { card: "card", state: "active", who: "self" } }] }, lexicon: ["unfreeze my card", "unlock my card"], ...phone });
-  r.action({ id: "card_report_lost", label: "Report card lost", pack: "economy", params: card, requires: cardBy, outcomes: { default: [{ type: "economy.card_state", args: { card: "card", state: "lost", who: "self" } }] }, lexicon: ["report my card lost", "my card was stolen", "cancel my card"], ...phone });
-  r.action({ id: "card_replace", label: "Replace card", pack: "economy", params: card, requires: cardBy, outcomes: { default: [{ type: "economy.card_replace", args: { card: "card", who: "self" } }] }, lexicon: ["replace my card", "order a new card"], ...phone });
-  r.action({ id: "set_autopay", label: "Set autopay", pack: "economy", params: { account: { type: "ref", ref: "account" }, mode: { type: "text", label: "none, minimum, statement, full or fixed" }, from: { type: "ref", ref: "account", optional: true }, amount: { type: "money", optional: true } }, requires: ["manages(self, account)", "is_credit(account)", "level.money >= 3"], outcomes: { default: [{ type: "economy.set_autopay", args: { account: "account", mode: "=params.mode", from: "=params.from", cents: "=params.amount", who: "self" } }] }, lexicon: ["set up autopay", "turn on autopay", "turn off autopay"], ...phone });
+  r.action({ id: "card_freeze", label: "Freeze card", description: "Freeze a card so it can't be used.", pack: "economy", params: card, requires: cardBy, outcomes: { default: [{ type: "economy.card_state", args: { card: "card", state: "frozen", who: "self" } }] }, lexicon: ["freeze my card", "lock my card"], ...phone });
+  r.action({ id: "card_unfreeze", label: "Unfreeze card", description: "Unfreeze a frozen card.", pack: "economy", params: card, requires: cardBy, outcomes: { default: [{ type: "economy.card_state", args: { card: "card", state: "active", who: "self" } }] }, lexicon: ["unfreeze my card", "unlock my card"], ...phone });
+  r.action({ id: "card_report_lost", label: "Report card lost", description: "Report a card lost or stolen.", pack: "economy", params: card, requires: cardBy, outcomes: { default: [{ type: "economy.card_state", args: { card: "card", state: "lost", who: "self" } }] }, lexicon: ["report my card lost", "my card was stolen", "cancel my card"], ...phone });
+  r.action({ id: "card_replace", label: "Replace card", description: "Order a replacement card.", pack: "economy", params: card, requires: cardBy, outcomes: { default: [{ type: "economy.card_replace", args: { card: "card", who: "self" } }] }, lexicon: ["replace my card", "order a new card"], ...phone });
+  r.action({ id: "set_autopay", label: "Set autopay", description: "Set how a card or loan pays itself each month.", pack: "economy", params: { account: { type: "ref", ref: "account" }, mode: { type: "text", label: "none, minimum, statement, full or fixed" }, from: { type: "ref", ref: "account", optional: true }, amount: { type: "money", optional: true } }, requires: ["manages(self, account)", "is_credit(account)", "level.money >= 3"], outcomes: { default: [{ type: "economy.set_autopay", args: { account: "account", mode: "=params.mode", from: "=params.from", cents: "=params.amount", who: "self" } }] }, lexicon: ["set up autopay", "turn on autopay", "turn off autopay"], ...phone });
   const flowParams = {
     label: { type: "text", optional: true },
     kind: { type: "text", optional: true },
@@ -21305,14 +21331,14 @@ function registerActions(r) {
   };
   const flowArgs = Object.fromEntries(Object.keys(flowParams).map((k) => [k, `=params.${k}`]));
   const flowsRun = ["money_feature('flows', self)"];
-  r.action({ id: "flow_create", label: "Set up a standing payment", pack: "economy", params: flowParams, requires: flowsRun, outcomes: { default: [{ type: "economy.flow_create", args: { ...flowArgs, who: "self" } }] }, lexicon: ["set up a standing order", "schedule a payment", "set up a recurring transfer"], ...phone });
-  r.action({ id: "flow_update", label: "Change a standing payment", pack: "economy", params: { flow: { type: "ref", ref: "flow" }, ...flowParams, clear: { type: "text", optional: true } }, requires: flowsRun, outcomes: { default: [{ type: "economy.flow_update", args: { flow: "flow", ...flowArgs, clear: "=params.clear", who: "self" } }] }, lexicon: ["change the standing order", "change the recurring payment"], ...phone });
+  r.action({ id: "flow_create", label: "Set up a standing payment", description: "Set up a standing payment: a bill, a regular transfer, an allowance.", pack: "economy", params: flowParams, requires: flowsRun, outcomes: { default: [{ type: "economy.flow_create", args: { ...flowArgs, who: "self" } }] }, lexicon: ["set up a standing order", "schedule a payment", "set up a recurring transfer"], ...phone });
+  r.action({ id: "flow_update", label: "Change a standing payment", description: "Change a standing payment: its amount, its schedule or its accounts.", pack: "economy", params: { flow: { type: "ref", ref: "flow" }, ...flowParams, clear: { type: "text", optional: true } }, requires: flowsRun, outcomes: { default: [{ type: "economy.flow_update", args: { flow: "flow", ...flowArgs, clear: "=params.clear", who: "self" } }] }, lexicon: ["change the standing order", "change the recurring payment"], ...phone });
   const flowOnly = { flow: { type: "ref", ref: "flow" } };
-  r.action({ id: "flow_pause", label: "Pause a standing payment", pack: "economy", params: flowOnly, requires: flowsRun, outcomes: { default: [{ type: "economy.flow_status", args: { flow: "flow", status: "paused", who: "self" } }] }, lexicon: ["pause the standing order"], ...phone });
-  r.action({ id: "flow_resume", label: "Resume a standing payment", pack: "economy", params: flowOnly, requires: flowsRun, outcomes: { default: [{ type: "economy.flow_status", args: { flow: "flow", status: "active", who: "self" } }] }, lexicon: ["resume the standing order"], ...phone });
-  r.action({ id: "flow_delete", label: "Cancel a standing payment", pack: "economy", params: flowOnly, requires: flowsRun, outcomes: { default: [{ type: "economy.flow_status", args: { flow: "flow", status: "ended", who: "self" } }] }, lexicon: ["cancel the standing order", "stop the recurring payment"], ...phone });
-  r.action({ id: "apply_credit", label: "Apply for credit", pack: "economy", params: { product: { type: "text", label: "Product (credit_card, line_of_credit, loan, or one of the world's)" }, amount: { type: "money", optional: true }, term: { type: "number", optional: true } }, requires: ["level.money >= 3"], outcomes: { default: [{ type: "economy.apply_credit", args: { product: "=params.product", cents: "=params.amount", term: "=params.term", who: "self" } }] }, duration: "15", lexicon: ["apply for a credit card", "apply for a loan", "take out a loan"], observable: "fills in an application" });
-  r.action({ id: "set_pay_prefs", label: "Set how I pay", pack: "economy", params: { tiers: { type: "text", label: "Ways to pay, in order: a JSON list of {use, min?, max?, categories?, except?}" } }, requires: ["money_feature('payment_prefs', self)"], outcomes: { default: [{ type: "economy.set_pay_prefs", args: { tiers: "=params.tiers", who: "self" } }] }, lexicon: ["i'd rather pay with"], ...phone });
+  r.action({ id: "flow_pause", label: "Pause a standing payment", description: "Pause a standing payment.", pack: "economy", params: flowOnly, requires: flowsRun, outcomes: { default: [{ type: "economy.flow_status", args: { flow: "flow", status: "paused", who: "self" } }] }, lexicon: ["pause the standing order"], ...phone });
+  r.action({ id: "flow_resume", label: "Resume a standing payment", description: "Resume a paused standing payment.", pack: "economy", params: flowOnly, requires: flowsRun, outcomes: { default: [{ type: "economy.flow_status", args: { flow: "flow", status: "active", who: "self" } }] }, lexicon: ["resume the standing order"], ...phone });
+  r.action({ id: "flow_delete", label: "Cancel a standing payment", description: "Cancel a standing payment.", pack: "economy", params: flowOnly, requires: flowsRun, outcomes: { default: [{ type: "economy.flow_status", args: { flow: "flow", status: "ended", who: "self" } }] }, lexicon: ["cancel the standing order", "stop the recurring payment"], ...phone });
+  r.action({ id: "apply_credit", label: "Apply for credit", description: "Apply for a credit card, a credit line or a loan.", pack: "economy", params: { product: { type: "text", label: "Product (credit_card, line_of_credit, loan, or one of the world's)" }, amount: { type: "money", optional: true }, term: { type: "number", optional: true } }, requires: ["level.money >= 3"], outcomes: { default: [{ type: "economy.apply_credit", args: { product: "=params.product", cents: "=params.amount", term: "=params.term", who: "self" } }] }, duration: "15", lexicon: ["apply for a credit card", "apply for a loan", "take out a loan"], observable: "fills in an application" });
+  r.action({ id: "set_pay_prefs", label: "Set how I pay", description: "Set the order in which you prefer to pay: cash, debit, credit.", pack: "economy", params: { tiers: { type: "text", label: "Ways to pay, in order: a JSON list of {use, min?, max?, categories?, except?}" } }, requires: ["money_feature('payment_prefs', self)"], outcomes: { default: [{ type: "economy.set_pay_prefs", args: { tiers: "=params.tiers", who: "self" } }] }, lexicon: ["i'd rather pay with"], ...phone });
 }
 var economyPack = {
   id: "economy",
@@ -22157,7 +22183,7 @@ var gearPack = {
         return out;
       }
     });
-    r.action({ id: "take", label: "Take", pack: "gear", params: { item: { type: "ref", ref: "item" } }, requires: ["place(item) == here", "not carries(self, item)", "reach(self, item)"], outcomes: { default: [{ type: "gear.transfer", args: { item: "item", to: "self" } }] }, duration: "1", lexicon: ["take", "pick up", "grab"], observable: "picks something up" });
+    r.action({ id: "take", label: "Take", description: "Pick up something that is here.", pack: "gear", params: { item: { type: "ref", ref: "item" } }, requires: ["place(item) == here", "not carries(self, item)", "reach(self, item)"], outcomes: { default: [{ type: "gear.transfer", args: { item: "item", to: "self" } }] }, duration: "1", lexicon: ["take", "pick up", "grab"], observable: "picks something up" });
     r.effect({
       type: "gear.lose",
       args: ["item", "thief?"],
@@ -22185,15 +22211,15 @@ var gearPack = {
         return out;
       }
     });
-    r.action({ id: "lose", label: "Lose something", pack: "gear", params: { item: { type: "ref", ref: "item" } }, requires: ["item.owner == self or carries(self, item)", "item.lost != true"], outcomes: { default: [{ type: "gear.lose", args: { item: "item" } }] }, duration: "1", lexicon: ["lost my", "lose", "can't find my", "is gone", "is missing"], observable: "searches their pockets" });
-    r.action({ id: "drop", label: "Drop", pack: "gear", params: { item: { type: "ref", ref: "item" } }, requires: ["carries(self, item)"], outcomes: { default: [{ type: "gear.drop", args: { item: "item", place: "=here" } }] }, duration: "1", lexicon: ["drop", "put down", "leave"], observable: "puts something down" });
-    r.action({ id: "give", label: "Give", pack: "gear", params: { item: { type: "ref", ref: "item" }, to: { type: "ref", ref: "person" } }, requires: ["carries(self, item)", "at(to, here)"], outcomes: { default: [{ type: "gear.give", args: { item: "item", from: "self", to: "to" } }] }, duration: "1", lexicon: ["give", "hand", "pass"], observable: "hands something over" });
-    r.action({ id: "lend", label: "Lend", pack: "gear", params: { item: { type: "ref", ref: "item" }, to: { type: "ref", ref: "person" }, days: { type: "number", optional: true }, until: { type: "text", optional: true, label: "Until (a time: 7 pm, tonight, tomorrow)" } }, requires: ["item.owner == self", "days > 0 or params.until != null", "at(to, here) or at(item, here)"], outcomes: { default: [{ type: "gear.lend", args: { item: "item", to: "to", until: "=days > 0 ? clock + days(days) : 0", said: "=params.until" } }] }, duration: "2", lexicon: ["lend", "loan", "let borrow"], observable: "lends something" });
-    r.action({ id: "reclaim", label: "Take back", pack: "gear", params: { item: { type: "ref", ref: "item" } }, requires: ["item.owner == self", "lent_out(item)"], outcomes: { default: [{ type: "gear.retrieve", args: { item: "item" } }] }, duration: "5", lexicon: ["take back", "get back", "reclaim"], observable: "takes something back" });
-    r.action({ id: "wear", label: "Wear or equip", pack: "gear", params: { item: { type: "ref", ref: "item" } }, requires: ["carries(self, item) or (place(item) == here and reach(self, item))", "level.gear >= 3"], outcomes: { default: [{ type: "gear.wear", args: { item: "item", wearer: "self" } }] }, duration: "2", lexicon: ["wear", "put on", "equip"], observable: "puts something on" });
-    r.action({ id: "remove", label: "Take off", pack: "gear", params: { item: { type: "ref", ref: "item" } }, requires: ["carries(self, item)"], outcomes: { default: [{ type: "gear.remove", args: { item: "item" } }] }, duration: "2", lexicon: ["take off", "remove", "unequip"], observable: "takes something off" });
-    r.action({ id: "use", label: "Use", pack: "gear", params: { item: { type: "ref", ref: "item" } }, requires: ["carries(self, item) or (on_grid(item) and reach(self, item))"], outcomes: { default: [{ type: "gear.use", args: { item: "item", user: "self" } }] }, duration: "5", lexicon: ["use", "apply"], observable: "uses something" });
-    r.action({ id: "take_piece", label: "Take from a kit", pack: "gear", params: { kit: { type: "ref", ref: "kit" }, piece: { type: "text" } }, requires: ["(place(kit) == here and reach(self, kit)) or carries(self, kit)", "level.gear >= 3"], outcomes: { default: [{ type: "gear.take_piece", args: { kit: "kit", piece: "=piece", to: "self" } }] }, duration: "1", lexicon: ["take the", "grab a", "get a"], observable: "takes a tool" });
+    r.action({ id: "lose", label: "Lose something", description: "Something you own or carry is lost or gone, whereabouts unknown.", pack: "gear", params: { item: { type: "ref", ref: "item" } }, requires: ["item.owner == self or carries(self, item)", "item.lost != true"], outcomes: { default: [{ type: "gear.lose", args: { item: "item" } }] }, duration: "1", lexicon: ["lost my", "lose", "can't find my", "is gone", "is missing"], observable: "searches their pockets" });
+    r.action({ id: "drop", label: "Drop", description: "Put down something you carry, here.", pack: "gear", params: { item: { type: "ref", ref: "item" } }, requires: ["carries(self, item)"], outcomes: { default: [{ type: "gear.drop", args: { item: "item", place: "=here" } }] }, duration: "1", lexicon: ["drop", "put down", "leave"], observable: "puts something down" });
+    r.action({ id: "give", label: "Give", description: "Hand something you carry to someone here, for keeps.", pack: "gear", params: { item: { type: "ref", ref: "item" }, to: { type: "ref", ref: "person" } }, requires: ["carries(self, item)", "at(to, here)"], outcomes: { default: [{ type: "gear.give", args: { item: "item", from: "self", to: "to" } }] }, duration: "1", lexicon: ["give", "hand", "pass"], observable: "hands something over" });
+    r.action({ id: "lend", label: "Lend", description: "Lend something of yours to someone, for some days or until a time.", pack: "gear", params: { item: { type: "ref", ref: "item" }, to: { type: "ref", ref: "person" }, days: { type: "number", optional: true }, until: { type: "text", optional: true, label: "Until (a time: 7 pm, tonight, tomorrow)" } }, requires: ["item.owner == self", "days > 0 or params.until != null", "at(to, here) or at(item, here)"], outcomes: { default: [{ type: "gear.lend", args: { item: "item", to: "to", until: "=days > 0 ? clock + days(days) : 0", said: "=params.until" } }] }, duration: "2", lexicon: ["lend", "loan", "let borrow"], observable: "lends something" });
+    r.action({ id: "reclaim", label: "Take back", description: "Take back something of yours that you lent out.", pack: "gear", params: { item: { type: "ref", ref: "item" } }, requires: ["item.owner == self", "lent_out(item)"], outcomes: { default: [{ type: "gear.retrieve", args: { item: "item" } }] }, duration: "5", lexicon: ["take back", "get back", "reclaim"], observable: "takes something back" });
+    r.action({ id: "wear", label: "Wear or equip", description: "Put on or equip clothing, armor or gear.", pack: "gear", params: { item: { type: "ref", ref: "item" } }, requires: ["carries(self, item) or (place(item) == here and reach(self, item))", "level.gear >= 3"], outcomes: { default: [{ type: "gear.wear", args: { item: "item", wearer: "self" } }] }, duration: "2", lexicon: ["wear", "put on", "equip"], observable: "puts something on" });
+    r.action({ id: "remove", label: "Take off", description: "Take off something you wear or have equipped.", pack: "gear", params: { item: { type: "ref", ref: "item" } }, requires: ["carries(self, item)"], outcomes: { default: [{ type: "gear.remove", args: { item: "item" } }] }, duration: "2", lexicon: ["take off", "remove", "unequip"], observable: "takes something off" });
+    r.action({ id: "use", label: "Use", description: "Use an item you carry or can reach.", pack: "gear", params: { item: { type: "ref", ref: "item" } }, requires: ["carries(self, item) or (on_grid(item) and reach(self, item))"], outcomes: { default: [{ type: "gear.use", args: { item: "item", user: "self" } }] }, duration: "5", lexicon: ["use", "apply"], observable: "uses something" });
+    r.action({ id: "take_piece", label: "Take from a kit", description: "Take one piece, such as a tool or a part, out of a kit.", pack: "gear", params: { kit: { type: "ref", ref: "kit" }, piece: { type: "text" } }, requires: ["(place(kit) == here and reach(self, kit)) or carries(self, kit)", "level.gear >= 3"], outcomes: { default: [{ type: "gear.take_piece", args: { kit: "kit", piece: "=piece", to: "self" } }] }, duration: "1", lexicon: ["take the", "grab a", "get a"], observable: "takes a tool" });
     r.process({
       id: "gear.grants",
       domain: "gear",
@@ -22762,6 +22788,7 @@ var vehiclesPack = {
     r.action({
       id: "drive",
       label: "Drive",
+      description: "Drive, ride or sail a vehicle you own or may use to another place.",
       pack: "vehicles",
       params: { vehicle: { type: "ref", ref: "vehicle" }, to: { type: "ref", ref: "place", label: "Destination" } },
       requires: ["place(vehicle) == here", "vehicle.owner == self or has_rel(self, 'uses', vehicle)", "vehicle.status != 'broken'", "drive_minutes(vehicle, to) > 0", "fuel_ok(vehicle, to)"],
@@ -22771,9 +22798,9 @@ var vehiclesPack = {
       lexicon: ["drive to", "drive over to", "take the truck", "take the car", "sail to", "ride to"],
       observable: "drives off"
     });
-    r.action({ id: "refuel", label: "Refuel", pack: "vehicles", params: { vehicle: { type: "ref", ref: "vehicle" } }, requires: ["place(vehicle) == here", "fuel_pct(vehicle) < 100"], outcomes: { default: [{ type: "vehicles.refuel", args: { vehicle: "vehicle", payer: "self" } }] }, duration: "10", lexicon: ["refuel", "fill up", "gas up", "charge the car"], observable: "fills up the tank" });
-    r.action({ id: "service_vehicle", label: "Service", pack: "vehicles", params: { vehicle: { type: "ref", ref: "vehicle" } }, requires: ["place(vehicle) == here"], outcomes: { default: [{ type: "vehicles.service", args: { vehicle: "vehicle", payer: "self" } }] }, duration: "60", lexicon: ["service", "oil change", "tune up"], observable: "gets the vehicle serviced" });
-    r.action({ id: "repair_vehicle", label: "Repair", pack: "vehicles", params: { vehicle: { type: "ref", ref: "vehicle" } }, requires: ["place(vehicle) == here", "vehicle.status != 'ok'"], outcomes: { default: [{ type: "vehicles.service", args: { vehicle: "vehicle", payer: "self", repair: true } }] }, duration: "180", lexicon: ["repair", "fix the truck", "fix the car", "get it towed"], observable: "gets the vehicle repaired" });
+    r.action({ id: "refuel", label: "Refuel", description: "Fill up a vehicle's tank, or charge it.", pack: "vehicles", params: { vehicle: { type: "ref", ref: "vehicle" } }, requires: ["place(vehicle) == here", "fuel_pct(vehicle) < 100"], outcomes: { default: [{ type: "vehicles.refuel", args: { vehicle: "vehicle", payer: "self" } }] }, duration: "10", lexicon: ["refuel", "fill up", "gas up", "charge the car"], observable: "fills up the tank" });
+    r.action({ id: "service_vehicle", label: "Service", description: "Have a vehicle serviced: an oil change, a tune-up.", pack: "vehicles", params: { vehicle: { type: "ref", ref: "vehicle" } }, requires: ["place(vehicle) == here"], outcomes: { default: [{ type: "vehicles.service", args: { vehicle: "vehicle", payer: "self" } }] }, duration: "60", lexicon: ["service", "oil change", "tune up"], observable: "gets the vehicle serviced" });
+    r.action({ id: "repair_vehicle", label: "Repair", description: "Have a damaged or broken-down vehicle repaired.", pack: "vehicles", params: { vehicle: { type: "ref", ref: "vehicle" } }, requires: ["place(vehicle) == here", "vehicle.status != 'ok'"], outcomes: { default: [{ type: "vehicles.service", args: { vehicle: "vehicle", payer: "self", repair: true } }] }, duration: "180", lexicon: ["repair", "fix the truck", "fix the car", "get it towed"], observable: "gets the vehicle repaired" });
     r.process({
       id: "vehicles.upkeep",
       domain: "vehicles",
@@ -23434,8 +23461,8 @@ var relationshipsPack = {
         return appraise(ctx, from, to, axis ? { [axis]: delta } : Object.fromEntries(axesOf(ctx).map((x) => [x.id, delta])), strOf(a.why, "change"));
       }
     });
-    r.action({ id: "chat_with", label: "Chat with", pack: "relationships", params: { target: { type: "ref", ref: "person" } }, requires: ["at(target, here)"], outcomes: { default: [{ type: "relationships.appraise", args: { from: "target", to: "self", appraisal: "conversation", mutual: true } }] }, duration: "15", lexicon: ["chat with", "talk to", "catch up with"], observable: "chats" });
-    r.action({ id: "give_gift", label: "Give a gift", pack: "relationships", params: { target: { type: "ref", ref: "person" } }, requires: ["at(target, here)"], outcomes: { default: [{ type: "relationships.appraise", args: { from: "target", to: "self", appraisal: "gift" } }] }, duration: "5", lexicon: ["give a gift", "surprise"], observable: "gives a gift" });
+    r.action({ id: "chat_with", label: "Chat with", description: "Spend a while talking with someone here.", pack: "relationships", params: { target: { type: "ref", ref: "person" } }, requires: ["at(target, here)"], outcomes: { default: [{ type: "relationships.appraise", args: { from: "target", to: "self", appraisal: "conversation", mutual: true } }] }, duration: "15", lexicon: ["chat with", "talk to", "catch up with"], observable: "chats" });
+    r.action({ id: "give_gift", label: "Give a gift", description: "Give someone here a present.", pack: "relationships", params: { target: { type: "ref", ref: "person" } }, requires: ["at(target, here)"], outcomes: { default: [{ type: "relationships.appraise", args: { from: "target", to: "self", appraisal: "gift" } }] }, duration: "5", lexicon: ["give a gift", "surprise"], observable: "gives a gift" });
     r.renderer({
       slot: "people",
       render(ctx) {
@@ -24586,17 +24613,16 @@ var castlifePack = {
       }
       return out;
     });
-    r.formula("invited", (ctx, host) => {
-      if (povLife(ctx.world, ctx.state, String(host ?? ""))?.acts === false)
-        return false;
+    const openInvitations = (ctx) => {
       const list = sliceOf(ctx.state, "castlife").invitations;
       const now = ctx.state.clock;
-      return Array.isArray(list) && list.some((raw) => {
-        const inv = objOf(raw);
+      return (Array.isArray(list) ? list : []).map(objOf).filter((inv) => {
         const at = numOf(inv.at);
-        return strOf(inv.agent) === String(host ?? "") && at >= now - 180 && at <= now + MINUTES_PER_DAY;
+        return povLife(ctx.world, ctx.state, strOf(inv.agent))?.acts !== false && at >= now - 180 && at <= now + MINUTES_PER_DAY;
       });
-    });
+    };
+    r.formula("invited", (ctx, host) => openInvitations(ctx).some((inv) => strOf(inv.agent) === String(host ?? "")));
+    r.query("castlife.invitations", (ctx, viewer) => openInvitations(ctx).map((inv) => ({ host: strOf(inv.agent), text: invitationText(ctx, strOf(inv.agent), typeof inv.place === "string" ? inv.place : null, numOf(inv.at), viewer) })));
     r.formula("need", (ctx, who, need) => needValue(ctx, String(who ?? ctx.world.pov), String(need ?? "")));
     r.formula("busy", (ctx, who) => {
       const id = String(who ?? "");
@@ -24631,10 +24657,10 @@ var castlifePack = {
         return [{ type: "set", entity: who, field: "holds", value: holds }, ...out];
       }
     });
-    r.action({ id: "eat", label: "Eat", pack: "castlife", params: {}, requires: [], outcomes: { default: [{ type: "castlife.satisfy", args: { entity: "self", need: "hunger" } }, { type: "set", args: { entity: "self", field: "activity", value: "meal" } }] }, duration: "30", lexicon: ["eat", "have lunch", "have dinner", "grab a bite"], observable: "eats" });
-    r.action({ id: "sleep", label: "Go to bed", pack: "castlife", params: {}, requires: [], outcomes: { default: [{ type: "castlife.satisfy", args: { entity: "self", need: "fatigue" } }] }, duration: "5", activity: { type: "sleep", until: "next_time('07:00')" }, lexicon: ["go to bed", "sleep", "turn in", "hit the sack"], observable: "goes to bed" });
-    r.action({ id: "rest", label: "Rest", pack: "castlife", params: {}, requires: [], outcomes: { default: [{ type: "castlife.satisfy", args: { entity: "self", need: "fun" } }] }, duration: "30", activity: { type: "waiting", until: "clock + 30" }, lexicon: ["rest", "relax", "take a break"], observable: "rests" });
-    r.action({ id: "accept_invitation", label: "Accept invitation", pack: "castlife", params: { host: { type: "ref", ref: "person" } }, requires: ["invited(host)"], outcomes: { default: [{ type: "relationships.appraise", args: { from: "host", to: "self", appraisal: "promise_kept" } }] }, duration: "1", lexicon: ["accept", "sure, let's", "count me in"], observable: "accepts an invitation" });
+    r.action({ id: "eat", label: "Eat", description: "Have a meal or a snack.", pack: "castlife", params: {}, requires: [], outcomes: { default: [{ type: "castlife.satisfy", args: { entity: "self", need: "hunger" } }, { type: "set", args: { entity: "self", field: "activity", value: "meal" } }] }, duration: "30", lexicon: ["eat", "have lunch", "have dinner", "grab a bite"], observable: "eats" });
+    r.action({ id: "sleep", label: "Go to bed", description: "Go to bed and sleep until morning.", pack: "castlife", params: {}, requires: [], outcomes: { default: [{ type: "castlife.satisfy", args: { entity: "self", need: "fatigue" } }] }, duration: "5", activity: { type: "sleep", until: "next_time('07:00')" }, lexicon: ["go to bed", "sleep", "turn in", "hit the sack"], observable: "goes to bed" });
+    r.action({ id: "rest", label: "Rest", description: "Rest or relax for a while.", pack: "castlife", params: {}, requires: [], outcomes: { default: [{ type: "castlife.satisfy", args: { entity: "self", need: "fun" } }] }, duration: "30", activity: { type: "waiting", until: "clock + 30" }, lexicon: ["rest", "relax", "take a break"], observable: "rests" });
+    r.action({ id: "accept_invitation", label: "Accept invitation", description: "Say yes to an invitation someone made you.", pack: "castlife", params: { host: { type: "ref", ref: "person" } }, requires: ["invited(host)"], outcomes: { default: [{ type: "relationships.appraise", args: { from: "host", to: "self", appraisal: "promise_kept" } }] }, duration: "1", lexicon: ["accept", "sure, let's", "count me in"], observable: "accepts an invitation" });
     r.renderer({
       slot: "people",
       render(ctx) {
@@ -24911,6 +24937,7 @@ var sheetsPack = {
     r.action({
       id: "attempt",
       label: "Attempt",
+      description: "Try something hard that one of your stats decides: climb, force, persuade, notice.",
       pack: "sheets",
       params: { stat: { type: "text", label: "Stat" }, difficulty: { type: "text", optional: true, label: "Difficulty (easy, moderate, hard, very hard or a number)" } },
       requires: ["level.sheets >= 1"],
@@ -26110,6 +26137,7 @@ var storyPack = {
     r.action({
       id: "answer",
       label: "Answer",
+      description: "Give your answer to a puzzle: a riddle, a code, a combination.",
       pack: "story",
       params: { puzzle: { type: "text", optional: true, label: "Puzzle" }, answer: { type: "text" }, decision: { type: "number", optional: true, label: "Judged probability" } },
       requires: [],
@@ -26386,17 +26414,8 @@ function paramCandidates(reg, world, state, action, param, actor = world.pov) {
   if (!def || def.type !== "ref")
     return [];
   const here = placeOfEntity(state, actor);
-  if (def.ref === "place") {
-    const near = new Set(Object.values(world.routes).flatMap((r) => r.from === here ? [r.to] : r.to === here && r.bidirectional ? [r.from] : []));
-    const parent = here ? own(world.places, here)?.parent : undefined;
-    if (parent)
-      near.add(parent);
-    for (const p of Object.values(world.places))
-      if (here && p.parent === here)
-        near.add(p.id);
-    const name = (id) => own(world.places, id)?.name ?? id;
-    return Object.keys(world.places).filter((id) => id !== here && canSeePlace(reg, world, state, actor, id)).sort((a, b) => Number(near.has(b)) - Number(near.has(a)) || name(a).localeCompare(name(b)));
-  }
+  if (def.ref === "place")
+    return placeCandidates(reg, world, state, actor);
   const filters = candidateFilters(action, param);
   const ctx = filters.length > 0 ? reg.context(world, state) : null;
   const out = [];
@@ -26419,6 +26438,18 @@ function paramCandidates(reg, world, state, action, param, actor = world.pov) {
     out.push(id);
   }
   return out;
+}
+function placeCandidates(reg, world, state, actor = world.pov) {
+  const here = placeOfEntity(state, actor);
+  const near = new Set(Object.values(world.routes).flatMap((r) => r.from === here ? [r.to] : r.to === here && r.bidirectional ? [r.from] : []));
+  const parent = here ? own(world.places, here)?.parent : undefined;
+  if (parent)
+    near.add(parent);
+  for (const p of Object.values(world.places))
+    if (here && p.parent === here)
+      near.add(p.id);
+  const name = (id) => own(world.places, id)?.name ?? id;
+  return Object.keys(world.places).filter((id) => id !== here && canSeePlace(reg, world, state, actor, id)).sort((a, b) => Number(near.has(b)) - Number(near.has(a)) || name(a).localeCompare(name(b)));
 }
 var EXPR_WORDS = new Set(["and", "or", "not", "true", "false", "null", "self"]);
 function candidateFilters(action, param) {
@@ -27484,6 +27515,7 @@ var combatPack = {
     r.action({
       id: "fight",
       label: "Fight",
+      description: "Start a fight with someone.",
       pack: PACK5,
       params: { target: { type: "ref", label: "Opponent" } },
       requires: ["can_fight(target)"],
@@ -27496,6 +27528,7 @@ var combatPack = {
     r.action({
       id: "end_turn",
       label: "End turn",
+      description: "End your turn in a fight.",
       pack: PACK5,
       params: {},
       requires: [],
@@ -55353,20 +55386,26 @@ function migrateWorld(stored) {
   const hasTiers = isRecord(doc.tiers);
   const tiers = hasTiers ? doc.tiers : defaultTiers();
   const retired = isRecord(steps) ? Object.entries(steps).flatMap(([id, t]) => isRecord(t) && t.purpose === "select" ? [id] : []) : [];
+  const resignaled = isRecord(steps) ? Object.entries(steps).flatMap(([id, t]) => isRecord(t) && t.purpose !== "select" && Array.isArray(t.signals) && hasRetiredSignal(t.signals.filter((s) => typeof s === "string")) ? [id] : []) : [];
   const pov = hasOwn(doc.entities, doc.pov) ? doc.entities[doc.pov] : undefined;
   const legacyPov = pov?.tier === "pov" && !tierOf({ tiers }, "pov");
   const economy = isRecord(doc.packs) ? doc.packs.economy : undefined;
   const config = isRecord(economy) && isRecord(economy.config) ? economy.config : null;
   const oldCap = config !== null && "unpricedCapCents" in config;
-  if (isCurrency(currency) && isRecord(lore) && indexed && isRecord(classifications) && isRecord(maps) && hasTiers && retired.length === 0 && !legacyPov && !oldCap)
+  if (isCurrency(currency) && isRecord(lore) && indexed && isRecord(classifications) && isRecord(maps) && hasTiers && retired.length === 0 && resignaled.length === 0 && !legacyPov && !oldCap)
     return compileMaps(doc);
   const out = { ...doc, currency: isCurrency(currency) ? currency : { ...DEFAULT_CURRENCY }, lore: isRecord(lore) ? doc.lore : {}, classifications: isRecord(classifications) ? doc.classifications : {}, maps: isRecord(maps) ? doc.maps : {}, tiers };
   if (!indexed)
     out.loreIndex = { terms: isRecord(loreIndex) && isRecord(loreIndex.terms) ? doc.loreIndex.terms : {}, topics: isRecord(loreIndex) && isRecord(loreIndex.topics) ? doc.loreIndex.topics : {} };
-  if (retired.length > 0) {
+  if (retired.length > 0 || resignaled.length > 0) {
     out.steps = { ...doc.steps };
     for (const id of retired)
       delete out.steps[id];
+    for (const id of resignaled) {
+      const t = out.steps[id];
+      if (t)
+        out.steps[id] = { ...t, signals: currentSignals(t.signals) };
+    }
   }
   if (pov && legacyPov)
     out.entities = { ...doc.entities, [doc.pov]: { ...pov, tier: leadTierOf(out) } };
@@ -63343,51 +63382,58 @@ ${questionLines(questions).join(`
     return { answers, via: "helper" };
   }
 }
-var ACTION_VERBS = /\b(go(?:ing)? to|walk|run|drive|driving|ride|head(?:ing)? (?:to|out|over|back|home)|travel|take|grab|pick up|drop|give|hand|lend|loan|wear|put on|take off|remove|use|buy|purchase|order|pay|transfer|send|refuel|fill (?:it|her) up|examine|inspect|look (?:at|in|under)|search|open|close|lock|unlock|call|phone|text|borrow|steal|sell|attack|fight|hit|shoot|climb|jump|sneak|hide|cook|eat|drink|work|study|train|fix|repair|craft|build)\b/i;
-var TIME_CUES = /\b(?:wait|sleep|bed|nap|rest|skip)\b|\b\d+(?:\.\d+)?\s?(?:minutes|mins|hours|hrs|days|weeks)\b|\b\d{1,2}(?::\d{2})?\s?(?:am|pm)\b|\b\d{1,2}:\d{2}\b|\b(?:until|till)\b/i;
-var AMOUNTS = /\$\s?\d|\b\d+(?:\.\d+)?\s?(?:gal|gallons|dollars|bucks)\b/i;
-function classifyTyped(text, world, lexicon = []) {
-  return TIME_CUES.test(text) || namesAction(text, world, lexicon);
-}
-function namesAction(text, world, lexicon) {
-  if (ACTION_VERBS.test(text) || AMOUNTS.test(text))
-    return true;
-  const lower = text.toLowerCase();
-  for (const phrase of lexicon)
-    if (phrase.trim().length > 2 && lower.includes(phrase.trim().toLowerCase()))
-      return true;
-  for (const [id, e] of Object.entries(world.entities)) {
-    if (id === world.pov || e.kind === "person")
-      continue;
-    if (e.name.length > 2 && lower.includes(e.name.toLowerCase()))
-      return true;
-  }
-  for (const p of Object.values(world.places))
-    if (p.name.length > 2 && lower.includes(`to ${p.name.toLowerCase()}`))
-      return true;
-  return false;
-}
-function onlyPassesTime(text, world, lexicon, timeLexicon) {
-  const lower = text.toLowerCase();
-  return (TIME_CUES.test(text) || timeLexicon.some((phrase) => phrase.trim().length > 2 && lower.includes(phrase.trim().toLowerCase()))) && !namesAction(text, world, lexicon.filter((phrase) => !TIME_CUES.test(phrase)));
-}
 function worldBrief(world, extra) {
   const pov = world.entities[world.pov];
   const people = Object.values(world.entities).filter((e) => e.id !== world.pov).slice(0, 40).map((e) => `${e.id} (${e.name}, ${e.kind})`).join(", ");
   const places = Object.values(world.places).slice(0, 40).map((p) => `${p.id} (${p.name})`).join(", ");
   return `World: ${world.name}. The player character is ${pov?.name ?? world.pov} (id ${world.pov}). Entities: ${people || "none"}. Places: ${places || "none"}. ${extra}`;
 }
-async function interpret(steps, text, world, actions, scene, config, userId, signal, instructions, lore = null, guidance = "") {
+function catalogLine(e) {
+  const parts = [`${e.id} \u2014 ${e.label}${e.description ? `: ${e.description.replace(/[\s.]+$/, "")}` : ""}`];
+  if (e.params.length > 0)
+    parts.push(`Params: ${e.params.join(", ")}`);
+  if (e.needs.length > 0)
+    parts.push(`Needs: ${e.needs.join("; ")}`);
+  if (e.lexicon && e.lexicon.length > 0)
+    parts.push(`Said as: ${e.lexicon.slice(0, 6).join(", ")}`);
+  return `${parts.join(". ")}.`;
+}
+async function interpret(steps, text, context, actions, config, userId, signal, instructions, lore = null, guidance = "") {
   if (actions.length === 0)
     return { action: null, params: {}, probabilities: { none: 1 } };
-  const catalog = actions.map((a) => `${a.id} \u2014 ${a.label}${a.params.length > 0 ? ` (params: ${a.params.join(", ")})` : ""}${a.lexicon && a.lexicon.length > 0 ? ` [said as: ${a.lexicon.slice(0, 6).join(", ")}]` : ""}`).join(`
+  const { world, pov, scene } = context;
+  const rules = [
+    `Read what the player character does in the input. Work out what it refers to ("what she offered", "there", "him") from the scene and the recent messages.`,
+    `Only the player character's own deliberate actions count, whether said in the first person ("I", "we"), as a stage direction ("[${pov.name} heads to the roof]") or as narration about ${pov.name} in the third person. "I'll \u2026" about what the player character does now is an action.`,
+    `No action ("action": null) for speech alone, out-of-character text ("OOC:", "((\u2026))"), questions, requests to others, what someone else does, hypotheticals, plans for another time, recaps or feelings.`,
+    `Use only the catalog's actions, as described there: never invent one. When no catalog action fits, "action" is null.`,
+    `When the input and its context still leave it unclear which action or which target is meant, give "action": null and a short "reason"; never guess.`,
+    `Params are world ids, from the scene, Places and the catalog's lists. A text param that names an item keeps its qualifiers as written ("large pizza, delivered", not "pizza"). Money params are plain amounts in ${world.currency.code} as written (200 for ${world.currency.symbol}200).`,
+    `Return the first action as "action" with its "params". If the input has more actions after it, list them in order in "more" (at most ${ACTION_QUEUE_LIMIT - 1}), each {"action": a catalog id, "params": {...}, "text": that action written as the player would type it}: "I walk to the market and buy bread" \u2192 "action" for the walk, and "more": [{"action": <the buy's id>, "params": {"item": "bread"}, "text": "I buy bread"}]. An action after them that no catalog action fits goes in "next", written as the player would type it.`,
+    `If the input lets time pass after its last action ("\u2026and sleep until the next morning", "\u2026then wait two hours", "\u2026then skip ahead to Friday at 6 PM"), add "then": {"minutes": number}, {"until": a day part, "shift" or "commitment"} or {"at": "YYYY-MM-DD HH:MM"} for a stated day and time; time passing is never in "more" or "next", nor is anything else that isn't an action.`
+  ];
+  const system = [
+    instructions ?? "",
+    "You map a player's typed input in a roleplay to the engine actions it takes, in order.",
+    `World: ${world.name}. The player character is ${pov.name} (id ${pov.id}).`,
+    `Scene:
+${scene.lines.join(`
+`)}`,
+    scene.places.length > 0 ? `Places (id: name), nearest first:
+${scene.places.join(`
+`)}` : "",
+    scene.recent.length > 0 ? `Recent messages, oldest first:
+${scene.recent.join(`
+`)}` : "",
+    `Action catalog:
+${actions.map(catalogLine).join(`
+`)}`,
+    `Rules:
+${rules.map((r) => `- ${r}`).join(`
+`)}`,
+    `Output JSON only, exactly this shape: {"action": string|null, "params": {...}, "confidence": number, "reason"?: string, "more"?: [{"action": string, "params": {...}, "text": string}], "then"?: {...}, "next"?: string}.`
+  ].filter((part) => part !== "").join(`
 `);
-  const system = `${instructions ? `${instructions}
-` : ""}You map a player's typed input in a roleplay to the engine actions it takes, in order.
-${worldBrief(world, `Scene: ${JSON.stringify(scene)}.`)}
-Action catalog:
-${catalog}
-Rules: only the player character's own deliberate actions in the input count. Speech to others, requests, hypotheticals, past recaps and feelings are not actions (action null). Return the first action as "action" with its "params". If the input has more actions after it, list them in order in "more" (at most ${ACTION_QUEUE_LIMIT - 1}), each {"action": a catalog id, "params": {...}, "text": that action written as the player would type it}: "I walk to the market and buy bread" \u2192 "action" for the walk, and "more": [{"action": <the buy's id>, "params": {"item": "bread"}, "text": "I buy bread"}]. An action after them that no catalog action fits goes in "next", written as the player would type it. If the input lets time pass after its last action ("\u2026and sleep until the next morning", "\u2026then wait two hours", "\u2026then skip ahead to Friday at 6 PM"), add "then": {"minutes": number}, {"until": a day part, "shift" or "commitment"} or {"at": "YYYY-MM-DD HH:MM"} for a stated day and time; time passing is never in "more" or "next", nor is anything else that isn't an action. Use world ids for params. A text param that names an item keeps its qualifiers as written (size, kind, how: "large pizza, delivered", not "pizza"). Money params are plain amounts in ${world.currency.code} as written (200 for ${world.currency.symbol}200). Output JSON only: {"action": string|null, "params": {...}, "confidence": number, "more"?: [{"action": string, "params": {...}, "text": string}], "then"?: {...}, "next"?: string}.`;
   const raw = await steps.helperJson("interpret", system, text, config, userId, signal, { lore, guidance });
   if (!isRecord(raw))
     return null;
@@ -63417,7 +63463,8 @@ Rules: only the player character's own deliberate actions in the input count. Sp
       rest.push(said);
   }
   const next = [...rest, words(raw.next)].filter((s) => s !== "");
-  return { action, params: action ? params : {}, probabilities: action ? { [action]: confidence, none: 1 - confidence } : { none: 1 }, ...then ? { then } : {}, ...queue.length > 0 ? { queue } : {}, ...next.length > 0 ? { next } : {} };
+  const reason = !action && typeof raw.reason === "string" ? raw.reason.replace(/\s+/g, " ").trim().slice(0, 200) : "";
+  return { action, params: action ? params : {}, probabilities: action ? { [action]: confidence, none: 1 - confidence } : { none: 1 }, ...then ? { then } : {}, ...queue.length > 0 ? { queue } : {}, ...next.length > 0 ? { next } : {}, ...reason !== "" ? { reason } : {} };
 }
 var SAID_METHOD = /\b(?:with|on|using|use|used|by|from|in)\s+(?:(?:my|the|his|her|their|our|a)\s+)?(credit card|debit card|cash|savings)\b(?![ -](?:holder|register|machine|drawer|box|reader|terminal|slot|case|sleeve|wallet))/gi;
 var NEGATED = /(?:\bnot|\bno|\bnever|n't|\binstead of|\brather than|\bthan)(?:\s+(?:pay|paying|paid))?\s*$/i;
@@ -63917,11 +63964,10 @@ function unfitRef(registry, action, params, world, state) {
   return null;
 }
 function noFacts(turn = 0) {
-  return { typed: false, classifier: false, reply: false, sceneChange: false, slotCrossed: false, dayStart: false, beat: false, agentsPresent: false, present: false, offscreen: false, tieZone: false, invitation: false, timelapse: false, conflict: false, turn };
+  return { typed: false, reply: false, sceneChange: false, slotCrossed: false, dayStart: false, beat: false, agentsPresent: false, present: false, offscreen: false, tieZone: false, invitation: false, timelapse: false, conflict: false, turn };
 }
 var FACT_OF = {
   typed_input: "typed",
-  classifier: "classifier",
   reply: "reply",
   scene_change: "sceneChange",
   slot_crossed: "slotCrossed",
@@ -64032,6 +64078,7 @@ ${v}`);
   add("Outcome", "outcome");
   add("Engine beats", "beats");
   add("Brief", "brief");
+  add("Sections the narrator has this turn (point at no other)", "sections");
   add("Recent turns", "recent");
   add("The player wrote", "user");
   add("The narrator's reply", "reply");
@@ -65710,7 +65757,7 @@ var NO_LOOKUPS = { calls: 0 };
 var MODEL_USE_PRESETS = {
   lean: {
     steps: {
-      interpret: step(true, ["classifier"], HELPER, lore("prefetch", 800)),
+      interpret: step(true, ["typed_input"], HELPER, lore("prefetch", 800)),
       extract: step(true, ["reply"], HELPER, lore("prefetch", 800)),
       "npc.choose": step(false, [], DECISION, lore("prefetch", 800)),
       judge: step(false, ["always"], HELPER, lore("prefetch", 800))
@@ -65720,7 +65767,7 @@ var MODEL_USE_PRESETS = {
   },
   standard: {
     steps: {
-      interpret: step(true, ["classifier"], HELPER, lore("prefetch+lookup", 1600)),
+      interpret: step(true, ["typed_input"], HELPER, lore("prefetch+lookup", 1600)),
       extract: step(true, ["reply"], HELPER, lore("prefetch+lookup", 1600)),
       "npc.choose": step(true, ["tie_zone", "invitation"], DECISION, lore("prefetch+lookup", 1600)),
       judge: step(true, ["always"], HELPER, lore("prefetch+lookup", 1600)),
@@ -65931,14 +65978,23 @@ function stepOf(v, base) {
   const route = routeOf2(v.route);
   const maxTokens = atLeast(v.maxTokens, 1);
   const lore = loreOf(v.lore) ?? base?.lore;
+  const recent = recentHistoryOf(v.recent) ?? base?.recent;
   return {
     enabled: typeof v.enabled === "boolean" ? v.enabled : base?.enabled ?? false,
-    signals: Array.isArray(v.signals) ? v.signals.filter((s) => typeof s === "string").slice(0, 32).map((s) => s.slice(0, 64)) : base?.signals ?? [],
+    signals: currentSignals(Array.isArray(v.signals) ? v.signals.filter((s) => typeof s === "string").slice(0, 32).map((s) => s.slice(0, 64)) : base?.signals ?? []),
     ...route ? { route } : {},
     ...typeof v.template === "string" ? { template: v.template.slice(0, 20000) } : {},
     ...maxTokens !== undefined ? { maxTokens } : {},
-    ...lore ? { lore: { ...lore } } : {}
+    ...lore ? { lore: { ...lore } } : {},
+    ...recent ? { recent: { ...recent } } : {}
   };
+}
+function recentHistoryOf(v) {
+  if (!isRecord(v))
+    return;
+  const messages = atLeast(v.messages, 0);
+  const tokens = atLeast(v.tokens, 0);
+  return messages !== undefined && tokens !== undefined ? { messages, tokens } : undefined;
 }
 function conform(v, d) {
   const mu = isRecord(v.modelUse) ? v.modelUse : {};
@@ -66258,6 +66314,270 @@ function startMarkersFrom(settings, world, revision) {
   out.push({ kind: "time", control: "unit_cap", scope: { all: true }, to: { agentDays: t.unitCap.agentDays, events: t.unitCap.events } });
   const authored = readAdjudication(world.ruleset?.adjudication);
   out.push({ kind: "adjudicate", to: authored && !settings.overrideWorldAdjudication ? authored : settings.adjudication });
+  return out;
+}
+
+// src/backend/requirement-words.ts
+var SHAPES = [
+  { shape: /\bto\s*!=\s*here\b/, needs: "{p} isn't where you are" },
+  { shape: /\broute_exists\(/, needs: "a way from here to {p}" },
+  { shape: /\bgrid_reachable\(/, needs: "a square of this grid you can walk to" },
+  { shape: /\blevel\.(\w+)\s*>=/, needs: "this world simulates it in enough detail", fails: "this world doesn't simulate that in enough detail" },
+  { shape: /\bmoney_feature\(/, needs: "this world keeps track of it", fails: "this world doesn't keep track of that" },
+  { shape: /\bcan_afford\(/, needs: "you can afford {p}", fails: "you can't afford it" },
+  { shape: /\bholds\(self[^)]*\)\s+or\s+manages\(self/, needs: "{p} is yours, or its account is one you run" },
+  { shape: /\b(?:spends|holds)\(self\b/, needs: "{p} is one of your own accounts", fails: "that account isn't yours to use" },
+  { shape: /\bmay_draw\(/, needs: "you may take a draw from {p}", fails: "you can't take a draw from it" },
+  { shape: /\.worker\s*==\s*self\s+or\s+manages\(self/, needs: "{p} is your own, or you run its employer" },
+  { shape: /\.customer\s*==\s*self\s+or\s+manages\(self/, needs: "{p} is billed to you, or to what you run" },
+  { shape: /\bmanages\(self,\s*\w+\.\w+/, needs: "you run the business behind {p}" },
+  { shape: /\bmanages\(self\b/, needs: "you run {p}", fails: "you don't run it" },
+  { shape: /\bis_credit\(/, needs: "{p} is a card, a credit line or a loan", fails: "that isn't a card, a credit line or a loan" },
+  { shape: /\bemploys\(/, needs: "{q} doesn't already work there", fails: "they already work there" },
+  { shape: /\bowner\s*==\s*self\s+or\s+has_rel\(self,\s*'uses'/, needs: "{p} is yours, or yours to use" },
+  { shape: /\bowner\s*==\s*self\s+or\s+carries\(self/, needs: "{p} is yours, or you have it with you" },
+  { shape: /\bowner\s*==\s*self\b/, needs: "{p} is yours", fails: "it isn't yours" },
+  { shape: /^\s*not\s+carries\(self/, needs: "you don't have {p} already" },
+  { shape: /\bcarries\(self[^)]*\)\s+or\s+\(/, needs: "you have {p} with you, or it is within your reach" },
+  { shape: /\breach\(self[^)]*\)\)\s+or\s+carries\(self/, needs: "{p} is within your reach, or you have it with you" },
+  { shape: /\bcarries\(self/, needs: "you have {p} with you", fails: "you need to have it with you" },
+  { shape: /\blent_out\(/, needs: "{p} is lent out", fails: "it isn't lent out" },
+  { shape: /\binvited\(/, needs: "{p} invited you" },
+  { shape: /\bcan_fight\(/, needs: "{p} is someone you can fight" },
+  { shape: /\breach\(self/, needs: "{p} is within your reach" },
+  { shape: /\bdrive_minutes\(/, needs: "a road there from here" },
+  { shape: /\bfuel_ok\(/, needs: "enough fuel to get there" },
+  { shape: /\bfuel_pct\([^)]*\)\s*<\s*100\b/, needs: "{p} isn't full" },
+  { shape: /\.status\s*!=\s*'broken'/, needs: "{p} isn't broken down" },
+  { shape: /\.status\s*!=\s*'ok'/, needs: "{p} needs a repair" },
+  { shape: /\.status\s*!=\s*'ended'/, needs: "{p} hasn't ended" },
+  { shape: /\.state\s*==\s*'open'/, needs: "{p} is still open" },
+  { shape: /\.lost\s*!=\s*true\b/, needs: "{p} isn't lost already" },
+  { shape: /\bdays\s*>\s*0\s+or\s+params\.until\b/, needs: "a number of days, or until when" },
+  { shape: /\bat\([^)]*\)\s+or\s+at\(/, needs: "{p} or {q} is here" },
+  { shape: /\bat\(|\bplace\([^)]*\)\s*==\s*here|==\s*here\b/, needs: "{p} is here", fails: "it has to be here" },
+  { shape: />\s*0\b/, needs: "{p} above zero", fails: "it needs an amount" }
+];
+var GATE = /\blevel\.\w+\s*>=|\bmoney_feature\(/;
+function paramsRead(action, req) {
+  return identifiers(req).filter((name) => Object.prototype.hasOwnProperty.call(action.params, name));
+}
+function gatesOf(action) {
+  return action.requires.filter((req) => GATE.test(req) && paramsRead(action, req).length === 0);
+}
+function needsOf(action, nameOf) {
+  const out = [];
+  for (const req of action.requires) {
+    const read = paramsRead(action, req);
+    if (read.length === 0)
+      continue;
+    const shape = SHAPES.find((s) => s.shape.test(req));
+    if (!shape)
+      continue;
+    const words = shape.needs.replace("{p}", nameOf(read[0] ?? "")).replace("{q}", nameOf(read[1] ?? read[0] ?? ""));
+    if (!out.includes(words))
+      out.push(words);
+  }
+  return out;
+}
+function failureWords(req) {
+  return SHAPES.find((s) => s.fails !== undefined && s.shape.test(req))?.fails ?? null;
+}
+
+// src/backend/interpret-context.ts
+var TIMELAPSE_LEXICON = ["wait until", "sleep until", "next morning", "skip ahead", "skip to", "pass the time", "sleep through", "hours later", "days later", "wait for"];
+function localNow(world, state) {
+  const cal = calendarOf(world);
+  const offset = placeOffset(world, state.clock, placeOfEntity(state, world.pov));
+  return `${weekdayName(cal, dateAt(cal, state.clock + offset).weekday)} ${formatStamp(cal, state.clock, offset)}`;
+}
+function openPuzzleTitles(ctx) {
+  return openPuzzles(ctx).slice(0, 6).map(({ shown }) => {
+    const where = shown.stage || shown.cue;
+    return `${shown.id}: ${where ? `${shown.label} \u2014 ${where}` : shown.label}`;
+  });
+}
+function kindWords(reg, world, def) {
+  if (def.ref === undefined)
+    return "anyone or anything";
+  return (own(world.kinds, def.ref)?.label ?? reg.kinds.get(def.ref)?.label ?? def.ref).toLowerCase();
+}
+function paramWords(ctx, action, name, def, mayKnow, places, named) {
+  const { registry: reg, world, state } = ctx;
+  const head = `${name}${def.optional ? "?" : ""}`;
+  const label = def.label ? `: ${def.label}` : "";
+  if (def.type === "ref") {
+    if (def.ref === "place")
+      return places > 0 ? `${head} (a place id from Places)` : def.optional ? `${head} (no place you know of)` : null;
+    if (def.optional)
+      return `${head} (${kindWords(reg, world, def)}: an id named above${label})`;
+    const ids = paramCandidates(reg, world, state, action, name).filter(mayKnow);
+    if (ids.length === 0)
+      return null;
+    for (const id of ids)
+      named.add(id);
+    return `${head} (${kindWords(reg, world, def)}: ${ids.join(" | ")})`;
+  }
+  if (def.table !== undefined)
+    return `${head} (one of: ${tableChoices(own(world.tables, def.table)).map((c) => c.key).join(" | ")})`;
+  if (action.id === "attempt" && name === "stat" && def.type === "text") {
+    const stats = optionalQuery(ctx, "sheets.stats")?.(ctx) ?? [];
+    if (stats.length > 0)
+      return `${head} (one of: ${stats.map((s) => s.id).join(" | ")})`;
+  }
+  if ((action.id.split(".").at(-1) ?? action.id).startsWith("buy") && name === "item" && def.type === "text") {
+    const sold = (optionalQuery(ctx, "economy.offers")?.(ctx, world.pov) ?? []).map((o) => o.name);
+    if (sold.length > 0)
+      return `${head} (text${label}; sold here: ${sold.join(" | ")})`;
+  }
+  if (def.type === "money")
+    return `${head} (an amount in ${world.currency.code} as written${label})`;
+  return `${head} (${def.type}${label})`;
+}
+function interpretCatalog(reg, world, state, actions, mayKnow) {
+  const ctx = reg.context(world, state);
+  const env = scopeEnv({ reg, ctx, bindings: { self: world.pov, actor: world.pov } });
+  const puzzles = openPuzzleTitles(ctx);
+  const places = placeCandidates(reg, world, state).length;
+  const named = new Set;
+  const entries = [];
+  for (const action of actions) {
+    if (!fightOffers(world, state, action) || gatesOf(action).some((req) => !truthy2(evalExpr(req, env, false))))
+      continue;
+    const params = [];
+    const ids = new Set;
+    for (const [name, def] of Object.entries(action.params)) {
+      const words = paramWords(ctx, action, name, def, mayKnow, places, ids);
+      if (words === null)
+        break;
+      params.push(words);
+    }
+    if (params.length < Object.keys(action.params).length)
+      continue;
+    for (const id of ids)
+      named.add(id);
+    const label = action.pack === "story" && action.id === "answer" && puzzles.length > 0 ? `${action.label} (open: ${puzzles.join("; ")})` : action.label;
+    entries.push({ action, entry: { id: action.id, label, ...action.description ? { description: action.description } : {}, params, needs: needsOf(action, (param) => `\`${param}\``), ...action.lexicon ? { lexicon: action.lexicon } : {} } });
+  }
+  return { entries, named: [...named] };
+}
+function timelapseEntry(world, state) {
+  const parts = [...world.calendar.dayParts.map((d) => d.id), "shift", "commitment"];
+  return {
+    id: TIMELAPSE_ACTION2,
+    label: "Let time pass",
+    description: `wait, sleep or skip ahead: minutes for a stated duration; until one of ${parts.join(", ")} ("next <day part>" for the following day's); or at a stated day and time, as "YYYY-MM-DD HH:MM" (it is now ${localNow(world, state)})`,
+    params: ["minutes? (number)", "until? (text)", "at? (text)"],
+    needs: [],
+    lexicon: TIMELAPSE_LEXICON
+  };
+}
+function atWords(reg, world, state, id) {
+  const place = placeOfEntity(state, id);
+  return place !== null && canSeePlace(reg, world, state, world.pov, place) ? `, at ${own(world.places, place)?.name ?? place}` : "";
+}
+function interpretScene(reg, world, state, opts) {
+  const ctx = reg.context(world, state);
+  const pov = own(state.entities, world.pov);
+  const here = placeOfEntity(state, world.pov);
+  const place = povPlace(reg, world, state);
+  const parentId = place?.id ? own(world.places, place.id)?.parent : undefined;
+  const parent = parentId && canSeePlace(reg, world, state, world.pov, parentId) ? `, in ${own(world.places, parentId)?.name ?? parentId} (${parentId})` : "";
+  const where = place === null ? "" : place.id === null ? ", somewhere you can't name" : `, at ${place.name} (${place.id})${parent}`;
+  const seen = (id) => id !== world.pov && !isGone(state, id) && canSeeEntity(reg, world, state, world.pov, id) && opts.mayKnow(id);
+  const people = here === null ? [] : Object.keys(state.entities).filter((id) => seen(id) && kindIs(reg, world, own(state.entities, id)?.kind ?? "", "person") && placeOfEntity(state, id) === here);
+  const carried = carriedBy(state, world.pov).filter(seen);
+  const vehicles = Object.keys(state.entities).filter((id) => seen(id) && kindIs(reg, world, own(state.entities, id)?.kind ?? "", "vehicle") && (own(state.entities, id)?.fields.owner === world.pov || (pov?.relations.some((r) => r.type === "uses" && r.to === id) ?? false)));
+  const waiting = (optionalQuery(ctx, "castlife.invitations")?.(ctx, world.pov) ?? []).filter((inv) => opts.mayKnow(inv.host)).map((inv) => `${inv.text} (host ${inv.host})`);
+  const shown = new Set([...people, ...carried, ...vehicles]);
+  const others = opts.named.filter((id) => !shown.has(id) && seen(id));
+  const nameOf = (id) => own(state.entities, id)?.name ?? id;
+  const lifeWords = (id) => {
+    const life = povLife(world, state, id);
+    return life ? `, ${life.reads}` : "";
+  };
+  const lines = [
+    `Now: ${localNow(world, state)}${where}.`,
+    `Here with you: ${people.length > 0 ? people.map((id) => `${nameOf(id)} (${id}${lifeWords(id)})`).join("; ") : "no one"}.`,
+    `You carry: ${carried.length > 0 ? carried.map((id) => `${nameOf(id)} (${id})`).join("; ") : "nothing"}.`,
+    ...vehicles.length > 0 ? [`Your vehicles: ${vehicles.map((id) => `${nameOf(id)} (${id}${atWords(reg, world, state, id)})`).join("; ")}.`] : [],
+    ...others.length > 0 ? [`Others you can name: ${others.map((id) => `${nameOf(id)} (${id})`).join("; ")}.`] : [],
+    ...waiting.length > 0 ? [`Waiting on your answer: ${waiting.join(" ")}`] : []
+  ];
+  const places = placeCandidates(reg, world, state).map((id) => {
+    const p = own(world.places, id);
+    const up = p?.parent && canSeePlace(reg, world, state, world.pov, p.parent) ? `, in ${own(world.places, p.parent)?.name ?? p.parent}` : "";
+    return `${id}: ${p?.name ?? id}${up}`;
+  });
+  return { lines, places, recent: recentMessages(opts.earlier, opts.recent, opts.hideJson) };
+}
+function recentMessages(messages, recent, hideJson) {
+  const out = [];
+  let left = recent.tokens;
+  for (let i = messages.length - 1;i >= 0 && out.length < recent.messages && left > 0; i--) {
+    const m = messages[i];
+    if (!m)
+      continue;
+    const raw = m.swipes[m.swipeId] ?? "";
+    const text = (m.isUser ? raw : readableReply(raw, hideJson)).replace(/\s+/g, " ").trim();
+    if (text === "")
+      continue;
+    const who = m.isUser ? "Player" : "Story";
+    const cost = tokensOf(`${who}: ${text}`);
+    if (cost <= left) {
+      out.push(`${who}: ${text}`);
+      left -= cost;
+      continue;
+    }
+    out.push(`${who}: \u2026${text.slice(text.length - Math.floor(text.length * left / cost))}`);
+    break;
+  }
+  return out.reverse();
+}
+
+// src/backend/section-refs.ts
+function missingSections(sections, rank, filled, minds) {
+  const out = [];
+  const defaults = new Map(Object.values(DEFAULT_SECTIONS).map((s) => [s.id, s]));
+  for (const d of defaults.values())
+    if (!sections.some((s) => s.id === d.id))
+      out.push(d.label);
+  for (const s of sections) {
+    if (!(s.id === MINDS_SLOT ? !minds : s.rank < rank && !filled.has(s.id)))
+      continue;
+    out.push(s.label);
+    const d = defaults.get(s.id);
+    if (d && d.label !== s.label)
+      out.push(d.label);
+  }
+  return out;
+}
+function names2(text, label) {
+  const l = label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`\\bthe ${l}\\b`).test(text) || new RegExp(`\\b${l} section\\b`, "i").test(text);
+}
+function withoutMissing(lines, missing) {
+  const out = [];
+  for (const line of lines) {
+    if (!missing.some((label) => names2(line, label))) {
+      out.push(line);
+      continue;
+    }
+    const sentences = line.trim().split(/(?<=[.!?])\s+(?=[A-Z"\u201C'\u2018([])/u);
+    const kept = sentences.flatMap((sentence) => {
+      const clauses = sentence.split(/\s*;\s*/);
+      const left = clauses.filter((c) => !missing.some((label) => names2(c, label)));
+      if (left.length === clauses.length)
+        return [sentence];
+      if (left.length === 0)
+        return [];
+      const joined = left.join("; ").replace(/[\s,;:]+$/, "");
+      const ended = /[.!?]$/.test(joined) ? joined : `${joined}.`;
+      return [ended.charAt(0).toUpperCase() + ended.slice(1)];
+    });
+    if (kept.length > 0)
+      out.push(kept.join(" "));
+  }
   return out;
 }
 
@@ -67319,7 +67639,7 @@ class Runtime {
     this.steps.onCallStart = (userId, purpose) => this.diag.callStart(userId, purpose);
     this.toolSupport = new ToolSupport(this.host);
     this.minds = { host: this.host, registry: this.registry, steps: this.steps, settings: this.settings, presets: this.presets };
-    this.ledger = new LedgerService(this.host, (chatId, userId) => this.resolveEnv(chatId, userId), new LedgerFold(this.registry, { fingerprint: "1792523860" }), (chatId) => messages.forget(chatId));
+    this.ledger = new LedgerService(this.host, (chatId, userId) => this.resolveEnv(chatId, userId), new LedgerFold(this.registry, { fingerprint: "1792526832" }), (chatId) => messages.forget(chatId));
     this.studio = new StudioBridge(this.host, this.worlds);
     this.worlds.onChange = (worldId, userId) => this.studio.worldChanged(worldId, userId);
     this.push = new StatePush(this.host, async (chatId, userId) => {
@@ -67462,7 +67782,6 @@ class Runtime {
     const facts = {
       ...noFacts(before.filter((m) => !m.isUser).length + 1),
       typed,
-      classifier: typed && classifyTyped(text, render.world, [...all.flatMap((a) => a.lexicon ?? []), ...TIMELAPSE_LEXICON]),
       sceneChange: this.lastPlace.has(input.chatId) && this.lastPlace.get(input.chatId) !== placeOfEntity(render.state, render.world.pov),
       agentsPresent: agentsActHere(this.registry, render.world, render.state),
       present: ties.present.length > 0,
@@ -67472,7 +67791,8 @@ class Runtime {
       timelapse: isRecord(recorded) && recorded.action === TIMELAPSE_ACTION2
     };
     const at = await this.lorePhase("pre", p.generationId, input.userId, render.world, render.state, budget, text, preset.guidance);
-    const intentTask = text.trim() === "" || bridge.hasIntent(text) ? Promise.resolve() : this.readIntent(bridge, text, recorded, render, all, settings, facts, budget, at);
+    const earlier = lastUser ? before.slice(0, before.indexOf(lastUser)) : before;
+    const intentTask = text.trim() === "" || bridge.hasIntent(text) ? Promise.resolve() : this.readIntent(bridge, text, recorded, render, all, earlier, settings, facts, budget, at);
     const policy = policyOf(render.world, render.state);
     const judging = described && runsOf(settings.modelUse, render.world, "judge", facts, { guidance: at.guidance }).length > 0 && (bridge.hasIntent(text) ? this.judgeTarget(bridge.intentOf(text), render) !== null : policy.description.weight !== "none" || policy.authority === "narrative");
     const npcRun = runsOf(settings.modelUse, render.world, "npc.choose", facts, { guidance: at.guidance })[0];
@@ -67568,13 +67888,30 @@ class Runtime {
     const at = await this.lorePhase("pre", input.generationId, input.userId, render.world, render.state, budget, pre.text, pre.preset.guidance);
     const run = (r, kind, stepVars = vars) => budget.take() ? promptedText(this.steps, r, kind, stepVars, secrets, input.userId, budget.signal, this.stepLore(r, at, inputs)).then((lines) => lines ?? []) : Promise.resolve([]);
     const briefTask = Promise.all(briefRuns.map((r) => run(r, "brief")));
-    const outlineTask = Promise.all(outlineRuns.map((r) => /\{\{\s*brief\s*\}\}/i.test(r.template?.template ?? "") ? briefTask.then((b) => run(r, "outline", { ...vars, brief: b.flat().join(" ").trim() })) : run(r, "outline")));
+    const outlineVars = outlineRuns.length > 0 ? { ...vars, sections: this.narratorSections(render.world, render.state, plan).join(", ") } : vars;
+    const outlineTask = Promise.all(outlineRuns.map((r) => /\{\{\s*brief\s*\}\}/i.test(r.template?.template ?? "") ? briefTask.then((b) => run(r, "outline", { ...outlineVars, brief: b.flat().join(" ").trim() })) : run(r, "outline", outlineVars)));
     const [briefs, outlines] = await Promise.all([briefTask, outlineTask]);
     const brief = briefs.flat().join(" ").trim();
     const prose = { brief: brief === "" ? null : brief, outline: outlines.flat() };
     bridge.setProse(p.seed, prose);
     await this.keepPlanLines(input.chatId, input.userId, p.seed, plan, render.world, prose);
     this.host.log("info", `[LumiRPEngine] plan ${input.generationId.slice(0, 8)}: brief ${brief === "" ? "none" : "yes"}, ${outlines.flat().length} outline line(s), ${budget.spent} pre call(s)`, input.userId);
+  }
+  narratorSections(world, state, plan) {
+    return readPass(() => {
+      const ctx = this.registry.context(world, state);
+      const has = (slot) => this.registry.renderers.some((r) => {
+        if (r.slot !== slot || r.hint)
+          return false;
+        try {
+          return r.render(ctx).length > 0;
+        } catch {
+          return false;
+        }
+      });
+      const montage = plan ? planLines(plan, world, this.registry).montage.length > 0 : false;
+      return sectionsOf(world).filter((s) => s.id === "outcome" || s.id === "scene" || s.id === "outline" ? true : s.id === MINDS_SLOT ? mindLines(ctx).length > 0 : s.id === "montage" && montage || has(s.id)).map((s) => s.label);
+    });
   }
   addMindTraces(chatId, generationId, traces, replace = false) {
     const list = [...replace ? [] : this.mindTraces.get(generationId) ?? [], ...traces];
@@ -67620,7 +67957,7 @@ class Runtime {
 `)
     };
   }
-  async readIntent(bridge, text, recorded, render, all, settings, facts, budget, at) {
+  async readIntent(bridge, text, recorded, render, all, earlier, settings, facts, budget, at) {
     const userId = at.userId;
     if (isRecord(recorded) && typeof recorded.action === "string") {
       const params = isRecord(recorded.params) ? JSON.parse(JSON.stringify(recorded.params)) : {};
@@ -67637,38 +67974,34 @@ class Runtime {
       bridge.setIntent(text, null);
       return;
     }
-    const scene = { place: placeOfEntity(render.state, render.world.pov) };
-    const dayParts = render.world.calendar.dayParts.map((d) => d.id);
-    const cal = calendarOf(render.world);
-    const offset = placeOffset(render.world, render.state.clock, placeOfEntity(render.state, render.world.pov));
-    const now = `${weekdayName(cal, dateAt(cal, render.state.clock + offset).weekday)} ${formatStamp(cal, render.state.clock, offset)}`;
-    const timelapseEntry = { id: TIMELAPSE_ACTION2, label: `Let time pass (wait, sleep, skip ahead): minutes for a stated duration; until one of ${[...dayParts, "shift", "commitment"].join(", ")} ("next <day part>" for the following day's); or at a stated day and time, as "YYYY-MM-DD HH:MM" (it is now ${now})`, params: ["minutes", "until", "at"], lexicon: TIMELAPSE_LEXICON };
-    const puzzles = openPuzzleTitles(this.registry, render.world, render.state);
-    const labelOf = (a) => a.pack === "story" && a.id === "answer" && puzzles.length > 0 ? `${a.label} (open: ${puzzles.join("; ")})` : a.label;
-    const paramsOf = (a) => Object.entries(a.params).map(([name, p]) => p.table !== undefined ? `${name} (one of: ${tableChoices(hasOwn(render.world.tables, p.table) ? render.world.tables[p.table] : undefined).map((c) => c.key).join(" | ")})` : name);
-    const offered = all.filter((a) => fightOffers(render.world, render.state, a));
-    const catalog = [...offered.map((a) => ({ id: a.id, label: labelOf(a), params: paramsOf(a), ...a.lexicon ? { lexicon: a.lexicon } : {} })), timelapseEntry];
+    const mayKnow = (id) => povMayKnow(this.registry, render.world, render.state, id);
+    const offered = interpretCatalog(this.registry, render.world, render.state, all, mayKnow);
+    const catalog = [...offered.entries.map((o) => o.entry), timelapseEntry(render.world, render.state)];
+    const context = {
+      world: render.world,
+      pov: { id: render.world.pov, name: render.state.entities[render.world.pov]?.name ?? render.world.pov },
+      scene: interpretScene(this.registry, render.world, render.state, { mayKnow, named: offered.named, earlier, recent: recentOf(run.config), hideJson: settings.hideJsonBlocks })
+    };
     let result;
     const lore = this.stepLore(run, at, { text: `${text}
 ${this.trackWords(render.world, render.state)}`, links: this.sceneLinks(render.world, render.state) });
     if (run.config.route?.provider === "decision") {
-      const criteria = { none: "Not an action: speech, a request, a feeling or a recap." };
-      for (const a of offered)
-        criteria[a.id] = labelOf(a);
-      criteria[TIMELAPSE_ACTION2] = timelapseEntry.label;
-      const answer = await this.steps.decide("interpret", { text, scene }, { action: { type: "choice", instructions: run.template?.template ?? "Which engine action does the player character deliberately take in this typed input?", criteria } }, run.config, userId, budget.signal, lore, run.guidance);
+      const criteria = { none: "Not an action: speech, out-of-character text, a request, a feeling or a recap." };
+      for (const c of catalog)
+        criteria[c.id] = c.description ? `${c.label}: ${c.description}` : c.label;
+      const answer = await this.steps.decide("interpret", { text, scene: context.scene.lines, recent: context.scene.recent }, { action: { type: "choice", instructions: run.template?.template ?? "Which engine action does the player character deliberately take in this typed input?", criteria } }, run.config, userId, budget.signal, lore, run.guidance);
       const a = answer?.answers.action;
-      const chosen = a?.type === "choice" && a.choice !== "none" ? a.choice === TIMELAPSE_ACTION2 ? { id: TIMELAPSE_ACTION2, params: { minutes: null, until: null, at: null } } : offered.find((x) => x.id === a.choice) : undefined;
+      const chosen = a?.type === "choice" && a.choice !== "none" ? catalog.find((c) => c.id === a.choice) : undefined;
       if (!chosen)
         result = a?.type === "choice" ? { action: null, params: {}, probabilities: a.probabilities } : null;
-      else if (Object.keys(chosen.params).length === 0)
+      else if (chosen.params.length === 0)
         result = { action: chosen.id, params: {}, probabilities: a?.type === "choice" ? a.probabilities : { [chosen.id]: 1 } };
       else if (!budget.take())
         result = null;
       else
-        result = await interpret(this.steps, text, povWorld(this.registry, render.world, render.state), catalog.filter((c) => c.id === chosen.id), scene, { ...run.config, route: { provider: "helper", connectionId: null, model: null } }, userId, budget.signal, undefined, lore, run.guidance);
+        result = await interpret(this.steps, text, context, [chosen], { ...run.config, route: { provider: "helper", connectionId: null, model: null } }, userId, budget.signal, undefined, lore, run.guidance);
     } else {
-      result = await interpret(this.steps, text, povWorld(this.registry, render.world, render.state), catalog, scene, run.config, userId, budget.signal, run.template ? renderTemplate(run.template.template, { world: render.world.name, pov: render.state.entities[render.world.pov]?.name ?? render.world.pov }) : undefined, lore, run.guidance);
+      result = await interpret(this.steps, text, context, catalog, run.config, userId, budget.signal, run.template ? renderTemplate(run.template.template, { world: render.world.name, pov: render.state.entities[render.world.pov]?.name ?? render.world.pov }) : undefined, lore, run.guidance);
     }
     if (result === null) {
       this.host.log("warn", `[LumiRPEngine] interpret: couldn't read the player's action; the turn runs as plain roleplay`, userId);
@@ -67677,6 +68010,8 @@ ${this.trackWords(render.world, render.state)}`, links: this.sceneLinks(render.w
       bridge.setUnread(text);
       return;
     }
+    if (result.reason)
+      this.host.log("info", `[LumiRPEngine] interpret: no action (${result.reason})`, userId);
     const typedText = text.toLowerCase();
     const secrets = unrevealedSecrets(this.registry, render.world, render.state).filter((s) => !typedText.includes(s.toLowerCase()));
     if (findLeaks({ params: result.params, ...result.then ? { then: result.then } : {} }, secrets).length > 0) {
@@ -67686,8 +68021,7 @@ ${this.trackWords(render.world, render.state)}`, links: this.sceneLinks(render.w
       bridge.setIntent(text, null);
       return;
     }
-    const lexicon = all.flatMap((a) => a.lexicon ?? []);
-    const chipText = (piece) => offeredNext(this.registry, render.world, render.state, piece, text, lexicon, secrets) ?? "";
+    const chipText = (piece) => offeredNext(this.registry, render.world, render.state, piece, text, secrets) ?? "";
     let next = (result.next ?? []).map(chipText);
     const timeOnly = result.action === TIMELAPSE_ACTION2 ? result.params : !result.action && result.then ? result.then : null;
     if (timeOnly) {
@@ -68376,6 +68710,7 @@ ${pre?.text ?? ""}`, links: this.sceneLinks(context.world, context.state) };
       const ladder = (optionalQuery(read, "minds.fidelity")?.(read, { user: said, reply: "" }) ?? []).map((s) => s.entity);
       const mindsFit = mindsSection ? fitMindLines(allMinds, ladder, mindsBudget, (kept) => sectionCost(renderSection(mindsSection.label, mindsSection.template, kept.map((l) => l.line)))) : [];
       const ctx = this.registry.context(world, state, { "minds.minded": () => mindsFit.map((l) => l.entity) });
+      const filled = new Set;
       for (const section of sectionsOf(world)) {
         const entryId = entryOf(section);
         if (!entryId)
@@ -68393,7 +68728,7 @@ ${pre?.text ?? ""}`, links: this.sceneLinks(context.world, context.state) };
           }
         }
         if (section.id === "outline")
-          lines.push(...outline);
+          lines.push(...withoutMissing(outline, missingSections(sectionsOf(world), section.rank, filled, mindsFit.length > 0 && mindsSection !== undefined && entryOf(mindsSection) !== null)));
         if (section.id === "scene" && plan) {
           const minutes = clockMinutes(plan.events);
           lines.push(minutes > 0 ? `This turn took ${spanText(minutes)}.` : "No time passes this turn.");
@@ -68422,6 +68757,7 @@ ${pre?.text ?? ""}`, links: this.sceneLinks(context.world, context.state) };
           budget -= cost;
         const fill = { id: entryId, content };
         fills.push(fill);
+        filled.add(section.id);
         (record.entries ??= {})[section.id] = entryId;
         const safeHints = hints.filter((l) => findLeaks(l, secrets).length === 0);
         if (safeHints.length > 0)
@@ -68646,13 +68982,6 @@ var TYPE_LABELS = {
   spawn: "New characters",
   life: "Life and death"
 };
-function openPuzzleTitles(registry, world, state) {
-  return openPuzzles(registry.context(world, state)).slice(0, 6).map(({ shown }) => {
-    const where = shown.stage || shown.cue;
-    return `${shown.id}: ${where ? `${shown.label} \u2014 ${where}` : shown.label}`;
-  });
-}
-var TIMELAPSE_LEXICON = ["wait until", "sleep until", "next morning", "skip ahead", "skip to", "pass the time", "sleep through", "hours later", "days later", "wait for"];
 var INTERPRETED_TIMELAPSE_CAP = 1440;
 var NEXT_DAY_PART_GAP = 180;
 function interpretedTarget(params, world, state, text) {
@@ -68686,24 +69015,9 @@ function playerReason(failed) {
   const req = failed.requirement ?? failed.reason.replace(/^requires\s+/, "");
   if (/\bto\s*!=\s*here\b/.test(req))
     return "You're already there.";
-  const why = REQUIREMENT_WORDS.find(([pattern]) => pattern.test(req))?.[1];
+  const why = failureWords(req);
   return why ? `Not possible here and now: ${why}.` : "Not possible here and now.";
 }
-var REQUIREMENT_WORDS = [
-  [/\blevel\.(\w+)\s*>=/, "this world doesn't simulate that in enough detail"],
-  [/\bmoney_feature\(/, "this world doesn't keep track of that"],
-  [/\bcan_afford\(/, "you can't afford it"],
-  [/\b(?:spends|holds)\(self\b/, "that account isn't yours to use"],
-  [/\bmay_draw\(/, "you can't take a draw from it"],
-  [/\bmanages\(self\b/, "you don't run it"],
-  [/\bis_credit\(/, "that isn't a card, a credit line or a loan"],
-  [/\bemploys\(/, "they already work there"],
-  [/\bowner\s*==\s*self\b/, "it isn't yours"],
-  [/\bcarries\(self/, "you need to have it with you"],
-  [/\blent_out\(/, "it isn't lent out"],
-  [/\bat\(|\bplace\([^)]*\)\s*==\s*here|==\s*here\b/, "it has to be here"],
-  [/>\s*0\b/, "it needs an amount"]
-];
 function chipNamesHidden(reg, world, state, text) {
   return namesHidden(reg, world, state, text) || namesAny(text, [], secretLoreNames(reg, world, state));
 }
@@ -68711,12 +69025,10 @@ function unfitId(messageId, swipeId) {
   return `unfit:${messageId}:${swipeId}`;
 }
 var NO_VALUE = { "": true, none: true, null: true, nil: true, na: true, "n a": true, nothing: true, no: true, undefined: true, empty: true };
-function offeredNext(reg, world, state, next, text, lexicon, secrets) {
+function offeredNext(reg, world, state, next, text, secrets) {
   const words = (s) => s.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim().replace(/^(?:i|we)\s+/, "");
   const said = words(next);
   if (hasOwn(NO_VALUE, said) || words(text).startsWith(said))
-    return null;
-  if (onlyPassesTime(next, world, lexicon, TIMELAPSE_LEXICON))
     return null;
   return findLeaks(next, secrets).length > 0 || chipNamesHidden(reg, world, state, next) ? null : next;
 }

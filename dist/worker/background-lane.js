@@ -30,7 +30,6 @@ function macroHazards(text, allowed = []) {
 // src/shared/steps.ts
 var STEP_SIGNALS = [
   "typed_input",
-  "classifier",
   "reply",
   "scene_change",
   "slot_crossed",
@@ -46,6 +45,7 @@ var STEP_SIGNALS = [
   "always",
   "never"
 ];
+var RETIRED_SIGNALS = new Map([["classifier", "typed_input"]]);
 function knownSignal(s) {
   return STEP_SIGNALS.includes(s) || /^every_n:[1-9]\d*$/.test(s);
 }
@@ -1412,6 +1412,7 @@ var MIND_ANSWER_FORMATS = Object.freeze({
 var HELPER_MAX_TOKENS = 8192;
 var DEFAULT_HELPER = Object.freeze({ connectionId: null, model: null, effort: "inherit", maxTokens: HELPER_MAX_TOKENS, params: Object.freeze({}) });
 var DEFAULT_STEP_LORE = Object.freeze({ policy: "prefetch", tokens: 1200 });
+var DEFAULT_RECENT = Object.freeze({ messages: 8, tokens: 3000 });
 var SPEED_DEFAULT = Object.freeze({ mode: "offer", thresholdMinutes: 30 });
 var SPEED_THRESHOLD_MINUTES = [1, 7 * 1440];
 var EXTRACTION_DEFAULTS = Object.freeze({
@@ -9382,17 +9383,8 @@ function paramCandidates(reg, world, state, action, param, actor = world.pov) {
   if (!def || def.type !== "ref")
     return [];
   const here = placeOfEntity(state, actor);
-  if (def.ref === "place") {
-    const near = new Set(Object.values(world.routes).flatMap((r) => r.from === here ? [r.to] : r.to === here && r.bidirectional ? [r.from] : []));
-    const parent = here ? own(world.places, here)?.parent : undefined;
-    if (parent)
-      near.add(parent);
-    for (const p of Object.values(world.places))
-      if (here && p.parent === here)
-        near.add(p.id);
-    const name = (id) => own(world.places, id)?.name ?? id;
-    return Object.keys(world.places).filter((id) => id !== here && canSeePlace(reg, world, state, actor, id)).sort((a, b) => Number(near.has(b)) - Number(near.has(a)) || name(a).localeCompare(name(b)));
-  }
+  if (def.ref === "place")
+    return placeCandidates(reg, world, state, actor);
   const filters = candidateFilters(action, param);
   const ctx = filters.length > 0 ? reg.context(world, state) : null;
   const out = [];
@@ -9415,6 +9407,18 @@ function paramCandidates(reg, world, state, action, param, actor = world.pov) {
     out.push(id);
   }
   return out;
+}
+function placeCandidates(reg, world, state, actor = world.pov) {
+  const here = placeOfEntity(state, actor);
+  const near = new Set(Object.values(world.routes).flatMap((r) => r.from === here ? [r.to] : r.to === here && r.bidirectional ? [r.from] : []));
+  const parent = here ? own(world.places, here)?.parent : undefined;
+  if (parent)
+    near.add(parent);
+  for (const p of Object.values(world.places))
+    if (here && p.parent === here)
+      near.add(p.id);
+  const name = (id) => own(world.places, id)?.name ?? id;
+  return Object.keys(world.places).filter((id) => id !== here && canSeePlace(reg, world, state, actor, id)).sort((a, b) => Number(near.has(b)) - Number(near.has(a)) || name(a).localeCompare(name(b)));
 }
 var EXPR_WORDS = new Set(["and", "or", "not", "true", "false", "null", "self"]);
 function candidateFilters(action, param) {
@@ -11944,6 +11948,7 @@ var spacePack = {
     r.action({
       id: "go",
       label: "Go to",
+      description: "Walk to another place: a room, a building, a street, another part of town.",
       pack: "space",
       params: { to: { type: "ref", ref: "place", label: "Place" } },
       requires: ["to != here", "level.space < 2 or route_exists(here, to, 'walk')"],
@@ -11956,6 +11961,7 @@ var spacePack = {
     r.action({
       id: "step",
       label: "Move on the map",
+      description: "Walk to a square of the grid you stand on.",
       pack: "space",
       params: { x: { type: "number" }, y: { type: "number" } },
       requires: ["level.space >= 3", "grid_reachable(here, x, y)"],
@@ -13790,9 +13796,9 @@ function registerEmployment(r) {
   core.effect({ type: "economy.job_end", args: ["job", "end?", "by?"], resolve: (args, ctx) => endJob(api, args, ctx) });
   core.effect({ type: "economy.job_raise", args: ["job", "rate?", "pct?", "by?"], resolve: (args, ctx) => raise(api, args, ctx) });
   core.formula("employs", (ctx, business, who) => allJobs(ctx).some((j) => j.business === String(business ?? "") && j.worker === String(who ?? "") && j.status !== "ended"));
-  core.action({ id: "job_hire", label: "Hire", pack: "economy", params: { business: { type: "ref", ref: "business" }, worker: { type: "ref", ref: "person" }, title: { type: "text", optional: true }, basis: { type: "text", optional: true, label: "Pay basis" }, rate: { type: "money", optional: true, label: "Pay rate" }, hours_per_week: { type: "number", optional: true }, pay_every: { type: "text", optional: true, label: "Paid every" } }, requires: ["manages(self, business)", "not employs(business, worker)", "level.money >= 3"], outcomes: { default: [{ type: "economy.hire", args: { business: "business", worker: "worker", title: "=params.title", basis: "=params.basis", rate: "=params.rate", hours_per_week: "=params.hours_per_week", pay_every: "=params.pay_every", by: "self" } }] }, duration: "15", lexicon: ["hire", "take on", "give a job to"], observable: "talks business" });
-  core.action({ id: "job_end", label: "End a job", pack: "economy", params: { job: { type: "ref", ref: JOB_KIND } }, requires: ["job.worker == self or manages(self, job.employer)", "job.status != 'ended'", "level.money >= 3"], outcomes: { default: [{ type: "economy.job_end", args: { job: "job", by: "self" } }] }, duration: "10", lexicon: ["fire", "let go", "quit", "resign", "hand in my notice"], observable: "talks business" });
-  core.action({ id: "job_raise", label: "Give a raise", pack: "economy", params: { job: { type: "ref", ref: JOB_KIND }, rate: { type: "money", label: "New rate" } }, requires: ["manages(self, job.employer)", "rate > 0", "level.money >= 3"], outcomes: { default: [{ type: "economy.job_raise", args: { job: "job", rate: "=rate", by: "self" } }] }, duration: "5", lexicon: ["give a raise", "raise the pay", "pay more"], observable: "talks business" });
+  core.action({ id: "job_hire", label: "Hire", description: "Hire someone into a business you run, with a title and pay.", pack: "economy", params: { business: { type: "ref", ref: "business" }, worker: { type: "ref", ref: "person" }, title: { type: "text", optional: true }, basis: { type: "text", optional: true, label: "Pay basis" }, rate: { type: "money", optional: true, label: "Pay rate" }, hours_per_week: { type: "number", optional: true }, pay_every: { type: "text", optional: true, label: "Paid every" } }, requires: ["manages(self, business)", "not employs(business, worker)", "level.money >= 3"], outcomes: { default: [{ type: "economy.hire", args: { business: "business", worker: "worker", title: "=params.title", basis: "=params.basis", rate: "=params.rate", hours_per_week: "=params.hours_per_week", pay_every: "=params.pay_every", by: "self" } }] }, duration: "15", lexicon: ["hire", "take on", "give a job to"], observable: "talks business" });
+  core.action({ id: "job_end", label: "End a job", description: "End a job: quit your own, or let someone go from a business you run.", pack: "economy", params: { job: { type: "ref", ref: JOB_KIND } }, requires: ["job.worker == self or manages(self, job.employer)", "job.status != 'ended'", "level.money >= 3"], outcomes: { default: [{ type: "economy.job_end", args: { job: "job", by: "self" } }] }, duration: "10", lexicon: ["fire", "let go", "quit", "resign", "hand in my notice"], observable: "talks business" });
+  core.action({ id: "job_raise", label: "Give a raise", description: "Change the pay of someone who works for a business you run.", pack: "economy", params: { job: { type: "ref", ref: JOB_KIND }, rate: { type: "money", label: "New rate" } }, requires: ["manages(self, job.employer)", "rate > 0", "level.money >= 3"], outcomes: { default: [{ type: "economy.job_raise", args: { job: "job", rate: "=rate", by: "self" } }] }, duration: "5", lexicon: ["give a raise", "raise the pay", "pay more"], observable: "talks business" });
   r.view((ctx, party, _view, viewer) => api.partyKind(ctx, party) === "person" ? { jobs: allJobs(ctx).filter((j) => j.worker === party).map((j) => jobView(ctx, api, j, viewer)) } : {});
   r.summary((ctx, who) => allJobs(ctx).filter((j) => j.worker === who && j.status === "active").map((j) => `${j.title} for ${employerName(ctx, j, null) || "an outside employer"}, ${api.money(ctx, j.rate)} ${BASIS_WORDS[j.basis]}, paid ${j.every === null ? "nothing" : j.every.replace("_", " ")}.`));
 }
@@ -14388,11 +14394,11 @@ function registerBusiness(r) {
   core.effect({ type: "economy.owner_draw", args: ["business", "cents", "owner?", "by?"], resolve: (args, ctx) => ownerDraw(ctx, api, args) });
   core.effect({ type: "economy.distribute", args: ["business", "cents?", "by?"], resolve: (args, ctx) => distribute(ctx, api, args) });
   core.formula("may_draw", (ctx, who, business) => mayDraw(api, ctx.state, String(who ?? ""), String(business ?? "")));
-  core.action({ id: "invoice_issue", label: "Send an invoice", pack: "economy", params: { business: { type: "ref", ref: "business" }, customer: { type: "ref", optional: true, label: "Bill (someone here)" }, customer_name: { type: "text", optional: true, label: "Or bill (a name)" }, amount: { type: "money" }, memo: { type: "text", optional: true, label: "For" }, days: { type: "number", optional: true, label: "Days to pay" } }, requires: ["manages(self, business)", "amount > 0", "level.money >= 3"], outcomes: { default: [{ type: "economy.invoice_issue", args: { business: "business", customer: "=params.customer", customer_name: "=params.customer_name", cents: "=amount", memo: "=params.memo", days: "=params.days", by: "self" } }] }, duration: "10", lexicon: ["send an invoice", "invoice", "bill them"], observable: "does paperwork" });
-  core.action({ id: "invoice_pay", label: "Pay an invoice", pack: "economy", params: { invoice: { type: "ref", ref: INVOICE_KIND } }, requires: ["invoice.customer == self or manages(self, invoice.customer)", "invoice.state == 'open' or invoice.state == 'late'", "level.money >= 3"], outcomes: { default: [{ type: "economy.invoice_pay", args: { invoice: "invoice", by: "self" } }] }, duration: "5", lexicon: ["pay the invoice", "settle the bill"], observable: "checks their phone" });
-  core.action({ id: "invoice_void", label: "Void an invoice", pack: "economy", params: { invoice: { type: "ref", ref: INVOICE_KIND } }, requires: ["manages(self, invoice.business)", "invoice.state == 'open' or invoice.state == 'late'", "level.money >= 3"], outcomes: { default: [{ type: "economy.invoice_void", args: { invoice: "invoice", by: "self" } }] }, duration: "5", lexicon: ["void the invoice", "cancel the invoice", "write it off"], observable: "does paperwork" });
-  core.action({ id: "owner_draw", label: "Take an owner's draw", pack: "economy", params: { business: { type: "ref", ref: "business" }, amount: { type: "money" } }, requires: ["may_draw(self, business)", "amount > 0", "level.money >= 3"], outcomes: { default: [{ type: "economy.owner_draw", args: { business: "business", cents: "=amount", owner: "self", by: "self" } }] }, duration: "5", lexicon: ["take a draw", "pay myself", "take money out of the business"], observable: "checks their phone" });
-  core.action({ id: "distribute_profit", label: "Distribute profit", pack: "economy", params: { business: { type: "ref", ref: "business" }, amount: { type: "money", optional: true, label: "Amount (else its share of the profit)" } }, requires: ["manages(self, business)", "level.money >= 3"], outcomes: { default: [{ type: "economy.distribute", args: { business: "business", cents: "=params.amount", by: "self" } }] }, duration: "10", lexicon: ["distribute profit", "pay dividends", "pay out the owners"], observable: "does paperwork" });
+  core.action({ id: "invoice_issue", label: "Send an invoice", description: "Bill a customer from a business you run.", pack: "economy", params: { business: { type: "ref", ref: "business" }, customer: { type: "ref", optional: true, label: "Bill (someone here)" }, customer_name: { type: "text", optional: true, label: "Or bill (a name)" }, amount: { type: "money" }, memo: { type: "text", optional: true, label: "For" }, days: { type: "number", optional: true, label: "Days to pay" } }, requires: ["manages(self, business)", "amount > 0", "level.money >= 3"], outcomes: { default: [{ type: "economy.invoice_issue", args: { business: "business", customer: "=params.customer", customer_name: "=params.customer_name", cents: "=amount", memo: "=params.memo", days: "=params.days", by: "self" } }] }, duration: "10", lexicon: ["send an invoice", "invoice", "bill them"], observable: "does paperwork" });
+  core.action({ id: "invoice_pay", label: "Pay an invoice", description: "Pay an invoice billed to you or to a business you run.", pack: "economy", params: { invoice: { type: "ref", ref: INVOICE_KIND } }, requires: ["invoice.customer == self or manages(self, invoice.customer)", "invoice.state == 'open' or invoice.state == 'late'", "level.money >= 3"], outcomes: { default: [{ type: "economy.invoice_pay", args: { invoice: "invoice", by: "self" } }] }, duration: "5", lexicon: ["pay the invoice", "settle the bill"], observable: "checks their phone" });
+  core.action({ id: "invoice_void", label: "Void an invoice", description: "Cancel an invoice that a business you run sent.", pack: "economy", params: { invoice: { type: "ref", ref: INVOICE_KIND } }, requires: ["manages(self, invoice.business)", "invoice.state == 'open' or invoice.state == 'late'", "level.money >= 3"], outcomes: { default: [{ type: "economy.invoice_void", args: { invoice: "invoice", by: "self" } }] }, duration: "5", lexicon: ["void the invoice", "cancel the invoice", "write it off"], observable: "does paperwork" });
+  core.action({ id: "owner_draw", label: "Take an owner's draw", description: "Take money out of a business you own, for yourself.", pack: "economy", params: { business: { type: "ref", ref: "business" }, amount: { type: "money" } }, requires: ["may_draw(self, business)", "amount > 0", "level.money >= 3"], outcomes: { default: [{ type: "economy.owner_draw", args: { business: "business", cents: "=amount", owner: "self", by: "self" } }] }, duration: "5", lexicon: ["take a draw", "pay myself", "take money out of the business"], observable: "checks their phone" });
+  core.action({ id: "distribute_profit", label: "Distribute profit", description: "Pay a business's profit out to its owners.", pack: "economy", params: { business: { type: "ref", ref: "business" }, amount: { type: "money", optional: true, label: "Amount (else its share of the profit)" } }, requires: ["manages(self, business)", "level.money >= 3"], outcomes: { default: [{ type: "economy.distribute", args: { business: "business", cents: "=params.amount", by: "self" } }] }, duration: "10", lexicon: ["distribute profit", "pay dividends", "pay out the owners"], observable: "does paperwork" });
   core.query("economy.business_books", (ctx, business, from, to) => {
     const b = businessBooks(api, ctx, business, from, to);
     return { revenue: b.revenue, expenses: b.expenses, profit: b.profit, receivables: b.receivables, payables: b.payables };
@@ -15698,6 +15704,7 @@ function registerHoldings(r) {
   r.core.action({
     id: "trade",
     label: "Buy or sell investments",
+    description: "Buy or sell investments: stocks, funds, bonds, crypto.",
     pack: "economy",
     params: {
       side: { type: "text", label: "Buy or sell", optional: true },
@@ -16093,6 +16100,7 @@ function registerOptions(r) {
   r.core.action({
     id: "exercise_option",
     label: "Exercise an option",
+    description: "Exercise an option contract you hold.",
     pack: "economy",
     params: { holding: { type: "ref", ref: "holding" }, qty: { type: "number", label: "Contracts", optional: true }, from: { type: "ref", ref: "account", label: "Pay the strike from", optional: true }, to: { type: "ref", ref: "account", label: "Strike to", optional: true } },
     requires: ["money_feature('options', self)"],
@@ -17170,6 +17178,7 @@ function registerProperty(r) {
   r.core.action({
     id: "property_buy",
     label: "Buy a property",
+    description: "Buy a property, outright or with a mortgage.",
     pack: "economy",
     params: { property: { type: "ref", ref: "property" }, price: { type: "money", label: "Offer", optional: true }, from: { type: "ref", ref: "account", label: "Pay from", optional: true }, down: { type: "money", label: "Down payment (the rest on a mortgage)", optional: true }, term_months: { type: "number", label: "Mortgage term, months (one a lender offers)", optional: true } },
     requires,
@@ -17181,6 +17190,7 @@ function registerProperty(r) {
   r.core.action({
     id: "property_sell",
     label: "Sell a property",
+    description: "Sell a property you own.",
     pack: "economy",
     params: { property: { type: "ref", ref: "property" }, price: { type: "money", label: "Price" }, buyer: { type: "ref", ref: "person", label: "Buyer", optional: true }, to: { type: "ref", ref: "account", label: "Proceeds to", optional: true } },
     requires,
@@ -17192,6 +17202,7 @@ function registerProperty(r) {
   r.core.action({
     id: "lease_start",
     label: "Let a unit",
+    description: "Let a unit of a property you own to a tenant, for rent each month.",
     pack: "economy",
     params: { property: { type: "ref", ref: "property" }, tenant: { type: "ref", ref: "person", label: "Tenant" }, rent: { type: "money", label: "Rent a month" }, months: { type: "number", label: "Term, months", optional: true }, day: { type: "number", label: "Rent day", optional: true }, unit: { type: "text", label: "Unit", optional: true } },
     requires,
@@ -17203,6 +17214,7 @@ function registerProperty(r) {
   r.core.action({
     id: "lease_end",
     label: "End a lease",
+    description: "End a tenant's lease.",
     pack: "economy",
     params: { lease: { type: "ref", ref: "flow" }, on: { type: "text", label: "Last day (YYYY-MM-DD)", optional: true } },
     requires,
@@ -17408,6 +17420,7 @@ function registerStakes(r) {
   r.core.action({
     id: "stake_sell",
     label: "Sell a share of a business",
+    description: "Sell part of your share of a business.",
     pack: "economy",
     params: { business: { type: "ref", ref: "business" }, share: { type: "number", label: "Share, %" }, price: { type: "money", label: "Price" }, buyer: { type: "ref", ref: "person", label: "Buyer", optional: true }, to: { type: "ref", ref: "account", label: "Proceeds to", optional: true } },
     requires: ["money_feature('investments', self)"],
@@ -17541,6 +17554,7 @@ function registerAssets(r) {
   r.core.action({
     id: "route_distributions",
     label: "Route dividends, rent or profits",
+    description: "Choose where dividends, rent or profits are paid: reinvested, or into an account.",
     pack: "economy",
     params: {
       holding: { type: "ref", ref: "holding", optional: true },
@@ -22336,19 +22350,19 @@ function registerEffects(r, hooks) {
 }
 function registerActions(r) {
   const phone = { duration: "2", observable: "checks their phone" };
-  r.action({ id: "buy", label: "Buy", pack: "economy", params: { item: { type: "text", label: "Item or category" }, qty: { type: "number", optional: true }, price: { type: "money", optional: true, label: "Stated price" }, method: { type: "text", optional: true, label: "Paid with (cash, card, debit or savings)" }, cashback: { type: "money", optional: true, label: "Cash back" } }, requires: ["level.money >= 1"], outcomes: { default: [{ type: "economy.buy", args: { payer: "self", item: "=item", qty: "=qty", price: "=price", method: "=params.method", cashback: "=params.cashback", stated: true } }] }, duration: "5", lexicon: ["buy", "purchase", "order", "pick up a"], observable: "pays for something" });
-  r.action({ id: "pay", label: "Pay", pack: "economy", params: { to: { type: "ref", ref: "person" }, amount: { type: "money" } }, requires: ["amount > 0", "can_afford(self, amount)"], outcomes: { default: [{ type: "economy.transfer", args: { from: "self", to: "to", cents: "=amount", memo: "Payment" } }] }, duration: "1", lexicon: ["pay", "give money", "send money", "venmo"], observable: "pays someone" });
-  r.action({ id: "move_money", label: "Transfer between accounts", pack: "economy", params: { from: { type: "ref", ref: "account" }, to: { type: "ref", ref: "account" }, amount: { type: "money" } }, requires: ["spends(self, from)", "holds(self, to)", "amount > 0"], outcomes: { default: [{ type: "economy.move", args: { from: "from", to: "to", cents: "=amount", memo: "Transfer" } }] }, lexicon: ["transfer", "move money", "put into savings"], ...phone });
-  r.action({ id: "pay_card", label: "Pay card or loan", pack: "economy", params: { card: { type: "ref", ref: "account" }, from: { type: "ref", ref: "account", optional: true }, amount: { type: "money", optional: true } }, requires: ["holds(self, card)", "is_credit(card)", "level.money >= 3"], outcomes: { default: [{ type: "economy.pay_card", args: { card: "card", from: "=params.from", cents: "=amount > 0 ? amount : 0 - balance(card)", who: "self" } }] }, lexicon: ["pay off the card", "pay the card", "pay my credit card", "make a loan payment"], ...phone });
-  r.action({ id: "withdraw_cash", label: "Withdraw cash", pack: "economy", params: { account: { type: "ref", ref: "account" }, amount: { type: "money" } }, requires: ["spends(self, account)", "amount > 0", "level.money >= 2"], outcomes: { default: [{ type: "economy.withdraw", args: { account: "account", cents: "=amount", who: "self" } }] }, duration: "3", lexicon: ["withdraw", "take out cash", "hit the atm", "get cash"], observable: "takes out cash" });
-  r.action({ id: "deposit_cash", label: "Deposit cash", pack: "economy", params: { account: { type: "ref", ref: "account" }, amount: { type: "money" } }, requires: ["holds(self, account)", "amount > 0", "level.money >= 2"], outcomes: { default: [{ type: "economy.deposit", args: { account: "account", cents: "=amount", who: "self" } }] }, duration: "3", lexicon: ["deposit", "pay in cash", "bank the cash"], observable: "pays cash into the bank" });
+  r.action({ id: "buy", label: "Buy", description: "Buy something: food, drinks, goods or a service, here or delivered.", pack: "economy", params: { item: { type: "text", label: "Item or category" }, qty: { type: "number", optional: true }, price: { type: "money", optional: true, label: "Stated price" }, method: { type: "text", optional: true, label: "Paid with (cash, card, debit or savings)" }, cashback: { type: "money", optional: true, label: "Cash back" } }, requires: ["level.money >= 1"], outcomes: { default: [{ type: "economy.buy", args: { payer: "self", item: "=item", qty: "=qty", price: "=price", method: "=params.method", cashback: "=params.cashback", stated: true } }] }, duration: "5", lexicon: ["buy", "purchase", "order", "pick up a"], observable: "pays for something" });
+  r.action({ id: "pay", label: "Pay", description: "Give someone money: settle up, pay them back, tip them.", pack: "economy", params: { to: { type: "ref", ref: "person" }, amount: { type: "money" } }, requires: ["amount > 0", "can_afford(self, amount)"], outcomes: { default: [{ type: "economy.transfer", args: { from: "self", to: "to", cents: "=amount", memo: "Payment" } }] }, duration: "1", lexicon: ["pay", "give money", "send money", "venmo"], observable: "pays someone" });
+  r.action({ id: "move_money", label: "Transfer between accounts", description: "Move money between your own accounts: checking, savings, cash.", pack: "economy", params: { from: { type: "ref", ref: "account" }, to: { type: "ref", ref: "account" }, amount: { type: "money" } }, requires: ["spends(self, from)", "holds(self, to)", "amount > 0"], outcomes: { default: [{ type: "economy.move", args: { from: "from", to: "to", cents: "=amount", memo: "Transfer" } }] }, lexicon: ["transfer", "move money", "put into savings"], ...phone });
+  r.action({ id: "pay_card", label: "Pay card or loan", description: "Pay off some or all of a card or loan balance.", pack: "economy", params: { card: { type: "ref", ref: "account" }, from: { type: "ref", ref: "account", optional: true }, amount: { type: "money", optional: true } }, requires: ["holds(self, card)", "is_credit(card)", "level.money >= 3"], outcomes: { default: [{ type: "economy.pay_card", args: { card: "card", from: "=params.from", cents: "=amount > 0 ? amount : 0 - balance(card)", who: "self" } }] }, lexicon: ["pay off the card", "pay the card", "pay my credit card", "make a loan payment"], ...phone });
+  r.action({ id: "withdraw_cash", label: "Withdraw cash", description: "Take cash out of a bank account.", pack: "economy", params: { account: { type: "ref", ref: "account" }, amount: { type: "money" } }, requires: ["spends(self, account)", "amount > 0", "level.money >= 2"], outcomes: { default: [{ type: "economy.withdraw", args: { account: "account", cents: "=amount", who: "self" } }] }, duration: "3", lexicon: ["withdraw", "take out cash", "hit the atm", "get cash"], observable: "takes out cash" });
+  r.action({ id: "deposit_cash", label: "Deposit cash", description: "Put cash into a bank account.", pack: "economy", params: { account: { type: "ref", ref: "account" }, amount: { type: "money" } }, requires: ["holds(self, account)", "amount > 0", "level.money >= 2"], outcomes: { default: [{ type: "economy.deposit", args: { account: "account", cents: "=amount", who: "self" } }] }, duration: "3", lexicon: ["deposit", "pay in cash", "bank the cash"], observable: "pays cash into the bank" });
   const card = { card: { type: "ref", ref: "card" } };
   const cardBy = ["holds(self, card) or manages(self, card.account)", "money_feature('cards', self)"];
-  r.action({ id: "card_freeze", label: "Freeze card", pack: "economy", params: card, requires: cardBy, outcomes: { default: [{ type: "economy.card_state", args: { card: "card", state: "frozen", who: "self" } }] }, lexicon: ["freeze my card", "lock my card"], ...phone });
-  r.action({ id: "card_unfreeze", label: "Unfreeze card", pack: "economy", params: card, requires: cardBy, outcomes: { default: [{ type: "economy.card_state", args: { card: "card", state: "active", who: "self" } }] }, lexicon: ["unfreeze my card", "unlock my card"], ...phone });
-  r.action({ id: "card_report_lost", label: "Report card lost", pack: "economy", params: card, requires: cardBy, outcomes: { default: [{ type: "economy.card_state", args: { card: "card", state: "lost", who: "self" } }] }, lexicon: ["report my card lost", "my card was stolen", "cancel my card"], ...phone });
-  r.action({ id: "card_replace", label: "Replace card", pack: "economy", params: card, requires: cardBy, outcomes: { default: [{ type: "economy.card_replace", args: { card: "card", who: "self" } }] }, lexicon: ["replace my card", "order a new card"], ...phone });
-  r.action({ id: "set_autopay", label: "Set autopay", pack: "economy", params: { account: { type: "ref", ref: "account" }, mode: { type: "text", label: "none, minimum, statement, full or fixed" }, from: { type: "ref", ref: "account", optional: true }, amount: { type: "money", optional: true } }, requires: ["manages(self, account)", "is_credit(account)", "level.money >= 3"], outcomes: { default: [{ type: "economy.set_autopay", args: { account: "account", mode: "=params.mode", from: "=params.from", cents: "=params.amount", who: "self" } }] }, lexicon: ["set up autopay", "turn on autopay", "turn off autopay"], ...phone });
+  r.action({ id: "card_freeze", label: "Freeze card", description: "Freeze a card so it can't be used.", pack: "economy", params: card, requires: cardBy, outcomes: { default: [{ type: "economy.card_state", args: { card: "card", state: "frozen", who: "self" } }] }, lexicon: ["freeze my card", "lock my card"], ...phone });
+  r.action({ id: "card_unfreeze", label: "Unfreeze card", description: "Unfreeze a frozen card.", pack: "economy", params: card, requires: cardBy, outcomes: { default: [{ type: "economy.card_state", args: { card: "card", state: "active", who: "self" } }] }, lexicon: ["unfreeze my card", "unlock my card"], ...phone });
+  r.action({ id: "card_report_lost", label: "Report card lost", description: "Report a card lost or stolen.", pack: "economy", params: card, requires: cardBy, outcomes: { default: [{ type: "economy.card_state", args: { card: "card", state: "lost", who: "self" } }] }, lexicon: ["report my card lost", "my card was stolen", "cancel my card"], ...phone });
+  r.action({ id: "card_replace", label: "Replace card", description: "Order a replacement card.", pack: "economy", params: card, requires: cardBy, outcomes: { default: [{ type: "economy.card_replace", args: { card: "card", who: "self" } }] }, lexicon: ["replace my card", "order a new card"], ...phone });
+  r.action({ id: "set_autopay", label: "Set autopay", description: "Set how a card or loan pays itself each month.", pack: "economy", params: { account: { type: "ref", ref: "account" }, mode: { type: "text", label: "none, minimum, statement, full or fixed" }, from: { type: "ref", ref: "account", optional: true }, amount: { type: "money", optional: true } }, requires: ["manages(self, account)", "is_credit(account)", "level.money >= 3"], outcomes: { default: [{ type: "economy.set_autopay", args: { account: "account", mode: "=params.mode", from: "=params.from", cents: "=params.amount", who: "self" } }] }, lexicon: ["set up autopay", "turn on autopay", "turn off autopay"], ...phone });
   const flowParams = {
     label: { type: "text", optional: true },
     kind: { type: "text", optional: true },
@@ -22374,14 +22388,14 @@ function registerActions(r) {
   };
   const flowArgs = Object.fromEntries(Object.keys(flowParams).map((k) => [k, `=params.${k}`]));
   const flowsRun = ["money_feature('flows', self)"];
-  r.action({ id: "flow_create", label: "Set up a standing payment", pack: "economy", params: flowParams, requires: flowsRun, outcomes: { default: [{ type: "economy.flow_create", args: { ...flowArgs, who: "self" } }] }, lexicon: ["set up a standing order", "schedule a payment", "set up a recurring transfer"], ...phone });
-  r.action({ id: "flow_update", label: "Change a standing payment", pack: "economy", params: { flow: { type: "ref", ref: "flow" }, ...flowParams, clear: { type: "text", optional: true } }, requires: flowsRun, outcomes: { default: [{ type: "economy.flow_update", args: { flow: "flow", ...flowArgs, clear: "=params.clear", who: "self" } }] }, lexicon: ["change the standing order", "change the recurring payment"], ...phone });
+  r.action({ id: "flow_create", label: "Set up a standing payment", description: "Set up a standing payment: a bill, a regular transfer, an allowance.", pack: "economy", params: flowParams, requires: flowsRun, outcomes: { default: [{ type: "economy.flow_create", args: { ...flowArgs, who: "self" } }] }, lexicon: ["set up a standing order", "schedule a payment", "set up a recurring transfer"], ...phone });
+  r.action({ id: "flow_update", label: "Change a standing payment", description: "Change a standing payment: its amount, its schedule or its accounts.", pack: "economy", params: { flow: { type: "ref", ref: "flow" }, ...flowParams, clear: { type: "text", optional: true } }, requires: flowsRun, outcomes: { default: [{ type: "economy.flow_update", args: { flow: "flow", ...flowArgs, clear: "=params.clear", who: "self" } }] }, lexicon: ["change the standing order", "change the recurring payment"], ...phone });
   const flowOnly = { flow: { type: "ref", ref: "flow" } };
-  r.action({ id: "flow_pause", label: "Pause a standing payment", pack: "economy", params: flowOnly, requires: flowsRun, outcomes: { default: [{ type: "economy.flow_status", args: { flow: "flow", status: "paused", who: "self" } }] }, lexicon: ["pause the standing order"], ...phone });
-  r.action({ id: "flow_resume", label: "Resume a standing payment", pack: "economy", params: flowOnly, requires: flowsRun, outcomes: { default: [{ type: "economy.flow_status", args: { flow: "flow", status: "active", who: "self" } }] }, lexicon: ["resume the standing order"], ...phone });
-  r.action({ id: "flow_delete", label: "Cancel a standing payment", pack: "economy", params: flowOnly, requires: flowsRun, outcomes: { default: [{ type: "economy.flow_status", args: { flow: "flow", status: "ended", who: "self" } }] }, lexicon: ["cancel the standing order", "stop the recurring payment"], ...phone });
-  r.action({ id: "apply_credit", label: "Apply for credit", pack: "economy", params: { product: { type: "text", label: "Product (credit_card, line_of_credit, loan, or one of the world's)" }, amount: { type: "money", optional: true }, term: { type: "number", optional: true } }, requires: ["level.money >= 3"], outcomes: { default: [{ type: "economy.apply_credit", args: { product: "=params.product", cents: "=params.amount", term: "=params.term", who: "self" } }] }, duration: "15", lexicon: ["apply for a credit card", "apply for a loan", "take out a loan"], observable: "fills in an application" });
-  r.action({ id: "set_pay_prefs", label: "Set how I pay", pack: "economy", params: { tiers: { type: "text", label: "Ways to pay, in order: a JSON list of {use, min?, max?, categories?, except?}" } }, requires: ["money_feature('payment_prefs', self)"], outcomes: { default: [{ type: "economy.set_pay_prefs", args: { tiers: "=params.tiers", who: "self" } }] }, lexicon: ["i'd rather pay with"], ...phone });
+  r.action({ id: "flow_pause", label: "Pause a standing payment", description: "Pause a standing payment.", pack: "economy", params: flowOnly, requires: flowsRun, outcomes: { default: [{ type: "economy.flow_status", args: { flow: "flow", status: "paused", who: "self" } }] }, lexicon: ["pause the standing order"], ...phone });
+  r.action({ id: "flow_resume", label: "Resume a standing payment", description: "Resume a paused standing payment.", pack: "economy", params: flowOnly, requires: flowsRun, outcomes: { default: [{ type: "economy.flow_status", args: { flow: "flow", status: "active", who: "self" } }] }, lexicon: ["resume the standing order"], ...phone });
+  r.action({ id: "flow_delete", label: "Cancel a standing payment", description: "Cancel a standing payment.", pack: "economy", params: flowOnly, requires: flowsRun, outcomes: { default: [{ type: "economy.flow_status", args: { flow: "flow", status: "ended", who: "self" } }] }, lexicon: ["cancel the standing order", "stop the recurring payment"], ...phone });
+  r.action({ id: "apply_credit", label: "Apply for credit", description: "Apply for a credit card, a credit line or a loan.", pack: "economy", params: { product: { type: "text", label: "Product (credit_card, line_of_credit, loan, or one of the world's)" }, amount: { type: "money", optional: true }, term: { type: "number", optional: true } }, requires: ["level.money >= 3"], outcomes: { default: [{ type: "economy.apply_credit", args: { product: "=params.product", cents: "=params.amount", term: "=params.term", who: "self" } }] }, duration: "15", lexicon: ["apply for a credit card", "apply for a loan", "take out a loan"], observable: "fills in an application" });
+  r.action({ id: "set_pay_prefs", label: "Set how I pay", description: "Set the order in which you prefer to pay: cash, debit, credit.", pack: "economy", params: { tiers: { type: "text", label: "Ways to pay, in order: a JSON list of {use, min?, max?, categories?, except?}" } }, requires: ["money_feature('payment_prefs', self)"], outcomes: { default: [{ type: "economy.set_pay_prefs", args: { tiers: "=params.tiers", who: "self" } }] }, lexicon: ["i'd rather pay with"], ...phone });
 }
 var economyPack = {
   id: "economy",
@@ -23226,7 +23240,7 @@ var gearPack = {
         return out;
       }
     });
-    r.action({ id: "take", label: "Take", pack: "gear", params: { item: { type: "ref", ref: "item" } }, requires: ["place(item) == here", "not carries(self, item)", "reach(self, item)"], outcomes: { default: [{ type: "gear.transfer", args: { item: "item", to: "self" } }] }, duration: "1", lexicon: ["take", "pick up", "grab"], observable: "picks something up" });
+    r.action({ id: "take", label: "Take", description: "Pick up something that is here.", pack: "gear", params: { item: { type: "ref", ref: "item" } }, requires: ["place(item) == here", "not carries(self, item)", "reach(self, item)"], outcomes: { default: [{ type: "gear.transfer", args: { item: "item", to: "self" } }] }, duration: "1", lexicon: ["take", "pick up", "grab"], observable: "picks something up" });
     r.effect({
       type: "gear.lose",
       args: ["item", "thief?"],
@@ -23254,15 +23268,15 @@ var gearPack = {
         return out;
       }
     });
-    r.action({ id: "lose", label: "Lose something", pack: "gear", params: { item: { type: "ref", ref: "item" } }, requires: ["item.owner == self or carries(self, item)", "item.lost != true"], outcomes: { default: [{ type: "gear.lose", args: { item: "item" } }] }, duration: "1", lexicon: ["lost my", "lose", "can't find my", "is gone", "is missing"], observable: "searches their pockets" });
-    r.action({ id: "drop", label: "Drop", pack: "gear", params: { item: { type: "ref", ref: "item" } }, requires: ["carries(self, item)"], outcomes: { default: [{ type: "gear.drop", args: { item: "item", place: "=here" } }] }, duration: "1", lexicon: ["drop", "put down", "leave"], observable: "puts something down" });
-    r.action({ id: "give", label: "Give", pack: "gear", params: { item: { type: "ref", ref: "item" }, to: { type: "ref", ref: "person" } }, requires: ["carries(self, item)", "at(to, here)"], outcomes: { default: [{ type: "gear.give", args: { item: "item", from: "self", to: "to" } }] }, duration: "1", lexicon: ["give", "hand", "pass"], observable: "hands something over" });
-    r.action({ id: "lend", label: "Lend", pack: "gear", params: { item: { type: "ref", ref: "item" }, to: { type: "ref", ref: "person" }, days: { type: "number", optional: true }, until: { type: "text", optional: true, label: "Until (a time: 7 pm, tonight, tomorrow)" } }, requires: ["item.owner == self", "days > 0 or params.until != null", "at(to, here) or at(item, here)"], outcomes: { default: [{ type: "gear.lend", args: { item: "item", to: "to", until: "=days > 0 ? clock + days(days) : 0", said: "=params.until" } }] }, duration: "2", lexicon: ["lend", "loan", "let borrow"], observable: "lends something" });
-    r.action({ id: "reclaim", label: "Take back", pack: "gear", params: { item: { type: "ref", ref: "item" } }, requires: ["item.owner == self", "lent_out(item)"], outcomes: { default: [{ type: "gear.retrieve", args: { item: "item" } }] }, duration: "5", lexicon: ["take back", "get back", "reclaim"], observable: "takes something back" });
-    r.action({ id: "wear", label: "Wear or equip", pack: "gear", params: { item: { type: "ref", ref: "item" } }, requires: ["carries(self, item) or (place(item) == here and reach(self, item))", "level.gear >= 3"], outcomes: { default: [{ type: "gear.wear", args: { item: "item", wearer: "self" } }] }, duration: "2", lexicon: ["wear", "put on", "equip"], observable: "puts something on" });
-    r.action({ id: "remove", label: "Take off", pack: "gear", params: { item: { type: "ref", ref: "item" } }, requires: ["carries(self, item)"], outcomes: { default: [{ type: "gear.remove", args: { item: "item" } }] }, duration: "2", lexicon: ["take off", "remove", "unequip"], observable: "takes something off" });
-    r.action({ id: "use", label: "Use", pack: "gear", params: { item: { type: "ref", ref: "item" } }, requires: ["carries(self, item) or (on_grid(item) and reach(self, item))"], outcomes: { default: [{ type: "gear.use", args: { item: "item", user: "self" } }] }, duration: "5", lexicon: ["use", "apply"], observable: "uses something" });
-    r.action({ id: "take_piece", label: "Take from a kit", pack: "gear", params: { kit: { type: "ref", ref: "kit" }, piece: { type: "text" } }, requires: ["(place(kit) == here and reach(self, kit)) or carries(self, kit)", "level.gear >= 3"], outcomes: { default: [{ type: "gear.take_piece", args: { kit: "kit", piece: "=piece", to: "self" } }] }, duration: "1", lexicon: ["take the", "grab a", "get a"], observable: "takes a tool" });
+    r.action({ id: "lose", label: "Lose something", description: "Something you own or carry is lost or gone, whereabouts unknown.", pack: "gear", params: { item: { type: "ref", ref: "item" } }, requires: ["item.owner == self or carries(self, item)", "item.lost != true"], outcomes: { default: [{ type: "gear.lose", args: { item: "item" } }] }, duration: "1", lexicon: ["lost my", "lose", "can't find my", "is gone", "is missing"], observable: "searches their pockets" });
+    r.action({ id: "drop", label: "Drop", description: "Put down something you carry, here.", pack: "gear", params: { item: { type: "ref", ref: "item" } }, requires: ["carries(self, item)"], outcomes: { default: [{ type: "gear.drop", args: { item: "item", place: "=here" } }] }, duration: "1", lexicon: ["drop", "put down", "leave"], observable: "puts something down" });
+    r.action({ id: "give", label: "Give", description: "Hand something you carry to someone here, for keeps.", pack: "gear", params: { item: { type: "ref", ref: "item" }, to: { type: "ref", ref: "person" } }, requires: ["carries(self, item)", "at(to, here)"], outcomes: { default: [{ type: "gear.give", args: { item: "item", from: "self", to: "to" } }] }, duration: "1", lexicon: ["give", "hand", "pass"], observable: "hands something over" });
+    r.action({ id: "lend", label: "Lend", description: "Lend something of yours to someone, for some days or until a time.", pack: "gear", params: { item: { type: "ref", ref: "item" }, to: { type: "ref", ref: "person" }, days: { type: "number", optional: true }, until: { type: "text", optional: true, label: "Until (a time: 7 pm, tonight, tomorrow)" } }, requires: ["item.owner == self", "days > 0 or params.until != null", "at(to, here) or at(item, here)"], outcomes: { default: [{ type: "gear.lend", args: { item: "item", to: "to", until: "=days > 0 ? clock + days(days) : 0", said: "=params.until" } }] }, duration: "2", lexicon: ["lend", "loan", "let borrow"], observable: "lends something" });
+    r.action({ id: "reclaim", label: "Take back", description: "Take back something of yours that you lent out.", pack: "gear", params: { item: { type: "ref", ref: "item" } }, requires: ["item.owner == self", "lent_out(item)"], outcomes: { default: [{ type: "gear.retrieve", args: { item: "item" } }] }, duration: "5", lexicon: ["take back", "get back", "reclaim"], observable: "takes something back" });
+    r.action({ id: "wear", label: "Wear or equip", description: "Put on or equip clothing, armor or gear.", pack: "gear", params: { item: { type: "ref", ref: "item" } }, requires: ["carries(self, item) or (place(item) == here and reach(self, item))", "level.gear >= 3"], outcomes: { default: [{ type: "gear.wear", args: { item: "item", wearer: "self" } }] }, duration: "2", lexicon: ["wear", "put on", "equip"], observable: "puts something on" });
+    r.action({ id: "remove", label: "Take off", description: "Take off something you wear or have equipped.", pack: "gear", params: { item: { type: "ref", ref: "item" } }, requires: ["carries(self, item)"], outcomes: { default: [{ type: "gear.remove", args: { item: "item" } }] }, duration: "2", lexicon: ["take off", "remove", "unequip"], observable: "takes something off" });
+    r.action({ id: "use", label: "Use", description: "Use an item you carry or can reach.", pack: "gear", params: { item: { type: "ref", ref: "item" } }, requires: ["carries(self, item) or (on_grid(item) and reach(self, item))"], outcomes: { default: [{ type: "gear.use", args: { item: "item", user: "self" } }] }, duration: "5", lexicon: ["use", "apply"], observable: "uses something" });
+    r.action({ id: "take_piece", label: "Take from a kit", description: "Take one piece, such as a tool or a part, out of a kit.", pack: "gear", params: { kit: { type: "ref", ref: "kit" }, piece: { type: "text" } }, requires: ["(place(kit) == here and reach(self, kit)) or carries(self, kit)", "level.gear >= 3"], outcomes: { default: [{ type: "gear.take_piece", args: { kit: "kit", piece: "=piece", to: "self" } }] }, duration: "1", lexicon: ["take the", "grab a", "get a"], observable: "takes a tool" });
     r.process({
       id: "gear.grants",
       domain: "gear",
@@ -23831,6 +23845,7 @@ var vehiclesPack = {
     r.action({
       id: "drive",
       label: "Drive",
+      description: "Drive, ride or sail a vehicle you own or may use to another place.",
       pack: "vehicles",
       params: { vehicle: { type: "ref", ref: "vehicle" }, to: { type: "ref", ref: "place", label: "Destination" } },
       requires: ["place(vehicle) == here", "vehicle.owner == self or has_rel(self, 'uses', vehicle)", "vehicle.status != 'broken'", "drive_minutes(vehicle, to) > 0", "fuel_ok(vehicle, to)"],
@@ -23840,9 +23855,9 @@ var vehiclesPack = {
       lexicon: ["drive to", "drive over to", "take the truck", "take the car", "sail to", "ride to"],
       observable: "drives off"
     });
-    r.action({ id: "refuel", label: "Refuel", pack: "vehicles", params: { vehicle: { type: "ref", ref: "vehicle" } }, requires: ["place(vehicle) == here", "fuel_pct(vehicle) < 100"], outcomes: { default: [{ type: "vehicles.refuel", args: { vehicle: "vehicle", payer: "self" } }] }, duration: "10", lexicon: ["refuel", "fill up", "gas up", "charge the car"], observable: "fills up the tank" });
-    r.action({ id: "service_vehicle", label: "Service", pack: "vehicles", params: { vehicle: { type: "ref", ref: "vehicle" } }, requires: ["place(vehicle) == here"], outcomes: { default: [{ type: "vehicles.service", args: { vehicle: "vehicle", payer: "self" } }] }, duration: "60", lexicon: ["service", "oil change", "tune up"], observable: "gets the vehicle serviced" });
-    r.action({ id: "repair_vehicle", label: "Repair", pack: "vehicles", params: { vehicle: { type: "ref", ref: "vehicle" } }, requires: ["place(vehicle) == here", "vehicle.status != 'ok'"], outcomes: { default: [{ type: "vehicles.service", args: { vehicle: "vehicle", payer: "self", repair: true } }] }, duration: "180", lexicon: ["repair", "fix the truck", "fix the car", "get it towed"], observable: "gets the vehicle repaired" });
+    r.action({ id: "refuel", label: "Refuel", description: "Fill up a vehicle's tank, or charge it.", pack: "vehicles", params: { vehicle: { type: "ref", ref: "vehicle" } }, requires: ["place(vehicle) == here", "fuel_pct(vehicle) < 100"], outcomes: { default: [{ type: "vehicles.refuel", args: { vehicle: "vehicle", payer: "self" } }] }, duration: "10", lexicon: ["refuel", "fill up", "gas up", "charge the car"], observable: "fills up the tank" });
+    r.action({ id: "service_vehicle", label: "Service", description: "Have a vehicle serviced: an oil change, a tune-up.", pack: "vehicles", params: { vehicle: { type: "ref", ref: "vehicle" } }, requires: ["place(vehicle) == here"], outcomes: { default: [{ type: "vehicles.service", args: { vehicle: "vehicle", payer: "self" } }] }, duration: "60", lexicon: ["service", "oil change", "tune up"], observable: "gets the vehicle serviced" });
+    r.action({ id: "repair_vehicle", label: "Repair", description: "Have a damaged or broken-down vehicle repaired.", pack: "vehicles", params: { vehicle: { type: "ref", ref: "vehicle" } }, requires: ["place(vehicle) == here", "vehicle.status != 'ok'"], outcomes: { default: [{ type: "vehicles.service", args: { vehicle: "vehicle", payer: "self", repair: true } }] }, duration: "180", lexicon: ["repair", "fix the truck", "fix the car", "get it towed"], observable: "gets the vehicle repaired" });
     r.process({
       id: "vehicles.upkeep",
       domain: "vehicles",
@@ -24503,8 +24518,8 @@ var relationshipsPack = {
         return appraise(ctx, from, to, axis ? { [axis]: delta } : Object.fromEntries(axesOf(ctx).map((x) => [x.id, delta])), strOf(a.why, "change"));
       }
     });
-    r.action({ id: "chat_with", label: "Chat with", pack: "relationships", params: { target: { type: "ref", ref: "person" } }, requires: ["at(target, here)"], outcomes: { default: [{ type: "relationships.appraise", args: { from: "target", to: "self", appraisal: "conversation", mutual: true } }] }, duration: "15", lexicon: ["chat with", "talk to", "catch up with"], observable: "chats" });
-    r.action({ id: "give_gift", label: "Give a gift", pack: "relationships", params: { target: { type: "ref", ref: "person" } }, requires: ["at(target, here)"], outcomes: { default: [{ type: "relationships.appraise", args: { from: "target", to: "self", appraisal: "gift" } }] }, duration: "5", lexicon: ["give a gift", "surprise"], observable: "gives a gift" });
+    r.action({ id: "chat_with", label: "Chat with", description: "Spend a while talking with someone here.", pack: "relationships", params: { target: { type: "ref", ref: "person" } }, requires: ["at(target, here)"], outcomes: { default: [{ type: "relationships.appraise", args: { from: "target", to: "self", appraisal: "conversation", mutual: true } }] }, duration: "15", lexicon: ["chat with", "talk to", "catch up with"], observable: "chats" });
+    r.action({ id: "give_gift", label: "Give a gift", description: "Give someone here a present.", pack: "relationships", params: { target: { type: "ref", ref: "person" } }, requires: ["at(target, here)"], outcomes: { default: [{ type: "relationships.appraise", args: { from: "target", to: "self", appraisal: "gift" } }] }, duration: "5", lexicon: ["give a gift", "surprise"], observable: "gives a gift" });
     r.renderer({
       slot: "people",
       render(ctx) {
@@ -25640,17 +25655,16 @@ var castlifePack = {
       }
       return out;
     });
-    r.formula("invited", (ctx, host) => {
-      if (povLife(ctx.world, ctx.state, String(host ?? ""))?.acts === false)
-        return false;
+    const openInvitations = (ctx) => {
       const list = sliceOf(ctx.state, "castlife").invitations;
       const now = ctx.state.clock;
-      return Array.isArray(list) && list.some((raw) => {
-        const inv = objOf(raw);
+      return (Array.isArray(list) ? list : []).map(objOf).filter((inv) => {
         const at = numOf(inv.at);
-        return strOf(inv.agent) === String(host ?? "") && at >= now - 180 && at <= now + MINUTES_PER_DAY;
+        return povLife(ctx.world, ctx.state, strOf(inv.agent))?.acts !== false && at >= now - 180 && at <= now + MINUTES_PER_DAY;
       });
-    });
+    };
+    r.formula("invited", (ctx, host) => openInvitations(ctx).some((inv) => strOf(inv.agent) === String(host ?? "")));
+    r.query("castlife.invitations", (ctx, viewer) => openInvitations(ctx).map((inv) => ({ host: strOf(inv.agent), text: invitationText(ctx, strOf(inv.agent), typeof inv.place === "string" ? inv.place : null, numOf(inv.at), viewer) })));
     r.formula("need", (ctx, who, need) => needValue(ctx, String(who ?? ctx.world.pov), String(need ?? "")));
     r.formula("busy", (ctx, who) => {
       const id = String(who ?? "");
@@ -25685,10 +25699,10 @@ var castlifePack = {
         return [{ type: "set", entity: who, field: "holds", value: holds }, ...out];
       }
     });
-    r.action({ id: "eat", label: "Eat", pack: "castlife", params: {}, requires: [], outcomes: { default: [{ type: "castlife.satisfy", args: { entity: "self", need: "hunger" } }, { type: "set", args: { entity: "self", field: "activity", value: "meal" } }] }, duration: "30", lexicon: ["eat", "have lunch", "have dinner", "grab a bite"], observable: "eats" });
-    r.action({ id: "sleep", label: "Go to bed", pack: "castlife", params: {}, requires: [], outcomes: { default: [{ type: "castlife.satisfy", args: { entity: "self", need: "fatigue" } }] }, duration: "5", activity: { type: "sleep", until: "next_time('07:00')" }, lexicon: ["go to bed", "sleep", "turn in", "hit the sack"], observable: "goes to bed" });
-    r.action({ id: "rest", label: "Rest", pack: "castlife", params: {}, requires: [], outcomes: { default: [{ type: "castlife.satisfy", args: { entity: "self", need: "fun" } }] }, duration: "30", activity: { type: "waiting", until: "clock + 30" }, lexicon: ["rest", "relax", "take a break"], observable: "rests" });
-    r.action({ id: "accept_invitation", label: "Accept invitation", pack: "castlife", params: { host: { type: "ref", ref: "person" } }, requires: ["invited(host)"], outcomes: { default: [{ type: "relationships.appraise", args: { from: "host", to: "self", appraisal: "promise_kept" } }] }, duration: "1", lexicon: ["accept", "sure, let's", "count me in"], observable: "accepts an invitation" });
+    r.action({ id: "eat", label: "Eat", description: "Have a meal or a snack.", pack: "castlife", params: {}, requires: [], outcomes: { default: [{ type: "castlife.satisfy", args: { entity: "self", need: "hunger" } }, { type: "set", args: { entity: "self", field: "activity", value: "meal" } }] }, duration: "30", lexicon: ["eat", "have lunch", "have dinner", "grab a bite"], observable: "eats" });
+    r.action({ id: "sleep", label: "Go to bed", description: "Go to bed and sleep until morning.", pack: "castlife", params: {}, requires: [], outcomes: { default: [{ type: "castlife.satisfy", args: { entity: "self", need: "fatigue" } }] }, duration: "5", activity: { type: "sleep", until: "next_time('07:00')" }, lexicon: ["go to bed", "sleep", "turn in", "hit the sack"], observable: "goes to bed" });
+    r.action({ id: "rest", label: "Rest", description: "Rest or relax for a while.", pack: "castlife", params: {}, requires: [], outcomes: { default: [{ type: "castlife.satisfy", args: { entity: "self", need: "fun" } }] }, duration: "30", activity: { type: "waiting", until: "clock + 30" }, lexicon: ["rest", "relax", "take a break"], observable: "rests" });
+    r.action({ id: "accept_invitation", label: "Accept invitation", description: "Say yes to an invitation someone made you.", pack: "castlife", params: { host: { type: "ref", ref: "person" } }, requires: ["invited(host)"], outcomes: { default: [{ type: "relationships.appraise", args: { from: "host", to: "self", appraisal: "promise_kept" } }] }, duration: "1", lexicon: ["accept", "sure, let's", "count me in"], observable: "accepts an invitation" });
     r.renderer({
       slot: "people",
       render(ctx) {
@@ -25965,6 +25979,7 @@ var sheetsPack = {
     r.action({
       id: "attempt",
       label: "Attempt",
+      description: "Try something hard that one of your stats decides: climb, force, persuade, notice.",
       pack: "sheets",
       params: { stat: { type: "text", label: "Stat" }, difficulty: { type: "text", optional: true, label: "Difficulty (easy, moderate, hard, very hard or a number)" } },
       requires: ["level.sheets >= 1"],
@@ -26256,6 +26271,7 @@ var storyPack = {
     r.action({
       id: "answer",
       label: "Answer",
+      description: "Give your answer to a puzzle: a riddle, a code, a combination.",
       pack: "story",
       params: { puzzle: { type: "text", optional: true, label: "Puzzle" }, answer: { type: "text" }, decision: { type: "number", optional: true, label: "Judged probability" } },
       requires: [],
@@ -27354,6 +27370,7 @@ var combatPack = {
     r.action({
       id: "fight",
       label: "Fight",
+      description: "Start a fight with someone.",
       pack: PACK4,
       params: { target: { type: "ref", label: "Opponent" } },
       requires: ["can_fight(target)"],
@@ -27366,6 +27383,7 @@ var combatPack = {
     r.action({
       id: "end_turn",
       label: "End turn",
+      description: "End your turn in a fight.",
       pack: PACK4,
       params: {},
       requires: [],
