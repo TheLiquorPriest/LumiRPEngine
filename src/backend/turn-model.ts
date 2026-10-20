@@ -120,8 +120,8 @@ export class TurnBridge implements TurnModel {
   private readonly interpreted = new Set<string>();
   /** User texts `interpret` couldn't read (its call failed, or a Decision route's choice had no call left for its params): their turn ran as plain roleplay ("Couldn't read your action"). */
   private readonly unread = new Set<string>();
-  /** Actions `interpret` read but couldn't apply, their params naming nothing that fits, keyed like `intents`: the first (the turn plays as plain roleplay) or a queued one (the queue ends before it); the reply says why. */
-  private readonly unfit = new Map<string, UnfitAction>();
+  /** Actions `interpret` read but dropped, their params naming nothing that fits, in the message's order, keyed like `intents`; the rest of the message plays without them, and the reply says why of each. */
+  private readonly unfit = new Map<string, UnfitAction[]>();
   /** What the input says that the turn won't play whatever happens, in words (`interpret`'s `next`, and actions after the queue's end), offered on a chip that sends it as the next message, keyed like `intents`. */
   private readonly nexts = new Map<string, string>();
   /** Prepared reads keyed by `hashParts(text)`. */
@@ -181,19 +181,19 @@ export class TurnBridge implements TurnModel {
   }
 
   /**
-   * `interpret` read an action whose params name nothing in the world that fits, and its reply gets a
-   * decline chip saying why. For the first action no intent is kept (`intent` null), so the turn plays
-   * as plain roleplay; for a queued one, `intent` holds the actions before it, which play.
+   * `interpret` read actions whose params name nothing in the world that fits, and dropped them; its
+   * reply gets a decline chip for each saying why. `intent` holds the message's other actions, which
+   * play, or is null when none is left, and the turn plays as plain roleplay.
    */
-  setUnfit(userText: string, unfit: UnfitAction, intent: InterpretOutput | null = null): void {
+  setUnfit(userText: string, unfit: UnfitAction[], intent: InterpretOutput | null = null): void {
     this.setIntent(userText, intent, intent !== null);
     this.unfit.set(userText, unfit);
     trim(this.unfit);
   }
 
-  /** The action this text's turn couldn't apply, when `interpret` read one whose params name nothing that fits. */
-  unfitOf(userText: string): UnfitAction | undefined {
-    return this.unfit.get(userText);
+  /** The actions this text's turn dropped, in order, when `interpret` read ones whose params name nothing that fits; empty otherwise. */
+  unfitOf(userText: string): readonly UnfitAction[] {
+    return this.unfit.get(userText) ?? [];
   }
 
   /** Whether this text's intent came from `interpret` (not a palette or chip action). */

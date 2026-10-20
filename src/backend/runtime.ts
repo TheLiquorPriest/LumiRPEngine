@@ -1087,26 +1087,26 @@ export class Runtime implements TurnHooks {
     }
     const chosen = result.action ? all.find((a) => a.id === result.action) : undefined;
     const params = chosen ? playable(chosen, result.params, render.world, [text]) : result.params;
-    // An action whose params name nothing in the world that fits ("I pay Rena" where Rena is no one in
-    // it) plays as plain roleplay, and its reply says why on a decline chip (DESIGN §9.4).
-    const unfit = chosen ? unfitRef(this.registry, chosen, params, render.world, render.state) : null;
-    if (chosen && unfit) {
-      this.host.log("info", `[LumiRPEngine] interpret: ${chosen.id} names nothing in the world (${JSON.stringify(params)}); played as roleplay`, userId);
-      // Nothing that follows the action (time after it, the actions after it) is offered when it didn't play.
-      bridge.setOffer(text, null);
-      bridge.setNext(text, null);
-      bridge.setUnfit(text, { label: chosen.label, reason: unfitReason(this.registry, render.world, render.state, unfit, text, secrets) });
-      return;
-    }
+    // An action whose params name nothing in the world that fits, as the POV knows it ("I pay Rena"
+    // where Rena is no one in it, "I pull on my work jacket" with no jacket), is dropped on its own,
+    // the first as much as a queued one, and its reply says why on a decline chip (DESIGN §9.4). The
+    // rest of the message still plays: an incidental action that names nothing never displaces the
+    // move the turn is about. With nothing left to play, the turn is plain roleplay.
+    const dropped: UnfitAction[] = [];
+    const drop = (def: ActionDef, ref: UnfitRef, given: JsonObject): void => {
+      this.host.log("info", `[LumiRPEngine] interpret: ${def.id} names nothing in the world (${JSON.stringify(given)}); dropped`, userId);
+      dropped.push({ label: def.label, reason: unfitReason(this.registry, render.world, render.state, ref, text, secrets, mayKnow) });
+    };
+    const playing: QueuedAction[] = [];
+    const unfit = chosen ? unfitRef(this.registry, chosen, params, render.world, render.state, mayKnow) : null;
+    if (chosen && unfit) drop(chosen, unfit, params);
+    else if (chosen) playing.push({ action: chosen.id, params, text: "" });
     // The further actions (DESIGN §11 action queue), each read as the first is. Time passing is never
     // queued: as the last it is the input's `then`, and earlier it ends the queue and is left in words.
     // One carrying a secret is dropped on its own, as a second action carrying one always was, and
-    // what follows it, which may hang on it, is left in words. One that names nothing that fits ends
-    // the queue with a decline chip, and nothing after it is offered, as after a first action that
-    // names nothing.
+    // what follows it, which may hang on it, is left in words. One that fails a check or a requirement
+    // still stops the queue when it plays (`planTurn`).
     let then = result.then;
-    const queue: QueuedAction[] = [];
-    let misfit: UnfitAction | null = null;
     const further = result.queue ?? [];
     for (const [k, q] of further.entries()) {
       const def = all.find((a) => a.id === q.action);
@@ -1120,22 +1120,19 @@ export class Runtime implements TurnHooks {
         break;
       }
       const ready = playable(def, q.params, render.world, [q.text, text]);
-      const ref = unfitRef(this.registry, def, ready, render.world, render.state);
-      if (ref) {
-        misfit = { label: def.label, reason: unfitReason(this.registry, render.world, render.state, ref, text, secrets) };
-        next = [];
-        then = undefined;
-        break;
-      }
-      queue.push({ action: def.id, params: ready, text: chipText(q.text) });
+      const ref = unfitRef(this.registry, def, ready, render.world, render.state, mayKnow);
+      if (ref) drop(def, ref, ready);
+      else playing.push({ action: def.id, params: ready, text: chipText(q.text) });
     }
     bridge.setNext(text, joinActions(next) || null);
     bridge.setOffer(text, then ? interpretedTarget(then, render.world, render.state, text) : null);
-    const intent: InterpretOutput = { action: result.action, params, probabilities: result.probabilities, ...(then ? { then } : {}), ...(queue.length > 0 ? { queue } : {}) };
-    if (misfit) {
-      this.host.log("info", `[LumiRPEngine] interpret: queued ${misfit.label} names nothing in the world; the queue ends before it`, userId);
-      bridge.setUnfit(text, misfit, intent);
-    } else bridge.setIntent(text, intent, true);
+    // The first action that plays leads, with the read's confidence; the others queue behind it.
+    const [first, ...queue] = playing;
+    const confidence = result.action ? (result.probabilities[result.action] ?? 1) : 1;
+    const probabilities = !first || first.action === result.action ? result.probabilities : { [first.action]: confidence, none: 1 - confidence };
+    const intent: InterpretOutput | null = chosen && !first ? null : { action: first?.action ?? result.action, params: first?.params ?? params, probabilities, ...(then ? { then } : {}), ...(queue.length > 0 ? { queue } : {}) };
+    if (dropped.length > 0) bridge.setUnfit(text, dropped, intent);
+    else bridge.setIntent(text, intent, true);
   }
 
   /** `puzzle.answer` (DESIGN §10): an Answer the stage can't match exactly is judged, then retried with the probability. */
@@ -1395,7 +1392,7 @@ export class Runtime implements TurnHooks {
     // What the engine reads of the reply: none of the JSON blocks the display hides, matched against the
     // whole message when `before` holds the text a Continue went on from (DESIGN §6.7).
     const text = readableReply(before + content, settings.hideJsonBlocks, before.length);
-    if (replace) await this.chips.removeWhere(chatId, userId, (c) => c.messageId === messageId && c.swipeId === swipeId && READ_CHIP_KINDS.has(c.kind) && c.id !== unfitId(messageId, swipeId));
+    if (replace) await this.chips.removeWhere(chatId, userId, (c) => c.messageId === messageId && c.swipeId === swipeId && READ_CHIP_KINDS.has(c.kind) && !isUnfitId(c.id, messageId, swipeId));
     const bridge = this.bridges.get(chatId);
     if (!bridge) return;
     const input = { chatId, userId, messageId, generationId: key, content };
@@ -1622,7 +1619,7 @@ export class Runtime implements TurnHooks {
       });
     });
     // Another swipe of this reply replaces its notes; this swipe's note on its typed action stays.
-    const notes = (await this.outcomeNotes.list(chatId, userId)).filter((n) => n.messageId !== messageId || n.id === unfitId(messageId, swipeId));
+    const notes = (await this.outcomeNotes.list(chatId, userId)).filter((n) => n.messageId !== messageId || isUnfitId(n.id, messageId, swipeId));
     declines.forEach((d, i) => {
       const id = `decline:${input.messageId}:${input.generationId}:${i}`;
       notes.push({ id, messageId, text: declineNote(d.proposal, d.reason, "accept", context.state, context.world) });
@@ -1704,21 +1701,23 @@ export class Runtime implements TurnHooks {
     if (input.kind !== "continue" && userText.trim() !== "" && bridge.wasUnread(userText)) {
       stored.push({ id: `read_failed:${at}`, kind: "read_failed", ...base, label: "Couldn't read your action", detail: "The call that reads your message failed, or none was left before the reply, so this turn ran as plain roleplay. Retry runs the turn again.", actions: [{ id: "rerun", label: "Retry", style: "primary" }], expires: "next_send", payload: {} });
     }
-    // `interpret` read an action whose params name nothing in the world that fits (DESIGN §9.4): the
-    // turn ran as plain roleplay, or, for a queued action, the queue ended before it; a decline chip
-    // says why. As after a declined change (§9.5), the next reply is told it didn't happen, and Remove
-    // it or Accept rewords that note. Both are about the typed message, so a later read of this reply
-    // keeps them (`prepareRead`).
-    const unfit = input.kind === "continue" ? undefined : bridge.unfitOf(userText);
-    if (unfit) {
-      const id = unfitId(input.messageId, input.swipeId);
-      const what = `the player's "${unfit.label}"`;
-      const notes = { accept: narratedNote(what, unfit.reason, "accept"), remove: narratedNote(what, unfit.reason, "remove") };
-      const kept = (await this.outcomeNotes.list(input.chatId, input.userId)).filter((n) => n.id !== id);
-      await this.outcomeNotes.save(input.chatId, input.userId, [...kept, { id, messageId: input.messageId, text: notes.accept }]);
-      const reason = `${unfit.reason.charAt(0).toUpperCase()}${unfit.reason.slice(1)}`;
-      const before = bridge.intentOf(userText) !== null ? "It didn't play, nor anything after it" : "Your message played as plain roleplay";
-      stored.push({ id, kind: "decline", ...base, label: `${unfit.label}: couldn't`, detail: `${reason}. ${before}, and the next reply is told it didn't happen.`, actions: [{ id: "remove", label: "Remove it" }, { id: "accept", label: "Accept" }], expires: "next_send", payload: { reason: unfit.reason, notes } });
+    // `interpret` dropped actions whose params name nothing in the world that fits (DESIGN §9.4): the
+    // rest of the message played without them, or, with none left, the turn ran as plain roleplay; a
+    // decline chip for each says why, about that action alone. As after a declined change (§9.5), the
+    // next reply is told it didn't happen, and Remove it or Accept rewords that note. Both are about
+    // the typed message, so a later read of this reply keeps them (`prepareRead`).
+    const unfit = (input.kind === "continue" ? [] : bridge.unfitOf(userText)).map((u, i) => {
+      const what = `the player's "${u.label}"`;
+      return { ...u, id: unfitId(input.messageId, input.swipeId, i), notes: { accept: narratedNote(what, u.reason, "accept"), remove: narratedNote(what, u.reason, "remove") } };
+    });
+    if (unfit.length > 0) {
+      const kept = (await this.outcomeNotes.list(input.chatId, input.userId)).filter((n) => !isUnfitId(n.id, input.messageId, input.swipeId));
+      await this.outcomeNotes.save(input.chatId, input.userId, [...kept, ...unfit.map((u) => ({ id: u.id, messageId: input.messageId, text: u.notes.accept }))]);
+      const before = bridge.intentOf(userText) !== null ? "It didn't play" : "Your message played as plain roleplay";
+      for (const u of unfit) {
+        const reason = `${u.reason.charAt(0).toUpperCase()}${u.reason.slice(1)}`;
+        stored.push({ id: u.id, kind: "decline", ...base, label: `${u.label}: couldn't`, detail: `${reason}. ${before}, and the next reply is told it didn't happen.`, actions: [{ id: "remove", label: "Remove it" }, { id: "accept", label: "Accept" }], expires: "next_send", payload: { reason: u.reason, notes: u.notes } });
+      }
     }
     await this.ageNotes(input.chatId, input.userId, input.messageId);
     const headState = input.core.fold(input.observed).state;
@@ -2306,9 +2305,15 @@ function chipNamesHidden(reg: Registry, world: WorldDoc, state: Readonly<WorldSt
   return namesHidden(reg, world, state, text) || namesAny(text, [], secretLoreNames(reg, world, state));
 }
 
-/** A swipe's decline chip, and its Outcome note, for a typed action that named nothing that fits. */
-function unfitId(messageId: MessageId, swipeId: number): string {
-  return `unfit:${messageId}:${swipeId}`;
+/** A swipe's decline chip, and its Outcome note, for the `index`th typed action dropped for naming nothing that fits. */
+function unfitId(messageId: MessageId, swipeId: number, index: number): string {
+  return index === 0 ? `unfit:${messageId}:${swipeId}` : `unfit:${messageId}:${swipeId}:${index}`;
+}
+
+/** Whether a chip's or a note's id is one of a swipe's dropped-action declines (`unfitId`). */
+function isUnfitId(id: string, messageId: MessageId, swipeId: number): boolean {
+  const head = unfitId(messageId, swipeId, 0);
+  return id === head || id.startsWith(`${head}:`);
 }
 
 /** What a model writes for "nothing" ("none", "null", "N/A"), compared as `offeredNext` compares words. */
@@ -2379,23 +2384,25 @@ function playable(action: ActionDef, params: JsonObject, world: WorldDoc, said: 
  * Why `interpret`'s action couldn't apply (DESIGN §9.4), for its decline chip and the next reply's
  * note: what its param named, as the player typed it ("Rena isn't anyone in this world"), a real
  * thing of another kind by its name ("Bluebird Coffee isn't a person"), or that it has none. A name
- * the player didn't type, one the POV can't see, one that leads to a secret or carries an unrevealed
- * secret (`secrets`, less the player's own words), or anything too long for a name is never
- * repeated: "it names no one you know".
+ * the player didn't type, one the POV may not know (`mayKnow`), one that leads to a secret or carries
+ * an unrevealed secret (`secrets`, less the player's own words), or anything too long for a name is
+ * never repeated: "it names no one you know". A thing the POV can't see reads as one nothing has.
  */
-function unfitReason(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, unfit: UnfitRef, text: string, secrets: readonly string[]): string {
+function unfitReason(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, unfit: UnfitRef, text: string, secrets: readonly string[], mayKnow: (id: EntityId) => boolean): string {
   const { def, value } = unfit;
   const place = def.ref === "place";
   const person = !place && def.ref !== undefined && kindIs(reg, world, def.ref, "person");
   if (value === undefined || value === null || value === "") return place ? "it needs a place" : person ? "it needs someone" : "it needs something";
   const id = typeof value === "string" ? value : "";
-  const entity = own(state.entities, id);
+  // A hidden thing's id reads as any id nothing has, so the reason can't tell the player it exists.
+  const real = own(state.entities, id);
+  const entity = real && canSeeEntity(reg, world, state, world.pov, id) ? real : undefined;
   const placeDef = entity ? undefined : own(world.places, id);
-  // A real thing reads by its name where the POV can see it; anything else only as the player typed it
-  // ("Rena" for a model's "rena"), an id's underscores read as spaces.
+  // A real thing reads by its name where the POV may know it; anything else only as the player typed
+  // it ("Rena" for a model's "rena"), an id's underscores read as spaces.
   const given = id.replace(/_+/g, " ").trim();
   const typed = given === "" ? undefined : new RegExp(given.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i").exec(text)?.[0];
-  const name = entity ? (canSeeEntity(reg, world, state, world.pov, id) ? entity.name : "") : placeDef ? (canSeePlace(reg, world, state, world.pov, id) ? placeDef.name : "") : (typed ?? "");
+  const name = entity ? (mayKnow(id) ? entity.name : "") : placeDef ? (canSeePlace(reg, world, state, world.pov, id) ? placeDef.name : "") : (typed ?? "");
   if (name === "" || name.length > 80 || findLeaks(name, secrets).length > 0 || chipNamesHidden(reg, world, state, name)) return place ? "it names no place you know" : person ? "it names no one you know" : "it names nothing you know";
   // Only a param of one kind refuses a real thing, for being another.
   if ((entity || placeDef) && def.ref !== undefined) {
