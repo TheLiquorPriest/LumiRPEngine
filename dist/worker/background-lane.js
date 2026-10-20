@@ -4633,6 +4633,404 @@ var lifeChannel = {
   }
 };
 
+// src/engine/player-events.ts
+var bookkeepingTypes = null;
+function bookkeeping(type) {
+  bookkeepingTypes ??= {
+    clock: true,
+    timelapse: true,
+    materialize: true,
+    [ENGINE_EVENTS.fired]: true,
+    [ENGINE_EVENTS.caught]: true,
+    [ENGINE_EVENTS.cursor]: true,
+    [ENGINE_EVENTS.choice]: true,
+    [ENGINE_EVENTS.attempt]: true,
+    [ENGINE_EVENTS.pause]: true,
+    [ENGINE_EVENTS.beat]: true,
+    [ENGINE_EVENTS.observed]: true,
+    [ENGINE_EVENTS.adjudged]: true,
+    "castlife.decision": true,
+    "castlife.override": true,
+    "economy.price": true,
+    "economy.txn": true,
+    "economy.flow_run": true,
+    "economy.sale": true,
+    "economy.remit": true,
+    "economy.invoice_paid": true,
+    "economy.payout": true,
+    "economy.payslip": true,
+    "economy.commission": true,
+    "economy.estimated_tax": true,
+    "economy.quote": true,
+    "economy.mint": true,
+    "economy.lots": true,
+    "economy.income": true,
+    "economy.exercise": true,
+    "economy.dispose": true,
+    "economy.acquire": true,
+    "economy.stake_route": true,
+    "story.flag": true,
+    "combat.turn": true,
+    "combat.spend": true,
+    "combat.decision": true
+  };
+  return hasOwn3(bookkeepingTypes, type);
+}
+function postLine(world, state, pov, memo, lines) {
+  const mine = lines.filter((l) => heldBy(state.entities, l.account, pov));
+  const label = memo !== "" ? memo : "Money moved";
+  if (mine.length === 0)
+    return memo !== "" ? memo : null;
+  const money = (cents) => formatMoney(Math.abs(cents), world.currency);
+  const name = (id) => own(state.entities, id)?.name ?? id;
+  const out = mine.filter((l) => l.amount < 0);
+  const into = mine.filter((l) => l.amount > 0);
+  const from = out[0];
+  const to = into[0];
+  if (out.length === 1 && into.length === 1 && from && to)
+    return `${label}: ${money(to.amount)} from ${name(from.account)} to ${name(to.account)}`;
+  const only = mine[0];
+  if (mine.length === 1 && only)
+    return `${label}: ${only.amount < 0 ? "\u2212" : "+"}${money(only.amount)} (${name(only.account)})`;
+  const net = mine.reduce((a, l) => a + l.amount, 0);
+  return net === 0 ? label : `${label}: ${net < 0 ? "\u2212" : "+"}${money(net)}`;
+}
+var POV_ONLY = new Set(["castlife.need", "economy.anchor"]);
+var INTERNAL_FIELD = /(^_|_until$|_at$|_since$|_seed$|_cursor$)/;
+var HOLD_DEPTH = 8;
+function hasOwn3(o, key) {
+  return Object.prototype.hasOwnProperty.call(o, key);
+}
+function metBy(state, pov, id) {
+  if (id === pov)
+    return true;
+  const e = hasOwn3(state.entities, id) ? own(state.entities, id) : undefined;
+  const p = own(state.entities, pov);
+  if (!e || !p)
+    return false;
+  if (heldBy(state.entities, id, pov) || knows(state, pov, id))
+    return true;
+  let holder = id;
+  for (let i = 0;holder && i < HOLD_DEPTH; i++) {
+    holder = own(state.entities, holder)?.relations.find((r) => r.type === "in")?.to;
+    if (holder === pov)
+      return true;
+  }
+  if (p.relations.some((r) => r.to === id) || e.relations.some((r) => r.to === pov))
+    return true;
+  return typeof e.fields.place === "string" && e.fields.place === p.fields.place;
+}
+function povRegions(world, state, pov) {
+  const out = [];
+  const start = own(state.entities, pov)?.fields.place;
+  let place = typeof start === "string" ? start : undefined;
+  for (let i = 0;place !== undefined && i < HOLD_DEPTH; i++) {
+    const def = own(world.places, place);
+    if (!def)
+      break;
+    if (typeof def.fields.region === "string")
+      out.push(def.fields.region);
+    place = def.parent;
+  }
+  return out;
+}
+function playerKnows(reg, world, state, pov, id) {
+  if (!canSeeEntity(reg, world, state, pov, id))
+    return false;
+  return metBy(state, pov, id) || povRegions(world, state, pov).includes(id);
+}
+function povMayKnow(reg, world, state, id) {
+  const pov = world.pov;
+  if (id === pov || playerKnows(reg, world, state, pov, id))
+    return true;
+  if (!canSeeEntity(reg, world, state, pov, id))
+    return false;
+  if (heldBy(state.entities, id, pov))
+    return true;
+  const here = placeOfEntity(state, pov);
+  return here === undefined || placeOfEntity(state, id) === here;
+}
+function trackShown(reg, world, state, pov, id) {
+  const t = own(world.tracks, id);
+  if (!t)
+    return false;
+  const visibility = visibilityOf(t.visibility);
+  if (visibility === "public")
+    return true;
+  if ((own(readEngineSlice(state).revealed, id) ?? []).length > 0)
+    return true;
+  return visibility === "known_by" && trackKnown(reg, world, state, pov, t);
+}
+function trackKeepsSecret(reg, world, state, pov, id) {
+  const t = own(world.tracks, id);
+  if (!t)
+    return false;
+  const revealed = own(readEngineSlice(state).revealed, id) ?? [];
+  return Object.entries(t.stages).some(([stage, s]) => !!s.truth && !revealed.includes(stage)) || !trackShown(reg, world, state, pov, id);
+}
+function refsOf(world, state, e) {
+  const out = [];
+  const add = (v) => {
+    if (typeof v !== "string" || v === "")
+      return;
+    if (hasOwn3(state.entities, v))
+      out.push({ kind: "entity", id: v });
+    else if (hasOwn3(world.places, v))
+      out.push({ kind: "place", id: v });
+    else if (hasOwn3(world.tracks, v))
+      out.push({ kind: "track", id: v });
+  };
+  const visit = (v, depth) => {
+    if (depth > 4)
+      return;
+    if (typeof v === "string")
+      add(v);
+    else if (Array.isArray(v))
+      v.forEach((x) => visit(x, depth + 1));
+    else if (isRecord(v))
+      Object.values(v).forEach((x) => visit(x, depth + 1));
+  };
+  switch (e.type) {
+    case "set":
+      add(e.entity);
+      visit(e.value, 0);
+      break;
+    case "add":
+      add(e.entity);
+      break;
+    case "link":
+    case "unlink":
+      add(e.from);
+      add(e.to);
+      break;
+    case "spawn":
+      add(e.entity.id);
+      add(e.entity.fields.place);
+      break;
+    case "stage":
+      add(e.track);
+      break;
+    case "post":
+      break;
+    default:
+      if ("data" in e)
+        visit(e.data, 0);
+  }
+  return out;
+}
+function playerEventVisible(reg, world, state, pov, e) {
+  if (bookkeeping(e.type))
+    return false;
+  if (!eventVisible(reg, world, state, pov, e))
+    return false;
+  if ("data" in e && isRecord(e.data)) {
+    if (e.data.npc === true)
+      return false;
+    if (POV_ONLY.has(e.type) && (e.data.agent ?? e.data.entity ?? e.data.who) !== pov)
+      return false;
+  }
+  if (e.type === "set" && e.entity !== pov && (e.field === "place" || e.field === "activity" || [...Object.values(world.schedules), ...reg.schedules].some((s) => s.target === e.field)) && kindIs(reg, world, own(state.entities, e.entity)?.kind ?? "", "person"))
+    return false;
+  if (e.type === "stage" && !trackShown(reg, world, state, pov, e.track))
+    return false;
+  for (const r of refsOf(world, state, e)) {
+    if (r.kind === "entity" && !playerKnows(reg, world, state, pov, r.id))
+      return false;
+    if (r.kind === "place" && !canSeePlace(reg, world, state, pov, r.id))
+      return false;
+    if (r.kind === "track" && !trackShown(reg, world, state, pov, r.id))
+      return false;
+  }
+  return true;
+}
+function nameOf(world, state, pov, id, you = "You") {
+  if (id === pov)
+    return you;
+  return own(state.entities, id)?.name ?? own(world.places, id)?.name ?? own(world.tracks, id)?.label ?? id;
+}
+function humanize(field) {
+  return field.replace(/_/g, " ");
+}
+function valueText(reg, world, state, pov, kind, field, v, you) {
+  if (v === null)
+    return "cleared";
+  if (typeof v === "boolean")
+    return v ? "yes" : "no";
+  if (typeof v === "string") {
+    if (hasOwn3(state.entities, v) || hasOwn3(world.places, v))
+      return nameOf(world, state, pov, v, you);
+    if (fieldDef(reg, world, kind, field)?.type === "enum" || /^[a-z0-9]+(?:_[a-z0-9]+)+$/.test(v))
+      return humanize(v);
+    return v.length > 80 ? `${v.slice(0, 79)}\u2026` : v;
+  }
+  if (typeof v === "number") {
+    const def = fieldDef(reg, world, kind, field);
+    if (def?.type === "money")
+      return formatMoney(v, world.currency);
+    const band = def?.bands ? bandOf(def.bands, v) : null;
+    return band ? band.label : String(Math.round(v * 100) / 100);
+  }
+  return null;
+}
+function relationLine(rel, from, to, linked) {
+  switch (rel) {
+    case "knows":
+      return linked ? `${from} now know ${to}` : `${from} no longer know ${to}`;
+    case "in":
+      return linked ? `${from} \u2192 ${to}` : `${from} out of ${to}`;
+    case "uses":
+      return linked ? `${from} borrows ${to}` : `${from} gives back ${to}`;
+    case "owns":
+      return linked ? `${from} owns ${to}` : `${from} no longer owns ${to}`;
+    default:
+      return linked ? `${from} ${humanize(rel)} ${to}` : `${from} no longer ${humanize(rel)} ${to}`;
+  }
+}
+function relabel(line, refs, world, state, pov, you) {
+  let out = line;
+  const ids = [...new Set(refs.map((r) => r.id))].sort((a, b) => b.length - a.length);
+  for (const id of ids) {
+    const name = nameOf(world, state, pov, id, you);
+    if (name.toLowerCase() === id.toLowerCase())
+      continue;
+    out = out.replace(new RegExp(`(?<![\\w.])${id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\w])`, "g"), name);
+  }
+  return out;
+}
+function hiddenTrackLabels(reg, world, state, pov) {
+  const out = [];
+  for (const [id, t] of Object.entries(world.tracks)) {
+    if (trackShown(reg, world, state, pov, id))
+      continue;
+    out.push(t.label);
+    for (const s of Object.values(t.stages))
+      if (s.label.length >= 6)
+        out.push(s.label);
+  }
+  return out;
+}
+function hiddenEntityNames(reg, world, state, pov) {
+  const out = { people: [], things: [] };
+  for (const [id, e] of Object.entries(state.entities))
+    if (!canSeeEntity(reg, world, state, pov, id))
+      (kindIs(reg, world, e.kind, "person") ? out.people : out.things).push(e.name);
+  return out;
+}
+function hiddenNames(reg, world, state, pov) {
+  const { people, things } = hiddenEntityNames(reg, world, state, pov);
+  return [...hiddenTrackLabels(reg, world, state, pov), ...people, ...things];
+}
+function hiddenNameCheck(reg, world, state, pov) {
+  return passMemo([state, world, reg], `visibility.hidden_names\x00${pov}`, () => {
+    const hidden = hiddenEntityNames(reg, world, state, pov);
+    const labels = [...hidden.things, ...unseenPlaceNames(reg, world, state, pov), ...hiddenTrackLabels(reg, world, state, pov), ...secretLoreTitles(reg, world, state)];
+    return (text) => namesAny(text, hidden.people, labels);
+  });
+}
+function rawLine(reg, world, state, pov, e, player, you) {
+  const name = (id) => nameOf(world, state, pov, id, you);
+  switch (e.type) {
+    case "set": {
+      if (INTERNAL_FIELD.test(e.field))
+        return null;
+      if (e.field === GONE_FIELD)
+        return `${name(e.entity)} ${e.value === true ? "is gone" : "is back"}`;
+      const kind = own(state.entities, e.entity)?.kind ?? "";
+      if (e.field === "place" && typeof e.value === "string")
+        return `${name(e.entity)} \u2192 ${name(e.value)}`;
+      const ctx = player && e.field === "activity" && typeof e.value === "string" ? reg.context(world, state) : null;
+      const shownActivity = ctx ? optionalQuery(ctx, "castlife.activity") : null;
+      const value = ctx && shownActivity && typeof e.value === "string" ? shownActivity(ctx, e.entity, e.value) : e.value;
+      const v = valueText(reg, world, state, pov, kind, e.field, value, you);
+      if (v === null)
+        return null;
+      if (e.field === "activity")
+        return `${name(e.entity)}: ${v}`;
+      return `${name(e.entity)}: ${fieldDef(reg, world, kind, e.field)?.label ?? humanize(e.field)} ${v}`;
+    }
+    case "add": {
+      if (INTERNAL_FIELD.test(e.field))
+        return null;
+      const kind = own(state.entities, e.entity)?.kind ?? "";
+      const def = fieldDef(reg, world, kind, e.field);
+      const amount = def?.type === "money" ? formatMoney(Math.abs(e.delta), world.currency) : String(Math.round(Math.abs(e.delta) * 100) / 100);
+      return `${name(e.entity)}: ${def?.label ?? humanize(e.field)} ${e.delta < 0 ? "\u2212" : "+"}${amount}`;
+    }
+    case "link":
+    case "unlink":
+      return relationLine(e.rel, name(e.from), name(e.to), e.type === "link");
+    case "spawn":
+      return `${e.entity.name} appears`;
+    case "stage": {
+      const t = own(world.tracks, e.track);
+      return t ? `${t.label}: ${own(t.stages, e.to)?.label ?? e.to}` : null;
+    }
+    case "post":
+      return postLine(world, state, pov, e.memo, e.lines);
+    default: {
+      const def = reg.get(e.type);
+      if (!def)
+        return null;
+      try {
+        const line = def.describe(e, reg.context(world, state), player ? pov : undefined);
+        return line ? relabel(line, refsOf(world, state, e), world, state, pov, you) : null;
+      } catch {
+        return null;
+      }
+    }
+  }
+}
+function lineRank(reg, world, state, pov, e) {
+  if (e.type === "post" || e.type === "stage" || e.type.startsWith("economy."))
+    return 0;
+  if ((e.type === "set" || e.type === "add") && fieldDef(reg, world, own(state.entities, e.entity)?.kind ?? "", e.field)?.type === "money")
+    return 0;
+  if (e.type === ENGINE_EVENTS.signal)
+    return "data" in e && (e.data.class === "bill" || e.data.class === "decline") ? 0 : 1;
+  if (e.type === "set" && (e.field === "activity" || e.field === "place" && e.entity !== pov))
+    return 3;
+  if (e.type.startsWith("castlife."))
+    return 3;
+  return 2;
+}
+function playerLines(reg, world, state, pov, events, max = 8) {
+  return wordedLines(reg, world, state, pov, events, max, true);
+}
+function authorLines(reg, world, state, events, max) {
+  return wordedLines(reg, world, state, world.pov, events, max, false);
+}
+function wordedLines(reg, world, state, pov, events, max, player, you = "You") {
+  const lines = [];
+  let secrets = null;
+  const lastSet = new Map;
+  events.forEach((e, i) => {
+    if (e.type === "set")
+      lastSet.set(`${e.entity}\x00${e.field}`, i);
+  });
+  const ctx = player ? reg.context(world, state) : null;
+  const hpLine = ctx ? optionalQuery(ctx, "combat.hp_line") : null;
+  for (const [i, e] of events.entries()) {
+    if (e.type === "set" && lastSet.get(`${e.entity}\x00${e.field}`) !== i)
+      continue;
+    if (bookkeeping(e.type))
+      continue;
+    if (player && !playerEventVisible(reg, world, state, pov, e))
+      continue;
+    const banded = ctx && hpLine ? hpLine(ctx, e) : undefined;
+    const text = banded === undefined ? rawLine(reg, world, state, pov, e, player, you) : banded;
+    if (!text || lines.some((l) => l.text === text))
+      continue;
+    if (player) {
+      secrets ??= [...unrevealedSecrets(reg, world, state), ...hiddenNames(reg, world, state, pov)];
+      if (findLeaks(text, secrets).length > 0)
+        continue;
+    }
+    lines.push({ at: i, rank: lineRank(reg, world, state, pov, e), text });
+  }
+  const kept = lines.length <= max ? lines : [...lines].sort((a, b) => a.rank - b.rank || a.at - b.at).slice(0, Math.max(0, max)).sort((a, b) => a.at - b.at);
+  return kept.map((l) => l.text);
+}
+
 // src/engine/narration-channels.ts
 var SPAWNED_BY_NARRATION = "narration";
 var NAME_MAX = 60;
@@ -4644,7 +5042,7 @@ function text(v) {
 function reject(code, reason) {
   return { code, reason };
 }
-function hasOwn3(o, key) {
+function hasOwn4(o, key) {
   return Object.prototype.hasOwnProperty.call(o, key);
 }
 function isPublic(v) {
@@ -4653,40 +5051,52 @@ function isPublic(v) {
 function knowsAlready(ctx, who, id) {
   return own(ctx.state.entities, who)?.relations.some((r) => r.type === "knows" && r.to === id) ?? false;
 }
+function placeKept(ctx, id) {
+  const v = own(ctx.world.places, id)?.visibility;
+  return !isPublic(v) && v !== "known_by" && v !== "discoverable" && !canSeePlace(ctx.registry, ctx.world, ctx.state, ctx.world.pov, id);
+}
 function placeNamed(ctx, fact) {
   const lower = fact.toLowerCase();
-  const ids = Object.keys(ctx.world.places).filter((id) => own(ctx.world.places, id)?.name.trim().toLowerCase() === lower);
+  const ids = Object.keys(ctx.world.places).filter((id) => own(ctx.world.places, id)?.name.trim().toLowerCase() === lower && !placeKept(ctx, id));
   return ids.length === 1 ? ids[0] ?? null : null;
 }
 function factOf(ctx, fact) {
-  if (hasOwn3(ctx.state.entities, fact) || hasOwn3(ctx.world.places, fact))
+  if (hasOwn4(ctx.state.entities, fact) || hasOwn4(ctx.world.places, fact))
     return fact;
   return placeNamed(ctx, fact) ?? fact;
 }
+function noSuchFact(said, gm) {
+  return { ...reject("unknown_fact", `no world fact ${said.replace(/_/g, " ").trim() || "nothing"}`), ...gm !== undefined ? { gm } : {} };
+}
 function unlearnable(ctx, fact) {
-  const { world, state } = ctx;
+  const { world, state, registry } = ctx;
   const pov = world.pov;
   if (fact === "")
     return reject("bad_proposal", "knows needs a fact");
   if (fact === pov)
     return reject("already_known", "everyone knows themselves");
-  if (hasOwn3(state.entities, fact)) {
-    if (!isPublic(own(world.entities, fact)?.visibility ?? own(state.entities, fact)?.fields.visibility))
-      return reject("not_public", "only public facts are read from a reply");
+  if (hasOwn4(state.entities, fact)) {
+    if (!isPublic(own(world.entities, fact)?.visibility ?? own(state.entities, fact)?.fields.visibility)) {
+      return povMayKnow(registry, world, state, fact) ? reject("not_public", "only public facts are read from a reply") : noSuchFact(fact, `${labelOf(ctx, fact)} isn't public, and the POV doesn't know them`);
+    }
     return knowsAlready(ctx, pov, fact) ? reject("already_known", `already knows ${labelOf(ctx, fact)}`) : null;
   }
-  const place = hasOwn3(world.places, fact) ? own(world.places, fact) : undefined;
+  const place = hasOwn4(world.places, fact) ? own(world.places, fact) : undefined;
   if (place) {
+    if (placeKept(ctx, fact))
+      return noSuchFact(fact, `${place.name} is secret`);
     if (place.visibility !== "known_by" && place.visibility !== "discoverable")
       return isPublic(place.visibility) ? reject("already_known", `${place.name} is public`) : reject("not_public", "only public facts are read from a reply");
-    return canSeePlace(ctx.registry, world, state, pov, fact) ? reject("already_known", `already knows ${place.name}`) : null;
+    return canSeePlace(registry, world, state, pov, fact) ? reject("already_known", `already knows ${place.name}`) : null;
   }
-  const lore = hasOwn3(world.lore, fact) ? own(world.lore, fact) : undefined;
+  const lore = hasOwn4(world.lore, fact) ? own(world.lore, fact) : undefined;
+  if (lore && loreIsSecret(lore) && !loreGateReader(registry, world, state)(lore))
+    return noSuchFact(fact, "secret lore whose gate doesn't hold");
   if (lore && (loreIsSecret(lore) || lore.gate !== undefined))
     return reject("not_public", "secret lore is learned through its gate, never from a reply");
-  if (hasOwn3(world.tracks, fact))
-    return reject("not_public", "tracks advance through their stages, never from a reply");
-  return reject("unknown_fact", `no world fact ${labelOf(ctx, fact)}`);
+  if (hasOwn4(world.tracks, fact))
+    return trackShown(registry, world, state, pov, fact) ? reject("not_public", "tracks advance through their stages, never from a reply") : noSuchFact(fact, "a track the POV may not know of");
+  return noSuchFact(fact);
 }
 var knowsChannel = {
   type: "knows",
@@ -4703,8 +5113,8 @@ function slug(name) {
   const s = name.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 40);
   return s !== "" ? s : hashParts("spawn", name).slice(0, 10);
 }
-function spawnId(name) {
-  return `npc_${slug(name)}`;
+function spawnId(ctx, name) {
+  return `npc_${slug(name)}_${hashParts("spawn", name, spawnedCount(ctx)).slice(0, 8)}`;
 }
 function spawnedCount(ctx) {
   let n = 0;
@@ -4721,7 +5131,7 @@ var spawnChannel = {
   boundField: "spawn",
   validate(p, ctx) {
     const kind = text(p.kind);
-    if (kind === "" || !(hasOwn3(ctx.world.kinds, kind) || ctx.registry.kinds.has(kind)))
+    if (kind === "" || !(hasOwn4(ctx.world.kinds, kind) || ctx.registry.kinds.has(kind)))
       return reject("missing_kind", `no kind ${kind}`);
     if (!kindIs(ctx.registry, ctx.world, kind, "person"))
       return reject("not_a_character", "a reply introduces characters only");
@@ -4729,22 +5139,28 @@ var spawnChannel = {
     if (name === "" || name.length > NAME_MAX || !NAME_OK.test(name))
       return reject("bad_name", "a new character needs a plain name");
     const place = placeFor(p, ctx);
-    const def = hasOwn3(ctx.world.places, place) ? own(ctx.world.places, place) : undefined;
+    const def = hasOwn4(ctx.world.places, place) ? own(ctx.world.places, place) : undefined;
     if (!def)
       return reject("missing_place", `no place ${place}`);
     if (def.visibility === "secret")
       return reject("not_public", "a reply can't place someone somewhere secret");
     const lower = name.toLowerCase();
-    if (hasOwn3(ctx.state.entities, spawnId(name)) || Object.values(ctx.state.entities).some((e) => e.name.trim().toLowerCase() === lower))
+    const named = Object.keys(ctx.state.entities).filter((id) => own(ctx.state.entities, id)?.name.trim().toLowerCase() === lower);
+    if (named.some((id) => povMayKnow(ctx.registry, ctx.world, ctx.state, id)))
       return reject("duplicate", `${name} already exists`);
     const cap = spawnCapOf(ctx.world);
     if (spawnedCount(ctx) >= cap)
       return reject("spawn_cap", cap === 0 ? "this world lets no reply introduce characters" : `replies have introduced ${cap} characters already`);
+    if (named.length > 0)
+      return { code: "duplicate", reason: "that newcomer didn't appear", gm: `${name} is already ${named.join(", ")}, whom the POV may not know`, unseen: true };
+    const id = spawnId(ctx, name);
+    if (hasOwn4(ctx.state.entities, id))
+      return { code: "duplicate", reason: "that newcomer didn't appear", gm: `the id ${id} is taken`, unseen: true };
     return null;
   },
   toEffects(p, ctx) {
     const name = text(p.name);
-    const id = spawnId(name);
+    const id = spawnId(ctx, name);
     const role = text(p.role).slice(0, ROLE_MAX);
     const fields = { spawned: SPAWNED_BY_NARRATION, ...role !== "" ? { role } : {} };
     return [
@@ -5284,389 +5700,6 @@ function dropTouches(state) {
   delete slice[SLICE3];
   if (Object.keys(slice).length === 0)
     delete state.packs[PACK3];
-}
-
-// src/engine/player-events.ts
-var BOOKKEEPING = new Set([
-  "clock",
-  "timelapse",
-  "materialize",
-  ENGINE_EVENTS.fired,
-  ENGINE_EVENTS.caught,
-  ENGINE_EVENTS.cursor,
-  ENGINE_EVENTS.choice,
-  ENGINE_EVENTS.attempt,
-  ENGINE_EVENTS.pause,
-  ENGINE_EVENTS.beat,
-  ENGINE_EVENTS.observed,
-  ENGINE_EVENTS.adjudged,
-  "castlife.decision",
-  "castlife.override",
-  "economy.price",
-  "economy.txn",
-  "economy.flow_run",
-  "economy.sale",
-  "economy.remit",
-  "economy.invoice_paid",
-  "economy.payout",
-  "economy.payslip",
-  "economy.commission",
-  "economy.estimated_tax",
-  "economy.quote",
-  "economy.mint",
-  "economy.lots",
-  "economy.income",
-  "economy.exercise",
-  "economy.dispose",
-  "economy.acquire",
-  "economy.stake_route",
-  "story.flag",
-  "combat.turn",
-  "combat.spend",
-  "combat.decision"
-]);
-function postLine(world, state, pov, memo, lines) {
-  const mine = lines.filter((l) => heldBy(state.entities, l.account, pov));
-  const label = memo !== "" ? memo : "Money moved";
-  if (mine.length === 0)
-    return memo !== "" ? memo : null;
-  const money = (cents) => formatMoney(Math.abs(cents), world.currency);
-  const name = (id) => own(state.entities, id)?.name ?? id;
-  const out = mine.filter((l) => l.amount < 0);
-  const into = mine.filter((l) => l.amount > 0);
-  const from = out[0];
-  const to = into[0];
-  if (out.length === 1 && into.length === 1 && from && to)
-    return `${label}: ${money(to.amount)} from ${name(from.account)} to ${name(to.account)}`;
-  const only = mine[0];
-  if (mine.length === 1 && only)
-    return `${label}: ${only.amount < 0 ? "\u2212" : "+"}${money(only.amount)} (${name(only.account)})`;
-  const net = mine.reduce((a, l) => a + l.amount, 0);
-  return net === 0 ? label : `${label}: ${net < 0 ? "\u2212" : "+"}${money(net)}`;
-}
-var POV_ONLY = new Set(["castlife.need", "economy.anchor"]);
-var INTERNAL_FIELD = /(^_|_until$|_at$|_since$|_seed$|_cursor$)/;
-var HOLD_DEPTH = 8;
-function hasOwn4(o, key) {
-  return Object.prototype.hasOwnProperty.call(o, key);
-}
-function metBy(state, pov, id) {
-  if (id === pov)
-    return true;
-  const e = hasOwn4(state.entities, id) ? own(state.entities, id) : undefined;
-  const p = own(state.entities, pov);
-  if (!e || !p)
-    return false;
-  if (heldBy(state.entities, id, pov) || knows(state, pov, id))
-    return true;
-  let holder = id;
-  for (let i = 0;holder && i < HOLD_DEPTH; i++) {
-    holder = own(state.entities, holder)?.relations.find((r) => r.type === "in")?.to;
-    if (holder === pov)
-      return true;
-  }
-  if (p.relations.some((r) => r.to === id) || e.relations.some((r) => r.to === pov))
-    return true;
-  return typeof e.fields.place === "string" && e.fields.place === p.fields.place;
-}
-function povRegions(world, state, pov) {
-  const out = [];
-  const start = own(state.entities, pov)?.fields.place;
-  let place = typeof start === "string" ? start : undefined;
-  for (let i = 0;place !== undefined && i < HOLD_DEPTH; i++) {
-    const def = own(world.places, place);
-    if (!def)
-      break;
-    if (typeof def.fields.region === "string")
-      out.push(def.fields.region);
-    place = def.parent;
-  }
-  return out;
-}
-function playerKnows(reg, world, state, pov, id) {
-  if (!canSeeEntity(reg, world, state, pov, id))
-    return false;
-  return metBy(state, pov, id) || povRegions(world, state, pov).includes(id);
-}
-function trackShown(reg, world, state, pov, id) {
-  const t = own(world.tracks, id);
-  if (!t)
-    return false;
-  const visibility = visibilityOf(t.visibility);
-  if (visibility === "public")
-    return true;
-  if ((own(readEngineSlice(state).revealed, id) ?? []).length > 0)
-    return true;
-  return visibility === "known_by" && trackKnown(reg, world, state, pov, t);
-}
-function trackKeepsSecret(reg, world, state, pov, id) {
-  const t = own(world.tracks, id);
-  if (!t)
-    return false;
-  const revealed = own(readEngineSlice(state).revealed, id) ?? [];
-  return Object.entries(t.stages).some(([stage, s]) => !!s.truth && !revealed.includes(stage)) || !trackShown(reg, world, state, pov, id);
-}
-function refsOf(world, state, e) {
-  const out = [];
-  const add = (v) => {
-    if (typeof v !== "string" || v === "")
-      return;
-    if (hasOwn4(state.entities, v))
-      out.push({ kind: "entity", id: v });
-    else if (hasOwn4(world.places, v))
-      out.push({ kind: "place", id: v });
-    else if (hasOwn4(world.tracks, v))
-      out.push({ kind: "track", id: v });
-  };
-  const visit = (v, depth) => {
-    if (depth > 4)
-      return;
-    if (typeof v === "string")
-      add(v);
-    else if (Array.isArray(v))
-      v.forEach((x) => visit(x, depth + 1));
-    else if (isRecord(v))
-      Object.values(v).forEach((x) => visit(x, depth + 1));
-  };
-  switch (e.type) {
-    case "set":
-      add(e.entity);
-      visit(e.value, 0);
-      break;
-    case "add":
-      add(e.entity);
-      break;
-    case "link":
-    case "unlink":
-      add(e.from);
-      add(e.to);
-      break;
-    case "spawn":
-      add(e.entity.id);
-      add(e.entity.fields.place);
-      break;
-    case "stage":
-      add(e.track);
-      break;
-    case "post":
-      break;
-    default:
-      if ("data" in e)
-        visit(e.data, 0);
-  }
-  return out;
-}
-function playerEventVisible(reg, world, state, pov, e) {
-  if (BOOKKEEPING.has(e.type))
-    return false;
-  if (!eventVisible(reg, world, state, pov, e))
-    return false;
-  if ("data" in e && isRecord(e.data)) {
-    if (e.data.npc === true)
-      return false;
-    if (POV_ONLY.has(e.type) && (e.data.agent ?? e.data.entity ?? e.data.who) !== pov)
-      return false;
-  }
-  if (e.type === "set" && e.entity !== pov && (e.field === "place" || e.field === "activity" || [...Object.values(world.schedules), ...reg.schedules].some((s) => s.target === e.field)) && kindIs(reg, world, own(state.entities, e.entity)?.kind ?? "", "person"))
-    return false;
-  if (e.type === "stage" && !trackShown(reg, world, state, pov, e.track))
-    return false;
-  for (const r of refsOf(world, state, e)) {
-    if (r.kind === "entity" && !playerKnows(reg, world, state, pov, r.id))
-      return false;
-    if (r.kind === "place" && !canSeePlace(reg, world, state, pov, r.id))
-      return false;
-    if (r.kind === "track" && !trackShown(reg, world, state, pov, r.id))
-      return false;
-  }
-  return true;
-}
-function nameOf(world, state, pov, id, you = "You") {
-  if (id === pov)
-    return you;
-  return own(state.entities, id)?.name ?? own(world.places, id)?.name ?? own(world.tracks, id)?.label ?? id;
-}
-function humanize(field) {
-  return field.replace(/_/g, " ");
-}
-function valueText(reg, world, state, pov, kind, field, v, you) {
-  if (v === null)
-    return "cleared";
-  if (typeof v === "boolean")
-    return v ? "yes" : "no";
-  if (typeof v === "string") {
-    if (hasOwn4(state.entities, v) || hasOwn4(world.places, v))
-      return nameOf(world, state, pov, v, you);
-    if (fieldDef(reg, world, kind, field)?.type === "enum" || /^[a-z0-9]+(?:_[a-z0-9]+)+$/.test(v))
-      return humanize(v);
-    return v.length > 80 ? `${v.slice(0, 79)}\u2026` : v;
-  }
-  if (typeof v === "number") {
-    const def = fieldDef(reg, world, kind, field);
-    if (def?.type === "money")
-      return formatMoney(v, world.currency);
-    const band = def?.bands ? bandOf(def.bands, v) : null;
-    return band ? band.label : String(Math.round(v * 100) / 100);
-  }
-  return null;
-}
-function relationLine(rel, from, to, linked) {
-  switch (rel) {
-    case "knows":
-      return linked ? `${from} now know ${to}` : `${from} no longer know ${to}`;
-    case "in":
-      return linked ? `${from} \u2192 ${to}` : `${from} out of ${to}`;
-    case "uses":
-      return linked ? `${from} borrows ${to}` : `${from} gives back ${to}`;
-    case "owns":
-      return linked ? `${from} owns ${to}` : `${from} no longer owns ${to}`;
-    default:
-      return linked ? `${from} ${humanize(rel)} ${to}` : `${from} no longer ${humanize(rel)} ${to}`;
-  }
-}
-function relabel(line, refs, world, state, pov, you) {
-  let out = line;
-  const ids = [...new Set(refs.map((r) => r.id))].sort((a, b) => b.length - a.length);
-  for (const id of ids) {
-    const name = nameOf(world, state, pov, id, you);
-    if (name.toLowerCase() === id.toLowerCase())
-      continue;
-    out = out.replace(new RegExp(`(?<![\\w.])${id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\w])`, "g"), name);
-  }
-  return out;
-}
-function hiddenTrackLabels(reg, world, state, pov) {
-  const out = [];
-  for (const [id, t] of Object.entries(world.tracks)) {
-    if (trackShown(reg, world, state, pov, id))
-      continue;
-    out.push(t.label);
-    for (const s of Object.values(t.stages))
-      if (s.label.length >= 6)
-        out.push(s.label);
-  }
-  return out;
-}
-function hiddenEntityNames(reg, world, state, pov) {
-  const out = { people: [], things: [] };
-  for (const [id, e] of Object.entries(state.entities))
-    if (!canSeeEntity(reg, world, state, pov, id))
-      (kindIs(reg, world, e.kind, "person") ? out.people : out.things).push(e.name);
-  return out;
-}
-function hiddenNames(reg, world, state, pov) {
-  const { people, things } = hiddenEntityNames(reg, world, state, pov);
-  return [...hiddenTrackLabels(reg, world, state, pov), ...people, ...things];
-}
-function hiddenNameCheck(reg, world, state, pov) {
-  return passMemo([state, world, reg], `visibility.hidden_names\x00${pov}`, () => {
-    const hidden = hiddenEntityNames(reg, world, state, pov);
-    const labels = [...hidden.things, ...unseenPlaceNames(reg, world, state, pov), ...hiddenTrackLabels(reg, world, state, pov), ...secretLoreTitles(reg, world, state)];
-    return (text) => namesAny(text, hidden.people, labels);
-  });
-}
-function rawLine(reg, world, state, pov, e, player, you) {
-  const name = (id) => nameOf(world, state, pov, id, you);
-  switch (e.type) {
-    case "set": {
-      if (INTERNAL_FIELD.test(e.field))
-        return null;
-      if (e.field === GONE_FIELD)
-        return `${name(e.entity)} ${e.value === true ? "is gone" : "is back"}`;
-      const kind = own(state.entities, e.entity)?.kind ?? "";
-      if (e.field === "place" && typeof e.value === "string")
-        return `${name(e.entity)} \u2192 ${name(e.value)}`;
-      const ctx = player && e.field === "activity" && typeof e.value === "string" ? reg.context(world, state) : null;
-      const shownActivity = ctx ? optionalQuery(ctx, "castlife.activity") : null;
-      const value = ctx && shownActivity && typeof e.value === "string" ? shownActivity(ctx, e.entity, e.value) : e.value;
-      const v = valueText(reg, world, state, pov, kind, e.field, value, you);
-      if (v === null)
-        return null;
-      if (e.field === "activity")
-        return `${name(e.entity)}: ${v}`;
-      return `${name(e.entity)}: ${fieldDef(reg, world, kind, e.field)?.label ?? humanize(e.field)} ${v}`;
-    }
-    case "add": {
-      if (INTERNAL_FIELD.test(e.field))
-        return null;
-      const kind = own(state.entities, e.entity)?.kind ?? "";
-      const def = fieldDef(reg, world, kind, e.field);
-      const amount = def?.type === "money" ? formatMoney(Math.abs(e.delta), world.currency) : String(Math.round(Math.abs(e.delta) * 100) / 100);
-      return `${name(e.entity)}: ${def?.label ?? humanize(e.field)} ${e.delta < 0 ? "\u2212" : "+"}${amount}`;
-    }
-    case "link":
-    case "unlink":
-      return relationLine(e.rel, name(e.from), name(e.to), e.type === "link");
-    case "spawn":
-      return `${e.entity.name} appears`;
-    case "stage": {
-      const t = own(world.tracks, e.track);
-      return t ? `${t.label}: ${own(t.stages, e.to)?.label ?? e.to}` : null;
-    }
-    case "post":
-      return postLine(world, state, pov, e.memo, e.lines);
-    default: {
-      const def = reg.get(e.type);
-      if (!def)
-        return null;
-      try {
-        const line = def.describe(e, reg.context(world, state), player ? pov : undefined);
-        return line ? relabel(line, refsOf(world, state, e), world, state, pov, you) : null;
-      } catch {
-        return null;
-      }
-    }
-  }
-}
-function lineRank(reg, world, state, pov, e) {
-  if (e.type === "post" || e.type === "stage" || e.type.startsWith("economy."))
-    return 0;
-  if ((e.type === "set" || e.type === "add") && fieldDef(reg, world, own(state.entities, e.entity)?.kind ?? "", e.field)?.type === "money")
-    return 0;
-  if (e.type === ENGINE_EVENTS.signal)
-    return "data" in e && (e.data.class === "bill" || e.data.class === "decline") ? 0 : 1;
-  if (e.type === "set" && (e.field === "activity" || e.field === "place" && e.entity !== pov))
-    return 3;
-  if (e.type.startsWith("castlife."))
-    return 3;
-  return 2;
-}
-function playerLines(reg, world, state, pov, events, max = 8) {
-  return wordedLines(reg, world, state, pov, events, max, true);
-}
-function authorLines(reg, world, state, events, max) {
-  return wordedLines(reg, world, state, world.pov, events, max, false);
-}
-function wordedLines(reg, world, state, pov, events, max, player, you = "You") {
-  const lines = [];
-  let secrets = null;
-  const lastSet = new Map;
-  events.forEach((e, i) => {
-    if (e.type === "set")
-      lastSet.set(`${e.entity}\x00${e.field}`, i);
-  });
-  const ctx = player ? reg.context(world, state) : null;
-  const hpLine = ctx ? optionalQuery(ctx, "combat.hp_line") : null;
-  for (const [i, e] of events.entries()) {
-    if (e.type === "set" && lastSet.get(`${e.entity}\x00${e.field}`) !== i)
-      continue;
-    if (BOOKKEEPING.has(e.type))
-      continue;
-    if (player && !playerEventVisible(reg, world, state, pov, e))
-      continue;
-    const banded = ctx && hpLine ? hpLine(ctx, e) : undefined;
-    const text = banded === undefined ? rawLine(reg, world, state, pov, e, player, you) : banded;
-    if (!text || lines.some((l) => l.text === text))
-      continue;
-    if (player) {
-      secrets ??= [...unrevealedSecrets(reg, world, state), ...hiddenNames(reg, world, state, pov)];
-      if (findLeaks(text, secrets).length > 0)
-        continue;
-    }
-    lines.push({ at: i, rank: lineRank(reg, world, state, pov, e), text });
-  }
-  const kept = lines.length <= max ? lines : [...lines].sort((a, b) => a.rank - b.rank || a.at - b.at).slice(0, Math.max(0, max)).sort((a, b) => a.at - b.at);
-  return kept.map((l) => l.text);
 }
 
 // src/engine/relations.ts
@@ -21857,16 +21890,18 @@ function matchCatalog(ctx, text, place, category = "") {
   const rows = ctx.tables.get("economy.catalog")?.rows ?? {};
   const trade = placeTrade(ctx, place);
   const tags = trade.tags.map((t) => stem(t.toLowerCase()));
+  const nouns = Object.keys(rows).sort().map((id) => ({ id, name: catalogName(id, strOf(rows[id]?.name, id)) })).filter((r) => r.name.heads.has(item.head));
+  const unnamed = (name) => [...item.words].filter((w) => w !== item.head && !name.words.has(w));
+  const otherKind = (name) => unnamed(name).length > 0 && [...name.qualifiers].some((q) => !said.has(q));
+  const sold = (id) => trade.categories.includes(strOf(rows[id]?.category));
+  const outright = nouns.filter((r) => !otherKind(r.name));
+  const placeChooses = outright.length > 0 && !outright.some((r) => sold(r.id));
+  const known = (w) => nouns.some((r) => r.name.words.has(w));
   let best = null;
-  for (const id of Object.keys(rows).sort()) {
-    const row = rows[id];
-    const name = catalogName(id, strOf(row?.name, id));
-    if (!name.heads.has(item.head))
+  for (const { id, name } of nouns) {
+    if (otherKind(name) && !(placeChooses && sold(id) && unnamed(name).every((w) => !known(w))))
       continue;
-    const unnamed = [...item.words].some((w) => w !== item.head && !name.words.has(w));
-    if (unnamed && [...name.qualifiers].some((q) => !said.has(q)))
-      continue;
-    const rowCategory = strOf(row?.category);
+    const rowCategory = strOf(rows[id]?.category);
     const score = [[...said].filter((w) => name.words.has(w)).length, name.main === item.head ? 1 : 0, rowCategory === category ? 1 : 0, trade.categories.includes(rowCategory) ? 1 : 0, tags.some((t) => name.words.has(t)) ? 1 : 0];
     const first = best ? score.findIndex((s, i) => s !== best?.score[i]) : 0;
     if (!best || first >= 0 && (score[first] ?? 0) > (best.score[first] ?? 0))

@@ -1,4 +1,4 @@
-// node_modules/preact/dist/preact.mjs
+// ../../LumiRPEngine/node_modules/preact/dist/preact.mjs
 var n;
 var t;
 var i;
@@ -347,7 +347,7 @@ n = { __e: function(n, t, i, r) {
   return n.__v.__b - t.__v.__b;
 }, e = Symbol(), l = /(PointerCapture)$|Capture$/i, c = 0, a = {}, s = 0;
 
-// node_modules/preact/hooks/dist/hooks.mjs
+// ../../LumiRPEngine/node_modules/preact/hooks/dist/hooks.mjs
 var t2;
 var r2;
 var u2;
@@ -1098,7 +1098,7 @@ function humanize(id) {
   const words = id.replace(/[_.]+/g, " ").trim();
   return words.length === 0 ? id : words[0]?.toUpperCase() + words.slice(1);
 }
-// node_modules/preact/jsx-runtime/dist/jsxRuntime.mjs
+// ../../LumiRPEngine/node_modules/preact/jsx-runtime/dist/jsxRuntime.mjs
 var o3 = 0;
 function u3(t, e, n2, f, u, i) {
   e || (e = {});
@@ -25122,6 +25122,9 @@ function tellLife(state, subject, who) {
       by[id] = truth;
 }
 
+// src/engine/player-events.ts
+var POV_ONLY = new Set(["castlife.need", "economy.anchor"]);
+
 // src/engine/engine-pack.ts
 var ENGINE_PACK = "engine";
 var ENGINE_EVENTS = {
@@ -25443,47 +25446,6 @@ function witnessesOf2(e) {
   const seen = e.data.witnesses;
   return Array.isArray(seen) ? seen.filter((id) => typeof id === "string") : null;
 }
-
-// src/engine/player-events.ts
-var BOOKKEEPING = new Set([
-  "clock",
-  "timelapse",
-  "materialize",
-  ENGINE_EVENTS.fired,
-  ENGINE_EVENTS.caught,
-  ENGINE_EVENTS.cursor,
-  ENGINE_EVENTS.choice,
-  ENGINE_EVENTS.attempt,
-  ENGINE_EVENTS.pause,
-  ENGINE_EVENTS.beat,
-  ENGINE_EVENTS.observed,
-  ENGINE_EVENTS.adjudged,
-  "castlife.decision",
-  "castlife.override",
-  "economy.price",
-  "economy.txn",
-  "economy.flow_run",
-  "economy.sale",
-  "economy.remit",
-  "economy.invoice_paid",
-  "economy.payout",
-  "economy.payslip",
-  "economy.commission",
-  "economy.estimated_tax",
-  "economy.quote",
-  "economy.mint",
-  "economy.lots",
-  "economy.income",
-  "economy.exercise",
-  "economy.dispose",
-  "economy.acquire",
-  "economy.stake_route",
-  "story.flag",
-  "combat.turn",
-  "combat.spend",
-  "combat.decision"
-]);
-var POV_ONLY = new Set(["castlife.need", "economy.anchor"]);
 
 // src/engine/time-limits.ts
 var TIME_LIMITS = Object.freeze({
