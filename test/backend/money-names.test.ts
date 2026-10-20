@@ -76,6 +76,22 @@ describe("an outside name says only what the player may see", () => {
   });
 });
 
+describe("an id or a link that would name someone hidden reaches the player under a stand-in", () => {
+  test("Danny's job, where Marcus can't see him, is the shop's Mechanic: its payroll links it by title and employer under the id its row on the shop's page has, and nothing on his money names Danny", async () => {
+    const chat = await MoneyChat.start({ pov: "marcus_delgado", secret: ["danny_okafor"] });
+    const view = await chat.hub();
+    const pay = view.flows.find((f) => f.label === "Pay: Mechanic" && f.to === "someone");
+    expect(pay?.link?.name).toBe("Mechanic at Alder Automotive");
+    const row = view.businesses.find((b) => b.id === "alder_automotive_co")?.employees.find((j) => j.worker === "an employee");
+    expect(row?.id).toBe(pay?.link?.id ?? "");
+    expect(view.overview?.upcoming.some((u) => u.flow === pay?.id)).toBe(true);
+    expect(JSON.stringify((await chat.state()).panels["economy.money"]).toLowerCase()).not.toContain("danny");
+    // The GM's views name him.
+    const gm = await chat.party("marcus_delgado");
+    expect(gm.flows.find((f) => f.id === "pay:job_danny_mechanic")?.link).toEqual({ id: "job_danny_mechanic", name: "Danny's job at Alder Automotive" });
+  });
+});
+
 describe("each journal line names the other side of its own payment", () => {
   const SHOP = "acct_marcus_shop";
   const CHECKING = "acct_pov_checking";

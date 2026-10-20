@@ -20,7 +20,7 @@ import type { WorldState } from "../../../engine/state";
 import { addToBooks, addToPayables, businessBooks, firstBookedMonth, monthBook, monthOf, monthsBetween, operatingAccount, payablesOf } from "./books";
 import { allJobs, businessAt, businessIds, jobBlocks, jobView, placesOf, type Job } from "./employment";
 import type { FinanceApi, FinanceRegistry, FlowPosting } from "./module";
-import { hiddenFrom, managesParty, unpricedCap } from "./model";
+import { hiddenFrom, managesParty, opaqueId, unpricedCap } from "./model";
 import { corporateTax, salesTaxAccount, salesTaxOn, salesTaxPct, structureOf, taxExempt, taxRegionOf } from "./taxes";
 
 /** The foundation's invoice kind (`kinds.ts`): one invoice a business issued. */
@@ -586,8 +586,8 @@ export function businessView(ctx: ReadContext, api: FinanceApi, business: Entity
     .map((j) => {
       const v = jobView(ctx, api, j, viewer);
       if (!hiddenFrom(ctx, viewer, j.worker)) return v;
-      // Where their pay goes, and to whom, would name them too.
-      return { ...v, worker: "an employee", workerId: "", splits: [], spec: { ...v.spec, worker: "", splits: [], deductions: [] } };
+      // Where their pay goes, and to whom, would name them too, and so can the job's id (`job_danny_mechanic`): its payroll's link sends the same stand-in.
+      return { ...v, id: opaqueId(v.id), worker: "an employee", workerId: "", splits: [], spec: { ...v.spec, worker: "", splits: [], deductions: [] } };
     });
   const owed = payablesOf(ctx.state, business);
   const taxes: BusinessView["taxes"] = [];

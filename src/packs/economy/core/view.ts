@@ -21,7 +21,7 @@ import { statementState } from "./cycle";
 import { creditReport } from "./credit";
 import { allFlows, fallsBackOn, occurrences, occurrenceAmount } from "./flows";
 import { cycleOf, flowRunOf, isOpened, journalOf, NOTES_CAP } from "./journal";
-import { accountsOf, availableOf, balance, canSpend, classOf, holdersOf, holdsOn, householdOf, managesAccount, managesParty, openerOf, outsideHidden, outsideName, ownersOf, productOf, rightsOf, statusOf, traitsOf, wealthBand } from "./model";
+import { accountsOf, availableOf, balance, canSpend, classOf, holdersOf, holdsOn, householdOf, managesAccount, managesParty, opaqueId, openerOf, outsideHidden, outsideName, ownersOf, productOf, rightsOf, statusOf, traitsOf, wealthBand } from "./model";
 import { cardsOn, cardRoom, featureFor, isParty, overdraftRoom, tiersOf, toggles } from "./pay";
 import { netWorthParts } from "./worth";
 import { createRng } from "../../../engine/rng";
@@ -301,6 +301,22 @@ function nextOf(ctx: ReadContext, f: Flow, horizon: number): number | null {
   return candidates.length > 0 ? Math.min(...candidates) : null;
 }
 
+/**
+ * What a flow belongs to as the viewer may read it: an entity they can see, by name. A job is named
+ * after its worker ("Danny's job at Alder Automotive"), so one whose worker they can't see reads by
+ * its title and employer, under the id its employer's page sends it by (`opaqueId`). The job kind
+ * is the foundation's (`kinds.ts`).
+ */
+function linkView(ctx: ReadContext, viewer: Viewer, link: string | undefined): { id: EntityId; name: string } | null {
+  const e = link === undefined ? undefined : own(ctx.state.entities, link);
+  if (link === undefined || !e || !visible(ctx, viewer, link)) return null;
+  if (!kindIs(ctx.registry, ctx.world, e.kind, "job") || visible(ctx, viewer, strOf(e.fields.worker))) return { id: link, name: nameFor(ctx, viewer, link) };
+  const employer = strOf(e.fields.employer);
+  const at = employer === "" || outsideHidden(ctx, employer, viewer.pov) ? "" : own(ctx.state.entities, employer) ? nameFor(ctx, viewer, employer) : outsideName(ctx, `employer:${employer}`, viewer.pov);
+  const title = strOf(e.fields.title) || "A job";
+  return { id: opaqueId(link), name: at === "" ? title : `${title} at ${at}` };
+}
+
 function flowView(hooks: FinanceHooks, ctx: ReadContext, viewer: Viewer, party: EntityId, f: Flow): FlowView {
   const run = flowRunOf(ctx.state, f.id);
   const next = run.ended || f.status !== "active" ? null : nextOf(ctx, f, 400 * DAY);
@@ -312,11 +328,13 @@ function flowView(hooks: FinanceHooks, ctx: ReadContext, viewer: Viewer, party: 
   const fromSide = own(ctx.state.entities, f.from);
   // The party changes it when they manage what pays it: the account (by their role on it, or on the business or trust that holds it), or the business or trust paying.
   const payerHolds = fromSide?.kind === "account" ? managesAccount(ctx, f.from, party) : f.from === party || managesParty(ctx.state, f.from, party);
+  const editable = f.source === "entity" && payerHolds;
   // The flow as stored goes out only when every side of it is someone the viewer can see.
   const sides = [f.from, f.to, f.fallback ?? "", f.link ?? "", ...(f.splits ?? []).map((s) => s.to), ...(f.shares ?? []).flatMap((s) => [s.party, s.from ?? ""])].filter((id) => id !== "");
   const seen = sides.every((id) => sideSeen(ctx, viewer, id));
   return {
-    id: f.id,
+    // Nor, unless it's theirs to change, does its id, which can name whom it's for (`pay:<job>`, an author's `bill_jess_household`).
+    id: seen || editable ? f.id : opaqueId(f.id),
     label: f.label,
     kind: f.kind,
     from: sideName(ctx, viewer, f.from),
@@ -329,9 +347,9 @@ function flowView(hooks: FinanceHooks, ctx: ReadContext, viewer: Viewer, party: 
     // A one-off flow entity that has run is over. Its run isn't marked ended: a derived flow (autopay) keeps its id while its one-off date moves on.
     status: run.ended || (f.schedule.once !== undefined && run.done > 0 && own(ctx.state.entities, f.id)?.kind === "flow") ? "ended" : f.status,
     category: f.category ?? null,
-    link: f.link && own(ctx.state.entities, f.link) && visible(ctx, viewer, f.link) ? { id: f.link, name: nameFor(ctx, viewer, f.link) } : null,
+    link: linkView(ctx, viewer, f.link),
     payer: fromSide && visible(ctx, viewer, f.from) ? f.from : null,
-    editable: f.source === "entity" && payerHolds,
+    editable,
     source: f.source,
     done: run.done,
     missed: run.missed,
@@ -403,12 +421,12 @@ export function buildFinanceView(hooks: FinanceHooks, ctx: ReadContext, party: E
   const flowViews = flows.map((f) => flowView(hooks, ctx, viewer, party, f));
   const now = ctx.state.clock;
   const upcoming: UpcomingLine[] = [];
-  for (const f of flows) {
-    const v = flowViews.find((x) => x.id === f.id);
+  for (const [i, f] of flows.entries()) {
+    const v = flowViews[i];
     const next = f.status === "active" && !flowRunOf(ctx.state, f.id).ended ? nextOf(ctx, f, 31 * DAY) : null;
     if (next === null || !v) continue;
     const cents = v.cents === null ? 0 : signedFor(ctx, f, party, v.cents);
-    upcoming.push({ at: when(ctx, next), clock: next, label: f.label, cents, flow: f.id, account: own(ctx.state.entities, f.from)?.kind === "account" ? f.from : null });
+    upcoming.push({ at: when(ctx, next), clock: next, label: f.label, cents, flow: v.id, account: own(ctx.state.entities, f.from)?.kind === "account" ? f.from : null });
   }
   for (const a of accounts) {
     const cycle = cycleOf(ctx.state, a.id);

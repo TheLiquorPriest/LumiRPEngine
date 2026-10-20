@@ -8,6 +8,7 @@
 
 import type { JsonObject } from "../../../shared/json";
 import type { EntityId } from "../../../shared/ids";
+import { hashParts } from "../../../shared/hash";
 import type { Band } from "../../../shared/tables";
 import type { WorldDoc } from "../../../shared/world";
 import {
@@ -148,6 +149,15 @@ export function outsideHidden(books: ViewBooks, raw: string, viewer: EntityId | 
 /** Whether `viewer` (the player's POV; null for the GM) can't see `id`, someone in the world: their views carry neither its name nor its id (DESIGN §7). */
 export function hiddenFrom(books: ViewBooks, viewer: EntityId | null, id: string): boolean {
   return viewer !== null && own(books.state.entities, id) !== undefined && !canSeeEntity(books.registry, books.world, books.state, viewer, id);
+}
+
+/**
+ * The id a player's view sends in place of one that names someone they can't see (a job's
+ * `job_danny_mechanic`, its payroll's `pay:job_danny_mechanic`): a digest of it, the same on every
+ * view, so the view's own references to it still meet.
+ */
+export function opaqueId(id: string): string {
+  return `hidden:${hashParts(id).slice(0, 12)}`;
 }
 
 export function bankSide(institution: string): string {
