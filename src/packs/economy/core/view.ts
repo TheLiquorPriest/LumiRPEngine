@@ -14,14 +14,14 @@ import { numOf, objOf, own, sliceOf, strOf } from "../../../engine/pack-kit";
 import type { ReadContext } from "../../../engine/registry";
 import { kindIs } from "../../../engine/scope";
 import { membersOf, MEMBER_OF } from "../../../engine/selector";
-import { canSeeEntity, canSeePlace } from "../../../engine/visibility";
+import { canSeePlace } from "../../../engine/visibility";
 import type { FinanceHooks } from "./module";
 import { autopaySourceProblem, interestsOf, mayPayFrom, paysFor } from "./actions";
 import { statementState } from "./cycle";
 import { creditReport } from "./credit";
 import { allFlows, fallsBackOn, occurrences, occurrenceAmount } from "./flows";
 import { cycleOf, flowRunOf, isOpened, journalOf, NOTES_CAP } from "./journal";
-import { accountsOf, availableOf, balance, canSpend, classOf, holdersOf, holdsOn, householdOf, managesAccount, managesParty, opaqueId, openerOf, outsideHidden, outsideName, ownersOf, productOf, rightsOf, shareOf, statusOf, traitsOf, wealthBand } from "./model";
+import { accountsOf, availableOf, balance, canSpend, classOf, holdersOf, holdsOn, householdOf, managesAccount, managesParty, opaqueId, openerOf, outsideHidden, outsideName, ownersOf, productOf, rightsOf, seenBy, shareOf, statusOf, traitsOf, wealthBand } from "./model";
 import { cardsOn, cardRoom, featureFor, isParty, overdraftRoom, tiersOf, toggles } from "./pay";
 import { netWorthParts } from "./worth";
 import { createRng } from "../../../engine/rng";
@@ -42,22 +42,9 @@ interface HiddenName {
   within: string;
 }
 
-/**
- * Whether the viewer may see an entity: the GM sees everything; the player sees the POV, what it
- * can see, and an account (or a card on one) it holds or that someone it can see holds. An outside
- * party's name isn't an entity and is always shown.
- */
+/** Whether the viewer may see an entity (`seenBy`): the GM sees everything. */
 function visible(ctx: ReadContext, viewer: Viewer, id: string): boolean {
-  const pov = viewer.pov;
-  if (pov === null || id === pov) return true;
-  const e = own(ctx.state.entities, id);
-  if (!e) return true;
-  if (!canSeeEntity(ctx.registry, ctx.world, ctx.state, pov, id)) return false;
-  if (e.kind !== "account" && e.kind !== "card") return true;
-  const account = e.kind === "card" ? strOf(e.fields.account) : id;
-  if (rightsOf(ctx.state, account, pov) !== null) return true;
-  const holders = holdersOf(ctx.state, account).filter((h) => own(ctx.state.entities, h));
-  return holders.length === 0 || holders.some((h) => canSeeEntity(ctx.registry, ctx.world, ctx.state, pov, h));
+  return seenBy(ctx, viewer.pov, id);
 }
 
 /** What someone or something the viewer can't see reads as in text: someone for a party, an account by its class, a property, something else. */

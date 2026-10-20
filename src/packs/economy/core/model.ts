@@ -35,7 +35,7 @@ import {
   type RoleRights,
 } from "../../../shared/finance";
 import { EXTERNAL_ACCOUNT_PREFIX } from "../../../engine/events";
-import { bandOfJson, numOf, objOf, sliceOf, strOf, own, rowOf } from "../../../engine/pack-kit";
+import { bandOfJson, labelOf, numOf, objOf, sliceOf, strOf, own, rowOf } from "../../../engine/pack-kit";
 import type { ReadContext } from "../../../engine/registry";
 import type { Rng } from "../../../engine/rng";
 import type { WorldState } from "../../../engine/state";
@@ -147,9 +147,31 @@ export function outsideHidden(books: ViewBooks, raw: string, viewer: EntityId | 
   return ids.some((id) => seenIn(books, viewer, id) === false);
 }
 
-/** Whether `viewer` (the player's POV; null for the GM) can't see `id`, someone in the world: their views carry neither its name nor its id (DESIGN §7). */
+/**
+ * Whether `viewer` (the player's POV; null for the GM, who sees everything) may see `id` (DESIGN
+ * §7): the POV, what it can see, and an account (or a card on one) it holds or that someone it can
+ * see holds. An outside party's name isn't an entity and is always shown.
+ */
+export function seenBy(books: ViewBooks, viewer: EntityId | null, id: string): boolean {
+  if (viewer === null || id === viewer) return true;
+  const e = own(books.state.entities, id);
+  if (!e) return true;
+  if (!canSeeEntity(books.registry, books.world, books.state, viewer, id)) return false;
+  if (e.kind !== "account" && e.kind !== "card") return true;
+  const account = e.kind === "card" ? strOf(e.fields.account) : id;
+  if (rightsOf(books.state, account, viewer) !== null) return true;
+  const holders = holdersOf(books.state, account).filter((h) => own(books.state.entities, h));
+  return holders.length === 0 || holders.some((h) => canSeeEntity(books.registry, books.world, books.state, viewer, h));
+}
+
+/** Whether `viewer` can't see `id`, someone or something in the world: their views carry neither its name nor its id (DESIGN §7). */
 export function hiddenFrom(books: ViewBooks, viewer: EntityId | null, id: string): boolean {
-  return viewer !== null && own(books.state.entities, id) !== undefined && !canSeeEntity(books.registry, books.world, books.state, viewer, id);
+  return !seenBy(books, viewer, id);
+}
+
+/** A name as `viewer` may read it, in a view or in why something was refused: "someone" for anyone or anything they can't see. */
+export function shownLabel(books: ViewBooks, viewer: EntityId | null, id: string): string {
+  return seenBy(books, viewer, id) ? labelOf(books, id) : "someone";
 }
 
 /**
