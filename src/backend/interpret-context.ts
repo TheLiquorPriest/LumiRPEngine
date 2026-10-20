@@ -16,15 +16,16 @@ import type { ReadContext } from "../engine/registry";
 import type { Registry } from "../engine/registry-impl";
 import { paramCandidates, placeCandidates } from "../engine/resolve";
 import { evalExpr, isGone, kindIs, placeOfEntity, scopeEnv, truthy } from "../engine/scope";
+import { lastSighting } from "../engine/seen";
 import type { WorldState } from "../engine/state";
-import { canSeeEntity, canSeePlace, povPlace } from "../engine/visibility";
+import { canSeeEntity, canSeePlace, namesAny, povPlace } from "../engine/visibility";
 import { fightOffers } from "../packs/combat/core/index";
 import { carriedBy } from "../packs/gear/core/model";
 import { openPuzzles } from "../packs/story/core/index";
 import { tokensOf } from "./book";
 import { readableReply } from "./json-hiding";
 import { gatesOf, needsOf } from "./requirement-words";
-import { TIMELAPSE_ACTION } from "./view";
+import { spanText, TIMELAPSE_ACTION } from "./view";
 
 /** One action of `interpret`'s catalog, as its prompt lists it. */
 export interface CatalogEntry {
@@ -41,7 +42,7 @@ export interface CatalogEntry {
 
 /** What `interpret` is told besides the catalog. */
 export interface InterpretScene {
-  /** The scene as the POV knows it, a line each: where and when, who is there, what it carries, its vehicles, what waits on its answer. */
+  /** The scene as the POV knows it, a line each: where and when, who is there, whom the input names who isn't (with where it last saw them), what it carries, its vehicles, what waits on its answer, what its last message left unplayed. */
   lines: string[];
   /** The places a place param may name, nearest first, a line each ("id: name, in parent"). */
   places: string[];
@@ -169,14 +170,30 @@ function atWords(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, id
   return place !== null && canSeePlace(reg, world, state, world.pov, place) ? `, at ${own(world.places, place)?.name ?? place}` : "";
 }
 
+/** People the input names who aren't here, a scene line lists at most. */
+const AWAY_LIMIT = 6;
+
+/**
+ * Where the POV last saw someone, for the scene: ", last seen at <place> (<id>) <span> ago", from
+ * its own observations (`space.seen`), never where they are now; nothing when it never was with
+ * them or can't see that place.
+ */
+function lastSeenWords(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, id: EntityId): string {
+  const last = lastSighting(state, id);
+  if (!last || !canSeePlace(reg, world, state, world.pov, last.place)) return "";
+  return `, last seen at ${own(world.places, last.place)?.name ?? last.place} (${last.place}) ${spanText(Math.max(1, state.clock - last.at))} ago`;
+}
+
 /**
  * The scene as the POV knows it (DESIGN §5.2): the day and time and where it is (a place it can't
- * see is somewhere it can't name), who is there with it, what it carries, its vehicles, the
- * invitations waiting on its answer, and everyone and everything else the catalog lists (`named`),
- * each by name and id; then the places a place param may name, and the messages before the typed
- * one (`recentMessages`). Only what the POV may know is named.
+ * see is somewhere it can't name), who is there with it, the people the typed input (`said`) names
+ * who aren't, with where the POV last saw them, what it carries, its vehicles, the invitations
+ * waiting on its answer, and everyone and everything else the catalog lists (`named`), each by name
+ * and id, and what its last message left unplayed (`left`: the words of the Send chip on the reply
+ * before it); then the places a place param may name, and the messages before the typed one
+ * (`recentMessages`). Only what the POV may know is named.
  */
-export function interpretScene(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, opts: { mayKnow: (id: EntityId) => boolean; named: readonly EntityId[]; earlier: readonly ChainMessage[]; recent: Readonly<RecentHistory>; hideJson: boolean }): InterpretScene {
+export function interpretScene(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, opts: { mayKnow: (id: EntityId) => boolean; named: readonly EntityId[]; earlier: readonly ChainMessage[]; recent: Readonly<RecentHistory>; hideJson: boolean; said?: string; left?: string }): InterpretScene {
   const ctx = reg.context(world, state);
   const pov = own(state.entities, world.pov);
   const here = placeOfEntity(state, world.pov);
@@ -189,7 +206,12 @@ export function interpretScene(reg: Registry, world: WorldDoc, state: Readonly<W
   const carried = carriedBy(state, world.pov).filter(seen);
   const vehicles = Object.keys(state.entities).filter((id) => seen(id) && kindIs(reg, world, own(state.entities, id)?.kind ?? "", "vehicle") && (own(state.entities, id)?.fields.owner === world.pov || (pov?.relations.some((r) => r.type === "uses" && r.to === id) ?? false)));
   const waiting = (optionalQuery(ctx, "castlife.invitations")?.(ctx, world.pov) ?? []).filter((inv) => opts.mayKnow(inv.host)).map((inv) => `${inv.text} (host ${inv.host})`);
-  const shown = new Set([...people, ...carried, ...vehicles]);
+  // A message can take for granted being with someone who isn't here ("I sit down next to Marcus"),
+  // a move to read first (DESIGN §5.2): the people it names who aren't here, with where the POV last
+  // saw them.
+  const said = opts.said ?? "";
+  const away = here === null || said.trim() === "" ? [] : Object.keys(state.entities).filter((id) => seen(id) && !people.includes(id) && kindIs(reg, world, own(state.entities, id)?.kind ?? "", "person") && namesAny(said, [own(state.entities, id)?.name ?? id])).slice(0, AWAY_LIMIT);
+  const shown = new Set([...people, ...away, ...carried, ...vehicles]);
   const others = opts.named.filter((id) => !shown.has(id) && seen(id));
   const nameOf = (id: EntityId): string => own(state.entities, id)?.name ?? id;
   const lifeWords = (id: EntityId): string => {
@@ -199,10 +221,12 @@ export function interpretScene(reg: Registry, world: WorldDoc, state: Readonly<W
   const lines = [
     `Now: ${localNow(world, state)}${where}.`,
     `Here with you: ${people.length > 0 ? people.map((id) => `${nameOf(id)} (${id}${lifeWords(id)})`).join("; ") : "no one"}.`,
+    ...(away.length > 0 ? [`Named in the input but not here: ${away.map((id) => `${nameOf(id)} (${id}${lifeWords(id)})${lastSeenWords(reg, world, state, id)}`).join("; ")}.`] : []),
     `You carry: ${carried.length > 0 ? carried.map((id) => `${nameOf(id)} (${id})`).join("; ") : "nothing"}.`,
     ...(vehicles.length > 0 ? [`Your vehicles: ${vehicles.map((id) => `${nameOf(id)} (${id}${atWords(reg, world, state, id)})`).join("; ")}.`] : []),
     ...(others.length > 0 ? [`Others you can name: ${others.map((id) => `${nameOf(id)} (${id})`).join("; ")}.`] : []),
     ...(waiting.length > 0 ? [`Waiting on your answer: ${waiting.join(" ")}`] : []),
+    ...(opts.left ? [`Left from your last message, not played yet: ${opts.left}`] : []),
   ];
   const places = placeCandidates(reg, world, state).map((id) => {
     const p = own(world.places, id);

@@ -80,7 +80,7 @@ describe("extract: purchase payer and method", () => {
     };
     const out = await extract(new Steps(host, new CallMeter()), "Sam buys a lamp.", world, {}, 0, [], null, host.userId, new AbortController().signal);
     expect(system).toContain(`Money amounts are plain amounts in ${world.currency.code} as written (8 for ${world.currency.symbol}8)`);
-    expect(out).toEqual([
+    expect(out.proposals).toEqual([
       { type: "purchase", item: "lamp", payer: POV, price: 850 },
       { type: "transfer", from: "dev", to: POV, amount: 1200 },
       { type: "transfer", from: "dev", to: POV, amount: 500, method: "cash" },

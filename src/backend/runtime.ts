@@ -38,7 +38,7 @@ import type { PackDef, ReadContext } from "../engine/registry";
 import { createRegistry, type Registry } from "../engine/registry-impl";
 import { createRng } from "../engine/rng";
 import { readPass } from "../engine/read-pass";
-import { kindIs, placeOfEntity } from "../engine/scope";
+import { kindIs, placeOfEntity, placeWithin } from "../engine/scope";
 import type { WorldState } from "../engine/state";
 import { actionOdds, findAction, type Resolution } from "../engine/resolve";
 import type { InterpretOutput, QueuedAction } from "../engine/steps";
@@ -371,6 +371,23 @@ export function splitAlongBuy(p: JsonObject, pre: readonly LedgerEvent[], ctx: R
   if (parts.length < 2 || !parts.some(isBuy)) return [p];
   const { price: _price, qty: _qty, name: _name, ...rest } = p;
   return parts.filter((part) => !isBuy(part)).map((item) => ({ ...rest, item }));
+}
+
+/**
+ * Where the reply leaves the POV (`extract`'s `where`, DESIGN §9.4) as their move there, when the
+ * engine has them elsewhere: a reply can take a move as given without telling it ("at the counter
+ * with Marcus" while the engine has the POV at the market), and no change would say the story and the
+ * world have parted. None when the engine has them there or inside it, when the turn's own events
+ * moved them (the engine's outcome wins), or when a narrated move of theirs already says where.
+ */
+function replyPlace(where: string | null, narrated: readonly JsonObject[], context: ReadInput): JsonObject[] {
+  const { world, state } = context;
+  const here = placeOfEntity(state, world.pov);
+  const said = where ?? "";
+  const to = hasOwn(world.places, said) ? said : said.toLowerCase();
+  if (here === null || !hasOwn(world.places, to) || placeWithin(world, here, to) || placeOfEntity(context.start, world.pov) !== here) return [];
+  if (narrated.some((p) => p.type === "location" && (typeof p.entity !== "string" || p.entity.trim() === world.pov))) return [];
+  return [{ type: "location", entity: world.pov, place: to }];
 }
 
 /** What an extraction reads against: the state, its world, the record's seed and its pre-reply events. */
@@ -777,7 +794,9 @@ export class Runtime implements TurnHooks {
     const at = await this.lorePhase("pre", p.generationId, input.userId, render.world, render.state, budget, text, preset.guidance);
     // `interpret` reads the messages before the typed one too, to tell what it refers to (DESIGN §5.2).
     const earlier = lastUser ? before.slice(0, before.indexOf(lastUser)) : before;
-    const intentTask = text.trim() === "" || bridge.hasIntent(text) ? Promise.resolve() : this.readIntent(bridge, text, recorded, render, all, earlier, settings, facts, budget, at);
+    // What the reply before it left unplayed of the last message, which this one may take as done (DESIGN §5.2).
+    const left = text.trim() === "" ? "" : await this.leftUnplayed(input.chatId, input.userId, earlier, text);
+    const intentTask = text.trim() === "" || bridge.hasIntent(text) ? Promise.resolve() : this.readIntent(bridge, text, recorded, render, all, earlier, settings, facts, budget, at, left);
     // The judge's call for the player's own action comes before npc.choose's (DESIGN §11). Present
     // agents' choices run beside the intent only while a call stays free for the judge; otherwise
     // they take what is left once it has run. Before `interpret` names the action, the judge may
@@ -986,7 +1005,7 @@ export class Runtime implements TurnHooks {
    * Decision choice over the actions), which reads what the POV can do now, the scene and places as
    * it knows them, and the messages before this one (`earlier`, DESIGN §5.2).
    */
-  private async readIntent(bridge: TurnBridge, text: string, recorded: JsonValue | undefined, render: { world: WorldDoc; state: WorldState }, all: ActionDef[], earlier: readonly ChainMessage[], settings: UserSettings, facts: SignalFacts, budget: StepBudget, at: LorePhase): Promise<void> {
+  private async readIntent(bridge: TurnBridge, text: string, recorded: JsonValue | undefined, render: { world: WorldDoc; state: WorldState }, all: ActionDef[], earlier: readonly ChainMessage[], settings: UserSettings, facts: SignalFacts, budget: StepBudget, at: LorePhase, left: string): Promise<void> {
     const userId = at.userId;
     // A palette or chip action records its intent on the user message (dispatch `lre.action`); it
     // survives restarts and a bridge that never saw the request.
@@ -1011,7 +1030,7 @@ export class Runtime implements TurnHooks {
     const context: InterpretContext = {
       world: render.world,
       pov: { id: render.world.pov, name: render.state.entities[render.world.pov]?.name ?? render.world.pov },
-      scene: interpretScene(this.registry, render.world, render.state, { mayKnow, named: offered.named, earlier, recent: recentOf(run.config), hideJson: settings.hideJsonBlocks }),
+      scene: interpretScene(this.registry, render.world, render.state, { mayKnow, named: offered.named, earlier, recent: recentOf(run.config), hideJson: settings.hideJsonBlocks, said: text, left }),
     };
     let result: InterpretRead | null;
     const lore = this.stepLore(run, at, { text: `${text}\n${this.trackWords(render.world, render.state)}`, links: this.sceneLinks(render.world, render.state) });
@@ -1405,7 +1424,7 @@ export class Runtime implements TurnHooks {
     const skipped = facts.timelapse || !!plan?.timelapse;
     const extractTask = extractRun && budget.take()
       ? extract(this.steps, text, povWorld(this.registry, context.world, context.state), prefixSummary(this.registry, context.world, context.state), clockMinutes(context.pre), EXTRACTION_TYPES.filter((t) => (t === "time_advance" ? !skipped : this.registry.proposals.has(t))), extractRun.config, userId, budget.signal, extractRun.template ? renderTemplate(extractRun.template.template, vars) : undefined, lore(extractRun), extractRun.guidance)
-      : Promise.resolve([]);
+      : Promise.resolve({ proposals: [], where: null });
     const effectsTasks = (["extract", "contradiction", "choices"] as const).flatMap((purpose) => runsOf(modelUse, context.world, purpose, facts, { output: "effects", guidance })).map((r) => (budget.take() ? promptedEffects(this.steps, r, vars, context.world.currency, userId, budget.signal, lore(r, true)) : Promise.resolve([])));
     const npcRun = runsOf(modelUse, context.world, "npc.choose", facts, { guidance })[0];
     const npcTask = npcRun && ties.offscreen.length > 0 && budget.take() ? npcChoose(this.steps, npcRun, ties.offscreen, (t) => this.describeTie(t, context.world, context.state), createRng(hashParts("lre.npc.post", bridge.runSeed, key)), userId, budget.signal, this.stepLore(npcRun, at, this.tieInputs(ties.offscreen, context.world, context.state))) : Promise.resolve([]);
@@ -1437,8 +1456,9 @@ export class Runtime implements TurnHooks {
     // The prices the player typed for this turn's Buys (minor units): the first action's and the queued ones'.
     const typed = intent ? [{ action: intent.action, params: intent.params }, ...(intent.queue ?? [])].flatMap((a) => (a.action === "buy" && typeof a.params.price === "number" ? [a.params.price] : [])) : [];
     const unsure = new Set<JsonObject>();
+    const narrated = [...extracted.proposals, ...effects.flat()];
     const deduped = dedupeProposals(
-      [...extracted, ...effects.flat()].flatMap((p) => splitAlongBuy(p, context.pre, ctx)),
+      [...narrated, ...replyPlace(extracted.where, narrated, context)].flatMap((p) => splitAlongBuy(p, context.pre, ctx)),
       context.world.pov,
     ).filter((p) => {
       if (lentAlong(p, context.pre, context.state) || movedAlong(p, context.pre, context.state)) return false;
@@ -1727,7 +1747,7 @@ export class Runtime implements TurnHooks {
     // suggested choice does, and it plays as the next turn, with its own prices, time and checks.
     const left = plan?.stopped ? (bridge.intentOf(userText)?.queue ?? []).slice(-plan.stopped.left).map((q) => q.text) : [];
     const next = input.kind === "continue" ? "" : joinActions([...left, bridge.nextOf(userText) ?? ""]);
-    if (next !== "") stored.push({ id: `next:${at}`, kind: "choice", ...base, label: next, detail: `The rest of your message${plan?.stopped ? `: ${STOPPED[plan.stopped.cause]}` : ""}. Send plays it as its own turn.`, actions: [{ id: "send", label: "Send" }], expires: "next_send", payload: { text: next } });
+    if (next !== "") stored.push({ id: restChipId(input.messageId, input.swipeId), kind: "choice", ...base, label: next, detail: `The rest of your message${plan?.stopped ? `: ${STOPPED[plan.stopped.cause]}` : ""}. Send plays it as its own turn.`, actions: [{ id: "send", label: "Send" }], expires: "next_send", payload: { text: next } });
     // An interrupt ended the timelapse early (DESIGN §9.2): say why, and offer the rest of the run.
     const summary = plan?.timelapse?.summary;
     if (summary?.stoppedBy && !(plan?.chips ?? []).some((c) => c.kind === "continue_timelapse")) {
@@ -1802,6 +1822,19 @@ export class Runtime implements TurnHooks {
     }
     if (counted) await this.settings.saveLearning(userId);
     this.push.changed(chatId, userId);
+  }
+
+  /**
+   * The words of the Send chip on the reply before the typed message: the rest of the last message
+   * its turn didn't play (DESIGN §5.2, §11), which the typed one may take as done. The chip lapses
+   * when the typed message is sent, so it is read as that lapse kept it (`ChipStore.recent`). ""
+   * when there is none, or when the player sent those very words (the chip's own Send).
+   */
+  private async leftUnplayed(chatId: ChatId, userId: UserId, earlier: readonly ChainMessage[], text: string): Promise<string> {
+    const reply = earlier.findLast((m) => !m.isUser);
+    const chip = reply ? await this.chips.recent(chatId, userId, restChipId(reply.id, reply.swipeId)) : null;
+    const left = typeof chip?.payload.text === "string" ? chip.payload.text.trim() : "";
+    return neutralizeMacros(left) === text.trim() ? "" : left;
   }
 
   async addModeChip(chatId: ChatId, userId: UserId, type: ExtractionType, from: string, to: string, connectionId: string): Promise<void> {
@@ -2299,6 +2332,11 @@ function unfitId(messageId: MessageId, swipeId: number, index: number): string {
 function isUnfitId(id: string, messageId: MessageId, swipeId: number): boolean {
   const head = unfitId(messageId, swipeId, 0);
   return id === head || id.startsWith(`${head}:`);
+}
+
+/** A swipe's Send chip holding the rest of the message its turn didn't play (DESIGN §5.2, §11). */
+function restChipId(messageId: MessageId, swipeId: number): string {
+  return `next:${messageId}:${swipeId}`;
 }
 
 /** What a model writes for "nothing" ("none", "null", "N/A"), compared as `offeredNext` compares words. */

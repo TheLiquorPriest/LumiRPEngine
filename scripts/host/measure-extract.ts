@@ -154,7 +154,7 @@ const bump = (type: string, key: "tp" | "fp" | "fn"): void => {
 let mustNotHits = 0;
 const out: JsonValue[] = [];
 for (const f of rows) {
-  const got = await extract(steps, String(f.narration), world, f.state ?? null, 0, [], null, RUN_USER, AbortSignal.timeout(90_000));
+  const { proposals: got } = await extract(steps, String(f.narration), world, f.state ?? null, 0, [], null, RUN_USER, AbortSignal.timeout(90_000));
   const expected = (Array.isArray(f.expected) ? f.expected : []).filter((x): x is JsonObject => isRecord(x));
   const mustNot = (Array.isArray(f.must_not) ? f.must_not : []).filter((x): x is JsonObject => isRecord(x));
   const used = new Set<number>();
