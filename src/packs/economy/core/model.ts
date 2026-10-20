@@ -37,7 +37,8 @@ import { bandOfJson, labelOf, numOf, objOf, sliceOf, strOf, own, rowOf } from ".
 import type { ReadContext } from "../../../engine/registry";
 import type { Rng } from "../../../engine/rng";
 import type { WorldState } from "../../../engine/state";
-import { placeOfEntity } from "../../../engine/scope";
+import { kindIs, placeOfEntity } from "../../../engine/scope";
+import { MEMBER_OF } from "../../../engine/selector";
 
 /** The outside account corrections post against (a ✎ cash fix, a GM money edit): money they add or remove comes from or goes to it, so the books still balance. Shown as "Correction". */
 export const CORRECTION_ACCOUNT = `${EXTERNAL_ACCOUNT_PREFIX}correction`;
@@ -344,6 +345,23 @@ export function managesParty(state: Readonly<WorldState>, party: EntityId, who: 
 export function managesAccount(books: Books, account: EntityId, who: EntityId): boolean {
   if (!classOf(books, account)) return false;
   return ownersOf(books.state, account).some((o) => ROLE_RIGHTS[o.role].manage && (o.party === who || managesParty(books.state, o.party, who)));
+}
+
+/**
+ * Who owes a credit account (DESIGN §25.1): the holders it counts against (an owner, a joint
+ * owner), not one who only spends on it or manages it; whoever holds it, when no role counts it.
+ */
+export function debtorsOf(state: Readonly<WorldState>, account: EntityId): EntityId[] {
+  const owners = ownersOf(state, account);
+  const owing = owners.filter((o) => ROLE_RIGHTS[o.role].worth);
+  return [...new Set((owing.length > 0 ? owing : owners).map((o) => o.party))];
+}
+
+/** The household a party is, or belongs to (a `member_of` relation to one); null for none. */
+export function householdOf(ctx: Pick<ReadContext, "registry" | "world" | "state">, party: EntityId): EntityId | null {
+  const isHousehold = (id: string): boolean => kindIs(ctx.registry, ctx.world, own(ctx.state.entities, id)?.kind ?? "", "household");
+  if (isHousehold(party)) return party;
+  return own(ctx.state.entities, party)?.relations.find((r) => r.type === MEMBER_OF && isHousehold(r.to))?.to ?? null;
 }
 
 /** A party's share of an entity's worth, in percent. */

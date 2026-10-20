@@ -480,6 +480,28 @@ describe("only a role that manages an account runs standing payments from it", (
   });
 });
 
+describe("money a party only manages pays for its holder, never for them", () => {
+  // The player is the trustee of a trust for Maya; the trust holds its account, which the trustee holds no role on.
+  const trust = (world: WorldDoc): void => {
+    mayaChecking(world);
+    world.entities.family_trust = { ...entity("family_trust", "trust", { owners: [{ party: "you", role: "trustee" }, { party: "maya", role: "beneficiary", share: 100 }] }), name: "Chen Family Trust" };
+    world.entities.trust_acct = { ...entity("trust_acct", "account", { owners: [{ party: "family_trust", role: "owner" }], product: "trust", opening: 5_000_000 }), name: "Trust account" };
+  };
+  const refusal = (w: Working, action: string, params: JsonObject): string | null => {
+    const r = resolveAction(reg, w, { action, actor: "you", params }, createRng(`${action}:${String(params.label ?? params.account)}`));
+    return r.failed?.reason ?? r.rejected[0]?.rejection.reason ?? null;
+  };
+
+  test("a trustee pays the trust's beneficiary from its account, never their own card's autopay or themselves", () => {
+    const w = setup(trust, ["maya", "family_trust"]);
+    expect(refusal(w, "set_autopay", { account: "card", mode: "full", from: "trust_acct" })).toContain("not from Trust account");
+    expect(refusal(w, "flow_create", { label: "Trustee fee, self-set", from: "trust_acct", to: "checking", amount: 300_000, every: "month", day: 20 })).toContain("Trust account pays for Chen Family Trust, not for");
+    expect(refusal(w, "flow_create", { label: "Maya's allowance", from: "trust_acct", to: "maya_checking", amount: 20_000, every: "month", day: 20 })).toBeNull();
+    expect(w.state.entities.card?.fields.autopay_from).not.toBe("trust_acct");
+    expect(Object.values(w.state.entities).filter((e) => e.kind === "flow" && e.fields.from === "trust_acct").map((e) => e.name)).toEqual(["Maya's allowance"]);
+  });
+});
+
 describe("a card is paid from the payer's own account", () => {
   const shared = (role: "authorized_user" | "joint") => (world: WorldDoc): void => {
     mayaChecking(world);
