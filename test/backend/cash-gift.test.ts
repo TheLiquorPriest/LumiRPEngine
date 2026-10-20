@@ -1,6 +1,6 @@
-// An NPC's cash gift read from a reply: the give becomes a transfer of the amount, in
-// minor units, once; the payer's accounts are materialized before it applies; and a gift that can't
-// apply gets a decline chip instead of silence.
+// An NPC's cash gift read from a reply: the give becomes a transfer of the amount, in minor units,
+// once, and a gift that can't apply gets a decline chip instead of silence. Where a gift's money
+// lands, and that it is the payer's own, is transfer-parties.test.ts's.
 
 import { describe, expect, test } from "bun:test";
 import type { JsonObject } from "../../src/shared/json";
@@ -12,6 +12,7 @@ import { createRegistry } from "../../src/engine/registry-impl";
 import { ALL_PACKS } from "../../src/packs/index";
 import type { WorldDoc } from "../../src/shared/world";
 import type { WorldState } from "../../src/engine/state";
+import type { Chip } from "../../src/shared/state-view";
 import { Rig } from "../support/rig";
 
 const reg = createRegistry(ALL_PACKS);
@@ -23,8 +24,21 @@ const worthAt = (world: WorldDoc, state: WorldState): number => {
 
 const EXTRACT_MARK = "propose concrete state changes";
 
+/** What a turn leaves: the chat, its state and world, the extract prompt, the POV's net worth, and the chips. */
+interface Gift {
+  rig: Rig;
+  chatId: string;
+  state: WorldState;
+  world: WorldDoc;
+  prompt: string;
+  worth: number;
+  chipList: Chip[];
+  chips: string[];
+  errors: string[];
+}
+
 /** One turn in a fresh Port Alder chat whose reply the extractor reads as `proposals`; the POV's net worth after it, and the chips. `autoTransfer` pins transfer to auto (D4 starts it in confirm) for tests of the apply mechanics. */
-async function gift(proposals: JsonObject[], autoTransfer = true) {
+async function gift(proposals: JsonObject[], autoTransfer = true): Promise<Gift> {
   const rig = new Rig({ shipped: true });
   const worldId = await rig.newWorld("Alder", "modern_slice_of_life");
   const chatId = rig.host.createChat("Morning.");
@@ -42,6 +56,10 @@ async function gift(proposals: JsonObject[], autoTransfer = true) {
   return { rig, chatId, state, world, prompt, worth: worthAt(world, state), chipList: view.chips, chips: view.chips.map((c) => `${c.kind}: ${c.label}`), errors: rig.rt.ledger.errors };
 }
 
+/** The same turn with nothing read from its reply, as several tests read it: it plays the same every time (whatever transfers do, none is proposed), so once. */
+let unread: Promise<Gift> | null = null;
+const baseline = () => (unread ??= gift([]));
+
 describe("an NPC's cash gift", () => {
   test("a cash give becomes a cash transfer of its amount in minor units, scaled once; a model's own transfer keeps its method", () => {
     const usd = DEFAULT_CURRENCY;
@@ -57,32 +75,20 @@ describe("an NPC's cash gift", () => {
   });
 
   test("the extract prompt says a transfer is between people or their own accounts, never things, and when it is cash", async () => {
-    const { prompt } = await gift([]);
+    const { prompt } = await baseline();
     expect(prompt).toContain("transfer{from,to,amount,method?} (from and to: people, entity ids, or a person's own cash, checking, savings or card account, never things;");
     expect(prompt).toContain('method: "cash" when bills or coins change hands in person');
   });
 
-  test('"Danny hands me $20 for gas" gives the player $20 from Danny\'s own money', async () => {
-    const none = await gift([]);
-    const gifts: JsonObject[] = [{ type: "give", item: "$20", from: "danny_okafor", to: "pov" }, { type: "give", item: "cash", amount: 20, from: "danny_okafor", to: "pov" }];
-    for (const p of gifts) {
-      const got = await gift([p]);
-      expect(got.worth - none.worth).toBe(2000);
-      expect(got.chips.filter((c) => c.startsWith("undo:"))).toEqual(["undo: Danny Okafor paid $20.00 to you"]);
-      expect(got.chips.some((c) => c.startsWith("decline:"))).toBe(false);
-      expect(got.errors).toEqual([]);
-    }
-  });
-
   test("a gift that can't apply gets a decline chip, never silence", async () => {
-    const none = await gift([]);
+    const none = await baseline();
     const got = await gift([{ type: "give", item: "cash", from: "danny_okafor", to: "pov" }]);
     expect(got.worth).toBe(none.worth);
     expect(got.chips.filter((c) => c.startsWith("decline:"))).toEqual(["decline: Didn't apply: Danny Okafor paid $? to you"]);
   });
 
   test("a decline note keeps names' case", async () => {
-    const { state, world } = await gift([]);
+    const { state, world } = await baseline();
     const move = { type: "location", entity: "danny_okafor", place: "harbor_street_114" };
     const notes = [declineNote(move, "no route", "accept", state, world), declineNote(move, "no route", "remove", state, world)];
     expect(notes.every((n) => n.includes('"Danny Okafor'))).toBe(true);
@@ -90,7 +96,7 @@ describe("an NPC's cash gift", () => {
   });
 
   test("with default settings a narrated transfer between people waits on a confirm chip; no money moves until Apply", async () => {
-    const none = await gift([], false);
+    const none = await baseline();
     const got = await gift([{ type: "transfer", from: "danny_okafor", to: "pov", amount: 20, method: "cash" }], false);
     expect(got.worth).toBe(none.worth);
     expect(got.chips.filter((c) => c.startsWith("undo:"))).toEqual([]);

@@ -21,13 +21,15 @@ export interface GmMoney {
   values: Map<string, Record<string, unknown>>;
 }
 
-/** What a test changes in the world before the chat starts: fields added to places (a cash machine, a branch) and set on entities, entities the player never sees, the world's money switches (Build's Custom toggles) and who the POV is. */
+/** What a test changes in the world before the chat starts: fields added to places (a cash machine, a branch) and set on entities, entities the player never sees, the world's money switches (Build's Custom toggles), who the POV is and when the world starts. */
 export interface WorldPatch {
   places?: Record<string, JsonObject>;
   entities?: Record<string, JsonObject>;
   secret?: string[];
   features?: Record<string, boolean>;
   pov?: string;
+  /** The world's start time (`2026-09-30T06:15`), at its own start place: a test of the 1st of the month starts near it. */
+  at?: string;
 }
 
 export class MoneyChat {
@@ -48,7 +50,7 @@ export class MoneyChat {
     const secret = new Set(patch.secret ?? []);
     const touched = [...new Set([...Object.keys(patch.entities ?? {}), ...secret])];
     const edits = [...Object.entries(patch.places ?? {}).map(([id, fields]) => ({ collection: "places", id, fields, hidden: false })), ...touched.map((id) => ({ collection: "entities", id, fields: patch.entities?.[id] ?? {}, hidden: secret.has(id) }))];
-    if (edits.length > 0 || patch.features !== undefined || patch.pov !== undefined) {
+    if (edits.length > 0 || patch.features !== undefined || patch.pov !== undefined || patch.at !== undefined) {
       const draft = rig.body(await rig.send({ type: "lre.editor", op: "get", worldId, base: null }));
       const doc = isRecord(draft.draft) ? draft.draft : {};
       for (const { collection, id, fields, hidden } of edits) {
@@ -67,6 +69,10 @@ export class MoneyChat {
         rig.body(await rig.send({ type: "lre.editor", op: "put", worldId, base: draft.base, collection: "packs", id: "economy", value }));
       }
       if (patch.pov !== undefined) rig.body(await rig.send({ type: "lre.editor", op: "set", worldId, base: draft.base, part: "meta", value: { pov: patch.pov } }));
+      if (patch.at !== undefined) {
+        const start = isRecord(doc.start) ? doc.start : {};
+        rig.body(await rig.send({ type: "lre.editor", op: "set", worldId, base: draft.base, part: "meta", value: { start: { place: start.place ?? null, at: patch.at } } }));
+      }
       rig.body(await rig.send({ type: "lre.world", op: "commit", worldId, base: draft.base }));
     }
     const chatId = rig.host.createChat("Morning.");

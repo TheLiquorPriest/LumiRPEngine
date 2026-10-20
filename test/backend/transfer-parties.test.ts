@@ -12,8 +12,18 @@ import { heldBy } from "../../src/shared/finance";
 const EXTRACT_MARK = "propose concrete state changes";
 const DANNY = "danny_okafor";
 
+/** What a turn leaves: the POV's accounts, the money outside the world and Danny's, every balance, and the chips. */
+interface Turn {
+  pov: Record<"cash" | "checking" | "savings" | "card" | "loan" | "brokerage", number>;
+  outside: number;
+  danny: number;
+  accounts: Record<string, number>;
+  chips: string[];
+  errors: string[];
+}
+
 /** One turn in a fresh Port Alder chat whose reply the extractor reads as `proposals`: the accounts after it, and the chips. */
-async function turn(proposals: JsonObject[]) {
+async function turn(proposals: JsonObject[]): Promise<Turn> {
   const rig = new Rig({ shipped: true });
   const worldId = await rig.newWorld("Alder", "modern_slice_of_life");
   const chatId = rig.host.createChat("Morning.");
@@ -42,9 +52,13 @@ async function turn(proposals: JsonObject[]) {
 
 const money = (chips: string[]): string[] => chips.filter((c) => c.startsWith("undo:") || c.startsWith("decline:"));
 
+/** The same turn with nothing read from its reply, which every test compares against: it plays the same every time, so once. */
+let unread: Promise<Turn> | null = null;
+const baseline = () => (unread ??= turn([]));
+
 describe("a narrated transfer's two sides", () => {
   test("to the player's own savings: checking pays savings, nothing vanishes", async () => {
-    const none = await turn([]);
+    const none = await baseline();
     const got = await turn([{ type: "transfer", from: "pov", to: "acct_pov_savings", amount: 100 }]);
     expect(got.pov).toEqual({ ...none.pov, checking: none.pov.checking - 10000, savings: none.pov.savings + 10000 });
     expect(got.outside).toBe(none.outside);
@@ -53,7 +67,7 @@ describe("a narrated transfer's two sides", () => {
   });
 
   test("from the player's checking to Danny: the player pays from checking, Danny gets it", async () => {
-    const none = await turn([]);
+    const none = await baseline();
     const got = await turn([{ type: "transfer", from: "acct_pov_checking", to: DANNY, amount: 20 }]);
     expect(got.pov).toEqual({ ...none.pov, checking: none.pov.checking - 2000 });
     expect(got.danny).toBe(2000);
@@ -62,7 +76,7 @@ describe("a narrated transfer's two sides", () => {
   });
 
   test("between two of the player's accounts: a move that conserves money and says so", async () => {
-    const none = await turn([]);
+    const none = await baseline();
     const got = await turn([{ type: "transfer", from: "acct_pov_checking", to: "acct_pov_savings", amount: 100 }]);
     expect(got.pov).toEqual({ ...none.pov, checking: none.pov.checking - 10000, savings: none.pov.savings + 10000 });
     expect(got.outside).toBe(none.outside);
@@ -70,7 +84,7 @@ describe("a narrated transfer's two sides", () => {
   });
 
   test("a loan or a thing on either side is refused with a Didn't apply chip, and nothing moves", async () => {
-    const none = await turn([]);
+    const none = await baseline();
     const cases: [JsonObject, string][] = [
       [{ type: "transfer", from: "acct_pov_auto_loan", to: DANNY, amount: 400 }, "decline: Didn't apply: Your auto loan paid $400.00 to Danny Okafor"],
       [{ type: "transfer", from: "pov_truck", to: "pov", amount: 50 }, "decline: Didn't apply: Your pickup paid $50.00 to you"],
@@ -87,9 +101,10 @@ describe("a narrated transfer's two sides", () => {
 
 describe("cash handed over", () => {
   test("a $20 cash gift to the player lands in the wallet, checking unchanged, from Danny's own money", async () => {
-    const none = await turn([]);
+    const none = await baseline();
     const gifts: JsonObject[] = [
       { type: "give", item: "$20", from: DANNY, to: "pov" },
+      { type: "give", item: "cash", amount: 20, from: DANNY, to: "pov" },
       { type: "transfer", from: DANNY, to: "pov", amount: 20, method: "cash" },
     ];
     for (const p of gifts) {
@@ -98,6 +113,7 @@ describe("cash handed over", () => {
       expect(got.danny).toBe(-2000);
       expect(got.outside).toBe(none.outside);
       expect(money(got.chips)).toEqual(["undo: Danny Okafor paid $20.00 to you"]);
+      expect(got.errors).toEqual([]);
     }
   });
 });

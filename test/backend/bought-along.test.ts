@@ -9,6 +9,7 @@
 
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import type { JsonObject } from "../../src/shared/json";
+import type { ReadContext } from "../../src/engine/registry";
 import type { LedgerEvent } from "../../src/shared/ledger";
 import { toChain } from "../../src/backend/ledger-io";
 import { boughtAlong } from "../../src/backend/runtime";
@@ -153,14 +154,23 @@ function purchase(item: string, dollars: number): JsonObject {
   return { type: "purchase", item, price: Math.round(dollars * 100), payer: "pov" };
 }
 
-describe("a stated price is the Buy's when it is within ±25% of what it charged, the price the player typed, or its catalog row's range", () => {
-  test("the Buy told again drops; another noun is a new purchase; the same noun at a price off the Buy's asks", async () => {
+/** A Port Alder chat's read context after a typed Buy, as the comparisons read it: both tests read the same one, so it plays once. */
+let read: Promise<ReadContext> | null = null;
+function afterBuy(): Promise<ReadContext> {
+  read ??= (async () => {
     const { rig, chatId } = await after("newspaper", null);
     const core = await rig.rt.ledger.core(chatId, rig.host.userId);
     const state = core?.fold(toChain(await rig.host.chats.messages(chatId, rig.host.userId))).state;
     const world = state ? core?.worldAt(state.revision) : undefined;
     if (!state || !world) throw new Error("no state");
-    const ctx = rig.rt.registry.context(world, state);
+    return rig.rt.registry.context(world, state);
+  })();
+  return read;
+}
+
+describe("a stated price is the Buy's when it is within ±25% of what it charged, the price the player typed, or its catalog row's range", () => {
+  test("the Buy told again drops; another noun is a new purchase; the same noun at a price off the Buy's asks", async () => {
+    const ctx = await afterBuy();
     // A typed $9 sandwich charged $2.43, a typed $3 coffee charged $5.38, a typed $5 milk charged
     // $3.63, a typed $6 pair of coffees charged $10.76.
     expect(boughtAlong(purchase("sandwich", 9), [bought("Bought Deli sandwich", 243)], ctx, [900])).toBe("retold");
@@ -177,12 +187,7 @@ describe("a stated price is the Buy's when it is within ±25% of what it charged
   });
 
   test("another one, one for someone, a different quantity or a ruled-out qualifier is a new purchase", async () => {
-    const { rig, chatId } = await after("newspaper", null);
-    const core = await rig.rt.ledger.core(chatId, rig.host.userId);
-    const state = core?.fold(toChain(await rig.host.chats.messages(chatId, rig.host.userId))).state;
-    const world = state ? core?.worldAt(state.revision) : undefined;
-    if (!state || !world) throw new Error("no state");
-    const ctx = rig.rt.registry.context(world, state);
+    const ctx = await afterBuy();
     const coffee = [bought("Bought Coffee", 538)];
     expect(boughtAlong(purchase("another coffee", 5.38), coffee, ctx)).toBeNull();
     expect(boughtAlong(purchase("second coffee", 5.38), coffee, ctx)).toBeNull();

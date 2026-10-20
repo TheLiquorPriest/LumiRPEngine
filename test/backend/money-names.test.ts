@@ -196,17 +196,18 @@ describe("each journal line names the other side of its own payment", () => {
       ["helen_kowalczyk", "Household share", "Household share, 1A", "Jess Kowalczyk"],
       ["jess_kowalczyk", "Household share, 1A", "Household share", "Helen Kowalczyk"],
     ] as const) {
-      const chat = await MoneyChat.start({ pov });
-      // Both pay their shares in on the 1st of October; a timelapse stops where something interrupts it, so time passes until they're in.
+      // Both pay their shares in on the 1st of October, so the chat starts the day before; a timelapse
+      // stops where something interrupts it, so time passes until they're in.
+      const chat = await MoneyChat.start({ pov, at: "2026-09-30T06:15" });
       let view = await chat.hub();
-      for (let i = 0; i < 12 && others(view, JOINT, theirs).length === 0; i++) {
-        await chat.timelapse(4 * 1440);
+      for (let i = 0; i < 4 && others(view, JOINT, theirs).length === 0; i++) {
+        await chat.timelapse(1440);
         view = await chat.hub();
       }
       expect(others(view, JOINT, mine)).toEqual([null]);
       expect(others(view, JOINT, theirs)).toEqual([them]);
     }
-  }, 120_000);
+  }, 30_000);
 
   test("a trade names the market it was made on, never its key", async () => {
     const chat = await MoneyChat.start();
