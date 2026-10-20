@@ -611,6 +611,7 @@ export function businessView(ctx: ReadContext, api: FinanceApi, business: Entity
     id: business,
     name: labelOf(ctx, business),
     role,
+    mayDraw: mayDraw(api, ctx.state, party, business),
     owners: ownerLines(ctx, api, viewer, business),
     accounts: api.accountsOf(ctx, business, "sees"),
     // The finance view fills these: it knows which accounts it already shows as the viewer's own.

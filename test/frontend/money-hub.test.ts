@@ -270,7 +270,7 @@ describe("what a party's roles allow", () => {
     expect(cardControls(v, card({ id: "c", account: "shop", holderId: "danny" }))).toEqual(["freeze", "lost", "replace"]);
   });
 
-  const shop = (role: BusinessView["role"]): BusinessView => ({ id: "shop", name: "The shop", role, owners: [], accounts: [], managed: [], places: [], books: { period: "Oct", revenue: 0, expenses: 0, payroll: 0, taxes: 0, profit: 0, lines: [] }, months: [], sales: [], invoices: [], employees: [], taxes: [], route: null });
+  const shop = (role: BusinessView["role"]): BusinessView => ({ id: "shop", name: "The shop", role, mayDraw: role === "owner" || role === "joint", owners: [], accounts: [], managed: [], places: [], books: { period: "Oct", revenue: 0, expenses: 0, payroll: 0, taxes: 0, profit: 0, lines: [] }, months: [], sales: [], invoices: [], employees: [], taxes: [], route: null });
 
   test("a business's own accounts its owner runs without a role on them: its page lists them, with autopay, cards and standing payments, never spending", () => {
     const till = account({ id: "till", class: "business_checking", role: null, manages: true, cents: 250000, cards: [card({ id: "tc", account: "till", holderId: "danny" })] });
