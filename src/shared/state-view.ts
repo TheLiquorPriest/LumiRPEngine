@@ -2,6 +2,7 @@
 // the fold and pushed as a snapshot plus deltas (ARCHITECTURE §5). Player-facing views are
 // filtered to what the POV knows (DESIGN §7); GM previews are labelled and never recorded.
 
+import type { ClaimsPolicy } from "./claims";
 import type { JsonObject, JsonValue } from "./json";
 import type { MindCallTrace, MindsGmView } from "./minds";
 import type {
@@ -120,6 +121,10 @@ export type ChipKind =
   | "read_failed"
   /** The engine run before the reply failed, so nothing was generated; Retry runs the engine and then the reply (DESIGN §5.1). */
   | "engine_failed"
+  /** A typed action uses a thing the world doesn't have and the turn waits, nothing generated, on Add or Not an action; either resumes it (DESIGN §9.4 player claims). */
+  | "claim"
+  /** A thing the player said they had, made real for their action ("Added: a coffee"), with Undo (DESIGN §9.4 player claims). */
+  | "claimed"
   /** A ✎ fix or GM edit on the head ("Corrected …"), with Undo (DESIGN §12). */
   | "fix"
   /** A write held during a reply that no longer applied when the reply finished (P2), with Dismiss. */
@@ -241,6 +246,8 @@ export interface ControlsView {
     bandTiers: Record<Band, string[]>;
     /** The world's floors on effective levels (DESIGN §9.1, §11): its ruleset's, and Space 3 while the grid system is on; the sliders don't go below them either. */
     floors: Partial<Record<DomainId, Level>>;
+    /** What this chat makes of a typed action's thing the world doesn't have (DESIGN §9.4): its own marker's, else the world's default, else Story's. */
+    claims: ClaimsPolicy;
   };
   time: {
     sceneType: SceneTypeId;

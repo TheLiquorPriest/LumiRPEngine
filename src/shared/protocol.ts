@@ -6,6 +6,7 @@
 // `lre.error` carrying the same `reqId`. State arrives unsolicited as snapshots and deltas.
 
 import type { JsonObject, JsonValue } from "./json";
+import type { ClaimsPolicy } from "./claims";
 import type { LoreIndexAddition } from "./lore";
 import type { Limit, MindEditOp, MindsRunView } from "./minds";
 import type { ActionId, BoundMode, ChatId, ChipId, DomainId, EntityId, FieldId, KindId, Level, MessageId, PanelId, PlaceId, RelationTypeId, RevisionId, StageId, TierId, TrackId, WorldId } from "./ids";
@@ -173,13 +174,14 @@ export interface GmRequest extends Request<"lre.gm"> {
 }
 
 /**
- * A Play change to the running chat: a realism, time, adjudication or Upgrade marker. With
- * `preview`, nothing is written. An Upgrade with `merge` brings the revision's definition changes in
- * as the picks say.
+ * A Play change to the running chat: a realism, time, player-claims, adjudication or Upgrade
+ * marker. With `preview`, nothing is written. An Upgrade with `merge` brings the revision's
+ * definition changes in as the picks say.
  */
 export type MarkerRequest = Request<"lre.marker"> & { chatId: ChatId; preview?: true } & (
     | { kind: "resolve"; domain: DomainId; scope: ResolveScope; to: Level }
     | { kind: "time"; control: TimeControl; scope: TimeScope; to: JsonValue }
+    | { kind: "claims"; to: ClaimsPolicy }
     | { kind: "adjudicate"; to: AdjudicationDef }
     | { kind: "migrate"; to: RevisionId; merge?: UpgradePicks }
   );

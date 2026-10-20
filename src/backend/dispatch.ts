@@ -3,6 +3,7 @@
 // windows (P2: `pending: true`).
 
 import type { Band, ChatId, DomainId, RevisionId, UserId, WorldId } from "../shared/ids";
+import { CLAIM_MODE_LABEL } from "../shared/claims";
 import { DOMAINS, pathSafe } from "../shared/ids";
 import type { JsonObject, JsonValue } from "../shared/json";
 import { hasOwn, isRecord, safeKey } from "../shared/json";
@@ -302,7 +303,7 @@ export class Dispatcher {
         return;
       }
       case "lre.marker": {
-        const body = validMarkerBody(r.kind === "resolve" ? { kind: "resolve", domain: r.domain, scope: r.scope, to: r.to } : r.kind === "time" ? { kind: "time", control: r.control, scope: r.scope, to: r.to } : r.kind === "adjudicate" ? { kind: "adjudicate", to: r.to } : { kind: "migrate", to: r.to, merge: r.merge });
+        const body = validMarkerBody(r.kind === "resolve" ? { kind: "resolve", domain: r.domain, scope: r.scope, to: r.to } : r.kind === "time" ? { kind: "time", control: r.control, scope: r.scope, to: r.to } : r.kind === "claims" ? { kind: "claims", to: r.to } : r.kind === "adjudicate" ? { kind: "adjudicate", to: r.to } : { kind: "migrate", to: r.to, merge: r.merge });
         // A retired control (an earlier build's starting markers) stays readable in stored ledgers, but nothing sets it now.
         if (!body || (body.kind === "time" && !TIME_CONTROLS.some((c) => c === body.control))) throw new RequestError("bad_request", "not a valid settings change");
         if (body.kind === "migrate") {
@@ -670,6 +671,8 @@ export class Dispatcher {
       if (to > from && to >= 2) lines.push({ text: `People without ${name.toLowerCase()} detail get it from the pinned tables when you open them.`, tone: "materialize" });
     } else if (body.kind === "time") {
       lines.push({ text: `${body.control} changes from the next turn; earlier turns keep the setting they were planned with.`, tone: "info" });
+    } else if (body.kind === "claims") {
+      lines.push({ text: `What you say you have that the world doesn't: ${CLAIM_MODE_LABEL[body.to.mode]}${body.to.mode === "real" ? (body.to.capped ? ", asking above the world's claim cap" : ", at any price") : ""}, from the next turn; earlier turns keep what theirs did.`, tone: "info" });
     } else if (body.kind === "adjudicate") {
       lines.push({ text: "Checks are decided this way from the next turn; earlier turns keep how theirs were decided.", tone: "info" });
     } else {

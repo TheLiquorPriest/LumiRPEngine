@@ -49,6 +49,8 @@ const CHIP_ICON: Record<ChipKind, IconName> = {
   contradiction: "info",
   read_failed: "alert",
   engine_failed: "alert",
+  claim: "help",
+  claimed: "sparkle",
   fix: "edit",
   refused: "alert",
 };

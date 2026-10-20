@@ -1,6 +1,7 @@
 // Every user interaction becomes exactly one of these protocol requests (ARCHITECTURE §4).
 // Kept pure so the mapping from a tap to its message is tested directly.
 
+import type { ClaimsPolicy } from "../shared/claims";
 import type { JsonObject, JsonValue } from "../shared/json";
 import type { ChatId, DomainId, EntityId, InterruptClass, InterruptPolicy, Level, TierId, WorldId } from "../shared/ids";
 import type { EntityUpgradePick, KeepLine, ResolveScope, TimeControl, TimelapseTarget, TimeScope, UpgradePicks } from "../shared/ledger";
@@ -16,8 +17,9 @@ export type Req<K extends RequestBody["type"]> = Extract<RequestBody, { type: K 
 /**
  * What a chip button does. `regenerate` (the Retry chip on an empty reply, D32) runs the host's
  * own Regenerate: only the frontend can start it. A swipe option (`renarrate`, `rerun`), a
- * contradiction's Re-narrate and the Retry of an unread action (`read_failed`, a Re-run) record
- * the one-shot choice with `lre.chip`, then run the same Regenerate. Every other choice, the pause
+ * contradiction's Re-narrate, the Retry of an unread action (`read_failed`, a Re-run) and the
+ * answer to a claim's question (Add, Not an action: the turn waiting on it resumes) record the
+ * one-shot choice with `lre.chip`, then run the same Regenerate. Every other choice, the pause
  * chip's Keep and Discard included, is `lre.chip {chip, choice: action.id}`, with the value an
  * action's input asked for as its payload.
  */
@@ -53,7 +55,7 @@ export function upgradeRequest(chatId: ChatId, preview: UpgradePreview, choices:
 export function chipIntent(chip: Chip, choice: string, chatId: ChatId, payload?: JsonObject): ChipIntent {
   if (choice === "regenerate") return { request: null, regenerate: true };
   const request: Req<"lre.chip"> = payload ? { type: "lre.chip", chatId, chip: chip.id, choice, payload } : { type: "lre.chip", chatId, chip: chip.id, choice };
-  return { request, regenerate: (chip.kind === "swipe_option" && (choice === "renarrate" || choice === "rerun")) || (chip.kind === "contradiction" && choice === "renarrate") || (chip.kind === "read_failed" && choice === "rerun") };
+  return { request, regenerate: (chip.kind === "swipe_option" && (choice === "renarrate" || choice === "rerun")) || (chip.kind === "contradiction" && choice === "renarrate") || (chip.kind === "read_failed" && choice === "rerun") || (chip.kind === "claim" && (choice === "add" || choice === "drop")) };
 }
 
 /** Convert one Keep-report entry; markers have no event ref and cannot be converted. */
@@ -161,6 +163,11 @@ export function resolveMarker(chatId: ChatId, domain: DomainId, scope: ResolveSc
 /** An `adjudicate` marker: how checks are decided in the running chat from the next turn (Settings → Checks → This chat). */
 export function adjudicateMarker(chatId: ChatId, to: AdjudicationDef): Req<"lre.marker"> {
   return { type: "lre.marker", chatId, kind: "adjudicate", to };
+}
+
+/** A `claims` marker: what a typed action's thing the world doesn't have becomes in the running chat from the next turn (GM → This chat → Realism). */
+export function claimsMarker(chatId: ChatId, to: ClaimsPolicy): Req<"lre.marker"> {
+  return { type: "lre.marker", chatId, kind: "claims", to };
 }
 
 /**

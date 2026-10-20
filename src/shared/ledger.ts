@@ -7,6 +7,7 @@
 // The journal is authoritative; message metadata is its re-asserted mirror (DESIGN §4.3).
 
 import type { JsonObject, JsonValue } from "./json";
+import type { ClaimsPolicy } from "./claims";
 import type { AdjudicationDef } from "./world";
 import type {
   ActionId,
@@ -235,7 +236,9 @@ export type MarkerBody =
   | { kind: "migrate"; to: RevisionId; merge?: UpgradePicks }
   | { kind: "resolve"; domain: DomainId; scope: ResolveScope; to: Level }
   | { kind: "time"; control: TimeControl | RetiredTimeControl; scope: TimeScope; to: JsonValue }
-  | { kind: "adjudicate"; to: AdjudicationDef };
+  | { kind: "adjudicate"; to: AdjudicationDef }
+  /** What a typed action's thing the world doesn't have becomes in this chat from now on (DESIGN §9.4 player claims). */
+  | { kind: "claims"; to: ClaimsPolicy };
 
 /** A message-level intent marker: a pure intent with no values (DESIGN §4.3). */
 export type Marker = MarkerBody & {

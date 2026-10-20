@@ -5,6 +5,8 @@
 
 import type { Band, DomainId, EntityId, Level, RealismPresetId } from "../shared/ids";
 import { BANDS, DOMAINS } from "../shared/ids";
+import type { ClaimsPolicy } from "../shared/claims";
+import { DEFAULT_CLAIMS, readClaims } from "../shared/claims";
 import type { MarkerBody } from "../shared/ledger";
 import type { WorldDoc } from "../shared/world";
 import { objectiveWhen } from "../shared/world";
@@ -59,6 +61,14 @@ export function realismMarkers(target: RealismState): Extract<MarkerBody, { kind
   for (const d of DOMAINS) out.push({ kind: "resolve", domain: d, scope: { all: true }, to: target.levels[d] });
   for (const b of BANDS) for (const d of DOMAINS) out.push({ kind: "resolve", domain: d, scope: { tier: b }, to: capOf(target.tierCaps, b, d) });
   return out;
+}
+
+/**
+ * The player-claims policy a chat plays by (DESIGN §9.4): its latest `claims` marker's (the starting
+ * one included), else, in a chat started before claims existed, the world's default, else Story's.
+ */
+export function claimsOf(world: Pick<WorldDoc, "realism">, state: Pick<WorldState, "claims">): ClaimsPolicy {
+  return state.claims ?? readClaims(world.realism.claims) ?? { ...DEFAULT_CLAIMS };
 }
 
 export interface LevelChange {

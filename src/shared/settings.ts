@@ -4,6 +4,7 @@
 // conservative default is one tap to change (D31).
 
 import type { Band, BoundMode, DomainId, InterruptClass, InterruptPolicy, Level, ModelUsePresetId, RealismPresetId, SceneTypeId } from "./ids";
+import type { ClaimsPolicy } from "./claims";
 import type { AdjudicationDef, StepPurpose } from "./world";
 import type { MindsSettings } from "./minds";
 import { isMindPurpose } from "./minds";
@@ -195,6 +196,8 @@ export interface RealismSettings {
   levels: Record<DomainId, Level>;
   /** Caps per detail band, keyed by band id. */
   tierCaps: Record<Band, Partial<Record<DomainId, Level>>>;
+  /** What a typed action's thing the world doesn't have becomes (DESIGN §9.4); each named preset carries its own. */
+  claims: ClaimsPolicy;
 }
 
 export interface TimeSettings {

@@ -2,6 +2,7 @@
 // D4 per-connection extraction learning (`userStorage/extraction-learning.json`; DESIGN §11).
 
 import { defaultAdjudication, readAdjudication } from "../shared/adjudication";
+import { CLAIM_PRESETS, readClaims } from "../shared/claims";
 import type { DomainId, InterruptPolicy, Level, ModelUsePresetId, RealismPresetId, UserId } from "../shared/ids";
 import { BANDS, DOMAINS, INTERRUPT_CLASSES } from "../shared/ids";
 import type { JsonObject, JsonValue } from "../shared/json";
@@ -24,14 +25,17 @@ export const REALISM_PRESETS: Record<Exclude<RealismPresetId, "custom">, Omit<Re
   story: {
     levels: { money: 1, gear: 1, vehicles: 1, castlife: 1, relationships: 1, space: 2, calendar: 2, weather: 1, sheets: 1 },
     tierCaps: { principal: {}, supporting: {}, background: {} },
+    claims: { ...CLAIM_PRESETS.story },
   },
   grounded: {
     levels: { money: 2, gear: 2, vehicles: 2, castlife: 2, relationships: 2, space: 2, calendar: 3, weather: 2, sheets: 2 },
     tierCaps: { principal: {}, supporting: {}, background: capAll(1) },
+    claims: { ...CLAIM_PRESETS.grounded },
   },
   simulation: {
     levels: { money: 4, gear: 4, vehicles: 4, castlife: 4, relationships: 4, space: 4, calendar: 4, weather: 3, sheets: 3 },
     tierCaps: { principal: capAll(4), supporting: capAll(3), background: capAll(2) },
+    claims: { ...CLAIM_PRESETS.simulation },
   },
 };
 
@@ -233,6 +237,9 @@ function normalize(raw: unknown): UserSettings {
     fill.modelUse = { preset, ...structuredClone(MODEL_USE_PRESETS[preset]) };
     fill.minds = defaultMindsSettings(preset);
   }
+  // A file saved before player claims existed plays them as its named realism preset does.
+  const realism = isRecord(raw.realism) ? raw.realism.preset : undefined;
+  if (realism === "grounded" || realism === "simulation") fill.realism.claims = { ...CLAIM_PRESETS[realism] };
   const merged = mergePatch(JSON.parse(JSON.stringify(fill)) as JsonValue, migrateTimeouts(lifted(raw)));
   return isRecord(merged) && merged.v === 1 ? conform(merged, fill) : defaultSettings();
 }
@@ -372,7 +379,7 @@ function conform(v: JsonObject, d: UserSettings): UserSettings {
     }
     tierCaps[band] = caps;
   }
-  const realism: RealismSettings = { preset: oneOf(re.preset, ["story", "grounded", "simulation", "custom"] as const) ?? d.realism.preset, levels, tierCaps };
+  const realism: RealismSettings = { preset: oneOf(re.preset, ["story", "grounded", "simulation", "custom"] as const) ?? d.realism.preset, levels, tierCaps, claims: readClaims(re.claims) ?? { ...d.realism.claims } };
   const t = isRecord(v.time) ? v.time : {};
   const rawInterrupts = isRecord(t.interrupts) ? t.interrupts : {};
   const interrupts = { ...d.time.interrupts };

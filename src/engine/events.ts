@@ -6,6 +6,7 @@
 
 import type { JsonValue } from "../shared/json";
 import { readAdjudication } from "../shared/adjudication";
+import { readClaims } from "../shared/claims";
 import { hasOwn, isRecord, safeKey } from "../shared/json";
 import type { DomainId, EntityId, Level } from "../shared/ids";
 import { BANDS, DOMAINS, INTERRUPT_CLASSES } from "../shared/ids";
@@ -423,6 +424,10 @@ export function validMarkerBody(raw: unknown): MarkerBody | null {
       const to = readAdjudication(raw.to);
       return to ? { kind: "adjudicate", to } : null;
     }
+    case "claims": {
+      const to = readClaims(raw.to);
+      return to ? { kind: "claims", to } : null;
+    }
     default:
       return null;
   }
@@ -501,6 +506,9 @@ export function applyMarker(state: WorldState, raw: MarkerBody, env?: MarkerEnv)
       return [];
     case "adjudicate":
       state.adjudication = body.to;
+      return [];
+    case "claims":
+      state.claims = body.to;
       return [];
   }
 }
