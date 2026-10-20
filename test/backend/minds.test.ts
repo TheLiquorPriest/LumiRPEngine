@@ -176,6 +176,21 @@ describe("minds around a turn", () => {
     expect(helen).not.toContain("recipe book");
   });
 
+  test("what a memory says they told reaches only someone who was with them for the turn", async () => {
+    const rig = new Rig({ shipped: true });
+    fakeModels(rig);
+    const minds = rig.host.quietReply;
+    rig.host.quietReply = (req) => (MEMORY.exec(req.messages[0]?.content ?? "")?.[1] === "Danny Okafor" ? JSON.stringify({ notes: [], commitments: [], resolved: [], plans: [], told: [{ to: ["Priya Nair", "Dale Whitcomb", "Jordan Ellis"], what: "DANNY-TOLD the boat is sold" }] }) : (minds?.(req) ?? "{}"));
+    const chatId = await alderChat(rig);
+    await rig.turn(chatId, "Hello.", "They look up.");
+    const { state } = await stateOf(rig, chatId);
+    expect(readCharacter(state, "priya_nair").witness.filter((w) => w.how === "told").map((w) => [w.by, w.what])).toEqual([["danny_okafor", "DANNY-TOLD the boat is sold"]]);
+    // Dale is at the marina, and the POV has no mind: neither hears it from Danny's memory.
+    expect(placeOfEntity(state, "dale_whitcomb")).not.toBe(placeOfEntity(state, "pov"));
+    expect(readCharacter(state, "dale_whitcomb").witness).toEqual([]);
+    expect(readCharacter(state, "pov").witness).toEqual([]);
+  });
+
   test("full secrecy gives the narrator each monologue and intent", async () => {
     const rig = new Rig({ shipped: true });
     fakeModels(rig);

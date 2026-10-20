@@ -361,8 +361,8 @@ export function turnPresence(reg: Registry, world: WorldDoc, input: Pick<PostMin
   };
 }
 
-/** The `memory` step's answer as event data. */
-function memoryData(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, who: EntityId, raw: JsonValue): JsonObject | null {
+/** The `memory` step's answer as event data; what they told reaches only `listeners`, who were with them for the turn. */
+function memoryData(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, who: EntityId, raw: JsonValue, listeners: readonly EntityId[]): JsonObject | null {
   if (!isRecord(raw)) return null;
   const now = state.clock;
   const notes: MindNote[] = (Array.isArray(raw.notes) ? raw.notes : []).slice(0, MIND_TEXT_CAPS.notes).flatMap((n, i) => {
@@ -384,7 +384,7 @@ function memoryData(reg: Registry, world: WorldDoc, state: Readonly<WorldState>,
   const told = (Array.isArray(raw.told) ? raw.told : []).slice(0, MIND_TEXT_CAPS.tolds).flatMap((t) => {
     if (!isRecord(t)) return [];
     const what = capText(str(t.what), MIND_TEXT_CAPS.told);
-    const to = [...new Set((Array.isArray(t.to) ? t.to : []).map((n) => personNamed(reg, world, state, str(n))).filter((n): n is EntityId => n !== null && n !== who))];
+    const to = [...new Set((Array.isArray(t.to) ? t.to : []).map((n) => personNamed(reg, world, state, str(n))).filter((n): n is EntityId => n !== null && n !== who && listeners.includes(n)))];
     return what === "" || to.length === 0 ? [] : [{ to, what }];
   });
   const summary = capText(str(raw.summary), MIND_TEXT_CAPS.summary);
@@ -426,7 +426,9 @@ export async function postMinds(deps: MindsDeps, input: PostMindsInput): Promise
       const usage = { tokens: 0 };
       const t0 = performance.now();
       const raw = input.signal.aborted ? null : await deps.steps.helperJson("memory", prompt.text, memoryContext(scope, { user: input.user, reply: input.reply, left: left.includes(id) }), memoryConfig, userId, input.signal, { guidance: input.guidance?.memory ?? deps.presets.last(userId).guidance.memory ?? "", usage });
-      const data = raw === null ? null : memoryData(reg, world, w.state, id, raw);
+      // Their listeners: who heard the turn with them, and, unless the POV left them, whoever it met.
+      const listeners = left.includes(id) ? said.who : [...said.who, ...(met?.who ?? [])];
+      const data = raw === null ? null : memoryData(reg, world, w.state, id, raw, listeners);
       traces.push({ purpose: "memory", phase: "post", who: traceName(reg, world, state, id), level: levels.get(id) ?? "near", outcome: data ? "recorded" : "failed", ms: Math.round(performance.now() - t0), tokens: usage.tokens, prompt: prompt.source });
       return data;
     }),
