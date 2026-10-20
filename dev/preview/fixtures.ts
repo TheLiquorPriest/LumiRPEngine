@@ -254,8 +254,15 @@ export function stateFixture(chatId: string): StateView {
               { slot: "scene", label: "Scene", tokens: 142, clipped: false },
               { slot: "cast", label: "Cast", tokens: 210, clipped: false },
               { slot: "montage", label: "Montage", tokens: 0, clipped: false },
+              { slot: "minds", label: "Minds", tokens: 96, clipped: false, cut: 1 },
             ],
             budget: { sections: 600, used: 416 },
+            minds: [
+              { purpose: "mind", phase: "pre", who: "Rosie Alvarez", level: "live", outcome: "recorded", ms: 2140, tokens: 812, prompt: "default" },
+              { purpose: "mind", phase: "pre", who: "Dev Patel", level: "near", outcome: "failed", ms: 6020, tokens: 0, prompt: "override" },
+              { purpose: "skip", phase: "skip", who: "", level: null, outcome: "recorded", ms: 1480, tokens: 390, prompt: "world" },
+              { purpose: "memory", phase: "post", who: "Rosie Alvarez", level: "live", outcome: "recorded", ms: 1720, tokens: 540, prompt: "default" },
+            ],
             lore: [
               {
                 step: "interpret",
@@ -630,6 +637,7 @@ function gmMinds(): MindsGmView {
         },
         plans: [
           plan(devBracket),
+          plan({ id: "pl_dev_rent", what: "Pay Sam back his half of the gas bill", kind: "pay", when: { from: 2520, to: 2550 }, where: null, with: ["pov"], priority: 3, status: "open", made: 1890, source: "mind", closed: null, reason: null, cents: 3150 }),
           plan({ id: "pl_dev_banner", what: "Help Mara hang the banner and the lights", kind: "meet", when: { from: 7800, to: 7920 }, where: "apartment", with: ["npc_mara"], priority: 5, status: "open", made: 1350, source: "memory", closed: null, reason: null }),
           plan({ id: "pl_dev_drill", what: "Bring Sam's drill back", kind: "errand", when: { from: 1080, to: 1110 }, where: "apartment", with: ["pov"], priority: 2, status: "dropped", made: 600, source: "gm", closed: 1110, reason: "Stayed late at the garage" }),
         ],
