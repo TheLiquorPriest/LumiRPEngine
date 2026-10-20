@@ -623,7 +623,7 @@ describe("a business's owner manages its accounts by their role on the business"
     const employee = await MoneyChat.start();
     expect((await employee.hub()).flows.some((f) => f.id === "flow_shop_lease")).toBe(false);
     expect(await employee.play({ action: "flow_update", params: { flow: "flow_shop_lease", amount: 10000 } })).toContain("Shop lease isn't Jordan Ellis's to change");
-    expect(await employee.play(autopayAction(LIFT_LOAN, "none", null, null))).toContain("requires manages(self, account)");
+    expect(await employee.play(autopayAction(LIFT_LOAN, "none", null, null))).toContain("Set autopay: it didn't happen");
     const shop = await employee.party(BUSINESS);
     expect(shop.flows.find((f) => f.id === "flow_shop_lease")?.amount).toBe("$3,200.00");
     expect(account(shop, LIFT_LOAN).autopay?.mode).toBe("fixed");

@@ -145,3 +145,17 @@ describe("answering a puzzle the quest log masks", () => {
     expect(rig.rt.ledger.errors).toEqual([]);
   });
 });
+
+describe("the narrator's sections", () => {
+  test("an action a secret gates, tried before its stage, is told as the player reads it, never by the secret's id", async () => {
+    const rig = new Rig({ shipped: true });
+    const chatId = await starterChat(rig, "modern_slice_of_life", "Port Alder");
+    // Read the past-due notice needs Port Alder's secret at its notice stage; the chat starts on its cue.
+    rig.body(await rig.send({ type: "lre.action", chatId, action: "read_past_due_notice", params: {}, source: "palette" }));
+    const g = await rig.host.start(chatId, { type: "normal" });
+    const sections = (rig.host.lastInterceptor?.mutated ?? []).map((m) => m.content ?? "").join("\n");
+    await rig.host.finish(g, "The desk is bare.");
+    expect(sections).toContain("Read the past-due notice: it didn't happen (Not possible here and now)");
+    for (const said of ["s_shop_trouble", "stage("]) expect(sections).not.toContain(said);
+  });
+});

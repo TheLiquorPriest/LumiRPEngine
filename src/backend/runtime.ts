@@ -2242,14 +2242,15 @@ function planOutline(plan: EngineTurnPlan, prose: PlanProse | undefined): string
  * What the narrator must know about the turn's plan (DESIGN §6.2 Outcome, §9.2 Montage, §11): each
  * action's result in the order they played, with its roll, or why it couldn't run, and that the
  * rest of the message hasn't happened when the queue stopped; a fight's round; and a timelapse's
- * Montage groups and money.
+ * Montage groups and money. Why an action couldn't run is told as the player reads it, never as a
+ * requirement's expression, which may name a secret track or someone the player doesn't know.
  */
 export function planLines(plan: EngineTurnPlan, world: WorldDoc, registry: Registry): { outcome: string[]; montage: string[] } {
   const outcome: string[] = [];
   for (const res of plan.resolutions) {
     const label = (world.actions[res.action] ?? registry.actions.get(res.action))?.label ?? res.action;
     const reasons = res.rejected.slice(0, 3).map((r) => r.rejection.reason);
-    if (!res.ok) outcome.push(`${label}: it didn't happen (${res.failed?.reason ?? "not possible"}). Narrate the attempt failing.`);
+    if (!res.ok) outcome.push(`${label}: it didn't happen (${res.failed ? playerReason(res.failed).replace(/\.$/, "") : "not possible"}). Narrate the attempt failing.`);
     else if (res.check || res.adjudged) {
       outcome.push(checkLine(label, res));
       for (const r of reasons) outcome.push(`Not possible: ${r}.`);
