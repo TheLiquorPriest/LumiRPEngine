@@ -389,8 +389,9 @@ function shows(view: FinanceView, feature: FinanceFeature): boolean {
 }
 
 export interface OverviewBlocks {
-  /** Assets and what's owed, apart from the net worth. */
+  /** Assets and what's owed, apart from the net worth: in the full books, or where investments or property put more than money in it. */
   assets: boolean;
+  /** What the net worth is made of, line by line: the full books' alone. */
   breakdown: boolean;
   cashFlowByCategory: boolean;
   /** What's due in and out over the next 30 days. */
@@ -401,7 +402,7 @@ export interface OverviewBlocks {
 
 export function overviewBlocks(view: FinanceView): OverviewBlocks {
   const assets = view.detail || shows(view, "investments") || shows(view, "property");
-  return { assets, breakdown: assets, cashFlowByCategory: view.detail, cashFlowAhead: view.detail, upcoming: view.detail ? 20 : 5, recent: view.detail ? 20 : 5 };
+  return { assets, breakdown: view.detail, cashFlowByCategory: view.detail, cashFlowAhead: view.detail, upcoming: view.detail ? 20 : 5, recent: view.detail ? 20 : 5 };
 }
 
 export interface AccountBlocks {

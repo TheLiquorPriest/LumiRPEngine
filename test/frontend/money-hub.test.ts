@@ -206,6 +206,9 @@ describe("realism gating", () => {
   test("the overview, investments, credit and work show their detail only at the top level", () => {
     expect(overviewBlocks(view())).toEqual({ assets: false, breakdown: false, cashFlowByCategory: false, cashFlowAhead: false, upcoming: 5, recent: 5 });
     expect(overviewBlocks(view({ level: 4, detail: true }))).toEqual({ assets: true, breakdown: true, cashFlowByCategory: true, cashFlowAhead: true, upcoming: 20, recent: 20 });
+    // Property running at Money 3 puts a house in the net worth: assets and what's owed show, but what it's made of stays in the full books.
+    expect(overviewBlocks(view({ features: ["flows", "property"] }))).toMatchObject({ assets: true, breakdown: false });
+    expect(overviewBlocks(view({ features: ["investments"] }))).toMatchObject({ assets: true, breakdown: false });
     expect(investmentBlocks(view())).toEqual({ lots: false, gains: false, income: false });
     expect(investmentBlocks(view({ features: ["capital_gains"] }))).toEqual({ lots: true, gains: true, income: false });
     expect(creditBlocks(view())).toEqual({ factors: false, report: false, history: 0 });
