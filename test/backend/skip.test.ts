@@ -203,6 +203,24 @@ describe("time skips", () => {
     expect(state.clock).toBe(end?.at ?? NaN);
   });
 
+  test("the unit cap ends a skip on a slot boundary, though a beat falls inside the slot it can't run", async () => {
+    const { rig, chatId, day, at } = await portAlder();
+    rig.body(await rig.send({ type: "lre.marker", chatId, kind: "time", control: "unit_cap", scope: { all: true }, to: { agentDays: 2, events: 5000 } }));
+    rig.body(await rig.send({ type: "lre.settings.set", patch: { modelUse: { steps: { skip: { enabled: true, signals: ["always"] } } } } }));
+    const { world } = await folded(rig, chatId);
+    rig.host.quietReply = (req) => (req.messages.some((m) => m.content.includes("skipping ahead in time")) ? JSON.stringify({ beats: [{ at: formatStamp(calendarOf(world), at(day, "12:30")), reason: "Lunch at the diner" }] }) : "{}");
+    const calls: { at: number; who: string[]; reason: string }[] = [];
+    rig.rt.beatMinds = fakeMinds(calls, () => false);
+    await skipDays(rig, chatId, 3);
+    const { state, record } = await folded(rig, chatId);
+    // Midday (11:30 to 14:00) doesn't fit: the skip ends at its start, as the same span run whole does, with no one asked at 12:30.
+    expect(record?.events.find((e) => e.type === "timelapse")).toMatchObject({ stoppedBy: null, to: at(day, "11:30") });
+    expect(state.clock).toBe(at(day, "11:30"));
+    expect(calls.map((c) => c.at)).not.toContain(at(day, "12:30"));
+    const chip = (await rig.rt.view(chatId, rig.host.userId)).chips.find((c) => c.kind === "continue_timelapse");
+    expect(chip?.label).toMatch(/^Continue timelapse/);
+  });
+
   test("the skip step makes no call until the user turns it on", async () => {
     const { rig, chatId, day, at } = await portAlder();
     await marcusPlans(rig, chatId, [at(day + 1, "19:00")]);

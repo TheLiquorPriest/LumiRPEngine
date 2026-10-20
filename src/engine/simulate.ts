@@ -35,7 +35,7 @@ import { own } from "./pack-kit";
 import type { WorldDoc } from "../shared/world";
 import { stepTracks, type TrackChange } from "./tracks";
 import { signalVisible } from "./visibility";
-import { Working } from "./working";
+import { Working, type WorkingMark } from "./working";
 import { minutesBetween } from "./world-state";
 import { clampUnitCap } from "./time-limits";
 
@@ -79,24 +79,36 @@ export interface AdvanceOptions {
   /** Timelapse unit cap per segment; default `state.time.unitCap`. */
   unitCap?: { agentDays: number; events: number };
   /**
-   * Slots the segment already ran in earlier calls (a time skip runs one segment in pieces, DESIGN
-   * §24.7): only a segment's first slot runs whatever the cap, so a later piece gets no free one.
+   * What earlier pieces of the same segment spent (a time skip runs one segment in pieces, DESIGN
+   * §24.7): the unit cap holds for the whole segment, and only its first slot runs whatever the cap.
    */
-  slotsBefore?: number;
+  spent?: { slots: number; agentDays: number; events: number };
   /**
-   * The slot an earlier piece of the same segment ended inside (a time skip runs one segment in pieces,
-   * DESIGN §24.7). Its stop check, at the slot's end, reads its signals from where they began, so
-   * cutting a run at a beat never changes where it stops.
+   * The slot an earlier piece of the same segment ended inside. Its stop check, at the slot's end,
+   * reads its signals from where they began, and the cap can still end the segment at its start, so
+   * cutting a run at a beat changes neither where it stops nor that a cap stop is on a slot boundary.
    */
   open?: OpenSlot;
+  /**
+   * The segment's own target, when this piece is one of several. A slot this piece ends inside that
+   * ends by then is one a later piece steps whole: the cap is checked at its start, as one piece
+   * would, and a mark kept there. The slot the target falls inside is never stepped, so it runs
+   * whatever the cap, as in one piece.
+   */
+  segmentTo?: number;
   /** A target predicate checked after each slot (a track reaching a stage). */
   stopWhen?: (w: Working) => boolean;
 }
 
-/** A slot a run is inside, not yet stepped: its index, and where its events began in the working events. */
+/**
+ * A slot a run is inside, not yet stepped: its index, where its events began in the working events,
+ * and the state at its start, to go back to when the cap ends the segment there (null for a
+ * segment's first slot, which runs whatever the cap, and for a run's last piece).
+ */
 export interface OpenSlot {
   slot: number;
   since: number;
+  mark: WorkingMark | null;
 }
 
 export interface AdvanceResult {
@@ -167,14 +179,15 @@ function clockTo(w: Working, at: number, cause: ClockEvent["cause"], e: Emitter)
 
 /**
  * Moves the clock to `to`, stepping every completed slot (see the header). A timelapse stops
- * early on a `stop`-class interrupt the POV can see, the unit cap (always after at least one slot)
- * or `stopWhen`.
+ * early on a `stop`-class interrupt the POV can see, the unit cap (always after at least one slot,
+ * and on a slot boundary) or `stopWhen`.
  */
 export function advance(reg: Registry, w: Working, to: number, opts: AdvanceOptions): AdvanceResult {
   const from = w.state.clock;
   const cause = opts.cause ?? (opts.mode === "timelapse" ? "timelapse" : "tick");
   const policy = interruptPolicy(w.state, opts.interrupts);
   const cap = clampUnitCap(opts.unitCap ?? w.state.time.unitCap);
+  const spent = opts.spent ?? { slots: 0, agentDays: 0, events: 0 };
   const startEvents = w.events.length;
   const result: AdvanceResult = { from, to: from, requested: to, slots: 0, stop: "target", stoppedBy: null, stops: [], notes: [], agentDays: 0, events: 0, rules: [], tracks: [], open: opts.open ?? null };
   if (to <= from) return result;
@@ -256,6 +269,9 @@ export function advance(reg: Registry, w: Working, to: number, opts: AdvanceOpti
     return out;
   };
 
+  /** Whether a slot holding `agents` would take the segment past its agent-days cap, once a slot has run. */
+  const overDays = (slot: Slot, agents: number): boolean => timelapse && result.slots + spent.slots > 0 && spent.agentDays + result.agentDays + (agents * (slot.end - slot.start)) / MINUTES_PER_DAY > cap.agentDays;
+
   for (const slot of slots) {
     const agents = stepping();
     // Someone who stopped acting keeps the cursor of the last slot they lived, recorded now, so a
@@ -266,15 +282,16 @@ export function advance(reg: Registry, w: Working, to: number, opts: AdvanceOpti
       cursors.delete(agent);
     }
     const slotDays = (agents.length * (slot.end - slot.start)) / MINUTES_PER_DAY;
-    const ranBefore = result.slots + (opts.slotsBefore ?? 0) > 0;
-    if (timelapse && ranBefore && result.agentDays + slotDays > cap.agentDays) {
+    // A slot an earlier piece ended inside passed the cap's check at its start, as it would in one
+    // piece; its stop check reads the signals raised there too, and the cap goes back to its start.
+    const opened = slot.index === opts.open?.slot ? opts.open : null;
+    if (!opened && overDays(slot, agents.length)) {
       result.stop = "cap";
       break;
     }
-    const mark = timelapse && ranBefore ? w.mark() : null;
-    const held = mark ? new Map(cursors) : null;
-    // A slot an earlier piece ended inside checks the signals raised there too, as one piece would.
-    const before = slot.index === opts.open?.slot ? opts.open.since : w.events.length;
+    const mark = opened ? opened.mark : timelapse && result.slots + spent.slots > 0 ? w.mark() : null;
+    const held = mark && !opened ? new Map(cursors) : null;
+    const before = opened ? opened.since : w.events.length;
     const rulesBefore = result.rules.length;
     const tracksBefore = result.tracks.length;
     applyInstants(slot.end, slot);
@@ -300,9 +317,10 @@ export function advance(reg: Registry, w: Working, to: number, opts: AdvanceOpti
     if (dayEnds) result.rules.push(...runRulesOnTick(reg, w, "day", { seed: tickSeed }));
     result.tracks.push(...stepTracks(reg, w, tickSeed));
 
-    if (mark && w.events.length - startEvents > cap.events) {
+    if (mark && spent.events + w.events.length - startEvents > cap.events) {
       w.restore(mark);
-      if (held) cursors = held;
+      // An earlier piece's mark was taken with every cursor settled into the state.
+      cursors = held ?? new Map();
       result.rules.length = rulesBefore;
       result.tracks.length = tracksBefore;
       result.stop = "cap";
@@ -328,17 +346,36 @@ export function advance(reg: Registry, w: Working, to: number, opts: AdvanceOpti
     }
   }
 
+  result.open = null;
   if (result.stop === "target") {
     const tail = slotOf(cal, slotIndexAt(cal, to));
-    const since = result.slots === 0 && opts.open?.slot === tail.index ? opts.open.since : w.events.length;
-    applyInstants(to, tail);
-    clockTo(w, to, cause, e);
-    // Reaching the target inside a slot leaves it open: the piece that steps it checks its signals from here.
-    result.open = tail.start === to ? null : { slot: tail.index, since };
-  } else result.open = null;
+    // Ending inside a slot: still the one an earlier piece entered, or entering one now. One a later
+    // piece of the segment steps whole gets the cap's check a single piece makes at the slot's start
+    // (the events cap too: a slot always adds its clock move), and a mark there holding every cursor,
+    // so that piece can still go back to it.
+    let open = tail.start < to && result.slots === 0 && opts.open?.slot === tail.index ? opts.open : null;
+    if (tail.start < to && !open) {
+      const stepped = timelapse && opts.segmentTo !== undefined && tail.end <= opts.segmentTo && result.slots + spent.slots > 0;
+      if (stepped && (overDays(tail, stepping().length) || spent.events + w.events.length - startEvents >= cap.events)) result.stop = "cap";
+      else {
+        let mark: WorkingMark | null = null;
+        if (stepped) {
+          for (const [agent, slot] of cursors) settle(agent, slot);
+          cursors = new Map();
+          mark = w.mark();
+        }
+        open = { slot: tail.index, since: w.events.length, mark };
+      }
+    }
+    if (result.stop === "target") {
+      applyInstants(to, tail);
+      clockTo(w, to, cause, e);
+      result.open = open;
+    }
+  }
   for (const [agent, slot] of cursors) settle(agent, slot);
   result.to = w.state.clock;
-  result.events = w.events.length - startEvents;
+  result.events = Math.max(0, w.events.length - startEvents);
   return result;
 }
 

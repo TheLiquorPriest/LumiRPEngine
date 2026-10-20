@@ -230,6 +230,44 @@ describe("simulation stepping", () => {
     expect(w.events.length).toBeLessThanOrEqual(40 + 4);
   });
 
+  test("a segment cut into pieces ends on the unit cap on a slot boundary, inside the slot it can't run too", () => {
+    const world = simWorld();
+    const s0 = startState(world);
+    const reg = registryOf([simPack]);
+    const cal = calendarOf(world);
+    const boundary = (t: number): boolean => slotOf(cal, slotIndexAt(cal, t)).start === t;
+    const run = (unitCap: { agentDays: number; events: number }, cuts: readonly number[]) => {
+      const w = new Working(reg, world, s0);
+      const r = TimelapseRun.start(reg, w, { type: "duration", minutes: 3 * 1440 }, { runSeed: "run-1", overrides: allNote, unitCap });
+      if ("code" in r) throw new Error(r.reason);
+      for (const c of cuts) r.advanceTo(c);
+      return { outcome: r.finish(null), state: w.state };
+    };
+    const cutsAround = (stop: number): number[][] => [[stop + 30], [stop - 60, stop + 1, stop + 90]];
+    // The agent-days cap ends it exactly where it ends whole.
+    const days = { agentDays: 1, events: 5000 };
+    const whole = run(days, []);
+    expect(whole.outcome.result.stop).toBe("cap");
+    expect(boundary(whole.outcome.summary.to)).toBe(true);
+    for (const cuts of cutsAround(whole.outcome.summary.to)) {
+      const cut = run(days, cuts);
+      expect(cut.outcome.summary).toEqual(whole.outcome.summary);
+      expect(cut.outcome.remaining).toBe(whole.outcome.remaining);
+      expect(hashJson(cut.state)).toBe(hashJson(whole.state));
+    }
+    // The events cap counts what each cut records too (the cursors, a beat's minds), so it may come
+    // a slot sooner, but it goes back to the start of the slot it can't run all the same.
+    const events = { agentDays: 600, events: 60 };
+    const wholeEvents = run(events, []);
+    expect(boundary(wholeEvents.outcome.summary.to)).toBe(true);
+    for (const cuts of cutsAround(wholeEvents.outcome.summary.to)) {
+      const cut = run(events, cuts);
+      expect(cut.outcome.result.stop).toBe("cap");
+      expect(boundary(cut.outcome.summary.to)).toBe(true);
+      expect(cut.outcome.summary.to).toBeLessThanOrEqual(wholeEvents.outcome.summary.to);
+    }
+  });
+
   test("turn-mode catch-up: K agents round-robin, the rest stay on a deterministic backlog", () => {
     const world = simWorld();
     const reg = registryOf([simPack]);

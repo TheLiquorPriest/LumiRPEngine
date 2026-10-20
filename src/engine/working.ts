@@ -14,6 +14,13 @@ export interface Dropped {
   rejection: Rejection;
 }
 
+/** A state snapshot plus the event counts, for an all-or-nothing step (`Working.mark`). */
+export interface WorkingMark {
+  state: WorldState;
+  events: number;
+  dropped: number;
+}
+
 export class Working {
   readonly reg: Registry;
   readonly world: WorldDoc;
@@ -52,12 +59,12 @@ export class Working {
   }
 
   /** A state snapshot plus the event counts, for an all-or-nothing step. */
-  mark(): { state: WorldState; events: number; dropped: number } {
+  mark(): WorkingMark {
     return { state: structuredClone(this.state), events: this.events.length, dropped: this.dropped.length };
   }
 
   /** Restores a mark: the state and the event lists return to what they were. */
-  restore(mark: { state: WorldState; events: number; dropped: number }): void {
+  restore(mark: WorkingMark): void {
     // Every WorldState key is required, so assigning a copy replaces each one in place and the
     // read context (which holds this object) stays valid.
     Object.assign(this.state, structuredClone(mark.state));

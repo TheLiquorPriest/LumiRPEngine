@@ -333,25 +333,24 @@ export class TimelapseRun {
     return this.w.state.clock;
   }
 
-  /** Runs on to `at` (never past the target); false once the run has ended on its own, here or before. */
+  /**
+   * Runs on to `at` (never past the target); false once the run has ended on its own, here or before.
+   * The cap may end it at the start of a slot an earlier piece ended inside, before the clock it had.
+   */
   advanceTo(at: number): boolean {
     if (this.ended !== null) return false;
     const to = Math.min(at, this.to);
     if (to <= this.w.state.clock) return true;
-    const used = { agentDays: this.result.agentDays, events: this.w.events.length - this.start };
-    if (this.result.slots > 0 && (used.agentDays >= this.cap.agentDays || used.events >= this.cap.events)) {
-      this.ended = this.result.stop = "cap";
-      return false;
-    }
     const r = advance(this.reg, this.w, to, {
       runSeed: this.opts.runSeed,
       mode: "timelapse",
       cause: "timelapse",
       includePov: true,
       ...(this.opts.overrides ? { interrupts: this.opts.overrides } : {}),
-      unitCap: { agentDays: this.cap.agentDays - used.agentDays, events: this.cap.events - used.events },
-      slotsBefore: this.result.slots,
+      unitCap: this.cap,
+      spent: { slots: this.result.slots, agentDays: this.result.agentDays, events: this.w.events.length - this.start },
       ...(this.result.open ? { open: this.result.open } : {}),
+      segmentTo: this.to,
       ...(this.resolved.stopWhen ? { stopWhen: this.resolved.stopWhen } : {}),
     });
     const acc = this.result;

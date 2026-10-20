@@ -1276,7 +1276,7 @@ A timelapse turn (§9.2: the palette, a chip or typed time) is a **time skip** w
   - **Minds per beat** (`maxMindsPerBeat`) keep the people the beat names first, then whoever is with the POV at Live or Near by fidelity at that moment, best score first.
 
   `"none"` is no cap, and the before-the-reply clock still bounds it.
-- **Running it:** one timelapse segment, run beat by beat under one unit cap (only its first slot runs whatever the cap).
+- **Running it:** one timelapse segment, run beat by beat under one unit cap (only its first slot runs whatever the cap). The cap is checked at a slot's start, as for one piece: a beat inside a slot the cap can't run is never reached, and when the events cap runs out inside such a slot, the run goes back to its start, so a cap stop is always on a slot boundary (§14).
   - At each beat, each of its people thinks in a call of their own, blind to the others, and the reason they are given names only the time.
   - Their `minds.mind` events apply at that moment, so their plans shape what follows.
   - Past the last beat the skip runs to its end, where whoever is with the POV thinks once more, within the Live limit, as the turn's own minds for the Minds section.

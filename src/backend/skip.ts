@@ -247,6 +247,8 @@ export async function runSkip(deps: SkipDeps, input: SkipInput): Promise<SkipRun
     }
   }
   run.advanceTo(run.to);
+  // The unit cap may have taken the run back to the start of a slot a beat fell inside: that beat is undone.
+  record.beats = record.beats.filter((b) => b.at <= run.clock);
   if (!input.signal.aborted) {
     const end = run.apply(await mindsAt(deps, input, w, [], limitOf(input.settings.minds.liveLimit), `The time skip ends; it is now ${formatClock(cal, run.clock)}.`, traces));
     if (end.length > 0) record.beats.push({ at: run.clock, events: end });
