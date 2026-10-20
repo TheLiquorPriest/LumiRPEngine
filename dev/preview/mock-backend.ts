@@ -376,7 +376,7 @@ export class MockBackend {
     switch (message.type) {
       case "lre.hello":
         if (message.chatId === null) {
-          this.result(reqId, "lre.hello", { accepted: true, agentApi: AGENT_API });
+          this.result(reqId, "lre.hello", { accepted: true, agentApi: AGENT_API, requestMs: this.settings.timeouts.requestMs });
           return;
         }
         this.view = this.options.scenario === "paused" ? pausedFixture(message.chatId) : this.options.scenario === "fresh" ? freshFixture(message.chatId) : stateFixture(message.chatId);
@@ -397,7 +397,7 @@ export class MockBackend {
         }
         // Play → You with the Modern profile's sheet, as the engine builds it.
         if (this.options.scenario === "sheet") this.view.panels["sheets.you"] = modernSheetFixture();
-        this.result(reqId, "lre.hello", { accepted: true, agentApi: AGENT_API });
+        this.result(reqId, "lre.hello", { accepted: true, agentApi: AGENT_API, requestMs: this.settings.timeouts.requestMs });
         setTimeout(() => this.snapshot(), 50);
         if (this.options.activity) setTimeout(() => this.activity(this.options.activity === "busy" ? { state: "running", label: "Asking 3 minds…", since: Date.now() - 12_000 } : { state: "failed", label: "Failed: Planning", since: Date.now() - 60_000 }), 80);
         return;

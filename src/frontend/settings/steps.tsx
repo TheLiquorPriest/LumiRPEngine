@@ -1,18 +1,19 @@
 // Settings → Helper model, Settings → Model use and Settings → Steps and connections (DESIGN §5.3,
 // §5.4, D25). Helper model sets the connection, model and reasoning effort every helper call runs
 // on unless its step picks its own. Model use leads with the preset (Lean, Standard, Full, Custom)
-// and what each one means for you, then the call meter; budgets per phase (calls, wall clock and
-// lore lookups) and the engine token budget sit under Advanced. Steps and connections has a card per
-// step: enabled, provider, connection, model, reasoning effort and max tokens (several thousand for
-// reasoning models, DESIGN §5.3), with signals and lore (the policy, its tokens and how lookups reach
-// the model) under Advanced. Each card's summary names the connection, model and effort it runs on.
+// and what each one means for you, then the call meter; budgets per phase (calls and lore lookups),
+// a link to Settings → Timeouts for how long each may take, and the engine token budget sit under
+// Advanced. Steps and connections has a card per step: enabled, provider, connection, model,
+// reasoning effort and max tokens (several thousand for reasoning models, DESIGN §5.3), with signals
+// and lore (the policy, its tokens and how lookups reach the model) under Advanced. Each card's
+// summary names the connection, model and effort it runs on.
 
 import { useEffect, useState } from "preact/hooks";
 import type { JsonObject } from "../../shared/json";
 import type { ModelUsePresetId } from "../../shared/ids";
 import { PROSE_STEPS } from "../../shared/lore";
 import type { HelperDefault, LorePolicy, LoreTransport, ModelUseSettings, ReasoningChoice, SamplingParams, StepConfig, StepRoute } from "../../shared/settings";
-import { helperCallOf, PRE_REPLY_MAX_MS, REASONING_CHOICES, SAMPLING_PARAMS, stepConfigOf, stepLoreOf } from "../../shared/settings";
+import { helperCallOf, REASONING_CHOICES, SAMPLING_PARAMS, stepConfigOf, stepLoreOf } from "../../shared/settings";
 import type { CallMeterView } from "../../shared/state-view";
 import type { StepPurpose } from "../../shared/world";
 import { useApp } from "../app";
@@ -90,8 +91,6 @@ const STEP_PLAIN: Record<StepPurpose, string> = {
 
 const PHASES = ["pre", "post"] as const;
 const PHASE_LABEL: Record<(typeof PHASES)[number], string> = { pre: "Before the reply", post: "After the reply" };
-/** Lumiverse waits at most 120 s for a turn's plan, so the before-the-reply steps get what planning leaves of it. */
-const WALL_CLOCK_MAX: Record<(typeof PHASES)[number], number> = { pre: PRE_REPLY_MAX_MS, post: 120_000 };
 /** Below this, a reasoning model can spend the whole reply thinking and answer nothing. */
 const LOW_TOKENS = 4096;
 
@@ -123,7 +122,7 @@ function PresetCards(props: { value: ModelUsePresetId; busy: boolean; onChange(p
   );
 }
 
-export function ModelUseSection(props: { modelUse: ModelUseSettings; meter: CallMeterView | null; patch(patch: JsonObject): void; busy: boolean }) {
+export function ModelUseSection(props: { modelUse: ModelUseSettings; meter: CallMeterView | null; patch(patch: JsonObject): void; openTimeouts(): void; busy: boolean }) {
   const { modelUse } = props;
   return (
     <div class="lre-stack" data-lre-settings-page="model">
@@ -136,16 +135,16 @@ export function ModelUseSection(props: { modelUse: ModelUseSettings; meter: Call
       <Section>
         <Disclosure summary="Advanced: budgets and the engine budget">
           <p class="lre-small lre-muted" style={{ margin: 0 }}>
-            Each phase of a turn has a number of calls and a time limit; lore lookups have their own. A step runs only while its phase has calls left.
+            Each phase of a turn has a number of calls; lore lookups have their own. A step runs only while its phase has calls left. How long each phase and its lookups may take is set in Timeouts, apart from the presets.
           </p>
+          <List>
+            <ListRow icon="clock" title="Timeouts" subtitle="How long the engine run, reading the reply and their lookups may take" chevron onClick={props.openTimeouts} />
+          </List>
           {PHASES.map((phase) => (
             <div key={phase} class="lre-set-group" data-lre-budget={phase}>
               <div class="lre-h">{PHASE_LABEL[phase]}</div>
               <NumberStepper label="Calls" value={modelUse.budgets[phase].calls} min={0} integer disabled={props.busy} onChange={(calls) => props.patch({ modelUse: { preset: "custom", budgets: { [phase]: { calls } } } })} />
-              <NumberStepper label="Wall clock (ms)" value={modelUse.budgets[phase].ms} min={500} max={WALL_CLOCK_MAX[phase]} step={500} integer disabled={props.busy} onChange={(ms) => props.patch({ modelUse: { preset: "custom", budgets: { [phase]: { ms } } } })} />
-              {phase === "pre" ? <p class="lre-small lre-muted" style={{ margin: 0 }}>At most {PRE_REPLY_MAX_MS.toLocaleString("en-US")} ms: Lumiverse waits 120 s for a turn's plan, and planning needs the rest.</p> : null}
-              <NumberStepper label="Lore lookups" value={modelUse.budgets[phase].lookup?.calls ?? 0} min={0} integer disabled={props.busy} onChange={(calls) => props.patch({ modelUse: { preset: "custom", budgets: { [phase]: { lookup: { calls, ms: modelUse.budgets[phase].lookup?.ms ?? 0 } } } } })} />
-              <NumberStepper label="Lookups may start within (ms)" value={modelUse.budgets[phase].lookup?.ms ?? 0} min={0} max={120000} step={500} integer disabled={props.busy} onChange={(ms) => props.patch({ modelUse: { preset: "custom", budgets: { [phase]: { lookup: { calls: modelUse.budgets[phase].lookup?.calls ?? 0, ms } } } } })} />
+              <NumberStepper label="Lore lookups" value={modelUse.budgets[phase].lookup?.calls ?? 0} min={0} integer disabled={props.busy} onChange={(calls) => props.patch({ modelUse: { preset: "custom", budgets: { [phase]: { lookup: { calls } } } } })} />
             </div>
           ))}
           <div class="lre-set-group">

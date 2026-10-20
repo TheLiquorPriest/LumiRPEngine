@@ -81,7 +81,8 @@ Your worlds on Lumiverse
   version, --version                          ${CLI_NAME}, engine, world format and agent API versions
 
   <s> is draft, head or a revision. Everywhere: --url <base> (or LUMIVERSE_URL) picks the Lumiverse when you
-  are signed in to several; --read-only (or LRE_READ_ONLY=1) refuses every change.`;
+  are signed in to several; --read-only (or LRE_READ_ONLY=1) refuses every change; --timeout <seconds|none>
+  (or LRE_TIMEOUT) is how long each request to LumiRPEngine may take (300 by default, none for no limit).`;
 
 class UsageError extends Error {}
 
@@ -242,10 +243,23 @@ function chooseBase(p: Parsed, io: CliIO): string {
   throw new LiveError("login", `Signed in to several Lumiverses (${stored.join(", ")}): pick one with --url or LUMIVERSE_URL.`);
 }
 
-function liveFor(base: string, io: CliIO): Live {
+/**
+ * How long each request to LumiRPEngine (and the socket's opening) may take: `--timeout`, else
+ * `LRE_TIMEOUT`, in seconds or "none"; else the client's default. Null is no limit.
+ */
+function timeoutOf(p: Parsed, env: CliIO["env"]): number | null | undefined {
+  const raw = one(p, "--timeout") ?? env.LRE_TIMEOUT;
+  if (raw === undefined || raw.trim() === "") return undefined;
+  if (raw.trim().toLowerCase() === "none") return null;
+  const seconds = Number(raw);
+  if (!Number.isFinite(seconds) || seconds <= 0) throw new UsageError(`--timeout (or LRE_TIMEOUT) is ${JSON.stringify(raw)}: give a number of seconds above 0, or none for no limit.`);
+  return Math.round(seconds * 1000);
+}
+
+function liveFor(base: string, io: CliIO, timeoutMs: number | null | undefined): Live {
   if (io.credentials.get(base) === null) throw new LiveError("login", `Not signed in to ${base}. Run: ${CLI_NAME} login --url ${base}`);
   // Read again whenever the connection opens: a `login` while an `mcp` server runs takes effect without a restart.
-  return new Live(new HostConnection({ base, credentials: () => io.credentials.get(base), http: io.http, openSocket: io.openSocket, client: { name: CLI_NAME, version: CLI_VERSION } }));
+  return new Live(new HostConnection({ base, credentials: () => io.credentials.get(base), http: io.http, openSocket: io.openSocket, client: { name: CLI_NAME, version: CLI_VERSION }, ...(timeoutMs !== undefined ? { timeoutMs } : {}) }));
 }
 
 interface Session {
@@ -258,10 +272,11 @@ interface Session {
 function sessionFor(p: Parsed, io: CliIO, readOnly: boolean): Session {
   let live: Live | null = null;
   const queue = new KeyedQueue();
+  const timeoutMs = timeoutOf(p, io.env);
   const ctx: ToolContext = {
     readFile: (path) => io.readFile(path),
     readOnly,
-    live: () => (live ??= liveFor(chooseBase(p, io), io)),
+    live: () => (live ??= liveFor(chooseBase(p, io), io, timeoutMs)),
     serialize: (key, work) => queue.run(key, work),
   };
   return { ctx, close: () => live?.conn.close() };
@@ -289,7 +304,7 @@ async function login(p: Parsed, io: CliIO): Promise<number> {
   io.credentials.put(base, { username: username.trim(), token, savedAt: Date.now(), ...(clear ? { allowHttp: true } : {}) });
   io.out(`Signed in to ${base} as ${username.trim()}. The session is saved in ${io.credentials.path}, readable only by you; the password is not kept.`);
   // Say now whether LumiRPEngine answers there, rather than at the first tool call.
-  const live = liveFor(base, io);
+  const live = liveFor(base, io, timeoutOf(p, io.env));
   try {
     const host = await live.conn.describe();
     const version = host.extension?.version;
@@ -381,7 +396,7 @@ export async function run(argv: readonly string[], io: CliIO): Promise<RunResult
     const readOnly = readOnlyOf(p, io.env);
     if (command === "mcp") {
       // Checked like any command's: a misspelled --read-only must refuse to start, never serve the write tools.
-      onlyOptions("mcp", p, ["--url", "--read-only"], "mcp [--read-only] [--url <base>]", false);
+      onlyOptions("mcp", p, ["--url", "--read-only", "--timeout"], "mcp [--read-only] [--url <base>] [--timeout <seconds|none>]", false);
       const server = sessionFor(p, io, readOnly);
       return { mcp: new McpServer(server.ctx), close: server.close };
     }
@@ -400,7 +415,7 @@ export async function run(argv: readonly string[], io: CliIO): Promise<RunResult
       io.err(`There is no command ${command}.\n\n${USAGE}`);
       return { code: 2 };
     }
-    onlyOptions(command, p, ["--url", "--read-only", ...mirror.options], mirror.usage);
+    onlyOptions(command, p, ["--url", "--read-only", "--timeout", ...mirror.options], mirror.usage);
     if (p.positionals.length < mirror.needs) throw new UsageError(`Usage: ${CLI_NAME} ${mirror.usage}`);
     const out = one(p, "--out");
     // A redirect wants the file itself (`template <id> > world.json`); a terminal gets the outline and paging.

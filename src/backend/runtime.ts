@@ -16,7 +16,8 @@ import { EXTRACTION_TYPES, helperCallOf, stepLoreOf } from "../shared/settings";
 import type { ChipAction, ContextGeneration, ContextView, LoreStepTrace, StateView } from "../shared/state-view";
 import type { ActionDef, AdjudicationDef, SectionTemplate, StepPurpose, WorldDoc } from "../shared/world";
 import { formatMoney, offersAction } from "../shared/world";
-import { MINDS_SLOT, worldMindsOf, type MindCallTrace } from "../shared/minds";
+import { limitOf, MINDS_SLOT, worldMindsOf, type MindCallTrace } from "../shared/minds";
+import { firedTimeout, TimeoutFired, TIMEOUTS } from "../shared/timeouts";
 import { mindsOn, postMinds, preMinds, runMinds, type MindsDeps } from "./minds";
 import { runSkip, type BeatMinds, type SkipRun } from "./skip";
 import { fightOffers } from "../packs/combat/core/index";
@@ -69,12 +70,12 @@ import { JsonHiding, readableReply } from "./json-hiding";
 import { GUIDANCE_PREFIX, GUIDANCE_TARGETS, NARRATOR_OUTLET, outletOf, PresetBinding, type Guidance, type PresetConfig } from "./preset-binding";
 import { presetCaveats, type PresetCaveat } from "./preset-lint";
 import { applyProposals, type EnginePipeline, type PlanProse, TIME_ADVANCE_CAP, TurnBridge, type UnfitAction } from "./turn-model";
-import { agentsActHere, contradiction, factLines, judge, noFacts, npcChoose, planFacts, presentNames, promptedEffects, promptedText, puzzleAnswer, renderTemplate, runsOf, safeVars, StepBudget, tiesOf, unfitRef, type PlanStart, type SignalFacts, type StepRun, type Tie, type UnfitRef } from "./turn-steps";
+import { agentsActHere, contradiction, factLines, judge, noFacts, npcChoose, phaseBudget, planFacts, presentNames, promptedEffects, promptedText, puzzleAnswer, renderTemplate, runsOf, safeVars, type StepBudget, tiesOf, unfitRef, type PlanStart, type SignalFacts, type StepRun, type Tie, type UnfitRef } from "./turn-steps";
 import { buildView, clockMinutes, compactSpan, notWorldView, recentLines, spanText, TIMELAPSE_ACTION } from "./view";
 import { StudioBridge } from "./studio";
 import { WorldStore } from "./worlds";
-import { Diagnostics } from "./diagnostics";
-import { STEP_LABEL } from "../shared/diagnostics";
+import { Diagnostics, type DiagAt } from "./diagnostics";
+import { STEP_LABEL, type DiagPhase } from "../shared/diagnostics";
 
 export interface RuntimeOptions {
   host: HostPort;
@@ -523,6 +524,8 @@ export class Runtime implements TurnHooks {
    * ignored, so a bogus count can't clip every section.
    */
   private readonly tokenCounts = new Map<string, number>();
+  /** Users whose last token count ran past their limit (Settings → Timeouts → Token counts): said once, until a count lands in time. */
+  private readonly lateCounts = new Set<UserId>();
   /** The world chat each user last generated in (the D32 preset lint dry-runs it when none is open). */
   private readonly lastWorldChat = new Map<UserId, ChatId>();
   /** The D32 preset caveats each chat's last dry run found (shown in the inspector). */
@@ -557,8 +560,8 @@ export class Runtime implements TurnHooks {
     this.templates = options.templates ?? {};
     this.templateInfo = options.templateInfo ?? [];
     this.worlds = new WorldStore(this.host, this.registry);
-    // The context handler waits as long as the users' before-the-reply wall clocks need.
-    this.settings = new SettingsStore(this.host, (userId, settings) => this.ledger.preReplyBudget(userId, settings.modelUse.budgets.pre.ms));
+    // The context handler waits as long as the users' engine runs need.
+    this.settings = new SettingsStore(this.host, (userId, settings) => this.ledger.preReplyBudget(userId, limitOf(settings.timeouts.engineRunMs)));
     this.chips = new ChipStore(this.host);
     this.planNotes = new PlanNotes(this.host);
     this.outcomeNotes = new OutcomeNotes(this.host);
@@ -738,7 +741,7 @@ export class Runtime implements TurnHooks {
     const text = lastUser ? (lastUser.swipes[lastUser.swipeId] ?? "") : "";
     const render = input.core.renderState(input.observed);
     if (!render) return;
-    const budget = new StepBudget(settings.modelUse.budgets.pre.calls, settings.modelUse.budgets.pre.ms, input.signal, settings.modelUse.budgets.pre.lookup);
+    const budget = phaseBudget(settings, "pre", input.signal);
     this.preBudgets.set(p.generationId, budget);
     trimMap(this.preBudgets);
     const ctx = this.registry.context(render.world, render.state);
@@ -828,7 +831,7 @@ export class Runtime implements TurnHooks {
       await this.keepPlanLines(input.chatId, input.userId, p.seed, plan, render.world, undefined);
       return;
     }
-    const budget = this.preBudgets.get(input.generationId) ?? new StepBudget(settings.modelUse.budgets.pre.calls, settings.modelUse.budgets.pre.ms, input.signal, settings.modelUse.budgets.pre.lookup);
+    const budget = this.preBudgets.get(input.generationId) ?? phaseBudget(settings, "pre", input.signal);
     const secrets = unrevealedSecrets(this.registry, render.world, render.state);
     // The Journal before this turn: the plan's target message and what follows aren't in it.
     const target = p.messageId === null ? -1 : input.observed.findIndex((m) => m.id === p.messageId);
@@ -1222,18 +1225,28 @@ export class Runtime implements TurnHooks {
   private countLater(userId: UserId, texts: readonly string[]): void {
     const asked = [...new Set(texts)].map((content) => [hashParts("lre.tokens", userId, content), content] as const).filter(([key]) => !this.tokenCounts.has(key));
     if (asked.length === 0) return;
-    void this.host.tokens
-      .count(
-        asked.map(([, content]) => content),
-        userId,
+    void this.settings
+      .get(userId)
+      .then((settings) =>
+        this.host.tokens.count(
+          asked.map(([, content]) => content),
+          userId,
+          settings.timeouts.tokenCountMs,
+        ),
       )
-      .then((counts) =>
+      .then((counts) => {
+        this.lateCounts.delete(userId);
         counts?.forEach((n, i) => {
           const [key, content] = asked[i] ?? ["", ""];
           if (key !== "" && Number.isFinite(n) && n >= 0 && n <= TOKEN_COUNT_CAP * sectionTokens(content)) lruSet(this.tokenCounts, key, n, 1024);
-        }),
-      )
-      .catch(() => undefined);
+        });
+      })
+      .catch((error: unknown) => {
+        // A count past the user's limit: the estimate stands in. Said once until a count lands in time.
+        if (!(error instanceof TimeoutFired) || this.lateCounts.has(userId)) return;
+        this.lateCounts.add(userId);
+        this.diag.timeout({ chatId: null, userId, turn: null }, "sections", "token count", error, "sections are priced by the engine's estimate until a count comes back in time");
+      });
   }
 
   /**
@@ -1271,6 +1284,18 @@ export class Runtime implements TurnHooks {
   }
 
   /**
+   * A phase's time limits that ran out, in the chat's diagnostics (DESIGN §6.9), each naming its
+   * setting in Settings → Timeouts: the phase's own, which cut its remaining calls short (one set to
+   * 0 ran none, as chosen), else its lookups' window or reserve, which kept a step from looking lore up.
+   */
+  timeLimits(at: DiagAt, phase: DiagPhase, budget: StepBudget): void {
+    const fired = firedTimeout(budget.signal);
+    if (fired?.ms === 0) this.diag.skipped(at, phase, "time limit", fired.message);
+    else if (fired) this.diag.timeout(at, phase, "time limit", fired, TIMEOUTS[fired.key].fires);
+    else if (budget.lookup.stopped) this.diag.skipped(at, phase, "lookups", budget.lookup.stopped);
+  }
+
+  /**
    * The post phase (DESIGN §5.2, §5.3), before the read commits: `extract` (or world `effects`
    * templates), off-screen `npc.choose`, `contradiction` and `choices`, side by side on the post
    * budget. Proposals are sorted by mode (D4 precedence, then bounds); the automatic ones and the
@@ -1296,8 +1321,8 @@ export class Runtime implements TurnHooks {
     const ctx = this.registry.context(context.world, context.state);
     const ties = tiesOf(ctx, context.world, context.state);
     const facts: SignalFacts = { ...(pre?.facts ?? noFacts()), ...(pre ? planFacts(context.world, pre.start, context.state, plan) : {}), reply: text.trim() !== "", present: false, offscreen: ties.offscreen.length > 0, tieZone: ties.offscreen.length > 0 };
-    // The user's post-phase deadline as set (no silent 15 s floor).
-    const budget = new StepBudget(settings.modelUse.budgets.post.calls, settings.modelUse.budgets.post.ms, undefined, settings.modelUse.budgets.post.lookup);
+    // The user's reading time as set (Settings → Timeouts), with no silent floor.
+    const budget = phaseBudget(settings, "post");
     const secrets = unrevealedSecrets(this.registry, context.world, context.state);
     // The brief the plan's step wrote, while the bridge still holds the plan (as `outcome` and `beats`).
     const vars = safeVars(this.stepVars(context.world, context.state, plan, pre?.text ?? "", text, (plan && bridge.proseFor(context.seed)?.brief) ?? "", context.recent), secrets);
@@ -1323,6 +1348,7 @@ export class Runtime implements TurnHooks {
     // consolidation, beside the reply's other steps, on the phase's wall clock.
     const mindsTask = post ? postMinds(this.minds, { chatId, userId, world: context.world, start: context.start, state: context.state, pre: context.pre, messageId, user: pre?.text ?? "", reply: text, signal: budget.signal, guidance: { memory: guidance.memory ?? "", consolidate: guidance.consolidate ?? "" } }) : Promise.resolve({ events: [], traces: [] });
     const [extracted, effects, decisions, contradicted, choices, minded] = await Promise.all([extractTask, Promise.all(effectsTasks), npcTask, contradictionTask, Promise.all(choiceTasks), mindsTask]);
+    this.timeLimits({ chatId, userId, turn: key }, "read", budget);
     this.addMindTraces(chatId, key, minded.traces);
     // The reply's lore traces join its generation's inspector record (the pre phase's are there already).
     const traces = this.loreTraces.get(key);

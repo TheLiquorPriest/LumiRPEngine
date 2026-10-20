@@ -8,10 +8,11 @@ import type { JsonObject, JsonValue } from "../shared/json";
 import { hasOwn, isRecord, safeKey } from "../shared/json";
 import type { ExtractionModeView, SettingsResult } from "../shared/protocol";
 import type { ExtractionBounds, ExtractionLearning, ExtractionType, ExtractionTypeStats, HelperDefault, LookupLimits, LorePolicy, ModelUseSettings, PhaseBudget, RealismSettings, SamplingParams, StepConfig, StepLore, StepRoute, TimeSettings, UserSettings } from "../shared/settings";
-import { DEFAULT_HELPER, EXTRACTION_DEFAULTS, EXTRACTION_LEARNING, EXTRACTION_TYPES, LORE_POLICIES, LORE_TRANSPORTS, PRE_REPLY_MAX_MS, REASONING_CHOICES, SAMPLING_PARAMS, SETTINGS_DEFAULTS_REV, SPEED_ACTIVITIES, SPEED_DEFAULT, SPEED_THRESHOLD_MINUTES } from "../shared/settings";
+import { DEFAULT_HELPER, EXTRACTION_DEFAULTS, EXTRACTION_LEARNING, EXTRACTION_TYPES, LORE_POLICIES, LORE_TRANSPORTS, REASONING_CHOICES, SAMPLING_PARAMS, SETTINGS_DEFAULTS_REV, SPEED_ACTIVITIES, SPEED_DEFAULT, SPEED_THRESHOLD_MINUTES } from "../shared/settings";
 import type { BoundMode } from "../shared/ids";
 import type { StepPurpose } from "../shared/world";
 import { defaultMindsSettings, MINDS_PRESETS, mindsSettingsOf } from "../shared/minds";
+import { defaultTimeouts, migrateTimeouts, timeoutsOf } from "../shared/timeouts";
 import type { HostPort } from "./host";
 import { readStoredJson } from "./stored-json";
 
@@ -46,16 +47,16 @@ function step(enabled: boolean, signals: string[], route: StepConfig["route"], l
 }
 
 const lore = (policy: LorePolicy, tokens: number): StepLore => ({ policy, tokens });
-const NO_LOOKUPS: LookupLimits = { calls: 0, ms: 0 };
+const NO_LOOKUPS: LookupLimits = { calls: 0 };
 
 /**
  * Model-use presets (DESIGN §5.3, §5.4). Routing per D10: `interpret` and `extract` on the helper;
  * `npc.choose` on the Decision connection. `judge` runs only when a world's adjudication policy
  * needs it (the player's words weigh, or the story decides), never on Lean. Lore: Lean prefetches
  * and never looks up; Standard and Full let their decision and JSON steps look lore up on a budget
- * per phase, apart from the phase's calls; prose steps prefetch only. The tokens, lore and wall
- * clocks are sized for reasoning models on long chats with large lorebooks, where a call takes tens
- * of seconds and thinks before it answers.
+ * per phase, apart from the phase's calls; prose steps prefetch only. The tokens and lore are sized
+ * for reasoning models on long chats with large lorebooks, where a call takes tens of seconds and
+ * thinks before it answers. No preset sets a time limit: those are the user's (`UserSettings.timeouts`).
  */
 export const MODEL_USE_PRESETS: Record<Exclude<ModelUsePresetId, "custom">, Omit<ModelUseSettings, "preset">> = {
   lean: {
@@ -65,7 +66,7 @@ export const MODEL_USE_PRESETS: Record<Exclude<ModelUsePresetId, "custom">, Omit
       "npc.choose": step(false, [], DECISION, lore("prefetch", 800)),
       judge: step(false, ["always"], HELPER, lore("prefetch", 800)),
     },
-    budgets: { pre: { calls: 1, ms: 20_000, lookup: { ...NO_LOOKUPS } }, post: { calls: 1, ms: 30_000, lookup: { ...NO_LOOKUPS } } },
+    budgets: { pre: { calls: 1, lookup: { ...NO_LOOKUPS } }, post: { calls: 1, lookup: { ...NO_LOOKUPS } } },
     tokens: { sections: 2000 },
   },
   standard: {
@@ -80,7 +81,7 @@ export const MODEL_USE_PRESETS: Record<Exclude<ModelUsePresetId, "custom">, Omit
       skip: step(false, ["timelapse"], HELPER, lore("prefetch", 1200)),
       consolidate: step(true, ["reply"], HELPER, lore("none", 0)),
     },
-    budgets: { pre: { calls: 2, ms: 30_000, lookup: { calls: 4, ms: 15_000 } }, post: { calls: 2, ms: 45_000, lookup: { calls: 3, ms: 20_000 } } },
+    budgets: { pre: { calls: 2, lookup: { calls: 4 } }, post: { calls: 2, lookup: { calls: 3 } } },
     tokens: { sections: 4000 },
   },
   full: {
@@ -97,7 +98,7 @@ export const MODEL_USE_PRESETS: Record<Exclude<ModelUsePresetId, "custom">, Omit
       skip: step(false, ["timelapse"], HELPER, lore("prefetch", 1600)),
       consolidate: step(true, ["reply"], HELPER, lore("none", 0)),
     },
-    budgets: { pre: { calls: 8, ms: 60_000, lookup: { calls: 6, ms: 30_000 } }, post: { calls: 4, ms: 60_000, lookup: { calls: 4, ms: 30_000 } } },
+    budgets: { pre: { calls: 8, lookup: { calls: 6 } }, post: { calls: 4, lookup: { calls: 4 } } },
     tokens: { sections: 8000 },
   },
 };
@@ -195,6 +196,7 @@ export function defaultSettings(): UserSettings {
     swipeDefault: "rerun",
     hideJsonBlocks: true,
     minds: defaultMindsSettings(),
+    timeouts: defaultTimeouts(),
   };
 }
 
@@ -214,7 +216,9 @@ export function mergePatch(target: JsonValue, patch: JsonValue): JsonValue {
 /**
  * Fills missing parts from the defaults, so a settings file from an older build still loads; then
  * checks every field. What a file lacks comes from its own preset (Custom fills in from Standard),
- * so one saved before lore settings existed reads with its preset's lore policies and lookups.
+ * so one saved before lore settings existed reads with its preset's lore policies and lookups; one
+ * saved before timeouts had their own settings takes them from its old budgets (`migrateTimeouts`),
+ * after `lifted` has read the old lookup windows it matches presets by.
  */
 function normalize(raw: unknown): UserSettings {
   if (!isRecord(raw)) return defaultSettings();
@@ -227,15 +231,13 @@ function normalize(raw: unknown): UserSettings {
     fill.modelUse = { preset, ...structuredClone(MODEL_USE_PRESETS[preset]) };
     fill.minds = defaultMindsSettings(preset);
   }
-  const merged = mergePatch(JSON.parse(JSON.stringify(fill)) as JsonValue, lifted(raw));
+  const merged = mergePatch(JSON.parse(JSON.stringify(fill)) as JsonValue, migrateTimeouts(lifted(raw)));
   return isRecord(merged) && merged.v === 1 ? conform(merged, fill) : defaultSettings();
 }
 
 // ---------------------------------------------------------------- the settings schema
 
 const STEP_PURPOSES: readonly StepPurpose[] = ["interpret", "npc.choose", "contradiction", "puzzle.answer", "brief", "outline", "extract", "choices", "judge", "mind", "memory", "skip", "consolidate"];
-/** A phase deadline above this is a typo, not a wish (10 min). */
-const MAX_PHASE_MS = 600_000;
 
 const int = (v: unknown, lo: number, hi: number): number | undefined => (typeof v === "number" && Number.isInteger(v) && v >= lo && v <= hi ? v : undefined);
 /** A token or call budget: a whole number from `lo` (below it the budget can't work), with no ceiling. */
@@ -322,13 +324,11 @@ function stepOf(v: unknown, base: StepConfig | undefined): StepConfig | undefine
 function conform(v: JsonObject, d: UserSettings): UserSettings {
   const mu = isRecord(v.modelUse) ? v.modelUse : {};
   const budgets = isRecord(mu.budgets) ? mu.budgets : {};
-  // A phase deadline past `max` is read as `max`: the before-the-reply wall clock must leave the plan
-  // its part of the host's wait for the context handler, or the host drops the plan.
-  const phase = (x: unknown, b: PhaseBudget, max: number): PhaseBudget => {
+  const phase = (x: unknown, b: PhaseBudget): PhaseBudget => {
     if (!isRecord(x)) return b;
     const l = isRecord(x.lookup) ? x.lookup : null;
-    const lookup = l ? { calls: atLeast(l.calls, 0) ?? b.lookup?.calls ?? 0, ms: int(l.ms, 0, MAX_PHASE_MS) ?? b.lookup?.ms ?? 0 } : b.lookup;
-    return { calls: atLeast(x.calls, 0) ?? b.calls, ms: Math.min(max, int(x.ms, 0, MAX_PHASE_MS) ?? b.ms), ...(lookup ? { lookup: { ...lookup } } : {}) };
+    const lookup = l ? { calls: atLeast(l.calls, 0) ?? b.lookup?.calls ?? 0 } : b.lookup;
+    return { calls: atLeast(x.calls, 0) ?? b.calls, ...(lookup ? { lookup: { ...lookup } } : {}) };
   };
   const rawSteps = isRecord(mu.steps) ? mu.steps : {};
   const steps: ModelUseSettings["steps"] = {};
@@ -340,7 +340,7 @@ function conform(v: JsonObject, d: UserSettings): UserSettings {
   const modelUse: ModelUseSettings = {
     preset: oneOf(mu.preset, ["lean", "standard", "full", "custom"] as const) ?? d.modelUse.preset,
     steps,
-    budgets: { pre: phase(budgets.pre, d.modelUse.budgets.pre, PRE_REPLY_MAX_MS), post: phase(budgets.post, d.modelUse.budgets.post, MAX_PHASE_MS) },
+    budgets: { pre: phase(budgets.pre, d.modelUse.budgets.pre), post: phase(budgets.post, d.modelUse.budgets.post) },
     tokens: { sections: atLeast(tokens.sections, 0) ?? d.modelUse.tokens.sections },
   };
   const re = isRecord(v.realism) ? v.realism : {};
@@ -402,6 +402,7 @@ function conform(v: JsonObject, d: UserSettings): UserSettings {
     swipeDefault: oneOf(v.swipeDefault, ["rerun", "renarrate"] as const) ?? d.swipeDefault,
     hideJsonBlocks: typeof v.hideJsonBlocks === "boolean" ? v.hideJsonBlocks : d.hideJsonBlocks,
     minds: mindsSettingsOf(v.minds, d.minds),
+    timeouts: timeoutsOf(v.timeouts, d.timeouts),
   };
 }
 

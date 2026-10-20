@@ -19,6 +19,7 @@ import { neutralizeMacros } from "../shared/macros";
 import type { DraftChanged, ErrorCode, FrontendToBackend, LintIssue, MarkerPreview, ResultBodies, StudioOfferView, UpgradePreview, WorldChatInfo } from "../shared/protocol";
 import { AGENT_API, PROTOCOL_VERSION } from "../shared/protocol";
 import { EXTRACTION_TYPES, helperCallOf } from "../shared/settings";
+import { formatMs, TimeoutFired, timerMs } from "../shared/timeouts";
 import type { TimelapseTarget } from "../shared/ledger";
 import { TIME_CONTROLS, validMarkerBody } from "../engine/events";
 import { materializeIfNeeded } from "../engine/materialize";
@@ -131,8 +132,12 @@ export class Dispatcher {
       // A request that failed after it changed a draft (a commit whose book sync failed) still says so.
       announce();
     } finally {
+      const ms = performance.now() - t0;
       // Any view or edit over a second is kept, so a slow tab says which request was slow.
-      this.rt.diag.slow(userId, chatId, what, performance.now() - t0);
+      this.rt.diag.slow(userId, chatId, what, ms);
+      // One slower than the user's Engine requests limit had the tab stop waiting before it answered: say so.
+      const limit = timerMs(this.rt.settings.known(userId)?.timeouts.requestMs ?? "none");
+      if (limit !== null && ms > limit) this.rt.diag.timeout({ chatId, userId, turn: null }, "request", what, new TimeoutFired("requestMs", limit), `${what} answered after ${formatMs(ms)}, so the tab had shown it as unanswered`);
     }
   }
 
@@ -173,7 +178,7 @@ export class Dispatcher {
       case "lre.hello":
       case "lre.state.resync": {
         if (r.type === "lre.hello") {
-          reply("lre.hello", { accepted: true, agentApi: AGENT_API });
+          reply("lre.hello", { accepted: true, agentApi: AGENT_API, requestMs: (await this.rt.settings.get(userId)).timeouts.requestMs });
           this.meet(userId, session, r.client);
         } else reply("lre.state.resync", { accepted: true });
         // The frontend says which Loom preset is active: the preset prompts assemble with (DESIGN §6.8).

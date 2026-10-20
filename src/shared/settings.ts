@@ -7,6 +7,7 @@ import type { Band, BoundMode, DomainId, InterruptClass, InterruptPolicy, Level,
 import type { AdjudicationDef, StepPurpose } from "./world";
 import type { MindsSettings } from "./minds";
 import { isMindPurpose } from "./minds";
+import { HOST_LIMITS, type TimeoutSettings } from "./timeouts";
 
 /**
  * How hard a model reasons on a call (Lumiverse's per-request reasoning override): `inherit` leaves
@@ -147,18 +148,15 @@ export interface StepConfig {
   lore?: StepLore;
 }
 
-/** Lore lookups a phase may make besides its calls: rounds, and the time from the phase's start in which one may begin. */
+/** Lore lookups a phase may make besides its calls: rounds. When one may still begin is a timeout (`TimeoutSettings`). */
 export interface LookupLimits {
   calls: number;
-  ms: number;
 }
 
-/** Lumiverse's longest wait for a context handler: it clamps a registration's timeout to 1–120 s. */
-export const CONTEXT_HANDLER_MAX_MS = 120_000;
+/** Lumiverse's longest wait for a context handler, from its limits table (`HOST_LIMITS`). */
+export const CONTEXT_HANDLER_MAX_MS = HOST_LIMITS.contextHandler.maxMs;
 /** What a turn's plan needs of the context handler's wait once the before-the-reply steps stop: the plan, its lines and the journal write. */
 export const PLAN_MARGIN_MS = 15_000;
-/** The longest before-the-reply wall clock: the rest of the host's wait, so the plan always lands (DESIGN §5.1). */
-export const PRE_REPLY_MAX_MS = CONTEXT_HANDLER_MAX_MS - PLAN_MARGIN_MS;
 
 /** The activities Speed through always lists (DESIGN §9.2), each offered as a timelapse past 30 minutes unless set otherwise; worlds may add more. */
 export const SPEED_ACTIVITIES = ["sleep", "work_shift", "travel", "waiting"] as const;
@@ -166,9 +164,9 @@ export const SPEED_DEFAULT: Readonly<{ mode: "offer" | "auto"; thresholdMinutes:
 /** A Speed-through threshold's range in whole minutes, 1 minute to 7 days (DESIGN §9.2): what Settings keeps, the controls offer and the engine reads. */
 export const SPEED_THRESHOLD_MINUTES = [1, 7 * 1440] as const;
 
+/** A phase's model calls; how long the phase may take is a timeout (`TimeoutSettings`), apart from any preset. */
 export interface PhaseBudget {
   calls: number;
-  ms: number;
   /** Absent: no lookups; a settings file without one reads with its preset's. */
   lookup?: LookupLimits;
 }
@@ -288,6 +286,8 @@ export interface UserSettings {
   hideJsonBlocks: boolean;
   /** Character minds (DESIGN §24.6): on or off, the Live limit, refresh policies, memory, the Minds section's budget, prompts and time-skip caps. */
   minds: MindsSettings;
+  /** Every wall clock the engine keeps (DESIGN §5.6, Settings → Timeouts), apart from the presets: picking one never changes a time limit. */
+  timeouts: TimeoutSettings;
 }
 
 /** The shipped defaults' revision (`UserSettings.defaults`). */

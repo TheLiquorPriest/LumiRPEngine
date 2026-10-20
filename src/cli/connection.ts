@@ -10,6 +10,7 @@ import { isRecord } from "../shared/json";
 import type { ErrorCode, FrontendToBackend, LintIssue, ResultBodies } from "../shared/protocol";
 import { AGENT_API, PROTOCOL_VERSION } from "../shared/protocol";
 import { ENGINE_EXTENSION } from "../shared/studio-bridge";
+import { formatMs } from "../shared/timeouts";
 import { inClear } from "./credentials";
 
 export interface HttpRequest {
@@ -117,7 +118,10 @@ export interface Connection {
 
 /** The host drops a larger frame without a word. */
 export const FRAME_LIMIT = 4 * 1024 * 1024;
-const TIMEOUT_MS = 60_000;
+/** Each request's wait, and the socket's opening, unless `--timeout` or `LRE_TIMEOUT` says otherwise. */
+const TIMEOUT_MS = 300_000;
+/** What a timeout's message says to raise. */
+const RAISE = "Raise --timeout (or LRE_TIMEOUT) in seconds, or set it to none.";
 /** The host closes a socket idle for 120 s. */
 const PING_MS = 45_000;
 
@@ -233,7 +237,7 @@ export async function sessionOf(http: Http, base: string, token: string | null):
 interface Pending {
   resolve(body: unknown): void;
   reject(error: Error): void;
-  timer: Timer;
+  timer: Timer | undefined;
 }
 
 interface Opened {
@@ -252,7 +256,8 @@ export interface ConnectionOptions {
   openSocket: OpenSocket;
   /** Named in `lre.hello`: LumiRPEngine labels this client's commits `agent`. */
   client: { name: string; version: string };
-  timeoutMs?: number;
+  /** Null: no limit. */
+  timeoutMs?: number | null;
   pingMs?: number;
 }
 
@@ -275,11 +280,11 @@ export class HostConnection implements Connection {
   private openedToken: string | null = null;
   /** Settles the open in progress when CONNECTED (or AUTH_ERROR) arrives. */
   private greeting: { resolve(): void; reject(error: Error): void } | null = null;
-  private readonly timeoutMs: number;
+  private readonly timeoutMs: number | null;
   private readonly pingMs: number;
 
   constructor(private readonly options: ConnectionOptions) {
-    this.timeoutMs = options.timeoutMs ?? TIMEOUT_MS;
+    this.timeoutMs = options.timeoutMs === undefined ? TIMEOUT_MS : options.timeoutMs;
     this.pingMs = options.pingMs ?? PING_MS;
   }
 
@@ -388,7 +393,7 @@ export class HostConnection implements Connection {
       this.opened = { extension, agentApi: typeof agentApi === "number" ? agentApi : null };
     } catch (error) {
       this.close();
-      if (error instanceof LiveError && error.problem === "timeout") throw new LiveError("timeout", `LumiRPEngine on ${this.options.base} didn't answer within ${Math.round(this.timeoutMs / 1000)} s. Check that it's running (lumirpengine status), and restart it in Lumiverse's Extensions tab if it is.`);
+      if (error instanceof LiveError && error.problem === "timeout") throw new LiveError("timeout", `LumiRPEngine on ${this.options.base} didn't answer within ${formatMs(this.timeoutMs ?? 0)}. Check that it's running (lumirpengine status), and restart it in Lumiverse's Extensions tab if it is. ${RAISE}`);
       throw error;
     }
     return this.opened;
@@ -411,7 +416,8 @@ export class HostConnection implements Connection {
       socket.close();
       reject(error);
     };
-    const timer = setTimeout(() => settle(new LiveError("timeout", `Lumiverse at ${this.options.base} opened no event socket within ${Math.round(this.timeoutMs / 1000)} s. Behind a proxy, the proxy must pass WebSocket upgrades on /api/ws.`)), this.timeoutMs);
+    const limit = this.timeoutMs;
+    const timer = limit === null ? undefined : setTimeout(() => settle(new LiveError("timeout", `Lumiverse at ${this.options.base} opened no event socket within ${formatMs(limit)}. Behind a proxy, the proxy must pass WebSocket upgrades on /api/ws. ${RAISE}`)), limit);
     this.greeting = { resolve: () => settle(null), reject: settle };
     const socket: Socket = this.options.openSocket(url.toString(), {
       message: (text) => this.received(socket, text),
@@ -465,10 +471,14 @@ export class HostConnection implements Connection {
     const bytes = frame.length * 3 > FRAME_LIMIT ? new TextEncoder().encode(frame).length : 0;
     if (bytes > FRAME_LIMIT) return Promise.reject(new LiveError("too_large", `That ${type} request is ${(bytes / 1048576).toFixed(1)} MiB, and Lumiverse drops anything over 4 MiB without a word. Send less at once.`));
     const { promise, resolve, reject } = Promise.withResolvers<unknown>();
-    const timer = setTimeout(() => {
-      this.pending.delete(reqId);
-      reject(new LiveError("timeout", `LumiRPEngine didn't answer ${type} within ${Math.round(this.timeoutMs / 1000)} s. A change may still have been made: check before repeating it.`));
-    }, this.timeoutMs);
+    const limit = this.timeoutMs;
+    const timer =
+      limit === null
+        ? undefined
+        : setTimeout(() => {
+            this.pending.delete(reqId);
+            reject(new LiveError("timeout", `LumiRPEngine didn't answer ${type} within ${formatMs(limit)}. A change may still have been made: check before repeating it. ${RAISE}`));
+          }, limit);
     this.pending.set(reqId, { resolve, reject, timer });
     socket.send(frame);
     return promise;

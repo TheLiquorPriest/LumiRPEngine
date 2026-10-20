@@ -1,8 +1,8 @@
 // Settings (DESIGN §12): a home list of pages in groups, each page under a header with
-// Back. Getting started: Helper model, Model use, Steps and connections, Minds. Defaults for new
-// chats: Realism, Checks, Time. Replies: Changes from the reply, Swipes. Your preset. Display: Show
-// ids. About: Caveats, fetched on their own (a dry run of the chat) by home and the Caveats page;
-// Diagnostics (each turn's steps, model calls and failures; behind its own curtain).
+// Back. Getting started: Helper model, Model use, Steps and connections, Minds, Timeouts. Defaults
+// for new chats: Realism, Checks, Time. Replies: Changes from the reply, Swipes. Your preset.
+// Display: Show ids. About: Caveats, fetched on their own (a dry run of the chat) by home and the
+// Caveats page, and Diagnostics (each turn's steps, model calls and failures; behind its own curtain).
 // The page is UI state (`ui.settings.page`), so it holds while the drawer switches modes. A running
 // chat's own rules (realism, checks, time, pins and Upgrade) live in GM → This chat.
 
@@ -23,6 +23,7 @@ import { MindsSection } from "./minds";
 import { PresetPage } from "./preset";
 import { ExtractionPage, SwipesPage } from "./replies";
 import { type Connection, HelperSection, helperSummary, ModelUseSection, STEP_LABEL, StepsSection, useConnections } from "./steps";
+import { limitText, TimeoutsSection } from "./timeouts";
 import { DiagnosticsPage } from "../diagnostics";
 
 type Page = Exclude<SettingsPage, "home">;
@@ -33,6 +34,7 @@ const PAGE: Record<Page, { title: string; subtitle: string; icon: IconName }> = 
   model: { title: "Model use", subtitle: "How much the engine asks a model", icon: "bolt" },
   steps: { title: "Steps and connections", subtitle: "Which model runs each step", icon: "branch" },
   minds: { title: "Minds", subtitle: "How characters think and remember", icon: "sparkle" },
+  timeouts: { title: "Timeouts", subtitle: "How long each wait may run", icon: "hourglass" },
   realism: { title: "Realism", subtitle: "For new chats", icon: "layers" },
   checks: { title: "Checks", subtitle: "For new chats", icon: "dice" },
   time: { title: "Time", subtitle: "For new chats", icon: "clock" },
@@ -46,7 +48,7 @@ const PAGE: Record<Page, { title: string; subtitle: string; icon: IconName }> = 
 
 /** The home list's groups, in order. */
 const GROUPS: readonly { title: string; pages: readonly Page[] }[] = [
-  { title: "Getting started", pages: ["helper", "model", "steps", "minds"] },
+  { title: "Getting started", pages: ["helper", "model", "steps", "minds", "timeouts"] },
   { title: "Defaults for new chats", pages: ["realism", "checks", "time"] },
   { title: "Replies", pages: ["extraction", "swipes"] },
   { title: "Your preset", pages: ["preset"] },
@@ -72,6 +74,8 @@ function summaryOf(page: Page, data: SettingsResult, caveats: readonly Caveat[] 
       return { subtitle: `${humanize(settings.modelUse.preset)} preset` };
     case "minds":
       return { subtitle: settings.minds.enabled ? `On · ${settings.minds.liveLimit === "none" ? "no Live limit" : `up to ${settings.minds.liveLimit} Live a turn`}` : "Off" };
+    case "timeouts":
+      return { subtitle: `Engine run ${limitText(settings.timeouts.engineRunMs)} · reading the reply ${limitText(settings.timeouts.postReplyMs)}` };
     case "steps": {
       const purposes = Object.keys(STEP_LABEL) as StepPurpose[];
       const on = purposes.filter((purpose) => stepConfigOf(settings.modelUse.steps, purpose).enabled).length;
@@ -234,11 +238,13 @@ export function Settings() {
     page === "helper" ? (
       <HelperSection helper={settings.helper} patch={patch} busy={busy} />
     ) : page === "model" ? (
-      <ModelUseSection modelUse={settings.modelUse} meter={view?.meter ?? null} patch={patch} busy={busy} />
+      <ModelUseSection modelUse={settings.modelUse} meter={view?.meter ?? null} patch={patch} openTimeouts={() => go("timeouts")} busy={busy} />
     ) : page === "steps" ? (
       <StepsSection modelUse={settings.modelUse} helper={settings.helper} patch={patch} openHelper={() => go("helper")} busy={busy} />
     ) : page === "minds" ? (
       <MindsSection minds={settings.minds} patch={patch} busy={busy} />
+    ) : page === "timeouts" ? (
+      <TimeoutsSection timeouts={settings.timeouts} patch={patch} busy={busy} />
     ) : page === "realism" ? (
       <RealismPage settings={settings} patch={patch} busy={busy} />
     ) : page === "checks" ? (

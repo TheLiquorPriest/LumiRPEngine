@@ -24,6 +24,9 @@ import type { JsonObject, JsonValue } from "../shared/json";
 import { hasOwn, isRecord, safeKey } from "../shared/json";
 import { loreIsSecret, topicIdOf } from "../shared/lore";
 import type { StepLore as StepLoreSetting } from "../shared/settings";
+import { limitOf } from "../shared/minds";
+import type { Timeout } from "../shared/timeouts";
+import { firedTimeout, formatMs, TimeoutFired, TIMEOUTS } from "../shared/timeouts";
 import type { LoreStepTrace } from "../shared/state-view";
 import type { LoreEntryDef, StepPurpose } from "../shared/world";
 import { loreGet, loreList, loreReadable, loreSearch, readableLore, readsSecrets, type LoreHit, type LoreReader, type LoreResult } from "../engine/lore";
@@ -102,23 +105,39 @@ export const LORE_TOOLS: readonly QuietTool[] = [
  * A phase's lookup budget (DESIGN §5.4): rounds, apart from the phase's calls. A step holds a round
  * before its model is offered lookups, spends it when the model asks, and releases it when the
  * model answers instead, so parallel steps never overdraw it. A round may start only within the
- * first `ms` of the phase, and only while `LOOKUP_RESERVE` of the phase's time is left.
+ * phase's lookup window (`window`, the user's setting), and only while `LOOKUP_RESERVE` of the
+ * phase's own time is left; the first round refused for time keeps why in `stopped`.
  */
 export class LookupBudget {
   private used = 0;
   private held = 0;
   private readonly started = performance.now();
+  /** Why lookups stopped while rounds were left: a time limit, named with its setting; null while none did. */
+  stopped: string | null = null;
 
   constructor(
     readonly calls: number,
-    readonly ms: number,
-    private readonly phaseMs: number,
+    private readonly window: Timeout,
+    private readonly phase: Timeout,
     private readonly signal: AbortSignal,
   ) {}
 
   hold(): boolean {
+    if (this.used + this.held >= this.calls) return false;
+    const fired = firedTimeout(this.signal);
+    if (fired) this.stopped ??= `lore lookups stopped: ${fired.message}`;
+    if (this.signal.aborted) return false;
     const elapsed = performance.now() - this.started;
-    if (this.used + this.held >= this.calls || elapsed >= this.ms || this.signal.aborted || this.phaseMs - elapsed < this.phaseMs * LOOKUP_RESERVE) return false;
+    const windowMs = limitOf(this.window.limit);
+    const phaseMs = limitOf(this.phase.limit);
+    if (elapsed >= windowMs) {
+      this.stopped ??= `lore lookups stopped: ${new TimeoutFired(this.window.key, windowMs).message}`;
+      return false;
+    }
+    if (phaseMs - elapsed < phaseMs * LOOKUP_RESERVE) {
+      this.stopped ??= `lore lookups stopped with a third of ${TIMEOUTS[this.phase.key].label} (${formatMs(phaseMs)}, Settings → Timeouts) left, so the steps keep time to answer`;
+      return false;
+    }
     this.held++;
     return true;
   }
@@ -280,7 +299,8 @@ export class StepLore {
     const { reg, world, state } = this.reader;
     if (!readableLore(reg, world, state, this.purpose, this.effects).some((id) => !this.given.has(id))) return null;
     if (!this.lookups.budget.hold()) {
-      this.note("No lookup: the phase's lookup budget was spent or its time was up, so the step used its prefetch.");
+      const stopped = this.lookups.budget.stopped;
+      this.note(stopped ? `No lookup: ${stopped}; the step used its prefetch.` : "No lookup: the phase's lookup budget was spent, so the step used its prefetch.");
       return null;
     }
     this.trace.transport = this.transport;

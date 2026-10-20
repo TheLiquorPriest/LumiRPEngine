@@ -2,9 +2,13 @@
 // resolve with exactly one result or error; state arrives as a snapshot followed by deltas. A
 // delta whose `base` is not the held `rev` (or whose paths do not resolve) is discarded and the
 // view is resynced; while a resync is outstanding every delta is discarded. Listener
-// notifications are coalesced, so a burst of deltas renders once.
+// notifications are coalesced, so a burst of deltas renders once. A request waits for its answer
+// as long as the user's Engine requests timeout (Settings → Timeouts): the hello's answer carries
+// it, and so does every settings answer, so a change applies to the next request.
 
 import { isRecord } from "../shared/json";
+import type { Limit } from "../shared/minds";
+import { formatMs, TIMEOUTS, timerMs } from "../shared/timeouts";
 import type { Activity } from "../shared/diagnostics";
 import type { ChatId } from "../shared/ids";
 import { PROTOCOL_VERSION } from "../shared/protocol";
@@ -25,8 +29,8 @@ export interface Timers {
 }
 
 export interface ClientOptions {
-  /** Unanswered requests resolve with an `unavailable` error after this long. */
-  timeoutMs?: number;
+  /** How long a request waits before it resolves with an `unavailable` error, until the hello's answer says the user's (ms, or "none"). */
+  requestMs?: Limit;
   newReqId?: () => string;
   /** Runs a coalesced notification; defaults to a microtask. */
   schedule?: (fn: () => void) => void;
@@ -104,7 +108,7 @@ export class ProtocolClient {
   private readonly mindsListeners = new Set<(update: MindsRunUpdate) => void>();
   private readonly draftListeners = new Set<(push: DraftChanged) => void>();
   private readonly unsubscribe: () => void;
-  private readonly timeoutMs: number;
+  private requestMs: Limit;
   private readonly newReqId: () => string;
   private readonly schedule: (fn: () => void) => void;
   private readonly timers: Timers;
@@ -114,7 +118,7 @@ export class ProtocolClient {
   private counter = 0;
 
   constructor(private readonly transport: Transport, options: ClientOptions = {}) {
-    this.timeoutMs = options.timeoutMs ?? 30_000;
+    this.requestMs = options.requestMs ?? TIMEOUTS.requestMs.defaultMs;
     this.newReqId = options.newReqId ?? (() => `r${Date.now().toString(36)}-${(this.counter += 1).toString(36)}`);
     // Wrapped: browsers throw "Illegal invocation" when queueMicrotask is called as a method.
     this.schedule = options.schedule ?? ((fn) => queueMicrotask(fn));
@@ -203,10 +207,14 @@ export class ProtocolClient {
       resolve(errorMessage(reqId, "unavailable", "The extension was unloaded"));
       return promise;
     }
-    const timer = this.timers.set(() => {
-      if (!this.pending.delete(reqId)) return;
-      resolve(errorMessage(reqId, "unavailable", `No reply from the engine within ${Math.round(this.timeoutMs / 1000)} s`));
-    }, this.timeoutMs);
+    const ms = timerMs(this.requestMs);
+    const timer =
+      ms === null
+        ? null
+        : this.timers.set(() => {
+            if (!this.pending.delete(reqId)) return;
+            resolve(errorMessage(reqId, "unavailable", `No reply from the engine within ${formatMs(ms)} (Settings → Timeouts → ${TIMEOUTS.requestMs.label}). It may still finish what was asked.`));
+          }, ms);
     this.pending.set(reqId, { type: body.type, resolve, timer });
     const message = { ...body, lre: PROTOCOL_VERSION, reqId } as FrontendToBackend;
     try {
@@ -274,6 +282,11 @@ export class ProtocolClient {
       entry.resolve(errorMessage(payload.reqId, "internal", `Result for ${String(payload.request)} answered a ${entry.type} request`));
       return;
     }
+    // The user's Engine requests timeout, from the hello's answer or a settings answer.
+    const body = payload.body;
+    const settings = payload.request === "lre.settings.get" || payload.request === "lre.settings.set" ? body.settings : undefined;
+    const limit = payload.request === "lre.hello" ? body.requestMs : isRecord(settings) && isRecord(settings.timeouts) ? settings.timeouts.requestMs : undefined;
+    if (limit === "none" || (typeof limit === "number" && Number.isFinite(limit) && limit >= 0)) this.requestMs = limit;
     entry.resolve(payload as unknown as ResultMessage);
   }
 

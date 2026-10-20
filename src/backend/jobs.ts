@@ -14,6 +14,8 @@ import { loreSourceOf } from "../shared/lore";
 import type { ErrorCode, JobKind, JobProposal, JobResult, JobSummary, JobUpdate, LintIssue, WorldCollection } from "../shared/protocol";
 import { PROTOCOL_VERSION } from "../shared/protocol";
 import type { StepConfig } from "../shared/settings";
+import type { Limit } from "../shared/minds";
+import { firedTimeout, formatMs, HOST_LIMITS, hostBound, timeoutSignal, TIMEOUTS } from "../shared/timeouts";
 import type { Registry } from "../engine/registry-impl";
 import type { HostPort, ProcessEvent, ProcessHandle } from "./host";
 import { checkIndexProposals, INDEX_TEXT_CHUNK, indexReplyProblem, indexRetry, indexSystem, readIndexProposals, textChunks, type IndexBook } from "./lore-index";
@@ -163,6 +165,17 @@ export interface LaneMessage {
   result?: JsonValue;
 }
 
+/**
+ * Why a lane Lumiverse stopped for time failed its job: Lumiverse's own words, the setting whose wait
+ * ran out (its words say start-up or heartbeat) and the most Lumiverse allows for it.
+ */
+function laneTimedOut(error: string | undefined): string {
+  const key = error?.includes("heartbeat") ? "laneHeartbeatMs" : error?.includes("startup") ? "laneStartupMs" : null;
+  const named = key ? TIMEOUTS[key].label : `${TIMEOUTS.laneStartupMs.label} or ${TIMEOUTS.laneHeartbeatMs.label}`;
+  const cap = HOST_LIMITS[key === "laneHeartbeatMs" ? "processHeartbeat" : "processStartup"].maxMs;
+  return `${error ?? "The background lane timed out"}: Lumiverse stopped it when ${named} ran out. Raise it in Settings → Timeouts; Lumiverse allows at most ${formatMs(cap)}.`;
+}
+
 export class JobRunner {
   private readonly jobs = new Map<string, Job>();
   private seq = 0;
@@ -179,8 +192,8 @@ export class JobRunner {
     private readonly steps: Steps,
     private readonly settings: SettingsStore,
     private readonly registry: Registry,
-    /** Each Import/Refine model call's own deadline; tests pass a signal they abort. */
-    private readonly callDeadline: () => AbortSignal = () => AbortSignal.timeout(JobRunner.CALL_MS),
+    /** Each Import/Refine model call's own deadline from the user's limit (Settings → Timeouts); null for none. Tests pass a signal they abort. */
+    private readonly callDeadline: (limit: Limit) => AbortSignal | null = (limit) => timeoutSignal("jobCallMs", limit),
   ) {
     // A lane that ends before reporting fails its job, instead of leaving it running.
     this.host.processes.onLifecycle((event) => this.onLifecycle(event));
@@ -188,9 +201,6 @@ export class JobRunner {
 
   /** Jobs a user may have running at once. */
   static readonly MAX_PER_USER = 2;
-
-  /** How long one Import/Refine model call may run before it counts as failed. */
-  static readonly CALL_MS = 120_000;
 
   async start(kind: JobKind, worldId: WorldId, input: JsonObject, userId: UserId, session?: string): Promise<string> {
     // The request is the frontend's: a kind the runner doesn't have would otherwise run as Refine.
@@ -291,7 +301,7 @@ export class JobRunner {
     const job = this.jobs.get(event.key);
     if (!job?.lane || job.lane.processId !== event.processId) return;
     if (event.state === "failed" || event.state === "timed_out" || event.state === "stopped" || event.state === "completed") {
-      this.update(job, { status: "failed", progress: 1, message: event.error ?? `the background lane ${event.state === "completed" ? "ended without a result" : event.state.replace("_", " ")}` });
+      this.update(job, { status: "failed", progress: 1, message: event.state === "timed_out" ? laneTimedOut(event.error) : (event.error ?? `the background lane ${event.state === "completed" ? "ended without a result" : event.state.replace("_", " ")}`) });
     }
   }
 
@@ -350,8 +360,8 @@ export class JobRunner {
     const ask = async (text: string, attempt: string): Promise<JsonValue | null> => {
       const t0 = performance.now();
       const reply = await this.steps.helperJson("brief", system, text, roomy, userId, signal);
-      const problem = reader.problem(reply);
-      this.host.log("info", `[LumiRPEngine] ${name} ${label} ${attempt}: ${problem ?? `${reader.count(reply)} proposal(s)`} in ${Math.round(performance.now() - t0)} ms`, userId);
+      const fired = firedTimeout(signal);
+      this.host.log(fired ? "warn" : "info", `[LumiRPEngine] ${name} ${label} ${attempt}: ${fired ? fired.message : (reader.problem(reply) ?? `${reader.count(reply)} proposal(s)`)} in ${Math.round(performance.now() - t0)} ms`, userId);
       return reply;
     };
     const reply = await ask(user, "call");
@@ -371,16 +381,21 @@ export class JobRunner {
     const config = settings.modelUse.steps.brief ?? settings.modelUse.steps.interpret ?? null;
     const signal = job.controller.signal;
     // A call ends at its own deadline or when the job is cancelled, whichever comes first.
-    const callSignal = (): AbortSignal => AbortSignal.any([signal, this.callDeadline()]);
+    const callSignal = (): AbortSignal => {
+      const own = this.callDeadline(settings.timeouts.jobCallMs);
+      return own ? AbortSignal.any([signal, own]) : signal;
+    };
+    // The background lane's start-up and heartbeat waits, within what Lumiverse allows.
+    const lane = { startupMs: hostBound(HOST_LIMITS.processStartup, settings.timeouts.laneStartupMs), heartbeatMs: hostBound(HOST_LIMITS.processHeartbeat, settings.timeouts.laneHeartbeatMs) };
     if (job.kind === "playtest") {
       const turns = Array.isArray(input.turns) ? input.turns.filter((t): t is string => typeof t === "string") : [];
       if (turns.length === 0) throw new Error("a playtest needs at least one typed turn");
-      job.lane = await this.host.processes.spawn({ entry: BACKGROUND_LANE, kind: "background", key: job.id, payload: { jobId: job.id, kind: "playtest", world: JSON.parse(JSON.stringify(world)) as JsonValue, revision, turns, runSeed: `playtest:${job.id}` }, userId: job.userId });
+      job.lane = await this.host.processes.spawn({ entry: BACKGROUND_LANE, kind: "background", key: job.id, payload: { jobId: job.id, kind: "playtest", world: JSON.parse(JSON.stringify(world)) as JsonValue, revision, turns, runSeed: `playtest:${job.id}` }, userId: job.userId, ...lane });
       return;
     }
     if (job.kind === "check_world") {
       const days = typeof input.days === "number" ? Math.max(1, Math.min(14, Math.floor(input.days))) : 3;
-      job.lane = await this.host.processes.spawn({ entry: BACKGROUND_LANE, kind: "background", key: job.id, payload: { jobId: job.id, kind: "check_world", world: JSON.parse(JSON.stringify(world)) as JsonValue, revision, days, runSeed: `check:${revision}` }, userId: job.userId });
+      job.lane = await this.host.processes.spawn({ entry: BACKGROUND_LANE, kind: "background", key: job.id, payload: { jobId: job.id, kind: "check_world", world: JSON.parse(JSON.stringify(world)) as JsonValue, revision, days, runSeed: `check:${revision}` }, userId: job.userId, ...lane });
       return;
     }
     if (job.kind === "import_lore") {
@@ -445,9 +460,11 @@ export class JobRunner {
       const roomy: StepConfig = { ...(config ?? { enabled: true, signals: [] }), maxTokens: Math.max(config?.maxTokens ?? 0, PROPOSAL_MAX_TOKENS) };
       const ask = async (user: string, attempt: string) => {
         const t0 = performance.now();
-        const answer = readMapAnswer(draft, request, await this.steps.helperJson("brief", system, user, roomy, job.userId, callSignal()));
+        const call = callSignal();
+        const answer = readMapAnswer(draft, request, await this.steps.helperJson("brief", system, user, roomy, job.userId, call));
         const errors = answer.problems.filter((p) => p.severity === "error").length;
-        this.host.log("info", `[LumiRPEngine] describe_map ${request.mapId} ${attempt}: ${answer.map ? `${errors} error(s), ${answer.problems.length - errors} warning(s)` : "no map"} in ${Math.round(performance.now() - t0)} ms`, job.userId);
+        const fired = firedTimeout(call);
+        this.host.log(fired ? "warn" : "info", `[LumiRPEngine] describe_map ${request.mapId} ${attempt}: ${fired ? fired.message : answer.map ? `${errors} error(s), ${answer.problems.length - errors} warning(s)` : "no map"} in ${Math.round(performance.now() - t0)} ms`, job.userId);
         return answer;
       };
       const first = await ask(text, "call");

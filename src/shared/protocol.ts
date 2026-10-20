@@ -7,7 +7,7 @@
 
 import type { JsonObject, JsonValue } from "./json";
 import type { LoreIndexAddition } from "./lore";
-import type { MindEditOp, MindsRunView } from "./minds";
+import type { Limit, MindEditOp, MindsRunView } from "./minds";
 import type { ActionId, BoundMode, ChatId, ChipId, DomainId, EntityId, FieldId, KindId, Level, MessageId, PanelId, PlaceId, RelationTypeId, RevisionId, StageId, TierId, TrackId, WorldId } from "./ids";
 import type { EntityUpgradePick, EventRef, PathHash, ResolveScope, TimeControl, TimeScope, UpgradeAspect, UpgradePicks } from "./ledger";
 import type { ExtractionType, UserSettings } from "./settings";
@@ -603,8 +603,8 @@ export interface SettingsResult {
 
 /** Results per request type. */
 export interface ResultBodies {
-  /** `agentApi`: the outside-client level this build speaks (`AGENT_API`). */
-  "lre.hello": { accepted: true; agentApi: number };
+  /** `agentApi`: the outside-client level this build speaks (`AGENT_API`). `requestMs`: how long the frontend waits for each answer, the user's Engine requests timeout (Settings → Timeouts). */
+  "lre.hello": { accepted: true; agentApi: number; requestMs: Limit };
   "lre.state.resync": { accepted: true };
   "lre.action": { messageId: MessageId };
   "lre.chip": { applied: boolean; pending: boolean };
