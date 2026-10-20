@@ -1,18 +1,15 @@
-// How checks are decided (DESIGN §11), one form for Build's Ruleset part and Settings → Checks: a
-// preset (Narrative-first, Balanced, Crunchy, Custom) told in plain lines, and under Custom every
-// value with a plain label and a short help. Shares go in as whole percentages; a named preset is
-// always its own values, so changing any value makes the policy Custom.
+// How checks are decided (DESIGN §11), one form for Build's Ruleset part, Settings → Checks and GM →
+// This chat → Checks: a preset (Narrative-first, Balanced, Crunchy, Custom) told in plain lines, and
+// under Custom every value with a plain label and a short help. Shares go in as whole percentages;
+// a named preset is always its own values, so changing any value makes the policy Custom.
 
 import { presetAdjudication } from "../shared/adjudication";
 import type { AdjudicationDef, AdjudicationPresetId, CheckAuthority, CheckTiming, DescriptionWeight, RetryRule } from "../shared/world";
 import { HostSwitch, NumberStepper, Seg } from "./components";
 
-const PRESETS: { value: AdjudicationPresetId; label: string }[] = [
-  { value: "narrative", label: "Narrative-first" },
-  { value: "balanced", label: "Balanced" },
-  { value: "crunchy", label: "Crunchy" },
-  { value: "custom", label: "Custom" },
-];
+export const ADJUDICATION_PRESET_LABEL: Record<AdjudicationPresetId, string> = { narrative: "Narrative-first", balanced: "Balanced", crunchy: "Crunchy", custom: "Custom" };
+
+const PRESETS = (["narrative", "balanced", "crunchy", "custom"] as const).map((value) => ({ value, label: ADJUDICATION_PRESET_LABEL[value] }));
 
 const TIMING: Record<CheckTiming, string> = { every: "Every check", risky: "Only risky ones", marked: "Only where marked", never: "Never" };
 const WEIGHT: Record<DescriptionWeight, string> = { none: "Doesn't count", bonus: "Adds a bonus", advantage: "Grants advantage", dc: "Lowers the DC" };
@@ -68,7 +65,7 @@ function Choice<T extends string>(props: { label: string; help: string; value: T
           </option>
         ))}
       </select>
-      <span class="lre-small lre-muted">{props.help}</span>
+      <span class="lre-field-help">{props.help}</span>
     </label>
   );
 }
@@ -79,7 +76,7 @@ function Threshold(props: { label: string; at: string; help: string; value: numb
     <div class="lre-field">
       <HostSwitch label={props.label} checked={props.value !== null} disabled={props.disabled} onChange={(on) => props.onChange(on ? props.fallback : null)} />
       {props.value !== null ? <NumberStepper label={props.at} value={percent(props.value)} min={0} max={100} step={1} integer disabled={props.disabled} onChange={(v) => props.onChange(v / 100)} /> : null}
-      <span class="lre-small lre-muted">{props.help}</span>
+      <span class="lre-field-help">{props.help}</span>
     </div>
   );
 }
@@ -95,16 +92,14 @@ export function AdjudicationForm(props: { value: AdjudicationDef; disabled?: boo
     <div class="lre-stack" data-lre-adjudication-form>
       <Seg<AdjudicationPresetId> label="Adjudication preset" value={p.preset} options={PRESETS} disabled={props.disabled} onChange={(preset) => props.onChange(preset === "custom" ? { ...p, preset } : presetAdjudication(preset))} />
       {p.preset !== "custom" ? (
-        <ul class="lre-small" style={{ margin: 0, paddingLeft: "18px" }} data-lre-policy-lines>
+        <ul class="lre-gm-lines" data-lre-policy-lines>
           {policyLines(p).map((line) => (
             <li key={line}>{line}</li>
           ))}
         </ul>
       ) : (
         <>
-          <p class="lre-small lre-muted" style={{ margin: 0 }}>
-            Any change makes it Custom. Chances are the exact odds the palette shows.
-          </p>
+          <p class="lre-gm-note">Any change makes it Custom. Chances are the exact odds the palette shows.</p>
           <Choice label="When checks roll" help="Risky: only when the chance of success is below the line. Marked: only for actions, places and quests marked in Build. A check that isn't rolled succeeds." value={p.checks} labels={TIMING} disabled={props.disabled} onChange={(checks) => set({ checks })} />
           {p.checks === "risky" ? <NumberStepper label="Risky below (% to succeed)" value={percent(p.riskyAt)} min={0} max={100} step={1} integer disabled={props.disabled} onChange={(v) => set({ riskyAt: v / 100 })} /> : null}
           <Threshold label="Sure things pass without a roll" at="From (% to succeed)" help="A check this likely just succeeds." value={p.trivialAt} fallback={0.95} disabled={props.disabled} onChange={(trivialAt) => set({ trivialAt })} />

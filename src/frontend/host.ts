@@ -77,6 +77,14 @@ export function createHost(ctx: SpindleFrontendContext): Host {
         return false;
       }
     },
+    revealMessage(messageId) {
+      const element = ctx.dom.findMessageElement(messageId);
+      if (!element) return false;
+      // Nothing moves under reduced motion: the jump is instant there.
+      const still = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches === true;
+      element.scrollIntoView({ behavior: still ? "auto" : "smooth", block: "center" });
+      return true;
+    },
     dispose() {
       window.removeEventListener("resize", syncViewport);
       coarse?.removeEventListener("change", syncViewport);

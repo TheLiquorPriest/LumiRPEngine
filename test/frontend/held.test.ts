@@ -7,20 +7,32 @@ import { describe, expect, test } from "bun:test";
 import type { HeldBase, HeldStep } from "../../src/frontend/build/held";
 import { heldChoice, heldStart, holdOrFollow } from "../../src/frontend/build/held";
 
-/** A form on one item, stepped as `useHeld` steps it; `watchOf` is what its editor watches of the draft's value. */
+/**
+ * A form on one item, stepped as `useHeld` steps it; `watchOf` is what its editor watches of the
+ * draft's value. `type` is text typed into a field the form's value doesn't have yet (a number or
+ * money field hands it on blur, once it parses), which counts as an edit as `typedFields` counts it.
+ */
 function form<T>(key: string, initial: T, watchOf: (initial: T) => string = (v) => JSON.stringify(v)) {
   let value = structuredClone(initial);
   let base: HeldBase<T> = heldStart(key, watchOf(initial), initial);
+  let typing = false;
   const apply = (step: HeldStep<T> | null): void => {
     if (!step) return;
     base = step.base;
     if (step.load) value = structuredClone(step.load.value);
   };
-  const changed = (next: T, reloaded: boolean, at: string): void => apply(holdOrFollow(base, { key: at, watch: watchOf(next), value, initial: next, reloaded }));
+  const changed = (next: T, reloaded: boolean, at: string): void => apply(holdOrFollow(base, { key: at, watch: watchOf(next), value, initial: next, reloaded, typing }));
   return {
     shown: (): { value: T; notice: boolean } => ({ value, notice: base.theirs !== null }),
     edit: (next: T): void => {
       value = next;
+    },
+    /** The first keystroke in a field, until it hands its text to the form (`edit`) or `handed` without a change. */
+    type: (): void => {
+      typing = true;
+    },
+    handed: (): void => {
+      typing = false;
     },
     /** A change made elsewhere, as Build reloads it; `at` is the item the form is on then. */
     reload: (next: T, at: string = base.key): void => changed(next, true, at),
@@ -45,6 +57,42 @@ describe("a Build form over a draft others change", () => {
     expect(f.shown()).toEqual({ value: track("Find the black cat", "Begin"), notice: true });
     f.choose("theirs");
     expect(f.shown()).toEqual({ value: track("Find the cat", "Begin (agent, again)"), notice: false });
+  });
+
+  test("text being typed is an edit from the first keystroke: a change elsewhere holds the form, so the field keeps what is typed until Load theirs", () => {
+    // A field shows what is typed until the form's value of it changes, so the form's value staying is the typed text staying.
+    const person = (name: string, mood = "calm", xp?: number) => ({ id: "rosie", kind: "person", name, fields: xp === undefined ? { mood } : { mood, xp } });
+    const f = form("w/entities/rosie", person("Rosie Alvarez"));
+    // A text field hands each keystroke to the form: an edit like any other.
+    f.edit(person("Rosie Alvarez-R"));
+    f.reload(person("Rosie Alvarez", "tense"));
+    expect(f.shown()).toEqual({ value: person("Rosie Alvarez-R"), notice: true });
+    f.choose("theirs");
+    expect(f.shown()).toEqual({ value: person("Rosie Alvarez", "tense"), notice: false });
+    // A number field keeps "12" to itself until blur; typed, it is an edit all the same.
+    f.type();
+    f.reload(person("Rosie Alvarez", "happy"));
+    expect(f.shown()).toEqual({ value: person("Rosie Alvarez", "tense"), notice: true });
+    // Another change while still typing: still held, the field's value still the one it was typed over.
+    f.reload(person("Rosie A. (agent)", "calm"));
+    expect(f.shown()).toEqual({ value: person("Rosie Alvarez", "tense"), notice: true });
+    // Blurred, the field hands its number to the form, which keeps it behind the notice; Load theirs alone replaces it.
+    f.edit(person("Rosie Alvarez", "tense", 12));
+    f.handed();
+    expect(f.shown()).toEqual({ value: person("Rosie Alvarez", "tense", 12), notice: true });
+    f.choose("theirs");
+    expect(f.shown()).toEqual({ value: person("Rosie A. (agent)", "calm"), notice: false });
+    // Text typed, taken back and handed over without a change is no edit: the next change loads.
+    f.type();
+    f.handed();
+    f.reload(person("Rosie A. (agent)", "happy"));
+    expect(f.shown()).toEqual({ value: person("Rosie A. (agent)", "happy"), notice: false });
+    // Build's own write and another item follow the draft even while a field is typed into.
+    f.type();
+    f.written(person("Rosie (saved)", "happy"));
+    expect(f.shown()).toEqual({ value: person("Rosie (saved)", "happy"), notice: false });
+    f.reload({ ...person("Hank"), id: "hank" }, "w/entities/hank");
+    expect(f.shown()).toEqual({ value: { ...person("Hank"), id: "hank" }, notice: false });
   });
 
   test("keep mine keeps the edits over theirs: any later change holds them, unless it brings the same", () => {

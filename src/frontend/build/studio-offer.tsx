@@ -9,7 +9,9 @@ import type { StudioInstalled } from "../../shared/studio-bridge";
 import { STUDIO_INSTALLED_EVENT } from "../../shared/studio-bridge";
 import type { WorldId } from "../../shared/ids";
 import { useApp, useUi, useView } from "../app";
-import { Card, useBusy } from "../components";
+import { Badge, Banner, Button, Section, useBusy } from "../components";
+import { Icon } from "../icons";
+import { IssueRow } from "./check";
 
 export interface StudioOfferState {
   offer: StudioOfferView | null;
@@ -48,7 +50,7 @@ export function useStudioOffer(props: { installed(): void; review(next: { worldI
       if (result.lint && result.lint.length > 0) props.review({ worldId: done.worldId, name: done.name, issues: result.lint });
       const detail: StudioInstalled = { offerId: done.offerId, mode: done.mode, worldId: done.worldId, revision: done.revision };
       window.dispatchEvent(new CustomEvent(STUDIO_INSTALLED_EVENT, { detail }));
-      app.toast(done.mode === "new" ? `Installed “${done.name}” as a new world.` : `“${done.name}” has a new revision. Upgrade its chats in Settings → Pins and upgrade.`, "info");
+      app.toast(done.mode === "new" ? `Installed “${done.name}” as a new world.` : `“${done.name}” has a new revision. Upgrade its chats in GM → This chat.`, "info");
       if (!done.attachChatId) return;
       // Play's Attach, with its confirmation, for the chat the Studio named while it's the open one.
       if (view?.chatId !== done.attachChatId) {
@@ -65,72 +67,81 @@ export function useStudioOffer(props: { installed(): void; review(next: { worldI
   return { offer, message, busy, load, dismiss: () => setOffer(null), install };
 }
 
-const COUNTED: readonly [string, string][] = [
-  ["entities", "entities"],
-  ["places", "places"],
-  ["routes", "routes"],
-  ["maps", "maps"],
-  ["tracks", "tracks"],
-  ["schedules", "schedules"],
-  ["lore", "lore entries"],
-  ["rules", "rules"],
-  ["actions", "actions"],
+/** What the offer holds, counted: the collection, then its word for one and for several. */
+const COUNTED: readonly [string, string, string][] = [
+  ["entities", "entity", "entities"],
+  ["places", "place", "places"],
+  ["routes", "route", "routes"],
+  ["maps", "map", "maps"],
+  ["tracks", "track", "tracks"],
+  ["schedules", "schedule", "schedules"],
+  ["lore", "lore entry", "lore entries"],
+  ["rules", "rule", "rules"],
+  ["actions", "action", "actions"],
 ];
 
 /** The offer's review: what it is, what it holds, its problems and macros, and Install. */
 export function StudioOfferReview(props: { state: StudioOfferState }) {
   const { offer, busy } = props.state;
   if (!offer) return null;
-  const counts = COUNTED.flatMap(([key, label]) => (offer.counts[key] ? [`${offer.counts[key]} ${label}`] : []));
+  const counts = COUNTED.flatMap(([key, one, many]) => {
+    const n = offer.counts[key];
+    return n ? [`${n} ${n === 1 ? one : many}`] : [];
+  });
   const what = offer.mode === "new" ? "A new world" : offer.target?.name ? `The next revision of “${offer.target.name}”` : "A revision of a world you don't have";
+  const open = offer.blocked === null && offer.installed === null;
   return (
-    <Card title="From LumiRPEngine Studio" aside={offer.errors > 0 ? <span class="lre-badge neg">{offer.errors}</span> : null}>
+    <Section title="From LumiRPEngine Studio" aside={offer.errors > 0 ? <Badge tone="neg">{offer.errors === 1 ? "1 error" : `${offer.errors} errors`}</Badge> : null}>
       <div class="lre-stack" data-lre-studio-offer>
-        <div class="lre-item" style={{ flexWrap: "wrap" }}>
-          <span class="grow" style={{ minWidth: 0 }}>
-            <span class="title" style={{ overflowWrap: "anywhere" }}>{offer.name}</span>
-            <span class="sub">
+        <div class="lre-build-offer">
+          <span class="lre-build-tile">
+            <Icon name="sparkle" />
+          </span>
+          <span class="lre-build-offer-text">
+            <strong class="lre-build-offer-name">{offer.name}</strong>
+            <span class="lre-build-note">
               {what}
               {offer.attachChatId ? ", to attach to a chat" : ""}
             </span>
           </span>
         </div>
-        {counts.length > 0 ? <span class="lre-small lre-muted">{counts.join(" · ")}</span> : null}
-        {offer.installed ? <div class="lre-banner info">Already installed.</div> : offer.blocked ? <div class="lre-banner warn">{offer.blocked}</div> : null}
+        {counts.length > 0 ? <p class="lre-build-note">{counts.join(" · ")}</p> : null}
+        {offer.installed ? (
+          <Banner tone="info" icon="check">
+            Already installed.
+          </Banner>
+        ) : offer.blocked ? (
+          // Errors block it as the badge says: danger, like the badge; any other reason is a warning.
+          <Banner tone={offer.errors > 0 ? "neg" : "warn"}>{offer.blocked}</Banner>
+        ) : null}
         {offer.lint.length > 0 ? (
-          <div class="lre-list">
+          <div class="lre-build-issues lre-build-well" role="list">
             {offer.lint.slice(0, 8).map((issue, i) => (
-              <div key={i} class="lre-item" style={{ flexWrap: "wrap" }}>
-                <span class={issue.severity === "error" ? "lre-badge neg" : "lre-badge warn"}>{issue.severity}</span>
-                <span class="grow" style={{ flexBasis: "180px", minWidth: 0 }}>
-                  <span class="title" style={{ overflowWrap: "anywhere" }}>{issue.message}</span>
-                  <span class="sub">{issue.path}</span>
-                </span>
-              </div>
+              <IssueRow key={i} issue={issue} />
             ))}
-            {offer.lint.length > 8 ? <span class="lre-small lre-muted">and {offer.lint.length - 8} more</span> : null}
+            {offer.lint.length > 8 ? <p class="lre-build-note">and {offer.lint.length - 8} more</p> : null}
           </div>
         ) : null}
         {offer.macros.length > 0 ? (
-          <div class="lre-banner warn">
+          <Banner tone="warn" title="Macros to review">
             Its lore and templates hold {offer.macros.length} macro{offer.macros.length === 1 ? "" : "s"} that Lumiverse runs when it builds a prompt; after installing, review each before you play.
-          </div>
+          </Banner>
         ) : null}
-        {offer.mode === "revision" && offer.blocked === null && !offer.installed ? <span class="lre-small lre-muted">Its chats stay on their revision until you Upgrade them in Settings → Pins and upgrade.</span> : null}
-        {offer.headMoved && offer.blocked === null && !offer.installed ? (
-          <div class="lre-banner warn">
+        {offer.mode === "revision" && open ? <p class="lre-build-note">Its chats stay on their revision until you Upgrade them in GM → This chat.</p> : null}
+        {offer.headMoved && open ? (
+          <Banner tone="warn" title="Changed in Build since">
             “{offer.target?.name ?? "This world"}” changed in Build since LumiRPEngine Studio took it. Installing makes this the new head without what was committed since; that revision stays, and so do its chats. To keep both, take the world into the Studio again.
-          </div>
+          </Banner>
         ) : null}
-        <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
-          <button type="button" class="lre-btn primary" disabled={busy || offer.blocked !== null || offer.installed !== null} onClick={() => props.state.install(offer)}>
+        <div class="lre-build-actions">
+          <Button variant="primary" disabled={busy || !open} onClick={() => props.state.install(offer)}>
             {offer.headMoved ? "Install anyway" : "Install"}
-          </button>
-          <button type="button" class="lre-btn ghost" disabled={busy} onClick={props.state.dismiss}>
+          </Button>
+          <Button variant="ghost" disabled={busy} onClick={props.state.dismiss}>
             Not now
-          </button>
+          </Button>
         </div>
       </div>
-    </Card>
+    </Section>
   );
 }

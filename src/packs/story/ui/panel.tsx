@@ -1,21 +1,31 @@
-// Play → Quests (DESIGN §10): the tracks the POV knows, with the current stage, its cue, revealed
-// truths, objectives and hints. The view is the story pack's quest log `{active, done, failed}`,
-// already POV-filtered: truth text never appears here before reveal.
+// Play → Story → Quests (DESIGN §10): the tracks the POV knows, active, done or failed, each
+// opening its quest sheet with the current stage, its cue, revealed truths, objectives and hints.
+// The view is the story pack's quest log `{active, done, failed}`, already POV-filtered: truth text
+// never appears here before reveal. The story's glance on Now gives the next step of the quest in
+// hand.
 
 import { useState } from "preact/hooks";
 import { isRecord } from "../../../shared/json";
-import { Card, Empty, JsonView, Seg } from "../../../frontend/components";
+import { pushSheet, useApp } from "../../../frontend/app";
+import { Empty, JsonView, List, ListRow, Section, Seg } from "../../../frontend/components";
 import { list, oneOf, optStr, str, strings } from "../../../frontend/decode";
+import type { IconName } from "../../../frontend/icons";
 import type { PanelProps } from "../../../frontend/registry";
+import { GlanceCard } from "../../../frontend/play/glance";
 
 const KINDS = ["quest", "secret", "puzzle", "agenda"] as const;
 const STATUSES = ["active", "done", "failed"] as const;
 type Status = (typeof STATUSES)[number];
+type Kind = (typeof KINDS)[number];
+
+export const KIND_LABEL: Record<Kind, string> = { quest: "Quest", secret: "Secret", puzzle: "Puzzle", agenda: "Agenda" };
+export const KIND_ICON: Record<Kind, IconName> = { quest: "flag", secret: "key", puzzle: "help", agenda: "scroll" };
+export const STATUS_LABEL: Record<Status, string> = { active: "Active", done: "Done", failed: "Failed" };
 
 export interface QuestTrack {
   id: string;
   label: string;
-  kind: (typeof KINDS)[number];
+  kind: Kind;
   stage: string;
   cue?: string;
   truths: string[];
@@ -47,62 +57,70 @@ export function decodeQuestsView(value: unknown): { tracks: QuestTrack[] } | nul
   };
 }
 
-function Track(props: { track: QuestTrack }) {
-  const { track } = props;
-  const done = track.objectives.filter((o) => o.done).length;
-  return (
-    <Card title={track.label} aside={<span class={track.status === "done" ? "lre-badge pos" : track.status === "failed" ? "lre-badge neg" : "lre-badge accent"}>{track.status === "active" ? track.kind : track.status}</span>}>
-      {track.stage ? <div class="lre-small lre-muted">{track.stage}</div> : null}
-      {track.cue ? <p style={{ margin: "6px 0", whiteSpace: "normal", overflowWrap: "anywhere" }}>{track.cue}</p> : null}
-      {track.truths.length > 0 ? (
-        <div data-lre-quest-truths>
-          <div class="lre-small lre-muted">What you've learned</div>
-          {track.truths.map((truth) => (
-            <div key={truth} class="lre-small" style={{ margin: "2px 0" }}>
-              • {truth}
-            </div>
-          ))}
-        </div>
-      ) : null}
-      {track.objectives.length > 0 ? (
-        <div>
-          <div class="lre-small lre-muted">
-            {done}/{track.objectives.length} objectives
-          </div>
-          {track.objectives.map((o) => (
-            <div key={o.label} class="lre-small" style={{ margin: "4px 0" }}>
-              <span role="img" aria-label={o.done ? "Done:" : "To do:"}>
-                {o.done ? "☑" : "☐"}
-              </span>{" "}
-              {o.label}
-            </div>
-          ))}
-        </div>
-      ) : null}
-      {track.hints.length > 0 ? (
-        <div data-lre-quest-hints>
-          {/* The engine releases hints one per failed attempt; every hint in the view is earned. */}
-          {track.hints.map((hint) => (
-            <div key={hint} class="lre-small" style={{ margin: "4px 0" }}>
-              <span aria-hidden="true">💡</span> {hint}
-            </div>
-          ))}
-        </div>
-      ) : null}
-    </Card>
-  );
+/** "2 of 3" objectives done, or nothing for a track without objectives. */
+export function objectiveCount(track: QuestTrack): string | undefined {
+  return track.objectives.length > 0 ? `${track.objectives.filter((o) => o.done).length} of ${track.objectives.length}` : undefined;
 }
 
 export function QuestsPanel(props: PanelProps) {
+  const app = useApp();
   const view = decodeQuestsView(props.view);
   const [status, setStatus] = useState<Status>("active");
-  if (props.view === null || props.view === undefined) return <Empty>No quests.</Empty>;
+  if (props.view === null || props.view === undefined) return <Empty icon="flag">No quests.</Empty>;
   if (!view) return <JsonView value={props.view} />;
   const tracks = view.tracks.filter((t) => t.status === status);
   return (
-    <div class="lre-stack" data-lre-panel="story.quests">
-      <Seg<Status> label="Quest status" value={status} options={STATUSES.map((s) => ({ value: s, label: `${s[0]?.toUpperCase()}${s.slice(1)} ${view.tracks.filter((t) => t.status === s).length}` }))} onChange={(next) => setStatus(next)} />
-      {tracks.length === 0 ? <Empty>None.</Empty> : tracks.map((t) => <Track key={t.id} track={t} />)}
+    <div class="lre-stack lre-world" data-lre-panel="story.quests">
+      <Seg<Status> label="Quest status" value={status} options={STATUSES.map((s) => ({ value: s, label: `${STATUS_LABEL[s]} ${view.tracks.filter((t) => t.status === s).length}` }))} onChange={(next) => setStatus(next)} />
+      {tracks.length === 0 ? (
+        <Empty icon="flag">{status === "active" ? "Nothing under way." : status === "done" ? "Nothing finished yet." : "Nothing failed."}</Empty>
+      ) : (
+        <Section flush>
+          <List>
+            {tracks.map((t) => (
+              <ListRow
+                key={t.id}
+                id={t.id}
+                icon={KIND_ICON[t.kind]}
+                title={t.label}
+                subtitle={[t.kind === "quest" ? null : KIND_LABEL[t.kind], t.stage].filter((part) => part).join(" · ") || undefined}
+                value={objectiveCount(t)}
+                valueTone="muted"
+                chevron
+                onClick={() => app.ui.update((ui) => pushSheet(ui, { kind: "quest", id: t.id }))}
+              />
+            ))}
+          </List>
+        </Section>
+      )}
     </div>
+  );
+}
+
+/** The quest in hand: the first active quest, else the first active track of any kind, with its first objective not yet done. */
+export function questInHand(tracks: readonly QuestTrack[]): { track: QuestTrack; next?: QuestTrack["objectives"][number] } | null {
+  const active = tracks.filter((t) => t.status === "active");
+  const track = active.find((t) => t.kind === "quest") ?? active[0];
+  return track ? { track, next: track.objectives.find((o) => !o.done) } : null;
+}
+
+/** Now's story glance: the next step of the quest in hand, or nothing. */
+export function StoryGlance(props: PanelProps) {
+  const app = useApp();
+  const hand = questInHand(decodeQuestsView(props.view)?.tracks ?? []);
+  if (!hand) return null;
+  const { track, next } = hand;
+  return (
+    <GlanceCard title="Story" panel="story.quests">
+      <ListRow
+        icon={next ? "checklist" : KIND_ICON[track.kind]}
+        title={next ? next.label : track.stage || track.label}
+        subtitle={track.label}
+        value={objectiveCount(track)}
+        valueTone="muted"
+        chevron
+        onClick={() => app.ui.update((ui) => pushSheet(ui, { kind: "quest", id: track.id }))}
+      />
+    </GlanceCard>
   );
 }

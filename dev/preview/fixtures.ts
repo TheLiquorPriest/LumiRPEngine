@@ -6,8 +6,12 @@ import { DOMAINS, INTERRUPT_CLASSES } from "../../src/shared/ids";
 import type { DomainId, InterruptClass, InterruptPolicy } from "../../src/shared/ids";
 import type { JsonValue } from "../../src/shared/json";
 import type { ExtractionModeView, UpgradePreview } from "../../src/shared/protocol";
+import type { StudioOffer } from "../../src/shared/studio-bridge";
 import type { ExtractionType, UserSettings } from "../../src/shared/settings";
 import { defaultMindsSettings } from "../../src/shared/minds";
+import type { MindCommitment, MindNote, MindPlan, MindsGmCharacter, MindsGmView, WitnessEntry } from "../../src/shared/minds";
+import { calendarOf, formatClock } from "../../src/engine/calendar";
+import { faded, salienceNow } from "../../src/packs/minds/core/state";
 import type { GmEntity, GmField, GmView, StateView } from "../../src/shared/state-view";
 import type { MapDisplay, WorldDoc, WorldIndex } from "../../src/shared/world";
 import { compileMaps } from "../../src/shared/maps";
@@ -19,6 +23,9 @@ import { ALL_PACKS, STARTER_WORLDS } from "../../src/packs/index";
 import { buildMapView } from "../../src/packs/space/core/view";
 
 const interrupts = Object.fromEntries(INTERRUPT_CLASSES.map((cls) => [cls, ["invitation", "decline", "incident", "quest", "arrival"].includes(cls) ? "stop" : cls === "bill" ? "note" : "ignore"])) as Record<InterruptClass, InterruptPolicy>;
+
+/** The purchase `c-decline` declined at Rosie's: more than the Visa's room ($787.45), which Pay another way takes from savings. */
+export const DECLINED_PURCHASE = { name: "Catering order", cents: 85000 };
 
 export function stateFixture(chatId: string): StateView {
   return {
@@ -56,7 +63,8 @@ export function stateFixture(chatId: string): StateView {
       { id: "c-confirm", kind: "confirm", messageId: "m2", label: "Dev gives you his car keys?", actions: [{ id: "confirm", label: "Yes", style: "primary" }, { id: "reject", label: "No" }], expires: "next_send" },
       { id: "c-mode", kind: "mode_change", messageId: "m2", label: "Purchases now apply automatically", detail: "28 of 30 kept on DeepSeek", actions: [{ id: "undo", label: "Undo" }], expires: "never" },
       { id: "c-swipe", kind: "swipe_option", messageId: "m2", label: "Swipe:", actions: [{ id: "renarrate", label: "Re-narrate" }, { id: "rerun", label: "Re-run" }], expires: "next_send" },
-      { id: "c-decline", kind: "decline", messageId: "m4", label: "Card declined: Visa over limit", detail: "$1,200 limit", actions: [], expires: "never" },
+      // As the engine words a payment it declines (DESIGN §9.5): "with my card" over the Visa's room, with Pay another way.
+      { id: "c-decline", kind: "decline", messageId: "m4", label: `Couldn't pay for ${DECLINED_PURCHASE.name}`, detail: "Sam Rivera's card was declined. It stays unowned, and the next reply is told so.", actions: [{ id: "other", label: "Pay another way", style: "primary" }, { id: "remove", label: "Remove it" }, { id: "accept", label: "Accept" }], expires: "next_send" },
       { id: "c-unpriced", kind: "decline", messageId: "m4", label: "Didn't apply: Buy a used bike", detail: "no price for a used bike. Nothing changed, and the next reply is told so.", actions: [{ id: "price", label: "Set price", style: "primary", input: { type: "money", label: "Price of a used bike" } }, { id: "item", label: "Pick item", input: { type: "choice", label: "Priced as", options: [{ value: "bike_used", label: "Used bike · $120.00" }, { value: "bike_new", label: "New bike · $450.00" }] } }, { id: "remove", label: "Remove it" }, { id: "accept", label: "Accept" }], expires: "next_send" },
       { id: "c-undo", kind: "undo", messageId: "m4", label: "Paid Dev $20", actions: [{ id: "undo", label: "Undo" }], expires: "next_send" },
       { id: "c-tl", kind: "timelapse_offer", messageId: "m4", label: "Sleep until 07:00?", detail: "8 h 20 min", actions: [{ id: "start", label: "Timelapse", style: "primary" }], expires: "next_send" },
@@ -556,6 +564,254 @@ function starterMoney(template: string): JsonValue {
   return def ? def.build(registry.context(world, initialState(world, "preview", registry)), { mapDisplay: null }) : null;
 }
 
+/**
+ * GM → Minds as the minds pack builds it (DESIGN §24.9) at the state fixture's clock, Tue 07:42: everyone
+ * but Sam, closest on the ladder first, scored with the default weights. Rosie is the author's Always
+ * Live and Mara the GM's pin; Teo has no mind yet and a refresh asked for; Mr. Haskell's last mind, at a
+ * beat of Monday afternoon's skip, named him (so the narrator got none of it) and interrupted the skip;
+ * Vic is out of the world. Notes fade as in a world with a half-day half-life, so a faded one shows.
+ */
+function gmMinds(): MindsGmView {
+  const now = 1902;
+  const cal = calendarOf(worldFixture());
+  const clock = (at: number): string => formatClock(cal, at);
+  const memory = { salience: { halfLifeDays: 0.5, floor: 0.5 } };
+  const names: Record<string, string> = { pov: "Sam Rivera", npc_rosie: "Rosie Alvarez", npc_dev: "Dev Patel", npc_mara: "Mara Lopez" };
+  const plan = (p: MindPlan): MindsGmCharacter["plans"][number] => ({ ...p, fromText: clock(p.when.from), toText: clock(p.when.to) });
+  const note = (n: MindNote): MindsGmCharacter["notes"][number] => ({ ...n, now: Math.round(salienceNow(n, now, memory) * 100) / 100, faded: faded(n, now, memory), clock: clock(n.at) });
+  const commitment = (x: MindCommitment): MindsGmCharacter["commitments"][number] => ({ ...x, withNames: x.with.map((w) => names[w] ?? w), dueText: x.due === null ? null : clock(x.due) });
+  const witness = (w: WitnessEntry): MindsGmCharacter["witness"][number] => ({ ...w, clock: clock(w.at) });
+  const rosieBroker: MindPlan = { id: "pl_rosie_broker", what: "Call the broker about the listing", kind: "errand", when: { from: 2310, to: 2340 }, where: "back_office", with: [], priority: 4, status: "open", made: 1890, source: "mind", closed: null, reason: null };
+  const devBracket: MindPlan = { id: "pl_dev_bracket", what: "Pick up the transom bracket at Kim's Garage", kind: "errand", when: { from: 2460, to: 2490 }, where: "garage", with: [], priority: 3, status: "open", made: 1890, source: "mind", closed: null, reason: null };
+  const maraBanner: MindPlan = { id: "pl_mara_banner", what: "Hang the banner and the lights", kind: "other", when: { from: 7800, to: 7920 }, where: "apartment", with: ["npc_dev"], priority: 5, status: "open", made: 1890, source: "mind", closed: null, reason: null };
+  const haskellBroker: MindPlan = { id: "pl_haskell_broker", what: "Meet the broker about the diner", kind: "meet", when: { from: 3540, to: 3600 }, where: null, with: [], priority: 4, status: "open", made: 960, source: "mind", closed: null, reason: null };
+  return {
+    enabled: true,
+    secrecy: "brief",
+    now,
+    nowText: clock(now),
+    characters: [
+      {
+        entity: "npc_dev",
+        name: "Dev Patel",
+        fidelity: {
+          entity: "npc_dev",
+          level: "live",
+          score: 147.9,
+          reasons: [
+            { label: "In the scene", points: 45 },
+            { label: "Named this turn", points: 40 },
+            { label: "Knows you", points: 10 },
+            { label: "Owns a story track", points: 15 },
+            { label: "In 1 story track", points: 8 },
+            { label: "1 pending with you", points: 15 },
+            { label: "Supporting", points: 5 },
+            { label: "Seen with you lately", points: 9.9 },
+          ],
+          pin: { gm: null, author: null },
+        },
+        refreshQueued: false,
+        mind: {
+          at: 1890,
+          round: 6,
+          level: "live",
+          place: "diner",
+          moment: "turn",
+          reason: "live",
+          monologue: "Sam's going to ask about the drill again, and I still need it for the boat's transom: two more evenings at most. Handing over the Civic keys buys some goodwill, and it keeps Sam away from the apartment while Mara sorts out Saturday.",
+          depiction: "Dev pushes the last of his pancakes around the plate and offers his car keys a little too quickly.",
+          intent: "Keep Sam busy and away from the apartment until Saturday; return the drill by Thursday.",
+          reactions: ["If Sam asks about Saturday, he changes the subject to the boat.", "If Sam is short of cash, he offers to cover breakfast."],
+          plans: [devBracket],
+          mood: "jittery",
+          interrupt: null,
+          withheld: false,
+          clock: clock(1890),
+        },
+        plans: [
+          plan(devBracket),
+          plan({ id: "pl_dev_banner", what: "Help Mara hang the banner and the lights", kind: "meet", when: { from: 7800, to: 7920 }, where: "apartment", with: ["npc_mara"], priority: 5, status: "open", made: 1350, source: "memory", closed: null, reason: null }),
+          plan({ id: "pl_dev_drill", what: "Bring Sam's drill back", kind: "errand", when: { from: 1080, to: 1110 }, where: "apartment", with: ["pov"], priority: 2, status: "dropped", made: 600, source: "gm", closed: 1110, reason: "Stayed late at the garage" }),
+        ],
+        notes: [
+          note({ id: "n_dev_drill", text: "Sam asked about the drill again; I said Thursday.", salience: 3, at: 1890 }),
+          note({ id: "n_dev_banner", text: "Mara wants the banner up before Sam's shift ends on Saturday.", salience: 4, at: 1350 }),
+          note({ id: "n_dev_counter", text: "Rosie gave the counter shift to the new guy.", salience: 1, at: 600 }),
+        ],
+        commitments: [
+          commitment({ id: "c_dev_party", kind: "plan", with: ["npc_mara"], text: "Keep Sam away from the apartment on Saturday afternoon", due: 8160, status: "open", made: 1350, closed: null }),
+          commitment({ id: "c_dev_drill", kind: "promise", with: ["pov"], text: "Give Sam's drill back by Thursday", due: 5400, status: "open", made: 1890, closed: null }),
+          commitment({ id: "c_dev_dishes", kind: "favour", with: ["pov"], text: "Cover Sam's Monday dish shift", due: null, status: "kept", made: 430, closed: 1000 }),
+        ],
+        witness: [
+          witness({ at: 1890, what: "Sam asked Rosie for a raise at the counter.", how: "saw", by: null, place: "diner" }),
+          witness({ at: 1350, what: "Mara said the party is at the apartment, Saturday at four.", how: "told", by: "npc_mara", place: "apartment" }),
+        ],
+        summary: "",
+      },
+      {
+        entity: "npc_rosie",
+        name: "Rosie Alvarez",
+        fidelity: {
+          entity: "npc_rosie",
+          level: "live",
+          score: 146.1,
+          reasons: [
+            { label: "In the scene", points: 45 },
+            { label: "Named this turn", points: 40 },
+            { label: "Regard with you", points: 3.2 },
+            { label: "Knows you", points: 10 },
+            { label: "In 1 story track", points: 8 },
+            { label: "1 pending with you", points: 15 },
+            { label: "Lead", points: 15 },
+            { label: "Seen with you lately", points: 9.9 },
+            { label: "The author: always Live", points: 0 },
+          ],
+          pin: { gm: null, author: "live" },
+        },
+        refreshQueued: false,
+        mind: {
+          at: 1890,
+          round: 6,
+          level: "live",
+          place: "diner",
+          moment: "turn",
+          reason: "live",
+          monologue: 'Another ask for more money, and in front of the regulars. Sam does cover the holiday shifts; I can\'t pretend otherwise. But if the Main Street offer goes through before winter, a raise is a promise I can\'t keep. Saying "later" is kinder than saying no.',
+          depiction: "Rosie keeps wiping the same stretch of counter, slower than it needs, and answers without quite meeting Sam's eyes.",
+          intent: "Put Sam off without a flat no, and keep the sale quiet until the papers are signed.",
+          reactions: ["If Sam brings up Main Street, she changes the subject.", "If Dev backs Sam up, she softens and offers an extra shift."],
+          plans: [rosieBroker],
+          mood: "guarded",
+          interrupt: null,
+          withheld: false,
+          clock: clock(1890),
+        },
+        plans: [plan(rosieBroker), plan({ id: "pl_rosie_order", what: "Place the weekly order with the supplier", kind: "work", when: { from: 900, to: 960 }, where: "back_office", with: [], priority: 3, status: "done", made: 480, source: "memory", closed: 960, reason: null })],
+        notes: [note({ id: "n_rosie_raise", text: "Sam asked for a raise again, in front of the regulars.", salience: 4, at: 1890 }), note({ id: "n_rosie_offer", text: "The Main Street offer stands until the first of November.", salience: 5, at: 900 })],
+        commitments: [commitment({ id: "c_rosie_answer", kind: "promise", with: ["pov"], text: "Give Sam an answer about the raise by Friday", due: 6600, status: "open", made: 1890, closed: null })],
+        witness: [
+          witness({ at: 1890, what: "Sam asked for a raise at the counter, in front of the regulars.", how: "saw", by: null, place: "diner" }),
+          witness({ at: 960, what: "The broker called: the Main Street buyer wants an answer by November.", how: "told", by: null, place: "back_office" }),
+        ],
+        summary: "Rosie has run the diner for twenty-two years and trusts Sam with the morning rush. She is weighing an offer for the building and has told no one on the crew.",
+      },
+      {
+        entity: "npc_mara",
+        name: "Mara Lopez",
+        fidelity: {
+          entity: "npc_mara",
+          level: "live",
+          score: 43.8,
+          reasons: [
+            { label: "Knows you", points: 10 },
+            { label: "In 1 story track", points: 8 },
+            { label: "1 pending with you", points: 15 },
+            { label: "Supporting", points: 5 },
+            { label: "Seen with you lately", points: 5.8 },
+            { label: "Pinned at live by the GM", points: 0 },
+          ],
+          pin: { gm: "live", author: null },
+        },
+        refreshQueued: false,
+        mind: {
+          at: 1890,
+          round: 6,
+          level: "live",
+          place: "apartment",
+          moment: "turn",
+          reason: "live",
+          monologue: "Four days to go. The balloons are in the hall closet and the cake is ordered under Dev's name. If Sam comes home early on Saturday it's all ruined, so Dev has to keep Sam out until four.",
+          depiction: "Mara answers Sam's text with three exclamation marks and no actual news.",
+          intent: "Finish the decorations by Saturday noon, and make sure Sam suspects nothing.",
+          reactions: ["If Sam mentions Saturday, she says she's working a double."],
+          plans: [maraBanner],
+          mood: "excited",
+          interrupt: null,
+          withheld: false,
+          clock: clock(1890),
+        },
+        plans: [plan(maraBanner)],
+        notes: [note({ id: "n_mara_closet", text: "Sam almost saw the balloons in the hall closet.", salience: 3, at: 1290 })],
+        commitments: [commitment({ id: "c_mara_party", kind: "plan", with: ["npc_dev"], text: "Throw Sam a surprise party on Saturday at four", due: 8160, status: "open", made: 1350, closed: null })],
+        witness: [witness({ at: 1290, what: "Sam came home early from the diner.", how: "saw", by: null, place: "apartment" })],
+        summary: "",
+      },
+      {
+        entity: "npc_teo",
+        name: "Teo Brandt",
+        fidelity: {
+          entity: "npc_teo",
+          level: "near",
+          score: 54.9,
+          reasons: [
+            { label: "In the scene", points: 45 },
+            { label: "Seen with you lately", points: 9.9 },
+          ],
+          pin: { gm: null, author: null },
+        },
+        refreshQueued: true,
+        mind: null,
+        plans: [],
+        notes: [],
+        commitments: [],
+        witness: [witness({ at: 1890, what: "Sam asked Rosie for a raise at the counter.", how: "saw", by: null, place: "diner" })],
+        summary: "",
+      },
+      {
+        entity: "npc_haskell",
+        name: "Mr. Haskell",
+        fidelity: {
+          entity: "npc_haskell",
+          level: "far",
+          score: 30,
+          reasons: [
+            { label: "Story role", points: 20 },
+            { label: "Named by a world rule", points: 5 },
+            { label: "Supporting", points: 5 },
+          ],
+          pin: { gm: null, author: null },
+        },
+        refreshQueued: false,
+        mind: {
+          at: 960,
+          round: 3,
+          level: "far",
+          place: null,
+          moment: "beat",
+          reason: "the broker returns his call",
+          monologue: "Rosie hasn't said no, which means she's counting. Two more weeks of slow winter trade and she'll take the shell company's number. Better that nobody on Main Street learns who is behind it.",
+          depiction: "Mr. Haskell leaves Rosie a polite voicemail from an unlisted number.",
+          intent: "Get Rosie's signature before the first of November through the broker, without showing his hand.",
+          reactions: [],
+          plans: [haskellBroker],
+          mood: "patient",
+          interrupt: "He wants Rosie's answer before she closes up tonight.",
+          withheld: true,
+          clock: clock(960),
+        },
+        plans: [plan(haskellBroker)],
+        notes: [],
+        commitments: [],
+        witness: [],
+        summary: "",
+      },
+      {
+        entity: "npc_vic",
+        name: "Vic Moreau",
+        fidelity: { entity: "npc_vic", level: "background", score: 0, reasons: [{ label: "Removed", points: 0 }], pin: { gm: null, author: null } },
+        refreshQueued: false,
+        mind: null,
+        plans: [],
+        notes: [],
+        commitments: [],
+        witness: [],
+        summary: "",
+      },
+    ],
+  };
+}
+
 export function gmFixture(): GmView {
   const entity = (id: string, name: string, kind: string, tier: string, place: string | null, rest: Partial<GmEntity> = {}): GmEntity => ({ id, name, kind, tier, agent: false, pov: false, gone: false, spawned: false, visibility: "public", place, holder: null, fields: [], relations: [], levels: gmLevels(tier === "principal" ? LEADS : tier === "supporting" ? SUPPORTING : BACKGROUND), class: {}, tags: [], sheet: null, life: { state: "alive", label: "Alive", acts: true, everyone: true, aware: [], unaware: [] }, ...rest });
   return {
@@ -663,7 +919,7 @@ export function gmFixture(): GmView {
       { messageId: "m2", seq: 7, lines: ["Vic Moreau is gone"] },
     ],
     refused: [{ id: "w-17", reason: "Dev Patel's energy must be between 0 and 100." }],
-    minds: { enabled: true, secrecy: "brief", now: 0, nowText: "Mon 19 Oct 2026, 07:00", characters: [] },
+    minds: gmMinds(),
   };
 }
 
@@ -905,6 +1161,41 @@ export function worldFixture(): WorldDoc {
     },
     start: { place: "apartment", at: "2026-10-19T07:00" },
   });
+}
+
+/** What LumiRPEngine Studio has waiting in the preview (`?studio=`): nothing, a new world, a revision of Maple Falls (one taken before its head moved), or a world with an error. */
+export type StudioCase = "none" | "new" | "revision" | "moved" | "errors";
+
+/** Lore the Studio wrote with host macros in it, which Build lists for review before playing. */
+const STUDIO_LORE: WorldDoc["lore"] = {
+  foghorn: { id: "foghorn", title: "The foghorn", content: "{{user}} hears the foghorn from the breakwater before dawn; locals set their watches by it.", keys: ["foghorn"], links: [] },
+  harbor_weather: { id: "harbor_weather", title: "Harbor weather", content: "Mornings on the lake start in {{random::fog,drizzle,a hard wind}} more often than not.", keys: ["weather", "fog"], links: [] },
+};
+
+/** The Studio's offer for a case, as its offer endpoint holds it (`StudioOffer`); null when nothing is waiting. */
+export function studioOfferFixture(kind: StudioCase, chatId: string): StudioOffer | null {
+  if (kind === "none") return null;
+  const createdAt = Date.UTC(2026, 9, 19, 11, 20);
+  if (kind === "revision" || kind === "moved") {
+    const doc = worldFixture();
+    doc.lore = { ...doc.lore, ...structuredClone(STUDIO_LORE) };
+    doc.entities.npc_hale = { id: "npc_hale", kind: "npc", name: "Mrs. Hale", tier: "supporting", fields: { mood: "calm" }, relations: [] };
+    // The Studio fixed what the preview's Maple Falls gets wrong: Rosie goes home to a real place, and Dev's boat isn't named.
+    doc.places.rosie_house = { id: "rosie_house", name: "Rosie's house", parent: "maple", sceneType: "downtime", fields: {} };
+    const shift = doc.schedules.rosie_shift;
+    if (shift) shift.slots = shift.slots.map((slot) => (slot.value === "home" ? { ...slot, value: "rosie_house" } : slot));
+    const dev = doc.entities.npc_dev;
+    if (dev) dev.relations = dev.relations.filter((r) => r.to !== "boat1");
+    const maple = WORLDS[0] as WorldIndex;
+    return { offerId: `offer-${kind}`, doc: doc as unknown as JsonValue, mode: "revision", worldId: maple.id, baseRevision: kind === "moved" ? (maple.revisions[1] ?? maple.head) : maple.head, createdAt };
+  }
+  const make = STARTER_WORLDS.modern_slice_of_life;
+  if (!make) return null;
+  const doc = migrateWorld(make("w-studio", "Harbor Lights"));
+  doc.lore = { ...doc.lore, ...structuredClone(STUDIO_LORE) };
+  // A kind the Studio's draft named but never defined: an error, so the offer can't install as it is.
+  if (kind === "errors") doc.entities.ghost = { id: "ghost", kind: "spectre", name: "The lighthouse ghost", tier: "background", fields: {}, relations: [] };
+  return { offerId: `offer-${kind}`, doc: doc as unknown as JsonValue, mode: "new", attachChatId: chatId, createdAt };
 }
 
 export function settingsFixture(): UserSettings {

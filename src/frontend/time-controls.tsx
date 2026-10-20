@@ -1,7 +1,7 @@
 // Time controls (DESIGN §9.2): ticks per scene type, time scale, interrupt policy, Speed through per
 // activity, Montage granularity and the timelapse unit cap. One editor, two sinks: Settings → Time
-// writes the seed for new chats (`settingsTimePatch`), Play → Calendar writes `time` markers on the
-// running chat.
+// writes the seed for new chats (`settingsTimePatch`), GM → This chat → Time writes `time` markers
+// on the running chat.
 
 import type { JsonObject, JsonValue } from "../shared/json";
 import { hasOwn } from "../shared/json";
@@ -9,7 +9,7 @@ import { INTERRUPT_CLASSES } from "../shared/ids";
 import type { InterruptClass, InterruptPolicy } from "../shared/ids";
 import type { TimeControl, TimeScope } from "../shared/ledger";
 import { SPEED_ACTIVITIES, SPEED_DEFAULT, SPEED_THRESHOLD_MINUTES } from "../shared/settings";
-import { HostSlider, NumberStepper, Seg } from "./components";
+import { HostSlider, NumberStepper, Section, Seg } from "./components";
 import { formatMinutes, humanize } from "./format";
 
 export interface TimeValues {
@@ -59,12 +59,14 @@ const POLICY_OPTIONS = [
   { value: "ignore", label: "Ignore" },
 ] as const;
 
+// The steppers stay in this one tree rather than in sub-components, so the tree reads as laid out
+// (test/backend/speed-threshold.test.ts reads the threshold stepper's range from it).
 export function TimeControlsEditor(props: { values: TimeValues; onChange(change: TimeChange): void; currentSceneType?: string; disabled?: boolean }) {
   const { values } = props;
   return (
-    <div class="lre-stack" data-lre-time-controls>
-      <section class="lre-card">
-        <div class="lre-h">Default tick per scene type</div>
+    <div class="lre-stack lre-gm-time" data-lre-time-controls>
+      <Section title="Default tick per scene type">
+        <p class="lre-gm-note">How long a turn takes when nothing in it says otherwise.</p>
         {Object.entries(values.sceneTicks).map(([sceneType, minutes]) => (
           <NumberStepper
             key={sceneType}
@@ -88,24 +90,24 @@ export function TimeControlsEditor(props: { values: TimeValues; onChange(change:
           disabled={props.disabled}
           onCommit={(to) => props.onChange({ control: "scale", scope: { all: true }, to })}
         />
-      </section>
-      <section class="lre-card">
-        <div class="lre-h">Timelapse interrupts</div>
+      </Section>
+      <Section title="Timelapse interrupts">
+        <p class="lre-gm-note">What a timelapse does when something of each kind comes up: stop there, note it and go on, or ignore it.</p>
         {INTERRUPT_CLASSES.map((cls) => (
-          <div key={cls} class="lre-field" style={{ marginBottom: "6px" }}>
+          <div key={cls} class="lre-field">
             <span class="label">{humanize(cls)}</span>
             <Seg<InterruptPolicy> label={humanize(cls)} value={values.interrupts[cls]} options={POLICY_OPTIONS} disabled={props.disabled} onChange={(to) => props.onChange({ control: "interrupt", scope: { interrupt: cls }, to })} />
           </div>
         ))}
-      </section>
-      <section class="lre-card">
-        <div class="lre-h">Speed through</div>
+      </Section>
+      <Section title="Speed through">
+        <p class="lre-gm-note">Long activities: offer a timelapse, or run it, once they take longer than the threshold.</p>
         {speedRows(values.speedThrough).map(({ activity, policy }) => (
-          <div key={activity} class="lre-stack" style={{ marginBottom: "8px" }}>
-            <span class="lre-small lre-muted">
+          <div key={activity} class="lre-gm-speed" role="group" aria-label={humanize(activity)}>
+            <div class="lre-gm-subtitle">
               {humanize(activity)}
-              {policy ? "" : " · passes within the turn"}
-            </span>
+              {policy ? null : <span class="lre-gm-subtitle-note"> · passes within the turn</span>}
+            </div>
             <Seg<"offer" | "auto">
               label={`${humanize(activity)} mode`}
               value={policy?.mode ?? null}
@@ -128,9 +130,8 @@ export function TimeControlsEditor(props: { values: TimeValues; onChange(change:
             />
           </div>
         ))}
-      </section>
-      <section class="lre-card">
-        <div class="lre-h">Montage and limits</div>
+      </Section>
+      <Section title="Montage and limits">
         <div class="lre-field">
           <span class="label">Montage granularity</span>
           <Seg<"key" | "day" | "week">
@@ -147,7 +148,7 @@ export function TimeControlsEditor(props: { values: TimeValues; onChange(change:
         </div>
         <NumberStepper label="Unit cap: agent-days per segment" value={values.unitCap.agentDays} min={1} max={100000} step={50} integer disabled={props.disabled} onChange={(agentDays) => props.onChange({ control: "unit_cap", scope: { all: true }, to: { agentDays, events: values.unitCap.events } })} />
         <NumberStepper label="Unit cap: events per segment" value={values.unitCap.events} min={1} max={1000000} step={500} integer disabled={props.disabled} onChange={(events) => props.onChange({ control: "unit_cap", scope: { all: true }, to: { agentDays: values.unitCap.agentDays, events } })} />
-      </section>
+      </Section>
     </div>
   );
 }

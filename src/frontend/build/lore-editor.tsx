@@ -1,35 +1,36 @@
 // Build → Lore (DESIGN §4.2): the entries, searchable by title, alias, topic, keyword and text, with
-// the lookup table a tap away; and the entry form: title and text, aliases and topics as chips,
-// keywords and links, the source (read-only; an entry indexed from a World Info book whose entry
-// changed since can take the book's new text), who may read it, and secrecy: the gate, whose own
-// secret it is, and the helpers that may read the secret, with a note on those whose output reaches
-// the player.
+// the lookup table and the indexing jobs a tap away, and + New, which names a new entry; and the
+// entry page: its title and text, how lookups find it (aliases, topics and keywords as chips, then
+// links, group and priority), the source (read-only; an entry indexed from a World Info book whose
+// entry changed since can take the book's new text), and secrecy: who may read it, the gate, and
+// the helpers that may read the secret, with a note on those whose output reaches the player.
+// Styles: the lore block of styles/forms.ts.
 
-import { useEffect, useMemo, useState } from "preact/hooks";
+import { useEffect, useId, useMemo, useState } from "preact/hooks";
 import type { JsonObject } from "../../shared/json";
 import { hasOwn } from "../../shared/json";
 import { LORE_AUDIENCE, loreIsSecret, loreSourceOf, PROSE_STEPS } from "../../shared/lore";
-import type { LintIssue, LoreDrift } from "../../shared/protocol";
+import type { LoreDrift } from "../../shared/protocol";
 import type { LoreEntryDef, LoreSource, StepPurpose, WorldDoc } from "../../shared/world";
-import type { App, BuildRoute } from "../app";
+import type { App } from "../app";
 import { useApp } from "../app";
-import { useHeld } from "./held";
-import { Card, Empty, useBusy } from "../components";
+import { Badge, Banner, Button, Empty, List, ListRow, PageHeader, SaveBar, Section, useBusy } from "../components";
 import { strings } from "../decode";
+import { Icon } from "../icons";
 import type { EditorProps } from "../registry";
 import { STEP_LABEL } from "../settings/steps";
 import { useSelect } from "../store";
+import { deleteItem, go, ItemHeader, NewItem, newItemName } from "./chrome";
+import { CheckField, Issues } from "./form-kit";
+import { useHeld } from "./held";
 import { COLLECTION_SPECS, newItem } from "./schema";
 import { lintAt, SchemaFields, worldIdentifiers } from "./schema-form";
 import { TagListInput } from "./selector-editor";
 
-function go(app: App, build: BuildRoute): void {
-  app.ui.update((ui) => ({ ...ui, build }));
-}
-
 const specs = (keys: readonly string[]) => COLLECTION_SPECS.lore.filter((s) => keys.includes(s.key));
 const TEXT = specs(["title", "content"]);
-const MORE = specs(["keys", "links", "group", "priority"]);
+// Keywords (`keys`) are laid out as chips beside the aliases and topics, so they aren't here.
+const MORE = specs(["links", "group", "priority"]);
 const SECRET = specs(["visibility", "secret"]);
 const GATE = specs(["gate", "holders"]);
 
@@ -62,93 +63,98 @@ export function LoreList(props: { worldId: string }) {
   const app = useApp();
   const draft = useSelect(app.drafts, (d) => d);
   const [query, setQuery] = useState("");
-  const [newId, setNewId] = useState("");
+  const [adding, setAdding] = useState(false);
   const doc = draft?.doc;
   const drift = useDrift(app, props.worldId, doc?.lore ?? {});
   if (!draft || !doc) return null;
   const q = query.trim().toLowerCase();
-  const shown = Object.entries(doc.lore).filter(([id, l]) => q === "" || [id, l.title, ...(l.aliases ?? []), ...(l.topics ?? []), ...l.keys, l.content].join("\n").toLowerCase().includes(q));
-  const create = () => {
-    const id = newId.trim();
-    if (!id || hasOwn(doc.lore, id)) return;
-    go(app, { view: "item", worldId: draft.worldId, collection: "lore", id: `new:${id}` });
-    setNewId("");
-  };
+  const all = Object.entries(doc.lore);
+  const shown = all.filter(([id, l]) => q === "" || [id, l.title, ...(l.aliases ?? []), ...(l.topics ?? []), ...l.keys, l.content].join("\n").toLowerCase().includes(q));
   const terms = Object.keys(doc.loreIndex.terms).length;
   const topics = Object.keys(doc.loreIndex.topics).length;
+  const indexIssues = lintAt(draft.lint, "loreIndex").length;
+  const add = (
+    <Button variant="primary" icon="plus" label="New lore entry" onClick={() => setAdding((open) => !open)}>
+      New
+    </Button>
+  );
   return (
-    <div class="lre-stack" data-lre-lore-list>
-      <div class="lre-h2">Lore</div>
-      <span class="lre-small lre-muted">Kept in the world. The engine's helpers read it. The narrator gets no lore section, but the brief and the prose outline draw on public entries in what they write for its Outline.</span>
-      <div class="lre-list">
-        <button type="button" class="lre-item" onClick={() => go(app, { view: "part", worldId: draft.worldId, part: "loreIndex" })}>
-          <span class="grow">
-            <span class="title">Lookup table</span>
-            <span class="sub">
-              {terms} term{terms === 1 ? "" : "s"} · {topics} topic{topics === 1 ? "" : "s"}
-            </span>
-          </span>
-          {lintAt(draft.lint, "loreIndex").length > 0 ? <span class="lre-badge warn">{lintAt(draft.lint, "loreIndex").length}</span> : null}
-          <span class="lre-dim" aria-hidden="true">
-            ›
-          </span>
-        </button>
-        <button type="button" class="lre-item" onClick={() => go(app, { view: "job", worldId: draft.worldId, kind: "index_book" })}>
-          <span class="grow">
-            <span class="title">Index a World Info book</span>
-            <span class="sub">Lore entries, aliases, topics and lookup terms from one of your books</span>
-          </span>
-        </button>
-        <button type="button" class="lre-item" onClick={() => go(app, { view: "job", worldId: draft.worldId, kind: "index_text" })}>
-          <span class="grow">
-            <span class="title">Index this text</span>
-            <span class="sub">The same, from text you paste</span>
-          </span>
-        </button>
+    <div class="lre-build-page" data-lre-lore-list>
+      <PageHeader title="Lore" subtitle="Kept in the world. The engine's helpers read it. The narrator gets no lore section, but the brief and the prose outline draw on public entries in what they write for its Outline." actions={add} />
+      {adding ? <NewItem worldId={draft.worldId} collection="lore" taken={new Set(Object.keys(doc.lore))} onDone={() => setAdding(false)} /> : null}
+      <Section title="Tools" flush>
+        <List>
+          <ListRow
+            icon="search"
+            title="Lookup table"
+            subtitle={`${terms} term${terms === 1 ? "" : "s"} · ${topics} topic${topics === 1 ? "" : "s"}`}
+            badge={indexIssues > 0 ? <Badge tone="warn">{indexIssues}</Badge> : undefined}
+            chevron
+            onClick={() => go(app, { view: "part", worldId: draft.worldId, part: "loreIndex" })}
+          />
+          <ListRow icon="book" title="Index a World Info book" subtitle="Lore entries, aliases, topics and lookup terms from one of your books" chevron onClick={() => go(app, { view: "job", worldId: draft.worldId, kind: "index_book" })} />
+          <ListRow icon="scroll" title="Index this text" subtitle="The same, from text you paste" chevron onClick={() => go(app, { view: "job", worldId: draft.worldId, kind: "index_text" })} />
+        </List>
+      </Section>
+      <div class="lre-build-search">
+        <Icon name="search" size={16} />
+        <input class="lre-input" type="search" placeholder="Search titles, aliases, topics and text" aria-label="Search lore" value={query} onInput={(event) => setQuery(event.currentTarget.value)} />
       </div>
-      <input class="lre-input" placeholder="Search titles, aliases, topics and text" aria-label="Search lore" value={query} onInput={(event) => setQuery(event.currentTarget.value)} />
-      <div class="lre-list">
-        {shown.map(([id, l]) => {
-          const source = loreSourceOf(l.source);
-          const changed = drift && hasOwn(drift, id) ? drift[id] : undefined;
-          const issues = lintAt(draft.lint, `lore.${id}`).length;
-          return (
-            <button key={id} type="button" class="lre-item" data-lre-lore={id} onClick={() => go(app, { view: "item", worldId: draft.worldId, collection: "lore", id })}>
-              <span class="grow">
-                <span class="title">{l.title || id}</span>
-                <span class="sub">
-                  <code>{id}</code>
-                  {(l.aliases ?? []).length > 0 ? ` · also ${(l.aliases ?? []).join(", ")}` : ""}
-                  {(l.topics ?? []).length > 0 ? ` · ${(l.topics ?? []).join(", ")}` : ""}
-                </span>
-              </span>
-              {loreIsSecret(l) ? <span class="lre-badge warn">Secret</span> : null}
-              {SOURCE_BADGE[source.kind] ? <span class="lre-badge">{source.kind === "ai" && source.status === "pending" ? "AI · to review" : SOURCE_BADGE[source.kind]}</span> : null}
-              {changed ? <span class={changed.status === "changed" ? "lre-badge warn" : "lre-badge neg"}>{changed.status === "changed" ? "Book changed" : "Book entry gone"}</span> : null}
-              {issues > 0 ? <span class="lre-badge warn">{issues}</span> : null}
-            </button>
-          );
-        })}
-        {shown.length === 0 ? <Empty>{Object.keys(doc.lore).length === 0 ? "No lore yet." : "No matches."}</Empty> : null}
-      </div>
-      <form
-        class="lre-inline"
-        onSubmit={(event) => {
-          event.preventDefault();
-          create();
-        }}
-      >
-        <input class="lre-input" style={{ flex: 1 }} placeholder="New id (letters, digits, _)" aria-label="New id" value={newId} onInput={(event) => setNewId(event.currentTarget.value.replace(/[^\w.-]/g, "_"))} />
-        <button type="submit" class="lre-btn primary" disabled={!newId.trim() || hasOwn(doc.lore, newId.trim())}>
-          + New
-        </button>
-      </form>
+      {shown.length === 0 ? (
+        all.length === 0 ? (
+          <Empty icon="book" title="No lore yet" action={adding ? undefined : add}>
+            Write an entry, or index a World Info book or some text.
+          </Empty>
+        ) : (
+          <Empty icon="search" title="No matches">
+            No entry matches “{query.trim()}”.
+          </Empty>
+        )
+      ) : (
+        <Section title="Entries" aside={<Badge>{shown.length}</Badge>} flush>
+          <List>
+            {shown.map(([id, l]) => {
+              const source = loreSourceOf(l.source);
+              const changed = drift && hasOwn(drift, id) ? drift[id] : undefined;
+              const issues = lintAt(draft.lint, `lore.${id}`).length;
+              const aliases = l.aliases ?? [];
+              const named = l.topics ?? [];
+              const subtitle = [aliases.length > 0 ? `also ${aliases.join(", ")}` : "", named.join(", ")].filter((part) => part !== "").join(" · ");
+              const secret = loreIsSecret(l);
+              const kind = SOURCE_BADGE[source.kind];
+              const badges = secret || kind || changed || issues > 0;
+              return (
+                // The wrapper only carries the row's hook for scripts and tests; it takes no box.
+                <div key={id} class="lre-form-lore-row" data-lre-lore={id}>
+                  <ListRow
+                    title={l.title || id}
+                    subtitle={subtitle === "" ? undefined : subtitle}
+                    id={id}
+                    badge={
+                      badges ? (
+                        <span class="lre-form-lore-badges">
+                          {secret ? <Badge tone="warn">Secret</Badge> : null}
+                          {kind ? <Badge>{source.kind === "ai" && source.status === "pending" ? "AI · to review" : kind}</Badge> : null}
+                          {changed ? <Badge tone={changed.status === "changed" ? "warn" : "neg"}>{changed.status === "changed" ? "Book changed" : "Book entry gone"}</Badge> : null}
+                          {issues > 0 ? <Badge tone="warn">{issues}</Badge> : null}
+                        </span>
+                      ) : undefined
+                    }
+                    chevron
+                    onClick={() => go(app, { view: "item", worldId: draft.worldId, collection: "lore", id })}
+                  />
+                </div>
+              );
+            })}
+          </List>
+        </Section>
+      )}
     </div>
   );
 }
 
 /** Where the entry came from, read-only; a book entry that changed since can be refreshed into the form. */
-function SourceCard(props: { app: App; doc: WorldDoc; id: string; source: LoreSource; onSource(next: LoreSource, content?: string): void }) {
+function SourceSection(props: { app: App; doc: WorldDoc; id: string; source: LoreSource; onSource(next: LoreSource, content?: string): void }) {
   const names = useBookNames(props.app);
   const drift = useDrift(props.app, props.doc.id, props.doc.lore, props.id);
   const { source } = props;
@@ -156,60 +162,69 @@ function SourceCard(props: { app: App; doc: WorldDoc; id: string; source: LoreSo
     const now = drift && hasOwn(drift, props.id) ? drift[props.id] : undefined;
     const refreshed = now?.status === "changed" && now.hash === source.hash;
     return (
-      <Card title="Source" aside={<span class="lre-badge">World Info</span>}>
-        <div class="lre-stack" data-lre-lore-source="book">
+      <Section title="Source" aside={<Badge>World Info</Badge>}>
+        <div class="lre-form-lore-source" data-lre-lore-source="book">
           <span>
-            {names[source.bookId] ?? source.bookId} · entry <code>{source.entryId}</code>
+            {names[source.bookId] ?? source.bookId} · entry <code class="lre-form-lore-mono">{source.entryId}</code>
           </span>
           {drift === null ? (
-            <span class="lre-small lre-muted">Checking the book…</span>
+            <span class="lre-form-lore-note">Checking the book…</span>
           ) : refreshed ? (
-            <span class="lre-small lre-muted">Refreshed from the book. Save to draft to keep it.</span>
+            <span class="lre-form-lore-note">Refreshed from the book. Save to draft to keep it.</span>
           ) : now?.status === "changed" ? (
-            <div class="lre-banner warn">
+            <Banner
+              tone="warn"
+              actions={
+                <Button size="sm" icon="refresh" onClick={() => props.onSource({ ...source, hash: now.hash }, now.content)}>
+                  Refresh from book
+                </Button>
+              }
+            >
               The book entry has changed since this was indexed.
-              <button type="button" class="lre-btn small" style={{ marginLeft: "8px" }} onClick={() => props.onSource({ ...source, hash: now.hash }, now.content)}>
-                Refresh from book
-              </button>
-            </div>
+            </Banner>
           ) : now?.status === "missing" ? (
-            <div class="lre-banner warn">The book entry is gone, or its book was deleted. The text here stays as it is.</div>
+            <Banner tone="warn">The book entry is gone, or its book was deleted. The text here stays as it is.</Banner>
           ) : (
-            <span class="lre-small lre-muted">Matches the book.</span>
+            <span class="lre-form-lore-note">Matches the book.</span>
           )}
         </div>
-      </Card>
+      </Section>
     );
   }
   if (source.kind === "chat") {
     return (
-      <Card title="Source" aside={<span class="lre-badge">Chat</span>}>
-        <span data-lre-lore-source="chat">
-          Saved from a chat, message <code>{source.messageId}</code>.
+      <Section title="Source" aside={<Badge>Chat</Badge>}>
+        <span class="lre-form-lore-source" data-lre-lore-source="chat">
+          <span>
+            Saved from a chat, message <code class="lre-form-lore-mono">{source.messageId}</code>.
+          </span>
         </span>
-      </Card>
+      </Section>
     );
   }
   if (source.kind === "ai") {
+    const pending = source.status === "pending";
     return (
-      <Card title="Source" aside={<span class="lre-badge">AI</span>}>
-        <div class="lre-spread" data-lre-lore-source="ai">
-          <span>Written by an indexing job from pasted text{source.status === "pending" ? "; not reviewed yet." : "; reviewed."}</span>
-          {source.status === "pending" ? (
-            <button type="button" class="lre-btn small" onClick={() => props.onSource({ kind: "ai", status: "accepted" })}>
-              Mark reviewed
-            </button>
+      <Section title="Source" aside={<Badge tone={pending ? "warn" : undefined}>AI</Badge>}>
+        <div class="lre-form-lore-source" data-lre-lore-source="ai">
+          <span>Written by an indexing job from pasted text{pending ? "; not reviewed yet." : "; reviewed."}</span>
+          {pending ? (
+            <span class="lre-form-lore-actions">
+              <Button size="sm" icon="check" onClick={() => props.onSource({ kind: "ai", status: "accepted" })}>
+                Mark reviewed
+              </Button>
+            </span>
           ) : null}
         </div>
-      </Card>
+      </Section>
     );
   }
   return (
-    <Card title="Source" aside={<span class="lre-badge">Authored</span>}>
-      <span class="lre-small lre-muted" data-lre-lore-source="authored">
+    <Section title="Source" aside={<Badge>Authored</Badge>}>
+      <span class="lre-form-lore-note" data-lre-lore-source="authored">
         Written in Build.
       </span>
-    </Card>
+    </Section>
   );
 }
 
@@ -220,11 +235,12 @@ export function LoreEditor(props: EditorProps) {
   const id = isNew ? (props.id ?? "").slice(4) : (props.id ?? "");
   const stored = hasOwn(props.world.lore, id) ? props.world.lore[id] : undefined;
   // The form edits the entry as the JSON the draft stores, like every Build editor.
-  const initial: JsonObject = stored ? (JSON.parse(JSON.stringify(stored)) as JsonObject) : newItem("lore", id, props.world);
+  const initial: JsonObject = stored ? (JSON.parse(JSON.stringify(stored)) as JsonObject) : newItem("lore", id, props.world, newItemName(props.world.id, "lore", id));
   const [value, setValue] = useState<JsonObject>(initial);
   const [busy, run] = useBusy();
   useHeld(value, setValue, initial, `${props.world.id}/lore/${props.id ?? ""}`, JSON.stringify(stored ?? null));
   const identifiers = useMemo(() => worldIdentifiers(props.world), [props.world]);
+  const audienceLabel = useId();
   const lint = draft?.lint ?? [];
   const path = `lore.${id}`;
   const ctx = { doc: props.world, lint, path, identifiers, functions: draft?.functions ?? [] };
@@ -233,86 +249,115 @@ export function LoreEditor(props: EditorProps) {
   const audience = strings(value.audience).filter((s): s is StepPurpose => (LORE_AUDIENCE as readonly string[]).includes(s));
   const prose = audience.filter((s) => PROSE_STEPS.includes(s));
   const topicsInUse = useMemo(() => [...new Set(Object.values(props.world.lore).flatMap((l) => l.topics ?? []))].sort((a, b) => a.localeCompare(b)), [props.world.lore]);
+  const keywordsInUse = useMemo(
+    () =>
+      [
+        ...new Set(
+          Object.entries(props.world.lore)
+            .filter(([other]) => other !== id)
+            .flatMap(([, l]) => l.keys),
+        ),
+      ].sort((a, b) => a.localeCompare(b)),
+    [props.world.lore, id],
+  );
   const set = (key: string, next: string[]) => {
     const out = { ...value };
     if (next.length > 0) out[key] = next;
     else delete out[key];
     setValue(out);
   };
-  const banners = lint.filter((issue: LintIssue) => issue.path === path || issue.path === `${path}.id` || issue.path === `${path}.links` || issue.path === `${path}.visibility`);
+  const title = typeof value.title === "string" && value.title.trim() !== "" ? value.title : id;
+  // Lint on a field shows under it; what concerns the entry as a whole shows at the top.
+  const banners = lint.filter((issue) => issue.path === path || issue.path === `${path}.id`);
   const save = () =>
     run(async () => {
       const message = await props.send({ type: "lre.editor", worldId: props.world.id, base: null, op: "put", collection: "lore", id, value });
       if (message.type === "lre.result" && isNew) go(app, { view: "item", worldId: props.world.id, collection: "lore", id });
     });
   const remove = () =>
-    run(async () => {
-      if (!(await app.host.confirm("Delete", `Delete lore “${id}”? Terms and topics that lead to it will show in Problems.`, "danger", "Delete"))) return;
-      const message = await props.send({ type: "lre.editor", worldId: props.world.id, base: null, op: "remove", collection: "lore", id });
-      if (message.type === "lre.result") go(app, { view: "collection", worldId: props.world.id, collection: "lore" });
-    });
+    run(() =>
+      deleteItem(app, props.send, {
+        worldId: props.world.id,
+        collection: "lore",
+        id,
+        name: title,
+        message: `Delete the lore entry “${title}”? Terms and topics that lead to it will show in Problems.`,
+      }),
+    );
   return (
-    <div class="lre-stack" data-lre-editor="lore">
-      <div class="lre-spread">
-        <span class="lre-h2">
-          <code>{id}</code>
-        </span>
-        {!isNew ? (
-          <button type="button" class="lre-btn small danger" disabled={busy} onClick={remove}>
-            Delete
-          </button>
-        ) : null}
-      </div>
+    <div class="lre-build-page" data-lre-editor="lore">
+      <ItemHeader title={title} id={id} subtitle={isNew ? "New lore entry, not in the draft until you create it" : undefined} onDelete={isNew ? undefined : remove} busy={busy} />
       {banners.map((issue, i) => (
-        <div key={`${issue.code}:${i}`} class={issue.severity === "error" ? "lre-banner warn" : "lre-banner info"}>
+        <Banner key={`${issue.code}:${i}`} tone={issue.severity === "error" ? "warn" : "info"}>
           {issue.message}
-        </div>
+        </Banner>
       ))}
-      <SchemaFields specs={TEXT} value={value} ctx={ctx} onChange={setValue} />
-      <TagListInput label="Aliases" noun="alias" value={strings(value.aliases)} suggestions={[]} onChange={(next) => set("aliases", next)} />
-      <TagListInput label="Topics" noun="topic" value={strings(value.topics)} suggestions={topicsInUse} onChange={(next) => set("topics", next)} />
-      <SchemaFields specs={MORE} value={value} ctx={ctx} onChange={setValue} />
-      <SourceCard
+      <Section title="Entry">
+        <SchemaFields specs={TEXT} value={value} ctx={ctx} onChange={setValue} />
+      </Section>
+      <Section title="How it's found">
+        <div class="lre-form-lore-fields">
+          <TagListInput label="Aliases" noun="alias" value={strings(value.aliases)} suggestions={[]} onChange={(next) => set("aliases", next)}>
+            <span class="lre-field-help">Other names it goes by</span>
+            <Issues issues={lintAt(lint, `${path}.aliases`)} />
+          </TagListInput>
+          <TagListInput label="Topics" noun="topic" value={strings(value.topics)} suggestions={topicsInUse} onChange={(next) => set("topics", next)}>
+            <span class="lre-field-help">What it's about; the lookup table can file it under these</span>
+            <Issues issues={lintAt(lint, `${path}.topics`)} />
+          </TagListInput>
+          {/* The engine reads `keys` as a list, so an entry without keywords keeps an empty one. */}
+          <TagListInput label="Keywords" noun="keyword" value={strings(value.keys)} suggestions={keywordsInUse} onChange={(next) => setValue({ ...value, keys: next })}>
+            <span class="lre-field-help">Words that bring it up in a lookup</span>
+            <Issues issues={lintAt(lint, `${path}.keys`)} />
+          </TagListInput>
+          <SchemaFields specs={MORE} value={value} ctx={ctx} onChange={setValue} />
+        </div>
+      </Section>
+      <SourceSection
         app={app}
         doc={props.world}
         id={id}
         source={loreSourceOf(value.source)}
         onSource={(source, content) => setValue({ ...value, source, ...(content !== undefined ? { content } : {}) })}
       />
-      <Card title="Secrecy">
-        <SchemaFields specs={SECRET} value={value} ctx={ctx} onChange={setValue} />
-        {secret ? (
-          <div class="lre-stack" data-lre-lore-audience>
-            <SchemaFields specs={GATE} value={value} ctx={ctx} onChange={setValue} />
-            <span class="label lre-small">Helpers that may read it before the gate holds</span>
-            {LORE_AUDIENCE.map((purpose) => (
-              <label key={purpose} class="lre-row">
-                <span class="k">
-                  {STEP_LABEL[purpose]}
-                  {PROSE_STEPS.includes(purpose) ? <span class="sub">Writes for the player: never reads a secret</span> : null}
+      <Section title="Secrecy">
+        <div class="lre-form-lore-fields">
+          <SchemaFields specs={SECRET} value={value} ctx={ctx} onChange={setValue} />
+          {secret ? (
+            <div class="lre-form-lore-fields" data-lre-lore-audience>
+              <SchemaFields specs={GATE} value={value} ctx={ctx} onChange={setValue} />
+              <div class="lre-field" role="group" aria-labelledby={audienceLabel}>
+                <span class="label" id={audienceLabel}>
+                  Helpers that may read it before the gate holds
                 </span>
-                <span class="lre-check">
-                  <input type="checkbox" checked={audience.includes(purpose)} onChange={() => set("audience", audience.includes(purpose) ? audience.filter((p) => p !== purpose) : LORE_AUDIENCE.filter((p) => p === purpose || audience.includes(p)))} />
-                </span>
-              </label>
-            ))}
-            {prose.length > 0 ? <div class="lre-banner warn">{prose.map((p) => STEP_LABEL[p]).join(", ")} write{prose.length === 1 ? "s" : ""} what the narrator or the player sees, so {prose.length === 1 ? "it never reads" : "they never read"} this secret before its gate holds.</div> : null}
-            {lintAt(lint, `${path}.audience`).map((issue, i) => (
-              <span key={`${issue.code}:${i}`} class="lre-small lre-warn">
-                {issue.message}
-              </span>
-            ))}
-          </div>
-        ) : null}
-      </Card>
-      <div class="lre-savebar">
-        <button type="button" class="lre-btn primary" disabled={busy || (!changed && !isNew)} onClick={save}>
+                {LORE_AUDIENCE.map((purpose) => (
+                  <CheckField
+                    key={purpose}
+                    label={STEP_LABEL[purpose]}
+                    help={PROSE_STEPS.includes(purpose) ? "Writes for the player: never reads a secret" : undefined}
+                    checked={audience.includes(purpose)}
+                    onChange={() => set("audience", audience.includes(purpose) ? audience.filter((p) => p !== purpose) : LORE_AUDIENCE.filter((p) => p === purpose || audience.includes(p)))}
+                  />
+                ))}
+              </div>
+              {prose.length > 0 ? (
+                <Banner tone="warn">
+                  {prose.map((p) => STEP_LABEL[p]).join(", ")} write{prose.length === 1 ? "s" : ""} what the narrator or the player sees, so {prose.length === 1 ? "it never reads" : "they never read"} this secret before its gate holds.
+                </Banner>
+              ) : null}
+              <Issues issues={lintAt(lint, `${path}.audience`)} />
+            </div>
+          ) : null}
+        </div>
+      </Section>
+      <SaveBar>
+        <Button variant="primary" disabled={!changed && !isNew} busy={busy} onClick={save}>
           {isNew ? "Create" : "Save to draft"}
-        </button>
-        <button type="button" class="lre-btn ghost" disabled={busy || !changed} onClick={() => setValue(initial)}>
+        </Button>
+        <Button variant="ghost" disabled={busy || !changed} onClick={() => setValue(initial)}>
           Revert
-        </button>
-      </div>
+        </Button>
+      </SaveBar>
     </div>
   );
 }

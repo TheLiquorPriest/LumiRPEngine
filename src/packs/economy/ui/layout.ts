@@ -4,7 +4,7 @@
 // dashboards show at each level is tested directly; the core already left out what the level
 // doesn't simulate, and nothing here shows detail the view marks as below the top level.
 
-import { CLASS_TRAITS, ROLE_RIGHTS, type AccountView, type BusinessView, type CardView, type DistributionRoute, type FinanceFeature, type FinanceView, type FlowView, type HoldingView, type HouseholdView, type Invoice, type JobView, type OwnerRole, type PropertyView, type RoleRights } from "../../../shared/finance";
+import { CLASS_TRAITS, ROLE_RIGHTS, type AccountView, type AlertLine, type BusinessView, type CardView, type DistributionRoute, type FinanceFeature, type FinanceView, type FlowView, type HoldingView, type Invoice, type JobView, type OwnerRole, type PropertyView, type RoleRights, type UpcomingLine } from "../../../shared/finance";
 import type { EntityId } from "../../../shared/ids";
 import type { PaletteView } from "../../../shared/state-view";
 import { cardChanges, type CardChange } from "./requests";
@@ -335,6 +335,11 @@ export function accountBlocks(view: FinanceView, account: AccountView): AccountB
   };
 }
 
+/** Whether a card shows its daily limits and today's spend: as on the cards of any account (`AccountBlocks.cardLimits`), a card on someone else's account included. */
+export function cardLimitsShown(view: FinanceView): boolean {
+  return shows(view, "daily_limits");
+}
+
 export interface InvestmentBlocks {
   /** Each holding's lots, with cost basis and gain by term. */
   lots: boolean;
@@ -373,4 +378,25 @@ export interface WorkBlocks {
 
 export function workBlocks(view: FinanceView): WorkBlocks {
   return { withholding: shows(view, "withholding"), deductions: view.detail, books: view.detail, sales: view.detail, taxes: shows(view, "business_tax") || shows(view, "sales_tax") };
+}
+
+// ---------------------------------------------------------------- Now's glance
+
+/** How far ahead Now's money glance looks for what's coming up: about three days of the world's clock, in minutes. */
+export const GLANCE_AHEAD_MINUTES = 3 * 24 * 60;
+
+export type GlanceLine = { kind: "alert"; alert: AlertLine } | { kind: "upcoming"; line: UpcomingLine };
+
+/**
+ * What Now's money glance may show, in order: the overview's problems, then its
+ * warnings, then what's coming up within about three days of `now` (the HUD clock's minutes),
+ * compared by each line's clock and never its words. Without a clock only the alerts show; the
+ * glance shows the first few.
+ */
+export function glanceLines(view: FinanceView, now: number | null): GlanceLine[] {
+  const o = view.overview;
+  if (!o) return [];
+  const alerts = [...o.alerts.filter((a) => a.tone === "neg"), ...o.alerts.filter((a) => a.tone === "warn")].map((alert): GlanceLine => ({ kind: "alert", alert }));
+  const soon = now === null ? [] : o.upcoming.filter((u) => u.clock <= now + GLANCE_AHEAD_MINUTES).map((line): GlanceLine => ({ kind: "upcoming", line }));
+  return [...alerts, ...soon];
 }

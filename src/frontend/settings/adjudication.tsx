@@ -1,6 +1,7 @@
-// Settings → Checks (DESIGN §11): how checks are decided. "New chats" holds the user's own policy,
-// which fills in for a world that sets none (or replaces a world's, with the switch on); "This chat"
-// shows the policy in force in the running chat and changes it through an `adjudicate` marker.
+// How checks are decided (DESIGN §11). For new chats (Settings → Checks): the user's own policy,
+// which fills in for a world that sets none (or replaces a world's, with the switch on). For this
+// chat (GM → This chat → Checks): the policy in force in the running chat, changed through an
+// `adjudicate` marker.
 
 import { useState } from "preact/hooks";
 import type { JsonObject } from "../../shared/json";
@@ -9,7 +10,7 @@ import type { ControlsView } from "../../shared/state-view";
 import type { AdjudicationDef } from "../../shared/world";
 import { useApp } from "../app";
 import { AdjudicationForm } from "../adjudication-form";
-import { Empty, HostSwitch, useBusy } from "../components";
+import { Button, Empty, HostSwitch, useBusy } from "../components";
 import { adjudicateMarker } from "../requests";
 
 export function AdjudicationSeed(props: { settings: UserSettings; busy: boolean; patch(patch: JsonObject): void }) {
@@ -18,7 +19,7 @@ export function AdjudicationSeed(props: { settings: UserSettings; busy: boolean;
     <div class="lre-stack" data-lre-adjudication="seed">
       <div class="lre-field">
         <HostSwitch label="Use my check rules instead of a world's for new chats" checked={mine} disabled={props.busy} onChange={(checked) => props.patch({ overrideWorldAdjudication: checked })} />
-        <span class="lre-small lre-muted">{mine ? "New chats decide checks this way, whatever their world sets." : "New chats decide checks as their world sets; these rules apply where a world sets none."}</span>
+        <span class="lre-field-help">{mine ? "New chats decide checks this way, whatever their world sets." : "New chats decide checks as their world sets; these rules apply where a world sets none."}</span>
       </div>
       {/* The whole policy goes as one value: a named preset reads as its own values. */}
       <AdjudicationForm value={props.settings.adjudication} disabled={props.busy} onChange={(next) => props.patch({ adjudication: next as unknown as JsonObject })} />
@@ -31,7 +32,7 @@ export function AdjudicationThisChat(props: { chatId: string; controls: Controls
   const app = useApp();
   const [draft, setDraft] = useState<AdjudicationDef | null>(null);
   const [busy, run] = useBusy();
-  if (!props.controls) return <Empty>Open a world chat to change how its checks are decided.</Empty>;
+  if (!props.controls) return <Empty icon="dice">Open a world chat to change how its checks are decided.</Empty>;
   const current = props.controls.adjudication;
   const changed = draft !== null && JSON.stringify(draft) !== JSON.stringify(current);
   const apply = () =>
@@ -45,18 +46,16 @@ export function AdjudicationThisChat(props: { chatId: string; controls: Controls
     });
   return (
     <div class="lre-stack" data-lre-adjudication="chat">
-      <p class="lre-small lre-muted" style={{ margin: 0 }}>
-        The rules in force in this chat. A change applies from the next turn; earlier turns keep how theirs were decided.
-      </p>
+      <p class="lre-gm-note">The rules in force in this chat. A change applies from the next turn; earlier turns keep how theirs were decided.</p>
       <AdjudicationForm value={draft ?? current} disabled={busy} onChange={setDraft} />
       {changed ? (
         <div class="lre-inline">
-          <button type="button" class="lre-btn primary" disabled={busy} onClick={apply}>
+          <Button variant="primary" busy={busy} onClick={apply}>
             Apply to this chat
-          </button>
-          <button type="button" class="lre-btn ghost" disabled={busy} onClick={() => setDraft(null)}>
+          </Button>
+          <Button variant="ghost" disabled={busy} onClick={() => setDraft(null)}>
             Cancel
-          </button>
+          </Button>
         </div>
       ) : null}
     </div>

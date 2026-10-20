@@ -1,30 +1,32 @@
-// Play → Context (DESIGN §6.5): per generation, the activation confirmation, the engine sections
-// with their token cost, clipping and delivery, the section budget, and the lore each model step
-// read (§5.4): its searches, the entries it was given with their token cost, its lookups and how
-// they reached the model. Built by the backend as `core.context`: an unrevealed secret entry isn't
-// in it at all, a search that would name a secret or someone the player hasn't met is withheld, a
-// step that may read a secret or an NPC's private options shows its lookups without their text
-// ("—"), and an NPC choice, being private, shows no counts and no entries. The minds calls show
-// whose mind ran, at which level, how it went and what it cost, only for people the player can see
-// and has met, and never a word of what a mind said or whether its depiction was kept back.
+// GM → This chat → Inspector (`core.context`, DESIGN §6.5): per generation, the activation
+// confirmation, the engine sections with their token cost, clipping and delivery, the section
+// budget, and the lore each model step read (§5.4): its searches, the entries it was given with
+// their token cost, its lookups and how they reached the model; the minds calls (whose mind ran, at
+// which level, how it went and what it cost: never a word of what a mind said); and the call meter.
+// Built by the backend as `core.context`: an unrevealed secret entry isn't in it at all, a search
+// that would name a secret or someone the player hasn't met is withheld, a step that may read a
+// secret or an NPC's private options shows its lookups without their text ("—"), and an NPC choice,
+// being private, shows no counts and no entries. So it needs no GM gate.
 
 import { useEffect, useState } from "preact/hooks";
 import { isRecord } from "../../shared/json";
 import { LORE_AUDIENCE } from "../../shared/lore";
 import type { LorePolicy } from "../../shared/settings";
 import { LORE_POLICIES } from "../../shared/settings";
+import type { CallMeterView, ContextView, LoreStepTrace } from "../../shared/state-view";
 import { useApp } from "../app";
-import { Card, Empty, JsonView, Row } from "../components";
+import { Badge, Banner, Empty, IconButton, JsonView, List, ListRow, Meter, Section } from "../components";
 import { list, num, oneOf, optNum, str, strings } from "../decode";
+import { ActionRow, ActionRows } from "../gm/ui";
+import { Icon } from "../icons";
 import type { PanelProps } from "../registry";
 import { STEP_LABEL } from "../settings/steps";
-import type { ContextView, LoreStepTrace } from "../../shared/state-view";
 import type { MindCallTrace } from "../../shared/minds";
 import { FIDELITIES, MIND_PURPOSES } from "../../shared/minds";
 import { FIDELITY_LABEL } from "../../packs/minds/ui/ops";
 
 const POLICY_LABEL: Record<LorePolicy, string> = { none: "lore off", prefetch: "prefetch", lookup: "lookups", "prefetch+lookup": "prefetch and lookups" };
-const TRANSPORT_LABEL: Record<LoreStepTrace["transport"], string> = { none: "", tools: "tools", need: "ask form" };
+const TRANSPORT_LABEL: Record<LoreStepTrace["transport"], string> = { none: "", tools: "through tools", need: "through the ask form" };
 const QUERY_LABEL: Record<LoreStepTrace["queries"][number]["kind"], string> = { prefetch: "Prefetch", search: "Search", get: "Read", list: "List" };
 
 function decodeLore(value: unknown): LoreStepTrace[] {
@@ -41,9 +43,12 @@ function decodeLore(value: unknown): LoreStepTrace[] {
   }));
 }
 
-const MIND_OUTCOME: Record<MindCallTrace["outcome"], { text: string; tone: string }> = {
+const MIND_OUTCOME: Record<MindCallTrace["outcome"], { text: string; tone: "neutral" | "pos" | "neg" | "warn" }> = {
   recorded: { text: "recorded", tone: "pos" },
+  reused: { text: "reused", tone: "neutral" },
   failed: { text: "failed", tone: "neg" },
+  leak_blocked: { text: "kept from the narrator", tone: "warn" },
+  skipped_limit: { text: "over the limit", tone: "neutral" },
 };
 const MIND_PHASE: Record<MindCallTrace["phase"], string> = { pre: "Before the reply", post: "After the reply", skip: "In a time skip" };
 const MIND_PROMPT: Record<MindCallTrace["prompt"], string> = { world: "the world's prompt", override: "your prompt", default: "the built-in prompt" };
@@ -63,10 +68,10 @@ function decodeMinds(value: unknown): MindCallTrace[] {
 
 const DELIVERY = ["verified", "unverified", "unchecked"] as const;
 type Delivery = (typeof DELIVERY)[number];
-const DELIVERY_BADGE: Record<Delivery, { text: string; tone: string }> = {
-  verified: { text: "delivered", tone: "pos" },
-  unverified: { text: "not delivered", tone: "neg" },
-  unchecked: { text: "unchecked", tone: "" },
+const DELIVERY_BADGE: Record<Delivery, { text: string; tone: "pos" | "neg" | "neutral" }> = {
+  verified: { text: "Delivered", tone: "pos" },
+  unverified: { text: "Not delivered", tone: "neg" },
+  unchecked: { text: "Unchecked", tone: "neutral" },
 };
 
 export function decodeContextView(value: unknown): ContextView | null {
@@ -88,10 +93,28 @@ export function decodeContextView(value: unknown): ContextView | null {
   };
 }
 
-const ACTIVATION: Record<ContextView["generations"][number]["activation"], { text: string; tone: string }> = {
+const ACTIVATION: Record<ContextView["generations"][number]["activation"], { text: string; tone: "pos" | "warn" }> = {
   confirmed: { text: "Activation confirmed", tone: "pos" },
   unconfirmed: { text: "Not confirmed", tone: "warn" },
 };
+
+/** The model calls replies make: this turn's, the average and the 95th percentile. */
+function CallMeter(props: { meter: CallMeterView }) {
+  const rows = [
+    ["This turn", props.meter.turn],
+    ["Average", props.meter.average],
+    ["95th percentile", props.meter.p95],
+  ] as const;
+  return (
+    <Section title="Call meter">
+      <ActionRows label="Call meter">
+        {rows.map(([label, m]) => (
+          <ActionRow key={label} title={label} subtitle={`${Math.round(m.tokens)} tokens${m.lookups > 0 ? ` · ${Number(m.lookups.toFixed(1))} lore lookup${m.lookups === 1 ? "" : "s"}` : ""}`} value={`${Number(m.calls.toFixed(1))} calls · ${(m.ms / 1000).toFixed(1)} s`} />
+        ))}
+      </ActionRows>
+    </Section>
+  );
+}
 
 export function ContextPanel(props: PanelProps) {
   const view = decodeContextView(props.view);
@@ -101,113 +124,118 @@ export function ContextPanel(props: PanelProps) {
   useEffect(() => {
     void app.request({ type: "lre.view.open", chatId: props.chatId, panel: "core.context", entity: null });
   }, [props.chatId]);
-  if (props.view === undefined || props.view === null) return <Empty>The inspector fills in after the first reply.</Empty>;
+  const meter = props.state.meter ? <CallMeter meter={props.state.meter} /> : null;
+  if (props.view === undefined || props.view === null) {
+    return (
+      <div class="lre-stack" data-lre-panel="core.context">
+        <Empty icon="code" title="Nothing inspected yet">
+          The inspector fills in after the first reply.
+        </Empty>
+        {meter}
+      </div>
+    );
+  }
   if (!view) return <JsonView value={props.view} />;
   const generations = [...view.generations].sort((a, b) => b.at - a.at);
-  const generation = generations[Math.min(index, generations.length - 1)];
+  const shownIndex = Math.min(index, generations.length - 1);
+  const generation = generations[shownIndex];
   const total = generation ? generation.budget.sections : 0;
   return (
     <div class="lre-stack" data-lre-panel="core.context">
       {view.warnings.map((warning) => (
-        <div key={warning} class="lre-banner warn">
+        <Banner key={warning} tone="warn">
           {warning}
-        </div>
+        </Banner>
       ))}
       {!generation ? (
-        <Empty>No generations inspected yet.</Empty>
+        <Empty icon="code">No generations inspected yet.</Empty>
       ) : (
         <>
-          <div class="lre-spread">
-            <button type="button" class="lre-btn small" aria-label="Older generation" disabled={index >= generations.length - 1} onClick={() => setIndex(index + 1)}>
-              ‹ Older
-            </button>
-            <span class="lre-small lre-muted">{generation.at > 0 ? new Date(generation.at).toLocaleString() : "—"}</span>
-            <button type="button" class="lre-btn small" aria-label="Newer generation" disabled={index === 0} onClick={() => setIndex(index - 1)}>
-              Newer ›
-            </button>
+          <div class="lre-gm-pager" role="group" aria-label="Generation">
+            <IconButton icon="chevron-left" label="Older generation" disabled={shownIndex >= generations.length - 1} onClick={() => setIndex(shownIndex + 1)} />
+            <span class="lre-gm-pager-text">
+              <span class="lre-gm-pager-when">{generation.at > 0 ? new Date(generation.at).toLocaleString() : "—"}</span>
+              <span class="lre-gm-pager-count">
+                {shownIndex === 0 ? "Latest" : `${shownIndex} older`} · {generations.length} kept
+              </span>
+            </span>
+            <IconButton icon="chevron-right" label="Newer generation" disabled={shownIndex === 0} onClick={() => setIndex(shownIndex - 1)} />
           </div>
-          <Card title="Activation" aside={<span class={`lre-badge ${ACTIVATION[generation.activation].tone}`}>{ACTIVATION[generation.activation].text}</span>}>
-            <Row k="Budget used" v={`${generation.budget.used} / ${total} tokens`} />
-            <div class={generation.budget.used > total ? "lre-bar low" : "lre-bar"}>
-              <span style={{ width: `${total > 0 ? Math.min(100, (generation.budget.used / total) * 100) : 0}%` }} />
-            </div>
-          </Card>
-          <Card title="Engine sections">
+          <Section title="Activation" aside={<Badge tone={ACTIVATION[generation.activation].tone}>{ACTIVATION[generation.activation].text}</Badge>}>
+            <Meter label={`Section budget: ${generation.budget.used} of ${total} tokens`} value={generation.budget.used} max={total} tone={generation.budget.used > total ? "neg" : "accent"} />
+          </Section>
+          <Section title="Engine sections" flush>
             {generation.sections.length === 0 ? (
               <Empty>None.</Empty>
             ) : (
-              generation.sections.map((s) => (
-                <Row
-                  key={s.slot}
-                  k={s.label}
-                  v={
-                    <span class="lre-inline">
-                      {s.tokens} tok{" "}
-                      {s.clipped ? <span class="lre-badge warn">clipped</span> : <span class={`lre-badge ${DELIVERY_BADGE[s.delivery].tone}`}>{DELIVERY_BADGE[s.delivery].text}</span>}
-                    </span>
-                  }
-                  sub={s.clipped ? "left out: over the section budget" : undefined}
-                  tone={s.clipped ? "warn" : undefined}
-                />
-              ))
-            )}
-          </Card>
-          {(generation.lore ?? []).length > 0 ? (
-            <Card title="Lore the helpers read">
-              {(generation.lore ?? []).map((t, i) => (
-                <div key={`${t.phase}:${t.step}:${i}`} class="lre-stack" data-lre-lore-step={t.step} style={{ gap: "2px", marginBottom: "8px" }}>
-                  <Row
-                    k={STEP_LABEL[t.step]}
-                    v={
-                      <span class="lre-inline">
-                        {t.private ? "private" : `${t.entries.reduce((s, e) => s + e.tokens, 0)} tok`}
-                        {t.lookups > 0 ? (
-                          <span class="lre-badge">
-                            {t.lookups} lookup{t.lookups === 1 ? "" : "s"}
-                            {t.transport !== "none" ? ` · ${TRANSPORT_LABEL[t.transport]}` : ""}
-                          </span>
-                        ) : null}
-                      </span>
-                    }
-                    sub={`${t.phase === "pre" ? "Before the reply" : "After the reply"} · ${POLICY_LABEL[t.policy]}`}
+              <List>
+                {generation.sections.map((s) => (
+                  <ListRow
+                    key={s.slot}
+                    id={s.slot}
+                    title={s.label}
+                    subtitle={s.clipped ? "Left out: over the section budget" : undefined}
+                    value={`${s.tokens} tok`}
+                    valueTone={s.clipped ? "warn" : undefined}
+                    badge={s.clipped ? <Badge tone="warn">Clipped</Badge> : <Badge tone={DELIVERY_BADGE[s.delivery].tone}>{DELIVERY_BADGE[s.delivery].text}</Badge>}
                   />
-                  {t.queries.map((q, j) => (
-                    <div key={`q${j}`} class="lre-small lre-muted">
-                      {QUERY_LABEL[q.kind]}: {q.text === "" ? "—" : q.text}
-                      {q.matched === undefined ? "" : ` · ${q.matched} found`}
-                    </div>
-                  ))}
-                  {t.entries.map((e, j) => (
-                    <Row key={`e${j}`} k={e.title === "" ? "—" : e.title} v={`${e.tokens} tok`} sub={e.cut ? "cut to fit" : undefined} />
-                  ))}
+                ))}
+              </List>
+            )}
+          </Section>
+          {(generation.lore ?? []).length > 0 ? (
+            <Section title="Lore the helpers read">
+              {(generation.lore ?? []).map((t, i) => (
+                <div key={`${t.phase}:${t.step}:${i}`} class="lre-gm-lore" data-lre-lore-step={t.step}>
+                  <ActionRows label={STEP_LABEL[t.step]}>
+                    <ActionRow
+                      title={STEP_LABEL[t.step]}
+                      subtitle={[t.phase === "pre" ? "Before the reply" : "After the reply", POLICY_LABEL[t.policy], t.lookups > 0 ? `${t.lookups} lookup${t.lookups === 1 ? "" : "s"}${t.transport === "none" ? "" : ` ${TRANSPORT_LABEL[t.transport]}`}` : null].filter((part) => part !== null).join(" · ")}
+                      value={t.private ? "Private" : `${t.entries.reduce((s, e) => s + e.tokens, 0)} tok`}
+                    >
+                      {t.queries.length > 0 ? (
+                        <ul class="lre-gm-queries">
+                          {t.queries.map((q, j) => (
+                            <li key={`q${j}`}>
+                              {QUERY_LABEL[q.kind]}: {q.text === "" ? "—" : q.text}
+                              {q.matched === undefined ? "" : ` · ${q.matched} found`}
+                            </li>
+                          ))}
+                        </ul>
+                      ) : null}
+                    </ActionRow>
+                    {t.entries.map((e, j) => (
+                      <ActionRow key={`e${j}`} title={e.title === "" ? "—" : e.title} subtitle={e.cut ? "Cut to fit" : undefined} value={`${e.tokens} tok`} />
+                    ))}
+                  </ActionRows>
                   {t.notes.map((n) => (
-                    <div key={n} class="lre-small lre-warn">
+                    <p key={n} class="lre-gm-warnline">
+                      <Icon name="alert" size={16} />
                       {n}
-                    </div>
+                    </p>
                   ))}
                 </div>
               ))}
-            </Card>
+            </Section>
           ) : null}
           {(generation.minds ?? []).length > 0 ? (
-            <Card title="Minds">
-              {(generation.minds ?? []).map((m, i) => (
-                <Row
-                  key={`${m.phase}:${m.purpose}:${i}`}
-                  k={m.who === "" ? STEP_LABEL[m.purpose] : `${m.who} · ${STEP_LABEL[m.purpose]}`}
-                  v={
-                    <span class="lre-inline">
-                      {`${(m.ms / 1000).toFixed(1)} s · ${m.tokens} tok`}
-                      <span class={`lre-badge ${MIND_OUTCOME[m.outcome].tone}`}>{MIND_OUTCOME[m.outcome].text}</span>
-                    </span>
-                  }
-                  sub={[...(m.level ? [FIDELITY_LABEL[m.level]] : []), MIND_PHASE[m.phase], MIND_PROMPT[m.prompt]].join(" · ")}
-                />
-              ))}
-            </Card>
+            <Section title="Minds">
+              <ActionRows label="Minds">
+                {(generation.minds ?? []).map((m, i) => (
+                  <ActionRow
+                    key={`${m.phase}:${m.purpose}:${i}`}
+                    title={`${m.who} · ${STEP_LABEL[m.purpose]}`}
+                    subtitle={`${FIDELITY_LABEL[m.level]} · ${MIND_PHASE[m.phase]} · ${MIND_PROMPT[m.prompt]}`}
+                    value={m.outcome === "skipped_limit" || m.outcome === "reused" ? undefined : `${(m.ms / 1000).toFixed(1)} s · ${m.tokens} tok`}
+                    actions={<Badge tone={MIND_OUTCOME[m.outcome].tone}>{MIND_OUTCOME[m.outcome].text}</Badge>}
+                  />
+                ))}
+              </ActionRows>
+            </Section>
           ) : null}
         </>
       )}
+      {meter}
     </div>
   );
 }

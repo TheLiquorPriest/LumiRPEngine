@@ -1,12 +1,12 @@
-// Play → You: the POV's sheet (bands as words at Sheets 1, stats and skills above, or the world
-// ruleset's designed sheet with pool bars and XP toward the next level), conditions, place and
-// activity, with ✎ fixes on the rows that have a fix target.
+// Play → Me → You: the POV's sheet (bands as words at Sheets 1, stats and skills above, or the
+// world ruleset's designed sheet with pool meters and XP toward the next level), conditions, place
+// and activity, with ✎ fixes on the rows that have a fix target.
 
 import { useState } from "preact/hooks";
 import { isRecord } from "../../../shared/json";
 import type { JsonValue } from "../../../shared/json";
 import type { FixTarget, SheetRowView, SheetSectionView } from "../../../shared/state-view";
-import { Card, Empty, JsonView } from "../../../frontend/components";
+import { Avatar, Badge, Empty, IconButton, JsonView, Meter, Section } from "../../../frontend/components";
 import { list, obj, optStr, str, strings } from "../../../frontend/decode";
 import { FixEditor } from "../../../frontend/fix-editor";
 import type { PanelProps } from "../../../frontend/registry";
@@ -31,13 +31,18 @@ function decodeMeters(r: Record<string, unknown>): Pick<SheetRowView, "pool" | "
   };
 }
 
-/** How full a bar is, 0–100: a pool between its min and max, a level's XP between its threshold and the next. */
-function fill(row: SheetRowView): number | null {
-  const ratio = (lo: number, hi: number | null, at: number): number | null => (hi === null || hi <= lo ? null : Math.max(0, Math.min(100, ((at - lo) / (hi - lo)) * 100)));
-  if (row.pool) return ratio(row.pool.min, row.pool.max, row.pool.current);
-  // A progression at its top level shows a full bar.
-  if (row.progress) return row.progress.next === null ? 100 : ratio(row.progress.from, row.progress.next, row.progress.xp);
-  return null;
+/** A pool's meter, when its max can be read and lies above its min. */
+function poolMeter(row: SheetRowView): { value: number; min: number; max: number } | null {
+  const pool = row.pool;
+  return pool && pool.max !== null && pool.max > pool.min ? { value: pool.current, min: pool.min, max: pool.max } : null;
+}
+
+/** A level's XP between its threshold and the next; a progression at its top level shows a full meter. */
+function progressMeter(row: SheetRowView): { value: number; min: number; max: number } | null {
+  const progress = row.progress;
+  if (!progress) return null;
+  if (progress.next === null) return { value: 1, min: 0, max: 1 };
+  return progress.next > progress.from ? { value: progress.xp, min: progress.from, max: progress.next } : null;
 }
 
 const FIELD_TYPES = ["number", "text", "bool", "enum", "ref", "list", "dice", "money", "date", "duration"] as const;
@@ -74,45 +79,65 @@ export function decodeYouView(value: unknown): YouView | null {
   };
 }
 
+/** One sheet row: a pool as a meter with its value, a level with its XP meter, or a label and value; ✎ when it has a fix target. */
+function SheetRow(props: { row: SheetRowView; onFix(): void }) {
+  const { row } = props;
+  const fix = row.fix ? <IconButton icon="edit" label={`Fix ${row.label}`} onClick={props.onFix} /> : null;
+  const pool = poolMeter(row);
+  if (pool) {
+    const low = (pool.value - pool.min) / (pool.max - pool.min) <= 0.25;
+    return (
+      <div class="lre-me-stat">
+        <div class="lre-me-stat-main">
+          <Meter label={row.label} value={pool.value} min={pool.min} max={pool.max} tone={low ? "neg" : "accent"} showValue />
+          {row.detail ? <span class="lre-me-stat-sub">{row.detail}</span> : null}
+        </div>
+        {fix}
+      </div>
+    );
+  }
+  const progress = progressMeter(row);
+  return (
+    <div class="lre-me-stat">
+      <div class="lre-me-stat-main">
+        <div class="lre-me-stat-line">
+          <span class="lre-me-stat-k">
+            {row.label}
+            {row.detail && !progress ? <span class="lre-me-stat-sub">{row.detail}</span> : null}
+          </span>
+          <span class="lre-me-stat-v">{row.value}</span>
+        </div>
+        {progress ? <Meter label={row.detail ?? (row.progress?.next === null ? "Top level" : `Level ${row.value}`)} value={progress.value} min={progress.min} max={progress.max} /> : null}
+      </div>
+      {fix}
+    </div>
+  );
+}
+
 /**
- * A designed sheet's sections as cards: rows with their pool bars and XP meters, and ✎ on the rows
- * with a fix target. Play → You shows the POV's; Build's Sheet Designer previews the same cards.
+ * A designed sheet's sections, each a titled list: pools as meters, levels with their XP, and ✎ on
+ * the rows with a fix target. Play → You shows the POV's; Build's Sheet Designer previews the same.
  */
 export function SheetSectionCards(props: { sections: readonly SheetSectionView[] }) {
   const [fixing, setFixing] = useState<string | null>(null);
   return (
     <>
       {props.sections.map((section) => (
-        <Card key={section.title} title={section.title}>
-          {section.rows.map((row) => {
-            const key = `${section.title}:${row.label}`;
-            if (fixing === key && row.fix) return <FixEditor key={key} label={row.label} target={row.fix} onDone={() => setFixing(null)} />;
-            const meter = fill(row);
-            return (
-              <div key={key} class="lre-stack" style={{ gap: "2px" }}>
-                <div class="lre-row">
-                  <span class="k">
-                    {row.label}
-                    {row.detail ? <span class="sub">{row.detail}</span> : null}
-                  </span>
-                  <span class="v lre-inline">
-                    {row.value}
-                    {row.fix ? (
-                      <button type="button" class="lre-btn small ghost" aria-label={`Fix ${row.label}`} onClick={() => setFixing(key)}>
-                        ✎
-                      </button>
-                    ) : null}
-                  </span>
-                </div>
-                {meter !== null ? (
-                  <div class={row.pool && meter <= 25 ? "lre-bar low" : "lre-bar"} role="meter" aria-label={row.pool ? `${row.label}: ${row.value}` : `${row.label}: ${row.detail ?? row.value}`} aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(meter)}>
-                    <span style={{ width: `${meter}%` }} />
+        <Section key={section.title} title={section.title} flush>
+          <div class="lre-me-stats">
+            {section.rows.map((row) => {
+              const key = `${section.title}:${row.label}`;
+              if (fixing === key && row.fix) {
+                return (
+                  <div key={key} class="lre-me-stat fixing">
+                    <FixEditor label={row.label} target={row.fix} onDone={() => setFixing(null)} />
                   </div>
-                ) : null}
-              </div>
-            );
-          })}
-        </Card>
+                );
+              }
+              return <SheetRow key={key} row={row} onFix={() => setFixing(key)} />;
+            })}
+          </div>
+        </Section>
       ))}
     </>
   );
@@ -120,22 +145,30 @@ export function SheetSectionCards(props: { sections: readonly SheetSectionView[]
 
 export function YouPanel(props: PanelProps) {
   const view = decodeYouView(props.view);
-  if (props.view === null || props.view === undefined) return <Empty>No character sheet yet.</Empty>;
+  if (props.view === null || props.view === undefined) return <Empty icon="user">No character sheet yet.</Empty>;
   if (!view) return <JsonView value={props.view} />;
+  const where = [view.activity, view.place].filter((part) => part).join(" · ");
   return (
-    <div class="lre-stack" data-lre-panel="sheets.you">
-      <Card title={view.name} aside={view.tier ? <span class="lre-badge accent">{view.tier}</span> : null}>
-        {view.place || view.activity ? <div class="lre-muted">{[view.activity, view.place].filter((part) => part).join(" · ")}</div> : null}
-        {view.conditions.length > 0 ? (
-          <div class="lre-inline" style={{ marginTop: "6px" }}>
+    <div class="lre-stack lre-me" data-lre-panel="sheets.you">
+      <section class="lre-me-hero">
+        <Avatar name={view.name} size={48} />
+        <div class="lre-me-hero-text">
+          <h2 class="lre-me-hero-name">{view.name}</h2>
+          {where ? <span class="lre-me-hero-sub">{where}</span> : null}
+        </div>
+        {view.tier ? <Badge tone="accent">{view.tier}</Badge> : null}
+      </section>
+      {view.conditions.length > 0 ? (
+        <Section title="Conditions">
+          <div class="lre-inline">
             {view.conditions.map((c) => (
-              <span key={c} class="lre-badge warn">
+              <Badge key={c} tone="warn">
                 {c}
-              </span>
+              </Badge>
             ))}
           </div>
-        ) : null}
-      </Card>
+        </Section>
+      ) : null}
       <SheetSectionCards sections={view.sections} />
     </div>
   );

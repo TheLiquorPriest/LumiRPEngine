@@ -1,6 +1,7 @@
-// A mock Lumiverse frontend host for the preview harness: drawer tab, float widgets (stacked
-// under the drawer on mobile, as DESIGN §12 describes), DOM decorators over static message anchors,
-// input-bar actions, simple stand-ins for the host components, and the messaging bridge.
+// A mock Lumiverse frontend host for the preview harness: drawer tab (full-width with the host tab
+// row and a "title ✕" header on phones, as the real host draws it), float widgets (stacked under the
+// drawer on mobile, as DESIGN §12 describes), optional chat heads, DOM decorators over static chat and
+// message anchors, input-bar actions, simple stand-ins for the host components, and the messaging bridge.
 
 import type { SpindleFrontendContext, SpindleModelComboboxOptions, SpindleNumberStepperOptions, SpindleRangeSliderOptions, SpindleSelectOptions, SpindleSwitchOptions } from "lumiverse-spindle-types";
 import type { DecoratorRenderContext, DomDecoratorOptions, FloatWidgetOptions } from "../../src/spindle-augment";
@@ -29,14 +30,25 @@ function handle<O>(element: HTMLElement, getValue: () => unknown, update: (patch
 /** Host actions the harness invoked through `ctx.host.surfaces` (Retry → regenerate). */
 export const hostActions: string[] = [];
 
-export function createMockHost(initialDrawerOpen: boolean): MockHost {
+export interface MockHostOptions {
+  drawerOpen: boolean;
+  /** Draw three host chat heads (`data-head-idx`) at the right edge, above the drawer. */
+  heads: boolean;
+}
+
+export function createMockHost(options: MockHostOptions): MockHost {
   const backendListeners = new Set<Listener<unknown>>();
   const drawerListeners = new Set<Listener<{ open: boolean; tabId: string | null }>>();
-  let drawerOpen = initialDrawerOpen;
+  let drawerOpen = options.drawerOpen;
   const drawer = document.getElementById("drawer") as HTMLElement;
   const drawerPanel = document.getElementById("drawer-panel") as HTMLElement;
+  const drawerTitle = document.getElementById("drawer-title-text") as HTMLElement;
   const floats = document.getElementById("floats") as HTMLElement;
   const extras = document.getElementById("extras") as HTMLElement;
+  if (options.heads) {
+    const heads = document.getElementById("chatheads") as HTMLElement;
+    for (let idx = 0; idx < 3; idx++) heads.appendChild(el("div", { "data-head-idx": String(idx), role: "button", "aria-label": `Chat head ${idx + 1}` }));
+  }
   const applyDrawer = () => {
     drawer.dataset.open = String(drawerOpen);
     document.body.dataset.drawer = drawerOpen ? "open" : "closed";
@@ -47,9 +59,24 @@ export function createMockHost(initialDrawerOpen: boolean): MockHost {
     drawerOpen = !drawerOpen;
     applyDrawer();
   });
-  (document.getElementById("drawer-backdrop") as HTMLElement).addEventListener("click", () => {
+  const closeDrawer = () => {
     drawerOpen = false;
     applyDrawer();
+  };
+  (document.getElementById("drawer-backdrop") as HTMLElement).addEventListener("click", closeDrawer);
+  (document.getElementById("drawer-close") as HTMLElement).addEventListener("click", closeDrawer);
+
+  // The host's Extras popover; the mock lists two host items and closes on a pick or an outside click.
+  const extrasToggle = document.getElementById("extras-toggle") as HTMLElement;
+  const extrasPopover = document.getElementById("extras-popover") as HTMLElement;
+  const setExtras = (open: boolean) => {
+    extrasPopover.hidden = !open;
+    extrasToggle.setAttribute("aria-expanded", String(open));
+  };
+  extrasToggle.addEventListener("click", () => setExtras(extrasToggle.getAttribute("aria-expanded") !== "true"));
+  extrasPopover.addEventListener("click", () => setExtras(false));
+  document.addEventListener("click", (event) => {
+    if (event.target instanceof Node && !extrasPopover.contains(event.target) && !extrasToggle.contains(event.target)) setExtras(false);
   });
 
   const host: MockHost = {
@@ -87,7 +114,7 @@ export function createMockHost(initialDrawerOpen: boolean): MockHost {
     },
     registerDrawerTab(options: { id: string; title: string }) {
       const root = el("div", { "data-tab": options.id });
-      drawerPanel.querySelector(".drawer-title")?.replaceChildren(document.createTextNode(options.title));
+      drawerTitle.textContent = options.title;
       drawerPanel.appendChild(root);
       return { root, tabId: options.id, setTitle: () => {}, setShortName: () => {}, setBadge: () => {}, activate: () => host.setDrawer(true), destroy: () => root.remove(), onActivate: () => () => {} };
     },
@@ -237,13 +264,23 @@ export function createMockHost(initialDrawerOpen: boolean): MockHost {
     },
     mountSelect(target: HTMLElement, options: SpindleSelectOptions) {
       const select = el("select", { class: "mock-select" });
-      const fill = (opts: SpindleSelectOptions["options"]) => select.replaceChildren(...(opts ?? []).map((o) => el("option", { value: o.value }, o.label)));
+      let placeholder = options.placeholder;
+      // As the host's select: an empty value shows the placeholder, which can't be picked again.
+      const fill = (opts: SpindleSelectOptions["options"]) =>
+        select.replaceChildren(...(placeholder ? [el("option", { value: "", disabled: "" }, placeholder)] : []), ...(opts ?? []).map((o) => el("option", { value: o.value }, o.label)));
       fill(options.options);
       select.value = options.value ?? "";
       select.addEventListener("change", () => options.onChange?.(select.value));
       target.replaceChildren(select);
+      let current = options.options;
       return handle<SpindleSelectOptions>(target, () => select.value, (patch) => {
-        if (patch.options) fill(patch.options);
+        const value = select.value;
+        if (patch.placeholder !== undefined) placeholder = patch.placeholder;
+        if (patch.options) current = patch.options;
+        if (patch.options || patch.placeholder !== undefined) {
+          fill(current);
+          select.value = value;
+        }
         if (typeof patch.value === "string") select.value = patch.value;
       });
     },
@@ -268,6 +305,7 @@ export function createMockHost(initialDrawerOpen: boolean): MockHost {
         document.head.appendChild(style);
         return () => style.remove();
       },
+      findMessageElement: (messageId: string) => document.querySelector(`[data-message-id="${CSS.escape(messageId)}"]`),
     },
     events: { on: () => () => {}, emit: () => {} },
     host: {

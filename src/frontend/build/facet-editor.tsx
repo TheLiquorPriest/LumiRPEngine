@@ -1,13 +1,23 @@
-// Build's classification widgets (DESIGN §4.1, §13): a facet's values as a tree (each with a label,
-// the value it nests under and a description), and an entity's classification, one picker per
-// facet: a single choice or several, as the facet says. Lint is shown by the form around them
-// (`issues`), so a stale value an entity still holds stays visible and removable here.
+// Build's classification widgets (DESIGN §4.1, §13): a facet's values as an item list in tree order,
+// each opening a sheet with its label, the value it nests under and a description; and an entity's
+// classification, one field per facet: chips for several values or a short single choice, a picker
+// for a long one. Lint is shown by the form around them (`issues`), so a stale value an entity still
+// holds stays visible and removable here. Ids stay hidden unless Show ids is on: values show by label, and a new
+// value's id is derived from its label. Styles: styles/forms.ts.
 
 import type { ComponentChildren } from "preact";
-import { useState } from "preact/hooks";
+import { useId, useState } from "preact/hooks";
 import { facetsInOrder, facetTree } from "../../shared/classes";
-import { isRecord, safeKey } from "../../shared/json";
+import { hasOwn, isRecord, safeKey } from "../../shared/json";
 import type { FacetId, FacetValueDef, FacetValueId, WorldDoc } from "../../shared/world";
+import { Button, Disclosure, Field, IconButton, IdText, useShowIds } from "../components";
+import { Icon } from "../icons";
+import type { RefOption } from "./form-kit";
+import { Chip, FormSheet, ItemRow, RefPicker } from "./form-kit";
+import { deriveId } from "./schema";
+
+/** Up to this many values, a single-choice facet shows them all as chips; past it, a picker keeps the field short. */
+const CHIP_CHOICE_MAX = 6;
 
 /** An entity's stored classification: facet → value ids (anything else dropped). */
 export function classesOf(v: unknown): Record<FacetId, FacetValueId[]> | undefined {
@@ -55,92 +65,158 @@ function subtree(values: Record<FacetValueId, FacetValueDef>, id: FacetValueId):
   return out;
 }
 
-/** A facet's values as a tree, each editable; `issues(path)` renders the lint at a value's path. */
+/** The label of the value `v` nests under, when the facet defines that value. */
+function parentLabel(values: Readonly<Record<FacetValueId, FacetValueDef>>, v: FacetValueDef): string | undefined {
+  return v.parent !== undefined && hasOwn(values, v.parent) ? values[v.parent]?.label : undefined;
+}
+
+/**
+ * A facet's values as choices, in tree order (each value, then those nested under it). A nested one
+ * says what it is in on its second line, so nesting reads without indent glyphs or ids.
+ */
+export function facetOptions(values: Readonly<Record<FacetValueId, FacetValueDef>>): RefOption[] {
+  return facetTree(values).map(({ id, value }) => {
+    const parent = parentLabel(values, value);
+    return { value: id, label: value.label, ...(parent !== undefined ? { sublabel: `in ${parent}` } : {}) };
+  });
+}
+
+/** A choice's name on a chip, with its quiet second line ("in Coast") when it has one. */
+export function ChipLines(props: { option: RefOption }) {
+  if (props.option.sublabel === undefined) return <>{props.option.label}</>;
+  return (
+    <span class="lre-form-facet-lines">
+      <span>{props.option.label}</span>
+      <span class="lre-form-facet-in">{props.option.sublabel}</span>
+    </span>
+  );
+}
+
+/** Why a typed value id can't be used, or null: it must be new and a safe key. */
+function idProblem(id: string, taken: ReadonlySet<string>): string | null {
+  if (!id) return "Give it an id.";
+  if (taken.has(id)) return "There's already a value with this id.";
+  return safeKey(id) ? null : "This id is reserved. Choose another.";
+}
+
+/**
+ * A facet's values as an item list in tree order, nesting shown by indent; tapping one opens its
+ * sheet. `issues(path)` renders the lint at a value's path. A new value is named by its label; its
+ * id follows the label and is editable under Advanced, or in the open while Show ids is on.
+ */
 export function FacetValuesInput(props: { label: string; value: Record<FacetValueId, FacetValueDef> | undefined; path: string; issues(path: string): ComponentChildren; onChange(next: Record<FacetValueId, FacetValueDef>): void }) {
   const values = props.value ?? {};
-  const [newId, setNewId] = useState("");
+  const showIds = useShowIds();
+  const idId = useId();
+  const [open, setOpen] = useState<FacetValueId | null>(null);
+  const [name, setName] = useState("");
+  const [typed, setTyped] = useState<string | null>(null);
   const edit = (id: FacetValueId, patch: Partial<FacetValueDef>) => {
     const next = { ...(values[id] ?? { label: id }), ...patch };
     if (patch.parent === undefined && "parent" in patch) delete next.parent;
     if (patch.description === undefined && "description" in patch) delete next.description;
     props.onChange({ ...values, [id]: next });
   };
+  const remove = (id: FacetValueId) => {
+    if (open === id) setOpen(null);
+    props.onChange(removeValue(values, id));
+  };
+  const taken = new Set(Object.keys(values));
+  const newId = typed ?? (name.trim() ? deriveId(name.trim(), taken) : "");
+  const problem = typed === null ? null : idProblem(typed, taken);
+  const ready = name.trim() !== "" && newId !== "" && problem === null;
   const add = () => {
-    const id = newId.trim();
-    if (!safeKey(id) || id in values) return;
-    props.onChange({ ...values, [id]: { label: id.replace(/_/g, " ") } });
-    setNewId("");
+    if (!ready) return;
+    props.onChange({ ...values, [newId]: { label: name.trim() } });
+    setName("");
+    setTyped(null);
   };
   const tree = facetTree(values);
+  const current = open !== null && hasOwn(values, open) ? values[open] : undefined;
+  // What the open value can't nest under: itself and the values nested under it.
+  const blocked = open !== null ? subtree(values, open) : null;
+  const idField = (
+    <Field label="Id" for={idId} help="How rules and entities refer to it. It follows the label until you change it." error={problem}>
+      <input id={idId} class="lre-input lre-build-mono" value={newId} autoComplete="off" spellcheck={false} aria-invalid={problem !== null || undefined} onInput={(event) => setTyped(event.currentTarget.value.replace(/[^\w-]/g, "_"))} />
+    </Field>
+  );
   return (
     <div class="lre-field" data-lre-facet-values>
       <span class="label">{props.label}</span>
-      {tree.length === 0 ? <span class="lre-small lre-muted">No values yet.</span> : null}
-      {tree.map(({ id, value, depth }) => {
-        const blocked = subtree(values, id);
-        return (
-          <section key={id} class="lre-card lre-stack" style={{ marginLeft: `${Math.min(depth, 4) * 14}px` }} data-lre-facet-value={id}>
-            <div class="lre-spread">
-              <span class="lre-small lre-muted">
-                {depth > 0 ? "› ".repeat(depth) : ""}
-                <code>{id}</code>
-              </span>
-              <button type="button" class="lre-btn small danger" aria-label={`Remove ${value.label}`} onClick={() => props.onChange(removeValue(values, id))}>
-                Remove
-              </button>
-            </div>
-            <label class="lre-field">
-              <span class="label">Label</span>
-              <input class="lre-input" value={value.label} onInput={(event) => edit(id, { label: event.currentTarget.value })} />
-            </label>
-            <label class="lre-field">
-              <span class="label">Nested under</span>
-              <select class="lre-input" value={value.parent ?? ""} onChange={(event) => edit(id, { parent: event.currentTarget.value === "" ? undefined : event.currentTarget.value })}>
-                <option value="">— (a top-level value)</option>
-                {tree
-                  .filter((other) => !blocked.has(other.id))
-                  .map((other) => (
-                    <option key={other.id} value={other.id}>
-                      {`${"› ".repeat(other.depth)}${other.value.label}`}
-                    </option>
-                  ))}
-                {value.parent !== undefined && !(value.parent in values) ? <option value={value.parent}>{value.parent} (not a value)</option> : null}
-              </select>
-            </label>
-            <label class="lre-field">
-              <span class="label">Description (optional)</span>
-              <input class="lre-input" value={value.description ?? ""} onInput={(event) => edit(id, { description: event.currentTarget.value === "" ? undefined : event.currentTarget.value })} />
-            </label>
-            {props.issues(`${props.path}.${id}`)}
-          </section>
-        );
-      })}
-      <div class="lre-inline">
-        <input
-          class="lre-input"
-          style={{ flex: 1 }}
-          placeholder="New value id (letters, digits, _)"
-          aria-label="New value id"
-          value={newId}
-          onInput={(event) => setNewId(event.currentTarget.value.replace(/[^\w-]/g, "_"))}
-          onKeyDown={(event) => {
-            if (event.key !== "Enter") return;
-            event.preventDefault();
-            add();
-          }}
-        />
-        <button type="button" class="lre-btn primary" disabled={!newId.trim() || newId.trim() in values} onClick={add}>
-          + Add value
-        </button>
+      {tree.length === 0 ? (
+        <span class="lre-field-help">No values yet.</span>
+      ) : (
+        <div class="lre-form-items">
+          {tree.map(({ id, value, depth }) => {
+            const parent = parentLabel(values, value);
+            const title = value.label || id;
+            const subtitle = parent !== undefined ? `in ${parent}` : value.parent !== undefined ? `in ${value.parent} (not a value)` : value.description;
+            return (
+              <div key={id} class="lre-form-facet-row" data-depth={Math.min(depth, 4)} data-lre-facet-value={id}>
+                <ItemRow title={title} subtitle={subtitle} onOpen={() => setOpen(id)} openLabel={`Edit ${title}`} actions={<IconButton icon="trash" label={`Remove ${title}`} onClick={() => remove(id)} />} />
+                <div class="lre-form-facet-row-issues">{props.issues(`${props.path}.${id}`)}</div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+      {open !== null && current ? (
+        <FormSheet title={current.label || open} subtitle={props.label} onClose={() => setOpen(null)}>
+          <label class="lre-field">
+            <span class="label">Label</span>
+            <input class="lre-input" value={current.label} onInput={(event) => edit(open, { label: event.currentTarget.value })} />
+          </label>
+          <RefPicker
+            label="Nested under"
+            value={current.parent ?? ""}
+            options={facetOptions(values).filter((o) => !blocked?.has(o.value))}
+            none="Nothing: a top-level value"
+            onChange={(parent) => edit(open, { parent: parent === "" ? undefined : parent })}
+          />
+          <label class="lre-field">
+            <span class="label">
+              Description<span class="lre-form-optional"> · optional</span>
+            </span>
+            <input class="lre-input" value={current.description ?? ""} onInput={(event) => edit(open, { description: event.currentTarget.value === "" ? undefined : event.currentTarget.value })} />
+          </label>
+          {props.issues(`${props.path}.${open}`)}
+          <IdText id={open} />
+          <div class="lre-form-facet-actions">
+            <Button variant="danger" icon="trash" onClick={() => remove(open)}>
+              Remove value
+            </Button>
+          </div>
+        </FormSheet>
+      ) : null}
+      <div class="lre-form-facet-new">
+        <div class="lre-form-add">
+          <input
+            class="lre-input"
+            placeholder="New value's label"
+            aria-label="New value's label"
+            value={name}
+            onInput={(event) => setName(event.currentTarget.value)}
+            onKeyDown={(event) => {
+              if (event.key !== "Enter") return;
+              event.preventDefault();
+              add();
+            }}
+          />
+          <Button size="sm" icon="plus" disabled={!ready} onClick={add}>
+            Add value
+          </Button>
+        </div>
+        {name.trim() !== "" || typed !== null ? showIds ? idField : <Disclosure summary="Advanced">{idField}</Disclosure> : null}
       </div>
     </div>
   );
 }
 
 /**
- * An entity's classification: per facet, in the world's order, one select (single-valued) or a
- * toggle per value (several). A facet or value the world no longer defines stays listed until removed.
- * Build passes its draft; the GM editor passes the running chat's facets.
+ * An entity's classification: one field per facet, in the world's order. Several values: a toggle
+ * chip each. One value: chips acting as a single choice while there are few (pressing the chosen one
+ * clears it), else a picker with None. A value or facet the world no longer defines stays listed,
+ * in the warning tone, until removed. Build passes its draft; the GM editor passes the running chat's facets.
  */
 export function ClassesInput(props: { label: string; value: Record<FacetId, FacetValueId[]> | undefined; doc: Pick<WorldDoc, "classifications">; onChange(next: Record<FacetId, FacetValueId[]> | undefined): void }) {
   const value = props.value ?? {};
@@ -153,60 +229,64 @@ export function ClassesInput(props: { label: string; value: Record<FacetId, Face
   };
   const stale = Object.keys(value).filter((facet) => !facets.some(([id]) => id === facet));
   return (
-    <div class="lre-field" data-lre-classes>
+    <div class="lre-field lre-form-facet-classes" data-lre-classes>
       <span class="label">{props.label}</span>
-      {facets.length === 0 ? <span class="lre-small lre-muted">No classifications yet: add facets in Build → Classifications.</span> : null}
+      {facets.length === 0 ? <span class="lre-field-help">No classifications yet: add facets in Build → Classifications.</span> : null}
       {facets.map(([facet, f]) => {
         const held = value[facet] ?? [];
-        const options = facetTree(f.values);
-        const unknown = held.filter((v) => !options.some((o) => o.id === v));
+        const options = facetOptions(f.values);
+        const known = (v: FacetValueId) => options.some((o) => o.value === v);
+        const picker = !f.multiple && options.length > CHIP_CHOICE_MAX;
+        // A picker shows one value: any further one a single-choice facet still holds is listed to remove.
+        const extra = picker ? held.filter(known).slice(1) : [];
+        const odd = [...held.filter((v) => !known(v)).map((v) => ({ v, text: `${v} (not a value)` })), ...extra.map((v) => ({ v, text: `${options.find((o) => o.value === v)?.label ?? v} (only one allowed)` }))];
+        const warn =
+          odd.length > 0 ? (
+            <div class="lre-form-chips">
+              {odd.map(({ v, text }) => (
+                <Chip key={v} tone="warn" removeLabel={`Remove ${v}`} onRemove={() => set(facet, held.filter((x) => x !== v))}>
+                  {text}
+                </Chip>
+              ))}
+            </div>
+          ) : null;
+        if (picker) {
+          return (
+            <div key={facet} class="lre-form-facet-class" data-lre-class-facet={facet}>
+              <RefPicker label={f.label} value={held.find(known) ?? ""} options={options} none="None" onChange={(v) => set(facet, v === "" ? [] : [v])} />
+              {warn}
+            </div>
+          );
+        }
         return (
-          <div key={facet} class="lre-field" data-lre-class-facet={facet}>
-            <span class="label">
-              {f.label}
-              {f.multiple ? " (any number)" : ""}
-            </span>
-            {f.multiple ? (
-              <div class="lre-inline" role="group" aria-label={f.label}>
-                {options.map((o) => {
-                  const on = held.includes(o.id);
-                  return (
-                    <button key={o.id} type="button" class={on ? "lre-btn small primary" : "lre-btn small"} aria-pressed={on} onClick={() => set(facet, on ? held.filter((v) => v !== o.id) : [...held, o.id])}>
-                      {`${"› ".repeat(o.depth)}${o.value.label}`}
-                    </button>
-                  );
-                })}
-              </div>
-            ) : (
-              <select class="lre-input" aria-label={f.label} value={held[0] ?? ""} onChange={(event) => set(facet, event.currentTarget.value === "" ? [] : [event.currentTarget.value])}>
-                <option value="">—</option>
-                {options.map((o) => (
-                  <option key={o.id} value={o.id}>
-                    {`${"› ".repeat(o.depth)}${o.value.label}`}
-                  </option>
-                ))}
-              </select>
-            )}
-            {unknown.length > 0 || (!f.multiple && held.length > 1) ? (
-              <div class="lre-inline">
-                {(unknown.length > 0 ? unknown : held.slice(1)).map((v) => (
-                  <button key={v} type="button" class="lre-btn small danger" aria-label={`Remove ${v}`} onClick={() => set(facet, held.filter((x) => x !== v))}>
-                    {v} ✕
-                  </button>
-                ))}
-              </div>
-            ) : null}
+          <div key={facet} class="lre-form-facet-class" data-lre-class-facet={facet}>
+            <span class="lre-form-facet-label">{f.label}</span>
+            {f.multiple ? <span class="lre-field-help">Any number of these.</span> : null}
+            {options.length === 0 ? <span class="lre-field-help">This classification has no values yet.</span> : null}
+            <div class="lre-form-chips" role="group" aria-label={f.label}>
+              {options.map((o) => {
+                const on = held.includes(o.value);
+                const next = on ? held.filter((v) => v !== o.value) : f.multiple ? [...held, o.value] : [o.value];
+                return (
+                  <Chip key={o.value} pressed={on} onToggle={() => set(facet, next)}>
+                    <ChipLines option={o} />
+                  </Chip>
+                );
+              })}
+            </div>
+            {warn}
           </div>
         );
       })}
       {stale.map((facet) => (
-        <div key={facet} class="lre-inline">
-          <span class="lre-small lre-warn">
-            {facet}: {(value[facet] ?? []).join(", ")}
+        <div key={facet} class="lre-form-facet-stale">
+          <span class="lre-form-facet-stale-text">
+            <Icon name="alert" size={16} />
+            <span>{`${facet}: ${(value[facet] ?? []).join(", ")} (no longer a classification)`}</span>
           </span>
-          <button type="button" class="lre-btn small danger" aria-label={`Remove ${facet}`} onClick={() => set(facet, [])}>
+          <Button variant="ghost" size="sm" label={`Remove ${facet}`} onClick={() => set(facet, [])}>
             Remove
-          </button>
+          </Button>
         </div>
       ))}
     </div>

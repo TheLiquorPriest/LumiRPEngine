@@ -1,5 +1,6 @@
-// Every UI pack, in registration order. `core` holds the engine's own Play panels; each domain
-// pack's `ui` registers its panels, editors and chip renderers.
+// Every UI pack, in registration order. `core` holds the engine's own panels (Scene and Journal in
+// Play, GM view and Context in GM mode); each domain pack's `ui` registers its panels, editors and
+// chip renderers.
 
 import calendar from "../packs/calendar/ui";
 import combat from "../packs/combat/ui";
@@ -20,10 +21,10 @@ import type { UiPackDef } from "./registry";
 const core: UiPackDef = {
   id: "core",
   register(r) {
-    r.panel({ id: "core.scene", label: "Scene", order: 10, component: ScenePanel });
-    r.panel({ id: "core.journal", label: "Journal", order: 90, component: JournalPanel });
-    r.panel({ id: "core.context", label: "Context", order: 100, component: ContextPanel });
-    r.panel({ id: "core.gm", label: "GM view", order: 110, component: GmPanel });
+    r.panel({ id: "core.scene", label: "Scene", order: 10, home: "now", component: ScenePanel });
+    r.panel({ id: "core.journal", label: "Journal", order: 90, home: "story", component: JournalPanel });
+    r.panel({ id: "core.gm", label: "GM view", order: 100, home: "gm", component: GmPanel });
+    r.panel({ id: "core.context", label: "Context", order: 110, home: "gm", component: ContextPanel });
   },
 };
 
