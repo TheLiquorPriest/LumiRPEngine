@@ -545,7 +545,8 @@ export function runOccurrence(hooks: FinanceHooks, run: Run, flow: Flow, at: num
     return;
   }
   const cents = amount.cents;
-  const overdraft = flow.shortfall === "overdraft" || flow.shortfall === "skip" || flow.shortfall === "retry" || flow.shortfall === "defer" || flow.shortfall === "fallback" || flow.shortfall === "partial";
+  // Only the overdraft policy pays into overdraft room; every other policy acts when the money itself isn't there.
+  const overdraft = flow.shortfall === "overdraft";
   // A module's own posting goes as it gave it; a module that gave only the amount pays like any flow, with its bookkeeping in the same unit.
   const own_lines = amount.posting?.lines?.some((l) => l.amount !== 0) === true;
   const extra = amount.posting && !own_lines ? (amount.posting.extra ?? []) : [];
@@ -553,7 +554,7 @@ export function runOccurrence(hooks: FinanceHooks, run: Run, flow: Flow, at: num
   const shared = (flow.shares ?? []).length > 0 && featureOn(flowLevel(ctx, flow), "households", toggles(ctx.world));
   const computed = (c: number): Attempt | Rejection => {
     if (c <= 0) return { events: extra, paid: 0 };
-    const made = shared ? sharedAttempt(hooks, ctx, flow, c, at) : payFrom(hooks, ctx, flow, flow.from, c, at, overdraft, amount.posting);
+    const made = shared ? sharedAttempt(hooks, ctx, flow, c, at, overdraft) : payFrom(hooks, ctx, flow, flow.from, c, at, overdraft, amount.posting);
     return "code" in made || extra.length === 0 ? made : { events: asUnit([...made.events.map(({ group: _g, ...e }) => e as LedgerEvent), ...extra]), paid: made.paid };
   };
   const attempt = amount.posting && own_lines ? providedAttempt(ctx, flow, amount.posting, at) : computed(cents);
@@ -599,7 +600,7 @@ export function runOccurrence(hooks: FinanceHooks, run: Run, flow: Flow, at: num
     case "fallback": {
       const fallback = fallbackOf(ctx, flow);
       if (fallback && !own_lines) {
-        const paid = payFrom(hooks, ctx, flow, fallback, cents, at, true, amount.posting);
+        const paid = payFrom(hooks, ctx, flow, fallback, cents, at, false, amount.posting);
         if (!("code" in paid) && run.emit(paid.events).length > 0) {
           const next: FlowRunState = { done: before.done + 1, missed: before.missed, ...pending, ended: ended(before.done + 1, before.missed) };
           run.emit([runEvent(flow, at, "fallback", cents, next)]);
@@ -666,7 +667,7 @@ function bounceFee(ctx: ReadContext, flow: Flow, cents: number, at: number, over
  * Each share is checked against the books the shares before it leave, so two shares from one
  * account can't both spend what covers one, and they go as one unit.
  */
-function sharedAttempt(hooks: FinanceHooks, ctx: ReadContext, flow: Flow, cents: number, at: number): Attempt | Rejection {
+function sharedAttempt(hooks: FinanceHooks, ctx: ReadContext, flow: Flow, cents: number, at: number, overdraft: boolean): Attempt | Rejection {
   const shares = flow.shares ?? [];
   const total = shares.reduce((a, s) => a + Math.max(0, s.pct), 0);
   if (total <= 0) return reject("bad_flow", `${flow.label} has no shares`);
@@ -678,7 +679,7 @@ function sharedAttempt(hooks: FinanceHooks, ctx: ReadContext, flow: Flow, cents:
     left -= part;
     if (part <= 0) continue;
     const share: Flow = { ...flow, from: s.from ?? s.party, label: flow.label };
-    const paid = payFrom(hooks, trial.ctx, share, s.from ?? s.party, part, at, true);
+    const paid = payFrom(hooks, trial.ctx, share, s.from ?? s.party, part, at, overdraft);
     if ("code" in paid) return reject("declined", `${labelOf(ctx, s.party)}'s share: ${paid.reason}`);
     if (trial.emit(asUnit(paid.events)).length === 0) return reject("declined", `${labelOf(ctx, s.party)}'s share can't be covered`);
     events.push(...paid.events);

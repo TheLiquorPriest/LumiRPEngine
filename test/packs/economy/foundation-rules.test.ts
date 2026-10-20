@@ -690,3 +690,24 @@ describe("a cash advance costs its fee and its own interest", () => {
     expect(statement?.interest).toBe(Math.round((held * 27) / 100 / (365 * 1440)));
   });
 });
+
+describe("only the overdraft policy pays into overdraft", () => {
+  const big = (shortfall: string) => (world: WorldDoc): void => {
+    Object.assign(world.entities.checking!.fields, { overdraft: "fee", overdraft_limit: 100_000 });
+    world.entities.big = entity("big", "flow", { flow_kind: "bill", from: "checking", to: "Landlord", amount_cents: 250_000, once: "2026-10-17T09:00", shortfall, status: "active" });
+  };
+
+  test("a skip flow the balance can't cover is skipped, though overdraft room would cover it", () => {
+    const w = setup(big("skip"));
+    lapse(w, 2);
+    expect(flowRuns(w, "big").map((r) => r.outcome)).toEqual(["skipped"]);
+    expect(w.state.accounts["economy.external:landlord"] ?? 0).toBe(0);
+  });
+
+  test("an overdraft flow pays into the room", () => {
+    const w = setup(big("overdraft"));
+    lapse(w, 2);
+    expect(flowRuns(w, "big").map((r) => r.outcome)).toEqual(["paid"]);
+    expect(w.state.accounts["economy.external:landlord"]).toBe(250_000);
+  });
+});

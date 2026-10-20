@@ -1363,7 +1363,7 @@ A flow has:
 - a schedule (`every`, `interval`, `days`, `weekdays`, `months`, `except`, an `at` time, `once`, start, end and count), with a roll to a business day;
 - splits;
 - a link to what it belongs to;
-- a shortfall policy for when the payer can't cover it: skip, partial, defer (added to the next occurrence), retry (after a number of days, a set number of times), fallback (another account), or overdraft.
+- a shortfall policy for when the payer can't cover it: skip, partial (as much as one payment can take), defer (added to the next occurrence), retry (after a number of days, a set number of times; one retry carries what later bounces with it), fallback (the payer's own: itself, or another account one of its holders may spend from), or overdraft. Only `overdraft` pays into an account's overdraft room, with its policy's fee or linked transfer; every other policy acts when the money itself isn't there.
 
 The money process (`economy.money`) runs every occurrence, statement and due check in a slot at its own instant, in time order. It works on a scratch state, so two payments due the same morning see each other. A payment to someone in the world lands in their deposit account; any other payee is an outside counterparty.
 
