@@ -163,7 +163,7 @@ export interface FinanceApi {
    * `deposit`, the account the payment names, where it's theirs, else their deposit account.
    */
   paysFor(ctx: ReadContext, who: EntityId, to: string, from: string, deposit?: EntityId): boolean;
-  /** Whether money from `from` paid into `account` would land where `who` could move it on: an account they may spend by a role of their own that isn't wholly the money's own people's, while the money isn't theirs (DESIGN §25.1). */
+  /** Whether money from `from` paid into `account` would land where `who` could move it on: an account they may spend by a role of their own that isn't wholly the money's own people's, while the money isn't wholly theirs (DESIGN §25.1). */
   landsInReach(ctx: ReadContext, who: EntityId, account: EntityId, from: string): boolean;
   /** The accounts a party holds with a right (`spend`, `worth` or `sees`), in class order. */
   accountsOf(books: Books, party: EntityId, right?: "spend" | "worth" | "sees"): EntityId[];

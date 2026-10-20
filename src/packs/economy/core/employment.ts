@@ -828,10 +828,11 @@ function today(ctx: ReadContext): number {
 /**
  * Why `by`, running `business`, may not put `worker` on its payroll or set their pay there, or null
  * (DESIGN §25.1). Running it for others, without a share of its worth, a manager puts neither
- * themselves nor their own on its payroll: they'd pay themselves from its money. Nor, holding no
- * share, may they pay anyone into an account they may spend by a role of their own (`landsInReach`):
- * the worker's deposit account, or one of the worker's that `splits` route the pay to, unless it's
- * the money's own people's.
+ * themselves nor their own on its payroll: they'd pay themselves from its money. With a share, a
+ * salary is theirs to take, as a draw is. Nor, unless the business is wholly theirs, may they pay
+ * anyone else into an account they may spend by a role of their own (`landsInReach`): the worker's
+ * deposit account, or one of the worker's that `splits` route the pay to, unless it's the money's
+ * own people's.
  */
 export function payrollProblem(ctx: ReadContext, api: FinanceApi, by: EntityId, business: EntityId, worker: EntityId, splits: readonly FlowSplit[], doing: "hire" | "raise"): string | null {
   const shown = (id: EntityId): string => shownLabel(ctx, ctx.world.pov, id);

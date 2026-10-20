@@ -168,8 +168,8 @@ describe("money a manager only manages reaches none of their own interests, in t
   });
 });
 
-describe("money a manager only manages goes into no account they may spend themselves unless some of it is theirs, in the hub as in the backend", () => {
-  test("the café's custodian isn't offered the till he has a card on for its savings; its owner, whose money it partly is, is", () => {
+describe("money a manager only manages goes into no account they may spend themselves unless it's wholly theirs, in the hub as in the backend", () => {
+  test("the café's custodian isn't offered the till he has a card on for its savings; its owner, whose money it wholly is, is", () => {
     for (const role of ["custodian", "owner"] as const) {
       const { w } = setup((wd) => {
         Object.assign(wd.entities.daybreak?.fields ?? {}, { owners: role === "owner" ? [{ party: "you", role, share: 100 }] : [{ party: "you", role }, { party: "maya", role: "beneficiary", share: 100 }] });

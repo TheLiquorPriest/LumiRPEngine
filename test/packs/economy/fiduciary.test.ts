@@ -14,6 +14,11 @@ function refusal(out: ReturnType<typeof act>): string {
   return out.rejected.map((r) => r.rejection.reason).join("; ");
 }
 
+/** The player sets up a daily payment of $1,000 from `from` to `to`. */
+function pay(w: ReturnType<typeof setup>["w"], from: string, to: string): ReturnType<typeof act> {
+  return act(w, "economy.flow_create", { who: "you", label: `Pay ${to}`, from, to, amount: 100_000, every: "day" });
+}
+
 describe("a business or a trust paying as a party pays for itself, whatever its manager's role on it", () => {
   test("a trustee can't redirect the trust's own allowance to himself or set one up to pay him, though he may change what it pays its beneficiary", () => {
     const { w } = setup((wd) => {
@@ -116,7 +121,7 @@ describe("money a manager only manages reaches none of their own interests", () 
     expect(refusal(act(owner, "economy.hire", { business: "daybreak", worker: "you", title: "General manager", basis: "salary", rate: 20_000_000, pay_every: "weekly", by: "you" }))).toBe("");
   });
 
-  test("nor does it go into an account the manager may spend by a role of their own, unless the money is partly theirs: the café's custodian can't sweep its savings into the till he has a card on, nor a trustee pay the trust's money into an account he's custodian of", () => {
+  test("nor does it go into an account the manager may spend by a role of their own, unless the money is wholly theirs: the café's custodian can't sweep its savings into the till he has a card on, nor a trustee pay the trust's money into an account he's custodian of", () => {
     const custodian = setup((wd) => {
       Object.assign(wd.entities.daybreak!.fields, { owners: [{ party: "you", role: "custodian" }, { party: "maya", role: "beneficiary", share: 100 }] });
       wd.entities.db_operating!.fields.owners = [{ party: "daybreak", role: "owner" }, { party: "you", role: "authorized_user" }];
@@ -157,7 +162,6 @@ describe("money a manager only manages is judged where it lands, however its pay
     wd.entities.family_trust = entity("family_trust", "trust", "Chen Family Trust", { owners: [{ party: "you", role: "trustee" }, { party: beneficiary, role: "beneficiary", share: 100 }] }, "principal");
     wd.entities.trust_acct = entity("trust_acct", "account", "Trust account", { owners: [{ party: "family_trust", role: "owner" }], product: "checking", opening: 5_000_000 });
   };
-  const pay = (w: ReturnType<typeof setup>["w"], from: string, to: string) => act(w, "economy.flow_create", { who: "you", label: `Pay ${to}`, from, to, amount: 100_000, every: "day" });
 
   test("paid to someone by name, it lands in their deposit account, judged as that account would be: the café's custodian pays its savings neither to the café, whose till he holds a card on, nor to Rosa, whose account he's custodian of", () => {
     const { w } = setup(both(cafeForMaya, rosaKept));
@@ -224,6 +228,47 @@ describe("money a manager only manages is judged where it lands, however its pay
     expect(savings).toEqual(expect.arrayContaining(["daybreak", "db_operating", "rosa", "rosa_kept"]));
     expect(savings).not.toContain("maya");
     expect(savings).not.toContain("maya_checking");
+  });
+});
+
+describe("a share of the money isn't the whole of it: only money wholly a manager's own goes into an account they may spend", () => {
+  test("a trustee who holds a tenth of the trust as a beneficiary pays the rest of it neither into Rosa's account he's custodian of nor into her checking he holds a card on, by account or by name; Maya, whose the rest is, it pays", () => {
+    const { w } = setup((wd) => {
+      wd.entities.family_trust = entity("family_trust", "trust", "Chen Family Trust", { owners: [{ party: "you", role: "trustee" }, { party: "you", role: "beneficiary", share: 10 }, { party: "maya", role: "beneficiary", share: 90 }] }, "principal");
+      wd.entities.trust_acct = entity("trust_acct", "account", "Trust account", { owners: [{ party: "family_trust", role: "owner" }], product: "checking", opening: 5_000_000 });
+      wd.entities.rosa_kept = entity("rosa_kept", "account", "Rosa's savings", { owners: [{ party: "you", role: "custodian" }, { party: "rosa", role: "beneficiary", share: 100 }], product: "savings", opening: 0 });
+      wd.entities.rosa_checking!.fields.owners = [{ party: "rosa", role: "owner" }, { party: "you", role: "authorized_user" }];
+    });
+    for (const to of ["rosa_kept", "rosa_checking", "rosa", "checking"]) expect([to, refusal(pay(w, "trust_acct", to))]).toEqual([to, "Trust account pays for Chen Family Trust, not for Alex Rivera"]);
+    for (const to of ["maya_checking", "maya"]) expect([to, refusal(pay(w, "trust_acct", to))]).toEqual([to, ""]);
+  });
+
+  test("a tenth owner running Brightline, a corporation, pays its money into no account he holds a card on, by account or by name, nor hires Rosa into one, and its page says so", () => {
+    const { w } = setup((wd) => {
+      Object.assign(wd.entities.brightline!.fields, { structure: "c_corp", owners: [{ party: "you", role: "owner", share: 10 }, { party: "jordan", role: "owner", share: 90 }] });
+      wd.entities.rosa_checking!.fields.owners = [{ party: "rosa", role: "owner" }, { party: "you", role: "authorized_user" }];
+    });
+    for (const to of ["rosa_checking", "rosa"]) expect([to, refusal(pay(w, "bl_operating", to))]).toEqual([to, "bl_operating pays for Brightline Logistics, not for Alex Rivera"]);
+    expect(refusal(pay(w, "bl_operating", "maya"))).toBe("");
+    const hire = { business: "brightline", worker: "rosa", title: "Courier", basis: "hourly", rate: 1_800, pay_every: "weekly", by: "you" };
+    expect(refusal(act(w, "economy.hire", hire))).toBe("Alex Rivera runs Brightline Logistics for others, so can't pay Rosa Delgado into rosa_checking, which Alex Rivera may spend");
+    expect((w.ctx.query("economy.finance")(w.ctx, "you", true) as FinanceView).businesses.find((b) => b.id === "brightline")?.selfDealing).toEqual(["rosa"]);
+  });
+
+  test("so the café's half-owner, holding a card on its till, sweeps its savings into it no more than its custodian may, in the hub as in the backend; without the card he may, and so may its outright owner with it", () => {
+    const sweep = (owners: JsonObject[], card: boolean): [string, boolean] => {
+      const { w } = setup((wd) => {
+        Object.assign(wd.entities.daybreak!.fields, { owners });
+        if (card) wd.entities.db_operating!.fields.owners = [{ party: "daybreak", role: "owner" }, { party: "you", role: "authorized_user" }];
+        wd.entities.db_savings = account("db_savings", "daybreak", "savings", 5_000_000);
+      });
+      const hub = (w.ctx.query("economy.finance")(w.ctx, "you", true) as FinanceView).paysFor.find((p) => p.from === "db_savings")?.to ?? [];
+      return [refusal(pay(w, "db_savings", "db_operating")), hub.includes("db_operating")];
+    };
+    const half: JsonObject[] = [{ party: "you", role: "owner", share: 50 }, { party: "maya", role: "owner", share: 50 }];
+    expect(sweep(half, true)).toEqual(["db_savings pays for Daybreak Café, not for Alex Rivera", true]);
+    expect(sweep(half, false)).toEqual(["", false]);
+    expect(sweep([{ party: "you", role: "owner", share: 100 }], true)).toEqual(["", false]);
   });
 });
 

@@ -339,13 +339,12 @@ function personal(ctx: ReadContext, id: string): boolean {
   return kind !== "" && (kindIs(ctx.registry, ctx.world, kind, "person") || kindIs(ctx.registry, ctx.world, kind, "household"));
 }
 
-/** What money from `from` is to `who`, for the fiduciary rule: whom it is for besides them (`forHolder`), whom it ends with besides them (`people`), and whether it's theirs in part (`stake`) or wholly. */
-function moneyOf(ctx: ReadContext, who: EntityId, from: string): { forHolder: Set<EntityId>; people: Set<EntityId>; stake: boolean; wholly: boolean } {
+/** What money from `from` is to `who`, for the fiduciary rule: whom it is for besides them (`forHolder`), whom it ends with besides them (`people`), and whether it's wholly theirs. */
+function moneyOf(ctx: ReadContext, who: EntityId, from: string): { forHolder: Set<EntityId>; people: Set<EntityId>; wholly: boolean } {
   const { all, last } = whoseMoney(ctx, from);
   return {
     forHolder: new Set([...all].filter((p) => p !== who)),
     people: new Set([...last].filter((p) => p !== who)),
-    stake: all.has(who),
     wholly: last.size > 0 && [...last].every((p) => p === who),
   };
 }
@@ -367,12 +366,12 @@ function inReach(ctx: ReadContext, who: EntityId, account: EntityId, people: Rea
 
 /**
  * Whether money from `from` paid into `account` would land where `who` could move it on (DESIGN
- * §25.1): an account in their reach (`inReach`), while the money isn't theirs. A module asks it of
- * where a payment it makes lands, a worker's pay into their deposit account.
+ * §25.1): an account in their reach (`inReach`), while the money isn't wholly theirs. A module asks
+ * it of where a payment it makes lands, a worker's pay into their deposit account.
  */
 export function landsInReach(ctx: ReadContext, who: EntityId, account: EntityId, from: string): boolean {
   const money = moneyOf(ctx, who, from);
-  return !money.stake && inReach(ctx, who, account, money.people);
+  return !money.wholly && inReach(ctx, who, account, money.people);
 }
 
 /**
@@ -383,8 +382,9 @@ export function landsInReach(ctx: ReadContext, who: EntityId, account: EntityId,
  * whom the money itself is for (`whoseMoney`), the manager aside, is the money's own: the café's
  * savings topping up its operating account, a trust paying its beneficiary though she's the
  * trustee's daughter. An account in their reach (`inReach`) is theirs too, whoever's worth it is,
- * unless they hold a share of the money themselves: then it's partly theirs, and the account no way
- * round anyone else's. A payee named as someone in the world is judged where the payment lands
+ * unless the money is wholly theirs: a share of it is no way round the rest of its people, so a
+ * trustee who holds a tenth of the trust as a beneficiary pays the rest of it into no account he
+ * may spend. A payee named as someone in the world is judged where the payment lands
  * (`payeeAccount`, the account named as `deposit` where it's theirs, else their deposit account),
  * as much as by who they are. Money wholly theirs (a business they own outright) keeps no one else's
  * interest, so it pays anything else they own; what goes to them, their household or its members
@@ -394,7 +394,7 @@ export function paysFor(ctx: ReadContext, who: EntityId, to: string, from: strin
   const interests = opts.interests ?? interestsOf(ctx, who);
   const money = moneyOf(ctx, who, from);
   const mine = (party: string): boolean => interests.has(party) && !money.forHolder.has(party) && (!money.wholly || personal(ctx, party));
-  const theirs = (account: EntityId): boolean => (!money.stake && inReach(ctx, who, account, money.people)) || worthHolders(ctx, account).some(mine);
+  const theirs = (account: EntityId): boolean => (!money.wholly && inReach(ctx, who, account, money.people)) || worthHolders(ctx, account).some(mine);
   const id = to.startsWith(EXTERNAL_ACCOUNT_PREFIX) ? to.slice(EXTERNAL_ACCOUNT_PREFIX.length) : to;
   const e = own(ctx.state.entities, id);
   if (e?.kind === "account") return theirs(id);
