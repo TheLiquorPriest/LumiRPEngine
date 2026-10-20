@@ -544,7 +544,8 @@ describe("a world's money switches open their controls below Money 3", () => {
     expect(two.features.filter((f) => f === "flows" || f === "payment_prefs" || f === "cards")).toEqual([]);
     expect([two.flows, two.cards, two.payPrefs]).toEqual([[], [], []]);
     const entities = [...(await plain.gm()).fields.keys()];
-    for (const body of [flowCreateAction(gymForm(CHECKING), plain.currency), payPrefsAction(tiers), cardAction(DEBIT, "freeze")]) expect(await plain.play(body)).toContain("didn't happen");
+    // Each is declined as something the world leaves out, not as a matter of where or when.
+    for (const body of [flowCreateAction(gymForm(CHECKING), plain.currency), payPrefsAction(tiers), cardAction(DEBIT, "freeze")]) expect(await plain.play(body)).toContain("didn't happen (Not possible here and now: this world doesn't keep track of that)");
     const gm = await plain.gm();
     expect([...gm.fields.keys()]).toEqual(entities);
     expect(gm.values.get(DEBIT)?.state ?? "active").toBe("active");
