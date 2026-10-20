@@ -3,7 +3,7 @@
 // the hub refusing, or leaving out, exactly what the action refuses, and offering what it takes.
 
 import { describe, expect, test } from "bun:test";
-import type { FinanceView } from "../../src/shared/finance";
+import type { BusinessView, FinanceView } from "../../src/shared/finance";
 import type { JsonObject } from "../../src/shared/json";
 import type { PaletteView } from "../../src/shared/state-view";
 import type { WorldDoc } from "../../src/shared/world";
@@ -48,6 +48,26 @@ function trust(wd: WorldDoc): void {
 function household(wd: WorldDoc, maya = false): void {
   wd.entities.home = entity("home", "household", "The household", {});
   for (const id of maya ? ["you", "rosa", "maya"] : ["you", "rosa"]) wd.entities[id]?.relations.push({ type: "member_of", to: "home" });
+}
+
+/** Who holds the café when the player runs it: as Maya's custodian, as its half-owner beside Jordan, or as its owner outright. */
+const CAFE_OWNERS: Readonly<Record<"custodian" | "half" | "owner", readonly JsonObject[]>> = {
+  custodian: [{ party: "you", role: "custodian" }, { party: "maya", role: "beneficiary", share: 100 }],
+  half: [{ party: "you", role: "owner", share: 50 }, { party: "jordan", role: "owner", share: 50 }],
+  owner: [{ party: "you", role: "owner", share: 100 }],
+};
+
+/** The café, run by the player as `role`, with an authorized user's card of theirs on its till and savings of its own. */
+function cafe(wd: WorldDoc, role: keyof typeof CAFE_OWNERS): void {
+  Object.assign(wd.entities.daybreak?.fields ?? {}, { owners: CAFE_OWNERS[role].map((o) => ({ ...o })) });
+  if (wd.entities.db_operating) wd.entities.db_operating.fields.owners = [{ party: "daybreak", role: "owner" }, { party: "you", role: "authorized_user" }];
+  wd.entities.db_savings = account("db_savings", "daybreak", "savings", 5_000_000);
+}
+
+/** Rosa keeps no account but one the player is custodian of, so whatever is paid her lands there. */
+function rosaKept(wd: WorldDoc): void {
+  delete wd.entities.rosa_checking;
+  wd.entities.rosa_kept = entity("rosa_kept", "account", "Rosa's account", { owners: [{ party: "you", role: "custodian" }, { party: "rosa", role: "beneficiary", share: 100 }], product: "checking", opening: 0 });
 }
 
 describe("a business or a trust paying as itself pays for itself, in the hub as in the backend", () => {
@@ -169,16 +189,12 @@ describe("money a manager only manages reaches none of their own interests, in t
 });
 
 describe("money a manager only manages goes into no account they may spend themselves unless it's wholly theirs, in the hub as in the backend", () => {
-  test("the café's custodian isn't offered the till he has a card on for its savings; its owner, whose money it wholly is, is", () => {
-    for (const role of ["custodian", "owner"] as const) {
-      const { w } = setup((wd) => {
-        Object.assign(wd.entities.daybreak?.fields ?? {}, { owners: role === "owner" ? [{ party: "you", role, share: 100 }] : [{ party: "you", role }, { party: "maya", role: "beneficiary", share: 100 }] });
-        if (wd.entities.db_operating) wd.entities.db_operating.fields.owners = [{ party: "daybreak", role: "owner" }, { party: "you", role: "authorized_user" }];
-        wd.entities.db_savings = account("db_savings", "daybreak", "savings", 5_000_000);
-      });
+  test("neither the café's custodian nor its half-owner is offered the till he has a card on for its savings; its owner outright, whose money it wholly is, is", () => {
+    for (const role of ["custodian", "half", "owner"] as const) {
+      const { w } = setup((wd) => cafe(wd, role));
       const v = hub(w);
       expect([role, flowTargets(v, PALETTE, ["db_savings"]).some((t) => t.id === "db_operating")]).toEqual([role, role === "owner"]);
-      payees(w, v, ["db_savings"], { db_operating: role === "custodian", checking: true, maya: false, jordan: false }, (payee) => ["economy.flow_create", { who: "you", label: `Sweep to ${payee}`, from: "db_savings", to: payee, amount: 100_000, every: "week", weekday: 1 }]);
+      payees(w, v, ["db_savings"], { db_operating: role !== "owner", checking: true, maya: false, jordan: false }, (payee) => ["economy.flow_create", { who: "you", label: `Sweep to ${payee}`, from: "db_savings", to: payee, amount: 100_000, every: "week", weekday: 1 }]);
     }
   });
 
@@ -192,6 +208,76 @@ describe("money a manager only manages goes into no account they may spend thems
     expect(findAccount(v, "jordan_kept")).toMatchObject({ role: "custodian", spends: true });
     expect(flowTargets(v, PALETTE, ["trust_acct"]).map((t) => t.id)).toEqual(["maya", "rosa"]);
     payees(w, v, ["trust_acct"], { jordan_kept: true, jordan: true, maya_checking: false }, (payee) => ["economy.flow_update", { who: "you", flow: "trust_help", to: payee }]);
+  });
+});
+
+describe("managed money is judged where it lands, however its payee is named, in the hub as in the backend", () => {
+  test("the café's custodian isn't offered Rosa for its savings, whose only account he's custodian of, by name or by account, though he is Maya", () => {
+    const { w } = setup((wd) => {
+      cafe(wd, "custodian");
+      rosaKept(wd);
+    });
+    const v = hub(w);
+    expect(flowTargets(v, PALETTE, ["db_savings"]).map((t) => t.id)).toEqual(["maya", "jordan"]);
+    payees(w, v, ["db_savings"], { rosa: true, rosa_kept: true, daybreak: true, db_operating: true, maya: false }, (payee) => ["economy.flow_create", { who: "you", label: `Pay ${payee}`, from: "db_savings", to: payee, amount: 100_000, every: "week", weekday: 1 }]);
+  });
+
+  test("a parent who is trustee of his daughter's trust and custodian of her account is offered her, by name or by account, never himself or his household", () => {
+    const { w } = setup((wd) => {
+      wd.entities.family_trust = entity("family_trust", "trust", "Chen Family Trust", { owners: [{ party: "you", role: "trustee" }, { party: "rosa", role: "beneficiary", share: 100 }] }, "principal");
+      wd.entities.trust_acct = entity("trust_acct", "account", "Trust account", { owners: [{ party: "family_trust", role: "owner" }], product: "checking", opening: 5_000_000 });
+      rosaKept(wd);
+      household(wd);
+      wd.entities.trust_help = entity("trust_help", "flow", "Rosa's allowance", { flow_kind: "transfer", from: "trust_acct", to: "rosa_kept", amount_cents: 100_000, every: "month", shortfall: "skip", status: "active" });
+    });
+    const v = hub(w);
+    expect(flowTargets(v, PALETTE, ["trust_acct"]).map((t) => t.id)).toEqual(["rosa_kept", "maya", "rosa", "jordan"]);
+    payees(w, v, ["trust_acct"], { rosa_kept: false, rosa: false, checking: true, you: true, home: true }, (payee) => ["economy.flow_update", { who: "you", flow: "trust_help", to: payee }]);
+  });
+
+  test("the café's custodian isn't offered Rosa to hire, nor Raise on her job there, as her pay would land in the account he's custodian of; its owner outright is offered both", () => {
+    const people = PALETTE.entries[0]?.options.map((o) => ({ value: String(o.params.to), label: o.label })) ?? [];
+    const hire = (worker: string): JsonObject => ({ business: "daybreak", worker, title: "Barista", basis: "hourly", rate: 1_800, pay_every: "weekly", by: "you" });
+    for (const role of ["custodian", "owner"] as const) {
+      const world = (job: boolean): Working =>
+        setup((wd) => {
+          cafe(wd, role);
+          rosaKept(wd);
+          if (job) wd.entities.job_rosa_cafe = entity("job_rosa_cafe", "job", "Rosa's café shifts", { worker: "rosa", employer: "daybreak", title: "Barista", basis: "hourly", rate: 1_800, hours: "contract", hours_per_week: 10, pay_every: "weekly", start: "2026-01-05" });
+        }).w;
+      const page = (w: Working): { v: FinanceView; shop: BusinessView } => {
+        const v = hub(w);
+        const shop = v.businesses.find((b) => b.id === "daybreak");
+        if (!shop) throw new Error("no café in the view");
+        return { v, shop };
+      };
+      const hiring = world(false);
+      const offered = hireable(page(hiring).shop, people).map((p) => p.value);
+      expect([role, offered]).toEqual([role, role === "owner" ? ["maya", "rosa", "jordan"] : ["maya", "jordan"]]);
+      expect(people.map((p) => !refuses(hiring, "economy.hire", hire(p.value)))).toEqual(people.map((p) => offered.includes(p.value)));
+      const paying = world(true);
+      const { v, shop } = page(paying);
+      const job = shop.employees.find((j) => j.id === "job_rosa_cafe");
+      if (!job) throw new Error("no job for Rosa at the café");
+      const controls = jobControls(v, job, shop);
+      expect([role, controls]).toEqual([role, role === "owner" ? ["raise", "let_go"] : ["let_go"]]);
+      expect(!refuses(paying, "economy.job_raise", { job: "job_rosa_cafe", rate: 4_000, by: "you" })).toBe(controls.includes("raise"));
+    }
+  });
+
+  test("with households on or off, the trust's allowance offers neither the trustee's household nor Rosa in it, picked or typed, as the backend refuses", () => {
+    for (const households of [true, false]) {
+      const { w } = setup((wd) => {
+        trust(wd);
+        household(wd);
+        wd.entities.trust_allowance = entity("trust_allowance", "flow", "Maya's allowance", { flow_kind: "transfer", from: "family_trust", to: "maya_checking", amount_cents: 100_000, every: "day", shortfall: "skip", status: "active" });
+        const economy = wd.packs.economy;
+        if (economy) economy.config = { ...economy.config, features: { households } };
+      });
+      const v = hub(w);
+      expect([households, v.household === null, flowTargets(v, PALETTE, ["family_trust"]).map((t) => t.id)]).toEqual([households, !households, ["maya", "jordan"]]);
+      payees(w, v, ["family_trust"], { rosa: true, home: true, "The household": true, maya_checking: false, maya: false }, (payee) => ["economy.flow_update", { who: "you", flow: "trust_allowance", to: payee }]);
+    }
   });
 });
 
