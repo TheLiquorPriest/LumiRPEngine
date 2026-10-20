@@ -167,3 +167,67 @@ describe("money a manager only manages reaches none of their own interests, in t
     }
   });
 });
+
+describe("money a manager only manages goes into no account they may spend themselves unless some of it is theirs, in the hub as in the backend", () => {
+  test("the café's custodian isn't offered the till he has a card on for its savings; its owner, whose money it partly is, is", () => {
+    for (const role of ["custodian", "owner"] as const) {
+      const { w } = setup((wd) => {
+        Object.assign(wd.entities.daybreak?.fields ?? {}, { owners: role === "owner" ? [{ party: "you", role, share: 100 }] : [{ party: "you", role }, { party: "maya", role: "beneficiary", share: 100 }] });
+        if (wd.entities.db_operating) wd.entities.db_operating.fields.owners = [{ party: "daybreak", role: "owner" }, { party: "you", role: "authorized_user" }];
+        wd.entities.db_savings = account("db_savings", "daybreak", "savings", 5_000_000);
+      });
+      const v = hub(w);
+      expect([role, flowTargets(v, PALETTE, ["db_savings"]).some((t) => t.id === "db_operating")]).toEqual([role, role === "owner"]);
+      payees(w, v, ["db_savings"], { db_operating: role === "custodian", checking: true, maya: false, jordan: false }, (payee) => ["economy.flow_create", { who: "you", label: `Sweep to ${payee}`, from: "db_savings", to: payee, amount: 100_000, every: "week", weekday: 1 }]);
+    }
+  });
+
+  test("a trustee editing the trust's payment isn't offered an account he's custodian of, though its worth is someone else's", () => {
+    const { w } = setup((wd) => {
+      trust(wd);
+      wd.entities.jordan_kept = entity("jordan_kept", "account", "Jordan's savings", { owners: [{ party: "you", role: "custodian" }, { party: "jordan", role: "beneficiary", share: 100 }], product: "savings", opening: 0 });
+      wd.entities.trust_help = entity("trust_help", "flow", "Maya's help", { flow_kind: "transfer", from: "trust_acct", to: "maya_checking", amount_cents: 100_000, every: "month", shortfall: "skip", status: "active" });
+    });
+    const v = hub(w);
+    expect(findAccount(v, "jordan_kept")).toMatchObject({ role: "custodian", spends: true });
+    expect(flowTargets(v, PALETTE, ["trust_acct"]).map((t) => t.id)).toEqual(["maya", "rosa", "jordan"]);
+    payees(w, v, ["trust_acct"], { jordan_kept: true, jordan: false, maya_checking: false }, (payee) => ["economy.flow_update", { who: "you", flow: "trust_help", to: payee }]);
+  });
+});
+
+describe("money wholly its manager's own pays what else they own, never them or their household, in the hub as in the backend", () => {
+  /** Brightline, the player's outright or half Jordan's, and the café the player's outright, which bills Brightline; Rosa shares the player's home. */
+  function companies(half: boolean): Working {
+    const { w } = setup((wd) => {
+      household(wd);
+      Object.assign(wd.entities.brightline?.fields ?? {}, { owners: half ? [{ party: "you", role: "owner", share: 50 }, { party: "jordan", role: "owner", share: 50 }] : [{ party: "you", role: "owner", share: 100 }] });
+      Object.assign(wd.entities.daybreak?.fields ?? {}, { owners: [{ party: "you", role: "owner", share: 100 }] });
+      wd.entities.inv_catering = entity("inv_catering", "invoice", "Catering", { business: "daybreak", customer: "brightline", cents: 300_000, memo: "Catering", issued: "2026-09-01", due: "2026-10-30", state: "open" });
+    });
+    lapse(w, 1440);
+    return w;
+  }
+  const pay = (payee: string): [string, JsonObject] => ["economy.flow_create", { who: "you", label: `Pay ${payee}`, from: "bl_operating", to: payee, amount: 100_000, every: "week", weekday: 1 }];
+  /** Pay now on the café's invoice to Brightline, as the hub offers it and as the backend takes it. */
+  function payNow(w: Working, v: FinanceView): [boolean, boolean] {
+    const f = v.flows.find((x) => x.source === "invoice" && x.link?.id === "inv_catering");
+    if (!f) throw new Error("no flow for the café's invoice");
+    return [flowControls(v, f).includes("pay_now"), !refuses(w, "economy.invoice_pay", { invoice: "inv_catering", by: "you" })];
+  }
+
+  test("owning both outright, the player is offered Pay now on the café's invoice to Brightline, and the café among Brightline's payees; never himself or his household", () => {
+    const w = companies(false);
+    const v = hub(w);
+    expect(flowTargets(v, PALETTE, ["bl_operating"]).map((t) => t.id)).toEqual(["db_operating", "maya", "jordan"]);
+    payees(w, v, ["bl_operating"], { db_operating: false, daybreak: false, checking: true, rosa: true, home: true, "Alex Rivera": true, jordan: false }, pay);
+    expect(payNow(w, v)).toEqual([true, true]);
+  });
+
+  test("with Jordan holding half of Brightline, its money pays nothing else of the player's, and the café's invoice to it has no Pay now", () => {
+    const w = companies(true);
+    const v = hub(w);
+    expect(flowTargets(v, PALETTE, ["bl_operating"]).map((t) => t.id)).toEqual(["maya", "jordan"]);
+    payees(w, v, ["bl_operating"], { db_operating: true, daybreak: true, checking: true, rosa: true, jordan: false }, pay);
+    expect(payNow(w, v)).toEqual([false, false]);
+  });
+});
