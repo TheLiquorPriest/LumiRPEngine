@@ -428,8 +428,8 @@ export function routeOps(target: RouteTarget, party: EntityId, to: string): Edit
   return [{ op: "effect", effect: "economy.route", args: { ...target, party, to } }];
 }
 
-export function propertyBuyAction(property: EntityId, price: number, opts: { from?: EntityId; down?: number; termMonths?: number; aprPct?: number } = {}): ActionBody {
-  return { action: FINANCE_ACTIONS.propertyBuy, params: { property, price, ...(opts.from ? { from: opts.from } : {}), ...(opts.down !== undefined ? { down: opts.down } : {}), ...(opts.termMonths !== undefined ? { term_months: opts.termMonths } : {}), ...(opts.aprPct !== undefined ? { apr_pct: opts.aprPct } : {}) } };
+export function propertyBuyAction(property: EntityId, price: number, opts: { from?: EntityId; down?: number; termMonths?: number } = {}): ActionBody {
+  return { action: FINANCE_ACTIONS.propertyBuy, params: { property, price, ...(opts.from ? { from: opts.from } : {}), ...(opts.down !== undefined ? { down: opts.down } : {}), ...(opts.termMonths !== undefined ? { term_months: opts.termMonths } : {}) } };
 }
 
 export function propertySellAction(property: EntityId, price: number, opts: { buyer?: EntityId; to?: EntityId } = {}): ActionBody {
