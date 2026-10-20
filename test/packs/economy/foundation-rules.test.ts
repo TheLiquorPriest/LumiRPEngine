@@ -138,6 +138,28 @@ describe("the player's money view never names or sends someone they can't see", 
     expect(view.accounts.find((a) => a.id === "joint")?.transactions.find((t) => t.cents === -20_000)?.counterparty).toBe("Viktor Kane");
     expect(view.flows.find((f) => f.id === "hush")?.spec?.to).toBe("viktor");
   });
+
+  test("an outside employer at a place the player can't see reads as an employer on their job, its pay and the paychecks on a shared account, and its id stays out", () => {
+    const w = setup((world) => {
+      world.places.blind_tiger = { id: "blind_tiger", name: "The Blind Tiger", parent: "riverton", visibility: "secret", fields: {} };
+      world.entities.joint = entity("joint", "account", { owners: [{ party: "you", role: "joint" }, { party: "rosa", role: "joint" }], product: "checking", opening: 10_000 });
+      const nights = { employer: "blind_tiger", title: "Night work", basis: "hourly", rate: 2000, hours: "contract", hours_per_week: 20, weeks_per_year: 52, pay_every: "weekly", pay_weekday: 5, start: "2025-01-06" };
+      world.entities.job_rosa_nights = entity("job_rosa_nights", "job", { ...nights, worker: "rosa", splits: [{ to: "joint", pct: 50 }] });
+      world.entities.job_you_nights = entity("job_you_nights", "job", { ...nights, worker: "you" });
+    }, ["rosa"]);
+    lapse(w, 8);
+    const view = w.ctx.query("economy.finance")(w.ctx, "you", true);
+    expect(view.jobs.filter((j) => j.title === "Night work").map((j) => [j.employer, j.employerId, j.spec.employer])).toEqual([["Employer", null, ""]]);
+    for (const id of ["pay:job_rosa_nights", "pay:job_you_nights"]) expect(view.flows.find((f) => f.id === id)).toMatchObject({ from: "Employer", spec: null });
+    // Their own pay into their checking, and Rosa's half into the account they share.
+    const paychecks = ["checking", "joint"].flatMap((id) => (view.accounts.find((a) => a.id === id)?.transactions ?? []).filter((t) => t.memo.startsWith("Payroll")));
+    expect(paychecks.length).toBeGreaterThanOrEqual(2);
+    expect(new Set(paychecks.map((t) => t.counterparty))).toEqual(new Set(["Employer"]));
+    expect(JSON.stringify(view)).not.toContain("Blind Tiger");
+    expect(JSON.stringify(view)).not.toContain("blind_tiger");
+    // The GM names it.
+    expect(w.ctx.query("economy.finance")(w.ctx, "you", false).flows.find((f) => f.id === "pay:job_you_nights")?.from).toBe("The Blind Tiger");
+  });
 });
 
 describe("a late payment counts toward what was past due", () => {

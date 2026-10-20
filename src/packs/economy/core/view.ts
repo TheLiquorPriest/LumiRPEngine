@@ -21,7 +21,7 @@ import { statementState } from "./cycle";
 import { creditReport } from "./credit";
 import { allFlows, fallsBackOn, occurrences, occurrenceAmount } from "./flows";
 import { cycleOf, flowRunOf, isOpened, journalOf, NOTES_CAP } from "./journal";
-import { accountsOf, availableOf, balance, canSpend, classOf, holdersOf, holdsOn, householdOf, managesAccount, managesParty, openerOf, outsideName, ownersOf, productOf, rightsOf, statusOf, traitsOf, wealthBand } from "./model";
+import { accountsOf, availableOf, balance, canSpend, classOf, holdersOf, holdsOn, householdOf, managesAccount, managesParty, openerOf, outsideHidden, outsideName, ownersOf, productOf, rightsOf, statusOf, traitsOf, wealthBand } from "./model";
 import { cardsOn, cardRoom, featureFor, isParty, overdraftRoom, tiersOf, toggles } from "./pay";
 import { netWorthParts } from "./worth";
 import { createRng } from "../../../engine/rng";
@@ -65,11 +65,17 @@ function idFor(ctx: ReadContext, viewer: Viewer, id: string): EntityId | null {
 /**
  * A flow's side, or a journal line's other party, as the viewer reads it: someone in the world by
  * name ("someone" when the viewer can't see them), an outside account of someone in the world as
- * them, and anyone outside in words (`outsideName`).
+ * them, and anyone outside in words, naming only what the viewer may see (`outsideName`).
  */
 function sideName(ctx: ReadContext, viewer: Viewer, raw: string): string {
   const id = raw.startsWith(EXTERNAL_ACCOUNT_PREFIX) ? raw.slice(EXTERNAL_ACCOUNT_PREFIX.length) : raw;
-  return own(ctx.state.entities, id) ? nameFor(ctx, viewer, id) : outsideName(ctx, raw);
+  return own(ctx.state.entities, id) ? nameFor(ctx, viewer, id) : outsideName(ctx, raw, viewer.pov);
+}
+
+/** Whether the viewer may see a flow's side as it's stored: someone in the world (or their outside account) they can see, or an outside name that says no one and nowhere hidden from them. */
+function sideSeen(ctx: ReadContext, viewer: Viewer, raw: string): boolean {
+  const id = raw.startsWith(EXTERNAL_ACCOUNT_PREFIX) ? raw.slice(EXTERNAL_ACCOUNT_PREFIX.length) : raw;
+  return own(ctx.state.entities, id) ? visible(ctx, viewer, id) : !outsideHidden(ctx, raw, viewer.pov);
 }
 
 /**
@@ -302,7 +308,7 @@ function flowView(hooks: FinanceHooks, ctx: ReadContext, viewer: Viewer, party: 
   const payerHolds = fromSide?.kind === "account" ? managesAccount(ctx, f.from, party) : f.from === party || managesParty(ctx.state, f.from, party);
   // The flow as stored goes out only when every side of it is someone the viewer can see.
   const sides = [f.from, f.to, f.fallback ?? "", f.link ?? "", ...(f.splits ?? []).map((s) => s.to), ...(f.shares ?? []).flatMap((s) => [s.party, s.from ?? ""])].filter((id) => id !== "");
-  const seen = sides.every((id) => visible(ctx, viewer, id));
+  const seen = sides.every((id) => sideSeen(ctx, viewer, id));
   return {
     id: f.id,
     label: f.label,
