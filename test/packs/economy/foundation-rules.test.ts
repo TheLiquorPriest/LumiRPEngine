@@ -8,6 +8,7 @@ import type { EntityDef, WorldDoc } from "../../../src/shared/world";
 import { lintWorld } from "../../../src/engine/authoring";
 import { calendarOf, dateAt } from "../../../src/engine/calendar";
 import { applyEffects } from "../../../src/engine/effects";
+import { applyValidUnits } from "../../../src/engine/events";
 import { materializeAll } from "../../../src/engine/materialize";
 import { optionalService } from "../../../src/engine/pack-kit";
 import { createRegistry, type Registry } from "../../../src/engine/registry-impl";
@@ -15,6 +16,7 @@ import { resolveAction } from "../../../src/engine/resolve";
 import { createRng } from "../../../src/engine/rng";
 import { runTimelapse } from "../../../src/engine/time";
 import { Working } from "../../../src/engine/working";
+import { withdraw } from "../../../src/packs/economy/core/actions";
 import { flowOfEntity } from "../../../src/packs/economy/core/flows";
 import { move } from "../../../src/packs/economy/core/pay";
 import { ALL_PACKS } from "../../../src/packs/index";
@@ -519,5 +521,25 @@ describe("a returned-payment fee is charged only when the money wasn't there", (
     });
     lapse(w, 1);
     expect(fees(w).length).toBeGreaterThan(0);
+  });
+});
+
+describe("a cash withdrawal's fees never let the cash past the funds check", () => {
+  test("a withdrawal the account can no longer cover is dropped whole at the fold, fees and all", () => {
+    const w = setup((world) => {
+      world.entities.debit = entity("debit", "card", { account: "checking", holder: "you", network: "debit", state: "active" });
+      const place = world.places[String(world.entities.you!.fields.place ?? world.start.place)]!;
+      place.fields = { ...place.fields, atm: { bank: "Lakeside Bank", fee: 300, limit: 20_000 } };
+    });
+    const out = withdraw(w.ctx, "you", "checking", 20_000);
+    if ("code" in out) throw new Error(out.reason);
+    // The fees and the cash are two postings in one unit.
+    expect(out.flatMap((e) => (e.type === "economy.txn" && "data" in e ? [e.data.kind] : []))).toEqual(["fee", "withdrawal"]);
+    // Another posting drains checking first, as a rebased view would see it.
+    const drain = optionalService(w.ctx, "economy.adjust")?.(w.ctx, "checking", -(w.state.accounts.checking ?? 0) + 1_000);
+    if (!drain || "code" in drain) throw new Error("no adjust");
+    w.applyAll(drain);
+    expect(applyValidUnits(reg, out, w.state, (s) => reg.context(w.world, s))).toEqual([]);
+    expect(w.state.accounts.checking).toBe(1_000);
   });
 });

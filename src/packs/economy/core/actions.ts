@@ -69,7 +69,9 @@ export function withdraw(ctx: ReadContext, who: EntityId, account: EntityId, raw
   if (!p) return reject("missing_account", "no such account");
   const t = traitsOf(ctx, account);
   const atTop = cashNeedsAMachine(ctx, who);
-  const lines: PostingLine[] = [{ account: wallet, amount: cents }];
+  // The fees post apart from the cash: a bank's own charges may overdraw, so they're exempt from the funds check, but the cash itself never is.
+  const machine: PostingLine[] = [];
+  const advanceLines: PostingLine[] = [];
   const extra: LedgerEvent[] = [];
   let fees = 0;
   let card: EntityId | null = null;
@@ -86,8 +88,8 @@ export function withdraw(ctx: ReadContext, who: EntityId, account: EntityId, raw
       where = `at ${own(ctx.world.places, atm.place)?.name ?? "a cash machine"}`;
       if (accountFeature(ctx, account, "fees") && atm.feature.bank !== p.institution) {
         const surcharge = Math.max(0, Math.round(numOf(atm.feature.fee)));
-        if (surcharge > 0) lines.push({ account: external(`atm:${atm.feature.bank}`), amount: surcharge });
-        if (p.fees.atm > 0) lines.push({ account: bankSide(p.institution), amount: p.fees.atm });
+        if (surcharge > 0) machine.push({ account: external(`atm:${atm.feature.bank}`), amount: surcharge });
+        if (p.fees.atm > 0) machine.push({ account: bankSide(p.institution), amount: p.fees.atm });
         fees += surcharge + p.fees.atm;
       }
       if (Number.isFinite(cardRoom(ctx, card, "atm"))) {
@@ -100,21 +102,19 @@ export function withdraw(ctx: ReadContext, who: EntityId, account: EntityId, raw
   if (t?.revolving && accountFeature(ctx, account, "fees")) {
     const advance = Math.max(p.fees.cash_advance_min, Math.round((cents * p.fees.cash_advance_pct) / 100));
     if (advance > 0) {
-      lines.push({ account: bankSide(p.institution), amount: advance });
+      advanceLines.push({ account: bankSide(p.institution), amount: advance });
       fees += advance;
     }
   }
   const total = cents + fees;
   if (availableOf(ctx, account) < total) return reject("declined", `${labelOf(ctx, account)} can't cover ${money(ctx, total)}`);
-  lines.unshift({ account, amount: -total });
-  const merged: PostingLine[] = [];
-  for (const l of lines) {
-    const same = merged.find((x) => x.account === l.account);
-    if (same) same.amount += l.amount;
-    else merged.push({ ...l });
-  }
+  const charge = (lines: PostingLine[], memo: string, category: string): LedgerEvent[] => {
+    const cents = lines.reduce((a, l) => a + l.amount, 0);
+    return cents > 0 ? posting([{ account, amount: -cents }, ...lines], { memo, kind: "fee", category }) : [];
+  };
   const memo = `Cash withdrawal${where ? ` ${where}` : ""}${fees > 0 ? ` (${money(ctx, fees)} in fees)` : ""}`;
-  return asUnit([...posting(merged, { memo, kind: "withdrawal", category: "transfer", ...(card ? { card } : {}) }), ...extra]);
+  // Fees first, so the cash is checked against what they leave: a rebased view that can't cover it drops the unit, fees and all.
+  return asUnit([...charge(machine, "Cash machine fees", "atm"), ...charge(advanceLines, "Cash advance fee", "cash_advance"), ...posting([{ account, amount: -cents }, { account: wallet, amount: cents }], { memo, kind: "withdrawal", category: "transfer", ...(card ? { card } : {}) }), ...extra]);
 }
 
 /**
