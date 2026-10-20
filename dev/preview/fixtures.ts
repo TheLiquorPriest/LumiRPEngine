@@ -19,6 +19,9 @@ import { presetAdjudication } from "../../src/shared/adjudication";
 import { blankWorld, migrateWorld } from "../../src/engine/authoring";
 import { createRegistry } from "../../src/engine/registry-impl";
 import { initialState } from "../../src/engine/world-state";
+import { materializeAll } from "../../src/engine/materialize";
+import { runTimelapse } from "../../src/engine/time";
+import { Working } from "../../src/engine/working";
 import { ALL_PACKS, STARTER_WORLDS } from "../../src/packs/index";
 import { buildMapView } from "../../src/packs/space/core/view";
 
@@ -562,6 +565,29 @@ function starterMoney(template: string): JsonValue {
   const registry = createRegistry(ALL_PACKS);
   const def = registry.views.find((v) => v.panel === "economy.money");
   return def ? def.build(registry.context(world, initialState(world, "preview", registry)), { mapDisplay: null }) : null;
+}
+
+/**
+ * Port Alder's money as the engine keeps it nine days into a chat (`?money=<party>`): Play → Me →
+ * Money shows that party's own, as they see it, and GM → Money everyone with money, each at their
+ * own Money level. 114 Harbor Street is put up for sale, so whoever doesn't own it sees its listing.
+ * Marcus Delgado (`marcus_delgado`) has a business, a mortgaged house and a credit score; Helen
+ * Kowalczyk (`helen_kowalczyk`) a household and a let house; the POV (`pov`) a job, investments and
+ * a credit score. Null for a party the world doesn't have.
+ */
+export function portAlderMoney(party: string): { play: JsonValue; gm: FinanceView[] } | null {
+  const world = STARTER_WORLDS.modern_slice_of_life?.("preview", "modern_slice_of_life");
+  const harbor = world?.entities.prop_harbor_114;
+  if (!world || !harbor || !Object.hasOwn(world.entities, party)) return null;
+  world.pov = party;
+  harbor.fields.asking_price = 54900000;
+  const registry = createRegistry(ALL_PACKS);
+  const w = new Working(registry, world, initialState(world, "preview", registry));
+  materializeAll(registry, w, party, "preview");
+  // Nothing stops the nine days: what would interrupt a player's timelapse only goes in its montage.
+  const lapse = runTimelapse(registry, w, { type: "duration", minutes: 9 * 24 * 60 }, { runSeed: "preview", overrides: { invitation: "note", decline: "note", incident: "note", quest: "note", arrival: "note" } });
+  if ("code" in lapse) return null;
+  return { play: w.ctx.query("economy.finance")(w.ctx, party, true) as unknown as JsonValue, gm: w.ctx.query("economy.people_money")(w.ctx) };
 }
 
 /**

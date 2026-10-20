@@ -6,6 +6,9 @@
 //   &studio=new|revision|moved|errors|none: what LumiRPEngine Studio has waiting. Any but `none` says an offer is
 //     waiting once the preview boots, so Build's world list opens on its review. Without it, Import from
 //     LumiRPEngine Studio finds nothing waiting.
+//   &money=<party>: Play's money is that Port Alder party's and GM → Money everyone's there, as the engine keeps
+//     them nine days into a chat (`marcus_delgado`: a business, a house and credit; `helen_kowalczyk`: a
+//     household; `pov`: a job and investments).
 
 import { setup } from "../../src/frontend/setup";
 import type { FrontendToBackend } from "../../src/shared/protocol";
@@ -29,7 +32,8 @@ const delay = Number(params.get("draftDelay") ?? "10");
 const draftElsewhereMs = params.get("draft") === "elsewhere" ? (Number.isFinite(delay) && delay >= 0 ? delay : 10) * 1000 : undefined;
 const host = createMockHost({ drawerOpen: params.get("drawer") !== "closed", heads: params.get("heads") === "on" });
 const starter = STARTER_MAPS[params.get("map") ?? ""];
-const backend = new MockBackend((payload) => host.deliver(payload), { scenario, studio, ...(starter ? { map: starter } : {}), ...(draftElsewhereMs !== undefined ? { draftElsewhereMs } : {}), closeDrawer: () => host.setDrawer(false) });
+const money = params.get("money") ?? "";
+const backend = new MockBackend((payload) => host.deliver(payload), { scenario, studio, ...(starter ? { map: starter } : {}), ...(money ? { money } : {}), ...(draftElsewhereMs !== undefined ? { draftElsewhereMs } : {}), closeDrawer: () => host.setDrawer(false) });
 host.onSend = (payload) => backend.receive(payload as FrontendToBackend);
 const teardown = setup(host.ctx);
 // As the Studio's frontend does when it has a world waiting (DESIGN §15).
