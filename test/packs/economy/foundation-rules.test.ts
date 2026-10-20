@@ -468,3 +468,32 @@ describe("only a role that manages an account runs standing payments from it", (
     expect(done(w, "you", "flow_pause", { flow: "save" })).toBe(true);
   });
 });
+
+describe("a card is paid from the payer's own account", () => {
+  const shared = (role: "authorized_user" | "joint") => (world: WorldDoc): void => {
+    mayaChecking(world);
+    world.entities.card!.fields.owners = [
+      { party: "you", role: "owner" },
+      { party: "maya", role },
+    ];
+    delete world.entities.card!.fields.owner;
+  };
+  const pay = (w: Working, params: JsonObject): boolean => {
+    const r = resolveAction(reg, w, { action: "pay_card", actor: "maya", params }, createRng(`pay:${JSON.stringify(params)}`));
+    return r.ok && r.rejected.length === 0;
+  };
+
+  test("an authorized user's payment comes out of their own checking, not the primary's", () => {
+    const w = setup(shared("authorized_user"), ["maya"]);
+    const [checking, maya, card] = [w.state.accounts.checking, w.state.accounts.maya_checking ?? 0, w.state.accounts.card ?? 0];
+    expect(pay(w, { card: "card", amount: 1_000 })).toBe(true);
+    expect([w.state.accounts.checking, w.state.accounts.maya_checking, w.state.accounts.card]).toEqual([checking, maya - 1_000, card + 1_000]);
+  });
+
+  test("a joint holder can't name the other holder's own account to pay from", () => {
+    const w = setup(shared("joint"), ["maya"]);
+    const checking = w.state.accounts.checking;
+    expect(pay(w, { card: "card", from: "checking", amount: 1_000 })).toBe(false);
+    expect(w.state.accounts.checking).toBe(checking);
+  });
+});
