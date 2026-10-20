@@ -245,7 +245,7 @@ describe("Play → Money: each control plays as the player's turn", () => {
 
     const change = flowUpdateAction(gym.spec, { ...flowFormOf(gym.spec, chat.currency), amount: "45", every: "week", weekday: 5 }, chat.currency);
     // Only what changed travels, the schedule whole.
-    expect(change?.params).toEqual({ flow: gym.id, every: "week", amount: 4500, weekday: 5 });
+    expect(change?.params).toEqual({ flow: gym.id, every: "week", amount: 4500, interval: 1, weekday: 5 });
     if (!change) throw new Error("no change");
     await chat.play(change);
     view = await chat.hub();
@@ -288,6 +288,18 @@ describe("Play → Money: each control plays as the player's turn", () => {
     // Helen is someone the POV may pay; Midlake Mutual is a payee typed by name.
     expect(sides("bill_rent").to).toEqual(ends.to);
     expect(sides("bill_auto_insurance").to).toEqual(ends.to);
+  });
+
+  test("Edit takes a standing payment every other month back to every month", async () => {
+    const chat = await MoneyChat.start();
+    await chat.play(flowCreateAction({ ...gymForm(CHECKING), interval: 2 }, chat.currency));
+    const made = (await chat.hub()).flows.find((f) => f.label === "Harbor Gym");
+    if (!made?.spec) throw new Error("no Harbor Gym flow with its form");
+    expect(made).toMatchObject({ schedule: "every 2 months on the 5th" });
+    const change = flowUpdateAction(made.spec, { ...flowFormOf(made.spec, chat.currency), interval: 1 }, chat.currency);
+    if (!change) throw new Error("no change");
+    expect(await chat.play(change)).toContain("done");
+    expect((await chat.hub()).flows.find((f) => f.id === made.id)).toMatchObject({ schedule: "monthly on the 5th" });
   });
 });
 
@@ -408,6 +420,17 @@ describe("GM view → Money: each control is one edit", () => {
     const mineId = newIdFor("flow", "Harbor Gym", new Set((await chat.gm()).fields.keys()));
     accepted(await chat.edit(flowSpawnOps(mineId, gymForm(CHECKING), chat.currency)));
     expect((await chat.hub()).flows.find((f) => f.id === mineId)).toMatchObject({ from: "Your checking account", amount: "$40.00", editable: true });
+  });
+
+  test("the GM's edit takes a flow every other month back to every month", async () => {
+    const chat = await MoneyChat.start();
+    const id = newIdFor("flow", "Harbor Gym", new Set((await chat.gm()).fields.keys()));
+    accepted(await chat.edit(flowSpawnOps(id, { ...gymForm(DANNY_CHECKING), interval: 2 }, chat.currency)));
+    const made = (await chat.party(DANNY)).flows.find((f) => f.id === id);
+    if (!made?.spec) throw new Error("no Harbor Gym flow with its form");
+    expect(made).toMatchObject({ schedule: "every 2 months on the 5th" });
+    accepted(await chat.edit(flowEditOps(made.spec, { ...flowFormOf(made.spec, chat.currency), interval: 1 }, chat.currency)));
+    expect((await chat.party(DANNY)).flows.find((f) => f.id === id)).toMatchObject({ schedule: "monthly on the 5th" });
   });
 
   test("the GM adds someone to a household and takes them out; the POV's Money shows who shares their home", async () => {

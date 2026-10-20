@@ -307,7 +307,7 @@ describe("the requests the controls send", () => {
 
   test("a new flow sends its schedule's own parts; a one-off sends when it happens", () => {
     const monthly = { ...blankFlowForm("chk"), label: "Savings", to: "sav", amount: "250", day: -1 };
-    expect(flowCreateAction(monthly, USD)).toEqual({ action: "flow_create", params: { label: "Savings", kind: "transfer", from: "chk", to: "sav", every: "month", shortfall: "skip", amount: 25000, day: -1 } });
+    expect(flowCreateAction(monthly, USD)).toEqual({ action: "flow_create", params: { label: "Savings", kind: "transfer", from: "chk", to: "sav", every: "month", shortfall: "skip", amount: 25000, interval: 1, day: -1 } });
     const once = { ...monthly, label: "Gift", every: "once" as const, start: "2026-12-24", at: "18:00" };
     expect(flowCreateAction(once, USD).params).toEqual({ label: "Gift", kind: "transfer", from: "chk", to: "sav", every: "once", shortfall: "skip", amount: 25000, once: "2026-12-24T18:00" });
   });
@@ -317,7 +317,15 @@ describe("the requests the controls send", () => {
     expect(form.amount).toBe("995.00");
     expect(flowUpdateAction(rent, form, USD)).toBeNull();
     expect(flowUpdateAction(rent, { ...form, amount: "1050" }, USD)).toEqual({ action: "flow_update", params: { flow: "flow_rent", amount: 105000 } });
-    expect(flowUpdateAction(rent, { ...form, weekday: 1 }, USD)).toEqual({ action: "flow_update", params: { flow: "flow_rent", every: "week", weekday: 1 } });
+    expect(flowUpdateAction(rent, { ...form, weekday: 1 }, USD)).toEqual({ action: "flow_update", params: { flow: "flow_rent", every: "week", interval: 1, weekday: 1 } });
+  });
+
+  test("an edit back to every time sends an interval of 1, with the schedule whole; so does the GM's", () => {
+    const fortnightly: Flow = { ...rent, schedule: { every: "week", interval: 2, weekdays: [5], at: "07:30" } };
+    const form = flowFormOf(fortnightly, USD);
+    expect(flowUpdateAction(fortnightly, { ...form, interval: 1 }, USD)?.params).toEqual({ flow: "flow_rent", every: "week", interval: 1, weekday: 5, at: "07:30" });
+    expect(flowEditOps(fortnightly, form, USD)).toEqual([]);
+    expect(flowEditOps(fortnightly, { ...form, interval: 1 }, USD)).toEqual([{ op: "set", entity: "flow_rent", field: "interval", value: 1 }]);
   });
 
   test("the GM's change sets the declared fields and empties what an old schedule shape held", () => {

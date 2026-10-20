@@ -180,8 +180,9 @@ export function flowFormProblem(form: FlowForm, currency: WorldCurrency, require
 
 /**
  * A flow form as `flow_create` and `flow_update` take it: the amount in minor units; a one-off as
- * `once` (`YYYY-MM-DDTHH:MM`), a repeat as `every` with its interval, weekday, day or month, time,
- * start, end and count; the shortfall with what it needs.
+ * `once` (`YYYY-MM-DDTHH:MM`), a repeat as `every` with its interval (1 too, so an edit back to
+ * every time goes), weekday, day or month, time, start, end and count; the shortfall with what it
+ * needs.
  */
 export function flowParams(form: FlowForm, currency: WorldCurrency): JsonObject {
   const params: JsonObject = { label: form.label.trim(), kind: form.kind, from: form.from, to: form.to.trim(), every: form.every, shortfall: form.shortfall };
@@ -189,7 +190,7 @@ export function flowParams(form: FlowForm, currency: WorldCurrency): JsonObject 
   if (cents !== null) params.amount = cents;
   if (form.every === "once") params.once = `${form.start}T${form.at || "09:00"}`;
   else {
-    if (form.interval > 1) params.interval = form.interval;
+    params.interval = form.interval;
     if ((form.every === "month" || form.every === "year") && form.day !== null) params.day = form.day;
     if (form.every === "week" && form.weekday !== null) params.weekday = form.weekday;
     if (form.every === "year" && form.month !== null) params.month = form.month;
@@ -237,7 +238,7 @@ export function flowFieldsOf(form: FlowForm, currency: WorldCurrency): JsonObjec
   if (form.every === "once") fields.once = `${form.start}T${form.at || "09:00"}`;
   else {
     fields.every = form.every;
-    if (form.interval > 1) fields.interval = form.interval;
+    fields.interval = form.interval;
     if ((form.every === "month" || form.every === "year") && form.day !== null) fields.days = [form.day];
     if (form.every === "week" && form.weekday !== null) fields.weekdays = [form.weekday];
     if (form.every === "year" && form.month !== null) fields.months = [form.month];
