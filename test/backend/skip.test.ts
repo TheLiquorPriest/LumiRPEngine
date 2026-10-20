@@ -13,6 +13,7 @@ import { Working } from "../../src/engine/working";
 import { toChain } from "../../src/backend/ledger-io";
 import { readRun } from "../../src/backend/runtime";
 import { runSkip, type BeatMinds } from "../../src/backend/skip";
+import { decodeContextView } from "../../src/frontend/play/context";
 import { Rig } from "../support/rig";
 
 const MARCUS = "marcus_delgado";
@@ -236,6 +237,17 @@ describe("time skips", () => {
     rig.body(await rig.send({ type: "lre.settings.set", patch: { modelUse: { steps: { skip: { enabled: true, signals: ["always"] } } } } }));
     await skipDays(rig, chatId, 1);
     expect(asked).toBe(1);
+  });
+
+  test("the skip step's call is listed in the Context panel's minds calls, as the step alone, with no text", async () => {
+    const { rig, chatId } = await portAlder();
+    rig.body(await rig.send({ type: "lre.settings.set", patch: { modelUse: { steps: { skip: { enabled: true, signals: ["always"] } } } } }));
+    rig.host.quietReply = (req) => (req.messages.some((m) => m.content.includes("skipping ahead in time")) ? JSON.stringify({ beats: [] }) : "{}");
+    rig.rt.beatMinds = fakeMinds([], () => false);
+    await skipDays(rig, chatId, 1);
+    const context = decodeContextView((await rig.rt.view(chatId, rig.host.userId)).panels["core.context"]);
+    const calls = context?.generations[0]?.minds ?? [];
+    expect(calls.filter((m) => m.purpose === "skip")).toEqual([expect.objectContaining({ purpose: "skip", phase: "skip", who: "", level: null, outcome: "recorded", prompt: "default" })]);
   });
 
   test("when the before-the-reply clock runs out the skip stops at a beat, keeps what it ran and offers Continue; the turn commits", async () => {

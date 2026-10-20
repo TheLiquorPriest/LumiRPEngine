@@ -151,9 +151,10 @@ export interface SkipRun {
  * The `skip` step (DESIGN §24.7), when the user turned it on: further beats the model proposes inside
  * the span, from the beats found and what the people involved plan. Its prompt is the world's
  * template, else the user's own, else the built-in. Its reasons are the GM's to read only: no mind and
- * no player surface is given them, since they may come of someone's private intent.
+ * no player surface is given them, since they may come of someone's private intent. Its call joins
+ * the inspector's minds calls, with no text and as no one.
  */
-async function proposedBeats(deps: SkipDeps, input: SkipInput, state: Readonly<WorldState>, scanned: ScannedSkip): Promise<Beat[]> {
+async function proposedBeats(deps: SkipDeps, input: SkipInput, state: Readonly<WorldState>, scanned: ScannedSkip, traces: MindCallTrace[]): Promise<Beat[]> {
   const config = mindsStepConfig(input.settings.modelUse, "skip");
   if (!config || input.signal.aborted) return [];
   const ctx = deps.registry.context(input.world, state);
@@ -164,10 +165,15 @@ async function proposedBeats(deps: SkipDeps, input: SkipInput, state: Readonly<W
     return theirs.length > 0 ? [`${own(state.entities, id)?.name ?? id}: ${theirs.map((p) => `${p.what} (${formatStamp(cal, p.when.from)})`).join("; ")}`] : [];
   });
   const user = [`The skip runs from ${formatStamp(cal, scanned.from)} to ${formatStamp(cal, scanned.to)}.`, scanned.beats.length > 0 ? `Moments found:\n${scanned.beats.map((b) => `- ${formatStamp(cal, b.at)}: ${b.reason}`).join("\n")}` : "No moments found.", intents.length > 0 ? `What the people involved plan:\n${intents.join("\n")}` : ""].filter((part) => part !== "").join("\n\n");
-  const raw = await deps.steps.helperJson("skip", mindPrompt("skip", input.world, input.settings.minds, { world: input.world.name }).text, user, config, input.userId, input.signal, { lore: null, guidance: input.guidance?.skip ?? "" });
-  if (!isRecord(raw) || !Array.isArray(raw.beats)) return [];
+  const prompt = mindPrompt("skip", input.world, input.settings.minds, { world: input.world.name });
+  const usage = { tokens: 0 };
+  const t0 = performance.now();
+  const raw = await deps.steps.helperJson("skip", prompt.text, user, config, input.userId, input.signal, { lore: null, guidance: input.guidance?.skip ?? "", usage });
+  const proposals = isRecord(raw) && Array.isArray(raw.beats) ? raw.beats : null;
+  traces.push({ purpose: "skip", phase: "skip", who: "", level: null, outcome: proposals ? "recorded" : "failed", ms: Math.round(performance.now() - t0), tokens: usage.tokens, prompt: prompt.source });
+  if (!proposals) return [];
   const out: Beat[] = [];
-  for (const b of raw.beats.slice(0, 5)) {
+  for (const b of proposals.slice(0, 5)) {
     if (!isRecord(b) || typeof b.at !== "string" || typeof b.reason !== "string") continue;
     const at = localTime(input.world, scanned.from, b.at);
     if (at !== null && at > scanned.from && at <= scanned.to) out.push({ at, reason: b.reason.replace(/\s+/g, " ").trim().slice(0, MIND_TEXT_CAPS.reason), source: "model", who: [], rank: RANK.model });
@@ -236,9 +242,9 @@ export async function runSkip(deps: SkipDeps, input: SkipInput): Promise<SkipRun
   const { target, opts } = timelapseOptions(input.intent, input.runSeed);
   const run = scanned && target ? TimelapseRun.start(reg, w, target, opts) : null;
   if (!scanned || !run || "code" in run) return null;
-  const beats = capBeats([...scanned.beats, ...(await proposedBeats(deps, input, w.state, scanned))], limitOf(input.settings.minds.skip.maxBeats));
-  const perBeat = limitOf(input.settings.minds.skip.maxMindsPerBeat);
   const traces: MindCallTrace[] = [];
+  const beats = capBeats([...scanned.beats, ...(await proposedBeats(deps, input, w.state, scanned, traces))], limitOf(input.settings.minds.skip.maxBeats));
+  const perBeat = limitOf(input.settings.minds.skip.maxMindsPerBeat);
   const record: SkipRecord = { beats: [{ at: run.from, events: run.apply([{ type: MINDS_EVENTS.skip, data: { from: run.from, to: run.to, beats: beats.map((b) => ({ at: b.at, reason: b.reason, source: b.source })) } }]) }], stop: null };
   for (const beat of beats) {
     run.advanceTo(beat.at);

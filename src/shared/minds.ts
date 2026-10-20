@@ -731,7 +731,8 @@ export interface MindCallTrace {
   purpose: MindPurpose;
   phase: "pre" | "post" | "skip";
   who: string;
-  level: Fidelity;
+  /** Null, with `who` empty, for the `skip` step's call, which thinks as no one. */
+  level: Fidelity | null;
   outcome: "recorded" | "failed";
   ms: number;
   tokens: number;

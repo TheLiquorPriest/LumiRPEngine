@@ -573,6 +573,8 @@ The **Context** panel in Play shows what the engine put into the prompt for each
 
 **Minds** lists the generation's minds calls ([Character minds](#character-minds)): whose mind it was, which step (a mind, a memory, a time skip's beats or consolidation), their level, when it ran (before the reply, after it, or in a time skip), whose prompt it used (the world's, yours or the built-in), and how it went, **recorded** or **failed**, with its seconds and tokens. Never a word of what a mind thought or said, nor whether the narrator got it: that is in the GM view. A call for someone you can't see or haven't met isn't listed, even when they are in the room with you.
 
+With **Time-skip beats** turned on, its call before a time skip is listed there too, as the step alone: it thinks as no one, so it shows no one's name and no level.
+
 ### The Stance section
 
 **Stance** tells the narrator how the people with you stand toward you and what they are about, in a line or two each. It lists only the people you can see where you are: someone hidden from you gets no line, and no line names them.
