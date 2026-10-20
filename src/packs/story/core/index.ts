@@ -5,8 +5,8 @@
 // no realism domain: tracks behave the same at every level.
 
 import type { TrackId } from "../../../shared/ids";
-import type { JsonValue } from "../../../shared/json";
-import type { PackEvent } from "../../../shared/ledger";
+import { hasOwn, type JsonValue } from "../../../shared/json";
+import type { LedgerEvent, PackEvent } from "../../../shared/ledger";
 import type { WorldDoc } from "../../../shared/world";
 import { wordsOf } from "../../../engine/lore";
 import { labelOf, mutableSlice, objOf, sliceOf, strOf, own } from "../../../engine/pack-kit";
@@ -177,17 +177,28 @@ export function openPuzzles(ctx: ReadContext): OpenPuzzle[] {
 }
 
 /**
- * The puzzles an answer's `ref` may be for, only ever ones in the POV's quest log (`openPuzzles`): the
- * one it names by the id its row goes by (a secret's stand-in, any other's own id); else those whose
- * label, stage and cue, as the POV sees them, hold the most of its words (a secret's own label, which
- * its row masks, never counts); else the only one open. Several when they tie, or when `ref` names
- * nothing while more than one is open. A puzzle the POV can't see is never among them, and a secret's
- * own id is no id it goes by: only such of its words as the player sees count.
+ * Whether `ref` is written as an id (one word with `_` or `~` in it: `p_strongroom`, a stand-in),
+ * not in words: it names a puzzle by the id its quest log row goes by, or none.
+ */
+function idShaped(ref: string): boolean {
+  const t = ref.trim();
+  return t !== "" && !/\s/.test(t) && /[_~]/.test(t);
+}
+
+/**
+ * The puzzles the player's `ref` may be for, only ever ones in the POV's quest log (`openPuzzles`):
+ * the one it names by the id its row goes by (a secret's stand-in, any other's own id); else, unless
+ * it is written as an id (`idShaped`), those whose label, stage and cue, as the POV sees them, hold
+ * the most of its words (a secret's own label, which its row masks, never counts), else the only one
+ * open. Several when they tie, or when `ref` names nothing while more than one is open. A puzzle the
+ * POV can't see is never among them, and an id no open row goes by (a hidden puzzle's own, a secret's
+ * own) is read neither for its parts nor as the only one open: it finds nothing, as an id nothing has.
  */
 function puzzlesFor(ctx: ReadContext, ref: string): TrackId[] {
   const open = openPuzzles(ctx);
   const byId = open.find((p) => p.shown.id === ref);
   if (byId) return [byId.id];
+  if (idShaped(ref)) return [];
   const want = new Set(wordsOf(ref));
   const scored = open.map(({ id, shown }) => {
     const seen = new Set(wordsOf(`${shown.label} ${shown.stage} ${shown.cue ?? ""}`));
@@ -200,17 +211,39 @@ function puzzlesFor(ctx: ReadContext, ref: string): TrackId[] {
   return want.size === 0 ? open.map((p) => p.id) : [];
 }
 
-/** The puzzle an answer is for (`puzzlesFor`), or null when none fits or more than one fits equally. */
+/** The puzzle the player's `ref` is for (`puzzlesFor`), or null when none fits or more than one fits equally. */
 export function openPuzzle(ctx: ReadContext, ref: string): TrackId | null {
   const fits = puzzlesFor(ctx, ref);
   return fits.length === 1 ? (fits[0] ?? null) : null;
 }
 
-/** A puzzle as the player asked for it, for a refusal: a track they see under that id by the label they see, else their own words, never a hidden track's label. */
-function askedFor(ctx: ReadContext, ref: string): string {
+/**
+ * How a refusal names the puzzle the player asked for: by the label of a quest log row it is the id
+ * of; else in their own words, unless those are written as an id or are some track's own id, which a
+ * refusal never repeats (null), so a hidden puzzle's id reads as one nothing has.
+ */
+function askedFor(ctx: ReadContext, ref: string): string | null {
   const id = Object.keys(ctx.world.tracks).find((t) => shownTrackId(ctx.world, t) === ref);
   const shown = id === undefined ? null : playerTrack(ctx.registry, ctx.world, ctx.state, ctx.world.pov, id);
-  return shown?.label ?? (ref.replace(/_/g, " ").trim() || "nothing");
+  if (shown) return shown.label;
+  const words = ref.trim();
+  return idShaped(words) || hasOwn(ctx.world.tracks, words) || hasOwn(ctx.world.tracks, ref) ? null : words;
+}
+
+/** What the player asked for, for the GM: their words, and the track a track's own id names. */
+function askedForGm(ctx: ReadContext, ref: string): string {
+  if (ref.trim() === "") return "an answer that names none";
+  const t = own(ctx.world.tracks, ref);
+  return t ? `"${ref}" (${t.label})` : `"${ref}"`;
+}
+
+/** An answer to `track`, a puzzle: its attempt, or a refusal when it needs a judgement first or its stage takes none. */
+function answerTo(ctx: ReadContext, track: TrackId, a: Record<string, JsonValue>): LedgerEvent[] | Rejection {
+  const decision = typeof a.decision === "number" ? a.decision : undefined;
+  const check = checkAnswer(ctx.world, ctx.state, track, strOf(a.answer), decision);
+  // The author opted this stage into model judgement: the turn asks `puzzle.answer`, then retries with `decision`.
+  if (check.needsDecision) return reject("needs_decision", "this answer needs a judgement");
+  return check.event ? [check.event] : reject("no_answer", "there is nothing to answer here");
 }
 
 export const storyPack: PackDef = {
@@ -238,25 +271,32 @@ export const storyPack: PackDef = {
     r.effect({ type: "story.flag", args: ["name", "value?"], resolve: (a) => (strOf(a.name) === "" ? reject("bad_flag", "a flag needs a name") : [{ type: "story.flag", data: { name: strOf(a.name), value: a.value ?? true } }]) });
     r.effect({
       type: "story.answer",
-      args: ["track", "answer", "decision?"],
+      // `track`: the puzzle's own id, which only the world's own content gives (an authored action or rule).
+      // `puzzle`: the player's reference, as the Answer action passes it on.
+      args: ["track?", "puzzle?", "answer", "decision?"],
       resolve(a, ctx) {
-        const ref = strOf(a.track);
+        // The world's own content names its puzzle by its own id, so it is answered as named, whatever
+        // the player sees of it. A refusal names no track: the id is the author's.
+        if (a.track !== undefined) {
+          const id = strOf(a.track);
+          if (own(ctx.world.tracks, id)?.kind !== "puzzle") return { code: "not_a_puzzle", reason: "there is nothing to answer here", gm: `story.answer's track ${id === "" ? "names nothing" : `"${id}" is no puzzle`}` };
+          return answerTo(ctx, id, a);
+        }
+        // The player's reference reaches only a puzzle in their quest log (`puzzlesFor`).
+        const ref = strOf(a.puzzle);
+        const asked = ref.trim() === "" ? "" : askedFor(ctx, ref);
         const fits = puzzlesFor(ctx, ref);
         // Several fit equally: which one is meant isn't for the engine to guess, so none is tried and no hint is spent.
         if (fits.length > 1) {
           return {
             code: "ambiguous_puzzle",
-            reason: ref.trim() === "" ? "more than one puzzle is open, and the answer doesn't say which" : `more than one open puzzle fits ${askedFor(ctx, ref)}`,
-            gm: `${fits.length} open puzzles fit ${ref.trim() === "" ? "an answer that names none" : ref}: ${fits.map((id) => labelOf(ctx, id)).join(", ")}`,
+            reason: asked === "" ? "more than one puzzle is open, and the answer doesn't say which" : `more than one open puzzle fits ${asked ?? "that name"}`,
+            gm: `${fits.length} open puzzles fit ${askedForGm(ctx, ref)}: ${fits.map((id) => labelOf(ctx, id)).join(", ")}`,
           };
         }
         const track = fits[0];
-        if (track === undefined) return { code: "not_a_puzzle", reason: `no open puzzle ${askedFor(ctx, ref)}`, gm: `no open puzzle ${labelOf(ctx, ref)}` };
-        const decision = typeof a.decision === "number" ? a.decision : undefined;
-        const check = checkAnswer(ctx.world, ctx.state, track, strOf(a.answer), decision);
-        // The author opted this stage into model judgement: the turn asks `puzzle.answer`, then retries with `decision`.
-        if (check.needsDecision) return reject("needs_decision", "this answer needs a judgement");
-        return check.event ? [check.event] : reject("no_answer", "there is nothing to answer here");
+        if (track === undefined) return { code: "not_a_puzzle", reason: asked === "" ? "there is no open puzzle to answer" : `no open puzzle ${asked ?? "by that name"}`, gm: `no open puzzle in the quest log fits ${askedForGm(ctx, ref)}` };
+        return answerTo(ctx, track, a);
       },
     });
 
@@ -267,7 +307,7 @@ export const storyPack: PackDef = {
       // `puzzle` names one in the quest log: the id its row goes by (a secret's stand-in), words from what the player sees of it (its label, stage or cue: "the safe"), or nothing when one puzzle is open.
       params: { puzzle: { type: "text", optional: true, label: "Puzzle" }, answer: { type: "text" }, decision: { type: "number", optional: true, label: "Judged probability" } },
       requires: [],
-      outcomes: { default: [{ type: "story.answer", args: { track: "=params.puzzle", answer: "=answer", decision: "=params.decision" } }] },
+      outcomes: { default: [{ type: "story.answer", args: { puzzle: "=params.puzzle", answer: "=answer", decision: "=params.decision" } }] },
       duration: "1",
       lexicon: ["the answer is", "i think it's", "solve", "answer", "the code is", "the combination is", "try the combination", "dial", "enter the code"],
       observable: "answers",
