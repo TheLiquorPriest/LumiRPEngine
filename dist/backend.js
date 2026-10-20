@@ -57409,6 +57409,7 @@ var DIAG_PHASES = ["pre", "plan", "prose", "sections", "reply", "read", "memory"
 var DIAG_RING = 400;
 var SLOW_MS = 1000;
 var CANNOT_STOP = "This Lumiverse can't stop generation; engine state may be missing.";
+var NOT_LAST_REPLY = "Lumiverse can only start the last reply again, so the engine can't prepare an earlier message's reply here. Use Edit and Send as a branch, or regenerate the last reply.";
 var STEP_LABEL = {
   engine: "Running the engine\u2026",
   pre: "Planning\u2026",
@@ -57591,8 +57592,9 @@ class Diagnostics {
     const status = failed !== null ? "failed" : outcome?.status ?? "ok";
     const reason = failed !== null ? outcome?.status === "failed" ? outcome.reason : `step ${failed} failed` : outcome?.reason;
     this.add(at, { kind: "turn", level: status === "failed" ? "warn" : "info", turn: at.turn, phase: null, step: "turn", status, start: turn.start, end, ms: end - turn.start, ...reason ? { reason } : {}, ...outcome?.fix ? { fix: outcome.fix } : {} });
+    const step = turn.failed?.split("/").at(-1);
     if (failed !== null)
-      this.activities.set(at.chatId, { chatId: at.chatId, turn: at.turn, state: "failed", label: `Failed: ${STEP_LABEL[failed.split("/").at(-1) ?? ""]?.replace("\u2026", "") ?? failed}`, since: end });
+      this.activities.set(at.chatId, { chatId: at.chatId, turn: at.turn, state: "failed", label: step ? `Failed: ${STEP_LABEL[step]?.replace("\u2026", "") ?? step}` : "Failed", since: end });
     else
       this.activities.delete(at.chatId);
     this.send(at.chatId, at.userId);
@@ -58261,8 +58263,8 @@ class LedgerService {
     p.holder = this.viewerOf(chatId, userId);
     if (p.holder !== null)
       this.host.frontend.send(restartPush(chatId, p), userId, p.holder);
-    else
-      this.host.frontend.send({ lre: PROTOCOL_VERSION, type: "lre.activity", chatId, activity: this.diag?.activityOf(chatId) ?? null }, userId);
+    else if (this.diag)
+      this.diag.rest({ chatId, userId }, STEP_LABEL.restart ?? "Ready; reopen the chat to continue");
   }
   askAgain(chatId, userId, session) {
     const gate = this.gates.get(chatId);
@@ -58431,6 +58433,8 @@ class LedgerService {
       let delivered = null;
       let claimed = false;
       try {
+        if (halt.target !== null && observed.at(-1)?.id !== target?.id)
+          throw new EngineFailure("target", NOT_LAST_REPLY);
         await step("pre", () => hooks.beforePlan({ chatId, userId, core, observed, generationId: halt.id, connectionId: halt.connectionId, runKey: `${stamp}\x00${epoch}`, signal }));
         await step("plan", async () => core.plan(halt.id, observed, false));
         await step("prose", () => hooks.afterPlan({ chatId, userId, core, observed, generationId: halt.id, signal }));
@@ -58458,7 +58462,7 @@ class LedgerService {
       this.dropIfStale(chatId);
       if (this.gates.get(chatId)?.prepared !== prepared)
         return;
-      this.diag?.rest(at, as === "send" ? STEP_LABEL.ready ?? "Ready: press Send for the reply" : STEP_LABEL.restart ?? "Ready; reopen the chat to continue");
+      this.diag?.rest(at, as === "send" ? STEP_LABEL.ready ?? "Ready: press Send for the reply" : holder !== null || !this.host.capabilities.sessions ? STEP_LABEL.reply ?? "Waiting for the reply\u2026" : STEP_LABEL.restart ?? "Ready; reopen the chat to continue");
       if (prepared.holder !== null)
         this.host.frontend.send(restartPush(chatId, prepared), userId, prepared.holder);
       else if (!this.host.capabilities.sessions)
@@ -62539,10 +62543,12 @@ class EngineBook {
     }
     const all = await this.host.books.entries(bookId, userId);
     const { found, slots, leftoverLore } = sortEntries(all);
-    if (!this.on.has(bookId)) {
-      const engine = new Set([...found.slots.values(), ...found.twins.values(), found.narrator, found.narratorOutlet]);
-      this.on.set(bookId, new Set(all.filter((e) => engine.has(e.id) && (!e.disabled || e.content !== "")).map((e) => e.id)));
-    }
+    const on = this.on.get(bookId) ?? new Set;
+    this.on.set(bookId, on);
+    const engine = new Set([...found.slots.values(), ...found.twins.values(), found.narrator, found.narratorOutlet]);
+    for (const e of all)
+      if (engine.has(e.id) && (!e.disabled || e.content !== ""))
+        on.add(e.id);
     const blank = { content: "", keys: [], disabled: true, constant: false };
     for (const section of sectionsOf(world)) {
       const p = section.position;
@@ -63291,7 +63297,7 @@ ${questionLines(questions).join(`
         const ms = performance.now() - t0;
         this.meter.record({ purpose, via: "decision", ok: true, ms, tokens: r.tokens }, userId);
         const answered = Object.keys(r.answers).length > 0;
-        this.onCall?.(userId, { ...route, model: r.model, tokensOut: answered ? r.tokens : 0, ms, ok: true });
+        this.onCall?.(userId, { ...route, model: r.model, tokensOut: answered ? r.tokens > 0 ? r.tokens : null : 0, ms, ok: true });
         if (answered)
           return { answers: r.answers, via: "decision" };
       } catch (error) {
@@ -65455,7 +65461,7 @@ class MessageCache {
     inner.on("MESSAGE_SWIPED", (e) => this.change(e.chatId, (list) => replaced(list, e.message)));
     inner.on("MESSAGE_DELETED", (e) => this.change(e.chatId, (list) => deleted(list, e.messageId)));
     inner.on("GENERATION_ENDED", (e) => this.change(e.chatId, () => false));
-    inner.on("GENERATION_STOPPED", (e) => this.change(e.chatId, () => false));
+    inner.on("GENERATION_STOPPED", (e) => this.change(e.chatId, () => e.content === ""));
     inner.on("CHAT_DELETED", (e) => this.change(e.chatId, () => false));
     const chats = {
       ...inner.chats,
@@ -67313,7 +67319,7 @@ class Runtime {
     this.steps.onCallStart = (userId, purpose) => this.diag.callStart(userId, purpose);
     this.toolSupport = new ToolSupport(this.host);
     this.minds = { host: this.host, registry: this.registry, steps: this.steps, settings: this.settings, presets: this.presets };
-    this.ledger = new LedgerService(this.host, (chatId, userId) => this.resolveEnv(chatId, userId), new LedgerFold(this.registry, { fingerprint: "1792521274" }), (chatId) => messages.forget(chatId));
+    this.ledger = new LedgerService(this.host, (chatId, userId) => this.resolveEnv(chatId, userId), new LedgerFold(this.registry, { fingerprint: "1792523860" }), (chatId) => messages.forget(chatId));
     this.studio = new StudioBridge(this.host, this.worlds);
     this.worlds.onChange = (worldId, userId) => this.studio.worldChanged(worldId, userId);
     this.push = new StatePush(this.host, async (chatId, userId) => {
@@ -68472,9 +68478,10 @@ ${rules}` });
     if (!last)
       return;
     const why = (input.reason.startsWith(`${input.step} `) ? input.reason.slice(input.step.length + 1) : input.reason).replace(/(?:^|\b)(?:the )?call failed: /g, "");
-    const said = input.step === "mind" ? why : `${(STEP_LABEL[input.step] ?? input.step).replace(/\u2026$/, "")}: ${why}`;
+    const said = input.step === "mind" || input.step === "target" ? why : `${(STEP_LABEL[input.step] ?? input.step).replace(/\u2026$/, "")}: ${why}`;
     const detail = said.charAt(0).toUpperCase() + said.slice(1);
-    await this.chips.add(input.chatId, input.userId, [{ id: `engine_failed:${input.turn}`, kind: "engine_failed", messageId: last.id, label: "The engine didn't finish, so nothing was generated", detail, actions: [{ id: "regenerate", label: "Retry", style: "primary" }, { id: "diagnostics", label: "Diagnostics" }], expires: "next_send", payload: {} }]);
+    const retry = input.step === "target" ? [] : [{ id: "regenerate", label: "Retry", style: "primary" }];
+    await this.chips.add(input.chatId, input.userId, [{ id: `engine_failed:${input.turn}`, kind: "engine_failed", messageId: last.id, label: "The engine didn't finish, so nothing was generated", detail, actions: [...retry, { id: "diagnostics", label: "Diagnostics" }], expires: "next_send", payload: {} }]);
     this.push.changed(input.chatId, input.userId);
   }
   onActivated(chatId, activated) {
