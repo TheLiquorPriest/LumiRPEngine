@@ -16,7 +16,7 @@ import { humanize } from "../../../frontend/format";
 import type { IconName } from "../../../frontend/icons";
 import { ActionPage, AmountField, ChoiceField, MONTH_CHOICES, NumberField, SelectField, TextField, WEEKDAY_CHOICES, type Choice } from "./forms";
 import type { HubControls, SectionProps } from "./hub";
-import { flowControls, flowSources, flowTargets, gmParties, viewAccounts, type FlowControl } from "./layout";
+import { fallbackSources, findAccount, flowControls, flowSources, flowTargets, gmParties, payeeProblem, viewAccounts, type FlowControl } from "./layout";
 import { FieldsPage } from "./lines";
 import { actionPage, Controls, detailPage, Hero, MoneyPage, Note, type HubNav, type HubPages } from "./nav";
 import { amountOf, blankFlowForm, flowCreateAction, flowEditOps, flowFormOf, flowFormProblem, flowSpawnOps, flowStatusAction, flowStatusOps, flowUpdateAction, invoiceAction, leaseEndAction, newIdFor, type FlowEvery, type FlowForm } from "./requests";
@@ -52,9 +52,13 @@ function canCreate(view: FinanceView, controls: HubControls): boolean {
   return controls.mode === "gm" || (view.features.includes("flows") && flowSources(view).length > 0);
 }
 
-/** Where a flow's money can come from and go, for the controls' mode: the player's own and the people they may pay; for the GM, the party's accounts (a business's they run included) and anyone in the world. */
-function endpoints(view: FinanceView, controls: HubControls): { from: Choice[]; to: Choice[] } {
-  if (controls.mode === "player") return { from: flowSources(view).map((s) => ({ value: s.id, label: s.label })), to: flowTargets(view, controls.palette).map((t) => ({ value: t.id, label: t.label })) };
+/**
+ * Where a flow's money can come from and go, for the controls' mode: the player's own and the
+ * people they may pay, where what pays (`payers`, its From and the account it falls back on)
+ * allows; for the GM, the party's accounts (a business's they run included) and anyone in the world.
+ */
+function endpoints(view: FinanceView, controls: HubControls, payers: readonly string[]): { from: Choice[]; to: Choice[] } {
+  if (controls.mode === "player") return { from: flowSources(view).map((s) => ({ value: s.id, label: s.label })), to: flowTargets(view, controls.palette, payers).map((t) => ({ value: t.id, label: t.label })) };
   const accounts = viewAccounts(view).filter((a) => !CLASS_TRAITS[a.class].cash).map((a) => ({ value: a.id, label: a.name }));
   const parties = gmParties(controls.gm, PARTY_KINDS).map((p) => ({ value: p.id, label: `${p.name} (${p.kind})` }));
   return { from: [...accounts, { value: view.party, label: `${view.name} (as their preferences choose)` }], to: [...accounts, ...parties] };
@@ -189,16 +193,28 @@ function FlowPage(props: SectionProps & { flow: FlowView }) {
   );
 }
 
-/** A new flow, or the change to one: the player's action, or the GM's edit. A new one opened from an account's page (`from`) starts with that account as From. */
+/**
+ * A new flow, or the change to one: the player's action, or the GM's edit. A new one opened from an
+ * account's page (`from`) starts with that account as From. What pays (its From, and the account it
+ * falls back on) decides where it may go and what may back it: money the party only manages pays
+ * for its holder. A To or a fallback that another choice rules out stays shown, and the problem
+ * under the form says why.
+ */
 function FlowFormPage(props: SectionProps & { flow?: FlowView & { spec: Flow }; from?: string }) {
   const { view, controls, nav, flow } = props;
-  const ends = endpoints(view, controls);
-  const { from: fromChoices, to: toChoices } = flowSideChoices(ends, flow);
-  const start = props.from !== undefined && ends.from.some((f) => f.value === props.from) ? props.from : (ends.from[0]?.value ?? "");
+  const every = flowSideChoices(endpoints(view, controls, []), flow);
+  const start = props.from !== undefined && every.from.some((f) => f.value === props.from) ? props.from : (every.from[0]?.value ?? "");
   const [form, setForm] = useState<FlowForm>(() => (flow ? flowFormOf(flow.spec, controls.currency) : { ...blankFlowForm(start) }));
-  const typedTo = form.to !== "" && !toChoices.some((t) => t.value === form.to);
-  const [otherTo, setOtherTo] = useState(typedTo);
+  const [otherTo, setOtherTo] = useState(() => form.to !== "" && !every.to.some((t) => t.value === form.to));
   const set = (patch: Partial<FlowForm>) => setForm((f) => ({ ...f, ...patch }));
+  const payers = [form.from, form.shortfall === "fallback" ? form.fallback : ""].filter((id) => id !== "");
+  const allowed = flowSideChoices(endpoints(view, controls, payers), flow);
+  const fromChoices = allowed.from;
+  const toChoices = otherTo || form.to === "" || allowed.to.some((t) => t.value === form.to) ? allowed.to : [...allowed.to, ...every.to.filter((t) => t.value === form.to)];
+  const backs = fallbackSources(view, form.from, form.to).map((a) => ({ value: a.id, label: a.name }));
+  const backed = form.fallback === "" || backs.some((b) => b.value === form.fallback);
+  const fallbackChoices = backed ? backs : [...backs, { value: form.fallback, label: findAccount(view, form.fallback)?.name ?? "another account" }];
+  const problem = (controls.mode === "player" ? payeeProblem(view, payers, form.to) : null) ?? (form.shortfall === "fallback" && !backed ? "That account can't back this one: pick one its payer may spend from." : null) ?? flowFormProblem(form, controls.currency, flow === undefined || "fixed" in flow.spec.amount);
   const submit = async (): Promise<boolean> => {
     if (controls.mode === "player") {
       if (!flow) return controls.act(flowCreateAction(form, controls.currency));
@@ -217,7 +233,7 @@ function FlowFormPage(props: SectionProps & { flow?: FlowView & { spec: Flow }; 
       title={flow ? "Edit" : "New standing payment or one-off"}
       subtitle={flow?.label}
       go={flow ? "Save" : form.every === "once" ? "Schedule it" : "Set it up"}
-      problem={flowFormProblem(form, controls.currency, flow === undefined || "fixed" in flow.spec.amount)}
+      problem={problem}
       submit={submit}
     >
       <TextField label="Name" value={form.label} onInput={(label) => set({ label })} placeholder="Rent, Savings, Allowance…" />
@@ -258,7 +274,7 @@ function FlowFormPage(props: SectionProps & { flow?: FlowView & { spec: Flow }; 
             <NumberField label="Tries at most" value={form.retries} min={1} onChange={(retries) => set({ retries })} />
           </>
         ) : null}
-        {form.shortfall === "fallback" ? <SelectField label="Then pay from" value={form.fallback} empty="Choose an account" options={ends.from.filter((f) => f.value !== form.from)} onChange={(fallback) => set({ fallback })} /> : null}
+        {form.shortfall === "fallback" ? <SelectField label="Then pay from" value={form.fallback} empty="Choose an account" options={fallbackChoices} onChange={(fallback) => set({ fallback })} /> : null}
         <TextField label="Category (for the books)" value={form.category} onInput={(category) => set({ category })} placeholder="housing, utilities, savings…" />
       </Disclosure>
     </ActionPage>

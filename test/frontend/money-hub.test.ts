@@ -7,6 +7,7 @@ import { featureOn, FINANCE_FEATURES, PARTY_KINDS, ROLE_RIGHTS, type AccountView
 import type { Level } from "../../src/shared/ids";
 import type { JsonObject } from "../../src/shared/json";
 import { isRecord } from "../../src/shared/json";
+import type { PaletteView } from "../../src/shared/state-view";
 import { DEFAULT_CURRENCY, type WorldDoc } from "../../src/shared/world";
 import { buildGmWorld } from "../../src/engine/gm-view";
 import { materializeAll } from "../../src/engine/materialize";
@@ -16,7 +17,7 @@ import { ALL_PACKS, STARTER_WORLDS } from "../../src/packs/index";
 import { startState } from "../packs/support";
 import { ListRow } from "../../src/frontend/components";
 import { decodeFinanceView } from "../../src/packs/economy/ui/decode";
-import { accountBlocks, accountControls, autopaySources, businessAccounts, businessControls, cardControls, creditBlocks, endableLeases, findAccount, flowControls, flowSources, gmKindIs, gmParties, hireable, holdingControls, householdRows, hubTabs, invoiceControls, investmentBlocks, mortgageTermChoices, overviewBlocks, propertyControls, transferTargets, workBlocks } from "../../src/packs/economy/ui/layout";
+import { accountBlocks, accountControls, autopaySources, businessAccounts, businessControls, cardControls, creditBlocks, endableLeases, fallbackSources, findAccount, flowControls, flowSources, flowTargets, gmKindIs, gmParties, hireable, holdingControls, householdRows, hubTabs, invoiceControls, investmentBlocks, mortgageTermChoices, overviewBlocks, payeeProblem, propertyControls, transferTargets, workBlocks } from "../../src/packs/economy/ui/layout";
 import { OwnerRows } from "../../src/packs/economy/ui/lines";
 import { gmFixture } from "../../dev/preview/fixtures";
 import {
@@ -263,17 +264,18 @@ describe("what a party's roles allow", () => {
 
   test("a business's own accounts its owner runs without a role on them: its page lists them, with autopay, cards and standing payments, never spending", () => {
     const till = account({ id: "till", class: "business_checking", role: null, manages: true, cents: 250000, cards: [card({ id: "tc", account: "till", holderId: "danny" })] });
-    const loan = account({ id: "lift", class: "loan", role: null, manages: true, cents: -3800000, autopay: { mode: "fixed", from: "till", fromName: "Till", cents: 119956 }, loan: { payment: 119956, monthsLeft: 36, payoff: 3800000 } });
+    // The loan is the business's: its autopay draws on what the business spends from, never on the party's own checking.
+    const loan = account({ id: "lift", class: "loan", role: null, manages: true, cents: -3800000, autopay: { mode: "fixed", from: "till", fromName: "Till", cents: 119956 }, autopayFrom: ["till"], loan: { payment: 119956, monthsLeft: 36, payoff: 3800000 } });
     const runs: BusinessView = { ...shop("owner"), accounts: ["till", "lift", "vault"], managed: [till, loan] };
     const v = view({ accounts: [cash, checking], businesses: [runs] });
     // The page lists what the view holds in the business's order; one the party doesn't run is only counted.
     expect(businessAccounts(v, runs)).toEqual({ shown: [till, loan], others: ["vault"] });
     expect(findAccount(v, "lift")).toBe(loan);
     expect(decodeFinanceView(JSON.parse(JSON.stringify(v)))?.businesses[0]?.managed).toEqual([till, loan]);
-    // Autopay pays from the business's checking or from the party's own; the loan is the business's to pay, and nothing here is theirs to spend.
+    // The loan's autopay draws on the business's checking alone, and nothing here is theirs to spend.
     expect(accountControls(v, loan)).toEqual(["autopay"]);
     expect(accountControls(v, till)).toEqual([]);
-    expect(autopaySources(v, loan).map((a) => a.id)).toEqual(["chk", "till"]);
+    expect(autopaySources(v, loan).map((a) => a.id)).toEqual(["till"]);
     // A standing payment may come from the business's checking, and its card, in an employee's hands, is the owner's to freeze or replace.
     expect(flowSources(v).map((s) => s.id)).toEqual(["chk", "till"]);
     expect(cardControls(v, card({ id: "tc", account: "till", holderId: "danny" }))).toEqual(["freeze", "lost", "replace"]);
@@ -281,6 +283,36 @@ describe("what a party's roles allow", () => {
     const outsider = view({ accounts: [cash, checking], businesses: [{ ...shop("beneficiary"), accounts: ["till", "lift"] }] });
     expect(businessAccounts(outsider, outsider.businesses[0] ?? runs)).toEqual({ shown: [], others: ["till", "lift"] });
     expect(findAccount(outsider, "lift")).toBeNull();
+  });
+
+  test("money a party only manages pays for its holder: its standing payments never go to them, their accounts or their name, nor fall back on it for them", () => {
+    const till = account({ id: "till", class: "business_checking", role: null, manages: true, cents: 250000, fallbacks: ["reserve"] });
+    const reserve = account({ id: "reserve", class: "savings", role: null, manages: true, cents: 900000 });
+    const loan = account({ id: "lift", class: "loan", role: null, manages: true, cents: -3800000, autopay: { mode: "none", from: null, fromName: null, cents: null }, autopayFrom: ["till", "reserve"] });
+    const mine = { ...checking, fallbacks: ["sav"] };
+    const v = view({ accounts: [cash, mine, savings], businesses: [{ ...shop("owner"), accounts: ["till", "reserve", "lift"], managed: [till, reserve, loan] }] });
+    const palette: PaletteView = { entries: [{ action: "pay", label: "Pay", group: "pay", options: [{ label: "Mara", params: { to: "mara" } }] }], timelapse: null };
+    const ids = (payers: string[]): string[] => flowTargets(v, palette, payers).map((t) => t.id);
+    // From the business's checking: the business's other accounts and other people, none of the party's own.
+    expect(ids(["till"])).toEqual(["reserve", "lift", "mara"]);
+    // From their own checking: their savings, the business's accounts and other people.
+    expect(ids(["chk"])).toEqual(["sav", "till", "reserve", "lift", "mara"]);
+    // Falling back on the business's savings counts as paying from it.
+    expect(ids(["chk", "reserve"])).toEqual(["till", "lift", "mara"]);
+    expect(payeeProblem(v, ["till"], "sav")).toContain("pays for its holder");
+    expect(payeeProblem(v, ["till"], " you ")).toContain("pays for its holder");
+    expect(payeeProblem(v, ["chk", "reserve"], "sav")).toContain("pays for its holder");
+    expect(payeeProblem(v, ["till"], "lift")).toBeNull();
+    expect(payeeProblem(v, ["till"], "Harbor Cleaners")).toBeNull();
+    expect(payeeProblem(v, ["chk"], "sav")).toBeNull();
+    // What backs a payment is its payer's own, as the view says; the business's never backs one to the party.
+    expect(fallbackSources(v, "till", "lift").map((a) => a.id)).toEqual(["reserve"]);
+    expect(fallbackSources(v, "till", "sav")).toEqual([]);
+    expect(fallbackSources(v, "chk", "mara").map((a) => a.id)).toEqual(["sav"]);
+    // A payment from the party itself (the GM's) falls back on what they spend from.
+    expect(fallbackSources(v, "pov", "mara").map((a) => a.id)).toEqual(["chk", "sav"]);
+    // The loan's autopay draws on the business's money, as the view says.
+    expect(autopaySources(v, loan).map((a) => a.id)).toEqual(["till", "reserve"]);
   });
 
   const flow = (over: Partial<FlowView> & Pick<FlowView, "id" | "spec">): FlowView => ({ label: over.id, kind: "bill", from: "", to: "", amount: "", cents: null, schedule: "", next: null, shortfall: "skip", status: "active", category: null, link: null, payer: over.spec?.from ?? null, editable: false, source: "entity", done: 0, missed: 0, deferred: 0, ...over });

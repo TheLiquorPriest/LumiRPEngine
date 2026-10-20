@@ -517,9 +517,10 @@ function samMoney(): FinanceView {
   const visaCard = card("visa_card", "Visa ··4421", "credit", "visa", "4421");
   const accounts = [
     account("cash", "Wallet cash", "cash", "Cash", 4600),
-    account("chk", "Checking", "checking", "Checking", 124018, { cards: [debit], transactions: recent.filter((r) => r.accountId === "chk") }),
-    account("sav", "Savings", "savings", "Savings", 350000),
-    account("visa", "Visa ··4421", "credit_card", "Credit card", -41255, { available: 78745, limit: 120000, autopay: { mode: "minimum", from: "chk", fromName: "Checking", cents: null }, cards: [visaCard], transactions: recent.filter((r) => r.accountId === "visa") }),
+    // Sam spends from all of them: each bank account backs the other, and the Visa's autopay draws on either.
+    account("chk", "Checking", "checking", "Checking", 124018, { cards: [debit], fallbacks: ["sav"], transactions: recent.filter((r) => r.accountId === "chk") }),
+    account("sav", "Savings", "savings", "Savings", 350000, { fallbacks: ["chk"] }),
+    account("visa", "Visa ··4421", "credit_card", "Credit card", -41255, { available: 78745, limit: 120000, autopay: { mode: "minimum", from: "chk", fromName: "Checking", cents: null }, autopayFrom: ["chk", "sav"], cards: [visaCard], transactions: recent.filter((r) => r.accountId === "visa") }),
   ];
   const rent: Flow = { id: "flow_rent", label: "Rent", kind: "rent", from: "chk", to: "Maple Street Properties", amount: { fixed: 85000 }, schedule: { every: "month", days: [1] }, shortfall: "retry", retry_days: 3, retries: 2, category: "housing", status: "active", source: "entity" };
   const phone: Flow = { id: "flow_phone", label: "Phone", kind: "subscription", from: "visa", to: "Northwind Mobile", amount: { fixed: 4500 }, schedule: { every: "month", days: [1] }, shortfall: "skip", category: "utilities", status: "active", source: "entity" };

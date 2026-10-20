@@ -277,23 +277,43 @@ export function mortgageTermChoices(property: PropertyView): { value: string; la
  */
 export function flowSources(view: FinanceView): { id: string; label: string }[] {
   return viewAccounts(view)
-    .filter((a) => {
-      const t = CLASS_TRAITS[a.class];
-      return t.pays && t.asset && !t.locked && !t.cash && a.status === "open" && a.manages;
-    })
+    .filter((a) => pays(a) && a.manages)
     .map((a) => ({ id: a.id, label: a.name }));
 }
 
+/** Whether money the party reaches only by managing it (a business's account they hold no spending role on) is what pays: such money pays for its holder, never for them. */
+function forHolder(view: FinanceView, payers: readonly string[]): boolean {
+  return payers.some((id) => {
+    const a = findAccount(view, id);
+    return a !== null && a.manages && !a.spends;
+  });
+}
+
+/** An account that can pay a standing payment or an autopay: open, paying, holding money, not locked and not wallet cash. */
+function pays(a: AccountView): boolean {
+  const t = CLASS_TRAITS[a.class];
+  return t.pays && t.asset && !t.locked && !t.cash && a.status === "open";
+}
+
 /**
- * Where a credit account's autopay can pay from: another open, non-cash account that pays and that
- * the party may spend from or manages (the business's own account, for a loan of the business
- * they run).
+ * Where a credit account's autopay can draw from: what the view says its debtor may spend from
+ * (`autopayFrom`: a business's loan from the business's own accounts, never from its manager's),
+ * of those that can pay.
  */
 export function autopaySources(view: FinanceView, account: AccountView): AccountView[] {
-  return viewAccounts(view).filter((a) => {
-    const t = CLASS_TRAITS[a.class];
-    return a.id !== account.id && t.pays && t.asset && !t.locked && !t.cash && a.status === "open" && (rights(a.role).spend || a.manages);
-  });
+  return viewAccounts(view).filter((a) => a.id !== account.id && account.autopayFrom.includes(a.id) && pays(a));
+}
+
+/**
+ * What may back a standing payment from `from` when it can't cover it: the payer's own accounts, as
+ * the view says (`fallbacks`; for a payment from the party itself, the GM's, what they spend from),
+ * of those that can pay. Money the party only manages pays for its holder, so none of it backs a
+ * payment to `to` when that's the party, their household or an account of theirs.
+ */
+export function fallbackSources(view: FinanceView, from: string, to: string): AccountView[] {
+  const backs = from === view.party ? view.accounts.filter((a) => a.spends).map((a) => a.id) : (findAccount(view, from)?.fallbacks ?? []);
+  const theirs = to === view.party || (view.household !== null && to === view.household.id) || view.accounts.some((a) => a.id === to);
+  return viewAccounts(view).filter((a) => a.id !== from && backs.includes(a.id) && pays(a) && !(theirs && forHolder(view, [a.id])));
 }
 
 /** The people the player may name (a payee, a tenant, a hire): the palette's Pay targets, which list only people the POV knows. */
@@ -330,10 +350,30 @@ export function gmParties(gm: Pick<GmView, "entities" | "kinds">, kinds: readonl
   return out;
 }
 
-/** Where a standing payment can go: the party's own accounts (savings, a card to pay off), the people the player may pay, or an outside payee by name (typed). */
-export function flowTargets(view: FinanceView, palette: PaletteView | null): { id: string; label: string }[] {
-  const own = view.accounts.filter((a) => a.status === "open" && !CLASS_TRAITS[a.class].cash && rights(a.role).sees).map((a) => ({ id: a.id, label: `${a.name} (yours)` }));
-  return [...own, ...knownPeople(palette).filter((p) => !own.some((o) => o.id === p.id))];
+/**
+ * Where a standing payment can go: the party's own accounts (savings, a card to pay off), the
+ * accounts of a business they run, the people the player may pay, or an outside payee by name
+ * (typed). Money the party only manages (among `payers`, its From and the account it falls back
+ * on) pays for its holder: never into an account of theirs, nor to them or their household, though
+ * it moves freely between the business's own accounts.
+ */
+export function flowTargets(view: FinanceView, palette: PaletteView | null, payers: readonly string[] = []): { id: string; label: string }[] {
+  const target = (a: AccountView): boolean => a.status === "open" && !CLASS_TRAITS[a.class].cash && !payers.includes(a.id);
+  const own = forHolder(view, payers) ? [] : view.accounts.filter((a) => target(a) && rights(a.role).sees).map((a) => ({ id: a.id, label: `${a.name} (yours)` }));
+  const run = view.businesses.flatMap((b) => b.managed.filter(target).map((a) => ({ id: a.id, label: `${a.name} (${possessive(b.name, false)})` })));
+  const theirs = new Set([view.party, view.household?.id ?? "", ...own.map((o) => o.id), ...run.map((r) => r.id)]);
+  return [...own, ...run, ...knownPeople(palette).filter((p) => !theirs.has(p.id))];
+}
+
+/**
+ * Why a standing payment from these payers (its From and the account it falls back on) can't go to
+ * `to`, or null: money the party only manages pays for its holder, so never to them, their
+ * household or an account of theirs, nor to their own name typed as an outside payee.
+ */
+export function payeeProblem(view: FinanceView, payers: readonly string[], to: string): string | null {
+  if (to.trim() === "" || !forHolder(view, payers)) return null;
+  const theirs = to === view.party || (view.household !== null && to === view.household.id) || view.accounts.some((a) => a.id === to) || to.trim().toLowerCase() === view.name.trim().toLowerCase();
+  return theirs ? "Money you only manage pays for its holder: it can't pay you, your household or an account of yours." : null;
 }
 
 /** How much of a credit account's limit is in use, percent; null without a limit (a charge card). */
