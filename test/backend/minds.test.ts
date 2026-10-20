@@ -391,6 +391,36 @@ describe("plan times a mind writes", () => {
   });
 });
 
+describe("the model-use presets' minds", () => {
+  test("a preset is a whole minds policy: Lean runs none, Full has no limits, and the player's own prompts and memory stay", async () => {
+    const rig = new Rig({ shipped: true });
+    fakeModels(rig);
+    const chatId = await alderChat(rig);
+    const mine = { prompts: { consolidate: "Fold as {{character}}." }, memory: { notes: { show: 3 } } };
+    rig.body(await rig.send({ type: "lre.settings.set", patch: { minds: mine } }));
+    const minds = async () => (await rig.rt.settings.get(rig.host.userId)).minds;
+
+    rig.body(await rig.send({ type: "lre.settings.set", patch: { modelUse: { preset: "lean" } } }));
+    let s = await minds();
+    expect([s.enabled, s.memoryLevels, s.prompts, s.memory]).toEqual([false, [], mine.prompts, mine.memory]);
+    const before = rig.host.quietCalls.length;
+    await rig.turn(chatId, "Hello.", "They look up.");
+    expect(mindCalls(rig).length).toBe(0);
+    expect(rig.host.quietCalls.slice(before).some((c) => MEMORY.test(c.messages[0]?.content ?? ""))).toBe(false);
+
+    rig.body(await rig.send({ type: "lre.settings.set", patch: { modelUse: { preset: "full" } } }));
+    s = await minds();
+    expect([s.enabled, s.liveLimit, s.refreshLimit, s.memoryLevels, s.skip, s.prompts, s.memory]).toEqual([true, "none", "none", ["live", "near"], { maxBeats: "none", maxMindsPerBeat: "none" }, mine.prompts, mine.memory]);
+    await rig.turn(chatId, "Hello again.", "They nod.");
+    expect(mindCalls(rig).map((c) => MIND.exec(c.messages[0]?.content ?? "")?.[1]).sort()).toEqual(["Danny Okafor", "Priya Nair"]);
+
+    // Standard again: its limits and memory for Live alone, and still the player's own.
+    rig.body(await rig.send({ type: "lre.settings.set", patch: { modelUse: { preset: "standard" } } }));
+    s = await minds();
+    expect([s.enabled, s.liveLimit, s.refreshLimit, s.memoryLevels, s.tokens, s.prompts, s.memory]).toEqual([true, 3, 2, ["live"], 600, mine.prompts, mine.memory]);
+  });
+});
+
 describe("a mind's context", () => {
   test("a moment the player says nothing in tells them why they think now, with the POV or away", async () => {
     const rig = new Rig({ shipped: true });
