@@ -447,3 +447,15 @@ describe("determinism", () => {
     expect(seen.size).toBeGreaterThan(5);
   });
 });
+
+describe("parsing once", () => {
+  test("a formula compiled again with the default limits is the program parsed the first time", () => {
+    const src = "clamp(round(a * 2.5) - b % 4, -12, 12) + parsing_once";
+    const first = compile(src);
+    expect(compile(src)).toBe(first);
+    // Other limits parse it anew, and are held to them.
+    expect(compile(src, { maxNodes: 64 })).not.toBe(first);
+    thrown(ExprLimitError, () => compile(src, { maxNodes: 3 }));
+    expect(runProgram(compile(src), createEnv({ a: 3, b: 7, parsing_once: 1 }))).toBe(6);
+  });
+});
