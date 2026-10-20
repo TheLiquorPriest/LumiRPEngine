@@ -1,6 +1,7 @@
 // Settings (DESIGN §12): a home list of pages in groups, each page under a header with
 // Back. Getting started: Model use, Steps and connections. Defaults for new chats: Realism, Checks,
-// Time. Replies: Changes from the reply, Swipes. Your preset. Display: Show ids. About: Caveats.
+// Time. Replies: Changes from the reply, Swipes. Your preset. Display: Show ids. About: Caveats,
+// Diagnostics (each turn's steps, model calls and failures; behind its own curtain).
 // The page is UI state (`ui.settings.page`), so it holds while the drawer switches modes. A running
 // chat's own rules (realism, checks, time, pins and Upgrade) live in GM → This chat.
 
@@ -21,6 +22,7 @@ import { MindsSection } from "./minds";
 import { PresetPage } from "./preset";
 import { ExtractionPage, SwipesPage } from "./replies";
 import { ModelUseSection, STEP_LABEL, StepsSection } from "./steps";
+import { DiagnosticsPage } from "../diagnostics";
 
 type Page = Exclude<SettingsPage, "home">;
 
@@ -36,6 +38,7 @@ const PAGE: Record<Page, { title: string; subtitle: string; icon: IconName }> = 
   preset: { title: "Preset", subtitle: "Your Lumiverse preset and LumiRPEngine", icon: "scroll" },
   display: { title: "Display", subtitle: "How LumiRPEngine looks on this device", icon: "eye" },
   caveats: { title: "Caveats", subtitle: "What to know", icon: "info" },
+  diagnostics: { title: "Diagnostics", subtitle: "What the engine did each turn, and what failed", icon: "list" },
 };
 
 /** The home list's groups, in order. */
@@ -45,7 +48,7 @@ const GROUPS: readonly { title: string; pages: readonly Page[] }[] = [
   { title: "Replies", pages: ["extraction", "swipes"] },
   { title: "Your preset", pages: ["preset"] },
   { title: "Display", pages: ["display"] },
-  { title: "About", pages: ["caveats"] },
+  { title: "About", pages: ["caveats", "diagnostics"] },
 ];
 
 const PRESET_LABEL: Record<AdjudicationPresetId, string> = { narrative: "Narrative-first", balanced: "Balanced", crunchy: "Crunchy", custom: "Custom" };
@@ -87,6 +90,8 @@ function summaryOf(page: Page, data: SettingsResult, showIds: boolean): { subtit
       return { subtitle: "Show ids", value: showIds ? "On" : "Off" };
     case "caveats":
       return data.caveats.length > 0 ? { subtitle: "Warnings and what to know", badge: <Badge tone="warn">{`${data.caveats.length} active`}</Badge> } : { subtitle: "What to know" };
+    case "diagnostics":
+      return { subtitle: "Each turn's steps, model calls and errors" };
   }
 }
 
@@ -220,6 +225,8 @@ export function Settings() {
       <PresetPage hideJsonBlocks={settings.hideJsonBlocks} patch={patch} busy={busy} />
     ) : page === "display" ? (
       <DisplayPage />
+    ) : page === "diagnostics" ? (
+      <DiagnosticsPage />
     ) : (
       <CaveatsPage data={data} />
     );

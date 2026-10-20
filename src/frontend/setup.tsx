@@ -24,6 +24,7 @@ import { ProtocolClient } from "./protocol-client";
 import type { FrontendToBackend } from "../shared/protocol";
 import { STATE_EVENT, STATE_REQUEST_EVENT, STUDIO_INBOUND, STUDIO_OFFER_EVENT } from "../shared/studio-bridge";
 import type { StudioState } from "../shared/world";
+import { OPEN_DIAGNOSTICS_EVENT } from "./diagnostics";
 import { ENGINE_VERSION, WORLD_FORMAT } from "../shared/world";
 import { timeMarker } from "./requests";
 import { createStore } from "./store";
@@ -154,6 +155,13 @@ export function setup(ctx: SpindleFrontendContext): () => void {
   };
   window.addEventListener(STUDIO_OFFER_EVENT, reviewOffer);
   cleanups.push(() => window.removeEventListener(STUDIO_OFFER_EVENT, reviewOffer));
+  // The activity line's and the error banner's way to Diagnostics: the drawer at Settings → Diagnostics.
+  const showDiagnostics = () => {
+    ui.update((state) => ({ ...state, mode: "settings", settings: { page: "diagnostics" } }));
+    tab.activate();
+  };
+  window.addEventListener(OPEN_DIAGNOSTICS_EVENT, showDiagnostics);
+  cleanups.push(() => window.removeEventListener(OPEN_DIAGNOSTICS_EVENT, showDiagnostics));
 
   // ------------------------------------------------------------ HUD pill and status line
   // How many status lines are mounted above a message input. On a phone the status line does the
