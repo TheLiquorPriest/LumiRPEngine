@@ -7,7 +7,7 @@ import { BANDS, DOMAINS, INTERRUPT_CLASSES } from "../shared/ids";
 import type { JsonObject, JsonValue } from "../shared/json";
 import { hasOwn, isRecord, safeKey } from "../shared/json";
 import type { ExtractionModeView, SettingsResult } from "../shared/protocol";
-import type { ExtractionBounds, ExtractionLearning, ExtractionType, ExtractionTypeStats, HelperDefault, LookupLimits, LorePolicy, ModelUseSettings, PhaseBudget, RealismSettings, SamplingParams, StepConfig, StepLore, StepRoute, TimeSettings, UserSettings } from "../shared/settings";
+import type { ExtractionBounds, ExtractionLearning, ExtractionType, ExtractionTypeStats, HelperDefault, LookupLimits, LorePolicy, ModelUseSettings, PhaseBudget, RealismSettings, RecentHistory, SamplingParams, StepConfig, StepLore, StepRoute, TimeSettings, UserSettings } from "../shared/settings";
 import { DEFAULT_HELPER, EXTRACTION_DEFAULTS, EXTRACTION_LEARNING, EXTRACTION_TYPES, LORE_POLICIES, LORE_TRANSPORTS, REASONING_CHOICES, SAMPLING_PARAMS, SETTINGS_DEFAULTS_REV, SPEED_ACTIVITIES, SPEED_DEFAULT, SPEED_THRESHOLD_MINUTES } from "../shared/settings";
 import type { BoundMode } from "../shared/ids";
 import type { StepPurpose } from "../shared/world";
@@ -309,6 +309,7 @@ function stepOf(v: unknown, base: StepConfig | undefined): StepConfig | undefine
   const route = routeOf(v.route);
   const maxTokens = atLeast(v.maxTokens, 1);
   const lore = loreOf(v.lore) ?? base?.lore;
+  const recent = recentHistoryOf(v.recent) ?? base?.recent;
   return {
     enabled: typeof v.enabled === "boolean" ? v.enabled : (base?.enabled ?? false),
     signals: currentSignals(Array.isArray(v.signals) ? v.signals.filter((s): s is string => typeof s === "string").slice(0, 32).map((s) => s.slice(0, 64)) : (base?.signals ?? [])),
@@ -316,7 +317,16 @@ function stepOf(v: unknown, base: StepConfig | undefined): StepConfig | undefine
     ...(typeof v.template === "string" ? { template: v.template.slice(0, 20_000) } : {}),
     ...(maxTokens !== undefined ? { maxTokens } : {}),
     ...(lore ? { lore: { ...lore } } : {}),
+    ...(recent ? { recent: { ...recent } } : {}),
   };
+}
+
+/** How much history a step reads: whole numbers from 0, with no ceiling; one that isn't reads as unset. */
+function recentHistoryOf(v: unknown): RecentHistory | undefined {
+  if (!isRecord(v)) return undefined;
+  const messages = atLeast(v.messages, 0);
+  const tokens = atLeast(v.tokens, 0);
+  return messages !== undefined && tokens !== undefined ? { messages, tokens } : undefined;
 }
 
 /**

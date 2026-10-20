@@ -381,6 +381,7 @@ export const COLLECTION_SPECS: Record<WorldCollection, FieldSpec[]> = {
   ],
   actions: [
     { kind: "text", key: "label", label: "Label" },
+    { kind: "text", key: "description", label: "Description", multiline: true, optional: true, hint: "What it does, in a line: the model that reads typed messages is told it" },
     {
       kind: "record",
       key: "params",

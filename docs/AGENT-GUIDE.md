@@ -10,6 +10,7 @@ A world is one JSON document in the `lre-world-v1` format, with a published JSON
 - **Parts** are single values: `calendar`, `realism`, `time`, `start` (`{place, at}`), `pov` (the entity the player plays), `currency`, `loreIndex`, `pins`, and the optional `ruleset`, `mapSettings`, `spawnTier` and `spawnCap`.
 - **Kinds** are types with fields and single inheritance (`extends`). The packs define the common ones: `thing` (with `owner` and `place`), `person`, `item`, `container`, `kit`, `vehicle`, `region`, the money kinds (`account`, `card`, `flow`, `job`, `holding`, `property`, `business`, `trust`, `invoice`), and `group` with its `faction`, `family`, `household` and `company`. A world kind with a pack kind's id replaces it whole, so extend a pack kind rather than redefine it.
 - **Entities** are the people and things: `{id, kind, name, tier, fields, relations}`, plus `life`, `lifeKnownBy`, `agent`, `cues`, `class`, `tags`, `visibility` and `knownBy` as needed. Fields hold values; relations are `{type, to, fields?}` links to other entities.
+- **Actions** need a one-line `description`: typed messages are read against each action's label and description.
 - **Formulas** are strings in a small, safe expression language (`lre_docs` with `doc: "expressions"`): `at(pov, 'archive')`, `stage.hale_debt == 'revealed'`, `hour >= 18`. Dice are notation strings (`1d20`).
 - **Money** is always a whole number of the currency's minor units: 4250 is $42.50 in a dollar world. **Times** are local ISO date-times (`2026-09-14T18:30`).
 

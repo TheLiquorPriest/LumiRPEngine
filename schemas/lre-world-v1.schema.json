@@ -517,6 +517,7 @@
       "properties": {
         "id": { "$ref": "#/$defs/id" },
         "label": { "type": "string" },
+        "description": { "type": "string", "description": "what the action does, in a line; interpret's catalog gives it the model" },
         "params": { "type": "object", "additionalProperties": { "$ref": "#/$defs/param" } },
         "requires": { "type": "array", "items": { "$ref": "#/$defs/expr" } },
         "check": { "anyOf": [{ "title": "a check id", "type": "string", "minLength": 1 }, { "$ref": "#/$defs/check" }] },

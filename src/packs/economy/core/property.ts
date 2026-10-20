@@ -849,6 +849,7 @@ export function registerProperty(r: FinanceRegistry): void {
   r.core.action({
     id: "property_buy",
     label: "Buy a property",
+    description: "Buy a property, outright or with a mortgage.",
     pack: "economy",
     params: { property: { type: "ref", ref: "property" }, price: { type: "money", label: "Offer", optional: true }, from: { type: "ref", ref: "account", label: "Pay from", optional: true }, down: { type: "money", label: "Down payment (the rest on a mortgage)", optional: true }, term_months: { type: "number", label: "Mortgage term, months (one a lender offers)", optional: true } },
     requires,
@@ -860,6 +861,7 @@ export function registerProperty(r: FinanceRegistry): void {
   r.core.action({
     id: "property_sell",
     label: "Sell a property",
+    description: "Sell a property you own.",
     pack: "economy",
     params: { property: { type: "ref", ref: "property" }, price: { type: "money", label: "Price" }, buyer: { type: "ref", ref: "person", label: "Buyer", optional: true }, to: { type: "ref", ref: "account", label: "Proceeds to", optional: true } },
     requires,
@@ -871,6 +873,7 @@ export function registerProperty(r: FinanceRegistry): void {
   r.core.action({
     id: "lease_start",
     label: "Let a unit",
+    description: "Let a unit of a property you own to a tenant, for rent each month.",
     pack: "economy",
     params: { property: { type: "ref", ref: "property" }, tenant: { type: "ref", ref: "person", label: "Tenant" }, rent: { type: "money", label: "Rent a month" }, months: { type: "number", label: "Term, months", optional: true }, day: { type: "number", label: "Rent day", optional: true }, unit: { type: "text", label: "Unit", optional: true } },
     requires,
@@ -882,6 +885,7 @@ export function registerProperty(r: FinanceRegistry): void {
   r.core.action({
     id: "lease_end",
     label: "End a lease",
+    description: "End a tenant's lease.",
     pack: "economy",
     params: { lease: { type: "ref", ref: "flow" }, on: { type: "text", label: "Last day (YYYY-MM-DD)", optional: true } },
     requires,

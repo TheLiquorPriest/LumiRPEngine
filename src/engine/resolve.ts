@@ -319,24 +319,15 @@ export function resolveOn(reg: Registry, world: WorldDoc, state: Readonly<WorldS
 }
 
 /**
- * What can fill a ref parameter. A `place` ref offers the places the actor may see, nearest first
- * (joined to here by a route, or the place's parent or a child); any other ref offers entities of
- * the right kind that the param's selector (`of`) matches and the actor may see, at the actor's place or held by the actor.
+ * What can fill a ref parameter. A `place` ref offers the places the actor may see (`placeCandidates`);
+ * any other ref offers entities of the right kind that the param's selector (`of`) matches and the
+ * actor may see, at the actor's place or held by the actor.
  */
 export function paramCandidates(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, action: ActionDef, param: string, actor: EntityId = world.pov): EntityId[] {
   const def = own(action.params, param);
   if (!def || def.type !== "ref") return [];
   const here = placeOfEntity(state, actor);
-  if (def.ref === "place") {
-    const near = new Set(Object.values(world.routes).flatMap((r) => (r.from === here ? [r.to] : r.to === here && r.bidirectional ? [r.from] : [])));
-    const parent = here ? own(world.places, here)?.parent : undefined;
-    if (parent) near.add(parent);
-    for (const p of Object.values(world.places)) if (here && p.parent === here) near.add(p.id);
-    const name = (id: string): string => own(world.places, id)?.name ?? id;
-    return Object.keys(world.places)
-      .filter((id) => id !== here && canSeePlace(reg, world, state, actor, id))
-      .sort((a, b) => Number(near.has(b)) - Number(near.has(a)) || name(a).localeCompare(name(b)));
-  }
+  if (def.ref === "place") return placeCandidates(reg, world, state, actor);
   const filters = candidateFilters(action, param);
   const ctx = filters.length > 0 ? reg.context(world, state) : null;
   const out: EntityId[] = [];
@@ -352,6 +343,19 @@ export function paramCandidates(reg: Registry, world: WorldDoc, state: Readonly<
     out.push(id);
   }
   return out;
+}
+
+/** The places the actor may see besides its own, nearest first (joined to here by a route, or here's parent or a child), then by name. */
+export function placeCandidates(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, actor: EntityId = world.pov): string[] {
+  const here = placeOfEntity(state, actor);
+  const near = new Set(Object.values(world.routes).flatMap((r) => (r.from === here ? [r.to] : r.to === here && r.bidirectional ? [r.from] : [])));
+  const parent = here ? own(world.places, here)?.parent : undefined;
+  if (parent) near.add(parent);
+  for (const p of Object.values(world.places)) if (here && p.parent === here) near.add(p.id);
+  const name = (id: string): string => own(world.places, id)?.name ?? id;
+  return Object.keys(world.places)
+    .filter((id) => id !== here && canSeePlace(reg, world, state, actor, id))
+    .sort((a, b) => Number(near.has(b)) - Number(near.has(a)) || name(a).localeCompare(name(b)));
 }
 
 const EXPR_WORDS = new Set(["and", "or", "not", "true", "false", "null", "self"]);

@@ -267,6 +267,7 @@ export const spacePack: PackDef = {
     r.action({
       id: "go",
       label: "Go to",
+      description: "Walk to another place: a room, a building, a street, another part of town.",
       pack: "space",
       params: { to: { type: "ref", ref: "place", label: "Place" } },
       requires: ["to != here", "level.space < 2 or route_exists(here, to, 'walk')"],
@@ -279,6 +280,7 @@ export const spacePack: PackDef = {
     r.action({
       id: "step",
       label: "Move on the map",
+      description: "Walk to a square of the grid you stand on.",
       pack: "space",
       params: { x: { type: "number" }, y: { type: "number" } },
       requires: ["level.space >= 3", "grid_reachable(here, x, y)"],

@@ -13,7 +13,7 @@ import type { JsonObject } from "../../shared/json";
 import type { ModelUsePresetId } from "../../shared/ids";
 import { PROSE_STEPS } from "../../shared/lore";
 import type { HelperDefault, LorePolicy, LoreTransport, ModelUseSettings, ReasoningChoice, SamplingParams, StepConfig, StepRoute } from "../../shared/settings";
-import { helperCallOf, REASONING_CHOICES, SAMPLING_PARAMS, stepConfigOf, stepLoreOf } from "../../shared/settings";
+import { helperCallOf, REASONING_CHOICES, recentOf, SAMPLING_PARAMS, stepConfigOf, stepLoreOf } from "../../shared/settings";
 import type { CallMeterView } from "../../shared/state-view";
 import type { StepPurpose } from "../../shared/world";
 import { useApp } from "../app";
@@ -215,6 +215,7 @@ export function stepUpdatePatch(purpose: StepPurpose, config: StepConfig): JsonO
   }
   if (config.template !== undefined) out.template = config.template;
   if (config.lore) out.lore = { policy: config.lore.policy, tokens: config.lore.tokens, ...(config.lore.transport ? { transport: config.lore.transport } : {}) };
+  if (config.recent) out.recent = { messages: config.recent.messages, tokens: config.recent.tokens };
   return { modelUse: { preset: "custom", steps: { [purpose]: out } } };
 }
 
@@ -350,6 +351,7 @@ function StepCard(props: { purpose: StepPurpose; config: StepConfig; helper: Hel
   const call = helperCallOf({ ...config, route }, props.helper);
   const lowTokens = route.provider === "helper" && call.maxTokens < LOW_TOKENS;
   const lore = stepLoreOf(config);
+  const recent = recentOf(config);
   const where = route.provider === "decision" ? `Decision · ${route.connectionId ? placeOf(route, props.connections) : "the Decisions API's default"}` : `Helper · ${placeOf(call, props.connections)} · ${paramsSummary(call)}`;
   const summary = config.enabled ? where : "Off";
   const setParam = (key: keyof SamplingParams, value: number | undefined) => {
@@ -411,6 +413,12 @@ function StepCard(props: { purpose: StepPurpose; config: StepConfig; helper: Hel
               ))}
             </Disclosure>
           </>
+        ) : null}
+        {purpose === "interpret" ? (
+          <Field label="Recent messages" help="The messages before yours it reads to work out what you mean (what she offered, there, him), newest first, up to both limits.">
+            <NumberStepper label="Messages" value={recent.messages} min={0} step={1} integer disabled={busy} onChange={(messages) => update({ ...config, recent: { ...recent, messages } })} />
+            <NumberStepper label="Tokens" value={recent.tokens} min={0} step={500} integer disabled={busy} onChange={(tokens) => update({ ...config, recent: { ...recent, tokens } })} />
+          </Field>
         ) : null}
         <Disclosure summary="Advanced: signals and lore">
           <label class="lre-field">

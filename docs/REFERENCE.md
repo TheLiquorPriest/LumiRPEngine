@@ -235,12 +235,12 @@ Version 1 · realism domain `castlife` · requires `gear`, `relationships`, `spa
 
 ### Actions
 
-| Action | Label | Parameters | Check | Outcomes | Minutes | Lexicon |
-|---|---|---|---|---|---|---|
-| `accept_invitation` | Accept invitation | `host: ref → person` |  | `default` | `1` | accept, sure, let's, count me in |
-| `eat` | Eat |  |  | `default` | `30` | eat, have lunch, have dinner, grab a bite |
-| `rest` | Rest |  |  | `default` | `30` | rest, relax, take a break |
-| `sleep` | Go to bed |  |  | `default` | `5` | go to bed, sleep, turn in, hit the sack |
+| Action | Label | Description | Parameters | Check | Outcomes | Minutes | Lexicon |
+|---|---|---|---|---|---|---|---|
+| `accept_invitation` | Accept invitation | Say yes to an invitation someone made you. | `host: ref → person` |  | `default` | `1` | accept, sure, let's, count me in |
+| `eat` | Eat | Have a meal or a snack. |  |  | `default` | `30` | eat, have lunch, have dinner, grab a bite |
+| `rest` | Rest | Rest or relax for a while. |  |  | `default` | `30` | rest, relax, take a break |
+| `sleep` | Go to bed | Go to bed and sleep until morning. |  |  | `default` | `5` | go to bed, sleep, turn in, hit the sack |
 
 ### Events
 
@@ -295,10 +295,10 @@ Version 1 · realism domain none · requires none.
 
 ### Actions
 
-| Action | Label | Parameters | Check | Outcomes | Minutes | Lexicon |
-|---|---|---|---|---|---|---|
-| `end_turn` | End turn |  |  | `default` | `0` | end my turn, end turn |
-| `fight` | Fight | `target: ref` |  | `default` | `0` | start a fight, pick a fight, draw my weapon |
+| Action | Label | Description | Parameters | Check | Outcomes | Minutes | Lexicon |
+|---|---|---|---|---|---|---|---|
+| `end_turn` | End turn | End your turn in a fight. |  |  | `default` | `0` | end my turn, end turn |
+| `fight` | Fight | Start a fight with someone. | `target: ref` |  | `default` | `0` | start a fight, pick a fight, draw my weapon |
 
 ### Events
 
@@ -583,42 +583,42 @@ Extends `thing`.
 
 ### Actions
 
-| Action | Label | Parameters | Check | Outcomes | Minutes | Lexicon |
-|---|---|---|---|---|---|---|
-| `apply_credit` | Apply for credit | `product: text`, `amount?: money`, `term?: number` |  | `default` | `15` | apply for a credit card, apply for a loan, take out a loan |
-| `buy` | Buy | `item: text`, `qty?: number`, `price?: money`, `method?: text`, `cashback?: money` |  | `default` | `5` | buy, purchase, order, pick up a |
-| `card_freeze` | Freeze card | `card: ref → card` |  | `default` | `2` | freeze my card, lock my card |
-| `card_replace` | Replace card | `card: ref → card` |  | `default` | `2` | replace my card, order a new card |
-| `card_report_lost` | Report card lost | `card: ref → card` |  | `default` | `2` | report my card lost, my card was stolen, cancel my card |
-| `card_unfreeze` | Unfreeze card | `card: ref → card` |  | `default` | `2` | unfreeze my card, unlock my card |
-| `deposit_cash` | Deposit cash | `account: ref → account`, `amount: money` |  | `default` | `3` | deposit, pay in cash, bank the cash |
-| `distribute_profit` | Distribute profit | `business: ref → business`, `amount?: money` |  | `default` | `10` | distribute profit, pay dividends, pay out the owners |
-| `exercise_option` | Exercise an option | `holding: ref → holding`, `qty?: number`, `from?: ref → account`, `to?: ref → account` |  | `default` | `2` | exercise the option, exercise my calls, exercise my puts |
-| `flow_create` | Set up a standing payment | `label?: text`, `kind?: text`, `from?: ref → account`, `to?: text`, `amount?: money`, `every?: text`, `interval?: number`, `weekday?: number`, `day?: number`, `month?: number`, `at?: text`, `once?: text`, `start?: text`, `end?: text`, `count?: number`, `shortfall?: text`, `retry_days?: number`, `retries?: number`, `fallback?: text`, `roll?: text`, `category?: text` |  | `default` | `2` | set up a standing order, schedule a payment, set up a recurring transfer |
-| `flow_delete` | Cancel a standing payment | `flow: ref → flow` |  | `default` | `2` | cancel the standing order, stop the recurring payment |
-| `flow_pause` | Pause a standing payment | `flow: ref → flow` |  | `default` | `2` | pause the standing order |
-| `flow_resume` | Resume a standing payment | `flow: ref → flow` |  | `default` | `2` | resume the standing order |
-| `flow_update` | Change a standing payment | `flow: ref → flow`, `label?: text`, `kind?: text`, `from?: ref → account`, `to?: text`, `amount?: money`, `every?: text`, `interval?: number`, `weekday?: number`, `day?: number`, `month?: number`, `at?: text`, `once?: text`, `start?: text`, `end?: text`, `count?: number`, `shortfall?: text`, `retry_days?: number`, `retries?: number`, `fallback?: text`, `roll?: text`, `category?: text`, `clear?: text` |  | `default` | `2` | change the standing order, change the recurring payment |
-| `invoice_issue` | Send an invoice | `business: ref → business`, `customer?: ref`, `customer_name?: text`, `amount: money`, `memo?: text`, `days?: number` |  | `default` | `10` | send an invoice, invoice, bill them |
-| `invoice_pay` | Pay an invoice | `invoice: ref → invoice` |  | `default` | `5` | pay the invoice, settle the bill |
-| `invoice_void` | Void an invoice | `invoice: ref → invoice` |  | `default` | `5` | void the invoice, cancel the invoice, write it off |
-| `job_end` | End a job | `job: ref → job` |  | `default` | `10` | fire, let go, quit, resign, hand in my notice |
-| `job_hire` | Hire | `business: ref → business`, `worker: ref → person`, `title?: text`, `basis?: text`, `rate?: money`, `hours_per_week?: number`, `pay_every?: text` |  | `default` | `15` | hire, take on, give a job to |
-| `job_raise` | Give a raise | `job: ref → job`, `rate: money` |  | `default` | `5` | give a raise, raise the pay, pay more |
-| `lease_end` | End a lease | `lease: ref → flow`, `on?: text` |  | `default` | `10` | end the lease, give notice, move out |
-| `lease_start` | Let a unit | `property: ref → property`, `tenant: ref → person`, `rent: money`, `months?: number`, `day?: number`, `unit?: text` |  | `default` | `20` | rent out, sign a lease, let the apartment |
-| `move_money` | Transfer between accounts | `from: ref → account`, `to: ref → account`, `amount: money` |  | `default` | `2` | transfer, move money, put into savings |
-| `owner_draw` | Take an owner's draw | `business: ref → business`, `amount: money` |  | `default` | `5` | take a draw, pay myself, take money out of the business |
-| `pay` | Pay | `to: ref → person`, `amount: money` |  | `default` | `1` | pay, give money, send money, venmo |
-| `pay_card` | Pay card or loan | `card: ref → account`, `from?: ref → account`, `amount?: money` |  | `default` | `2` | pay off the card, pay the card, pay my credit card, make a loan payment |
-| `property_buy` | Buy a property | `property: ref → property`, `price?: money`, `from?: ref → account`, `down?: money`, `term_months?: number` |  | `default` | `60` | buy the house, buy the property, make an offer on |
-| `property_sell` | Sell a property | `property: ref → property`, `price: money`, `buyer?: ref → person`, `to?: ref → account` |  | `default` | `60` | sell the house, sell the property |
-| `route_distributions` | Route dividends, rent or profits | `holding?: ref → holding`, `property?: ref → property`, `business?: ref → business`, `to?: text` |  | `default` | `1` | reinvest dividends, send dividends to, send the rent to |
-| `set_autopay` | Set autopay | `account: ref → account`, `mode: text`, `from?: ref → account`, `amount?: money` |  | `default` | `2` | set up autopay, turn on autopay, turn off autopay |
-| `set_pay_prefs` | Set how I pay | `tiers: text` |  | `default` | `2` | i'd rather pay with |
-| `stake_sell` | Sell a share of a business | `business: ref → business`, `share: number`, `price: money`, `buyer?: ref → person`, `to?: ref → account` |  | `default` | `60` | sell my share of the business, sell the shop |
-| `trade` | Buy or sell investments | `side?: text`, `holding?: ref → holding`, `asset?: text`, `account?: ref → account`, `qty?: number`, `amount?: money`, `from?: ref → account`, `to?: ref → account`, `right?: text`, `strike?: money`, `expiry?: text` |  | `default` | `2` | invest, buy stocks, buy shares, sell stocks, sell shares, cash out, buy an option |
-| `withdraw_cash` | Withdraw cash | `account: ref → account`, `amount: money` |  | `default` | `3` | withdraw, take out cash, hit the atm, get cash |
+| Action | Label | Description | Parameters | Check | Outcomes | Minutes | Lexicon |
+|---|---|---|---|---|---|---|---|
+| `apply_credit` | Apply for credit | Apply for a credit card, a credit line or a loan. | `product: text`, `amount?: money`, `term?: number` |  | `default` | `15` | apply for a credit card, apply for a loan, take out a loan |
+| `buy` | Buy | Buy something: food, drinks, goods or a service, here or delivered. | `item: text`, `qty?: number`, `price?: money`, `method?: text`, `cashback?: money` |  | `default` | `5` | buy, purchase, order, pick up a |
+| `card_freeze` | Freeze card | Freeze a card so it can't be used. | `card: ref → card` |  | `default` | `2` | freeze my card, lock my card |
+| `card_replace` | Replace card | Order a replacement card. | `card: ref → card` |  | `default` | `2` | replace my card, order a new card |
+| `card_report_lost` | Report card lost | Report a card lost or stolen. | `card: ref → card` |  | `default` | `2` | report my card lost, my card was stolen, cancel my card |
+| `card_unfreeze` | Unfreeze card | Unfreeze a frozen card. | `card: ref → card` |  | `default` | `2` | unfreeze my card, unlock my card |
+| `deposit_cash` | Deposit cash | Put cash into a bank account. | `account: ref → account`, `amount: money` |  | `default` | `3` | deposit, pay in cash, bank the cash |
+| `distribute_profit` | Distribute profit | Pay a business's profit out to its owners. | `business: ref → business`, `amount?: money` |  | `default` | `10` | distribute profit, pay dividends, pay out the owners |
+| `exercise_option` | Exercise an option | Exercise an option contract you hold. | `holding: ref → holding`, `qty?: number`, `from?: ref → account`, `to?: ref → account` |  | `default` | `2` | exercise the option, exercise my calls, exercise my puts |
+| `flow_create` | Set up a standing payment | Set up a standing payment: a bill, a regular transfer, an allowance. | `label?: text`, `kind?: text`, `from?: ref → account`, `to?: text`, `amount?: money`, `every?: text`, `interval?: number`, `weekday?: number`, `day?: number`, `month?: number`, `at?: text`, `once?: text`, `start?: text`, `end?: text`, `count?: number`, `shortfall?: text`, `retry_days?: number`, `retries?: number`, `fallback?: text`, `roll?: text`, `category?: text` |  | `default` | `2` | set up a standing order, schedule a payment, set up a recurring transfer |
+| `flow_delete` | Cancel a standing payment | Cancel a standing payment. | `flow: ref → flow` |  | `default` | `2` | cancel the standing order, stop the recurring payment |
+| `flow_pause` | Pause a standing payment | Pause a standing payment. | `flow: ref → flow` |  | `default` | `2` | pause the standing order |
+| `flow_resume` | Resume a standing payment | Resume a paused standing payment. | `flow: ref → flow` |  | `default` | `2` | resume the standing order |
+| `flow_update` | Change a standing payment | Change a standing payment: its amount, its schedule or its accounts. | `flow: ref → flow`, `label?: text`, `kind?: text`, `from?: ref → account`, `to?: text`, `amount?: money`, `every?: text`, `interval?: number`, `weekday?: number`, `day?: number`, `month?: number`, `at?: text`, `once?: text`, `start?: text`, `end?: text`, `count?: number`, `shortfall?: text`, `retry_days?: number`, `retries?: number`, `fallback?: text`, `roll?: text`, `category?: text`, `clear?: text` |  | `default` | `2` | change the standing order, change the recurring payment |
+| `invoice_issue` | Send an invoice | Bill a customer from a business you run. | `business: ref → business`, `customer?: ref`, `customer_name?: text`, `amount: money`, `memo?: text`, `days?: number` |  | `default` | `10` | send an invoice, invoice, bill them |
+| `invoice_pay` | Pay an invoice | Pay an invoice billed to you or to a business you run. | `invoice: ref → invoice` |  | `default` | `5` | pay the invoice, settle the bill |
+| `invoice_void` | Void an invoice | Cancel an invoice that a business you run sent. | `invoice: ref → invoice` |  | `default` | `5` | void the invoice, cancel the invoice, write it off |
+| `job_end` | End a job | End a job: quit your own, or let someone go from a business you run. | `job: ref → job` |  | `default` | `10` | fire, let go, quit, resign, hand in my notice |
+| `job_hire` | Hire | Hire someone into a business you run, with a title and pay. | `business: ref → business`, `worker: ref → person`, `title?: text`, `basis?: text`, `rate?: money`, `hours_per_week?: number`, `pay_every?: text` |  | `default` | `15` | hire, take on, give a job to |
+| `job_raise` | Give a raise | Change the pay of someone who works for a business you run. | `job: ref → job`, `rate: money` |  | `default` | `5` | give a raise, raise the pay, pay more |
+| `lease_end` | End a lease | End a tenant's lease. | `lease: ref → flow`, `on?: text` |  | `default` | `10` | end the lease, give notice, move out |
+| `lease_start` | Let a unit | Let a unit of a property you own to a tenant, for rent each month. | `property: ref → property`, `tenant: ref → person`, `rent: money`, `months?: number`, `day?: number`, `unit?: text` |  | `default` | `20` | rent out, sign a lease, let the apartment |
+| `move_money` | Transfer between accounts | Move money between your own accounts: checking, savings, cash. | `from: ref → account`, `to: ref → account`, `amount: money` |  | `default` | `2` | transfer, move money, put into savings |
+| `owner_draw` | Take an owner's draw | Take money out of a business you own, for yourself. | `business: ref → business`, `amount: money` |  | `default` | `5` | take a draw, pay myself, take money out of the business |
+| `pay` | Pay | Give someone money: settle up, pay them back, tip them. | `to: ref → person`, `amount: money` |  | `default` | `1` | pay, give money, send money, venmo |
+| `pay_card` | Pay card or loan | Pay off some or all of a card or loan balance. | `card: ref → account`, `from?: ref → account`, `amount?: money` |  | `default` | `2` | pay off the card, pay the card, pay my credit card, make a loan payment |
+| `property_buy` | Buy a property | Buy a property, outright or with a mortgage. | `property: ref → property`, `price?: money`, `from?: ref → account`, `down?: money`, `term_months?: number` |  | `default` | `60` | buy the house, buy the property, make an offer on |
+| `property_sell` | Sell a property | Sell a property you own. | `property: ref → property`, `price: money`, `buyer?: ref → person`, `to?: ref → account` |  | `default` | `60` | sell the house, sell the property |
+| `route_distributions` | Route dividends, rent or profits | Choose where dividends, rent or profits are paid: reinvested, or into an account. | `holding?: ref → holding`, `property?: ref → property`, `business?: ref → business`, `to?: text` |  | `default` | `1` | reinvest dividends, send dividends to, send the rent to |
+| `set_autopay` | Set autopay | Set how a card or loan pays itself each month. | `account: ref → account`, `mode: text`, `from?: ref → account`, `amount?: money` |  | `default` | `2` | set up autopay, turn on autopay, turn off autopay |
+| `set_pay_prefs` | Set how I pay | Set the order in which you prefer to pay: cash, debit, credit. | `tiers: text` |  | `default` | `2` | i'd rather pay with |
+| `stake_sell` | Sell a share of a business | Sell part of your share of a business. | `business: ref → business`, `share: number`, `price: money`, `buyer?: ref → person`, `to?: ref → account` |  | `default` | `60` | sell my share of the business, sell the shop |
+| `trade` | Buy or sell investments | Buy or sell investments: stocks, funds, bonds, crypto. | `side?: text`, `holding?: ref → holding`, `asset?: text`, `account?: ref → account`, `qty?: number`, `amount?: money`, `from?: ref → account`, `to?: ref → account`, `right?: text`, `strike?: money`, `expiry?: text` |  | `default` | `2` | invest, buy stocks, buy shares, sell stocks, sell shares, cash out, buy an option |
+| `withdraw_cash` | Withdraw cash | Take cash out of a bank account. | `account: ref → account`, `amount: money` |  | `default` | `3` | withdraw, take out cash, hit the atm, get cash |
 
 ### Events
 
@@ -747,18 +747,18 @@ Extends `container`.
 
 ### Actions
 
-| Action | Label | Parameters | Check | Outcomes | Minutes | Lexicon |
-|---|---|---|---|---|---|---|
-| `drop` | Drop | `item: ref → item` |  | `default` | `1` | drop, put down, leave |
-| `give` | Give | `item: ref → item`, `to: ref → person` |  | `default` | `1` | give, hand, pass |
-| `lend` | Lend | `item: ref → item`, `to: ref → person`, `days?: number`, `until?: text` |  | `default` | `2` | lend, loan, let borrow |
-| `lose` | Lose something | `item: ref → item` |  | `default` | `1` | lost my, lose, can't find my, is gone, is missing |
-| `reclaim` | Take back | `item: ref → item` |  | `default` | `5` | take back, get back, reclaim |
-| `remove` | Take off | `item: ref → item` |  | `default` | `2` | take off, remove, unequip |
-| `take` | Take | `item: ref → item` |  | `default` | `1` | take, pick up, grab |
-| `take_piece` | Take from a kit | `kit: ref → kit`, `piece: text` |  | `default` | `1` | take the, grab a, get a |
-| `use` | Use | `item: ref → item` |  | `default` | `5` | use, apply |
-| `wear` | Wear or equip | `item: ref → item` |  | `default` | `2` | wear, put on, equip |
+| Action | Label | Description | Parameters | Check | Outcomes | Minutes | Lexicon |
+|---|---|---|---|---|---|---|---|
+| `drop` | Drop | Put down something you carry, here. | `item: ref → item` |  | `default` | `1` | drop, put down, leave |
+| `give` | Give | Hand something you carry to someone here, for keeps. | `item: ref → item`, `to: ref → person` |  | `default` | `1` | give, hand, pass |
+| `lend` | Lend | Lend something of yours to someone, for some days or until a time. | `item: ref → item`, `to: ref → person`, `days?: number`, `until?: text` |  | `default` | `2` | lend, loan, let borrow |
+| `lose` | Lose something | Something you own or carry is lost or gone, whereabouts unknown. | `item: ref → item` |  | `default` | `1` | lost my, lose, can't find my, is gone, is missing |
+| `reclaim` | Take back | Take back something of yours that you lent out. | `item: ref → item` |  | `default` | `5` | take back, get back, reclaim |
+| `remove` | Take off | Take off something you wear or have equipped. | `item: ref → item` |  | `default` | `2` | take off, remove, unequip |
+| `take` | Take | Pick up something that is here. | `item: ref → item` |  | `default` | `1` | take, pick up, grab |
+| `take_piece` | Take from a kit | Take one piece, such as a tool or a part, out of a kit. | `kit: ref → kit`, `piece: text` |  | `default` | `1` | take the, grab a, get a |
+| `use` | Use | Use an item you carry or can reach. | `item: ref → item` |  | `default` | `5` | use, apply |
+| `wear` | Wear or equip | Put on or equip clothing, armor or gear. | `item: ref → item` |  | `default` | `2` | wear, put on, equip |
 
 ### Proposals
 
@@ -872,10 +872,10 @@ No fields of its own.
 
 ### Actions
 
-| Action | Label | Parameters | Check | Outcomes | Minutes | Lexicon |
-|---|---|---|---|---|---|---|
-| `chat_with` | Chat with | `target: ref → person` |  | `default` | `15` | chat with, talk to, catch up with |
-| `give_gift` | Give a gift | `target: ref → person` |  | `default` | `5` | give a gift, surprise |
+| Action | Label | Description | Parameters | Check | Outcomes | Minutes | Lexicon |
+|---|---|---|---|---|---|---|---|
+| `chat_with` | Chat with | Spend a while talking with someone here. | `target: ref → person` |  | `default` | `15` | chat with, talk to, catch up with |
+| `give_gift` | Give a gift | Give someone here a present. | `target: ref → person` |  | `default` | `5` | give a gift, surprise |
 
 ### Events
 
@@ -917,9 +917,9 @@ Version 1 · realism domain `sheets` · requires `space`.
 
 ### Actions
 
-| Action | Label | Parameters | Check | Outcomes | Minutes | Lexicon |
-|---|---|---|---|---|---|---|
-| `attempt` | Attempt | `stat: text`, `difficulty?: text` | `1d20` | `failure`, `great`, `success` | `5` | try to, attempt, check |
+| Action | Label | Description | Parameters | Check | Outcomes | Minutes | Lexicon |
+|---|---|---|---|---|---|---|---|
+| `attempt` | Attempt | Try something hard that one of your stats decides: climb, force, persuade, notice. | `stat: text`, `difficulty?: text` | `1d20` | `failure`, `great`, `success` | `5` | try to, attempt, check |
 
 ### Proposals
 
@@ -1006,10 +1006,10 @@ Extends `thing`.
 
 ### Actions
 
-| Action | Label | Parameters | Check | Outcomes | Minutes | Lexicon |
-|---|---|---|---|---|---|---|
-| `go` | Go to | `to: ref → place` |  | `default` | `level.space < 2 ? (level.space < 1 ? 0 : 15) : travel_minutes(here, to, 'walk')` | go to, walk to, head to, head over to, leave for |
-| `step` | Move on the map | `x: number`, `y: number` |  | `default` | `grid_minutes(here, x, y)` | walk over to, cross to, move to |
+| Action | Label | Description | Parameters | Check | Outcomes | Minutes | Lexicon |
+|---|---|---|---|---|---|---|---|
+| `go` | Go to | Walk to another place: a room, a building, a street, another part of town. | `to: ref → place` |  | `default` | `level.space < 2 ? (level.space < 1 ? 0 : 15) : travel_minutes(here, to, 'walk')` | go to, walk to, head to, head over to, leave for |
+| `step` | Move on the map | Walk to a square of the grid you stand on. | `x: number`, `y: number` |  | `default` | `grid_minutes(here, x, y)` | walk over to, cross to, move to |
 
 ### Events
 
@@ -1046,9 +1046,9 @@ Version 1 · realism domain none · requires none.
 
 ### Actions
 
-| Action | Label | Parameters | Check | Outcomes | Minutes | Lexicon |
-|---|---|---|---|---|---|---|
-| `answer` | Answer | `puzzle?: text`, `answer: text`, `decision?: number` |  | `default` | `1` | the answer is, i think it's, solve, answer, the code is, the combination is, try the combination, dial, enter the code |
+| Action | Label | Description | Parameters | Check | Outcomes | Minutes | Lexicon |
+|---|---|---|---|---|---|---|---|
+| `answer` | Answer | Give your answer to a puzzle: a riddle, a code, a combination. | `puzzle?: text`, `answer: text`, `decision?: number` |  | `default` | `1` | the answer is, i think it's, solve, answer, the code is, the combination is, try the combination, dial, enter the code |
 
 ### Events
 
@@ -1099,12 +1099,12 @@ Extends `container`.
 
 ### Actions
 
-| Action | Label | Parameters | Check | Outcomes | Minutes | Lexicon |
-|---|---|---|---|---|---|---|
-| `drive` | Drive | `vehicle: ref → vehicle`, `to: ref → place` |  | `default` | `drive_minutes(vehicle, to)` | drive to, drive over to, take the truck, take the car, sail to, ride to |
-| `refuel` | Refuel | `vehicle: ref → vehicle` |  | `default` | `10` | refuel, fill up, gas up, charge the car |
-| `repair_vehicle` | Repair | `vehicle: ref → vehicle` |  | `default` | `180` | repair, fix the truck, fix the car, get it towed |
-| `service_vehicle` | Service | `vehicle: ref → vehicle` |  | `default` | `60` | service, oil change, tune up |
+| Action | Label | Description | Parameters | Check | Outcomes | Minutes | Lexicon |
+|---|---|---|---|---|---|---|---|
+| `drive` | Drive | Drive, ride or sail a vehicle you own or may use to another place. | `vehicle: ref → vehicle`, `to: ref → place` |  | `default` | `drive_minutes(vehicle, to)` | drive to, drive over to, take the truck, take the car, sail to, ride to |
+| `refuel` | Refuel | Fill up a vehicle's tank, or charge it. | `vehicle: ref → vehicle` |  | `default` | `10` | refuel, fill up, gas up, charge the car |
+| `repair_vehicle` | Repair | Have a damaged or broken-down vehicle repaired. | `vehicle: ref → vehicle` |  | `default` | `180` | repair, fix the truck, fix the car, get it towed |
+| `service_vehicle` | Service | Have a vehicle serviced: an oil change, a tune-up. | `vehicle: ref → vehicle` |  | `default` | `60` | service, oil change, tune up |
 
 ### Panels and slots
 

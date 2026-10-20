@@ -274,6 +274,7 @@ export const sheetsPack: PackDef = {
     r.action({
       id: "attempt",
       label: "Attempt",
+      description: "Try something hard that one of your stats decides: climb, force, persuade, notice.",
       pack: "sheets",
       params: { stat: { type: "text", label: "Stat" }, difficulty: { type: "text", optional: true, label: "Difficulty (easy, moderate, hard, very hard or a number)" } },
       requires: ["level.sheets >= 1"],

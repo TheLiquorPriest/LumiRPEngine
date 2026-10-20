@@ -7,12 +7,11 @@ import type { ChatId, ChipId, EntityId, InterruptClass, MessageId, RevisionId, U
 import type { JsonObject, JsonValue } from "../shared/json";
 import { heldBy } from "../shared/finance";
 import { hasOwn, isRecord } from "../shared/json";
-import { tableChoices } from "../shared/tables";
 import type { ChatRun, EventRef, GenerationKind, LedgerEvent, PostEvent, TimelapseTarget } from "../shared/ledger";
 import { LEDGER_NAMESPACE } from "../shared/ledger";
 import { neutralizeMacros } from "../shared/macros";
 import type { ExtractionType, StepConfig, UserSettings } from "../shared/settings";
-import { EXTRACTION_TYPES, helperCallOf, stepLoreOf } from "../shared/settings";
+import { EXTRACTION_TYPES, helperCallOf, recentOf, stepLoreOf } from "../shared/settings";
 import type { ChipAction, ContextGeneration, ContextView, LoreStepTrace, StateView } from "../shared/state-view";
 import type { ActionDef, AdjudicationDef, SectionTemplate, StepPurpose, WorldDoc } from "../shared/world";
 import { formatMoney, offersAction } from "../shared/world";
@@ -20,7 +19,6 @@ import { MINDS_EVENTS, MINDS_SLOT, worldMindsOf, type MindCallTrace, type MindEv
 import { firedTimeout, TimeoutFired, TIMEOUTS } from "../shared/timeouts";
 import { mindsOn, mindsStepConfig, postMinds, preMinds, runMinds, type MindsDeps, type RunMindsResult } from "./minds";
 import { runSkip, type BeatMinds, type SkipRun } from "./skip";
-import { fightOffers } from "../packs/combat/core/index";
 import { fitMindLines, mindLines } from "../packs/minds/core/section";
 import { matchCatalog, transferCents } from "../packs/economy/core/index";
 import { itemName, stem } from "../packs/economy/core/items";
@@ -31,7 +29,7 @@ import { checkOf } from "../engine/checks";
 import { applyTimeAdvance, fightHoldsClock, IN_FIGHT, parseOverrides, parseTarget } from "../engine/time";
 import { EXTERNAL_ACCOUNT_PREFIX } from "../engine/events";
 import { boundProposal } from "../engine/bounds";
-import { calendarOf, clockOfStamp, dateAt, formatClock, formatHHMM, formatStamp, nextTimeOfDay, placeOffset, weekdayName } from "../engine/calendar";
+import { calendarOf, clockOfStamp, dateAt, formatClock, formatHHMM, nextTimeOfDay, placeOffset, weekdayName } from "../engine/calendar";
 import type { ChainMessage } from "../engine/ledger/chain";
 import { LedgerFold } from "../engine/ledger/fold";
 import type { LedgerCore, LedgerEnv } from "../engine/ledger/journal";
@@ -49,7 +47,7 @@ import { secretLoreNames } from "../engine/lore";
 import { pinsFor, type PinnedText } from "../engine/lore-pins";
 import { namesHidden, playerKnows } from "../engine/player-events";
 import { canSeeEntity, canSeePlace, findLeaks, namesAny, playerTrack, povPlace, shownTrackId, unrevealedSecrets, unseenPlaceNames } from "../engine/visibility";
-import { openPuzzle, openPuzzles } from "../packs/story/core/index";
+import { openPuzzle } from "../packs/story/core/index";
 import { REGARD_CHANNEL_CAP } from "../packs/relationships/core/index";
 import { Working } from "../engine/working";
 import type { PresetCard, TemplateInfo } from "../shared/protocol";
@@ -64,7 +62,9 @@ import { effectiveMode, recordOutcome, SettingsStore } from "./settings-store";
 import { startMarkersFrom } from "./start-markers";
 import { StepLore, ToolSupport, type LoreInputs, type LookupTransport } from "./lore-steps";
 import { readPins } from "./lore-pins";
-import { CallMeter, dedupeProposals, extract, interpret, saidPayMethod, Steps } from "./steps";
+import { interpretCatalog, interpretScene, timelapseEntry } from "./interpret-context";
+import { failureWords } from "./requirement-words";
+import { CallMeter, dedupeProposals, extract, interpret, saidPayMethod, Steps, type InterpretContext, type InterpretRead } from "./steps";
 import { PlanNotes } from "./plan-notes";
 import { OutcomeNotes } from "./outcome-notes";
 import { InspectorLog, type InspectorRecord } from "./inspector-log";
@@ -789,7 +789,9 @@ export class Runtime implements TurnHooks {
       timelapse: isRecord(recorded) && recorded.action === TIMELAPSE_ACTION,
     };
     const at = await this.lorePhase("pre", p.generationId, input.userId, render.world, render.state, budget, text, preset.guidance);
-    const intentTask = text.trim() === "" || bridge.hasIntent(text) ? Promise.resolve() : this.readIntent(bridge, text, recorded, render, all, settings, facts, budget, at);
+    // `interpret` reads the messages before the typed one too, to tell what it refers to (DESIGN §5.2).
+    const earlier = lastUser ? before.slice(0, before.indexOf(lastUser)) : before;
+    const intentTask = text.trim() === "" || bridge.hasIntent(text) ? Promise.resolve() : this.readIntent(bridge, text, recorded, render, all, earlier, settings, facts, budget, at);
     // The judge's call for the player's own action comes before npc.choose's (DESIGN §11). Present
     // agents' choices run beside the intent only while a call stays free for the judge; otherwise
     // they take what is left once it has run. Before `interpret` names the action, the judge may
@@ -966,8 +968,12 @@ export class Runtime implements TurnHooks {
     };
   }
 
-  /** The turn's intent: a recorded palette or chip action, else `interpret` (helper JSON, or a Decision choice over the actions). */
-  private async readIntent(bridge: TurnBridge, text: string, recorded: JsonValue | undefined, render: { world: WorldDoc; state: WorldState }, all: ActionDef[], settings: UserSettings, facts: SignalFacts, budget: StepBudget, at: LorePhase): Promise<void> {
+  /**
+   * The turn's intent: a recorded palette or chip action, else `interpret` (helper JSON, or a
+   * Decision choice over the actions), which reads what the POV can do now, the scene and places as
+   * it knows them, and the messages before this one (`earlier`, DESIGN §5.2).
+   */
+  private async readIntent(bridge: TurnBridge, text: string, recorded: JsonValue | undefined, render: { world: WorldDoc; state: WorldState }, all: ActionDef[], earlier: readonly ChainMessage[], settings: UserSettings, facts: SignalFacts, budget: StepBudget, at: LorePhase): Promise<void> {
     const userId = at.userId;
     // A palette or chip action records its intent on the user message (dispatch `lre.action`); it
     // survives restarts and a bridge that never saw the request.
@@ -979,48 +985,38 @@ export class Runtime implements TurnHooks {
       bridge.setIntent(text, recorded.action === TIMELAPSE_ACTION ? (target ? timelapseIntent(target, overrides) : null) : { action: recorded.action, params, probabilities: { [recorded.action]: 1 } });
       return;
     }
-    // Letting time pass is always in the catalog, so a world without actions still interprets.
     const run = runsOf(settings.modelUse, render.world, "interpret", facts, { guidance: at.guidance })[0];
     if (!run || !budget.take()) {
       bridge.setIntent(text, null);
       return;
     }
-    const scene = { place: placeOfEntity(render.state, render.world.pov) };
-    // Letting time pass is an engine action too ("I sleep until the next morning", "skip ahead to
-    // Friday at 6 PM"). The model is told the day and time as the HUD shows them (the place's time
-    // zone), so it can name a stated day and time exactly.
-    const dayParts = render.world.calendar.dayParts.map((d) => d.id);
-    const cal = calendarOf(render.world);
-    const offset = placeOffset(render.world, render.state.clock, placeOfEntity(render.state, render.world.pov));
-    const now = `${weekdayName(cal, dateAt(cal, render.state.clock + offset).weekday)} ${formatStamp(cal, render.state.clock, offset)}`;
-    const timelapseEntry = { id: TIMELAPSE_ACTION, label: `Let time pass (wait, sleep, skip ahead): minutes for a stated duration; until one of ${[...dayParts, "shift", "commitment"].join(", ")} ("next <day part>" for the following day's); or at a stated day and time, as "YYYY-MM-DD HH:MM" (it is now ${now})`, params: ["minutes", "until", "at"], lexicon: TIMELAPSE_LEXICON };
-    // Answer lists the open puzzles the player can see, by their rows' ids, so a typed "I dial 1887" finds one and the id the model gives for it is the row's.
-    const puzzles = openPuzzleTitles(this.registry, render.world, render.state);
-    const labelOf = (a: ActionDef): string => (a.pack === "story" && a.id === "answer" && puzzles.length > 0 ? `${a.label} (open: ${puzzles.join("; ")})` : a.label);
-    // A param naming a table row lists the rows' ids, so the helper answers with one ("athletics", not
-    // "climbing"); the list keeps to the param's own parentheses, so the next param can't read as a row.
-    const paramsOf = (a: ActionDef): string[] => Object.entries(a.params).map(([name, p]) => (p.table !== undefined ? `${name} (one of: ${tableChoices(hasOwn(render.world.tables, p.table) ? render.world.tables[p.table] : undefined).map((c) => c.key).join(" | ")})` : name));
-    // Only what fits the fight's state for the POV (Fight outside one, attacks in one), as the Combat tab lists them.
-    const offered = all.filter((a) => fightOffers(render.world, render.state, a));
-    const catalog = [...offered.map((a) => ({ id: a.id, label: labelOf(a), params: paramsOf(a), ...(a.lexicon ? { lexicon: a.lexicon } : {}) })), timelapseEntry];
-    let result: InterpretOutput | null;
+    // The actions the POV can take now, as the palette offers them, and letting time pass, which is
+    // always there, so a world without actions still interprets.
+    const mayKnow = (id: EntityId): boolean => povMayKnow(this.registry, render.world, render.state, id);
+    const offered = interpretCatalog(this.registry, render.world, render.state, all, mayKnow);
+    const catalog = [...offered.entries.map((o) => o.entry), timelapseEntry(render.world, render.state)];
+    const context: InterpretContext = {
+      world: render.world,
+      pov: { id: render.world.pov, name: render.state.entities[render.world.pov]?.name ?? render.world.pov },
+      scene: interpretScene(this.registry, render.world, render.state, { mayKnow, named: offered.named, earlier, recent: recentOf(run.config), hideJson: settings.hideJsonBlocks }),
+    };
+    let result: InterpretRead | null;
     const lore = this.stepLore(run, at, { text: `${text}\n${this.trackWords(render.world, render.state)}`, links: this.sceneLinks(render.world, render.state) });
     if (run.config.route?.provider === "decision") {
       // A Decision route answers which action (or none); a helper call fills its params when it has any.
-      const criteria: Record<string, string> = { none: "Not an action: speech, a request, a feeling or a recap." };
-      for (const a of offered) criteria[a.id] = labelOf(a);
-      criteria[TIMELAPSE_ACTION] = timelapseEntry.label;
-      const answer = await this.steps.decide("interpret", { text, scene }, { action: { type: "choice", instructions: run.template?.template ?? "Which engine action does the player character deliberately take in this typed input?", criteria } }, run.config, userId, budget.signal, lore, run.guidance);
+      const criteria: Record<string, string> = { none: "Not an action: speech, out-of-character text, a request, a feeling or a recap." };
+      for (const c of catalog) criteria[c.id] = c.description ? `${c.label}: ${c.description}` : c.label;
+      const answer = await this.steps.decide("interpret", { text, scene: context.scene.lines, recent: context.scene.recent }, { action: { type: "choice", instructions: run.template?.template ?? "Which engine action does the player character deliberately take in this typed input?", criteria } }, run.config, userId, budget.signal, lore, run.guidance);
       const a = answer?.answers.action;
-      const chosen = a?.type === "choice" && a.choice !== "none" ? (a.choice === TIMELAPSE_ACTION ? { id: TIMELAPSE_ACTION, params: { minutes: null, until: null, at: null } } : offered.find((x) => x.id === a.choice)) : undefined;
+      const chosen = a?.type === "choice" && a.choice !== "none" ? catalog.find((c) => c.id === a.choice) : undefined;
       if (!chosen) result = a?.type === "choice" ? { action: null, params: {}, probabilities: a.probabilities } : null;
-      else if (Object.keys(chosen.params).length === 0) result = { action: chosen.id, params: {}, probabilities: a?.type === "choice" ? a.probabilities : { [chosen.id]: 1 } };
+      else if (chosen.params.length === 0) result = { action: chosen.id, params: {}, probabilities: a?.type === "choice" ? a.probabilities : { [chosen.id]: 1 } };
       // With no call left to fill its params, the action went unread, as when the call fails: a chip
       // says so, with Retry, rather than blaming the player for a place or person they did name.
       else if (!budget.take()) result = null;
-      else result = await interpret(this.steps, text, povWorld(this.registry, render.world, render.state), catalog.filter((c) => c.id === chosen.id), scene, { ...run.config, route: { provider: "helper", connectionId: null, model: null } }, userId, budget.signal, undefined, lore, run.guidance);
+      else result = await interpret(this.steps, text, context, [chosen], { ...run.config, route: { provider: "helper", connectionId: null, model: null } }, userId, budget.signal, undefined, lore, run.guidance);
     } else {
-      result = await interpret(this.steps, text, povWorld(this.registry, render.world, render.state), catalog, scene, run.config, userId, budget.signal, run.template ? renderTemplate(run.template.template, { world: render.world.name, pov: render.state.entities[render.world.pov]?.name ?? render.world.pov }) : undefined, lore, run.guidance);
+      result = await interpret(this.steps, text, context, catalog, run.config, userId, budget.signal, run.template ? renderTemplate(run.template.template, { world: render.world.name, pov: render.state.entities[render.world.pov]?.name ?? render.world.pov }) : undefined, lore, run.guidance);
     }
     // The call failed (a transient failure already had its second try): the turn runs as plain
     // roleplay, and a chip says the action went unread, with a Retry that runs the turn again.
@@ -1031,6 +1027,7 @@ export class Runtime implements TurnHooks {
       bridge.setUnread(text);
       return;
     }
+    if (result.reason) this.host.log("info", `[LumiRPEngine] interpret: no action (${result.reason})`, userId);
     // `interpret` may read secret lore its audience allows (DESIGN §7): what it returns becomes chips,
     // Journal lines and the Outcome, so an answer carrying a secret's unrevealed text is played as
     // roleplay. Words the player typed are theirs to repeat. Its further actions are checked on their own.
@@ -2213,25 +2210,6 @@ export const TYPE_LABELS: Record<ExtractionType, string> = {
   life: "Life and death",
 };
 
-/**
- * The puzzles the player can see that take an answer now (`openPuzzles`, up to six), as interpret's
- * Answer label names them: each by the id its quest log row goes by, then as the row shows it,
- * "id: Puzzle — stage", so the world id the model is told to give for `puzzle` is the row's own (a
- * masked secret's stand-in). A masked secret reads "Something is going on" with no stage, like any
- * other, so its cue stands in for the stage: all that tells it from another, and never its own label.
- */
-function openPuzzleTitles(registry: Registry, world: WorldDoc, state: Readonly<WorldState>): string[] {
-  return openPuzzles(registry.context(world, state))
-    .slice(0, 6)
-    .map(({ shown }) => {
-      const where = shown.stage || shown.cue;
-      return `${shown.id}: ${where ? `${shown.label} — ${where}` : shown.label}`;
-    });
-}
-
-/** Typed phrases that let time pass: the timelapse's lexicon in `interpret`'s catalog. */
-const TIMELAPSE_LEXICON = ["wait until", "sleep until", "next morning", "skip ahead", "skip to", "pass the time", "sleep through", "hours later", "days later", "wait for"];
-
 /** The longest typed timelapse a turn runs on its own (minutes); longer ones are offered as a chip. */
 export const INTERPRETED_TIMELAPSE_CAP = 1440;
 
@@ -2270,34 +2248,14 @@ export function interpretedTarget(params: JsonObject, world: WorldDoc, state: Re
   return minutes > 0 ? { type: "duration", minutes } : null;
 }
 
-/** Why an action couldn't run, for the player: a requirement isn't shown as its expression ("requires to != here"). */
+/** Why an action couldn't run, for the player: a requirement isn't shown as its expression ("requires to != here"), only in the words its shape has (`failureWords`). */
 export function playerReason(failed: { code: string; reason: string; requirement?: string }): string {
   if (failed.code !== "requirement") return failed.reason;
   const req = failed.requirement ?? failed.reason.replace(/^requires\s+/, "");
   if (/\bto\s*!=\s*here\b/.test(req)) return "You're already there.";
-  const why = REQUIREMENT_WORDS.find(([pattern]) => pattern.test(req))?.[1];
+  const why = failureWords(req);
   return why ? `Not possible here and now: ${why}.` : "Not possible here and now.";
 }
-
-/** Readable reasons for the requirement shapes packs use (the expression itself is never shown). */
-const REQUIREMENT_WORDS: readonly [RegExp, string][] = [
-  [/\blevel\.(\w+)\s*>=/, "this world doesn't simulate that in enough detail"],
-  // A money feature the world's switches leave off (`money_feature`, DESIGN §25.12): the world, not the place or the hour, rules it out.
-  [/\bmoney_feature\(/, "this world doesn't keep track of that"],
-  // Money (DESIGN §25): enough of it, and whose account it is. Whose money comes before who runs it, so a
-  // card change refused to someone who neither holds the card nor runs its account reads as the card.
-  [/\bcan_afford\(/, "you can't afford it"],
-  [/\b(?:spends|holds)\(self\b/, "that account isn't yours to use"],
-  [/\bmay_draw\(/, "you can't take a draw from it"],
-  [/\bmanages\(self\b/, "you don't run it"],
-  [/\bis_credit\(/, "that isn't a card, a credit line or a loan"],
-  [/\bemploys\(/, "they already work there"],
-  [/\bowner\s*==\s*self\b/, "it isn't yours"],
-  [/\bcarries\(self/, "you need to have it with you"],
-  [/\blent_out\(/, "it isn't lent out"],
-  [/\bat\(|\bplace\([^)]*\)\s*==\s*here|==\s*here\b/, "it has to be here"],
-  [/>\s*0\b/, "it needs an amount"],
-];
 
 /**
  * Whether text a chip shows from `interpret`'s read names anything hidden: what `namesHidden` finds,

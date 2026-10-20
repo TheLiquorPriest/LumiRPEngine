@@ -17,6 +17,7 @@ import type { Answers, Questions } from "../engine/decide";
 import { ACTION_QUEUE_LIMIT, type InterpretOutput, type QueuedAction } from "../engine/steps";
 import { cashGift } from "../packs/gear/core/index";
 import type { HostPort, QuietMessage, QuietRequest, QuietResult } from "./host";
+import type { CatalogEntry, InterpretScene } from "./interpret-context";
 import type { LookupTransport, StepLore } from "./lore-steps";
 import { readStoredJson } from "./stored-json";
 
@@ -451,23 +452,70 @@ function worldBrief(world: WorldDoc, extra: string): string {
   return `World: ${world.name}. The player character is ${pov?.name ?? world.pov} (id ${world.pov}). Entities: ${people || "none"}. Places: ${places || "none"}. ${extra}`;
 }
 
-/** `interpret`: typed input to its actions in order (DESIGN §9.4, §11): the first, the further ones it reads as engine actions (`queue`), and the rest as the player would type it (`next`). `instructions` (a world step template) lead the prompt; the output contract stays; the preset's guidance and the step's lore follow. Null when the call fails. */
+/** `interpret`'s read: the intent, and the reason it gave when it read no action. */
+export type InterpretRead = InterpretOutput & { reason?: string };
+
+/** What `interpret` is told of the world besides the catalog: its name and money, the player character, and the scene as the POV knows it (`interpretScene`). */
+export interface InterpretContext {
+  world: Pick<WorldDoc, "name" | "currency">;
+  pov: { id: EntityId; name: string };
+  scene: InterpretScene;
+}
+
+/** A catalog action on one line: "id — label: what it does. Params: …. Needs: …. Said as: …." */
+function catalogLine(e: CatalogEntry): string {
+  const parts = [`${e.id} — ${e.label}${e.description ? `: ${e.description.replace(/[\s.]+$/, "")}` : ""}`];
+  if (e.params.length > 0) parts.push(`Params: ${e.params.join(", ")}`);
+  if (e.needs.length > 0) parts.push(`Needs: ${e.needs.join("; ")}`);
+  if (e.lexicon && e.lexicon.length > 0) parts.push(`Said as: ${e.lexicon.slice(0, 6).join(", ")}`);
+  return `${parts.join(". ")}.`;
+}
+
+/**
+ * `interpret`: typed input to its actions in order (DESIGN §5.2, §9.4, §11): the first, the further
+ * ones it reads as engine actions (`queue`), and the rest as the player would type it (`next`), or
+ * none with its reason. It reads the scene, the places and the messages before the input
+ * (`context`), and only the catalog's actions. `instructions` (a world step template) lead the
+ * prompt; the output contract stays; the preset's guidance and the step's lore follow. Null when
+ * the call fails.
+ */
 export async function interpret(
   steps: Steps,
   text: string,
-  world: WorldDoc,
-  actions: { id: ActionId; label: string; params: string[]; lexicon?: string[] }[],
-  scene: JsonValue,
+  context: InterpretContext,
+  actions: readonly CatalogEntry[],
   config: StepConfig | null,
   userId: UserId,
   signal: AbortSignal,
   instructions?: string,
   lore: StepLore | null = null,
   guidance = "",
-): Promise<InterpretOutput | null> {
+): Promise<InterpretRead | null> {
   if (actions.length === 0) return { action: null, params: {}, probabilities: { none: 1 } };
-  const catalog = actions.map((a) => `${a.id} — ${a.label}${a.params.length > 0 ? ` (params: ${a.params.join(", ")})` : ""}${a.lexicon && a.lexicon.length > 0 ? ` [said as: ${a.lexicon.slice(0, 6).join(", ")}]` : ""}`).join("\n");
-  const system = `${instructions ? `${instructions}\n` : ""}You map a player's typed input in a roleplay to the engine actions it takes, in order.\n${worldBrief(world, `Scene: ${JSON.stringify(scene)}.`)}\nAction catalog:\n${catalog}\nRules: only the player character's own deliberate actions in the input count. Speech to others, requests, hypotheticals, past recaps and feelings are not actions (action null). Return the first action as "action" with its "params". If the input has more actions after it, list them in order in "more" (at most ${ACTION_QUEUE_LIMIT - 1}), each {"action": a catalog id, "params": {...}, "text": that action written as the player would type it}: "I walk to the market and buy bread" → "action" for the walk, and "more": [{"action": <the buy's id>, "params": {"item": "bread"}, "text": "I buy bread"}]. An action after them that no catalog action fits goes in "next", written as the player would type it. If the input lets time pass after its last action ("…and sleep until the next morning", "…then wait two hours", "…then skip ahead to Friday at 6 PM"), add "then": {"minutes": number}, {"until": a day part, "shift" or "commitment"} or {"at": "YYYY-MM-DD HH:MM"} for a stated day and time; time passing is never in "more" or "next", nor is anything else that isn't an action. Use world ids for params. A text param that names an item keeps its qualifiers as written (size, kind, how: "large pizza, delivered", not "pizza"). Money params are plain amounts in ${world.currency.code} as written (200 for ${world.currency.symbol}200). Output JSON only: {"action": string|null, "params": {...}, "confidence": number, "more"?: [{"action": string, "params": {...}, "text": string}], "then"?: {...}, "next"?: string}.`;
+  const { world, pov, scene } = context;
+  const rules = [
+    `Read what the player character does in the input. Work out what it refers to ("what she offered", "there", "him") from the scene and the recent messages.`,
+    `Only the player character's own deliberate actions count, whether said in the first person ("I", "we"), as a stage direction ("[${pov.name} heads to the roof]") or as narration about ${pov.name} in the third person. "I'll …" about what the player character does now is an action.`,
+    `No action ("action": null) for speech alone, out-of-character text ("OOC:", "((…))"), questions, requests to others, what someone else does, hypotheticals, plans for another time, recaps or feelings.`,
+    `Use only the catalog's actions, as described there: never invent one. When no catalog action fits, "action" is null.`,
+    `When the input and its context still leave it unclear which action or which target is meant, give "action": null and a short "reason"; never guess.`,
+    `Params are world ids, from the scene, Places and the catalog's lists. A text param that names an item keeps its qualifiers as written ("large pizza, delivered", not "pizza"). Money params are plain amounts in ${world.currency.code} as written (200 for ${world.currency.symbol}200).`,
+    `Return the first action as "action" with its "params". If the input has more actions after it, list them in order in "more" (at most ${ACTION_QUEUE_LIMIT - 1}), each {"action": a catalog id, "params": {...}, "text": that action written as the player would type it}: "I walk to the market and buy bread" → "action" for the walk, and "more": [{"action": <the buy's id>, "params": {"item": "bread"}, "text": "I buy bread"}]. An action after them that no catalog action fits goes in "next", written as the player would type it.`,
+    `If the input lets time pass after its last action ("…and sleep until the next morning", "…then wait two hours", "…then skip ahead to Friday at 6 PM"), add "then": {"minutes": number}, {"until": a day part, "shift" or "commitment"} or {"at": "YYYY-MM-DD HH:MM"} for a stated day and time; time passing is never in "more" or "next", nor is anything else that isn't an action.`,
+  ];
+  const system = [
+    instructions ?? "",
+    "You map a player's typed input in a roleplay to the engine actions it takes, in order.",
+    `World: ${world.name}. The player character is ${pov.name} (id ${pov.id}).`,
+    `Scene:\n${scene.lines.join("\n")}`,
+    scene.places.length > 0 ? `Places (id: name), nearest first:\n${scene.places.join("\n")}` : "",
+    scene.recent.length > 0 ? `Recent messages, oldest first:\n${scene.recent.join("\n")}` : "",
+    `Action catalog:\n${actions.map(catalogLine).join("\n")}`,
+    `Rules:\n${rules.map((r) => `- ${r}`).join("\n")}`,
+    `Output JSON only, exactly this shape: {"action": string|null, "params": {...}, "confidence": number, "reason"?: string, "more"?: [{"action": string, "params": {...}, "text": string}], "then"?: {...}, "next"?: string}.`,
+  ]
+    .filter((part) => part !== "")
+    .join("\n");
   const raw = await steps.helperJson("interpret", system, text, config, userId, signal, { lore, guidance });
   if (!isRecord(raw)) return null;
   const action = typeof raw.action === "string" && actions.some((a) => a.id === raw.action) ? raw.action : null;
@@ -495,7 +543,9 @@ export async function interpret(
     } else if (said !== "") rest.push(said);
   }
   const next = [...rest, words(raw.next)].filter((s) => s !== "");
-  return { action, params: action ? params : {}, probabilities: action ? { [action]: confidence, none: 1 - confidence } : { none: 1 }, ...(then ? { then } : {}), ...(queue.length > 0 ? { queue } : {}), ...(next.length > 0 ? { next } : {}) };
+  // Why it read no action, for the log: a line at most.
+  const reason = !action && typeof raw.reason === "string" ? raw.reason.replace(/\s+/g, " ").trim().slice(0, 200) : "";
+  return { action, params: action ? params : {}, probabilities: action ? { [action]: confidence, none: 1 - confidence } : { none: 1 }, ...(then ? { then } : {}), ...(queue.length > 0 ? { queue } : {}), ...(next.length > 0 ? { next } : {}), ...(reason !== "" ? { reason } : {}) };
 }
 
 /** A way of paying said as a payment: a preposition or "use" before it ("pay with my credit card", "on my debit card", "in cash", "from savings"), and not a thing named after it ("a credit card holder"). */

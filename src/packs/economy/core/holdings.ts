@@ -489,6 +489,7 @@ export function registerHoldings(r: FinanceRegistry): void {
   r.core.action({
     id: "trade",
     label: "Buy or sell investments",
+    description: "Buy or sell investments: stocks, funds, bonds, crypto.",
     pack: "economy",
     params: {
       side: { type: "text", label: "Buy or sell", optional: true },

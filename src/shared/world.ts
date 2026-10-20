@@ -515,6 +515,8 @@ export interface CombatActionDef {
 export interface ActionDef {
   id: ActionId;
   label: string;
+  /** What the action does, in a line: `interpret`'s catalog gives it the model with the label (DESIGN §5.2). Public text, like the label. */
+  description?: string;
   params: Record<string, ParamDef>;
   requires: Expr[];
   /** Inline check or a reference to `checks`. */
