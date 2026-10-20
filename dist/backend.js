@@ -64965,7 +64965,7 @@ class Runtime {
     this.steps = new Steps(this.host, this.meter);
     this.toolSupport = new ToolSupport(this.host);
     this.minds = { host: this.host, registry: this.registry, steps: this.steps, settings: this.settings, presets: this.presets };
-    this.ledger = new LedgerService(this.host, (chatId, userId) => this.resolveEnv(chatId, userId), new LedgerFold(this.registry, { fingerprint: "1792488508" }));
+    this.ledger = new LedgerService(this.host, (chatId, userId) => this.resolveEnv(chatId, userId), new LedgerFold(this.registry, { fingerprint: "1792489461" }));
     this.studio = new StudioBridge(this.host, this.worlds);
     this.worlds.onChange = (worldId, userId) => this.studio.worldChanged(worldId, userId);
     this.push = new StatePush(this.host, async (chatId, userId) => {
@@ -66271,6 +66271,12 @@ function playerReason(failed) {
 var REQUIREMENT_WORDS = [
   [/\blevel\.(\w+)\s*>=/, "this world doesn't simulate that in enough detail"],
   [/\bmoney_feature\(/, "this world doesn't keep track of that"],
+  [/\bcan_afford\(/, "you can't afford it"],
+  [/\b(?:spends|holds)\(self\b/, "that account isn't yours to use"],
+  [/\bmay_draw\(/, "you can't take a draw from it"],
+  [/\bmanages\(self\b/, "you don't run it"],
+  [/\bis_credit\(/, "that isn't a card, a credit line or a loan"],
+  [/\bemploys\(/, "they already work there"],
   [/\bowner\s*==\s*self\b/, "it isn't yours"],
   [/\bcarries\(self/, "you need to have it with you"],
   [/\blent_out\(/, "it isn't lent out"],
