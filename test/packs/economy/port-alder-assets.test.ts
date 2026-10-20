@@ -103,6 +103,26 @@ describe("Port Alder's holdings and property", () => {
     expect([his?.place, his?.mortgage?.id, his?.owners.map((o) => o.name)]).toEqual(["12 Birch Lane", "acct_marcus_mortgage", ["Marcus Delgado"]]);
   });
 
+  test("Marcus lives in his house, so it stands vacant for nobody; the POV, who lives on Harbor Street, would have it vacant until let; Helen's building is her home too, and its three units are the ones to let", () => {
+    const w = portAlder();
+    const pov = w.world.pov;
+    const leases = (who: string, property: string): { state: string }[] => w.ctx.query("economy.finance")(w.ctx, who, who === pov).properties.find((p) => p.id === property)?.leases ?? [];
+    const vacant = (who: string, property: string): number => leases(who, property).filter((l) => l.state === "vacant").length;
+    // His home names no units to let: no line for it, so nothing about it needs him.
+    expect(leases("marcus_delgado", "prop_birch_lane_12")).toEqual([]);
+    // 114 Harbor Street's three units are to let besides the Kowalczyks' own flat: all let, and with the outside letting stopped, the one no lease covers stands vacant.
+    expect(vacant("helen_kowalczyk", "prop_harbor_114")).toBe(0);
+    w.apply({ type: "set", entity: "prop_harbor_114", field: "managed", value: false });
+    expect(vacant("helen_kowalczyk", "prop_harbor_114")).toBe(1);
+    // Owned by the POV, the house is nobody's home: one unit to let, vacant.
+    w.apply({ type: "set", entity: "prop_birch_lane_12", field: "owners", value: [{ party: pov, role: "owner", share: 100 }] });
+    expect(vacant(pov, "prop_birch_lane_12")).toBe(1);
+    // And Marcus's again once he has moved out.
+    w.apply({ type: "set", entity: "prop_birch_lane_12", field: "owners", value: [{ party: "marcus_delgado", role: "owner", share: 100 }] });
+    w.apply({ type: "set", entity: "marcus_delgado", field: "home", value: "harbor_street_114" });
+    expect(vacant("marcus_delgado", "prop_birch_lane_12")).toBe(1);
+  });
+
   test("on a property the POV owns with someone it can't see, that owner shows as someone, with no id", () => {
     const w = portAlder([], (world) => {
       // Priya is someone the POV knows only once it meets her.
