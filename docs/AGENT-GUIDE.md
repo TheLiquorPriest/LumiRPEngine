@@ -346,7 +346,7 @@ Lore entries (`/lore/<id>`) are what the world knows, read by the engine's own h
 
 Prices, pay, taxes, occupations, regions, gear and the calendar's holiday rules come from data tables (`/tables/<id>`): typed `columns` and `rows` keyed by row id, read by the packs and by `table(id, key, column)` in formulas.
 
-- A blank world has none; each starter carries a full set of seventeen. Bring in a table whole, with `id`, `pack`, `schema`, `label`, `columns` and `rows`: copy one from a starter (`lre_template` at `/world/tables/<id>`) and adapt it.
+- A new blank world carries the full set of seventeen default tables, pinned, as each starter does; edit its copy in place. A table of your own comes in whole, with `id`, `pack`, `schema`, `label`, `columns` and `rows`, and replaces the copy it shares an id with: start from a starter's (`lre_template` at `/world/tables/<id>`) and adapt it.
 - Cells follow their column: a `band` is `{"min", "typical", "max"}`, money columns are in the currency's minor units, and a `ref` names a row of another table.
 - A table's `revision` and its pin in `pins.tables` are the engine's: every write that changes a table computes both again (`hashJson` of its schema, columns and rows). Don't write either, and don't patch `/pins`.
 - Each revision of the world keeps its own copy of its tables, so a running chat sees a table change only through an Upgrade.

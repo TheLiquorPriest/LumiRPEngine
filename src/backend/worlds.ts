@@ -22,7 +22,7 @@ import type { EditorRequest, JsonPatchOp, LintIssue, ResultBodies, WorldCollecti
 import type { RevisionNote, RulesetDef, WorldDoc, WorldIndex } from "../shared/world";
 import { DEFAULT_SPAWN_CAP, EXPORT_FORMAT, WORLD_FORMAT } from "../shared/world";
 import { WORLD_MINDS_KEYS, type WorldMindsConfig } from "../shared/minds";
-import { blankWorld, currencyOf, isWorldDoc, lintWorld, macrosIn, migrateWorld, shapeIssues, stamped } from "../engine/authoring";
+import { currencyOf, isWorldDoc, lintWorld, macrosIn, migrateWorld, newBlankWorld, shapeIssues, stamped } from "../engine/authoring";
 import { compileMaps, mapSettingsOf } from "../shared/maps";
 import type { Registry } from "../engine/registry-impl";
 import type { HostPort } from "./host";
@@ -290,7 +290,7 @@ export class WorldStore {
   /** A new world, from a template or blank; `source` is what its history says made it. */
   async create(name: string, template: WorldDoc | null, userId: UserId, source: "create" | "import" | "studio" = "create"): Promise<{ world: WorldDoc; revision: RevisionId }> {
     const id = `w_${crypto.randomUUID().replace(/-/g, "").slice(0, 16)}`;
-    const doc: WorldDoc = template ? migrateWorld({ ...structuredClone(template), id, name }) : blankWorld(id, name);
+    const doc: WorldDoc = template ? migrateWorld({ ...structuredClone(template), id, name }) : newBlankWorld(id, name, this.registry);
     const made = await this.commitDoc(doc, userId, null, { source });
     return { world: doc, revision: made.revision };
   }

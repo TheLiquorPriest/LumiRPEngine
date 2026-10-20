@@ -2,11 +2,13 @@
 // world leaves out, or replace it with "Use my settings" on (DESIGN §9.1, §9.2).
 
 import { describe, expect, test } from "bun:test";
+import { isWorldDoc } from "../../src/engine/authoring";
 import { REALISM_PRESETS } from "../../src/engine/realism";
 import { STARTER_WORLDS } from "../../src/packs/index";
 import type { ControlsView } from "../../src/shared/state-view";
 import type { WorldDoc } from "../../src/shared/world";
 import { SPEED_ACTIVITIES, SPEED_DEFAULT } from "../../src/shared/settings";
+import { newWorld } from "../../src/studio-api";
 import { Rig } from "../support/rig";
 
 /** A new chat on a starter; its controls before the first turn are the levels that turn will use. */
@@ -71,5 +73,19 @@ describe("new chats start from the world's realism and time defaults", () => {
     expect(Object.keys(settings.time.speedThrough).sort()).toEqual([...SPEED_ACTIVITIES].sort());
     for (const policy of Object.values(settings.time.speedThrough)) expect(policy).toEqual(SPEED_DEFAULT);
     expect(settings.time.sceneTicks.action).toBe(3);
+  });
+});
+
+describe("a world made from nothing carries the default tables, as a starter does", () => {
+  test("Build's blank world and the studio's new world pin every default table at its revision", async () => {
+    const rig = new Rig({ shipped: true });
+    const created = rig.body(await rig.send({ type: "lre.world", op: "create", name: "Blank" })).world;
+    if (!isWorldDoc(created)) throw new Error("no world");
+    const starter = STARTER_WORLDS.modern_slice_of_life?.("w_starter", "Starter");
+    for (const world of [created, newWorld("w_blank", "Blank")]) {
+      expect(Object.keys(world.tables).sort()).toEqual(Object.keys(starter?.tables ?? {}).sort());
+      expect(world.pins.tables).toEqual(Object.fromEntries(Object.entries(world.tables).map(([id, t]) => [id, t.revision])));
+      expect(world.tables["economy.finance"]?.rows.credit_card).toBeDefined();
+    }
   });
 });

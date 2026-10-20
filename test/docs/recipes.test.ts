@@ -48,9 +48,12 @@ function merge(base: unknown, patch: unknown): unknown {
   return out;
 }
 
-/** A new world with the recipe merged in, loaded as a studio loads it. */
+/** A new world with the recipe merged in, loaded as a studio loads it; a table the recipe gives replaces the world's copy whole. */
 function recipe(title: string): WorldDoc {
-  const loaded = load(JSON.stringify(merge(newWorld("recipe", title), fragment(title))));
+  const patch = fragment(title);
+  const merged = merge(newWorld("recipe", title), patch);
+  if (isRecord(merged) && isRecord(merged.tables) && isRecord(patch) && isRecord(patch.tables)) for (const [id, table] of Object.entries(patch.tables)) merged.tables[id] = structuredClone(table);
+  const loaded = load(JSON.stringify(merged));
   if (!loaded.ok) throw new Error(loaded.issues.map((i) => `${i.path}: ${i.message}`).join("\n"));
   return loaded.world;
 }

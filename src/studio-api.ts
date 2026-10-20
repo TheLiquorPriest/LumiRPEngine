@@ -15,7 +15,7 @@ import type { MapDoc, RulesetDef, StudioState, WorldDoc } from "./shared/world";
 import { ENGINE_VERSION, EXPORT_FORMAT, WORLD_FORMAT } from "./shared/world";
 import { channelId, chatsChannel, engineEndpoint, ENGINE_EXTENSION, offerEndpoint, readOffer, STATE_EVENT, STATE_REQUEST_EVENT, STUDIO_EXTENSION, STUDIO_INBOUND, STUDIO_INSTALLED_EVENT, STUDIO_OFFER_EVENT, worldChannel, worldsChannel } from "./shared/studio-bridge";
 import type { StudioChats, StudioChatSummary, StudioInstalled, StudioOffer, StudioWorldEntry, StudioWorldList, StudioWorldRead } from "./shared/studio-bridge";
-import { blankWorld, checkWorldDay, isWorldDoc, lintWorld, migrateWorld, playtestStart, playtestTurn, previewSheet, shapeIssues, type PlaytestTurn } from "./engine/authoring";
+import { checkWorldDay, isWorldDoc, lintWorld, migrateWorld, newBlankWorld, playtestStart, playtestTurn, previewSheet, shapeIssues, type PlaytestTurn } from "./engine/authoring";
 import { createRegistry, type Registry } from "./engine/registry-impl";
 import type { WorldState } from "./engine/state";
 import { planTurn, postTurn, timelapseIntent } from "./engine/turn";
@@ -74,9 +74,9 @@ export function lint(world: WorldDoc): LintIssue[] {
   return lintWorld(world, registryOf());
 }
 
-/** A new minimal world (one POV person in one place). */
+/** A new world from nothing (one POV person in one place), with every default table pinned, as a starter carries them. */
 export function newWorld(id: string, name: string): WorldDoc {
-  return blankWorld(id, name);
+  return newBlankWorld(id, name, registryOf());
 }
 
 /** The revision id a document would get when committed (its content hash). */

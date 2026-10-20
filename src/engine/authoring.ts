@@ -11,6 +11,7 @@ import type { SheetSectionView } from "../shared/state-view";
 import { knownSignal, STEP_OUTPUTS, STEP_PLACEHOLDERS } from "../shared/steps";
 import { defaultTiers, leadTierOf, tierOf } from "../shared/tiers";
 import type { WorldCurrency, WorldDoc } from "../shared/world";
+import type { DataTable } from "../shared/tables";
 import { compileMaps } from "../shared/maps";
 import { DEFAULT_CURRENCY, ENGINE_VERSION, WORLD_FORMAT } from "../shared/world";
 import { applyEvent, validateEvent } from "./events";
@@ -87,6 +88,18 @@ export function blankWorld(id: WorldId, name: string): WorldDoc {
     classifications: {},
     start: { place: "home", at: "2026-01-01T08:00" },
   };
+}
+
+/**
+ * A world made from nothing, as Build and the studio make one: the minimal world with every pack's
+ * default table copied in and pinned at its revision, as the starter templates carry them, so it
+ * prices, pays and dresses as a world made from a template does.
+ */
+export function newBlankWorld(id: WorldId, name: string, registry: Pick<Registry, "tables">): WorldDoc {
+  const world = blankWorld(id, name);
+  const tables: Record<string, DataTable> = {};
+  for (const [tid, def] of registry.tables) if (def.defaults) tables[tid] = structuredClone(def.defaults);
+  return { ...world, tables, pins: { ...world.pins, tables: Object.fromEntries(Object.entries(tables).map(([tid, t]) => [tid, t.revision])) } };
 }
 
 /** A document that has the shape of `lre-world-v1` (enough to load and lint it). */

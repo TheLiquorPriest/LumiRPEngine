@@ -383,7 +383,8 @@ describe("live tools", () => {
     const found = await call(ctx, "lre_search", { query: "harbor", worldId });
     const hits = found.data.hits as { source: string; collection: string; id: string; pointer: string; label: string; field: string }[];
     const where = hits.map((h) => `${h.source} ${h.collection} ${h.id}`).sort();
-    expect(where).toEqual(["draft assets harbor_fund", "draft packs economy", "draft products gull_card", "draft products harbor_checking", "head products gull_card"]);
+    // A new world carries the default tables; the finance table's late-fee note cites Reg Z's safe harbor.
+    expect(where).toEqual(["draft assets harbor_fund", "draft packs economy", "draft products gull_card", "draft products harbor_checking", "draft tables economy.finance", "head products gull_card"]);
     expect(hits.find((h) => h.id === "harbor_checking")).toMatchObject({ pointer: "/packs/economy/config/products/harbor_checking", label: "Harbor Credit Union checking", field: "/label" });
     expect(hits.find((h) => h.id === "gull_card" && h.source === "head")?.label).toBe("Gull Rewards card");
     // The pack's own item keeps the rest of its config, not the products again.
