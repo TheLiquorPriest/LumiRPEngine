@@ -1247,7 +1247,7 @@ Four layers, each tunable (the world's defaults, then the user's overrides):
   - `interrupt` counts only at a time-skip beat.
   - An answer that isn't JSON gets one repair call. One that says nothing records no mind.
 - **Prompts:** the steps are `mind`, `memory`, `skip` and `consolidate`. Each has built-in instructions (`MIND_PROMPT_DEFAULTS`).
-  - **Precedence:** the world's step template for the purpose (the first by id), then the user's own prompt (Settings → Minds, with a reset to the default), then the built-in.
+  - **Precedence:** the user's own prompt (Settings → Minds, with a reset to the default), then the world's step template for the purpose (`worldMindTemplate`: the first by id with any text, a blank one skipped, which lint and Build read too), then the built-in.
   - **Placeholders:** `{{character}}`, `{{world}}`, `{{pov}}`, `{{place}}` and `{{clock}}` are filled.
   - **Answer format:** the engine appends the purpose's answer format (`MIND_ANSWER_FORMATS`), which no template replaces, and then the preset's `RPEngine · <purpose>` block (§6.8).
   - **Lint:** a minds template's signals are ignored (`minds.step_signals`), and a second template for one purpose is never used (`minds.step_duplicate`).
@@ -1271,7 +1271,7 @@ A timelapse turn (§9.2: the palette, a chip or typed time) is a **time skip** w
   - from a scratch run of the skip: invitations to the POV, story moments (a track changing stage; a time rule, or one that interrupts or tells a beat), and the POV's money (paydays, bills, statements, declines, at their own instants).
 
   Beats at the same minute are one.
-- **The `skip` step** is off unless the user turns it on. Its prompt is the world's template, else the user's own, else the built-in, and the answer format follows it. It is given the span, the beats found and what the people involved plan, and proposes at most five more beats, each a local time inside the span with a reason. Its reasons, like the scan's, are recorded in `minds.skip` for the GM only: no mind and no player surface is given them, since they may come of someone's private intent.
+- **The `skip` step** is off unless the user turns it on. Its prompt is the user's own, else the world's template, else the built-in (§24.5), and the answer format follows it. It is given the span, the beats found and what the people involved plan, and proposes at most five more beats, each a local time inside the span with a reason. Its reasons, like the scan's, are recorded in `minds.skip` for the GM only: no mind and no player surface is given them, since they may come of someone's private intent.
 - **The caps:**
   - **Beats per skip** (`minds.skip.maxBeats`) keep the weightiest: plans with the POV, then invitations, its appointments, story moments, its money, and the step's last.
   - **Minds per beat** (`maxMindsPerBeat`) keep the people the beat names first, then whoever is with the POV at Live or Near by fidelity at that moment, best score first.

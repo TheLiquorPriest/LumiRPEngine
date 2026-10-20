@@ -14,7 +14,7 @@ import type { JsonObject, JsonValue } from "../shared/json";
 import { isRecord } from "../shared/json";
 import type { LedgerEvent } from "../shared/ledger";
 import type { CommitmentKind, Fidelity, MindCallTrace, MindCommitment, MindEventData, MindMoment, MindNote, MindPlan, MindPurpose, MindsSettings, PlanKind, PresenceEventData } from "../shared/minds";
-import { COMMITMENT_KINDS, effectiveMemory, MIND_ANSWER_FORMATS, MIND_PROMPT_DEFAULTS, MIND_TEXT_CAPS, MINDS_EVENTS, PLAN_KINDS, PLAN_PRIORITY, worldMindsOf } from "../shared/minds";
+import { COMMITMENT_KINDS, effectiveMemory, MIND_ANSWER_FORMATS, MIND_PROMPT_DEFAULTS, MIND_TEXT_CAPS, MINDS_EVENTS, PLAN_KINDS, PLAN_PRIORITY, worldMindsOf, worldMindTemplate } from "../shared/minds";
 import type { ModelUseSettings, StepConfig } from "../shared/settings";
 import type { WorldDoc } from "../shared/world";
 import { calendarOf, clockOfStamp, formatClock, nextTimeOfDay } from "../engine/calendar";
@@ -86,16 +86,15 @@ export function mindsOn(settings: { minds: MindsSettings; modelUse: ModelUseSett
 }
 
 /**
- * A minds step's instructions (DESIGN §24.5): the world's template for the purpose (the first by id),
- * else the user's own prompt, else the built-in; then the answer format, which no template replaces.
+ * A minds step's instructions (DESIGN §24.5): the user's own prompt, else the world's template for the
+ * purpose (`worldMindTemplate`: the first by id with any text), else the built-in; then the answer
+ * format, which no prompt replaces.
  */
 export function mindPrompt(purpose: MindPurpose, world: WorldDoc, settings: MindsSettings, vars: Readonly<Record<string, string>>): { text: string; source: MindCallTrace["prompt"] } {
-  const template = Object.values(world.steps)
-    .filter((t) => t.purpose === purpose && t.template.trim() !== "")
-    .sort((a, b) => a.id.localeCompare(b.id))[0];
-  const own = settings.prompts[purpose];
-  const source: MindCallTrace["prompt"] = template ? "world" : own ? "override" : "default";
-  const text = template?.template ?? own ?? MIND_PROMPT_DEFAULTS[purpose];
+  const own = settings.prompts[purpose]?.trim() ? settings.prompts[purpose] : undefined;
+  const template = own === undefined ? worldMindTemplate(world, purpose) : undefined;
+  const source: MindCallTrace["prompt"] = own !== undefined ? "override" : template ? "world" : "default";
+  const text = own ?? template?.template ?? MIND_PROMPT_DEFAULTS[purpose];
   return { text: `${renderTemplate(text, vars)}\n\n${MIND_ANSWER_FORMATS[purpose]}`, source };
 }
 

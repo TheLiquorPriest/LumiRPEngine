@@ -282,6 +282,38 @@ describe("minds around a turn", () => {
     expect(mindCalls(rig).length).toBe(asked + 2);
   });
 
+  test("the player's own prompt wins over the world's template, which wins over the built-in", async () => {
+    const rig = new Rig({ shipped: true });
+    const systems: string[] = [];
+    rig.host.quietReply = (req) => {
+      const system = req.messages[0]?.content ?? "";
+      if (!system.includes('{"monologue": "...", "depiction"')) return JSON.stringify({ proposals: [] });
+      systems.push(system);
+      return JSON.stringify({ monologue: "Thinking.", depiction: "Looks up", intent: "", reactions: [], plans: [], mood: "calm" });
+    };
+    const worldId = await rig.newWorld("Alder", "modern_slice_of_life");
+    // A blank template sorts first and is skipped.
+    for (const [id, template] of [["a_blank", "  "], ["mind_world", "WORLD-PROMPT for {{character}}."]] as const) rig.body(await rig.send({ type: "lre.editor", op: "put", worldId, base: null, collection: "steps", id, value: { id, purpose: "mind", template, output: "text", signals: [] } }));
+    rig.body(await rig.send({ type: "lre.editor", op: "set", worldId, base: null, part: "minds", value: { thresholds: { live: 900, near: 900, far: 900 }, always: { ids: ["danny_okafor"] } } }));
+    rig.body(await rig.send({ type: "lre.world", op: "commit", worldId, base: null }));
+    const chatId = rig.host.createChat("Morning.");
+    rig.body(await rig.send({ type: "lre.world", op: "attach", worldId, chatId }));
+    const here = placeOfEntity((await stateOf(rig, chatId)).state, "pov") ?? "";
+    const stay = async () => rig.body(await rig.send({ type: "lre.edit", chatId, ops: [{ op: "move", entity: "danny_okafor", to: here }, { op: "move", entity: "pov", to: here }] }));
+    const prompts = () => (rig.rt.inspectorRecords(chatId)?.at(-1)?.minds ?? []).filter((t) => t.purpose === "mind").map((t) => t.prompt);
+    await stay();
+    await rig.turn(chatId, "Hello.", "He looks up.");
+    expect(systems.at(-1)?.startsWith("WORLD-PROMPT for Danny Okafor.")).toBe(true);
+    expect(prompts()).toEqual(["world"]);
+    rig.body(await rig.send({ type: "lre.settings.set", patch: { minds: { prompts: { mind: "USER-PROMPT for {{character}}." } } } }));
+    await stay();
+    await rig.turn(chatId, "Again.", "He nods.");
+    expect(systems.at(-1)?.startsWith("USER-PROMPT for Danny Okafor.")).toBe(true);
+    expect(systems.at(-1)).not.toContain("WORLD-PROMPT");
+    expect(systems.at(-1)).toContain('{"monologue": "...", "depiction"');
+    expect(prompts()).toEqual(["override"]);
+  });
+
   test("the inspector lists each minds call, with no text and strangers unnamed", async () => {
     const rig = new Rig({ shipped: true });
     fakeModels(rig);
