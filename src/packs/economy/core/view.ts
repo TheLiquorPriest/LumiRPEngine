@@ -281,10 +281,15 @@ function amountWords(ctx: ReadContext, viewer: Viewer, f: Flow): string {
   return "worked out each time";
 }
 
-/** Whether a flow touches a party: it pays from or into them, or an account of theirs, or shares it. */
-function flowTouches(ctx: ReadContext, f: Flow, party: EntityId): boolean {
+/**
+ * Whether a flow touches a party: it pays from or into them, or an account of theirs, or shares it;
+ * or it pays from money they manage, a business's account the viewer can see or the business
+ * itself, whose standing payments are theirs to change (DESIGN §25.1).
+ */
+function flowTouches(ctx: ReadContext, viewer: Viewer, f: Flow, party: EntityId): boolean {
   const sides = [f.from, f.to, ...(f.splits ?? []).map((s) => s.to), ...(f.shares ?? []).flatMap((s) => [s.party, s.from ?? ""])];
-  return sides.some((id) => id === party || (own(ctx.state.entities, id)?.kind === "account" && rightsOf(ctx.state, id, party)?.sees === true));
+  if (sides.some((id) => id === party || (own(ctx.state.entities, id)?.kind === "account" && rightsOf(ctx.state, id, party)?.sees === true))) return true;
+  return own(ctx.state.entities, f.from)?.kind === "account" ? managesAccount(ctx, f.from, party) && visible(ctx, viewer, f.from) : managesParty(ctx.state, f.from, party);
 }
 
 function nextOf(ctx: ReadContext, f: Flow, horizon: number): number | null {
@@ -393,7 +398,7 @@ export function buildFinanceView(hooks: FinanceHooks, ctx: ReadContext, party: E
   const shownAccounts = level >= 3 ? mine : mine.filter((id) => classOf(ctx, id) === "cash" || id === firstTransactional);
   const accounts = shownAccounts.map((id) => accountView(ctx, viewer, party, id, level, detail));
   const cash = mine.filter((id) => classOf(ctx, id) === "cash" && rightsOf(ctx.state, id, party)?.spend).reduce((a, id) => a + shown(ctx, id), 0);
-  const flows = level >= 3 && featureFor(ctx, party, "flows") ? allFlows(hooks, ctx).filter((f) => flowTouches(ctx, f, party)) : [];
+  const flows = level >= 3 && featureFor(ctx, party, "flows") ? allFlows(hooks, ctx).filter((f) => flowTouches(ctx, viewer, f, party)) : [];
   const flowViews = flows.map((f) => flowView(hooks, ctx, viewer, party, f));
   const now = ctx.state.clock;
   const upcoming: UpcomingLine[] = [];
