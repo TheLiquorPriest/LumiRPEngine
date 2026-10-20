@@ -113,7 +113,7 @@ describe("minds around a turn", () => {
     expect(presentTurns(state, "priya_nair").length).toBe(1);
     const messages = await rig.host.chats.messages(chatId, rig.host.userId);
     const memory = { ...DEFAULT_MINDS_MEMORY, recall: { ...DEFAULT_MINDS_MEMORY.recall, tokens: 4000 } };
-    const recall = (who: string) => recallFor({ state, who, memory, messages, hideJson: true, moment: { kind: "turn", at: state.clock, reason: "a turn", user: "", reply: "" } }).map((t) => t.text).join("\n");
+    const recall = (who: string) => recallFor({ state, who, memory, messages, hideJson: true }, "").map((t) => t.text).join("\n");
     expect(recall(stayed)).toContain("SECOND-MARK");
     expect(recall("priya_nair")).not.toContain("SECOND-MARK");
     expect(recall("priya_nair")).toContain("Priya smiles at you");
@@ -165,7 +165,7 @@ describe("minds around a turn", () => {
     expect(presence.find((p) => p.msg === null && p.place === "harbor_street_114")?.who).toContain("helen_kowalczyk");
     // Recall: the turn is Marcus's, never Helen's.
     const messages = await rig.host.chats.messages(chatId, rig.host.userId);
-    const recall = (who: string) => recallFor({ state, who, memory: DEFAULT_MINDS_MEMORY, messages, hideJson: true, moment: { kind: "turn", at: state.clock, reason: "a turn", user: "", reply: "" } }).map((t) => t.text).join("\n");
+    const recall = (who: string) => recallFor({ state, who, memory: DEFAULT_MINDS_MEMORY, messages, hideJson: true }, "").map((t) => t.text).join("\n");
     expect(recall("marcus_delgado")).toContain(LINE);
     expect(presentTurns(state, "helen_kowalczyk")).toEqual([]);
     // Her next mind, with the POV at her place, isn't told how that turn went either.
@@ -370,6 +370,44 @@ describe("a mind's context", () => {
     const julian = mindCalls(rig).find((c) => MIND.exec(c.messages[0]?.content ?? "")?.[1] === "Julian Ashcombe")?.messages[1]?.content ?? "";
     expect(julian).toContain("- Your secret, Julian's agenda: Julian has taken");
     expect(julian).toContain("a lethal dose of digitalis tincture");
+  });
+
+  test("away from the POV, a mind's lore and recall aren't chosen by what the POV says", async () => {
+    const rig = new Rig({ shipped: true });
+    fakeModels(rig);
+    const worldId = await rig.newWorld("Alder", "modern_slice_of_life");
+    rig.body(await rig.send({ type: "lre.editor", op: "put", worldId, base: null, collection: "lore", id: "lighthouse_tale", value: { id: "lighthouse_tale", title: "The lighthouse tale", content: "LORE-MARK: the lighthouse keeper still walks the pier on foggy nights.", keys: ["lighthouse"], links: [] } }));
+    rig.body(await rig.send({ type: "lre.editor", op: "set", worldId, base: null, part: "minds", value: { thresholds: { live: 900, near: 900, far: 900 }, always: { ids: [...PEOPLE] } } }));
+    rig.body(await rig.send({ type: "lre.world", op: "commit", worldId, base: null }));
+    const chatId = rig.host.createChat("Morning.");
+    rig.body(await rig.send({ type: "lre.world", op: "attach", worldId, chatId }));
+    rig.body(await rig.send({ type: "lre.settings.set", patch: { minds: { refreshLimit: 0, memory: { recall: { recent: 0, relevant: 1, tokens: 4000 } } } } }));
+    const here = placeOfEntity((await stateOf(rig, chatId)).state, "pov") ?? "";
+    rig.body(await rig.send({ type: "lre.edit", chatId, ops: PEOPLE.map((entity) => ({ op: "move", entity, to: here })) }));
+    await rig.turn(chatId, "Tell me about the lighthouse.", "ZEPHYRMARK: they talk about the lighthouse keeper.");
+    // Danny goes off; the GM asks for his mind, and the POV talks of the lighthouse without him.
+    const marina = "alder_harbor_marina";
+    rig.body(await rig.send({ type: "lre.edit", chatId, ops: [{ op: "move", entity: "danny_okafor", to: marina }, { op: "mind_refresh", entity: "danny_okafor" }] }));
+    const before = mindCalls(rig).length;
+    await rig.turn(chatId, "What about the lighthouse?", "Priya shrugs.");
+    const danny = mindCalls(rig).slice(before).find((c) => MIND.exec(c.messages[0]?.content ?? "")?.[1] === "Danny Okafor")?.messages[1]?.content ?? "";
+    expect(danny).toContain("You aren't with");
+    expect(danny).not.toContain("LORE-MARK");
+    expect(danny).not.toContain("ZEPHYRMARK");
+    // With the POV, the same words find both.
+    const priya = mindCalls(rig).slice(before).find((c) => MIND.exec(c.messages[0]?.content ?? "")?.[1] === "Priya Nair")?.messages[1]?.content ?? "";
+    expect(priya).toContain("LORE-MARK");
+    expect(priya).toContain("ZEPHYRMARK");
+  });
+
+  test("their money reads in their own sentences, under no second label", async () => {
+    const rig = new Rig({ shipped: true });
+    fakeModels(rig);
+    const chatId = await alderChat(rig);
+    await rig.turn(chatId, "Hello.", "They look up.");
+    const danny = mindCalls(rig).find((c) => MIND.exec(c.messages[0]?.content ?? "")?.[1] === "Danny Okafor")?.messages[1]?.content ?? "";
+    expect(danny).toMatch(/\n- You have \$[\d,.]+ in cash and \$[\d,.]+ in the bank\.\n/);
+    expect(danny).not.toContain("- Money: ");
   });
 
   test("who they are includes their list fields, such as traits, as words", async () => {

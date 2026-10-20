@@ -36,7 +36,7 @@ import { HELPER_MAX_TOKENS, type SettingsStore } from "./settings-store";
 import type { Steps } from "./steps";
 import { renderTemplate } from "./turn-steps";
 
-/** What the minds need of the backend: the host (chat, cards), the registry, the steps, the user's settings and preset. */
+/** What the minds need of the backend: the host (the chat's messages), the registry, the steps, the user's settings and preset. */
 export interface MindsDeps {
   host: HostPort;
   registry: Registry;

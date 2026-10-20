@@ -29,12 +29,16 @@ export function capText(text: string, max: number): string {
 const text = (v: JsonValue | undefined, max: number): string | null => (typeof v === "string" && v.trim() !== "" ? capText(v, max) : null);
 const minutes = (v: JsonValue | undefined): number | null => (typeof v === "number" && Number.isFinite(v) ? Math.round(v) : null);
 
-/** The entity ids among `v` that are people in the world (a value naming anyone else refuses). */
+/** The entity ids among `v`, every one a person in the world: a value naming anything else refuses. */
 function peopleIn(ctx: ReadContext, v: JsonValue | undefined): EntityId[] | Rejection {
   if (v === undefined) return [];
   if (!Array.isArray(v) || !v.every((x) => typeof x === "string")) return reject("bad_value", "who it's with is a list of people");
   const ids = v as string[];
-  for (const id of ids) if (!own(ctx.state.entities, id)) return reject("missing_entity", `there's no ${labelOf(ctx, id)}`);
+  for (const id of ids) {
+    const e = own(ctx.state.entities, id);
+    if (!e) return reject("missing_entity", `there's no ${labelOf(ctx, id)}`);
+    if (!kindIs(ctx.registry, ctx.world, e.kind, "person")) return reject("bad_value", `${e.name} isn't a person`);
+  }
   return [...new Set(ids)];
 }
 
