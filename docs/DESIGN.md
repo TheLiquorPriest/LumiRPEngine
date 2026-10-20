@@ -1367,6 +1367,8 @@ A flow has:
 
 The money process (`economy.money`) runs every occurrence, statement and due check in a slot at its own instant, in time order. It works on a scratch state, so two payments due the same morning see each other. A payment to someone in the world lands in their deposit account; any other payee is an outside counterparty.
 
+A flow entity's payer changes it with `flow_update`, which can rename it (`economy.flow_renamed`, 1 to 80 characters) and, with `clear` (a comma list of at, start, end, count, roll, retry_days, retries, fallback and category), take those limits off it. The GM's `economy.flow_edit` renames and clears anyone's.
+
 ### 25.6 Journal and holds
 
 Every posting writes a journal line on each account it touches: memo, kind, category, counterparty, card, flow, and status (pending or posted). The journal keeps the last 40 lines per account, monthly totals for 13 months, the last 6 statements and the notes. A hold makes part of a balance unavailable until its time: an authorization, or a deposit's hold days at a cash machine. Release is the GM's control. What can be spent is the balance, less holds, plus overdraft room.

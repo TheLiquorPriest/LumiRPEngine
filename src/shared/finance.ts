@@ -1009,6 +1009,7 @@ export const FINANCE_EVENTS = {
   decline: "economy.decline",
   delinquency: "economy.delinquency",
   flowRun: "economy.flow_run",
+  flowRenamed: "economy.flow_renamed",
   hold: "economy.hold",
   settle: "economy.settle",
   credit: "economy.credit",
@@ -1022,6 +1023,12 @@ export const FINANCE_EVENTS = {
 /** `economy.open`: accounts whose opening balances have posted (a joint account opens once, with whichever holder's money opens first). */
 export interface OpenData {
   accounts: EntityId[];
+}
+
+/** `economy.flow_renamed`: a standing payment's new name, from 1 to 80 characters (a player's change, a GM edit). */
+export interface FlowRenamedData {
+  flow: EntityId;
+  name: string;
 }
 
 /** `economy.status`: an account's status set in play (frozen, collections, charged off, paid off, closed, open again). */

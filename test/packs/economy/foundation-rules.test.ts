@@ -7,6 +7,7 @@ import type { JsonObject } from "../../../src/shared/json";
 import type { EntityDef, WorldDoc } from "../../../src/shared/world";
 import { lintWorld } from "../../../src/engine/authoring";
 import { calendarOf, dateAt } from "../../../src/engine/calendar";
+import { applyEffects } from "../../../src/engine/effects";
 import { materializeAll } from "../../../src/engine/materialize";
 import { optionalService } from "../../../src/engine/pack-kit";
 import { createRegistry, type Registry } from "../../../src/engine/registry-impl";
@@ -14,6 +15,7 @@ import { resolveAction } from "../../../src/engine/resolve";
 import { createRng } from "../../../src/engine/rng";
 import { runTimelapse } from "../../../src/engine/time";
 import { Working } from "../../../src/engine/working";
+import { flowOfEntity } from "../../../src/packs/economy/core/flows";
 import { move } from "../../../src/packs/economy/core/pay";
 import { ALL_PACKS } from "../../../src/packs/index";
 import { modernUsWorld } from "../riverton";
@@ -398,5 +400,43 @@ describe("an outside payee is one outside account whoever pays it", () => {
     lapse(w, 2);
     const outside = Object.entries(w.state.accounts).filter(([id, cents]) => id.startsWith("economy.external:") && cents !== 0 && /tax|gym/.test(id));
     expect(Object.fromEntries(outside)).toEqual({ "economy.external:tax:federal": 3_000, "economy.external:harbor_gym": 2_000 });
+  });
+});
+
+describe("a standing payment can be renamed and have its limits cleared", () => {
+  const gym = (world: WorldDoc): void => {
+    world.entities.gym = { ...entity("gym", "flow", { flow_kind: "subscription", from: "checking", to: "Harbor Gym", amount_cents: 4_000, every: "month", days: [5], end: "2027-06-30", count: 12, category: "fitness", shortfall: "skip", status: "active" }), name: "Harbor Gym" };
+  };
+
+  test("the player's change renames it and clears its end and count, and it runs past them", () => {
+    const w = setup(gym);
+    const r = resolveAction(reg, w, { action: "flow_update", params: { flow: "gym", label: "Gym", clear: "end,count" } }, createRng("rename"));
+    expect([r.ok, r.rejected]).toEqual([true, []]);
+    const flow = flowOfEntity(w.ctx, "gym");
+    expect([flow?.label, flow?.end, flow?.count, flow?.category]).toEqual(["Gym", undefined, undefined, "fitness"]);
+  });
+
+  test("a change can't clear what isn't clearable, or change and clear one field at once", () => {
+    const w = setup(gym);
+    const changes: JsonObject[] = [
+      { flow: "gym", clear: "amount" },
+      { flow: "gym", end: "2027-12-31", clear: "end" },
+    ];
+    for (const params of changes) {
+      const r = resolveAction(reg, w, { action: "flow_update", params }, createRng(JSON.stringify(params)));
+      expect(r.ok && r.rejected.length === 0).toBe(false);
+    }
+    expect(flowOfEntity(w.ctx, "gym")?.end).toBe("2027-06-30");
+  });
+
+  test("the GM renames anyone's standing payment and clears its fallback with economy.flow_edit", () => {
+    const w = setup((world) => {
+      mayaChecking(world);
+      world.entities.rent = { ...entity("rent", "flow", { flow_kind: "rent", from: "maya_checking", to: "Landlord", amount_cents: 90_000, every: "month", days: [1], shortfall: "fallback", fallback: "maya", status: "active" }), name: "Rent" };
+    }, ["maya"]);
+    const out = applyEffects(reg, w, [{ type: "economy.flow_edit", args: { flow: "rent", name: "Maya's rent", clear: "fallback" } }], { bindings: {}, rng: createRng("gm") });
+    expect(out.rejected).toEqual([]);
+    const flow = flowOfEntity(w.ctx, "rent");
+    expect([flow?.label, flow?.fallback]).toEqual(["Maya's rent", undefined]);
   });
 });
