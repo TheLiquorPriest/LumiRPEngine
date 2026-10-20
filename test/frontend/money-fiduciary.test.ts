@@ -113,14 +113,17 @@ describe("money a manager only manages reaches none of their own interests, in t
     const v = hub(w);
     expect(findAccount(v, "trust_acct")).toBeNull();
     expect(flowTargets(v, PALETTE, ["trust_acct"]).map((t) => t.id)).toEqual(["maya", "jordan"]);
-    payees(w, v, ["trust_acct"], { db_operating: true, daybreak: true, rosa: true, rosa_checking: true, home: true, "The household": true, checking: true, maya_checking: false, maya: false, jordan: false, "Harbor Parts": false }, update);
+    payees(w, v, ["trust_acct"], { db_operating: true, daybreak: true, rosa: true, home: true, "The household": true, checking: true, maya_checking: false, maya: false, jordan: false, "Harbor Parts": false }, update);
+    // Rosa's checking isn't on his money, and the hub's list of where the trust's money may not go names nothing his money doesn't: typed by its id, the hub can't tell, and the backend refuses it.
+    expect(payeeProblem(v, ["trust_acct"], "rosa_checking")).toBeNull();
+    expect(refuses(w, ...update("rosa_checking"))).toBe(true);
   });
 
   test("a trust pays its beneficiary though she's of the trustee's household; the rest of it, it doesn't", () => {
     const w = trustee(true);
     const v = hub(w);
     expect(flowTargets(v, PALETTE, ["trust_acct"]).map((t) => t.id)).toEqual(["maya", "jordan"]);
-    payees(w, v, ["trust_acct"], { maya_checking: false, maya: false, rosa_checking: true, rosa: true }, update);
+    payees(w, v, ["trust_acct"], { maya_checking: false, maya: false, rosa: true }, update);
   });
 
   test("Brightline's custodian, who owns the café, isn't offered Pay now on the café's invoice to Brightline; the café pays Brightline's as it likes", () => {

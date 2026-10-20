@@ -102,6 +102,15 @@ describe("an id or a link that would name someone hidden reaches the player unde
     expect(JSON.stringify(upcoming).toLowerCase()).not.toContain("jess");
   });
 
+  test("where money Jess only manages may not go, her money says only of payers she runs and ids it already carries: Helen's checking and Maddie's savings stay out of it", async () => {
+    const chat = await MoneyChat.start({ pov: "jess_kowalczyk" });
+    const view = await chat.hub();
+    expect(view.paysFor.map((p) => p.from)).not.toContain("acct_helen_checking");
+    const rest = JSON.stringify({ ...view, paysFor: [] });
+    for (const id of view.paysFor.flatMap((p) => [p.from, ...p.to])) expect(rest).toContain(`"${id}"`);
+    expect(JSON.stringify((await chat.state()).panels["economy.money"])).not.toContain("acct_maddie_savings");
+  });
+
   test("a lease of a tenant Helen can't see keeps its id, as she ends it by its id from her building's page", async () => {
     const chat = await MoneyChat.start({ pov: "helen_kowalczyk", secret: ["danny_okafor"] });
     const view = await chat.hub();

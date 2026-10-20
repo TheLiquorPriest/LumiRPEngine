@@ -137,6 +137,16 @@ function day(ctx: ReadContext, at: number): string {
   return formatClock(calendarOf(ctx.world), at).split(",")[0] ?? "";
 }
 
+/** Every string a value carries, however deep: the ids and the words a view already sends. */
+function stringsIn(value: unknown, out: Set<string>): void {
+  if (typeof value === "string") out.add(value);
+  else if (Array.isArray(value)) for (const v of value) stringsIn(v, out);
+  else if (typeof value === "object" && value !== null) {
+    const fields: unknown[] = Object.values(value);
+    for (const v of fields) stringsIn(v, out);
+  }
+}
+
 function partyKindOf(ctx: ReadContext, id: EntityId): PartyKind {
   const kind = own(ctx.state.entities, id)?.kind ?? "";
   for (const k of ["business", "trust", "household"] as const) if (kindIs(ctx.registry, ctx.world, kind, k)) return k;
@@ -594,12 +604,13 @@ export function buildFinanceView(hooks: FinanceHooks, ctx: ReadContext, party: E
     a.autopayFrom = a.autopay !== null && a.manages ? others.filter((id) => autopaySourceProblem(ctx, party, a.id, id) === null) : [];
     a.fallbacks = pays(a.id) ? others.filter((id) => pays(id) && fallsBackOn(ctx, a.id, id)) : [];
   }
-  // Where money the party only manages may not go, by the actions' own rule (`paysFor`): for each payer the hub may set a standing payment or a fallback from, which ids it may not pay. Only an interest of theirs, an account one of those counts the worth of, or an account they may spend can be one, so the list holds for any payee, one typed by hand too.
+  // Where money the party only manages may not go, by the actions' own rule (`paysFor`): for each payer they may run standing payments from and only manage, which of the ids the view already carries it may not pay. The list adds no id to the view, so it names nothing the view doesn't.
   const interests = interestsOf(ctx, party);
-  const onlyManaged = (side: string): boolean => side !== "" && side !== party && visible(ctx, viewer, side) && (isParty(ctx, side) || !canSpend(ctx.state, side, party));
+  const onlyManaged = (side: string): boolean => side !== "" && side !== party && visible(ctx, viewer, side) && mayPayFrom(ctx, party, side) && (isParty(ctx, side) || !canSpend(ctx.state, side, party));
   const payers = [...new Set([...listed.map((a) => a.id), ...view.flows.flatMap((f) => (f.spec ? [f.spec.from, f.spec.fallback ?? ""] : []))])].filter(onlyManaged);
-  const counted = Object.keys(ctx.state.entities).filter((id) => own(ctx.state.entities, id)?.kind === "account" && (canSpend(ctx.state, id, party) || holdersOf(ctx.state, id).some((h) => interests.has(h) && rightsOf(ctx.state, id, h)?.worth === true)));
-  const payees = [...interests, ...counted].filter((id) => visible(ctx, viewer, id));
+  const carried = new Set<string>();
+  stringsIn(view, carried);
+  const payees = [...carried].filter((id) => own(ctx.state.entities, id)?.kind === "account" || isParty(ctx, id));
   view.paysFor = payers.map((from) => ({ from, to: payees.filter((to) => paysFor(ctx, party, to, from, interests)) }));
   // And the keys a typed payee is theirs by: their id's and name's, and their household's.
   const home = householdOf(ctx, party);

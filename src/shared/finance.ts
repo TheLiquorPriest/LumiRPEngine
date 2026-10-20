@@ -1474,9 +1474,10 @@ export interface FinanceView {
   payPrefs: PayTier[];
   /**
    * For each payer the party may run standing payments from but only manages (DESIGN §25.1): an
-   * account listed here or a flow's payer or fallback, other than the party, that is a party itself
-   * or that they hold no spending role on. `to` is what it may not pay of the ids the view lists:
-   * the accounts it lists, the party's own interests, and its flows' payees. Ids the viewer can see.
+   * account listed here or a flow's payer or fallback, other than the party, that they run payments
+   * from (`mayPayFrom`) and that is a party itself or that they hold no spending role on. `to` is
+   * what it may not pay of the ids the rest of the view already carries, so the list names nothing
+   * the view doesn't: a payee typed by an id it doesn't carry is the backend's to refuse.
    */
   paysFor: { from: EntityId; to: EntityId[] }[];
   /** The keys (`payeeKey`) a typed payee is the party's own by: their id's and name's, and their household's where the viewer can see it. */
