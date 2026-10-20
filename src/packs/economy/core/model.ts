@@ -37,6 +37,7 @@ import {
 import { EXTERNAL_ACCOUNT_PREFIX } from "../../../engine/events";
 import { bandOfJson, labelOf, numOf, objOf, sliceOf, strOf, own, rowOf } from "../../../engine/pack-kit";
 import type { ReadContext } from "../../../engine/registry";
+import { passMemo } from "../../../engine/read-pass";
 import type { Rng } from "../../../engine/rng";
 import type { WorldState } from "../../../engine/state";
 import { kindIs, placeOfEntity } from "../../../engine/scope";
@@ -231,8 +232,9 @@ export function classOf(books: Books, id: EntityId): AccountClass | null {
   if (!e || e.kind !== "account") return null;
   const product = strOf(e.fields.product);
   if (product !== "") {
-    const def = own(worldProducts(books.world), product);
-    if (def) return def.class;
+    // A world product counts only with a class of its own (`worldProducts`).
+    const def = objOf(own(objOf(objOf(books.world.packs.economy?.config).products), product));
+    if (isAccountClass(def.class)) return def.class;
     if (isAccountClass(product)) return product;
   }
   return own(LEGACY_TYPE_CLASS, strOf(e.fields.type)) ?? null;
@@ -448,15 +450,45 @@ export function openerOf(state: Readonly<WorldState>, account: EntityId): Entity
   return ownersOf(state, account)[0]?.party ?? null;
 }
 
+/** A party's hold on an account: what its roles there let it do, and where its class sorts. */
+interface AccountHold {
+  id: EntityId;
+  rights: RoleRights;
+  order: number;
+}
+
+/**
+ * Every party's holds on accounts with a class, in class order, then id (`accountsOf`): built in one
+ * walk of the entities, and kept for a read pass (DESIGN §9.6), where views ask it for each party.
+ */
+function accountHolds(books: Books): Map<EntityId, AccountHold[]> {
+  return passMemo([books.state, books.world], "economy.account_holds", () => {
+    const out = new Map<EntityId, AccountHold[]>();
+    for (const [id, e] of Object.entries(books.state.entities)) {
+      const cls = e.kind === "account" ? classOf(books, id) : null;
+      if (!cls) continue;
+      const order = ACCOUNT_CLASSES.indexOf(cls);
+      for (const party of new Set(ownersIn(e.fields).map((o) => o.party))) {
+        const rights = rightsOf(books.state, id, party);
+        if (!rights) continue;
+        const held = out.get(party);
+        if (held) held.push({ id, rights, order });
+        else out.set(party, [{ id, rights, order }]);
+      }
+    }
+    for (const held of out.values()) held.sort((a, b) => a.order - b.order || a.id.localeCompare(b.id));
+    return out;
+  });
+}
+
 /** Accounts a party holds with a right (`sees` by default: any role), in class order, then id. */
 export function accountsOf(books: Books, party: EntityId, right: keyof RoleRights = "sees"): EntityId[] {
-  const out: EntityId[] = [];
-  for (const [id, e] of Object.entries(books.state.entities)) {
-    if (e.kind !== "account" || !classOf(books, id)) continue;
-    if (rightsOf(books.state, id, party)?.[right] === true) out.push(id);
-  }
-  const order = (id: EntityId): number => ACCOUNT_CLASSES.indexOf(classOf(books, id) ?? "cash");
-  return out.sort((a, b) => order(a) - order(b) || a.localeCompare(b));
+  return (accountHolds(books).get(party) ?? []).flatMap((h) => (h.rights[right] ? [h.id] : []));
+}
+
+/** The parties holding any account with a class (those `hasLedger` is true of). */
+export function ledgerHolders(books: Books): Set<EntityId> {
+  return new Set([...accountHolds(books)].flatMap(([party, held]) => (held.some((h) => h.rights.sees) ? [party] : [])));
 }
 
 export function hasLedger(books: Books, party: EntityId): boolean {
