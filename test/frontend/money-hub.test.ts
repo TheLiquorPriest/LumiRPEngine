@@ -19,6 +19,7 @@ import { ListRow } from "../../src/frontend/components";
 import { decodeFinanceView } from "../../src/packs/economy/ui/decode";
 import { accountBlocks, accountControls, autopaySources, businessAccounts, businessControls, cardControls, creditBlocks, endableLeases, fallbackSources, findAccount, flowControls, flowSources, flowTargets, gmAutopaySources, gmKindIs, gmParties, hireable, holdingControls, householdRows, hubTabs, invoiceControls, investmentBlocks, mortgageTermChoices, overviewBlocks, payeeProblem, propertyControls, transferTargets, workBlocks } from "../../src/packs/economy/ui/layout";
 import { OwnerRows } from "../../src/packs/economy/ui/lines";
+import { amountProblem, numberProblem, unchangedProblem } from "../../src/packs/economy/ui/forms";
 import { gmFixture } from "../../dev/preview/fixtures";
 import {
   actionRequest,
@@ -588,5 +589,27 @@ describe("the GM's autopay page", () => {
     const pov = money.find((v) => v.party === "pov");
     const own = pov ? findAccount(pov, "acct_pov_card") : null;
     expect(pov && own ? autopaySources(pov, own).map((a) => a.id) : null).toEqual(["acct_pov_checking", "acct_pov_savings"]);
+  });
+});
+
+describe("why an action page's button is held", () => {
+  test("a number field's reason names the field, without its aside, and the numbers it takes, so it reads plain on the page while the field is folded away", () => {
+    // The new flow's "Every Nth time", in More options, with 0 typed.
+    expect(numberProblem("Every Nth time (2 with weekly is every other week)", 1)).toBe("“Every Nth time” takes a number of 1 or more.");
+    expect(numberProblem("Due on day (1–28)", 1, 28)).toBe("“Due on day” takes a number from 1 to 28.");
+    expect(numberProblem("Due in (days; empty: the business's terms)", 0)).toBe("“Due in” takes a number of 0 or more.");
+    expect(numberProblem("Discount", undefined, 50)).toBe("“Discount” takes a number of 50 or less.");
+    expect(numberProblem("Hours a week")).toBe("“Hours a week” takes a number.");
+  });
+
+  test("an amount's reason: one to type where it's needed, else one above zero; a GM's state page names the state in force", () => {
+    expect(amountProblem("", USD, "the rent a month")).toBe("Type the rent a month.");
+    expect(amountProblem("  ", USD, "a rate", false)).toBeNull();
+    expect(amountProblem("0", USD, "the price")).toBe("Type an amount above zero.");
+    expect(amountProblem("-12", USD, "the price")).toBe("Type an amount above zero.");
+    expect(amountProblem("lots", USD, "a down payment", false)).toBe("Type an amount above zero.");
+    expect(amountProblem("12.50", USD, "the price")).toBeNull();
+    expect(unchangedProblem("charged_off", "status")).toBe("It's charged off now: pick another status.");
+    expect(unchangedProblem("open", "state")).toBe("It's open now: pick another state.");
   });
 });

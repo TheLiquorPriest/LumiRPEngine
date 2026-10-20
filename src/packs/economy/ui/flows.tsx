@@ -14,7 +14,7 @@ import { formatMoney } from "../../../shared/world";
 import { Badge, Button, Disclosure, Empty, IdText, List, ListRow, Section } from "../../../frontend/components";
 import { humanize } from "../../../frontend/format";
 import type { IconName } from "../../../frontend/icons";
-import { ActionPage, AmountField, ChoiceField, MONTH_CHOICES, NumberField, SelectField, TextField, WEEKDAY_CHOICES, type Choice } from "./forms";
+import { ActionPage, AmountField, ChoiceField, MONTH_CHOICES, NumberField, SelectField, TextField, unchangedProblem, WEEKDAY_CHOICES, type Choice } from "./forms";
 import type { HubControls, SectionProps } from "./hub";
 import { fallbackSources, findAccount, flowControls, flowSources, flowTargets, gmParties, payeeProblem, viewAccounts, type FlowControl } from "./layout";
 import { FieldsPage } from "./lines";
@@ -326,7 +326,7 @@ function FlowStatusPage(props: SectionProps & { flow: FlowView }) {
   const [status, setStatus] = useState<FlowStatus>(f.status);
   if (controls.mode !== "gm") return null;
   return (
-    <ActionPage nav={nav} controls={controls} name="flow-status" title="Status" subtitle={f.label} go="Save" disabled={status === f.status} submit={() => controls.edit(flowStatusOps(f.id, status))}>
+    <ActionPage nav={nav} controls={controls} name="flow-status" title="Status" subtitle={f.label} go="Save" problem={status === f.status ? unchangedProblem(f.status, "status") : null} submit={() => controls.edit(flowStatusOps(f.id, status))}>
       <FlowLine flow={f} />
       <ChoiceField label="Status" value={status} options={FLOW_STATUSES.map((s) => ({ value: s, label: humanize(s), detail: STATUS_DETAIL[s] }))} onChange={(v) => setStatus(FLOW_STATUSES.find((s) => s === v) ?? f.status)} />
     </ActionPage>

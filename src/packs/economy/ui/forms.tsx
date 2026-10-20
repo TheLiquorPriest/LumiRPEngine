@@ -1,13 +1,14 @@
 // The money hub's form pieces: labelled fields on the shared atoms (40 px targets,
 // the one money input for every typed amount), and the action page every control opens: its fields,
 // then one primary button that sends the request and, once it's accepted, goes back to the page
-// the action was opened from.
+// the action was opened from. Whenever the button is held, the page says why.
 
 import { createContext, type ComponentChildren } from "preact";
 import { useCallback, useContext, useEffect, useId, useState } from "preact/hooks";
 import type { MoneyUnit } from "../../../shared/money";
 import type { WorldCurrency } from "../../../shared/world";
 import { Button, Field } from "../../../frontend/components";
+import { humanize } from "../../../frontend/format";
 import { MoneyInput } from "../../../frontend/money-input";
 import type { HubControls } from "./hub";
 import { MoneyPage, type HubNav } from "./nav";
@@ -54,22 +55,31 @@ export function TextField(props: { label: string; value: string; onInput(value: 
 
 /**
  * How a field on an action page says its text isn't a value it can send (a number out of range,
- * say). The page's button waits until no field says so, so an action never goes with a field's last
- * good value while its box shows another.
+ * say), in words naming the field: the page's button waits until no field says so, and the page
+ * shows what each says, so the reason is in sight though the field is folded away.
  */
-const FieldValidity = createContext<((field: string, bad: boolean) => void) | null>(null);
+const FieldValidity = createContext<((field: string, reason: string | null) => void) | null>(null);
 
-/** A whole number or a decimal typed as text; empty is null, and what isn't a number in range marks the box and holds the page's button. */
+/** Why a number field's text can't be sent, naming the field and the numbers it takes. */
+export function numberProblem(label: string, min?: number, max?: number): string {
+  // A label's closing aside ("(days)", "(1–28)") helps fill the box; it isn't the field's name.
+  const name = label.replace(/\s*\([^()]*\)$/, "");
+  const range = min !== undefined && max !== undefined ? ` from ${min} to ${max}` : min !== undefined ? ` of ${min} or more` : max !== undefined ? ` of ${max} or less` : "";
+  return `“${name}” takes a number${range}.`;
+}
+
+/** A whole number or a decimal typed as text; empty is null, and what isn't a number in range marks the box and holds the page's button with the reason. */
 export function NumberField(props: { label: string; value: number | null; onChange(value: number | null): void; min?: number; max?: number; step?: number; placeholder?: string; help?: ComponentChildren }) {
   const id = useId();
   const [text, setText] = useState(props.value === null ? "" : String(props.value));
   const parsed = text.trim() === "" ? null : Number(text);
   const bad = parsed !== null && (!Number.isFinite(parsed) || (props.min !== undefined && parsed < props.min) || (props.max !== undefined && parsed > props.max));
+  const reason = bad ? numberProblem(props.label, props.min, props.max) : null;
   const mark = useContext(FieldValidity);
   useEffect(() => {
-    mark?.(id, bad);
-    return () => mark?.(id, false);
-  }, [mark, id, bad]);
+    mark?.(id, reason);
+    return () => mark?.(id, null);
+  }, [mark, id, reason]);
   return (
     <Field label={props.label} help={props.help} for={id}>
       <input
@@ -140,23 +150,25 @@ export function ToggleField(props: { label: ComponentChildren; help?: ComponentC
  * An action's own page: its fields, then one primary button that sends it, busy while the
  * request runs. Accepted, it goes back to the page it was opened from (`nav.back` does nothing once
  * the page has been left, so a Back tapped while the request ran isn't doubled); declined, it
- * stays, and the toast says why. `problem` says in words what's missing and holds the button back,
- * as a number field does while its box holds what it can't send; a one-tap action's page states
- * what it does in its children, which is its confirmation.
+ * stays, and the toast says why. The button is held only for a reason the page shows above it:
+ * `problem`, what the page says is missing, and each number field's text it can't send, which
+ * names the field, so the reason is in sight though the field is folded away. A one-tap action's
+ * page states what it does in its children, which is its confirmation.
  */
-export function ActionPage(props: { nav: HubNav; controls: HubControls; name: string; title: ComponentChildren; subtitle?: ComponentChildren; go: ComponentChildren; danger?: boolean; disabled?: boolean; problem?: string | null; submit(): Promise<boolean>; children?: ComponentChildren }) {
+export function ActionPage(props: { nav: HubNav; controls: HubControls; name: string; title: ComponentChildren; subtitle?: ComponentChildren; go: ComponentChildren; danger?: boolean; problem?: string | null; submit(): Promise<boolean>; children?: ComponentChildren }) {
   const { nav, controls } = props;
-  const [invalid, setInvalid] = useState<ReadonlySet<string>>(() => new Set());
-  const mark = useCallback((field: string, bad: boolean) => {
-    setInvalid((was) => {
-      if (was.has(field) === bad) return was;
-      const next = new Set(was);
-      if (bad) next.add(field);
-      else next.delete(field);
+  const [fields, setFields] = useState<ReadonlyMap<string, string>>(() => new Map());
+  const mark = useCallback((field: string, reason: string | null) => {
+    setFields((was) => {
+      if ((was.get(field) ?? null) === reason) return was;
+      const next = new Map(was);
+      if (reason === null) next.delete(field);
+      else next.set(field, reason);
       return next;
     });
   }, []);
-  const blocked = props.disabled === true || (props.problem !== undefined && props.problem !== null) || invalid.size > 0;
+  const reasons = [...new Set([...fields.values(), ...(props.problem ? [props.problem] : [])])];
+  const blocked = reasons.length > 0;
   return (
     <MoneyPage nav={nav} name={props.name} title={props.title} subtitle={props.subtitle}>
       <FieldValidity.Provider value={mark}>
@@ -170,7 +182,11 @@ export function ActionPage(props: { nav: HubNav; controls: HubControls; name: st
           }}
         >
           {props.children}
-          {props.problem ? <p class="lre-money-problem">{props.problem}</p> : null}
+          {reasons.map((r) => (
+            <p key={r} class="lre-money-problem">
+              {r}
+            </p>
+          ))}
           <Button type="submit" variant={props.danger ? "danger" : "primary"} block busy={controls.busy} disabled={blocked}>
             {props.go}
           </Button>
@@ -180,15 +196,25 @@ export function ActionPage(props: { nav: HubNav; controls: HubControls; name: st
   );
 }
 
+/** Why the amount typed for `what` ("the rent") can't be sent, or null: none typed where one is needed, or text that isn't an amount above zero. */
+export function amountProblem(text: string, currency: WorldCurrency, what: string, needed = true): string | null {
+  if (text.trim() === "") return needed ? `Type ${what}.` : null;
+  return amountOf(text, currency) === null ? "Type an amount above zero." : null;
+}
+
+/** Why a GM's state page holds its button: the state picked is the one in force, `now`. */
+export function unchangedProblem(now: string, what: string): string {
+  return `It's ${humanize(now).toLowerCase()} now: pick another ${what}.`;
+}
+
 /** An action page whose field is an amount: required, or empty only with `optional`, the words for what an empty amount means ("The whole balance"). */
 export function AmountPage(props: { nav: HubNav; controls: HubControls; name: string; title: ComponentChildren; subtitle?: ComponentChildren; label: string; go: ComponentChildren; danger?: boolean; optional?: string; initial?: string; help?: ComponentChildren; submit(cents: number | null): Promise<boolean>; children?: ComponentChildren }) {
   const { controls } = props;
   const [text, setText] = useState(props.initial ?? "");
   const empty = text.trim() === "";
   const cents = empty ? null : amountOf(text, controls.currency);
-  const ok = empty ? props.optional !== undefined : cents !== null;
   return (
-    <ActionPage nav={props.nav} controls={controls} name={props.name} title={props.title} subtitle={props.subtitle} go={props.go} danger={props.danger} disabled={!ok} submit={() => props.submit(cents)}>
+    <ActionPage nav={props.nav} controls={controls} name={props.name} title={props.title} subtitle={props.subtitle} go={props.go} danger={props.danger} problem={amountProblem(text, controls.currency, "an amount", props.optional === undefined)} submit={() => props.submit(cents)}>
       {props.children}
       <AmountField label={props.label} value={text} currency={controls.currency} onInput={setText} invalid={!empty && cents === null} placeholder={props.optional} help={props.help} />
     </ActionPage>

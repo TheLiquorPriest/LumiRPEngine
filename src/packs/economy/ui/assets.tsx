@@ -13,7 +13,7 @@ import { formatMoney, type WorldCurrency } from "../../../shared/world";
 import { Badge, Button, Empty, IdText, List, ListRow, Section } from "../../../frontend/components";
 import { humanize } from "../../../frontend/format";
 import { FlowListRow } from "./flows";
-import { ActionPage, AmountField, AmountPage, ChoiceField, NumberField, SelectField, TextField, ToggleField, type ChoiceOption } from "./forms";
+import { ActionPage, AmountField, AmountPage, amountProblem, ChoiceField, NumberField, SelectField, TextField, ToggleField, type ChoiceOption } from "./forms";
 import type { HubControls, SectionProps } from "./hub";
 import { endableLeases, holdingControls, investmentBlocks, knownPeople, mortgageTermChoices, moveSources, propertyControls, ROUTE_ELSEWHERE, routePick, transferTargets, type HoldingControl, type PropertyControl } from "./layout";
 import { FieldsPage } from "./lines";
@@ -73,8 +73,9 @@ export function RoutePage(props: { view: FinanceView; controls: HubControls; nav
   const [picked, setPicked] = useState(pick);
   if (controls.mode === "player" && view.level < 3) return null;
   const to = picked.trim();
+  const problem = picked === "" ? "Pick where it goes." : picked === ROUTE_ELSEWHERE ? "It goes to another owner's account now: pick where it goes instead." : picked === pick ? "That's where it goes now: pick another place." : null;
   return (
-    <ActionPage nav={props.nav} controls={controls} name="route" title={props.label} subtitle={props.subtitle} go="Save" disabled={picked === "" || picked === ROUTE_ELSEWHERE || picked === pick} submit={() => (controls.mode === "player" ? controls.act(routeAction(props.target, to)) : controls.edit(routeOps(props.target, view.party, to)))}>
+    <ActionPage nav={props.nav} controls={controls} name="route" title={props.label} subtitle={props.subtitle} go="Save" problem={problem} submit={() => (controls.mode === "player" ? controls.act(routeAction(props.target, to)) : controls.edit(routeOps(props.target, view.party, to)))}>
       <ChoiceField label={props.label} value={picked} options={routeChoices(view, props.reinvest, pick)} onChange={setPicked} />
     </ActionPage>
   );
@@ -250,7 +251,7 @@ function ExercisePage(props: SectionProps & { holding: HoldingView }) {
   const call = h.option?.right !== "put";
   const choices = (call ? moveSources(view) : transferTargets(view, "")).map((a) => ({ value: a.id, label: a.name }));
   return (
-    <ActionPage nav={nav} controls={controls} name="exercise" title="Exercise" subtitle={holdingName(h)} go="Exercise" disabled={qty !== null && !(qty >= 1 && qty <= h.qty)} submit={() => controls.act(exerciseAction(h.id, qty, account === "" ? {} : call ? { from: account } : { to: account }))}>
+    <ActionPage nav={nav} controls={controls} name="exercise" title="Exercise" subtitle={holdingName(h)} go="Exercise" submit={() => controls.act(exerciseAction(h.id, qty, account === "" ? {} : call ? { from: account } : { to: account }))}>
       <NumberField label={`Contracts (of ${h.qty}; empty: all)`} value={qty} min={1} max={h.qty} onChange={setQty} />
       <SelectField label={call ? "Pay the strike from" : "The strike goes to"} value={account} empty="Its own account, else your usual one" options={choices} onChange={setAccount} />
     </ActionPage>
@@ -299,9 +300,9 @@ function NewPropertyPage(props: SectionProps) {
   const [value, setValue] = useState("");
   if (controls.mode !== "gm") return null;
   const cents = amountOf(value, controls.currency);
-  const ok = name.trim() !== "" && cents !== null;
+  const problem = name.trim() === "" ? "Give it a name." : amountProblem(value, controls.currency, "its value");
   return (
-    <ActionPage nav={nav} controls={controls} name="property-new" title="Add a property" subtitle={view.name} go="Add the property" disabled={!ok} submit={() => (!ok || cents === null ? Promise.resolve(false) : controls.edit(propertySpawnOps(newIdFor("prop", name, new Set(controls.gm.entities.map((e) => e.id))), name.trim(), view.party, cents)))}>
+    <ActionPage nav={nav} controls={controls} name="property-new" title="Add a property" subtitle={view.name} go="Add the property" problem={problem} submit={() => (problem !== null || cents === null ? Promise.resolve(false) : controls.edit(propertySpawnOps(newIdFor("prop", name, new Set(controls.gm.entities.map((e) => e.id))), name.trim(), view.party, cents)))}>
       <TextField label="Name" value={name} onInput={setName} placeholder="The lake cabin" />
       <AmountField label="Value" value={value} currency={controls.currency} onInput={setValue} invalid={value.trim() !== "" && cents === null} />
       <Note>{`${view.name} owns it whole.`}</Note>
@@ -391,9 +392,9 @@ function LetPage(props: SectionProps & { property: PropertyView }) {
   const [unit, setUnit] = useState("");
   if (controls.mode !== "player") return null;
   const cents = amountOf(rent, controls.currency);
-  const ok = tenant !== "" && cents !== null && (day === null || (day >= 1 && day <= 28));
+  const problem = tenant === "" ? "Choose a tenant." : amountProblem(rent, controls.currency, "the rent a month");
   return (
-    <ActionPage nav={nav} controls={controls} name="property-let" title="Let it" subtitle={p.name} go="Start the lease" disabled={!ok} submit={() => (!ok || cents === null ? Promise.resolve(false) : controls.act(leaseStartAction(p.id, tenant, cents, { ...(months !== null ? { months } : {}), ...(day !== null ? { day } : {}), ...(unit.trim() !== "" ? { unit: unit.trim() } : {}) })))}>
+    <ActionPage nav={nav} controls={controls} name="property-let" title="Let it" subtitle={p.name} go="Start the lease" problem={problem} submit={() => (problem !== null || cents === null ? Promise.resolve(false) : controls.act(leaseStartAction(p.id, tenant, cents, { ...(months !== null ? { months } : {}), ...(day !== null ? { day } : {}), ...(unit.trim() !== "" ? { unit: unit.trim() } : {}) })))}>
       <SelectField label="Tenant" value={tenant} empty="Choose someone" options={knownPeople(controls.palette).map((k) => ({ value: k.id, label: k.label }))} onChange={setTenant} />
       <AmountField label="Rent a month" value={rent} currency={controls.currency} onInput={setRent} invalid={rent.trim() !== "" && cents === null} />
       <NumberField label="Months" value={months} min={1} onChange={setMonths} />
@@ -410,7 +411,7 @@ function SellPropertyPage(props: SectionProps & { property: PropertyView }) {
   if (controls.mode !== "player") return null;
   const cents = amountOf(price, controls.currency);
   return (
-    <ActionPage nav={nav} controls={controls} name="property-sell" title="Sell" subtitle={p.name} go="Sell" disabled={cents === null} submit={() => (cents === null ? Promise.resolve(false) : controls.act(propertySellAction(p.id, cents, buyer ? { buyer } : {})))}>
+    <ActionPage nav={nav} controls={controls} name="property-sell" title="Sell" subtitle={p.name} go="Sell" problem={amountProblem(price, controls.currency, "the price")} submit={() => (cents === null ? Promise.resolve(false) : controls.act(propertySellAction(p.id, cents, buyer ? { buyer } : {})))}>
       <AmountField label="Price" value={price} currency={controls.currency} onInput={setPrice} invalid={cents === null} />
       <SelectField label="Buyer" value={buyer} empty="Whoever buys" options={knownPeople(controls.palette).map((k) => ({ value: k.id, label: k.label }))} onChange={setBuyer} />
       <Note>A mortgage on it is paid off from the price first.</Note>
@@ -428,12 +429,12 @@ function BuyPropertyPage(props: SectionProps & { property: PropertyView }) {
   if (controls.mode !== "player") return null;
   const cents = amountOf(price, controls.currency);
   const downCents = down.trim() === "" ? null : amountOf(down, controls.currency);
-  const ok = cents !== null && (down.trim() === "" || downCents !== null);
+  const problem = amountProblem(price, controls.currency, "your offer") ?? amountProblem(down, controls.currency, "a down payment", false);
   // Only what isn't paid down is a mortgage, and only a mortgage has a term.
   const financed = cents !== null && downCents !== null && downCents < cents;
   const terms = mortgageTermChoices(p);
   return (
-    <ActionPage nav={nav} controls={controls} name="property-buy" title="Buy" subtitle={p.name} go="Buy" disabled={!ok} submit={() => (!ok || cents === null ? Promise.resolve(false) : controls.act(propertyBuyAction(p.id, cents, { ...(from ? { from } : {}), ...(downCents !== null ? { down: downCents } : {}), ...(financed && term !== "" ? { termMonths: Number(term) } : {}) })))}>
+    <ActionPage nav={nav} controls={controls} name="property-buy" title="Buy" subtitle={p.name} go="Buy" problem={problem} submit={() => (problem !== null || cents === null ? Promise.resolve(false) : controls.act(propertyBuyAction(p.id, cents, { ...(from ? { from } : {}), ...(downCents !== null ? { down: downCents } : {}), ...(financed && term !== "" ? { termMonths: Number(term) } : {}) })))}>
       <AmountField label="Offer" value={price} currency={controls.currency} onInput={setPrice} invalid={cents === null} />
       <AmountField label="Down payment (empty: pay it all)" value={down} currency={controls.currency} onInput={setDown} invalid={down.trim() !== "" && downCents === null} />
       {financed && terms.length > 0 ? <ChoiceField label="Mortgage over" value={term} options={terms} onChange={setTerm} /> : null}

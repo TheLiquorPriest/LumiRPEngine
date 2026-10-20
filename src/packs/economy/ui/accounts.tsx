@@ -16,7 +16,7 @@ import { formatMoney, type WorldCurrency } from "../../../shared/world";
 import { Badge, Button, Empty, IdText, List, ListRow, Meter, Section } from "../../../frontend/components";
 import { humanize } from "../../../frontend/format";
 import type { IconName } from "../../../frontend/icons";
-import { ActionPage, AmountField, AmountPage, ChoiceField, SelectField, type Choice } from "./forms";
+import { ActionPage, AmountField, AmountPage, amountProblem, ChoiceField, SelectField, unchangedProblem, type Choice } from "./forms";
 import type { GmControls, HubControls, PlayerControls, SectionProps } from "./hub";
 import { accountBlocks, accountControls, accountGroups, autopaySources, cardControls, cardLimitsShown, findAccount, flowSources, gmAutopaySources, groupOf, paySources, possessive, transferTargets, utilisation, viewAccounts, type AccountGroup } from "./layout";
 import { FieldsPage, OwnerRows, TxnRows } from "./lines";
@@ -351,9 +351,9 @@ function TransferPage(props: { view: FinanceView; account: AccountView; controls
   const [to, setTo] = useState(targets[0]?.id ?? "");
   const [text, setText] = useState("");
   const cents = amountOf(text, controls.currency);
-  const problem = to === "" ? "Pick where it goes." : text.trim() !== "" && cents === null ? "Type an amount above zero." : null;
+  const problem = to === "" ? "Pick where it goes." : amountProblem(text, controls.currency, "an amount");
   return (
-    <ActionPage nav={props.nav} controls={controls} name="transfer" title="Transfer" subtitle={`From ${a.name} · ${fmt(a.available ?? a.cents)} available`} go={cents !== null ? `Transfer ${fmt(cents)}` : "Transfer"} problem={problem} disabled={cents === null} submit={() => (cents === null ? Promise.resolve(false) : controls.act(transferAction(a.id, to, cents)))}>
+    <ActionPage nav={props.nav} controls={controls} name="transfer" title="Transfer" subtitle={`From ${a.name} · ${fmt(a.available ?? a.cents)} available`} go={cents !== null ? `Transfer ${fmt(cents)}` : "Transfer"} problem={problem} submit={() => (cents === null ? Promise.resolve(false) : controls.act(transferAction(a.id, to, cents)))}>
       <SelectField label="To" value={to} options={targets.map((x) => ({ value: x.id, label: x.name }))} onChange={setTo} />
       <AmountField label="Amount" value={text} currency={controls.currency} onInput={setText} invalid={text.trim() !== "" && cents === null} />
     </ActionPage>
@@ -436,7 +436,7 @@ function StatusPage(props: { account: AccountView; controls: GmControls; nav: Hu
   const { account: a, controls } = props;
   const [status, setStatus] = useState<string>(a.status);
   return (
-    <ActionPage nav={props.nav} controls={controls} name="status" title="Status" subtitle={a.name} go="Set the status" disabled={status === a.status} submit={() => controls.edit(accountStatusOps(a.id, status))}>
+    <ActionPage nav={props.nav} controls={controls} name="status" title="Status" subtitle={a.name} go="Set the status" problem={status === a.status ? unchangedProblem(a.status, "status") : null} submit={() => controls.edit(accountStatusOps(a.id, status))}>
       <ChoiceField label="New status" value={status} options={ACCOUNT_STATUSES.map((s) => ({ value: s, label: humanize(s), detail: s === a.status ? "Now" : undefined }))} onChange={setStatus} />
     </ActionPage>
   );
@@ -535,7 +535,7 @@ function CardStatePage(props: { card: CardView; controls: GmControls; nav: HubNa
   const { card, controls } = props;
   const [state, setState] = useState<string>(card.state);
   return (
-    <ActionPage nav={props.nav} controls={controls} name="card-state" title="Card state" subtitle={card.name} go="Set the state" disabled={state === card.state} submit={() => controls.edit([{ op: "set", entity: card.id, field: "state", value: state }])}>
+    <ActionPage nav={props.nav} controls={controls} name="card-state" title="Card state" subtitle={card.name} go="Set the state" problem={state === card.state ? unchangedProblem(card.state, "state") : null} submit={() => controls.edit([{ op: "set", entity: card.id, field: "state", value: state }])}>
       <ChoiceField label="New state" value={state} options={CARD_STATES.map((s) => ({ value: s, label: humanize(s), detail: s === card.state ? "Now" : undefined }))} onChange={setState} />
     </ActionPage>
   );
