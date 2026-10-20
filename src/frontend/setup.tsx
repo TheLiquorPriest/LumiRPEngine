@@ -92,14 +92,18 @@ export function setup(ctx: SpindleFrontendContext): () => void {
   };
   cleanups.push(client.onError((error) => toast(error.message, "error")));
   // The engine ran before a reply the guard stopped (DESIGN §5.1): the frontend open on that chat
-  // starts it again with Lumiverse's own command; a new reply after a reply only Send can start.
+  // starts it again with Lumiverse's own command, once per prepared turn however often it is asked;
+  // a new reply after a reply only Send can start.
+  const startedTurns = new Set<string>();
   cleanups.push(
     client.onGenerate((push) => {
-      if (host.activeChat() !== push.chatId) return;
+      if (host.activeChat() !== push.chatId || startedTurns.has(push.turn)) return;
       if (push.as === "send") {
         toast("The engine is ready: press Send for the reply.", "info");
         return;
       }
+      startedTurns.add(push.turn);
+      if (startedTurns.size > 64) startedTurns.delete(startedTurns.values().next().value ?? "");
       const command = push.as === "continue" ? "Continue" : "Regenerate";
       void host.generate(push.as).then((started) => {
         if (!started) toast(`The engine is ready, but ${command} couldn't start here: use ${command} on the last message.`, "error");

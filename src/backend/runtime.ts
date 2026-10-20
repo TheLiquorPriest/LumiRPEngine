@@ -18,7 +18,7 @@ import type { ActionDef, AdjudicationDef, SectionTemplate, StepPurpose, WorldDoc
 import { formatMoney, offersAction } from "../shared/world";
 import { MINDS_EVENTS, MINDS_SLOT, worldMindsOf, type MindCallTrace, type MindEventData } from "../shared/minds";
 import { firedTimeout, TimeoutFired, TIMEOUTS } from "../shared/timeouts";
-import { mindsOn, postMinds, preMinds, runMinds, type MindsDeps, type RunMindsResult } from "./minds";
+import { mindsOn, mindsStepConfig, postMinds, preMinds, runMinds, type MindsDeps, type RunMindsResult } from "./minds";
 import { runSkip, type BeatMinds, type SkipRun } from "./skip";
 import { fightOffers } from "../packs/combat/core/index";
 import { fitMindLines, mindLines } from "../packs/minds/core/section";
@@ -805,10 +805,12 @@ export class Runtime implements TurnHooks {
     // Character minds (DESIGN §24) think beside the judge: separate calls, on the phase's wall clock,
     // apart from its call count. A timelapse's minds think at its beats instead (`skip.ts`).
     const lastReply = before.findLast((m) => !m.isUser);
-    // A Retry of a run that failed keeps the minds it got from this same chain, journal and inputs,
-    // and asks only the others (DESIGN §5.1).
+    // A Retry of a run that failed keeps the minds it got and asks only the others (DESIGN §5.1),
+    // while what they think from is unchanged: the chain and journal, the world revision, the player's
+    // message, the minds settings, the mind step and the preset's mind block. Fixing another step's
+    // connection keeps them.
     const runAt: DiagAt = { chatId: input.chatId, userId: input.userId, turn: p.generationId };
-    const mindsKey = `${input.runKey}\u0000${text}`;
+    const mindsKey = [input.runKey, render.state.revision, text, hashParts("lre.kept-minds", JSON.stringify({ minds: settings.minds, step: mindsStepConfig(settings.modelUse, "mind"), guidance: preset.guidance.mind ?? "" }))].join("\u0000");
     const kept = this.keptMinds.get(input.chatId);
     this.keptMinds.delete(input.chatId);
     const mindsTask = preMinds(this.minds, { chatId: input.chatId, userId: input.userId, world: render.world, state: render.state, user: text, reply: lastReply ? (lastReply.swipes[lastReply.swipeId] ?? "") : "", timelapse: bridge.intentOf(text)?.action === TIMELAPSE_ACTION, signal: budget.signal, guidance: preset.guidance.mind ?? "", ...(kept?.key === mindsKey ? { kept: kept.minds } : {}) });

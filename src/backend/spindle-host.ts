@@ -81,7 +81,7 @@ function contextType(o: unknown): HostGenerationType | "other" {
 function hostCapabilities(): HostCapabilities {
   const contracts: Readonly<Record<string, number>> = spindle.contracts ?? {};
   const capabilities: Readonly<Record<string, number>> = spindle.host?.capabilities ?? {};
-  return { cancel: (contracts.preAssemblyGenerationContext ?? 0) >= 1, required: (capabilities["required-context-handlers-v1"] ?? 0) >= 1 };
+  return { cancel: (contracts.preAssemblyGenerationContext ?? 0) >= 1, required: (capabilities["required-context-handlers-v1"] ?? 0) >= 1, sessions: (capabilities["frontend-session-routing-v1"] ?? 0) >= 1 };
 }
 
 /** A World Info entry as the port reads it. */
@@ -118,9 +118,13 @@ const SWIPE_ACTIONS: Record<string, SwipeAction> = { added: "added", navigated: 
 
 function decodeEvent<K extends HostEventName>(event: K, p: unknown): HostEventMap[K] | null;
 function decodeEvent(event: HostEventName, p: unknown): HostEventMap[HostEventName] | null {
-  // A preset or a setting written belongs to no chat (`{ id, preset }`, `{ key, value }`).
+  // A preset or a setting written, or a page closed, belongs to no chat (`{ id, preset }`, `{ key, value }`, `{ frontendSessionId }`).
   if (event === "PRESET_CHANGED") return { presetId: str(p, "id") ?? null };
   if (event === "SETTINGS_UPDATED") return { key: str(p, "key") ?? null };
+  if (event === "FRONTEND_SESSION_CLOSED") {
+    const frontendSessionId = str(p, "frontendSessionId");
+    return frontendSessionId ? { frontendSessionId } : null;
+  }
   // CHAT_DELETED names its chat `id`; every other event, `chatId`.
   const chatId = str(p, event === "CHAT_DELETED" ? "id" : "chatId");
   if (!chatId) return null;
