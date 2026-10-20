@@ -372,7 +372,8 @@ export class MockBackend {
         const money = this.options.money && this.options.scenario !== "not_world" ? portAlderMoney(this.options.money) : null;
         if (money) {
           this.view.panels["economy.money"] = money.play;
-          this.gm = { ...this.gm, money: money.gm };
+          // The GM's money pages read entities, kinds and places too (a business's fields, Add a job's employers, a payee): all Port Alder's, with its money.
+          this.gm = { ...this.gm, ...money.gm };
         }
         if (this.options.scenario === "combat") {
           const fight = combatFixture();
