@@ -202,7 +202,7 @@ describe("discoverable places", () => {
     expect(shown(w, "boathouse")).toEqual({ travel: true, map: true, narrator: true });
   });
 
-  test("a reply can tell the POV of one, by id or by name, but never of a secret place", () => {
+  test("a reply can tell the POV of one, by id or by name, but never of a secret place, which it is refused as if there were none", () => {
     const w = riverton(boathouse);
     const knows = reg.proposals.get("knows");
     if (!knows) throw new Error("no knows channel");
@@ -211,8 +211,9 @@ describe("discoverable places", () => {
     expect(proposalKnown({ type: "knows", fact: "boathouse" }, reg, w.world, w.state)).toBe(true);
     expect(proposalKnown({ type: "knows", fact: "vault" }, reg, w.world, w.state)).toBe(false);
     expect(proposalKnown({ type: "location", entity: "you", place: "boathouse" }, reg, w.world, w.state)).toBe(false);
-    expect(propose("vault")).toBe("not_public");
-    expect(propose("The Vault")).toBe("not_public");
+    // The secret one reads as no place at all, by id or by name, so the refusal doesn't tell it exists.
+    expect(knows.validate({ fact: "vault" }, w.ctx)?.reason).toBe("no world fact vault");
+    expect(knows.validate({ fact: "The Vault" }, w.ctx)?.reason).toBe("no world fact The Vault");
     expect(propose("the old boathouse")).toBe("ok");
     for (const effect of knows.toEffects({ fact: "the old boathouse" }, w.ctx)) applyEffects(reg, w, [effect], { bindings: {}, rng: createRng("heard") });
     expect(canSeePlace(reg, w.world, w.state, "you", "boathouse")).toBe(true);

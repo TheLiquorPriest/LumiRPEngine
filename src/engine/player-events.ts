@@ -15,59 +15,67 @@ import { formatMoney } from "../shared/world";
 import { ENGINE_EVENTS, readEngineSlice } from "./engine-pack";
 import { passMemo } from "./read-pass";
 import type { Registry } from "./registry-impl";
-import { bandOf, fieldDef, GONE_FIELD, kindIs } from "./scope";
+import { bandOf, fieldDef, GONE_FIELD, kindIs, placeOfEntity } from "./scope";
 import type { WorldState } from "./state";
 import { optionalQuery, own } from "./pack-kit";
 import { canSeeEntity, canSeePlace, eventVisible, findLeaks, knows, namesAny, secretLoreTitles, trackKnown, unrevealedSecrets, unseenPlaceNames, visibilityOf } from "./visibility";
 
-/** Event types that are engine or pack bookkeeping: never player-facing lines. */
-const BOOKKEEPING = new Set<string>([
-  "clock",
-  "timelapse",
-  "materialize",
-  ENGINE_EVENTS.fired,
-  ENGINE_EVENTS.caught,
-  ENGINE_EVENTS.cursor,
-  ENGINE_EVENTS.choice,
-  ENGINE_EVENTS.attempt,
-  ENGINE_EVENTS.pause,
-  ENGINE_EVENTS.beat,
-  ENGINE_EVENTS.observed,
-  // The roll chip and the Outcome slot tell how a check was decided.
-  ENGINE_EVENTS.adjudged,
-  "castlife.decision",
-  "castlife.override",
-  "economy.price",
-  // The POV's transaction history mirrors its `post` events, which carry the line.
-  "economy.txn",
-  // A flow's run carries its schedule state; its posting and its payer's note carry the line, so
-  // nobody else's bills, takings or living costs reach the player.
-  "economy.flow_run",
-  // The work module's books (DESIGN §26.4): sales, remittances, invoices paid, payouts, payslips,
-  // commission and estimated tax. Their postings and the payer's notes carry the lines.
-  "economy.sale",
-  "economy.remit",
-  "economy.invoice_paid",
-  "economy.payout",
-  "economy.payslip",
-  "economy.commission",
-  "economy.estimated_tax",
-  // The holdings module's books (DESIGN §27.11): marks, contracts listed, lots, income and gains
-  // records, and routes. What anyone hears of a trade, a payout or a sale is its posting.
-  "economy.quote",
-  "economy.mint",
-  "economy.lots",
-  "economy.income",
-  "economy.exercise",
-  "economy.dispose",
-  "economy.acquire",
-  "economy.stake_route",
-  "story.flag",
-  // A fight's turn order, economy and recorded picks; what anyone did is `combat.act`.
-  "combat.turn",
-  "combat.spend",
-  "combat.decision",
-]);
+/**
+ * Event types that are engine or pack bookkeeping: never player-facing lines. Built on first use:
+ * the engine pack's own channels read who the POV may know from this module, so it can load before
+ * the engine pack has named its events.
+ */
+let bookkeepingTypes: Readonly<Record<string, true>> | null = null;
+function bookkeeping(type: string): boolean {
+  bookkeepingTypes ??= {
+    clock: true,
+    timelapse: true,
+    materialize: true,
+    [ENGINE_EVENTS.fired]: true,
+    [ENGINE_EVENTS.caught]: true,
+    [ENGINE_EVENTS.cursor]: true,
+    [ENGINE_EVENTS.choice]: true,
+    [ENGINE_EVENTS.attempt]: true,
+    [ENGINE_EVENTS.pause]: true,
+    [ENGINE_EVENTS.beat]: true,
+    [ENGINE_EVENTS.observed]: true,
+    // The roll chip and the Outcome slot tell how a check was decided.
+    [ENGINE_EVENTS.adjudged]: true,
+    "castlife.decision": true,
+    "castlife.override": true,
+    "economy.price": true,
+    // The POV's transaction history mirrors its `post` events, which carry the line.
+    "economy.txn": true,
+    // A flow's run carries its schedule state; its posting and its payer's note carry the line, so
+    // nobody else's bills, takings or living costs reach the player.
+    "economy.flow_run": true,
+    // The work module's books (DESIGN §26.4): sales, remittances, invoices paid, payouts, payslips,
+    // commission and estimated tax. Their postings and the payer's notes carry the lines.
+    "economy.sale": true,
+    "economy.remit": true,
+    "economy.invoice_paid": true,
+    "economy.payout": true,
+    "economy.payslip": true,
+    "economy.commission": true,
+    "economy.estimated_tax": true,
+    // The holdings module's books (DESIGN §27.11): marks, contracts listed, lots, income and gains
+    // records, and routes. What anyone hears of a trade, a payout or a sale is its posting.
+    "economy.quote": true,
+    "economy.mint": true,
+    "economy.lots": true,
+    "economy.income": true,
+    "economy.exercise": true,
+    "economy.dispose": true,
+    "economy.acquire": true,
+    "economy.stake_route": true,
+    "story.flag": true,
+    // A fight's turn order, economy and recorded picks; what anyone did is `combat.act`.
+    "combat.turn": true,
+    "combat.spend": true,
+    "combat.decision": true,
+  };
+  return hasOwn(bookkeepingTypes, type);
+}
 
 /** A posting as the POV sees it: the memo with what moved between its own accounts. */
 function postLine(world: WorldDoc, state: Readonly<WorldState>, pov: EntityId, memo: string, lines: readonly { account: string; amount: number }[]): string | null {
@@ -139,8 +147,22 @@ export function playerKnows(reg: Registry, world: WorldDoc, state: Readonly<Worl
   return metBy(state, pov, id) || povRegions(world, state, pov).includes(id);
 }
 
+/**
+ * Whether the POV may be told about an entity: itself, someone it has met, its own thing, or someone
+ * it can see where it stands (an extraction chip must never name a stranger). A world
+ * that doesn't place the POV can't tell who is present: every entity it can see counts.
+ */
+export function povMayKnow(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, id: EntityId): boolean {
+  const pov = world.pov;
+  if (id === pov || playerKnows(reg, world, state, pov, id)) return true;
+  if (!canSeeEntity(reg, world, state, pov, id)) return false;
+  if (heldBy(state.entities, id, pov)) return true;
+  const here = placeOfEntity(state, pov);
+  return here === undefined || placeOfEntity(state, id) === here;
+}
+
 /** Whether a track may be named to the POV: public, revealed, or `known_by` and known (`trackKnown`). */
-function trackShown(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, pov: EntityId, id: string): boolean {
+export function trackShown(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, pov: EntityId, id: string): boolean {
   const t = own(world.tracks, id);
   if (!t) return false;
   const visibility = visibilityOf(t.visibility);
@@ -208,7 +230,7 @@ function refsOf(world: WorldDoc, state: Readonly<WorldState>, e: LedgerEvent): R
 
 /** Whether the POV may see this event in a chip, the Journal or a Montage. */
 export function playerEventVisible(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, pov: EntityId, e: LedgerEvent): boolean {
-  if (BOOKKEEPING.has(e.type)) return false;
+  if (bookkeeping(e.type)) return false;
   if (!eventVisible(reg, world, state, pov, e)) return false;
   if ("data" in e && isRecord(e.data)) {
     // Off-screen NPC↔NPC changes (an encounter's regard) are nobody's news.
@@ -450,7 +472,7 @@ function wordedLines(reg: Registry, world: WorldDoc, state: Readonly<WorldState>
   const hpLine = ctx ? optionalQuery(ctx, "combat.hp_line") : null;
   for (const [i, e] of events.entries()) {
     if (e.type === "set" && lastSet.get(`${e.entity}\u0000${e.field}`) !== i) continue;
-    if (BOOKKEEPING.has(e.type)) continue;
+    if (bookkeeping(e.type)) continue;
     if (player && !playerEventVisible(reg, world, state, pov, e)) continue;
     const banded = ctx && hpLine ? hpLine(ctx, e) : undefined;
     const text = banded === undefined ? rawLine(reg, world, state, pov, e, player, you) : banded;
