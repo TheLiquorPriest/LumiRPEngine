@@ -20,6 +20,7 @@ import { Working } from "../../../src/engine/working";
 import { ALL_PACKS } from "../../../src/packs/index";
 import { assetOf, priceOf, quoteOf } from "../../../src/packs/economy/core/assets";
 import { lotsOf, qtyOf } from "../../../src/packs/economy/core/holdings";
+import { managedLeases } from "../../../src/packs/economy/core/property";
 import { gainsIn, incomeIn } from "../../../src/packs/economy/core/records";
 import { investmentTax } from "../../../src/packs/economy/core/gains";
 import { blackScholes } from "../../../src/packs/economy/core/pricing";
@@ -585,6 +586,26 @@ describe("holdings: property", () => {
       ["lease_b", "ended"],
       ["", "vacant"],
     ]);
+  });
+
+  test("a paused lease is still its tenant's: no outside tenant or second lease takes the flat, and a sale takes the lease to the new owner like any other", () => {
+    const w = setup((world) => {
+      world.entities.jordan_checking = account("jordan_checking", "Jordan's checking", "jordan", "checking", 900_000);
+      world.entities.maya_checking = account("maya_checking", "Maya's checking", "maya", "checking", 25_000_000);
+      // Let to outside tenants whenever no lease holds it, with no months empty between them.
+      world.entities.flat = { id: "flat", kind: "property", name: "The flat", tier: "background", fields: { place: "jordan_house", owners: [{ party: "you", role: "owner", share: 100 }], value: 20_000_000, managed: true, market_rent: 100_000, vacancy_months: 0 }, relations: [] };
+      world.entities.lease_flat = { id: "lease_flat", kind: "flow", name: "Lease: Jordan Price, The flat", tier: "background", fields: { flow_kind: "rent", from: "jordan_checking", to: "checking", amount_cents: 120_000, every: "month", days: [1], start: "2026-10-01", end: "2027-09-30", category: "rent", link: "flat", status: "active" }, relations: [] };
+    });
+    expect(managedLeases(w.ctx, "flat")).toEqual([]);
+    run(w, "economy.flow_status", { flow: "lease_flat", status: "paused", who: "jordan" });
+    expect(managedLeases(w.ctx, "flat")).toEqual([]);
+    expect(refuse(w, "economy.lease_start", { party: "you", property: "flat", tenant: "maya", rent: 100_000 })).toBe("full");
+    // Sold to Maya, it's hers to collect once Jordan pays again.
+    const opening = openingEvent(w.ctx, "maya");
+    if (opening) w.apply(opening);
+    run(w, "economy.property_sell", { party: "you", property: "flat", price: 20_000_000, buyer: "maya" });
+    expect(w.state.entities.lease_flat?.fields.to).toBe("maya_checking");
+    expect(trialBalance(w.state)).toBe(0);
   });
 
   test("a share of a property owned with someone sells only to a buyer in the world: the other owner's share stays theirs", () => {
