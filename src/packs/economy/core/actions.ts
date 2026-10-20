@@ -250,9 +250,13 @@ function flowFields(args: Record<string, JsonValue>): { fields: JsonObject; labe
   return { fields, ...(label !== undefined ? { label } : {}) };
 }
 
-/** Whether a party may run a flow that pays from `from`: an account they can spend from, or themselves. */
+/**
+ * Whether a party may run a flow that pays from `from`: themselves, or an account (or business)
+ * they manage. A role that may only spend, an authorized user's, makes payments but sets up and
+ * changes no standing ones.
+ */
 function mayPayFrom(ctx: ReadContext, who: EntityId, from: string): boolean {
-  return from === who || canSpend(ctx.state, from, who);
+  return from === who || (canSpend(ctx.state, from, who) && rightsOf(ctx.state, from, who)?.manage === true);
 }
 
 /**

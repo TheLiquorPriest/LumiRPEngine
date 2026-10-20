@@ -440,3 +440,31 @@ describe("a standing payment can be renamed and have its limits cleared", () => 
     expect([flow?.label, flow?.fallback]).toEqual(["Maya's rent", undefined]);
   });
 });
+
+describe("only a role that manages an account runs standing payments from it", () => {
+  const authorized = (world: WorldDoc): void => {
+    world.entities.checking!.fields.owners = [
+      { party: "you", role: "owner" },
+      { party: "maya", role: "authorized_user" },
+    ];
+    delete world.entities.checking!.fields.owner;
+    world.entities.save = entity("save", "flow", { flow_kind: "transfer", from: "checking", to: "savings", amount_cents: 5_000, every: "week", weekdays: [1], shortfall: "skip", status: "active" });
+  };
+  const done = (w: Working, actor: string, action: string, params: JsonObject): boolean => {
+    const r = resolveAction(reg, w, { action, actor, params }, createRng(`${actor}:${action}`));
+    return r.ok && r.rejected.length === 0;
+  };
+
+  test("an authorized user can't set up, change or pause a standing payment out of the primary's checking", () => {
+    const w = setup(authorized, ["maya"]);
+    expect(done(w, "maya", "flow_create", { label: "To me", from: "checking", to: "maya", amount: 5_000, every: "week" })).toBe(false);
+    expect(done(w, "maya", "flow_update", { flow: "save", amount: 1 })).toBe(false);
+    expect(done(w, "maya", "flow_pause", { flow: "save" })).toBe(false);
+    expect(Object.values(w.state.entities).filter((e) => e.kind === "flow").map((e) => [e.fields.amount_cents, e.fields.status])).toEqual([[5_000, "active"]]);
+  });
+
+  test("the owner still can", () => {
+    const w = setup(authorized, ["maya"]);
+    expect(done(w, "you", "flow_pause", { flow: "save" })).toBe(true);
+  });
+});
