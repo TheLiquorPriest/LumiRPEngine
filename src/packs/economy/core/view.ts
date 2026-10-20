@@ -14,7 +14,7 @@ import { numOf, objOf, own, sliceOf, strOf } from "../../../engine/pack-kit";
 import type { ReadContext } from "../../../engine/registry";
 import { kindIs } from "../../../engine/scope";
 import { membersOf, MEMBER_OF } from "../../../engine/selector";
-import { canSeeEntity } from "../../../engine/visibility";
+import { canSeeEntity, canSeePlace } from "../../../engine/visibility";
 import type { FinanceHooks } from "./module";
 import { autopaySourceProblem, mayPayFrom } from "./actions";
 import { statementState } from "./cycle";
@@ -31,6 +31,15 @@ const DAY = 1440;
 interface Viewer {
   /** The POV a player surface is drawn for, or null for the GM, who sees every name. */
   pov: EntityId | null;
+  /** The names in the world the viewer can't see, each with the words it reads as instead (`hiddenNames`); none for the GM. */
+  hidden: readonly HiddenName[];
+}
+
+/** A name the viewer can't see, as text may carry it, and what it reads as: at the start of the text, and within it. */
+interface HiddenName {
+  pattern: RegExp;
+  first: string;
+  within: string;
 }
 
 /**
@@ -49,6 +58,49 @@ function visible(ctx: ReadContext, viewer: Viewer, id: string): boolean {
   if (rightsOf(ctx.state, account, pov) !== null) return true;
   const holders = holdersOf(ctx.state, account).filter((h) => own(ctx.state.entities, h));
   return holders.length === 0 || holders.some((h) => canSeeEntity(ctx.registry, ctx.world, ctx.state, pov, h));
+}
+
+/** What someone or something the viewer can't see reads as in text: someone for a party, an account by its class, a property, something else. */
+function hiddenWords(ctx: ReadContext, id: EntityId): { first: string; within: string } {
+  const kind = own(ctx.state.entities, id)?.kind ?? "";
+  if (isParty(ctx, id)) return { first: "Someone", within: "someone" };
+  if (kind === "account") return { first: traitsOf(ctx, id)?.label ?? "An account", within: "an account" };
+  if (kind === "card") return { first: "A card", within: "a card" };
+  if (kindIs(ctx.registry, ctx.world, kind, "property")) return { first: "A property", within: "a property" };
+  return { first: "Something", within: "something" };
+}
+
+/**
+ * The names of everyone and everything the POV can't see, as labels and memos would carry them:
+ * a derived flow's label is built from names ("Lift loan autopay"), and a posting's memo is
+ * written once for every side of it. A name something the POV can see also has gives nothing
+ * away, so it stays, and one shorter than three letters is too likely a word.
+ */
+function hiddenNames(ctx: ReadContext, pov: EntityId): HiddenName[] {
+  const viewer: Viewer = { pov, hidden: [] };
+  const seen = new Set<string>();
+  const hidden: { name: string; words: { first: string; within: string } }[] = [];
+  for (const [id, e] of Object.entries(ctx.state.entities)) {
+    if (e.name.length < 3) continue;
+    if (visible(ctx, viewer, id)) seen.add(e.name.toLowerCase());
+    else hidden.push({ name: e.name, words: hiddenWords(ctx, id) });
+  }
+  for (const [id, p] of Object.entries(ctx.world.places)) {
+    if (p.name.length < 3) continue;
+    if (canSeePlace(ctx.registry, ctx.world, ctx.state, pov, id)) seen.add(p.name.toLowerCase());
+    else hidden.push({ name: p.name, words: { first: "Somewhere", within: "somewhere" } });
+  }
+  return hidden
+    .filter((h) => !seen.has(h.name.toLowerCase()))
+    .sort((a, b) => b.name.length - a.name.length)
+    .map((h) => ({ pattern: new RegExp(`(^|[^\\p{L}\\p{N}])${h.name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\p{L}\\p{N}])`, "giu"), ...h.words }));
+}
+
+/** Text as the viewer may read it: each name of someone or something they can't see in their words for it (`hiddenNames`). */
+function says(viewer: Viewer, text: string): string {
+  let out = text;
+  for (const h of viewer.hidden) out = out.replace(h.pattern, (_match: string, before: string, at: number) => before + (at === 0 && before === "" ? h.first : h.within));
+  return out;
 }
 
 function nameFor(ctx: ReadContext, viewer: Viewer, id: string): string {
@@ -123,7 +175,7 @@ function journalLine(ctx: ReadContext, viewer: Viewer, party: EntityId, j: Journ
   const worth = Object.entries(worthShares(ownersOf(ctx.state, j.account))).filter(([, share]) => share > 0);
   const whose = worth.length === 1 ? (worth[0]?.[0] ?? j.account) : j.account;
   const counterparty = j.counterparty && j.counterparty !== party && j.counterparty !== whose ? counterpartyName(ctx, viewer, j.counterparty) : null;
-  return { id: j.id, at: when(ctx, j.at), memo: j.memo, cents: j.cents, account: nameFor(ctx, viewer, j.account), accountId: j.account, kind: j.kind ?? null, category: j.category ?? null, counterparty, card: j.card ? nameFor(ctx, viewer, j.card) : null, status: j.status };
+  return { id: j.id, at: when(ctx, j.at), memo: says(viewer, j.memo), cents: j.cents, account: nameFor(ctx, viewer, j.account), accountId: j.account, kind: j.kind ?? null, category: j.category ?? null, counterparty, card: j.card ? nameFor(ctx, viewer, j.card) : null, status: j.status };
 }
 
 function cardView(ctx: ReadContext, viewer: Viewer, card: EntityId): CardView {
@@ -246,7 +298,7 @@ function accountView(ctx: ReadContext, viewer: Viewer, party: EntityId, account:
     statements: statements && (t.revolving || t.installment) ? [statementView(ctx, cycle), ...pastStatements(ctx, account)].filter((s): s is StatementView => s !== null) : [],
     cards: cards ? cardsOn(ctx.state, account).map((c) => cardView(ctx, viewer, c)) : [],
     pending: holds ? journal.filter((j) => j.status === "pending").reverse().map((j) => journalLine(ctx, viewer, party, j)) : [],
-    holds: holds ? holdsOn(ctx.state, account).map((h) => ({ id: h.id, cents: h.cents, until: day(ctx, h.until), kind: h.kind, memo: h.memo })) : [],
+    holds: holds ? holdsOn(ctx.state, account).map((h) => ({ id: h.id, cents: h.cents, until: day(ctx, h.until), kind: h.kind, memo: says(viewer, h.memo) })) : [],
     transactions: level >= 2 ? journal.slice(-(level >= 4 ? 40 : 20)).reverse().map((j) => journalLine(ctx, viewer, party, j)) : [],
     securedBy: securedBy !== "" && own(ctx.state.entities, securedBy) && visible(ctx, viewer, securedBy) ? { id: securedBy, name: nameFor(ctx, viewer, securedBy) } : null,
     loan: t.installment && level >= 3 ? { payment: typeof e?.fields.payment === "number" ? e.fields.payment : (cycle?.minimum ?? 0), monthsLeft: cycle?.months_left ?? numOf(e?.fields.months_left, numOf(e?.fields.remaining_months, p?.term_months ?? 0)), payoff: Math.max(0, -cents) } : null,
@@ -340,7 +392,8 @@ function flowView(hooks: FinanceHooks, ctx: ReadContext, viewer: Viewer, party: 
   return {
     // Nor, unless they act on it by it, does its id, which can name whom it's for (`pay:<job>`, an author's `bill_jess_household`).
     id: seen || actsOn ? f.id : opaqueId(f.id),
-    label: f.label,
+    // A derived flow's label is built from names ("Lift loan autopay"): it reads as the viewer may see them.
+    label: says(viewer, f.label),
     kind: f.kind,
     from: sideName(ctx, viewer, f.from),
     to: sideName(ctx, viewer, f.to),
@@ -401,7 +454,8 @@ function householdView(hooks: FinanceHooks, ctx: ReadContext, viewer: Viewer, ho
 
 /** One party's money at its own level (DESIGN §25.11). */
 export function buildFinanceView(hooks: FinanceHooks, ctx: ReadContext, party: EntityId, player: boolean): FinanceView {
-  const viewer: Viewer = { pov: player ? ctx.world.pov : null };
+  const pov = player ? ctx.world.pov : null;
+  const viewer: Viewer = { pov, hidden: pov === null ? [] : hiddenNames(ctx, pov) };
   const e = own(ctx.state.entities, party);
   const kind = partyKindOf(ctx, party);
   // A household is its members' shared money: it is followed as closely as its most closely followed member, though it holds no account of its own.
@@ -432,7 +486,7 @@ export function buildFinanceView(hooks: FinanceHooks, ctx: ReadContext, party: E
     if (next === null || !v) continue;
     const cents = v.cents === null ? 0 : signedFor(ctx, f, party, v.cents);
     // The account paying it, where the viewer can see it: money into theirs can come from an account of someone they can't.
-    upcoming.push({ at: when(ctx, next), clock: next, label: f.label, cents, flow: v.id, account: own(ctx.state.entities, f.from)?.kind === "account" && visible(ctx, viewer, f.from) ? f.from : null });
+    upcoming.push({ at: when(ctx, next), clock: next, label: v.label, cents, flow: v.id, account: own(ctx.state.entities, f.from)?.kind === "account" && visible(ctx, viewer, f.from) ? f.from : null });
   }
   for (const a of accounts) {
     const cycle = cycleOf(ctx.state, a.id);
