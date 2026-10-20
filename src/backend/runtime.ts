@@ -384,6 +384,8 @@ export interface ReadInput {
   world: WorldDoc;
   seed: string;
   pre: LedgerEvent[];
+  /** The state before `pre`: where the player's message was said, and who heard it (DESIGN §24.4). */
+  start: WorldState;
   /** The Journal's latest turn lines before the reply (`{{recent}}`). */
   recent: string[];
 }
@@ -1221,7 +1223,7 @@ export class Runtime implements TurnHooks {
     if (input.kind === "continue") {
       const head = input.core.fold(input.observed.slice(0, index + 1));
       const world = input.core.worldAt(head.state.revision);
-      context = world ? { state: head.state, world, seed: "", pre: [], recent } : null;
+      context = world ? { state: head.state, world, seed: "", pre: [], start: head.state, recent } : null;
     } else {
       const at = input.core.commitContext(input.generationId, input.messageId, input.observed);
       context = at ? { ...at, recent } : null;
@@ -1283,7 +1285,7 @@ export class Runtime implements TurnHooks {
     const choiceTasks = choiceRuns.map((r) => (post && budget.take() ? promptedText(this.steps, r, "choices", vars, secrets, userId, budget.signal, lore(r)).then((lines) => lines ?? []) : Promise.resolve([])));
     // The minds' post phase (DESIGN §24.4): who was present, their memory of what was written, and
     // consolidation, beside the reply's other steps, on the phase's wall clock.
-    const mindsTask = post ? postMinds(this.minds, { chatId, userId, world: context.world, state: context.state, pre: context.pre, messageId, user: pre?.text ?? "", reply: text, signal: budget.signal, guidance: { memory: guidance.memory ?? "", consolidate: guidance.consolidate ?? "" } }) : Promise.resolve({ events: [], traces: [] });
+    const mindsTask = post ? postMinds(this.minds, { chatId, userId, world: context.world, start: context.start, state: context.state, pre: context.pre, messageId, user: pre?.text ?? "", reply: text, signal: budget.signal, guidance: { memory: guidance.memory ?? "", consolidate: guidance.consolidate ?? "" } }) : Promise.resolve({ events: [], traces: [] });
     const [extracted, effects, decisions, contradicted, choices, minded] = await Promise.all([extractTask, Promise.all(effectsTasks), npcTask, contradictionTask, Promise.all(choiceTasks), mindsTask]);
     this.addMindTraces(chatId, key, minded.traces);
     // The reply's lore traces join its generation's inspector record (the pre phase's are there already).

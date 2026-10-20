@@ -13,7 +13,7 @@ import type { ChatId, EntityId, MessageId, UserId } from "../shared/ids";
 import type { JsonObject, JsonValue } from "../shared/json";
 import { isRecord } from "../shared/json";
 import type { LedgerEvent } from "../shared/ledger";
-import type { CommitmentKind, Fidelity, MindCallTrace, MindCommitment, MindEventData, MindMoment, MindNote, MindPlan, MindPurpose, MindsSettings, PlanKind } from "../shared/minds";
+import type { CommitmentKind, Fidelity, MindCallTrace, MindCommitment, MindEventData, MindMoment, MindNote, MindPlan, MindPurpose, MindsSettings, PlanKind, PresenceEventData } from "../shared/minds";
 import { COMMITMENT_KINDS, effectiveMemory, MIND_ANSWER_FORMATS, MIND_PROMPT_DEFAULTS, MIND_TEXT_CAPS, MINDS_EVENTS, PLAN_KINDS, PLAN_PRIORITY, worldMindsOf } from "../shared/minds";
 import type { ModelUseSettings, StepConfig } from "../shared/settings";
 import type { WorldDoc } from "../shared/world";
@@ -295,6 +295,8 @@ export interface PostMindsInput {
   chatId: ChatId;
   userId: UserId;
   world: WorldDoc;
+  /** The state the turn started from: where the player's message was said, and who heard it. */
+  start: Readonly<WorldState>;
   /** The state the reply was written in: the fold prefix and the turn's planned events. */
   state: Readonly<WorldState>;
   /** The turn's planned events: what present characters saw happen. */
@@ -308,13 +310,55 @@ export interface PostMindsInput {
   guidance?: { memory?: string; consolidate?: string };
 }
 
-/** Who was in the POV's scene: everyone acting at its place but the POV, whether it sees them or not. */
+/** Who is in the POV's scene in `state`: everyone acting at its place but the POV, whether it sees them or not. */
 export function presentWith(reg: Registry, world: WorldDoc, state: Readonly<WorldState>): EntityId[] {
   const here = placeOfEntity(state, world.pov);
   if (here === null) return [];
   return Object.keys(state.entities)
     .sort()
     .filter((id) => id !== world.pov && placeOfEntity(state, id) === here && kindIs(reg, world, own(state.entities, id)?.kind ?? "", "person") && !isGone(state, id) && acts(world, state, id));
+}
+
+/**
+ * A turn's presence (DESIGN §24.4): who heard the player's message, where it was said, and what they
+ * saw happen until the POV left them (`said`); then whoever the POV is with at the turn's end that
+ * didn't hear it, with no message, so they never recall it or remember it (`met`). When the POV ends
+ * the turn somewhere else, that is everyone at the destination, a companion who came along included,
+ * with what they saw from its arrival; otherwise someone who came in while the turn played. `left`:
+ * those who heard it and stayed behind.
+ */
+export function turnPresence(reg: Registry, world: WorldDoc, input: Pick<PostMindsInput, "start" | "state" | "pre" | "messageId">): { said: PresenceEventData; met: PresenceEventData | null; left: EntityId[] } {
+  const { start, state, pre } = input;
+  const pov = world.pov;
+  const from = placeOfEntity(start, pov);
+  const to = placeOfEntity(state, pov);
+  const heard = presentWith(reg, world, start);
+  const there = presentWith(reg, world, state);
+  const saw = (events: readonly LedgerEvent[]): string[] => playerLines(reg, world, state, pov, events, 3);
+  if (from === to) {
+    const came = there.filter((id) => !heard.includes(id));
+    return { said: { msg: input.messageId, at: state.clock, place: from, who: heard, saw: saw(pre) }, met: came.length > 0 ? { msg: null, at: state.clock, place: to, who: came, saw: [] } : null, left: [] };
+  }
+  // Where the POV was as each planned event happened: the event that took it away, and the one that
+  // brought it where it ended.
+  const w = new Working(reg, world, start);
+  let away = -1;
+  let awayAt = start.clock;
+  let arrived = 0;
+  pre.forEach((e, i) => {
+    w.apply(e);
+    const at = placeOfEntity(w.state, pov);
+    if (away < 0 && at !== from) {
+      away = i;
+      awayAt = w.state.clock;
+    }
+    if (at !== to) arrived = i + 1;
+  });
+  return {
+    said: { msg: input.messageId, at: awayAt, place: from, who: heard, saw: saw(away < 0 ? pre : pre.slice(0, away + 1)) },
+    met: there.length > 0 ? { msg: null, at: state.clock, place: to, who: there, saw: saw(pre.slice(arrived)) } : null,
+    left: heard.filter((id) => !there.includes(id)),
+  };
 }
 
 /** The `memory` step's answer as event data. */
@@ -351,27 +395,28 @@ function memoryData(reg: Registry, world: WorldDoc, state: Readonly<WorldState>,
 const CONSOLIDATIONS_PER_TURN = 2;
 
 /**
- * The post phase (DESIGN §24.4): who was present for the turn (and what they saw happen), then the
- * `memory` step for each present character whose level the user chose, from what was written, then
- * `consolidate` for those whose notes overflow or fade, at most once per period each.
+ * The post phase (DESIGN §24.4): who heard the turn and who the POV met in it (and what each saw
+ * happen), then the `memory` step for each who heard it at a level the user chose, from what was
+ * written, then `consolidate` for those whose notes overflow or fade, at most once per period each.
  */
 export async function postMinds(deps: MindsDeps, input: PostMindsInput): Promise<RunMindsResult> {
   const { registry: reg } = deps;
   const { world, state, userId } = input;
   const settings = await deps.settings.get(userId);
   if (!mindsOn(settings)) return { events: [], traces: [] };
-  const who = presentWith(reg, world, state);
-  const saw = playerLines(reg, world, state, world.pov, input.pre, 3);
-  const presence: LedgerEvent = { type: MINDS_EVENTS.presence, data: { msg: input.messageId, at: state.clock, place: placeOfEntity(state, world.pov), who, saw } };
+  const { said, met, left } = turnPresence(reg, world, input);
   const w = new Working(reg, world, state);
-  w.apply(presence);
-  const events: LedgerEvent[] = [presence];
+  const events: LedgerEvent[] = [];
+  for (const data of met ? [said, met] : [said]) {
+    const presence: LedgerEvent = { type: MINDS_EVENTS.presence, data };
+    if (!w.apply(presence)) events.push(presence);
+  }
   const traces: MindCallTrace[] = [];
   const memory = effectiveMemory(world, settings.minds);
-  const ctx = reg.context(world, w.state);
-  const levels = new Map(fidelityOf(ctx, { user: input.user, reply: input.reply }).map((s) => [s.entity, s.level]));
+  // Their level as they heard it: where the message was said.
+  const levels = new Map(fidelityOf(reg.context(world, input.start), { user: input.user, reply: input.reply }).map((s) => [s.entity, s.level]));
   const memoryConfig = mindsStepConfig(settings.modelUse, "memory");
-  const remembering = memoryConfig ? who.filter((id) => settings.minds.memoryLevels.includes(levels.get(id) ?? "background")) : [];
+  const remembering = memoryConfig ? said.who.filter((id) => settings.minds.memoryLevels.includes(levels.get(id) ?? "background")) : [];
   const messages = remembering.length > 0 ? await chatMessages(deps, input.chatId, userId) : [];
   const moment: MindMoment = { kind: "turn", at: state.clock, reason: "after the reply", user: input.user, reply: input.reply };
   const remembered = await Promise.all(
@@ -380,7 +425,7 @@ export async function postMinds(deps: MindsDeps, input: PostMindsInput): Promise
       const scope: MindScope = { reg, world, state: w.state, who: id, memory, messages, hideJson: settings.hideJsonBlocks, moment, loreTokens: 0 };
       const usage = { tokens: 0 };
       const t0 = performance.now();
-      const raw = input.signal.aborted ? null : await deps.steps.helperJson("memory", prompt.text, memoryContext(scope, { user: input.user, reply: input.reply }), memoryConfig, userId, input.signal, { guidance: input.guidance?.memory ?? deps.presets.last(userId).guidance.memory ?? "", usage });
+      const raw = input.signal.aborted ? null : await deps.steps.helperJson("memory", prompt.text, memoryContext(scope, { user: input.user, reply: input.reply, left: left.includes(id) }), memoryConfig, userId, input.signal, { guidance: input.guidance?.memory ?? deps.presets.last(userId).guidance.memory ?? "", usage });
       const data = raw === null ? null : memoryData(reg, world, w.state, id, raw);
       traces.push({ purpose: "memory", phase: "post", who: traceName(reg, world, state, id), level: levels.get(id) ?? "near", outcome: data ? "recorded" : "failed", ms: Math.round(performance.now() - t0), tokens: usage.tokens, prompt: prompt.source });
       return data;

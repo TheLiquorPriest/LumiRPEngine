@@ -228,11 +228,15 @@ export function mindContext(scope: MindScope): string {
   const cal = calendarOf(world);
   const last = c.mind;
   const recall = recallFor(scope);
+  // How the last turn ended is theirs only if they heard it: someone the POV met at its end, or who
+  // came in since, wasn't there for what it tells (DESIGN §24.4).
+  const said = readSlice(state).presence.findLast((p) => p.msg !== null);
+  const heardLast = said === undefined || said.who.includes(who);
   const now =
     moment.kind === "beat"
       ? [`It is ${formatClock(cal, moment.at)}. ${moment.reason}.`]
       : withPov
-        ? [moment.reply.trim() !== "" ? `The story so far ended: ${clip(readableReply(moment.reply, scope.hideJson), RECALL_SIDE)}` : "", moment.user.trim() !== "" ? `Now ${povLabel(scope)} says or does: ${clip(moment.user, RECALL_SIDE)}` : `${povLabel(scope)} is here with you.`].filter((l) => l !== "")
+        ? [heardLast && moment.reply.trim() !== "" ? `The story so far ended: ${clip(readableReply(moment.reply, scope.hideJson), RECALL_SIDE)}` : "", moment.user.trim() !== "" ? `Now ${povLabel(scope)} says or does: ${clip(moment.user, RECALL_SIDE)}` : `${povLabel(scope)} is here with you.`].filter((l) => l !== "")
         : [`You aren't with ${povLabel(scope)} right now; carry on with your own day.`];
   const parts = [
     `You are ${e?.name ?? who}. ${occasion(scope, place)}`,
@@ -249,8 +253,11 @@ export function mindContext(scope: MindScope): string {
   return clip(parts.join("\n\n"), CONTEXT_MAX);
 }
 
-/** The user message of a `memory` call: who they are, what they hold, and the turn as it was written. */
-export function memoryContext(scope: MindScope, turn: { user: string; reply: string }): string {
+/**
+ * The user message of a `memory` call: who they are, what they hold, and the turn as it was written.
+ * With `left`, the POV left them partway through: what the story tells after that happened without them.
+ */
+export function memoryContext(scope: MindScope, turn: { user: string; reply: string; left?: boolean }): string {
   const { state, who, world } = scope;
   const c = readCharacter(state, who);
   const cal = calendarOf(world);
@@ -262,7 +269,7 @@ export function memoryContext(scope: MindScope, turn: { user: string; reply: str
     block("Your open commitments (by id)", commitments),
     block("Your plans", plans),
     block("What you remember", memoryLines(scope, c)),
-    block("The turn just written", [storyVoice(scope), turn.user.trim() !== "" ? `${povLabel(scope)} (the player character) wrote: ${clip(turn.user, RECALL_SIDE)}` : "", `Story: ${clip(readableReply(turn.reply, scope.hideJson), RECALL_SIDE * 2)}`].filter((l) => l !== "")),
+    block("The turn just written", [storyVoice(scope), turn.left ? `${povLabel(scope)} left you partway through this turn: whatever the story tells after they left happened without you.` : "", turn.user.trim() !== "" ? `${povLabel(scope)} (the player character) wrote: ${clip(turn.user, RECALL_SIDE)}` : "", `Story: ${clip(readableReply(turn.reply, scope.hideJson), RECALL_SIDE * 2)}`].filter((l) => l !== "")),
   ].filter((p) => p !== "");
   return clip(parts.join("\n\n"), CONTEXT_MAX);
 }

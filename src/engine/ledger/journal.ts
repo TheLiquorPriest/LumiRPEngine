@@ -762,15 +762,15 @@ export class LedgerCore {
     return (out.messages.at(-1)?.path ?? ROOT_PATH) === path ? { out, path, elsewhere: false } : inForce(path, true);
   }
 
-  /** What a Re-read edit or Retry read of an existing record reads against (its fold prefix plus `pre`). */
-  readContext(messageId: MessageId, observed: readonly ChainMessage[]): { state: WorldState; world: WorldDoc; seed: string; pre: LedgerEvent[] } | null {
+  /** What a Re-read edit or Retry read of an existing record reads against (its fold prefix plus `pre`), and the state before `pre`. */
+  readContext(messageId: MessageId, observed: readonly ChainMessage[]): { state: WorldState; world: WorldDoc; seed: string; pre: LedgerEvent[]; start: WorldState } | null {
     const index = observed.findIndex((m) => m.id === messageId);
     const m = this.chain(observed)[index];
     if (!m) return null;
     const rec = activeRecord(m, this.journal.tombstones);
     if (!rec) return null;
-    const prefix = this.prefixState(this.fold(observed.slice(0, index)), m, rec);
-    return prefix ? { ...prefix, seed: rec.seed, pre: rec.events.slice(0, rec.pre) } : null;
+    const prefix = this.prefixState(this.fold(observed.slice(0, index)), m, rec, [], true);
+    return prefix?.start ? { ...prefix, start: prefix.start, seed: rec.seed, pre: rec.events.slice(0, rec.pre) } : null;
   }
 
   /**
@@ -797,21 +797,25 @@ export class LedgerCore {
 
   /**
    * What a turn's post steps will read against when it commits on `messageId` (its fold prefix
-   * plus `pre`), so the backend can run `extract` first. Null when the reply won't be read (no
-   * pending turn, a pause before it, or its own swipe deleted while it streamed, which leaves the
-   * commit nothing to record it on).
+   * plus `pre`), so the backend can run `extract` first, and the state before `pre`: where the
+   * player's message was said. Null when the reply won't be read (no pending turn, a pause before
+   * it, or its own swipe deleted while it streamed, which leaves the commit nothing to record it on).
    */
-  commitContext(generationId: GenerationId, messageId: MessageId, observed: readonly ChainMessage[]): { state: WorldState; world: WorldDoc; seed: string; pre: LedgerEvent[] } | null {
+  commitContext(generationId: GenerationId, messageId: MessageId, observed: readonly ChainMessage[]): { state: WorldState; world: WorldDoc; seed: string; pre: LedgerEvent[]; start: WorldState } | null {
     const p = this.journal.pending[generationId];
     const index = observed.findIndex((m) => m.id === messageId);
     if (!p || index < 0 || p.swipeId === GONE_SWIPE || this.pausedWithin(observed.slice(0, index))) return null;
     const at = this.plannedPrefix(p, observed, index);
-    const prefix = this.prefixState(at.out, this.chain(observed.slice(index, index + 1))[0], { markersApplied: p.markersApplied, events: p.events, pre: p.events.length, path: at.path, undone: [] }, this.journal.started ? [] : p.startMarkers);
-    return prefix ? { ...prefix, seed: p.seed, pre: [...p.events] } : null;
+    const prefix = this.prefixState(at.out, this.chain(observed.slice(index, index + 1))[0], { markersApplied: p.markersApplied, events: p.events, pre: p.events.length, path: at.path, undone: [] }, this.journal.started ? [] : p.startMarkers, true);
+    return prefix?.start ? { ...prefix, start: prefix.start, seed: p.seed, pre: [...p.events] } : null;
   }
 
-  /** State the turn's post steps validate against: its fold prefix (P2) from `out`, the fold before its target, plus a planned first turn's starting markers when given; and the target's parent path. */
-  private prefixState(out: FoldOutput, target: ChainMessage | undefined, rec: Pick<Rec, "markersApplied" | "events" | "pre" | "path" | "undone">, start: readonly Marker[] = []): { state: WorldState; world: WorldDoc; parent: PathHash } | null {
+  /**
+   * State the turn's post steps validate against: its fold prefix (P2) from `out`, the fold before its
+   * target, plus a planned first turn's starting markers when given; and the target's parent path.
+   * With `keepStart`, also the state before the planned events, which a read's minds need (DESIGN §24.4).
+   */
+  private prefixState(out: FoldOutput, target: ChainMessage | undefined, rec: Pick<Rec, "markersApplied" | "events" | "pre" | "path" | "undone">, start: readonly Marker[] = [], keepStart = false): { state: WorldState; world: WorldDoc; parent: PathHash; start?: WorldState } | null {
     const state = structuredClone(out.state);
     const parent = out.messages.at(-1)?.path ?? ROOT_PATH;
     for (const mk of [...(target?.ledger?.markers ?? [])].sort((a, b) => a.seq - b.seq)) {
@@ -820,11 +824,13 @@ export class LedgerCore {
     for (const mk of start) applyMarker(state, mk, this.env);
     const world = this.env.worlds(state.revision);
     if (!world) return null;
+    // The state the turn started from: who was there to hear the player's message.
+    const before = keepStart ? structuredClone(state) : undefined;
     // The planned events as the fold applies them: an undone one doesn't count (a read after an undo
     // must not lean on what was undone; property seed rc-0d464a0-8843, L7).
     const planned = rec.events.slice(0, rec.pre).filter((_, i) => !rec.undone.some((u) => u.in === "events" && u.index === i));
     applyValidUnits(this.env.types, planned, state, (s) => this.env.types.context(world, s));
-    return { state, world, parent };
+    return { state, world, parent, ...(before ? { start: before } : {}) };
   }
 
   /** Reads `text` against `state`, keeping each unit (an event, or a group) that validates in sequence. */

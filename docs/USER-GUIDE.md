@@ -433,7 +433,7 @@ The number is the most steps a turn can run: each step takes one call from its p
 | `contradiction` (Contradiction check) | After the reply | Checks the reply against the established facts. If it finds a clash, a **The reply contradicts the facts** chip appears, and the next turn is told the correction. |
 | `choices` (Suggested choices) | After the reply | Offers next-step options as **Suggested choices** chips. |
 | `mind` (Character minds) | Before the reply, and at time-skip beats | One call per character, as that character: their monologue, depiction, intent, reactions and plans. Runs on its own cadence; see [Character minds](#character-minds). |
-| `memory` (Character memory) | After the reply | Per character in the scene at the levels you pick: the notes, commitments and plans they take from what the reply said. |
+| `memory` (Character memory) | After the reply | Per character who heard your message, at the levels you pick: the notes, commitments and plans they take from what the reply said. |
 | `skip` (Time-skip beats) | Before a time skip | Proposes further moments in the skip worth stopping at, beside the ones the engine finds. |
 | `consolidate` (Memory consolidation) | After the reply | Folds a character's faded and surplus notes into their summary. |
 
@@ -507,7 +507,7 @@ Each character remembers in four layers: a **witness log** of what they saw happ
 - **Near refresh**: when they come into the scene or it changes; when the latest message or reply names them; every so many turns; when their mind is so many game minutes old. Each number can be turned off.
 - **Far refresh**: every so many game minutes, or never.
 - **Near and Far refreshes a turn**: how many Near and Far minds may think in one turn besides the Live ones, the most pressing first, or **no limit**. A refresh you ask for in the GM view always runs.
-- **Memory notes after the reply**: which levels of the characters in the scene get the memory step.
+- **Memory notes after the reply**: which levels of the characters who heard your message get the memory step. On a turn that takes you somewhere else, the people you leave remember it, and the people you meet there don't, since they weren't there to hear it.
 - **Minds section budget (tokens)**: the narrator's Minds section has its own budget, apart from the section budget, so minds never crowd out Scene or People.
 - **Time skips**: how many beats a skip may stop at, and how many minds think at each beat; either can be **no limit**.
 - **Memory**: your own value for any of the world's memory settings (see [Character minds in a world](#character-minds-in-a-world)); **Use the world's** goes back to the world's.

@@ -119,6 +119,60 @@ describe("minds around a turn", () => {
     expect(recall("priya_nair")).toContain("Priya smiles at you");
   });
 
+  test("a travel turn: who heard the message remembers it, and whoever the POV met at its destination never recalls or notes it", async () => {
+    const rig = new Rig({ shipped: true });
+    const LINE = "I'll take Helen's recipe book tonight";
+    const memories: Record<string, string> = {};
+    const minds: string[] = [];
+    rig.host.quietReply = (req) => {
+      const system = req.messages[0]?.content ?? "";
+      const user = req.messages[1]?.content ?? "";
+      if (system.includes("You map a player's typed input")) return JSON.stringify(user.includes("recipe book") ? { action: "go", params: { to: "harbor_street_114" }, confidence: 0.9 } : { action: null, params: {}, confidence: 0.9 });
+      const mind = MIND.exec(system)?.[1];
+      if (mind) {
+        minds.push(`${mind}\n${user}`);
+        return JSON.stringify({ monologue: "Thinking it over.", depiction: `${mind} looks up`, intent: "", reactions: [], plans: [], mood: "calm" });
+      }
+      const memory = MEMORY.exec(system)?.[1];
+      if (memory) {
+        memories[memory] = user;
+        return JSON.stringify({ notes: [{ text: `${memory} remembers the turn`, salience: 3 }], commitments: [], resolved: [], plans: [], told: [] });
+      }
+      return JSON.stringify({ proposals: [] });
+    };
+    const worldId = await rig.newWorld("Alder", "modern_slice_of_life");
+    rig.body(await rig.send({ type: "lre.editor", op: "set", worldId, base: null, part: "minds", value: { thresholds: { live: 900, near: 900, far: 900 }, always: { ids: ["marcus_delgado", "helen_kowalczyk"] } } }));
+    rig.body(await rig.send({ type: "lre.world", op: "commit", worldId, base: null }));
+    const chatId = rig.host.createChat("Morning.");
+    rig.body(await rig.send({ type: "lre.world", op: "attach", worldId, chatId }));
+    rig.body(await rig.send({ type: "lre.settings.set", patch: { minds: { refreshLimit: 0 } } }));
+    rig.body(await rig.send({ type: "lre.edit", chatId, ops: [{ op: "move", entity: "pov", to: "birch_lane_12" }, { op: "move", entity: "marcus_delgado", to: "birch_lane_12" }, { op: "move", entity: "helen_kowalczyk", to: "harbor_street_114" }] }));
+    await rig.turn(chatId, `I tell Marcus ${LINE}, then head to Helen's.`, `You tell Marcus ${LINE}, then drive over to Helen's, where she waves you in.`);
+    const { state } = await stateOf(rig, chatId);
+    expect(placeOfEntity(state, "pov")).toBe("harbor_street_114");
+    // Marcus heard it, and remembers it, knowing he was left behind; Helen didn't, and has no memory of it.
+    expect(memories["Marcus Delgado"]).toContain(LINE);
+    expect(memories["Marcus Delgado"]).toContain("left you partway through");
+    expect(memories["Helen Kowalczyk"]).toBeUndefined();
+    const presence = readSlice(state).presence;
+    const said = presence.find((p) => p.msg !== null);
+    expect(said?.place).toBe("birch_lane_12");
+    expect(said?.who).toContain("marcus_delgado");
+    expect(said?.who).not.toContain("helen_kowalczyk");
+    expect(presence.find((p) => p.msg === null && p.place === "harbor_street_114")?.who).toContain("helen_kowalczyk");
+    // Recall: the turn is Marcus's, never Helen's.
+    const messages = await rig.host.chats.messages(chatId, rig.host.userId);
+    const recall = (who: string) => recallFor({ state, who, memory: DEFAULT_MINDS_MEMORY, messages, hideJson: true, moment: { kind: "turn", at: state.clock, reason: "a turn", user: "", reply: "" } }).map((t) => t.text).join("\n");
+    expect(recall("marcus_delgado")).toContain(LINE);
+    expect(presentTurns(state, "helen_kowalczyk")).toEqual([]);
+    // Her next mind, with the POV at her place, isn't told how that turn went either.
+    minds.length = 0;
+    await rig.turn(chatId, "Hello, Helen.", "She smiles.");
+    const helen = minds.find((m) => m.startsWith("Helen Kowalczyk\n")) ?? "";
+    expect(helen).toContain("Now Jordan Ellis says or does: Hello, Helen.");
+    expect(helen).not.toContain("recipe book");
+  });
+
   test("full secrecy gives the narrator each monologue and intent", async () => {
     const rig = new Rig({ shipped: true });
     fakeModels(rig);
