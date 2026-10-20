@@ -639,7 +639,7 @@ export function buildFinanceView(hooks: FinanceHooks, ctx: ReadContext, party: E
   const carried = new Set<string>();
   stringsIn(view, carried);
   const payees = [...carried].filter((id) => own(ctx.state.entities, id)?.kind === "account" || isParty(ctx, id));
-  view.paysFor = payers.map((from) => ({ from, to: payees.filter((to) => paysFor(ctx, party, to, from, interests)) }));
+  view.paysFor = payers.map((from) => ({ from, to: payees.filter((to) => paysFor(ctx, party, to, from, { interests })) }));
   // And the keys a typed payee is theirs by: their id's and name's, and their household's.
   const home = householdOf(ctx, party);
   const keyed = [party, ...(home !== null && visible(ctx, viewer, home) ? [home] : [])];

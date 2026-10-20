@@ -138,6 +138,95 @@ describe("money a manager only manages reaches none of their own interests", () 
   });
 });
 
+describe("money a manager only manages is judged where it lands, however its payee is named", () => {
+  type Patch = NonNullable<Parameters<typeof setup>[0]>;
+  const both = (...patches: Patch[]): Patch => (wd) => patches.forEach((p) => p(wd));
+  /** The café, which the player runs as custodian for Maya, holding an authorized user's card on its till. */
+  const cafeForMaya: Patch = (wd) => {
+    Object.assign(wd.entities.daybreak!.fields, { owners: [{ party: "you", role: "custodian" }, { party: "maya", role: "beneficiary", share: 100 }] });
+    wd.entities.db_operating!.fields.owners = [{ party: "daybreak", role: "owner" }, { party: "you", role: "authorized_user" }];
+    wd.entities.db_savings = account("db_savings", "daybreak", "savings", 5_000_000);
+  };
+  /** Rosa keeps no account but one the player is custodian of, so whatever is paid her lands there. */
+  const rosaKept: Patch = (wd) => {
+    delete wd.entities.rosa_checking;
+    wd.entities.rosa_kept = entity("rosa_kept", "account", "Rosa's account", { owners: [{ party: "you", role: "custodian" }, { party: "rosa", role: "beneficiary", share: 100 }], product: "checking", opening: 0 });
+  };
+  /** A family trust the player is trustee of for `beneficiary`. */
+  const trustFor = (beneficiary: string): Patch => (wd) => {
+    wd.entities.family_trust = entity("family_trust", "trust", "Chen Family Trust", { owners: [{ party: "you", role: "trustee" }, { party: beneficiary, role: "beneficiary", share: 100 }] }, "principal");
+    wd.entities.trust_acct = entity("trust_acct", "account", "Trust account", { owners: [{ party: "family_trust", role: "owner" }], product: "checking", opening: 5_000_000 });
+  };
+  const pay = (w: ReturnType<typeof setup>["w"], from: string, to: string) => act(w, "economy.flow_create", { who: "you", label: `Pay ${to}`, from, to, amount: 100_000, every: "day" });
+
+  test("paid to someone by name, it lands in their deposit account, judged as that account would be: the café's custodian pays its savings neither to the café, whose till he holds a card on, nor to Rosa, whose account he's custodian of", () => {
+    const { w } = setup(both(cafeForMaya, rosaKept));
+    for (const to of ["daybreak", "db_operating", "rosa", "rosa_kept"]) expect([to, refusal(pay(w, "db_savings", to))]).toEqual([to, "db_savings pays for Daybreak Café, not for Alex Rivera"]);
+    expect(refusal(pay(w, "db_savings", "maya"))).toBe("");
+  });
+
+  test("nor does a trustee pay Rosa by name what he may not pay into her account", () => {
+    const { w } = setup(both(trustFor("maya"), rosaKept));
+    for (const to of ["rosa", "rosa_kept"]) expect([to, refusal(pay(w, "trust_acct", to))]).toEqual([to, "Trust account pays for Chen Family Trust, not for Alex Rivera"]);
+    expect(refusal(pay(w, "trust_acct", "maya"))).toBe("");
+  });
+
+  test("a parent who is trustee of his daughter's trust and custodian of her account pays her from it, by name or into the account alike, though never himself", () => {
+    const { w } = setup(
+      both(trustFor("rosa"), rosaKept, (wd) => {
+        wd.entities.home = entity("home", "household", "The household", {});
+        for (const id of ["you", "rosa"]) wd.entities[id]!.relations.push({ type: "member_of", to: "home" });
+      }),
+    );
+    expect(refusal(pay(w, "trust_acct", "rosa_kept"))).toBe("");
+    expect(refusal(pay(w, "trust_acct", "rosa"))).toBe("");
+    expect(refusal(pay(w, "trust_acct", "checking"))).toBe("Trust account pays for Chen Family Trust, not for Alex Rivera");
+    lapse(w, 2 * DAY);
+    expect(w.state.accounts.rosa_kept ?? 0).toBeGreaterThan(0);
+  });
+
+  test("an invoice's payment lands in its business's till: Brightline's custodian pays from Brightline no invoice of a café whose till he holds a card on, nor bills Brightline for a café he runs for Maya", () => {
+    const brightlineForJordan: Patch = (wd) => Object.assign(wd.entities.brightline!.fields, { owners: [{ party: "you", role: "custodian" }, { party: "jordan", role: "beneficiary", share: 100 }] });
+    const { w } = setup(
+      both(brightlineForJordan, (wd) => {
+        Object.assign(wd.entities.daybreak!.fields, { owners: [{ party: "rosa", role: "owner", share: 100 }] });
+        wd.entities.db_operating!.fields.owners = [{ party: "daybreak", role: "owner" }, { party: "you", role: "authorized_user" }];
+        wd.entities.inv_supplies = entity("inv_supplies", "invoice", "Supplies", { business: "daybreak", customer: "brightline", cents: 300_000, memo: "Supplies", issued: "2026-09-01", due: "2026-10-30", state: "open" });
+      }),
+    );
+    lapse(w, DAY);
+    const brightline = w.state.accounts.bl_operating ?? 0;
+    expect(refusal(act(w, "economy.invoice_pay", { invoice: "inv_supplies", by: "you" }))).toBe("Brightline Logistics pays for itself, not for Alex Rivera");
+    expect(w.state.accounts.bl_operating).toBe(brightline);
+    const billing = setup(both(brightlineForJordan, cafeForMaya)).w;
+    expect(refusal(act(billing, "economy.invoice_issue", { business: "daybreak", customer: "brightline", cents: 300_000, memo: "Catering", by: "you" }))).toBe("Alex Rivera runs Brightline Logistics for others, so can't bill it for Daybreak Café");
+  });
+
+  test("a worker's pay lands in their deposit account: the café's custodian neither hires Rosa into the account he's custodian of nor raises her there, though he hires Maya", () => {
+    const { w } = setup(
+      both(cafeForMaya, rosaKept, (wd) => {
+        wd.entities.job_rosa_cafe = entity("job_rosa_cafe", "job", "Rosa's café shifts", { worker: "rosa", employer: "daybreak", title: "Barista", basis: "hourly", rate: 1_800, hours: "contract", hours_per_week: 10, pay_every: "weekly", start: "2026-01-05" });
+      }),
+    );
+    const hire = (worker: string) => act(w, "economy.hire", { business: "daybreak", worker, title: "Barista", basis: "hourly", rate: 1_800, pay_every: "weekly", by: "you" });
+    const why = "Alex Rivera runs Daybreak Café for others, so can't pay Rosa Delgado into Rosa's account, which Alex Rivera may spend";
+    expect(refusal(hire("rosa"))).toBe(why);
+    expect(refusal(act(w, "economy.job_raise", { job: "job_rosa_cafe", rate: 4_000, by: "you" }))).toBe(why);
+    expect(refusal(hire("maya"))).toBe("");
+    // The hub names her among those he may neither hire nor raise there.
+    const page = (w.ctx.query("economy.finance")(w.ctx, "you", true) as FinanceView).businesses.find((b) => b.id === "daybreak");
+    expect(page?.selfDealing).toEqual(["you", "rosa"]);
+  });
+
+  test("the hub is told so by the same rule: the café's savings may go neither to the café nor to Rosa, by name or account, but to Maya", () => {
+    const { w } = setup(both(cafeForMaya, rosaKept));
+    const savings = (w.ctx.query("economy.finance")(w.ctx, "you", true) as FinanceView).paysFor.find((p) => p.from === "db_savings")?.to ?? [];
+    expect(savings).toEqual(expect.arrayContaining(["daybreak", "db_operating", "rosa", "rosa_kept"]));
+    expect(savings).not.toContain("maya");
+    expect(savings).not.toContain("maya_checking");
+  });
+});
+
 describe("money wholly a manager's own keeps no one else's interest", () => {
   test("the owner of Brightline and the café outright bills and pays between them, though he pays himself from neither but by a draw", () => {
     const { w } = setup((wd) => {

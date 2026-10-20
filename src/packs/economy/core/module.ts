@@ -157,8 +157,14 @@ export interface FinanceApi {
   shareOf(state: Readonly<WorldState>, entity: EntityId, party: EntityId): number;
   /** Whom a party's own interests are: them, their household and its members, and each party any of those counts the worth of (DESIGN §25.1). */
   interestsOf(ctx: ReadContext, who: EntityId): ReadonlySet<EntityId>;
-  /** Whether money from `from`, which `who` only manages, paid to `to` would be for `who` rather than for whom the money is (DESIGN §25.1). */
-  paysFor(ctx: ReadContext, who: EntityId, to: string, from: string): boolean;
+  /**
+   * Whether money from `from`, which `who` only manages, paid to `to` would be for `who` rather than
+   * for whom the money is (DESIGN §25.1). A payee in the world is judged where the payment lands too:
+   * `deposit`, the account the payment names, where it's theirs, else their deposit account.
+   */
+  paysFor(ctx: ReadContext, who: EntityId, to: string, from: string, deposit?: EntityId): boolean;
+  /** Whether money from `from` paid into `account` would land where `who` could move it on: an account they may spend by a role of their own that isn't wholly the money's own people's, while the money isn't theirs (DESIGN §25.1). */
+  landsInReach(ctx: ReadContext, who: EntityId, account: EntityId, from: string): boolean;
   /** The accounts a party holds with a right (`spend`, `worth` or `sees`), in class order. */
   accountsOf(books: Books, party: EntityId, right?: "spend" | "worth" | "sees"): EntityId[];
   balance(state: Readonly<WorldState>, account: EntityId): number;

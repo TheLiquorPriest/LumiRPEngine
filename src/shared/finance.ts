@@ -1351,7 +1351,7 @@ export interface BusinessView {
   role: OwnerRole | null;
   /** Whether the viewing party may take an owner's draw from it (`may_draw`): an owner or joint owner of anything but a corporation, which pays its owners by salary or dividends. */
   mayDraw: boolean;
-  /** The people the viewing party may neither hire here nor raise: their own (them, their household's members), when they hold no share of its worth (DESIGN §25.1). Only those the viewer can see. */
+  /** The people the viewing party may neither hire here nor raise (`payrollProblem`, DESIGN §25.1), holding no share of its worth: their own (them, their household's members), and anyone whose pay would land in an account they may spend by a role of their own that isn't wholly the business's own people's. Only those the viewer can see. */
   selfDealing: EntityId[];
   owners: OwnerLine[];
   accounts: EntityId[];
