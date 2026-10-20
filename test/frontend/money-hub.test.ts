@@ -236,6 +236,16 @@ describe("what a party's roles allow", () => {
     expect(accountControls(view({ level: 1, accounts: [cash, checking, savings] }), checking)).toEqual([]);
   });
 
+  test("at Money 2 a card or loan is paid as the money step does, never by Pay; card changes need cards to run", () => {
+    // A card shows at Money 2 once the world switches cards on (with no autopay, which runs from Money 3), but paying one is an action from Money 3.
+    const low = { ...visa, autopay: null };
+    expect(accountControls(view({ level: 2, features: ["cards"], accounts: [cash, checking, savings, low] }), low)).toEqual([]);
+    expect(accountControls(view({ level: 3, accounts: [cash, checking, savings, visa] }), visa)).toEqual(["pay", "autopay"]);
+    const debit = card({ id: "d", account: "chk" });
+    expect(cardControls(view({ level: 2, features: ["cards"], accounts: [checking] }), debit)).toEqual(["freeze", "lost", "replace"]);
+    expect(cardControls(view({ level: 3, features: ["flows"], accounts: [checking] }), debit)).toEqual([]);
+  });
+
   test("a standing payment comes from an account the party manages: never cash, nor one an authorized user only spends from", () => {
     const shared = account({ id: "mom", class: "checking", role: "authorized_user" });
     expect(flowSources(view({ accounts: [cash, checking, savings, shared] })).map((s) => s.id)).toEqual(["chk", "sav"]);

@@ -129,8 +129,9 @@ export type AccountControl = "pay" | "transfer" | "autopay" | "withdraw" | "depo
 
 /**
  * The player's controls on one account, in the order the account card shows them:
- * - `pay`: something owed on a card, a line or a loan they hold, from an account they may pay from
- *   (a business's loan they only manage is the business's to pay, from its own account by autopay);
+ * - `pay`: from Money 3, where paying is an action, something owed on a card, a line or a loan they
+ *   hold, from an account they may pay from (a business's loan they only manage is the business's
+ *   to pay, from its own account by autopay);
  * - `transfer`: money out of an account they may spend from, to another of theirs (cash moves by
  *   Withdraw and Deposit instead, which at the top level need a machine or a branch);
  * - `autopay`: where the view offers autopay (credit accounts, at the level that runs it) and they manage the account (by their role on it, or on the business that holds it);
@@ -143,7 +144,7 @@ export function accountControls(view: FinanceView, account: AccountView): Accoun
   const t = CLASS_TRAITS[account.class];
   const r = rights(account.role);
   const out: AccountControl[] = [];
-  if ((t.revolving || t.installment) && account.role !== null && account.cents < 0 && paySources(view).some((a) => a.id !== account.id)) out.push("pay");
+  if (view.level >= 3 && (t.revolving || t.installment) && account.role !== null && account.cents < 0 && paySources(view).some((a) => a.id !== account.id)) out.push("pay");
   if (r.spend && account.status === "open" && moveSources(view).some((a) => a.id === account.id) && transferTargets(view, account.id).length > 0) out.push("transfer");
   if (account.autopay !== null && account.manages) out.push("autopay");
   const holdsCash = view.accounts.some((a) => CLASS_TRAITS[a.class].cash && rights(a.role).spend);
@@ -172,8 +173,9 @@ export function transferTargets(view: FinanceView, from: EntityId): AccountView[
   return view.accounts.filter((a) => a.id !== from && CLASS_TRAITS[a.class].asset && !CLASS_TRAITS[a.class].cash && a.status === "open" && rights(a.role).sees);
 }
 
-/** The card changes the player may make: on a card they hold, or on one on an account they manage (a business's, for its owner). */
+/** The card changes the player may make where cards run for them: on a card they hold, or on one on an account they manage (a business's, for its owner). */
 export function cardControls(view: FinanceView, card: CardView): CardChange[] {
+  if (!view.features.includes("cards")) return [];
   if (card.holderId !== view.party && findAccount(view, card.account)?.manages !== true) return [];
   return cardChanges(card.state);
 }
