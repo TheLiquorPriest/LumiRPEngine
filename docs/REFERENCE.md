@@ -1024,7 +1024,7 @@ Version 1 · realism domain none · requires none.
 
 | Effect | Arguments |
 |---|---|
-| `story.answer` | `track`, `answer`, `decision?` |
+| `story.answer` | `track?`, `puzzle?`, `answer`, `decision?` |
 | `story.flag` | `name`, `value?` |
 
 ### Formula functions
