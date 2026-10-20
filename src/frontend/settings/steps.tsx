@@ -81,8 +81,8 @@ const STEP_PLAIN: Record<StepPurpose, string> = {
   choices: "After the reply: offers next steps as suggested choices.",
   judge: "Before the reply: rates how well you describe your approach to a check.",
   mind: "Before the reply: one call per character, as that character: what they think, how they come across, what they mean to do.",
-  memory: "After the reply: the notes, commitments and plans each character takes from it, at the levels you pick.",
-  skip: "Before a time skip: further moments in it worth stopping at.",
+  memory: "After the reply: the notes, commitments and plans each character who heard your message takes from it, at the levels you pick.",
+  skip: "Before a time skip, once you turn it on: further moments in it worth stopping at.",
   consolidate: "Folds a character's faded and surplus notes into their summary.",
 };
 

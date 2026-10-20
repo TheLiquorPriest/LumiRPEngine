@@ -17,7 +17,7 @@ import { FIDELITY_LABEL } from "../../packs/minds/ui/ops";
 
 const PROMPT_NOTE: Record<MindPurpose, string> = {
   mind: "One call per character, as that character: what they think, how they come across, what they mean to do.",
-  memory: "After the reply, per character at the levels you pick: the notes, commitments and plans they take from it.",
+  memory: "After the reply, per character who heard your message, at the levels you pick: the notes, commitments and plans they take from it.",
   skip: "Before a time skip: further moments in it worth stopping at.",
   consolidate: "Folds a character's faded and surplus notes into their summary.",
 };
@@ -167,9 +167,9 @@ export function MindsSection(props: { minds: MindsSettings; patch(patch: JsonObj
           </Section>
           <Section title="Memory notes after the reply">
             <div class="lre-minds-body">
-              <Note>Which characters in the scene take notes, commitments and plans from the reply.</Note>
+              <Note>Which of the characters who heard your message take notes, commitments and plans from the reply.</Note>
               {FIDELITIES.filter((f) => f !== "background").map((level) => (
-                <HostSwitch key={level} label={`${FIDELITY_LABEL[level]} characters in the scene`} checked={minds.memoryLevels.includes(level)} disabled={busy} onChange={(on) => policy({ memoryLevels: withMemoryLevel(minds.memoryLevels, level, on) })} />
+                <HostSwitch key={level} label={`${FIDELITY_LABEL[level]} characters who heard you`} checked={minds.memoryLevels.includes(level)} disabled={busy} onChange={(on) => policy({ memoryLevels: withMemoryLevel(minds.memoryLevels, level, on) })} />
               ))}
             </div>
           </Section>
@@ -210,7 +210,7 @@ export function MindsSection(props: { minds: MindsSettings; patch(patch: JsonObj
       </Section>
       <Section title="Prompts" flush>
         <div class="lre-minds-prompts">
-          <p class="lre-minds-note lre-minds-prompts-lead">A world's own step template for a purpose wins over these (Build → Step templates).</p>
+          <p class="lre-minds-note lre-minds-prompts-lead">Your prompt wins over the world's own step template for a purpose (Build → Step templates), and that over the built-in.</p>
           {MIND_PURPOSES.map((purpose) => (
             <PromptEditor key={purpose} purpose={purpose} value={minds.prompts[purpose]} busy={busy} patch={props.patch} />
           ))}

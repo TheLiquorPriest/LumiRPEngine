@@ -11,14 +11,17 @@ import type { EntityId, PlaceId } from "../../../shared/ids";
 import type { CommitmentKind, CommitmentStatus, Fidelity, MindsGmCharacter, MindsGmView, PlanKind, PlanStatus, RefreshReason } from "../../../shared/minds";
 import { COMMITMENT_KINDS, COMMITMENT_STATUSES, FIDELITIES, MIND_TEXT_CAPS, PLAN_KINDS, PLAN_PRIORITY } from "../../../shared/minds";
 import type { EditOp } from "../../../shared/protocol";
+import { formatMoneyInput, parseMoneyInput } from "../../../shared/money";
+import { formatMoney, type WorldCurrency } from "../../../shared/world";
 import { Chip } from "../../../frontend/build/form-kit";
 import { Badge, Banner, Button, Empty, Field, IdText, List, ListRow, Section, Seg, Stat } from "../../../frontend/components";
 import { formatMinutes } from "../../../frontend/format";
 import { GmPage, usePages } from "../../../frontend/gm/ui";
 import { Icon } from "../../../frontend/icons";
+import { MoneyInput } from "../../../frontend/money-input";
 import type { GmSectionProps } from "../../../frontend/registry";
 import type { PlanFormDraft } from "./ops";
-import { COMMITMENT_KIND_LABEL, COMMITMENT_STATUS_LABEL, commitmentDraft, commitmentOp, deleteOp, FIDELITY_LABEL, noteDraft, noteOp, pinOp, PLAN_KIND_LABEL, PLAN_STATUS_LABEL, planDraft, planLasts, planOp, refreshOp, startPlanIn } from "./ops";
+import { COMMITMENT_KIND_LABEL, COMMITMENT_STATUS_LABEL, commitmentDraft, commitmentOp, deleteOp, FIDELITY_LABEL, isMoneyPlan, narratorGets, noteDraft, noteOp, pinOp, PLAN_KIND_LABEL, PLAN_STATUS_LABEL, planDraft, planLasts, planOp, refreshOp, startPlanIn } from "./ops";
 
 type Tone = "neutral" | "accent" | "pos" | "neg";
 type Mind = NonNullable<MindsGmCharacter["mind"]>;
@@ -35,7 +38,7 @@ const COMMITMENT_TONE: Record<CommitmentStatus, Tone> = { open: "neutral", kept:
 
 /** What the narrator gets of a mind under each secrecy (DESIGN §24.3). */
 const SECRECY: Record<MindsGmView["secrecy"], { label: string; note: string }> = {
-  full: { label: "Full", note: "The narrator gets each mind's monologue and intent, told to show them and never state them." },
+  full: { label: "Full", note: "The narrator gets each mind whole (monologue, intent, reactions, mood and depiction), told to show it and never state it." },
   brief: { label: "Brief", note: "The narrator gets only the depiction, checked for leaks; the monologue and intent stay here." },
 };
 
@@ -70,6 +73,7 @@ interface Ctx {
   view: MindsGmView;
   busy: boolean;
   people: Person[];
+  currency: WorldCurrency;
   places: { id: PlaceId; name: string }[];
   edit(ops: EditOp[]): Promise<boolean>;
 }
@@ -105,6 +109,7 @@ export function GmMindsSection(props: GmSectionProps) {
     busy: props.busy,
     people: [...(pov ? [{ id: pov.id, name: pov.name }] : []), ...view.characters.map((c) => ({ id: c.entity, name: c.name }))],
     places: props.gm.places.map((p) => ({ id: p.id, name: p.name })),
+    currency: props.currency,
     edit: props.edit,
   };
   const page = pages.page;
@@ -323,26 +328,30 @@ function LatestMind(props: { ctx: Ctx; c: MindsGmCharacter }) {
       </Section>
     );
   }
-  const full = ctx.view.secrecy === "full";
+  const sent = narratorGets(ctx.view.secrecy, m);
   return (
     <Section title="Latest mind" aside={<Badge>{FIDELITY_LABEL[m.level]}</Badge>}>
       <div class="lre-gm-minds-when">
         <span class="lre-gm-minds-clock">{m.clock}</span>
         <span class="lre-gm-minds-why">{[m.moment === "beat" ? "At a time-skip beat" : "On a turn", whyOf(m), m.place ? `at ${nameIn(ctx.places, m.place)}` : null].filter((part) => part !== null && part !== "").join(" · ")}</span>
       </div>
-      {m.mood ? <Thought label="Mood">{m.mood}</Thought> : null}
-      <Thought label="Monologue" told={full}>
+      {m.mood ? (
+        <Thought label="Mood" told={sent.mood}>
+          {m.mood}
+        </Thought>
+      ) : null}
+      <Thought label="Monologue" told={sent.monologue}>
         {m.monologue || "—"}
       </Thought>
-      <Thought label="Depiction" told={!full && !m.withheld}>
+      <Thought label="Depiction" told={sent.depiction}>
         {m.depiction || "—"}
       </Thought>
       {m.withheld ? <Banner tone="warn">The depiction gave away a secret or a name you haven't met, so the narrator got none of it this time.</Banner> : null}
-      <Thought label="Intent" told={full}>
+      <Thought label="Intent" told={sent.intent}>
         {m.intent || "—"}
       </Thought>
       {m.reactions.length > 0 ? (
-        <Thought label="Reactions">
+        <Thought label="Reactions" told={sent.reactions}>
           <ul class="lre-gm-minds-reactions">
             {m.reactions.map((r, i) => (
               <li key={`${i}:${r}`}>{r}</li>
@@ -351,7 +360,15 @@ function LatestMind(props: { ctx: Ctx; c: MindsGmCharacter }) {
         </Thought>
       ) : null}
       {m.interrupt ? (
-        <Banner tone="warn" icon="pause" title="Interrupted the skip">
+        <Banner
+          tone="warn"
+          icon="pause"
+          title={
+            <>
+              Interrupted the skip {sent.interrupt ? <Badge>To the narrator</Badge> : null}
+            </>
+          }
+        >
           {m.interrupt}
         </Banner>
       ) : null}
@@ -381,7 +398,8 @@ function Plans(props: { ctx: Ctx; c: MindsGmCharacter; open(change: Change): voi
             subtitle={
               <span class="lre-gm-minds-lines">
                 <span>
-                  {PLAN_KIND_LABEL[p.kind]} · {p.fromText} · <span class="lre-gm-minds-keep">{formatMinutes(p.when.to - p.when.from)}</span>
+                  {PLAN_KIND_LABEL[p.kind]}
+                  {p.cents !== undefined ? <> · {formatMoney(p.cents, ctx.currency)}</> : null} · {p.fromText} · <span class="lre-gm-minds-keep">{formatMinutes(p.when.to - p.when.from)}</span>
                 </span>
                 <span>
                   {[p.where ? `at ${nameIn(ctx.places, p.where)}` : null, p.with.length > 0 ? `with ${p.with.map((w) => nameIn(ctx.people, w)).join(", ")}` : null, `priority ${p.priority}`, `from ${p.source === "gm" ? "you" : `their ${p.source}`}`, p.reason]
@@ -717,6 +735,9 @@ function PlanPage(props: { ctx: Ctx; c: MindsGmCharacter; plan: Plan | null; onB
   const [draft, setDraft] = useState<PlanFormDraft>(() => planDraft(now, plan ?? undefined));
   const [startIn, setStartIn] = useState(() => String(Math.round(((draft.from - now) / 60) * 4) / 4));
   const [lasts, setLasts] = useState(() => String(draft.to - draft.from));
+  const [amount, setAmount] = useState(() => (draft.cents === null ? "" : formatMoneyInput(draft.cents, ctx.currency)));
+  const money = isMoneyPlan(draft.kind);
+  const amountOff = amount.trim() !== "" && draft.cents === null;
   const ids = { what: useId(), kind: useId(), start: useId(), lasts: useId(), where: useId(), status: useId() };
   const op = planOp(c.entity, plan?.id ?? null, draft);
   // Text that isn't a number leaves the plan's start or length as it was.
@@ -789,6 +810,21 @@ function PlanPage(props: { ctx: Ctx; c: MindsGmCharacter; plan: Plan | null; onB
               ))}
             </select>
           </Field>
+          {money ? (
+            <Field label="Amount" help="Handed to the first person it's with, at the plan's time." error={amountOff ? "An amount above zero, like 20 or 12.50." : null}>
+              <MoneyInput
+                currency={ctx.currency}
+                label="Amount"
+                value={amount}
+                invalid={amountOff}
+                onInput={(text) => {
+                  setAmount(text);
+                  const cents = parseMoneyInput(text, ctx.currency);
+                  setDraft({ ...draft, cents: cents !== null && cents > 0 ? cents : null });
+                }}
+              />
+            </Field>
+          ) : null}
           <PeopleField label="With" value={draft.with} people={ctx.people} exclude={c.entity} disabled={ctx.busy} onChange={(next) => setDraft({ ...draft, with: next })} />
           <Field label="Priority" help="1 whenever it fits, 5 it must happen.">
             <Seg<number>
@@ -808,7 +844,7 @@ function PlanPage(props: { ctx: Ctx; c: MindsGmCharacter; plan: Plan | null; onB
             </select>
           </Field>
         </Section>
-        <Submit ctx={ctx} ready={op !== null} icon={plan ? "check" : "plus"} invalid="A plan needs what it is, and a length.">
+        <Submit ctx={ctx} ready={op !== null} icon={plan ? "check" : "plus"} invalid={money ? "A plan to pay or lend needs what it is, a length, an amount and someone it is with." : "A plan needs what it is, and a length."}>
           {plan ? "Save" : "Add plan"}
         </Submit>
       </form>
