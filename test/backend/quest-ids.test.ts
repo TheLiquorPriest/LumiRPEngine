@@ -173,31 +173,54 @@ describe("answering a puzzle as the player sees it", () => {
       { id: "p_cellar", kind: "puzzle", label: "The cellar door", start: "waiting", visibility: "public", stages: { waiting: { label: "Waiting", next: [{ to: "riddle", when: "flag('cellar_found')" }] }, riddle: { label: "The riddle", answer: { expect: ["echo"] }, next: [] } } },
     ]);
     expect((await questLog(rig, chatId)).filter((q) => q.kind === "puzzle")).toEqual([]);
-    for (const puzzle of ["p_township_truck", "p_cellar", "p_no_such_thing"]) expect((await answer(rig, chatId, { puzzle, answer: "echo" })).decline).toBe("Answer: declined no open puzzle by that name");
+    // Their ids, the truck's id as a slug, and the id of the pickup it is about, which the POV can see: none reaches either.
+    for (const puzzle of ["p_township_truck", "p_cellar", "p_no_such_thing", "township_truck", "township_pickup"]) expect((await answer(rig, chatId, { puzzle, answer: "echo" })).decline).toBe("Answer: declined no open puzzle by that name");
     expect([await gmStage(rig, chatId, "p_township_truck"), await gmStage(rig, chatId, "p_cellar")]).toEqual(["stuck", "waiting"]);
     expect(rig.rt.ledger.errors).toEqual([]);
   });
 
-  test("beside an open puzzle, a hidden puzzle's id is refused as an unknown id and the open one isn't tried; named by nothing, the open one is", async () => {
+  test("beside an open puzzle, a hidden puzzle's id is refused as one nothing has and the open one isn't tried; an id whose parts fit the open one reaches it, as naming nothing does", async () => {
     const rig = new Rig({ shipped: true });
     // The truck puzzle known only to its owner, whom the POV doesn't know, beside the cellar door, open and listed.
     const chatId = await starterChat(rig, "modern_slice_of_life", "Port Alder", (draft): JsonObject[] => [{ ...(draft.tracks.p_township_truck as unknown as JsonObject), owner: "dale_whitcomb" }, DOOR]);
     const door = async () => (await questLog(rig, chatId)).find((q) => q.id === "p_door");
     expect((await questLog(rig, chatId)).filter((q) => q.kind === "puzzle").map((q) => q.id)).toEqual(["p_door"]);
-    // The hidden truck's id, an id nothing has, one whose parts are the door's own words, and a stand-in nothing goes by:
-    // none is read for its parts or taken for the only one open.
-    for (const puzzle of ["p_township_truck", "p_no_such_thing", "p_cellar_door", "~0123456789ab"]) {
+    // The hidden truck's id, an id nothing has, and a stand-in nothing goes by: read for their parts, which fit no row,
+    // and never taken for the only one open.
+    for (const puzzle of ["p_township_truck", "p_no_such_thing", "~0123456789ab"]) {
       expect(await act(rig, chatId, "answer", { puzzle, answer: "fuel pump relay" })).toEqual(["Answer: declined | no open puzzle by that name"]);
       expect([(await door())?.hints, await attemptsOf(rig, chatId, "p_door")]).toEqual([[], 0]);
     }
     expect([await gmStage(rig, chatId, "p_township_truck"), await attemptsOf(rig, chatId, "p_township_truck")]).toEqual(["stuck", 0]);
+    // An id whose parts are the door's own words reads as those words: a wrong answer is the door's try, and earns its hint.
+    expect(await act(rig, chatId, "answer", { puzzle: "p_cellar_door", answer: "fuel pump relay" })).toEqual([]);
+    expect([(await door())?.hints, await attemptsOf(rig, chatId, "p_door")]).toEqual([["Shout into a cave."], 1]);
     // Named by nothing, the only open puzzle is answered.
     expect(await act(rig, chatId, "answer", { answer: "echo" })).toEqual([]);
     expect((await door())?.status).toBe("done");
     expect(rig.rt.ledger.errors).toEqual([]);
   });
 
-  test("its own label finds nothing, and interpret is told it by the label the quest log shows", async () => {
+  test("an id of an entity or place the POV can see reads as its name, and a hidden one's id fares as an id nothing has", async () => {
+    const rig = new Rig({ shipped: true });
+    // The truck puzzle known only to Dale, whom the POV doesn't know yet, beside the cellar door, open and listed.
+    const chatId = await starterChat(rig, "modern_slice_of_life", "Port Alder", (draft): JsonObject[] => [{ ...(draft.tracks.p_township_truck as unknown as JsonObject), owner: "dale_whitcomb" }, DOOR]);
+    const tries = async () => [await attemptsOf(rig, chatId, "p_door"), await attemptsOf(rig, chatId, "p_township_truck")];
+    // A secret item's id, a secret place's id and an id nothing has: each refused alike, and the door isn't tried.
+    for (const puzzle of ["past_due_notice", "birch_lane_12", "no_such_notice"]) expect(await act(rig, chatId, "answer", { puzzle, answer: "a sponge" })).toEqual(["Answer: declined | no open puzzle by that name"]);
+    expect(await tries()).toEqual([0, 0]);
+    // A person's and a place's id the POV can see read as their names: words that fit no row, so the only one open is tried.
+    for (const puzzle of ["marcus_delgado", "rusty_anchor"]) expect(await act(rig, chatId, "answer", { puzzle, answer: "a sponge" })).toEqual([]);
+    expect(await tries()).toEqual([2, 0]);
+    // With the truck open too, the pickup's id reaches the truck, whose cue names it; a name that fits neither is refused.
+    rig.body(await rig.send({ type: "lre.edit", chatId, ops: [{ op: "link", rel: "knows", from: "pov", to: "dale_whitcomb" }] }));
+    expect(await act(rig, chatId, "answer", { puzzle: "township_pickup", answer: "the battery" })).toEqual([]);
+    expect(await act(rig, chatId, "answer", { puzzle: "marcus_delgado", answer: "the battery" })).toEqual(["Answer: declined | no open puzzle by that name"]);
+    expect(await tries()).toEqual([2, 1]);
+    expect(rig.rt.ledger.errors).toEqual([]);
+  });
+
+  test("its own label finds nothing, and interpret is told it by the stand-in and the label the quest log shows", async () => {
     const rig = new Rig({ shipped: true });
     // The truck puzzle kept secret, beside a public one: two open, so neither is answered as the only one.
     const chatId = await starterChat(rig, "modern_slice_of_life", "Port Alder", (draft): JsonObject[] => [
@@ -208,8 +231,10 @@ describe("answering a puzzle as the player sees it", () => {
     expect((await masked())?.label).toBe("Something is going on");
     await rig.turn(chatId, "The answer is the relay.", "You think it over.");
     const interpret = rig.host.quietCalls.map((c) => c.messages.map((m) => m.content).join("\n")).find((p) => p.includes("answer — Answer (open:")) ?? "";
-    expect(interpret).toContain("Something is going on");
-    expect(interpret).not.toContain("The truck that won't start");
+    // Each open puzzle by the id its row goes by: the masked one by its stand-in, never by its own id or label.
+    expect(interpret).toContain(`${(await masked())?.id ?? "no stand-in"}: Something is going on — The township pickup turns over fine`);
+    expect(interpret).toContain("p_lockbox: The lockbox — Three dials");
+    for (const own of ["p_township_truck", "The truck that won't start"]) expect(interpret).not.toContain(own);
     // A word only its hidden label holds doesn't reach it: it stays unanswered.
     const { decline } = await answer(rig, chatId, { puzzle: "truck", answer: "fuel pump relay" });
     expect(decline).toContain("no open puzzle truck");
@@ -235,7 +260,7 @@ describe("answering a puzzle as the player sees it", () => {
     expect(rig.rt.ledger.errors).toEqual([]);
   });
 
-  test("with two open, interpret is told each by its cue, the cue's words reach the right one, and an answer that fits both is refused with no attempt and no hint", async () => {
+  test("with two open, interpret is told each by its stand-in and cue, the cue's words reach the right one, and an answer that fits both is refused with no attempt and no hint", async () => {
     const rig = new Rig({ shipped: true });
     // Port Alder's truck puzzle and a lockbox, both kept secret: the quest log shows each as "Something is going on".
     const lockbox: JsonObject = { id: "p_lockbox", kind: "puzzle", label: "The lockbox", start: "shut", visibility: "secret", stages: { shut: { label: "Three dials", cue: "A lockbox with three brass dials.", answer: { expect: ["317"] }, hints: ["The dials only go to 3, 1 and 7 here."], next: [{ to: "open", when: "false" }] }, open: { label: "Open", cue: "The lockbox clicks open.", next: [] } } };
@@ -262,10 +287,10 @@ describe("answering a puzzle as the player sees it", () => {
     // By the label both rows show: refused, and neither is tried.
     expect(await typed("The answer is 317.", { puzzle: "Something is going on", answer: "317" })).toBe("Answer: declined | more than one open puzzle fits Something is going on");
     expect(await hints()).toEqual([0, 0]);
-    // Interpret was told each by the cue the quest log shows, never by its own label.
-    expect(prompt).toContain("Something is going on — A lockbox with three brass dials.");
-    expect(prompt).toContain("Something is going on — The township pickup turns over fine");
-    for (const label of ["The lockbox", "The truck that won't start"]) expect(prompt).not.toContain(label);
+    // Interpret was told each by its stand-in and the cue the quest log shows, never by its own id or label.
+    expect(prompt).toContain(`${boxId}: Something is going on — A lockbox with three brass dials.`);
+    expect(prompt).toContain(`${truckId}: Something is going on — The township pickup turns over fine`);
+    for (const own of ["p_lockbox", "p_township_truck", "The lockbox", "The truck that won't start"]) expect(prompt).not.toContain(own);
     // Naming neither, with both open, is refused the same way.
     expect(await typed("The code is 317.", { answer: "317" })).toBe("Answer: declined | more than one puzzle is open, and the answer doesn't say which");
     expect(await hints()).toEqual([0, 0]);
@@ -277,6 +302,35 @@ describe("answering a puzzle as the player sees it", () => {
     expect([(await row(boxId))?.status, (await row(boxId))?.cue, (await row(truckId))?.status]).toEqual(["done", "The lockbox clicks open.", "active"]);
     expect(rig.rt.ledger.errors).toEqual([]);
   });
+
+  /** Each starter's puzzle once the POV knows its item: the item's id and a slug the model might give for the puzzle, its row as interpret's Answer label lists it, what the player types, and the stage it opens to. */
+  const STARTER_PUZZLES = [
+    ["Port Alder", "modern_slice_of_life", "township_pickup", "township_truck", "p_township_truck: The truck that won't start — Cranks, doesn't catch", "The answer is the fuel pump relay.", "fuel pump relay", "fixed"],
+    ["Ashcombe Manor", "mystery_manor", "study_safe", "the_study_safe", "p_study_safe: The study safe — Four digits", "The code is 1887.", "1887", "open"],
+    ["Brindlemere", "fantasy_town", "tile_ford", "vestry_tiles", "p_vestry_tiles: The Vestry Tiles — Three tiles and a rhyme", "The answer is ford, ferry, bridge.", "ford ferry bridge", "solved"],
+  ] as const;
+
+  test.each(STARTER_PUZZLES.flatMap(([name, starter, item, slug, row, text, said, opens]) => [item, slug].map((puzzle) => [name, puzzle, starter, item, row, text, said, opens] as const)))(
+    "%s: the only open puzzle, given as %s, takes the right answer, and interpret is told it by its row's id",
+    async (name, puzzle, starter, item, row, text, said, opens) => {
+      const rig = new Rig({ shipped: true });
+      const chatId = await starterChat(rig, starter, name);
+      rig.body(await rig.send({ type: "lre.edit", chatId, ops: [{ op: "link", rel: "knows", from: "pov", to: item }] }));
+      const track = row.slice(0, row.indexOf(":"));
+      let prompt = "";
+      rig.host.quietReply = (req) => {
+        const content = req.messages.map((m) => m.content).join("\n");
+        if (!content.includes("You map a player's typed input")) return "{}";
+        prompt = content;
+        return JSON.stringify({ action: "answer", params: { puzzle, answer: said }, confidence: 0.9 });
+      };
+      await rig.turn(chatId, text, "You try it.");
+      expect(prompt).toContain(`answer — Answer (open: ${row})`);
+      expect((await rig.rt.view(chatId, rig.host.userId)).chips.filter((c) => c.kind === "decline")).toEqual([]);
+      expect(await gmStage(rig, chatId, track)).toBe(opens);
+      expect(rig.rt.ledger.errors).toEqual([]);
+    },
+  );
 });
 
 describe("a puzzle the world's own content answers", () => {
@@ -324,6 +378,22 @@ describe("a puzzle the world's own content answers", () => {
     expect(log.find((q) => q.cue === "The steel door sighs open.")).toMatchObject({ label: "Something is going on", status: "done" });
     for (const name of NAMES) expect(playerTraffic(rig, from)).not.toContain(name);
     expect(rig.rt.ledger.errors).toEqual([]);
+  });
+
+  test("Build warns of an action whose story.answer takes its track from a formula, and not of one that names the puzzle", async () => {
+    const rig = new Rig({ shipped: true });
+    const worldId = await rig.newWorld("Port Alder", "modern_slice_of_life");
+    /** Puts an action in the draft; Build's warnings about the track its story.answer is given, as "severity path". */
+    const put = async (value: JsonObject): Promise<string[]> => {
+      const { lint } = rig.body(await rig.send({ type: "lre.editor", op: "put", worldId, base: null, collection: "actions", id: String(value.id), value }));
+      return (Array.isArray(lint) ? lint : []).flatMap((i) => (isRecord(i) && i.code === "story.answer_track" ? [`${String(i.severity)} ${String(i.path)}`] : []));
+    };
+    // The player's words passed as a puzzle's own id: one a hidden puzzle has would reach it.
+    const TRY: JsonObject = { id: "try_combination", label: "Try a combination", params: { lock: { type: "text" }, code: { type: "text" } }, requires: [], outcomes: { default: [{ type: "story.answer", args: { track: "=params.lock", answer: "=params.code" } }] }, duration: "1", lexicon: ["try the combination on"] };
+    expect(await put(KEY_IN)).toEqual([]);
+    expect(await put(TRY)).toEqual(["warning actions.try_combination.outcomes.default.0.args.track"]);
+    // Their words passed as the puzzle they name instead: nothing to warn of.
+    expect(await put({ ...TRY, outcomes: { default: [{ type: "story.answer", args: { puzzle: "=params.lock", answer: "=params.code" } }] } })).toEqual([]);
   });
 });
 

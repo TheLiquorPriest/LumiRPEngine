@@ -1,6 +1,6 @@
 // Story pack (DESIGN §7, §9.3): flags, the quest log over the engine's tracks (quests, secret ladders,
 // puzzles), puzzle answers through `checkAnswer` with the author's opt-in decision threshold, and
-// the leaky-label and leaky-id lints. Track stepping, gates, reveals and hints are the engine's
+// the leaky-label, leaky-id and answer-track lints. Track stepping, gates, reveals and hints are the engine's
 // (tracks.ts); this pack is how they reach effects, formulas, the narrator and the panel. Story has
 // no realism domain: tracks behave the same at every level.
 
@@ -12,9 +12,10 @@ import { wordsOf } from "../../../engine/lore";
 import { labelOf, mutableSlice, objOf, sliceOf, strOf, own } from "../../../engine/pack-kit";
 import type { PackDef, ReadContext, Rejection } from "../../../engine/registry";
 import type { Registry } from "../../../engine/registry-impl";
+import { effectLists } from "../../../engine/ruleset-lint";
 import { kindIs } from "../../../engine/scope";
 import { checkAnswer } from "../../../engine/tracks";
-import { playerTrack, shownTrackId, type PlayerTrack } from "../../../engine/visibility";
+import { canSeeEntity, canSeePlace, playerTrack, shownTrackId, type PlayerTrack } from "../../../engine/visibility";
 
 declare module "../../../engine/registry" {
   interface QueryMap {
@@ -177,35 +178,49 @@ export function openPuzzles(ctx: ReadContext): OpenPuzzle[] {
 }
 
 /**
- * Whether `ref` is written as an id (one word with `_` or `~` in it: `p_strongroom`, a stand-in),
- * not in words: it names a puzzle by the id its quest log row goes by, or none.
+ * Whether `ref` is written as an id (one word with `_` or `~` in it: `p_strongroom`, `study_safe`, a
+ * stand-in), not in words. `puzzlesFor` reads one no quest log row goes by as the name of the thing
+ * the POV sees by that id, else by its own parts alone.
  */
 function idShaped(ref: string): boolean {
   const t = ref.trim();
   return t !== "" && !/\s/.test(t) && /[_~]/.test(t);
 }
 
+/** The name of the entity or place `id` belongs to, when the POV can see it; null for any other id (a hidden thing's, or one nothing has). */
+function seenName(ctx: ReadContext, id: string): string | null {
+  const pov = ctx.world.pov;
+  const e = own(ctx.state.entities, id);
+  if (e && canSeeEntity(ctx.registry, ctx.world, ctx.state, pov, id)) return e.name;
+  const p = own(ctx.world.places, id);
+  return p && canSeePlace(ctx.registry, ctx.world, ctx.state, pov, id) ? p.name : null;
+}
+
 /**
  * The puzzles the player's `ref` may be for, only ever ones in the POV's quest log (`openPuzzles`):
- * the one it names by the id its row goes by (a secret's stand-in, any other's own id); else, unless
- * it is written as an id (`idShaped`), those whose label, stage and cue, as the POV sees them, hold
- * the most of its words (a secret's own label, which its row masks, never counts), else the only one
- * open. Several when they tie, or when `ref` names nothing while more than one is open. A puzzle the
- * POV can't see is never among them, and an id no open row goes by (a hidden puzzle's own, a secret's
- * own) is read neither for its parts nor as the only one open: it finds nothing, as an id nothing has.
+ * the one it names by the id its row goes by (a secret's stand-in, any other's own id); else those
+ * whose label, stage and cue, as the POV sees them, hold the most of its words (a secret's own label,
+ * which its row masks, never counts); else the only one open. Several when they tie, or when `ref`
+ * names nothing while more than one is open. A ref written as an id (`idShaped`) that no row goes by
+ * reads as the name of the entity or place the POV sees by it (`study_safe`: "The study safe"). Any
+ * other id-shaped ref (a hidden puzzle's or thing's id, a slug, one nothing has) is read by its parts
+ * alone (`township_truck`: "township truck"), never as the only one open, so it finds nothing unless
+ * its words fit a row. Only what the POV sees decides, so a hidden id fares as one nothing has.
  */
 function puzzlesFor(ctx: ReadContext, ref: string): TrackId[] {
   const open = openPuzzles(ctx);
   const byId = open.find((p) => p.shown.id === ref);
   if (byId) return [byId.id];
-  if (idShaped(ref)) return [];
-  const want = new Set(wordsOf(ref));
+  const name = idShaped(ref) ? seenName(ctx, ref.trim()) : null;
+  const partsOnly = idShaped(ref) && name === null;
+  const want = new Set(wordsOf(name ?? ref));
   const scored = open.map(({ id, shown }) => {
     const seen = new Set(wordsOf(`${shown.label} ${shown.stage} ${shown.cue ?? ""}`));
     return { id, n: [...want].filter((w) => seen.has(w)).length };
   });
   const best = Math.max(0, ...scored.map((s) => s.n));
   if (best > 0) return scored.filter((s) => s.n === best).map((s) => s.id);
+  if (partsOnly) return [];
   // Words that fit none still find the only one open (the player may name it loosely); none at all fit every one.
   if (open.length === 1) return open.map((p) => p.id);
   return want.size === 0 ? open.map((p) => p.id) : [];
@@ -304,7 +319,7 @@ export const storyPack: PackDef = {
       id: "answer",
       label: "Answer",
       pack: "story",
-      // `puzzle` names one in the quest log: the id its row goes by (a secret's stand-in), words from what the player sees of it (its label, stage or cue: "the safe"), or nothing when one puzzle is open.
+      // `puzzle` names one in the quest log: the id its row goes by (a secret's stand-in), as interpret's Answer label lists it; words from what the player sees of it (its label, stage or cue: "the safe"), or the id of something they see (`study_safe`), read as its name; or nothing when one puzzle is open.
       params: { puzzle: { type: "text", optional: true, label: "Puzzle" }, answer: { type: "text" }, decision: { type: "number", optional: true, label: "Judged probability" } },
       requires: [],
       outcomes: { default: [{ type: "story.answer", args: { puzzle: "=params.puzzle", answer: "=answer", decision: "=params.decision" } }] },
@@ -342,6 +357,19 @@ export const storyPack: PackDef = {
           message: `The id "${l.id}" gives away a secret (${l.secrets.map((s) => `"${s}"`).join(", ")}): a player's views carry it wherever the player acts on what it names. Give it an id that names no one, such as "${l.neutral}".`,
           path: l.path,
         })),
+    });
+    // `track` names the puzzle by its own id, which only the world's own content knows: a formula there
+    // answers whatever it gives, a puzzle the player can't see too, so one fed the player's words could reach it.
+    r.lint({
+      code: "story.answer_track",
+      check: (world) =>
+        effectLists(world).flatMap(({ path, effects }) =>
+          effects.flatMap((spec, i) => {
+            const track = spec.type === "story.answer" ? spec.args.track : undefined;
+            if (typeof track !== "string" || !track.startsWith("=")) return [];
+            return [{ severity: "warning" as const, code: "story.answer_track", message: `This answer's track is a formula (${track}), but track takes a puzzle's own id as written, such as "p_safe": the puzzle the formula gives is answered even when the player can't see it. To let the player say which puzzle, pass their words as puzzle instead.`, path: `${path}.${i}.args.track` }];
+          }),
+        ),
     });
   },
 };
