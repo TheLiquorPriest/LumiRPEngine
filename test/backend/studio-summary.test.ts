@@ -4,10 +4,11 @@ import { describe, expect, test } from "bun:test";
 import { isRecord } from "../../src/shared/json";
 import type { StudioChats } from "../../src/shared/studio-bridge";
 import { chatsChannel, engineEndpoint, STUDIO_EXTENSION } from "../../src/shared/studio-bridge";
+import { decodeQuestsView } from "../../src/packs/story/ui/panel";
 import { Rig } from "../support/rig";
 
 describe("the Studio's chat summary", () => {
-  test("a secret the quest log masks keeps its id from the Studio, and a body the player has found isn't read as alive", async () => {
+  test("a secret the quest log masks goes by the quest log's own stand-in, and a body the player has found isn't read as alive", async () => {
     const rig = new Rig({ shipped: true });
     const created = rig.body(await rig.send({ type: "lre.world", op: "create", name: "Lantern Row", template: null }));
     if (!isRecord(created.world) || typeof created.world.id !== "string" || !isRecord(created.world.start)) throw new Error("no world");
@@ -31,6 +32,9 @@ describe("the Studio's chat summary", () => {
     const summary = chats.find((c) => c.chatId === chatId);
     expect(summary?.quests.map((q) => q.label)).toContain("Something is going on");
     expect(JSON.stringify(summary)).not.toContain("thorne_owes_the_guild");
+    // The same id the player's quest log gives it, so the Studio and Play name one quest alike.
+    const log = decodeQuestsView((await rig.rt.view(chatId, rig.host.userId)).panels["story.quests"])?.tracks ?? [];
+    expect(summary?.quests.find((q) => q.label === "Something is going on")?.id).toBe(log.find((t) => t.label === "Something is going on")?.id ?? "none in the quest log");
     expect(summary?.present.find((p) => p.id === "old_bram")?.life ?? JSON.stringify(summary?.present)).toMatch(/dead/i);
   });
 });

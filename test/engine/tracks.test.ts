@@ -112,10 +112,14 @@ describe("tracks", () => {
     expect(clue?.cue).toBe("Ink stains on a cuff.");
     expect(findLeaks(JSON.parse(JSON.stringify(clue)), unrevealedTruths(wd, w.state))).toEqual([]);
     expect(clue?.label).not.toContain("ledger");
+    // It goes by a stand-in, never its own id, and keeps that one once revealed.
+    expect(clue?.id).toMatch(/^~/);
+    expect(JSON.stringify(clue)).not.toContain("butler");
     w.apply({ type: "add", entity: POV, field: "skill", delta: 2 });
     stepTracks(reg, w, "s");
     const revealed = playerTrack(reg, wd, w.state, POV, "butler");
     expect(revealed?.truths).toEqual(["The butler hid the ledger in the wine cellar."]);
+    expect(revealed?.id).toBe(clue?.id ?? "");
     expect(unrevealedTruths(wd, w.state)).toEqual([]);
     // the secret track never raised a player-visible signal
     expect(w.events.filter((e) => e.type === "engine.signal")).toEqual([]);
