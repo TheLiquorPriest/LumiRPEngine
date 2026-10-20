@@ -5,7 +5,7 @@
 // and its expenses (flows its owners set up); and it pays its owners by draws, or distributions by
 // share. Every money movement here goes through the foundation's flows and postings.
 
-import type { JsonValue } from "../../../shared/json";
+import type { JsonObject, JsonValue } from "../../../shared/json";
 import type { EntityId } from "../../../shared/ids";
 import type { LedgerEvent, PackEvent, PostingLine } from "../../../shared/ledger";
 import type { EntityDef, FieldDef } from "../../../shared/world";
@@ -21,6 +21,7 @@ import { canSeeEntity } from "../../../engine/visibility";
 import { addToBooks, addToPayables, businessBooks, monthBook, monthOf, monthsBetween, operatingAccount, payablesOf } from "./books";
 import { allJobs, businessAt, businessIds, jobBlocks, jobView, manages, placesOf, type Job } from "./employment";
 import type { FinanceApi, FinanceRegistry, FlowPosting } from "./module";
+import { unpricedCap } from "./model";
 import { corporateTax, salesTaxAccount, salesTaxOn, salesTaxPct, structureOf, taxExempt, taxRegionOf } from "./taxes";
 
 /** The foundation's invoice kind (`kinds.ts`): one invoice a business issued. */
@@ -98,7 +99,8 @@ export const SALE: EventTypeDef<PackEvent> = {
     const list = Array.isArray(own(sales, business)) ? (own(sales, business) as JsonValue[]) : [];
     sales[business] = [...list.slice(-(SALES_KEPT - 1)), { at: state.clock, cents, tax, memo: str(e, "memo"), payer: str(e, "payer"), category: str(e, "category") }];
   },
-  describe: (e) => `Sale: ${str(e, "memo")}`,
+  // The book of a sale is the GM's line; the player reads its posting.
+  describe: (e, ctx, viewer) => (viewer ? "" : `${labelOf(ctx, str(e, "business"))}: sale ${str(e, "payer") === "" ? "to walk-in customers" : `of ${str(e, "memo")} to ${labelOf(ctx, str(e, "payer"))}`}`),
 };
 
 /** `economy.remit`: a business paid what it owed its suppliers, or the sales tax it collected. */
@@ -113,7 +115,7 @@ export const REMIT: EventTypeDef<PackEvent> = {
       addToBooks(state, business, monthOf(ctx.world, state.clock), { tax_remitted: cents });
     } else addToPayables(state, business, { suppliers: -cents });
   },
-  describe: (e) => (e.data.what === "sales_tax" ? "Sales tax paid" : "Suppliers paid"),
+  describe: (e, ctx, viewer) => (viewer ? "" : `${labelOf(ctx, str(e, "business"))}: ${e.data.what === "sales_tax" ? "sales tax paid" : "suppliers paid"}`),
 };
 
 /** Commission on a sale for each commission job at the business whose worker is `working`, split evenly. */
@@ -266,7 +268,7 @@ export const INVOICE_PAID: EventTypeDef<PackEvent> = {
     const customer = str(e, "customer");
     if (own(state.entities, customer) && kindIs(ctx.registry, ctx.world, own(state.entities, customer)?.kind ?? "", "business")) addToBooks(state, customer, month, { bills: cents });
   },
-  describe: (e) => `Invoice paid: ${str(e, "invoice")}`,
+  describe: (e, ctx, viewer) => (viewer ? "" : `${labelOf(ctx, str(e, "business"))}: invoice paid by ${own(ctx.state.entities, str(e, "customer")) ? labelOf(ctx, str(e, "customer")) : str(e, "customer")}`),
 };
 
 /** The events that mark an invoice paid in full with a payment of `cents`, and book it. */
@@ -331,8 +333,10 @@ function lateInvoices(slot: SlotInfo, ctx: ReadContext, api: FinanceApi): Ledger
     if (inv.state !== "late") out.push({ type: "set", entity: inv.id, field: "state", value: "late" });
     if (fees > inv.fees) out.push({ type: "set", entity: inv.id, field: "fees", value: fees }, ...(fee > 0 ? [{ type: "set" as const, entity: inv.id, field: "late_fee", value: inv.late_fee + fee }] : []));
     const amount = api.money(ctx, inv.left + fee);
-    if (inv.party) out.push(...api.note(ctx, inv.party, "bill", `${inv.memo} from ${shownName(ctx, inv.party, inv.business, "a business")} is ${daysLate} day${daysLate === 1 ? "" : "s"} late: ${amount} due.`));
-    for (const o of api.ownersOf(ctx.state, inv.business)) if (o.role === "owner" || o.role === "joint") out.push(...api.note(ctx, o.party, "bill", `${inv.memo}, billed to ${inv.party ? shownName(ctx, o.party, inv.party, "a customer") : inv.customer}, is ${daysLate} day${daysLate === 1 ? "" : "s"} late: ${amount} owed.`));
+    // A note to the player reads as the player sees; one to anyone else only reaches the GM, who sees everyone.
+    const reader = (party: EntityId): EntityId | null => (party === ctx.world.pov ? party : null);
+    if (inv.party) out.push(...api.note(ctx, inv.party, "bill", `${inv.memo} from ${shownName(ctx, reader(inv.party), inv.business, "a business")} is ${daysLate} day${daysLate === 1 ? "" : "s"} late: ${amount} due.`));
+    for (const o of api.ownersOf(ctx.state, inv.business)) if (o.role === "owner" || o.role === "joint") out.push(...api.note(ctx, o.party, "bill", `${inv.memo}, billed to ${inv.party ? shownName(ctx, reader(o.party), inv.party, "a customer") : inv.customer}, is ${daysLate} day${daysLate === 1 ? "" : "s"} late: ${amount} owed.`));
   }
   return out;
 }
@@ -346,6 +350,16 @@ function issueInvoice(ctx: EffectContext, api: FinanceApi, args: Record<string, 
   if (customer === "" || customer === business) return reject("bad_party", "an invoice needs someone to bill");
   const cents = typeof args.cents === "number" ? Math.round(args.cents) : NaN;
   if (!(cents > 0)) return reject("bad_amount", "an invoice needs an amount");
+  // A customer outside the world pays what it is billed from money nobody in the world had, so what a
+  // business bills such customers in a month is bounded by the world's cap on prices nothing lists.
+  if (!own(ctx.state.entities, customer)) {
+    const cap = unpricedCap(ctx.world);
+    const month = monthOf(ctx.world, ctx.state.clock);
+    const billed = allInvoices(ctx)
+      .filter((i) => i.business === business && i.party === null && i.state !== "void" && monthOf(ctx.world, i.issued) === month)
+      .reduce((a, i) => a + i.cents, 0);
+    if (billed + cents > cap) return reject("over_cap", `${labelOf(ctx, business)} can bill customers outside the world at most ${api.money(ctx, cap)} a month, and has billed ${api.money(ctx, billed)}`);
+  }
   const days = typeof args.days === "number" && args.days >= 0 ? Math.round(args.days) : Math.round(numOf(own(ctx.state.entities, business)?.fields.invoice_days, INVOICE_DAYS));
   const cal = calendarOf(ctx.world);
   const due = dateText(ctx, dateAt(cal, ctx.state.clock).dayIndex + days);
@@ -379,16 +393,27 @@ function voidInvoice(ctx: EffectContext, api: FinanceApi, args: Record<string, J
 
 // ---------------------------------------------------------------- owners: draws and distributions
 
-/** `economy.payout`: an owner's draw, or a distribution of profit by share, booked. */
+/**
+ * `economy.payout`: an owner's draw, or a distribution of profit by share, booked. A distribution
+ * books what it paid of each month's profit (`months`), so no month's profit is paid out twice; one
+ * without them books it all to the month it was paid.
+ */
 export const PAYOUT: EventTypeDef<PackEvent> = {
   type: "economy.payout",
   validate: (e, ctx) => (own(ctx.state.entities, str(e, "business")) && typeof e.data.cents === "number" ? null : reject("bad_event", "a payout needs its business and amount")),
   apply: (e, state, ctx) => {
     const business = str(e, "business");
-    addToBooks(state, business, monthOf(ctx.world, state.clock), e.data.what === "draw" ? { draws: numOf(e.data.cents) } : { distributions: numOf(e.data.cents) });
-    if (e.data.what === "distribution") sliceRecord(state, "economy", "distributed")[business] = state.clock;
+    const now = monthOf(ctx.world, state.clock);
+    if (e.data.what === "draw") {
+      addToBooks(state, business, now, { draws: numOf(e.data.cents) });
+      return;
+    }
+    const months = Object.entries(objOf(e.data.months)).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+    if (months.length === 0) addToBooks(state, business, now, { distributions: numOf(e.data.cents) });
+    for (const [month, cents] of months) addToBooks(state, business, month, { distributions: numOf(cents) });
+    sliceRecord(state, "economy", "distributed")[business] = state.clock;
   },
-  describe: (e) => (e.data.what === "draw" ? "Owner's draw" : "Profit distributed"),
+  describe: (e, ctx, viewer) => (viewer ? "" : `${labelOf(ctx, str(e, "business"))}: ${e.data.what === "draw" ? "owner's draw" : "profit distributed"}`),
 };
 
 /** Whether an owner may draw on a business: an owner or joint owner; a corporation pays its owners by salary or dividends instead. */
@@ -411,12 +436,30 @@ function ownerDraw(ctx: EffectContext, api: FinanceApi, args: Record<string, Jso
 }
 
 /**
- * A distribution of `total` from a business's operating account to its owners by their share of its
- * worth. Each owner's part goes where the holdings module routes their stake (an account of theirs,
- * else their deposit account); a part they reinvest stays in the business and only its stake records
- * it. Null when there is nothing to pay or no account to pay from.
+ * What each month's profit from the one holding `from` to the one holding `to - 1` has left to pay
+ * out at `pct`: its share of the month's profit, less what distributions already paid of it.
  */
-function distribution(ctx: ReadContext, api: FinanceApi, business: EntityId, total: number): { lines: PostingLine[]; extra: LedgerEvent[]; paid: number } | null {
+function undistributed(api: FinanceApi, ctx: ReadContext, business: EntityId, from: number, to: number, pct: number): JsonObject {
+  const cal = calendarOf(ctx.world);
+  const out: JsonObject = {};
+  for (const month of monthsBetween(ctx.world, from, to)) {
+    const [y = 0, m = 1] = month.split("-").map(Number);
+    const start = clockAt(cal, dayIndexOf(cal, y, m, 1), 0);
+    const b = businessBooks(api, ctx, business, start, start + 1);
+    const left = Math.round((Math.max(0, b.profit) * pct) / 100) - b.distributions;
+    if (left > 0) out[month] = left;
+  }
+  return out;
+}
+
+/**
+ * A distribution from a business's operating account to its owners by their share of its worth,
+ * paying `months` of its profit. Each owner's part goes where the holdings module routes their
+ * stake (an account of theirs, else their deposit account); a part they reinvest stays in the
+ * business and only its stake records it. Null when there is nothing to pay or no account to pay from.
+ */
+function distribution(ctx: ReadContext, api: FinanceApi, business: EntityId, months: JsonObject): { lines: PostingLine[]; extra: LedgerEvent[]; paid: number } | null {
+  const total = Object.values(months).reduce((a: number, c) => a + numOf(c), 0);
   const from = operatingAccount(api, ctx, business);
   if (!from || total <= 0) return null;
   const owners = api.ownersOf(ctx.state, business).map((o) => ({ party: o.party, share: api.shareOf(ctx.state, business, o.party) })).filter((o) => o.share > 0);
@@ -444,7 +487,7 @@ function distribution(ctx: ReadContext, api: FinanceApi, business: EntityId, tot
     extra.push(...(stakePaid?.(ctx, o.party, business, cents, reinvest) ?? []));
   }
   if (paid > 0) lines.unshift({ account: from, amount: -paid });
-  extra.push({ type: "economy.payout", data: { business, what: "distribution", cents: total } });
+  extra.push({ type: "economy.payout", data: { business, what: "distribution", cents: total, months } });
   return { lines, extra, paid };
 }
 
@@ -455,9 +498,10 @@ function distribute(ctx: EffectContext, api: FinanceApi, args: Record<string, Js
   if (by !== "" && !manages(api, ctx.state, by, business)) return reject("not_owner", `${labelOf(ctx, by)} doesn't run ${labelOf(ctx, business)}`);
   const since = numOf(own(objOf(sliceOf(ctx.state, "economy").distributed), business), monthStart(ctx, ctx.state.clock));
   const pct = numOf(own(ctx.state.entities, business)?.fields.distribution_pct, 100);
-  const total = typeof args.cents === "number" && args.cents > 0 ? Math.round(args.cents) : Math.round((Math.max(0, businessBooks(api, ctx, business, since, ctx.state.clock + 1).profit) * pct) / 100);
-  if (!(total > 0)) return reject("bad_amount", `${labelOf(ctx, business)} has no profit to distribute`);
-  const d = distribution(ctx, api, business, total);
+  // A stated amount pays out of this month; otherwise the profit of every month since the last payout that no payout has paid.
+  const months: JsonObject = typeof args.cents === "number" && args.cents > 0 ? { [monthOf(ctx.world, ctx.state.clock)]: Math.round(args.cents) } : undistributed(api, ctx, business, since, ctx.state.clock + 1, pct);
+  if (Object.keys(months).length === 0) return reject("bad_amount", `${labelOf(ctx, business)} has no profit to distribute`);
+  const d = distribution(ctx, api, business, months);
   if (!d) return reject("no_owners", `${labelOf(ctx, business)} has no owners with a share, or no account to pay from`);
   if (d.lines.length === 0) return d.extra;
   const posted = api.post(ctx, d.lines, { memo: "Profit distribution", kind: "income", category: "distribution" });
@@ -499,15 +543,19 @@ function distributionFlow(ctx: ReadContext, api: FinanceApi, business: EntityId)
 
 // ---------------------------------------------------------------- views
 
-/** A name as the viewer may read it: anyone the player can't see reads as `fallback` (DESIGN §7); the GM's views name everyone. */
-function shownName(ctx: ReadContext, viewer: EntityId, id: string, fallback: string): string {
-  if (!own(ctx.state.entities, id)) return id;
-  if (viewer === ctx.world.pov && !canSeeEntity(ctx.registry, ctx.world, ctx.state, viewer, id)) return fallback;
-  return labelOf(ctx, id);
+/** Whether `viewer` (the player; null for the GM) can't see `id`: their views carry neither its name nor its id (DESIGN §7). */
+function hiddenFrom(ctx: ReadContext, viewer: EntityId | null, id: string): boolean {
+  return viewer !== null && own(ctx.state.entities, id) !== undefined && !canSeeEntity(ctx.registry, ctx.world, ctx.state, viewer, id);
 }
 
-function ownerLines(ctx: ReadContext, api: FinanceApi, viewer: EntityId, business: EntityId): OwnerLine[] {
-  return api.ownersOf(ctx.state, business).map((o) => ({ party: o.party, name: shownName(ctx, viewer, o.party, "an owner"), role: o.role, share: api.shareOf(ctx.state, business, o.party) }));
+/** A name as `viewer` may read it: anyone hidden from them reads as `fallback`; the GM's views name everyone. */
+function shownName(ctx: ReadContext, viewer: EntityId | null, id: string, fallback: string): string {
+  if (!own(ctx.state.entities, id)) return id;
+  return hiddenFrom(ctx, viewer, id) ? fallback : labelOf(ctx, id);
+}
+
+function ownerLines(ctx: ReadContext, api: FinanceApi, viewer: EntityId | null, business: EntityId): OwnerLine[] {
+  return api.ownersOf(ctx.state, business).map((o) => ({ party: hiddenFrom(ctx, viewer, o.party) ? "" : o.party, name: shownName(ctx, viewer, o.party, "an owner"), role: o.role, share: api.shareOf(ctx.state, business, o.party) }));
 }
 
 /** The next time a flow of this business falls due, as the dashboards print it. */
@@ -517,15 +565,18 @@ function nextDue(ctx: ReadContext, api: FinanceApi, flowId: string): string | nu
   return next === undefined ? null : formatClock(calendarOf(ctx.world), next);
 }
 
-/** A business as its owner's dashboard (and the GM's) shows it: books this year and by month, sales, invoices, staff and taxes. */
-export function businessView(ctx: ReadContext, api: FinanceApi, business: EntityId, viewer: EntityId): BusinessView {
+/**
+ * A business on `party`'s dashboard (its own, or one it holds a role on): books this year and by
+ * month, sales, invoices, staff and taxes, with names as `viewer` may read them.
+ */
+export function businessView(ctx: ReadContext, api: FinanceApi, business: EntityId, party: EntityId, viewer: EntityId | null): BusinessView {
   const cal = calendarOf(ctx.world);
   const now = ctx.state.clock;
   const d = dateAt(cal, now);
   const yearStart = clockAt(cal, dayIndexOf(cal, d.year, 1, 1), 0);
   const year = businessBooks(api, ctx, business, yearStart, now + 1);
   const deposit = operatingAccount(api, ctx, business);
-  const role = api.ownersOf(ctx.state, business).find((o) => o.party === viewer)?.role ?? null;
+  const role = api.ownersOf(ctx.state, business).find((o) => o.party === party)?.role ?? null;
   const salesList = own(objOf(sliceOf(ctx.state, "economy").sales), business);
   const sales: JournalLine[] = (Array.isArray(salesList) ? salesList : [])
     .map((raw, i) => ({ raw: objOf(raw), i }))
@@ -534,12 +585,14 @@ export function businessView(ctx: ReadContext, api: FinanceApi, business: Entity
   const invoices = allInvoices(ctx)
     .filter((i) => i.business === business || i.party === business)
     .sort((a, b) => b.issued - a.issued)
-    .map((i) => ({ id: i.id, business: i.business, customer: i.customer, cents: i.cents, memo: i.memo, issued: i.issued, due: i.due, state: i.state, paid: i.paid, late_fee: i.late_fee, ...(i.state === "late" ? { days_late: dateAt(cal, now).dayIndex - dateAt(cal, i.due).dayIndex } : {}), flow: `invoice:${i.id}`, customerName: i.party ? shownName(ctx, viewer, i.party, "a customer") : i.customer, issuedAt: formatClock(cal, i.issued), dueAt: formatClock(cal, i.due) }));
+    .map((i) => ({ id: i.id, business: hiddenFrom(ctx, viewer, i.business) ? "" : i.business, customer: i.party !== null && hiddenFrom(ctx, viewer, i.party) ? "" : i.customer, cents: i.cents, memo: i.memo, issued: i.issued, due: i.due, state: i.state, paid: i.paid, late_fee: i.late_fee, ...(i.state === "late" ? { days_late: dateAt(cal, now).dayIndex - dateAt(cal, i.due).dayIndex } : {}), flow: `invoice:${i.id}`, customerName: i.party ? shownName(ctx, viewer, i.party, "a customer") : i.customer, issuedAt: formatClock(cal, i.issued), dueAt: formatClock(cal, i.due) }));
   const employees = allJobs(ctx)
     .filter((j) => j.business === business && j.status !== "ended")
     .map((j) => {
       const v = jobView(ctx, api, j);
-      return { ...v, worker: shownName(ctx, viewer, j.worker, "an employee") };
+      if (!hiddenFrom(ctx, viewer, j.worker)) return v;
+      // Where their pay goes, and to whom, would name them too.
+      return { ...v, worker: "an employee", workerId: "", splits: [], spec: { ...v.spec, worker: "", splits: [], deductions: [] } };
     });
   const owed = payablesOf(ctx.state, business);
   const taxes: BusinessView["taxes"] = [];
@@ -554,8 +607,8 @@ export function businessView(ctx: ReadContext, api: FinanceApi, business: Entity
       const b = businessBooks(api, ctx, business, from, from + 1);
       return { period: m, revenue: b.revenue, expenses: b.expenses, profit: b.profit };
     });
-  // Where the viewer's share of its profit goes, when they hold one: the holdings module routes it (`economy.stake_route`).
-  const routed = api.shareOf(ctx.state, business, viewer) > 0 ? (optionalQuery(ctx, "economy.stake_route")?.(ctx, viewer, business) ?? null) : undefined;
+  // Where the party's share of its profit goes, when they hold one: the holdings module routes it (`economy.stake_route`).
+  const routed = api.shareOf(ctx.state, business, party) > 0 ? (optionalQuery(ctx, "economy.stake_route")?.(ctx, party, business) ?? null) : undefined;
   return {
     id: business,
     name: labelOf(ctx, business),
@@ -579,14 +632,14 @@ function businessesOf(ctx: ReadContext, api: FinanceApi, party: EntityId): Entit
   return businessIds(ctx).filter((b) => api.ownersOf(ctx.state, b).some((o) => o.party === party));
 }
 
-/** Late invoices a party owes, or that its businesses are owed. */
-function invoiceAlerts(ctx: ReadContext, api: FinanceApi, party: EntityId): AlertLine[] {
+/** Late invoices a party owes, or that its businesses are owed, with names as `viewer` may read them. */
+function invoiceAlerts(ctx: ReadContext, api: FinanceApi, party: EntityId, viewer: EntityId | null): AlertLine[] {
   const mine = businessesOf(ctx, api, party);
   const out: AlertLine[] = [];
   for (const inv of allInvoices(ctx)) {
     if (inv.state !== "late" || inv.left <= 0) continue;
-    if (inv.party === party || (inv.party !== null && mine.includes(inv.party))) out.push({ tone: "neg", text: `${inv.memo} from ${shownName(ctx, party, inv.business, "a business")} is late: ${api.money(ctx, inv.left)} due.`, flow: `invoice:${inv.id}` });
-    else if (mine.includes(inv.business)) out.push({ tone: "warn", text: `${inv.memo}, billed to ${inv.party ? shownName(ctx, party, inv.party, "a customer") : inv.customer}, is late: ${api.money(ctx, inv.left)} owed.`, flow: `invoice:${inv.id}` });
+    if (inv.party === party || (inv.party !== null && mine.includes(inv.party))) out.push({ tone: "neg", text: `${inv.memo} from ${shownName(ctx, viewer, inv.business, "a business")} is late: ${api.money(ctx, inv.left)} due.`, flow: `invoice:${inv.id}` });
+    else if (mine.includes(inv.business)) out.push({ tone: "warn", text: `${inv.memo}, billed to ${inv.party ? shownName(ctx, viewer, inv.party, "a customer") : inv.customer}, is late: ${api.money(ctx, inv.left)} owed.`, flow: `invoice:${inv.id}` });
   }
   return out;
 }
@@ -628,8 +681,7 @@ export function registerBusiness(r: FinanceRegistry): void {
     const f = own(ctx.state.entities, business)?.fields;
     if (!f) return null;
     const period = distributionPeriod(ctx, strOf(f.distribution_every, "quarter"), at);
-    const total = Math.round((Math.max(0, businessBooks(api, ctx, business, period.from, period.to).profit) * numOf(f.distribution_pct)) / 100);
-    const d = distribution(ctx, api, business, total);
+    const d = distribution(ctx, api, business, undistributed(api, ctx, business, period.from, period.to, numOf(f.distribution_pct)));
     return d ? { cents: d.paid, lines: d.lines, memo: "Profit distribution", kind: "income", category: "distribution", extra: d.extra } : null;
   });
   core.process({ id: "economy.invoices", domain: "money", minLevel: 3, step: (slot, ctx) => lateInvoices(slot, ctx, api) });
@@ -652,10 +704,10 @@ export function registerBusiness(r: FinanceRegistry): void {
   });
   core.query("economy.operating_account", (ctx, business) => operatingAccount(api, ctx, business));
 
-  r.view((ctx, party) => {
+  r.view((ctx, party, _view, viewer) => {
     const mine = businessesOf(ctx, api, party);
-    const alerts = invoiceAlerts(ctx, api, party);
-    return { ...(mine.length > 0 ? { businesses: mine.map((b) => businessView(ctx, api, b, party)) } : {}), ...(alerts.length > 0 ? { alerts } : {}) };
+    const alerts = invoiceAlerts(ctx, api, party, viewer);
+    return { ...(mine.length > 0 ? { businesses: mine.map((b) => businessView(ctx, api, b, party, viewer)) } : {}), ...(alerts.length > 0 ? { alerts } : {}) };
   });
   r.summary((ctx, who) => {
     const out: string[] = [];

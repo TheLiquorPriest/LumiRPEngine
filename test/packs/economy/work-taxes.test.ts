@@ -1,0 +1,77 @@
+// Taxes on work (DESIGN §26.3), folded through Riverton: withholding on paychecks, and the
+// estimated tax on income nobody withholds from.
+
+import { describe, expect, test } from "bun:test";
+import { calendarOf, clockOfLocal } from "../../../src/engine/calendar";
+import { investmentTax } from "../../../src/packs/economy/core/gains";
+import { incomeIn } from "../../../src/packs/economy/core/records";
+import { act, entity, ext, lapse, line, paid, paychecks, posts, setup } from "./work-world";
+
+const DAY = 1440;
+
+/** Rosa (Money 3, no occupation of her own) delivering for Dashway nightly from 28 December 2026 to 16 January. */
+function courier() {
+  const { w } = setup((wd) => {
+    wd.start.at = "2026-12-28T07:30";
+    delete wd.entities.rosa!.fields.occupation;
+    wd.entities.job_gig = entity("job_gig", "job", "Courier", { worker: "rosa", employer: "Dashway", title: "Courier", occupation: "food_delivery_courier", basis: "per_shift", rate: 9000, hours: "contract", shifts_per_week: 7, weeks_per_year: 52, pay_every: "per_job", start: "2026-01-01" });
+  });
+  lapse(w, 19 * DAY);
+  return w;
+}
+
+describe("work taxes: withholding and estimated tax", () => {
+  test("withholding and the estimated-tax set-aside read the job's occupation, not the worker's", () => {
+    // Rosa (Money 3, Ohio's 1.4%) has no occupation of her own; each job names one.
+    const clerk = setup((wd) => {
+      delete wd.entities.rosa!.fields.occupation;
+      wd.entities.job_desk = entity("job_desk", "job", "Desk", { worker: "rosa", employer: "Riverton desk", title: "Desk", occupation: "office_clerk", basis: "hourly", rate: 2000, hours: "contract", hours_per_week: 40, weeks_per_year: 52, pay_every: "weekly", pay_weekday: 5, start: "2025-01-06" });
+    });
+    lapse(clerk.w, 8 * DAY);
+    const [check] = paychecks(clerk.w, "rosa_checking");
+    const [slip] = paid(clerk.w, "job_desk");
+    // An office clerk's flat 14% federal.
+    expect(line(check!, ext("tax:federal"))).toBe(Math.round(((slip?.gross as number) * 14) / 100));
+
+    // A courier's contract pay in December is paid for on 15 January: the courier's 15.4% set-aside and the state's 1.4%.
+    const w = courier();
+    const december = paid(w, "job_gig").filter((d) => d.year === 2026).reduce((a, d) => a + (d.gross as number), 0);
+    expect(december).toBe(4 * 9000);
+    const [estimate] = posts(w, /^Estimated tax/);
+    expect(-line(estimate!, "rosa_checking")).toBe(Math.round((december * (15.4 + 1.4)) / 100));
+  });
+
+  test("a person's estimated tax goes to the federal tax account their withholding goes to", () => {
+    const [estimate] = posts(courier(), /^Estimated tax/);
+    expect(line(estimate!, ext("tax:federal"))).toBe(-line(estimate!, "rosa_checking"));
+  });
+});
+
+describe("work taxes: business income", () => {
+  test("a C corporation's payout is a dividend its owner's investment tax covers", () => {
+    const { w } = setup((wd) => {
+      wd.entities.you!.fields.place = "cafe";
+      wd.entities.daybreak!.fields.structure = "c_corp";
+    });
+    expect(act(w, "economy.buy", { payer: "you", item: "latte_16oz", method: "debit" }).rejected).toEqual([]);
+    expect(act(w, "economy.distribute", { business: "daybreak", by: "maya" }).rejected).toEqual([]);
+    const [payout] = posts(w, /^Profit distribution/);
+    expect(incomeIn(w.state, "maya", 2026)).toMatchObject({ dividend: line(payout!, "maya_checking"), profit: 0 });
+    expect(investmentTax(w.ctx, "maya", 2026).cents).toBeGreaterThan(0);
+  });
+
+  test("a C corporation pays its income tax on the last four months' profit on 15 January, from its own account", () => {
+    // The café, an Ohio corporation, takes walk-in customers from Monday 28 December.
+    const { w } = setup((wd) => {
+      wd.start.at = "2026-12-28T07:30";
+      Object.assign(wd.entities.daybreak!.fields, { structure: "c_corp", region: "oh", daily_sales: 50_000 });
+    });
+    lapse(w, 19 * DAY);
+    const cal = calendarOf(w.world);
+    const books = w.ctx.query("economy.business_books")(w.ctx, "daybreak", clockOfLocal(cal, "2026-09-01T00:00"), clockOfLocal(cal, "2027-01-01T00:00"));
+    expect(books.profit).toBeGreaterThan(0);
+    // The federal 21% and Ohio's 1.4%.
+    const [tax] = posts(w, /^Corporate income tax/);
+    expect(tax?.lines).toEqual([{ account: "db_operating", amount: -Math.round((books.profit * 22.4) / 100) }, { account: ext("tax:federal"), amount: Math.round((books.profit * 22.4) / 100) }]);
+  });
+});

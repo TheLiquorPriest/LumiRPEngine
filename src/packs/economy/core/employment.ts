@@ -182,8 +182,9 @@ export function readJob(ctx: Pick<ReadContext, "registry" | "world" | "state" | 
   const business = employer !== "" && own(ctx.state.entities, employer) && !isGone(ctx.state, employer) ? employer : own(ctx.world.places, employer) ? businessAt(ctx, employer) : null;
   const freq = strOf(occ.pay_frequency);
   const basis: PayBasis = (PAY_BASES as readonly string[]).includes(strOf(f.basis)) ? (strOf(f.basis) as PayBasis) : freq === "semimonthly" || freq === "monthly" ? "salary" : "hourly";
-  // A tipped occupation's own pay is the tipped cash wage, and its tips the rest of the median.
-  const tipped = occ.tipped === true && typeof f.rate !== "number";
+  // A tipped occupation's own pay is the tipped cash wage, and its tips the rest of the median,
+  // whatever rate the job sets: a raise, or a hire at a stated wage, keeps the tips.
+  const tipped = occ.tipped === true;
   const median = numOf(occ.median_cents_per_h);
   const cashWage = numOf(occ.tipped_cash_wage_cents_per_h, median);
   const defaults: Record<PayBasis, number> = { salary: numOf(occ.typical_earnings_cents_per_year), hourly: tipped ? cashWage : median, per_shift: Math.round(median * 8), commission: 0, tips: Math.max(0, median - cashWage), stipend: 0 };
@@ -380,6 +381,27 @@ function scheduledPaydays(ctx: ReadContext, api: FinanceApi, job: Job, fromDay: 
   return days.filter((d) => (first === undefined || d >= first) && d <= target);
 }
 
+/**
+ * Where a payroll flow counts its intervals from: the job's anchor, for the cycles that count from
+ * one (weekly, biweekly and custom), as its paydays do.
+ */
+function flowStart(cal: Calendar, job: Job): string | undefined {
+  return job.anchor !== null && (job.every === "weekly" || job.every === "biweekly" || job.every === "custom") ? dateText(cal, job.anchor) : undefined;
+}
+
+/**
+ * Where a job's pay starts before any paycheck is paid: the scheduled payday before the chat's
+ * first (a gig's: the day of its first payout). Null when no payday falls in the chat's first year.
+ */
+function firstPeriodDay(ctx: ReadContext, api: FinanceApi, job: Job): number | null {
+  const cal = calendarOf(ctx.world);
+  const begun = chatStart(ctx.world);
+  const at = api.occurrences(ctx, payFlowSchedule(ctx, job), begun, begun + 400 * MINUTES_PER_DAY, flowStart(cal, job))[0];
+  if (at === undefined) return null;
+  const day = dateAt(cal, at).dayIndex;
+  return job.every === "per_job" ? day : (scheduledPaydays(ctx, api, job, day, day)[0] ?? null);
+}
+
 // ---------------------------------------------------------------- the work a job counts
 
 type Block = { start: number; end: number };
@@ -422,10 +444,18 @@ export interface Work {
   source: HoursSource;
 }
 
-/** The days a job counts whose midnight falls in [from, to): a pay period's days, and a gig's day by its evening payout. */
-function daysIn(cal: Calendar, job: Job, from: number, to: number): number {
+/**
+ * The days a job counts whose midnight falls in [from, to) (a pay period's days, and a gig's day by
+ * its evening payout), but for those the worker spends away: a trip covers their noon.
+ */
+function daysIn(ctx: ReadContext, job: Job, from: number, to: number): number {
+  const cal = calendarOf(ctx.world);
+  const trips = (optionalQuery(ctx, "castlife.commitments")?.(ctx, job.worker, from, to) ?? []).filter((b) => b.kind === "trip");
   let n = 0;
-  for (let d = dateAt(cal, from - 1).dayIndex + 1; clockAt(cal, d, 0) < to; d++) if (workingDay(cal, job, d)) n++;
+  for (let d = dateAt(cal, from - 1).dayIndex + 1; clockAt(cal, d, 0) < to; d++) {
+    const noon = clockAt(cal, d, 12 * 60);
+    if (workingDay(cal, job, d) && !trips.some((t) => t.start <= noon && noon < t.end)) n++;
+  }
   return n;
 }
 
@@ -444,7 +474,7 @@ export function workIn(ctx: ReadContext, job: Job, from: number, to: number): Wo
   const source = hoursSource(ctx, job, to);
   const cal = calendarOf(ctx.world);
   if (source === "contract") {
-    const days = daysIn(cal, job, from, to);
+    const days = daysIn(ctx, job, from, to);
     const share = job.season ? 1 : job.weeksPerYear / 52;
     return { minutes: Math.round(((job.hoursPerWeek * 60 * days) / 7) * share), shifts: Math.round(((job.shiftsPerWeek * days) / 7) * share * 100) / 100, source };
   }
@@ -522,13 +552,16 @@ export function paycheckFor(ctx: ReadContext, api: FinanceApi, job: Job, at: num
   const record = payRecord(ctx.state, job.id);
   const paidThrough = typeof record.through === "number" ? record.through : null;
   const periodic = job.basis === "salary" || job.basis === "stipend";
-  const paydays = job.every === "per_job" ? [payDay - 1, payDay] : scheduledPaydays(ctx, api, job, paidThrough === null ? payDay : dateAt(cal, paidThrough).dayIndex, payDay);
+  // With nothing paid yet, pay runs from the period the chat's first payday closes, so a first
+  // paycheck that couldn't be paid is paid with the next.
+  const first = paidThrough === null ? firstPeriodDay(ctx, api, job) : null;
+  const paydays = job.every === "per_job" ? [payDay - 1, payDay] : scheduledPaydays(ctx, api, job, paidThrough !== null ? dateAt(cal, paidThrough).dayIndex : (first ?? payDay), payDay);
   if (paydays.length < 2) return null;
-  // Hours are cut at the start of each payday, so the first period runs from the start of the one
-  // before; a salary's periods are whole days after it.
-  const firstStart = clockAt(cal, (paydays[paydays.length - 2] ?? payDay) + (periodic ? 1 : 0), 0);
+  // Hours are cut at the start of each payday, so a period runs from the start of the one before;
+  // a salary's periods are whole days after it. A gig's day pays that evening.
+  const firstStart = clockAt(cal, job.every === "per_job" ? (first ?? payDay) : (paydays[0] ?? payDay) + (periodic ? 1 : 0), 0);
   const startClock = job.start === null ? -Infinity : clockAt(cal, job.start, 0);
-  const since = paidThrough ?? Math.max(startClock, job.every === "per_job" ? clockAt(cal, payDay, 0) : firstStart);
+  const since = paidThrough ?? Math.max(startClock, firstStart);
   const through = periodic ? clockAt(cal, (paydays[paydays.length - 1] ?? payDay) + 1, 0) : Math.max(since, cutoff);
   if (through <= since) return null;
   const work = workIn(ctx, job, since, Math.max(since, cutoff));
@@ -571,15 +604,22 @@ export function paycheckFor(ctx: ReadContext, api: FinanceApi, job: Job, at: num
   }
   const brackets = api.feature(ctx, job.worker, "tax_brackets");
   const year = dateAt(cal, at).year;
-  const taxes = api.feature(ctx, job.worker, "withholding") ? payTaxes(ctx, job.worker, { gross, pretax, periods: periodsPerYear(ctx, api, job), ytdFica: yearPay(ctx.state, job.worker, year).fica, brackets, selfEmployed: job.contractor, ficaExempt: job.ficaExempt }) : { federal: 0, socialSecurity: 0, medicare: 0, state: 0, local: 0 };
-  // Withholding never takes more than deductions leave; what it can't take comes off federal.
-  taxes.federal = Math.max(0, taxes.federal - Math.max(0, taxTotal(taxes) - left));
+  const taxes = api.feature(ctx, job.worker, "withholding") ? payTaxes(ctx, job.worker, { gross, occupation: job.occupation, pretax, periods: periodsPerYear(ctx, api, job), ytdFica: yearPay(ctx.state, job.worker, year).fica, brackets, selfEmployed: job.contractor, ficaExempt: job.ficaExempt }) : { federal: 0, socialSecurity: 0, medicare: 0, state: 0, local: 0 };
+  // Withholding never takes more than the deductions leave: what it can't take comes off income tax
+  // first, then Medicare, then Social Security. The employer's share of FICA is its own, and whole.
+  const fica = taxes.socialSecurity + taxes.medicare;
+  let over = taxTotal(taxes) - left;
+  for (const k of ["federal", "local", "state", "medicare", "socialSecurity"] as const) {
+    const cut = Math.min(taxes[k], Math.max(0, over));
+    taxes[k] -= cut;
+    over -= cut;
+  }
   const net = left - taxTotal(taxes);
 
   const deposit = api.depositAccount(ctx, job.worker) ?? api.outside(job.worker);
   const routed = api.split(net, job.splits.filter((s) => ownsAccount(api, ctx.state, job.worker, s.to)), deposit).filter((r) => r.cents > 0);
   const match = matched.reduce((a, m) => a + m.cents, 0);
-  const employerFica = brackets && job.business !== null && !job.contractor && !job.ficaExempt ? taxes.socialSecurity + taxes.medicare : 0;
+  const employerFica = brackets && job.business !== null && !job.contractor && !job.ficaExempt ? fica : 0;
   const lines: PostingLine[] = [];
   const add = (account: string, amount: number): void => {
     if (amount === 0) return;
@@ -594,7 +634,7 @@ export function paycheckFor(ctx: ReadContext, api: FinanceApi, job: Job, at: num
   add(api.outside("tax:federal"), taxes.federal + taxes.socialSecurity + taxes.medicare + employerFica);
   add(api.outside("tax:state"), taxes.state);
   add(api.outside("tax:local"), taxes.local);
-  const ficaWages = taxes.socialSecurity > 0 || taxes.medicare > 0 ? Math.max(0, gross - pretax.fica) : 0;
+  const ficaWages = fica > 0 ? Math.max(0, gross - pretax.fica) : 0;
   return { job: job.id, worker: job.worker, from: since, to: through, work, gross, parts: { pay, tips, commission }, taxes, deductions, net, routed, match, employerFica, ficaWages, pretax: pretax.income, lines: lines.filter((l) => l.amount !== 0) };
 }
 
@@ -626,7 +666,7 @@ export const PAYSLIP: EventTypeDef<PackEvent> = {
     const business = str(e, "business");
     if (business !== "") addToBooks(state, business, monthOf(ctx.world, state.clock), { payroll: numOf(e.data.cost) });
   },
-  describe: (e) => `Payslip: ${str(e, "job")}`,
+  describe: (e, ctx, viewer) => (viewer ? "" : `Payslip: ${labelOf(ctx, str(e, "worker"))}, ${labelOf(ctx, str(e, "job"))}`),
 };
 
 /** The days on a timesheet, as a sorted list of day indexes. */
@@ -667,7 +707,7 @@ export const COMMISSION: EventTypeDef<PackEvent> = {
     const cur = objOf(own(payroll, job));
     payroll[job] = { ...cur, sales: numOf(cur.sales) + numOf(e.data.cents) };
   },
-  describe: (e) => `Commission on sales: ${str(e, "job")}`,
+  describe: (e, ctx, viewer) => (viewer ? "" : `Commission on sales: ${labelOf(ctx, str(e, "job"))}`),
   coarsen: {
     key: (e) => `${str(e, "job")}:${numOf(e.data.since)}`,
     merge: (a, b) => ({ ...b, data: { ...b.data, cents: numOf(a.data.cents) + numOf(b.data.cents) } }),
@@ -709,9 +749,13 @@ function payrollFlow(ctx: ReadContext, api: FinanceApi, job: Job): Flow | null {
   if (job.every === null) return null;
   const cal = calendarOf(ctx.world);
   const schedule = payFlowSchedule(ctx, job);
-  const start = job.anchor !== null && (job.every === "weekly" || job.every === "biweekly") ? dateText(cal, job.anchor) : undefined;
-  // The last paycheck comes on the first payday after the last day worked.
-  const settle = job.end === null ? undefined : api.occurrences(ctx, schedule, clockAt(cal, job.end + 1, 0) - 1, clockAt(cal, job.end + 63, 0), start)[0];
+  const start = flowStart(cal, job);
+  // The last paycheck comes on the first payday after the last day worked. The flow ends on that
+  // payday's scheduled day, since its occurrences are counted by it: rolled back off a weekend, the
+  // payday is paid before the day the flow would otherwise end on.
+  const end = job.end;
+  const roll = (d: number): number => (schedule.roll === "before" || schedule.roll === "after" ? api.businessDay(ctx, d, schedule.roll) : d);
+  const settle = end === null ? undefined : cycleDays(ctx, api, job, end - 62, end + 400).find((d) => roll(d) > end);
   return {
     id: `pay:${job.id}`,
     label: `Pay: ${job.title}`,
@@ -722,7 +766,7 @@ function payrollFlow(ctx: ReadContext, api: FinanceApi, job: Job): Flow | null {
     amount: { provider: "payroll", args: { job: job.id } },
     schedule,
     ...(start ? { start } : {}),
-    ...(settle !== undefined ? { end: dateText(cal, dateAt(cal, settle).dayIndex) } : {}),
+    ...(settle !== undefined ? { end: dateText(cal, settle) } : {}),
     // A paycheck that can't be paid is paid with the next: each covers the work since the last one paid.
     shortfall: "skip",
     category: "payroll",

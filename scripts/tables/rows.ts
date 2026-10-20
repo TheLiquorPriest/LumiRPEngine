@@ -215,6 +215,7 @@ export const ROW_SPECS: Record<string, RowSpec> = {
         local_income_tax_pct_typical: f.take("local_income_tax_pct_typical"),
         ...shared,
         minimum_wage_cents_per_h: f.take("minimum_wage_cents_per_hour"),
+        tipped_minimum_wage_cents_per_h: f.take("tipped_minimum_wage_cents_per_hour"),
         notes: f.take("notes"),
       };
     },

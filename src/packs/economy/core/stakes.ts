@@ -21,6 +21,7 @@ import { acquisition, disposal } from "./gains";
 import { unit } from "./holdings";
 import { incomeFor } from "./income";
 import { YEAR_MINUTES } from "./pricing";
+import { structureOf } from "./taxes";
 
 /** What a business is worth beyond its books, in years of profit, when it names no multiple of its own. */
 const VALUATION_MULTIPLE = 3;
@@ -170,7 +171,8 @@ export function registerStakes(r: FinanceRegistry): void {
   r.fields("business", BUSINESS_FIELDS);
   r.core.event(routeEvent);
   r.core.query("economy.stake_route", stakeRoute);
-  r.core.service("economy.stake_paid", (_ctx, owner, business, cents, reinvested) => incomeFor(business, owner, Math.round(cents), "profit", reinvested));
+  // A pass-through business's profit is its owners' income through estimated tax; a C corporation's payout is a dividend, which the investment tax covers.
+  r.core.service("economy.stake_paid", (ctx, owner, business, cents, reinvested) => incomeFor(business, owner, Math.round(cents), structureOf(ctx.state, business) === "c_corp" ? "dividend" : "profit", reinvested));
   r.core.effect({
     type: "economy.stake_sell",
     args: ["business", "share", "price", "buyer?", "to?", "party?"],

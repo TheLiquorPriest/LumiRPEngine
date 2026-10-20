@@ -1431,13 +1431,15 @@ The work module (`packs/economy/core/work.ts`, with `employment.ts`, `business.t
 - **The employer** is either a business in the world, which pays from its operating account (§26.2), or an outside employer by name, which pays from the outside economy. An employer named by a place, as worlds wrote it before businesses were parties, is the business trading there.
 - **The pay basis** is one of: `salary` (a year), `hourly`, `per_shift`, `commission`, `tips` or `stipend` (a period). A rate the job doesn't set comes from its occupation row:
   - salary: the typical earnings;
-  - hourly: the median wage, or for a tipped occupation the tipped cash wage, with the rest of the median as tips by the hour;
+  - hourly: the median wage, or for a tipped occupation the tipped cash wage;
   - per shift: eight hours at the median.
+
+  A tipped occupation's tips are the rest of its median, by the hour, whatever rate the job sets: a raise, or a hire at a stated wage, keeps them.
 
 **The work a job counts.** A job counts only the days from its `start` to its `end` (the last day worked), and inside its `season` (`MM-DD` to `MM-DD`, which may wrap the new year) when it has one. Hourly and per-shift pay count hours, from one of three sources (`hours`):
 - **`scheduled`:** the worker's commitments at the job's workplace, as castlife gives them (`castlife.commitments`). That covers their routine there, after every cut a trip or a plan of their own makes. A shift is a day with work in it.
 - **`attended`:** the player's own timesheet (`economy.timesheet`). When a slot completes, each work block of the player's that ended in it counts if they turned up: they are at the workplace, or arrived there or left it after the block began. Blocks from before the chat began count as attended.
-- **`contract`:** the job's hours a week over the days it counts, thinned to its weeks a year unless a season already says which weeks.
+- **`contract`:** the job's hours a week over the days it counts, thinned to its weeks a year unless a season already says which weeks. A day the worker is away on a trip (its noon is inside one) isn't counted.
 
 With no source set, a worker who has a routine at the job is paid for it: the player as attended, anyone else as scheduled. A worker with no routine there is paid the contract hours.
 
@@ -1450,19 +1452,19 @@ With no source set, a worker who has a routine at the job is paid for it: the pl
 
 A payday that falls on a weekend or a day-off holiday rolls to the business day before it (`pay_roll`: `before`, `after` or `none`).
 
-**A paycheck** pays for the work since the last one, up to the start of the day it is paid; a gig's runs up to its payout.
+**A paycheck** pays for the work since the last one, up to the start of the day it is paid; a gig's runs up to its payout. Before any paycheck is paid, the work counts from the start of the period the chat's first payday closes.
 - **Salary and a stipend** pay each scheduled period the paycheck closes, each prorated by the days the job counted in it. A seasonal salary divides over the periods its season reaches.
 - **Commission** is the job's percentage of the sales credited to it since the last paycheck: sales at the business while the worker is at the workplace, and walk-in takings on days they worked, split evenly among those who qualify.
 - **Tips** are the job's tips an hour times its hours.
 - **Deductions** are fixed amounts or percentages of gross, never more than is left. A pre-tax deduction comes off income-tax wages; a retirement contribution is still FICA wages, a health premium isn't. Each goes to an account of the worker's, or to an outside payee. A business employer adds its match (`match_pct`) to the worker's account.
-- **Withholding** follows §26.3, never taking more than the deductions leave.
+- **Withholding** follows §26.3, and every tax it takes comes out of what the deductions leave: what doesn't fit comes off federal income tax first, then the local and state taxes, then Medicare and Social Security. The employer's own share of FICA is paid whole. So a paycheck is never refused for its withholding.
 - **The net** is routed across the worker's accounts (`splits`): fixed amounts first, then percentages of the rest; what's left goes to their deposit account.
 
 The paycheck is one posting: the gross, plus the match and, at the top level, the employer's share of FICA, out of the employer's account; the net, deductions and taxes to where they go. Its `economy.payslip` rides with it. The payslip moves the job's record on (what it has paid through; the timesheet and the commission sales start again), adds to the worker's year of pay, and books the cost to a business employer. The payday note goes with it too: a signal for the player, a private note for anyone else (§9.3).
 
-**Payroll as flows.** Each job derives one flow (`pay:<job>`, source `job`) from the employer to the worker, on the job's cycle, from its anchor to the first payday after its last day.
+**Payroll as flows.** Each job derives one flow (`pay:<job>`, source `job`) from the employer to the worker, on the job's cycle, from its anchor to the scheduled day of the first payday after its last day. Its occurrences are counted by their scheduled day, so a last payday that rolls back before the job's end is still paid.
 - It runs at its payer's level: a business's own, or for an outside employer, the worker's (§25).
-- Its shortfall is `skip`. Each paycheck covers everything since the last one paid, so a payday the employer can't cover is paid with the next.
+- Its shortfall is `skip`. Each paycheck covers everything since the last one paid, so a payday the employer can't cover, the first included, is paid with the next.
 - A paycheck with nothing earned (a period on leave, out of season, or with no shifts) posts nothing but still moves the record on, so that time is never paid later.
 
 **Hire, fire and raise** are actions for the business's owner and GM edits:
@@ -1492,7 +1494,7 @@ A business doesn't sell to itself. One with no accounts is paid as any party wit
 
 **Invoices** are `invoice` entities.
 - **Issuing one** (`invoice_issue`) names the customer (someone in the world, or an outside customer by name), the amount, what it's for, and the days to pay: the business's `invoice_days`, else 30.
-- **Payment is a flow** from the customer, paid as a bill (from an account, never wallet cash). It falls due on the due date and again every week after, until the invoice is paid in full. An outside customer pays on the due date; one in the world pays once their money covers it.
+- **Payment is a flow** from the customer, paid as a bill (from an account, never wallet cash). It falls due on the due date and again every week after, until the invoice is paid in full. An outside customer pays on the due date; one in the world pays once their money covers it. An outside customer pays from money nobody in the world had, so what a business bills outside customers in a calendar month is at most the world's cap on unlisted prices (`unpricedCap`, §9.5); someone in the world pays from their own money, unbounded.
 - **Late.** An invoice still unpaid when its due day ends goes `late` and takes the business's `late_fee_pct` of the amount, and the fee again every 30 days it stays unpaid. The customer and the business's owners are told.
 - **Paying it now** (`invoice_pay`) is the customer's own action. **Voiding it** (`invoice_void`) is the owner's.
 
@@ -1500,15 +1502,15 @@ A business doesn't sell to itself. One with no accounts is paid as any party wit
 
 **Owners are paid** in two ways:
 - **Draws.** An owner or joint owner takes a draw (`owner_draw`) from the operating account. A corporation has none: it pays its owners by salary or dividends.
-- **Distributions** (`distribute_profit`) share out an amount among the owners by their share of its worth. With no amount given, the business pays its `distribution_pct` of the profit since its last distribution. A distribution policy (`distribution_pct` with `distribution_every`: month, quarter or year) does the same as a flow on the 10th after each period closes.
+- **Distributions** (`distribute_profit`) share out an amount among the owners by their share of its worth. With no amount given, the business pays its `distribution_pct` of each month's profit since its last distribution, less what distributions already paid of that month; each payout records the months it paid (`months`), so no month's profit is paid out twice. A distribution policy (`distribution_pct` with `distribution_every`: month, quarter or year) does the same as a flow on the 10th after each period closes.
 
-Each owner's part goes where the holdings module routes their stake (`economy.stake_route`, else their deposit account). A reinvested part stays in the business. Every part is recorded on the stake (`economy.stake_paid`, §27).
+Each owner's part goes where the holdings module routes their stake (`economy.stake_route`, else their deposit account). A reinvested part stays in the business. Every part is recorded on the stake (`economy.stake_paid`, §27): a pass-through business's as profit, which the owner's estimated tax covers; a C corporation's as a dividend, which their investment tax does.
 
 **The books** are kept by calendar month, the last 25 of them:
 - **Revenue** is sales, invoices paid to it, and other money in from the journal (less the takings of sales already booked).
 - **Expenses** are the cost of goods, payroll with the employer's costs, invoices it paid, business income tax, and every other outflow from its accounts by journal category.
 
-Owner draws, distributions, transfers between its own accounts and the sales tax it passes through count as neither. Its receivables are its unpaid invoices. Its payables are the invoices billed to it, the sales tax it holds and what it owes its suppliers. The holdings module values a stake from them (`economy.business_books`, `economy.operating_account`).
+Owner draws, distributions, transfers between its own accounts and the sales tax it passes through count as neither, and nor do balance-sheet moves: money it borrows (`loan`), and investments and property it buys or sells (`investment`, `property`), which change what it holds, not what it makes. Its receivables are its unpaid invoices. Its payables are the invoices billed to it, the sales tax it holds and what it owes its suppliers. The holdings module values a stake from them (`economy.business_books`, `economy.operating_account`).
 
 **On the dashboards**, a party sees itself when it is a business, and each business it holds a role on:
 - its books for the year and for each of the last 12 months;
@@ -1517,12 +1519,12 @@ Owner draws, distributions, transfers between its own accounts and the sales tax
 - its staff, with their pay;
 - what it owes for taxes and to its suppliers, with when each is next paid.
 
-A party's own late invoices, owed or owed to it, are alerts. On the player's surfaces, anyone the player can't see is named only as "a customer", "an employee" or "an owner" (§7). A character's money summary for their mind says how a business of theirs is doing this month, and what they owe on an invoice.
+A party's own late invoices, owed or owed to it, are alerts. The modules' sections of a view are told who reads it: the player's surfaces name anyone the player can't see only as "a customer", "an employee" or "an owner", and leave out their ids (an owner line's party, an invoice's customer or business, an employee's worker, where their pay goes, and their job's worker and splits). The GM's views name everyone (§7). A character's money summary for their mind says how a business of theirs is doing this month, and what they owe on an invoice.
 
 ### 26.3 Taxes
 
 **Withholding** (feature `withholding`, from Money 3):
-- **Flat below the top level:** the occupation's federal-plus-FICA rate (`withholding_rate_pct`) and the region's state rate (with its local rate for someone who pays it, `local_tax`), on gross pay less pre-tax deductions.
+- **Flat below the top level:** the job's occupation's federal-plus-FICA rate (`withholding_rate_pct`; the worker's own occupation when the job names none) and the region's state rate (with its local rate for someone who pays it, `local_tax`), on gross pay less pre-tax deductions.
 - **Brackets at the top level** (feature `tax_brackets`, Money 4). The period's taxable pay is annualized, the standard deduction for the worker's `filing_status` comes off, and the rest goes through the federal brackets of the finance tables and back to one period. Social Security is 6.2 % up to the year's wage base (counting the year's FICA wages so far). Medicare is 1.45 %, with the additional 0.9 % past $200,000. The state and local rates follow.
 
 A contractor (`contractor`, by default the occupation's `self_employed`) has nothing withheld. A student working for their own school pays no FICA.
@@ -1537,7 +1539,7 @@ A contractor (`contractor`, by default the occupation's `self_employed`) has not
   - their contract pay in the period, from Money 3;
   - their share of the period's profit from each pass-through business they own (a sole proprietorship, a partnership, an LLC or an S corporation), at the business's `business_tax` level.
   
-  Below the top level the tax is the occupation's `estimated_tax_set_aside_pct` (15 % without one) plus the state rate. At the top level the income is stacked on the year's wages through the brackets, with self-employment tax (15.3 % of 92.35 %, half of it deductible) on contract pay and on profit from any structure but an S corporation, plus the state rate.
+  Below the top level the tax is the `estimated_tax_set_aside_pct` of the occupation of their contract job (else their own; 15 % without one) plus the state rate. At the top level the income is stacked on the year's wages through the brackets, with self-employment tax (15.3 % of 92.35 %, half of it deductible) on contract pay and on profit from any structure but an S corporation, plus the state rate. It goes to `tax:federal`, where withholding goes.
 - **A C corporation** pays the corporate rate (21 %, or the economy config's `taxes.corporatePct`) plus the state rate on the period's profit, from its own account, and books it as its income tax.
 - **A missed payment** is made with the next: each one settles, as well as its own period, any period of the year before that no payment settled.
 
@@ -1555,6 +1557,8 @@ The holdings module stacks capital gains on the same income through two queries:
 - `distributed`: per business, when it last distributed.
 
 **The events** are `economy.payslip`, `economy.timesheet`, `economy.commission`, `economy.sale`, `economy.remit`, `economy.invoice_paid`, `economy.payout` and `economy.estimated_tax`. In a timelapse or catch-up record, a job's timesheet entries for one pay period merge into one (minutes add, days join), and so do its commission credits; nothing else merges, so a coarse record folds exactly as the full one. Invoice states, late fees and jobs hired or ended are plain field sets and spawns, so a GM edit of them is the same change.
+
+**Secrecy.** Payslips, commission credits, sales, remittances, invoices paid, payouts and estimated tax are bookkeeping, never a player line: what the player reads of them is the postings' lines and the notes to them. Their words for the GM's and the author's lines name the parties.
 
 ## 27. Holdings and property
 

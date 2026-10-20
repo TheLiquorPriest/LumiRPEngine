@@ -16,7 +16,7 @@ import type { EntityId, PlaceId } from "../../../shared/ids";
 import type { PackEvent } from "../../../shared/ledger";
 import { FILING_STATUSES, type FilingStatus, type Flow } from "../../../shared/finance";
 import { calendarOf, clockAt, dateAt, dayIndexOf } from "../../../engine/calendar";
-import { numOf, objOf, own, rowOf, sliceOf, sliceRecord, strOf } from "../../../engine/pack-kit";
+import { labelOf, numOf, objOf, own, rowOf, sliceOf, sliceRecord, strOf } from "../../../engine/pack-kit";
 import type { EventTypeDef, ReadContext, Rejection } from "../../../engine/registry";
 import { isGone, kindIs } from "../../../engine/scope";
 import type { WorldState } from "../../../engine/state";
@@ -163,6 +163,8 @@ export function taxTotal(t: PayTaxes): number {
 
 export interface PayTaxInput {
   gross: number;
+  /** The job's occupation, whose flat rate applies below the top level. */
+  occupation: string;
   /** Pre-tax deductions this paycheck: `income` comes off income-tax wages, `fica` off FICA wages too. */
   pretax: { income: number; fica: number };
   /** Pay periods a year: how a paycheck annualizes. */
@@ -178,7 +180,7 @@ export interface PayTaxInput {
 }
 
 /**
- * Withholding on one paycheck. Flat: the occupation's federal-plus-FICA rate and the state rate on
+ * Withholding on one paycheck. Flat: the job's occupation's federal-plus-FICA rate and the state rate on
  * gross pay less pre-tax deductions. Brackets: the period's taxable pay annualized, less the
  * standard deduction, through the brackets and back to one period; FICA on this paycheck's FICA
  * wages within the year's wage base; state and local on taxable pay.
@@ -190,7 +192,7 @@ export function payTaxes(ctx: Ctx, person: EntityId, input: PayTaxInput): PayTax
   const stateTax = Math.round((taxable * state) / 100);
   const localTax = Math.round((taxable * local) / 100);
   if (!input.brackets) {
-    const occ = rowOf(ctx, "economy.occupations", strOf(own(ctx.state.entities, person)?.fields.occupation));
+    const occ = rowOf(ctx, "economy.occupations", input.occupation);
     return { federal: Math.round((taxable * numOf(occ?.withholding_rate_pct)) / 100), socialSecurity: 0, medicare: 0, state: stateTax, local: localTax };
   }
   const t = federalTables(ctx);
@@ -332,7 +334,7 @@ export function estimatedTax(api: FinanceApi, ctx: ReadContext, person: EntityId
   if (income <= 0) return { cents: 0, income: 0 };
   const state = (income * stateTaxPct(ctx, person).state) / 100;
   if (!api.feature(ctx, person, "tax_brackets")) {
-    const occ = rowOf(ctx, "economy.occupations", strOf(own(ctx.state.entities, person)?.fields.occupation));
+    const occ = rowOf(ctx, "economy.occupations", setAsideOccupation(ctx, person));
     return { cents: Math.round((income * numOf(occ?.estimated_tax_set_aside_pct, 15)) / 100 + state), income };
   }
   const t = federalTables(ctx);
@@ -429,7 +431,7 @@ export const ESTIMATED_TAX: EventTypeDef<PackEvent> = {
     all[party] = paid;
     if (e.data.business === true) addToBooks(state, party, monthOf(ctx.world, state.clock), { business_tax: total });
   },
-  describe: (e) => `Estimated tax: ${str(e, "party")}`,
+  describe: (e, ctx, viewer) => (viewer ? "" : `Estimated tax: ${labelOf(ctx, str(e, "party"))}`),
 };
 
 /** The estimated-tax flow: on the four due dates, rolled to the next business day, from the payer to the tax authority. */
@@ -438,10 +440,27 @@ function estimateFlow(id: string, label: string, from: string, to: string, party
   return { id, label, kind: "tax", from, to, amount: { provider: "estimated_tax", args: { party, business } }, schedule: { every: "year", months: ESTIMATE_DUE.map((d) => d.month), days: [15], roll: "after" }, shortfall: "skip", category: business ? "business_tax" : "tax", link: party, status: "active", source: "estimated_tax" };
 }
 
+/** The occupations of a person's contract jobs, ended ones too, since their pay still owes estimated tax (a job's own, else the person's), by job id. */
+function contractOccupations(ctx: ReadContext, person: EntityId): string[] {
+  const mine = strOf(own(ctx.state.entities, person)?.fields.occupation);
+  return Object.keys(ctx.state.entities)
+    .sort()
+    .flatMap((id) => {
+      const e = own(ctx.state.entities, id);
+      if (!e || e.kind !== "job" || e.fields.worker !== person) return [];
+      const occupation = strOf(e.fields.occupation, mine);
+      return e.fields.contractor === true || (e.fields.contractor === undefined && rowOf(ctx, "economy.occupations", occupation)?.self_employed === true) ? [occupation] : [];
+    });
+}
+
+/** The occupation a person's estimated tax sets aside by: their contract job's, else their own. */
+function setAsideOccupation(ctx: ReadContext, person: EntityId): string {
+  return contractOccupations(ctx, person)[0] ?? strOf(own(ctx.state.entities, person)?.fields.occupation);
+}
+
 /** Whether a person may have income nobody withholds from: a contract job, or a share of a pass-through business. */
 function owesEstimates(ctx: ReadContext, api: FinanceApi, person: EntityId): boolean {
-  if (passThroughShares(ctx, api, person).length > 0) return true;
-  return Object.values(ctx.state.entities).some((e) => e.kind === "job" && e.fields.worker === person && (e.fields.contractor === true || (e.fields.contractor === undefined && rowOf(ctx, "economy.occupations", strOf(e.fields.occupation))?.self_employed === true)));
+  return passThroughShares(ctx, api, person).length > 0 || contractOccupations(ctx, person).length > 0;
 }
 
 /** Estimated tax: a flow per person with contract pay or pass-through profit and per C corporation, its provider, and the tax queries the holdings module shares. */
@@ -455,8 +474,9 @@ export function registerTaxes(r: FinanceRegistry): void {
       for (const id of Object.keys(ctx.state.entities).sort()) {
         const e = own(ctx.state.entities, id);
         if (!e || isGone(ctx.state, id)) continue;
-        if (kindIs(ctx.registry, ctx.world, e.kind, "person") && owesEstimates(ctx, api, id)) out.push(estimateFlow(`esttax:${id}`, "Estimated tax", id, api.outside("tax:federal"), id, false));
-        else if (kindIs(ctx.registry, ctx.world, e.kind, "business") && structureOf(ctx.state, id) === "c_corp") out.push(estimateFlow(`esttax:${id}`, "Corporate income tax", operatingAccount(api, ctx, id) ?? api.outside(id), api.outside("tax:federal"), id, true));
+        // The payee is named as a flow names someone outside (`tax:federal`), not as their outside account.
+        if (kindIs(ctx.registry, ctx.world, e.kind, "person") && owesEstimates(ctx, api, id)) out.push(estimateFlow(`esttax:${id}`, "Estimated tax", id, "tax:federal", id, false));
+        else if (kindIs(ctx.registry, ctx.world, e.kind, "business") && structureOf(ctx.state, id) === "c_corp") out.push(estimateFlow(`esttax:${id}`, "Corporate income tax", operatingAccount(api, ctx, id) ?? id, "tax:federal", id, true));
       }
       return out;
     },
@@ -479,7 +499,11 @@ export function registerTaxes(r: FinanceRegistry): void {
     }
     const cents = periods.reduce((a, p) => a + p.cents, 0);
     if (cents <= 0) return null;
-    return { cents, memo: business ? "Corporate income tax" : "Estimated tax", kind: "payment", category: business ? "business_tax" : "tax", extra: [{ type: "economy.estimated_tax", data: { party, periods, ...(business ? { business: true } : {}) } }] };
+    // A corporation pays from its operating account, which the flow would pay to an outside account of
+    // its own naming; its posting names the federal tax account itself, as withholding does.
+    const payer = business ? operatingAccount(api, ctx, party) : null;
+    const lines = payer ? [{ account: payer, amount: -cents }, { account: api.outside("tax:federal"), amount: cents }] : undefined;
+    return { cents, ...(lines ? { lines } : {}), memo: business ? "Corporate income tax" : "Estimated tax", kind: "payment", category: business ? "business_tax" : "tax", extra: [{ type: "economy.estimated_tax", data: { party, periods, ...(business ? { business: true } : {}) } }] };
   });
   core.query("economy.ordinary_income", (ctx, person, year) => ordinaryIncome(api, ctx, person, year));
   core.query("economy.income_tax", (ctx, filing, taxable) => bracketTax(federalTables(ctx).brackets[filing], taxable));

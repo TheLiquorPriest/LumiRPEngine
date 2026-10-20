@@ -415,7 +415,9 @@ function validate(t: Rec, file: string): { findings: Findings; counts: Record<st
         const hourly = (num(job.rateCents) ?? 0) + (num(job.tipsPerHourCents) ?? 0);
         if (hourly < median * 0.6 || hourly > median * 1.8) err(`${where}: ${hourly}c/h with tips is outside 0.6-1.8x the ${occ} median ${median}c/h`);
         if (row.tipped === true && !((num(job.tipsPerHourCents) ?? 0) > 0)) err(`${where}: ${occ} is tipped work; give the job tipsPerHourCents, or its pay has no tips`);
-        if (row.tipped === true && (num(job.rateCents) ?? 0) < (num(row.tipped_cash_wage_cents_per_h) ?? 0)) err(`${where}: a cash wage under the ${occ} tipped floor of ${text(String(row.tipped_cash_wage_cents_per_h))}c/h`);
+        // The template's state sets a tipped floor of its own where the regions table records one; else the federal floor applies.
+        const tippedFloor = num(rec(region).tipped_minimum_wage_cents_per_h) ?? num(row.tipped_cash_wage_cents_per_h) ?? 0;
+        if (row.tipped === true && (num(job.rateCents) ?? 0) < tippedFloor) err(`${where}: a cash wage under the tipped floor of ${tippedFloor}c/h in ${text(t.region)}`);
       }
       if (row.pay_frequency !== job.payEvery) err(`${where}: payEvery "${text(job.payEvery)}" differs from ${occ} (${text(row.pay_frequency)})`);
       if (row.schedule_pattern !== job.shiftPattern || !(text(job.shiftPattern) in shifts)) err(`${where}: shiftPattern differs from ${occ} (${text(row.schedule_pattern)})`);

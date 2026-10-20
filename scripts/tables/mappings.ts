@@ -134,6 +134,7 @@ export const MAPPINGS: readonly TableMapping[] = [
       median_rent_2br_cents_per_month: int("cents_per_month"),
       residential_electricity_cents_per_kwh: num("cents_per_kwh", "Decimal cents."),
       minimum_wage_cents_per_h: int("cents_per_h", "Effective 2025 floor, the higher of state and federal."),
+      tipped_minimum_wage_cents_per_h: opt(int("cents_per_h", "Effective 2025 cash wage floor for tipped work where the state sets one above the federal floor; absent where the federal floor applies.")),
       notes: opt(text()),
     },
   },

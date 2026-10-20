@@ -86,7 +86,11 @@ export interface ViewSectionResult extends Partial<Pick<FinanceView, "jobs" | "b
   alerts?: AlertLine[];
 }
 
-export type ViewSection = (ctx: ReadContext, party: EntityId, view: Readonly<FinanceView>) => ViewSectionResult;
+/**
+ * A module's sections of `party`'s dashboard view. `viewer` is who reads it: the POV for the
+ * player's view, whose sections leave out what the POV can't see; null for the GM's, which name everyone.
+ */
+export type ViewSection = (ctx: ReadContext, party: EntityId, view: Readonly<FinanceView>, viewer: EntityId | null) => ViewSectionResult;
 
 /** Sentences a module adds to a character's money summary (their job, their business, their investments). */
 export type SummarySource = (ctx: ReadContext, who: EntityId) => string[];
