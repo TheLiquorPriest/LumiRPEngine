@@ -142,7 +142,7 @@ export function assetSpecs(currency: WorldCurrency): FieldSpec[] {
 
 function FeatureToggles(props: PackConfigProps) {
   return (
-    <Card title="Money features (Custom)">
+    <Card title="Money features">
       <span class="lre-small lre-muted">Each runs from its usual Money level; switch one on to run it from its lowest level, or off. The money hub shows each one's detail wherever it runs; the rest of the full books show only at the top level.</span>
       {FINANCE_FEATURES.map((f) => {
         const def = FEATURE_DEFS[f];

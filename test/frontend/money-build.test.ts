@@ -11,13 +11,14 @@ import { exemptChoices, regionChoices, toggleOf, withLivingCost, withRegion, wit
 import { ALL_PACKS, STARTER_WORLDS } from "../../src/packs/index";
 import { compact, equalShares, householdMembers, monthDays, numbersOf, recordsOf } from "../../src/packs/economy/ui/field-editors";
 import { corporateTax, taxExempt } from "../../src/packs/economy/core/taxes";
+import { featureFor } from "../../src/packs/economy/core/pay";
 import { createRegistry } from "../../src/engine/registry-impl";
 import { Working } from "../../src/engine/working";
 import type { JsonObject } from "../../src/shared/json";
 import type { WorldDoc } from "../../src/shared/world";
 import { startState } from "../packs/support";
 
-describe("the Custom money toggles", () => {
+describe("the money toggles", () => {
   test("a toggle is stored as on or off, and By level removes it (and an empty set of toggles)", () => {
     const on = withToggle({ unpricedCap: 500 }, "statements", "on");
     expect(on).toEqual({ unpricedCap: 500, features: { statements: true } });
@@ -27,6 +28,19 @@ describe("the Custom money toggles", () => {
     expect(toggleOf(off, "atm")).toBe("off");
     expect(withToggle(withToggle(off, "atm", "level"), "statements", "level")).toEqual({ unpricedCap: 500 });
     expect(toggleOf({}, "holds")).toBe("level");
+  });
+
+  test("a toggle applies under any realism preset, as the user guide says", async () => {
+    const world = (STARTER_WORLDS.modern_slice_of_life as (id: string, name: string) => WorldDoc)("pa", "Port Alder");
+    // Port Alder plays on the Simulation preset, at Money 4, where statements run unless a toggle says otherwise.
+    expect(world.realism.preset).toBe("simulation");
+    world.packs.economy = { ...world.packs.economy, config: withToggle(world.packs.economy?.config ?? {}, "statements", "off") };
+    const ctx = new Working(createRegistry(ALL_PACKS), world, startState(world)).ctx;
+    expect(featureFor(ctx, world.pov, "statements")).toBe(false);
+    const guide = await Bun.file(new URL("../../docs/USER-GUIDE.md", import.meta.url)).text();
+    const detail = guide.split("\n").find((line) => line.startsWith("**Money detail.**")) ?? "";
+    expect(detail).toContain("Under any preset");
+    expect(guide).not.toContain("Under the **Custom** preset a world can turn single money features");
   });
 });
 
