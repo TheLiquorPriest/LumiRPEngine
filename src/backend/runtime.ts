@@ -46,7 +46,7 @@ import { checkAnswer } from "../engine/tracks";
 import { secretLoreNames } from "../engine/lore";
 import { namesHidden, playerKnows } from "../engine/player-events";
 import { canSeeEntity, canSeePlace, findLeaks, namesAny, playerTrack, povPlace, unrevealedSecrets, unseenPlaceNames } from "../engine/visibility";
-import { openPuzzle } from "../packs/story/core/index";
+import { openPuzzle, openPuzzles } from "../packs/story/core/index";
 import { REGARD_CHANNEL_CAP } from "../packs/relationships/core/index";
 import { Working } from "../engine/working";
 import type { PresetCard, TemplateInfo } from "../shared/protocol";
@@ -2035,20 +2035,18 @@ export const TYPE_LABELS: Record<ExtractionType, string> = {
 };
 
 /**
- * The puzzles the player can see that take an answer now, as "Puzzle — stage" titles (interpret's
- * Answer label), each as the player sees it: a secret's masked label, never its own.
+ * The puzzles the player can see that take an answer now (`openPuzzles`, up to six), as interpret's
+ * Answer label names them: each as its quest log row shows it, "Puzzle — stage". A masked secret
+ * reads "Something is going on" with no stage, like any other, so its cue stands in for the stage:
+ * all that tells it from another, and never its own label.
  */
 function openPuzzleTitles(registry: Registry, world: WorldDoc, state: Readonly<WorldState>): string[] {
-  const out: string[] = [];
-  for (const id of Object.keys(world.tracks).sort()) {
-    const t = world.tracks[id];
-    const stage = t?.kind === "puzzle" ? t.stages[state.tracks[id]?.stage ?? t.start] : undefined;
-    const shown = stage?.answer ? playerTrack(registry, world, state, world.pov, id) : null;
-    if (!shown) continue;
-    out.push(shown.stage ? `${shown.label} — ${shown.stage}` : shown.label);
-    if (out.length >= 6) break;
-  }
-  return out;
+  return openPuzzles(registry.context(world, state))
+    .slice(0, 6)
+    .map(({ shown }) => {
+      const where = shown.stage || shown.cue;
+      return where ? `${shown.label} — ${where}` : shown.label;
+    });
 }
 
 /** Typed phrases that let time pass: they wake the classifier and are the timelapse's lexicon for `interpret`. */

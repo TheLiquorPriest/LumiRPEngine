@@ -4,9 +4,11 @@
 // this pack is how they reach effects, formulas, the narrator and the panel. Story has no realism
 // domain: tracks behave the same at every level.
 
+import type { TrackId } from "../../../shared/ids";
 import type { JsonValue } from "../../../shared/json";
 import type { PackEvent } from "../../../shared/ledger";
 import type { WorldDoc } from "../../../shared/world";
+import { wordsOf } from "../../../engine/lore";
 import { labelOf, mutableSlice, objOf, sliceOf, strOf, own } from "../../../engine/pack-kit";
 import type { PackDef, ReadContext, Rejection } from "../../../engine/registry";
 import { checkAnswer } from "../../../engine/tracks";
@@ -75,15 +77,18 @@ function reject(code: string, reason: string): Rejection {
   return { code, reason };
 }
 
+/** An open puzzle: the track, and its row in the quest log. */
+export interface OpenPuzzle {
+  id: TrackId;
+  shown: PlayerTrack;
+}
+
 /**
- * The puzzle an answer is for: `ref` when it is a puzzle's id, or the id the player layer shows an
- * open one by (a secret's stand-in); else, among the open puzzles the POV can see (a stage awaiting
- * an answer), the one whose label and stage as the POV sees them share the most words with `ref`
- * (a secret's own label, which its quest log row masks, never matches), or the only one open.
+ * The puzzles the POV can see that take an answer now (a stage awaiting one), each with its quest log
+ * row, in the order of the ids the player layer knows them by, as the quest log lists them.
  */
-export function openPuzzle(ctx: ReadContext, ref: string): string | null {
-  if (own(ctx.world.tracks, ref)?.kind === "puzzle") return ref;
-  const open = Object.keys(ctx.world.tracks)
+export function openPuzzles(ctx: ReadContext): OpenPuzzle[] {
+  return Object.keys(ctx.world.tracks)
     .flatMap((id) => {
       const t = own(ctx.world.tracks, id);
       if (t?.kind !== "puzzle" || own(t.stages, own(ctx.state.tracks, id)?.stage ?? t.start)?.answer === undefined) return [];
@@ -91,16 +96,35 @@ export function openPuzzle(ctx: ReadContext, ref: string): string | null {
       return shown ? [{ id, shown }] : [];
     })
     .sort((a, b) => (a.shown.id < b.shown.id ? -1 : a.shown.id > b.shown.id ? 1 : 0));
+}
+
+/**
+ * The puzzles an answer's `ref` may be for: the one it names by id (a puzzle's own, or the stand-in
+ * the player layer shows a secret by); else the open ones whose label, stage and cue, as the POV sees
+ * them, hold the most of its words (a secret's own label, which its row masks, never counts); else the
+ * only one open. Several when they tie, or when `ref` names nothing while more than one is open.
+ */
+function puzzlesFor(ctx: ReadContext, ref: string): TrackId[] {
+  if (own(ctx.world.tracks, ref)?.kind === "puzzle") return [ref];
+  const open = openPuzzles(ctx);
   const byId = open.find((p) => p.shown.id === ref);
-  if (byId) return byId.id;
-  const words = (s: string): string[] => s.toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length > 2);
-  const want = new Set(words(ref));
-  let best: { id: string; n: number } | null = null;
-  for (const p of open) {
-    const n = words(`${p.shown.label} ${p.shown.stage}`).filter((w) => want.has(w)).length;
-    if (n > 0 && (!best || n > best.n)) best = { id: p.id, n };
-  }
-  return best?.id ?? (open.length === 1 ? (open[0]?.id ?? null) : null);
+  if (byId) return [byId.id];
+  const want = new Set(wordsOf(ref));
+  const scored = open.map(({ id, shown }) => {
+    const seen = new Set(wordsOf(`${shown.label} ${shown.stage} ${shown.cue ?? ""}`));
+    return { id, n: [...want].filter((w) => seen.has(w)).length };
+  });
+  const best = Math.max(0, ...scored.map((s) => s.n));
+  if (best > 0) return scored.filter((s) => s.n === best).map((s) => s.id);
+  // Words that fit none still find the only one open (the player may name it loosely); none at all fit every one.
+  if (open.length === 1) return open.map((p) => p.id);
+  return want.size === 0 ? open.map((p) => p.id) : [];
+}
+
+/** The puzzle an answer is for (`puzzlesFor`), or null when none fits or more than one fits equally. */
+export function openPuzzle(ctx: ReadContext, ref: string): TrackId | null {
+  const fits = puzzlesFor(ctx, ref);
+  return fits.length === 1 ? (fits[0] ?? null) : null;
 }
 
 /** A puzzle as the player asked for it, for a refusal: a track they see under that id by the label they see, else their own words, never a hidden track's label. */
@@ -138,8 +162,17 @@ export const storyPack: PackDef = {
       args: ["track", "answer", "decision?"],
       resolve(a, ctx) {
         const ref = strOf(a.track);
-        const track = openPuzzle(ctx, ref);
-        if (!track) return { code: "not_a_puzzle", reason: `no open puzzle ${askedFor(ctx, ref)}`, gm: `no open puzzle ${labelOf(ctx, ref)}` };
+        const fits = puzzlesFor(ctx, ref);
+        // Several fit equally: which one is meant isn't for the engine to guess, so none is tried and no hint is spent.
+        if (fits.length > 1) {
+          return {
+            code: "ambiguous_puzzle",
+            reason: ref.trim() === "" ? "more than one puzzle is open, and the answer doesn't say which" : `more than one open puzzle fits ${askedFor(ctx, ref)}`,
+            gm: `${fits.length} open puzzles fit ${ref.trim() === "" ? "an answer that names none" : ref}: ${fits.map((id) => labelOf(ctx, id)).join(", ")}`,
+          };
+        }
+        const track = fits[0];
+        if (track === undefined) return { code: "not_a_puzzle", reason: `no open puzzle ${askedFor(ctx, ref)}`, gm: `no open puzzle ${labelOf(ctx, ref)}` };
         const decision = typeof a.decision === "number" ? a.decision : undefined;
         const check = checkAnswer(ctx.world, ctx.state, track, strOf(a.answer), decision);
         // The author opted this stage into model judgement: the turn asks `puzzle.answer`, then retries with `decision`.
@@ -152,7 +185,7 @@ export const storyPack: PackDef = {
       id: "answer",
       label: "Answer",
       pack: "story",
-      // `puzzle` may be the id, words from its label ("the safe"), or left out when one puzzle is open.
+      // `puzzle` may be the id (a secret's stand-in), words from what the player sees of it (its label, stage or cue: "the safe"), or left out when one puzzle is open.
       params: { puzzle: { type: "text", optional: true, label: "Puzzle" }, answer: { type: "text" }, decision: { type: "number", optional: true, label: "Judged probability" } },
       requires: [],
       outcomes: { default: [{ type: "story.answer", args: { track: "=params.puzzle", answer: "=answer", decision: "=params.decision" } }] },

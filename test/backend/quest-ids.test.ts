@@ -144,6 +144,49 @@ describe("answering a puzzle the quest log masks", () => {
     expect([(await masked())?.status, (await masked())?.hints]).toEqual(["active", []]);
     expect(rig.rt.ledger.errors).toEqual([]);
   });
+
+  test("with two open, interpret is told each by its cue, the cue's words reach the right one, and an answer that fits both is refused with no attempt and no hint", async () => {
+    const rig = new Rig({ shipped: true });
+    // Port Alder's truck puzzle and a lockbox, both kept secret: the quest log shows each as "Something is going on".
+    const lockbox: JsonObject = { id: "p_lockbox", kind: "puzzle", label: "The lockbox", start: "shut", visibility: "secret", stages: { shut: { label: "Three dials", cue: "A lockbox with three brass dials.", answer: { expect: ["317"] }, hints: ["The dials only go to 3, 1 and 7 here."], next: [{ to: "open", when: "false" }] }, open: { label: "Open", cue: "The lockbox clicks open.", next: [] } } };
+    const chatId = await starterChat(rig, "modern_slice_of_life", "Port Alder", (draft): JsonObject[] => [{ ...(draft.tracks.p_township_truck as unknown as JsonObject), visibility: "secret" }, lockbox]);
+    const log = await questLog(rig, chatId);
+    const truckId = log.find((q) => q.cue?.startsWith("The township pickup turns over fine"))?.id ?? "no truck";
+    const boxId = log.find((q) => q.cue === "A lockbox with three brass dials.")?.id ?? "no lockbox";
+    expect(log.filter((q) => q.id === truckId || q.id === boxId).map((q) => q.label)).toEqual(["Something is going on", "Something is going on"]);
+    const row = async (id: string) => (await questLog(rig, chatId)).find((q) => q.id === id);
+    const hints = async () => [(await row(truckId))?.hints.length, (await row(boxId))?.hints.length];
+    let prompt = "";
+    /** A typed turn interpret reads as Answer with `params` (each text its own: a text keeps its reading); the turn's decline chip, or "". */
+    const typed = async (text: string, params: JsonObject): Promise<string> => {
+      rig.host.quietReply = (req) => {
+        const content = req.messages.map((m) => m.content).join("\n");
+        if (!content.includes("You map a player's typed input")) return "{}";
+        prompt = content;
+        return JSON.stringify({ action: "answer", params, confidence: 0.9 });
+      };
+      await rig.turn(chatId, text, "You try it.");
+      const decline = (await rig.rt.view(chatId, rig.host.userId)).chips.find((c) => c.kind === "decline");
+      return decline ? `${decline.label} | ${decline.detail ?? ""}` : "";
+    };
+    // By the label both rows show: refused, and neither is tried.
+    expect(await typed("The answer is 317.", { puzzle: "Something is going on", answer: "317" })).toBe("Answer: declined | more than one open puzzle fits Something is going on");
+    expect(await hints()).toEqual([0, 0]);
+    // Interpret was told each by the cue the quest log shows, never by its own label.
+    expect(prompt).toContain("Something is going on — A lockbox with three brass dials.");
+    expect(prompt).toContain("Something is going on — The township pickup turns over fine");
+    for (const label of ["The lockbox", "The truck that won't start"]) expect(prompt).not.toContain(label);
+    // Naming neither, with both open, is refused the same way.
+    expect(await typed("The code is 317.", { answer: "317" })).toBe("Answer: declined | more than one puzzle is open, and the answer doesn't say which");
+    expect(await hints()).toEqual([0, 0]);
+    // The cue's words reach the one they describe: a wrong guess at the pickup earns its hint alone...
+    expect(await typed("The answer is the battery.", { puzzle: "the township pickup", answer: "the battery" })).toBe("");
+    expect(await hints()).toEqual([1, 0]);
+    // ...and the brass dials open the lockbox.
+    expect(await typed("I dial 317 on the brass dials.", { puzzle: "the brass dials", answer: "317" })).toBe("");
+    expect([(await row(boxId))?.status, (await row(boxId))?.cue, (await row(truckId))?.status]).toEqual(["done", "The lockbox clicks open.", "active"]);
+    expect(rig.rt.ledger.errors).toEqual([]);
+  });
 });
 
 describe("the narrator's sections", () => {
