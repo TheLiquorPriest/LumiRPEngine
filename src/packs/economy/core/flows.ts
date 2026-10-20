@@ -529,9 +529,12 @@ export function runOccurrence(hooks: FinanceHooks, run: Run, flow: Flow, at: num
   const who = noteParty(ctx, flow);
   const money = (c: number): string => formatMoney(c, ctx.world.currency);
   if (amount === null) return;
+  // A retry still waiting from an earlier occurrence outlives this one, whatever it does: it's that occurrence's money.
+  const waiting = !retry && before.retry ? before.retry : undefined;
+  const pending = waiting ? { retry: waiting } : {};
   if ("code" in amount) {
     // The module couldn't work the amount out: nothing moves, it counts as missed, and what was carried still waits.
-    const next: FlowRunState = { done: before.done, missed: before.missed + 1, ...(before.deferred ? { deferred: before.deferred } : {}), ended: ended(before.done, before.missed + 1) };
+    const next: FlowRunState = { done: before.done, missed: before.missed + 1, ...pending, ...(before.deferred ? { deferred: before.deferred } : {}), ended: ended(before.done, before.missed + 1) };
     run.emit([runEvent(flow, at, "declined", 0, next)]);
     return;
   }
@@ -552,7 +555,7 @@ export function runOccurrence(hooks: FinanceHooks, run: Run, flow: Flow, at: num
     const applied = run.emit(attempt.events);
     if (applied.length > 0 || attempt.events.length === 0) {
       // A module's own posting can't take what was carried; it waits for an occurrence that can.
-      const next: FlowRunState = { done: before.done + 1, missed: before.missed, ...(own_lines && before.deferred ? { deferred: before.deferred } : {}), ended: ended(before.done + 1, before.missed) };
+      const next: FlowRunState = { done: before.done + 1, missed: before.missed, ...pending, ...(own_lines && before.deferred ? { deferred: before.deferred } : {}), ended: ended(before.done + 1, before.missed) };
       run.emit([runEvent(flow, at, "paid", attempt.paid, next)]);
       if (who && flow.kind !== "living" && amount.posting?.quiet !== true && attempt.paid > 0) run.emit([signal("bill", `${flow.label}: ${money(attempt.paid)} ${flowIsIncome(ctx, flow, who) ? "received" : "paid"}.`, who, at)]);
       return;
@@ -567,7 +570,7 @@ export function runOccurrence(hooks: FinanceHooks, run: Run, flow: Flow, at: num
       const part = Math.min(have, cents - 1);
       const paid = part > 0 && !own_lines ? computed(part) : null;
       if (paid && !("code" in paid) && run.emit(paid.events).length > 0) {
-        const next: FlowRunState = { done: before.done + 1, missed: before.missed, ended: ended(before.done + 1, before.missed) };
+        const next: FlowRunState = { done: before.done + 1, missed: before.missed, ...pending, ended: ended(before.done + 1, before.missed) };
         run.emit([runEvent(flow, at, "partial", part, next, cents - part)]);
         if (who) run.emit([signal("decline", `${flow.label}: only ${money(part)} of ${money(cents)} paid.`, who, at)]);
         return;
@@ -577,7 +580,9 @@ export function runOccurrence(hooks: FinanceHooks, run: Run, flow: Flow, at: num
     case "retry": {
       const left = retry && before.retry ? before.retry.left : Math.max(0, Math.round(flow.retries ?? 2));
       if (left > 0) {
-        const next: FlowRunState = { done: before.done, missed: before.missed, retry: { at: at + Math.max(1, Math.round(flow.retry_days ?? 3)) * 1440, left: left - 1, cents }, ...(before.deferred ? { deferred: 0 } : {}) };
+        // One retry for all that's owed: one already waiting takes this occurrence's amount with it, at its own time.
+        const again = waiting ? { at: waiting.at, left: Math.max(waiting.left, left - 1), cents: waiting.cents + cents } : { at: at + Math.max(1, Math.round(flow.retry_days ?? 3)) * 1440, left: left - 1, cents };
+        const next: FlowRunState = { done: before.done, missed: before.missed, retry: again, ...(before.deferred ? { deferred: 0 } : {}) };
         run.emit([...nsf, runEvent(flow, at, "retry", 0, next, cents)]);
         if (who) run.emit([signal("decline", `${flow.label} (${money(cents)}) didn't go through; it will be tried again.`, who, at)]);
         return;
@@ -589,7 +594,7 @@ export function runOccurrence(hooks: FinanceHooks, run: Run, flow: Flow, at: num
       if (fallback && !own_lines) {
         const paid = payFrom(hooks, ctx, flow, fallback, cents, at, true, amount.posting);
         if (!("code" in paid) && run.emit(paid.events).length > 0) {
-          const next: FlowRunState = { done: before.done + 1, missed: before.missed, ended: ended(before.done + 1, before.missed) };
+          const next: FlowRunState = { done: before.done + 1, missed: before.missed, ...pending, ended: ended(before.done + 1, before.missed) };
           run.emit([runEvent(flow, at, "fallback", cents, next)]);
           if (who) run.emit([signal("bill", `${flow.label}: ${money(cents)} paid from ${labelOf(ctx, fallback)}.`, who, at)]);
           return;
@@ -598,7 +603,7 @@ export function runOccurrence(hooks: FinanceHooks, run: Run, flow: Flow, at: num
       break;
     }
     case "defer": {
-      const next: FlowRunState = { done: before.done, missed: before.missed + 1, deferred: cents + (own_lines ? (before.deferred ?? 0) : 0), ended: ended(before.done, before.missed + 1) };
+      const next: FlowRunState = { done: before.done, missed: before.missed + 1, ...pending, deferred: cents + (own_lines ? (before.deferred ?? 0) : 0), ended: ended(before.done, before.missed + 1) };
       run.emit([runEvent(flow, at, "deferred", 0, next, cents)]);
       if (who) run.emit([signal("decline", `${flow.label} (${money(cents)}) couldn't be paid; it carries to next time.`, who, at)]);
       return;
@@ -606,7 +611,7 @@ export function runOccurrence(hooks: FinanceHooks, run: Run, flow: Flow, at: num
     default:
       break;
   }
-  const next: FlowRunState = { done: before.done, missed: before.missed + 1, ended: ended(before.done, before.missed + 1) };
+  const next: FlowRunState = { done: before.done, missed: before.missed + 1, ...pending, ended: ended(before.done, before.missed + 1) };
   run.emit([...nsf, runEvent(flow, at, flow.shortfall === "skip" ? "skipped" : "declined", 0, next, cents)]);
   if (who) run.emit([signal("decline", `${flow.label} (${money(cents)}) was declined: ${reason}.`, who, at)]);
 }

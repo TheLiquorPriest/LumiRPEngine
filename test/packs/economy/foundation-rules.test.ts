@@ -543,3 +543,19 @@ describe("a cash withdrawal's fees never let the cash past the funds check", () 
     expect(w.state.accounts.checking).toBe(1_000);
   });
 });
+
+describe("a payment waiting to be retried outlives the occurrences after it", () => {
+  test("a week's transfer that bounced is retried after the next week's goes through, and both are paid", () => {
+    const w = setup((world) => {
+      world.entities.save = entity("save", "flow", { flow_kind: "transfer", from: "checking", to: "savings", amount_cents: 300_000, every: "week", weekdays: [1], shortfall: "retry", retry_days: 10, retries: 2, status: "active" });
+    });
+    const savings = w.state.accounts.savings ?? 0;
+    lapse(w, 4); // Mon 19 Oct bounces; its retry is 29 Oct
+    const add = optionalService(w.ctx, "economy.adjust")?.(w.ctx, "checking", 500_000);
+    if (!add || "code" in add) throw new Error("no adjust");
+    w.applyAll(add);
+    lapse(w, 11); // Mon 26 Oct pays, and the retry on the 29th pays the 19th's
+    expect(flowRuns(w, "save").map((r) => r.outcome)).toEqual(["retry", "paid", "paid"]);
+    expect(w.state.accounts.savings).toBe(savings + 600_000);
+  });
+});
