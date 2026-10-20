@@ -4,7 +4,7 @@
 // dashboards show at each level is tested directly; the core already left out what the level
 // doesn't simulate, and nothing here shows detail the view marks as below the top level.
 
-import { CLASS_TRAITS, ROLE_RIGHTS, type AccountView, type AlertLine, type BusinessView, type CardView, type DistributionRoute, type FinanceFeature, type FinanceView, type FlowView, type HoldingView, type HouseholdView, type Invoice, type JobView, type OwnerRole, type PartyKind, type PropertyView, type RoleRights, type UpcomingLine } from "../../../shared/finance";
+import { CLASS_TRAITS, payeeKey, ROLE_RIGHTS, type AccountView, type AlertLine, type BusinessView, type CardView, type DistributionRoute, type FinanceFeature, type FinanceView, type FlowView, type HoldingView, type HouseholdView, type Invoice, type JobView, type OwnerRole, type PartyKind, type PropertyView, type RoleRights, type UpcomingLine } from "../../../shared/finance";
 import type { EntityId } from "../../../shared/ids";
 import type { GmView, PaletteView } from "../../../shared/state-view";
 import { cardChanges, type CardChange } from "./requests";
@@ -186,8 +186,9 @@ export type FlowControl = "edit" | "pause" | "resume" | "end_lease" | "delete" |
  * The player's controls on one flow, in the order its row shows them. One they may change they
  * edit, pause, resume and delete, and rent they pay under a lease also ends by notice where
  * property runs. From Money 3 (where invoices are actions) an invoice billed to them, or to a
- * business they run, they pay before it falls due. Anything else changes at its source (a job, a
- * loan, the lease's owner).
+ * business they run, they pay before it falls due, unless the business's money would pay for them
+ * (its issuer is one of their own interests: a business they run for others is never billed by
+ * one of theirs). Anything else changes at its source (a job, a loan, the lease's owner).
  */
 export function flowControls(view: FinanceView, flow: FlowView): FlowControl[] {
   if (flow.editable) {
@@ -200,8 +201,9 @@ export function flowControls(view: FinanceView, flow: FlowView): FlowControl[] {
     return out;
   }
   const payer = flow.payer;
-  const billed = payer !== null && (payer === view.party || view.businesses.some((b) => b.id === payer && rights(b.role).manage));
-  return view.level >= 3 && flow.source === "invoice" && flow.link !== null && billed ? ["pay_now"] : [];
+  if (view.level < 3 || flow.source !== "invoice" || flow.link === null || payer === null) return [];
+  const billed = payer === view.party || view.businesses.some((b) => b.id === payer && rights(b.role).manage);
+  return billed && !(flow.spec !== null && paysForThem(view, [payer], flow.spec.to)) ? ["pay_now"] : [];
 }
 
 export type JobControl = "quit" | "raise" | "let_go";
@@ -210,12 +212,16 @@ export type JobControl = "quit" | "raise" | "let_go";
  * The player's controls on a job while it lasts, from Money 3 (where work is actions): its worker
  * quits; whoever runs the employer (shown on its payroll) gives a raise or lets them go, unless the
  * worker is someone they can't see, whose row stands in for the job (no worker id), which no action
- * takes.
+ * takes. Running it for others without a share of its worth, they raise neither their own pay nor
+ * their household's (`selfDealing`).
  */
 export function jobControls(view: FinanceView, job: JobView, employer: BusinessView | null): JobControl[] {
   if (view.level < 3 || job.status === "ended") return [];
   const out: JobControl[] = job.workerId === view.party ? ["quit"] : [];
-  if (employer && rights(employer.role).manage && job.workerId !== "") out.push("raise", "let_go");
+  if (employer && rights(employer.role).manage && job.workerId !== "") {
+    if (!employer.selfDealing.includes(job.workerId)) out.push("raise");
+    out.push("let_go");
+  }
   return out;
 }
 
@@ -295,11 +301,23 @@ export function flowSources(view: FinanceView): { id: string; label: string }[] 
     .map((a) => ({ id: a.id, label: a.name }));
 }
 
-/** Whether money the party reaches only by managing it (a business's account they hold no spending role on) is what pays: such money pays for its holder, never for them. */
-function forHolder(view: FinanceView, payers: readonly string[]): boolean {
-  return payers.some((id) => {
-    const a = findAccount(view, id);
-    return a !== null && a.manages && !a.spends;
+/**
+ * Whether a payment to `to` from any of these payers would pay for the party out of money they only
+ * manage (DESIGN §25.1), as the backend rules it. Money they only manage is an account of theirs
+ * they hold no spending role on, a party other than them paying as itself (a business, a trust:
+ * never its manager's own money, whatever their role on it), or an account the view doesn't list (a
+ * trust's, reached only through the trust). Such money may not pay what the view's `paysFor` lists
+ * against it (their own interests it isn't for, and accounts whose worth one of those counts), nor a
+ * payee typed by name whose key (`payeeKey`) is their id's or name's, or their household's
+ * (`ownKeys`): "Jordan Ellis" and " POV " alike.
+ */
+function paysForThem(view: FinanceView, payers: readonly string[], to: string): boolean {
+  if (to.trim() === "") return false;
+  const typedOwn = view.ownKeys.includes(payeeKey(to));
+  return payers.some((p) => {
+    const a = findAccount(view, p);
+    const managed = a === null ? p !== view.party : a.manages && !a.spends;
+    return managed && (typedOwn || (view.paysFor.find((x) => x.from === p)?.to.includes(to) ?? false));
   });
 }
 
@@ -319,15 +337,29 @@ export function autopaySources(view: FinanceView, account: AccountView): Account
 }
 
 /**
+ * Where the GM may point a credit account's autopay, whichever party's page shows it: what each
+ * party's view lists for it, without repeats. A view lists sources only where its party manages the
+ * account, so a card opened from the page of someone who only holds it (an authorized user) gets
+ * its debtor's sources from the debtor's view.
+ */
+export function gmAutopaySources(views: readonly FinanceView[], account: EntityId): AccountView[] {
+  const out: AccountView[] = [];
+  for (const v of views) {
+    const a = findAccount(v, account);
+    if (a) for (const s of autopaySources(v, a)) if (!out.some((o) => o.id === s.id)) out.push(s);
+  }
+  return out;
+}
+
+/**
  * What may back a standing payment from `from` when it can't cover it: the payer's own accounts, as
  * the view says (`fallbacks`; for a payment from the party itself, the GM's, what they spend from),
- * of those that can pay. Money the party only manages pays for its holder, so none of it backs a
- * payment to `to` when that's the party, their household or an account of theirs.
+ * of those that can pay. Money the party only manages backs no payment that would pay for them
+ * (`paysForThem`).
  */
 export function fallbackSources(view: FinanceView, from: string, to: string): AccountView[] {
   const backs = from === view.party ? view.accounts.filter((a) => a.spends).map((a) => a.id) : (findAccount(view, from)?.fallbacks ?? []);
-  const theirs = to === view.party || (view.household !== null && to === view.household.id) || view.accounts.some((a) => a.id === to);
-  return viewAccounts(view).filter((a) => a.id !== from && backs.includes(a.id) && pays(a) && !(theirs && forHolder(view, [a.id])));
+  return viewAccounts(view).filter((a) => a.id !== from && backs.includes(a.id) && pays(a) && !paysForThem(view, [a.id], to));
 }
 
 /** The people the player may name (a payee, a tenant, a hire): the palette's Pay targets, which list only people the POV knows. */
@@ -336,9 +368,13 @@ export function knownPeople(palette: PaletteView | null): { id: string; label: s
   return (pay?.options ?? []).flatMap((o) => (typeof o.params.to === "string" ? [{ id: o.params.to, label: o.label }] : []));
 }
 
-/** Whom a business's manager may hire, of the people the player may name: no one already on its payroll, whom the economy won't hire twice. */
+/**
+ * Whom a business's manager may hire, of the people the player may name: no one already on its
+ * payroll, whom the economy won't hire twice, nor, running it for others without a share of its
+ * worth, themselves or their household (`selfDealing`).
+ */
 export function hireable<T extends { value: string }>(business: BusinessView, people: readonly T[]): T[] {
-  return people.filter((p) => !business.employees.some((j) => j.workerId === p.value && j.status !== "ended"));
+  return people.filter((p) => !business.selfDealing.includes(p.value) && !business.employees.some((j) => j.workerId === p.value && j.status !== "ended"));
 }
 
 /** True when `kind` is `ancestor` or extends it, up the GM view's kinds as the engine's `kindIs` walks them (a loop ends the walk). */
@@ -367,27 +403,28 @@ export function gmParties(gm: Pick<GmView, "entities" | "kinds">, kinds: readonl
 /**
  * Where a standing payment can go: the party's own accounts (savings, a card to pay off), the
  * accounts of a business they run, the people the player may pay, or an outside payee by name
- * (typed). Money the party only manages (among `payers`, its From and the account it falls back
- * on) pays for its holder: never into an account of theirs, nor to them or their household, though
- * it moves freely between the business's own accounts.
+ * (typed). An account they hold by a role that doesn't count its worth (a card on a business's
+ * operating account, a child's savings they're custodian of) is named as whose it is. Money the
+ * party only manages (among `payers`, its From and the account it falls back on) pays for whom
+ * it's for, never for them (`paysForThem`): it moves freely among its holder's own accounts, but
+ * reaches none of their own interests.
  */
 export function flowTargets(view: FinanceView, palette: PaletteView | null, payers: readonly string[] = []): { id: string; label: string }[] {
-  const target = (a: AccountView): boolean => a.status === "open" && !CLASS_TRAITS[a.class].cash && !payers.includes(a.id);
-  const own = forHolder(view, payers) ? [] : view.accounts.filter((a) => target(a) && rights(a.role).sees).map((a) => ({ id: a.id, label: `${a.name} (yours)` }));
+  const target = (a: AccountView): boolean => a.status === "open" && !CLASS_TRAITS[a.class].cash && !payers.includes(a.id) && !paysForThem(view, payers, a.id);
+  const own = view.accounts
+    .filter((a) => target(a) && rights(a.role).sees)
+    .map((a) => {
+      const holder = rights(a.role).worth ? undefined : a.owners.find((o) => rights(o.role).worth);
+      return { id: a.id, label: `${a.name} (${holder ? possessive(holder.name, false) : "yours"})` };
+    });
   const run = view.businesses.flatMap((b) => b.managed.filter(target).map((a) => ({ id: a.id, label: `${a.name} (${possessive(b.name, false)})` })));
   const theirs = new Set([view.party, view.household?.id ?? "", ...own.map((o) => o.id), ...run.map((r) => r.id)]);
-  return [...own, ...run, ...knownPeople(palette).filter((p) => !theirs.has(p.id))];
+  return [...own, ...run, ...knownPeople(palette).filter((p) => !theirs.has(p.id) && !paysForThem(view, payers, p.id))];
 }
 
-/**
- * Why a standing payment from these payers (its From and the account it falls back on) can't go to
- * `to`, or null: money the party only manages pays for its holder, so never to them, their
- * household or an account of theirs, nor to their own name typed as an outside payee.
- */
+/** Why a standing payment from these payers (its From and the account it falls back on) can't go to `to`, or null: money the party only manages pays for whom it's for, never for them (`paysForThem`). */
 export function payeeProblem(view: FinanceView, payers: readonly string[], to: string): string | null {
-  if (to.trim() === "" || !forHolder(view, payers)) return null;
-  const theirs = to === view.party || (view.household !== null && to === view.household.id) || view.accounts.some((a) => a.id === to) || to.trim().toLowerCase() === view.name.trim().toLowerCase();
-  return theirs ? "Money you only manage pays for its holder: it can't pay you, your household or an account of yours." : null;
+  return paysForThem(view, payers, to) ? "Money you only manage pays for whom it's for: it can't pay you, your household, or a business or account of yours or theirs." : null;
 }
 
 /** How much of a credit account's limit is in use, percent; null without a limit (a charge card). */

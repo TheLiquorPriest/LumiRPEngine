@@ -15,7 +15,7 @@ import { humanize } from "../../../frontend/format";
 import type { IconName } from "../../../frontend/icons";
 import { AccountRow } from "./accounts";
 import { RoutePage, RouteRow } from "./assets";
-import { ActionPage, AmountField, AmountPage, ChoiceField, NumberField, SelectField, TextField, type Choice } from "./forms";
+import { ActionPage, AmountField, AmountPage, amountProblem, ChoiceField, NumberField, SelectField, TextField, unchangedProblem, type Choice } from "./forms";
 import type { PlayerControls, SectionProps } from "./hub";
 import { businessAccounts, businessControls, gmParties, hireable, invoiceControls, jobControls, knownPeople, possessive, workBlocks, type BusinessControl, type InvoiceControl } from "./layout";
 import { FieldsPage, OwnerRows, TxnRows } from "./lines";
@@ -202,7 +202,7 @@ function NewJobPage(props: SectionProps) {
     return controls.edit(jobSpawnOps(id, name, { worker: view.party, employer: named, ...(title.trim() !== "" ? { title: title.trim() } : {}), basis, rate: cents, pay_every: every }));
   };
   return (
-    <ActionPage nav={nav} controls={controls} name="job-new" title="Add a job" subtitle={view.name} go="Add the job" disabled={named === "" || cents === null} submit={submit}>
+    <ActionPage nav={nav} controls={controls} name="job-new" title="Add a job" subtitle={view.name} go="Add the job" problem={named !== "" ? amountProblem(rate, controls.currency, "the rate") : employer === OUTSIDE ? "Type the employer's name." : "Choose the employer."} submit={submit}>
       <SelectField label="Employer" value={employer} empty="Choose" options={[...businesses, { value: OUTSIDE, label: "An outside employer (type the name)" }]} onChange={setEmployer} />
       {employer === OUTSIDE ? <TextField label="Employer's name" value={outside} onInput={setOutside} placeholder="Harbor Freight" /> : null}
       <TextField label="Title" value={title} onInput={setTitle} />
@@ -433,9 +433,11 @@ function HirePage(props: SectionProps & { business: BusinessView }) {
   const [form, setForm] = useState<HireForm>({ business: b.id, worker: "", title: "", basis: "hourly", rate: "", hoursPerWeek: null, payEvery: "biweekly" });
   if (controls.mode !== "player") return null;
   const body = hireAction(form, controls.currency);
+  const candidates = hireable(b, people(controls));
+  const problem = candidates.length === 0 ? "No one you can name is free to hire." : form.worker === "" ? "Choose whom to hire." : amountProblem(form.rate, controls.currency, "a rate", false);
   return (
-    <ActionPage nav={nav} controls={controls} name="business-hire" title="Hire" subtitle={b.name} go="Hire" disabled={body === null} submit={() => (body === null ? Promise.resolve(false) : controls.act(body))}>
-      <SelectField label="Who" value={form.worker} empty="Choose someone" options={hireable(b, people(controls))} onChange={(worker) => setForm({ ...form, worker })} />
+    <ActionPage nav={nav} controls={controls} name="business-hire" title="Hire" subtitle={b.name} go="Hire" problem={problem} submit={() => (body === null ? Promise.resolve(false) : controls.act(body))}>
+      <SelectField label="Who" value={form.worker} empty="Choose someone" options={candidates} onChange={(worker) => setForm({ ...form, worker })} />
       <TextField label="Title" value={form.title} onInput={(title) => setForm({ ...form, title })} />
       <SelectField label="Paid by" value={form.basis} options={PAY_BASES.map((p) => ({ value: p, label: humanize(p) }))} onChange={(basis) => setForm({ ...form, basis })} />
       <AmountField label="Rate (a year, an hour or a shift)" value={form.rate} currency={controls.currency} onInput={(rate) => setForm({ ...form, rate })} invalid={form.rate.trim() !== "" && amountOf(form.rate, controls.currency) === null} />
@@ -456,7 +458,7 @@ function IssueInvoicePage(props: SectionProps & { business: BusinessView }) {
   const cents = amountOf(amount, controls.currency);
   const who = customer === OUTSIDE ? (outside.trim() !== "" ? { name: outside } : null) : customer !== "" ? { id: customer } : null;
   return (
-    <ActionPage nav={nav} controls={controls} name="business-invoice" title="Issue an invoice" subtitle={b.name} go="Issue the invoice" disabled={who === null || cents === null} submit={() => (who === null || cents === null ? Promise.resolve(false) : controls.act(invoiceIssueAction(b.id, who, cents, memo, days)))}>
+    <ActionPage nav={nav} controls={controls} name="business-invoice" title="Issue an invoice" subtitle={b.name} go="Issue the invoice" problem={customer === "" ? "Choose a customer." : who === null ? "Type the customer's name." : amountProblem(amount, controls.currency, "the amount")} submit={() => (who === null || cents === null ? Promise.resolve(false) : controls.act(invoiceIssueAction(b.id, who, cents, memo, days)))}>
       <SelectField label="To" value={customer} empty="Choose a customer" options={[...people(controls), { value: OUTSIDE, label: "Someone else (type the name)" }]} onChange={setCustomer} />
       {customer === OUTSIDE ? <TextField label="Customer's name" value={outside} onInput={setOutside} /> : null}
       <AmountField label="Amount" value={amount} currency={controls.currency} onInput={setAmount} invalid={amount.trim() !== "" && cents === null} />
@@ -473,9 +475,9 @@ function StakePage(props: SectionProps & { business: BusinessView }) {
   const [buyer, setBuyer] = useState("");
   if (controls.mode !== "player") return null;
   const cents = amountOf(price, controls.currency);
-  const ok = share !== null && share > 0 && share <= 100 && cents !== null;
+  const problem = share === null ? "Type the share to sell." : share <= 0 ? "Sell a share above 0%." : amountProblem(price, controls.currency, "the price");
   return (
-    <ActionPage nav={nav} controls={controls} name="business-stake" title="Sell a stake" subtitle={b.name} go="Sell the stake" disabled={!ok} submit={() => (share === null || cents === null || !ok ? Promise.resolve(false) : controls.act(stakeSellAction(b.id, share, cents, buyer || undefined)))}>
+    <ActionPage nav={nav} controls={controls} name="business-stake" title="Sell a stake" subtitle={b.name} go="Sell the stake" problem={problem} submit={() => (share === null || cents === null || problem !== null ? Promise.resolve(false) : controls.act(stakeSellAction(b.id, share, cents, buyer || undefined)))}>
       <NumberField label="Share to sell (%)" value={share} min={0} max={100} onChange={setShare} />
       <AmountField label="Price" value={price} currency={controls.currency} onInput={setPrice} invalid={price.trim() !== "" && cents === null} />
       <SelectField label="Buyer" value={buyer} empty="Whoever buys" options={people(controls)} onChange={setBuyer} />
@@ -531,7 +533,7 @@ function InvoiceStatePage(props: SectionProps & { business: BusinessView; invoic
   const [state, setState] = useState<InvoiceState>(i.state);
   if (controls.mode !== "gm") return null;
   return (
-    <ActionPage nav={nav} controls={controls} name="invoice-state" title="State" subtitle={`${b.name} · invoice to ${i.customerName}`} go="Save" disabled={state === i.state} submit={() => controls.edit([{ op: "set", entity: i.id, field: "state", value: state }])}>
+    <ActionPage nav={nav} controls={controls} name="invoice-state" title="State" subtitle={`${b.name} · invoice to ${i.customerName}`} go="Save" problem={state === i.state ? unchangedProblem(i.state, "state") : null} submit={() => controls.edit([{ op: "set", entity: i.id, field: "state", value: state }])}>
       <InvoiceLine invoice={i} currency={controls.currency} />
       <ChoiceField label="State" value={state} options={INVOICE_STATES.map((s) => ({ value: s, label: humanize(s), detail: INVOICE_STATE_DETAIL[s] }))} onChange={(v) => setState(INVOICE_STATES.find((s) => s === v) ?? i.state)} />
     </ActionPage>

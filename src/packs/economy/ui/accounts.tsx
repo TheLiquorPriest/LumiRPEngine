@@ -16,9 +16,9 @@ import { formatMoney, type WorldCurrency } from "../../../shared/world";
 import { Badge, Button, Empty, IdText, List, ListRow, Meter, Section } from "../../../frontend/components";
 import { humanize } from "../../../frontend/format";
 import type { IconName } from "../../../frontend/icons";
-import { ActionPage, AmountField, AmountPage, ChoiceField, SelectField, type Choice } from "./forms";
+import { ActionPage, AmountField, AmountPage, amountProblem, ChoiceField, SelectField, unchangedProblem, type Choice } from "./forms";
 import type { GmControls, HubControls, PlayerControls, SectionProps } from "./hub";
-import { accountBlocks, accountControls, accountGroups, autopaySources, cardControls, cardLimitsShown, findAccount, flowSources, groupOf, paySources, possessive, transferTargets, utilisation, viewAccounts, type AccountGroup } from "./layout";
+import { accountBlocks, accountControls, accountGroups, autopaySources, cardControls, cardLimitsShown, findAccount, flowSources, gmAutopaySources, groupOf, paySources, possessive, transferTargets, utilisation, viewAccounts, type AccountGroup } from "./layout";
 import { FieldsPage, OwnerRows, TxnRows } from "./lines";
 import { actionPage, Controls, detailPage, Hero, MoneyPage, Note, type HubNav, type HubPages } from "./nav";
 import { PayTiersEditor, tierText } from "./pay-prefs";
@@ -351,9 +351,9 @@ function TransferPage(props: { view: FinanceView; account: AccountView; controls
   const [to, setTo] = useState(targets[0]?.id ?? "");
   const [text, setText] = useState("");
   const cents = amountOf(text, controls.currency);
-  const problem = to === "" ? "Pick where it goes." : text.trim() !== "" && cents === null ? "Type an amount above zero." : null;
+  const problem = to === "" ? "Pick where it goes." : amountProblem(text, controls.currency, "an amount");
   return (
-    <ActionPage nav={props.nav} controls={controls} name="transfer" title="Transfer" subtitle={`From ${a.name} · ${fmt(a.available ?? a.cents)} available`} go={cents !== null ? `Transfer ${fmt(cents)}` : "Transfer"} problem={problem} disabled={cents === null} submit={() => (cents === null ? Promise.resolve(false) : controls.act(transferAction(a.id, to, cents)))}>
+    <ActionPage nav={props.nav} controls={controls} name="transfer" title="Transfer" subtitle={`From ${a.name} · ${fmt(a.available ?? a.cents)} available`} go={cents !== null ? `Transfer ${fmt(cents)}` : "Transfer"} problem={problem} submit={() => (cents === null ? Promise.resolve(false) : controls.act(transferAction(a.id, to, cents)))}>
       <SelectField label="To" value={to} options={targets.map((x) => ({ value: x.id, label: x.name }))} onChange={setTo} />
       <AmountField label="Amount" value={text} currency={controls.currency} onInput={setText} invalid={text.trim() !== "" && cents === null} />
     </ActionPage>
@@ -382,16 +382,23 @@ function CashPage(props: { view: FinanceView; account: AccountView; controls: Pl
   );
 }
 
-/** Autopay's mode, the account it pays from and a fixed amount: an action for the player, the account's fields for the GM. */
+/**
+ * Autopay's mode, the account it pays from and a fixed amount: an action for the player, the
+ * account's fields for the GM, who gets the debtor's sources whichever party's page the account was
+ * opened from. A source in force that isn't offered stays shown under its name: the player is told
+ * it can't pay, and the GM may keep it.
+ */
 function AutopayPage(props: { view: FinanceView; account: AccountView; controls: HubControls; nav: HubNav }) {
   const { account: a, controls } = props;
   const was = a.autopay;
-  const sources = autopaySources(props.view, a);
+  const sources = (controls.mode === "gm" ? gmAutopaySources(controls.gm.money, a.id) : autopaySources(props.view, a)).map((x) => ({ value: x.id, label: x.name }));
   const [mode, setMode] = useState<AutopayMode>(was?.mode ?? "none");
-  const [from, setFrom] = useState<string>(was?.from ?? sources[0]?.id ?? "");
+  const [from, setFrom] = useState<string>(was?.from ?? sources[0]?.value ?? "");
   const [amount, setAmount] = useState(was?.cents !== null && was?.cents !== undefined ? String(was.cents / 10 ** controls.currency.decimals) : "");
   const cents = mode === "fixed" ? amountOf(amount, controls.currency) : null;
-  const problem = mode === "none" ? null : from === "" ? "Pick the account it pays from." : mode === "fixed" && cents === null ? "Type the amount it pays each month." : null;
+  const offered = from === "" || sources.some((s) => s.value === from);
+  const choices = offered ? sources : [...sources, { value: from, label: was?.from === from ? (was.fromName ?? "Its account now") : "Its account now" }];
+  const problem = mode === "none" ? null : from === "" ? "Pick the account it pays from." : !offered && controls.mode === "player" ? "That account can't pay it: pick one of these." : mode === "fixed" && cents === null ? "Type the amount it pays each month." : null;
   const submit = (): Promise<boolean> => {
     if (controls.mode === "player") return controls.act(autopayAction(a.id, mode, from || null, cents));
     const ops = autopayOps(a.id, was, mode, from || null, cents);
@@ -400,7 +407,7 @@ function AutopayPage(props: { view: FinanceView; account: AccountView; controls:
   return (
     <ActionPage nav={props.nav} controls={controls} name="autopay" title="Autopay" subtitle={a.name} go="Save autopay" problem={problem} submit={submit}>
       <ChoiceField label="Pays" value={mode} options={AUTOPAY_MODES.map((m) => ({ value: m, label: AUTOPAY_LABEL[m] }))} onChange={(v) => setMode(AUTOPAY_MODES.find((m) => m === v) ?? "none")} />
-      {mode !== "none" ? <SelectField label="From" value={from} empty="Choose an account" options={sources.map((x) => ({ value: x.id, label: x.name }))} onChange={setFrom} /> : null}
+      {mode !== "none" ? <SelectField label="From" value={from} empty="Choose an account" options={choices} onChange={setFrom} /> : null}
       {mode === "fixed" ? <AmountField label="Amount each month" value={amount} currency={controls.currency} onInput={setAmount} invalid={amount.trim() !== "" && cents === null} /> : null}
     </ActionPage>
   );
@@ -429,7 +436,7 @@ function StatusPage(props: { account: AccountView; controls: GmControls; nav: Hu
   const { account: a, controls } = props;
   const [status, setStatus] = useState<string>(a.status);
   return (
-    <ActionPage nav={props.nav} controls={controls} name="status" title="Status" subtitle={a.name} go="Set the status" disabled={status === a.status} submit={() => controls.edit(accountStatusOps(a.id, status))}>
+    <ActionPage nav={props.nav} controls={controls} name="status" title="Status" subtitle={a.name} go="Set the status" problem={status === a.status ? unchangedProblem(a.status, "status") : null} submit={() => controls.edit(accountStatusOps(a.id, status))}>
       <ChoiceField label="New status" value={status} options={ACCOUNT_STATUSES.map((s) => ({ value: s, label: humanize(s), detail: s === a.status ? "Now" : undefined }))} onChange={setStatus} />
     </ActionPage>
   );
@@ -528,7 +535,7 @@ function CardStatePage(props: { card: CardView; controls: GmControls; nav: HubNa
   const { card, controls } = props;
   const [state, setState] = useState<string>(card.state);
   return (
-    <ActionPage nav={props.nav} controls={controls} name="card-state" title="Card state" subtitle={card.name} go="Set the state" disabled={state === card.state} submit={() => controls.edit([{ op: "set", entity: card.id, field: "state", value: state }])}>
+    <ActionPage nav={props.nav} controls={controls} name="card-state" title="Card state" subtitle={card.name} go="Set the state" problem={state === card.state ? unchangedProblem(card.state, "state") : null} submit={() => controls.edit([{ op: "set", entity: card.id, field: "state", value: state }])}>
       <ChoiceField label="New state" value={state} options={CARD_STATES.map((s) => ({ value: s, label: humanize(s), detail: s === card.state ? "Now" : undefined }))} onChange={setState} />
     </ActionPage>
   );

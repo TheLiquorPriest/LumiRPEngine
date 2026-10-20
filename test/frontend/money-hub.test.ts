@@ -17,8 +17,9 @@ import { ALL_PACKS, STARTER_WORLDS } from "../../src/packs/index";
 import { startState } from "../packs/support";
 import { ListRow } from "../../src/frontend/components";
 import { decodeFinanceView } from "../../src/packs/economy/ui/decode";
-import { accountBlocks, accountControls, autopaySources, businessAccounts, businessControls, cardControls, creditBlocks, endableLeases, fallbackSources, findAccount, flowControls, flowSources, flowTargets, gmKindIs, gmParties, hireable, holdingControls, householdRows, hubTabs, invoiceControls, investmentBlocks, mortgageTermChoices, overviewBlocks, payeeProblem, propertyControls, transferTargets, workBlocks } from "../../src/packs/economy/ui/layout";
+import { accountBlocks, accountControls, autopaySources, businessAccounts, businessControls, cardControls, creditBlocks, endableLeases, fallbackSources, findAccount, flowControls, flowSources, flowTargets, gmAutopaySources, gmKindIs, gmParties, hireable, holdingControls, householdRows, hubTabs, invoiceControls, investmentBlocks, mortgageTermChoices, overviewBlocks, payeeProblem, propertyControls, transferTargets, workBlocks } from "../../src/packs/economy/ui/layout";
 import { OwnerRows } from "../../src/packs/economy/ui/lines";
+import { amountProblem, numberProblem, unchangedProblem } from "../../src/packs/economy/ui/forms";
 import { gmFixture } from "../../dev/preview/fixtures";
 import {
   actionRequest,
@@ -295,12 +296,14 @@ describe("what a party's roles allow", () => {
     expect(findAccount(outsider, "lift")).toBeNull();
   });
 
-  test("money a party only manages pays for its holder: its standing payments never go to them, their accounts or their name, nor fall back on it for them", () => {
+  test("money a party only manages pays for whom it's for: the hub leaves out and refuses what the view says it may not pay, and a payee typed as the party's own", () => {
     const till = account({ id: "till", class: "business_checking", role: null, manages: true, cents: 250000, fallbacks: ["reserve"] });
     const reserve = account({ id: "reserve", class: "savings", role: null, manages: true, cents: 900000 });
     const loan = account({ id: "lift", class: "loan", role: null, manages: true, cents: -3800000, autopay: { mode: "none", from: null, fromName: null, cents: null }, autopayFrom: ["till", "reserve"] });
     const mine = { ...checking, fallbacks: ["sav"] };
-    const v = view({ accounts: [cash, mine, savings], businesses: [{ ...shop("owner"), accounts: ["till", "reserve", "lift"], managed: [till, reserve, loan] }] });
+    // As the backend says: the shop's money, by an account or as itself, may not pay the party or what's theirs.
+    const theirs = ["pov", "wallet", "chk", "sav"];
+    const v = view({ accounts: [cash, mine, savings], businesses: [{ ...shop("owner"), accounts: ["till", "reserve", "lift"], managed: [till, reserve, loan] }], paysFor: [{ from: "till", to: theirs }, { from: "reserve", to: theirs }, { from: "shop", to: theirs }] });
     const palette: PaletteView = { entries: [{ action: "pay", label: "Pay", group: "pay", options: [{ label: "Mara", params: { to: "mara" } }] }], timelapse: null };
     const ids = (payers: string[]): string[] => flowTargets(v, palette, payers).map((t) => t.id);
     // From the business's checking: the business's other accounts and other people, none of the party's own.
@@ -309,12 +312,21 @@ describe("what a party's roles allow", () => {
     expect(ids(["chk"])).toEqual(["sav", "till", "reserve", "lift", "mara"]);
     // Falling back on the business's savings counts as paying from it.
     expect(ids(["chk", "reserve"])).toEqual(["till", "lift", "mara"]);
-    expect(payeeProblem(v, ["till"], "sav")).toContain("pays for its holder");
-    expect(payeeProblem(v, ["till"], " you ")).toContain("pays for its holder");
-    expect(payeeProblem(v, ["chk", "reserve"], "sav")).toContain("pays for its holder");
+    expect(payeeProblem(v, ["till"], "sav")).toContain("pays for whom it's for");
+    expect(payeeProblem(v, ["chk", "reserve"], "sav")).toContain("pays for whom it's for");
     expect(payeeProblem(v, ["till"], "lift")).toBeNull();
     expect(payeeProblem(v, ["till"], "Harbor Cleaners")).toBeNull();
     expect(payeeProblem(v, ["chk"], "sav")).toBeNull();
+    // The business paying as itself is money the party only manages, whatever their role on it; the party paying as themselves isn't.
+    expect(payeeProblem(v, ["shop"], "sav")).toContain("pays for whom it's for");
+    expect(payeeProblem(v, ["pov"], "sav")).toBeNull();
+    // A payer the view lists nothing against refuses only a payee typed as the party's own.
+    expect(payeeProblem(v, ["elsewhere"], "sav")).toBeNull();
+    // A typed payee is read by the backend's keys (`ownKeys`): the party's or their household's id or name, in any case or spacing.
+    const housed: FinanceView = { ...v, ownKeys: [...v.ownKeys, "home", "unit_2b"] };
+    for (const to of [` ${v.party.toUpperCase()} `, " you ", "unit-2b", "HOME"]) expect(payeeProblem(housed, ["till"], to)).toContain("pays for whom it's for");
+    expect(payeeProblem(housed, ["till"], "Unit 2C")).toBeNull();
+    expect(payeeProblem(housed, ["chk"], "HOME")).toBeNull();
     // What backs a payment is its payer's own, as the view says; the business's never backs one to the party.
     expect(fallbackSources(v, "till", "lift").map((a) => a.id)).toEqual(["reserve"]);
     expect(fallbackSources(v, "till", "sav")).toEqual([]);
@@ -564,5 +576,51 @@ describe("the GM view's kinds", () => {
     const money = w.ctx.query("economy.people_money")(w.ctx) as FinanceView[];
     expect(money.length).toBeGreaterThan(3);
     for (const v of money) expect([v.party, kinds.get(v.party)]).toEqual([v.party, v.partyKind]);
+  });
+});
+
+describe("the GM's autopay page", () => {
+  test("opened from the page of someone who only holds a card, it offers the card's debtor's accounts, its source in force among them", () => {
+    // Port Alder, with Danny an authorized user on the POV's credit card.
+    const world = (STARTER_WORLDS.modern_slice_of_life as (id: string, name: string) => WorldDoc)("pa", "Port Alder");
+    const visa = world.entities.acct_pov_card;
+    if (!visa || !Array.isArray(visa.fields.owners)) throw new Error("Port Alder has no POV card");
+    visa.fields.owners = [...visa.fields.owners, { party: "danny_okafor", role: "authorized_user" }];
+    const w = new Working(reg, world, startState(world));
+    materializeAll(reg, w, world.pov, "run");
+    const money = w.ctx.query("economy.people_money")(w.ctx) as FinanceView[];
+    const danny = money.find((v) => v.party === "danny_okafor");
+    const card = danny ? findAccount(danny, "acct_pov_card") : null;
+    if (!danny || !card) throw new Error("Danny's page doesn't show the card");
+    // Danny manages nothing on it, so his own view lists no source for its autopay, though one is in force.
+    expect(card).toMatchObject({ role: "authorized_user", manages: false, autopay: { from: "acct_pov_checking" } });
+    expect(autopaySources(danny, card)).toEqual([]);
+    // The GM gets the debtor's: the POV's checking and savings, never wallet cash, as from the POV's own page.
+    expect(gmAutopaySources(money, "acct_pov_card").map((a) => a.id)).toEqual(["acct_pov_checking", "acct_pov_savings"]);
+    const pov = money.find((v) => v.party === "pov");
+    const own = pov ? findAccount(pov, "acct_pov_card") : null;
+    expect(pov && own ? autopaySources(pov, own).map((a) => a.id) : null).toEqual(["acct_pov_checking", "acct_pov_savings"]);
+  });
+});
+
+describe("why an action page's button is held", () => {
+  test("a number field's reason names the field, without its aside, and the numbers it takes, so it reads plain on the page while the field is folded away", () => {
+    // The new flow's "Every Nth time", in More options, with 0 typed.
+    expect(numberProblem("Every Nth time (2 with weekly is every other week)", 1)).toBe("“Every Nth time” takes a number of 1 or more.");
+    expect(numberProblem("Due on day (1–28)", 1, 28)).toBe("“Due on day” takes a number from 1 to 28.");
+    expect(numberProblem("Due in (days; empty: the business's terms)", 0)).toBe("“Due in” takes a number of 0 or more.");
+    expect(numberProblem("Discount", undefined, 50)).toBe("“Discount” takes a number of 50 or less.");
+    expect(numberProblem("Hours a week")).toBe("“Hours a week” takes a number.");
+  });
+
+  test("an amount's reason: one to type where it's needed, else one above zero; a GM's state page names the state in force", () => {
+    expect(amountProblem("", USD, "the rent a month")).toBe("Type the rent a month.");
+    expect(amountProblem("  ", USD, "a rate", false)).toBeNull();
+    expect(amountProblem("0", USD, "the price")).toBe("Type an amount above zero.");
+    expect(amountProblem("-12", USD, "the price")).toBe("Type an amount above zero.");
+    expect(amountProblem("lots", USD, "a down payment", false)).toBe("Type an amount above zero.");
+    expect(amountProblem("12.50", USD, "the price")).toBeNull();
+    expect(unchangedProblem("charged_off", "status")).toBe("It's charged off now: pick another status.");
+    expect(unchangedProblem("open", "state")).toBe("It's open now: pick another state.");
   });
 });

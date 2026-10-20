@@ -209,7 +209,7 @@ function AddMemberPage(props: SectionProps) {
   if (controls.mode !== "gm" || !h) return null;
   const candidates = gmParties(controls.gm, ["person"]).filter((p) => !h.members.some((m) => m.id === p.id));
   return (
-    <ActionPage nav={nav} controls={controls} name="household-add" title="Add a member" subtitle={h.name} go="Add" disabled={adding === ""} submit={() => controls.edit([{ op: "link", rel: "member_of", from: adding, to: h.id }])}>
+    <ActionPage nav={nav} controls={controls} name="household-add" title="Add a member" subtitle={h.name} go="Add" problem={candidates.length === 0 ? "No one else in the world can join it." : adding === "" ? "Choose who joins." : null} submit={() => controls.edit([{ op: "link", rel: "member_of", from: adding, to: h.id }])}>
       <SelectField label="Who" value={adding} empty="Choose someone" options={candidates.map((p) => ({ value: p.id, label: p.name }))} onChange={setAdding} />
     </ActionPage>
   );
@@ -222,8 +222,8 @@ function JoinHouseholdPage(props: SectionProps) {
   if (controls.mode !== "gm" || view.household !== null || view.partyKind !== "person" || !view.features.includes("households")) return null;
   const households = gmParties(controls.gm, ["household"]).map((p) => ({ value: p.id, label: p.name }));
   return (
-    <ActionPage nav={nav} controls={controls} name="household-join" title="Add to a household" subtitle={view.name} go="Add" disabled={joining === ""} submit={() => controls.edit([{ op: "link", rel: "member_of", from: view.party, to: joining }])}>
-      {households.length > 0 ? <SelectField label="Household" value={joining} empty="Choose a household" options={households} onChange={setJoining} /> : <Note>The world has no household yet.</Note>}
+    <ActionPage nav={nav} controls={controls} name="household-join" title="Add to a household" subtitle={view.name} go="Add" problem={households.length === 0 ? "The world has no household yet." : joining === "" ? "Choose a household." : null} submit={() => controls.edit([{ op: "link", rel: "member_of", from: view.party, to: joining }])}>
+      {households.length > 0 ? <SelectField label="Household" value={joining} empty="Choose a household" options={households} onChange={setJoining} /> : null}
     </ActionPage>
   );
 }
@@ -237,7 +237,7 @@ function RemoveMemberPage(props: SectionProps) {
   if (controls.mode !== "gm" || !h || members.length === 0) return null;
   const who = members.find((m) => m.id === leaving);
   return (
-    <ActionPage nav={nav} controls={controls} name="household-remove" title="Remove a member" subtitle={h.name} go="Remove" danger disabled={!who} submit={() => controls.edit([{ op: "unlink", rel: "member_of", from: leaving, to: h.id }])}>
+    <ActionPage nav={nav} controls={controls} name="household-remove" title="Remove a member" subtitle={h.name} go="Remove" danger problem={who ? null : "Choose who leaves."} submit={() => controls.edit([{ op: "unlink", rel: "member_of", from: leaving, to: h.id }])}>
       <ChoiceField label="Who" value={leaving} options={members.map((m) => ({ value: m.id, label: m.name, detail: m.role ? humanize(m.role) : undefined }))} onChange={setLeaving} />
       {who ? <Note>{`${who.name} no longer shares ${possessive(h.name, true)} costs.`}</Note> : null}
     </ActionPage>
