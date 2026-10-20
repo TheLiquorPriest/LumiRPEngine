@@ -2,8 +2,9 @@
 // the lookup table and the indexing jobs a tap away, and + New, which names a new entry; and the
 // entry page: its title and text, how lookups find it (aliases, topics and keywords as chips, then
 // links, group and priority), the source (read-only; an entry indexed from a World Info book whose
-// entry changed since can take the book's new text), and secrecy: who may read it, the gate, and
-// the helpers that may read the secret, with a note on those whose output reaches the player.
+// entry changed since can take the book's new text), and secrecy: who may read it, the gate, whose
+// own secret it is, and the helpers that may read the secret, with a note on those whose output
+// reaches the player.
 // Styles: the lore block of styles/forms.ts.
 
 import { useEffect, useId, useMemo, useState } from "preact/hooks";

@@ -17,7 +17,7 @@ import { FIDELITY_LABEL } from "../../packs/minds/ui/ops";
 
 const PROMPT_NOTE: Record<MindPurpose, string> = {
   mind: "One call per character, as that character: what they think, how they come across, what they mean to do.",
-  memory: "After the reply, per character at the levels you pick: the notes, commitments and plans they take from it.",
+  memory: "After the reply, per character who heard your message, at the levels you pick: the notes, commitments and plans they take from it.",
   skip: "Before a time skip: further moments in it worth stopping at.",
   consolidate: "Folds a character's faded and surplus notes into their summary.",
 };
