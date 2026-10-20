@@ -18,9 +18,8 @@ import { placeOfEntity } from "../../../src/engine/scope";
 import { runTimelapse } from "../../../src/engine/time";
 import { Working } from "../../../src/engine/working";
 import { withdraw } from "../../../src/packs/economy/core/actions";
-import { accountsOf, canSpend, rightsOf } from "../../../src/packs/economy/core/model";
 import type { FinanceHooks } from "../../../src/packs/economy/core/module";
-import { charge } from "../../../src/packs/economy/core/pay";
+import { charge, isRejection } from "../../../src/packs/economy/core/pay";
 import { ALL_PACKS, STARTER_WORLDS } from "../../../src/packs/index";
 import { modernUsWorld } from "../riverton";
 import { startState, trialBalance } from "../support";
@@ -117,15 +116,25 @@ describe("money foundation: flows, owners and payment", () => {
   });
 
   test("a joint account is spendable by both owners; a custodial account counts toward its beneficiary", () => {
-    const w = setup((world) => {
+    const joint = (world: WorldDoc): void => {
       world.entities.joint = entity("joint", "account", { owners: [{ party: "you", role: "joint" }, { party: "maya", role: "joint" }], product: "checking", opening: 120000 });
+    };
+    const w = setup((world) => {
+      joint(world);
       world.entities.custodial = entity("custodial", "account", { owners: [{ party: "you", role: "custodian" }, { party: "jordan", role: "beneficiary" }], product: "savings", opening: 50000 });
     });
-    expect(canSpend(w.state, "joint", "you")).toBe(true);
-    expect(canSpend(w.state, "joint", "maya")).toBe(true);
-    expect(accountsOf(w.ctx, "maya", "spend")).toContain("joint");
-    expect(rightsOf(w.state, "custodial", "jordan")?.worth).toBe(true);
-    expect(rightsOf(w.state, "custodial", "you")?.worth).toBe(false);
+    // The custodial savings are Jordan's worth, not their custodian's.
+    const worth = (x: Working, who: string): number | null => x.ctx.query("economy.net_worth")(x.ctx, who);
+    expect(worth(w, "jordan")).toBe(50000);
+    expect(worth(w, "you")).toBe(worth(setup(joint), "you"));
+    // Either owner's payment comes out of the joint account.
+    for (const who of ["you", "maya"]) {
+      const before = w.state.accounts.joint ?? 0;
+      const paid = charge(NO_MODULES, w.ctx, who, 1000, "Groceries", { source: "joint", counterparty: "market" });
+      if (isRejection(paid)) throw new Error(paid.reason);
+      expect(w.applyAll(paid).length).toBe(paid.length);
+      expect(w.state.accounts.joint).toBe(before - 1000);
+    }
   });
 
   test("payment preferences pick the instrument: cash for small amounts, the credit card above them", () => {
@@ -134,10 +143,16 @@ describe("money foundation: flows, owners and payment", () => {
     });
     // Cash takes a till: an in-person sale where the payer is.
     const sale = { place: placeOfEntity(w.state, "you"), item: "coffee" };
-    const small = charge(NO_MODULES, w.ctx, "you", 1500, "Bought a coffee", { method: "auto", kind: "purchase", sale });
-    expect(JSON.stringify(small)).toContain('{"account":"cash","amount":-1500}');
-    const large = charge(NO_MODULES, w.ctx, "you", 5000, "Bought a lamp", { method: "auto", kind: "purchase", sale });
-    expect(JSON.stringify(large)).toContain('{"account":"card","amount":-5000}');
+    const buy = (cents: number, memo: string): void => {
+      const paid = charge(NO_MODULES, w.ctx, "you", cents, memo, { method: "auto", kind: "purchase", sale });
+      if (isRejection(paid)) throw new Error(paid.reason);
+      expect(w.applyAll(paid).length).toBe(paid.length);
+    };
+    const [cash, card] = [w.state.accounts.cash ?? 0, w.state.accounts.card ?? 0];
+    buy(1500, "Bought a coffee");
+    expect([w.state.accounts.cash, w.state.accounts.card]).toEqual([cash - 1500, card]);
+    buy(5000, "Bought a lamp");
+    expect([w.state.accounts.cash, w.state.accounts.card]).toEqual([cash - 1500, card - 5000]);
   });
 
   test("at the top level cash comes from a machine, with its limit and fees; below it, money moves freely", () => {

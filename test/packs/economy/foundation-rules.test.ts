@@ -3,13 +3,15 @@
 // pins one rule against the books a timelapse leaves.
 
 import { describe, expect, test } from "bun:test";
+import type { Flow } from "../../../src/shared/finance";
 import type { JsonObject } from "../../../src/shared/json";
+import type { LedgerEvent } from "../../../src/shared/ledger";
 import { formatMoney, type EntityDef, type WorldDoc } from "../../../src/shared/world";
 import { lintWorld } from "../../../src/engine/authoring";
 import { calendarOf, dateAt } from "../../../src/engine/calendar";
 import { applyEffects } from "../../../src/engine/effects";
 import { applyValidUnits } from "../../../src/engine/events";
-import { materializeAll } from "../../../src/engine/materialize";
+import { materializeAll, tablesRevision } from "../../../src/engine/materialize";
 import { migrateMoney } from "../../../src/engine/money-migrate";
 import { optionalService } from "../../../src/engine/pack-kit";
 import { playerLines } from "../../../src/engine/player-events";
@@ -19,12 +21,16 @@ import { createRng } from "../../../src/engine/rng";
 import { runTimelapse } from "../../../src/engine/time";
 import { Working } from "../../../src/engine/working";
 import { closeAccount, setStatus, withdraw } from "../../../src/packs/economy/core/actions";
-import { flowOfEntity } from "../../../src/packs/economy/core/flows";
-import { statusOf } from "../../../src/packs/economy/core/model";
+import { quoteOf } from "../../../src/packs/economy/core/assets";
+import { flowOfEntity, runOccurrence } from "../../../src/packs/economy/core/flows";
+import { cycleOf, flowRunOf, journalOf, reject } from "../../../src/packs/economy/core/journal";
+import { priceOf, statusOf } from "../../../src/packs/economy/core/model";
+import type { FinanceHooks } from "../../../src/packs/economy/core/module";
 import { move } from "../../../src/packs/economy/core/pay";
+import { Run } from "../../../src/packs/economy/core/run";
 import { ALL_PACKS } from "../../../src/packs/index";
 import { modernUsWorld } from "../riverton";
-import { startState, trialBalance } from "../support";
+import { fold, startState, trialBalance } from "../support";
 
 const reg: Registry = createRegistry(ALL_PACKS);
 const DAY = 1440;
@@ -727,5 +733,133 @@ describe("a character's money summary is their own money alone", () => {
     // Maya's own checking alone: the primary's $2,140 isn't hers.
     expect(summary.lines[0]).toEndWith(`and ${formatMoney(500_000, w.world.currency)} in the bank.`);
     expect(summary.lines.some((l) => l.startsWith("gym"))).toBe(false);
+  });
+});
+
+describe("a card left unpaid goes through every stage of delinquency", () => {
+  const unpaid = (world: WorldDoc): void => {
+    const card = world.entities.card!.fields;
+    card.autopay = "none";
+    delete card.autopay_from;
+  };
+  const stagesOf = (w: Working): JsonObject[] => cardData(w.events, "economy.delinquency");
+  /** The card's events of one type among `events`, in order. */
+  const cardData = (events: readonly LedgerEvent[], type: string): JsonObject[] => events.flatMap((e) => (e.type === type && "data" in e && e.data.account === "card" ? [e.data] : []));
+  /** Where among `events` the card's first delinquency that `pick` matches is. */
+  const firstAt = (events: readonly LedgerEvent[], pick: (d: JsonObject) => boolean): number => events.findIndex((e) => e.type === "economy.delinquency" && "data" in e && e.data.account === "card" && pick(e.data));
+  /** Months of time, two at a time, as a timelapse's unit cap stops one run short of them. */
+  const lapseMonths = (w: Working, days: number): void => {
+    for (let left = days; left > 0; left -= 60) lapse(w, Math.min(60, left));
+  };
+
+  test("late, 30, 60 with the penalty rate, 90 frozen, 120 to collections, then charged off, each reported", () => {
+    const w = setup(unpaid);
+    lapseMonths(w, 240);
+    expect(stagesOf(w).map((d) => d.stage)).toEqual(["late", "30", "60", "90", "120", "collections", "charged_off"]);
+    // The penalty rate comes at 60 days and stays; every statement after it charges it.
+    expect(stagesOf(w).map((d) => d.penalty)).toEqual([false, false, true, true, true, true, true]);
+    const later = cardData(w.events.slice(firstAt(w.events, (d) => d.stage === "60")), "economy.statement").map((s) => s.apr);
+    expect(later.length).toBeGreaterThan(0);
+    expect(new Set(later)).toEqual(new Set([29.99]));
+    expect(dataOf(w, "economy.status").filter((d) => d.account === "card").map((d) => d.status)).toEqual(["frozen", "collections", "charged_off"]);
+    expect(statusOf(w.state, "card")).toBe("charged_off");
+    expect(dataOf(w, "economy.credit").filter((d) => d.account === "card").map((d) => (d.days !== undefined ? `${String(d.kind)} ${String(d.days)}` : d.kind))).toEqual(["late 30", "late 60", "late 90", "collections", "charged_off"]);
+    expect(trialBalance(w.state)).toBe(0);
+  });
+
+  test("six payments on time lift the penalty rate, and the statements after go back to the card's own", () => {
+    // Enough in checking that the year's bills never leave the card's minimum unpaid.
+    const w = setup((world) => {
+      unpaid(world);
+      world.entities.checking!.fields.opening = 2_000_000;
+    });
+    lapseMonths(w, 110);
+    expect(stagesOf(w).at(-1)).toMatchObject({ stage: "60", penalty: true });
+    // From here the card's minimum is paid from checking every month.
+    expect(w.applyAll([{ type: "set", entity: "card", field: "autopay", value: "minimum" }, { type: "set", entity: "card", field: "autopay_from", value: "checking" }])).toHaveLength(2);
+    const from = w.events.length;
+    lapseMonths(w, 210);
+    const after = cardData(w.events.slice(from), "economy.delinquency");
+    expect(after.map((d) => d.stage)).toEqual(after.map(() => "current"));
+    const lifted = after.findIndex((d) => d.penalty === false);
+    expect(after.slice(0, lifted).map((d) => d.penalty)).toEqual([true, true, true, true, true]);
+    expect(after[lifted]).toMatchObject({ streak: 6, lates: 0 });
+    const aprs = cardData(w.events.slice(from + firstAt(w.events.slice(from), (d) => d.penalty === false)), "economy.statement").map((s) => s.apr);
+    expect(aprs.length).toBeGreaterThan(0);
+    expect(new Set(aprs)).toEqual(new Set([22]));
+  });
+});
+
+describe("a deposit account earns its own APY", () => {
+  test("a savings account's interest follows the rate it carries and its balance; none at no rate", () => {
+    const interest = (apy: number, opening = 650_000): number[] => {
+      const w = setup((world) => Object.assign(world.entities.savings!.fields, { apy_pct: apy, opening }));
+      lapse(w, 70);
+      return journalOf(w.state, "savings").filter((j) => j.category === "interest").map((j) => j.cents);
+    };
+    const [one, four, half] = [interest(1), interest(4), interest(4, 325_000)];
+    expect(one.length).toBeGreaterThanOrEqual(2);
+    expect(one.every((c) => c > 0)).toBe(true);
+    // The first month's interest is the balance's share of the rate: four times the rate earns four times as much, half the balance half. Later months compound.
+    expect(Math.abs((four[0] ?? 0) - 4 * (one[0] ?? 0))).toBeLessThanOrEqual(2);
+    expect(Math.abs(2 * (half[0] ?? 0) - (four[0] ?? 0))).toBeLessThanOrEqual(1);
+    expect(four[1]).toBeGreaterThan(Math.round(((four[0] ?? 0) * 28) / 31));
+    expect(interest(0)).toEqual([]);
+  });
+});
+
+describe("a chat an older build recorded still folds", () => {
+  test("its openings, purchases, statement, payment, decline, anchor, note, price modifier and market price apply to the money as it is now", () => {
+    const world = modernUsWorld("w", "Riverton");
+    world.packs.economy = { version: world.packs.economy?.version ?? 1, config: { assets: { harbor_fund: { label: "Harbor Index Fund", class: "fund", symbol: "HRBR", price: 4200 } } } };
+    const start = startState(world);
+    const due = start.clock + 25 * DAY;
+    // The events as the build before the money foundation wrote them: no `economy.open`, no kinds or categories on a journal line.
+    const older: LedgerEvent[] = [
+      { type: "materialize", entity: "you", domain: "money", generatorVersion: 1, tablesRevision: tablesRevision(world), events: [{ type: "post", lines: [{ account: "cash", amount: 8400 }, { account: "checking", amount: 214_000 }, { account: "savings", amount: 650_000 }, { account: "card", amount: -38_000 }, { account: "economy.external:you", amount: -834_400 }], memo: "Opening balances" }] },
+      { type: "post", lines: [{ account: "card", amount: -5000 }, { account: "economy.external:market", amount: 5000 }], memo: "Bought a lamp" },
+      { type: "economy.txn", data: { memo: "Bought a lamp", lines: [{ account: "card", amount: -5000 }] } },
+      { type: "economy.statement", data: { account: "card", closing: 43_000, interest: 0, minimum: 3500, due } },
+      { type: "post", lines: [{ account: "checking", amount: -10_000 }, { account: "card", amount: 10_000 }], memo: "Visa card payment" },
+      { type: "economy.card_paid", data: { account: "card", cents: 10_000 } },
+      { type: "economy.txn", data: { memo: "Visa card payment", lines: [{ account: "checking", amount: -10_000 }, { account: "card", amount: 10_000 }] } },
+      { type: "economy.decline", data: { payer: "you", cents: 9_999_900, memo: "A boat", reason: "Alex Rivera doesn't have $99,999.00 available" } },
+      { type: "economy.anchor", data: { entity: "maya", band: "poor", typical: 150_000, base: 150_000 } },
+      { type: "economy.note", data: { entity: "maya", class: "bill", text: "Rent: $900.00 paid." } },
+      { type: "economy.modifier", data: { id: "storm", scope: "groceries_staples", place: "", mult: 1.25 } },
+      { type: "economy.price", data: { symbol: "harbor_fund", price: 45.5 } },
+    ];
+    const state = fold(reg, world, start, older);
+    const ctx = reg.context(world, state);
+    expect([state.accounts.cash, state.accounts.checking, state.accounts.savings, state.accounts.card]).toEqual([8400, 204_000, 650_000, -33_000]);
+    expect(trialBalance(state)).toBe(0);
+    expect(journalOf(state, "card").map((j) => [j.memo, j.cents])).toEqual([["Bought a lamp", -5000], ["Visa card payment", 10_000]]);
+    expect(cycleOf(state, "card")).toMatchObject({ closing: 43_000, minimum: 3500, due, paid: 10_000 });
+    // The money view reads it all, the old prices count, and the decline moved nothing.
+    expect(ctx.query("economy.finance")(ctx, "you", true).accounts.map((a) => [a.id, a.cents])).toEqual(expect.arrayContaining([["checking", 204_000], ["card", -33_000]]));
+    const groceries = (s: typeof state): number | undefined => priceOf(reg.context(world, s), { category: "groceries_staples", place: null })?.cents;
+    expect(groceries(state)).toBe(Math.round((groceries(start) ?? 0) * 1.25));
+    expect(quoteOf(ctx, "harbor_fund")).toBe(4550);
+    // The money engine picks up from there: the openings don't post again, and the books still balance.
+    const w = new Working(reg, world, state);
+    lapse(w, 40);
+    expect(w.events.some((e) => e.type === "post" && e.memo === "Opening balances")).toBe(false);
+    expect(trialBalance(w.state)).toBe(0);
+  });
+});
+
+describe("a module that can't work out an occurrence's amount", () => {
+  test("its flow moves nothing, records the occurrence as declined and missed, and says why", () => {
+    const w = setup();
+    const broken: FinanceHooks = { fields: {}, flows: [], amounts: { "test.broken": () => reject("no_rate", "the rate isn't set") }, worth: [], sales: [], views: [], summaries: [] };
+    const at = w.state.clock + 60;
+    const flow: Flow = { id: "broken_pay", label: "Broken pay", kind: "income", from: "Employer", to: "checking", amount: { provider: "test.broken" }, schedule: { once: at }, shortfall: "skip", status: "active", source: "test" };
+    const run = new Run(w.ctx);
+    expect(runOccurrence(broken, run, flow, at, createRng("broken"), false)).toEqual({ outcome: "declined", reason: "the rate isn't set" });
+    const checking = w.state.accounts.checking;
+    expect(w.applyAll(run.out)).toHaveLength(run.out.length);
+    expect(w.state.accounts.checking).toBe(checking);
+    expect(flowRunOf(w.state, "broken_pay")).toMatchObject({ done: 0, missed: 1 });
+    expect(run.out.filter((e) => e.type === "post")).toEqual([]);
   });
 });
