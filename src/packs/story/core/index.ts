@@ -1,6 +1,6 @@
 // Story pack (DESIGN §7, §9.3): flags, the quest log over the engine's tracks (quests, secret ladders,
 // puzzles), puzzle answers through `checkAnswer` with the author's opt-in decision threshold, and
-// the leaky-label and leaky-id lints. Track stepping, gates, reveals and hints are the engine's
+// the leaky-label, leaky-id and answer-track lints. Track stepping, gates, reveals and hints are the engine's
 // (tracks.ts); this pack is how they reach effects, formulas, the narrator and the panel. Story has
 // no realism domain: tracks behave the same at every level.
 
@@ -12,6 +12,7 @@ import { wordsOf } from "../../../engine/lore";
 import { labelOf, mutableSlice, objOf, sliceOf, strOf, own } from "../../../engine/pack-kit";
 import type { PackDef, ReadContext, Rejection } from "../../../engine/registry";
 import type { Registry } from "../../../engine/registry-impl";
+import { effectLists } from "../../../engine/ruleset-lint";
 import { kindIs } from "../../../engine/scope";
 import { checkAnswer } from "../../../engine/tracks";
 import { canSeeEntity, canSeePlace, playerTrack, shownTrackId, type PlayerTrack } from "../../../engine/visibility";
@@ -356,6 +357,19 @@ export const storyPack: PackDef = {
           message: `The id "${l.id}" gives away a secret (${l.secrets.map((s) => `"${s}"`).join(", ")}): a player's views carry it wherever the player acts on what it names. Give it an id that names no one, such as "${l.neutral}".`,
           path: l.path,
         })),
+    });
+    // `track` names the puzzle by its own id, which only the world's own content knows: a formula there
+    // answers whatever it gives, a puzzle the player can't see too, so one fed the player's words could reach it.
+    r.lint({
+      code: "story.answer_track",
+      check: (world) =>
+        effectLists(world).flatMap(({ path, effects }) =>
+          effects.flatMap((spec, i) => {
+            const track = spec.type === "story.answer" ? spec.args.track : undefined;
+            if (typeof track !== "string" || !track.startsWith("=")) return [];
+            return [{ severity: "warning" as const, code: "story.answer_track", message: `This answer's track is a formula (${track}), but track takes a puzzle's own id as written, such as "p_safe": the puzzle the formula gives is answered even when the player can't see it. To let the player say which puzzle, pass their words as puzzle instead.`, path: `${path}.${i}.args.track` }];
+          }),
+        ),
     });
   },
 };

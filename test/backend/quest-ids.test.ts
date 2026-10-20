@@ -379,6 +379,22 @@ describe("a puzzle the world's own content answers", () => {
     for (const name of NAMES) expect(playerTraffic(rig, from)).not.toContain(name);
     expect(rig.rt.ledger.errors).toEqual([]);
   });
+
+  test("Build warns of an action whose story.answer takes its track from a formula, and not of one that names the puzzle", async () => {
+    const rig = new Rig({ shipped: true });
+    const worldId = await rig.newWorld("Port Alder", "modern_slice_of_life");
+    /** Puts an action in the draft; Build's warnings about the track its story.answer is given, as "severity path". */
+    const put = async (value: JsonObject): Promise<string[]> => {
+      const { lint } = rig.body(await rig.send({ type: "lre.editor", op: "put", worldId, base: null, collection: "actions", id: String(value.id), value }));
+      return (Array.isArray(lint) ? lint : []).flatMap((i) => (isRecord(i) && i.code === "story.answer_track" ? [`${String(i.severity)} ${String(i.path)}`] : []));
+    };
+    // The player's words passed as a puzzle's own id: one a hidden puzzle has would reach it.
+    const TRY: JsonObject = { id: "try_combination", label: "Try a combination", params: { lock: { type: "text" }, code: { type: "text" } }, requires: [], outcomes: { default: [{ type: "story.answer", args: { track: "=params.lock", answer: "=params.code" } }] }, duration: "1", lexicon: ["try the combination on"] };
+    expect(await put(KEY_IN)).toEqual([]);
+    expect(await put(TRY)).toEqual(["warning actions.try_combination.outcomes.default.0.args.track"]);
+    // Their words passed as the puzzle they name instead: nothing to warn of.
+    expect(await put({ ...TRY, outcomes: { default: [{ type: "story.answer", args: { puzzle: "=params.lock", answer: "=params.code" } }] } })).toEqual([]);
+  });
 });
 
 describe("the narrator's sections", () => {

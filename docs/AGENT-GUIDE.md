@@ -313,6 +313,7 @@ A track is a small state machine: `start` names its first stage, and each stage'
 
 - **Quests** start at the stage the story has reached, not at the beginning: `start` is today's stage.
 - **Secrets** keep a `truth` (what is really so, kept from the player) on the stage that reveals it, and a `cue` (what the player can notice) on the stages before. A cue never states the truth.
+- **Puzzles** an action of yours answers take `story.answer`'s `track`: the puzzle's own id, written out, never a formula.
 
 ### A revealed secret starts one stage earlier
 
