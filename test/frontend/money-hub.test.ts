@@ -296,12 +296,14 @@ describe("what a party's roles allow", () => {
     expect(findAccount(outsider, "lift")).toBeNull();
   });
 
-  test("money a party only manages pays for its holder: its standing payments never go to them, their accounts or their name, nor fall back on it for them", () => {
+  test("money a party only manages pays for whom it's for: the hub leaves out and refuses what the view says it may not pay, and a payee typed as the party's own", () => {
     const till = account({ id: "till", class: "business_checking", role: null, manages: true, cents: 250000, fallbacks: ["reserve"] });
     const reserve = account({ id: "reserve", class: "savings", role: null, manages: true, cents: 900000 });
     const loan = account({ id: "lift", class: "loan", role: null, manages: true, cents: -3800000, autopay: { mode: "none", from: null, fromName: null, cents: null }, autopayFrom: ["till", "reserve"] });
     const mine = { ...checking, fallbacks: ["sav"] };
-    const v = view({ accounts: [cash, mine, savings], businesses: [{ ...shop("owner"), accounts: ["till", "reserve", "lift"], managed: [till, reserve, loan] }] });
+    // As the backend says: the shop's money, by an account or as itself, may not pay the party or what's theirs.
+    const theirs = ["pov", "wallet", "chk", "sav"];
+    const v = view({ accounts: [cash, mine, savings], businesses: [{ ...shop("owner"), accounts: ["till", "reserve", "lift"], managed: [till, reserve, loan] }], paysFor: [{ from: "till", to: theirs }, { from: "reserve", to: theirs }, { from: "shop", to: theirs }] });
     const palette: PaletteView = { entries: [{ action: "pay", label: "Pay", group: "pay", options: [{ label: "Mara", params: { to: "mara" } }] }], timelapse: null };
     const ids = (payers: string[]): string[] => flowTargets(v, palette, payers).map((t) => t.id);
     // From the business's checking: the business's other accounts and other people, none of the party's own.
@@ -310,16 +312,21 @@ describe("what a party's roles allow", () => {
     expect(ids(["chk"])).toEqual(["sav", "till", "reserve", "lift", "mara"]);
     // Falling back on the business's savings counts as paying from it.
     expect(ids(["chk", "reserve"])).toEqual(["till", "lift", "mara"]);
-    expect(payeeProblem(v, ["till"], "sav")).toContain("pays for its holder");
-    expect(payeeProblem(v, ["till"], " you ")).toContain("pays for its holder");
-    expect(payeeProblem(v, ["chk", "reserve"], "sav")).toContain("pays for its holder");
+    expect(payeeProblem(v, ["till"], "sav")).toContain("pays for whom it's for");
+    expect(payeeProblem(v, ["chk", "reserve"], "sav")).toContain("pays for whom it's for");
     expect(payeeProblem(v, ["till"], "lift")).toBeNull();
     expect(payeeProblem(v, ["till"], "Harbor Cleaners")).toBeNull();
     expect(payeeProblem(v, ["chk"], "sav")).toBeNull();
-    // A typed payee is read by the backend's key: the party's or their household's id or name, in any case or spacing.
-    const housed: FinanceView = { ...v, household: { id: "home", name: "Unit 2B", accounts: [], flows: [], members: [], monthly: { total: 0, parts: [] } } };
-    for (const to of [` ${v.party.toUpperCase()} `, "unit-2b", "HOME"]) expect(payeeProblem(housed, ["till"], to)).toContain("pays for its holder");
+    // The business paying as itself is money the party only manages, whatever their role on it; the party paying as themselves isn't.
+    expect(payeeProblem(v, ["shop"], "sav")).toContain("pays for whom it's for");
+    expect(payeeProblem(v, ["pov"], "sav")).toBeNull();
+    // A payer the view lists nothing against refuses only a payee typed as the party's own.
+    expect(payeeProblem(v, ["elsewhere"], "sav")).toBeNull();
+    // A typed payee is read by the backend's keys (`ownKeys`): the party's or their household's id or name, in any case or spacing.
+    const housed: FinanceView = { ...v, ownKeys: [...v.ownKeys, "home", "unit_2b"] };
+    for (const to of [` ${v.party.toUpperCase()} `, " you ", "unit-2b", "HOME"]) expect(payeeProblem(housed, ["till"], to)).toContain("pays for whom it's for");
     expect(payeeProblem(housed, ["till"], "Unit 2C")).toBeNull();
+    expect(payeeProblem(housed, ["chk"], "HOME")).toBeNull();
     // What backs a payment is its payer's own, as the view says; the business's never backs one to the party.
     expect(fallbackSources(v, "till", "lift").map((a) => a.id)).toEqual(["reserve"]);
     expect(fallbackSources(v, "till", "sav")).toEqual([]);
