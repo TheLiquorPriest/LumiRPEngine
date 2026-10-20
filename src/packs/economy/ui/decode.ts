@@ -390,6 +390,7 @@ export function decodeFinanceView(value: unknown): FinanceView | null {
         id: b.id,
         name: str(b.name, b.id),
         role: nullableOf(b.role, OWNER_ROLES),
+        mayDraw: b.mayDraw === true,
         owners: list(b.owners, ownerLine),
         accounts: strings(b.accounts),
         managed: list(b.managed, account),

@@ -33,7 +33,7 @@ import {
   type ActionBody,
   type FlowForm,
 } from "../../src/packs/economy/ui/requests";
-import { accepted, account, cashOf, MoneyChat, refusal } from "../support/money-chat";
+import { accepted, account, cashOf, MoneyChat, refusal, type WorldPatch } from "../support/money-chat";
 
 const CHECKING = "acct_pov_checking";
 const SAVINGS = "acct_pov_savings";
@@ -730,6 +730,19 @@ describe("a manager runs a business's money for the business, never for themselv
     expect(await chat.play({ action: "flow_create", params: { label: "Salary, sort of", from: SHOP, to: MINE, ...once } })).toContain("not for Marcus Delgado");
     expect(await chat.play(autopayAction(MORTGAGE, "minimum", SHOP, null))).toContain("not from Alder Automotive operating account");
     expect((await chat.party(BUSINESS)).flows.map((f) => f.label)).not.toContain("Salary, sort of");
+  });
+
+  test("the shop's page says whether Marcus may take a draw, as the draw decides: as its owner he may, as its trustee or from a corporation he may not", async () => {
+    const cases: [WorldPatch["entities"], boolean][] = [
+      [{}, true],
+      [{ [BUSINESS]: { owners: [{ party: "marcus_delgado", role: "trustee" }] } }, false],
+      [{ [BUSINESS]: { structure: "c_corp" } }, false],
+    ];
+    for (const [entities, may] of cases) {
+      const chat = await MoneyChat.start({ pov: "marcus_delgado", entities });
+      expect((await chat.hub()).businesses.find((b) => b.id === BUSINESS)?.mayDraw).toBe(may);
+      expect(await chat.play({ action: "owner_draw", params: { business: BUSINESS, amount: 100_000 } })).toContain(may ? "done" : "didn't happen");
+    }
   });
 
   test("the shop's standing payments are on Marcus's money though he holds no role on its checking, so he changes the ones he runs, the one he set up included", async () => {

@@ -1339,6 +1339,8 @@ export interface BusinessView {
   name: string;
   /** The viewing party's role. */
   role: OwnerRole | null;
+  /** Whether the viewing party may take an owner's draw from it (`may_draw`): an owner or joint owner of anything but a corporation, which pays its owners by salary or dividends. */
+  mayDraw: boolean;
   owners: OwnerLine[];
   accounts: EntityId[];
   /**
