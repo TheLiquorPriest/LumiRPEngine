@@ -206,11 +206,16 @@ export function flowControls(view: FinanceView, flow: FlowView): FlowControl[] {
 
 export type JobControl = "quit" | "raise" | "let_go";
 
-/** The player's controls on a job while it lasts, from Money 3 (where work is actions): its worker quits; whoever runs the employer (shown on its payroll) gives a raise or lets them go. */
+/**
+ * The player's controls on a job while it lasts, from Money 3 (where work is actions): its worker
+ * quits; whoever runs the employer (shown on its payroll) gives a raise or lets them go, unless the
+ * worker is someone they can't see, whose row stands in for the job (no worker id), which no action
+ * takes.
+ */
 export function jobControls(view: FinanceView, job: JobView, employer: BusinessView | null): JobControl[] {
   if (view.level < 3 || job.status === "ended") return [];
   const out: JobControl[] = job.workerId === view.party ? ["quit"] : [];
-  if (employer && rights(employer.role).manage) out.push("raise", "let_go");
+  if (employer && rights(employer.role).manage && job.workerId !== "") out.push("raise", "let_go");
   return out;
 }
 

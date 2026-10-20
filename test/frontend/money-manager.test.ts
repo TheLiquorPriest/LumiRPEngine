@@ -4,7 +4,7 @@
 
 import { describe, expect, test } from "bun:test";
 import type { AccountView, FinanceView } from "../../src/shared/finance";
-import { autopaySources, fallbackSources, findAccount, flowSources, flowTargets, payeeProblem } from "../../src/packs/economy/ui/layout";
+import { autopaySources, fallbackSources, findAccount, flowSources, flowTargets, jobControls, payeeProblem } from "../../src/packs/economy/ui/layout";
 import { autopayAction, flowCreateAction, blankFlowForm } from "../../src/packs/economy/ui/requests";
 import { MoneyChat } from "../support/money-chat";
 
@@ -53,5 +53,18 @@ describe("a manager's pickers", () => {
     expect(await chat.play(autopayAction(MORTGAGE, "minimum", MINE, null))).toContain("done");
     const cleaning = { ...blankFlowForm(SHOP), label: "Shop cleaning", to: "Harbor Cleaners", amount: "90", day: 5 };
     expect(await chat.play(flowCreateAction(cleaning, chat.currency))).toContain("done");
+  });
+
+  test("an employee Marcus can't see is a payroll row with no one to raise or let go; one he can see has both", async () => {
+    const chat = await MoneyChat.start({ pov: MARCUS, secret: ["danny_okafor"] });
+    const view = await chat.hub();
+    const shop = view.businesses.find((b) => b.id === BUSINESS);
+    if (!shop) throw new Error("Marcus doesn't run the shop");
+    const hidden = shop.employees.find((j) => j.workerId === "");
+    const seen = shop.employees.find((j) => j.workerId === "pov");
+    if (!hidden || !seen) throw new Error("the payroll lacks a row");
+    expect(hidden.worker).toBe("an employee");
+    expect(jobControls(view, hidden, shop)).toEqual([]);
+    expect(jobControls(view, seen, shop)).toEqual(["raise", "let_go"]);
   });
 });
