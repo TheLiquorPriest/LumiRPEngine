@@ -2704,7 +2704,7 @@
       "paymentCents": 114200,
       "monthsLeft": 260,
       "dueDay": 1,
-      "securedBy": "prop_birch_lane_12",
+      "securedBy": "prop_marcus_home",
       "autopay": "minimum",
       "autopayFrom": "acct_marcus_checking"
     },
@@ -3379,7 +3379,7 @@
       }
     },
     {
-      "id": "prop_birch_lane_12",
+      "id": "prop_marcus_home",
       "kind": "property",
       "name": "Marcus's house",
       "fields": {

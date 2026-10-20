@@ -19,6 +19,7 @@ import {
   isAccountClass,
   isOwnerRole,
   ownersIn,
+  payeeKey,
   worthShares,
   type AccountClass,
   type AccountStatus,
@@ -34,7 +35,7 @@ import {
   type RoleRights,
 } from "../../../shared/finance";
 import { EXTERNAL_ACCOUNT_PREFIX } from "../../../engine/events";
-import { bandOfJson, numOf, objOf, sliceOf, strOf, own, rowOf } from "../../../engine/pack-kit";
+import { bandOfJson, labelOf, numOf, objOf, sliceOf, strOf, own, rowOf } from "../../../engine/pack-kit";
 import type { ReadContext } from "../../../engine/registry";
 import type { Rng } from "../../../engine/rng";
 import type { WorldState } from "../../../engine/state";
@@ -52,15 +53,15 @@ export function external(id: string): string {
 }
 
 /**
- * The outside account an outside payee's name stands for, the same whoever pays it: the name as an
- * id (lower case, `:` kept between its parts, any other run of characters as `_`), an outside
- * account id read as its name. So "Harbor Gym" is `economy.external:harbor_gym`, and `tax:federal`
- * and `economy.external:tax:federal` are both `economy.external:tax:federal`, as `api.outside`
- * names it.
+ * The outside account an outside payee's name stands for, the same whoever pays it: the name's key
+ * (`payeeKey`: lower case, `:` kept between its parts, any other run of characters as `_`), an
+ * outside account id read as its name. So "Harbor Gym" is `economy.external:harbor_gym`, and
+ * `tax:federal` and `economy.external:tax:federal` are both `economy.external:tax:federal`, as
+ * `api.outside` names it.
  */
 export function outsideAccount(name: string): string {
   const bare = name.startsWith(EXTERNAL_ACCOUNT_PREFIX) ? name.slice(EXTERNAL_ACCOUNT_PREFIX.length) : name;
-  return external(bare.toLowerCase().replace(/[^a-z0-9:]+/g, "_").replace(/^_+|_+$/g, "") || "outside");
+  return external(payeeKey(bare) || "outside");
 }
 
 /** The foundation's and the modules' own outside payees by key, as a person reads them. */
@@ -146,9 +147,31 @@ export function outsideHidden(books: ViewBooks, raw: string, viewer: EntityId | 
   return ids.some((id) => seenIn(books, viewer, id) === false);
 }
 
-/** Whether `viewer` (the player's POV; null for the GM) can't see `id`, someone in the world: their views carry neither its name nor its id (DESIGN §7). */
+/**
+ * Whether `viewer` (the player's POV; null for the GM, who sees everything) may see `id` (DESIGN
+ * §7): the POV, what it can see, and an account (or a card on one) it holds or that someone it can
+ * see holds. An outside party's name isn't an entity and is always shown.
+ */
+export function seenBy(books: ViewBooks, viewer: EntityId | null, id: string): boolean {
+  if (viewer === null || id === viewer) return true;
+  const e = own(books.state.entities, id);
+  if (!e) return true;
+  if (!canSeeEntity(books.registry, books.world, books.state, viewer, id)) return false;
+  if (e.kind !== "account" && e.kind !== "card") return true;
+  const account = e.kind === "card" ? strOf(e.fields.account) : id;
+  if (rightsOf(books.state, account, viewer) !== null) return true;
+  const holders = holdersOf(books.state, account).filter((h) => own(books.state.entities, h));
+  return holders.length === 0 || holders.some((h) => canSeeEntity(books.registry, books.world, books.state, viewer, h));
+}
+
+/** Whether `viewer` can't see `id`, someone or something in the world: their views carry neither its name nor its id (DESIGN §7). */
 export function hiddenFrom(books: ViewBooks, viewer: EntityId | null, id: string): boolean {
-  return viewer !== null && own(books.state.entities, id) !== undefined && !canSeeEntity(books.registry, books.world, books.state, viewer, id);
+  return !seenBy(books, viewer, id);
+}
+
+/** A name as `viewer` may read it, in a view or in why something was refused: "someone" for anyone or anything they can't see. */
+export function shownLabel(books: ViewBooks, viewer: EntityId | null, id: string): string {
+  return seenBy(books, viewer, id) ? labelOf(books, id) : "someone";
 }
 
 /**

@@ -1047,7 +1047,7 @@ Panels: `story.quests`. Slots it writes: `quest`.
 
 ### Lint codes
 
-`story.leaky_label`.
+`story.leaky_id`, `story.leaky_label`.
 
 ## Vehicles pack (`vehicles`)
 

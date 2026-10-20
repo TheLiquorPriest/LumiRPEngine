@@ -6,7 +6,7 @@
 import type { JsonObject, JsonValue } from "../../../shared/json";
 import type { EntityId } from "../../../shared/ids";
 import type { LedgerEvent, PostingLine } from "../../../shared/ledger";
-import { ACCOUNT_STATUSES, AUTOPAY_MODES, CARD_STATES, CLASS_TRAITS, FINANCE_EVENTS, FLOW_KINDS, FLOW_SHORTFALLS, isAccountClass, isCredit, type AtmFeature, type CreditApplication, type Owner } from "../../../shared/finance";
+import { ACCOUNT_STATUSES, AUTOPAY_MODES, CARD_STATES, CLASS_TRAITS, FINANCE_EVENTS, FLOW_KINDS, FLOW_SHORTFALLS, isAccountClass, isCredit, payeeKey, type AtmFeature, type CreditApplication, type Owner } from "../../../shared/finance";
 import { hashParts } from "../../../shared/hash";
 import { formatMoney, type EntityDef } from "../../../shared/world";
 import { calendarOf, dateAt } from "../../../engine/calendar";
@@ -15,11 +15,12 @@ import { GONE_FIELD } from "../../../engine/scope";
 import { labelOf, numOf, objOf, optionalService, own, strOf } from "../../../engine/pack-kit";
 import type { EffectContext, ReadContext, Rejection } from "../../../engine/registry";
 import { placeOfEntity } from "../../../engine/scope";
+import { membersOf } from "../../../engine/selector";
 import { decide, type Decision } from "./credit";
 import type { OpenAccount } from "./module";
 import { fallsBackOn } from "./flows";
 import { isOpened, reject, spendOf } from "./journal";
-import { availableOf, balance, bankSide, canSpend, classOf, debtorsOf, external, holdersOf, householdOf, managesAccount, managesParty, openerOf, outsideAccount, productOf, rightsOf, statusOf, traitsOf, worldProducts } from "./model";
+import { availableOf, balance, bankSide, canSpend, classOf, debtorsOf, external, holdersOf, householdOf, managesAccount, managesParty, openerOf, productOf, rightsOf, shownLabel, statusOf, traitsOf, worldProducts } from "./model";
 import { accountFeature, asUnit, cardProblem, cardRoom, cardsOn, cashAccount, cashAdvanceFee, depositAccount, featureFor, isParty, mayUse, posting, signal } from "./pay";
 
 function money(ctx: ReadContext, cents: number): string {
@@ -200,17 +201,24 @@ export function replaceCard(ctx: EffectContext, who: EntityId, card: EntityId): 
   return asUnit(out);
 }
 
+/** A name in why something was refused, as the player may read it (`shownLabel`): the refusal reaches the narrator and the decline chip. */
+function said(ctx: ReadContext, id: string): string {
+  return shownLabel(ctx, ctx.world.pov, id);
+}
+
 /**
  * What's wrong with a credit account's autopay drawing on `from` when `who` sets it (DESIGN
  * §25.1), or null: an account that pays and isn't credit, which `who` may spend from or manages,
- * and which the account's debtor may spend from. So a business's loan pays from the business's
- * money, and a manager's own card or loan from their own.
+ * and which is the account's debtor's own money: theirs to spend, or theirs by its worth, as a
+ * child's savings is the child's though their custodian spends it. So a business's loan pays from
+ * the business's money, a manager's own card or loan from their own, and a custodial card from the
+ * custodial money.
  */
 export function autopaySourceProblem(ctx: ReadContext, who: EntityId, account: EntityId, from: EntityId): Rejection | null {
   const t = traitsOf(ctx, from);
-  if ((!canSpend(ctx.state, from, who) && !managesAccount(ctx, from, who)) || !t?.pays || t.liability) return reject("bad_account", `${labelOf(ctx, who)} can't pay from ${labelOf(ctx, from)}`);
+  if ((!canSpend(ctx.state, from, who) && !managesAccount(ctx, from, who)) || !t?.pays || t.liability) return reject("bad_account", `${said(ctx, who)} can't pay from ${said(ctx, from)}`);
   const debtors = debtorsOf(ctx.state, account);
-  if (!debtors.some((d) => canSpend(ctx.state, from, d))) return reject("bad_account", `${labelOf(ctx, account)} is paid from ${labelOf(ctx, debtors[0] ?? who)}'s own money, not from ${labelOf(ctx, from)}`);
+  if (!debtors.some((d) => canSpend(ctx.state, from, d) || rightsOf(ctx.state, from, d)?.worth === true)) return reject("bad_account", `${said(ctx, account)} is paid from ${said(ctx, debtors[0] ?? who)}'s own money, not from ${said(ctx, from)}`);
   return null;
 }
 
@@ -275,18 +283,60 @@ export function mayPayFrom(ctx: ReadContext, who: EntityId, from: string): boole
   return from === who || (isParty(ctx, from) && managesParty(ctx.state, from, who)) || managesAccount(ctx, from, who);
 }
 
+/** The holders of an entity whose role counts its worth: an account's, a business's owners, a trust's beneficiaries. */
+function worthHolders(ctx: ReadContext, id: string): EntityId[] {
+  return holdersOf(ctx.state, id).filter((h) => rightsOf(ctx.state, id, h)?.worth === true);
+}
+
 /**
- * Whether a payment to `to` would be for `who`: to them, an account they hold, their household or
- * an account it holds, or the outside account their own name gives (a typed payee lands there).
+ * Whom `who`'s own interests are (DESIGN §25.1): them, their household and its members, and each
+ * party any of those counts the worth of (a business they own, and so may draw from; a trust they
+ * benefit from). Money a manager only manages reaches none of them.
  */
-function paysFor(ctx: ReadContext, who: EntityId, to: string): boolean {
+export function interestsOf(ctx: ReadContext, who: EntityId): Set<EntityId> {
   const household = householdOf(ctx, who);
-  const theirs = (party: string): boolean => party === who || party === household;
+  const kin = household === null ? [who] : [who, household, ...membersOf(ctx.registry, ctx.world, ctx.state, household)];
+  const out = new Set<EntityId>(kin);
+  for (const id of Object.keys(ctx.state.entities)) if (!out.has(id) && isParty(ctx, id) && worthHolders(ctx, id).some((h) => kin.includes(h))) out.add(id);
+  return out;
+}
+
+/**
+ * Whom the money `side` is for: a party paying for itself, or the holders an account counts the
+ * worth of, and in turn whom those are for (a business's owners, a trust's beneficiaries), a few
+ * levels deep.
+ */
+function whoseMoney(ctx: ReadContext, side: string): Set<EntityId> {
+  const out = new Set<EntityId>();
+  let next = isParty(ctx, side) ? [side] : worthHolders(ctx, side);
+  for (let depth = 0; depth < 4 && next.length > 0; depth++) {
+    const fresh = next.filter((p) => !out.has(p));
+    for (const p of fresh) out.add(p);
+    next = fresh.flatMap((p) => worthHolders(ctx, p));
+  }
+  return out;
+}
+
+/**
+ * Whether money from `from`, which `who` only manages, paid to `to` would be for `who` (DESIGN
+ * §25.1): to one of their interests (`interestsOf`) or an account whose worth one of those counts,
+ * or to an outside payee typed as their own (its `payeeKey` is their id's or their name's, or their
+ * household's: "Jordan Ellis", " POV "), which the hub refuses by the same keys. A payment among
+ * whom the money itself is for (`whoseMoney`), the manager aside, is the money's own: the café's
+ * savings topping up its operating account, a trust paying its beneficiary though she's the
+ * trustee's daughter. A role that doesn't count an account's worth (an authorized user's card)
+ * doesn't make it theirs.
+ */
+export function paysFor(ctx: ReadContext, who: EntityId, to: string, from: string, interests: ReadonlySet<EntityId> = interestsOf(ctx, who)): boolean {
+  const forHolder = whoseMoney(ctx, from);
+  forHolder.delete(who);
+  const mine = (party: string): boolean => interests.has(party) && !forHolder.has(party);
   const id = to.startsWith(EXTERNAL_ACCOUNT_PREFIX) ? to.slice(EXTERNAL_ACCOUNT_PREFIX.length) : to;
-  if (theirs(id)) return true;
-  if (own(ctx.state.entities, id)?.kind === "account") return holdersOf(ctx.state, id).some(theirs);
-  const landing = outsideAccount(to);
-  return landing === external(who) || (household !== null && landing === external(household));
+  const e = own(ctx.state.entities, id);
+  if (e) return e.kind === "account" ? worthHolders(ctx, id).some(mine) : mine(id);
+  const key = payeeKey(id);
+  const household = householdOf(ctx, who);
+  return key !== "" && [who, household].some((p) => p !== null && (key === payeeKey(p) || key === payeeKey(own(ctx.state.entities, p)?.name ?? "")));
 }
 
 /**
@@ -294,20 +344,22 @@ function paysFor(ctx: ReadContext, who: EntityId, to: string): boolean {
  * `fallback`, or null (DESIGN §25.1, §25.5). Each is money they may pay from. A fallback is the
  * payer's own, as the money step draws on it (`fallsBackOn`): an outside name would pay with money
  * nobody has, and someone else's account isn't the payer's to draw on. Money they reach only by
- * managing it, a business's or a trust's they hold no spending role on, pays for its holder: never
- * to them, their accounts or their household.
+ * managing it pays for whom it is, never for them (`paysFor`). That is a business's or a trust's
+ * account they hold no spending role on, and the business or trust itself paying as a party,
+ * whatever their role on it: a party's money is never a manager's own, though every managing role
+ * on it carries the spending right.
  */
 function flowProblem(ctx: ReadContext, who: EntityId, from: string, to: string, fallback: string): Rejection | null {
-  if (!mayPayFrom(ctx, who, from)) return reject("not_owner", `${labelOf(ctx, who)} can't pay from ${labelOf(ctx, from)}`);
+  if (!mayPayFrom(ctx, who, from)) return reject("not_owner", `${said(ctx, who)} can't pay from ${said(ctx, from)}`);
   if (fallback !== "" && (!mayPayFrom(ctx, who, fallback) || !fallsBackOn(ctx, from, fallback))) {
-    return reject("not_owner", own(ctx.state.entities, fallback) ? `${labelOf(ctx, who)} can't fall back on ${labelOf(ctx, fallback)}` : `a fallback is an account of ${labelOf(ctx, who)}'s, not "${fallback}"`);
+    return reject("not_owner", own(ctx.state.entities, fallback) ? `${said(ctx, who)} can't fall back on ${said(ctx, fallback)}` : `a fallback is an account of ${said(ctx, who)}'s, not "${fallback}"`);
   }
-  const managed = [from, fallback].find((side) => side !== "" && side !== who && !canSpend(ctx.state, side, who));
-  if (managed !== undefined && paysFor(ctx, who, to)) {
-    const holder = isParty(ctx, managed) ? managed : (holdersOf(ctx.state, managed).find((h) => managesParty(ctx.state, h, who)) ?? managed);
-    return reject("not_owner", `${labelOf(ctx, managed)} pays for ${labelOf(ctx, holder)}, not for ${labelOf(ctx, who)}`);
-  }
-  return null;
+  const managed = [from, fallback].filter((side) => side !== "" && side !== who && (isParty(ctx, side) || !canSpend(ctx.state, side, who)));
+  const paying = managed.find((side) => paysFor(ctx, who, to, side));
+  if (paying === undefined) return null;
+  if (isParty(ctx, paying)) return reject("not_owner", `${said(ctx, paying)} pays for itself, not for ${said(ctx, who)}`);
+  const holder = holdersOf(ctx.state, paying).find((h) => managesParty(ctx.state, h, who)) ?? paying;
+  return reject("not_owner", `${said(ctx, paying)} pays for ${said(ctx, holder)}, not for ${said(ctx, who)}`);
 }
 
 export function createFlow(ctx: ReadContext, who: EntityId, args: Record<string, JsonValue>): LedgerEvent[] | Rejection {

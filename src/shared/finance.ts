@@ -426,6 +426,16 @@ export interface FlowShare {
   from?: EntityId;
 }
 
+/**
+ * The key an outside payer's or payee's name is kept by (`economy.external:<key>`): the name
+ * lowercased, each run of anything but letters, digits and ":" one "_", none at either end. Names
+ * with one key are one payee, so the backend and the hub read a typed name alike: a manager can't
+ * pay their own name from money they only manage (DESIGN §25.1).
+ */
+export function payeeKey(name: string): string {
+  return name.toLowerCase().replace(/[^a-z0-9:]+/g, "_").replace(/^_+|_+$/g, "");
+}
+
 /** One scheduled or one-off movement of money, read from a `flow` entity or derived by a module from its records. */
 export interface Flow {
   id: string;
@@ -1341,6 +1351,8 @@ export interface BusinessView {
   role: OwnerRole | null;
   /** Whether the viewing party may take an owner's draw from it (`may_draw`): an owner or joint owner of anything but a corporation, which pays its owners by salary or dividends. */
   mayDraw: boolean;
+  /** The people the viewing party may neither hire here nor raise: their own (them, their household's members), when they hold no share of its worth (DESIGN §25.1). Only those the viewer can see. */
+  selfDealing: EntityId[];
   owners: OwnerLine[];
   accounts: EntityId[];
   /**
@@ -1460,6 +1472,15 @@ export interface FinanceView {
   /** Private notes (paydays, bills, declines) for the GM; the player's own come as signals instead. */
   notes: { at: string; text: string }[];
   payPrefs: PayTier[];
+  /**
+   * For each payer the party may run standing payments from but only manages (DESIGN §25.1): an
+   * account listed here or a flow's payer or fallback, other than the party, that is a party itself
+   * or that they hold no spending role on. `to` is what it may not pay of the ids the view lists:
+   * the accounts it lists, the party's own interests, and its flows' payees. Ids the viewer can see.
+   */
+  paysFor: { from: EntityId; to: EntityId[] }[];
+  /** The keys (`payeeKey`) a typed payee is the party's own by: their id's and name's, and their household's where the viewer can see it. */
+  ownKeys: string[];
 }
 
 /** The plain-language money summary a character's mind reads (`economy.summary`). */

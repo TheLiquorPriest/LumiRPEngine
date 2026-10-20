@@ -31,7 +31,7 @@ import type { Rng } from "../../../engine/rng";
 import { kindIs, placeOfEntity } from "../../../engine/scope";
 import { FINANCE_MODULES } from "./modules";
 import type { FinanceApi, FinanceHooks, FinanceKind, FinanceRegistry, Payment, PostMeta } from "./module";
-import { applyForCredit, closeAccount, createFlow, creditApplication, deposit, editFlow, openAccount, releaseHold, replaceCard, setAutopay, setCardState, setFlowStatus, setPayPrefs, setStatus, updateFlow, withdraw } from "./actions";
+import { applyForCredit, closeAccount, createFlow, creditApplication, deposit, editFlow, interestsOf, openAccount, paysFor, releaseHold, replaceCard, setAutopay, setCardState, setFlowStatus, setPayPrefs, setStatus, updateFlow, withdraw } from "./actions";
 import { currentScore } from "./credit";
 import { allFlows, businessDay, livingCost, occurrences, splitAmount } from "./flows";
 import { EVENTS, isOpened, reject } from "./journal";
@@ -285,6 +285,8 @@ function makeApi(hooks: FinanceHooks): FinanceApi {
     traitsOf: (books, account) => traitsOf(books, account),
     ownersOf: (state, entity) => ownersOf(state, entity),
     shareOf: (state, entity, party) => shareOf(state, entity, party),
+    interestsOf: (ctx, who) => interestsOf(ctx, who),
+    paysFor: (ctx, who, to, from) => paysFor(ctx, who, to, from),
     accountsOf: (books, party, right) => accountsOf(books, party, right ?? "sees"),
     balance: (state, account) => balance(state, account),
     available: (ctx, account) => availableOf(ctx, account) + overdraftRoom(ctx, account),

@@ -1,7 +1,7 @@
 // Preview fixtures: a modern slice-of-life world in play. Shapes follow the contracts
 // (`StateView`, `WorldDoc`, `UserSettings`) and the panel view models of the UI packs.
 
-import { featureOn, FINANCE_FEATURES, type AccountView, type CardView, type FinanceView, type Flow, type FlowView, type JournalLine } from "../../src/shared/finance";
+import { featureOn, FINANCE_FEATURES, payeeKey, type AccountView, type CardView, type FinanceView, type Flow, type FlowView, type JournalLine } from "../../src/shared/finance";
 import { DOMAINS, INTERRUPT_CLASSES } from "../../src/shared/ids";
 import type { DomainId, InterruptClass, InterruptPolicy } from "../../src/shared/ids";
 import type { JsonValue } from "../../src/shared/json";
@@ -498,6 +498,8 @@ function gmMoney(party: string, name: string, level: number, opened: boolean, ac
     recent: lines,
     notes,
     payPrefs: [],
+    paysFor: [],
+    ownKeys: [payeeKey(party), payeeKey(name)],
   };
 }
 
@@ -564,6 +566,8 @@ function samMoney(): FinanceView {
     recent,
     notes: [],
     payPrefs: [{ use: "cash", max: 2000 }, { use: "visa_card" }],
+    paysFor: [],
+    ownKeys: ["pov", payeeKey("Sam Rivera")],
   };
 }
 

@@ -20,7 +20,7 @@ import type { WorldState } from "../../../engine/state";
 import { addToBooks, addToPayables, businessBooks, firstBookedMonth, monthBook, monthOf, monthsBetween, operatingAccount, payablesOf } from "./books";
 import { allJobs, businessAt, businessIds, jobBlocks, jobView, placesOf, type Job } from "./employment";
 import type { FinanceApi, FinanceRegistry, FlowPosting } from "./module";
-import { hiddenFrom, managesParty, opaqueId, unpricedCap } from "./model";
+import { hiddenFrom, managesParty, opaqueId, shownLabel, unpricedCap } from "./model";
 import { corporateTax, salesTaxAccount, salesTaxOn, salesTaxPct, structureOf, taxExempt, taxRegionOf } from "./taxes";
 
 /** The foundation's invoice kind (`kinds.ts`): one invoice a business issued. */
@@ -348,6 +348,8 @@ function issueInvoice(ctx: EffectContext, api: FinanceApi, args: Record<string, 
   if (by !== "" && !managesParty(ctx.state, business, by)) return reject("not_owner", `${labelOf(ctx, by)} doesn't run ${labelOf(ctx, business)}`);
   const customer = strOf(args.customer) || strOf(args.customer_name).trim();
   if (customer === "" || customer === business) return reject("bad_party", "an invoice needs someone to bill");
+  // A business the manager runs for others can't be billed by one that is theirs: its money would pay them (DESIGN §25.1).
+  if (by !== "" && customer !== by && managesParty(ctx.state, customer, by) && api.paysFor(ctx, by, business, customer)) return reject("not_owner", `${shownLabel(ctx, ctx.world.pov, by)} runs ${shownLabel(ctx, ctx.world.pov, customer)} for others, so can't bill it for ${shownLabel(ctx, ctx.world.pov, business)}`);
   const cents = typeof args.cents === "number" ? Math.round(args.cents) : NaN;
   if (!(cents > 0)) return reject("bad_amount", "an invoice needs an amount");
   // A customer outside the world pays what it is billed from money nobody in the world had, so what a
@@ -376,6 +378,7 @@ function payInvoice(ctx: EffectContext, api: FinanceApi, args: Record<string, Js
   const by = strOf(args.by);
   const payer = inv.party ?? inv.customer;
   if (by !== "" && by !== inv.party && !(inv.party && isBusiness(ctx, inv.party) && managesParty(ctx.state, inv.party, by))) return reject("not_customer", `${labelOf(ctx, by)} isn't billed for ${inv.memo}`);
+  if (by !== "" && inv.party && by !== inv.party && api.paysFor(ctx, by, inv.business, inv.party)) return reject("not_owner", `${shownLabel(ctx, ctx.world.pov, inv.party)} pays for itself, not for ${shownLabel(ctx, ctx.world.pov, by)}`);
   const deposit = operatingAccount(api, ctx, inv.business);
   const paid = inv.party ? api.pay(ctx, { from: inv.party, to: inv.business, cents: inv.left, memo: `Invoice: ${inv.memo}`, kind: "payment", category: "invoice", method: "account", ...(deposit ? { deposit } : {}) }) : api.post(ctx, [{ account: api.outside(`customer:${payer}`), amount: -inv.left }, { account: deposit ?? api.outside(inv.business), amount: inv.left }], { memo: `Invoice: ${inv.memo}`, kind: "payment", category: "invoice", payer });
   if (!Array.isArray(paid)) return paid;
@@ -612,6 +615,8 @@ export function businessView(ctx: ReadContext, api: FinanceApi, business: Entity
     name: labelOf(ctx, business),
     role,
     mayDraw: mayDraw(api, ctx.state, party, business),
+    // Their own, whom they neither hire nor raise here without a share of its worth, as `hire` and `job_raise` refuse (DESIGN §25.1).
+    selfDealing: api.shareOf(ctx.state, business, party) > 0 ? [] : [...api.interestsOf(ctx, party)].filter((id) => kindIs(ctx.registry, ctx.world, own(ctx.state.entities, id)?.kind ?? "", "person") && !hiddenFrom(ctx, viewer, id)),
     owners: ownerLines(ctx, api, viewer, business),
     accounts: api.accountsOf(ctx, business, "sees"),
     // The finance view fills these: it knows which accounts it already shows as the viewer's own.

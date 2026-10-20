@@ -544,7 +544,8 @@ describe("a world's money switches open their controls below Money 3", () => {
     expect(two.features.filter((f) => f === "flows" || f === "payment_prefs" || f === "cards")).toEqual([]);
     expect([two.flows, two.cards, two.payPrefs]).toEqual([[], [], []]);
     const entities = [...(await plain.gm()).fields.keys()];
-    for (const body of [flowCreateAction(gymForm(CHECKING), plain.currency), payPrefsAction(tiers), cardAction(DEBIT, "freeze")]) expect(await plain.play(body)).toContain("didn't happen");
+    // Each is declined as something the world leaves out, not as a matter of where or when.
+    for (const body of [flowCreateAction(gymForm(CHECKING), plain.currency), payPrefsAction(tiers), cardAction(DEBIT, "freeze")]) expect(await plain.play(body)).toContain("didn't happen (Not possible here and now: this world doesn't keep track of that)");
     const gm = await plain.gm();
     expect([...gm.fields.keys()]).toEqual(entities);
     expect(gm.values.get(DEBIT)?.state ?? "active").toBe("active");
@@ -722,6 +723,12 @@ describe("a manager runs a business's money for the business, never for themselv
     for (const refused of ["Pay me", "Pay my mortgage", "Cash for me", "Gym"]) expect(labels).not.toContain(refused);
     expect(account(await chat.party("marcus_delgado"), MORTGAGE).autopay?.from).not.toBe(SHOP);
     expect(account(shop, LIFT_LOAN).autopay).toMatchObject({ mode: "minimum", from: SHOP });
+  });
+
+  test("a payee typed as the manager's own name or id is them: Jordan, owning the shop, can't pay \"Jordan Ellis\" or \" POV \" from its checking, though he may pay another name", async () => {
+    const chat = await MoneyChat.start({ entities: { ...shopOnly, [BUSINESS]: { owners: [{ party: "pov", role: "owner" }] } } });
+    for (const to of ["Jordan Ellis", " POV "]) expect(await chat.play({ action: "flow_create", params: { label: "To me", from: SHOP, to, ...once } })).toContain("not for Jordan Ellis");
+    expect(await chat.play({ action: "flow_create", params: { label: "Parts", from: SHOP, to: "Harbor Parts", ...once } })).toContain("done");
   });
 
   test("a C corporation's owner, who takes no draws, can't pay himself from its account by a standing payment or his mortgage's autopay", async () => {

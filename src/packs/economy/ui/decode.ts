@@ -393,6 +393,7 @@ export function decodeFinanceView(value: unknown): FinanceView | null {
         name: str(b.name, b.id),
         role: nullableOf(b.role, OWNER_ROLES),
         mayDraw: b.mayDraw === true,
+        selfDealing: strings(b.selfDealing),
         owners: list(b.owners, ownerLine),
         accounts: strings(b.accounts),
         managed: list(b.managed, account),
@@ -457,5 +458,7 @@ export function decodeFinanceView(value: unknown): FinanceView | null {
     recent: list(value.recent, journalLine),
     notes: list(value.notes, (n) => ({ at: str(n.at), text: str(n.text) })),
     payPrefs: list(value.payPrefs, payTier),
+    paysFor: list(value.paysFor, (p) => (typeof p.from === "string" ? { from: p.from, to: strings(p.to) } : null)),
+    ownKeys: strings(value.ownKeys),
   };
 }

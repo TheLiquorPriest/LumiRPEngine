@@ -2104,6 +2104,8 @@ export function playerReason(failed: { code: string; reason: string; requirement
 /** Readable reasons for the requirement shapes packs use (the expression itself is never shown). */
 const REQUIREMENT_WORDS: readonly [RegExp, string][] = [
   [/\blevel\.(\w+)\s*>=/, "this world doesn't simulate that in enough detail"],
+  // A money feature the world's switches leave off (`money_feature`, DESIGN §25.12): the world, not the place or the hour, rules it out.
+  [/\bmoney_feature\(/, "this world doesn't keep track of that"],
   [/\bowner\s*==\s*self\b/, "it isn't yours"],
   [/\bcarries\(self/, "you need to have it with you"],
   [/\blent_out\(/, "it isn't lent out"],

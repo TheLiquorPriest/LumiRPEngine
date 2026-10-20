@@ -1169,7 +1169,7 @@
         "autopay_from": "acct_marcus_checking",
         "payment": 114200,
         "months_left": 260,
-        "secured_by": "prop_birch_lane_12"
+        "secured_by": "prop_marcus_home"
       },
       "relations": []
     },
@@ -2007,8 +2007,8 @@
       },
       "relations": []
     },
-    "prop_birch_lane_12": {
-      "id": "prop_birch_lane_12",
+    "prop_marcus_home": {
+      "id": "prop_marcus_home",
       "kind": "property",
       "name": "Marcus's house",
       "tier": "background",

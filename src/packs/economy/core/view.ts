@@ -6,7 +6,7 @@
 // surface a party the POV can't see is "someone".
 
 import type { EntityId } from "../../../shared/ids";
-import { AUTOPAY_MODES, CLASS_TRAITS, FINANCE_FEATURES, featureOn, ownersIn, worthShares, type AccountView, type AutopayMode, type CycleState, type AlertLine, type CardView, type FinanceView, type Flow, type FlowView, type HouseholdView, type JournalEntry, type JournalLine, type OverviewView, type PartyKind, type StatementView, type UpcomingLine } from "../../../shared/finance";
+import { AUTOPAY_MODES, CLASS_TRAITS, FINANCE_FEATURES, featureOn, ownersIn, payeeKey, worthShares, type AccountView, type AutopayMode, type CycleState, type AlertLine, type CardView, type FinanceView, type Flow, type FlowView, type HouseholdView, type JournalEntry, type JournalLine, type OverviewView, type PartyKind, type StatementView, type UpcomingLine } from "../../../shared/finance";
 import { formatMoney } from "../../../shared/world";
 import { calendarOf, formatClock, monthName, weekdayName } from "../../../engine/calendar";
 import { EXTERNAL_ACCOUNT_PREFIX } from "../../../engine/events";
@@ -14,14 +14,14 @@ import { numOf, objOf, own, sliceOf, strOf } from "../../../engine/pack-kit";
 import type { ReadContext } from "../../../engine/registry";
 import { kindIs } from "../../../engine/scope";
 import { membersOf, MEMBER_OF } from "../../../engine/selector";
-import { canSeeEntity } from "../../../engine/visibility";
+import { canSeePlace } from "../../../engine/visibility";
 import type { FinanceHooks } from "./module";
-import { autopaySourceProblem, mayPayFrom } from "./actions";
+import { autopaySourceProblem, interestsOf, mayPayFrom, paysFor } from "./actions";
 import { statementState } from "./cycle";
 import { creditReport } from "./credit";
 import { allFlows, fallsBackOn, occurrences, occurrenceAmount } from "./flows";
 import { cycleOf, flowRunOf, isOpened, journalOf, NOTES_CAP } from "./journal";
-import { accountsOf, availableOf, balance, canSpend, classOf, holdersOf, holdsOn, householdOf, managesAccount, managesParty, opaqueId, openerOf, outsideHidden, outsideName, ownersOf, productOf, rightsOf, shareOf, statusOf, traitsOf, wealthBand } from "./model";
+import { accountsOf, availableOf, balance, canSpend, classOf, holdersOf, holdsOn, householdOf, managesAccount, managesParty, opaqueId, openerOf, outsideHidden, outsideName, ownersOf, productOf, rightsOf, seenBy, shareOf, statusOf, traitsOf, wealthBand } from "./model";
 import { cardsOn, cardRoom, featureFor, isParty, overdraftRoom, tiersOf, toggles } from "./pay";
 import { netWorthParts } from "./worth";
 import { createRng } from "../../../engine/rng";
@@ -31,24 +31,63 @@ const DAY = 1440;
 interface Viewer {
   /** The POV a player surface is drawn for, or null for the GM, who sees every name. */
   pov: EntityId | null;
+  /** The names in the world the viewer can't see, each with the words it reads as instead (`hiddenNames`); none for the GM. */
+  hidden: readonly HiddenName[];
+}
+
+/** A name the viewer can't see, as text may carry it, and what it reads as: at the start of the text, and within it. */
+interface HiddenName {
+  pattern: RegExp;
+  first: string;
+  within: string;
+}
+
+/** Whether the viewer may see an entity (`seenBy`): the GM sees everything. */
+function visible(ctx: ReadContext, viewer: Viewer, id: string): boolean {
+  return seenBy(ctx, viewer.pov, id);
+}
+
+/** What someone or something the viewer can't see reads as in text: someone for a party, an account by its class, a property, something else. */
+function hiddenWords(ctx: ReadContext, id: EntityId): { first: string; within: string } {
+  const kind = own(ctx.state.entities, id)?.kind ?? "";
+  if (isParty(ctx, id)) return { first: "Someone", within: "someone" };
+  if (kind === "account") return { first: traitsOf(ctx, id)?.label ?? "An account", within: "an account" };
+  if (kind === "card") return { first: "A card", within: "a card" };
+  if (kindIs(ctx.registry, ctx.world, kind, "property")) return { first: "A property", within: "a property" };
+  return { first: "Something", within: "something" };
 }
 
 /**
- * Whether the viewer may see an entity: the GM sees everything; the player sees the POV, what it
- * can see, and an account (or a card on one) it holds or that someone it can see holds. An outside
- * party's name isn't an entity and is always shown.
+ * The names of everyone and everything the POV can't see, as labels and memos would carry them:
+ * a derived flow's label is built from names ("Lift loan autopay"), and a posting's memo is
+ * written once for every side of it. A name something the POV can see also has gives nothing
+ * away, so it stays, and one shorter than three letters is too likely a word.
  */
-function visible(ctx: ReadContext, viewer: Viewer, id: string): boolean {
-  const pov = viewer.pov;
-  if (pov === null || id === pov) return true;
-  const e = own(ctx.state.entities, id);
-  if (!e) return true;
-  if (!canSeeEntity(ctx.registry, ctx.world, ctx.state, pov, id)) return false;
-  if (e.kind !== "account" && e.kind !== "card") return true;
-  const account = e.kind === "card" ? strOf(e.fields.account) : id;
-  if (rightsOf(ctx.state, account, pov) !== null) return true;
-  const holders = holdersOf(ctx.state, account).filter((h) => own(ctx.state.entities, h));
-  return holders.length === 0 || holders.some((h) => canSeeEntity(ctx.registry, ctx.world, ctx.state, pov, h));
+function hiddenNames(ctx: ReadContext, pov: EntityId): HiddenName[] {
+  const viewer: Viewer = { pov, hidden: [] };
+  const seen = new Set<string>();
+  const hidden: { name: string; words: { first: string; within: string } }[] = [];
+  for (const [id, e] of Object.entries(ctx.state.entities)) {
+    if (e.name.length < 3) continue;
+    if (visible(ctx, viewer, id)) seen.add(e.name.toLowerCase());
+    else hidden.push({ name: e.name, words: hiddenWords(ctx, id) });
+  }
+  for (const [id, p] of Object.entries(ctx.world.places)) {
+    if (p.name.length < 3) continue;
+    if (canSeePlace(ctx.registry, ctx.world, ctx.state, pov, id)) seen.add(p.name.toLowerCase());
+    else hidden.push({ name: p.name, words: { first: "Somewhere", within: "somewhere" } });
+  }
+  return hidden
+    .filter((h) => !seen.has(h.name.toLowerCase()))
+    .sort((a, b) => b.name.length - a.name.length)
+    .map((h) => ({ pattern: new RegExp(`(^|[^\\p{L}\\p{N}])${h.name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\p{L}\\p{N}])`, "giu"), ...h.words }));
+}
+
+/** Text as the viewer may read it: each name of someone or something they can't see in their words for it (`hiddenNames`). */
+function says(viewer: Viewer, text: string): string {
+  let out = text;
+  for (const h of viewer.hidden) out = out.replace(h.pattern, (_match: string, before: string, at: number) => before + (at === 0 && before === "" ? h.first : h.within));
+  return out;
 }
 
 function nameFor(ctx: ReadContext, viewer: Viewer, id: string): string {
@@ -123,7 +162,7 @@ function journalLine(ctx: ReadContext, viewer: Viewer, party: EntityId, j: Journ
   const worth = Object.entries(worthShares(ownersOf(ctx.state, j.account))).filter(([, share]) => share > 0);
   const whose = worth.length === 1 ? (worth[0]?.[0] ?? j.account) : j.account;
   const counterparty = j.counterparty && j.counterparty !== party && j.counterparty !== whose ? counterpartyName(ctx, viewer, j.counterparty) : null;
-  return { id: j.id, at: when(ctx, j.at), memo: j.memo, cents: j.cents, account: nameFor(ctx, viewer, j.account), accountId: j.account, kind: j.kind ?? null, category: j.category ?? null, counterparty, card: j.card ? nameFor(ctx, viewer, j.card) : null, status: j.status };
+  return { id: j.id, at: when(ctx, j.at), memo: says(viewer, j.memo), cents: j.cents, account: nameFor(ctx, viewer, j.account), accountId: j.account, kind: j.kind ?? null, category: j.category ?? null, counterparty, card: j.card ? nameFor(ctx, viewer, j.card) : null, status: j.status };
 }
 
 function cardView(ctx: ReadContext, viewer: Viewer, card: EntityId): CardView {
@@ -246,7 +285,7 @@ function accountView(ctx: ReadContext, viewer: Viewer, party: EntityId, account:
     statements: statements && (t.revolving || t.installment) ? [statementView(ctx, cycle), ...pastStatements(ctx, account)].filter((s): s is StatementView => s !== null) : [],
     cards: cards ? cardsOn(ctx.state, account).map((c) => cardView(ctx, viewer, c)) : [],
     pending: holds ? journal.filter((j) => j.status === "pending").reverse().map((j) => journalLine(ctx, viewer, party, j)) : [],
-    holds: holds ? holdsOn(ctx.state, account).map((h) => ({ id: h.id, cents: h.cents, until: day(ctx, h.until), kind: h.kind, memo: h.memo })) : [],
+    holds: holds ? holdsOn(ctx.state, account).map((h) => ({ id: h.id, cents: h.cents, until: day(ctx, h.until), kind: h.kind, memo: says(viewer, h.memo) })) : [],
     transactions: level >= 2 ? journal.slice(-(level >= 4 ? 40 : 20)).reverse().map((j) => journalLine(ctx, viewer, party, j)) : [],
     securedBy: securedBy !== "" && own(ctx.state.entities, securedBy) && visible(ctx, viewer, securedBy) ? { id: securedBy, name: nameFor(ctx, viewer, securedBy) } : null,
     loan: t.installment && level >= 3 ? { payment: typeof e?.fields.payment === "number" ? e.fields.payment : (cycle?.minimum ?? 0), monthsLeft: cycle?.months_left ?? numOf(e?.fields.months_left, numOf(e?.fields.remaining_months, p?.term_months ?? 0)), payoff: Math.max(0, -cents) } : null,
@@ -340,7 +379,8 @@ function flowView(hooks: FinanceHooks, ctx: ReadContext, viewer: Viewer, party: 
   return {
     // Nor, unless they act on it by it, does its id, which can name whom it's for (`pay:<job>`, an author's `bill_jess_household`).
     id: seen || actsOn ? f.id : opaqueId(f.id),
-    label: f.label,
+    // A derived flow's label is built from names ("Lift loan autopay"): it reads as the viewer may see them.
+    label: says(viewer, f.label),
     kind: f.kind,
     from: sideName(ctx, viewer, f.from),
     to: sideName(ctx, viewer, f.to),
@@ -371,7 +411,8 @@ function signedFor(ctx: ReadContext, f: Flow, party: EntityId, cents: number): n
   return 0;
 }
 
-function householdView(hooks: FinanceHooks, ctx: ReadContext, viewer: Viewer, household: EntityId, flows: readonly Flow[]): HouseholdView {
+/** A household's shared money, its flows as the view sends them everywhere else (`viewOf`): one flow, one id, the same controls. */
+function householdView(ctx: ReadContext, viewer: Viewer, household: EntityId, flows: readonly Flow[], viewOf: (f: Flow) => FlowView): HouseholdView {
   const members = membersOf(ctx.registry, ctx.world, ctx.state, household);
   // Shared: paid by the household, split among its members only, or paid from an account it holds.
   const splitAmongMembers = (f: Flow): boolean => (f.shares ?? []).length > 0 && (f.shares ?? []).every((s) => members.includes(s.party));
@@ -394,14 +435,31 @@ function householdView(hooks: FinanceHooks, ctx: ReadContext, viewer: Viewer, ho
       return { id: idFor(ctx, viewer, m), name: nameFor(ctx, viewer, m), role: strOf(rel?.fields?.role), share: total > 0 ? Math.round((part * 1000) / total) / 10 : Math.round(1000 / Math.max(1, members.length)) / 10 };
     }),
     accounts: accountsOf(ctx, household).concat(members.length > 1 ? accountsOf(ctx, members[0] ?? household).filter((id) => members.every((m) => rightsOf(ctx.state, id, m) !== null)) : []).filter((id, i, all) => all.indexOf(id) === i),
-    flows: shared.map((f) => flowView(hooks, ctx, viewer, household, f)),
+    flows: shared.map(viewOf),
     monthly: { total, parts: members.map((m) => ({ id: idFor(ctx, viewer, m), name: nameFor(ctx, viewer, m), cents: partOf(m) })) },
   };
 }
 
 /** One party's money at its own level (DESIGN §25.11). */
 export function buildFinanceView(hooks: FinanceHooks, ctx: ReadContext, party: EntityId, player: boolean): FinanceView {
-  const viewer: Viewer = { pov: player ? ctx.world.pov : null };
+  const pov = player ? ctx.world.pov : null;
+  const viewer: Viewer = { pov, hidden: pov === null ? [] : hiddenNames(ctx, pov) };
+  // Each flow goes out once for the whole view, as the viewing party knows it (`flowView`), so every section that names it, its row, its coming-up lines and alerts, the household's and a business's, sends the same id and lets them do the same with it.
+  const shownFlows = new Map<string, FlowView>();
+  const viewOf = (f: Flow): FlowView => {
+    const known = shownFlows.get(f.id);
+    if (known) return known;
+    const made = flowView(hooks, ctx, viewer, party, f);
+    shownFlows.set(f.id, made);
+    return made;
+  };
+  let every: Map<string, Flow> | null = null;
+  /** The id the view sends a flow by, from its own; null for one there is no such flow. */
+  const shownId = (id: string): string | null => {
+    every ??= new Map(allFlows(hooks, ctx).map((f) => [f.id, f]));
+    const f = every.get(id);
+    return f ? viewOf(f).id : null;
+  };
   const e = own(ctx.state.entities, party);
   const kind = partyKindOf(ctx, party);
   // A household is its members' shared money: it is followed as closely as its most closely followed member, though it holds no account of its own.
@@ -411,32 +469,34 @@ export function buildFinanceView(hooks: FinanceHooks, ctx: ReadContext, party: E
   const detail = level >= 4;
   const features = FINANCE_FEATURES.filter((f) => featureFor(ctx, party, f));
   const mine = accountsOf(ctx, party);
-  const empty: FinanceView = { party, name: e?.name ?? party, partyKind: kind, level, detail, features, band: null, opened: true, cash: null, overview: null, accounts: [], cards: [], flows: [], jobs: [], businesses: [], investments: null, properties: [], credit: null, household: null, recent: [], notes: [], payPrefs: [] };
+  const empty: FinanceView = { party, name: e?.name ?? party, partyKind: kind, level, detail, features, band: null, opened: true, cash: null, overview: null, accounts: [], cards: [], flows: [], jobs: [], businesses: [], investments: null, properties: [], credit: null, household: null, recent: [], notes: [], payPrefs: [], paysFor: [], ownKeys: [] };
   if (level === 0) return empty;
   const worth = netWorthParts(hooks, ctx, party);
   const band = mine.length > 0 ? wealthBand(worth.net) : strOf(e?.fields.wealth, "modest");
   const opened = mine.every((id) => isOpened(ctx.state, id, openerOf(ctx.state, id)));
-  if (kind === "household" && level >= 3 && mine.length === 0) return { ...empty, band, cash: { band }, opened, household: householdView(hooks, ctx, viewer, party, allFlows(hooks, ctx)) };
+  if (kind === "household" && level >= 3 && mine.length === 0) return { ...empty, band, cash: { band }, opened, household: householdView(ctx, viewer, party, allFlows(hooks, ctx), viewOf) };
   if (level === 1 || mine.length === 0) return { ...empty, band, cash: { band }, opened };
   const firstTransactional = mine.find((id) => traitsOf(ctx, id)?.transactional);
   const shownAccounts = level >= 3 ? mine : mine.filter((id) => classOf(ctx, id) === "cash" || id === firstTransactional);
   const accounts = shownAccounts.map((id) => accountView(ctx, viewer, party, id, level, detail));
   const cash = mine.filter((id) => classOf(ctx, id) === "cash" && rightsOf(ctx.state, id, party)?.spend).reduce((a, id) => a + shown(ctx, id), 0);
   const flows = featureFor(ctx, party, "flows") ? allFlows(hooks, ctx).filter((f) => flowTouches(ctx, viewer, f, party)) : [];
-  const flowViews = flows.map((f) => flowView(hooks, ctx, viewer, party, f));
+  const flowViews = flows.map(viewOf);
   const now = ctx.state.clock;
   const upcoming: UpcomingLine[] = [];
+  const coming = new Set<string>();
   for (const [i, f] of flows.entries()) {
     const v = flowViews[i];
     const next = f.status === "active" && !flowRunOf(ctx.state, f.id).ended ? nextOf(ctx, f, 31 * DAY) : null;
     if (next === null || !v) continue;
     const cents = v.cents === null ? 0 : signedFor(ctx, f, party, v.cents);
     // The account paying it, where the viewer can see it: money into theirs can come from an account of someone they can't.
-    upcoming.push({ at: when(ctx, next), clock: next, label: f.label, cents, flow: v.id, account: own(ctx.state.entities, f.from)?.kind === "account" && visible(ctx, viewer, f.from) ? f.from : null });
+    upcoming.push({ at: when(ctx, next), clock: next, label: v.label, cents, flow: v.id, account: own(ctx.state.entities, f.from)?.kind === "account" && visible(ctx, viewer, f.from) ? f.from : null });
+    coming.add(f.id);
   }
   for (const a of accounts) {
     const cycle = cycleOf(ctx.state, a.id);
-    if (a.due && cycle && cycle.due > now && cycle.due <= now + 31 * DAY && !upcoming.some((u) => u.flow === `autopay:${a.id}`)) upcoming.push({ at: when(ctx, cycle.due), clock: cycle.due, label: `${a.name} ${a.due.label.toLowerCase()}`, cents: -a.due.cents, flow: null, account: a.id });
+    if (a.due && cycle && cycle.due > now && cycle.due <= now + 31 * DAY && !coming.has(`autopay:${a.id}`)) upcoming.push({ at: when(ctx, cycle.due), clock: cycle.due, label: `${a.name} ${a.due.label.toLowerCase()}`, cents: -a.due.cents, flow: null, account: a.id });
   }
   const alerts: AlertLine[] = [];
   for (const a of accounts) {
@@ -447,8 +507,11 @@ export function buildFinanceView(hooks: FinanceHooks, ctx: ReadContext, party: E
     if (!CLASS_TRAITS[a.class].liability && a.cents < 0) alerts.push({ tone: "neg", text: `${a.name} is overdrawn by ${money(ctx, -a.cents)}.`, account: a.id });
     for (const c of a.cards) if (c.state !== "active") alerts.push({ tone: "warn", text: `${c.name} is ${c.state}.`, account: a.id });
   }
-  // A flow that missed within the last month: what's owed may still be owed.
-  for (const v of flowViews) if (v.missed > 0 && v.status === "active" && (flowRunOf(ctx.state, v.id).last ?? -Infinity) > now - 31 * DAY) alerts.push({ tone: "warn", text: `${v.label} was missed.`, flow: v.id });
+  // A flow that missed within the last month: what's owed may still be owed. Its run is kept by its own id.
+  for (const [i, f] of flows.entries()) {
+    const v = flowViews[i];
+    if (v && v.missed > 0 && v.status === "active" && (flowRunOf(ctx.state, f.id).last ?? -Infinity) > now - 31 * DAY) alerts.push({ tone: "warn", text: `${v.label} was missed.`, flow: v.id });
+  }
   // Money in and out over the last 30 days, by category, from the journal of the accounts shown.
   const since = now - 30 * DAY;
   let pastIn = 0;
@@ -491,19 +554,24 @@ export function buildFinanceView(hooks: FinanceHooks, ctx: ReadContext, party: E
     cards: accounts.flatMap((a) => a.cards),
     flows: flowViews,
     credit: partyKindOf(ctx, party) === "person" && featureOn(level, "credit", tog) ? creditReport(ctx, party) : null,
-    household: household && featureOn(level, "households", tog) ? householdView(hooks, ctx, viewer, household, allFlows(hooks, ctx)) : null,
+    household: household && featureOn(level, "households", tog) ? householdView(ctx, viewer, household, allFlows(hooks, ctx), viewOf) : null,
     recent,
     notes,
     payPrefs: featureFor(ctx, party, "payment_prefs") && partyKindOf(ctx, party) === "person" ? tiersOf(ctx, party) : [],
   };
+  // The modules name flows by their own ids (`invoice:<id>`): those go out by the view's, and a link to a flow there is none of goes.
+  const shownAlert = (a: AlertLine): AlertLine => {
+    const flow = a.flow === undefined ? null : shownId(a.flow);
+    return flow === null ? { tone: a.tone, text: a.text, ...(a.account !== undefined ? { account: a.account } : {}) } : { ...a, flow };
+  };
   for (const section of hooks.views) {
     const extra = section(ctx, party, view, viewer.pov);
     if (extra.jobs) view.jobs.push(...extra.jobs);
-    if (extra.businesses) view.businesses.push(...extra.businesses);
+    if (extra.businesses) view.businesses.push(...extra.businesses.map((b) => ({ ...b, invoices: b.invoices.map((i) => (i.flow === undefined ? i : { ...i, flow: shownId(i.flow) ?? i.flow })) })));
     if (extra.investments) view.investments = extra.investments;
     if (extra.properties) view.properties.push(...extra.properties);
-    if (extra.upcoming && view.overview) view.overview.upcoming = [...view.overview.upcoming, ...extra.upcoming].sort((a, b) => a.clock - b.clock).slice(0, 20);
-    if (extra.alerts && view.overview) view.overview.alerts.push(...extra.alerts);
+    if (extra.upcoming && view.overview) view.overview.upcoming = [...view.overview.upcoming, ...extra.upcoming.map((u) => ({ ...u, flow: u.flow === null ? null : shownId(u.flow) }))].sort((a, b) => a.clock - b.clock).slice(0, 20);
+    if (extra.alerts && view.overview) view.overview.alerts.push(...extra.alerts.map(shownAlert));
   }
   for (const b of view.businesses) {
     // An account of the business the viewer can't see stays off its page, by id as much as in full.
@@ -519,6 +587,17 @@ export function buildFinanceView(hooks: FinanceHooks, ctx: ReadContext, party: E
     a.autopayFrom = a.autopay !== null && a.manages ? others.filter((id) => autopaySourceProblem(ctx, party, a.id, id) === null) : [];
     a.fallbacks = pays(a.id) ? others.filter((id) => pays(id) && fallsBackOn(ctx, a.id, id)) : [];
   }
+  // Where money the party only manages may not go, by the actions' own rule (`paysFor`): for each payer the hub may set a standing payment or a fallback from, which ids it may not pay. Only an interest of theirs, or an account one of those counts the worth of, can be one, so the list holds for any payee, one typed by hand too.
+  const interests = interestsOf(ctx, party);
+  const onlyManaged = (side: string): boolean => side !== "" && side !== party && visible(ctx, viewer, side) && (isParty(ctx, side) || !canSpend(ctx.state, side, party));
+  const payers = [...new Set([...listed.map((a) => a.id), ...view.flows.flatMap((f) => (f.spec ? [f.spec.from, f.spec.fallback ?? ""] : []))])].filter(onlyManaged);
+  const counted = Object.keys(ctx.state.entities).filter((id) => own(ctx.state.entities, id)?.kind === "account" && holdersOf(ctx.state, id).some((h) => interests.has(h) && rightsOf(ctx.state, id, h)?.worth === true));
+  const payees = [...interests, ...counted].filter((id) => visible(ctx, viewer, id));
+  view.paysFor = payers.map((from) => ({ from, to: payees.filter((to) => paysFor(ctx, party, to, from, interests)) }));
+  // And the keys a typed payee is theirs by: their id's and name's, and their household's.
+  const home = householdOf(ctx, party);
+  const keyed = [party, ...(home !== null && visible(ctx, viewer, home) ? [home] : [])];
+  view.ownKeys = [...new Set(keyed.flatMap((id) => [payeeKey(id), payeeKey(own(ctx.state.entities, id)?.name ?? "")]).filter((k) => k !== ""))];
   return view;
 }
 

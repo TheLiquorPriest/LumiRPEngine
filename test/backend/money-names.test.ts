@@ -28,9 +28,9 @@ describe("the player's money view names outside payees in words", () => {
     // Past Tuesday the 15th, when the house's upkeep is paid.
     await chat.timelapse(2 * 1440);
     const view = await chat.hub();
-    expect(flow(view, "property_tax:prop_birch_lane_12").to).toBe("Property tax (Michigan)");
-    expect(flow(view, "property_insurance:prop_birch_lane_12").to).toBe("Property insurance");
-    expect(flow(view, "property_upkeep:prop_birch_lane_12").to).toBe("Property upkeep");
+    expect(flow(view, "property_tax:prop_marcus_home").to).toBe("Property tax (Michigan)");
+    expect(flow(view, "property_insurance:prop_marcus_home").to).toBe("Property insurance");
+    expect(flow(view, "property_upkeep:prop_marcus_home").to).toBe("Property upkeep");
     expect(flow(view, "esttax:marcus_delgado").to).toBe("Federal tax");
     expect(flow(view, "salestax:alder_automotive_co").to).toBe("Sales tax (Michigan)");
     expect(flow(view, "insurance:shop_tow_truck").to).toBe("Insurer");
@@ -109,6 +109,29 @@ describe("an id or a link that would name someone hidden reaches the player unde
     if (!harbor) throw new Error("Helen's building isn't on her money");
     expect(view.flows.find((f) => f.id === "bill_danny_rent")).toMatchObject({ from: "someone", spec: null });
     expect(endableLeases(view, harbor)).toContain("bill_danny_rent");
+  });
+
+  test("the household's groceries, paid to someone Jess can't see from the account she holds, are one flow on her Flows and her Household: one id, hers to change on both", async () => {
+    const chat = await MoneyChat.start({ pov: "jess_kowalczyk", entities: { flow_kowalczyk_groceries: { to: "danny_okafor" } }, secret: ["danny_okafor"] });
+    const view = await chat.hub();
+    const inFlows = view.flows.find((f) => f.label === "Groceries");
+    const inHousehold = view.household?.flows.find((f) => f.label === "Groceries");
+    expect(inFlows).toMatchObject({ id: "flow_kowalczyk_groceries", editable: true });
+    expect(inHousehold).toEqual(inFlows);
+  });
+});
+
+describe("a label or a memo names only what the player may see", () => {
+  test("with the shop's lift loan secret, its autopay reaches Marcus's money as a loan's, in his standing payments, what's coming up and the line it posts, while the GM's views name it", async () => {
+    const chat = await MoneyChat.start({ pov: "marcus_delgado", secret: ["acct_alder_lift_loan"] });
+    // Past the 15th, when the autopay first runs.
+    await chat.timelapse(2 * 1440);
+    const view = await chat.hub();
+    expect(view.flows.filter((f) => f.label === "Loan autopay").length).toBe(1);
+    expect(view.overview?.upcoming.some((u) => u.label === "Loan autopay")).toBe(true);
+    expect(view.accounts.find((a) => a.id === "acct_marcus_shop")?.transactions.some((t) => t.memo === "Loan autopay")).toBe(true);
+    expect(JSON.stringify((await chat.state()).panels["economy.money"])).not.toContain("Lift loan");
+    expect((await chat.party("marcus_delgado")).flows.map((f) => f.label)).toContain("Lift loan autopay");
   });
 });
 
