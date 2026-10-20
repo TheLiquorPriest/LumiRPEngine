@@ -10,7 +10,7 @@ import type { EditOp } from "../../../shared/protocol";
 
 export const FIDELITY_LABEL: Record<Fidelity, string> = { live: "Live", near: "Near", far: "Far", background: "Background" };
 
-export const PLAN_KIND_LABEL: Record<PlanKind, string> = { errand: "Errand", meet: "Meet", visit: "Visit", work: "Work", rest: "Rest", leisure: "Leisure", other: "Other" };
+export const PLAN_KIND_LABEL: Record<PlanKind, string> = { errand: "Errand", meet: "Meet", visit: "Visit", work: "Work", rest: "Rest", leisure: "Leisure", pay: "Pay someone", lend: "Lend money", other: "Other" };
 export const PLAN_STATUS_LABEL: Record<PlanStatus, string> = { open: "Open", done: "Done", dropped: "Dropped" };
 export const COMMITMENT_KIND_LABEL: Record<CommitmentKind, string> = { promise: "Promise", debt: "Debt", grudge: "Grudge", favour: "Favour", plan: "Plan together", other: "Other" };
 export const COMMITMENT_STATUS_LABEL: Record<CommitmentStatus, string> = { open: "Open", kept: "Kept", broken: "Broken", released: "Released" };

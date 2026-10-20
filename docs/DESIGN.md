@@ -1305,6 +1305,7 @@ The Cast life planner (§8) lays each character's own plans into their days and 
   - At the start the character goes to the plan's place (home for rest), and holds its place and activity for the block's span, as a trip does: a routine's schedule edge inside it (work starting at 08:00 under an errand until 08:30) doesn't take them back.
   - After the end they take up whatever follows, going home when that names no place.
 - **Settling it:** at each slot step a `minds.plan` event marks a plan done once every block laid for it has passed. It marks one dropped once its window has passed with nothing laid: "no time for it" (routine, appointments, a stronger plan or a trip left no room), or "routine only" for a Background character. A plan cut away entirely is dropped, never done. Each records its own time, so a late catch-up settles it alike.
+- **Money plans:** a `pay` or `lend` plan is no block of anyone's day; the economy carries it out (§25.5). Its amount (`cents`; a mind writes `amount` in the world's major units) goes to the first person the plan is with, and a plan with no positive amount or no one to hand it to is left out. It's paid as a one-off at its window's start, never before the minute after it was made, from the planner's own money as their preferences choose, at the planner's Money level: in the money step's time order from Money 2, and from a world process (`economy.plans`) below it, so no plan is left open for want of an engine. It's done once paid, and dropped with the decline's reason when the money isn't there. Its journal lines say only "Payment" or "Loan", never the plan's words. The POV's plans are the player's, so none of theirs is carried out.
 - **What the player sees:** a plan's block shows its kind ("Errand", "Meeting someone", "A visit", "Work", "Rest", "Time out", "Busy") and "their own plan", never the plan's words, which are the character's private intent. The GM view shows the plan whole (§24.9).
 - **Occasions.** A day's occasion shapes its options:
   - **A day off** (the weekend, or a holiday that gives one) makes a slow morning (breakfast 7 to 11) and more time for leisure and friends.
@@ -1355,7 +1356,7 @@ Installment accounts bill an amortized payment on their due day. `months_left` c
 
 ### 25.5 Flows
 
-Every scheduled movement of money is a flow: authored flow entities, and flows the foundation and its modules derive. The foundation's own are card and loan autopay, living costs and vehicle premiums. A vehicle's premium is derived only where no insurance flow (kind `premium` or category `insurance`) insures it: one linked to the vehicle, or one its owner pays that's linked to nothing. The modules' are payroll, owner's draws and invoices.
+Every scheduled movement of money is a flow: authored flow entities, and flows the foundation and its modules derive. The foundation's own are card and loan autopay, living costs, vehicle premiums and the minds' plans to pay or lend (`plan:<planner>:<plan>`, a one-off each, §24.8). A vehicle's premium is derived only where no insurance flow (kind `premium` or category `insurance`) insures it: one linked to the vehicle, or one its owner pays that's linked to nothing. The modules' are payroll, owner's draws and invoices.
 
 A flow has:
 - a payer and a payee;

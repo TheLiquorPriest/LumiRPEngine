@@ -82,6 +82,10 @@ function planFrom(ctx: ReadContext, who: EntityId, id: string | null, v: JsonObj
   const status = v.status === undefined ? (before?.status ?? "open") : statuses.includes(v.status) ? (v.status as PlanStatus) : null;
   if (status === null) return reject("bad_value", "a plan's status is open, done or dropped");
   const closed = status === "open" ? null : before && before.status !== "open" ? before.closed : ctx.state.clock;
+  // A pay or lend plan's amount is whole minor units, kept from before unless the edit gives one; it's handed to the first person it's with.
+  const money = kind === "pay" || kind === "lend";
+  const cents = v.cents === undefined ? before?.cents : typeof v.cents === "number" && Number.isInteger(v.cents) && v.cents > 0 ? v.cents : null;
+  if (money && (cents === null || cents === undefined || withList.length === 0)) return reject("bad_value", "a pay or lend plan needs an amount in minor units and someone to hand it to");
   return {
     id: id ?? `p_${hashParts("minds.gm.plan", who, String(ctx.state.clock), what).slice(0, 10)}`,
     what,
@@ -95,6 +99,7 @@ function planFrom(ctx: ReadContext, who: EntityId, id: string | null, v: JsonObj
     source: before?.source ?? "gm",
     closed,
     reason: status === "open" ? null : (before?.reason ?? "GM edit"),
+    ...(money && cents ? { cents } : {}),
   };
 }
 

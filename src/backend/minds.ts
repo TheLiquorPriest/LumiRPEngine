@@ -18,6 +18,7 @@ import { COMMITMENT_KINDS, effectiveMemory, MIND_ANSWER_FORMATS, MIND_PROMPT_DEF
 import type { ModelUseSettings, StepConfig } from "../shared/settings";
 import { stepConfigOf } from "../shared/settings";
 import type { WorldDoc } from "../shared/world";
+import { parseMoneyInput } from "../shared/money";
 import { calendarOf, clockOfStamp, formatClock, nextTimeOfDay } from "../engine/calendar";
 import { own } from "../engine/pack-kit";
 import { hiddenNameCheck, playerKnows, witnessLines } from "../engine/player-events";
@@ -138,7 +139,10 @@ function placeNamed(world: WorldDoc, name: string): string | null {
   return Object.keys(world.places).find((id) => id === name.trim() || own(world.places, id)?.name.toLowerCase() === n) ?? null;
 }
 
-/** Plans as a model wrote them, resolved to ids and game minutes; a plan with no time, or wholly past, is left out. */
+/**
+ * Plans as a model wrote them, resolved to ids and game minutes; a plan with no time, or wholly past,
+ * is left out, and so is a pay or lend plan with no positive amount or no one to hand it to.
+ */
 export function plansFrom(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, who: EntityId, raw: JsonValue | undefined, source: MindPlan["source"]): MindPlan[] {
   const now = state.clock;
   const out: MindPlan[] = [];
@@ -154,7 +158,11 @@ export function plansFrom(reg: Registry, world: WorldDoc, state: Readonly<WorldS
     const kind: PlanKind = (PLAN_KINDS as readonly string[]).includes(str(d.kind)) ? (str(d.kind) as PlanKind) : "other";
     const withIds = [...new Set((Array.isArray(d.with) ? d.with : []).map((x) => personNamed(reg, world, state, str(x))).filter((x): x is EntityId => x !== null && x !== who))];
     const priority = typeof d.priority === "number" && Number.isFinite(d.priority) ? Math.min(PLAN_PRIORITY.max, Math.max(PLAN_PRIORITY.min, Math.round(d.priority))) : PLAN_PRIORITY.normal;
-    out.push({ id: `p_${hashParts("minds.plan", who, String(now), String(i), what).slice(0, 10)}`, what, kind, when: { from, to }, where: placeNamed(world, str(d.where)), with: withIds, priority, status: "open", made: now, source, closed: null, reason: null });
+    // The amount comes in the world's major units, as a number or as typed ("$20"); the payee is the first person it's with.
+    const money = kind === "pay" || kind === "lend";
+    const cents = !money ? 0 : typeof d.amount === "number" && Number.isFinite(d.amount) ? Math.round(d.amount * 10 ** world.currency.decimals) : (parseMoneyInput(str(d.amount), world.currency) ?? 0);
+    if (money && (cents <= 0 || withIds.length === 0)) continue;
+    out.push({ id: `p_${hashParts("minds.plan", who, String(now), String(i), what).slice(0, 10)}`, what, kind, when: { from, to }, where: placeNamed(world, str(d.where)), with: withIds, priority, status: "open", made: now, source, closed: null, reason: null, ...(money ? { cents } : {}) });
   }
   return out;
 }

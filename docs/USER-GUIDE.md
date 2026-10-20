@@ -483,6 +483,8 @@ The engine's sections are a fixed overhead in every prompt, up to the engine bud
 
 With **character minds** on, the people near the story think for themselves. Each one's mind is its own model call, made as that character and scoped to what they know: their own fields, the lore they may know, the turns they were present for, what they saw or were told, their notes, commitments and summary, the scene as they see it, and their own life (money, work, today's plans, their own agendas and secrets, how they feel about the people present). Minds are blind to each other, so no mind decides what another character says or does. A mind answers with an inner monologue, a **depiction** (how they come across), what they intend, their reactions and their plans, and the narrator is told how to depict it. After the reply, the concrete changes (money, moves) are still read from what the reply actually says, and the characters' memory is written from it.
 
+A plan to pay or lend someone money is carried out by the money engine: at the plan's time, the amount goes from the character to the person the plan is with, from their own money as they'd pay anything, and the plan is done. If they can't cover it, nothing moves and the plan is dropped. Their journal says only **Payment** or **Loan**, never what they had in mind.
+
 Each mind is recorded on the turn, so swipes and branches keep it: **Re-narrate** reuses the turn's minds, **Re-run** asks again, and Playtest and Check world never call a model for them.
 
 ### The fidelity ladder

@@ -8,16 +8,18 @@ import type { JsonObject } from "../../../shared/json";
 import type { EntityId } from "../../../shared/ids";
 import type { LedgerEvent, PostingLine } from "../../../shared/ledger";
 import { FINANCE_EVENTS, featureOn } from "../../../shared/finance";
+import { MINDS_EVENTS } from "../../../shared/minds";
 import type { EntityDef } from "../../../shared/world";
 import { isMaterialized, pinnedVersion, tablesRevision } from "../../../engine/materialize";
 import { numOf, own, strOf } from "../../../engine/pack-kit";
 import type { ReadContext, SlotInfo } from "../../../engine/registry";
+import { rulesetFloor } from "../../../engine/registry-impl";
 import type { Rng } from "../../../engine/rng";
 import { isGone, kindIs } from "../../../engine/scope";
 import type { FinanceHooks } from "./module";
 import { cycleTasks, type CycleTask } from "./cycle";
 import { hasCreditFile, monthlyScore, scoreInstants } from "./credit";
-import { allFlows, flowLevel, occurrences, runOccurrence } from "./flows";
+import { allFlows, flowLevel, occurrences, planPayments, runOccurrence } from "./flows";
 import { flowRunOf, isOpened } from "./journal";
 import { accountsOf, bandByLabel, external, openerOf } from "./model";
 import { featureFor, isParty, toggles } from "./pay";
@@ -78,9 +80,10 @@ export function openingEvent(ctx: ReadContext, who: EntityId, claimed?: Set<Enti
 
 /** The money engine's step: every money instant in the slot, in time order, each seeing the last. */
 export function moneyStep(hooks: FinanceHooks, slot: SlotInfo, ctx: ReadContext, rng: (entity: EntityId) => Rng): LedgerEvent[] {
-  const tasks: CycleTask[] = cycleTasks(ctx, slot.start, slot.end);
+  const tasks: CycleTask[] = [...cycleTasks(ctx, slot.start, slot.end), ...planTasks(hooks, slot, ctx, rng)];
   for (const flow of allFlows(hooks, ctx)) {
-    if (flow.status !== "active") continue;
+    // A mind's plan is a one-off its own task carries out, not a standing payment.
+    if (flow.status !== "active" || flow.source === "minds") continue;
     const level = flowLevel(ctx, flow);
     if (!featureOn(level, "flows", toggles(ctx.world))) continue;
     const run = flowRunOf(ctx.state, flow.id);
@@ -98,11 +101,54 @@ export function moneyStep(hooks: FinanceHooks, slot: SlotInfo, ctx: ReadContext,
       for (const at of scores) tasks.push({ at, rank: 6, key: `score:${person}`, run: (r) => (hasCreditFile(r.ctx, person) ? void r.emit(monthlyScore(r.ctx, person, at)) : undefined) });
     }
   }
+  return runTasks(ctx, tasks);
+}
+
+/** Tasks run in time order (then rank, then key), each seeing the last, as one run's events. */
+function runTasks(ctx: ReadContext, tasks: CycleTask[]): LedgerEvent[] {
   if (tasks.length === 0) return [];
   tasks.sort((a, b) => a.at - b.at || a.rank - b.rank || (a.key < b.key ? -1 : a.key > b.key ? 1 : 0));
   const run = new Run(ctx);
   for (const t of tasks) t.run(run);
   return run.out;
+}
+
+/**
+ * A mind's plans to pay or lend someone, carried out (DESIGN §24.8): each one payment at its time,
+ * at the planner's own Money level, as a one-off they hand over rather than a standing payment, so
+ * it needs no flows. A step reaching its time late pays it at the step's first minute. The plan is
+ * done once paid, and dropped with the reason when the money wasn't there.
+ */
+function planTasks(hooks: FinanceHooks, slot: SlotInfo, ctx: ReadContext, rng: (entity: EntityId) => Rng): CycleTask[] {
+  return planPayments(ctx).flatMap(({ entity, plan, flow, at: due }): CycleTask[] => {
+    if (due > slot.end) return [];
+    const at = Math.max(due, slot.start + 1);
+    return [
+      {
+        at,
+        rank: 3,
+        key: `flow:${flow.id}`,
+        run: (r) => {
+          const ran = runOccurrence(hooks, r, flow, at, rng(`flow:${flow.id}:${at}`), false);
+          const paid = ran?.outcome === "paid";
+          r.emit([{ type: MINDS_EVENTS.plan, data: { entity, plan: plan.id, status: paid ? "done" : "dropped", at, reason: paid ? null : (ran?.reason ?? "the payment didn't go through") } }]);
+        },
+      },
+    ];
+  });
+}
+
+/** The Money level from which the money step runs: below it, `planStep` carries out the minds' plans alone. */
+export const MONEY_STEP_LEVEL = 2;
+
+/**
+ * The minds' money plans where the money step doesn't run (Money below 2): carried out all the
+ * same, each as any payment at its planner's level is (nothing moves at 0), so no plan is left open
+ * for want of an engine to settle it.
+ */
+export function planStep(hooks: FinanceHooks, slot: SlotInfo, ctx: ReadContext, rng: (entity: EntityId) => Rng): LedgerEvent[] {
+  if (rulesetFloor(ctx.world, "money", ctx.state.realism.levels.money) >= MONEY_STEP_LEVEL) return [];
+  return runTasks(ctx, planTasks(hooks, slot, ctx, rng));
 }
 
 // ---------------------------------------------------------------- materialization

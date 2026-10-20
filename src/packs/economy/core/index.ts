@@ -60,7 +60,7 @@ import {
   type PriceRef,
 } from "./model";
 import { accountLevel, asUnit, charge, featureFor, isParty, isRejection, l1Move, loseWith, mayUse, move, overdraftRoom, payMethodOf, postGuard, posting, reprice, setCash, signal, transfer, transferParty, depositAccount, type ChargeOptions, type ChargeService, type PayMethod } from "./pay";
-import { materializeMoney, moneyStep, openAccounts, openingEvent } from "./process";
+import { materializeMoney, MONEY_STEP_LEVEL, moneyStep, openAccounts, openingEvent, planStep } from "./process";
 import { moneySummary } from "./summary";
 import { buildFinanceView, buildMoneyView, buildPeopleMoney } from "./view";
 import { canAfford, netWorth, wealthOf } from "./worth";
@@ -465,7 +465,9 @@ function registerRest(r: CoreRegistry, hooks: FinanceHooks): void {
 
   // Openings first, so the money engine sees every authored balance.
   r.process({ id: "economy.accounts", domain: "money", minLevel: 3, step: (_slot, ctx) => openAccounts(ctx) });
-  r.process({ id: "economy.money", domain: "money", minLevel: 2, step: (slot, ctx, rng) => moneyStep(hooks, slot, ctx, rng) });
+  r.process({ id: "economy.money", domain: "money", minLevel: MONEY_STEP_LEVEL, step: (slot, ctx, rng) => moneyStep(hooks, slot, ctx, rng) });
+  // Below the money step, a mind's plan to pay or lend is still carried out and settled.
+  r.process({ id: "economy.plans", domain: "money", minLevel: 0, step: (slot, ctx, rng) => planStep(hooks, slot, ctx, rng) });
   r.materializer({ domain: "money", version: 2, versions: [1, 2], materialize: (entity, ctx, rng, version) => materializeMoney(entity, ctx, rng, version) });
 
   r.renderer({

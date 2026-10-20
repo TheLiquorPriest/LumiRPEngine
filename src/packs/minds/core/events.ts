@@ -48,7 +48,9 @@ export function isPlan(v: JsonValue | undefined): v is MindPlan & JsonObject {
     finite(v.made) &&
     (v.source === "mind" || v.source === "memory" || v.source === "gm") &&
     (v.closed === null || finite(v.closed)) &&
-    (v.reason === null || str(v.reason))
+    (v.reason === null || str(v.reason)) &&
+    // A pay or lend plan hands a whole positive amount to the first person it's with; no other kind carries one.
+    (v.kind === "pay" || v.kind === "lend" ? finite(v.cents) && Number.isInteger(v.cents) && v.cents > 0 && v.with.length > 0 : v.cents === undefined)
   );
 }
 
@@ -75,7 +77,7 @@ export function isCommitment(v: JsonValue | undefined): v is MindCommitment & Js
 
 /** Copies of model-shaped values as plain state (the event's own objects are never aliased into the state). */
 function planOf(v: MindPlan): MindPlan {
-  return { id: v.id, what: v.what, kind: v.kind, when: { from: v.when.from, to: v.when.to }, where: v.where, with: [...v.with], priority: v.priority, status: v.status, made: v.made, source: v.source, closed: v.closed, reason: v.reason };
+  return { id: v.id, what: v.what, kind: v.kind, when: { from: v.when.from, to: v.when.to }, where: v.where, with: [...v.with], priority: v.priority, status: v.status, made: v.made, source: v.source, closed: v.closed, reason: v.reason, ...(v.cents !== undefined ? { cents: v.cents } : {}) };
 }
 
 function noteOf(v: MindNote): MindNote {

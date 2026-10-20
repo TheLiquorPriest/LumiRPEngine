@@ -401,9 +401,12 @@ export function effectiveMemory(world: { readonly minds?: unknown }, settings: P
 
 // ---------------------------------------------------------------- what a mind answers
 
-/** What a plan is, as the castlife planner maps it to an activity (DESIGN §24.8). */
-export type PlanKind = "errand" | "meet" | "visit" | "work" | "rest" | "leisure" | "other";
-export const PLAN_KINDS: readonly PlanKind[] = ["errand", "meet", "visit", "work", "rest", "leisure", "other"];
+/**
+ * What a plan is: the castlife planner maps the everyday kinds to an activity (DESIGN §24.8); the
+ * economy carries out `pay` and `lend`, handing `cents` to the first person the plan is with.
+ */
+export type PlanKind = "errand" | "meet" | "visit" | "work" | "rest" | "leisure" | "pay" | "lend" | "other";
+export const PLAN_KINDS: readonly PlanKind[] = ["errand", "meet", "visit", "work", "rest", "leisure", "pay", "lend", "other"];
 export type PlanStatus = "open" | "done" | "dropped";
 
 /** A plan's priority: 1 (whenever it fits) to 5 (it must happen); 3 is ordinary. */
@@ -429,6 +432,8 @@ export type MindPlan = {
   /** When it closed and why (a planner reason, a GM note); null while open. */
   closed: number | null;
   reason: string | null;
+  /** What a `pay` or `lend` plan hands over, in the world currency's minor units; no other kind has one. */
+  cents?: number;
 };
 
 /** A promise, debt, grudge, favour or plan with someone: kept until resolved, never faded (DESIGN §24.4). */
@@ -559,6 +564,8 @@ export interface PlanDraft {
   where?: string;
   with?: string[];
   priority?: number;
+  /** A `pay` or `lend` plan's amount, in the world currency's major units. */
+  amount?: number | string;
 }
 
 /** A mind's answer (DESIGN §24.5), JSON. */
@@ -792,21 +799,21 @@ export const MIND_PROMPT_DEFAULTS: Readonly<Record<MindPurpose, string>> = Objec
 /** Each minds step's answer: the JSON the engine reads, appended after the instructions whoever wrote them. */
 export const MIND_ANSWER_FORMATS: Readonly<Record<MindPurpose, string>> = Object.freeze({
   mind: [
-    'Answer with JSON only: {"monologue": "...", "depiction": "...", "intent": "...", "reactions": ["..."], "plans": [{"what": "...", "kind": "errand|meet|visit|work|rest|leisure|other", "when": {"from": "YYYY-MM-DD HH:MM", "to": "YYYY-MM-DD HH:MM"}, "where": "a place", "with": ["a name"], "priority": 3}], "mood": "...", "interrupt": {"reason": "..."}}',
+    'Answer with JSON only: {"monologue": "...", "depiction": "...", "intent": "...", "reactions": ["..."], "plans": [{"what": "...", "kind": "errand|meet|visit|work|rest|leisure|pay|lend|other", "when": {"from": "YYYY-MM-DD HH:MM", "to": "YYYY-MM-DD HH:MM"}, "where": "a place", "with": ["a name"], "priority": 3, "amount": 20}], "mood": "...", "interrupt": {"reason": "..."}}',
     "- monologue: their private reasoning in the first person, at most six sentences.",
     "- depiction: how they come across right now, as behaviour anyone present could see (posture, tone, what they do). Never a secret, an unspoken reason or a thought.",
     "- intent: what they mean to do next, in one sentence.",
     '- reactions: up to three short conditional reactions ("if pressed about the cellar, changes the subject").',
-    "- plans: only real intentions for later, with local times; priority 1 (whenever it fits) to 5 (it must happen). Leave the list empty when there are none.",
+    "- plans: only real intentions for later, with local times; priority 1 (whenever it fits) to 5 (it must happen); kind pay or lend, with amount, when they mean to hand someone money, and no amount otherwise. Leave the list empty when there are none.",
     "- mood: one or two words.",
     "- interrupt: only when the moment is a beat inside a time skip and what they'd do now would interrupt the player character's skipped time (seeking them out, calling them). Leave it out otherwise.",
   ].join("\n"),
   memory: [
-    'Answer with JSON only: {"notes": [{"text": "...", "salience": 3}], "commitments": [{"kind": "promise|debt|grudge|favour|plan|other", "with": ["a name"], "text": "...", "due": "YYYY-MM-DD HH:MM"}], "resolved": [{"id": "...", "status": "kept|broken|released"}], "plans": [{"what": "...", "kind": "errand|meet|visit|work|rest|leisure|other", "when": {"from": "YYYY-MM-DD HH:MM", "to": "YYYY-MM-DD HH:MM"}, "where": "a place", "with": ["a name"], "priority": 3}], "told": [{"to": ["a name"], "what": "..."}], "summary": "..."}',
+    'Answer with JSON only: {"notes": [{"text": "...", "salience": 3}], "commitments": [{"kind": "promise|debt|grudge|favour|plan|other", "with": ["a name"], "text": "...", "due": "YYYY-MM-DD HH:MM"}], "resolved": [{"id": "...", "status": "kept|broken|released"}], "plans": [{"what": "...", "kind": "errand|meet|visit|work|rest|leisure|pay|lend|other", "when": {"from": "YYYY-MM-DD HH:MM", "to": "YYYY-MM-DD HH:MM"}, "where": "a place", "with": ["a name"], "priority": 3, "amount": 20}], "told": [{"to": ["a name"], "what": "..."}], "summary": "..."}',
     "- notes: at most three things they will remember, in their own perspective; salience 1 (passing) to 5 (unforgettable).",
     "- commitments: promises, debts, grudges, favours and plans with someone that this turn made; due only when a time was set.",
     "- resolved: their open commitments (listed with ids) that this turn kept, broke or released.",
-    "- plans: intentions with times that this turn formed.",
+    "- plans: intentions with times that this turn formed; kind pay or lend, with amount, when they mean to hand someone money, and no amount otherwise.",
     "- told: what they told whom in this turn, in a few words each.",
     "- summary: their one-paragraph summary rewritten, only when this turn changed who they are or what they're about; leave it out otherwise.",
     "Use empty lists for anything the turn didn't give.",

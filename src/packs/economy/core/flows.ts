@@ -18,6 +18,7 @@ import type { ReadContext, Rejection } from "../../../engine/registry";
 import type { Rng } from "../../../engine/rng";
 import { isGone, kindIs, scopeEnv } from "../../../engine/scope";
 import type { FinanceHooks, FlowPosting } from "./module";
+import type { MindPlan } from "../../../shared/minds";
 import { cycleOf, flowRunOf, reject } from "./journal";
 import { availableOf, balance, canSpend, classOf, hasLedger, holdersOf, outsideAccount, priceOf, productOf, statusOf, traitsOf } from "./model";
 import { accountLevel, asUnit, charge, chooseSource, depositAccount, isParty, isRejection, mostPayable, overdraftEvents, overdraftRoom, payeeSide, posting, signal, toggles, type PayMethod } from "./pay";
@@ -309,6 +310,40 @@ function foundationFlows(ctx: ReadContext): Flow[] {
     if (insured.has(p.vehicle) || payers.has(p.owner) || p.cents <= 0) continue;
     out.push({ id: `insurance:${p.vehicle}`, label: p.label, kind: "premium", from: p.owner, to: "insurer", amount: { fixed: p.cents }, schedule: { every: "month", days: [1] }, shortfall: "skip", category: "insurance", link: p.vehicle, status: "active", method: "account", source: "vehicle" });
   }
+  out.push(...planPayments(ctx).map((p) => p.flow));
+  return out;
+}
+
+/** A mind's open plan to pay or lend someone, the one-off flow that carries it out, and when it pays. */
+export interface PlanPayment {
+  entity: EntityId;
+  plan: MindPlan;
+  flow: Flow;
+  at: number;
+}
+
+/**
+ * The open `pay` and `lend` plans of everyone but the POV, whose money is the player's (DESIGN §24.8):
+ * each a one-off from the planner, as their preferences choose, to the first person it's with, at
+ * its window's start and never before the minute after it was made. Its label names only the kind,
+ * as the plan's words are the character's private intent.
+ */
+export function planPayments(ctx: ReadContext): PlanPayment[] {
+  const plans = optionalQuery(ctx, "minds.plans");
+  if (!plans) return [];
+  const s = ctx.state;
+  const out: PlanPayment[] = [];
+  for (const who of Object.keys(s.entities).sort()) {
+    const e = own(s.entities, who);
+    if (!e || who === ctx.world.pov || isGone(s, who) || !kindIs(ctx.registry, ctx.world, e.kind, "person") || !isParty(ctx, who)) continue;
+    for (const plan of plans(ctx, who)) {
+      const to = plan.with[0];
+      if (plan.status !== "open" || (plan.kind !== "pay" && plan.kind !== "lend") || !plan.cents || !to || !isParty(ctx, to)) continue;
+      const lend = plan.kind === "lend";
+      const at = Math.max(plan.when.from, plan.made + 1);
+      out.push({ entity: who, plan, at, flow: { id: `plan:${who}:${plan.id}`, label: lend ? "Loan" : "Payment", kind: "other", from: who, to, amount: { fixed: plan.cents }, schedule: { once: at }, shortfall: "skip", category: lend ? "loan" : "payment", status: "active", source: "minds" } });
+    }
+  }
   return out;
 }
 
@@ -522,19 +557,26 @@ function runEvent(flow: Flow, at: number, outcome: FlowOutcome, cents: number, n
   return { type: FINANCE_EVENTS.flowRun, data: { flow: flow.id, label: flow.label, at, outcome, cents, ...(short > 0 ? { short } : {}), state } };
 }
 
+/** What one occurrence of a flow did, and why when it didn't pay in full. */
+export interface FlowRan {
+  outcome: FlowOutcome;
+  reason: string | null;
+}
+
 /**
  * One occurrence of a flow (or a retry of one): what it pays, and what its shortfall policy does
  * when the money isn't there. Every outcome records the flow's run; the payer hears of a decline.
+ * Null when there was nothing to run: the flow has ended, or its module gave no amount.
  */
-export function runOccurrence(hooks: FinanceHooks, run: Run, flow: Flow, at: number, rng: Rng, retry: boolean): void {
+export function runOccurrence(hooks: FinanceHooks, run: Run, flow: Flow, at: number, rng: Rng, retry: boolean): FlowRan | null {
   const ctx = run.ctx;
   const before = flowRunOf(ctx.state, flow.id);
-  if (before.ended) return;
+  if (before.ended) return null;
   const amount = retry && before.retry ? { cents: before.retry.cents } : occurrenceAmount(hooks, ctx, flow, at, rng, before.deferred ?? 0);
   const ended = (done: number, missed: number): boolean => (flow.count !== undefined && done + missed >= flow.count) || false;
   const who = noteParty(ctx, flow);
   const money = (c: number): string => formatMoney(c, ctx.world.currency);
-  if (amount === null) return;
+  if (amount === null) return null;
   // A retry still waiting from an earlier occurrence outlives this one, whatever it does: it's that occurrence's money.
   const waiting = !retry && before.retry ? before.retry : undefined;
   const pending = waiting ? { retry: waiting } : {};
@@ -542,7 +584,7 @@ export function runOccurrence(hooks: FinanceHooks, run: Run, flow: Flow, at: num
     // The module couldn't work the amount out: nothing moves, it counts as missed, and what was carried still waits.
     const next: FlowRunState = { done: before.done, missed: before.missed + 1, ...pending, ...(before.deferred ? { deferred: before.deferred } : {}), ended: ended(before.done, before.missed + 1) };
     run.emit([runEvent(flow, at, "declined", 0, next)]);
-    return;
+    return { outcome: "declined", reason: amount.reason };
   }
   const cents = amount.cents;
   // Only the overdraft policy pays into overdraft room; every other policy acts when the money itself isn't there.
@@ -565,7 +607,7 @@ export function runOccurrence(hooks: FinanceHooks, run: Run, flow: Flow, at: num
       const next: FlowRunState = { done: before.done + 1, missed: before.missed, ...pending, ...(own_lines && before.deferred ? { deferred: before.deferred } : {}), ended: ended(before.done + 1, before.missed) };
       run.emit([runEvent(flow, at, "paid", attempt.paid, next)]);
       if (who && flow.kind !== "living" && amount.posting?.quiet !== true && attempt.paid > 0) run.emit([signal("bill", `${flow.label}: ${money(attempt.paid)} ${flowIsIncome(ctx, flow, who) ? "received" : "paid"}.`, who, at)]);
-      return;
+      return { outcome: "paid", reason: null };
     }
   }
   const reason = "code" in attempt ? attempt.reason : "the payment didn't go through";
@@ -581,7 +623,7 @@ export function runOccurrence(hooks: FinanceHooks, run: Run, flow: Flow, at: num
         const next: FlowRunState = { done: before.done + 1, missed: before.missed, ...pending, ended: ended(before.done + 1, before.missed) };
         run.emit([runEvent(flow, at, "partial", part, next, cents - part)]);
         if (who) run.emit([signal("decline", `${flow.label}: only ${money(part)} of ${money(cents)} paid.`, who, at)]);
-        return;
+        return { outcome: "partial", reason };
       }
       break;
     }
@@ -593,7 +635,7 @@ export function runOccurrence(hooks: FinanceHooks, run: Run, flow: Flow, at: num
         const next: FlowRunState = { done: before.done, missed: before.missed, retry: again, ...(before.deferred ? { deferred: 0 } : {}) };
         run.emit([...nsf, runEvent(flow, at, "retry", 0, next, cents)]);
         if (who) run.emit([signal("decline", `${flow.label} (${money(cents)}) didn't go through; it will be tried again.`, who, at)]);
-        return;
+        return { outcome: "retry", reason };
       }
       break;
     }
@@ -605,7 +647,7 @@ export function runOccurrence(hooks: FinanceHooks, run: Run, flow: Flow, at: num
           const next: FlowRunState = { done: before.done + 1, missed: before.missed, ...pending, ended: ended(before.done + 1, before.missed) };
           run.emit([runEvent(flow, at, "fallback", cents, next)]);
           if (who) run.emit([signal("bill", `${flow.label}: ${money(cents)} paid from ${labelOf(ctx, fallback)}.`, who, at)]);
-          return;
+          return { outcome: "fallback", reason: null };
         }
       }
       break;
@@ -614,14 +656,16 @@ export function runOccurrence(hooks: FinanceHooks, run: Run, flow: Flow, at: num
       const next: FlowRunState = { done: before.done, missed: before.missed + 1, ...pending, deferred: cents + (own_lines ? (before.deferred ?? 0) : 0), ended: ended(before.done, before.missed + 1) };
       run.emit([runEvent(flow, at, "deferred", 0, next, cents)]);
       if (who) run.emit([signal("decline", `${flow.label} (${money(cents)}) couldn't be paid; it carries to next time.`, who, at)]);
-      return;
+      return { outcome: "deferred", reason };
     }
     default:
       break;
   }
+  const outcome = flow.shortfall === "skip" ? "skipped" : "declined";
   const next: FlowRunState = { done: before.done, missed: before.missed + 1, ...pending, ended: ended(before.done, before.missed + 1) };
-  run.emit([...nsf, runEvent(flow, at, flow.shortfall === "skip" ? "skipped" : "declined", 0, next, cents)]);
+  run.emit([...nsf, runEvent(flow, at, outcome, 0, next, cents)]);
   if (who) run.emit([signal("decline", `${flow.label} (${money(cents)}) was declined: ${reason}.`, who, at)]);
+  return { outcome, reason };
 }
 
 /** Whether a flow brings money to `who` rather than taking it. */
