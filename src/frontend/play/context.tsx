@@ -2,7 +2,8 @@
 // confirmation, the engine sections with their token cost, clipping and delivery, the section
 // budget, and the lore each model step read (§5.4): its searches, the entries it was given with
 // their token cost, its lookups and how they reached the model; the minds calls (whose mind ran, at
-// which level, how it went and what it cost: never a word of what a mind said); and the call meter.
+// which level, how it went and what it cost, only for people the player can see and has met, and
+// never a word of what a mind said or whether its depiction was kept back); and the call meter.
 // Built by the backend as `core.context`: an unrevealed secret entry isn't in it at all, a search
 // that would name a secret or someone the player hasn't met is withheld, a step that may read a
 // secret or an NPC's private options shows its lookups without their text ("—"), and an NPC choice,
@@ -45,10 +46,7 @@ function decodeLore(value: unknown): LoreStepTrace[] {
 
 const MIND_OUTCOME: Record<MindCallTrace["outcome"], { text: string; tone: "neutral" | "pos" | "neg" | "warn" }> = {
   recorded: { text: "recorded", tone: "pos" },
-  reused: { text: "reused", tone: "neutral" },
   failed: { text: "failed", tone: "neg" },
-  leak_blocked: { text: "kept from the narrator", tone: "warn" },
-  skipped_limit: { text: "over the limit", tone: "neutral" },
 };
 const MIND_PHASE: Record<MindCallTrace["phase"], string> = { pre: "Before the reply", post: "After the reply", skip: "In a time skip" };
 const MIND_PROMPT: Record<MindCallTrace["prompt"], string> = { world: "the world's prompt", override: "your prompt", default: "the built-in prompt" };
@@ -84,7 +82,10 @@ export function decodeContextView(value: unknown): ContextView | null {
         id: str(g.id),
         at: num(g.at),
         activation: oneOf(g.activation, ["confirmed", "unconfirmed"] as const, "unconfirmed"),
-        sections: list(g.sections, (s) => ({ slot: str(s.slot), label: str(s.label, str(s.slot)), tokens: num(s.tokens), clipped: s.clipped === true, delivery: oneOf(s.delivery, DELIVERY, "unchecked") })),
+        sections: list(g.sections, (s) => {
+          const cut = optNum(s.cut);
+          return { slot: str(s.slot), label: str(s.label, str(s.slot)), tokens: num(s.tokens), clipped: s.clipped === true, ...(cut !== undefined && cut > 0 ? { cut } : {}), delivery: oneOf(s.delivery, DELIVERY, "unchecked") };
+        }),
         budget: { sections: num(budget.sections), used: num(budget.used) },
         lore: decodeLore(g.lore),
         minds: decodeMinds(g.minds),
@@ -97,6 +98,13 @@ const ACTIVATION: Record<ContextView["generations"][number]["activation"], { tex
   confirmed: { text: "Activation confirmed", tone: "pos" },
   unconfirmed: { text: "Not confirmed", tone: "warn" },
 };
+
+/** Why a section's row is short: left out over the section budget, or (the Minds section) lines left out over its own. */
+export function sectionNote(s: ContextView["generations"][number]["sections"][number]): string | undefined {
+  if (s.cut === undefined) return s.clipped ? "Left out: over the section budget" : undefined;
+  if (s.clipped) return "Left out: over its own budget";
+  return `${s.cut} line${s.cut === 1 ? "" : "s"} left out: over its own budget`;
+}
 
 /** The model calls replies make: this turn's, the average and the 95th percentile. */
 function CallMeter(props: { meter: CallMeterView }) {
@@ -174,9 +182,9 @@ export function ContextPanel(props: PanelProps) {
                     key={s.slot}
                     id={s.slot}
                     title={s.label}
-                    subtitle={s.clipped ? "Left out: over the section budget" : undefined}
+                    subtitle={sectionNote(s)}
                     value={`${s.tokens} tok`}
-                    valueTone={s.clipped ? "warn" : undefined}
+                    valueTone={s.clipped || s.cut !== undefined ? "warn" : undefined}
                     badge={s.clipped ? <Badge tone="warn">Clipped</Badge> : <Badge tone={DELIVERY_BADGE[s.delivery].tone}>{DELIVERY_BADGE[s.delivery].text}</Badge>}
                   />
                 ))}
@@ -224,9 +232,9 @@ export function ContextPanel(props: PanelProps) {
                 {(generation.minds ?? []).map((m, i) => (
                   <ActionRow
                     key={`${m.phase}:${m.purpose}:${i}`}
-                    title={`${m.who} · ${STEP_LABEL[m.purpose]}`}
-                    subtitle={`${FIDELITY_LABEL[m.level]} · ${MIND_PHASE[m.phase]} · ${MIND_PROMPT[m.prompt]}`}
-                    value={m.outcome === "skipped_limit" || m.outcome === "reused" ? undefined : `${(m.ms / 1000).toFixed(1)} s · ${m.tokens} tok`}
+                    title={m.who === "" ? STEP_LABEL[m.purpose] : `${m.who} · ${STEP_LABEL[m.purpose]}`}
+                    subtitle={[...(m.level ? [FIDELITY_LABEL[m.level]] : []), MIND_PHASE[m.phase], MIND_PROMPT[m.prompt]].join(" · ")}
+                    value={`${(m.ms / 1000).toFixed(1)} s · ${m.tokens} tok`}
                     actions={<Badge tone={MIND_OUTCOME[m.outcome].tone}>{MIND_OUTCOME[m.outcome].text}</Badge>}
                   />
                 ))}
