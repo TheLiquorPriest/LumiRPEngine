@@ -640,7 +640,8 @@ describe("ledger scenarios", () => {
     expect(wins).toBeGreaterThan(70);
     expect(wins).toBeLessThan(130);
     await expectAgree(h, chat);
-  });
+    // 200 Re-runs, each stopped and started again after its engine run.
+  }, 30_000);
 
   test("a same-roll world reproduces the roll on every Re-run (L12)", async () => {
     const h = new Harness("same_roll");
