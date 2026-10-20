@@ -2,6 +2,7 @@
 // estimated tax on income nobody withholds from.
 
 import { describe, expect, test } from "bun:test";
+import { calendarOf, clockOfLocal } from "../../../src/engine/calendar";
 import { investmentTax } from "../../../src/packs/economy/core/gains";
 import { incomeIn } from "../../../src/packs/economy/core/records";
 import { act, entity, ext, lapse, line, paid, paychecks, posts, setup } from "./work-world";
@@ -57,5 +58,20 @@ describe("work taxes: business income", () => {
     const [payout] = posts(w, /^Profit distribution/);
     expect(incomeIn(w.state, "maya", 2026)).toMatchObject({ dividend: line(payout!, "maya_checking"), profit: 0 });
     expect(investmentTax(w.ctx, "maya", 2026).cents).toBeGreaterThan(0);
+  });
+
+  test("a C corporation pays its income tax on the last four months' profit on 15 January, from its own account", () => {
+    // The café, an Ohio corporation, takes walk-in customers from Monday 28 December.
+    const { w } = setup((wd) => {
+      wd.start.at = "2026-12-28T07:30";
+      Object.assign(wd.entities.daybreak!.fields, { structure: "c_corp", region: "oh", daily_sales: 50_000 });
+    });
+    lapse(w, 19 * DAY);
+    const cal = calendarOf(w.world);
+    const books = w.ctx.query("economy.business_books")(w.ctx, "daybreak", clockOfLocal(cal, "2026-09-01T00:00"), clockOfLocal(cal, "2027-01-01T00:00"));
+    expect(books.profit).toBeGreaterThan(0);
+    // The federal 21% and Ohio's 1.4%.
+    const [tax] = posts(w, /^Corporate income tax/);
+    expect(tax?.lines).toEqual([{ account: "db_operating", amount: -Math.round((books.profit * 22.4) / 100) }, { account: ext("tax:federal"), amount: Math.round((books.profit * 22.4) / 100) }]);
   });
 });

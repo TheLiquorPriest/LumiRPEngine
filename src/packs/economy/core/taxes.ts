@@ -499,7 +499,11 @@ export function registerTaxes(r: FinanceRegistry): void {
     }
     const cents = periods.reduce((a, p) => a + p.cents, 0);
     if (cents <= 0) return null;
-    return { cents, memo: business ? "Corporate income tax" : "Estimated tax", kind: "payment", category: business ? "business_tax" : "tax", extra: [{ type: "economy.estimated_tax", data: { party, periods, ...(business ? { business: true } : {}) } }] };
+    // A corporation pays from its operating account, which the flow would pay to an outside account of
+    // its own naming; its posting names the federal tax account itself, as withholding does.
+    const payer = business ? operatingAccount(api, ctx, party) : null;
+    const lines = payer ? [{ account: payer, amount: -cents }, { account: api.outside("tax:federal"), amount: cents }] : undefined;
+    return { cents, ...(lines ? { lines } : {}), memo: business ? "Corporate income tax" : "Estimated tax", kind: "payment", category: business ? "business_tax" : "tax", extra: [{ type: "economy.estimated_tax", data: { party, periods, ...(business ? { business: true } : {}) } }] };
   });
   core.query("economy.ordinary_income", (ctx, person, year) => ordinaryIncome(api, ctx, person, year));
   core.query("economy.income_tax", (ctx, filing, taxable) => bracketTax(federalTables(ctx).brackets[filing], taxable));
