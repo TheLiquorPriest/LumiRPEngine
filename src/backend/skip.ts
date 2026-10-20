@@ -149,8 +149,8 @@ export interface SkipRun {
 
 /**
  * The `skip` step (DESIGN §24.7), when the user turned it on: further beats the model proposes inside
- * the span, from the beats found and what the people involved plan. Its prompt is the world's
- * template, else the user's own, else the built-in. Its reasons are the GM's to read only: no mind and
+ * the span, from the beats found and what the people involved plan. Its prompt is the user's own,
+ * else the world's template, else the built-in. Its reasons are the GM's to read only: no mind and
  * no player surface is given them, since they may come of someone's private intent. Its call joins
  * the inspector's minds calls, with no text and as no one.
  */
