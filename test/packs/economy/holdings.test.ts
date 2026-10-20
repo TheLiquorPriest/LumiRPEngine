@@ -574,6 +574,31 @@ describe("holdings: property", () => {
     expect(terms(bare)).toEqual([{ months: 360, usual: true }]);
   });
 
+  test("a written lease keeps its unit until it's over: one not begun yet, or paused, shows as let with no vacant line beside it, and one cancelled as ended", () => {
+    const flat = (id: string): EntityDef => ({ id, kind: "property", name: `Flat ${id}`, tier: "background", fields: { place: "jordan_house", owners: [{ party: "you", role: "owner", share: 100 }], value: 20_000_000 }, relations: [] });
+    const lease = (id: string, property: string, start: string): EntityDef => ({ id, kind: "flow", name: `Lease: Jordan Price, ${property}`, tier: "background", fields: { flow_kind: "rent", from: "jordan_checking", to: "checking", amount_cents: 120_000, every: "month", days: [1], start, end: "2027-09-30", category: "rent", link: property, status: "active" }, relations: [] });
+    const w = setup((world) => {
+      world.entities.jordan_checking = account("jordan_checking", "Jordan's checking", "jordan", "checking", 900_000);
+      world.entities.flat_a = flat("flat_a");
+      world.entities.flat_b = flat("flat_b");
+      // Jordan's lease on flat A is signed to begin on 1 November; on flat B it began on 1 October.
+      world.entities.lease_a = lease("lease_a", "flat_a", "2026-11-01");
+      world.entities.lease_b = lease("lease_b", "flat_b", "2026-10-01");
+    });
+    const lines = (property: string): [string, string][] => (w.ctx.query("economy.finance")(w.ctx, "you", true).properties.find((p) => p.id === property)?.leases ?? []).map((l) => [l.flow, l.state]);
+    expect(lines("flat_a")).toEqual([["lease_a", "let"]]);
+    expect(lines("flat_b")).toEqual([["lease_b", "let"]]);
+    // Paused, as the hub's Pause on a standing payment does: flat B is still Jordan's.
+    run(w, "economy.flow_status", { flow: "lease_b", status: "paused", who: "jordan" });
+    expect(lines("flat_b")).toEqual([["lease_b", "let"]]);
+    // Cancelled before its last day, it's over, and the flat stands vacant.
+    run(w, "economy.flow_status", { flow: "lease_b", status: "ended", who: "jordan" });
+    expect(lines("flat_b")).toEqual([
+      ["lease_b", "ended"],
+      ["", "vacant"],
+    ]);
+  });
+
   test("a share of a property owned with someone sells only to a buyer in the world: the other owner's share stays theirs", () => {
     const w = setup((world) => duplex(world, { owners: [{ party: "you", role: "owner", share: 60 }, { party: "jordan", role: "owner", share: 40 }] }));
     const jordan = w.ctx.query("economy.net_worth")(w.ctx, "jordan") ?? 0;

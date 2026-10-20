@@ -260,6 +260,11 @@ function inForce(l: { start: number | null; end: number | null; status: string }
   return l.status === "active" && (l.start === null || l.start <= at) && (l.end === null || at < l.end);
 }
 
+/** Whether a lease is over at a clock reading: cancelled, or past its last day. A paused one isn't: its tenant keeps the unit. */
+function isOver(l: { end: number | null; status: string }, at: number): boolean {
+  return l.status === "ended" || (l.end !== null && at >= l.end);
+}
+
 function monthIndex(world: ReadContext["world"], clock: number): number {
   const cal = calendarOf(world);
   const d = dateAt(cal, clock);
@@ -354,18 +359,22 @@ function unitsToLet(api: FinanceApi, state: Readonly<WorldState>, id: EntityId):
   return api.ownersOf(state, id).some((o) => isHome(state, id, o.party)) ? 0 : 1;
 }
 
-/** A property's leases as its view lists them: each lease, then a vacant line for each unit to let that none covers. */
+/**
+ * A property's leases as its view lists them: each lease, then a vacant line for each unit to let
+ * that none holds. A lease holds its unit until it's over, so one signed to begin later or paused
+ * shows as let, and its unit isn't vacant beside it.
+ */
 function leaseViews(api: FinanceApi, ctx: ReadContext, id: EntityId, viewer: EntityId): LeaseView[] {
   const now = ctx.state.clock;
   const units = unitsToLet(api, ctx.state, id);
   const out: LeaseView[] = [];
   let let_ = 0;
   for (const l of authoredLeases(ctx, id)) {
-    const live = inForce(l, now);
-    if (live) let_++;
+    const over = isOver(l, now);
+    if (!over) let_++;
     // The tenant is whoever holds the account the rent is paid from.
     const tenant = own(ctx.state.entities, l.tenant)?.kind === "account" ? (api.ownersOf(ctx.state, l.tenant)[0]?.party ?? l.tenant) : l.tenant;
-    out.push({ flow: l.id, tenant: shownName(ctx, viewer, tenant, "a tenant"), rent: l.rent, start: l.start === null ? null : dateText(ctx.world, l.start), end: l.end === null ? null : dateText(ctx.world, l.end - 1440), state: live ? "let" : l.end !== null && l.end <= now ? "ended" : "vacant" });
+    out.push({ flow: l.id, tenant: shownName(ctx, viewer, tenant, "a tenant"), rent: l.rent, start: l.start === null ? null : dateText(ctx.world, l.start), end: l.end === null ? null : dateText(ctx.world, l.end - 1440), state: over ? "ended" : "let" });
   }
   for (const l of managedLeases(ctx, id)) {
     const from = monthStart(ctx.world, l.from);
