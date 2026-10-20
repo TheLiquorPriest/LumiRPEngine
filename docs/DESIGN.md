@@ -1289,6 +1289,7 @@ A timelapse turn (§9.2: the palette, a chip or typed time) is a **time skip** w
 ### 24.8 The planner
 The Cast life planner (§8) lays each character's own plans into their days and lives them; plans already recorded drive it whether minds are on or off, on the background lane too.
 - **Laying a plan.** A character's plans (`minds.plans`, from a mind, the memory step or the GM) become blocks of their day: the open ones, and the settled ones for the times before they were settled. So a plan that's done keeps the day it had, with the needs it met (and the Cast timeline that shows it), and no other plan re-lays into a past it was cut from.
+  - **Its window** starts no sooner than the moment after the plan was made: a plan for "now", or one already under way when a mind, the memory step or the GM records it, starts a minute after, when the next turn or timelapse can live it.
   - **A tight window** (at most twice what its kind takes) is the plan's own time.
   - **A wider window** gets its kind's length (an errand 45 minutes, a meeting 90, a visit 120, work 240, rest 60, leisure 90, other 60). It goes at the first time in the window, within its kind's hours (errands 9 to 18, meetings 10 to 22, visits 10 to 21), that trips, appointments, the stronger plans and, for a plan that doesn't take its time from routine, the routine leave free. The search covers the window's first 14 days.
 - **Precedence:**
@@ -1310,7 +1311,7 @@ The Cast life planner (§8) lays each character's own plans into their days and 
   - **Birthdays:** a person's own birthday and a close friend's (regard 30 and up) bring theirs. The `birthday` field is `MM-DD`, or `YYYY-MM-DD` with the year they were born. 29 February falls on the 28th in a common year, and lint flags a birthday that doesn't read as a date.
   - **Season and weather:** summer draws people outdoors, winter and bad weather keep them in.
 - **Needs** (Cast life 4) follow the plan. An NPC's need is met at the end of the latest block that meets it, or now while they're in it, and the routine's times stand in before the day has met it. Options weigh needs as the day so far leaves them, so a plan through the lunch hour leaves them hungry for dinner.
-- **Invitations** (Cast life 4) come from plans with the POV. One is asked at most 6 hours before the meeting, never before the meeting's day or before the plan was made, and only once (it is keyed by the plan). Its text never names a place the POV can't see. The old formula invitations run only while minds are off.
+- **Invitations** (Cast life 4) come from plans with the POV. One is asked at most 6 hours before the meeting, never before the meeting's day, and at the earliest the moment after the plan was made, so one for "now" is asked in time; and only once (it is keyed by the plan). Its text never names a place the POV can't see. The old formula invitations run only while minds are off.
 - **Stance** leaves out whoever the Minds section tells of (§6.6, §24.3).
 
 ### 24.9 The GM view

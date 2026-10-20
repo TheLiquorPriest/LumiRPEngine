@@ -146,7 +146,7 @@ export function planTier(ctx: ReadContext, who: EntityId): Fidelity {
 interface Layable {
   p: MindPlan;
   played: Played;
-  /** Its window's start. */
+  /** Its window's start, never before the moment after the plan was made: a plan for "now" starts then. */
   from: number;
   /** When it was settled, from which it lays nothing; for an open plan, never. */
   until: number;
@@ -161,7 +161,7 @@ interface Layable {
 function layable(ctx: ReadContext, who: EntityId, tier: Fidelity): Layable[] {
   if (tier === "background" || who === ctx.world.pov) return [];
   return (optionalQuery(ctx, "minds.plans")?.(ctx, who) ?? []).flatMap((p) => {
-    const from = p.when.from;
+    const from = Math.max(p.when.from, p.made + 1);
     const until = p.status === "open" ? Infinity : (p.closed ?? from);
     return p.when.to > from && until > from ? [{ p, played: PLAYED[p.kind], from, until }] : [];
   });

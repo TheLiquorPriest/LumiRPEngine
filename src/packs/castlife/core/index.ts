@@ -303,7 +303,7 @@ function planOutcomes(ctx: ReadContext, who: EntityId, slot: SlotInfo): LedgerEv
   return out;
 }
 
-/** How far ahead of a plan with the POV its invitation comes, at most: never before the day it's on, nor before the plan was made. */
+/** How far ahead of a plan with the POV its invitation comes, at most: never before the day it's on, and at the earliest the moment after the plan was made. */
 const INVITE_LEAD = 6 * 60;
 
 /** A plan with the POV asking it along: when it asks, and when and where the plan meets. */
@@ -323,7 +323,7 @@ function planAsks(ctx: ReadContext, who: EntityId): PlanAsk[] {
   const laid = laidPlans(ctx, who, plans);
   return plans.flatMap((p) => {
     const first = laid.get(p.id)?.[0];
-    return first ? [{ plan: p.id, ask: Math.max(first.start - INVITE_LEAD, p.made, clockAt(cal, dateAt(cal, first.start).dayIndex, 0)), at: first.start, place: first.place ?? null }] : [];
+    return first ? [{ plan: p.id, ask: Math.max(first.start - INVITE_LEAD, p.made + 1, clockAt(cal, dateAt(cal, first.start).dayIndex, 0)), at: first.start, place: first.place ?? null }] : [];
   });
 }
 

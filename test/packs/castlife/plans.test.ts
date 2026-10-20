@@ -6,7 +6,7 @@ import { describe, expect, test } from "bun:test";
 import type { LedgerEvent } from "../../../src/shared/ledger";
 import type { Fidelity, MindPlan } from "../../../src/shared/minds";
 import type { WorldDoc } from "../../../src/shared/world";
-import { calendarOf, clockAt, dateAt, dayIndexOf, parseHHMM } from "../../../src/engine/calendar";
+import { calendarOf, clockAt, dateAt, dayIndexOf, formatHHMM, parseHHMM } from "../../../src/engine/calendar";
 import { createRegistry } from "../../../src/engine/registry-impl";
 import { ALL_NOTE } from "../../../src/engine/simulate";
 import { runTimelapse } from "../../../src/engine/time";
@@ -187,6 +187,18 @@ describe("castlife: characters' own plans", () => {
     lapse(w, at(w, 1, "19:00"));
     expect(outcomes(w).flatMap((e) => ("data" in e ? [e.data.status] : []))).toEqual(["done"]);
     expect({ blocks: saturday(), hunger: needValue(w.ctx, "jordan", "hunger", at(w, 1, "16:00")) }).toEqual(before);
+  });
+
+  test("a plan for now starts the moment after it was made, and its invitation is asked then", () => {
+    const w = riverton((wd) => {
+      wd.entities.maya?.relations.push({ type: "regard", to: "you", fields: { warmth: 60, trust: 50, respect: 40, t: 0 } });
+    });
+    const now = w.state.clock;
+    record(w, [{ type: "minds.round", data: { at: now, on: true } }, pin("maya", "live"), pin("jordan", "live"), planEdit("jordan", plan(w, "now", { kind: "errand", where: "bank", priority: 4, when: { from: now, to: now + 45 } })), planEdit("maya", plan(w, "coffee", { kind: "meet", where: "cafe", with: ["you"], priority: 4, when: { from: now - 15, to: now + 90 } }))]);
+    lapse(w, now + 10);
+    expect([w.state.entities.jordan?.fields.place, w.state.entities.jordan?.fields.activity]).toEqual(["bank", "errand"]);
+    const invites = w.events.flatMap((e) => (e.type === "castlife.invitation" && "data" in e ? [e.data] : []));
+    expect(invites).toEqual([{ agent: "maya", place: "cafe", at: now + 1, text: `Maya Chen invites you to Daybreak Café at ${formatHHMM(dateAt(calendarOf(w.world), now + 1).minuteOfDay)}.`, key: "maya:plan:coffee" }]);
   });
 });
 
