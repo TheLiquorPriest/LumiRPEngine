@@ -21,13 +21,16 @@ export const PACKS_MONEY_CSS = `
 /* The money hub (economy/ui/hub.tsx, panel.tsx, gm.tsx, sheet.tsx), its page frame and shared pieces (nav.tsx, forms.tsx, lines.tsx), accounts and cards (accounts.tsx), payment tiers (pay-prefs.tsx) and Now's glance */
 .lre .lre-money-root,.lre .lre-money-hub,.lre .lre-money-page,.lre .lre-money-page-body,.lre .lre-money-level,.lre .lre-money-form{display:flex;flex-direction:column;gap:var(--lre-s3);min-width:0}
 .lre .lre-money-hero{display:flex;flex-direction:column;gap:var(--lre-s3);min-width:0;padding:var(--lre-s3);border:1px solid var(--lre-hairline);border-radius:var(--lre-r-xl);background:var(--lre-card)}
-.lre .lre-money-hero-main{display:flex;align-items:flex-start;justify-content:space-between;gap:var(--lre-s3);min-width:0}
+/* A figure stays whole (it breaks only where it can't fit the card at all), so the badges beside it wrap under it instead */
+.lre .lre-money-hero-main{display:flex;flex-wrap:wrap;align-items:flex-start;justify-content:space-between;gap:var(--lre-s3);min-width:0}
 .lre .lre-money-hero-main>.lre-stat{flex:1 1 auto}
-.lre .lre-money-hero .lre-money-hero-main .lre-stat-value{font-size:calc(var(--lre-fs-xl) * 1.5);line-height:1.15;letter-spacing:-.01em}
+.lre .lre-money-hero .lre-money-hero-main .lre-stat-value{font-size:calc(var(--lre-fs-xl) * 1.5);line-height:1.15;letter-spacing:-.01em;overflow-wrap:break-word}
 .lre .lre-money-hero-badges{flex:none;display:flex;flex-wrap:wrap;justify-content:flex-end;gap:var(--lre-s1);max-width:50%}
 .lre .lre-money-top>.lre-money-hero-badges{max-width:none;justify-content:flex-start}
-.lre .lre-money-stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,7rem),1fr));gap:var(--lre-s3);padding-top:var(--lre-s3);border-top:1px solid var(--lre-hairline)}
-.lre .lre-money-stats .lre-stat-value{font-size:var(--lre-fs-lg)}
+/* Cash on hand, assets and what's owed flow two or three to a line as the card allows, each figure whole */
+.lre .lre-money-stats{display:flex;flex-wrap:wrap;gap:var(--lre-s3);padding-top:var(--lre-s3);border-top:1px solid var(--lre-hairline)}
+.lre .lre-money-stats>.lre-stat{flex:1 1 7rem;min-width:auto}
+.lre .lre-money-stats .lre-stat-value{font-size:var(--lre-fs-lg);overflow-wrap:break-word}
 .lre .lre-money-controls{display:flex;flex-wrap:wrap;gap:var(--lre-s2);min-width:0;container:lre-money-controls/inline-size}
 .lre .lre-money-controls>.lre-btn{flex:1 1 9rem;min-width:fit-content}
 @container lre-money-controls (min-width:560px){.lre .lre-money-controls>.lre-btn{flex:0 1 auto;min-width:11rem}}
