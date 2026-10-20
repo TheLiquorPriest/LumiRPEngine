@@ -115,9 +115,14 @@ export function faded(note: Pick<MindNote, "salience" | "at">, clock: number, me
   return salienceNow(note, clock, memory) < memory.salience.floor;
 }
 
+/** A character's plans as kept, open and settled, soonest first (ties by id). */
+export function keptPlans(c: MindsCharacter): MindPlan[] {
+  return [...c.plans].sort((a, b) => a.when.from - b.when.from || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+}
+
 /** A character's open plans, soonest first (ties by id). */
 export function openPlans(c: MindsCharacter): MindPlan[] {
-  return c.plans.filter((p) => p.status === "open").sort((a, b) => a.when.from - b.when.from || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+  return keptPlans(c).filter((p) => p.status === "open");
 }
 
 /** A character's open commitments, oldest first. */

@@ -103,10 +103,11 @@ export function mindTracesOf(raw: unknown): MindCallTrace[] | undefined {
     if (!isRecord(t) || typeof t.who !== "string" || t.who === UNKNOWN_PERSON || typeof t.ms !== "number" || typeof t.tokens !== "number") return [];
     const purpose = MIND_PURPOSES.find((p) => p === t.purpose);
     const phase = MIND_PHASES.find((p) => p === t.phase);
-    const level = FIDELITIES.find((f) => f === t.level);
+    // The `skip` step's call thinks as no one, so it has no level; every other has one.
+    const level = purpose === "skip" && t.level === null ? null : FIDELITIES.find((f) => f === t.level);
     const outcome = t.outcome === "leak_blocked" ? "recorded" : MIND_OUTCOMES.find((o) => o === t.outcome);
     const prompt = MIND_PROMPTS.find((p) => p === t.prompt);
-    if (!purpose || !phase || !level || !outcome || !prompt) return [];
+    if (!purpose || !phase || level === undefined || !outcome || !prompt) return [];
     return [{ purpose, phase, who: t.who, level, outcome, ms: t.ms, tokens: t.tokens, prompt }];
   });
 }

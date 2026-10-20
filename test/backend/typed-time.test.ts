@@ -177,4 +177,23 @@ describe("a typed skip to Friday at 6 PM", () => {
     await rig.host.finish(g, "The week goes by.");
     expect((await folded(rig, chatId)).record?.events.find((e) => e.type === "timelapse")).toMatchObject({ target: { type: "at", at: friday } });
   });
+
+  test("in another time zone, the offer names the time as the player typed it, local to where they are", async () => {
+    const rig = new Rig({ shipped: true });
+    rig.host.quietReply = (req) => ((req.messages[0]?.content ?? "").includes("You map a player's typed input") ? JSON.stringify({ action: "eat", params: {}, confidence: 0.9, then: { at: "2026-09-18 18:00" } }) : "{}");
+    const worldId = await rig.newWorld("Port Alder", "modern_slice_of_life");
+    // In Chicago, an hour behind Port Alder: 18:00 there is 19:00 at home.
+    const { draft } = rig.body(await rig.send({ type: "lre.editor", op: "get", worldId, base: null })) as { draft: { pov: string; entities: Record<string, JsonObject & { fields: JsonObject }> } };
+    const pov = draft.entities[draft.pov];
+    if (!pov) throw new Error("no POV");
+    rig.body(await rig.send({ type: "lre.editor", op: "put", worldId, base: null, collection: "entities", id: draft.pov, value: { ...pov, fields: { ...pov.fields, place: "chicago_il" } } }));
+    rig.body(await rig.send({ type: "lre.world", op: "commit", worldId, base: null }));
+    const chatId = rig.host.createChat("Morning.");
+    rig.body(await rig.send({ type: "lre.world", op: "attach", worldId, chatId }));
+    await rig.turn(chatId, "I grab breakfast, then skip ahead to Friday at 6 PM.", "The diner is busy.");
+    const { state, world } = await folded(rig, chatId);
+    expect(placeOfEntity(state, world.pov)).toBe("chicago_il");
+    const offer = (await rig.rt.view(chatId, rig.host.userId)).chips.find((c) => c.kind === "timelapse_offer");
+    expect(offer?.label).toBe("Timelapse to Fri 18:00?");
+  });
 });

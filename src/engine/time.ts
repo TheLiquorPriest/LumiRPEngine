@@ -292,7 +292,9 @@ export function parseOverrides(v: JsonValue | undefined): Partial<Record<Interru
  * `apply` adds what was decided there, and `finish` closes the segment with its summary, Montage and
  * chip. The pre phase drives one beat by beat while minds think; the plan replays the recorded beats
  * through another, so both reach every beat in the same state. One piece to the target is a plain
- * timelapse. The unit cap holds for the whole segment, and only its first slot runs whatever it.
+ * timelapse. The unit cap holds for the whole segment, and only its first slot runs whatever it. A
+ * slot a piece ends inside stays open into the next, whose stop check reads the signals raised in
+ * all of it, so cutting the run at beats never changes where it stops.
  */
 export class TimelapseRun {
   readonly from: number;
@@ -317,7 +319,7 @@ export class TimelapseRun {
     this.from = w.state.clock;
     this.to = resolved.to;
     this.cap = clampUnitCap(opts.unitCap ?? w.state.time.unitCap);
-    this.result = { from: this.from, to: this.from, requested: resolved.to, slots: 0, stop: "target", stoppedBy: null, stops: [], notes: [], agentDays: 0, events: 0, rules: [], tracks: [] };
+    this.result = { from: this.from, to: this.from, requested: resolved.to, slots: 0, stop: "target", stoppedBy: null, stops: [], notes: [], agentDays: 0, events: 0, rules: [], tracks: [], open: null };
   }
 
   /** A run toward `target`, or why none can start (the clock is paused, the target doesn't resolve). */
@@ -331,24 +333,24 @@ export class TimelapseRun {
     return this.w.state.clock;
   }
 
-  /** Runs on to `at` (never past the target); false once the run has ended on its own, here or before. */
+  /**
+   * Runs on to `at` (never past the target); false once the run has ended on its own, here or before.
+   * The cap may end it at the start of a slot an earlier piece ended inside, before the clock it had.
+   */
   advanceTo(at: number): boolean {
     if (this.ended !== null) return false;
     const to = Math.min(at, this.to);
     if (to <= this.w.state.clock) return true;
-    const used = { agentDays: this.result.agentDays, events: this.w.events.length - this.start };
-    if (this.result.slots > 0 && (used.agentDays >= this.cap.agentDays || used.events >= this.cap.events)) {
-      this.ended = this.result.stop = "cap";
-      return false;
-    }
     const r = advance(this.reg, this.w, to, {
       runSeed: this.opts.runSeed,
       mode: "timelapse",
       cause: "timelapse",
       includePov: true,
       ...(this.opts.overrides ? { interrupts: this.opts.overrides } : {}),
-      unitCap: { agentDays: this.cap.agentDays - used.agentDays, events: this.cap.events - used.events },
-      slotsBefore: this.result.slots,
+      unitCap: this.cap,
+      spent: { slots: this.result.slots, agentDays: this.result.agentDays, events: this.w.events.length - this.start },
+      ...(this.result.open ? { open: this.result.open } : {}),
+      segmentTo: this.to,
       ...(this.resolved.stopWhen ? { stopWhen: this.resolved.stopWhen } : {}),
     });
     const acc = this.result;
@@ -358,6 +360,7 @@ export class TimelapseRun {
     acc.notes.push(...r.notes);
     acc.rules.push(...r.rules);
     acc.tracks.push(...r.tracks);
+    acc.open = r.open;
     if (r.stop === "target") return true;
     this.ended = acc.stop = r.stop;
     acc.stoppedBy = r.stoppedBy;

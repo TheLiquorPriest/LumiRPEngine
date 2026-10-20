@@ -48,7 +48,7 @@ A world is one JSON document in the `lre-world-v1` format, with a published JSON
 ## People
 
 - **The POV** (`pov`) is the entity the player plays, a `person` on a lead tier, never capped by realism. `start` is where and when play begins, and the POV stands there unless its `fields.place` says otherwise.
-- **Tiers** say how deeply someone is simulated: by default `principal` (Leads), `supporting` and `background`. `"agent": true` makes someone pursue their own agenda off-screen.
+- **Tiers** say how deeply someone is simulated: by default `principal` (Leads), `supporting` and `background`. `"agent": true` makes someone pursue their own agenda off-screen, and live the plans their mind makes. Anyone else follows their schedules only: a mind of theirs still thinks, but its plans are never lived and are dropped once their time has passed, so mark `agent` on whoever should act on their own plans.
 - **Who knows the POV.** Everyone who has met the POV holds a `knows` relation toward the POV, or a `regard`. The narrator is told "Mara knows you" or "Mara doesn't know you" from exactly that, so a friend without either greets the player as a stranger.
 - **Regard** is one directed relation with `warmth`, `trust` and `respect` from −100 to 100; write each direction that matters. Kinship (`parent_of` and `child_of`, `sibling_of`, `spouse_of`, `partner_of`) is kept two-sided: write both sides.
 - **Life and death.** `life` is the state someone starts in: `alive` when unset, `dying`, `dead`, or one of the world's own `lifeStates`. The dead keep their place: give a body a `fields.place` where it lies, and no schedule (someone who doesn't act follows none).

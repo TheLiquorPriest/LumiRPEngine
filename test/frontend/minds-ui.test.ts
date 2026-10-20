@@ -118,7 +118,8 @@ describe("Settings → Steps with the minds steps", () => {
     const lean = await set({ modelUse: { preset: "lean" } });
     for (const purpose of ["mind", "memory", "skip", "consolidate"] as const) {
       expect(lean.modelUse.steps[purpose]).toBeUndefined();
-      expect(stepConfigOf(lean.modelUse.steps, purpose)).toEqual({ enabled: true, signals: [], maxTokens: HELPER_MAX_TOKENS });
+      // The skip step is off until the user turns it on (DESIGN §24.7); the others run.
+      expect(stepConfigOf(lean.modelUse.steps, purpose)).toEqual({ enabled: purpose !== "skip", signals: [], maxTokens: HELPER_MAX_TOKENS });
     }
     // The card saves its whole config with the change, as the Connection select does.
     const card = stepConfigOf(lean.modelUse.steps, "mind");

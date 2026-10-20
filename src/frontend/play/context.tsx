@@ -53,7 +53,7 @@ function decodeMinds(value: unknown): MindCallTrace[] {
     purpose: oneOf(t.purpose, MIND_PURPOSES, "mind"),
     phase: oneOf(t.phase, ["pre", "post", "skip"] as const, "pre"),
     who: str(t.who, "Someone"),
-    level: oneOf(t.level, FIDELITIES, "near"),
+    level: t.level === null ? null : oneOf(t.level, FIDELITIES, "near"),
     outcome: oneOf(t.outcome, ["recorded", "failed"] as const, "failed"),
     ms: num(t.ms),
     tokens: num(t.tokens),
@@ -194,14 +194,14 @@ export function ContextPanel(props: PanelProps) {
               {(generation.minds ?? []).map((m, i) => (
                 <Row
                   key={`${m.phase}:${m.purpose}:${i}`}
-                  k={`${m.who} · ${STEP_LABEL[m.purpose]}`}
+                  k={m.who === "" ? STEP_LABEL[m.purpose] : `${m.who} · ${STEP_LABEL[m.purpose]}`}
                   v={
                     <span class="lre-inline">
                       {`${(m.ms / 1000).toFixed(1)} s · ${m.tokens} tok`}
                       <span class={`lre-badge ${MIND_OUTCOME[m.outcome].tone}`}>{MIND_OUTCOME[m.outcome].text}</span>
                     </span>
                   }
-                  sub={`${FIDELITY_LABEL[m.level]} · ${MIND_PHASE[m.phase]} · ${MIND_PROMPT[m.prompt]}`}
+                  sub={[...(m.level ? [FIDELITY_LABEL[m.level]] : []), MIND_PHASE[m.phase], MIND_PROMPT[m.prompt]].join(" · ")}
                 />
               ))}
             </Card>

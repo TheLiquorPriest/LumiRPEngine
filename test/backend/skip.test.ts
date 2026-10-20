@@ -1,14 +1,25 @@
 // Time skips (DESIGN §24.7) on the whole backend with fake steps: the beats a skip finds, the minds at
 // them, a mind's interrupt stopping the skip at its time with the stop chip, the caps, the `skip`
-// step's beats recorded, the before-the-reply clock running out, Re-run asking again and replay.
+// step's beats recorded, the before-the-reply clock running out, Re-run asking again and replay; and
+// the beat scan and the beats cap on their own.
 
 import { describe, expect, test } from "bun:test";
 import type { LedgerEvent } from "../../src/shared/ledger";
 import type { JsonObject } from "../../src/shared/json";
-import { calendarOf, clockAt, dateAt, formatHHMM } from "../../src/engine/calendar";
+import { calendarOf, clockAt, clockOfLocal, dateAt, formatHHMM, formatStamp } from "../../src/engine/calendar";
+import { createRegistry } from "../../src/engine/registry-impl";
+import { ALL_NOTE } from "../../src/engine/simulate";
 import { placeOfEntity } from "../../src/engine/scope";
+import { replaySkip, runTimelapse } from "../../src/engine/time";
+import { timelapseIntent, turnStart } from "../../src/engine/turn";
+import { Working } from "../../src/engine/working";
 import { toChain } from "../../src/backend/ledger-io";
-import type { BeatMinds } from "../../src/backend/skip";
+import { readRun } from "../../src/backend/runtime";
+import { capBeats, runSkip, scanBeats, type Beat, type BeatMinds } from "../../src/backend/skip";
+import { ALL_PACKS } from "../../src/packs/index";
+import { modernUsWorld } from "../packs/riverton";
+import { startState } from "../packs/support";
+import { decodeContextView } from "../../src/frontend/play/context";
 import { Rig } from "../support/rig";
 
 const MARCUS = "marcus_delgado";
@@ -66,9 +77,9 @@ function fakeMinds(calls: { at: number; who: string[]; reason: string }[], inter
   };
 }
 
-/** A timelapse of `days`, where invitations only note (the plan's own invitation would end it first otherwise). */
-async function skipDays(rig: Rig, chatId: string, days: number): Promise<void> {
-  rig.body(await rig.send({ type: "lre.action", chatId, action: "timelapse", params: { target: { type: "duration", minutes: days * 1440 }, overrides: { invitation: "note" } }, source: "palette" }));
+/** A timelapse of `days` under `overrides`: by default invitations only note (the plan's own invitation would end it first otherwise). */
+async function skipDays(rig: Rig, chatId: string, days: number, overrides: JsonObject = { invitation: "note" }): Promise<void> {
+  rig.body(await rig.send({ type: "lre.action", chatId, action: "timelapse", params: { target: { type: "duration", minutes: days * 1440 }, overrides }, source: "palette" }));
   const g = await rig.host.start(chatId, { type: "normal" });
   await rig.host.finish(g, "Days pass.");
 }
@@ -76,6 +87,40 @@ async function skipDays(rig: Rig, chatId: string, days: number): Promise<void> {
 const ofType = (events: readonly LedgerEvent[] | undefined, type: string): LedgerEvent[] => (events ?? []).filter((e) => e.type === type);
 
 describe("time skips", () => {
+  test("under the default policy an invitation stops the skip where the span run whole stops, and Continue's scan finds the beat after it", async () => {
+    const { rig, chatId, day, at } = await portAlder();
+    const meet = at(day + 1, "19:00");
+    await marcusPlans(rig, chatId, [meet]);
+    // The same span run whole, as a plain timelapse from the state the skip starts from: Marcus's
+    // invitation, asked six hours before the meeting, stops it at the end of that slot.
+    const start = await folded(rig, chatId);
+    const run = readRun(await rig.host.chats.chatMetadata(chatId, rig.host.userId));
+    if (!run) throw new Error("no run");
+    const whole = new Working(rig.rt.registry, start.world, start.state);
+    turnStart(rig.rt.registry, whole, run.runSeed);
+    const plain = runTimelapse(rig.rt.registry, whole, { type: "duration", minutes: 3 * 1440 }, { runSeed: run.runSeed });
+    if ("code" in plain) throw new Error(plain.reason);
+    expect(plain.summary.stoppedBy).toBe("invitation");
+    const calls: { at: number; who: string[]; reason: string }[] = [];
+    rig.rt.beatMinds = fakeMinds(calls, (who, when) => who === MARCUS && when === meet);
+    await skipDays(rig, chatId, 3, {});
+    const first = await folded(rig, chatId);
+    expect(first.record?.events.find((e) => e.type === "timelapse")).toMatchObject({ stoppedBy: "invitation", to: plain.summary.to });
+    expect(first.state.clock).toBe(plain.summary.to);
+    // Continue runs the rest: its scan finds the meeting, where Marcus thinks and steps in.
+    const chip = (await rig.rt.view(chatId, rig.host.userId)).chips.find((c) => c.kind === "continue_timelapse");
+    expect(chip?.label).toBe("Timelapse stopped: an invitation");
+    if (!chip) throw new Error("no stop chip");
+    rig.body(await rig.send({ type: "lre.chip", chatId, chip: chip.id, choice: "timelapse" }));
+    const g = await rig.host.start(chatId, { type: "normal" });
+    await rig.host.finish(g, "Evening comes.");
+    const second = await folded(rig, chatId);
+    const skip = ofType(second.record?.events, "minds.skip")[0];
+    expect(skip && "data" in skip ? skip.data.beats : null).toEqual(expect.arrayContaining([expect.objectContaining({ at: meet, source: "scan" })]));
+    expect(calls.some((c) => c.at === meet && c.who.includes(MARCUS))).toBe(true);
+    expect(second.record?.events.find((e) => e.type === "timelapse")).toMatchObject({ stoppedBy: "mind", mind: MARCUS, to: meet });
+  });
+
   test("a 3-day skip finds the beats, runs the minds at them and stops on an interrupt at its time, with the chip; replay is identical", async () => {
     const { rig, chatId, day, at } = await portAlder();
     const meet = at(day + 1, "19:00");
@@ -143,6 +188,74 @@ describe("time skips", () => {
     expect(skip && "data" in skip ? skip.data.beats : null).toEqual(expect.arrayContaining([{ at: festival, reason: "The harbour festival", source: "model" }]));
   });
 
+  test("a skip whose beats' minds give nothing replays as it ran before the reply, ending where that run ended", async () => {
+    const { rig, chatId, day, at } = await portAlder();
+    // Two agent-days a segment: the early-morning and morning slots run, midday (11:30 to 14:00) doesn't fit.
+    rig.body(await rig.send({ type: "lre.marker", chatId, kind: "time", control: "unit_cap", scope: { all: true }, to: { agentDays: 2, events: 5000 } }));
+    rig.body(await rig.send({ type: "lre.settings.set", patch: { modelUse: { steps: { skip: { enabled: true, signals: ["always"] } } } } }));
+    const { world } = await folded(rig, chatId);
+    const lunch = at(day, "12:30");
+    rig.host.quietReply = (req) => (req.messages.some((m) => m.content.includes("skipping ahead in time")) ? JSON.stringify({ beats: [{ at: formatStamp(calendarOf(world), lunch), reason: "Lunch at the diner" }] }) : "{}");
+    // Every mind's call fails, so no beat records a mind; the last minds asked are the skip's end.
+    const calls: { at: number; reason: string }[] = [];
+    rig.rt.beatMinds = async (input) => {
+      calls.push({ at: input.moment.at, reason: input.moment.reason });
+      return { events: [], traces: [] };
+    };
+    await skipDays(rig, chatId, 3);
+    const end = calls.at(-1);
+    expect(end?.reason).toStartWith("The time skip ends");
+    const { state, record } = await folded(rig, chatId);
+    expect(record?.events.find((e) => e.type === "timelapse")).toMatchObject({ to: end?.at });
+    expect(state.clock).toBe(end?.at ?? NaN);
+  });
+
+  test("the unit cap ends a skip on a slot boundary, though a beat falls inside the slot it can't run", async () => {
+    const { rig, chatId, day, at } = await portAlder();
+    rig.body(await rig.send({ type: "lre.marker", chatId, kind: "time", control: "unit_cap", scope: { all: true }, to: { agentDays: 2, events: 5000 } }));
+    rig.body(await rig.send({ type: "lre.settings.set", patch: { modelUse: { steps: { skip: { enabled: true, signals: ["always"] } } } } }));
+    const { world } = await folded(rig, chatId);
+    rig.host.quietReply = (req) => (req.messages.some((m) => m.content.includes("skipping ahead in time")) ? JSON.stringify({ beats: [{ at: formatStamp(calendarOf(world), at(day, "12:30")), reason: "Lunch at the diner" }] }) : "{}");
+    const calls: { at: number; who: string[]; reason: string }[] = [];
+    rig.rt.beatMinds = fakeMinds(calls, () => false);
+    await skipDays(rig, chatId, 3);
+    const { state, record } = await folded(rig, chatId);
+    // Midday (11:30 to 14:00) doesn't fit: the skip ends at its start, as the same span run whole does, with no one asked at 12:30.
+    expect(record?.events.find((e) => e.type === "timelapse")).toMatchObject({ stoppedBy: null, to: at(day, "11:30") });
+    expect(state.clock).toBe(at(day, "11:30"));
+    expect(calls.map((c) => c.at)).not.toContain(at(day, "12:30"));
+    const chip = (await rig.rt.view(chatId, rig.host.userId)).chips.find((c) => c.kind === "continue_timelapse");
+    expect(chip?.label).toMatch(/^Continue timelapse/);
+  });
+
+  test("the skip step makes no call until the user turns it on", async () => {
+    const { rig, chatId, day, at } = await portAlder();
+    await marcusPlans(rig, chatId, [at(day + 1, "19:00")]);
+    let asked = 0;
+    rig.host.quietReply = (req) => {
+      if (req.messages.some((m) => m.content.includes("skipping ahead in time"))) asked++;
+      return "{}";
+    };
+    rig.rt.beatMinds = fakeMinds([], () => false);
+    // The default settings (Standard) leave the step off.
+    await skipDays(rig, chatId, 1);
+    expect(asked).toBe(0);
+    rig.body(await rig.send({ type: "lre.settings.set", patch: { modelUse: { steps: { skip: { enabled: true, signals: ["always"] } } } } }));
+    await skipDays(rig, chatId, 1);
+    expect(asked).toBe(1);
+  });
+
+  test("the skip step's call is listed in the Context panel's minds calls, as the step alone, with no text", async () => {
+    const { rig, chatId } = await portAlder();
+    rig.body(await rig.send({ type: "lre.settings.set", patch: { modelUse: { steps: { skip: { enabled: true, signals: ["always"] } } } } }));
+    rig.host.quietReply = (req) => (req.messages.some((m) => m.content.includes("skipping ahead in time")) ? JSON.stringify({ beats: [] }) : "{}");
+    rig.rt.beatMinds = fakeMinds([], () => false);
+    await skipDays(rig, chatId, 1);
+    const context = decodeContextView((await rig.rt.view(chatId, rig.host.userId)).panels["core.context"]);
+    const calls = context?.generations[0]?.minds ?? [];
+    expect(calls.filter((m) => m.purpose === "skip")).toEqual([expect.objectContaining({ purpose: "skip", phase: "skip", who: "", level: null, outcome: "recorded", prompt: "default" })]);
+  });
+
   test("when the before-the-reply clock runs out the skip stops at a beat, keeps what it ran and offers Continue; the turn commits", async () => {
     const { rig, chatId, day, at } = await portAlder();
     rig.body(await rig.send({ type: "lre.settings.set", patch: { modelUse: { budgets: { pre: { calls: 4, ms: 250 } } } } }));
@@ -158,5 +271,153 @@ describe("time skips", () => {
     expect(record?.events.find((e) => e.type === "timelapse")).toMatchObject({ stoppedBy: null, to: first });
     const chip = (await rig.rt.view(chatId, rig.host.userId)).chips.find((c) => c.kind === "continue_timelapse");
     expect(chip?.label).toMatch(/^Continue timelapse/);
+  });
+
+  test("a clock already out before the first beat still takes the skip to that beat, so its Continue gets further", async () => {
+    const { rig, chatId, day, at } = await portAlder();
+    await marcusPlans(rig, chatId, [at(day + 1, "19:00")]);
+    const { state, world } = await folded(rig, chatId);
+    const settings = await rig.rt.settings.get(rig.host.userId);
+    const target = { type: "duration" as const, minutes: 3 * 1440 };
+    const asked: number[] = [];
+    const skip = await runSkip({ registry: rig.rt.registry, steps: rig.rt.steps, minds: async (input) => (asked.push(input.moment.at), { events: [], traces: [] }) }, { chatId, userId: rig.host.userId, world, state, intent: { ...timelapseIntent(target, { invitation: "note" }) }, runSeed: "seed", settings, signal: AbortSignal.abort() });
+    if (!skip) throw new Error("no skip");
+    const beats = skip.record.beats.map((b) => b.at);
+    expect(skip.record.stop).toEqual({ by: "clock", at: beats[1] ?? NaN });
+    expect(beats[1]).toBeGreaterThan(state.clock);
+    expect(asked).toEqual([]);
+    // The plan replays it there, and offers the rest.
+    const w = new Working(rig.rt.registry, world, state);
+    turnStart(rig.rt.registry, w, "seed");
+    const out = replaySkip(rig.rt.registry, w, target, skip.record, { runSeed: "seed", overrides: { invitation: "note" } });
+    if ("code" in out) throw new Error(out.reason);
+    expect(out.summary.to).toBe(beats[1] ?? NaN);
+    expect(out.chip).toEqual({ kind: "continue_timelapse", target: { type: "duration", minutes: state.clock + target.minutes - (beats[1] ?? 0) }, remaining: state.clock + target.minutes - (beats[1] ?? 0) });
+  });
+
+  test("no skip runs while a fight holds the clock: no one is asked, and the turn notes why", async () => {
+    const rig = new Rig({ shipped: true });
+    rig.host.quietReply = () => "{}";
+    const worldId = await rig.newWorld("Port Alder", "modern_slice_of_life");
+    // The Modern profile brings combat.
+    rig.body(await rig.send({ type: "lre.editor", worldId, base: null, op: "profile", profile: "modern", choices: {} }));
+    rig.body(await rig.send({ type: "lre.world", op: "commit", worldId, base: null }));
+    const chatId = rig.host.createChat("Morning.");
+    rig.body(await rig.send({ type: "lre.world", op: "attach", worldId, chatId }));
+    await rig.turn(chatId, "I look around the shop.", "The shop is quiet.");
+    const { state, world } = await folded(rig, chatId);
+    const cal = calendarOf(world);
+    await marcusPlans(rig, chatId, [clockAt(cal, dateAt(cal, state.clock).dayIndex + 1, 19 * 60)]);
+    // The player character is made too tough for one round of Danny's blows to put down.
+    rig.body(await rig.send({ type: "lre.edit", chatId, ops: [{ op: "set", entity: "pov", field: "con", value: 30 }] }));
+    rig.body(await rig.send({ type: "lre.action", chatId, action: "fight", params: { target: "danny_okafor" }, source: "palette" }));
+    const g = await rig.host.start(chatId, { type: "normal" });
+    await rig.host.finish(g, "Danny squares up to you.");
+    const before = (await folded(rig, chatId)).state.clock;
+    const calls: { at: number; who: string[]; reason: string }[] = [];
+    rig.rt.beatMinds = fakeMinds(calls, () => false);
+    await skipDays(rig, chatId, 2);
+    const after = await folded(rig, chatId);
+    expect(calls).toEqual([]);
+    expect(JSON.stringify(after.record?.events)).toContain("Timelapse not run: a fight is under way");
+    expect(after.record?.events.some((e) => e.type === "minds.skip" || e.type === "timelapse")).toBe(false);
+    expect(after.state.clock).toBe(before);
+  });
+
+  test("the minds at a skip's end are the turn's own: a model's interrupt there is no stop and isn't recorded", async () => {
+    const { rig, chatId } = await portAlder();
+    // No beats: only the end's minds think, through the real runner, each answering with an interrupt.
+    rig.body(await rig.send({ type: "lre.settings.set", patch: { minds: { skip: { maxBeats: 0 } } } }));
+    rig.host.quietReply = (req) => {
+      const mind = /You are the private mind of (.+?) in the roleplay world/.exec(req.messages[0]?.content ?? "")?.[1];
+      return mind ? JSON.stringify({ monologue: `${mind} has had enough.`, depiction: "restless", intent: "Go and find Jordan.", reactions: [], plans: [], mood: null, interrupt: { reason: `${mind} comes looking for Jordan.` } }) : "{}";
+    };
+    await skipDays(rig, chatId, 1);
+    const { record } = await folded(rig, chatId);
+    const minds = ofType(record?.events, "minds.mind").flatMap((e) => ("data" in e ? [e.data] : []));
+    expect(minds.length).toBeGreaterThan(0);
+    expect(minds.map((m) => [m.moment, m.interrupt])).toEqual(minds.map(() => ["turn", null]));
+    expect(record?.events.find((e) => e.type === "timelapse")).toMatchObject({ stoppedBy: null });
+  });
+
+  test("of the minds interrupting at a beat, only the one that stops the skip is recorded as stepping in", async () => {
+    const { rig, chatId, day, at } = await portAlder();
+    const meet = at(day + 1, "19:00");
+    rig.body(await rig.send({ type: "lre.edit", chatId, ops: [{ op: "mind_pin", entity: MARCUS, level: "live" }, { op: "mind_memory", entity: MARCUS, part: "plan", id: null, value: { what: "Talk to Jordan and Danny", kind: "meet", when: { from: meet, to: meet + 60 }, with: ["pov", "danny_okafor"], priority: 4 } }] }));
+    const calls: { at: number; who: string[]; reason: string }[] = [];
+    rig.rt.beatMinds = fakeMinds(calls, (_who, when) => when === meet);
+    await skipDays(rig, chatId, 3);
+    const { record } = await folded(rig, chatId);
+    expect(calls.find((c) => c.at === meet)?.who).toEqual(expect.arrayContaining([MARCUS, "danny_okafor"]));
+    const summary = record?.events.find((e) => e.type === "timelapse");
+    expect(summary).toMatchObject({ stoppedBy: "mind", to: meet });
+    const stopper = summary?.type === "timelapse" ? summary.mind : undefined;
+    expect(stopper).toBeDefined();
+    const interrupting = ofType(record?.events, "minds.mind").flatMap((e) => ("data" in e && e.data.interrupt !== null ? [e.data.entity] : []));
+    expect(interrupting).toEqual([stopper ?? ""]);
+  });
+});
+
+describe("the beat scan and the beats cap", () => {
+  test("the scan finds the player character's appointments, the story's moments and their money, up to where the skip would end", () => {
+    const reg = createRegistry(ALL_PACKS);
+    // Riverton, from Friday 16 October 2026 at 07:30: a time rule, and three appointments, one in the span.
+    const world = modernUsWorld("w", "R");
+    const cal = calendarOf(world);
+    world.rules.siren = { id: "siren", on: { at: "hour >= 18" }, do: [{ type: "signal", args: { class: "incident", text: "A siren wails." } }], once: true, interrupt: true };
+    const you = world.entities.you;
+    if (!you) throw new Error("no POV");
+    you.fields.appointments = ["2026-10-16T06:00", "2026-10-19T15:00", "2026-11-05T10:00"].map((at, i) => ({ at: clockOfLocal(cal, at), minutes: 60, place: "park", label: ["Before", "Dentist", "After"][i] ?? "" }));
+    const state = startState(world);
+    const found = (overrides?: Record<string, string>): string[][] => {
+      const scan = scanBeats(reg, world, state, timelapseIntent({ type: "duration", minutes: 19 * 1440 }, overrides), "seed");
+      if (!scan) throw new Error("no scan");
+      expect([scan.from, scan.to]).toEqual([state.clock, state.clock + 19 * 1440]);
+      return [...scan.beats].sort((a, b) => a.at - b.at || a.reason.localeCompare(b.reason)).map((b) => [formatStamp(cal, b.at, 0), b.reason]);
+    };
+    // Run whole, every class only noting: the rule and the quest's stage, the appointment in the span, and the card's bills.
+    expect(found(ALL_NOTE)).toEqual([
+      ["2026-10-16 18:00", "a story moment: Settle in"],
+      ["2026-10-16 18:00", "the rule siren"],
+      ["2026-10-19 15:00", "the player character's appointment: Dentist"],
+      ["2026-11-01 09:00", "the player character's money: Insurance: Pickup truck: $225.00 paid."],
+      ["2026-11-03 08:30", "the player character's money: Visa card statement: $380.00; minimum $35.00 due 28 Nov."],
+    ]);
+    // Under the world's own policy the quest's stage stops it that evening, so nothing after is a beat.
+    expect(found()).toEqual([
+      ["2026-10-16 18:00", "a story moment: Settle in"],
+      ["2026-10-16 18:00", "the rule siren"],
+    ]);
+  });
+
+  test("the cap keeps the weightiest beats, earliest first among equals, each minute's beats as one, in time order", () => {
+    const beat = (at: number, rank: number, reason: string, source: Beat["source"] = "scan", who: string[] = []): Beat => ({ at, reason, source, who, rank });
+    const beats = [
+      beat(50, 6, "the step's", "model"),
+      beat(10, 5, "money"),
+      beat(40, 1, "Maya's plan", "scan", ["maya"]),
+      beat(20, 3, "an appointment"),
+      beat(40, 6, "a model's at the same minute", "model", ["jordan", "maya"]),
+      beat(30, 2, "Rosa's invitation", "scan", ["rosa"]),
+      beat(60, 4, "a story moment"),
+      beat(70, 4, "a later story moment"),
+      beat(50, 6, "the step's again", "model", ["rosa"]),
+    ];
+    expect(capBeats(beats, 4)).toEqual([
+      beat(20, 3, "an appointment"),
+      beat(30, 2, "Rosa's invitation", "scan", ["rosa"]),
+      beat(40, 1, "Maya's plan", "scan", ["maya", "jordan"]),
+      beat(60, 4, "a story moment"),
+    ]);
+    expect(capBeats(beats, Infinity)).toEqual([
+      beat(10, 5, "money"),
+      beat(20, 3, "an appointment"),
+      beat(30, 2, "Rosa's invitation", "scan", ["rosa"]),
+      beat(40, 1, "Maya's plan", "scan", ["maya", "jordan"]),
+      beat(50, 6, "the step's", "model", ["rosa"]),
+      beat(60, 4, "a story moment"),
+      beat(70, 4, "a later story moment"),
+    ]);
+    expect(capBeats(beats, 0)).toEqual([]);
   });
 });

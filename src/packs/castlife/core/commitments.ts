@@ -35,12 +35,21 @@ export interface CommitmentBlock {
   plan?: string;
 }
 
+/** How a kind of plan plays as a block of someone's day. */
+interface Played {
+  minutes: number;
+  hours: readonly [number, number];
+  activity: string;
+  label: string;
+}
+
 /**
  * How each kind of plan plays: how long it takes when its window leaves that open, the hours of the
  * day it keeps then, what the person is doing, and how the player reads the block. The plan's own
- * words are the character's private intent, so no player surface ever shows them.
+ * words are the character's private intent, so no player surface ever shows them. A kind with no
+ * entry is no block of anyone's day: another pack carries it out and settles it.
  */
-const PLAYED: Readonly<Record<PlanKind, { minutes: number; hours: readonly [number, number]; activity: string; label: string }>> = {
+const PLAYED: Readonly<Partial<Record<PlanKind, Played>>> = {
   errand: { minutes: 45, hours: [9, 18], activity: "errand", label: "Errand" },
   meet: { minutes: 90, hours: [10, 22], activity: "socialize", label: "Meeting someone" },
   visit: { minutes: 120, hours: [10, 21], activity: "visiting", label: "A visit" },
@@ -49,6 +58,11 @@ const PLAYED: Readonly<Record<PlanKind, { minutes: number; hours: readonly [numb
   leisure: { minutes: 90, hours: [9, 22], activity: "leisure", label: "Time out" },
   other: { minutes: 60, hours: [8, 21], activity: "busy", label: "Busy" },
 };
+
+/** Whether a plan is the planner's to lay and settle: one of the kinds it plays as a block of someone's day. */
+export function isPlayed(p: MindPlan): boolean {
+  return PLAYED[p.kind] !== undefined;
+}
 
 /** The furthest a plan's window is searched for room: a plan for "sometime this month" lands in its first fortnight or not at all. */
 const SEARCH_DAYS = 14;
@@ -135,17 +149,54 @@ export function planTier(ctx: ReadContext, who: EntityId): Fidelity {
 }
 
 /**
- * The open plans that shape a person's days (DESIGN §24.8): none for a Background character, who
- * follows routine only, nor for the player character, whose plans are the player's.
+ * Whether the planner lives someone's plans (DESIGN §24.8): an LOD1 agent from Cast life 3, whose
+ * days the planner plans, never the player character, whose plans are the player's. Anyone else
+ * follows routine only: their plans are never laid, and `castlife.plans` drops each once its window
+ * has passed.
  */
+export function livesPlans(ctx: ReadContext, who: EntityId): boolean {
+  return who !== ctx.world.pov && own(ctx.state.entities, who)?.agent === true && ctx.levelOf(who, "castlife") >= 3;
+}
+
+/** A plan as the planner lays it. */
+interface Layable {
+  p: MindPlan;
+  played: Played;
+  /** Its window's start, never before the moment after the plan was made: a plan for "now" starts then. */
+  from: number;
+  /** When it was settled, from which it lays nothing; for an open plan, never. */
+  until: number;
+}
+
+/**
+ * The plans that shape a person's days (DESIGN §24.8): the open ones, and the settled ones for the
+ * times before they were settled, so settling a plan never changes the day it had, nor what another
+ * plan was cut to. None for a Background character, who follows routine only, nor for anyone whose
+ * plans the planner doesn't live.
+ */
+function layable(ctx: ReadContext, who: EntityId, tier: Fidelity): Layable[] {
+  if (tier === "background" || !livesPlans(ctx, who)) return [];
+  return (optionalQuery(ctx, "minds.plans")?.(ctx, who) ?? []).flatMap((p) => {
+    const played = PLAYED[p.kind];
+    const from = Math.max(p.when.from, p.made + 1);
+    const until = p.status === "open" ? Infinity : (p.closed ?? from);
+    return played && p.when.to > from && until > from ? [{ p, played, from, until }] : [];
+  });
+}
+
+/** The open plans that shape a person's days (DESIGN §24.8), as `layable` finds them. */
 export function plansOf(ctx: ReadContext, who: EntityId, tier: Fidelity = planTier(ctx, who)): MindPlan[] {
-  if (tier === "background" || who === ctx.world.pov) return [];
-  return (optionalQuery(ctx, "minds.plans")?.(ctx, who) ?? []).filter((p) => p.status === "open" && p.when.to > p.when.from);
+  return layable(ctx, who, tier).flatMap((l) => (l.p.status === "open" ? [l.p] : []));
 }
 
 /** A window that is the plan's own time (at most twice what its kind takes): it happens when the plan says. */
-function tight(p: MindPlan): boolean {
-  return p.when.to - p.when.from <= 2 * PLAYED[p.kind].minutes;
+function tight(l: Layable): boolean {
+  return l.p.when.to - l.from <= 2 * l.played.minutes;
+}
+
+/** Where the search for a wide window's room ends: its end, or its first fortnight's. */
+function searchEnd(l: Layable): number {
+  return Math.min(l.p.when.to, l.from + SEARCH_DAYS * MINUTES_PER_DAY);
 }
 
 /**
@@ -153,8 +204,8 @@ function tight(p: MindPlan): boolean {
  * plans; for a Live or Near character also an ordinary one at a set time. A Far character's
  * routine bends only for strong plans.
  */
-function cutsRoutine(p: MindPlan, tier: Fidelity): boolean {
-  return p.priority >= 4 || (tier !== "far" && p.priority >= 3 && tight(p));
+function cutsRoutine(l: Layable, tier: Fidelity): boolean {
+  return l.p.priority >= 4 || (tier !== "far" && l.p.priority >= 3 && tight(l));
 }
 
 /** Higher priority first, then the older plan, then by id. */
@@ -163,8 +214,7 @@ function precedence(a: MindPlan, b: MindPlan): number {
 }
 
 /** What a plan's block is: its kind's activity (company makes a visit social), at its own place, else at home for rest. */
-function planBlock(ctx: ReadContext, who: EntityId, p: MindPlan, start: number, end: number): Commitment {
-  const played = PLAYED[p.kind];
+function planBlock(ctx: ReadContext, who: EntityId, { p, played }: Layable, start: number, end: number): Commitment {
   const place = p.where !== null && own(ctx.world.places, p.where) ? p.where : p.kind === "rest" ? homeOf(ctx, who) : null;
   return { start, end, label: played.label, activity: p.kind === "visit" && p.with.length > 0 ? "socialize" : played.activity, place, reason: "their own plan", kind: "plan", plan: p.id, option: `plan:${p.id}` };
 }
@@ -172,66 +222,94 @@ function planBlock(ctx: ReadContext, who: EntityId, p: MindPlan, start: number, 
 /**
  * Where a plan goes (DESIGN §24.8): a tight window is the plan's own time; a wider one gets its
  * kind's length at the first time in it, within its kind's hours, that leaves trips, appointments
- * (unless the plan must happen, priority 5) and, for a plan that doesn't take its time from routine,
- * the routine free. Null when nothing in the window fits.
+ * (unless the plan must happen, priority 5), the stronger plans and, for a plan that doesn't take its
+ * time from routine, the routine free. Null when nothing in the window fits.
  */
-function placed(ctx: ReadContext, who: EntityId, p: MindPlan, tier: Fidelity, a: Authored): Commitment | null {
-  if (tight(p)) return planBlock(ctx, who, p, p.when.from, p.when.to);
+function placed(ctx: ReadContext, who: EntityId, l: Layable, tier: Fidelity, a: Authored, stronger: readonly Commitment[]): Commitment | null {
+  if (tight(l)) return planBlock(ctx, who, l, l.from, l.p.when.to);
   const cal = calendarOf(ctx.world);
-  const { minutes, hours } = PLAYED[p.kind];
-  const to = Math.min(p.when.to, p.when.from + SEARCH_DAYS * MINUTES_PER_DAY);
-  const blockers = [...a.trips, ...(p.priority >= 5 ? [] : a.appointments), ...(cutsRoutine(p, tier) ? [] : a.routine)];
-  const candidates = new Set<number>([p.when.from]);
-  for (const b of blockers) if (b.end > p.when.from && b.end < to) candidates.add(b.end);
-  for (let day = dateAt(cal, p.when.from).dayIndex; clockAt(cal, day, 0) < to; day++) candidates.add(clockAt(cal, day, hours[0] * 60));
+  const { minutes, hours } = l.played;
+  const to = searchEnd(l);
+  const blockers = [...a.trips, ...(l.p.priority >= 5 ? [] : a.appointments), ...(cutsRoutine(l, tier) ? [] : a.routine), ...stronger];
+  const candidates = new Set<number>([l.from]);
+  for (const b of blockers) if (b.end > l.from && b.end < to) candidates.add(b.end);
+  for (let day = dateAt(cal, l.from).dayIndex; clockAt(cal, day, 0) < to; day++) candidates.add(clockAt(cal, day, hours[0] * 60));
   for (const c of [...candidates].sort((x, y) => x - y)) {
-    if (c < p.when.from || c >= to) continue;
+    if (c < l.from || c >= to) continue;
     const day = dateAt(cal, c).dayIndex;
     const start = Math.max(c, clockAt(cal, day, hours[0] * 60));
     const end = start + minutes;
     if (end > Math.min(to, clockAt(cal, day, hours[1] * 60))) continue;
-    if (!blockers.some((b) => b.start < end && b.end > start)) return planBlock(ctx, who, p, start, end);
+    if (!blockers.some((b) => b.start < end && b.end > start)) return planBlock(ctx, who, l, start, end);
   }
   return null;
+}
+
+/**
+ * The plans whose windows reach [start, end), and every plan whose window reaches one of theirs: all
+ * that can bear on how those are laid, since a plan avoids and is cut by the stronger ones it meets.
+ * So a plan lands where it does whatever span is asked about.
+ */
+function bearing(plans: readonly Layable[], start: number, end: number): Layable[] {
+  const reached: [number, number][] = [[start, end]];
+  const out: Layable[] = [];
+  const rest = [...plans];
+  for (let grew = true; grew; ) {
+    grew = false;
+    for (let i = rest.length - 1; i >= 0; i--) {
+      const l = rest[i];
+      if (!l) continue;
+      const window: [number, number] = [l.from, searchEnd(l)];
+      if (!reached.some(([a, b]) => window[0] < b && window[1] > a)) continue;
+      out.push(l);
+      reached.push(window);
+      rest.splice(i, 1);
+      grew = true;
+    }
+  }
+  return out;
 }
 
 /**
  * A person's commitments overlapping [start, end): routine, appointments, trips and their own plans
  * (DESIGN §8, §24.8). A plan that takes its time from routine cuts the routine it overlaps; one that
  * must happen (priority 5) cuts appointments too; otherwise appointments and routine cut the plan.
- * Plans cut each other by precedence, and a trip preempts everything it overlaps.
+ * Plans cut each other by precedence, a wide one placed around the stronger ones, and a trip
+ * preempts everything it overlaps. A settled plan keeps only what it laid before it was settled.
  */
 export function commitments(ctx: ReadContext, who: EntityId, start: number, end: number): Commitment[] {
   const tier = planTier(ctx, who);
-  const plans = plansOf(ctx, who, tier)
-    .filter((p) => p.when.to > start && p.when.from < end)
-    .sort(precedence);
+  const plans = bearing(layable(ctx, who, tier), start, end).sort((x, y) => precedence(x.p, y.p));
   // Plans are laid against the authored commitments of their whole windows, whatever span is asked about.
-  const from = Math.min(start, ...plans.map((p) => p.when.from));
-  const to = Math.max(end, ...plans.map((p) => Math.min(p.when.to, p.when.from + SEARCH_DAYS * MINUTES_PER_DAY)));
+  const from = Math.min(start, ...plans.map((l) => l.from));
+  const to = Math.max(end, ...plans.map(searchEnd));
   const a = authored(ctx, who, from, to);
-  const laid: { p: MindPlan; block: Commitment }[] = [];
-  for (const p of plans) {
-    const block = placed(ctx, who, p, tier, a);
-    if (block) laid.push({ p, block });
+  const laid: { l: Layable; block: Commitment }[] = [];
+  const blocks: Commitment[] = [];
+  for (const l of plans) {
+    const block = placed(ctx, who, l, tier, a, blocks);
+    if (!block || block.start >= l.until) continue;
+    const kept = block.end > l.until ? { ...block, end: l.until } : block;
+    laid.push({ l, block: kept });
+    blocks.push(kept);
   }
   const pieces: Commitment[] = [];
-  laid.forEach(({ p, block }, i) => {
-    const cutters = [...laid.slice(0, i).map((l) => l.block), ...(p.priority >= 5 ? [] : a.appointments), ...(cutsRoutine(p, tier) ? [] : a.routine)];
+  laid.forEach(({ l, block }, i) => {
+    const cutters = [...blocks.slice(0, i), ...(l.p.priority >= 5 ? [] : a.appointments), ...(cutsRoutine(l, tier) ? [] : a.routine)];
     pieces.push(...cutAround([block], cutters));
   });
   const routine = cutAround(
     a.routine,
-    laid.filter((l) => cutsRoutine(l.p, tier)).map((l) => l.block),
+    laid.filter((x) => cutsRoutine(x.l, tier)).map((x) => x.block),
   );
   const appointments = cutAround(
     a.appointments,
-    laid.filter((l) => l.p.priority >= 5).map((l) => l.block),
+    laid.filter((x) => x.l.p.priority >= 5).map((x) => x.block),
   );
   return [...cutAround([...routine, ...appointments, ...pieces], a.trips), ...a.trips].filter((c) => c.end > start && c.start < end).sort((x, y) => x.start - y.start);
 }
 
-/** Each open plan's blocks as laid (after every cut), by plan id: none for a plan nothing left room for. */
+/** Each given plan's blocks as laid (after every cut), by plan id: none for a plan nothing left room for. */
 export function laidPlans(ctx: ReadContext, who: EntityId, plans: readonly MindPlan[]): Map<string, Commitment[]> {
   const out = new Map<string, Commitment[]>(plans.map((p) => [p.id, []]));
   if (plans.length === 0) return out;

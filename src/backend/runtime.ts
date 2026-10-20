@@ -29,7 +29,7 @@ import { checkOf } from "../engine/checks";
 import { applyTimeAdvance, fightHoldsClock, IN_FIGHT, parseOverrides, parseTarget } from "../engine/time";
 import { EXTERNAL_ACCOUNT_PREFIX } from "../engine/events";
 import { boundProposal } from "../engine/bounds";
-import { calendarOf, clockOfStamp, dateAt, formatClock, formatHHMM, formatStamp, nextTimeOfDay, placeOffset, weekdayName, type Calendar } from "../engine/calendar";
+import { calendarOf, clockOfStamp, dateAt, formatClock, formatHHMM, formatStamp, nextTimeOfDay, placeOffset, weekdayName } from "../engine/calendar";
 import type { ChainMessage } from "../engine/ledger/chain";
 import { LedgerFold } from "../engine/ledger/fold";
 import type { LedgerCore, LedgerEnv } from "../engine/ledger/journal";
@@ -1568,7 +1568,7 @@ export class Runtime implements TurnHooks {
     const chipWorld = input.core.worldAt(headState.revision) ?? input.core.worldAt(rec?.defHash ?? "");
     for (const [i, chip] of (plan?.chips ?? []).entries()) {
       // DESIGN §9.2 wording: "Timelapse to 07:00 (8 h 55 min)?"
-      const to = chip.target.type === "at" && chipWorld ? ` to ${shortClock(calendarOf(chipWorld), headState.clock, chip.target.at)}` : "";
+      const to = chip.target.type === "at" && chipWorld ? ` to ${shortClock(chipWorld, headState, chip.target.at)}` : "";
       const label = chip.kind === "timelapse_offer" ? `Timelapse${to} (${compactSpan(chip.remaining)})?` : `Continue timelapse (${compactSpan(chip.remaining)} left)`;
       stored.push({ id: `tl:${at}:${i}`, kind: chip.kind, ...base, label, actions: [{ id: "timelapse", label: chip.kind === "timelapse_offer" ? "Timelapse" : "Continue", style: "primary" }], expires: "next_send", payload: { target: JSON.parse(JSON.stringify(chip.target)) as JsonValue } });
     }
@@ -1577,7 +1577,7 @@ export class Runtime implements TurnHooks {
     const offer = input.kind === "continue" || plan?.stopped ? undefined : bridge.offerFor(userText);
     if (offer) {
       const part = offer.type === "day_part" ? chipWorld?.calendar.dayParts.find((d) => d.id === offer.dayPart)?.label.toLowerCase() : undefined;
-      const label = offer.type === "duration" ? `Timelapse ${compactSpan(offer.minutes)}?` : offer.type === "day_part" ? `Timelapse to ${part ?? offer.dayPart}?` : offer.type === "at" && chipWorld ? `Timelapse to ${shortClock(calendarOf(chipWorld), headState.clock, offer.at)}?` : offer.type === "shift" ? "Timelapse to your next shift?" : offer.type === "commitment" ? "Timelapse to your next commitment?" : "Timelapse?";
+      const label = offer.type === "duration" ? `Timelapse ${compactSpan(offer.minutes)}?` : offer.type === "day_part" ? `Timelapse to ${part ?? offer.dayPart}?` : offer.type === "at" && chipWorld ? `Timelapse to ${shortClock(chipWorld, headState, offer.at)}?` : offer.type === "shift" ? "Timelapse to your next shift?" : offer.type === "commitment" ? "Timelapse to your next commitment?" : "Timelapse?";
       const detail = offer.type === "duration" && offer.minutes > INTERPRETED_TIMELAPSE_CAP ? "That's longer than one turn runs on its own. Run it as a timelapse?" : "You said time passes after that. Run it as a timelapse?";
       stored.push({ id: `tlo:${at}`, kind: "timelapse_offer", ...base, label, detail, actions: [{ id: "timelapse", label: "Timelapse", style: "primary" }], expires: "next_send", payload: { target: JSON.parse(JSON.stringify(offer)) as JsonValue } });
     }
@@ -2195,10 +2195,16 @@ function unfitReason(reg: Registry, world: WorldDoc, state: Readonly<WorldState>
   return `${name} isn't ${place ? "a place" : person ? "anyone" : "anything"} in this world`;
 }
 
-/** A clock time for a chip: "07:00" later the same day, else with its weekday ("Sat 07:00"). */
-function shortClock(cal: Calendar, now: number, at: number): string {
-  const d = dateAt(cal, at);
-  return d.dayIndex === dateAt(cal, now).dayIndex ? formatHHMM(d.minuteOfDay) : `${weekdayName(cal, d.weekday)} ${formatHHMM(d.minuteOfDay)}`;
+/**
+ * A clock time for a chip, local to where the POV is, as the HUD shows it: "07:00" later the same
+ * day, else with its weekday ("Sat 07:00").
+ */
+function shortClock(world: WorldDoc, state: Readonly<WorldState>, at: number): string {
+  const cal = calendarOf(world);
+  const place = placeOfEntity(state, world.pov);
+  const d = dateAt(cal, at + placeOffset(world, at, place));
+  const today = dateAt(cal, state.clock + placeOffset(world, state.clock, place)).dayIndex;
+  return d.dayIndex === today ? formatHHMM(d.minuteOfDay) : `${weekdayName(cal, d.weekday)} ${formatHHMM(d.minuteOfDay)}`;
 }
 
 /** The Outline slot's lines: the brief, the engine's beats, then the outline step's prose. */

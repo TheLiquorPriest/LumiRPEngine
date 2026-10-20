@@ -8,7 +8,7 @@
 import type { ChatId, EntityId, UserId } from "../shared/ids";
 import { isRecord } from "../shared/json";
 import type { LedgerEvent } from "../shared/ledger";
-import type { Fidelity, MindCallTrace, MindsSettings } from "../shared/minds";
+import type { Fidelity, MindCallTrace, MindMoment, MindsSettings } from "../shared/minds";
 import { limitOf, MIND_TEXT_CAPS, MINDS_EVENTS } from "../shared/minds";
 import type { ModelUseSettings } from "../shared/settings";
 import type { WorldDoc } from "../shared/world";
@@ -21,7 +21,7 @@ import { allRules } from "../engine/rules";
 import { isGone, kindIs, placeOfEntity } from "../engine/scope";
 import type { WorldState } from "../engine/state";
 import type { InterpretOutput } from "../engine/steps";
-import { TimelapseRun, type SkipRecord } from "../engine/time";
+import { fightHoldsClock, TimelapseRun, type SkipRecord } from "../engine/time";
 import { timelapseOptions, turnStart } from "../engine/turn";
 import { Working } from "../engine/working";
 import { localTime, mindPrompt, mindsStepConfig, type RunMindsInput, type RunMindsResult } from "./minds";
@@ -84,7 +84,7 @@ export function scanBeats(reg: Registry, world: WorldDoc, state: Readonly<WorldS
     for (const id of Object.keys(state.entities).sort()) {
       const level = id === pov ? "background" : tier(ctx, id);
       if (level !== "live" && level !== "near") continue;
-      const withPov = plans(ctx, id).filter((p) => p.with.includes(pov));
+      const withPov = plans(ctx, id).filter((p) => p.status === "open" && p.with.includes(pov));
       for (const b of laid(ctx, id, run.from, end)) {
         const p = withPov.find((x) => x.id === b.plan);
         if (p) add(b.start, `${nameOf(id)}'s plan with the player character: ${p.what}`, RANK.plan, [id, ...p.with.filter(person)]);
@@ -149,25 +149,31 @@ export interface SkipRun {
 
 /**
  * The `skip` step (DESIGN §24.7), when the user turned it on: further beats the model proposes inside
- * the span, from the beats found and what the people involved plan. Its prompt is the world's
- * template, else the user's own, else the built-in. Its reasons are the GM's to read only: no mind and
- * no player surface is given them, since they may come of someone's private intent.
+ * the span, from the beats found and what the people involved plan. Its prompt is the user's own,
+ * else the world's template, else the built-in. Its reasons are the GM's to read only: no mind and
+ * no player surface is given them, since they may come of someone's private intent. Its call joins
+ * the inspector's minds calls, with no text and as no one.
  */
-async function proposedBeats(deps: SkipDeps, input: SkipInput, state: Readonly<WorldState>, scanned: ScannedSkip): Promise<Beat[]> {
+async function proposedBeats(deps: SkipDeps, input: SkipInput, state: Readonly<WorldState>, scanned: ScannedSkip, traces: MindCallTrace[]): Promise<Beat[]> {
   const config = mindsStepConfig(input.settings.modelUse, "skip");
   if (!config || input.signal.aborted) return [];
   const ctx = deps.registry.context(input.world, state);
   const cal = calendarOf(input.world);
   const plans = optionalQuery(ctx, "minds.plans");
   const intents = [...new Set(scanned.beats.flatMap((b) => b.who))].flatMap((id) => {
-    const theirs = plans?.(ctx, id) ?? [];
+    const theirs = (plans?.(ctx, id) ?? []).filter((p) => p.status === "open");
     return theirs.length > 0 ? [`${own(state.entities, id)?.name ?? id}: ${theirs.map((p) => `${p.what} (${formatStamp(cal, p.when.from)})`).join("; ")}`] : [];
   });
   const user = [`The skip runs from ${formatStamp(cal, scanned.from)} to ${formatStamp(cal, scanned.to)}.`, scanned.beats.length > 0 ? `Moments found:\n${scanned.beats.map((b) => `- ${formatStamp(cal, b.at)}: ${b.reason}`).join("\n")}` : "No moments found.", intents.length > 0 ? `What the people involved plan:\n${intents.join("\n")}` : ""].filter((part) => part !== "").join("\n\n");
-  const raw = await deps.steps.helperJson("skip", mindPrompt("skip", input.world, input.settings.minds, { world: input.world.name }).text, user, config, input.userId, input.signal, { lore: null, guidance: input.guidance?.skip ?? "" });
-  if (!isRecord(raw) || !Array.isArray(raw.beats)) return [];
+  const prompt = mindPrompt("skip", input.world, input.settings.minds, { world: input.world.name });
+  const usage = { tokens: 0 };
+  const t0 = performance.now();
+  const raw = await deps.steps.helperJson("skip", prompt.text, user, config, input.userId, input.signal, { lore: null, guidance: input.guidance?.skip ?? "", usage });
+  const proposals = isRecord(raw) && Array.isArray(raw.beats) ? raw.beats : null;
+  traces.push({ purpose: "skip", phase: "skip", who: "", level: null, outcome: proposals ? "recorded" : "failed", ms: Math.round(performance.now() - t0), tokens: usage.tokens, prompt: prompt.source });
+  if (!proposals) return [];
   const out: Beat[] = [];
-  for (const b of raw.beats.slice(0, 5)) {
+  for (const b of proposals.slice(0, 5)) {
     if (!isRecord(b) || typeof b.at !== "string" || typeof b.reason !== "string") continue;
     const at = localTime(input.world, scanned.from, b.at);
     if (at !== null && at > scanned.from && at <= scanned.to) out.push({ at, reason: b.reason.replace(/\s+/g, " ").trim().slice(0, MIND_TEXT_CAPS.reason), source: "model", who: [], rank: RANK.model });
@@ -176,11 +182,13 @@ async function proposedBeats(deps: SkipDeps, input: SkipInput, state: Readonly<W
 }
 
 /**
- * The minds at a moment of the skip: the people the beat names, then those with the player character
- * whom fidelity puts at Live or Near, best score first, up to `cap`. Each thinks blind to the others,
- * with a reason that names nothing private. Only their `minds.mind` events come back.
+ * The minds at a moment of the skip. At a beat: the people it names, then those with the player
+ * character whom fidelity puts at Live or Near, best score first, up to `cap`. At its end (a `turn`
+ * moment, as the turn's own minds, which can't interrupt anything): only those with the player
+ * character. Each thinks blind to the others, with a reason that names nothing private. Only their
+ * `minds.mind` events come back.
  */
-async function mindsAt(deps: SkipDeps, input: SkipInput, w: Working, named: readonly EntityId[], cap: number, reason: string, traces: MindCallTrace[]): Promise<LedgerEvent[]> {
+async function mindsAt(deps: SkipDeps, input: SkipInput, w: Working, kind: MindMoment["kind"], named: readonly EntityId[], cap: number, reason: string, traces: MindCallTrace[]): Promise<LedgerEvent[]> {
   const pov = input.world.pov;
   const scores = optionalQuery(w.ctx, "minds.fidelity")?.(w.ctx, { user: "", reply: "" }) ?? [];
   const here = placeOfEntity(w.state, pov);
@@ -194,7 +202,7 @@ async function mindsAt(deps: SkipDeps, input: SkipInput, w: Working, named: read
   if (who.length === 0) return [];
   const levels: Record<EntityId, Fidelity> = {};
   for (const id of who) levels[id] = scores.find((s) => s.entity === id)?.level ?? "background";
-  const result = await deps.minds({ chatId: input.chatId, userId: input.userId, world: input.world, state: w.state, who, moment: { kind: "beat", at: w.state.clock, reason, user: "", reply: "" }, levels, signal: input.signal, guidance: input.guidance?.mind ?? "", phase: "skip" });
+  const result = await deps.minds({ chatId: input.chatId, userId: input.userId, world: input.world, state: w.state, who, moment: { kind, at: w.state.clock, reason, user: "", reply: "" }, levels, signal: input.signal, guidance: input.guidance?.mind ?? "", phase: "skip" });
   traces.push(...result.traces);
   return result.events.filter((e) => e.type === MINDS_EVENTS.mind && "data" in e && typeof e.data.entity === "string" && who.includes(e.data.entity));
 }
@@ -209,45 +217,58 @@ function interrupter(w: Working, events: readonly LedgerEvent[]): EntityId | nul
   return null;
 }
 
+/** A beat's minds as recorded: only the one that stops the skip keeps its interrupt, so no one else is told as stepping in. */
+function stopperOnly(events: readonly LedgerEvent[], stopper: EntityId | null): LedgerEvent[] {
+  return events.map((e) => (e.type === MINDS_EVENTS.mind && "data" in e && e.data.entity !== stopper && isRecord(e.data.interrupt) ? { ...e, data: { ...e.data, interrupt: null } } : e));
+}
+
 /**
  * A time skip's pre phase (DESIGN §24.7): from the state the plan starts from, the beats, the `skip`
  * step's proposals, and the timelapse run beat by beat with the minds at each, capped by the user's
  * settings ("none" is no cap, which the before-the-reply clock still bounds). A mind's interrupt stops
- * it at its beat; the clock running out stops it at the next beat, with the rest left for Continue.
- * Past the last beat it runs to its end, where those with the player character think once more as the
- * turn's own minds. Null when the timelapse can't run, which the plan then says.
+ * it at its beat; the clock running out stops it at the next beat it reaches, the first one too, so
+ * a Continue always gets further, with the rest left for it. Past the last beat it runs to its end,
+ * where those with the player character think once more as the turn's own minds. Null when the
+ * timelapse can't run (a fight holds the clock among the rest), which the plan then says.
  */
 export async function runSkip(deps: SkipDeps, input: SkipInput): Promise<SkipRun | null> {
   const reg = deps.registry;
   const cal = calendarOf(input.world);
   const w = new Working(reg, input.world, input.state);
   turnStart(reg, w, input.runSeed);
+  // A fight's rounds take no clock time (DESIGN §11): the plan refuses the timelapse, so no one is asked.
+  if (fightHoldsClock(w.ctx)) return null;
   const scanned = scanBeats(reg, input.world, w.state, input.intent, input.runSeed);
   const { target, opts } = timelapseOptions(input.intent, input.runSeed);
   const run = scanned && target ? TimelapseRun.start(reg, w, target, opts) : null;
   if (!scanned || !run || "code" in run) return null;
-  const beats = capBeats([...scanned.beats, ...(await proposedBeats(deps, input, w.state, scanned))], limitOf(input.settings.minds.skip.maxBeats));
-  const perBeat = limitOf(input.settings.minds.skip.maxMindsPerBeat);
   const traces: MindCallTrace[] = [];
+  const beats = capBeats([...scanned.beats, ...(await proposedBeats(deps, input, w.state, scanned, traces))], limitOf(input.settings.minds.skip.maxBeats));
+  const perBeat = limitOf(input.settings.minds.skip.maxMindsPerBeat);
   const record: SkipRecord = { beats: [{ at: run.from, events: run.apply([{ type: MINDS_EVENTS.skip, data: { from: run.from, to: run.to, beats: beats.map((b) => ({ at: b.at, reason: b.reason, source: b.source })) } }]) }], stop: null };
   for (const beat of beats) {
-    if (input.signal.aborted) {
-      record.stop = { by: "clock", at: run.clock };
-      return { record, traces };
-    }
     run.advanceTo(beat.at);
     if (run.clock !== beat.at) break;
-    const applied = run.apply(await mindsAt(deps, input, w, beat.who, perBeat, `Time skips ahead; it is now ${formatClock(cal, beat.at)}.`, traces));
-    if (applied.length > 0) record.beats.push({ at: beat.at, events: applied });
+    // Once the before-the-reply clock has run out no one else is asked.
+    const minds = input.signal.aborted ? [] : await mindsAt(deps, input, w, "beat", beat.who, perBeat, `Time skips ahead; it is now ${formatClock(cal, beat.at)}.`, traces);
+    const applied = run.apply(stopperOnly(minds, interrupter(w, minds)));
+    // Every beat reached is recorded, with its minds' events or none, so the plan's replay cuts the run where this one did.
+    record.beats.push({ at: beat.at, events: applied });
     const stopper = interrupter(w, applied);
     if (stopper) {
       record.stop = { by: "mind", at: beat.at, entity: stopper };
       return { record, traces };
     }
+    if (input.signal.aborted) {
+      record.stop = { by: "clock", at: beat.at };
+      return { record, traces };
+    }
   }
   run.advanceTo(run.to);
+  // The unit cap may have taken the run back to the start of a slot a beat fell inside: that beat is undone.
+  record.beats = record.beats.filter((b) => b.at <= run.clock);
   if (!input.signal.aborted) {
-    const end = run.apply(await mindsAt(deps, input, w, [], limitOf(input.settings.minds.liveLimit), `The time skip ends; it is now ${formatClock(cal, run.clock)}.`, traces));
+    const end = run.apply(await mindsAt(deps, input, w, "turn", [], limitOf(input.settings.minds.liveLimit), `The time skip ends; it is now ${formatClock(cal, run.clock)}.`, traces));
     if (end.length > 0) record.beats.push({ at: run.clock, events: end });
   }
   return { record, traces };

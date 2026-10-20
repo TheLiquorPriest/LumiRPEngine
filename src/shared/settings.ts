@@ -45,14 +45,15 @@ export const HELPER_MAX_TOKENS = 2000;
 /**
  * A step's saved settings, else what it runs with while none are saved: `puzzle.answer` is the
  * author's opt-in, so it runs on every Answer unless the user turns it off; the minds steps run
- * whenever Settings → Minds is on (DESIGN §24.6); any other is off. The turn, the minds and
- * Settings → Steps all read this, so the card shows what runs and its switch flips it.
+ * whenever Settings → Minds is on (DESIGN §24.6), except the `skip` step, which is off until the
+ * user turns it on (§24.7); any other is off. The turn, the minds and Settings → Steps all read
+ * this, so the card shows what runs and its switch flips it.
  * Puzzle answers with no signals saved reads its own: an older card saved Enabled with an empty
  * list, which showed On and never ran, and Enabled is what turns it off.
  */
 export function stepConfigOf(steps: Partial<Record<StepPurpose, StepConfig>>, purpose: StepPurpose): StepConfig {
   const saved = steps[purpose];
-  if (isMindPurpose(purpose)) return saved ?? { enabled: true, signals: [], maxTokens: HELPER_MAX_TOKENS };
+  if (isMindPurpose(purpose)) return saved ?? { enabled: purpose !== "skip", signals: [], maxTokens: HELPER_MAX_TOKENS };
   if (purpose !== "puzzle.answer") return saved ?? { enabled: false, signals: [] };
   const signals = ["always"];
   return saved ? (saved.signals.length > 0 ? saved : { ...saved, signals }) : { enabled: true, signals };
