@@ -412,6 +412,11 @@ function b2(n, r) {
   var u = y2(t2++, 7);
   return E2(u.__H, r) && (u.__ = n(), u.__H = r), u.__;
 }
+function j2(n, t) {
+  return f2 = 8, b2(function() {
+    return n;
+  }, t);
+}
 function w2(n) {
   var u = r2.context[n.__c], i = y2(t2++, 9);
   return i.c = n, u ? (i.__ == null && (i.__ = true, u.sub(r2)), u.props.value) : n.__;
@@ -569,6 +574,16 @@ function pushSheet(ui, route) {
 }
 function popSheet(ui) {
   return ui.play.stack.length === 0 ? ui : { ...ui, play: { ...ui.play, stack: ui.play.stack.slice(0, -1) } };
+}
+function switchChat(app, chatId) {
+  const now = app.client.getState();
+  if (chatId === now.chatId && now.status !== "closed")
+    return;
+  app.overlays.closeMap();
+  app.overlays.closePalette();
+  app.overlays.closeWorld();
+  app.ui.update((ui) => ui.play.stack.length === 0 ? ui : { ...ui, play: { ...ui.play, stack: [] } });
+  app.client.open(chatId);
 }
 var AppContext = K(null);
 function useApp() {
@@ -1897,8 +1912,10 @@ function SaveBar(props) {
 function useShowIds() {
   return useUi((ui) => ui.showIds);
 }
+var IdsSurface = K(false);
 function IdText(props) {
-  return useShowIds() ? /* @__PURE__ */ u3("code", {
+  const surface = w2(IdsSurface);
+  return useShowIds() && surface ? /* @__PURE__ */ u3("code", {
     class: "lre-id",
     children: props.id
   }, undefined, false, undefined, this) : null;
@@ -19867,7 +19884,7 @@ function DisplayPage() {
           }, undefined, false, undefined, this),
           /* @__PURE__ */ u3("span", {
             class: "lre-field-help",
-            children: "Shows the id the engine and world files use beside each name, in Build and GM. Handy when you write rules or read a world's files. Kept on this device."
+            children: "Shows the id the engine and world files use beside each name, in Build and GM; never in Play, where an id can say what a name keeps back. Handy when you write rules or read a world's files. Kept on this device."
           }, undefined, false, undefined, this)
         ]
       }, undefined, true, undefined, this)
@@ -20142,7 +20159,10 @@ function Drawer(props) {
         id: bodyId,
         role: "tabpanel",
         "aria-labelledby": `${bodyId}-tab-${mode}`,
-        children: mode === "play" ? /* @__PURE__ */ u3(Play, {}, undefined, false, undefined, this) : mode === "gm" ? /* @__PURE__ */ u3(GmMode, {}, undefined, false, undefined, this) : mode === "build" ? /* @__PURE__ */ u3(Build, {}, undefined, false, undefined, this) : /* @__PURE__ */ u3(Settings, {}, undefined, false, undefined, this)
+        children: mode === "play" ? /* @__PURE__ */ u3(Play, {}, undefined, false, undefined, this) : mode === "gm" || mode === "build" ? /* @__PURE__ */ u3(IdsSurface.Provider, {
+          value: true,
+          children: mode === "gm" ? /* @__PURE__ */ u3(GmMode, {}, undefined, false, undefined, this) : /* @__PURE__ */ u3(Build, {}, undefined, false, undefined, this)
+        }, undefined, false, undefined, this) : /* @__PURE__ */ u3(Settings, {}, undefined, false, undefined, this)
       }, undefined, false, undefined, this)
     ]
   }, undefined, true, undefined, this);
@@ -23366,6 +23386,9 @@ var CARD_STATES = ["active", "frozen", "lost", "cancelled"];
 var FLOW_KINDS = ["transfer", "bill", "rent", "utility", "subscription", "premium", "loan_payment", "card_payment", "savings", "income", "payroll", "allowance", "living", "tax", "distribution", "invoice", "draw", "other"];
 var FLOW_SHORTFALLS = ["skip", "partial", "retry", "fallback", "overdraft", "defer"];
 var FLOW_STATUSES = ["active", "paused", "ended"];
+function payeeKey(name) {
+  return name.toLowerCase().replace(/[^a-z0-9:]+/g, "_").replace(/^_+|_+$/g, "");
+}
 var TXN_KINDS = ["purchase", "payment", "transfer", "income", "fee", "interest", "withdrawal", "deposit", "refund", "adjustment", "opening", "rewards", "sale"];
 var DELINQUENCY_STAGES = ["current", "late", "30", "60", "90", "120", "collections", "charged_off"];
 var CREDIT_TIERS = ["super_prime", "prime", "nonprime", "subprime", "deep_subprime"];
@@ -25296,11 +25319,23 @@ function TextField2(props) {
     }, undefined, false, undefined, this)
   }, undefined, false, undefined, this);
 }
+var FieldValidity = K(null);
+function numberProblem2(label, min, max) {
+  const name = label.replace(/\s*\([^()]*\)$/, "");
+  const range = min !== undefined && max !== undefined ? ` from ${min} to ${max}` : min !== undefined ? ` of ${min} or more` : max !== undefined ? ` of ${max} or less` : "";
+  return `“${name}” takes a number${range}.`;
+}
 function NumberField2(props) {
   const id = P2();
   const [text, setText] = d2(props.value === null ? "" : String(props.value));
   const parsed = text.trim() === "" ? null : Number(text);
   const bad = parsed !== null && (!Number.isFinite(parsed) || props.min !== undefined && parsed < props.min || props.max !== undefined && parsed > props.max);
+  const reason = bad ? numberProblem2(props.label, props.min, props.max) : null;
+  const mark = w2(FieldValidity);
+  A(() => {
+    mark?.(id, reason);
+    return () => mark?.(id, null);
+  }, [mark, id, reason]);
   return /* @__PURE__ */ u3(Field, {
     label: props.label,
     help: props.help,
@@ -25410,45 +25445,69 @@ function ToggleField(props) {
 }
 function ActionPage(props) {
   const { nav, controls } = props;
-  const blocked = props.disabled === true || props.problem !== undefined && props.problem !== null;
+  const [fields, setFields] = d2(() => new Map);
+  const mark = j2((field, reason) => {
+    setFields((was) => {
+      if ((was.get(field) ?? null) === reason)
+        return was;
+      const next = new Map(was);
+      if (reason === null)
+        next.delete(field);
+      else
+        next.set(field, reason);
+      return next;
+    });
+  }, []);
+  const reasons = [...new Set([...fields.values(), ...props.problem ? [props.problem] : []])];
+  const blocked = reasons.length > 0;
   return /* @__PURE__ */ u3(MoneyPage, {
     nav,
     name: props.name,
     title: props.title,
     subtitle: props.subtitle,
-    children: /* @__PURE__ */ u3("form", {
-      class: "lre-money-form",
-      "data-lre-money-action": props.name,
-      onSubmit: (event) => {
-        event.preventDefault();
-        if (controls.busy || blocked)
-          return;
-        props.submit().then((ok) => ok && nav.back());
-      },
-      children: [
-        props.children,
-        props.problem ? /* @__PURE__ */ u3("p", {
-          class: "lre-money-problem",
-          children: props.problem
-        }, undefined, false, undefined, this) : null,
-        /* @__PURE__ */ u3(Button, {
-          type: "submit",
-          variant: props.danger ? "danger" : "primary",
-          block: true,
-          busy: controls.busy,
-          disabled: blocked,
-          children: props.go
-        }, undefined, false, undefined, this)
-      ]
-    }, undefined, true, undefined, this)
+    children: /* @__PURE__ */ u3(FieldValidity.Provider, {
+      value: mark,
+      children: /* @__PURE__ */ u3("form", {
+        class: "lre-money-form",
+        "data-lre-money-action": props.name,
+        onSubmit: (event) => {
+          event.preventDefault();
+          if (controls.busy || blocked)
+            return;
+          props.submit().then((ok) => ok && nav.back());
+        },
+        children: [
+          props.children,
+          reasons.map((r) => /* @__PURE__ */ u3("p", {
+            class: "lre-money-problem",
+            children: r
+          }, r, false, undefined, this)),
+          /* @__PURE__ */ u3(Button, {
+            type: "submit",
+            variant: props.danger ? "danger" : "primary",
+            block: true,
+            busy: controls.busy,
+            disabled: blocked,
+            children: props.go
+          }, undefined, false, undefined, this)
+        ]
+      }, undefined, true, undefined, this)
+    }, undefined, false, undefined, this)
   }, undefined, false, undefined, this);
+}
+function amountProblem(text, currency, what, needed = true) {
+  if (text.trim() === "")
+    return needed ? `Type ${what}.` : null;
+  return amountOf(text, currency) === null ? "Type an amount above zero." : null;
+}
+function unchangedProblem(now, what) {
+  return `It's ${humanize(now).toLowerCase()} now: pick another ${what}.`;
 }
 function AmountPage(props) {
   const { controls } = props;
   const [text, setText] = d2(props.initial ?? "");
   const empty = text.trim() === "";
   const cents = empty ? null : amountOf(text, controls.currency);
-  const ok = empty ? props.optional !== undefined : cents !== null;
   return /* @__PURE__ */ u3(ActionPage, {
     nav: props.nav,
     controls,
@@ -25457,7 +25516,7 @@ function AmountPage(props) {
     subtitle: props.subtitle,
     go: props.go,
     danger: props.danger,
-    disabled: !ok,
+    problem: amountProblem(text, controls.currency, "an amount", props.optional === undefined),
     submit: () => props.submit(cents),
     children: [
       props.children,
@@ -26688,6 +26747,9 @@ function account(o) {
     owners: list(o.owners, ownerLine),
     role: nullableOf(o.role, OWNER_ROLES),
     manages: o.manages === true,
+    spends: o.spends === true,
+    autopayFrom: strings(o.autopayFrom),
+    fallbacks: strings(o.fallbacks),
     limit: nullableNum(o.limit),
     aprPct: nullableNum(o.aprPct),
     apyPct: nullableNum(o.apyPct),
@@ -26871,7 +26933,8 @@ function property(o) {
     leases: list(o.leases, (l) => ({ flow: str(l.flow), tenant: str(l.tenant), rent: num(l.rent), start: nullableStr(l.start), end: nullableStr(l.end), state: oneOf(l.state, ["let", "vacant", "ended"], "let") })),
     costs: list(o.costs, flowView),
     forSale: nullableNum(o.forSale),
-    route: distributionRoute(o.route)
+    route: distributionRoute(o.route),
+    ...Array.isArray(o.mortgageTerms) ? { mortgageTerms: list(o.mortgageTerms, (t) => typeof t.months === "number" && t.months > 0 ? { months: t.months, usual: bool(t.usual) } : null) } : {}
   };
 }
 function credit(o) {
@@ -26944,6 +27007,8 @@ function decodeFinanceView(value) {
         id: b.id,
         name: str(b.name, b.id),
         role: nullableOf(b.role, OWNER_ROLES),
+        mayDraw: b.mayDraw === true,
+        selfDealing: strings(b.selfDealing),
         owners: list(b.owners, ownerLine),
         accounts: strings(b.accounts),
         managed: list(b.managed, account),
@@ -26998,7 +27063,9 @@ function decodeFinanceView(value) {
     } : null,
     recent: list(value.recent, journalLine),
     notes: list(value.notes, (n) => ({ at: str(n.at), text: str(n.text) })),
-    payPrefs: list(value.payPrefs, payTier)
+    payPrefs: list(value.payPrefs, payTier),
+    paysFor: list(value.paysFor, (p) => typeof p.from === "string" ? { from: p.from, to: strings(p.to) } : null),
+    ownKeys: strings(value.ownKeys)
   };
 }
 
@@ -27040,7 +27107,7 @@ function hubTabs(view, mode) {
     tabs.push({ id: "properties", label: SECTION_LABELS.properties, dot: view.properties.some((p) => p.leases.some((l) => l.state === "vacant")) });
   if (view.credit !== null)
     tabs.push({ id: "credit", label: SECTION_LABELS.credit, dot: view.credit.marks.length > 0 });
-  if (view.household !== null || creates && person && view.level >= 3)
+  if (view.household !== null || creates && person && view.features.includes("households"))
     tabs.push({ id: "household", label: SECTION_LABELS.household, dot: false });
   return tabs;
 }
@@ -27094,7 +27161,7 @@ function accountControls(view, account) {
   const t = CLASS_TRAITS[account.class];
   const r = rights(account.role);
   const out = [];
-  if ((t.revolving || t.installment) && account.role !== null && account.cents < 0 && paySources(view).some((a) => a.id !== account.id))
+  if (view.level >= 3 && (t.revolving || t.installment) && account.role !== null && account.cents < 0 && paySources(view).some((a) => a.id !== account.id))
     out.push("pay");
   if (r.spend && account.status === "open" && moveSources(view).some((a) => a.id === account.id) && transferTargets(view, account.id).length > 0)
     out.push("transfer");
@@ -27121,6 +27188,8 @@ function transferTargets(view, from) {
   return view.accounts.filter((a) => a.id !== from && CLASS_TRAITS[a.class].asset && !CLASS_TRAITS[a.class].cash && a.status === "open" && rights(a.role).sees);
 }
 function cardControls(view, card) {
+  if (!view.features.includes("cards"))
+    return [];
   if (card.holderId !== view.party && findAccount(view, card.account)?.manages !== true)
     return [];
   return cardChanges(card.state);
@@ -27140,22 +27209,31 @@ function flowControls(view, flow) {
     return out;
   }
   const payer = flow.payer;
-  const billed = payer !== null && (payer === view.party || view.businesses.some((b) => b.id === payer && rights(b.role).manage));
-  return view.level >= 3 && flow.source === "invoice" && flow.link !== null && billed ? ["pay_now"] : [];
+  if (view.level < 3 || flow.source !== "invoice" || flow.link === null || payer === null)
+    return [];
+  const billed = payer === view.party || view.businesses.some((b) => b.id === payer && rights(b.role).manage);
+  return billed && !(flow.spec !== null && paysForThem(view, [payer], flow.spec.to)) ? ["pay_now"] : [];
 }
 function jobControls(view, job, employer) {
   if (view.level < 3 || job.status === "ended")
     return [];
   const out = job.workerId === view.party ? ["quit"] : [];
-  if (employer && rights(employer.role).manage)
-    out.push("raise", "let_go");
+  if (employer && rights(employer.role).manage && job.workerId !== "") {
+    if (!employer.selfDealing.includes(job.workerId))
+      out.push("raise");
+    out.push("let_go");
+  }
   return out;
 }
 function businessControls(view, business) {
   if (view.level < 3)
     return [];
   const r = rights(business.role);
-  const out = r.manage ? ["hire", "invoice", "draw", "distribute"] : [];
+  const out = r.manage ? ["hire", "invoice"] : [];
+  if (business.mayDraw)
+    out.push("draw");
+  if (r.manage)
+    out.push("distribute");
   if (r.worth && view.features.includes("investments"))
     out.push("stake");
   return out;
@@ -27187,25 +27265,86 @@ function endableLeases(view, property) {
     return [];
   return property.leases.filter((l) => l.state === "let" && view.flows.some((f) => f.id === l.flow)).map((l) => l.flow);
 }
+function mortgageTermChoices(property) {
+  return (property.mortgageTerms ?? []).map((t) => {
+    const [n, unit] = t.months % 12 === 0 ? [t.months / 12, "year"] : [t.months, "month"];
+    return { value: String(t.months), label: `${n} ${unit}${n === 1 ? "" : "s"}`, ...t.usual ? { detail: "The usual" } : {} };
+  });
+}
 function flowSources(view) {
-  return viewAccounts(view).filter((a) => {
-    const t = CLASS_TRAITS[a.class];
-    return t.pays && t.asset && !t.locked && !t.cash && a.status === "open" && a.manages;
-  }).map((a) => ({ id: a.id, label: a.name }));
+  return viewAccounts(view).filter((a) => pays(a) && a.manages).map((a) => ({ id: a.id, label: a.name }));
+}
+function paysForThem(view, payers, to) {
+  if (to.trim() === "")
+    return false;
+  const typedOwn = view.ownKeys.includes(payeeKey(to));
+  return payers.some((p) => {
+    const a = findAccount(view, p);
+    const managed = a === null ? p !== view.party : a.manages && !a.spends;
+    return managed && (typedOwn || (view.paysFor.find((x) => x.from === p)?.to.includes(to) ?? false));
+  });
+}
+function pays(a) {
+  const t = CLASS_TRAITS[a.class];
+  return t.pays && t.asset && !t.locked && !t.cash && a.status === "open";
 }
 function autopaySources(view, account) {
-  return viewAccounts(view).filter((a) => {
-    const t = CLASS_TRAITS[a.class];
-    return a.id !== account.id && t.pays && t.asset && !t.locked && !t.cash && a.status === "open" && (rights(a.role).spend || a.manages);
-  });
+  return viewAccounts(view).filter((a) => a.id !== account.id && account.autopayFrom.includes(a.id) && pays(a));
+}
+function gmAutopaySources(views, account) {
+  const out = [];
+  for (const v of views) {
+    const a = findAccount(v, account);
+    if (a) {
+      for (const s of autopaySources(v, a))
+        if (!out.some((o) => o.id === s.id))
+          out.push(s);
+    }
+  }
+  return out;
+}
+function fallbackSources(view, from, to) {
+  const backs = from === view.party ? view.accounts.filter((a) => a.spends).map((a) => a.id) : findAccount(view, from)?.fallbacks ?? [];
+  return viewAccounts(view).filter((a) => a.id !== from && backs.includes(a.id) && pays(a) && !paysForThem(view, [a.id], to));
 }
 function knownPeople(palette) {
   const pay = palette?.entries.find((e) => e.action === "pay");
   return (pay?.options ?? []).flatMap((o) => typeof o.params.to === "string" ? [{ id: o.params.to, label: o.label }] : []);
 }
-function flowTargets(view, palette) {
-  const own = view.accounts.filter((a) => a.status === "open" && !CLASS_TRAITS[a.class].cash && rights(a.role).sees).map((a) => ({ id: a.id, label: `${a.name} (yours)` }));
-  return [...own, ...knownPeople(palette).filter((p) => !own.some((o) => o.id === p.id))];
+function hireable(business, people) {
+  return people.filter((p) => !business.selfDealing.includes(p.value) && !business.employees.some((j) => j.workerId === p.value && j.status !== "ended"));
+}
+function gmKindIs(kinds, kind, ancestor) {
+  const seen = new Set;
+  for (let id = kind;id !== null && !seen.has(id); id = kinds.find((k) => k.id === id)?.extends ?? null) {
+    if (id === ancestor)
+      return true;
+    seen.add(id);
+  }
+  return false;
+}
+var PARTY_KIND_ORDER = ["business", "trust", "household", "person"];
+function gmParties(gm, kinds) {
+  const out = [];
+  for (const e of gm.entities) {
+    const kind = e.gone ? undefined : PARTY_KIND_ORDER.find((k) => gmKindIs(gm.kinds, e.kind, k));
+    if (kind !== undefined && kinds.includes(kind))
+      out.push({ id: e.id, name: e.name, kind });
+  }
+  return out;
+}
+function flowTargets(view, palette, payers = []) {
+  const target = (a) => a.status === "open" && !CLASS_TRAITS[a.class].cash && !payers.includes(a.id) && !paysForThem(view, payers, a.id);
+  const own = view.accounts.filter((a) => target(a) && rights(a.role).sees).map((a) => {
+    const holder = rights(a.role).worth ? undefined : a.owners.find((o) => rights(o.role).worth);
+    return { id: a.id, label: `${a.name} (${holder ? possessive(holder.name, false) : "yours"})` };
+  });
+  const run = view.businesses.flatMap((b) => b.managed.filter(target).map((a) => ({ id: a.id, label: `${a.name} (${possessive(b.name, false)})` })));
+  const theirs = new Set([view.party, view.household?.id ?? "", ...own.map((o) => o.id), ...run.map((r) => r.id)]);
+  return [...own, ...run, ...knownPeople(palette).filter((p) => !theirs.has(p.id) && !paysForThem(view, payers, p.id))];
+}
+function payeeProblem(view, payers, to) {
+  return paysForThem(view, payers, to) ? "Money you only manage pays for whom it's for: it can't pay you, your household, or a business or account of yours or theirs." : null;
 }
 function utilisation(account) {
   return account.limit !== null && account.limit > 0 ? Math.round(Math.max(0, -account.cents) * 100 / account.limit) : null;
@@ -27233,7 +27372,7 @@ function shows(view, feature) {
 }
 function overviewBlocks(view) {
   const assets = view.detail || shows(view, "investments") || shows(view, "property");
-  return { assets, breakdown: assets, cashFlowByCategory: view.detail, cashFlowAhead: view.detail, upcoming: view.detail ? 20 : 5, recent: view.detail ? 20 : 5 };
+  return { assets, breakdown: view.detail, cashFlowByCategory: view.detail, cashFlowAhead: view.detail, upcoming: view.detail ? 20 : 5, recent: view.detail ? 20 : 5 };
 }
 function accountBlocks(view, account) {
   const t = CLASS_TRAITS[account.class];
@@ -28634,7 +28773,7 @@ function findCard(view, id) {
   return view.cards.find((c) => c.id === id) ?? viewAccounts(view).flatMap((a) => a.cards).find((c) => c.id === id) ?? null;
 }
 function payPrefsShown(view) {
-  return view.level >= 2 && (view.features.includes("payment_prefs") || view.payPrefs.length > 0);
+  return view.features.includes("payment_prefs");
 }
 function payUses(view) {
   return [...view.cards.filter((c) => c.state === "active").map((c) => ({ value: c.id, label: c.name })), ...paySources(view).map((a) => ({ value: a.id, label: a.name }))];
@@ -29033,7 +29172,7 @@ function TransferPage(props) {
   const [to, setTo] = d2(targets[0]?.id ?? "");
   const [text, setText] = d2("");
   const cents = amountOf(text, controls.currency);
-  const problem = to === "" ? "Pick where it goes." : text.trim() !== "" && cents === null ? "Type an amount above zero." : null;
+  const problem = to === "" ? "Pick where it goes." : amountProblem(text, controls.currency, "an amount");
   return /* @__PURE__ */ u3(ActionPage, {
     nav: props.nav,
     controls,
@@ -29042,7 +29181,6 @@ function TransferPage(props) {
     subtitle: `From ${a.name} · ${fmt(a.available ?? a.cents)} available`,
     go: cents !== null ? `Transfer ${fmt(cents)}` : "Transfer",
     problem,
-    disabled: cents === null,
     submit: () => cents === null ? Promise.resolve(false) : controls.act(transferAction(a.id, to, cents)),
     children: [
       /* @__PURE__ */ u3(SelectField, {
@@ -29082,12 +29220,14 @@ function CashPage(props) {
 function AutopayPage(props) {
   const { account: a, controls } = props;
   const was = a.autopay;
-  const sources = autopaySources(props.view, a);
+  const sources = (controls.mode === "gm" ? gmAutopaySources(controls.gm.money, a.id) : autopaySources(props.view, a)).map((x) => ({ value: x.id, label: x.name }));
   const [mode, setMode] = d2(was?.mode ?? "none");
-  const [from, setFrom] = d2(was?.from ?? sources[0]?.id ?? "");
+  const [from, setFrom] = d2(was?.from ?? sources[0]?.value ?? "");
   const [amount, setAmount] = d2(was?.cents !== null && was?.cents !== undefined ? String(was.cents / 10 ** controls.currency.decimals) : "");
   const cents = mode === "fixed" ? amountOf(amount, controls.currency) : null;
-  const problem = mode === "none" ? null : from === "" ? "Pick the account it pays from." : mode === "fixed" && cents === null ? "Type the amount it pays each month." : null;
+  const offered = from === "" || sources.some((s) => s.value === from);
+  const choices = offered ? sources : [...sources, { value: from, label: was?.from === from ? was.fromName ?? "Its account now" : "Its account now" }];
+  const problem = mode === "none" ? null : from === "" ? "Pick the account it pays from." : !offered && controls.mode === "player" ? "That account can't pay it: pick one of these." : mode === "fixed" && cents === null ? "Type the amount it pays each month." : null;
   const submit = () => {
     if (controls.mode === "player")
       return controls.act(autopayAction(a.id, mode, from || null, cents));
@@ -29114,7 +29254,7 @@ function AutopayPage(props) {
         label: "From",
         value: from,
         empty: "Choose an account",
-        options: sources.map((x) => ({ value: x.id, label: x.name })),
+        options: choices,
         onChange: setFrom
       }, undefined, false, undefined, this) : null,
       mode === "fixed" ? /* @__PURE__ */ u3(AmountField, {
@@ -29151,7 +29291,7 @@ function StatusPage(props) {
     title: "Status",
     subtitle: a.name,
     go: "Set the status",
-    disabled: status === a.status,
+    problem: status === a.status ? unchangedProblem(a.status, "status") : null,
     submit: () => controls.edit(accountStatusOps(a.id, status)),
     children: /* @__PURE__ */ u3(ChoiceField, {
       label: "New status",
@@ -29320,7 +29460,7 @@ function CardStatePage(props) {
     title: "Card state",
     subtitle: card.name,
     go: "Set the state",
-    disabled: state === card.state,
+    problem: state === card.state ? unchangedProblem(card.state, "state") : null,
     submit: () => controls.edit([{ op: "set", entity: card.id, field: "state", value: state }]),
     children: /* @__PURE__ */ u3(ChoiceField, {
       label: "New state",
@@ -29525,11 +29665,11 @@ function findFlow(view, id) {
 function canCreate(view, controls) {
   return controls.mode === "gm" || view.features.includes("flows") && flowSources(view).length > 0;
 }
-function endpoints(view, controls) {
+function endpoints(view, controls, payers) {
   if (controls.mode === "player")
-    return { from: flowSources(view).map((s) => ({ value: s.id, label: s.label })), to: flowTargets(view, controls.palette).map((t) => ({ value: t.id, label: t.label })) };
+    return { from: flowSources(view).map((s) => ({ value: s.id, label: s.label })), to: flowTargets(view, controls.palette, payers).map((t) => ({ value: t.id, label: t.label })) };
   const accounts = viewAccounts(view).filter((a) => !CLASS_TRAITS[a.class].cash).map((a) => ({ value: a.id, label: a.name }));
-  const parties = controls.gm.entities.filter((e) => !e.gone && (e.kind === "person" || e.kind === "business" || e.kind === "trust" || e.kind === "household")).map((e) => ({ value: e.id, label: `${e.name} (${e.kind})` }));
+  const parties = gmParties(controls.gm, PARTY_KINDS).map((p) => ({ value: p.id, label: `${p.name} (${p.kind})` }));
   return { from: [...accounts, { value: view.party, label: `${view.name} (as their preferences choose)` }], to: [...accounts, ...parties] };
 }
 function flowSideChoices(ends, flow) {
@@ -29712,13 +29852,19 @@ function FlowPage(props) {
 }
 function FlowFormPage(props) {
   const { view, controls, nav, flow } = props;
-  const ends = endpoints(view, controls);
-  const { from: fromChoices, to: toChoices } = flowSideChoices(ends, flow);
-  const start = props.from !== undefined && ends.from.some((f) => f.value === props.from) ? props.from : ends.from[0]?.value ?? "";
+  const every = flowSideChoices(endpoints(view, controls, []), flow);
+  const start = props.from !== undefined && every.from.some((f) => f.value === props.from) ? props.from : every.from[0]?.value ?? "";
   const [form, setForm] = d2(() => flow ? flowFormOf(flow.spec, controls.currency) : { ...blankFlowForm(start) });
-  const typedTo = form.to !== "" && !toChoices.some((t) => t.value === form.to);
-  const [otherTo, setOtherTo] = d2(typedTo);
+  const [otherTo, setOtherTo] = d2(() => form.to !== "" && !every.to.some((t) => t.value === form.to));
   const set = (patch) => setForm((f) => ({ ...f, ...patch }));
+  const payers = [form.from, form.shortfall === "fallback" ? form.fallback : ""].filter((id) => id !== "");
+  const allowed = flowSideChoices(endpoints(view, controls, payers), flow);
+  const fromChoices = allowed.from;
+  const toChoices = otherTo || form.to === "" || allowed.to.some((t) => t.value === form.to) ? allowed.to : [...allowed.to, ...every.to.filter((t) => t.value === form.to)];
+  const backs = fallbackSources(view, form.from, form.to).map((a) => ({ value: a.id, label: a.name }));
+  const backed = form.fallback === "" || backs.some((b) => b.value === form.fallback);
+  const fallbackChoices = backed ? backs : [...backs, { value: form.fallback, label: findAccount(view, form.fallback)?.name ?? "another account" }];
+  const problem = (controls.mode === "player" ? payeeProblem(view, payers, form.to) : null) ?? (form.shortfall === "fallback" && !backed ? "That account can't back this one: pick one its payer may spend from." : null) ?? flowFormProblem(form, controls.currency, flow === undefined || "fixed" in flow.spec.amount);
   const submit = async () => {
     if (controls.mode === "player") {
       if (!flow)
@@ -29738,7 +29884,7 @@ function FlowFormPage(props) {
     title: flow ? "Edit" : "New standing payment or one-off",
     subtitle: flow?.label,
     go: flow ? "Save" : form.every === "once" ? "Schedule it" : "Set it up",
-    problem: flowFormProblem(form, controls.currency, flow === undefined || "fixed" in flow.spec.amount),
+    problem,
     submit,
     children: [
       /* @__PURE__ */ u3(TextField2, {
@@ -29886,7 +30032,7 @@ function FlowFormPage(props) {
             label: "Then pay from",
             value: form.fallback,
             empty: "Choose an account",
-            options: ends.from.filter((f) => f.value !== form.from),
+            options: fallbackChoices,
             onChange: (fallback) => set({ fallback })
           }, undefined, false, undefined, this) : null,
           /* @__PURE__ */ u3(TextField2, {
@@ -29964,7 +30110,7 @@ function FlowStatusPage(props) {
     title: "Status",
     subtitle: f.label,
     go: "Save",
-    disabled: status === f.status,
+    problem: status === f.status ? unchangedProblem(f.status, "status") : null,
     submit: () => controls.edit(flowStatusOps(f.id, status)),
     children: [
       /* @__PURE__ */ u3(FlowLine, {
@@ -30092,6 +30238,7 @@ function RoutePage(props) {
   if (controls.mode === "player" && view.level < 3)
     return null;
   const to = picked.trim();
+  const problem = picked === "" ? "Pick where it goes." : picked === ROUTE_ELSEWHERE ? "It goes to another owner's account now: pick where it goes instead." : picked === pick ? "That's where it goes now: pick another place." : null;
   return /* @__PURE__ */ u3(ActionPage, {
     nav: props.nav,
     controls,
@@ -30099,7 +30246,7 @@ function RoutePage(props) {
     title: props.label,
     subtitle: props.subtitle,
     go: "Save",
-    disabled: picked === "" || picked === ROUTE_ELSEWHERE || picked === pick,
+    problem,
     submit: () => controls.mode === "player" ? controls.act(routeAction(props.target, to)) : controls.edit(routeOps(props.target, view.party, to)),
     children: /* @__PURE__ */ u3(ChoiceField, {
       label: props.label,
@@ -30427,7 +30574,6 @@ function ExercisePage(props) {
     title: "Exercise",
     subtitle: holdingName(h),
     go: "Exercise",
-    disabled: qty !== null && !(qty >= 1 && qty <= h.qty),
     submit: () => controls.act(exerciseAction(h.id, qty, account === "" ? {} : call ? { from: account } : { to: account })),
     children: [
       /* @__PURE__ */ u3(NumberField2, {
@@ -30503,7 +30649,7 @@ function NewPropertyPage(props) {
   if (controls.mode !== "gm")
     return null;
   const cents = amountOf(value, controls.currency);
-  const ok = name.trim() !== "" && cents !== null;
+  const problem = name.trim() === "" ? "Give it a name." : amountProblem(value, controls.currency, "its value");
   return /* @__PURE__ */ u3(ActionPage, {
     nav,
     controls,
@@ -30511,8 +30657,8 @@ function NewPropertyPage(props) {
     title: "Add a property",
     subtitle: view.name,
     go: "Add the property",
-    disabled: !ok,
-    submit: () => !ok || cents === null ? Promise.resolve(false) : controls.edit(propertySpawnOps(newIdFor("prop", name, new Set(controls.gm.entities.map((e) => e.id))), name.trim(), view.party, cents)),
+    problem,
+    submit: () => problem !== null || cents === null ? Promise.resolve(false) : controls.edit(propertySpawnOps(newIdFor("prop", name, new Set(controls.gm.entities.map((e) => e.id))), name.trim(), view.party, cents)),
     children: [
       /* @__PURE__ */ u3(TextField2, {
         label: "Name",
@@ -30663,7 +30809,7 @@ function LetPage(props) {
   if (controls.mode !== "player")
     return null;
   const cents = amountOf(rent, controls.currency);
-  const ok = tenant !== "" && cents !== null && (day === null || day >= 1 && day <= 28);
+  const problem = tenant === "" ? "Choose a tenant." : amountProblem(rent, controls.currency, "the rent a month");
   return /* @__PURE__ */ u3(ActionPage, {
     nav,
     controls,
@@ -30671,8 +30817,8 @@ function LetPage(props) {
     title: "Let it",
     subtitle: p.name,
     go: "Start the lease",
-    disabled: !ok,
-    submit: () => !ok || cents === null ? Promise.resolve(false) : controls.act(leaseStartAction(p.id, tenant, cents, { ...months !== null ? { months } : {}, ...day !== null ? { day } : {}, ...unit.trim() !== "" ? { unit: unit.trim() } : {} })),
+    problem,
+    submit: () => problem !== null || cents === null ? Promise.resolve(false) : controls.act(leaseStartAction(p.id, tenant, cents, { ...months !== null ? { months } : {}, ...day !== null ? { day } : {}, ...unit.trim() !== "" ? { unit: unit.trim() } : {} })),
     children: [
       /* @__PURE__ */ u3(SelectField, {
         label: "Tenant",
@@ -30723,7 +30869,7 @@ function SellPropertyPage(props) {
     title: "Sell",
     subtitle: p.name,
     go: "Sell",
-    disabled: cents === null,
+    problem: amountProblem(price, controls.currency, "the price"),
     submit: () => cents === null ? Promise.resolve(false) : controls.act(propertySellAction(p.id, cents, buyer ? { buyer } : {})),
     children: [
       /* @__PURE__ */ u3(AmountField, {
@@ -30746,23 +30892,19 @@ function SellPropertyPage(props) {
     ]
   }, undefined, true, undefined, this);
 }
-var MORTGAGE_TERMS = [
-  { value: "360", label: "30 years", detail: "The usual" },
-  { value: "240", label: "20 years" },
-  { value: "180", label: "15 years" }
-];
 function BuyPropertyPage(props) {
   const { view, controls, nav, property: p } = props;
   const [price, setPrice] = d2(String((p.forSale ?? p.value) / 10 ** controls.currency.decimals));
   const [down, setDown] = d2("");
-  const [term, setTerm] = d2("360");
+  const [term, setTerm] = d2(String((p.mortgageTerms?.find((t) => t.usual) ?? p.mortgageTerms?.[0])?.months ?? ""));
   const [from, setFrom] = d2("");
   if (controls.mode !== "player")
     return null;
   const cents = amountOf(price, controls.currency);
   const downCents = down.trim() === "" ? null : amountOf(down, controls.currency);
-  const ok = cents !== null && (down.trim() === "" || downCents !== null);
+  const problem = amountProblem(price, controls.currency, "your offer") ?? amountProblem(down, controls.currency, "a down payment", false);
   const financed = cents !== null && downCents !== null && downCents < cents;
+  const terms = mortgageTermChoices(p);
   return /* @__PURE__ */ u3(ActionPage, {
     nav,
     controls,
@@ -30770,8 +30912,8 @@ function BuyPropertyPage(props) {
     title: "Buy",
     subtitle: p.name,
     go: "Buy",
-    disabled: !ok,
-    submit: () => !ok || cents === null ? Promise.resolve(false) : controls.act(propertyBuyAction(p.id, cents, { ...from ? { from } : {}, ...downCents !== null ? { down: downCents } : {}, ...financed ? { termMonths: Number(term) } : {} })),
+    problem,
+    submit: () => problem !== null || cents === null ? Promise.resolve(false) : controls.act(propertyBuyAction(p.id, cents, { ...from ? { from } : {}, ...downCents !== null ? { down: downCents } : {}, ...financed && term !== "" ? { termMonths: Number(term) } : {} })),
     children: [
       /* @__PURE__ */ u3(AmountField, {
         label: "Offer",
@@ -30787,10 +30929,10 @@ function BuyPropertyPage(props) {
         onInput: setDown,
         invalid: down.trim() !== "" && downCents === null
       }, undefined, false, undefined, this),
-      financed ? /* @__PURE__ */ u3(ChoiceField, {
+      financed && terms.length > 0 ? /* @__PURE__ */ u3(ChoiceField, {
         label: "Mortgage over",
         value: term,
-        options: MORTGAGE_TERMS,
+        options: terms,
         onChange: setTerm
       }, undefined, false, undefined, this) : null,
       /* @__PURE__ */ u3(SelectField, {
@@ -31149,12 +31291,13 @@ function HouseholdSection(props) {
   const { view, controls, nav } = props;
   const h = view.household;
   if (!h) {
+    const runs = view.features.includes("households");
     return /* @__PURE__ */ u3(MoneyPage, {
       nav,
       name: "household",
       title: "Household",
       children: [
-        controls.mode === "gm" && view.partyKind === "person" ? /* @__PURE__ */ u3(Button, {
+        controls.mode === "gm" && view.partyKind === "person" && runs ? /* @__PURE__ */ u3(Button, {
           variant: "primary",
           icon: "user-plus",
           block: true,
@@ -31163,7 +31306,7 @@ function HouseholdSection(props) {
         }, undefined, false, undefined, this) : null,
         /* @__PURE__ */ u3(Empty, {
           icon: "users",
-          children: "No household."
+          children: runs ? "No household." : "Households don't run at this Money level."
         }, undefined, false, undefined, this)
       ]
     }, undefined, true, undefined, this);
@@ -31243,7 +31386,7 @@ function AddMemberPage(props) {
   const h = view.household;
   if (controls.mode !== "gm" || !h)
     return null;
-  const candidates = controls.gm.entities.filter((e) => e.kind === "person" && !e.gone && !h.members.some((m) => m.id === e.id));
+  const candidates = gmParties(controls.gm, ["person"]).filter((p) => !h.members.some((m) => m.id === p.id));
   return /* @__PURE__ */ u3(ActionPage, {
     nav,
     controls,
@@ -31251,13 +31394,13 @@ function AddMemberPage(props) {
     title: "Add a member",
     subtitle: h.name,
     go: "Add",
-    disabled: adding === "",
+    problem: candidates.length === 0 ? "No one else in the world can join it." : adding === "" ? "Choose who joins." : null,
     submit: () => controls.edit([{ op: "link", rel: "member_of", from: adding, to: h.id }]),
     children: /* @__PURE__ */ u3(SelectField, {
       label: "Who",
       value: adding,
       empty: "Choose someone",
-      options: candidates.map((e) => ({ value: e.id, label: e.name })),
+      options: candidates.map((p) => ({ value: p.id, label: p.name })),
       onChange: setAdding
     }, undefined, false, undefined, this)
   }, undefined, false, undefined, this);
@@ -31265,9 +31408,9 @@ function AddMemberPage(props) {
 function JoinHouseholdPage(props) {
   const { view, controls, nav } = props;
   const [joining, setJoining] = d2("");
-  if (controls.mode !== "gm" || view.household !== null || view.partyKind !== "person")
+  if (controls.mode !== "gm" || view.household !== null || view.partyKind !== "person" || !view.features.includes("households"))
     return null;
-  const households = controls.gm.entities.filter((e) => e.kind === "household" && !e.gone).map((e) => ({ value: e.id, label: e.name }));
+  const households = gmParties(controls.gm, ["household"]).map((p) => ({ value: p.id, label: p.name }));
   return /* @__PURE__ */ u3(ActionPage, {
     nav,
     controls,
@@ -31275,7 +31418,7 @@ function JoinHouseholdPage(props) {
     title: "Add to a household",
     subtitle: view.name,
     go: "Add",
-    disabled: joining === "",
+    problem: households.length === 0 ? "The world has no household yet." : joining === "" ? "Choose a household." : null,
     submit: () => controls.edit([{ op: "link", rel: "member_of", from: view.party, to: joining }]),
     children: households.length > 0 ? /* @__PURE__ */ u3(SelectField, {
       label: "Household",
@@ -31283,9 +31426,7 @@ function JoinHouseholdPage(props) {
       empty: "Choose a household",
       options: households,
       onChange: setJoining
-    }, undefined, false, undefined, this) : /* @__PURE__ */ u3(Note2, {
-      children: "The world has no household yet."
-    }, undefined, false, undefined, this)
+    }, undefined, false, undefined, this) : null
   }, undefined, false, undefined, this);
 }
 function RemoveMemberPage(props) {
@@ -31304,7 +31445,7 @@ function RemoveMemberPage(props) {
     subtitle: h.name,
     go: "Remove",
     danger: true,
-    disabled: !who,
+    problem: who ? null : "Choose who leaves.",
     submit: () => controls.edit([{ op: "unlink", rel: "member_of", from: leaving, to: h.id }]),
     children: [
       /* @__PURE__ */ u3(ChoiceField, {
@@ -31574,7 +31715,7 @@ function NewJobPage(props) {
   if (controls.mode !== "gm")
     return null;
   const cents = amountOf(rate, controls.currency);
-  const businesses = controls.gm.entities.filter((e) => e.kind === "business" && !e.gone).map((e) => ({ value: e.id, label: e.name }));
+  const businesses = gmParties(controls.gm, ["business"]).map((p) => ({ value: p.id, label: p.name }));
   const named = employer === OUTSIDE ? outside.trim() : employer;
   const submit = () => {
     if (named === "" || cents === null)
@@ -31590,7 +31731,7 @@ function NewJobPage(props) {
     title: "Add a job",
     subtitle: view.name,
     go: "Add the job",
-    disabled: named === "" || cents === null,
+    problem: named !== "" ? amountProblem(rate, controls.currency, "the rate") : employer === OUTSIDE ? "Type the employer's name." : "Choose the employer.",
     submit,
     children: [
       /* @__PURE__ */ u3(SelectField, {
@@ -31938,6 +32079,8 @@ function HirePage(props) {
   if (controls.mode !== "player")
     return null;
   const body = hireAction(form, controls.currency);
+  const candidates = hireable(b, people(controls));
+  const problem = candidates.length === 0 ? "No one you can name is free to hire." : form.worker === "" ? "Choose whom to hire." : amountProblem(form.rate, controls.currency, "a rate", false);
   return /* @__PURE__ */ u3(ActionPage, {
     nav,
     controls,
@@ -31945,14 +32088,14 @@ function HirePage(props) {
     title: "Hire",
     subtitle: b.name,
     go: "Hire",
-    disabled: body === null,
+    problem,
     submit: () => body === null ? Promise.resolve(false) : controls.act(body),
     children: [
       /* @__PURE__ */ u3(SelectField, {
         label: "Who",
         value: form.worker,
         empty: "Choose someone",
-        options: people(controls),
+        options: candidates,
         onChange: (worker) => setForm({ ...form, worker })
       }, undefined, false, undefined, this),
       /* @__PURE__ */ u3(TextField2, {
@@ -32006,7 +32149,7 @@ function IssueInvoicePage(props) {
     title: "Issue an invoice",
     subtitle: b.name,
     go: "Issue the invoice",
-    disabled: who === null || cents === null,
+    problem: customer === "" ? "Choose a customer." : who === null ? "Type the customer's name." : amountProblem(amount, controls.currency, "the amount"),
     submit: () => who === null || cents === null ? Promise.resolve(false) : controls.act(invoiceIssueAction(b.id, who, cents, memo, days)),
     children: [
       /* @__PURE__ */ u3(SelectField, {
@@ -32051,7 +32194,7 @@ function StakePage(props) {
   if (controls.mode !== "player")
     return null;
   const cents = amountOf(price, controls.currency);
-  const ok = share !== null && share > 0 && share <= 100 && cents !== null;
+  const problem = share === null ? "Type the share to sell." : share <= 0 ? "Sell a share above 0%." : amountProblem(price, controls.currency, "the price");
   return /* @__PURE__ */ u3(ActionPage, {
     nav,
     controls,
@@ -32059,8 +32202,8 @@ function StakePage(props) {
     title: "Sell a stake",
     subtitle: b.name,
     go: "Sell the stake",
-    disabled: !ok,
-    submit: () => share === null || cents === null || !ok ? Promise.resolve(false) : controls.act(stakeSellAction(b.id, share, cents, buyer || undefined)),
+    problem,
+    submit: () => share === null || cents === null || problem !== null ? Promise.resolve(false) : controls.act(stakeSellAction(b.id, share, cents, buyer || undefined)),
     children: [
       /* @__PURE__ */ u3(NumberField2, {
         label: "Share to sell (%)",
@@ -32158,7 +32301,7 @@ function InvoiceStatePage(props) {
     title: "State",
     subtitle: `${b.name} · invoice to ${i.customerName}`,
     go: "Save",
-    disabled: state === i.state,
+    problem: state === i.state ? unchangedProblem(i.state, "state") : null,
     submit: () => controls.edit([{ op: "set", entity: i.id, field: "state", value: state }]),
     children: [
       /* @__PURE__ */ u3(InvoiceLine, {
@@ -42904,6 +43047,7 @@ button.lre-world-pill:hover{background:linear-gradient(var(--lre-hover),var(--lr
 .lre-world-pill-note{margin-left:4px;color:var(--lre-muted);font-weight:400}
 .lre-world-mode{position:absolute;left:8px;bottom:8px;z-index:1;padding:2px;border-radius:var(--lre-r-lg);background:var(--lre-bar-bg);border:1px solid var(--lre-border);box-shadow:var(--lre-shadow-sm)}
 .lre-world-mode .lre-seg{flex-wrap:nowrap}
+.lre-world-mode .lre-seg>button{flex:1 0 auto;min-width:var(--lre-tap)}
 .lre-world-dock,.lre-world-maplist{position:absolute;left:8px;right:8px;bottom:8px;z-index:2;overflow:auto;overscroll-behavior:contain;display:flex;flex-direction:column;gap:var(--lre-s2);padding:var(--lre-s3);border-radius:var(--lre-r-xl);border:1px solid var(--lre-border);background:var(--lre-bar-bg);box-shadow:var(--lre-shadow-lg)}
 .lre-world-dock{max-height:min(65%,440px)}
 .lre-world-dock-head{display:flex;align-items:center;justify-content:space-between;gap:var(--lre-s2);min-width:0}
@@ -43112,7 +43256,7 @@ var TOKENS_CSS = `
 --lre-danger:var(--lumiverse-danger,#ef4444);--lre-success:var(--lumiverse-success,#22c55e);--lre-warning:var(--lumiverse-warning,#f59e0b);
 --lre-neg:color-mix(in srgb,var(--lre-danger) 55%,var(--lre-fg));--lre-pos:color-mix(in srgb,var(--lre-success) 35%,var(--lre-fg));--lre-warn:color-mix(in srgb,var(--lre-warning) 35%,var(--lre-fg));
 --lre-neg-soft:color-mix(in srgb,var(--lre-danger) 12%,transparent);--lre-pos-soft:color-mix(in srgb,var(--lre-success) 12%,transparent);--lre-warn-soft:color-mix(in srgb,var(--lre-warning) 12%,transparent);
---lre-gm:color-mix(in srgb,var(--lumiverse-warning,#f59e0b) 70%,var(--lre-fg));--lre-gm-soft:color-mix(in srgb,var(--lumiverse-warning,#f59e0b) 12%,transparent);--lre-gm-text:color-mix(in srgb,var(--lre-gm) 60%,var(--lre-fg));
+--lre-gm:color-mix(in srgb,var(--lumiverse-warning,#f59e0b) 70%,var(--lre-fg));--lre-gm-soft:color-mix(in srgb,var(--lumiverse-warning,#f59e0b) 12%,transparent);--lre-gm-text:color-mix(in srgb,var(--lre-gm) 50%,var(--lre-fg));
 --lre-r-sm:var(--lumiverse-radius-sm,6px);--lre-r:var(--lumiverse-radius-md,10px);--lre-r-lg:var(--lumiverse-radius-lg,12px);--lre-r-xl:var(--lumiverse-radius-xl,16px);--lre-r-pill:999px;--lre-radius:var(--lre-r);
 --lre-shadow-sm:var(--lumiverse-shadow-sm,0 2px 8px rgba(0,0,0,.2));--lre-shadow-lg:var(--lumiverse-shadow-md,0 8px 24px rgba(0,0,0,.4));
 --lre-s1:4px;--lre-s2:8px;--lre-s3:12px;--lre-s4:16px;--lre-s5:24px;--lre-tap:40px;--lre-tap-lg:44px;
@@ -43555,14 +43699,7 @@ function setup(ctx) {
       return () => G(null, root);
     }
   }));
-  const openActive = (chatId) => {
-    if (chatId === client.getState().chatId && client.getState().status !== "closed")
-      return;
-    app.overlays.closeMap();
-    app.overlays.closePalette();
-    app.overlays.closeWorld();
-    client.open(chatId);
-  };
+  const openActive = (chatId) => switchChat(app, chatId);
   if (ctx.state) {
     client.presetId = ctx.state.get("loom.activePresetId") ?? null;
     cleanups.push(ctx.state.subscribe("loom.activePresetId", (presetId) => {

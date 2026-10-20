@@ -3663,6 +3663,9 @@ var CARD_STATES = ["active", "frozen", "lost", "cancelled"];
 var FLOW_KINDS = ["transfer", "bill", "rent", "utility", "subscription", "premium", "loan_payment", "card_payment", "savings", "income", "payroll", "allowance", "living", "tax", "distribution", "invoice", "draw", "other"];
 var FLOW_SHORTFALLS = ["skip", "partial", "retry", "fallback", "overdraft", "defer"];
 var FLOW_STATUSES = ["active", "paused", "ended"];
+function payeeKey(name) {
+  return name.toLowerCase().replace(/[^a-z0-9:]+/g, "_").replace(/^_+|_+$/g, "");
+}
 var DELINQUENCY_STAGES = ["current", "late", "30", "60", "90", "120", "collections", "charged_off"];
 function creditTierOf(score) {
   if (score >= 781)
@@ -4195,6 +4198,14 @@ function eventVisible(reg, world, state, pov, e) {
     }
   }
 }
+function shownTrackId(world, id) {
+  if (visibilityOf(own(world.tracks, id)?.visibility) !== "secret")
+    return id;
+  let shown = `~${hashParts("lre.track", world.id, id).slice(0, 12)}`;
+  while (hasOwn(world.tracks, shown))
+    shown = `~${shown}`;
+  return shown;
+}
 function playerTrack(reg, world, state, pov, id) {
   const t = own(world.tracks, id);
   if (!t)
@@ -4218,7 +4229,7 @@ function playerTrack(reg, world, state, pov, id) {
   const failed = Object.values(t.stages).some((s) => s.fail?.to === stageId);
   const terminal = stage.next.length === 0 && !stage.fail;
   return {
-    id,
+    id: shownTrackId(world, id),
     kind: t.kind,
     label: secret && truths.length === 0 ? "Something is going on" : t.label,
     stage: secret && truths.length === 0 ? "" : stage.label,
@@ -4298,14 +4309,17 @@ function spellings(text) {
 }
 var FUNCTION_WORDS = { a: true, an: true, the: true, of: true, and: true, in: true, on: true, at: true, to: true, by: true, for: true, or: true, with: true, from: true };
 var WORD_CHAR = "[\\p{L}\\p{M}\\p{N}]";
+function personWords(name) {
+  return spellings(name).filter((w) => !hasOwn(FUNCTION_WORDS, w.plain) && !/^[a-z0-9]$/.test(w.plain));
+}
+function wordPattern(w) {
+  if (!/^[a-z0-9]+$/.test(w))
+    return w;
+  const plural = /[^aeiou]y$/.test(w) ? `(?:${w}(?:e?s)?|${w.slice(0, -1)}ies)` : `${w}(?:e?s)?`;
+  return `(?<!${WORD_CHAR})${plural}(?!${WORD_CHAR})`;
+}
 function saysInOrder(said, words) {
-  const parts = words.map((w) => {
-    if (!/^[a-z0-9]+$/.test(w))
-      return w;
-    const plural = /[^aeiou]y$/.test(w) ? `(?:${w}(?:e?s)?|${w.slice(0, -1)}ies)` : `${w}(?:e?s)?`;
-    return `(?<!${WORD_CHAR})${plural}(?!${WORD_CHAR})`;
-  });
-  return new RegExp(parts.join(`${WORD_CHAR}*(?: ${WORD_CHAR}*)?`), "u").test(said);
+  return new RegExp(words.map(wordPattern).join(`${WORD_CHAR}*(?: ${WORD_CHAR}*)?`), "u").test(said);
 }
 function sayings(text) {
   const words = spellings(text);
@@ -4322,7 +4336,7 @@ function namesAny(text, people, labels = [], heard = "") {
   const known = sayings(heard);
   for (const name of people) {
     const words = spellings(name).filter((w) => !hasOwn(FUNCTION_WORDS, w.plain));
-    const counted = words.filter((w) => !/^[a-z0-9]$/.test(w.plain));
+    const counted = personWords(name);
     for (const w of counted)
       if (said.says([w], false) && !known.says([w], false))
         return true;
@@ -11953,7 +11967,7 @@ function external(id) {
 }
 function outsideAccount(name) {
   const bare = name.startsWith(EXTERNAL_ACCOUNT_PREFIX) ? name.slice(EXTERNAL_ACCOUNT_PREFIX.length) : name;
-  return external(bare.toLowerCase().replace(/[^a-z0-9:]+/g, "_").replace(/^_+|_+$/g, "") || "outside");
+  return external(payeeKey(bare) || "outside");
 }
 var OUTSIDE_NAMES = {
   market: "Shops",
@@ -11966,8 +11980,25 @@ var OUTSIDE_NAMES = {
 };
 var REGIONAL_TAXES = { sales: "Sales tax", property: "Property tax" };
 var NAMED_OUTSIDE = { bank: "Bank", atm: "Cash machine", employer: "Employer" };
-var OUTSIDE_KINDS = { buyer: "Buyer", seller: "Seller", market: "Market", tenant: "Outside tenant" };
-function outsideName(books, raw) {
+var OUTSIDE_KINDS = { buyer: "Buyer", seller: "Seller", market: "Market", tenant: "Outside tenant", closing: "Closing" };
+function seenIn(books, viewer, id) {
+  if (own(books.state.entities, id))
+    return viewer === null || canSeeEntity(books.registry, books.world, books.state, viewer, id);
+  if (own(books.world.places, id))
+    return viewer === null || canSeePlace(books.registry, books.world, books.state, viewer, id);
+  return own(books.world.tracks, id) ? false : undefined;
+}
+function wordsFor(books, viewer, words, unseen) {
+  const id = words.trim().replace(/ +/g, "_");
+  const seen = seenIn(books, viewer, id);
+  if (seen === undefined)
+    return words.replace(/_/g, " ").trim();
+  const entity = own(books.state.entities, id);
+  if (!seen)
+    return entity ? "someone" : unseen;
+  return entity?.name ?? own(books.world.places, id)?.name ?? unseen;
+}
+function outsideName(books, raw, viewer) {
   const bare = raw.startsWith(EXTERNAL_ACCOUNT_PREFIX) ? raw.slice(EXTERNAL_ACCOUNT_PREFIX.length) : raw;
   const known = own(OUTSIDE_NAMES, bare);
   if (known !== undefined)
@@ -11984,9 +12015,41 @@ function outsideName(books, raw) {
   }
   const named = own(NAMED_OUTSIDE, head);
   if (named !== undefined)
-    return tail === "" || tail === head ? named : labelOf(books, tail.replace(/ +/g, "_"));
+    return tail === "" || tail === head ? named : wordsFor(books, viewer, tail, named);
   const kind = tail === "" ? undefined : own(OUTSIDE_KINDS, head);
-  return kind ?? bare.replace(/_/g, " ");
+  return kind ?? wordsFor(books, viewer, bare, "someone");
+}
+function outsideHidden(books, raw, viewer) {
+  if (viewer === null)
+    return false;
+  const bare = raw.startsWith(EXTERNAL_ACCOUNT_PREFIX) ? raw.slice(EXTERNAL_ACCOUNT_PREFIX.length) : raw;
+  const ids = (bare.includes(":") ? bare.split(":").slice(1) : [bare]).map((p) => p.trim().replace(/ +/g, "_"));
+  return ids.some((id) => seenIn(books, viewer, id) === false);
+}
+function seenBy(books, viewer, id) {
+  if (viewer === null || id === viewer)
+    return true;
+  const e = own(books.state.entities, id);
+  if (!e)
+    return true;
+  if (!canSeeEntity(books.registry, books.world, books.state, viewer, id))
+    return false;
+  if (e.kind !== "account" && e.kind !== "card")
+    return true;
+  const account = e.kind === "card" ? strOf(e.fields.account) : id;
+  if (rightsOf(books.state, account, viewer) !== null)
+    return true;
+  const holders = holdersOf(books.state, account).filter((h) => own(books.state.entities, h));
+  return holders.length === 0 || holders.some((h) => canSeeEntity(books.registry, books.world, books.state, viewer, h));
+}
+function hiddenFrom(books, viewer, id) {
+  return !seenBy(books, viewer, id);
+}
+function shownLabel(books, viewer, id) {
+  return seenBy(books, viewer, id) ? labelOf(books, id) : "someone";
+}
+function opaqueId(id) {
+  return `hidden:${hashParts(id).slice(0, 12)}`;
 }
 function bankSide(institution) {
   return `${BANK_PREFIX}${institution || "bank"}`;
@@ -12182,6 +12245,17 @@ function managesAccount(books, account, who) {
   if (!classOf2(books, account))
     return false;
   return ownersOf(books.state, account).some((o) => ROLE_RIGHTS[o.role].manage && (o.party === who || managesParty(books.state, o.party, who)));
+}
+function debtorsOf(state, account) {
+  const owners = ownersOf(state, account);
+  const owing = owners.filter((o) => ROLE_RIGHTS[o.role].worth);
+  return [...new Set((owing.length > 0 ? owing : owners).map((o) => o.party))];
+}
+function householdOf(ctx, party) {
+  const isHousehold = (id) => kindIs(ctx.registry, ctx.world, own(ctx.state.entities, id)?.kind ?? "", "household");
+  if (isHousehold(party))
+    return party;
+  return own(ctx.state.entities, party)?.relations.find((r) => r.type === MEMBER_OF && isHousehold(r.to))?.to ?? null;
 }
 function shareOf(state, id, party) {
   return own(worthShares(ownersOf(state, id)), party) ?? 0;
@@ -13217,10 +13291,10 @@ function payerOf(ctx, api, job) {
     return operatingAccount(api, ctx, job.business) ?? api.outside(job.business);
   return api.outside(`employer:${(job.employer || job.occupation || "work").toLowerCase().replace(/\W+/g, "_")}`);
 }
-function employerName(ctx, job) {
+function employerName(ctx, job, viewer) {
   if (job.business)
-    return labelOf(ctx, job.business);
-  return job.employer === "" ? "" : labelOf(ctx, job.employer);
+    return hiddenFrom(ctx, viewer, job.business) ? "someone" : labelOf(ctx, job.business);
+  return job.employer === "" ? "" : outsideName(ctx, `employer:${job.employer}`, viewer);
 }
 function payrollFlow(ctx, api, job) {
   if (job.every === null)
@@ -13288,6 +13362,8 @@ function hire(api, args, ctx) {
   const by = strOf(args.by);
   if (by !== "" && !managesParty(ctx.state, business, by))
     return reject5("not_owner", `${labelOf(ctx, by)} doesn't run ${labelOf(ctx, business)}`);
+  if (by !== "" && api.interestsOf(ctx, by).has(worker) && api.shareOf(ctx.state, business, by) <= 0)
+    return reject5("not_owner", `${shownLabel(ctx, ctx.world.pov, by)} runs ${shownLabel(ctx, ctx.world.pov, business)} for others, so can't put ${worker === by ? "themselves" : shownLabel(ctx, ctx.world.pov, worker)} on its payroll`);
   const jobs = allJobs(ctx);
   if (jobs.some((j) => j.worker === worker && j.business === business && j.status !== "ended"))
     return reject5("exists", `${labelOf(ctx, worker)} already works for ${labelOf(ctx, business)}`);
@@ -13334,13 +13410,15 @@ function raise(api, args, ctx) {
   const by = strOf(args.by);
   if (by !== "" && !(job.business && managesParty(ctx.state, job.business, by)))
     return reject5("not_owner", `${labelOf(ctx, by)} doesn't set that pay`);
+  if (by !== "" && job.business && api.interestsOf(ctx, by).has(job.worker) && api.shareOf(ctx.state, job.business, by) <= 0)
+    return reject5("not_owner", `${shownLabel(ctx, ctx.world.pov, by)} runs ${shownLabel(ctx, ctx.world.pov, job.business)} for others, so can't set ${job.worker === by ? "their own" : `${shownLabel(ctx, ctx.world.pov, job.worker)}'s`} pay`);
   const rate = typeof args.rate === "number" && args.rate > 0 ? Math.round(args.rate) : typeof args.pct === "number" && args.pct > -100 ? Math.round(job.rate * (1 + args.pct / 100)) : NaN;
   if (!(rate > 0))
     return reject5("bad_amount", "a raise needs a new rate above nothing, or a percentage");
   return [{ type: "set", entity: job.id, field: "rate", value: rate }];
 }
 var BASIS_WORDS = { salary: "a year", hourly: "an hour", per_shift: "a shift", commission: "commission", tips: "an hour in tips", stipend: "a period" };
-function jobView(ctx, api, job) {
+function jobView(ctx, api, job, viewer) {
   const cal = calendarOf(ctx.world);
   const now = ctx.state.clock;
   const flow = api.flows(ctx).find((f) => f.source === "job" && f.link === job.id);
@@ -13352,12 +13430,14 @@ function jobView(ctx, api, job) {
   const scheduled = hoursSource(ctx, job, now) === "contract" ? null : jobBlocks(ctx, job, since, now).reduce((a, b) => a + (b.end - b.start), 0);
   const money = (c) => api.money(ctx, c);
   const entity = own(ctx.state.entities, job.id);
+  const fields = entity?.fields ?? {};
+  const unseen = Object.fromEntries(["employer", "workplace"].filter((k) => outsideHidden(ctx, strOf(fields[k]), viewer)).map((k) => [k, ""]));
   return {
     id: job.id,
     title: job.title,
-    employer: employerName(ctx, job),
-    employerId: job.business,
-    worker: labelOf(ctx, job.worker),
+    employer: employerName(ctx, job, viewer),
+    employerId: job.business && !hiddenFrom(ctx, viewer, job.business) ? job.business : null,
+    worker: shownLabel(ctx, viewer, job.worker),
     workerId: job.worker,
     basis: job.basis,
     pay: job.basis === "commission" ? `${job.commissionPct || job.rate}% commission` : `${money(job.rate)} ${BASIS_WORDS[job.basis]}${job.tipsPerHour > 0 ? ` plus about ${money(job.tipsPerHour)} an hour in tips` : ""}${job.commissionPct > 0 ? ` plus ${job.commissionPct}% commission` : ""}`,
@@ -13370,8 +13450,8 @@ function jobView(ctx, api, job) {
     hours: scheduled === null && job.hours !== "attended" ? null : { scheduled: Math.round((scheduled ?? 0) / 6) / 10, attended: Math.round(numOf(sheet.minutes) / 6) / 10 },
     lastPay: Object.keys(last).length > 0 ? { at: formatClock(cal, numOf(last.at)), gross: numOf(last.gross), taxes: numOf(last.taxes), deductions: numOf(last.deductions), net: numOf(last.net) } : null,
     deductions: job.deductions.map((d) => ({ label: d.label, value: d.cents !== undefined ? money(d.cents) : `${d.pct ?? 0}%` })),
-    splits: job.splits.map((s) => ({ to: labelOf(ctx, s.to), value: s.cents !== undefined ? money(s.cents) : `${s.pct ?? 0}%` })),
-    spec: entity?.fields ?? {}
+    splits: job.splits.map((s) => ({ to: shownLabel(ctx, viewer, s.to), value: s.cents !== undefined ? money(s.cents) : `${s.pct ?? 0}%` })),
+    spec: { ...fields, ...unseen }
   };
 }
 function registerEmployment(r) {
@@ -13402,8 +13482,8 @@ function registerEmployment(r) {
   core.action({ id: "job_hire", label: "Hire", pack: "economy", params: { business: { type: "ref", ref: "business" }, worker: { type: "ref", ref: "person" }, title: { type: "text", optional: true }, basis: { type: "text", optional: true, label: "Pay basis" }, rate: { type: "money", optional: true, label: "Pay rate" }, hours_per_week: { type: "number", optional: true }, pay_every: { type: "text", optional: true, label: "Paid every" } }, requires: ["manages(self, business)", "not employs(business, worker)", "level.money >= 3"], outcomes: { default: [{ type: "economy.hire", args: { business: "business", worker: "worker", title: "=params.title", basis: "=params.basis", rate: "=params.rate", hours_per_week: "=params.hours_per_week", pay_every: "=params.pay_every", by: "self" } }] }, duration: "15", lexicon: ["hire", "take on", "give a job to"], observable: "talks business" });
   core.action({ id: "job_end", label: "End a job", pack: "economy", params: { job: { type: "ref", ref: JOB_KIND } }, requires: ["job.worker == self or manages(self, job.employer)", "job.status != 'ended'", "level.money >= 3"], outcomes: { default: [{ type: "economy.job_end", args: { job: "job", by: "self" } }] }, duration: "10", lexicon: ["fire", "let go", "quit", "resign", "hand in my notice"], observable: "talks business" });
   core.action({ id: "job_raise", label: "Give a raise", pack: "economy", params: { job: { type: "ref", ref: JOB_KIND }, rate: { type: "money", label: "New rate" } }, requires: ["manages(self, job.employer)", "rate > 0", "level.money >= 3"], outcomes: { default: [{ type: "economy.job_raise", args: { job: "job", rate: "=rate", by: "self" } }] }, duration: "5", lexicon: ["give a raise", "raise the pay", "pay more"], observable: "talks business" });
-  r.view((ctx, party) => api.partyKind(ctx, party) === "person" ? { jobs: allJobs(ctx).filter((j) => j.worker === party).map((j) => jobView(ctx, api, j)) } : {});
-  r.summary((ctx, who) => allJobs(ctx).filter((j) => j.worker === who && j.status === "active").map((j) => `${j.title} for ${employerName(ctx, j) || "an outside employer"}, ${api.money(ctx, j.rate)} ${BASIS_WORDS[j.basis]}, paid ${j.every === null ? "nothing" : j.every.replace("_", " ")}.`));
+  r.view((ctx, party, _view, viewer) => api.partyKind(ctx, party) === "person" ? { jobs: allJobs(ctx).filter((j) => j.worker === party).map((j) => jobView(ctx, api, j, viewer)) } : {});
+  r.summary((ctx, who) => allJobs(ctx).filter((j) => j.worker === who && j.status === "active").map((j) => `${j.title} for ${employerName(ctx, j, null) || "an outside employer"}, ${api.money(ctx, j.rate)} ${BASIS_WORDS[j.basis]}, paid ${j.every === null ? "nothing" : j.every.replace("_", " ")}.`));
 }
 
 // src/packs/economy/core/business.ts
@@ -13666,6 +13746,8 @@ function issueInvoice(ctx, api, args) {
   const customer = strOf(args.customer) || strOf(args.customer_name).trim();
   if (customer === "" || customer === business)
     return reject6("bad_party", "an invoice needs someone to bill");
+  if (by !== "" && customer !== by && managesParty(ctx.state, customer, by) && api.paysFor(ctx, by, business, customer))
+    return reject6("not_owner", `${shownLabel(ctx, ctx.world.pov, by)} runs ${shownLabel(ctx, ctx.world.pov, customer)} for others, so can't bill it for ${shownLabel(ctx, ctx.world.pov, business)}`);
   const cents = typeof args.cents === "number" ? Math.round(args.cents) : NaN;
   if (!(cents > 0))
     return reject6("bad_amount", "an invoice needs an amount");
@@ -13694,6 +13776,8 @@ function payInvoice(ctx, api, args) {
   const payer = inv.party ?? inv.customer;
   if (by !== "" && by !== inv.party && !(inv.party && isBusiness(ctx, inv.party) && managesParty(ctx.state, inv.party, by)))
     return reject6("not_customer", `${labelOf(ctx, by)} isn't billed for ${inv.memo}`);
+  if (by !== "" && inv.party && by !== inv.party && api.paysFor(ctx, by, inv.business, inv.party))
+    return reject6("not_owner", `${shownLabel(ctx, ctx.world.pov, inv.party)} pays for itself, not for ${shownLabel(ctx, ctx.world.pov, by)}`);
   const deposit = operatingAccount(api, ctx, inv.business);
   const paid = inv.party ? api.pay(ctx, { from: inv.party, to: inv.business, cents: inv.left, memo: `Invoice: ${inv.memo}`, kind: "payment", category: "invoice", method: "account", ...deposit ? { deposit } : {} }) : api.post(ctx, [{ account: api.outside(`customer:${payer}`), amount: -inv.left }, { account: deposit ?? api.outside(inv.business), amount: inv.left }], { memo: `Invoice: ${inv.memo}`, kind: "payment", category: "invoice", payer });
   if (!Array.isArray(paid))
@@ -13852,9 +13936,6 @@ function distributionFlow(ctx, api, business) {
   const schedule = every === "month" ? { every: "month", days: [10], roll: "after" } : every === "year" ? { every: "year", months: [1], days: [10], roll: "after" } : { every: "year", months: [1, 4, 7, 10], days: [10], roll: "after" };
   return { id: `distribute:${business}`, label: "Profit distribution", kind: "distribution", from, to: "Owners", amount: { provider: "distribution", args: { business } }, schedule, shortfall: "skip", category: "distribution", link: business, status: "active", source: "business" };
 }
-function hiddenFrom(ctx, viewer, id) {
-  return viewer !== null && own(ctx.state.entities, id) !== undefined && !canSeeEntity(ctx.registry, ctx.world, ctx.state, viewer, id);
-}
 function shownName2(ctx, viewer, id, fallback) {
   if (!own(ctx.state.entities, id))
     return id;
@@ -13880,10 +13961,10 @@ function businessView(ctx, api, business, party, viewer) {
   const sales = (Array.isArray(salesList) ? salesList : []).map((raw, i) => ({ raw: objOf(raw), i })).reverse().map(({ raw, i }) => ({ id: `${business}:sale:${i}`, at: formatClock(cal, numOf(raw.at)), memo: strOf(raw.memo, "Sale"), cents: numOf(raw.cents) + numOf(raw.tax), account: deposit ? labelOf(ctx, deposit) : labelOf(ctx, business), accountId: deposit ?? business, kind: "sale", category: strOf(raw.category) || null, counterparty: strOf(raw.payer) === "" ? "Walk-in customers" : shownName2(ctx, viewer, strOf(raw.payer), "a customer"), card: null, status: "posted" }));
   const invoices = allInvoices(ctx).filter((i) => i.business === business || i.party === business).sort((a, b) => b.issued - a.issued).map((i) => ({ id: i.id, business: hiddenFrom(ctx, viewer, i.business) ? "" : i.business, customer: i.party !== null && hiddenFrom(ctx, viewer, i.party) ? "" : i.customer, cents: i.cents, memo: i.memo, issued: i.issued, due: i.due, state: i.state, paid: i.paid, late_fee: i.late_fee, ...i.state === "late" ? { days_late: dateAt(cal, now).dayIndex - dateAt(cal, i.due).dayIndex } : {}, flow: `invoice:${i.id}`, customerName: i.party ? shownName2(ctx, viewer, i.party, "a customer") : i.customer, issuedAt: formatClock(cal, i.issued), dueAt: formatClock(cal, i.due) }));
   const employees = allJobs(ctx).filter((j) => j.business === business && j.status !== "ended").map((j) => {
-    const v = jobView(ctx, api, j);
+    const v = jobView(ctx, api, j, viewer);
     if (!hiddenFrom(ctx, viewer, j.worker))
       return v;
-    return { ...v, worker: "an employee", workerId: "", splits: [], spec: { ...v.spec, worker: "", splits: [], deductions: [] } };
+    return { ...v, id: opaqueId(v.id), worker: "an employee", workerId: "", splits: [], spec: { ...v.spec, worker: "", splits: [], deductions: [] } };
   });
   const owed = payablesOf(ctx.state, business);
   const taxes = [];
@@ -13905,6 +13986,8 @@ function businessView(ctx, api, business, party, viewer) {
     id: business,
     name: labelOf(ctx, business),
     role,
+    mayDraw: mayDraw(api, ctx.state, party, business),
+    selfDealing: api.shareOf(ctx.state, business, party) > 0 ? [] : [...api.interestsOf(ctx, party)].filter((id) => kindIs(ctx.registry, ctx.world, own(ctx.state.entities, id)?.kind ?? "", "person") && !hiddenFrom(ctx, viewer, id)),
     owners: ownerLines(ctx, api, viewer, business),
     accounts: api.accountsOf(ctx, business, "sees"),
     managed: [],
@@ -16160,7 +16243,11 @@ function mortgageRow(ctx) {
 function mortgageTerms(ctx) {
   const t = objOf(mortgageRow(ctx).term_months);
   const terms = [t.typical, ...Array.isArray(t.alternatives) ? t.alternatives : []].filter((v) => typeof v === "number" && v > 0);
-  return terms.length > 0 ? terms : [360];
+  return terms.length > 0 ? [...new Set(terms)] : [360];
+}
+function offeredTerms(ctx) {
+  const terms = mortgageTerms(ctx);
+  return [...terms].sort((a, b) => b - a).map((months) => ({ months, usual: months === terms[0] }));
 }
 function propertyTaxPct(ctx, id) {
   const region = objOf(own(objOf(ctx.tables.get("economy.regions")?.rows), regionOf(ctx, id)));
@@ -16253,6 +16340,12 @@ function authoredLeases(ctx, id) {
 function inForce(l, at) {
   return l.status === "active" && (l.start === null || l.start <= at) && (l.end === null || at < l.end);
 }
+function isOver(l, at) {
+  return l.status === "ended" || l.end !== null && at >= l.end;
+}
+function holdsUnit(l, at) {
+  return !isOver(l, at) && (l.start === null || l.start <= at);
+}
 function monthIndex(world, clock) {
   const cal = calendarOf(world);
   const d = dateAt(cal, clock);
@@ -16269,7 +16362,7 @@ function managedLeases(ctx, id, at = ctx.state.clock) {
   if (f.managed !== true || marketRent <= 0)
     return [];
   const units = Math.max(1, Math.round(numOf(f.units, 1)));
-  const covered = authoredLeases(ctx, id).filter((l) => inForce(l, at)).length;
+  const covered = authoredLeases(ctx, id).filter((l) => holdsUnit(l, at)).length;
   const term = Math.max(1, Math.round(numOf(f.lease_months, 12)));
   const vacancy = Math.max(0, Math.round(numOf(f.vacancy_months, 1)));
   const since = clockOfDate(ctx.world, f.let_from) ?? clockOfDate(ctx.world, ctx.world.start.at) ?? 0;
@@ -16314,17 +16407,23 @@ function managedFlow(api, ctx, id, l, side) {
     source: "leases"
   };
 }
+function unitsToLet(api, state, id) {
+  const units = num5(fieldsOf(state, id).units);
+  if (units !== undefined)
+    return Math.max(1, Math.round(units));
+  return api.ownersOf(state, id).some((o) => isHome(state, id, o.party)) ? 0 : 1;
+}
 function leaseViews(api, ctx, id, viewer) {
   const now = ctx.state.clock;
-  const units = Math.max(1, Math.round(numOf(fieldsOf(ctx.state, id).units, 1)));
+  const units = unitsToLet(api, ctx.state, id);
   const out = [];
   let let_ = 0;
   for (const l of authoredLeases(ctx, id)) {
-    const live = inForce(l, now);
-    if (live)
+    const over = isOver(l, now);
+    if (!over)
       let_++;
     const tenant = own(ctx.state.entities, l.tenant)?.kind === "account" ? api.ownersOf(ctx.state, l.tenant)[0]?.party ?? l.tenant : l.tenant;
-    out.push({ flow: l.id, tenant: shownName3(ctx, viewer, tenant, "a tenant"), rent: l.rent, start: l.start === null ? null : dateText3(ctx.world, l.start), end: l.end === null ? null : dateText3(ctx.world, l.end - 1440), state: live ? "let" : l.end !== null && l.end <= now ? "ended" : "vacant" });
+    out.push({ flow: l.id, tenant: shownName3(ctx, viewer, tenant, "a tenant"), rent: l.rent, start: l.start === null ? null : dateText3(ctx.world, l.start), end: l.end === null ? null : dateText3(ctx.world, l.end - 1440), state: over ? "ended" : "let" });
   }
   for (const l of managedLeases(ctx, id)) {
     const from = monthStart2(ctx.world, l.from);
@@ -16439,9 +16538,6 @@ function buyProperty(api, ctx, x) {
     ...moveLeases(api, ctx, x.property, api.ownersOf(ctx.state, x.property).map((o) => o.party), [{ party: x.party, role: "owner", share: 100 }])
   ]);
 }
-function notOver(l, at) {
-  return l.status === "active" && (l.end === null || at < l.end);
-}
 function paysOwners(api, ctx, lease, owners) {
   const to = strOf(fieldsOf(ctx.state, lease).to);
   return owners.includes(to) || api.ownersOf(ctx.state, to).some((o) => owners.includes(o.party));
@@ -16463,7 +16559,7 @@ function moveLeases(api, ctx, property, owners, next) {
   const out = [];
   const side = ownersSide(api, ctx, next);
   for (const l of authoredLeases(ctx, property)) {
-    if (!notOver(l, ctx.state.clock) || !paysOwners(api, ctx, l.id, owners))
+    if (isOver(l, ctx.state.clock) || !paysOwners(api, ctx, l.id, owners))
       continue;
     out.push(...side ? repoint(api, ctx, l.id, side) : [{ type: "set", entity: l.id, field: "end", value: dateText3(ctx.world, ctx.state.clock) }]);
   }
@@ -16476,7 +16572,7 @@ function routeRent(api, ctx, property, route) {
     return out;
   const owners = api.ownersOf(ctx.state, property).map((o) => o.party);
   for (const l of authoredLeases(ctx, property))
-    if (notOver(l, ctx.state.clock) && paysOwners(api, ctx, l.id, owners))
+    if (!isOver(l, ctx.state.clock) && paysOwners(api, ctx, l.id, owners))
       out.push(...repoint(api, ctx, l.id, side));
   return unit2(out);
 }
@@ -16568,7 +16664,7 @@ function startLease(api, ctx, x) {
   if (!(rent > 0))
     return reject7("bad_amount", "rent is above nothing");
   const units = Math.max(1, Math.round(numOf(e.fields.units, 1)));
-  if (authoredLeases(ctx, x.property).filter((l) => inForce(l, ctx.state.clock)).length >= units)
+  if (authoredLeases(ctx, x.property).filter((l) => holdsUnit(l, ctx.state.clock)).length >= units)
     return reject7("full", `every unit of ${e.name} is let`);
   if (x.from) {
     const unusable = api.mayUse(ctx, x.tenant, x.from, "from");
@@ -16637,8 +16733,10 @@ function propertyView(api, ctx, id, party, flows) {
   const place = strOf(e?.fields.place);
   const asking = num5(e?.fields.asking_price);
   const shownPlace = place === "" || party === ctx.world.pov && !canSeePlace(ctx.registry, ctx.world, ctx.state, party, place) ? null : own(ctx.world.places, place)?.name ?? labelOf(ctx, place);
-  if (!api.ownersOf(ctx.state, id).some((o) => o.party === party))
-    return { id, name: e?.name ?? id, place: shownPlace, owners: [], share: 0, value, equity: 0, forSale: asking ?? null, mortgage: null, leases: [], costs: [], route: null };
+  if (!api.ownersOf(ctx.state, id).some((o) => o.party === party)) {
+    const mayBuy = api.feature(ctx, party, "property") && (asking !== undefined || payers(api, ctx.state, id).owners.length === 0);
+    return { id, name: e?.name ?? id, place: shownPlace, owners: [], share: 0, value, equity: 0, forSale: asking ?? null, mortgage: null, leases: [], costs: [], route: null, ...mayBuy ? { mortgageTerms: offeredTerms(ctx) } : {} };
+  }
   const loans = securedLoans(api, ctx.state, id);
   const loan = loans.find((l) => l.owed > 0);
   const owed = loans.reduce((a, l) => a + l.owed, 0);
@@ -18037,472 +18135,6 @@ function noted(ctx, events) {
   });
 }
 
-// src/packs/economy/core/actions.ts
-function money(ctx, cents) {
-  return formatMoney(cents, ctx.world.currency);
-}
-function featureAt(ctx, who, field) {
-  let cur = placeOfEntity(ctx.state, who) ?? undefined;
-  for (let guard = 0;cur && guard < 32; guard++) {
-    const p = own(ctx.world.places, cur);
-    const f = objOf(p?.fields[field]);
-    if (typeof f.bank === "string" && f.bank !== "")
-      return { place: cur, feature: f };
-    cur = p?.parent;
-  }
-  return null;
-}
-function cashNeedsAMachine(ctx, who) {
-  if (!featureFor(ctx, who, "atm"))
-    return false;
-  return Object.values(ctx.world.places).some((p) => ["atm", "branch"].some((f) => {
-    const bank = objOf(p.fields[f]).bank;
-    return typeof bank === "string" && bank !== "";
-  }));
-}
-function debitCard(ctx, who, account) {
-  return cardsOn(ctx.state, account).find((c) => strOf(own(ctx.state.entities, c)?.fields.holder) === who && cardProblem(ctx, c, who) === null) ?? null;
-}
-function withdraw(ctx, who, account, raw) {
-  const cents = Math.round(raw);
-  if (!(cents > 0))
-    return reject8("bad_amount", "the amount must be positive");
-  if (!canSpend(ctx.state, account, who) || !traitsOf(ctx, account)?.pays || traitsOf(ctx, account)?.cash)
-    return reject8("not_owner", `${labelOf(ctx, who)} can't draw cash from ${labelOf(ctx, account)}`);
-  if (statusOf(ctx.state, account) !== "open")
-    return reject8("declined", `${labelOf(ctx, account)} is ${statusOf(ctx.state, account).replace(/_/g, " ")}`);
-  const wallet = cashAccount(ctx, who);
-  if (!wallet)
-    return reject8("no_wallet", `${labelOf(ctx, who)} has nowhere to carry cash`);
-  const p = productOf(ctx, account);
-  if (!p)
-    return reject8("missing_account", "no such account");
-  const t = traitsOf(ctx, account);
-  const atTop = cashNeedsAMachine(ctx, who);
-  const machine = [];
-  const advanceLines = [];
-  const extra = [];
-  let fees = 0;
-  let card = null;
-  let where = "";
-  if (atTop) {
-    const branch = featureAt(ctx, who, "branch");
-    const atm = featureAt(ctx, who, "atm");
-    if (branch && branch.feature.bank === p.institution)
-      where = `at ${own(ctx.world.places, branch.place)?.name ?? "the branch"}`;
-    else if (atm) {
-      card = debitCard(ctx, who, account);
-      if (!card)
-        return reject8("no_card", cardsOn(ctx.state, account).length > 0 ? `none of ${labelOf(ctx, who)}'s cards on ${labelOf(ctx, account)} works` : `${labelOf(ctx, account)} has no card for a cash machine`);
-      if (typeof atm.feature.limit === "number" && cents > atm.feature.limit)
-        return reject8("over_limit", `the machine gives at most ${money(ctx, atm.feature.limit)} at a time`);
-      if (cardRoom(ctx, card, "atm") < cents)
-        return reject8("over_limit", `${labelOf(ctx, card)} has ${money(ctx, cardRoom(ctx, card, "atm"))} left of its daily cash limit`);
-      where = `at ${own(ctx.world.places, atm.place)?.name ?? "a cash machine"}`;
-      if (accountFeature(ctx, account, "fees") && atm.feature.bank !== p.institution) {
-        const surcharge = Math.max(0, Math.round(numOf(atm.feature.fee)));
-        if (surcharge > 0)
-          machine.push({ account: external(`atm:${atm.feature.bank}`), amount: surcharge });
-        if (p.fees.atm > 0)
-          machine.push({ account: bankSide(p.institution), amount: p.fees.atm });
-        fees += surcharge + p.fees.atm;
-      }
-      if (Number.isFinite(cardRoom(ctx, card, "atm"))) {
-        const day = dateAt(calendarOf(ctx.world), ctx.state.clock).dayIndex;
-        const s = spendOf(ctx.state, card, day);
-        extra.push({ type: FINANCE_EVENTS.spend, data: { card, day, purchase: s.purchase, atm: s.atm + cents } });
-      }
-    } else
-      return reject8("no_atm", `there's no cash machine or ${p.institution || "bank"} branch here`);
-  }
-  const advance = cashAdvanceFee(ctx, account, cents);
-  if (advance > 0) {
-    advanceLines.push({ account: bankSide(p.institution), amount: advance });
-    fees += advance;
-  }
-  const total = cents + fees;
-  if (availableOf(ctx, account) < total)
-    return reject8("declined", `${labelOf(ctx, account)} can't cover ${money(ctx, total)}`);
-  const charge = (lines, memo, category) => {
-    const cents = lines.reduce((a, l) => a + l.amount, 0);
-    return cents > 0 ? posting([{ account, amount: -cents }, ...lines], { memo, kind: "fee", category }) : [];
-  };
-  const memo = `Cash withdrawal${where ? ` ${where}` : ""}${fees > 0 ? ` (${money(ctx, fees)} in fees)` : ""}`;
-  return asUnit([...charge(machine, "Cash machine fees", "atm"), ...charge(advanceLines, "Cash advance fee", "cash_advance"), ...posting([{ account, amount: -cents }, { account: wallet, amount: cents }], { memo, kind: "withdrawal", category: t?.revolving ? "cash_advance" : "transfer", ...card ? { card } : {} }), ...extra]);
-}
-function deposit(ctx, who, account, raw) {
-  const cents = Math.round(raw);
-  if (!(cents > 0))
-    return reject8("bad_amount", "the amount must be positive");
-  const unusable = mayUse(ctx, who, account, "into");
-  if (unusable)
-    return unusable;
-  if (traitsOf(ctx, account)?.cash || traitsOf(ctx, account)?.locked)
-    return reject8("not_owner", `${labelOf(ctx, who)} can't pay cash into ${labelOf(ctx, account)}`);
-  const wallet = cashAccount(ctx, who);
-  if (!wallet || availableOf(ctx, wallet) < cents)
-    return reject8("declined", `${labelOf(ctx, who)} doesn't have ${money(ctx, cents)} in cash`);
-  const p = productOf(ctx, account);
-  if (!p)
-    return reject8("missing_account", "no such account");
-  if (traitsOf(ctx, account)?.liability && cents > -balance(ctx.state, account))
-    return reject8("overpay", `${labelOf(ctx, account)} owes only ${money(ctx, Math.max(0, -balance(ctx.state, account)))}`);
-  let held = false;
-  let where = "";
-  if (cashNeedsAMachine(ctx, who)) {
-    const branch = featureAt(ctx, who, "branch");
-    const atm = featureAt(ctx, who, "atm");
-    if (branch && branch.feature.bank === p.institution)
-      where = ` at ${own(ctx.world.places, branch.place)?.name ?? "the branch"}`;
-    else if (atm && atm.feature.deposits === true && atm.feature.bank === p.institution) {
-      where = ` at ${own(ctx.world.places, atm.place)?.name ?? "a cash machine"}`;
-      held = accountFeature(ctx, account, "holds") && p.hold_days > 0;
-    } else
-      return reject8("no_atm", `there's no ${p.institution || "bank"} branch or deposit machine here`);
-  }
-  const lines = [
-    { account: wallet, amount: -cents },
-    { account, amount: cents }
-  ];
-  const events = posting(lines, { memo: `Cash deposit${where}`, kind: "deposit", category: "transfer" });
-  if (traitsOf(ctx, account)?.liability)
-    events.push({ type: FINANCE_EVENTS.cardPaid, data: { account, cents } });
-  if (held)
-    events.push({ type: FINANCE_EVENTS.hold, data: { id: `dep:${hashParts(account, ctx.state.clock, cents).slice(0, 10)}`, account, cents, until: ctx.state.clock + p.hold_days * 1440, kind: "deposit", memo: "Cash deposit" } });
-  return asUnit(events);
-}
-function setCardState(ctx, who, card, state) {
-  const e = own(ctx.state.entities, card);
-  if (e?.kind !== "card")
-    return reject8("not_card", `${labelOf(ctx, card)} isn't a payment card`);
-  if (strOf(e.fields.holder) !== who && !managesAccount(ctx, strOf(e.fields.account), who))
-    return reject8("not_owner", `${e.name} isn't ${labelOf(ctx, who)}'s`);
-  if (!CARD_STATES.includes(state))
-    return reject8("bad_state", `a card can't be ${state}`);
-  const now = strOf(e.fields.state, "active");
-  if (now === state)
-    return [];
-  if (now === "lost" || now === "cancelled")
-    return reject8("bad_state", `${e.name} is ${now}; replace it`);
-  return [{ type: "set", entity: card, field: "state", value: state }];
-}
-function replaceCard(ctx, who, card) {
-  const e = own(ctx.state.entities, card);
-  if (e?.kind !== "card")
-    return reject8("not_card", `${labelOf(ctx, card)} isn't a payment card`);
-  const holder = strOf(e.fields.holder);
-  if (holder !== who && !managesAccount(ctx, strOf(e.fields.account), who))
-    return reject8("not_owner", `${e.name} isn't ${labelOf(ctx, who)}'s`);
-  if (strOf(e.fields.state) === "cancelled" && strOf(e.fields.replaced_by) !== "")
-    return reject8("bad_state", `${e.name} was already replaced`);
-  let n = 2;
-  while (own(ctx.state.entities, `${card}_r${n}`))
-    n++;
-  const id = `${card}_r${n}`;
-  const last4 = String(1000 + Number.parseInt(hashParts(card, n).slice(0, 6), 16) % 9000);
-  const fields = { ...e.fields, state: "active", replaces: card, last4 };
-  delete fields.replaced_by;
-  delete fields.item;
-  const out = [{ type: "spawn", entity: { id, kind: "card", name: e.name, tier: "background", fields, relations: [] } }, { type: "set", entity: card, field: "state", value: "cancelled" }, { type: "set", entity: card, field: "replaced_by", value: id }];
-  const spawn = optionalService(ctx, "gear.spawn");
-  const oldItem = strOf(e.fields.item);
-  if (spawn && ctx.levelOf(holder, "gear") >= 1) {
-    const place = oldItem !== "" ? own(ctx.state.entities, oldItem)?.relations.find((r) => r.type === "in")?.to : undefined;
-    const made = spawn(ctx, { name: own(ctx.state.entities, oldItem)?.name ?? e.name, owner: holder, holder: place && own(ctx.state.entities, place) && !own(ctx.state.entities, oldItem)?.fields.lost ? place : holder, salt: `card:${id}` });
-    if (Array.isArray(made)) {
-      out.push(...made);
-      const item = made.find((x) => x.type === "spawn");
-      if (item?.type === "spawn")
-        out.push({ type: "set", entity: id, field: "item", value: item.entity.id });
-    }
-  }
-  const account = strOf(e.fields.account);
-  const p = productOf(ctx, account);
-  if (p && p.fees.card_replacement > 0 && accountFeature(ctx, account, "fees"))
-    out.push(...posting([{ account, amount: -p.fees.card_replacement }, { account: bankSide(p.institution), amount: p.fees.card_replacement }], { memo: `${e.name} replacement`, kind: "fee", category: "card_replacement" }));
-  return asUnit(out);
-}
-function setAutopay(ctx, who, account, mode, from, cents) {
-  const cls = classOf2(ctx, account);
-  if (!cls || !isCredit(cls))
-    return reject8("not_credit", `${labelOf(ctx, account)} isn't a card or a loan`);
-  if (!managesAccount(ctx, account, who))
-    return reject8("not_owner", `${labelOf(ctx, account)} isn't ${labelOf(ctx, who)}'s to change`);
-  if (!AUTOPAY_MODES.includes(mode))
-    return reject8("bad_mode", `autopay can't be ${mode}`);
-  if (from !== "" && (!canSpend(ctx.state, from, who) && !managesAccount(ctx, from, who) || !traitsOf(ctx, from)?.pays || traitsOf(ctx, from)?.liability))
-    return reject8("bad_account", `${labelOf(ctx, who)} can't pay from ${labelOf(ctx, from)}`);
-  if (mode === "fixed" && !(cents > 0))
-    return reject8("bad_amount", "fixed autopay needs an amount");
-  const out = [{ type: "set", entity: account, field: "autopay", value: mode }];
-  if (from !== "")
-    out.push({ type: "set", entity: account, field: "autopay_from", value: from });
-  if (mode === "fixed")
-    out.push({ type: "set", entity: account, field: "autopay_cents", value: Math.round(cents) });
-  return out;
-}
-var FLOW_PARAM_FIELDS = { label: "", kind: "flow_kind", from: "from", to: "to", amount: "amount_cents", every: "every", interval: "interval", at: "at", start: "start", end: "end", count: "count", shortfall: "shortfall", retry_days: "retry_days", retries: "retries", fallback: "fallback", roll: "roll", category: "category" };
-function flowFields(args) {
-  const fields = {};
-  let label;
-  for (const [param, field] of Object.entries(FLOW_PARAM_FIELDS)) {
-    const v = args[param];
-    if (v === undefined || v === null || v === "")
-      continue;
-    if (param === "label")
-      label = String(v).slice(0, 80);
-    else
-      fields[field] = v;
-  }
-  if (typeof fields.flow_kind === "string" && !FLOW_KINDS.includes(fields.flow_kind))
-    return reject8("bad_flow", `a flow can't be a ${fields.flow_kind}`);
-  if (typeof fields.shortfall === "string" && !FLOW_SHORTFALLS.includes(fields.shortfall))
-    return reject8("bad_flow", `there's no shortfall policy ${fields.shortfall}`);
-  if (typeof fields.amount_cents === "number")
-    fields.amount_cents = Math.round(fields.amount_cents);
-  const every = args.every;
-  if (every === "once") {
-    delete fields.every;
-    fields.once = strOf(args.once);
-    if (fields.once === "")
-      return reject8("bad_flow", "a one-off flow needs its date and time");
-  } else if (every !== undefined && every !== null && every !== "") {
-    if (!["day", "week", "month", "year"].includes(String(every)))
-      return reject8("bad_flow", `a flow can't fall every ${String(every)}`);
-    fields.once = "";
-    if (typeof args.weekday === "number")
-      fields.weekdays = [args.weekday];
-    else if (every !== "week")
-      fields.weekdays = [];
-    if (typeof args.day === "number")
-      fields.days = [args.day];
-    else if (every === "week" || every === "day")
-      fields.days = [];
-    if (typeof args.month === "number")
-      fields.months = [args.month];
-    else if (every !== "year")
-      fields.months = [];
-  } else {
-    if (typeof args.weekday === "number")
-      fields.weekdays = [args.weekday];
-    if (typeof args.day === "number")
-      fields.days = [args.day];
-    if (typeof args.month === "number")
-      fields.months = [args.month];
-  }
-  return { fields, ...label !== undefined ? { label } : {} };
-}
-function mayPayFrom(ctx, who, from) {
-  return from === who || isParty(ctx, from) && managesParty(ctx.state, from, who) || managesAccount(ctx, from, who);
-}
-function fallbackProblem(ctx, who, fields) {
-  const fallback = strOf(fields.fallback);
-  if (fallback === "" || mayPayFrom(ctx, who, fallback))
-    return null;
-  return reject8("not_owner", own(ctx.state.entities, fallback) ? `${labelOf(ctx, who)} can't fall back on ${labelOf(ctx, fallback)}` : `a fallback is an account of ${labelOf(ctx, who)}'s, not "${fallback}"`);
-}
-function createFlow(ctx, who, args) {
-  const made = flowFields(args);
-  if ("code" in made)
-    return made;
-  const f = made.fields;
-  const from = strOf(f.from);
-  const to = strOf(f.to);
-  if (from === "" || to === "" || typeof f.amount_cents !== "number" || !(f.amount_cents > 0))
-    return reject8("bad_flow", "a flow needs who pays, who is paid and an amount");
-  if (!mayPayFrom(ctx, who, from))
-    return reject8("not_owner", `${labelOf(ctx, who)} can't pay from ${labelOf(ctx, from)}`);
-  const fallback = fallbackProblem(ctx, who, f);
-  if (fallback)
-    return fallback;
-  if (f.once === undefined && f.every === undefined)
-    return reject8("bad_flow", "a flow needs a schedule");
-  const label = made.label ?? `Payment to ${labelOf(ctx, to)}`;
-  const toMine = own(ctx.state.entities, to)?.kind === "account" && rightsOf(ctx.state, to, who) !== null;
-  const fields = { flow_kind: toMine ? "transfer" : "bill", shortfall: "skip", status: "active", ...f };
-  const id = `flow_${who}_${hashParts(who, label, ctx.state.clock).slice(0, 8)}`;
-  const entity = { id, kind: "flow", name: label, tier: "background", fields, relations: [] };
-  return [{ type: "spawn", entity }];
-}
-var CLEARABLE = ["at", "start", "end", "count", "roll", "retry_days", "retries", "fallback", "category"];
-function renameAndClear(current, id, name, clear) {
-  const names = typeof clear === "string" ? clear.split(",").map((s) => s.trim()).filter((s) => s !== "") : [];
-  const bad = names.find((n) => !CLEARABLE.includes(n));
-  if (bad !== undefined)
-    return reject8("bad_flow", `a standing payment's ${bad.replace(/_/g, " ")} can't be cleared`);
-  const out = [...new Set(names)].map((n) => ({ type: "set", entity: id, field: FLOW_PARAM_FIELDS[n] ?? n, value: null }));
-  const label = name?.trim().slice(0, 80) ?? "";
-  if (label !== "" && label !== current)
-    out.push({ type: FINANCE_EVENTS.flowRenamed, data: { flow: id, name: label } });
-  return out;
-}
-function updateFlow(ctx, who, flow, args) {
-  const e = own(ctx.state.entities, flow);
-  if (e?.kind !== "flow")
-    return reject8("not_flow", `${labelOf(ctx, flow)} isn't a standing payment`);
-  if (!mayPayFrom(ctx, who, strOf(e.fields.from)))
-    return reject8("not_owner", `${e.name} isn't ${labelOf(ctx, who)}'s to change`);
-  const made = flowFields(args);
-  if ("code" in made)
-    return made;
-  if (typeof made.fields.from === "string" && !mayPayFrom(ctx, who, made.fields.from))
-    return reject8("not_owner", `${labelOf(ctx, who)} can't pay from ${labelOf(ctx, made.fields.from)}`);
-  const fallback = fallbackProblem(ctx, who, made.fields);
-  if (fallback)
-    return fallback;
-  const more = renameAndClear(e.name, flow, made.label, args.clear);
-  if ("code" in more)
-    return more;
-  const both = more.find((x) => x.type === "set" && (x.field in made.fields));
-  if (both && both.type === "set")
-    return reject8("bad_flow", `a standing payment's ${both.field.replace(/_/g, " ")} can't be both changed and cleared`);
-  return [...Object.entries(made.fields).map(([field, value]) => ({ type: "set", entity: flow, field, value })), ...more];
-}
-function editFlow(ctx, flow, name, clear) {
-  const e = own(ctx.state.entities, flow);
-  if (e?.kind !== "flow")
-    return reject8("not_flow", `${labelOf(ctx, flow)} isn't a standing payment`);
-  return renameAndClear(e.name, flow, name, clear);
-}
-function setFlowStatus(ctx, who, flow, status) {
-  const e = own(ctx.state.entities, flow);
-  if (e?.kind !== "flow")
-    return reject8("not_flow", `${labelOf(ctx, flow)} isn't a standing payment`);
-  if (!mayPayFrom(ctx, who, strOf(e.fields.from)))
-    return reject8("not_owner", `${e.name} isn't ${labelOf(ctx, who)}'s to change`);
-  const out = [{ type: "set", entity: flow, field: "status", value: status }];
-  if (status === "ended")
-    out.push({ type: "set", entity: flow, field: GONE_FIELD, value: true });
-  return out;
-}
-function newAccountId(ctx, spec) {
-  const base = `${spec.owners[0]?.party ?? "acct"}_${spec.product}`;
-  let id = spec.id ?? `${base}_${hashParts(base, spec.name, ctx.state.clock).slice(0, 6)}`;
-  while (own(ctx.state.entities, id))
-    id = `${id}x`;
-  return id;
-}
-function openAccount(ctx, spec) {
-  const products = worldProducts(ctx.world);
-  const cls = own(products, spec.product)?.class ?? (isAccountClass(spec.product) ? spec.product : null);
-  if (!cls)
-    return reject8("bad_product", `there's no product ${spec.product.replace(/_/g, " ")}`);
-  const holder = spec.owners[0]?.party;
-  if (!holder || !own(ctx.state.entities, holder))
-    return reject8("missing_entity", "an account needs an owner");
-  const id = newAccountId(ctx, spec);
-  const cal = calendarOf(ctx.world);
-  const d = dateAt(cal, ctx.state.clock);
-  const opened = `${String(d.year).padStart(4, "0")}-${String(d.month).padStart(2, "0")}-${String(d.day).padStart(2, "0")}`;
-  const t = CLASS_TRAITS[cls];
-  const fields = { owners: spec.owners.map((o) => ({ party: o.party, role: o.role, ...o.share !== undefined ? { share: o.share } : {} })), product: spec.product, opening: 0, opened, status: "open" };
-  if (spec.apr_pct !== undefined)
-    fields.apr_pct = spec.apr_pct;
-  if (t.revolving && typeof spec.cents === "number")
-    fields.limit = Math.round(spec.cents);
-  if (t.installment) {
-    if (spec.term_months !== undefined) {
-      fields.term_months = spec.term_months;
-      fields.months_left = spec.term_months;
-    }
-    fields.due_day = Math.min(28, d.day);
-    const from = depositAccount(ctx, holder);
-    if (from) {
-      fields.autopay = "minimum";
-      fields.autopay_from = from;
-    }
-  }
-  if (spec.secured_by)
-    fields.secured_by = spec.secured_by;
-  if (t.revolving)
-    fields.statement_day = Math.min(28, d.day);
-  const out = [{ type: "spawn", entity: { id, kind: "account", name: spec.name, tier: "background", fields, relations: [] } }, { type: FINANCE_EVENTS.open, data: { accounts: [id] } }];
-  if (t.installment && typeof spec.cents === "number" && spec.cents > 0) {
-    const into = spec.into ?? depositAccount(ctx, holder) ?? external(holder);
-    out.push(...posting([{ account: id, amount: -Math.round(spec.cents) }, { account: into, amount: Math.round(spec.cents) }], { memo: `${spec.name}: loan paid out`, kind: "deposit", category: "loan" }));
-  }
-  if (spec.card && (t.revolving || t.transactional)) {
-    const cardId = `${id}_card`;
-    out.push({ type: "spawn", entity: { id: cardId, kind: "card", name: /\bcard$/i.test(spec.name) ? spec.name : `${spec.name} card`, tier: "background", fields: { account: id, holder, network: cls === "charge_card" ? "charge" : t.revolving ? "credit" : "debit", state: "active" }, relations: [] } });
-  }
-  for (const o of spec.owners)
-    if (o.role === "owner" || o.role === "joint") {
-      if (isParty(ctx, o.party) && t.liability)
-        out.push({ type: FINANCE_EVENTS.credit, data: { person: o.party, kind: "opened", account: id } });
-    }
-  return out;
-}
-function creditApplication(ctx, who, app) {
-  if (!isParty(ctx, who))
-    return reject8("missing_entity", `no ${labelOf(ctx, who)}`);
-  const reports = featureFor(ctx, who, "credit");
-  const decision = decide(ctx, who, app, reports);
-  if ("code" in decision)
-    return decision;
-  const inquiry = reports ? [{ type: FINANCE_EVENTS.credit, data: { person: who, kind: "inquiry", note: app.product.replace(/_/g, " ") } }] : [];
-  if (!decision.approved)
-    return { decision, events: inquiry };
-  if (app.into !== undefined && own(ctx.state.entities, app.into)) {
-    const unusable = mayUse(ctx, who, app.into, "into");
-    if (unusable)
-      return unusable;
-  }
-  const amount = decision.limit ?? app.cents;
-  const opened = openAccount(ctx, { ...app.id ? { id: app.id } : {}, name: app.name ?? decision.label, product: app.product, owners: [{ party: who, role: "owner" }], ...amount !== undefined ? { cents: amount } : {}, ...app.into !== undefined ? { into: app.into } : {}, ...app.term_months !== undefined ? { term_months: app.term_months } : {}, ...decision.apr !== null ? { apr_pct: decision.apr } : {}, ...app.secured_by ? { secured_by: app.secured_by } : {}, card: CLASS_TRAITS[decision.cls].revolving });
-  if ("code" in opened)
-    return opened;
-  return { decision, events: [...inquiry, ...opened] };
-}
-function applyForCredit(ctx, who, product, cents, term, securedBy) {
-  const made = creditApplication(ctx, who, { product, ...cents !== undefined ? { cents } : {}, ...term !== undefined ? { term_months: term } : {}, ...securedBy ? { secured_by: securedBy } : {} });
-  if ("code" in made)
-    return made;
-  const d = made.decision;
-  const note = d.approved ? signal("bill", `Approved: a ${d.label.toLowerCase()}${d.apr !== null ? ` at ${d.apr}% APR` : ""}${d.limit ? ` with a ${money(ctx, d.limit)} limit` : ""}.`, who, ctx.state.clock) : signal("decline", `The application for a ${d.label.toLowerCase()} was declined: ${d.reason}.`, who, ctx.state.clock);
-  return [...made.events, note];
-}
-function setPayPrefs(ctx, who, tiers) {
-  if (!isParty(ctx, who))
-    return reject8("missing_entity", `no ${labelOf(ctx, who)}`);
-  let raw = tiers;
-  if (typeof tiers === "string") {
-    try {
-      raw = JSON.parse(tiers);
-    } catch {
-      return reject8("bad_tiers", "payment preferences are a list of ways to pay");
-    }
-  }
-  const list = Array.isArray(raw) ? raw.map((t) => objOf(t)).filter((t) => typeof t.use === "string" && t.use !== "") : null;
-  if (!list)
-    return reject8("bad_tiers", "payment preferences are a list of ways to pay");
-  return [{ type: "set", entity: who, field: "pay_prefs", value: list }];
-}
-function closeAccount(ctx, account) {
-  const e = own(ctx.state.entities, account);
-  if (e?.kind !== "account")
-    return reject8("not_account", `${labelOf(ctx, account)} isn't an account`);
-  if (balance(ctx.state, account) !== 0)
-    return reject8("not_empty", `${labelOf(ctx, account)} still has ${money(ctx, balance(ctx.state, account))} on it`);
-  const opening = Math.round(numOf(e.fields.opening));
-  if (opening !== 0 && !isOpened(ctx.state, account, openerOf(ctx.state, account)))
-    return reject8("not_empty", `${labelOf(ctx, account)} opens with ${money(ctx, opening)} still to post`);
-  return [{ type: FINANCE_EVENTS.status, data: { account, status: "closed" } }, ...cardsOn(ctx.state, account).map((c) => ({ type: "set", entity: c, field: "state", value: "cancelled" }))];
-}
-function setStatus(ctx, account, status) {
-  if (own(ctx.state.entities, account)?.kind !== "account")
-    return reject8("not_account", `${labelOf(ctx, account)} isn't an account`);
-  if (!ACCOUNT_STATUSES.includes(status))
-    return reject8("bad_status", `an account can't be ${status}`);
-  if (statusOf(ctx.state, account) === status)
-    return [];
-  return status === "closed" ? closeAccount(ctx, account) : [{ type: FINANCE_EVENTS.status, data: { account, status } }];
-}
-function releaseHold(ctx, account, hold) {
-  if (!own(ctx.state.entities, account))
-    return reject8("not_account", `${labelOf(ctx, account)} isn't an account`);
-  return [{ type: FINANCE_EVENTS.hold, data: { id: hold, account, release: true } }];
-}
-
 // src/packs/economy/core/run.ts
 function scratchOf(state) {
   return { ...state, entities: { ...state.entities }, accounts: { ...state.accounts }, packs: { ...state.packs, economy: structuredClone(state.packs.economy ?? {}) }, materialized: { ...state.materialized } };
@@ -19174,15 +18806,15 @@ function flowIsIncome(ctx, flow, who) {
   const from = sideOf(ctx, flow.from);
   return !(("account" in from) && from.party === who || ("party" in from) && !("account" in from) && from.party === who);
 }
-function fallbackOf(ctx, flow) {
-  const fallback = flow.fallback;
-  if (!fallback)
-    return null;
-  const from = sideOf(ctx, flow.from);
-  const payers = "account" in from ? holdersOf(ctx.state, from.account).filter((h) => canSpend(ctx.state, from.account, h)) : ("party" in from) ? [from.party] : [];
+function fallsBackOn(ctx, from, fallback) {
+  const side = sideOf(ctx, from);
+  const payers = "account" in side ? holdersOf(ctx.state, side.account).filter((h) => canSpend(ctx.state, side.account, h)) : ("party" in side) ? [side.party] : [];
   if (payers.includes(fallback))
-    return fallback;
-  return own(ctx.state.entities, fallback)?.kind === "account" && payers.some((p) => canSpend(ctx.state, fallback, p)) ? fallback : null;
+    return true;
+  return own(ctx.state.entities, fallback)?.kind === "account" && payers.some((p) => canSpend(ctx.state, fallback, p));
+}
+function fallbackOf(ctx, flow) {
+  return flow.fallback && fallsBackOn(ctx, flow.from, flow.fallback) ? flow.fallback : null;
 }
 function bounceFee(ctx, flow, cents, at, overdraft) {
   const side = sideOf(ctx, flow.from);
@@ -19221,6 +18853,548 @@ function sharedAttempt(hooks, ctx, flow, cents, at, overdraft) {
     events.push(...paid.events);
   }
   return { events: asUnit(events), paid: cents };
+}
+
+// src/packs/economy/core/actions.ts
+function money(ctx, cents) {
+  return formatMoney(cents, ctx.world.currency);
+}
+function featureAt(ctx, who, field) {
+  let cur = placeOfEntity(ctx.state, who) ?? undefined;
+  for (let guard = 0;cur && guard < 32; guard++) {
+    const p = own(ctx.world.places, cur);
+    const f = objOf(p?.fields[field]);
+    if (typeof f.bank === "string" && f.bank !== "")
+      return { place: cur, feature: f };
+    cur = p?.parent;
+  }
+  return null;
+}
+function cashNeedsAMachine(ctx, who) {
+  if (!featureFor(ctx, who, "atm"))
+    return false;
+  return Object.values(ctx.world.places).some((p) => ["atm", "branch"].some((f) => {
+    const bank = objOf(p.fields[f]).bank;
+    return typeof bank === "string" && bank !== "";
+  }));
+}
+function debitCard(ctx, who, account) {
+  return cardsOn(ctx.state, account).find((c) => strOf(own(ctx.state.entities, c)?.fields.holder) === who && cardProblem(ctx, c, who) === null) ?? null;
+}
+function withdraw(ctx, who, account, raw) {
+  const cents = Math.round(raw);
+  if (!(cents > 0))
+    return reject8("bad_amount", "the amount must be positive");
+  if (!canSpend(ctx.state, account, who) || !traitsOf(ctx, account)?.pays || traitsOf(ctx, account)?.cash)
+    return reject8("not_owner", `${labelOf(ctx, who)} can't draw cash from ${labelOf(ctx, account)}`);
+  if (statusOf(ctx.state, account) !== "open")
+    return reject8("declined", `${labelOf(ctx, account)} is ${statusOf(ctx.state, account).replace(/_/g, " ")}`);
+  const wallet = cashAccount(ctx, who);
+  if (!wallet)
+    return reject8("no_wallet", `${labelOf(ctx, who)} has nowhere to carry cash`);
+  const p = productOf(ctx, account);
+  if (!p)
+    return reject8("missing_account", "no such account");
+  const t = traitsOf(ctx, account);
+  const atTop = cashNeedsAMachine(ctx, who);
+  const machine = [];
+  const advanceLines = [];
+  const extra = [];
+  let fees = 0;
+  let card = null;
+  let where = "";
+  if (atTop) {
+    const branch = featureAt(ctx, who, "branch");
+    const atm = featureAt(ctx, who, "atm");
+    if (branch && branch.feature.bank === p.institution)
+      where = `at ${own(ctx.world.places, branch.place)?.name ?? "the branch"}`;
+    else if (atm) {
+      card = debitCard(ctx, who, account);
+      if (!card)
+        return reject8("no_card", cardsOn(ctx.state, account).length > 0 ? `none of ${labelOf(ctx, who)}'s cards on ${labelOf(ctx, account)} works` : `${labelOf(ctx, account)} has no card for a cash machine`);
+      if (typeof atm.feature.limit === "number" && cents > atm.feature.limit)
+        return reject8("over_limit", `the machine gives at most ${money(ctx, atm.feature.limit)} at a time`);
+      if (cardRoom(ctx, card, "atm") < cents)
+        return reject8("over_limit", `${labelOf(ctx, card)} has ${money(ctx, cardRoom(ctx, card, "atm"))} left of its daily cash limit`);
+      where = `at ${own(ctx.world.places, atm.place)?.name ?? "a cash machine"}`;
+      if (accountFeature(ctx, account, "fees") && atm.feature.bank !== p.institution) {
+        const surcharge = Math.max(0, Math.round(numOf(atm.feature.fee)));
+        if (surcharge > 0)
+          machine.push({ account: external(`atm:${atm.feature.bank}`), amount: surcharge });
+        if (p.fees.atm > 0)
+          machine.push({ account: bankSide(p.institution), amount: p.fees.atm });
+        fees += surcharge + p.fees.atm;
+      }
+      if (Number.isFinite(cardRoom(ctx, card, "atm"))) {
+        const day = dateAt(calendarOf(ctx.world), ctx.state.clock).dayIndex;
+        const s = spendOf(ctx.state, card, day);
+        extra.push({ type: FINANCE_EVENTS.spend, data: { card, day, purchase: s.purchase, atm: s.atm + cents } });
+      }
+    } else
+      return reject8("no_atm", `there's no cash machine or ${p.institution || "bank"} branch here`);
+  }
+  const advance = cashAdvanceFee(ctx, account, cents);
+  if (advance > 0) {
+    advanceLines.push({ account: bankSide(p.institution), amount: advance });
+    fees += advance;
+  }
+  const total = cents + fees;
+  if (availableOf(ctx, account) < total)
+    return reject8("declined", `${labelOf(ctx, account)} can't cover ${money(ctx, total)}`);
+  const charge = (lines, memo, category) => {
+    const cents = lines.reduce((a, l) => a + l.amount, 0);
+    return cents > 0 ? posting([{ account, amount: -cents }, ...lines], { memo, kind: "fee", category }) : [];
+  };
+  const memo = `Cash withdrawal${where ? ` ${where}` : ""}${fees > 0 ? ` (${money(ctx, fees)} in fees)` : ""}`;
+  return asUnit([...charge(machine, "Cash machine fees", "atm"), ...charge(advanceLines, "Cash advance fee", "cash_advance"), ...posting([{ account, amount: -cents }, { account: wallet, amount: cents }], { memo, kind: "withdrawal", category: t?.revolving ? "cash_advance" : "transfer", ...card ? { card } : {} }), ...extra]);
+}
+function deposit(ctx, who, account, raw) {
+  const cents = Math.round(raw);
+  if (!(cents > 0))
+    return reject8("bad_amount", "the amount must be positive");
+  const unusable = mayUse(ctx, who, account, "into");
+  if (unusable)
+    return unusable;
+  if (traitsOf(ctx, account)?.cash || traitsOf(ctx, account)?.locked)
+    return reject8("not_owner", `${labelOf(ctx, who)} can't pay cash into ${labelOf(ctx, account)}`);
+  const wallet = cashAccount(ctx, who);
+  if (!wallet || availableOf(ctx, wallet) < cents)
+    return reject8("declined", `${labelOf(ctx, who)} doesn't have ${money(ctx, cents)} in cash`);
+  const p = productOf(ctx, account);
+  if (!p)
+    return reject8("missing_account", "no such account");
+  if (traitsOf(ctx, account)?.liability && cents > -balance(ctx.state, account))
+    return reject8("overpay", `${labelOf(ctx, account)} owes only ${money(ctx, Math.max(0, -balance(ctx.state, account)))}`);
+  let held = false;
+  let where = "";
+  if (cashNeedsAMachine(ctx, who)) {
+    const branch = featureAt(ctx, who, "branch");
+    const atm = featureAt(ctx, who, "atm");
+    if (branch && branch.feature.bank === p.institution)
+      where = ` at ${own(ctx.world.places, branch.place)?.name ?? "the branch"}`;
+    else if (atm && atm.feature.deposits === true && atm.feature.bank === p.institution) {
+      where = ` at ${own(ctx.world.places, atm.place)?.name ?? "a cash machine"}`;
+      held = accountFeature(ctx, account, "holds") && p.hold_days > 0;
+    } else
+      return reject8("no_atm", `there's no ${p.institution || "bank"} branch or deposit machine here`);
+  }
+  const lines = [
+    { account: wallet, amount: -cents },
+    { account, amount: cents }
+  ];
+  const events = posting(lines, { memo: `Cash deposit${where}`, kind: "deposit", category: "transfer" });
+  if (traitsOf(ctx, account)?.liability)
+    events.push({ type: FINANCE_EVENTS.cardPaid, data: { account, cents } });
+  if (held)
+    events.push({ type: FINANCE_EVENTS.hold, data: { id: `dep:${hashParts(account, ctx.state.clock, cents).slice(0, 10)}`, account, cents, until: ctx.state.clock + p.hold_days * 1440, kind: "deposit", memo: "Cash deposit" } });
+  return asUnit(events);
+}
+function setCardState(ctx, who, card, state) {
+  const e = own(ctx.state.entities, card);
+  if (e?.kind !== "card")
+    return reject8("not_card", `${labelOf(ctx, card)} isn't a payment card`);
+  if (strOf(e.fields.holder) !== who && !managesAccount(ctx, strOf(e.fields.account), who))
+    return reject8("not_owner", `${e.name} isn't ${labelOf(ctx, who)}'s`);
+  if (!CARD_STATES.includes(state))
+    return reject8("bad_state", `a card can't be ${state}`);
+  const now = strOf(e.fields.state, "active");
+  if (now === state)
+    return [];
+  if (now === "lost" || now === "cancelled")
+    return reject8("bad_state", `${e.name} is ${now}; replace it`);
+  return [{ type: "set", entity: card, field: "state", value: state }];
+}
+function replaceCard(ctx, who, card) {
+  const e = own(ctx.state.entities, card);
+  if (e?.kind !== "card")
+    return reject8("not_card", `${labelOf(ctx, card)} isn't a payment card`);
+  const holder = strOf(e.fields.holder);
+  if (holder !== who && !managesAccount(ctx, strOf(e.fields.account), who))
+    return reject8("not_owner", `${e.name} isn't ${labelOf(ctx, who)}'s`);
+  if (strOf(e.fields.state) === "cancelled" && strOf(e.fields.replaced_by) !== "")
+    return reject8("bad_state", `${e.name} was already replaced`);
+  let n = 2;
+  while (own(ctx.state.entities, `${card}_r${n}`))
+    n++;
+  const id = `${card}_r${n}`;
+  const last4 = String(1000 + Number.parseInt(hashParts(card, n).slice(0, 6), 16) % 9000);
+  const fields = { ...e.fields, state: "active", replaces: card, last4 };
+  delete fields.replaced_by;
+  delete fields.item;
+  const out = [{ type: "spawn", entity: { id, kind: "card", name: e.name, tier: "background", fields, relations: [] } }, { type: "set", entity: card, field: "state", value: "cancelled" }, { type: "set", entity: card, field: "replaced_by", value: id }];
+  const spawn = optionalService(ctx, "gear.spawn");
+  const oldItem = strOf(e.fields.item);
+  if (spawn && ctx.levelOf(holder, "gear") >= 1) {
+    const place = oldItem !== "" ? own(ctx.state.entities, oldItem)?.relations.find((r) => r.type === "in")?.to : undefined;
+    const made = spawn(ctx, { name: own(ctx.state.entities, oldItem)?.name ?? e.name, owner: holder, holder: place && own(ctx.state.entities, place) && !own(ctx.state.entities, oldItem)?.fields.lost ? place : holder, salt: `card:${id}` });
+    if (Array.isArray(made)) {
+      out.push(...made);
+      const item = made.find((x) => x.type === "spawn");
+      if (item?.type === "spawn")
+        out.push({ type: "set", entity: id, field: "item", value: item.entity.id });
+    }
+  }
+  const account = strOf(e.fields.account);
+  const p = productOf(ctx, account);
+  if (p && p.fees.card_replacement > 0 && accountFeature(ctx, account, "fees"))
+    out.push(...posting([{ account, amount: -p.fees.card_replacement }, { account: bankSide(p.institution), amount: p.fees.card_replacement }], { memo: `${e.name} replacement`, kind: "fee", category: "card_replacement" }));
+  return asUnit(out);
+}
+function said(ctx, id) {
+  return shownLabel(ctx, ctx.world.pov, id);
+}
+function autopaySourceProblem(ctx, who, account, from) {
+  const t = traitsOf(ctx, from);
+  if (!canSpend(ctx.state, from, who) && !managesAccount(ctx, from, who) || !t?.pays || t.liability)
+    return reject8("bad_account", `${said(ctx, who)} can't pay from ${said(ctx, from)}`);
+  const debtors = debtorsOf(ctx.state, account);
+  if (!debtors.some((d) => canSpend(ctx.state, from, d) || rightsOf(ctx.state, from, d)?.worth === true))
+    return reject8("bad_account", `${said(ctx, account)} is paid from ${said(ctx, debtors[0] ?? who)}'s own money, not from ${said(ctx, from)}`);
+  return null;
+}
+function setAutopay(ctx, who, account, mode, from, cents) {
+  const cls = classOf2(ctx, account);
+  if (!cls || !isCredit(cls))
+    return reject8("not_credit", `${labelOf(ctx, account)} isn't a card or a loan`);
+  if (!managesAccount(ctx, account, who))
+    return reject8("not_owner", `${labelOf(ctx, account)} isn't ${labelOf(ctx, who)}'s to change`);
+  if (!AUTOPAY_MODES.includes(mode))
+    return reject8("bad_mode", `autopay can't be ${mode}`);
+  const source = from === "" ? null : autopaySourceProblem(ctx, who, account, from);
+  if (source)
+    return source;
+  if (mode === "fixed" && !(cents > 0))
+    return reject8("bad_amount", "fixed autopay needs an amount");
+  const out = [{ type: "set", entity: account, field: "autopay", value: mode }];
+  if (from !== "")
+    out.push({ type: "set", entity: account, field: "autopay_from", value: from });
+  if (mode === "fixed")
+    out.push({ type: "set", entity: account, field: "autopay_cents", value: Math.round(cents) });
+  return out;
+}
+var FLOW_PARAM_FIELDS = { label: "", kind: "flow_kind", from: "from", to: "to", amount: "amount_cents", every: "every", interval: "interval", at: "at", start: "start", end: "end", count: "count", shortfall: "shortfall", retry_days: "retry_days", retries: "retries", fallback: "fallback", roll: "roll", category: "category" };
+function flowFields(args) {
+  const fields = {};
+  let label;
+  for (const [param, field] of Object.entries(FLOW_PARAM_FIELDS)) {
+    const v = args[param];
+    if (v === undefined || v === null || v === "")
+      continue;
+    if (param === "label")
+      label = String(v).slice(0, 80);
+    else
+      fields[field] = v;
+  }
+  if (typeof fields.flow_kind === "string" && !FLOW_KINDS.includes(fields.flow_kind))
+    return reject8("bad_flow", `a flow can't be a ${fields.flow_kind}`);
+  if (typeof fields.shortfall === "string" && !FLOW_SHORTFALLS.includes(fields.shortfall))
+    return reject8("bad_flow", `there's no shortfall policy ${fields.shortfall}`);
+  if (typeof fields.amount_cents === "number")
+    fields.amount_cents = Math.round(fields.amount_cents);
+  const every = args.every;
+  if (every === "once") {
+    delete fields.every;
+    fields.once = strOf(args.once);
+    if (fields.once === "")
+      return reject8("bad_flow", "a one-off flow needs its date and time");
+  } else if (every !== undefined && every !== null && every !== "") {
+    if (!["day", "week", "month", "year"].includes(String(every)))
+      return reject8("bad_flow", `a flow can't fall every ${String(every)}`);
+    fields.once = "";
+    if (typeof args.weekday === "number")
+      fields.weekdays = [args.weekday];
+    else if (every !== "week")
+      fields.weekdays = [];
+    if (typeof args.day === "number")
+      fields.days = [args.day];
+    else if (every === "week" || every === "day")
+      fields.days = [];
+    if (typeof args.month === "number")
+      fields.months = [args.month];
+    else if (every !== "year")
+      fields.months = [];
+  } else {
+    if (typeof args.weekday === "number")
+      fields.weekdays = [args.weekday];
+    if (typeof args.day === "number")
+      fields.days = [args.day];
+    if (typeof args.month === "number")
+      fields.months = [args.month];
+  }
+  return { fields, ...label !== undefined ? { label } : {} };
+}
+function mayPayFrom(ctx, who, from) {
+  return from === who || isParty(ctx, from) && managesParty(ctx.state, from, who) || managesAccount(ctx, from, who);
+}
+function worthHolders(ctx, id) {
+  return holdersOf(ctx.state, id).filter((h) => rightsOf(ctx.state, id, h)?.worth === true);
+}
+var WORTH_DEPTH = 4;
+function interestsOf(ctx, who) {
+  const household = householdOf(ctx, who);
+  const kin = household === null ? [who] : [who, household, ...membersOf(ctx.registry, ctx.world, ctx.state, household)];
+  const out = new Set(kin);
+  const parties = Object.keys(ctx.state.entities).filter((id) => !out.has(id) && isParty(ctx, id));
+  let reached = out;
+  for (let depth = 0;depth < WORTH_DEPTH && reached.size > 0; depth++) {
+    const next = new Set(parties.filter((id) => !out.has(id) && worthHolders(ctx, id).some((h) => reached.has(h))));
+    for (const id of next)
+      out.add(id);
+    reached = next;
+  }
+  return out;
+}
+function whoseMoney(ctx, side) {
+  const all = new Set;
+  const last = new Set;
+  let next = isParty(ctx, side) ? [side] : worthHolders(ctx, side);
+  for (let depth = 0;depth < WORTH_DEPTH && next.length > 0; depth++) {
+    const deeper = [];
+    for (const p of next.filter((q) => !all.has(q))) {
+      all.add(p);
+      const holders = worthHolders(ctx, p);
+      if (holders.length === 0 || depth === WORTH_DEPTH - 1)
+        last.add(p);
+      else
+        deeper.push(...holders);
+    }
+    next = deeper;
+  }
+  return { all, last };
+}
+function personal(ctx, id) {
+  const kind = own(ctx.state.entities, id)?.kind ?? "";
+  return kind !== "" && (kindIs(ctx.registry, ctx.world, kind, "person") || kindIs(ctx.registry, ctx.world, kind, "household"));
+}
+function paysFor(ctx, who, to, from, interests = interestsOf(ctx, who)) {
+  const { all: forHolder, last } = whoseMoney(ctx, from);
+  const stake = forHolder.has(who);
+  const wholly = last.size > 0 && [...last].every((p) => p === who);
+  forHolder.delete(who);
+  const mine = (party) => interests.has(party) && !forHolder.has(party) && (!wholly || personal(ctx, party));
+  const id = to.startsWith(EXTERNAL_ACCOUNT_PREFIX) ? to.slice(EXTERNAL_ACCOUNT_PREFIX.length) : to;
+  const e = own(ctx.state.entities, id);
+  if (e?.kind === "account")
+    return !stake && canSpend(ctx.state, id, who) || worthHolders(ctx, id).some(mine);
+  if (e)
+    return mine(id);
+  const key = payeeKey(id);
+  const household = householdOf(ctx, who);
+  return key !== "" && [who, household].some((p) => p !== null && (key === payeeKey(p) || key === payeeKey(own(ctx.state.entities, p)?.name ?? "")));
+}
+function flowProblem(ctx, who, from, to, fallback) {
+  if (!mayPayFrom(ctx, who, from))
+    return reject8("not_owner", `${said(ctx, who)} can't pay from ${said(ctx, from)}`);
+  if (fallback !== "" && (!mayPayFrom(ctx, who, fallback) || !fallsBackOn(ctx, from, fallback))) {
+    return reject8("not_owner", own(ctx.state.entities, fallback) ? `${said(ctx, who)} can't fall back on ${said(ctx, fallback)}` : `a fallback is an account of ${said(ctx, who)}'s, not "${fallback}"`);
+  }
+  const managed = [from, fallback].filter((side) => side !== "" && side !== who && (isParty(ctx, side) || !canSpend(ctx.state, side, who)));
+  const paying = managed.find((side) => paysFor(ctx, who, to, side));
+  if (paying === undefined)
+    return null;
+  if (isParty(ctx, paying))
+    return reject8("not_owner", `${said(ctx, paying)} pays for itself, not for ${said(ctx, who)}`);
+  const holder = holdersOf(ctx.state, paying).find((h) => managesParty(ctx.state, h, who)) ?? paying;
+  return reject8("not_owner", `${said(ctx, paying)} pays for ${said(ctx, holder)}, not for ${said(ctx, who)}`);
+}
+function createFlow(ctx, who, args) {
+  const made = flowFields(args);
+  if ("code" in made)
+    return made;
+  const f = made.fields;
+  const from = strOf(f.from);
+  const to = strOf(f.to);
+  if (from === "" || to === "" || typeof f.amount_cents !== "number" || !(f.amount_cents > 0))
+    return reject8("bad_flow", "a flow needs who pays, who is paid and an amount");
+  const problem = flowProblem(ctx, who, from, to, strOf(f.fallback));
+  if (problem)
+    return problem;
+  if (f.once === undefined && f.every === undefined)
+    return reject8("bad_flow", "a flow needs a schedule");
+  const label = made.label ?? `Payment to ${labelOf(ctx, to)}`;
+  const toMine = own(ctx.state.entities, to)?.kind === "account" && rightsOf(ctx.state, to, who) !== null;
+  const fields = { flow_kind: toMine ? "transfer" : "bill", shortfall: "skip", status: "active", ...f };
+  const id = `flow_${who}_${hashParts(who, label, ctx.state.clock).slice(0, 8)}`;
+  const entity = { id, kind: "flow", name: label, tier: "background", fields, relations: [] };
+  return [{ type: "spawn", entity }];
+}
+var CLEARABLE = ["at", "start", "end", "count", "roll", "retry_days", "retries", "fallback", "category"];
+function renameAndClear(current, id, name, clear) {
+  const names = typeof clear === "string" ? clear.split(",").map((s) => s.trim()).filter((s) => s !== "") : [];
+  const bad = names.find((n) => !CLEARABLE.includes(n));
+  if (bad !== undefined)
+    return reject8("bad_flow", `a standing payment's ${bad.replace(/_/g, " ")} can't be cleared`);
+  const out = [...new Set(names)].map((n) => ({ type: "set", entity: id, field: FLOW_PARAM_FIELDS[n] ?? n, value: null }));
+  const label = name?.trim().slice(0, 80) ?? "";
+  if (label !== "" && label !== current)
+    out.push({ type: FINANCE_EVENTS.flowRenamed, data: { flow: id, name: label } });
+  return out;
+}
+function updateFlow(ctx, who, flow, args) {
+  const e = own(ctx.state.entities, flow);
+  if (e?.kind !== "flow")
+    return reject8("not_flow", `${labelOf(ctx, flow)} isn't a standing payment`);
+  if (!mayPayFrom(ctx, who, strOf(e.fields.from)))
+    return reject8("not_owner", `${e.name} isn't ${labelOf(ctx, who)}'s to change`);
+  const made = flowFields(args);
+  if ("code" in made)
+    return made;
+  const more = renameAndClear(e.name, flow, made.label, args.clear);
+  if ("code" in more)
+    return more;
+  const both = more.find((x) => x.type === "set" && (x.field in made.fields));
+  if (both && both.type === "set")
+    return reject8("bad_flow", `a standing payment's ${both.field.replace(/_/g, " ")} can't be both changed and cleared`);
+  const cleared = new Set(more.flatMap((x) => x.type === "set" ? [x.field] : []));
+  const after = (field) => cleared.has(field) ? "" : strOf(made.fields[field] ?? e.fields[field]);
+  const problem = flowProblem(ctx, who, after("from"), after("to"), after("fallback"));
+  if (problem)
+    return problem;
+  return [...Object.entries(made.fields).map(([field, value]) => ({ type: "set", entity: flow, field, value })), ...more];
+}
+function editFlow(ctx, flow, name, clear) {
+  const e = own(ctx.state.entities, flow);
+  if (e?.kind !== "flow")
+    return reject8("not_flow", `${labelOf(ctx, flow)} isn't a standing payment`);
+  return renameAndClear(e.name, flow, name, clear);
+}
+function setFlowStatus(ctx, who, flow, status) {
+  const e = own(ctx.state.entities, flow);
+  if (e?.kind !== "flow")
+    return reject8("not_flow", `${labelOf(ctx, flow)} isn't a standing payment`);
+  if (!mayPayFrom(ctx, who, strOf(e.fields.from)))
+    return reject8("not_owner", `${e.name} isn't ${labelOf(ctx, who)}'s to change`);
+  const out = [{ type: "set", entity: flow, field: "status", value: status }];
+  if (status === "ended")
+    out.push({ type: "set", entity: flow, field: GONE_FIELD, value: true });
+  return out;
+}
+function newAccountId(ctx, spec) {
+  const base = `${spec.owners[0]?.party ?? "acct"}_${spec.product}`;
+  let id = spec.id ?? `${base}_${hashParts(base, spec.name, ctx.state.clock).slice(0, 6)}`;
+  while (own(ctx.state.entities, id))
+    id = `${id}x`;
+  return id;
+}
+function openAccount(ctx, spec) {
+  const products = worldProducts(ctx.world);
+  const cls = own(products, spec.product)?.class ?? (isAccountClass(spec.product) ? spec.product : null);
+  if (!cls)
+    return reject8("bad_product", `there's no product ${spec.product.replace(/_/g, " ")}`);
+  const holder = spec.owners[0]?.party;
+  if (!holder || !own(ctx.state.entities, holder))
+    return reject8("missing_entity", "an account needs an owner");
+  const id = newAccountId(ctx, spec);
+  const cal = calendarOf(ctx.world);
+  const d = dateAt(cal, ctx.state.clock);
+  const opened = `${String(d.year).padStart(4, "0")}-${String(d.month).padStart(2, "0")}-${String(d.day).padStart(2, "0")}`;
+  const t = CLASS_TRAITS[cls];
+  const fields = { owners: spec.owners.map((o) => ({ party: o.party, role: o.role, ...o.share !== undefined ? { share: o.share } : {} })), product: spec.product, opening: 0, opened, status: "open" };
+  if (spec.apr_pct !== undefined)
+    fields.apr_pct = spec.apr_pct;
+  if (t.revolving && typeof spec.cents === "number")
+    fields.limit = Math.round(spec.cents);
+  if (t.installment) {
+    if (spec.term_months !== undefined) {
+      fields.term_months = spec.term_months;
+      fields.months_left = spec.term_months;
+    }
+    fields.due_day = Math.min(28, d.day);
+    const from = depositAccount(ctx, holder);
+    if (from) {
+      fields.autopay = "minimum";
+      fields.autopay_from = from;
+    }
+  }
+  if (spec.secured_by)
+    fields.secured_by = spec.secured_by;
+  if (t.revolving)
+    fields.statement_day = Math.min(28, d.day);
+  const out = [{ type: "spawn", entity: { id, kind: "account", name: spec.name, tier: "background", fields, relations: [] } }, { type: FINANCE_EVENTS.open, data: { accounts: [id] } }];
+  if (t.installment && typeof spec.cents === "number" && spec.cents > 0) {
+    const into = spec.into ?? depositAccount(ctx, holder) ?? external(holder);
+    out.push(...posting([{ account: id, amount: -Math.round(spec.cents) }, { account: into, amount: Math.round(spec.cents) }], { memo: `${spec.name}: loan paid out`, kind: "deposit", category: "loan" }));
+  }
+  if (spec.card && (t.revolving || t.transactional)) {
+    const cardId = `${id}_card`;
+    out.push({ type: "spawn", entity: { id: cardId, kind: "card", name: /\bcard$/i.test(spec.name) ? spec.name : `${spec.name} card`, tier: "background", fields: { account: id, holder, network: cls === "charge_card" ? "charge" : t.revolving ? "credit" : "debit", state: "active" }, relations: [] } });
+  }
+  for (const o of spec.owners)
+    if (o.role === "owner" || o.role === "joint") {
+      if (isParty(ctx, o.party) && t.liability)
+        out.push({ type: FINANCE_EVENTS.credit, data: { person: o.party, kind: "opened", account: id } });
+    }
+  return out;
+}
+function creditApplication(ctx, who, app) {
+  if (!isParty(ctx, who))
+    return reject8("missing_entity", `no ${labelOf(ctx, who)}`);
+  const reports = featureFor(ctx, who, "credit");
+  const decision = decide(ctx, who, app, reports);
+  if ("code" in decision)
+    return decision;
+  const inquiry = reports ? [{ type: FINANCE_EVENTS.credit, data: { person: who, kind: "inquiry", note: app.product.replace(/_/g, " ") } }] : [];
+  if (!decision.approved)
+    return { decision, events: inquiry };
+  if (app.into !== undefined && own(ctx.state.entities, app.into)) {
+    const unusable = mayUse(ctx, who, app.into, "into");
+    if (unusable)
+      return unusable;
+  }
+  const amount = decision.limit ?? app.cents;
+  const opened = openAccount(ctx, { ...app.id ? { id: app.id } : {}, name: app.name ?? decision.label, product: app.product, owners: [{ party: who, role: "owner" }], ...amount !== undefined ? { cents: amount } : {}, ...app.into !== undefined ? { into: app.into } : {}, ...app.term_months !== undefined ? { term_months: app.term_months } : {}, ...decision.apr !== null ? { apr_pct: decision.apr } : {}, ...app.secured_by ? { secured_by: app.secured_by } : {}, card: CLASS_TRAITS[decision.cls].revolving });
+  if ("code" in opened)
+    return opened;
+  return { decision, events: [...inquiry, ...opened] };
+}
+function applyForCredit(ctx, who, product, cents, term, securedBy) {
+  const made = creditApplication(ctx, who, { product, ...cents !== undefined ? { cents } : {}, ...term !== undefined ? { term_months: term } : {}, ...securedBy ? { secured_by: securedBy } : {} });
+  if ("code" in made)
+    return made;
+  const d = made.decision;
+  const note = d.approved ? signal("bill", `Approved: a ${d.label.toLowerCase()}${d.apr !== null ? ` at ${d.apr}% APR` : ""}${d.limit ? ` with a ${money(ctx, d.limit)} limit` : ""}.`, who, ctx.state.clock) : signal("decline", `The application for a ${d.label.toLowerCase()} was declined: ${d.reason}.`, who, ctx.state.clock);
+  return [...made.events, note];
+}
+function setPayPrefs(ctx, who, tiers) {
+  if (!isParty(ctx, who))
+    return reject8("missing_entity", `no ${labelOf(ctx, who)}`);
+  let raw = tiers;
+  if (typeof tiers === "string") {
+    try {
+      raw = JSON.parse(tiers);
+    } catch {
+      return reject8("bad_tiers", "payment preferences are a list of ways to pay");
+    }
+  }
+  const list = Array.isArray(raw) ? raw.map((t) => objOf(t)).filter((t) => typeof t.use === "string" && t.use !== "") : null;
+  if (!list)
+    return reject8("bad_tiers", "payment preferences are a list of ways to pay");
+  return [{ type: "set", entity: who, field: "pay_prefs", value: list }];
+}
+function closeAccount(ctx, account) {
+  const e = own(ctx.state.entities, account);
+  if (e?.kind !== "account")
+    return reject8("not_account", `${labelOf(ctx, account)} isn't an account`);
+  if (balance(ctx.state, account) !== 0)
+    return reject8("not_empty", `${labelOf(ctx, account)} still has ${money(ctx, balance(ctx.state, account))} on it`);
+  const opening = Math.round(numOf(e.fields.opening));
+  if (opening !== 0 && !isOpened(ctx.state, account, openerOf(ctx.state, account)))
+    return reject8("not_empty", `${labelOf(ctx, account)} opens with ${money(ctx, opening)} still to post`);
+  return [{ type: FINANCE_EVENTS.status, data: { account, status: "closed" } }, ...cardsOn(ctx.state, account).map((c) => ({ type: "set", entity: c, field: "state", value: "cancelled" }))];
+}
+function setStatus(ctx, account, status) {
+  if (own(ctx.state.entities, account)?.kind !== "account")
+    return reject8("not_account", `${labelOf(ctx, account)} isn't an account`);
+  if (!ACCOUNT_STATUSES.includes(status))
+    return reject8("bad_status", `an account can't be ${status}`);
+  if (statusOf(ctx.state, account) === status)
+    return [];
+  return status === "closed" ? closeAccount(ctx, account) : [{ type: FINANCE_EVENTS.status, data: { account, status } }];
+}
+function releaseHold(ctx, account, hold) {
+  if (!own(ctx.state.entities, account))
+    return reject8("not_account", `${labelOf(ctx, account)} isn't an account`);
+  return [{ type: FINANCE_EVENTS.hold, data: { id: hold, account, release: true } }];
 }
 
 // src/packs/economy/core/kinds.ts
@@ -20084,22 +20258,75 @@ function moneySummary(hooks, ctx, who) {
 
 // src/packs/economy/core/view.ts
 var DAY2 = 1440;
+var NO_HIDDEN = { pattern: null, reads: [] };
+var SOMEONE = { first: "Someone", within: "someone" };
+var SOMEWHERE = { first: "Somewhere", within: "somewhere" };
 function visible(ctx, viewer, id) {
-  const pov = viewer.pov;
-  if (pov === null || id === pov)
-    return true;
-  const e = own(ctx.state.entities, id);
-  if (!e)
-    return true;
-  if (!canSeeEntity(ctx.registry, ctx.world, ctx.state, pov, id))
-    return false;
-  if (e.kind !== "account" && e.kind !== "card")
-    return true;
-  const account = e.kind === "card" ? strOf(e.fields.account) : id;
-  if (rightsOf(ctx.state, account, pov) !== null)
-    return true;
-  const holders = holdersOf(ctx.state, account).filter((h) => own(ctx.state.entities, h));
-  return holders.length === 0 || holders.some((h) => canSeeEntity(ctx.registry, ctx.world, ctx.state, pov, h));
+  return seenBy(ctx, viewer.pov, id);
+}
+function hiddenWords(ctx, id) {
+  const kind = own(ctx.state.entities, id)?.kind ?? "";
+  if (isParty(ctx, id))
+    return SOMEONE;
+  if (kind === "account")
+    return { first: traitsOf(ctx, id)?.label ?? "An account", within: "an account" };
+  if (kind === "card")
+    return { first: "A card", within: "a card" };
+  if (kindIs(ctx.registry, ctx.world, kind, "property"))
+    return { first: "A property", within: "a property" };
+  return { first: "Something", within: "something" };
+}
+function hiddenNames2(ctx, pov) {
+  const viewer = { pov, hidden: NO_HIDDEN };
+  const seenNames = new Set;
+  const seenWords = new Set;
+  const hidden = [];
+  for (const [id, e] of Object.entries(ctx.state.entities)) {
+    const person = kindIs(ctx.registry, ctx.world, e.kind, "person");
+    if (visible(ctx, viewer, id)) {
+      seenNames.add(e.name.toLowerCase());
+      if (person)
+        for (const w of personWords(e.name))
+          seenWords.add(w.plain);
+    } else
+      hidden.push({ name: e.name, person, reads: hiddenWords(ctx, id) });
+  }
+  for (const [id, p] of Object.entries(ctx.world.places)) {
+    if (canSeePlace(ctx.registry, ctx.world, ctx.state, pov, id)) {
+      seenNames.add(p.name.toLowerCase());
+      for (const w of personWords(p.name))
+        seenWords.add(w.plain);
+    } else
+      hidden.push({ name: p.name, person: false, reads: SOMEWHERE });
+  }
+  const ways = new Map;
+  const say = (source, length, reads) => {
+    if (!ways.has(source))
+      ways.set(source, { length, reads });
+  };
+  for (const h of hidden) {
+    if (h.name.length >= 3 && !seenNames.has(h.name.toLowerCase()))
+      say(`(?<![\\p{L}\\p{M}\\p{N}])${h.name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\p{L}\\p{M}\\p{N}])`, h.name.length, h.reads);
+    if (!h.person)
+      continue;
+    for (const w of personWords(h.name))
+      if (!seenWords.has(w.plain))
+        for (const spelt of new Set([w.written, w.plain]))
+          say(wordPattern(spelt), spelt.length, SOMEONE);
+  }
+  const sorted = [...ways].sort((a, b) => b[1].length - a[1].length);
+  return sorted.length === 0 ? NO_HIDDEN : { pattern: new RegExp(sorted.map(([source]) => `(${source})`).join("|"), "giu"), reads: sorted.map(([, w]) => w.reads) };
+}
+function says(viewer, text) {
+  const { pattern, reads } = viewer.hidden;
+  if (pattern === null)
+    return text;
+  return text.normalize("NFC").replace(pattern, (match, ...rest) => {
+    const reading = reads[rest.slice(0, reads.length).findIndex((group) => typeof group === "string")];
+    if (!reading)
+      return match;
+    return rest[reads.length] === 0 ? reading.first : reading.within;
+  });
 }
 function nameFor(ctx, viewer, id) {
   const e = own(ctx.state.entities, id);
@@ -20112,7 +20339,11 @@ function idFor(ctx, viewer, id) {
 }
 function sideName(ctx, viewer, raw) {
   const id = raw.startsWith(EXTERNAL_ACCOUNT_PREFIX) ? raw.slice(EXTERNAL_ACCOUNT_PREFIX.length) : raw;
-  return own(ctx.state.entities, id) ? nameFor(ctx, viewer, id) : outsideName(ctx, raw);
+  return own(ctx.state.entities, id) ? nameFor(ctx, viewer, id) : outsideName(ctx, raw, viewer.pov);
+}
+function sideSeen(ctx, viewer, raw) {
+  const id = raw.startsWith(EXTERNAL_ACCOUNT_PREFIX) ? raw.slice(EXTERNAL_ACCOUNT_PREFIX.length) : raw;
+  return own(ctx.state.entities, id) ? visible(ctx, viewer, id) : !outsideHidden(ctx, raw, viewer.pov);
 }
 function counterpartyName(ctx, viewer, raw) {
   if (viewer.pov !== null && !own(ctx.state.entities, raw)) {
@@ -20128,6 +20359,18 @@ function when(ctx, at) {
 function day(ctx, at) {
   return formatClock(calendarOf(ctx.world), at).split(",")[0] ?? "";
 }
+function stringsIn2(value, out) {
+  if (typeof value === "string")
+    out.add(value);
+  else if (Array.isArray(value))
+    for (const v of value)
+      stringsIn2(v, out);
+  else if (typeof value === "object" && value !== null) {
+    const fields = Object.values(value);
+    for (const v of fields)
+      stringsIn2(v, out);
+  }
+}
 function partyKindOf(ctx, id) {
   const kind = own(ctx.state.entities, id)?.kind ?? "";
   for (const k of ["business", "trust", "household"])
@@ -20142,10 +20385,11 @@ function shown2(ctx, account) {
 function shownAvailable(ctx, account) {
   return availableOf(ctx, account) + shown2(ctx, account) - balance(ctx.state, account);
 }
-function journalLine(ctx, viewer, j) {
-  const self = holdersOf(ctx.state, j.account).find((h) => own(ctx.state.entities, h)) ?? j.account;
-  const counterparty = j.counterparty && j.counterparty !== self ? counterpartyName(ctx, viewer, j.counterparty) : null;
-  return { id: j.id, at: when(ctx, j.at), memo: j.memo, cents: j.cents, account: nameFor(ctx, viewer, j.account), accountId: j.account, kind: j.kind ?? null, category: j.category ?? null, counterparty, card: j.card ? nameFor(ctx, viewer, j.card) : null, status: j.status };
+function journalLine(ctx, viewer, party, j) {
+  const worth = Object.entries(worthShares(ownersOf(ctx.state, j.account))).filter(([, share]) => share > 0);
+  const whose = worth.length === 1 ? worth[0]?.[0] ?? j.account : j.account;
+  const counterparty = j.counterparty && j.counterparty !== party && j.counterparty !== whose ? counterpartyName(ctx, viewer, j.counterparty) : null;
+  return { id: j.id, at: when(ctx, j.at), memo: says(viewer, j.memo), cents: j.cents, account: nameFor(ctx, viewer, j.account), accountId: j.account, kind: j.kind ?? null, category: j.category ?? null, counterparty, card: j.card ? nameFor(ctx, viewer, j.card) : null, status: j.status };
 }
 function cardView(ctx, viewer, card) {
   const e = own(ctx.state.entities, card);
@@ -20242,6 +20486,7 @@ function accountView(ctx, viewer, party, account, level, detail) {
   const cents = shown2(ctx, account);
   const statements = featureOn(level, "statements", toggles(ctx.world));
   const holds = featureOn(level, "holds", toggles(ctx.world));
+  const cards = featureOn(level, "cards", toggles(ctx.world));
   const autopayMode = strOf(e?.fields.autopay, "none");
   const autopayFrom = strOf(e?.fields.autopay_from);
   const securedBy = strOf(e?.fields.secured_by);
@@ -20260,6 +20505,9 @@ function accountView(ctx, viewer, party, account, level, detail) {
     owners: owners.map((o) => ({ party: idFor(ctx, viewer, o.party), name: nameFor(ctx, viewer, o.party), role: o.role, share: Math.round((own(shares, o.party) ?? 0) * 100) / 100 })),
     role,
     manages: managesAccount(ctx, account, party),
+    spends: canSpend(ctx.state, account, party),
+    autopayFrom: [],
+    fallbacks: [],
     limit: level >= 3 && t.liability ? p?.limit ?? null : null,
     aprPct: level >= 4 && t.liability ? p?.apr_pct ?? null : null,
     apyPct: level >= 4 && t.earns ? p?.apy_pct ?? null : null,
@@ -20267,10 +20515,10 @@ function accountView(ctx, viewer, party, account, level, detail) {
     autopay: level >= 3 && (t.revolving || t.installment) ? { mode: AUTOPAY_MODES.includes(autopayMode) ? autopayMode : "none", from: autopayFrom ? idFor(ctx, viewer, autopayFrom) : null, fromName: autopayFrom ? nameFor(ctx, viewer, autopayFrom) : null, cents: autopayMode === "fixed" ? numOf(e?.fields.autopay_cents) : null } : null,
     due: statements ? due : null,
     statements: statements && (t.revolving || t.installment) ? [statementView(ctx, cycle), ...pastStatements(ctx, account)].filter((s) => s !== null) : [],
-    cards: level >= 3 ? cardsOn(ctx.state, account).map((c) => cardView(ctx, viewer, c)) : [],
-    pending: holds ? journal.filter((j) => j.status === "pending").reverse().map((j) => journalLine(ctx, viewer, j)) : [],
-    holds: holds ? holdsOn(ctx.state, account).map((h) => ({ id: h.id, cents: h.cents, until: day(ctx, h.until), kind: h.kind, memo: h.memo })) : [],
-    transactions: level >= 2 ? journal.slice(-(level >= 4 ? 40 : 20)).reverse().map((j) => journalLine(ctx, viewer, j)) : [],
+    cards: cards ? cardsOn(ctx.state, account).map((c) => cardView(ctx, viewer, c)) : [],
+    pending: holds ? journal.filter((j) => j.status === "pending").reverse().map((j) => journalLine(ctx, viewer, party, j)) : [],
+    holds: holds ? holdsOn(ctx.state, account).map((h) => ({ id: h.id, cents: h.cents, until: day(ctx, h.until), kind: h.kind, memo: says(viewer, h.memo) })) : [],
+    transactions: level >= 2 ? journal.slice(-(level >= 4 ? 40 : 20)).reverse().map((j) => journalLine(ctx, viewer, party, j)) : [],
     securedBy: securedBy !== "" && own(ctx.state.entities, securedBy) && visible(ctx, viewer, securedBy) ? { id: securedBy, name: nameFor(ctx, viewer, securedBy) } : null,
     loan: t.installment && level >= 3 ? { payment: typeof e?.fields.payment === "number" ? e.fields.payment : cycle?.minimum ?? 0, monthsLeft: cycle?.months_left ?? numOf(e?.fields.months_left, numOf(e?.fields.remaining_months, p?.term_months ?? 0)), payoff: Math.max(0, -cents) } : null
   };
@@ -20311,9 +20559,11 @@ function amountWords(ctx, viewer, f) {
     return a.due === "minimum" ? "the minimum due" : a.due === "statement" ? "the statement balance" : "the whole balance";
   return "worked out each time";
 }
-function flowTouches(ctx, f, party) {
+function flowTouches(ctx, viewer, f, party) {
   const sides = [f.from, f.to, ...(f.splits ?? []).map((s) => s.to), ...(f.shares ?? []).flatMap((s) => [s.party, s.from ?? ""])];
-  return sides.some((id) => id === party || own(ctx.state.entities, id)?.kind === "account" && rightsOf(ctx.state, id, party)?.sees === true);
+  if (sides.some((id) => id === party || own(ctx.state.entities, id)?.kind === "account" && rightsOf(ctx.state, id, party)?.sees === true))
+    return true;
+  return own(ctx.state.entities, f.from)?.kind === "account" ? managesAccount(ctx, f.from, party) && visible(ctx, viewer, f.from) : managesParty(ctx.state, f.from, party);
 }
 function nextOf(ctx, f, horizon) {
   const from = ctx.state.clock;
@@ -20322,7 +20572,18 @@ function nextOf(ctx, f, horizon) {
   const candidates = [first?.at, retry?.at].filter((x) => typeof x === "number" && x > from);
   return candidates.length > 0 ? Math.min(...candidates) : null;
 }
-function flowView(hooks, ctx, viewer, party, f) {
+function linkView(ctx, viewer, link) {
+  const e = link === undefined ? undefined : own(ctx.state.entities, link);
+  if (link === undefined || !e || !visible(ctx, viewer, link))
+    return null;
+  if (!kindIs(ctx.registry, ctx.world, e.kind, "job") || visible(ctx, viewer, strOf(e.fields.worker)))
+    return { id: link, name: nameFor(ctx, viewer, link) };
+  const employer = strOf(e.fields.employer);
+  const at = employer === "" || outsideHidden(ctx, employer, viewer.pov) ? "" : own(ctx.state.entities, employer) ? nameFor(ctx, viewer, employer) : outsideName(ctx, `employer:${employer}`, viewer.pov);
+  const title = strOf(e.fields.title) || "A job";
+  return { id: opaqueId(link), name: at === "" ? title : `${title} at ${at}` };
+}
+function flowView(hooks, ctx, viewer, party, runsFlows, f) {
   const run = flowRunOf(ctx.state, f.id);
   const next = run.ended || f.status !== "active" ? null : nextOf(ctx, f, 400 * DAY2);
   let cents = null;
@@ -20332,11 +20593,13 @@ function flowView(hooks, ctx, viewer, party, f) {
   }
   const fromSide = own(ctx.state.entities, f.from);
   const payerHolds = fromSide?.kind === "account" ? managesAccount(ctx, f.from, party) : f.from === party || managesParty(ctx.state, f.from, party);
+  const editable = runsFlows && f.source === "entity" && payerHolds;
   const sides = [f.from, f.to, f.fallback ?? "", f.link ?? "", ...(f.splits ?? []).map((s) => s.to), ...(f.shares ?? []).flatMap((s) => [s.party, s.from ?? ""])].filter((id) => id !== "");
-  const seen = sides.every((id) => visible(ctx, viewer, id));
+  const seen = sides.every((id) => sideSeen(ctx, viewer, id));
+  const actsOn = editable || f.kind === "rent" && f.link !== undefined && shareOf(ctx.state, f.link, party) > 0;
   return {
-    id: f.id,
-    label: f.label,
+    id: seen || actsOn ? f.id : opaqueId(f.id),
+    label: says(viewer, f.label),
     kind: f.kind,
     from: sideName(ctx, viewer, f.from),
     to: sideName(ctx, viewer, f.to),
@@ -20347,9 +20610,9 @@ function flowView(hooks, ctx, viewer, party, f) {
     shortfall: f.shortfall,
     status: run.ended || f.schedule.once !== undefined && run.done > 0 && own(ctx.state.entities, f.id)?.kind === "flow" ? "ended" : f.status,
     category: f.category ?? null,
-    link: f.link && own(ctx.state.entities, f.link) && visible(ctx, viewer, f.link) ? { id: f.link, name: nameFor(ctx, viewer, f.link) } : null,
+    link: linkView(ctx, viewer, f.link),
     payer: fromSide && visible(ctx, viewer, f.from) ? f.from : null,
-    editable: f.source === "entity" && payerHolds,
+    editable,
     source: f.source,
     done: run.done,
     missed: run.missed,
@@ -20365,13 +20628,7 @@ function signedFor(ctx, f, party, cents) {
     return cents;
   return 0;
 }
-function householdOf(ctx, party) {
-  if (kindIs(ctx.registry, ctx.world, own(ctx.state.entities, party)?.kind ?? "", "household"))
-    return party;
-  const rel = own(ctx.state.entities, party)?.relations.find((r) => r.type === MEMBER_OF && kindIs(ctx.registry, ctx.world, own(ctx.state.entities, r.to)?.kind ?? "", "household"));
-  return rel?.to ?? null;
-}
-function householdView(hooks, ctx, viewer, household, flows) {
+function householdView(ctx, viewer, household, flows, viewOf) {
   const members = membersOf(ctx.registry, ctx.world, ctx.state, household);
   const splitAmongMembers = (f) => (f.shares ?? []).length > 0 && (f.shares ?? []).every((s) => members.includes(s.party));
   const fromHouseholdAccount = (f) => own(ctx.state.entities, f.from)?.kind === "account" && rightsOf(ctx.state, f.from, household) !== null;
@@ -20393,12 +20650,29 @@ function householdView(hooks, ctx, viewer, household, flows) {
       return { id: idFor(ctx, viewer, m), name: nameFor(ctx, viewer, m), role: strOf(rel?.fields?.role), share: total > 0 ? Math.round(part * 1000 / total) / 10 : Math.round(1000 / Math.max(1, members.length)) / 10 };
     }),
     accounts: accountsOf(ctx, household).concat(members.length > 1 ? accountsOf(ctx, members[0] ?? household).filter((id) => members.every((m) => rightsOf(ctx.state, id, m) !== null)) : []).filter((id, i, all) => all.indexOf(id) === i),
-    flows: shared.map((f) => flowView(hooks, ctx, viewer, household, f)),
+    flows: shared.map(viewOf),
     monthly: { total, parts: members.map((m) => ({ id: idFor(ctx, viewer, m), name: nameFor(ctx, viewer, m), cents: partOf(m) })) }
   };
 }
 function buildFinanceView(hooks, ctx, party, player) {
-  const viewer = { pov: player ? ctx.world.pov : null };
+  const pov = player ? ctx.world.pov : null;
+  const viewer = { pov, hidden: pov === null ? NO_HIDDEN : hiddenNames2(ctx, pov) };
+  const runsFlows = featureFor(ctx, party, "flows");
+  const shownFlows = new Map;
+  const viewOf = (f) => {
+    const known = shownFlows.get(f.id);
+    if (known)
+      return known;
+    const made = flowView(hooks, ctx, viewer, party, runsFlows, f);
+    shownFlows.set(f.id, made);
+    return made;
+  };
+  let every = null;
+  const shownId = (id) => {
+    every ??= new Map(allFlows(hooks, ctx).map((f) => [f.id, f]));
+    const f = every.get(id);
+    return f ? viewOf(f).id : null;
+  };
   const e = own(ctx.state.entities, party);
   const kind = partyKindOf(ctx, party);
   const members = kind === "household" ? membersOf(ctx.registry, ctx.world, ctx.state, party) : [];
@@ -20407,35 +20681,37 @@ function buildFinanceView(hooks, ctx, party, player) {
   const detail = level >= 4;
   const features = FINANCE_FEATURES.filter((f) => featureFor(ctx, party, f));
   const mine = accountsOf(ctx, party);
-  const empty = { party, name: e?.name ?? party, partyKind: kind, level, detail, features, band: null, opened: true, cash: null, overview: null, accounts: [], cards: [], flows: [], jobs: [], businesses: [], investments: null, properties: [], credit: null, household: null, recent: [], notes: [], payPrefs: [] };
+  const empty = { party, name: e?.name ?? party, partyKind: kind, level, detail, features, band: null, opened: true, cash: null, overview: null, accounts: [], cards: [], flows: [], jobs: [], businesses: [], investments: null, properties: [], credit: null, household: null, recent: [], notes: [], payPrefs: [], paysFor: [], ownKeys: [] };
   if (level === 0)
     return empty;
   const worth = netWorthParts(hooks, ctx, party);
   const band = mine.length > 0 ? wealthBand(worth.net) : strOf(e?.fields.wealth, "modest");
   const opened = mine.every((id) => isOpened(ctx.state, id, openerOf(ctx.state, id)));
   if (kind === "household" && level >= 3 && mine.length === 0)
-    return { ...empty, band, cash: { band }, opened, household: householdView(hooks, ctx, viewer, party, allFlows(hooks, ctx)) };
+    return { ...empty, band, cash: { band }, opened, household: householdView(ctx, viewer, party, allFlows(hooks, ctx), viewOf) };
   if (level === 1 || mine.length === 0)
     return { ...empty, band, cash: { band }, opened };
   const firstTransactional = mine.find((id) => traitsOf(ctx, id)?.transactional);
   const shownAccounts = level >= 3 ? mine : mine.filter((id) => classOf2(ctx, id) === "cash" || id === firstTransactional);
   const accounts = shownAccounts.map((id) => accountView(ctx, viewer, party, id, level, detail));
   const cash = mine.filter((id) => classOf2(ctx, id) === "cash" && rightsOf(ctx.state, id, party)?.spend).reduce((a, id) => a + shown2(ctx, id), 0);
-  const flows = level >= 3 && featureFor(ctx, party, "flows") ? allFlows(hooks, ctx).filter((f) => flowTouches(ctx, f, party)) : [];
-  const flowViews = flows.map((f) => flowView(hooks, ctx, viewer, party, f));
+  const flows = runsFlows ? allFlows(hooks, ctx).filter((f) => flowTouches(ctx, viewer, f, party)) : [];
+  const flowViews = flows.map(viewOf);
   const now = ctx.state.clock;
   const upcoming = [];
-  for (const f of flows) {
-    const v = flowViews.find((x) => x.id === f.id);
+  const coming = new Set;
+  for (const [i, f] of flows.entries()) {
+    const v = flowViews[i];
     const next = f.status === "active" && !flowRunOf(ctx.state, f.id).ended ? nextOf(ctx, f, 31 * DAY2) : null;
     if (next === null || !v)
       continue;
     const cents = v.cents === null ? 0 : signedFor(ctx, f, party, v.cents);
-    upcoming.push({ at: when(ctx, next), clock: next, label: f.label, cents, flow: f.id, account: own(ctx.state.entities, f.from)?.kind === "account" ? f.from : null });
+    upcoming.push({ at: when(ctx, next), clock: next, label: v.label, cents, flow: v.id, account: own(ctx.state.entities, f.from)?.kind === "account" && visible(ctx, viewer, f.from) ? f.from : null });
+    coming.add(f.id);
   }
   for (const a of accounts) {
     const cycle = cycleOf2(ctx.state, a.id);
-    if (a.due && cycle && cycle.due > now && cycle.due <= now + 31 * DAY2 && !upcoming.some((u) => u.flow === `autopay:${a.id}`))
+    if (a.due && cycle && cycle.due > now && cycle.due <= now + 31 * DAY2 && !coming.has(`autopay:${a.id}`))
       upcoming.push({ at: when(ctx, cycle.due), clock: cycle.due, label: `${a.name} ${a.due.label.toLowerCase()}`, cents: -a.due.cents, flow: null, account: a.id });
   }
   const alerts = [];
@@ -20453,9 +20729,11 @@ function buildFinanceView(hooks, ctx, party, player) {
       if (c.state !== "active")
         alerts.push({ tone: "warn", text: `${c.name} is ${c.state}.`, account: a.id });
   }
-  for (const v of flowViews)
-    if (v.missed > 0 && v.status === "active" && (flowRunOf(ctx.state, v.id).last ?? -Infinity) > now - 31 * DAY2)
+  for (const [i, f] of flows.entries()) {
+    const v = flowViews[i];
+    if (v && v.missed > 0 && v.status === "active" && (flowRunOf(ctx.state, f.id).last ?? -Infinity) > now - 31 * DAY2)
       alerts.push({ tone: "warn", text: `${v.label} was missed.`, flow: v.id });
+  }
   const since = now - 30 * DAY2;
   let pastIn = 0;
   let pastOut = 0;
@@ -20482,7 +20760,7 @@ function buildFinanceView(hooks, ctx, party, player) {
     upcoming: level >= 3 ? upcoming.sort((a, b) => a.clock - b.clock).slice(0, 20) : [],
     alerts: level >= 3 ? alerts : []
   };
-  const recent = shownAccounts.flatMap((id) => journalOf(ctx.state, id)).sort((a, b) => b.at - a.at || (a.id < b.id ? 1 : -1)).slice(0, 10).map((j) => journalLine(ctx, viewer, j));
+  const recent = shownAccounts.flatMap((id) => journalOf(ctx.state, id)).sort((a, b) => b.at - a.at || (a.id < b.id ? 1 : -1)).slice(0, 10).map((j) => journalLine(ctx, viewer, party, j));
   const notesRaw = own(objOf(sliceOf(ctx.state, "economy").notes), party);
   const notes = player ? [] : (Array.isArray(notesRaw) ? notesRaw : []).slice(-NOTES_CAP).map((n) => objOf(n)).reverse().map((n) => ({ at: when(ctx, numOf(n.at)), text: strOf(n.text) }));
   const household = kind === "household" ? party : householdOf(ctx, party);
@@ -20496,28 +20774,51 @@ function buildFinanceView(hooks, ctx, party, player) {
     cards: accounts.flatMap((a) => a.cards),
     flows: flowViews,
     credit: partyKindOf(ctx, party) === "person" && featureOn(level, "credit", tog) ? creditReport(ctx, party) : null,
-    household: household && featureOn(level, "households", tog) ? householdView(hooks, ctx, viewer, household, allFlows(hooks, ctx)) : null,
+    household: household && featureOn(level, "households", tog) ? householdView(ctx, viewer, household, allFlows(hooks, ctx), viewOf) : null,
     recent,
     notes,
-    payPrefs: level >= 3 && partyKindOf(ctx, party) === "person" ? tiersOf(ctx, party) : []
+    payPrefs: featureFor(ctx, party, "payment_prefs") && partyKindOf(ctx, party) === "person" ? tiersOf(ctx, party) : []
+  };
+  const shownAlert = (a) => {
+    const flow = a.flow === undefined ? null : shownId(a.flow);
+    return flow === null ? { tone: a.tone, text: a.text, ...a.account !== undefined ? { account: a.account } : {} } : { ...a, flow };
   };
   for (const section of hooks.views) {
     const extra = section(ctx, party, view, viewer.pov);
     if (extra.jobs)
       view.jobs.push(...extra.jobs);
     if (extra.businesses)
-      view.businesses.push(...extra.businesses);
+      view.businesses.push(...extra.businesses.map((b) => ({ ...b, invoices: b.invoices.map((i) => i.flow === undefined ? i : { ...i, flow: shownId(i.flow) ?? i.flow }) })));
     if (extra.investments)
       view.investments = extra.investments;
     if (extra.properties)
       view.properties.push(...extra.properties);
     if (extra.upcoming && view.overview)
-      view.overview.upcoming = [...view.overview.upcoming, ...extra.upcoming].sort((a, b) => a.clock - b.clock).slice(0, 20);
+      view.overview.upcoming = [...view.overview.upcoming, ...extra.upcoming.map((u) => ({ ...u, flow: u.flow === null ? null : shownId(u.flow) }))].sort((a, b) => a.clock - b.clock).slice(0, 20);
     if (extra.alerts && view.overview)
-      view.overview.alerts.push(...extra.alerts);
+      view.overview.alerts.push(...extra.alerts.map(shownAlert));
   }
-  for (const b of view.businesses)
+  for (const b of view.businesses) {
+    b.accounts = b.accounts.filter((id) => visible(ctx, viewer, id));
     b.managed = level >= 3 ? b.accounts.filter((id) => !mine.includes(id) && managesAccount(ctx, id, party)).map((id) => accountView(ctx, viewer, party, id, level, detail)) : [];
+  }
+  const listed = [...view.accounts, ...view.businesses.flatMap((b) => b.managed)];
+  const pays = (id) => traitsOf(ctx, id)?.pays === true && mayPayFrom(ctx, party, id);
+  for (const a of listed) {
+    const others = listed.filter((x) => x.id !== a.id).map((x) => x.id);
+    a.autopayFrom = a.autopay !== null && a.manages ? others.filter((id) => autopaySourceProblem(ctx, party, a.id, id) === null) : [];
+    a.fallbacks = pays(a.id) ? others.filter((id) => pays(id) && fallsBackOn(ctx, a.id, id)) : [];
+  }
+  const interests = interestsOf(ctx, party);
+  const onlyManaged = (side) => side !== "" && side !== party && visible(ctx, viewer, side) && mayPayFrom(ctx, party, side) && (isParty(ctx, side) || !canSpend(ctx.state, side, party));
+  const payers = [...new Set([...listed.map((a) => a.id), ...view.flows.flatMap((f) => f.spec ? [f.spec.from, f.spec.fallback ?? ""] : [])])].filter(onlyManaged);
+  const carried = new Set;
+  stringsIn2(view, carried);
+  const payees = [...carried].filter((id) => own(ctx.state.entities, id)?.kind === "account" || isParty(ctx, id));
+  view.paysFor = payers.map((from) => ({ from, to: payees.filter((to) => paysFor(ctx, party, to, from, interests)) }));
+  const home = householdOf(ctx, party);
+  const keyed = [party, ...home !== null && visible(ctx, viewer, home) ? [home] : []];
+  view.ownKeys = [...new Set(keyed.flatMap((id) => [payeeKey(id), payeeKey(own(ctx.state.entities, id)?.name ?? "")]).filter((k) => k !== ""))];
   return view;
 }
 function buildMoneyView(hooks, ctx) {
@@ -21257,6 +21558,8 @@ function makeApi(hooks) {
     traitsOf: (books, account) => traitsOf(books, account),
     ownersOf: (state, entity) => ownersOf(state, entity),
     shareOf: (state, entity, party) => shareOf(state, entity, party),
+    interestsOf: (ctx, who) => interestsOf(ctx, who),
+    paysFor: (ctx, who, to, from) => paysFor(ctx, who, to, from),
     accountsOf: (books, party, right) => accountsOf(books, party, right ?? "sees"),
     balance: (state, account) => balance(state, account),
     available: (ctx, account) => availableOf(ctx, account) + overdraftRoom(ctx, account),
@@ -21684,7 +21987,7 @@ function registerActions(r) {
   r.action({ id: "withdraw_cash", label: "Withdraw cash", pack: "economy", params: { account: { type: "ref", ref: "account" }, amount: { type: "money" } }, requires: ["spends(self, account)", "amount > 0", "level.money >= 2"], outcomes: { default: [{ type: "economy.withdraw", args: { account: "account", cents: "=amount", who: "self" } }] }, duration: "3", lexicon: ["withdraw", "take out cash", "hit the atm", "get cash"], observable: "takes out cash" });
   r.action({ id: "deposit_cash", label: "Deposit cash", pack: "economy", params: { account: { type: "ref", ref: "account" }, amount: { type: "money" } }, requires: ["holds(self, account)", "amount > 0", "level.money >= 2"], outcomes: { default: [{ type: "economy.deposit", args: { account: "account", cents: "=amount", who: "self" } }] }, duration: "3", lexicon: ["deposit", "pay in cash", "bank the cash"], observable: "pays cash into the bank" });
   const card = { card: { type: "ref", ref: "card" } };
-  const cardBy = ["holds(self, card) or manages(self, card.account)", "level.money >= 3"];
+  const cardBy = ["holds(self, card) or manages(self, card.account)", "money_feature('cards', self)"];
   r.action({ id: "card_freeze", label: "Freeze card", pack: "economy", params: card, requires: cardBy, outcomes: { default: [{ type: "economy.card_state", args: { card: "card", state: "frozen", who: "self" } }] }, lexicon: ["freeze my card", "lock my card"], ...phone });
   r.action({ id: "card_unfreeze", label: "Unfreeze card", pack: "economy", params: card, requires: cardBy, outcomes: { default: [{ type: "economy.card_state", args: { card: "card", state: "active", who: "self" } }] }, lexicon: ["unfreeze my card", "unlock my card"], ...phone });
   r.action({ id: "card_report_lost", label: "Report card lost", pack: "economy", params: card, requires: cardBy, outcomes: { default: [{ type: "economy.card_state", args: { card: "card", state: "lost", who: "self" } }] }, lexicon: ["report my card lost", "my card was stolen", "cancel my card"], ...phone });
@@ -21714,14 +22017,15 @@ function registerActions(r) {
     category: { type: "text", optional: true }
   };
   const flowArgs = Object.fromEntries(Object.keys(flowParams).map((k) => [k, `=params.${k}`]));
-  r.action({ id: "flow_create", label: "Set up a standing payment", pack: "economy", params: flowParams, requires: ["level.money >= 3"], outcomes: { default: [{ type: "economy.flow_create", args: { ...flowArgs, who: "self" } }] }, lexicon: ["set up a standing order", "schedule a payment", "set up a recurring transfer"], ...phone });
-  r.action({ id: "flow_update", label: "Change a standing payment", pack: "economy", params: { flow: { type: "ref", ref: "flow" }, ...flowParams, clear: { type: "text", optional: true } }, requires: ["level.money >= 3"], outcomes: { default: [{ type: "economy.flow_update", args: { flow: "flow", ...flowArgs, clear: "=params.clear", who: "self" } }] }, lexicon: ["change the standing order", "change the recurring payment"], ...phone });
+  const flowsRun = ["money_feature('flows', self)"];
+  r.action({ id: "flow_create", label: "Set up a standing payment", pack: "economy", params: flowParams, requires: flowsRun, outcomes: { default: [{ type: "economy.flow_create", args: { ...flowArgs, who: "self" } }] }, lexicon: ["set up a standing order", "schedule a payment", "set up a recurring transfer"], ...phone });
+  r.action({ id: "flow_update", label: "Change a standing payment", pack: "economy", params: { flow: { type: "ref", ref: "flow" }, ...flowParams, clear: { type: "text", optional: true } }, requires: flowsRun, outcomes: { default: [{ type: "economy.flow_update", args: { flow: "flow", ...flowArgs, clear: "=params.clear", who: "self" } }] }, lexicon: ["change the standing order", "change the recurring payment"], ...phone });
   const flowOnly = { flow: { type: "ref", ref: "flow" } };
-  r.action({ id: "flow_pause", label: "Pause a standing payment", pack: "economy", params: flowOnly, requires: ["level.money >= 3"], outcomes: { default: [{ type: "economy.flow_status", args: { flow: "flow", status: "paused", who: "self" } }] }, lexicon: ["pause the standing order"], ...phone });
-  r.action({ id: "flow_resume", label: "Resume a standing payment", pack: "economy", params: flowOnly, requires: ["level.money >= 3"], outcomes: { default: [{ type: "economy.flow_status", args: { flow: "flow", status: "active", who: "self" } }] }, lexicon: ["resume the standing order"], ...phone });
-  r.action({ id: "flow_delete", label: "Cancel a standing payment", pack: "economy", params: flowOnly, requires: ["level.money >= 3"], outcomes: { default: [{ type: "economy.flow_status", args: { flow: "flow", status: "ended", who: "self" } }] }, lexicon: ["cancel the standing order", "stop the recurring payment"], ...phone });
+  r.action({ id: "flow_pause", label: "Pause a standing payment", pack: "economy", params: flowOnly, requires: flowsRun, outcomes: { default: [{ type: "economy.flow_status", args: { flow: "flow", status: "paused", who: "self" } }] }, lexicon: ["pause the standing order"], ...phone });
+  r.action({ id: "flow_resume", label: "Resume a standing payment", pack: "economy", params: flowOnly, requires: flowsRun, outcomes: { default: [{ type: "economy.flow_status", args: { flow: "flow", status: "active", who: "self" } }] }, lexicon: ["resume the standing order"], ...phone });
+  r.action({ id: "flow_delete", label: "Cancel a standing payment", pack: "economy", params: flowOnly, requires: flowsRun, outcomes: { default: [{ type: "economy.flow_status", args: { flow: "flow", status: "ended", who: "self" } }] }, lexicon: ["cancel the standing order", "stop the recurring payment"], ...phone });
   r.action({ id: "apply_credit", label: "Apply for credit", pack: "economy", params: { product: { type: "text", label: "Product (credit_card, line_of_credit, loan, or one of the world's)" }, amount: { type: "money", optional: true }, term: { type: "number", optional: true } }, requires: ["level.money >= 3"], outcomes: { default: [{ type: "economy.apply_credit", args: { product: "=params.product", cents: "=params.amount", term: "=params.term", who: "self" } }] }, duration: "15", lexicon: ["apply for a credit card", "apply for a loan", "take out a loan"], observable: "fills in an application" });
-  r.action({ id: "set_pay_prefs", label: "Set how I pay", pack: "economy", params: { tiers: { type: "text", label: "Ways to pay, in order: a JSON list of {use, min?, max?, categories?, except?}" } }, requires: ["level.money >= 3"], outcomes: { default: [{ type: "economy.set_pay_prefs", args: { tiers: "=params.tiers", who: "self" } }] }, lexicon: ["i'd rather pay with"], ...phone });
+  r.action({ id: "set_pay_prefs", label: "Set how I pay", pack: "economy", params: { tiers: { type: "text", label: "Ways to pay, in order: a JSON list of {use, min?, max?, categories?, except?}" } }, requires: ["money_feature('payment_prefs', self)"], outcomes: { default: [{ type: "economy.set_pay_prefs", args: { tiers: "=params.tiers", who: "self" } }] }, lexicon: ["i'd rather pay with"], ...phone });
 }
 var economyPack = {
   id: "economy",
@@ -24268,7 +24572,7 @@ function personKind(world, kind) {
   }
   return false;
 }
-function hiddenNames2(world) {
+function hiddenNames3(world) {
   const out = [];
   const label = (name, secret, entity) => void out.push({ name, secret, ...entity !== undefined ? { entity } : {}, said: (text) => namesAny(text, [], [name]) });
   for (const e of Object.values(world.entities)) {
@@ -24300,7 +24604,7 @@ function cueIssues(world) {
   const issues = [];
   const issue = (severity, path, message) => void issues.push({ severity, path, code: "castlife.cues", message });
   const secrets = [...Object.values(world.tracks).flatMap((t) => Object.values(t.stages).flatMap((s) => s.truth ? [s.truth] : [])), ...Object.values(world.lore).flatMap((l) => loreIsSecret(l) && typeof l.content === "string" ? lorePhrases(l.content) : [])];
-  const hidden = hiddenNames2(world);
+  const hidden = hiddenNames3(world);
   for (const e of Object.values(world.entities)) {
     if (e.cues === undefined)
       continue;
@@ -25369,19 +25673,32 @@ var sheetsPack = {
 };
 var core_default9 = sheetsPack;
 
+// src/engine/lore.ts
+var MIN_TERM = 3;
+var STOP_WORDS = Object.fromEntries("the and for with that this from into onto have has had was were are you your yours my mine our ours his her hers their theirs them they she him its not but all any can will would could should about then than there here what when where which who whom how why just very some more most other out over under again also like get got one two too off own same such only each both few nor yet".split(" ").map((w) => [w, true]));
+function plain(text) {
+  const words = text.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim();
+  return words === "" ? "" : ` ${words} `;
+}
+function wordsOf2(text) {
+  return plain(text).trim().split(" ").filter((w) => w.length >= MIN_TERM && !hasOwn(STOP_WORDS, w)).map((w) => w.length > 4 && w.endsWith("s") && !w.endsWith("ss") ? w.slice(0, -1) : w);
+}
+
 // src/packs/story/core/index.ts
 function flagValue(ctx, name) {
   return own(objOf(sliceOf(ctx.state, "story").flags), name) ?? own(objOf(ctx.world.packs.story?.config.flags), name) ?? false;
 }
 function buildQuestLog(ctx) {
   const view = { active: [], done: [], failed: [] };
-  for (const id of Object.keys(ctx.world.tracks).sort()) {
+  for (const id of Object.keys(ctx.world.tracks)) {
     if (own(ctx.world.tracks, id)?.kind === "agenda")
       continue;
     const t = playerTrack(ctx.registry, ctx.world, ctx.state, ctx.world.pov, id);
     if (t)
       view[t.status === "done" ? "done" : t.status === "failed" ? "failed" : "active"].push(t);
   }
+  for (const list of [view.active, view.done, view.failed])
+    list.sort((a, b) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
   return view;
 }
 function leakyLabels(world) {
@@ -25421,29 +25738,132 @@ function leakyLabels(world) {
       check(`places.${p.id}.name`, p.name);
   return out;
 }
+function idWords(id) {
+  return id.replace(/([a-z0-9])([A-Z])/g, "$1_$2").toLowerCase().split(/[^a-z0-9]+/).filter((w) => w !== "");
+}
+function nameWords(name) {
+  return name.toLowerCase().split(/[^a-z]+/).filter((w) => w.length >= 4);
+}
+function leakyIds(world, registry) {
+  const person = (kind) => {
+    if (registry)
+      return kindIs(registry, world, kind, "person");
+    let k = kind;
+    for (let guard = 0;k !== undefined && guard < 32; guard++) {
+      if (k === "person")
+        return true;
+      k = own(world.kinds, k)?.extends;
+    }
+    return false;
+  };
+  const known = new Set;
+  for (const p of Object.values(world.places))
+    if (p.visibility !== "secret")
+      for (const w of nameWords(p.name))
+        known.add(w);
+  for (const e of Object.values(world.entities))
+    if (e.visibility !== "secret" && person(e.kind))
+      for (const w of nameWords(e.name))
+        known.add(w);
+  const secrets = [...Object.values(world.entities).filter((e) => e.visibility === "secret"), ...Object.values(world.places).filter((p) => p.visibility === "secret")].map((s) => ({
+    name: s.name || s.id,
+    id: idWords(s.id),
+    words: nameWords(s.name).filter((w) => !known.has(w))
+  }));
+  if (secrets.length === 0)
+    return [];
+  const taken = new Set([...Object.keys(world.entities), ...Object.keys(world.places)]);
+  const unused = (base) => {
+    let id = base;
+    for (let n = 2;taken.has(id); n++)
+      id = `${base}_${n}`;
+    taken.add(id);
+    return id;
+  };
+  const out = [];
+  for (const e of Object.values(world.entities)) {
+    if (e.visibility === "secret")
+      continue;
+    const words = idWords(e.id);
+    const spelt = new Set;
+    const gives = [];
+    for (const s of secrets) {
+      const at = [];
+      for (let i = 0;s.id.length > 0 && i + s.id.length <= words.length; i++)
+        if (s.id.every((w, j) => words[i + j] === w))
+          for (let j = 0;j < s.id.length; j++)
+            at.push(i + j);
+      words.forEach((w, i) => {
+        if (s.words.some((n) => w === n || w === `${n}s`))
+          at.push(i);
+      });
+      if (at.length === 0)
+        continue;
+      gives.push(s.name);
+      for (const i of at)
+        spelt.add(i);
+    }
+    if (gives.length === 0)
+      continue;
+    out.push({ path: `entities.${e.id}.id`, id: e.id, secrets: gives, neutral: unused(words.filter((_, i) => !spelt.has(i)).join("_") || e.kind) });
+  }
+  return out;
+}
 function reject14(code, reason) {
   return { code, reason };
 }
-function openPuzzle(ctx, ref) {
-  if (own(ctx.world.tracks, ref)?.kind === "puzzle")
-    return ref;
-  const open = Object.keys(ctx.world.tracks).sort().filter((id) => {
+function openPuzzles(ctx) {
+  return Object.keys(ctx.world.tracks).flatMap((id) => {
     const t = own(ctx.world.tracks, id);
-    if (t?.kind !== "puzzle")
-      return false;
-    return own(t.stages, own(ctx.state.tracks, id)?.stage ?? t.start)?.answer !== undefined && playerTrack(ctx.registry, ctx.world, ctx.state, ctx.world.pov, id) !== null;
+    if (t?.kind !== "puzzle" || own(t.stages, own(ctx.state.tracks, id)?.stage ?? t.start)?.answer === undefined)
+      return [];
+    const shown = playerTrack(ctx.registry, ctx.world, ctx.state, ctx.world.pov, id);
+    return shown ? [{ id, shown }] : [];
+  }).sort((a, b) => a.shown.id < b.shown.id ? -1 : a.shown.id > b.shown.id ? 1 : 0);
+}
+function idShaped(ref) {
+  const t = ref.trim();
+  return t !== "" && !/\s/.test(t) && /[_~]/.test(t);
+}
+function puzzlesFor(ctx, ref) {
+  const open = openPuzzles(ctx);
+  const byId = open.find((p) => p.shown.id === ref);
+  if (byId)
+    return [byId.id];
+  if (idShaped(ref))
+    return [];
+  const want = new Set(wordsOf2(ref));
+  const scored = open.map(({ id, shown }) => {
+    const seen = new Set(wordsOf2(`${shown.label} ${shown.stage} ${shown.cue ?? ""}`));
+    return { id, n: [...want].filter((w) => seen.has(w)).length };
   });
-  const words = (s) => s.toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length > 2);
-  const want = new Set(words(ref));
-  let best = null;
-  for (const id of open) {
-    const t = own(ctx.world.tracks, id);
-    const stage = t ? own(t.stages, own(ctx.state.tracks, id)?.stage ?? t.start) : undefined;
-    const n = words(`${t?.label ?? ""} ${stage?.label ?? ""}`).filter((w) => want.has(w)).length;
-    if (n > 0 && (!best || n > best.n))
-      best = { id, n };
-  }
-  return best?.id ?? (open.length === 1 ? open[0] ?? null : null);
+  const best = Math.max(0, ...scored.map((s) => s.n));
+  if (best > 0)
+    return scored.filter((s) => s.n === best).map((s) => s.id);
+  if (open.length === 1)
+    return open.map((p) => p.id);
+  return want.size === 0 ? open.map((p) => p.id) : [];
+}
+function askedFor(ctx, ref) {
+  const id = Object.keys(ctx.world.tracks).find((t) => shownTrackId(ctx.world, t) === ref);
+  const shown = id === undefined ? null : playerTrack(ctx.registry, ctx.world, ctx.state, ctx.world.pov, id);
+  if (shown)
+    return shown.label;
+  const words = ref.trim();
+  return idShaped(words) || hasOwn(ctx.world.tracks, words) || hasOwn(ctx.world.tracks, ref) ? null : words;
+}
+function askedForGm(ctx, ref) {
+  if (ref.trim() === "")
+    return "an answer that names none";
+  const t = own(ctx.world.tracks, ref);
+  return t ? `"${ref}" (${t.label})` : `"${ref}"`;
+}
+function answerTo(ctx, track, a) {
+  const decision = typeof a.decision === "number" ? a.decision : undefined;
+  const check = checkAnswer(ctx.world, ctx.state, track, strOf(a.answer), decision);
+  if (check.needsDecision)
+    return reject14("needs_decision", "this answer needs a judgement");
+  return check.event ? [check.event] : reject14("no_answer", "there is nothing to answer here");
 }
 var storyPack = {
   id: "story",
@@ -25469,16 +25889,28 @@ var storyPack = {
     r.effect({ type: "story.flag", args: ["name", "value?"], resolve: (a) => strOf(a.name) === "" ? reject14("bad_flag", "a flag needs a name") : [{ type: "story.flag", data: { name: strOf(a.name), value: a.value ?? true } }] });
     r.effect({
       type: "story.answer",
-      args: ["track", "answer", "decision?"],
+      args: ["track?", "puzzle?", "answer", "decision?"],
       resolve(a, ctx) {
-        const track = openPuzzle(ctx, strOf(a.track));
-        if (!track)
-          return reject14("not_a_puzzle", `no open puzzle ${labelOf(ctx, strOf(a.track))}`);
-        const decision = typeof a.decision === "number" ? a.decision : undefined;
-        const check = checkAnswer(ctx.world, ctx.state, track, strOf(a.answer), decision);
-        if (check.needsDecision)
-          return reject14("needs_decision", "this answer needs a judgement");
-        return check.event ? [check.event] : reject14("no_answer", "there is nothing to answer here");
+        if (a.track !== undefined) {
+          const id = strOf(a.track);
+          if (own(ctx.world.tracks, id)?.kind !== "puzzle")
+            return { code: "not_a_puzzle", reason: "there is nothing to answer here", gm: `story.answer's track ${id === "" ? "names nothing" : `"${id}" is no puzzle`}` };
+          return answerTo(ctx, id, a);
+        }
+        const ref = strOf(a.puzzle);
+        const asked = ref.trim() === "" ? "" : askedFor(ctx, ref);
+        const fits = puzzlesFor(ctx, ref);
+        if (fits.length > 1) {
+          return {
+            code: "ambiguous_puzzle",
+            reason: asked === "" ? "more than one puzzle is open, and the answer doesn't say which" : `more than one open puzzle fits ${asked ?? "that name"}`,
+            gm: `${fits.length} open puzzles fit ${askedForGm(ctx, ref)}: ${fits.map((id) => labelOf(ctx, id)).join(", ")}`
+          };
+        }
+        const track = fits[0];
+        if (track === undefined)
+          return { code: "not_a_puzzle", reason: asked === "" ? "there is no open puzzle to answer" : `no open puzzle ${asked ?? "by that name"}`, gm: `no open puzzle in the quest log fits ${askedForGm(ctx, ref)}` };
+        return answerTo(ctx, track, a);
       }
     });
     r.action({
@@ -25487,7 +25919,7 @@ var storyPack = {
       pack: "story",
       params: { puzzle: { type: "text", optional: true, label: "Puzzle" }, answer: { type: "text" }, decision: { type: "number", optional: true, label: "Judged probability" } },
       requires: [],
-      outcomes: { default: [{ type: "story.answer", args: { track: "=params.puzzle", answer: "=answer", decision: "=params.decision" } }] },
+      outcomes: { default: [{ type: "story.answer", args: { puzzle: "=params.puzzle", answer: "=answer", decision: "=params.decision" } }] },
       duration: "1",
       lexicon: ["the answer is", "i think it's", "solve", "answer", "the code is", "the combination is", "try the combination", "dial", "enter the code"],
       observable: "answers"
@@ -25513,6 +25945,15 @@ var storyPack = {
     r.lint({
       code: "story.leaky_label",
       check: (world) => leakyLabels(world).map((l) => ({ severity: "error", code: "story.leaky_label", message: `"${l.text}" gives away a secret ("${l.secret}").`, path: l.path }))
+    });
+    r.lint({
+      code: "story.leaky_id",
+      check: (world, registry) => leakyIds(world, registry).map((l) => ({
+        severity: "warning",
+        code: "story.leaky_id",
+        message: `The id "${l.id}" gives away a secret (${l.secrets.map((s) => `"${s}"`).join(", ")}): a player's views carry it wherever the player acts on what it names. Give it an id that names no one, such as "${l.neutral}".`,
+        path: l.path
+      }))
     });
   }
 };
@@ -44022,7 +44463,7 @@ var modern_slice_of_life_default = {
         autopay_from: "acct_marcus_checking",
         payment: 114200,
         months_left: 260,
-        secured_by: "prop_birch_lane_12"
+        secured_by: "prop_marcus_home"
       },
       relations: []
     },
@@ -44860,8 +45301,8 @@ var modern_slice_of_life_default = {
       },
       relations: []
     },
-    prop_birch_lane_12: {
-      id: "prop_birch_lane_12",
+    prop_marcus_home: {
+      id: "prop_marcus_home",
       kind: "property",
       name: "Marcus's house",
       tier: "background",

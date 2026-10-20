@@ -5101,6 +5101,9 @@ var CARD_STATES = ["active", "frozen", "lost", "cancelled"];
 var FLOW_KINDS = ["transfer", "bill", "rent", "utility", "subscription", "premium", "loan_payment", "card_payment", "savings", "income", "payroll", "allowance", "living", "tax", "distribution", "invoice", "draw", "other"];
 var FLOW_SHORTFALLS = ["skip", "partial", "retry", "fallback", "overdraft", "defer"];
 var FLOW_STATUSES = ["active", "paused", "ended"];
+function payeeKey(name) {
+  return name.toLowerCase().replace(/[^a-z0-9:]+/g, "_").replace(/^_+|_+$/g, "");
+}
 var DELINQUENCY_STAGES = ["current", "late", "30", "60", "90", "120", "collections", "charged_off"];
 function creditTierOf(score) {
   if (score >= 781)
@@ -5672,6 +5675,14 @@ function eventVisible(reg, world, state, pov, e) {
     }
   }
 }
+function shownTrackId(world, id) {
+  if (visibilityOf(own(world.tracks, id)?.visibility) !== "secret")
+    return id;
+  let shown = `~${hashParts("lre.track", world.id, id).slice(0, 12)}`;
+  while (hasOwn(world.tracks, shown))
+    shown = `~${shown}`;
+  return shown;
+}
 function playerTrack(reg, world, state, pov, id) {
   const t = own(world.tracks, id);
   if (!t)
@@ -5695,7 +5706,7 @@ function playerTrack(reg, world, state, pov, id) {
   const failed = Object.values(t.stages).some((s) => s.fail?.to === stageId);
   const terminal = stage.next.length === 0 && !stage.fail;
   return {
-    id,
+    id: shownTrackId(world, id),
     kind: t.kind,
     label: secret && truths.length === 0 ? "Something is going on" : t.label,
     stage: secret && truths.length === 0 ? "" : stage.label,
@@ -5775,14 +5786,17 @@ function spellings(text) {
 }
 var FUNCTION_WORDS = { a: true, an: true, the: true, of: true, and: true, in: true, on: true, at: true, to: true, by: true, for: true, or: true, with: true, from: true };
 var WORD_CHAR = "[\\p{L}\\p{M}\\p{N}]";
+function personWords(name) {
+  return spellings(name).filter((w) => !hasOwn(FUNCTION_WORDS, w.plain) && !/^[a-z0-9]$/.test(w.plain));
+}
+function wordPattern(w) {
+  if (!/^[a-z0-9]+$/.test(w))
+    return w;
+  const plural = /[^aeiou]y$/.test(w) ? `(?:${w}(?:e?s)?|${w.slice(0, -1)}ies)` : `${w}(?:e?s)?`;
+  return `(?<!${WORD_CHAR})${plural}(?!${WORD_CHAR})`;
+}
 function saysInOrder(said, words) {
-  const parts = words.map((w) => {
-    if (!/^[a-z0-9]+$/.test(w))
-      return w;
-    const plural = /[^aeiou]y$/.test(w) ? `(?:${w}(?:e?s)?|${w.slice(0, -1)}ies)` : `${w}(?:e?s)?`;
-    return `(?<!${WORD_CHAR})${plural}(?!${WORD_CHAR})`;
-  });
-  return new RegExp(parts.join(`${WORD_CHAR}*(?: ${WORD_CHAR}*)?`), "u").test(said);
+  return new RegExp(words.map(wordPattern).join(`${WORD_CHAR}*(?: ${WORD_CHAR}*)?`), "u").test(said);
 }
 function sayings(text) {
   const words = spellings(text);
@@ -5799,7 +5813,7 @@ function namesAny(text, people, labels = [], heard = "") {
   const known = sayings(heard);
   for (const name of people) {
     const words = spellings(name).filter((w) => !hasOwn(FUNCTION_WORDS, w.plain));
-    const counted = words.filter((w) => !/^[a-z0-9]$/.test(w.plain));
+    const counted = personWords(name);
     for (const w of counted)
       if (said.says([w], false) && !known.says([w], false))
         return true;
@@ -11422,7 +11436,7 @@ function external(id) {
 }
 function outsideAccount(name) {
   const bare = name.startsWith(EXTERNAL_ACCOUNT_PREFIX) ? name.slice(EXTERNAL_ACCOUNT_PREFIX.length) : name;
-  return external(bare.toLowerCase().replace(/[^a-z0-9:]+/g, "_").replace(/^_+|_+$/g, "") || "outside");
+  return external(payeeKey(bare) || "outside");
 }
 var OUTSIDE_NAMES = {
   market: "Shops",
@@ -11435,8 +11449,25 @@ var OUTSIDE_NAMES = {
 };
 var REGIONAL_TAXES = { sales: "Sales tax", property: "Property tax" };
 var NAMED_OUTSIDE = { bank: "Bank", atm: "Cash machine", employer: "Employer" };
-var OUTSIDE_KINDS = { buyer: "Buyer", seller: "Seller", market: "Market", tenant: "Outside tenant" };
-function outsideName(books, raw) {
+var OUTSIDE_KINDS = { buyer: "Buyer", seller: "Seller", market: "Market", tenant: "Outside tenant", closing: "Closing" };
+function seenIn(books, viewer, id) {
+  if (own(books.state.entities, id))
+    return viewer === null || canSeeEntity(books.registry, books.world, books.state, viewer, id);
+  if (own(books.world.places, id))
+    return viewer === null || canSeePlace(books.registry, books.world, books.state, viewer, id);
+  return own(books.world.tracks, id) ? false : undefined;
+}
+function wordsFor(books, viewer, words, unseen) {
+  const id = words.trim().replace(/ +/g, "_");
+  const seen = seenIn(books, viewer, id);
+  if (seen === undefined)
+    return words.replace(/_/g, " ").trim();
+  const entity = own(books.state.entities, id);
+  if (!seen)
+    return entity ? "someone" : unseen;
+  return entity?.name ?? own(books.world.places, id)?.name ?? unseen;
+}
+function outsideName(books, raw, viewer) {
   const bare = raw.startsWith(EXTERNAL_ACCOUNT_PREFIX) ? raw.slice(EXTERNAL_ACCOUNT_PREFIX.length) : raw;
   const known = own(OUTSIDE_NAMES, bare);
   if (known !== undefined)
@@ -11453,9 +11484,41 @@ function outsideName(books, raw) {
   }
   const named = own(NAMED_OUTSIDE, head);
   if (named !== undefined)
-    return tail === "" || tail === head ? named : labelOf(books, tail.replace(/ +/g, "_"));
+    return tail === "" || tail === head ? named : wordsFor(books, viewer, tail, named);
   const kind = tail === "" ? undefined : own(OUTSIDE_KINDS, head);
-  return kind ?? bare.replace(/_/g, " ");
+  return kind ?? wordsFor(books, viewer, bare, "someone");
+}
+function outsideHidden(books, raw, viewer) {
+  if (viewer === null)
+    return false;
+  const bare = raw.startsWith(EXTERNAL_ACCOUNT_PREFIX) ? raw.slice(EXTERNAL_ACCOUNT_PREFIX.length) : raw;
+  const ids = (bare.includes(":") ? bare.split(":").slice(1) : [bare]).map((p) => p.trim().replace(/ +/g, "_"));
+  return ids.some((id) => seenIn(books, viewer, id) === false);
+}
+function seenBy(books, viewer, id) {
+  if (viewer === null || id === viewer)
+    return true;
+  const e = own(books.state.entities, id);
+  if (!e)
+    return true;
+  if (!canSeeEntity(books.registry, books.world, books.state, viewer, id))
+    return false;
+  if (e.kind !== "account" && e.kind !== "card")
+    return true;
+  const account = e.kind === "card" ? strOf(e.fields.account) : id;
+  if (rightsOf(books.state, account, viewer) !== null)
+    return true;
+  const holders = holdersOf(books.state, account).filter((h) => own(books.state.entities, h));
+  return holders.length === 0 || holders.some((h) => canSeeEntity(books.registry, books.world, books.state, viewer, h));
+}
+function hiddenFrom(books, viewer, id) {
+  return !seenBy(books, viewer, id);
+}
+function shownLabel(books, viewer, id) {
+  return seenBy(books, viewer, id) ? labelOf(books, id) : "someone";
+}
+function opaqueId(id) {
+  return `hidden:${hashParts(id).slice(0, 12)}`;
 }
 function bankSide(institution) {
   return `${BANK_PREFIX}${institution || "bank"}`;
@@ -11651,6 +11714,17 @@ function managesAccount(books, account, who) {
   if (!classOf2(books, account))
     return false;
   return ownersOf(books.state, account).some((o) => ROLE_RIGHTS[o.role].manage && (o.party === who || managesParty(books.state, o.party, who)));
+}
+function debtorsOf(state, account) {
+  const owners = ownersOf(state, account);
+  const owing = owners.filter((o) => ROLE_RIGHTS[o.role].worth);
+  return [...new Set((owing.length > 0 ? owing : owners).map((o) => o.party))];
+}
+function householdOf(ctx, party) {
+  const isHousehold = (id) => kindIs(ctx.registry, ctx.world, own(ctx.state.entities, id)?.kind ?? "", "household");
+  if (isHousehold(party))
+    return party;
+  return own(ctx.state.entities, party)?.relations.find((r) => r.type === MEMBER_OF && isHousehold(r.to))?.to ?? null;
 }
 function shareOf(state, id, party) {
   return own(worthShares(ownersOf(state, id)), party) ?? 0;
@@ -12686,10 +12760,10 @@ function payerOf(ctx, api, job) {
     return operatingAccount(api, ctx, job.business) ?? api.outside(job.business);
   return api.outside(`employer:${(job.employer || job.occupation || "work").toLowerCase().replace(/\W+/g, "_")}`);
 }
-function employerName(ctx, job) {
+function employerName(ctx, job, viewer) {
   if (job.business)
-    return labelOf(ctx, job.business);
-  return job.employer === "" ? "" : labelOf(ctx, job.employer);
+    return hiddenFrom(ctx, viewer, job.business) ? "someone" : labelOf(ctx, job.business);
+  return job.employer === "" ? "" : outsideName(ctx, `employer:${job.employer}`, viewer);
 }
 function payrollFlow(ctx, api, job) {
   if (job.every === null)
@@ -12757,6 +12831,8 @@ function hire(api, args, ctx) {
   const by = strOf(args.by);
   if (by !== "" && !managesParty(ctx.state, business, by))
     return reject5("not_owner", `${labelOf(ctx, by)} doesn't run ${labelOf(ctx, business)}`);
+  if (by !== "" && api.interestsOf(ctx, by).has(worker) && api.shareOf(ctx.state, business, by) <= 0)
+    return reject5("not_owner", `${shownLabel(ctx, ctx.world.pov, by)} runs ${shownLabel(ctx, ctx.world.pov, business)} for others, so can't put ${worker === by ? "themselves" : shownLabel(ctx, ctx.world.pov, worker)} on its payroll`);
   const jobs = allJobs(ctx);
   if (jobs.some((j) => j.worker === worker && j.business === business && j.status !== "ended"))
     return reject5("exists", `${labelOf(ctx, worker)} already works for ${labelOf(ctx, business)}`);
@@ -12803,13 +12879,15 @@ function raise(api, args, ctx) {
   const by = strOf(args.by);
   if (by !== "" && !(job.business && managesParty(ctx.state, job.business, by)))
     return reject5("not_owner", `${labelOf(ctx, by)} doesn't set that pay`);
+  if (by !== "" && job.business && api.interestsOf(ctx, by).has(job.worker) && api.shareOf(ctx.state, job.business, by) <= 0)
+    return reject5("not_owner", `${shownLabel(ctx, ctx.world.pov, by)} runs ${shownLabel(ctx, ctx.world.pov, job.business)} for others, so can't set ${job.worker === by ? "their own" : `${shownLabel(ctx, ctx.world.pov, job.worker)}'s`} pay`);
   const rate = typeof args.rate === "number" && args.rate > 0 ? Math.round(args.rate) : typeof args.pct === "number" && args.pct > -100 ? Math.round(job.rate * (1 + args.pct / 100)) : NaN;
   if (!(rate > 0))
     return reject5("bad_amount", "a raise needs a new rate above nothing, or a percentage");
   return [{ type: "set", entity: job.id, field: "rate", value: rate }];
 }
 var BASIS_WORDS = { salary: "a year", hourly: "an hour", per_shift: "a shift", commission: "commission", tips: "an hour in tips", stipend: "a period" };
-function jobView(ctx, api, job) {
+function jobView(ctx, api, job, viewer) {
   const cal = calendarOf(ctx.world);
   const now = ctx.state.clock;
   const flow = api.flows(ctx).find((f) => f.source === "job" && f.link === job.id);
@@ -12821,12 +12899,14 @@ function jobView(ctx, api, job) {
   const scheduled = hoursSource(ctx, job, now) === "contract" ? null : jobBlocks(ctx, job, since, now).reduce((a, b) => a + (b.end - b.start), 0);
   const money = (c) => api.money(ctx, c);
   const entity = own(ctx.state.entities, job.id);
+  const fields = entity?.fields ?? {};
+  const unseen = Object.fromEntries(["employer", "workplace"].filter((k) => outsideHidden(ctx, strOf(fields[k]), viewer)).map((k) => [k, ""]));
   return {
     id: job.id,
     title: job.title,
-    employer: employerName(ctx, job),
-    employerId: job.business,
-    worker: labelOf(ctx, job.worker),
+    employer: employerName(ctx, job, viewer),
+    employerId: job.business && !hiddenFrom(ctx, viewer, job.business) ? job.business : null,
+    worker: shownLabel(ctx, viewer, job.worker),
     workerId: job.worker,
     basis: job.basis,
     pay: job.basis === "commission" ? `${job.commissionPct || job.rate}% commission` : `${money(job.rate)} ${BASIS_WORDS[job.basis]}${job.tipsPerHour > 0 ? ` plus about ${money(job.tipsPerHour)} an hour in tips` : ""}${job.commissionPct > 0 ? ` plus ${job.commissionPct}% commission` : ""}`,
@@ -12839,8 +12919,8 @@ function jobView(ctx, api, job) {
     hours: scheduled === null && job.hours !== "attended" ? null : { scheduled: Math.round((scheduled ?? 0) / 6) / 10, attended: Math.round(numOf(sheet.minutes) / 6) / 10 },
     lastPay: Object.keys(last).length > 0 ? { at: formatClock(cal, numOf(last.at)), gross: numOf(last.gross), taxes: numOf(last.taxes), deductions: numOf(last.deductions), net: numOf(last.net) } : null,
     deductions: job.deductions.map((d) => ({ label: d.label, value: d.cents !== undefined ? money(d.cents) : `${d.pct ?? 0}%` })),
-    splits: job.splits.map((s) => ({ to: labelOf(ctx, s.to), value: s.cents !== undefined ? money(s.cents) : `${s.pct ?? 0}%` })),
-    spec: entity?.fields ?? {}
+    splits: job.splits.map((s) => ({ to: shownLabel(ctx, viewer, s.to), value: s.cents !== undefined ? money(s.cents) : `${s.pct ?? 0}%` })),
+    spec: { ...fields, ...unseen }
   };
 }
 function registerEmployment(r) {
@@ -12871,8 +12951,8 @@ function registerEmployment(r) {
   core.action({ id: "job_hire", label: "Hire", pack: "economy", params: { business: { type: "ref", ref: "business" }, worker: { type: "ref", ref: "person" }, title: { type: "text", optional: true }, basis: { type: "text", optional: true, label: "Pay basis" }, rate: { type: "money", optional: true, label: "Pay rate" }, hours_per_week: { type: "number", optional: true }, pay_every: { type: "text", optional: true, label: "Paid every" } }, requires: ["manages(self, business)", "not employs(business, worker)", "level.money >= 3"], outcomes: { default: [{ type: "economy.hire", args: { business: "business", worker: "worker", title: "=params.title", basis: "=params.basis", rate: "=params.rate", hours_per_week: "=params.hours_per_week", pay_every: "=params.pay_every", by: "self" } }] }, duration: "15", lexicon: ["hire", "take on", "give a job to"], observable: "talks business" });
   core.action({ id: "job_end", label: "End a job", pack: "economy", params: { job: { type: "ref", ref: JOB_KIND } }, requires: ["job.worker == self or manages(self, job.employer)", "job.status != 'ended'", "level.money >= 3"], outcomes: { default: [{ type: "economy.job_end", args: { job: "job", by: "self" } }] }, duration: "10", lexicon: ["fire", "let go", "quit", "resign", "hand in my notice"], observable: "talks business" });
   core.action({ id: "job_raise", label: "Give a raise", pack: "economy", params: { job: { type: "ref", ref: JOB_KIND }, rate: { type: "money", label: "New rate" } }, requires: ["manages(self, job.employer)", "rate > 0", "level.money >= 3"], outcomes: { default: [{ type: "economy.job_raise", args: { job: "job", rate: "=rate", by: "self" } }] }, duration: "5", lexicon: ["give a raise", "raise the pay", "pay more"], observable: "talks business" });
-  r.view((ctx, party) => api.partyKind(ctx, party) === "person" ? { jobs: allJobs(ctx).filter((j) => j.worker === party).map((j) => jobView(ctx, api, j)) } : {});
-  r.summary((ctx, who) => allJobs(ctx).filter((j) => j.worker === who && j.status === "active").map((j) => `${j.title} for ${employerName(ctx, j) || "an outside employer"}, ${api.money(ctx, j.rate)} ${BASIS_WORDS[j.basis]}, paid ${j.every === null ? "nothing" : j.every.replace("_", " ")}.`));
+  r.view((ctx, party, _view, viewer) => api.partyKind(ctx, party) === "person" ? { jobs: allJobs(ctx).filter((j) => j.worker === party).map((j) => jobView(ctx, api, j, viewer)) } : {});
+  r.summary((ctx, who) => allJobs(ctx).filter((j) => j.worker === who && j.status === "active").map((j) => `${j.title} for ${employerName(ctx, j, null) || "an outside employer"}, ${api.money(ctx, j.rate)} ${BASIS_WORDS[j.basis]}, paid ${j.every === null ? "nothing" : j.every.replace("_", " ")}.`));
 }
 
 // src/packs/economy/core/business.ts
@@ -13135,6 +13215,8 @@ function issueInvoice(ctx, api, args) {
   const customer = strOf(args.customer) || strOf(args.customer_name).trim();
   if (customer === "" || customer === business)
     return reject6("bad_party", "an invoice needs someone to bill");
+  if (by !== "" && customer !== by && managesParty(ctx.state, customer, by) && api.paysFor(ctx, by, business, customer))
+    return reject6("not_owner", `${shownLabel(ctx, ctx.world.pov, by)} runs ${shownLabel(ctx, ctx.world.pov, customer)} for others, so can't bill it for ${shownLabel(ctx, ctx.world.pov, business)}`);
   const cents = typeof args.cents === "number" ? Math.round(args.cents) : NaN;
   if (!(cents > 0))
     return reject6("bad_amount", "an invoice needs an amount");
@@ -13163,6 +13245,8 @@ function payInvoice(ctx, api, args) {
   const payer = inv.party ?? inv.customer;
   if (by !== "" && by !== inv.party && !(inv.party && isBusiness(ctx, inv.party) && managesParty(ctx.state, inv.party, by)))
     return reject6("not_customer", `${labelOf(ctx, by)} isn't billed for ${inv.memo}`);
+  if (by !== "" && inv.party && by !== inv.party && api.paysFor(ctx, by, inv.business, inv.party))
+    return reject6("not_owner", `${shownLabel(ctx, ctx.world.pov, inv.party)} pays for itself, not for ${shownLabel(ctx, ctx.world.pov, by)}`);
   const deposit = operatingAccount(api, ctx, inv.business);
   const paid = inv.party ? api.pay(ctx, { from: inv.party, to: inv.business, cents: inv.left, memo: `Invoice: ${inv.memo}`, kind: "payment", category: "invoice", method: "account", ...deposit ? { deposit } : {} }) : api.post(ctx, [{ account: api.outside(`customer:${payer}`), amount: -inv.left }, { account: deposit ?? api.outside(inv.business), amount: inv.left }], { memo: `Invoice: ${inv.memo}`, kind: "payment", category: "invoice", payer });
   if (!Array.isArray(paid))
@@ -13321,9 +13405,6 @@ function distributionFlow(ctx, api, business) {
   const schedule = every === "month" ? { every: "month", days: [10], roll: "after" } : every === "year" ? { every: "year", months: [1], days: [10], roll: "after" } : { every: "year", months: [1, 4, 7, 10], days: [10], roll: "after" };
   return { id: `distribute:${business}`, label: "Profit distribution", kind: "distribution", from, to: "Owners", amount: { provider: "distribution", args: { business } }, schedule, shortfall: "skip", category: "distribution", link: business, status: "active", source: "business" };
 }
-function hiddenFrom(ctx, viewer, id) {
-  return viewer !== null && own(ctx.state.entities, id) !== undefined && !canSeeEntity(ctx.registry, ctx.world, ctx.state, viewer, id);
-}
 function shownName2(ctx, viewer, id, fallback) {
   if (!own(ctx.state.entities, id))
     return id;
@@ -13349,10 +13430,10 @@ function businessView(ctx, api, business, party, viewer) {
   const sales = (Array.isArray(salesList) ? salesList : []).map((raw, i) => ({ raw: objOf(raw), i })).reverse().map(({ raw, i }) => ({ id: `${business}:sale:${i}`, at: formatClock(cal, numOf(raw.at)), memo: strOf(raw.memo, "Sale"), cents: numOf(raw.cents) + numOf(raw.tax), account: deposit ? labelOf(ctx, deposit) : labelOf(ctx, business), accountId: deposit ?? business, kind: "sale", category: strOf(raw.category) || null, counterparty: strOf(raw.payer) === "" ? "Walk-in customers" : shownName2(ctx, viewer, strOf(raw.payer), "a customer"), card: null, status: "posted" }));
   const invoices = allInvoices(ctx).filter((i) => i.business === business || i.party === business).sort((a, b) => b.issued - a.issued).map((i) => ({ id: i.id, business: hiddenFrom(ctx, viewer, i.business) ? "" : i.business, customer: i.party !== null && hiddenFrom(ctx, viewer, i.party) ? "" : i.customer, cents: i.cents, memo: i.memo, issued: i.issued, due: i.due, state: i.state, paid: i.paid, late_fee: i.late_fee, ...i.state === "late" ? { days_late: dateAt(cal, now).dayIndex - dateAt(cal, i.due).dayIndex } : {}, flow: `invoice:${i.id}`, customerName: i.party ? shownName2(ctx, viewer, i.party, "a customer") : i.customer, issuedAt: formatClock(cal, i.issued), dueAt: formatClock(cal, i.due) }));
   const employees = allJobs(ctx).filter((j) => j.business === business && j.status !== "ended").map((j) => {
-    const v = jobView(ctx, api, j);
+    const v = jobView(ctx, api, j, viewer);
     if (!hiddenFrom(ctx, viewer, j.worker))
       return v;
-    return { ...v, worker: "an employee", workerId: "", splits: [], spec: { ...v.spec, worker: "", splits: [], deductions: [] } };
+    return { ...v, id: opaqueId(v.id), worker: "an employee", workerId: "", splits: [], spec: { ...v.spec, worker: "", splits: [], deductions: [] } };
   });
   const owed = payablesOf(ctx.state, business);
   const taxes = [];
@@ -13374,6 +13455,8 @@ function businessView(ctx, api, business, party, viewer) {
     id: business,
     name: labelOf(ctx, business),
     role,
+    mayDraw: mayDraw(api, ctx.state, party, business),
+    selfDealing: api.shareOf(ctx.state, business, party) > 0 ? [] : [...api.interestsOf(ctx, party)].filter((id) => kindIs(ctx.registry, ctx.world, own(ctx.state.entities, id)?.kind ?? "", "person") && !hiddenFrom(ctx, viewer, id)),
     owners: ownerLines(ctx, api, viewer, business),
     accounts: api.accountsOf(ctx, business, "sees"),
     managed: [],
@@ -15629,7 +15712,11 @@ function mortgageRow(ctx) {
 function mortgageTerms(ctx) {
   const t = objOf(mortgageRow(ctx).term_months);
   const terms = [t.typical, ...Array.isArray(t.alternatives) ? t.alternatives : []].filter((v) => typeof v === "number" && v > 0);
-  return terms.length > 0 ? terms : [360];
+  return terms.length > 0 ? [...new Set(terms)] : [360];
+}
+function offeredTerms(ctx) {
+  const terms = mortgageTerms(ctx);
+  return [...terms].sort((a, b) => b - a).map((months) => ({ months, usual: months === terms[0] }));
 }
 function propertyTaxPct(ctx, id) {
   const region = objOf(own(objOf(ctx.tables.get("economy.regions")?.rows), regionOf(ctx, id)));
@@ -15722,6 +15809,12 @@ function authoredLeases(ctx, id) {
 function inForce(l, at) {
   return l.status === "active" && (l.start === null || l.start <= at) && (l.end === null || at < l.end);
 }
+function isOver(l, at) {
+  return l.status === "ended" || l.end !== null && at >= l.end;
+}
+function holdsUnit(l, at) {
+  return !isOver(l, at) && (l.start === null || l.start <= at);
+}
 function monthIndex(world, clock) {
   const cal = calendarOf(world);
   const d = dateAt(cal, clock);
@@ -15738,7 +15831,7 @@ function managedLeases(ctx, id, at = ctx.state.clock) {
   if (f.managed !== true || marketRent <= 0)
     return [];
   const units = Math.max(1, Math.round(numOf(f.units, 1)));
-  const covered = authoredLeases(ctx, id).filter((l) => inForce(l, at)).length;
+  const covered = authoredLeases(ctx, id).filter((l) => holdsUnit(l, at)).length;
   const term = Math.max(1, Math.round(numOf(f.lease_months, 12)));
   const vacancy = Math.max(0, Math.round(numOf(f.vacancy_months, 1)));
   const since = clockOfDate(ctx.world, f.let_from) ?? clockOfDate(ctx.world, ctx.world.start.at) ?? 0;
@@ -15783,17 +15876,23 @@ function managedFlow(api, ctx, id, l, side) {
     source: "leases"
   };
 }
+function unitsToLet(api, state, id) {
+  const units = num5(fieldsOf(state, id).units);
+  if (units !== undefined)
+    return Math.max(1, Math.round(units));
+  return api.ownersOf(state, id).some((o) => isHome(state, id, o.party)) ? 0 : 1;
+}
 function leaseViews(api, ctx, id, viewer) {
   const now = ctx.state.clock;
-  const units = Math.max(1, Math.round(numOf(fieldsOf(ctx.state, id).units, 1)));
+  const units = unitsToLet(api, ctx.state, id);
   const out = [];
   let let_ = 0;
   for (const l of authoredLeases(ctx, id)) {
-    const live = inForce(l, now);
-    if (live)
+    const over = isOver(l, now);
+    if (!over)
       let_++;
     const tenant = own(ctx.state.entities, l.tenant)?.kind === "account" ? api.ownersOf(ctx.state, l.tenant)[0]?.party ?? l.tenant : l.tenant;
-    out.push({ flow: l.id, tenant: shownName3(ctx, viewer, tenant, "a tenant"), rent: l.rent, start: l.start === null ? null : dateText3(ctx.world, l.start), end: l.end === null ? null : dateText3(ctx.world, l.end - 1440), state: live ? "let" : l.end !== null && l.end <= now ? "ended" : "vacant" });
+    out.push({ flow: l.id, tenant: shownName3(ctx, viewer, tenant, "a tenant"), rent: l.rent, start: l.start === null ? null : dateText3(ctx.world, l.start), end: l.end === null ? null : dateText3(ctx.world, l.end - 1440), state: over ? "ended" : "let" });
   }
   for (const l of managedLeases(ctx, id)) {
     const from = monthStart2(ctx.world, l.from);
@@ -15908,9 +16007,6 @@ function buyProperty(api, ctx, x) {
     ...moveLeases(api, ctx, x.property, api.ownersOf(ctx.state, x.property).map((o) => o.party), [{ party: x.party, role: "owner", share: 100 }])
   ]);
 }
-function notOver(l, at) {
-  return l.status === "active" && (l.end === null || at < l.end);
-}
 function paysOwners(api, ctx, lease, owners) {
   const to = strOf(fieldsOf(ctx.state, lease).to);
   return owners.includes(to) || api.ownersOf(ctx.state, to).some((o) => owners.includes(o.party));
@@ -15932,7 +16028,7 @@ function moveLeases(api, ctx, property, owners, next) {
   const out = [];
   const side = ownersSide(api, ctx, next);
   for (const l of authoredLeases(ctx, property)) {
-    if (!notOver(l, ctx.state.clock) || !paysOwners(api, ctx, l.id, owners))
+    if (isOver(l, ctx.state.clock) || !paysOwners(api, ctx, l.id, owners))
       continue;
     out.push(...side ? repoint(api, ctx, l.id, side) : [{ type: "set", entity: l.id, field: "end", value: dateText3(ctx.world, ctx.state.clock) }]);
   }
@@ -15945,7 +16041,7 @@ function routeRent(api, ctx, property, route) {
     return out;
   const owners = api.ownersOf(ctx.state, property).map((o) => o.party);
   for (const l of authoredLeases(ctx, property))
-    if (notOver(l, ctx.state.clock) && paysOwners(api, ctx, l.id, owners))
+    if (!isOver(l, ctx.state.clock) && paysOwners(api, ctx, l.id, owners))
       out.push(...repoint(api, ctx, l.id, side));
   return unit2(out);
 }
@@ -16037,7 +16133,7 @@ function startLease(api, ctx, x) {
   if (!(rent > 0))
     return reject7("bad_amount", "rent is above nothing");
   const units = Math.max(1, Math.round(numOf(e.fields.units, 1)));
-  if (authoredLeases(ctx, x.property).filter((l) => inForce(l, ctx.state.clock)).length >= units)
+  if (authoredLeases(ctx, x.property).filter((l) => holdsUnit(l, ctx.state.clock)).length >= units)
     return reject7("full", `every unit of ${e.name} is let`);
   if (x.from) {
     const unusable = api.mayUse(ctx, x.tenant, x.from, "from");
@@ -16106,8 +16202,10 @@ function propertyView(api, ctx, id, party, flows) {
   const place = strOf(e?.fields.place);
   const asking = num5(e?.fields.asking_price);
   const shownPlace = place === "" || party === ctx.world.pov && !canSeePlace(ctx.registry, ctx.world, ctx.state, party, place) ? null : own(ctx.world.places, place)?.name ?? labelOf(ctx, place);
-  if (!api.ownersOf(ctx.state, id).some((o) => o.party === party))
-    return { id, name: e?.name ?? id, place: shownPlace, owners: [], share: 0, value, equity: 0, forSale: asking ?? null, mortgage: null, leases: [], costs: [], route: null };
+  if (!api.ownersOf(ctx.state, id).some((o) => o.party === party)) {
+    const mayBuy = api.feature(ctx, party, "property") && (asking !== undefined || payers(api, ctx.state, id).owners.length === 0);
+    return { id, name: e?.name ?? id, place: shownPlace, owners: [], share: 0, value, equity: 0, forSale: asking ?? null, mortgage: null, leases: [], costs: [], route: null, ...mayBuy ? { mortgageTerms: offeredTerms(ctx) } : {} };
+  }
   const loans = securedLoans(api, ctx.state, id);
   const loan = loans.find((l) => l.owed > 0);
   const owed = loans.reduce((a, l) => a + l.owed, 0);
@@ -17506,472 +17604,6 @@ function noted(ctx, events) {
   });
 }
 
-// src/packs/economy/core/actions.ts
-function money(ctx, cents) {
-  return formatMoney(cents, ctx.world.currency);
-}
-function featureAt(ctx, who, field) {
-  let cur = placeOfEntity(ctx.state, who) ?? undefined;
-  for (let guard = 0;cur && guard < 32; guard++) {
-    const p = own(ctx.world.places, cur);
-    const f = objOf(p?.fields[field]);
-    if (typeof f.bank === "string" && f.bank !== "")
-      return { place: cur, feature: f };
-    cur = p?.parent;
-  }
-  return null;
-}
-function cashNeedsAMachine(ctx, who) {
-  if (!featureFor(ctx, who, "atm"))
-    return false;
-  return Object.values(ctx.world.places).some((p) => ["atm", "branch"].some((f) => {
-    const bank = objOf(p.fields[f]).bank;
-    return typeof bank === "string" && bank !== "";
-  }));
-}
-function debitCard(ctx, who, account) {
-  return cardsOn(ctx.state, account).find((c) => strOf(own(ctx.state.entities, c)?.fields.holder) === who && cardProblem(ctx, c, who) === null) ?? null;
-}
-function withdraw(ctx, who, account, raw) {
-  const cents = Math.round(raw);
-  if (!(cents > 0))
-    return reject8("bad_amount", "the amount must be positive");
-  if (!canSpend(ctx.state, account, who) || !traitsOf(ctx, account)?.pays || traitsOf(ctx, account)?.cash)
-    return reject8("not_owner", `${labelOf(ctx, who)} can't draw cash from ${labelOf(ctx, account)}`);
-  if (statusOf(ctx.state, account) !== "open")
-    return reject8("declined", `${labelOf(ctx, account)} is ${statusOf(ctx.state, account).replace(/_/g, " ")}`);
-  const wallet = cashAccount(ctx, who);
-  if (!wallet)
-    return reject8("no_wallet", `${labelOf(ctx, who)} has nowhere to carry cash`);
-  const p = productOf(ctx, account);
-  if (!p)
-    return reject8("missing_account", "no such account");
-  const t = traitsOf(ctx, account);
-  const atTop = cashNeedsAMachine(ctx, who);
-  const machine = [];
-  const advanceLines = [];
-  const extra = [];
-  let fees = 0;
-  let card = null;
-  let where = "";
-  if (atTop) {
-    const branch = featureAt(ctx, who, "branch");
-    const atm = featureAt(ctx, who, "atm");
-    if (branch && branch.feature.bank === p.institution)
-      where = `at ${own(ctx.world.places, branch.place)?.name ?? "the branch"}`;
-    else if (atm) {
-      card = debitCard(ctx, who, account);
-      if (!card)
-        return reject8("no_card", cardsOn(ctx.state, account).length > 0 ? `none of ${labelOf(ctx, who)}'s cards on ${labelOf(ctx, account)} works` : `${labelOf(ctx, account)} has no card for a cash machine`);
-      if (typeof atm.feature.limit === "number" && cents > atm.feature.limit)
-        return reject8("over_limit", `the machine gives at most ${money(ctx, atm.feature.limit)} at a time`);
-      if (cardRoom(ctx, card, "atm") < cents)
-        return reject8("over_limit", `${labelOf(ctx, card)} has ${money(ctx, cardRoom(ctx, card, "atm"))} left of its daily cash limit`);
-      where = `at ${own(ctx.world.places, atm.place)?.name ?? "a cash machine"}`;
-      if (accountFeature(ctx, account, "fees") && atm.feature.bank !== p.institution) {
-        const surcharge = Math.max(0, Math.round(numOf(atm.feature.fee)));
-        if (surcharge > 0)
-          machine.push({ account: external(`atm:${atm.feature.bank}`), amount: surcharge });
-        if (p.fees.atm > 0)
-          machine.push({ account: bankSide(p.institution), amount: p.fees.atm });
-        fees += surcharge + p.fees.atm;
-      }
-      if (Number.isFinite(cardRoom(ctx, card, "atm"))) {
-        const day = dateAt(calendarOf(ctx.world), ctx.state.clock).dayIndex;
-        const s = spendOf(ctx.state, card, day);
-        extra.push({ type: FINANCE_EVENTS.spend, data: { card, day, purchase: s.purchase, atm: s.atm + cents } });
-      }
-    } else
-      return reject8("no_atm", `there's no cash machine or ${p.institution || "bank"} branch here`);
-  }
-  const advance = cashAdvanceFee(ctx, account, cents);
-  if (advance > 0) {
-    advanceLines.push({ account: bankSide(p.institution), amount: advance });
-    fees += advance;
-  }
-  const total = cents + fees;
-  if (availableOf(ctx, account) < total)
-    return reject8("declined", `${labelOf(ctx, account)} can't cover ${money(ctx, total)}`);
-  const charge = (lines, memo, category) => {
-    const cents = lines.reduce((a, l) => a + l.amount, 0);
-    return cents > 0 ? posting([{ account, amount: -cents }, ...lines], { memo, kind: "fee", category }) : [];
-  };
-  const memo = `Cash withdrawal${where ? ` ${where}` : ""}${fees > 0 ? ` (${money(ctx, fees)} in fees)` : ""}`;
-  return asUnit([...charge(machine, "Cash machine fees", "atm"), ...charge(advanceLines, "Cash advance fee", "cash_advance"), ...posting([{ account, amount: -cents }, { account: wallet, amount: cents }], { memo, kind: "withdrawal", category: t?.revolving ? "cash_advance" : "transfer", ...card ? { card } : {} }), ...extra]);
-}
-function deposit(ctx, who, account, raw) {
-  const cents = Math.round(raw);
-  if (!(cents > 0))
-    return reject8("bad_amount", "the amount must be positive");
-  const unusable = mayUse(ctx, who, account, "into");
-  if (unusable)
-    return unusable;
-  if (traitsOf(ctx, account)?.cash || traitsOf(ctx, account)?.locked)
-    return reject8("not_owner", `${labelOf(ctx, who)} can't pay cash into ${labelOf(ctx, account)}`);
-  const wallet = cashAccount(ctx, who);
-  if (!wallet || availableOf(ctx, wallet) < cents)
-    return reject8("declined", `${labelOf(ctx, who)} doesn't have ${money(ctx, cents)} in cash`);
-  const p = productOf(ctx, account);
-  if (!p)
-    return reject8("missing_account", "no such account");
-  if (traitsOf(ctx, account)?.liability && cents > -balance(ctx.state, account))
-    return reject8("overpay", `${labelOf(ctx, account)} owes only ${money(ctx, Math.max(0, -balance(ctx.state, account)))}`);
-  let held = false;
-  let where = "";
-  if (cashNeedsAMachine(ctx, who)) {
-    const branch = featureAt(ctx, who, "branch");
-    const atm = featureAt(ctx, who, "atm");
-    if (branch && branch.feature.bank === p.institution)
-      where = ` at ${own(ctx.world.places, branch.place)?.name ?? "the branch"}`;
-    else if (atm && atm.feature.deposits === true && atm.feature.bank === p.institution) {
-      where = ` at ${own(ctx.world.places, atm.place)?.name ?? "a cash machine"}`;
-      held = accountFeature(ctx, account, "holds") && p.hold_days > 0;
-    } else
-      return reject8("no_atm", `there's no ${p.institution || "bank"} branch or deposit machine here`);
-  }
-  const lines = [
-    { account: wallet, amount: -cents },
-    { account, amount: cents }
-  ];
-  const events = posting(lines, { memo: `Cash deposit${where}`, kind: "deposit", category: "transfer" });
-  if (traitsOf(ctx, account)?.liability)
-    events.push({ type: FINANCE_EVENTS.cardPaid, data: { account, cents } });
-  if (held)
-    events.push({ type: FINANCE_EVENTS.hold, data: { id: `dep:${hashParts(account, ctx.state.clock, cents).slice(0, 10)}`, account, cents, until: ctx.state.clock + p.hold_days * 1440, kind: "deposit", memo: "Cash deposit" } });
-  return asUnit(events);
-}
-function setCardState(ctx, who, card, state) {
-  const e = own(ctx.state.entities, card);
-  if (e?.kind !== "card")
-    return reject8("not_card", `${labelOf(ctx, card)} isn't a payment card`);
-  if (strOf(e.fields.holder) !== who && !managesAccount(ctx, strOf(e.fields.account), who))
-    return reject8("not_owner", `${e.name} isn't ${labelOf(ctx, who)}'s`);
-  if (!CARD_STATES.includes(state))
-    return reject8("bad_state", `a card can't be ${state}`);
-  const now = strOf(e.fields.state, "active");
-  if (now === state)
-    return [];
-  if (now === "lost" || now === "cancelled")
-    return reject8("bad_state", `${e.name} is ${now}; replace it`);
-  return [{ type: "set", entity: card, field: "state", value: state }];
-}
-function replaceCard(ctx, who, card) {
-  const e = own(ctx.state.entities, card);
-  if (e?.kind !== "card")
-    return reject8("not_card", `${labelOf(ctx, card)} isn't a payment card`);
-  const holder = strOf(e.fields.holder);
-  if (holder !== who && !managesAccount(ctx, strOf(e.fields.account), who))
-    return reject8("not_owner", `${e.name} isn't ${labelOf(ctx, who)}'s`);
-  if (strOf(e.fields.state) === "cancelled" && strOf(e.fields.replaced_by) !== "")
-    return reject8("bad_state", `${e.name} was already replaced`);
-  let n = 2;
-  while (own(ctx.state.entities, `${card}_r${n}`))
-    n++;
-  const id = `${card}_r${n}`;
-  const last4 = String(1000 + Number.parseInt(hashParts(card, n).slice(0, 6), 16) % 9000);
-  const fields = { ...e.fields, state: "active", replaces: card, last4 };
-  delete fields.replaced_by;
-  delete fields.item;
-  const out = [{ type: "spawn", entity: { id, kind: "card", name: e.name, tier: "background", fields, relations: [] } }, { type: "set", entity: card, field: "state", value: "cancelled" }, { type: "set", entity: card, field: "replaced_by", value: id }];
-  const spawn = optionalService(ctx, "gear.spawn");
-  const oldItem = strOf(e.fields.item);
-  if (spawn && ctx.levelOf(holder, "gear") >= 1) {
-    const place = oldItem !== "" ? own(ctx.state.entities, oldItem)?.relations.find((r) => r.type === "in")?.to : undefined;
-    const made = spawn(ctx, { name: own(ctx.state.entities, oldItem)?.name ?? e.name, owner: holder, holder: place && own(ctx.state.entities, place) && !own(ctx.state.entities, oldItem)?.fields.lost ? place : holder, salt: `card:${id}` });
-    if (Array.isArray(made)) {
-      out.push(...made);
-      const item = made.find((x) => x.type === "spawn");
-      if (item?.type === "spawn")
-        out.push({ type: "set", entity: id, field: "item", value: item.entity.id });
-    }
-  }
-  const account = strOf(e.fields.account);
-  const p = productOf(ctx, account);
-  if (p && p.fees.card_replacement > 0 && accountFeature(ctx, account, "fees"))
-    out.push(...posting([{ account, amount: -p.fees.card_replacement }, { account: bankSide(p.institution), amount: p.fees.card_replacement }], { memo: `${e.name} replacement`, kind: "fee", category: "card_replacement" }));
-  return asUnit(out);
-}
-function setAutopay(ctx, who, account, mode, from, cents) {
-  const cls = classOf2(ctx, account);
-  if (!cls || !isCredit(cls))
-    return reject8("not_credit", `${labelOf(ctx, account)} isn't a card or a loan`);
-  if (!managesAccount(ctx, account, who))
-    return reject8("not_owner", `${labelOf(ctx, account)} isn't ${labelOf(ctx, who)}'s to change`);
-  if (!AUTOPAY_MODES.includes(mode))
-    return reject8("bad_mode", `autopay can't be ${mode}`);
-  if (from !== "" && (!canSpend(ctx.state, from, who) && !managesAccount(ctx, from, who) || !traitsOf(ctx, from)?.pays || traitsOf(ctx, from)?.liability))
-    return reject8("bad_account", `${labelOf(ctx, who)} can't pay from ${labelOf(ctx, from)}`);
-  if (mode === "fixed" && !(cents > 0))
-    return reject8("bad_amount", "fixed autopay needs an amount");
-  const out = [{ type: "set", entity: account, field: "autopay", value: mode }];
-  if (from !== "")
-    out.push({ type: "set", entity: account, field: "autopay_from", value: from });
-  if (mode === "fixed")
-    out.push({ type: "set", entity: account, field: "autopay_cents", value: Math.round(cents) });
-  return out;
-}
-var FLOW_PARAM_FIELDS = { label: "", kind: "flow_kind", from: "from", to: "to", amount: "amount_cents", every: "every", interval: "interval", at: "at", start: "start", end: "end", count: "count", shortfall: "shortfall", retry_days: "retry_days", retries: "retries", fallback: "fallback", roll: "roll", category: "category" };
-function flowFields(args) {
-  const fields = {};
-  let label;
-  for (const [param, field] of Object.entries(FLOW_PARAM_FIELDS)) {
-    const v = args[param];
-    if (v === undefined || v === null || v === "")
-      continue;
-    if (param === "label")
-      label = String(v).slice(0, 80);
-    else
-      fields[field] = v;
-  }
-  if (typeof fields.flow_kind === "string" && !FLOW_KINDS.includes(fields.flow_kind))
-    return reject8("bad_flow", `a flow can't be a ${fields.flow_kind}`);
-  if (typeof fields.shortfall === "string" && !FLOW_SHORTFALLS.includes(fields.shortfall))
-    return reject8("bad_flow", `there's no shortfall policy ${fields.shortfall}`);
-  if (typeof fields.amount_cents === "number")
-    fields.amount_cents = Math.round(fields.amount_cents);
-  const every = args.every;
-  if (every === "once") {
-    delete fields.every;
-    fields.once = strOf(args.once);
-    if (fields.once === "")
-      return reject8("bad_flow", "a one-off flow needs its date and time");
-  } else if (every !== undefined && every !== null && every !== "") {
-    if (!["day", "week", "month", "year"].includes(String(every)))
-      return reject8("bad_flow", `a flow can't fall every ${String(every)}`);
-    fields.once = "";
-    if (typeof args.weekday === "number")
-      fields.weekdays = [args.weekday];
-    else if (every !== "week")
-      fields.weekdays = [];
-    if (typeof args.day === "number")
-      fields.days = [args.day];
-    else if (every === "week" || every === "day")
-      fields.days = [];
-    if (typeof args.month === "number")
-      fields.months = [args.month];
-    else if (every !== "year")
-      fields.months = [];
-  } else {
-    if (typeof args.weekday === "number")
-      fields.weekdays = [args.weekday];
-    if (typeof args.day === "number")
-      fields.days = [args.day];
-    if (typeof args.month === "number")
-      fields.months = [args.month];
-  }
-  return { fields, ...label !== undefined ? { label } : {} };
-}
-function mayPayFrom(ctx, who, from) {
-  return from === who || isParty(ctx, from) && managesParty(ctx.state, from, who) || managesAccount(ctx, from, who);
-}
-function fallbackProblem(ctx, who, fields) {
-  const fallback = strOf(fields.fallback);
-  if (fallback === "" || mayPayFrom(ctx, who, fallback))
-    return null;
-  return reject8("not_owner", own(ctx.state.entities, fallback) ? `${labelOf(ctx, who)} can't fall back on ${labelOf(ctx, fallback)}` : `a fallback is an account of ${labelOf(ctx, who)}'s, not "${fallback}"`);
-}
-function createFlow(ctx, who, args) {
-  const made = flowFields(args);
-  if ("code" in made)
-    return made;
-  const f = made.fields;
-  const from = strOf(f.from);
-  const to = strOf(f.to);
-  if (from === "" || to === "" || typeof f.amount_cents !== "number" || !(f.amount_cents > 0))
-    return reject8("bad_flow", "a flow needs who pays, who is paid and an amount");
-  if (!mayPayFrom(ctx, who, from))
-    return reject8("not_owner", `${labelOf(ctx, who)} can't pay from ${labelOf(ctx, from)}`);
-  const fallback = fallbackProblem(ctx, who, f);
-  if (fallback)
-    return fallback;
-  if (f.once === undefined && f.every === undefined)
-    return reject8("bad_flow", "a flow needs a schedule");
-  const label = made.label ?? `Payment to ${labelOf(ctx, to)}`;
-  const toMine = own(ctx.state.entities, to)?.kind === "account" && rightsOf(ctx.state, to, who) !== null;
-  const fields = { flow_kind: toMine ? "transfer" : "bill", shortfall: "skip", status: "active", ...f };
-  const id = `flow_${who}_${hashParts(who, label, ctx.state.clock).slice(0, 8)}`;
-  const entity = { id, kind: "flow", name: label, tier: "background", fields, relations: [] };
-  return [{ type: "spawn", entity }];
-}
-var CLEARABLE = ["at", "start", "end", "count", "roll", "retry_days", "retries", "fallback", "category"];
-function renameAndClear(current, id, name, clear) {
-  const names = typeof clear === "string" ? clear.split(",").map((s) => s.trim()).filter((s) => s !== "") : [];
-  const bad = names.find((n) => !CLEARABLE.includes(n));
-  if (bad !== undefined)
-    return reject8("bad_flow", `a standing payment's ${bad.replace(/_/g, " ")} can't be cleared`);
-  const out = [...new Set(names)].map((n) => ({ type: "set", entity: id, field: FLOW_PARAM_FIELDS[n] ?? n, value: null }));
-  const label = name?.trim().slice(0, 80) ?? "";
-  if (label !== "" && label !== current)
-    out.push({ type: FINANCE_EVENTS.flowRenamed, data: { flow: id, name: label } });
-  return out;
-}
-function updateFlow(ctx, who, flow, args) {
-  const e = own(ctx.state.entities, flow);
-  if (e?.kind !== "flow")
-    return reject8("not_flow", `${labelOf(ctx, flow)} isn't a standing payment`);
-  if (!mayPayFrom(ctx, who, strOf(e.fields.from)))
-    return reject8("not_owner", `${e.name} isn't ${labelOf(ctx, who)}'s to change`);
-  const made = flowFields(args);
-  if ("code" in made)
-    return made;
-  if (typeof made.fields.from === "string" && !mayPayFrom(ctx, who, made.fields.from))
-    return reject8("not_owner", `${labelOf(ctx, who)} can't pay from ${labelOf(ctx, made.fields.from)}`);
-  const fallback = fallbackProblem(ctx, who, made.fields);
-  if (fallback)
-    return fallback;
-  const more = renameAndClear(e.name, flow, made.label, args.clear);
-  if ("code" in more)
-    return more;
-  const both = more.find((x) => x.type === "set" && (x.field in made.fields));
-  if (both && both.type === "set")
-    return reject8("bad_flow", `a standing payment's ${both.field.replace(/_/g, " ")} can't be both changed and cleared`);
-  return [...Object.entries(made.fields).map(([field, value]) => ({ type: "set", entity: flow, field, value })), ...more];
-}
-function editFlow(ctx, flow, name, clear) {
-  const e = own(ctx.state.entities, flow);
-  if (e?.kind !== "flow")
-    return reject8("not_flow", `${labelOf(ctx, flow)} isn't a standing payment`);
-  return renameAndClear(e.name, flow, name, clear);
-}
-function setFlowStatus(ctx, who, flow, status) {
-  const e = own(ctx.state.entities, flow);
-  if (e?.kind !== "flow")
-    return reject8("not_flow", `${labelOf(ctx, flow)} isn't a standing payment`);
-  if (!mayPayFrom(ctx, who, strOf(e.fields.from)))
-    return reject8("not_owner", `${e.name} isn't ${labelOf(ctx, who)}'s to change`);
-  const out = [{ type: "set", entity: flow, field: "status", value: status }];
-  if (status === "ended")
-    out.push({ type: "set", entity: flow, field: GONE_FIELD, value: true });
-  return out;
-}
-function newAccountId(ctx, spec) {
-  const base = `${spec.owners[0]?.party ?? "acct"}_${spec.product}`;
-  let id = spec.id ?? `${base}_${hashParts(base, spec.name, ctx.state.clock).slice(0, 6)}`;
-  while (own(ctx.state.entities, id))
-    id = `${id}x`;
-  return id;
-}
-function openAccount(ctx, spec) {
-  const products = worldProducts(ctx.world);
-  const cls = own(products, spec.product)?.class ?? (isAccountClass(spec.product) ? spec.product : null);
-  if (!cls)
-    return reject8("bad_product", `there's no product ${spec.product.replace(/_/g, " ")}`);
-  const holder = spec.owners[0]?.party;
-  if (!holder || !own(ctx.state.entities, holder))
-    return reject8("missing_entity", "an account needs an owner");
-  const id = newAccountId(ctx, spec);
-  const cal = calendarOf(ctx.world);
-  const d = dateAt(cal, ctx.state.clock);
-  const opened = `${String(d.year).padStart(4, "0")}-${String(d.month).padStart(2, "0")}-${String(d.day).padStart(2, "0")}`;
-  const t = CLASS_TRAITS[cls];
-  const fields = { owners: spec.owners.map((o) => ({ party: o.party, role: o.role, ...o.share !== undefined ? { share: o.share } : {} })), product: spec.product, opening: 0, opened, status: "open" };
-  if (spec.apr_pct !== undefined)
-    fields.apr_pct = spec.apr_pct;
-  if (t.revolving && typeof spec.cents === "number")
-    fields.limit = Math.round(spec.cents);
-  if (t.installment) {
-    if (spec.term_months !== undefined) {
-      fields.term_months = spec.term_months;
-      fields.months_left = spec.term_months;
-    }
-    fields.due_day = Math.min(28, d.day);
-    const from = depositAccount(ctx, holder);
-    if (from) {
-      fields.autopay = "minimum";
-      fields.autopay_from = from;
-    }
-  }
-  if (spec.secured_by)
-    fields.secured_by = spec.secured_by;
-  if (t.revolving)
-    fields.statement_day = Math.min(28, d.day);
-  const out = [{ type: "spawn", entity: { id, kind: "account", name: spec.name, tier: "background", fields, relations: [] } }, { type: FINANCE_EVENTS.open, data: { accounts: [id] } }];
-  if (t.installment && typeof spec.cents === "number" && spec.cents > 0) {
-    const into = spec.into ?? depositAccount(ctx, holder) ?? external(holder);
-    out.push(...posting([{ account: id, amount: -Math.round(spec.cents) }, { account: into, amount: Math.round(spec.cents) }], { memo: `${spec.name}: loan paid out`, kind: "deposit", category: "loan" }));
-  }
-  if (spec.card && (t.revolving || t.transactional)) {
-    const cardId = `${id}_card`;
-    out.push({ type: "spawn", entity: { id: cardId, kind: "card", name: /\bcard$/i.test(spec.name) ? spec.name : `${spec.name} card`, tier: "background", fields: { account: id, holder, network: cls === "charge_card" ? "charge" : t.revolving ? "credit" : "debit", state: "active" }, relations: [] } });
-  }
-  for (const o of spec.owners)
-    if (o.role === "owner" || o.role === "joint") {
-      if (isParty(ctx, o.party) && t.liability)
-        out.push({ type: FINANCE_EVENTS.credit, data: { person: o.party, kind: "opened", account: id } });
-    }
-  return out;
-}
-function creditApplication(ctx, who, app) {
-  if (!isParty(ctx, who))
-    return reject8("missing_entity", `no ${labelOf(ctx, who)}`);
-  const reports = featureFor(ctx, who, "credit");
-  const decision = decide(ctx, who, app, reports);
-  if ("code" in decision)
-    return decision;
-  const inquiry = reports ? [{ type: FINANCE_EVENTS.credit, data: { person: who, kind: "inquiry", note: app.product.replace(/_/g, " ") } }] : [];
-  if (!decision.approved)
-    return { decision, events: inquiry };
-  if (app.into !== undefined && own(ctx.state.entities, app.into)) {
-    const unusable = mayUse(ctx, who, app.into, "into");
-    if (unusable)
-      return unusable;
-  }
-  const amount = decision.limit ?? app.cents;
-  const opened = openAccount(ctx, { ...app.id ? { id: app.id } : {}, name: app.name ?? decision.label, product: app.product, owners: [{ party: who, role: "owner" }], ...amount !== undefined ? { cents: amount } : {}, ...app.into !== undefined ? { into: app.into } : {}, ...app.term_months !== undefined ? { term_months: app.term_months } : {}, ...decision.apr !== null ? { apr_pct: decision.apr } : {}, ...app.secured_by ? { secured_by: app.secured_by } : {}, card: CLASS_TRAITS[decision.cls].revolving });
-  if ("code" in opened)
-    return opened;
-  return { decision, events: [...inquiry, ...opened] };
-}
-function applyForCredit(ctx, who, product, cents, term, securedBy) {
-  const made = creditApplication(ctx, who, { product, ...cents !== undefined ? { cents } : {}, ...term !== undefined ? { term_months: term } : {}, ...securedBy ? { secured_by: securedBy } : {} });
-  if ("code" in made)
-    return made;
-  const d = made.decision;
-  const note = d.approved ? signal("bill", `Approved: a ${d.label.toLowerCase()}${d.apr !== null ? ` at ${d.apr}% APR` : ""}${d.limit ? ` with a ${money(ctx, d.limit)} limit` : ""}.`, who, ctx.state.clock) : signal("decline", `The application for a ${d.label.toLowerCase()} was declined: ${d.reason}.`, who, ctx.state.clock);
-  return [...made.events, note];
-}
-function setPayPrefs(ctx, who, tiers) {
-  if (!isParty(ctx, who))
-    return reject8("missing_entity", `no ${labelOf(ctx, who)}`);
-  let raw = tiers;
-  if (typeof tiers === "string") {
-    try {
-      raw = JSON.parse(tiers);
-    } catch {
-      return reject8("bad_tiers", "payment preferences are a list of ways to pay");
-    }
-  }
-  const list = Array.isArray(raw) ? raw.map((t) => objOf(t)).filter((t) => typeof t.use === "string" && t.use !== "") : null;
-  if (!list)
-    return reject8("bad_tiers", "payment preferences are a list of ways to pay");
-  return [{ type: "set", entity: who, field: "pay_prefs", value: list }];
-}
-function closeAccount(ctx, account) {
-  const e = own(ctx.state.entities, account);
-  if (e?.kind !== "account")
-    return reject8("not_account", `${labelOf(ctx, account)} isn't an account`);
-  if (balance(ctx.state, account) !== 0)
-    return reject8("not_empty", `${labelOf(ctx, account)} still has ${money(ctx, balance(ctx.state, account))} on it`);
-  const opening = Math.round(numOf(e.fields.opening));
-  if (opening !== 0 && !isOpened(ctx.state, account, openerOf(ctx.state, account)))
-    return reject8("not_empty", `${labelOf(ctx, account)} opens with ${money(ctx, opening)} still to post`);
-  return [{ type: FINANCE_EVENTS.status, data: { account, status: "closed" } }, ...cardsOn(ctx.state, account).map((c) => ({ type: "set", entity: c, field: "state", value: "cancelled" }))];
-}
-function setStatus(ctx, account, status) {
-  if (own(ctx.state.entities, account)?.kind !== "account")
-    return reject8("not_account", `${labelOf(ctx, account)} isn't an account`);
-  if (!ACCOUNT_STATUSES.includes(status))
-    return reject8("bad_status", `an account can't be ${status}`);
-  if (statusOf(ctx.state, account) === status)
-    return [];
-  return status === "closed" ? closeAccount(ctx, account) : [{ type: FINANCE_EVENTS.status, data: { account, status } }];
-}
-function releaseHold(ctx, account, hold) {
-  if (!own(ctx.state.entities, account))
-    return reject8("not_account", `${labelOf(ctx, account)} isn't an account`);
-  return [{ type: FINANCE_EVENTS.hold, data: { id: hold, account, release: true } }];
-}
-
 // src/packs/economy/core/run.ts
 function scratchOf(state) {
   return { ...state, entities: { ...state.entities }, accounts: { ...state.accounts }, packs: { ...state.packs, economy: structuredClone(state.packs.economy ?? {}) }, materialized: { ...state.materialized } };
@@ -18643,15 +18275,15 @@ function flowIsIncome(ctx, flow, who) {
   const from = sideOf(ctx, flow.from);
   return !(("account" in from) && from.party === who || ("party" in from) && !("account" in from) && from.party === who);
 }
-function fallbackOf(ctx, flow) {
-  const fallback = flow.fallback;
-  if (!fallback)
-    return null;
-  const from = sideOf(ctx, flow.from);
-  const payers = "account" in from ? holdersOf(ctx.state, from.account).filter((h) => canSpend(ctx.state, from.account, h)) : ("party" in from) ? [from.party] : [];
+function fallsBackOn(ctx, from, fallback) {
+  const side = sideOf(ctx, from);
+  const payers = "account" in side ? holdersOf(ctx.state, side.account).filter((h) => canSpend(ctx.state, side.account, h)) : ("party" in side) ? [side.party] : [];
   if (payers.includes(fallback))
-    return fallback;
-  return own(ctx.state.entities, fallback)?.kind === "account" && payers.some((p) => canSpend(ctx.state, fallback, p)) ? fallback : null;
+    return true;
+  return own(ctx.state.entities, fallback)?.kind === "account" && payers.some((p) => canSpend(ctx.state, fallback, p));
+}
+function fallbackOf(ctx, flow) {
+  return flow.fallback && fallsBackOn(ctx, flow.from, flow.fallback) ? flow.fallback : null;
 }
 function bounceFee(ctx, flow, cents, at, overdraft) {
   const side = sideOf(ctx, flow.from);
@@ -18690,6 +18322,548 @@ function sharedAttempt(hooks, ctx, flow, cents, at, overdraft) {
     events.push(...paid.events);
   }
   return { events: asUnit(events), paid: cents };
+}
+
+// src/packs/economy/core/actions.ts
+function money(ctx, cents) {
+  return formatMoney(cents, ctx.world.currency);
+}
+function featureAt(ctx, who, field) {
+  let cur = placeOfEntity(ctx.state, who) ?? undefined;
+  for (let guard = 0;cur && guard < 32; guard++) {
+    const p = own(ctx.world.places, cur);
+    const f = objOf(p?.fields[field]);
+    if (typeof f.bank === "string" && f.bank !== "")
+      return { place: cur, feature: f };
+    cur = p?.parent;
+  }
+  return null;
+}
+function cashNeedsAMachine(ctx, who) {
+  if (!featureFor(ctx, who, "atm"))
+    return false;
+  return Object.values(ctx.world.places).some((p) => ["atm", "branch"].some((f) => {
+    const bank = objOf(p.fields[f]).bank;
+    return typeof bank === "string" && bank !== "";
+  }));
+}
+function debitCard(ctx, who, account) {
+  return cardsOn(ctx.state, account).find((c) => strOf(own(ctx.state.entities, c)?.fields.holder) === who && cardProblem(ctx, c, who) === null) ?? null;
+}
+function withdraw(ctx, who, account, raw) {
+  const cents = Math.round(raw);
+  if (!(cents > 0))
+    return reject8("bad_amount", "the amount must be positive");
+  if (!canSpend(ctx.state, account, who) || !traitsOf(ctx, account)?.pays || traitsOf(ctx, account)?.cash)
+    return reject8("not_owner", `${labelOf(ctx, who)} can't draw cash from ${labelOf(ctx, account)}`);
+  if (statusOf(ctx.state, account) !== "open")
+    return reject8("declined", `${labelOf(ctx, account)} is ${statusOf(ctx.state, account).replace(/_/g, " ")}`);
+  const wallet = cashAccount(ctx, who);
+  if (!wallet)
+    return reject8("no_wallet", `${labelOf(ctx, who)} has nowhere to carry cash`);
+  const p = productOf(ctx, account);
+  if (!p)
+    return reject8("missing_account", "no such account");
+  const t = traitsOf(ctx, account);
+  const atTop = cashNeedsAMachine(ctx, who);
+  const machine = [];
+  const advanceLines = [];
+  const extra = [];
+  let fees = 0;
+  let card = null;
+  let where = "";
+  if (atTop) {
+    const branch = featureAt(ctx, who, "branch");
+    const atm = featureAt(ctx, who, "atm");
+    if (branch && branch.feature.bank === p.institution)
+      where = `at ${own(ctx.world.places, branch.place)?.name ?? "the branch"}`;
+    else if (atm) {
+      card = debitCard(ctx, who, account);
+      if (!card)
+        return reject8("no_card", cardsOn(ctx.state, account).length > 0 ? `none of ${labelOf(ctx, who)}'s cards on ${labelOf(ctx, account)} works` : `${labelOf(ctx, account)} has no card for a cash machine`);
+      if (typeof atm.feature.limit === "number" && cents > atm.feature.limit)
+        return reject8("over_limit", `the machine gives at most ${money(ctx, atm.feature.limit)} at a time`);
+      if (cardRoom(ctx, card, "atm") < cents)
+        return reject8("over_limit", `${labelOf(ctx, card)} has ${money(ctx, cardRoom(ctx, card, "atm"))} left of its daily cash limit`);
+      where = `at ${own(ctx.world.places, atm.place)?.name ?? "a cash machine"}`;
+      if (accountFeature(ctx, account, "fees") && atm.feature.bank !== p.institution) {
+        const surcharge = Math.max(0, Math.round(numOf(atm.feature.fee)));
+        if (surcharge > 0)
+          machine.push({ account: external(`atm:${atm.feature.bank}`), amount: surcharge });
+        if (p.fees.atm > 0)
+          machine.push({ account: bankSide(p.institution), amount: p.fees.atm });
+        fees += surcharge + p.fees.atm;
+      }
+      if (Number.isFinite(cardRoom(ctx, card, "atm"))) {
+        const day = dateAt(calendarOf(ctx.world), ctx.state.clock).dayIndex;
+        const s = spendOf(ctx.state, card, day);
+        extra.push({ type: FINANCE_EVENTS.spend, data: { card, day, purchase: s.purchase, atm: s.atm + cents } });
+      }
+    } else
+      return reject8("no_atm", `there's no cash machine or ${p.institution || "bank"} branch here`);
+  }
+  const advance = cashAdvanceFee(ctx, account, cents);
+  if (advance > 0) {
+    advanceLines.push({ account: bankSide(p.institution), amount: advance });
+    fees += advance;
+  }
+  const total = cents + fees;
+  if (availableOf(ctx, account) < total)
+    return reject8("declined", `${labelOf(ctx, account)} can't cover ${money(ctx, total)}`);
+  const charge = (lines, memo, category) => {
+    const cents = lines.reduce((a, l) => a + l.amount, 0);
+    return cents > 0 ? posting([{ account, amount: -cents }, ...lines], { memo, kind: "fee", category }) : [];
+  };
+  const memo = `Cash withdrawal${where ? ` ${where}` : ""}${fees > 0 ? ` (${money(ctx, fees)} in fees)` : ""}`;
+  return asUnit([...charge(machine, "Cash machine fees", "atm"), ...charge(advanceLines, "Cash advance fee", "cash_advance"), ...posting([{ account, amount: -cents }, { account: wallet, amount: cents }], { memo, kind: "withdrawal", category: t?.revolving ? "cash_advance" : "transfer", ...card ? { card } : {} }), ...extra]);
+}
+function deposit(ctx, who, account, raw) {
+  const cents = Math.round(raw);
+  if (!(cents > 0))
+    return reject8("bad_amount", "the amount must be positive");
+  const unusable = mayUse(ctx, who, account, "into");
+  if (unusable)
+    return unusable;
+  if (traitsOf(ctx, account)?.cash || traitsOf(ctx, account)?.locked)
+    return reject8("not_owner", `${labelOf(ctx, who)} can't pay cash into ${labelOf(ctx, account)}`);
+  const wallet = cashAccount(ctx, who);
+  if (!wallet || availableOf(ctx, wallet) < cents)
+    return reject8("declined", `${labelOf(ctx, who)} doesn't have ${money(ctx, cents)} in cash`);
+  const p = productOf(ctx, account);
+  if (!p)
+    return reject8("missing_account", "no such account");
+  if (traitsOf(ctx, account)?.liability && cents > -balance(ctx.state, account))
+    return reject8("overpay", `${labelOf(ctx, account)} owes only ${money(ctx, Math.max(0, -balance(ctx.state, account)))}`);
+  let held = false;
+  let where = "";
+  if (cashNeedsAMachine(ctx, who)) {
+    const branch = featureAt(ctx, who, "branch");
+    const atm = featureAt(ctx, who, "atm");
+    if (branch && branch.feature.bank === p.institution)
+      where = ` at ${own(ctx.world.places, branch.place)?.name ?? "the branch"}`;
+    else if (atm && atm.feature.deposits === true && atm.feature.bank === p.institution) {
+      where = ` at ${own(ctx.world.places, atm.place)?.name ?? "a cash machine"}`;
+      held = accountFeature(ctx, account, "holds") && p.hold_days > 0;
+    } else
+      return reject8("no_atm", `there's no ${p.institution || "bank"} branch or deposit machine here`);
+  }
+  const lines = [
+    { account: wallet, amount: -cents },
+    { account, amount: cents }
+  ];
+  const events = posting(lines, { memo: `Cash deposit${where}`, kind: "deposit", category: "transfer" });
+  if (traitsOf(ctx, account)?.liability)
+    events.push({ type: FINANCE_EVENTS.cardPaid, data: { account, cents } });
+  if (held)
+    events.push({ type: FINANCE_EVENTS.hold, data: { id: `dep:${hashParts(account, ctx.state.clock, cents).slice(0, 10)}`, account, cents, until: ctx.state.clock + p.hold_days * 1440, kind: "deposit", memo: "Cash deposit" } });
+  return asUnit(events);
+}
+function setCardState(ctx, who, card, state) {
+  const e = own(ctx.state.entities, card);
+  if (e?.kind !== "card")
+    return reject8("not_card", `${labelOf(ctx, card)} isn't a payment card`);
+  if (strOf(e.fields.holder) !== who && !managesAccount(ctx, strOf(e.fields.account), who))
+    return reject8("not_owner", `${e.name} isn't ${labelOf(ctx, who)}'s`);
+  if (!CARD_STATES.includes(state))
+    return reject8("bad_state", `a card can't be ${state}`);
+  const now = strOf(e.fields.state, "active");
+  if (now === state)
+    return [];
+  if (now === "lost" || now === "cancelled")
+    return reject8("bad_state", `${e.name} is ${now}; replace it`);
+  return [{ type: "set", entity: card, field: "state", value: state }];
+}
+function replaceCard(ctx, who, card) {
+  const e = own(ctx.state.entities, card);
+  if (e?.kind !== "card")
+    return reject8("not_card", `${labelOf(ctx, card)} isn't a payment card`);
+  const holder = strOf(e.fields.holder);
+  if (holder !== who && !managesAccount(ctx, strOf(e.fields.account), who))
+    return reject8("not_owner", `${e.name} isn't ${labelOf(ctx, who)}'s`);
+  if (strOf(e.fields.state) === "cancelled" && strOf(e.fields.replaced_by) !== "")
+    return reject8("bad_state", `${e.name} was already replaced`);
+  let n = 2;
+  while (own(ctx.state.entities, `${card}_r${n}`))
+    n++;
+  const id = `${card}_r${n}`;
+  const last4 = String(1000 + Number.parseInt(hashParts(card, n).slice(0, 6), 16) % 9000);
+  const fields = { ...e.fields, state: "active", replaces: card, last4 };
+  delete fields.replaced_by;
+  delete fields.item;
+  const out = [{ type: "spawn", entity: { id, kind: "card", name: e.name, tier: "background", fields, relations: [] } }, { type: "set", entity: card, field: "state", value: "cancelled" }, { type: "set", entity: card, field: "replaced_by", value: id }];
+  const spawn = optionalService(ctx, "gear.spawn");
+  const oldItem = strOf(e.fields.item);
+  if (spawn && ctx.levelOf(holder, "gear") >= 1) {
+    const place = oldItem !== "" ? own(ctx.state.entities, oldItem)?.relations.find((r) => r.type === "in")?.to : undefined;
+    const made = spawn(ctx, { name: own(ctx.state.entities, oldItem)?.name ?? e.name, owner: holder, holder: place && own(ctx.state.entities, place) && !own(ctx.state.entities, oldItem)?.fields.lost ? place : holder, salt: `card:${id}` });
+    if (Array.isArray(made)) {
+      out.push(...made);
+      const item = made.find((x) => x.type === "spawn");
+      if (item?.type === "spawn")
+        out.push({ type: "set", entity: id, field: "item", value: item.entity.id });
+    }
+  }
+  const account = strOf(e.fields.account);
+  const p = productOf(ctx, account);
+  if (p && p.fees.card_replacement > 0 && accountFeature(ctx, account, "fees"))
+    out.push(...posting([{ account, amount: -p.fees.card_replacement }, { account: bankSide(p.institution), amount: p.fees.card_replacement }], { memo: `${e.name} replacement`, kind: "fee", category: "card_replacement" }));
+  return asUnit(out);
+}
+function said2(ctx, id) {
+  return shownLabel(ctx, ctx.world.pov, id);
+}
+function autopaySourceProblem(ctx, who, account, from) {
+  const t = traitsOf(ctx, from);
+  if (!canSpend(ctx.state, from, who) && !managesAccount(ctx, from, who) || !t?.pays || t.liability)
+    return reject8("bad_account", `${said2(ctx, who)} can't pay from ${said2(ctx, from)}`);
+  const debtors = debtorsOf(ctx.state, account);
+  if (!debtors.some((d) => canSpend(ctx.state, from, d) || rightsOf(ctx.state, from, d)?.worth === true))
+    return reject8("bad_account", `${said2(ctx, account)} is paid from ${said2(ctx, debtors[0] ?? who)}'s own money, not from ${said2(ctx, from)}`);
+  return null;
+}
+function setAutopay(ctx, who, account, mode, from, cents) {
+  const cls = classOf2(ctx, account);
+  if (!cls || !isCredit(cls))
+    return reject8("not_credit", `${labelOf(ctx, account)} isn't a card or a loan`);
+  if (!managesAccount(ctx, account, who))
+    return reject8("not_owner", `${labelOf(ctx, account)} isn't ${labelOf(ctx, who)}'s to change`);
+  if (!AUTOPAY_MODES.includes(mode))
+    return reject8("bad_mode", `autopay can't be ${mode}`);
+  const source = from === "" ? null : autopaySourceProblem(ctx, who, account, from);
+  if (source)
+    return source;
+  if (mode === "fixed" && !(cents > 0))
+    return reject8("bad_amount", "fixed autopay needs an amount");
+  const out = [{ type: "set", entity: account, field: "autopay", value: mode }];
+  if (from !== "")
+    out.push({ type: "set", entity: account, field: "autopay_from", value: from });
+  if (mode === "fixed")
+    out.push({ type: "set", entity: account, field: "autopay_cents", value: Math.round(cents) });
+  return out;
+}
+var FLOW_PARAM_FIELDS = { label: "", kind: "flow_kind", from: "from", to: "to", amount: "amount_cents", every: "every", interval: "interval", at: "at", start: "start", end: "end", count: "count", shortfall: "shortfall", retry_days: "retry_days", retries: "retries", fallback: "fallback", roll: "roll", category: "category" };
+function flowFields(args) {
+  const fields = {};
+  let label;
+  for (const [param, field] of Object.entries(FLOW_PARAM_FIELDS)) {
+    const v = args[param];
+    if (v === undefined || v === null || v === "")
+      continue;
+    if (param === "label")
+      label = String(v).slice(0, 80);
+    else
+      fields[field] = v;
+  }
+  if (typeof fields.flow_kind === "string" && !FLOW_KINDS.includes(fields.flow_kind))
+    return reject8("bad_flow", `a flow can't be a ${fields.flow_kind}`);
+  if (typeof fields.shortfall === "string" && !FLOW_SHORTFALLS.includes(fields.shortfall))
+    return reject8("bad_flow", `there's no shortfall policy ${fields.shortfall}`);
+  if (typeof fields.amount_cents === "number")
+    fields.amount_cents = Math.round(fields.amount_cents);
+  const every = args.every;
+  if (every === "once") {
+    delete fields.every;
+    fields.once = strOf(args.once);
+    if (fields.once === "")
+      return reject8("bad_flow", "a one-off flow needs its date and time");
+  } else if (every !== undefined && every !== null && every !== "") {
+    if (!["day", "week", "month", "year"].includes(String(every)))
+      return reject8("bad_flow", `a flow can't fall every ${String(every)}`);
+    fields.once = "";
+    if (typeof args.weekday === "number")
+      fields.weekdays = [args.weekday];
+    else if (every !== "week")
+      fields.weekdays = [];
+    if (typeof args.day === "number")
+      fields.days = [args.day];
+    else if (every === "week" || every === "day")
+      fields.days = [];
+    if (typeof args.month === "number")
+      fields.months = [args.month];
+    else if (every !== "year")
+      fields.months = [];
+  } else {
+    if (typeof args.weekday === "number")
+      fields.weekdays = [args.weekday];
+    if (typeof args.day === "number")
+      fields.days = [args.day];
+    if (typeof args.month === "number")
+      fields.months = [args.month];
+  }
+  return { fields, ...label !== undefined ? { label } : {} };
+}
+function mayPayFrom(ctx, who, from) {
+  return from === who || isParty(ctx, from) && managesParty(ctx.state, from, who) || managesAccount(ctx, from, who);
+}
+function worthHolders(ctx, id) {
+  return holdersOf(ctx.state, id).filter((h) => rightsOf(ctx.state, id, h)?.worth === true);
+}
+var WORTH_DEPTH = 4;
+function interestsOf(ctx, who) {
+  const household = householdOf(ctx, who);
+  const kin = household === null ? [who] : [who, household, ...membersOf(ctx.registry, ctx.world, ctx.state, household)];
+  const out = new Set(kin);
+  const parties = Object.keys(ctx.state.entities).filter((id) => !out.has(id) && isParty(ctx, id));
+  let reached = out;
+  for (let depth = 0;depth < WORTH_DEPTH && reached.size > 0; depth++) {
+    const next = new Set(parties.filter((id) => !out.has(id) && worthHolders(ctx, id).some((h) => reached.has(h))));
+    for (const id of next)
+      out.add(id);
+    reached = next;
+  }
+  return out;
+}
+function whoseMoney(ctx, side) {
+  const all = new Set;
+  const last = new Set;
+  let next = isParty(ctx, side) ? [side] : worthHolders(ctx, side);
+  for (let depth = 0;depth < WORTH_DEPTH && next.length > 0; depth++) {
+    const deeper = [];
+    for (const p of next.filter((q) => !all.has(q))) {
+      all.add(p);
+      const holders = worthHolders(ctx, p);
+      if (holders.length === 0 || depth === WORTH_DEPTH - 1)
+        last.add(p);
+      else
+        deeper.push(...holders);
+    }
+    next = deeper;
+  }
+  return { all, last };
+}
+function personal(ctx, id) {
+  const kind = own(ctx.state.entities, id)?.kind ?? "";
+  return kind !== "" && (kindIs(ctx.registry, ctx.world, kind, "person") || kindIs(ctx.registry, ctx.world, kind, "household"));
+}
+function paysFor(ctx, who, to, from, interests = interestsOf(ctx, who)) {
+  const { all: forHolder, last } = whoseMoney(ctx, from);
+  const stake = forHolder.has(who);
+  const wholly = last.size > 0 && [...last].every((p) => p === who);
+  forHolder.delete(who);
+  const mine = (party) => interests.has(party) && !forHolder.has(party) && (!wholly || personal(ctx, party));
+  const id = to.startsWith(EXTERNAL_ACCOUNT_PREFIX) ? to.slice(EXTERNAL_ACCOUNT_PREFIX.length) : to;
+  const e = own(ctx.state.entities, id);
+  if (e?.kind === "account")
+    return !stake && canSpend(ctx.state, id, who) || worthHolders(ctx, id).some(mine);
+  if (e)
+    return mine(id);
+  const key = payeeKey(id);
+  const household = householdOf(ctx, who);
+  return key !== "" && [who, household].some((p) => p !== null && (key === payeeKey(p) || key === payeeKey(own(ctx.state.entities, p)?.name ?? "")));
+}
+function flowProblem(ctx, who, from, to, fallback) {
+  if (!mayPayFrom(ctx, who, from))
+    return reject8("not_owner", `${said2(ctx, who)} can't pay from ${said2(ctx, from)}`);
+  if (fallback !== "" && (!mayPayFrom(ctx, who, fallback) || !fallsBackOn(ctx, from, fallback))) {
+    return reject8("not_owner", own(ctx.state.entities, fallback) ? `${said2(ctx, who)} can't fall back on ${said2(ctx, fallback)}` : `a fallback is an account of ${said2(ctx, who)}'s, not "${fallback}"`);
+  }
+  const managed = [from, fallback].filter((side) => side !== "" && side !== who && (isParty(ctx, side) || !canSpend(ctx.state, side, who)));
+  const paying = managed.find((side) => paysFor(ctx, who, to, side));
+  if (paying === undefined)
+    return null;
+  if (isParty(ctx, paying))
+    return reject8("not_owner", `${said2(ctx, paying)} pays for itself, not for ${said2(ctx, who)}`);
+  const holder = holdersOf(ctx.state, paying).find((h) => managesParty(ctx.state, h, who)) ?? paying;
+  return reject8("not_owner", `${said2(ctx, paying)} pays for ${said2(ctx, holder)}, not for ${said2(ctx, who)}`);
+}
+function createFlow(ctx, who, args) {
+  const made = flowFields(args);
+  if ("code" in made)
+    return made;
+  const f = made.fields;
+  const from = strOf(f.from);
+  const to = strOf(f.to);
+  if (from === "" || to === "" || typeof f.amount_cents !== "number" || !(f.amount_cents > 0))
+    return reject8("bad_flow", "a flow needs who pays, who is paid and an amount");
+  const problem = flowProblem(ctx, who, from, to, strOf(f.fallback));
+  if (problem)
+    return problem;
+  if (f.once === undefined && f.every === undefined)
+    return reject8("bad_flow", "a flow needs a schedule");
+  const label = made.label ?? `Payment to ${labelOf(ctx, to)}`;
+  const toMine = own(ctx.state.entities, to)?.kind === "account" && rightsOf(ctx.state, to, who) !== null;
+  const fields = { flow_kind: toMine ? "transfer" : "bill", shortfall: "skip", status: "active", ...f };
+  const id = `flow_${who}_${hashParts(who, label, ctx.state.clock).slice(0, 8)}`;
+  const entity = { id, kind: "flow", name: label, tier: "background", fields, relations: [] };
+  return [{ type: "spawn", entity }];
+}
+var CLEARABLE = ["at", "start", "end", "count", "roll", "retry_days", "retries", "fallback", "category"];
+function renameAndClear(current, id, name, clear) {
+  const names = typeof clear === "string" ? clear.split(",").map((s) => s.trim()).filter((s) => s !== "") : [];
+  const bad = names.find((n) => !CLEARABLE.includes(n));
+  if (bad !== undefined)
+    return reject8("bad_flow", `a standing payment's ${bad.replace(/_/g, " ")} can't be cleared`);
+  const out = [...new Set(names)].map((n) => ({ type: "set", entity: id, field: FLOW_PARAM_FIELDS[n] ?? n, value: null }));
+  const label = name?.trim().slice(0, 80) ?? "";
+  if (label !== "" && label !== current)
+    out.push({ type: FINANCE_EVENTS.flowRenamed, data: { flow: id, name: label } });
+  return out;
+}
+function updateFlow(ctx, who, flow, args) {
+  const e = own(ctx.state.entities, flow);
+  if (e?.kind !== "flow")
+    return reject8("not_flow", `${labelOf(ctx, flow)} isn't a standing payment`);
+  if (!mayPayFrom(ctx, who, strOf(e.fields.from)))
+    return reject8("not_owner", `${e.name} isn't ${labelOf(ctx, who)}'s to change`);
+  const made = flowFields(args);
+  if ("code" in made)
+    return made;
+  const more = renameAndClear(e.name, flow, made.label, args.clear);
+  if ("code" in more)
+    return more;
+  const both = more.find((x) => x.type === "set" && (x.field in made.fields));
+  if (both && both.type === "set")
+    return reject8("bad_flow", `a standing payment's ${both.field.replace(/_/g, " ")} can't be both changed and cleared`);
+  const cleared = new Set(more.flatMap((x) => x.type === "set" ? [x.field] : []));
+  const after = (field) => cleared.has(field) ? "" : strOf(made.fields[field] ?? e.fields[field]);
+  const problem = flowProblem(ctx, who, after("from"), after("to"), after("fallback"));
+  if (problem)
+    return problem;
+  return [...Object.entries(made.fields).map(([field, value]) => ({ type: "set", entity: flow, field, value })), ...more];
+}
+function editFlow(ctx, flow, name, clear) {
+  const e = own(ctx.state.entities, flow);
+  if (e?.kind !== "flow")
+    return reject8("not_flow", `${labelOf(ctx, flow)} isn't a standing payment`);
+  return renameAndClear(e.name, flow, name, clear);
+}
+function setFlowStatus(ctx, who, flow, status) {
+  const e = own(ctx.state.entities, flow);
+  if (e?.kind !== "flow")
+    return reject8("not_flow", `${labelOf(ctx, flow)} isn't a standing payment`);
+  if (!mayPayFrom(ctx, who, strOf(e.fields.from)))
+    return reject8("not_owner", `${e.name} isn't ${labelOf(ctx, who)}'s to change`);
+  const out = [{ type: "set", entity: flow, field: "status", value: status }];
+  if (status === "ended")
+    out.push({ type: "set", entity: flow, field: GONE_FIELD, value: true });
+  return out;
+}
+function newAccountId(ctx, spec) {
+  const base = `${spec.owners[0]?.party ?? "acct"}_${spec.product}`;
+  let id = spec.id ?? `${base}_${hashParts(base, spec.name, ctx.state.clock).slice(0, 6)}`;
+  while (own(ctx.state.entities, id))
+    id = `${id}x`;
+  return id;
+}
+function openAccount(ctx, spec) {
+  const products = worldProducts(ctx.world);
+  const cls = own(products, spec.product)?.class ?? (isAccountClass(spec.product) ? spec.product : null);
+  if (!cls)
+    return reject8("bad_product", `there's no product ${spec.product.replace(/_/g, " ")}`);
+  const holder = spec.owners[0]?.party;
+  if (!holder || !own(ctx.state.entities, holder))
+    return reject8("missing_entity", "an account needs an owner");
+  const id = newAccountId(ctx, spec);
+  const cal = calendarOf(ctx.world);
+  const d = dateAt(cal, ctx.state.clock);
+  const opened = `${String(d.year).padStart(4, "0")}-${String(d.month).padStart(2, "0")}-${String(d.day).padStart(2, "0")}`;
+  const t = CLASS_TRAITS[cls];
+  const fields = { owners: spec.owners.map((o) => ({ party: o.party, role: o.role, ...o.share !== undefined ? { share: o.share } : {} })), product: spec.product, opening: 0, opened, status: "open" };
+  if (spec.apr_pct !== undefined)
+    fields.apr_pct = spec.apr_pct;
+  if (t.revolving && typeof spec.cents === "number")
+    fields.limit = Math.round(spec.cents);
+  if (t.installment) {
+    if (spec.term_months !== undefined) {
+      fields.term_months = spec.term_months;
+      fields.months_left = spec.term_months;
+    }
+    fields.due_day = Math.min(28, d.day);
+    const from = depositAccount(ctx, holder);
+    if (from) {
+      fields.autopay = "minimum";
+      fields.autopay_from = from;
+    }
+  }
+  if (spec.secured_by)
+    fields.secured_by = spec.secured_by;
+  if (t.revolving)
+    fields.statement_day = Math.min(28, d.day);
+  const out = [{ type: "spawn", entity: { id, kind: "account", name: spec.name, tier: "background", fields, relations: [] } }, { type: FINANCE_EVENTS.open, data: { accounts: [id] } }];
+  if (t.installment && typeof spec.cents === "number" && spec.cents > 0) {
+    const into = spec.into ?? depositAccount(ctx, holder) ?? external(holder);
+    out.push(...posting([{ account: id, amount: -Math.round(spec.cents) }, { account: into, amount: Math.round(spec.cents) }], { memo: `${spec.name}: loan paid out`, kind: "deposit", category: "loan" }));
+  }
+  if (spec.card && (t.revolving || t.transactional)) {
+    const cardId = `${id}_card`;
+    out.push({ type: "spawn", entity: { id: cardId, kind: "card", name: /\bcard$/i.test(spec.name) ? spec.name : `${spec.name} card`, tier: "background", fields: { account: id, holder, network: cls === "charge_card" ? "charge" : t.revolving ? "credit" : "debit", state: "active" }, relations: [] } });
+  }
+  for (const o of spec.owners)
+    if (o.role === "owner" || o.role === "joint") {
+      if (isParty(ctx, o.party) && t.liability)
+        out.push({ type: FINANCE_EVENTS.credit, data: { person: o.party, kind: "opened", account: id } });
+    }
+  return out;
+}
+function creditApplication(ctx, who, app) {
+  if (!isParty(ctx, who))
+    return reject8("missing_entity", `no ${labelOf(ctx, who)}`);
+  const reports = featureFor(ctx, who, "credit");
+  const decision = decide(ctx, who, app, reports);
+  if ("code" in decision)
+    return decision;
+  const inquiry = reports ? [{ type: FINANCE_EVENTS.credit, data: { person: who, kind: "inquiry", note: app.product.replace(/_/g, " ") } }] : [];
+  if (!decision.approved)
+    return { decision, events: inquiry };
+  if (app.into !== undefined && own(ctx.state.entities, app.into)) {
+    const unusable = mayUse(ctx, who, app.into, "into");
+    if (unusable)
+      return unusable;
+  }
+  const amount = decision.limit ?? app.cents;
+  const opened = openAccount(ctx, { ...app.id ? { id: app.id } : {}, name: app.name ?? decision.label, product: app.product, owners: [{ party: who, role: "owner" }], ...amount !== undefined ? { cents: amount } : {}, ...app.into !== undefined ? { into: app.into } : {}, ...app.term_months !== undefined ? { term_months: app.term_months } : {}, ...decision.apr !== null ? { apr_pct: decision.apr } : {}, ...app.secured_by ? { secured_by: app.secured_by } : {}, card: CLASS_TRAITS[decision.cls].revolving });
+  if ("code" in opened)
+    return opened;
+  return { decision, events: [...inquiry, ...opened] };
+}
+function applyForCredit(ctx, who, product, cents, term, securedBy) {
+  const made = creditApplication(ctx, who, { product, ...cents !== undefined ? { cents } : {}, ...term !== undefined ? { term_months: term } : {}, ...securedBy ? { secured_by: securedBy } : {} });
+  if ("code" in made)
+    return made;
+  const d = made.decision;
+  const note = d.approved ? signal("bill", `Approved: a ${d.label.toLowerCase()}${d.apr !== null ? ` at ${d.apr}% APR` : ""}${d.limit ? ` with a ${money(ctx, d.limit)} limit` : ""}.`, who, ctx.state.clock) : signal("decline", `The application for a ${d.label.toLowerCase()} was declined: ${d.reason}.`, who, ctx.state.clock);
+  return [...made.events, note];
+}
+function setPayPrefs(ctx, who, tiers) {
+  if (!isParty(ctx, who))
+    return reject8("missing_entity", `no ${labelOf(ctx, who)}`);
+  let raw = tiers;
+  if (typeof tiers === "string") {
+    try {
+      raw = JSON.parse(tiers);
+    } catch {
+      return reject8("bad_tiers", "payment preferences are a list of ways to pay");
+    }
+  }
+  const list = Array.isArray(raw) ? raw.map((t) => objOf(t)).filter((t) => typeof t.use === "string" && t.use !== "") : null;
+  if (!list)
+    return reject8("bad_tiers", "payment preferences are a list of ways to pay");
+  return [{ type: "set", entity: who, field: "pay_prefs", value: list }];
+}
+function closeAccount(ctx, account) {
+  const e = own(ctx.state.entities, account);
+  if (e?.kind !== "account")
+    return reject8("not_account", `${labelOf(ctx, account)} isn't an account`);
+  if (balance(ctx.state, account) !== 0)
+    return reject8("not_empty", `${labelOf(ctx, account)} still has ${money(ctx, balance(ctx.state, account))} on it`);
+  const opening = Math.round(numOf(e.fields.opening));
+  if (opening !== 0 && !isOpened(ctx.state, account, openerOf(ctx.state, account)))
+    return reject8("not_empty", `${labelOf(ctx, account)} opens with ${money(ctx, opening)} still to post`);
+  return [{ type: FINANCE_EVENTS.status, data: { account, status: "closed" } }, ...cardsOn(ctx.state, account).map((c) => ({ type: "set", entity: c, field: "state", value: "cancelled" }))];
+}
+function setStatus(ctx, account, status) {
+  if (own(ctx.state.entities, account)?.kind !== "account")
+    return reject8("not_account", `${labelOf(ctx, account)} isn't an account`);
+  if (!ACCOUNT_STATUSES.includes(status))
+    return reject8("bad_status", `an account can't be ${status}`);
+  if (statusOf(ctx.state, account) === status)
+    return [];
+  return status === "closed" ? closeAccount(ctx, account) : [{ type: FINANCE_EVENTS.status, data: { account, status } }];
+}
+function releaseHold(ctx, account, hold) {
+  if (!own(ctx.state.entities, account))
+    return reject8("not_account", `${labelOf(ctx, account)} isn't an account`);
+  return [{ type: FINANCE_EVENTS.hold, data: { id: hold, account, release: true } }];
 }
 
 // src/packs/economy/core/kinds.ts
@@ -19553,22 +19727,75 @@ function moneySummary(hooks, ctx, who) {
 
 // src/packs/economy/core/view.ts
 var DAY2 = 1440;
+var NO_HIDDEN = { pattern: null, reads: [] };
+var SOMEONE = { first: "Someone", within: "someone" };
+var SOMEWHERE = { first: "Somewhere", within: "somewhere" };
 function visible(ctx, viewer, id) {
-  const pov = viewer.pov;
-  if (pov === null || id === pov)
-    return true;
-  const e = own(ctx.state.entities, id);
-  if (!e)
-    return true;
-  if (!canSeeEntity(ctx.registry, ctx.world, ctx.state, pov, id))
-    return false;
-  if (e.kind !== "account" && e.kind !== "card")
-    return true;
-  const account = e.kind === "card" ? strOf(e.fields.account) : id;
-  if (rightsOf(ctx.state, account, pov) !== null)
-    return true;
-  const holders = holdersOf(ctx.state, account).filter((h) => own(ctx.state.entities, h));
-  return holders.length === 0 || holders.some((h) => canSeeEntity(ctx.registry, ctx.world, ctx.state, pov, h));
+  return seenBy(ctx, viewer.pov, id);
+}
+function hiddenWords(ctx, id) {
+  const kind = own(ctx.state.entities, id)?.kind ?? "";
+  if (isParty(ctx, id))
+    return SOMEONE;
+  if (kind === "account")
+    return { first: traitsOf(ctx, id)?.label ?? "An account", within: "an account" };
+  if (kind === "card")
+    return { first: "A card", within: "a card" };
+  if (kindIs(ctx.registry, ctx.world, kind, "property"))
+    return { first: "A property", within: "a property" };
+  return { first: "Something", within: "something" };
+}
+function hiddenNames2(ctx, pov) {
+  const viewer = { pov, hidden: NO_HIDDEN };
+  const seenNames = new Set;
+  const seenWords = new Set;
+  const hidden = [];
+  for (const [id, e] of Object.entries(ctx.state.entities)) {
+    const person = kindIs(ctx.registry, ctx.world, e.kind, "person");
+    if (visible(ctx, viewer, id)) {
+      seenNames.add(e.name.toLowerCase());
+      if (person)
+        for (const w of personWords(e.name))
+          seenWords.add(w.plain);
+    } else
+      hidden.push({ name: e.name, person, reads: hiddenWords(ctx, id) });
+  }
+  for (const [id, p] of Object.entries(ctx.world.places)) {
+    if (canSeePlace(ctx.registry, ctx.world, ctx.state, pov, id)) {
+      seenNames.add(p.name.toLowerCase());
+      for (const w of personWords(p.name))
+        seenWords.add(w.plain);
+    } else
+      hidden.push({ name: p.name, person: false, reads: SOMEWHERE });
+  }
+  const ways = new Map;
+  const say = (source, length, reads) => {
+    if (!ways.has(source))
+      ways.set(source, { length, reads });
+  };
+  for (const h of hidden) {
+    if (h.name.length >= 3 && !seenNames.has(h.name.toLowerCase()))
+      say(`(?<![\\p{L}\\p{M}\\p{N}])${h.name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\p{L}\\p{M}\\p{N}])`, h.name.length, h.reads);
+    if (!h.person)
+      continue;
+    for (const w of personWords(h.name))
+      if (!seenWords.has(w.plain))
+        for (const spelt of new Set([w.written, w.plain]))
+          say(wordPattern(spelt), spelt.length, SOMEONE);
+  }
+  const sorted = [...ways].sort((a, b) => b[1].length - a[1].length);
+  return sorted.length === 0 ? NO_HIDDEN : { pattern: new RegExp(sorted.map(([source]) => `(${source})`).join("|"), "giu"), reads: sorted.map(([, w]) => w.reads) };
+}
+function says(viewer, text) {
+  const { pattern, reads } = viewer.hidden;
+  if (pattern === null)
+    return text;
+  return text.normalize("NFC").replace(pattern, (match, ...rest) => {
+    const reading = reads[rest.slice(0, reads.length).findIndex((group) => typeof group === "string")];
+    if (!reading)
+      return match;
+    return rest[reads.length] === 0 ? reading.first : reading.within;
+  });
 }
 function nameFor(ctx, viewer, id) {
   const e = own(ctx.state.entities, id);
@@ -19581,7 +19808,11 @@ function idFor(ctx, viewer, id) {
 }
 function sideName(ctx, viewer, raw) {
   const id = raw.startsWith(EXTERNAL_ACCOUNT_PREFIX) ? raw.slice(EXTERNAL_ACCOUNT_PREFIX.length) : raw;
-  return own(ctx.state.entities, id) ? nameFor(ctx, viewer, id) : outsideName(ctx, raw);
+  return own(ctx.state.entities, id) ? nameFor(ctx, viewer, id) : outsideName(ctx, raw, viewer.pov);
+}
+function sideSeen(ctx, viewer, raw) {
+  const id = raw.startsWith(EXTERNAL_ACCOUNT_PREFIX) ? raw.slice(EXTERNAL_ACCOUNT_PREFIX.length) : raw;
+  return own(ctx.state.entities, id) ? visible(ctx, viewer, id) : !outsideHidden(ctx, raw, viewer.pov);
 }
 function counterpartyName(ctx, viewer, raw) {
   if (viewer.pov !== null && !own(ctx.state.entities, raw)) {
@@ -19597,6 +19828,18 @@ function when(ctx, at) {
 function day(ctx, at) {
   return formatClock(calendarOf(ctx.world), at).split(",")[0] ?? "";
 }
+function stringsIn2(value, out) {
+  if (typeof value === "string")
+    out.add(value);
+  else if (Array.isArray(value))
+    for (const v of value)
+      stringsIn2(v, out);
+  else if (typeof value === "object" && value !== null) {
+    const fields = Object.values(value);
+    for (const v of fields)
+      stringsIn2(v, out);
+  }
+}
 function partyKindOf(ctx, id) {
   const kind = own(ctx.state.entities, id)?.kind ?? "";
   for (const k of ["business", "trust", "household"])
@@ -19611,10 +19854,11 @@ function shown2(ctx, account) {
 function shownAvailable(ctx, account) {
   return availableOf(ctx, account) + shown2(ctx, account) - balance(ctx.state, account);
 }
-function journalLine(ctx, viewer, j) {
-  const self = holdersOf(ctx.state, j.account).find((h) => own(ctx.state.entities, h)) ?? j.account;
-  const counterparty = j.counterparty && j.counterparty !== self ? counterpartyName(ctx, viewer, j.counterparty) : null;
-  return { id: j.id, at: when(ctx, j.at), memo: j.memo, cents: j.cents, account: nameFor(ctx, viewer, j.account), accountId: j.account, kind: j.kind ?? null, category: j.category ?? null, counterparty, card: j.card ? nameFor(ctx, viewer, j.card) : null, status: j.status };
+function journalLine(ctx, viewer, party, j) {
+  const worth = Object.entries(worthShares(ownersOf(ctx.state, j.account))).filter(([, share]) => share > 0);
+  const whose = worth.length === 1 ? worth[0]?.[0] ?? j.account : j.account;
+  const counterparty = j.counterparty && j.counterparty !== party && j.counterparty !== whose ? counterpartyName(ctx, viewer, j.counterparty) : null;
+  return { id: j.id, at: when(ctx, j.at), memo: says(viewer, j.memo), cents: j.cents, account: nameFor(ctx, viewer, j.account), accountId: j.account, kind: j.kind ?? null, category: j.category ?? null, counterparty, card: j.card ? nameFor(ctx, viewer, j.card) : null, status: j.status };
 }
 function cardView(ctx, viewer, card) {
   const e = own(ctx.state.entities, card);
@@ -19711,6 +19955,7 @@ function accountView(ctx, viewer, party, account, level, detail) {
   const cents = shown2(ctx, account);
   const statements = featureOn(level, "statements", toggles(ctx.world));
   const holds = featureOn(level, "holds", toggles(ctx.world));
+  const cards = featureOn(level, "cards", toggles(ctx.world));
   const autopayMode = strOf(e?.fields.autopay, "none");
   const autopayFrom = strOf(e?.fields.autopay_from);
   const securedBy = strOf(e?.fields.secured_by);
@@ -19729,6 +19974,9 @@ function accountView(ctx, viewer, party, account, level, detail) {
     owners: owners.map((o) => ({ party: idFor(ctx, viewer, o.party), name: nameFor(ctx, viewer, o.party), role: o.role, share: Math.round((own(shares, o.party) ?? 0) * 100) / 100 })),
     role,
     manages: managesAccount(ctx, account, party),
+    spends: canSpend(ctx.state, account, party),
+    autopayFrom: [],
+    fallbacks: [],
     limit: level >= 3 && t.liability ? p?.limit ?? null : null,
     aprPct: level >= 4 && t.liability ? p?.apr_pct ?? null : null,
     apyPct: level >= 4 && t.earns ? p?.apy_pct ?? null : null,
@@ -19736,10 +19984,10 @@ function accountView(ctx, viewer, party, account, level, detail) {
     autopay: level >= 3 && (t.revolving || t.installment) ? { mode: AUTOPAY_MODES.includes(autopayMode) ? autopayMode : "none", from: autopayFrom ? idFor(ctx, viewer, autopayFrom) : null, fromName: autopayFrom ? nameFor(ctx, viewer, autopayFrom) : null, cents: autopayMode === "fixed" ? numOf(e?.fields.autopay_cents) : null } : null,
     due: statements ? due : null,
     statements: statements && (t.revolving || t.installment) ? [statementView(ctx, cycle), ...pastStatements(ctx, account)].filter((s) => s !== null) : [],
-    cards: level >= 3 ? cardsOn(ctx.state, account).map((c) => cardView(ctx, viewer, c)) : [],
-    pending: holds ? journal.filter((j) => j.status === "pending").reverse().map((j) => journalLine(ctx, viewer, j)) : [],
-    holds: holds ? holdsOn(ctx.state, account).map((h) => ({ id: h.id, cents: h.cents, until: day(ctx, h.until), kind: h.kind, memo: h.memo })) : [],
-    transactions: level >= 2 ? journal.slice(-(level >= 4 ? 40 : 20)).reverse().map((j) => journalLine(ctx, viewer, j)) : [],
+    cards: cards ? cardsOn(ctx.state, account).map((c) => cardView(ctx, viewer, c)) : [],
+    pending: holds ? journal.filter((j) => j.status === "pending").reverse().map((j) => journalLine(ctx, viewer, party, j)) : [],
+    holds: holds ? holdsOn(ctx.state, account).map((h) => ({ id: h.id, cents: h.cents, until: day(ctx, h.until), kind: h.kind, memo: says(viewer, h.memo) })) : [],
+    transactions: level >= 2 ? journal.slice(-(level >= 4 ? 40 : 20)).reverse().map((j) => journalLine(ctx, viewer, party, j)) : [],
     securedBy: securedBy !== "" && own(ctx.state.entities, securedBy) && visible(ctx, viewer, securedBy) ? { id: securedBy, name: nameFor(ctx, viewer, securedBy) } : null,
     loan: t.installment && level >= 3 ? { payment: typeof e?.fields.payment === "number" ? e.fields.payment : cycle?.minimum ?? 0, monthsLeft: cycle?.months_left ?? numOf(e?.fields.months_left, numOf(e?.fields.remaining_months, p?.term_months ?? 0)), payoff: Math.max(0, -cents) } : null
   };
@@ -19780,9 +20028,11 @@ function amountWords(ctx, viewer, f) {
     return a.due === "minimum" ? "the minimum due" : a.due === "statement" ? "the statement balance" : "the whole balance";
   return "worked out each time";
 }
-function flowTouches(ctx, f, party) {
+function flowTouches(ctx, viewer, f, party) {
   const sides = [f.from, f.to, ...(f.splits ?? []).map((s) => s.to), ...(f.shares ?? []).flatMap((s) => [s.party, s.from ?? ""])];
-  return sides.some((id) => id === party || own(ctx.state.entities, id)?.kind === "account" && rightsOf(ctx.state, id, party)?.sees === true);
+  if (sides.some((id) => id === party || own(ctx.state.entities, id)?.kind === "account" && rightsOf(ctx.state, id, party)?.sees === true))
+    return true;
+  return own(ctx.state.entities, f.from)?.kind === "account" ? managesAccount(ctx, f.from, party) && visible(ctx, viewer, f.from) : managesParty(ctx.state, f.from, party);
 }
 function nextOf(ctx, f, horizon) {
   const from = ctx.state.clock;
@@ -19791,7 +20041,18 @@ function nextOf(ctx, f, horizon) {
   const candidates = [first?.at, retry?.at].filter((x) => typeof x === "number" && x > from);
   return candidates.length > 0 ? Math.min(...candidates) : null;
 }
-function flowView(hooks, ctx, viewer, party, f) {
+function linkView(ctx, viewer, link) {
+  const e = link === undefined ? undefined : own(ctx.state.entities, link);
+  if (link === undefined || !e || !visible(ctx, viewer, link))
+    return null;
+  if (!kindIs(ctx.registry, ctx.world, e.kind, "job") || visible(ctx, viewer, strOf(e.fields.worker)))
+    return { id: link, name: nameFor(ctx, viewer, link) };
+  const employer = strOf(e.fields.employer);
+  const at = employer === "" || outsideHidden(ctx, employer, viewer.pov) ? "" : own(ctx.state.entities, employer) ? nameFor(ctx, viewer, employer) : outsideName(ctx, `employer:${employer}`, viewer.pov);
+  const title = strOf(e.fields.title) || "A job";
+  return { id: opaqueId(link), name: at === "" ? title : `${title} at ${at}` };
+}
+function flowView(hooks, ctx, viewer, party, runsFlows, f) {
   const run = flowRunOf(ctx.state, f.id);
   const next = run.ended || f.status !== "active" ? null : nextOf(ctx, f, 400 * DAY2);
   let cents = null;
@@ -19801,11 +20062,13 @@ function flowView(hooks, ctx, viewer, party, f) {
   }
   const fromSide = own(ctx.state.entities, f.from);
   const payerHolds = fromSide?.kind === "account" ? managesAccount(ctx, f.from, party) : f.from === party || managesParty(ctx.state, f.from, party);
+  const editable = runsFlows && f.source === "entity" && payerHolds;
   const sides = [f.from, f.to, f.fallback ?? "", f.link ?? "", ...(f.splits ?? []).map((s) => s.to), ...(f.shares ?? []).flatMap((s) => [s.party, s.from ?? ""])].filter((id) => id !== "");
-  const seen = sides.every((id) => visible(ctx, viewer, id));
+  const seen = sides.every((id) => sideSeen(ctx, viewer, id));
+  const actsOn = editable || f.kind === "rent" && f.link !== undefined && shareOf(ctx.state, f.link, party) > 0;
   return {
-    id: f.id,
-    label: f.label,
+    id: seen || actsOn ? f.id : opaqueId(f.id),
+    label: says(viewer, f.label),
     kind: f.kind,
     from: sideName(ctx, viewer, f.from),
     to: sideName(ctx, viewer, f.to),
@@ -19816,9 +20079,9 @@ function flowView(hooks, ctx, viewer, party, f) {
     shortfall: f.shortfall,
     status: run.ended || f.schedule.once !== undefined && run.done > 0 && own(ctx.state.entities, f.id)?.kind === "flow" ? "ended" : f.status,
     category: f.category ?? null,
-    link: f.link && own(ctx.state.entities, f.link) && visible(ctx, viewer, f.link) ? { id: f.link, name: nameFor(ctx, viewer, f.link) } : null,
+    link: linkView(ctx, viewer, f.link),
     payer: fromSide && visible(ctx, viewer, f.from) ? f.from : null,
-    editable: f.source === "entity" && payerHolds,
+    editable,
     source: f.source,
     done: run.done,
     missed: run.missed,
@@ -19834,13 +20097,7 @@ function signedFor(ctx, f, party, cents) {
     return cents;
   return 0;
 }
-function householdOf(ctx, party) {
-  if (kindIs(ctx.registry, ctx.world, own(ctx.state.entities, party)?.kind ?? "", "household"))
-    return party;
-  const rel = own(ctx.state.entities, party)?.relations.find((r) => r.type === MEMBER_OF && kindIs(ctx.registry, ctx.world, own(ctx.state.entities, r.to)?.kind ?? "", "household"));
-  return rel?.to ?? null;
-}
-function householdView(hooks, ctx, viewer, household, flows) {
+function householdView(ctx, viewer, household, flows, viewOf) {
   const members = membersOf(ctx.registry, ctx.world, ctx.state, household);
   const splitAmongMembers = (f) => (f.shares ?? []).length > 0 && (f.shares ?? []).every((s) => members.includes(s.party));
   const fromHouseholdAccount = (f) => own(ctx.state.entities, f.from)?.kind === "account" && rightsOf(ctx.state, f.from, household) !== null;
@@ -19862,12 +20119,29 @@ function householdView(hooks, ctx, viewer, household, flows) {
       return { id: idFor(ctx, viewer, m), name: nameFor(ctx, viewer, m), role: strOf(rel?.fields?.role), share: total > 0 ? Math.round(part * 1000 / total) / 10 : Math.round(1000 / Math.max(1, members.length)) / 10 };
     }),
     accounts: accountsOf(ctx, household).concat(members.length > 1 ? accountsOf(ctx, members[0] ?? household).filter((id) => members.every((m) => rightsOf(ctx.state, id, m) !== null)) : []).filter((id, i, all) => all.indexOf(id) === i),
-    flows: shared.map((f) => flowView(hooks, ctx, viewer, household, f)),
+    flows: shared.map(viewOf),
     monthly: { total, parts: members.map((m) => ({ id: idFor(ctx, viewer, m), name: nameFor(ctx, viewer, m), cents: partOf(m) })) }
   };
 }
 function buildFinanceView(hooks, ctx, party, player) {
-  const viewer = { pov: player ? ctx.world.pov : null };
+  const pov = player ? ctx.world.pov : null;
+  const viewer = { pov, hidden: pov === null ? NO_HIDDEN : hiddenNames2(ctx, pov) };
+  const runsFlows = featureFor(ctx, party, "flows");
+  const shownFlows = new Map;
+  const viewOf = (f) => {
+    const known = shownFlows.get(f.id);
+    if (known)
+      return known;
+    const made = flowView(hooks, ctx, viewer, party, runsFlows, f);
+    shownFlows.set(f.id, made);
+    return made;
+  };
+  let every = null;
+  const shownId = (id) => {
+    every ??= new Map(allFlows(hooks, ctx).map((f) => [f.id, f]));
+    const f = every.get(id);
+    return f ? viewOf(f).id : null;
+  };
   const e = own(ctx.state.entities, party);
   const kind = partyKindOf(ctx, party);
   const members = kind === "household" ? membersOf(ctx.registry, ctx.world, ctx.state, party) : [];
@@ -19876,35 +20150,37 @@ function buildFinanceView(hooks, ctx, party, player) {
   const detail = level >= 4;
   const features = FINANCE_FEATURES.filter((f) => featureFor(ctx, party, f));
   const mine = accountsOf(ctx, party);
-  const empty = { party, name: e?.name ?? party, partyKind: kind, level, detail, features, band: null, opened: true, cash: null, overview: null, accounts: [], cards: [], flows: [], jobs: [], businesses: [], investments: null, properties: [], credit: null, household: null, recent: [], notes: [], payPrefs: [] };
+  const empty = { party, name: e?.name ?? party, partyKind: kind, level, detail, features, band: null, opened: true, cash: null, overview: null, accounts: [], cards: [], flows: [], jobs: [], businesses: [], investments: null, properties: [], credit: null, household: null, recent: [], notes: [], payPrefs: [], paysFor: [], ownKeys: [] };
   if (level === 0)
     return empty;
   const worth = netWorthParts(hooks, ctx, party);
   const band = mine.length > 0 ? wealthBand(worth.net) : strOf(e?.fields.wealth, "modest");
   const opened = mine.every((id) => isOpened(ctx.state, id, openerOf(ctx.state, id)));
   if (kind === "household" && level >= 3 && mine.length === 0)
-    return { ...empty, band, cash: { band }, opened, household: householdView(hooks, ctx, viewer, party, allFlows(hooks, ctx)) };
+    return { ...empty, band, cash: { band }, opened, household: householdView(ctx, viewer, party, allFlows(hooks, ctx), viewOf) };
   if (level === 1 || mine.length === 0)
     return { ...empty, band, cash: { band }, opened };
   const firstTransactional = mine.find((id) => traitsOf(ctx, id)?.transactional);
   const shownAccounts = level >= 3 ? mine : mine.filter((id) => classOf2(ctx, id) === "cash" || id === firstTransactional);
   const accounts = shownAccounts.map((id) => accountView(ctx, viewer, party, id, level, detail));
   const cash = mine.filter((id) => classOf2(ctx, id) === "cash" && rightsOf(ctx.state, id, party)?.spend).reduce((a, id) => a + shown2(ctx, id), 0);
-  const flows = level >= 3 && featureFor(ctx, party, "flows") ? allFlows(hooks, ctx).filter((f) => flowTouches(ctx, f, party)) : [];
-  const flowViews = flows.map((f) => flowView(hooks, ctx, viewer, party, f));
+  const flows = runsFlows ? allFlows(hooks, ctx).filter((f) => flowTouches(ctx, viewer, f, party)) : [];
+  const flowViews = flows.map(viewOf);
   const now = ctx.state.clock;
   const upcoming = [];
-  for (const f of flows) {
-    const v = flowViews.find((x) => x.id === f.id);
+  const coming = new Set;
+  for (const [i, f] of flows.entries()) {
+    const v = flowViews[i];
     const next = f.status === "active" && !flowRunOf(ctx.state, f.id).ended ? nextOf(ctx, f, 31 * DAY2) : null;
     if (next === null || !v)
       continue;
     const cents = v.cents === null ? 0 : signedFor(ctx, f, party, v.cents);
-    upcoming.push({ at: when(ctx, next), clock: next, label: f.label, cents, flow: f.id, account: own(ctx.state.entities, f.from)?.kind === "account" ? f.from : null });
+    upcoming.push({ at: when(ctx, next), clock: next, label: v.label, cents, flow: v.id, account: own(ctx.state.entities, f.from)?.kind === "account" && visible(ctx, viewer, f.from) ? f.from : null });
+    coming.add(f.id);
   }
   for (const a of accounts) {
     const cycle = cycleOf2(ctx.state, a.id);
-    if (a.due && cycle && cycle.due > now && cycle.due <= now + 31 * DAY2 && !upcoming.some((u) => u.flow === `autopay:${a.id}`))
+    if (a.due && cycle && cycle.due > now && cycle.due <= now + 31 * DAY2 && !coming.has(`autopay:${a.id}`))
       upcoming.push({ at: when(ctx, cycle.due), clock: cycle.due, label: `${a.name} ${a.due.label.toLowerCase()}`, cents: -a.due.cents, flow: null, account: a.id });
   }
   const alerts = [];
@@ -19922,9 +20198,11 @@ function buildFinanceView(hooks, ctx, party, player) {
       if (c.state !== "active")
         alerts.push({ tone: "warn", text: `${c.name} is ${c.state}.`, account: a.id });
   }
-  for (const v of flowViews)
-    if (v.missed > 0 && v.status === "active" && (flowRunOf(ctx.state, v.id).last ?? -Infinity) > now - 31 * DAY2)
+  for (const [i, f] of flows.entries()) {
+    const v = flowViews[i];
+    if (v && v.missed > 0 && v.status === "active" && (flowRunOf(ctx.state, f.id).last ?? -Infinity) > now - 31 * DAY2)
       alerts.push({ tone: "warn", text: `${v.label} was missed.`, flow: v.id });
+  }
   const since = now - 30 * DAY2;
   let pastIn = 0;
   let pastOut = 0;
@@ -19951,7 +20229,7 @@ function buildFinanceView(hooks, ctx, party, player) {
     upcoming: level >= 3 ? upcoming.sort((a, b) => a.clock - b.clock).slice(0, 20) : [],
     alerts: level >= 3 ? alerts : []
   };
-  const recent = shownAccounts.flatMap((id) => journalOf(ctx.state, id)).sort((a, b) => b.at - a.at || (a.id < b.id ? 1 : -1)).slice(0, 10).map((j) => journalLine(ctx, viewer, j));
+  const recent = shownAccounts.flatMap((id) => journalOf(ctx.state, id)).sort((a, b) => b.at - a.at || (a.id < b.id ? 1 : -1)).slice(0, 10).map((j) => journalLine(ctx, viewer, party, j));
   const notesRaw = own(objOf(sliceOf(ctx.state, "economy").notes), party);
   const notes = player ? [] : (Array.isArray(notesRaw) ? notesRaw : []).slice(-NOTES_CAP).map((n) => objOf(n)).reverse().map((n) => ({ at: when(ctx, numOf(n.at)), text: strOf(n.text) }));
   const household = kind === "household" ? party : householdOf(ctx, party);
@@ -19965,28 +20243,51 @@ function buildFinanceView(hooks, ctx, party, player) {
     cards: accounts.flatMap((a) => a.cards),
     flows: flowViews,
     credit: partyKindOf(ctx, party) === "person" && featureOn(level, "credit", tog) ? creditReport(ctx, party) : null,
-    household: household && featureOn(level, "households", tog) ? householdView(hooks, ctx, viewer, household, allFlows(hooks, ctx)) : null,
+    household: household && featureOn(level, "households", tog) ? householdView(ctx, viewer, household, allFlows(hooks, ctx), viewOf) : null,
     recent,
     notes,
-    payPrefs: level >= 3 && partyKindOf(ctx, party) === "person" ? tiersOf(ctx, party) : []
+    payPrefs: featureFor(ctx, party, "payment_prefs") && partyKindOf(ctx, party) === "person" ? tiersOf(ctx, party) : []
+  };
+  const shownAlert = (a) => {
+    const flow = a.flow === undefined ? null : shownId(a.flow);
+    return flow === null ? { tone: a.tone, text: a.text, ...a.account !== undefined ? { account: a.account } : {} } : { ...a, flow };
   };
   for (const section of hooks.views) {
     const extra = section(ctx, party, view, viewer.pov);
     if (extra.jobs)
       view.jobs.push(...extra.jobs);
     if (extra.businesses)
-      view.businesses.push(...extra.businesses);
+      view.businesses.push(...extra.businesses.map((b) => ({ ...b, invoices: b.invoices.map((i) => i.flow === undefined ? i : { ...i, flow: shownId(i.flow) ?? i.flow }) })));
     if (extra.investments)
       view.investments = extra.investments;
     if (extra.properties)
       view.properties.push(...extra.properties);
     if (extra.upcoming && view.overview)
-      view.overview.upcoming = [...view.overview.upcoming, ...extra.upcoming].sort((a, b) => a.clock - b.clock).slice(0, 20);
+      view.overview.upcoming = [...view.overview.upcoming, ...extra.upcoming.map((u) => ({ ...u, flow: u.flow === null ? null : shownId(u.flow) }))].sort((a, b) => a.clock - b.clock).slice(0, 20);
     if (extra.alerts && view.overview)
-      view.overview.alerts.push(...extra.alerts);
+      view.overview.alerts.push(...extra.alerts.map(shownAlert));
   }
-  for (const b of view.businesses)
+  for (const b of view.businesses) {
+    b.accounts = b.accounts.filter((id) => visible(ctx, viewer, id));
     b.managed = level >= 3 ? b.accounts.filter((id) => !mine.includes(id) && managesAccount(ctx, id, party)).map((id) => accountView(ctx, viewer, party, id, level, detail)) : [];
+  }
+  const listed = [...view.accounts, ...view.businesses.flatMap((b) => b.managed)];
+  const pays = (id) => traitsOf(ctx, id)?.pays === true && mayPayFrom(ctx, party, id);
+  for (const a of listed) {
+    const others = listed.filter((x) => x.id !== a.id).map((x) => x.id);
+    a.autopayFrom = a.autopay !== null && a.manages ? others.filter((id) => autopaySourceProblem(ctx, party, a.id, id) === null) : [];
+    a.fallbacks = pays(a.id) ? others.filter((id) => pays(id) && fallsBackOn(ctx, a.id, id)) : [];
+  }
+  const interests = interestsOf(ctx, party);
+  const onlyManaged = (side) => side !== "" && side !== party && visible(ctx, viewer, side) && mayPayFrom(ctx, party, side) && (isParty(ctx, side) || !canSpend(ctx.state, side, party));
+  const payers = [...new Set([...listed.map((a) => a.id), ...view.flows.flatMap((f) => f.spec ? [f.spec.from, f.spec.fallback ?? ""] : [])])].filter(onlyManaged);
+  const carried = new Set;
+  stringsIn2(view, carried);
+  const payees = [...carried].filter((id) => own(ctx.state.entities, id)?.kind === "account" || isParty(ctx, id));
+  view.paysFor = payers.map((from) => ({ from, to: payees.filter((to) => paysFor(ctx, party, to, from, interests)) }));
+  const home = householdOf(ctx, party);
+  const keyed = [party, ...home !== null && visible(ctx, viewer, home) ? [home] : []];
+  view.ownKeys = [...new Set(keyed.flatMap((id) => [payeeKey(id), payeeKey(own(ctx.state.entities, id)?.name ?? "")]).filter((k) => k !== ""))];
   return view;
 }
 function buildMoneyView(hooks, ctx) {
@@ -20726,6 +21027,8 @@ function makeApi(hooks) {
     traitsOf: (books, account) => traitsOf(books, account),
     ownersOf: (state, entity) => ownersOf(state, entity),
     shareOf: (state, entity, party) => shareOf(state, entity, party),
+    interestsOf: (ctx, who) => interestsOf(ctx, who),
+    paysFor: (ctx, who, to, from) => paysFor(ctx, who, to, from),
     accountsOf: (books, party, right) => accountsOf(books, party, right ?? "sees"),
     balance: (state, account) => balance(state, account),
     available: (ctx, account) => availableOf(ctx, account) + overdraftRoom(ctx, account),
@@ -21153,7 +21456,7 @@ function registerActions(r) {
   r.action({ id: "withdraw_cash", label: "Withdraw cash", pack: "economy", params: { account: { type: "ref", ref: "account" }, amount: { type: "money" } }, requires: ["spends(self, account)", "amount > 0", "level.money >= 2"], outcomes: { default: [{ type: "economy.withdraw", args: { account: "account", cents: "=amount", who: "self" } }] }, duration: "3", lexicon: ["withdraw", "take out cash", "hit the atm", "get cash"], observable: "takes out cash" });
   r.action({ id: "deposit_cash", label: "Deposit cash", pack: "economy", params: { account: { type: "ref", ref: "account" }, amount: { type: "money" } }, requires: ["holds(self, account)", "amount > 0", "level.money >= 2"], outcomes: { default: [{ type: "economy.deposit", args: { account: "account", cents: "=amount", who: "self" } }] }, duration: "3", lexicon: ["deposit", "pay in cash", "bank the cash"], observable: "pays cash into the bank" });
   const card = { card: { type: "ref", ref: "card" } };
-  const cardBy = ["holds(self, card) or manages(self, card.account)", "level.money >= 3"];
+  const cardBy = ["holds(self, card) or manages(self, card.account)", "money_feature('cards', self)"];
   r.action({ id: "card_freeze", label: "Freeze card", pack: "economy", params: card, requires: cardBy, outcomes: { default: [{ type: "economy.card_state", args: { card: "card", state: "frozen", who: "self" } }] }, lexicon: ["freeze my card", "lock my card"], ...phone });
   r.action({ id: "card_unfreeze", label: "Unfreeze card", pack: "economy", params: card, requires: cardBy, outcomes: { default: [{ type: "economy.card_state", args: { card: "card", state: "active", who: "self" } }] }, lexicon: ["unfreeze my card", "unlock my card"], ...phone });
   r.action({ id: "card_report_lost", label: "Report card lost", pack: "economy", params: card, requires: cardBy, outcomes: { default: [{ type: "economy.card_state", args: { card: "card", state: "lost", who: "self" } }] }, lexicon: ["report my card lost", "my card was stolen", "cancel my card"], ...phone });
@@ -21183,14 +21486,15 @@ function registerActions(r) {
     category: { type: "text", optional: true }
   };
   const flowArgs = Object.fromEntries(Object.keys(flowParams).map((k) => [k, `=params.${k}`]));
-  r.action({ id: "flow_create", label: "Set up a standing payment", pack: "economy", params: flowParams, requires: ["level.money >= 3"], outcomes: { default: [{ type: "economy.flow_create", args: { ...flowArgs, who: "self" } }] }, lexicon: ["set up a standing order", "schedule a payment", "set up a recurring transfer"], ...phone });
-  r.action({ id: "flow_update", label: "Change a standing payment", pack: "economy", params: { flow: { type: "ref", ref: "flow" }, ...flowParams, clear: { type: "text", optional: true } }, requires: ["level.money >= 3"], outcomes: { default: [{ type: "economy.flow_update", args: { flow: "flow", ...flowArgs, clear: "=params.clear", who: "self" } }] }, lexicon: ["change the standing order", "change the recurring payment"], ...phone });
+  const flowsRun = ["money_feature('flows', self)"];
+  r.action({ id: "flow_create", label: "Set up a standing payment", pack: "economy", params: flowParams, requires: flowsRun, outcomes: { default: [{ type: "economy.flow_create", args: { ...flowArgs, who: "self" } }] }, lexicon: ["set up a standing order", "schedule a payment", "set up a recurring transfer"], ...phone });
+  r.action({ id: "flow_update", label: "Change a standing payment", pack: "economy", params: { flow: { type: "ref", ref: "flow" }, ...flowParams, clear: { type: "text", optional: true } }, requires: flowsRun, outcomes: { default: [{ type: "economy.flow_update", args: { flow: "flow", ...flowArgs, clear: "=params.clear", who: "self" } }] }, lexicon: ["change the standing order", "change the recurring payment"], ...phone });
   const flowOnly = { flow: { type: "ref", ref: "flow" } };
-  r.action({ id: "flow_pause", label: "Pause a standing payment", pack: "economy", params: flowOnly, requires: ["level.money >= 3"], outcomes: { default: [{ type: "economy.flow_status", args: { flow: "flow", status: "paused", who: "self" } }] }, lexicon: ["pause the standing order"], ...phone });
-  r.action({ id: "flow_resume", label: "Resume a standing payment", pack: "economy", params: flowOnly, requires: ["level.money >= 3"], outcomes: { default: [{ type: "economy.flow_status", args: { flow: "flow", status: "active", who: "self" } }] }, lexicon: ["resume the standing order"], ...phone });
-  r.action({ id: "flow_delete", label: "Cancel a standing payment", pack: "economy", params: flowOnly, requires: ["level.money >= 3"], outcomes: { default: [{ type: "economy.flow_status", args: { flow: "flow", status: "ended", who: "self" } }] }, lexicon: ["cancel the standing order", "stop the recurring payment"], ...phone });
+  r.action({ id: "flow_pause", label: "Pause a standing payment", pack: "economy", params: flowOnly, requires: flowsRun, outcomes: { default: [{ type: "economy.flow_status", args: { flow: "flow", status: "paused", who: "self" } }] }, lexicon: ["pause the standing order"], ...phone });
+  r.action({ id: "flow_resume", label: "Resume a standing payment", pack: "economy", params: flowOnly, requires: flowsRun, outcomes: { default: [{ type: "economy.flow_status", args: { flow: "flow", status: "active", who: "self" } }] }, lexicon: ["resume the standing order"], ...phone });
+  r.action({ id: "flow_delete", label: "Cancel a standing payment", pack: "economy", params: flowOnly, requires: flowsRun, outcomes: { default: [{ type: "economy.flow_status", args: { flow: "flow", status: "ended", who: "self" } }] }, lexicon: ["cancel the standing order", "stop the recurring payment"], ...phone });
   r.action({ id: "apply_credit", label: "Apply for credit", pack: "economy", params: { product: { type: "text", label: "Product (credit_card, line_of_credit, loan, or one of the world's)" }, amount: { type: "money", optional: true }, term: { type: "number", optional: true } }, requires: ["level.money >= 3"], outcomes: { default: [{ type: "economy.apply_credit", args: { product: "=params.product", cents: "=params.amount", term: "=params.term", who: "self" } }] }, duration: "15", lexicon: ["apply for a credit card", "apply for a loan", "take out a loan"], observable: "fills in an application" });
-  r.action({ id: "set_pay_prefs", label: "Set how I pay", pack: "economy", params: { tiers: { type: "text", label: "Ways to pay, in order: a JSON list of {use, min?, max?, categories?, except?}" } }, requires: ["level.money >= 3"], outcomes: { default: [{ type: "economy.set_pay_prefs", args: { tiers: "=params.tiers", who: "self" } }] }, lexicon: ["i'd rather pay with"], ...phone });
+  r.action({ id: "set_pay_prefs", label: "Set how I pay", pack: "economy", params: { tiers: { type: "text", label: "Ways to pay, in order: a JSON list of {use, min?, max?, categories?, except?}" } }, requires: ["money_feature('payment_prefs', self)"], outcomes: { default: [{ type: "economy.set_pay_prefs", args: { tiers: "=params.tiers", who: "self" } }] }, lexicon: ["i'd rather pay with"], ...phone });
 }
 var economyPack = {
   id: "economy",
@@ -23737,7 +24041,7 @@ function personKind(world, kind) {
   }
   return false;
 }
-function hiddenNames2(world) {
+function hiddenNames3(world) {
   const out = [];
   const label = (name, secret, entity) => void out.push({ name, secret, ...entity !== undefined ? { entity } : {}, said: (text) => namesAny(text, [], [name]) });
   for (const e of Object.values(world.entities)) {
@@ -23769,7 +24073,7 @@ function cueIssues(world) {
   const issues = [];
   const issue = (severity, path, message) => void issues.push({ severity, path, code: "castlife.cues", message });
   const secrets = [...Object.values(world.tracks).flatMap((t) => Object.values(t.stages).flatMap((s) => s.truth ? [s.truth] : [])), ...Object.values(world.lore).flatMap((l) => loreIsSecret(l) && typeof l.content === "string" ? lorePhrases(l.content) : [])];
-  const hidden = hiddenNames2(world);
+  const hidden = hiddenNames3(world);
   for (const e of Object.values(world.entities)) {
     if (e.cues === undefined)
       continue;
@@ -24838,19 +25142,32 @@ var sheetsPack = {
 };
 var core_default9 = sheetsPack;
 
+// src/engine/lore.ts
+var MIN_TERM = 3;
+var STOP_WORDS = Object.fromEntries("the and for with that this from into onto have has had was were are you your yours my mine our ours his her hers their theirs them they she him its not but all any can will would could should about then than there here what when where which who whom how why just very some more most other out over under again also like get got one two too off own same such only each both few nor yet".split(" ").map((w) => [w, true]));
+function plain(text) {
+  const words = text.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim();
+  return words === "" ? "" : ` ${words} `;
+}
+function wordsOf2(text) {
+  return plain(text).trim().split(" ").filter((w) => w.length >= MIN_TERM && !hasOwn(STOP_WORDS, w)).map((w) => w.length > 4 && w.endsWith("s") && !w.endsWith("ss") ? w.slice(0, -1) : w);
+}
+
 // src/packs/story/core/index.ts
 function flagValue(ctx, name) {
   return own(objOf(sliceOf(ctx.state, "story").flags), name) ?? own(objOf(ctx.world.packs.story?.config.flags), name) ?? false;
 }
 function buildQuestLog(ctx) {
   const view = { active: [], done: [], failed: [] };
-  for (const id of Object.keys(ctx.world.tracks).sort()) {
+  for (const id of Object.keys(ctx.world.tracks)) {
     if (own(ctx.world.tracks, id)?.kind === "agenda")
       continue;
     const t = playerTrack(ctx.registry, ctx.world, ctx.state, ctx.world.pov, id);
     if (t)
       view[t.status === "done" ? "done" : t.status === "failed" ? "failed" : "active"].push(t);
   }
+  for (const list of [view.active, view.done, view.failed])
+    list.sort((a, b) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
   return view;
 }
 function leakyLabels(world) {
@@ -24890,29 +25207,132 @@ function leakyLabels(world) {
       check(`places.${p.id}.name`, p.name);
   return out;
 }
+function idWords(id) {
+  return id.replace(/([a-z0-9])([A-Z])/g, "$1_$2").toLowerCase().split(/[^a-z0-9]+/).filter((w) => w !== "");
+}
+function nameWords(name) {
+  return name.toLowerCase().split(/[^a-z]+/).filter((w) => w.length >= 4);
+}
+function leakyIds(world, registry) {
+  const person = (kind) => {
+    if (registry)
+      return kindIs(registry, world, kind, "person");
+    let k = kind;
+    for (let guard = 0;k !== undefined && guard < 32; guard++) {
+      if (k === "person")
+        return true;
+      k = own(world.kinds, k)?.extends;
+    }
+    return false;
+  };
+  const known = new Set;
+  for (const p of Object.values(world.places))
+    if (p.visibility !== "secret")
+      for (const w of nameWords(p.name))
+        known.add(w);
+  for (const e of Object.values(world.entities))
+    if (e.visibility !== "secret" && person(e.kind))
+      for (const w of nameWords(e.name))
+        known.add(w);
+  const secrets = [...Object.values(world.entities).filter((e) => e.visibility === "secret"), ...Object.values(world.places).filter((p) => p.visibility === "secret")].map((s) => ({
+    name: s.name || s.id,
+    id: idWords(s.id),
+    words: nameWords(s.name).filter((w) => !known.has(w))
+  }));
+  if (secrets.length === 0)
+    return [];
+  const taken = new Set([...Object.keys(world.entities), ...Object.keys(world.places)]);
+  const unused = (base) => {
+    let id = base;
+    for (let n = 2;taken.has(id); n++)
+      id = `${base}_${n}`;
+    taken.add(id);
+    return id;
+  };
+  const out = [];
+  for (const e of Object.values(world.entities)) {
+    if (e.visibility === "secret")
+      continue;
+    const words = idWords(e.id);
+    const spelt = new Set;
+    const gives = [];
+    for (const s of secrets) {
+      const at = [];
+      for (let i = 0;s.id.length > 0 && i + s.id.length <= words.length; i++)
+        if (s.id.every((w, j) => words[i + j] === w))
+          for (let j = 0;j < s.id.length; j++)
+            at.push(i + j);
+      words.forEach((w, i) => {
+        if (s.words.some((n) => w === n || w === `${n}s`))
+          at.push(i);
+      });
+      if (at.length === 0)
+        continue;
+      gives.push(s.name);
+      for (const i of at)
+        spelt.add(i);
+    }
+    if (gives.length === 0)
+      continue;
+    out.push({ path: `entities.${e.id}.id`, id: e.id, secrets: gives, neutral: unused(words.filter((_, i) => !spelt.has(i)).join("_") || e.kind) });
+  }
+  return out;
+}
 function reject14(code, reason) {
   return { code, reason };
 }
-function openPuzzle(ctx, ref) {
-  if (own(ctx.world.tracks, ref)?.kind === "puzzle")
-    return ref;
-  const open = Object.keys(ctx.world.tracks).sort().filter((id) => {
+function openPuzzles(ctx) {
+  return Object.keys(ctx.world.tracks).flatMap((id) => {
     const t = own(ctx.world.tracks, id);
-    if (t?.kind !== "puzzle")
-      return false;
-    return own(t.stages, own(ctx.state.tracks, id)?.stage ?? t.start)?.answer !== undefined && playerTrack(ctx.registry, ctx.world, ctx.state, ctx.world.pov, id) !== null;
+    if (t?.kind !== "puzzle" || own(t.stages, own(ctx.state.tracks, id)?.stage ?? t.start)?.answer === undefined)
+      return [];
+    const shown = playerTrack(ctx.registry, ctx.world, ctx.state, ctx.world.pov, id);
+    return shown ? [{ id, shown }] : [];
+  }).sort((a, b) => a.shown.id < b.shown.id ? -1 : a.shown.id > b.shown.id ? 1 : 0);
+}
+function idShaped(ref) {
+  const t = ref.trim();
+  return t !== "" && !/\s/.test(t) && /[_~]/.test(t);
+}
+function puzzlesFor(ctx, ref) {
+  const open = openPuzzles(ctx);
+  const byId = open.find((p) => p.shown.id === ref);
+  if (byId)
+    return [byId.id];
+  if (idShaped(ref))
+    return [];
+  const want = new Set(wordsOf2(ref));
+  const scored = open.map(({ id, shown }) => {
+    const seen = new Set(wordsOf2(`${shown.label} ${shown.stage} ${shown.cue ?? ""}`));
+    return { id, n: [...want].filter((w) => seen.has(w)).length };
   });
-  const words = (s) => s.toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length > 2);
-  const want = new Set(words(ref));
-  let best = null;
-  for (const id of open) {
-    const t = own(ctx.world.tracks, id);
-    const stage = t ? own(t.stages, own(ctx.state.tracks, id)?.stage ?? t.start) : undefined;
-    const n = words(`${t?.label ?? ""} ${stage?.label ?? ""}`).filter((w) => want.has(w)).length;
-    if (n > 0 && (!best || n > best.n))
-      best = { id, n };
-  }
-  return best?.id ?? (open.length === 1 ? open[0] ?? null : null);
+  const best = Math.max(0, ...scored.map((s) => s.n));
+  if (best > 0)
+    return scored.filter((s) => s.n === best).map((s) => s.id);
+  if (open.length === 1)
+    return open.map((p) => p.id);
+  return want.size === 0 ? open.map((p) => p.id) : [];
+}
+function askedFor(ctx, ref) {
+  const id = Object.keys(ctx.world.tracks).find((t) => shownTrackId(ctx.world, t) === ref);
+  const shown = id === undefined ? null : playerTrack(ctx.registry, ctx.world, ctx.state, ctx.world.pov, id);
+  if (shown)
+    return shown.label;
+  const words = ref.trim();
+  return idShaped(words) || hasOwn(ctx.world.tracks, words) || hasOwn(ctx.world.tracks, ref) ? null : words;
+}
+function askedForGm(ctx, ref) {
+  if (ref.trim() === "")
+    return "an answer that names none";
+  const t = own(ctx.world.tracks, ref);
+  return t ? `"${ref}" (${t.label})` : `"${ref}"`;
+}
+function answerTo(ctx, track, a) {
+  const decision = typeof a.decision === "number" ? a.decision : undefined;
+  const check = checkAnswer(ctx.world, ctx.state, track, strOf(a.answer), decision);
+  if (check.needsDecision)
+    return reject14("needs_decision", "this answer needs a judgement");
+  return check.event ? [check.event] : reject14("no_answer", "there is nothing to answer here");
 }
 var storyPack = {
   id: "story",
@@ -24938,16 +25358,28 @@ var storyPack = {
     r.effect({ type: "story.flag", args: ["name", "value?"], resolve: (a) => strOf(a.name) === "" ? reject14("bad_flag", "a flag needs a name") : [{ type: "story.flag", data: { name: strOf(a.name), value: a.value ?? true } }] });
     r.effect({
       type: "story.answer",
-      args: ["track", "answer", "decision?"],
+      args: ["track?", "puzzle?", "answer", "decision?"],
       resolve(a, ctx) {
-        const track = openPuzzle(ctx, strOf(a.track));
-        if (!track)
-          return reject14("not_a_puzzle", `no open puzzle ${labelOf(ctx, strOf(a.track))}`);
-        const decision = typeof a.decision === "number" ? a.decision : undefined;
-        const check = checkAnswer(ctx.world, ctx.state, track, strOf(a.answer), decision);
-        if (check.needsDecision)
-          return reject14("needs_decision", "this answer needs a judgement");
-        return check.event ? [check.event] : reject14("no_answer", "there is nothing to answer here");
+        if (a.track !== undefined) {
+          const id = strOf(a.track);
+          if (own(ctx.world.tracks, id)?.kind !== "puzzle")
+            return { code: "not_a_puzzle", reason: "there is nothing to answer here", gm: `story.answer's track ${id === "" ? "names nothing" : `"${id}" is no puzzle`}` };
+          return answerTo(ctx, id, a);
+        }
+        const ref = strOf(a.puzzle);
+        const asked = ref.trim() === "" ? "" : askedFor(ctx, ref);
+        const fits = puzzlesFor(ctx, ref);
+        if (fits.length > 1) {
+          return {
+            code: "ambiguous_puzzle",
+            reason: asked === "" ? "more than one puzzle is open, and the answer doesn't say which" : `more than one open puzzle fits ${asked ?? "that name"}`,
+            gm: `${fits.length} open puzzles fit ${askedForGm(ctx, ref)}: ${fits.map((id) => labelOf(ctx, id)).join(", ")}`
+          };
+        }
+        const track = fits[0];
+        if (track === undefined)
+          return { code: "not_a_puzzle", reason: asked === "" ? "there is no open puzzle to answer" : `no open puzzle ${asked ?? "by that name"}`, gm: `no open puzzle in the quest log fits ${askedForGm(ctx, ref)}` };
+        return answerTo(ctx, track, a);
       }
     });
     r.action({
@@ -24956,7 +25388,7 @@ var storyPack = {
       pack: "story",
       params: { puzzle: { type: "text", optional: true, label: "Puzzle" }, answer: { type: "text" }, decision: { type: "number", optional: true, label: "Judged probability" } },
       requires: [],
-      outcomes: { default: [{ type: "story.answer", args: { track: "=params.puzzle", answer: "=answer", decision: "=params.decision" } }] },
+      outcomes: { default: [{ type: "story.answer", args: { puzzle: "=params.puzzle", answer: "=answer", decision: "=params.decision" } }] },
       duration: "1",
       lexicon: ["the answer is", "i think it's", "solve", "answer", "the code is", "the combination is", "try the combination", "dial", "enter the code"],
       observable: "answers"
@@ -24982,6 +25414,15 @@ var storyPack = {
     r.lint({
       code: "story.leaky_label",
       check: (world) => leakyLabels(world).map((l) => ({ severity: "error", code: "story.leaky_label", message: `"${l.text}" gives away a secret ("${l.secret}").`, path: l.path }))
+    });
+    r.lint({
+      code: "story.leaky_id",
+      check: (world, registry) => leakyIds(world, registry).map((l) => ({
+        severity: "warning",
+        code: "story.leaky_id",
+        message: `The id "${l.id}" gives away a secret (${l.secrets.map((s) => `"${s}"`).join(", ")}): a player's views carry it wherever the player acts on what it names. Give it an id that names no one, such as "${l.neutral}".`,
+        path: l.path
+      }))
     });
   }
 };
@@ -43963,7 +44404,7 @@ var modern_slice_of_life_default = {
         autopay_from: "acct_marcus_checking",
         payment: 114200,
         months_left: 260,
-        secured_by: "prop_birch_lane_12"
+        secured_by: "prop_marcus_home"
       },
       relations: []
     },
@@ -44801,8 +45242,8 @@ var modern_slice_of_life_default = {
       },
       relations: []
     },
-    prop_birch_lane_12: {
-      id: "prop_birch_lane_12",
+    prop_marcus_home: {
+      id: "prop_marcus_home",
       kind: "property",
       name: "Marcus's house",
       tier: "background",
@@ -55964,6 +56405,7 @@ What the active preset says applies while it is active (\`backend/preset-binding
 - **The POV's own observations** (\`space.seen\`): every place it has been, with its first and last visit (a visit counts for the places around the one visited), and where and when it last saw each person it was with and could see. It is written inside the apply of the events that move someone (a \`place\` set, an \`in\` link or unlink, a spawn, a \`space.pos\`), so both folds keep it alike, no turn writes an event for it and an old chat rebuilds it on replay; the start place counts as the first visit. A POV the world doesn't place starts at \`start.place\`. From Space 3, the POV arriving at a place with a cell stands on that cell. With the grid system on, it also keeps the cells the POV has seen on each grid (\`cells[scope] = {width, bits}\`: a hex bitmask by cell index with trailing zeros trimmed, started again when the grid's width changes): every \`space.pos\` that moves the POV adds the cells within \`sightRadius\` squares (at most 32) that a line of sight reaches, a blocked cell stopping the line but itself seen. The fog display reads it.
 - **People on the player layer.** Scene → Present, palette targets, the narrator's people lines and the people the helpers' prompts name as present (\`brief\`, \`outline\`, \`choices\` and \`judge\`) list only people the POV can see. Cast lists the people the POV knows (met: something it owns or holds, anyone it has a relation with either way, anyone where it is, or of its region) and anyone it can see where it stands. Someone here shows what they are doing and, for an LOD1 agent, their day and next commitment; someone away shows only where and when the POV last saw them, never where they are now or what they plan. Agendas show only when public, each track on its own, so a secret one never shows behind a public one; a block of an agent's day spent on an agenda that isn't public shows as "Busy", for "their own business", in the timeline and as the next commitment. An agenda's step as someone's activity ("agenda") doesn't record which agenda it is, so Cast, the Journal and the narrator's people lines and outline read it as "busy" unless every agenda the person has is public (\`castlife.activity\`). Every field follows its field visibility, wherever the player or the narrator reads it: a change to a field the POV can't see (a \`set\`, an \`add\`, or a pack event that writes it, as its type's \`touches\` declares) is in no chip, Journal line or Montage (\`eventVisible\`), and the narrator's people lines and outline say what someone is doing only when the POV may see their activity field.
 - **Places on the player layer.** The map, the travel list, the palette, the place ✎, the narrator's facts (nearby exits included) and the Journal show only places the POV can see. A place inside one the POV can't see is as hidden as that place, even when it is public on its own: nothing names it or offers a way there. Being anywhere inside a \`known_by\` or \`discoverable\` place counts as being there, whatever lets the POV see the room it stands in, so walking from someone's flat into its kitchen keeps both named; a secret place is never seen, not even from inside. The map still draws the places the POV is inside, but one it can't see (a secret one, or a room of one) goes by a stand-in: "Somewhere", under an opaque id, in its scopes, breadcrumbs and path, never with its own id, name or scene type, and never as somewhere to travel to. Every other player surface names the POV's own place the same way (\`povPlace\`): the HUD pill, Scene, the sheet, the narrator's Place line and the facts the helpers read say "Somewhere", with no id, and the place ✎ neither names it nor offers it. Cast names the place of someone there with the POV the same way, and the Garage names a vehicle's place or home base the POV can't see "Somewhere" too, while the narrator's vehicles line says the vehicle is "somewhere". The scene ✎ offers the engine's own scene types (conversation, action, exploration and downtime) and those of the places the POV can see, and no other: not one only a hidden place has, nor one the world only gives a tick or only an action sets, since a tick says nothing of who may know the type. Its "Place default" option names no other type, and a pinned one isn't marked current. The scene in force (the Scene row in the HUD details and Play → Scene, and the time controls' "now") is named the same way: any other type, whether the POV stands in a place of that type or is pinned to it, reads as the engine's default scene ("conversation"). That is display only: the clock still reads the type in force and paces by its tick, a world's own included, and Settings → Time and the time controls still list every type the world ticks, as the author's configuration. On a grid, by knowledge, the area of a place the POV can't see goes out as nothing (\`void\`, walled), unless the POV is inside it; in fog, the cells of it the POV hasn't seen go out blank, exactly as any unseen cell, so fog never outlines a hidden room. A route is drawn only when the POV can see both its real ends, so a hidden end is never drawn as a way to the place around it. The narrator's Place line names a place around the POV's only when the POV can see it too, and a refused narrated move names a place the POV can't see as "somewhere".
+- **Tracks on the player layer.** A secret track goes by a stand-in id wherever the player layer names it (\`shownTrackId\`: \`~\` and a hash of the world and the track), never by its own, which is the author's and may name more than any one of its truths tells: in the quest log, in the Studio's chat summary, and in the answer action's \`puzzle\`, which takes the stand-in of an open puzzle the POV can see. It keeps that stand-in for as long as it lasts, revealed or not, so a quest sheet open on it still finds it once its own label shows. The quest log lists its rows in the order of the ids they go by, so where a stand-in sits says nothing of the track's own id. An answer the player gives (\`story.answer\`'s \`puzzle\`, which the Answer action passes on) reaches only a puzzle in their quest log: by the id its row goes by (a secret's stand-in, never its own), or by what the player sees of it. A reference written as an id (one word with \`_\` or \`~\` in it) is only ever read as such an id, never for its parts nor as the only open puzzle, so one the POV can't see (\`known_by\` and not yet known, or dormant) is refused just as an id nothing has would be. What the player sees of a puzzle is the words its label, stage and cue share with the answer's (the lookups' words, \`wordsOf\`: no stop words), so a masked secret's own label never matches; \`interpret\`'s Answer label lists open puzzles the same way, a masked one, whose row reads "Something is going on" with no stage, by its cue. When more than one fits equally, or the answer names none while several are open, it is refused and nothing is tried, so no hint is spent. A refusal names the puzzle by the label the player sees or in their own words, and never repeats a track's own id or anything written as an id ("no open puzzle by that name"), nor a hidden track's label: those stay in the GM's reason. The world's own content answers by the puzzle's own id instead: \`story.answer\`'s \`track\`, which only an authored action or rule sets, reaches that puzzle as named, whatever the player sees of it, and its refusal names no track.
 - **Player-facing views** are filtered to what the POV knows. The GM view shows everything, secrets and removed entities included, and records nothing by being looked at (L34). It is built when asked (\`lre.gm\`, once its spoiler gate is open) from the head's state and is never part of a snapshot or delta, so its data never travels with the player's state. It holds every entity with its fields as stored (derived ones read now), relations, placement, levels and designed sheet; every place with its visibility; every track with all its stages and truths; the ✎ fixes and GM edits in force; the held writes that didn't apply, with their raw reasons; and everyone else's money: each person at their own Money level (a band at 1; cash and one account at 2; every account and their bills from 3), with their latest history lines and payday, bill and decline notes; accounts not opened yet show the opening balances they will start from. The player never sees another person's money unless the POV holds the account. A track still on a bare start stage is dormant and stays out of the quest log until it moves on, so a quest can wait unseen for its trigger.
 - **GM edits** (\`lre.edit\`) change anything the GM view shows, on the head: a field (\`set\`, or \`add\` to a number, which stops at its bounds), a relation (\`link\` with its fields, \`unlink\`), where something is (\`move\` to a place, \`put\` into a container or take it out), money (\`adjust\`: a posting between the account and \`economy.external:correction\`, memo "Correction"), a track's stage, an entity's tier, agent flag and level overrides (\`engine.entity\`), its classes and tags (\`classify\`, as \`engine.class\`), \`spawn\`, \`despawn\` and \`restore\`, and \`effect\`: a pack effect registered for GM edits (\`EffectDef.gm\`), for what no entity field holds (an asset's price); any other effect is refused (\`not_editable\`). Each operation is checked as the effect it becomes (field types, enum values, min and max with a pool's evaluated max, relation kinds, fields and cardinality, the world's facets and their values); values are taken literally, never as formulas, and a value out of range is refused, not clamped. If one fails, the request is refused and nothing applies. A request is one \`fix\` post entry (its events grouped when there is more than one), so undo, Keep, swipes, Re-narrate and Re-run treat it like a ✎ fix (P2, P3); locked fields are writable here and only here. **Classify** sets the classes (any facet, hidden ones included, since the GM sees everything) and tags whole; a facet or value the world doesn't define is refused (\`unknown_facet\`, \`unknown_class\`, \`single_class\`, as a spawn's are), and so is one that reads as it already does. The chat holds both in the entity's state from then on, so selectors match them over the world's definition, and they count as play's for an Upgrade. The event keeps the classes it replaced (\`was\`), so its player line names only the facets players can see whose values changed, a cleared one as "none", the same on every replay, and never tags; an edit that changes no such facet has no player line, and its Corrected chip names nothing, as for any hidden edit. **Despawn** sets the entity's reserved \`gone\` field, unlinks its own relations (taken out of a container, it keeps the place it was at) and everyone's relations to it except containment, so what it holds stays inside and is gone with it. A gone entity drops out of every player surface and process: Scene, Cast, the palette, the narrator's people, visibility, schedules, agents, encounters and the money processes. It matches no selector and is no group's member (\`selectorMatches\`, \`membersOf\`), so rules, schedules, \`knownBy\` grants and a group's regard pass it by, and a removed group's schedules route none of its members; it fires no zone or cell trigger, and \`step\` refuses to move it. The GM view, Restore and Upgrade read state directly, so they still see it. **Restore** clears \`gone\`; an agent comes back caught up, without replaying the time it was away. The POV can't be removed. Kinds and places are the world's definitions and are edited in Build, not here.
 - **Life state edits** (\`life\`, §8): an entity's life state, the people told it, or both; everyone with the entity learns a change anyway. The GM view shows each entity's state as it is and who knows it (everyone but those whose word is older, or only those who learned it).
@@ -56190,7 +56632,7 @@ I then re-measured with the engine's own \`extract\` step as shipped (strict rul
 - Palette, action-chip and map actions append a user message (text plus \`intent\`) with \`triggerGeneration\`.
 - Resolution runs requirements, then the check, then effects, then the duration.
 - The Outcome slot says the result is decided, worded for how the adjudication policy decided it (below).
-- An unmet requirement reads as a plain decline ("Not possible here and now: you need to have it with you"; "You're already there."), never as its expression.
+- An unmet requirement reads as a plain decline ("Not possible here and now: you need to have it with you"; "You're already there."), never as its expression, on its chip and in the Outcome alike: an expression may name a secret track or someone the player doesn't know.
 - **The action queue.** A typed message's actions (\`interpret\`'s first and queued ones, §5.2) play in order in one turn, each against the state the one before it left: its requirements, check and effects, its event rules and a fight's turns around it, then its own time, so durations add up and each action's events land in order among the record's pre-reply events; the scene tick stands in only when no action ran. The first draws from the turn's seed as a single action always has, and each queued one from its own fork of it, so a Re-run, which reads the same cached queue, re-samples them all, and a Re-narrate copies them. The queue stops after an action that fails (a requirement, its params, a refused effect such as a declined payment), after a check (resolved, so the player sees how it fell before going on), or at an interruption: the POV no longer acting (dying, dead, or a world's state that doesn't act), a fight starting or under way (a fight's turn is one act), an activity that Speed through offers or runs, a change of place or scene (\`sceneKey\`) the action's own effects didn't make, or a signal the POV can see whose interrupt class is at \`stop\` (one it can't see never stops it: stopping would give it away). Off-screen catch-up runs once, after the queue. The plan records how many actions were left and why; the Outcome slot gives every played action's result in order and, when the queue stopped, says the rest of the message hasn't happened. What's left goes on the chip of §5.2. The judge rates the queue's check: the first action with one, weighed in the state the turn starts from, and not judged when that state doesn't offer it yet; \`puzzle.answer\` reads only the first action.
 
 **Ruleset primitives.** Generic and ruleset-agnostic; rulesets are data over them (\`engine/checks\`, \`engine/ruleset\`, \`engine/ruleset-lint\`).
@@ -56268,6 +56710,7 @@ Touch targets are at least 40 px (including a number stepper of our own with nam
   - refs, types, cycles, unreachable stages;
   - oversized sections;
   - leaky labels, secret truth in public lore, secret lore without a gate or read by a prose step, cues that give their secret away, name what the player may not know or can never show (§6.6), and lookup-table terms and topics that name missing entries, lead nowhere or contradict an alias;
+  - ids that give a secret away (\`story.leaky_id\`, a warning): a non-secret entity's id (an account, a flow, an invoice, a lease, a job or anything else) holding a secret entity's or place's id, or a word of its name four or more letters long that no person or place the player can see is also called (\`bill_danny_rent\` while Danny Okafor is secret). A player's views carry an id wherever the player acts on what it names, and the engine can't rename an author's ids, so the warning names the secret and suggests an id that names no one. A possession's name doesn't make a word public, as it is named for whoever holds it ("Danny's checking");
   - attachment, groups;
   - unbalanced postings;
   - double-booked commitments;
@@ -56418,7 +56861,7 @@ The ledger is accepted by this executable suite, not by review on paper.
 - **\`lre-state-v1\` window event payload:** \`{engineVersion, worldFormat, packs:{id:version}, inbound}\`, announced when the frontend loads, when the pack set changes and when a \`lre-state-request-v1\` event asks. \`inbound\` lists \`file\` and \`rpc:lumi_rp_engine_studio.offer\`.
 - **Install from a studio:** an export file through Build's **Import an lre-world-v1 file…**, which makes a new world and lists its macros for review; or LumiRPEngine Studio's offer, through the Studio bridge.
 - **The Studio bridge** (\`shared/studio-bridge.ts\`, \`backend/studio.ts\`; STUDIO.md "The Studio bridge"). A shared RPC read carries no request and no user, so it carries no commands: each side publishes endpoints per user and the other pulls.
-  - **Engine → Studio, read-only.** Per user: the world list, each world's head and each revision, and the world chats' summaries. Channels name ids by their bytes in hex (a segment takes only \`[a-z0-9_-]\`; user and world ids are mixed case). Every endpoint answers \`lumi_rp_engine_studio\` only, and the summaries' read policy needs \`chats\`. A summary is built from the view last pushed to the chat, so it carries only what the player sees (place, clock, cash, the people present with their life state as the POV knows it, the open quests): the Studio is an authoring tool and reads the world document for the rest, but the summary never becomes a way around the player layer. A secret track the quest log masks goes with an opaque id (\`hidden-1\`, …), since its own id is the author's and may name the secret.
+  - **Engine → Studio, read-only.** Per user: the world list, each world's head and each revision, and the world chats' summaries. Channels name ids by their bytes in hex (a segment takes only \`[a-z0-9_-]\`; user and world ids are mixed case). Every endpoint answers \`lumi_rp_engine_studio\` only, and the summaries' read policy needs \`chats\`. A summary is built from the view last pushed to the chat, so it carries only what the player sees (place, clock, cash, the people present with their life state as the POV knows it, the open quests): the Studio is an authoring tool and reads the world document for the rest, but the summary never becomes a way around the player layer. A secret track goes by the quest log's own stand-in id (§7), since its own id is the author's and may name the secret.
   - **Studio → engine, by offer.** The Studio publishes the user's pending offer (a document, \`new\` or \`revision\` of a world, the revision it was taken from, an optional chat to attach) and its frontend dispatches \`lre-studio-offer-v1\`; Build reads it, reviews it (counts, lint, macros, what blocks it) and installs it only on the player's **Install**, as the offer reviewed: a new world as an import makes one, or a new revision under the world's own id, whose chats move to it only through an Upgrade. A revision is refused while Build holds an unsaved draft of the world, which a later Commit would put back over it. When the world's head has moved since the revision was taken (its \`baseRevision\`, or none given), Build warns rather than blocks: revisions are immutable, so the head it passes over stays, with its chats, but installing takes the player's explicit **Install anyway** (\`acceptMovedHead\` on the request), which also catches a head that moves after the review. Install names back the hash of the offer reviewed and is refused when the offer has changed since. Installs run one at a time per user, and the offer is marked installed as soon as its world is written, so it installs once however often Install is pressed. The chat the offer names gets Play's Attach and its confirmation when it's open and plays no world.
 
 ## 16. Host gaps and upstream follow-ups (D21)
@@ -56818,7 +57261,9 @@ The economy pack's core (\`src/packs/economy/core/\`) is one double-entry ledger
 
 A party is a person, a business, a trust or a household. An account, a holding, a property or a business lists \`owners: [{party, role, share?}]\`. The role grants the rights: \`owner\` and \`joint\` spend, manage and count it; \`authorized_user\` spends; \`custodian\` and \`trustee\` manage it for a \`beneficiary\`, who counts it. Every "your own things" read in the engine goes through \`heldBy\`, so held accounts and cards count as a character's own. The first owner opens the account. A joint account opens once, by \`economy.open\`, whichever owner's money materializes first. Shares split what a shared account is worth among its owners.
 
-**Managing through a business or a trust.** Whoever manages a business or a trust, by a managing role on it (\`owner\`, \`joint\`, \`custodian\` or \`trustee\`), manages every account it holds a managing role on, by that role: its standing payments, its autopay and its cards, as they would an account of their own (\`managesAccount\`; the \`manages(who, thing)\` formula reads an account or a party). The same role runs the business itself: hiring, invoicing, draws and payouts (§26.2). It is management only: they spend from the business's accounts for themselves only by a role of their own on them (an authorized user's card), and those accounts count toward their worth only through their share of the business. An employee holds no role on the business and manages none of it. A role that only spends (\`authorized_user\`) or only counts (\`beneficiary\`) manages nothing.
+**Managing through a business or a trust.** Whoever manages a business or a trust, by a managing role on it (\`owner\`, \`joint\`, \`custodian\` or \`trustee\`), manages every account it holds a managing role on, by that role: its standing payments, its autopay and its cards, as they would an account of their own (\`managesAccount\`; the \`manages(who, thing)\` formula reads an account or a party). The same role runs the business itself: hiring, invoicing and payouts (§26.2). A draw is narrower (\`may_draw\`): only an owner or a joint owner takes one, and never from a corporation, which pays its owners by salary or dividends; each business in a view says whether its reader may (\`mayDraw\`). They spend from the business's accounts for themselves only by a role of their own on them (an authorized user's card), and those accounts count toward their worth only through their share of the business. An employee holds no role on the business and manages none of it. A role that only spends (\`authorized_user\`) or only counts (\`beneficiary\`) manages nothing.
+
+**The fiduciary rule.** A manager runs money they only manage for whom it is, never for themselves, as a trustee or a custodian must. That money is an account of the business or trust they hold no spending role on, or the business or trust itself paying as a party, whatever their role on it: a party's money is never its manager's own, though every managing role on it carries the spending right. It reaches none of their own interests (\`interestsOf\`): them, their household and its members, a party any of those counts the worth of (a business they own, and so may draw from; a trust they benefit from) and in turn any party those count the worth of (a business their business owns), four holders deep as whom the money is for is followed, or an account whose worth one of those counts. Nor does it reach an outside payee typed as any of them: a name whose key (\`payeeKey\`, the key an outside payee is kept by) is their id's or their name's, or their household's ("Jordan Ellis" or " POV " for the POV), which the hub refuses by the same keys. A payment among whom the money itself is for, the manager aside, is the money's own (\`whoseMoney\`): the café's savings topping up its operating account, a trust paying its beneficiary though she's the trustee's daughter. Nor does it go into an account they may spend by a role of their own (an authorized user's card, a custodian's or a trustee's), whoever's worth it is, as they could move it on from there, unless they hold a share of the money themselves: so the café's owner tops up its operating account from its savings though he holds an authorized user's card on it, as the money is partly his, while its custodian, who holds none of it, can't, and a trustee pays the trust's money into no account he's custodian of. So a standing payment from such money, or one falling back on it, can't pay them; a business they run for others can't be billed by one that is theirs, nor pay one of its invoices by their hand; and without a share of its worth they put neither themselves nor their household on its payroll, nor raise their pay there (§26.1). Money wholly the manager's own, where nobody else holds any of its worth (a business they own outright), keeps no one else's interest, so it pays anything else of theirs: the owner of two companies outright bills and pays between them. What they take out of it for themselves still goes by a draw or a salary, so the books and the taxes see it: it pays neither them, their household nor its members. A credit account's autopay draws only on its debtor's own money (a holder whose role counts it): an account they may spend from or whose worth is theirs, so the shop's loan pays from the shop's money, their own card or mortgage from their own, and a custodial card from the custodial savings. A fallback is always the payer's own, as the money step draws on it (§25.5). Each account in a view says, by these rules, whether the party spends from it by a role of their own (\`spends\`), where its autopay may draw from (\`autopayFrom\`) and what may back a standing payment from it (\`fallbacks\`). The view says too, for each payer they run standing payments from and only manage, which of the ids the rest of the view already carries it may not pay (\`paysFor\`), so the list names nothing the view doesn't, and a payee typed by an id it doesn't carry is the backend's to refuse; the keys a typed payee is theirs by (\`ownKeys\`); and on each business whom they may neither hire nor raise there (\`selfDealing\`), so the hub refuses as the actions do.
 
 ### 25.2 Products and classes
 
@@ -56854,7 +57299,7 @@ A flow entity's payer changes it with \`flow_update\`, which can rename it (\`ec
 
 ### 25.6 Journal and holds
 
-Every posting writes a journal line on each account it touches: memo, kind, category, its other side, card, flow, and status (pending or posted). A posting records both its sides, who the money came from (\`payer\`) and who it went to (\`counterparty\`): the parties or outside payees its poster names, else the holder of the account its biggest line on that side is on. Each line names the side opposite it, so money out names whoever was paid and money in whoever paid it: the shop's takings name its walk-in customers, an invoice paid to it its customer, and the customer's own line the shop. A line whose other side is its own account's holder (money between their own accounts) names no one, and so does an opening or an adjustment. Events from before postings recorded their payer named only the payee: money in from them names whoever in the world paid it where the posting shows them, and a line kept naming its own holder reads as no one. The journal keeps the last 40 lines per account, monthly totals for 13 months, the last 6 statements and the notes. A hold makes part of a balance unavailable until its time: an authorization, or a deposit's hold days at a cash machine. Release is the GM's control. What can be spent is the balance, less holds, plus overdraft room.
+Every posting writes a journal line on each account it touches: memo, kind, category, its other side, card, flow, and status (pending or posted). A posting records both its sides, who the money came from (\`payer\`) and who it went to (\`counterparty\`): the parties or outside payees its poster names, else the holder of the account its biggest line on that side is on. Each line names the side opposite it, so money out names whoever was paid and money in whoever paid it: the shop's takings name its walk-in customers, an invoice paid to it its customer, and the customer's own line the shop. A line whose other side is the party reading it, or the one party whose money its account is (money between their own accounts, a business's too), names no one, and so does an opening or an adjustment; on an account two hold, what one of them pays in reads by their name to the other. Events from before postings recorded their payer named only the payee: money in from them names whoever in the world paid it where the posting shows them, and a line kept naming its own holder reads as no one. The journal keeps the last 40 lines per account, monthly totals for 13 months, the last 6 statements and the notes. A hold makes part of a balance unavailable until its time: an authorization, or a deposit's hold days at a cash machine. Release is the GM's control. What can be spent is the balance, less holds, plus overdraft room.
 
 ### 25.7 Credit
 
@@ -56876,9 +57321,13 @@ A deposit account's \`overdraft\` policy decides a payment the balance can't cov
 
 ### 25.11 Households and views
 
-A household is a party its members belong to. Its accounts, the joint accounts every member holds, and its shared flows (paid by it, or split among its members) make its view: who pays what share of the month. \`FinanceView\` is one party's money at their own level: overview, accounts, cards, flows, jobs, businesses, investments, properties, credit and household. The POV's view is \`economy.money\`; every party's, POV first, is the GM's \`economy.people_money\`; and any one party's is \`economy.finance\`. Player views show "someone" for any party the POV can't see.
+A household is a party its members belong to. Its accounts, the joint accounts every member holds, and its shared flows (paid by it, or split among its members) make its view: who pays what share of the month. \`FinanceView\` is one party's money at their own level: overview, accounts, cards, flows, jobs, businesses, investments, properties, credit and household. The POV's view is \`economy.money\`; every party's, POV first, is the GM's \`economy.people_money\`; and any one party's is \`economy.finance\`. Player views show "someone" for anyone or anything the POV can't see (\`seenBy\`: someone or something it can't see, or an account held only by such), and so do the money's reasons for refusing an action (\`shownLabel\`), which reach the narrator and the decline chip, and where a job's pay is routed.
 
-A view names whoever is outside the world as a person would (\`outsideName\`), on a flow's two sides and a journal line's other party alike. The foundation's and the modules' own payees, kept by key, read in words: "Federal tax", "State tax", "Local tax", "Property insurance", "Property upkeep", "Insurer" for a vehicle's premium and "Shops" for living costs. A regional tax names its region from the regions table ("Sales tax (Michigan)", "Property tax (Michigan)"). A bank reads by its name ("Lakeshore Credit Union", or "Bank" where it has none), and so does a cash machine's bank. An outside employer reads as the place or the name its job gives ("The Rusty Anchor"), a managed property's tenants as "Outside tenant", a property's outside buyer or seller as "Buyer" or "Seller", and a holding's market as "Market". Any other outside name, an author's or a player's, reads as written.
+A view names whoever is outside the world as a person would (\`outsideName\`), on a flow's two sides and a journal line's other party alike. The foundation's and the modules' own payees, kept by key, read in words: "Federal tax", "State tax", "Local tax", "Property insurance", "Property upkeep", "Insurer" for a vehicle's premium and "Shops" for living costs. A regional tax names its region from the regions table ("Sales tax (Michigan)", "Property tax (Michigan)"). A bank reads by its name ("Lakeshore Credit Union", or "Bank" where it has none), and so does a cash machine's bank. An outside employer reads as the place or the name its job gives ("The Rusty Anchor"), a managed property's tenants as "Outside tenant", a property's outside buyer or seller as "Buyer" or "Seller", the closing a purchase's mortgage pays out to as "Closing", and a holding's market as "Market". Any other outside name, an author's or a player's, reads as written. Whatever such a name says that's in the world reads as the viewer may see it: someone they can't see as "someone", as they would by id; a place they can't see as the plain word ("Employer", "Bank", "Cash machine"; "someone" for a name that's only the place); a story track never. A flow whose stored sides name anyone or anywhere the viewer can't see goes out without its spec, and a job's spec goes out without such an employer or workplace; a job's employer reads the same way on its row (§26.2). Nor does such a flow's own id go out, unless the viewer acts on the flow by it (it's theirs to change, or a lease of a property they own a share of, which they may end): its id can name whom it's for (\`pay:<job>\`, an author's \`bill_jess_household\`), so it goes as a stand-in (\`opaqueId\`, a digest of it), which its upcoming lines carry too. An upcoming line gives the account paying it only where the viewer can see that account. What a flow belongs to (\`link\`) reads by its name, but a job is named for its worker ("Danny's job at Alder Automotive"): one whose worker the viewer can't see reads by its title and employer ("Mechanic at Alder Automotive"), under the stand-in its row on its employer's page carries.
+
+Each flow goes out once for the whole view, as the viewing party knows it: its row, its coming-up lines and alerts, the household's section and the modules' references to it (a late invoice's alert, a business's invoice) all send the same id, stand-in or not, and give the same controls, while the view reads its run by its own id. A stand-in is a digest anyone can compute from a guessed id, as the world file is readable in Build anyway: it keeps spoilers out of play, not out of a determined reader's reach.
+
+Labels and memos read as the viewer may see too. A derived flow's label is built from names ("Lift loan autopay"), and a posting's memo is written once for every side of it, so on the player's views a flow's label, its coming-up lines and the memo of a journal line or a hold read each name of someone or something the POV can't see as that: "someone", an account by its class where the text begins with it ("Loan autopay") and "an account" within, "a card", "a property", "somewhere" for a place and "something" else. Names are read as the engine reads text for them (\`namesAny\`, §7): a person by any word of their name, so "Rosa's share of the rent" reads "Someone's share of the rent", and anything else by its whole name. A name something they can see also has gives nothing away, and stays, and so does a word of a name that someone or somewhere they can see is also called by: with Delgado's Deli on the map, "Delgado" stays though Rosa Delgado is hidden.
 
 ### 25.12 Realism gating
 
@@ -56891,7 +57340,7 @@ The Money level sets a baseline.
 | 3 | Every account, cards, flows, payment preferences, households and living costs. |
 | 4 | Statements, interest, fees, delinquency, credit, cash machines, holds, limits and overdrafts. |
 
-Each feature in \`FEATURE_DEFS\` has a floor (the lowest level it can run at) and the level where it turns on by itself. A world's Custom toggles (\`packs.economy.config.features\`) switch a feature on anywhere from its floor up, or off. The views follow them: statements, holds, credit and the household show where their feature runs, and full detail (terms' fees and penalty rates) from Money 4. With household shares off, a flow's shares don't split it and its payer pays it whole. Flows take the payer's level when the payer is in the world, else the payee's. Demotion stops processes and narrows views; balances stay live, and the trial balance is 0 at every level mix.
+Each feature in \`FEATURE_DEFS\` has a floor (the lowest level it can run at) and the level where it turns on by itself. A world's Custom toggles (\`packs.economy.config.features\`) switch a feature on anywhere from its floor up, or off. The views follow them: statements, holds, credit, the household, standing payments, payment preferences and cards show where their feature runs, and full detail (terms' fees and penalty rates) from Money 4. So do the actions that change them: setting up and changing standing payments (\`flows\`), payment preferences (\`payment_prefs\`) and a card's state (\`cards\`) each require their feature to run for the actor (\`money_feature\`), not a Money level, so a switch that shows them below Money 3 opens their controls too. Where standing payments don't run for the party, no section of their view offers a flow as theirs to change (\`editable\`): the household's shared costs still show where households run, but not to change. One the switches leave off is declined with the world's own reason, that it doesn't keep track of that, as one a Money level gates says the world doesn't simulate it in enough detail. With household shares off, a flow's shares don't split it and its payer pays it whole. Flows take the payer's level when the payer is in the world, else the payee's. Demotion stops processes and narrows views; balances stay live, and the trial balance is 0 at every level mix.
 
 ### 25.13 Minds
 
@@ -56961,6 +57410,8 @@ The paycheck is one posting: the gross, plus the match and, at the top level, th
 - **End a job** (\`job_end\`, also the worker's own way to quit) sets its last day to today. The next payday pays through it.
 - **Raise** (\`job_raise\`) sets the rate the next paycheck pays.
 
+A manager without a share of the business's worth (a custodian, a trustee) hires neither themselves nor their household, and raises neither's pay: they'd pay themselves from money they run for others (§25.1).
+
 A GM spawns a job and sets its fields, or sets its \`status\`, \`end\` or \`rate\`. Payroll reads only the fields, so an edit changes payroll exactly as the action would.
 
 **The old payroll.** The person fields (\`hourly_cents\`, \`pay_frequency\`, \`deposit_to\` and the rest) and the 09:00 payroll process are gone, and the world migration turns those fields into jobs (§25). An old chat's payroll left only plain postings, history lines and signals, so it still folds as recorded. The first paycheck after an Upgrade covers only from the day after the last scheduled payday, so it never pays a period twice.
@@ -56985,7 +57436,7 @@ A business doesn't sell to itself. One with no accounts is paid as any party wit
 - **Issuing one** (\`invoice_issue\`) names the customer (someone in the world, or an outside customer by name), the amount, what it's for, and the days to pay: the business's \`invoice_days\`, else 30.
 - **Payment is a flow** from the customer, paid as a bill (from an account, never wallet cash). It falls due on the due date and again every week after, until the invoice is paid in full. An outside customer pays on the due date; one in the world pays once their money covers it. An outside customer pays from money nobody in the world had, so what a business bills outside customers in a calendar month is at most the world's cap on unlisted prices (\`unpricedCap\`, §9.5); someone in the world pays from their own money, unbounded.
 - **Late.** An invoice still unpaid when its due day ends goes \`late\` and takes the business's \`late_fee_pct\` of the amount, and the fee again every 30 days it stays unpaid. The customer and the business's owners are told.
-- **Paying it now** (\`invoice_pay\`) is the customer's own action. **Voiding it** (\`invoice_void\`) is the owner's.
+- **Paying it now** (\`invoice_pay\`) is the customer's own action, or its manager's for a business customer. **Voiding it** (\`invoice_void\`) is the owner's. A business someone runs for others can't be billed by one that is theirs, nor pay such an invoice by their hand (§25.1).
 
 **Expenses** are flows the owners set up from the business's accounts, which they manage by their role on the business (§25.1): rent, utilities, loan payments. They reach the books through the journal.
 
@@ -57007,9 +57458,9 @@ Owner draws, distributions, transfers between its own accounts and the sales tax
 - its invoices;
 - its staff, with their pay;
 - what it owes for taxes and to its suppliers, with when each is next paid;
-- from Money 3, the accounts it holds that the party manages through it (§25.1) but holds no role on, so they aren't among the party's own (its loan, say), each as the party's own accounts show.
+- from Money 3, the accounts it holds that the party manages through it (§25.1) but holds no role on, so they aren't among the party's own (its loan, say), each as the party's own accounts show. An account of it the viewer can't see isn't on its page at all, not even by id.
 
-A party's own late invoices, owed or owed to it, are alerts. The modules' sections of a view are told who reads it: the player's surfaces name anyone the player can't see only as "a customer", "an employee" or "an owner", and leave out their ids (an owner line's party, an invoice's customer or business, an employee's worker, where their pay goes, and their job's worker and splits). The GM's views name everyone (§7). A character's money summary for their mind says how a business of theirs is doing this month, and what they owe on an invoice.
+A party's own late invoices, owed or owed to it, are alerts. The modules' sections of a view are told who reads it: the player's surfaces name anyone the player can't see only as "a customer", "an employee" or "an owner", and leave out their ids (an owner line's party, an invoice's customer or business, an employee's worker, where their pay goes, and their job's worker and splits); a hidden employee's job goes under a stand-in id (§25.11), as its own can name them. No action takes a stand-in, so the player can't raise or let go an employee they can't see: they can't act on someone they don't know. The GM's views name everyone (§7). A character's money summary for their mind says how a business of theirs is doing this month, and what they owe on an invoice.
 
 ### 26.3 Taxes
 
@@ -57117,8 +57568,8 @@ Everything a party owns besides money in accounts: positions in securities, fund
 - **The mortgage** is a foundation loan account (product \`mortgage\`) whose \`secured_by\` names the property; the property's \`mortgage\` names it back. Equity is the value less what the loans it secures owe. Lint warns when the two don't name each other.
 - **Costs are flows**, derived per property and worked out when they fall due from its value: property tax at its own rate, else its region's effective rate (the regions table's \`property_tax_effective_pct\`), else the table's typical, in installments (twice a year by default); insurance a month, its own premium or the table's typical scaled to its value within the table's range; upkeep a month, a share of its value a year (1 % by default). Its owners pay them by their shares. Upkeep is an average, not a bill anyone sends, so like living costs it posts with no "paid" note.
 - **Leases are rent flows** from tenant to owner, with a term: a \`flow\` entity of kind \`rent\` linked to the property, authored or started by its landlord (\`lease_start\`: a tenant, the rent, the term from today and the rent day), ended by the landlord or the tenant (\`lease_end\`). The tenant pays from the account the lease names, else their deposit account, since rent split between owners is paid from an account. Rent lands in the property's \`rent_to\`, else its owners' deposit accounts by share. Routing the rent (\`route_distributions\`) re-points every lease not yet over that pays the owners, so the tenants already paying follow the route as later ones do; one a tenant pays as a person moves to their deposit account when the rent is split.
-- **Vacancy.** A unit with no lease in force is vacant. A property let to outside tenants (\`managed\`) lets each unit no lease covers, one lease after another: each runs its term (12 months by default) at the market rent grown at the property's appreciation to the month it starts, and the unit stands empty between tenants for a few months drawn from the property's and unit's ids (about \`vacancy_months\` on average), so the same on every fold and every machine. The first leases began some months before the letting did, each unit by its own offset, so they don't all end at once.
-- **Buying** (\`property_buy\`): a property for sale (an asking price) at the asking price or more, or one nobody owns at its value or more. The down payment comes from the buyer; the rest is a new mortgage the property secures, which the lender decides through the foundation's credit application (\`applyCredit\`, product \`mortgage\`): a hard inquiry where credit reports run, the rate the buyer's score earns, no more than the property is worth, a term among those the finance table offers (its typical 30 years, else 15 or 20) and at least its conventional minimum down (3 %). The buyer picks the term among those, never the rate; declined, nothing changes hands. The loans the property secured are paid off from the price and the rest goes to the sellers by share, each realising their gain.
+- **Vacancy.** A unit to let that no lease holds is vacant. A lease holds its unit until it's over (cancelled, or past its last day), so the property view shows one signed to begin later, or paused, as let, never as vacant beside a vacant line for its own unit, and one cancelled as ended. A paused lease, once begun, is still its tenant's in the money too: the outside letting leaves its unit alone, a second lease can't take it, and routing the rent or a sale re-points it like any other, so it pays the right owner once it's resumed. A property's \`units\` are its units to let, so an owner's own flat in the building isn't one of them; one that names none has one, or none when one of its owners lives in it (their \`home\` is it or its place): a house its owner lives in is their home, so it never stands vacant or needs them, and a lease they start on it anyway shows as let. A property let to outside tenants (\`managed\`) lets each unit no begun lease holds, one lease after another: each runs its term (12 months by default) at the market rent grown at the property's appreciation to the month it starts, and the unit stands empty between tenants for a few months drawn from the property's and unit's ids (about \`vacancy_months\` on average), so the same on every fold and every machine. The first leases began some months before the letting did, each unit by its own offset, so they don't all end at once.
+- **Buying** (\`property_buy\`): a property for sale (an asking price) at the asking price or more, or one nobody owns at its value or more. The down payment comes from the buyer; the rest is a new mortgage the property secures, which the lender decides through the foundation's credit application (\`applyCredit\`, product \`mortgage\`): a hard inquiry where credit reports run, the rate the buyer's score earns, no more than the property is worth, a term among those the finance table offers (its typical, 30 years in the Modern US data, else 15 or 20; 30 years only in a world without the table) and at least its conventional minimum down (3 %). The buyer picks the term among those, never the rate; declined, nothing changes hands. The loans the property secured are paid off from the price and the rest goes to the sellers by share, each realising their gain.
 - **Selling** (\`property_sell\`): one's share, to a buyer in the world (who pays as they choose) or outside. The seller's loans against it are paid off from the proceeds, the rest lands where the seller says. The buyer takes the seller's share. A buyer outside the world can't hold a share beside the other owners, so only a property's only owner sells to one, and pays no more than the property is worth. After a sale or a purchase the rent's route is cleared, and every lease that paid the old owners pays the new ones' deposit accounts, split by their shares; a lease ends today when the property went outside the world. Selling one's home after two years excludes the table's amount of the gain (§27.8).
 - **Lint** (\`economy.property\`): its place is a place, its owners are in the world, its mortgage is an account it secures, a managed property has a market rent, its rent goes to an account, a lease's end is a date.
 
@@ -57128,7 +57579,7 @@ Everything a party owns besides money in accounts: positions in securities, fund
 
 ### 27.11 Net worth, dashboards and summaries
 - **Net worth** (§25) adds each party's share of every holding at market, every property's value, every business stake and every vehicle they own (its own \`value\`, else its class's typical used price from the vehicles table, by the vehicles pack's \`vehicles.values\`), each a line of what it's made of. The mortgage and a car loan are already among the party's accounts, so nothing is counted twice, and a loan isn't counted against nothing. An account that hasn't opened yet counts at the authored opening it will post, as the money views show it, so a party's worth at a chat's start is what it is once their accounts open.
-- **The investment view** (\`FinanceView.investments\`): the holdings the party sees, with units, price, value and, where the books show detail, cost, gain and lots with their terms; the year's realised gains, income and estimated tax; the assets they could buy and the accounts that can hold them. **The property view** lists the properties they hold a share of: value, equity, the mortgage, every lease and vacant unit, and the cost flows. A property for sale that they don't own shows only what its listing would: its name, where it is, its value and its asking price, nothing of its owners, mortgage or leases. Names and places the POV can't see go unnamed (an owner as "someone" with no id, as the foundation's views send one; a tenant as "a tenant"; no place), and the POV isn't offered a listing it can't see. Alerts: contracts expiring within a week, bonds maturing within a month.
+- **The investment view** (\`FinanceView.investments\`): the holdings the party sees, with units, price, value and, where the books show detail, cost, gain and lots with their terms; the year's realised gains, income and estimated tax; the assets they could buy and the accounts that can hold them. **The property view** lists the properties they hold a share of: value, equity, the mortgage, every lease and vacant unit, and the cost flows. A property for sale that they don't own shows only what its listing would: its name, where it is, its value and its asking price, nothing of its owners, mortgage or leases; one they may buy also carries the terms its lenders offer a mortgage over (\`mortgageTerms\`, longest first, the one a purchase gets when none is chosen marked usual), so a purchase form offers those and no others. Names and places the POV can't see go unnamed (an owner as "someone" with no id, as the foundation's views send one; a tenant as "a tenant"; no place), and the POV isn't offered a listing it can't see. Alerts: contracts expiring within a week, bonds maturing within a month.
 - **Routes in force.** A holding that pays, a property its viewer owns and a business they hold a share of each carry where its payouts go now (\`route\`: an account of the viewer's, reinvested, or the usual place); another owner's account shows only as that, unnamed. The hub's pickers open on it.
 - **A mind's money summary** (\`economy.summary\`) gets plain sentences: what they have invested, the properties they own and what's left on the mortgage, the rent they collect, the businesses they own.
 - **Secrecy.** Prices, mints, lots, income, disposals and routes are bookkeeping, never a player line; another party's trades and holdings show only in the GM view. What the POV sees of its own is the postings' lines and the notes its expiries and maturities send.
@@ -57253,7 +57704,7 @@ Don't name a price the sections don't give.
 var RECIPES_default = "# LumiRPEngine recipes\n\nSmall worlds that each show one thing working end to end. Every recipe here is a fragment of a world document: the parts it adds to a new world (Build's **Blank** template, or `newWorld` in the [studio API](STUDIO.md)). Merge it object by object: a collection gains the items shown, an item gains the fields shown, and a list replaces the one already there. In Build, enter each item in its editor; a studio merges the JSON. A new world carries every default data table, pinned as a template's are, so a recipe that needs a table of its own carries the whole table, rows and all, and it replaces the world's copy rather than merging into it; in Build, edit that copy in the **Data tables** editor. `test/docs/recipes.test.ts` builds every fragment on this page and plays it through the engine, so what each recipe says happens does happen.\n\nThe formulas are explained in [EXPRESSIONS.md](EXPRESSIONS.md), and every effect, function and pack kind used here is listed in the [reference](REFERENCE.md). Fights are set up in the user guide's [Combat and encounters](USER-GUIDE.md#combat-and-encounters).\n\n## XP and levels\n\nA progression keeps experience in one field and the level in another. After any effect changes an entity's XP (an award, a quest reward, a ✎ fix), the engine raises its level to the last threshold reached, one level at a time, and runs `onLevel` for each level gained. Here sparring earns 150 XP, Level 2 starts at 300, and every level adds a point of Grit. The maximum hit points are derived from the level, so the pool grows with it, and the sheet shows the level, the XP to the next one, and the pool as a bar.\n\n```json\n{\n  \"kinds\": {\n    \"person\": {\n      \"fields\": {\n        \"xp\": { \"type\": \"number\", \"label\": \"XP\", \"min\": 0, \"default\": 0 },\n        \"level\": { \"type\": \"number\", \"label\": \"Level\", \"min\": 1, \"default\": 1 },\n        \"grit\": { \"type\": \"number\", \"label\": \"Grit\", \"default\": 10 },\n        \"hp_max\": { \"type\": \"number\", \"label\": \"Max HP\", \"derived\": \"8 + self.level * 4\" },\n        \"hp\": { \"type\": \"number\", \"label\": \"Hit points\", \"pool\": { \"max\": \"hp_max\" } }\n      }\n    }\n  },\n  \"actions\": {\n    \"spar\": {\n      \"id\": \"spar\",\n      \"label\": \"Spar at the yard\",\n      \"params\": {},\n      \"requires\": [],\n      \"outcomes\": { \"default\": [{ \"type\": \"award\", \"args\": { \"entity\": \"self\", \"progression\": \"adventurer\", \"amount\": 150 } }] },\n      \"duration\": \"60\",\n      \"lexicon\": [\"spar\"]\n    }\n  },\n  \"ruleset\": {\n    \"progression\": {\n      \"adventurer\": {\n        \"label\": \"Level\",\n        \"xpField\": \"xp\",\n        \"levelField\": \"level\",\n        \"thresholds\": [0, 300, 900, 2700],\n        \"maxLevel\": 4,\n        \"kind\": \"person\",\n        \"onLevel\": [{ \"type\": \"add\", \"args\": { \"entity\": \"self\", \"field\": \"grit\", \"delta\": 1 } }]\n      }\n    },\n    \"sheet\": {\n      \"sections\": [{ \"id\": \"growth\", \"label\": \"Growth\", \"rows\": [{ \"progression\": \"adventurer\" }, { \"pool\": \"hp\" }, { \"field\": \"grit\" }] }]\n    }\n  }\n}\n```\n\n**Try it.** In Playtest, type *I spar* three times. The second spar reaches 300 XP: you reach Level 2, Grit goes from 10 to 11, the Journal says \"You reached Level 2.\", and your hit points can now reach 16. The third leaves you at 450 XP, still Level 2.\n\nThe thresholds can come from a data table instead (`\"thresholds\": { \"table\": \"xp_levels\", \"column\": \"xp\" }`, read in row order). `onLevel` sees `level` and `from` in its formulas, so `\"delta\": \"=level % 2 == 0 ? 1 : 0\"` adds a point only on even levels.\n\n## A skill challenge\n\nA puzzle track that opens after three successful checks, under the **Balanced** adjudication policy. Each lock is a little harder than the last (the DC is 12, then 14, then 16). Balanced rolls every check between two limits: a check with a 95 % chance or better passes without a roll (\"No roll needed\"), one with 5 % or worse fails without one (\"Too hard to try\"), and a close roll is told to the narrator as a close call. A failed attempt stands until something changes: an hour passes, the odds change, or you leave and come back.\n\n```json\n{\n  \"kinds\": {\n    \"person\": {\n      \"fields\": {\n        \"finesse\": { \"type\": \"number\", \"label\": \"Finesse\", \"default\": 0 },\n        \"locks_open\": { \"type\": \"number\", \"label\": \"Locks open\", \"min\": 0, \"default\": 0 }\n      }\n    }\n  },\n  \"entities\": { \"you\": { \"fields\": { \"finesse\": 4 } } },\n  \"checks\": {\n    \"tumbler\": { \"id\": \"tumbler\", \"dice\": \"1d20\", \"modifier\": \"self.finesse\", \"dc\": \"12 + self.locks_open * 2\" }\n  },\n  \"actions\": {\n    \"work_lock\": {\n      \"id\": \"work_lock\",\n      \"label\": \"Work a lock\",\n      \"params\": {},\n      \"requires\": [\"stage.vault_door == 'locked'\"],\n      \"check\": \"tumbler\",\n      \"outcomes\": {\n        \"success\": [{ \"type\": \"add\", \"args\": { \"entity\": \"self\", \"field\": \"locks_open\", \"delta\": 1 } }],\n        \"failure\": [{ \"type\": \"note\", \"args\": { \"text\": \"A tumbler slips back into place.\" } }]\n      },\n      \"duration\": \"10\",\n      \"lexicon\": [\"work the lock\", \"pick the lock\"]\n    }\n  },\n  \"tracks\": {\n    \"vault_door\": {\n      \"id\": \"vault_door\",\n      \"kind\": \"puzzle\",\n      \"label\": \"The vault door\",\n      \"start\": \"locked\",\n      \"visibility\": \"public\",\n      \"stages\": {\n        \"locked\": {\n          \"label\": \"Three locks hold the door\",\n          \"objectives\": [{ \"label\": \"Open all three locks\", \"when\": \"pov.locks_open >= 3\" }],\n          \"next\": [{ \"to\": \"open\", \"when\": \"pov.locks_open >= 3\" }],\n          \"hints\": [\"Each lock gives a little under steady hands.\"]\n        },\n        \"open\": { \"label\": \"The door swings open\", \"next\": [] }\n      }\n    }\n  },\n  \"ruleset\": {\n    \"adjudication\": {\n      \"preset\": \"balanced\",\n      \"checks\": \"every\",\n      \"riskyAt\": 0.75,\n      \"trivialAt\": 0.95,\n      \"impossibleAt\": 0.05,\n      \"description\": { \"weight\": \"bonus\", \"max\": 2, \"advantageAt\": 2 },\n      \"authority\": \"hybrid\",\n      \"closeBy\": 2,\n      \"retry\": \"changed\",\n      \"retryAfter\": 60\n    }\n  }\n}\n```\n\n**Try it.** Type *I work the lock* until the door opens. With Finesse 4 each lock rolls (a 65 %, then 55 %, then 45 % chance), and the palette shows the odds before you choose. Raise Finesse to 15 and every lock is a sure thing: three tries, no rolls, and the door is open. Lower it to −30 and no lock can be picked: each try fails without a roll.\n\nA named preset always plays as its own values, so to change one, set `\"preset\": \"custom\"`. The policy here is the world's default; a player can pick another for a chat in **Settings → Checks**. The check names no `pass`, so `success` counts as passing, the outcome a DC check reads when it isn't failed. To have the player's described approach count, keep `description.weight` at `bonus`: the judge step rates it, and the rating adds to the roll.\n\n## A shop with a priced catalog\n\nThe Buy action prices what you ask for from the world's `economy.catalog` table, finding the row by its id or by its name (with an `economy.categories` table, naming a whole category prices from its band instead). A row's `price_cents` is a band in minor units of the world's currency; a price drawn from it varies a little around `typical`, so a fixed price sets `min`, `typical` and `max` alike. At Money 2 the shop takes cash from the buyer's cash account and declines what they can't cover, and at Gear 1 or more a physical thing you buy (the categories `tools_hardware`, `groceries_staples`, `clothing` and the like) comes into being in your hands.\n\n```json\n{\n  \"realism\": { \"levels\": { \"money\": 2 } },\n  \"places\": { \"store\": { \"id\": \"store\", \"name\": \"Hollow Creek General Store\", \"fields\": {} } },\n  \"start\": { \"place\": \"store\" },\n  \"entities\": {\n    \"you\": { \"fields\": { \"place\": \"store\" } },\n    \"purse\": { \"id\": \"purse\", \"kind\": \"account\", \"name\": \"Your purse\", \"tier\": \"background\", \"fields\": { \"owner\": \"you\", \"type\": \"cash\", \"opening\": 2000 }, \"relations\": [] }\n  },\n  \"tables\": {\n    \"economy.catalog\": {\n      \"id\": \"economy.catalog\",\n      \"pack\": \"economy\",\n      \"schema\": \"lre-table/economy.catalog/v1\",\n      \"revision\": \"05c9407d21cade2a99c5351d90b8e57d\",\n      \"label\": \"Hollow Creek General Store\",\n      \"columns\": {\n        \"name\": { \"type\": \"text\" },\n        \"category\": { \"type\": \"text\" },\n        \"unit\": { \"type\": \"text\" },\n        \"price_cents\": { \"type\": \"band\", \"unit\": \"cents\" }\n      },\n      \"rows\": {\n        \"lantern\": { \"name\": \"Brass lantern\", \"category\": \"tools_hardware\", \"unit\": \"each\", \"price_cents\": { \"min\": 1250, \"typical\": 1250, \"max\": 1250 } },\n        \"rope\": { \"name\": \"Hemp rope\", \"category\": \"tools_hardware\", \"unit\": \"50 ft\", \"price_cents\": { \"min\": 600, \"typical\": 800, \"max\": 1000 } },\n        \"jerky\": { \"name\": \"Beef jerky\", \"category\": \"groceries_staples\", \"unit\": \"bag\", \"price_cents\": { \"min\": 350, \"typical\": 350, \"max\": 350 } }\n      }\n    }\n  }\n}\n```\n\n**Try it.** With $20.00 in your purse, *I buy a brass lantern* costs $12.50 and puts the lantern in your hands; *I buy beef jerky* costs $3.50. A second lantern is declined: $4.00 doesn't cover it. Rope costs between $6.00 and $10.00, close to $8.00.\n\nThe `revision` is computed from the table's schema, columns and rows, never written by hand: whenever a table is saved to a draft (by Build's table editor, or by an agent's patch), the engine computes it and pins it in `pins.tables`, and a studio computes the same hash. For a store that charges more than the world's usual prices, the `economy.price_modifier` effect raises a category, or everything, at one place (`\"percent\": 25` is a quarter dearer).\n\n## Secret lore behind a track\n\nA secret track reveals the mayor's debt once you reach the mill office, and a lore entry holds the secret itself. The entry is `secret`, so its `gate` keeps it shut until the track reaches `revealed`, and its `audience` names the one helper that may read it before then: `npc.choose`, the step that decides what NPCs do. No helper that writes prose for the narrator is in the audience, so nothing it reads can reach the story early.\n\n```json\n{\n  \"places\": {\n    \"mill\": { \"id\": \"mill\", \"name\": \"The mill\", \"fields\": {} },\n    \"mill_office\": { \"id\": \"mill_office\", \"name\": \"The mill office\", \"parent\": \"mill\", \"fields\": {} }\n  },\n  \"start\": { \"place\": \"mill\" },\n  \"entities\": {\n    \"you\": { \"fields\": { \"place\": \"mill\" } },\n    \"hale\": { \"id\": \"hale\", \"kind\": \"person\", \"name\": \"Mayor Hale\", \"tier\": \"supporting\", \"fields\": { \"place\": \"mill\" }, \"relations\": [] }\n  },\n  \"tracks\": {\n    \"hale_debt\": {\n      \"id\": \"hale_debt\",\n      \"kind\": \"secret\",\n      \"label\": \"The mayor's debt\",\n      \"owner\": \"hale\",\n      \"start\": \"hidden\",\n      \"visibility\": \"secret\",\n      \"stages\": {\n        \"hidden\": {\n          \"label\": \"The mill's books don't add up\",\n          \"cue\": \"The miller won't meet your eye when the mayor's name comes up.\",\n          \"next\": [{ \"to\": \"revealed\", \"when\": \"at(pov, 'mill_office')\" }]\n        },\n        \"revealed\": {\n          \"label\": \"The mayor owes the mill\",\n          \"truth\": \"Mayor Hale borrowed the mill's grain money to cover his gambling debts.\",\n          \"next\": []\n        }\n      }\n    }\n  },\n  \"lore\": {\n    \"hale_debt\": {\n      \"id\": \"hale_debt\",\n      \"title\": \"Hale's debt\",\n      \"content\": \"Mayor Hale borrowed the mill's grain money to cover his gambling debts. He means to repay it before the harvest audit.\",\n      \"keys\": [\"mayor\", \"debt\", \"grain money\"],\n      \"links\": [\"hale\", \"mill\"],\n      \"secret\": true,\n      \"gate\": \"stage.hale_debt == 'revealed'\",\n      \"audience\": [\"npc.choose\"]\n    }\n  }\n}\n```\n\n**Try it.** Check world runs a day without a leak: the truth never shows in a section. In Playtest, *I go to the mill office* reveals the track, and from then on the gate holds.\n\nLint guards the secret. The entry repeats the track's truth, so without `\"secret\": true` it is an error (`secret_truth`); a secret entry needs a gate (`no_gate`); and putting a prose step such as `brief` in the audience is a warning (`prose_audience`). The GM view shows every track with its truth whatever the player knows.\n\n## A room on the grid\n\nA walled garden drawn as a grid map, with the optional grid system on: walls and doors steer you, things lie in cells, and stepping into a zone fires a rule. The potting shed is a room behind a door, an iron key lies on the path, and the fountain is a zone. Cells outside every room (the paths here) count as the map's own place, the garden.\n\n```json\n{\n  \"mapSettings\": { \"display\": \"knowledge\", \"grid\": { \"movement\": true, \"sightRadius\": 3 } },\n  \"places\": { \"garden\": { \"id\": \"garden\", \"name\": \"The walled garden\", \"fields\": {} } },\n  \"start\": { \"place\": \"garden\" },\n  \"entities\": {\n    \"you\": { \"fields\": { \"place\": \"garden\" } },\n    \"key\": { \"id\": \"key\", \"kind\": \"item\", \"name\": \"Iron key\", \"tier\": \"background\", \"fields\": {}, \"relations\": [] }\n  },\n  \"maps\": {\n    \"garden\": {\n      \"id\": \"garden\",\n      \"scope\": \"garden\",\n      \"title\": \"The walled garden\",\n      \"cellMeters\": 2,\n      \"layout\": [\"#########\", \"#sss#...#\", \"#sss+.F.#\", \"#sss#.K.#\", \"######+##\"],\n      \"legend\": { \"s\": { \"place\": \"shed\" }, \"F\": { \"zone\": \"fountain\" }, \"K\": { \"item\": \"key\" } },\n      \"places\": [{ \"id\": \"shed\", \"name\": \"Potting shed\" }]\n    }\n  },\n  \"rules\": {\n    \"fountain_coins\": {\n      \"id\": \"fountain_coins\",\n      \"on\": { \"zone\": \"fountain\", \"in\": \"garden\" },\n      \"do\": [{ \"type\": \"note\", \"args\": { \"text\": \"Coins glint under the water.\" } }]\n    }\n  }\n}\n```\n\n**Try it.** You start at the gate in the bottom wall, x 6 and y 4 (x counts from the left, y from the top, both from 0). On the map, tap the fountain two squares up and **Walk here**: the rule fires and the Journal notes the coins. Standing there doesn't fire it again; stepping off and back on does. The key lies on the square below the fountain, close enough to **Take** from where you stand. Walk to the shed and you're in the potting shed: its door is the only way in.\n\nA zone trigger without `who` counts only the POV; `\"who\": { \"kind\": [\"person\"] }` counts anyone. Each room's area is also a zone named by the room, so `{ \"zone\": \"shed\", \"in\": \"garden\" }` fires on stepping into the shed. Lint checks the zone and cell triggers against the map.\n\n## A family\n\nA family is a group (the Relationships pack's `family` kind) whose members hold `member_of`, with kinship between them. `parent_of` and `child_of` are each other's inverse and `spouse_of` is symmetric, so the engine keeps both sides: the `link` and `unlink` effects write and remove the other side with them, and a chat starts with any side the world left out. Write both sides, as here, and lint has nothing to say. A schedule owned by the group applies to every member who isn't a group, so one schedule brings the whole family home for supper.\n\n```json\n{\n  \"places\": {\n    \"okafor_house\": { \"id\": \"okafor_house\", \"name\": \"The Okafor house\", \"fields\": {} },\n    \"bakery\": { \"id\": \"bakery\", \"name\": \"Okafor's Bakery\", \"fields\": {} }\n  },\n  \"start\": { \"at\": \"2026-01-01T17:00\" },\n  \"entities\": {\n    \"okafors\": { \"id\": \"okafors\", \"kind\": \"family\", \"name\": \"The Okafors\", \"tier\": \"background\", \"fields\": {}, \"relations\": [] },\n    \"ada\": {\n      \"id\": \"ada\",\n      \"kind\": \"person\",\n      \"name\": \"Ada Okafor\",\n      \"tier\": \"supporting\",\n      \"fields\": { \"place\": \"bakery\" },\n      \"relations\": [\n        { \"type\": \"member_of\", \"to\": \"okafors\", \"fields\": { \"role\": \"Mother\" } },\n        { \"type\": \"spouse_of\", \"to\": \"emeka\" },\n        { \"type\": \"parent_of\", \"to\": \"tobi\" }\n      ]\n    },\n    \"emeka\": {\n      \"id\": \"emeka\",\n      \"kind\": \"person\",\n      \"name\": \"Emeka Okafor\",\n      \"tier\": \"supporting\",\n      \"fields\": { \"place\": \"bakery\" },\n      \"relations\": [\n        { \"type\": \"member_of\", \"to\": \"okafors\", \"fields\": { \"role\": \"Father\" } },\n        { \"type\": \"spouse_of\", \"to\": \"ada\" },\n        { \"type\": \"parent_of\", \"to\": \"tobi\" }\n      ]\n    },\n    \"tobi\": {\n      \"id\": \"tobi\",\n      \"kind\": \"person\",\n      \"name\": \"Tobi Okafor\",\n      \"tier\": \"background\",\n      \"fields\": { \"place\": \"bakery\" },\n      \"relations\": [\n        { \"type\": \"member_of\", \"to\": \"okafors\", \"fields\": { \"role\": \"Son\" } },\n        { \"type\": \"child_of\", \"to\": \"ada\" },\n        { \"type\": \"child_of\", \"to\": \"emeka\" }\n      ]\n    }\n  },\n  \"schedules\": {\n    \"okafor_supper\": {\n      \"id\": \"okafor_supper\",\n      \"owner\": \"okafors\",\n      \"target\": \"place\",\n      \"recurrence\": { \"every\": \"day\" },\n      \"slots\": [{ \"start\": \"18:00\", \"end\": \"20:00\", \"value\": \"okafor_house\" }]\n    }\n  }\n}\n```\n\n**Try it.** The day starts at five in the afternoon with the family at the bakery. Timelapse an hour and a half: at six they all go home for supper. Formulas can ask about them: `member_of(tobi, 'okafors')` is true, and so is `has_rel(ada, 'parent_of', 'tobi')`.\n\nA selector picks the family wherever one is asked for: `{ \"memberOf\": [\"okafors\"] }` matches the three of them, for a schedule's owner, a rule's `who`, an action parameter's candidates or who knows a secret (`knownBy`). The person's own schedule wins over the group's for the same field, so Tobi can keep his own Saturday plans.\n";
 
 // docs/REFERENCE.md
-var REFERENCE_default = "# LumiRPEngine reference\n\n<!-- Generated by `bun run reference` (scripts/reference/build.ts). Edit the packs, then run it again. -->\n\nWhat the engine and its packs register, as the registry has it: kinds and their fields, effects and the arguments they read, formula functions, actions, events, proposal channels, panels, slots, data tables and lint codes. Arguments and parameters marked `?` may be left out. The formula language is in [EXPRESSIONS.md](EXPRESSIONS.md), worked examples are in [RECIPES.md](RECIPES.md), and the [user guide](USER-GUIDE.md#authoring) shows the editors.\n\nEngine `0.1.0` · world format `lre-world-v1` · packs `engine` 1, `calendar` 1, `space` 1, `economy` 1, `gear` 1, `vehicles` 1, `weather` 1, `relationships` 1, `castlife` 1, `sheets` 1, `story` 1, `combat` 1, `minds` 1.\n\n## Contents\n\n- [Engine built-ins](#engine-built-ins)\n- [Calendar & time pack](#calendar--time-pack-calendar)\n- [Cast life pack](#cast-life-pack-castlife)\n- [Combat pack](#combat-pack-combat)\n- [Economy pack](#economy-pack-economy)\n- [Gear & containers pack](#gear--containers-pack-gear)\n- [Minds pack](#minds-pack-minds)\n- [Relationships pack](#relationships-pack-relationships)\n- [Character sheets pack](#character-sheets-pack-sheets)\n- [Space & travel pack](#space--travel-pack-space)\n- [Story pack](#story-pack-story)\n- [Vehicles pack](#vehicles-pack-vehicles)\n- [Weather pack](#weather-pack-weather)\n\n## Engine built-ins\n\n### Core effects\n\n| Effect | Arguments |\n|---|---|\n| `add` | `entity`, `field`, `delta` |\n| `award` | `entity`, `progression`, `amount` |\n| `beat` | `hint` |\n| `check` | `check`, `actor?`, `target?`, `outcomes` |\n| `life` | `entity`, `to?`, `tell?` |\n| `link` | `rel`, `from`, `to`, `until?`, `fields?` |\n| `move` | `entity`, `to` |\n| `note` | `text`, `visibility?` |\n| `post` | `lines`, `memo?` |\n| `recover` | `entity`, `field`, `amount?`, `full?` |\n| `set` | `entity`, `field`, `value` |\n| `signal` | `class`, `text`, `entity?`, `visibility?` |\n| `spawn` | `kind`, `name`, `id?`, `tier?`, `fields?`, `relations?`, `agent?`, `place?`, `class?`, `tags?` |\n| `stage` | `track`, `to` |\n| `unlink` | `rel`, `from`, `to` |\n\n### Formula functions\n\nMath: `abs`, `ceil`, `clamp`, `floor`, `max`, `min`, `round`. `min` and `max` take any number of arguments.\n\nThe engine's own:\n\n- `at(entity, place)`\n- `attempts(track)`\n- `band(entity, field)`\n- `count_at(place, kind?)`\n- `days(n)`\n- `field(entity, field)`\n- `fired(rule)`\n- `has_rel(entity, type, to?)`\n- `holiday()`\n- `hours(n)`\n- `knows(entity, subject)`\n- `level(entity, domain)`\n- `next_time(time)`\n- `place(entity)`\n- `rel(entity, type, to?)`\n- `rel_count(entity, type)`\n- `rel_field(from, type, to, field)`\n- `revealed(track, stage?)`\n- `roll(notation)`: effect arguments only\n- `since(track)`\n- `stage(track)`\n- `table(table, key, column)`\n- `table_step(table, value, column)`\n- `today_at(time)`\n\nTaxonomy and life states:\n\n- `band_of(entity)`\n- `has_tag(entity, tag)`\n- `in_class(entity, facet, value)`\n- `kind_is(entity, kind)`\n- `life_of(entity)`\n- `member_of(entity, group)`\n- `tier_of(entity)`\n\n### Events\n\nCore: `add`, `clock`, `link`, `materialize`, `post`, `set`, `spawn`, `stage`, `timelapse`, `unlink`.\n\nEngine bookkeeping: `engine.adjudged`, `engine.attempt`, `engine.beat`, `engine.caught`, `engine.check`, `engine.choice`, `engine.class`, `engine.cursor`, `engine.entity`, `engine.fired`, `engine.life`, `engine.note`, `engine.observed`, `engine.pause`, `engine.revealed`, `engine.signal`, `engine.told`.\n\n### Relation types\n\nBuilt in: `in`, `owns`, `uses`, `worn_by`, `equipped`, `knows`, `member_of`, `regard`, `route`. Packs add the typed ones below.\n\n### Proposals\n\n| Proposal | Bound by |\n|---|---|\n| `knows` | `knows` |\n| `life` | `life` |\n| `spawn` | `spawn` |\n\n### Step purposes\n\n| Purpose | Outputs a world template may declare |\n|---|---|\n| `brief` | `text` |\n| `choices` | `text`, `effects` |\n| `consolidate` | `text` |\n| `contradiction` | `decision`, `text`, `effects` |\n| `extract` | `text`, `effects` |\n| `interpret` | `decision`, `text` |\n| `judge` | `decision`, `text` |\n| `memory` | `text` |\n| `mind` | `text` |\n| `npc.choose` | `decision`, `text` |\n| `outline` | `text` |\n| `puzzle.answer` | `decision`, `text` |\n| `skip` | `text` |\n\nSignals: `agents_present`, `always`, `beat`, `classifier`, `conflict`, `day_start`, `invitation`, `never`, `offscreen`, `present`, `reply`, `scene_change`, `slot_crossed`, `tie_zone`, `timelapse`, `typed_input`, and `every_n:<k>`.\n\nTemplate placeholders: `beats`, `brief`, `character`, `clock`, `facts`, `outcome`, `place`, `pov`, `present`, `recent`, `reply`, `scene`, `user`, `world`.\n\n### Sections\n\nThe slots a world gets when it defines none, kept in rank order on the section budget.\n\n| Slot | Label | Rank |\n|---|---|---|\n| `outcome` | Outcome | 0 |\n| `montage` | Montage | 1 |\n| `scene` | Scene | 2 |\n| `people` | People | 3 |\n| `money` | Money | 4 |\n| `gear` | Gear | 5 |\n| `vehicles` | Vehicles | 6 |\n| `quest` | Quest | 7 |\n| `outline` | Outline | 8 |\n| `stance` | Stance | 9 |\n| `minds` | Minds | 10 |\n\n### Realism\n\nDomains: `money`, `gear`, `vehicles`, `castlife`, `relationships`, `space`, `calendar`, `weather`, `sheets`; each at a level from 0 to 4.\n\nDetail bands: `principal` (Leads), `supporting` (Supporting), `background` (Background).\n\nInterrupt classes: `invitation`, `bill`, `decline`, `incident`, `quest`, `rule`, `arrival`, `overdue`, `needs`, `weather`.\n\n### Adjudication presets\n\n| Value | `narrative` | `balanced` | `crunchy` |\n|---|---|---|---|\n| `checks` | `\"risky\"` | `\"every\"` | `\"every\"` |\n| `riskyAt` | `0.75` | `0.75` | `0.75` |\n| `trivialAt` | `null` | `0.95` | `null` |\n| `impossibleAt` | `null` | `0.05` | `null` |\n| `description` | `{\"weight\":\"none\",\"max\":3,\"advantageAt\":2}` | `{\"weight\":\"bonus\",\"max\":2,\"advantageAt\":2}` | `{\"weight\":\"none\",\"max\":2,\"advantageAt\":2}` |\n| `authority` | `\"narrative\"` | `\"hybrid\"` | `\"mechanics\"` |\n| `closeBy` | `2` | `2` | `2` |\n| `retry` | `\"changed\"` | `\"changed\"` | `\"free\"` |\n| `retryAfter` | `60` | `60` | `60` |\n\n## Calendar & time pack (`calendar`)\n\nVersion 1 · realism domain `calendar` · requires none.\n\n### Formula functions\n\n- `days_until(date)`\n- `is_day_off()`\n- `is_weekend()`\n- `minutes_until(at)`\n- `weekday_name()`\n\n### Proposals\n\n| Proposal | Bound by |\n|---|---|\n| `time_advance` | `duration` |\n\n### Panels and slots\n\nPanels: `calendar.calendar`. Slots it writes: `scene`.\n\n### Data tables\n\n| Table | Label | Schema | Columns | Default rows |\n|---|---|---|---|---|\n| `calendar.dst` | Daylight saving time, time zones and daylight hours | `lre-table/calendar.dst/v1` | start (json), end (json), duration_weeks_approx (int), exceptions (list), standard_offsets_h (json), note (text), daylight_hours (json) | 1 |\n| `calendar.holidays` | Federal holidays | `lre-table/calendar.holidays/v1` | name (text), rule_type (enum), month (int), day (int, optional), weekday (enum, optional), n (int, optional), federal_paid_day_off (bool), private_sector_paid_day_off (enum), observed_if_weekend (text, optional) | 11 |\n| `calendar.observances` | Common observances | `lre-table/calendar.observances/v1` | name (text), rule_type (enum), month (int, optional), day (int, optional), weekday (enum, optional), n (int, optional), base (ref, optional), offset_days (int, optional), algorithm (text, optional), window (text, optional), start (text, optional), end (text, optional), rule_text (text, optional), rule_note (text, optional) | 30 |\n| `calendar.school` | School year | `lre-table/calendar.school/v1` | title (text), values (json) | 2 |\n| `calendar.shifts` | Work shift patterns | `lre-table/calendar.shifts/v1` | name (text), description (text), days_per_week (number), typical_start (text), typical_shift_h (number), typical_hours_per_week (int), weekend_work (enum), notes (text) | 24 |\n| `calendar.work` | Work norms | `lre-table/calendar.work/v1` | full_time_hours_per_week (number), standard_work_year_h (int), overtime (text), vacation_days_after_1_year (int), vacation_days_after_5_years (int), vacation_days_after_10_years (int), sick_days_per_year (int), paid_time_off_note (text), paid_holidays_per_year (int), meal_break (text) | 1 |\n\n### Lint codes\n\n`calendar.epoch`, `calendar.schedule_times`, `calendar.unit_cap`.\n\n## Cast life pack (`castlife`)\n\nVersion 1 · realism domain `castlife` · requires `gear`, `relationships`, `space`.\n\n### Effects\n\n| Effect | Arguments |\n|---|---|\n| `castlife.decide` | `key`, `choice` |\n| `castlife.override` | `who`, `minutes?`, `place?`, `activity?` |\n| `castlife.satisfy` | `need`, `entity?` |\n\n### Formula functions\n\n- `busy(who)`\n- `invited(host)`\n- `need(who, need)`\n\n### Actions\n\n| Action | Label | Parameters | Check | Outcomes | Minutes | Lexicon |\n|---|---|---|---|---|---|---|\n| `accept_invitation` | Accept invitation | `host: ref → person` |  | `default` | `1` | accept, sure, let's, count me in |\n| `eat` | Eat |  |  | `default` | `30` | eat, have lunch, have dinner, grab a bite |\n| `rest` | Rest |  |  | `default` | `30` | rest, relax, take a break |\n| `sleep` | Go to bed |  |  | `default` | `5` | go to bed, sleep, turn in, hit the sack |\n\n### Events\n\nIts own: `castlife.decision`, `castlife.invitation`, `castlife.need`.\n\n### Panels and slots\n\nPanels: `castlife.cast`. Slots it writes: `people`, `stance`.\n\n### Simulation\n\n| Process | Domain | From level | Steps |\n|---|---|---|---|\n| `castlife.agents` | `castlife` | 3 | each agent |\n| `castlife.plans` | `castlife` | 0 | the world |\n| `castlife.trips` | `castlife` | 1 | the world |\n\n### Lint codes\n\n`castlife.birthday`, `castlife.cues`, `castlife.double_booking`.\n\n## Combat pack (`combat`)\n\nVersion 1 · realism domain none · requires none.\n\n### Relation types\n\n| Relation | Label | From | To | Cardinality | Symmetric | Inverse | Fields |\n|---|---|---|---|---|---|---|---|\n| `hostile` | Hostile to | `*` | `*` | many_many | yes |  | none |\n\n### Effects\n\n| Effect | Arguments |\n|---|---|\n| `combat.end` | `winner?` |\n| `combat.end_turn` | `who?` |\n| `combat.spend` | `who?`, `cost` |\n| `combat.start` | `foes?` |\n\n### Formula functions\n\n- `budget_left(e, budget)`\n- `can_fight(e)`\n- `encounter_round()`\n- `has_turn(e)`\n- `in_encounter(e)`\n- `is_ally(a, b)`\n- `is_down(e)`\n- `is_foe(a, b)`\n- `standing(side)`\n\n### Actions\n\n| Action | Label | Parameters | Check | Outcomes | Minutes | Lexicon |\n|---|---|---|---|---|---|---|\n| `end_turn` | End turn |  |  | `default` | `0` | end my turn, end turn |\n| `fight` | Fight | `target: ref` |  | `default` | `0` | start a fight, pick a fight, draw my weapon |\n\n### Events\n\nIts own: `combat.act`, `combat.decision`, `combat.down`, `combat.end`, `combat.spend`, `combat.start`, `combat.turn`.\n\n### Panels and slots\n\nPanels: `combat.encounter`. Slots it writes: none.\n\n## Economy pack (`economy`)\n\nVersion 1 · realism domain `money` · requires `space`.\n\n### Kinds\n\n#### `account`: Account\n\n| Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |\n|---|---|---|---|---|---|---|---|\n| `apr_pct` | APR % | number | ≥ 0 |  |  |  | live from money 4 |\n| `apy_pct` | APY % | number | ≥ 0 |  |  |  | live from money 4 |\n| `autopay` | Autopay | enum: none, minimum, statement, full, fixed |  | `\"none\"` |  |  | live from money 3 |\n| `autopay_cents` | Autopay amount (fixed) | money | ≥ 0 |  |  |  | live from money 3 |\n| `autopay_from` | Autopay from | ref → account |  |  |  |  | live from money 3 |\n| `due_day` | Due day of month | number | 1 … 31 |  |  |  | live from money 3 |\n| `institution` | Institution | text |  |  |  |  | live from money 3 |\n| `limit` | Credit limit | money | ≥ 0 |  |  |  | live from money 3 |\n| `min_floor` | Minimum payment floor | money | ≥ 0 |  |  |  | live from money 4 |\n| `min_pct` | Minimum payment % of balance | number | 0 … 100 |  |  |  | live from money 4 |\n| `months_left` | Months left (loans) | number | ≥ 0 |  |  |  | live from money 3 |\n| `opened` | Opened | date |  |  |  |  | live from money 4 |\n| `opening` | Opening balance | money |  |  |  |  | locked |\n| `overdraft` | Overdraft policy | enum: decline, fee, linked |  |  |  |  | live from money 2 |\n| `overdraft_limit` | Overdraft limit | money | ≥ 0 |  |  |  | live from money 2 |\n| `overdraft_link` | Overdraft from | ref → account |  |  |  |  | live from money 2 |\n| `owners` | Owners ({party, role, share?}) | list |  |  |  |  | live from money 1 |\n| `payment` | Monthly payment (loans) | money | ≥ 0 |  |  |  | live from money 3 |\n| `product` | Product (a world product, or a class: cash, checking, business_checking, savings, money_market, cd, trust, escrow, credit_card, charge_card, line_of_credit, loan, mortgage, brokerage, retirement) | text |  |  |  |  | live from money 2 |\n| `secured_by` | Secured by | ref |  |  |  |  | live from money 3 |\n| `statement_day` | Statement day | number | 1 … 28 |  |  |  | live from money 3 |\n| `status` | Status | enum: open, frozen, collections, charged_off, closed, paid_off, matured |  | `\"open\"` |  |  | live from money 2 |\n| `term_months` | Term in months | number | ≥ 0 |  |  |  | live from money 3 |\n\n#### `business`: Business\n\nExtends `thing`.\n\n| Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |\n|---|---|---|---|---|---|---|---|\n| `collects_sales_tax` | Collects sales tax | bool |  |  |  |  | live from money 4 |\n| `daily_sales` | Walk-in takings a trading day | money | ≥ 0 |  |  |  | live from money 3 |\n| `distribution_every` | Paid out every | enum: month, quarter, year |  |  |  |  | live from money 4 |\n| `distribution_pct` | Profit paid out % | number | 0 … 100 |  |  |  | live from money 4 |\n| `industry` | Industry | text |  |  |  |  | live from money 3 |\n| `invoice_days` | Invoice terms (days) | number | ≥ 0 |  |  |  | live from money 3 |\n| `late_fee_pct` | Late fee % | number | ≥ 0 |  |  |  | live from money 4 |\n| `margin_pct` | Margin % | number | 0 … 100 |  |  |  | live from money 4 |\n| `operating_account` | Operating account | ref → account |  |  |  |  | live from money 3 |\n| `owners` | Owners ({party, role, share?}) | list |  |  |  |  | live from money 1 |\n| `places` | Places it trades at | list of ref |  |  |  |  | live from money 3 |\n| `sales_spread_pct` | Takings vary by up to ± % | number | 0 … 100 | `30` |  |  | live from money 3 |\n| `structure` | Structure | enum: sole_proprietorship, partnership, llc, s_corp, c_corp |  |  |  |  | live from money 4 |\n| `trading_days` | Trading days (0 is Sunday) | list of number |  |  |  |  | live from money 3 |\n| `valuation_multiple` | Valued at this many years of profit, over its books | number | ≥ 0 | `3` |  |  | live from money 4 |\n| `value` | Value (set: overrides the books) | money | ≥ 0 |  |  |  | live from money 3 |\n\n#### `card`: Payment card\n\n| Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |\n|---|---|---|---|---|---|---|---|\n| `account` | Account | ref → account |  |  |  |  | live from money 2 |\n| `daily_atm_limit` | Daily cash machine limit | money | ≥ 0 |  |  |  | live from money 4 |\n| `daily_purchase_limit` | Daily purchase limit | money | ≥ 0 |  |  |  | live from money 4 |\n| `holder` | Holder | ref |  |  |  |  | live from money 2 |\n| `item` | The card in gear | ref |  |  |  |  | live from money 2 |\n| `last4` | Last four digits | text |  |  |  |  | live from money 3 |\n| `network` | Card type | enum: debit, credit, charge |  |  |  |  | live from money 2 |\n| `replaced_by` | Replaced by | ref → card |  |  |  |  | live from money 2 |\n| `replaces` | Replaces | ref → card |  |  |  |  | live from money 2 |\n| `state` | State | enum: active, frozen, lost, cancelled |  | `\"active\"` |  |  | live from money 2 |\n\n#### `flow`: Money flow\n\n| Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |\n|---|---|---|---|---|---|---|---|\n| `amount_cents` | Amount | money | ≥ 0 |  |  |  | live from money 2 |\n| `amount_due` | What's due on the credit account it pays | enum: minimum, statement, balance |  |  |  |  | live from money 3 |\n| `amount_formula` | Amount formula | text |  |  |  |  | live from money 3 |\n| `amount_max` | Amount at most | money | ≥ 0 |  |  |  | live from money 3 |\n| `amount_min` | Amount at least | money | ≥ 0 |  |  |  | live from money 3 |\n| `amount_of` | Percent of this account's balance | ref → account |  |  |  |  | live from money 3 |\n| `amount_pct` | Percent of a balance | number | 0 … 100 |  |  |  | live from money 3 |\n| `amount_table` | Amount from a table (table.row.column) | text |  |  |  |  | live from money 3 |\n| `at` | Time of day (HH:MM) | text |  |  |  |  | live from money 2 |\n| `category` | Category | text |  |  |  |  | live from money 2 |\n| `count` | Times at most | number | ≥ 1 |  |  |  | live from money 2 |\n| `days` | Days of the month (-1 = the last) | list of number |  |  |  |  | live from money 2 |\n| `end` | Ends | date |  |  |  |  | live from money 2 |\n| `every` | Every | enum: day, week, month, year |  |  |  |  | live from money 2 |\n| `except` | Except holidays | list of text |  |  |  |  | live from money 3 |\n| `fallback` | Fallback (an account or a party) | text |  |  |  |  | live from money 3 |\n| `flow_kind` | Kind | enum: transfer, bill, rent, utility, subscription, premium, loan_payment, card_payment, savings, income, payroll, allowance, living, tax, distribution, invoice, draw, other |  | `\"bill\"` |  |  | live from money 2 |\n| `from` | From (an account, a party, or an outside payer) | text |  |  |  |  | live from money 2 |\n| `interval` | Every Nth period | number | ≥ 1 |  |  |  | live from money 2 |\n| `link` | Belongs to | ref |  |  |  |  | live from money 2 |\n| `method` | Paid by (cash, card, checking, savings) | text |  |  |  |  | live from money 3 |\n| `months` | Months (yearly) | list of number |  |  |  |  | live from money 2 |\n| `once` | Once, at (YYYY-MM-DDTHH:MM) | text |  |  |  |  | live from money 2 |\n| `retries` | Retries | number | ≥ 0 |  |  |  | live from money 3 |\n| `retry_days` | Retry after days | number | ≥ 1 |  |  |  | live from money 3 |\n| `roll` | Off a business day | enum: none, before, after |  | `\"none\"` |  |  | live from money 3 |\n| `shares` | Shares ({party, pct, from?}) | list |  |  |  |  | live from money 3 |\n| `shortfall` | When the money isn't there | enum: skip, partial, retry, fallback, overdraft, defer |  | `\"skip\"` |  |  | live from money 3 |\n| `splits` | Splits ({to, cents?, pct?}) | list |  |  |  |  | live from money 3 |\n| `start` | Starts | date |  |  |  |  | live from money 2 |\n| `status` | Status | enum: active, paused, ended |  | `\"active\"` |  |  | live from money 2 |\n| `to` | To (an account, a party, or an outside payee) | text |  |  |  |  | live from money 2 |\n| `weekdays` | Weekdays (0 = Sunday) | list of number |  |  |  |  | live from money 2 |\n\n#### `holding`: Holding\n\n| Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |\n|---|---|---|---|---|---|---|---|\n| `account` | Account | ref → account |  |  |  |  | live from money 4 |\n| `asset` | Asset | text |  |  |  |  | live from money 4 |\n| `lots` | Lots ({qty, cost, at}) | list |  |  |  |  | live from money 4 |\n| `owners` | Owners ({party, role, share?}) | list |  |  |  |  | live from money 1 |\n| `route` | Distributions go to (an account, or reinvest) | text |  |  |  |  | live from money 4 |\n\n#### `invoice`: Invoice\n\n| Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |\n|---|---|---|---|---|---|---|---|\n| `business` | Business | ref → business |  |  |  |  | live from money 3 |\n| `cents` | Amount | money | ≥ 0 |  |  |  | live from money 3 |\n| `customer` | Customer (a party, or an outside customer) | text |  |  |  |  | live from money 3 |\n| `days_late` | Days late | number | ≥ 0 |  |  |  | live from money 4 |\n| `due` | Due | date |  |  |  |  | live from money 3 |\n| `fees` | Late fees charged | number | ≥ 0 |  |  |  | live from money 4; locked |\n| `flow` | Paid by flow | text |  |  |  |  | live from money 3 |\n| `issued` | Issued | date |  |  |  |  | live from money 3 |\n| `late_fee` | Late fee charged | money | ≥ 0 |  |  |  | live from money 4 |\n| `memo` | For | text |  |  |  |  | live from money 3 |\n| `paid` | Paid | money | ≥ 0 |  |  |  | live from money 3 |\n| `state` | State | enum: open, paid, late, void |  | `\"open\"` |  |  | live from money 3 |\n\n#### `job`: Job\n\n| Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |\n|---|---|---|---|---|---|---|---|\n| `basis` | Paid by | enum: salary, hourly, per_shift, commission, tips, stipend |  | `\"hourly\"` |  |  | live from money 3 |\n| `commission_pct` | Commission % | number | ≥ 0 |  |  |  | live from money 3 |\n| `contractor` | Contractor (nothing withheld) | bool |  |  |  |  | live from money 4 |\n| `deductions` | Deductions ({label, pretax, cents?, pct?, kind?, match_pct?, to?}) | list |  |  |  |  | live from money 4 |\n| `employer` | Employer (a business, or an outside employer) | text |  |  |  |  | live from money 3 |\n| `end` | Ends | date |  |  |  |  | live from money 3 |\n| `hours` | Hours counted | enum: scheduled, attended, contract |  |  |  |  | live from money 3 |\n| `hours_per_week` | Hours a week | number | ≥ 0 |  |  |  | live from money 3 |\n| `occupation` | Occupation | text (row of economy.occupations) |  |  |  |  | live from money 3 |\n| `pay_anchor` | First payday | date |  |  |  |  | live from money 3 |\n| `pay_days` | Paydays of the month | list of number |  |  |  |  | live from money 3 |\n| `pay_every` | Paid | enum: weekly, biweekly, semimonthly, monthly, per_job, custom |  | `\"monthly\"` |  |  | live from money 3 |\n| `pay_except` | Custom pay: except holidays | list of text |  |  |  |  | live from money 3 |\n| `pay_interval` | Custom pay: every Nth | number | ≥ 1 |  |  |  | live from money 3 |\n| `pay_months` | Custom pay: months | list of number |  |  |  |  | live from money 3 |\n| `pay_roll` | Payday off a business day | enum: none, before, after |  | `\"before\"` |  |  | live from money 3 |\n| `pay_unit` | Custom pay: every | enum: day, week, month, year |  |  |  |  | live from money 3 |\n| `pay_weekday` | Payday weekday (0 = Sunday) | number | 0 … 6 |  |  |  | live from money 3 |\n| `pay_weekdays` | Custom pay: weekdays | list of number |  |  |  |  | live from money 3 |\n| `rate` | Rate (a year, an hour or a shift) | money | ≥ 0 |  |  |  | live from money 3 |\n| `season_from` | Season from (MM-DD) | text |  |  |  |  | live from money 3 |\n| `season_to` | Season to (MM-DD) | text |  |  |  |  | live from money 3 |\n| `shift_pattern` | Shift pattern | text (row of calendar.shifts) |  |  |  |  | live from money 3 |\n| `shifts_per_week` | Shifts a week | number | ≥ 0 |  |  |  | live from money 3 |\n| `splits` | Pay goes to ({to, cents?, pct?}) | list |  |  |  |  | live from money 3 |\n| `start` | Started | date |  |  |  |  | live from money 3 |\n| `status` | Status | enum: active, leave, ended |  | `\"active\"` |  |  | live from money 3 |\n| `tips_per_hour` | Tips an hour | money | ≥ 0 |  |  |  | live from money 3 |\n| `title` | Title | text |  |  |  |  | live from money 3 |\n| `weeks_per_year` | Weeks a year | number | 0 … 53 |  |  |  | live from money 3 |\n| `worker` | Worker | ref → person |  |  |  |  | live from money 3 |\n| `workplace` | Workplace | ref |  |  |  |  | live from money 3 |\n\n#### `property`: Property\n\nExtends `thing`.\n\n| Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |\n|---|---|---|---|---|---|---|---|\n| `appreciation_pct` | Appreciation % a year | number |  |  |  |  | live from money 4 |\n| `asking_price` | Asking price (for sale) | money | ≥ 0 |  |  |  | live from money 3 |\n| `insurance` | Insurance a month | money | ≥ 0 |  |  |  | live from money 4 |\n| `lease_months` | Lease term, months | number | ≥ 1 | `12` |  |  | live from money 3 |\n| `let_from` | Let since | date |  |  |  |  | live from money 3 |\n| `managed` | Let to outside tenants | bool |  | `false` |  |  | live from money 3 |\n| `market_rent` | Market rent, a unit a month | money | ≥ 0 |  |  |  | live from money 3 |\n| `mortgage` | Mortgage | ref → account |  |  |  |  | live from money 3 |\n| `owners` | Owners ({party, role, share?}) | list |  |  |  |  | live from money 1 |\n| `place` | Place | ref |  |  |  |  | live from money 3 |\n| `purchase_price` | Purchase price | money | ≥ 0 |  |  |  | live from money 4 |\n| `purchased` | Purchased | date |  |  |  |  | live from money 4 |\n| `region` | Region (for its property tax) | text (row of economy.regions) |  |  |  |  | live from money 3 |\n| `rent_to` | Rent paid into | ref → account |  |  |  |  | live from money 3 |\n| `tax_installments` | Property tax bills a year | number | 1 … 12 | `2` |  |  | live from money 3 |\n| `tax_pct` | Property tax % a year | number | ≥ 0 |  |  |  | live from money 4 |\n| `units` | Units to let | number | ≥ 1 | `1` |  |  | live from money 3 |\n| `upkeep_pct` | Upkeep % a year | number | ≥ 0 |  |  |  | live from money 4 |\n| `vacancy_months` | Months empty between tenants, on average | number | ≥ 0 | `1` |  |  | live from money 3 |\n| `value` | Value | money | ≥ 0 |  |  |  | live from money 3 |\n| `volatility_pct` | Value swings, % a year | number | ≥ 0 |  |  |  | live from money 4 |\n\n#### `trust`: Trust\n\nExtends `thing`.\n\n| Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |\n|---|---|---|---|---|---|---|---|\n| `owners` | Owners ({party, role, share?}) | list |  |  |  |  | live from money 1 |\n\n### Effects\n\n| Effect | Arguments |\n|---|---|\n| `economy.apply_credit` | `product`, `cents?`, `term?`, `secured_by?`, `who?` |\n| `economy.buy` | `item?`, `category?`, `qty?`, `price?`, `exact?`, `stated?`, `name?`, `payer?`, `method?`, `from?`, `payee?`, `keep?`, `cashback?` |\n| `economy.card_replace` | `card`, `who?` |\n| `economy.card_state` | `card`, `state`, `who?` |\n| `economy.close_account` | `account` |\n| `economy.deposit` | `account`, `cents`, `who?` |\n| `economy.distribute` | `business`, `cents?`, `by?` |\n| `economy.exercise` | `holding`, `qty?`, `from?`, `to?`, `party?` |\n| `economy.flow_create` | `label?`, `kind?`, `from?`, `to?`, `amount?`, `every?`, `interval?`, `weekday?`, `day?`, `month?`, `at?`, `once?`, `start?`, `end?`, `count?`, `shortfall?`, `retry_days?`, `retries?`, `fallback?`, `roll?`, `category?`, `who?` |\n| `economy.flow_edit` | `flow`, `name?`, `clear?` |\n| `economy.flow_status` | `flow`, `status`, `who?` |\n| `economy.flow_update` | `flow`, `label?`, `kind?`, `from?`, `to?`, `amount?`, `every?`, `interval?`, `weekday?`, `day?`, `month?`, `at?`, `once?`, `start?`, `end?`, `count?`, `shortfall?`, `retry_days?`, `retries?`, `fallback?`, `roll?`, `category?`, `who?`, `clear?` |\n| `economy.hire` | `business`, `worker`, `title?`, `occupation?`, `basis?`, `rate?`, `hours?`, `hours_per_week?`, `pay_every?`, `start?`, `by?` |\n| `economy.invoice_issue` | `business`, `customer?`, `customer_name?`, `cents`, `memo?`, `days?`, `by?` |\n| `economy.invoice_pay` | `invoice`, `by?` |\n| `economy.invoice_void` | `invoice`, `by?` |\n| `economy.job_end` | `job`, `end?`, `by?` |\n| `economy.job_raise` | `job`, `rate?`, `pct?`, `by?` |\n| `economy.lease_end` | `lease`, `on?`, `party?` |\n| `economy.lease_start` | `property`, `tenant`, `rent`, `months?`, `day?`, `unit?`, `from?`, `party?` |\n| `economy.lose` | `item`, `thief?` |\n| `economy.move` | `from`, `to`, `cents`, `memo?` |\n| `economy.owner_draw` | `business`, `cents`, `owner?`, `by?` |\n| `economy.pay_card` | `card`, `from?`, `cents?`, `who?` |\n| `economy.price_modifier` | `percent`, `scope?`, `place?`, `minutes?`, `id?`, `clear?` |\n| `economy.property_buy` | `property`, `price?`, `from?`, `down?`, `term_months?`, `party?` |\n| `economy.property_sell` | `property`, `price`, `buyer?`, `to?`, `party?` |\n| `economy.release_hold` | `account`, `hold` |\n| `economy.route` | `holding?`, `property?`, `business?`, `to?`, `party?` |\n| `economy.set_autopay` | `account`, `mode`, `from?`, `cents?`, `who?` |\n| `economy.set_pay_prefs` | `tiers`, `who?` |\n| `economy.set_price` | `asset`, `price` |\n| `economy.set_status` | `account`, `status` |\n| `economy.stake_sell` | `business`, `share`, `price`, `buyer?`, `to?`, `party?` |\n| `economy.trade` | `side?`, `party?`, `holding?`, `asset?`, `account?`, `qty?`, `amount?`, `from?`, `to?`, `right?`, `strike?`, `expiry?` |\n| `economy.transfer` | `to`, `cents`, `from?`, `memo?`, `method?` |\n| `economy.withdraw` | `account`, `cents`, `who?` |\n\n### Formula functions\n\n- `asset_price(id)`\n- `balance(account)`\n- `business_value(id)`\n- `can_afford(who, cents)`\n- `credit_score(who)`\n- `employs(business, who)`\n- `holding_units(id)`\n- `holding_value(id)`\n- `holds(who, thing)`\n- `is_credit(account)`\n- `manages(who, thing)`\n- `may_draw(who, business)`\n- `money_feature(feature, who)`\n- `net_worth(who)`\n- `price(item)`\n- `property_value(id)`\n- `spends(who, account)`\n- `wealth(who)`\n\n### Actions\n\n| Action | Label | Parameters | Check | Outcomes | Minutes | Lexicon |\n|---|---|---|---|---|---|---|\n| `apply_credit` | Apply for credit | `product: text`, `amount?: money`, `term?: number` |  | `default` | `15` | apply for a credit card, apply for a loan, take out a loan |\n| `buy` | Buy | `item: text`, `qty?: number`, `price?: money`, `method?: text`, `cashback?: money` |  | `default` | `5` | buy, purchase, order, pick up a |\n| `card_freeze` | Freeze card | `card: ref → card` |  | `default` | `2` | freeze my card, lock my card |\n| `card_replace` | Replace card | `card: ref → card` |  | `default` | `2` | replace my card, order a new card |\n| `card_report_lost` | Report card lost | `card: ref → card` |  | `default` | `2` | report my card lost, my card was stolen, cancel my card |\n| `card_unfreeze` | Unfreeze card | `card: ref → card` |  | `default` | `2` | unfreeze my card, unlock my card |\n| `deposit_cash` | Deposit cash | `account: ref → account`, `amount: money` |  | `default` | `3` | deposit, pay in cash, bank the cash |\n| `distribute_profit` | Distribute profit | `business: ref → business`, `amount?: money` |  | `default` | `10` | distribute profit, pay dividends, pay out the owners |\n| `exercise_option` | Exercise an option | `holding: ref → holding`, `qty?: number`, `from?: ref → account`, `to?: ref → account` |  | `default` | `2` | exercise the option, exercise my calls, exercise my puts |\n| `flow_create` | Set up a standing payment | `label?: text`, `kind?: text`, `from?: ref → account`, `to?: text`, `amount?: money`, `every?: text`, `interval?: number`, `weekday?: number`, `day?: number`, `month?: number`, `at?: text`, `once?: text`, `start?: text`, `end?: text`, `count?: number`, `shortfall?: text`, `retry_days?: number`, `retries?: number`, `fallback?: text`, `roll?: text`, `category?: text` |  | `default` | `2` | set up a standing order, schedule a payment, set up a recurring transfer |\n| `flow_delete` | Cancel a standing payment | `flow: ref → flow` |  | `default` | `2` | cancel the standing order, stop the recurring payment |\n| `flow_pause` | Pause a standing payment | `flow: ref → flow` |  | `default` | `2` | pause the standing order |\n| `flow_resume` | Resume a standing payment | `flow: ref → flow` |  | `default` | `2` | resume the standing order |\n| `flow_update` | Change a standing payment | `flow: ref → flow`, `label?: text`, `kind?: text`, `from?: ref → account`, `to?: text`, `amount?: money`, `every?: text`, `interval?: number`, `weekday?: number`, `day?: number`, `month?: number`, `at?: text`, `once?: text`, `start?: text`, `end?: text`, `count?: number`, `shortfall?: text`, `retry_days?: number`, `retries?: number`, `fallback?: text`, `roll?: text`, `category?: text`, `clear?: text` |  | `default` | `2` | change the standing order, change the recurring payment |\n| `invoice_issue` | Send an invoice | `business: ref → business`, `customer?: ref`, `customer_name?: text`, `amount: money`, `memo?: text`, `days?: number` |  | `default` | `10` | send an invoice, invoice, bill them |\n| `invoice_pay` | Pay an invoice | `invoice: ref → invoice` |  | `default` | `5` | pay the invoice, settle the bill |\n| `invoice_void` | Void an invoice | `invoice: ref → invoice` |  | `default` | `5` | void the invoice, cancel the invoice, write it off |\n| `job_end` | End a job | `job: ref → job` |  | `default` | `10` | fire, let go, quit, resign, hand in my notice |\n| `job_hire` | Hire | `business: ref → business`, `worker: ref → person`, `title?: text`, `basis?: text`, `rate?: money`, `hours_per_week?: number`, `pay_every?: text` |  | `default` | `15` | hire, take on, give a job to |\n| `job_raise` | Give a raise | `job: ref → job`, `rate: money` |  | `default` | `5` | give a raise, raise the pay, pay more |\n| `lease_end` | End a lease | `lease: ref → flow`, `on?: text` |  | `default` | `10` | end the lease, give notice, move out |\n| `lease_start` | Let a unit | `property: ref → property`, `tenant: ref → person`, `rent: money`, `months?: number`, `day?: number`, `unit?: text` |  | `default` | `20` | rent out, sign a lease, let the apartment |\n| `move_money` | Transfer between accounts | `from: ref → account`, `to: ref → account`, `amount: money` |  | `default` | `2` | transfer, move money, put into savings |\n| `owner_draw` | Take an owner's draw | `business: ref → business`, `amount: money` |  | `default` | `5` | take a draw, pay myself, take money out of the business |\n| `pay` | Pay | `to: ref → person`, `amount: money` |  | `default` | `1` | pay, give money, send money, venmo |\n| `pay_card` | Pay card or loan | `card: ref → account`, `from?: ref → account`, `amount?: money` |  | `default` | `2` | pay off the card, pay the card, pay my credit card, make a loan payment |\n| `property_buy` | Buy a property | `property: ref → property`, `price?: money`, `from?: ref → account`, `down?: money`, `term_months?: number` |  | `default` | `60` | buy the house, buy the property, make an offer on |\n| `property_sell` | Sell a property | `property: ref → property`, `price: money`, `buyer?: ref → person`, `to?: ref → account` |  | `default` | `60` | sell the house, sell the property |\n| `route_distributions` | Route dividends, rent or profits | `holding?: ref → holding`, `property?: ref → property`, `business?: ref → business`, `to?: text` |  | `default` | `1` | reinvest dividends, send dividends to, send the rent to |\n| `set_autopay` | Set autopay | `account: ref → account`, `mode: text`, `from?: ref → account`, `amount?: money` |  | `default` | `2` | set up autopay, turn on autopay, turn off autopay |\n| `set_pay_prefs` | Set how I pay | `tiers: text` |  | `default` | `2` | i'd rather pay with |\n| `stake_sell` | Sell a share of a business | `business: ref → business`, `share: number`, `price: money`, `buyer?: ref → person`, `to?: ref → account` |  | `default` | `60` | sell my share of the business, sell the shop |\n| `trade` | Buy or sell investments | `side?: text`, `holding?: ref → holding`, `asset?: text`, `account?: ref → account`, `qty?: number`, `amount?: money`, `from?: ref → account`, `to?: ref → account`, `right?: text`, `strike?: money`, `expiry?: text` |  | `default` | `2` | invest, buy stocks, buy shares, sell stocks, sell shares, cash out, buy an option |\n| `withdraw_cash` | Withdraw cash | `account: ref → account`, `amount: money` |  | `default` | `3` | withdraw, take out cash, hit the atm, get cash |\n\n### Events\n\nIts own: `economy.accrue`, `economy.acquire`, `economy.anchor`, `economy.card_paid`, `economy.commission`, `economy.credit`, `economy.decline`, `economy.delinquency`, `economy.dispose`, `economy.estimated_tax`, `economy.exercise`, `economy.flow_renamed`, `economy.flow_run`, `economy.hold`, `economy.income`, `economy.invoice_paid`, `economy.lots`, `economy.mint`, `economy.modifier`, `economy.note`, `economy.open`, `economy.payout`, `economy.payslip`, `economy.price`, `economy.quote`, `economy.remit`, `economy.sale`, `economy.score`, `economy.settle`, `economy.spend`, `economy.stake_route`, `economy.statement`, `economy.status`, `economy.timesheet`, `economy.txn`.\n\nChecks it adds to: `post`.\n\n### Proposals\n\n| Proposal | Bound by |\n|---|---|\n| `purchase` | `money` |\n| `transfer` | `money` |\n\n### Panels and slots\n\nPanels: `economy.money`. Slots it writes: `money`.\n\n### Simulation\n\n| Process | Domain | From level | Steps |\n|---|---|---|---|\n| `economy.accounts` | `money` | 3 | the world |\n| `economy.invoices` | `money` | 3 | the world |\n| `economy.markets` | `money` | 3 | the world |\n| `economy.money` | `money` | 2 | the world |\n| `economy.plans` | `money` | 0 | the world |\n| `economy.property_values` | `money` | 3 | the world |\n| `economy.settlements` | `money` | 3 | the world |\n| `economy.timesheet` | `money` | 3 | the world |\n\nDetail on demand: `money` (version 2).\n\n### Data tables\n\n| Table | Label | Schema | Columns | Default rows |\n|---|---|---|---|---|\n| `economy.catalog` | Price catalog | `lre-table/economy.catalog/v1` | name (text), category (ref), unit (text), price_cents (band), notes (text, optional) | 340 |\n| `economy.categories` | Price categories | `lre-table/economy.categories/v1` | name (text), basis (text), notes (text, optional), price_unit_note (text, optional), item_count (int), price_cents (band) | 19 |\n| `economy.finance` | Finance parameters | `lre-table/economy.finance/v1` | title (text), values (json) | 7 |\n| `economy.occupations` | Occupations and pay | `lre-table/economy.occupations/v1` | title (text), category (enum), median_cents_per_h (int), median_cents_per_year (int), typical_earnings_cents_per_year (int), schedule_pattern (ref), typical_hours_per_week (number), weeks_per_year (number), weekend_work (enum), shifts (list), pay_frequency (enum), benefits (enum), benefits_note (text), withholding_rate_pct (number), description (text), wage_basis (text), tipped (bool, optional), tipped_cash_wage_cents_per_h (int, optional), self_employed (bool, optional), fica_exempt (bool, optional), estimated_tax_set_aside_pct (number, optional), withholding_note (text, optional) | 56 |\n| `economy.regions` | Regions (US states, DC and the national baseline) | `lre-table/economy.regions/v1` | name (text), abbr (text), scope (enum), census_region (enum, optional), census_division (enum, optional), time_zones (list, optional), observes_dst (bool, optional), state_income_tax_effective_pct (number, optional), local_income_tax_pct_typical (number, optional), sales_tax_combined_avg_pct (number), property_tax_effective_pct (number, optional), cost_of_living_multiplier (number), median_rent_1br_cents_per_month (int), median_rent_2br_cents_per_month (int), residential_electricity_cents_per_kwh (number), minimum_wage_cents_per_h (int), tipped_minimum_wage_cents_per_h (int, optional), notes (text, optional) | 52 |\n\n### Lint codes\n\n`economy.accounts`, `economy.assets`, `economy.business`, `economy.holdings`, `economy.property`, `economy.unpriced_cap`.\n\n## Gear & containers pack (`gear`)\n\nVersion 1 · realism domain `gear` · requires `space`.\n\n### Kinds\n\n#### `container`: Container\n\nExtends `item`.\n\n| Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |\n|---|---|---|---|---|---|---|---|\n| `capacity_l` | Capacity (l) | number | ≥ 0 |  |  |  | live from gear 2 |\n| `max_load_kg` | Max load (kg) | number | ≥ 0 |  |  |  | live from gear 2 |\n| `stock` | Contents category (sampled when first opened) | text |  |  |  |  |  |\n\n#### `item`: Item\n\nExtends `thing`.\n\n| Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |\n|---|---|---|---|---|---|---|---|\n| `catalog` | Catalog item | text (row of economy.catalog) |  |  |  |  |  |\n| `category` | Category | text |  |  |  |  |  |\n| `condition` | Condition | number | 0 … 100 | `100` |  |  | live from gear 3; bound auto, ±25 a turn; bands: broken, worn, good, like new |\n| `consumable` | Consumable | bool |  |  |  |  | live from gear 4 |\n| `from_kit` | From kit | ref |  |  |  |  | locked |\n| `notable` | Notable | bool |  |  |  |  | live from gear 1 |\n| `overdue` | Overdue | bool |  |  |  |  | locked |\n| `piece` | Kit piece | text |  |  |  |  | locked |\n| `qty` | Quantity | number | ≥ 0 | `1` |  |  | live from gear 2; bound confirm, ±10 a turn |\n| `slot` | Equip slot | text |  |  |  |  | live from gear 3 |\n| `uses` | Uses left | number | ≥ 0 |  |  |  | live from gear 4 |\n| `volume_l` | Volume (l) | number | ≥ 0 |  |  |  | live from gear 2 |\n| `weight_g` | Weight (g) | number | ≥ 0 |  |  |  | live from gear 2 |\n\n#### `kit`: Kit\n\nExtends `container`.\n\n| Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |\n|---|---|---|---|---|---|---|---|\n| `kit` | Kit template | text |  |  |  |  | live from gear 3 |\n| `piece_count` | Piece count | number |  |  |  |  | live from gear 3 |\n| `pieces` | Pieces | list |  |  |  |  | live from gear 3 |\n\n### Relation types\n\n| Relation | Label | From | To | Cardinality | Symmetric | Inverse | Fields |\n|---|---|---|---|---|---|---|---|\n| `equipped` | Equipped by | `item` | `*` | many_one |  |  | `slot` |\n| `uses` | Uses (granted until) | `*` | `*` | many_many |  |  | none |\n| `worn_by` | Worn by | `item` | `*` | many_one |  |  | `slot` |\n\n### Effects\n\n| Effect | Arguments |\n|---|---|\n| `gear.drop` | `item`, `place?` |\n| `gear.give` | `item`, `from`, `to` |\n| `gear.lend` | `item`, `to`, `until?`, `said?` |\n| `gear.lose` | `item`, `thief?` |\n| `gear.receive` | `name`, `to`, `from?` |\n| `gear.remove` | `item` |\n| `gear.retrieve` | `item` |\n| `gear.take_piece` | `kit`, `piece`, `to` |\n| `gear.transfer` | `item`, `to` |\n| `gear.use` | `item`, `user?` |\n| `gear.wear` | `item`, `wearer`, `slot?` |\n\n### Formula functions\n\n- `carried_kg(holder)`\n- `carries(holder, item)`\n- `has_item(holder, what)`\n- `kit_complete(kit)`\n- `kit_present(kit)`\n- `lent_out(thing)`\n\n### Actions\n\n| Action | Label | Parameters | Check | Outcomes | Minutes | Lexicon |\n|---|---|---|---|---|---|---|\n| `drop` | Drop | `item: ref → item` |  | `default` | `1` | drop, put down, leave |\n| `give` | Give | `item: ref → item`, `to: ref → person` |  | `default` | `1` | give, hand, pass |\n| `lend` | Lend | `item: ref → item`, `to: ref → person`, `days?: number`, `until?: text` |  | `default` | `2` | lend, loan, let borrow |\n| `lose` | Lose something | `item: ref → item` |  | `default` | `1` | lost my, lose, can't find my, is gone, is missing |\n| `reclaim` | Take back | `item: ref → item` |  | `default` | `5` | take back, get back, reclaim |\n| `remove` | Take off | `item: ref → item` |  | `default` | `2` | take off, remove, unequip |\n| `take` | Take | `item: ref → item` |  | `default` | `1` | take, pick up, grab |\n| `take_piece` | Take from a kit | `kit: ref → kit`, `piece: text` |  | `default` | `1` | take the, grab a, get a |\n| `use` | Use | `item: ref → item` |  | `default` | `5` | use, apply |\n| `wear` | Wear or equip | `item: ref → item` |  | `default` | `2` | wear, put on, equip |\n\n### Proposals\n\n| Proposal | Bound by |\n|---|---|\n| `give` | `ref` |\n| `quantity` | `number` |\n\n### Panels and slots\n\nPanels: `gear.gear`. Slots it writes: `gear`.\n\n### Simulation\n\n| Process | Domain | From level | Steps |\n|---|---|---|---|\n| `gear.grants` | `gear` | 1 | the world |\n\nDetail on demand: `gear` (version 1).\n\n### Data tables\n\n| Table | Label | Schema | Columns | Default rows |\n|---|---|---|---|---|\n| `gear.containers` | Containers | `lre-table/gear.containers/v1` | name (text), capacity_l (number), max_load_kg (number), empty_weight_g (int), location (enum), equip_slot (ref), price_cents (band), notes (text, optional) | 34 |\n| `gear.items` | Gear items | `lre-table/gear.items/v1` | name (text), category (enum), equip_slot (ref), weight_g (int), volume_l (number), price_cents (band), notes (text, optional) | 90 |\n| `gear.kits` | Kits | `lre-table/gear.kits/v1` | name (text), recommended_container (ref), description (text), piece_count (int), pieces_total_weight_g (number), packed_volume_l (number), price_cents (band), pieces (list), notes (text, optional) | 5 |\n| `gear.slots` | Equip slots | `lre-table/gear.slots/v1` | description (text) | 20 |\n\n### Lint codes\n\n`gear.kits`.\n\n## Minds pack (`minds`)\n\nVersion 1 · realism domain none · requires none.\n\n### Events\n\nIts own: `minds.commitment`, `minds.commitment_edit`, `minds.consolidated`, `minds.memory`, `minds.mind`, `minds.note_edit`, `minds.pin`, `minds.plan`, `minds.plan_edit`, `minds.presence`, `minds.refresh`, `minds.round`, `minds.skip`.\n\n### Panels and slots\n\nPanels: none. Slots it writes: `minds`.\n\n### Lint codes\n\n`minds.config`, `minds.steps`.\n\n## Relationships pack (`relationships`)\n\nVersion 1 · realism domain `relationships` · requires `space`.\n\n### Kinds\n\n#### `company`: Company\n\nExtends `group`.\n\nNo fields of its own.\n\n#### `faction`: Faction\n\nExtends `group`.\n\nNo fields of its own.\n\n#### `family`: Family\n\nExtends `group`.\n\nNo fields of its own.\n\n#### `group`: Group\n\nExtends `thing`.\n\nNo fields of its own.\n\n#### `household`: Household\n\nExtends `group`.\n\nNo fields of its own.\n\n### Relation types\n\n| Relation | Label | From | To | Cardinality | Symmetric | Inverse | Fields |\n|---|---|---|---|---|---|---|---|\n| `child_of` | Child of | `person` | `person` | many_many |  | `parent_of` | none |\n| `knows` | Knows | `*` | `*` | many_many |  |  | none |\n| `member_of` | Member of | `*` | `group` | many_many |  |  | `rank`, `role`, `since` |\n| `parent_of` | Parent of | `person` | `person` | many_many |  | `child_of` | none |\n| `partner_of` | Partner of | `person` | `person` | many_many | yes |  | `since` |\n| `regard` | Regard | `*` | `*` | many_many |  |  | `respect`, `trust`, `warmth` |\n| `sibling_of` | Sibling of | `person` | `person` | many_many | yes |  | none |\n| `spouse_of` | Spouse of | `person` | `person` | many_many | yes |  | `since` |\n\n### Effects\n\n| Effect | Arguments |\n|---|---|\n| `relationships.adjust` | `from`, `to`, `delta`, `axis?`, `why?` |\n| `relationships.appraise` | `from`, `to`, `appraisal`, `why?`, `mutual?` |\n\n### Formula functions\n\n- `faction_regard(group, to)`\n- `regard(from, to, axis)`\n- `regard_band(from, to)`\n\n### Actions\n\n| Action | Label | Parameters | Check | Outcomes | Minutes | Lexicon |\n|---|---|---|---|---|---|---|\n| `chat_with` | Chat with | `target: ref → person` |  | `default` | `15` | chat with, talk to, catch up with |\n| `give_gift` | Give a gift | `target: ref → person` |  | `default` | `5` | give a gift, surprise |\n\n### Events\n\nIts own: `relationships.regard`.\n\n### Proposals\n\n| Proposal | Bound by |\n|---|---|\n| `regard` | `number` |\n\n### Panels and slots\n\nPanels: none. Slots it writes: `people`.\n\n### Lint codes\n\n`relationships.axes`.\n\n## Character sheets pack (`sheets`)\n\nVersion 1 · realism domain `sheets` · requires `space`.\n\n### Effects\n\n| Effect | Arguments |\n|---|---|\n| `sheets.condition` | `condition`, `who?`, `label?`, `mod?`, `minutes?`, `clear?` |\n\n### Formula functions\n\n- `condition_mod(who)`\n- `derived(who, id)`\n- `difficulty_of(v)`\n- `has_condition(who, id)`\n- `stat(who, stat)`\n- `stat_mod(who, stat)`\n- `stat_word(who, stat)`\n\n### Actions\n\n| Action | Label | Parameters | Check | Outcomes | Minutes | Lexicon |\n|---|---|---|---|---|---|---|\n| `attempt` | Attempt | `stat: text`, `difficulty?: text` | `1d20` | `failure`, `great`, `success` | `5` | try to, attempt, check |\n\n### Proposals\n\n| Proposal | Bound by |\n|---|---|\n| `condition` | `list` |\n\n### Panels and slots\n\nPanels: `sheets.you`. Slots it writes: `outcome`.\n\n### Lint codes\n\n`sheets.stat_range`.\n\n## Space & travel pack (`space`)\n\nVersion 1 · realism domain `space` · requires `calendar`.\n\n### Kinds\n\n#### `person`: Person\n\nExtends `thing`.\n\n| Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |\n|---|---|---|---|---|---|---|---|\n| `activity` | Activity | text |  | `\"idle\"` |  |  | live from castlife 1 |\n| `activity_until` | Activity ends | number |  |  |  |  | live from castlife 1; locked |\n| `agility` | Agility | number | 3 … 18 |  |  |  | live from sheets 1 |\n| `appointments` | Appointments | list |  |  |  |  | live from castlife 2 |\n| `birthday` | Birthday (MM-DD or YYYY-MM-DD) | date |  |  |  |  | live from castlife 3 |\n| `charm` | Charm | number | 3 … 18 |  |  |  | live from sheets 1 |\n| `chores` | Chores | list |  |  |  |  | live from castlife 3 |\n| `conditions` | Conditions | list |  |  |  |  | live from sheets 4 |\n| `employer` | Employer | ref |  |  |  |  | live from money 3 |\n| `filing_status` | Tax filing status | enum: single, married_filing_jointly, head_of_household |  |  |  |  | live from money 4 |\n| `grit` | Grit | number | 3 … 18 |  |  |  | live from sheets 1 |\n| `home` | Home | ref |  |  |  |  | live from space 1 |\n| `local_tax` | Pays local income tax | bool |  |  |  |  | live from money 4 |\n| `might` | Might | number | 3 … 18 |  |  |  | live from sheets 1 |\n| `needs` | Needs | list |  |  |  |  | live from castlife 4; locked |\n| `occupation` | Occupation | text (row of economy.occupations) |  |  |  |  | live from money 3 |\n| `pay_prefs` | Pays with, in order ({use, min?, max?, categories?, except?}) | list |  |  |  |  | live from money 3 |\n| `region` | Region | text (row of economy.regions) |  |  |  |  | live from money 3 |\n| `scene` | Scene type | text |  |  |  |  |  |\n| `trips` | Trips | list |  |  |  |  | live from castlife 1 |\n| `wealth` | Wealth | text |  |  |  |  | live from money 1 |\n| `wits` | Wits | number | 3 … 18 |  |  |  | live from sheets 1 |\n\n#### `thing`: Thing\n\n| Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |\n|---|---|---|---|---|---|---|---|\n| `owner` | Owner | ref |  |  |  |  |  |\n| `place` | Place | ref |  |  |  |  | live from space 1 |\n| `x` | Grid x | number |  |  |  |  | live from space 3 |\n| `y` | Grid y | number |  |  |  |  | live from space 3 |\n\n### Relation types\n\n| Relation | Label | From | To | Cardinality | Symmetric | Inverse | Fields |\n|---|---|---|---|---|---|---|---|\n| `in` | In | `*` | `*` | many_one |  |  | none |\n\n### Effects\n\n| Effect | Arguments |\n|---|---|\n| `space.set_route` | `route`, `open?` |\n| `space.step` | `x`, `y`, `entity?` |\n\n### Formula functions\n\n- `distance_km(from, to, mode)`\n- `grid_minutes(place, x, y)`\n- `grid_reachable(place, x, y)`\n- `on_grid(thing)`\n- `reach(a, b)`\n- `route_exists(from, to, mode)`\n- `route_open(route)`\n- `travel_minutes(from, to, mode)`\n- `within(place, ancestor)`\n\n### Actions\n\n| Action | Label | Parameters | Check | Outcomes | Minutes | Lexicon |\n|---|---|---|---|---|---|---|\n| `go` | Go to | `to: ref → place` |  | `default` | `level.space < 2 ? (level.space < 1 ? 0 : 15) : travel_minutes(here, to, 'walk')` | go to, walk to, head to, head over to, leave for |\n| `step` | Move on the map | `x: number`, `y: number` |  | `default` | `grid_minutes(here, x, y)` | walk over to, cross to, move to |\n\n### Events\n\nIts own: `space.pos`, `space.route`.\n\n### Proposals\n\n| Proposal | Bound by |\n|---|---|\n| `location` | `ref` |\n\n### Panels and slots\n\nPanels: `space.map`. Slots it writes: `scene`.\n\n### Lint codes\n\n`space.grid`, `space.maps`, `space.references`.\n\n## Story pack (`story`)\n\nVersion 1 · realism domain none · requires none.\n\n### Effects\n\n| Effect | Arguments |\n|---|---|\n| `story.answer` | `track`, `answer`, `decision?` |\n| `story.flag` | `name`, `value?` |\n\n### Formula functions\n\n- `flag(name)`\n\n### Actions\n\n| Action | Label | Parameters | Check | Outcomes | Minutes | Lexicon |\n|---|---|---|---|---|---|---|\n| `answer` | Answer | `puzzle?: text`, `answer: text`, `decision?: number` |  | `default` | `1` | the answer is, i think it's, solve, answer, the code is, the combination is, try the combination, dial, enter the code |\n\n### Events\n\nIts own: `story.flag`.\n\n### Panels and slots\n\nPanels: `story.quests`. Slots it writes: `quest`.\n\n### Lint codes\n\n`story.leaky_label`.\n\n## Vehicles pack (`vehicles`)\n\nVersion 1 · realism domain `vehicles` · requires `economy`, `gear`, `space`.\n\n### Kinds\n\n#### `vehicle`: Vehicle\n\nExtends `container`.\n\n| Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |\n|---|---|---|---|---|---|---|---|\n| `class` | Vehicle class | text |  |  |  |  |  |\n| `engine_hours` | Engine hours | number | ≥ 0 |  |  |  | live from vehicles 3; locked |\n| `fuel_pct` | Fuel % | number | 0 … 100 |  |  |  | live from vehicles 2; bound auto, ±30 a turn |\n| `home` | Home base | ref |  |  |  |  | live from vehicles 3 |\n| `last_service` | Last service (mi or h) | number | ≥ 0 |  |  |  | live from vehicles 4 |\n| `odometer_mi` | Odometer (mi) | number | ≥ 0 |  |  |  | live from vehicles 3; locked |\n| `status` | Status | enum: ok, needs_service, broken |  | `\"ok\"` |  |  | live from vehicles 1; bound confirm |\n| `value` | Value | money | ≥ 0 |  |  |  | live from money 3 |\n\n### Effects\n\n| Effect | Arguments |\n|---|---|\n| `vehicles.drive` | `vehicle`, `to`, `driver?`, `riders?` |\n| `vehicles.refuel` | `vehicle`, `payer?`, `pct?` |\n| `vehicles.service` | `vehicle`, `payer?`, `repair?` |\n\n### Formula functions\n\n- `drive_minutes(vehicle, to)`\n- `fuel_ok(vehicle, to)`\n- `fuel_pct(vehicle)`\n\n### Actions\n\n| Action | Label | Parameters | Check | Outcomes | Minutes | Lexicon |\n|---|---|---|---|---|---|---|\n| `drive` | Drive | `vehicle: ref → vehicle`, `to: ref → place` |  | `default` | `drive_minutes(vehicle, to)` | drive to, drive over to, take the truck, take the car, sail to, ride to |\n| `refuel` | Refuel | `vehicle: ref → vehicle` |  | `default` | `10` | refuel, fill up, gas up, charge the car |\n| `repair_vehicle` | Repair | `vehicle: ref → vehicle` |  | `default` | `180` | repair, fix the truck, fix the car, get it towed |\n| `service_vehicle` | Service | `vehicle: ref → vehicle` |  | `default` | `60` | service, oil change, tune up |\n\n### Panels and slots\n\nPanels: `vehicles.garage`. Slots it writes: `vehicles`.\n\n### Simulation\n\n| Process | Domain | From level | Steps |\n|---|---|---|---|\n| `vehicles.upkeep` | `vehicles` | 4 | the world |\n\nDetail on demand: `vehicles` (version 1).\n\n### Data tables\n\n| Table | Label | Schema | Columns | Default rows |\n|---|---|---|---|---|\n| `vehicles.classes` | Vehicle classes | `lre-table/vehicles.classes/v1` | name (text), domain (enum), fuel_type (enum), factor_guide (ref), tank_capacity_gal (number, optional), tank_capacity_l (number, optional), usable_battery_kwh (number, optional), consumption_unit (enum), consumption (json), range_mi (int, optional), range_h (number, optional), price_new_cents (band), price_used_cents (band), insurance_liability_cents_per_month (int), insurance_full_cents_per_month (int), registration_cents_per_year (band), annual_maintenance_cents_per_year (int), maintenance (json), passengers (int), cargo_l (number), payload_kg (number), towing_kg (number, optional), charging (json, optional), notes (text) | 19 |\n| `vehicles.factors` | Consumption factor guides | `lre-table/vehicles.factors/v1` | basis (text), factors (json), note (text, optional) | 3 |\n\n### Lint codes\n\n`vehicles.classes`.\n\n## Weather pack (`weather`)\n\nVersion 1 · realism domain `weather` · requires `space`.\n\n### Kinds\n\n#### `region`: Weather region\n\n| Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |\n|---|---|---|---|---|---|---|---|\n| `climate` | Climate | text |  | `\"temperate\"` |  |  |  |\n| `temp_c` | Temperature (°C) | number |  |  |  |  | live from weather 3; bound never |\n| `weather` | Weather | text |  | `\"clear\"` |  |  | live from weather 2; bound never |\n| `weather_hold` | Weather held until | number |  |  |  |  | live from weather 2; locked |\n| `weather_hold_until` | Weather held until (condition) | text |  |  |  |  | live from weather 2; locked |\n\n### Effects\n\n| Effect | Arguments |\n|---|---|\n| `weather.clear` | `region`, `state?` |\n| `weather.set` | `region`, `state`, `minutes?`, `until?` |\n\n### Formula functions\n\n- `season()`\n- `weather(place)`\n\n### Panels and slots\n\nPanels: `weather.now`. Slots it writes: `scene`.\n\n### Simulation\n\n| Process | Domain | From level | Steps |\n|---|---|---|---|\n| `weather.climate` | `weather` | 2 | the world |\n\n### Lint codes\n\n`weather.climates`.\n";
+var REFERENCE_default = "# LumiRPEngine reference\n\n<!-- Generated by `bun run reference` (scripts/reference/build.ts). Edit the packs, then run it again. -->\n\nWhat the engine and its packs register, as the registry has it: kinds and their fields, effects and the arguments they read, formula functions, actions, events, proposal channels, panels, slots, data tables and lint codes. Arguments and parameters marked `?` may be left out. The formula language is in [EXPRESSIONS.md](EXPRESSIONS.md), worked examples are in [RECIPES.md](RECIPES.md), and the [user guide](USER-GUIDE.md#authoring) shows the editors.\n\nEngine `0.1.0` · world format `lre-world-v1` · packs `engine` 1, `calendar` 1, `space` 1, `economy` 1, `gear` 1, `vehicles` 1, `weather` 1, `relationships` 1, `castlife` 1, `sheets` 1, `story` 1, `combat` 1, `minds` 1.\n\n## Contents\n\n- [Engine built-ins](#engine-built-ins)\n- [Calendar & time pack](#calendar--time-pack-calendar)\n- [Cast life pack](#cast-life-pack-castlife)\n- [Combat pack](#combat-pack-combat)\n- [Economy pack](#economy-pack-economy)\n- [Gear & containers pack](#gear--containers-pack-gear)\n- [Minds pack](#minds-pack-minds)\n- [Relationships pack](#relationships-pack-relationships)\n- [Character sheets pack](#character-sheets-pack-sheets)\n- [Space & travel pack](#space--travel-pack-space)\n- [Story pack](#story-pack-story)\n- [Vehicles pack](#vehicles-pack-vehicles)\n- [Weather pack](#weather-pack-weather)\n\n## Engine built-ins\n\n### Core effects\n\n| Effect | Arguments |\n|---|---|\n| `add` | `entity`, `field`, `delta` |\n| `award` | `entity`, `progression`, `amount` |\n| `beat` | `hint` |\n| `check` | `check`, `actor?`, `target?`, `outcomes` |\n| `life` | `entity`, `to?`, `tell?` |\n| `link` | `rel`, `from`, `to`, `until?`, `fields?` |\n| `move` | `entity`, `to` |\n| `note` | `text`, `visibility?` |\n| `post` | `lines`, `memo?` |\n| `recover` | `entity`, `field`, `amount?`, `full?` |\n| `set` | `entity`, `field`, `value` |\n| `signal` | `class`, `text`, `entity?`, `visibility?` |\n| `spawn` | `kind`, `name`, `id?`, `tier?`, `fields?`, `relations?`, `agent?`, `place?`, `class?`, `tags?` |\n| `stage` | `track`, `to` |\n| `unlink` | `rel`, `from`, `to` |\n\n### Formula functions\n\nMath: `abs`, `ceil`, `clamp`, `floor`, `max`, `min`, `round`. `min` and `max` take any number of arguments.\n\nThe engine's own:\n\n- `at(entity, place)`\n- `attempts(track)`\n- `band(entity, field)`\n- `count_at(place, kind?)`\n- `days(n)`\n- `field(entity, field)`\n- `fired(rule)`\n- `has_rel(entity, type, to?)`\n- `holiday()`\n- `hours(n)`\n- `knows(entity, subject)`\n- `level(entity, domain)`\n- `next_time(time)`\n- `place(entity)`\n- `rel(entity, type, to?)`\n- `rel_count(entity, type)`\n- `rel_field(from, type, to, field)`\n- `revealed(track, stage?)`\n- `roll(notation)`: effect arguments only\n- `since(track)`\n- `stage(track)`\n- `table(table, key, column)`\n- `table_step(table, value, column)`\n- `today_at(time)`\n\nTaxonomy and life states:\n\n- `band_of(entity)`\n- `has_tag(entity, tag)`\n- `in_class(entity, facet, value)`\n- `kind_is(entity, kind)`\n- `life_of(entity)`\n- `member_of(entity, group)`\n- `tier_of(entity)`\n\n### Events\n\nCore: `add`, `clock`, `link`, `materialize`, `post`, `set`, `spawn`, `stage`, `timelapse`, `unlink`.\n\nEngine bookkeeping: `engine.adjudged`, `engine.attempt`, `engine.beat`, `engine.caught`, `engine.check`, `engine.choice`, `engine.class`, `engine.cursor`, `engine.entity`, `engine.fired`, `engine.life`, `engine.note`, `engine.observed`, `engine.pause`, `engine.revealed`, `engine.signal`, `engine.told`.\n\n### Relation types\n\nBuilt in: `in`, `owns`, `uses`, `worn_by`, `equipped`, `knows`, `member_of`, `regard`, `route`. Packs add the typed ones below.\n\n### Proposals\n\n| Proposal | Bound by |\n|---|---|\n| `knows` | `knows` |\n| `life` | `life` |\n| `spawn` | `spawn` |\n\n### Step purposes\n\n| Purpose | Outputs a world template may declare |\n|---|---|\n| `brief` | `text` |\n| `choices` | `text`, `effects` |\n| `consolidate` | `text` |\n| `contradiction` | `decision`, `text`, `effects` |\n| `extract` | `text`, `effects` |\n| `interpret` | `decision`, `text` |\n| `judge` | `decision`, `text` |\n| `memory` | `text` |\n| `mind` | `text` |\n| `npc.choose` | `decision`, `text` |\n| `outline` | `text` |\n| `puzzle.answer` | `decision`, `text` |\n| `skip` | `text` |\n\nSignals: `agents_present`, `always`, `beat`, `classifier`, `conflict`, `day_start`, `invitation`, `never`, `offscreen`, `present`, `reply`, `scene_change`, `slot_crossed`, `tie_zone`, `timelapse`, `typed_input`, and `every_n:<k>`.\n\nTemplate placeholders: `beats`, `brief`, `character`, `clock`, `facts`, `outcome`, `place`, `pov`, `present`, `recent`, `reply`, `scene`, `user`, `world`.\n\n### Sections\n\nThe slots a world gets when it defines none, kept in rank order on the section budget.\n\n| Slot | Label | Rank |\n|---|---|---|\n| `outcome` | Outcome | 0 |\n| `montage` | Montage | 1 |\n| `scene` | Scene | 2 |\n| `people` | People | 3 |\n| `money` | Money | 4 |\n| `gear` | Gear | 5 |\n| `vehicles` | Vehicles | 6 |\n| `quest` | Quest | 7 |\n| `outline` | Outline | 8 |\n| `stance` | Stance | 9 |\n| `minds` | Minds | 10 |\n\n### Realism\n\nDomains: `money`, `gear`, `vehicles`, `castlife`, `relationships`, `space`, `calendar`, `weather`, `sheets`; each at a level from 0 to 4.\n\nDetail bands: `principal` (Leads), `supporting` (Supporting), `background` (Background).\n\nInterrupt classes: `invitation`, `bill`, `decline`, `incident`, `quest`, `rule`, `arrival`, `overdue`, `needs`, `weather`.\n\n### Adjudication presets\n\n| Value | `narrative` | `balanced` | `crunchy` |\n|---|---|---|---|\n| `checks` | `\"risky\"` | `\"every\"` | `\"every\"` |\n| `riskyAt` | `0.75` | `0.75` | `0.75` |\n| `trivialAt` | `null` | `0.95` | `null` |\n| `impossibleAt` | `null` | `0.05` | `null` |\n| `description` | `{\"weight\":\"none\",\"max\":3,\"advantageAt\":2}` | `{\"weight\":\"bonus\",\"max\":2,\"advantageAt\":2}` | `{\"weight\":\"none\",\"max\":2,\"advantageAt\":2}` |\n| `authority` | `\"narrative\"` | `\"hybrid\"` | `\"mechanics\"` |\n| `closeBy` | `2` | `2` | `2` |\n| `retry` | `\"changed\"` | `\"changed\"` | `\"free\"` |\n| `retryAfter` | `60` | `60` | `60` |\n\n## Calendar & time pack (`calendar`)\n\nVersion 1 · realism domain `calendar` · requires none.\n\n### Formula functions\n\n- `days_until(date)`\n- `is_day_off()`\n- `is_weekend()`\n- `minutes_until(at)`\n- `weekday_name()`\n\n### Proposals\n\n| Proposal | Bound by |\n|---|---|\n| `time_advance` | `duration` |\n\n### Panels and slots\n\nPanels: `calendar.calendar`. Slots it writes: `scene`.\n\n### Data tables\n\n| Table | Label | Schema | Columns | Default rows |\n|---|---|---|---|---|\n| `calendar.dst` | Daylight saving time, time zones and daylight hours | `lre-table/calendar.dst/v1` | start (json), end (json), duration_weeks_approx (int), exceptions (list), standard_offsets_h (json), note (text), daylight_hours (json) | 1 |\n| `calendar.holidays` | Federal holidays | `lre-table/calendar.holidays/v1` | name (text), rule_type (enum), month (int), day (int, optional), weekday (enum, optional), n (int, optional), federal_paid_day_off (bool), private_sector_paid_day_off (enum), observed_if_weekend (text, optional) | 11 |\n| `calendar.observances` | Common observances | `lre-table/calendar.observances/v1` | name (text), rule_type (enum), month (int, optional), day (int, optional), weekday (enum, optional), n (int, optional), base (ref, optional), offset_days (int, optional), algorithm (text, optional), window (text, optional), start (text, optional), end (text, optional), rule_text (text, optional), rule_note (text, optional) | 30 |\n| `calendar.school` | School year | `lre-table/calendar.school/v1` | title (text), values (json) | 2 |\n| `calendar.shifts` | Work shift patterns | `lre-table/calendar.shifts/v1` | name (text), description (text), days_per_week (number), typical_start (text), typical_shift_h (number), typical_hours_per_week (int), weekend_work (enum), notes (text) | 24 |\n| `calendar.work` | Work norms | `lre-table/calendar.work/v1` | full_time_hours_per_week (number), standard_work_year_h (int), overtime (text), vacation_days_after_1_year (int), vacation_days_after_5_years (int), vacation_days_after_10_years (int), sick_days_per_year (int), paid_time_off_note (text), paid_holidays_per_year (int), meal_break (text) | 1 |\n\n### Lint codes\n\n`calendar.epoch`, `calendar.schedule_times`, `calendar.unit_cap`.\n\n## Cast life pack (`castlife`)\n\nVersion 1 · realism domain `castlife` · requires `gear`, `relationships`, `space`.\n\n### Effects\n\n| Effect | Arguments |\n|---|---|\n| `castlife.decide` | `key`, `choice` |\n| `castlife.override` | `who`, `minutes?`, `place?`, `activity?` |\n| `castlife.satisfy` | `need`, `entity?` |\n\n### Formula functions\n\n- `busy(who)`\n- `invited(host)`\n- `need(who, need)`\n\n### Actions\n\n| Action | Label | Parameters | Check | Outcomes | Minutes | Lexicon |\n|---|---|---|---|---|---|---|\n| `accept_invitation` | Accept invitation | `host: ref → person` |  | `default` | `1` | accept, sure, let's, count me in |\n| `eat` | Eat |  |  | `default` | `30` | eat, have lunch, have dinner, grab a bite |\n| `rest` | Rest |  |  | `default` | `30` | rest, relax, take a break |\n| `sleep` | Go to bed |  |  | `default` | `5` | go to bed, sleep, turn in, hit the sack |\n\n### Events\n\nIts own: `castlife.decision`, `castlife.invitation`, `castlife.need`.\n\n### Panels and slots\n\nPanels: `castlife.cast`. Slots it writes: `people`, `stance`.\n\n### Simulation\n\n| Process | Domain | From level | Steps |\n|---|---|---|---|\n| `castlife.agents` | `castlife` | 3 | each agent |\n| `castlife.plans` | `castlife` | 0 | the world |\n| `castlife.trips` | `castlife` | 1 | the world |\n\n### Lint codes\n\n`castlife.birthday`, `castlife.cues`, `castlife.double_booking`.\n\n## Combat pack (`combat`)\n\nVersion 1 · realism domain none · requires none.\n\n### Relation types\n\n| Relation | Label | From | To | Cardinality | Symmetric | Inverse | Fields |\n|---|---|---|---|---|---|---|---|\n| `hostile` | Hostile to | `*` | `*` | many_many | yes |  | none |\n\n### Effects\n\n| Effect | Arguments |\n|---|---|\n| `combat.end` | `winner?` |\n| `combat.end_turn` | `who?` |\n| `combat.spend` | `who?`, `cost` |\n| `combat.start` | `foes?` |\n\n### Formula functions\n\n- `budget_left(e, budget)`\n- `can_fight(e)`\n- `encounter_round()`\n- `has_turn(e)`\n- `in_encounter(e)`\n- `is_ally(a, b)`\n- `is_down(e)`\n- `is_foe(a, b)`\n- `standing(side)`\n\n### Actions\n\n| Action | Label | Parameters | Check | Outcomes | Minutes | Lexicon |\n|---|---|---|---|---|---|---|\n| `end_turn` | End turn |  |  | `default` | `0` | end my turn, end turn |\n| `fight` | Fight | `target: ref` |  | `default` | `0` | start a fight, pick a fight, draw my weapon |\n\n### Events\n\nIts own: `combat.act`, `combat.decision`, `combat.down`, `combat.end`, `combat.spend`, `combat.start`, `combat.turn`.\n\n### Panels and slots\n\nPanels: `combat.encounter`. Slots it writes: none.\n\n## Economy pack (`economy`)\n\nVersion 1 · realism domain `money` · requires `space`.\n\n### Kinds\n\n#### `account`: Account\n\n| Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |\n|---|---|---|---|---|---|---|---|\n| `apr_pct` | APR % | number | ≥ 0 |  |  |  | live from money 4 |\n| `apy_pct` | APY % | number | ≥ 0 |  |  |  | live from money 4 |\n| `autopay` | Autopay | enum: none, minimum, statement, full, fixed |  | `\"none\"` |  |  | live from money 3 |\n| `autopay_cents` | Autopay amount (fixed) | money | ≥ 0 |  |  |  | live from money 3 |\n| `autopay_from` | Autopay from | ref → account |  |  |  |  | live from money 3 |\n| `due_day` | Due day of month | number | 1 … 31 |  |  |  | live from money 3 |\n| `institution` | Institution | text |  |  |  |  | live from money 3 |\n| `limit` | Credit limit | money | ≥ 0 |  |  |  | live from money 3 |\n| `min_floor` | Minimum payment floor | money | ≥ 0 |  |  |  | live from money 4 |\n| `min_pct` | Minimum payment % of balance | number | 0 … 100 |  |  |  | live from money 4 |\n| `months_left` | Months left (loans) | number | ≥ 0 |  |  |  | live from money 3 |\n| `opened` | Opened | date |  |  |  |  | live from money 4 |\n| `opening` | Opening balance | money |  |  |  |  | locked |\n| `overdraft` | Overdraft policy | enum: decline, fee, linked |  |  |  |  | live from money 2 |\n| `overdraft_limit` | Overdraft limit | money | ≥ 0 |  |  |  | live from money 2 |\n| `overdraft_link` | Overdraft from | ref → account |  |  |  |  | live from money 2 |\n| `owners` | Owners ({party, role, share?}) | list |  |  |  |  | live from money 1 |\n| `payment` | Monthly payment (loans) | money | ≥ 0 |  |  |  | live from money 3 |\n| `product` | Product (a world product, or a class: cash, checking, business_checking, savings, money_market, cd, trust, escrow, credit_card, charge_card, line_of_credit, loan, mortgage, brokerage, retirement) | text |  |  |  |  | live from money 2 |\n| `secured_by` | Secured by | ref |  |  |  |  | live from money 3 |\n| `statement_day` | Statement day | number | 1 … 28 |  |  |  | live from money 3 |\n| `status` | Status | enum: open, frozen, collections, charged_off, closed, paid_off, matured |  | `\"open\"` |  |  | live from money 2 |\n| `term_months` | Term in months | number | ≥ 0 |  |  |  | live from money 3 |\n\n#### `business`: Business\n\nExtends `thing`.\n\n| Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |\n|---|---|---|---|---|---|---|---|\n| `collects_sales_tax` | Collects sales tax | bool |  |  |  |  | live from money 4 |\n| `daily_sales` | Walk-in takings a trading day | money | ≥ 0 |  |  |  | live from money 3 |\n| `distribution_every` | Paid out every | enum: month, quarter, year |  |  |  |  | live from money 4 |\n| `distribution_pct` | Profit paid out % | number | 0 … 100 |  |  |  | live from money 4 |\n| `industry` | Industry | text |  |  |  |  | live from money 3 |\n| `invoice_days` | Invoice terms (days) | number | ≥ 0 |  |  |  | live from money 3 |\n| `late_fee_pct` | Late fee % | number | ≥ 0 |  |  |  | live from money 4 |\n| `margin_pct` | Margin % | number | 0 … 100 |  |  |  | live from money 4 |\n| `operating_account` | Operating account | ref → account |  |  |  |  | live from money 3 |\n| `owners` | Owners ({party, role, share?}) | list |  |  |  |  | live from money 1 |\n| `places` | Places it trades at | list of ref |  |  |  |  | live from money 3 |\n| `sales_spread_pct` | Takings vary by up to ± % | number | 0 … 100 | `30` |  |  | live from money 3 |\n| `structure` | Structure | enum: sole_proprietorship, partnership, llc, s_corp, c_corp |  |  |  |  | live from money 4 |\n| `trading_days` | Trading days (0 is Sunday) | list of number |  |  |  |  | live from money 3 |\n| `valuation_multiple` | Valued at this many years of profit, over its books | number | ≥ 0 | `3` |  |  | live from money 4 |\n| `value` | Value (set: overrides the books) | money | ≥ 0 |  |  |  | live from money 3 |\n\n#### `card`: Payment card\n\n| Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |\n|---|---|---|---|---|---|---|---|\n| `account` | Account | ref → account |  |  |  |  | live from money 2 |\n| `daily_atm_limit` | Daily cash machine limit | money | ≥ 0 |  |  |  | live from money 4 |\n| `daily_purchase_limit` | Daily purchase limit | money | ≥ 0 |  |  |  | live from money 4 |\n| `holder` | Holder | ref |  |  |  |  | live from money 2 |\n| `item` | The card in gear | ref |  |  |  |  | live from money 2 |\n| `last4` | Last four digits | text |  |  |  |  | live from money 3 |\n| `network` | Card type | enum: debit, credit, charge |  |  |  |  | live from money 2 |\n| `replaced_by` | Replaced by | ref → card |  |  |  |  | live from money 2 |\n| `replaces` | Replaces | ref → card |  |  |  |  | live from money 2 |\n| `state` | State | enum: active, frozen, lost, cancelled |  | `\"active\"` |  |  | live from money 2 |\n\n#### `flow`: Money flow\n\n| Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |\n|---|---|---|---|---|---|---|---|\n| `amount_cents` | Amount | money | ≥ 0 |  |  |  | live from money 2 |\n| `amount_due` | What's due on the credit account it pays | enum: minimum, statement, balance |  |  |  |  | live from money 3 |\n| `amount_formula` | Amount formula | text |  |  |  |  | live from money 3 |\n| `amount_max` | Amount at most | money | ≥ 0 |  |  |  | live from money 3 |\n| `amount_min` | Amount at least | money | ≥ 0 |  |  |  | live from money 3 |\n| `amount_of` | Percent of this account's balance | ref → account |  |  |  |  | live from money 3 |\n| `amount_pct` | Percent of a balance | number | 0 … 100 |  |  |  | live from money 3 |\n| `amount_table` | Amount from a table (table.row.column) | text |  |  |  |  | live from money 3 |\n| `at` | Time of day (HH:MM) | text |  |  |  |  | live from money 2 |\n| `category` | Category | text |  |  |  |  | live from money 2 |\n| `count` | Times at most | number | ≥ 1 |  |  |  | live from money 2 |\n| `days` | Days of the month (-1 = the last) | list of number |  |  |  |  | live from money 2 |\n| `end` | Ends | date |  |  |  |  | live from money 2 |\n| `every` | Every | enum: day, week, month, year |  |  |  |  | live from money 2 |\n| `except` | Except holidays | list of text |  |  |  |  | live from money 3 |\n| `fallback` | Fallback (an account or a party) | text |  |  |  |  | live from money 3 |\n| `flow_kind` | Kind | enum: transfer, bill, rent, utility, subscription, premium, loan_payment, card_payment, savings, income, payroll, allowance, living, tax, distribution, invoice, draw, other |  | `\"bill\"` |  |  | live from money 2 |\n| `from` | From (an account, a party, or an outside payer) | text |  |  |  |  | live from money 2 |\n| `interval` | Every Nth period | number | ≥ 1 |  |  |  | live from money 2 |\n| `link` | Belongs to | ref |  |  |  |  | live from money 2 |\n| `method` | Paid by (cash, card, checking, savings) | text |  |  |  |  | live from money 3 |\n| `months` | Months (yearly) | list of number |  |  |  |  | live from money 2 |\n| `once` | Once, at (YYYY-MM-DDTHH:MM) | text |  |  |  |  | live from money 2 |\n| `retries` | Retries | number | ≥ 0 |  |  |  | live from money 3 |\n| `retry_days` | Retry after days | number | ≥ 1 |  |  |  | live from money 3 |\n| `roll` | Off a business day | enum: none, before, after |  | `\"none\"` |  |  | live from money 3 |\n| `shares` | Shares ({party, pct, from?}) | list |  |  |  |  | live from money 3 |\n| `shortfall` | When the money isn't there | enum: skip, partial, retry, fallback, overdraft, defer |  | `\"skip\"` |  |  | live from money 3 |\n| `splits` | Splits ({to, cents?, pct?}) | list |  |  |  |  | live from money 3 |\n| `start` | Starts | date |  |  |  |  | live from money 2 |\n| `status` | Status | enum: active, paused, ended |  | `\"active\"` |  |  | live from money 2 |\n| `to` | To (an account, a party, or an outside payee) | text |  |  |  |  | live from money 2 |\n| `weekdays` | Weekdays (0 = Sunday) | list of number |  |  |  |  | live from money 2 |\n\n#### `holding`: Holding\n\n| Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |\n|---|---|---|---|---|---|---|---|\n| `account` | Account | ref → account |  |  |  |  | live from money 4 |\n| `asset` | Asset | text |  |  |  |  | live from money 4 |\n| `lots` | Lots ({qty, cost, at}) | list |  |  |  |  | live from money 4 |\n| `owners` | Owners ({party, role, share?}) | list |  |  |  |  | live from money 1 |\n| `route` | Distributions go to (an account, or reinvest) | text |  |  |  |  | live from money 4 |\n\n#### `invoice`: Invoice\n\n| Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |\n|---|---|---|---|---|---|---|---|\n| `business` | Business | ref → business |  |  |  |  | live from money 3 |\n| `cents` | Amount | money | ≥ 0 |  |  |  | live from money 3 |\n| `customer` | Customer (a party, or an outside customer) | text |  |  |  |  | live from money 3 |\n| `days_late` | Days late | number | ≥ 0 |  |  |  | live from money 4 |\n| `due` | Due | date |  |  |  |  | live from money 3 |\n| `fees` | Late fees charged | number | ≥ 0 |  |  |  | live from money 4; locked |\n| `flow` | Paid by flow | text |  |  |  |  | live from money 3 |\n| `issued` | Issued | date |  |  |  |  | live from money 3 |\n| `late_fee` | Late fee charged | money | ≥ 0 |  |  |  | live from money 4 |\n| `memo` | For | text |  |  |  |  | live from money 3 |\n| `paid` | Paid | money | ≥ 0 |  |  |  | live from money 3 |\n| `state` | State | enum: open, paid, late, void |  | `\"open\"` |  |  | live from money 3 |\n\n#### `job`: Job\n\n| Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |\n|---|---|---|---|---|---|---|---|\n| `basis` | Paid by | enum: salary, hourly, per_shift, commission, tips, stipend |  | `\"hourly\"` |  |  | live from money 3 |\n| `commission_pct` | Commission % | number | ≥ 0 |  |  |  | live from money 3 |\n| `contractor` | Contractor (nothing withheld) | bool |  |  |  |  | live from money 4 |\n| `deductions` | Deductions ({label, pretax, cents?, pct?, kind?, match_pct?, to?}) | list |  |  |  |  | live from money 4 |\n| `employer` | Employer (a business, or an outside employer) | text |  |  |  |  | live from money 3 |\n| `end` | Ends | date |  |  |  |  | live from money 3 |\n| `hours` | Hours counted | enum: scheduled, attended, contract |  |  |  |  | live from money 3 |\n| `hours_per_week` | Hours a week | number | ≥ 0 |  |  |  | live from money 3 |\n| `occupation` | Occupation | text (row of economy.occupations) |  |  |  |  | live from money 3 |\n| `pay_anchor` | First payday | date |  |  |  |  | live from money 3 |\n| `pay_days` | Paydays of the month | list of number |  |  |  |  | live from money 3 |\n| `pay_every` | Paid | enum: weekly, biweekly, semimonthly, monthly, per_job, custom |  | `\"monthly\"` |  |  | live from money 3 |\n| `pay_except` | Custom pay: except holidays | list of text |  |  |  |  | live from money 3 |\n| `pay_interval` | Custom pay: every Nth | number | ≥ 1 |  |  |  | live from money 3 |\n| `pay_months` | Custom pay: months | list of number |  |  |  |  | live from money 3 |\n| `pay_roll` | Payday off a business day | enum: none, before, after |  | `\"before\"` |  |  | live from money 3 |\n| `pay_unit` | Custom pay: every | enum: day, week, month, year |  |  |  |  | live from money 3 |\n| `pay_weekday` | Payday weekday (0 = Sunday) | number | 0 … 6 |  |  |  | live from money 3 |\n| `pay_weekdays` | Custom pay: weekdays | list of number |  |  |  |  | live from money 3 |\n| `rate` | Rate (a year, an hour or a shift) | money | ≥ 0 |  |  |  | live from money 3 |\n| `season_from` | Season from (MM-DD) | text |  |  |  |  | live from money 3 |\n| `season_to` | Season to (MM-DD) | text |  |  |  |  | live from money 3 |\n| `shift_pattern` | Shift pattern | text (row of calendar.shifts) |  |  |  |  | live from money 3 |\n| `shifts_per_week` | Shifts a week | number | ≥ 0 |  |  |  | live from money 3 |\n| `splits` | Pay goes to ({to, cents?, pct?}) | list |  |  |  |  | live from money 3 |\n| `start` | Started | date |  |  |  |  | live from money 3 |\n| `status` | Status | enum: active, leave, ended |  | `\"active\"` |  |  | live from money 3 |\n| `tips_per_hour` | Tips an hour | money | ≥ 0 |  |  |  | live from money 3 |\n| `title` | Title | text |  |  |  |  | live from money 3 |\n| `weeks_per_year` | Weeks a year | number | 0 … 53 |  |  |  | live from money 3 |\n| `worker` | Worker | ref → person |  |  |  |  | live from money 3 |\n| `workplace` | Workplace | ref |  |  |  |  | live from money 3 |\n\n#### `property`: Property\n\nExtends `thing`.\n\n| Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |\n|---|---|---|---|---|---|---|---|\n| `appreciation_pct` | Appreciation % a year | number |  |  |  |  | live from money 4 |\n| `asking_price` | Asking price (for sale) | money | ≥ 0 |  |  |  | live from money 3 |\n| `insurance` | Insurance a month | money | ≥ 0 |  |  |  | live from money 4 |\n| `lease_months` | Lease term, months | number | ≥ 1 | `12` |  |  | live from money 3 |\n| `let_from` | Let since | date |  |  |  |  | live from money 3 |\n| `managed` | Let to outside tenants | bool |  | `false` |  |  | live from money 3 |\n| `market_rent` | Market rent, a unit a month | money | ≥ 0 |  |  |  | live from money 3 |\n| `mortgage` | Mortgage | ref → account |  |  |  |  | live from money 3 |\n| `owners` | Owners ({party, role, share?}) | list |  |  |  |  | live from money 1 |\n| `place` | Place | ref |  |  |  |  | live from money 3 |\n| `purchase_price` | Purchase price | money | ≥ 0 |  |  |  | live from money 4 |\n| `purchased` | Purchased | date |  |  |  |  | live from money 4 |\n| `region` | Region (for its property tax) | text (row of economy.regions) |  |  |  |  | live from money 3 |\n| `rent_to` | Rent paid into | ref → account |  |  |  |  | live from money 3 |\n| `tax_installments` | Property tax bills a year | number | 1 … 12 | `2` |  |  | live from money 3 |\n| `tax_pct` | Property tax % a year | number | ≥ 0 |  |  |  | live from money 4 |\n| `units` | Units to let | number | ≥ 1 | `1` |  |  | live from money 3 |\n| `upkeep_pct` | Upkeep % a year | number | ≥ 0 |  |  |  | live from money 4 |\n| `vacancy_months` | Months empty between tenants, on average | number | ≥ 0 | `1` |  |  | live from money 3 |\n| `value` | Value | money | ≥ 0 |  |  |  | live from money 3 |\n| `volatility_pct` | Value swings, % a year | number | ≥ 0 |  |  |  | live from money 4 |\n\n#### `trust`: Trust\n\nExtends `thing`.\n\n| Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |\n|---|---|---|---|---|---|---|---|\n| `owners` | Owners ({party, role, share?}) | list |  |  |  |  | live from money 1 |\n\n### Effects\n\n| Effect | Arguments |\n|---|---|\n| `economy.apply_credit` | `product`, `cents?`, `term?`, `secured_by?`, `who?` |\n| `economy.buy` | `item?`, `category?`, `qty?`, `price?`, `exact?`, `stated?`, `name?`, `payer?`, `method?`, `from?`, `payee?`, `keep?`, `cashback?` |\n| `economy.card_replace` | `card`, `who?` |\n| `economy.card_state` | `card`, `state`, `who?` |\n| `economy.close_account` | `account` |\n| `economy.deposit` | `account`, `cents`, `who?` |\n| `economy.distribute` | `business`, `cents?`, `by?` |\n| `economy.exercise` | `holding`, `qty?`, `from?`, `to?`, `party?` |\n| `economy.flow_create` | `label?`, `kind?`, `from?`, `to?`, `amount?`, `every?`, `interval?`, `weekday?`, `day?`, `month?`, `at?`, `once?`, `start?`, `end?`, `count?`, `shortfall?`, `retry_days?`, `retries?`, `fallback?`, `roll?`, `category?`, `who?` |\n| `economy.flow_edit` | `flow`, `name?`, `clear?` |\n| `economy.flow_status` | `flow`, `status`, `who?` |\n| `economy.flow_update` | `flow`, `label?`, `kind?`, `from?`, `to?`, `amount?`, `every?`, `interval?`, `weekday?`, `day?`, `month?`, `at?`, `once?`, `start?`, `end?`, `count?`, `shortfall?`, `retry_days?`, `retries?`, `fallback?`, `roll?`, `category?`, `who?`, `clear?` |\n| `economy.hire` | `business`, `worker`, `title?`, `occupation?`, `basis?`, `rate?`, `hours?`, `hours_per_week?`, `pay_every?`, `start?`, `by?` |\n| `economy.invoice_issue` | `business`, `customer?`, `customer_name?`, `cents`, `memo?`, `days?`, `by?` |\n| `economy.invoice_pay` | `invoice`, `by?` |\n| `economy.invoice_void` | `invoice`, `by?` |\n| `economy.job_end` | `job`, `end?`, `by?` |\n| `economy.job_raise` | `job`, `rate?`, `pct?`, `by?` |\n| `economy.lease_end` | `lease`, `on?`, `party?` |\n| `economy.lease_start` | `property`, `tenant`, `rent`, `months?`, `day?`, `unit?`, `from?`, `party?` |\n| `economy.lose` | `item`, `thief?` |\n| `economy.move` | `from`, `to`, `cents`, `memo?` |\n| `economy.owner_draw` | `business`, `cents`, `owner?`, `by?` |\n| `economy.pay_card` | `card`, `from?`, `cents?`, `who?` |\n| `economy.price_modifier` | `percent`, `scope?`, `place?`, `minutes?`, `id?`, `clear?` |\n| `economy.property_buy` | `property`, `price?`, `from?`, `down?`, `term_months?`, `party?` |\n| `economy.property_sell` | `property`, `price`, `buyer?`, `to?`, `party?` |\n| `economy.release_hold` | `account`, `hold` |\n| `economy.route` | `holding?`, `property?`, `business?`, `to?`, `party?` |\n| `economy.set_autopay` | `account`, `mode`, `from?`, `cents?`, `who?` |\n| `economy.set_pay_prefs` | `tiers`, `who?` |\n| `economy.set_price` | `asset`, `price` |\n| `economy.set_status` | `account`, `status` |\n| `economy.stake_sell` | `business`, `share`, `price`, `buyer?`, `to?`, `party?` |\n| `economy.trade` | `side?`, `party?`, `holding?`, `asset?`, `account?`, `qty?`, `amount?`, `from?`, `to?`, `right?`, `strike?`, `expiry?` |\n| `economy.transfer` | `to`, `cents`, `from?`, `memo?`, `method?` |\n| `economy.withdraw` | `account`, `cents`, `who?` |\n\n### Formula functions\n\n- `asset_price(id)`\n- `balance(account)`\n- `business_value(id)`\n- `can_afford(who, cents)`\n- `credit_score(who)`\n- `employs(business, who)`\n- `holding_units(id)`\n- `holding_value(id)`\n- `holds(who, thing)`\n- `is_credit(account)`\n- `manages(who, thing)`\n- `may_draw(who, business)`\n- `money_feature(feature, who)`\n- `net_worth(who)`\n- `price(item)`\n- `property_value(id)`\n- `spends(who, account)`\n- `wealth(who)`\n\n### Actions\n\n| Action | Label | Parameters | Check | Outcomes | Minutes | Lexicon |\n|---|---|---|---|---|---|---|\n| `apply_credit` | Apply for credit | `product: text`, `amount?: money`, `term?: number` |  | `default` | `15` | apply for a credit card, apply for a loan, take out a loan |\n| `buy` | Buy | `item: text`, `qty?: number`, `price?: money`, `method?: text`, `cashback?: money` |  | `default` | `5` | buy, purchase, order, pick up a |\n| `card_freeze` | Freeze card | `card: ref → card` |  | `default` | `2` | freeze my card, lock my card |\n| `card_replace` | Replace card | `card: ref → card` |  | `default` | `2` | replace my card, order a new card |\n| `card_report_lost` | Report card lost | `card: ref → card` |  | `default` | `2` | report my card lost, my card was stolen, cancel my card |\n| `card_unfreeze` | Unfreeze card | `card: ref → card` |  | `default` | `2` | unfreeze my card, unlock my card |\n| `deposit_cash` | Deposit cash | `account: ref → account`, `amount: money` |  | `default` | `3` | deposit, pay in cash, bank the cash |\n| `distribute_profit` | Distribute profit | `business: ref → business`, `amount?: money` |  | `default` | `10` | distribute profit, pay dividends, pay out the owners |\n| `exercise_option` | Exercise an option | `holding: ref → holding`, `qty?: number`, `from?: ref → account`, `to?: ref → account` |  | `default` | `2` | exercise the option, exercise my calls, exercise my puts |\n| `flow_create` | Set up a standing payment | `label?: text`, `kind?: text`, `from?: ref → account`, `to?: text`, `amount?: money`, `every?: text`, `interval?: number`, `weekday?: number`, `day?: number`, `month?: number`, `at?: text`, `once?: text`, `start?: text`, `end?: text`, `count?: number`, `shortfall?: text`, `retry_days?: number`, `retries?: number`, `fallback?: text`, `roll?: text`, `category?: text` |  | `default` | `2` | set up a standing order, schedule a payment, set up a recurring transfer |\n| `flow_delete` | Cancel a standing payment | `flow: ref → flow` |  | `default` | `2` | cancel the standing order, stop the recurring payment |\n| `flow_pause` | Pause a standing payment | `flow: ref → flow` |  | `default` | `2` | pause the standing order |\n| `flow_resume` | Resume a standing payment | `flow: ref → flow` |  | `default` | `2` | resume the standing order |\n| `flow_update` | Change a standing payment | `flow: ref → flow`, `label?: text`, `kind?: text`, `from?: ref → account`, `to?: text`, `amount?: money`, `every?: text`, `interval?: number`, `weekday?: number`, `day?: number`, `month?: number`, `at?: text`, `once?: text`, `start?: text`, `end?: text`, `count?: number`, `shortfall?: text`, `retry_days?: number`, `retries?: number`, `fallback?: text`, `roll?: text`, `category?: text`, `clear?: text` |  | `default` | `2` | change the standing order, change the recurring payment |\n| `invoice_issue` | Send an invoice | `business: ref → business`, `customer?: ref`, `customer_name?: text`, `amount: money`, `memo?: text`, `days?: number` |  | `default` | `10` | send an invoice, invoice, bill them |\n| `invoice_pay` | Pay an invoice | `invoice: ref → invoice` |  | `default` | `5` | pay the invoice, settle the bill |\n| `invoice_void` | Void an invoice | `invoice: ref → invoice` |  | `default` | `5` | void the invoice, cancel the invoice, write it off |\n| `job_end` | End a job | `job: ref → job` |  | `default` | `10` | fire, let go, quit, resign, hand in my notice |\n| `job_hire` | Hire | `business: ref → business`, `worker: ref → person`, `title?: text`, `basis?: text`, `rate?: money`, `hours_per_week?: number`, `pay_every?: text` |  | `default` | `15` | hire, take on, give a job to |\n| `job_raise` | Give a raise | `job: ref → job`, `rate: money` |  | `default` | `5` | give a raise, raise the pay, pay more |\n| `lease_end` | End a lease | `lease: ref → flow`, `on?: text` |  | `default` | `10` | end the lease, give notice, move out |\n| `lease_start` | Let a unit | `property: ref → property`, `tenant: ref → person`, `rent: money`, `months?: number`, `day?: number`, `unit?: text` |  | `default` | `20` | rent out, sign a lease, let the apartment |\n| `move_money` | Transfer between accounts | `from: ref → account`, `to: ref → account`, `amount: money` |  | `default` | `2` | transfer, move money, put into savings |\n| `owner_draw` | Take an owner's draw | `business: ref → business`, `amount: money` |  | `default` | `5` | take a draw, pay myself, take money out of the business |\n| `pay` | Pay | `to: ref → person`, `amount: money` |  | `default` | `1` | pay, give money, send money, venmo |\n| `pay_card` | Pay card or loan | `card: ref → account`, `from?: ref → account`, `amount?: money` |  | `default` | `2` | pay off the card, pay the card, pay my credit card, make a loan payment |\n| `property_buy` | Buy a property | `property: ref → property`, `price?: money`, `from?: ref → account`, `down?: money`, `term_months?: number` |  | `default` | `60` | buy the house, buy the property, make an offer on |\n| `property_sell` | Sell a property | `property: ref → property`, `price: money`, `buyer?: ref → person`, `to?: ref → account` |  | `default` | `60` | sell the house, sell the property |\n| `route_distributions` | Route dividends, rent or profits | `holding?: ref → holding`, `property?: ref → property`, `business?: ref → business`, `to?: text` |  | `default` | `1` | reinvest dividends, send dividends to, send the rent to |\n| `set_autopay` | Set autopay | `account: ref → account`, `mode: text`, `from?: ref → account`, `amount?: money` |  | `default` | `2` | set up autopay, turn on autopay, turn off autopay |\n| `set_pay_prefs` | Set how I pay | `tiers: text` |  | `default` | `2` | i'd rather pay with |\n| `stake_sell` | Sell a share of a business | `business: ref → business`, `share: number`, `price: money`, `buyer?: ref → person`, `to?: ref → account` |  | `default` | `60` | sell my share of the business, sell the shop |\n| `trade` | Buy or sell investments | `side?: text`, `holding?: ref → holding`, `asset?: text`, `account?: ref → account`, `qty?: number`, `amount?: money`, `from?: ref → account`, `to?: ref → account`, `right?: text`, `strike?: money`, `expiry?: text` |  | `default` | `2` | invest, buy stocks, buy shares, sell stocks, sell shares, cash out, buy an option |\n| `withdraw_cash` | Withdraw cash | `account: ref → account`, `amount: money` |  | `default` | `3` | withdraw, take out cash, hit the atm, get cash |\n\n### Events\n\nIts own: `economy.accrue`, `economy.acquire`, `economy.anchor`, `economy.card_paid`, `economy.commission`, `economy.credit`, `economy.decline`, `economy.delinquency`, `economy.dispose`, `economy.estimated_tax`, `economy.exercise`, `economy.flow_renamed`, `economy.flow_run`, `economy.hold`, `economy.income`, `economy.invoice_paid`, `economy.lots`, `economy.mint`, `economy.modifier`, `economy.note`, `economy.open`, `economy.payout`, `economy.payslip`, `economy.price`, `economy.quote`, `economy.remit`, `economy.sale`, `economy.score`, `economy.settle`, `economy.spend`, `economy.stake_route`, `economy.statement`, `economy.status`, `economy.timesheet`, `economy.txn`.\n\nChecks it adds to: `post`.\n\n### Proposals\n\n| Proposal | Bound by |\n|---|---|\n| `purchase` | `money` |\n| `transfer` | `money` |\n\n### Panels and slots\n\nPanels: `economy.money`. Slots it writes: `money`.\n\n### Simulation\n\n| Process | Domain | From level | Steps |\n|---|---|---|---|\n| `economy.accounts` | `money` | 3 | the world |\n| `economy.invoices` | `money` | 3 | the world |\n| `economy.markets` | `money` | 3 | the world |\n| `economy.money` | `money` | 2 | the world |\n| `economy.plans` | `money` | 0 | the world |\n| `economy.property_values` | `money` | 3 | the world |\n| `economy.settlements` | `money` | 3 | the world |\n| `economy.timesheet` | `money` | 3 | the world |\n\nDetail on demand: `money` (version 2).\n\n### Data tables\n\n| Table | Label | Schema | Columns | Default rows |\n|---|---|---|---|---|\n| `economy.catalog` | Price catalog | `lre-table/economy.catalog/v1` | name (text), category (ref), unit (text), price_cents (band), notes (text, optional) | 340 |\n| `economy.categories` | Price categories | `lre-table/economy.categories/v1` | name (text), basis (text), notes (text, optional), price_unit_note (text, optional), item_count (int), price_cents (band) | 19 |\n| `economy.finance` | Finance parameters | `lre-table/economy.finance/v1` | title (text), values (json) | 7 |\n| `economy.occupations` | Occupations and pay | `lre-table/economy.occupations/v1` | title (text), category (enum), median_cents_per_h (int), median_cents_per_year (int), typical_earnings_cents_per_year (int), schedule_pattern (ref), typical_hours_per_week (number), weeks_per_year (number), weekend_work (enum), shifts (list), pay_frequency (enum), benefits (enum), benefits_note (text), withholding_rate_pct (number), description (text), wage_basis (text), tipped (bool, optional), tipped_cash_wage_cents_per_h (int, optional), self_employed (bool, optional), fica_exempt (bool, optional), estimated_tax_set_aside_pct (number, optional), withholding_note (text, optional) | 56 |\n| `economy.regions` | Regions (US states, DC and the national baseline) | `lre-table/economy.regions/v1` | name (text), abbr (text), scope (enum), census_region (enum, optional), census_division (enum, optional), time_zones (list, optional), observes_dst (bool, optional), state_income_tax_effective_pct (number, optional), local_income_tax_pct_typical (number, optional), sales_tax_combined_avg_pct (number), property_tax_effective_pct (number, optional), cost_of_living_multiplier (number), median_rent_1br_cents_per_month (int), median_rent_2br_cents_per_month (int), residential_electricity_cents_per_kwh (number), minimum_wage_cents_per_h (int), tipped_minimum_wage_cents_per_h (int, optional), notes (text, optional) | 52 |\n\n### Lint codes\n\n`economy.accounts`, `economy.assets`, `economy.business`, `economy.holdings`, `economy.property`, `economy.unpriced_cap`.\n\n## Gear & containers pack (`gear`)\n\nVersion 1 · realism domain `gear` · requires `space`.\n\n### Kinds\n\n#### `container`: Container\n\nExtends `item`.\n\n| Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |\n|---|---|---|---|---|---|---|---|\n| `capacity_l` | Capacity (l) | number | ≥ 0 |  |  |  | live from gear 2 |\n| `max_load_kg` | Max load (kg) | number | ≥ 0 |  |  |  | live from gear 2 |\n| `stock` | Contents category (sampled when first opened) | text |  |  |  |  |  |\n\n#### `item`: Item\n\nExtends `thing`.\n\n| Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |\n|---|---|---|---|---|---|---|---|\n| `catalog` | Catalog item | text (row of economy.catalog) |  |  |  |  |  |\n| `category` | Category | text |  |  |  |  |  |\n| `condition` | Condition | number | 0 … 100 | `100` |  |  | live from gear 3; bound auto, ±25 a turn; bands: broken, worn, good, like new |\n| `consumable` | Consumable | bool |  |  |  |  | live from gear 4 |\n| `from_kit` | From kit | ref |  |  |  |  | locked |\n| `notable` | Notable | bool |  |  |  |  | live from gear 1 |\n| `overdue` | Overdue | bool |  |  |  |  | locked |\n| `piece` | Kit piece | text |  |  |  |  | locked |\n| `qty` | Quantity | number | ≥ 0 | `1` |  |  | live from gear 2; bound confirm, ±10 a turn |\n| `slot` | Equip slot | text |  |  |  |  | live from gear 3 |\n| `uses` | Uses left | number | ≥ 0 |  |  |  | live from gear 4 |\n| `volume_l` | Volume (l) | number | ≥ 0 |  |  |  | live from gear 2 |\n| `weight_g` | Weight (g) | number | ≥ 0 |  |  |  | live from gear 2 |\n\n#### `kit`: Kit\n\nExtends `container`.\n\n| Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |\n|---|---|---|---|---|---|---|---|\n| `kit` | Kit template | text |  |  |  |  | live from gear 3 |\n| `piece_count` | Piece count | number |  |  |  |  | live from gear 3 |\n| `pieces` | Pieces | list |  |  |  |  | live from gear 3 |\n\n### Relation types\n\n| Relation | Label | From | To | Cardinality | Symmetric | Inverse | Fields |\n|---|---|---|---|---|---|---|---|\n| `equipped` | Equipped by | `item` | `*` | many_one |  |  | `slot` |\n| `uses` | Uses (granted until) | `*` | `*` | many_many |  |  | none |\n| `worn_by` | Worn by | `item` | `*` | many_one |  |  | `slot` |\n\n### Effects\n\n| Effect | Arguments |\n|---|---|\n| `gear.drop` | `item`, `place?` |\n| `gear.give` | `item`, `from`, `to` |\n| `gear.lend` | `item`, `to`, `until?`, `said?` |\n| `gear.lose` | `item`, `thief?` |\n| `gear.receive` | `name`, `to`, `from?` |\n| `gear.remove` | `item` |\n| `gear.retrieve` | `item` |\n| `gear.take_piece` | `kit`, `piece`, `to` |\n| `gear.transfer` | `item`, `to` |\n| `gear.use` | `item`, `user?` |\n| `gear.wear` | `item`, `wearer`, `slot?` |\n\n### Formula functions\n\n- `carried_kg(holder)`\n- `carries(holder, item)`\n- `has_item(holder, what)`\n- `kit_complete(kit)`\n- `kit_present(kit)`\n- `lent_out(thing)`\n\n### Actions\n\n| Action | Label | Parameters | Check | Outcomes | Minutes | Lexicon |\n|---|---|---|---|---|---|---|\n| `drop` | Drop | `item: ref → item` |  | `default` | `1` | drop, put down, leave |\n| `give` | Give | `item: ref → item`, `to: ref → person` |  | `default` | `1` | give, hand, pass |\n| `lend` | Lend | `item: ref → item`, `to: ref → person`, `days?: number`, `until?: text` |  | `default` | `2` | lend, loan, let borrow |\n| `lose` | Lose something | `item: ref → item` |  | `default` | `1` | lost my, lose, can't find my, is gone, is missing |\n| `reclaim` | Take back | `item: ref → item` |  | `default` | `5` | take back, get back, reclaim |\n| `remove` | Take off | `item: ref → item` |  | `default` | `2` | take off, remove, unequip |\n| `take` | Take | `item: ref → item` |  | `default` | `1` | take, pick up, grab |\n| `take_piece` | Take from a kit | `kit: ref → kit`, `piece: text` |  | `default` | `1` | take the, grab a, get a |\n| `use` | Use | `item: ref → item` |  | `default` | `5` | use, apply |\n| `wear` | Wear or equip | `item: ref → item` |  | `default` | `2` | wear, put on, equip |\n\n### Proposals\n\n| Proposal | Bound by |\n|---|---|\n| `give` | `ref` |\n| `quantity` | `number` |\n\n### Panels and slots\n\nPanels: `gear.gear`. Slots it writes: `gear`.\n\n### Simulation\n\n| Process | Domain | From level | Steps |\n|---|---|---|---|\n| `gear.grants` | `gear` | 1 | the world |\n\nDetail on demand: `gear` (version 1).\n\n### Data tables\n\n| Table | Label | Schema | Columns | Default rows |\n|---|---|---|---|---|\n| `gear.containers` | Containers | `lre-table/gear.containers/v1` | name (text), capacity_l (number), max_load_kg (number), empty_weight_g (int), location (enum), equip_slot (ref), price_cents (band), notes (text, optional) | 34 |\n| `gear.items` | Gear items | `lre-table/gear.items/v1` | name (text), category (enum), equip_slot (ref), weight_g (int), volume_l (number), price_cents (band), notes (text, optional) | 90 |\n| `gear.kits` | Kits | `lre-table/gear.kits/v1` | name (text), recommended_container (ref), description (text), piece_count (int), pieces_total_weight_g (number), packed_volume_l (number), price_cents (band), pieces (list), notes (text, optional) | 5 |\n| `gear.slots` | Equip slots | `lre-table/gear.slots/v1` | description (text) | 20 |\n\n### Lint codes\n\n`gear.kits`.\n\n## Minds pack (`minds`)\n\nVersion 1 · realism domain none · requires none.\n\n### Events\n\nIts own: `minds.commitment`, `minds.commitment_edit`, `minds.consolidated`, `minds.memory`, `minds.mind`, `minds.note_edit`, `minds.pin`, `minds.plan`, `minds.plan_edit`, `minds.presence`, `minds.refresh`, `minds.round`, `minds.skip`.\n\n### Panels and slots\n\nPanels: none. Slots it writes: `minds`.\n\n### Lint codes\n\n`minds.config`, `minds.steps`.\n\n## Relationships pack (`relationships`)\n\nVersion 1 · realism domain `relationships` · requires `space`.\n\n### Kinds\n\n#### `company`: Company\n\nExtends `group`.\n\nNo fields of its own.\n\n#### `faction`: Faction\n\nExtends `group`.\n\nNo fields of its own.\n\n#### `family`: Family\n\nExtends `group`.\n\nNo fields of its own.\n\n#### `group`: Group\n\nExtends `thing`.\n\nNo fields of its own.\n\n#### `household`: Household\n\nExtends `group`.\n\nNo fields of its own.\n\n### Relation types\n\n| Relation | Label | From | To | Cardinality | Symmetric | Inverse | Fields |\n|---|---|---|---|---|---|---|---|\n| `child_of` | Child of | `person` | `person` | many_many |  | `parent_of` | none |\n| `knows` | Knows | `*` | `*` | many_many |  |  | none |\n| `member_of` | Member of | `*` | `group` | many_many |  |  | `rank`, `role`, `since` |\n| `parent_of` | Parent of | `person` | `person` | many_many |  | `child_of` | none |\n| `partner_of` | Partner of | `person` | `person` | many_many | yes |  | `since` |\n| `regard` | Regard | `*` | `*` | many_many |  |  | `respect`, `trust`, `warmth` |\n| `sibling_of` | Sibling of | `person` | `person` | many_many | yes |  | none |\n| `spouse_of` | Spouse of | `person` | `person` | many_many | yes |  | `since` |\n\n### Effects\n\n| Effect | Arguments |\n|---|---|\n| `relationships.adjust` | `from`, `to`, `delta`, `axis?`, `why?` |\n| `relationships.appraise` | `from`, `to`, `appraisal`, `why?`, `mutual?` |\n\n### Formula functions\n\n- `faction_regard(group, to)`\n- `regard(from, to, axis)`\n- `regard_band(from, to)`\n\n### Actions\n\n| Action | Label | Parameters | Check | Outcomes | Minutes | Lexicon |\n|---|---|---|---|---|---|---|\n| `chat_with` | Chat with | `target: ref → person` |  | `default` | `15` | chat with, talk to, catch up with |\n| `give_gift` | Give a gift | `target: ref → person` |  | `default` | `5` | give a gift, surprise |\n\n### Events\n\nIts own: `relationships.regard`.\n\n### Proposals\n\n| Proposal | Bound by |\n|---|---|\n| `regard` | `number` |\n\n### Panels and slots\n\nPanels: none. Slots it writes: `people`.\n\n### Lint codes\n\n`relationships.axes`.\n\n## Character sheets pack (`sheets`)\n\nVersion 1 · realism domain `sheets` · requires `space`.\n\n### Effects\n\n| Effect | Arguments |\n|---|---|\n| `sheets.condition` | `condition`, `who?`, `label?`, `mod?`, `minutes?`, `clear?` |\n\n### Formula functions\n\n- `condition_mod(who)`\n- `derived(who, id)`\n- `difficulty_of(v)`\n- `has_condition(who, id)`\n- `stat(who, stat)`\n- `stat_mod(who, stat)`\n- `stat_word(who, stat)`\n\n### Actions\n\n| Action | Label | Parameters | Check | Outcomes | Minutes | Lexicon |\n|---|---|---|---|---|---|---|\n| `attempt` | Attempt | `stat: text`, `difficulty?: text` | `1d20` | `failure`, `great`, `success` | `5` | try to, attempt, check |\n\n### Proposals\n\n| Proposal | Bound by |\n|---|---|\n| `condition` | `list` |\n\n### Panels and slots\n\nPanels: `sheets.you`. Slots it writes: `outcome`.\n\n### Lint codes\n\n`sheets.stat_range`.\n\n## Space & travel pack (`space`)\n\nVersion 1 · realism domain `space` · requires `calendar`.\n\n### Kinds\n\n#### `person`: Person\n\nExtends `thing`.\n\n| Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |\n|---|---|---|---|---|---|---|---|\n| `activity` | Activity | text |  | `\"idle\"` |  |  | live from castlife 1 |\n| `activity_until` | Activity ends | number |  |  |  |  | live from castlife 1; locked |\n| `agility` | Agility | number | 3 … 18 |  |  |  | live from sheets 1 |\n| `appointments` | Appointments | list |  |  |  |  | live from castlife 2 |\n| `birthday` | Birthday (MM-DD or YYYY-MM-DD) | date |  |  |  |  | live from castlife 3 |\n| `charm` | Charm | number | 3 … 18 |  |  |  | live from sheets 1 |\n| `chores` | Chores | list |  |  |  |  | live from castlife 3 |\n| `conditions` | Conditions | list |  |  |  |  | live from sheets 4 |\n| `employer` | Employer | ref |  |  |  |  | live from money 3 |\n| `filing_status` | Tax filing status | enum: single, married_filing_jointly, head_of_household |  |  |  |  | live from money 4 |\n| `grit` | Grit | number | 3 … 18 |  |  |  | live from sheets 1 |\n| `home` | Home | ref |  |  |  |  | live from space 1 |\n| `local_tax` | Pays local income tax | bool |  |  |  |  | live from money 4 |\n| `might` | Might | number | 3 … 18 |  |  |  | live from sheets 1 |\n| `needs` | Needs | list |  |  |  |  | live from castlife 4; locked |\n| `occupation` | Occupation | text (row of economy.occupations) |  |  |  |  | live from money 3 |\n| `pay_prefs` | Pays with, in order ({use, min?, max?, categories?, except?}) | list |  |  |  |  | live from money 3 |\n| `region` | Region | text (row of economy.regions) |  |  |  |  | live from money 3 |\n| `scene` | Scene type | text |  |  |  |  |  |\n| `trips` | Trips | list |  |  |  |  | live from castlife 1 |\n| `wealth` | Wealth | text |  |  |  |  | live from money 1 |\n| `wits` | Wits | number | 3 … 18 |  |  |  | live from sheets 1 |\n\n#### `thing`: Thing\n\n| Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |\n|---|---|---|---|---|---|---|---|\n| `owner` | Owner | ref |  |  |  |  |  |\n| `place` | Place | ref |  |  |  |  | live from space 1 |\n| `x` | Grid x | number |  |  |  |  | live from space 3 |\n| `y` | Grid y | number |  |  |  |  | live from space 3 |\n\n### Relation types\n\n| Relation | Label | From | To | Cardinality | Symmetric | Inverse | Fields |\n|---|---|---|---|---|---|---|---|\n| `in` | In | `*` | `*` | many_one |  |  | none |\n\n### Effects\n\n| Effect | Arguments |\n|---|---|\n| `space.set_route` | `route`, `open?` |\n| `space.step` | `x`, `y`, `entity?` |\n\n### Formula functions\n\n- `distance_km(from, to, mode)`\n- `grid_minutes(place, x, y)`\n- `grid_reachable(place, x, y)`\n- `on_grid(thing)`\n- `reach(a, b)`\n- `route_exists(from, to, mode)`\n- `route_open(route)`\n- `travel_minutes(from, to, mode)`\n- `within(place, ancestor)`\n\n### Actions\n\n| Action | Label | Parameters | Check | Outcomes | Minutes | Lexicon |\n|---|---|---|---|---|---|---|\n| `go` | Go to | `to: ref → place` |  | `default` | `level.space < 2 ? (level.space < 1 ? 0 : 15) : travel_minutes(here, to, 'walk')` | go to, walk to, head to, head over to, leave for |\n| `step` | Move on the map | `x: number`, `y: number` |  | `default` | `grid_minutes(here, x, y)` | walk over to, cross to, move to |\n\n### Events\n\nIts own: `space.pos`, `space.route`.\n\n### Proposals\n\n| Proposal | Bound by |\n|---|---|\n| `location` | `ref` |\n\n### Panels and slots\n\nPanels: `space.map`. Slots it writes: `scene`.\n\n### Lint codes\n\n`space.grid`, `space.maps`, `space.references`.\n\n## Story pack (`story`)\n\nVersion 1 · realism domain none · requires none.\n\n### Effects\n\n| Effect | Arguments |\n|---|---|\n| `story.answer` | `track?`, `puzzle?`, `answer`, `decision?` |\n| `story.flag` | `name`, `value?` |\n\n### Formula functions\n\n- `flag(name)`\n\n### Actions\n\n| Action | Label | Parameters | Check | Outcomes | Minutes | Lexicon |\n|---|---|---|---|---|---|---|\n| `answer` | Answer | `puzzle?: text`, `answer: text`, `decision?: number` |  | `default` | `1` | the answer is, i think it's, solve, answer, the code is, the combination is, try the combination, dial, enter the code |\n\n### Events\n\nIts own: `story.flag`.\n\n### Panels and slots\n\nPanels: `story.quests`. Slots it writes: `quest`.\n\n### Lint codes\n\n`story.leaky_id`, `story.leaky_label`.\n\n## Vehicles pack (`vehicles`)\n\nVersion 1 · realism domain `vehicles` · requires `economy`, `gear`, `space`.\n\n### Kinds\n\n#### `vehicle`: Vehicle\n\nExtends `container`.\n\n| Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |\n|---|---|---|---|---|---|---|---|\n| `class` | Vehicle class | text |  |  |  |  |  |\n| `engine_hours` | Engine hours | number | ≥ 0 |  |  |  | live from vehicles 3; locked |\n| `fuel_pct` | Fuel % | number | 0 … 100 |  |  |  | live from vehicles 2; bound auto, ±30 a turn |\n| `home` | Home base | ref |  |  |  |  | live from vehicles 3 |\n| `last_service` | Last service (mi or h) | number | ≥ 0 |  |  |  | live from vehicles 4 |\n| `odometer_mi` | Odometer (mi) | number | ≥ 0 |  |  |  | live from vehicles 3; locked |\n| `status` | Status | enum: ok, needs_service, broken |  | `\"ok\"` |  |  | live from vehicles 1; bound confirm |\n| `value` | Value | money | ≥ 0 |  |  |  | live from money 3 |\n\n### Effects\n\n| Effect | Arguments |\n|---|---|\n| `vehicles.drive` | `vehicle`, `to`, `driver?`, `riders?` |\n| `vehicles.refuel` | `vehicle`, `payer?`, `pct?` |\n| `vehicles.service` | `vehicle`, `payer?`, `repair?` |\n\n### Formula functions\n\n- `drive_minutes(vehicle, to)`\n- `fuel_ok(vehicle, to)`\n- `fuel_pct(vehicle)`\n\n### Actions\n\n| Action | Label | Parameters | Check | Outcomes | Minutes | Lexicon |\n|---|---|---|---|---|---|---|\n| `drive` | Drive | `vehicle: ref → vehicle`, `to: ref → place` |  | `default` | `drive_minutes(vehicle, to)` | drive to, drive over to, take the truck, take the car, sail to, ride to |\n| `refuel` | Refuel | `vehicle: ref → vehicle` |  | `default` | `10` | refuel, fill up, gas up, charge the car |\n| `repair_vehicle` | Repair | `vehicle: ref → vehicle` |  | `default` | `180` | repair, fix the truck, fix the car, get it towed |\n| `service_vehicle` | Service | `vehicle: ref → vehicle` |  | `default` | `60` | service, oil change, tune up |\n\n### Panels and slots\n\nPanels: `vehicles.garage`. Slots it writes: `vehicles`.\n\n### Simulation\n\n| Process | Domain | From level | Steps |\n|---|---|---|---|\n| `vehicles.upkeep` | `vehicles` | 4 | the world |\n\nDetail on demand: `vehicles` (version 1).\n\n### Data tables\n\n| Table | Label | Schema | Columns | Default rows |\n|---|---|---|---|---|\n| `vehicles.classes` | Vehicle classes | `lre-table/vehicles.classes/v1` | name (text), domain (enum), fuel_type (enum), factor_guide (ref), tank_capacity_gal (number, optional), tank_capacity_l (number, optional), usable_battery_kwh (number, optional), consumption_unit (enum), consumption (json), range_mi (int, optional), range_h (number, optional), price_new_cents (band), price_used_cents (band), insurance_liability_cents_per_month (int), insurance_full_cents_per_month (int), registration_cents_per_year (band), annual_maintenance_cents_per_year (int), maintenance (json), passengers (int), cargo_l (number), payload_kg (number), towing_kg (number, optional), charging (json, optional), notes (text) | 19 |\n| `vehicles.factors` | Consumption factor guides | `lre-table/vehicles.factors/v1` | basis (text), factors (json), note (text, optional) | 3 |\n\n### Lint codes\n\n`vehicles.classes`.\n\n## Weather pack (`weather`)\n\nVersion 1 · realism domain `weather` · requires `space`.\n\n### Kinds\n\n#### `region`: Weather region\n\n| Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |\n|---|---|---|---|---|---|---|---|\n| `climate` | Climate | text |  | `\"temperate\"` |  |  |  |\n| `temp_c` | Temperature (°C) | number |  |  |  |  | live from weather 3; bound never |\n| `weather` | Weather | text |  | `\"clear\"` |  |  | live from weather 2; bound never |\n| `weather_hold` | Weather held until | number |  |  |  |  | live from weather 2; locked |\n| `weather_hold_until` | Weather held until (condition) | text |  |  |  |  | live from weather 2; locked |\n\n### Effects\n\n| Effect | Arguments |\n|---|---|\n| `weather.clear` | `region`, `state?` |\n| `weather.set` | `region`, `state`, `minutes?`, `until?` |\n\n### Formula functions\n\n- `season()`\n- `weather(place)`\n\n### Panels and slots\n\nPanels: `weather.now`. Slots it writes: `scene`.\n\n### Simulation\n\n| Process | Domain | From level | Steps |\n|---|---|---|---|\n| `weather.climate` | `weather` | 2 | the world |\n\n### Lint codes\n\n`weather.climates`.\n";
 
 // docs/STUDIO.md
 var STUDIO_default = `# LumiRPEngine studio contract
@@ -57387,7 +57838,7 @@ While LumiRPEngine runs, its frontend dispatches a \`lre-state-v1\` window event
 | \`lumi_rp_engine.studio-world.<user>.<world>.<revision>\` | none | The same, for that revision |
 | \`lumi_rp_engine.studio-chats.<user>\` | \`chats\` | \`StudioChats\`: \`{v: 1, chats: [StudioChatSummary]}\` |
 
-A chat summary is built from the state the engine last pushed to that chat's view, so it says only what the player sees: the world and its revision (and \`definitionsFrom\` when an Upgrade left the chat's definitions behind), the POV's place, the clock, the cash as the HUD shows it, the people present (with their life state when the player knows it isn't alive, so a body they've found isn't read as alive) and the open quests. A secret the quest log masks ("Something is going on") goes with an opaque id (\`hidden-1\`, …), since its own id is the author's and may name the secret. It covers the world chats LumiRPEngine has shown since it started, the 24 most recent, newest first. The world document holds the rest.
+A chat summary is built from the state the engine last pushed to that chat's view, so it says only what the player sees: the world and its revision (and \`definitionsFrom\` when an Upgrade left the chat's definitions behind), the POV's place, the clock, the cash as the HUD shows it, the people present (with their life state when the player knows it isn't alive, so a body they've found isn't read as alive) and the open quests. A secret track goes by the stand-in id the player's quest log gives it (\`~\` and a hash), with "Something is going on" for its label until a truth is out, since its own id is the author's and may name the secret. It covers the world chats LumiRPEngine has shown since it started, the 24 most recent, newest first. The world document holds the rest.
 
 **What the Studio publishes.** \`lumi_rp_engine_studio.offer.<user>\`, which answers the engine only: the user's pending offer, \`StudioOffer\` = \`{offerId, doc, mode, worldId?, baseRevision?, attachChatId?, createdAt}\`, or \`null\` when nothing waits. \`mode\` is \`new\` (a new world) or \`revision\` (the next revision of the user's world \`worldId\`), \`baseRevision\` is the revision of that world the document was taken from, and \`attachChatId\` names a chat to attach it to. \`readOffer\` checks the shape; the document itself is checked in the review.
 
@@ -57487,11 +57938,11 @@ Open the **LumiRPEngine** tab in the Lumiverse drawer. The mode bar at the top m
 
 A place that holds more than one part shows them as tabs along its top. A place shows only while it has something to show: Now and Story always do, and a place whose packs the world doesn't use is left out. Everything follows your [realism](#realism) levels: a domain that is switched off has nothing to show, and a domain at a low level shows less. A dot on a place, or on one of its tabs, means detail is waiting there.
 
-Details open as sheets inside the drawer: a person, a place, an item, an account or a quest. Each sheet has a back button at its top left. The back button or Escape goes back one level, and moving to another place closes them all.
+Details open as sheets inside the drawer: a person, a place, an item, an account or a quest. Each sheet has a back button at its top left. The back button or Escape goes back one level, and moving to another place, or opening another chat, closes them all.
 
 If the chat isn't a world chat, Play says **Not a world chat** and lists **Your worlds**, each with an **Attach** button. Tap **Attach** and confirm in the **Attach world** box. **Open Build** takes you to the editors. A chat keeps the world it started with: attaching the same world again only re-attaches its lore book, and attaching a different one is refused with "This chat already plays another world. Start a new chat for this one."
 
-The other modes: **GM** shows and edits everything, secrets included (see [GM mode](#gm-mode)), **Build** is where you make worlds (see [Authoring](#authoring)), and **Settings** holds your own defaults. Settings opens on a list of pages in groups: **Getting started** (**Model use**, **Steps and connections**), **Defaults for new chats** (**Realism**, **Checks**, **Time**), **Replies** (**Changes from the reply**, **Swipes**), **Your preset** (**Preset**), **Display** and **About** (**Caveats**). Tap a page to open it; its back button, or Escape, returns to the list. **Realism**, **Checks** and **Time** there set up chats you start from now on; the chat you have open has its own in GM mode, and each of those pages says so, with **Open GM → This chat** to go there. **Settings → Display → Show ids** is off by default. Turn it on to see the id the engine and the world's files use beside each name, in Build's lists, in Problems and in GM mode.
+The other modes: **GM** shows and edits everything, secrets included (see [GM mode](#gm-mode)), **Build** is where you make worlds (see [Authoring](#authoring)), and **Settings** holds your own defaults. Settings opens on a list of pages in groups: **Getting started** (**Model use**, **Steps and connections**, **Minds**), **Defaults for new chats** (**Realism**, **Checks**, **Time**), **Replies** (**Changes from the reply**, **Swipes**), **Your preset** (**Preset**), **Display** and **About** (**Caveats**). Tap a page to open it; its back button, or Escape, returns to the list. **Realism**, **Checks** and **Time** there set up chats you start from now on; the chat you have open has its own in GM mode, and each of those pages says so, with **Open GM → This chat** to go there. **Settings → Display → Show ids** is off by default. Turn it on to see the id the engine and the world's files use beside each name, in Build's lists, in Problems and in GM mode. Play never shows them: it names things only as your character knows them.
 
 What you can see is always filtered to what your point-of-view character knows. Facts are public, known by particular characters, or secret, and a secret stays out of every place, sheet, chip, choice and Journal line until the story reveals it.
 
@@ -57526,22 +57977,22 @@ What you can see is always filtered to what your point-of-view character knows. 
 
 **Play → Me → Money** is your money hub. What it shows follows your [realism](#realism): at Money 1 just a wealth band; from Money 2 your cash and accounts; from Money 3 cards, standing payments, income and bills; and at the top level (Money 4) the full books. Below the top level the books stay simple: balances, what's due, a few recent lines. The full books add each account's terms, statements, pending lines and holds, what your net worth is made of, cash flow by category and the next 30 days, investment lots with their gains, your paycheck's taxes and deductions, a business's books and sales, and your credit report. A money feature the world switches on (see [Realism](#realism)) shows its own part of these wherever it runs, and one it switches off shows nowhere, the top level included.
 
-The hub opens on the overview. A large figure leads: your net worth, with your wealth band under it (at Money 1, just the band), and a **Money** *n* badge that adds **· full books** when it shows them. Under it come **Cash on hand**, **Assets** and **Owed**. Each alert is a banner, with **Open** when it names an account or a standing payment. Then, at the levels that show them, **Coming up**, **Recent**, **What it's made of** (the full books) and **Cash flow** (by category and the next 30 days in the full books); a **Coming up** row opens the payment or account it names. Under **Your money**, a row for each other section you have gives a one-line summary and opens that section's page; **Needs you** marks one that wants your attention.
+The hub opens on the overview. A large figure leads: your net worth, with your wealth band under it (at Money 1, just the band), and a **Money** *n* badge that adds **· full books** when it shows them. Under it come **Cash on hand** and, in the full books or wherever investments or property run for you, **Assets** and **Owed**. Each alert is a banner, with **Open** when it names an account or a standing payment. Then, at the levels that show them, **Coming up**, **Recent**, **What it's made of** (the full books) and **Cash flow** (by category and the next 30 days in the full books); a **Coming up** row opens the payment or account it names. Under **Your money**, a row for each other section you have gives a one-line summary and opens that section's page; **Needs you** marks one that wants your attention.
 
-Each page opens over the drawer with a back button, and Escape goes back too. Every control opens a page of its own: fill it in, then tap its one button, which says what it does (**Pay** *amount*, **Start the lease**, **Release**).
+Each page opens over the drawer with a back button, and Escape goes back too. Every control opens a page of its own: fill it in, then tap its one button, which says what it does (**Pay** *amount*, **Start the lease**, **Release**). While something is missing, or a box holds what it can't send (a 0 in **Every Nth time**, say), the button waits and the page says why just above it, even when that box is folded away under **More options**.
 
-- **Accounts**: every account you hold or share, by kind (cash, bank accounts, cards and credit lines, loans, investment accounts), each row with its balance and what's due, or a loan's payment a month and the months left. Tap one for its page: its balance, what's available, its limit (with how much of it is used) and rate, what's due, a loan's payment and months left, its owners when it's shared, its cards and its lines, each naming who it paid or who paid it (no one, for money between your own accounts). **Pay** pays what a card, a line or a loan owes, from the account you pick: the amount due, the whole balance, or another amount you type. **Transfer** moves money to another of your accounts, and **Withdraw cash** and **Deposit cash** move cash in and out of a bank account. At the top level, in a world that places bank branches or cash machines, that needs one where you are, and the page says so: a branch of the account's bank, or a cash machine. Taking cash out of a machine needs a card on the account (another bank's machine adds its fee), and paying cash in needs the bank's own machine that takes deposits, which holds the deposit for a few days. A world that places none leaves banking offstage, and cash moves anywhere. The **Autopay** row opens a page that sets how a credit account pays itself (the minimum due, the statement balance, the whole balance or a fixed amount, from an account you pick). **New standing payment**, on the page of an account you manage that can pay one, opens **New standing payment or one-off** with that account as **From**. A card opens its own page, where **Freeze**, **Unfreeze**, **Report lost** (it stops working at once) and **Replace** each open a page that asks you to confirm. **How you pay** lists your payment preferences, in order: a way of paying (cash, a debit, credit or charge card, checking, savings, or one card or account), for amounts and categories that fit; the first tier that fits and covers a purchase pays it, and if none does, your cash, debit card, credit card or charge card, whichever covers it, pays (savings, a money market or a trust account pays only when a tier names it or you do). Its **Change** button opens the page where you set them.
-- **Flows**: every standing transfer, bill, income and one-off, grouped **Active**, **Paused** and **Ended**; tap one for its page. **New standing payment or one-off**, at the top of the page, sets one up: a name, from one of your accounts, to one of your accounts, someone you know or someone outside the world by name, an amount, and when: once on a day, or every day, week (on a weekday), month (on a day, or the last day) or year. Under **More options**: every second (or Nth) time, the time of day (09:00 when you don't say), an end date or a number of times, what happens on a weekend or a day-off holiday, a category, and what it does when the money isn't there: skip that time, pay what there is, try again later, pay from another account, go into overdraft as the account allows, or carry it to the next time. On a flow's page, **Edit**, **Pause**, **Resume** and **Delete** each open a page; an edit can rename it, and a time, end date, number of times or category you empty is gone. One that comes from a job, a lease or a loan says so on its page, and is changed there. Rent you pay under a lease also has **End the lease**, which gives notice: the lease ends today. An invoice billed to you, or to a business you run, has **Pay now**; otherwise it's paid on its due date if the money is there.
+- **Accounts**: every account you hold or share, by kind (cash, bank accounts, cards and credit lines, loans, investment accounts), each row with its balance and what's due, or a loan's payment a month and the months left. Tap one for its page: its balance, what's available, its limit (with how much of it is used) and rate, what's due, a loan's payment and months left, its owners when it's shared, its cards and its lines, each naming who it paid or who paid it (no one, for money between your own accounts). From Money 3, **Pay** pays what a card, a line or a loan owes, from the account you pick: the amount due, the whole balance, or another amount you type. **Transfer** moves money to another of your accounts, and **Withdraw cash** and **Deposit cash** move cash in and out of a bank account. At the top level, in a world that places bank branches or cash machines, that needs one where you are, and the page says so: a branch of the account's bank, or a cash machine. Taking cash out of a machine needs a card on the account (another bank's machine adds its fee), and paying cash in needs the bank's own machine that takes deposits, which holds the deposit for a few days. A world that places none leaves banking offstage, and cash moves anywhere. The **Autopay** row opens a page that sets how a credit account pays itself (the minimum due, the statement balance, the whole balance or a fixed amount, from an account you pick of its debtor's own money: theirs to spend, or theirs by its worth, so a custodial card pays from the custodial savings). **New standing payment**, on the page of an account you manage that can pay one, opens **New standing payment or one-off** with that account as **From**. A card opens its own page, where **Freeze**, **Unfreeze**, **Report lost** (it stops working at once) and **Replace** each open a page that asks you to confirm. **How you pay** lists your payment preferences, in order: a way of paying (cash, a debit, credit or charge card, checking, savings, or one card or account), for amounts and categories that fit; the first tier that fits and covers a purchase pays it, and if none does, your cash, debit card, credit card or charge card, whichever covers it, pays (savings, a money market or a trust account pays only when a tier names it or you do). Its **Change** button opens the page where you set them.
+- **Flows**: every standing transfer, bill, income and one-off, grouped **Active**, **Paused** and **Ended**; tap one for its page. **New standing payment or one-off**, at the top of the page, sets one up: a name, from one of your accounts, to one of your accounts, someone you know or someone outside the world by name, an amount, and when: once on a day, or every day, week (on a weekday), month (on a day, or the last day) or year. Under **More options**: every second (or Nth) time, the time of day (09:00 when you don't say), an end date or a number of times, what happens on a weekend or a day-off holiday, a category, and what it does when the money isn't there: skip that time, pay what there is, try again later, pay from another account, go into overdraft as the account allows, or carry it to the next time. On a flow's page, **Edit**, **Pause**, **Resume** and **Delete** each open a page; an edit can rename it, and a time, end date, number of times or category you empty is gone. One that comes from a job, a lease or a loan says so on its page, and is changed there. Rent you pay under a lease also has **End the lease**, which gives notice: the lease ends today. An invoice billed to you, or to a business you run, has **Pay now**, except one that a business of yours or your household's sent to a business you run that someone else holds a share of, whose money never pays it; otherwise it's paid on its due date if the money is there.
 - **Jobs**: a job's page shows its pay, schedule, next payday, gross pay each payday, the hours worked, the last paycheck, its **Deductions** (with taxes, in the full books) and **Pay goes to**. From Money 3, **Quit** leaves it.
-- **Businesses**: a business you own or run. Its page shows its profit, where it trades (**Trades at**), its **Accounts**, its owners, its books (revenue, expenses, payroll, taxes and profit), month by month, its sales, its invoices, its payroll and its taxes. From Money 3, if you manage it, its buttons are **Hire** (someone you know), **Issue an invoice** (to someone you know or someone outside by name; its due date follows the business's own terms unless you give one), **Owner's draw**, and **Pay out profit** by share (with no amount, its profit since the last payout). A job on its payroll opens a page with **Raise** and **Let go**, and an invoice row opens **Void**, or **Pay** for one billed to you. If you own a share, **Your share of its profit goes to** opens a page where you say where it goes (reinvested, to one of your accounts, or to the usual place), and where investments run, **Sell a stake** sells part of it to someone you know or an outside buyer. Its **Accounts** are the ones you hold among its own and, from Money 3 if you manage it, the rest of them, its loan too: each opens its page, where you set its autopay, handle its cards and set up a standing payment from it, though **Pay**, **Transfer** and the cash buttons still take a role of your own on the account. Any others are counted, not named.
+- **Businesses**: a business you own or run. Its page shows its profit, where it trades (**Trades at**), its **Accounts**, its owners, its books (revenue, expenses, payroll, taxes and profit), month by month, its sales, its invoices, its payroll and its taxes. From Money 3, if you manage it, its buttons are **Hire** (someone you know; running it for others without a share of it, not you or your household), **Issue an invoice** (to someone you know or someone outside by name; its due date follows the business's own terms unless you give one), **Owner's draw** (for an owner or a joint owner, never from a corporation), and **Pay out profit** by share (with no amount, its profit since the last payout). A job on its payroll opens a page with **Raise** and **Let go** (only **Let go** for your own job or your household's at a business you run for others without a share of it), and an invoice row opens **Void**, or **Pay** for one billed to you. If you own a share, **Your share of its profit goes to** opens a page where you say where it goes (reinvested, to one of your accounts, or to the usual place), and where investments run, **Sell a stake** sells part of it to someone you know or an outside buyer. Its **Accounts** are the ones you hold among its own and, from Money 3 if you manage it, the rest of them, its loan too: each opens its page, where you set its autopay, handle its cards and set up a standing payment from it, though **Pay**, **Transfer** and the cash buttons still take a role of your own on the account. Any others are counted, not named. Money you only manage pays for the business, never for you: a standing payment from it, or falling back on it, can't go to you, your household or anything of yours (though a business you own outright may pay your other businesses), nor, unless you hold a share of the business, into one of its accounts you hold a card on; a loan's autopay draws only on the business's own money.
 - **Investments**: what you hold, at its price now. A holding's page shows its worth, cost and gain (and its lots in the full books), an option's strike and expiry, and **Distributions go to**, which says where its payouts go (reinvested, to an account, or to the usual place). Where investments run for you (from Money 4), the holding's page has **Buy more** and **Sell** (all of it when you give no amount), and the Investments page has **Buy something new** from what's on the market. A buy says which account pays for it and a sale where its money goes; by default, that's the account it's held in, else your usual account. Where options run, a buy can be a call or a put with its strike and expiry, and **Exercise** takes the contracts you choose (all of them by default) at the strike: a call's strike is paid from the account you pick, and a put's is paid into it.
-- **Properties**: what you own, and what's for sale. A property's page shows its value, your share, your equity, its mortgage, **Rent goes to** (which of your accounts the rent lands in), its leases and its running costs (tax, insurance, upkeep); one for sale that isn't yours shows only its listing: its value, where it is when you know the place, and its asking price. From Money 3, **Let it** starts a lease with a tenant you know, a lease row opens **End the lease** (the tenants of a managed property come and go on their own), and **Sell** sells it (its mortgage is paid off from the price first). A property for sale has **Buy**, paid from the account you pick, with a down payment; what the down payment leaves is a mortgage, over the term you pick under **Mortgage over** (30, 20 or 15 years, the terms lenders offer in the Modern US data). The mortgage is a lender's, as if you had applied for it: it sets the rate by your credit, lends no more than the property is worth, and wants at least 3 % down; if it says no, nothing is bought. The mortgage pays the sellers, and what they owed on it is paid off first.
+- **Properties**: what you own, and what's for sale. A property's page shows its value, your share, your equity, its mortgage, **Rent goes to** (which of your accounts the rent lands in), its leases and its running costs (tax, insurance, upkeep); one for sale that isn't yours shows only its listing: its value, where it is when you know the place, and its asking price. From Money 3, **Let it** starts a lease with a tenant you know, a lease row opens **End the lease** (the tenants of a managed property come and go on their own), and **Sell** sells it (its mortgage is paid off from the price first). A property for sale has **Buy**, paid from the account you pick, with a down payment; what the down payment leaves is a mortgage, over the term you pick under **Mortgage over**, from the terms the world's lenders offer (30, 20 or 15 years in the Modern US data, 30 years where a world sets none), with the usual one picked to start. The mortgage is a lender's, as if you had applied for it: it sets the rate by your credit, lends no more than the property is worth, and wants at least 3 % down; if it says no, nothing is bought. The mortgage pays the sellers, and what they owed on it is paid off first.
 - **Credit**: your score with its band, on a meter from 300 to 850 (its history, what makes it and your report in the full books), and the credit you could apply for, each with its rate; an offer's row opens its **Apply** page.
-- **Household**: what the shared costs come to a month, who you share a home with and each one's share, the shared accounts and the shared costs.
+- **Household**: what the shared costs come to a month, who you share a home with and each one's share, the shared accounts and the shared costs, each opening its page, which offers changes only where standing payments run for you.
 
 A holding's **Held in** and a property's **Mortgage** open that account's page.
 
-Every control here is something your character does: it plays as your next turn, like an action from the Actions sheet, and the reply narrates it. Your role on an account decides what you can do with it: an owner or a joint owner spends from it and manages it, a custodian or a trustee spends from it and manages it but its worth isn't theirs, a beneficiary sees it and counts its worth but can't spend it, and an authorized user spends with a card but manages nothing. If you own or run a business, you also manage its accounts by that role: you set up and change their standing payments, set their autopay and handle their cards, though you spend the business's money for yourself only with a role of your own on the account, such as an authorized user's card. Working there gives you no say over its money.
+Every control here is something your character does: it plays as your next turn, like an action from the Actions sheet, and the reply narrates it. Your role on an account decides what you can do with it: an owner or a joint owner spends from it and manages it, a custodian or a trustee spends from it and manages it but its worth isn't theirs, a beneficiary sees it and counts its worth but can't spend it, and an authorized user spends with a card but manages nothing. If you own or run a business, you also manage its accounts by that role: you set up and change their standing payments, set their autopay and handle their cards, though you spend the business's money for yourself only with a role of your own on the account, such as an authorized user's card. Money you only manage pays for whom it's for, never for you. That's a business's or a trust's money you hold no spending role on, and the business or trust paying as itself, whatever your role on it. A standing payment from it, or falling back on it, can't go to you, anyone in your household, a business or a trust one of you owns or benefits from (or one that those own in turn), or an account one of those counts as theirs, nor to someone outside typed as your name or your household's, in any capitals or spacing. Unless some of the money is yours, it can't go into an account you can spend from yourself either (with an authorized user's card, or as its custodian or trustee), even one that's someone else's. It still pays whom it's for, such as a trust's beneficiary, even one in your household. Money that's wholly yours, a business you own outright, pays your other businesses and trusts too, though never you or anyone in your household: what you take out for yourself goes by a draw or a salary. The hub leaves out what it can't pay, and says so on the page when a name you type is yours or your household's. Working there gives you no say over its money.
 
 ### People
 
@@ -57553,7 +58004,7 @@ Tap someone for their person sheet: where they are, or **Last seen** (from Cast 
 
 **Story** has three tabs.
 
-- **Quests**: quests, puzzles, secrets and agendas, sorted into **Active**, **Done** and **Failed**, each row with its stage and its objectives (n of m). Tap one for its quest sheet: where it stands (its stage and cue), its objectives, what you've learned, and its hints: **Show a hint**, then **Show another hint**, one at a time. Only what you know is shown.
+- **Quests**: quests, puzzles, secrets and agendas, sorted into **Active**, **Done** and **Failed**, each row with its stage and its objectives (n of m). Tap one for its quest sheet: where it stands (its stage and cue), its objectives, what you've learned, and its hints: **Show a hint**, then **Show another hint**, one at a time. Only what you know is shown. To answer a puzzle, type it ("the code is 1887"); while more than one is open, say which in words from its row or its sheet, or the answer is turned down and doesn't count as a try.
 - **Journal**: a running list of what changed, newest first, including the full list behind every Montage, plus notes about changes the engine didn't apply and why. It lists what was applied: a change you undid, or one a later switch dropped, isn't shown as made. A group of changes dropped together (a purchase and its payment) is one note, worded like its Keep report row, with "(2 linked changes)" when the group has more than one change. A turn's entry lists the same lines as its change chip, at most 8; when more exist, money, quest and signal lines are kept and routine ones (activities, other people's moves, needs) go first. Filter by **All**, **Notes & montages** or **Not applied**. **Save to lore…** keeps the latest reply, or an excerpt you select or paste, as a lore entry for the world (see [World lore](#world-lore)).
 - **Calendar**: the date and the clock, today's holidays and what is coming up, with **Pause clock** / **Resume clock** and **Timelapse…**. This chat's time controls are in GM mode, and the button at the bottom, **This chat's time controls are in GM → This chat**, takes you there (see [Time controls](#time-controls)).
 
@@ -57716,7 +58167,7 @@ A classification or tag you set here holds in this chat only, over what the worl
 
 ### Everyone else's money
 
-**Money** shows anyone's money: pick a person, a business, a trust or a household from **Whose money**, a list that gives each one's kind and Money level under their name (with a search box when there are more than 8), and their money hub opens under it at their own Money level, as yours does in Play, with the GM's controls in place of the player's actions. Its pages open over the hub, each with a back button, and Escape goes back too. On an account's page, **Add money** and **Take money** make a correction against an outside account, so the books still balance; **Status** sets it to open, frozen, collections, charged off, closed, paid off or matured; the **Autopay** row sets how it pays itself; **Account fields** holds every field the account declares, each with its edit button; and **Close** closes an account that holds and owes nothing (its cards are cancelled), and otherwise says why it can't. A hold's row opens its **Release** page, to release it early, and a card's page has its **Card state** (active, frozen, lost or cancelled) and **Card fields**. A standing payment's page can edit it (its name too), set its status (paused, ended and so on) or delete it, and **New standing payment or one-off** adds one. A job can be ended (**End the job**) or edited, and **Add a job** gives the person a new one, from one of the world's businesses picked by name or **An outside employer (type the name)**. An invoice's state can be set, and a holding's price too (**Set its price**, for securities, funds, crypto and other assets: an option follows its underlying). Where a holding's payouts, a property's rent or an owner's share of a business's profit go can be set for the person at any level, **Add a property** gives them one of their own at a value, and **Add a member** and **Remove a member** change a household (from Money 3, **Add to a household** puts a person who has none in one). Jobs, Properties and Household have their rows for this even while they're empty, once the person has money to show. A person whose accounts haven't been opened yet shows the balances the world gives them to start with. None of this reaches your chat: other people's paydays and bills never appear in your chips, Journal or Montage, and their declines never stop your timelapse.
+**Money** shows anyone's money: pick a person, a business, a trust or a household from **Whose money**, a list that gives each one's kind and Money level under their name (with a search box when there are more than 8), and their money hub opens under it at their own Money level, as yours does in Play, with the GM's controls in place of the player's actions. Its pages open over the hub, each with a back button, and Escape goes back too. On an account's page, **Add money** and **Take money** make a correction against an outside account, so the books still balance; **Status** sets it to open, frozen, collections, charged off, closed, paid off or matured; the **Autopay** row sets how it pays itself, from its debtor's own accounts whichever party's page it was opened from; **Account fields** holds every field the account declares, each with its edit button; and **Close** closes an account that holds and owes nothing (its cards are cancelled), and otherwise says why it can't. A hold's row opens its **Release** page, to release it early, and a card's page has its **Card state** (active, frozen, lost or cancelled) and **Card fields**. A standing payment's page can edit it (its name too), set its status (paused, ended and so on) or delete it, and **New standing payment or one-off** adds one. A job can be ended (**End the job**) or edited, and **Add a job** gives the person a new one, from one of the world's businesses picked by name or **An outside employer (type the name)**. An invoice's state can be set, and a holding's price too (**Set its price**, for securities, funds, crypto and other assets: an option follows its underlying). Where a holding's payouts, a property's rent or an owner's share of a business's profit go can be set for the person at any level, **Add a property** gives them one of their own at a value, and **Add a member** and **Remove a member** change a household (where households run for them, from Money 3 unless the world switches them, **Add to a household** puts a person who has none in one). Jobs, Properties and Household have their rows for this even while they're empty, once the person has money to show (Household only where households run: switched off, no household shows, theirs included). A person whose accounts haven't been opened yet shows the balances the world gives them to start with. None of this reaches your chat: other people's paydays and bills never appear in your chips, Journal or Montage, and their declines never stop your timelapse.
 
 ### This chat
 
@@ -58035,7 +58486,7 @@ Each character remembers in four layers: a **witness log** of what they saw happ
 - **Near refresh**: when they come into the scene or it changes; when the latest message or reply names them; every so many turns; when their mind is so many game minutes old. Each number can be turned off.
 - **Far refresh**: every so many game minutes, or never.
 - **Memory notes after the reply**: a switch for each level (**Live characters who heard you**, and so on) that gets the memory step. On a turn that takes you somewhere else, the people you leave remember it, and the people you meet there don't, since they weren't there to hear it.
-- **Advanced: the Minds section budget and time skips**, folded away: **Minds section budget (tokens)**, the narrator's Minds section's own budget, apart from the section budget, so minds never crowd out Scene or People; and under **Time skips**, **Beats a skip may stop at** and **Minds at each beat**, either of which can be **no limit**.
+- **Advanced: the Minds section budget and time skips**, folded away: **Minds section budget (tokens)**, the narrator's Minds section's own budget, apart from the section budget, so minds never crowd out Scene or People (when the minds don't all fit, the characters lowest on the ladder are left out of it first, and the Stance section tells of them instead); and under **Time skips**, **Beats a skip may stop at** and **Minds at each beat**, either of which can be **no limit**.
 
 Two sections are there whether minds are on or off:
 
