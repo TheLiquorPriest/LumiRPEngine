@@ -203,14 +203,16 @@ export function replaceCard(ctx: EffectContext, who: EntityId, card: EntityId): 
 /**
  * What's wrong with a credit account's autopay drawing on `from` when `who` sets it (DESIGN
  * §25.1), or null: an account that pays and isn't credit, which `who` may spend from or manages,
- * and which the account's debtor may spend from. So a business's loan pays from the business's
- * money, and a manager's own card or loan from their own.
+ * and which is the account's debtor's own money: theirs to spend, or theirs by its worth, as a
+ * child's savings is the child's though their custodian spends it. So a business's loan pays from
+ * the business's money, a manager's own card or loan from their own, and a custodial card from the
+ * custodial money.
  */
 export function autopaySourceProblem(ctx: ReadContext, who: EntityId, account: EntityId, from: EntityId): Rejection | null {
   const t = traitsOf(ctx, from);
   if ((!canSpend(ctx.state, from, who) && !managesAccount(ctx, from, who)) || !t?.pays || t.liability) return reject("bad_account", `${labelOf(ctx, who)} can't pay from ${labelOf(ctx, from)}`);
   const debtors = debtorsOf(ctx.state, account);
-  if (!debtors.some((d) => canSpend(ctx.state, from, d))) return reject("bad_account", `${labelOf(ctx, account)} is paid from ${labelOf(ctx, debtors[0] ?? who)}'s own money, not from ${labelOf(ctx, from)}`);
+  if (!debtors.some((d) => canSpend(ctx.state, from, d) || rightsOf(ctx.state, from, d)?.worth === true)) return reject("bad_account", `${labelOf(ctx, account)} is paid from ${labelOf(ctx, debtors[0] ?? who)}'s own money, not from ${labelOf(ctx, from)}`);
   return null;
 }
 
@@ -276,17 +278,18 @@ export function mayPayFrom(ctx: ReadContext, who: EntityId, from: string): boole
 }
 
 /**
- * Whether a payment to `to` would be for `who`: to them, an account they hold, their household or
- * an account it holds, or an outside payee typed as any of their own: its key (`payeeKey`) is their
- * id's or their name's, or their household's ("Jordan Ellis", " POV "). The hub refuses by the
- * same keys.
+ * Whether a payment to `to` would be for `who`: to them, an account whose worth is theirs, their
+ * household or an account whose worth is its, or an outside payee typed as any of their own: its
+ * key (`payeeKey`) is their id's or their name's, or their household's ("Jordan Ellis", " POV ").
+ * The hub refuses by the same keys. A role on an account that doesn't count its worth (an
+ * authorized user's card on the business's own account) doesn't make it theirs.
  */
 function paysFor(ctx: ReadContext, who: EntityId, to: string): boolean {
   const household = householdOf(ctx, who);
   const theirs = (party: string): boolean => party === who || party === household;
   const id = to.startsWith(EXTERNAL_ACCOUNT_PREFIX) ? to.slice(EXTERNAL_ACCOUNT_PREFIX.length) : to;
   if (theirs(id)) return true;
-  if (own(ctx.state.entities, id)?.kind === "account") return holdersOf(ctx.state, id).some(theirs);
+  if (own(ctx.state.entities, id)?.kind === "account") return holdersOf(ctx.state, id).some((h) => theirs(h) && rightsOf(ctx.state, id, h)?.worth === true);
   const key = payeeKey(id);
   return key !== "" && [who, household].some((p) => p !== null && (key === payeeKey(p) || key === payeeKey(own(ctx.state.entities, p)?.name ?? "")));
 }
