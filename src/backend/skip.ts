@@ -19,6 +19,7 @@ import { optionalQuery, own } from "../engine/pack-kit";
 import type { Registry } from "../engine/registry-impl";
 import { allRules } from "../engine/rules";
 import { isGone, kindIs, placeOfEntity } from "../engine/scope";
+import { ranTo } from "../engine/simulate";
 import type { WorldState } from "../engine/state";
 import type { InterpretOutput } from "../engine/steps";
 import { fightHoldsClock, TimelapseRun, type SkipRecord } from "../engine/time";
@@ -47,6 +48,11 @@ const RANK = { plan: 1, invitation: 2, appointment: 3, story: 4, money: 5, model
 export interface ScannedSkip {
   from: number;
   to: number;
+  /**
+   * Beats lie after it: the skip's start, or how far the clock had run before a ✎ fix set it back,
+   * since everything up to there already happened and no mind thinks there again (L48).
+   */
+  after: number;
   beats: Beat[];
 }
 
@@ -55,7 +61,8 @@ export interface ScannedSkip {
  * Live and Near characters that involve it (where the planner lays them), and, from a scratch run of
  * the skip, invitations to it, story moments (a track changing stage, a time rule, a rule that
  * interrupts or tells a beat) and its money (paydays, bills, statements, declines). Only up to where
- * the skip would end on its own. Null when the timelapse can't run.
+ * the skip would end on its own, and only past how far the world has run (`ranTo`). Null when the
+ * timelapse can't run.
  */
 export function scanBeats(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, intent: InterpretOutput, runSeed: string): ScannedSkip | null {
   const { target, opts } = timelapseOptions(intent, runSeed);
@@ -70,8 +77,9 @@ export function scanBeats(reg: Registry, world: WorldDoc, state: Readonly<WorldS
   const nameOf = (id: EntityId): string => own(state.entities, id)?.name ?? id;
   const person = (id: EntityId): boolean => id !== pov && kindIs(reg, world, own(state.entities, id)?.kind ?? "", "person");
   const beats: Beat[] = [];
+  const after = Math.max(run.from, ranTo(state));
   const add = (at: number, reason: string, rank: number, who: EntityId[]): void => {
-    if (at > run.from && at <= end) beats.push({ at, reason, source: "scan", who, rank });
+    if (at > after && at <= end) beats.push({ at, reason, source: "scan", who, rank });
   };
   const appointments = own(state.entities, pov)?.fields.appointments;
   for (const raw of Array.isArray(appointments) ? appointments : []) {
@@ -104,7 +112,7 @@ export function scanBeats(reg: Registry, world: WorldDoc, state: Readonly<WorldS
       if (rule && ("at" in rule.on || rule.interrupt === true || rule.beat !== undefined)) add(clock, `the rule ${rule.id}`, RANK.story, []);
     } else if (e.type === ENGINE_EVENTS.signal && "data" in e && e.data.entity === pov && (e.data.class === "bill" || e.data.class === "decline")) add(typeof e.data.at === "number" ? e.data.at : clock, `the player character's money: ${String(e.data.text ?? e.data.class)}`, RANK.money, []);
   }
-  return { from: run.from, to: run.to, beats };
+  return { from: run.from, to: run.to, after, beats };
 }
 
 /** Beats at the same minute as one (its names together, the weightiest reason); then the cap, by weight and time; in time order. */
@@ -176,7 +184,7 @@ async function proposedBeats(deps: SkipDeps, input: SkipInput, state: Readonly<W
   for (const b of proposals.slice(0, 5)) {
     if (!isRecord(b) || typeof b.at !== "string" || typeof b.reason !== "string") continue;
     const at = localTime(input.world, scanned.from, b.at);
-    if (at !== null && at > scanned.from && at <= scanned.to) out.push({ at, reason: b.reason.replace(/\s+/g, " ").trim().slice(0, MIND_TEXT_CAPS.reason), source: "model", who: [], rank: RANK.model });
+    if (at !== null && at > scanned.after && at <= scanned.to) out.push({ at, reason: b.reason.replace(/\s+/g, " ").trim().slice(0, MIND_TEXT_CAPS.reason), source: "model", who: [], rank: RANK.model });
   }
   return out;
 }

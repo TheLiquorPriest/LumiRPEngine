@@ -141,6 +141,8 @@ const EVERY_TYPE: LedgerEvent[] = [
   { type: "spawn", entity: { id: "coin", kind: "item", name: "Coin", tier: "background", fields: {}, relations: [] } },
   { type: "stage", track: "heist", to: "on" },
   { type: "clock", minutes: 5, cause: "tick" },
+  { type: "engine.rewind", data: { minutes: 5 } },
+  { type: "clock", minutes: 5, cause: "tick" },
   { type: "materialize", entity: "dev", domain: "gear", generatorVersion: 1, tablesRevision: "t", events: [{ type: "set", entity: "dev", field: "kit", value: "rope" }] },
   { type: "timelapse", from: 0, to: 60, target: { type: "duration", minutes: 60 }, stoppedBy: null, segment: 0 },
   { type: "engine.fired", data: { rule: "closing_time" } },

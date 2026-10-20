@@ -3,7 +3,7 @@
 
 import { describe, expect, test } from "bun:test";
 import { fixRequest, paletteRequest } from "../../src/frontend/requests";
-import type { FixTarget, StateView } from "../../src/shared/state-view";
+import type { FieldFixTarget, StateView } from "../../src/shared/state-view";
 import { Rig } from "../support/rig";
 import { toChain } from "../../src/backend/ledger-io";
 import { POV } from "../support/test-pack";
@@ -213,7 +213,7 @@ describe("HUD ✎ fixes for weather and scene type", () => {
     const chatId = rig.host.createChat("Morning.");
     rig.body(await rig.send({ type: "lre.world", op: "attach", worldId, chatId }));
     const view = () => rig.rt.view(chatId, rig.host.userId);
-    const fixTo = async (target: FixTarget | undefined, value: string) => {
+    const fixTo = async (target: FieldFixTarget | undefined, value: string) => {
       if (!target) throw new Error("no fix target");
       rig.body(await rig.send(fixRequest(target, value, chatId)));
     };

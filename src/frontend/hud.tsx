@@ -18,9 +18,9 @@ import { hudMode, isMobile } from "./layout";
 import { timeMarker } from "./requests";
 import { useSelect } from "./store";
 
-type FixKey = "place" | "weather" | "cash" | "scene";
+type FixKey = "time" | "place" | "weather" | "cash" | "scene";
 
-const FIX_LABEL: Record<FixKey, string> = { place: "Place", weather: "Weather", cash: "Cash", scene: "Scene type" };
+const FIX_LABEL: Record<FixKey, string> = { time: "Time", place: "Place", weather: "Weather", cash: "Cash", scene: "Scene type" };
 
 export function cashText(cash: HudView["cash"]): string | null {
   if (!cash) return null;
@@ -215,7 +215,7 @@ function WorldDetails(props: { view: StateView; hud: HudView; onLeave(next: () =
     <div ref={root} class="lre-chat-world" data-lre-world>
       <div class="lre-chat-worldlist">
         <List>
-          <ListRow icon={paused ? "pause" : "clock"} title={<span class="lre-num">{clockText(hud)}</span>} subtitle={paused ? `${hud.clock.dayPart} · clock paused` : hud.clock.dayPart} />
+          <ListRow icon={paused ? "pause" : "clock"} title={<span class="lre-num">{clockText(hud)}</span>} subtitle={paused ? `${hud.clock.dayPart} · clock paused` : hud.clock.dayPart} value={fix("time")} />
           <ListRow icon="pin" title={hud.place?.name ?? "—"} subtitle="Place" value={fix("place")} />
           {view.scene ? <ListRow icon="layers" title={humanize(view.scene.sceneType)} subtitle={view.scene.elapsed > 0 ? `Scene · last turn ${formatMinutes(view.scene.elapsed)}` : "Scene"} value={fix("scene")} /> : null}
           <ListRow icon="cloud" title={hud.weather ?? "—"} subtitle="Weather" value={fix("weather")} />

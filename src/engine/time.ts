@@ -1,26 +1,27 @@
 // Time progression (DESIGN §9.2 Time, D29): the per-turn elapsed time, time controls, Timelapse
-// with its interrupt policy and unit cap, Speed through, the `time.advance` channel and the
-// Montage. Deterministic by default: nothing here needs a model call.
+// with its interrupt policy and unit cap, Speed through, the `time.advance` channel, the clock's ✎
+// fix and the Montage. Deterministic by default: nothing here needs a model call.
 
 import type { JsonObject, JsonValue } from "../shared/json";
 import { isRecord } from "../shared/json";
+import { hashParts } from "../shared/hash";
 import type { EntityId, InterruptClass, InterruptPolicy, SceneTypeId } from "../shared/ids";
 import { heldBy } from "../shared/finance";
 import { INTERRUPT_CLASSES } from "../shared/ids";
 import type { LedgerEvent, TimelapseEvent, TimelapseTarget } from "../shared/ledger";
 import type { WorldDoc } from "../shared/world";
-import { calendarOf, dateAt, formatClock, MINUTES_PER_DAY, nextTimeOfDay, shortestSlot, slotIndexAt, slotStart } from "./calendar";
+import { calendarOf, clockOfStamp, dateAt, formatClock, MINUTES_PER_DAY, nextTimeOfDay, placeOffset, shortestSlot, slotIndexAt, slotStart } from "./calendar";
 import { ENGINE_EVENTS, readEngineSlice, signalOf, type Signal } from "./engine-pack";
 import type { ReadContext, Rejection } from "./registry";
 import type { Registry } from "./registry-impl";
 import { allSchedules, nextStartFor, scheduleOwners } from "./schedules";
 import { bandOf, fieldDef, placeOfEntity } from "./scope";
-import { advance, ALL_NOTE, lod1Agents, type AdvanceResult } from "./simulate";
+import { advance, ALL_NOTE, coarsen, lod1Agents, type AdvanceResult } from "./simulate";
 import type { WorldState } from "./state";
 import { optionalQuery, own } from "./pack-kit";
 import { playerEventVisible, playerKnows } from "./player-events";
 import { canSeeField } from "./visibility";
-import type { Working } from "./working";
+import { Working } from "./working";
 import { clampScale, clampThreshold, clampTick, clampUnitCap, TIME_LIMITS } from "./time-limits";
 
 export const DEFAULT_SCENE_TYPE = "conversation";
@@ -464,6 +465,40 @@ export function applyTimeAdvance(reg: Registry, w: Working, minutes: number, opt
     return { applied: false, reason: "unit_cap", chip };
   }
   return { applied: true, reason: null, chip: null };
+}
+
+// ---------------------------------------------------------------- the clock's ✎ fix
+
+/** A ✎ fix of the clock as the ledger records it: its events (none when the clock already reads that time), or why it can't. */
+export type ClockFix = { events: LedgerEvent[] } | Rejection;
+
+/**
+ * The ✎ fix of the clock (DESIGN §9.2, §12): the clock set to `local`, a date and time of day in the
+ * world's calendar (`YYYY-MM-DD HH:MM`) at the POV's place, as the HUD reads it. Calendar & time on.
+ * - Later: the time passes as an applied `time.advance` to then does (L28): the interval run whole
+ *   with every interrupt class at `note`, and no Montage. A fight holds the clock, as it does for a
+ *   narrated skip, and past the unit cap nothing applies: a Timelapse gets there in steps. The
+ *   events are recorded as a timelapse's are, coarsened, and as one unit kept or dropped whole.
+ * - Earlier: the clock goes back (`engine.rewind`), never before the story starts. Nothing that ran
+ *   up to where it stood is undone, and none of it runs again (L48).
+ */
+export function clockFix(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, local: string, runSeed: string): ClockFix {
+  if (reg.context(world, state).levelOf(world.pov, "calendar") < 1) return { code: "calendar_off", reason: "Calendar & time is off" };
+  const at = clockOfStamp(calendarOf(world), local);
+  if (at === null) return { code: "bad_time", reason: "that isn't a date and time of day in this world's calendar (YYYY-MM-DD HH:MM)" };
+  // Local time at the POV's place, as the HUD shows it and typed time reads it.
+  const to = at - placeOffset(world, at, placeOfEntity(state, world.pov));
+  const w = new Working(reg, world, state);
+  if (to < state.clock) return w.apply({ type: ENGINE_EVENTS.rewind, data: { minutes: state.clock - to } }) ?? { events: [...w.events] };
+  const advanced = applyTimeAdvance(reg, w, to - state.clock, { runSeed, capMinutes: TIME_LIMITS.timelapseMinutes });
+  if (advanced.reason === "in_fight") return { code: "in_fight", reason: `${IN_FIGHT}, and its rounds take no clock time` };
+  if (advanced.reason === "unit_cap") return { code: "unit_cap", reason: "too much happens before then to run in one go; a Timelapse to that time gets there in steps" };
+  if (advanced.reason === "over_cap") return { code: "too_long", reason: `the clock moves on at most ${TIME_LIMITS.timelapseMinutes / MINUTES_PER_DAY} days at a time` };
+  if (!advanced.applied) return { events: [] };
+  const events = coarsen(reg, world, state, w.events);
+  if (events.length < 2) return { events };
+  const group = `time:${hashParts(JSON.stringify(events)).slice(0, 10)}`;
+  return { events: events.map((e) => ({ ...e, group })) };
 }
 
 // ---------------------------------------------------------------- speed through

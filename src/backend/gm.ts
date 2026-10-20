@@ -13,7 +13,7 @@ import { activeRecord } from "../engine/ledger/path";
 import { authorLines } from "../engine/player-events";
 import { readPass } from "../engine/read-pass";
 import type { Registry } from "../engine/registry-impl";
-import { appliedEvents } from "./view";
+import { appliedEvents, clockFixLine } from "./view";
 
 /** How many edits the GM view lists, newest first. */
 const GM_EDITS = 40;
@@ -29,7 +29,11 @@ export function buildGmView(core: LedgerCore, observed: readonly ChainMessage[],
     chain.forEach((m, i) => {
       const rec = m.isUser ? null : activeRecord(m, core.journal.tombstones);
       if (!rec) return;
-      for (const fix of appliedEvents(rec, fold, i).fixes) edits.push({ messageId: m.id, seq: fix.seq, lines: authorLines(registry, render.world, render.state, fix.events, 12) });
+      // A fix of the time leads with how it moved the clock, which no event line words.
+      for (const fix of appliedEvents(rec, fold, i).fixes) {
+        const clock = clockFixLine(fix.events);
+        edits.push({ messageId: m.id, seq: fix.seq, lines: [...(clock ? [clock] : []), ...authorLines(registry, render.world, render.state, fix.events, 12)] });
+      }
     });
     return {
       ...buildGmWorld(registry, render.world, render.state),

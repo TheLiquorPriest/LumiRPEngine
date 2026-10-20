@@ -314,6 +314,16 @@ export function monthName(cal: Calendar, month: number): string {
   return cal.system.monthNames[month - 1] ?? `M${month}`;
 }
 
+/**
+ * The calendar's months for a date typed in it (the clock's ✎, DESIGN §12): each one's name and its
+ * days, a Gregorian February's in a leap year; `gregorian` says the leap years apply.
+ */
+export function calendarMonths(cal: Calendar): { gregorian: boolean; months: { name: string; days: number }[] } {
+  const gregorian = cal.system === GREGORIAN;
+  // 2000 is a leap year; a custom calendar's months have the same days every year.
+  return { gregorian, months: Array.from({ length: cal.system.months }, (_, i) => ({ name: monthName(cal, i + 1), days: cal.system.monthLength(2000, i + 1) })) };
+}
+
 export function weekdayName(cal: Calendar, weekday: number): string {
   return cal.system.weekdayNames[weekday] ?? `D${weekday}`;
 }

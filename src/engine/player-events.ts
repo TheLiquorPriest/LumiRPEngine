@@ -39,6 +39,8 @@ function bookkeeping(type: string): boolean {
     [ENGINE_EVENTS.pause]: true,
     [ENGINE_EVENTS.beat]: true,
     [ENGINE_EVENTS.observed]: true,
+    // A fix of the time words how it moved the clock as a whole, never this event alone.
+    [ENGINE_EVENTS.rewind]: true,
     // The roll chip and the Outcome slot tell how a check was decided.
     [ENGINE_EVENTS.adjudged]: true,
     "castlife.decision": true,

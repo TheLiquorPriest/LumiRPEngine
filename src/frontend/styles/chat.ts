@@ -166,6 +166,7 @@ export const CHAT_CSS = `
 .lre .lre-chat-fix{display:flex;flex-direction:column;gap:var(--lre-s2);min-width:0;padding:var(--lre-s3);border:1px solid color-mix(in srgb,var(--lre-accent) 35%,transparent);border-radius:var(--lre-r-xl);background:var(--lre-card)}
 .lre .lre-chat-fix-head{display:inline-flex;align-items:center;gap:6px;font-size:var(--lre-fs-sm);font-weight:600;color:var(--lre-fg)}
 .lre .lre-chat-fix-head>.lre-icon,.lre .lre-chat-fix .lre-item>.lre-icon{color:var(--lre-accent-text)}
+.lre .lre-chat-fix-when{display:grid;grid-template-columns:repeat(auto-fit,minmax(8.5rem,1fr));gap:var(--lre-s2);min-width:0}
 
 .lre.lre-chat-mapframe{position:relative;width:100%;height:100%;overflow:hidden;border:1px solid var(--lre-border);border-radius:var(--lre-r-xl);background:var(--lre-bar-bg);box-shadow:var(--lre-shadow-lg)}
 .lre.lre-chat-mapframe.full{border:0;border-radius:0;box-shadow:none}

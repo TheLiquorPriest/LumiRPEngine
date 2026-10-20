@@ -475,8 +475,14 @@ export class MockBackend {
         this.result(reqId, "lre.fix", { pending: false });
         this.mutate((view) => {
           if (!view.hud) return;
+          // The clock's ✎: the pill reads the date and time set, as the backend's would.
+          if ("time" in message) {
+            view.hud.clock.label = message.time;
+            if (view.hud.fixes.time) view.hud.fixes.time.value = message.time;
+            return;
+          }
           if (message.field === "cash" && typeof message.value === "number") view.hud.cash = { cents: message.value };
-          const fix = Object.values(view.hud.fixes).find((f) => f?.entity === message.entity && f.field === message.field);
+          const fix = Object.values(view.hud.fixes).find((f) => f?.type !== "time" && f?.entity === message.entity && f.field === message.field);
           if (fix) fix.value = message.value;
           if (message.field === "place") {
             const option = view.hud.fixes.place?.options?.find((o) => o.value === message.value);

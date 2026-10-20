@@ -27,6 +27,7 @@ export const PLAY_CSS = `
 .lre-play-fixbtn{flex:none;display:inline-flex;width:var(--lre-tap);margin-right:calc(-1 * var(--lre-s2))}
 .lre-play-fixbtn>.lre-iconbtn{color:var(--lre-muted)}
 .lre-play-fixbtn>.lre-iconbtn:hover:not(:disabled){color:var(--lre-fg)}
+.lre-play-clock>.lre-play-fixbtn{margin-left:auto}
 .lre-play-fix{padding:var(--lre-s2) 0 var(--lre-s3)}
 .lre-play-none{margin:0;padding:var(--lre-s3);color:var(--lre-muted)}
 .lre-play-badges{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:var(--lre-s1)}

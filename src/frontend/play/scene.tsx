@@ -1,9 +1,9 @@
 // Play → Now, the hub, registered as the core Scene panel: the status banners; the
 // scene card (time and day part, place, scene type with the last turn's elapsed time, weather, cash,
-// each fixable value with its ✎); what needs you; the fight while one is on (Now's other panels);
-// who is here; the packs' glances; the quick actions. Opening someone here pushes their person
-// sheet, which observes them on opening (DESIGN §9.2); where no pack draws one, the row observes
-// them itself and shows People.
+// each fixable value, the time among them, with its ✎); what needs you; the fight while one is on
+// (Now's other panels); who is here; the packs' glances; the quick actions. Opening someone here
+// pushes their person sheet, which observes them on opening (DESIGN §9.2); where no pack draws one,
+// the row observes them itself and shows People.
 
 import { useEffect, useRef, useState } from "preact/hooks";
 import type { EntityId } from "../../shared/ids";
@@ -19,9 +19,9 @@ import type { PanelDef, PanelProps } from "../registry";
 import { NeedsYou, QuickActions, StatusBanners } from "./now";
 import { visiblePanels } from "./play";
 
-type FixKey = "place" | "weather" | "cash" | "scene";
+type FixKey = "time" | "place" | "weather" | "cash" | "scene";
 
-const FIX_LABEL: Record<FixKey, string> = { place: "Place", weather: "Weather", cash: "Cash", scene: "Scene type" };
+const FIX_LABEL: Record<FixKey, string> = { time: "Time", place: "Place", weather: "Weather", cash: "Cash", scene: "Scene type" };
 
 /** The weather's icon from its words; decorative, as the words say it. */
 function weatherIcon(weather: string): IconName {
@@ -136,8 +136,10 @@ function SceneCard(props: { state: StateView }) {
   const cash = hud ? cashText(hud.cash) : null;
   return (
     <section ref={card} class="lre-play-scene" aria-label="Where you are">
-      {hud ? (
-        <div class="lre-play-clock">
+      {hud && fixing === "time" && editor ? (
+        editor
+      ) : hud ? (
+        <div class="lre-play-clock" data-lre-fact="time">
           <span class="lre-play-time lre-num">{hud.clock.label}</span>
           <span class="lre-play-daypart">{hud.clock.dayPart}</span>
           {hud.clock.scale !== 1 ? <Badge tone="accent">{`${hud.clock.scale}× time`}</Badge> : null}
@@ -147,6 +149,7 @@ function SceneCard(props: { state: StateView }) {
               Clock paused
             </Badge>
           ) : null}
+          {fixes.time ? fixFor("time") : null}
         </div>
       ) : null}
       {fixing === "place" && editor ? (

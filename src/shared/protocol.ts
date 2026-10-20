@@ -113,13 +113,12 @@ export interface ViewOpenRequest extends Request<"lre.view.open"> {
   entity: EntityId | null;
 }
 
-/** A ✎ fix on the head: one typed `set` (`EditOp`), written as a `post` entry of kind `fix`. Locked fields are refused. */
-export interface FixRequest extends Request<"lre.fix"> {
-  chatId: ChatId;
-  entity: EntityId;
-  field: FieldId;
-  value: JsonValue;
-}
+/**
+ * A ✎ fix on the head, written as a `post` entry of kind `fix`: one typed `set` of a field
+ * (`EditOp`; locked fields are refused), or the clock set to `time`, a date and time of day in the
+ * world's calendar (`YYYY-MM-DD HH:MM`) at the POV's place, as the HUD reads it (DESIGN §9.2, §12).
+ */
+export type FixRequest = Request<"lre.fix"> & { chatId: ChatId } & ({ entity: EntityId; field: FieldId; value: JsonValue } | { time: string });
 
 /**
  * One typed edit (DESIGN §7 GM edits, §12 ✎ fixes). Each is checked against what it touches (a

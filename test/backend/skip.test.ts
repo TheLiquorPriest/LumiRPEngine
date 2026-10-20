@@ -11,7 +11,8 @@ import { calendarOf, clockAt, clockOfLocal, dateAt, formatHHMM, formatStamp } fr
 import { createRegistry } from "../../src/engine/registry-impl";
 import { ALL_NOTE } from "../../src/engine/simulate";
 import { placeOfEntity } from "../../src/engine/scope";
-import { replaySkip, runTimelapse } from "../../src/engine/time";
+import type { WorldState } from "../../src/engine/state";
+import { clockFix, replaySkip, runTimelapse } from "../../src/engine/time";
 import { timelapseIntent, turnStart } from "../../src/engine/turn";
 import { Working } from "../../src/engine/working";
 import { toChain } from "../../src/backend/ledger-io";
@@ -19,7 +20,7 @@ import { readRun } from "../../src/backend/runtime";
 import { capBeats, runSkip, scanBeats, type Beat, type BeatMinds } from "../../src/backend/skip";
 import { ALL_PACKS } from "../../src/packs/index";
 import { modernUsWorld } from "../packs/riverton";
-import { startState } from "../packs/support";
+import { fold, startState } from "../packs/support";
 import { decodeContextView } from "../../src/frontend/play/context";
 import { Rig } from "../support/rig";
 
@@ -395,6 +396,28 @@ describe("the beat scan and the beats cap", () => {
       ["2026-10-16 18:00", "a story moment: Settle in"],
       ["2026-10-16 18:00", "the rule siren"],
     ]);
+  });
+
+  test("after the clock's ✎ set it back, the scan finds no beat up to where it had stood: no mind thinks there again (L48)", () => {
+    const reg = createRegistry(ALL_PACKS);
+    const world = modernUsWorld("w", "R");
+    const cal = calendarOf(world);
+    const you = world.entities.you;
+    if (!you) throw new Error("no POV");
+    you.fields.appointments = [{ at: clockOfLocal(cal, "2026-10-19T15:00"), minutes: 60, place: "park", label: "Dentist" }];
+    const fixed = (state: WorldState, at: string): WorldState => {
+      const fix = clockFix(reg, world, state, at, "seed");
+      if ("code" in fix) throw new Error(fix.reason);
+      return fold(reg, world, state, fix.events);
+    };
+    const start = startState(world);
+    const back = fixed(fixed(start, "2026-10-20 00:00"), "2026-10-16 07:30");
+    const scan = scanBeats(reg, world, back, timelapseIntent({ type: "duration", minutes: 19 * 1440 }, ALL_NOTE), "seed");
+    if (!scan) throw new Error("no scan");
+    const mark = clockOfLocal(cal, "2026-10-20T00:00");
+    expect([scan.from, scan.after]).toEqual([back.clock, mark]);
+    expect(scan.beats.length).toBeGreaterThan(0);
+    expect(scan.beats.filter((b) => b.at <= mark || b.reason.includes("Dentist"))).toEqual([]);
   });
 
   test("the cap keeps the weightiest beats, earliest first among equals, each minute's beats as one, in time order", () => {

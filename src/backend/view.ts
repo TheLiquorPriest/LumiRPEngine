@@ -12,7 +12,8 @@ import type { CallMeterView, Chip, ControlsView, HudView, PaletteEntry, PaletteO
 import type { ActionDef, MapDisplay, WorldDoc } from "../shared/world";
 import { tableChoices } from "../shared/tables";
 import { checkView, policyOf } from "../engine/adjudication";
-import { calendarOf, dayPartAt, formatClock, placeOffset } from "../engine/calendar";
+import { calendarMonths, calendarOf, dayPartAt, formatClock, formatStamp, placeOffset } from "../engine/calendar";
+import { ENGINE_EVENTS } from "../engine/engine-pack";
 import { clockPaused, DEFAULT_SCENE_TYPE, ENGINE_SCENE_TYPES, placeSceneType, sceneType } from "../engine/time";
 import { identifiers } from "../engine/expr";
 import type { ChainMessage, FoldOutput } from "../engine/ledger/chain";
@@ -92,6 +93,9 @@ function hud(world: WorldDoc, state: WorldState, panels: Record<PanelId, JsonVal
   const weatherPanel = panels["weather.weather"] ?? panels["weather.now"];
   const weather = isRecord(weatherPanel) && typeof weatherPanel.label === "string" ? weatherPanel.label : null;
   const fixes: HudView["fixes"] = {};
+  // The clock's ✎ (DESIGN §12) sets a date and a time of day in the world's calendar, starting from
+  // now as the pill reads it, local to the POV's place; it needs the calendar, as a Timelapse does.
+  if (ctx.levelOf(pov, "calendar") >= 1) fixes.time = { type: "time", value: formatStamp(cal, state.clock, offset), ...calendarMonths(cal) };
   if (placeId) {
     // The ✎ offers the places the POV may see; a hidden one, even where it stands, is never offered.
     const options = Object.values(world.places).filter((p) => canSeePlace(ctx.registry, world, state, pov, p.id));
@@ -320,6 +324,22 @@ export function turnLines(registry: Registry, world: WorldDoc, state: Readonly<W
   return playerLines(registry, world, state, world.pov, events, 8);
 }
 
+/** How a ✎ fix of the time moved the clock, in words ("Clock moved on 2 h 15 min", "Clock set back 3 h"); null for a fix that moved none. */
+export function clockFixLine(events: readonly LedgerEvent[]): string | null {
+  let minutes = clockMinutes(events);
+  for (const e of events) if (e.type === ENGINE_EVENTS.rewind && "data" in e && typeof e.data.minutes === "number") minutes -= e.data.minutes;
+  return minutes > 0 ? `Clock moved on ${compactSpan(minutes)}` : minutes < 0 ? `Clock set back ${compactSpan(-minutes)}` : null;
+}
+
+/**
+ * A ✎ fix's or GM edit's lines, as its Corrected chip and its Journal line word them: how a fix of
+ * the time moved the clock first, then the changes the POV may see (`turnLines`).
+ */
+export function fixLines(registry: Registry, world: WorldDoc, state: Readonly<WorldState>, events: readonly LedgerEvent[]): string[] {
+  const clock = clockFixLine(events);
+  return [...(clock ? [clock] : []), ...turnLines(registry, world, state, events)];
+}
+
 /** An event's ref as a key, to match `Rec.undone` and the fold's drop notes. */
 function refKey(ref: EventRef): string {
   return ref.in === "events" ? `e:${ref.index}` : `p:${ref.seq}:${ref.index}`;
@@ -369,7 +389,7 @@ function turnNotes(chain: readonly ChainMessage[], fold: FoldOutput, core: Ledge
     if (minutes > 0 && fold.messages[i]?.fold !== "plain") lines.push(`${spanText(minutes)} passed`);
     if (lines.length > 0) out.push({ kind: "note", messageId: m.id, ref: null, text: lines.join(" · ") });
     for (const fix of applied.fixes) {
-      const fixed = turnLines(registry, world, state, fix.events);
+      const fixed = fixLines(registry, world, state, fix.events);
       if (fixed.length > 0) out.push({ kind: "fix", messageId: m.id, ref: { in: "post", seq: fix.seq, index: 0 }, text: fixed.join(" · ") });
     }
   });
@@ -527,7 +547,7 @@ function derivedChips(chain: readonly ChainMessage[], fold: FoldOutput, keepRepo
     if (lines.length > 0) chips.push({ id: `change:${m.id}:${m.swipeId}`, kind: "change", messageId: m.id, label: lines.length === 1 ? (lines[0] ?? "Changed") : `${lines.length} changes`, ...(lines.length > 1 ? { detail: lines.join("\n") } : {}), actions: [], expires: "next_send" });
     // Each ✎ fix or GM edit on the head: "Corrected …" with Undo, worded for the player (DESIGN §12).
     for (const fix of applied.fixes) {
-      const fixed = turnLines(registry, world, state, fix.events);
+      const fixed = fixLines(registry, world, state, fix.events);
       chips.push({ id: `fix:${m.id}:${m.swipeId}:${fix.seq}`, kind: "fix", messageId: m.id, label: "Corrected", detail: fixed.length > 0 ? fixed.join(" · ") : "something you haven't come across", actions: [{ id: "undo", label: "Undo", style: "danger" }], expires: "next_send" });
     }
     chips.push(...overdueChips(m.id, ctx, state, world));
