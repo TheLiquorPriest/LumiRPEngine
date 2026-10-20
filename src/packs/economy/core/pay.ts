@@ -567,9 +567,30 @@ export function moverOf(ctx: TableBooks, from: EntityId, to: EntityId): EntityId
 }
 
 /**
+ * Whether a party may use an account on one side of a payment, the one check the foundation and
+ * every module make: to pay `from` it, the account is open, the party may spend from it, and it
+ * isn't locked (a CD's or retirement account's money comes out only on its own terms); to pay
+ * `into` it, the account isn't closed and the party holds it, and it isn't a CD (its deposit is
+ * made when it opens). Null when it may.
+ */
+export function mayUse(ctx: ReadContext, party: EntityId, account: EntityId, side: "from" | "into"): Rejection | null {
+  const t = traitsOf(ctx, account);
+  if (own(ctx.state.entities, account)?.kind !== "account" || !t) return reject("missing_account", `there's no account ${labelOf(ctx, account)}`);
+  const status = statusOf(ctx.state, account);
+  if (side === "from") {
+    if (status !== "open") return reject("declined", `${labelOf(ctx, account)} is ${status.replace(/_/g, " ")}`);
+    if (!canSpend(ctx.state, account, party)) return reject("not_owner", `${labelOf(ctx, party)} can't spend from ${labelOf(ctx, account)}`);
+    return t.locked ? reject("locked", `${labelOf(ctx, account)} can't be drawn on here`) : null;
+  }
+  if (status === "closed") return reject("declined", `${labelOf(ctx, account)} is closed`);
+  if (rightsOf(ctx.state, account, party) === null) return reject("not_owner", `${labelOf(ctx, account)} isn't ${labelOf(ctx, party)}'s`);
+  return classOf(ctx, account) === "cd" ? reject("locked", `${labelOf(ctx, account)} takes nothing in after it opens`) : null;
+}
+
+/**
  * A posting between two accounts a party holds (a savings transfer, a card or loan payment). A
  * payment to credit pays at most what it owes (`cap`, or refused as an overpayment); money in a CD
- * or retirement account doesn't move out here.
+ * or retirement account doesn't move out here, and nothing moves into a closed account or a CD.
  */
 export function move(ctx: ReadContext, from: EntityId, to: EntityId, cents: number, memo: string, opts: { cap?: boolean; flow?: string; at?: number; unchecked?: boolean } = {}): LedgerEvent[] | Rejection {
   const s = ctx.state;
@@ -580,7 +601,8 @@ export function move(ctx: ReadContext, from: EntityId, to: EntityId, cents: numb
   const fromTraits = traitsOf(ctx, from);
   const toTraits = traitsOf(ctx, to);
   if (!fromTraits || !toTraits) return reject("missing_account", "both accounts must exist");
-  if (fromTraits.locked) return reject("locked", `${labelOf(ctx, from)} can't be drawn on here`);
+  const unusable = mayUse(ctx, party, from, "from") ?? mayUse(ctx, party, to, "into");
+  if (unusable) return unusable;
   let c = Math.round(cents);
   if (!(c > 0)) return reject("bad_amount", "the amount must be positive");
   if (toTraits.liability) {

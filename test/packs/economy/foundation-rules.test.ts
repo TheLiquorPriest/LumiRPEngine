@@ -320,3 +320,31 @@ describe("Custom toggles decide what the money view shows and how shares split",
     expect(finance(w).household).toBeNull();
   });
 });
+
+describe("one check decides which accounts a payment may use", () => {
+  // Done: the action went through and none of its effects was refused.
+  const act = (w: Working, action: string, params: JsonObject): boolean => {
+    const r = resolveAction(reg, w, { action, params }, createRng(`${action}:${JSON.stringify(params)}`));
+    return r.ok && r.rejected.length === 0;
+  };
+
+  test("nothing is moved or paid in cash into a closed account, where it couldn't come out", () => {
+    const w = setup();
+    expect(act(w, "move_money", { from: "savings", to: "checking", amount: w.state.accounts.savings ?? 0 })).toBe(true);
+    w.applyAll([{ type: "economy.status", data: { account: "savings", status: "closed" } }]);
+    expect(act(w, "move_money", { from: "checking", to: "savings", amount: 50_000 })).toBe(false);
+    expect(act(w, "deposit_cash", { account: "savings", amount: 1_000 })).toBe(false);
+    expect(w.state.accounts.savings ?? 0).toBe(0);
+  });
+
+  test("a CD takes nothing in after it opens, and a retirement account gives nothing out here but takes money in", () => {
+    const w = setup((world) => {
+      world.entities.cd = entity("cd", "account", { owners: [{ party: "you", role: "owner" }], product: "cd", opening: 100_000 });
+      world.entities.ira = entity("ira", "account", { owners: [{ party: "you", role: "owner" }], product: "retirement", opening: 500_000 });
+    });
+    expect(act(w, "move_money", { from: "checking", to: "cd", amount: 10_000 })).toBe(false);
+    expect(act(w, "move_money", { from: "ira", to: "checking", amount: 10_000 })).toBe(false);
+    expect(act(w, "move_money", { from: "checking", to: "ira", amount: 10_000 })).toBe(true);
+    expect([w.state.accounts.cd, w.state.accounts.ira]).toEqual([100_000, 510_000]);
+  });
+});

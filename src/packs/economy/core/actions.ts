@@ -18,7 +18,7 @@ import { decide } from "./credit";
 import type { OpenAccount } from "./module";
 import { reject, spendOf } from "./journal";
 import { availableOf, balance, bankSide, canSpend, classOf, external, holdersOf, productOf, rightsOf, statusOf, traitsOf, worldProducts } from "./model";
-import { accountFeature, asUnit, cardProblem, cardRoom, cardsOn, cashAccount, depositAccount, featureFor, isParty, posting, signal } from "./pay";
+import { accountFeature, asUnit, cardProblem, cardRoom, cardsOn, cashAccount, depositAccount, featureFor, isParty, mayUse, posting, signal } from "./pay";
 
 function money(ctx: ReadContext, cents: number): string {
   return formatMoney(cents, ctx.world.currency);
@@ -125,7 +125,10 @@ export function withdraw(ctx: ReadContext, who: EntityId, account: EntityId, raw
 export function deposit(ctx: ReadContext, who: EntityId, account: EntityId, raw: number): LedgerEvent[] | Rejection {
   const cents = Math.round(raw);
   if (!(cents > 0)) return reject("bad_amount", "the amount must be positive");
-  if (!rightsOf(ctx.state, account, who) || traitsOf(ctx, account)?.cash || traitsOf(ctx, account)?.locked) return reject("not_owner", `${labelOf(ctx, who)} can't pay cash into ${labelOf(ctx, account)}`);
+  const unusable = mayUse(ctx, who, account, "into");
+  if (unusable) return unusable;
+  // Cash goes into a bank account; a wallet or a locked account doesn't take it at a machine or a branch.
+  if (traitsOf(ctx, account)?.cash || traitsOf(ctx, account)?.locked) return reject("not_owner", `${labelOf(ctx, who)} can't pay cash into ${labelOf(ctx, account)}`);
   const wallet = cashAccount(ctx, who);
   if (!wallet || availableOf(ctx, wallet) < cents) return reject("declined", `${labelOf(ctx, who)} doesn't have ${money(ctx, cents)} in cash`);
   const p = productOf(ctx, account);
