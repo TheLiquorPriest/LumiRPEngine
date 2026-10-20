@@ -128,6 +128,18 @@ describe("castlife: characters' own plans", () => {
     const invites = w.events.flatMap((e) => (e.type === "castlife.invitation" && "data" in e ? [e.data] : []));
     expect(invites).toEqual([{ agent: "maya", place: "cafe", at: at(w, 0, "18:00"), text: "Maya Chen invites you to Daybreak Café at 18:00.", key: "maya:plan:p4" }]);
   });
+
+  test("a plan's block holds its place and activity for its span: a routine edge inside it doesn't take the NPC back", () => {
+    const w = riverton();
+    // Jordan's work starts at 08:00; the errand that must happen takes the time up to 08:30 from it.
+    record(w, [pin("jordan", "live"), planEdit("jordan", plan(w, "early", { kind: "errand", where: "bank", priority: 5, when: { from: at(w, 0, "07:45"), to: at(w, 0, "08:30") } }))]);
+    const seen: string[] = [];
+    for (const t of ["07:50", "08:10", "08:25", "08:40"]) {
+      lapse(w, at(w, 0, t));
+      seen.push(`${t} ${String(w.state.entities.jordan?.fields.place)}/${String(w.state.entities.jordan?.fields.activity)}`);
+    }
+    expect(seen).toEqual(["07:50 bank/errand", "08:10 bank/errand", "08:25 bank/errand", "08:40 office/work_shift"]);
+  });
 });
 
 describe("castlife: occasions", () => {

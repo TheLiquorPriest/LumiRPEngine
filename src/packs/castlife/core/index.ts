@@ -260,9 +260,11 @@ function acquainted(state: Readonly<WorldState>, a: EntityId, b: EntityId): bool
 /**
  * Someone takes up a block of their day (DESIGN §8): its place and its activity, unless a hold keeps
  * either, a fight under way keeps them (the combat pack's `combat.engaged`) or the POV's routine
- * can't take it there (stranded, or the place out of reach). Arriving where the POV is says so.
+ * can't take it there (stranded, or the place out of reach). Arriving where the POV is says so. A
+ * block of their own plan (`holdUntil`, its end) holds its place and activity for its span, as a
+ * trip does, so a routine's schedule edge inside it doesn't take them back (DESIGN §24.8).
  */
-function takeUp(ctx: ReadContext, who: EntityId, place: PlaceId | null, activity: string, at: number): LedgerEvent[] {
+function takeUp(ctx: ReadContext, who: EntityId, place: PlaceId | null, activity: string, at: number, holdUntil?: number): LedgerEvent[] {
   const out: LedgerEvent[] = [];
   const e = own(ctx.state.entities, who);
   if (!e || routineStays(ctx, who, place) || optionalQuery(ctx, "combat.engaged")?.(ctx, who) === true) return out;
@@ -271,6 +273,11 @@ function takeUp(ctx: ReadContext, who: EntityId, place: PlaceId | null, activity
     if (who !== ctx.world.pov && place === placeOfEntity(ctx.state, ctx.world.pov)) out.push({ type: ENGINE_EVENTS.signal, data: { class: "arrival", text: `${e.name} arrives.`, entity: who } });
   }
   if (!held(ctx.state, who, "activity", at) && e.fields.activity !== activity) out.push({ type: "set", entity: who, field: "activity", value: activity });
+  if (holdUntil !== undefined && holdUntil > at) {
+    const holds = objOf(e.fields.holds);
+    const kept = { ...holds, place: Math.max(numOf(holds.place, 0), holdUntil), activity: Math.max(numOf(holds.activity, 0), holdUntil) };
+    if (kept.place !== holds.place || kept.activity !== holds.activity) out.push({ type: "set", entity: who, field: "holds", value: kept });
+  }
   return out;
 }
 
@@ -352,8 +359,8 @@ function planMoments(ctx: ReadContext, who: EntityId, slot: SlotInfo): AgentInst
 
 /**
  * What an agent does at a plan moment: the invitation goes out, or they take up the block of their
- * day that holds from then (the plan's own at its start; after its end what follows, home when that
- * names no place).
+ * day that holds from then (the plan's own at its start, held for its span; after its end what
+ * follows, home when that names no place).
  */
 function atPlanMoment(ctx: ReadContext, who: EntityId, moment: AgentInstant): LedgerEvent[] {
   if (moment.key.startsWith("invite:")) {
@@ -362,7 +369,7 @@ function atPlanMoment(ctx: ReadContext, who: EntityId, moment: AgentInstant): Le
   }
   const block = dayPlan(ctx, who, dateAt(calendarOf(ctx.world), moment.at).dayIndex).blocks.find((b) => b.start <= moment.at && moment.at < b.end);
   if (!block) return [];
-  return takeUp(ctx, who, block.place ?? (moment.key.startsWith("end:") ? homeOf(ctx, who) : null), block.activity.startsWith("retrieve:") ? "errand" : block.activity, moment.at);
+  return takeUp(ctx, who, block.place ?? (moment.key.startsWith("end:") ? homeOf(ctx, who) : null), block.activity.startsWith("retrieve:") ? "errand" : block.activity, moment.at, block.option.startsWith("plan:") ? block.end : undefined);
 }
 
 /** Steps one LOD1 agent through one slot (Cast life ≥ 3): plan the day, live the block, settle their plans, needs, encounters, invitations; nothing for someone who doesn't act. */
@@ -389,7 +396,7 @@ function stepAgent(slot: SlotInfo, ctx: ReadContext, rngFor: (entity: EntityId) 
       if (Array.isArray(got)) out.push(...got, { type: ENGINE_EVENTS.note, data: { text: `${e.name} got ${own(ctx.state.entities, thing)?.name ?? thing} back.`, entity: who, visibility: "known_by" } });
     }
   }
-  out.push(...takeUp(ctx, who, block.place, block.activity.startsWith("retrieve:") ? "errand" : block.activity, slot.end), ...planOutcomes(ctx, who, slot));
+  out.push(...takeUp(ctx, who, block.place, block.activity.startsWith("retrieve:") ? "errand" : block.activity, slot.end, block.option.startsWith("plan:") ? block.end : undefined), ...planOutcomes(ctx, who, slot));
   if (level < 4) return out;
 
   // Needs: only the POV's are recorded (an NPC's follow their day's plan); it gets alerts when it is an agent.

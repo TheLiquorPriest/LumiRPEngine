@@ -1300,7 +1300,7 @@ The Cast life planner (§8) lays each character's own plans into their days and 
   Laying is a pure function of the plans and the authored commitments, never of the clock or of where anyone stands. A plan therefore lands at the same time however often, and from whatever timelapse segment, its day is planned.
 - **Living it:**
   - A plan's block starts and ends at its own minute, between slot steps: an agent process's moments (`ProcessDef.instants`), applied among the schedule edges in a turn and a timelapse, for an agent stepped through the slot before. Catch-up steps by slot.
-  - At the start the character goes to the plan's place (home for rest).
+  - At the start the character goes to the plan's place (home for rest), and holds its place and activity for the block's span, as a trip does: a routine's schedule edge inside it (work starting at 08:00 under an errand until 08:30) doesn't take them back.
   - After the end they take up whatever follows, going home when that names no place.
 - **Settling it:** at each slot step a `minds.plan` event marks a plan done once every block laid for it has passed. It marks one dropped once its window has passed with nothing laid: "no time for it" (routine, appointments or a trip left no room), or "routine only" for a Background character. Each records its own time, so a late catch-up settles it alike.
 - **What the player sees:** a plan's block shows its kind ("Errand", "Meeting someone", "A visit", "Work", "Rest", "Time out", "Busy") and "their own plan", never the plan's words, which are the character's private intent. The GM view shows the plan whole (§24.9).
