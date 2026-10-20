@@ -1288,21 +1288,21 @@ A timelapse turn (§9.2: the palette, a chip or typed time) is a **time skip** w
 
 ### 24.8 The planner
 The Cast life planner (§8) lays each character's own plans into their days and lives them; plans already recorded drive it whether minds are on or off, on the background lane too.
-- **Laying a plan.** A character's open plans (`minds.plans`, from a mind, the memory step or the GM) become blocks of their day:
+- **Laying a plan.** A character's plans (`minds.plans`, from a mind, the memory step or the GM) become blocks of their day: the open ones, and the settled ones for the times before they were settled. So a plan that's done keeps the day it had, with the needs it met (and the Cast timeline that shows it), and no other plan re-lays into a past it was cut from.
   - **A tight window** (at most twice what its kind takes) is the plan's own time.
-  - **A wider window** gets its kind's length (an errand 45 minutes, a meeting 90, a visit 120, work 240, rest 60, leisure 90, other 60). It goes at the first time in the window, within its kind's hours (errands 9 to 18, meetings 10 to 22, visits 10 to 21), that trips, appointments and, for a plan that doesn't take its time from routine, the routine leave free. The search covers the window's first 14 days.
+  - **A wider window** gets its kind's length (an errand 45 minutes, a meeting 90, a visit 120, work 240, rest 60, leisure 90, other 60). It goes at the first time in the window, within its kind's hours (errands 9 to 18, meetings 10 to 22, visits 10 to 21), that trips, appointments, the stronger plans and, for a plan that doesn't take its time from routine, the routine leave free. The search covers the window's first 14 days.
 - **Precedence:**
   - A plan takes its time from routine (work, school) when it is strong (priority 4 or 5), or, for a Live or Near character, ordinary (3) at a set time.
   - A Far character's routine bends only for strong plans, and a Background character follows routine only.
   - A plan that must happen (5) overrides appointments too.
   - Plans cut each other by priority, then age, and a trip overrides everything.
 
-  Laying is a pure function of the plans and the authored commitments, never of the clock or of where anyone stands. A plan therefore lands at the same time however often, and from whatever timelapse segment, its day is planned.
+  Laying is a pure function of the plans and the authored commitments, never of the clock or of where anyone stands. Every plan that can bear on the span asked about is laid with it (those whose windows reach it, and those whose windows reach theirs), so a plan lands at the same time however often, and from whatever timelapse segment, its day is planned.
 - **Living it:**
   - A plan's block starts and ends at its own minute, between slot steps: an agent process's moments (`ProcessDef.instants`), applied among the schedule edges in a turn and a timelapse, for an agent stepped through the slot before. Catch-up steps by slot.
   - At the start the character goes to the plan's place (home for rest), and holds its place and activity for the block's span, as a trip does: a routine's schedule edge inside it (work starting at 08:00 under an errand until 08:30) doesn't take them back.
   - After the end they take up whatever follows, going home when that names no place.
-- **Settling it:** at each slot step a `minds.plan` event marks a plan done once every block laid for it has passed. It marks one dropped once its window has passed with nothing laid: "no time for it" (routine, appointments or a trip left no room), or "routine only" for a Background character. Each records its own time, so a late catch-up settles it alike.
+- **Settling it:** at each slot step a `minds.plan` event marks a plan done once every block laid for it has passed. It marks one dropped once its window has passed with nothing laid: "no time for it" (routine, appointments, a stronger plan or a trip left no room), or "routine only" for a Background character. A plan cut away entirely is dropped, never done. Each records its own time, so a late catch-up settles it alike.
 - **What the player sees:** a plan's block shows its kind ("Errand", "Meeting someone", "A visit", "Work", "Rest", "Time out", "Busy") and "their own plan", never the plan's words, which are the character's private intent. The GM view shows the plan whole (§24.9).
 - **Occasions.** A day's occasion shapes its options:
   - **A day off** (the weekend, or a holiday that gives one) makes a slow morning (breakfast 7 to 11) and more time for leisure and friends.

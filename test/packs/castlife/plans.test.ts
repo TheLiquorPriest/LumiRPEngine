@@ -70,7 +70,7 @@ describe("castlife: characters' own plans", () => {
     lapse(w, at(w, 0, "13:00"));
     expect(w.state.entities.jordan?.fields.place).toBe("office");
     expect(outcomes(w)).toEqual([{ type: "minds.plan", data: { entity: "jordan", plan: "p1", status: "done", at: at(w, 0, "11:00"), reason: null } }]);
-    expect(w.ctx.query("minds.plans")(w.ctx, "jordan")).toEqual([]);
+    expect(w.ctx.query("minds.plans")(w.ctx, "jordan").map((p) => p.status)).toEqual(["done"]);
     expect(fold(reg, w.world, startState(w.world), w.events)).toEqual(w.state);
   });
 
@@ -139,6 +139,54 @@ describe("castlife: characters' own plans", () => {
       seen.push(`${t} ${String(w.state.entities.jordan?.fields.place)}/${String(w.state.entities.jordan?.fields.activity)}`);
     }
     expect(seen).toEqual(["07:50 bank/errand", "08:10 bank/errand", "08:25 bank/errand", "08:40 office/work_shift"]);
+  });
+
+  test("a wide plan goes around a stronger one and is lived there, and keeps its place once both are done", () => {
+    const w = riverton();
+    // Saturday (day 1), no work: a meeting at the café, and an errand any time from 10:00 to 18:00.
+    record(w, [
+      pin("jordan", "live"),
+      planEdit("jordan", plan(w, "strong", { kind: "meet", where: "cafe", priority: 4, when: { from: at(w, 1, "10:00"), to: at(w, 1, "11:30") } })),
+      planEdit("jordan", plan(w, "errand", { kind: "errand", where: "bank", priority: 2, when: { from: at(w, 1, "10:00"), to: at(w, 1, "18:00") } })),
+    ]);
+    const laid = (): unknown[] => w.ctx.query("castlife.commitments")(w.ctx, "jordan", at(w, 1, "00:00"), at(w, 2, "00:00")).flatMap((c) => (c.kind === "plan" ? [[c.plan, c.start, c.end]] : []));
+    const placed = [["strong", at(w, 1, "10:00"), at(w, 1, "11:30")], ["errand", at(w, 1, "11:30"), at(w, 1, "12:15")]];
+    expect(laid()).toEqual(placed);
+    lapse(w, at(w, 1, "11:45"));
+    expect([w.state.entities.jordan?.fields.place, w.state.entities.jordan?.fields.activity]).toEqual(["bank", "errand"]);
+    lapse(w, at(w, 1, "19:00"));
+    expect(outcomes(w).flatMap((e) => ("data" in e ? [[e.data.plan, e.data.status, e.data.at]] : []))).toEqual([["strong", "done", at(w, 1, "11:30")], ["errand", "done", at(w, 1, "12:15")]]);
+    expect(laid()).toEqual(placed);
+  });
+
+  test("a plan a stronger one leaves no room for is dropped once its window has passed, never done", () => {
+    const w = riverton((wd) => {
+      const jordan = wd.entities.jordan;
+      if (jordan) jordan.fields.appointments = [{ at: clockAt(calendarOf(wd), 1, parseHHMM("11:30")), minutes: 330, place: "office", label: "Stocktake" }];
+    });
+    record(w, [
+      pin("jordan", "live"),
+      planEdit("jordan", plan(w, "strong", { kind: "meet", where: "cafe", priority: 4, when: { from: at(w, 1, "10:00"), to: at(w, 1, "11:30") } })),
+      planEdit("jordan", plan(w, "errand", { kind: "errand", where: "bank", priority: 2, when: { from: at(w, 1, "10:00"), to: at(w, 1, "17:00") } })),
+    ]);
+    lapse(w, at(w, 1, "19:00"));
+    expect(outcomes(w).flatMap((e) => ("data" in e ? [[e.data.plan, e.data.status, e.data.at, e.data.reason]] : []))).toEqual([
+      ["strong", "done", at(w, 1, "11:30"), null],
+      ["errand", "dropped", at(w, 1, "17:00"), "no time for it"],
+    ]);
+  });
+
+  test("a plan that's done keeps its day: the blocks it laid and the needs they met stay as they were", () => {
+    const w = riverton();
+    record(w, [pin("jordan", "live"), planEdit("jordan", plan(w, "visit", { kind: "visit", where: "park", when: { from: at(w, 1, "11:00"), to: at(w, 1, "15:00") } }))]);
+    const saturday = (): string[] => dayPlan(w.ctx, "jordan", 1).blocks.map((b) => `${b.start}-${b.end} ${b.label}`);
+    lapse(w, at(w, 1, "17:00"));
+    const before = { blocks: saturday(), hunger: needValue(w.ctx, "jordan", "hunger", at(w, 1, "16:00")) };
+    expect(before.blocks).toContain(`${at(w, 1, "11:00")}-${at(w, 1, "15:00")} A visit`);
+    // The 18:00 step marks it done.
+    lapse(w, at(w, 1, "19:00"));
+    expect(outcomes(w).flatMap((e) => ("data" in e ? [e.data.status] : []))).toEqual(["done"]);
+    expect({ blocks: saturday(), hunger: needValue(w.ctx, "jordan", "hunger", at(w, 1, "16:00")) }).toEqual(before);
   });
 });
 

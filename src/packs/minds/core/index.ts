@@ -16,7 +16,7 @@ import { mindEdit } from "./edit";
 import { fidelityOf } from "./fidelity";
 import { MINDS_LINTS } from "./lint";
 import { mindLines, minded } from "./section";
-import { openPlans, PACK, readCharacter } from "./state";
+import { keptPlans, PACK, readCharacter } from "./state";
 
 export const mindsPack: PackDef = {
   id: PACK,
@@ -27,7 +27,7 @@ export const mindsPack: PackDef = {
   register(r) {
     for (const def of MINDS_EVENT_DEFS) r.event(def);
     r.service("minds.edit", mindEdit);
-    r.query("minds.plans", (ctx, who) => openPlans(readCharacter(ctx.state, who)));
+    r.query("minds.plans", (ctx, who) => keptPlans(readCharacter(ctx.state, who)));
     r.query("minds.tier", (ctx, who) => {
       const c = readCharacter(ctx.state, who);
       return c.pin ?? c.mind?.level ?? "background";

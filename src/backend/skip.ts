@@ -84,7 +84,7 @@ export function scanBeats(reg: Registry, world: WorldDoc, state: Readonly<WorldS
     for (const id of Object.keys(state.entities).sort()) {
       const level = id === pov ? "background" : tier(ctx, id);
       if (level !== "live" && level !== "near") continue;
-      const withPov = plans(ctx, id).filter((p) => p.with.includes(pov));
+      const withPov = plans(ctx, id).filter((p) => p.status === "open" && p.with.includes(pov));
       for (const b of laid(ctx, id, run.from, end)) {
         const p = withPov.find((x) => x.id === b.plan);
         if (p) add(b.start, `${nameOf(id)}'s plan with the player character: ${p.what}`, RANK.plan, [id, ...p.with.filter(person)]);
@@ -161,7 +161,7 @@ async function proposedBeats(deps: SkipDeps, input: SkipInput, state: Readonly<W
   const cal = calendarOf(input.world);
   const plans = optionalQuery(ctx, "minds.plans");
   const intents = [...new Set(scanned.beats.flatMap((b) => b.who))].flatMap((id) => {
-    const theirs = plans?.(ctx, id) ?? [];
+    const theirs = (plans?.(ctx, id) ?? []).filter((p) => p.status === "open");
     return theirs.length > 0 ? [`${own(state.entities, id)?.name ?? id}: ${theirs.map((p) => `${p.what} (${formatStamp(cal, p.when.from)})`).join("; ")}`] : [];
   });
   const user = [`The skip runs from ${formatStamp(cal, scanned.from)} to ${formatStamp(cal, scanned.to)}.`, scanned.beats.length > 0 ? `Moments found:\n${scanned.beats.map((b) => `- ${formatStamp(cal, b.at)}: ${b.reason}`).join("\n")}` : "No moments found.", intents.length > 0 ? `What the people involved plan:\n${intents.join("\n")}` : ""].filter((part) => part !== "").join("\n\n");
