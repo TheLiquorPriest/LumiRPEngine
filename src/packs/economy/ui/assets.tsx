@@ -15,7 +15,7 @@ import { humanize } from "../../../frontend/format";
 import { FlowListRow } from "./flows";
 import { ActionPage, AmountField, AmountPage, ChoiceField, NumberField, SelectField, TextField, ToggleField, type ChoiceOption } from "./forms";
 import type { HubControls, SectionProps } from "./hub";
-import { endableLeases, holdingControls, investmentBlocks, knownPeople, moveSources, propertyControls, ROUTE_ELSEWHERE, routePick, transferTargets, type HoldingControl, type PropertyControl } from "./layout";
+import { endableLeases, holdingControls, investmentBlocks, knownPeople, mortgageTermChoices, moveSources, propertyControls, ROUTE_ELSEWHERE, routePick, transferTargets, type HoldingControl, type PropertyControl } from "./layout";
 import { FieldsPage } from "./lines";
 import { actionPage, Controls, detailPage, Hero, MoneyPage, Note, type HubNav, type HubPage, type HubPages } from "./nav";
 import { amountOf, exerciseAction, leaseEndAction, leaseStartAction, newIdFor, propertyBuyAction, propertySellAction, propertySpawnOps, routeAction, routeOps, setPriceOps, tradeAction, type RouteTarget, type TradeForm } from "./requests";
@@ -418,18 +418,12 @@ function SellPropertyPage(props: SectionProps & { property: PropertyView }) {
   );
 }
 
-/** The terms a lender offers a mortgage over, months, the usual first: the finance table's (`loans.mortgage.term_months`), which the purchase refuses any other than. */
-const MORTGAGE_TERMS: readonly ChoiceOption[] = [
-  { value: "360", label: "30 years", detail: "The usual" },
-  { value: "240", label: "20 years" },
-  { value: "180", label: "15 years" },
-];
-
 function BuyPropertyPage(props: SectionProps & { property: PropertyView }) {
   const { view, controls, nav, property: p } = props;
   const [price, setPrice] = useState(String((p.forSale ?? p.value) / 10 ** controls.currency.decimals));
   const [down, setDown] = useState("");
-  const [term, setTerm] = useState("360");
+  // A purchase gets the usual term unless another is chosen.
+  const [term, setTerm] = useState(String((p.mortgageTerms?.find((t) => t.usual) ?? p.mortgageTerms?.[0])?.months ?? ""));
   const [from, setFrom] = useState("");
   if (controls.mode !== "player") return null;
   const cents = amountOf(price, controls.currency);
@@ -437,11 +431,12 @@ function BuyPropertyPage(props: SectionProps & { property: PropertyView }) {
   const ok = cents !== null && (down.trim() === "" || downCents !== null);
   // Only what isn't paid down is a mortgage, and only a mortgage has a term.
   const financed = cents !== null && downCents !== null && downCents < cents;
+  const terms = mortgageTermChoices(p);
   return (
-    <ActionPage nav={nav} controls={controls} name="property-buy" title="Buy" subtitle={p.name} go="Buy" disabled={!ok} submit={() => (!ok || cents === null ? Promise.resolve(false) : controls.act(propertyBuyAction(p.id, cents, { ...(from ? { from } : {}), ...(downCents !== null ? { down: downCents } : {}), ...(financed ? { termMonths: Number(term) } : {}) })))}>
+    <ActionPage nav={nav} controls={controls} name="property-buy" title="Buy" subtitle={p.name} go="Buy" disabled={!ok} submit={() => (!ok || cents === null ? Promise.resolve(false) : controls.act(propertyBuyAction(p.id, cents, { ...(from ? { from } : {}), ...(downCents !== null ? { down: downCents } : {}), ...(financed && term !== "" ? { termMonths: Number(term) } : {}) })))}>
       <AmountField label="Offer" value={price} currency={controls.currency} onInput={setPrice} invalid={cents === null} />
       <AmountField label="Down payment (empty: pay it all)" value={down} currency={controls.currency} onInput={setDown} invalid={down.trim() !== "" && downCents === null} />
-      {financed ? <ChoiceField label="Mortgage over" value={term} options={MORTGAGE_TERMS} onChange={setTerm} /> : null}
+      {financed && terms.length > 0 ? <ChoiceField label="Mortgage over" value={term} options={terms} onChange={setTerm} /> : null}
       <SelectField label="Paid from" value={from} empty="Your usual account" options={moveSources(view).map((a) => ({ value: a.id, label: a.name }))} onChange={setFrom} />
     </ActionPage>
   );

@@ -17,6 +17,7 @@ import type { MapDisplay, WorldDoc, WorldIndex } from "../../src/shared/world";
 import { compileMaps } from "../../src/shared/maps";
 import { presetAdjudication } from "../../src/shared/adjudication";
 import { blankWorld, migrateWorld } from "../../src/engine/authoring";
+import { buildGmWorld } from "../../src/engine/gm-view";
 import { createRegistry } from "../../src/engine/registry-impl";
 import { initialState } from "../../src/engine/world-state";
 import { materializeAll } from "../../src/engine/materialize";
@@ -516,9 +517,10 @@ function samMoney(): FinanceView {
   const visaCard = card("visa_card", "Visa ··4421", "credit", "visa", "4421");
   const accounts = [
     account("cash", "Wallet cash", "cash", "Cash", 4600),
-    account("chk", "Checking", "checking", "Checking", 124018, { cards: [debit], transactions: recent.filter((r) => r.accountId === "chk") }),
-    account("sav", "Savings", "savings", "Savings", 350000),
-    account("visa", "Visa ··4421", "credit_card", "Credit card", -41255, { available: 78745, limit: 120000, autopay: { mode: "minimum", from: "chk", fromName: "Checking", cents: null }, cards: [visaCard], transactions: recent.filter((r) => r.accountId === "visa") }),
+    // Sam spends from all of them: each bank account backs the other, and the Visa's autopay draws on either.
+    account("chk", "Checking", "checking", "Checking", 124018, { cards: [debit], fallbacks: ["sav"], transactions: recent.filter((r) => r.accountId === "chk") }),
+    account("sav", "Savings", "savings", "Savings", 350000, { fallbacks: ["chk"] }),
+    account("visa", "Visa ··4421", "credit_card", "Credit card", -41255, { available: 78745, limit: 120000, autopay: { mode: "minimum", from: "chk", fromName: "Checking", cents: null }, autopayFrom: ["chk", "sav"], cards: [visaCard], transactions: recent.filter((r) => r.accountId === "visa") }),
   ];
   const rent: Flow = { id: "flow_rent", label: "Rent", kind: "rent", from: "chk", to: "Maple Street Properties", amount: { fixed: 85000 }, schedule: { every: "month", days: [1] }, shortfall: "retry", retry_days: 3, retries: 2, category: "housing", status: "active", source: "entity" };
   const phone: Flow = { id: "flow_phone", label: "Phone", kind: "subscription", from: "visa", to: "Northwind Mobile", amount: { fixed: 4500 }, schedule: { every: "month", days: [1] }, shortfall: "skip", category: "utilities", status: "active", source: "entity" };
@@ -576,13 +578,14 @@ function starterMoney(template: string): JsonValue {
 
 /**
  * Port Alder's money as the engine keeps it nine days into a chat (`?money=<party>`): Play → Me →
- * Money shows that party's own, as they see it, and GM → Money everyone with money, each at their
- * own Money level. 114 Harbor Street is put up for sale, so whoever doesn't own it sees its listing.
- * Marcus Delgado (`marcus_delgado`) has a business, a mortgaged house and a credit score; Helen
- * Kowalczyk (`helen_kowalczyk`) a household and a let house; the POV (`pov`) a job, investments and
- * a credit score. Null for a party the world doesn't have.
+ * Money shows that party's own, as they see it, and the GM view is Port Alder's as the engine
+ * builds it, so GM → Money shows everyone with money, each at their own Money level, and its pages
+ * read Port Alder's entities, kinds and places. 114 Harbor Street is put up for sale, so whoever
+ * doesn't own it sees its listing. Marcus Delgado (`marcus_delgado`) has a business, a mortgaged
+ * house and a credit score; Helen Kowalczyk (`helen_kowalczyk`) a household and a let house; the
+ * POV (`pov`) a job, investments and a credit score. Null for a party the world doesn't have.
  */
-export function portAlderMoney(party: string): { play: JsonValue; gm: FinanceView[] } | null {
+export function portAlderMoney(party: string): { play: JsonValue; gm: Omit<GmView, "edits" | "refused" | "minds"> } | null {
   const world = STARTER_WORLDS.modern_slice_of_life?.("preview", "modern_slice_of_life");
   const harbor = world?.entities.prop_harbor_114;
   if (!world || !harbor || !Object.hasOwn(world.entities, party)) return null;
@@ -594,7 +597,7 @@ export function portAlderMoney(party: string): { play: JsonValue; gm: FinanceVie
   // Nothing stops the nine days: what would interrupt a player's timelapse only goes in its montage.
   const lapse = runTimelapse(registry, w, { type: "duration", minutes: 9 * 24 * 60 }, { runSeed: "preview", overrides: { invitation: "note", decline: "note", incident: "note", quest: "note", arrival: "note" } });
   if ("code" in lapse) return null;
-  return { play: w.ctx.query("economy.finance")(w.ctx, party, true) as unknown as JsonValue, gm: w.ctx.query("economy.people_money")(w.ctx) };
+  return { play: w.ctx.query("economy.finance")(w.ctx, party, true) as unknown as JsonValue, gm: buildGmWorld(registry, w.world, w.state) };
 }
 
 /**
@@ -896,13 +899,13 @@ export function gmFixture(): GmView {
       entity("dev_checking", "Dev's checking", "account", "background", null, { balance: 412650, fields: [{ id: "owner", label: "Owner", type: "ref", value: "npc_dev", ref: "person" }] }),
     ],
     kinds: [
-      { id: "person", label: "Person" },
-      { id: "npc", label: "NPC" },
-      { id: "group", label: "Group" },
-      { id: "vehicle", label: "Vehicle" },
-      { id: "container", label: "Container" },
-      { id: "thing", label: "Thing" },
-      { id: "account", label: "Account" },
+      { id: "person", label: "Person", extends: "thing" },
+      { id: "npc", label: "NPC", extends: "person" },
+      { id: "group", label: "Group", extends: "thing" },
+      { id: "vehicle", label: "Vehicle", extends: "container" },
+      { id: "container", label: "Container", extends: "thing" },
+      { id: "thing", label: "Thing", extends: null },
+      { id: "account", label: "Account", extends: null },
     ],
     tiers: [
       { id: "principal", label: "Leads" },

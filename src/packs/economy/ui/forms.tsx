@@ -3,8 +3,8 @@
 // then one primary button that sends the request and, once it's accepted, goes back to the page
 // the action was opened from.
 
-import type { ComponentChildren } from "preact";
-import { useId, useState } from "preact/hooks";
+import { createContext, type ComponentChildren } from "preact";
+import { useCallback, useContext, useEffect, useId, useState } from "preact/hooks";
 import type { MoneyUnit } from "../../../shared/money";
 import type { WorldCurrency } from "../../../shared/world";
 import { Button, Field } from "../../../frontend/components";
@@ -52,12 +52,24 @@ export function TextField(props: { label: string; value: string; onInput(value: 
   );
 }
 
-/** A whole number or a decimal typed as text; empty is null, and what isn't a number marks the box. */
+/**
+ * How a field on an action page says its text isn't a value it can send (a number out of range,
+ * say). The page's button waits until no field says so, so an action never goes with a field's last
+ * good value while its box shows another.
+ */
+const FieldValidity = createContext<((field: string, bad: boolean) => void) | null>(null);
+
+/** A whole number or a decimal typed as text; empty is null, and what isn't a number in range marks the box and holds the page's button. */
 export function NumberField(props: { label: string; value: number | null; onChange(value: number | null): void; min?: number; max?: number; step?: number; placeholder?: string; help?: ComponentChildren }) {
   const id = useId();
   const [text, setText] = useState(props.value === null ? "" : String(props.value));
   const parsed = text.trim() === "" ? null : Number(text);
   const bad = parsed !== null && (!Number.isFinite(parsed) || (props.min !== undefined && parsed < props.min) || (props.max !== undefined && parsed > props.max));
+  const mark = useContext(FieldValidity);
+  useEffect(() => {
+    mark?.(id, bad);
+    return () => mark?.(id, false);
+  }, [mark, id, bad]);
   return (
     <Field label={props.label} help={props.help} for={id}>
       <input
@@ -128,29 +140,42 @@ export function ToggleField(props: { label: ComponentChildren; help?: ComponentC
  * An action's own page: its fields, then one primary button that sends it, busy while the
  * request runs. Accepted, it goes back to the page it was opened from (`nav.back` does nothing once
  * the page has been left, so a Back tapped while the request ran isn't doubled); declined, it
- * stays, and the toast says why. `problem` says in words what's missing and holds the button back;
- * a one-tap action's page states what it does in its children, which is its confirmation.
+ * stays, and the toast says why. `problem` says in words what's missing and holds the button back,
+ * as a number field does while its box holds what it can't send; a one-tap action's page states
+ * what it does in its children, which is its confirmation.
  */
 export function ActionPage(props: { nav: HubNav; controls: HubControls; name: string; title: ComponentChildren; subtitle?: ComponentChildren; go: ComponentChildren; danger?: boolean; disabled?: boolean; problem?: string | null; submit(): Promise<boolean>; children?: ComponentChildren }) {
   const { nav, controls } = props;
-  const blocked = props.disabled === true || (props.problem !== undefined && props.problem !== null);
+  const [invalid, setInvalid] = useState<ReadonlySet<string>>(() => new Set());
+  const mark = useCallback((field: string, bad: boolean) => {
+    setInvalid((was) => {
+      if (was.has(field) === bad) return was;
+      const next = new Set(was);
+      if (bad) next.add(field);
+      else next.delete(field);
+      return next;
+    });
+  }, []);
+  const blocked = props.disabled === true || (props.problem !== undefined && props.problem !== null) || invalid.size > 0;
   return (
     <MoneyPage nav={nav} name={props.name} title={props.title} subtitle={props.subtitle}>
-      <form
-        class="lre-money-form"
-        data-lre-money-action={props.name}
-        onSubmit={(event) => {
-          event.preventDefault();
-          if (controls.busy || blocked) return;
-          void props.submit().then((ok) => ok && nav.back());
-        }}
-      >
-        {props.children}
-        {props.problem ? <p class="lre-money-problem">{props.problem}</p> : null}
-        <Button type="submit" variant={props.danger ? "danger" : "primary"} block busy={controls.busy} disabled={blocked}>
-          {props.go}
-        </Button>
-      </form>
+      <FieldValidity.Provider value={mark}>
+        <form
+          class="lre-money-form"
+          data-lre-money-action={props.name}
+          onSubmit={(event) => {
+            event.preventDefault();
+            if (controls.busy || blocked) return;
+            void props.submit().then((ok) => ok && nav.back());
+          }}
+        >
+          {props.children}
+          {props.problem ? <p class="lre-money-problem">{props.problem}</p> : null}
+          <Button type="submit" variant={props.danger ? "danger" : "primary"} block busy={controls.busy} disabled={blocked}>
+            {props.go}
+          </Button>
+        </form>
+      </FieldValidity.Provider>
     </MoneyPage>
   );
 }

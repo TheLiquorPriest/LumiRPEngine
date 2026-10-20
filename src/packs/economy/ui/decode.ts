@@ -315,6 +315,8 @@ function property(o: Obj): PropertyView | null {
     costs: list(o.costs, flowView),
     forSale: nullableNum(o.forSale),
     route: distributionRoute(o.route),
+    // Only on a property the viewer may buy: absent stays absent.
+    ...(Array.isArray(o.mortgageTerms) ? { mortgageTerms: list(o.mortgageTerms, (t) => (typeof t.months === "number" && t.months > 0 ? { months: t.months, usual: bool(t.usual) } : null)) } : {}),
   };
 }
 

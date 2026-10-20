@@ -347,7 +347,8 @@ export interface GmEntity {
  */
 export interface GmView {
   entities: GmEntity[];
-  kinds: { id: string; label: string }[];
+  /** Every kind, built in and the world's own, with the kind it extends (null for a root): a kind matches another when it is it or extends it, as the engine's `kindIs` walks the chain. */
+  kinds: { id: string; label: string; extends: string | null }[];
   tiers: { id: string; label: string }[];
   /** The world's life states, built in and its own, in order: what the life editor offers. */
   lifeStates: { id: string; label: string; acts: boolean }[];

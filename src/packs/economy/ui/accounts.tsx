@@ -67,9 +67,9 @@ function findCard(view: FinanceView, id: string | undefined): CardView | null {
   return view.cards.find((c) => c.id === id) ?? viewAccounts(view).flatMap((a) => a.cards).find((c) => c.id === id) ?? null;
 }
 
-/** Whether the party's payment tiers show: from Money 2, where payment preferences run for them or they have some. */
+/** Whether the party's payment tiers show, with their Change: where payment preferences run for them, as setting them does (the view sends tiers only there). */
 function payPrefsShown(view: FinanceView): boolean {
-  return view.level >= 2 && (view.features.includes("payment_prefs") || view.payPrefs.length > 0);
+  return view.features.includes("payment_prefs");
 }
 
 /** Ways of paying a tier can name: the party's cards and the accounts it may pay from. */

@@ -17,7 +17,7 @@ import { AccountRow } from "./accounts";
 import { RoutePage, RouteRow } from "./assets";
 import { ActionPage, AmountField, AmountPage, ChoiceField, NumberField, SelectField, TextField, type Choice } from "./forms";
 import type { PlayerControls, SectionProps } from "./hub";
-import { businessAccounts, businessControls, invoiceControls, jobControls, knownPeople, possessive, workBlocks, type BusinessControl, type InvoiceControl } from "./layout";
+import { businessAccounts, businessControls, gmParties, hireable, invoiceControls, jobControls, knownPeople, possessive, workBlocks, type BusinessControl, type InvoiceControl } from "./layout";
 import { FieldsPage, OwnerRows, TxnRows } from "./lines";
 import { actionPage, Controls, detailPage, Hero, MoneyPage, Note, type HubPages } from "./nav";
 import { amountOf, distributeAction, drawAction, hireAction, invoiceAction, invoiceIssueAction, jobEndAction, jobSpawnOps, newIdFor, raiseAction, stakeSellAction, type HireForm } from "./requests";
@@ -192,7 +192,7 @@ function NewJobPage(props: SectionProps) {
   const [every, setEvery] = useState<string>("biweekly");
   if (controls.mode !== "gm") return null;
   const cents = amountOf(rate, controls.currency);
-  const businesses = controls.gm.entities.filter((e) => e.kind === "business" && !e.gone).map((e) => ({ value: e.id, label: e.name }));
+  const businesses = gmParties(controls.gm, ["business"]).map((p) => ({ value: p.id, label: p.name }));
   // The job's `employer`: the business's id, or the outside employer's name as typed.
   const named = employer === OUTSIDE ? outside.trim() : employer;
   const submit = (): Promise<boolean> => {
@@ -435,7 +435,7 @@ function HirePage(props: SectionProps & { business: BusinessView }) {
   const body = hireAction(form, controls.currency);
   return (
     <ActionPage nav={nav} controls={controls} name="business-hire" title="Hire" subtitle={b.name} go="Hire" disabled={body === null} submit={() => (body === null ? Promise.resolve(false) : controls.act(body))}>
-      <SelectField label="Who" value={form.worker} empty="Choose someone" options={people(controls)} onChange={(worker) => setForm({ ...form, worker })} />
+      <SelectField label="Who" value={form.worker} empty="Choose someone" options={hireable(b, people(controls))} onChange={(worker) => setForm({ ...form, worker })} />
       <TextField label="Title" value={form.title} onInput={(title) => setForm({ ...form, title })} />
       <SelectField label="Paid by" value={form.basis} options={PAY_BASES.map((p) => ({ value: p, label: humanize(p) }))} onChange={(basis) => setForm({ ...form, basis })} />
       <AmountField label="Rate (a year, an hour or a shift)" value={form.rate} currency={controls.currency} onInput={(rate) => setForm({ ...form, rate })} invalid={form.rate.trim() !== "" && amountOf(form.rate, controls.currency) === null} />

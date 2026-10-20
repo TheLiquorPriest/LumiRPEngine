@@ -13,7 +13,7 @@ import { humanize } from "../../../frontend/format";
 import { FlowListRow } from "./flows";
 import { ActionPage, AmountPage, ChoiceField, SelectField } from "./forms";
 import type { SectionProps } from "./hub";
-import { creditBlocks, householdRows, possessive, sharedAccounts } from "./layout";
+import { creditBlocks, gmParties, householdRows, possessive, sharedAccounts } from "./layout";
 import { actionPage, Controls, Hero, MoneyPage, Note, type HubPage, type HubPages } from "./nav";
 import { applyCreditAction } from "./requests";
 
@@ -136,14 +136,16 @@ function HouseholdSection(props: SectionProps) {
   const { view, controls, nav } = props;
   const h = view.household;
   if (!h) {
+    // Where households don't run, none shows, even for someone who is in one: so the page says that, and offers no household to join.
+    const runs = view.features.includes("households");
     return (
       <MoneyPage nav={nav} name="household" title="Household">
-        {controls.mode === "gm" && view.partyKind === "person" ? (
+        {controls.mode === "gm" && view.partyKind === "person" && runs ? (
           <Button variant="primary" icon="user-plus" block onClick={() => nav.open(actionPage("household", "join"))}>
             Add to a household
           </Button>
         ) : null}
-        <Empty icon="users">No household.</Empty>
+        <Empty icon="users">{runs ? "No household." : "Households don't run at this Money level."}</Empty>
       </MoneyPage>
     );
   }
@@ -199,16 +201,16 @@ function HouseholdSection(props: SectionProps) {
   );
 }
 
-/** The GM adds someone in the world to the household (`member_of`), one edit. */
+/** The GM adds a person in the world to the household (`member_of`), one edit. */
 function AddMemberPage(props: SectionProps) {
   const { view, controls, nav } = props;
   const [adding, setAdding] = useState("");
   const h = view.household;
   if (controls.mode !== "gm" || !h) return null;
-  const candidates = controls.gm.entities.filter((e) => e.kind === "person" && !e.gone && !h.members.some((m) => m.id === e.id));
+  const candidates = gmParties(controls.gm, ["person"]).filter((p) => !h.members.some((m) => m.id === p.id));
   return (
     <ActionPage nav={nav} controls={controls} name="household-add" title="Add a member" subtitle={h.name} go="Add" disabled={adding === ""} submit={() => controls.edit([{ op: "link", rel: "member_of", from: adding, to: h.id }])}>
-      <SelectField label="Who" value={adding} empty="Choose someone" options={candidates.map((e) => ({ value: e.id, label: e.name }))} onChange={setAdding} />
+      <SelectField label="Who" value={adding} empty="Choose someone" options={candidates.map((p) => ({ value: p.id, label: p.name }))} onChange={setAdding} />
     </ActionPage>
   );
 }
@@ -217,8 +219,8 @@ function AddMemberPage(props: SectionProps) {
 function JoinHouseholdPage(props: SectionProps) {
   const { view, controls, nav } = props;
   const [joining, setJoining] = useState("");
-  if (controls.mode !== "gm" || view.household !== null || view.partyKind !== "person") return null;
-  const households = controls.gm.entities.filter((e) => e.kind === "household" && !e.gone).map((e) => ({ value: e.id, label: e.name }));
+  if (controls.mode !== "gm" || view.household !== null || view.partyKind !== "person" || !view.features.includes("households")) return null;
+  const households = gmParties(controls.gm, ["household"]).map((p) => ({ value: p.id, label: p.name }));
   return (
     <ActionPage nav={nav} controls={controls} name="household-join" title="Add to a household" subtitle={view.name} go="Add" disabled={joining === ""} submit={() => controls.edit([{ op: "link", rel: "member_of", from: view.party, to: joining }])}>
       {households.length > 0 ? <SelectField label="Household" value={joining} empty="Choose a household" options={households} onChange={setJoining} /> : <Note>The world has no household yet.</Note>}

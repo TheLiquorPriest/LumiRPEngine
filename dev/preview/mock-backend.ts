@@ -2,6 +2,7 @@
 // a push counter, and pushes real snapshots and deltas (computed by diffing the view), so the
 // frontend's delta/resync path runs exactly as against the real backend.
 
+import { CLASS_TRAITS, type AccountView, type FinanceView, type JournalLine } from "../../src/shared/finance";
 import type { JsonObject, JsonValue } from "../../src/shared/json";
 import { hasOwn, isRecord } from "../../src/shared/json";
 import type { DeltaOp, EditOp, FrontendToBackend, JobProposal, JobSummary, JobUpdate, LintIssue, LoreDrift, PresetCard, ResultBodies, StudioOfferView } from "../../src/shared/protocol";
@@ -14,6 +15,7 @@ import { hashJson } from "../../src/shared/hash";
 import { compileMaps, mapLint, mapTemplate } from "../../src/shared/maps";
 import { findPath, gridMinutes } from "../../src/shared/grid";
 import { decodeMapView } from "../../src/packs/space/ui/view";
+import { decodeFinanceView } from "../../src/packs/economy/ui/decode";
 import { mapProposal, readMapAnswer, readMapRequest } from "../../src/backend/map-job";
 import { macroReview, WORLD_COLLECTIONS } from "../../src/backend/worlds";
 import type { StudioCase } from "./fixtures";
@@ -235,24 +237,28 @@ export class MockBackend {
 
   /**
    * Pay another way on the declined payment (`c-decline`), as the backend tries it (DESIGN §9.5):
-   * savings, card, checking, then cash, the first that covers it pays; false when none does.
+   * savings, then a card, then checking, then cash; the first with room for it pays (a card up to
+   * what's available on it, any other account up to what it holds). False when none has room.
    */
   private payAnotherWay(): boolean {
-    const money = this.view?.panels["economy.money"];
-    if (!isRecord(money) || !Array.isArray(money.accounts)) return false;
-    const accounts = (money.accounts as JsonValue[]).filter((a): a is JsonObject => isRecord(a));
-    // A card pays up to its limit; any other account up to its balance.
-    const room = (a: (typeof accounts)[number]): number => (typeof a.cents !== "number" ? 0 : a.kind === "card" ? (typeof a.limitCents === "number" ? a.limitCents : 0) + a.cents : a.cents);
-    const source = ["savings", "card", "checking", "cash"].flatMap((kind) => accounts.filter((a) => a.kind === kind)).find((a) => room(a) >= DECLINED_PURCHASE.cents);
-    if (!source || typeof source.id !== "string") return false;
-    const id = source.id;
-    const label = typeof source.name === "string" ? source.name : id;
+    const money = decodeFinanceView(this.view?.panels["economy.money"] ?? null);
+    if (!money) return false;
+    const cents = DECLINED_PURCHASE.cents;
+    const tries: readonly ((a: AccountView) => boolean)[] = [(a) => a.class === "savings", (a) => CLASS_TRAITS[a.class].revolving, (a) => a.class === "checking", (a) => CLASS_TRAITS[a.class].cash];
+    const source = tries.flatMap((is) => money.accounts.filter((a) => a.status === "open" && is(a))).find((a) => (a.available ?? a.cents) >= cents);
+    if (!source) return false;
+    const liability = CLASS_TRAITS[source.class].liability;
     this.mutate((view) => {
-      const panel = view.panels["economy.money"];
-      if (!isRecord(panel) || !Array.isArray(panel.accounts)) return;
-      for (const account of panel.accounts) if (isRecord(account) && account.id === id && typeof account.cents === "number") account.cents -= DECLINED_PURCHASE.cents;
-      if (typeof panel.netWorthCents === "number") panel.netWorthCents -= DECLINED_PURCHASE.cents;
-      if (Array.isArray(panel.recent)) panel.recent.unshift({ at: view.hud?.clock.label ?? "", memo: DECLINED_PURCHASE.name, cents: -DECLINED_PURCHASE.cents, account: label });
+      const panel = decodeFinanceView(view.panels["economy.money"] ?? null);
+      if (!panel) return;
+      const line: JournalLine = { id: "preview:pay-another-way", at: view.hud?.clock.label ?? "", memo: DECLINED_PURCHASE.name, cents: -cents, account: source.name, accountId: source.id, kind: "purchase", category: null, counterparty: null, card: null, status: "posted" };
+      const accounts = panel.accounts.map((a) => (a.id === source.id ? { ...a, cents: a.cents - cents, available: a.available === null ? null : a.available - cents, transactions: [line, ...a.transactions] } : a));
+      // A total the level doesn't show stays unknown.
+      const less = (total: number | null, by: number): number | null => (total === null ? null : total - by);
+      const overview = panel.overview ? { ...panel.overview, netWorth: less(panel.overview.netWorth, cents), assets: less(panel.overview.assets, liability ? 0 : cents), liabilities: less(panel.overview.liabilities, liability ? -cents : 0) } : null;
+      const cash = panel.cash !== null && "cents" in panel.cash && CLASS_TRAITS[source.class].cash ? { cents: panel.cash.cents - cents } : panel.cash;
+      const paid: FinanceView = { ...panel, accounts, overview, cash, recent: [line, ...panel.recent] };
+      view.panels["economy.money"] = paid as unknown as JsonValue;
     }, 60);
     return true;
   }
@@ -372,7 +378,8 @@ export class MockBackend {
         const money = this.options.money && this.options.scenario !== "not_world" ? portAlderMoney(this.options.money) : null;
         if (money) {
           this.view.panels["economy.money"] = money.play;
-          this.gm = { ...this.gm, money: money.gm };
+          // The GM's money pages read entities, kinds and places too (a business's fields, Add a job's employers, a payee): all Port Alder's, with its money.
+          this.gm = { ...this.gm, ...money.gm };
         }
         if (this.options.scenario === "combat") {
           const fight = combatFixture();

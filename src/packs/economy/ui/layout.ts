@@ -4,9 +4,9 @@
 // dashboards show at each level is tested directly; the core already left out what the level
 // doesn't simulate, and nothing here shows detail the view marks as below the top level.
 
-import { CLASS_TRAITS, ROLE_RIGHTS, type AccountView, type AlertLine, type BusinessView, type CardView, type DistributionRoute, type FinanceFeature, type FinanceView, type FlowView, type HoldingView, type HouseholdView, type Invoice, type JobView, type OwnerRole, type PropertyView, type RoleRights, type UpcomingLine } from "../../../shared/finance";
+import { CLASS_TRAITS, ROLE_RIGHTS, type AccountView, type AlertLine, type BusinessView, type CardView, type DistributionRoute, type FinanceFeature, type FinanceView, type FlowView, type HoldingView, type HouseholdView, type Invoice, type JobView, type OwnerRole, type PartyKind, type PropertyView, type RoleRights, type UpcomingLine } from "../../../shared/finance";
 import type { EntityId } from "../../../shared/ids";
-import type { PaletteView } from "../../../shared/state-view";
+import type { GmView, PaletteView } from "../../../shared/state-view";
 import { cardChanges, type CardChange } from "./requests";
 
 /** What a route picker opens on when the route in force is another owner's account, which the viewer can't pick. */
@@ -46,7 +46,8 @@ export interface HubTab {
  * its accounts; a job, a household, …), so a household that holds no account of its own still
  * shows its members, and a player with no job or business sees no empty tab for one. The GM also
  * gets the sections that hold its create controls while they're empty, wherever what it adds would
- * show: a person's Jobs, anyone's Properties, and a person's Household from Money 3.
+ * show: a person's Jobs, anyone's Properties, and a person's Household where households run for
+ * them (a household switched off shows nothing, so a member's would read as none).
  */
 export function hubTabs(view: FinanceView, mode: "player" | "gm"): HubTab[] {
   if (view.level <= 0) return [];
@@ -63,7 +64,7 @@ export function hubTabs(view: FinanceView, mode: "player" | "gm"): HubTab[] {
   if (view.investments !== null) tabs.push({ id: "investments", label: SECTION_LABELS.investments, dot: false });
   if (view.properties.length > 0 || creates) tabs.push({ id: "properties", label: SECTION_LABELS.properties, dot: view.properties.some((p) => p.leases.some((l) => l.state === "vacant")) });
   if (view.credit !== null) tabs.push({ id: "credit", label: SECTION_LABELS.credit, dot: view.credit.marks.length > 0 });
-  if (view.household !== null || (creates && person && view.level >= 3)) tabs.push({ id: "household", label: SECTION_LABELS.household, dot: false });
+  if (view.household !== null || (creates && person && view.features.includes("households"))) tabs.push({ id: "household", label: SECTION_LABELS.household, dot: false });
   return tabs;
 }
 
@@ -128,8 +129,9 @@ export type AccountControl = "pay" | "transfer" | "autopay" | "withdraw" | "depo
 
 /**
  * The player's controls on one account, in the order the account card shows them:
- * - `pay`: something owed on a card, a line or a loan they hold, from an account they may pay from
- *   (a business's loan they only manage is the business's to pay, from its own account by autopay);
+ * - `pay`: from Money 3, where paying is an action, something owed on a card, a line or a loan they
+ *   hold, from an account they may pay from (a business's loan they only manage is the business's
+ *   to pay, from its own account by autopay);
  * - `transfer`: money out of an account they may spend from, to another of theirs (cash moves by
  *   Withdraw and Deposit instead, which at the top level need a machine or a branch);
  * - `autopay`: where the view offers autopay (credit accounts, at the level that runs it) and they manage the account (by their role on it, or on the business that holds it);
@@ -142,7 +144,7 @@ export function accountControls(view: FinanceView, account: AccountView): Accoun
   const t = CLASS_TRAITS[account.class];
   const r = rights(account.role);
   const out: AccountControl[] = [];
-  if ((t.revolving || t.installment) && account.role !== null && account.cents < 0 && paySources(view).some((a) => a.id !== account.id)) out.push("pay");
+  if (view.level >= 3 && (t.revolving || t.installment) && account.role !== null && account.cents < 0 && paySources(view).some((a) => a.id !== account.id)) out.push("pay");
   if (r.spend && account.status === "open" && moveSources(view).some((a) => a.id === account.id) && transferTargets(view, account.id).length > 0) out.push("transfer");
   if (account.autopay !== null && account.manages) out.push("autopay");
   const holdsCash = view.accounts.some((a) => CLASS_TRAITS[a.class].cash && rights(a.role).spend);
@@ -171,8 +173,9 @@ export function transferTargets(view: FinanceView, from: EntityId): AccountView[
   return view.accounts.filter((a) => a.id !== from && CLASS_TRAITS[a.class].asset && !CLASS_TRAITS[a.class].cash && a.status === "open" && rights(a.role).sees);
 }
 
-/** The card changes the player may make: on a card they hold, or on one on an account they manage (a business's, for its owner). */
+/** The card changes the player may make where cards run for them: on a card they hold, or on one on an account they manage (a business's, for its owner). */
 export function cardControls(view: FinanceView, card: CardView): CardChange[] {
+  if (!view.features.includes("cards")) return [];
   if (card.holderId !== view.party && findAccount(view, card.account)?.manages !== true) return [];
   return cardChanges(card.state);
 }
@@ -203,21 +206,33 @@ export function flowControls(view: FinanceView, flow: FlowView): FlowControl[] {
 
 export type JobControl = "quit" | "raise" | "let_go";
 
-/** The player's controls on a job while it lasts, from Money 3 (where work is actions): its worker quits; whoever runs the employer (shown on its payroll) gives a raise or lets them go. */
+/**
+ * The player's controls on a job while it lasts, from Money 3 (where work is actions): its worker
+ * quits; whoever runs the employer (shown on its payroll) gives a raise or lets them go, unless the
+ * worker is someone they can't see, whose row stands in for the job (no worker id), which no action
+ * takes.
+ */
 export function jobControls(view: FinanceView, job: JobView, employer: BusinessView | null): JobControl[] {
   if (view.level < 3 || job.status === "ended") return [];
   const out: JobControl[] = job.workerId === view.party ? ["quit"] : [];
-  if (employer && rights(employer.role).manage) out.push("raise", "let_go");
+  if (employer && rights(employer.role).manage && job.workerId !== "") out.push("raise", "let_go");
   return out;
 }
 
 export type BusinessControl = "hire" | "invoice" | "draw" | "distribute" | "stake";
 
-/** The player's controls on a business from Money 3: running it (hiring, invoicing, drawing, paying out profit) for whoever manages it; selling a stake, where investments run, for whoever holds a share of its worth. */
+/**
+ * The player's controls on a business from Money 3: running it (hiring, invoicing, paying out
+ * profit) for whoever manages it, and a draw for whoever may take one (an owner or a joint owner,
+ * never from a corporation, as the view says); selling a stake, where investments run, for whoever
+ * holds a share of its worth.
+ */
 export function businessControls(view: FinanceView, business: BusinessView): BusinessControl[] {
   if (view.level < 3) return [];
   const r = rights(business.role);
-  const out: BusinessControl[] = r.manage ? ["hire", "invoice", "draw", "distribute"] : [];
+  const out: BusinessControl[] = r.manage ? ["hire", "invoice"] : [];
+  if (business.mayDraw) out.push("draw");
+  if (r.manage) out.push("distribute");
   if (r.worth && view.features.includes("investments")) out.push("stake");
   return out;
 }
@@ -257,6 +272,18 @@ export function endableLeases(view: FinanceView, property: PropertyView): string
 }
 
 /**
+ * A property's Mortgage over choices on its Buy page: the terms its lenders offer, as the view sends
+ * them (longest first; none on a property the player can't buy), in years where they come to whole
+ * years, the one a purchase gets unless another is chosen marked as the usual.
+ */
+export function mortgageTermChoices(property: PropertyView): { value: string; label: string; detail?: string }[] {
+  return (property.mortgageTerms ?? []).map((t) => {
+    const [n, unit] = t.months % 12 === 0 ? [t.months / 12, "year"] : [t.months, "month"];
+    return { value: String(t.months), label: `${n} ${unit}${n === 1 ? "" : "s"}`, ...(t.usual ? { detail: "The usual" } : {}) };
+  });
+}
+
+/**
  * Where a new standing payment can come from: a non-cash account that pays and that the party
  * manages, by their role on it or on the business that holds it, a business's own account they
  * hold no role on included: the business pays it. Flows never draw on wallet cash, and an
@@ -264,23 +291,43 @@ export function endableLeases(view: FinanceView, property: PropertyView): string
  */
 export function flowSources(view: FinanceView): { id: string; label: string }[] {
   return viewAccounts(view)
-    .filter((a) => {
-      const t = CLASS_TRAITS[a.class];
-      return t.pays && t.asset && !t.locked && !t.cash && a.status === "open" && a.manages;
-    })
+    .filter((a) => pays(a) && a.manages)
     .map((a) => ({ id: a.id, label: a.name }));
 }
 
+/** Whether money the party reaches only by managing it (a business's account they hold no spending role on) is what pays: such money pays for its holder, never for them. */
+function forHolder(view: FinanceView, payers: readonly string[]): boolean {
+  return payers.some((id) => {
+    const a = findAccount(view, id);
+    return a !== null && a.manages && !a.spends;
+  });
+}
+
+/** An account that can pay a standing payment or an autopay: open, paying, holding money, not locked and not wallet cash. */
+function pays(a: AccountView): boolean {
+  const t = CLASS_TRAITS[a.class];
+  return t.pays && t.asset && !t.locked && !t.cash && a.status === "open";
+}
+
 /**
- * Where a credit account's autopay can pay from: another open, non-cash account that pays and that
- * the party may spend from or manages (the business's own account, for a loan of the business
- * they run).
+ * Where a credit account's autopay can draw from: what the view says its debtor may spend from
+ * (`autopayFrom`: a business's loan from the business's own accounts, never from its manager's),
+ * of those that can pay.
  */
 export function autopaySources(view: FinanceView, account: AccountView): AccountView[] {
-  return viewAccounts(view).filter((a) => {
-    const t = CLASS_TRAITS[a.class];
-    return a.id !== account.id && t.pays && t.asset && !t.locked && !t.cash && a.status === "open" && (rights(a.role).spend || a.manages);
-  });
+  return viewAccounts(view).filter((a) => a.id !== account.id && account.autopayFrom.includes(a.id) && pays(a));
+}
+
+/**
+ * What may back a standing payment from `from` when it can't cover it: the payer's own accounts, as
+ * the view says (`fallbacks`; for a payment from the party itself, the GM's, what they spend from),
+ * of those that can pay. Money the party only manages pays for its holder, so none of it backs a
+ * payment to `to` when that's the party, their household or an account of theirs.
+ */
+export function fallbackSources(view: FinanceView, from: string, to: string): AccountView[] {
+  const backs = from === view.party ? view.accounts.filter((a) => a.spends).map((a) => a.id) : (findAccount(view, from)?.fallbacks ?? []);
+  const theirs = to === view.party || (view.household !== null && to === view.household.id) || view.accounts.some((a) => a.id === to);
+  return viewAccounts(view).filter((a) => a.id !== from && backs.includes(a.id) && pays(a) && !(theirs && forHolder(view, [a.id])));
 }
 
 /** The people the player may name (a payee, a tenant, a hire): the palette's Pay targets, which list only people the POV knows. */
@@ -289,10 +336,58 @@ export function knownPeople(palette: PaletteView | null): { id: string; label: s
   return (pay?.options ?? []).flatMap((o) => (typeof o.params.to === "string" ? [{ id: o.params.to, label: o.label }] : []));
 }
 
-/** Where a standing payment can go: the party's own accounts (savings, a card to pay off), the people the player may pay, or an outside payee by name (typed). */
-export function flowTargets(view: FinanceView, palette: PaletteView | null): { id: string; label: string }[] {
-  const own = view.accounts.filter((a) => a.status === "open" && !CLASS_TRAITS[a.class].cash && rights(a.role).sees).map((a) => ({ id: a.id, label: `${a.name} (yours)` }));
-  return [...own, ...knownPeople(palette).filter((p) => !own.some((o) => o.id === p.id))];
+/** Whom a business's manager may hire, of the people the player may name: no one already on its payroll, whom the economy won't hire twice. */
+export function hireable<T extends { value: string }>(business: BusinessView, people: readonly T[]): T[] {
+  return people.filter((p) => !business.employees.some((j) => j.workerId === p.value && j.status !== "ended"));
+}
+
+/** True when `kind` is `ancestor` or extends it, up the GM view's kinds as the engine's `kindIs` walks them (a loop ends the walk). */
+export function gmKindIs(kinds: GmView["kinds"], kind: string, ancestor: string): boolean {
+  const seen = new Set<string>();
+  for (let id: string | null = kind; id !== null && !seen.has(id); id = kinds.find((k) => k.id === id)?.extends ?? null) {
+    if (id === ancestor) return true;
+    seen.add(id);
+  }
+  return false;
+}
+
+/** The party kinds in the order the economy tries them (`partyKindOf`): a business, a trust or a household before a person, which any of them might extend. */
+const PARTY_KIND_ORDER: readonly PartyKind[] = ["business", "trust", "household", "person"];
+
+/** The world's parties of `kinds` for a GM's picker, each with the kind the economy gives it (a kind that extends a person's is a person); whoever is gone is left out. */
+export function gmParties(gm: Pick<GmView, "entities" | "kinds">, kinds: readonly PartyKind[]): { id: EntityId; name: string; kind: PartyKind }[] {
+  const out: { id: EntityId; name: string; kind: PartyKind }[] = [];
+  for (const e of gm.entities) {
+    const kind = e.gone ? undefined : PARTY_KIND_ORDER.find((k) => gmKindIs(gm.kinds, e.kind, k));
+    if (kind !== undefined && kinds.includes(kind)) out.push({ id: e.id, name: e.name, kind });
+  }
+  return out;
+}
+
+/**
+ * Where a standing payment can go: the party's own accounts (savings, a card to pay off), the
+ * accounts of a business they run, the people the player may pay, or an outside payee by name
+ * (typed). Money the party only manages (among `payers`, its From and the account it falls back
+ * on) pays for its holder: never into an account of theirs, nor to them or their household, though
+ * it moves freely between the business's own accounts.
+ */
+export function flowTargets(view: FinanceView, palette: PaletteView | null, payers: readonly string[] = []): { id: string; label: string }[] {
+  const target = (a: AccountView): boolean => a.status === "open" && !CLASS_TRAITS[a.class].cash && !payers.includes(a.id);
+  const own = forHolder(view, payers) ? [] : view.accounts.filter((a) => target(a) && rights(a.role).sees).map((a) => ({ id: a.id, label: `${a.name} (yours)` }));
+  const run = view.businesses.flatMap((b) => b.managed.filter(target).map((a) => ({ id: a.id, label: `${a.name} (${possessive(b.name, false)})` })));
+  const theirs = new Set([view.party, view.household?.id ?? "", ...own.map((o) => o.id), ...run.map((r) => r.id)]);
+  return [...own, ...run, ...knownPeople(palette).filter((p) => !theirs.has(p.id))];
+}
+
+/**
+ * Why a standing payment from these payers (its From and the account it falls back on) can't go to
+ * `to`, or null: money the party only manages pays for its holder, so never to them, their
+ * household or an account of theirs, nor to their own name typed as an outside payee.
+ */
+export function payeeProblem(view: FinanceView, payers: readonly string[], to: string): string | null {
+  if (to.trim() === "" || !forHolder(view, payers)) return null;
+  const theirs = to === view.party || (view.household !== null && to === view.household.id) || view.accounts.some((a) => a.id === to) || to.trim().toLowerCase() === view.name.trim().toLowerCase();
+  return theirs ? "Money you only manage pays for its holder: it can't pay you, your household or an account of yours." : null;
 }
 
 /** How much of a credit account's limit is in use, percent; null without a limit (a charge card). */
@@ -348,8 +443,9 @@ function shows(view: FinanceView, feature: FinanceFeature): boolean {
 }
 
 export interface OverviewBlocks {
-  /** Assets and what's owed, apart from the net worth. */
+  /** Assets and what's owed, apart from the net worth: in the full books, or where investments or property put more than money in it. */
   assets: boolean;
+  /** What the net worth is made of, line by line: the full books' alone. */
   breakdown: boolean;
   cashFlowByCategory: boolean;
   /** What's due in and out over the next 30 days. */
@@ -360,7 +456,7 @@ export interface OverviewBlocks {
 
 export function overviewBlocks(view: FinanceView): OverviewBlocks {
   const assets = view.detail || shows(view, "investments") || shows(view, "property");
-  return { assets, breakdown: assets, cashFlowByCategory: view.detail, cashFlowAhead: view.detail, upcoming: view.detail ? 20 : 5, recent: view.detail ? 20 : 5 };
+  return { assets, breakdown: view.detail, cashFlowByCategory: view.detail, cashFlowAhead: view.detail, upcoming: view.detail ? 20 : 5, recent: view.detail ? 20 : 5 };
 }
 
 export interface AccountBlocks {
