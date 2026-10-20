@@ -128,6 +128,14 @@ describe("money a manager only manages reaches none of their own interests", () 
     });
     expect(refusal(act(w, "economy.flow_create", { who: "you", label: "Grant", from: "trust_acct", to: "jordan_kept", ...once }))).toContain("Trust account pays for Chen Family Trust, not for Alex Rivera");
   });
+
+  test("his interests run as deep as whose money is: a trustee who owns Brightline, which owns the café, pays the trust's money into neither", () => {
+    const { w } = trustee((wd) => {
+      Object.assign(wd.entities.brightline!.fields, { owners: [{ party: "you", role: "owner", share: 100 }] });
+      Object.assign(wd.entities.daybreak!.fields, { owners: [{ party: "brightline", role: "owner", share: 100 }] });
+    });
+    for (const to of ["bl_operating", "db_operating"]) expect(refusal(act(w, "economy.flow_create", { who: "you", label: "Consulting", from: "trust_acct", to, ...once }))).toContain("Trust account pays for Chen Family Trust, not for Alex Rivera");
+  });
 });
 
 describe("money wholly a manager's own keeps no one else's interest", () => {

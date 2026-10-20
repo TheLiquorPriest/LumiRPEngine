@@ -288,34 +288,44 @@ function worthHolders(ctx: ReadContext, id: string): EntityId[] {
   return holdersOf(ctx.state, id).filter((h) => rightsOf(ctx.state, id, h)?.worth === true);
 }
 
+/** How many holders deep money is followed, both to whom it is for (`whoseMoney`) and to what a party's own interests reach (`interestsOf`). */
+const WORTH_DEPTH = 4;
+
 /**
- * Whom `who`'s own interests are (DESIGN §25.1): them, their household and its members, and each
- * party any of those counts the worth of (a business they own, and so may draw from; a trust they
- * benefit from). Money a manager only manages reaches none of them.
+ * Whom `who`'s own interests are (DESIGN §25.1): them, their household and its members, each party
+ * any of those counts the worth of (a business they own, and so may draw from; a trust they benefit
+ * from), and in turn each party those count the worth of (a business their business owns), as deep
+ * as `whoseMoney` follows money. Money a manager only manages reaches none of them.
  */
 export function interestsOf(ctx: ReadContext, who: EntityId): Set<EntityId> {
   const household = householdOf(ctx, who);
   const kin = household === null ? [who] : [who, household, ...membersOf(ctx.registry, ctx.world, ctx.state, household)];
   const out = new Set<EntityId>(kin);
-  for (const id of Object.keys(ctx.state.entities)) if (!out.has(id) && isParty(ctx, id) && worthHolders(ctx, id).some((h) => kin.includes(h))) out.add(id);
+  const parties = Object.keys(ctx.state.entities).filter((id) => !out.has(id) && isParty(ctx, id));
+  let reached: ReadonlySet<EntityId> = out;
+  for (let depth = 0; depth < WORTH_DEPTH && reached.size > 0; depth++) {
+    const next = new Set(parties.filter((id) => !out.has(id) && worthHolders(ctx, id).some((h) => reached.has(h))));
+    for (const id of next) out.add(id);
+    reached = next;
+  }
   return out;
 }
 
 /**
  * Whom the money `side` is for (`all`): a party paying for itself, or the holders an account counts
- * the worth of, and in turn whom those are for (a business's owners, a trust's beneficiaries), a
- * few levels deep; and whom it ends with (`last`), who hold it for no one further.
+ * the worth of, and in turn whom those are for (a business's owners, a trust's beneficiaries),
+ * `WORTH_DEPTH` holders deep; and whom it ends with (`last`), who hold it for no one further.
  */
 function whoseMoney(ctx: ReadContext, side: string): { all: Set<EntityId>; last: Set<EntityId> } {
   const all = new Set<EntityId>();
   const last = new Set<EntityId>();
   let next = isParty(ctx, side) ? [side] : worthHolders(ctx, side);
-  for (let depth = 0; depth < 4 && next.length > 0; depth++) {
+  for (let depth = 0; depth < WORTH_DEPTH && next.length > 0; depth++) {
     const deeper: EntityId[] = [];
     for (const p of next.filter((q) => !all.has(q))) {
       all.add(p);
       const holders = worthHolders(ctx, p);
-      if (holders.length === 0 || depth === 3) last.add(p);
+      if (holders.length === 0 || depth === WORTH_DEPTH - 1) last.add(p);
       else deeper.push(...holders);
     }
     next = deeper;
