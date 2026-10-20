@@ -5832,7 +5832,7 @@ var MINDS_PRESETS = Object.freeze({
   full: { enabled: true, liveLimit: "none", nearRefresh: { scene: true, mention: true, turns: 4, minutes: 60 }, farRefreshMinutes: 720, refreshLimit: "none", memoryLevels: ["live", "near"], tokens: 4000, skip: { maxBeats: "none", maxMindsPerBeat: "none" } }
 });
 function defaultMindsSettings(preset = "standard") {
-  return { ...structuredClone(MINDS_PRESETS[preset]), memory: {}, prompts: {} };
+  return { ...structuredClone(MINDS_PRESETS[preset]), replyTokens: "none", memory: {}, prompts: {} };
 }
 var MINDS_DEFAULTS = Object.freeze(defaultMindsSettings());
 var MIND_PROMPT_MAX = 20000;
@@ -5882,6 +5882,7 @@ function mindsSettingsOf(raw, base = MINDS_DEFAULTS) {
     refreshLimit: limitIn(m.refreshLimit, 0, 64, base.refreshLimit),
     memoryLevels: levels,
     tokens: typeof m.tokens === "number" && Number.isSafeInteger(m.tokens) && m.tokens >= 0 ? m.tokens : base.tokens,
+    replyTokens: limitIn(m.replyTokens, 1, Number.MAX_SAFE_INTEGER, base.replyTokens),
     memory: isRecord(m.memory) ? memoryOverridesOf(m.memory) : structuredClone(base.memory),
     prompts: isRecord(m.prompts) ? prompts : { ...base.prompts },
     skip: { maxBeats: limitIn(skip.maxBeats, 0, 200, base.skip.maxBeats), maxMindsPerBeat: limitIn(skip.maxMindsPerBeat, 0, 64, base.skip.maxMindsPerBeat) }
@@ -5896,6 +5897,9 @@ function effectiveMemory(world, settings) {
 }
 var PLAN_KINDS = ["errand", "meet", "visit", "work", "rest", "leisure", "pay", "lend", "other"];
 var PLAN_PRIORITY = { min: 1, max: 5, normal: 3 };
+function planInForce(p) {
+  return p.source !== "mind";
+}
 var COMMITMENT_KINDS = ["promise", "debt", "grudge", "favour", "plan", "other"];
 var COMMITMENT_STATUSES = ["open", "kept", "broken", "released"];
 var MINDS_KEEP = { notes: 64, openCommitments: 48, closedCommitments: 16, openPlans: 24, closedPlans: 16, witness: 48, presence: 400 };
@@ -5952,22 +5956,21 @@ var MIND_PROMPT_DEFAULTS = Object.freeze({
 });
 var MIND_ANSWER_FORMATS = Object.freeze({
   mind: [
-    'Answer with JSON only: {"monologue": "...", "depiction": "...", "intent": "...", "reactions": ["..."], "plans": [{"what": "...", "kind": "errand|meet|visit|work|rest|leisure|pay|lend|other", "when": {"from": "YYYY-MM-DD HH:MM", "to": "YYYY-MM-DD HH:MM"}, "where": "a place", "with": ["a name"], "priority": 3, "amount": 20}], "mood": "...", "interrupt": {"reason": "..."}}',
+    'Answer with JSON only: {"monologue": "...", "depiction": "...", "intent": "...", "reactions": ["..."], "mood": "...", "interrupt": {"reason": "..."}}',
     "- monologue: their private reasoning in the first person, at most six sentences.",
     "- depiction: how they come across right now, as behaviour anyone present could see (posture, tone, what they do). Never a secret, an unspoken reason or a thought.",
     "- intent: what they mean to do next, in one sentence.",
     '- reactions: up to three short conditional reactions ("if pressed about the cellar, changes the subject").',
-    "- plans: only real intentions for later, with local times; priority 1 (whenever it fits) to 5 (it must happen); kind pay or lend, with amount, when they mean to hand someone money, and no amount otherwise. Leave the list empty when there are none.",
     "- mood: one or two words.",
     "- interrupt: only when the moment is a beat inside a time skip and what they'd do now would interrupt the player character's skipped time (seeking them out, calling them). Leave it out otherwise."
   ].join(`
 `),
   memory: [
-    'Answer with JSON only: {"notes": [{"text": "...", "salience": 3}], "commitments": [{"kind": "promise|debt|grudge|favour|plan|other", "with": ["a name"], "text": "...", "due": "YYYY-MM-DD HH:MM"}], "resolved": [{"id": "...", "status": "kept|broken|released"}], "plans": [{"what": "...", "kind": "errand|meet|visit|work|rest|leisure|pay|lend|other", "when": {"from": "YYYY-MM-DD HH:MM", "to": "YYYY-MM-DD HH:MM"}, "where": "a place", "with": ["a name"], "priority": 3, "amount": 20}], "told": [{"to": ["a name"], "what": "..."}], "summary": "..."}',
+    'Answer with JSON only: {"notes": [{"text": "...", "salience": 3}], "commitments": [{"kind": "promise|debt|grudge|favour|plan|other", "with": ["a name"], "text": "...", "due": "YYYY-MM-DD HH:MM"}], "resolved": [{"id": "...", "status": "kept|broken|released"}], "plans": [], "told": [{"to": ["a name"], "what": "..."}], "summary": "..."}',
     "- notes: at most three things they will remember, in their own perspective; salience 1 (passing) to 5 (unforgettable).",
     "- commitments: promises, debts, grudges, favours and plans with someone that this turn made; due only when a time was set.",
     "- resolved: their open commitments (listed with ids) that this turn kept, broke or released.",
-    "- plans: intentions with times that this turn formed; kind pay or lend, with amount, when they mean to hand someone money, and no amount otherwise.",
+    '- plans: only what this turn states they will do later: said aloud, agreed with someone, or scheduled in the story as written; never a guess at what they might do. Each {"what": "...", "kind": "errand|meet|visit|work|rest|leisure|pay|lend|other", "when": {"from": "YYYY-MM-DD HH:MM", "to": "YYYY-MM-DD HH:MM"}, "where": "a place", "with": ["a name"], "priority": 3, "amount": 20}, with local times; priority 1 (whenever it fits) to 5 (it must happen); kind pay or lend, with amount, when they mean to hand someone money, and no amount otherwise.',
     "- told: what they told whom in this turn, in a few words each.",
     "- summary: their one-paragraph summary rewritten, only when this turn changed who they are or what they're about; leave it out otherwise.",
     "Use empty lists for anything the turn didn't give."
@@ -27669,7 +27672,7 @@ function faded(note, clock, memory) {
   return salienceNow(note, clock, memory) < memory.salience.floor;
 }
 function keptPlans(c) {
-  return [...c.plans].sort((a, b) => a.when.from - b.when.from || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+  return c.plans.filter(planInForce).sort((a, b) => a.when.from - b.when.from || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
 }
 function openPlans(c) {
   return keptPlans(c).filter((p) => p.status === "open");
@@ -27730,8 +27733,8 @@ function validMind(data) {
   const { at, place, level, moment, reason, monologue, depiction, intent, reactions, plans, mood, interrupt, withheld } = data;
   if (!finite2(at) || !(place === null || str13(place)) || !isFidelity(level) || moment !== "turn" && moment !== "beat" || !str13(reason))
     return bad("a mind needs its clock, place, level, moment and reason");
-  if (!str13(monologue) || !str13(depiction) || !str13(intent) || !texts(reactions) || !Array.isArray(plans) || !plans.every((p) => isPlan(p)))
-    return bad("a mind needs its monologue, depiction, intent, reactions and plans");
+  if (!str13(monologue) || !str13(depiction) || !str13(intent) || !texts(reactions) || plans !== undefined && (!Array.isArray(plans) || !plans.every((p) => isPlan(p))))
+    return bad("a mind needs its monologue, depiction, intent and reactions, and any plans it carries well formed");
   if (!(mood === null || str13(mood)) || !(interrupt === null || isRecord(interrupt) && str13(interrupt.reason)) || typeof withheld !== "boolean")
     return bad("a mind's mood, interrupt or withheld flag is malformed");
   return null;
@@ -62711,8 +62714,9 @@ ${list}`;
   return `[${neutralizeMacros(label)}]
 ${body}`;
 }
+var CHARS_PER_TOKEN = 3.2;
 function tokensOf(text) {
-  return Math.ceil(text.length / 3.2);
+  return Math.ceil(text.length / CHARS_PER_TOKEN);
 }
 function sectionTokens(text) {
   return tokensOf(text) + 2 + 3 * (text.match(/\n/g)?.length ?? 0) + (text.match(/\d+/g)?.length ?? 0);
@@ -62737,6 +62741,9 @@ function tail(text, max) {
   const t = clip(text, Number.POSITIVE_INFINITY);
   return t.length <= max ? t : `\u2026${t.slice(t.length - max + 1).replace(/^\S*\s+/, "")}`;
 }
+function latestReply(scope, reply) {
+  return tail(readableReply(reply, scope.hideJson), scope.replyTokens === "none" ? Number.POSITIVE_INFINITY : Math.floor(scope.replyTokens * CHARS_PER_TOKEN));
+}
 function sentence(text) {
   const t = text.trim();
   return t === "" ? "" : `${t[0]?.toUpperCase() ?? ""}${t.slice(1)}${/[.!?\u2026]$/.test(t) ? "" : "."}`;
@@ -62746,9 +62753,9 @@ class ContextFit {
   last;
   parts = [];
   left;
-  constructor(last) {
+  constructor(last, reply = 0) {
     this.last = last;
-    this.left = CONTEXT_MAX - last.length;
+    this.left = CONTEXT_MAX - (last.length - reply);
   }
   get room() {
     return this.left - 2;
@@ -62968,10 +62975,11 @@ function mindContext(scope, report) {
   const said = readSlice(state).presence.findLast((p) => p.msg !== null);
   const heardLast = said === undefined || said.who.includes(who);
   const why = moment.user.trim() === "" ? sentence(moment.reason) : "";
-  const now = moment.kind === "beat" ? [`It is ${formatClock(cal, moment.at)}. ${sentence(moment.reason)}`.trim()] : withPov ? [heardLast && moment.reply.trim() !== "" ? `The story so far ended: ${tail(readableReply(moment.reply, scope.hideJson), RECALL_SIDE)}` : "", why, moment.user.trim() !== "" ? `Now ${povLabel(scope)} says or does: ${clip(moment.user, RECALL_SIDE)}` : `${povLabel(scope)} is here with you.`].filter((l) => l !== "") : [`You aren't with ${povLabel(scope)} right now; carry on with your own day.`, why].filter((l) => l !== "");
+  const ended = moment.kind !== "beat" && withPov && heardLast && moment.reply.trim() !== "" ? latestReply(scope, moment.reply) : "";
+  const now = moment.kind === "beat" ? [`It is ${formatClock(cal, moment.at)}. ${sentence(moment.reason)}`.trim()] : withPov ? [ended !== "" ? `The story so far ended: ${ended}` : "", why, moment.user.trim() !== "" ? `Now ${povLabel(scope)} says or does: ${clip(moment.user, RECALL_SIDE)}` : `${povLabel(scope)} is here with you.`].filter((l) => l !== "") : [`You aren't with ${povLabel(scope)} right now; carry on with your own day.`, why].filter((l) => l !== "");
   const about = withPov && moment.kind === "turn" ? `${moment.user}
 ${heardLast ? moment.reply : ""}` : place ? nameOf5(scope, place) : "";
-  const fit = new ContextFit(block("Now", now.length > 0 && withPov && moment.kind !== "beat" ? [storyVoice(scope), ...now] : now));
+  const fit = new ContextFit(block("Now", now.length > 0 && withPov && moment.kind !== "beat" ? [storyVoice(scope), ...now] : now), ended.length);
   fit.add(`You are ${e?.name ?? who}. ${occasion(scope, place)}`);
   fit.add(block("Who you are", sheetLines(scope)));
   fit.add(c.summary !== "" ? block("Your story so far", [c.summary]) : "");
@@ -62992,7 +63000,8 @@ function memoryContext(scope, turn) {
   const cal = calendarOf(world);
   const commitments = openCommitments(c).map((x) => `- [${x.id}] ${x.kind}${x.with.length > 0 ? ` with ${x.with.map((id) => nameOf5(scope, id)).join(", ")}` : ""}: ${x.text}`);
   const plans = openPlans(c).map((p) => `- ${p.what}${p.cents !== undefined ? `, ${formatMoney(p.cents, world.currency)}` : ""} (${formatClock(cal, p.when.from)})`);
-  const fit = new ContextFit(block("The turn just written", [storyVoice(scope), turn.left ? `${povLabel(scope)} left you partway through this turn: whatever the story tells after they left happened without you.` : "", turn.user.trim() !== "" ? `${povLabel(scope)} (the player character) wrote: ${clip(turn.user, RECALL_SIDE)}` : "", `Story: ${tail(readableReply(turn.reply, scope.hideJson), RECALL_SIDE * 2)}`].filter((l) => l !== "")));
+  const story = latestReply(scope, turn.reply);
+  const fit = new ContextFit(block("The turn just written", [storyVoice(scope), turn.left ? `${povLabel(scope)} left you partway through this turn: whatever the story tells after they left happened without you.` : "", turn.user.trim() !== "" ? `${povLabel(scope)} (the player character) wrote: ${clip(turn.user, RECALL_SIDE)}` : "", `Story: ${story}`].filter((l) => l !== "")), story.length);
   fit.add(`You are ${nameOf5(scope, who)}. ${occasion(scope, placeOfEntity(state, who))}`);
   fit.add(c.summary !== "" ? block("Your story so far", [c.summary]) : "");
   fit.add(block("Your open commitments (by id)", commitments));
@@ -64308,7 +64317,7 @@ function placeNamed2(world, name) {
     return null;
   return Object.keys(world.places).find((id) => id === name.trim() || own(world.places, id)?.name.toLowerCase() === n) ?? null;
 }
-function plansFrom(reg, world, state, who, raw, source) {
+function plansFrom(reg, world, state, who, raw) {
   const now = state.clock;
   const out = [];
   for (const [i, d] of (Array.isArray(raw) ? raw : []).slice(0, MIND_TEXT_CAPS.plans).entries()) {
@@ -64330,7 +64339,7 @@ function plansFrom(reg, world, state, who, raw, source) {
     const cents = !money ? 0 : typeof d.amount === "number" && Number.isFinite(d.amount) ? Math.round(d.amount * 10 ** world.currency.decimals) : parseMoneyInput(str15(d.amount), world.currency) ?? 0;
     if (money && (cents <= 0 || withIds.length === 0))
       continue;
-    out.push({ id: `p_${hashParts("minds.plan", who, String(now), String(i), what).slice(0, 10)}`, what, kind, when: { from, to }, where: placeNamed2(world, str15(d.where)), with: withIds, priority, status: "open", made: now, source, closed: null, reason: null, ...money ? { cents } : {} });
+    out.push({ id: `p_${hashParts("minds.plan", who, String(now), String(i), what).slice(0, 10)}`, what, kind, when: { from, to }, where: placeNamed2(world, str15(d.where)), with: withIds, priority, status: "open", made: now, source: "memory", closed: null, reason: null, ...money ? { cents } : {} });
   }
   return out;
 }
@@ -64361,7 +64370,6 @@ function mindData(reg, world, state, who, raw, moment, level, reason) {
     depiction,
     intent,
     reactions,
-    plans: plansFrom(reg, world, state, who, raw.plans, "mind"),
     mood: mood === "" ? null : mood,
     interrupt: interruptReason === "" ? null : { reason: interruptReason },
     withheld
@@ -64420,7 +64428,7 @@ async function runMinds(deps, input) {
       const t = texts.get(r.key);
       return t ? [{ ...t, on: r.on }] : [];
     });
-    const scope = { reg, world, state, who, memory, messages, hideJson: settings.hideJsonBlocks, moment: input.moment, loreTokens, pinned };
+    const scope = { reg, world, state, who, memory, messages, hideJson: settings.hideJsonBlocks, replyTokens: settings.minds.replyTokens, moment: input.moment, loreTokens, pinned };
     const report = { pinned: [] };
     const usage = { tokens: 0 };
     const failure = { reason: "" };
@@ -64573,7 +64581,7 @@ function memoryData(reg, world, state, who, raw, listeners) {
     return what === "" || to.length === 0 ? [] : [{ to, what }];
   });
   const summary = capText(str15(raw.summary), MIND_TEXT_CAPS.summary);
-  return { entity: who, at: now, notes, commitments, resolved, plans: plansFrom(reg, world, state, who, raw.plans, "memory"), told, summary: summary === "" ? null : summary };
+  return { entity: who, at: now, notes, commitments, resolved, plans: plansFrom(reg, world, state, who, raw.plans), told, summary: summary === "" ? null : summary };
 }
 var CONSOLIDATIONS_PER_TURN = 2;
 async function postMinds(deps, input) {
@@ -64599,7 +64607,7 @@ async function postMinds(deps, input) {
   const moment = { kind: "turn", at: state.clock, reason: "after the reply", user: input.user, reply: input.reply };
   const remembered = await Promise.all(remembering.map(async (id) => {
     const prompt = mindPrompt("memory", world, settings.minds, varsFor(world, w.state, id));
-    const scope = { reg, world, state: w.state, who: id, memory, messages, hideJson: settings.hideJsonBlocks, moment, loreTokens: 0 };
+    const scope = { reg, world, state: w.state, who: id, memory, messages, hideJson: settings.hideJsonBlocks, replyTokens: settings.minds.replyTokens, moment, loreTokens: 0 };
     const usage = { tokens: 0 };
     const t0 = performance.now();
     const raw = input.signal.aborted ? null : await deps.steps.helperJson("memory", prompt.text, memoryContext(scope, { user: input.user, reply: input.reply, left: left.includes(id) }), memoryConfig, userId, input.signal, { guidance: input.guidance?.memory ?? deps.presets.last(userId).guidance.memory ?? "", usage });
@@ -66152,7 +66160,7 @@ function expandPresets(settings, patch) {
   const modelUse = isRecord(patch.modelUse) ? patch.modelUse.preset : undefined;
   if (modelUse === "lean" || modelUse === "standard" || modelUse === "full") {
     out.modelUse = { preset: modelUse, ...structuredClone(MODEL_USE_PRESETS[modelUse]) };
-    out.minds = { ...structuredClone(MINDS_PRESETS[modelUse]), memory: out.minds.memory, prompts: out.minds.prompts };
+    out.minds = { ...structuredClone(MINDS_PRESETS[modelUse]), replyTokens: out.minds.replyTokens, memory: out.minds.memory, prompts: out.minds.prompts };
   }
   return out;
 }
@@ -67708,7 +67716,7 @@ class Runtime {
     this.steps.onCallStart = (userId, purpose) => this.diag.callStart(userId, purpose);
     this.toolSupport = new ToolSupport(this.host);
     this.minds = { host: this.host, registry: this.registry, steps: this.steps, settings: this.settings, presets: this.presets };
-    this.ledger = new LedgerService(this.host, (chatId, userId) => this.resolveEnv(chatId, userId), new LedgerFold(this.registry, { fingerprint: "1792534898" }), (chatId) => messages.forget(chatId));
+    this.ledger = new LedgerService(this.host, (chatId, userId) => this.resolveEnv(chatId, userId), new LedgerFold(this.registry, { fingerprint: "1792536758" }), (chatId) => messages.forget(chatId));
     this.studio = new StudioBridge(this.host, this.worlds);
     this.worlds.onChange = (worldId, userId) => this.studio.worldChanged(worldId, userId);
     this.push = new StatePush(this.host, async (chatId, userId) => {

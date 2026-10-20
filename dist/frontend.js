@@ -4621,12 +4621,15 @@ var MINDS_PRESETS = Object.freeze({
   full: { enabled: true, liveLimit: "none", nearRefresh: { scene: true, mention: true, turns: 4, minutes: 60 }, farRefreshMinutes: 720, refreshLimit: "none", memoryLevels: ["live", "near"], tokens: 4000, skip: { maxBeats: "none", maxMindsPerBeat: "none" } }
 });
 function defaultMindsSettings(preset = "standard") {
-  return { ...structuredClone(MINDS_PRESETS[preset]), memory: {}, prompts: {} };
+  return { ...structuredClone(MINDS_PRESETS[preset]), replyTokens: "none", memory: {}, prompts: {} };
 }
 var MINDS_DEFAULTS = Object.freeze(defaultMindsSettings());
 var MIND_PROMPT_MAX = 20000;
 var PLAN_KINDS = ["errand", "meet", "visit", "work", "rest", "leisure", "pay", "lend", "other"];
 var PLAN_PRIORITY = { min: 1, max: 5, normal: 3 };
+function planInForce(p) {
+  return p.source !== "mind";
+}
 var COMMITMENT_KINDS = ["promise", "debt", "grudge", "favour", "plan", "other"];
 var COMMITMENT_STATUSES = ["open", "kept", "broken", "released"];
 var MIND_TEXT_CAPS = {
@@ -4664,22 +4667,21 @@ var MIND_PROMPT_DEFAULTS = Object.freeze({
 });
 var MIND_ANSWER_FORMATS = Object.freeze({
   mind: [
-    'Answer with JSON only: {"monologue": "...", "depiction": "...", "intent": "...", "reactions": ["..."], "plans": [{"what": "...", "kind": "errand|meet|visit|work|rest|leisure|pay|lend|other", "when": {"from": "YYYY-MM-DD HH:MM", "to": "YYYY-MM-DD HH:MM"}, "where": "a place", "with": ["a name"], "priority": 3, "amount": 20}], "mood": "...", "interrupt": {"reason": "..."}}',
+    'Answer with JSON only: {"monologue": "...", "depiction": "...", "intent": "...", "reactions": ["..."], "mood": "...", "interrupt": {"reason": "..."}}',
     "- monologue: their private reasoning in the first person, at most six sentences.",
     "- depiction: how they come across right now, as behaviour anyone present could see (posture, tone, what they do). Never a secret, an unspoken reason or a thought.",
     "- intent: what they mean to do next, in one sentence.",
     '- reactions: up to three short conditional reactions ("if pressed about the cellar, changes the subject").',
-    "- plans: only real intentions for later, with local times; priority 1 (whenever it fits) to 5 (it must happen); kind pay or lend, with amount, when they mean to hand someone money, and no amount otherwise. Leave the list empty when there are none.",
     "- mood: one or two words.",
     "- interrupt: only when the moment is a beat inside a time skip and what they'd do now would interrupt the player character's skipped time (seeking them out, calling them). Leave it out otherwise."
   ].join(`
 `),
   memory: [
-    'Answer with JSON only: {"notes": [{"text": "...", "salience": 3}], "commitments": [{"kind": "promise|debt|grudge|favour|plan|other", "with": ["a name"], "text": "...", "due": "YYYY-MM-DD HH:MM"}], "resolved": [{"id": "...", "status": "kept|broken|released"}], "plans": [{"what": "...", "kind": "errand|meet|visit|work|rest|leisure|pay|lend|other", "when": {"from": "YYYY-MM-DD HH:MM", "to": "YYYY-MM-DD HH:MM"}, "where": "a place", "with": ["a name"], "priority": 3, "amount": 20}], "told": [{"to": ["a name"], "what": "..."}], "summary": "..."}',
+    'Answer with JSON only: {"notes": [{"text": "...", "salience": 3}], "commitments": [{"kind": "promise|debt|grudge|favour|plan|other", "with": ["a name"], "text": "...", "due": "YYYY-MM-DD HH:MM"}], "resolved": [{"id": "...", "status": "kept|broken|released"}], "plans": [], "told": [{"to": ["a name"], "what": "..."}], "summary": "..."}',
     "- notes: at most three things they will remember, in their own perspective; salience 1 (passing) to 5 (unforgettable).",
     "- commitments: promises, debts, grudges, favours and plans with someone that this turn made; due only when a time was set.",
     "- resolved: their open commitments (listed with ids) that this turn kept, broke or released.",
-    "- plans: intentions with times that this turn formed; kind pay or lend, with amount, when they mean to hand someone money, and no amount otherwise.",
+    '- plans: only what this turn states they will do later: said aloud, agreed with someone, or scheduled in the story as written; never a guess at what they might do. Each {"what": "...", "kind": "errand|meet|visit|work|rest|leisure|pay|lend|other", "when": {"from": "YYYY-MM-DD HH:MM", "to": "YYYY-MM-DD HH:MM"}, "where": "a place", "with": ["a name"], "priority": 3, "amount": 20}, with local times; priority 1 (whenever it fits) to 5 (it must happen); kind pay or lend, with amount, when they mean to hand someone money, and no amount otherwise.',
     "- told: what they told whom in this turn, in a few words each.",
     "- summary: their one-paragraph summary rewritten, only when this turn changed who they are or what they're about; leave it out otherwise.",
     "Use empty lists for anything the turn didn't give."
@@ -12848,6 +12850,9 @@ function mindsPolicyPatch(change) {
 function withMemoryLevel(levels, level, on) {
   return FIDELITIES.filter((f) => f !== "background" && (f === level ? on : levels.includes(f)));
 }
+function mindsReplyPatch(replyTokens) {
+  return { minds: { replyTokens } };
+}
 function mindsPromptPatch(purpose, text) {
   if (text !== null && text.length > MIND_PROMPT_MAX)
     return null;
@@ -20229,6 +20234,7 @@ function Note(props) {
     children: props.children
   }, undefined, false, undefined, this);
 }
+var REPLY_TOKENS_START = 1000;
 function LimitField(props) {
   const fallback = props.fallback === "none" ? props.min : props.fallback;
   return /* @__PURE__ */ u3("div", {
@@ -20435,7 +20441,7 @@ function MindsSection(props) {
               onChange: (enabled) => policy({ enabled })
             }, undefined, false, undefined, this),
             /* @__PURE__ */ u3(Note, {
-              children: "Picking a Model use preset sets everything here but your prompts and memory overrides; changing any of these makes it Custom."
+              children: "Picking a Model use preset sets everything here but how much of the reply minds read, your prompts and memory overrides; changing any of the rest makes it Custom."
             }, undefined, false, undefined, this)
           ]
         }, undefined, true, undefined, this)
@@ -20559,6 +20565,27 @@ function MindsSection(props) {
                   disabled: busy,
                   onChange: (on) => policy({ memoryLevels: withMemoryLevel(minds.memoryLevels, level, on) })
                 }, level, false, undefined, this))
+              ]
+            }, undefined, true, undefined, this)
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3(Section, {
+            title: "The latest reply",
+            children: /* @__PURE__ */ u3("div", {
+              class: "lre-minds-body",
+              children: [
+                /* @__PURE__ */ u3(LimitField, {
+                  label: "Latest reply minds read (tokens)",
+                  noneLabel: "the whole reply",
+                  value: minds.replyTokens,
+                  min: 1,
+                  step: 100,
+                  fallback: REPLY_TOKENS_START,
+                  disabled: busy,
+                  onChange: (replyTokens) => props.patch(mindsReplyPatch(replyTokens))
+                }, undefined, false, undefined, this),
+                /* @__PURE__ */ u3(Note, {
+                  children: "What a character thinks from, before the reply and when you run minds now, and what the memory step reads after it. Cut to a number, they read its end. It comes on top of the rest of what they're given, and only characters who were there for the reply read it."
+                }, undefined, false, undefined, this)
               ]
             }, undefined, true, undefined, this)
           }, undefined, false, undefined, this),
@@ -35388,7 +35415,7 @@ function Plans(props) {
     title: "Plans",
     aside: /* @__PURE__ */ u3(Badge, {
       children: [
-        c.plans.filter((p) => p.status === "open").length,
+        c.plans.filter((p) => p.status === "open" && planInForce(p)).length,
         " open"
       ]
     }, undefined, true, undefined, this),
@@ -35424,13 +35451,15 @@ function Plans(props) {
                   ]
                 }, undefined, true, undefined, this),
                 /* @__PURE__ */ u3("span", {
-                  children: [p.where ? `at ${nameIn2(ctx.places, p.where)}` : null, p.with.length > 0 ? `with ${p.with.map((w) => nameIn2(ctx.people, w)).join(", ")}` : null, `priority ${p.priority}`, `from ${p.source === "gm" ? "you" : `their ${p.source}`}`, p.reason].filter((part) => part !== null && part !== "").join(" · ")
+                  children: [p.where ? `at ${nameIn2(ctx.places, p.where)}` : null, p.with.length > 0 ? `with ${p.with.map((w) => nameIn2(ctx.people, w)).join(", ")}` : null, `priority ${p.priority}`, p.source === "gm" ? "from you" : p.source === "mind" ? "a thought from their mind, which drives nothing" : `from their ${p.source}`, p.reason].filter((part) => part !== null && part !== "").join(" · ")
                 }, undefined, false, undefined, this)
               ]
             }, undefined, true, undefined, this),
-            badge: /* @__PURE__ */ u3(Badge, {
+            badge: planInForce(p) ? /* @__PURE__ */ u3(Badge, {
               tone: PLAN_TONE[p.status],
               children: PLAN_STATUS_LABEL[p.status]
+            }, undefined, false, undefined, this) : /* @__PURE__ */ u3(Badge, {
+              children: "Thought"
             }, undefined, false, undefined, this),
             chevron: true,
             disabled: ctx.busy,
