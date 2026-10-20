@@ -131,7 +131,7 @@ export const DEFAULT_FIDELITY_THRESHOLDS: Readonly<FidelityThresholds> = Object.
 
 export const DEFAULT_MINDS_MEMORY: Readonly<MindsMemoryConfig> = Object.freeze({
   witness: { show: 8 },
-  recall: { recent: 4, relevant: 4, tokens: 1200 },
+  recall: { recent: 4, relevant: 4, tokens: 4000 },
   notes: { show: 8, keep: 24 },
   commitments: { show: 8 },
   salience: { halfLifeDays: 7, floor: 0.5 },
@@ -153,7 +153,7 @@ export const MINDS_RANGES = {
   threshold: [0, 1000],
   show: [0, 64],
   keep: [1, 64],
-  recallTokens: [0, 8000],
+  recallTokens: [0, Number.MAX_SAFE_INTEGER],
   halfLifeDays: [0.1, 3650],
   floor: [0, 5],
   periodDays: [0.1, 365],
@@ -324,9 +324,9 @@ type PresetMinds = Omit<MindsSettings, "prompts" | "memory">;
 
 /** The minds part of each Model use preset (D25): Lean off; Standard 3 Live with notes for Live; Full no limit with notes for Live and Near. */
 export const MINDS_PRESETS: Readonly<Record<"lean" | "standard" | "full", Readonly<PresetMinds>>> = Object.freeze({
-  lean: { enabled: false, liveLimit: 3, nearRefresh: { scene: true, mention: true, turns: 6, minutes: 120 }, farRefreshMinutes: 1440, refreshLimit: 1, memoryLevels: [], tokens: 300, skip: { maxBeats: 4, maxMindsPerBeat: 2 } },
-  standard: { enabled: true, liveLimit: 3, nearRefresh: { scene: true, mention: true, turns: 6, minutes: 120 }, farRefreshMinutes: 1440, refreshLimit: 2, memoryLevels: ["live"], tokens: 600, skip: { maxBeats: 6, maxMindsPerBeat: 3 } },
-  full: { enabled: true, liveLimit: "none", nearRefresh: { scene: true, mention: true, turns: 4, minutes: 60 }, farRefreshMinutes: 720, refreshLimit: "none", memoryLevels: ["live", "near"], tokens: 1000, skip: { maxBeats: "none", maxMindsPerBeat: "none" } },
+  lean: { enabled: false, liveLimit: 3, nearRefresh: { scene: true, mention: true, turns: 6, minutes: 120 }, farRefreshMinutes: 1440, refreshLimit: 1, memoryLevels: [], tokens: 1200, skip: { maxBeats: 4, maxMindsPerBeat: 2 } },
+  standard: { enabled: true, liveLimit: 3, nearRefresh: { scene: true, mention: true, turns: 6, minutes: 120 }, farRefreshMinutes: 1440, refreshLimit: 2, memoryLevels: ["live"], tokens: 2400, skip: { maxBeats: 6, maxMindsPerBeat: 3 } },
+  full: { enabled: true, liveLimit: "none", nearRefresh: { scene: true, mention: true, turns: 4, minutes: 60 }, farRefreshMinutes: 720, refreshLimit: "none", memoryLevels: ["live", "near"], tokens: 4000, skip: { maxBeats: "none", maxMindsPerBeat: "none" } },
 });
 
 /** A new user's minds settings: Standard's. */
@@ -384,7 +384,7 @@ export function mindsSettingsOf(raw: unknown, base: Readonly<MindsSettings> = MI
     farRefreshMinutes: limitIn(m.farRefreshMinutes, 1, 525_600, base.farRefreshMinutes),
     refreshLimit: limitIn(m.refreshLimit, 0, 64, base.refreshLimit),
     memoryLevels: levels,
-    tokens: typeof m.tokens === "number" && Number.isInteger(m.tokens) && m.tokens >= 0 && m.tokens <= 100_000 ? m.tokens : base.tokens,
+    tokens: typeof m.tokens === "number" && Number.isSafeInteger(m.tokens) && m.tokens >= 0 ? m.tokens : base.tokens,
     memory: isRecord(m.memory) ? memoryOverridesOf(m.memory) : structuredClone(base.memory),
     prompts: isRecord(m.prompts) ? prompts : { ...base.prompts },
     skip: { maxBeats: limitIn(skip.maxBeats, 0, 200, base.skip.maxBeats), maxMindsPerBeat: limitIn(skip.maxMindsPerBeat, 0, 64, base.skip.maxMindsPerBeat) },

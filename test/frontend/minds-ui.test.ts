@@ -15,7 +15,7 @@ import { Rig } from "../support/rig";
 import { stepUpdatePatch } from "../../src/frontend/settings/steps";
 import { mindPrompt, mindsOn, mindsStepConfig } from "../../src/backend/minds";
 import { lintWorld } from "../../src/engine/authoring";
-import { HELPER_MAX_TOKENS, stepConfigOf, type ModelUseSettings } from "../../src/shared/settings";
+import { stepConfigOf, type ModelUseSettings } from "../../src/shared/settings";
 import { createRegistry } from "../../src/engine/registry-impl";
 import { ALL_PACKS } from "../../src/packs/index";
 import { mindLines } from "../../src/packs/minds/core/section";
@@ -116,15 +116,17 @@ describe("Settings → Steps with the minds steps", () => {
     const lean = await set({ modelUse: { preset: "lean" } });
     for (const purpose of ["mind", "memory", "skip", "consolidate"] as const) {
       expect(lean.modelUse.steps[purpose]).toBeUndefined();
-      // The skip step is off until the user turns it on (DESIGN §24.7); the others run.
-      expect(stepConfigOf(lean.modelUse.steps, purpose)).toEqual({ enabled: purpose !== "skip", signals: [], maxTokens: HELPER_MAX_TOKENS });
+      // The skip step is off until the user turns it on (DESIGN §24.7); the others run, with the helper model's max tokens.
+      expect(stepConfigOf(lean.modelUse.steps, purpose)).toEqual({ enabled: purpose !== "skip", signals: [] });
     }
     // The card saves its whole config with the change, as the Connection select does.
     const card = stepConfigOf(lean.modelUse.steps, "mind");
     await set(stepUpdatePatch("mind", { ...card, route: { provider: "helper", connectionId: "conn-2", model: null } }));
     const after = await set(mindsPolicyPatch({ enabled: true }));
     expect(mindsOn(after)).toBe(true);
-    expect(mindsStepConfig(after.modelUse, "mind")).toMatchObject({ enabled: true, maxTokens: HELPER_MAX_TOKENS, route: { connectionId: "conn-2" } });
+    const saved = mindsStepConfig(after.modelUse, "mind");
+    expect(saved).toMatchObject({ enabled: true, route: { connectionId: "conn-2" } });
+    expect(saved?.maxTokens).toBeUndefined();
   });
 });
 

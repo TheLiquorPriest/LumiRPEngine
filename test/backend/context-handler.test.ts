@@ -4,7 +4,9 @@
 
 import { describe, expect, test } from "bun:test";
 import { CONTEXT_HANDLER_MAX_MS, PLAN_MARGIN_MS, PRE_REPLY_MAX_MS } from "../../src/shared/settings";
-import { defaultSettings, SettingsStore } from "../../src/backend/settings-store";
+import { defaultSettings, MODEL_USE_PRESETS, SettingsStore } from "../../src/backend/settings-store";
+
+const FULL_PRE_MS = MODEL_USE_PRESETS.full.budgets.pre.ms;
 import { FakeHost } from "../support/fake-host";
 import { Rig } from "../support/rig";
 
@@ -15,7 +17,7 @@ describe("the context handler's timeout", () => {
     rig.body(await rig.send({ type: "lre.settings.get" }));
     expect(rig.host.contextTimeoutMs).toBe(defaultSettings().modelUse.budgets.pre.ms + PLAN_MARGIN_MS);
     rig.body(await rig.send({ type: "lre.settings.set", patch: { modelUse: { preset: "full" } } }));
-    expect(rig.host.contextTimeoutMs).toBe(60_000 + PLAN_MARGIN_MS);
+    expect(rig.host.contextTimeoutMs).toBe(FULL_PRE_MS + PLAN_MARGIN_MS);
     rig.body(await rig.send({ type: "lre.settings.set", patch: { modelUse: { preset: "custom", budgets: { pre: { ms: 100_000 } } } } }));
     expect(rig.host.contextTimeoutMs).toBe(100_000 + PLAN_MARGIN_MS);
   });
@@ -51,8 +53,8 @@ describe("the context handler's timeout", () => {
     rig.body(await rig.send({ type: "lre.settings.set", patch: { modelUse: { preset: "full" } } }));
     expect(registered).toHaveLength(1);
     await rig.host.finish(g, "Quiet.");
-    expect(registered).toEqual([defaultSettings().modelUse.budgets.pre.ms + PLAN_MARGIN_MS, 60_000 + PLAN_MARGIN_MS]);
-    expect(rig.host.contextTimeoutMs).toBe(60_000 + PLAN_MARGIN_MS);
+    expect(registered).toEqual([defaultSettings().modelUse.budgets.pre.ms + PLAN_MARGIN_MS, FULL_PRE_MS + PLAN_MARGIN_MS]);
+    expect(rig.host.contextTimeoutMs).toBe(FULL_PRE_MS + PLAN_MARGIN_MS);
     expect(rig.rt.ledger.errors).toEqual([]);
   });
 });

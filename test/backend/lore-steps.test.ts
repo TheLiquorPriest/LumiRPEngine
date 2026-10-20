@@ -149,9 +149,20 @@ const TIMETABLE: JsonObject = { id: "timetable", title: "Timetable", content: "B
 const asked = (req: QuietRequest): boolean => req.messages.some((m) => m.content.startsWith("Lore you asked for:"));
 const isStep = (req: QuietRequest, step: string): boolean => req.messages[0]?.content.includes(PROMPTS[step] ?? "\u0000") === true;
 
+/**
+ * Standard's lore and lookups before they rose for reasoning models: prefetches small enough that a
+ * lookup has lore left to find, two lookups before the reply and one after.
+ */
+const TIGHT: JsonObject = {
+  modelUse: {
+    preset: "custom",
+    steps: Object.fromEntries(["interpret", "extract", "npc.choose", "judge"].map((step) => [step, { lore: { policy: "prefetch+lookup", tokens: 400 } }])),
+    budgets: { pre: { lookup: { calls: 2, ms: 15_000 } }, post: { lookup: { calls: 1, ms: 20_000 } } },
+  },
+};
 describe("lookups", () => {
   test("a tool-call lookup: the model calls lore_search, the engine answers in a follow-up message, and the meter counts the round", async () => {
-    const { rig, chatId } = await loreChat([{ modelUse: { preset: "standard" } }, { minds: { enabled: false } }], { ...LORE, timetable: TIMETABLE });
+    const { rig, chatId } = await loreChat([{ modelUse: { preset: "standard" } }, TIGHT, { minds: { enabled: false } }], { ...LORE, timetable: TIMETABLE });
     const search: QuietToolCall = { name: "lore_search", args: { query: "timetable" }, callId: "c1" };
     rig.host.quietReply = (req) => (isStep(req, "interpret") && req.tools && !asked(req) ? { content: "", toolCalls: [search] } : quiet(req));
     const start = rig.rt.meter.log.length;
@@ -202,7 +213,7 @@ describe("lookups", () => {
   });
 
   test("when the phase's lookup budget is spent, a step gets no lookup and answers with its prefetch", async () => {
-    const { rig, chatId } = await loreChat([{ modelUse: { preset: "full" } }, { modelUse: { preset: "custom", steps: { brief: { enabled: true, signals: ["always"], lore: { policy: "prefetch+lookup", tokens: 400 } } }, budgets: { pre: { lookup: { calls: 1, ms: 60_000 } } } } }], { ...LORE, timetable: TIMETABLE });
+    const { rig, chatId } = await loreChat([{ modelUse: { preset: "full" } }, { modelUse: { preset: "custom", steps: { interpret: { lore: { policy: "prefetch+lookup", tokens: 600 } }, brief: { enabled: true, signals: ["always"], lore: { policy: "prefetch+lookup", tokens: 400 } } }, budgets: { pre: { lookup: { calls: 1, ms: 60_000 } } } } }], { ...LORE, timetable: TIMETABLE });
     const search: QuietToolCall = { name: "lore_search", args: { query: "timetable" }, callId: "c1" };
     rig.host.quietReply = (req) => (req.tools && !asked(req) ? { content: "", toolCalls: [search] } : quiet(req));
     await rig.turn(chatId, "I walk to the ferry and wait.", "The ferry horn sounds.");
@@ -235,7 +246,7 @@ describe("the decision pre-pass", () => {
   const prepassOf = (req: QuietRequest): boolean => req.messages[0]?.content.startsWith("You get a decision ready") === true;
 
   test("npc.choose on the Decision connection asks the helper what lore it needs, on the lookup budget, and reads the hits with its prefetch", async () => {
-    const { rig, chatId } = await loreChat([{ modelUse: { preset: "standard" } }, { minds: { enabled: false } }], { ...LORE, timetable: TIMETABLE });
+    const { rig, chatId } = await loreChat([{ modelUse: { preset: "standard" } }, TIGHT, { minds: { enabled: false } }], { ...LORE, timetable: TIMETABLE });
     const search: QuietToolCall = { name: "lore_search", args: { query: "timetable" }, callId: "c1" };
     rig.host.quietReply = (req) => (prepassOf(req) ? { content: "", toolCalls: [search] } : quiet(req));
     const start = rig.rt.meter.log.length;
@@ -257,7 +268,7 @@ describe("the decision pre-pass", () => {
   });
 
   test("in the need form, and with no lookup left the decision reads its prefetch only", async () => {
-    const { rig, chatId } = await loreChat([{ modelUse: { preset: "standard" } }, { modelUse: { preset: "custom", steps: { "npc.choose": { enabled: true, signals: ["tie_zone"], route: { provider: "decision", connectionId: null, model: null }, lore: { policy: "prefetch+lookup", tokens: 400, transport: "need" } } } } }], { ...LORE, timetable: TIMETABLE });
+    const { rig, chatId } = await loreChat([{ modelUse: { preset: "standard" } }, TIGHT, { modelUse: { preset: "custom", steps: { "npc.choose": { enabled: true, signals: ["tie_zone"], route: { provider: "decision", connectionId: null, model: null }, lore: { policy: "prefetch+lookup", tokens: 400, transport: "need" } } } } }], { ...LORE, timetable: TIMETABLE });
     rig.host.quietReply = (req) => (prepassOf(req) ? JSON.stringify({ need: ["timetable"] }) : quiet(req));
     await rig.turn(chatId, "I walk to the ferry and wait.", "The ferry horn sounds.");
     const [prepass] = rig.host.quietCalls.filter(prepassOf);
@@ -265,7 +276,7 @@ describe("the decision pre-pass", () => {
     expect(prepass?.messages[0]?.content).toContain('{"need"');
     expect(JSON.stringify(rig.host.decideCalls.find((r) => JSON.stringify(r.state).includes('"agent":"Dev"'))?.state)).toContain("Timetable: Boats leave at 7, 12 and 18.");
     // One lookup before the reply: interpret holds it first, by priority.
-    const single = await loreChat([{ modelUse: { preset: "standard" } }, { modelUse: { preset: "custom", budgets: { pre: { lookup: { calls: 1, ms: 15_000 } } } } }], { ...LORE, timetable: TIMETABLE });
+    const single = await loreChat([{ modelUse: { preset: "standard" } }, TIGHT, { modelUse: { preset: "custom", budgets: { pre: { lookup: { calls: 1, ms: 15_000 } } } } }], { ...LORE, timetable: TIMETABLE });
     single.rig.host.quietReply = (req) => (prepassOf(req) ? JSON.stringify({ need: ["timetable"] }) : quiet(req));
     await single.rig.turn(single.chatId, "I walk to the ferry and wait.", "The ferry horn sounds.");
     expect(single.rig.host.quietCalls.filter(prepassOf)).toEqual([]);

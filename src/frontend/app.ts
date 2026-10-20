@@ -50,7 +50,7 @@ export interface GmState {
   section: GmSection;
 }
 
-export type SettingsPage = "home" | "model" | "steps" | "minds" | "realism" | "checks" | "time" | "extraction" | "swipes" | "preset" | "display" | "caveats" | "diagnostics";
+export type SettingsPage = "home" | "helper" | "model" | "steps" | "minds" | "realism" | "checks" | "time" | "extraction" | "swipes" | "preset" | "display" | "caveats" | "diagnostics";
 
 export type BuildRoute =
   | { view: "worlds" }

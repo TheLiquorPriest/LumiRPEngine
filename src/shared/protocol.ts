@@ -225,6 +225,9 @@ export type KeepRequest = Request<"lre.keep"> & { chatId: ChatId } & (
 
 export interface SettingsGetRequest extends Request<"lre.settings.get"> {}
 
+/** The D32 preset caveats (Settings → Caveats), apart from settings: they need a dry run of the chat, which takes long on a long chat. */
+export interface SettingsCaveatsRequest extends Request<"lre.settings.caveats"> {}
+
 /**
  * An RFC 7386 merge patch over UserSettings: `null` deletes (unpin a type with
  * `{extraction: {purchase: null}}`) and arrays replace. A `realism.preset` or `modelUse.preset`
@@ -509,6 +512,7 @@ export type FrontendToBackend =
   | KeepRequest
   | SettingsGetRequest
   | SettingsSetRequest
+  | SettingsCaveatsRequest
   | EditorRequest
   | WorldRequest
   | UiRequest
@@ -539,11 +543,10 @@ export interface ExtractionModeView {
   rejected: number;
 }
 
-/** Settings plus derived views: effective extraction modes and the D32 preset caveats. */
+/** Settings plus a derived view: effective extraction modes. */
 export interface SettingsResult {
   settings: UserSettings;
   extraction: Record<ExtractionType, ExtractionModeView>;
-  caveats: { code: string; message: string }[];
 }
 
 /** Results per request type. */
@@ -561,6 +564,7 @@ export interface ResultBodies {
   "lre.keep": { pending: boolean };
   "lre.settings.get": SettingsResult;
   "lre.settings.set": SettingsResult;
+  "lre.settings.caveats": { caveats: { code: string; message: string }[] };
   /** `base`: the revision the draft started from (send it with the next edit); `stored`: whether a draft exists apart from the head; `version`: the working copy's version (see `EditorRequest`). */
   "lre.editor": { draft: WorldDoc; lint: LintIssue[]; base: RevisionId | null; stored: boolean; version: number };
   /**
