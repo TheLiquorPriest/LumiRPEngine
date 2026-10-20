@@ -58063,6 +58063,7 @@ class LedgerService {
   resets = new Map;
   damaged = new Map;
   gates = new Map;
+  pages = new Map;
   started = new Map;
   leases = new Map;
   answered = new Set;
@@ -58234,6 +58235,35 @@ class LedgerService {
       if (gate.userId === userId)
         this.dropIfStale(chatId);
   }
+  page(session, userId, chatId, viewing) {
+    this.pages.delete(session);
+    this.pages.set(session, { userId, chatId, viewing });
+    if (this.pages.size > 1024)
+      this.pages.delete(this.pages.keys().next().value ?? "");
+    for (const [id, gate] of this.gates) {
+      const p = gate.prepared;
+      if (p && p.generationId === null && p.holder === session && !this.shows(session, id))
+        this.handOver(id, gate.userId, p);
+    }
+  }
+  shows(session, chatId) {
+    const page = this.pages.get(session);
+    return page === undefined || page.chatId === chatId && page.viewing;
+  }
+  viewerOf(chatId, userId) {
+    let last = null;
+    for (const [session, page] of this.pages)
+      if (page.userId === userId && page.chatId === chatId && page.viewing)
+        last = session;
+    return last;
+  }
+  handOver(chatId, userId, p) {
+    p.holder = this.viewerOf(chatId, userId);
+    if (p.holder !== null)
+      this.host.frontend.send(restartPush(chatId, p), userId, p.holder);
+    else
+      this.host.frontend.send({ lre: PROTOCOL_VERSION, type: "lre.activity", chatId, activity: this.diag?.activityOf(chatId) ?? null }, userId);
+  }
   askAgain(chatId, userId, session) {
     const gate = this.gates.get(chatId);
     const p = gate?.prepared;
@@ -58243,19 +58273,28 @@ class LedgerService {
       this.host.frontend.send(restartPush(chatId, p), userId);
       return;
     }
-    p.holder ??= session;
+    const here = this.shows(session, chatId);
+    if (here && p.holder !== session && (p.holder === null || !this.shows(p.holder, chatId)))
+      p.holder = session;
     if (p.holder === session)
       this.host.frontend.send(restartPush(chatId, p), userId, session);
-    else
+    else if (here)
       this.host.frontend.send({ lre: PROTOCOL_VERSION, type: "lre.activity", chatId, activity: { chatId, turn: p.id, state: "running", label: STEP_LABEL.elsewhere ?? "Already started in another window", since: Date.now() } }, userId, session);
   }
+  claimRestart(chatId, userId, session, turn) {
+    const gate = this.gates.get(chatId);
+    const p = gate?.prepared;
+    if (!gate || gate.userId !== userId || !p || p.id !== turn || p.generationId !== null)
+      return false;
+    return !this.host.capabilities.sessions || session === undefined || p.holder === session;
+  }
   sessionClosed(session, userId) {
+    this.pages.delete(session);
     for (const [chatId, gate] of this.gates) {
       const p = gate.prepared;
       if (!p || p.generationId !== null || p.holder !== session || userId !== null && gate.userId !== userId)
         continue;
-      p.holder = null;
-      this.host.frontend.send({ lre: PROTOCOL_VERSION, type: "lre.activity", chatId, activity: this.diag?.activityOf(chatId) ?? null }, gate.userId);
+      this.handOver(chatId, gate.userId, p);
     }
   }
   async gateFor(chatId, userId) {
@@ -58413,7 +58452,8 @@ class LedgerService {
       }
       const turn = core.take(halt.id);
       const as = restartAs(halt.type, observed);
-      const prepared = { id: halt.id, type: halt.type, target: target?.id ?? null, turn: turn?.planned ? turn : null, stamp, epoch, inputs, worldId: gate.worldId, delivered, as, holder: halt.session ?? null, generationId: null };
+      const holder = halt.session !== undefined && this.shows(halt.session, chatId) ? halt.session : this.viewerOf(chatId, userId);
+      const prepared = { id: halt.id, type: halt.type, target: target?.id ?? null, turn: turn?.planned ? turn : null, stamp, epoch, inputs, worldId: gate.worldId, delivered, as, holder, generationId: null };
       gate.prepared = prepared;
       this.dropIfStale(chatId);
       if (this.gates.get(chatId)?.prepared !== prepared)
@@ -67273,7 +67313,7 @@ class Runtime {
     this.steps.onCallStart = (userId, purpose) => this.diag.callStart(userId, purpose);
     this.toolSupport = new ToolSupport(this.host);
     this.minds = { host: this.host, registry: this.registry, steps: this.steps, settings: this.settings, presets: this.presets };
-    this.ledger = new LedgerService(this.host, (chatId, userId) => this.resolveEnv(chatId, userId), new LedgerFold(this.registry, { fingerprint: "1792519891" }), (chatId) => messages.forget(chatId));
+    this.ledger = new LedgerService(this.host, (chatId, userId) => this.resolveEnv(chatId, userId), new LedgerFold(this.registry, { fingerprint: "1792521274" }), (chatId) => messages.forget(chatId));
     this.studio = new StudioBridge(this.host, this.worlds);
     this.worlds.onChange = (worldId, userId) => this.studio.worldChanged(worldId, userId);
     this.push = new StatePush(this.host, async (chatId, userId) => {
@@ -69172,6 +69212,8 @@ class Dispatcher {
           reply("lre.state.resync", { accepted: true });
         if (r.type === "lre.hello" && r.presetId !== undefined && this.rt.presets.useLoom(userId, typeof r.presetId === "string" ? r.presetId : null))
           this.rt.ledger.inputsChanged(userId);
+        if (session !== undefined && !(r.type === "lre.hello" && r.client !== undefined))
+          this.rt.ledger.page(session, userId, r.chatId, r.chatId !== null && r.viewing !== false);
         if (r.chatId) {
           const run = await this.rt.runOf(r.chatId, userId);
           if (run) {
@@ -69184,6 +69226,18 @@ class Dispatcher {
         }
         return;
       }
+      case "lre.page": {
+        reply("lre.page", { accepted: true });
+        if (session === undefined)
+          return;
+        this.rt.ledger.page(session, userId, r.chatId, r.chatId !== null && r.viewing);
+        if (r.chatId && r.viewing)
+          this.rt.ledger.askAgain(r.chatId, userId, session);
+        return;
+      }
+      case "lre.restart":
+        reply("lre.restart", { start: this.rt.ledger.claimRestart(r.chatId, userId, session, r.turn) });
+        return;
       case "lre.action": {
         await this.requireWorldChat(r.chatId, userId);
         const bridge = this.rt.bridgeOf(r.chatId);

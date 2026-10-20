@@ -43507,6 +43507,8 @@ function isActivity(value) {
 var REQUEST_TYPES = {
   "lre.hello": true,
   "lre.state.resync": true,
+  "lre.restart": true,
+  "lre.page": true,
   "lre.action": true,
   "lre.chip": true,
   "lre.view.open": true,
@@ -43595,9 +43597,10 @@ class ProtocolClient {
     return () => this.generateListeners.delete(listener);
   }
   presetId = undefined;
+  visible = () => true;
   open(chatId) {
     this.update({ chatId, rev: null, view: null, status: chatId === null ? "closed" : "syncing", resyncs: 0, activity: null, canStop: this.state.canStop });
-    const reply = this.request({ type: "lre.hello", chatId, ...this.presetId !== undefined ? { presetId: this.presetId } : {} });
+    const reply = this.request({ type: "lre.hello", chatId, viewing: chatId !== null && this.visible(), ...this.presetId !== undefined ? { presetId: this.presetId } : {} });
     reply.then((message) => {
       if (message.type === "lre.error" && this.state.chatId === chatId) {
         this.update({ ...this.state, status: "closed" });
@@ -43611,12 +43614,15 @@ class ProtocolClient {
     if (chatId === null || this.state.status === "resyncing")
       return;
     this.update({ ...this.state, status: "resyncing", resyncs: this.state.resyncs + 1 });
-    this.request({ type: "lre.state.resync", chatId }).then((message) => {
+    this.request({ type: "lre.state.resync", chatId, viewing: this.visible() }).then((message) => {
       if (message.type !== "lre.error" || this.state.chatId !== chatId || this.state.status !== "resyncing")
         return;
       this.update({ ...this.state, status: this.state.view ? "live" : "syncing" });
       this.emitError(message);
     });
+  }
+  page() {
+    this.request({ type: "lre.page", chatId: this.state.chatId, viewing: this.state.chatId !== null && this.visible() });
   }
   dispose() {
     if (this.disposed)
@@ -45274,9 +45280,10 @@ function setup(ctx) {
     setTimeout(() => toasts.update((all) => all.filter((entry) => entry.id !== id)), tone === "error" ? 6000 : 3500);
   };
   cleanups.push(client.onError((error) => toast(error.message, "error")));
+  client.visible = () => document.visibilityState === "visible";
   const startedTurns = new Set;
   cleanups.push(client.onGenerate((push) => {
-    if (host.activeChat() !== push.chatId || startedTurns.has(push.turn))
+    if (host.activeChat() !== push.chatId || !client.visible() || startedTurns.has(push.turn))
       return;
     if (push.as === "send") {
       toast("The engine is ready: press Send for the reply.", "info");
@@ -45285,9 +45292,12 @@ function setup(ctx) {
     startedTurns.add(push.turn);
     if (startedTurns.size > 64)
       startedTurns.delete(startedTurns.values().next().value ?? "");
-    const command = push.as === "continue" ? "Continue" : "Regenerate";
-    host.generate(push.as).then((started) => {
-      if (!started)
+    const as = push.as;
+    const command = as === "continue" ? "Continue" : "Regenerate";
+    client.send({ type: "lre.restart", chatId: push.chatId, turn: push.turn }).then(async (claim) => {
+      if (claim.type !== "lre.result" || claim.request !== "lre.restart" || !claim.body.start)
+        return;
+      if (!await host.generate(as))
         toast(`The engine is ready, but ${command} couldn't start here: use ${command} on the last message.`, "error");
     });
   }));
@@ -45323,6 +45333,8 @@ function setup(ctx) {
   const visible = () => {
     if (document.visibilityState === "visible")
       recheck();
+    else
+      client.page();
   };
   window.addEventListener("online", recheck);
   document.addEventListener("visibilitychange", visible);
