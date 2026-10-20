@@ -4,7 +4,7 @@
 // the engine publishes its worlds and world chats, the Studio publishes the world it offers, and
 // nothing installs until the player confirms it in LumiRPEngine.
 
-import type { ChatId, EntityId, PlaceId, RevisionId, TrackId, UserId, WorldId } from "./ids";
+import type { ChatId, EntityId, PlaceId, RevisionId, UserId, WorldId } from "./ids";
 import type { JsonValue } from "./json";
 import { isRecord } from "./json";
 import type { StateView } from "./state-view";
@@ -153,8 +153,8 @@ export interface StudioChatSummary {
   cash: string | null;
   /** The people present the POV sees; `life`: their life state as the POV knows it, when that isn't alive. */
   present: { id: EntityId; name: string; label: string; life?: string }[];
-  /** A secret the quest log masks goes with an opaque id (`hidden-1`, …): its own is the author's, and may name the secret. */
-  quests: { id: TrackId; kind: string; label: string; stage: string; cue: string | null }[];
+  /** A secret goes by the quest log's own stand-in id (`~…`): its own is the author's, and may name the secret. */
+  quests: { id: string; kind: string; label: string; stage: string; cue: string | null }[];
   /** Epoch ms of the state it was read from. */
   at: number;
 }
@@ -184,17 +184,14 @@ export function chatSummary(view: StateView, at: number): StudioChatSummary | nu
   };
 }
 
-/** The quest log's active tracks (`story.quests`), as its panel shows them to the player. */
+/** The quest log's active tracks (`story.quests`), as its panel shows them to the player, a secret under its stand-in id. */
 function openQuests(panel: JsonValue | undefined): StudioChatSummary["quests"] {
   if (!isRecord(panel) || !Array.isArray(panel.active)) return [];
   const out: StudioChatSummary["quests"] = [];
-  let hidden = 0;
   for (const t of panel.active) {
     if (out.length >= QUEST_CAP) break;
     if (!isRecord(t) || typeof t.id !== "string" || typeof t.label !== "string") continue;
-    // The quest log masks a secret track until one of its truths is out: a generic label and no stage.
-    const masked = t.stage === "" && (!Array.isArray(t.truths) || t.truths.length === 0);
-    out.push({ id: masked ? `hidden-${++hidden}` : t.id, kind: typeof t.kind === "string" ? t.kind : "quest", label: t.label, stage: typeof t.stage === "string" ? t.stage : "", cue: typeof t.cue === "string" ? t.cue : null });
+    out.push({ id: t.id, kind: typeof t.kind === "string" ? t.kind : "quest", label: t.label, stage: typeof t.stage === "string" ? t.stage : "", cue: typeof t.cue === "string" ? t.cue : null });
   }
   return out;
 }

@@ -11,6 +11,7 @@ import type { JsonValue } from "../shared/json";
 import { hasOwn, isRecord } from "../shared/json";
 import type { EntityId, PlaceId, StageId, TrackId, Visibility } from "../shared/ids";
 import { heldBy } from "../shared/finance";
+import { hashParts } from "../shared/hash";
 import type { LedgerEvent } from "../shared/ledger";
 import type { LoreEntryDef, PlaceDef, Selector, TrackDef, TrackKind, WorldDoc } from "../shared/world";
 import { objectiveLabel, objectiveWhen } from "../shared/world";
@@ -218,7 +219,8 @@ export function eventVisible(reg: Registry, world: WorldDoc, state: Readonly<Wor
 }
 
 export interface PlayerTrack {
-  id: TrackId;
+  /** The id the player layer knows it by (`shownTrackId`): a secret track's stand-in, any other's own. */
+  id: string;
   kind: TrackKind;
   label: string;
   stage: string;
@@ -231,10 +233,23 @@ export interface PlayerTrack {
 }
 
 /**
+ * The id the player layer knows a track by (DESIGN §7). A secret track never goes by its own, which
+ * is the author's and may name more than any one of its truths tells: it goes by a stand-in, `~` and
+ * a hash of the world and the track, for as long as it lasts, revealed or not, so the id under an open
+ * quest sheet never changes. Any other track goes by its own id.
+ */
+export function shownTrackId(world: Pick<WorldDoc, "id" | "tracks">, id: TrackId): string {
+  if (visibilityOf(own(world.tracks, id)?.visibility) !== "secret") return id;
+  let shown = `~${hashParts("lre.track", world.id, id).slice(0, 12)}`;
+  while (hasOwn(world.tracks, shown)) shown = `~${shown}`;
+  return shown;
+}
+
+/**
  * A track as the POV sees it, or null when it is hidden. Secret tracks show only reached cues and
- * revealed truths; their labels stay generic until something is revealed. A track still on a start
- * stage with nothing to show or answer (no cue, objectives or puzzle answer) is dormant: it stays
- * out of view until it moves on, so a quest can wait unseen for its trigger.
+ * revealed truths, under their stand-in id; their labels stay generic until something is revealed.
+ * A track still on a start stage with nothing to show or answer (no cue, objectives or puzzle
+ * answer) is dormant: it stays out of view until it moves on, so a quest can wait unseen for its trigger.
  */
 export function playerTrack(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, pov: EntityId, id: TrackId): PlayerTrack | null {
   const t = own(world.tracks, id);
@@ -255,7 +270,7 @@ export function playerTrack(reg: Registry, world: WorldDoc, state: Readonly<Worl
   const failed = Object.values(t.stages).some((s) => s.fail?.to === stageId);
   const terminal = stage.next.length === 0 && !stage.fail;
   return {
-    id,
+    id: shownTrackId(world, id),
     kind: t.kind,
     label: secret && truths.length === 0 ? "Something is going on" : t.label,
     stage: secret && truths.length === 0 ? "" : stage.label,

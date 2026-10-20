@@ -10,7 +10,7 @@ import type { WorldDoc } from "../../../shared/world";
 import { labelOf, mutableSlice, objOf, sliceOf, strOf, own } from "../../../engine/pack-kit";
 import type { PackDef, ReadContext, Rejection } from "../../../engine/registry";
 import { checkAnswer } from "../../../engine/tracks";
-import { playerTrack, type PlayerTrack } from "../../../engine/visibility";
+import { playerTrack, shownTrackId, type PlayerTrack } from "../../../engine/visibility";
 
 declare module "../../../engine/registry" {
   interface QueryMap {
@@ -30,14 +30,19 @@ export interface QuestLogView {
   failed: PlayerTrack[];
 }
 
-/** The POV's quest log: visible tracks only, through the engine's visibility (secret truths stay out until revealed). */
+/**
+ * The POV's quest log: visible tracks only, through the engine's visibility (secret truths stay out
+ * until revealed), each under the id the player layer knows it by and in that id's order, so a
+ * secret's stand-in says nothing of its own id by where it sits.
+ */
 export function buildQuestLog(ctx: ReadContext): QuestLogView {
   const view: QuestLogView = { active: [], done: [], failed: [] };
-  for (const id of Object.keys(ctx.world.tracks).sort()) {
+  for (const id of Object.keys(ctx.world.tracks)) {
     if (own(ctx.world.tracks, id)?.kind === "agenda") continue;
     const t = playerTrack(ctx.registry, ctx.world, ctx.state, ctx.world.pov, id);
     if (t) view[t.status === "done" ? "done" : t.status === "failed" ? "failed" : "active"].push(t);
   }
+  for (const list of [view.active, view.done, view.failed]) list.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
   return view;
 }
 
@@ -71,9 +76,9 @@ function reject(code: string, reason: string): Rejection {
 }
 
 /**
- * The puzzle an answer is for: `ref` when it is a puzzle's id; else, among the open puzzles the POV
- * can see (a stage awaiting an answer), the one whose label and stage share the most words with
- * `ref`, or the only one open.
+ * The puzzle an answer is for: `ref` when it is a puzzle's id, or the id the player layer shows an
+ * open one by (a secret's stand-in); else, among the open puzzles the POV can see (a stage awaiting
+ * an answer), the one whose label and stage share the most words with `ref`, or the only one open.
  */
 export function openPuzzle(ctx: ReadContext, ref: string): string | null {
   if (own(ctx.world.tracks, ref)?.kind === "puzzle") return ref;
@@ -84,6 +89,8 @@ export function openPuzzle(ctx: ReadContext, ref: string): string | null {
       if (t?.kind !== "puzzle") return false;
       return own(t.stages, own(ctx.state.tracks, id)?.stage ?? t.start)?.answer !== undefined && playerTrack(ctx.registry, ctx.world, ctx.state, ctx.world.pov, id) !== null;
     });
+  const shown = open.find((id) => shownTrackId(ctx.world, id) === ref);
+  if (shown !== undefined) return shown;
   const words = (s: string): string[] => s.toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length > 2);
   const want = new Set(words(ref));
   let best: { id: string; n: number } | null = null;
