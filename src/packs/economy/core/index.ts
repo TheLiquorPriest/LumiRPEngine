@@ -58,7 +58,7 @@ import {
   type Price,
   type PriceRef,
 } from "./model";
-import { accountLevel, asUnit, charge, featureFor, isParty, isRejection, l1Move, loseWith, move, overdraftRoom, payMethodOf, postGuard, posting, reprice, setCash, signal, transfer, transferParty, depositAccount, type ChargeOptions, type ChargeService, type PayMethod } from "./pay";
+import { accountLevel, asUnit, charge, featureFor, isParty, isRejection, l1Move, loseWith, mayUse, move, overdraftRoom, payMethodOf, postGuard, posting, reprice, setCash, signal, transfer, transferParty, depositAccount, type ChargeOptions, type ChargeService, type PayMethod } from "./pay";
 import { materializeMoney, moneyStep, openAccounts, openingEvent } from "./process";
 import { moneySummary } from "./summary";
 import { buildFinanceView, buildMoneyView, buildPeopleMoney } from "./view";
@@ -290,6 +290,7 @@ function makeApi(hooks: FinanceHooks): FinanceApi {
     partyKind: (ctx, id) => partyKindOf(ctx, id),
     feature: (ctx, party, feature) => featureFor(ctx, party, feature),
     outside: (id) => external(id),
+    mayUse: (ctx, party, account, side) => mayUse(ctx, party, account, side),
     pay: (ctx, p) => payWith(hooks, ctx, p),
     post: (ctx, lines, meta) => postWith(ctx, lines, meta),
     note: (ctx, who, cls, text) => [signal(cls, text, who, ctx.state.clock)],

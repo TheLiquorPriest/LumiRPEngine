@@ -165,6 +165,12 @@ export interface FinanceApi {
   feature(ctx: ReadContext, party: EntityId, feature: FinanceFeature): boolean;
   /** The outside account for a counterparty (`employer:acme`, `tax:federal`). */
   outside(id: string): string;
+  /**
+   * Whether a party may use an account on one side of a payment: `from` needs it open, theirs to
+   * spend from, and not locked (a CD or a retirement account); `into` needs it not closed, theirs,
+   * and not a CD. Null when it may; check every account a module pays from or into.
+   */
+  mayUse(ctx: ReadContext, party: EntityId, account: EntityId, side: "from" | "into"): Rejection | null;
   pay(ctx: ReadContext, payment: Payment): LedgerEvent[] | Rejection;
   /** A posting of any number of lines with its journal lines, as one unit. */
   post(ctx: ReadContext, lines: PostingLine[], meta: PostMeta): LedgerEvent[] | Rejection;
