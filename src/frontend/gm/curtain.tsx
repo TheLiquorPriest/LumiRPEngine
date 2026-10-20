@@ -1,5 +1,5 @@
-// The GM curtain as it shows (contract §4.5, principle 6): the gate in front of the truth, and the
-// strip over a page while the truth shows, with Hide. Both wear GM gold, which marks GM chrome only.
+// The GM curtain as it shows: the gate in front of the truth, and the strip over a page while the
+// truth shows, with Hide. Both wear GM gold, which marks GM chrome only.
 
 import { Button } from "../components";
 import { Icon } from "../icons";

@@ -1,4 +1,4 @@
-// Design tokens and base rules (contract §5.1–5.2, §5.6–5.7) on the `.lre` and `.lre-chips` roots.
+// Design tokens and base rules on the `.lre` and `.lre-chips` roots.
 // Host theme variables with fallbacks, so the UI follows the host theme in light and dark. Text
 // tokens mix the host status/muted colours toward the host text colour so they keep WCAG 4.5:1 on
 // the host's light and dark surfaces; accent-filled controls use --lre-accent-fill. Earlier token

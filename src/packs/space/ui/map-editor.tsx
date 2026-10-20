@@ -1,4 +1,4 @@
-// Build's map editor (DESIGN §13, contract §4.6): a map (`lre-map-v1`) drawn and edited by touch,
+// Build's map editor (DESIGN §13): a map (`lre-map-v1`) drawn and edited by touch,
 // with its JSON one tab away. Every edit goes through that JSON, so the two never disagree: a
 // visual edit writes the map's JSON (laid out by `formatMap`), and typed JSON redraws the map. A
 // grid map is painted cell by cell with its legend's brushes (rooms, doors, walls, terrain, zones,

@@ -1,4 +1,4 @@
-// Settings → Model use and Settings → Steps and connections (DESIGN §5.3, §5.4, D25; contract §4.7).
+// Settings → Model use and Settings → Steps and connections (DESIGN §5.3, §5.4, D25).
 // Model use leads with the preset (Lean, Standard, Full, Custom) and what each one means for you,
 // then the call meter; budgets per phase (calls, wall clock and lore lookups) and the engine token
 // budget sit under Advanced. Steps and connections has a card per step: enabled, provider,

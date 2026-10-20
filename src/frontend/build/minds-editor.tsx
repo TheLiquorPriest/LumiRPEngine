@@ -1,9 +1,9 @@
-// Build → World → Minds (DESIGN §24.2; contract §4.6): what the narrator gets of a mind (secrecy),
+// Build → World → Minds (DESIGN §24.2): what the narrator gets of a mind (secrecy),
 // the fidelity ladder's thresholds and focus weights, who is always Live and who never gets a mind,
 // the memory defaults, and the world's own step templates for the minds steps, written in the
 // step-template editor. Saved whole as `lre.editor set part minds` from the sticky bar; a world left
 // at the defaults keeps no config. Each group shows the lint under its own path. Styles:
-// styles/minds.ts (M3) and styles/forms.ts.
+// styles/minds.ts and styles/forms.ts.
 
 import { useMemo, useState } from "preact/hooks";
 import type { JsonObject } from "../../shared/json";

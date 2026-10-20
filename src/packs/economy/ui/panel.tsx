@@ -1,4 +1,4 @@
-// Play → Me → Money (DESIGN §12, §25; contract D-UI9): the POV's money hub. The view (`FinanceView`)
+// Play → Me → Money (DESIGN §12, §25): the POV's money hub. The view (`FinanceView`)
 // is already at the POV's Money level; the hub lays it out, and each page it opens rides the sheet
 // stack. Each control is an in-world action sent like a palette pick, so it plays as the next turn
 // and the narrator hears of it.

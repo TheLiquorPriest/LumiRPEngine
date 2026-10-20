@@ -1,11 +1,11 @@
-// Build → Packs → economy: the economy pack's own config fields, in the Build forms' idiom (redesign
-// contract §4.6), above its config as JSON. The narrated-price cap (DESIGN §9.5) is the most a
+// Build → Packs → economy: the economy pack's own config fields, in the Build forms' idiom, above
+// its config as JSON. The narrated-price cap (DESIGN §9.5) is the most a
 // narrated price charges for something no catalog row prices, typed as the world's currency writes
 // it and stored in whole minor units; left empty, the engine derives it from the tables. The region
 // prices living and taxes for whoever names none; living costs are a week's spending per wealth
 // band. The Custom toggles (DESIGN §25) switch a money feature on or off at the levels its floor
 // allows, on a page of their own; products are the world's own account products and assets are
-// what holdings hold (§27), each a row that opens as a sheet. Styles: styles/packs-money.ts (M4).
+// what holdings hold (§27), each a row that opens as a sheet. Styles: styles/packs-money.ts.
 
 import type { ComponentChildren } from "preact";
 import { useState } from "preact/hooks";
@@ -300,7 +300,7 @@ function CreditLimit(props: { value: JsonValue | undefined; currency: WorldCurre
 /**
  * The world's own products or assets (id → definition), as Build lists a record: a row per entry
  * (its name, a summary, its id under Show ids, its lint) that opens it as a sheet. A new one asks
- * for its name and derives its id (D-UI6); the record stays, empty, when its last entry goes.
+ * for its name and derives its id from it; the record stays, empty, when its last entry goes.
  */
 function Definitions(props: {
   config: JsonObject;

@@ -1,4 +1,4 @@
-// The person sheet (contract §4.3): someone from the cast, as the POV knows them: who they are,
+// The person sheet: someone from the cast, as the POV knows them: who they are,
 // whether they're here (what they're doing) or where and when the POV last saw them, today's plan
 // with "Why this plan?", how they regard the POV per axis, the agendas the POV knows about, their
 // next commitment, their groups, the classes players may see, and a life state other than alive.
@@ -12,7 +12,7 @@ import { Icon } from "../../../frontend/icons";
 import type { SheetProps } from "../../../frontend/registry";
 import { decodeCastView, SLOT_KINDS, whereabouts, type CastPerson, type CastView, type SlotKind } from "./panel";
 
-/** Each kind of plan block in words, and its categorical fill (contract §5.1 `--lre-series-*`). */
+/** Each kind of plan block in words, and its categorical fill (a `--lre-series-*` token). */
 const SLOT_LABEL: Record<SlotKind, string> = { work: "Work", sleep: "Sleep", free: "Free time", travel: "Travel", other: "Other" };
 const SLOT_SERIES: Record<SlotKind, number> = { work: 2, sleep: 6, free: 1, travel: 3, other: 5 };
 

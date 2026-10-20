@@ -1,4 +1,4 @@
-// The shared atoms of components.tsx (contract §5.2–5.3, §5.7, §6.2), built on the tokens only.
+// The shared atoms of components.tsx, built on the tokens only.
 // Every interactive atom is at least 40 px tall (44 in the bottom bar); cards are flat inside the
 // drawer, with a hairline and the card surface.
 

@@ -1,4 +1,4 @@
-// GM → Places and Story, and This chat's Edits log (contract §4.5): every place with how visible
+// GM → Places and Story, and This chat's Edits log: every place with how visible
 // it is, nested as the world nests them; every track with its stage picker and the truths its
 // stages hold; and the corrections in force on this chat's path. Places and tracks are the world's
 // definitions, edited in Build; here a track's stage is set for this chat. Everyone's money is the

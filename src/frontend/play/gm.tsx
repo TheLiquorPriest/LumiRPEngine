@@ -1,4 +1,4 @@
-// The GM view (`core.gm`, DESIGN §7; contract §4.5): the truth for the GM section in view, secrets
+// The GM view (`core.gm`, DESIGN §7): the truth for the GM section in view, secrets
 // and removed entities included, with the editor. GM mode renders it for World, Places and Story,
 // for each pack's tab (`UiRegistry.gm`: everyone's money is the economy pack's, the characters'
 // minds the minds pack's), and for This chat's Edits. Behind the gate in UI state

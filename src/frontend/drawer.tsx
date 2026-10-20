@@ -1,7 +1,7 @@
-// The drawer tab "LumiRPEngine" (contract §4.1): a sticky mode bar (Play · GM · Build · Settings)
+// The drawer tab "LumiRPEngine": a sticky mode bar (Play · GM · Build · Settings)
 // over the chosen mode. GM mode wears the GM frame (`data-lre-mode="gm"`: a rule at the top and a
 // faint tint). Content keeps clear of the host's chat heads only while they overlap the drawer, by as
-// much as they do (D-UI7). The drawer publishes two measures for the modes' sticky parts:
+// much as they do. The drawer publishes two measures for the modes' sticky parts:
 // `--lre-modebar-h`, the mode bar's height (bars that stick under it), and `--lre-fill-h`, the height
 // the host's scrolling panel shows (the drawer fills it, so a bottom bar sits at the drawer's bottom).
 

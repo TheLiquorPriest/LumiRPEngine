@@ -1,4 +1,4 @@
-// Float overlays (contract §4.8): the map, the palette and the World sheet, each a chromeless float
+// Float overlays: the map, the palette and the World sheet, each a chromeless float
 // widget (`ui_panels`) opened through the OverlayController, so the drawer closes first on mobile.
 // One shows at a time. On a phone a bottom sheet spans the width less what the host's chat heads
 // cover of it, followed while it shows. Closing an overlay hands focus back to what opened it.
@@ -63,7 +63,7 @@ function MapFrame(props: { fullscreen: boolean; onToggleFullscreen(): void; onCl
 /** A lazily created float widget rendering one Preact tree. */
 class WidgetSurface implements FloatSurface {
   private widget: SpindleFloatWidgetHandle | null = null;
-  /** What had focus when the overlay opened; closing it hands focus back (contract §5.7). */
+  /** What had focus when the overlay opened; closing it hands focus back. */
   private opener: HTMLElement | null = null;
 
   constructor(

@@ -1,4 +1,4 @@
-// GM → This chat (contract §4.5, §9.6): this chat's rules (Realism and Checks for this chat, the time
+// GM → This chat: this chat's rules (Realism and Checks for this chat, the time
 // controls, Pins and upgrade), the Edits log behind the gate, and the Inspector with the call meter;
 // a grouped list where each opens as a page. The rules and the Inspector show nothing the player
 // mayn't see, so they don't wait behind the gate; Edits is the truth's (the `core.gm` panel).

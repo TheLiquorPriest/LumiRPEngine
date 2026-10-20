@@ -1,4 +1,4 @@
-// Chat surfaces (S1, contract §4.8, §5): under each reply the receipt, decision cards and offers; the
+// Chat surfaces : under each reply the receipt, decision cards and offers; the
 // phone's status line above the message input; the desktop pill and its details; the World sheet and
 // the action sheet with Timelapse; the map overlay's frame; toasts; the fix editor and the money
 // input. Every sheet, pop-up, toast and float overlay sits on --lre-bar-bg, which stays opaque where

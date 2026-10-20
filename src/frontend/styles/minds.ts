@@ -1,8 +1,8 @@
 // Character minds: GM → Minds (the minds pack's tab), Settings → Minds and Build → World → Minds.
-// Built on the tokens only (contract §5).
+// Built on the tokens only.
 
 export const MINDS_CSS = `
-/* M3 MindsSettingsBuild: Settings → Minds (settings/minds.tsx) and Build → World → Minds (build/minds-editor.tsx) */
+/* Settings → Minds (settings/minds.tsx) and Build → World → Minds (build/minds-editor.tsx) */
 .lre-minds-note{margin:0;font-size:var(--lre-fs-sm);line-height:1.4;color:var(--lre-muted);overflow-wrap:anywhere}
 .lre-minds-body{display:flex;flex-direction:column;gap:var(--lre-s1);min-width:0}
 .lre-minds-body>.lre-row,.lre-minds-limit>.lre-row,.lre-minds-group>.lre-row,.lre-minds-override>.lre-row{border-bottom:0}
@@ -56,7 +56,7 @@ textarea.lre-input.lre-minds-prompt-input{min-height:200px;font-family:var(--lre
 .lre-minds-tpl-head{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:var(--lre-s2);min-height:var(--lre-tap);min-width:0}
 .lre-minds-tpl-text{flex:1 1 12rem;min-width:0;display:flex;flex-direction:column;gap:2px}
 .lre-minds-tpl-head>.lre-btn{flex:none}
-/* M2 MindsGm: GM → Minds (packs/minds/ui/gm.tsx): the list, a character's page and the change pages over it */
+/* GM → Minds (packs/minds/ui/gm.tsx): the list, a character's page and the change pages over it */
 .lre-gm-minds-pages{animation:none}
 .lre-gm-minds{display:flex;flex-direction:column;gap:var(--lre-s3);min-width:0}
 .lre-gm-minds-head .lre-listrow-value{max-width:70%}

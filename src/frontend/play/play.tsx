@@ -1,4 +1,4 @@
-// Play: the running chat (contract §4.2–4.4). A bottom bar holds the destinations (Now, Me, People,
+// Play: the running chat. A bottom bar holds the destinations (Now, Me, People,
 // Places, Story); each shows the visible panels whose home it is, with sub-tabs when there are
 // several. Now is a hub (scene.tsx) rather than tabs: it holds the status banners, what needs you, the
 // fight while one is on and the packs' glances. Details open as sheets stacked over the destination;
@@ -40,7 +40,7 @@ export interface Destination {
   dot: boolean;
 }
 
-/** The destinations that have a visible panel, in bar order (contract §4.2): Now and Story always do, as Scene and Journal are core. */
+/** The destinations that have a visible panel, in bar order: Now and Story always do, as Scene and Journal are core. */
 export function destinations(catalog: UiCatalog, view: StateView): Destination[] {
   const visible = visiblePanels(catalog, view);
   return DESTS.flatMap((dest) => {
@@ -74,7 +74,7 @@ export function Play() {
   useEffect(() => {
     if (chatId !== null && current !== null && !current.startsWith("core.")) void app.send({ type: "lre.view.open", chatId, panel: current, entity: null });
   }, [chatId, current]);
-  // Back returns focus to the control that opened the sheet (contract §5.7): the one last focused in
+  // Back returns focus to the control that opened the sheet: the one last focused in
   // Play, kept as it was focused, since an opener may lose focus while its request runs (disabled
   // while busy) or as the sheet hides the destination under it.
   const lastFocus = useRef<HTMLElement | null>(null);
@@ -159,7 +159,7 @@ export function Play() {
   );
 }
 
-/** One sheet of the stack: its kind's registered sheet, which draws its own header (contract §9.2), or a note with Back where no pack draws that kind. */
+/** One sheet of the stack: its kind's registered sheet, which draws its own header, or a note with Back where no pack draws that kind. */
 function SheetFrame(props: { route: SheetRoute; state: StateView; hidden: boolean }) {
   const app = useApp();
   const Sheet = app.catalog.sheets.get(props.route.kind);

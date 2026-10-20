@@ -1,4 +1,4 @@
-// The money hub's navigation (contract D-UI9): the pages it opens over its overview, the navigator
+// The money hub's navigation: the pages it opens over its overview, the navigator
 // that opens them, and the pieces every page is built from. One set of section, detail and action
 // pages serves Play, where each page rides the sheet stack as a `money` sheet (an account's page as
 // an `account` one), and GM mode, where the pages stack over the Money tab under Whose money.

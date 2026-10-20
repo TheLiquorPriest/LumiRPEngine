@@ -1,4 +1,4 @@
-// Play's money sheets (contract D-UI9): every page of the hub over Play rides the sheet stack, the
+// Play's money sheets: every page of the hub over Play rides the sheet stack, the
 // page in the sheet's id (`routes.ts`), an account's page as an `account` sheet. The view is the
 // POV's, from the state, and each control an in-world action, as on the overview.
 

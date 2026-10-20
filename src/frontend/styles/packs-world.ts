@@ -1,4 +1,4 @@
-// World packs (S3b): the map (`.lre-map` base rules, contract §9.4: also the map overlay's frame and
+// World packs: the map (`.lre-map` base rules; also the map overlay's frame and
 // Build's previews, which add rules under their own classes), its bar, zoom, list, dock and
 // Known/Fog control; People's list and filters; the person sheet with its day timeline; the place
 // and quest sheets; the Calendar; the Encounter. Tokens only. Controls laid over the map canvas sit

@@ -1,4 +1,4 @@
-// The HUD (DESIGN §12; contract §4.8, D-UI3). On a phone, the status line docked above the message
+// The HUD (DESIGN §12). On a phone, the status line docked above the message
 // input (`chat_composer_above`): time · place · cash, the engine working or paused, and Act; tapping it
 // opens the World sheet. On wider screens, and on a phone whose host has no such mount, the floating
 // pill in a chromeless float widget the player docks anywhere (host drag, edge snap, persisted
@@ -173,7 +173,7 @@ function HudDetails(props: { view: StateView; hud: HudView; popRef: { current: H
 }
 
 /**
- * The world's details (contract §4.8), the World sheet's and the pill pop-over's content: time and
+ * The world's details, the World sheet's and the pill pop-over's content: time and
  * day part, place, scene and last turn, weather and cash, each with a ✎ fix where the view offers
  * one; this turn's calls; the clock toggle, Map and Actions. A fix swaps the list for its editor.
  * `onLeave` runs as Map or Actions opens: a host the overlay controller doesn't replace (the pill's
@@ -253,7 +253,7 @@ function WorldDetails(props: { view: StateView; hud: HudView; onLeave(next: () =
 }
 
 /**
- * The World sheet (contract §4.8): a bottom sheet over the chat with the world's details. It reports
+ * The World sheet: a bottom sheet over the chat with the world's details. It reports
  * the height that shows its content without scrolling, so the sheet hugs it as a fix opens and closes.
  */
 export function WorldSheet(props: { desk: boolean; onClose(): void; onHeight(height: number): void }) {
@@ -311,7 +311,7 @@ export function WorldSheet(props: { desk: boolean; onClose(): void; onHeight(hei
 }
 
 /**
- * The phone's status line (D-UI3), docked above the message input: time · place · cash, the engine
+ * The phone's status line, docked above the message input: time · place · cash, the engine
  * working or paused, and Act for the action sheet. Tapping the line opens the World sheet. It shows
  * in world chats on mobile only; on wider screens the floating pill does this job.
  */

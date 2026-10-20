@@ -1,4 +1,4 @@
-// Settings (DESIGN §12; contract §4.7): a home list of pages in groups, each page under a header with
+// Settings (DESIGN §12): a home list of pages in groups, each page under a header with
 // Back. Getting started: Model use, Steps and connections. Defaults for new chats: Realism, Checks,
 // Time. Replies: Changes from the reply, Swipes. Your preset. Display: Show ids. About: Caveats.
 // The page is UI state (`ui.settings.page`), so it holds while the drawer switches modes. A running
@@ -38,7 +38,7 @@ const PAGE: Record<Page, { title: string; subtitle: string; icon: IconName }> = 
   caveats: { title: "Caveats", subtitle: "What to know", icon: "info" },
 };
 
-/** The home list's groups, in order (contract §4.7). */
+/** The home list's groups, in order. */
 const GROUPS: readonly { title: string; pages: readonly Page[] }[] = [
   { title: "Getting started", pages: ["model", "steps", "minds"] },
   { title: "Defaults for new chats", pages: ["realism", "checks", "time"] },

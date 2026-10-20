@@ -1,4 +1,4 @@
-// The action sheet (DESIGN §11, §12; contract §4.8): actions with targets and exact odds, Buy, Pay,
+// The action sheet (DESIGN §11, §12): actions with targets and exact odds, Buy, Pay,
 // Transfer, Drive, Lend and Combat, and the Timelapse sheet (duration chips, until targets, interrupt
 // overrides), plus Pause/Resume clock. Each option shows its price, its time and one odds bar with
 // the chances in words; why it can't be taken now shows inline. Everything comes from

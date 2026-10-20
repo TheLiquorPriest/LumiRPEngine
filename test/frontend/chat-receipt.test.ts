@@ -1,4 +1,4 @@
-// The receipt under a reply (contract §4.8): at most three segments, then "n more"; what went wrong
+// The receipt under a reply: at most three segments, then "n more"; what went wrong
 // leads, so it never hides behind "n more", then time, money, the roll and the changes.
 import { describe, expect, test } from "bun:test";
 import { receiptLine } from "../../src/frontend/chips";

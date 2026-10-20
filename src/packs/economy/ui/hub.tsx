@@ -1,4 +1,4 @@
-// The money hub (DESIGN §12, §25; contract D-UI9): one party's money. It opens on the overview (net
+// The money hub (DESIGN §12, §25): one party's money. It opens on the overview (net
 // worth as a large figure, cash on hand, alerts, what's coming up, recent lines, and at the levels
 // that show them what it's made of and its cash flow), then a row for each of the party's other
 // sections with a line from the view, which opens that section's page. The player's Play → Me →

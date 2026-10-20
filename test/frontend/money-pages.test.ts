@@ -1,6 +1,6 @@
-// The money hub's pages (contract D-UI9): a page survives the trip through a Play sheet's id, an
-// account's page is an `account` sheet, Now's glance picks its rows by the clock and never by
-// words, and a line opens the flow or account it names.
+// The money hub's pages (overview, section rows, detail pages, action pages): a page survives the
+// trip through a Play sheet's id, an account's page is an `account` sheet, Now's glance picks its
+// rows by the clock and never by words, and a line opens the flow or account it names.
 
 import { describe, expect, test } from "bun:test";
 import type { AccountView, FinanceView, FlowView, UpcomingLine } from "../../src/shared/finance";

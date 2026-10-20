@@ -1,4 +1,4 @@
-// The place sheet (contract §4.3): a place from the map, with its exact travel options (mode,
+// The place sheet: a place from the map, with its exact travel options (mode,
 // time, cost, or why not), whether the POV is there, has been there or has only heard of it, and
 // ways back to the map: open its own map, or show it where it lies. A place the POV can't see goes
 // by "Somewhere" and offers nothing. Places aren't entities, so opening one observes nothing new

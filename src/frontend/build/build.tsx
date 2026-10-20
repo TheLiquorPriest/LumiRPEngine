@@ -1,4 +1,4 @@
-// Build (DESIGN §13; redesign contract §4.6): a stack of pages, Worlds → World → Collection → Item
+// Build (DESIGN §13): a stack of pages, Worlds → World → Collection → Item
 // → sub-editor pages, each of them usable on a phone. Worlds lists the worlds (open, Export,
 // Delete) and New world starts one from a template, a file or LumiRPEngine Studio. Inside a world a
 // sticky bar keeps Back, the draft's state and Commit in reach, with Discard in its overflow; the
@@ -38,7 +38,7 @@ import { StudioOfferReview, useStudioOffer } from "./studio-offer";
 import { TableEditor } from "./table-editor";
 import { TiersEditor } from "./tiers-editor";
 
-/** The world's content in the story's own groups (contract §4.6). */
+/** The world's content in the story's own groups. */
 const GROUPS: readonly { title: string; collections: readonly WorldCollection[] }[] = [
   { title: "People & things", collections: ["entities", "kinds", "classifications", "relations"] },
   { title: "Places", collections: ["places", "maps", "routes", "grids"] },

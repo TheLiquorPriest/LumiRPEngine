@@ -1,4 +1,4 @@
-// Data-table editor (DESIGN §13, ARCHITECTURE §6; redesign contract §4.6): a world's copy of a pinned
+// Data-table editor (DESIGN §13, ARCHITECTURE §6): a world's copy of a pinned
 // table. Its page shows the rows as a paged grid whose first column, each row's name, stays put
 // while the other columns scroll sideways inside the grid, so it works at phone width. A row opens
 // as a sheet with one field per column, typed by the column contract: money in the world's
@@ -148,7 +148,7 @@ function nameColumnOf(table: DataTable): string | null {
   return null;
 }
 
-/** A row's name: its `label` or `name` cell, else its id in words, since ids show only with Show ids (D-UI6). */
+/** A row's name: its `label` or `name` cell, else its id in words, since ids show only with Show ids. */
 function rowName(table: DataTable | undefined, id: string): string {
   const row = table && hasOwn(table.rows, id) ? table.rows[id] : undefined;
   for (const key of NAME_KEYS) {
@@ -689,7 +689,7 @@ function RowSheet(props: { table: DataTable; rowId: string; row: TableRow; ctx: 
 }
 
 /**
- * New row (D-UI6). A table that names its rows (a `label` or `name` column) asks for the name and
+ * New row. A table that names its rows (a `label` or `name` column) asks for the name and
  * derives the id from it (`deriveId`), editable under Advanced or in the open while Show ids is on;
  * once typed, the id stops following the name. Any other table asks for the id itself. A taken or
  * reserved id is refused.

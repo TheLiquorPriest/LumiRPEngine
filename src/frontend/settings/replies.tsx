@@ -1,4 +1,4 @@
-// Settings → Replies (contract §4.7): what the engine may change from a reply's text, per type
+// Settings → Replies: what the engine may change from a reply's text, per type
 // (Auto, Confirm or Never, with where the mode comes from and Unpin, D4 learning), and what a swipe
 // does by default.
 

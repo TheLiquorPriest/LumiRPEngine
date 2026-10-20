@@ -1,4 +1,4 @@
-// Play's content (S2, contract §4.4, §5.2–5.3): the Now hub (status banners, the scene card with its
+// Play's content: the Now hub (status banners, the scene card with its
 // ✎ fixes, Needs you, Here, the quick actions), the Journal with its Save to lore form, and the
 // states that replace a destination (no chat, connecting, not a world chat). The Play shell (bottom
 // bar, sub-tabs, sheet stack) is in shell.ts.

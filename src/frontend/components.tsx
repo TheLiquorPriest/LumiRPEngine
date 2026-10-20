@@ -1,7 +1,7 @@
-// Shared UI atoms (contract §6.2). Host components (range slider, switch, number stepper, select,
+// Shared UI atoms. Host components (range slider, switch, number stepper, select,
 // model picker) are mounted through `ctx.components` into a div Preact never renders children
 // into; their latest callbacks are read through refs so the host mount is created once. Every atom
-// meets the accessibility floor (contract §5.7): 40 px targets (44 in the bottom bar), labelled icon
+// meets the accessibility floor: 40 px targets (44 in the bottom bar), labelled icon
 // buttons, the shared focus ring.
 
 import type { ComponentChildren } from "preact";
@@ -294,7 +294,7 @@ export function useBusy(): [boolean, (run: () => Promise<unknown>) => void] {
   ];
 }
 
-// ---------------------------------------------------------------- redesign atoms (contract §6.2)
+// ---------------------------------------------------------------- shared UI atoms
 
 /** A button on the shared look: 40 px tall at least, an optional icon either side. `label` names it when its text alone doesn't. */
 export function Button(props: { variant?: "primary" | "secondary" | "ghost" | "danger"; size?: "md" | "sm"; icon?: IconName; iconAfter?: IconName; block?: boolean; disabled?: boolean; busy?: boolean; label?: string; title?: string; type?: "button" | "submit"; onClick?(event: MouseEvent): void; children?: ComponentChildren }) {
@@ -414,7 +414,7 @@ export function Badge(props: { tone?: "neutral" | "accent" | "pos" | "neg" | "wa
   return <span class={props.tone && props.tone !== "neutral" ? `lre-badge ${props.tone}` : "lre-badge"}>{props.children}</span>;
 }
 
-/** Each tone's icon, so a banner never says what it means by colour alone (contract §5.4). */
+/** Each tone's icon, so a banner never says what it means by colour alone. */
 const BANNER_ICON: Record<"info" | "warn" | "neg" | "gm", IconName> = { info: "info", warn: "alert", neg: "alert", gm: "eye" };
 
 /** A status message across the content: an icon, a title, the details and actions. */

@@ -1,4 +1,4 @@
-// Build's form parts (redesign contract §4.6, S7a), shared by the schema form and every sub-editor:
+// Build's form parts , shared by the schema form and every sub-editor:
 // the form sheet (a sub-editor's own page), the lint under a field, a group of fields, a yes-or-no
 // field, an item list's row, the by-name reference pickers and chips. A leaf module: it imports no
 // editor, so the editors can share it without import cycles. Styles: styles/forms.ts.
@@ -15,7 +15,7 @@ import { revealInScroller } from "../scroll";
 const SheetParent = createContext<((open: 1 | -1) => void) | null>(null);
 
 /**
- * A sub-editor's own page (contract §4.6: sub-editors open as full pages on phones). The caller
+ * A sub-editor's own page (sub-editors open as full pages on phones). The caller
  * renders it in place, only while open. It stays in the flow rather than the top layer, so the
  * host's pickers, confirms and toasts work inside it. While it is open it is all the mode body
  * shows: forms.ts hides everything else and takes its ancestors out of the layout. Back and Escape
@@ -148,7 +148,7 @@ export interface RefOption {
 }
 
 /**
- * A reference picker by name (contract §4.6): the host's searchable select. While Show ids is on,
+ * A reference picker by name: the host's searchable select. While Show ids is on,
  * every choice names its id and the picked id shows under the picker. `none` offers an empty
  * choice under that name, for a reference that may be left out. A value no choice holds (a deleted
  * item) stays listed as missing, so it shows and can be replaced.
@@ -198,7 +198,7 @@ export function AddPicker(props: { label: string; options: readonly RefOption[];
  * A value as a pill. With `onRemove` it is a button that takes the value away (named by
  * `removeLabel`); with `onToggle` a toggle, pressed while `pressed`; with `onPress` a plain action
  * (a suggestion to insert, named by `label` when its text alone doesn't); with none, just the
- * label. The pill is drawn inside a 40 px tall target (contract §5.7).
+ * label. The pill is drawn inside a 40 px tall target.
  */
 export function Chip(props: { children: ComponentChildren; onRemove?(): void; removeLabel?: string; onToggle?(): void; pressed?: boolean; onPress?(): void; label?: string; tone?: "warn" | "neg"; disabled?: boolean }) {
   const tone = props.tone ? ` ${props.tone}` : "";

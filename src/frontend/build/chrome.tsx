@@ -1,7 +1,7 @@
-// Build's page chrome (redesign contract §4.6), shared by the shell and every editor page: how Build
+// Build's page chrome, shared by the shell and every editor page: how Build
 // names each collection, an item's display name, the overflow menu, an item page's header (its
 // name, its id under Show ids, Delete in the overflow), Delete itself, and + New, which asks for a
-// name and derives the id from it (D-UI6). A leaf module: the editors import it and it imports none
+// name and derives the id from it. A leaf module: the editors import it and it imports none
 // of them, so the shell (build.tsx), which imports the editors, never sits in an import cycle.
 
 import type { ComponentChildren } from "preact";
@@ -69,7 +69,7 @@ export function go(app: Pick<App, "ui">, build: BuildRoute): void {
 /**
  * An item's name as Build lists it: its name, label or title; a route by the places it joins (named
  * when `places` is given). An item without one reads as its id in words, since ids show only under
- * Show ids (D-UI6).
+ * Show ids.
  */
 export function itemLabel(collection: WorldCollection, id: string, value: unknown, places?: Readonly<Record<string, { name: string }>>): string {
   if (isRecord(value)) {
@@ -96,7 +96,7 @@ export interface MenuItem {
 }
 
 /**
- * The ⋯ button and the menu of less frequent actions it opens (contract §4.6). Arrow keys move
+ * The ⋯ button and the menu of less frequent actions it opens. Arrow keys move
  * between the items; Escape, Tab or a tap elsewhere closes it, Escape returning focus to the button.
  * It opens upward when there's no room below.
  */
@@ -252,7 +252,7 @@ function idProblem(id: string, taken: ReadonlySet<string>, noun: string): string
 }
 
 /**
- * + New (D-UI6): asks for a name and derives the id from it (`deriveId`: lower snake case, then
+ * + New: asks for a name and derives the id from it (`deriveId`: lower snake case, then
  * `_2`, `_3`… while `taken` holds it). The id is editable under Advanced, or in the open while
  * Show ids is on; once typed, it stops following the name. Continue opens the new item's page.
  */

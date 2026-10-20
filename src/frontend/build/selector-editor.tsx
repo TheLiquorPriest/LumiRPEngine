@@ -3,7 +3,7 @@
 // selector lists constraints that must all hold, each one any of its values: kinds (with
 // inheritance), tiers, classification values (nested values included), tags, groups (members,
 // through member groups too) and ids. Each constraint is a field of chips, named by label (ids stay
-// hidden, D-UI6), so it wraps at phone width. Also the chip tag list, used for entity tags.
+// hidden unless Show ids is on), so it wraps at phone width. Also the chip tag list, used for entity tags.
 // Styles: styles/forms.ts.
 
 import type { ComponentChildren } from "preact";

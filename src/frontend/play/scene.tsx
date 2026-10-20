@@ -1,4 +1,4 @@
-// Play → Now, the hub (contract §4.4), registered as the core Scene panel: the status banners; the
+// Play → Now, the hub, registered as the core Scene panel: the status banners; the
 // scene card (time and day part, place, scene type with the last turn's elapsed time, weather, cash,
 // each fixable value with its ✎); what needs you; the fight while one is on (Now's other panels);
 // who is here; the packs' glances; the quick actions. Opening someone here pushes their person
@@ -174,7 +174,7 @@ function Here(props: { state: StateView }) {
   const [busy, run] = useBusy();
   const present = state.scene?.present ?? [];
   const open = (entity: EntityId) => {
-    // The sheet observes them on opening (contract §9.3): the row only opens it.
+    // The sheet observes them on opening: the row only opens it.
     if (app.catalog.sheets.has("person")) {
       app.ui.update((ui) => pushSheet(ui, { kind: "person", id: entity }));
       return;

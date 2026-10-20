@@ -1,4 +1,4 @@
-// GM mode's content (S4, contract §4.5, §9.4): the gate and the truth bar, the section body over the
+// GM mode's content: the gate and the truth bar, the section body over the
 // GM bottom bar, pages over a section's list, rows with their own actions, the entity editor's
 // forms, track and money cards, This chat's rules (realism with its band-cap grid, checks, time,
 // pins and the Upgrade review) and the Inspector. The GM frame (rule, tint, the mode bar's GM

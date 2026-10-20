@@ -1,4 +1,4 @@
-// Money → Accounts (DESIGN §25; contract D-UI9): every account the party holds or shares, by kind,
+// Money → Accounts (DESIGN §25): every account the party holds or shares, by kind,
 // each opening its own page: its balance and what's available, its limit and rate, what's due, a
 // loan's payment and months left, autopay, its cards (each with a page of its own), its owners,
 // the books the level shows (statements, pending lines, holds and terms at the top level) and its

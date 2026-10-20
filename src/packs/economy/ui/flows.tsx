@@ -1,7 +1,7 @@
 // Money → Flows (DESIGN §25): every standing transfer, bill, income and one-off that moves the
 // party's money, with its schedule, what it does when the money isn't there and how it has run.
 // The section lists them by status, each opens its own page, and every control there opens a page
-// of its own with one button that returns to the flow when it's done (D-UI9). The player creates,
+// of its own with one button that returns to the flow when it's done. The player creates,
 // edits, pauses, resumes and deletes the ones they may (in-world actions), pays an invoice billed
 // to them and gives notice on a lease they rent under; a flow a job, a lease or a loan derives is
 // changed at its source. The GM edits any flow's fields and status.

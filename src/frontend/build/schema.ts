@@ -135,7 +135,7 @@ export const EFFECT: FieldSpec = {
 
 /**
  * The element shapes of the list fields the packs read, by field id, so Build edits them as typed
- * lists rather than JSON (contract §4.6). Each pack reads its own: Cast life's commitments
+ * lists rather than JSON. Each pack reads its own: Cast life's commitments
  * (`appointments`, `trips`, `chores`; `castlife/core`), Sheets' `conditions`, Economy's `bills`,
  * and Gear's inline kit `pieces`. `title` names the element field a list row shows.
  */
@@ -636,7 +636,7 @@ const ID_MAX = 64;
 const FOLD: Readonly<Record<string, string>> = { ß: "ss", æ: "ae", œ: "oe", ø: "o", đ: "d", ð: "d", ł: "l", þ: "th" };
 
 /**
- * A new item's id from its name (D-UI6): lower snake case with accents and apostrophes dropped,
+ * A new item's id from its name: lower snake case with accents and apostrophes dropped,
  * `x` before a leading digit (formulas name ids, and a name can't start with one), then `_2`,
  * `_3`… while `taken` holds it. A name without a letter or digit gives `item`.
  */

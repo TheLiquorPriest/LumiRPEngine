@@ -1,7 +1,7 @@
 // Money → Investments and Properties (DESIGN §27): holdings with their value, cost and gain (lots
 // and realised gains in the full books), options, where distributions go; real estate with its
 // value, equity, mortgage, leases and running costs. Each holding and property opens its own page,
-// and each control there its own page with one button (D-UI9). The player buys and sells,
+// and each control there its own page with Back and one button. The player buys and sells,
 // exercises options, routes distributions, lets and sells property and buys what's for sale, each
 // an in-world action offered only where the feature runs for them; the GM sets prices, routes and
 // every declared field.

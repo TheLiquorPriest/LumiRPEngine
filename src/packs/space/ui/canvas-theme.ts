@@ -1,4 +1,4 @@
-// The canvas palette (contract §5.1): map and grid drawings take their colours from the
+// The canvas palette: map and grid drawings take their colours from the
 // `--lre-canvas-*` and `--lre-series-*` tokens at draw time, so a canvas follows the host theme in
 // light and dark like the rest of the UI, and redraws when the host switches theme (the host sets
 // its variables, and its theme class, on <html>).

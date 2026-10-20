@@ -1,4 +1,4 @@
-// Settings → Defaults for new chats (contract §4.7): realism, checks and time as seeds for new chats,
+// Settings → Defaults for new chats: realism, checks and time as seeds for new chats,
 // behind a world's own defaults unless "Use my settings…" is on. The editors are GM mode's (S4's
 // seed exports); a running chat's own rules are in GM → This chat, which each page points to.
 

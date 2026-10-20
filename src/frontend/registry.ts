@@ -1,5 +1,5 @@
-// The UI registry contract for pack `ui` modules (DESIGN §3, §12; ARCHITECTURE §5; redesign
-// contract §6.4). A pack's ui default-exports a UiPackDef. Components are Preact and render the
+// The UI registry contract for pack `ui` modules (DESIGN §3, §12; ARCHITECTURE §5). A pack's ui
+// default-exports a UiPackDef. Components are Preact and render the
 // view models the pack's core builds (`PanelViewDef`); they never compute state. Every interaction
 // goes to the backend through `send`, as a protocol request.
 
@@ -32,12 +32,12 @@ export interface PanelDef {
   label: string;
   /** Order within its home, ties by id. */
   order: number;
-  /** The Play destination it shows in, or GM mode (contract §4.2). */
+  /** The Play destination it shows in, or GM mode. */
   home: PanelHome;
   component: ComponentType<PanelProps>;
 }
 
-/** A detail sheet over a Play destination; it renders `StateView` data only (contract §4.3). */
+/** A detail sheet over a Play destination; it renders `StateView` data only. */
 export interface SheetProps {
   chatId: ChatId;
   /** The entity, place, account or quest the sheet shows. */
@@ -51,7 +51,7 @@ export interface SheetProps {
 }
 
 /**
- * A compact card in Play → Now (contract §4.4): at most three rows with a link to its panel, or
+ * A compact card in Play → Now: at most three rows with a link to its panel, or
  * null when there's nothing worth showing. It shows only while its panel is visible, and its view
  * is that panel's (`StateView.panels[panel]`).
  */

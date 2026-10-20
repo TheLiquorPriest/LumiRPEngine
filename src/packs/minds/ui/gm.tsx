@@ -1,4 +1,4 @@
-// GM → Minds (DESIGN §24.9; contract §4.5): every character's place on the fidelity ladder and why,
+// GM → Minds (DESIGN §24.9): every character's place on the fidelity ladder and why,
 // their latest mind (monologue, depiction, intent, reactions), plans, commitments, notes, what they
 // witnessed and their summary. It lives in GM mode behind the gate, and its data comes with `lre.gm`
 // only. A character opens as a page over the list, and each change opens as its own page over theirs:

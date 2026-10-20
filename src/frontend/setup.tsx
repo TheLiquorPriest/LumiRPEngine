@@ -62,7 +62,7 @@ export function setup(ctx: SpindleFrontendContext): () => void {
   window.addEventListener(STATE_REQUEST_EVENT, announceAgain);
   cleanups.push(() => window.removeEventListener(STATE_REQUEST_EVENT, announceAgain));
 
-  // Show ids is a choice for this device (contract §6.7): read once here, written back when it changes.
+  // Show ids is a choice for this device: read once here, written back when it changes.
   let showIds = false;
   try {
     showIds = localStorage.getItem(SHOW_IDS_KEY) === "true";
@@ -157,7 +157,7 @@ export function setup(ctx: SpindleFrontendContext): () => void {
 
   // ------------------------------------------------------------ HUD pill and status line
   // How many status lines are mounted above a message input. On a phone the status line does the
-  // pill's job (D-UI3); a host without that mount keeps the pill.
+  // pill's job; a host without that mount keeps the pill.
   const statusLines = createStore(0);
   const hud = new HudFloat<SpindleFloatWidgetHandle>({
     viewport: () => host.viewport.get(),

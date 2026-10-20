@@ -1,4 +1,4 @@
-// The money hub's form pieces (contract D-UI9): labelled fields on the shared atoms (40 px targets,
+// The money hub's form pieces: labelled fields on the shared atoms (40 px targets,
 // the one money input for every typed amount), and the action page every control opens: its fields,
 // then one primary button that sends the request and, once it's accepted, goes back to the page
 // the action was opened from.
@@ -125,7 +125,7 @@ export function ToggleField(props: { label: ComponentChildren; help?: ComponentC
 }
 
 /**
- * An action's own page (D-UI9): its fields, then one primary button that sends it, busy while the
+ * An action's own page: its fields, then one primary button that sends it, busy while the
  * request runs. Accepted, it goes back to the page it was opened from (`nav.back` does nothing once
  * the page has been left, so a Back tapped while the request ran isn't doubled); declined, it
  * stays, and the toast says why. `problem` says in words what's missing and holds the button back;

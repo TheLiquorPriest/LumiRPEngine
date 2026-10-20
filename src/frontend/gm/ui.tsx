@@ -17,7 +17,7 @@ export interface Pages<T> {
 }
 
 /**
- * One page at a time over a list (contract §5.7). The list stays mounted, hidden, under the page,
+ * One page at a time over a list. The list stays mounted, hidden, under the page,
  * so Back or Escape returns focus to the row that opened it; opening moves focus to the page's Back.
  */
 export function usePages<T>(): Pages<T> {

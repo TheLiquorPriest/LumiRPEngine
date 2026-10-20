@@ -1,4 +1,4 @@
-// The schema-driven form (DESIGN §13, redesign contract §4.6): renders a value from `FieldSpec`s,
+// The schema-driven form (DESIGN §13): renders a value from `FieldSpec`s,
 // each field's label over its control with its help and the backend's lint under it. References
 // are pickers by name; money is typed in the world's currency; durations and moments of the clock
 // are typed as spans and dates; lists and records of objects list their items, each opening as a
@@ -55,7 +55,7 @@ export function lintAt(lint: readonly LintIssue[], path: string): LintIssue[] {
 }
 
 /**
- * Pickable ids of a collection by name (D-UI6: ids stay hidden), sorted by name. Relations include
+ * Pickable ids of a collection by name (ids stay hidden unless Show ids is on), sorted by name. Relations include
  * the built-in types; a pack's kinds and relation types name their pack on the second line, and
  * items that share a name are told apart there by their ids.
  */
@@ -747,7 +747,7 @@ export function LintBadge(props: { issues: readonly LintIssue[] }) {
 }
 
 /**
- * A list (contract §4.6 typed list editors): items of objects as rows that open as sheets, with
+ * A list (a typed list editor): items of objects as rows that open as sheets, with
  * move up, move down and remove; scalar items inline. Add appends a blank item and opens it.
  */
 function ListInput(props: { spec: ListSpec; value: JsonValue | undefined; ctx: FormCtx; path: string; onChange(value: JsonValue | undefined): void }) {
@@ -845,8 +845,8 @@ function keyProblem(key: string, taken: ReadonlySet<string>): string | null {
 }
 
 /**
- * A new record entry. One whose item has a label asks for a name and derives the key from it
- * (D-UI6), the key editable under Advanced or in the open while Show ids is on; any other asks
+ * A new record entry. One whose item has a label asks for a name and derives the key from it,
+ * the key editable under Advanced or in the open while Show ids is on; any other asks
  * for the key itself, with suggestions.
  */
 export function NewKey(props: { named: boolean; keyLabel: string; noun: string; taken: ReadonlySet<string>; suggestions: readonly string[]; onAdd(key: string, label?: string): void; onCancel(): void }) {

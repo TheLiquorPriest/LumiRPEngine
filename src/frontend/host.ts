@@ -80,7 +80,7 @@ export function createHost(ctx: SpindleFrontendContext): Host {
     revealMessage(messageId) {
       const element = ctx.dom.findMessageElement(messageId);
       if (!element) return false;
-      // Nothing moves under reduced motion (contract §5.6): the jump is instant there.
+      // Nothing moves under reduced motion: the jump is instant there.
       const still = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches === true;
       element.scrollIntoView({ behavior: still ? "auto" : "smooth", block: "center" });
       return true;

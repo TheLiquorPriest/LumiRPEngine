@@ -1,4 +1,4 @@
-// What a chip asks of the player under a reply (contract §4.8, §6.5): a decision to answer, an
+// What a chip asks of the player under a reply: a decision to answer, an
 // offer to take or leave, or a record of what the turn did. Every kind is listed, so a new chip
 // kind can't ship without a role and a tone.
 

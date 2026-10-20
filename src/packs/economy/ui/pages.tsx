@@ -1,4 +1,4 @@
-// The money hub's pages (contract D-UI9): which module draws a page, by its path's head, and what a
+// The money hub's pages: which module draws a page, by its path's head, and what a
 // page is called for Back's label in GM mode. A page its module draws nothing for (its thing gone
 // from the view, or its control no longer allowed) shows as gone.
 

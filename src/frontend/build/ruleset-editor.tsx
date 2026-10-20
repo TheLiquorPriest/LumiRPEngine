@@ -1,4 +1,4 @@
-// Build → World → Ruleset (DESIGN §11, §13; contract §4.6): the world's rules as parts, each opening
+// Build → World → Ruleset (DESIGN §11, §13): the world's rules as parts, each opening
 // as its own page (a sheet): Start from a profile…, how checks are decided (the adjudication
 // policy), the level floors, the progressions, the Sheet Designer with its live preview, and the
 // Combat card, saved together as the `ruleset` part. The preview is `lre.world sheet` on the POV as

@@ -1,4 +1,4 @@
-// The drawer shell (contract §4.1–4.5, §5.3, §9.4): the sticky mode bar, each mode's body, Play's
+// The drawer shell: the sticky mode bar, each mode's body, Play's
 // destination area with its sticky sub-tabs, the sheet stack's frame and motion, the bottom bar
 // (Play's and GM's), and the GM frame. Content keeps 12 px from each side plus the chat-head gutters
 // (--lre-gutter-l/-r, set from the heads' measured overlap); the sticky bars bleed to the edges and

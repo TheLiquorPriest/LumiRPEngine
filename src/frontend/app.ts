@@ -1,6 +1,6 @@
 // The frontend's app object: the protocol client, the UI registry catalog, local UI state, host
 // capabilities and overlay control, shared with every Preact tree (drawer, HUD, chips, sheets,
-// map) through one context. UI state follows the redesign's IA (contract §4, §6.3): a mode, Play's
+// map) through one context. UI state: a mode, Play's
 // destination with its sub-tabs and sheet stack, GM's gate, Build's route and Settings' page.
 
 import { createContext } from "preact";
@@ -19,7 +19,7 @@ import type { UiCatalog } from "./ui-registry";
 
 export type Mode = "play" | "gm" | "build" | "settings";
 
-/** Play's bottom-bar destinations (contract §4.2). */
+/** Play's bottom-bar destinations. */
 export type Dest = "now" | "me" | "people" | "places" | "story";
 
 /** Where a panel lives: a Play destination, or GM mode. */
@@ -27,7 +27,7 @@ export type PanelHome = Dest | "gm";
 
 export type SheetKind = "person" | "place" | "item" | "account" | "quest" | "money";
 
-/** A detail sheet opened over a Play destination (contract §4.3). */
+/** A detail sheet opened over a Play destination. */
 export interface SheetRoute {
   kind: SheetKind;
   id: string;
@@ -45,7 +45,7 @@ export interface PlayState {
 export type GmSection = "world" | "places" | "story" | "chat" | `${string}.${string}`;
 
 export interface GmState {
-  /** The truth shows only once the gate is opened; leaving GM mode closes it again (contract §4.5). */
+  /** The truth shows only once the gate is opened; leaving GM mode closes it again. */
   revealed: boolean;
   section: GmSection;
 }
@@ -75,7 +75,7 @@ export interface UiState {
   showIds: boolean;
 }
 
-/** The localStorage key Show ids is kept under (contract §6.7). */
+/** The localStorage key Show ids is kept under. */
 export const SHOW_IDS_KEY = "lre:ui:show-ids";
 
 /** The UI state a session starts with. */
@@ -83,12 +83,12 @@ export function initialUi(showIds: boolean): UiState {
   return { mode: "play", play: { dest: "now", tab: {}, stack: [] }, gm: { revealed: false, section: "world" }, build: { view: "worlds" }, settings: { page: "home" }, overlay: null, studioOffer: 0, showIds };
 }
 
-/** Play at a destination, on one of its panels when given. Navigating starts with no sheet open (contract §4.3). */
+/** Play at a destination, on one of its panels when given. Navigating starts with no sheet open. */
 export function playAt(ui: UiState, dest: Dest, panel?: PanelId): UiState {
   return { ...ui, mode: "play", play: { dest, tab: panel === undefined ? ui.play.tab : { ...ui.play.tab, [dest]: panel }, stack: [] } };
 }
 
-/** A panel shown where it lives (contract §4.2): its Play destination on its tab, or GM mode for a GM panel. */
+/** A panel shown where it lives: its Play destination on its tab, or GM mode for a GM panel. */
 export function showPanel(ui: UiState, catalog: UiCatalog, panel: PanelId): UiState {
   const home = catalog.panels.find((def) => def.id === panel)?.home;
   if (home === undefined) return ui;
@@ -156,7 +156,7 @@ export interface Overlays {
   closeMap(): void;
   openPalette(tab?: PaletteTab): Promise<void>;
   closePalette(): void;
-  /** The World sheet (contract §4.8): time, place, scene, weather and cash with ✎ fixes, the call meter, the clock toggle, Map and Actions. */
+  /** The World sheet: time, place, scene, weather and cash with ✎ fixes, the call meter, the clock toggle, Map and Actions. */
   openWorld(): Promise<void>;
   closeWorld(): void;
 }

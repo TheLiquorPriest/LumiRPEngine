@@ -4,7 +4,7 @@
 // terms and topics join the lookup table in one more write), then committed from the Build bar. The
 // backend keeps each job (`lre.job list`), so a reload or a restart shows the last run of each tool
 // again, and a job a restart cut off as interrupted, with its proposals so far and Run it again.
-// A job's page (redesign contract §4.6) leads with its status and results; Apply stays in reach in
+// A job's page leads with its status and results; Apply stays in reach in
 // a sticky bar while the review scrolls.
 
 import { useEffect, useId, useMemo, useState } from "preact/hooks";
@@ -186,7 +186,7 @@ function JobInput(props: { kind: JobKind; onStart(input: Record<string, string |
   if (props.kind === "describe_map") {
     const places = draft ? Object.values(draft.doc.places).sort((a, b) => a.name.localeCompare(b.name)) : [];
     const chosen = scope || draft?.doc.start.place || "";
-    // The map's id is the backend's to derive unless the author names one (D-UI6): an Advanced field.
+    // The map's id is the backend's to derive unless the author names one: an Advanced field.
     const mapIdField = (
       <Field label="Map id" for={mapIdId} help={`Left empty, it's ${chosen}_map.`}>
         <input id={mapIdId} class="lre-input lre-build-mono" placeholder={`${chosen}_map`} value={mapId} autoComplete="off" spellcheck={false} onInput={(event) => setMapId(event.currentTarget.value.replace(/[^\w-]/g, "_"))} />

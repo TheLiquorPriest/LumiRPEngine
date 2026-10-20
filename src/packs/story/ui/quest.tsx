@@ -1,4 +1,4 @@
-// The quest sheet (contract §4.3): one track of the quest log as the POV knows it: where it
+// The quest sheet: one track of the quest log as the POV knows it: where it
 // stands (its current stage and cue), what the POV has learned, its objectives, n of m done, and
 // its hints behind "Show a hint". The engine releases hints one per failed attempt, so every hint
 // in the view is earned; the sheet only keeps them out of sight until asked. A track isn't an

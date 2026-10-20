@@ -1,4 +1,4 @@
-// GM mode → Money (DESIGN §7, §25; contract D-UI9): anyone's money, a person's, a business's, a
+// GM mode → Money (DESIGN §7, §25): anyone's money, a person's, a business's, a
 // trust's or a household's, picked under Whose money, as the same hub the player sees at that
 // party's own level, with the GM's controls: money in and out, statuses, autopay, card states,
 // flows, jobs, prices and every declared field, each one edit with its own Corrected chip. Its pages

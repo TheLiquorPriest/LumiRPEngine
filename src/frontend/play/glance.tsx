@@ -1,4 +1,4 @@
-// Play → Now glances (contract §4.4, §6.4): every pack's glance is this titled list of at most
+// Play → Now glances: every pack's glance is this titled list of at most
 // three rows whose Open button shows the panel where the rows live, so the glances read alike.
 
 import type { ComponentChildren } from "preact";
@@ -6,7 +6,7 @@ import type { PanelId } from "../../shared/ids";
 import { showPanel, useApp } from "../app";
 import { Button, List, Section } from "../components";
 
-/** The most rows a glance shows (contract §6.4). */
+/** The most rows a glance shows. */
 export const GLANCE_ROWS = 3;
 
 export function GlanceCard(props: { title: string; panel: PanelId; children: ComponentChildren }) {

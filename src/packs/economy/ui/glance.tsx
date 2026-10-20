@@ -1,4 +1,4 @@
-// Now's money glance (contract D-UI9): what in the POV's money needs them, from the overview: its
+// Now's money glance: what in the POV's money needs them, from the overview: its
 // problems, then its warnings, then what's coming up within about three days of the world's clock.
 // At most three rows, and nothing when there's nothing; a row opens the account or flow page it
 // names, over Now.

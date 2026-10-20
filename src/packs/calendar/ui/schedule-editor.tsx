@@ -1,4 +1,4 @@
-// Build's schedule editor (DESIGN §13, contract §4.6): who a schedule applies to and what it sets,
+// Build's schedule editor (DESIGN §13): who a schedule applies to and what it sets,
 // when it repeats, and its day as a 24-hour bar of slots. Tap a slot, on the bar or in the list, to
 // edit it in a sheet; drag a handle on the bar (or step it with the arrow keys) to move where one
 // slot hands over to the next. Slots are fixed values, weighted choices, or choices given the

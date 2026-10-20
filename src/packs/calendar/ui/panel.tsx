@@ -1,6 +1,6 @@
 // Play → Story → Calendar (DESIGN §12): the clock and today, today's holidays, what's coming up,
 // Pause/Resume and Timelapse. This chat's time controls (scene ticks, scale, interrupts…) live in
-// GM → This chat (contract §4.7, §9.6); a pointer leads there. The calendar's glance on Now gives
+// GM → This chat; a pointer leads there. The calendar's glance on Now gives
 // the POV's next two commitments.
 
 import { isRecord } from "../../../shared/json";

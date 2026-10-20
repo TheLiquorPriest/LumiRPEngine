@@ -1,4 +1,4 @@
-// Play → People (DESIGN §12, contract §4.2): everyone the POV knows and anyone here, people here
+// Play → People (DESIGN §12): everyone the POV knows and anyone here, people here
 // first. Each row shows who they are, what they're doing or where and when the POV last saw them,
 // and how they regard the POV; tapping one opens their person sheet (person.tsx) with today's
 // plan, regard per axis, agendas, groups and classes. The list can be grouped by a classification

@@ -1,4 +1,4 @@
-// GM mode (contract §4.5), inside the drawer's GM frame: a bottom bar in GM gold (World, Places,
+// GM mode, inside the drawer's GM frame: a bottom bar in GM gold (World, Places,
 // Story, each pack's tab in its order, This chat) over the GM panels. The truth (World, Places,
 // Story, the packs' tabs, the Fight and the Edits log) is the `core.gm` panel, behind the gate in UI
 // state; This chat's rules and the Inspector (`core.context` and any other GM panel) aren't behind

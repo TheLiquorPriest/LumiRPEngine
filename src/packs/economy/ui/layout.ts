@@ -342,7 +342,7 @@ export const GLANCE_AHEAD_MINUTES = 3 * 24 * 60;
 export type GlanceLine = { kind: "alert"; alert: AlertLine } | { kind: "upcoming"; line: UpcomingLine };
 
 /**
- * What Now's money glance may show, in order (contract D-UI9): the overview's problems, then its
+ * What Now's money glance may show, in order: the overview's problems, then its
  * warnings, then what's coming up within about three days of `now` (the HUD clock's minutes),
  * compared by each line's clock and never its words. Without a clock only the alerts show; the
  * glance shows the first few.

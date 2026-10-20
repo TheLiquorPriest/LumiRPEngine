@@ -1,4 +1,4 @@
-// Build's forms (S7a): the form sheet (a sub-editor's own page), fields with their lint, chips, the
+// Build's forms: the form sheet (a sub-editor's own page), fields with their lint, chips, the
 // typed list editors, the expression editor, the selector and facet widgets, the tier and level
 // grids, the data-table editor and the lore editors. Each block below belongs to one editor.
 

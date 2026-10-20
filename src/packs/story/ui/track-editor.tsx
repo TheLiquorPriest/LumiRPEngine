@@ -1,4 +1,4 @@
-// Build's track editor (DESIGN §13, contract §4.6): a quest, secret, puzzle or agenda as its
+// Build's track editor (DESIGN §13): a quest, secret, puzzle or agenda as its
 // stages, laid out from the start along `next` and `fail` edges, with the stages it can't reach
 // flagged. On a phone the stages are a list in that order, on a desktop a graph; either view is a
 // tap away. A stage opens as a sheet: its label, cue and secret truth, objectives, the stages it

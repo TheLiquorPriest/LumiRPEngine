@@ -1,4 +1,4 @@
-// Where a hub page rides Play's sheet stack (contract D-UI9): an account's page is an `account`
+// Where a hub page rides Play's sheet stack: an account's page is an `account`
 // sheet with the account's id; every other page is a `money` sheet whose id is the page, its type
 // then its path, each segment URI-encoded (flow ids hold colons, a name may hold a slash).
 

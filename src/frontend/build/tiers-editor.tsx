@@ -1,5 +1,5 @@
 // Build → Tiers (DESIGN §9.1, §13): a world's own tiers, each in one of the three detail bands whose
-// caps limit how deeply its people are simulated. Add (by name, the id derived from it: D-UI6),
+// caps limit how deeply its people are simulated. Add (by name, the id derived from it),
 // rename, reorder, pick a band, say whether its people live their own day (agendas and plans) by
 // default, describe it; and choose the tier new people join. One card per tier, so it works at
 // phone width. Styles: styles/forms.ts.

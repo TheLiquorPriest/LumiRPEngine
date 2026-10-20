@@ -1,4 +1,4 @@
-// Responsive layout rules (DESIGN §12, contract §4.8). Pure, so the rules are tested without a browser.
+// Responsive layout rules (DESIGN §12). Pure, so the rules are tested without a browser.
 
 import { headGutters } from "./chat-heads";
 
@@ -51,8 +51,8 @@ export interface Rect {
 
 /**
  * A bottom sheet (the palette, the World sheet) `height` px tall, never taller than the viewport less
- * 24 px. On mobile it spans the width less what the host's chat heads actually cover of it (D-UI7:
- * they are usually absent, and anywhere when present); on desktop it is a centred 440 px column.
+ * 24 px. On mobile it spans the width less what the host's chat heads actually cover of it (they
+ * are usually absent, and anywhere when present); on desktop it is a centred 440 px column.
  */
 export function sheetRect(viewport: Viewport, height: number, heads: readonly Rect[] = []): Rect {
   const tall = Math.round(Math.min(height, viewport.height - 24));

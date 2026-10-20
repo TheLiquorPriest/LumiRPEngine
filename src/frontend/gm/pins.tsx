@@ -1,6 +1,6 @@
 // GM → This chat → Pins and upgrade (DESIGN §4.3 `migrate`, §9.2, §12): the world and the revision
 // this chat plays, whether a newer one exists, the Upgrade with its review, and the generator
-// versions and table revisions the revision pins. Moved here from Settings (contract §9.6). Not
+// versions and table revisions the revision pins. Moved here from Settings. Not
 // behind the GM gate: the Upgrade review keeps its own spoiler gate for changes that would give a
 // secret away.
 

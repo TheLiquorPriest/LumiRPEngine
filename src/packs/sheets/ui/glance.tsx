@@ -1,4 +1,4 @@
-// Play → Now glance for the You panel (contract §4.4, §6.4): the POV's active conditions, on the
+// Play → Now glance for the You panel: the POV's active conditions, on the
 // glance card every pack shares.
 
 import { Badge, ListRow } from "../../../frontend/components";

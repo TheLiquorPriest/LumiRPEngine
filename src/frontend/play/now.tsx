@@ -1,4 +1,4 @@
-// Play → Now's parts around the scene (contract §4.4): the status banners (a paused chat with its
+// Play → Now's parts around the scene: the status banners (a paused chat with its
 // Keep report, a turn running), what needs the player's answer, and the quick actions. Scene
 // (scene.tsx) assembles the hub from these and its own card and Here list.
 
@@ -13,7 +13,7 @@ import { isMobile } from "../layout";
 import { visiblePanels } from "./play";
 
 /**
- * What needs the player (contract §4.4): the Keep report while it stands, then every decision that
+ * What needs the player: the Keep report while it stands, then every decision that
  * lapses at the next send, in chat order. A decision kept past the send (an overdue loan) waits in
  * its own place instead.
  */

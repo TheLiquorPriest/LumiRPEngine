@@ -1,4 +1,4 @@
-// Build's visual editors (S7b, contract §4.6): the editing canvas shared by the grid painter, the
+// Build's visual editors: the editing canvas shared by the grid painter, the
 // map editor and the place editor (its zoom buttons and the selection dock under it), brushes and
 // swatches, the map's problems and its JSON tab, lint marks over the map preview, the schedule's
 // day bar with its handles, the track's stage graph, and the ruleset's parts. Tokens only: canvases

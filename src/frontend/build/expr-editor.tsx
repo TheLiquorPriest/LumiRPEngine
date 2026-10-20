@@ -1,4 +1,4 @@
-// The expression editor (DESIGN §13 special widget, redesign contract §4.6): a monospace input
+// The expression editor (DESIGN §13 special widget): a monospace input
 // with suggestions for the word at the caret, a plain-words readout of what the formula reads, a
 // bracket and quote balance check, and the backend's lint for this field. Its palette (operators,
 // functions and the world's names) opens inline on desktop; the full-page formula editor holds the
@@ -304,7 +304,7 @@ export function exprSummary(text: string, doc?: WorldDoc): string {
   return using === "" ? `${sentence}.` : `${sentence}; uses ${using}.`;
 }
 
-/** A formula in plain words, as a quiet line (contract §4.6: formulas carry a readout); nothing while it is empty. */
+/** A formula in plain words, as a quiet line, so every formula carries a readout; nothing while it is empty. */
 export function ExprReadout(props: { text: string; doc?: WorldDoc }) {
   if (props.text.trim() === "") return null;
   return <p class="lre-expr-readout">{exprSummary(props.text, props.doc)}</p>;
@@ -478,7 +478,7 @@ function Palette(props: { functions: readonly string[]; identifiers: readonly st
 }
 
 /**
- * The full-page formula editor (contract §4.6: a sub-editor opens as its own page): the formula
+ * The full-page formula editor (a sub-editor opens as its own page): the formula
  * large, with its suggestions, readout and problems kept in view while the palette scrolls under
  * them. Edits apply as they are made; Done and Back both close it.
  */

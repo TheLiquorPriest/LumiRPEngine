@@ -1,4 +1,4 @@
-// Settings (S5, contract §4.7): the home list, page leads, the model-use preset cards, the call meter
+// Settings: the home list, page leads, the model-use preset cards, the call meter
 // table, the per-step cards and the extraction rows. Built on the tokens and the shared atoms only.
 
 export const SETTINGS_CSS = `

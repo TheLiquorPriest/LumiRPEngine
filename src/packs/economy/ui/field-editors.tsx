@@ -1,5 +1,5 @@
 // Build's editors for the money fields whose values are structured (DESIGN §13, §25–§27), in the
-// Build forms' idiom (redesign contract §4.6): owners, pay and flow splits, household shares,
+// Build forms' idiom: owners, pay and flow splits, household shares,
 // holding lots, payroll deductions and payment preferences are lists whose items open as form
 // sheets; schedule lists are chips to toggle, or days typed in a row; a business's places are chips;
 // an account's product, a holding's asset and where its payouts go are picks by name. A place's
@@ -41,7 +41,7 @@ export function compact(o: Record<string, JsonValue | undefined>): JsonObject {
   return out;
 }
 
-/** Entities of these kinds (or kinds inheriting from them), as picks by name; their ids show only with Show ids (D-UI6). */
+/** Entities of these kinds (or kinds inheriting from them), as picks by name; their ids show only with Show ids. */
 export function entityChoices(doc: WorldDoc, kinds: readonly string[]): RefOption[] {
   return refOptions(doc, "entities").filter((o) => {
     const kind = hasOwn(doc.entities, o.value) ? doc.entities[o.value]?.kind : undefined;
@@ -135,7 +135,7 @@ function entriesOf(value: JsonValue | undefined): Entry<JsonObject>[] {
 }
 
 /**
- * A list of records as Build lists items (contract §4.6): a row per item with its lint count, which
+ * A list of records as Build lists items: a row per item with its lint count, which
  * opens the item as a sheet; remove on the row and in the sheet; Add appends `blank` and opens it.
  * `ordered` numbers the items and moves them up and down, for a list whose order decides (payment
  * tiers). `onChange` gets the items to store; an emptied list is the caller's to drop.

@@ -1,8 +1,8 @@
 // The money hub (economy pack): Play → Me → Money and GM → Money, their section and detail pages,
-// the action forms and Now's money glance. Built on the tokens only (contract §5).
+// the action forms and Now's money glance. Built on the tokens only.
 
 export const PACKS_MONEY_CSS = `
-/* M4 MoneyBuild: money in Build (economy/ui/config.tsx, field-editors.tsx): living costs in a grid, the feature switches page, a place's cash machine and branch */
+/* Money in Build (economy/ui/config.tsx, field-editors.tsx): living costs in a grid, the feature switches page, a place's cash machine and branch */
 .lre .lre-money-build-bands{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,13rem),1fr));gap:var(--lre-s3);min-width:0}
 .lre .lre-money-build-feature{display:flex;flex-wrap:wrap;align-items:center;gap:var(--lre-s2) var(--lre-s3);min-width:0;padding:var(--lre-s2) var(--lre-s3)}
 .lre .lre-money-build-feature+.lre-money-build-feature{border-top:1px solid var(--lre-hairline)}
@@ -16,9 +16,9 @@ export const PACKS_MONEY_CSS = `
 .lre .lre-money-build-absent-text{flex:1 1 10rem;min-width:0;color:var(--lre-muted);overflow-wrap:anywhere}
 .lre .lre-money-build-place{gap:var(--lre-s3)}
 .lre .lre-money-build-place-actions{display:flex;flex-wrap:wrap;gap:var(--lre-s2)}
-/* M1b MoneyHubSections: flows, jobs, businesses, investments, properties, credit and household (economy/ui/flows.tsx, work.tsx, assets.tsx, credit.tsx): a lead amount in words (worked out each time) at a reading size */
+/* The money hub's sections: flows, jobs, businesses, investments, properties, credit and household (economy/ui/flows.tsx, work.tsx, assets.tsx, credit.tsx): a lead amount in words (worked out each time) at a reading size */
 .lre .lre-money-hero .lre-money-hero-words{font-size:var(--lre-fs-lg);line-height:1.3;letter-spacing:0}
-/* M1a MoneyHubCore: the hub (economy/ui/hub.tsx, panel.tsx, gm.tsx, sheet.tsx), its page frame and shared pieces (nav.tsx, forms.tsx, lines.tsx), accounts and cards (accounts.tsx), payment tiers (pay-prefs.tsx) and Now's glance */
+/* The money hub (economy/ui/hub.tsx, panel.tsx, gm.tsx, sheet.tsx), its page frame and shared pieces (nav.tsx, forms.tsx, lines.tsx), accounts and cards (accounts.tsx), payment tiers (pay-prefs.tsx) and Now's glance */
 .lre .lre-money-root,.lre .lre-money-hub,.lre .lre-money-page,.lre .lre-money-page-body,.lre .lre-money-level,.lre .lre-money-form{display:flex;flex-direction:column;gap:var(--lre-s3);min-width:0}
 .lre .lre-money-hero{display:flex;flex-direction:column;gap:var(--lre-s3);min-width:0;padding:var(--lre-s3);border:1px solid var(--lre-hairline);border-radius:var(--lre-r-xl);background:var(--lre-card)}
 .lre .lre-money-hero-main{display:flex;align-items:flex-start;justify-content:space-between;gap:var(--lre-s3);min-width:0}

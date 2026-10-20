@@ -1,8 +1,8 @@
-// Settings → Minds (DESIGN §24.6; contract §4.7): whether characters get minds, how many think a
+// Settings → Minds (DESIGN §24.6): whether characters get minds, how many think a
 // turn, what refreshes a Near mind and how often a Far one thinks, which levels write memory notes,
 // the Minds section's own budget and a time skip's caps (under Advanced), the user's memory
 // overrides of the world's settings (a disclosure, as they're long), and the four minds prompts, each
-// beside its built-in default with Reset. Every patch is `minds-patch.ts`'s. Styles: styles/minds.ts (M3).
+// beside its built-in default with Reset. Every patch is `minds-patch.ts`'s. Styles: styles/minds.ts.
 
 import { useEffect, useState } from "preact/hooks";
 import type { JsonObject } from "../../shared/json";

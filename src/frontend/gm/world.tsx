@@ -1,4 +1,4 @@
-// GM → World (contract §4.5): every entity, secrets and the removed included, with search, a kind
+// GM → World: every entity, secrets and the removed included, with search, a kind
 // filter and badges; each opens its editor as a page. While a fight is on, a Fight card leads,
 // opening the fight as the GM sees it (everyone named, HP exact). Spawn adds someone or something
 // to this chat.

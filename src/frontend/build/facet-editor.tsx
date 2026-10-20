@@ -2,7 +2,7 @@
 // each opening a sheet with its label, the value it nests under and a description; and an entity's
 // classification, one field per facet: chips for several values or a short single choice, a picker
 // for a long one. Lint is shown by the form around them (`issues`), so a stale value an entity still
-// holds stays visible and removable here. Ids stay hidden (D-UI6): values show by label, and a new
+// holds stays visible and removable here. Ids stay hidden unless Show ids is on: values show by label, and a new
 // value's id is derived from its label. Styles: styles/forms.ts.
 
 import type { ComponentChildren } from "preact";
@@ -102,7 +102,7 @@ function idProblem(id: string, taken: ReadonlySet<string>): string | null {
 /**
  * A facet's values as an item list in tree order, nesting shown by indent; tapping one opens its
  * sheet. `issues(path)` renders the lint at a value's path. A new value is named by its label; its
- * id follows the label (D-UI6) and is editable under Advanced, or in the open while Show ids is on.
+ * id follows the label and is editable under Advanced, or in the open while Show ids is on.
  */
 export function FacetValuesInput(props: { label: string; value: Record<FacetValueId, FacetValueDef> | undefined; path: string; issues(path: string): ComponentChildren; onChange(next: Record<FacetValueId, FacetValueDef>): void }) {
   const values = props.value ?? {};

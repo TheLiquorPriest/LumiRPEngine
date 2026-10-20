@@ -1,4 +1,4 @@
-// Chips under each reply (DESIGN §11, §12; contract §4.8), rendered by a DOM decorator on
+// Chips under each reply (DESIGN §11, §12), rendered by a DOM decorator on
 // `message_body_after`: one quiet receipt line for what the turn did (its `done` chips), a card for
 // each decision the player owes, and compact offers. Nothing is dropped: the receipt opens to the full
 // list, where every chip shows with its own buttons. A pack can override a kind's rendering through
@@ -55,7 +55,7 @@ const CHIP_ICON: Record<ChipKind, IconName> = {
 const ACTION_ICON: Partial<Record<string, IconName>> = { undo: "undo", regenerate: "refresh", rerun: "refresh", send: "send", timelapse: "fast-forward" };
 
 /**
- * The receipt's order (contract §4.8): what went wrong first, so it never hides behind "n more";
+ * The receipt's order: what went wrong first, so it never hides behind "n more";
  * then time, money, the roll, the changes and how the message was read.
  */
 const RECEIPT_ORDER: readonly ChipKind[] = ["decline", "degraded", "pending", "elapsed", "price", "undo", "roll", "change", "not_action", "fix", "mode_change"];
@@ -273,7 +273,7 @@ export function DefaultChip(props: ChipProps) {
   );
 }
 
-/** A decision the player owes (contract §4.8): a card with its question, detail and answers, marked when the next send lapses it. */
+/** A decision the player owes: a card with its question, detail and answers, marked when the next send lapses it. */
 function DecisionCard(props: ChipProps) {
   const { chip } = props;
   const controls = useChipControls(chip, props.chatId);
@@ -305,7 +305,7 @@ function DecisionCard(props: ChipProps) {
 }
 
 /**
- * An offer (contract §4.8) as compact pills: one action makes the whole pill its button ("Send: the
+ * An offer as compact pills: one action makes the whole pill its button ("Send: the
  * suggestion"), several sit as pills after the offer's label ("Swipe as… Re-narrate · Re-run"). The
  * detail follows in quiet text, so a touch screen loses none of it.
  */

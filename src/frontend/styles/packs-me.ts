@@ -1,5 +1,5 @@
-// "Me" packs (S3a): You, Money, Gear and Garage panels, their glances, and the item and account
-// sheets. Built on the tokens only (contract §5); cards are flat with a hairline, rows are 44 px
+// "Me" packs: You, Money, Gear and Garage panels, their glances, and the item and account
+// sheets. Built on the tokens only; cards are flat with a hairline, rows are 44 px
 // tall at least, and nested contents indent under a hairline rule.
 
 export const PACKS_ME_CSS = `

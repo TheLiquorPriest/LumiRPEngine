@@ -1,7 +1,7 @@
 // Money → Jobs and Businesses (DESIGN §26): the party's jobs with their pay, schedule and last
 // paycheck; the businesses it owns or runs with their books, sales, invoices, payroll and taxes.
-// Each job and business opens its own page, and each control there its own page with one button
-// (D-UI9). The player quits a job, and for a business they manage hires, gives raises, lets people
+// Each job and business opens its own page, and each control there its own page with Back and one
+// button. The player quits a job, and for a business they manage hires, gives raises, lets people
 // go, issues, pays and voids invoices, draws money, pays out profit, sells a stake and says where
 // their profit goes, each an in-world action; the GM ends and edits jobs, adds one, sets an
 // invoice's state, edits every business's declared fields and routes an owner's profit.

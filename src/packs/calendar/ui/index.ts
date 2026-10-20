@@ -8,7 +8,7 @@ import { CalendarGlance, CalendarPanel } from "./panel";
 const calendar: UiPackDef = {
   id: "calendar",
   register(r) {
-    // Story's sub-tabs run Quests, Journal, Calendar (contract §9.5).
+    // Story's sub-tabs run Quests, Journal, Calendar.
     r.panel({ id: "calendar.calendar", label: "Calendar", order: 95, home: "story", component: CalendarPanel });
     r.glance({ id: "calendar.next", order: 50, panel: "calendar.calendar", component: CalendarGlance });
     r.editor({ collection: "schedules", label: "Schedules", component: ScheduleEditor });

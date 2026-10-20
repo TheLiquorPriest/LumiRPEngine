@@ -1,4 +1,4 @@
-// Build's shell (S6; contract §4.6, §5): the sticky world bar under the mode bar, the overflow menu,
+// Build's shell: the sticky world bar under the mode bar, the overflow menu,
 // world cards and template cards, + New, Problems rows (`.lre-lint`, which the form and visual
 // editors use as they are), job progress, proposal review, playtest transcripts and the profile
 // picker. Phone first: one column, 40 px targets, sticky bars that bleed to the drawer's edges.

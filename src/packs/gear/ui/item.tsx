@@ -1,4 +1,4 @@
-// The item sheet (contract §4.3): one thing from the Gear view: where it is (and what it's
+// The item sheet: one thing from the Gear view: where it is (and what it's
 // inside), whether it's yours, its condition, slot and quantity, a kit's pieces, a loan, and its
 // contents with the load. Opening it is a player-facing observation of the item (DESIGN §9.2),
 // sent once on mount; for a container that may bring its contents into view.

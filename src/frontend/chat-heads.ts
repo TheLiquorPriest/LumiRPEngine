@@ -1,7 +1,7 @@
 // Host chat heads (avatars of other chats with background replies) float above the drawer; they can
 // be switched off, dragged anywhere and resized, and are usually absent. The drawer keeps its
-// content clear of them only while they actually overlap it, by as much as they do (contract §6.6,
-// D-UI7), instead of a fixed gutter.
+// content clear of them only while they actually overlap it, by as much as they do, instead of a
+// fixed gutter.
 
 import type { Rect } from "./layout";
 import type { Readable } from "./store";
