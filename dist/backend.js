@@ -54847,7 +54847,10 @@ function presetOf(realism) {
   return "custom";
 }
 function claimsOf(world, state) {
-  return state.claims ?? readClaims(world.realism.claims) ?? { ...DEFAULT_CLAIMS };
+  if (state.claims)
+    return state.claims;
+  const preset = presetOf(state.realism);
+  return readClaims(world.realism.claims) ?? { ...preset === "custom" ? DEFAULT_CLAIMS : CLAIM_PRESETS[preset] };
 }
 function predicates(world, reg) {
   const out = [];
@@ -68092,7 +68095,7 @@ class Runtime {
     this.steps.onCallStart = (userId, purpose) => this.diag.callStart(userId, purpose);
     this.toolSupport = new ToolSupport(this.host);
     this.minds = { host: this.host, registry: this.registry, steps: this.steps, settings: this.settings, presets: this.presets };
-    this.ledger = new LedgerService(this.host, (chatId, userId) => this.resolveEnv(chatId, userId), new LedgerFold(this.registry, { fingerprint: "1792537971" }), (chatId) => messages.forget(chatId));
+    this.ledger = new LedgerService(this.host, (chatId, userId) => this.resolveEnv(chatId, userId), new LedgerFold(this.registry, { fingerprint: "1792538992" }), (chatId) => messages.forget(chatId));
     this.studio = new StudioBridge(this.host, this.worlds);
     this.worlds.onChange = (worldId, userId) => this.studio.worldChanged(worldId, userId);
     this.push = new StatePush(this.host, async (chatId, userId) => {
