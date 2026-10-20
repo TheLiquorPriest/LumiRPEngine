@@ -268,7 +268,7 @@ export class FakeHost implements HostPort {
    * plays a failed call. The default refuses: the ledger suite makes no model calls. Live model
    * behaviour is checked on the real host only.
    */
-  quietReply: ((request: QuietRequest) => string | { content: string; toolCalls?: QuietToolCall[] }) | null = null;
+  quietReply: ((request: QuietRequest) => string | { content: string; toolCalls?: QuietToolCall[]; finishReason?: string }) | null = null;
   /** Every quiet call made, for assertions. */
   readonly quietCalls: QuietRequest[] = [];
   /** Scripted Decision API answers; null (the default) means no Decision connection, so steps fall back to the helper. */
@@ -280,7 +280,7 @@ export class FakeHost implements HostPort {
       this.quietCalls.push(request);
       if (!this.quietReply) throw new Error("the fake host makes no model calls");
       const reply = this.quietReply(request);
-      return typeof reply === "string" ? { content: reply, finishReason: "stop", tokens: 0 } : { content: reply.content, finishReason: reply.toolCalls ? "tool_calls" : "stop", tokens: 0, ...(reply.toolCalls ? { toolCalls: reply.toolCalls } : {}) };
+      return typeof reply === "string" ? { content: reply, finishReason: "stop", tokens: 0 } : { content: reply.content, finishReason: reply.finishReason ?? (reply.toolCalls ? "tool_calls" : "stop"), tokens: 0, ...(reply.toolCalls ? { toolCalls: reply.toolCalls } : {}) };
     },
     decide: async (request) => {
       this.decideCalls.push(request);
@@ -321,9 +321,14 @@ export class FakeHost implements HostPort {
   /** Log lines tied to a user, by user (the per-user diagnostics mirror). */
   readonly userLogs = new Map<UserId, string[]>();
 
-  log(level: "info" | "warn" | "error", message: string, userId?: UserId): void {
+  /** Each user line's turn (a generation id), where the line named one; by the line's index in `userLogs`. */
+  readonly logTurns = new Map<UserId, (string | null)[]>();
+
+  log(level: "debug" | "info" | "warn" | "error", message: string, userId?: UserId, turn?: string): void {
     this.logs.push(`${level}: ${message}`);
-    if (userId) this.userLogs.set(userId, [...(this.userLogs.get(userId) ?? []), `${level}: ${message}`]);
+    if (!userId) return;
+    this.userLogs.set(userId, [...(this.userLogs.get(userId) ?? []), `${level}: ${message}`]);
+    this.logTurns.set(userId, [...(this.logTurns.get(userId) ?? []), turn ?? null]);
   }
 
   // ------------------------------------------------------------------ delivery

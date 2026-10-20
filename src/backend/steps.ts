@@ -4,6 +4,7 @@
 // repair call when a helper reply doesn't parse (DESIGN §18.4), and `interpret` asks once more after
 // a transient failure (a network reset, a timeout, a 5xx). Prompts are model-agnostic.
 
+import type { DiagCall } from "../shared/diagnostics";
 import type { ActionId, EntityId, UserId } from "../shared/ids";
 import type { JsonObject, JsonValue } from "../shared/json";
 import { isRecord } from "../shared/json";
@@ -198,6 +199,11 @@ function questionLines(questions: Questions): string[] {
 /** What leads a preset's guidance in a helper's prompt: it styles the answer, never its contract. */
 const GUIDANCE_LEAD = "Style and rules from the player's preset. Follow them where they fit the instructions above; they never change what to output or its format:";
 export class Steps {
+  /** Each model call as diagnostics read it (connection, model, tokens in and out, finish_reason, time); the runtime sets it. */
+  onCall: ((userId: UserId, call: DiagCall) => void) | null = null;
+  /** A model call is starting (the activity line says what the engine is asking); the runtime sets it. */
+  onCallStart: ((userId: UserId, purpose: StepPurpose) => void) | null = null;
+
   constructor(
     private readonly host: StepsHost,
     readonly meter: CallMeter,
@@ -207,14 +213,21 @@ export class Steps {
   private async quiet(purpose: StepPurpose, request: QuietRequest, userId: UserId, signal: AbortSignal, o: { retry: boolean; lookup: boolean }): Promise<QuietResult | Error> {
     const t0 = performance.now();
     const lookup = o.lookup ? { lookup: true } : {};
+    const route = { purpose, via: "helper" as const, connection: request.connectionId ?? "active", maxTokens: request.maxTokens, ...lookup };
+    this.onCallStart?.(userId, purpose);
     try {
       const r = await this.host.models.quiet(request, userId, signal);
-      this.meter.record({ purpose, via: "helper", ok: true, ms: performance.now() - t0, tokens: r.tokens, ...lookup }, userId);
+      const ms = performance.now() - t0;
+      this.meter.record({ purpose, via: "helper", ok: true, ms, tokens: r.tokens, ...lookup }, userId);
+      const answered = r.content.trim() !== "" || (r.toolCalls?.length ?? 0) > 0;
+      this.onCall?.(userId, { ...route, model: r.model ?? request.model ?? "default", tokensIn: r.tokensIn ?? null, tokensOut: answered ? (r.tokensOut ?? null) : 0, finishReason: r.finishReason, ms, ok: true });
       // A reply that ran out of tokens is cut off mid-JSON; say so, as it reads as no JSON.
       if (r.finishReason === "length") this.host.log("warn", `[LumiRPEngine] ${purpose} helper reply was cut off at ${request.maxTokens} tokens (${r.content.length} characters)`, userId);
       return r;
     } catch (error) {
-      this.meter.record({ purpose, via: "helper", ok: false, ms: performance.now() - t0, tokens: 0, ...lookup }, userId);
+      const ms = performance.now() - t0;
+      this.meter.record({ purpose, via: "helper", ok: false, ms, tokens: 0, ...lookup }, userId);
+      this.onCall?.(userId, { ...route, model: request.model ?? "default", tokensIn: null, tokensOut: null, finishReason: "", ms, ok: false, error: signal.aborted ? `aborted: the step's time ran out (${error instanceof Error ? error.message : String(error)})` : error instanceof Error ? error.message : String(error) });
       const again = o.retry && !signal.aborted && transientFailure(error);
       this.host.log("warn", `[LumiRPEngine] ${purpose} helper call failed${again ? ", asking once more" : ""}: ${error instanceof Error ? error.message : String(error)}`, userId);
       return again ? this.quiet(purpose, request, userId, signal, { ...o, retry: false }) : error instanceof Error ? error : new Error(String(error));
@@ -336,12 +349,19 @@ export class Steps {
       const extra: JsonObject = { ...(notes.length > 0 ? { lore: notes } : {}), ...(guidance !== "" ? { rules: guidance } : {}) };
       const asked: JsonValue = Object.keys(extra).length === 0 ? state : isRecord(state) ? { ...state, ...extra } : { state, ...extra };
       const t0 = performance.now();
+      const route = { purpose, via: "decision" as const, connection: config?.route?.connectionId ?? "active", maxTokens: null, finishReason: "", tokensIn: null };
+      this.onCallStart?.(userId, purpose);
       try {
         const r = await this.host.models.decide({ state: asked, questions, connectionId: config?.route?.connectionId ?? null, model: config?.route?.model ?? null }, userId, signal);
-        this.meter.record({ purpose, via: "decision", ok: true, ms: performance.now() - t0, tokens: r.tokens }, userId);
-        if (Object.keys(r.answers).length > 0) return { answers: r.answers, via: "decision" };
+        const ms = performance.now() - t0;
+        this.meter.record({ purpose, via: "decision", ok: true, ms, tokens: r.tokens }, userId);
+        const answered = Object.keys(r.answers).length > 0;
+        this.onCall?.(userId, { ...route, model: r.model, tokensOut: answered ? r.tokens : 0, ms, ok: true });
+        if (answered) return { answers: r.answers, via: "decision" };
       } catch (error) {
-        this.meter.record({ purpose, via: "decision", ok: false, ms: performance.now() - t0, tokens: 0 }, userId);
+        const ms = performance.now() - t0;
+        this.meter.record({ purpose, via: "decision", ok: false, ms, tokens: 0 }, userId);
+        this.onCall?.(userId, { ...route, model: config?.route?.model ?? "default", tokensOut: null, ms, ok: false, error: error instanceof Error ? error.message : String(error) });
         this.host.log("warn", `[LumiRPEngine] ${purpose} decision failed, using the helper: ${error instanceof Error ? error.message : String(error)}`, userId);
       }
     }

@@ -71,6 +71,8 @@ import { agentsActHere, contradiction, factLines, judge, noFacts, npcChoose, pla
 import { buildView, clockMinutes, compactSpan, notWorldView, recentLines, spanText, TIMELAPSE_ACTION } from "./view";
 import { StudioBridge } from "./studio";
 import { WorldStore } from "./worlds";
+import { Diagnostics } from "./diagnostics";
+import { STEP_LABEL } from "../shared/diagnostics";
 
 export interface RuntimeOptions {
   host: HostPort;
@@ -495,6 +497,8 @@ export class Runtime implements TurnHooks {
   /** What the active preset says: section outlets, helper guidance, narrator rules (DESIGN §6.8). */
   readonly presets: PresetBinding;
   readonly push: StatePush;
+  /** Each chat's diagnostics ring and the in-flight activity line (DESIGN §6.9). */
+  readonly diag: Diagnostics;
   /** What LumiRPEngine Studio may read, and its offers (DESIGN §15). */
   readonly studio: StudioBridge;
   readonly templates: Record<string, (id: string, name: string) => WorldDoc>;
@@ -557,6 +561,9 @@ export class Runtime implements TurnHooks {
     this.presets = new PresetBinding(this.host);
     this.meter = new CallMeter(this.host);
     this.steps = new Steps(this.host, this.meter);
+    this.diag = new Diagnostics(this.host);
+    this.steps.onCall = (userId, call) => this.diag.call(userId, call);
+    this.steps.onCallStart = (userId, purpose) => this.diag.callStart(userId, purpose);
     this.toolSupport = new ToolSupport(this.host);
     this.minds = { host: this.host, registry: this.registry, steps: this.steps, settings: this.settings, presets: this.presets };
     // Snapshots from another build never apply (the build defines LRE_BUILD_ID; tests fold as "dev").
@@ -565,7 +572,8 @@ export class Runtime implements TurnHooks {
     this.worlds.onChange = (worldId, userId) => this.studio.worldChanged(worldId, userId);
     // Every view pushed to a chat also refreshes the summary the Studio reads of it.
     this.push = new StatePush(this.host, async (chatId, userId) => {
-      const view = await this.view(chatId, userId);
+      // A view slower than a second is kept in the chat's diagnostics (a slow tab says where it went).
+      const view = await this.diag.timed(userId, chatId, "state view", () => this.view(chatId, userId));
       this.studio.seen(userId, view);
       return view;
     });
@@ -573,8 +581,23 @@ export class Runtime implements TurnHooks {
 
   start(): void {
     this.ledger.hooks = this;
+    this.ledger.diag = this.diag;
     this.ledger.attach();
-    this.host.registerInterceptor((input) => this.intercept(input), 50);
+    // Diagnostics see the interceptor at work, a world chat it filled nothing for, and what it threw.
+    this.host.registerInterceptor(async (input) => {
+      const at = { chatId: input.chatId, userId: input.userId, turn: null };
+      this.diag.rest(at, STEP_LABEL.sections ?? "Filling the prompt…");
+      try {
+        const result = await this.intercept(input);
+        if (!result && this.runs.get(`${input.userId}\u0000${input.chatId}`)) this.diag.failed(at, "sections", "interceptor", "the chat's world revision isn't loaded, so no section reached the prompt (every outlet is empty)");
+        return result;
+      } catch (error) {
+        this.diag.error(at, "interceptor", error, "no section reached the prompt");
+        throw error;
+      } finally {
+        this.diag.rest(at, STEP_LABEL.reply ?? "Waiting for the reply…");
+      }
+    }, 50);
     this.host.on("MESSAGE_SENT", (e, userId) => {
       if (e.message.isUser && userId) void this.lapse(e.chatId, userId);
     });
@@ -1682,6 +1705,7 @@ export class Runtime implements TurnHooks {
   // ---------------------------------------------------------------- the World Info interceptor
 
   async intercept(input: InterceptorInput): Promise<InterceptorResult | null> {
+    const started = Date.now();
     const run = await this.runOf(input.chatId, input.userId);
     if (!run) return null;
     lruSet(this.lastWorldChat, input.userId, input.chatId, 1024);
@@ -1845,6 +1869,11 @@ export class Runtime implements TurnHooks {
     if (plan) {
       await this.inspector.add(input.chatId, input.userId, record);
       this.push.changed(input.chatId, input.userId);
+      // Diagnostics: each section, the outlet the preset gives it, and whether it went out with text.
+      const sent = new Set(record.sections.filter((s) => !s.clipped).map((s) => s.slot));
+      const at = { chatId: input.chatId, userId: input.userId, turn: plan.generationId };
+      this.diag.interceptor(at, `${plan.kind} turn, ${preset.preset ? `preset ${preset.preset.id}` : "no preset"}`, sectionsOf(world).map((s) => ({ slot: s.id, outlet: preset.outlets.has(outletOf(s.id)) ? outletOf(s.id) : null, filled: sent.has(s.id) })), started);
+      for (const warning of record.warnings ?? []) this.diag.failed(at, "sections", "book", warning);
     }
     return result;
   }

@@ -214,6 +214,11 @@ export interface QuietResult {
   content: string;
   finishReason: string;
   tokens: number;
+  /** The prompt's and the answer's tokens, when the provider reports them apart. */
+  tokensIn?: number;
+  tokensOut?: number;
+  /** The model that answered, when the host says. */
+  model?: string;
   /** Present when the model called tools; the host has no tool-role messages, so results go back in a user message. */
   toolCalls?: QuietToolCall[];
 }
@@ -447,7 +452,8 @@ export interface HostPort {
   };
   /**
    * A log line. With `userId` it concerns that user's chats: the diagnostics mirror keeps it in
-   * their own storage, never in the extension-wide file.
+   * their own storage, never in the extension-wide file. `turn` (a generation id) tags the line with
+   * the turn it belongs to. `debug` lines go to the mirror only.
    */
-  log(level: "info" | "warn" | "error", message: string, userId?: UserId): void;
+  log(level: "debug" | "info" | "warn" | "error", message: string, userId?: UserId, turn?: string): void;
 }

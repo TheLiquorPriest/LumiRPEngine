@@ -221,11 +221,12 @@ class DiagnosticsLog {
   private readonly dirty = new Set<UserId | null>();
   private timer: ReturnType<typeof setTimeout> | null = null;
 
-  add(level: string, message: string, userId?: UserId): void {
-    const line = `${new Date().toISOString()} ${level} ${message}`;
+  add(level: string, message: string, userId?: UserId, turn?: string): void {
+    // Fixed-width level and the turn's short id, so a turn's lines can be picked out of the file.
+    const line = `${new Date().toISOString()} ${level.toUpperCase().padEnd(5)} ${turn ? `[turn ${turn.slice(0, 8)}] ` : ""}${message}`;
     const list = userId ? (this.users.get(userId) ?? []) : this.lines;
     list.push(line);
-    if (list.length > 400) list.splice(0, list.length - 400);
+    if (list.length > 1000) list.splice(0, list.length - 1000);
     if (userId) {
       this.users.set(userId, list);
       if (this.users.size > 256) this.users.delete(this.users.keys().next().value ?? "");
@@ -402,7 +403,11 @@ export function createSpindleHost(): HostPort {
         // `tool_calls` (`ToolCallDTO[]`): a call without a name is dropped; arguments that aren't an object read as none.
         const calls = isRecord(raw) && Array.isArray(raw.tool_calls) ? raw.tool_calls : [];
         const toolCalls: QuietToolCall[] = calls.flatMap((c, i) => (isRecord(c) && typeof c.name === "string" ? [{ name: c.name, args: toJsonObject(c.args), callId: str(c, "call_id") ?? `call_${i}` }] : []));
-        return { content: str(raw, "content") ?? "", finishReason: str(raw, "finish_reason") ?? "", tokens: usageTokens(raw), ...(toolCalls.length > 0 ? { toolCalls } : {}) };
+        const usage = isRecord(raw) && isRecord(raw.usage) ? raw.usage : null;
+        const tokensIn = usage ? (num(usage, "input_tokens") ?? num(usage, "prompt_tokens")) : undefined;
+        const tokensOut = usage ? (num(usage, "output_tokens") ?? num(usage, "completion_tokens")) : undefined;
+        const model = str(raw, "model");
+        return { content: str(raw, "content") ?? "", finishReason: str(raw, "finish_reason") ?? "", tokens: usageTokens(raw), ...(tokensIn !== undefined ? { tokensIn } : {}), ...(tokensOut !== undefined ? { tokensOut } : {}), ...(model ? { model } : {}), ...(toolCalls.length > 0 ? { toolCalls } : {}) };
       },
       async decide(request, userId, signal) {
         // The Decision API takes text, a list or an object as state; scalars go as their text.
@@ -591,11 +596,11 @@ export function createSpindleHost(): HostPort {
       unregister: (channel) => spindle.rpcPool.unregister(channel),
       read: (endpoint) => spindle.rpcPool.read(endpoint),
     },
-    log(level, message, userId) {
+    log(level, message, userId, turn) {
       if (level === "error") spindle.log.error(message);
       else if (level === "warn") spindle.log.warn(message);
-      else spindle.log.info(message);
-      diagnostics.add(level, message, userId);
+      else if (level === "info") spindle.log.info(message);
+      diagnostics.add(level, message, userId, turn);
     },
   };
 }

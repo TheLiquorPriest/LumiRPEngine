@@ -109,16 +109,24 @@ export class Dispatcher {
     const noted: DraftNoted = (worldId, draft) => {
       drafts.set(worldId, { lre: PROTOCOL_VERSION, type: "lre.draft.changed", worldId, version: draft.version, stored: draft.stored, base: draft.base });
     };
+    const chatId = isRecord(raw) && typeof raw.chatId === "string" ? raw.chatId : null;
+    const what = `${raw.type}${isRecord(raw) && typeof raw.op === "string" ? ` ${raw.op}` : ""}`;
+    const t0 = performance.now();
     try {
       // The Studio bridge serves each user from their first request on (DESIGN §15).
       await this.rt.studio.serve(userId);
       await this.route(raw, userId, session, reply, noted);
     } catch (error) {
       const e = error instanceof RequestError ? error : error instanceof WorldError ? new RequestError(error.code, error.message, error.lint) : error instanceof JobError ? new RequestError(error.code, error.message) : new RequestError("internal", error instanceof Error ? error.message : String(error));
-      if (e.code === "internal") this.rt.host.log("error", `[LumiRPEngine] ${raw.type}: ${error instanceof Error ? (error.stack ?? error.message) : String(error)}`);
+      if (e.code === "internal") this.rt.host.log("error", `[LumiRPEngine] ${raw.type}: ${error instanceof Error ? (error.stack ?? error.message) : String(error)}`, userId);
+      // A request the engine couldn't answer goes to the chat's diagnostics; a refused one is the player's to read.
+      if (chatId && (e.code === "internal" || e.code === "unavailable")) this.rt.diag.error({ chatId, userId, turn: null }, what, error);
       this.rt.host.frontend.send({ lre: PROTOCOL_VERSION, type: "lre.error", reqId: raw.reqId, code: e.code, message: e.message, ...(e.lint ? { lint: e.lint } : {}) }, userId, session);
       // A request that failed after it changed a draft (a commit whose book sync failed) still says so.
       announce();
+    } finally {
+      // Any view or edit over a second is kept, so a slow tab says which request was slow.
+      this.rt.diag.slow(userId, chatId, what, performance.now() - t0);
     }
   }
 
@@ -171,6 +179,8 @@ export class Dispatcher {
             this.rt.jsonHiding.seen(r.chatId, run.worldId, userId);
           }
           await this.rt.push.snapshot(r.chatId, userId, session);
+          // A frontend that opens mid-turn (or after a failed one) shows the activity line at once.
+          this.rt.host.frontend.send({ lre: PROTOCOL_VERSION, type: "lre.activity", chatId: r.chatId, activity: this.rt.diag.activityOf(r.chatId) }, userId, session);
         }
         return;
       }
@@ -255,6 +265,13 @@ export class Dispatcher {
         const view = core ? buildGmView(core, toChain(await this.rt.host.chats.messages(r.chatId, userId)), this.rt.registry, (await this.rt.settings.get(userId)).minds) : null;
         if (!view) throw new RequestError("unavailable", "the chat's world revision is not loaded");
         reply("lre.gm", view);
+        return;
+      }
+      case "lre.diag": {
+        // GM-level, like `lre.gm`: read only when the Diagnostics page asks, never pushed.
+        if (r.op === "clear") await this.rt.diag.clear(r.chatId, userId);
+        if (r.op === "dismiss") this.rt.diag.dismiss(r.chatId, userId);
+        reply("lre.diag", { records: r.op === "get" ? await this.rt.diag.records(r.chatId, userId) : [], activity: this.rt.diag.activityOf(r.chatId) });
         return;
       }
       case "lre.marker": {
