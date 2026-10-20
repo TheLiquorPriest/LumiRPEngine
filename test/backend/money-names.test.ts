@@ -1,8 +1,9 @@
 // The player's money view names everyone outside the world in words (DESIGN §25.11): the
 // foundation's and the modules' own payees ("Federal tax", "Property upkeep", "Sales tax
 // (Michigan)"), an outside employer by its place, a managed property's tenants, and an author's
-// own payees as written. Each journal line names the other side of its own payment (§25.6): who it
-// paid, or who paid it. Port Alder chats on the fake host, as Play → Money decodes them.
+// own payees as written, naming only what the player may see. Each journal line names the other
+// side of its own payment (§25.6): who it paid, or who paid it. Port Alder chats on the fake host,
+// as Play → Money decodes them.
 
 import { describe, expect, test } from "bun:test";
 import type { FinanceView } from "../../src/shared/finance";
@@ -55,6 +56,23 @@ describe("the player's money view names outside payees in words", () => {
     const view = await (await MoneyChat.start()).hub();
     expect(flow(view, "insurance:pov_truck").to).toBe("Insurer");
     expect(namesIn(view).filter((n) => n.includes(":"))).toEqual([]);
+  });
+});
+
+describe("an outside name says only what the player may see", () => {
+  test("someone hidden from the player, named inside an outside key, reads as someone, as they would by id", async () => {
+    const chat = await MoneyChat.start({ secret: ["danny_okafor"] });
+    for (const [label, to] of [["By id", "danny_okafor"], ["To his bank", "bank:danny_okafor"], ["As his employer", "employer:danny_okafor"]]) {
+      expect(await chat.play({ action: "flow_create", params: { label, from: "acct_pov_checking", to, amount: 500, every: "once", once: "2026-09-14T10:00" } })).toContain("done");
+    }
+    await chat.timelapse(1440);
+    const view = await chat.hub();
+    const lines = view.accounts.flatMap((a) => a.transactions);
+    for (const label of ["By id", "To his bank", "As his employer"]) {
+      expect(view.flows.find((f) => f.label === label)).toMatchObject({ to: "someone", spec: null });
+      expect(lines.find((t) => t.memo === label)?.counterparty).toBe("someone");
+    }
+    expect(JSON.stringify((await chat.state()).panels["economy.money"])).not.toContain("Danny");
   });
 });
 

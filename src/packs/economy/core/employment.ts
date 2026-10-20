@@ -28,7 +28,7 @@ import { placeVisit } from "../../../engine/seen";
 import type { WorldState } from "../../../engine/state";
 import { minutesBetween } from "../../../engine/world-state";
 import { addToBooks, monthOf, operatingAccount } from "./books";
-import { managesParty } from "./model";
+import { hiddenFrom, managesParty, outsideHidden, outsideName } from "./model";
 import type { FinanceApi, FinanceRegistry, FlowPosting } from "./module";
 import { addPay, payTaxes, taxTotal, yearPay, type PayTaxes } from "./taxes";
 
@@ -745,10 +745,14 @@ export function payerOf(ctx: ReadContext, api: FinanceApi, job: Job): string {
   return api.outside(`employer:${(job.employer || job.occupation || "work").toLowerCase().replace(/\W+/g, "_")}`);
 }
 
-/** A job's employer by name: its business's, else the place or name the job gives; "" when it gives none. */
-function employerName(ctx: ReadContext, job: Job): string {
-  if (job.business) return labelOf(ctx, job.business);
-  return job.employer === "" ? "" : labelOf(ctx, job.employer);
+/**
+ * A job's employer by name, as `viewer` (the player's POV; null for the GM) may read it: its
+ * business's ("someone" for one they can't see), else the place or name the job gives, naming only
+ * what the viewer may see (`outsideName`); "" when it gives none.
+ */
+function employerName(ctx: ReadContext, job: Job, viewer: EntityId | null): string {
+  if (job.business) return hiddenFrom(ctx, viewer, job.business) ? "someone" : labelOf(ctx, job.business);
+  return job.employer === "" ? "" : outsideName(ctx, `employer:${job.employer}`, viewer);
 }
 
 /** The payroll flow a job derives: from the employer to the worker, on the job's cycle, from its start to the payday that settles its end. */
@@ -880,8 +884,8 @@ function raise(api: FinanceApi, args: Record<string, JsonValue>, ctx: EffectCont
 
 const BASIS_WORDS: Record<PayBasis, string> = { salary: "a year", hourly: "an hour", per_shift: "a shift", commission: "commission", tips: "an hour in tips", stipend: "a period" };
 
-/** A job as the dashboards list it, with its next payday and what a period pays when that's known ahead. */
-export function jobView(ctx: ReadContext, api: FinanceApi, job: Job): JobView {
+/** A job as the dashboards list it, with its next payday and what a period pays when that's known ahead; its employer as `viewer` may read it. */
+export function jobView(ctx: ReadContext, api: FinanceApi, job: Job, viewer: EntityId | null): JobView {
   const cal = calendarOf(ctx.world);
   const now = ctx.state.clock;
   const flow = api.flows(ctx).find((f) => f.source === "job" && f.link === job.id);
@@ -893,11 +897,14 @@ export function jobView(ctx: ReadContext, api: FinanceApi, job: Job): JobView {
   const scheduled = hoursSource(ctx, job, now) === "contract" ? null : jobBlocks(ctx, job, since, now).reduce((a, b) => a + (b.end - b.start), 0);
   const money = (c: number): string => api.money(ctx, c);
   const entity = own(ctx.state.entities, job.id);
+  const fields = entity?.fields ?? {};
+  // The job as stored names its employer and workplace by id: a place or someone the viewer can't see stays out of it.
+  const unseen = Object.fromEntries(["employer", "workplace"].filter((k) => outsideHidden(ctx, strOf(fields[k]), viewer)).map((k) => [k, ""]));
   return {
     id: job.id,
     title: job.title,
-    employer: employerName(ctx, job),
-    employerId: job.business,
+    employer: employerName(ctx, job, viewer),
+    employerId: job.business && !hiddenFrom(ctx, viewer, job.business) ? job.business : null,
     worker: labelOf(ctx, job.worker),
     workerId: job.worker,
     basis: job.basis,
@@ -912,7 +919,7 @@ export function jobView(ctx: ReadContext, api: FinanceApi, job: Job): JobView {
     lastPay: Object.keys(last).length > 0 ? { at: formatClock(cal, numOf(last.at)), gross: numOf(last.gross), taxes: numOf(last.taxes), deductions: numOf(last.deductions), net: numOf(last.net) } : null,
     deductions: job.deductions.map((d) => ({ label: d.label, value: d.cents !== undefined ? money(d.cents) : `${d.pct ?? 0}%` })),
     splits: job.splits.map((s) => ({ to: labelOf(ctx, s.to), value: s.cents !== undefined ? money(s.cents) : `${s.pct ?? 0}%` })),
-    spec: (entity?.fields ?? {}) as unknown as JobFields,
+    spec: { ...fields, ...unseen } as unknown as JobFields,
   };
 }
 
@@ -944,10 +951,11 @@ export function registerEmployment(r: FinanceRegistry): void {
   core.action({ id: "job_hire", label: "Hire", pack: "economy", params: { business: { type: "ref", ref: "business" }, worker: { type: "ref", ref: "person" }, title: { type: "text", optional: true }, basis: { type: "text", optional: true, label: "Pay basis" }, rate: { type: "money", optional: true, label: "Pay rate" }, hours_per_week: { type: "number", optional: true }, pay_every: { type: "text", optional: true, label: "Paid every" } }, requires: ["manages(self, business)", "not employs(business, worker)", "level.money >= 3"], outcomes: { default: [{ type: "economy.hire", args: { business: "business", worker: "worker", title: "=params.title", basis: "=params.basis", rate: "=params.rate", hours_per_week: "=params.hours_per_week", pay_every: "=params.pay_every", by: "self" } }] }, duration: "15", lexicon: ["hire", "take on", "give a job to"], observable: "talks business" });
   core.action({ id: "job_end", label: "End a job", pack: "economy", params: { job: { type: "ref", ref: JOB_KIND } }, requires: ["job.worker == self or manages(self, job.employer)", "job.status != 'ended'", "level.money >= 3"], outcomes: { default: [{ type: "economy.job_end", args: { job: "job", by: "self" } }] }, duration: "10", lexicon: ["fire", "let go", "quit", "resign", "hand in my notice"], observable: "talks business" });
   core.action({ id: "job_raise", label: "Give a raise", pack: "economy", params: { job: { type: "ref", ref: JOB_KIND }, rate: { type: "money", label: "New rate" } }, requires: ["manages(self, job.employer)", "rate > 0", "level.money >= 3"], outcomes: { default: [{ type: "economy.job_raise", args: { job: "job", rate: "=rate", by: "self" } }] }, duration: "5", lexicon: ["give a raise", "raise the pay", "pay more"], observable: "talks business" });
-  r.view((ctx, party) => (api.partyKind(ctx, party) === "person" ? { jobs: allJobs(ctx).filter((j) => j.worker === party).map((j) => jobView(ctx, api, j)) } : {}));
+  r.view((ctx, party, _view, viewer) => (api.partyKind(ctx, party) === "person" ? { jobs: allJobs(ctx).filter((j) => j.worker === party).map((j) => jobView(ctx, api, j, viewer)) } : {}));
+  // A character's own mind knows who they work for.
   r.summary((ctx, who) =>
     allJobs(ctx)
       .filter((j) => j.worker === who && j.status === "active")
-      .map((j) => `${j.title} for ${employerName(ctx, j) || "an outside employer"}, ${api.money(ctx, j.rate)} ${BASIS_WORDS[j.basis]}, paid ${j.every === null ? "nothing" : j.every.replace("_", " ")}.`),
+      .map((j) => `${j.title} for ${employerName(ctx, j, null) || "an outside employer"}, ${api.money(ctx, j.rate)} ${BASIS_WORDS[j.basis]}, paid ${j.every === null ? "nothing" : j.every.replace("_", " ")}.`),
   );
 }
