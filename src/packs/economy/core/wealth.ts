@@ -28,8 +28,8 @@ function setRentRoute(api: FinanceApi, ctx: ReadContext, party: EntityId, proper
   const route = to.trim();
   if (route === "reinvest") return reject("bad_route", "rent goes to an account");
   if (route !== "") {
-    if (own(ctx.state.entities, route)?.kind !== "account") return reject("not_account", `${labelOf(ctx, route)} isn't an account`);
-    if (!api.accountsOf(ctx, party, "worth").includes(route) && !api.accountsOf(ctx, party, "spend").includes(route)) return reject("not_yours", `${labelOf(ctx, route)} isn't ${labelOf(ctx, party)}'s`);
+    const unusable = api.mayUse(ctx, party, route, "into");
+    if (unusable) return unusable;
   }
   return routeRent(api, ctx, property, route);
 }

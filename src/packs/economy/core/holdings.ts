@@ -286,17 +286,16 @@ export interface Trade {
   option?: { right: "call" | "put"; strike: number; expiry: string };
 }
 
-/** The account a sale's proceeds land in: the one named, else the holding's own, else the seller's deposit account. */
-function proceedsAccount(api: FinanceApi, ctx: ReadContext, party: EntityId, holding: EntityId, to: EntityId | undefined): EntityId | Rejection {
+/**
+ * The account a sale's proceeds land in: the one named, else the holding's own, else the seller's
+ * deposit account. A named account must take money from the seller (the foundation's `mayUse`).
+ */
+export function proceedsAccount(api: FinanceApi, ctx: ReadContext, party: EntityId, holding: EntityId, to: EntityId | undefined): EntityId | Rejection {
   const account = accountOfHolding(ctx.state, holding);
   // A retirement account's money stays in it: its own effects are the only way out.
   if (account && api.traitsOf(ctx, account)?.locked && to && to !== account) return reject("locked", `${labelOf(ctx, account)} keeps what its holdings pay; move it out from the account itself`);
-  if (to) {
-    if (own(ctx.state.entities, to)?.kind !== "account") return reject("not_account", `${labelOf(ctx, to)} isn't an account`);
-    if (!api.accountsOf(ctx, party, "worth").includes(to) && !api.accountsOf(ctx, party, "spend").includes(to)) return reject("not_yours", `${labelOf(ctx, to)} isn't ${labelOf(ctx, party)}'s`);
-    return to;
-  }
-  return account ?? api.depositAccount(ctx, party) ?? reject("no_account", `${labelOf(ctx, party)} has no account the money could go to`);
+  if (to && to !== account) return api.mayUse(ctx, party, to, "into") ?? to;
+  return to ?? account ?? api.depositAccount(ctx, party) ?? reject("no_account", `${labelOf(ctx, party)} has no account the money could go to`);
 }
 
 /**
@@ -347,12 +346,11 @@ export function trade(api: FinanceApi, ctx: EffectContext | ReadContext, t: Trad
     if (!(qty > QTY_EPSILON)) return reject("bad_amount", whole ? `${money(Math.round(t.amount ?? 0))} buys no whole contract at ${money(Math.round(price))}` : "say how much to buy");
     const cents = Math.round(qty * price);
     if (cents <= 0) return reject("bad_amount", "say how much to buy");
-    let source: EntityId | null;
-    if (t.from) {
-      if (!api.accountsOf(ctx, party, "spend").includes(t.from)) return reject("not_yours", `${labelOf(ctx, t.from)} isn't ${labelOf(ctx, party)}'s to pay from`);
-      source = t.from;
-    } else source = account ?? api.depositAccount(ctx, party);
+    const source = t.from ?? account ?? api.depositAccount(ctx, party);
     if (!source) return reject("no_account", `${labelOf(ctx, party)} has no account to pay from`);
+    // Cash in the holding's own account buys within it; any other account is paid from (the foundation's `mayUse`).
+    const unusable = source === account ? null : api.mayUse(ctx, party, source, "from");
+    if (unusable) return unusable;
     const spawned = !holding;
     if (!holding) {
       holding = newHoldingId(ctx.state, `${account ?? party}:${assetId}`);
@@ -394,10 +392,10 @@ export function setRoute(api: FinanceApi, ctx: ReadContext, party: EntityId, hol
   if (!canTrade(api, ctx, party, holding)) return reject("not_yours", `${labelOf(ctx, holding)} isn't ${labelOf(ctx, party)}'s to manage`);
   const route = to.trim();
   if (route !== "" && route !== "reinvest") {
-    if (own(ctx.state.entities, route)?.kind !== "account") return reject("not_account", `${labelOf(ctx, route)} isn't an account`);
     const account = accountOfHolding(ctx.state, holding);
     if (account && api.traitsOf(ctx, account)?.locked && route !== account) return reject("locked", `${labelOf(ctx, account)} keeps what its holdings pay`);
-    if (!api.accountsOf(ctx, party, "worth").includes(route) && !api.accountsOf(ctx, party, "spend").includes(route)) return reject("not_yours", `${labelOf(ctx, route)} isn't ${labelOf(ctx, party)}'s`);
+    const unusable = route === account ? null : api.mayUse(ctx, party, route, "into");
+    if (unusable) return unusable;
   }
   if (strOf(own(ctx.state.entities, holding)?.fields.route) === route) return [];
   return [{ type: "set", entity: holding, field: "route", value: route }];

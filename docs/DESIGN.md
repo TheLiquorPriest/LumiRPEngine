@@ -1597,7 +1597,7 @@ Everything a party owns besides money in accounts: positions in securities, fund
 - **Options** are bought by giving a right, a strike and an expiry with the underlying as the asset (the `options` feature); contracts trade whole. A contract past its expiry, or a bond past its maturity, doesn't trade.
 - **Retirement money stays in its account:** a sale's proceeds and payouts land in it, and only its own account moves them out.
 - Property and stakes change hands by their own actions (§27.9, §27.10), not by trading.
-- **Who may:** spend rights on the account, or a spending role on a directly held holding's owners.
+- **Who may:** spend rights on the account, or a spending role on a directly held holding's owners. Every account a trade, an exercise, a purchase, a sale, a lease or a route pays from or into, other than the holding's own, passes the foundation's check (`mayUse`): one paid from is open, spendable by the party and not locked (a CD or a retirement account), and one paid into is the party's and not a CD. Retirement money stays in its account: a sale's proceeds, a put's strike and a cash settlement in one land there.
 
 ### 27.5 Gains
 - **Realised in the fold.** The `economy.lots` reducer takes a sale's units first in, first out, whole lots oldest first, then part of the next with its share of the cost (the parts of a lot always add back to its cost). The proceeds against the cost of what was taken is the gain, short term for lots held under a year and long term for the rest, recorded for each owner by their share of its worth in their calendar year. Because the reducer does the arithmetic, a rebased view realises the gain on the lots that branch holds.

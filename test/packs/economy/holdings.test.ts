@@ -660,3 +660,47 @@ describe("holdings: the yearly investment tax", () => {
     ]);
   });
 });
+
+describe("holdings: the accounts a payment uses", () => {
+  const accounts = (world: WorldDoc): void => {
+    world.entities.cd = account("cd", "Certificate of deposit", "you", "cd", 2_000_000);
+    world.entities.ira = account("ira", "IRA", "you", "retirement", 0);
+    world.entities.jordan_checking = account("jordan_checking", "Jordan's checking", "jordan", "checking", 900_000);
+    world.entities.h_still = holding("h_still", "brokerage", "still", [{ qty: 100, cost: 400_000, at: "2026-06-01" }]);
+    world.entities.h_ira_still = holding("h_ira_still", "ira", "still", [{ qty: 100, cost: 400_000, at: "2026-06-01" }]);
+    const assets = world.packs.economy?.config.assets;
+    if (assets && typeof assets === "object" && !Array.isArray(assets)) {
+      assets.still_put = { label: "STIL Nov $60 put", class: "option", underlying: "still", strike: 6000, expiry: "2026-11-20", right: "put", multiplier: 100 };
+      assets.still_cash = { label: "STIL Nov $40 call (cash)", class: "option", underlying: "still", strike: 4000, expiry: "2026-11-20", right: "call", multiplier: 100, settlement: "cash" };
+    }
+    world.entities.h_put = holding("h_put", "brokerage", "still_put", [{ qty: 1, cost: 90_000, at: "2026-10-01" }]);
+    world.entities.h_cash = holding("h_cash", "brokerage", "still_cash", [{ qty: 1, cost: 20_000, at: "2026-10-01" }]);
+    world.entities.h_ira_put = holding("h_ira_put", "ira", "still_put", [{ qty: 1, cost: 90_000, at: "2026-10-01" }]);
+    world.entities.stall = { id: "stall", kind: "business", name: "The stall", tier: "background", fields: { owners: [{ party: "you", role: "owner", share: 100 }], value: 1_000_000 }, relations: [] };
+    world.entities.lot = { id: "lot", kind: "property", name: "The lot", tier: "background", fields: { place: "apartment", owners: [], value: 1_000_000 }, relations: [] };
+  };
+
+  test("nothing is paid from a CD or a retirement account, nor into someone else's account", () => {
+    const w = setup(accounts);
+    const before = structuredClone(w.state.accounts);
+    const refused = [
+      refuse(w, "economy.trade", { party: "you", side: "buy", asset: "index", account: "brokerage", qty: 1, from: "cd" }),
+      refuse(w, "economy.property_buy", { party: "you", property: "lot", from: "ira" }),
+      refuse(w, "economy.exercise", { party: "you", holding: "h_put", qty: 1, to: "jordan_checking" }),
+      refuse(w, "economy.exercise", { party: "you", holding: "h_cash", qty: 1, to: "jordan_checking" }),
+      refuse(w, "economy.stake_sell", { party: "you", business: "stall", share: 100, price: 1_000_000, to: "jordan_checking" }),
+    ];
+    expect(refused).toEqual(["locked", "locked", "not_owner", "not_owner", "not_owner"]);
+    expect(w.state.accounts).toEqual(before);
+  });
+
+  test("a put held in a retirement account pays its strike into that account, never out of it", () => {
+    const w = setup(accounts);
+    expect(refuse(w, "economy.exercise", { party: "you", holding: "h_ira_put", qty: 1, to: "checking" })).toBe("locked");
+    const ira = balance(w, "ira");
+    run(w, "economy.exercise", { party: "you", holding: "h_ira_put", qty: 1 });
+    expect(balance(w, "ira") - ira).toBe(600_000);
+    expect(qtyOf(lotsOf(w.ctx, "h_ira_still"))).toBe(0);
+    expect(trialBalance(w.state)).toBe(0);
+  });
+});

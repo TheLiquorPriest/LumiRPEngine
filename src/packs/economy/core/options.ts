@@ -16,7 +16,7 @@ import { labelOf, numOf, own, strOf } from "../../../engine/pack-kit";
 import type { EventTypeDef, ReadContext, Rejection, SlotInfo } from "../../../engine/registry";
 import type { FinanceApi, FinanceRegistry } from "./module";
 import { assetOf, instantIn, MARKET_CLOSE, priceOf, reject, type Asset } from "./assets";
-import { accountOfHolding, applyLots, canTrade, findHolding, holdingIds, holdingOwners, lotsChange, lotsOf, marketOf, qtyOf, unit, unitsText } from "./holdings";
+import { accountOfHolding, applyLots, canTrade, findHolding, holdingIds, holdingOwners, lotsChange, lotsOf, marketOf, proceedsAccount, qtyOf, unit, unitsText } from "./holdings";
 import { holdingIncome, payout } from "./income";
 import { intrinsic, QTY_EPSILON, roundQty, takeFifo } from "./pricing";
 
@@ -102,7 +102,10 @@ export function exercise(api: FinanceApi, ctx: ReadContext, x: Exercise): Ledger
   if (a.option.settlement === "cash") {
     const cash = Math.round(units * intrinsic(a.option.right, priceOf(ctx, under), a.option.strike));
     if (cash <= 0) return reject("out_of_money", `${a.label} is worth nothing to exercise`);
-    const posted = settle(api, ctx, x.holding, a, qty, cash, label, x.to);
+    // Where the cash goes: an account the holder may pay into, and a retirement account's stays in it.
+    const to = x.to !== undefined ? proceedsAccount(api, ctx, x.party, x.holding, x.to) : undefined;
+    if (to !== undefined && typeof to !== "string") return to;
+    const posted = settle(api, ctx, x.holding, a, qty, cash, label, to);
     return isRejection(posted) ? posted : unit(posted);
   }
 
@@ -114,7 +117,9 @@ export function exercise(api: FinanceApi, ctx: ReadContext, x: Exercise): Ledger
   if (a.option.right === "call") {
     const from = x.from ?? account ?? api.depositAccount(ctx, x.party);
     if (!from) return reject("no_account", `${labelOf(ctx, x.party)} has no account to pay the strike from`);
-    if (x.from && !api.accountsOf(ctx, x.party, "spend").includes(x.from)) return reject("not_yours", `${labelOf(ctx, x.from)} isn't ${labelOf(ctx, x.party)}'s to pay from`);
+    // Cash in the contract's own account pays within it; any other account is paid from (the foundation's `mayUse`).
+    const unusable = from === account ? null : api.mayUse(ctx, x.party, from, "from");
+    if (unusable) return unusable;
     if (!target) {
       target = `${account ?? x.party}:${under.id}`;
       for (let i = 2; own(ctx.state.entities, target); i++) target = `${account ?? x.party}:${under.id}:${i}`;
@@ -126,8 +131,8 @@ export function exercise(api: FinanceApi, ctx: ReadContext, x: Exercise): Ledger
     ];
   } else {
     if (!target || qtyOf(lotsOf(ctx, target)) + QTY_EPSILON < units) return reject("nothing_to_deliver", `exercising ${qty} ${a.label} delivers ${unitsText(units)} ${under.symbol ?? under.label}, which ${labelOf(ctx, x.party)} doesn't hold${account ? ` in ${labelOf(ctx, account)}` : ""}`);
-    const to = x.to ?? account ?? api.depositAccount(ctx, x.party);
-    if (!to) return reject("no_account", `${labelOf(ctx, x.party)} has no account the strike could go to`);
+    const to = proceedsAccount(api, ctx, x.party, x.holding, x.to);
+    if (typeof to !== "string") return to;
     lines = [
       { account: market, amount: -strike },
       { account: to, amount: strike },

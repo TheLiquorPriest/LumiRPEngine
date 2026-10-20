@@ -104,8 +104,8 @@ export function setStakeRoute(api: FinanceApi, ctx: ReadContext, owner: EntityId
   if (api.shareOf(ctx.state, business, owner) <= 0) return reject("not_yours", `${labelOf(ctx, owner)} owns no part of ${labelOf(ctx, business)}`);
   const route = to.trim();
   if (route !== "" && route !== "reinvest") {
-    if (own(ctx.state.entities, route)?.kind !== "account") return reject("not_account", `${labelOf(ctx, route)} isn't an account`);
-    if (!api.accountsOf(ctx, owner, "worth").includes(route) && !api.accountsOf(ctx, owner, "spend").includes(route)) return reject("not_yours", `${labelOf(ctx, route)} isn't ${labelOf(ctx, owner)}'s`);
+    const unusable = api.mayUse(ctx, owner, route, "into");
+    if (unusable) return unusable;
   }
   const current = stakeRoute(ctx, owner, business);
   const now = current === null ? "" : "reinvest" in current ? "reinvest" : current.account;
@@ -146,6 +146,8 @@ export function sellStake(api: FinanceApi, ctx: EffectContext | ReadContext, x: 
   if (x.buyer === undefined && price > worth) return reject("declined", `no buyer outside the world pays more than ${formatMoney(worth, ctx.world.currency)} for ${labelOf(ctx, x.business)}`);
   const to = x.to ?? api.depositAccount(ctx, x.party);
   if (!to) return reject("no_account", `${labelOf(ctx, x.party)} has no account the money could go to`);
+  const unusable = api.mayUse(ctx, x.party, to, "into");
+  if (unusable) return unusable;
   const memo = `Sold ${Math.round(share * 100) / 100}% of ${labelOf(ctx, x.business)} for ${formatMoney(price, ctx.world.currency)}`;
   const events: LedgerEvent[] = [];
   if (price > 0) {

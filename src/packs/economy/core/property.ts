@@ -406,7 +406,8 @@ export function buyProperty(api: FinanceApi, ctx: EffectContext | ReadContext, x
   const financed = price - down;
   const from = x.from ?? api.depositAccount(ctx, x.party);
   if (!from) return reject("no_account", `${labelOf(ctx, x.party)} has no account to pay from`);
-  if (x.from && !api.accountsOf(ctx, x.party, "spend").includes(x.from)) return reject("not_yours", `${labelOf(ctx, x.from)} isn't ${labelOf(ctx, x.party)}'s to pay from`);
+  const unusableFrom = api.mayUse(ctx, x.party, from, "from");
+  if (unusableFrom) return unusableFrom;
   const events: LedgerEvent[] = [];
   let mortgage: EntityId | null = null;
   if (financed > 0) {
@@ -530,7 +531,8 @@ export function sellProperty(api: FinanceApi, ctx: EffectContext | ReadContext, 
   if (x.buyer === undefined && owners.some((o) => o.party !== x.party && api.shareOf(ctx.state, x.property, o.party) > 0)) return reject("needs_buyer", `selling a share of ${e.name} needs a buyer in the world`);
   const to = x.to ?? api.depositAccount(ctx, x.party);
   if (!to) return reject("no_account", `${labelOf(ctx, x.party)} has no account the money could go to`);
-  if (x.to && !api.accountsOf(ctx, x.party, "worth").includes(x.to) && !api.accountsOf(ctx, x.party, "spend").includes(x.to)) return reject("not_yours", `${labelOf(ctx, x.to)} isn't ${labelOf(ctx, x.party)}'s`);
+  const unusableTo = api.mayUse(ctx, x.party, to, "into");
+  if (unusableTo) return unusableTo;
   const money = (c: number): string => formatMoney(c, ctx.world.currency);
   // A buyer outside the world pays what the market does: no more than the property is worth.
   const value = propertyValue(ctx.state, x.property);
@@ -602,7 +604,10 @@ export function startLease(api: FinanceApi, ctx: ReadContext, x: LeaseStart): Le
   if (!(rent > 0)) return reject("bad_amount", "rent is above nothing");
   const units = Math.max(1, Math.round(numOf(e.fields.units, 1)));
   if (authoredLeases(ctx, x.property).filter((l) => inForce(l, ctx.state.clock)).length >= units) return reject("full", `every unit of ${e.name} is let`);
-  if (x.from && !api.ownersOf(ctx.state, x.from).some((o) => o.party === x.tenant)) return reject("not_yours", `${labelOf(ctx, x.from)} isn't ${labelOf(ctx, x.tenant)}'s`);
+  if (x.from) {
+    const unusable = api.mayUse(ctx, x.tenant, x.from, "from");
+    if (unusable) return unusable;
+  }
   const side = rentSide(api, ctx, x.property);
   if (!side) return reject("no_account", `${labelOf(ctx, x.party)} has no account the rent could go to`);
   const months = Math.max(1, Math.round(x.months ?? 12));
