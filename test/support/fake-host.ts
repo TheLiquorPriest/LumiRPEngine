@@ -666,10 +666,13 @@ export class FakeHost implements HostPort {
 
   /** Payloads sent to spawned lanes, by process id. */
   readonly processMail = new Map<string, unknown[]>();
+  /** Each lane spawn's options, in order (its start-up and heartbeat waits among them). */
+  readonly spawned: Parameters<HostPort["processes"]["spawn"]>[0][] = [];
   private readonly processHandlers = new Set<(event: ProcessEvent) => void>();
 
   processes: HostPort["processes"] = {
-    spawn: async () => {
+    spawn: async (options) => {
+      this.spawned.push(options);
       const processId = this.newId("proc");
       this.processMail.set(processId, []);
       return {

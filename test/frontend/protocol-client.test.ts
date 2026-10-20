@@ -38,7 +38,7 @@ function harness(): Harness {
     },
   };
   let n = 0;
-  const client = new ProtocolClient(transport, { newReqId: () => `q${(n += 1)}`, schedule: (fn) => queue.push(fn), timers: fakeTimers, timeoutMs: 1000 });
+  const client = new ProtocolClient(transport, { newReqId: () => `q${(n += 1)}`, schedule: (fn) => queue.push(fn), timers: fakeTimers, requestMs: 1000 });
   const notifications: SyncState[] = [];
   client.subscribe((state) => notifications.push(state));
   return {

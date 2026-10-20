@@ -4,6 +4,7 @@
 // request (`lre.diag`), never pushed. The activity line is player-safe: a step's label, no names.
 
 import type { ChatId } from "./ids";
+import { formatMs, HOST_LIMITS } from "./timeouts";
 
 export type DiagLevel = "debug" | "info" | "warn" | "error";
 
@@ -114,7 +115,8 @@ export function suggestFix(reason: string, call?: Pick<DiagCall, "finishReason" 
   const r = reason.toLowerCase();
   if (call?.finishReason === "length" || /cut off|max.?tokens|finish_reason length/.test(r))
     return `The model's answer was cut off at ${call?.maxTokens ?? "its"} max tokens: raise Max tokens for ${call?.purpose ?? "this step"} in Settings → Steps and connections (a reasoning model spends tokens thinking first).`;
-  if (/abort|timed? ?out|timeout|wall clock/.test(r)) return "The step ran out of time: raise the before-the-reply wall clock in Settings → Model use, or pick a faster model in Settings → Steps and connections.";
+  if (/decision evaluation timed out/.test(r)) return `Lumiverse stops a Decision call at ${formatMs(HOST_LIMITS.decision.maxMs)}, its own limit and not a setting; the step used the helper instead. A faster Decision connection avoids it.`;
+  if (/abort|timed? ?out|timeout|wall clock|ran out after/.test(r)) return "The step ran out of time: raise its limit in Settings → Timeouts (Engine run before the reply, Reading the reply after it), or pick a faster model in Settings → Helper model.";
   if (/401|403|unauthori[sz]ed|api key|forbidden/.test(r)) return "The connection refused the call: check its API key in Lumiverse's connections, or route the step to another in Settings → Steps and connections.";
   if (/429|rate.?limit/.test(r)) return "The provider is rate-limiting: wait, lower Model use in Settings, or route steps to another connection.";
   if (/empty|no answer|nothing/.test(r)) return "The model answered nothing usable: check the step's connection and model in Settings → Steps and connections, and its Max tokens.";

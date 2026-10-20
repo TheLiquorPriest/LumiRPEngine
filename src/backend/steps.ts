@@ -12,6 +12,7 @@ import type { HelperDefault, StepConfig } from "../shared/settings";
 import { DEFAULT_HELPER, helperCallOf } from "../shared/settings";
 import type { StepPurpose, WorldCurrency, WorldDoc } from "../shared/world";
 import { lifeStatesOf } from "../shared/world";
+import { firedTimeout } from "../shared/timeouts";
 import type { Answers, Questions } from "../engine/decide";
 import { ACTION_QUEUE_LIMIT, type InterpretOutput, type QueuedAction } from "../engine/steps";
 import { cashGift } from "../packs/gear/core/index";
@@ -229,7 +230,9 @@ export class Steps {
     } catch (error) {
       const ms = performance.now() - t0;
       this.meter.record({ purpose, via: "helper", ok: false, ms, tokens: 0, ...lookup }, userId);
-      this.onCall?.(userId, { ...route, model: request.model ?? "default", tokensIn: null, tokensOut: null, finishReason: "", ms, ok: false, error: signal.aborted ? `aborted: the step's time ran out (${error instanceof Error ? error.message : String(error)})` : error instanceof Error ? error.message : String(error) });
+      const why = error instanceof Error ? error.message : String(error);
+      const fired = firedTimeout(signal);
+      this.onCall?.(userId, { ...route, model: request.model ?? "default", tokensIn: null, tokensOut: null, finishReason: "", ms, ok: false, error: fired ? `${fired.message} (${why})` : signal.aborted ? `aborted: the step's time ran out (${why})` : why });
       const again = o.retry && !signal.aborted && transientFailure(error);
       this.host.log("warn", `[LumiRPEngine] ${purpose} helper call failed${again ? ", asking once more" : ""}: ${error instanceof Error ? error.message : String(error)}`, userId);
       return again ? this.quiet(purpose, request, userId, signal, { ...o, retry: false }) : error instanceof Error ? error : new Error(String(error));

@@ -13,10 +13,12 @@ import type { EntityId, UserId } from "../shared/ids";
 import type { JsonObject, JsonValue } from "../shared/json";
 import { hasOwn, isRecord, safeKey } from "../shared/json";
 import type { LedgerEvent } from "../shared/ledger";
-import type { LookupLimits, ModelUseSettings, StepConfig } from "../shared/settings";
+import type { LookupLimits, ModelUseSettings, StepConfig, UserSettings } from "../shared/settings";
 import { stepConfigOf } from "../shared/settings";
 import type { StepSignal } from "../shared/steps";
-import { MINDS_SLOT } from "../shared/minds";
+import { limitOf, MINDS_SLOT } from "../shared/minds";
+import type { Timeout } from "../shared/timeouts";
+import { within } from "../shared/timeouts";
 import type { ActionDef, ParamDef, StepPurpose, StepTemplateDef, WorldCurrency, WorldDoc } from "../shared/world";
 import { calendarOf, dateAt, dayPartAt, formatClock } from "../engine/calendar";
 import type { Judgement } from "../engine/adjudication";
@@ -234,8 +236,10 @@ function fires(signals: readonly string[], f: SignalFacts): boolean {
 /**
  * A phase's call budget: steps run by priority and each takes one call before it starts (a JSON
  * repair call, a decision falling back to the helper or a need-form ask after a tool refusal is
- * not charged). At the deadline the remaining steps fall back to engine-only; a deadline of 0 ms
- * leaves no time for any call. Its lore lookups have their own budget (`lookup`).
+ * not charged). The phase's time is the user's setting (`time`): when it runs out the signal aborts
+ * with a `TimeoutFired` naming the setting, and the remaining steps fall back to engine-only; 0
+ * leaves no time for any call, "none" sets no deadline. Its lore lookups have their own budget
+ * (`lookup`): rounds, and the setting for how long after the phase starts one may begin.
  */
 export class StepBudget {
   private used = 0;
@@ -245,14 +249,13 @@ export class StepBudget {
 
   constructor(
     readonly calls: number,
-    ms: number,
-    parent?: AbortSignal,
-    lookup: LookupLimits = { calls: 0, ms: 0 },
+    time: Timeout,
+    parent: AbortSignal | undefined,
+    lookup: LookupLimits & { window: Timeout },
   ) {
-    this.open = ms > 0;
-    const timeout = AbortSignal.timeout(Math.max(1, ms));
-    this.signal = parent ? AbortSignal.any([parent, timeout]) : timeout;
-    this.lookup = new LookupBudget(lookup.calls, lookup.ms, ms, this.signal);
+    this.open = limitOf(time.limit) > 0;
+    this.signal = within(parent, time.key, time.limit);
+    this.lookup = new LookupBudget(lookup.calls, lookup.window, time, this.signal);
   }
 
   /** Takes a call, leaving `keep` free for a step that ranks higher but starts later (the judge, before npc.choose). */
@@ -265,6 +268,16 @@ export class StepBudget {
   get spent(): number {
     return this.used;
   }
+}
+
+/** Each phase's time limits (Settings → Timeouts): the phase's own, and its lookup window. */
+const PHASE_TIMEOUTS = { pre: { time: "engineRunMs", window: "preLookupMs" }, post: { time: "postReplyMs", window: "postLookupMs" } } as const;
+
+/** A phase's budget from the user's settings: its calls and lookup rounds (Model use), its time and lookup window (Timeouts). */
+export function phaseBudget(settings: Pick<UserSettings, "modelUse" | "timeouts">, phase: "pre" | "post", parent?: AbortSignal): StepBudget {
+  const b = settings.modelUse.budgets[phase];
+  const keys = PHASE_TIMEOUTS[phase];
+  return new StepBudget(b.calls, { key: keys.time, limit: settings.timeouts[keys.time] }, parent, { calls: b.lookup?.calls ?? 0, window: { key: keys.window, limit: settings.timeouts[keys.window] } });
 }
 
 // ---------------------------------------------------------------- what runs

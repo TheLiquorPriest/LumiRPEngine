@@ -12,6 +12,7 @@ import { isRecord } from "../shared/json";
 import type { Activity, DiagCall, DiagLevel, DiagPhase, DiagRecord, DiagSection, DiagStatus } from "../shared/diagnostics";
 import { callLabel, DIAG_PHASES, DIAG_RING, SLOW_MS, STEP_LABEL, suggestFix } from "../shared/diagnostics";
 import { PROTOCOL_VERSION } from "../shared/protocol";
+import type { TimeoutFired } from "../shared/timeouts";
 import type { HostPort } from "./host";
 import { readStoredJson } from "./stored-json";
 
@@ -250,6 +251,16 @@ export class Diagnostics {
     const t = this.now();
     const hint = fix ?? suggestFix(reason);
     this.add(at, { kind: "step", level: "warn", turn: at.turn, phase, step, status: "failed", start: t, end: t, ms: 0, reason, ...(hint ? { fix: hint } : {}) });
+  }
+
+  /**
+   * A time limit that ran out (Settings → Timeouts), naming its setting and how to raise it: a failed
+   * step in the chat's records (so its turn shows as failed), or, outside a chat, in the user's
+   * diagnostics log. `context` says what it cut short.
+   */
+  timeout(at: { chatId: ChatId | null; userId: UserId; turn: string | null }, phase: DiagPhase, step: string, fired: TimeoutFired, context?: string): void {
+    const t = this.now();
+    this.add(at, { kind: "step", level: "warn", turn: at.turn, phase, step, status: "failed", start: t - fired.ms, end: t, ms: fired.ms, reason: context ? `${fired.message}: ${context}` : fired.message, fix: fired.fix });
   }
 
   /** An error caught at `where`, with what was going on. */
