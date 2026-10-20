@@ -18,6 +18,8 @@ export const PACKS_MONEY_CSS = `
 .lre .lre-money-build-place-actions{display:flex;flex-wrap:wrap;gap:var(--lre-s2)}
 /* The money hub's sections: flows, jobs, businesses, investments, properties, credit and household (economy/ui/flows.tsx, work.tsx, assets.tsx, credit.tsx): a lead amount in words (worked out each time) at a reading size */
 .lre .lre-money-hero .lre-money-hero-words{font-size:var(--lre-fs-lg);line-height:1.3;letter-spacing:0}
+/* An amount in words in a row's value (what's coming up that's worked out each time) reads as a note beside the figures */
+.lre .lre-money-row-words{font-size:var(--lre-fs-sm);font-weight:400;line-height:1.3;color:var(--lre-muted)}
 /* The money hub (economy/ui/hub.tsx, panel.tsx, gm.tsx, sheet.tsx), its page frame and shared pieces (nav.tsx, forms.tsx, lines.tsx), accounts and cards (accounts.tsx), payment tiers (pay-prefs.tsx) and Now's glance */
 .lre .lre-money-root,.lre .lre-money-hub,.lre .lre-money-page,.lre .lre-money-page-body,.lre .lre-money-level,.lre .lre-money-form{display:flex;flex-direction:column;gap:var(--lre-s3);min-width:0}
 .lre .lre-money-hero{display:flex;flex-direction:column;gap:var(--lre-s3);min-width:0;padding:var(--lre-s3);border:1px solid var(--lre-hairline);border-radius:var(--lre-r-xl);background:var(--lre-card)}
