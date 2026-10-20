@@ -29,9 +29,9 @@ const PRESETS: { value: ModelUsePresetId; label: string }[] = [
 
 /** What a preset means for play, in plain words: the first thing each preset card says. */
 const PRESET_PLAIN: Record<ModelUsePresetId, string> = {
-  lean: "The fewest calls: quickest and cheapest. A model reads your typed actions and the reply; people's choices follow the engine's own rules.",
+  lean: "The fewest calls: quickest and cheapest. A model reads each message you type for its actions, and the reply; people's choices follow the engine's own rules.",
   standard: "The default. A model also judges your approach when the rules for checks need it, and decides close calls for the people around you.",
-  full: "The most calls, so the slowest and costliest. A model reads every message you type, decides for everyone present, writes a brief and an outline for the narrator, and checks the reply against the facts.",
+  full: "The most calls, so the slowest and costliest. A model decides for everyone present, writes a brief and an outline for the narrator, and checks the reply against the facts.",
   custom: "Your own mix, set step by step in Steps and connections.",
 };
 

@@ -64,7 +64,7 @@ import { effectiveMode, recordOutcome, SettingsStore } from "./settings-store";
 import { startMarkersFrom } from "./start-markers";
 import { StepLore, ToolSupport, type LoreInputs, type LookupTransport } from "./lore-steps";
 import { readPins } from "./lore-pins";
-import { CallMeter, classifyTyped, dedupeProposals, extract, interpret, onlyPassesTime, saidPayMethod, Steps } from "./steps";
+import { CallMeter, dedupeProposals, extract, interpret, saidPayMethod, Steps } from "./steps";
 import { PlanNotes } from "./plan-notes";
 import { OutcomeNotes } from "./outcome-notes";
 import { InspectorLog, type InspectorRecord } from "./inspector-log";
@@ -780,7 +780,6 @@ export class Runtime implements TurnHooks {
     const facts: SignalFacts = {
       ...noFacts(before.filter((m) => !m.isUser).length + 1),
       typed,
-      classifier: typed && classifyTyped(text, render.world, [...all.flatMap((a) => a.lexicon ?? []), ...TIMELAPSE_LEXICON]),
       sceneChange: this.lastPlace.has(input.chatId) && this.lastPlace.get(input.chatId) !== placeOfEntity(render.state, render.world.pov),
       agentsPresent: agentsActHere(this.registry, render.world, render.state),
       present: ties.present.length > 0,
@@ -1046,8 +1045,7 @@ export class Runtime implements TurnHooks {
     }
     // Words the turn won't play are offered on a chip that sends them as the next message (DESIGN
     // §5.2), each piece only when it may be (`offeredNext`); "" when it may not.
-    const lexicon = all.flatMap((a) => a.lexicon ?? []);
-    const chipText = (piece: string): string => offeredNext(this.registry, render.world, render.state, piece, text, lexicon, secrets) ?? "";
+    const chipText = (piece: string): string => offeredNext(this.registry, render.world, render.state, piece, text, secrets) ?? "";
     let next = (result.next ?? []).map(chipText);
     // A bare time span reads as the timelapse itself, which plays alone: anything after it is offered
     // in words once it has run. One after another action ("I head home and sleep until the next
@@ -2231,7 +2229,7 @@ function openPuzzleTitles(registry: Registry, world: WorldDoc, state: Readonly<W
     });
 }
 
-/** Typed phrases that let time pass: they wake the classifier and are the timelapse's lexicon for `interpret`. */
+/** Typed phrases that let time pass: the timelapse's lexicon in `interpret`'s catalog. */
 const TIMELAPSE_LEXICON = ["wait until", "sleep until", "next morning", "skip ahead", "skip to", "pass the time", "sleep through", "hours later", "days later", "wait for"];
 
 /** The longest typed timelapse a turn runs on its own (minutes); longer ones are offered as a chip. */
@@ -2320,15 +2318,14 @@ const NO_VALUE: Record<string, true> = { "": true, none: true, null: true, nil: 
 
 /**
  * Words of the message the turn won't play (a queued action's, or what no action reads) as its chip
- * may offer them (DESIGN §5.2), or null. Whether they are an action is the read's call, not a word
- * list's, so only junk is kept off: a placeholder for nothing ("none", "N/A"); the message or its
- * first action said again ("I walk to Bluebird Coffee" after "I walk to Bluebird Coffee to buy a
- * latte"), whose chip would play it twice; words that only let time pass, which is `then`'s
- * (`lexicon` holds the actions' phrases); and words carrying an unrevealed secret (`secrets`, less
- * the player's own words) or naming anything hidden, which are dropped on their own while the
- * actions still play.
+ * may offer them (DESIGN §5.2), or null. Whether they are an action, and whether they only let time
+ * pass (which is `then`'s, offered as a Timelapse), is the read's call, never a word list's, so only
+ * junk is kept off: a placeholder for nothing ("none", "N/A"); the message or its first action said
+ * again ("I walk to Bluebird Coffee" after "I walk to Bluebird Coffee to buy a latte"), whose chip
+ * would play it twice; and words carrying an unrevealed secret (`secrets`, less the player's own
+ * words) or naming anything hidden, which are dropped on their own while the actions still play.
  */
-function offeredNext(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, next: string, text: string, lexicon: readonly string[], secrets: readonly string[]): string | null {
+function offeredNext(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, next: string, text: string, secrets: readonly string[]): string | null {
   // Compared as words, without the player's own "I" or "we": "I walk to the cafe." is "walk to the cafe".
   const words = (s: string): string =>
     s
@@ -2338,7 +2335,6 @@ function offeredNext(reg: Registry, world: WorldDoc, state: Readonly<WorldState>
       .replace(/^(?:i|we)\s+/, "");
   const said = words(next);
   if (hasOwn(NO_VALUE, said) || words(text).startsWith(said)) return null;
-  if (onlyPassesTime(next, world, lexicon, TIMELAPSE_LEXICON)) return null;
   return findLeaks(next, secrets).length > 0 || chipNamesHidden(reg, world, state, next) ? null : next;
 }
 

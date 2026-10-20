@@ -1,5 +1,5 @@
-// Model calls per turn by preset (DESIGN §5.3) on one typed turn that fires every signal: the
-// classifier, open ties for an agent with the POV and one elsewhere, a reply. Also: routes reach
+// Model calls per turn by preset (DESIGN §5.3) on one typed turn that fires every signal: typed
+// input, open ties for an agent with the POV and one elsewhere, a reply. Also: routes reach
 // the host, prose steps never see a secret (secrecy batching rule), a suggestion too long for a chip
 // is dropped, never cut, and a brief is checked whole for a secret before it's cut.
 

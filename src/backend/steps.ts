@@ -435,43 +435,6 @@ export class Steps {
   }
 }
 
-// ---------------------------------------------------------------- the typed-input classifier
-
-const ACTION_VERBS =
-  /\b(go(?:ing)? to|walk|run|drive|driving|ride|head(?:ing)? (?:to|out|over|back|home)|travel|take|grab|pick up|drop|give|hand|lend|loan|wear|put on|take off|remove|use|buy|purchase|order|pay|transfer|send|refuel|fill (?:it|her) up|examine|inspect|look (?:at|in|under)|search|open|close|lock|unlock|call|phone|text|borrow|steal|sell|attack|fight|hit|shoot|climb|jump|sneak|hide|cook|eat|drink|work|study|train|fix|repair|craft|build)\b/i;
-/** Words and cues that let time pass: waiting or sleeping, a span, a clock time, "until". */
-const TIME_CUES = /\b(?:wait|sleep|bed|nap|rest|skip)\b|\b\d+(?:\.\d+)?\s?(?:minutes|mins|hours|hrs|days|weeks)\b|\b\d{1,2}(?::\d{2})?\s?(?:am|pm)\b|\b\d{1,2}:\d{2}\b|\b(?:until|till)\b/i;
-const AMOUNTS = /\$\s?\d|\b\d+(?:\.\d+)?\s?(?:gal|gallons|dollars|bucks)\b/i;
-
-/** DESIGN §5.2: fires on the action lexicon (the built-in verbs plus every action's `lexicon`), a known item, vehicle, account or place named as a target, or a structural cue. Deterministic, no model. */
-export function classifyTyped(text: string, world: WorldDoc, lexicon: readonly string[] = []): boolean {
-  return TIME_CUES.test(text) || namesAction(text, world, lexicon);
-}
-
-/** Whether typed text names an action other than letting time pass: a built-in verb or a `lexicon` phrase, an amount, or a known item, vehicle, account or place as a target. */
-function namesAction(text: string, world: WorldDoc, lexicon: readonly string[]): boolean {
-  if (ACTION_VERBS.test(text) || AMOUNTS.test(text)) return true;
-  const lower = text.toLowerCase();
-  for (const phrase of lexicon) if (phrase.trim().length > 2 && lower.includes(phrase.trim().toLowerCase())) return true;
-  for (const [id, e] of Object.entries(world.entities)) {
-    if (id === world.pov || e.kind === "person") continue;
-    if (e.name.length > 2 && lower.includes(e.name.toLowerCase())) return true;
-  }
-  for (const p of Object.values(world.places)) if (p.name.length > 2 && lower.includes(`to ${p.name.toLowerCase()}`)) return true;
-  return false;
-}
-
-/**
- * Whether typed text only lets time pass ("I sleep until morning", "wait two hours"): a time cue or
- * one of `timeLexicon`'s phrases, and nothing that names another action (`lexicon` holds the actions'
- * own phrases; one that is itself a time cue, such as "sleep" or "rest", names no more than the time).
- * `interpret`'s second action never does: time after the first is `then`'s.
- */
-export function onlyPassesTime(text: string, world: WorldDoc, lexicon: readonly string[], timeLexicon: readonly string[]): boolean {
-  const lower = text.toLowerCase();
-  return (TIME_CUES.test(text) || timeLexicon.some((phrase) => phrase.trim().length > 2 && lower.includes(phrase.trim().toLowerCase()))) && !namesAction(text, world, lexicon.filter((phrase) => !TIME_CUES.test(phrase)));
-}
-
 // ---------------------------------------------------------------- interpret
 
 function worldBrief(world: WorldDoc, extra: string): string {

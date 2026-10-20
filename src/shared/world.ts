@@ -524,7 +524,7 @@ export interface ActionDef {
   /** Duration in minutes. */
   duration: Expr;
   activity?: ActivitySpec;
-  /** Verbs and phrases for the typed-input classifier. */
+  /** Ways players say it ("head over to", "walk to"): `interpret`'s catalog shows them as hints (DESIGN §5.2); no word list decides what an input is. */
   lexicon?: string[];
   /** The label other characters can observe (no secrets; linted). */
   observable?: string;
