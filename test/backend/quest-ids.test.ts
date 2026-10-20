@@ -3,7 +3,7 @@
 // (an answer, the hints it earns) work by that stand-in. Played through the starters' pushed state.
 
 import { describe, expect, test } from "bun:test";
-import type { JsonObject } from "../../src/shared/json";
+import { isRecord, type JsonObject } from "../../src/shared/json";
 import type { WorldDoc } from "../../src/shared/world";
 import { decodeQuestsView, type QuestTrack } from "../../src/packs/story/ui/panel";
 import { STARTER_WORLDS } from "../../src/packs/index";
@@ -106,7 +106,7 @@ describe("a secret track on the player layer", () => {
   });
 });
 
-describe("answering a puzzle the quest log masks", () => {
+describe("answering a puzzle as the player sees it", () => {
   /** Sends Answer with `params` and plays the turn; the turn's decline, if any. */
   async function answer(rig: Rig, chatId: string, params: JsonObject): Promise<{ decline: string; outcome: string }> {
     rig.body(await rig.send({ type: "lre.action", chatId, action: "answer", params, source: "palette" }));
@@ -123,6 +123,27 @@ describe("answering a puzzle the quest log masks", () => {
     const { decline, outcome } = await answer(rig, chatId, { puzzle: "s_shop_trouble", answer: "42" });
     expect(decline).toContain("no open puzzle s shop trouble");
     expect(`${decline}\n${outcome}`).not.toContain("What Marcus isn't saying");
+  });
+
+  test("a puzzle not in the quest log is never answered by its own id: the refusal reads as one for an id nothing has", async () => {
+    const rig = new Rig({ shipped: true });
+    // The truck puzzle known only to its owner, whom the POV doesn't know, and a puzzle still dormant: neither is listed.
+    const chatId = await starterChat(rig, "modern_slice_of_life", "Port Alder", (draft): JsonObject[] => [
+      { ...(draft.tracks.p_township_truck as unknown as JsonObject), owner: "dale_whitcomb" },
+      { id: "p_cellar", kind: "puzzle", label: "The cellar door", start: "waiting", visibility: "public", stages: { waiting: { label: "Waiting", next: [{ to: "riddle", when: "flag('cellar_found')" }] }, riddle: { label: "The riddle", answer: { expect: ["echo"] }, next: [] } } },
+    ]);
+    expect((await questLog(rig, chatId)).filter((q) => q.kind === "puzzle")).toEqual([]);
+    /** A track's stage as the GM view has it. */
+    const stage = async (id: string): Promise<unknown> => {
+      const gm = rig.body(await rig.send({ type: "lre.gm", chatId }));
+      const track = (Array.isArray(gm.tracks) ? gm.tracks : []).find((t) => isRecord(t) && t.id === id);
+      return isRecord(track) ? track.stage : undefined;
+    };
+    expect((await answer(rig, chatId, { puzzle: "p_township_truck", answer: "fuel pump relay" })).decline).toBe("Answer: declined no open puzzle p township truck");
+    expect(await stage("p_township_truck")).toBe("stuck");
+    expect((await answer(rig, chatId, { puzzle: "p_cellar", answer: "echo" })).decline).toBe("Answer: declined no open puzzle p cellar");
+    expect((await answer(rig, chatId, { puzzle: "p_no_such_thing", answer: "echo" })).decline).toBe("Answer: declined no open puzzle p no such thing");
+    expect(rig.rt.ledger.errors).toEqual([]);
   });
 
   test("its own label finds nothing, and interpret is told it by the label the quest log shows", async () => {
@@ -142,6 +163,24 @@ describe("answering a puzzle the quest log masks", () => {
     const { decline } = await answer(rig, chatId, { puzzle: "truck", answer: "fuel pump relay" });
     expect(decline).toContain("no open puzzle truck");
     expect([(await masked())?.status, (await masked())?.hints]).toEqual(["active", []]);
+    expect(rig.rt.ledger.errors).toEqual([]);
+  });
+
+  test("a judged answer to a masked puzzle is retried by its stand-in, and opens it", async () => {
+    const rig = new Rig({ shipped: true });
+    // A lockbox whose id says nothing its row shows, judged by `puzzle.answer`, beside the truck kept secret: two open.
+    const lockbox: JsonObject = { id: "p_x1", kind: "puzzle", label: "The lockbox", start: "shut", visibility: "secret", stages: { shut: { label: "Three dials", cue: "A lockbox with three brass dials.", answer: { expect: ["317"], decision: { threshold: 0.7 } }, next: [{ to: "open", when: "false" }] }, open: { label: "Open", cue: "The lockbox clicks open.", next: [] } } };
+    const chatId = await starterChat(rig, "modern_slice_of_life", "Port Alder", (draft): JsonObject[] => [{ ...(draft.tracks.p_township_truck as unknown as JsonObject), visibility: "secret" }, lockbox]);
+    // Room before the reply for the judgement beside interpret and the NPC choices.
+    rig.body(await rig.send({ type: "lre.settings.set", patch: { modelUse: { preset: "custom", budgets: { pre: { calls: 4 } } } } }));
+    rig.host.quietReply = (req) => {
+      const content = req.messages.map((m) => m.content).join("\n");
+      if (content.includes("You map a player's typed input")) return JSON.stringify({ action: "answer", params: { puzzle: "the brass dials", answer: "three, one, seven" }, confidence: 0.9 });
+      if (content.includes('"correct": probability')) return JSON.stringify({ correct: { p: 0.9 } });
+      return "{}";
+    };
+    await rig.turn(chatId, "The combination is three, one, seven.", "The dials turn.");
+    expect((await questLog(rig, chatId)).find((q) => q.cue === "The lockbox clicks open.")?.status).toBe("done");
     expect(rig.rt.ledger.errors).toEqual([]);
   });
 

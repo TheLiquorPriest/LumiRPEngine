@@ -45,7 +45,7 @@ import type { InterpretOutput, QueuedAction } from "../engine/steps";
 import { checkAnswer } from "../engine/tracks";
 import { secretLoreNames } from "../engine/lore";
 import { namesHidden, playerKnows } from "../engine/player-events";
-import { canSeeEntity, canSeePlace, findLeaks, namesAny, playerTrack, povPlace, unrevealedSecrets, unseenPlaceNames } from "../engine/visibility";
+import { canSeeEntity, canSeePlace, findLeaks, namesAny, playerTrack, povPlace, shownTrackId, unrevealedSecrets, unseenPlaceNames } from "../engine/visibility";
 import { openPuzzle, openPuzzles } from "../packs/story/core/index";
 import { REGARD_CHANNEL_CAP } from "../packs/relationships/core/index";
 import { Working } from "../engine/working";
@@ -1027,7 +1027,8 @@ export class Runtime implements TurnHooks {
     if (!run || !stage?.answer || !budget.take()) return;
     const owner = render.world.tracks[track]?.owner;
     const p = await puzzleAnswer(this.steps, run, stage.label, stage.answer.expect, answer, at.userId, budget.signal, this.stepLore(run, at, { text: `${stage.label}\n${answer}`, links: owner ? [owner] : [] }));
-    if (p !== null) bridge.amendIntent(text, { ...intent, params: { ...intent.params, puzzle: track, decision: p } });
+    // Retried by the id the quest log shows it by, which the answer takes (a secret's stand-in), never its own.
+    if (p !== null) bridge.amendIntent(text, { ...intent, params: { ...intent.params, puzzle: shownTrackId(render.world, track), decision: p } });
   }
 
   /**

@@ -99,13 +99,14 @@ export function openPuzzles(ctx: ReadContext): OpenPuzzle[] {
 }
 
 /**
- * The puzzles an answer's `ref` may be for: the one it names by id (a puzzle's own, or the stand-in
- * the player layer shows a secret by); else the open ones whose label, stage and cue, as the POV sees
- * them, hold the most of its words (a secret's own label, which its row masks, never counts); else the
- * only one open. Several when they tie, or when `ref` names nothing while more than one is open.
+ * The puzzles an answer's `ref` may be for, only ever ones in the POV's quest log (`openPuzzles`): the
+ * one it names by the id its row goes by (a secret's stand-in, any other's own id); else those whose
+ * label, stage and cue, as the POV sees them, hold the most of its words (a secret's own label, which
+ * its row masks, never counts); else the only one open. Several when they tie, or when `ref` names
+ * nothing while more than one is open. A puzzle the POV can't see is never among them, and a secret's
+ * own id is no id it goes by: only such of its words as the player sees count.
  */
 function puzzlesFor(ctx: ReadContext, ref: string): TrackId[] {
-  if (own(ctx.world.tracks, ref)?.kind === "puzzle") return [ref];
   const open = openPuzzles(ctx);
   const byId = open.find((p) => p.shown.id === ref);
   if (byId) return [byId.id];
@@ -185,7 +186,7 @@ export const storyPack: PackDef = {
       id: "answer",
       label: "Answer",
       pack: "story",
-      // `puzzle` may be the id (a secret's stand-in), words from what the player sees of it (its label, stage or cue: "the safe"), or left out when one puzzle is open.
+      // `puzzle` names one in the quest log: the id its row goes by (a secret's stand-in), words from what the player sees of it (its label, stage or cue: "the safe"), or nothing when one puzzle is open.
       params: { puzzle: { type: "text", optional: true, label: "Puzzle" }, answer: { type: "text" }, decision: { type: "number", optional: true, label: "Judged probability" } },
       requires: [],
       outcomes: { default: [{ type: "story.answer", args: { track: "=params.puzzle", answer: "=answer", decision: "=params.decision" } }] },
