@@ -63,7 +63,7 @@ export interface WorldState {
   time: TimeState;
   /** The adjudication policy an `adjudicate` marker set (DESIGN §11); absent, the world's ruleset decides. */
   adjudication?: AdjudicationDef;
-  /** The player-claims policy a `claims` marker set (DESIGN §9.4); absent (a chat older than claims), the world's default, else Story's. */
+  /** The player-claims policy a `claims` marker set (DESIGN §9.4); absent (a chat older than claims), the world's default, else the chat's realism preset's (`claimsOf`). */
   claims?: ClaimsPolicy;
   /** First materialization per `<entityId>:<domain>`, with its pins (L24). */
   materialized: Record<string, { generatorVersion: number; tablesRevision: string }>;

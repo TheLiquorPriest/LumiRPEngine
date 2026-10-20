@@ -2,7 +2,8 @@ import { describe, expect, test } from "bun:test";
 import { applyMarker } from "../../src/engine/events";
 import type { PackDef } from "../../src/engine/registry";
 import { effectiveLevel } from "../../src/engine/registry-impl";
-import { fieldLive, levelContract, presetOf, previewLevelChange, realismMarkers, REALISM_PRESETS } from "../../src/engine/realism";
+import { claimsOf, fieldLive, levelContract, presetOf, previewLevelChange, realismMarkers, REALISM_PRESETS } from "../../src/engine/realism";
+import type { ClaimsPolicy } from "../../src/shared/claims";
 import { baseWorld, POV, registryOf, startState } from "../packs/support";
 
 const moneyPack: PackDef = {
@@ -30,6 +31,29 @@ describe("realism", () => {
     const s = startState(baseWorld());
     applyMarker(s, { kind: "resolve", domain: "money", scope: { all: true }, to: 3 });
     expect(presetOf(s.realism)).toBe("custom");
+  });
+
+  test("a chat older than player claims plays by the world's default, else by its own realism preset's", () => {
+    const world = baseWorld();
+    // As an older chat's ledger holds it: realism markers, and no `claims` marker.
+    const chat = (id: "story" | "grounded" | "simulation") => {
+      const s = startState(world);
+      for (const m of realismMarkers(REALISM_PRESETS[id])) applyMarker(s, m);
+      return s;
+    };
+    expect(claimsOf(world, chat("simulation"))).toEqual({ mode: "ask", capped: true });
+    expect(claimsOf(world, chat("grounded"))).toEqual({ mode: "real", capped: true });
+    expect(claimsOf(world, chat("story"))).toEqual({ mode: "real", capped: false });
+    const custom = chat("simulation");
+    applyMarker(custom, { kind: "resolve", domain: "money", scope: { all: true }, to: 3 });
+    expect(claimsOf(world, custom)).toEqual({ mode: "real", capped: false });
+    // The world's own default comes before the preset's, and the chat's marker before both.
+    const hold: ClaimsPolicy = { mode: "hold", capped: false };
+    const authored = { ...world, realism: { ...world.realism, claims: hold } };
+    expect(claimsOf(authored, chat("simulation"))).toEqual({ mode: "hold", capped: false });
+    const marked = chat("simulation");
+    applyMarker(marked, { kind: "claims", to: { mode: "real", capped: false } });
+    expect(claimsOf(authored, marked)).toEqual({ mode: "real", capped: false });
   });
 
   test("effective level = override (never above the domain), else min(domain, band cap); the POV is never capped", () => {

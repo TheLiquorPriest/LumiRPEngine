@@ -29,7 +29,7 @@ export const CLAIM_PRESETS: Readonly<Record<Exclude<RealismPresetId, "custom">, 
   simulation: { mode: "ask", capped: true },
 };
 
-/** Story's, the default preset's: a chat with no `claims` marker in a world that sets none plays by it. */
+/** Story's, the default preset's: a chat older than claims, in a Custom realism and a world that sets none, plays by it. */
 export const DEFAULT_CLAIMS: Readonly<ClaimsPolicy> = CLAIM_PRESETS.story;
 
 /** A policy from outside data (a world, a settings file, a marker), or null when it isn't one; `capped` is off unless it says true. */

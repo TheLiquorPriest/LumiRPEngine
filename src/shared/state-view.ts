@@ -263,7 +263,7 @@ export interface ControlsView {
     bandTiers: Record<Band, string[]>;
     /** The world's floors on effective levels (DESIGN §9.1, §11): its ruleset's, and Space 3 while the grid system is on; the sliders don't go below them either. */
     floors: Partial<Record<DomainId, Level>>;
-    /** What this chat makes of a typed action's thing the world doesn't have (DESIGN §9.4): its own marker's, else the world's default, else Story's. */
+    /** What this chat makes of a typed action's thing the world doesn't have (DESIGN §9.4): its own marker's, else the world's default, else its realism preset's. */
     claims: ClaimsPolicy;
   };
   time: {
