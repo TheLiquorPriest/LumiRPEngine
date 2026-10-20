@@ -892,6 +892,53 @@ function loreSourceOf(raw) {
     return { kind: "ai", status: raw.status };
   return { kind: "authored" };
 }
+function isLorePin(v) {
+  if (!isRecord(v))
+    return false;
+  const keys = Object.keys(v).length;
+  if (v.lore !== undefined)
+    return typeof v.lore === "string" && v.lore !== "" && keys === 1;
+  return typeof v.book === "string" && v.book !== "" && typeof v.entry === "string" && v.entry !== "" && keys === 2;
+}
+function lorePinKey(pin) {
+  return "lore" in pin ? `lore:${pin.lore}` : `book:${pin.book}/${pin.entry}`;
+}
+var pinsRead = new WeakMap;
+function lorePinsOf(world) {
+  const raw = world.lorePins;
+  if (!isRecord(raw))
+    return { characters: {}, places: {} };
+  const known = pinsRead.get(raw);
+  if (known)
+    return known;
+  const part = (value) => {
+    const out = {};
+    if (!isRecord(value))
+      return out;
+    for (const [id, list] of Object.entries(value)) {
+      if (!safeKey(id) || !Array.isArray(list))
+        continue;
+      const seen = new Set;
+      const pins = [];
+      for (const pin of list) {
+        if (!isLorePin(pin) || seen.has(lorePinKey(pin)))
+          continue;
+        seen.add(lorePinKey(pin));
+        pins.push("lore" in pin ? { lore: pin.lore } : { book: pin.book, entry: pin.entry });
+      }
+      if (pins.length > 0)
+        out[id] = pins;
+    }
+    return out;
+  };
+  const read = { characters: part(raw.characters), places: part(raw.places) };
+  pinsRead.set(raw, read);
+  return read;
+}
+function lorePinsJson(pins) {
+  const part = (record) => Object.fromEntries(Object.entries(record).flatMap(([id, list]) => list.length > 0 ? [[id, list.map((p) => ("lore" in p) ? { lore: p.lore } : { book: p.book, entry: p.entry })]] : []));
+  return { characters: part(pins.characters), places: part(pins.places) };
+}
 function loreIndexJson(index) {
   return { terms: Object.fromEntries(Object.entries(index.terms).map(([term, ids]) => [term, [...ids]])), topics: Object.fromEntries(Object.entries(index.topics).map(([id, t]) => [id, { label: t.label, entries: [...t.entries] }])) };
 }
@@ -2854,7 +2901,8 @@ var PART_INFO = {
   time: { label: "Time defaults", hint: "How time passes in new chats", icon: "clock" },
   ruleset: { label: "Ruleset", hint: "Character fields, checks, levels, the sheet and combat", icon: "shield" },
   loreIndex: { label: "Lore lookup table", hint: "Terms and topics that lead to lore entries", icon: "search" },
-  minds: { label: "Minds", hint: "How closely characters think, what they remember, and their prompts", icon: "sparkle" }
+  minds: { label: "Minds", hint: "How closely characters think, what they remember, and their prompts", icon: "sparkle" },
+  lorePins: { label: "Pinned lore", hint: "Lore every call for a character, or at a place, always reads", icon: "pin" }
 };
 function go(app, build) {
   app.ui.update((ui) => ({ ...ui, build }));
@@ -3114,7 +3162,9 @@ var COLLECTIONS = ["kinds", "relations", "entities", "places", "maps", "routes",
 var PARTS = ["calendar", "realism", "tiers", "time", "ruleset", "loreIndex"];
 var META_FIELDS = ["name", "pov", "start", "seedMode", "lenientPricing", "spawnCap", "lifeStates", "currency", "mapSettings"];
 function issueTarget(path) {
-  const [head, id] = path.split(".");
+  const [head, id, pinned] = path.split(".");
+  if (head === "lorePins" && pinned)
+    return id === "characters" ? { collection: "entities", id: pinned } : id === "places" ? { collection: "places", id: pinned } : null;
   const collection = COLLECTIONS.find((c) => c === head);
   return collection && id ? { collection, id } : null;
 }
@@ -5918,6 +5968,152 @@ function mapTemplate(kind, id, scope) {
       { from: place("square"), to: place("docks"), minutes: 6 }
     ]
   };
+}
+
+// src/frontend/gm/ui.tsx
+function usePages() {
+  const [page, setPage] = d2(null);
+  const ref = T2(null);
+  const opener = T2(null);
+  const open = page !== null;
+  const shown = T2(open);
+  A(() => {
+    if (open === shown.current)
+      return;
+    shown.current = open;
+    if (open) {
+      ref.current?.querySelector(":scope > .lre-gm-page .lre-page-header button")?.focus();
+      return;
+    }
+    const back = opener.current;
+    opener.current = null;
+    if (back?.isConnected)
+      back.focus();
+  }, [open]);
+  return {
+    page,
+    open: (next) => {
+      if (page === null)
+        opener.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+      setPage(next);
+    },
+    back: () => setPage(null),
+    host: {
+      ref,
+      onKeyDown: (event) => {
+        if (event.key !== "Escape" || page === null || event.defaultPrevented)
+          return;
+        event.preventDefault();
+        event.stopPropagation();
+        setPage(null);
+      }
+    }
+  };
+}
+function GmPage(props) {
+  return /* @__PURE__ */ u3("div", {
+    class: "lre-gm-page",
+    "data-lre-gm-page": props.name,
+    children: [
+      /* @__PURE__ */ u3(PageHeader, {
+        title: props.title,
+        subtitle: props.subtitle,
+        onBack: props.onBack,
+        backLabel: props.backLabel,
+        actions: props.actions
+      }, undefined, false, undefined, this),
+      props.children
+    ]
+  }, undefined, true, undefined, this);
+}
+function ActionRows(props) {
+  return /* @__PURE__ */ u3("div", {
+    class: "lre-gm-rows",
+    role: "list",
+    "aria-label": props.label,
+    children: props.children
+  }, undefined, false, undefined, this);
+}
+function ActionRow(props) {
+  return /* @__PURE__ */ u3("div", {
+    class: "lre-gm-row",
+    role: "listitem",
+    children: [
+      /* @__PURE__ */ u3("div", {
+        class: "lre-gm-row-main",
+        children: [
+          /* @__PURE__ */ u3("span", {
+            class: "lre-gm-row-text",
+            children: [
+              /* @__PURE__ */ u3("span", {
+                class: "lre-gm-row-title",
+                children: props.title
+              }, undefined, false, undefined, this),
+              props.subtitle !== undefined ? /* @__PURE__ */ u3("span", {
+                class: "lre-gm-row-sub",
+                children: props.subtitle
+              }, undefined, false, undefined, this) : null,
+              props.id !== undefined ? /* @__PURE__ */ u3(IdText, {
+                id: props.id
+              }, undefined, false, undefined, this) : null
+            ]
+          }, undefined, true, undefined, this),
+          props.value !== undefined ? /* @__PURE__ */ u3("span", {
+            class: props.tone ? `lre-gm-row-value lre-${props.tone}` : "lre-gm-row-value",
+            children: props.value
+          }, undefined, false, undefined, this) : null,
+          props.actions !== undefined ? /* @__PURE__ */ u3("span", {
+            class: "lre-gm-row-actions",
+            children: props.actions
+          }, undefined, false, undefined, this) : null
+        ]
+      }, undefined, true, undefined, this),
+      props.children
+    ]
+  }, undefined, true, undefined, this);
+}
+function GmCard(props) {
+  return /* @__PURE__ */ u3("section", {
+    class: "lre-card lre-gm-card",
+    "data-lre-gm-card": props.name,
+    children: [
+      /* @__PURE__ */ u3("div", {
+        class: "lre-gm-card-head",
+        children: [
+          /* @__PURE__ */ u3("div", {
+            class: "lre-gm-card-titles",
+            children: [
+              /* @__PURE__ */ u3("h3", {
+                class: "lre-gm-card-title",
+                children: props.title
+              }, undefined, false, undefined, this),
+              props.subtitle !== undefined ? /* @__PURE__ */ u3("span", {
+                class: "lre-gm-card-sub",
+                children: props.subtitle
+              }, undefined, false, undefined, this) : null,
+              props.id !== undefined ? /* @__PURE__ */ u3(IdText, {
+                id: props.id
+              }, undefined, false, undefined, this) : null
+            ]
+          }, undefined, true, undefined, this),
+          props.badges !== undefined ? /* @__PURE__ */ u3("span", {
+            class: "lre-gm-badges",
+            children: props.badges
+          }, undefined, false, undefined, this) : null
+        ]
+      }, undefined, true, undefined, this),
+      props.children
+    ]
+  }, undefined, true, undefined, this);
+}
+function BuildLink() {
+  const app = useApp();
+  return /* @__PURE__ */ u3(Button, {
+    variant: "ghost",
+    icon: "hammer",
+    onClick: () => app.ui.update((ui) => ({ ...ui, mode: "build" })),
+    children: "Kinds and places are the world's: edit them in Build"
+  }, undefined, false, undefined, this);
 }
 
 // src/frontend/scroll.ts
@@ -10232,6 +10428,236 @@ function worldIdentifiers(doc) {
   return [...out].sort();
 }
 
+// src/frontend/build/lore-pins.tsx
+var HINT = {
+  characters: "Their mind reads these first, every time they think, within the mind step's lore tokens.",
+  places: "Every helper and mind call here, or in a place inside it, reads these first, within its lore tokens."
+};
+function LorePinsSection(props) {
+  const app = useApp();
+  const draft = useSelect(app.drafts, (d) => d);
+  const send = b2(() => draftSend(app), [app]);
+  const [busy, run] = useBusy();
+  const [views, setViews] = d2({});
+  const [adding, setAdding] = d2(null);
+  const [books, setBooks] = d2(null);
+  const [book, setBook] = d2("");
+  const [entries, setEntries] = d2(null);
+  const [choice, setChoice] = d2("");
+  const loreId = P2();
+  const bookId = P2();
+  const entryId = P2();
+  const pins = draft ? lorePinsOf(draft.doc) : { characters: {}, places: {} };
+  const list = pins[props.target][props.id] ?? [];
+  const keys = list.map(lorePinKey).join(`
+`);
+  A(() => {
+    if (!draft || !list.some((p) => !("lore" in p)))
+      return;
+    app.request({ type: "lre.lore", op: "pins", worldId: draft.worldId }).then((body) => {
+      const part = body?.pins?.[props.target][props.id] ?? [];
+      setViews(Object.fromEntries(part.map((v) => [v.key, v])));
+    });
+  }, [draft?.worldId, keys]);
+  A(() => {
+    if (adding !== "book" || books !== null)
+      return;
+    app.request({ type: "lre.lore", op: "books", ...app.client.getState().chatId ? { chatId: app.client.getState().chatId ?? "" } : {} }).then((body) => setBooks(body?.books ?? []));
+  }, [adding]);
+  A(() => {
+    setEntries(null);
+    setChoice("");
+    if (book === "")
+      return;
+    app.request({ type: "lre.lore", op: "entries", bookId: book }).then((body) => setEntries(body?.entries ?? []));
+  }, [book]);
+  if (!draft)
+    return null;
+  const save = (next) => run(async () => {
+    const all = { ...pins, [props.target]: { ...pins[props.target], [props.id]: next } };
+    await send({ type: "lre.editor", worldId: draft.worldId, base: draft.base, op: "set", part: "lorePins", value: lorePinsJson(all) });
+    setAdding(null);
+    setChoice("");
+  });
+  const titleOf = (pin) => {
+    if ("lore" in pin) {
+      const entry = draft.doc.lore[pin.lore];
+      return entry ? { title: entry.title || pin.lore, source: "World lore", badge: entry.secret === true ? "Secret" : null } : { title: pin.lore, source: "World lore", badge: "Missing" };
+    }
+    const v = views[lorePinKey(pin)];
+    return { title: v?.title ?? "A World Info entry", source: v?.source ?? "World Info", badge: v?.status === "missing" ? "Missing" : v?.status === "off" ? "Off in its book" : null };
+  };
+  const taken = new Set(list.map(lorePinKey));
+  const lore = Object.values(draft.doc.lore).filter((l) => !taken.has(`lore:${l.id}`)).sort((a, b) => a.title.localeCompare(b.title));
+  return /* @__PURE__ */ u3("div", {
+    "data-lre-lore-pins": `${props.target}:${props.id}`,
+    children: /* @__PURE__ */ u3(Section, {
+      title: "Pinned lore",
+      aside: list.length > 0 ? /* @__PURE__ */ u3(Badge, {
+        children: list.length
+      }, undefined, false, undefined, this) : undefined,
+      children: /* @__PURE__ */ u3("div", {
+        class: "lre-stack",
+        children: [
+          /* @__PURE__ */ u3("p", {
+            class: "lre-build-note",
+            children: [
+              HINT[props.target],
+              " Pins go to the draft as you change them; a chat uses them once you commit and Upgrade it."
+            ]
+          }, undefined, true, undefined, this),
+          list.length > 0 ? /* @__PURE__ */ u3(ActionRows, {
+            label: "Pinned lore",
+            children: list.map((pin, i) => {
+              const t = titleOf(pin);
+              return /* @__PURE__ */ u3(ActionRow, {
+                title: t.title,
+                subtitle: t.source,
+                value: t.badge ? /* @__PURE__ */ u3(Badge, {
+                  tone: t.badge === "Missing" ? "neg" : t.badge === "Secret" ? "gm" : "neutral",
+                  children: t.badge
+                }, undefined, false, undefined, this) : undefined,
+                actions: /* @__PURE__ */ u3(IconButton, {
+                  icon: "close",
+                  label: `Unpin ${t.title}`,
+                  disabled: busy,
+                  onClick: () => save(list.filter((_, j) => j !== i))
+                }, undefined, false, undefined, this)
+              }, lorePinKey(pin), false, undefined, this);
+            })
+          }, undefined, false, undefined, this) : null,
+          /* @__PURE__ */ u3(Issues, {
+            issues: lintAt(draft.lint, `lorePins.${props.target}.${props.id}`)
+          }, undefined, false, undefined, this),
+          adding === "lore" ? /* @__PURE__ */ u3("div", {
+            class: "lre-form-pins-add",
+            children: [
+              /* @__PURE__ */ u3("label", {
+                for: loreId,
+                children: "World lore entry"
+              }, undefined, false, undefined, this),
+              /* @__PURE__ */ u3("select", {
+                id: loreId,
+                class: "lre-input",
+                value: choice,
+                onChange: (event) => setChoice(event.currentTarget.value),
+                children: [
+                  /* @__PURE__ */ u3("option", {
+                    value: "",
+                    children: "Choose an entry"
+                  }, undefined, false, undefined, this),
+                  lore.map((l) => /* @__PURE__ */ u3("option", {
+                    value: l.id,
+                    children: l.title || l.id
+                  }, l.id, false, undefined, this))
+                ]
+              }, undefined, true, undefined, this),
+              /* @__PURE__ */ u3("div", {
+                class: "lre-form-pins-actions",
+                children: [
+                  /* @__PURE__ */ u3(Button, {
+                    variant: "primary",
+                    icon: "pin",
+                    disabled: choice === "" || busy,
+                    onClick: () => save([...list, { lore: choice }]),
+                    children: "Pin it"
+                  }, undefined, false, undefined, this),
+                  /* @__PURE__ */ u3(Button, {
+                    variant: "ghost",
+                    onClick: () => setAdding(null),
+                    children: "Cancel"
+                  }, undefined, false, undefined, this)
+                ]
+              }, undefined, true, undefined, this)
+            ]
+          }, undefined, true, undefined, this) : adding === "book" ? /* @__PURE__ */ u3("div", {
+            class: "lre-form-pins-add",
+            children: [
+              /* @__PURE__ */ u3("label", {
+                for: bookId,
+                children: "World Info book"
+              }, undefined, false, undefined, this),
+              /* @__PURE__ */ u3("select", {
+                id: bookId,
+                class: "lre-input",
+                value: book,
+                onChange: (event) => setBook(event.currentTarget.value),
+                children: [
+                  /* @__PURE__ */ u3("option", {
+                    value: "",
+                    children: books === null ? "Loading books…" : books.length === 0 ? "No World Info books" : "Choose a book"
+                  }, undefined, false, undefined, this),
+                  (books ?? []).map((b) => /* @__PURE__ */ u3("option", {
+                    value: b.id,
+                    children: b.attached ? `${b.name} (in this chat)` : b.name
+                  }, b.id, false, undefined, this))
+                ]
+              }, undefined, true, undefined, this),
+              book !== "" ? /* @__PURE__ */ u3(M, {
+                children: [
+                  /* @__PURE__ */ u3("label", {
+                    for: entryId,
+                    children: "Entry"
+                  }, undefined, false, undefined, this),
+                  /* @__PURE__ */ u3("select", {
+                    id: entryId,
+                    class: "lre-input",
+                    value: choice,
+                    onChange: (event) => setChoice(event.currentTarget.value),
+                    children: [
+                      /* @__PURE__ */ u3("option", {
+                        value: "",
+                        children: entries === null ? "Loading entries…" : entries.length === 0 ? "The book has no entries" : "Choose an entry"
+                      }, undefined, false, undefined, this),
+                      (entries ?? []).filter((e) => !taken.has(`book:${book}/${e.id}`)).map((e) => /* @__PURE__ */ u3("option", {
+                        value: e.id,
+                        children: e.disabled ? `${e.title} (off in the book)` : e.title
+                      }, e.id, false, undefined, this))
+                    ]
+                  }, undefined, true, undefined, this)
+                ]
+              }, undefined, true, undefined, this) : null,
+              /* @__PURE__ */ u3("div", {
+                class: "lre-form-pins-actions",
+                children: [
+                  /* @__PURE__ */ u3(Button, {
+                    variant: "primary",
+                    icon: "pin",
+                    disabled: book === "" || choice === "" || busy,
+                    onClick: () => save([...list, { book, entry: choice }]),
+                    children: "Pin it"
+                  }, undefined, false, undefined, this),
+                  /* @__PURE__ */ u3(Button, {
+                    variant: "ghost",
+                    onClick: () => setAdding(null),
+                    children: "Cancel"
+                  }, undefined, false, undefined, this)
+                ]
+              }, undefined, true, undefined, this)
+            ]
+          }, undefined, true, undefined, this) : /* @__PURE__ */ u3("div", {
+            class: "lre-form-pins-actions",
+            children: [
+              /* @__PURE__ */ u3(Button, {
+                icon: "pin",
+                disabled: busy || lore.length === 0,
+                onClick: () => setAdding("lore"),
+                children: "Pin world lore"
+              }, undefined, false, undefined, this),
+              /* @__PURE__ */ u3(Button, {
+                icon: "book",
+                disabled: busy,
+                onClick: () => setAdding("book"),
+                children: "Pin a World Info entry"
+              }, undefined, false, undefined, this)
+            ]
+          }, undefined, true, undefined, this)
+        ]
+      }, undefined, true, undefined, this)
+    }, undefined, false, undefined, this)
+  }, undefined, false, undefined, this);
+}
+
 // src/frontend/build/lookup-editor.tsx
 var SUGGESTIONS_SHOWN = 12;
 function EntryChips(props) {
@@ -10849,6 +11275,9 @@ function worldMindsOf(world) {
     memory: memoryConfigOf(raw.memory)
   };
 }
+function limitOf(limit) {
+  return limit === "none" ? Number.POSITIVE_INFINITY : limit;
+}
 var MIND_PURPOSES = ["mind", "memory", "skip", "consolidate"];
 function isMindPurpose(purpose) {
   return MIND_PURPOSES.includes(purpose);
@@ -10930,6 +11359,188 @@ var MIND_ANSWER_FORMATS = Object.freeze({
   consolidate: 'Answer with JSON only: {"summary": "..."}: at most 900 characters of plain prose, in their own perspective.'
 });
 
+// src/shared/timeouts.ts
+var TIMER_MAX_MS = 2147483647;
+var HOST_LIMITS = {
+  contextHandler: {
+    what: "A context handler, per call",
+    minMs: 1000,
+    maxMs: 120000,
+    source: "src/spindle/worker-host.ts:4498-4500 (the clamp), src/spindle/context-handler.ts:64-78 (the timer)",
+    effect: "Lumiverse aborts the handler; a required one stops the generation, any other is skipped and the generation goes on without it."
+  },
+  decision: {
+    what: "A Decision call (decisions.evaluate)",
+    maxMs: 30000,
+    source: "src/services/decisions.service.ts:47",
+    effect: "The call fails with “Decision evaluation timed out after 30 seconds”; the step falls back to the helper."
+  },
+  processStartup: {
+    what: "A background process's start-up",
+    minMs: 1000,
+    maxMs: 120000,
+    source: "src/spindle/worker-host-process-api.ts:768",
+    effect: "Lumiverse stops the process as timed out; its job fails."
+  },
+  processHeartbeat: {
+    what: "The gap between a background process's heartbeats",
+    minMs: 1000,
+    maxMs: 120000,
+    noneMs: 0,
+    source: "src/spindle/worker-host-process-api.ts:769 (the clamp), 273-286 (the watchdog; 0 checks nothing)",
+    effect: "Lumiverse terminates the process (“Backend process heartbeat timed out”); its job fails."
+  },
+  sharedRpc: {
+    what: "Another extension's read of LumiRPEngine's shared endpoint (LumiRPEngine Studio)",
+    maxMs: 1e4,
+    source: "src/spindle/worker-host.ts:971, 1715-1719",
+    effect: "The reader's request fails as timed out."
+  },
+  socketIdle: {
+    what: "An idle event socket (the command line and MCP server)",
+    maxMs: 120000,
+    source: "Bun's WebSocket idle timeout: src/app.ts:7 takes hono/bun's `websocket`, and src/main.ts:293-309 sets only the HTTP idleTimeout",
+    effect: "Lumiverse closes the socket; the client pings every 45 s to keep it open."
+  }
+};
+var TIMEOUT_KEYS = ["engineRunMs", "preLookupMs", "postReplyMs", "postLookupMs", "guardMs", "requestMs", "caveatsMs", "mindsRunMs", "jobCallMs", "tokenCountMs", "laneStartupMs", "laneHeartbeatMs"];
+var MIN = 60000;
+var TIMEOUTS = {
+  engineRunMs: {
+    label: "Engine run",
+    group: "turn",
+    limits: "Everything the engine does before the reply is generated: reading your action, people's choices, judging your approach, puzzle answers, the minds, the plan, the brief and the outline.",
+    fires: "The engine run stops: no reply is generated, and the chat says which step ran out, with a Retry.",
+    defaultMs: 5 * MIN,
+    minMs: 1000,
+    none: "the run takes as long as it needs"
+  },
+  preLookupMs: {
+    label: "Lore lookups before the reply",
+    group: "turn",
+    limits: "How long after the engine run starts a helper may still ask for lore; a lookup also starts only while a third of the run's time is left.",
+    fires: "Helpers answer with the lore they already have.",
+    defaultMs: 2 * MIN,
+    minMs: 0,
+    zero: "no lookups",
+    none: "lookups may start until the run's last third"
+  },
+  postReplyMs: {
+    label: "Reading the reply",
+    group: "turn",
+    limits: "Everything the engine asks a model after the reply: what changed, the contradiction check, people elsewhere, suggested choices, memory.",
+    fires: "The reads still waiting are skipped; the reply stands, and Re-read tries again.",
+    defaultMs: 5 * MIN,
+    minMs: 0,
+    zero: "no model calls after the reply",
+    none: "the reads take as long as they need"
+  },
+  postLookupMs: {
+    label: "Lore lookups after the reply",
+    group: "turn",
+    limits: "How long after the reply's reading starts a helper may still ask for lore; a lookup also starts only while a third of the reading's time is left.",
+    fires: "Helpers answer with the lore they already have.",
+    defaultMs: 2 * MIN,
+    minMs: 0,
+    zero: "no lookups",
+    none: "lookups may start until the reading's last third"
+  },
+  guardMs: {
+    label: "Generation guard",
+    group: "turn",
+    limits: "Lumiverse's wait for the engine's check, as a generation starts, that the engine's lore entries are fresh. The check itself is instant; this matters only while the engine is busy.",
+    fires: "Lumiverse stops the generation, so nothing goes out with stale entries.",
+    defaultMs: 2 * MIN,
+    minMs: 1000,
+    none: "as long as Lumiverse waits",
+    host: "contextHandler"
+  },
+  requestMs: {
+    label: "Engine requests",
+    group: "app",
+    limits: "How long this tab waits for the engine to answer a request: a view, an edit, a setting.",
+    fires: "The tab says the engine didn't answer; the engine may still finish the request.",
+    defaultMs: 5 * MIN,
+    minMs: 1000,
+    none: "the tab waits as long as it takes"
+  },
+  caveatsMs: {
+    label: "Preset check",
+    group: "app",
+    limits: "How long Settings → Caveats waits for its test prompt of the chat before saying the check is still running.",
+    fires: "Caveats says the check is still running; it finishes in the background for the next look.",
+    defaultMs: MIN,
+    minMs: 0,
+    zero: "always answer at once",
+    none: "wait for the check (Engine requests still bounds the tab's wait)"
+  },
+  mindsRunMs: {
+    label: "Minds run on demand",
+    group: "work",
+    limits: "A minds run started from GM → Minds, from start to end.",
+    fires: "The run stops; the minds it finished are kept.",
+    defaultMs: 10 * MIN,
+    minMs: 1000,
+    none: "the run goes on until it ends or you cancel it"
+  },
+  jobCallMs: {
+    label: "Import and Refine calls",
+    group: "work",
+    limits: "Each model call of an Import, a Refine, a lore index or a map description in Build.",
+    fires: "That call counts as failed; the job goes on with what the other calls proposed.",
+    defaultMs: 10 * MIN,
+    minMs: 1000,
+    none: "a call takes as long as it needs (Cancel still stops the job)"
+  },
+  tokenCountMs: {
+    label: "Token counts",
+    group: "work",
+    limits: "How long Lumiverse's tokenizer may take to count a section before the engine's estimate stands in for it.",
+    fires: "The section is priced by the engine's estimate, which stays above the real count.",
+    defaultMs: 30000,
+    minMs: 0,
+    zero: "always the estimate",
+    none: "wait for every count"
+  },
+  laneStartupMs: {
+    label: "Background lane start-up",
+    group: "work",
+    limits: "How long Playtest and Check world's background process may take to start.",
+    fires: "Lumiverse stops the process and the job fails.",
+    defaultMs: MIN,
+    minMs: 1000,
+    none: "as long as Lumiverse waits",
+    host: "processStartup"
+  },
+  laneHeartbeatMs: {
+    label: "Background lane heartbeat",
+    group: "work",
+    limits: "The longest gap between the background process's heartbeats; it beats after each simulated day or turn.",
+    fires: "Lumiverse terminates the process and the job fails.",
+    defaultMs: MIN,
+    minMs: 1000,
+    none: "Lumiverse checks no heartbeat",
+    host: "processHeartbeat"
+  }
+};
+function formatMs(ms) {
+  if (!Number.isFinite(ms))
+    return "no limit";
+  if (ms < 1000)
+    return `${Math.round(ms)} ms`;
+  if (ms < MIN)
+    return `${Number((ms / 1000).toFixed(1))} s`;
+  const totalSeconds = Math.round(ms / 1000);
+  const h = Math.floor(totalSeconds / 3600);
+  const m = Math.floor(totalSeconds % 3600 / 60);
+  const s = totalSeconds % 60;
+  return [h > 0 ? `${h} h` : "", m > 0 ? `${m} min` : "", s > 0 && h === 0 ? `${s} s` : ""].filter((p) => p !== "").join(" ");
+}
+function timerMs(limit) {
+  const ms = limitOf(limit);
+  return ms >= TIMER_MAX_MS ? null : Math.max(0, ms);
+}
+
 // src/shared/settings.ts
 var REASONING_CHOICES = ["inherit", "off", "auto", "minimal", "low", "medium", "high", "max", "xhigh"];
 var HELPER_MAX_TOKENS = 8192;
@@ -10966,9 +11577,7 @@ function stepConfigOf(steps, purpose) {
   const signals = ["always"];
   return saved ? saved.signals.length > 0 ? saved : { ...saved, signals } : { enabled: true, signals };
 }
-var CONTEXT_HANDLER_MAX_MS = 120000;
-var PLAN_MARGIN_MS = 15000;
-var PRE_REPLY_MAX_MS = CONTEXT_HANDLER_MAX_MS - PLAN_MARGIN_MS;
+var CONTEXT_HANDLER_MAX_MS = HOST_LIMITS.contextHandler.maxMs;
 var SPEED_ACTIVITIES = ["sleep", "work_shift", "travel", "waiting"];
 var SPEED_DEFAULT = Object.freeze({ mode: "offer", thresholdMinutes: 30 });
 var SPEED_THRESHOLD_MINUTES = [1, 7 * 1440];
@@ -11054,7 +11663,6 @@ var STEP_PLAIN = {
 };
 var PHASES = ["pre", "post"];
 var PHASE_LABEL = { pre: "Before the reply", post: "After the reply" };
-var WALL_CLOCK_MAX = { pre: PRE_REPLY_MAX_MS, post: 120000 };
 var LOW_TOKENS = 4096;
 var EFFORT_LABEL = { inherit: "Connection's own", off: "Off", auto: "Auto", minimal: "Minimal", low: "Low", medium: "Medium", high: "High", max: "Max", xhigh: "Extra high" };
 function PresetCards(props) {
@@ -11141,7 +11749,16 @@ function ModelUseSection(props) {
             /* @__PURE__ */ u3("p", {
               class: "lre-small lre-muted",
               style: { margin: 0 },
-              children: "Each phase of a turn has a number of calls and a time limit; lore lookups have their own. A step runs only while its phase has calls left."
+              children: "Each phase of a turn has a number of calls; lore lookups have their own. A step runs only while its phase has calls left. How long each phase and its lookups may take is set in Timeouts, apart from the presets."
+            }, undefined, false, undefined, this),
+            /* @__PURE__ */ u3(List, {
+              children: /* @__PURE__ */ u3(ListRow, {
+                icon: "clock",
+                title: "Timeouts",
+                subtitle: "How long the engine run, reading the reply and their lookups may take",
+                chevron: true,
+                onClick: props.openTimeouts
+              }, undefined, false, undefined, this)
             }, undefined, false, undefined, this),
             PHASES.map((phase) => /* @__PURE__ */ u3("div", {
               class: "lre-set-group",
@@ -11160,41 +11777,12 @@ function ModelUseSection(props) {
                   onChange: (calls) => props.patch({ modelUse: { preset: "custom", budgets: { [phase]: { calls } } } })
                 }, undefined, false, undefined, this),
                 /* @__PURE__ */ u3(NumberStepper, {
-                  label: "Wall clock (ms)",
-                  value: modelUse.budgets[phase].ms,
-                  min: 500,
-                  max: WALL_CLOCK_MAX[phase],
-                  step: 500,
-                  integer: true,
-                  disabled: props.busy,
-                  onChange: (ms) => props.patch({ modelUse: { preset: "custom", budgets: { [phase]: { ms } } } })
-                }, undefined, false, undefined, this),
-                phase === "pre" ? /* @__PURE__ */ u3("p", {
-                  class: "lre-small lre-muted",
-                  style: { margin: 0 },
-                  children: [
-                    "At most ",
-                    PRE_REPLY_MAX_MS.toLocaleString("en-US"),
-                    " ms: Lumiverse waits 120 s for a turn's plan, and planning needs the rest."
-                  ]
-                }, undefined, true, undefined, this) : null,
-                /* @__PURE__ */ u3(NumberStepper, {
                   label: "Lore lookups",
                   value: modelUse.budgets[phase].lookup?.calls ?? 0,
                   min: 0,
                   integer: true,
                   disabled: props.busy,
-                  onChange: (calls) => props.patch({ modelUse: { preset: "custom", budgets: { [phase]: { lookup: { calls, ms: modelUse.budgets[phase].lookup?.ms ?? 0 } } } } })
-                }, undefined, false, undefined, this),
-                /* @__PURE__ */ u3(NumberStepper, {
-                  label: "Lookups may start within (ms)",
-                  value: modelUse.budgets[phase].lookup?.ms ?? 0,
-                  min: 0,
-                  max: 120000,
-                  step: 500,
-                  integer: true,
-                  disabled: props.busy,
-                  onChange: (ms) => props.patch({ modelUse: { preset: "custom", budgets: { [phase]: { lookup: { calls: modelUse.budgets[phase].lookup?.calls ?? 0, ms } } } } })
+                  onChange: (calls) => props.patch({ modelUse: { preset: "custom", budgets: { [phase]: { lookup: { calls } } } } })
                 }, undefined, false, undefined, this)
               ]
             }, phase, true, undefined, this)),
@@ -17784,7 +18372,11 @@ function MapOwned(props) {
         children: /* @__PURE__ */ u3(JsonView, {
           value: props.value
         }, undefined, false, undefined, this)
-      }, undefined, false, undefined, this)
+      }, undefined, false, undefined, this),
+      props.collection === "places" ? /* @__PURE__ */ u3(LorePinsSection, {
+        target: "places",
+        id: props.id
+      }, undefined, false, undefined, this) : null
     ]
   }, undefined, true, undefined, this);
 }
@@ -17870,6 +18462,10 @@ function SchemaEditor(props) {
           }, undefined, false, undefined, this)
         }, def.field, false, undefined, this);
       }) : null,
+      !isNew && (props.collection === "entities" || props.collection === "places") ? /* @__PURE__ */ u3(LorePinsSection, {
+        target: props.collection === "entities" ? "characters" : "places",
+        id
+      }, undefined, false, undefined, this) : null,
       props.children,
       /* @__PURE__ */ u3(SaveBar, {
         children: [
@@ -17940,6 +18536,24 @@ function PartView(props) {
     return /* @__PURE__ */ u3(RulesetEditor, {}, undefined, false, undefined, this);
   if (props.part === "minds")
     return /* @__PURE__ */ u3(MindsEditor, {}, undefined, false, undefined, this);
+  if (props.part === "lorePins") {
+    return /* @__PURE__ */ u3("div", {
+      class: "lre-build-page",
+      "data-lre-editor": "part:lorePins",
+      children: [
+        /* @__PURE__ */ u3(PageHeader, {
+          title: PART_INFO.lorePins.label,
+          subtitle: PART_INFO.lorePins.hint
+        }, undefined, false, undefined, this),
+        /* @__PURE__ */ u3(Section, {
+          title: "As stored",
+          children: /* @__PURE__ */ u3(JsonView, {
+            value: lorePinsJson(lorePinsOf(draft.doc))
+          }, undefined, false, undefined, this)
+        }, undefined, false, undefined, this)
+      ]
+    }, undefined, true, undefined, this);
+  }
   return /* @__PURE__ */ u3(SchemaPartView, {
     part: props.part
   }, undefined, false, undefined, this);
@@ -18661,152 +19275,6 @@ function TimeControlsEditor(props) {
       }, undefined, true, undefined, this)
     ]
   }, undefined, true, undefined, this);
-}
-
-// src/frontend/gm/ui.tsx
-function usePages() {
-  const [page, setPage] = d2(null);
-  const ref = T2(null);
-  const opener = T2(null);
-  const open = page !== null;
-  const shown = T2(open);
-  A(() => {
-    if (open === shown.current)
-      return;
-    shown.current = open;
-    if (open) {
-      ref.current?.querySelector(":scope > .lre-gm-page .lre-page-header button")?.focus();
-      return;
-    }
-    const back = opener.current;
-    opener.current = null;
-    if (back?.isConnected)
-      back.focus();
-  }, [open]);
-  return {
-    page,
-    open: (next) => {
-      if (page === null)
-        opener.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-      setPage(next);
-    },
-    back: () => setPage(null),
-    host: {
-      ref,
-      onKeyDown: (event) => {
-        if (event.key !== "Escape" || page === null || event.defaultPrevented)
-          return;
-        event.preventDefault();
-        event.stopPropagation();
-        setPage(null);
-      }
-    }
-  };
-}
-function GmPage(props) {
-  return /* @__PURE__ */ u3("div", {
-    class: "lre-gm-page",
-    "data-lre-gm-page": props.name,
-    children: [
-      /* @__PURE__ */ u3(PageHeader, {
-        title: props.title,
-        subtitle: props.subtitle,
-        onBack: props.onBack,
-        backLabel: props.backLabel,
-        actions: props.actions
-      }, undefined, false, undefined, this),
-      props.children
-    ]
-  }, undefined, true, undefined, this);
-}
-function ActionRows(props) {
-  return /* @__PURE__ */ u3("div", {
-    class: "lre-gm-rows",
-    role: "list",
-    "aria-label": props.label,
-    children: props.children
-  }, undefined, false, undefined, this);
-}
-function ActionRow(props) {
-  return /* @__PURE__ */ u3("div", {
-    class: "lre-gm-row",
-    role: "listitem",
-    children: [
-      /* @__PURE__ */ u3("div", {
-        class: "lre-gm-row-main",
-        children: [
-          /* @__PURE__ */ u3("span", {
-            class: "lre-gm-row-text",
-            children: [
-              /* @__PURE__ */ u3("span", {
-                class: "lre-gm-row-title",
-                children: props.title
-              }, undefined, false, undefined, this),
-              props.subtitle !== undefined ? /* @__PURE__ */ u3("span", {
-                class: "lre-gm-row-sub",
-                children: props.subtitle
-              }, undefined, false, undefined, this) : null,
-              props.id !== undefined ? /* @__PURE__ */ u3(IdText, {
-                id: props.id
-              }, undefined, false, undefined, this) : null
-            ]
-          }, undefined, true, undefined, this),
-          props.value !== undefined ? /* @__PURE__ */ u3("span", {
-            class: props.tone ? `lre-gm-row-value lre-${props.tone}` : "lre-gm-row-value",
-            children: props.value
-          }, undefined, false, undefined, this) : null,
-          props.actions !== undefined ? /* @__PURE__ */ u3("span", {
-            class: "lre-gm-row-actions",
-            children: props.actions
-          }, undefined, false, undefined, this) : null
-        ]
-      }, undefined, true, undefined, this),
-      props.children
-    ]
-  }, undefined, true, undefined, this);
-}
-function GmCard(props) {
-  return /* @__PURE__ */ u3("section", {
-    class: "lre-card lre-gm-card",
-    "data-lre-gm-card": props.name,
-    children: [
-      /* @__PURE__ */ u3("div", {
-        class: "lre-gm-card-head",
-        children: [
-          /* @__PURE__ */ u3("div", {
-            class: "lre-gm-card-titles",
-            children: [
-              /* @__PURE__ */ u3("h3", {
-                class: "lre-gm-card-title",
-                children: props.title
-              }, undefined, false, undefined, this),
-              props.subtitle !== undefined ? /* @__PURE__ */ u3("span", {
-                class: "lre-gm-card-sub",
-                children: props.subtitle
-              }, undefined, false, undefined, this) : null,
-              props.id !== undefined ? /* @__PURE__ */ u3(IdText, {
-                id: props.id
-              }, undefined, false, undefined, this) : null
-            ]
-          }, undefined, true, undefined, this),
-          props.badges !== undefined ? /* @__PURE__ */ u3("span", {
-            class: "lre-gm-badges",
-            children: props.badges
-          }, undefined, false, undefined, this) : null
-        ]
-      }, undefined, true, undefined, this),
-      props.children
-    ]
-  }, undefined, true, undefined, this);
-}
-function BuildLink() {
-  const app = useApp();
-  return /* @__PURE__ */ u3(Button, {
-    variant: "ghost",
-    icon: "hammer",
-    onClick: () => app.ui.update((ui) => ({ ...ui, mode: "build" })),
-    children: "Kinds and places are the world's: edit them in Build"
-  }, undefined, false, undefined, this);
 }
 
 // src/frontend/settings/upgrade.tsx
@@ -20419,12 +20887,175 @@ function SwipesPage(props) {
   }, undefined, true, undefined, this);
 }
 
+// src/frontend/settings/timeouts.tsx
+var GROUPS3 = [
+  { group: "turn", title: "Turns", lead: "How long the engine may work on a turn before the reply, and after it." },
+  { group: "app", title: "This tab", lead: "How long LumiRPEngine's tab waits for the engine." },
+  { group: "work", title: "Jobs and background work", lead: "Build's model jobs, minds runs you start, and the engine's work in the background." }
+];
+var STEP_S = { engineRunMs: 30, preLookupMs: 15, postReplyMs: 30, postLookupMs: 15, guardMs: 10, requestMs: 30, caveatsMs: 10, mindsRunMs: 60, jobCallMs: 60, tokenCountMs: 5, laneStartupMs: 10, laneHeartbeatMs: 10 };
+function limitText(limit) {
+  return limit === "none" ? "No limit" : formatMs(limit);
+}
+function hostNote(key, value) {
+  const def = TIMEOUTS[key];
+  if (!def.host)
+    return null;
+  const host = HOST_LIMITS[def.host];
+  const asked = value === "none" ? host.noneMs : undefined;
+  const cap = `Lumiverse caps this at ${formatMs(host.maxMs)}, its own limit.`;
+  if (asked === 0)
+    return `${cap} No limit asks it to check none.`;
+  return limitOf(value) > host.maxMs ? `${cap} What's set here runs as ${formatMs(host.maxMs)}.` : cap;
+}
+function TimeoutRow(props) {
+  const { id, value } = props;
+  const def = TIMEOUTS[id];
+  const fallback = def.defaultMs === "none" ? def.minMs : def.defaultMs;
+  const host = hostNote(id, value);
+  return /* @__PURE__ */ u3("div", {
+    class: "lre-set-ext lre-set-timeout",
+    "data-lre-timeout": id,
+    children: [
+      /* @__PURE__ */ u3("div", {
+        class: "lre-set-ext-head",
+        children: [
+          /* @__PURE__ */ u3("span", {
+            class: "lre-set-ext-title",
+            children: def.label
+          }, undefined, false, undefined, this),
+          value === def.defaultMs ? null : /* @__PURE__ */ u3(Button, {
+            size: "sm",
+            variant: "ghost",
+            icon: "undo",
+            label: `Reset ${def.label} to its default, ${limitText(def.defaultMs)}`,
+            disabled: props.busy,
+            onClick: () => props.set(null),
+            children: "Default"
+          }, undefined, false, undefined, this)
+        ]
+      }, undefined, true, undefined, this),
+      /* @__PURE__ */ u3("span", {
+        class: "lre-set-timeout-text",
+        children: def.limits
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3("span", {
+        class: "lre-small lre-muted",
+        children: [
+          "When it runs out: ",
+          def.fires
+        ]
+      }, undefined, true, undefined, this),
+      def.none !== null ? /* @__PURE__ */ u3(HostSwitch, {
+        label: `${def.label}: no limit`,
+        checked: value === "none",
+        disabled: props.busy,
+        onChange: (none) => props.set(none ? "none" : fallback)
+      }, undefined, false, undefined, this) : null,
+      value === "none" ? null : /* @__PURE__ */ u3(NumberStepper, {
+        label: `${def.label} (seconds)`,
+        value: value / 1000,
+        min: def.minMs / 1000,
+        step: STEP_S[id],
+        disabled: props.busy,
+        onChange: (seconds) => props.set(Math.round(seconds * 1000))
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3("span", {
+        class: "lre-small lre-muted",
+        children: [
+          "Default ",
+          limitText(def.defaultMs),
+          def.zero ? `; 0 means ${def.zero}` : "",
+          value === "none" && def.none ? `; no limit: ${def.none}` : "",
+          ".",
+          value !== "none" && value >= TIMER_MAX_MS ? " Longer than a timer can wait (about 24 days), so it runs as no limit." : ""
+        ]
+      }, undefined, true, undefined, this),
+      host ? /* @__PURE__ */ u3("span", {
+        class: "lre-small lre-warn",
+        children: host
+      }, undefined, false, undefined, this) : null
+    ]
+  }, undefined, true, undefined, this);
+}
+function TimeoutsSection(props) {
+  const set = (id) => (value) => props.patch({ timeouts: { [id]: value } });
+  return /* @__PURE__ */ u3("div", {
+    class: "lre-stack",
+    "data-lre-settings-page": "timeouts",
+    children: [
+      /* @__PURE__ */ u3("p", {
+        class: "lre-set-lead",
+        children: "Every wait the engine keeps is yours to set, in seconds, with no ceiling; No limit lifts one where that can't break anything. Picking a Model use preset never changes these."
+      }, undefined, false, undefined, this),
+      GROUPS3.map(({ group, title, lead }) => /* @__PURE__ */ u3(Section, {
+        title,
+        flush: true,
+        children: /* @__PURE__ */ u3("div", {
+          class: "lre-set-rows",
+          "data-lre-timeout-group": group,
+          children: [
+            /* @__PURE__ */ u3("p", {
+              class: "lre-set-timeout-lead",
+              children: lead
+            }, undefined, false, undefined, this),
+            TIMEOUT_KEYS.filter((id) => TIMEOUTS[id].group === group).map((id) => /* @__PURE__ */ u3(TimeoutRow, {
+              id,
+              value: props.timeouts[id],
+              busy: props.busy,
+              set: set(id)
+            }, id, false, undefined, this))
+          ]
+        }, undefined, true, undefined, this)
+      }, group, false, undefined, this)),
+      /* @__PURE__ */ u3(Section, {
+        title: "Lumiverse's own limits",
+        flush: true,
+        children: /* @__PURE__ */ u3("div", {
+          class: "lre-set-rows",
+          "data-lre-host-limits": true,
+          children: [
+            /* @__PURE__ */ u3("p", {
+              class: "lre-set-timeout-lead",
+              children: "Lumiverse limits some waits itself. No setting here changes these; the settings above that run inside one say so."
+            }, undefined, false, undefined, this),
+            Object.entries(HOST_LIMITS).map(([id, host]) => /* @__PURE__ */ u3("div", {
+              class: "lre-set-ext lre-set-timeout",
+              "data-lre-host-limit": id,
+              children: [
+                /* @__PURE__ */ u3("div", {
+                  class: "lre-set-ext-head",
+                  children: [
+                    /* @__PURE__ */ u3("span", {
+                      class: "lre-set-ext-title",
+                      children: host.what
+                    }, undefined, false, undefined, this),
+                    /* @__PURE__ */ u3("span", {
+                      class: "lre-set-timeout-cap",
+                      children: `minMs` in host ? `${formatMs(host.minMs)} to ${formatMs(host.maxMs)}` : formatMs(host.maxMs)
+                    }, undefined, false, undefined, this)
+                  ]
+                }, undefined, true, undefined, this),
+                /* @__PURE__ */ u3("span", {
+                  class: "lre-small lre-muted",
+                  children: host.effect
+                }, undefined, false, undefined, this)
+              ]
+            }, id, true, undefined, this))
+          ]
+        }, undefined, true, undefined, this)
+      }, undefined, false, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+}
+
 // src/frontend/settings/settings.tsx
 var PAGE2 = {
   helper: { title: "Helper model", subtitle: "What the engine's model calls run on", icon: "sliders" },
   model: { title: "Model use", subtitle: "How much the engine asks a model", icon: "bolt" },
   steps: { title: "Steps and connections", subtitle: "Which model runs each step", icon: "branch" },
   minds: { title: "Minds", subtitle: "How characters think and remember", icon: "sparkle" },
+  timeouts: { title: "Timeouts", subtitle: "How long each wait may run", icon: "hourglass" },
   realism: { title: "Realism", subtitle: "For new chats", icon: "layers" },
   checks: { title: "Checks", subtitle: "For new chats", icon: "dice" },
   time: { title: "Time", subtitle: "For new chats", icon: "clock" },
@@ -20435,8 +21066,8 @@ var PAGE2 = {
   caveats: { title: "Caveats", subtitle: "What to know", icon: "info" },
   diagnostics: { title: "Diagnostics", subtitle: "What the engine did each turn, and what failed", icon: "list" }
 };
-var GROUPS3 = [
-  { title: "Getting started", pages: ["helper", "model", "steps", "minds"] },
+var GROUPS4 = [
+  { title: "Getting started", pages: ["helper", "model", "steps", "minds", "timeouts"] },
   { title: "Defaults for new chats", pages: ["realism", "checks", "time"] },
   { title: "Replies", pages: ["extraction", "swipes"] },
   { title: "Your preset", pages: ["preset"] },
@@ -20458,6 +21089,8 @@ function summaryOf(page, data, caveats, showIds, connections) {
       return { subtitle: `${humanize(settings.modelUse.preset)} preset` };
     case "minds":
       return { subtitle: settings.minds.enabled ? `On · ${settings.minds.liveLimit === "none" ? "no Live limit" : `up to ${settings.minds.liveLimit} Live a turn`}` : "Off" };
+    case "timeouts":
+      return { subtitle: `Engine run ${limitText(settings.timeouts.engineRunMs)} · reading the reply ${limitText(settings.timeouts.postReplyMs)}` };
     case "steps": {
       const purposes = Object.keys(STEP_LABEL);
       const on = purposes.filter((purpose) => stepConfigOf(settings.modelUse.steps, purpose).enabled).length;
@@ -20503,7 +21136,7 @@ function Home(props) {
         title: "Settings",
         subtitle: "Yours, for every world chat"
       }, undefined, false, undefined, this),
-      GROUPS3.map((group) => /* @__PURE__ */ u3(Section, {
+      GROUPS4.map((group) => /* @__PURE__ */ u3(Section, {
         title: group.title,
         flush: true,
         children: /* @__PURE__ */ u3(List, {
@@ -20664,6 +21297,7 @@ function Settings() {
     modelUse: settings.modelUse,
     meter: view?.meter ?? null,
     patch,
+    openTimeouts: () => go("timeouts"),
     busy
   }, undefined, false, undefined, this) : page === "steps" ? /* @__PURE__ */ u3(StepsSection, {
     modelUse: settings.modelUse,
@@ -20673,6 +21307,10 @@ function Settings() {
     busy
   }, undefined, false, undefined, this) : page === "minds" ? /* @__PURE__ */ u3(MindsSection, {
     minds: settings.minds,
+    patch,
+    busy
+  }, undefined, false, undefined, this) : page === "timeouts" ? /* @__PURE__ */ u3(TimeoutsSection, {
+    timeouts: settings.timeouts,
     patch,
     busy
   }, undefined, false, undefined, this) : page === "realism" ? /* @__PURE__ */ u3(RealismPage, {
@@ -24229,6 +24867,7 @@ var DEFAULT_LIMITS = Object.freeze({
   maxNodes: 2048,
   maxSteps: 1e5
 });
+var PARSED = new Map;
 var MATH = {
   min: (a) => Math.min(...a),
   max: (a) => Math.max(...a),
@@ -24355,6 +24994,8 @@ function classOf(value) {
 
 // src/engine/visibility.ts
 var HIDDEN_PLACE_NAME = "Somewhere";
+var SPELT = new Map;
+var PATTERNS = new Map;
 
 // src/engine/life.ts
 var PACK2 = "engine";
@@ -33913,6 +34554,213 @@ var gear = {
 };
 var ui_default5 = gear;
 
+// src/packs/minds/ui/run.tsx
+var STATUS2 = {
+  waiting: { text: "Waiting", tone: "neutral" },
+  thinking: { text: "Thinking", tone: "accent" },
+  recorded: { text: "Recorded", tone: "pos" },
+  failed: { text: "Failed", tone: "neg" },
+  cancelled: { text: "Cancelled", tone: "warn" }
+};
+function useMindsRun(chatId, send, reload) {
+  const app = useApp();
+  const [run, setRun] = d2(null);
+  const [error, setError] = d2(null);
+  const [undone, setUndone] = d2(false);
+  A(() => {
+    let live = true;
+    send({ type: "lre.minds", op: "status", chatId }).then((m) => {
+      if (live && m.type === "lre.result" && m.request === "lre.minds")
+        setRun(m.body.run);
+    });
+    const off = app.client.onMindsRun((u) => {
+      if (u.chatId !== chatId)
+        return;
+      setRun(u.run);
+      if (u.run.status !== "running")
+        reload();
+    });
+    return () => {
+      live = false;
+      off();
+    };
+  }, [chatId]);
+  const act = async (body) => {
+    setError(null);
+    const m = await send(body);
+    if (m.type === "lre.error") {
+      setError(m.message);
+      return false;
+    }
+    if (m.type === "lre.result" && m.request === "lre.minds")
+      setRun(m.body.run);
+    return true;
+  };
+  return {
+    run,
+    error,
+    undone,
+    start: (who) => {
+      setUndone(false);
+      return act({ type: "lre.minds", op: "run", chatId, ...who ? { who } : {} });
+    },
+    cancel: () => run ? act({ type: "lre.minds", op: "cancel", chatId, runId: run.runId }) : Promise.resolve(false),
+    undo: async () => {
+      if (!run?.undo)
+        return;
+      const m = await send({ type: "lre.chip", chatId, chip: run.undo, choice: "undo" });
+      if (m.type === "lre.error")
+        setError(m.message);
+      else {
+        setUndone(true);
+        await reload();
+      }
+    }
+  };
+}
+function RunCard(props) {
+  const { run, error } = props.minds;
+  if (!run && !error)
+    return null;
+  const finished = run ? run.entries.filter((e) => e.status !== "waiting" && e.status !== "thinking").length : 0;
+  return /* @__PURE__ */ u3("div", {
+    "data-lre-minds-run": run?.status ?? "error",
+    children: /* @__PURE__ */ u3(Section, {
+      title: run?.status === "running" ? "Running minds" : "Last minds run",
+      aside: run ? /* @__PURE__ */ u3(Badge, {
+        tone: run.status === "done" ? "pos" : run.status === "running" ? "accent" : "warn",
+        children: run.status === "running" ? `${finished} of ${run.entries.length}` : run.status === "done" ? "Recorded" : run.status === "cancelled" ? "Cancelled" : "Failed"
+      }, undefined, false, undefined, this) : undefined,
+      flush: true,
+      children: [
+        error ? /* @__PURE__ */ u3(Banner, {
+          tone: "neg",
+          title: "The run didn't start",
+          children: error
+        }, undefined, false, undefined, this) : null,
+        run ? /* @__PURE__ */ u3(M, {
+          children: [
+            run.status === "running" ? /* @__PURE__ */ u3("div", {
+              class: "lre-gm-minds-run-meter",
+              children: /* @__PURE__ */ u3(Meter, {
+                label: `${finished} of ${run.entries.length} minds done`,
+                value: finished,
+                max: Math.max(1, run.entries.length)
+              }, undefined, false, undefined, this)
+            }, undefined, false, undefined, this) : null,
+            run.message ? /* @__PURE__ */ u3("p", {
+              class: "lre-gm-minds-run-note",
+              children: run.message
+            }, undefined, false, undefined, this) : null,
+            /* @__PURE__ */ u3(List, {
+              children: run.entries.map((e) => /* @__PURE__ */ u3(ListRow, {
+                title: e.name,
+                subtitle: /* @__PURE__ */ u3("span", {
+                  class: "lre-gm-minds-run-sub",
+                  children: [
+                    /* @__PURE__ */ u3("span", {
+                      children: [FIDELITY_LABEL[e.level], e.ms !== undefined && e.status !== "waiting" ? `${(e.ms / 1000).toFixed(1)} s · ${e.tokens ?? 0} tok` : ""].filter((s) => s !== "").join(" · ")
+                    }, undefined, false, undefined, this),
+                    e.reason ? /* @__PURE__ */ u3("span", {
+                      class: "lre-gm-minds-run-why",
+                      children: e.reason
+                    }, undefined, false, undefined, this) : null,
+                    (e.pinned ?? []).length > 0 ? /* @__PURE__ */ u3("span", {
+                      class: "lre-gm-minds-run-pins",
+                      children: [
+                        "Pinned lore: ",
+                        (e.pinned ?? []).map((p) => `${p.title}${p.left ? " (left out)" : p.cut ? " (cut)" : ""}`).join(", ")
+                      ]
+                    }, undefined, true, undefined, this) : null
+                  ]
+                }, undefined, true, undefined, this),
+                badge: /* @__PURE__ */ u3(Badge, {
+                  tone: STATUS2[e.status].tone,
+                  children: STATUS2[e.status].text
+                }, undefined, false, undefined, this)
+              }, e.entity, false, undefined, this))
+            }, undefined, false, undefined, this),
+            /* @__PURE__ */ u3("div", {
+              class: "lre-gm-minds-run-actions",
+              children: run.status === "running" ? /* @__PURE__ */ u3(Button, {
+                variant: "danger",
+                icon: "close",
+                onClick: () => void props.minds.cancel(),
+                children: "Cancel the run"
+              }, undefined, false, undefined, this) : run.undo && !props.minds.undone ? /* @__PURE__ */ u3(Button, {
+                icon: "undo",
+                disabled: props.busy,
+                onClick: () => void props.minds.undo(),
+                children: "Undo this run"
+              }, undefined, false, undefined, this) : props.minds.undone ? /* @__PURE__ */ u3("span", {
+                class: "lre-gm-minds-run-note",
+                children: "Undone: their minds are as they were."
+              }, undefined, false, undefined, this) : null
+            }, undefined, false, undefined, this)
+          ]
+        }, undefined, true, undefined, this) : null
+      ]
+    }, undefined, true, undefined, this)
+  }, undefined, false, undefined, this);
+}
+function placesOf2(gm, place) {
+  const out = [];
+  for (let at = place;at !== null && !out.includes(at) && out.length < 16; at = gm.places.find((p) => p.id === at)?.parent ?? null)
+    out.push(at);
+  return out;
+}
+function PinnedLore(props) {
+  const app = useApp();
+  const worldId = useView()?.worldId ?? null;
+  const [pins, setPins] = d2(null);
+  A(() => {
+    props.send({ type: "lre.lore", op: "pins", chatId: props.chatId }).then((m) => {
+      if (m.type === "lre.result" && m.request === "lre.lore")
+        setPins(m.body.pins ?? { characters: {}, places: {} });
+    });
+  }, [props.chatId]);
+  const own = pins?.characters[props.who] ?? [];
+  const place = props.gm.entities.find((e) => e.id === props.who)?.place ?? null;
+  const there = placesOf2(props.gm, place).flatMap((id) => (pins?.places[id] ?? []).map((p) => ({ ...p, at: props.gm.places.find((x) => x.id === id)?.name ?? id })));
+  const row = (p) => /* @__PURE__ */ u3(ListRow, {
+    icon: "pin",
+    title: p.title,
+    subtitle: [p.at ? `Pinned to ${p.at}` : "Pinned to them", p.source].join(" · "),
+    badge: p.status === "missing" ? /* @__PURE__ */ u3(Badge, {
+      tone: "neg",
+      children: "Missing"
+    }, undefined, false, undefined, this) : p.status === "pending" ? /* @__PURE__ */ u3(Badge, {
+      tone: "warn",
+      children: "Not reviewed"
+    }, undefined, false, undefined, this) : p.status === "off" ? /* @__PURE__ */ u3(Badge, {
+      children: "Off in its book"
+    }, undefined, false, undefined, this) : p.secret ? /* @__PURE__ */ u3(Badge, {
+      tone: "gm",
+      children: "Secret"
+    }, undefined, false, undefined, this) : undefined
+  }, `${p.at ?? ""}:${p.key}`, false, undefined, this);
+  return /* @__PURE__ */ u3(Section, {
+    title: "Pinned lore",
+    aside: worldId ? /* @__PURE__ */ u3(Button, {
+      size: "sm",
+      variant: "ghost",
+      icon: "hammer",
+      onClick: () => app.ui.update((ui) => ({ ...ui, mode: "build", build: { view: "item", worldId, collection: "entities", id: props.who } })),
+      children: "Edit in Build"
+    }, undefined, false, undefined, this) : undefined,
+    flush: true,
+    children: pins === null ? /* @__PURE__ */ u3("p", {
+      class: "lre-gm-minds-none",
+      children: "Reading the pins…"
+    }, undefined, false, undefined, this) : own.length + there.length === 0 ? /* @__PURE__ */ u3("p", {
+      class: "lre-gm-minds-none",
+      children: "Nothing is pinned to them or to where they are. Pins are the world's: Build → Entities or Places, Pinned lore. Commit, then Upgrade this chat, to use them here."
+    }, undefined, false, undefined, this) : /* @__PURE__ */ u3(List, {
+      children: [...own.map((p) => row(p)), ...there.map((p) => row(p))]
+    }, undefined, false, undefined, this)
+  }, undefined, false, undefined, this);
+}
+
 // src/packs/minds/ui/gm.tsx
 var LEVEL_TONE = { live: "accent", near: "neutral", far: "neutral", background: "neutral" };
 var PLAN_TONE = { open: "neutral", done: "pos", dropped: "neutral" };
@@ -33960,6 +34808,10 @@ function GmMindsSection(props) {
   const pages = usePages();
   const [query, setQuery] = d2("");
   const [level, setLevel] = d2("");
+  const [picking, setPicking] = d2(false);
+  const [picked, setPicked] = d2([]);
+  const minds = useMindsRun(props.chatId, props.send, props.reload);
+  const running = minds.run?.status === "running";
   const pov = props.gm.entities.find((e) => e.pov);
   const ctx = {
     view,
@@ -33967,8 +34819,13 @@ function GmMindsSection(props) {
     people: [...pov ? [{ id: pov.id, name: pov.name }] : [], ...view.characters.map((c) => ({ id: c.entity, name: c.name }))],
     places: props.gm.places.map((p) => ({ id: p.id, name: p.name })),
     currency: props.currency,
-    edit: props.edit
+    edit: props.edit,
+    minds,
+    chatId: props.chatId,
+    send: props.send,
+    gm: props.gm
   };
+  const liveNear = view.characters.filter((c) => c.fidelity.level === "live" || c.fidelity.level === "near").length;
   const page = pages.page;
   const selected = page === null ? undefined : view.characters.find((c) => c.entity === page);
   A(() => {
@@ -34013,6 +34870,34 @@ function GmMindsSection(props) {
                 ]
               }, undefined, true, undefined, this)
             }, undefined, false, undefined, this)
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3(RunCard, {
+            minds,
+            busy: props.busy
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3(Section, {
+            title: "Run minds now",
+            flush: true,
+            children: /* @__PURE__ */ u3(List, {
+              children: [
+                /* @__PURE__ */ u3(ListRow, {
+                  icon: "sparkle",
+                  title: `Run everyone Live and Near (${liveNear})`,
+                  subtitle: "From the chat so far and their lore, as a turn would; recorded as one edit you can undo",
+                  chevron: true,
+                  disabled: props.busy || running || liveNear === 0,
+                  onClick: () => void minds.start()
+                }, undefined, false, undefined, this),
+                /* @__PURE__ */ u3(ListRow, {
+                  icon: "users",
+                  title: picking ? "Stop choosing" : "Choose who to run",
+                  subtitle: picking ? "Tap people below to pick them" : "Pick one or more from the list below",
+                  chevron: true,
+                  disabled: props.busy || running,
+                  onClick: () => (setPicking(!picking), setPicked([]))
+                }, undefined, false, undefined, this)
+              ]
+            }, undefined, true, undefined, this)
           }, undefined, false, undefined, this),
           /* @__PURE__ */ u3("div", {
             class: "lre-gm-tools",
@@ -34067,6 +34952,13 @@ function GmMindsSection(props) {
                 children: list.map((c) => /* @__PURE__ */ u3(ListRow, {
                   id: c.entity,
                   title: c.name,
+                  leading: picking ? /* @__PURE__ */ u3("input", {
+                    type: "checkbox",
+                    class: "lre-gm-minds-pick",
+                    "aria-label": `Pick ${c.name}`,
+                    checked: picked.includes(c.entity),
+                    tabIndex: -1
+                  }, undefined, false, undefined, this) : undefined,
                   subtitle: /* @__PURE__ */ u3("span", {
                     class: "lre-gm-minds-sub",
                     children: [
@@ -34099,12 +34991,29 @@ function GmMindsSection(props) {
                       }, undefined, false, undefined, this)
                     ]
                   }, undefined, true, undefined, this),
-                  chevron: true,
-                  onClick: () => pages.open(c.entity)
+                  chevron: !picking,
+                  onClick: () => picking ? setPicked(picked.includes(c.entity) ? picked.filter((id) => id !== c.entity) : [...picked, c.entity]) : pages.open(c.entity)
                 }, c.entity, false, undefined, this))
               }, undefined, false, undefined, this)
             }, undefined, false, undefined, this)
-          }, undefined, false, undefined, this)
+          }, undefined, false, undefined, this),
+          picking ? /* @__PURE__ */ u3("div", {
+            class: "lre-gm-minds-pickbar",
+            role: "group",
+            "aria-label": "Run the chosen minds",
+            children: [
+              /* @__PURE__ */ u3("span", {
+                children: picked.length === 1 ? "1 chosen" : `${picked.length} chosen`
+              }, undefined, false, undefined, this),
+              /* @__PURE__ */ u3(Button, {
+                variant: "primary",
+                icon: "sparkle",
+                disabled: picked.length === 0 || running || props.busy,
+                onClick: () => void minds.start(picked).then((ok) => ok && (setPicking(false), setPicked([]))),
+                children: "Run their minds"
+              }, undefined, false, undefined, this)
+            ]
+          }, undefined, true, undefined, this) : null
         ]
       }, undefined, true, undefined, this),
       selected ? /* @__PURE__ */ u3(CharacterPages, {
@@ -34164,6 +35073,24 @@ function CharacterPages(props) {
             class: "lre-gm-minds",
             "data-lre-gm-minds": c.entity,
             children: [
+              /* @__PURE__ */ u3(Section, {
+                title: "Run their mind now",
+                flush: true,
+                children: /* @__PURE__ */ u3(List, {
+                  children: /* @__PURE__ */ u3(ListRow, {
+                    icon: "sparkle",
+                    title: "Run their mind now",
+                    subtitle: "From the chat so far and their lore, as a turn would; recorded as one edit you can undo",
+                    chevron: true,
+                    disabled: ctx.busy || ctx.minds.run?.status === "running",
+                    onClick: () => void ctx.minds.start([c.entity])
+                  }, undefined, false, undefined, this)
+                }, undefined, false, undefined, this)
+              }, undefined, false, undefined, this),
+              ctx.minds.run?.entries.some((e) => e.entity === c.entity) || ctx.minds.error ? /* @__PURE__ */ u3(RunCard, {
+                minds: ctx.minds,
+                busy: ctx.busy
+              }, undefined, false, undefined, this) : null,
               /* @__PURE__ */ u3(Ladder, {
                 c,
                 busy: ctx.busy,
@@ -34172,6 +35099,12 @@ function CharacterPages(props) {
               /* @__PURE__ */ u3(LatestMind, {
                 ctx,
                 c
+              }, undefined, false, undefined, this),
+              /* @__PURE__ */ u3(PinnedLore, {
+                gm: ctx.gm,
+                chatId: ctx.chatId,
+                who: c.entity,
+                send: ctx.send
               }, undefined, false, undefined, this),
               /* @__PURE__ */ u3(Plans, {
                 ctx,
@@ -36305,7 +37238,7 @@ var TOOLS2 = [
   { value: "block", label: "Blocked" },
   { value: "zone", label: "Zone" }
 ];
-var HINT = {
+var HINT2 = {
   pan: "Drag to pan; pinch, scroll or the buttons to zoom.",
   paint: "Drag to paint terrain; two fingers pan and zoom.",
   block: "Drag to block cells, or start on a blocked cell to clear them; two fingers pan and zoom.",
@@ -36539,7 +37472,7 @@ function GridEditor(props) {
             }, undefined, false, undefined, this),
             /* @__PURE__ */ u3("span", {
               class: "lre-small lre-muted",
-              children: HINT[tool]
+              children: HINT2[tool]
             }, undefined, false, undefined, this)
           ]
         }, undefined, true, undefined, this)
@@ -41044,7 +41977,7 @@ function decodeLore(value) {
     policy: oneOf(t.policy, LORE_POLICIES, "prefetch"),
     transport: oneOf(t.transport, ["none", "tools", "need"], "none"),
     queries: list(t.queries, (q) => ({ kind: oneOf(q.kind, ["prefetch", "search", "get", "list"], "search"), text: str(q.text), matched: optNum(q.matched) })),
-    entries: list(t.entries, (e) => ({ title: str(e.title), tokens: num(e.tokens), cut: e.cut === true })),
+    entries: list(t.entries, (e) => ({ title: str(e.title), tokens: num(e.tokens), cut: e.cut === true, ...e.pinned === true ? { pinned: true } : {} })),
     ...t.private === true ? { private: true } : {},
     lookups: num(t.lookups),
     notes: strings(t.notes)
@@ -41065,7 +41998,9 @@ function decodeMinds(value) {
     outcome: oneOf(t.outcome, ["recorded", "failed"], "failed"),
     ms: num(t.ms),
     tokens: num(t.tokens),
-    prompt: oneOf(t.prompt, ["world", "override", "default"], "default")
+    prompt: oneOf(t.prompt, ["world", "override", "default"], "default"),
+    pinned: list(t.pinned, (p) => ({ title: str(p.title), tokens: num(p.tokens), cut: p.cut === true })),
+    notes: strings(t.notes)
   }));
 }
 var DELIVERY = ["verified", "unverified", "unchecked"];
@@ -41269,7 +42204,7 @@ function ContextPanel(props) {
                     }, undefined, false, undefined, this),
                     t.entries.map((e, j) => /* @__PURE__ */ u3(ActionRow, {
                       title: e.title === "" ? "—" : e.title,
-                      subtitle: e.cut ? "Cut to fit" : undefined,
+                      subtitle: [e.pinned ? "Pinned here" : "", e.cut ? "Cut to fit" : ""].filter((s) => s !== "").join(" · ") || undefined,
                       value: `${e.tokens} tok`
                     }, `e${j}`, false, undefined, this))
                   ]
@@ -41298,7 +42233,29 @@ function ContextPanel(props) {
                 actions: /* @__PURE__ */ u3(Badge, {
                   tone: MIND_OUTCOME[m.outcome].tone,
                   children: MIND_OUTCOME[m.outcome].text
-                }, undefined, false, undefined, this)
+                }, undefined, false, undefined, this),
+                children: (m.pinned ?? []).length > 0 || (m.notes ?? []).length > 0 ? /* @__PURE__ */ u3("div", {
+                  class: "lre-gm-minds-pinned",
+                  "data-lre-mind-pins": true,
+                  children: [
+                    (m.pinned ?? []).length > 0 ? /* @__PURE__ */ u3("span", {
+                      children: [
+                        "Pinned lore: ",
+                        (m.pinned ?? []).map((p) => `${p.title} (${p.tokens} tok${p.cut ? ", cut" : ""})`).join(", ")
+                      ]
+                    }, undefined, true, undefined, this) : null,
+                    (m.notes ?? []).map((n) => /* @__PURE__ */ u3("p", {
+                      class: "lre-gm-warnline",
+                      children: [
+                        /* @__PURE__ */ u3(Icon, {
+                          name: "alert",
+                          size: 16
+                        }, undefined, false, undefined, this),
+                        n
+                      ]
+                    }, n, true, undefined, this))
+                  ]
+                }, undefined, true, undefined, this) : null
               }, `${m.phase}:${m.purpose}:${i}`, false, undefined, this))
             }, undefined, false, undefined, this)
           }, undefined, false, undefined, this) : null
@@ -42543,7 +43500,8 @@ var REQUEST_TYPES = {
   "lre.lore": true,
   "lre.studio": true,
   "lre.preset": true,
-  "lre.diag": true
+  "lre.diag": true,
+  "lre.minds": true
 };
 function isRequestType(value) {
   return typeof value === "string" && Object.prototype.hasOwnProperty.call(REQUEST_TYPES, value);
@@ -42562,9 +43520,10 @@ class ProtocolClient {
   listeners = new Set;
   errorListeners = new Set;
   jobListeners = new Set;
+  mindsListeners = new Set;
   draftListeners = new Set;
   unsubscribe;
-  timeoutMs;
+  requestMs;
   newReqId;
   schedule;
   timers;
@@ -42574,7 +43533,7 @@ class ProtocolClient {
   counter = 0;
   constructor(transport, options = {}) {
     this.transport = transport;
-    this.timeoutMs = options.timeoutMs ?? 30000;
+    this.requestMs = options.requestMs ?? TIMEOUTS.requestMs.defaultMs;
     this.newReqId = options.newReqId ?? (() => `r${Date.now().toString(36)}-${(this.counter += 1).toString(36)}`);
     this.schedule = options.schedule ?? ((fn) => queueMicrotask(fn));
     this.timers = options.timers ?? { set: (fn, ms) => setTimeout(fn, ms), clear: (handle) => clearTimeout(handle) };
@@ -42595,6 +43554,10 @@ class ProtocolClient {
   onJob(listener) {
     this.jobListeners.add(listener);
     return () => this.jobListeners.delete(listener);
+  }
+  onMindsRun(listener) {
+    this.mindsListeners.add(listener);
+    return () => this.mindsListeners.delete(listener);
   }
   onDraftChanged(listener) {
     this.draftListeners.add(listener);
@@ -42643,11 +43606,12 @@ class ProtocolClient {
       resolve(errorMessage(reqId, "unavailable", "The extension was unloaded"));
       return promise;
     }
-    const timer = this.timers.set(() => {
+    const ms = timerMs(this.requestMs);
+    const timer = ms === null ? null : this.timers.set(() => {
       if (!this.pending.delete(reqId))
         return;
-      resolve(errorMessage(reqId, "unavailable", `No reply from the engine within ${Math.round(this.timeoutMs / 1000)} s`));
-    }, this.timeoutMs);
+      resolve(errorMessage(reqId, "unavailable", `No reply from the engine within ${formatMs(ms)} (Settings → Timeouts → ${TIMEOUTS.requestMs.label}). It may still finish what was asked.`));
+    }, ms);
     this.pending.set(reqId, { type: body.type, resolve, timer });
     const message = { ...body, lre: PROTOCOL_VERSION, reqId };
     try {
@@ -42686,6 +43650,13 @@ class ProtocolClient {
         if (payload.chatId === this.state.chatId && (payload.activity === null || isActivity(payload.activity)))
           this.update({ ...this.state, activity: payload.activity });
         return;
+      case "lre.minds.update":
+        if (typeof payload.chatId === "string" && isRecord(payload.run) && typeof payload.run.runId === "string") {
+          const update = payload;
+          for (const listener of this.mindsListeners)
+            listener(update);
+        }
+        return;
       case "lre.draft.changed":
         if (typeof payload.worldId === "string" && typeof payload.version === "number" && typeof payload.stored === "boolean" && (typeof payload.base === "string" || payload.base === null)) {
           const push = { lre: PROTOCOL_VERSION, type: "lre.draft.changed", worldId: payload.worldId, version: payload.version, stored: payload.stored, base: payload.base };
@@ -42713,6 +43684,11 @@ class ProtocolClient {
       entry.resolve(errorMessage(payload.reqId, "internal", `Result for ${String(payload.request)} answered a ${entry.type} request`));
       return;
     }
+    const body = payload.body;
+    const settings = payload.request === "lre.settings.get" || payload.request === "lre.settings.set" ? body.settings : undefined;
+    const limit = payload.request === "lre.hello" ? body.requestMs : isRecord(settings) && isRecord(settings.timeouts) ? settings.timeouts.requestMs : undefined;
+    if (limit === "none" || typeof limit === "number" && Number.isFinite(limit) && limit >= 0)
+      this.requestMs = limit;
     entry.resolve(payload);
   }
   receiveError(payload) {
@@ -43644,6 +44620,21 @@ textarea.lre-input.lre-minds-prompt-input{min-height:200px;font-family:var(--lre
 .lre-gm-minds-due{display:flex;flex-wrap:wrap;align-items:center;gap:var(--lre-s2);min-width:0}
 .lre-gm-minds-due>.lre-input{flex:1 1 10em;width:auto}
 .lre-gm-minds-due>.lre-btn{flex:0 0 auto}
+/* GM → Minds: a run on demand (packs/minds/ui/run.tsx), choosing who to run, and the pinned lore */
+.lre-gm-minds-run-meter{padding:var(--lre-s3) var(--lre-s3) var(--lre-s1)}
+.lre-gm-minds-run-note{margin:0;padding:var(--lre-s2) var(--lre-s3);font-size:var(--lre-fs-sm);color:var(--lre-muted);overflow-wrap:anywhere}
+.lre-gm-minds-run-sub{display:flex;flex-direction:column;gap:2px;min-width:0}
+.lre-gm-minds-run-why{color:var(--lre-neg-text,var(--lre-fg));overflow-wrap:anywhere}
+.lre-gm-minds-run-pins{font-size:var(--lre-fs-sm);color:var(--lre-muted);overflow-wrap:anywhere}
+.lre-gm-minds-run-actions{display:flex;flex-wrap:wrap;align-items:center;gap:var(--lre-s2);padding:var(--lre-s2) var(--lre-s3) var(--lre-s3);min-width:0}
+.lre-gm-minds-run-actions:empty{display:none}
+.lre-gm-minds-pick{flex:none;width:22px;height:22px;margin:0;accent-color:var(--lre-accent);pointer-events:none}
+.lre-gm-minds-pickbar{position:sticky;bottom:0;z-index:1;display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:var(--lre-s2);min-height:var(--lre-tap-lg);padding:var(--lre-s2) var(--lre-s3);border:1px solid var(--lre-hairline);border-radius:var(--lre-r-xl);background:var(--lre-surface);font-weight:600}
+.lre-gm-minds-pinned{display:flex;flex-direction:column;gap:var(--lre-s1);min-width:0;font-size:var(--lre-fs-sm);color:var(--lre-muted);overflow-wrap:anywhere}
+/* Build → an entity's or place's page, Pinned lore (build/lore-pins.tsx) */
+.lre-form-pins-add{display:flex;flex-direction:column;gap:var(--lre-s1);min-width:0}
+.lre-form-pins-add>label{font-size:var(--lre-fs-sm);font-weight:600;color:var(--lre-muted)}
+.lre-form-pins-actions{display:flex;flex-wrap:wrap;gap:var(--lre-s2);min-width:0}
 `;
 
 // src/frontend/styles/packs-me.ts
@@ -43933,6 +44924,11 @@ var SETTINGS_CSS = `
 .lre-set-ext+.lre-set-ext{border-top:1px solid var(--lre-hairline)}
 .lre-set-ext-head{display:flex;align-items:center;justify-content:space-between;gap:var(--lre-s2);min-height:32px;min-width:0}
 .lre-set-ext-title{font-size:var(--lre-fs-md);font-weight:500;min-width:0;overflow-wrap:anywhere}
+.lre-set-timeout-lead{margin:0;padding:var(--lre-s3) var(--lre-s3) 0;font-size:var(--lre-fs-sm);color:var(--lre-muted);overflow-wrap:anywhere}
+.lre-set-timeout{gap:var(--lre-s1)}
+.lre-set-timeout>.lre-row{border-bottom:0;padding:var(--lre-s1) 0}
+.lre-set-timeout-text{overflow-wrap:anywhere}
+.lre-set-timeout-cap{flex:none;font-size:var(--lre-fs-sm);font-weight:600;font-variant-numeric:tabular-nums}
 `;
 
 // src/frontend/styles/shell.ts
