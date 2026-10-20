@@ -359,7 +359,13 @@ function linkView(ctx: ReadContext, viewer: Viewer, link: string | undefined): {
   return { id: opaqueId(link), name: at === "" ? title : `${title} at ${at}` };
 }
 
-function flowView(hooks: FinanceHooks, ctx: ReadContext, viewer: Viewer, party: EntityId, f: Flow): FlowView {
+/**
+ * A flow as `party` knows it. `runsFlows` is whether standing payments run for them (the `flows`
+ * feature), as the actions that change one require (`money_feature('flows', self)`): where they
+ * don't, no section offers a flow as theirs to change, though the household's still lists its
+ * shared costs.
+ */
+function flowView(hooks: FinanceHooks, ctx: ReadContext, viewer: Viewer, party: EntityId, runsFlows: boolean, f: Flow): FlowView {
   const run = flowRunOf(ctx.state, f.id);
   const next = run.ended || f.status !== "active" ? null : nextOf(ctx, f, 400 * DAY);
   let cents: number | null = null;
@@ -370,7 +376,7 @@ function flowView(hooks: FinanceHooks, ctx: ReadContext, viewer: Viewer, party: 
   const fromSide = own(ctx.state.entities, f.from);
   // The party changes it when they manage what pays it: the account (by their role on it, or on the business or trust that holds it), or the business or trust paying.
   const payerHolds = fromSide?.kind === "account" ? managesAccount(ctx, f.from, party) : f.from === party || managesParty(ctx.state, f.from, party);
-  const editable = f.source === "entity" && payerHolds;
+  const editable = runsFlows && f.source === "entity" && payerHolds;
   // The flow as stored goes out only when every side of it is someone the viewer can see.
   const sides = [f.from, f.to, f.fallback ?? "", f.link ?? "", ...(f.splits ?? []).map((s) => s.to), ...(f.shares ?? []).flatMap((s) => [s.party, s.from ?? ""])].filter((id) => id !== "");
   const seen = sides.every((id) => sideSeen(ctx, viewer, id));
@@ -445,11 +451,12 @@ export function buildFinanceView(hooks: FinanceHooks, ctx: ReadContext, party: E
   const pov = player ? ctx.world.pov : null;
   const viewer: Viewer = { pov, hidden: pov === null ? [] : hiddenNames(ctx, pov) };
   // Each flow goes out once for the whole view, as the viewing party knows it (`flowView`), so every section that names it, its row, its coming-up lines and alerts, the household's and a business's, sends the same id and lets them do the same with it.
+  const runsFlows = featureFor(ctx, party, "flows");
   const shownFlows = new Map<string, FlowView>();
   const viewOf = (f: Flow): FlowView => {
     const known = shownFlows.get(f.id);
     if (known) return known;
-    const made = flowView(hooks, ctx, viewer, party, f);
+    const made = flowView(hooks, ctx, viewer, party, runsFlows, f);
     shownFlows.set(f.id, made);
     return made;
   };
@@ -480,7 +487,7 @@ export function buildFinanceView(hooks: FinanceHooks, ctx: ReadContext, party: E
   const shownAccounts = level >= 3 ? mine : mine.filter((id) => classOf(ctx, id) === "cash" || id === firstTransactional);
   const accounts = shownAccounts.map((id) => accountView(ctx, viewer, party, id, level, detail));
   const cash = mine.filter((id) => classOf(ctx, id) === "cash" && rightsOf(ctx.state, id, party)?.spend).reduce((a, id) => a + shown(ctx, id), 0);
-  const flows = featureFor(ctx, party, "flows") ? allFlows(hooks, ctx).filter((f) => flowTouches(ctx, viewer, f, party)) : [];
+  const flows = runsFlows ? allFlows(hooks, ctx).filter((f) => flowTouches(ctx, viewer, f, party)) : [];
   const flowViews = flows.map(viewOf);
   const now = ctx.state.clock;
   const upcoming: UpcomingLine[] = [];
