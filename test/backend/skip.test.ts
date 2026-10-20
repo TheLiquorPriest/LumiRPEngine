@@ -305,4 +305,37 @@ describe("time skips", () => {
     expect(after.record?.events.some((e) => e.type === "minds.skip" || e.type === "timelapse")).toBe(false);
     expect(after.state.clock).toBe(before);
   });
+
+  test("the minds at a skip's end are the turn's own: a model's interrupt there is no stop and isn't recorded", async () => {
+    const { rig, chatId } = await portAlder();
+    // No beats: only the end's minds think, through the real runner, each answering with an interrupt.
+    rig.body(await rig.send({ type: "lre.settings.set", patch: { minds: { skip: { maxBeats: 0 } } } }));
+    rig.host.quietReply = (req) => {
+      const mind = /You are the private mind of (.+?) in the roleplay world/.exec(req.messages[0]?.content ?? "")?.[1];
+      return mind ? JSON.stringify({ monologue: `${mind} has had enough.`, depiction: "restless", intent: "Go and find Jordan.", reactions: [], plans: [], mood: null, interrupt: { reason: `${mind} comes looking for Jordan.` } }) : "{}";
+    };
+    await skipDays(rig, chatId, 1);
+    const { record } = await folded(rig, chatId);
+    const minds = ofType(record?.events, "minds.mind").flatMap((e) => ("data" in e ? [e.data] : []));
+    expect(minds.length).toBeGreaterThan(0);
+    expect(minds.map((m) => [m.moment, m.interrupt])).toEqual(minds.map(() => ["turn", null]));
+    expect(record?.events.find((e) => e.type === "timelapse")).toMatchObject({ stoppedBy: null });
+  });
+
+  test("of the minds interrupting at a beat, only the one that stops the skip is recorded as stepping in", async () => {
+    const { rig, chatId, day, at } = await portAlder();
+    const meet = at(day + 1, "19:00");
+    rig.body(await rig.send({ type: "lre.edit", chatId, ops: [{ op: "mind_pin", entity: MARCUS, level: "live" }, { op: "mind_memory", entity: MARCUS, part: "plan", id: null, value: { what: "Talk to Jordan and Danny", kind: "meet", when: { from: meet, to: meet + 60 }, with: ["pov", "danny_okafor"], priority: 4 } }] }));
+    const calls: { at: number; who: string[]; reason: string }[] = [];
+    rig.rt.beatMinds = fakeMinds(calls, (_who, when) => when === meet);
+    await skipDays(rig, chatId, 3);
+    const { record } = await folded(rig, chatId);
+    expect(calls.find((c) => c.at === meet)?.who).toEqual(expect.arrayContaining([MARCUS, "danny_okafor"]));
+    const summary = record?.events.find((e) => e.type === "timelapse");
+    expect(summary).toMatchObject({ stoppedBy: "mind", to: meet });
+    const stopper = summary?.type === "timelapse" ? summary.mind : undefined;
+    expect(stopper).toBeDefined();
+    const interrupting = ofType(record?.events, "minds.mind").flatMap((e) => ("data" in e && e.data.interrupt !== null ? [e.data.entity] : []));
+    expect(interrupting).toEqual([stopper ?? ""]);
+  });
 });
