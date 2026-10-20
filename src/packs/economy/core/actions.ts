@@ -10,14 +10,16 @@ import { ACCOUNT_STATUSES, AUTOPAY_MODES, CARD_STATES, CLASS_TRAITS, FINANCE_EVE
 import { hashParts } from "../../../shared/hash";
 import { formatMoney, type EntityDef } from "../../../shared/world";
 import { calendarOf, dateAt } from "../../../engine/calendar";
+import { EXTERNAL_ACCOUNT_PREFIX } from "../../../engine/events";
 import { GONE_FIELD } from "../../../engine/scope";
 import { labelOf, numOf, objOf, optionalService, own, strOf } from "../../../engine/pack-kit";
 import type { EffectContext, ReadContext, Rejection } from "../../../engine/registry";
 import { placeOfEntity } from "../../../engine/scope";
 import { decide, type Decision } from "./credit";
 import type { OpenAccount } from "./module";
+import { fallsBackOn } from "./flows";
 import { isOpened, reject, spendOf } from "./journal";
-import { availableOf, balance, bankSide, canSpend, classOf, external, holdersOf, managesAccount, managesParty, openerOf, productOf, rightsOf, statusOf, traitsOf, worldProducts } from "./model";
+import { availableOf, balance, bankSide, canSpend, classOf, debtorsOf, external, holdersOf, householdOf, managesAccount, managesParty, openerOf, outsideAccount, productOf, rightsOf, statusOf, traitsOf, worldProducts } from "./model";
 import { accountFeature, asUnit, cardProblem, cardRoom, cardsOn, cashAccount, cashAdvanceFee, depositAccount, featureFor, isParty, mayUse, posting, signal } from "./pay";
 
 function money(ctx: ReadContext, cents: number): string {
@@ -198,13 +200,28 @@ export function replaceCard(ctx: EffectContext, who: EntityId, card: EntityId): 
   return asUnit(out);
 }
 
-/** A credit account's autopay, by whoever manages it: how much, and from an account they may spend from or manage (a business's, for its owner). */
+/**
+ * What's wrong with a credit account's autopay drawing on `from` when `who` sets it (DESIGN
+ * §25.1), or null: an account that pays and isn't credit, which `who` may spend from or manages,
+ * and which the account's debtor may spend from. So a business's loan pays from the business's
+ * money, and a manager's own card or loan from their own.
+ */
+export function autopaySourceProblem(ctx: ReadContext, who: EntityId, account: EntityId, from: EntityId): Rejection | null {
+  const t = traitsOf(ctx, from);
+  if ((!canSpend(ctx.state, from, who) && !managesAccount(ctx, from, who)) || !t?.pays || t.liability) return reject("bad_account", `${labelOf(ctx, who)} can't pay from ${labelOf(ctx, from)}`);
+  const debtors = debtorsOf(ctx.state, account);
+  if (!debtors.some((d) => canSpend(ctx.state, from, d))) return reject("bad_account", `${labelOf(ctx, account)} is paid from ${labelOf(ctx, debtors[0] ?? who)}'s own money, not from ${labelOf(ctx, from)}`);
+  return null;
+}
+
+/** A credit account's autopay, by whoever manages it: how much, and from where (`autopaySourceProblem`). */
 export function setAutopay(ctx: ReadContext, who: EntityId, account: EntityId, mode: string, from: string, cents: number): LedgerEvent[] | Rejection {
   const cls = classOf(ctx, account);
   if (!cls || !isCredit(cls)) return reject("not_credit", `${labelOf(ctx, account)} isn't a card or a loan`);
   if (!managesAccount(ctx, account, who)) return reject("not_owner", `${labelOf(ctx, account)} isn't ${labelOf(ctx, who)}'s to change`);
   if (!(AUTOPAY_MODES as readonly string[]).includes(mode)) return reject("bad_mode", `autopay can't be ${mode}`);
-  if (from !== "" && ((!canSpend(ctx.state, from, who) && !managesAccount(ctx, from, who)) || !traitsOf(ctx, from)?.pays || traitsOf(ctx, from)?.liability)) return reject("bad_account", `${labelOf(ctx, who)} can't pay from ${labelOf(ctx, from)}`);
+  const source = from === "" ? null : autopaySourceProblem(ctx, who, account, from);
+  if (source) return source;
   if (mode === "fixed" && !(cents > 0)) return reject("bad_amount", "fixed autopay needs an amount");
   const out: LedgerEvent[] = [{ type: "set", entity: account, field: "autopay", value: mode }];
   if (from !== "") out.push({ type: "set", entity: account, field: "autopay_from", value: from });
@@ -250,23 +267,47 @@ function flowFields(args: Record<string, JsonValue>): { fields: JsonObject; labe
 }
 
 /**
- * Whether a party may run a flow that pays from `from` (DESIGN §25.1): themselves, a business or a
- * trust they manage, or an account they manage, by their role on it or on its owner. A role that
+ * Whether a party may run standing payments from `from` (DESIGN §25.1): themselves, a business or
+ * a trust they manage, or an account they manage, by their role on it or on its owner. A role that
  * may only spend, an authorized user's, makes payments but sets up and changes no standing ones.
  */
-function mayPayFrom(ctx: ReadContext, who: EntityId, from: string): boolean {
+export function mayPayFrom(ctx: ReadContext, who: EntityId, from: string): boolean {
   return from === who || (isParty(ctx, from) && managesParty(ctx.state, from, who)) || managesAccount(ctx, from, who);
 }
 
 /**
- * A flow's fallback, when it names one: the party itself or an account it may pay from, like the
- * flow's own payer. An outside name would pay from money nobody has, and someone else's account
- * isn't theirs to draw on.
+ * Whether a payment to `to` would be for `who`: to them, an account they hold, their household or
+ * an account it holds, or the outside account their own name gives (a typed payee lands there).
  */
-function fallbackProblem(ctx: ReadContext, who: EntityId, fields: JsonObject): Rejection | null {
-  const fallback = strOf(fields.fallback);
-  if (fallback === "" || mayPayFrom(ctx, who, fallback)) return null;
-  return reject("not_owner", own(ctx.state.entities, fallback) ? `${labelOf(ctx, who)} can't fall back on ${labelOf(ctx, fallback)}` : `a fallback is an account of ${labelOf(ctx, who)}'s, not "${fallback}"`);
+function paysFor(ctx: ReadContext, who: EntityId, to: string): boolean {
+  const household = householdOf(ctx, who);
+  const theirs = (party: string): boolean => party === who || party === household;
+  const id = to.startsWith(EXTERNAL_ACCOUNT_PREFIX) ? to.slice(EXTERNAL_ACCOUNT_PREFIX.length) : to;
+  if (theirs(id)) return true;
+  if (own(ctx.state.entities, id)?.kind === "account") return holdersOf(ctx.state, id).some(theirs);
+  const landing = outsideAccount(to);
+  return landing === external(who) || (household !== null && landing === external(household));
+}
+
+/**
+ * What's wrong with `who` running a standing payment from `from` to `to`, falling back on
+ * `fallback`, or null (DESIGN §25.1, §25.5). Each is money they may pay from. A fallback is the
+ * payer's own, as the money step draws on it (`fallsBackOn`): an outside name would pay with money
+ * nobody has, and someone else's account isn't the payer's to draw on. Money they reach only by
+ * managing it, a business's or a trust's they hold no spending role on, pays for its holder: never
+ * to them, their accounts or their household.
+ */
+function flowProblem(ctx: ReadContext, who: EntityId, from: string, to: string, fallback: string): Rejection | null {
+  if (!mayPayFrom(ctx, who, from)) return reject("not_owner", `${labelOf(ctx, who)} can't pay from ${labelOf(ctx, from)}`);
+  if (fallback !== "" && (!mayPayFrom(ctx, who, fallback) || !fallsBackOn(ctx, from, fallback))) {
+    return reject("not_owner", own(ctx.state.entities, fallback) ? `${labelOf(ctx, who)} can't fall back on ${labelOf(ctx, fallback)}` : `a fallback is an account of ${labelOf(ctx, who)}'s, not "${fallback}"`);
+  }
+  const managed = [from, fallback].find((side) => side !== "" && side !== who && !canSpend(ctx.state, side, who));
+  if (managed !== undefined && paysFor(ctx, who, to)) {
+    const holder = isParty(ctx, managed) ? managed : (holdersOf(ctx.state, managed).find((h) => managesParty(ctx.state, h, who)) ?? managed);
+    return reject("not_owner", `${labelOf(ctx, managed)} pays for ${labelOf(ctx, holder)}, not for ${labelOf(ctx, who)}`);
+  }
+  return null;
 }
 
 export function createFlow(ctx: ReadContext, who: EntityId, args: Record<string, JsonValue>): LedgerEvent[] | Rejection {
@@ -276,9 +317,8 @@ export function createFlow(ctx: ReadContext, who: EntityId, args: Record<string,
   const from = strOf(f.from);
   const to = strOf(f.to);
   if (from === "" || to === "" || typeof f.amount_cents !== "number" || !(f.amount_cents > 0)) return reject("bad_flow", "a flow needs who pays, who is paid and an amount");
-  if (!mayPayFrom(ctx, who, from)) return reject("not_owner", `${labelOf(ctx, who)} can't pay from ${labelOf(ctx, from)}`);
-  const fallback = fallbackProblem(ctx, who, f);
-  if (fallback) return fallback;
+  const problem = flowProblem(ctx, who, from, to, strOf(f.fallback));
+  if (problem) return problem;
   if (f.once === undefined && f.every === undefined) return reject("bad_flow", "a flow needs a schedule");
   const label = made.label ?? `Payment to ${labelOf(ctx, to)}`;
   const toMine = own(ctx.state.entities, to)?.kind === "account" && rightsOf(ctx.state, to, who) !== null;
@@ -311,13 +351,15 @@ export function updateFlow(ctx: ReadContext, who: EntityId, flow: EntityId, args
   if (!mayPayFrom(ctx, who, strOf(e.fields.from))) return reject("not_owner", `${e.name} isn't ${labelOf(ctx, who)}'s to change`);
   const made = flowFields(args);
   if ("code" in made) return made;
-  if (typeof made.fields.from === "string" && !mayPayFrom(ctx, who, made.fields.from)) return reject("not_owner", `${labelOf(ctx, who)} can't pay from ${labelOf(ctx, made.fields.from)}`);
-  const fallback = fallbackProblem(ctx, who, made.fields);
-  if (fallback) return fallback;
   const more = renameAndClear(e.name, flow, made.label, args.clear);
   if ("code" in more) return more;
   const both = more.find((x) => x.type === "set" && x.field in made.fields);
   if (both && both.type === "set") return reject("bad_flow", `a standing payment's ${both.field.replace(/_/g, " ")} can't be both changed and cleared`);
+  // The payment as it will be: what changes, what's cleared, and the rest as it was.
+  const cleared = new Set(more.flatMap((x) => (x.type === "set" ? [x.field] : [])));
+  const after = (field: string): string => (cleared.has(field) ? "" : strOf(made.fields[field] ?? e.fields[field]));
+  const problem = flowProblem(ctx, who, after("from"), after("to"), after("fallback"));
+  if (problem) return problem;
   return [...Object.entries(made.fields).map(([field, value]): LedgerEvent => ({ type: "set", entity: flow, field, value })), ...more];
 }
 

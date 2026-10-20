@@ -16,11 +16,12 @@ import { kindIs } from "../../../engine/scope";
 import { membersOf, MEMBER_OF } from "../../../engine/selector";
 import { canSeeEntity } from "../../../engine/visibility";
 import type { FinanceHooks } from "./module";
+import { autopaySourceProblem, mayPayFrom } from "./actions";
 import { statementState } from "./cycle";
 import { creditReport } from "./credit";
-import { allFlows, occurrences, occurrenceAmount } from "./flows";
+import { allFlows, fallsBackOn, occurrences, occurrenceAmount } from "./flows";
 import { cycleOf, flowRunOf, isOpened, journalOf, NOTES_CAP } from "./journal";
-import { accountsOf, availableOf, balance, classOf, holdersOf, holdsOn, managesAccount, managesParty, openerOf, outsideName, ownersOf, productOf, rightsOf, statusOf, traitsOf, wealthBand } from "./model";
+import { accountsOf, availableOf, balance, canSpend, classOf, holdersOf, holdsOn, householdOf, managesAccount, managesParty, openerOf, outsideName, ownersOf, productOf, rightsOf, statusOf, traitsOf, wealthBand } from "./model";
 import { cardsOn, cardRoom, featureFor, isParty, overdraftRoom, tiersOf, toggles } from "./pay";
 import { netWorthParts } from "./worth";
 import { createRng } from "../../../engine/rng";
@@ -222,6 +223,10 @@ function accountView(ctx: ReadContext, viewer: Viewer, party: EntityId, account:
     owners: owners.map((o) => ({ party: idFor(ctx, viewer, o.party), name: nameFor(ctx, viewer, o.party), role: o.role, share: Math.round((own(shares, o.party) ?? 0) * 100) / 100 })),
     role,
     manages: managesAccount(ctx, account, party),
+    spends: canSpend(ctx.state, account, party),
+    // Filled once the view holds every account it shows (`buildFinanceView`).
+    autopayFrom: [],
+    fallbacks: [],
     limit: level >= 3 && t.liability ? (p?.limit ?? null) : null,
     aprPct: level >= 4 && t.liability ? (p?.apr_pct ?? null) : null,
     apyPct: level >= 4 && t.earns ? (p?.apy_pct ?? null) : null,
@@ -329,12 +334,6 @@ function signedFor(ctx: ReadContext, f: Flow, party: EntityId, cents: number): n
   if (mine(f.from) && !mine(f.to)) return -cents;
   if (!mine(f.from) && mine(f.to)) return cents;
   return 0;
-}
-
-function householdOf(ctx: ReadContext, party: EntityId): EntityId | null {
-  if (kindIs(ctx.registry, ctx.world, own(ctx.state.entities, party)?.kind ?? "", "household")) return party;
-  const rel = own(ctx.state.entities, party)?.relations.find((r) => r.type === MEMBER_OF && kindIs(ctx.registry, ctx.world, own(ctx.state.entities, r.to)?.kind ?? "", "household"));
-  return rel?.to ?? null;
 }
 
 function householdView(hooks: FinanceHooks, ctx: ReadContext, viewer: Viewer, household: EntityId, flows: readonly Flow[]): HouseholdView {
@@ -472,6 +471,14 @@ export function buildFinanceView(hooks: FinanceHooks, ctx: ReadContext, party: E
   }
   // A business's accounts its owner manages without a role of their own on them are on its page, not among theirs.
   for (const b of view.businesses) b.managed = level >= 3 ? b.accounts.filter((id) => !mine.includes(id) && managesAccount(ctx, id, party)).map((id) => accountView(ctx, viewer, party, id, level, detail)) : [];
+  // What each account's controls may draw on, by the actions' own rules: its autopay's sources, and what may back a standing payment from it.
+  const listed = [...view.accounts, ...view.businesses.flatMap((b) => b.managed)];
+  const pays = (id: EntityId): boolean => traitsOf(ctx, id)?.pays === true && mayPayFrom(ctx, party, id);
+  for (const a of listed) {
+    const others = listed.filter((x) => x.id !== a.id).map((x) => x.id);
+    a.autopayFrom = a.autopay !== null && a.manages ? others.filter((id) => autopaySourceProblem(ctx, party, a.id, id) === null) : [];
+    a.fallbacks = pays(a.id) ? others.filter((id) => pays(id) && fallsBackOn(ctx, a.id, id)) : [];
+  }
   return view;
 }
 

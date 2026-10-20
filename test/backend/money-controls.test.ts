@@ -641,3 +641,56 @@ describe("a business's owner manages its accounts by their role on the business"
     expect((await (await MoneyChat.start()).hub()).businesses.flatMap((b) => b.managed)).toEqual([]);
   });
 });
+
+describe("a manager runs a business's money for the business, never for themselves", () => {
+  const SHOP = "acct_marcus_shop";
+  const LIFT_LOAN = "acct_alder_lift_loan";
+  const BUSINESS = "alder_automotive_co";
+  const MINE = "acct_marcus_checking";
+  const MORTGAGE = "acct_marcus_mortgage";
+  // As Port Alder has it, but with the shop's checking held by the shop alone: Marcus manages it as the shop's owner and may spend none of it.
+  const shopOnly = { [SHOP]: { owners: [{ party: BUSINESS, role: "owner" }] } };
+  const once = { amount: 50_000, every: "once", once: "2026-09-15T09:00" };
+
+  test("the shop's checking pays neither Marcus, his mortgage's autopay, nor a bill of his as its fallback; it still pays the shop's loan and bills", async () => {
+    const chat = await MoneyChat.start({ pov: "marcus_delgado", entities: shopOnly });
+    const view = await chat.hub();
+    const managed = view.businesses.find((b) => b.id === BUSINESS)?.managed ?? [];
+    expect(managed.find((a) => a.id === SHOP)).toMatchObject({ manages: true, spends: false });
+    // What the hub may offer: his mortgage's autopay draws on his own money, the shop's loan's on the shop's, and his own bills fall back on his own.
+    expect(account(view, MORTGAGE).autopayFrom).toContain(MINE);
+    expect(account(view, MORTGAGE).autopayFrom).not.toContain(SHOP);
+    expect(managed.find((a) => a.id === LIFT_LOAN)?.autopayFrom).toEqual([SHOP]);
+    expect(account(view, MINE).fallbacks).not.toContain(SHOP);
+
+    expect(await chat.play(autopayAction(MORTGAGE, "minimum", SHOP, null))).toContain("Marcus's mortgage is paid from Marcus Delgado's own money, not from Alder Automotive operating account");
+    const forHim = "Alder Automotive operating account pays for Alder Automotive, not for Marcus Delgado";
+    expect(await chat.play({ action: "flow_create", params: { label: "Pay me", from: SHOP, to: MINE, ...once } })).toContain(forHim);
+    expect(await chat.play({ action: "flow_create", params: { label: "Pay my mortgage", from: SHOP, to: MORTGAGE, ...once } })).toContain(forHim);
+    // His own name, typed as an outside payee, lands in the outside account his name gives.
+    expect(await chat.play({ action: "flow_create", params: { label: "Cash for me", from: SHOP, to: "Marcus Delgado", ...once } })).toContain(forHim);
+    expect(await chat.play({ action: "flow_update", params: { flow: "flow_shop_lease", to: MINE } })).toContain(forHim);
+    expect(await chat.play({ action: "flow_create", params: { label: "Gym", from: MINE, to: "Harbor Gym", amount: 4_000, every: "month", day: 5, shortfall: "fallback", fallback: SHOP } })).toContain("Marcus Delgado can't fall back on Alder Automotive operating account");
+
+    // Running the shop's money for the shop is his to do.
+    expect(await chat.play({ action: "flow_update", params: { flow: "flow_shop_lease", amount: 330_000 } })).toContain("done");
+    expect(await chat.play({ action: "flow_create", params: { label: "Shop cleaning", from: SHOP, to: "Harbor Cleaners", amount: 9_000, every: "month", day: 5 } })).toContain("done");
+    expect(await chat.play(autopayAction(LIFT_LOAN, "minimum", SHOP, null))).toContain("done");
+
+    const shop = await chat.party(BUSINESS);
+    expect(shop.flows.find((f) => f.id === "flow_shop_lease")).toMatchObject({ to: "Harbor Realty", amount: "$3,300.00" });
+    const labels = shop.flows.map((f) => f.label);
+    expect(labels).toContain("Shop cleaning");
+    for (const refused of ["Pay me", "Pay my mortgage", "Cash for me", "Gym"]) expect(labels).not.toContain(refused);
+    expect(account(await chat.party("marcus_delgado"), MORTGAGE).autopay?.from).not.toBe(SHOP);
+    expect(account(shop, LIFT_LOAN).autopay).toMatchObject({ mode: "minimum", from: SHOP });
+  });
+
+  test("a C corporation's owner, who takes no draws, can't pay himself from its account by a standing payment or his mortgage's autopay", async () => {
+    const chat = await MoneyChat.start({ pov: "marcus_delgado", entities: { ...shopOnly, [BUSINESS]: { structure: "c_corp" } } });
+    expect(await chat.play({ action: "owner_draw", params: { business: BUSINESS, amount: 100_000 } })).toContain("didn't happen");
+    expect(await chat.play({ action: "flow_create", params: { label: "Salary, sort of", from: SHOP, to: MINE, ...once } })).toContain("not for Marcus Delgado");
+    expect(await chat.play(autopayAction(MORTGAGE, "minimum", SHOP, null))).toContain("not from Alder Automotive operating account");
+    expect((await chat.party(BUSINESS)).flows.map((f) => f.label)).not.toContain("Salary, sort of");
+  });
+});

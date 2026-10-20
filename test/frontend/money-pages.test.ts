@@ -17,7 +17,7 @@ function view(over: Partial<FinanceView> = {}): FinanceView {
 }
 
 function account(id: string, name: string): AccountView {
-  return { id, name, class: "checking", classLabel: "Checking", product: { id: "checking", label: "Checking" }, institution: null, status: "open", cents: 0, available: null, owners: [], role: "owner", manages: true, limit: null, aprPct: null, apyPct: null, terms: [], autopay: null, due: null, statements: [], cards: [], pending: [], holds: [], transactions: [], securedBy: null, loan: null };
+  return { id, name, class: "checking", classLabel: "Checking", product: { id: "checking", label: "Checking" }, institution: null, status: "open", cents: 0, available: null, owners: [], role: "owner", manages: true, spends: true, autopayFrom: [], fallbacks: [], limit: null, aprPct: null, apyPct: null, terms: [], autopay: null, due: null, statements: [], cards: [], pending: [], holds: [], transactions: [], securedBy: null, loan: null };
 }
 
 function flow(id: string, label: string): FlowView {

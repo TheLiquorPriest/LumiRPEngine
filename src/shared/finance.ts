@@ -1237,6 +1237,12 @@ export interface AccountView {
   role: OwnerRole | null;
   /** Whether the viewing party manages it (its standing payments, autopay and cards): by a managing role on it, or on a business or trust that holds one (DESIGN §25.1). */
   manages: boolean;
+  /** Whether the viewing party may spend from it by a role of their own; one they only manage pays for its holder, never for them (§25.1). */
+  spends: boolean;
+  /** On a credit account they manage, the accounts in the view its autopay may draw on: ones its debtor may spend from (§25.1). */
+  autopayFrom: EntityId[];
+  /** The accounts in the view that may back a standing payment from this one when it can't cover it: its payer's own (§25.5). */
+  fallbacks: EntityId[];
   limit: number | null;
   aprPct: number | null;
   apyPct: number | null;

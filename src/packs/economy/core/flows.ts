@@ -679,17 +679,20 @@ function flowIsIncome(ctx: ReadContext, flow: Flow, who: EntityId): boolean {
 }
 
 /**
- * The account (or party) a flow falls back on, when it's the payer's own: the payer itself, or an
- * account one of the payer's holders may spend from. An outside name or someone else's account is
- * never drawn on, so a fallback can't pay with money nobody has.
+ * Whether a payment from `from` can fall back on `fallback`: the payer itself, or an account one of
+ * the payer's holders may spend from. An outside name or someone else's account is never drawn on,
+ * so a fallback can't pay with money nobody has, nor with money its payer can't spend.
  */
+export function fallsBackOn(ctx: ReadContext, from: string, fallback: string): boolean {
+  const side = sideOf(ctx, from);
+  const payers = "account" in side ? holdersOf(ctx.state, side.account).filter((h) => canSpend(ctx.state, side.account, h)) : "party" in side ? [side.party] : [];
+  if (payers.includes(fallback)) return true;
+  return own(ctx.state.entities, fallback)?.kind === "account" && payers.some((p) => canSpend(ctx.state, fallback, p));
+}
+
+/** The account (or party) a flow falls back on, when it's the payer's own (`fallsBackOn`). */
 function fallbackOf(ctx: ReadContext, flow: Flow): string | null {
-  const fallback = flow.fallback;
-  if (!fallback) return null;
-  const from = sideOf(ctx, flow.from);
-  const payers = "account" in from ? holdersOf(ctx.state, from.account).filter((h) => canSpend(ctx.state, from.account, h)) : "party" in from ? [from.party] : [];
-  if (payers.includes(fallback)) return fallback;
-  return own(ctx.state.entities, fallback)?.kind === "account" && payers.some((p) => canSpend(ctx.state, fallback, p)) ? fallback : null;
+  return flow.fallback && fallsBackOn(ctx, flow.from, flow.fallback) ? flow.fallback : null;
 }
 
 /**

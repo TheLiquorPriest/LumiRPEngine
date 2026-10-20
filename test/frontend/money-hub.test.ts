@@ -48,10 +48,10 @@ import {
 
 const USD = DEFAULT_CURRENCY;
 
-/** An account in the party's view; whether they manage it follows their own role unless a test says (a business's account its owner runs). */
+/** An account in the party's view; whether they manage it and spend from it follows their own role unless a test says (a business's account its owner runs). */
 function account(over: Partial<AccountView> & Pick<AccountView, "id" | "class">): AccountView {
   const role = over.role === undefined ? "owner" : over.role;
-  return { name: over.id, classLabel: "", product: { id: over.class, label: "" }, institution: null, status: "open", cents: 0, available: null, owners: [{ party: "pov", name: "You", role: "owner", share: 100 }], role: "owner", manages: role !== null && ROLE_RIGHTS[role].manage, limit: null, aprPct: null, apyPct: null, terms: [], autopay: null, due: null, statements: [], cards: [], pending: [], holds: [], transactions: [], securedBy: null, loan: null, ...over };
+  return { name: over.id, classLabel: "", product: { id: over.class, label: "" }, institution: null, status: "open", cents: 0, available: null, owners: [{ party: "pov", name: "You", role: "owner", share: 100 }], role: "owner", manages: role !== null && ROLE_RIGHTS[role].manage, spends: role !== null && ROLE_RIGHTS[role].spend, autopayFrom: [], fallbacks: [], limit: null, aprPct: null, apyPct: null, terms: [], autopay: null, due: null, statements: [], cards: [], pending: [], holds: [], transactions: [], securedBy: null, loan: null, ...over };
 }
 
 function card(over: Partial<CardView> & Pick<CardView, "id" | "account">): CardView {
