@@ -90,6 +90,16 @@ describe("an id or a link that would name someone hidden reaches the player unde
     const gm = await chat.party("marcus_delgado");
     expect(gm.flows.find((f) => f.id === "pay:job_danny_mechanic")?.link).toEqual({ id: "job_danny_mechanic", name: "Danny's job at Alder Automotive" });
   });
+
+  test("Jess's share into the household account is coming up on Helen's money, where she can't see Jess, without Jess's account", async () => {
+    // Her job is named for her, so it's secret with her.
+    const chat = await MoneyChat.start({ pov: "helen_kowalczyk", secret: ["jess_kowalczyk", "job_jess_kowalczyk"] });
+    const upcoming = (await chat.hub()).overview?.upcoming ?? [];
+    const share = upcoming.filter((u) => u.label === "Household share, 1A");
+    expect(share.length).toBeGreaterThan(0);
+    expect(share.map((u) => [u.account, u.flow?.startsWith("hidden:")])).toEqual(share.map(() => [null, true]));
+    expect(JSON.stringify(upcoming).toLowerCase()).not.toContain("jess");
+  });
 });
 
 describe("each journal line names the other side of its own payment", () => {
