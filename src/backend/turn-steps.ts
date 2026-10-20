@@ -349,6 +349,8 @@ function dataBlock(vars: Readonly<Record<string, string>>): string {
   add("Outcome", "outcome");
   add("Engine beats", "beats");
   add("Brief", "brief");
+  // The outline step's only: what the narrator has this turn (DESIGN §9.5).
+  add("Sections the narrator has this turn (point at no other)", "sections");
   add("Recent turns", "recent");
   add("The player wrote", "user");
   add("The narrator's reply", "reply");

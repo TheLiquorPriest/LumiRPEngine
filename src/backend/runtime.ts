@@ -64,6 +64,7 @@ import { StepLore, ToolSupport, type LoreInputs, type LookupTransport } from "./
 import { readPins } from "./lore-pins";
 import { interpretCatalog, interpretScene, timelapseEntry } from "./interpret-context";
 import { failureWords } from "./requirement-words";
+import { missingSections, withoutMissing } from "./section-refs";
 import { CallMeter, dedupeProposals, extract, interpret, saidPayMethod, Steps, type InterpretContext, type InterpretRead } from "./steps";
 import { PlanNotes } from "./plan-notes";
 import { OutcomeNotes } from "./outcome-notes";
@@ -909,14 +910,41 @@ export class Runtime implements TurnHooks {
     const at = await this.lorePhase("pre", input.generationId, input.userId, render.world, render.state, budget, pre.text, pre.preset.guidance);
     const run = (r: StepRun, kind: "brief" | "outline", stepVars = vars): Promise<string[]> => (budget.take() ? promptedText(this.steps, r, kind, stepVars, secrets, input.userId, budget.signal, this.stepLore(r, at, inputs)).then((lines) => lines ?? []) : Promise.resolve([]));
     const briefTask = Promise.all(briefRuns.map((r) => run(r, "brief")));
+    // The outline is told the sections the narrator has this turn, so it points at no other (DESIGN §9.5).
+    const outlineVars = outlineRuns.length > 0 ? { ...vars, sections: this.narratorSections(render.world, render.state, plan).join(", ") } : vars;
     // An outline template that names {{brief}} waits for the brief (leak-checked as it comes back).
-    const outlineTask = Promise.all(outlineRuns.map((r) => (/\{\{\s*brief\s*\}\}/i.test(r.template?.template ?? "") ? briefTask.then((b) => run(r, "outline", { ...vars, brief: b.flat().join(" ").trim() })) : run(r, "outline"))));
+    const outlineTask = Promise.all(outlineRuns.map((r) => (/\{\{\s*brief\s*\}\}/i.test(r.template?.template ?? "") ? briefTask.then((b) => run(r, "outline", { ...outlineVars, brief: b.flat().join(" ").trim() })) : run(r, "outline", outlineVars))));
     const [briefs, outlines] = await Promise.all([briefTask, outlineTask]);
     const brief = briefs.flat().join(" ").trim();
     const prose = { brief: brief === "" ? null : brief, outline: outlines.flat() };
     bridge.setProse(p.seed, prose);
     await this.keepPlanLines(input.chatId, input.userId, p.seed, plan, render.world, prose);
     this.host.log("info", `[LumiRPEngine] plan ${input.generationId.slice(0, 8)}: brief ${brief === "" ? "none" : "yes"}, ${outlines.flat().length} outline line(s), ${budget.spent} pre call(s)`, input.userId);
+  }
+
+  /**
+   * The sections the narrator will have this turn, by label, as the outline step is told them
+   * (DESIGN §9.5): the Outcome, the Scene and the Outline itself, a timelapse's Montage when it has
+   * lines, Minds when someone's mind has one, and any other when its renderers have one. The budget
+   * may still leave one out: the Outline is checked again when it is written (`withoutMissing`).
+   */
+  private narratorSections(world: WorldDoc, state: WorldState, plan: EngineTurnPlan | undefined): string[] {
+    return readPass(() => {
+      const ctx = this.registry.context(world, state);
+      const has = (slot: string): boolean =>
+        this.registry.renderers.some((r) => {
+          if (r.slot !== slot || r.hint) return false;
+          try {
+            return r.render(ctx).length > 0;
+          } catch {
+            return false;
+          }
+        });
+      const montage = plan ? planLines(plan, world, this.registry).montage.length > 0 : false;
+      return sectionsOf(world)
+        .filter((s) => (s.id === "outcome" || s.id === "scene" || s.id === "outline" ? true : s.id === MINDS_SLOT ? mindLines(ctx).length > 0 : (s.id === "montage" && montage) || has(s.id)))
+        .map((s) => s.label);
+    });
   }
 
   /**
@@ -1885,6 +1913,8 @@ export class Runtime implements TurnHooks {
       const ladder = (optionalQuery(read, "minds.fidelity")?.(read, { user: said, reply: "" }) ?? []).map((s) => s.entity);
       const mindsFit = mindsSection ? fitMindLines(allMinds, ladder, mindsBudget, (kept) => sectionCost(renderSection(mindsSection.label, mindsSection.template, kept.map((l) => l.line)))) : [];
       const ctx = this.registry.context(world, state, { "minds.minded": () => mindsFit.map((l) => l.entity) });
+      // The sections filled so far, in rank order: the Outline points only at those (DESIGN §9.5).
+      const filled = new Set<string>();
       for (const section of sectionsOf(world)) {
         const entryId = entryOf(section);
         if (!entryId) continue;
@@ -1899,7 +1929,7 @@ export class Runtime implements TurnHooks {
             this.host.log("warn", `[LumiRPEngine] section ${section.id}: ${error instanceof Error ? error.message : String(error)}`, input.userId);
           }
         }
-        if (section.id === "outline") lines.push(...outline);
+        if (section.id === "outline") lines.push(...withoutMissing(outline, missingSections(sectionsOf(world), section.rank, filled, mindsFit.length > 0 && mindsSection !== undefined && entryOf(mindsSection) !== null)));
         // DESIGN §9.2: every turn has an elapsed time, and the Scene slot states it.
         if (section.id === "scene" && plan) {
           const minutes = clockMinutes(plan.events);
@@ -1927,6 +1957,7 @@ export class Runtime implements TurnHooks {
         if (!minds) budget -= cost;
         const fill = { id: entryId, content };
         fills.push(fill);
+        filled.add(section.id);
         (record.entries ??= {})[section.id] = entryId;
         const safeHints = hints.filter((l) => findLeaks(l, secrets).length === 0);
         if (safeHints.length > 0) hinted.push({ fill, label: section.label, template: section.template, lines: safe, hints: safeHints, cost });
