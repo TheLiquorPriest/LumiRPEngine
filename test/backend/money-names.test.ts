@@ -1,10 +1,12 @@
 // The player's money view names everyone outside the world in words (DESIGN §25.11): the
 // foundation's and the modules' own payees ("Federal tax", "Property upkeep", "Sales tax
 // (Michigan)"), an outside employer by its place, a managed property's tenants, and an author's
-// own payees as written. Port Alder chats on the fake host, as Play → Money decodes them.
+// own payees as written. Each journal line names the other side of its own payment (§25.6): who it
+// paid, or who paid it. Port Alder chats on the fake host, as Play → Money decodes them.
 
 import { describe, expect, test } from "bun:test";
 import type { FinanceView } from "../../src/shared/finance";
+import { invoiceAction, tradeAction, transferAction } from "../../src/packs/economy/ui/requests";
 import { MoneyChat } from "../support/money-chat";
 
 /** Every name a view gives a side of money: its flows' two ends and its transactions' other parties. */
@@ -53,5 +55,62 @@ describe("the player's money view names outside payees in words", () => {
     const view = await (await MoneyChat.start()).hub();
     expect(flow(view, "insurance:pov_truck").to).toBe("Insurer");
     expect(namesIn(view).filter((n) => n.includes(":"))).toEqual([]);
+  });
+});
+
+describe("each journal line names the other side of its own payment", () => {
+  const SHOP = "acct_marcus_shop";
+  const CHECKING = "acct_pov_checking";
+
+  /** The other side of each of an account's lines with this memo, newest first, as the view names it. */
+  function others(view: FinanceView, account: string, memo: string | RegExp): (string | null)[] {
+    const a = view.accounts.find((x) => x.id === account);
+    if (!a) throw new Error(`no ${account} in ${view.name}'s money`);
+    return a.transactions.filter((t) => (typeof memo === "string" ? t.memo === memo : memo.test(t.memo))).map((t) => t.counterparty);
+  }
+
+  // Both of the shop's invoices fall due on Tuesday the 15th, and Jordan owes for the trailer brakes.
+  const invoices = { inv_road_commission: { due: "2026-09-15" }, inv_dale_trailer: { customer: "pov", due: "2026-09-15" } };
+
+  test("on the shop's account Marcus reads who paid it: walk-in customers, an outside customer by name and Jordan by his, or someone where he can't see Jordan", async () => {
+    const chat = await MoneyChat.start({ pov: "marcus_delgado", entities: invoices });
+    await chat.timelapse(2 * 1440);
+    const view = await chat.hub();
+    expect(others(view, SHOP, "Walk-in takings")).toEqual(["Walk-in customers", "Walk-in customers"]);
+    expect(others(view, SHOP, "Invoice: Fleet service")).toEqual(["Port Alder Road Commission"]);
+    expect(others(view, SHOP, "Invoice: Trailer brakes")).toEqual(["Jordan Ellis"]);
+    // The shop paying its own loan, and its opening, name no one.
+    expect(others(view, SHOP, "Lift loan autopay")).toEqual([null]);
+    expect(others(view, SHOP, "Opening balance")).toEqual([null]);
+
+    const hidden = await MoneyChat.start({ pov: "marcus_delgado", entities: invoices, secret: ["pov"] });
+    await hidden.timelapse(2 * 1440);
+    expect(others(await hidden.hub(), SHOP, "Invoice: Trailer brakes")).toEqual(["someone"]);
+  });
+
+  test("Jordan's own lines name who he paid and who paid him, the shop's books name him, and money between his own accounts names no one", async () => {
+    const chat = await MoneyChat.start({ entities: { inv_dale_trailer: { customer: "pov" } } });
+    expect(await chat.play(invoiceAction("inv_dale_trailer", "pay"))).toContain("done");
+    expect(await chat.play(transferAction(CHECKING, "acct_pov_savings", chat.cents("50")))).toContain("done");
+    // Past his first payday, Friday the 18th.
+    await chat.timelapse(5 * 1440);
+    const view = await chat.hub();
+    expect(others(view, CHECKING, "Invoice: Trailer brakes")).toEqual(["Alder Automotive"]);
+    expect(others(view, CHECKING, /^Payroll/)).toEqual(["Alder Automotive"]);
+    expect(others(view, CHECKING, "Transfer")).toEqual([null]);
+    expect(others(view, "acct_pov_savings", "Transfer")).toEqual([null]);
+    const shop = await chat.party("alder_automotive_co");
+    expect(others(shop, SHOP, "Invoice: Trailer brakes")).toEqual(["Jordan Ellis"]);
+    expect(others(shop, SHOP, /^Payroll/)).toEqual(expect.arrayContaining(["Jordan Ellis", "Danny Okafor"]));
+  });
+
+  test("a trade names the market it was made on, never its key", async () => {
+    const chat = await MoneyChat.start();
+    const buy = tradeAction({ side: "buy", holding: "", asset: "broad_us_equity_index", account: "acct_pov_brokerage", qty: null, amount: "100", from: CHECKING, to: "", option: null }, chat.currency);
+    if (typeof buy === "string") throw new Error(buy);
+    expect(await chat.play(buy)).toContain("done");
+    const view = await chat.hub();
+    expect(others(view, CHECKING, /^Bought/)).toEqual(["Market"]);
+    expect(view.accounts.flatMap((a) => a.transactions.flatMap((t) => (t.counterparty?.includes(":") ? [t.counterparty] : [])))).toEqual([]);
   });
 });

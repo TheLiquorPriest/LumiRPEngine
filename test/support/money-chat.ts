@@ -21,10 +21,11 @@ export interface GmMoney {
   values: Map<string, Record<string, unknown>>;
 }
 
-/** What a test changes in the world before the chat starts: fields added to places (a cash machine, a branch) and set on entities, and who the POV is. */
+/** What a test changes in the world before the chat starts: fields added to places (a cash machine, a branch) and set on entities, entities the player never sees, and who the POV is. */
 export interface WorldPatch {
   places?: Record<string, JsonObject>;
   entities?: Record<string, JsonObject>;
+  secret?: string[];
   pov?: string;
 }
 
@@ -33,21 +34,25 @@ export class MoneyChat {
     readonly rig: Rig,
     readonly chatId: string,
     readonly currency: WorldCurrency,
+    /** Whose story it is: the world's POV. */
+    readonly pov: string,
   ) {}
 
   /** Port Alder with `patch` committed to the world, a chat attached, and Play → Money opened as picking the tab opens it. */
   static async start(patch: WorldPatch = {}): Promise<MoneyChat> {
     const rig = new Rig({ shipped: true });
     const worldId = await rig.newWorld("Port Alder", "modern_slice_of_life");
-    const edits = [...Object.entries(patch.places ?? {}).map(([id, fields]) => ({ collection: "places", id, fields })), ...Object.entries(patch.entities ?? {}).map(([id, fields]) => ({ collection: "entities", id, fields }))];
+    const secret = new Set(patch.secret ?? []);
+    const touched = [...new Set([...Object.keys(patch.entities ?? {}), ...secret])];
+    const edits = [...Object.entries(patch.places ?? {}).map(([id, fields]) => ({ collection: "places", id, fields, hidden: false })), ...touched.map((id) => ({ collection: "entities", id, fields: patch.entities?.[id] ?? {}, hidden: secret.has(id) }))];
     if (edits.length > 0 || patch.pov !== undefined) {
       const draft = rig.body(await rig.send({ type: "lre.editor", op: "get", worldId, base: null }));
       const doc = isRecord(draft.draft) ? draft.draft : {};
-      for (const { collection, id, fields } of edits) {
+      for (const { collection, id, fields, hidden } of edits) {
         const items = doc[collection];
         const item = isRecord(items) ? items[id] : undefined;
         if (!isRecord(item)) throw new Error(`no ${collection} ${id}`);
-        const value = { ...item, fields: { ...(isRecord(item.fields) ? item.fields : {}), ...fields } };
+        const value = { ...item, ...(hidden ? { visibility: "secret" } : {}), fields: { ...(isRecord(item.fields) ? item.fields : {}), ...fields } };
         rig.body(await rig.send({ type: "lre.editor", op: "put", worldId, base: draft.base, collection, id, value }));
       }
       if (patch.pov !== undefined) rig.body(await rig.send({ type: "lre.editor", op: "set", worldId, base: draft.base, part: "meta", value: { pov: patch.pov } }));
@@ -58,7 +63,7 @@ export class MoneyChat {
     // Picking Play → Money opens the POV's money (play.tsx), which posts the authored openings.
     rig.body(await rig.send({ type: "lre.view.open", chatId, panel: "economy.money", entity: null }));
     await rig.rt.push.settle();
-    return new MoneyChat(rig, chatId, (await rig.rt.view(chatId, rig.host.userId)).currency ?? DEFAULT_CURRENCY);
+    return new MoneyChat(rig, chatId, (await rig.rt.view(chatId, rig.host.userId)).currency ?? DEFAULT_CURRENCY, patch.pov ?? "pov");
   }
 
   /** The state view the client renders. */
@@ -129,7 +134,7 @@ export class MoneyChat {
 
   /** The POV's Money level, as Play → Realism sets it. */
   async level(to: Level): Promise<void> {
-    this.rig.body(await this.rig.send(resolveMarker(this.chatId, "money", { entity: "pov" }, to)));
+    this.rig.body(await this.rig.send(resolveMarker(this.chatId, "money", { entity: this.pov }, to)));
   }
 
   /** An amount as typed into a control. */

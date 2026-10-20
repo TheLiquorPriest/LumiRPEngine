@@ -74,18 +74,26 @@ const OUTSIDE_NAMES: Readonly<Record<string, string>> = {
 /** The taxes a region's authority collects (`tax:<kind>:<region>`), by kind. */
 const REGIONAL_TAXES: Readonly<Record<string, string>> = { sales: "Sales tax", property: "Property tax" };
 
+/** Outside keys that name who they are after the kind (`bank:<institution>`), and what each reads as when nothing follows. */
+const NAMED_OUTSIDE: Readonly<Record<string, string>> = { bank: "Bank", atm: "Cash machine", employer: "Employer" };
+
+/** Outside keys that say what kind of party they are and what they're about (`seller:<property>`), by the kind. */
+const OUTSIDE_KINDS: Readonly<Record<string, string>> = { buyer: "Buyer", seller: "Seller", market: "Market", tenant: "Outside tenant" };
+
 /**
  * An outside side of a payment as a person reads it (DESIGN §25.11): the foundation's and the
- * modules' own payees in words, a regional tax with its region ("Sales tax (Michigan)"), an outside
- * employer by the name or place it was given, a managed property's tenants as "Outside tenant",
- * and any other name, an author's or a player's, as written. A journal line keeps an outside name
- * with its `_` read as spaces, so a region is found either way.
+ * modules' own payees in words, a regional tax with its region ("Sales tax (Michigan)"), a bank, a
+ * cash machine's bank and an outside employer by the name or place they were given, a property's
+ * outside buyer, seller or tenant and a holding's market by what they are, and any other name, an
+ * author's or a player's, as written. A journal line keeps an outside name with its `_` read as
+ * spaces, so a region or a place is found either way.
  */
 export function outsideName(books: TableBooks, raw: string): string {
   const bare = raw.startsWith(EXTERNAL_ACCOUNT_PREFIX) ? raw.slice(EXTERNAL_ACCOUNT_PREFIX.length) : raw;
   const known = own(OUTSIDE_NAMES, bare);
   if (known !== undefined) return known;
   const [head = "", ...rest] = bare.split(":");
+  const tail = rest.join(":").trim();
   const tax = head === "tax" ? own(REGIONAL_TAXES, rest[0] ?? "") : undefined;
   if (tax !== undefined) {
     const region = rest.slice(1).join(":").trim();
@@ -93,9 +101,11 @@ export function outsideName(books: TableBooks, raw: string): string {
     const name = rowOf(books, "economy.regions", region.replace(/ +/g, "_"))?.name;
     return `${tax} (${typeof name === "string" && name !== "" ? name : region.replace(/_/g, " ")})`;
   }
-  if (head === "employer") return rest.join(":") === "" ? "Employer" : labelOf(books, rest.join(":"));
-  if (head === "tenant") return "Outside tenant";
-  return bare.replace(/_/g, " ");
+  const named = own(NAMED_OUTSIDE, head);
+  // A bank with no name of its own is `bank:bank` (`bankSide`).
+  if (named !== undefined) return tail === "" || tail === head ? named : labelOf(books, tail.replace(/ +/g, "_"));
+  const kind = tail === "" ? undefined : own(OUTSIDE_KINDS, head);
+  return kind ?? bare.replace(/_/g, " ");
 }
 
 export function bankSide(institution: string): string {

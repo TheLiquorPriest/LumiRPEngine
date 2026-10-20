@@ -4,8 +4,9 @@
 // level; overdraft policies; and older worlds migrated to the foundation's shapes.
 
 import { describe, expect, test } from "bun:test";
+import type { JournalLine } from "../../../src/shared/finance";
 import type { JsonObject } from "../../../src/shared/json";
-import type { PostEvent } from "../../../src/shared/ledger";
+import type { LedgerEvent, PostEvent } from "../../../src/shared/ledger";
 import type { EntityDef, WorldDoc } from "../../../src/shared/world";
 import { lintWorld } from "../../../src/engine/authoring";
 import { materializeAll } from "../../../src/engine/materialize";
@@ -48,6 +49,11 @@ function lapse(w: Working, days: number): void {
 /** One of the POV's accounts as the Money view shows it. */
 function accountView(w: Working, id = ""): { cents: number; available: number | null } | undefined {
   return w.ctx.query("economy.finance")(w.ctx, "you", true).accounts.find((a) => a.id === id);
+}
+
+/** The lines of one of the POV's accounts as the Money view shows them, newest first. */
+function accountLines(w: Working, id: string): JournalLine[] {
+  return w.ctx.query("economy.finance")(w.ctx, "you", true).accounts.find((a) => a.id === id)?.transactions ?? [];
 }
 
 function dataOf(w: Working, type: string): JsonObject[] {
@@ -94,6 +100,14 @@ describe("money foundation: one statement cycle", () => {
     expect(w.state.accounts.loan).toBe(0);
     const payments = w.events.filter((e): e is PostEvent => e.type === "post" && e.lines.some((l) => l.account === "loan" && l.amount > 0));
     expect(payments).toHaveLength(3);
+  });
+
+  test("a bank's interest names the bank on the account's lines: by its name, or as a bank where it has none", () => {
+    const w = setup();
+    lapse(w, 40);
+    const banks = (account: string): (string | null)[] => [...new Set(accountLines(w, account).filter((t) => t.kind === "interest").map((t) => t.counterparty))];
+    expect(banks("checking")).toEqual(["Riverton Credit Union"]);
+    expect(banks("savings")).toEqual(["Bank"]);
   });
 });
 
@@ -293,5 +307,19 @@ describe("money foundation: older worlds", () => {
       }
       expect(migrateMoney(world)).toBe(world);
     }
+  });
+
+  test("a chat's older journal events, which named only who was paid, still read: money in names whoever in the world paid it, and no line names its own holder", () => {
+    const w = setup((world) => void (world.entities.maya_checking = entity("maya_checking", "account", { owners: [{ party: "maya", role: "owner" }], product: "checking", opening: 0 })));
+    // As an older build recorded them: the player paying Maya back, and a shop's refund that named the player, the side paid, on its one line in the world.
+    const older = (memo: string, lines: PostEvent["lines"], counterparty: string): LedgerEvent[] => [
+      { type: "post", lines, memo },
+      { type: "economy.txn", data: { memo, kind: "payment", counterparty, lines: lines.filter((l) => !l.account.startsWith("economy.external:")).map((l) => ({ account: l.account, amount: l.amount })) } },
+    ];
+    const events = [...older("Dinner, her half", [{ account: "checking", amount: -4_000 }, { account: "maya_checking", amount: 4_000 }], "maya"), ...older("Refund", [{ account: "economy.external:market", amount: -1_500 }, { account: "checking", amount: 1_500 }], "you")];
+    for (const e of events) expect(w.apply(e)).toBeNull();
+    const lines = (party: string, account: string): (string | null)[][] | undefined => w.ctx.query("economy.finance")(w.ctx, party, false).accounts.find((a) => a.id === account)?.transactions.filter((t) => t.kind === "payment").map((t) => [t.memo, t.counterparty]);
+    expect(lines("you", "checking")).toEqual([["Refund", null], ["Dinner, her half", "Maya Chen"]]);
+    expect(lines("maya", "maya_checking")).toEqual([["Dinner, her half", w.state.entities.you?.name ?? "you"]]);
   });
 });

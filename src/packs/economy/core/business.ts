@@ -378,7 +378,7 @@ function payInvoice(ctx: EffectContext, api: FinanceApi, args: Record<string, Js
   const payer = inv.party ?? inv.customer;
   if (by !== "" && by !== inv.party && !(inv.party && isBusiness(ctx, inv.party) && managesParty(ctx.state, inv.party, by))) return reject("not_customer", `${labelOf(ctx, by)} isn't billed for ${inv.memo}`);
   const deposit = operatingAccount(api, ctx, inv.business);
-  const paid = inv.party ? api.pay(ctx, { from: inv.party, to: inv.business, cents: inv.left, memo: `Invoice: ${inv.memo}`, kind: "payment", category: "invoice", method: "account", ...(deposit ? { deposit } : {}) }) : api.post(ctx, [{ account: api.outside(`customer:${payer}`), amount: -inv.left }, { account: deposit ?? api.outside(inv.business), amount: inv.left }], { memo: `Invoice: ${inv.memo}`, kind: "payment", category: "invoice", counterparty: payer });
+  const paid = inv.party ? api.pay(ctx, { from: inv.party, to: inv.business, cents: inv.left, memo: `Invoice: ${inv.memo}`, kind: "payment", category: "invoice", method: "account", ...(deposit ? { deposit } : {}) }) : api.post(ctx, [{ account: api.outside(`customer:${payer}`), amount: -inv.left }, { account: deposit ?? api.outside(inv.business), amount: inv.left }], { memo: `Invoice: ${inv.memo}`, kind: "payment", category: "invoice", payer });
   if (!Array.isArray(paid)) return paid;
   return unit(paid, invoiceSettled(inv, inv.left));
 }
@@ -582,7 +582,7 @@ export function businessView(ctx: ReadContext, api: FinanceApi, business: Entity
   const sales: JournalLine[] = (Array.isArray(salesList) ? salesList : [])
     .map((raw, i) => ({ raw: objOf(raw), i }))
     .reverse()
-    .map(({ raw, i }) => ({ id: `${business}:sale:${i}`, at: formatClock(cal, numOf(raw.at)), memo: strOf(raw.memo, "Sale"), cents: numOf(raw.cents) + numOf(raw.tax), account: deposit ? labelOf(ctx, deposit) : labelOf(ctx, business), accountId: deposit ?? business, kind: "sale" as const, category: strOf(raw.category) || null, counterparty: strOf(raw.payer) === "" ? "walk-in customers" : shownName(ctx, viewer, strOf(raw.payer), "a customer"), card: null, status: "posted" as const }));
+    .map(({ raw, i }) => ({ id: `${business}:sale:${i}`, at: formatClock(cal, numOf(raw.at)), memo: strOf(raw.memo, "Sale"), cents: numOf(raw.cents) + numOf(raw.tax), account: deposit ? labelOf(ctx, deposit) : labelOf(ctx, business), accountId: deposit ?? business, kind: "sale" as const, category: strOf(raw.category) || null, counterparty: strOf(raw.payer) === "" ? "Walk-in customers" : shownName(ctx, viewer, strOf(raw.payer), "a customer"), card: null, status: "posted" as const }));
   const invoices = allInvoices(ctx)
     .filter((i) => i.business === business || i.party === business)
     .sort((a, b) => b.issued - a.issued)
@@ -619,6 +619,8 @@ export function businessView(ctx: ReadContext, api: FinanceApi, business: Entity
     role,
     owners: ownerLines(ctx, api, viewer, business),
     accounts: api.accountsOf(ctx, business, "sees"),
+    // The finance view fills these: it knows which accounts it already shows as the viewer's own.
+    managed: [],
     places: placesOf(ctx, business).map((p) => ({ id: p, name: own(ctx.world.places, p)?.name ?? p })),
     books: { period: String(d.year), revenue: year.revenue, expenses: year.expenses, payroll: year.payroll, taxes: year.taxes, profit: year.profit, lines: year.lines },
     months,

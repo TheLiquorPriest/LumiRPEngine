@@ -19,7 +19,7 @@ import type { ReadContext, Rejection } from "../../../engine/registry";
 import { kindIs } from "../../../engine/scope";
 import type { WorldState } from "../../../engine/state";
 import type { FinanceHooks, SaleTerms } from "./module";
-import { isOpened, journalOf, reject, spendOf } from "./journal";
+import { isOpened, journalOf, reject, spendOf, UNSIDED_KINDS } from "./journal";
 import {
   BANK_PREFIX,
   CORRECTION_ACCOUNT,
@@ -427,7 +427,10 @@ export interface TxnMeta {
   memo: string;
   kind?: TxnKind;
   category?: string;
+  /** Who the money goes to: someone in the world by id, else an outside payee by name or key. */
   counterparty?: string;
+  /** Who it comes from, the same way. */
+  payer?: string;
   card?: EntityId;
   flow?: string;
   pending?: number;
@@ -435,13 +438,24 @@ export interface TxnMeta {
   at?: number;
 }
 
-/** A posting's journal lines: the lines on accounts in the world, and what the payment was. */
+/**
+ * A posting's journal lines: the lines on accounts in the world, what the payment was, and its two
+ * sides, so each line can name the one opposite it. A side the poster doesn't name is the account
+ * of its biggest line, which the journal files as whoever holds it; an opening or an adjustment has
+ * no sides.
+ */
 export function txn(lines: readonly PostingLine[], meta: TxnMeta): LedgerEvent {
   const mine = lines.filter((l) => !l.account.startsWith(EXTERNAL_ACCOUNT_PREFIX));
   const data: JsonObject = { memo: meta.memo, lines: mine.map((l) => ({ account: l.account, amount: l.amount })) };
   if (meta.kind) data.kind = meta.kind;
   if (meta.category) data.category = meta.category;
-  if (meta.counterparty) data.counterparty = meta.counterparty;
+  if (!UNSIDED_KINDS.has(meta.kind ?? "")) {
+    const biggest = (sign: number): string | undefined => lines.reduce<PostingLine | undefined>((top, l) => (Math.sign(l.amount) === sign && (top === undefined || Math.abs(l.amount) > Math.abs(top.amount)) ? l : top), undefined)?.account;
+    const payee = meta.counterparty || biggest(1);
+    const payer = meta.payer || biggest(-1);
+    if (payee) data.counterparty = payee;
+    if (payer) data.payer = payer;
+  }
   if (meta.card) data.card = meta.card;
   if (meta.flow) data.flow = meta.flow;
   if (meta.pending !== undefined) {
@@ -567,7 +581,7 @@ export function charge(hooks: FinanceHooks, ctx: ReadContext, payer: EntityId, r
   // The other side by id when it's someone in the world (a view names it, or masks it), else the outside party's name.
   const outside = opts.counterparty === undefined ? undefined : own(ctx.state.entities, opts.counterparty) ? opts.counterparty : opts.counterparty.replace(/_/g, " ");
   const counterparty = terms?.seller ?? opts.payee ?? outside;
-  const meta: TxnMeta = { memo, kind: opts.kind ?? (opts.sale ? "purchase" : "payment"), ...(opts.category ? { category: opts.category } : {}), ...(counterparty ? { counterparty } : {}), ...(picked?.card ? { card: picked.card } : {}), ...(opts.flow ? { flow: opts.flow } : {}), ...(holds ? { pending: at + 1440 } : {}), ...(opts.narrated ? { narrated: opts.narrated } : {}), ...(opts.at !== undefined ? { at: opts.at } : {}) };
+  const meta: TxnMeta = { memo, kind: opts.kind ?? (opts.sale ? "purchase" : "payment"), ...(opts.category ? { category: opts.category } : {}), ...(counterparty ? { counterparty } : {}), payer, ...(picked?.card ? { card: picked.card } : {}), ...(opts.flow ? { flow: opts.flow } : {}), ...(holds ? { pending: at + 1440 } : {}), ...(opts.narrated ? { narrated: opts.narrated } : {}), ...(opts.at !== undefined ? { at: opts.at } : {}) };
   const spend: LedgerEvent[] = [];
   if (picked?.card && opts.sale && Number.isFinite(cardRoom(ctx, picked.card, "purchase"))) {
     const day = dateAt(calendarOf(ctx.world), ctx.state.clock).dayIndex;
@@ -790,7 +804,8 @@ export function setCash(ctx: ReadContext, holder: EntityId, cents: number): Ledg
 export function reprice(ctx: ReadContext, events: readonly LedgerEvent[], cents: number): LedgerEvent[] | Rejection {
   const posts = events.filter((e): e is PostEvent => e.type === "post");
   const purchase = events.find((e) => e.type === FINANCE_EVENTS.txn && "data" in e && e.data.kind === "purchase");
-  const memo = purchase && "data" in purchase ? strOf(purchase.data.memo) : undefined;
+  const was = purchase && "data" in purchase ? purchase.data : undefined;
+  const memo = was !== undefined ? strOf(was.memo) : undefined;
   const post = (memo !== undefined ? posts.find((p) => p.memo === memo) : undefined) ?? (posts.length === 1 && posts[0]?.lines.length === 2 ? posts[0] : undefined);
   const paid = post?.lines.find((l) => l.amount < 0);
   const got = post ? [...post.lines].filter((l) => l.amount > 0).sort((a, b) => b.amount - a.amount)[0] : undefined;
@@ -804,7 +819,10 @@ export function reprice(ctx: ReadContext, events: readonly LedgerEvent[], cents:
     { account: paid.account, amount: -diff },
     { account: got.account, amount: diff },
   ];
-  return asUnit(posting(lines, { memo: note, kind: diff > 0 ? "purchase" : "refund" }));
+  // The purchase's own sides, the other way round for money given back.
+  const seller = strOf(was?.counterparty);
+  const buyer = strOf(was?.payer);
+  return asUnit(posting(lines, { memo: note, kind: diff > 0 ? "purchase" : "refund", counterparty: diff > 0 ? seller : buyer, payer: diff > 0 ? buyer : seller }));
 }
 
 // ---------------------------------------------------------------- signals and notes

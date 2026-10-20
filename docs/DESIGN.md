@@ -1374,7 +1374,7 @@ A flow entity's payer changes it with `flow_update`, which can rename it (`econo
 
 ### 25.6 Journal and holds
 
-Every posting writes a journal line on each account it touches: memo, kind, category, counterparty, card, flow, and status (pending or posted). The journal keeps the last 40 lines per account, monthly totals for 13 months, the last 6 statements and the notes. A hold makes part of a balance unavailable until its time: an authorization, or a deposit's hold days at a cash machine. Release is the GM's control. What can be spent is the balance, less holds, plus overdraft room.
+Every posting writes a journal line on each account it touches: memo, kind, category, its other side, card, flow, and status (pending or posted). A posting records both its sides, who the money came from (`payer`) and who it went to (`counterparty`): the parties or outside payees its poster names, else the holder of the account its biggest line on that side is on. Each line names the side opposite it, so money out names whoever was paid and money in whoever paid it: the shop's takings name its walk-in customers, an invoice paid to it its customer, and the customer's own line the shop. A line whose other side is its own account's holder (money between their own accounts) names no one, and so does an opening or an adjustment. Events from before postings recorded their payer named only the payee: money in from them names whoever in the world paid it where the posting shows them, and a line kept naming its own holder reads as no one. The journal keeps the last 40 lines per account, monthly totals for 13 months, the last 6 statements and the notes. A hold makes part of a balance unavailable until its time: an authorization, or a deposit's hold days at a cash machine. Release is the GM's control. What can be spent is the balance, less holds, plus overdraft room.
 
 ### 25.7 Credit
 
@@ -1398,7 +1398,7 @@ A deposit account's `overdraft` policy decides a payment the balance can't cover
 
 A household is a party its members belong to. Its accounts, the joint accounts every member holds, and its shared flows (paid by it, or split among its members) make its view: who pays what share of the month. `FinanceView` is one party's money at their own level: overview, accounts, cards, flows, jobs, businesses, investments, properties, credit and household. The POV's view is `economy.money`; every party's, POV first, is the GM's `economy.people_money`; and any one party's is `economy.finance`. Player views show "someone" for any party the POV can't see.
 
-A view names whoever is outside the world as a person would (`outsideName`), on a flow's two sides and a journal line's other party alike. The foundation's and the modules' own payees, kept by key, read in words: "Federal tax", "State tax", "Local tax", "Property insurance", "Property upkeep", "Insurer" for a vehicle's premium and "Shops" for living costs. A regional tax names its region from the regions table ("Sales tax (Michigan)", "Property tax (Michigan)"). An outside employer reads as the place or the name its job gives ("The Rusty Anchor"), and a managed property's tenants as "Outside tenant". Any other outside name, an author's or a player's, reads as written.
+A view names whoever is outside the world as a person would (`outsideName`), on a flow's two sides and a journal line's other party alike. The foundation's and the modules' own payees, kept by key, read in words: "Federal tax", "State tax", "Local tax", "Property insurance", "Property upkeep", "Insurer" for a vehicle's premium and "Shops" for living costs. A regional tax names its region from the regions table ("Sales tax (Michigan)", "Property tax (Michigan)"). A bank reads by its name ("Lakeshore Credit Union", or "Bank" where it has none), and so does a cash machine's bank. An outside employer reads as the place or the name its job gives ("The Rusty Anchor"), a managed property's tenants as "Outside tenant", a property's outside buyer or seller as "Buyer" or "Seller", and a holding's market as "Market". Any other outside name, an author's or a player's, reads as written.
 
 ### 25.12 Realism gating
 
@@ -1526,7 +1526,8 @@ Owner draws, distributions, transfers between its own accounts and the sales tax
 - its last 20 sales;
 - its invoices;
 - its staff, with their pay;
-- what it owes for taxes and to its suppliers, with when each is next paid.
+- what it owes for taxes and to its suppliers, with when each is next paid;
+- from Money 3, the accounts it holds that the party manages through it (§25.1) but holds no role on, so they aren't among the party's own (its loan, say), each as the party's own accounts show.
 
 A party's own late invoices, owed or owed to it, are alerts. The modules' sections of a view are told who reads it: the player's surfaces name anyone the player can't see only as "a customer", "an employee" or "an owner", and leave out their ids (an owner line's party, an invoice's customer or business, an employee's worker, where their pay goes, and their job's worker and splits). The GM's views name everyone (§7). A character's money summary for their mind says how a business of theirs is doing this month, and what they owe on an invoice.
 
