@@ -894,7 +894,7 @@ export class Runtime implements TurnHooks {
     const offset = placeOffset(render.world, render.state.clock, placeOfEntity(render.state, render.world.pov));
     const now = `${weekdayName(cal, dateAt(cal, render.state.clock + offset).weekday)} ${formatStamp(cal, render.state.clock, offset)}`;
     const timelapseEntry = { id: TIMELAPSE_ACTION, label: `Let time pass (wait, sleep, skip ahead): minutes for a stated duration; until one of ${[...dayParts, "shift", "commitment"].join(", ")} ("next <day part>" for the following day's); or at a stated day and time, as "YYYY-MM-DD HH:MM" (it is now ${now})`, params: ["minutes", "until", "at"], lexicon: TIMELAPSE_LEXICON };
-    // Answer names the open puzzles the player can see, so a typed "I dial 1887" finds it.
+    // Answer lists the open puzzles the player can see, by their rows' ids, so a typed "I dial 1887" finds one and the id the model gives for it is the row's.
     const puzzles = openPuzzleTitles(this.registry, render.world, render.state);
     const labelOf = (a: ActionDef): string => (a.pack === "story" && a.id === "answer" && puzzles.length > 0 ? `${a.label} (open: ${puzzles.join("; ")})` : a.label);
     // A param naming a table row lists the rows' ids, so the helper answers with one ("athletics", not
@@ -2037,16 +2037,17 @@ export const TYPE_LABELS: Record<ExtractionType, string> = {
 
 /**
  * The puzzles the player can see that take an answer now (`openPuzzles`, up to six), as interpret's
- * Answer label names them: each as its quest log row shows it, "Puzzle — stage". A masked secret
- * reads "Something is going on" with no stage, like any other, so its cue stands in for the stage:
- * all that tells it from another, and never its own label.
+ * Answer label names them: each by the id its quest log row goes by, then as the row shows it,
+ * "id: Puzzle — stage", so the world id the model is told to give for `puzzle` is the row's own (a
+ * masked secret's stand-in). A masked secret reads "Something is going on" with no stage, like any
+ * other, so its cue stands in for the stage: all that tells it from another, and never its own label.
  */
 function openPuzzleTitles(registry: Registry, world: WorldDoc, state: Readonly<WorldState>): string[] {
   return openPuzzles(registry.context(world, state))
     .slice(0, 6)
     .map(({ shown }) => {
       const where = shown.stage || shown.cue;
-      return where ? `${shown.label} — ${where}` : shown.label;
+      return `${shown.id}: ${where ? `${shown.label} — ${where}` : shown.label}`;
     });
 }
 
