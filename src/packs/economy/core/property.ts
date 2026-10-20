@@ -130,6 +130,13 @@ function mortgageRow(ctx: Pick<ReadContext, "tables">): JsonObject {
   return objOf(objOf(ctx.tables.get("economy.finance")?.rows.loans?.values).mortgage);
 }
 
+/** The terms a lender offers a mortgage on, months (the finance table's typical and alternatives; 30 years without a table). */
+function mortgageTerms(ctx: Pick<ReadContext, "tables">): number[] {
+  const t = objOf(mortgageRow(ctx).term_months);
+  const terms = [t.typical, ...(Array.isArray(t.alternatives) ? t.alternatives : [])].filter((v): v is number => typeof v === "number" && v > 0);
+  return terms.length > 0 ? terms : [360];
+}
+
 /** Property tax a year, percent of value: the property's own rate, else its region's effective rate, else the table's typical. */
 export function propertyTaxPct(ctx: ReadContext, id: EntityId): number {
   const region = objOf(own(objOf(ctx.tables.get("economy.regions")?.rows), regionOf(ctx, id)));
@@ -378,8 +385,8 @@ export interface PropertyBuy {
   from?: EntityId;
   /** Paid in cash at once; the rest is a mortgage. Absent: the whole price in cash. */
   down?: number;
+  /** One of the terms lenders offer (`mortgageTerms`); absent, the usual one. The rate is the lender's. */
   term_months?: number;
-  apr_pct?: number;
 }
 
 /**
@@ -404,6 +411,15 @@ export function buyProperty(api: FinanceApi, ctx: EffectContext | ReadContext, x
   const down = Math.round(x.down ?? price);
   if (down < 0 || down > price) return reject("bad_amount", "a down payment is between nothing and the price");
   const financed = price - down;
+  // A lender wants its share down, and lends for the terms it offers.
+  const leastDown = Math.ceil((price * numOf(objOf(mortgageRow(ctx).down_payment_pct).minimum_conventional, 3)) / 100);
+  if (financed > 0 && down < leastDown) return reject("declined", `a lender wants at least ${money(leastDown)} down on ${e.name}`);
+  const terms = mortgageTerms(ctx);
+  const term = x.term_months ?? terms[0] ?? 360;
+  if (financed > 0 && !terms.includes(term)) {
+    const years = [...terms].sort((a, b) => a - b).map((m) => String(Math.round((m / 12) * 10) / 10));
+    return reject("bad_term", `lenders offer mortgages over ${years.length > 1 ? `${years.slice(0, -1).join(", ")} or ${years[years.length - 1]}` : years[0]} years`);
+  }
   const from = x.from ?? api.depositAccount(ctx, x.party);
   if (!from) return reject("no_account", `${labelOf(ctx, x.party)} has no account to pay from`);
   const unusableFrom = api.mayUse(ctx, x.party, from, "from");
@@ -413,7 +429,8 @@ export function buyProperty(api: FinanceApi, ctx: EffectContext | ReadContext, x
   if (financed > 0) {
     mortgage = `${x.property}:mortgage`;
     for (let i = 2; own(ctx.state.entities, mortgage); i++) mortgage = `${x.property}:mortgage:${i}`;
-    const opened = api.openAccount(ctx, { id: mortgage, name: `Mortgage, ${e.name}`, product: "mortgage", owners: [{ party: x.party, role: "owner" }], cents: financed, into: api.outside(`closing:${x.property}`), ...(x.term_months ? { term_months: x.term_months } : {}), ...(x.apr_pct !== undefined ? { apr_pct: x.apr_pct } : {}), secured_by: x.property });
+    // The lender decides, at the buyer's credit (`applyCredit`): the rate, and whether it lends this much against the property at all.
+    const opened = api.applyCredit(ctx, x.party, { product: "mortgage", cents: financed, term_months: term, secured_by: x.property, into: api.outside(`closing:${x.property}`), id: mortgage, name: `Mortgage, ${e.name}` });
     if (isRejection(opened)) return opened;
     events.push(...opened);
   }
@@ -765,14 +782,13 @@ export function registerProperty(r: FinanceRegistry): void {
   const party = (a: Record<string, JsonValue>, ctx: ReadContext): EntityId => s(a, "party") ?? ctx.world.pov;
   r.core.effect({
     type: "economy.property_buy",
-    args: ["property", "price?", "from?", "down?", "term_months?", "apr_pct?", "party?"],
+    args: ["property", "price?", "from?", "down?", "term_months?", "party?"],
     resolve: (a, ctx) => {
       const price = n(a, "price");
       const from = s(a, "from");
       const down = n(a, "down");
       const term = n(a, "term_months");
-      const apr = n(a, "apr_pct");
-      return buyProperty(r.api, ctx, { party: party(a, ctx), property: strOf(a.property), ...(price !== undefined ? { price } : {}), ...(from ? { from } : {}), ...(down !== undefined ? { down } : {}), ...(term !== undefined ? { term_months: term } : {}), ...(apr !== undefined ? { apr_pct: apr } : {}) });
+      return buyProperty(r.api, ctx, { party: party(a, ctx), property: strOf(a.property), ...(price !== undefined ? { price } : {}), ...(from ? { from } : {}), ...(down !== undefined ? { down } : {}), ...(term !== undefined ? { term_months: term } : {}) });
     },
   });
   r.core.effect({
@@ -802,9 +818,9 @@ export function registerProperty(r: FinanceRegistry): void {
     id: "property_buy",
     label: "Buy a property",
     pack: "economy",
-    params: { property: { type: "ref", ref: "property" }, price: { type: "money", label: "Offer", optional: true }, from: { type: "ref", ref: "account", label: "Pay from", optional: true }, down: { type: "money", label: "Down payment (the rest on a mortgage)", optional: true }, term_months: { type: "number", label: "Mortgage term, months", optional: true }, apr_pct: { type: "number", label: "Mortgage APR %", optional: true } },
+    params: { property: { type: "ref", ref: "property" }, price: { type: "money", label: "Offer", optional: true }, from: { type: "ref", ref: "account", label: "Pay from", optional: true }, down: { type: "money", label: "Down payment (the rest on a mortgage)", optional: true }, term_months: { type: "number", label: "Mortgage term, months (one a lender offers)", optional: true } },
     requires,
-    outcomes: { default: [{ type: "economy.property_buy", args: { party: "self", property: "property", price: "=params.price", from: "=params.from", down: "=params.down", term_months: "=params.term_months", apr_pct: "=params.apr_pct" } }] },
+    outcomes: { default: [{ type: "economy.property_buy", args: { party: "self", property: "property", price: "=params.price", from: "=params.from", down: "=params.down", term_months: "=params.term_months" } }] },
     duration: "60",
     lexicon: ["buy the house", "buy the property", "make an offer on"],
     observable: "signs a stack of papers",

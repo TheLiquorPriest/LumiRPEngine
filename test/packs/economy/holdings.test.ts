@@ -452,7 +452,7 @@ describe("holdings: property", () => {
       world.entities.cabin = { id: "cabin", kind: "property", name: "The cabin", tier: "background", fields: { place: "apartment", owners: [], value: 20_000_000, asking_price: 20_000_000 }, relations: [] };
       world.entities.savings!.fields.opening = 6_500_000;
     });
-    run(w, "economy.property_buy", { party: "you", property: "cabin", from: "savings", down: 4_000_000, term_months: 360, apr_pct: 6.4 });
+    run(w, "economy.property_buy", { party: "you", property: "cabin", from: "savings", down: 4_000_000, term_months: 360 });
     const mortgage = String(w.state.entities.cabin?.fields.mortgage ?? "");
     expect(w.state.entities[mortgage]?.fields.secured_by).toBe("cabin");
     expect(balance(w, mortgage)).toBe(-16_000_000);
@@ -491,6 +491,38 @@ describe("holdings: property", () => {
     run(w, "economy.property_buy", { party: "you", property: "lot", from: "savings" });
     expect(w.state.entities.lot?.fields.owners).toEqual([{ party: "you", role: "owner", share: 100 }]);
     expect(balance(w, "savings")).toBe(5_000_000);
+    expect(trialBalance(w.state)).toBe(0);
+  });
+
+  test("a mortgage is the lender's: its rate at the buyer's score, its terms, at least 3 % down and no more than the property is worth", () => {
+    const cabin = (world: WorldDoc): void => {
+      world.realism.levels.money = 4;
+      world.entities.cabin = { id: "cabin", kind: "property", name: "The cabin", tier: "background", fields: { place: "apartment", owners: [], value: 20_000_000, asking_price: 20_000_000 }, relations: [] };
+      world.entities.savings!.fields.opening = 6_500_000;
+    };
+    const w = setup(cabin);
+    const buy = (args: JsonObject): JsonObject => ({ party: "you", property: "cabin", from: "savings", ...args });
+    const savings = balance(w, "savings");
+    // All of it on a mortgage, a term no lender offers, or $260,000 lent against a $200,000 cabin: each refused, nothing changes hands.
+    expect(refuse(w, "economy.property_buy", buy({ down: 0 }))).toBe("declined");
+    expect(refuse(w, "economy.property_buy", buy({ down: 4_000_000, term_months: 7 }))).toBe("bad_term");
+    w.apply({ type: "set", entity: "cabin", field: "asking_price", value: 30_000_000 });
+    expect(refuse(w, "economy.property_buy", buy({ down: 4_000_000 }))).toBe("declined");
+    w.apply({ type: "set", entity: "cabin", field: "asking_price", value: 20_000_000 });
+    expect(w.state.entities.cabin?.fields.owners).toEqual([]);
+    expect(balance(w, "savings")).toBe(savings);
+    // The rate is what applying for the same mortgage gets, whatever the buyer names.
+    const twin = setup(cabin);
+    const applied = run(twin, "economy.apply_credit", { product: "mortgage", cents: 16_000_000, term: 180, secured_by: "cabin", who: "you" });
+    const offered = applied.flatMap((e) => (e.type === "spawn" && e.entity.kind === "account" ? [e.entity.fields.apr_pct] : []));
+    expect(offered).toHaveLength(1);
+    expect(offered[0]).toBeGreaterThan(0);
+    const events = run(w, "economy.property_buy", buy({ down: 4_000_000, term_months: 180, apr_pct: 0 }));
+    const mortgage = String(w.state.entities.cabin?.fields.mortgage ?? "");
+    expect(w.state.entities[mortgage]?.fields).toMatchObject({ apr_pct: offered[0], term_months: 180, secured_by: "cabin" });
+    expect(balance(w, mortgage)).toBe(-16_000_000);
+    // The application goes on the buyer's credit report, as any does.
+    expect(events.filter((e) => e.type === "economy.credit" && JSON.stringify(e).includes("inquiry"))).toHaveLength(1);
     expect(trialBalance(w.state)).toBe(0);
   });
 

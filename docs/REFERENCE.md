@@ -534,7 +534,7 @@ Extends `thing`.
 | `economy.owner_draw` | `business`, `cents`, `owner?`, `by?` |
 | `economy.pay_card` | `card`, `from?`, `cents?`, `who?` |
 | `economy.price_modifier` | `percent`, `scope?`, `place?`, `minutes?`, `id?`, `clear?` |
-| `economy.property_buy` | `property`, `price?`, `from?`, `down?`, `term_months?`, `apr_pct?`, `party?` |
+| `economy.property_buy` | `property`, `price?`, `from?`, `down?`, `term_months?`, `party?` |
 | `economy.property_sell` | `property`, `price`, `buyer?`, `to?`, `party?` |
 | `economy.release_hold` | `account`, `hold` |
 | `economy.route` | `holding?`, `property?`, `business?`, `to?`, `party?` |
@@ -598,7 +598,7 @@ Extends `thing`.
 | `owner_draw` | Take an owner's draw | `business: ref → business`, `amount: money` |  | `default` | `5` | take a draw, pay myself, take money out of the business |
 | `pay` | Pay | `to: ref → person`, `amount: money` |  | `default` | `1` | pay, give money, send money, venmo |
 | `pay_card` | Pay card or loan | `card: ref → account`, `from?: ref → account`, `amount?: money` |  | `default` | `2` | pay off the card, pay the card, pay my credit card, make a loan payment |
-| `property_buy` | Buy a property | `property: ref → property`, `price?: money`, `from?: ref → account`, `down?: money`, `term_months?: number`, `apr_pct?: number` |  | `default` | `60` | buy the house, buy the property, make an offer on |
+| `property_buy` | Buy a property | `property: ref → property`, `price?: money`, `from?: ref → account`, `down?: money`, `term_months?: number` |  | `default` | `60` | buy the house, buy the property, make an offer on |
 | `property_sell` | Sell a property | `property: ref → property`, `price: money`, `buyer?: ref → person`, `to?: ref → account` |  | `default` | `60` | sell the house, sell the property |
 | `route_distributions` | Route dividends, rent or profits | `holding?: ref → holding`, `property?: ref → property`, `business?: ref → business`, `to?: text` |  | `default` | `1` | reinvest dividends, send dividends to, send the rent to |
 | `set_autopay` | Set autopay | `account: ref → account`, `mode: text`, `from?: ref → account`, `amount?: money` |  | `default` | `2` | set up autopay, turn on autopay, turn off autopay |
