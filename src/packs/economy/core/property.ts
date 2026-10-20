@@ -265,6 +265,11 @@ function isOver(l: { end: number | null; status: string }, at: number): boolean 
   return l.status === "ended" || (l.end !== null && at >= l.end);
 }
 
+/** Whether a lease holds its unit at a clock reading: begun and not over, paid or paused, since a paused lease's tenant still lives there. */
+function holdsUnit(l: { start: number | null; end: number | null; status: string }, at: number): boolean {
+  return !isOver(l, at) && (l.start === null || l.start <= at);
+}
+
 function monthIndex(world: ReadContext["world"], clock: number): number {
   const cal = calendarOf(world);
   const d = dateAt(cal, clock);
@@ -288,7 +293,7 @@ export interface ManagedLease {
 }
 
 /**
- * The outside leases of a managed property's units that no lease entity covers: per unit, the lease
+ * The outside leases of a managed property's units that no lease entity holds: per unit, the lease
  * in force at `at` (if any) and the one after it. A unit's leases run back to back, the first begun
  * a few months before the letting did (each unit's own offset), with a vacancy after each drawn
  * from the ids, about `vacancy_months` on average. Each lease's rent is the market rent grown at the
@@ -299,7 +304,7 @@ export function managedLeases(ctx: ReadContext, id: EntityId, at: number = ctx.s
   const marketRent = numOf(f.market_rent);
   if (f.managed !== true || marketRent <= 0) return [];
   const units = Math.max(1, Math.round(numOf(f.units, 1)));
-  const covered = authoredLeases(ctx, id).filter((l) => inForce(l, at)).length;
+  const covered = authoredLeases(ctx, id).filter((l) => holdsUnit(l, at)).length;
   const term = Math.max(1, Math.round(numOf(f.lease_months, 12)));
   const vacancy = Math.max(0, Math.round(numOf(f.vacancy_months, 1)));
   const since = clockOfDate(ctx.world, f.let_from as JsonValue) ?? clockOfDate(ctx.world, ctx.world.start.at) ?? 0;
@@ -499,11 +504,6 @@ export function buyProperty(api: FinanceApi, ctx: EffectContext | ReadContext, x
   ]);
 }
 
-/** Whether a lease is still to run: active and not past its last day (it may not have started). */
-function notOver(l: { end: number | null; status: string }, at: number): boolean {
-  return l.status === "active" && (l.end === null || at < l.end);
-}
-
 /** Whether a lease pays the given owners: its payee is one of them, or an account one of them holds. */
 function paysOwners(api: FinanceApi, ctx: ReadContext, lease: EntityId, owners: readonly EntityId[]): boolean {
   const to = strOf(fieldsOf(ctx.state, lease).to);
@@ -531,7 +531,7 @@ function moveLeases(api: FinanceApi, ctx: ReadContext, property: EntityId, owner
   const out: LedgerEvent[] = [];
   const side = ownersSide(api, ctx, next);
   for (const l of authoredLeases(ctx, property)) {
-    if (!notOver(l, ctx.state.clock) || !paysOwners(api, ctx, l.id, owners)) continue;
+    if (isOver(l, ctx.state.clock) || !paysOwners(api, ctx, l.id, owners)) continue;
     out.push(...(side ? repoint(api, ctx, l.id, side) : [{ type: "set" as const, entity: l.id, field: "end", value: dateText(ctx.world, ctx.state.clock) }]));
   }
   return out;
@@ -547,7 +547,7 @@ export function routeRent(api: FinanceApi, ctx: ReadContext, property: EntityId,
   const side = rentSide(api, ctx, property, route);
   if (!side) return out;
   const owners = api.ownersOf(ctx.state, property).map((o) => o.party);
-  for (const l of authoredLeases(ctx, property)) if (notOver(l, ctx.state.clock) && paysOwners(api, ctx, l.id, owners)) out.push(...repoint(api, ctx, l.id, side));
+  for (const l of authoredLeases(ctx, property)) if (!isOver(l, ctx.state.clock) && paysOwners(api, ctx, l.id, owners)) out.push(...repoint(api, ctx, l.id, side));
   return unit(out);
 }
 
@@ -648,7 +648,7 @@ export function startLease(api: FinanceApi, ctx: ReadContext, x: LeaseStart): Le
   const rent = Math.round(x.rent);
   if (!(rent > 0)) return reject("bad_amount", "rent is above nothing");
   const units = Math.max(1, Math.round(numOf(e.fields.units, 1)));
-  if (authoredLeases(ctx, x.property).filter((l) => inForce(l, ctx.state.clock)).length >= units) return reject("full", `every unit of ${e.name} is let`);
+  if (authoredLeases(ctx, x.property).filter((l) => holdsUnit(l, ctx.state.clock)).length >= units) return reject("full", `every unit of ${e.name} is let`);
   if (x.from) {
     const unusable = api.mayUse(ctx, x.tenant, x.from, "from");
     if (unusable) return unusable;

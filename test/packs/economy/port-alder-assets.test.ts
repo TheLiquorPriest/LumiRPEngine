@@ -124,6 +124,16 @@ describe("Port Alder's holdings and property", () => {
     expect(vacant("marcus_delgado", "prop_birch_lane_12")).toBe(1);
   });
 
+  test("the POV pausing its rent keeps its flat its own: 114 Harbor Street still shows its lease as let, and lets no outside tenant into the flat", () => {
+    const w = portAlder();
+    const lines = (): [string, string][] => (w.ctx.query("economy.finance")(w.ctx, "helen_kowalczyk", false).properties.find((p) => p.id === "prop_harbor_114")?.leases ?? []).map((l) => [l.flow, l.state]);
+    const before = lines();
+    expect(before.filter(([, state]) => state === "let")).toHaveLength(3);
+    // As the hub's Pause on the POV's rent does.
+    w.apply({ type: "set", entity: "bill_rent", field: "status", value: "paused" });
+    expect(lines()).toEqual(before);
+  });
+
   test("on a property the POV owns with someone it can't see, that owner shows as someone, with no id", () => {
     const w = portAlder([], (world) => {
       // Priya is someone the POV knows only once it meets her.
