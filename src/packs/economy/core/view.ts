@@ -21,7 +21,7 @@ import { statementState } from "./cycle";
 import { creditReport } from "./credit";
 import { allFlows, fallsBackOn, occurrences, occurrenceAmount } from "./flows";
 import { cycleOf, flowRunOf, isOpened, journalOf, NOTES_CAP } from "./journal";
-import { accountsOf, availableOf, balance, canSpend, classOf, holdersOf, holdsOn, householdOf, managesAccount, managesParty, opaqueId, openerOf, outsideHidden, outsideName, ownersOf, productOf, rightsOf, statusOf, traitsOf, wealthBand } from "./model";
+import { accountsOf, availableOf, balance, canSpend, classOf, holdersOf, holdsOn, householdOf, managesAccount, managesParty, opaqueId, openerOf, outsideHidden, outsideName, ownersOf, productOf, rightsOf, shareOf, statusOf, traitsOf, wealthBand } from "./model";
 import { cardsOn, cardRoom, featureFor, isParty, overdraftRoom, tiersOf, toggles } from "./pay";
 import { netWorthParts } from "./worth";
 import { createRng } from "../../../engine/rng";
@@ -335,9 +335,11 @@ function flowView(hooks: FinanceHooks, ctx: ReadContext, viewer: Viewer, party: 
   // The flow as stored goes out only when every side of it is someone the viewer can see.
   const sides = [f.from, f.to, f.fallback ?? "", f.link ?? "", ...(f.splits ?? []).map((s) => s.to), ...(f.shares ?? []).flatMap((s) => [s.party, s.from ?? ""])].filter((id) => id !== "");
   const seen = sides.every((id) => sideSeen(ctx, viewer, id));
+  // What the party acts on by its id: a flow theirs to change, or a lease of a property they own a share of, which they may end (`lease_end`).
+  const actsOn = editable || (f.kind === "rent" && f.link !== undefined && shareOf(ctx.state, f.link, party) > 0);
   return {
-    // Nor, unless it's theirs to change, does its id, which can name whom it's for (`pay:<job>`, an author's `bill_jess_household`).
-    id: seen || editable ? f.id : opaqueId(f.id),
+    // Nor, unless they act on it by it, does its id, which can name whom it's for (`pay:<job>`, an author's `bill_jess_household`).
+    id: seen || actsOn ? f.id : opaqueId(f.id),
     label: f.label,
     kind: f.kind,
     from: sideName(ctx, viewer, f.from),
