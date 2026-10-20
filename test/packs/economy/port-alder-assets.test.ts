@@ -95,12 +95,43 @@ describe("Port Alder's holdings and property", () => {
     const w = portAlder();
     w.apply({ type: "set", entity: "prop_birch_lane_12", field: "asking_price", value: 35_000_000 });
     const view = w.ctx.query("economy.finance")(w.ctx, w.world.pov, true);
-    expect(view.properties.find((p) => p.id === "prop_birch_lane_12")).toEqual({ id: "prop_birch_lane_12", name: "Marcus's house", place: null, owners: [], share: 0, value: 34_000_000, equity: 0, forSale: 35_000_000, mortgage: null, leases: [], costs: [], route: null });
+    // The terms its lenders offer come with it, from the starter's finance table, so the Buy form offers those.
+    expect(view.properties.find((p) => p.id === "prop_birch_lane_12")).toEqual({ id: "prop_birch_lane_12", name: "Marcus's house", place: null, owners: [], share: 0, value: 34_000_000, equity: 0, forSale: 35_000_000, mortgageTerms: [{ months: 360, usual: true }, { months: 240, usual: false }, { months: 180, usual: false }], mortgage: null, leases: [], costs: [], route: null });
     const text = JSON.stringify(view);
     for (const hidden of ["Birch Lane", "Marcus's mortgage", "acct_marcus_mortgage"]) expect(text).not.toContain(hidden);
     // Marcus's own view, as the GM sees it, still shows all of it.
     const his = w.ctx.query("economy.finance")(w.ctx, "marcus_delgado", false).properties.find((p) => p.id === "prop_birch_lane_12");
     expect([his?.place, his?.mortgage?.id, his?.owners.map((o) => o.name)]).toEqual(["12 Birch Lane", "acct_marcus_mortgage", ["Marcus Delgado"]]);
+  });
+
+  test("Marcus lives in his house, so it stands vacant for nobody; the POV, who lives on Harbor Street, would have it vacant until let; Helen's building is her home too, and its three units are the ones to let", () => {
+    const w = portAlder();
+    const pov = w.world.pov;
+    const leases = (who: string, property: string): { state: string }[] => w.ctx.query("economy.finance")(w.ctx, who, who === pov).properties.find((p) => p.id === property)?.leases ?? [];
+    const vacant = (who: string, property: string): number => leases(who, property).filter((l) => l.state === "vacant").length;
+    // His home names no units to let: no line for it, so nothing about it needs him.
+    expect(leases("marcus_delgado", "prop_birch_lane_12")).toEqual([]);
+    // 114 Harbor Street's three units are to let besides the Kowalczyks' own flat: all let, and with the outside letting stopped, the one no lease covers stands vacant.
+    expect(vacant("helen_kowalczyk", "prop_harbor_114")).toBe(0);
+    w.apply({ type: "set", entity: "prop_harbor_114", field: "managed", value: false });
+    expect(vacant("helen_kowalczyk", "prop_harbor_114")).toBe(1);
+    // Owned by the POV, the house is nobody's home: one unit to let, vacant.
+    w.apply({ type: "set", entity: "prop_birch_lane_12", field: "owners", value: [{ party: pov, role: "owner", share: 100 }] });
+    expect(vacant(pov, "prop_birch_lane_12")).toBe(1);
+    // And Marcus's again once he has moved out.
+    w.apply({ type: "set", entity: "prop_birch_lane_12", field: "owners", value: [{ party: "marcus_delgado", role: "owner", share: 100 }] });
+    w.apply({ type: "set", entity: "marcus_delgado", field: "home", value: "harbor_street_114" });
+    expect(vacant("marcus_delgado", "prop_birch_lane_12")).toBe(1);
+  });
+
+  test("the POV pausing its rent keeps its flat its own: 114 Harbor Street still shows its lease as let, and lets no outside tenant into the flat", () => {
+    const w = portAlder();
+    const lines = (): [string, string][] => (w.ctx.query("economy.finance")(w.ctx, "helen_kowalczyk", false).properties.find((p) => p.id === "prop_harbor_114")?.leases ?? []).map((l) => [l.flow, l.state]);
+    const before = lines();
+    expect(before.filter(([, state]) => state === "let")).toHaveLength(3);
+    // As the hub's Pause on the POV's rent does.
+    w.apply({ type: "set", entity: "bill_rent", field: "status", value: "paused" });
+    expect(lines()).toEqual(before);
   });
 
   test("on a property the POV owns with someone it can't see, that owner shows as someone, with no id", () => {

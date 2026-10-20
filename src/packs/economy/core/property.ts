@@ -8,8 +8,9 @@
 // author or the landlord starts is a `flow` entity linked to the property; a property let to
 // outside tenants (`managed`) lets each unit no lease covers, one lease after another at the market
 // rent of its day, with a vacancy between tenants drawn from the property's and unit's ids, so it is
-// the same on every fold. A unit without a lease is vacant. Buying and selling settle the mortgages
-// the property secures, move its leases to the new owner and realise the seller's gain.
+// the same on every fold. A unit to let without a lease is vacant; a house its owner lives in has
+// none to let. Buying and selling settle the mortgages the property secures, move its leases to the
+// new owner and realise the seller's gain.
 
 import type { EntityId } from "../../../shared/ids";
 import type { JsonObject, JsonValue } from "../../../shared/json";
@@ -26,7 +27,7 @@ import type { WorldState } from "../../../engine/state";
 import { canSeeEntity, canSeePlace } from "../../../engine/visibility";
 import type { AmountProvider, FinanceApi, FinanceRegistry, FlowPosting } from "./module";
 import { addMonths, clockOfDate, dateText, instantIn, investingRows, reject } from "./assets";
-import { acquisition, disposal } from "./gains";
+import { acquisition, disposal, isHome } from "./gains";
 import { shownRoute, unit } from "./holdings";
 import { paymentMonths } from "./income";
 import { isOpened } from "./journal";
@@ -130,11 +131,17 @@ function mortgageRow(ctx: Pick<ReadContext, "tables">): JsonObject {
   return objOf(objOf(ctx.tables.get("economy.finance")?.rows.loans?.values).mortgage);
 }
 
-/** The terms a lender offers a mortgage on, months (the finance table's typical and alternatives; 30 years without a table). */
+/** The terms a lender offers a mortgage on, months, the usual first (the finance table's typical and alternatives; 30 years without a table). */
 function mortgageTerms(ctx: Pick<ReadContext, "tables">): number[] {
   const t = objOf(mortgageRow(ctx).term_months);
   const terms = [t.typical, ...(Array.isArray(t.alternatives) ? t.alternatives : [])].filter((v): v is number => typeof v === "number" && v > 0);
-  return terms.length > 0 ? terms : [360];
+  return terms.length > 0 ? [...new Set(terms)] : [360];
+}
+
+/** The terms as a purchase form offers them: longest first, the one a purchase gets when none is chosen marked usual. */
+function offeredTerms(ctx: Pick<ReadContext, "tables">): { months: number; usual: boolean }[] {
+  const terms = mortgageTerms(ctx);
+  return [...terms].sort((a, b) => b - a).map((months) => ({ months, usual: months === terms[0] }));
 }
 
 /** Property tax a year, percent of value: the property's own rate, else its region's effective rate, else the table's typical. */
@@ -253,6 +260,16 @@ function inForce(l: { start: number | null; end: number | null; status: string }
   return l.status === "active" && (l.start === null || l.start <= at) && (l.end === null || at < l.end);
 }
 
+/** Whether a lease is over at a clock reading: cancelled, or past its last day. A paused one isn't: its tenant keeps the unit. */
+function isOver(l: { end: number | null; status: string }, at: number): boolean {
+  return l.status === "ended" || (l.end !== null && at >= l.end);
+}
+
+/** Whether a lease holds its unit at a clock reading: begun and not over, paid or paused, since a paused lease's tenant still lives there. */
+function holdsUnit(l: { start: number | null; end: number | null; status: string }, at: number): boolean {
+  return !isOver(l, at) && (l.start === null || l.start <= at);
+}
+
 function monthIndex(world: ReadContext["world"], clock: number): number {
   const cal = calendarOf(world);
   const d = dateAt(cal, clock);
@@ -276,7 +293,7 @@ export interface ManagedLease {
 }
 
 /**
- * The outside leases of a managed property's units that no lease entity covers: per unit, the lease
+ * The outside leases of a managed property's units that no lease entity holds: per unit, the lease
  * in force at `at` (if any) and the one after it. A unit's leases run back to back, the first begun
  * a few months before the letting did (each unit's own offset), with a vacancy after each drawn
  * from the ids, about `vacancy_months` on average. Each lease's rent is the market rent grown at the
@@ -287,7 +304,7 @@ export function managedLeases(ctx: ReadContext, id: EntityId, at: number = ctx.s
   const marketRent = numOf(f.market_rent);
   if (f.managed !== true || marketRent <= 0) return [];
   const units = Math.max(1, Math.round(numOf(f.units, 1)));
-  const covered = authoredLeases(ctx, id).filter((l) => inForce(l, at)).length;
+  const covered = authoredLeases(ctx, id).filter((l) => holdsUnit(l, at)).length;
   const term = Math.max(1, Math.round(numOf(f.lease_months, 12)));
   const vacancy = Math.max(0, Math.round(numOf(f.vacancy_months, 1)));
   const since = clockOfDate(ctx.world, f.let_from as JsonValue) ?? clockOfDate(ctx.world, ctx.world.start.at) ?? 0;
@@ -335,18 +352,34 @@ function managedFlow(api: FinanceApi, ctx: ReadContext, id: EntityId, l: Managed
   };
 }
 
-/** A property's leases as its view lists them: each lease, then a vacant line for each unit without one. */
+/**
+ * How many of a property's units are to let, and so stand vacant when no lease covers them: its
+ * `units` when its author gives them (units to let: an owner's own flat in the building isn't one);
+ * else one, or none when one of its owners lives in it, since a house its owner lives in is their
+ * home, not a unit to let (a lease they start on it anyway still shows as let).
+ */
+function unitsToLet(api: FinanceApi, state: Readonly<WorldState>, id: EntityId): number {
+  const units = num(fieldsOf(state, id).units);
+  if (units !== undefined) return Math.max(1, Math.round(units));
+  return api.ownersOf(state, id).some((o) => isHome(state, id, o.party)) ? 0 : 1;
+}
+
+/**
+ * A property's leases as its view lists them: each lease, then a vacant line for each unit to let
+ * that none holds. A lease holds its unit until it's over, so one signed to begin later or paused
+ * shows as let, and its unit isn't vacant beside it.
+ */
 function leaseViews(api: FinanceApi, ctx: ReadContext, id: EntityId, viewer: EntityId): LeaseView[] {
   const now = ctx.state.clock;
-  const units = Math.max(1, Math.round(numOf(fieldsOf(ctx.state, id).units, 1)));
+  const units = unitsToLet(api, ctx.state, id);
   const out: LeaseView[] = [];
   let let_ = 0;
   for (const l of authoredLeases(ctx, id)) {
-    const live = inForce(l, now);
-    if (live) let_++;
+    const over = isOver(l, now);
+    if (!over) let_++;
     // The tenant is whoever holds the account the rent is paid from.
     const tenant = own(ctx.state.entities, l.tenant)?.kind === "account" ? (api.ownersOf(ctx.state, l.tenant)[0]?.party ?? l.tenant) : l.tenant;
-    out.push({ flow: l.id, tenant: shownName(ctx, viewer, tenant, "a tenant"), rent: l.rent, start: l.start === null ? null : dateText(ctx.world, l.start), end: l.end === null ? null : dateText(ctx.world, l.end - 1440), state: live ? "let" : l.end !== null && l.end <= now ? "ended" : "vacant" });
+    out.push({ flow: l.id, tenant: shownName(ctx, viewer, tenant, "a tenant"), rent: l.rent, start: l.start === null ? null : dateText(ctx.world, l.start), end: l.end === null ? null : dateText(ctx.world, l.end - 1440), state: over ? "ended" : "let" });
   }
   for (const l of managedLeases(ctx, id)) {
     const from = monthStart(ctx.world, l.from);
@@ -471,11 +504,6 @@ export function buyProperty(api: FinanceApi, ctx: EffectContext | ReadContext, x
   ]);
 }
 
-/** Whether a lease is still to run: active and not past its last day (it may not have started). */
-function notOver(l: { end: number | null; status: string }, at: number): boolean {
-  return l.status === "active" && (l.end === null || at < l.end);
-}
-
 /** Whether a lease pays the given owners: its payee is one of them, or an account one of them holds. */
 function paysOwners(api: FinanceApi, ctx: ReadContext, lease: EntityId, owners: readonly EntityId[]): boolean {
   const to = strOf(fieldsOf(ctx.state, lease).to);
@@ -503,7 +531,7 @@ function moveLeases(api: FinanceApi, ctx: ReadContext, property: EntityId, owner
   const out: LedgerEvent[] = [];
   const side = ownersSide(api, ctx, next);
   for (const l of authoredLeases(ctx, property)) {
-    if (!notOver(l, ctx.state.clock) || !paysOwners(api, ctx, l.id, owners)) continue;
+    if (isOver(l, ctx.state.clock) || !paysOwners(api, ctx, l.id, owners)) continue;
     out.push(...(side ? repoint(api, ctx, l.id, side) : [{ type: "set" as const, entity: l.id, field: "end", value: dateText(ctx.world, ctx.state.clock) }]));
   }
   return out;
@@ -519,7 +547,7 @@ export function routeRent(api: FinanceApi, ctx: ReadContext, property: EntityId,
   const side = rentSide(api, ctx, property, route);
   if (!side) return out;
   const owners = api.ownersOf(ctx.state, property).map((o) => o.party);
-  for (const l of authoredLeases(ctx, property)) if (notOver(l, ctx.state.clock) && paysOwners(api, ctx, l.id, owners)) out.push(...repoint(api, ctx, l.id, side));
+  for (const l of authoredLeases(ctx, property)) if (!isOver(l, ctx.state.clock) && paysOwners(api, ctx, l.id, owners)) out.push(...repoint(api, ctx, l.id, side));
   return unit(out);
 }
 
@@ -620,7 +648,7 @@ export function startLease(api: FinanceApi, ctx: ReadContext, x: LeaseStart): Le
   const rent = Math.round(x.rent);
   if (!(rent > 0)) return reject("bad_amount", "rent is above nothing");
   const units = Math.max(1, Math.round(numOf(e.fields.units, 1)));
-  if (authoredLeases(ctx, x.property).filter((l) => inForce(l, ctx.state.clock)).length >= units) return reject("full", `every unit of ${e.name} is let`);
+  if (authoredLeases(ctx, x.property).filter((l) => holdsUnit(l, ctx.state.clock)).length >= units) return reject("full", `every unit of ${e.name} is let`);
   if (x.from) {
     const unusable = api.mayUse(ctx, x.tenant, x.from, "from");
     if (unusable) return unusable;
@@ -695,7 +723,11 @@ export function propertyView(api: FinanceApi, ctx: ReadContext, id: EntityId, pa
   const place = strOf(e?.fields.place);
   const asking = num(e?.fields.asking_price);
   const shownPlace = place === "" || (party === ctx.world.pov && !canSeePlace(ctx.registry, ctx.world, ctx.state, party, place)) ? null : (own(ctx.world.places, place)?.name ?? labelOf(ctx, place));
-  if (!api.ownersOf(ctx.state, id).some((o) => o.party === party)) return { id, name: e?.name ?? id, place: shownPlace, owners: [], share: 0, value, equity: 0, forSale: asking ?? null, mortgage: null, leases: [], costs: [], route: null };
+  if (!api.ownersOf(ctx.state, id).some((o) => o.party === party)) {
+    // One they may buy, as a purchase allows, carries the terms a lender offers, so a form offers those and no others.
+    const mayBuy = api.feature(ctx, party, "property") && (asking !== undefined || payers(api, ctx.state, id).owners.length === 0);
+    return { id, name: e?.name ?? id, place: shownPlace, owners: [], share: 0, value, equity: 0, forSale: asking ?? null, mortgage: null, leases: [], costs: [], route: null, ...(mayBuy ? { mortgageTerms: offeredTerms(ctx) } : {}) };
+  }
   const loans = securedLoans(api, ctx.state, id);
   const loan = loans.find((l) => l.owed > 0);
   const owed = loans.reduce((a, l) => a + l.owed, 0);

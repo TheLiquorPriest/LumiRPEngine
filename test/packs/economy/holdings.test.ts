@@ -8,6 +8,8 @@ import { hashJson } from "../../../src/shared/hash";
 import type { LedgerEvent, PackEvent, PostEvent } from "../../../src/shared/ledger";
 import type { EntityDef, WorldDoc } from "../../../src/shared/world";
 import type { JsonObject } from "../../../src/shared/json";
+import type { PropertyView } from "../../../src/shared/finance";
+import { objOf } from "../../../src/engine/pack-kit";
 import { calendarOf, clockOfLocal } from "../../../src/engine/calendar";
 import { applyEffects } from "../../../src/engine/effects";
 import { materializeAll } from "../../../src/engine/materialize";
@@ -18,6 +20,7 @@ import { Working } from "../../../src/engine/working";
 import { ALL_PACKS } from "../../../src/packs/index";
 import { assetOf, priceOf, quoteOf } from "../../../src/packs/economy/core/assets";
 import { lotsOf, qtyOf } from "../../../src/packs/economy/core/holdings";
+import { managedLeases } from "../../../src/packs/economy/core/property";
 import { gainsIn, incomeIn } from "../../../src/packs/economy/core/records";
 import { investmentTax } from "../../../src/packs/economy/core/gains";
 import { blackScholes } from "../../../src/packs/economy/core/pricing";
@@ -535,6 +538,85 @@ describe("holdings: property", () => {
     expect(balance(w, mortgage)).toBe(-16_000_000);
     // The application goes on the buyer's credit report, as any does.
     expect(events.filter((e) => e.type === "economy.credit" && JSON.stringify(e).includes("inquiry"))).toHaveLength(1);
+    expect(trialBalance(w.state)).toBe(0);
+  });
+
+  test("a property the POV may buy carries the terms its lenders offer, from the world's finance table, and a purchase takes those and no others", () => {
+    const cabin = (world: WorldDoc): void => {
+      world.entities.cabin = { id: "cabin", kind: "property", name: "The cabin", tier: "background", fields: { place: "apartment", owners: [], value: 20_000_000, asking_price: 20_000_000 }, relations: [] };
+      world.entities.savings!.fields.opening = 6_500_000;
+    };
+    /** The world's finance table with its lenders' mortgage terms replaced. */
+    const offering = (world: WorldDoc, term_months: JsonObject): void => {
+      const finance = world.tables["economy.finance"];
+      if (!finance) throw new Error("the world has no finance table");
+      const loans = objOf(finance.rows.loans?.values);
+      world.tables = { ...world.tables, "economy.finance": { ...finance, rows: { ...finance.rows, loans: { ...finance.rows.loans, values: { ...loans, mortgage: { ...objOf(loans.mortgage), term_months } } } } } };
+    };
+    const terms = (w: Working): PropertyView["mortgageTerms"] => w.ctx.query("economy.finance")(w.ctx, "you", true).properties.find((p) => p.id === "cabin")?.mortgageTerms;
+    // The Modern US table's: 30 years as usual, else 20 or 15.
+    expect(terms(setup(cabin))).toEqual([{ months: 360, usual: true }, { months: 240, usual: false }, { months: 180, usual: false }]);
+    // A world whose lenders offer 25 years, or 10: those, and a purchase over any other is refused.
+    const w = setup((world) => {
+      cabin(world);
+      offering(world, { typical: 300, alternatives: [120] });
+    });
+    expect(terms(w)).toEqual([{ months: 300, usual: true }, { months: 120, usual: false }]);
+    expect(refuse(w, "economy.property_buy", { party: "you", property: "cabin", from: "savings", down: 4_000_000, term_months: 360 })).toBe("bad_term");
+    run(w, "economy.property_buy", { party: "you", property: "cabin", from: "savings", down: 4_000_000, term_months: 120 });
+    expect(w.state.entities[String(w.state.entities.cabin?.fields.mortgage)]?.fields.term_months).toBe(120);
+    // Bought, it's the POV's own: there's nothing to offer it.
+    expect(terms(w)).toBeUndefined();
+    // A world without a finance table: 30 years only.
+    const bare = setup((world) => {
+      cabin(world);
+      world.tables = Object.fromEntries(Object.entries(world.tables).filter(([id]) => id !== "economy.finance"));
+    });
+    expect(terms(bare)).toEqual([{ months: 360, usual: true }]);
+  });
+
+  test("a written lease keeps its unit until it's over: one not begun yet, or paused, shows as let with no vacant line beside it, and one cancelled as ended", () => {
+    const flat = (id: string): EntityDef => ({ id, kind: "property", name: `Flat ${id}`, tier: "background", fields: { place: "jordan_house", owners: [{ party: "you", role: "owner", share: 100 }], value: 20_000_000 }, relations: [] });
+    const lease = (id: string, property: string, start: string): EntityDef => ({ id, kind: "flow", name: `Lease: Jordan Price, ${property}`, tier: "background", fields: { flow_kind: "rent", from: "jordan_checking", to: "checking", amount_cents: 120_000, every: "month", days: [1], start, end: "2027-09-30", category: "rent", link: property, status: "active" }, relations: [] });
+    const w = setup((world) => {
+      world.entities.jordan_checking = account("jordan_checking", "Jordan's checking", "jordan", "checking", 900_000);
+      world.entities.flat_a = flat("flat_a");
+      world.entities.flat_b = flat("flat_b");
+      // Jordan's lease on flat A is signed to begin on 1 November; on flat B it began on 1 October.
+      world.entities.lease_a = lease("lease_a", "flat_a", "2026-11-01");
+      world.entities.lease_b = lease("lease_b", "flat_b", "2026-10-01");
+    });
+    const lines = (property: string): [string, string][] => (w.ctx.query("economy.finance")(w.ctx, "you", true).properties.find((p) => p.id === property)?.leases ?? []).map((l) => [l.flow, l.state]);
+    expect(lines("flat_a")).toEqual([["lease_a", "let"]]);
+    expect(lines("flat_b")).toEqual([["lease_b", "let"]]);
+    // Paused, as the hub's Pause on a standing payment does: flat B is still Jordan's.
+    run(w, "economy.flow_status", { flow: "lease_b", status: "paused", who: "jordan" });
+    expect(lines("flat_b")).toEqual([["lease_b", "let"]]);
+    // Cancelled before its last day, it's over, and the flat stands vacant.
+    run(w, "economy.flow_status", { flow: "lease_b", status: "ended", who: "jordan" });
+    expect(lines("flat_b")).toEqual([
+      ["lease_b", "ended"],
+      ["", "vacant"],
+    ]);
+  });
+
+  test("a paused lease is still its tenant's: no outside tenant or second lease takes the flat, and a sale takes the lease to the new owner like any other", () => {
+    const w = setup((world) => {
+      world.entities.jordan_checking = account("jordan_checking", "Jordan's checking", "jordan", "checking", 900_000);
+      world.entities.maya_checking = account("maya_checking", "Maya's checking", "maya", "checking", 25_000_000);
+      // Let to outside tenants whenever no lease holds it, with no months empty between them.
+      world.entities.flat = { id: "flat", kind: "property", name: "The flat", tier: "background", fields: { place: "jordan_house", owners: [{ party: "you", role: "owner", share: 100 }], value: 20_000_000, managed: true, market_rent: 100_000, vacancy_months: 0 }, relations: [] };
+      world.entities.lease_flat = { id: "lease_flat", kind: "flow", name: "Lease: Jordan Price, The flat", tier: "background", fields: { flow_kind: "rent", from: "jordan_checking", to: "checking", amount_cents: 120_000, every: "month", days: [1], start: "2026-10-01", end: "2027-09-30", category: "rent", link: "flat", status: "active" }, relations: [] };
+    });
+    expect(managedLeases(w.ctx, "flat")).toEqual([]);
+    run(w, "economy.flow_status", { flow: "lease_flat", status: "paused", who: "jordan" });
+    expect(managedLeases(w.ctx, "flat")).toEqual([]);
+    expect(refuse(w, "economy.lease_start", { party: "you", property: "flat", tenant: "maya", rent: 100_000 })).toBe("full");
+    // Sold to Maya, it's hers to collect once Jordan pays again.
+    const opening = openingEvent(w.ctx, "maya");
+    if (opening) w.apply(opening);
+    run(w, "economy.property_sell", { party: "you", property: "flat", price: 20_000_000, buyer: "maya" });
+    expect(w.state.entities.lease_flat?.fields.to).toBe("maya_checking");
     expect(trialBalance(w.state)).toBe(0);
   });
 
