@@ -17,11 +17,16 @@
   },
   "scripts": {
     "build": "bun build src/backend.ts --outfile dist/backend.js --target bun --define process.env.LRE_BUILD_ID=\\\"$(date +%s)\\\" && bun build src/frontend.ts --outfile dist/frontend.js --target browser && bun build src/worker/background-lane.ts --outfile dist/worker/background-lane.js --target bun && bun build src/cli/main.ts --outfile dist/lumirpengine.js --target node && node dist/lumirpengine.js --version",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --noEmit -p . && tsc --noEmit -p dev/preview",
     "tables": "bun scripts/tables/build.ts",
     "templates": "bun scripts/templates/build.ts",
     "reference": "bun scripts/reference/build.ts",
-    "test": "bun test"
+    "test": "bun scripts/test/run.ts",
+    "check": "bun scripts/test/run.ts --check",
+    "test:all": "bun scripts/test/run.ts --all",
+    "test:release": "bun scripts/test/run.ts --release",
+    "test:properties": "bun scripts/test/run.ts --properties",
+    "test:timings": "bun scripts/test/run.ts --timings"
   },
   "devDependencies": {
     "bun-types": "^1.4.2",
