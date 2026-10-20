@@ -702,4 +702,16 @@ describe("a manager runs a business's money for the business, never for themselv
     expect(await chat.play(autopayAction(MORTGAGE, "minimum", SHOP, null))).toContain("not from Alder Automotive operating account");
     expect((await chat.party(BUSINESS)).flows.map((f) => f.label)).not.toContain("Salary, sort of");
   });
+
+  test("the shop's standing payments are on Marcus's money though he holds no role on its checking, so he changes the ones he runs, the one he set up included", async () => {
+    const chat = await MoneyChat.start({ pov: "marcus_delgado", entities: shopOnly });
+    expect((await chat.hub()).flows.find((f) => f.id === "flow_shop_lease")).toMatchObject({ from: "Alder Automotive operating account", editable: true });
+    expect(await chat.play({ action: "flow_create", params: { label: "Shop cleaning", from: SHOP, to: "Harbor Cleaners", amount: 9_000, every: "month", day: 5 } })).toContain("done");
+    const view = await chat.hub();
+    const cleaning = view.flows.find((f) => f.label === "Shop cleaning");
+    if (!cleaning) throw new Error("the standing payment he set up isn't on his money");
+    expect(flowControls(view, cleaning)).toEqual(["edit", "pause", "delete"]);
+    expect(await chat.play(flowStatusAction(cleaning.id, "pause"))).toContain("done");
+    expect((await chat.hub()).flows.find((f) => f.id === cleaning.id)?.status).toBe("paused");
+  });
 });
