@@ -150,7 +150,9 @@ describe("the player's money view never names or sends someone they can't see", 
     lapse(w, 8);
     const view = w.ctx.query("economy.finance")(w.ctx, "you", true);
     expect(view.jobs.filter((j) => j.title === "Night work").map((j) => [j.employer, j.employerId, j.spec.employer])).toEqual([["Employer", null, ""]]);
-    for (const id of ["pay:job_rosa_nights", "pay:job_you_nights"]) expect(view.flows.find((f) => f.id === id)).toMatchObject({ from: "Employer", spec: null });
+    // Rosa's pay and theirs, each under a stand-in id, as a flow's own can name where the work is.
+    const pay = view.flows.filter((f) => f.label === "Pay: Night work");
+    expect(pay.map((f) => [f.from, f.spec, f.id.startsWith("hidden:")])).toEqual([["Employer", null, true], ["Employer", null, true]]);
     // Their own pay into their checking, and Rosa's half into the account they share.
     const paychecks = ["checking", "joint"].flatMap((id) => (view.accounts.find((a) => a.id === id)?.transactions ?? []).filter((t) => t.memo.startsWith("Payroll")));
     expect(paychecks.length).toBeGreaterThanOrEqual(2);
