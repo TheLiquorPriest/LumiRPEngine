@@ -333,6 +333,31 @@ describe("minds around a turn", () => {
 });
 
 describe("a mind's context", () => {
+  test("the previous reply is told by how it ended, in the next mind and in the memory step", async () => {
+    const rig = new Rig({ shipped: true });
+    fakeModels(rig);
+    const minds: string[] = [];
+    const memories: string[] = [];
+    const fake = rig.host.quietReply;
+    rig.host.quietReply = (req) => {
+      const system = req.messages[0]?.content ?? "";
+      if (MIND.exec(system)?.[1] === "Danny Okafor") minds.push(req.messages[1]?.content ?? "");
+      if (MEMORY.exec(system)?.[1] === "Danny Okafor") memories.push(req.messages[1]?.content ?? "");
+      return fake?.(req) ?? "{}";
+    };
+    const chatId = await alderChat(rig);
+    const long = `START-MARK ${"the gulls wheel over the breakwater and the tide comes in ".repeat(70).trim()} END-MARK`;
+    expect(long.length).toBeGreaterThan(3200);
+    await rig.turn(chatId, "Hello.", long);
+    expect(memories.at(-1)).toContain("END-MARK");
+    expect(memories.at(-1)).not.toContain("START-MARK");
+    await rig.turn(chatId, "And then?", "They shrug.");
+    const now = (minds.at(-1) ?? "").split("## Now\n")[1] ?? "";
+    expect(now).toContain("The story so far ended: …");
+    expect(now).toContain("END-MARK");
+    expect(now).not.toContain("START-MARK");
+  });
+
   test("however much recall it may take, the moment is never cut, lines stay lines, and recalled turns stay whole", async () => {
     const rig = new Rig({ shipped: true });
     fakeModels(rig);

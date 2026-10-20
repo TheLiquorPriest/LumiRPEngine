@@ -57,6 +57,12 @@ function clip(text: string, max: number): string {
   return t.length <= max ? t : `${t.slice(0, max).replace(/\s+\S*$/, "")}…`;
 }
 
+/** The end of a text, tidied as `clip` tidies it, from a word, within `max` characters: where a reply ended up. */
+function tail(text: string, max: number): string {
+  const t = clip(text, Number.POSITIVE_INFINITY);
+  return t.length <= max ? t : `…${t.slice(t.length - max + 1).replace(/^\S*\s+/, "")}`;
+}
+
 /** A block of as many of `lines` as fit in `room` characters, whole and in order. */
 function blockWithin(title: string, lines: readonly string[], room: number): string {
   const kept: string[] = [];
@@ -276,7 +282,7 @@ export function mindContext(scope: MindScope): string {
     moment.kind === "beat"
       ? [`It is ${formatClock(cal, moment.at)}. ${moment.reason}.`]
       : withPov
-        ? [heardLast && moment.reply.trim() !== "" ? `The story so far ended: ${clip(readableReply(moment.reply, scope.hideJson), RECALL_SIDE)}` : "", moment.user.trim() !== "" ? `Now ${povLabel(scope)} says or does: ${clip(moment.user, RECALL_SIDE)}` : `${povLabel(scope)} is here with you.`].filter((l) => l !== "")
+        ? [heardLast && moment.reply.trim() !== "" ? `The story so far ended: ${tail(readableReply(moment.reply, scope.hideJson), RECALL_SIDE)}` : "", moment.user.trim() !== "" ? `Now ${povLabel(scope)} says or does: ${clip(moment.user, RECALL_SIDE)}` : `${povLabel(scope)} is here with you.`].filter((l) => l !== "")
         : [`You aren't with ${povLabel(scope)} right now; carry on with your own day.`];
   // The moment is never cut: the rest fits in what is left, block by block, then lore and recall,
   // whole entries and whole turns.
@@ -306,7 +312,7 @@ export function memoryContext(scope: MindScope, turn: { user: string; reply: str
   const cal = calendarOf(world);
   const commitments = openCommitments(c).map((x) => `- [${x.id}] ${x.kind}${x.with.length > 0 ? ` with ${x.with.map((id) => nameOf(scope, id)).join(", ")}` : ""}: ${x.text}`);
   const plans = openPlans(c).map((p) => `- ${p.what} (${formatClock(cal, p.when.from)})`);
-  const fit = new ContextFit(block("The turn just written", [storyVoice(scope), turn.left ? `${povLabel(scope)} left you partway through this turn: whatever the story tells after they left happened without you.` : "", turn.user.trim() !== "" ? `${povLabel(scope)} (the player character) wrote: ${clip(turn.user, RECALL_SIDE)}` : "", `Story: ${clip(readableReply(turn.reply, scope.hideJson), RECALL_SIDE * 2)}`].filter((l) => l !== "")));
+  const fit = new ContextFit(block("The turn just written", [storyVoice(scope), turn.left ? `${povLabel(scope)} left you partway through this turn: whatever the story tells after they left happened without you.` : "", turn.user.trim() !== "" ? `${povLabel(scope)} (the player character) wrote: ${clip(turn.user, RECALL_SIDE)}` : "", `Story: ${tail(readableReply(turn.reply, scope.hideJson), RECALL_SIDE * 2)}`].filter((l) => l !== "")));
   fit.add(`You are ${nameOf(scope, who)}. ${occasion(scope, placeOfEntity(state, who))}`);
   fit.add(c.summary !== "" ? block("Your story so far", [c.summary]) : "");
   fit.add(block("Your open commitments (by id)", commitments));
