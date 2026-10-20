@@ -131,11 +131,17 @@ function mortgageRow(ctx: Pick<ReadContext, "tables">): JsonObject {
   return objOf(objOf(ctx.tables.get("economy.finance")?.rows.loans?.values).mortgage);
 }
 
-/** The terms a lender offers a mortgage on, months (the finance table's typical and alternatives; 30 years without a table). */
+/** The terms a lender offers a mortgage on, months, the usual first (the finance table's typical and alternatives; 30 years without a table). */
 function mortgageTerms(ctx: Pick<ReadContext, "tables">): number[] {
   const t = objOf(mortgageRow(ctx).term_months);
   const terms = [t.typical, ...(Array.isArray(t.alternatives) ? t.alternatives : [])].filter((v): v is number => typeof v === "number" && v > 0);
-  return terms.length > 0 ? terms : [360];
+  return terms.length > 0 ? [...new Set(terms)] : [360];
+}
+
+/** The terms as a purchase form offers them: longest first, the one a purchase gets when none is chosen marked usual. */
+function offeredTerms(ctx: Pick<ReadContext, "tables">): { months: number; usual: boolean }[] {
+  const terms = mortgageTerms(ctx);
+  return [...terms].sort((a, b) => b - a).map((months) => ({ months, usual: months === terms[0] }));
 }
 
 /** Property tax a year, percent of value: the property's own rate, else its region's effective rate, else the table's typical. */
@@ -708,7 +714,11 @@ export function propertyView(api: FinanceApi, ctx: ReadContext, id: EntityId, pa
   const place = strOf(e?.fields.place);
   const asking = num(e?.fields.asking_price);
   const shownPlace = place === "" || (party === ctx.world.pov && !canSeePlace(ctx.registry, ctx.world, ctx.state, party, place)) ? null : (own(ctx.world.places, place)?.name ?? labelOf(ctx, place));
-  if (!api.ownersOf(ctx.state, id).some((o) => o.party === party)) return { id, name: e?.name ?? id, place: shownPlace, owners: [], share: 0, value, equity: 0, forSale: asking ?? null, mortgage: null, leases: [], costs: [], route: null };
+  if (!api.ownersOf(ctx.state, id).some((o) => o.party === party)) {
+    // One they may buy, as a purchase allows, carries the terms a lender offers, so a form offers those and no others.
+    const mayBuy = api.feature(ctx, party, "property") && (asking !== undefined || payers(api, ctx.state, id).owners.length === 0);
+    return { id, name: e?.name ?? id, place: shownPlace, owners: [], share: 0, value, equity: 0, forSale: asking ?? null, mortgage: null, leases: [], costs: [], route: null, ...(mayBuy ? { mortgageTerms: offeredTerms(ctx) } : {}) };
+  }
   const loans = securedLoans(api, ctx.state, id);
   const loan = loans.find((l) => l.owed > 0);
   const owed = loans.reduce((a, l) => a + l.owed, 0);

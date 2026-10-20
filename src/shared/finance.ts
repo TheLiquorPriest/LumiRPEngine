@@ -1396,6 +1396,8 @@ export interface PropertyView {
   equity: number;
   /** The asking price when it's for sale; a property for sale the party doesn't own comes with share 0. */
   forSale?: number | null;
+  /** On one the viewer may buy: the terms a lender offers a mortgage on it, months, longest first; `usual` is the one a purchase gets when none is chosen. */
+  mortgageTerms?: { months: number; usual: boolean }[];
   mortgage: { id: EntityId; name: string; owed: number; payment: number | null; monthsLeft: number | null } | null;
   leases: LeaseView[];
   /** Property tax, insurance and upkeep flows. */
