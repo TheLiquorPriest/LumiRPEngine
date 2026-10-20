@@ -1503,9 +1503,9 @@
         "employer": "rusty_anchor",
         "occupation": "bartender",
         "basis": "hourly",
-        "rateCents": 213,
-        "tipsPerHourCents": 1437,
-        "hoursPerWeek": 32,
+        "rateCents": 549,
+        "tipsPerHourCents": 1101,
+        "hoursPerWeek": 37.5,
         "payEvery": "weekly",
         "payWeekday": 5,
         "shiftPattern": "bar_night"

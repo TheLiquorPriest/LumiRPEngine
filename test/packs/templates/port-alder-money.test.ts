@@ -58,18 +58,19 @@ describe("Port Alder's money", () => {
     const w = portAlder();
     const job = w.state.entities.job_jess_kowalczyk?.fields;
     const [wage, tips] = [Number(job?.rate), Number(job?.tips_per_hour)];
-    expect([wage, tips]).toEqual([213, 1437]);
+    // Michigan's tipped cash wage, above the floor the template validator holds it to.
+    expect([wage, tips]).toEqual([549, 1101]);
     expect(w.ctx.query("economy.finance")(w.ctx, "jess_kowalczyk", false).jobs[0]?.pay).toContain("an hour in tips");
     // Four weeks from Monday 14 September: her Friday paydays from the 25th each pay a full week of shifts.
     const out = runTimelapse(reg, w, { type: "duration", minutes: 28 * 1440 }, { runSeed: "pa", overrides: ALL_NOTE });
     if ("code" in out) throw new Error(out.reason);
     const checks = w.events.flatMap((e) => (e.type === "economy.payslip" && "data" in e && e.data.job === "job_jess_kowalczyk" && Number(e.data.minutes) > 0 ? [e.data] : []));
     expect(checks.length).toBeGreaterThanOrEqual(3);
-    // Each paycheck is her wage for the hours worked plus her tips for the same hours: far more than the cash wage alone.
+    // Each paycheck is her wage for the hours worked plus her tips for the same hours: about three times the cash wage alone.
     for (const c of checks) {
       const minutes = Number(c.minutes);
       expect(c.gross).toBe(Math.round((wage * minutes) / 60) + Math.round((tips * minutes) / 60));
-      expect(Number(c.gross)).toBeGreaterThan(5 * Math.round((wage * minutes) / 60));
+      expect(Number(c.gross)).toBeGreaterThan(2.5 * Math.round((wage * minutes) / 60));
     }
     expect(trialBalance(w.state)).toBe(0);
   });
