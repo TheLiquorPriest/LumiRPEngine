@@ -283,7 +283,7 @@ function PropertiesSection(props: SectionProps) {
         <Section flush>
           <List>
             {view.properties.map((p) => (
-              <ListRow key={p.id} title={p.name} subtitle={p.place ?? undefined} id={p.id} value={formatMoney(p.value, controls.currency)} badge={<ShareBadge property={p} controls={controls} />} chevron onClick={() => nav.open(detailPage("property", p.id))} />
+              <ListRow key={p.id} title={p.name} subtitle={p.place && p.place !== p.name ? p.place : undefined} id={p.id} value={formatMoney(p.value, controls.currency)} badge={<ShareBadge property={p} controls={controls} />} chevron onClick={() => nav.open(detailPage("property", p.id))} />
             ))}
           </List>
         </Section>
@@ -332,7 +332,7 @@ function PropertyPage(props: SectionProps & { property: PropertyView }) {
   const can = controls.mode === "player" ? propertyControls(view, p) : [];
   const endable = controls.mode === "player" ? endableLeases(view, p) : [];
   return (
-    <MoneyPage nav={nav} name="property" title={p.name} subtitle={p.place ?? undefined}>
+    <MoneyPage nav={nav} name="property" title={p.name} subtitle={p.place && p.place !== p.name ? p.place : undefined}>
       <IdText id={p.id} />
       <Hero label="Value" value={fmt(p.value)} sub={owns ? `Equity ${fmt(p.equity)}` : undefined} badges={<ShareBadge property={p} controls={controls} />} />
       {can.length > 0 ? (

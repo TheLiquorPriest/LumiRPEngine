@@ -153,7 +153,7 @@ function FlowPage(props: SectionProps & { flow: FlowView }) {
             ))}
           </Controls>
         ) : (
-          <Note>Set by its {humanize(f.source).toLowerCase()}; change it there.</Note>
+          <Note>{f.source === "entity" ? "Only whoever pays it can change it." : `Set by its ${humanize(f.source).toLowerCase()}; change it there.`}</Note>
         )
       ) : f.source === "entity" ? (
         <Controls name={f.id}>

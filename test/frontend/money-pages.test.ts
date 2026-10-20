@@ -8,7 +8,7 @@ import type { AccountView, FinanceView, FlowView, UpcomingLine } from "../../src
 import { isRecord } from "../../src/shared/json";
 import { DEFAULT_CURRENCY } from "../../src/shared/world";
 import { lineTarget, upcomingValue } from "../../src/packs/economy/ui/hub";
-import { GLANCE_AHEAD_MINUTES, glanceLines } from "../../src/packs/economy/ui/layout";
+import { GLANCE_AHEAD_MINUTES, glanceLines, possessive } from "../../src/packs/economy/ui/layout";
 import { actionPage, detailPage, sectionPage } from "../../src/packs/economy/ui/nav";
 import { pageOf, routeOf } from "../../src/packs/economy/ui/routes";
 
@@ -110,5 +110,12 @@ describe("what a money line shows", () => {
     expect(upcomingValue(v, due("flow_rent", -99500), DEFAULT_CURRENCY)).toEqual({ value: "-$995.00", tone: "neg" });
     expect(upcomingValue(v, due("flow_rent", 6124), DEFAULT_CURRENCY)).toEqual({ value: "+$61.24", tone: "pos" });
     expect(upcomingValue(v, due(null, 0), DEFAULT_CURRENCY)).toEqual({ value: "$0.00", tone: "pos" });
+  });
+
+  test("an owner's name: a household's is its family's, a plural", () => {
+    expect(possessive("Marcus Delgado", false)).toBe("Marcus Delgado's");
+    expect(possessive("Silas", false)).toBe("Silas's");
+    expect(possessive("The Kowalczyks", true)).toBe("The Kowalczyks'");
+    expect(possessive("Unit 2B", true)).toBe("Unit 2B's");
   });
 });

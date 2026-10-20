@@ -24,6 +24,11 @@ export function routePick(route: DistributionRoute | null): string {
   return route.to ?? " ";
 }
 
+/** A party's name as an owner: "Marcus Delgado's", and a household's, which is its family's and so a plural, "The Kowalczyks'". */
+export function possessive(name: string, household: boolean): string {
+  return household && name.endsWith("s") ? `${name}'` : `${name}'s`;
+}
+
 export type HubSection = "overview" | "accounts" | "flows" | "jobs" | "businesses" | "investments" | "properties" | "credit" | "household";
 
 export const SECTION_LABELS: Readonly<Record<HubSection, string>> = { overview: "Overview", accounts: "Accounts", flows: "Flows", jobs: "Jobs", businesses: "Businesses", investments: "Investments", properties: "Properties", credit: "Credit", household: "Household" };

@@ -13,7 +13,7 @@ import { humanize } from "../../../frontend/format";
 import { FlowListRow } from "./flows";
 import { ActionPage, AmountPage, ChoiceField, SelectField } from "./forms";
 import type { SectionProps } from "./hub";
-import { creditBlocks, householdRows, sharedAccounts } from "./layout";
+import { creditBlocks, householdRows, possessive, sharedAccounts } from "./layout";
 import { actionPage, Controls, Hero, MoneyPage, Note, type HubPage, type HubPages } from "./nav";
 import { applyCreditAction } from "./requests";
 
@@ -237,7 +237,7 @@ function RemoveMemberPage(props: SectionProps) {
   return (
     <ActionPage nav={nav} controls={controls} name="household-remove" title="Remove a member" subtitle={h.name} go="Remove" danger disabled={!who} submit={() => controls.edit([{ op: "unlink", rel: "member_of", from: leaving, to: h.id }])}>
       <ChoiceField label="Who" value={leaving} options={members.map((m) => ({ value: m.id, label: m.name, detail: m.role ? humanize(m.role) : undefined }))} onChange={setLeaving} />
-      {who ? <Note>{`${who.name} no longer shares ${h.name}'s costs.`}</Note> : null}
+      {who ? <Note>{`${who.name} no longer shares ${possessive(h.name, true)} costs.`}</Note> : null}
     </ActionPage>
   );
 }

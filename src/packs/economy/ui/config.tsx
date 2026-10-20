@@ -252,6 +252,7 @@ function Taxes(props: PackConfigProps) {
         <FormSheet title="Sales tax" subtitle="Categories exempt everywhere" backLabel="Economy" onClose={() => setOpen(false)}>
           <span class="lre-field-help">{EXEMPT_NOTE}</span>
           <div class="lre-form-items" data-lre-money-exempt>
+            {choices.length === 0 ? <span class="lre-form-items-none">The world's tables list no spending categories.</span> : null}
             {choices.map((c) => (
               <div key={c.value} class="lre-money-build-feature" data-lre-category={c.value}>
                 <span class="lre-money-build-feature-text">

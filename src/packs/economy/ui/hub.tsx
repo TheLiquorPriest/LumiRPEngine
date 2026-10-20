@@ -88,6 +88,7 @@ function summaryOf(view: FinanceView, section: Exclude<HubSection, "overview">, 
     }
     case "jobs": {
       const [job] = view.jobs;
+      if (view.jobs.length === 0) return "None yet";
       if (view.jobs.length !== 1 || !job) return counted(view.jobs.length, "job", "jobs");
       return parts(`${job.title || humanize(job.basis)} at ${job.employer}`, job.nextPay ? `payday ${job.nextPay}` : null);
     }
@@ -102,10 +103,11 @@ function summaryOf(view: FinanceView, section: Exclude<HubSection, "overview">, 
       return parts(`Worth ${fmt(inv.value)}`, `${inv.unrealised > 0 ? "+" : ""}${fmt(inv.unrealised)} not yet taken`);
     }
     case "properties": {
+      if (view.properties.length === 0) return "None yet";
       const owned = view.properties.filter((p) => p.share > 0);
       const forSale = view.properties.filter((p) => p.share <= 0 && p.forSale !== null && p.forSale !== undefined).length;
       const [home] = owned;
-      return parts(owned.length === 1 && home ? `${home.name}, ${fmt(home.equity)} equity` : owned.length > 0 ? `${owned.length} yours` : null, forSale > 0 ? `${forSale} for sale` : null);
+      return parts(owned.length === 1 && home ? `${home.name}, ${fmt(home.equity)} equity` : owned.length > 0 ? `${owned.length} owned` : null, forSale > 0 ? `${forSale} for sale` : null);
     }
     case "credit": {
       const c = view.credit;
@@ -114,7 +116,7 @@ function summaryOf(view: FinanceView, section: Exclude<HubSection, "overview">, 
     }
     case "household": {
       const h = view.household;
-      if (!h) return "";
+      if (!h) return "None yet";
       return parts(h.name, counted(h.members.length, "person", "people"), `${fmt(h.monthly.total)} a month shared`);
     }
   }

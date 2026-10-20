@@ -8,7 +8,7 @@ import { assetPages } from "./assets";
 import { creditPages } from "./credit";
 import { flowPages } from "./flows";
 import type { SectionProps } from "./hub";
-import { SECTION_LABELS, type HubSection } from "./layout";
+import { possessive, SECTION_LABELS, type HubSection } from "./layout";
 import { Gone, type HubPage, type HubPages } from "./nav";
 import { workPages } from "./work";
 
@@ -30,7 +30,7 @@ export function HubPageView(props: SectionProps & { page: HubPage }) {
   if (drawn !== null) return <>{drawn}</>;
   return (
     <Gone nav={nav} name="gone" title="Not here any more" icon="info">
-      {`This isn't in ${controls.mode === "player" ? "your" : `${view.name}'s`} money any more, or it can't be done now.`}
+      {`This isn't in ${controls.mode === "player" ? "your" : possessive(view.name, view.partyKind === "household")} money any more, or it can't be done now.`}
     </Gone>
   );
 }
