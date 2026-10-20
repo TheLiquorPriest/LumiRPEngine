@@ -333,6 +333,20 @@ describe("holdings: bonds", () => {
     expect(trialBalance(w.state)).toBe(0);
   });
 
+  test("in a world whose day part spans the morning and the close, a bond maturing on a business day still pays its last coupon once", () => {
+    const w = setup((world) => {
+      // One day part from 06:00 to 18:00: the coupon's hour and the market's close share a slot.
+      world.calendar.dayParts = world.calendar.dayParts.filter((p) => p.id !== "afternoon");
+      const assets = world.packs.economy?.config.assets;
+      if (assets && typeof assets === "object" && !Array.isArray(assets)) assets.fri = { label: "Note due Fri 30 Oct", symbol: "FRI", class: "bond", face: 100000, coupon_pct: 6, pays_per_year: 2, maturity: "2026-10-30", price: 100000 };
+      world.entities.h_fri = holding("h_fri", "brokerage", "fri", [{ qty: 10, cost: 1_000_000, at: "2026-01-02" }]);
+    });
+    const before = balance(w, "brokerage");
+    lapseTo(w, "2026-11-03T12:00");
+    expect(balance(w, "brokerage") - before).toBe(1_000_000 + 30_000);
+    expect(incomeIn(w.state, "you", 2026).interest).toBe(30_000);
+  });
+
   test("before it matures, a bond pays its coupon on its schedule, from its issuer into its account", () => {
     const w = setup((world) => {
       const assets = world.packs.economy?.config.assets;
