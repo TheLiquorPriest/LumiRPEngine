@@ -21,7 +21,7 @@ import { allRules } from "../engine/rules";
 import { isGone, kindIs, placeOfEntity } from "../engine/scope";
 import type { WorldState } from "../engine/state";
 import type { InterpretOutput } from "../engine/steps";
-import { TimelapseRun, type SkipRecord } from "../engine/time";
+import { fightHoldsClock, TimelapseRun, type SkipRecord } from "../engine/time";
 import { timelapseOptions, turnStart } from "../engine/turn";
 import { Working } from "../engine/working";
 import { localTime, mindPrompt, mindsStepConfig, type RunMindsInput, type RunMindsResult } from "./minds";
@@ -216,13 +216,15 @@ function interrupter(w: Working, events: readonly LedgerEvent[]): EntityId | nul
  * it at its beat; the clock running out stops it at the next beat it reaches, the first one too, so
  * a Continue always gets further, with the rest left for it. Past the last beat it runs to its end,
  * where those with the player character think once more as the turn's own minds. Null when the
- * timelapse can't run, which the plan then says.
+ * timelapse can't run (a fight holds the clock among the rest), which the plan then says.
  */
 export async function runSkip(deps: SkipDeps, input: SkipInput): Promise<SkipRun | null> {
   const reg = deps.registry;
   const cal = calendarOf(input.world);
   const w = new Working(reg, input.world, input.state);
   turnStart(reg, w, input.runSeed);
+  // A fight's rounds take no clock time (DESIGN §11): the plan refuses the timelapse, so no one is asked.
+  if (fightHoldsClock(w.ctx)) return null;
   const scanned = scanBeats(reg, input.world, w.state, input.intent, input.runSeed);
   const { target, opts } = timelapseOptions(input.intent, input.runSeed);
   const run = scanned && target ? TimelapseRun.start(reg, w, target, opts) : null;

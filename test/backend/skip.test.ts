@@ -276,4 +276,33 @@ describe("time skips", () => {
     expect(out.summary.to).toBe(beats[1] ?? NaN);
     expect(out.chip).toEqual({ kind: "continue_timelapse", target: { type: "duration", minutes: state.clock + target.minutes - (beats[1] ?? 0) }, remaining: state.clock + target.minutes - (beats[1] ?? 0) });
   });
+
+  test("no skip runs while a fight holds the clock: no one is asked, and the turn notes why", async () => {
+    const rig = new Rig({ shipped: true });
+    rig.host.quietReply = () => "{}";
+    const worldId = await rig.newWorld("Port Alder", "modern_slice_of_life");
+    // The Modern profile brings combat.
+    rig.body(await rig.send({ type: "lre.editor", worldId, base: null, op: "profile", profile: "modern", choices: {} }));
+    rig.body(await rig.send({ type: "lre.world", op: "commit", worldId, base: null }));
+    const chatId = rig.host.createChat("Morning.");
+    rig.body(await rig.send({ type: "lre.world", op: "attach", worldId, chatId }));
+    await rig.turn(chatId, "I look around the shop.", "The shop is quiet.");
+    const { state, world } = await folded(rig, chatId);
+    const cal = calendarOf(world);
+    await marcusPlans(rig, chatId, [clockAt(cal, dateAt(cal, state.clock).dayIndex + 1, 19 * 60)]);
+    // The player character is made too tough for one round of Danny's blows to put down.
+    rig.body(await rig.send({ type: "lre.edit", chatId, ops: [{ op: "set", entity: "pov", field: "con", value: 30 }] }));
+    rig.body(await rig.send({ type: "lre.action", chatId, action: "fight", params: { target: "danny_okafor" }, source: "palette" }));
+    const g = await rig.host.start(chatId, { type: "normal" });
+    await rig.host.finish(g, "Danny squares up to you.");
+    const before = (await folded(rig, chatId)).state.clock;
+    const calls: { at: number; who: string[]; reason: string }[] = [];
+    rig.rt.beatMinds = fakeMinds(calls, () => false);
+    await skipDays(rig, chatId, 2);
+    const after = await folded(rig, chatId);
+    expect(calls).toEqual([]);
+    expect(JSON.stringify(after.record?.events)).toContain("Timelapse not run: a fight is under way");
+    expect(after.record?.events.some((e) => e.type === "minds.skip" || e.type === "timelapse")).toBe(false);
+    expect(after.state.clock).toBe(before);
+  });
 });
