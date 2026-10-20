@@ -12,7 +12,7 @@
 
 import type { EntityId } from "../../../shared/ids";
 import type { LedgerEvent, PostingLine } from "../../../shared/ledger";
-import type { AccountClass, AlertLine, ClassTraits, FilingStatus, FinanceFeature, FinanceView, Flow, FlowSchedule, FlowSplit, MoneySummary, Owner, PartyKind, ResolvedProduct, TxnKind, UpcomingLine } from "../../../shared/finance";
+import type { AccountClass, AlertLine, ClassTraits, CreditApplication, FilingStatus, FinanceFeature, FinanceView, Flow, FlowSchedule, FlowSplit, MoneySummary, Owner, PartyKind, ResolvedProduct, TxnKind, UpcomingLine } from "../../../shared/finance";
 import type { FieldDef } from "../../../shared/world";
 import type { CoreRegistry, ReadContext, Rejection } from "../../../engine/registry";
 import type { WorldState } from "../../../engine/state";
@@ -186,6 +186,14 @@ export interface FinanceApi {
   /** Every flow in force: flow entities and every module's derived flows. */
   flows(ctx: ReadContext): Flow[];
   openAccount(ctx: ReadContext, spec: OpenAccount): LedgerEvent[] | Rejection;
+  /**
+   * An application for credit, as the player's makes it: where credit reports run, a hard inquiry
+   * and the lender's decision at the applicant's score; anywhere, no more than a lender extends (a
+   * card's limit for the score, a loan no larger than what secures it is worth or the most it lends
+   * unsecured). A decline is a `declined` rejection and applies nothing; an approval is the inquiry
+   * and the opened account at the decided APR, a loan's principal paid to `into`.
+   */
+  applyCredit(ctx: ReadContext, who: EntityId, app: CreditApplication & { into?: string; id?: EntityId; name?: string }): LedgerEvent[] | Rejection;
   /** The loans and mortgages an asset secures. */
   securedBy(state: Readonly<WorldState>, asset: EntityId): EntityId[];
   /** A party's net worth with every module's assets. */

@@ -6,6 +6,7 @@
 import type { EntityId } from "../../../shared/ids";
 import type { LedgerEvent } from "../../../shared/ledger";
 import { CLASS_TRAITS, FINANCE_EVENTS, SCORE_MAX, SCORE_MIN, creditTierOf, isAccountClass, isCredit, scoreBand, type AccountClass, type CreditApplication, type CreditEntry, type CreditReport, type CreditTier, type ScoreFactors } from "../../../shared/finance";
+import { formatMoney } from "../../../shared/world";
 import { calendarOf, clockAt, clockOfLocal, dateAt, formatClock } from "../../../engine/calendar";
 import { labelOf, numOf, objOf, own, sliceOf, strOf } from "../../../engine/pack-kit";
 import type { ReadContext, Rejection } from "../../../engine/registry";
@@ -113,40 +114,66 @@ export function aprFor(ctx: ReadContext, cls: AccountClass, score: number | null
   return Math.round((band.min + (band.max - band.min) * step) * 100) / 100;
 }
 
-/** The limit a card or line of credit starts at for a score. */
+/** The limit a card, charge card or line of credit starts at for a score: the finance tables' starter, typical or good-credit limit. */
 function limitFor(ctx: ReadContext, cls: AccountClass, score: number | null): number | null {
-  if (!CLASS_TRAITS[cls].revolving || cls === "charge_card") return null;
+  if (!CLASS_TRAITS[cls].revolving) return null;
   const limits = objOf(objOf(ctx.tables.get("economy.finance")?.rows.credit_card?.values).credit_limit_cents);
   const tier = creditTierOf(score ?? 700);
   return tier === "super_prime" ? numOf(limits.good_credit, 1_500_000) : tier === "prime" ? numOf(limits.typical, 1_000_000) : numOf(limits.starter, 50_000);
+}
+
+/**
+ * The most a lender lends at a score: up to what secures the loan is worth, else the personal-loan
+ * range's top for a prime score or better, its typical amount for a fair or poor one, its least
+ * below that.
+ */
+function loanCeiling(ctx: ReadContext, score: number | null, securedBy?: EntityId): number {
+  const worth = numOf(own(ctx.state.entities, securedBy ?? "")?.fields.value);
+  if (worth > 0) return worth;
+  const amounts = objOf(objOf(objOf(objOf(ctx.tables.get("economy.finance")?.rows.loans?.values).personal).amount_cents));
+  const tier = creditTierOf(score ?? 700);
+  return tier === "super_prime" || tier === "prime" ? numOf(amounts.max, 5_000_000) : tier === "deep_subprime" ? numOf(amounts.min, 100_000) : numOf(amounts.typical, 800_000);
 }
 
 export interface Decision {
   approved: boolean;
   reason: string;
   apr: number | null;
+  /** A card's or line's limit: what was asked for, no more than the lender extends. */
   limit: number | null;
   cls: AccountClass;
   label: string;
 }
 
 /**
- * What an application for credit gets: declined for an unsecured product below a subprime score (or
- * with a charge-off in the last two years), else approved at the APR and limit its tier gets.
+ * What an application for credit gets. Where credit reports run (`reports`): declined for an
+ * unsecured product below a subprime score, or with a charge-off in the last two years, else at the
+ * APR its tier gets. Anywhere, no more than a lender extends: a card's or line's limit for the
+ * score, and a loan no larger than the most it lends (a product's own `limit` caps either), so
+ * asking for more is declined.
  */
-export function decide(ctx: ReadContext, person: EntityId, app: CreditApplication): Decision | Rejection {
+export function decide(ctx: ReadContext, person: EntityId, app: CreditApplication, reports: boolean): Decision | Rejection {
   const products = worldProducts(ctx.world);
   const def = own(products, app.product);
   const cls = def?.class ?? (isAccountClass(app.product) ? app.product : null);
   if (!cls || !isCredit(cls)) return reject("not_credit", `${app.product.replace(/_/g, " ")} isn't a kind of credit`);
-  const score = currentScore(ctx, person);
-  const entries = creditEntriesOf(ctx, person);
+  const score = reports ? currentScore(ctx, person) : null;
+  const entries = reports ? creditEntriesOf(ctx, person) : [];
   const chargedOff = entries.some((e) => e.kind === "charged_off" && ctx.state.clock - numOf(e.at) <= 24 * MONTH);
   const secured = app.secured_by !== undefined && own(ctx.state.entities, app.secured_by) !== undefined;
   const label = def?.label ?? CLASS_TRAITS[cls].label;
   const tier = creditTierOf(score ?? 650);
-  if (!secured && (tier === "deep_subprime" || chargedOff)) return { approved: false, reason: chargedOff ? "a recent charge-off on their report" : "their credit score is too low", apr: null, limit: null, cls, label };
-  return { approved: true, reason: "", apr: def?.apr_pct ?? aprFor(ctx, cls, score), limit: typeof def?.limit === "number" ? def.limit : limitFor(ctx, cls, score), cls, label };
+  const declined = (reason: string): Decision => ({ approved: false, reason, apr: null, limit: null, cls, label });
+  if (reports && !secured && (tier === "deep_subprime" || chargedOff)) return declined(chargedOff ? "a recent charge-off on their report" : "their credit score is too low");
+  const productLimit = typeof def?.limit === "number" ? def.limit : null;
+  const apr = reports ? (def?.apr_pct ?? aprFor(ctx, cls, score)) : null;
+  if (CLASS_TRAITS[cls].revolving) {
+    const most = productLimit ?? limitFor(ctx, cls, score) ?? 0;
+    return { approved: true, reason: "", apr, limit: Math.min(app.cents ?? most, most), cls, label };
+  }
+  const most = productLimit ?? loanCeiling(ctx, score, secured ? app.secured_by : undefined);
+  if ((app.cents ?? 0) > most) return declined(`it's more than a lender would lend them (up to ${formatMoney(most, ctx.world.currency)})`);
+  return { approved: true, reason: "", apr, limit: null, cls, label };
 }
 
 /** A person's credit report, for the dashboards. */

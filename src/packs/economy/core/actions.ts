@@ -6,7 +6,7 @@
 import type { JsonObject, JsonValue } from "../../../shared/json";
 import type { EntityId } from "../../../shared/ids";
 import type { LedgerEvent, PostingLine } from "../../../shared/ledger";
-import { ACCOUNT_STATUSES, AUTOPAY_MODES, CARD_STATES, CLASS_TRAITS, FINANCE_EVENTS, FLOW_KINDS, FLOW_SHORTFALLS, isAccountClass, isCredit, type AtmFeature, type Owner } from "../../../shared/finance";
+import { ACCOUNT_STATUSES, AUTOPAY_MODES, CARD_STATES, CLASS_TRAITS, FINANCE_EVENTS, FLOW_KINDS, FLOW_SHORTFALLS, isAccountClass, isCredit, type AtmFeature, type CreditApplication, type Owner } from "../../../shared/finance";
 import { hashParts } from "../../../shared/hash";
 import { formatMoney, type EntityDef } from "../../../shared/world";
 import { calendarOf, dateAt } from "../../../engine/calendar";
@@ -14,7 +14,7 @@ import { GONE_FIELD } from "../../../engine/scope";
 import { labelOf, numOf, objOf, optionalService, own, strOf } from "../../../engine/pack-kit";
 import type { EffectContext, ReadContext, Rejection } from "../../../engine/registry";
 import { placeOfEntity } from "../../../engine/scope";
-import { decide } from "./credit";
+import { decide, type Decision } from "./credit";
 import type { OpenAccount } from "./module";
 import { reject, spendOf } from "./journal";
 import { availableOf, balance, bankSide, canSpend, classOf, external, holdersOf, productOf, rightsOf, statusOf, traitsOf, worldProducts } from "./model";
@@ -357,27 +357,39 @@ export function openAccount(ctx: ReadContext, spec: OpenAccount): LedgerEvent[] 
   return out;
 }
 
+/** What a credit application brings, for a module (`api.applyCredit`) or the player's action. */
+export type CreditRequest = CreditApplication & { into?: string; id?: EntityId; name?: string };
+
 /**
- * Applying for credit: a hard inquiry on the report, then the account at the APR and limit the
- * score earns, or a decline that says why.
+ * Applying for credit: where credit reports run, a hard inquiry and the lender's decision at the
+ * applicant's score; anywhere, no more than a lender extends. Approved, the account opens at the
+ * decided APR and limit, with a loan's principal paid to `into` (an account the applicant may pay
+ * into, or the outside); declined, the decision says why and only the inquiry is made.
  */
-export function applyForCredit(ctx: ReadContext, who: EntityId, product: string, cents: number | undefined, term: number | undefined, securedBy?: EntityId): LedgerEvent[] | Rejection {
+export function creditApplication(ctx: ReadContext, who: EntityId, app: CreditRequest): { decision: Decision; events: LedgerEvent[] } | Rejection {
   if (!isParty(ctx, who)) return reject("missing_entity", `no ${labelOf(ctx, who)}`);
-  const inquiry: LedgerEvent = { type: FINANCE_EVENTS.credit, data: { person: who, kind: "inquiry", note: product.replace(/_/g, " ") } };
-  if (!featureFor(ctx, who, "credit")) {
-    const products = worldProducts(ctx.world);
-    const label = own(products, product)?.label ?? product.replace(/_/g, " ");
-    const opened = openAccount(ctx, { name: label, product, owners: [{ party: who, role: "owner" }], ...(cents !== undefined ? { cents } : {}), ...(term !== undefined ? { term_months: term } : {}), card: true });
-    return opened;
+  const reports = featureFor(ctx, who, "credit");
+  const decision = decide(ctx, who, app, reports);
+  if ("code" in decision) return decision;
+  const inquiry: LedgerEvent[] = reports ? [{ type: FINANCE_EVENTS.credit, data: { person: who, kind: "inquiry", note: app.product.replace(/_/g, " ") } }] : [];
+  if (!decision.approved) return { decision, events: inquiry };
+  if (app.into !== undefined && own(ctx.state.entities, app.into)) {
+    const unusable = mayUse(ctx, who, app.into, "into");
+    if (unusable) return unusable;
   }
-  const d = decide(ctx, who, { product, ...(cents !== undefined ? { cents } : {}), ...(term !== undefined ? { term_months: term } : {}), ...(securedBy ? { secured_by: securedBy } : {}) });
-  if ("code" in d) return d;
-  if (!d.approved) return [inquiry, signal("decline", `The application for a ${d.label.toLowerCase()} was declined: ${d.reason}.`, who, ctx.state.clock)];
-  const owners: Owner[] = [{ party: who, role: "owner" }];
-  const limit = CLASS_TRAITS[d.cls].revolving ? Math.min(cents ?? Number.MAX_SAFE_INTEGER, d.limit ?? cents ?? 0) : undefined;
-  const opened = openAccount(ctx, { name: d.label, product, owners, ...(limit !== undefined ? { cents: limit } : cents !== undefined ? { cents } : {}), ...(term !== undefined ? { term_months: term } : {}), ...(d.apr !== null ? { apr_pct: d.apr } : {}), ...(securedBy ? { secured_by: securedBy } : {}), card: CLASS_TRAITS[d.cls].revolving });
+  const amount = decision.limit ?? app.cents;
+  const opened = openAccount(ctx, { ...(app.id ? { id: app.id } : {}), name: app.name ?? decision.label, product: app.product, owners: [{ party: who, role: "owner" }], ...(amount !== undefined ? { cents: amount } : {}), ...(app.into !== undefined ? { into: app.into } : {}), ...(app.term_months !== undefined ? { term_months: app.term_months } : {}), ...(decision.apr !== null ? { apr_pct: decision.apr } : {}), ...(app.secured_by ? { secured_by: app.secured_by } : {}), card: CLASS_TRAITS[decision.cls].revolving });
   if ("code" in opened) return opened;
-  return [inquiry, ...opened, signal("bill", `Approved: a ${d.label.toLowerCase()}${d.apr !== null ? ` at ${d.apr}% APR` : ""}${limit ? ` with a ${money(ctx, limit)} limit` : ""}.`, who, ctx.state.clock)];
+  return { decision, events: [...inquiry, ...opened] };
+}
+
+/** The player's (or anyone's) application for credit, with the note that says how it went. */
+export function applyForCredit(ctx: ReadContext, who: EntityId, product: string, cents: number | undefined, term: number | undefined, securedBy?: EntityId): LedgerEvent[] | Rejection {
+  const made = creditApplication(ctx, who, { product, ...(cents !== undefined ? { cents } : {}), ...(term !== undefined ? { term_months: term } : {}), ...(securedBy ? { secured_by: securedBy } : {}) });
+  if ("code" in made) return made;
+  const d = made.decision;
+  const note = d.approved ? signal("bill", `Approved: a ${d.label.toLowerCase()}${d.apr !== null ? ` at ${d.apr}% APR` : ""}${d.limit ? ` with a ${money(ctx, d.limit)} limit` : ""}.`, who, ctx.state.clock) : signal("decline", `The application for a ${d.label.toLowerCase()} was declined: ${d.reason}.`, who, ctx.state.clock);
+  return [...made.events, note];
 }
 
 /** A party's payment preferences, set by them: a list of tiers, or that list as JSON text (an action's parameters are scalars). */

@@ -1371,7 +1371,7 @@ Every posting writes a journal line on each account it touches: memo, kind, cate
 
 ### 25.7 Credit
 
-Each person has a credit report: inquiries, accounts opened, on-time and late payments, collections, charge-offs, closures and payoffs. A score is computed monthly from payment history, utilisation, account age, new credit and mix (`credit.ts`), and the report keeps its history. Applying for credit makes a hard inquiry; the score then sets the APR tier and the limit, or a decline that says why. Below the level where credit runs, an application simply opens the account.
+Each person has a credit report: inquiries, accounts opened, on-time and late payments, collections, charge-offs, closures and payoffs. A score is computed monthly from payment history, utilisation, account age, new credit and mix (`credit.ts`), and the report keeps its history. Applying for credit makes a hard inquiry; the score then sets the APR tier and the limit, or a decline that says why. At every level a lender extends no more than the score earns: a card's, charge card's or line's limit is the finance tables' starter, typical or good-credit limit for the tier; a loan is at most what secures it is worth, else the personal-loan range's top at a prime score or better, its typical amount below, so asking for more is declined. A product's own `limit` caps either. Below the level where credit runs there's no inquiry or score-based decline, and the APR is the product's. Modules apply through `api.applyCredit`, which returns a decline as a `declined` rejection.
 
 ### 25.8 Payment preferences
 
