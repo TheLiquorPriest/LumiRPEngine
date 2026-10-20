@@ -519,6 +519,8 @@ export class Runtime implements TurnHooks {
   private readonly lastWorldChat = new Map<UserId, ChatId>();
   /** The D32 preset caveats each chat's last dry run found (shown in the inspector). */
   private readonly presetWarnings = new Map<ChatId, string[]>();
+  /** Delivery checks running after their request's reply (`checkDeliveryLater`). */
+  private readonly deliveryChecks = new Set<Promise<void>>();
   /** The sections each chat's last interceptor run sent to the preset's outlets, with the preset revision it read (`preset \0 revision`). */
   private readonly routedLast = new Map<ChatId, { preset: string; slots: Set<string> }>();
   /** Per chat, a preset revision whose outlets a delivery check didn't find some routed sections at, and those sections: the world places them again (DESIGN §6.8). */
@@ -1863,6 +1865,23 @@ export class Runtime implements TurnHooks {
     const ids = new Set(activated);
     record.activation = record.forced.every((id) => ids.has(id)) ? "confirmed" : "unconfirmed";
     this.inspector.save(chatId);
+  }
+
+  /**
+   * Starts a delivery check once the request that asked for it has its reply: the check waits on a
+   * dry run of the whole prompt, which the host takes a while to assemble on a long chat, and its
+   * result reaches the frontend with the state push it ends with.
+   */
+  checkDeliveryLater(chatId: ChatId, userId: UserId): void {
+    const check: Promise<void> = this.checkDelivery(chatId, userId)
+      .catch((error: unknown) => this.host.log("warn", `[LumiRPEngine] delivery check ${chatId}: ${error instanceof Error ? error.message : String(error)}`, userId))
+      .finally(() => this.deliveryChecks.delete(check));
+    this.deliveryChecks.add(check);
+  }
+
+  /** Resolves once every delivery check started after a reply has finished (tests). */
+  async deliveryChecked(): Promise<void> {
+    while (this.deliveryChecks.size > 0) await Promise.all([...this.deliveryChecks]);
   }
 
   /**

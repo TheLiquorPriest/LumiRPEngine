@@ -205,9 +205,11 @@ export class Dispatcher {
       case "lre.view.open": {
         await this.requireWorldChat(r.chatId, userId);
         if (r.panel === "core.context") {
-          // Opening the inspector checks slot deliverability between generations (decision #5c).
-          await this.rt.checkDelivery(r.chatId, userId);
+          // Opening the inspector checks slot deliverability between generations (decision #5c). The
+          // check waits on a dry run of the whole prompt, so it runs after the reply, and its result
+          // comes with the next state push.
           reply("lre.view.open", { materialized: false, pending: false });
+          this.rt.checkDeliveryLater(r.chatId, userId);
           return;
         }
         const run = await this.rt.runOf(r.chatId, userId);
