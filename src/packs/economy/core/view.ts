@@ -66,14 +66,18 @@ function hiddenWords(ctx: ReadContext, id: EntityId): Reading {
   return { first: "Something", within: "something" };
 }
 
+/** The foundation's kinds whose names are writing, not names: a flow's label, a job's (for its worker), an invoice's memo. They're what the mask reads, so no word of theirs is one the POV has seen. */
+const WRITTEN_KINDS: Record<string, true> = { flow: true, job: true, invoice: true };
+
 /**
  * The names of everyone and everything the POV can't see, as labels and memos would carry them:
  * a derived flow's label is built from names ("Lift loan autopay"), and a posting's memo is
  * written once for every side of it. They're read as the engine reads text for names (`namesAny`):
  * a person by any word of their name ("Rosa's share" names Rosa Delgado), anything else by its
  * whole name. A name something the POV can see also has gives nothing away, and nor does a word
- * of one someone or somewhere they can see is also called by, so those stay; a whole name shorter
- * than three letters is too likely a word.
+ * of any name they can see, whatever it names (a person, a place, a business, an account, an
+ * item) or of a job's title, so those stay: with Rusty's Garage on their page, "Rusty" names no
+ * one hidden. A whole name shorter than three letters is too likely a word.
  */
 function hiddenNames(ctx: ReadContext, pov: EntityId): HiddenNames {
   const viewer: Viewer = { pov, hidden: NO_HIDDEN };
@@ -81,11 +85,13 @@ function hiddenNames(ctx: ReadContext, pov: EntityId): HiddenNames {
   const seenWords = new Set<string>();
   const hidden: { name: string; person: boolean; reads: Reading }[] = [];
   for (const [id, e] of Object.entries(ctx.state.entities)) {
-    const person = kindIs(ctx.registry, ctx.world, e.kind, "person");
     if (visible(ctx, viewer, id)) {
-      seenNames.add(e.name.toLowerCase());
-      if (person) for (const w of personWords(e.name)) seenWords.add(w.plain);
-    } else hidden.push({ name: e.name, person, reads: hiddenWords(ctx, id) });
+      for (const name of [own(WRITTEN_KINDS, e.kind) ? "" : e.name, strOf(e.fields.title)]) {
+        if (name === "") continue;
+        seenNames.add(name.toLowerCase());
+        for (const w of personWords(name)) seenWords.add(w.plain);
+      }
+    } else hidden.push({ name: e.name, person: kindIs(ctx.registry, ctx.world, e.kind, "person"), reads: hiddenWords(ctx, id) });
   }
   for (const [id, p] of Object.entries(ctx.world.places)) {
     if (canSeePlace(ctx.registry, ctx.world, ctx.state, pov, id)) {
@@ -443,7 +449,8 @@ function flowView(hooks: FinanceHooks, ctx: ReadContext, viewer: Viewer, party: 
     done: run.done,
     missed: run.missed,
     deferred: run.deferred ?? 0,
-    spec: seen ? f : null,
+    // The edit form opens on it, so its label reads as the row's: the hub sends a label only when the player changes it.
+    spec: seen ? { ...f, label: says(viewer, f.label) } : null,
   };
 }
 
@@ -632,14 +639,15 @@ export function buildFinanceView(hooks: FinanceHooks, ctx: ReadContext, party: E
     a.autopayFrom = a.autopay !== null && a.manages ? others.filter((id) => autopaySourceProblem(ctx, party, a.id, id) === null) : [];
     a.fallbacks = pays(a.id) ? others.filter((id) => pays(id) && fallsBackOn(ctx, a.id, id)) : [];
   }
-  // Where money the party only manages may not go, by the actions' own rule (`paysFor`): for each payer they may run standing payments from and only manage, which of the ids the view already carries it may not pay. The list adds no id to the view, so it names nothing the view doesn't.
+  // Where money the party only manages may not go, by the actions' own rule (`paysFor`): for each payer they may run standing payments from and only manage, which of the ids the view already carries it may not pay, and which of the party's own interests they can see (with households off, nothing else carries their household or its members). So the list names no one the viewer can't see.
   const interests = interestsOf(ctx, party);
   const onlyManaged = (side: string): boolean => side !== "" && side !== party && visible(ctx, viewer, side) && mayPayFrom(ctx, party, side) && (isParty(ctx, side) || !canSpend(ctx.state, side, party));
   const payers = [...new Set([...listed.map((a) => a.id), ...view.flows.flatMap((f) => (f.spec ? [f.spec.from, f.spec.fallback ?? ""] : []))])].filter(onlyManaged);
   const carried = new Set<string>();
   stringsIn(view, carried);
+  for (const id of interests) if (visible(ctx, viewer, id)) carried.add(id);
   const payees = [...carried].filter((id) => own(ctx.state.entities, id)?.kind === "account" || isParty(ctx, id));
-  view.paysFor = payers.map((from) => ({ from, to: payees.filter((to) => paysFor(ctx, party, to, from, interests)) }));
+  view.paysFor = payers.map((from) => ({ from, to: payees.filter((to) => paysFor(ctx, party, to, from, { interests })) }));
   // And the keys a typed payee is theirs by: their id's and name's, and their household's.
   const home = householdOf(ctx, party);
   const keyed = [party, ...(home !== null && visible(ctx, viewer, home) ? [home] : [])];

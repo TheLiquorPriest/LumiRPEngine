@@ -1351,7 +1351,7 @@ export interface BusinessView {
   role: OwnerRole | null;
   /** Whether the viewing party may take an owner's draw from it (`may_draw`): an owner or joint owner of anything but a corporation, which pays its owners by salary or dividends. */
   mayDraw: boolean;
-  /** The people the viewing party may neither hire here nor raise: their own (them, their household's members), when they hold no share of its worth (DESIGN §25.1). Only those the viewer can see. */
+  /** The people the viewing party may neither hire here nor raise (`payrollProblem`, DESIGN §25.1): their own (them, their household's members) when they hold no share of its worth, and, unless the business is wholly theirs, anyone whose pay would land in an account they may spend by a role of their own that isn't wholly the business's own people's. Only those the viewer can see. */
   selfDealing: EntityId[];
   owners: OwnerLine[];
   accounts: EntityId[];
@@ -1476,8 +1476,10 @@ export interface FinanceView {
    * For each payer the party may run standing payments from but only manages (DESIGN §25.1): an
    * account listed here or a flow's payer or fallback, other than the party, that they run payments
    * from (`mayPayFrom`) and that is a party itself or that they hold no spending role on. `to` is
-   * what it may not pay of the ids the rest of the view already carries, so the list names nothing
-   * the view doesn't: a payee typed by an id it doesn't carry is the backend's to refuse.
+   * what it may not pay of the ids the rest of the view already carries, and of the party's own
+   * interests the viewer can see (their household and its members, which nothing else carries with
+   * households off), so the list names no one the viewer can't see: a payee typed by an id it
+   * doesn't name is the backend's to refuse.
    */
   paysFor: { from: EntityId; to: EntityId[] }[];
   /** The keys (`payeeKey`) a typed payee is the party's own by: their id's and name's, and their household's where the viewer can see it. */

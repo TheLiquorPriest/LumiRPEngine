@@ -826,6 +826,28 @@ function today(ctx: ReadContext): number {
 }
 
 /**
+ * Why `by`, running `business`, may not put `worker` on its payroll or set their pay there, or null
+ * (DESIGN §25.1). Running it for others, without a share of its worth, a manager puts neither
+ * themselves nor their own on its payroll: they'd pay themselves from its money. With a share, a
+ * salary is theirs to take, as a draw is. Nor, unless the business is wholly theirs, may they pay
+ * anyone else into an account they may spend by a role of their own (`landsInReach`): the worker's
+ * deposit account, or one of the worker's that `splits` route the pay to, unless it's the money's
+ * own people's.
+ */
+export function payrollProblem(ctx: ReadContext, api: FinanceApi, by: EntityId, business: EntityId, worker: EntityId, splits: readonly FlowSplit[], doing: "hire" | "raise"): string | null {
+  const shown = (id: EntityId): string => shownLabel(ctx, ctx.world.pov, id);
+  if (api.interestsOf(ctx, by).has(worker)) {
+    if (api.shareOf(ctx.state, business, by) > 0) return null;
+    const what = doing === "hire" ? `put ${worker === by ? "themselves" : shown(worker)} on its payroll` : `set ${worker === by ? "their own" : `${shown(worker)}'s`} pay`;
+    return `${shown(by)} runs ${shown(business)} for others, so can't ${what}`;
+  }
+  const deposit = api.depositAccount(ctx, worker);
+  const lands = [...(deposit ? [deposit] : []), ...splits.filter((s) => ownsAccount(api, ctx.state, worker, s.to)).map((s) => s.to)];
+  const reached = lands.find((a) => api.landsInReach(ctx, by, a, business));
+  return reached === undefined ? null : `${shown(by)} runs ${shown(business)} for others, so can't pay ${shown(worker)} into ${shown(reached)}, which ${shown(by)} may spend`;
+}
+
+/**
  * `economy.hire`: a business takes someone on. The job is a new entity, starting today or on
  * `start`; what it doesn't say comes from the occupation, and a hire joins the business's own pay
  * cycle when it has one, so its payroll runs on one day.
@@ -837,8 +859,8 @@ function hire(api: FinanceApi, args: Record<string, JsonValue>, ctx: EffectConte
   if (!own(ctx.state.entities, worker) || isGone(ctx.state, worker) || !kindIs(ctx.registry, ctx.world, own(ctx.state.entities, worker)?.kind ?? "", "person")) return reject("missing_entity", `no person ${labelOf(ctx, worker)}`);
   const by = strOf(args.by);
   if (by !== "" && !managesParty(ctx.state, business, by)) return reject("not_owner", `${labelOf(ctx, by)} doesn't run ${labelOf(ctx, business)}`);
-  // Running a business for others, a manager puts neither themselves nor their own on its payroll: they'd pay themselves from its money (DESIGN §25.1).
-  if (by !== "" && api.interestsOf(ctx, by).has(worker) && api.shareOf(ctx.state, business, by) <= 0) return reject("not_owner", `${shownLabel(ctx, ctx.world.pov, by)} runs ${shownLabel(ctx, ctx.world.pov, business)} for others, so can't put ${worker === by ? "themselves" : shownLabel(ctx, ctx.world.pov, worker)} on its payroll`);
+  const problem = by === "" ? null : payrollProblem(ctx, api, by, business, worker, [], "hire");
+  if (problem !== null) return reject("not_owner", problem);
   const jobs = allJobs(ctx);
   if (jobs.some((j) => j.worker === worker && j.business === business && j.status !== "ended")) return reject("exists", `${labelOf(ctx, worker)} already works for ${labelOf(ctx, business)}`);
   const cal = calendarOf(ctx.world);
@@ -877,7 +899,8 @@ function raise(api: FinanceApi, args: Record<string, JsonValue>, ctx: EffectCont
   if (!job) return reject("missing_entity", `no job ${labelOf(ctx, strOf(args.job))}`);
   const by = strOf(args.by);
   if (by !== "" && !(job.business && managesParty(ctx.state, job.business, by))) return reject("not_owner", `${labelOf(ctx, by)} doesn't set that pay`);
-  if (by !== "" && job.business && api.interestsOf(ctx, by).has(job.worker) && api.shareOf(ctx.state, job.business, by) <= 0) return reject("not_owner", `${shownLabel(ctx, ctx.world.pov, by)} runs ${shownLabel(ctx, ctx.world.pov, job.business)} for others, so can't set ${job.worker === by ? "their own" : `${shownLabel(ctx, ctx.world.pov, job.worker)}'s`} pay`);
+  const problem = by === "" || !job.business ? null : payrollProblem(ctx, api, by, job.business, job.worker, job.splits, "raise");
+  if (problem !== null) return reject("not_owner", problem);
   const rate = typeof args.rate === "number" && args.rate > 0 ? Math.round(args.rate) : typeof args.pct === "number" && args.pct > -100 ? Math.round(job.rate * (1 + args.pct / 100)) : NaN;
   if (!(rate > 0)) return reject("bad_amount", "a raise needs a new rate above nothing, or a percentage");
   return [{ type: "set", entity: job.id, field: "rate", value: rate }];

@@ -406,15 +406,23 @@ export function l1Move(state: Readonly<WorldState>, who: EntityId, delta: number
   return out;
 }
 
+/**
+ * The account a payment to `payee`, someone in the world, lands in: the named deposit account it
+ * holds, else its default deposit account; null where it lands outside (they keep no accounts, or
+ * aren't followed). The fiduciary rule judges a payee named as a party by it (DESIGN §25.1).
+ */
+export function payeeAccount(ctx: ReadContext, payee: EntityId, deposit?: EntityId): EntityId | null {
+  if (!own(ctx.state.entities, payee) || !hasLedger(ctx, payee) || ctx.levelOf(payee, "money") < 1) return null;
+  const named = deposit && rightsOf(ctx.state, deposit, payee) && statusOf(ctx.state, deposit) === "open" ? deposit : undefined;
+  return named ?? depositAccount(ctx, payee);
+}
+
 /** Where money lands for a payee: the named deposit account it holds, else its default deposit account, else its outside account (level-1 band moves). */
 export function payeeSide(ctx: ReadContext, opts: Pick<ChargeOptions, "payee" | "deposit" | "counterparty">, cents: number): { account: string; extra: LedgerEvent[] } {
   const payee = opts.payee;
   if (payee && own(ctx.state.entities, payee)) {
-    if (hasLedger(ctx, payee) && ctx.levelOf(payee, "money") >= 1) {
-      const named = opts.deposit && rightsOf(ctx.state, opts.deposit, payee) && statusOf(ctx.state, opts.deposit) === "open" ? opts.deposit : undefined;
-      const deposit = named ?? depositAccount(ctx, payee);
-      if (deposit) return { account: deposit, extra: [] };
-    }
+    const deposit = payeeAccount(ctx, payee, opts.deposit);
+    if (deposit) return { account: deposit, extra: [] };
     const extra = ctx.levelOf(payee, "money") >= 1 && !hasLedger(ctx, payee) ? l1Move(ctx.state, payee, cents) : [];
     return { account: external(payee), extra };
   }

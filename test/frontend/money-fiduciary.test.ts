@@ -168,8 +168,8 @@ describe("money a manager only manages reaches none of their own interests, in t
   });
 });
 
-describe("money a manager only manages goes into no account they may spend themselves unless some of it is theirs, in the hub as in the backend", () => {
-  test("the café's custodian isn't offered the till he has a card on for its savings; its owner, whose money it partly is, is", () => {
+describe("money a manager only manages goes into no account they may spend themselves unless it's wholly theirs, in the hub as in the backend", () => {
+  test("the café's custodian isn't offered the till he has a card on for its savings; its owner, whose money it wholly is, is", () => {
     for (const role of ["custodian", "owner"] as const) {
       const { w } = setup((wd) => {
         Object.assign(wd.entities.daybreak?.fields ?? {}, { owners: role === "owner" ? [{ party: "you", role, share: 100 }] : [{ party: "you", role }, { party: "maya", role: "beneficiary", share: 100 }] });
@@ -182,7 +182,7 @@ describe("money a manager only manages goes into no account they may spend thems
     }
   });
 
-  test("a trustee editing the trust's payment isn't offered an account he's custodian of, though its worth is someone else's", () => {
+  test("a trustee editing the trust's payment isn't offered an account he's custodian of, by account or by its holder's name, though its worth is someone else's", () => {
     const { w } = setup((wd) => {
       trust(wd);
       wd.entities.jordan_kept = entity("jordan_kept", "account", "Jordan's savings", { owners: [{ party: "you", role: "custodian" }, { party: "jordan", role: "beneficiary", share: 100 }], product: "savings", opening: 0 });
@@ -190,8 +190,8 @@ describe("money a manager only manages goes into no account they may spend thems
     });
     const v = hub(w);
     expect(findAccount(v, "jordan_kept")).toMatchObject({ role: "custodian", spends: true });
-    expect(flowTargets(v, PALETTE, ["trust_acct"]).map((t) => t.id)).toEqual(["maya", "rosa", "jordan"]);
-    payees(w, v, ["trust_acct"], { jordan_kept: true, jordan: false, maya_checking: false }, (payee) => ["economy.flow_update", { who: "you", flow: "trust_help", to: payee }]);
+    expect(flowTargets(v, PALETTE, ["trust_acct"]).map((t) => t.id)).toEqual(["maya", "rosa"]);
+    payees(w, v, ["trust_acct"], { jordan_kept: true, jordan: true, maya_checking: false }, (payee) => ["economy.flow_update", { who: "you", flow: "trust_help", to: payee }]);
   });
 });
 

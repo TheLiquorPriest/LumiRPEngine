@@ -21,7 +21,7 @@ import type { OpenAccount } from "./module";
 import { fallsBackOn } from "./flows";
 import { isOpened, reject, spendOf } from "./journal";
 import { availableOf, balance, bankSide, canSpend, classOf, debtorsOf, external, holdersOf, householdOf, managesAccount, managesParty, openerOf, productOf, rightsOf, shownLabel, statusOf, traitsOf, worldProducts } from "./model";
-import { accountFeature, asUnit, cardProblem, cardRoom, cardsOn, cashAccount, cashAdvanceFee, depositAccount, featureFor, isParty, mayUse, posting, signal } from "./pay";
+import { accountFeature, asUnit, cardProblem, cardRoom, cardsOn, cashAccount, cashAdvanceFee, depositAccount, featureFor, isParty, mayUse, payeeAccount, posting, signal } from "./pay";
 
 function money(ctx: ReadContext, cents: number): string {
   return formatMoney(cents, ctx.world.currency);
@@ -339,6 +339,41 @@ function personal(ctx: ReadContext, id: string): boolean {
   return kind !== "" && (kindIs(ctx.registry, ctx.world, kind, "person") || kindIs(ctx.registry, ctx.world, kind, "household"));
 }
 
+/** What money from `from` is to `who`, for the fiduciary rule: whom it is for besides them (`forHolder`), whom it ends with besides them (`people`), and whether it's wholly theirs. */
+function moneyOf(ctx: ReadContext, who: EntityId, from: string): { forHolder: Set<EntityId>; people: Set<EntityId>; wholly: boolean } {
+  const { all, last } = whoseMoney(ctx, from);
+  return {
+    forHolder: new Set([...all].filter((p) => p !== who)),
+    people: new Set([...last].filter((p) => p !== who)),
+    wholly: last.size > 0 && [...last].every((p) => p === who),
+  };
+}
+
+/**
+ * Whether `who` may spend `account` by a role of their own (an authorized user's card, a
+ * custodian's or a trustee's), so could move money on from it, where it isn't wholly the money's
+ * own people's: every holder of its worth someone the money ends with (`people`, a trust's
+ * beneficiary, a business's owner). Money paid to its own people is theirs whoever holds the card or
+ * the custodianship, so a parent who is trustee of a child's trust and custodian of the child's
+ * account pays the child; the custodian's power over that account is the custodian's role's, and no
+ * part of this rule.
+ */
+function inReach(ctx: ReadContext, who: EntityId, account: EntityId, people: ReadonlySet<EntityId>): boolean {
+  if (!canSpend(ctx.state, account, who)) return false;
+  const holders = worthHolders(ctx, account);
+  return !(holders.length > 0 && holders.every((h) => people.has(h)));
+}
+
+/**
+ * Whether money from `from` paid into `account` would land where `who` could move it on (DESIGN
+ * §25.1): an account in their reach (`inReach`), while the money isn't wholly theirs. A module asks
+ * it of where a payment it makes lands, a worker's pay into their deposit account.
+ */
+export function landsInReach(ctx: ReadContext, who: EntityId, account: EntityId, from: string): boolean {
+  const money = moneyOf(ctx, who, from);
+  return !money.wholly && inReach(ctx, who, account, money.people);
+}
+
 /**
  * Whether money from `from`, which `who` only manages, paid to `to` would be for `who` (DESIGN
  * §25.1): to one of their interests (`interestsOf`) or an account whose worth one of those counts,
@@ -346,23 +381,27 @@ function personal(ctx: ReadContext, id: string): boolean {
  * household's: "Jordan Ellis", " POV "), which the hub refuses by the same keys. A payment among
  * whom the money itself is for (`whoseMoney`), the manager aside, is the money's own: the café's
  * savings topping up its operating account, a trust paying its beneficiary though she's the
- * trustee's daughter. An account the manager may spend by a role of their own (an authorized
- * user's card, a custodian's or a trustee's) is theirs too, whoever's worth it is, as they could
- * move the money on from it, unless they hold a share of the money themselves: then it's partly
- * theirs, and the account no way round anyone else's. Money wholly theirs (a business they own
- * outright) keeps no one else's interest, so it pays anything else they own; what goes to them,
- * their household or its members still goes by a draw or a salary, so the books and taxes see it.
+ * trustee's daughter. An account in their reach (`inReach`) is theirs too, whoever's worth it is,
+ * unless the money is wholly theirs: a share of it is no way round the rest of its people, so a
+ * trustee who holds a tenth of the trust as a beneficiary pays the rest of it into no account he
+ * may spend. A payee named as someone in the world is judged where the payment lands
+ * (`payeeAccount`, the account named as `deposit` where it's theirs, else their deposit account),
+ * as much as by who they are. Money wholly theirs (a business they own outright) keeps no one else's
+ * interest, so it pays anything else they own; what goes to them, their household or its members
+ * still goes by a draw or a salary, so the books and taxes see it.
  */
-export function paysFor(ctx: ReadContext, who: EntityId, to: string, from: string, interests: ReadonlySet<EntityId> = interestsOf(ctx, who)): boolean {
-  const { all: forHolder, last } = whoseMoney(ctx, from);
-  const stake = forHolder.has(who);
-  const wholly = last.size > 0 && [...last].every((p) => p === who);
-  forHolder.delete(who);
-  const mine = (party: string): boolean => interests.has(party) && !forHolder.has(party) && (!wholly || personal(ctx, party));
+export function paysFor(ctx: ReadContext, who: EntityId, to: string, from: string, opts: { deposit?: EntityId; interests?: ReadonlySet<EntityId> } = {}): boolean {
+  const interests = opts.interests ?? interestsOf(ctx, who);
+  const money = moneyOf(ctx, who, from);
+  const mine = (party: string): boolean => interests.has(party) && !money.forHolder.has(party) && (!money.wholly || personal(ctx, party));
+  const theirs = (account: EntityId): boolean => (!money.wholly && inReach(ctx, who, account, money.people)) || worthHolders(ctx, account).some(mine);
   const id = to.startsWith(EXTERNAL_ACCOUNT_PREFIX) ? to.slice(EXTERNAL_ACCOUNT_PREFIX.length) : to;
   const e = own(ctx.state.entities, id);
-  if (e?.kind === "account") return (!stake && canSpend(ctx.state, id, who)) || worthHolders(ctx, id).some(mine);
-  if (e) return mine(id);
+  if (e?.kind === "account") return theirs(id);
+  if (e) {
+    const lands = payeeAccount(ctx, id, opts.deposit);
+    return mine(id) || (lands !== null && theirs(lands));
+  }
   const key = payeeKey(id);
   const household = householdOf(ctx, who);
   return key !== "" && [who, household].some((p) => p !== null && (key === payeeKey(p) || key === payeeKey(own(ctx.state.entities, p)?.name ?? "")));
