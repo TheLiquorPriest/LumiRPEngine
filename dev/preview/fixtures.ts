@@ -623,10 +623,10 @@ function gmMinds(): MindsGmView {
   const note = (n: MindNote): MindsGmCharacter["notes"][number] => ({ ...n, now: Math.round(salienceNow(n, now, memory) * 100) / 100, faded: faded(n, now, memory), clock: clock(n.at) });
   const commitment = (x: MindCommitment): MindsGmCharacter["commitments"][number] => ({ ...x, withNames: x.with.map((w) => names[w] ?? w), dueText: x.due === null ? null : clock(x.due) });
   const witness = (w: WitnessEntry): MindsGmCharacter["witness"][number] => ({ ...w, clock: clock(w.at) });
-  const rosieBroker: MindPlan = { id: "pl_rosie_broker", what: "Call the broker about the listing", kind: "errand", when: { from: 2310, to: 2340 }, where: "back_office", with: [], priority: 4, status: "open", made: 1890, source: "mind", closed: null, reason: null };
-  const devBracket: MindPlan = { id: "pl_dev_bracket", what: "Pick up the transom bracket at Kim's Garage", kind: "errand", when: { from: 2460, to: 2490 }, where: "garage", with: [], priority: 3, status: "open", made: 1890, source: "mind", closed: null, reason: null };
-  const maraBanner: MindPlan = { id: "pl_mara_banner", what: "Hang the banner and the lights", kind: "other", when: { from: 7800, to: 7920 }, where: "apartment", with: ["npc_dev"], priority: 5, status: "open", made: 1890, source: "mind", closed: null, reason: null };
-  const haskellBroker: MindPlan = { id: "pl_haskell_broker", what: "Meet the broker about the diner", kind: "meet", when: { from: 3540, to: 3600 }, where: null, with: [], priority: 4, status: "open", made: 960, source: "mind", closed: null, reason: null };
+  const rosieBroker: MindPlan = { id: "pl_rosie_broker", what: "Call the broker about the listing", kind: "errand", when: { from: 2310, to: 2340 }, where: "back_office", with: [], priority: 4, status: "open", made: 1890, source: "memory", closed: null, reason: null };
+  const devBracket: MindPlan = { id: "pl_dev_bracket", what: "Pick up the transom bracket at Kim's Garage", kind: "errand", when: { from: 2460, to: 2490 }, where: "garage", with: [], priority: 3, status: "open", made: 1890, source: "memory", closed: null, reason: null };
+  const maraBanner: MindPlan = { id: "pl_mara_banner", what: "Hang the banner and the lights", kind: "other", when: { from: 7800, to: 7920 }, where: "apartment", with: ["npc_dev"], priority: 5, status: "open", made: 1890, source: "memory", closed: null, reason: null };
+  const haskellBroker: MindPlan = { id: "pl_haskell_broker", what: "Meet the broker about the diner", kind: "meet", when: { from: 3540, to: 3600 }, where: null, with: [], priority: 4, status: "open", made: 960, source: "memory", closed: null, reason: null };
   return {
     enabled: true,
     secrecy: "brief",
@@ -664,7 +664,7 @@ function gmMinds(): MindsGmView {
           depiction: "Dev pushes the last of his pancakes around the plate and offers his car keys a little too quickly.",
           intent: "Keep Sam busy and away from the apartment until Saturday; return the drill by Thursday.",
           reactions: ["If Sam asks about Saturday, he changes the subject to the boat.", "If Sam is short of cash, he offers to cover breakfast."],
-          plans: [devBracket],
+          plans: [],
           mood: "jittery",
           interrupt: null,
           withheld: false,
@@ -672,6 +672,7 @@ function gmMinds(): MindsGmView {
         },
         plans: [
           plan(devBracket),
+          // A plan his mind made in an older chat: the GM still sees it, as a thought that drives nothing.
           plan({ id: "pl_dev_rent", what: "Pay Sam back his half of the gas bill", kind: "pay", when: { from: 2520, to: 2550 }, where: null, with: ["pov"], priority: 3, status: "open", made: 1890, source: "mind", closed: null, reason: null, cents: 3150 }),
           plan({ id: "pl_dev_banner", what: "Help Mara hang the banner and the lights", kind: "meet", when: { from: 7800, to: 7920 }, where: "apartment", with: ["npc_mara"], priority: 5, status: "open", made: 1350, source: "memory", closed: null, reason: null }),
           plan({ id: "pl_dev_drill", what: "Bring Sam's drill back", kind: "errand", when: { from: 1080, to: 1110 }, where: "apartment", with: ["pov"], priority: 2, status: "dropped", made: 600, source: "gm", closed: 1110, reason: "Stayed late at the garage" }),
@@ -724,7 +725,7 @@ function gmMinds(): MindsGmView {
           depiction: "Rosie keeps wiping the same stretch of counter, slower than it needs, and answers without quite meeting Sam's eyes.",
           intent: "Put Sam off without a flat no, and keep the sale quiet until the papers are signed.",
           reactions: ["If Sam brings up Main Street, she changes the subject.", "If Dev backs Sam up, she softens and offers an extra shift."],
-          plans: [rosieBroker],
+          plans: [],
           mood: "guarded",
           interrupt: null,
           withheld: false,
@@ -768,7 +769,7 @@ function gmMinds(): MindsGmView {
           depiction: "Mara answers Sam's text with three exclamation marks and no actual news.",
           intent: "Finish the decorations by Saturday noon, and make sure Sam suspects nothing.",
           reactions: ["If Sam mentions Saturday, she says she's working a double."],
-          plans: [maraBanner],
+          plans: [],
           mood: "excited",
           interrupt: null,
           withheld: false,
@@ -827,7 +828,7 @@ function gmMinds(): MindsGmView {
           depiction: "Mr. Haskell leaves Rosie a polite voicemail from an unlisted number.",
           intent: "Get Rosie's signature before the first of November through the broker, without showing his hand.",
           reactions: [],
-          plans: [haskellBroker],
+          plans: [],
           mood: "patient",
           interrupt: "He wants Rosie's answer before she closes up tonight.",
           withheld: true,

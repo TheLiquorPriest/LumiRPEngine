@@ -1,6 +1,7 @@
 // The castlife planner and characters' own plans (DESIGN §24.8): plans laid into their windows and
 // lived at their times off screen, settled by events, occasions shaping the day, needs following the
-// plan, invitations from plans, and Stance leaving the minded to the Minds section.
+// plan, invitations from plans, Stance leaving the minded to the Minds section, and a mind's own plans
+// from an older chat driving none of it.
 
 import { describe, expect, test } from "bun:test";
 import type { LedgerEvent } from "../../../src/shared/ledger";
@@ -14,6 +15,7 @@ import { runTimelapse } from "../../../src/engine/time";
 import { Working } from "../../../src/engine/working";
 import { ALL_PACKS } from "../../../src/packs/index";
 import { buildCastView, dayOptions, dayPlan, needValue, stanceLines } from "../../../src/packs/castlife/core/index";
+import { readCharacter } from "../../../src/packs/minds/core/state";
 import { birthdayOn } from "../../../src/packs/castlife/core/occasions";
 import { modernUsWorld } from "../riverton";
 import { fold, startState } from "../support";
@@ -34,7 +36,7 @@ function at(w: Working, day: number, hhmm: string): number {
 }
 
 function plan(w: Working, id: string, patch: Partial<MindPlan>): MindPlan {
-  return { id, what: "Move money before the audit", kind: "errand", when: { from: at(w, 0, "10:00"), to: at(w, 0, "11:00") }, where: "bank", with: [], priority: 3, status: "open", made: w.state.clock, source: "mind", closed: null, reason: null, ...patch };
+  return { id, what: "Move money before the audit", kind: "errand", when: { from: at(w, 0, "10:00"), to: at(w, 0, "11:00") }, where: "bank", with: [], priority: 3, status: "open", made: w.state.clock, source: "memory", closed: null, reason: null, ...patch };
 }
 
 /** Applies recorded events, as a turn's minds would leave them; every one must apply. */
@@ -46,6 +48,11 @@ function record(w: Working, events: LedgerEvent[]): void {
 
 const pin = (entity: string, level: Fidelity): LedgerEvent => ({ type: "minds.pin", data: { entity, level } });
 const planEdit = (entity: string, p: MindPlan): LedgerEvent => ({ type: "minds.plan_edit", data: { entity, plan: p.id, value: JSON.parse(JSON.stringify(p)) } });
+/** A mind as an older chat's ledger holds it: its answer carried plans of its own. */
+const oldMind = (w: Working, entity: string, p: MindPlan): LedgerEvent[] => [
+  { type: "minds.round", data: { at: w.state.clock, on: true } },
+  { type: "minds.mind", data: { entity, at: w.state.clock, place: null, level: "live", moment: "turn", reason: "live", monologue: "m", depiction: "d", intent: "i", reactions: [], plans: [JSON.parse(JSON.stringify(p))], mood: null, interrupt: null, withheld: false } },
+];
 
 function lapse(w: Working, to: number): void {
   const out = runTimelapse(reg, w, { type: "at", at: to }, { runSeed: "seed", overrides: ALL_NOTE });
@@ -73,6 +80,29 @@ describe("castlife: characters' own plans", () => {
     expect(outcomes(w)).toEqual([{ type: "minds.plan", data: { entity: "jordan", plan: "p1", status: "done", at: at(w, 0, "11:00"), reason: null } }]);
     expect(w.ctx.query("minds.plans")(w.ctx, "jordan").map((p) => p.status)).toEqual(["done"]);
     expect(fold(reg, w.world, startState(w.world), w.events)).toEqual(w.state);
+  });
+
+  test("a plan a mind made in an older chat takes them nowhere, asks no one and is never settled; the GM's still takes them", () => {
+    const run = (events: (w: Working) => LedgerEvent[]): { at: unknown; outcomes: LedgerEvent[]; invited: boolean; laid: number; held: string[] } => {
+      const w = riverton();
+      record(w, [pin("jordan", "live"), ...events(w)]);
+      lapse(w, at(w, 0, "10:30"));
+      const place = w.state.entities.jordan?.fields.place;
+      lapse(w, at(w, 0, "13:00"));
+      return {
+        at: place,
+        outcomes: outcomes(w),
+        invited: w.events.some((e) => e.type === "castlife.invitation"),
+        laid: w.ctx.query("minds.plans")(w.ctx, "jordan").length,
+        held: readCharacter(w.state, "jordan").plans.map((p) => `${p.id}:${p.source}:${p.status}`),
+      };
+    };
+    // A meeting with the player character at the bank: the plan that would ask them along.
+    const meet = (w: Working, source: MindPlan["source"]): MindPlan => plan(w, "p1", { kind: "meet", with: ["you"], priority: 5, source });
+    const mind = run((w) => oldMind(w, "jordan", meet(w, "mind")));
+    expect(mind).toEqual({ at: "office", outcomes: [], invited: false, laid: 0, held: ["p1:mind:open"] });
+    const gm = run((w) => [planEdit("jordan", meet(w, "gm"))]);
+    expect(gm).toMatchObject({ at: "bank", invited: true, laid: 1, held: ["p1:gm:done"] });
   });
 
   test("a plan's moves don't depend on how the time is cut", () => {

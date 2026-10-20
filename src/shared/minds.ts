@@ -413,9 +413,9 @@ export type PlanStatus = "open" | "done" | "dropped";
 export const PLAN_PRIORITY = { min: 1, max: 5, normal: 3 } as const;
 
 /**
- * Something a character means to do later (DESIGN §24.8): from a mind, the memory step or the GM.
- * Times are absolute game minutes. The castlife planner lays open plans into the character's day and
- * marks them `done` or `dropped` with `minds.plan`.
+ * Something a character means to do later (DESIGN §24.8): from the memory step or the GM. Times are
+ * absolute game minutes. The castlife planner lays open plans in force (`planInForce`) into the
+ * character's day and marks them `done` or `dropped` with `minds.plan`.
  */
 export type MindPlan = {
   id: string;
@@ -439,6 +439,17 @@ export type MindPlan = {
 /** A promise, debt, grudge, favour or plan with someone: kept until resolved, never faded (DESIGN §24.4). */
 export type CommitmentKind = "promise" | "debt" | "grudge" | "favour" | "plan" | "other";
 export const COMMITMENT_KINDS: readonly CommitmentKind[] = ["promise", "debt", "grudge", "favour", "plan", "other"];
+/**
+ * Whether a plan drives anything: schedules, money, skip beats, fidelity and what a mind is told it
+ * plans. Only plans the turn stated (the memory step's) and the GM's do. A mind's own (`source:
+ * "mind"`), made in chats from before minds stopped proposing plans, were its guesses at a day the
+ * story never set up, so they stay as thoughts the GM view shows and nothing acts on. Every consumer
+ * reads plans through `keptPlans`, which keeps only these, so none can drift from another.
+ */
+export function planInForce(p: Pick<MindPlan, "source">): boolean {
+  return p.source !== "mind";
+}
+
 export type CommitmentStatus = "open" | "kept" | "broken" | "released";
 export const COMMITMENT_STATUSES: readonly CommitmentStatus[] = ["open", "kept", "broken", "released"];
 
@@ -574,7 +585,6 @@ export interface MindOutput {
   depiction: string;
   intent: string;
   reactions: string[];
-  plans: PlanDraft[];
   mood?: string;
   interrupt?: { reason: string };
 }
@@ -641,7 +651,6 @@ export type MindEventData = {
   depiction: string;
   intent: string;
   reactions: string[];
-  plans: MindPlan[];
   mood: string | null;
   interrupt: { reason: string } | null;
   withheld: boolean;
@@ -846,21 +855,20 @@ export const MIND_PROMPT_DEFAULTS: Readonly<Record<MindPurpose, string>> = Objec
 /** Each minds step's answer: the JSON the engine reads, appended after the instructions whoever wrote them. */
 export const MIND_ANSWER_FORMATS: Readonly<Record<MindPurpose, string>> = Object.freeze({
   mind: [
-    'Answer with JSON only: {"monologue": "...", "depiction": "...", "intent": "...", "reactions": ["..."], "plans": [{"what": "...", "kind": "errand|meet|visit|work|rest|leisure|pay|lend|other", "when": {"from": "YYYY-MM-DD HH:MM", "to": "YYYY-MM-DD HH:MM"}, "where": "a place", "with": ["a name"], "priority": 3, "amount": 20}], "mood": "...", "interrupt": {"reason": "..."}}',
+    'Answer with JSON only: {"monologue": "...", "depiction": "...", "intent": "...", "reactions": ["..."], "mood": "...", "interrupt": {"reason": "..."}}',
     "- monologue: their private reasoning in the first person, at most six sentences.",
     "- depiction: how they come across right now, as behaviour anyone present could see (posture, tone, what they do). Never a secret, an unspoken reason or a thought.",
     "- intent: what they mean to do next, in one sentence.",
     '- reactions: up to three short conditional reactions ("if pressed about the cellar, changes the subject").',
-    "- plans: only real intentions for later, with local times; priority 1 (whenever it fits) to 5 (it must happen); kind pay or lend, with amount, when they mean to hand someone money, and no amount otherwise. Leave the list empty when there are none.",
     "- mood: one or two words.",
     "- interrupt: only when the moment is a beat inside a time skip and what they'd do now would interrupt the player character's skipped time (seeking them out, calling them). Leave it out otherwise.",
   ].join("\n"),
   memory: [
-    'Answer with JSON only: {"notes": [{"text": "...", "salience": 3}], "commitments": [{"kind": "promise|debt|grudge|favour|plan|other", "with": ["a name"], "text": "...", "due": "YYYY-MM-DD HH:MM"}], "resolved": [{"id": "...", "status": "kept|broken|released"}], "plans": [{"what": "...", "kind": "errand|meet|visit|work|rest|leisure|pay|lend|other", "when": {"from": "YYYY-MM-DD HH:MM", "to": "YYYY-MM-DD HH:MM"}, "where": "a place", "with": ["a name"], "priority": 3, "amount": 20}], "told": [{"to": ["a name"], "what": "..."}], "summary": "..."}',
+    'Answer with JSON only: {"notes": [{"text": "...", "salience": 3}], "commitments": [{"kind": "promise|debt|grudge|favour|plan|other", "with": ["a name"], "text": "...", "due": "YYYY-MM-DD HH:MM"}], "resolved": [{"id": "...", "status": "kept|broken|released"}], "plans": [], "told": [{"to": ["a name"], "what": "..."}], "summary": "..."}',
     "- notes: at most three things they will remember, in their own perspective; salience 1 (passing) to 5 (unforgettable).",
     "- commitments: promises, debts, grudges, favours and plans with someone that this turn made; due only when a time was set.",
     "- resolved: their open commitments (listed with ids) that this turn kept, broke or released.",
-    "- plans: intentions with times that this turn formed; kind pay or lend, with amount, when they mean to hand someone money, and no amount otherwise.",
+    '- plans: only what this turn states they will do later: said aloud, agreed with someone, or scheduled in the story as written; never a guess at what they might do. Each {"what": "...", "kind": "errand|meet|visit|work|rest|leisure|pay|lend|other", "when": {"from": "YYYY-MM-DD HH:MM", "to": "YYYY-MM-DD HH:MM"}, "where": "a place", "with": ["a name"], "priority": 3, "amount": 20}, with local times; priority 1 (whenever it fits) to 5 (it must happen); kind pay or lend, with amount, when they mean to hand someone money, and no amount otherwise.',
     "- told: what they told whom in this turn, in a few words each.",
     "- summary: their one-paragraph summary rewritten, only when this turn changed who they are or what they're about; leave it out otherwise.",
     "Use empty lists for anything the turn didn't give.",

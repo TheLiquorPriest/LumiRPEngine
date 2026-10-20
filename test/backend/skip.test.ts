@@ -7,6 +7,7 @@ import { describe, expect, test } from "bun:test";
 import type { QuietRequest } from "../../src/backend/host";
 import type { LedgerEvent } from "../../src/shared/ledger";
 import type { JsonObject } from "../../src/shared/json";
+import type { MindPlan } from "../../src/shared/minds";
 import { calendarOf, clockAt, clockOfLocal, dateAt, formatHHMM, formatStamp } from "../../src/engine/calendar";
 import { createRegistry } from "../../src/engine/registry-impl";
 import { ALL_NOTE } from "../../src/engine/simulate";
@@ -19,7 +20,7 @@ import { readRun } from "../../src/backend/runtime";
 import { capBeats, runSkip, scanBeats, type Beat, type BeatMinds } from "../../src/backend/skip";
 import { ALL_PACKS } from "../../src/packs/index";
 import { modernUsWorld } from "../packs/riverton";
-import { startState } from "../packs/support";
+import { fold, startState } from "../packs/support";
 import { decodeContextView } from "../../src/frontend/play/context";
 import { Rig } from "../support/rig";
 
@@ -395,6 +396,28 @@ describe("the beat scan and the beats cap", () => {
       ["2026-10-16 18:00", "a story moment: Settle in"],
       ["2026-10-16 18:00", "the rule siren"],
     ]);
+  });
+
+  test("a plan with the player character that a mind made in an older chat is no beat; the GM's is", () => {
+    const reg = createRegistry(ALL_PACKS);
+    const world = modernUsWorld("w", "R");
+    const cal = calendarOf(world);
+    const s0 = startState(world);
+    const meet = clockAt(cal, dateAt(cal, s0.clock).dayIndex + 1, 19 * 60);
+    const plan = (source: MindPlan["source"]): JsonObject => ({ id: "p1", what: "Talk to the player character about the audit", kind: "meet", when: { from: meet, to: meet + 60 }, where: null, with: ["you"], priority: 5, status: "open", made: s0.clock, source, closed: null, reason: null });
+    const planBeats = (events: LedgerEvent[]): string[] => {
+      const state = fold(reg, world, s0, [{ type: "minds.pin", data: { entity: "jordan", level: "live" } }, ...events]);
+      const scan = scanBeats(reg, world, state, timelapseIntent({ type: "duration", minutes: 2 * 1440 }, ALL_NOTE), "seed");
+      if (!scan) throw new Error("no scan");
+      return scan.beats.filter((b) => b.reason.includes("plan with the player character")).map((b) => `${formatStamp(cal, b.at, 0)} ${b.who.join(",")}`);
+    };
+    // As an older chat's ledger holds it: the mind's answer carried its own plan.
+    const old: LedgerEvent[] = [
+      { type: "minds.round", data: { at: s0.clock, on: true } },
+      { type: "minds.mind", data: { entity: "jordan", at: s0.clock, place: null, level: "live", moment: "turn", reason: "live", monologue: "m", depiction: "d", intent: "i", reactions: [], plans: [plan("mind")], mood: null, interrupt: null, withheld: false } },
+    ];
+    expect(planBeats(old)).toEqual([]);
+    expect(planBeats([{ type: "minds.plan_edit", data: { entity: "jordan", plan: "p1", value: plan("gm") } }])).toEqual([`${formatStamp(cal, meet, 0)} jordan`]);
   });
 
   test("the cap keeps the weightiest beats, earliest first among equals, each minute's beats as one, in time order", () => {

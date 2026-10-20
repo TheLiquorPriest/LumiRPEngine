@@ -316,7 +316,7 @@ function foundationFlows(ctx: ReadContext): Flow[] {
   return out;
 }
 
-/** A mind's open plan to pay or lend someone, the one-off flow that carries it out, and when it pays. */
+/** A character's open plan in force to pay or lend someone (`minds.plans`), the one-off flow that carries it out, and when it pays. */
 export interface PlanPayment {
   entity: EntityId;
   plan: MindPlan;

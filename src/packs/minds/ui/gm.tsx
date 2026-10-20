@@ -9,7 +9,7 @@ import type { ComponentChildren } from "preact";
 import { useEffect, useId, useRef, useState } from "preact/hooks";
 import type { EntityId, PlaceId } from "../../../shared/ids";
 import type { CommitmentKind, CommitmentStatus, Fidelity, MindsGmCharacter, MindsGmView, PlanKind, PlanStatus, RefreshReason } from "../../../shared/minds";
-import { COMMITMENT_KINDS, COMMITMENT_STATUSES, FIDELITIES, MIND_TEXT_CAPS, PLAN_KINDS, PLAN_PRIORITY } from "../../../shared/minds";
+import { COMMITMENT_KINDS, COMMITMENT_STATUSES, FIDELITIES, MIND_TEXT_CAPS, PLAN_KINDS, PLAN_PRIORITY, planInForce } from "../../../shared/minds";
 import type { EditOp } from "../../../shared/protocol";
 import { formatMoneyInput, parseMoneyInput } from "../../../shared/money";
 import { formatMoney, type WorldCurrency } from "../../../shared/world";
@@ -427,7 +427,7 @@ function None(props: { children: string }) {
 function Plans(props: { ctx: Ctx; c: MindsGmCharacter; open(change: Change): void }) {
   const { ctx, c } = props;
   return (
-    <Section title="Plans" aside={<Badge>{c.plans.filter((p) => p.status === "open").length} open</Badge>} flush>
+    <Section title="Plans" aside={<Badge>{c.plans.filter((p) => p.status === "open" && planInForce(p)).length} open</Badge>} flush>
       {c.plans.length === 0 ? <None>No plans.</None> : null}
       <List>
         {c.plans.map((p) => (
@@ -442,13 +442,13 @@ function Plans(props: { ctx: Ctx; c: MindsGmCharacter; open(change: Change): voi
                   {p.cents !== undefined ? <> · {formatMoney(p.cents, ctx.currency)}</> : null} · {p.fromText} · <span class="lre-gm-minds-keep">{formatMinutes(p.when.to - p.when.from)}</span>
                 </span>
                 <span>
-                  {[p.where ? `at ${nameIn(ctx.places, p.where)}` : null, p.with.length > 0 ? `with ${p.with.map((w) => nameIn(ctx.people, w)).join(", ")}` : null, `priority ${p.priority}`, `from ${p.source === "gm" ? "you" : `their ${p.source}`}`, p.reason]
+                  {[p.where ? `at ${nameIn(ctx.places, p.where)}` : null, p.with.length > 0 ? `with ${p.with.map((w) => nameIn(ctx.people, w)).join(", ")}` : null, `priority ${p.priority}`, p.source === "gm" ? "from you" : p.source === "mind" ? "a thought from their mind, which drives nothing" : `from their ${p.source}`, p.reason]
                     .filter((part) => part !== null && part !== "")
                     .join(" · ")}
                 </span>
               </span>
             }
-            badge={<Badge tone={PLAN_TONE[p.status]}>{PLAN_STATUS_LABEL[p.status]}</Badge>}
+            badge={planInForce(p) ? <Badge tone={PLAN_TONE[p.status]}>{PLAN_STATUS_LABEL[p.status]}</Badge> : <Badge>Thought</Badge>}
             chevron
             disabled={ctx.busy}
             onClick={() => props.open({ kind: "plan", id: p.id })}

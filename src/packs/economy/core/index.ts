@@ -488,7 +488,7 @@ function registerRest(r: CoreRegistry, hooks: FinanceHooks): void {
   // Openings first, so the money engine sees every authored balance.
   r.process({ id: "economy.accounts", domain: "money", minLevel: 3, step: (_slot, ctx) => openAccounts(ctx) });
   r.process({ id: "economy.money", domain: "money", minLevel: MONEY_STEP_LEVEL, step: (slot, ctx, rng) => moneyStep(hooks, slot, ctx, rng) });
-  // Below the money step, a mind's plan to pay or lend is still carried out and settled.
+  // Below the money step, a character's plan to pay or lend is still carried out and settled.
   r.process({ id: "economy.plans", domain: "money", minLevel: 0, step: (slot, ctx, rng) => planStep(hooks, slot, ctx, rng) });
   r.materializer({ domain: "money", version: 2, versions: [1, 2], materialize: (entity, ctx, rng, version) => materializeMoney(entity, ctx, rng, version) });
 

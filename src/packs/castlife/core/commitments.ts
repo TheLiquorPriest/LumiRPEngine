@@ -1,6 +1,6 @@
 // A person's commitments (DESIGN §8, §24.8): what the day planner treats as fixed blocks. Routine
 // (activity schedules: shifts, school timetables), dated appointments and trips, and the plans their
-// mind, their memory or the GM recorded, each laid into its window. Everything here is a pure
+// memory or the GM recorded (`minds.plans`), each laid into its window. Everything here is a pure
 // function of the plans and the authored commitments, never of the clock or of where anyone stands,
 // so a plan lands at the same time however often, and from whatever segment of a timelapse, its day
 // is planned again.

@@ -7,7 +7,7 @@
 // Commitments are what the planner treats as fixed blocks (`commitments.ts`): activity schedules
 // (shifts, school timetables; terms are recurrence `from`/`until`), the person fields `appointments`
 // [{at, minutes, place, label}] and `trips` [{from, until, place, label}], and the open plans a
-// character's mind, memory or the GM recorded (`minds.plans`), laid into their windows. Chores
+// character's memory or the GM recorded (`minds.plans`), laid into their windows. Chores
 // [{label, minutes, place?, utility?}] are options. A day's occasion (`occasions.ts`: the weekend,
 // holidays, birthdays, the season, the weather) shapes its options. Needs live in `needs`
 // {name: {v, t}} for the POV; an NPC's are read from what their day's plan has them do.
