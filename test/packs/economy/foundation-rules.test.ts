@@ -497,3 +497,27 @@ describe("a card is paid from the payer's own account", () => {
     expect(w.state.accounts.checking).toBe(checking);
   });
 });
+
+describe("a returned-payment fee is charged only when the money wasn't there", () => {
+  const gym = (world: WorldDoc): void => {
+    world.entities.gym = entity("gym", "flow", { flow_kind: "bill", from: "checking", to: "Harbor Gym", amount_cents: 5_000, every: "day", shortfall: "skip", status: "active" });
+  };
+  const fees = (w: Working): JsonObject[] => dataOf(w, "economy.txn").filter((t) => t.category === "nsf");
+
+  test("a flow from a closed account is declined with no fee on it", () => {
+    const w = setup(gym);
+    w.applyAll([{ type: "economy.status", data: { account: "checking", status: "closed" } }]);
+    lapse(w, 3);
+    expect(flowRuns(w, "gym").length).toBeGreaterThan(0);
+    expect(fees(w)).toEqual([]);
+  });
+
+  test("a flow an open account can't cover bounces with the fee", () => {
+    const w = setup((world) => {
+      gym(world);
+      world.entities.checking!.fields.opening = 1_000;
+    });
+    lapse(w, 1);
+    expect(fees(w).length).toBeGreaterThan(0);
+  });
+});
