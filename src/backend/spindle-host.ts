@@ -10,6 +10,7 @@ import type { JsonObject, JsonValue } from "../shared/json";
 import { isRecord } from "../shared/json";
 import type { ChatId, UserId } from "../shared/ids";
 import type { ReasoningChoice } from "../shared/settings";
+import { TimeoutFired, timerMs } from "../shared/timeouts";
 import type { Answer, Answers } from "../engine/decide";
 import type {
   ActivatedEntry,
@@ -221,9 +222,6 @@ export function reasoningOverride(effort: ReasoningChoice | undefined): Generati
   if (effort === undefined || effort === "inherit") return undefined;
   return effort === "off" ? { source: "off" } : { source: "custom", apiReasoning: true, effort };
 }
-
-/** How long a section token count may take before the estimate stands in (a tokenizer still loading takes seconds). */
-const TOKEN_COUNT_MS = 1000;
 
 /** Keeps the last log lines and writes them, debounced: system lines to extension storage, user lines to that user's storage. */
 class DiagnosticsLog {
@@ -442,19 +440,27 @@ export function createSpindleHost(): HostPort {
     tokens: {
       // One countText per text, in parallel: the host counts with the user's main model, as its prompt
       // breakdown does (operator scope needs the userId). A tokenizer still loading can take seconds,
-      // so anything slower than TOKEN_COUNT_MS, or a failed or malformed count, is no count.
-      async count(texts, userId) {
+      // so a count slower than the user's limit rejects with its TimeoutFired; a limit of 0 asks for
+      // none, and a failed or malformed count is no count.
+      async count(texts, userId, limit) {
+        if (limit === 0) return null;
         const counted = Promise.all(texts.map((text) => spindle.tokens.countText(text, { userId }))).then((rows) => rows.map((r) => r.total_tokens));
-        const late = new Promise<null>((resolve) => {
-          const timer = setTimeout(() => resolve(null), TOKEN_COUNT_MS);
-          void counted.finally(() => clearTimeout(timer)).catch(() => undefined);
-        });
+        const ms = timerMs(limit);
+        const late =
+          ms === null
+            ? null
+            : new Promise<never>((_resolve, reject) => {
+                const timer = setTimeout(() => reject(new TimeoutFired("tokenCountMs", ms)), ms);
+                void counted.finally(() => clearTimeout(timer)).catch(() => undefined);
+              });
+        let counts: number[];
         try {
-          const counts = await Promise.race([counted, late]);
-          return counts && counts.every((n) => Number.isInteger(n) && n >= 0) ? counts : null;
-        } catch {
+          counts = await (late ? Promise.race([counted, late]) : counted);
+        } catch (error) {
+          if (error instanceof TimeoutFired) throw error;
           return null;
         }
+        return counts.every((n) => Number.isInteger(n) && n >= 0) ? counts : null;
       },
     },
     frontend: {
@@ -593,7 +599,7 @@ export function createSpindleHost(): HostPort {
     },
     processes: {
       async spawn(options) {
-        const handle = await spindle.backendProcesses.spawn({ entry: options.entry, kind: options.kind, key: options.key, payload: options.payload, userId: options.userId, startupTimeoutMs: 15_000, heartbeatTimeoutMs: 15_000, replaceExisting: true });
+        const handle = await spindle.backendProcesses.spawn({ entry: options.entry, kind: options.kind, key: options.key, payload: options.payload, userId: options.userId, startupTimeoutMs: options.startupMs, heartbeatTimeoutMs: options.heartbeatMs, replaceExisting: true });
         return { processId: handle.processId, send: (payload: unknown) => handle.send(payload), stop: () => handle.stop() };
       },
       onMessage(handler) {

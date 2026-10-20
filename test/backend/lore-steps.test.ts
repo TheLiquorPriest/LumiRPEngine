@@ -481,7 +481,7 @@ describe("lookup instructions and answers", () => {
   /** A step's lore on `world`'s start, with a round of lookups to offer. */
   const stepLore = (world: WorldDoc, purpose: StepPurpose, tokens = 400): StepLore => {
     const w = new Working(reg, world, startState(world));
-    const lookups = { budget: new LookupBudget(2, 60_000, 60_000, new AbortController().signal), transport: "tools" as const, refused: () => undefined };
+    const lookups = { budget: new LookupBudget(2, { key: "postLookupMs", limit: 60_000 }, { key: "postReplyMs", limit: 60_000 }, new AbortController().signal), transport: "tools" as const, refused: () => undefined };
     return new StepLore(purpose, { policy: "prefetch+lookup", tokens }, { reg, world: w.world, state: w.state, tokens: (t: string) => Math.ceil(t.length / 3.2) }, "post", { text: [], people: [], labels: [], said: "", names: [] }, { lookups });
   };
 

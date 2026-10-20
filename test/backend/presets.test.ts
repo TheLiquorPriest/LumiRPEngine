@@ -93,7 +93,7 @@ describe("settings saved before lore policies existed", () => {
       const host = new FakeHost();
       const preset = MODEL_USE_PRESETS[id];
       const { pre, post } = preset.budgets;
-      const old = { ...defaultSettings(), swipeDefault: "renarrate", modelUse: { preset: id, steps: without(preset.steps), budgets: { pre: { calls: pre.calls, ms: pre.ms }, post: { calls: post.calls, ms: post.ms } }, tokens: { ...preset.tokens } } };
+      const old = { ...defaultSettings(), swipeDefault: "renarrate", modelUse: { preset: id, steps: without(preset.steps), budgets: { pre: { calls: pre.calls }, post: { calls: post.calls } }, tokens: { ...preset.tokens } } };
       await host.storage.write("settings.json", JSON.stringify(old), host.userId);
       const loaded = await new SettingsStore(host).get(host.userId);
       expect(loaded.modelUse).toEqual({ preset: id, ...preset });
@@ -112,6 +112,6 @@ describe("settings saved before lore policies existed", () => {
     expect(loaded.steps.extract?.lore).toEqual({ policy: "none", tokens: 0 });
     expect(loaded.steps.brief?.lore).toBeUndefined();
     expect(stepLoreOf(loaded.steps.brief)).toEqual(DEFAULT_STEP_LORE);
-    expect(loaded.budgets).toEqual({ pre: { calls: 3, ms: 30_000, lookup: standard.budgets.pre.lookup }, post: { calls: 2, ms: 45_000, lookup: { calls: 0, ms: 0 } } });
+    expect(loaded.budgets).toEqual({ pre: { calls: 3, lookup: standard.budgets.pre.lookup }, post: { calls: 2, lookup: { calls: 0 } } });
   });
 });

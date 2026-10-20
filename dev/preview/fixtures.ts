@@ -10,6 +10,7 @@ import type { StudioOffer } from "../../src/shared/studio-bridge";
 import type { ExtractionType, UserSettings } from "../../src/shared/settings";
 import { SETTINGS_DEFAULTS_REV } from "../../src/shared/settings";
 import { defaultMindsSettings } from "../../src/shared/minds";
+import { defaultTimeouts } from "../../src/shared/timeouts";
 import type { MindCommitment, MindNote, MindPlan, MindsGmCharacter, MindsGmView, WitnessEntry } from "../../src/shared/minds";
 import { calendarOf, formatClock } from "../../src/engine/calendar";
 import { faded, salienceNow } from "../../src/packs/minds/core/state";
@@ -1252,7 +1253,7 @@ export function settingsFixture(): UserSettings {
         extract: { enabled: true, signals: ["reply"], maxTokens: 800 },
         "npc.choose": { enabled: true, signals: ["tie_zone", "invitation"] },
       },
-      budgets: { pre: { calls: 2, ms: 20000 }, post: { calls: 2, ms: 30000 } },
+      budgets: { pre: { calls: 2 }, post: { calls: 2 } },
       tokens: { sections: 600 },
     },
     realism: { preset: "story", levels: { money: 1, gear: 1, vehicles: 1, castlife: 1, relationships: 1, space: 2, calendar: 2, weather: 1, sheets: 1 }, tierCaps: { principal: {}, supporting: {}, background: {} } },
@@ -1264,6 +1265,7 @@ export function settingsFixture(): UserSettings {
     swipeDefault: "rerun",
     hideJsonBlocks: true,
     minds: defaultMindsSettings(),
+    timeouts: { ...defaultTimeouts(), requestMs: 600_000, laneHeartbeatMs: "none" },
   };
 }
 

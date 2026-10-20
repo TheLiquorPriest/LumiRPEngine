@@ -8,6 +8,7 @@
 
 import type { JsonObject, JsonValue } from "../shared/json";
 import type { ReasoningChoice, SamplingParams } from "../shared/settings";
+import type { Limit } from "../shared/minds";
 import type { ChatId, GenerationId, MessageId, UserId } from "../shared/ids";
 import type { BackendToFrontend } from "../shared/protocol";
 import type { Answers, Questions } from "../engine/decide";
@@ -389,8 +390,8 @@ export interface HostPort {
     decide(request: DecideRequest, userId: UserId, signal: AbortSignal): Promise<DecideResult>;
   };
   tokens: {
-    /** The host tokenizer's count for each text (the user's main model, as the prompt breakdown counts), or null when it can't count in time. */
-    count(texts: readonly string[], userId: UserId): Promise<number[] | null>;
+    /** The host tokenizer's count for each text (the user's main model, as the prompt breakdown counts), or null when it can't count; rejects with a `TimeoutFired` when counting takes longer than `limit` (Settings → Timeouts → Token counts). */
+    count(texts: readonly string[], userId: UserId, limit: Limit): Promise<number[] | null>;
   };
   frontend: {
     send(message: BackendToFrontend, userId: UserId | null, frontendSessionId?: string): void;
@@ -435,7 +436,8 @@ export interface HostPort {
     remove(id: string, userId: UserId): Promise<void>;
   };
   processes: {
-    spawn(options: { entry: string; kind: string; key: string; payload: JsonValue; userId: UserId }): Promise<ProcessHandle>;
+    /** `startupMs` and `heartbeatMs`: how long Lumiverse waits for the process to start and between its heartbeats, already within its limits (`HOST_LIMITS`; a heartbeat of 0 checks none). */
+    spawn(options: { entry: string; kind: string; key: string; payload: JsonValue; userId: UserId; startupMs: number; heartbeatMs: number }): Promise<ProcessHandle>;
     onMessage(handler: (event: ProcessEvent) => void): () => void;
     onLifecycle(handler: (event: ProcessEvent) => void): () => void;
   };

@@ -161,8 +161,10 @@ describe("settings saved before the budgets rose", () => {
     expect(steps.interpret).toMatchObject({ maxTokens: 3000, lore: { tokens: 450 } });
     // The old Standard wall clock and lookups rise, with the calls kept; values the user changed stay as set.
     const standard = MODEL_USE_PRESETS.standard;
-    expect(s.modelUse.budgets.pre).toEqual({ calls: 2, ms: standard.budgets.pre.ms, lookup: standard.budgets.pre.lookup });
-    expect(s.modelUse.budgets.post).toEqual({ calls: 3, ms: 50_000, lookup: { calls: 2, ms: 20_000 } });
+    expect(s.modelUse.budgets.pre).toEqual({ calls: 2, lookup: standard.budgets.pre.lookup });
+    expect(s.modelUse.budgets.post).toEqual({ calls: 3, lookup: { calls: 2 } });
+    // The old Standard wall clocks and lookup windows move to Timeouts, risen to the new defaults; the user's own 50 s stays.
+    expect(s.timeouts).toMatchObject({ engineRunMs: 300_000, preLookupMs: 120_000, postReplyMs: 50_000, postLookupMs: 120_000 });
     expect(s.modelUse.tokens.sections).toBe(standard.tokens.sections);
     expect(s.minds.tokens).toBe(MINDS_PRESETS.standard.tokens);
     expect(s.helper).toEqual({ connectionId: null, model: null, effort: "inherit", maxTokens: 8192, params: {} });

@@ -1,5 +1,5 @@
-// Settings: the home list, page leads, the model-use preset cards, the call meter
-// table, the per-step cards and the extraction rows. Built on the tokens and the shared atoms only.
+// Settings: the home list, page leads, the model-use preset cards, the call meter table, the
+// per-step cards, the extraction rows and the timeout rows. Built on the tokens and the shared atoms only.
 
 export const SETTINGS_CSS = `
 .lre-set{display:flex;flex-direction:column;gap:var(--lre-s3);min-width:0}
@@ -41,4 +41,9 @@ export const SETTINGS_CSS = `
 .lre-set-ext+.lre-set-ext{border-top:1px solid var(--lre-hairline)}
 .lre-set-ext-head{display:flex;align-items:center;justify-content:space-between;gap:var(--lre-s2);min-height:32px;min-width:0}
 .lre-set-ext-title{font-size:var(--lre-fs-md);font-weight:500;min-width:0;overflow-wrap:anywhere}
+.lre-set-timeout-lead{margin:0;padding:var(--lre-s3) var(--lre-s3) 0;font-size:var(--lre-fs-sm);color:var(--lre-muted);overflow-wrap:anywhere}
+.lre-set-timeout{gap:var(--lre-s1)}
+.lre-set-timeout>.lre-row{border-bottom:0;padding:var(--lre-s1) 0}
+.lre-set-timeout-text{overflow-wrap:anywhere}
+.lre-set-timeout-cap{flex:none;font-size:var(--lre-fs-sm);font-weight:600;font-variant-numeric:tabular-nums}
 `;
