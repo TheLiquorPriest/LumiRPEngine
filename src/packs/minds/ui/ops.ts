@@ -104,12 +104,19 @@ export interface PlanFormDraft {
   with: EntityId[];
   priority: number;
   status: PlanStatus;
+  /** A `pay` or `lend` plan's amount, in minor units; null while none is typed. */
+  cents: number | null;
+}
+
+/** Whether a plan kind hands money over, and so needs an amount and someone it is with. */
+export function isMoneyPlan(kind: PlanKind): boolean {
+  return kind === "pay" || kind === "lend";
 }
 
 /** A new plan starts an hour from now and lasts an hour; an existing one, as it is. */
 export function planDraft(now: number, plan?: MindPlan): PlanFormDraft {
-  if (plan) return { what: plan.what, kind: plan.kind, from: plan.when.from, to: plan.when.to, where: plan.where, with: [...plan.with], priority: plan.priority, status: plan.status };
-  return { what: "", kind: "errand", from: now + 60, to: now + 120, where: null, with: [], priority: PLAN_PRIORITY.normal, status: "open" };
+  if (plan) return { what: plan.what, kind: plan.kind, from: plan.when.from, to: plan.when.to, where: plan.where, with: [...plan.with], priority: plan.priority, status: plan.status, cents: plan.cents ?? null };
+  return { what: "", kind: "errand", from: now + 60, to: now + 120, where: null, with: [], priority: PLAN_PRIORITY.normal, status: "open", cents: null };
 }
 
 /** Moves a plan to start `hours` from now, keeping how long it lasts. */
@@ -123,11 +130,13 @@ export function planLasts(draft: PlanFormDraft, minutes: number): PlanFormDraft 
   return { ...draft, to: draft.from + Math.round(minutes) };
 }
 
-/** A plan added or replaced: what it is within the cap, a start before its end, and a priority of 1 to 5. */
+/** A plan added or replaced: what it is within the cap, a start before its end, a priority of 1 to 5, and for a pay or lend plan an amount above zero and someone to hand it to. */
 export function planOp(entity: EntityId, id: string | null, draft: PlanFormDraft): EditOp | null {
   const what = textIn(draft.what, MIND_TEXT_CAPS.planWhat);
   const ok = Number.isInteger(draft.from) && Number.isInteger(draft.to) && draft.from < draft.to && Number.isInteger(draft.priority) && draft.priority >= PLAN_PRIORITY.min && draft.priority <= PLAN_PRIORITY.max;
-  if (what === null || !ok) return null;
-  const value: JsonObject = { what, kind: draft.kind, when: { from: draft.from, to: draft.to }, where: draft.where, with: [...new Set(draft.with.filter((w) => w !== "" && w !== entity))], priority: draft.priority, status: draft.status };
+  const withIds = [...new Set(draft.with.filter((w) => w !== "" && w !== entity))];
+  const money = isMoneyPlan(draft.kind);
+  if (what === null || !ok || (money && (draft.cents === null || !Number.isSafeInteger(draft.cents) || draft.cents <= 0 || withIds.length === 0))) return null;
+  const value: JsonObject = { what, kind: draft.kind, when: { from: draft.from, to: draft.to }, where: draft.where, with: withIds, priority: draft.priority, status: draft.status, ...(money && draft.cents !== null ? { cents: draft.cents } : {}) };
   return { op: "mind_memory", entity, part: "plan", id, value };
 }

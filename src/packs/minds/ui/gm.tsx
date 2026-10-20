@@ -8,10 +8,13 @@ import type { EntityId, PlaceId } from "../../../shared/ids";
 import type { CommitmentKind, CommitmentStatus, Fidelity, MindsGmCharacter, MindsGmView, PlanKind, PlanStatus } from "../../../shared/minds";
 import { COMMITMENT_KINDS, COMMITMENT_STATUSES, FIDELITIES, MIND_TEXT_CAPS, PLAN_KINDS, PLAN_PRIORITY } from "../../../shared/minds";
 import type { EditOp } from "../../../shared/protocol";
+import { formatMoneyInput, parseMoneyInput } from "../../../shared/money";
+import { formatMoney } from "../../../shared/world";
 import { Card, Empty, Row, Seg } from "../../../frontend/components";
+import { MoneyInput } from "../../../frontend/money-input";
 import type { GmSectionProps } from "../../../frontend/registry";
 import type { CommitmentDraft, NoteDraft, PlanFormDraft } from "./ops";
-import { COMMITMENT_KIND_LABEL, COMMITMENT_STATUS_LABEL, commitmentDraft, commitmentOp, deleteOp, FIDELITY_LABEL, narratorGets, noteDraft, noteOp, pinOp, PLAN_KIND_LABEL, PLAN_STATUS_LABEL, planDraft, planLasts, planOp, refreshOp, startPlanIn } from "./ops";
+import { COMMITMENT_KIND_LABEL, COMMITMENT_STATUS_LABEL, commitmentDraft, commitmentOp, deleteOp, FIDELITY_LABEL, isMoneyPlan, narratorGets, noteDraft, noteOp, pinOp, PLAN_KIND_LABEL, PLAN_STATUS_LABEL, planDraft, planLasts, planOp, refreshOp, startPlanIn } from "./ops";
 
 const LEVEL_TONE: Record<Fidelity, string> = { live: "accent", near: "", far: "", background: "" };
 
@@ -140,6 +143,8 @@ function PlanForm(props: { ctx: Ctx; entity: EntityId; id: string | null; initia
   const now = props.ctx.view.now;
   const [startIn, setStartIn] = useState(String(Math.round(((draft.from - now) / 60) * 4) / 4));
   const [lasts, setLasts] = useState(String(draft.to - draft.from));
+  const currency = props.ctx.section.currency;
+  const [amount, setAmount] = useState(draft.cents === null ? "" : formatMoneyInput(draft.cents, currency));
   return (
     <div class="lre-stack" data-lre-minds-form="plan">
       <input class="lre-input" aria-label="What" placeholder="What they mean to do" maxLength={MIND_TEXT_CAPS.planWhat} value={draft.what} onInput={(event) => setDraft({ ...draft, what: event.currentTarget.value })} />
@@ -186,6 +191,22 @@ function PlanForm(props: { ctx: Ctx; entity: EntityId; id: string | null; initia
           </option>
         ))}
       </select>
+      {isMoneyPlan(draft.kind) ? (
+        <div class="lre-field">
+          <span class="label">Amount (handed to the first person it's with)</span>
+          <MoneyInput
+            currency={currency}
+            label="Amount"
+            value={amount}
+            invalid={amount.trim() !== "" && draft.cents === null}
+            onInput={(text) => {
+              setAmount(text);
+              const cents = parseMoneyInput(text, currency);
+              setDraft({ ...draft, cents: cents !== null && cents > 0 ? cents : null });
+            }}
+          />
+        </div>
+      ) : null}
       <PeoplePicker label="With" value={draft.with} people={props.ctx.people} exclude={props.entity} disabled={props.ctx.section.busy} onChange={(next) => setDraft({ ...draft, with: next })} />
       <Seg<number> label="Priority" value={draft.priority} options={Array.from({ length: PLAN_PRIORITY.max - PLAN_PRIORITY.min + 1 }, (_, i) => ({ value: PLAN_PRIORITY.min + i, label: String(PLAN_PRIORITY.min + i), title: i === 0 ? "Whenever it fits" : i === PLAN_PRIORITY.max - PLAN_PRIORITY.min ? "It must happen" : undefined }))} onChange={(priority) => setDraft({ ...draft, priority })} />
       <select class="lre-input" aria-label="Status" value={draft.status} onChange={(event) => setDraft({ ...draft, status: event.currentTarget.value as PlanStatus })}>
@@ -195,7 +216,7 @@ function PlanForm(props: { ctx: Ctx; entity: EntityId; id: string | null; initia
           </option>
         ))}
       </select>
-      <FormButtons ctx={props.ctx} op={planOp(props.entity, props.id, draft)} invalid="A plan needs what it is, and a length." onDone={props.onDone} />
+      <FormButtons ctx={props.ctx} op={planOp(props.entity, props.id, draft)} invalid={isMoneyPlan(draft.kind) ? "A plan to pay or lend needs what it is, a length, an amount and someone it is with." : "A plan needs what it is, and a length."} onDone={props.onDone} />
     </div>
   );
 }
@@ -273,7 +294,7 @@ function Plans(props: { ctx: Ctx; c: MindsGmCharacter }) {
           <Row
             key={p.id}
             k={p.what}
-            sub={`${PLAN_KIND_LABEL[p.kind]} · ${p.fromText} – ${p.toText}${p.where ? ` · ${nameIn(ctx.places, p.where)}` : ""}${p.with.length > 0 ? ` · with ${p.with.map((w) => nameIn(ctx.people, w)).join(", ")}` : ""} · priority ${p.priority} · ${PLAN_STATUS_LABEL[p.status]}${p.reason ? ` (${p.reason})` : ""} · from ${p.source === "gm" ? "you" : `their ${p.source}`}`}
+            sub={`${PLAN_KIND_LABEL[p.kind]}${p.cents !== undefined ? ` ${formatMoney(p.cents, ctx.section.currency)}` : ""} · ${p.fromText} – ${p.toText}${p.where ? ` · ${nameIn(ctx.places, p.where)}` : ""}${p.with.length > 0 ? ` · with ${p.with.map((w) => nameIn(ctx.people, w)).join(", ")}` : ""} · priority ${p.priority} · ${PLAN_STATUS_LABEL[p.status]}${p.reason ? ` (${p.reason})` : ""} · from ${p.source === "gm" ? "you" : `their ${p.source}`}`}
             tone={p.status === "open" ? undefined : "muted"}
             v={<ItemActions ctx={ctx} noun={`plan ${p.what}`} onEdit={() => setEditing(p.id)} remove={deleteOp(c.entity, "plan", p.id)} />}
           />
