@@ -21,6 +21,7 @@ import { activeRecord, isLive, turnPath } from "../engine/ledger/path";
 import { optionalQuery, own } from "../engine/pack-kit";
 import { playerDrop, playerLines, UNSEEN_DROP } from "../engine/player-events";
 import type { ReadContext } from "../engine/registry";
+import { readPass } from "../engine/read-pass";
 import { presetOf } from "../engine/realism";
 import { levelFloors, type Registry } from "../engine/registry-impl";
 import { actionOdds, paramCandidates } from "../engine/resolve";
@@ -597,54 +598,57 @@ export function buildView(input: ViewInput): StateView {
   const state = fold.state;
   const world = input.world(state.revision) ?? input.world(input.run.revision);
   if (!world) return notWorldView(input.chatId);
-  const ctx = registry.context(world, state);
-  const panels: Record<PanelId, JsonValue> = {};
-  const prefs = { mapDisplay: input.mapDisplay ?? null };
-  for (const view of registry.views) {
-    try {
-      panels[view.panel] = view.build(ctx, prefs);
-    } catch (error) {
-      panels[view.panel] = { error: error instanceof Error ? error.message : String(error) };
-    }
-  }
-  const head = chain.findLast((m) => !m.isUser);
-  const headRec = head ? activeRecord(head, core.journal.tombstones) : null;
-  const sceneView = scene(world, state, headRec ? clockMinutes(headRec.events) : 0, registry);
-  const pending: PendingMark[] = core.journal.held.map((h) => ({ panel: "*", entity: h.write.kind === "post" ? povEntity(world) : null }));
-  const packs: Record<PackId, number> = {};
-  for (const pack of registry.packs) packs[pack.id] = pack.version;
-  // A swipe's chips show only while that swipe is displayed (switching back shows them again).
-  const shown = input.stored.filter((c) => c.swipeId === undefined || chain.find((m) => m.id === c.messageId)?.swipeId === c.swipeId);
-  const recordOf = (messageId: string): Rec | null => {
-    const m = chain.find((x) => x.id === messageId);
-    return m ? activeRecord(m, core.journal.tombstones) : null;
-  };
-  const drops = playerDrops(registry, world, state, recordOf, fold.notes, fold.keepReport);
-  const chips: Chip[] = [...shown.map(({ payload: _payload, ...chip }) => chip), ...derivedChips(chain, fold, drops.keep, core, registry, world)];
+  // Judged against what the next turn acts on: before the first record, that includes the starting
+  // markers (the world's defaults, the user's settings filling in), which the head fold doesn't hold yet.
   const next = core.renderState(observed)?.state ?? state;
-  const lag = definitionsLag(state);
-  return {
-    v: 1,
-    chatId: input.chatId,
-    worldId: input.run.worldId,
-    revision: state.revision,
-    ...(lag !== null ? { definitionsFrom: lag } : {}),
-    status: core.journal.pauses.length > 0 ? "paused" : core.inFlight ? "in_flight" : "idle",
-    hud: hud(world, state, panels, ctx),
-    scene: sceneView,
-    chips,
-    journal: [...turnNotes(chain, fold, core, registry, world, state), ...drops.notes],
-    keepReport: drops.keep,
-    pending,
-    panels,
-    // Judged against what the next turn acts on: before the first record, that includes the starting
-    // markers (the world's defaults, the user's settings filling in), which the head fold doesn't hold yet.
-    palette: palette(world, next, registry),
-    controls: controls(world, next, sceneView.sceneType),
-    meter: input.meter,
-    packs,
-    currency: world.currency,
-  };
+  // Everything else only reads the folded states, many times over: one read pass (DESIGN §9.6).
+  return readPass(() => {
+    const ctx = registry.context(world, state);
+    const panels: Record<PanelId, JsonValue> = {};
+    const prefs = { mapDisplay: input.mapDisplay ?? null };
+    for (const view of registry.views) {
+      try {
+        panels[view.panel] = view.build(ctx, prefs);
+      } catch (error) {
+        panels[view.panel] = { error: error instanceof Error ? error.message : String(error) };
+      }
+    }
+    const head = chain.findLast((m) => !m.isUser);
+    const headRec = head ? activeRecord(head, core.journal.tombstones) : null;
+    const sceneView = scene(world, state, headRec ? clockMinutes(headRec.events) : 0, registry);
+    const pending: PendingMark[] = core.journal.held.map((h) => ({ panel: "*", entity: h.write.kind === "post" ? povEntity(world) : null }));
+    const packs: Record<PackId, number> = {};
+    for (const pack of registry.packs) packs[pack.id] = pack.version;
+    // A swipe's chips show only while that swipe is displayed (switching back shows them again).
+    const shown = input.stored.filter((c) => c.swipeId === undefined || chain.find((m) => m.id === c.messageId)?.swipeId === c.swipeId);
+    const recordOf = (messageId: string): Rec | null => {
+      const m = chain.find((x) => x.id === messageId);
+      return m ? activeRecord(m, core.journal.tombstones) : null;
+    };
+    const drops = playerDrops(registry, world, state, recordOf, fold.notes, fold.keepReport);
+    const chips: Chip[] = [...shown.map(({ payload: _payload, ...chip }) => chip), ...derivedChips(chain, fold, drops.keep, core, registry, world)];
+    const lag = definitionsLag(state);
+    return {
+      v: 1,
+      chatId: input.chatId,
+      worldId: input.run.worldId,
+      revision: state.revision,
+      ...(lag !== null ? { definitionsFrom: lag } : {}),
+      status: core.journal.pauses.length > 0 ? "paused" : core.inFlight ? "in_flight" : "idle",
+      hud: hud(world, state, panels, ctx),
+      scene: sceneView,
+      chips,
+      journal: [...turnNotes(chain, fold, core, registry, world, state), ...drops.notes],
+      keepReport: drops.keep,
+      pending,
+      panels,
+      palette: palette(world, next, registry),
+      controls: controls(world, next, sceneView.sceneType),
+      meter: input.meter,
+      packs,
+      currency: world.currency,
+    };
+  });
 }
 
 function povEntity(world: WorldDoc): EntityId {

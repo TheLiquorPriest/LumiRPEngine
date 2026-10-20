@@ -5,6 +5,7 @@ import type { PlaceId, TravelMode } from "../../../shared/ids";
 import type { RouteLeg, WorldDoc } from "../../../shared/world";
 import { objOf, optionalQuery, sliceOf, own } from "../../../engine/pack-kit";
 import type { ReadContext } from "../../../engine/registry";
+import { passMemo } from "../../../engine/read-pass";
 
 /** A move at Space level 1 (named places only). */
 export const NOMINAL_MOVE_MINUTES = 15;
@@ -52,14 +53,26 @@ interface Edge {
 /** The node a place is left through: a compact parent itself, or a spread parent's exit node `P^`. */
 const EXIT = "^";
 
+/** The route graph of a travel mode, once per read pass (DESIGN §9.6): the palette and the map ask for many routes on one world. */
 function edges(world: WorldDoc, mode: TravelMode, closed: ReadonlySet<string>): Map<PlaceId, Edge[]> {
+  return passMemo([world], `space.edges\u0000${mode}\u0000${[...closed].sort().join("\u0000")}`, () => buildEdges(world, mode, closed));
+}
+
+function buildEdges(world: WorldDoc, mode: TravelMode, closed: ReadonlySet<string>): Map<PlaceId, Edge[]> {
   const out = new Map<PlaceId, Edge[]>();
+  // Who each node already reaches, so a connector is added only where no edge leads yet.
+  const reached = new Map<PlaceId, Set<PlaceId>>();
   const authored = new Map<PlaceId, Edge[]>();
   const add = (from: PlaceId, to: PlaceId, leg: RouteLeg, into = out): void => {
     const list = into.get(from) ?? [];
     list.push({ to, leg });
     into.set(from, list);
+    if (into !== out) return;
+    const seen = reached.get(from) ?? new Set<PlaceId>();
+    seen.add(to);
+    reached.set(from, seen);
   };
+  const reaches = (from: PlaceId, to: PlaceId): boolean => reached.get(from)?.has(to) === true;
   for (const id of Object.keys(world.routes).sort()) {
     const r = own(world.routes, id);
     const leg = r ? own(r.modes, mode) : undefined;
@@ -77,24 +90,36 @@ function edges(world: WorldDoc, mode: TravelMode, closed: ReadonlySet<string>): 
   // exit node, which carries the parent's own routes but never re-enters a sibling, so a town is
   // not a free hub. A "compact" parent (a building) connects its children directly.
   const connector: RouteLeg = mode === "walk" ? { minutes: SIBLING_WALK_MINUTES, distanceKm: 0.3 } : { minutes: 1, distanceKm: 0 };
-  const within = (place: PlaceId, ancestor: PlaceId): boolean => {
+  /** The places a place lies within, nearest first. */
+  const ancestors = (place: PlaceId): Set<PlaceId> => {
+    const out = new Set<PlaceId>();
     let cur = own(world.places, place)?.parent;
     for (let guard = 0; cur && guard < 64; guard++) {
-      if (cur === ancestor) return true;
+      out.add(cur);
       cur = own(world.places, cur)?.parent;
     }
-    return false;
+    return out;
   };
   const byParent = new Map<string, PlaceId[]>();
-  for (const p of Object.values(world.places)) if (p.parent) byParent.set(p.parent, [...(byParent.get(p.parent) ?? []), p.id]);
-  const spread = new Set<PlaceId>();
-  for (const parent of byParent.keys()) if (Object.values(world.routes).some((r) => within(r.from, parent) && within(r.to, parent))) spread.add(parent);
+  for (const p of Object.values(world.places)) {
+    if (!p.parent) continue;
+    const kids = byParent.get(p.parent);
+    if (kids) kids.push(p.id);
+    else byParent.set(p.parent, [p.id]);
+  }
+  // Every place both ends of a route (of any mode, open or not) lie within.
+  const holding = new Set<PlaceId>();
+  for (const r of Object.values(world.routes)) {
+    const from = ancestors(r.from);
+    for (const a of ancestors(r.to)) if (from.has(a)) holding.add(a);
+  }
+  const spread = new Set<PlaceId>([...byParent.keys()].filter((parent) => holding.has(parent)));
   const exitNode = (p: PlaceId): PlaceId => (spread.has(p) ? `${p}${EXIT}` : p);
   for (const [parent, kids] of byParent) {
     for (const a of kids.sort()) {
-      if (mode === "walk" && !spread.has(parent)) for (const b of kids) if (a !== b && !(out.get(a) ?? []).some((e) => e.to === b)) add(a, b, connector);
+      if (mode === "walk" && !spread.has(parent)) for (const b of kids) if (a !== b && !reaches(a, b)) add(a, b, connector);
       add(a, exitNode(parent), connector);
-      if (!(out.get(parent) ?? []).some((e) => e.to === a)) add(parent, a, connector);
+      if (!reaches(parent, a)) add(parent, a, connector);
     }
   }
   for (const p of spread) {
@@ -119,17 +144,23 @@ export function findRoute(world: WorldDoc, from: PlaceId, to: PlaceId, mode: Tra
   const dist = new Map<PlaceId, number>([[from, 0]]);
   const prev = new Map<PlaceId, { from: PlaceId; leg: RouteLeg }>();
   const done = new Set<PlaceId>();
-  for (let guard = 0; guard < 10_000; guard++) {
-    let best: PlaceId | null = null;
-    for (const [p, d] of dist) if (!done.has(p) && (best === null || d < (dist.get(best) ?? Infinity) || (d === dist.get(best) && p < best))) best = p;
-    if (best === null) return null;
+  const frontier = new Frontier();
+  frontier.push(0, from);
+  for (let taken = 0; taken < 10_000; ) {
+    const next = frontier.pop();
+    if (!next) return null;
+    const best = next.place;
+    // A node reached again more cheaply, or taken already, is passed over.
+    if (done.has(best) || next.minutes !== dist.get(best)) continue;
+    taken++;
     if (best === to || best === `${to}${EXIT}`) break;
     done.add(best);
     for (const e of graph.get(best) ?? []) {
-      const nd = (dist.get(best) ?? 0) + cost(e.leg);
+      const nd = next.minutes + cost(e.leg);
       if (nd < (dist.get(e.to) ?? Infinity)) {
         dist.set(e.to, nd);
         prev.set(e.to, { from: best, leg: e.leg });
+        frontier.push(nd, e.to);
       }
     }
   }
@@ -145,6 +176,61 @@ export function findRoute(world: WorldDoc, from: PlaceId, to: PlaceId, mode: Tra
     cur = p.from;
   }
   return { mode, legs, minutes: legs.reduce((a, l) => a + l.minutes, 0), distanceKm: legs.reduce((a, l) => a + l.distanceKm, 0) };
+}
+
+/** A node a route search reached, by how far it is. */
+interface Reached {
+  minutes: number;
+  place: PlaceId;
+}
+
+/** The nodes a route search may take next, nearest first, then by id: the order it takes them in. */
+class Frontier {
+  private readonly heap: Reached[] = [];
+
+  private static before(a: Reached, b: Reached): boolean {
+    return a.minutes < b.minutes || (a.minutes === b.minutes && a.place < b.place);
+  }
+
+  push(minutes: number, place: PlaceId): void {
+    const heap = this.heap;
+    heap.push({ minutes, place });
+    for (let i = heap.length - 1; i > 0; ) {
+      const up = (i - 1) >> 1;
+      if (!this.swapIfBefore(i, up)) break;
+      i = up;
+    }
+  }
+
+  pop(): Reached | undefined {
+    const heap = this.heap;
+    const top = heap[0];
+    const last = heap.pop();
+    if (top === undefined || last === undefined || heap.length === 0) return top;
+    heap[0] = last;
+    for (let i = 0; ; ) {
+      let least = i;
+      for (const k of [2 * i + 1, 2 * i + 2]) {
+        const child = heap[k];
+        const held = heap[least];
+        if (child && held && Frontier.before(child, held)) least = k;
+      }
+      if (least === i || !this.swapIfBefore(least, i)) break;
+      i = least;
+    }
+    return top;
+  }
+
+  /** Swaps the entries at `a` and `b` when the one at `a` comes before the one at `b`. */
+  private swapIfBefore(a: number, b: number): boolean {
+    const heap = this.heap;
+    const x = heap[a];
+    const y = heap[b];
+    if (!x || !y || !Frontier.before(x, y)) return false;
+    heap[a] = y;
+    heap[b] = x;
+    return true;
+  }
 }
 
 /** Routes closed now: `packs.space.config.closedRoutes` (secret or seasonal routes) unless opened, plus any closed by `space.route`. */

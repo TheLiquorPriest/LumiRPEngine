@@ -10,6 +10,7 @@ import { hasOwn, isRecord, safeKey } from "../shared/json";
 import type { DomainId, EntityId, Level } from "../shared/ids";
 import { BANDS, DOMAINS, INTERRUPT_CLASSES } from "../shared/ids";
 import { SPEED_THRESHOLD_MINUTES } from "../shared/settings";
+import { dropPassMemo } from "./read-pass";
 import type {
   AddEvent,
   ClockEvent,
@@ -233,6 +234,8 @@ export function validateEvent(types: EventTypes, event: LedgerEvent, ctx: ReadCo
 export function applyEvent(types: EventTypes, event: LedgerEvent, state: WorldState, ctx: ReadContext): void {
   const def = types.get(event.type);
   if (def) def.apply(event, state, ctx);
+  // What a read pass kept for the state no longer holds (DESIGN §9.6).
+  dropPassMemo(state);
 }
 
 /**
