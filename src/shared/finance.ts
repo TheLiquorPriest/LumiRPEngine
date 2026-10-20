@@ -1328,6 +1328,11 @@ export interface BusinessView {
   role: OwnerRole | null;
   owners: OwnerLine[];
   accounts: EntityId[];
+  /**
+   * Its accounts the viewer manages through it but holds no role on, so they aren't among the
+   * viewer's own (its loan, say): from Money 3, where all of a party's accounts show; else none.
+   */
+  managed: AccountView[];
   places: { id: string; name: string }[];
   /** Year to date. */
   books: { period: string; revenue: number; expenses: number; payroll: number; taxes: number; profit: number; lines: { category: string; cents: number }[] };

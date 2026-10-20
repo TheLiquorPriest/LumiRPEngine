@@ -1526,7 +1526,8 @@ Owner draws, distributions, transfers between its own accounts and the sales tax
 - its last 20 sales;
 - its invoices;
 - its staff, with their pay;
-- what it owes for taxes and to its suppliers, with when each is next paid.
+- what it owes for taxes and to its suppliers, with when each is next paid;
+- from Money 3, the accounts it holds that the party manages through it (§25.1) but holds no role on, so they aren't among the party's own (its loan, say), each as the party's own accounts show.
 
 A party's own late invoices, owed or owed to it, are alerts. The modules' sections of a view are told who reads it: the player's surfaces name anyone the player can't see only as "a customer", "an employee" or "an owner", and leave out their ids (an owner line's party, an invoice's customer or business, an employee's worker, where their pay goes, and their job's worker and splits). The GM's views name everyone (§7). A character's money summary for their mind says how a business of theirs is doing this month, and what they owe on an invoice.
 

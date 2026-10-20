@@ -33,6 +33,8 @@ export class MoneyChat {
     readonly rig: Rig,
     readonly chatId: string,
     readonly currency: WorldCurrency,
+    /** Whose story it is: the world's POV. */
+    readonly pov: string,
   ) {}
 
   /** Port Alder with `patch` committed to the world, a chat attached, and Play → Money opened as picking the tab opens it. */
@@ -58,7 +60,7 @@ export class MoneyChat {
     // Picking Play → Money opens the POV's money (play.tsx), which posts the authored openings.
     rig.body(await rig.send({ type: "lre.view.open", chatId, panel: "economy.money", entity: null }));
     await rig.rt.push.settle();
-    return new MoneyChat(rig, chatId, (await rig.rt.view(chatId, rig.host.userId)).currency ?? DEFAULT_CURRENCY);
+    return new MoneyChat(rig, chatId, (await rig.rt.view(chatId, rig.host.userId)).currency ?? DEFAULT_CURRENCY, patch.pov ?? "pov");
   }
 
   /** The state view the client renders. */
@@ -129,7 +131,7 @@ export class MoneyChat {
 
   /** The POV's Money level, as Play → Realism sets it. */
   async level(to: Level): Promise<void> {
-    this.rig.body(await this.rig.send(resolveMarker(this.chatId, "money", { entity: "pov" }, to)));
+    this.rig.body(await this.rig.send(resolveMarker(this.chatId, "money", { entity: this.pov }, to)));
   }
 
   /** An amount as typed into a control. */

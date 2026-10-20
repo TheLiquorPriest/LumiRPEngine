@@ -619,6 +619,8 @@ export function businessView(ctx: ReadContext, api: FinanceApi, business: Entity
     role,
     owners: ownerLines(ctx, api, viewer, business),
     accounts: api.accountsOf(ctx, business, "sees"),
+    // The finance view fills these: it knows which accounts it already shows as the viewer's own.
+    managed: [],
     places: placesOf(ctx, business).map((p) => ({ id: p, name: own(ctx.world.places, p)?.name ?? p })),
     books: { period: String(d.year), revenue: year.revenue, expenses: year.expenses, payroll: year.payroll, taxes: year.taxes, profit: year.profit, lines: year.lines },
     months,

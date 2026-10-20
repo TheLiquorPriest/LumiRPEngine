@@ -466,6 +466,8 @@ export function buildFinanceView(hooks: FinanceHooks, ctx: ReadContext, party: E
     if (extra.upcoming && view.overview) view.overview.upcoming = [...view.overview.upcoming, ...extra.upcoming].sort((a, b) => a.clock - b.clock).slice(0, 20);
     if (extra.alerts && view.overview) view.overview.alerts.push(...extra.alerts);
   }
+  // A business's accounts its owner manages without a role of their own on them are on its page, not among theirs.
+  for (const b of view.businesses) b.managed = level >= 3 ? b.accounts.filter((id) => !mine.includes(id) && managesAccount(ctx, id, party)).map((id) => accountView(ctx, viewer, party, id, level, detail)) : [];
   return view;
 }
 

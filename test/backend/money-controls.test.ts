@@ -628,4 +628,16 @@ describe("a business's owner manages its accounts by their role on the business"
     expect(shop.flows.find((f) => f.id === "flow_shop_lease")?.amount).toBe("$3,200.00");
     expect(account(shop, LIFT_LOAN).autopay?.mode).toBe("fixed");
   });
+
+  test("the shop's page carries the accounts Marcus manages through it but holds no role on; the shop's own view, an employee's and Money 2 carry none", async () => {
+    const owner = await MoneyChat.start({ pov: "marcus_delgado" });
+    const shop = (await owner.hub()).businesses.find((b) => b.id === BUSINESS);
+    // The shop's checking is among his own accounts already (he holds its card); its loan is the shop's alone.
+    expect(shop?.managed.map((a) => a.id)).toEqual([LIFT_LOAN]);
+    expect(shop?.managed[0]).toMatchObject({ role: null, manages: true, autopay: { mode: "fixed", from: SHOP } });
+    expect((await owner.party(BUSINESS)).businesses.find((b) => b.id === BUSINESS)?.managed).toEqual([]);
+    await owner.level(2);
+    expect((await owner.hub()).businesses.flatMap((b) => b.managed)).toEqual([]);
+    expect((await (await MoneyChat.start()).hub()).businesses.flatMap((b) => b.managed)).toEqual([]);
+  });
 });
