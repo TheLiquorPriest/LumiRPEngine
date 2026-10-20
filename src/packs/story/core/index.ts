@@ -78,29 +78,36 @@ function reject(code: string, reason: string): Rejection {
 /**
  * The puzzle an answer is for: `ref` when it is a puzzle's id, or the id the player layer shows an
  * open one by (a secret's stand-in); else, among the open puzzles the POV can see (a stage awaiting
- * an answer), the one whose label and stage share the most words with `ref`, or the only one open.
+ * an answer), the one whose label and stage as the POV sees them share the most words with `ref`
+ * (a secret's own label, which its quest log row masks, never matches), or the only one open.
  */
 export function openPuzzle(ctx: ReadContext, ref: string): string | null {
   if (own(ctx.world.tracks, ref)?.kind === "puzzle") return ref;
   const open = Object.keys(ctx.world.tracks)
-    .sort()
-    .filter((id) => {
+    .flatMap((id) => {
       const t = own(ctx.world.tracks, id);
-      if (t?.kind !== "puzzle") return false;
-      return own(t.stages, own(ctx.state.tracks, id)?.stage ?? t.start)?.answer !== undefined && playerTrack(ctx.registry, ctx.world, ctx.state, ctx.world.pov, id) !== null;
-    });
-  const shown = open.find((id) => shownTrackId(ctx.world, id) === ref);
-  if (shown !== undefined) return shown;
+      if (t?.kind !== "puzzle" || own(t.stages, own(ctx.state.tracks, id)?.stage ?? t.start)?.answer === undefined) return [];
+      const shown = playerTrack(ctx.registry, ctx.world, ctx.state, ctx.world.pov, id);
+      return shown ? [{ id, shown }] : [];
+    })
+    .sort((a, b) => (a.shown.id < b.shown.id ? -1 : a.shown.id > b.shown.id ? 1 : 0));
+  const byId = open.find((p) => p.shown.id === ref);
+  if (byId) return byId.id;
   const words = (s: string): string[] => s.toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length > 2);
   const want = new Set(words(ref));
   let best: { id: string; n: number } | null = null;
-  for (const id of open) {
-    const t = own(ctx.world.tracks, id);
-    const stage = t ? own(t.stages, own(ctx.state.tracks, id)?.stage ?? t.start) : undefined;
-    const n = words(`${t?.label ?? ""} ${stage?.label ?? ""}`).filter((w) => want.has(w)).length;
-    if (n > 0 && (!best || n > best.n)) best = { id, n };
+  for (const p of open) {
+    const n = words(`${p.shown.label} ${p.shown.stage}`).filter((w) => want.has(w)).length;
+    if (n > 0 && (!best || n > best.n)) best = { id: p.id, n };
   }
-  return best?.id ?? (open.length === 1 ? (open[0] ?? null) : null);
+  return best?.id ?? (open.length === 1 ? (open[0]?.id ?? null) : null);
+}
+
+/** A puzzle as the player asked for it, for a refusal: a track they see under that id by the label they see, else their own words, never a hidden track's label. */
+function askedFor(ctx: ReadContext, ref: string): string {
+  const id = Object.keys(ctx.world.tracks).find((t) => shownTrackId(ctx.world, t) === ref);
+  const shown = id === undefined ? null : playerTrack(ctx.registry, ctx.world, ctx.state, ctx.world.pov, id);
+  return shown?.label ?? (ref.replace(/_/g, " ").trim() || "nothing");
 }
 
 export const storyPack: PackDef = {
@@ -130,8 +137,9 @@ export const storyPack: PackDef = {
       type: "story.answer",
       args: ["track", "answer", "decision?"],
       resolve(a, ctx) {
-        const track = openPuzzle(ctx, strOf(a.track));
-        if (!track) return reject("not_a_puzzle", `no open puzzle ${labelOf(ctx, strOf(a.track))}`);
+        const ref = strOf(a.track);
+        const track = openPuzzle(ctx, ref);
+        if (!track) return { code: "not_a_puzzle", reason: `no open puzzle ${askedFor(ctx, ref)}`, gm: `no open puzzle ${labelOf(ctx, ref)}` };
         const decision = typeof a.decision === "number" ? a.decision : undefined;
         const check = checkAnswer(ctx.world, ctx.state, track, strOf(a.answer), decision);
         // The author opted this stage into model judgement: the turn asks `puzzle.answer`, then retries with `decision`.

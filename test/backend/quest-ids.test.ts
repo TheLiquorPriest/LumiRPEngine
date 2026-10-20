@@ -105,3 +105,43 @@ describe("a secret track on the player layer", () => {
     expect(rig.rt.ledger.errors).toEqual([]);
   });
 });
+
+describe("answering a puzzle the quest log masks", () => {
+  /** Sends Answer with `params` and plays the turn; the turn's decline, if any. */
+  async function answer(rig: Rig, chatId: string, params: JsonObject): Promise<{ decline: string; outcome: string }> {
+    rig.body(await rig.send({ type: "lre.action", chatId, action: "answer", params, source: "palette" }));
+    const g = await rig.host.start(chatId, { type: "normal" });
+    const outcome = rig.host.lastInterceptor?.mutated.find((m) => m.content?.startsWith("[Outcome]"))?.content ?? "";
+    await rig.host.finish(g, "You try it.");
+    const decline = (await rig.rt.view(chatId, rig.host.userId)).chips.find((c) => c.kind === "decline");
+    return { decline: `${decline?.label ?? ""} ${decline?.detail ?? ""}`, outcome };
+  }
+
+  test("a refusal names it as the player asked, never by the secret's own label", async () => {
+    const rig = new Rig({ shipped: true });
+    const chatId = await starterChat(rig, "modern_slice_of_life", "Port Alder");
+    const { decline, outcome } = await answer(rig, chatId, { puzzle: "s_shop_trouble", answer: "42" });
+    expect(decline).toContain("no open puzzle s shop trouble");
+    expect(`${decline}\n${outcome}`).not.toContain("What Marcus isn't saying");
+  });
+
+  test("its own label finds nothing, and interpret is told it by the label the quest log shows", async () => {
+    const rig = new Rig({ shipped: true });
+    // The truck puzzle kept secret, beside a public one: two open, so neither is answered as the only one.
+    const chatId = await starterChat(rig, "modern_slice_of_life", "Port Alder", (draft): JsonObject[] => [
+      { ...(draft.tracks.p_township_truck as unknown as JsonObject), visibility: "secret" },
+      { id: "p_lockbox", kind: "puzzle", label: "The lockbox", start: "shut", visibility: "public", stages: { shut: { label: "Three dials", cue: "A lockbox with three brass dials.", answer: { expect: ["317"] }, next: [{ to: "open", when: "false" }] }, open: { label: "Open", next: [] } } },
+    ]);
+    const masked = async () => (await questLog(rig, chatId)).find((q) => q.cue?.startsWith("The township pickup turns over fine"));
+    expect((await masked())?.label).toBe("Something is going on");
+    await rig.turn(chatId, "The answer is the relay.", "You think it over.");
+    const interpret = rig.host.quietCalls.map((c) => c.messages.map((m) => m.content).join("\n")).find((p) => p.includes("answer — Answer (open:")) ?? "";
+    expect(interpret).toContain("Something is going on");
+    expect(interpret).not.toContain("The truck that won't start");
+    // A word only its hidden label holds doesn't reach it: it stays unanswered.
+    const { decline } = await answer(rig, chatId, { puzzle: "truck", answer: "fuel pump relay" });
+    expect(decline).toContain("no open puzzle truck");
+    expect([(await masked())?.status, (await masked())?.hints]).toEqual(["active", []]);
+    expect(rig.rt.ledger.errors).toEqual([]);
+  });
+});

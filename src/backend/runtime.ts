@@ -2034,14 +2034,18 @@ export const TYPE_LABELS: Record<ExtractionType, string> = {
   life: "Life and death",
 };
 
-/** The puzzles the player can see that take an answer now, as "Puzzle — stage" titles (interpret's Answer label). */
+/**
+ * The puzzles the player can see that take an answer now, as "Puzzle — stage" titles (interpret's
+ * Answer label), each as the player sees it: a secret's masked label, never its own.
+ */
 function openPuzzleTitles(registry: Registry, world: WorldDoc, state: Readonly<WorldState>): string[] {
   const out: string[] = [];
   for (const id of Object.keys(world.tracks).sort()) {
     const t = world.tracks[id];
     const stage = t?.kind === "puzzle" ? t.stages[state.tracks[id]?.stage ?? t.start] : undefined;
-    if (!t || !stage?.answer || playerTrack(registry, world, state, world.pov, id) === null) continue;
-    out.push(`${t.label} — ${stage.label}`);
+    const shown = stage?.answer ? playerTrack(registry, world, state, world.pov, id) : null;
+    if (!shown) continue;
+    out.push(shown.stage ? `${shown.label} — ${shown.stage}` : shown.label);
     if (out.length >= 6) break;
   }
   return out;
