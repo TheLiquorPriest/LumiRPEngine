@@ -8,6 +8,7 @@
 import { useEffect, useId, useRef } from "preact/hooks";
 import type { Mode } from "./app";
 import { useApp, useUi } from "./app";
+import { IdsSurface } from "./components";
 import { Build } from "./build/build";
 import { headGutters, watchChatHeads } from "./chat-heads";
 import { GmMode } from "./gm/mode";
@@ -124,7 +125,14 @@ export function Drawer(props: { measure(el: Element): Rect }) {
         </div>
       </div>
       <div class="lre-mode-body" id={bodyId} role="tabpanel" aria-labelledby={`${bodyId}-tab-${mode}`}>
-        {mode === "play" ? <Play /> : mode === "gm" ? <GmMode /> : mode === "build" ? <Build /> : <Settings />}
+        {mode === "play" ? (
+          <Play />
+        ) : mode === "gm" || mode === "build" ? (
+          // Show ids applies in Build and GM only: in Play an id can name what its label hides.
+          <IdsSurface.Provider value={true}>{mode === "gm" ? <GmMode /> : <Build />}</IdsSurface.Provider>
+        ) : (
+          <Settings />
+        )}
       </div>
     </div>
   );

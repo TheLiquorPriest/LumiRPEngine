@@ -105,6 +105,21 @@ export function popSheet(ui: UiState): UiState {
   return ui.play.stack.length === 0 ? ui : { ...ui, play: { ...ui.play, stack: ui.play.stack.slice(0, -1) } };
 }
 
+/**
+ * Opens the host's active chat. What was open over the last one closes first: the float overlays
+ * and every Play sheet, since a sheet asks its chat for its entity's detail (`lre.view.open`) and
+ * the new chat's player opened nothing. GM mode closes its own gate on the change.
+ */
+export function switchChat(app: Pick<App, "client" | "ui" | "overlays">, chatId: ChatId | null): void {
+  const now = app.client.getState();
+  if (chatId === now.chatId && now.status !== "closed") return;
+  app.overlays.closeMap();
+  app.overlays.closePalette();
+  app.overlays.closeWorld();
+  app.ui.update((ui) => (ui.play.stack.length === 0 ? ui : { ...ui, play: { ...ui.play, stack: [] } }));
+  void app.client.open(chatId);
+}
+
 export type PaletteTab = "actions" | "combat" | "buy" | "pay" | "transfer" | "drive" | "lend" | "timelapse";
 
 export interface Toast {

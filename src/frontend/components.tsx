@@ -5,7 +5,8 @@
 // buttons, the shared focus ring.
 
 import type { ComponentChildren } from "preact";
-import { useEffect, useId, useLayoutEffect, useRef, useState } from "preact/hooks";
+import { createContext } from "preact";
+import { useContext, useEffect, useId, useLayoutEffect, useRef, useState } from "preact/hooks";
 import type { JsonValue } from "../shared/json";
 import { isRecord } from "../shared/json";
 import type { OutcomeOdds } from "../shared/state-view";
@@ -520,9 +521,17 @@ export function useShowIds(): boolean {
   return useUi((ui) => ui.showIds);
 }
 
-/** An id in small mono type, shown only while Show ids is on. */
+/**
+ * Whether the surface shows ids when Show ids is on: Build and GM provide true. Play's panels, sheets
+ * and overlays keep the default, false: a view id there can name what its label hides (a secret quest
+ * shown as "Something is going on" still goes by its own track id).
+ */
+export const IdsSurface = createContext(false);
+
+/** An id in small mono type, shown while Show ids is on, on a surface that shows ids (`IdsSurface`). */
 export function IdText(props: { id: string }) {
-  return useShowIds() ? <code class="lre-id">{props.id}</code> : null;
+  const surface = useContext(IdsSurface);
+  return useShowIds() && surface ? <code class="lre-id">{props.id}</code> : null;
 }
 
 // ---------------------------------------------------------------- host components

@@ -6,7 +6,7 @@
 import { render } from "preact";
 import type { SpindleFloatWidgetHandle, SpindleFrontendContext } from "lumiverse-spindle-types";
 import type { App, Draft, Toast, UiState } from "./app";
-import { AppContext, initialUi, makeRequest, SHOW_IDS_KEY } from "./app";
+import { AppContext, initialUi, makeRequest, SHOW_IDS_KEY, switchChat } from "./app";
 import { trackJobs } from "./build/jobs";
 import { recheckDraft, trackDraft } from "./build/draft";
 import { MessageChips, messageIdFromScope } from "./chips";
@@ -304,13 +304,7 @@ export function setup(ctx: SpindleFrontendContext): () => void {
   );
 
   // ------------------------------------------------------------ the active chat
-  const openActive = (chatId: string | null) => {
-    if (chatId === client.getState().chatId && client.getState().status !== "closed") return;
-    app.overlays.closeMap();
-    app.overlays.closePalette();
-    app.overlays.closeWorld();
-    void client.open(chatId);
-  };
+  const openActive = (chatId: string | null) => switchChat(app, chatId);
   if (ctx.state) {
     // The active Loom preset is the one prompts assemble with, and only the frontend can read it (DESIGN §6.8).
     client.presetId = ctx.state.get<string | null>("loom.activePresetId") ?? null;

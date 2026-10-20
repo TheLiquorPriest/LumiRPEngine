@@ -17,7 +17,7 @@ export const TOKENS_CSS = `
 --lre-danger:var(--lumiverse-danger,#ef4444);--lre-success:var(--lumiverse-success,#22c55e);--lre-warning:var(--lumiverse-warning,#f59e0b);
 --lre-neg:color-mix(in srgb,var(--lre-danger) 55%,var(--lre-fg));--lre-pos:color-mix(in srgb,var(--lre-success) 35%,var(--lre-fg));--lre-warn:color-mix(in srgb,var(--lre-warning) 35%,var(--lre-fg));
 --lre-neg-soft:color-mix(in srgb,var(--lre-danger) 12%,transparent);--lre-pos-soft:color-mix(in srgb,var(--lre-success) 12%,transparent);--lre-warn-soft:color-mix(in srgb,var(--lre-warning) 12%,transparent);
---lre-gm:color-mix(in srgb,var(--lumiverse-warning,#f59e0b) 70%,var(--lre-fg));--lre-gm-soft:color-mix(in srgb,var(--lumiverse-warning,#f59e0b) 12%,transparent);--lre-gm-text:color-mix(in srgb,var(--lre-gm) 60%,var(--lre-fg));
+--lre-gm:color-mix(in srgb,var(--lumiverse-warning,#f59e0b) 70%,var(--lre-fg));--lre-gm-soft:color-mix(in srgb,var(--lumiverse-warning,#f59e0b) 12%,transparent);--lre-gm-text:color-mix(in srgb,var(--lre-gm) 50%,var(--lre-fg));
 --lre-r-sm:var(--lumiverse-radius-sm,6px);--lre-r:var(--lumiverse-radius-md,10px);--lre-r-lg:var(--lumiverse-radius-lg,12px);--lre-r-xl:var(--lumiverse-radius-xl,16px);--lre-r-pill:999px;--lre-radius:var(--lre-r);
 --lre-shadow-sm:var(--lumiverse-shadow-sm,0 2px 8px rgba(0,0,0,.2));--lre-shadow-lg:var(--lumiverse-shadow-md,0 8px 24px rgba(0,0,0,.4));
 --lre-s1:4px;--lre-s2:8px;--lre-s3:12px;--lre-s4:16px;--lre-s5:24px;--lre-tap:40px;--lre-tap-lg:44px;
