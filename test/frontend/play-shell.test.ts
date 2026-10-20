@@ -1,6 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import type { PanelHome } from "../../src/frontend/app";
-import { initialUi, playAt, popSheet, pushSheet, showPanel } from "../../src/frontend/app";
+import { initialUi, playAt, popSheet, pushSheet, showPanel, switchChat } from "../../src/frontend/app";
+import type { Overlays } from "../../src/frontend/app";
+import { ProtocolClient } from "../../src/frontend/protocol-client";
+import { createStore } from "../../src/frontend/store";
 import { needsYou } from "../../src/frontend/play/now";
 import { destinations } from "../../src/frontend/play/play";
 import type { PanelDef } from "../../src/frontend/registry";
@@ -83,5 +86,27 @@ describe("UI navigation", () => {
     expect(showPanel(ui, catalog, "castlife.cast")).toMatchObject({ mode: "play", play: { dest: "people", tab: { people: "castlife.cast" } } });
     expect(showPanel(ui, catalog, "core.gm").mode).toBe("gm");
     expect(showPanel(ui, catalog, "nope.nope")).toBe(ui);
+  });
+
+  test("switching chats closes every sheet and overlay before the new chat opens; the same chat keeps them", () => {
+    const sent: { type?: string; chatId?: unknown }[] = [];
+    const client = new ProtocolClient({ send: (payload) => void sent.push(payload as { type?: string; chatId?: unknown }), subscribe: () => () => undefined }, { timers: { set: () => 0, clear: () => undefined } });
+    const closed: string[] = [];
+    const overlays = { closeMap: () => closed.push("map"), closePalette: () => closed.push("palette"), closeWorld: () => closed.push("world") } as unknown as Overlays;
+    const ui = createStore(pushSheet(pushSheet(playAt(initialUi(false), "people"), { kind: "person", id: "npc_rosie" }), { kind: "item", id: "backpack" }));
+    // A sheet stays open across chats only if nothing closes it: it would then ask the new chat for its entity.
+    ui.subscribe((state) => {
+      if (state.play.stack.length > 0 && client.getState().chatId === "chat-2") throw new Error("a sheet over chat-2");
+    });
+    switchChat({ client, ui, overlays }, "chat-1");
+    expect(ui.get().play.stack).toEqual([]);
+    const reopened = pushSheet(ui.get(), { kind: "person", id: "npc_rosie" });
+    ui.set(reopened);
+    switchChat({ client, ui, overlays }, "chat-1");
+    expect(ui.get()).toBe(reopened);
+    switchChat({ client, ui, overlays }, "chat-2");
+    expect(ui.get().play).toEqual({ dest: "people", tab: {}, stack: [] });
+    expect(closed).toEqual(["map", "palette", "world", "map", "palette", "world"]);
+    expect(sent.map((m) => m.chatId)).toEqual(["chat-1", "chat-2"]);
   });
 });

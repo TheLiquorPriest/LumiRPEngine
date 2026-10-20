@@ -42,7 +42,7 @@ Open the **LumiRPEngine** tab in the Lumiverse drawer. The mode bar at the top m
 
 A place that holds more than one part shows them as tabs along its top. A place shows only while it has something to show: Now and Story always do, and a place whose packs the world doesn't use is left out. Everything follows your [realism](#realism) levels: a domain that is switched off has nothing to show, and a domain at a low level shows less. A dot on a place, or on one of its tabs, means detail is waiting there.
 
-Details open as sheets inside the drawer: a person, a place, an item, an account or a quest. Each sheet has a back button at its top left. The back button or Escape goes back one level, and moving to another place closes them all.
+Details open as sheets inside the drawer: a person, a place, an item, an account or a quest. Each sheet has a back button at its top left. The back button or Escape goes back one level, and moving to another place, or opening another chat, closes them all.
 
 If the chat isn't a world chat, Play says **Not a world chat** and lists **Your worlds**, each with an **Attach** button. Tap **Attach** and confirm in the **Attach world** box. **Open Build** takes you to the editors. A chat keeps the world it started with: attaching the same world again only re-attaches its lore book, and attaching a different one is refused with "This chat already plays another world. Start a new chat for this one."
 
