@@ -15,7 +15,7 @@ import { ALL_PACKS, STARTER_WORLDS } from "../../src/packs/index";
 import { startState } from "../packs/support";
 import { ListRow } from "../../src/frontend/components";
 import { decodeFinanceView } from "../../src/packs/economy/ui/decode";
-import { accountBlocks, accountControls, businessControls, cardControls, creditBlocks, endableLeases, flowControls, flowSources, holdingControls, householdRows, hubTabs, invoiceControls, investmentBlocks, overviewBlocks, propertyControls, transferTargets, workBlocks } from "../../src/packs/economy/ui/layout";
+import { accountBlocks, accountControls, autopaySources, businessAccounts, businessControls, cardControls, creditBlocks, endableLeases, findAccount, flowControls, flowSources, holdingControls, householdRows, hubTabs, invoiceControls, investmentBlocks, overviewBlocks, propertyControls, transferTargets, workBlocks } from "../../src/packs/economy/ui/layout";
 import { OwnerRows } from "../../src/packs/economy/ui/lines";
 import { gmFixture } from "../../dev/preview/fixtures";
 import {
@@ -247,6 +247,29 @@ describe("what a party's roles allow", () => {
   });
 
   const shop = (role: BusinessView["role"]): BusinessView => ({ id: "shop", name: "The shop", role, owners: [], accounts: [], managed: [], places: [], books: { period: "Oct", revenue: 0, expenses: 0, payroll: 0, taxes: 0, profit: 0, lines: [] }, months: [], sales: [], invoices: [], employees: [], taxes: [], route: null });
+
+  test("a business's own accounts its owner runs without a role on them: its page lists them, with autopay, cards and standing payments, never spending", () => {
+    const till = account({ id: "till", class: "business_checking", role: null, manages: true, cents: 250000, cards: [card({ id: "tc", account: "till", holderId: "danny" })] });
+    const loan = account({ id: "lift", class: "loan", role: null, manages: true, cents: -3800000, autopay: { mode: "fixed", from: "till", fromName: "Till", cents: 119956 }, loan: { payment: 119956, monthsLeft: 36, payoff: 3800000 } });
+    const runs: BusinessView = { ...shop("owner"), accounts: ["till", "lift", "vault"], managed: [till, loan] };
+    const v = view({ accounts: [cash, checking], businesses: [runs] });
+    // The page lists what the view holds in the business's order; one the party doesn't run is only counted.
+    expect(businessAccounts(v, runs)).toEqual({ shown: [till, loan], others: ["vault"] });
+    expect(findAccount(v, "lift")).toBe(loan);
+    expect(decodeFinanceView(JSON.parse(JSON.stringify(v)))?.businesses[0]?.managed).toEqual([till, loan]);
+    // Autopay pays from the business's checking or from the party's own; the loan is the business's to pay, and nothing here is theirs to spend.
+    expect(accountControls(v, loan)).toEqual(["autopay"]);
+    expect(accountControls(v, till)).toEqual([]);
+    expect(autopaySources(v, loan).map((a) => a.id)).toEqual(["chk", "till"]);
+    // A standing payment may come from the business's checking, and its card, in an employee's hands, is the owner's to freeze or replace.
+    expect(flowSources(v).map((s) => s.id)).toEqual(["chk", "till"]);
+    expect(cardControls(v, card({ id: "tc", account: "till", holderId: "danny" }))).toEqual(["freeze", "lost", "replace"]);
+    // Someone who doesn't run the business holds none of them.
+    const outsider = view({ accounts: [cash, checking], businesses: [{ ...shop("beneficiary"), accounts: ["till", "lift"] }] });
+    expect(businessAccounts(outsider, outsider.businesses[0] ?? runs)).toEqual({ shown: [], others: ["till", "lift"] });
+    expect(findAccount(outsider, "lift")).toBeNull();
+  });
+
   const flow = (over: Partial<FlowView> & Pick<FlowView, "id" | "spec">): FlowView => ({ label: over.id, kind: "bill", from: "", to: "", amount: "", cents: null, schedule: "", next: null, shortfall: "skip", status: "active", category: null, link: null, payer: over.spec?.from ?? null, editable: false, source: "entity", done: 0, missed: 0, deferred: 0, ...over });
   const bill = (from: string): Flow => ({ id: "invoice:inv1", label: "Invoice", kind: "bill", from, to: "theirs", amount: { fixed: 5000 }, schedule: { once: "2026-10-01T09:00" }, shortfall: "skip", status: "active", source: "invoice" });
 

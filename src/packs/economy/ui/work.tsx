@@ -1,10 +1,11 @@
 // Money → Jobs and Businesses (DESIGN §26): the party's jobs with their pay, schedule and last
-// paycheck; the businesses it owns or runs with their books, sales, invoices, payroll and taxes.
-// Each job and business opens its own page, and each control there its own page with Back and one
-// button. The player quits a job, and for a business they manage hires, gives raises, lets people
-// go, issues, pays and voids invoices, draws money, pays out profit, sells a stake and says where
-// their profit goes, each an in-world action; the GM ends and edits jobs, adds one, sets an
-// invoice's state, edits every business's declared fields and routes an owner's profit.
+// paycheck; the businesses it owns or runs with their accounts, books, sales, invoices, payroll and
+// taxes. Each job and business opens its own page, and each control there its own page with Back
+// and one button. The player quits a job, and for a business they manage hires, gives raises, lets
+// people go, issues, pays and voids invoices, draws money, pays out profit, sells a stake and says
+// where their profit goes, each an in-world action, and runs the business's own accounts from their
+// pages; the GM ends and edits jobs, adds one, sets an invoice's state, edits every business's
+// declared fields and routes an owner's profit.
 
 import { useState } from "preact/hooks";
 import { INVOICE_STATES, PAY_BASES, PAY_EVERY, ROLE_RIGHTS, type BusinessView, type FinanceView, type InvoiceState, type JobView } from "../../../shared/finance";
@@ -12,10 +13,11 @@ import { formatMoney, type WorldCurrency } from "../../../shared/world";
 import { Badge, Button, Empty, IdText, List, ListRow, Section } from "../../../frontend/components";
 import { humanize } from "../../../frontend/format";
 import type { IconName } from "../../../frontend/icons";
+import { AccountRow } from "./accounts";
 import { RoutePage, RouteRow } from "./assets";
 import { ActionPage, AmountField, AmountPage, ChoiceField, NumberField, SelectField, TextField, type Choice } from "./forms";
 import type { PlayerControls, SectionProps } from "./hub";
-import { businessControls, invoiceControls, jobControls, knownPeople, possessive, workBlocks, type BusinessControl, type InvoiceControl } from "./layout";
+import { businessAccounts, businessControls, invoiceControls, jobControls, knownPeople, possessive, workBlocks, type BusinessControl, type InvoiceControl } from "./layout";
 import { FieldsPage, OwnerRows, TxnRows } from "./lines";
 import { actionPage, Controls, detailPage, Hero, MoneyPage, Note, type HubPages } from "./nav";
 import { amountOf, distributeAction, drawAction, hireAction, invoiceAction, invoiceIssueAction, jobEndAction, jobSpawnOps, newIdFor, raiseAction, stakeSellAction, type HireForm } from "./requests";
@@ -292,14 +294,16 @@ const BUSINESS_CONTROL: Readonly<Record<BusinessControl, { label: string; icon: 
 
 const INVOICE_CONTROL: Readonly<Record<InvoiceControl, { title: string; go: string }>> = { void: { title: "Void the invoice", go: "Void" }, pay: { title: "Pay the invoice", go: "Pay" } };
 
-/** One business: its owners, where it trades, its books, invoices, payroll and taxes, where the viewer's profit goes, and the controls its role allows. */
+/** One business: where it trades, its accounts, its owners, its books, invoices, payroll and taxes, where the viewer's profit goes, and the controls its role allows. */
 function BusinessPage(props: SectionProps & { business: BusinessView }) {
   const { view, controls, nav, business: b } = props;
   const fmt = (cents: number): string => formatMoney(cents, controls.currency);
   const blocks = workBlocks(view);
   const can = controls.mode === "player" ? businessControls(view, b) : [];
-  // An account the view doesn't name (one only the business holds) is never shown by its id (ids show only with Show ids).
-  const accountName = (id: string): string => view.accounts.find((a) => a.id === id)?.name ?? (controls.mode === "gm" ? controls.gm.entities.find((e) => e.id === id)?.name : undefined) ?? "another account";
+  // Each account the view holds opens its page; one it doesn't (the party doesn't run the business, or
+  // their level shows only some accounts) is counted for the player and named for the GM, never shown by its id.
+  const accounts = businessAccounts(view, b);
+  const others = accounts.others.length;
   // The player's own control on an invoice is its page; with both (a business billing its own manager) a page offers each; the GM sets its state.
   const invoicePage = (i: Invoice) => {
     if (controls.mode === "gm") return actionPage("business", b.id, "state", i.id);
@@ -327,12 +331,29 @@ function BusinessPage(props: SectionProps & { business: BusinessView }) {
           </Button>
         </Controls>
       ) : null}
-      {b.places.length > 0 || b.accounts.length > 0 ? (
+      {b.places.length > 0 ? (
         <Section flush>
           <List>
-            {b.places.length > 0 ? <ListRow icon="pin" title="Trades at" value={b.places.map((p) => p.name).join(", ")} /> : null}
-            {b.accounts.length > 0 ? <ListRow icon="bank" title="Accounts" value={b.accounts.map(accountName).join(", ")} /> : null}
+            <ListRow icon="pin" title="Trades at" value={b.places.map((p) => p.name).join(", ")} />
           </List>
+        </Section>
+      ) : null}
+      {b.accounts.length > 0 ? (
+        <Section title="Accounts" flush>
+          <div data-lre-business-accounts={b.id}>
+            <List>
+              {accounts.shown.map((a) => (
+                <AccountRow key={a.id} account={a} currency={controls.currency} onOpen={() => nav.open(detailPage("account", a.id))} />
+              ))}
+              {others > 0 ? (
+                <ListRow
+                  icon="bank"
+                  title={controls.mode === "gm" ? accounts.others.map((id) => controls.gm.entities.find((e) => e.id === id)?.name ?? "another account").join(", ") : `${others} ${accounts.shown.length > 0 ? "more " : ""}${others === 1 ? "account" : "accounts"}`}
+                  subtitle={`${possessive(b.name, false)} own`}
+                />
+              ) : null}
+            </List>
+          </div>
         </Section>
       ) : null}
       {b.owners.length > 0 ? (

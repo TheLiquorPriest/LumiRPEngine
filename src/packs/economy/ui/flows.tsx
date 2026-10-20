@@ -16,7 +16,7 @@ import { humanize } from "../../../frontend/format";
 import type { IconName } from "../../../frontend/icons";
 import { ActionPage, AmountField, ChoiceField, MONTH_CHOICES, NumberField, SelectField, TextField, WEEKDAY_CHOICES, type Choice } from "./forms";
 import type { HubControls, SectionProps } from "./hub";
-import { flowControls, flowSources, flowTargets, type FlowControl } from "./layout";
+import { flowControls, flowSources, flowTargets, viewAccounts, type FlowControl } from "./layout";
 import { FieldsPage } from "./lines";
 import { actionPage, Controls, detailPage, Hero, MoneyPage, Note, type HubNav, type HubPages } from "./nav";
 import { amountOf, blankFlowForm, flowCreateAction, flowEditOps, flowFormOf, flowFormProblem, flowSpawnOps, flowStatusAction, flowStatusOps, flowUpdateAction, invoiceAction, leaseEndAction, newIdFor, type FlowEvery, type FlowForm } from "./requests";
@@ -52,10 +52,10 @@ function canCreate(view: FinanceView, controls: HubControls): boolean {
   return controls.mode === "gm" || (view.features.includes("flows") && flowSources(view).length > 0);
 }
 
-/** Where a flow's money can come from and go, for the controls' mode: the player's own and the people they may pay; for the GM, the party's accounts and anyone in the world. */
+/** Where a flow's money can come from and go, for the controls' mode: the player's own and the people they may pay; for the GM, the party's accounts (a business's they run included) and anyone in the world. */
 function endpoints(view: FinanceView, controls: HubControls): { from: Choice[]; to: Choice[] } {
   if (controls.mode === "player") return { from: flowSources(view).map((s) => ({ value: s.id, label: s.label })), to: flowTargets(view, controls.palette).map((t) => ({ value: t.id, label: t.label })) };
-  const accounts = view.accounts.filter((a) => !CLASS_TRAITS[a.class].cash).map((a) => ({ value: a.id, label: a.name }));
+  const accounts = viewAccounts(view).filter((a) => !CLASS_TRAITS[a.class].cash).map((a) => ({ value: a.id, label: a.name }));
   const parties = controls.gm.entities.filter((e) => !e.gone && (e.kind === "person" || e.kind === "business" || e.kind === "trust" || e.kind === "household")).map((e) => ({ value: e.id, label: `${e.name} (${e.kind})` }));
   return { from: [...accounts, { value: view.party, label: `${view.name} (as their preferences choose)` }], to: [...accounts, ...parties] };
 }
@@ -189,12 +189,13 @@ function FlowPage(props: SectionProps & { flow: FlowView }) {
   );
 }
 
-/** A new flow, or the change to one: the player's action, or the GM's edit. */
-function FlowFormPage(props: SectionProps & { flow?: FlowView & { spec: Flow } }) {
+/** A new flow, or the change to one: the player's action, or the GM's edit. A new one opened from an account's page (`from`) starts with that account as From. */
+function FlowFormPage(props: SectionProps & { flow?: FlowView & { spec: Flow }; from?: string }) {
   const { view, controls, nav, flow } = props;
   const ends = endpoints(view, controls);
   const { from: fromChoices, to: toChoices } = flowSideChoices(ends, flow);
-  const [form, setForm] = useState<FlowForm>(() => (flow ? flowFormOf(flow.spec, controls.currency) : { ...blankFlowForm(ends.from[0]?.value ?? "") }));
+  const start = props.from !== undefined && ends.from.some((f) => f.value === props.from) ? props.from : (ends.from[0]?.value ?? "");
+  const [form, setForm] = useState<FlowForm>(() => (flow ? flowFormOf(flow.spec, controls.currency) : { ...blankFlowForm(start) }));
   const typedTo = form.to !== "" && !toChoices.some((t) => t.value === form.to);
   const [otherTo, setOtherTo] = useState(typedTo);
   const set = (patch: Partial<FlowForm>) => setForm((f) => ({ ...f, ...patch }));
@@ -322,7 +323,7 @@ export const flowPages: HubPages = {
   render(page, props) {
     const { view, controls } = props;
     const [head, id, control] = page.path;
-    if (head === "flows") return id === undefined ? <FlowsSection {...props} /> : id === "new" && canCreate(view, controls) ? <FlowFormPage {...props} /> : null;
+    if (head === "flows") return id === undefined ? <FlowsSection {...props} /> : id === "new" && canCreate(view, controls) ? <FlowFormPage {...props} from={control} /> : null;
     const flow = id === undefined ? null : findFlow(view, id);
     if (head !== "flow" || flow === null) return null;
     // The GM changes only a flow stored as its own entity; a derived one changes at its source.

@@ -3,10 +3,12 @@
 // loan's payment and months left, autopay, its cards (each with a page of its own), its owners,
 // the books the level shows (statements, pending lines, holds and terms at the top level) and its
 // own lines. Every control opens a page of its own with one button: the player pays, transfers,
-// sets autopay, takes cash out and puts it in, and freezes, unfreezes, reports lost and replaces
-// cards, each an in-world action; the GM adds or takes money, sets the status, autopay, card states
-// and every declared field, releases holds and closes an account. How the party pays (its payment
-// tiers) ends the section.
+// sets autopay, takes cash out and puts it in, sets up a standing payment from it, and freezes,
+// unfreezes, reports lost and replaces cards, each an in-world action; the GM adds or takes money,
+// sets the status, autopay, card states and every declared field, releases holds and closes an
+// account. How the party pays (its payment tiers) ends the section. The same pages serve a
+// business's own accounts, which its owner manages from the business's page (`managed`): autopay,
+// cards and standing payments, but no spending, which follows the party's own role on an account.
 
 import { useState } from "preact/hooks";
 import { ACCOUNT_STATUSES, AUTOPAY_MODES, CARD_STATES, CLASS_TRAITS, type AccountView, type AutopayMode, type CardState, type CardView, type FinanceView, type PayTier } from "../../../shared/finance";
@@ -16,7 +18,7 @@ import { humanize } from "../../../frontend/format";
 import type { IconName } from "../../../frontend/icons";
 import { ActionPage, AmountField, AmountPage, ChoiceField, SelectField, type Choice } from "./forms";
 import type { GmControls, HubControls, PlayerControls, SectionProps } from "./hub";
-import { accountBlocks, accountControls, accountGroups, cardControls, cardLimitsShown, groupOf, paySources, transferTargets, utilisation, type AccountGroup } from "./layout";
+import { accountBlocks, accountControls, accountGroups, autopaySources, cardControls, cardLimitsShown, findAccount, flowSources, groupOf, paySources, possessive, transferTargets, utilisation, viewAccounts, type AccountGroup } from "./layout";
 import { FieldsPage, OwnerRows, TxnRows } from "./lines";
 import { actionPage, Controls, detailPage, Hero, MoneyPage, Note, type HubNav, type HubPages } from "./nav";
 import { PayTiersEditor, tierText } from "./pay-prefs";
@@ -60,9 +62,9 @@ function cardLine(view: FinanceView, card: CardView): string {
   return [humanize(card.network), card.last4 ? `··${card.last4}` : null, card.holderId === view.party ? null : `held by ${card.holder}`].filter((s) => s !== null).join(" · ");
 }
 
-/** Any card the view shows: the party's own, or one on an account of theirs in someone else's hands. */
+/** Any card the view shows: the party's own, one on an account of theirs in someone else's hands, or one on a business's account they manage. */
 function findCard(view: FinanceView, id: string | undefined): CardView | null {
-  return view.cards.find((c) => c.id === id) ?? view.accounts.flatMap((a) => a.cards).find((c) => c.id === id) ?? null;
+  return view.cards.find((c) => c.id === id) ?? viewAccounts(view).flatMap((a) => a.cards).find((c) => c.id === id) ?? null;
 }
 
 /** Whether the party's payment tiers show: from Money 2, where payment preferences run for them or they have some. */
@@ -77,16 +79,18 @@ function payUses(view: FinanceView): Choice[] {
 
 // ---------------------------------------------------------------- the section
 
-function AccountRow(props: { account: AccountView; currency: WorldCurrency; onOpen(): void }) {
+/** An account as a row: its kind and bank, then what's due, else a loan's payment and months left; its balance; it opens the account's page. */
+export function AccountRow(props: { account: AccountView; currency: WorldCurrency; onOpen(): void }) {
   const a = props.account;
   const fmt = (cents: number): string => formatMoney(cents, props.currency);
   const late = a.statements.some((s) => s.state === "late");
   const lost = a.cards.some((c) => c.state === "lost");
+  const owing = a.due ? `${a.due.label} ${fmt(a.due.cents)}, ${a.due.at}` : a.loan ? `${fmt(a.loan.payment)} a month, ${a.loan.monthsLeft} month${a.loan.monthsLeft === 1 ? "" : "s"} left` : null;
   return (
     <ListRow
       icon={GROUP_ICON[groupOf(a)]}
       title={a.name}
-      subtitle={[a.classLabel || CLASS_TRAITS[a.class].label, a.institution, a.due ? `${a.due.label} ${fmt(a.due.cents)}, ${a.due.at}` : null].filter((s) => s !== null && s !== "").join(" · ")}
+      subtitle={[a.classLabel || CLASS_TRAITS[a.class].label, a.institution, owing].filter((s) => s !== null && s !== "").join(" · ")}
       id={a.id}
       badge={a.status !== "open" ? <Badge tone="warn">{humanize(a.status)}</Badge> : late ? <Badge tone="neg">Late</Badge> : lost ? <Badge tone="warn">Card lost</Badge> : undefined}
       value={fmt(a.cents)}
@@ -172,6 +176,10 @@ function AccountPage(props: SectionProps & { account: AccountView }) {
   const product = [a.product.label && a.product.label !== a.classLabel ? a.product.label : null, a.institution].filter((s) => s !== null && s !== "").join(" · ");
   const can = controls.mode === "player" ? accountControls(view, a) : [];
   const act = (action: string, ...within: string[]) => nav.open(actionPage("account", a.id, action, ...within));
+  // A standing payment from it opens the Flows form with the account as From, where flows run and it may pay one.
+  const newFlow = controls.mode === "player" && view.features.includes("flows") && flowSources(view).some((s) => s.id === a.id);
+  // A business's own account the party manages for it without a role on it, which is why it offers nothing to spend.
+  const runFor = a.role === null && a.manages ? (view.businesses.find((b) => b.managed.some((m) => m.id === a.id)) ?? null) : null;
   // Autopay is changed from its own row, the player's where they manage the account, the GM's wherever it's offered.
   const autopayOpens = a.autopay !== null && (controls.mode === "gm" || can.includes("autopay"));
   const details = [
@@ -191,8 +199,9 @@ function AccountPage(props: SectionProps & { account: AccountView }) {
       <Hero label={t.liability ? (owed ? "Owed" : "In credit") : "Balance"} value={fmt(t.liability ? Math.abs(a.cents) : a.cents)} tone={a.cents < 0 ? "neg" : undefined} sub={blocks.available && a.available !== null ? `${fmt(a.available)} available` : undefined} badges={a.status !== "open" ? <Badge tone="warn">{humanize(a.status)}</Badge> : undefined}>
         {a.limit !== null && used !== null ? <Meter label={`${used}% of the limit used`} value={Math.min(used, 100)} max={100} tone={used > 30 ? "warn" : "accent"} /> : null}
       </Hero>
+      {runFor ? <Note>{`${possessive(runFor.name, false)} own account, which ${controls.mode === "player" ? "you manage" : `${view.name} manages`} for the business.`}</Note> : null}
       {controls.mode === "player" ? (
-        can.some((c) => c !== "autopay") ? (
+        can.some((c) => c !== "autopay") || newFlow ? (
           <Controls name={a.id}>
             {can.includes("pay") ? (
               <Button variant="primary" icon="coins" onClick={() => act("pay")}>
@@ -212,6 +221,11 @@ function AccountPage(props: SectionProps & { account: AccountView }) {
             {can.includes("deposit") ? (
               <Button icon="bank" onClick={() => act("deposit")}>
                 Deposit cash
+              </Button>
+            ) : null}
+            {newFlow ? (
+              <Button icon="refresh" onClick={() => nav.open(actionPage("flows", "new", a.id))}>
+                New standing payment
               </Button>
             ) : null}
           </Controls>
@@ -372,7 +386,7 @@ function CashPage(props: { view: FinanceView; account: AccountView; controls: Pl
 function AutopayPage(props: { view: FinanceView; account: AccountView; controls: HubControls; nav: HubNav }) {
   const { account: a, controls } = props;
   const was = a.autopay;
-  const sources = paySources(props.view).filter((x) => x.id !== a.id && !CLASS_TRAITS[x.class].cash);
+  const sources = autopaySources(props.view, a);
   const [mode, setMode] = useState<AutopayMode>(was?.mode ?? "none");
   const [from, setFrom] = useState<string>(was?.from ?? sources[0]?.id ?? "");
   const [amount, setAmount] = useState(was?.cents !== null && was?.cents !== undefined ? String(was.cents / 10 ** controls.currency.decimals) : "");
@@ -448,7 +462,7 @@ function ReleasePage(props: { account: AccountView; hold: AccountView["holds"][n
 function CardPage(props: SectionProps & { card: CardView }) {
   const { view, controls, nav, card } = props;
   const fmt = (cents: number): string => formatMoney(cents, controls.currency);
-  const account = view.accounts.find((a) => a.id === card.account) ?? null;
+  const account = findAccount(view, card.account);
   const limits = cardLimitsShown(view);
   const changes = controls.mode === "player" ? cardControls(view, card) : [];
   const act = (action: string) => nav.open(actionPage("card", card.id, action));
@@ -505,7 +519,7 @@ function CardChangePage(props: { view: FinanceView; card: CardView; change: Card
   const { card, change, controls } = props;
   return (
     <ActionPage nav={props.nav} controls={controls} name={`card-${change}`} title={CARD_CHANGE[change].title} subtitle={card.name} go={CARD_CHANGE[change].go} danger={change === "lost"} submit={() => controls.act(cardAction(card.id, change))}>
-      <Note>{changeText(change, card, props.view.accounts.find((a) => a.id === card.account) ?? null)}</Note>
+      <Note>{changeText(change, card, findAccount(props.view, card.account))}</Note>
     </ActionPage>
   );
 }
@@ -597,7 +611,7 @@ export const accountPages: HubPages = {
       return id === "pay-prefs" && payPrefsShown(props.view) ? <PayPrefsPage {...props} /> : null;
     }
     if (head === "account") {
-      const account = props.view.accounts.find((a) => a.id === id);
+      const account = findAccount(props.view, id);
       if (!account) return null;
       return page.type === "detail" ? <AccountPage {...props} account={account} /> : accountActionPage(props, account, action, within);
     }
