@@ -332,6 +332,42 @@ describe("minds around a turn", () => {
   });
 });
 
+describe("a mind's context", () => {
+  test("however much recall it may take, the moment is never cut, lines stay lines, and recalled turns stay whole", async () => {
+    const rig = new Rig({ shipped: true });
+    fakeModels(rig);
+    const contexts: string[] = [];
+    const minds = rig.host.quietReply;
+    rig.host.quietReply = (req) => {
+      if (MIND.exec(req.messages[0]?.content ?? "")?.[1] === "Danny Okafor") contexts.push(req.messages[1]?.content ?? "");
+      return minds?.(req) ?? "{}";
+    };
+    const chatId = await alderChat(rig);
+    rig.body(await rig.send({ type: "lre.settings.set", patch: { minds: { memory: { recall: { recent: 8, relevant: 0, tokens: 8000 } } } } }));
+    const here = placeOfEntity((await stateOf(rig, chatId)).state, "pov") ?? "";
+    // Danny stays with the POV for every turn, so every one is his to recall.
+    const stay = async () => rig.body(await rig.send({ type: "lre.edit", chatId, ops: [{ op: "move", entity: "danny_okafor", to: here }, { op: "move", entity: "pov", to: here }] }));
+    for (let k = 1; k <= 8; k++) {
+      await stay();
+      await rig.turn(chatId, `Turn ${k}.`, `REPLY-${k} ${"and the harbor wind keeps on blowing ".repeat(41).trim()} END-${k}`);
+    }
+    await stay();
+    await rig.turn(chatId, "NOW-MARK: what do you think?", "They think.");
+    const context = contexts.at(-1) ?? "";
+    expect(context.length).toBeLessThanOrEqual(16_000);
+    expect(context).toContain("## Now\n");
+    expect(context).toContain("Now Jordan Ellis says or does: NOW-MARK: what do you think?");
+    expect(context.split("\n").length).toBeGreaterThan(20);
+    // The recall the room left: the latest turns, each whole.
+    const recall = context.slice(context.indexOf("## Turns you were there for"), context.indexOf("## Now"));
+    const recalled = [...recall.matchAll(/REPLY-(\d+)/g)].map((m) => Number(m[1]));
+    expect(recalled.length).toBeGreaterThan(0);
+    expect(recalled.length).toBeLessThan(8);
+    expect(recalled.at(-1)).toBe(8);
+    for (const k of recalled) expect(recall).toContain(`END-${k}`);
+  });
+});
+
 describe("determinism", () => {
   test("the background lane runs no model and records no mind; replay folds the same", async () => {
     const rig = new Rig({ shipped: true });

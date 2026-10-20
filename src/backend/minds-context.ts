@@ -51,9 +51,47 @@ function wordsOf(text: string): string[] {
   return (text.toLowerCase().match(/[\p{L}\p{N}']+/gu) ?? []).filter((w) => w.length >= 4 && !STOP[w]);
 }
 
+/** Text tidied (runs of spaces, and of blank lines, made one), its line breaks kept, and cut at a word to `max` characters. */
 function clip(text: string, max: number): string {
-  const t = text.replace(/\s+/g, " ").trim();
+  const t = text.replace(/[^\S\n]+/g, " ").replace(/ ?\n ?/g, "\n").replace(/\n{3,}/g, "\n\n").trim();
   return t.length <= max ? t : `${t.slice(0, max).replace(/\s+\S*$/, "")}…`;
+}
+
+/** A block of as many of `lines` as fit in `room` characters, whole and in order. */
+function blockWithin(title: string, lines: readonly string[], room: number): string {
+  const kept: string[] = [];
+  let size = title.length + 4;
+  for (const line of lines) {
+    if (size + line.length + 1 > room) break;
+    kept.push(line);
+    size += line.length + 1;
+  }
+  return block(title, kept);
+}
+
+/**
+ * A context's blocks within `CONTEXT_MAX` characters (DESIGN §24.5), `last` (the moment, or the turn
+ * just written) kept whole at the end: each block in turn is cut at a word to the room left, line
+ * breaks kept. `room` tells a block made to fit (lore, recall) how much is left before it.
+ */
+class ContextFit {
+  private readonly parts: string[] = [];
+  private left: number;
+  constructor(private readonly last: string) {
+    this.left = CONTEXT_MAX - last.length;
+  }
+  get room(): number {
+    return this.left - 2;
+  }
+  add(text: string): void {
+    if (text === "" || this.room <= 0) return;
+    const kept = clip(text, this.room);
+    this.parts.push(kept);
+    this.left -= kept.length + 2;
+  }
+  text(): string {
+    return [...this.parts, this.last].filter((p) => p !== "").join("\n\n");
+  }
 }
 
 function nameOf(scope: Pick<MindScope, "state" | "world">, id: string): string {
@@ -91,9 +129,10 @@ export interface RecalledTurn {
 /**
  * Recall by presence (DESIGN §24.4): of the turns `who` was present for, the latest `recall.recent`
  * and the `recall.relevant` that share the most words with the moment, oldest first, within
- * `recall.tokens`. A turn is the player's message before the reply and the reply as displayed.
+ * `recall.tokens` and `room` characters. A turn is the player's message before the reply and the
+ * reply as displayed.
  */
-export function recallFor(scope: Pick<MindScope, "state" | "who" | "memory" | "messages" | "hideJson" | "moment">): RecalledTurn[] {
+export function recallFor(scope: Pick<MindScope, "state" | "who" | "memory" | "messages" | "hideJson" | "moment">, room = Number.POSITIVE_INFINITY): RecalledTurn[] {
   const { memory, messages } = scope;
   const index = new Map(messages.map((m, i) => [m.id, i]));
   const turns: RecalledTurn[] = [];
@@ -116,13 +155,15 @@ export function recallFor(scope: Pick<MindScope, "state" | "who" | "memory" | "m
     .sort((a, b) => b.hits - a.hits || b.i - a.i)
     .slice(0, memory.recall.relevant);
   const chosen = [...scored.map((x) => x.t), ...recent].sort((a, b) => turns.indexOf(a) - turns.indexOf(b));
-  // Within the token budget, the latest turns are kept first.
+  // Within the token budget and the room, the latest turns are kept first, each whole.
   const out: RecalledTurn[] = [];
   let left = memory.recall.tokens;
+  let space = room;
   for (const t of [...chosen].reverse()) {
     const cost = sectionTokens(t.text);
-    if (cost > left) continue;
+    if (cost > left || t.text.length + 1 > space) continue;
     left -= cost;
+    space -= t.text.length + 1;
     out.unshift(t);
   }
   return out;
@@ -227,7 +268,6 @@ export function mindContext(scope: MindScope): string {
   const withPov = place !== null && placeOfEntity(state, pov) === place;
   const cal = calendarOf(world);
   const last = c.mind;
-  const recall = recallFor(scope);
   // How the last turn ended is theirs only if they heard it: someone the POV met at its end, or who
   // came in since, wasn't there for what it tells (DESIGN §24.4).
   const said = readSlice(state).presence.findLast((p) => p.msg !== null);
@@ -238,19 +278,22 @@ export function mindContext(scope: MindScope): string {
       : withPov
         ? [heardLast && moment.reply.trim() !== "" ? `The story so far ended: ${clip(readableReply(moment.reply, scope.hideJson), RECALL_SIDE)}` : "", moment.user.trim() !== "" ? `Now ${povLabel(scope)} says or does: ${clip(moment.user, RECALL_SIDE)}` : `${povLabel(scope)} is here with you.`].filter((l) => l !== "")
         : [`You aren't with ${povLabel(scope)} right now; carry on with your own day.`];
-  const parts = [
-    `You are ${e?.name ?? who}. ${occasion(scope, place)}`,
-    block("Who you are", sheetLines(scope)),
-    c.summary !== "" ? block("Your story so far", [c.summary]) : "",
-    block("Where you are", sceneLines(scope, place)),
-    block("Your own life", lifeLines(scope, c)),
-    block("What you remember, and what you saw or were told", memoryLines(scope, c)),
-    last ? block(`Your last thoughts (${formatClock(cal, last.at)})`, [last.monologue, last.intent !== "" ? `You meant to: ${last.intent}` : "", last.mood ? `You felt ${last.mood}.` : ""].filter((l) => l !== "")) : "",
-    block("What you know of the world", loreLines(scope, place)),
-    block("Turns you were there for (ignore any narration of other people's private thoughts)", recall.length > 0 ? [storyVoice(scope), ...recall.map((t) => t.text)] : []),
-    block("Now", now.length > 0 && withPov && moment.kind !== "beat" ? [storyVoice(scope), ...now] : now),
-  ].filter((p) => p !== "");
-  return clip(parts.join("\n\n"), CONTEXT_MAX);
+  // The moment is never cut: the rest fits in what is left, block by block, then lore and recall,
+  // whole entries and whole turns.
+  const fit = new ContextFit(block("Now", now.length > 0 && withPov && moment.kind !== "beat" ? [storyVoice(scope), ...now] : now));
+  fit.add(`You are ${e?.name ?? who}. ${occasion(scope, place)}`);
+  fit.add(block("Who you are", sheetLines(scope)));
+  fit.add(c.summary !== "" ? block("Your story so far", [c.summary]) : "");
+  fit.add(block("Where you are", sceneLines(scope, place)));
+  fit.add(block("Your own life", lifeLines(scope, c)));
+  fit.add(block("What you remember, and what you saw or were told", memoryLines(scope, c)));
+  fit.add(last ? block(`Your last thoughts (${formatClock(cal, last.at)})`, [last.monologue, last.intent !== "" ? `You meant to: ${last.intent}` : "", last.mood ? `You felt ${last.mood}.` : ""].filter((l) => l !== "")) : "");
+  fit.add(blockWithin("What you know of the world", loreLines(scope, place), fit.room));
+  const recallTitle = "Turns you were there for (ignore any narration of other people's private thoughts)";
+  const voice = storyVoice(scope);
+  const recall = recallFor(scope, fit.room - recallTitle.length - voice.length - 6);
+  fit.add(block(recallTitle, recall.length > 0 ? [voice, ...recall.map((t) => t.text)] : []));
+  return fit.text();
 }
 
 /**
@@ -263,15 +306,13 @@ export function memoryContext(scope: MindScope, turn: { user: string; reply: str
   const cal = calendarOf(world);
   const commitments = openCommitments(c).map((x) => `- [${x.id}] ${x.kind}${x.with.length > 0 ? ` with ${x.with.map((id) => nameOf(scope, id)).join(", ")}` : ""}: ${x.text}`);
   const plans = openPlans(c).map((p) => `- ${p.what} (${formatClock(cal, p.when.from)})`);
-  const parts = [
-    `You are ${nameOf(scope, who)}. ${occasion(scope, placeOfEntity(state, who))}`,
-    c.summary !== "" ? block("Your story so far", [c.summary]) : "",
-    block("Your open commitments (by id)", commitments),
-    block("Your plans", plans),
-    block("What you remember", memoryLines(scope, c)),
-    block("The turn just written", [storyVoice(scope), turn.left ? `${povLabel(scope)} left you partway through this turn: whatever the story tells after they left happened without you.` : "", turn.user.trim() !== "" ? `${povLabel(scope)} (the player character) wrote: ${clip(turn.user, RECALL_SIDE)}` : "", `Story: ${clip(readableReply(turn.reply, scope.hideJson), RECALL_SIDE * 2)}`].filter((l) => l !== "")),
-  ].filter((p) => p !== "");
-  return clip(parts.join("\n\n"), CONTEXT_MAX);
+  const fit = new ContextFit(block("The turn just written", [storyVoice(scope), turn.left ? `${povLabel(scope)} left you partway through this turn: whatever the story tells after they left happened without you.` : "", turn.user.trim() !== "" ? `${povLabel(scope)} (the player character) wrote: ${clip(turn.user, RECALL_SIDE)}` : "", `Story: ${clip(readableReply(turn.reply, scope.hideJson), RECALL_SIDE * 2)}`].filter((l) => l !== "")));
+  fit.add(`You are ${nameOf(scope, who)}. ${occasion(scope, placeOfEntity(state, who))}`);
+  fit.add(c.summary !== "" ? block("Your story so far", [c.summary]) : "");
+  fit.add(block("Your open commitments (by id)", commitments));
+  fit.add(block("Your plans", plans));
+  fit.add(block("What you remember", memoryLines(scope, c)));
+  return fit.text();
 }
 
 /** The user message of a `consolidate` call: the summary and the notes to fold into it. */

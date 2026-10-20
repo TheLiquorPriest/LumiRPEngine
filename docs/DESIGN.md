@@ -1239,6 +1239,7 @@ Four layers, each tunable (the world's defaults, then the user's overrides):
   - recall by presence, told to ignore narration of other people's private thoughts;
   - the moment: what the POV just said and did if they are with the POV, after how the story's last reply ended when they heard that turn (someone the POV met only at its end, or who came in since, isn't told); else a note that they aren't.
   - Wherever story text appears (recall, the moment, the memory step's turn), a line says that its "you" is the POV, never the character. Narration speaks to the POV in the second person, and a mind told "You are X" would otherwise take it as itself.
+  - **Its length:** at most 16,000 characters, line breaks kept. The moment (for the memory step, the turn just written) is never cut; the blocks before it are cut, each at a word, to what is left in turn, and lore and recall take what is left after them, whole entries and whole turns, the latest turns first.
 - **Never in it:** the GM view, another character's mind, or a turn they weren't present for.
 - **The answer:** JSON `{monologue, depiction, intent, reactions[], plans[{what, kind, when{from, to}, where?, with?[], priority}], mood?, interrupt?{reason}}`.
   - Lengths are capped.
