@@ -190,7 +190,8 @@ function settleFlows(ctx: ReadContext, api: FinanceApi, business: EntityId): Flo
   if (!deposit) return [];
   const out: Flow[] = [];
   if (marginOf(ctx.state, business) < 100) out.push({ id: `suppliers:${business}`, label: "Suppliers", kind: "bill", from: deposit, to: "Suppliers", amount: { provider: "settle", args: { business, what: "suppliers" } }, schedule: { every: "month", days: [10], roll: "after" }, shortfall: "skip", category: "cogs", link: business, status: "active", source: "business" });
-  if (own(ctx.state.entities, business)?.fields.collects_sales_tax !== false) out.push({ id: `salestax:${business}`, label: "Sales tax", kind: "tax", from: deposit, to: "Sales tax", amount: { provider: "settle", args: { business, what: "sales_tax" } }, schedule: { every: "month", days: [20], roll: "after" }, shortfall: "skip", category: "sales_tax", link: business, status: "active", source: "business" });
+  // The tax is paid to its region's authority, which the flow names as the account its posting pays.
+  if (own(ctx.state.entities, business)?.fields.collects_sales_tax !== false) out.push({ id: `salestax:${business}`, label: "Sales tax", kind: "tax", from: deposit, to: `tax:sales:${taxRegionOf(ctx, placesOf(ctx, business)[0] ?? null)}`, amount: { provider: "settle", args: { business, what: "sales_tax" } }, schedule: { every: "month", days: [20], roll: "after" }, shortfall: "skip", category: "sales_tax", link: business, status: "active", source: "business" });
   return out;
 }
 

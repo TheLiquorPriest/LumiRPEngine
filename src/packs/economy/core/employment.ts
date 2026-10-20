@@ -738,10 +738,16 @@ function payslipEvent(ctx: ReadContext, job: Job, check: Paycheck, at: number): 
   };
 }
 
-/** Where a job's pay comes from: its business employer's operating account (its outside account while it holds none), else the outside employer. */
+/** Where a job's pay comes from: its business employer's operating account (its outside account while it holds none), else the outside employer's account. */
 export function payerOf(ctx: ReadContext, api: FinanceApi, job: Job): string {
   if (job.business) return operatingAccount(api, ctx, job.business) ?? api.outside(job.business);
   return api.outside(`employer:${(job.employer || job.occupation || "work").toLowerCase().replace(/\W+/g, "_")}`);
+}
+
+/** A job's employer by name: its business's, else the place or name the job gives; "" when it gives none. */
+function employerName(ctx: ReadContext, job: Job): string {
+  if (job.business) return labelOf(ctx, job.business);
+  return job.employer === "" ? "" : labelOf(ctx, job.employer);
 }
 
 /** The payroll flow a job derives: from the employer to the worker, on the job's cycle, from its start to the payday that settles its end. */
@@ -760,7 +766,8 @@ function payrollFlow(ctx: ReadContext, api: FinanceApi, job: Job): Flow | null {
     id: `pay:${job.id}`,
     label: `Pay: ${job.title}`,
     kind: "payroll",
-    from: payerOf(ctx, api, job),
+    // An outside employer pays as an outside payer named as the job names it, so the flow reads as its name; its pay posts from `payerOf`'s account.
+    from: job.business ? payerOf(ctx, api, job) : `employer:${job.employer}`,
     to: job.worker,
     ...(job.splits.length > 0 ? { splits: job.splits } : {}),
     amount: { provider: "payroll", args: { job: job.id } },
@@ -893,7 +900,7 @@ export function jobView(ctx: ReadContext, api: FinanceApi, job: Job): JobView {
   return {
     id: job.id,
     title: job.title,
-    employer: job.business ? labelOf(ctx, job.business) : job.employer,
+    employer: employerName(ctx, job),
     employerId: job.business,
     worker: labelOf(ctx, job.worker),
     workerId: job.worker,
@@ -924,7 +931,7 @@ export function registerEmployment(r: FinanceRegistry): void {
     const id = "provider" in flow.amount ? strOf(objOf(flow.amount.args).job, flow.link ?? "") : (flow.link ?? "");
     const job = readJob(ctx, id);
     if (!job) return null;
-    const check = paycheckFor(ctx, api, job, at, flow.from);
+    const check = paycheckFor(ctx, api, job, at, payerOf(ctx, api, job));
     if (!check) return null;
     // Nothing earned (a period on leave, out of season, no shifts): the record moves on, nothing posts.
     if (check.gross === 0) return { cents: 0, lines: [], extra: [payslipEvent(ctx, job, check, at)] };
@@ -946,6 +953,6 @@ export function registerEmployment(r: FinanceRegistry): void {
   r.summary((ctx, who) =>
     allJobs(ctx)
       .filter((j) => j.worker === who && j.status === "active")
-      .map((j) => `${j.title} for ${j.business ? labelOf(ctx, j.business) : j.employer || "an outside employer"}, ${api.money(ctx, j.rate)} ${BASIS_WORDS[j.basis]}, paid ${j.every === null ? "nothing" : j.every.replace("_", " ")}.`),
+      .map((j) => `${j.title} for ${employerName(ctx, j) || "an outside employer"}, ${api.money(ctx, j.rate)} ${BASIS_WORDS[j.basis]}, paid ${j.every === null ? "nothing" : j.every.replace("_", " ")}.`),
   );
 }

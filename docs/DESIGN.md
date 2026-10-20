@@ -1396,6 +1396,8 @@ A deposit account's `overdraft` policy decides a payment the balance can't cover
 
 A household is a party its members belong to. Its accounts, the joint accounts every member holds, and its shared flows (paid by it, or split among its members) make its view: who pays what share of the month. `FinanceView` is one party's money at their own level: overview, accounts, cards, flows, jobs, businesses, investments, properties, credit and household. The POV's view is `economy.money`; every party's, POV first, is the GM's `economy.people_money`; and any one party's is `economy.finance`. Player views show "someone" for any party the POV can't see.
 
+A view names whoever is outside the world as a person would (`outsideName`), on a flow's two sides and a journal line's other party alike. The foundation's and the modules' own payees, kept by key, read in words: "Federal tax", "State tax", "Local tax", "Property insurance", "Property upkeep", "Insurer" for a vehicle's premium and "Shops" for living costs. A regional tax names its region from the regions table ("Sales tax (Michigan)", "Property tax (Michigan)"). An outside employer reads as the place or the name its job gives ("The Rusty Anchor"), and a managed property's tenants as "Outside tenant". Any other outside name, an author's or a player's, reads as written.
+
 ### 25.12 Realism gating
 
 The Money level sets a baseline.
