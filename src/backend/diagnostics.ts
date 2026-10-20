@@ -1,5 +1,5 @@
 // Diagnostics (DESIGN §6.9): each chat's ring of records (turns, their steps with their model calls,
-// errors, interceptor runs, slow requests), kept in `userStorage/runs/<chatId>/diagnostics.json` and
+// errors, the engine run's section fills, slow requests), kept in `userStorage/runs/<chatId>/diagnostics.json` and
 // mirrored as lines to the user's `diagnostics.log` with their level and turn; and the in-flight
 // activity line, pushed to the chat's frontends as `lre.activity`.
 //

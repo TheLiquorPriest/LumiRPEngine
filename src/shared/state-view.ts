@@ -398,7 +398,7 @@ export interface LoreStepTrace {
   notes: string[];
 }
 
-/** One interceptor run in the context inspector (`core.context`, DESIGN §6.5). */
+/** One engine run's sections in the context inspector (`core.context`, DESIGN §6.5). */
 export interface ContextGeneration {
   /** The generation id, or `dry:<n>` for a dry-run assembly. */
   id: string;
@@ -414,7 +414,7 @@ export interface ContextGeneration {
   minds?: MindCallTrace[];
 }
 
-/** The `core.context` panel: the last ten interceptor runs, newest first, and standing warnings (book attachment and slot repair, preset caveats, journal notices). */
+/** The `core.context` panel: the last ten engine runs' sections, newest first, and standing warnings (book attachment and slot repair, preset caveats, journal notices). */
 export interface ContextView {
   generations: ContextGeneration[];
   warnings: string[];

@@ -46,8 +46,8 @@ LumiRPEngine requires **Lumiverse's `staging` branch from 16 October 2026 (commi
 
 LumiRPEngine asks for nine permissions. Here is why each one is there:
 
-- `generation`: to follow each reply from start to finish, to run the World Info interceptor that puts the world's sections into the prompt, and to make its own small helper calls.
-- `context_handler`: to plan each turn (elapsed time, what your action does, what the world did in the meantime) before the reply is generated.
+- `generation`: to follow each reply from start to finish, to stop a reply the engine hasn't prepared yet so the engine can run first, and to make its own small helper calls.
+- `context_handler`: to check, just before each reply, that the engine has prepared it (the turn's plan, and the world's sections in the prompt), and stop it when it hasn't.
 - `chats`: to read and update a chat's metadata, where a world chat records the world it plays and lists the world's lore book (attaching a world writes both), and to know which chat is open.
 - `chat_mutation`: to read each chat's messages and swipes, so the world stays in step with every swipe, edit and branch; to save the world's record on each reply; and to add your palette, chip and map actions to the chat as messages.
 - `world_books`: to create and maintain the world's own lore book, which holds its sections, attach it to the chat, read the books you pick for **Import from lore** or **Index a World Info book**, and tell you when a book that lore was indexed from has changed.
@@ -56,7 +56,7 @@ LumiRPEngine asks for nine permissions. Here is why each one is there:
 - `decisions`: to use Lumiverse's Decisions API for the probability questions the engine asks, such as what an NPC does on a close call.
 - `ui_panels`: for the status pill, the map and the action palette with its Timelapse tab, which float over the chat. The drawer tab needs no permission.
 
-LumiRPEngine deliberately does **not** request the `characters` permission. Character cards stay out of its reach. Where it needs to know whether the world's sections really reach the prompt, it checks with a test prompt build instead, and a section the build didn't find shows as "not delivered".
+LumiRPEngine deliberately does **not** request the `characters` permission. Character cards stay out of its reach. To know whether the world's sections really reached a reply's prompt, it reads which of its entries Lumiverse activated for that reply, and a section whose entry didn't activate shows as "not delivered".
 
 ## Quick start
 
@@ -83,9 +83,10 @@ These are the known limits of this release. Most of them need a change in Lumive
 
 - **Prompt assembly moves to the main process, for everyone.** While LumiRPEngine is enabled, Lumiverse builds prompts for all users on the host on its main process instead of a separate worker. On the live host, with a 1,000-message chat, that added about 23 ms per prompt build (122 ms with LumiRPEngine enabled against 99 ms without). On a shared host, tell the people you share it with.
 - **Other extensions that write message metadata.** Lumiverse replaces a message's whole metadata when something saves it, so another extension can overwrite LumiRPEngine's records and LumiRPEngine can overwrite theirs. LumiRPEngine keeps a second copy of its records and restores them, but I cannot promise the other extension does the same.
-- **Other extensions' World Info interceptors.** They cannot switch on an entry in the world's own book that LumiRPEngine has left off. Everything they do to your own lore books works as usual.
-- **If the engine stalls,** the world's sections are missing from that turn's prompt; a turn it couldn't plan in time is marked *Not fully simulated*.
-- **Delivery is checked, not traced.** The engine confirms that its sections were activated, and a test prompt build finds whether each one reached the prompt, but not where in the prompt it landed.
+- **Other extensions' World Info interceptors** can switch the world's sections off for a reply; the Context panel then shows them as not delivered. Everything they do to your own lore books works as usual.
+- **If the engine stalls or one of its steps fails,** nothing is generated: the chat says which step failed and why, with a **Retry**.
+- **Replies for an earlier message.** Lumiverse can start only the last reply again, so in a world chat an in-place **Edit and Send** on an earlier message, or a swipe of an older reply asked through Lumiverse's API, is stopped with a card that says so, and nothing is written. Edit and Send as a branch works.
+- **Delivery is checked, not traced.** The engine confirms that its sections were activated for the reply, but not where in the prompt each one landed.
 - **Text and world can disagree after some edits and Continues.** When you edit a reply, or continue one in a way the engine cannot read as part of a turn (a continue on an older message, a stopped continue, or a continue where Lumiverse rewrote the earlier text), the world stays as it was simulated until you use **Re-read edit**.
 - **Detail opened while a reply streams** shows as "pending" until the reply finishes, and anything you change in that moment lands right after it.
 - **Continue shows the world as it was before the reply.** The engine learns which message you are continuing only when the reply ends.

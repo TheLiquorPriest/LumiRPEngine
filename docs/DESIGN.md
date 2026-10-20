@@ -1009,7 +1009,7 @@ The design rests on assumptions about the host and the models, checked on the re
 
 | Check | Verdict |
 |---|---|
-| 1 Correlation | Pass. `select` p95 inside the interceptor: 1.13 s (helper), 0.32 s (decisions). `select` was later retired; the interceptor now makes no model call. |
+| 1 Correlation | Pass. `select` p95 inside the interceptor: 1.13 s (helper), 0.32 s (decisions). `select` was later retired, and then the interceptor itself (D9). |
 | 2 Delivery | Partial: evictions unreported, escaping visible, placement chat-depth only, history wiped when fixed overhead exceeds the budget, card outlets unverified (§5.1, §6.3, §6.4, §4.2). |
 | 3 Ledger, host side | Partial: every host-observable item passes. Engine-fold items need the engine (D34); the user-message re-render was not observed (P4, D35). |
 | 4 Model viability | Partial; **extraction precision failed** (§9.4; D4 per-type defaults). Decision-path findings: D10, D30. Empty replies: D32. The numbers are a floor (D31). |
@@ -1018,7 +1018,7 @@ The design rests on assumptions about the host and the models, checked on the re
 | 7 UI | Pass, with fixes (§12; D33). |
 
 1. **Correlation.**
-   - The context handler and the interceptor see the same chain for normal, regenerate, swipe, continue and Edit-and-Send generations. The engine doesn't rely on it: the interceptor reads the turn back from the journal (§5.1).
+   - The context handler and the interceptor see the same chain for normal, regenerate, swipe, continue and Edit-and-Send generations. The engine doesn't rely on it: the engine runs before the reply, and the guard only checks the turn it prepared (§5.1).
    - A dry run during a live generation.
    - **Stop, then Regenerate:** the host lets the stopped generation's interceptor finish, and that interceptor writes nothing to the ledger or the journal (§5.1); the in-flight `select` is aborted (`select` since retired).
    - The `spindle.assemble` path.
@@ -1063,7 +1063,7 @@ The design rests on assumptions about the host and the models, checked on the re
    - a rebased view after an earlier switch ≤ 250 ms over 1k later turns with a cold cache (re-validation plus re-convergence);
    - 30-day catch-up for 20 NPCs ≤ 2 s in process;
    - a default-cap timelapse segment (600 agent-days, interrupts and Montage on) ≤ 2 s in process; the default cap is set from this measurement;
-   - interceptor apply ≤ 20 ms (excluding a model call);
+   - interceptor apply ≤ 20 ms (excluding a model call; retired with the interceptor, D9);
    - record size per preset; overflow chunking;
    - chat-open payload growth;
    - main-process assembly cost.
@@ -1093,7 +1093,7 @@ The design rests on assumptions about the host and the models, checked on the re
 |---|---|
 | Scope (Warp's larger version was cut back) | Six concepts; uniform representation; packs with level contracts; schema-driven editors; boundary lint; gates first; per-block checks. |
 | Prompt bloat | Compact renderers; the section budget, with Outcome never evicted; the inspector. User lore follows native World Info and its budget (§6). |
-| Latency | A deterministic plan; no model call in the World Info interceptor; tie-zone-only NPC calls; beats by default; budgets with fallbacks; the call meter. |
+| Latency | A deterministic plan; the guard only checks, in memory; tie-zone-only NPC calls; beats by default; budgets with fallbacks; the call meter. |
 | Ledger divergence | Concrete events; fold order; journaled markers and `seq`s; path tags (P1); one in-flight window per turn (P2); rebased views that never rewrite records; Keep re-validation; tombstones; chain snapshot; one queue per chat; recovery; the executable ledger property suite with a reference fold (§14). |
 | Coexistence (metadata, other interceptors) | Documented caveats; G2 follow-up. |
 | Host-wide worker cost | Disclosure; measured; G3 follow-up. |
@@ -1119,7 +1119,7 @@ The design rests on assumptions about the host and the models, checked on the re
 
 | The obvious design | What the engine does | Why |
 |---|---|---|
-| Turn-critical simulation in a child *turn lane* (D9) | In the backend process, inside the context handler, bounded by the same unit caps; the child lane stays for Playtest, Check world, imports and Build with AI (§9.6) | A segment took 38 ms on a child process and 2.5 ms in process |
+| Turn-critical simulation in a child *turn lane* (D9) | In the backend process, inside the engine run, bounded by the same unit caps; the child lane stays for Playtest, Check world, imports and Build with AI (§9.6) | A segment took 38 ms on a child process and 2.5 ms in process |
 | Re-narrate always copies its source (P3) | It falls back to a Re-run when the source cannot be reproduced (§4.3) | P3 cannot hold without the source's prefix |
 | A `seq` is never reused (L9) | A Re-narrate copy keeps its source's `seq`; L9 reads "never names two different entries" | P3 and L9 conflicted as written |
 | An undo cascades | An undo that later on-path events depend on is refused (§11) | Keeps L7 |
@@ -1128,7 +1128,7 @@ The design rests on assumptions about the host and the models, checked on the re
 | Import: accept, edit or reject each proposal | Accept or reject; edit afterwards in the editors (§9.7) | Bounded like extraction |
 | Data tables: worlds can replace them with another region's | The table editor edits a table; replacement is not built (§9.7) | Not on the critical path |
 | World lore without a world-document field | `WorldDoc.lore` and an editor collection, kept in the world and read by the engine's helpers, not by the narrator (§4.2, §5.4) | The starter worlds carry lore |
-| Models select lore in the World Info interceptor (D13), with pins (D19), adoption and suppression (D11) | Retired: lore handling is off, user books follow native World Info, and the interceptor delivers only the engine's sections (§6) | The engine's own lore search serves its helpers instead (§5.4) |
+| Models select lore in the World Info interceptor (D13), with pins (D19), adoption and suppression (D11) | Retired: lore handling is off, user books follow native World Info, and the engine run delivers only the engine's sections (§6) | The engine's own lore search serves its helpers instead (§5.4) |
 | Decline after the prose: other method / remove / accept | Pay another way retries savings → card → checking → cash; Remove and Accept reword the next Outcome note (§9.5) | "Accept" reads as accepting the decline |
 | "Not an action?" undoes an interpreted Speed through | Only interpreted action resolutions get the chip (§11) | A timelapse's events are clock output |
 | A confirm chip for every confirm-mode proposal | Only proposals that would validate now get Apply (§11) | Apply always failed for unpriced items |

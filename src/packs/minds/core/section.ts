@@ -5,7 +5,7 @@
 // depiction, written as behaviour, and only when it carries no unrevealed secret and names no one the
 // POV can't see (the screens Stance uses), checked again here whatever was checked when it was
 // recorded. Whoever gets a line here is left out of Stance (`minds.minded`); on the section's own
-// budget the interceptor keeps the best on the ladder (`fitMindLines`), and Stance tells of the rest.
+// budget the engine run keeps the best on the ladder (`fitMindLines`), and Stance tells of the rest.
 
 import type { EntityId } from "../../../shared/ids";
 import { worldMindsOf } from "../../../shared/minds";
