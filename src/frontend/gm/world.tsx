@@ -1,7 +1,8 @@
 // GM → World: every entity, secrets and the removed included, with search, a kind
 // filter and badges; each opens its editor as a page. While a fight is on, a Fight card leads,
-// opening the fight as the GM sees it (everyone named, HP exact). Spawn adds someone or something
-// to this chat.
+// opening the fight as the GM sees it (everyone named, HP exact). The things the player claimed
+// into being (DESIGN §9.4) get a section of their own, with who holds each, so a GM can find one
+// and remove it from its page. Spawn adds someone or something to this chat.
 
 import { useEffect, useId, useState } from "preact/hooks";
 import type { EncounterView } from "../../packs/combat/ui/panel";
@@ -9,7 +10,7 @@ import { decodeEncounterView, EncounterCard } from "../../packs/combat/ui/panel"
 import { Button, Empty, Field, List, ListRow, Section } from "../components";
 import { Icon } from "../icons";
 import type { Editor } from "./editor";
-import { findEntities } from "./editor";
+import { claimedThings, findEntities } from "./editor";
 import { EntityBadges, EntityPage } from "./entity";
 import { BuildLink, GmPage, usePages } from "./ui";
 
@@ -107,10 +108,22 @@ export function WorldSection(props: { editor: Editor }) {
   });
   const list = findEntities(editor.gm.entities, query, kind);
   const kinds = editor.gm.kinds.filter((k) => editor.gm.entities.some((e) => e.kind === k.id));
+  const claimed = claimedThings(editor.gm);
   return (
     <div ref={pages.host.ref} class="lre-gm-pages" onKeyDown={pages.host.onKeyDown}>
       <div class="lre-stack lre-gm-list" hidden={open}>
         {fight ? <FightCard fight={fight} turn={turn} onOpen={() => pages.open("fight")} /> : null}
+        {claimed.length > 0 ? (
+          <Section title="Claimed by the player" flush>
+            <div data-lre-gm-list="claimed">
+              <List>
+                {claimed.map(({ entity: e, where }) => (
+                  <ListRow key={e.id} id={e.id} title={e.name} subtitle={where} badge={<EntityBadges entity={e} />} chevron onClick={() => pages.open({ entity: e.id })} />
+                ))}
+              </List>
+            </div>
+          </Section>
+        ) : null}
         <div class="lre-gm-tools">
           <label class="lre-gm-search">
             <Icon name="search" size={16} />

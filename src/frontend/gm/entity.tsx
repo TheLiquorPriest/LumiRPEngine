@@ -24,7 +24,7 @@ import { ActionRow, ActionRows, GmPage } from "./ui";
 
 const LEVELS = [0, 1, 2, 3, 4] as const;
 
-/** What an entity is at a glance: the player's own, removed, not alive, not public, living its own day, new in this chat. */
+/** What an entity is at a glance: the player's own, removed, not alive, not public, claimed by the player, living its own day, new in this chat. */
 export function EntityBadges(props: { entity: GmEntity; full?: boolean }) {
   const { entity, full } = props;
   const badges = [
@@ -32,6 +32,7 @@ export function EntityBadges(props: { entity: GmEntity; full?: boolean }) {
     entity.gone ? <Badge key="gone" tone="neg">Removed</Badge> : null,
     entity.life.state !== "alive" ? <Badge key="life" tone="neg">{entity.life.label}</Badge> : null,
     entity.visibility !== "public" ? <Badge key="vis" tone="gm">{humanize(entity.visibility)}</Badge> : null,
+    entity.claimed ? <Badge key="claimed">Claimed</Badge> : null,
     full && entity.agent ? <Badge key="agent">Own day</Badge> : null,
     full && entity.spawned ? <Badge key="spawned">Spawned here</Badge> : null,
   ].filter((badge) => badge !== null);

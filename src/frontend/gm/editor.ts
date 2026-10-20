@@ -15,7 +15,7 @@ export interface Editor {
 }
 
 /** An entity's or place's name, the id when neither has one, "—" for none. */
-export function nameOf(gm: GmView, id: string | null): string {
+export function nameOf(gm: Pick<GmView, "entities" | "places">, id: string | null): string {
   if (id === null) return "—";
   return gm.entities.find((e) => e.id === id)?.name ?? gm.places.find((p) => p.id === id)?.name ?? id;
 }
@@ -27,4 +27,16 @@ export function nameOf(gm: GmView, id: string | null): string {
 export function findEntities(entities: readonly GmEntity[], query: string, kind: string): GmEntity[] {
   const q = query.trim().toLowerCase();
   return entities.filter((e) => (kind === "" || e.kind === kind) && (q === "" || e.name.toLowerCase().includes(q) || e.id.toLowerCase().includes(q))).sort((a, b) => Number(a.gone) - Number(b.gone) || a.name.localeCompare(b.name));
+}
+
+/**
+ * The things the player said they had, made real for their actions (DESIGN §9.4 player claims), that
+ * are still in the world, by name, each with who holds it or where it lies: the list a GM finds them
+ * in to remove them. A removed one, or a consumable used up, has left the list.
+ */
+export function claimedThings(gm: Pick<GmView, "entities" | "places">): { entity: GmEntity; where: string }[] {
+  return gm.entities
+    .filter((e) => e.claimed && !e.gone)
+    .sort((a, b) => a.name.localeCompare(b.name))
+    .map((entity) => ({ entity, where: entity.holder !== null ? `held by ${nameOf(gm, entity.holder)}` : entity.place !== null ? `at ${nameOf(gm, entity.place)}` : "nowhere" }));
 }

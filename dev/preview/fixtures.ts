@@ -856,7 +856,7 @@ function gmMinds(): MindsGmView {
 }
 
 export function gmFixture(): GmView {
-  const entity = (id: string, name: string, kind: string, tier: string, place: string | null, rest: Partial<GmEntity> = {}): GmEntity => ({ id, name, kind, tier, agent: false, pov: false, gone: false, spawned: false, visibility: "public", place, holder: null, fields: [], relations: [], levels: gmLevels(tier === "principal" ? LEADS : tier === "supporting" ? SUPPORTING : BACKGROUND), class: {}, tags: [], sheet: null, life: { state: "alive", label: "Alive", acts: true, everyone: true, aware: [], unaware: [] }, ...rest });
+  const entity = (id: string, name: string, kind: string, tier: string, place: string | null, rest: Partial<GmEntity> = {}): GmEntity => ({ id, name, kind, tier, agent: false, pov: false, gone: false, spawned: false, visibility: "public", place, holder: null, claimed: false, fields: [], relations: [], levels: gmLevels(tier === "principal" ? LEADS : tier === "supporting" ? SUPPORTING : BACKGROUND), class: {}, tags: [], sheet: null, life: { state: "alive", label: "Alive", acts: true, everyone: true, aware: [], unaware: [] }, ...rest });
   return {
     entities: [
       entity("pov", "Sam Rivera", "person", "principal", "diner", {
@@ -902,6 +902,10 @@ export function gmFixture(): GmView {
       entity("civic", "Honda Civic", "vehicle", "background", "apartment", { fields: [{ id: "fuel", label: "fuel", type: "number", value: 38, min: 0, max: 100 }, { id: "owner", label: "owner", type: "ref", value: "pov", ref: "person" }] }),
       entity("glovebox", "Glovebox", "container", "background", "apartment", { holder: "civic", visibility: "discoverable", fields: [{ id: "capacity_l", label: "capacity_l", type: "number", value: 4 }, { id: "stock", label: "stock", type: "text", value: "Registration, gum, $7 in quarters" }] }),
       entity("drill", "Cordless drill", "thing", "background", "diner", { holder: "npc_dev" }),
+      // Things the player said they had: one in Sam's hands, one left lying in the diner, and a coffee drunk since (used up, so off the Claimed list).
+      entity("item:claim_1f3a9c2e04b7", "Zippo lighter", "thing", "background", "diner", { holder: "pov", spawned: true, claimed: true, fields: [{ id: "claimed", label: "claimed", type: "bool", value: true, extra: true }] }),
+      entity("item:claim_7d20e9a1c5f3", "Dog-eared paperback", "thing", "background", "diner", { spawned: true, claimed: true, fields: [{ id: "claimed", label: "claimed", type: "bool", value: true, extra: true }] }),
+      entity("item:claim_b81c4f6d2a90", "Iced coffee", "thing", "background", "diner", { holder: "npc_rosie", spawned: true, claimed: true, gone: true, fields: [{ id: "claimed", label: "claimed", type: "bool", value: true, extra: true }] }),
       entity("dev_checking", "Dev's checking", "account", "background", null, { balance: 412650, fields: [{ id: "owner", label: "Owner", type: "ref", value: "npc_dev", ref: "person" }] }),
     ],
     kinds: [
