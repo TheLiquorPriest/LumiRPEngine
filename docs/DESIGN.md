@@ -16,7 +16,7 @@ Section numbers are stable: code comments and docs cite them as `DESIGN §9.2`. 
 | Identifier | Meaning |
 |---|---|
 | `D1`–`D35` | Design decisions (§2) |
-| `G1`–`G9` | Gaps in the host that I plan to propose fixes for (§16) |
+| `G1`–`G11` | Gaps in the host that I plan to propose fixes for (§16) |
 | `P1`–`P4` | The four principles behind the per-chat ledger (§4.3) |
 | `L1`–`L47` | The ledger's named invariants (§14); a number is never reused, so a retired one leaves a gap |
 
@@ -84,7 +84,7 @@ A few terms, in plain words:
 | D18 | **Domain packs and two dials** (depth per domain × entity tier). **The representation is uniform: levels gate processes, rendering and extraction targets, never the data shape.** |
 | D19 | **Pinned constants (retired).** User entries stored `constant:true, disabled:false` were charged to the lore budget as pins, so they never displaced engine sections. With lore handling off the engine no longer touches user entries, and native World Info decides them (§6.1). |
 | D20 | **No license yet.** It is decided after the extension has proved itself. |
-| D21 | **Upstream proposals (G1–G9) are follow-up work** after the first release, which ships with its caveats documented (§16). |
+| D21 | **Upstream proposals (G1–G11) are follow-up work** after the first release, which ships with its caveats documented (§16). |
 | D22 | **Low realism by default:** new blank worlds start on the Story preset. |
 | D23 | **A studio repository built on `japolino/warp-studio` comes next.** LumiRPEngine ships the seam for it now (§15). |
 | D24 | **LumiRPEngine registers no extension macros.** A macro would block `decisions.evaluate` during dry runs and force main-process prompt assembly. |
@@ -309,7 +309,7 @@ Lore pins (§24.5) can name an entry of any of the user's World Info books, but 
 
 3. **The engine run**, at the stopped generation's `GENERATION_STOPPED`, on the chat's queue after whatever is ahead of it (a previous turn's post steps included), within the user's **Engine run** timeout: a limit that fires stops the run.
    - The turn is prepared as a `pending` entry of the stopped generation's type and target. It stays in memory, out of the journal, until a generation takes it, so a restart drops it and the next generation runs the engine again.
-   - **A reply for an earlier message is refused** before any model call: Lumiverse's Regenerate and Continue act only on the last reply, so the restart can't make a swipe of an earlier one (an Edit and Send in place on an earlier message, or a swipe or Regenerate with an explicit `message_id` naming one). Its blank swipe is removed, nothing is generated, and the chat's flag says why, with no Retry: Edit and Send as a branch, or regenerate the last reply. On a host that can't stop generations, such a reply goes through unplanned and is read as one (§4.3).
+   - **A reply for an earlier message is refused** before any model call, until G11: Lumiverse's Regenerate and Continue act only on the last reply, so the restart can't make a swipe of an earlier one (an Edit and Send in place on an earlier message, or a swipe or Regenerate with an explicit `message_id` naming one). Its blank swipe is removed, nothing is generated, and the chat's flag says why and what to do instead, with no Retry: use Edit and Send as a branch, or regenerate the last reply. On a host that can't stop generations, such a reply goes through unplanned and is read as one (§4.3).
    - **Continue:** no plan. A Continue's target is known only at `GENERATION_ENDED` (G1); its sections are the head's, and the restart is Lumiverse's Continue, which continues the last reply.
    - **Re-narrate** (P3, §4.3): no model steps and no new plan. The turn copies its source's seed, `pre` events and `markersApplied`, re-validates the source's live ✎ fixes and materializations against the new swipe's fold prefix, and its narration renders from that prefix, with the source plan's Outcome, Montage and Outline lines (from the turn bridge, or `plans.json`). Its post steps run at `GENERATION_ENDED` and commit as a `narr` entry. When the source can't be reproduced (its record is gone, or a `pre` event no longer validates), the turn is planned as a Re-run with a fresh seed but still runs no model steps: the plan reads only what the turn bridge keeps for the text, and there is no brief or prose outline. With no source at all (no earlier swipe holds a live record) it is a Re-run in full.
    - **Otherwise,** in this order:
@@ -995,11 +995,13 @@ These are the places where Lumiverse itself would make LumiRPEngine simpler or s
 | G8 | Forced entries skip inclusion-group competition | ~10–20 LOC |
 | G9 | Keep `spindle_metadata` out of the light message list | Small |
 | G10 | A message read without `extra` (reasoning), or by range: `getMessages` sends every message with all its reasoning, 174 MB on an 844-message chat, so the backend keeps its own copy (§9.6) | Small |
+| G11 | A Regenerate of a chosen reply from an extension's page: a validated `{messageId}` on the `action-regenerate` or `action-swipe-right` command, running `useSwipeAction`'s path (`generate` with `message_id` and `generation_type: "swipe"`, and the store's streaming hooks). Commands take no arguments today (`applyHostAction` rejects them) and the store isn't open to extensions, so the restart after an engine run can start only the last reply, and a reply for an earlier message (Edit and Send in place, a swipe of it) is refused (§5.1) | ~40–80 LOC |
 
 **Shipped caveats** (Settings and README):
 - While the extension is enabled, prompt assembly for **all users on the host** runs on the main process. On a 1,000-message chat the measured overhead was about 23 ms per prompt build (§18.5).
 - Coexistence with other message-metadata writers (G2).
 - In world chats, other extensions' World Info interceptors may switch the engine's entries off for a generation; the inspector then shows those sections not delivered. The engine doesn't touch user entries.
+- In world chats, a reply for an earlier message (Edit and Send in place, a swipe of an older reply through the API) is refused until G11; Edit and Send as a branch, and Regenerate of the last reply, work.
 
 ## 17. Delivery (D16)
 The extension is delivered and checked as a whole: nothing is deferred to a later release. The ledger gate (§14) covers the ledger, the test suite and type checks cover the rest, and the visible checks on the reference host (D28) cover every surface at phone width.
@@ -1151,7 +1153,7 @@ The design rests on assumptions about the host and the models, checked on the re
 | # | Item | Behavior until resolved |
 |---|---|---|
 | R4 | **The `characters` permission**, which would let the engine see where an outlet inside a character-card field puts a section (§4.2). | It is not requested; the dry-run search shows whether a section reached the prompt, not where. |
-| G1–G9 | The upstream proposals (§16). | The extension ships with the caveats documented. |
+| G1–G11 | The upstream proposals (§16). | The extension ships with the caveats documented. |
 | — | Not built: command-palette commands, replacing a data table with another region's, a per-proposal edit step in Import from lore, agenda and secret-track objectives in the starter worlds (they carry narrative to-dos only). | Documented in the user guide where a user would look for them. |
 | D20 | The license. | None yet; all rights reserved. |
 
