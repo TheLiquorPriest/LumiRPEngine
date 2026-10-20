@@ -270,6 +270,20 @@ export const EVENTS: EventTypeDef<PackEvent>[] = [
     coarsen: { key: (e) => str(e, "flow"), merge: (_a, b) => b },
   },
   {
+    // A standing payment renamed in play: the flow entity's name, which its journal lines and views show.
+    type: FINANCE_EVENTS.flowRenamed,
+    validate: (e, ctx) => {
+      const name = str(e, "name");
+      return own(ctx.state.entities, str(e, "flow"))?.kind === "flow" && name.trim() !== "" && name.length <= 80 ? null : reject("bad_event", "a rename needs a standing payment and a name of up to 80 characters");
+    },
+    apply: (e, state) => {
+      const flow = own(state.entities, str(e, "flow"));
+      if (flow) flow.name = str(e, "name");
+    },
+    describe: (e, _ctx, viewer) => (viewer ? "" : `Standing payment renamed ${str(e, "name")}`),
+    coarsen: { key: (e) => str(e, "flow"), merge: (_a, b) => b },
+  },
+  {
     // Money set aside on an account (a deposit not yet available, a card authorisation), or a hold let go.
     type: FINANCE_EVENTS.hold,
     validate: (e, ctx) => {

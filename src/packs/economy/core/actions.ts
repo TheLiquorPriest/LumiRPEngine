@@ -285,6 +285,23 @@ export function createFlow(ctx: ReadContext, who: EntityId, args: Record<string,
   return [{ type: "spawn", entity }];
 }
 
+/** What a change may clear on a standing payment, by the parameter that names it (`flow_update`'s and `economy.flow_edit`'s `clear`). */
+const CLEARABLE = ["at", "start", "end", "count", "roll", "retry_days", "retries", "fallback", "category"] as const;
+
+/**
+ * A standing payment's new name, when it has one, and the fields a comma list of parameters
+ * clears (`end,count`), each set to nothing; a parameter that can't be cleared is refused.
+ */
+function renameAndClear(current: string, id: EntityId, name: string | undefined, clear: JsonValue | undefined): LedgerEvent[] | Rejection {
+  const names = typeof clear === "string" ? clear.split(",").map((s) => s.trim()).filter((s) => s !== "") : [];
+  const bad = names.find((n) => !(CLEARABLE as readonly string[]).includes(n));
+  if (bad !== undefined) return reject("bad_flow", `a standing payment's ${bad.replace(/_/g, " ")} can't be cleared`);
+  const out: LedgerEvent[] = [...new Set(names)].map((n): LedgerEvent => ({ type: "set", entity: id, field: FLOW_PARAM_FIELDS[n] ?? n, value: null }));
+  const label = name?.trim().slice(0, 80) ?? "";
+  if (label !== "" && label !== current) out.push({ type: FINANCE_EVENTS.flowRenamed, data: { flow: id, name: label } });
+  return out;
+}
+
 export function updateFlow(ctx: ReadContext, who: EntityId, flow: EntityId, args: Record<string, JsonValue>): LedgerEvent[] | Rejection {
   const e = own(ctx.state.entities, flow);
   if (e?.kind !== "flow") return reject("not_flow", `${labelOf(ctx, flow)} isn't a standing payment`);
@@ -294,8 +311,18 @@ export function updateFlow(ctx: ReadContext, who: EntityId, flow: EntityId, args
   if (typeof made.fields.from === "string" && !mayPayFrom(ctx, who, made.fields.from)) return reject("not_owner", `${labelOf(ctx, who)} can't pay from ${labelOf(ctx, made.fields.from)}`);
   const fallback = fallbackProblem(ctx, who, made.fields);
   if (fallback) return fallback;
-  const out: LedgerEvent[] = Object.entries(made.fields).map(([field, value]): LedgerEvent => ({ type: "set", entity: flow, field, value }));
-  return out;
+  const more = renameAndClear(e.name, flow, made.label, args.clear);
+  if ("code" in more) return more;
+  const both = more.find((x) => x.type === "set" && x.field in made.fields);
+  if (both && both.type === "set") return reject("bad_flow", `a standing payment's ${both.field.replace(/_/g, " ")} can't be both changed and cleared`);
+  return [...Object.entries(made.fields).map(([field, value]): LedgerEvent => ({ type: "set", entity: flow, field, value })), ...more];
+}
+
+/** GM: a standing payment's name, and the fields a comma list of parameters clears (`economy.flow_edit`). */
+export function editFlow(ctx: ReadContext, flow: EntityId, name: string | undefined, clear: JsonValue | undefined): LedgerEvent[] | Rejection {
+  const e = own(ctx.state.entities, flow);
+  if (e?.kind !== "flow") return reject("not_flow", `${labelOf(ctx, flow)} isn't a standing payment`);
+  return renameAndClear(e.name, flow, name, clear);
 }
 
 export function setFlowStatus(ctx: ReadContext, who: EntityId, flow: EntityId, status: "active" | "paused" | "ended"): LedgerEvent[] | Rejection {
