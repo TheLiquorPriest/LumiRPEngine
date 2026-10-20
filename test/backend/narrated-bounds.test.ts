@@ -15,9 +15,10 @@ const EXTRACT_MARK = "propose concrete state changes";
 /**
  * A fresh Port Alder chat whose next reply the extractor reads as `proposals`, with `extraction`
  * settings applied first. With `fights` the world has the Modern profile's combat; `ready` runs
- * after a first turn, before that reply's turn, and `before` is the clock then.
+ * after a first turn, before that reply's turn, and `before` is the clock then; `play` plays that
+ * turn in place of a typed "I sit with Danny."
  */
-async function chat(proposals: JsonObject[], extraction: JsonObject, opts: { fights?: boolean; ready?: (rig: Rig, chatId: string) => Promise<void> } = {}) {
+async function chat(proposals: JsonObject[], extraction: JsonObject, opts: { fights?: boolean; ready?: (rig: Rig, chatId: string) => Promise<void>; play?: (rig: Rig, chatId: string) => Promise<void> } = {}) {
   const rig = new Rig({ shipped: true });
   const worldId = await rig.newWorld("Alder", "modern_slice_of_life");
   if (opts.fights) {
@@ -45,7 +46,7 @@ async function chat(proposals: JsonObject[], extraction: JsonObject, opts: { fig
   await opts.ready?.(rig, chatId);
   const before = (await state()).clock;
   rig.host.quietReply = (req) => ((req.messages[0]?.content ?? "").includes(EXTRACT_MARK) ? JSON.stringify({ proposals }) : "{}");
-  await rig.turn(chatId, "I sit with Danny.", "An hour later, Danny trusts you a good deal more.");
+  await (opts.play ? opts.play(rig, chatId) : rig.turn(chatId, "I sit with Danny.", "An hour later, Danny trusts you a good deal more."));
   const chips = (await rig.rt.view(chatId, rig.host.userId)).chips;
   return { rig, chatId, state, danny, chips, before };
 }
@@ -106,6 +107,17 @@ describe("a narrated time skip, auto or confirm", () => {
     asked.rig.body(await asked.rig.send({ type: "lre.chip", chatId: asked.chatId, chip: confirm.id, choice: "confirm" }));
     expect((await asked.state()).clock - asked.before).toBe(45);
     for (const got of [auto, asked]) expect(got.rig.rt.ledger.errors).toEqual([]);
+  });
+
+  test("a timelapse turn's reply proposes none: the clock ends where the timelapse took it (L27)", async () => {
+    const timelapse = async (rig: Rig, chatId: string) => {
+      rig.body(await rig.send({ type: "lre.action", chatId, action: "timelapse", params: { target: { type: "duration", minutes: 30 } }, source: "palette" }));
+      const g = await rig.host.start(chatId, { type: "normal" });
+      await rig.host.finish(g, "The yards work for another quarter of an hour.");
+    };
+    const got = await chat([{ type: "time_advance", minutes: 15 }], { time_advance: { mode: "auto" } }, { play: timelapse });
+    expect((await got.state()).clock - got.before).toBe(30);
+    expect(got.rig.rt.ledger.errors).toEqual([]);
   });
 
   test("during a fight none applies, in either mode: it is declined with a note, and Apply on an earlier chip is refused", async () => {
