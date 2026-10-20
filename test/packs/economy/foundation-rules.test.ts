@@ -11,6 +11,7 @@ import { applyEffects } from "../../../src/engine/effects";
 import { applyValidUnits } from "../../../src/engine/events";
 import { materializeAll } from "../../../src/engine/materialize";
 import { optionalService } from "../../../src/engine/pack-kit";
+import { playerLines } from "../../../src/engine/player-events";
 import { createRegistry, type Registry } from "../../../src/engine/registry-impl";
 import { resolveAction } from "../../../src/engine/resolve";
 import { createRng } from "../../../src/engine/rng";
@@ -557,5 +558,19 @@ describe("a payment waiting to be retried outlives the occurrences after it", ()
     lapse(w, 11); // Mon 26 Oct pays, and the retry on the 29th pays the 19th's
     expect(flowRuns(w, "save").map((r) => r.outcome)).toEqual(["retry", "paid", "paid"]);
     expect(w.state.accounts.savings).toBe(savings + 600_000);
+  });
+});
+
+describe("someone else's credit is theirs alone", () => {
+  test("the player's lines carry their own monthly score, never a known NPC's", () => {
+    const w = setup((world) => {
+      world.entities.maya_card = entity("maya_card", "account", { owners: [{ party: "maya", role: "owner" }], product: "credit_card", limit: 300_000, opening: -50_000 });
+      world.entities.you!.relations.push({ type: "knows", to: "maya" });
+    }, ["maya"]);
+    const start = w.events.length;
+    lapse(w, 17); // past 1 Nov, when scores are worked out
+    const scores = w.events.slice(start).filter((e) => e.type === "economy.score");
+    expect(new Set(scores.flatMap((e) => ("data" in e ? [e.data.person] : [])))).toEqual(new Set(["you", "maya"]));
+    expect(playerLines(reg, w.world, w.state, "you", scores, 20)).toHaveLength(1);
   });
 });

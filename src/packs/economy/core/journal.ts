@@ -337,7 +337,8 @@ export const EVENTS: EventTypeDef<PackEvent>[] = [
       const { person: _person, ...entry } = e.data;
       credit[person] = { ...cur, entries: pushCapped(cur.entries, { ...entry, at: typeof e.data.at === "number" ? e.data.at : state.clock }, CREDIT_CAP) };
     },
-    describe: (e) => `Credit report: ${str(e, "kind")}`,
+    // A credit report is its person's alone: the player reads their own, never anyone else's.
+    describe: (e, _ctx, viewer) => (viewer !== undefined && viewer !== str(e, "person") ? "" : `Credit report: ${str(e, "kind")}`),
   },
   {
     // A person's monthly score.
@@ -350,7 +351,7 @@ export const EVENTS: EventTypeDef<PackEvent>[] = [
       const at = typeof e.data.at === "number" ? e.data.at : state.clock;
       credit[person] = { ...cur, score: numOf(e.data.score), factors: objOf(e.data.factors), at, history: pushCapped(cur.history, { at, score: numOf(e.data.score) }, SCORES_KEPT) };
     },
-    describe: (e) => `Credit score ${numOf(e.data.score)}`,
+    describe: (e, _ctx, viewer) => (viewer !== undefined && viewer !== str(e, "person") ? "" : `Credit score ${numOf(e.data.score)}`),
   },
   {
     // A card's spending today: its new totals (an assignment, so a record keeps only the last).
