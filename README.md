@@ -95,6 +95,20 @@ These are the known limits of this release. Most of them need a change in Lumive
 - **Rare overlapping turns** fall back to planning from the last saved state.
 - **Worlds from other people can carry macros.** A world file's lore and templates may contain Lumiverse macros (`{{…}}`), which Lumiverse runs when it builds a prompt, as in any World Book. Lumiverse's macro engine also acts on control characters (it turns some of them back into braces on a later pass) and on the `<user>`, `<char>` and `<bot>` shorthands. LumiRPEngine keeps authored text as written. Everything it inserts itself (a name, a price, what a model said) has its braces swapped for look-alikes, its control characters dropped and its `<user>`-style shorthands broken, so a value can never form a macro however many times Lumiverse processes it. It lists all of these in an imported world for you to review before you play it.
 
+## Tests
+
+The suite runs on Bun (`bun install` first). Which run to use when:
+
+| When | Run | What it runs |
+|---|---|---|
+| During a change | `bun run test` | The test files that cover what changed since your branch left `main`, committed or not. A changed test, the tests named after a changed module and the tests that read a changed doc or template always run; then the tests nearest what changed through their imports, cheapest first, up to about a minute of recorded test time. Usually done in under a minute. |
+| Before a commit | `bun run check` | Both typechecks, the checks that `docs/REFERENCE.md` and the starter worlds are current and that the templates validate, then `bun run test`. |
+| At release | `bun run test:release` | The release gate: those checks, every test file, and the ledger property suite on its 200 fixed sequences and on 200 fresh ones, in parallel across the cores. About two minutes. |
+
+`bun run test -- --list` prints what it would run and why; `--base <branch or commit>` compares with something other than `main` (`--base HEAD`: only what isn't committed), and `--budget <seconds>` changes the minute. `bun run test:all` runs every test file but the property suite, `bun run test:properties` the property suite alone, and `bun run test <test files>` just those files. Plain `bun test` still runs every file in one process, the property suite's fixed sample whole, in about five minutes.
+
+The release gate prints the fresh sequences' seed base: `LRE_PROPERTY_SEED=<base>-<n> bun test ./test/ledger/properties.test.ts` replays one, and a seed that fails, shrunk, goes into `test/ledger/regressions.json`. `test/timings.json` holds each file's recorded time, for the budget and to start the slowest files first; `bun run test:timings` records it again after a slow test changes.
+
 ## Credits
 
 Parts of the engine are adapted from [Warp](https://github.com/japolino/warp) by japolino, used with the author's permission for this non-commercial project. The details, file by file, are in [`NOTICE`](NOTICE).
