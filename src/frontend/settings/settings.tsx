@@ -121,7 +121,7 @@ function DisplayPage() {
       <Section>
         <div class="lre-field" data-lre-show-ids>
           <HostSwitch label="Show ids" checked={showIds} onChange={(next) => app.ui.update((ui) => ({ ...ui, showIds: next }))} />
-          <span class="lre-field-help">Shows the id the engine and world files use beside each name: in Build and GM, and in Play on the people, places, belongings and quests you can see. Handy when you write rules or read a world's files. Kept on this device.</span>
+          <span class="lre-field-help">Shows the id the engine and world files use beside each name, in Build and GM; never in Play, where an id can say what a name keeps back. Handy when you write rules or read a world's files. Kept on this device.</span>
         </div>
       </Section>
     </div>
