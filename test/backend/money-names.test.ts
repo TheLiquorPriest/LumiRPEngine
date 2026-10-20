@@ -7,6 +7,7 @@
 
 import { describe, expect, test } from "bun:test";
 import type { FinanceView } from "../../src/shared/finance";
+import { endableLeases } from "../../src/packs/economy/ui/layout";
 import { invoiceAction, tradeAction, transferAction } from "../../src/packs/economy/ui/requests";
 import { MoneyChat } from "../support/money-chat";
 
@@ -99,6 +100,15 @@ describe("an id or a link that would name someone hidden reaches the player unde
     expect(share.length).toBeGreaterThan(0);
     expect(share.map((u) => [u.account, u.flow?.startsWith("hidden:")])).toEqual(share.map(() => [null, true]));
     expect(JSON.stringify(upcoming).toLowerCase()).not.toContain("jess");
+  });
+
+  test("a lease of a tenant Helen can't see keeps its id, as she ends it by its id from her building's page", async () => {
+    const chat = await MoneyChat.start({ pov: "helen_kowalczyk", secret: ["danny_okafor"] });
+    const view = await chat.hub();
+    const harbor = view.properties.find((p) => p.id === "prop_harbor_114");
+    if (!harbor) throw new Error("Helen's building isn't on her money");
+    expect(view.flows.find((f) => f.id === "bill_danny_rent")).toMatchObject({ from: "someone", spec: null });
+    expect(endableLeases(view, harbor)).toContain("bill_danny_rent");
   });
 });
 
