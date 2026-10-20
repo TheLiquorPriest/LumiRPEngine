@@ -11878,6 +11878,11 @@ function totalsOf(state, account, month) {
     out[category] = { in: numOf(objOf(v).in), out: numOf(objOf(v).out) };
   return out;
 }
+function firstBookedMonth(api, books, business) {
+  const economy = sliceOf(books.state, "economy");
+  const months = [...Object.keys(objOf(own(objOf(economy.books), business))), ...api.accountsOf(books, business, "worth").flatMap((a) => Object.keys(objOf(own(objOf(economy.totals), a))))];
+  return months.length === 0 ? null : months.reduce((a, b) => b < a ? b : a);
+}
 function operatingAccount(api, books, business) {
   const accounts = api.accountsOf(books, business, "spend");
   const named = strOf(own(books.state.entities, business)?.fields.operating_account);
@@ -11949,6 +11954,39 @@ function external(id) {
 function outsideAccount(name) {
   const bare = name.startsWith(EXTERNAL_ACCOUNT_PREFIX) ? name.slice(EXTERNAL_ACCOUNT_PREFIX.length) : name;
   return external(bare.toLowerCase().replace(/[^a-z0-9:]+/g, "_").replace(/^_+|_+$/g, "") || "outside");
+}
+var OUTSIDE_NAMES = {
+  market: "Shops",
+  insurer: "Insurer",
+  "tax:federal": "Federal tax",
+  "tax:state": "State tax",
+  "tax:local": "Local tax",
+  "insurance:property": "Property insurance",
+  "upkeep:property": "Property upkeep"
+};
+var REGIONAL_TAXES = { sales: "Sales tax", property: "Property tax" };
+var NAMED_OUTSIDE = { bank: "Bank", atm: "Cash machine", employer: "Employer" };
+var OUTSIDE_KINDS = { buyer: "Buyer", seller: "Seller", market: "Market", tenant: "Outside tenant" };
+function outsideName(books, raw) {
+  const bare = raw.startsWith(EXTERNAL_ACCOUNT_PREFIX) ? raw.slice(EXTERNAL_ACCOUNT_PREFIX.length) : raw;
+  const known = own(OUTSIDE_NAMES, bare);
+  if (known !== undefined)
+    return known;
+  const [head = "", ...rest] = bare.split(":");
+  const tail = rest.join(":").trim();
+  const tax = head === "tax" ? own(REGIONAL_TAXES, rest[0] ?? "") : undefined;
+  if (tax !== undefined) {
+    const region = rest.slice(1).join(":").trim();
+    if (region === "")
+      return tax;
+    const name = rowOf(books, "economy.regions", region.replace(/ +/g, "_"))?.name;
+    return `${tax} (${typeof name === "string" && name !== "" ? name : region.replace(/_/g, " ")})`;
+  }
+  const named = own(NAMED_OUTSIDE, head);
+  if (named !== undefined)
+    return tail === "" || tail === head ? named : labelOf(books, tail.replace(/ +/g, "_"));
+  const kind = tail === "" ? undefined : own(OUTSIDE_KINDS, head);
+  return kind ?? bare.replace(/_/g, " ");
 }
 function bankSide(institution) {
   return `${BANK_PREFIX}${institution || "bank"}`;
@@ -12136,6 +12174,14 @@ function rightsOf(state, id, party) {
 }
 function canSpend(state, account, party) {
   return rightsOf(state, account, party)?.spend === true;
+}
+function managesParty(state, party, who) {
+  return ownersOf(state, party).some((o) => o.party === who && ROLE_RIGHTS[o.role].manage);
+}
+function managesAccount(books, account, who) {
+  if (!classOf2(books, account))
+    return false;
+  return ownersOf(books.state, account).some((o) => ROLE_RIGHTS[o.role].manage && (o.party === who || managesParty(books.state, o.party, who)));
 }
 function shareOf(state, id, party) {
   return own(worthShares(ownersOf(state, id)), party) ?? 0;
@@ -13171,6 +13217,11 @@ function payerOf(ctx, api, job) {
     return operatingAccount(api, ctx, job.business) ?? api.outside(job.business);
   return api.outside(`employer:${(job.employer || job.occupation || "work").toLowerCase().replace(/\W+/g, "_")}`);
 }
+function employerName(ctx, job) {
+  if (job.business)
+    return labelOf(ctx, job.business);
+  return job.employer === "" ? "" : labelOf(ctx, job.employer);
+}
 function payrollFlow(ctx, api, job) {
   if (job.every === null)
     return null;
@@ -13184,7 +13235,7 @@ function payrollFlow(ctx, api, job) {
     id: `pay:${job.id}`,
     label: `Pay: ${job.title}`,
     kind: "payroll",
-    from: payerOf(ctx, api, job),
+    from: job.business ? payerOf(ctx, api, job) : `employer:${job.employer}`,
     to: job.worker,
     ...job.splits.length > 0 ? { splits: job.splits } : {},
     amount: { provider: "payroll", args: { job: job.id } },
@@ -13224,9 +13275,6 @@ function timesheet(slot, ctx) {
   }
   return out;
 }
-function manages(api, state, who, business) {
-  return api.ownersOf(state, business).some((o) => o.party === who && (o.role === "owner" || o.role === "joint" || o.role === "trustee"));
-}
 function today(ctx) {
   return dateAt(calendarOf(ctx.world), ctx.state.clock).dayIndex;
 }
@@ -13238,7 +13286,7 @@ function hire(api, args, ctx) {
   if (!own(ctx.state.entities, worker) || isGone(ctx.state, worker) || !kindIs(ctx.registry, ctx.world, own(ctx.state.entities, worker)?.kind ?? "", "person"))
     return reject5("missing_entity", `no person ${labelOf(ctx, worker)}`);
   const by = strOf(args.by);
-  if (by !== "" && !manages(api, ctx.state, by, business))
+  if (by !== "" && !managesParty(ctx.state, business, by))
     return reject5("not_owner", `${labelOf(ctx, by)} doesn't run ${labelOf(ctx, business)}`);
   const jobs = allJobs(ctx);
   if (jobs.some((j) => j.worker === worker && j.business === business && j.status !== "ended"))
@@ -13269,7 +13317,7 @@ function endJob(api, args, ctx) {
   if (!job)
     return reject5("missing_entity", `no job ${labelOf(ctx, strOf(args.job))}`);
   const by = strOf(args.by);
-  if (by !== "" && by !== job.worker && !(job.business && manages(api, ctx.state, by, job.business)))
+  if (by !== "" && by !== job.worker && !(job.business && managesParty(ctx.state, job.business, by)))
     return reject5("not_owner", `${labelOf(ctx, by)} can't end that job`);
   if (job.status === "ended")
     return reject5("ended", "that job has already ended");
@@ -13284,7 +13332,7 @@ function raise(api, args, ctx) {
   if (!job)
     return reject5("missing_entity", `no job ${labelOf(ctx, strOf(args.job))}`);
   const by = strOf(args.by);
-  if (by !== "" && !(job.business && manages(api, ctx.state, by, job.business)))
+  if (by !== "" && !(job.business && managesParty(ctx.state, job.business, by)))
     return reject5("not_owner", `${labelOf(ctx, by)} doesn't set that pay`);
   const rate = typeof args.rate === "number" && args.rate > 0 ? Math.round(args.rate) : typeof args.pct === "number" && args.pct > -100 ? Math.round(job.rate * (1 + args.pct / 100)) : NaN;
   if (!(rate > 0))
@@ -13307,7 +13355,7 @@ function jobView(ctx, api, job) {
   return {
     id: job.id,
     title: job.title,
-    employer: job.business ? labelOf(ctx, job.business) : job.employer,
+    employer: employerName(ctx, job),
     employerId: job.business,
     worker: labelOf(ctx, job.worker),
     workerId: job.worker,
@@ -13336,7 +13384,7 @@ function registerEmployment(r) {
     const job = readJob(ctx, id);
     if (!job)
       return null;
-    const check = paycheckFor(ctx, api, job, at, flow.from);
+    const check = paycheckFor(ctx, api, job, at, payerOf(ctx, api, job));
     if (!check)
       return null;
     if (check.gross === 0)
@@ -13350,13 +13398,12 @@ function registerEmployment(r) {
   core.effect({ type: "economy.hire", args: ["business", "worker", "title?", "occupation?", "basis?", "rate?", "hours?", "hours_per_week?", "pay_every?", "start?", "by?"], resolve: (args, ctx) => hire(api, args, ctx) });
   core.effect({ type: "economy.job_end", args: ["job", "end?", "by?"], resolve: (args, ctx) => endJob(api, args, ctx) });
   core.effect({ type: "economy.job_raise", args: ["job", "rate?", "pct?", "by?"], resolve: (args, ctx) => raise(api, args, ctx) });
-  core.formula("manages", (ctx, who, business) => manages(api, ctx.state, String(who ?? ""), String(business ?? "")));
   core.formula("employs", (ctx, business, who) => allJobs(ctx).some((j) => j.business === String(business ?? "") && j.worker === String(who ?? "") && j.status !== "ended"));
   core.action({ id: "job_hire", label: "Hire", pack: "economy", params: { business: { type: "ref", ref: "business" }, worker: { type: "ref", ref: "person" }, title: { type: "text", optional: true }, basis: { type: "text", optional: true, label: "Pay basis" }, rate: { type: "money", optional: true, label: "Pay rate" }, hours_per_week: { type: "number", optional: true }, pay_every: { type: "text", optional: true, label: "Paid every" } }, requires: ["manages(self, business)", "not employs(business, worker)", "level.money >= 3"], outcomes: { default: [{ type: "economy.hire", args: { business: "business", worker: "worker", title: "=params.title", basis: "=params.basis", rate: "=params.rate", hours_per_week: "=params.hours_per_week", pay_every: "=params.pay_every", by: "self" } }] }, duration: "15", lexicon: ["hire", "take on", "give a job to"], observable: "talks business" });
   core.action({ id: "job_end", label: "End a job", pack: "economy", params: { job: { type: "ref", ref: JOB_KIND } }, requires: ["job.worker == self or manages(self, job.employer)", "job.status != 'ended'", "level.money >= 3"], outcomes: { default: [{ type: "economy.job_end", args: { job: "job", by: "self" } }] }, duration: "10", lexicon: ["fire", "let go", "quit", "resign", "hand in my notice"], observable: "talks business" });
   core.action({ id: "job_raise", label: "Give a raise", pack: "economy", params: { job: { type: "ref", ref: JOB_KIND }, rate: { type: "money", label: "New rate" } }, requires: ["manages(self, job.employer)", "rate > 0", "level.money >= 3"], outcomes: { default: [{ type: "economy.job_raise", args: { job: "job", rate: "=rate", by: "self" } }] }, duration: "5", lexicon: ["give a raise", "raise the pay", "pay more"], observable: "talks business" });
   r.view((ctx, party) => api.partyKind(ctx, party) === "person" ? { jobs: allJobs(ctx).filter((j) => j.worker === party).map((j) => jobView(ctx, api, j)) } : {});
-  r.summary((ctx, who) => allJobs(ctx).filter((j) => j.worker === who && j.status === "active").map((j) => `${j.title} for ${j.business ? labelOf(ctx, j.business) : j.employer || "an outside employer"}, ${api.money(ctx, j.rate)} ${BASIS_WORDS[j.basis]}, paid ${j.every === null ? "nothing" : j.every.replace("_", " ")}.`));
+  r.summary((ctx, who) => allJobs(ctx).filter((j) => j.worker === who && j.status === "active").map((j) => `${j.title} for ${employerName(ctx, j) || "an outside employer"}, ${api.money(ctx, j.rate)} ${BASIS_WORDS[j.basis]}, paid ${j.every === null ? "nothing" : j.every.replace("_", " ")}.`));
 }
 
 // src/packs/economy/core/business.ts
@@ -13487,7 +13534,7 @@ function settleFlows(ctx, api, business) {
   if (marginOf(ctx.state, business) < 100)
     out.push({ id: `suppliers:${business}`, label: "Suppliers", kind: "bill", from: deposit, to: "Suppliers", amount: { provider: "settle", args: { business, what: "suppliers" } }, schedule: { every: "month", days: [10], roll: "after" }, shortfall: "skip", category: "cogs", link: business, status: "active", source: "business" });
   if (own(ctx.state.entities, business)?.fields.collects_sales_tax !== false)
-    out.push({ id: `salestax:${business}`, label: "Sales tax", kind: "tax", from: deposit, to: "Sales tax", amount: { provider: "settle", args: { business, what: "sales_tax" } }, schedule: { every: "month", days: [20], roll: "after" }, shortfall: "skip", category: "sales_tax", link: business, status: "active", source: "business" });
+    out.push({ id: `salestax:${business}`, label: "Sales tax", kind: "tax", from: deposit, to: `tax:sales:${taxRegionOf(ctx, placesOf(ctx, business)[0] ?? null)}`, amount: { provider: "settle", args: { business, what: "sales_tax" } }, schedule: { every: "month", days: [20], roll: "after" }, shortfall: "skip", category: "sales_tax", link: business, status: "active", source: "business" });
   return out;
 }
 function settlePosting(ctx, api, business, what) {
@@ -13614,7 +13661,7 @@ function issueInvoice(ctx, api, args) {
   if (!isBusiness(ctx, business))
     return reject6("missing_entity", `no business ${labelOf(ctx, business)}`);
   const by = strOf(args.by);
-  if (by !== "" && !manages(api, ctx.state, by, business))
+  if (by !== "" && !managesParty(ctx.state, business, by))
     return reject6("not_owner", `${labelOf(ctx, by)} doesn't run ${labelOf(ctx, business)}`);
   const customer = strOf(args.customer) || strOf(args.customer_name).trim();
   if (customer === "" || customer === business)
@@ -13645,10 +13692,10 @@ function payInvoice(ctx, api, args) {
     return reject6("settled", `${inv.memo} is ${inv.state === "void" ? "void" : "paid"}`);
   const by = strOf(args.by);
   const payer = inv.party ?? inv.customer;
-  if (by !== "" && by !== inv.party && !(inv.party && isBusiness(ctx, inv.party) && manages(api, ctx.state, by, inv.party)))
+  if (by !== "" && by !== inv.party && !(inv.party && isBusiness(ctx, inv.party) && managesParty(ctx.state, inv.party, by)))
     return reject6("not_customer", `${labelOf(ctx, by)} isn't billed for ${inv.memo}`);
   const deposit = operatingAccount(api, ctx, inv.business);
-  const paid = inv.party ? api.pay(ctx, { from: inv.party, to: inv.business, cents: inv.left, memo: `Invoice: ${inv.memo}`, kind: "payment", category: "invoice", method: "account", ...deposit ? { deposit } : {} }) : api.post(ctx, [{ account: api.outside(`customer:${payer}`), amount: -inv.left }, { account: deposit ?? api.outside(inv.business), amount: inv.left }], { memo: `Invoice: ${inv.memo}`, kind: "payment", category: "invoice", counterparty: payer });
+  const paid = inv.party ? api.pay(ctx, { from: inv.party, to: inv.business, cents: inv.left, memo: `Invoice: ${inv.memo}`, kind: "payment", category: "invoice", method: "account", ...deposit ? { deposit } : {} }) : api.post(ctx, [{ account: api.outside(`customer:${payer}`), amount: -inv.left }, { account: deposit ?? api.outside(inv.business), amount: inv.left }], { memo: `Invoice: ${inv.memo}`, kind: "payment", category: "invoice", payer });
   if (!Array.isArray(paid))
     return paid;
   return unit(paid, invoiceSettled(inv, inv.left));
@@ -13658,7 +13705,7 @@ function voidInvoice(ctx, api, args) {
   if (!inv)
     return reject6("missing_entity", `no invoice ${labelOf(ctx, strOf(args.invoice))}`);
   const by = strOf(args.by);
-  if (by !== "" && !manages(api, ctx.state, by, inv.business))
+  if (by !== "" && !managesParty(ctx.state, inv.business, by))
     return reject6("not_owner", `${labelOf(ctx, by)} doesn't run ${labelOf(ctx, inv.business)}`);
   if (inv.state === "paid" || inv.state === "void")
     return reject6("settled", `${inv.memo} is already ${inv.state}`);
@@ -13760,7 +13807,7 @@ function distribute(ctx, api, args) {
   if (!isBusiness(ctx, business))
     return reject6("missing_entity", `no business ${labelOf(ctx, business)}`);
   const by = strOf(args.by);
-  if (by !== "" && !manages(api, ctx.state, by, business))
+  if (by !== "" && !managesParty(ctx.state, business, by))
     return reject6("not_owner", `${labelOf(ctx, by)} doesn't run ${labelOf(ctx, business)}`);
   const since = numOf(own(objOf(sliceOf(ctx.state, "economy").distributed), business), monthStart(ctx, ctx.state.clock));
   const pct = numOf(own(ctx.state.entities, business)?.fields.distribution_pct, 100);
@@ -13830,7 +13877,7 @@ function businessView(ctx, api, business, party, viewer) {
   const deposit = operatingAccount(api, ctx, business);
   const role = api.ownersOf(ctx.state, business).find((o) => o.party === party)?.role ?? null;
   const salesList = own(objOf(sliceOf(ctx.state, "economy").sales), business);
-  const sales = (Array.isArray(salesList) ? salesList : []).map((raw, i) => ({ raw: objOf(raw), i })).reverse().map(({ raw, i }) => ({ id: `${business}:sale:${i}`, at: formatClock(cal, numOf(raw.at)), memo: strOf(raw.memo, "Sale"), cents: numOf(raw.cents) + numOf(raw.tax), account: deposit ? labelOf(ctx, deposit) : labelOf(ctx, business), accountId: deposit ?? business, kind: "sale", category: strOf(raw.category) || null, counterparty: strOf(raw.payer) === "" ? "walk-in customers" : shownName2(ctx, viewer, strOf(raw.payer), "a customer"), card: null, status: "posted" }));
+  const sales = (Array.isArray(salesList) ? salesList : []).map((raw, i) => ({ raw: objOf(raw), i })).reverse().map(({ raw, i }) => ({ id: `${business}:sale:${i}`, at: formatClock(cal, numOf(raw.at)), memo: strOf(raw.memo, "Sale"), cents: numOf(raw.cents) + numOf(raw.tax), account: deposit ? labelOf(ctx, deposit) : labelOf(ctx, business), accountId: deposit ?? business, kind: "sale", category: strOf(raw.category) || null, counterparty: strOf(raw.payer) === "" ? "Walk-in customers" : shownName2(ctx, viewer, strOf(raw.payer), "a customer"), card: null, status: "posted" }));
   const invoices = allInvoices(ctx).filter((i) => i.business === business || i.party === business).sort((a, b) => b.issued - a.issued).map((i) => ({ id: i.id, business: hiddenFrom(ctx, viewer, i.business) ? "" : i.business, customer: i.party !== null && hiddenFrom(ctx, viewer, i.party) ? "" : i.customer, cents: i.cents, memo: i.memo, issued: i.issued, due: i.due, state: i.state, paid: i.paid, late_fee: i.late_fee, ...i.state === "late" ? { days_late: dateAt(cal, now).dayIndex - dateAt(cal, i.due).dayIndex } : {}, flow: `invoice:${i.id}`, customerName: i.party ? shownName2(ctx, viewer, i.party, "a customer") : i.customer, issuedAt: formatClock(cal, i.issued), dueAt: formatClock(cal, i.due) }));
   const employees = allJobs(ctx).filter((j) => j.business === business && j.status !== "ended").map((j) => {
     const v = jobView(ctx, api, j);
@@ -13846,7 +13893,8 @@ function businessView(ctx, api, business, party, viewer) {
     taxes.push({ label: "Owed to suppliers", cents: owed.suppliers, due: nextDue(ctx, api, `suppliers:${business}`) });
   if (structureOf(ctx.state, business) === "c_corp" && api.feature(ctx, business, "business_tax"))
     taxes.push({ label: "Income tax on this year's profit", cents: corporateTax(ctx, business, year.profit), due: nextDue(ctx, api, `esttax:${business}`) });
-  const months = monthsBetween(ctx.world, now - 335 * MINUTES_PER_DAY, now + 1).reverse().map((m) => {
+  const since = firstBookedMonth(api, ctx, business) ?? monthOf(ctx.world, now);
+  const months = monthsBetween(ctx.world, now - 335 * MINUTES_PER_DAY, now + 1).filter((m) => m >= since).reverse().map((m) => {
     const [y, mo] = m.split("-").map(Number);
     const from = clockAt(cal, dayIndexOf(cal, y ?? d.year, mo ?? 1, 1), 0);
     const b = businessBooks(api, ctx, business, from, from + 1);
@@ -13859,6 +13907,7 @@ function businessView(ctx, api, business, party, viewer) {
     role,
     owners: ownerLines(ctx, api, viewer, business),
     accounts: api.accountsOf(ctx, business, "sees"),
+    managed: [],
     places: placesOf(ctx, business).map((p) => ({ id: p, name: own(ctx.world.places, p)?.name ?? p })),
     books: { period: String(d.year), revenue: year.revenue, expenses: year.expenses, payroll: year.payroll, taxes: year.taxes, profit: year.profit, lines: year.lines },
     months,
@@ -15606,7 +15655,7 @@ function settlements(api, ctx, slot) {
       const cash = Math.round(qty * a.bond.face);
       const label = `${a.label} matured`;
       const coupon = holdingIncome(api, ctx, holding, at.at, true);
-      const paid = coupon?.lines ? api.post(ctx, coupon.lines, { memo: coupon.memo ?? label, kind: "income", category: coupon.category ?? "interest" }) : [];
+      const paid = coupon?.lines ? api.post(ctx, coupon.lines, { memo: coupon.memo ?? label, kind: "income", category: coupon.category ?? "interest", payer: a.label }) : [];
       const couponEvents = isRejection3(paid) || !coupon ? [] : [...paid, ...coupon.extra ?? []];
       const couponCents = couponEvents.length > 0 && coupon ? coupon.cents : 0;
       const settled = settle(api, ctx, holding, { ...a, option: null }, qty, cash, label);
@@ -15657,6 +15706,7 @@ var MONTHS_KEPT2 = 13;
 var CREDIT_CAP = 60;
 var SCORES_KEPT = 24;
 var STATEMENTS_KEPT = 6;
+var UNSIDED_KINDS = new Set(["opening", "adjustment"]);
 function reject8(code, reason) {
   return { code, reason };
 }
@@ -15732,13 +15782,21 @@ function spendOf(state, card, day) {
 function pushCapped(list, entry, cap) {
   return [...Array.isArray(list) ? list.slice(-(cap - 1)) : [], entry];
 }
-function fileLine(state, ctx, account, amount, at, data, seq) {
+function partyOfSide(state, side) {
+  if (own(state.entities, side)?.kind === "account")
+    return holdersOf(state, side).find((h) => own(state.entities, h)) ?? side;
+  const bare = side.startsWith(EXTERNAL_ACCOUNT_PREFIX) ? side.slice(EXTERNAL_ACCOUNT_PREFIX.length) : "";
+  return bare !== "" && own(state.entities, bare) ? bare : side;
+}
+function fileLine(state, ctx, account, amount, at, data, other, seq) {
   const journal = sliceRecord(state, "economy", "journal");
   const status = data.status === "pending" ? "pending" : "posted";
   const entry = { id: `j${seq}`, at, account, cents: amount, memo: strOf(data.memo), status };
-  for (const k of ["kind", "category", "counterparty", "card", "flow"])
+  for (const k of ["kind", "category", "card", "flow"])
     if (typeof data[k] === "string" && data[k] !== "")
       entry[k] = data[k];
+  if (other !== "")
+    entry.counterparty = other;
   if (status === "pending" && typeof data.settles === "number")
     entry.settles = data.settles;
   journal[account] = pushCapped(journal[account], entry, JOURNAL_CAP);
@@ -15800,9 +15858,13 @@ var EVENTS2 = [
           continue;
         totals.set(account, (totals.get(account) ?? 0) + Math.round(numOf(l.amount)));
       }
+      const sided = !UNSIDED_KINDS.has(strOf(e.data.kind));
+      const payee = sided ? strOf(e.data.counterparty) : "";
+      const paidMost = [...totals].reduce((top, l) => l[1] < 0 && (top === undefined || l[1] < top[1]) ? l : top, undefined)?.[0];
+      const payer = sided ? strOf(e.data.payer) || (paidMost ?? payee) : "";
       for (const [account, amount] of totals) {
         seq += 1;
-        fileLine(state, ctx, account, amount, at, e.data, seq);
+        fileLine(state, ctx, account, amount, at, e.data, partyOfSide(state, amount < 0 ? payee : payer), seq);
         const use = !isCreditAccount(ctx, account) ? null : e.data.kind === "purchase" ? "purchase" : e.data.category === "cash_advance" && e.data.kind !== "fee" && amount < 0 ? "advance" : null;
         accrue(state, account, amount, at, use);
       }
@@ -17597,8 +17659,15 @@ function txn(lines, meta) {
     data.kind = meta.kind;
   if (meta.category)
     data.category = meta.category;
-  if (meta.counterparty)
-    data.counterparty = meta.counterparty;
+  if (!UNSIDED_KINDS.has(meta.kind ?? "")) {
+    const biggest = (sign) => lines.reduce((top, l) => Math.sign(l.amount) === sign && (top === undefined || Math.abs(l.amount) > Math.abs(top.amount)) ? l : top, undefined)?.account;
+    const payee = meta.counterparty || biggest(1);
+    const payer = meta.payer || biggest(-1);
+    if (payee)
+      data.counterparty = payee;
+    if (payer)
+      data.payer = payer;
+  }
   if (meta.card)
     data.card = meta.card;
   if (meta.flow)
@@ -17722,7 +17791,7 @@ function charge(hooks, ctx, payer, rawCents, memo, opts = {}) {
   const holds = picked?.card !== undefined && featureFor(ctx, payer, "holds");
   const outside = opts.counterparty === undefined ? undefined : own(ctx.state.entities, opts.counterparty) ? opts.counterparty : opts.counterparty.replace(/_/g, " ");
   const counterparty = terms?.seller ?? opts.payee ?? outside;
-  const meta = { memo, kind: opts.kind ?? (opts.sale ? "purchase" : "payment"), ...opts.category ? { category: opts.category } : {}, ...counterparty ? { counterparty } : {}, ...picked?.card ? { card: picked.card } : {}, ...opts.flow ? { flow: opts.flow } : {}, ...holds ? { pending: at + 1440 } : {}, ...opts.narrated ? { narrated: opts.narrated } : {}, ...opts.at !== undefined ? { at: opts.at } : {} };
+  const meta = { memo, kind: opts.kind ?? (opts.sale ? "purchase" : "payment"), ...opts.category ? { category: opts.category } : {}, ...counterparty ? { counterparty } : {}, payer, ...picked?.card ? { card: picked.card } : {}, ...opts.flow ? { flow: opts.flow } : {}, ...holds ? { pending: at + 1440 } : {}, ...opts.narrated ? { narrated: opts.narrated } : {}, ...opts.at !== undefined ? { at: opts.at } : {} };
   const spend = [];
   if (picked?.card && opts.sale && Number.isFinite(cardRoom(ctx, picked.card, "purchase"))) {
     const day = dateAt(calendarOf(ctx.world), ctx.state.clock).dayIndex;
@@ -17930,7 +17999,8 @@ function setCash(ctx, holder, cents) {
 function reprice(ctx, events, cents) {
   const posts = events.filter((e) => e.type === "post");
   const purchase = events.find((e) => e.type === FINANCE_EVENTS.txn && ("data" in e) && e.data.kind === "purchase");
-  const memo = purchase && "data" in purchase ? strOf(purchase.data.memo) : undefined;
+  const was = purchase && "data" in purchase ? purchase.data : undefined;
+  const memo = was !== undefined ? strOf(was.memo) : undefined;
   const post = (memo !== undefined ? posts.find((p) => p.memo === memo) : undefined) ?? (posts.length === 1 && posts[0]?.lines.length === 2 ? posts[0] : undefined);
   const paid = post?.lines.find((l) => l.amount < 0);
   const got = post ? [...post.lines].filter((l) => l.amount > 0).sort((a, b) => b.amount - a.amount)[0] : undefined;
@@ -17947,7 +18017,9 @@ function reprice(ctx, events, cents) {
     { account: paid.account, amount: -diff },
     { account: got.account, amount: diff }
   ];
-  return asUnit(posting(lines, { memo: note, kind: diff > 0 ? "purchase" : "refund" }));
+  const seller = strOf(was?.counterparty);
+  const buyer = strOf(was?.payer);
+  return asUnit(posting(lines, { memo: note, kind: diff > 0 ? "purchase" : "refund", counterparty: diff > 0 ? seller : buyer, payer: diff > 0 ? buyer : seller }));
 }
 function signal(cls, text, who, at) {
   return { type: ENGINE_EVENTS.signal, data: { class: cls, text, entity: who, visibility: "known_by", at } };
@@ -18103,7 +18175,7 @@ function setCardState(ctx, who, card, state) {
   const e = own(ctx.state.entities, card);
   if (e?.kind !== "card")
     return reject8("not_card", `${labelOf(ctx, card)} isn't a payment card`);
-  if (strOf(e.fields.holder) !== who && !rightsOf(ctx.state, strOf(e.fields.account), who)?.manage)
+  if (strOf(e.fields.holder) !== who && !managesAccount(ctx, strOf(e.fields.account), who))
     return reject8("not_owner", `${e.name} isn't ${labelOf(ctx, who)}'s`);
   if (!CARD_STATES.includes(state))
     return reject8("bad_state", `a card can't be ${state}`);
@@ -18119,7 +18191,7 @@ function replaceCard(ctx, who, card) {
   if (e?.kind !== "card")
     return reject8("not_card", `${labelOf(ctx, card)} isn't a payment card`);
   const holder = strOf(e.fields.holder);
-  if (holder !== who && !rightsOf(ctx.state, strOf(e.fields.account), who)?.manage)
+  if (holder !== who && !managesAccount(ctx, strOf(e.fields.account), who))
     return reject8("not_owner", `${e.name} isn't ${labelOf(ctx, who)}'s`);
   if (strOf(e.fields.state) === "cancelled" && strOf(e.fields.replaced_by) !== "")
     return reject8("bad_state", `${e.name} was already replaced`);
@@ -18154,11 +18226,11 @@ function setAutopay(ctx, who, account, mode, from, cents) {
   const cls = classOf2(ctx, account);
   if (!cls || !isCredit(cls))
     return reject8("not_credit", `${labelOf(ctx, account)} isn't a card or a loan`);
-  if (!rightsOf(ctx.state, account, who)?.manage)
+  if (!managesAccount(ctx, account, who))
     return reject8("not_owner", `${labelOf(ctx, account)} isn't ${labelOf(ctx, who)}'s to change`);
   if (!AUTOPAY_MODES.includes(mode))
     return reject8("bad_mode", `autopay can't be ${mode}`);
-  if (from !== "" && (!canSpend(ctx.state, from, who) || !traitsOf(ctx, from)?.pays || traitsOf(ctx, from)?.liability))
+  if (from !== "" && (!canSpend(ctx.state, from, who) && !managesAccount(ctx, from, who) || !traitsOf(ctx, from)?.pays || traitsOf(ctx, from)?.liability))
     return reject8("bad_account", `${labelOf(ctx, who)} can't pay from ${labelOf(ctx, from)}`);
   if (mode === "fixed" && !(cents > 0))
     return reject8("bad_amount", "fixed autopay needs an amount");
@@ -18221,7 +18293,7 @@ function flowFields(args) {
   return { fields, ...label !== undefined ? { label } : {} };
 }
 function mayPayFrom(ctx, who, from) {
-  return from === who || canSpend(ctx.state, from, who) && rightsOf(ctx.state, from, who)?.manage === true;
+  return from === who || isParty(ctx, from) && managesParty(ctx.state, from, who) || managesAccount(ctx, from, who);
 }
 function fallbackProblem(ctx, who, fields) {
   const fallback = strOf(fields.fallback);
@@ -18810,15 +18882,20 @@ function flowLevel(ctx, flow) {
   const level = (side) => ("account" in side) ? accountLevel(ctx, side.account) : ("party" in side) ? ctx.levelOf(side.party, "money") : null;
   return level(sideOf(ctx, flow.from)) ?? level(sideOf(ctx, flow.to)) ?? 0;
 }
+function sideParty(side) {
+  if ("account" in side)
+    return side.party ?? side.account;
+  if ("party" in side)
+    return side.party;
+  return (side.outside.startsWith(EXTERNAL_ACCOUNT_PREFIX) ? side.outside.slice(EXTERNAL_ACCOUNT_PREFIX.length) : side.outside).replace(/_/g, " ");
+}
 function landing(ctx, to, cents) {
   const side = sideOf(ctx, to);
   if ("account" in side)
-    return { account: side.account, extra: [], counterparty: side.party ?? side.account };
-  if ("party" in side) {
-    const dest = payeeSide(ctx, { payee: side.party }, cents);
-    return { ...dest, counterparty: side.party };
-  }
-  return { account: outsideAccount(side.outside), extra: [], counterparty: (side.outside.startsWith(EXTERNAL_ACCOUNT_PREFIX) ? side.outside.slice(EXTERNAL_ACCOUNT_PREFIX.length) : side.outside).replace(/_/g, " ") };
+    return { account: side.account, extra: [], counterparty: sideParty(side) };
+  if ("party" in side)
+    return { ...payeeSide(ctx, { payee: side.party }, cents), counterparty: sideParty(side) };
+  return { account: outsideAccount(side.outside), extra: [], counterparty: sideParty(side) };
 }
 function tableAmount(ctx, table, row, column) {
   const r = own(ctx.tables.get(table)?.rows ?? {}, row);
@@ -18953,7 +19030,7 @@ function payFrom(hooks, ctx, flow, fromId, cents, at, overdraft, made) {
   if (finalLines.length < 2)
     return reject8("bad_flow", `${flow.label} pays itself`);
   const od = "account" in from && overdraft ? overdraftEvents(ctx, from.account, cents, at) : { before: [], after: [] };
-  return { events: asUnit([...od.before, ...posting(finalLines, { memo, ...meta, counterparty }), ...extra, ...od.after]), paid: cents };
+  return { events: asUnit([...od.before, ...posting(finalLines, { memo, ...meta, counterparty, payer: sideParty(from) }), ...extra, ...od.after]), paid: cents };
 }
 function providedAttempt(ctx, flow, made, at) {
   const lines = (made.lines ?? []).filter((l) => l.amount !== 0);
@@ -18971,7 +19048,7 @@ function providedAttempt(ctx, flow, made, at) {
   }
   const memo = made.memo ?? flow.label;
   const card = lines.filter((l) => l.amount > 0 && traitsOf(ctx, l.account)?.liability).map((l) => ({ type: FINANCE_EVENTS.cardPaid, data: { account: l.account, cents: l.amount } }));
-  return { events: asUnit([...posting(lines, { memo, kind: made.kind ?? "payment", category: made.category ?? flow.category ?? flow.kind, flow: flow.id, at }), ...card, ...made.extra ?? []]), paid: made.cents };
+  return { events: asUnit([...posting(lines, { memo, kind: made.kind ?? "payment", category: made.category ?? flow.category ?? flow.kind, flow: flow.id, at, counterparty: sideParty(sideOf(ctx, flow.to)), payer: sideParty(sideOf(ctx, flow.from)) }), ...card, ...made.extra ?? []]), paid: made.cents };
 }
 function noteParty(ctx, flow) {
   for (const id of [flow.from, flow.to]) {
@@ -20033,15 +20110,17 @@ function nameFor(ctx, viewer, id) {
 function idFor(ctx, viewer, id) {
   return visible(ctx, viewer, id) ? id : null;
 }
+function sideName(ctx, viewer, raw) {
+  const id = raw.startsWith(EXTERNAL_ACCOUNT_PREFIX) ? raw.slice(EXTERNAL_ACCOUNT_PREFIX.length) : raw;
+  return own(ctx.state.entities, id) ? nameFor(ctx, viewer, id) : outsideName(ctx, raw);
+}
 function counterpartyName(ctx, viewer, raw) {
-  if (own(ctx.state.entities, raw))
-    return nameFor(ctx, viewer, raw);
-  if (viewer.pov !== null) {
+  if (viewer.pov !== null && !own(ctx.state.entities, raw)) {
     const named = Object.keys(ctx.state.entities).find((id) => ctx.state.entities[id]?.name === raw);
     if (named !== undefined && !visible(ctx, viewer, named))
       return "someone";
   }
-  return raw;
+  return sideName(ctx, viewer, raw);
 }
 function when(ctx, at) {
   return formatClock(calendarOf(ctx.world), at);
@@ -20064,7 +20143,9 @@ function shownAvailable(ctx, account) {
   return availableOf(ctx, account) + shown2(ctx, account) - balance(ctx.state, account);
 }
 function journalLine(ctx, viewer, j) {
-  return { id: j.id, at: when(ctx, j.at), memo: j.memo, cents: j.cents, account: nameFor(ctx, viewer, j.account), accountId: j.account, kind: j.kind ?? null, category: j.category ?? null, counterparty: j.counterparty ? counterpartyName(ctx, viewer, j.counterparty) : null, card: j.card ? nameFor(ctx, viewer, j.card) : null, status: j.status };
+  const self = holdersOf(ctx.state, j.account).find((h) => own(ctx.state.entities, h)) ?? j.account;
+  const counterparty = j.counterparty && j.counterparty !== self ? counterpartyName(ctx, viewer, j.counterparty) : null;
+  return { id: j.id, at: when(ctx, j.at), memo: j.memo, cents: j.cents, account: nameFor(ctx, viewer, j.account), accountId: j.account, kind: j.kind ?? null, category: j.category ?? null, counterparty, card: j.card ? nameFor(ctx, viewer, j.card) : null, status: j.status };
 }
 function cardView(ctx, viewer, card) {
   const e = own(ctx.state.entities, card);
@@ -20178,6 +20259,7 @@ function accountView(ctx, viewer, party, account, level, detail) {
     available: level >= 2 ? t.liability ? p?.limit === null && cls === "charge_card" ? null : shownAvailable(ctx, account) : shownAvailable(ctx, account) + overdraftRoom(ctx, account) : null,
     owners: owners.map((o) => ({ party: idFor(ctx, viewer, o.party), name: nameFor(ctx, viewer, o.party), role: o.role, share: Math.round((own(shares, o.party) ?? 0) * 100) / 100 })),
     role,
+    manages: managesAccount(ctx, account, party),
     limit: level >= 3 && t.liability ? p?.limit ?? null : null,
     aprPct: level >= 4 && t.liability ? p?.apr_pct ?? null : null,
     apyPct: level >= 4 && t.earns ? p?.apy_pct ?? null : null,
@@ -20249,15 +20331,15 @@ function flowView(hooks, ctx, viewer, party, f) {
     cents = a && !("code" in a) ? a.cents : null;
   }
   const fromSide = own(ctx.state.entities, f.from);
-  const payerHolds = fromSide?.kind === "account" ? rightsOf(ctx.state, f.from, party)?.manage === true : f.from === party;
+  const payerHolds = fromSide?.kind === "account" ? managesAccount(ctx, f.from, party) : f.from === party || managesParty(ctx.state, f.from, party);
   const sides = [f.from, f.to, f.fallback ?? "", f.link ?? "", ...(f.splits ?? []).map((s) => s.to), ...(f.shares ?? []).flatMap((s) => [s.party, s.from ?? ""])].filter((id) => id !== "");
   const seen = sides.every((id) => visible(ctx, viewer, id));
   return {
     id: f.id,
     label: f.label,
     kind: f.kind,
-    from: own(ctx.state.entities, f.from) ? nameFor(ctx, viewer, f.from) : f.from.replace(/_/g, " "),
-    to: own(ctx.state.entities, f.to) ? nameFor(ctx, viewer, f.to) : f.to.replace(/_/g, " "),
+    from: sideName(ctx, viewer, f.from),
+    to: sideName(ctx, viewer, f.to),
     amount: amountWords(ctx, viewer, f),
     cents,
     schedule: scheduleWords(ctx, f),
@@ -20434,6 +20516,8 @@ function buildFinanceView(hooks, ctx, party, player) {
     if (extra.alerts && view.overview)
       view.overview.alerts.push(...extra.alerts);
   }
+  for (const b of view.businesses)
+    b.managed = level >= 3 ? b.accounts.filter((id) => !mine.includes(id) && managesAccount(ctx, id, party)).map((id) => accountView(ctx, viewer, party, id, level, detail)) : [];
   return view;
 }
 function buildMoneyView(hooks, ctx) {
@@ -21236,7 +21320,7 @@ function postWith(ctx, lines, meta) {
     if (party !== "" && own(ctx.state.entities, party) && !hasLedger(ctx, party) && ctx.levelOf(party, "money") >= 1)
       bands.push(...l1Move(ctx.state, party, l.amount));
   }
-  return asUnit([...posting(clean, { memo: meta.memo, ...meta.kind ? { kind: meta.kind } : {}, ...meta.category ? { category: meta.category } : {}, ...meta.counterparty ? { counterparty: meta.counterparty } : {}, ...meta.flow ? { flow: meta.flow } : {} }), ...bands]);
+  return asUnit([...posting(clean, { memo: meta.memo, ...meta.kind ? { kind: meta.kind } : {}, ...meta.category ? { category: meta.category } : {}, ...meta.counterparty ? { counterparty: meta.counterparty } : {}, ...meta.payer ? { payer: meta.payer } : {}, ...meta.flow ? { flow: meta.flow } : {} }), ...bands]);
 }
 function spendableNow(ctx, who) {
   let total = 0;
@@ -21337,6 +21421,11 @@ function registerRest(r, hooks) {
   r.formula("price", (ctx, item) => priceOf(ctx, { catalog: String(item ?? "") })?.cents ?? priceOf(ctx, { category: String(item ?? "") })?.cents ?? 0);
   r.formula("holds", (ctx, who, thing) => heldBy(ctx.state.entities, String(thing ?? ""), String(who ?? ctx.world.pov)));
   r.formula("spends", (ctx, who, account) => canSpend(ctx.state, String(account ?? ""), String(who ?? ctx.world.pov)));
+  r.formula("manages", (ctx, who, thing) => {
+    const id = String(thing ?? "");
+    const by = String(who ?? ctx.world.pov);
+    return own(ctx.state.entities, id)?.kind === "account" ? managesAccount(ctx, id, by) : managesParty(ctx.state, id, by);
+  });
   r.formula("is_credit", (ctx, account) => traitsOf(ctx, String(account ?? ""))?.liability === true);
   r.formula("money_feature", (ctx, feature, who) => FINANCE_FEATURES.includes(String(feature)) && featureFor(ctx, String(who ?? ctx.world.pov), String(feature)));
   r.formula("credit_score", (ctx, who) => currentScore(ctx, String(who ?? ctx.world.pov)) ?? 0);
@@ -21595,11 +21684,12 @@ function registerActions(r) {
   r.action({ id: "withdraw_cash", label: "Withdraw cash", pack: "economy", params: { account: { type: "ref", ref: "account" }, amount: { type: "money" } }, requires: ["spends(self, account)", "amount > 0", "level.money >= 2"], outcomes: { default: [{ type: "economy.withdraw", args: { account: "account", cents: "=amount", who: "self" } }] }, duration: "3", lexicon: ["withdraw", "take out cash", "hit the atm", "get cash"], observable: "takes out cash" });
   r.action({ id: "deposit_cash", label: "Deposit cash", pack: "economy", params: { account: { type: "ref", ref: "account" }, amount: { type: "money" } }, requires: ["holds(self, account)", "amount > 0", "level.money >= 2"], outcomes: { default: [{ type: "economy.deposit", args: { account: "account", cents: "=amount", who: "self" } }] }, duration: "3", lexicon: ["deposit", "pay in cash", "bank the cash"], observable: "pays cash into the bank" });
   const card = { card: { type: "ref", ref: "card" } };
-  r.action({ id: "card_freeze", label: "Freeze card", pack: "economy", params: card, requires: ["holds(self, card)", "level.money >= 3"], outcomes: { default: [{ type: "economy.card_state", args: { card: "card", state: "frozen", who: "self" } }] }, lexicon: ["freeze my card", "lock my card"], ...phone });
-  r.action({ id: "card_unfreeze", label: "Unfreeze card", pack: "economy", params: card, requires: ["holds(self, card)", "level.money >= 3"], outcomes: { default: [{ type: "economy.card_state", args: { card: "card", state: "active", who: "self" } }] }, lexicon: ["unfreeze my card", "unlock my card"], ...phone });
-  r.action({ id: "card_report_lost", label: "Report card lost", pack: "economy", params: card, requires: ["holds(self, card)", "level.money >= 3"], outcomes: { default: [{ type: "economy.card_state", args: { card: "card", state: "lost", who: "self" } }] }, lexicon: ["report my card lost", "my card was stolen", "cancel my card"], ...phone });
-  r.action({ id: "card_replace", label: "Replace card", pack: "economy", params: card, requires: ["holds(self, card)", "level.money >= 3"], outcomes: { default: [{ type: "economy.card_replace", args: { card: "card", who: "self" } }] }, lexicon: ["replace my card", "order a new card"], ...phone });
-  r.action({ id: "set_autopay", label: "Set autopay", pack: "economy", params: { account: { type: "ref", ref: "account" }, mode: { type: "text", label: "none, minimum, statement, full or fixed" }, from: { type: "ref", ref: "account", optional: true }, amount: { type: "money", optional: true } }, requires: ["holds(self, account)", "is_credit(account)", "level.money >= 3"], outcomes: { default: [{ type: "economy.set_autopay", args: { account: "account", mode: "=params.mode", from: "=params.from", cents: "=params.amount", who: "self" } }] }, lexicon: ["set up autopay", "turn on autopay", "turn off autopay"], ...phone });
+  const cardBy = ["holds(self, card) or manages(self, card.account)", "level.money >= 3"];
+  r.action({ id: "card_freeze", label: "Freeze card", pack: "economy", params: card, requires: cardBy, outcomes: { default: [{ type: "economy.card_state", args: { card: "card", state: "frozen", who: "self" } }] }, lexicon: ["freeze my card", "lock my card"], ...phone });
+  r.action({ id: "card_unfreeze", label: "Unfreeze card", pack: "economy", params: card, requires: cardBy, outcomes: { default: [{ type: "economy.card_state", args: { card: "card", state: "active", who: "self" } }] }, lexicon: ["unfreeze my card", "unlock my card"], ...phone });
+  r.action({ id: "card_report_lost", label: "Report card lost", pack: "economy", params: card, requires: cardBy, outcomes: { default: [{ type: "economy.card_state", args: { card: "card", state: "lost", who: "self" } }] }, lexicon: ["report my card lost", "my card was stolen", "cancel my card"], ...phone });
+  r.action({ id: "card_replace", label: "Replace card", pack: "economy", params: card, requires: cardBy, outcomes: { default: [{ type: "economy.card_replace", args: { card: "card", who: "self" } }] }, lexicon: ["replace my card", "order a new card"], ...phone });
+  r.action({ id: "set_autopay", label: "Set autopay", pack: "economy", params: { account: { type: "ref", ref: "account" }, mode: { type: "text", label: "none, minimum, statement, full or fixed" }, from: { type: "ref", ref: "account", optional: true }, amount: { type: "money", optional: true } }, requires: ["manages(self, account)", "is_credit(account)", "level.money >= 3"], outcomes: { default: [{ type: "economy.set_autopay", args: { account: "account", mode: "=params.mode", from: "=params.from", cents: "=params.amount", who: "self" } }] }, lexicon: ["set up autopay", "turn on autopay", "turn off autopay"], ...phone });
   const flowParams = {
     label: { type: "text", optional: true },
     kind: { type: "text", optional: true },

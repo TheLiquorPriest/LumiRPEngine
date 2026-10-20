@@ -26687,6 +26687,7 @@ function account(o) {
     available: nullableNum(o.available),
     owners: list(o.owners, ownerLine),
     role: nullableOf(o.role, OWNER_ROLES),
+    manages: o.manages === true,
     limit: nullableNum(o.limit),
     aprPct: nullableNum(o.aprPct),
     apyPct: nullableNum(o.apyPct),
@@ -26945,6 +26946,7 @@ function decodeFinanceView(value) {
         role: nullableOf(b.role, OWNER_ROLES),
         owners: list(b.owners, ownerLine),
         accounts: strings(b.accounts),
+        managed: list(b.managed, account),
         places: list(b.places, (p) => typeof p.id === "string" ? { id: p.id, name: str(p.name, p.id) } : null),
         books: { period: str(books.period), revenue: num(books.revenue), expenses: num(books.expenses), payroll: num(books.payroll), taxes: num(books.taxes), profit: num(books.profit), lines: list(books.lines, (l) => ({ category: str(l.category), cents: num(l.cents) })) },
         months: list(b.months, (m) => ({ period: str(m.period), revenue: num(m.revenue), expenses: num(m.expenses), profit: num(m.profit) })),
@@ -27059,6 +27061,30 @@ function accountGroups(accounts) {
   const order = ["cash", "banking", "credit", "loans", "investing"];
   return order.map((group) => ({ group, label: GROUP_LABELS[group], accounts: accounts.filter((a) => groupOf(a) === group) })).filter((g) => g.accounts.length > 0);
 }
+function viewAccounts(view) {
+  const out = [...view.accounts];
+  for (const b of view.businesses)
+    for (const a of b.managed)
+      if (!out.some((x) => x.id === a.id))
+        out.push(a);
+  return out;
+}
+function findAccount(view, id) {
+  return viewAccounts(view).find((a) => a.id === id) ?? null;
+}
+function businessAccounts(view, business) {
+  const all = viewAccounts(view);
+  const shown = [];
+  const others = [];
+  for (const id of business.accounts) {
+    const a = all.find((x) => x.id === id);
+    if (a)
+      shown.push(a);
+    else
+      others.push(id);
+  }
+  return { shown, others };
+}
 function rights(role) {
   return role ? ROLE_RIGHTS[role] : { spend: false, worth: false, sees: false, manage: false };
 }
@@ -27068,11 +27094,11 @@ function accountControls(view, account) {
   const t = CLASS_TRAITS[account.class];
   const r = rights(account.role);
   const out = [];
-  if ((t.revolving || t.installment) && account.cents < 0 && paySources(view).some((a) => a.id !== account.id))
+  if ((t.revolving || t.installment) && account.role !== null && account.cents < 0 && paySources(view).some((a) => a.id !== account.id))
     out.push("pay");
   if (r.spend && account.status === "open" && moveSources(view).some((a) => a.id === account.id) && transferTargets(view, account.id).length > 0)
     out.push("transfer");
-  if (account.autopay !== null && r.manage)
+  if (account.autopay !== null && account.manages)
     out.push("autopay");
   const holdsCash = view.accounts.some((a) => CLASS_TRAITS[a.class].cash && rights(a.role).spend);
   if (holdsCash && r.spend && account.status === "open" && t.asset && !t.cash && !t.locked && !t.investment && t.depositRank !== null)
@@ -27095,8 +27121,7 @@ function transferTargets(view, from) {
   return view.accounts.filter((a) => a.id !== from && CLASS_TRAITS[a.class].asset && !CLASS_TRAITS[a.class].cash && a.status === "open" && rights(a.role).sees);
 }
 function cardControls(view, card) {
-  const account = view.accounts.find((a) => a.id === card.account);
-  if (card.holderId !== view.party && !rights(account?.role ?? null).manage)
+  if (card.holderId !== view.party && findAccount(view, card.account)?.manages !== true)
     return [];
   return cardChanges(card.state);
 }
@@ -27163,7 +27188,16 @@ function endableLeases(view, property) {
   return property.leases.filter((l) => l.state === "let" && view.flows.some((f) => f.id === l.flow)).map((l) => l.flow);
 }
 function flowSources(view) {
-  return paySources(view).filter((a) => !CLASS_TRAITS[a.class].cash && rights(a.role).manage).map((a) => ({ id: a.id, label: a.name }));
+  return viewAccounts(view).filter((a) => {
+    const t = CLASS_TRAITS[a.class];
+    return t.pays && t.asset && !t.locked && !t.cash && a.status === "open" && a.manages;
+  }).map((a) => ({ id: a.id, label: a.name }));
+}
+function autopaySources(view, account) {
+  return viewAccounts(view).filter((a) => {
+    const t = CLASS_TRAITS[a.class];
+    return a.id !== account.id && t.pays && t.asset && !t.locked && !t.cash && a.status === "open" && (rights(a.role).spend || a.manages);
+  });
 }
 function knownPeople(palette) {
   const pay = palette?.entries.find((e) => e.action === "pay");
@@ -27204,7 +27238,7 @@ function overviewBlocks(view) {
 function accountBlocks(view, account) {
   const t = CLASS_TRAITS[account.class];
   return {
-    available: account.available !== null && (t.revolving || shows(view, "holds") || shows(view, "overdraft")),
+    available: account.available !== null && !t.installment && (t.revolving || shows(view, "holds") || shows(view, "overdraft")),
     terms: view.detail && account.terms.length > 0,
     statements: shows(view, "statements") && account.statements.length > 0,
     pending: shows(view, "holds") && account.pending.length > 0,
@@ -28597,7 +28631,7 @@ function cardLine(view, card) {
   return [humanize(card.network), card.last4 ? `··${card.last4}` : null, card.holderId === view.party ? null : `held by ${card.holder}`].filter((s) => s !== null).join(" · ");
 }
 function findCard(view, id) {
-  return view.cards.find((c) => c.id === id) ?? view.accounts.flatMap((a) => a.cards).find((c) => c.id === id) ?? null;
+  return view.cards.find((c) => c.id === id) ?? viewAccounts(view).flatMap((a) => a.cards).find((c) => c.id === id) ?? null;
 }
 function payPrefsShown(view) {
   return view.level >= 2 && (view.features.includes("payment_prefs") || view.payPrefs.length > 0);
@@ -28610,10 +28644,11 @@ function AccountRow(props) {
   const fmt = (cents) => formatMoney(cents, props.currency);
   const late = a.statements.some((s) => s.state === "late");
   const lost = a.cards.some((c) => c.state === "lost");
+  const owing = a.due ? `${a.due.label} ${fmt(a.due.cents)}, ${a.due.at}` : a.loan ? `${fmt(a.loan.payment)} a month, ${a.loan.monthsLeft} month${a.loan.monthsLeft === 1 ? "" : "s"} left` : null;
   return /* @__PURE__ */ u3(ListRow, {
     icon: GROUP_ICON[groupOf(a)],
     title: a.name,
-    subtitle: [a.classLabel || CLASS_TRAITS[a.class].label, a.institution, a.due ? `${a.due.label} ${fmt(a.due.cents)}, ${a.due.at}` : null].filter((s) => s !== null && s !== "").join(" · "),
+    subtitle: [a.classLabel || CLASS_TRAITS[a.class].label, a.institution, owing].filter((s) => s !== null && s !== "").join(" · "),
     id: a.id,
     badge: a.status !== "open" ? /* @__PURE__ */ u3(Badge, {
       tone: "warn",
@@ -28724,6 +28759,8 @@ function AccountPage(props) {
   const product = [a.product.label && a.product.label !== a.classLabel ? a.product.label : null, a.institution].filter((s) => s !== null && s !== "").join(" · ");
   const can = controls.mode === "player" ? accountControls(view, a) : [];
   const act = (action, ...within) => nav.open(actionPage("account", a.id, action, ...within));
+  const newFlow = controls.mode === "player" && view.features.includes("flows") && flowSources(view).some((s) => s.id === a.id);
+  const runFor = a.role === null && a.manages ? view.businesses.find((b) => b.managed.some((m) => m.id === a.id)) ?? null : null;
   const autopayOpens = a.autopay !== null && (controls.mode === "gm" || can.includes("autopay"));
   const details = [
     a.limit !== null ? /* @__PURE__ */ u3(ListRow, {
@@ -28794,7 +28831,10 @@ function AccountPage(props) {
           tone: used > 30 ? "warn" : "accent"
         }, undefined, false, undefined, this) : null
       }, undefined, false, undefined, this),
-      controls.mode === "player" ? can.some((c) => c !== "autopay") ? /* @__PURE__ */ u3(Controls, {
+      runFor ? /* @__PURE__ */ u3(Note2, {
+        children: `${possessive(runFor.name, false)} own account, which ${controls.mode === "player" ? "you manage" : `${view.name} manages`} for the business.`
+      }, undefined, false, undefined, this) : null,
+      controls.mode === "player" ? can.some((c) => c !== "autopay") || newFlow ? /* @__PURE__ */ u3(Controls, {
         name: a.id,
         children: [
           can.includes("pay") ? /* @__PURE__ */ u3(Button, {
@@ -28817,6 +28857,11 @@ function AccountPage(props) {
             icon: "bank",
             onClick: () => act("deposit"),
             children: "Deposit cash"
+          }, undefined, false, undefined, this) : null,
+          newFlow ? /* @__PURE__ */ u3(Button, {
+            icon: "refresh",
+            onClick: () => nav.open(actionPage("flows", "new", a.id)),
+            children: "New standing payment"
           }, undefined, false, undefined, this) : null
         ]
       }, undefined, true, undefined, this) : null : /* @__PURE__ */ u3(Controls, {
@@ -29037,7 +29082,7 @@ function CashPage(props) {
 function AutopayPage(props) {
   const { account: a, controls } = props;
   const was = a.autopay;
-  const sources = paySources(props.view).filter((x) => x.id !== a.id && !CLASS_TRAITS[x.class].cash);
+  const sources = autopaySources(props.view, a);
   const [mode, setMode] = d2(was?.mode ?? "none");
   const [from, setFrom] = d2(was?.from ?? sources[0]?.id ?? "");
   const [amount, setAmount] = d2(was?.cents !== null && was?.cents !== undefined ? String(was.cents / 10 ** controls.currency.decimals) : "");
@@ -29165,7 +29210,7 @@ function ReleasePage(props) {
 function CardPage(props) {
   const { view, controls, nav, card } = props;
   const fmt = (cents) => formatMoney(cents, controls.currency);
-  const account = view.accounts.find((a) => a.id === card.account) ?? null;
+  const account = findAccount(view, card.account);
   const limits = cardLimitsShown(view);
   const changes = controls.mode === "player" ? cardControls(view, card) : [];
   const act = (action) => nav.open(actionPage("card", card.id, action));
@@ -29261,7 +29306,7 @@ function CardChangePage(props) {
     danger: change === "lost",
     submit: () => controls.act(cardAction(card.id, change)),
     children: /* @__PURE__ */ u3(Note2, {
-      children: changeText(change, card, props.view.accounts.find((a) => a.id === card.account) ?? null)
+      children: changeText(change, card, findAccount(props.view, card.account))
     }, undefined, false, undefined, this)
   }, undefined, false, undefined, this);
 }
@@ -29438,7 +29483,7 @@ var accountPages = {
       }, undefined, false, undefined, this) : null;
     }
     if (head === "account") {
-      const account = props.view.accounts.find((a) => a.id === id);
+      const account = findAccount(props.view, id);
       if (!account)
         return null;
       return page.type === "detail" ? /* @__PURE__ */ u3(AccountPage, {
@@ -29483,7 +29528,7 @@ function canCreate(view, controls) {
 function endpoints(view, controls) {
   if (controls.mode === "player")
     return { from: flowSources(view).map((s) => ({ value: s.id, label: s.label })), to: flowTargets(view, controls.palette).map((t) => ({ value: t.id, label: t.label })) };
-  const accounts = view.accounts.filter((a) => !CLASS_TRAITS[a.class].cash).map((a) => ({ value: a.id, label: a.name }));
+  const accounts = viewAccounts(view).filter((a) => !CLASS_TRAITS[a.class].cash).map((a) => ({ value: a.id, label: a.name }));
   const parties = controls.gm.entities.filter((e) => !e.gone && (e.kind === "person" || e.kind === "business" || e.kind === "trust" || e.kind === "household")).map((e) => ({ value: e.id, label: `${e.name} (${e.kind})` }));
   return { from: [...accounts, { value: view.party, label: `${view.name} (as their preferences choose)` }], to: [...accounts, ...parties] };
 }
@@ -29669,7 +29714,8 @@ function FlowFormPage(props) {
   const { view, controls, nav, flow } = props;
   const ends = endpoints(view, controls);
   const { from: fromChoices, to: toChoices } = flowSideChoices(ends, flow);
-  const [form, setForm] = d2(() => flow ? flowFormOf(flow.spec, controls.currency) : { ...blankFlowForm(ends.from[0]?.value ?? "") });
+  const start = props.from !== undefined && ends.from.some((f) => f.value === props.from) ? props.from : ends.from[0]?.value ?? "";
+  const [form, setForm] = d2(() => flow ? flowFormOf(flow.spec, controls.currency) : { ...blankFlowForm(start) });
   const typedTo = form.to !== "" && !toChoices.some((t) => t.value === form.to);
   const [otherTo, setOtherTo] = d2(typedTo);
   const set = (patch) => setForm((f) => ({ ...f, ...patch }));
@@ -29942,7 +29988,8 @@ var flowPages = {
       return id === undefined ? /* @__PURE__ */ u3(FlowsSection, {
         ...props
       }, undefined, false, undefined, this) : id === "new" && canCreate(view, controls) ? /* @__PURE__ */ u3(FlowFormPage, {
-        ...props
+        ...props,
+        from: control
       }, undefined, false, undefined, this) : null;
     const flow = id === undefined ? null : findFlow(view, id);
     if (head !== "flow" || flow === null)
@@ -31692,7 +31739,8 @@ function BusinessPage(props) {
   const fmt = (cents) => formatMoney(cents, controls.currency);
   const blocks = workBlocks(view);
   const can = controls.mode === "player" ? businessControls(view, b) : [];
-  const accountName = (id) => view.accounts.find((a) => a.id === id)?.name ?? (controls.mode === "gm" ? controls.gm.entities.find((e) => e.id === id)?.name : undefined) ?? "another account";
+  const accounts = businessAccounts(view, b);
+  const others = accounts.others.length;
   const invoicePage = (i) => {
     if (controls.mode === "gm")
       return actionPage("business", b.id, "state", i.id);
@@ -31731,22 +31779,36 @@ function BusinessPage(props) {
           children: "Business fields"
         }, undefined, false, undefined, this)
       }, undefined, false, undefined, this) : null,
-      b.places.length > 0 || b.accounts.length > 0 ? /* @__PURE__ */ u3(Section, {
+      b.places.length > 0 ? /* @__PURE__ */ u3(Section, {
         flush: true,
         children: /* @__PURE__ */ u3(List, {
-          children: [
-            b.places.length > 0 ? /* @__PURE__ */ u3(ListRow, {
-              icon: "pin",
-              title: "Trades at",
-              value: b.places.map((p) => p.name).join(", ")
-            }, undefined, false, undefined, this) : null,
-            b.accounts.length > 0 ? /* @__PURE__ */ u3(ListRow, {
-              icon: "bank",
-              title: "Accounts",
-              value: b.accounts.map(accountName).join(", ")
-            }, undefined, false, undefined, this) : null
-          ]
-        }, undefined, true, undefined, this)
+          children: /* @__PURE__ */ u3(ListRow, {
+            icon: "pin",
+            title: "Trades at",
+            value: b.places.map((p) => p.name).join(", ")
+          }, undefined, false, undefined, this)
+        }, undefined, false, undefined, this)
+      }, undefined, false, undefined, this) : null,
+      b.accounts.length > 0 ? /* @__PURE__ */ u3(Section, {
+        title: "Accounts",
+        flush: true,
+        children: /* @__PURE__ */ u3("div", {
+          "data-lre-business-accounts": b.id,
+          children: /* @__PURE__ */ u3(List, {
+            children: [
+              accounts.shown.map((a) => /* @__PURE__ */ u3(AccountRow, {
+                account: a,
+                currency: controls.currency,
+                onOpen: () => nav.open(detailPage("account", a.id))
+              }, a.id, false, undefined, this)),
+              others > 0 ? /* @__PURE__ */ u3(ListRow, {
+                icon: "bank",
+                title: controls.mode === "gm" ? accounts.others.map((id) => controls.gm.entities.find((e) => e.id === id)?.name ?? "another account").join(", ") : `${others} ${accounts.shown.length > 0 ? "more " : ""}${others === 1 ? "account" : "accounts"}`,
+                subtitle: `${possessive(b.name, false)} own`
+              }, undefined, false, undefined, this) : null
+            ]
+          }, undefined, true, undefined, this)
+        }, undefined, false, undefined, this)
       }, undefined, false, undefined, this) : null,
       b.owners.length > 0 ? /* @__PURE__ */ u3(Section, {
         title: "Owners",
@@ -32271,9 +32333,9 @@ function pageLabel(view, page) {
     return null;
   switch (head) {
     case "account":
-      return view.accounts.find((a) => a.id === id)?.name ?? null;
+      return findAccount(view, id)?.name ?? null;
     case "card":
-      return [...view.cards, ...view.accounts.flatMap((a) => a.cards)].find((c) => c.id === id)?.name ?? null;
+      return [...view.cards, ...viewAccounts(view).flatMap((a) => a.cards)].find((c) => c.id === id)?.name ?? null;
     case "flow":
       return [...view.flows, ...view.properties.flatMap((p) => p.costs), ...view.household?.flows ?? []].find((f) => f.id === id)?.label ?? null;
     case "job": {
