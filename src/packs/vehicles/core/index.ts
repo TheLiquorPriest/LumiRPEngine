@@ -59,6 +59,8 @@ declare module "../../../engine/registry" {
     "vehicles.travel_options": (ctx: ReadContext, from: PlaceId) => TravelOption[];
     /** Each insured vehicle's monthly premium, its owner and its name: the economy pays it as a flow linked to the vehicle. */
     "vehicles.insurance": (ctx: ReadContext) => { vehicle: EntityId; owner: EntityId; cents: number; label: string }[];
+    /** What each vehicle is worth: its own `value`, else its class's typical used price; the economy counts it in its owners' net worth. */
+    "vehicles.values": (ctx: ReadContext) => { vehicle: EntityId; cents: number }[];
   }
 }
 
@@ -76,6 +78,8 @@ export const VEHICLE: KindDef = {
     engine_hours: { type: "number", label: "Engine hours", min: 0, domain: "vehicles", level: 3, locked: true },
     home: { type: "ref", label: "Home base", domain: "vehicles", level: 3 },
     last_service: { type: "number", label: "Last service (mi or h)", min: 0, domain: "vehicles", level: 4 },
+    // What it would sell for, when its author or the GM says; else its class's typical used price.
+    value: { type: "money", label: "Value", min: 0, domain: "money", level: 3 },
   },
 };
 
@@ -396,6 +400,16 @@ export const vehiclesPack: PackDef = {
         if (!e || !owner || !own(ctx.state.entities, owner) || !kindIs(ctx.registry, ctx.world, e.kind, "vehicle") || ownerLevel(ctx, v) < 4) continue;
         const premium = Math.round(numOf(classRow(ctx, v)?.insurance_full_cents_per_month));
         if (premium > 0) out.push({ vehicle: v, owner, cents: premium, label: `Insurance: ${e.name}` });
+      }
+      return out;
+    });
+    r.query("vehicles.values", (ctx) => {
+      const out: { vehicle: EntityId; cents: number }[] = [];
+      for (const v of Object.keys(ctx.state.entities).sort()) {
+        const e = own(ctx.state.entities, v);
+        if (!e || !kindIs(ctx.registry, ctx.world, e.kind, "vehicle")) continue;
+        const cents = Math.round(typeof e.fields.value === "number" && Number.isFinite(e.fields.value) ? e.fields.value : numOf(objOf(classRow(ctx, v)?.price_used_cents).typical));
+        if (cents > 0) out.push({ vehicle: v, cents });
       }
       return out;
     });

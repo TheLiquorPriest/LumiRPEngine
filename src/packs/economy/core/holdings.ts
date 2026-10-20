@@ -146,8 +146,15 @@ export function shownRoute(api: FinanceApi, ctx: ReadContext, viewer: EntityId, 
 
 // ---------------------------------------------------------------- gains
 
-/** A sale's proceeds over the parts of lots it took, short and long term apart, as each owner's gains. */
-function realise(api: Pick<FinanceApi, "ownersOf">, state: WorldState, world: ReadContext["world"], holding: EntityId, taken: readonly TakenLot[], proceeds: number, label: string): void {
+/** Whether a holding sits in a retirement account, whose gains and income aren't the year's to tax (§27.8). */
+export function sheltered(api: Pick<FinanceApi, "classOf">, books: Pick<ReadContext, "world" | "state">, holding: EntityId): boolean {
+  const account = accountOfHolding(books.state, holding);
+  return account !== null && api.classOf(books, account) === "retirement";
+}
+
+/** A sale's proceeds over the parts of lots it took, short and long term apart, as each owner's gains (none inside a retirement account). */
+function realise(api: Pick<FinanceApi, "ownersOf" | "classOf">, state: WorldState, world: ReadContext["world"], holding: EntityId, taken: readonly TakenLot[], proceeds: number, label: string): void {
+  if (sheltered(api, { world, state }, holding)) return;
   const total = taken.reduce((a, t) => a + t.qty, 0);
   if (total <= 0) return;
   const parts: Record<"short" | "long", { qty: number; proceeds: number; basis: number }> = { short: { qty: 0, proceeds: 0, basis: 0 }, long: { qty: 0, proceeds: 0, basis: 0 } };
@@ -187,7 +194,7 @@ export const LOT_KINDS = ["buy", "sell", "reinvest", "expire", "redeem", "settle
  * units in on the way, so they're never counted twice. Entities are replaced, not written in place:
  * a money step applies its events to a copy of the state that shares entities it hasn't copied.
  */
-export function applyLots(api: Pick<FinanceApi, "ownersOf">, state: WorldState, world: ReadContext["world"], tables: ReadContext["tables"], holding: EntityId, qty: number, cents: number, label: string, realised = true): void {
+export function applyLots(api: Pick<FinanceApi, "ownersOf" | "classOf">, state: WorldState, world: ReadContext["world"], tables: ReadContext["tables"], holding: EntityId, qty: number, cents: number, label: string, realised = true): void {
   const e = own(state.entities, holding);
   if (!e) return;
   const books: AssetBooks = { world, state, tables };
@@ -279,17 +286,16 @@ export interface Trade {
   option?: { right: "call" | "put"; strike: number; expiry: string };
 }
 
-/** The account a sale's proceeds land in: the one named, else the holding's own, else the seller's deposit account. */
-function proceedsAccount(api: FinanceApi, ctx: ReadContext, party: EntityId, holding: EntityId, to: EntityId | undefined): EntityId | Rejection {
+/**
+ * The account a sale's proceeds land in: the one named, else the holding's own, else the seller's
+ * deposit account. A named account must take money from the seller (the foundation's `mayUse`).
+ */
+export function proceedsAccount(api: FinanceApi, ctx: ReadContext, party: EntityId, holding: EntityId, to: EntityId | undefined): EntityId | Rejection {
   const account = accountOfHolding(ctx.state, holding);
   // A retirement account's money stays in it: its own effects are the only way out.
   if (account && api.traitsOf(ctx, account)?.locked && to && to !== account) return reject("locked", `${labelOf(ctx, account)} keeps what its holdings pay; move it out from the account itself`);
-  if (to) {
-    if (own(ctx.state.entities, to)?.kind !== "account") return reject("not_account", `${labelOf(ctx, to)} isn't an account`);
-    if (!api.accountsOf(ctx, party, "worth").includes(to) && !api.accountsOf(ctx, party, "spend").includes(to)) return reject("not_yours", `${labelOf(ctx, to)} isn't ${labelOf(ctx, party)}'s`);
-    return to;
-  }
-  return account ?? api.depositAccount(ctx, party) ?? reject("no_account", `${labelOf(ctx, party)} has no account the money could go to`);
+  if (to && to !== account) return api.mayUse(ctx, party, to, "into") ?? to;
+  return to ?? account ?? api.depositAccount(ctx, party) ?? reject("no_account", `${labelOf(ctx, party)} has no account the money could go to`);
 }
 
 /**
@@ -340,12 +346,11 @@ export function trade(api: FinanceApi, ctx: EffectContext | ReadContext, t: Trad
     if (!(qty > QTY_EPSILON)) return reject("bad_amount", whole ? `${money(Math.round(t.amount ?? 0))} buys no whole contract at ${money(Math.round(price))}` : "say how much to buy");
     const cents = Math.round(qty * price);
     if (cents <= 0) return reject("bad_amount", "say how much to buy");
-    let source: EntityId | null;
-    if (t.from) {
-      if (!api.accountsOf(ctx, party, "spend").includes(t.from)) return reject("not_yours", `${labelOf(ctx, t.from)} isn't ${labelOf(ctx, party)}'s to pay from`);
-      source = t.from;
-    } else source = account ?? api.depositAccount(ctx, party);
+    const source = t.from ?? account ?? api.depositAccount(ctx, party);
     if (!source) return reject("no_account", `${labelOf(ctx, party)} has no account to pay from`);
+    // Cash in the holding's own account buys within it; any other account is paid from (the foundation's `mayUse`).
+    const unusable = source === account ? null : api.mayUse(ctx, party, source, "from");
+    if (unusable) return unusable;
     const spawned = !holding;
     if (!holding) {
       holding = newHoldingId(ctx.state, `${account ?? party}:${assetId}`);
@@ -387,10 +392,10 @@ export function setRoute(api: FinanceApi, ctx: ReadContext, party: EntityId, hol
   if (!canTrade(api, ctx, party, holding)) return reject("not_yours", `${labelOf(ctx, holding)} isn't ${labelOf(ctx, party)}'s to manage`);
   const route = to.trim();
   if (route !== "" && route !== "reinvest") {
-    if (own(ctx.state.entities, route)?.kind !== "account") return reject("not_account", `${labelOf(ctx, route)} isn't an account`);
     const account = accountOfHolding(ctx.state, holding);
     if (account && api.traitsOf(ctx, account)?.locked && route !== account) return reject("locked", `${labelOf(ctx, account)} keeps what its holdings pay`);
-    if (!api.accountsOf(ctx, party, "worth").includes(route) && !api.accountsOf(ctx, party, "spend").includes(route)) return reject("not_yours", `${labelOf(ctx, route)} isn't ${labelOf(ctx, party)}'s`);
+    const unusable = route === account ? null : api.mayUse(ctx, party, route, "into");
+    if (unusable) return unusable;
   }
   if (strOf(own(ctx.state.entities, holding)?.fields.route) === route) return [];
   return [{ type: "set", entity: holding, field: "route", value: route }];

@@ -9,7 +9,7 @@ import type { LedgerEvent } from "../../../shared/ledger";
 import type { AlertLine, HoldingView, InvestmentsView } from "../../../shared/finance";
 import { formatMoney } from "../../../shared/world";
 import { calendarOf, dateAt } from "../../../engine/calendar";
-import { labelOf, own, strOf } from "../../../engine/pack-kit";
+import { labelOf, optionalQuery, own, strOf } from "../../../engine/pack-kit";
 import type { ReadContext, Rejection } from "../../../engine/registry";
 import type { FinanceApi, FinanceRegistry } from "./module";
 import { assetOf, configAssets, dateText, priceOf, readAssetDef, registerMarkets, reject } from "./assets";
@@ -28,8 +28,8 @@ function setRentRoute(api: FinanceApi, ctx: ReadContext, party: EntityId, proper
   const route = to.trim();
   if (route === "reinvest") return reject("bad_route", "rent goes to an account");
   if (route !== "") {
-    if (own(ctx.state.entities, route)?.kind !== "account") return reject("not_account", `${labelOf(ctx, route)} isn't an account`);
-    if (!api.accountsOf(ctx, party, "worth").includes(route) && !api.accountsOf(ctx, party, "spend").includes(route)) return reject("not_yours", `${labelOf(ctx, route)} isn't ${labelOf(ctx, party)}'s`);
+    const unusable = api.mayUse(ctx, party, route, "into");
+    if (unusable) return unusable;
   }
   return routeRent(api, ctx, property, route);
 }
@@ -160,7 +160,12 @@ export function registerAssets(r: FinanceRegistry): void {
     const h = holdingsWorth(r.api, ctx, party);
     const p = propertyWorth(r.api, ctx, party);
     const s = stakeWorth(r.api, ctx, party);
-    return { assets: h.assets + p.assets + s.assets, liabilities: 0, lines: [...h.lines, ...p.lines, ...s.lines] };
+    // Vehicles are worth what they'd sell for (the vehicles pack's values), so a car loan isn't counted against nothing.
+    const v = (optionalQuery(ctx, "vehicles.values")?.(ctx) ?? []).flatMap((x) => {
+      const cents = Math.round((x.cents * r.api.shareOf(ctx.state, x.vehicle, party)) / 100);
+      return cents > 0 ? [{ label: labelOf(ctx, x.vehicle), cents }] : [];
+    });
+    return { assets: h.assets + p.assets + s.assets + v.reduce((a, l) => a + l.cents, 0), liabilities: 0, lines: [...h.lines, ...p.lines, ...s.lines, ...v] };
   });
   r.view((ctx, party, view) => ({
     investments: investmentsView(r.api, ctx, party, view.detail),

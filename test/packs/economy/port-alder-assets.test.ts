@@ -3,6 +3,7 @@
 // as their dashboards draw them and as the first weeks play.
 import { describe, expect, test } from "bun:test";
 import type { PostEvent } from "../../../src/shared/ledger";
+import type { WorldDoc } from "../../../src/shared/world";
 import { calendarOf, clockOfLocal } from "../../../src/engine/calendar";
 import { materializeAll } from "../../../src/engine/materialize";
 import { createRegistry } from "../../../src/engine/registry-impl";
@@ -18,11 +19,12 @@ import { startState, trialBalance } from "../support";
 const reg = createRegistry(ALL_PACKS);
 
 /** The starter in play with every account open; `without` takes entities out, to compare a party's worth against. */
-function portAlder(without: readonly string[] = []): Working {
+function portAlder(without: readonly string[] = [], patch: (world: WorldDoc) => void = () => undefined): Working {
   const make = STARTER_WORLDS.modern_slice_of_life;
   if (!make) throw new Error("no Port Alder starter");
   const world = make("pa", "Port Alder");
   for (const id of without) delete world.entities[id];
+  patch(world);
   const w = new Working(reg, world, startState(world));
   materializeAll(reg, w, world.pov, "run");
   return w;
@@ -87,5 +89,79 @@ describe("Port Alder's holdings and property", () => {
     expect(opened("acct_marcus_mortgage")).toBe(true);
     expect(w.state.accounts.acct_marcus_mortgage).toBe(-18778000);
     expect(worth(w, "marcus_delgado")).toBe(before);
+  });
+
+  test("listed for sale, Marcus's house shows the POV only what a listing would: never its secret address, its owner's mortgage or its leases", () => {
+    const w = portAlder();
+    w.apply({ type: "set", entity: "prop_birch_lane_12", field: "asking_price", value: 35_000_000 });
+    const view = w.ctx.query("economy.finance")(w.ctx, w.world.pov, true);
+    expect(view.properties.find((p) => p.id === "prop_birch_lane_12")).toEqual({ id: "prop_birch_lane_12", name: "Marcus's house", place: null, owners: [], share: 0, value: 34_000_000, equity: 0, forSale: 35_000_000, mortgage: null, leases: [], costs: [], route: null });
+    const text = JSON.stringify(view);
+    for (const hidden of ["Birch Lane", "Marcus's mortgage", "acct_marcus_mortgage"]) expect(text).not.toContain(hidden);
+    // Marcus's own view, as the GM sees it, still shows all of it.
+    const his = w.ctx.query("economy.finance")(w.ctx, "marcus_delgado", false).properties.find((p) => p.id === "prop_birch_lane_12");
+    expect([his?.place, his?.mortgage?.id, his?.owners.map((o) => o.name)]).toEqual(["12 Birch Lane", "acct_marcus_mortgage", ["Marcus Delgado"]]);
+  });
+
+  test("on a property the POV owns with someone it can't see, that owner shows as someone, with no id", () => {
+    const w = portAlder([], (world) => {
+      // Priya is someone the POV knows only once it meets her.
+      const priya = world.entities.priya_nair;
+      if (priya) priya.visibility = "known_by";
+      for (const e of Object.values(world.entities)) e.relations = e.relations.filter((r) => !(r.type === "knows" && r.to === "priya_nair"));
+    });
+    const pov = w.world.pov;
+    w.apply({ type: "set", entity: "prop_birch_lane_12", field: "owners", value: [{ party: pov, role: "owner", share: 50 }, { party: "priya_nair", role: "owner", share: 50 }] });
+    const house = w.ctx.query("economy.finance")(w.ctx, pov, true).properties.find((p) => p.id === "prop_birch_lane_12");
+    expect(house?.owners.map((o) => [o.party, o.name, o.share])).toEqual([
+      [pov, w.state.entities[pov]?.name, 50],
+      [null, "someone", 50],
+    ]);
+    expect(JSON.stringify(house)).not.toContain("riya");
+  });
+
+  test("the POV's pickup, ATV and boat count in its net worth at their used prices, so it reads comfortable, not broke", () => {
+    const w = portAlder();
+    const view = w.ctx.query("economy.finance")(w.ctx, w.world.pov, true);
+    const vehicles = (view.overview?.breakdown ?? []).filter((l) => ["Your pickup", "Your ATV", "Your fishing boat"].includes(l.label));
+    expect(vehicles).toEqual([
+      { label: "Your ATV", cents: 500_000 },
+      { label: "Your fishing boat", cents: 3_200_000 },
+      { label: "Your pickup", cents: 3_000_000 },
+    ]);
+    expect(view.band).toBe("comfortable");
+    // A vehicle's own value is what counts when it has one; and Dale's pontoon is Dale's.
+    w.apply({ type: "set", entity: "pov_truck", field: "value", value: 1_800_000 });
+    const after = w.ctx.query("economy.finance")(w.ctx, w.world.pov, true);
+    expect((after.overview?.netWorth ?? 0) - (view.overview?.netWorth ?? 0)).toBe(1_800_000 - 3_000_000);
+    expect(after.overview?.breakdown.some((l) => l.label === "Dale's pontoon")).toBe(false);
+  });
+
+  test("Alder Automotive is worth its books and a multiple of its last year's profit, never below nothing; Marcus's stake counts it, and a value the GM sets stands instead", () => {
+    const w = portAlder();
+    const to = clockOfLocal(calendarOf(w.world), "2026-09-17T12:00");
+    for (let guard = 0; w.state.clock < to && guard < 32; guard++) {
+      const out = runTimelapse(reg, w, { type: "at", at: to }, { runSeed: "run", overrides: ALL_NOTE });
+      if ("code" in out) throw new Error(out.reason);
+    }
+    const shop = "alder_automotive_co";
+    const books = w.ctx.query("economy.business_books")(w.ctx, shop, w.state.clock - 525_600, w.state.clock);
+    // Three days of walk-in takings and no payday yet: a profit so far.
+    expect(books.profit).toBeGreaterThan(0);
+    // Its lift loan outweighs its account: on its books alone it is worth less than nothing.
+    const book = worth(w, shop) + books.receivables - books.payables;
+    expect(book).toBeLessThan(0);
+    const stake = (): number => (w.ctx.query("economy.finance")(w.ctx, "marcus_delgado", false).overview?.breakdown ?? []).find((l) => l.label.startsWith("Alder Automotive"))?.cents ?? 0;
+    const at = (multiple: number): number => {
+      w.apply({ type: "set", entity: shop, field: "valuation_multiple", value: multiple });
+      return stake();
+    };
+    const valued = stake();
+    expect(valued).toBe(Math.max(0, Math.round(book + 3 * books.profit)));
+    expect(at(0)).toBe(0);
+    expect(at(10)).toBe(Math.round(book + 10 * books.profit));
+    expect(at(10)).toBeGreaterThan(0);
+    w.apply({ type: "set", entity: shop, field: "value", value: 25_000_000 });
+    expect(stake()).toBe(25_000_000);
   });
 });

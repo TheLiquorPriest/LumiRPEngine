@@ -75,10 +75,10 @@ function trade(chat: MoneyChat, form: Partial<TradeForm>): ActionBody {
   return body;
 }
 
-/** Birch Lane put up for sale by the GM (its asking price, a ✎ field) and bought by the POV: $3,000 down from savings, a 30-year mortgage for the rest. */
+/** Birch Lane put up for sale by the GM (its asking price, a ✎ field) and bought by the POV: $35,000 the GM adds to savings goes down, a 30-year mortgage for the rest. */
 async function buyHouse(chat: MoneyChat): Promise<void> {
-  accepted(await chat.edit([{ op: "set", entity: HOUSE, field: "asking_price", value: chat.cents("350000") }]));
-  expect(await chat.play(propertyBuyAction(HOUSE, chat.cents("350000"), { from: SAVINGS, down: chat.cents("3000"), termMonths: 360 }))).toContain("done");
+  accepted(await chat.edit([{ op: "set", entity: HOUSE, field: "asking_price", value: chat.cents("350000") }, { op: "adjust", account: SAVINGS, cents: chat.cents("35000") }]));
+  expect(await chat.play(propertyBuyAction(HOUSE, chat.cents("350000"), { from: SAVINGS, down: chat.cents("35000"), termMonths: 360 }))).toContain("done");
 }
 
 describe("Play → Money → Jobs and Businesses: each control plays as the player's turn", () => {
@@ -336,7 +336,7 @@ describe("Play → Money → Properties: each control plays as the player's turn
     const chat = await MoneyChat.start();
     // Marcus's house isn't the POV's business until it's for sale.
     expect((await chat.hub()).properties.map((p) => p.id)).not.toContain(HOUSE);
-    accepted(await chat.edit([{ op: "set", entity: HOUSE, field: "asking_price", value: chat.cents("350000") }]));
+    accepted(await chat.edit([{ op: "set", entity: HOUSE, field: "asking_price", value: chat.cents("350000") }, { op: "adjust", account: SAVINGS, cents: chat.cents("35000") }]));
     const listed = await chat.hub();
     const forSale = find(listed.properties, HOUSE);
     expect(forSale.forSale).toBe(35000000);
@@ -344,16 +344,19 @@ describe("Play → Money → Properties: each control plays as the player's turn
     const marcus = await chat.party(MARCUS);
     const owed = -account(marcus, MARCUS_MORTGAGE).cents;
     expect(await chat.play(propertyBuyAction(HOUSE, chat.cents("349000")))).toContain("the sellers want $350,000.00");
-    expect(await chat.play(propertyBuyAction(HOUSE, chat.cents("350000"), { from: SAVINGS, down: chat.cents("3000"), termMonths: 360 }))).toContain("done");
+    // The lender decides the mortgage: it wants 3 % down, and lends only for the terms it offers.
+    expect(await chat.play(propertyBuyAction(HOUSE, chat.cents("350000"), { from: SAVINGS, down: chat.cents("3000"), termMonths: 360 }))).toContain("a lender wants at least $10,500.00 down");
+    expect(await chat.play(propertyBuyAction(HOUSE, chat.cents("350000"), { from: SAVINGS, down: chat.cents("35000"), termMonths: 100 }))).toContain("lenders offer mortgages over 15, 20 or 30 years");
+    expect(await chat.play(propertyBuyAction(HOUSE, chat.cents("350000"), { from: SAVINGS, down: chat.cents("35000"), termMonths: 360 }))).toContain("done");
     const view = await chat.hub();
     const house = find(view.properties, HOUSE);
     expect(house.share).toBe(100);
     expect(house.forSale).toBeNull();
     // The mortgage shown is the POV's new one, not Marcus's paid-off loan.
-    expect(house.mortgage).toMatchObject({ id: `${HOUSE}:mortgage`, owed: 34700000, monthsLeft: 360 });
+    expect(house.mortgage).toMatchObject({ id: `${HOUSE}:mortgage`, owed: 31500000, monthsLeft: 360 });
     expect(propertyControls(view, house)).toEqual(["let", "sell"]);
-    expect(account(view, SAVINGS).cents).toBe(account(listed, SAVINGS).cents - 300000);
-    expect(account(view, `${HOUSE}:mortgage`).cents).toBe(-34700000);
+    expect(account(view, SAVINGS).cents).toBe(account(listed, SAVINGS).cents - 3500000);
+    expect(account(view, `${HOUSE}:mortgage`).cents).toBe(-31500000);
     // The loan pays the sellers; none of it lands in the buyer's own accounts.
     expect(account(view, CHECKING).cents).toBe(account(listed, CHECKING).cents);
     const sold = await chat.party(MARCUS);
@@ -372,7 +375,8 @@ describe("Play → Money → Properties: each control plays as the player's turn
     expect(find(view.properties, HOUSE).leases.find((l) => l.flow === lease)).toEqual({ flow: lease, tenant: "Danny Okafor", rent: 150000, start: TODAY, end: "2027-09-13", state: "let" });
     expect(endableLeases(view, find(view.properties, HOUSE))).toEqual([lease]);
     expect(find(view.flows, lease)).toMatchObject({ to: "Your savings account", amount: "$1,500.00" });
-    expect(find((await chat.party(DANNY)).flows, lease)).toMatchObject({ from: "Danny Okafor", next: "Thu 1 Oct 2026, 09:00" });
+    // Danny pays it from his checking, his deposit account.
+    expect(find((await chat.party(DANNY)).flows, lease)).toMatchObject({ from: "Danny's checking", next: "Thu 1 Oct 2026, 09:00" });
     expect(await chat.play(leaseEndAction(lease))).toContain("done");
     expect(find((await chat.hub()).properties, HOUSE).leases.find((l) => l.flow === lease)?.end).toBe(TODAY);
     // The GM's routing puts the rent back in checking.
@@ -385,11 +389,13 @@ describe("Play → Money → Properties: each control plays as the player's turn
     await buyHouse(chat);
     const before = await chat.hub();
     expect(await chat.play(propertySellAction(HOUSE, chat.cents("360000"), { buyer: DANNY }))).toContain("doesn't have $360,000.00");
+    // An outside buyer pays no more than it is worth: the GM's ✎ puts its value at $360,000 first.
+    accepted(await chat.edit([{ op: "set", entity: HOUSE, field: "value", value: chat.cents("360000") }]));
     expect(await chat.play(propertySellAction(HOUSE, chat.cents("360000")))).toContain("done");
     const after = await chat.hub();
     expect(after.properties.map((p) => p.id)).not.toContain(HOUSE);
     expect(account(after, `${HOUSE}:mortgage`).cents).toBe(0);
-    expect(account(after, CHECKING).cents).toBe(account(before, CHECKING).cents + 36000000 - 34700000);
+    expect(account(after, CHECKING).cents).toBe(account(before, CHECKING).cents + 36000000 - 31500000);
   });
 
   test("A tenant gives notice: End the lease on the POV's rent ends it today", async () => {

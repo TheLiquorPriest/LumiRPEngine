@@ -23,6 +23,7 @@ import { labelOf, numOf, objOf, own, strOf } from "../../../engine/pack-kit";
 import type { EffectContext, ReadContext, Rejection, SlotInfo } from "../../../engine/registry";
 import type { Rng } from "../../../engine/rng";
 import type { WorldState } from "../../../engine/state";
+import { canSeeEntity, canSeePlace } from "../../../engine/visibility";
 import type { AmountProvider, FinanceApi, FinanceRegistry, FlowPosting } from "./module";
 import { addMonths, clockOfDate, dateText, instantIn, investingRows, reject } from "./assets";
 import { acquisition, disposal } from "./gains";
@@ -89,14 +90,31 @@ function payingSide(owners: readonly Owner[], shares: Readonly<Record<EntityId, 
   return { from: first, shares: owners.map((o) => ({ party: o.party, pct: shares[o.party] ?? 0 })) };
 }
 
-/** Where a property's rent lands: its `rent_to`, else the first owner's deposit account, with the other owners' parts split off to theirs. */
-function rentSide(api: FinanceApi, ctx: ReadContext, id: EntityId, rentTo: string = strOf(fieldsOf(ctx.state, id).rent_to)): { to: string; splits?: FlowSplit[] } | null {
-  if (rentTo !== "" && own(ctx.state.entities, rentTo)?.kind === "account") return { to: rentTo };
-  const { owners, shares } = payers(api, ctx.state, id);
-  const deposits = owners.map((o) => ({ party: o.party, account: api.depositAccount(ctx, o.party) })).filter((d): d is { party: EntityId; account: EntityId } => d.account !== null);
+/** Where rent for owners lands: the first one's deposit account, with the other owners' parts (by share of its worth) split off to theirs. */
+function ownersSide(api: FinanceApi, ctx: ReadContext, owners: readonly Owner[]): { to: string; splits?: FlowSplit[] } | null {
+  const shares = worthShares(owners);
+  const deposits = owners
+    .filter((o) => (shares[o.party] ?? 0) > 0)
+    .map((o) => ({ party: o.party, account: api.depositAccount(ctx, o.party) }))
+    .filter((d): d is { party: EntityId; account: EntityId } => d.account !== null);
   const [first, ...rest] = deposits;
   if (!first) return null;
   return rest.length === 0 ? { to: first.account } : { to: first.account, splits: rest.map((d) => ({ to: d.account, pct: shares[d.party] ?? 0 })) };
+}
+
+/** Where a property's rent lands: its `rent_to`, else its owners' deposit accounts by share. */
+function rentSide(api: FinanceApi, ctx: ReadContext, id: EntityId, rentTo: string = strOf(fieldsOf(ctx.state, id).rent_to)): { to: string; splits?: FlowSplit[] } | null {
+  if (rentTo !== "" && own(ctx.state.entities, rentTo)?.kind === "account") return { to: rentTo };
+  return ownersSide(api, ctx, api.ownersOf(ctx.state, id));
+}
+
+/**
+ * The account a tenant pays rent from: the one the lease names, else their deposit account. A rent
+ * split between owners is paid from an account (the flow engine splits only what an account pays),
+ * so a lease never leaves the tenant to pay as a person.
+ */
+function rentPayer(api: FinanceApi, ctx: ReadContext, payer: EntityId): EntityId {
+  return own(ctx.state.entities, payer)?.kind === "account" ? payer : (api.depositAccount(ctx, payer) ?? payer);
 }
 
 /** The region a property is taxed in: its own, else its first owner's, else the economy's. */
@@ -110,6 +128,13 @@ function regionOf(ctx: ReadContext, id: EntityId): string {
 
 function mortgageRow(ctx: Pick<ReadContext, "tables">): JsonObject {
   return objOf(objOf(ctx.tables.get("economy.finance")?.rows.loans?.values).mortgage);
+}
+
+/** The terms a lender offers a mortgage on, months (the finance table's typical and alternatives; 30 years without a table). */
+function mortgageTerms(ctx: Pick<ReadContext, "tables">): number[] {
+  const t = objOf(mortgageRow(ctx).term_months);
+  const terms = [t.typical, ...(Array.isArray(t.alternatives) ? t.alternatives : [])].filter((v): v is number => typeof v === "number" && v > 0);
+  return terms.length > 0 ? terms : [360];
 }
 
 /** Property tax a year, percent of value: the property's own rate, else its region's effective rate, else the table's typical. */
@@ -311,7 +336,7 @@ function managedFlow(api: FinanceApi, ctx: ReadContext, id: EntityId, l: Managed
 }
 
 /** A property's leases as its view lists them: each lease, then a vacant line for each unit without one. */
-function leaseViews(ctx: ReadContext, id: EntityId): LeaseView[] {
+function leaseViews(api: FinanceApi, ctx: ReadContext, id: EntityId, viewer: EntityId): LeaseView[] {
   const now = ctx.state.clock;
   const units = Math.max(1, Math.round(numOf(fieldsOf(ctx.state, id).units, 1)));
   const out: LeaseView[] = [];
@@ -319,7 +344,9 @@ function leaseViews(ctx: ReadContext, id: EntityId): LeaseView[] {
   for (const l of authoredLeases(ctx, id)) {
     const live = inForce(l, now);
     if (live) let_++;
-    out.push({ flow: l.id, tenant: labelOf(ctx, l.tenant), rent: l.rent, start: l.start === null ? null : dateText(ctx.world, l.start), end: l.end === null ? null : dateText(ctx.world, l.end - 1440), state: live ? "let" : l.end !== null && l.end <= now ? "ended" : "vacant" });
+    // The tenant is whoever holds the account the rent is paid from.
+    const tenant = own(ctx.state.entities, l.tenant)?.kind === "account" ? (api.ownersOf(ctx.state, l.tenant)[0]?.party ?? l.tenant) : l.tenant;
+    out.push({ flow: l.id, tenant: shownName(ctx, viewer, tenant, "a tenant"), rent: l.rent, start: l.start === null ? null : dateText(ctx.world, l.start), end: l.end === null ? null : dateText(ctx.world, l.end - 1440), state: live ? "let" : l.end !== null && l.end <= now ? "ended" : "vacant" });
   }
   for (const l of managedLeases(ctx, id)) {
     const from = monthStart(ctx.world, l.from);
@@ -358,8 +385,8 @@ export interface PropertyBuy {
   from?: EntityId;
   /** Paid in cash at once; the rest is a mortgage. Absent: the whole price in cash. */
   down?: number;
+  /** One of the terms lenders offer (`mortgageTerms`); absent, the usual one. The rate is the lender's. */
   term_months?: number;
-  apr_pct?: number;
 }
 
 /**
@@ -375,22 +402,35 @@ export function buyProperty(api: FinanceApi, ctx: EffectContext | ReadContext, x
   if (owners.some((o) => o.party === x.party)) return reject("already_yours", `${e.name} is already ${labelOf(ctx, x.party)}'s`);
   const asking = num(e.fields.asking_price);
   if (owners.length > 0 && asking === undefined) return reject("not_for_sale", `${e.name} isn't for sale`);
-  const price = Math.round(x.price ?? asking ?? propertyValue(ctx.state, x.property));
-  if (!(price > 0)) return reject("bad_amount", "a price is above nothing");
   const money = (c: number): string => formatMoney(c, ctx.world.currency);
-  if (asking !== undefined && price < asking) return reject("declined", `the sellers want ${money(Math.round(asking))} for ${e.name}`);
+  // The least it sells for: its asking price, else (nobody owns it) what it's worth.
+  const floor = Math.round(asking ?? propertyValue(ctx.state, x.property));
+  const price = Math.round(x.price ?? floor);
+  if (!(price > 0)) return reject("bad_amount", "a price is above nothing");
+  if (price < floor) return reject("declined", asking !== undefined ? `the sellers want ${money(floor)} for ${e.name}` : `${e.name} is worth ${money(floor)}`);
   const down = Math.round(x.down ?? price);
   if (down < 0 || down > price) return reject("bad_amount", "a down payment is between nothing and the price");
   const financed = price - down;
+  // A lender wants its share down, and lends for the terms it offers.
+  const leastDown = Math.ceil((price * numOf(objOf(mortgageRow(ctx).down_payment_pct).minimum_conventional, 3)) / 100);
+  if (financed > 0 && down < leastDown) return reject("declined", `a lender wants at least ${money(leastDown)} down on ${e.name}`);
+  const terms = mortgageTerms(ctx);
+  const term = x.term_months ?? terms[0] ?? 360;
+  if (financed > 0 && !terms.includes(term)) {
+    const years = [...terms].sort((a, b) => a - b).map((m) => String(Math.round((m / 12) * 10) / 10));
+    return reject("bad_term", `lenders offer mortgages over ${years.length > 1 ? `${years.slice(0, -1).join(", ")} or ${years[years.length - 1]}` : years[0]} years`);
+  }
   const from = x.from ?? api.depositAccount(ctx, x.party);
   if (!from) return reject("no_account", `${labelOf(ctx, x.party)} has no account to pay from`);
-  if (x.from && !api.accountsOf(ctx, x.party, "spend").includes(x.from)) return reject("not_yours", `${labelOf(ctx, x.from)} isn't ${labelOf(ctx, x.party)}'s to pay from`);
+  const unusableFrom = api.mayUse(ctx, x.party, from, "from");
+  if (unusableFrom) return unusableFrom;
   const events: LedgerEvent[] = [];
   let mortgage: EntityId | null = null;
   if (financed > 0) {
     mortgage = `${x.property}:mortgage`;
     for (let i = 2; own(ctx.state.entities, mortgage); i++) mortgage = `${x.property}:mortgage:${i}`;
-    const opened = api.openAccount(ctx, { id: mortgage, name: `Mortgage, ${e.name}`, product: "mortgage", owners: [{ party: x.party, role: "owner" }], cents: financed, into: api.outside(`closing:${x.property}`), ...(x.term_months ? { term_months: x.term_months } : {}), ...(x.apr_pct !== undefined ? { apr_pct: x.apr_pct } : {}), secured_by: x.property });
+    // The lender decides, at the buyer's credit (`applyCredit`): the rate, and whether it lends this much against the property at all.
+    const opened = api.applyCredit(ctx, x.party, { product: "mortgage", cents: financed, term_months: term, secured_by: x.property, into: api.outside(`closing:${x.property}`), id: mortgage, name: `Mortgage, ${e.name}` });
     if (isRejection(opened)) return opened;
     events.push(...opened);
   }
@@ -427,20 +467,44 @@ export function buyProperty(api: FinanceApi, ctx: EffectContext | ReadContext, x
     ...(asking !== undefined ? [{ type: "set" as const, entity: x.property, field: "asking_price", value: null }] : []),
     ...(strOf(e.fields.rent_to) !== "" ? [{ type: "set" as const, entity: x.property, field: "rent_to", value: null }] : []),
     acquisition(x.property, x.party, price),
-    ...moveLeases(api, ctx, x.property, owners.map((o) => o.party), x.party),
+    ...moveLeases(api, ctx, x.property, api.ownersOf(ctx.state, x.property).map((o) => o.party), [{ party: x.party, role: "owner", share: 100 }]),
   ]);
 }
 
-/** Leases follow their property to its new owner: rent the sellers took now lands in the buyer's deposit account (sold to nobody in the world, they end today). */
-function moveLeases(api: FinanceApi, ctx: ReadContext, property: EntityId, sellers: readonly EntityId[], buyer: EntityId | null): LedgerEvent[] {
+/** Whether a lease is still to run: active and not past its last day (it may not have started). */
+function notOver(l: { end: number | null; status: string }, at: number): boolean {
+  return l.status === "active" && (l.end === null || at < l.end);
+}
+
+/** Whether a lease pays the given owners: its payee is one of them, or an account one of them holds. */
+function paysOwners(api: FinanceApi, ctx: ReadContext, lease: EntityId, owners: readonly EntityId[]): boolean {
+  const to = strOf(fieldsOf(ctx.state, lease).to);
+  return owners.includes(to) || api.ownersOf(ctx.state, to).some((o) => owners.includes(o.party));
+}
+
+/** What points a lease at a side of the owners: its payee, the owners' split, and (when split) an account for the tenant to pay it from. */
+function repoint(api: FinanceApi, ctx: ReadContext, lease: EntityId, side: { to: string; splits?: FlowSplit[] }): LedgerEvent[] {
+  const f = fieldsOf(ctx.state, lease);
   const out: LedgerEvent[] = [];
-  const deposit = buyer ? api.depositAccount(ctx, buyer) : null;
+  const splits: JsonValue = side.splits ? (side.splits as unknown as JsonValue) : null;
+  if (strOf(f.to) !== side.to) out.push({ type: "set", entity: lease, field: "to", value: side.to });
+  if (JSON.stringify(f.splits ?? null) !== JSON.stringify(splits)) out.push({ type: "set", entity: lease, field: "splits", value: splits });
+  // A lease a tenant pays as a person (authored so) pays the owners' split from their account.
+  const payer = strOf(f.from);
+  if (side.splits && rentPayer(api, ctx, payer) !== payer) out.push({ type: "set", entity: lease, field: "from", value: rentPayer(api, ctx, payer) });
+  return out;
+}
+
+/**
+ * Leases follow their property to its new owners: each that paid the old ones now pays the new ones'
+ * deposit accounts, split by their shares (sold to nobody in the world, they end today).
+ */
+function moveLeases(api: FinanceApi, ctx: ReadContext, property: EntityId, owners: readonly EntityId[], next: readonly Owner[]): LedgerEvent[] {
+  const out: LedgerEvent[] = [];
+  const side = ownersSide(api, ctx, next);
   for (const l of authoredLeases(ctx, property)) {
-    if (!inForce(l, ctx.state.clock)) continue;
-    const to = strOf(fieldsOf(ctx.state, l.id).to);
-    const sellerSide = sellers.includes(to) || sellers.some((s) => api.ownersOf(ctx.state, to).some((o) => o.party === s));
-    if (!sellerSide) continue;
-    out.push(deposit ? { type: "set", entity: l.id, field: "to", value: deposit } : { type: "set", entity: l.id, field: "end", value: dateText(ctx.world, ctx.state.clock) });
+    if (!notOver(l, ctx.state.clock) || !paysOwners(api, ctx, l.id, owners)) continue;
+    out.push(...(side ? repoint(api, ctx, l.id, side) : [{ type: "set" as const, entity: l.id, field: "end", value: dateText(ctx.world, ctx.state.clock) }]));
   }
   return out;
 }
@@ -455,15 +519,7 @@ export function routeRent(api: FinanceApi, ctx: ReadContext, property: EntityId,
   const side = rentSide(api, ctx, property, route);
   if (!side) return out;
   const owners = api.ownersOf(ctx.state, property).map((o) => o.party);
-  const splits: JsonValue = side.splits ? (side.splits as unknown as JsonValue) : null;
-  for (const l of authoredLeases(ctx, property)) {
-    if (l.status !== "active" || (l.end !== null && l.end <= ctx.state.clock)) continue;
-    const f = fieldsOf(ctx.state, l.id);
-    const to = strOf(f.to);
-    if (!owners.includes(to) && !api.ownersOf(ctx.state, to).some((o) => owners.includes(o.party))) continue;
-    if (to !== side.to) out.push({ type: "set", entity: l.id, field: "to", value: side.to });
-    if (JSON.stringify(f.splits ?? null) !== JSON.stringify(splits)) out.push({ type: "set", entity: l.id, field: "splits", value: splits });
-  }
+  for (const l of authoredLeases(ctx, property)) if (notOver(l, ctx.state.clock) && paysOwners(api, ctx, l.id, owners)) out.push(...repoint(api, ctx, l.id, side));
   return unit(out);
 }
 
@@ -488,10 +544,16 @@ export function sellProperty(api: FinanceApi, ctx: EffectContext | ReadContext, 
   const price = Math.round(x.price);
   if (!(price > 0)) return reject("bad_amount", "a price is above nothing");
   if (x.buyer !== undefined && (!own(ctx.state.entities, x.buyer) || x.buyer === x.party)) return reject("missing_entity", `no buyer ${labelOf(ctx, x.buyer)}`);
+  // Someone outside the world can't hold a share beside the other owners: they buy a whole property from its only owner (§27.9).
+  if (x.buyer === undefined && owners.some((o) => o.party !== x.party && api.shareOf(ctx.state, x.property, o.party) > 0)) return reject("needs_buyer", `selling a share of ${e.name} needs a buyer in the world`);
   const to = x.to ?? api.depositAccount(ctx, x.party);
   if (!to) return reject("no_account", `${labelOf(ctx, x.party)} has no account the money could go to`);
-  if (x.to && !api.accountsOf(ctx, x.party, "worth").includes(x.to) && !api.accountsOf(ctx, x.party, "spend").includes(x.to)) return reject("not_yours", `${labelOf(ctx, x.to)} isn't ${labelOf(ctx, x.party)}'s`);
+  const unusableTo = api.mayUse(ctx, x.party, to, "into");
+  if (unusableTo) return unusableTo;
   const money = (c: number): string => formatMoney(c, ctx.world.currency);
+  // A buyer outside the world pays what the market does: no more than the property is worth.
+  const value = propertyValue(ctx.state, x.property);
+  if (x.buyer === undefined && price > value) return reject("declined", `no buyer outside the world pays more than ${money(value)} for ${e.name}`);
   const memo = `Sold ${share < 100 ? `a ${Math.round(share)}% share of ` : ""}${e.name} for ${money(price)}`;
   // The seller's own loans against it are settled from the proceeds.
   const loans = securedLoans(api, ctx.state, x.property).filter((l) => api.ownersOf(ctx.state, l.loan).some((o) => o.party === x.party) && l.owed > 0);
@@ -513,11 +575,17 @@ export function sellProperty(api: FinanceApi, ctx: EffectContext | ReadContext, 
     if (isRejection(posted)) return posted;
     events.push(...posted);
   }
-  const others = owners.filter((o) => o.party !== x.party);
-  const next: Owner[] = x.buyer ? [...others, { party: x.buyer, role: mine.role === "owner" || mine.role === "joint" ? mine.role : "owner", share }] : others;
+  // Everyone's share written out, the seller's added to the buyer's (on top of any they held) and the
+  // rest's unchanged, as a stake sale writes them.
   const shares = worthShares(owners);
-  const written = next.map((o) => ({ party: o.party, role: o.role, share: Math.round((o.party === x.buyer ? share : (shares[o.party] ?? 0)) * 100) / 100 }));
-  const sold = next.length === 0 || (others.length === 0 && x.buyer !== undefined);
+  const written: Owner[] = [];
+  for (const o of owners) {
+    if (o.party === x.party) continue;
+    written.push({ party: o.party, role: o.role, share: Math.round(((shares[o.party] ?? 0) + (o.party === x.buyer ? share : 0)) * 10000) / 10000 });
+  }
+  if (x.buyer && !written.some((o) => o.party === x.buyer)) written.push({ party: x.buyer, role: mine.role === "owner" || mine.role === "joint" ? mine.role : "owner", share: Math.round(share * 10000) / 10000 });
+  const others = owners.filter((o) => o.party !== x.party);
+  const sold = written.length === 0 || (others.length === 0 && x.buyer !== undefined);
   return unit([
     ...events,
     disposal(x.property, x.party, 100, price, memo),
@@ -525,8 +593,9 @@ export function sellProperty(api: FinanceApi, ctx: EffectContext | ReadContext, 
     ...(x.buyer ? [acquisition(x.property, x.buyer, price)] : []),
     ...(sold && loans.length > 0 ? [{ type: "set" as const, entity: x.property, field: "mortgage", value: null }] : []),
     ...(num(e.fields.asking_price) !== undefined ? [{ type: "set" as const, entity: x.property, field: "asking_price", value: null }] : []),
-    ...(others.length === 0 && strOf(e.fields.rent_to) !== "" ? [{ type: "set" as const, entity: x.property, field: "rent_to", value: null }] : []),
-    ...(others.length === 0 ? moveLeases(api, ctx, x.property, [x.party], x.buyer ?? null) : []),
+    // The owners changed: their rent goes to them by share until one of them routes it again.
+    ...(strOf(e.fields.rent_to) !== "" ? [{ type: "set" as const, entity: x.property, field: "rent_to", value: null }] : []),
+    ...moveLeases(api, ctx, x.property, owners.map((o) => o.party), written),
   ]);
 }
 
@@ -552,7 +621,10 @@ export function startLease(api: FinanceApi, ctx: ReadContext, x: LeaseStart): Le
   if (!(rent > 0)) return reject("bad_amount", "rent is above nothing");
   const units = Math.max(1, Math.round(numOf(e.fields.units, 1)));
   if (authoredLeases(ctx, x.property).filter((l) => inForce(l, ctx.state.clock)).length >= units) return reject("full", `every unit of ${e.name} is let`);
-  if (x.from && !api.ownersOf(ctx.state, x.from).some((o) => o.party === x.tenant)) return reject("not_yours", `${labelOf(ctx, x.from)} isn't ${labelOf(ctx, x.tenant)}'s`);
+  if (x.from) {
+    const unusable = api.mayUse(ctx, x.tenant, x.from, "from");
+    if (unusable) return unusable;
+  }
   const side = rentSide(api, ctx, x.property);
   if (!side) return reject("no_account", `${labelOf(ctx, x.party)} has no account the rent could go to`);
   const months = Math.max(1, Math.round(x.months ?? 12));
@@ -562,7 +634,7 @@ export function startLease(api: FinanceApi, ctx: ReadContext, x: LeaseStart): Le
   for (let i = 2; own(ctx.state.entities, id); i++) id = `lease:${x.property}:${x.tenant}:${i}`;
   const fields: JsonObject = {
     flow_kind: "rent",
-    from: x.from ?? x.tenant,
+    from: x.from ?? rentPayer(api, ctx, x.tenant),
     to: side.to,
     ...(side.splits ? { splits: side.splits as unknown as JsonValue } : {}),
     amount_cents: rent,
@@ -596,42 +668,58 @@ export function endLease(api: FinanceApi, ctx: ReadContext, party: EntityId, lea
 
 // ---------------------------------------------------------------- views and worth
 
-function ownerLines(api: FinanceApi, ctx: ReadContext, id: EntityId): OwnerLine[] {
-  const owners = api.ownersOf(ctx.state, id);
-  const shares = worthShares(owners);
-  return owners.map((o) => ({ party: o.party, name: labelOf(ctx, o.party), role: o.role, share: Math.round((shares[o.party] ?? 0) * 100) / 100 }));
+/** A name as `viewer` may read it: anyone the POV can't see reads as `fallback` (DESIGN §7); the GM's views of others name everyone. */
+function shownName(ctx: ReadContext, viewer: EntityId, id: string, fallback: string): string {
+  if (!own(ctx.state.entities, id)) return id;
+  return viewer === ctx.world.pov && !canSeeEntity(ctx.registry, ctx.world, ctx.state, viewer, id) ? fallback : labelOf(ctx, id);
 }
 
-/** A property as a party's dashboard draws it; its costs are the party's flows linked to it. */
+function ownerLines(api: FinanceApi, ctx: ReadContext, id: EntityId, viewer: EntityId): OwnerLine[] {
+  const owners = api.ownersOf(ctx.state, id);
+  const shares = worthShares(owners);
+  return owners.map((o) => {
+    const hidden = viewer === ctx.world.pov && own(ctx.state.entities, o.party) !== undefined && !canSeeEntity(ctx.registry, ctx.world, ctx.state, viewer, o.party);
+    // An owner the viewer can't see goes as the foundation's views send one: "someone", with no id.
+    return { party: hidden ? null : o.party, name: hidden ? "someone" : labelOf(ctx, o.party), role: o.role, share: Math.round((shares[o.party] ?? 0) * 100) / 100 };
+  });
+}
+
+/**
+ * A property as a party's dashboard draws it; its costs are the party's flows linked to it. One they
+ * don't own (listed for sale) shows what its listing would: its name, where it is, its value and its
+ * price, and nothing of its owners, mortgage or leases. A place the POV can't see goes unnamed.
+ */
 export function propertyView(api: FinanceApi, ctx: ReadContext, id: EntityId, party: EntityId, flows: readonly FlowView[]): PropertyView {
   const e = own(ctx.state.entities, id);
   const value = propertyValue(ctx.state, id);
+  const place = strOf(e?.fields.place);
+  const asking = num(e?.fields.asking_price);
+  const shownPlace = place === "" || (party === ctx.world.pov && !canSeePlace(ctx.registry, ctx.world, ctx.state, party, place)) ? null : (own(ctx.world.places, place)?.name ?? labelOf(ctx, place));
+  if (!api.ownersOf(ctx.state, id).some((o) => o.party === party)) return { id, name: e?.name ?? id, place: shownPlace, owners: [], share: 0, value, equity: 0, forSale: asking ?? null, mortgage: null, leases: [], costs: [], route: null };
   const loans = securedLoans(api, ctx.state, id);
   const loan = loans.find((l) => l.owed > 0);
   const owed = loans.reduce((a, l) => a + l.owed, 0);
-  const place = strOf(e?.fields.place);
-  const asking = num(e?.fields.asking_price);
   const rentTo = strOf(e?.fields.rent_to);
   return {
     id,
     name: e?.name ?? id,
-    place: place !== "" ? (own(ctx.world.places, place)?.name ?? labelOf(ctx, place)) : null,
-    owners: ownerLines(api, ctx, id),
+    place: shownPlace,
+    owners: ownerLines(api, ctx, id, party),
     share: api.shareOf(ctx.state, id, party),
     value,
     equity: value - owed,
     mortgage: loan ? { id: loan.loan, name: labelOf(ctx, loan.loan), owed, payment: num(fieldsOf(ctx.state, loan.loan).payment) ?? null, monthsLeft: num(fieldsOf(ctx.state, loan.loan).months_left) ?? null } : null,
-    leases: leaseViews(ctx, id),
+    leases: leaseViews(api, ctx, id, party),
     costs: flows.filter((f) => f.link?.id === id && f.kind !== "rent"),
     forSale: asking ?? null,
-    // Where its rent goes, for an owner: `rent_to` when it names an account, else the usual place.
-    route: api.ownersOf(ctx.state, id).some((o) => o.party === party) ? shownRoute(api, ctx, party, own(ctx.state.entities, rentTo)?.kind === "account" ? rentTo : null, false) : null,
+    // Where its rent goes: `rent_to` when it names an account, else the usual place.
+    route: shownRoute(api, ctx, party, own(ctx.state.entities, rentTo)?.kind === "account" ? rentTo : null, false),
   };
 }
 
-/** The properties a party sees: those it has a role on, and those for sale it doesn't own. */
+/** The properties a party sees: those it has a role on, and those for sale it doesn't own (for the POV, those it may see). */
 export function visibleProperties(api: FinanceApi, ctx: ReadContext, party: EntityId): EntityId[] {
-  return propertyIds(ctx.state).filter((id) => api.ownersOf(ctx.state, id).some((o) => o.party === party) || num(fieldsOf(ctx.state, id).asking_price) !== undefined);
+  return propertyIds(ctx.state).filter((id) => api.ownersOf(ctx.state, id).some((o) => o.party === party) || (num(fieldsOf(ctx.state, id).asking_price) !== undefined && (party !== ctx.world.pov || canSeeEntity(ctx.registry, ctx.world, ctx.state, party, id))));
 }
 
 /** A party's share of every property's value, a line each. */
@@ -694,14 +782,13 @@ export function registerProperty(r: FinanceRegistry): void {
   const party = (a: Record<string, JsonValue>, ctx: ReadContext): EntityId => s(a, "party") ?? ctx.world.pov;
   r.core.effect({
     type: "economy.property_buy",
-    args: ["property", "price?", "from?", "down?", "term_months?", "apr_pct?", "party?"],
+    args: ["property", "price?", "from?", "down?", "term_months?", "party?"],
     resolve: (a, ctx) => {
       const price = n(a, "price");
       const from = s(a, "from");
       const down = n(a, "down");
       const term = n(a, "term_months");
-      const apr = n(a, "apr_pct");
-      return buyProperty(r.api, ctx, { party: party(a, ctx), property: strOf(a.property), ...(price !== undefined ? { price } : {}), ...(from ? { from } : {}), ...(down !== undefined ? { down } : {}), ...(term !== undefined ? { term_months: term } : {}), ...(apr !== undefined ? { apr_pct: apr } : {}) });
+      return buyProperty(r.api, ctx, { party: party(a, ctx), property: strOf(a.property), ...(price !== undefined ? { price } : {}), ...(from ? { from } : {}), ...(down !== undefined ? { down } : {}), ...(term !== undefined ? { term_months: term } : {}) });
     },
   });
   r.core.effect({
@@ -731,9 +818,9 @@ export function registerProperty(r: FinanceRegistry): void {
     id: "property_buy",
     label: "Buy a property",
     pack: "economy",
-    params: { property: { type: "ref", ref: "property" }, price: { type: "money", label: "Offer", optional: true }, from: { type: "ref", ref: "account", label: "Pay from", optional: true }, down: { type: "money", label: "Down payment (the rest on a mortgage)", optional: true }, term_months: { type: "number", label: "Mortgage term, months", optional: true }, apr_pct: { type: "number", label: "Mortgage APR %", optional: true } },
+    params: { property: { type: "ref", ref: "property" }, price: { type: "money", label: "Offer", optional: true }, from: { type: "ref", ref: "account", label: "Pay from", optional: true }, down: { type: "money", label: "Down payment (the rest on a mortgage)", optional: true }, term_months: { type: "number", label: "Mortgage term, months (one a lender offers)", optional: true } },
     requires,
-    outcomes: { default: [{ type: "economy.property_buy", args: { party: "self", property: "property", price: "=params.price", from: "=params.from", down: "=params.down", term_months: "=params.term_months", apr_pct: "=params.apr_pct" } }] },
+    outcomes: { default: [{ type: "economy.property_buy", args: { party: "self", property: "property", price: "=params.price", from: "=params.from", down: "=params.down", term_months: "=params.term_months" } }] },
     duration: "60",
     lexicon: ["buy the house", "buy the property", "make an offer on"],
     observable: "signs a stack of papers",
