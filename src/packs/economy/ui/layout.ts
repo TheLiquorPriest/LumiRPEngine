@@ -4,7 +4,7 @@
 // dashboards show at each level is tested directly; the core already left out what the level
 // doesn't simulate, and nothing here shows detail the view marks as below the top level.
 
-import { CLASS_TRAITS, ROLE_RIGHTS, type AccountView, type AlertLine, type BusinessView, type CardView, type DistributionRoute, type FinanceFeature, type FinanceView, type FlowView, type HoldingView, type HouseholdView, type Invoice, type JobView, type OwnerRole, type PartyKind, type PropertyView, type RoleRights, type UpcomingLine } from "../../../shared/finance";
+import { CLASS_TRAITS, payeeKey, ROLE_RIGHTS, type AccountView, type AlertLine, type BusinessView, type CardView, type DistributionRoute, type FinanceFeature, type FinanceView, type FlowView, type HoldingView, type HouseholdView, type Invoice, type JobView, type OwnerRole, type PartyKind, type PropertyView, type RoleRights, type UpcomingLine } from "../../../shared/finance";
 import type { EntityId } from "../../../shared/ids";
 import type { GmView, PaletteView } from "../../../shared/state-view";
 import { cardChanges, type CardChange } from "./requests";
@@ -397,11 +397,15 @@ export function flowTargets(view: FinanceView, palette: PaletteView | null, paye
 /**
  * Why a standing payment from these payers (its From and the account it falls back on) can't go to
  * `to`, or null: money the party only manages pays for its holder, so never to them, their
- * household or an account of theirs, nor to their own name typed as an outside payee.
+ * household or an account of theirs, nor to a payee typed as any of them. A typed payee is theirs
+ * when its key (`payeeKey`) is their id's or name's, or their household's, as the backend reads
+ * it: "Jordan Ellis" and " POV " alike.
  */
 export function payeeProblem(view: FinanceView, payers: readonly string[], to: string): string | null {
   if (to.trim() === "" || !forHolder(view, payers)) return null;
-  const theirs = to === view.party || (view.household !== null && to === view.household.id) || view.accounts.some((a) => a.id === to) || to.trim().toLowerCase() === view.name.trim().toLowerCase();
+  const key = payeeKey(to);
+  const own = [view.party, view.name, view.household?.id ?? "", view.household?.name ?? ""];
+  const theirs = view.accounts.some((a) => a.id === to) || (key !== "" && own.some((n) => payeeKey(n) === key));
   return theirs ? "Money you only manage pays for its holder: it can't pay you, your household or an account of yours." : null;
 }
 

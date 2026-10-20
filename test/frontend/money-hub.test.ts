@@ -316,6 +316,10 @@ describe("what a party's roles allow", () => {
     expect(payeeProblem(v, ["till"], "lift")).toBeNull();
     expect(payeeProblem(v, ["till"], "Harbor Cleaners")).toBeNull();
     expect(payeeProblem(v, ["chk"], "sav")).toBeNull();
+    // A typed payee is read by the backend's key: the party's or their household's id or name, in any case or spacing.
+    const housed: FinanceView = { ...v, household: { id: "home", name: "Unit 2B", accounts: [], flows: [], members: [], monthly: { total: 0, parts: [] } } };
+    for (const to of [` ${v.party.toUpperCase()} `, "unit-2b", "HOME"]) expect(payeeProblem(housed, ["till"], to)).toContain("pays for its holder");
+    expect(payeeProblem(housed, ["till"], "Unit 2C")).toBeNull();
     // What backs a payment is its payer's own, as the view says; the business's never backs one to the party.
     expect(fallbackSources(v, "till", "lift").map((a) => a.id)).toEqual(["reserve"]);
     expect(fallbackSources(v, "till", "sav")).toEqual([]);

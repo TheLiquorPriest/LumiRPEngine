@@ -55,6 +55,20 @@ describe("a manager's pickers", () => {
     expect(await chat.play(flowCreateAction(cleaning, chat.currency))).toContain("done");
   });
 
+  test("a payee typed as the manager's own is refused alike by the hub and the backend, by id or name in any case or spacing; another name goes through both", async () => {
+    // Jordan owns the shop, whose checking the shop holds alone, so he only manages it.
+    const chat = await MoneyChat.start({ entities: { [SHOP]: { owners: [{ party: BUSINESS, role: "owner" }] }, [BUSINESS]: { owners: [{ party: "pov", role: "owner" }] } } });
+    const view = await chat.hub();
+    expect(held(view, SHOP)).toMatchObject({ manages: true, spends: false });
+    const typed = ["Jordan Ellis", "  jordan ellis ", "JORDAN-ELLIS", "pov", " POV ", "Harbor Parts"];
+    const hub = typed.map((to) => payeeProblem(view, [SHOP], to) !== null);
+    // The backend's refusal names whom the shop's money is for, and whom it isn't.
+    const backend: boolean[] = [];
+    for (const to of typed) backend.push((await chat.play(flowCreateAction({ ...blankFlowForm(SHOP), label: "Shop payment", to, amount: "90", day: 5 }, chat.currency))).includes("pays for Alder Automotive, not for Jordan Ellis"));
+    expect(hub).toEqual([true, true, true, true, true, false]);
+    expect(backend).toEqual(hub);
+  });
+
   test("an employee Marcus can't see is a payroll row with no one to raise or let go; one he can see has both", async () => {
     const chat = await MoneyChat.start({ pov: MARCUS, secret: ["danny_okafor"] });
     const view = await chat.hub();
