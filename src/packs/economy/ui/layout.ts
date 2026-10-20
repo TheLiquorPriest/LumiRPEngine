@@ -301,6 +301,11 @@ export function knownPeople(palette: PaletteView | null): { id: string; label: s
   return (pay?.options ?? []).flatMap((o) => (typeof o.params.to === "string" ? [{ id: o.params.to, label: o.label }] : []));
 }
 
+/** Whom a business's manager may hire, of the people the player may name: no one already on its payroll, whom the economy won't hire twice. */
+export function hireable<T extends { value: string }>(business: BusinessView, people: readonly T[]): T[] {
+  return people.filter((p) => !business.employees.some((j) => j.workerId === p.value && j.status !== "ended"));
+}
+
 /** True when `kind` is `ancestor` or extends it, up the GM view's kinds as the engine's `kindIs` walks them (a loop ends the walk). */
 export function gmKindIs(kinds: GmView["kinds"], kind: string, ancestor: string): boolean {
   const seen = new Set<string>();

@@ -16,7 +16,7 @@ import { ALL_PACKS, STARTER_WORLDS } from "../../src/packs/index";
 import { startState } from "../packs/support";
 import { ListRow } from "../../src/frontend/components";
 import { decodeFinanceView } from "../../src/packs/economy/ui/decode";
-import { accountBlocks, accountControls, autopaySources, businessAccounts, businessControls, cardControls, creditBlocks, endableLeases, findAccount, flowControls, flowSources, gmKindIs, gmParties, holdingControls, householdRows, hubTabs, invoiceControls, investmentBlocks, mortgageTermChoices, overviewBlocks, propertyControls, transferTargets, workBlocks } from "../../src/packs/economy/ui/layout";
+import { accountBlocks, accountControls, autopaySources, businessAccounts, businessControls, cardControls, creditBlocks, endableLeases, findAccount, flowControls, flowSources, gmKindIs, gmParties, hireable, holdingControls, householdRows, hubTabs, invoiceControls, investmentBlocks, mortgageTermChoices, overviewBlocks, propertyControls, transferTargets, workBlocks } from "../../src/packs/economy/ui/layout";
 import { OwnerRows } from "../../src/packs/economy/ui/lines";
 import { gmFixture } from "../../dev/preview/fixtures";
 import {
@@ -298,6 +298,22 @@ describe("what a party's roles allow", () => {
     const invoice = { id: "inv1", business: "shop", customer: "pov", cents: 5000, memo: "", issued: 0, due: 0, state: "paid" as const, customerName: "You", issuedAt: "", dueAt: "" };
     expect(invoiceControls(view({ level: 3 }), shop("owner"), invoice)).toEqual([]);
     expect(invoiceControls(view({ level: 3 }), shop("owner"), { ...invoice, state: "late" })).toEqual(["void", "pay"]);
+  });
+
+  test("Hire offers the people the player knows but no one the business already employs", () => {
+    const marcus = portAlderMoney(3, {}, "marcus_delgado");
+    const alder = marcus.businesses.find((b) => b.id === "alder_automotive_co");
+    if (!alder) throw new Error("Marcus doesn't run the shop");
+    // Danny and Jordan (the POV) work at the shop; Priya doesn't.
+    expect(alder.employees.filter((j) => j.status !== "ended").map((j) => j.workerId).sort()).toEqual(["danny_okafor", "pov"]);
+    const known = [
+      { value: "danny_okafor", label: "Danny Okafor" },
+      { value: "pov", label: "Jordan Ellis" },
+      { value: "priya_nair", label: "Priya Nair" },
+    ];
+    expect(hireable(alder, known).map((p) => p.value)).toEqual(["priya_nair"]);
+    // Someone whose job there has ended may be hired again.
+    expect(hireable({ ...alder, employees: alder.employees.map((j) => ({ ...j, status: "ended" as const })) }, known)).toEqual(known);
   });
 
   test("a holding trades only in an account the party may spend from; an option exercises only where options run", () => {
