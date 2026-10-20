@@ -25,7 +25,7 @@ import type { ContextHandlerInput, ContextVerdict, GenerationStartedEvent, HostG
 import { setAside } from "./stored-json";
 import type { Diagnostics } from "./diagnostics";
 import { messageOf } from "./diagnostics";
-import { CANNOT_STOP, STEP_LABEL } from "../shared/diagnostics";
+import { CANNOT_STOP, NOT_LAST_REPLY, STEP_LABEL } from "../shared/diagnostics";
 
 /** Resolves a chat's ledger environment; null when the chat is not a world chat. */
 export type EnvResolver = (chatId: ChatId, userId: UserId) => Promise<LedgerEnv | null>;
@@ -917,6 +917,9 @@ export class LedgerService {
       let delivered: Delivered | null = null;
       let claimed = false;
       try {
+        // Lumiverse starts only the last reply again, so a reply for an earlier message (Edit and Send
+        // in place, a swipe of an earlier reply) is refused before any model call, never sent to the last one.
+        if (halt.target !== null && observed.at(-1)?.id !== target?.id) throw new EngineFailure("target", NOT_LAST_REPLY);
         await step("pre", () => hooks.beforePlan({ chatId, userId, core, observed, generationId: halt.id, connectionId: halt.connectionId, runKey: `${stamp}\u0000${epoch}`, signal }));
         await step("plan", async () => core.plan(halt.id, observed, false));
         await step("prose", () => hooks.afterPlan({ chatId, userId, core, observed, generationId: halt.id, signal }));

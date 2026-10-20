@@ -1998,11 +1998,13 @@ export class Runtime implements TurnHooks {
     if (answered && answered.minds.size > 0) lruSet(this.keptMinds, input.chatId, answered, 256);
     const last = (await this.host.chats.messages(input.chatId, input.userId)).at(-1);
     if (!last) return;
-    // "interpret call failed: …" reads as "Reading your action: …"; a mind's record already says whose.
+    // "interpret call failed: …" reads as "Reading your action: …"; a mind's record already says whose,
+    // and a refused earlier message's reply says why and what to do instead: no Retry can start it.
     const why = (input.reason.startsWith(`${input.step} `) ? input.reason.slice(input.step.length + 1) : input.reason).replace(/(?:^|\b)(?:the )?call failed: /g, "");
-    const said = input.step === "mind" ? why : `${(STEP_LABEL[input.step] ?? input.step).replace(/…$/, "")}: ${why}`;
+    const said = input.step === "mind" || input.step === "target" ? why : `${(STEP_LABEL[input.step] ?? input.step).replace(/…$/, "")}: ${why}`;
     const detail = said.charAt(0).toUpperCase() + said.slice(1);
-    await this.chips.add(input.chatId, input.userId, [{ id: `engine_failed:${input.turn}`, kind: "engine_failed", messageId: last.id, label: "The engine didn't finish, so nothing was generated", detail, actions: [{ id: "regenerate", label: "Retry", style: "primary" }, { id: "diagnostics", label: "Diagnostics" }], expires: "next_send", payload: {} }]);
+    const retry = input.step === "target" ? [] : [{ id: "regenerate", label: "Retry", style: "primary" as const }];
+    await this.chips.add(input.chatId, input.userId, [{ id: `engine_failed:${input.turn}`, kind: "engine_failed", messageId: last.id, label: "The engine didn't finish, so nothing was generated", detail, actions: [...retry, { id: "diagnostics", label: "Diagnostics" }], expires: "next_send", payload: {} }]);
     this.push.changed(input.chatId, input.userId);
   }
 

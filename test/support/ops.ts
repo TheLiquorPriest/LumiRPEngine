@@ -415,6 +415,27 @@ export class Runner {
     return this.messages().filter((m) => !m.isUser);
   }
 
+  /**
+   * The reply a swipe or Continue can be made of: on a host the guard stops generations on, only the
+   * last message, when it's a reply (Lumiverse starts only the last reply again, DESIGN §5.1); else the
+   * last assistant message.
+   */
+  private head(): FakeMessage | undefined {
+    if (!this.h.host.capabilities.cancel) return this.assistants().at(-1);
+    const last = this.messages().at(-1);
+    return last && !last.isUser ? last : undefined;
+  }
+
+  /** Whether a generation for `messageId` is one the engine refuses: on a host that stops generations, a reply for an earlier message. */
+  private refused(messageId: string, chatId = this.current): boolean {
+    return this.h.host.capabilities.cancel && this.messages(chatId).at(-1)?.id !== messageId;
+  }
+
+  /** Every message's id and swipes, to check a refused reply added or changed none (L47). Its staging may still move the target's selection to its last swipe. */
+  private swipesOf(chatId = this.current): string {
+    return JSON.stringify(this.messages(chatId).map((m) => [m.id, m.swipes]));
+  }
+
   /** Assistant messages the player (or a foreign writer) can touch now. */
   private editable(): FakeMessage[] {
     return this.assistants().filter((m) => m.id !== this.streaming);
@@ -452,7 +473,15 @@ export class Runner {
         const before = structuredClone((await this.h.core(chat)).journal.messages[target.id]?.ledger);
         const tombstones = structuredClone((await this.h.core(chat)).journal.tombstones);
         this.h.renarrateNext = op.renarrate === true;
+        const refused = this.refused(target.id);
+        const unchanged = this.swipesOf();
         const g = await host.start(chat, { type: "swipe", messageId: target.id });
+        // L47: a reply for an earlier message is refused: nothing is generated and no swipe changes.
+        if (refused) {
+          this.h.renarrateNext = false;
+          if (g.halted !== "cancelled" || this.swipesOf() !== unchanged) throw new InvariantError("L47", "a reply for an earlier message wasn't refused");
+          return;
+        }
         await host.finish(g, op.opens !== undefined ? pick(OPENING_REPLIES, op.opens) : op.toll !== undefined ? pick(TOLL_REPLIES, op.toll) : pick(REPLIES, op.reply));
         this.h.renarrateNext = false;
         if (op.renarrate) await this.checkRenarrate(chat, target.id, g.swipeId, before, tombstones);
@@ -461,7 +490,8 @@ export class Runner {
       }
       case "continue": {
         const all = this.assistants();
-        const target = op.at >= 1 ? all.at(-1) : all.length > 0 ? pick(all, op.at) : undefined;
+        // Lumiverse's Continue continues the last reply, the only one the engine can start again.
+        const target = this.h.host.capabilities.cancel ? this.head() : op.at >= 1 ? all.at(-1) : all.length > 0 ? pick(all, op.at) : undefined;
         if (!target) return;
         const isHead = target.id === all.at(-1)?.id;
         const before = await this.h.folds(chat);
@@ -509,7 +539,13 @@ export class Runner {
         }
         host.editMessage(target, userId, pick(USER_TEXTS, op.text));
         await host.settle();
+        const refused = this.refused(assistantId, target);
+        const unchanged = this.swipesOf(target);
         const g = await host.start(target, { type: "swipe", messageId: assistantId });
+        if (refused) {
+          if (g.halted !== "cancelled" || this.swipesOf(target) !== unchanged) throw new InvariantError("L47", "an Edit and Send for an earlier message wasn't refused");
+          return;
+        }
         await host.finish(g, pick(REPLIES, op.reply));
         return;
       }
@@ -618,7 +654,7 @@ export class Runner {
         return;
       }
       case "fixRerun": {
-        const head = this.assistants().at(-1);
+        const head = this.head();
         if (!head || this.assistants().length < 2) return;
         await this.h.write(chat, { kind: "post", id: `w${++this.ids}`, target: "head", entry: { kind: "fix", events: op.open !== undefined ? await this.devCashFix(op.open) : op.life !== undefined ? pick(LIFE_FIXES, op.life) : gmFix(op.gm, op.a) } });
         const core = await this.h.core(chat);
@@ -687,7 +723,7 @@ export class Runner {
           await host.settle();
           g = await host.start(chat, { type: "normal" });
         } else {
-          const head = this.assistants().at(-1);
+          const head = this.head();
           if (!head) return;
           const core = await this.h.core(chat);
           if (type === "swipe") before = { ledger: structuredClone(core.journal.messages[head.id]?.ledger), tombstones: structuredClone(core.journal.tombstones) };

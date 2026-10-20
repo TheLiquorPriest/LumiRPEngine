@@ -11,6 +11,7 @@ import { isRecord, type JsonObject } from "../../src/shared/json";
 import { LEDGER_NAMESPACE } from "../../src/shared/ledger";
 import { placeOfEntity } from "../../src/engine/scope";
 import { toChain } from "../../src/backend/ledger-io";
+import { NOT_LAST_REPLY } from "../../src/shared/diagnostics";
 import { Rig } from "../support/rig";
 
 const block = (name: string, content: string): HostPresetBlock => ({ id: `b_${name}`, name, content, enabled: true, marker: null, injectionTrigger: [], characterTagTrigger: [], categoryMode: null });
@@ -322,3 +323,25 @@ describe("engine first", () => {
 function activitiesTo(rig: Rig, session: string, from: number): string[] {
   return rig.host.sent.flatMap((m, i) => (i >= from && rig.host.sentTo[i]?.session === session && m.type === "lre.activity" && m.activity ? [m.activity.label] : []));
 }
+
+  test("a reply for an earlier message is refused before any model call: nothing is generated, nothing goes to the last reply, and the flag says why with no Retry", async () => {
+    const rig = new Rig();
+    const chatId = await rig.worldChat();
+    await rig.turn(chatId, "I look around.", "The square is quiet.");
+    await rig.turn(chatId, "I wait.", "A bell rings.");
+    const [earlier, last] = rig.host.chat(chatId).messages.filter((m) => !m.isUser).slice(-2);
+    if (!earlier || !last) throw new Error("no replies");
+    const calls = rig.rt.meter.log.length;
+    // Edit and Send in place on the first message stages a swipe on the reply after it; Lumiverse's
+    // Regenerate, the only restart there is, would make a swipe of the last reply instead.
+    const g = await rig.host.start(chatId, { type: "swipe", messageId: earlier.id });
+    expect(g.halted).toBe("cancelled");
+    expect(rig.rt.meter.log.length).toBe(calls);
+    expect(rig.host.restarts).toEqual([]);
+    const after = rig.host.chat(chatId).messages;
+    expect(after.find((m) => m.id === earlier.id)?.swipes).toEqual(["The square is quiet."]);
+    expect(after.find((m) => m.id === last.id)?.swipes).toEqual(["A bell rings."]);
+    const flag = await flagOf(rig, chatId);
+    expect(flag).toMatchObject({ messageId: last.id, detail: NOT_LAST_REPLY });
+    expect(flag?.actions).toEqual([{ id: "diagnostics", label: "Diagnostics" }]);
+  });

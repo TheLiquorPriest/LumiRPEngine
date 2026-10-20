@@ -88,6 +88,9 @@ export interface Activity {
 /** What the chat, Settings and Diagnostics say when this Lumiverse can't stop a generation for the engine run (DESIGN §5.1). */
 export const CANNOT_STOP = "This Lumiverse can't stop generation; engine state may be missing.";
 
+/** Why the engine refused a stopped reply for an earlier message: Lumiverse starts only the last reply again (DESIGN §5.1). */
+export const NOT_LAST_REPLY = "Lumiverse can only start the last reply again, so the engine can't prepare an earlier message's reply here. Use Edit and Send as a branch, or regenerate the last reply.";
+
 /** A phase's or a model call's in-flight label, by phase or step purpose. */
 export const STEP_LABEL: Record<string, string> = {
   engine: "Running the engine…",
