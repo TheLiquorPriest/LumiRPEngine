@@ -391,7 +391,11 @@ export interface HostPort {
   books: {
     create(name: string, description: string, userId: UserId): Promise<string>;
     exists(bookId: string, userId: UserId): Promise<boolean>;
+    /** Every World Info book of the user's (`world_books.list`, paged through); `engine`: one the engine made for a world. */
+    list(userId: UserId): Promise<{ id: string; name: string; engine: boolean }[]>;
     entries(bookId: string, userId: UserId): Promise<HostBookEntry[]>;
+    /** One entry by id (`world_books.entries.get`), or null when it is gone. */
+    entry(entryId: string, userId: UserId): Promise<HostBookEntry | null>;
     createEntry(bookId: string, entry: HostBookEntryInput, userId: UserId): Promise<string>;
     /** Moves an entry (its position, depth, role and outlet) and rewrites its extension data. */
     place(entryId: string, placement: HostEntryPlacement, extensions: JsonObject, userId: UserId): Promise<void>;

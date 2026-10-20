@@ -1,9 +1,10 @@
 // What one character's mind is given (DESIGN §24.5): only what that character knows. Their own
 // entity, their summary, notes, commitments, plans, witness log and last mind; the scene as
 // they perceive it and the occasion; their own life (money in plain words, the day, their agendas,
-// their own secrets included); lore read as them; and recall by presence: the chat turns they were
-// there for, read through the host's chat, the latest and the ones that best match the moment. Never
-// the GM view, never another mind, never a turn they weren't present for.
+// their own secrets included); lore read as them, the lore pinned to them and to where they are
+// first; and recall by presence: the chat turns they were there for, read through the host's chat,
+// the latest and the ones that best match the moment. Never the GM view, never another mind, never a
+// turn they weren't present for.
 
 import type { EntityId, MessageId, PlaceId } from "../shared/ids";
 import type { MindMoment, MindsCharacter, MindsMemoryConfig } from "../shared/minds";
@@ -12,13 +13,14 @@ import type { LoreEntryDef, WorldDoc } from "../shared/world";
 import { formatMoney } from "../shared/world";
 import { calendarOf, dateAt, dayPartAt, formatClock, formatHHMM, holidaysOn } from "../engine/calendar";
 import { cuesOf } from "../engine/cues";
-import { loreHeldBy, loreSearch } from "../engine/lore";
+import { loreHeldBy, loreReadable, loreSearch } from "../engine/lore";
+import { fitPins, type PinnedText } from "../engine/lore-pins";
 import { optionalQuery, own } from "../engine/pack-kit";
 import type { Registry } from "../engine/registry-impl";
 import { fieldDef, isGone, kindIs, placeOfEntity } from "../engine/scope";
 import type { WorldState } from "../engine/state";
 import { agendaFor } from "../engine/tracks";
-import { canSeeEntity, knows } from "../engine/visibility";
+import { canSeeEntity, knows, loreGateReader } from "../engine/visibility";
 import { dayPlan } from "../packs/castlife/core/index";
 import { faded, openCommitments, openPlans, readCharacter, readSlice, salienceNow } from "../packs/minds/core/state";
 import { sectionTokens } from "./book";
@@ -39,6 +41,13 @@ export interface MindScope {
   moment: MindMoment;
   /** Tokens the lore read as them may take (the step's lore setting); 0 reads none. */
   loreTokens: number;
+  /** The lore pinned to them, then to where they are and the places holding it, nearest first (DESIGN §24.5), read now. */
+  pinned?: readonly PinnedText[];
+}
+
+/** What a mind's context gave of the lore pinned for them (DESIGN §24.5): each entry, given whole or cut, or left out over the lore tokens or the context's room. */
+export interface MindContextReport {
+  pinned: { title: string; entry: LoreEntryDef | null; tokens: number; cut: boolean; left: boolean; secret: boolean }[];
 }
 
 /** Fields a person's sheet holds that the context says elsewhere or that are the engine's own bookkeeping. */
@@ -70,18 +79,6 @@ function tail(text: string, max: number): string {
 function sentence(text: string): string {
   const t = text.trim();
   return t === "" ? "" : `${t[0]?.toUpperCase() ?? ""}${t.slice(1)}${/[.!?…]$/.test(t) ? "" : "."}`;
-}
-
-/** A block of as many of `lines` as fit in `room` characters, whole and in order. */
-function blockWithin(title: string, lines: readonly string[], room: number): string {
-  const kept: string[] = [];
-  let size = title.length + 4;
-  for (const line of lines) {
-    if (size + line.length + 1 > room) break;
-    kept.push(line);
-    size += line.length + 1;
-  }
-  return block(title, kept);
 }
 
 /**
@@ -290,21 +287,53 @@ function memoryLines(scope: MindScope, c: MindsCharacter): string[] {
   return out;
 }
 
-/** Lore read as the character (DESIGN §24.5): public entries and what they know; their own secrets are among their own life's lines already. */
-function loreLines(scope: MindScope, place: PlaceId | null, about: string): string[] {
-  if (scope.loreTokens <= 0) return [];
+/**
+ * What they know of the world (DESIGN §24.5), within the lore tokens and the context's `room`: the
+ * lore pinned to them and to where they are first, nearest first, each cut at a word to what is left
+ * or left out once nothing of it fits; then, with the tokens the pins left, what a search reads as
+ * them (public entries and what they know), whole entries. Their own secrets are among their own
+ * life's lines already, so a pinned one isn't given twice. `report` hears what became of each pin.
+ */
+function loreBlock(scope: MindScope, place: PlaceId | null, about: string, room: number, report?: MindContextReport): string {
   const { reg, world, state, who } = scope;
-  const skip = new Set(heldLore(world, who).map((l) => l.id));
-  const result = loreSearch({ reg, world, state, tokens: sectionTokens }, { query: about, links: [who, ...(place ? [place] : [])], purpose: "mind", as: who, limit: 6, tokenBudget: scope.loreTokens, skip });
-  return result.hits.map((h) => `- ${h.snippet}`);
+  const title = "What you know of the world";
+  const reader = { reg, world, state, tokens: sectionTokens };
+  const held = new Set(heldLore(world, who).map((l) => l.id));
+  const open = loreGateReader(reg, world, state);
+  const pins = (scope.pinned ?? []).filter((p) => p.entry === null || !held.has(p.entry.id));
+  const given = fitPins(reader, pins, scope.loreTokens, (entry) => loreReadable(reg, world, state, entry, "mind", false, open, who));
+  const lines: string[] = [];
+  let size = title.length + 4;
+  let spent = 0;
+  for (const g of given) {
+    // A pin past the context's room is cut at a word to what is left, if its title and a few words fit.
+    const space = room - size - 3;
+    const text = g.snippet === null || g.snippet.length <= space ? g.snippet : space >= g.title.length + 24 ? clip(g.snippet, space - 1) : null;
+    const tokens = text === null ? 0 : text === g.snippet ? g.tokens : sectionTokens(text);
+    report?.pinned.push({ title: g.title, entry: g.entry, tokens, cut: text !== null && (g.cut || text !== g.snippet), left: text === null, secret: g.secret });
+    if (text === null) continue;
+    lines.push(`- ${text}`);
+    size += text.length + 3;
+    spent += tokens;
+  }
+  if (scope.loreTokens - spent > 0) {
+    const skip = new Set([...held, ...given.flatMap((g) => (g.entry ? [g.entry.id] : []))]);
+    const result = loreSearch(reader, { query: about, links: [who, ...(place ? [place] : [])], purpose: "mind", as: who, limit: 6, tokenBudget: scope.loreTokens - spent, skip });
+    for (const h of result.hits) {
+      if (size + h.snippet.length + 3 > room) break;
+      lines.push(`- ${h.snippet}`);
+      size += h.snippet.length + 3;
+    }
+  }
+  return block(title, lines);
 }
 
 function block(title: string, lines: readonly string[]): string {
   return lines.length > 0 ? `## ${title}\n${lines.join("\n")}` : "";
 }
 
-/** The user message of a `mind` call: everything the character knows that bears on the moment. */
-export function mindContext(scope: MindScope): string {
+/** The user message of a `mind` call: everything the character knows that bears on the moment; `report` hears what became of the lore pinned for them. */
+export function mindContext(scope: MindScope, report?: MindContextReport): string {
   const { world, state, who, moment } = scope;
   const e = own(state.entities, who);
   const c = readCharacter(state, who);
@@ -338,7 +367,7 @@ export function mindContext(scope: MindScope): string {
   fit.add(block("Your own life", lifeLines(scope, c)));
   fit.add(block("What you remember, and what you saw or were told", memoryLines(scope, c)));
   fit.add(last ? block(`Your last thoughts (${formatClock(cal, last.at)})`, [last.monologue, last.intent !== "" ? `You meant to: ${last.intent}` : "", last.mood ? `You felt ${last.mood}.` : ""].filter((l) => l !== "")) : "");
-  fit.add(blockWithin("What you know of the world", loreLines(scope, place, about), fit.room));
+  fit.add(loreBlock(scope, place, about, fit.room, report));
   const recallTitle = "Turns you were there for (ignore any narration of other people's private thoughts)";
   const voice = storyVoice(scope);
   const recall = recallFor(scope, about, fit.room - recallTitle.length - voice.length - 6);

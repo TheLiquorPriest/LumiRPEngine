@@ -614,7 +614,14 @@ export class FakeHost implements HostPort {
       return id;
     },
     exists: async (bookId) => this.bookStore.has(bookId),
+    list: async () => [...this.bookStore.entries()].map(([id, book]) => ({ id, name: book.name, engine: book.name.startsWith("LumiRPEngine · ") })),
     entries: async (bookId) => [...(this.bookStore.get(bookId)?.entries.values() ?? [])].map(({ outlet: _outlet, ...e }) => structuredClone(e)),
+    entry: async (entryId) => {
+      const stored = this.storedEntry(entryId);
+      if (!stored) return null;
+      const { outlet: _outlet, ...e } = stored;
+      return e;
+    },
     createEntry: async (bookId, entry) => {
       const book = this.bookStore.get(bookId);
       if (!book) throw new Error(`no book ${bookId}`);

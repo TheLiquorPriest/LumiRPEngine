@@ -7,6 +7,7 @@
 
 import type { JsonValue } from "../shared/json";
 import { isRecord } from "../shared/json";
+import { lorePinsOf } from "../shared/lore";
 import { DOMAINS } from "../shared/ids";
 import type { GmEntity, GmField, GmView } from "../shared/state-view";
 import { tiersInOrder } from "../shared/tiers";
@@ -112,7 +113,7 @@ export function buildGmWorld(reg: Registry, world: WorldDoc, state: Readonly<Wor
     lifeStates: lifeStatesOf(world).map(([id, def]) => ({ id, label: def.label, acts: def.acts })),
     domains: DOMAINS.map((id) => ({ id, label: reg.packs.find((p) => p.domain === id)?.label ?? id })),
     classifications: world.classifications,
-    places: Object.values(world.places).map((p) => ({ id: p.id, name: p.name, visibility: p.visibility ?? "public", parent: p.parent ?? null })),
+    places: Object.values(world.places).map((p) => ({ id: p.id, name: p.name, visibility: p.visibility ?? "public", parent: p.parent ?? null, pins: own(lorePinsOf(world).places, p.id)?.length ?? 0 })),
     tracks: Object.values(world.tracks).map((t) => ({
       id: t.id,
       label: t.label,

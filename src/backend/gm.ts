@@ -36,8 +36,8 @@ export function buildGmView(core: LedgerCore, observed: readonly ChainMessage[],
   };
 }
 
-/** The latest user message and the reply before it, as a turn's fidelity reads them. */
-function latestTexts(observed: readonly ChainMessage[]): { user: string; reply: string } {
+/** The latest user message and the reply before it, as a turn's fidelity reads them; a GM's minds run picks Live and Near by them too. */
+export function latestTexts(observed: readonly ChainMessage[]): { user: string; reply: string } {
   const text = (m: ChainMessage | undefined): string => (m ? (m.swipes[m.swipeId] ?? "") : "");
   const lastUser = observed.findLastIndex((m) => m.isUser);
   return { user: text(observed[lastUser]), reply: text(observed.slice(0, lastUser < 0 ? observed.length : lastUser).findLast((m) => !m.isUser)) };

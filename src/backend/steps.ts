@@ -223,7 +223,8 @@ export class Steps {
 
   /**
    * A helper JSON call, with one repair call when the reply doesn't parse; with `retryTransient`, a
-   * call that fails transiently (`transientFailure`) is made once more. Null on failure.
+   * call that fails transiently (`transientFailure`) is made once more. Null on failure, with why in
+   * `failure` when the caller passes one: short words naming no one, fit for a player's chip.
    *
    * The preset's guidance for the step (DESIGN §6.8) follows the instructions, and the step's lore
    * follows that. When it may look lore up (`StepLore.offer` holds a round on the phase's lookup
@@ -231,7 +232,7 @@ export class Steps {
    * answers in a follow-up message and the call is made again, once per round held. A connection
    * that refuses the tools is asked again in the need form, and the refusal is kept once that works.
    */
-  async helperJson(purpose: StepPurpose, system: string, user: string, config: StepConfig | null, userId: UserId, signal: AbortSignal, options: { retryTransient?: boolean; lore?: StepLore | null; guidance?: string; usage?: { tokens: number } } = {}): Promise<JsonValue | null> {
+  async helperJson(purpose: StepPurpose, system: string, user: string, config: StepConfig | null, userId: UserId, signal: AbortSignal, options: { retryTransient?: boolean; lore?: StepLore | null; guidance?: string; usage?: { tokens: number }; failure?: { reason: string } } = {}): Promise<JsonValue | null> {
     const base = { maxTokens: Math.max(config?.maxTokens ?? HELPER_MAX_TOKENS, 1500), connectionId: config?.route?.connectionId ?? null, model: config?.route?.model ?? null };
     const lore = options.lore ?? null;
     const guidance = options.guidance ? `${GUIDANCE_LEAD}\n${options.guidance}` : "";
@@ -269,8 +270,13 @@ export class Steps {
       reply = await ask(messages, next === "tools", { retry: false, lookup: true });
     }
     if (lore && offer) lore.release();
-    const first = reply instanceof Error ? null : reply.content;
-    if (first === null || first.trim() === "") return null;
+    const failed = (reason: string): null => {
+      if (options.failure) options.failure.reason = reason;
+      return null;
+    };
+    if (reply instanceof Error) return failed(signal.aborted ? "the time ran out before it answered" : `the call failed: ${reply.message.replace(/\s+/g, " ").trim().slice(0, 160)}`);
+    const first = reply.content;
+    if (first.trim() === "") return failed(reply.finishReason === "length" ? `the answer was cut off at ${base.maxTokens} tokens before it said anything` : "the answer was empty");
     try {
       return parseJsonReply(first);
     } catch {
@@ -282,11 +288,11 @@ export class Steps {
         false,
         { retry: false, lookup: false },
       );
-      if (fixed instanceof Error) return null;
+      if (fixed instanceof Error) return failed("the answer wasn't JSON, and the call to repair it failed");
       try {
         return parseJsonReply(fixed.content);
       } catch {
-        return null;
+        return failed(reply.finishReason === "length" ? `the answer was cut off at ${base.maxTokens} tokens` : "the answer wasn't JSON");
       }
     }
   }

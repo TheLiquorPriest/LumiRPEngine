@@ -22,6 +22,7 @@ import type { EditorRequest, JsonPatchOp, LintIssue, ResultBodies, WorldCollecti
 import type { RevisionNote, RulesetDef, WorldDoc, WorldIndex } from "../shared/world";
 import { DEFAULT_SPAWN_CAP, EXPORT_FORMAT, WORLD_FORMAT } from "../shared/world";
 import { WORLD_MINDS_KEYS, type WorldMindsConfig } from "../shared/minds";
+import { lorePinsOf } from "../shared/lore";
 import { currencyOf, isWorldDoc, lintWorld, macrosIn, migrateWorld, newBlankWorld, shapeIssues, stamped } from "../engine/authoring";
 import { compileMaps, mapSettingsOf } from "../shared/maps";
 import type { Registry } from "../engine/registry-impl";
@@ -80,7 +81,7 @@ export const NOTE_CAP = 200;
 const PATCH_PROTECTED = ["id", "format", "engineVersion", "pins", "suppressed"] as const;
 
 /** Every part `set` writes: any other name is refused, so a set never reaches the rest of the document. */
-const WORLD_PARTS: Record<WorldPart, true> = { calendar: true, realism: true, time: true, meta: true, tiers: true, ruleset: true, loreIndex: true, minds: true };
+const WORLD_PARTS: Record<WorldPart, true> = { calendar: true, realism: true, time: true, meta: true, tiers: true, ruleset: true, loreIndex: true, minds: true, lorePins: true };
 
 export class WorldError extends Error {
   constructor(
@@ -717,6 +718,14 @@ function setPart(doc: WorldDoc, part: WorldPart, value: JsonValue): void {
     const kept = Object.fromEntries(WORLD_MINDS_KEYS.filter((key) => value[key] !== undefined).map((key) => [key, value[key] ?? null]));
     if (Object.keys(kept).length === 0) delete doc.minds;
     else doc.minds = kept as unknown as WorldMindsConfig;
+    return;
+  }
+  // `world.lorePins` whole (DESIGN §24.5): each target's well-formed pins, once each; a target that
+  // pins nothing is dropped, and pins that pin nothing remove the part.
+  if (part === "lorePins") {
+    const pins = lorePinsOf({ lorePins: value });
+    if (Object.keys(pins.characters).length === 0 && Object.keys(pins.places).length === 0) delete doc.lorePins;
+    else doc.lorePins = structuredClone(pins);
     return;
   }
   // `calendar`, `realism` and `time` are whole singletons, written as the editors send them.

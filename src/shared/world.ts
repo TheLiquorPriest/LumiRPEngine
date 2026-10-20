@@ -833,6 +833,26 @@ export interface LoreIndex {
   topics: Record<TopicId, LoreTopic>;
 }
 
+/**
+ * A lore entry pinned to a character or a place (DESIGN §24.5, §5.4): one of the world's own
+ * (`lore`, an entry id), or an entry of one of the user's Lumiverse World Info books (`book` and
+ * `entry`, the host's ids), read from the book whenever it is used.
+ */
+export type LorePin = { lore: string } | { book: string; entry: string };
+
+/**
+ * Lore pinned where calls always read it (DESIGN §24.5, §5.4): `characters` by entity id, read by
+ * that character's mind calls; `places` by place id, read by every helper call while the player
+ * character is there and every mind call of someone there, a place's pins holding in the places
+ * inside it. Pinned text counts against the call's lore tokens, nearest first, and is cut to fit.
+ * Pins never widen who may read an entry: a secret or Known by entry reaches a call only when its
+ * reader may read it.
+ */
+export interface LorePins {
+  characters: Record<EntityId, LorePin[]>;
+  places: Record<PlaceId, LorePin[]>;
+}
+
 export type SuppressedSource =
   | { bookId: string; entryId: string }
   | { bookId: string; comment: string; contentHash: string };
@@ -1033,6 +1053,8 @@ export interface WorldDoc {
   lore: Record<string, LoreEntryDef>;
   /** The lore lookup table (DESIGN §4.2); empty in documents written before it existed. */
   loreIndex: LoreIndex;
+  /** Lore pinned to characters and places (DESIGN §24.5, §5.4); absent, none. */
+  lorePins?: LorePins;
   /** How the map shows the world, and the optional grid system (DESIGN §12); absent, the defaults. */
   mapSettings?: MapSettings;
   /** Classification facets by id (DESIGN §4.1); entities hold values in `class`. */

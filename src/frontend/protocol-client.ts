@@ -70,6 +70,7 @@ const REQUEST_TYPES: Record<keyof ResultBodies, true> = {
   "lre.lore": true,
   "lre.studio": true,
   "lre.preset": true,
+  "lre.minds": true,
 };
 
 function isRequestType(value: unknown): value is keyof ResultBodies {

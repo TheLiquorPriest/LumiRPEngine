@@ -115,9 +115,9 @@ const LATER_COLLECTIONS = ["maps", "lore", "classifications", "tiers"] as const;
 const PARTS = ["pins", "calendar", "realism", "time", "start"] as const;
 /**
  * Parts a document may leave out: `migrateWorld` fills the currency (Modern US) and the lore lookup
- * table (empty), and a world without a ruleset, map settings or minds config plays by the defaults.
+ * table (empty), and a world without a ruleset, map settings, minds config or lore pins plays by the defaults.
  */
-const OPTIONAL_PARTS = ["currency", "loreIndex", "ruleset", "mapSettings", "minds"] as const;
+const OPTIONAL_PARTS = ["currency", "loreIndex", "ruleset", "mapSettings", "minds", "lorePins"] as const;
 
 /**
  * Shape checks for an untrusted document, before `migrateWorld` and `lintWorld` read it: every

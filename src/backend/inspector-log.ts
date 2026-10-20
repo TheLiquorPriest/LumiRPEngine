@@ -79,7 +79,7 @@ function loreTracesOf(raw: unknown, legacy: boolean): LoreStepTrace[] | undefine
       if (privateInputs) return [{ kind, text: legacy || kind !== "prefetch" ? "" : q.text }];
       return typeof q.matched === "number" ? [{ kind, text: legacy ? "" : q.text, matched: q.matched }] : [];
     });
-    const entries = privateInputs ? [] : t.entries.flatMap((e) => (isRecord(e) && typeof e.title === "string" && typeof e.tokens === "number" && typeof e.cut === "boolean" ? [{ title: e.title, tokens: e.tokens, cut: e.cut }] : []));
+    const entries = privateInputs ? [] : t.entries.flatMap((e) => (isRecord(e) && typeof e.title === "string" && typeof e.tokens === "number" && typeof e.cut === "boolean" ? [{ title: e.title, tokens: e.tokens, cut: e.cut, ...(e.pinned === true ? { pinned: true as const } : {}) }] : []));
     out.push({ step, phase: t.phase, policy, transport, queries, entries, ...(privateInputs ? { private: true as const } : {}), lookups: t.lookups, notes: [...t.notes] });
   }
   return out;
@@ -108,7 +108,10 @@ export function mindTracesOf(raw: unknown): MindCallTrace[] | undefined {
     const outcome = t.outcome === "leak_blocked" ? "recorded" : MIND_OUTCOMES.find((o) => o === t.outcome);
     const prompt = MIND_PROMPTS.find((p) => p === t.prompt);
     if (!purpose || !phase || level === undefined || !outcome || !prompt) return [];
-    return [{ purpose, phase, who: t.who, level, outcome, ms: t.ms, tokens: t.tokens, prompt }];
+    // Pinned lore as the call listed it (DESIGN §24.5): titles and costs only, never an entry's text.
+    const pinned = Array.isArray(t.pinned) ? t.pinned.flatMap((p) => (isRecord(p) && typeof p.title === "string" && typeof p.tokens === "number" && typeof p.cut === "boolean" ? [{ title: p.title, tokens: p.tokens, cut: p.cut }] : [])) : [];
+    const notes = strings(t.notes) ? [...t.notes] : [];
+    return [{ purpose, phase, who: t.who, level, outcome, ms: t.ms, tokens: t.tokens, prompt, ...(pinned.length > 0 ? { pinned } : {}), ...(notes.length > 0 ? { notes } : {}) }];
   });
 }
 

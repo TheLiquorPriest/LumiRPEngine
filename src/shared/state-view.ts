@@ -355,7 +355,8 @@ export interface GmView {
   domains: { id: DomainId; label: string }[];
   /** The world's classification facets, hidden ones too: what the classification editor offers. */
   classifications: Record<FacetId, FacetDef>;
-  places: { id: PlaceId; name: string; visibility: string; parent: PlaceId | null }[];
+  /** `pins`: how many lore entries are pinned to the place (DESIGN §24.5). */
+  places: { id: PlaceId; name: string; visibility: string; parent: PlaceId | null; pins: number }[];
   tracks: { id: string; label: string; kind: string; visibility: string; owner: string | null; stage: string; stages: { id: string; label: string; truth?: string }[] }[];
   relationTypes: { id: string; label: string; from: string; to: string; fields: { id: string; label: string; type: FieldType; min?: number; max?: number; values?: string[] }[] }[];
   /** Every party's money, the POV first, each at their own Money level (the economy pack's `economy.people_money`); empty without it. */
@@ -385,8 +386,8 @@ export interface LoreStepTrace {
   transport: "none" | "tools" | "need";
   /** Each search: the prefetch over the step's inputs, or a lookup the model asked for (with no text when the step may read an unrevealed secret or reads private inputs), and how many entries it matched that the player may know of, unless the step is `private`. */
   queries: { kind: "prefetch" | "search" | "get" | "list"; text: string; matched?: number }[];
-  /** The entries the step was given, in order, with their token cost: no unrevealed secret, and none for a `private` step. */
-  entries: { title: string; tokens: number; cut: boolean }[];
+  /** The entries the step was given, in order, with their token cost: no unrevealed secret, and none for a `private` step. `pinned`: pinned to where the player character is (DESIGN §24.5), given before any search. */
+  entries: { title: string; tokens: number; cut: boolean; pinned?: true }[];
   /** The step read someone's private plans: how much it found, and how big, would say what those are. */
   private?: true;
   /** Lookup rounds made: one model call each, on the phase's lookup budget. */

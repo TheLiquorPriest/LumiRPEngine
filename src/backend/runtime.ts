@@ -44,6 +44,7 @@ import { actionOdds, findAction, type Resolution } from "../engine/resolve";
 import type { InterpretOutput, QueuedAction } from "../engine/steps";
 import { checkAnswer } from "../engine/tracks";
 import { secretLoreNames } from "../engine/lore";
+import { pinsFor, type PinnedText } from "../engine/lore-pins";
 import { namesHidden, playerKnows } from "../engine/player-events";
 import { canSeeEntity, canSeePlace, findLeaks, namesAny, playerTrack, povPlace, shownTrackId, unrevealedSecrets, unseenPlaceNames } from "../engine/visibility";
 import { openPuzzle, openPuzzles } from "../packs/story/core/index";
@@ -59,6 +60,7 @@ import { StatePush } from "./push";
 import { effectiveMode, recordOutcome, SettingsStore } from "./settings-store";
 import { startMarkersFrom } from "./start-markers";
 import { StepLore, ToolSupport, type LoreInputs, type LookupTransport } from "./lore-steps";
+import { readPins } from "./lore-pins";
 import { CallMeter, classifyTyped, dedupeProposals, extract, interpret, onlyPassesTime, saidPayMethod, Steps } from "./steps";
 import { PlanNotes } from "./plan-notes";
 import { OutcomeNotes } from "./outcome-notes";
@@ -100,6 +102,8 @@ interface LorePhase {
   said: string;
   /** The active preset's style and rules for each helper (DESIGN §6.8). */
   guidance: Guidance;
+  /** The lore pinned where the POV is and the places holding it (DESIGN §24.5), read once for the phase's steps. */
+  pinned: PinnedText[];
 }
 
 /** Chips a read stores for its swipe; a read that replaces it (Re-read edit, Retry read) drops them. */
@@ -1099,28 +1103,30 @@ export class Runtime implements TurnHooks {
   /**
    * What a phase's step lore shares (DESIGN §5.4): its budget, the user's default connection (whose
    * tool support a step on it uses) with the user's record of connections refusing tools loaded,
-   * where its traces go, and what the player has seen said this turn. Nothing is read from the host
-   * for a world without lore.
+   * where its traces go, what the player has seen said this turn, and the lore pinned where the POV
+   * is (§24.5), read once. Nothing else is read from the host for a world without lore.
    */
   private async lorePhase(phase: "pre" | "post", key: string, userId: UserId, world: WorldDoc, state: WorldState, budget: StepBudget, said: string, guidance: Guidance): Promise<LorePhase> {
-    const at: LorePhase = { phase, key, userId, world, state, budget, active: ACTIVE_CONNECTION, said, guidance };
+    const pinned = await readPins(this.host, world, pinsFor(world, placeOfEntity(state, world.pov)), userId);
+    const at: LorePhase = { phase, key, userId, world, state, budget, active: ACTIVE_CONNECTION, said, guidance, pinned };
     if (Object.keys(world.lore).length === 0) return at;
     await this.toolSupport.ready(userId);
     return { ...at, active: await this.activeConnectionId(userId) };
   }
 
   /**
-   * A step run's lore (DESIGN §5.4): null when the world has none or the step's policy is off.
-   * Its prefetch searches the step's own inputs now, at no call; its lookups go to the connection
-   * the step's helper calls use (a helper route's, else the default), as tools unless the step says
-   * otherwise or that connection was seen refusing them. Its trace is kept under the phase's key
-   * for the inspector, unless the step is about no one the POV may know (`LoreInputs.shown` null).
-   * Snippets cost the host's count of their text once it has one for this user, else the
-   * estimate, and are counted in the background.
+   * A step run's lore (DESIGN §5.4): null when the world has none and nothing is pinned where the
+   * POV is, or the step's policy is off. The pinned lore goes first (§24.5); then its prefetch
+   * searches the step's own inputs now, at no call; its lookups go to the connection the step's
+   * helper calls use (a helper route's, else the default), as tools unless the step says otherwise or
+   * that connection was seen refusing them. Its trace is kept under the phase's key for the
+   * inspector, unless the step is about no one the POV may know (`LoreInputs.shown` null). Snippets
+   * cost the host's count of their text once it has one for this user, else the estimate, and are
+   * counted in the background.
    */
   private stepLore(run: { purpose: StepPurpose; config: StepConfig }, at: LorePhase, inputs: LoreInputs, effects = false): StepLore | null {
     const { world, state, userId } = at;
-    if (Object.keys(world.lore).length === 0) return null;
+    if (Object.keys(world.lore).length === 0 && at.pinned.length === 0) return null;
     const setting = stepLoreOf(run.config);
     if (setting.policy === "none") return null;
     const route = run.config.route;
@@ -1141,6 +1147,7 @@ export class Runtime implements TurnHooks {
     for (const [id, e] of Object.entries(state.entities)) if (!povMayKnow(this.registry, world, state, id)) (kindIs(this.registry, world, e.kind, "person") ? people : labels).push(e.name);
     const withheld = { text: unrevealedSecrets(this.registry, world, state).filter(unsaid), people, labels, said: at.said, names: secretLoreNames(this.registry, world, state).filter(unsaid) };
     const lore = new StepLore(run.purpose, setting, reader, at.phase, withheld, { effects, counted: (texts) => this.countLater(userId, texts), lookups: { budget: at.budget.lookup, transport, refused }, privateInputs: inputs.shown !== undefined });
+    lore.pin(at.pinned);
     lore.prefetch(inputs);
     if (inputs.shown !== null) lruSet(this.loreTraces, at.key, [...(this.loreTraces.get(at.key) ?? []), lore.trace], 64);
     return lore;

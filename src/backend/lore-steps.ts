@@ -1,6 +1,7 @@
 // The world's lore for RPEngine's own helpers (DESIGN §5.4). Each step run gets a `StepLore`: its
 // lore policy and token budget, the reader it searches with (the step's purpose decides what it
-// may read, and `engine/lore.ts` enforces it), the prefetch built from the step's own inputs at no
+// may read, and `engine/lore.ts` enforces it), the lore pinned where the player character is
+// (§24.5, given first within the budget), the prefetch built from the step's own inputs at no
 // extra call, the lookups its model may ask for, and the trace the inspector shows (§6.5).
 //
 // Lookups reach the model as native tools (`lore_search`, `lore_get`, `lore_list`) or, on a
@@ -25,7 +26,8 @@ import { loreIsSecret, topicIdOf } from "../shared/lore";
 import type { StepLore as StepLoreSetting } from "../shared/settings";
 import type { LoreStepTrace } from "../shared/state-view";
 import type { LoreEntryDef, StepPurpose } from "../shared/world";
-import { loreGet, loreList, loreSearch, readableLore, readsSecrets, type LoreHit, type LoreReader, type LoreResult } from "../engine/lore";
+import { loreGet, loreList, loreReadable, loreSearch, readableLore, readsSecrets, type LoreHit, type LoreReader, type LoreResult } from "../engine/lore";
+import { fitPins, type PinnedText } from "../engine/lore-pins";
 import { findLeaks, loreGateReader, namesAny } from "../engine/visibility";
 import type { HostPort, QuietResult, QuietTool } from "./host";
 import { parseJsonReply } from "./steps";
@@ -161,6 +163,8 @@ export class StepLore {
   private readonly privateInputs: boolean;
   /** Whether a secret entry's gate holds: one that doesn't is left out of the trace. */
   private readonly gateOpen: (entry: LoreEntryDef) => boolean;
+  /** Tokens the pinned lore took (DESIGN §24.5): the prefetch searches with what is left. */
+  private pinTokens = 0;
 
   constructor(
     readonly purpose: StepPurpose,
@@ -180,10 +184,47 @@ export class StepLore {
     this.gateOpen = loreGateReader(reader.reg, reader.world, reader.state);
   }
 
-  /** The prefetch: the index searched with the step's own inputs, at no extra call. */
+  /**
+   * The lore pinned where the player character is (DESIGN §24.5), given before any search, nearest
+   * first, within the step's lore tokens: each cut at a word to what is left, or left out once not
+   * even its title and a few words fit. An entry this step may not read isn't given. The trace lists
+   * what the player may know of, marked pinned, and says what was cut or left out.
+   */
+  pin(texts: readonly PinnedText[]): void {
+    if (texts.length === 0 || this.setting.policy === "none") return;
+    const { reg, world, state } = this.reader;
+    const given = fitPins(this.reader, texts, this.setting.tokens - this.pinTokens, (entry) => loreReadable(reg, world, state, entry, this.purpose, this.effects, this.gateOpen));
+    let cut = 0;
+    let left = 0;
+    const fresh: string[] = [];
+    for (const g of given) {
+      const id = g.entry?.id ?? g.key;
+      if (this.given.has(id)) continue;
+      const listed = !g.secret && !this.privateInputs;
+      if (g.snippet === null) {
+        if (listed) left++;
+        continue;
+      }
+      this.given.set(id, { id, title: g.title, snippet: g.snippet, tokens: g.tokens, cut: g.cut, secret: g.secret, why: ["pinned"] });
+      this.pinTokens += g.tokens;
+      fresh.push(g.snippet);
+      if (!listed) continue;
+      if (g.cut) cut++;
+      this.trace.entries.push({ title: this.shownTitle(g.title), tokens: g.tokens, cut: g.cut, pinned: true });
+    }
+    if (fresh.length > 0) this.counted(fresh);
+    if (cut + left > 0) this.note(`Pinned lore went over the step's ${this.setting.tokens} lore tokens: ${[cut > 0 ? `${cut} cut to fit` : "", left > 0 ? `${left} left out` : ""].filter((s) => s !== "").join(", ")}. Raise the step's lore tokens in Settings → Steps to give it more.`);
+  }
+
+  /** The prefetch: the index searched with the step's own inputs, at no extra call, within what the pinned lore left of its tokens. */
   prefetch(inputs: LoreInputs): void {
     if (this.setting.policy !== "prefetch" && this.setting.policy !== "prefetch+lookup") return;
-    this.take("prefetch", inputs.shown === undefined ? inputs.text : (inputs.shown ?? ""), loreSearch(this.reader, { query: inputs.text, links: inputs.links, purpose: this.purpose, effects: this.effects, limit: SEARCH_LIMIT, tokenBudget: this.setting.tokens }));
+    this.take("prefetch", inputs.shown === undefined ? inputs.text : (inputs.shown ?? ""), loreSearch(this.reader, { query: inputs.text, links: inputs.links, purpose: this.purpose, effects: this.effects, limit: SEARCH_LIMIT, tokenBudget: Math.max(0, this.setting.tokens - this.pinTokens), skip: new Set(this.given.keys()) }));
+  }
+
+  /** An entry's title as the trace may show it (§6.5): "A hidden entry" when it carries an unrevealed secret or names someone or somewhere the player doesn't know. */
+  private shownTitle(title: string): string {
+    return findLeaks(title, this.withheld.text).length > 0 || namesAny(title, this.withheld.people, this.withheld.labels, this.withheld.said) ? "A hidden entry" : title;
   }
 
   private note(text: string): void {
@@ -212,7 +253,7 @@ export class StepLore {
     const fresh = result.hits.filter((h) => !this.given.has(h.id));
     for (const h of fresh) {
       this.given.set(h.id, h);
-      if (!h.secret && !this.privateInputs) this.trace.entries.push({ title: findLeaks(h.title, this.withheld.text).length > 0 || namesAny(h.title, this.withheld.people, this.withheld.labels, this.withheld.said) ? "A hidden entry" : h.title, tokens: h.tokens, cut: h.cut });
+      if (!h.secret && !this.privateInputs) this.trace.entries.push({ title: this.shownTitle(h.title), tokens: h.tokens, cut: h.cut });
     }
     if (fresh.length > 0) this.counted(fresh.map((h) => h.snippet));
     return fresh;

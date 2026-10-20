@@ -8,7 +8,7 @@ import type { TopicId } from "./ids";
 import type { JsonObject } from "./json";
 import { hasOwn, isRecord, safeKey } from "./json";
 import { STEP_OUTPUTS } from "./steps";
-import type { LoreIndex, LoreSource, StepPurpose, WorldDoc } from "./world";
+import type { LoreIndex, LorePin, LorePins, LoreSource, StepPurpose, WorldDoc } from "./world";
 
 /** Every helper a secret entry's audience may name, in Settings' order. */
 export const LORE_AUDIENCE = Object.keys(STEP_OUTPUTS) as StepPurpose[];
@@ -53,6 +53,68 @@ export function loreSourceOf(raw: unknown): LoreSource {
   if (raw.kind === "ai" && (raw.status === "pending" || raw.status === "accepted")) return { kind: "ai", status: raw.status };
   return { kind: "authored" };
 }
+
+/** Whether a value is a lore pin: `{lore}` naming one of the world's entries, or `{book, entry}` naming a World Info book's (DESIGN §24.5). */
+export function isLorePin(v: unknown): v is LorePin {
+  if (!isRecord(v)) return false;
+  const keys = Object.keys(v).length;
+  if (v.lore !== undefined) return typeof v.lore === "string" && v.lore !== "" && keys === 1;
+  return typeof v.book === "string" && v.book !== "" && typeof v.entry === "string" && v.entry !== "" && keys === 2;
+}
+
+/** A pin's key, the same for the same entry wherever it is pinned: `lore:<id>` or `book:<book>/<entry>`. */
+export function lorePinKey(pin: LorePin): string {
+  return "lore" in pin ? `lore:${pin.lore}` : `book:${pin.book}/${pin.entry}`;
+}
+
+const pinsRead = new WeakMap<object, LorePins>();
+
+/**
+ * The world's lore pins as the engine reads them (DESIGN §24.5): each character's and place's
+ * well-formed pins, each entry once, in order; a malformed one (linted) or a key that could reach a
+ * prototype is left out. Read once per world revision.
+ */
+export function lorePinsOf(world: { readonly lorePins?: unknown }): LorePins {
+  const raw = world.lorePins;
+  if (!isRecord(raw)) return { characters: {}, places: {} };
+  const known = pinsRead.get(raw);
+  if (known) return known;
+  const part = (value: unknown): Record<string, LorePin[]> => {
+    const out: Record<string, LorePin[]> = {};
+    if (!isRecord(value)) return out;
+    for (const [id, list] of Object.entries(value)) {
+      if (!safeKey(id) || !Array.isArray(list)) continue;
+      const seen = new Set<string>();
+      const pins: LorePin[] = [];
+      for (const pin of list) {
+        if (!isLorePin(pin) || seen.has(lorePinKey(pin))) continue;
+        seen.add(lorePinKey(pin));
+        pins.push("lore" in pin ? { lore: pin.lore } : { book: pin.book, entry: pin.entry });
+      }
+      if (pins.length > 0) out[id] = pins;
+    }
+    return out;
+  };
+  const read: LorePins = { characters: part(raw.characters), places: part(raw.places) };
+  pinsRead.set(raw, read);
+  return read;
+}
+
+/** The pins as plain JSON: the value of a `set lorePins` edit, with no target left that pins nothing. */
+export function lorePinsJson(pins: LorePins): JsonObject {
+  const part = (record: Readonly<Record<string, readonly LorePin[]>>): JsonObject => Object.fromEntries(Object.entries(record).flatMap(([id, list]) => (list.length > 0 ? [[id, list.map((p): JsonObject => ("lore" in p ? { lore: p.lore } : { book: p.book, entry: p.entry }))]] : [])));
+  return { characters: part(pins.characters), places: part(pins.places) };
+}
+
+/** The lint codes lore pins raise (DESIGN §24.5), with what each means; the reference lists them. */
+export const LORE_PIN_LINTS: Readonly<Record<string, string>> = {
+  pin_shape: 'a pin that is neither {"lore": id} nor {"book": id, "entry": id}: it is ignored',
+  pin_missing: "a pin naming a lore entry the world doesn't have",
+  pin_target: "pins under a character or place the world doesn't have: no call reads them",
+  pin_duplicate: "the same entry pinned twice to one character or place",
+  pin_unread: "a secret entry pinned to someone whose own it isn't: their mind never reads it",
+  pin_pending: "an AI-written entry still waiting for review: no call reads it until it is accepted",
+};
 
 /** The lookup table as plain JSON: the value of a `set loreIndex` edit. */
 export function loreIndexJson(index: LoreIndex): JsonObject {

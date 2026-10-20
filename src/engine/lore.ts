@@ -178,16 +178,19 @@ export function secretLoreNames(reg: Registry, world: WorldDoc, state: Readonly<
   return [...names];
 }
 
-/** An entry as `Title: text`, cut at a word to fit `budget` tokens; null when not even its title and a few words fit. */
-function snippetOf(r: LoreReader, entry: LoreEntryDef, budget: number): { text: string; tokens: number; cut: boolean } | null {
+/**
+ * An entry as `Title: text`, cut at a word to fit `budget` tokens by `tokens`; null when not even its
+ * title and a few words fit. World lore and pinned book entries (DESIGN §24.5) are cut alike.
+ */
+export function loreSnippet(tokens: (text: string) => number, entry: { readonly title?: unknown; readonly content?: unknown }, budget: number): { text: string; tokens: number; cut: boolean } | null {
   const title = (typeof entry.title === "string" ? entry.title : "").replace(/\s+/g, " ").trim();
   const body = (typeof entry.content === "string" ? entry.content : "").replace(/\s+/g, " ").trim();
   const whole = title === "" ? body : `${title}: ${body}`;
-  const cost = r.tokens(whole);
+  const cost = tokens(whole);
   if (cost <= budget) return { text: whole, tokens: cost, cut: false };
   const head = title === "" ? 0 : title.split(" ").length;
   const words = whole.split(" ");
-  const fits = (n: number): boolean => r.tokens(`${words.slice(0, n).join(" ")}…`) <= budget;
+  const fits = (n: number): boolean => tokens(`${words.slice(0, n).join(" ")}…`) <= budget;
   let lo = head + MIN_WORDS;
   if (lo >= words.length || !fits(lo)) return null;
   let hi = words.length - 1;
@@ -197,7 +200,7 @@ function snippetOf(r: LoreReader, entry: LoreEntryDef, budget: number): { text: 
     else hi = mid - 1;
   }
   const text = `${words.slice(0, lo).join(" ")}…`;
-  return { text, tokens: r.tokens(text), cut: true };
+  return { text, tokens: tokens(text), cut: true };
 }
 
 /** The entries the lookup table files under a topic id, in its order, then those naming the topic, by id. */
@@ -275,7 +278,7 @@ export function loreSearch(r: LoreReader, q: LoreQuery): LoreResult {
   for (const { id, entry, why } of best) {
     if (hits.length >= q.limit) break;
     if (q.skip?.has(id)) continue;
-    const snippet = snippetOf(r, entry, left);
+    const snippet = loreSnippet((text) => r.tokens(text), entry, left);
     if (!snippet) break;
     left -= snippet.tokens;
     hits.push({ id, title: typeof entry.title === "string" ? entry.title : id, snippet: snippet.text, tokens: snippet.tokens, cut: snippet.cut, secret: loreIsSecret(entry) && !open(entry), why });
@@ -288,7 +291,7 @@ export function loreGet(r: LoreReader, id: string, purpose: LorePurpose, tokenBu
   const entry = hasOwn(r.world.lore, id) ? r.world.lore[id] : undefined;
   const open = loreGateReader(r.reg, r.world, r.state);
   if (!entry || !loreReadable(r.reg, r.world, r.state, entry, purpose, effects, open)) return null;
-  const snippet = snippetOf(r, entry, Math.max(0, Math.floor(tokenBudget)));
+  const snippet = loreSnippet((text) => r.tokens(text), entry, Math.max(0, Math.floor(tokenBudget)));
   if (!snippet) return null;
   return { id, title: typeof entry.title === "string" ? entry.title : id, snippet: snippet.text, tokens: snippet.tokens, cut: snippet.cut, secret: loreIsSecret(entry) && !open(entry), why: [] };
 }
