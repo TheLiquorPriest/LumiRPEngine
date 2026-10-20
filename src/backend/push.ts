@@ -8,6 +8,7 @@ import { isRecord } from "../shared/json";
 import type { DeltaOp } from "../shared/protocol";
 import { PROTOCOL_VERSION } from "../shared/protocol";
 import type { StateView } from "../shared/state-view";
+import { giveWay } from "./give-way";
 import type { HostPort } from "./host";
 
 /** Set/delete operations turning `from` into `to`; arrays are replaced whole when they differ. */
@@ -56,9 +57,10 @@ export class StatePush {
     return c;
   }
 
-  /** A full snapshot (hello, resync, chat open). */
+  /** A full snapshot (hello, resync, chat open). Its view is built after the messages already waiting (`giveWay`). */
   async snapshot(chatId: ChatId, userId: UserId, frontendSessionId?: string): Promise<void> {
     const c = this.channel(chatId, userId);
+    await giveWay();
     const view = await this.build(chatId, userId);
     c.rev++;
     c.last = asJson(view);
@@ -107,6 +109,7 @@ export class StatePush {
       await this.snapshot(chatId, userId);
       return;
     }
+    await giveWay();
     const next = asJson(await this.build(chatId, userId));
     const ops = diff(c.last, next);
     if (ops.length === 0) return;

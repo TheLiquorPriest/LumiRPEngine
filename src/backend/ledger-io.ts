@@ -16,6 +16,7 @@ import { validMarkerBody } from "../engine/events";
 import type { ChainMessage, FoldSnapshot, SnapshotStore } from "../engine/ledger/chain";
 import { emptyJournal, LedgerCore, type LedgerEnv } from "../engine/ledger/journal";
 import type { LedgerFold } from "../engine/ledger/fold";
+import { giveWay } from "./give-way";
 import type { ContextHandlerInput, HostGenerationType, HostMessage, HostPort } from "./host";
 import { setAside } from "./stored-json";
 
@@ -603,6 +604,8 @@ export class LedgerService {
       slot.ops++;
       slot.queue = slot.queue
         .then(async () => {
+          // A kept read answers at once: the op gives way first, so a message waiting runs before its folds.
+          await giveWay();
           const observed = this.observe(chatId, slot.userId, await this.host.chats.messages(chatId, slot.userId));
           await slot.core.prepareWorlds(observed, write);
           await op(slot.core, observed);
