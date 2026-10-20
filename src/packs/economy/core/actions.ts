@@ -322,8 +322,7 @@ function whoseMoney(ctx: ReadContext, side: string): Set<EntityId> {
  * trustee's daughter. A role that doesn't count an account's worth (an authorized user's card)
  * doesn't make it theirs.
  */
-export function paysFor(ctx: ReadContext, who: EntityId, to: string, from: string): boolean {
-  const interests = interestsOf(ctx, who);
+export function paysFor(ctx: ReadContext, who: EntityId, to: string, from: string, interests: ReadonlySet<EntityId> = interestsOf(ctx, who)): boolean {
   const forHolder = whoseMoney(ctx, from);
   forHolder.delete(who);
   const mine = (party: string): boolean => interests.has(party) && !forHolder.has(party);

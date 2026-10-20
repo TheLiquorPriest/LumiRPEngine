@@ -615,6 +615,8 @@ export function businessView(ctx: ReadContext, api: FinanceApi, business: Entity
     name: labelOf(ctx, business),
     role,
     mayDraw: mayDraw(api, ctx.state, party, business),
+    // Their own, whom they neither hire nor raise here without a share of its worth, as `hire` and `job_raise` refuse (DESIGN §25.1).
+    selfDealing: api.shareOf(ctx.state, business, party) > 0 ? [] : [...api.interestsOf(ctx, party)].filter((id) => kindIs(ctx.registry, ctx.world, own(ctx.state.entities, id)?.kind ?? "", "person") && !hiddenFrom(ctx, viewer, id)),
     owners: ownerLines(ctx, api, viewer, business),
     accounts: api.accountsOf(ctx, business, "sees"),
     // The finance view fills these: it knows which accounts it already shows as the viewer's own.

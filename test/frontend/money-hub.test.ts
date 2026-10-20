@@ -61,7 +61,7 @@ function card(over: Partial<CardView> & Pick<CardView, "id" | "account">): CardV
 }
 
 function view(over: Partial<FinanceView> = {}): FinanceView {
-  return { party: "pov", name: "You", partyKind: "person", level: 3, detail: false, features: ["flows", "cards"], band: "comfortable", opened: true, cash: { cents: 4600 }, overview: { netWorth: 100000, assets: 120000, liabilities: 20000, breakdown: [], cashFlow: null, upcoming: [], alerts: [] }, accounts: [], cards: [], flows: [], jobs: [], businesses: [], investments: null, properties: [], credit: null, household: null, recent: [], notes: [], payPrefs: [], ...over };
+  return { party: "pov", name: "You", partyKind: "person", level: 3, detail: false, features: ["flows", "cards"], band: "comfortable", opened: true, cash: { cents: 4600 }, overview: { netWorth: 100000, assets: 120000, liabilities: 20000, breakdown: [], cashFlow: null, upcoming: [], alerts: [] }, accounts: [], cards: [], flows: [], jobs: [], businesses: [], investments: null, properties: [], credit: null, household: null, recent: [], notes: [], payPrefs: [], paysFor: [], ownKeys: ["pov", "you"], ...over };
 }
 
 const cash = account({ id: "wallet", class: "cash", cents: 4600 });
@@ -270,7 +270,7 @@ describe("what a party's roles allow", () => {
     expect(cardControls(v, card({ id: "c", account: "shop", holderId: "danny" }))).toEqual(["freeze", "lost", "replace"]);
   });
 
-  const shop = (role: BusinessView["role"]): BusinessView => ({ id: "shop", name: "The shop", role, mayDraw: role === "owner" || role === "joint", owners: [], accounts: [], managed: [], places: [], books: { period: "Oct", revenue: 0, expenses: 0, payroll: 0, taxes: 0, profit: 0, lines: [] }, months: [], sales: [], invoices: [], employees: [], taxes: [], route: null });
+  const shop = (role: BusinessView["role"]): BusinessView => ({ id: "shop", name: "The shop", role, mayDraw: role === "owner" || role === "joint", selfDealing: [], owners: [], accounts: [], managed: [], places: [], books: { period: "Oct", revenue: 0, expenses: 0, payroll: 0, taxes: 0, profit: 0, lines: [] }, months: [], sales: [], invoices: [], employees: [], taxes: [], route: null });
 
   test("a business's own accounts its owner runs without a role on them: its page lists them, with autopay, cards and standing payments, never spending", () => {
     const till = account({ id: "till", class: "business_checking", role: null, manages: true, cents: 250000, cards: [card({ id: "tc", account: "till", holderId: "danny" })] });

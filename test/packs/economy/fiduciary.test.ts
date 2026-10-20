@@ -3,6 +3,7 @@
 // work module's Riverton, with a family trust where a test needs one.
 
 import { describe, expect, test } from "bun:test";
+import type { FinanceView } from "../../../src/shared/finance";
 import type { JsonObject } from "../../../src/shared/json";
 import { account, act, entity, lapse, setup } from "./work-world";
 
@@ -113,5 +114,30 @@ describe("money a manager only manages reaches none of their own interests", () 
     expect(refusal(act(custodian, "economy.hire", { business: "daybreak", worker: "rosa", title: "Barista", basis: "hourly", rate: 1_800, pay_every: "weekly", by: "you" }))).toBe("");
     const owner = setup((wd) => Object.assign(wd.entities.daybreak!.fields, { owners: [{ party: "you", role: "owner", share: 100 }] })).w;
     expect(refusal(act(owner, "economy.hire", { business: "daybreak", worker: "you", title: "General manager", basis: "salary", rate: 20_000_000, pay_every: "weekly", by: "you" }))).toBe("");
+  });
+});
+
+describe("the hub is told, by the same rule, where money its reader only manages may not go", () => {
+  test("the trust's allowance, on its trustee's money, may pay its beneficiary but not him or his checking; his own names are his keys", () => {
+    const { w } = setup((wd) => {
+      wd.entities.family_trust = entity("family_trust", "trust", "Chen Family Trust", { owners: [{ party: "you", role: "trustee" }, { party: "maya", role: "beneficiary", share: 100 }] }, "principal");
+      wd.entities.trust_acct = entity("trust_acct", "account", "Trust account", { owners: [{ party: "family_trust", role: "owner" }], product: "checking", opening: 5_000_000 });
+      wd.entities.trust_allowance = entity("trust_allowance", "flow", "Maya's allowance", { flow_kind: "transfer", from: "family_trust", to: "maya_checking", amount_cents: 100_000, every: "day", shortfall: "skip", status: "active" });
+    });
+    const view = w.ctx.query("economy.finance")(w.ctx, "you", true) as FinanceView;
+    const trust = view.paysFor.find((p) => p.from === "family_trust")?.to ?? [];
+    expect(trust).toEqual(expect.arrayContaining(["you", "checking"]));
+    expect(trust).not.toContain("maya_checking");
+    // What the hub refuses agrees with the actions.
+    for (const to of trust) expect(refusal(act(w, "economy.flow_create", { who: "you", label: "Test", from: "family_trust", to, amount: 100, every: "day" }))).toContain("pays for itself");
+    expect(view.ownKeys).toEqual(["you", "alex_rivera"]);
+  });
+
+  test("a business page names whom its custodian may neither hire nor raise there, and no one for its owner", () => {
+    const custodian = setup((wd) => Object.assign(wd.entities.daybreak!.fields, { owners: [{ party: "you", role: "custodian" }, { party: "maya", role: "beneficiary", share: 100 }] })).w;
+    const page = (w: typeof custodian) => (w.ctx.query("economy.finance")(w.ctx, "you", true) as FinanceView).businesses.find((b) => b.id === "daybreak");
+    expect(page(custodian)?.selfDealing).toEqual(["you"]);
+    const owner = setup((wd) => Object.assign(wd.entities.daybreak!.fields, { owners: [{ party: "you", role: "owner", share: 100 }] })).w;
+    expect(page(owner)?.selfDealing).toEqual([]);
   });
 });

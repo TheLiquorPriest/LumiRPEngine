@@ -13,7 +13,7 @@ import { actionPage, detailPage, sectionPage } from "../../src/packs/economy/ui/
 import { pageOf, routeOf } from "../../src/packs/economy/ui/routes";
 
 function view(over: Partial<FinanceView> = {}): FinanceView {
-  return { party: "pov", name: "You", partyKind: "person", level: 3, detail: false, features: ["flows"], band: null, opened: true, cash: { cents: 4600 }, overview: { netWorth: 1, assets: 1, liabilities: 0, breakdown: [], cashFlow: null, upcoming: [], alerts: [] }, accounts: [], cards: [], flows: [], jobs: [], businesses: [], investments: null, properties: [], credit: null, household: null, recent: [], notes: [], payPrefs: [], ...over };
+  return { party: "pov", name: "You", partyKind: "person", level: 3, detail: false, features: ["flows"], band: null, opened: true, cash: { cents: 4600 }, overview: { netWorth: 1, assets: 1, liabilities: 0, breakdown: [], cashFlow: null, upcoming: [], alerts: [] }, accounts: [], cards: [], flows: [], jobs: [], businesses: [], investments: null, properties: [], credit: null, household: null, recent: [], notes: [], payPrefs: [], paysFor: [], ownKeys: ["pov", "you"], ...over };
 }
 
 function account(id: string, name: string): AccountView {

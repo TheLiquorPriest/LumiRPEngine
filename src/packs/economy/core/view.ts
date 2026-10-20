@@ -6,7 +6,7 @@
 // surface a party the POV can't see is "someone".
 
 import type { EntityId } from "../../../shared/ids";
-import { AUTOPAY_MODES, CLASS_TRAITS, FINANCE_FEATURES, featureOn, ownersIn, worthShares, type AccountView, type AutopayMode, type CycleState, type AlertLine, type CardView, type FinanceView, type Flow, type FlowView, type HouseholdView, type JournalEntry, type JournalLine, type OverviewView, type PartyKind, type StatementView, type UpcomingLine } from "../../../shared/finance";
+import { AUTOPAY_MODES, CLASS_TRAITS, FINANCE_FEATURES, featureOn, ownersIn, payeeKey, worthShares, type AccountView, type AutopayMode, type CycleState, type AlertLine, type CardView, type FinanceView, type Flow, type FlowView, type HouseholdView, type JournalEntry, type JournalLine, type OverviewView, type PartyKind, type StatementView, type UpcomingLine } from "../../../shared/finance";
 import { formatMoney } from "../../../shared/world";
 import { calendarOf, formatClock, monthName, weekdayName } from "../../../engine/calendar";
 import { EXTERNAL_ACCOUNT_PREFIX } from "../../../engine/events";
@@ -16,7 +16,7 @@ import { kindIs } from "../../../engine/scope";
 import { membersOf, MEMBER_OF } from "../../../engine/selector";
 import { canSeeEntity, canSeePlace } from "../../../engine/visibility";
 import type { FinanceHooks } from "./module";
-import { autopaySourceProblem, mayPayFrom } from "./actions";
+import { autopaySourceProblem, interestsOf, mayPayFrom, paysFor } from "./actions";
 import { statementState } from "./cycle";
 import { creditReport } from "./credit";
 import { allFlows, fallsBackOn, occurrences, occurrenceAmount } from "./flows";
@@ -482,7 +482,7 @@ export function buildFinanceView(hooks: FinanceHooks, ctx: ReadContext, party: E
   const detail = level >= 4;
   const features = FINANCE_FEATURES.filter((f) => featureFor(ctx, party, f));
   const mine = accountsOf(ctx, party);
-  const empty: FinanceView = { party, name: e?.name ?? party, partyKind: kind, level, detail, features, band: null, opened: true, cash: null, overview: null, accounts: [], cards: [], flows: [], jobs: [], businesses: [], investments: null, properties: [], credit: null, household: null, recent: [], notes: [], payPrefs: [] };
+  const empty: FinanceView = { party, name: e?.name ?? party, partyKind: kind, level, detail, features, band: null, opened: true, cash: null, overview: null, accounts: [], cards: [], flows: [], jobs: [], businesses: [], investments: null, properties: [], credit: null, household: null, recent: [], notes: [], payPrefs: [], paysFor: [], ownKeys: [] };
   if (level === 0) return empty;
   const worth = netWorthParts(hooks, ctx, party);
   const band = mine.length > 0 ? wealthBand(worth.net) : strOf(e?.fields.wealth, "modest");
@@ -600,6 +600,17 @@ export function buildFinanceView(hooks: FinanceHooks, ctx: ReadContext, party: E
     a.autopayFrom = a.autopay !== null && a.manages ? others.filter((id) => autopaySourceProblem(ctx, party, a.id, id) === null) : [];
     a.fallbacks = pays(a.id) ? others.filter((id) => pays(id) && fallsBackOn(ctx, a.id, id)) : [];
   }
+  // Where money the party only manages may not go, by the actions' own rule (`paysFor`): for each payer the hub may set a standing payment or a fallback from, which ids it may not pay. Only an interest of theirs, or an account one of those counts the worth of, can be one, so the list holds for any payee, one typed by hand too.
+  const interests = interestsOf(ctx, party);
+  const onlyManaged = (side: string): boolean => side !== "" && side !== party && visible(ctx, viewer, side) && (isParty(ctx, side) || !canSpend(ctx.state, side, party));
+  const payers = [...new Set([...listed.map((a) => a.id), ...view.flows.flatMap((f) => (f.spec ? [f.spec.from, f.spec.fallback ?? ""] : []))])].filter(onlyManaged);
+  const counted = Object.keys(ctx.state.entities).filter((id) => own(ctx.state.entities, id)?.kind === "account" && holdersOf(ctx.state, id).some((h) => interests.has(h) && rightsOf(ctx.state, id, h)?.worth === true));
+  const payees = [...interests, ...counted].filter((id) => visible(ctx, viewer, id));
+  view.paysFor = payers.map((from) => ({ from, to: payees.filter((to) => paysFor(ctx, party, to, from, interests)) }));
+  // And the keys a typed payee is theirs by: their id's and name's, and their household's.
+  const home = householdOf(ctx, party);
+  const keyed = [party, ...(home !== null && visible(ctx, viewer, home) ? [home] : [])];
+  view.ownKeys = [...new Set(keyed.flatMap((id) => [payeeKey(id), payeeKey(own(ctx.state.entities, id)?.name ?? "")]).filter((k) => k !== ""))];
   return view;
 }
 
