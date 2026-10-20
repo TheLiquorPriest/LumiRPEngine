@@ -100,7 +100,7 @@ describe("the helper model", () => {
     Object.assign(globalThis, { spindle });
     try {
       const host = createSpindleHost();
-      const ask = (connectionId?: string) => host.models.quiet({ messages: [{ role: "user" as const, content: "x" }], maxTokens: 100, json: true, ...(connectionId ? { connectionId } : {}) }, "u", signal());
+      const ask = (connectionId: string | null = null) => host.models.quiet({ messages: [{ role: "user" as const, content: "x" }], maxTokens: 100, json: true, model: null, connectionId }, "u", signal());
       await ask("claude");
       await ask("gemini");
       await ask();
