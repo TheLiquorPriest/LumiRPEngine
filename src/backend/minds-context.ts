@@ -7,7 +7,7 @@
 // turn they weren't present for.
 
 import type { EntityId, MessageId, PlaceId } from "../shared/ids";
-import type { MindMoment, MindsCharacter, MindsMemoryConfig } from "../shared/minds";
+import type { Limit, MindMoment, MindsCharacter, MindsMemoryConfig } from "../shared/minds";
 import { loreIsSecret } from "../shared/lore";
 import type { LoreEntryDef, WorldDoc } from "../shared/world";
 import { formatMoney } from "../shared/world";
@@ -23,7 +23,7 @@ import { agendaFor } from "../engine/tracks";
 import { canSeeEntity, knows, loreGateReader } from "../engine/visibility";
 import { dayPlan } from "../packs/castlife/core/index";
 import { faded, openCommitments, openPlans, readCharacter, readSlice, salienceNow } from "../packs/minds/core/state";
-import { sectionTokens } from "./book";
+import { CHARS_PER_TOKEN, sectionTokens } from "./book";
 import type { HostMessage } from "./host";
 import { readableReply } from "./json-hiding";
 
@@ -41,6 +41,8 @@ export interface MindScope {
   moment: MindMoment;
   /** Tokens the lore read as them may take (the step's lore setting); 0 reads none. */
   loreTokens: number;
+  /** How much of the latest reply they read, by its end, in tokens; "none" reads it whole (Settings → Minds). */
+  replyTokens: Limit;
   /** The lore pinned to them, then to where they are and the places holding it, nearest first (DESIGN §24.5), read now. */
   pinned?: readonly PinnedText[];
 }
@@ -53,7 +55,7 @@ export interface MindContextReport {
 /** Fields a person's sheet holds that the context says elsewhere or that are the engine's own bookkeeping. */
 const SKIPPED_FIELDS: Readonly<Record<string, true>> = { place: true, x: true, y: true, gone: true, needs: true, holds: true, knownBy: true, appointments: true, trips: true, activity: true };
 
-/** The longest a recalled turn's side, or the whole context, may run, in characters. */
+/** The longest a recalled turn's side, or the whole context but the latest reply, may run, in characters. */
 const RECALL_SIDE = 1600;
 const CONTEXT_MAX = 16_000;
 
@@ -75,6 +77,11 @@ function tail(text: string, max: number): string {
   return t.length <= max ? t : `…${t.slice(t.length - max + 1).replace(/^\S*\s+/, "")}`;
 }
 
+/** The latest reply as a mind or the memory step reads it: as displayed, whole, or its end within the user's reply tokens. */
+function latestReply(scope: Pick<MindScope, "hideJson" | "replyTokens">, reply: string): string {
+  return tail(readableReply(reply, scope.hideJson), scope.replyTokens === "none" ? Number.POSITIVE_INFINITY : Math.floor(scope.replyTokens * CHARS_PER_TOKEN));
+}
+
 /** Text as one sentence: its first letter capitalised and a full stop added unless it ends in one; "" stays "". */
 function sentence(text: string): string {
   const t = text.trim();
@@ -84,13 +91,18 @@ function sentence(text: string): string {
 /**
  * A context's blocks within `CONTEXT_MAX` characters (DESIGN §24.5), `last` (the moment, or the turn
  * just written) kept whole at the end: each block in turn is cut at a word to the room left, line
- * breaks kept. `room` tells a block made to fit (lore, recall) how much is left before it.
+ * breaks kept. `room` tells a block made to fit (lore, recall) how much is left before it. The
+ * latest reply in `last` (`reply`, its length) comes on top of the budget: it is as long as the user
+ * lets it be, and a long one must not squeeze out what they know, their lore and their recall.
  */
 class ContextFit {
   private readonly parts: string[] = [];
   private left: number;
-  constructor(private readonly last: string) {
-    this.left = CONTEXT_MAX - last.length;
+  constructor(
+    private readonly last: string,
+    reply = 0,
+  ) {
+    this.left = CONTEXT_MAX - (last.length - reply);
   }
   get room(): number {
     return this.left - 2;
@@ -348,18 +360,19 @@ export function mindContext(scope: MindScope, report?: MindContextReport): strin
   const heardLast = said === undefined || said.who.includes(who);
   // A moment the player said nothing in (a time skip's end) tells why they think now.
   const why = moment.user.trim() === "" ? sentence(moment.reason) : "";
+  const ended = moment.kind !== "beat" && withPov && heardLast && moment.reply.trim() !== "" ? latestReply(scope, moment.reply) : "";
   const now =
     moment.kind === "beat"
       ? [`It is ${formatClock(cal, moment.at)}. ${sentence(moment.reason)}`.trim()]
       : withPov
-        ? [heardLast && moment.reply.trim() !== "" ? `The story so far ended: ${tail(readableReply(moment.reply, scope.hideJson), RECALL_SIDE)}` : "", why, moment.user.trim() !== "" ? `Now ${povLabel(scope)} says or does: ${clip(moment.user, RECALL_SIDE)}` : `${povLabel(scope)} is here with you.`].filter((l) => l !== "")
+        ? [ended !== "" ? `The story so far ended: ${ended}` : "", why, moment.user.trim() !== "" ? `Now ${povLabel(scope)} says or does: ${clip(moment.user, RECALL_SIDE)}` : `${povLabel(scope)} is here with you.`].filter((l) => l !== "")
         : [`You aren't with ${povLabel(scope)} right now; carry on with your own day.`, why].filter((l) => l !== "");
   // What the moment is to them, which ranks their lore and recall: what the POV says and how the last
   // reply ended when they are there to hear it, else where they are.
   const about = withPov && moment.kind === "turn" ? `${moment.user}\n${heardLast ? moment.reply : ""}` : place ? nameOf(scope, place) : "";
-  // The moment is never cut: the rest fits in what is left, block by block, then lore and recall,
-  // whole entries and whole turns.
-  const fit = new ContextFit(block("Now", now.length > 0 && withPov && moment.kind !== "beat" ? [storyVoice(scope), ...now] : now));
+  // The moment is never cut, and the latest reply in it comes on top of the budget: the rest fits in
+  // what is left, block by block, then lore and recall, whole entries and whole turns.
+  const fit = new ContextFit(block("Now", now.length > 0 && withPov && moment.kind !== "beat" ? [storyVoice(scope), ...now] : now), ended.length);
   fit.add(`You are ${e?.name ?? who}. ${occasion(scope, place)}`);
   fit.add(block("Who you are", sheetLines(scope)));
   fit.add(c.summary !== "" ? block("Your story so far", [c.summary]) : "");
@@ -385,7 +398,8 @@ export function memoryContext(scope: MindScope, turn: { user: string; reply: str
   const cal = calendarOf(world);
   const commitments = openCommitments(c).map((x) => `- [${x.id}] ${x.kind}${x.with.length > 0 ? ` with ${x.with.map((id) => nameOf(scope, id)).join(", ")}` : ""}: ${x.text}`);
   const plans = openPlans(c).map((p) => `- ${p.what}${p.cents !== undefined ? `, ${formatMoney(p.cents, world.currency)}` : ""} (${formatClock(cal, p.when.from)})`);
-  const fit = new ContextFit(block("The turn just written", [storyVoice(scope), turn.left ? `${povLabel(scope)} left you partway through this turn: whatever the story tells after they left happened without you.` : "", turn.user.trim() !== "" ? `${povLabel(scope)} (the player character) wrote: ${clip(turn.user, RECALL_SIDE)}` : "", `Story: ${tail(readableReply(turn.reply, scope.hideJson), RECALL_SIDE * 2)}`].filter((l) => l !== "")));
+  const story = latestReply(scope, turn.reply);
+  const fit = new ContextFit(block("The turn just written", [storyVoice(scope), turn.left ? `${povLabel(scope)} left you partway through this turn: whatever the story tells after they left happened without you.` : "", turn.user.trim() !== "" ? `${povLabel(scope)} (the player character) wrote: ${clip(turn.user, RECALL_SIDE)}` : "", `Story: ${story}`].filter((l) => l !== "")), story.length);
   fit.add(`You are ${nameOf(scope, who)}. ${occasion(scope, placeOfEntity(state, who))}`);
   fit.add(c.summary !== "" ? block("Your story so far", [c.summary]) : "");
   fit.add(block("Your open commitments (by id)", commitments));

@@ -11,6 +11,8 @@ import type { WorldDoc } from "../../src/shared/world";
 import { toChain } from "../../src/backend/ledger-io";
 import type { QuietRequest } from "../../src/backend/host";
 import { localTime } from "../../src/backend/minds";
+import { defaultSettings, SettingsStore } from "../../src/backend/settings-store";
+import { FakeHost } from "../support/fake-host";
 import { mindContext, presentTurns, recallFor } from "../../src/backend/minds-context";
 import { calendarOf, clockOfStamp } from "../../src/engine/calendar";
 import { modernUsWorld } from "../packs/riverton";
@@ -392,17 +394,17 @@ describe("plan times a mind writes", () => {
 });
 
 describe("the model-use presets' minds", () => {
-  test("a preset is a whole minds policy: Lean runs none, Full has no limits, and the player's own prompts and memory stay", async () => {
+  test("a preset is a whole minds policy: Lean runs none, Full has no limits, and the player's own prompts, memory and reply allowance stay", async () => {
     const rig = new Rig({ shipped: true, minds: true });
     fakeModels(rig);
     const chatId = await alderChat(rig);
-    const mine = { prompts: { consolidate: "Fold as {{character}}." }, memory: { notes: { show: 3 } } };
+    const mine = { prompts: { consolidate: "Fold as {{character}}." }, memory: { notes: { show: 3 } }, replyTokens: 300 };
     rig.body(await rig.send({ type: "lre.settings.set", patch: { minds: mine } }));
     const minds = async () => (await rig.rt.settings.get(rig.host.userId)).minds;
 
     rig.body(await rig.send({ type: "lre.settings.set", patch: { modelUse: { preset: "lean" } } }));
     let s = await minds();
-    expect([s.enabled, s.memoryLevels, s.prompts, s.memory]).toEqual([false, [], mine.prompts, mine.memory]);
+    expect([s.enabled, s.memoryLevels, s.prompts, s.memory, s.replyTokens]).toEqual([false, [], mine.prompts, mine.memory, 300]);
     const before = rig.host.quietCalls.length;
     await rig.turn(chatId, "Hello.", "They look up.");
     expect(mindCalls(rig).length).toBe(0);
@@ -410,7 +412,7 @@ describe("the model-use presets' minds", () => {
 
     rig.body(await rig.send({ type: "lre.settings.set", patch: { modelUse: { preset: "full" } } }));
     s = await minds();
-    expect([s.enabled, s.liveLimit, s.refreshLimit, s.memoryLevels, s.skip, s.prompts, s.memory]).toEqual([true, "none", "none", ["live", "near"], { maxBeats: "none", maxMindsPerBeat: "none" }, mine.prompts, mine.memory]);
+    expect([s.enabled, s.liveLimit, s.refreshLimit, s.memoryLevels, s.skip, s.prompts, s.memory, s.replyTokens]).toEqual([true, "none", "none", ["live", "near"], { maxBeats: "none", maxMindsPerBeat: "none" }, mine.prompts, mine.memory, 300]);
     await rig.turn(chatId, "Hello again.", "They nod.");
     expect(mindCalls(rig).map((c) => MIND.exec(c.messages[0]?.content ?? "")?.[1]).sort()).toEqual(["Danny Okafor", "Priya Nair"]);
 
@@ -418,6 +420,21 @@ describe("the model-use presets' minds", () => {
     rig.body(await rig.send({ type: "lre.settings.set", patch: { modelUse: { preset: "standard" } } }));
     s = await minds();
     expect([s.enabled, s.liveLimit, s.refreshLimit, s.memoryLevels, s.tokens, s.prompts, s.memory]).toEqual([true, 3, 2, ["live"], MINDS_PRESETS.standard.tokens, mine.prompts, mine.memory]);
+  });
+
+  test("settings saved before the reply allowance read the whole reply; a saved allowance stays, and a malformed one reads as the whole reply", async () => {
+    const host = new FakeHost();
+    const save = async (minds: Record<string, unknown>, preset = "standard"): Promise<unknown> => {
+      const fresh = defaultSettings();
+      await host.storage.write("settings.json", JSON.stringify({ ...fresh, modelUse: { ...fresh.modelUse, preset }, minds }), host.userId);
+      return (await new SettingsStore(host).get(host.userId)).minds.replyTokens;
+    };
+    const before: Record<string, unknown> = { ...defaultSettings().minds };
+    delete before.replyTokens;
+    expect(await save(before)).toBe("none");
+    expect(await save({ ...before, liveLimit: "none" }, "full")).toBe("none");
+    expect(await save({ ...before, replyTokens: 2500 })).toBe(2500);
+    for (const bad of [0, -5, 1.5, "lots"]) expect(await save({ ...before, replyTokens: bad })).toBe("none");
   });
 });
 
@@ -428,7 +445,7 @@ describe("a mind's context", () => {
     const { state, world } = await stateOf(rig, chatId);
     const ended = "The time skip ends; it is now Mon 14 Sep 2026, 18:00 (evening).";
     const now = (who: string, moment: MindMoment): string => {
-      const text = mindContext({ reg: rig.rt.registry, world, state, who, memory: DEFAULT_MINDS_MEMORY, messages: [], hideJson: true, moment, loreTokens: 0 });
+      const text = mindContext({ reg: rig.rt.registry, world, state, who, memory: DEFAULT_MINDS_MEMORY, messages: [], hideJson: true, replyTokens: "none", moment, loreTokens: 0 });
       return text.slice(text.indexOf("## Now"));
     };
     const turn = (reason: string, user = ""): MindMoment => ({ kind: "turn", at: state.clock, reason, user, reply: "" });
@@ -529,7 +546,40 @@ describe("a mind's context", () => {
     expect(danny).toMatch(/\n- Traits: funny, competitive, loyal\n/i);
   });
 
-  test("the previous reply is told by how it ended, in the next mind and in the memory step", async () => {
+  test("by default the latest reply is read whole, however long, by the next mind and by the memory step; only who was there for it reads it", async () => {
+    const rig = new Rig({ shipped: true, minds: true });
+    fakeModels(rig);
+    const minds: Record<string, string> = {};
+    const memories: Record<string, string> = {};
+    const fake = rig.host.quietReply;
+    rig.host.quietReply = (req) => {
+      const system = req.messages[0]?.content ?? "";
+      const mind = MIND.exec(system)?.[1];
+      const memory = MEMORY.exec(system)?.[1];
+      if (mind) minds[mind] = req.messages[1]?.content ?? "";
+      if (memory) memories[memory] = req.messages[1]?.content ?? "";
+      return fake?.(req) ?? "{}";
+    };
+    const chatId = await alderChat(rig);
+    const { state, world } = await stateOf(rig, chatId);
+    const here = placeOfEntity(state, "pov") ?? "";
+    const elsewhere = Object.keys(world.places).find((p) => p !== here && world.places[p]?.parent === undefined) ?? "";
+    // Priya is away for the long reply, and back for the next turn.
+    rig.body(await rig.send({ type: "lre.edit", chatId, ops: [{ op: "move", entity: "priya_nair", to: elsewhere }] }));
+    const long = `START-MARK ${"the gulls wheel over the breakwater and the tide comes in ".repeat(140).trim()} END-MARK`;
+    expect(long.length).toBeGreaterThan(8000);
+    await rig.turn(chatId, "Hello.", long);
+    expect(memories["Danny Okafor"]).toContain(`Story: ${long}`);
+    expect(memories["Priya Nair"]).toBeUndefined();
+    rig.body(await rig.send({ type: "lre.edit", chatId, ops: [{ op: "move", entity: "priya_nair", to: here }] }));
+    await rig.turn(chatId, "And then?", "They shrug.");
+    expect(minds["Danny Okafor"]?.split("## Now\n")[1]).toContain(`The story so far ended: ${long}`);
+    const priya = minds["Priya Nair"] ?? "";
+    expect(priya).toContain("Now Jordan Ellis says or does: And then?");
+    expect(priya).not.toContain("the gulls wheel");
+  });
+
+  test("with a token allowance the latest reply is read by its end, cut to about that size", async () => {
     const rig = new Rig({ shipped: true, minds: true });
     fakeModels(rig);
     const minds: string[] = [];
@@ -542,16 +592,19 @@ describe("a mind's context", () => {
       return fake?.(req) ?? "{}";
     };
     const chatId = await alderChat(rig);
+    rig.body(await rig.send({ type: "lre.settings.set", patch: { minds: { replyTokens: 200 } } }));
     const long = `START-MARK ${"the gulls wheel over the breakwater and the tide comes in ".repeat(70).trim()} END-MARK`;
-    expect(long.length).toBeGreaterThan(3200);
     await rig.turn(chatId, "Hello.", long);
-    expect(memories.at(-1)).toContain("END-MARK");
-    expect(memories.at(-1)).not.toContain("START-MARK");
     await rig.turn(chatId, "And then?", "They shrug.");
-    const now = (minds.at(-1) ?? "").split("## Now\n")[1] ?? "";
-    expect(now).toContain("The story so far ended: …");
-    expect(now).toContain("END-MARK");
-    expect(now).not.toContain("START-MARK");
+    const story = /\nStory: (.*)$/.exec(memories[0] ?? "")?.[1] ?? "";
+    const ended = /The story so far ended: (.*)\n/.exec(minds.at(-1) ?? "")?.[1] ?? "";
+    // 200 tokens at the estimate's 3.2 characters a token: about 640 characters, from a word.
+    for (const read of [story, ended]) {
+      expect(read).toMatch(/^….+ END-MARK$/);
+      expect(read).not.toContain("START-MARK");
+      expect(read.length).toBeGreaterThan(560);
+      expect(read.length).toBeLessThanOrEqual(640);
+    }
   });
 
   test("however much recall it may take, the moment is never cut, lines stay lines, and recalled turns stay whole", async () => {
@@ -575,7 +628,10 @@ describe("a mind's context", () => {
     await stay();
     await rig.turn(chatId, "NOW-MARK: what do you think?", "They think.");
     const context = contexts.at(-1) ?? "";
-    expect(context.length).toBeLessThanOrEqual(16_000);
+    // The latest reply, read whole, comes on top of the 16,000 characters the rest may take.
+    const ended = /The story so far ended: (.*)\n/.exec(context)?.[1] ?? "";
+    expect(ended).toMatch(/^REPLY-8 .* END-8$/);
+    expect(context.length - ended.length).toBeLessThanOrEqual(16_000);
     expect(context).toContain("## Now\n");
     expect(context).toContain("Now Jordan Ellis says or does: NOW-MARK: what do you think?");
     expect(context.split("\n").length).toBeGreaterThan(20);

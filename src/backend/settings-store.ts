@@ -427,8 +427,8 @@ function expandPresets(settings: UserSettings, patch: JsonObject): UserSettings 
   const modelUse = isRecord(patch.modelUse) ? patch.modelUse.preset : undefined;
   if (modelUse === "lean" || modelUse === "standard" || modelUse === "full") {
     out.modelUse = { preset: modelUse, ...structuredClone(MODEL_USE_PRESETS[modelUse]) };
-    // A preset is a whole policy for minds too; the user's own prompts and memory overrides stay.
-    out.minds = { ...structuredClone(MINDS_PRESETS[modelUse]), memory: out.minds.memory, prompts: out.minds.prompts };
+    // A preset is a whole policy for minds too; the user's own prompts, memory overrides and how much of the reply minds read stay.
+    out.minds = { ...structuredClone(MINDS_PRESETS[modelUse]), replyTokens: out.minds.replyTokens, memory: out.minds.memory, prompts: out.minds.prompts };
   }
   return out;
 }

@@ -299,7 +299,7 @@ export function worldMindTemplate(world: Pick<WorldDoc, "steps">, purpose: MindP
 /** The user's overrides of a world's memory config: whatever they set wins, part by part. */
 export type MindsMemoryOverrides = { [K in keyof MindsMemoryConfig]?: Partial<MindsMemoryConfig[K]> };
 
-/** `UserSettings.minds` (DESIGN §24.6). A named Model use preset sets everything here but `prompts` and `memory`. */
+/** `UserSettings.minds` (DESIGN §24.6). A named Model use preset sets everything here but `prompts`, `memory` and `replyTokens`. */
 export interface MindsSettings {
   enabled: boolean;
   /** How many Live minds run a turn, best score first; the rest wait for Near's triggers. */
@@ -313,6 +313,8 @@ export interface MindsSettings {
   memoryLevels: Fidelity[];
   /** The Minds section's own token budget, apart from the shared section budget (DESIGN §24.3). */
   tokens: number;
+  /** How much of the latest reply a mind and the memory step read, by its end, in tokens; "none" reads it whole (DESIGN §24.5). The user's own: no preset sets it. */
+  replyTokens: Limit;
   memory: MindsMemoryOverrides;
   /** The user's own prompt for a purpose, which wins over a world template; absent, the world's (`worldMindTemplate`), else the built-in (`MIND_PROMPT_DEFAULTS`). */
   prompts: Partial<Record<MindPurpose, string>>;
@@ -320,7 +322,7 @@ export interface MindsSettings {
   skip: { maxBeats: Limit; maxMindsPerBeat: Limit };
 }
 
-type PresetMinds = Omit<MindsSettings, "prompts" | "memory">;
+type PresetMinds = Omit<MindsSettings, "prompts" | "memory" | "replyTokens">;
 
 /** The minds part of each Model use preset (D25): Lean off; Standard 3 Live with notes for Live; Full no limit with notes for Live and Near. */
 export const MINDS_PRESETS: Readonly<Record<"lean" | "standard" | "full", Readonly<PresetMinds>>> = Object.freeze({
@@ -329,9 +331,9 @@ export const MINDS_PRESETS: Readonly<Record<"lean" | "standard" | "full", Readon
   full: { enabled: true, liveLimit: "none", nearRefresh: { scene: true, mention: true, turns: 4, minutes: 60 }, farRefreshMinutes: 720, refreshLimit: "none", memoryLevels: ["live", "near"], tokens: 4000, skip: { maxBeats: "none", maxMindsPerBeat: "none" } },
 });
 
-/** A new user's minds settings: Standard's. */
+/** A new user's minds settings: Standard's, reading the whole latest reply. */
 export function defaultMindsSettings(preset: keyof typeof MINDS_PRESETS = "standard"): MindsSettings {
-  return { ...structuredClone(MINDS_PRESETS[preset]) as PresetMinds, memory: {}, prompts: {} };
+  return { ...structuredClone(MINDS_PRESETS[preset]) as PresetMinds, replyTokens: "none", memory: {}, prompts: {} };
 }
 
 /** Kept equal to `defaultMindsSettings()`: what Settings shows as the defaults. */
@@ -385,6 +387,7 @@ export function mindsSettingsOf(raw: unknown, base: Readonly<MindsSettings> = MI
     refreshLimit: limitIn(m.refreshLimit, 0, 64, base.refreshLimit),
     memoryLevels: levels,
     tokens: typeof m.tokens === "number" && Number.isSafeInteger(m.tokens) && m.tokens >= 0 ? m.tokens : base.tokens,
+    replyTokens: limitIn(m.replyTokens, 1, Number.MAX_SAFE_INTEGER, base.replyTokens),
     memory: isRecord(m.memory) ? memoryOverridesOf(m.memory) : structuredClone(base.memory),
     prompts: isRecord(m.prompts) ? prompts : { ...base.prompts },
     skip: { maxBeats: limitIn(skip.maxBeats, 0, 200, base.skip.maxBeats), maxMindsPerBeat: limitIn(skip.maxMindsPerBeat, 0, 64, base.skip.maxMindsPerBeat) },
@@ -436,9 +439,6 @@ export type MindPlan = {
   cents?: number;
 };
 
-/** A promise, debt, grudge, favour or plan with someone: kept until resolved, never faded (DESIGN §24.4). */
-export type CommitmentKind = "promise" | "debt" | "grudge" | "favour" | "plan" | "other";
-export const COMMITMENT_KINDS: readonly CommitmentKind[] = ["promise", "debt", "grudge", "favour", "plan", "other"];
 /**
  * Whether a plan drives anything: schedules, money, skip beats, fidelity and what a mind is told it
  * plans. Only plans the turn stated (the memory step's) and the GM's do. A mind's own (`source:
@@ -450,6 +450,9 @@ export function planInForce(p: Pick<MindPlan, "source">): boolean {
   return p.source !== "mind";
 }
 
+/** A promise, debt, grudge, favour or plan with someone: kept until resolved, never faded (DESIGN §24.4). */
+export type CommitmentKind = "promise" | "debt" | "grudge" | "favour" | "plan" | "other";
+export const COMMITMENT_KINDS: readonly CommitmentKind[] = ["promise", "debt", "grudge", "favour", "plan", "other"];
 export type CommitmentStatus = "open" | "kept" | "broken" | "released";
 export const COMMITMENT_STATUSES: readonly CommitmentStatus[] = ["open", "kept", "broken", "released"];
 
