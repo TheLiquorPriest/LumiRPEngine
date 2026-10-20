@@ -338,6 +338,8 @@ export class LedgerService {
     private readonly host: HostPort,
     private readonly resolveEnv: EnvResolver,
     private readonly folder: LedgerFold,
+    /** Drops the runtime's copy of a chat's messages (`MessageCache`), so a chat forgotten is read afresh. */
+    private readonly forgetMessages: (chatId: ChatId) => void = () => undefined,
   ) {}
 
   /** Subscribes to host events and registers the context handler. */
@@ -479,10 +481,11 @@ export class LedgerService {
     return (await this.slot(chatId, userId))?.core ?? null;
   }
 
-  /** Drops a chat's cached slot (after attaching a world, or detaching one). */
+  /** Drops a chat's cached slot (after attaching a world, or detaching one), and the copy of its messages. */
   forget(chatId: ChatId): void {
     this.chats.delete(chatId);
     for (const key of [...this.notWorld]) if (key.endsWith(`\u0000${chatId}`)) this.notWorld.delete(key);
+    this.forgetMessages(chatId);
   }
 
   /** Standing notices for the player about a chat (its journal was replaced, a record on a message was damaged), for the inspector's warnings. */

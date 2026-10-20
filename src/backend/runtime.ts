@@ -56,6 +56,7 @@ import { ChatPrefs } from "./chat-prefs";
 import { ChipStore, idAfterSwipeDelete, type StoredChip } from "./chips";
 import type { DryRun, HostPort, InterceptorInput, InterceptorResult } from "./host";
 import { LedgerService, toChain, type TurnContext, type TurnHooks } from "./ledger-io";
+import { MessageCache } from "./message-cache";
 import { StatePush } from "./push";
 import { effectiveMode, recordOutcome, SettingsStore } from "./settings-store";
 import { startMarkersFrom } from "./start-markers";
@@ -540,7 +541,9 @@ export class Runtime implements TurnHooks {
   beatMinds: BeatMinds = (input) => runMinds(this.minds, input);
 
   constructor(options: RuntimeOptions) {
-    this.host = options.host;
+    // Chat reads come from a copy the host's message events keep current (DESIGN §9.6).
+    const messages = new MessageCache(options.host);
+    this.host = messages.host;
     this.registry = createRegistry(options.packs);
     this.pipeline = options.pipeline;
     this.templates = options.templates ?? {};
@@ -561,7 +564,7 @@ export class Runtime implements TurnHooks {
     this.toolSupport = new ToolSupport(this.host);
     this.minds = { host: this.host, registry: this.registry, steps: this.steps, settings: this.settings, presets: this.presets };
     // Snapshots from another build never apply (the build defines LRE_BUILD_ID; tests fold as "dev").
-    this.ledger = new LedgerService(this.host, (chatId, userId) => this.resolveEnv(chatId, userId), new LedgerFold(this.registry, { fingerprint: process.env.LRE_BUILD_ID ?? "dev" }));
+    this.ledger = new LedgerService(this.host, (chatId, userId) => this.resolveEnv(chatId, userId), new LedgerFold(this.registry, { fingerprint: process.env.LRE_BUILD_ID ?? "dev" }), (chatId) => messages.forget(chatId));
     this.studio = new StudioBridge(this.host, this.worlds);
     this.worlds.onChange = (worldId, userId) => this.studio.worldChanged(worldId, userId);
     // Every view pushed to a chat also refreshes the summary the Studio reads of it.
