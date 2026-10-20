@@ -68,9 +68,9 @@ async function alderChat(rig: Rig, minds: JsonObject = {}, people: readonly stri
   return chatId;
 }
 
-/** The section the last interceptor run sent under `label`, or "". */
+/** The section the last reply's prompt held under `label`, or "". */
 function section(rig: Rig, label: string): string {
-  return (rig.host.lastInterceptor?.mutated ?? []).map((m) => m.content ?? "").find((c) => c.startsWith(`[${label}]\n`)) ?? "";
+  return rig.host.section(label);
 }
 
 async function headRecord(rig: Rig, chatId: string, swipe = 0): Promise<LedgerEvent[]> {

@@ -9,7 +9,7 @@ import { Rig } from "../support/rig";
 /** The latest interceptor run's slot texts and the inspector's costs for them, by label. */
 function slots(rig: Rig, chatId: string): { label: string; text: string; tokens: number }[] {
   const record = rig.rt.inspectorRecords(chatId)?.at(-1);
-  const texts = rig.host.lastInterceptor?.mutated.map((m) => m.content ?? "") ?? [];
+  const texts = rig.host.assembled.map((e) => e.content);
   return (record?.sections ?? []).filter((s) => !s.clipped).flatMap((s) => {
     const text = texts.find((t) => t.startsWith(`[${s.label}]\n`));
     return text ? [{ label: s.label, text, tokens: s.tokens }] : [];

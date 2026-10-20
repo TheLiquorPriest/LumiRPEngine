@@ -92,7 +92,7 @@ describe("backend runtime", () => {
     // As after a restart: the bridge that saw the request is gone; the intent comes from the message.
     rig.rt.forgetChat(chatId);
     const g = await rig.host.start(chatId, { type: "normal" });
-    const outcome = rig.host.lastInterceptor?.mutated.find((m) => m.content?.startsWith("[Outcome]"))?.content ?? "";
+    const outcome = rig.host.section("Outcome");
     expect(outcome).toMatch(/Flip a coin: (success|fail) \(rolled [12] on 1d2\)/);
     await rig.host.finish(g, "The coin spins.");
     const head = rig.host.head(chatId);
@@ -141,13 +141,13 @@ describe("backend runtime", () => {
     const vehicles = (await rig.rt.book.slotEntries(bookId, rig.host.userId)).get("vehicles") ?? "";
     rig.host.editEntry(vehicles, { disabled: false, keys: ["ferry"] });
     const leftover = await rig.host.books.createEntry(bookId, { comment: "The vault", content: "Rumors say the bank has an old vault.", keys: ["ferry"], disabled: false, constant: false, position: 0, depth: 4, role: null, order: 200, extensions: { [LEDGER_NAMESPACE]: { lore: "vault", secret: true, gate: "false" } } }, rig.host.userId);
-    await rig.turn(chatId, "I wait for the ferry.", "The horn sounds.");
-    const result = rig.host.lastInterceptor;
-    for (const id of [vehicles, leftover]) {
-      expect(result?.disabled).toContain(id);
-      expect(result?.enabled).not.toContain(id);
-      expect(result?.forced).not.toContain(id);
-    }
+    rig.host.sendUser(chatId, "I wait for the ferry.");
+    await rig.host.settle();
+    const g = await rig.host.start(chatId, { type: "normal" });
+    // The reply's prompt is read with every engine entry the run didn't fill switched off.
+    expect(rig.host.storedEntry(vehicles)).toMatchObject({ disabled: true, content: "" });
+    expect(rig.host.assembled.map((e) => e.id)).not.toContain(vehicles);
+    await rig.host.finish(g, "The horn sounds.");
     await rig.host.settle();
     const entries = await rig.host.books.entries(bookId, rig.host.userId);
     expect(entries.some((e) => e.id === leftover)).toBe(false);
@@ -180,12 +180,12 @@ describe("backend runtime", () => {
     rig.host.sendUser(chatId, "I look around.");
     await rig.host.settle();
     const g = await rig.host.start(chatId, { type: "normal" });
-    expect(rig.host.lastInterceptor?.mutated.find((m) => m.content?.startsWith("[Outcome]"))?.content ?? "").toContain("payment for lamp was declined (Sam doesn't have $99999)");
+    expect(rig.host.section("Outcome")).toContain("payment for lamp was declined (Sam doesn't have $99999)");
     await rig.host.finish(g, "Nothing much.");
     rig.host.sendUser(chatId, "I wait.");
     await rig.host.settle();
     const g2 = await rig.host.start(chatId, { type: "normal" });
-    expect(rig.host.lastInterceptor?.mutated.find((m) => m.content?.startsWith("[Outcome]"))?.content ?? "").not.toContain("lamp");
+    expect(rig.host.section("Outcome")).not.toContain("lamp");
     await rig.host.finish(g2, "Time passes.");
     expect(rig.rt.ledger.errors).toEqual([]);
     // Pay another way (on a fresh chat, before the chip lapses): the first method that covers it applies.
@@ -381,12 +381,14 @@ describe("backend runtime", () => {
     expect(rig.rt.ledger.errors).toEqual([]);
   });
 
-  test("the interceptor fills the engine's slot entries from the fold", async () => {
+  test("the engine run fills the engine's section entries from the fold, and the reply's prompt holds them", async () => {
     const rig = new Rig();
     const chatId = await rig.worldChat();
-    const assembly = await rig.host.dryRun(chatId);
-    expect(assembly.messages.some((m) => m.content.includes("[Scene]") && m.content.includes("Sam has $"))).toBe(true);
-    expect(rig.host.lastInterceptor?.forced.length).toBeGreaterThan(0);
+    rig.host.sendUser(chatId, "I look around.");
+    await rig.host.settle();
+    await rig.host.start(chatId, { type: "normal" });
+    expect(rig.host.section("Scene")).toContain("Sam has $");
+    expect(rig.host.fills.some((f) => f.content?.startsWith("[Scene]\n"))).toBe(true);
   });
 
   test("in a world chat your own books are left to native World Info, while the engine's sections still go in; the inspector shows them (dry runs don't enter it)", async () => {
@@ -400,20 +402,22 @@ describe("backend runtime", () => {
     const meta = await rig.host.chats.chatMetadata(chatId, rig.host.userId);
     const ids = Array.isArray(meta.chat_world_book_ids) ? meta.chat_world_book_ids : [];
     await rig.host.chats.mergeChatMetadata(chatId, { chat_world_book_ids: [...ids, userBook] }, rig.host.userId);
-    await rig.turn(chatId, "Let's go to the diner.", "Sure.");
-    const result = rig.host.lastInterceptor;
-    if (!result) throw new Error("no interceptor run");
-    // No vote, force, enable or text for any of the user's entries.
-    for (const list of [result.disabled, result.enabled, result.forced, result.mutated.map((m) => m.id)]) expect(list.filter((id) => mine.has(id))).toEqual([]);
-    // Every section the engine filled is a slot entry, enabled, forced and given its text.
+    rig.host.sendUser(chatId, "Let's go to the diner.");
+    await rig.host.settle();
+    const g = await rig.host.start(chatId, { type: "normal" });
+    // The engine never fills, moves or switches the user's entries; their own settings place them.
+    expect(rig.host.fills.filter((f) => mine.has(f.entryId))).toEqual([]);
+    expect(rig.host.placed.filter((id) => mine.has(id))).toEqual([]);
+    const prompt = rig.host.assembled.map((e) => e.id);
+    expect(prompt.filter((id) => mine.has(id))).toEqual([...mine].filter((id) => rig.host.storedEntry(id)?.constant === true));
+    // Every section the engine filled is one of its own entries, in the prompt with its text.
     const run = await rig.rt.runOf(chatId, rig.host.userId);
     const slots = await rig.rt.book.slotEntries((await rig.rt.worlds.index(run?.worldId ?? "", rig.host.userId))?.loreBookId ?? "", rig.host.userId);
     const scene = slots.get("scene") ?? "";
-    expect(result.enabled).toContain(scene);
-    expect(result.forced).toContain(scene);
-    expect(result.mutated.find((m) => m.id === scene)?.content).toMatch(/^\[Scene\]\n/);
-    expect(result.mutated.every((m) => [...slots.values()].includes(m.id) && result.enabled.includes(m.id) && result.forced.includes(m.id))).toBe(true);
-    // Opening the inspector verifies slot delivery; a generation shows sections and the section budget only.
+    expect(rig.host.assembled.find((e) => e.id === scene)?.content).toMatch(/^\[Scene\]\n/);
+    for (const f of rig.host.fills.filter((x) => x.content !== null)) expect(isRecord(rig.host.storedEntry(f.entryId)?.extensions[LEDGER_NAMESPACE])).toBe(true);
+    await rig.host.finish(g, "Sure.");
+    // The reply's World Info activation verified each section's delivery; a generation shows sections and the section budget only.
     const count = (rig.rt.inspectorRecords(chatId) ?? []).length;
     rig.body(await rig.send({ type: "lre.view.open", chatId, panel: "core.context", entity: null }));
     const panel = (await rig.rt.view(chatId, rig.host.userId)).panels["core.context"];
@@ -429,7 +433,7 @@ describe("backend runtime", () => {
     expect((rig.rt.inspectorRecords(chatId) ?? []).length).toBe(count);
   });
 
-  test("opening the inspector leaves Outcome, Montage and Outline unchecked: a dry run plans nothing, so it can't show them", async () => {
+  test("each section a turn filled is verified from its reply's World Info activation, Outcome, Montage and Outline included", async () => {
     const rig = new Rig({ shipped: true });
     const worldId = await rig.newWorld("Alder", "modern_slice_of_life");
     const chatId = rig.host.createChat("Morning.");
@@ -441,7 +445,7 @@ describe("backend runtime", () => {
     const sections = isRecord(latest) && Array.isArray(latest.sections) ? latest.sections.flatMap((s) => (isRecord(s) ? [s] : [])) : [];
     const turnOnly = sections.filter((s) => ["outcome", "montage", "outline"].includes(String(s.slot)) && s.clipped !== true);
     expect(turnOnly.length).toBeGreaterThan(0);
-    expect(turnOnly.map((s) => s.delivery)).toEqual(turnOnly.map(() => "unchecked"));
+    expect(turnOnly.map((s) => s.delivery)).toEqual(turnOnly.map(() => "verified"));
     expect(sections.some((s) => s.slot === "scene" && s.delivery === "verified")).toBe(true);
   });
 
@@ -638,7 +642,7 @@ describe("Scene slot", () => {
     rig.host.sendUser(chatId, "I look around.");
     await rig.host.settle();
     const g = await rig.host.start(chatId, { type: "normal" });
-    const scene = rig.host.lastInterceptor?.mutated.find((m) => m.content?.startsWith("[Scene]"))?.content ?? "";
+    const scene = rig.host.section("Scene");
     expect(scene).toMatch(/This turn took \d+ min\./);
     await rig.host.finish(g, "Quiet.");
   });

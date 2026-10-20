@@ -193,7 +193,7 @@ describe("macro neutralization", () => {
     const chatId = rig.host.createChat("Morning.");
     rig.body(await rig.send({ type: "lre.world", op: "attach", worldId, chatId }));
     await rig.turn(chatId, "I look around.", "Quiet.");
-    const contents = (rig.host.lastInterceptor?.mutated ?? []).map((m) => m.content ?? "");
+    const contents = rig.host.assembled.map((e) => e.content);
     expect(contents.some((c) => c.includes("setvar"))).toBe(true);
     for (const c of contents) expect(c).not.toMatch(/[{}]/);
   });
@@ -491,7 +491,7 @@ describe("Re-narrate after a restart", () => {
     rig.body(await rig.send({ type: "lre.world", op: "attach", worldId, chatId }));
     rig.body(await rig.send({ type: "lre.action", chatId, action: "flip_coin", params: {}, source: "palette" }));
     const g = await rig.host.start(chatId, { type: "normal" });
-    const first = rig.host.lastInterceptor?.mutated.find((m) => m.content?.startsWith("[Outcome]"))?.content ?? "";
+    const first = rig.host.section("Outcome");
     expect(first).toMatch(/Flip a coin: (success|fail)/);
     await rig.host.finish(g, "The coin spins.");
     // As after a restart: the bridge and its plans are gone.
@@ -499,7 +499,7 @@ describe("Re-narrate after a restart", () => {
     const chip = (await rig.rt.view(chatId, rig.host.userId)).chips.find((c) => c.kind === "swipe_option");
     rig.body(await rig.send({ type: "lre.chip", chatId, chip: chip?.id, choice: "renarrate" }));
     const g2 = await rig.host.start(chatId, { type: "swipe" });
-    expect(rig.host.lastInterceptor?.mutated.find((m) => m.content?.startsWith("[Outcome]"))?.content).toBe(first);
+    expect(rig.host.section("Outcome")).toBe(first);
     await rig.host.finish(g2, "The coin spins again, the same way.");
     expect(rig.rt.ledger.errors).toEqual([]);
   });
@@ -536,21 +536,20 @@ describe("helper fallback answers", () => {
 });
 
 describe("engine book slots", () => {
-  test("a slot entry deleted in the host's UI is recreated, and its section comes back next turn", async () => {
+  test("a slot entry deleted in the host's UI is recreated by the next engine run, and its section reaches that reply's prompt", async () => {
     const rig = new Rig();
     const chatId = await rig.worldChat();
     const run = await rig.rt.runOf(chatId, rig.host.userId);
     const bookId = (await rig.rt.worlds.index(run?.worldId ?? "", rig.host.userId))?.loreBookId ?? "";
     const scene = (await rig.rt.book.slotEntries(bookId, rig.host.userId)).get("scene") ?? "";
     await rig.host.books.deleteEntry(scene, rig.host.userId);
-    await rig.turn(chatId, "I look around.", "Quiet.");
-    expect(rig.rt.inspectorRecords(chatId)?.at(-1)?.warnings?.some((w) => w.includes("recreated"))).toBe(true);
-    await rig.host.settle();
-    rig.host.sendUser(chatId, "And again.");
+    rig.host.sendUser(chatId, "I look around.");
     await rig.host.settle();
     const g = await rig.host.start(chatId, { type: "normal" });
-    expect(rig.host.lastInterceptor?.mutated.some((m) => m.content?.startsWith("[Scene]"))).toBe(true);
-    await rig.host.finish(g, "Still quiet.");
+    const recreated = (await rig.rt.book.slotEntries(bookId, rig.host.userId)).get("scene") ?? "";
+    expect(recreated).not.toBe(scene);
+    expect(rig.host.assembled.find((e) => e.id === recreated)?.content).toMatch(/^\[Scene\]\n/);
+    await rig.host.finish(g, "Quiet.");
   });
 });
 

@@ -18,7 +18,7 @@ async function sent(rig: Rig, chatId: string, budget: number): Promise<Map<strin
   rig.body(await rig.send({ type: "lre.settings.set", patch: { modelUse: { tokens: { sections: budget } } } }));
   await rig.host.dryRun(chatId);
   const out = new Map<string, string>();
-  for (const m of rig.host.lastInterceptor?.mutated ?? []) {
+  for (const m of rig.host.assembled) {
     const label = /^\[([^\]]+)\]\n/.exec(m.content ?? "")?.[1];
     if (label !== undefined) out.set(label, m.content ?? "");
   }

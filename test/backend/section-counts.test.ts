@@ -8,7 +8,7 @@ import { Rig } from "../support/rig";
 /** The latest interceptor run's sections, with the text each sent and the cost the inspector gave it. */
 function sections(rig: Rig, chatId: string): { slot: string; text: string; tokens: number; clipped: boolean }[] {
   const record = rig.rt.inspectorRecords(chatId)?.at(-1);
-  const texts = rig.host.lastInterceptor?.mutated.map((m) => m.content ?? "") ?? [];
+  const texts = rig.host.assembled.map((e) => e.content);
   return (record?.sections ?? []).map((s) => ({ slot: s.slot, text: texts.find((t) => t.startsWith(`[${s.label}]\n`)) ?? "", tokens: s.tokens, clipped: s.clipped }));
 }
 
