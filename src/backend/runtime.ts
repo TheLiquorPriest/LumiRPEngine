@@ -1493,6 +1493,11 @@ export class Runtime implements TurnHooks {
       const field = typeof p.field === "string" ? p.field : undefined;
       const bounded = boundProposal(this.registry, context.world, context.state, { type, ...(entity ? { entity } : {}), ...(field ? { field } : {}), ...(typeof p.delta === "number" ? { delta: p.delta } : {}) }, { typeMode, ...(settings.extraction[type]?.maxDelta !== undefined ? { typeMaxDelta: settings.extraction[type]?.maxDelta } : {}) });
       if (bounded.mode === "never") continue;
+      // L27: whichever step proposed it (extraction or a world's effects step), on a Re-read too.
+      if (type === "time_advance" && skipped) {
+        this.host.log("info", `[LumiRPEngine] read ${messageId.slice(0, 8)}: dropped ${describeProposal(p)} (a timelapse turn's time passed as its timelapse)`, userId);
+        continue;
+      }
       if (type === "time_advance" && fighting) {
         held.push(p);
         continue;

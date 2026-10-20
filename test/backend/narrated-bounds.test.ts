@@ -14,17 +14,23 @@ const EXTRACT_MARK = "propose concrete state changes";
 
 /**
  * A fresh Port Alder chat whose next reply the extractor reads as `proposals`, with `extraction`
- * settings applied first. With `fights` the world has the Modern profile's combat; `ready` runs
- * after a first turn, before that reply's turn, and `before` is the clock then; `play` plays that
- * turn in place of a typed "I sit with Danny."
+ * settings applied first. With `fights` the world has the Modern profile's combat; `world` edits
+ * and commits the world before the chat attaches; `ready` runs after a first turn, before that
+ * reply's turn, and `before` is the clock then; `play` plays that turn in place of a typed
+ * "I sit with Danny."
  */
-async function chat(proposals: JsonObject[], extraction: JsonObject, opts: { fights?: boolean; ready?: (rig: Rig, chatId: string) => Promise<void>; play?: (rig: Rig, chatId: string) => Promise<void> } = {}) {
+async function chat(
+  proposals: JsonObject[],
+  extraction: JsonObject,
+  opts: { fights?: boolean; world?: (rig: Rig, worldId: string) => Promise<void>; ready?: (rig: Rig, chatId: string) => Promise<void>; play?: (rig: Rig, chatId: string) => Promise<void> } = {},
+) {
   const rig = new Rig({ shipped: true });
   const worldId = await rig.newWorld("Alder", "modern_slice_of_life");
   if (opts.fights) {
     rig.body(await rig.send({ type: "lre.editor", worldId, base: null, op: "profile", profile: "modern", choices: {} }));
     rig.body(await rig.send({ type: "lre.world", op: "commit", worldId, base: null }));
   }
+  await opts.world?.(rig, worldId);
   const chatId = rig.host.createChat("Morning.");
   rig.body(await rig.send({ type: "lre.world", op: "attach", worldId, chatId }));
   rig.body(await rig.send({ type: "lre.settings.set", patch: { extraction } }));
@@ -62,6 +68,13 @@ async function fight(rig: Rig, chatId: string): Promise<void> {
   rig.body(await rig.send({ type: "lre.action", chatId, action: "fight", params: { target: "danny_okafor" }, source: "palette" }));
   const g = await rig.host.start(chatId, { type: "normal" });
   await rig.host.finish(g, "Danny squares up to you.");
+}
+
+/** Plays a 30-minute timelapse from the palette, whose reply tells of more time passing. */
+async function timelapse(rig: Rig, chatId: string): Promise<void> {
+  rig.body(await rig.send({ type: "lre.action", chatId, action: "timelapse", params: { target: { type: "duration", minutes: 30 } }, source: "palette" }));
+  const g = await rig.host.start(chatId, { type: "normal" });
+  await rig.host.finish(g, "The yards work for another quarter of an hour.");
 }
 
 describe("a narrated time skip under confirm", () => {
@@ -110,12 +123,28 @@ describe("a narrated time skip, auto or confirm", () => {
   });
 
   test("a timelapse turn's reply proposes none: the clock ends where the timelapse took it (L27)", async () => {
-    const timelapse = async (rig: Rig, chatId: string) => {
-      rig.body(await rig.send({ type: "lre.action", chatId, action: "timelapse", params: { target: { type: "duration", minutes: 30 } }, source: "palette" }));
-      const g = await rig.host.start(chatId, { type: "normal" });
-      await rig.host.finish(g, "The yards work for another quarter of an hour.");
-    };
     const got = await chat([{ type: "time_advance", minutes: 15 }], { time_advance: { mode: "auto" } }, { play: timelapse });
+    expect((await got.state()).clock - got.before).toBe(30);
+    expect(got.rig.rt.ledger.errors).toEqual([]);
+  });
+
+  test("nor does a world's effects step on that turn, nor a Re-read of the reply edited later", async () => {
+    // The effects step's prompt carries the extractor's mark, so the fake answers it with the skip too.
+    const effects = async (rig: Rig, worldId: string) => {
+      rig.body(await rig.send({ type: "lre.editor", op: "put", worldId, base: null, collection: "steps", id: "fx", value: { id: "fx", purpose: "extract", template: `Note the time that passed, and ${EXTRACT_MARK}.`, output: "effects", signals: ["always"] } }));
+      rig.body(await rig.send({ type: "lre.world", op: "commit", worldId, base: null }));
+    };
+    const got = await chat([{ type: "time_advance", minutes: 15 }], { time_advance: { mode: "auto" } }, { world: effects, play: timelapse });
+    expect(got.rig.host.quietCalls.some((r) => r.messages[0]?.content.startsWith("Note the time that passed"))).toBe(true);
+    expect((await got.state()).clock - got.before).toBe(30);
+    // A Re-read has no pre phase: it still knows the turn was a timelapse.
+    const head = got.rig.host.head(got.chatId);
+    if (!head) throw new Error("no reply");
+    got.rig.host.editMessage(got.chatId, head.id, `${head.swipes[0] ?? ""} Another hour slips by.`);
+    await got.rig.host.settle();
+    const reread = (await got.rig.rt.view(got.chatId, got.rig.host.userId)).chips.find((c) => c.kind === "reread");
+    if (!reread) throw new Error("no reread chip");
+    got.rig.body(await got.rig.send({ type: "lre.chip", chatId: got.chatId, chip: reread.id, choice: "reread" }));
     expect((await got.state()).clock - got.before).toBe(30);
     expect(got.rig.rt.ledger.errors).toEqual([]);
   });
