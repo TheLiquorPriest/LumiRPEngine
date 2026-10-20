@@ -640,6 +640,15 @@ describe("a business's owner manages its accounts by their role on the business"
     expect((await owner.hub()).businesses.flatMap((b) => b.managed)).toEqual([]);
     expect((await (await MoneyChat.start()).hub()).businesses.flatMap((b) => b.managed)).toEqual([]);
   });
+
+  test("an account of the shop Marcus can't see stays off its page on his money, by id as much as in full; the GM's view of the shop has it", async () => {
+    const owner = await MoneyChat.start({ pov: "marcus_delgado", secret: [LIFT_LOAN] });
+    const shop = (await owner.hub()).businesses.find((b) => b.id === BUSINESS);
+    expect(shop?.accounts).toContain(SHOP);
+    expect(shop?.accounts).not.toContain(LIFT_LOAN);
+    expect(shop?.managed).toEqual([]);
+    expect(account(await owner.party(BUSINESS), LIFT_LOAN).name).toBe("Lift loan");
+  });
 });
 
 describe("a manager runs a business's money for the business, never for themselves", () => {
