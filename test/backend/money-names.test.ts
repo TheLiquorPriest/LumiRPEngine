@@ -112,6 +112,20 @@ describe("an id or a link that would name someone hidden reaches the player unde
   });
 });
 
+describe("a label or a memo names only what the player may see", () => {
+  test("with the shop's lift loan secret, its autopay reaches Marcus's money as a loan's, in his standing payments, what's coming up and the line it posts, while the GM's views name it", async () => {
+    const chat = await MoneyChat.start({ pov: "marcus_delgado", secret: ["acct_alder_lift_loan"] });
+    // Past the 15th, when the autopay first runs.
+    await chat.timelapse(2 * 1440);
+    const view = await chat.hub();
+    expect(view.flows.filter((f) => f.label === "Loan autopay").length).toBe(1);
+    expect(view.overview?.upcoming.some((u) => u.label === "Loan autopay")).toBe(true);
+    expect(view.accounts.find((a) => a.id === "acct_marcus_shop")?.transactions.some((t) => t.memo === "Loan autopay")).toBe(true);
+    expect(JSON.stringify((await chat.state()).panels["economy.money"])).not.toContain("Lift loan");
+    expect((await chat.party("marcus_delgado")).flows.map((f) => f.label)).toContain("Lift loan autopay");
+  });
+});
+
 describe("each journal line names the other side of its own payment", () => {
   const SHOP = "acct_marcus_shop";
   const CHECKING = "acct_pov_checking";
