@@ -9,6 +9,7 @@ import { transientFailure } from "../../src/backend/steps";
 import { lintWorld, migrateWorld } from "../../src/engine/authoring";
 import { matchCatalog } from "../../src/packs/economy/core/index";
 import { derivedUnpricedCap } from "../../src/packs/economy/core/model";
+import { salesTaxOn } from "../../src/packs/economy/core/taxes";
 import type { JsonObject, JsonValue } from "../../src/shared/json";
 import type { LedgerEvent } from "../../src/shared/ledger";
 import { Rig } from "../support/rig";
@@ -84,6 +85,52 @@ describe("a catalog row prices an item only when it names it", () => {
     expect((await bought(rig, chatId)).find((b) => b.memo === "Bought desk lamp")?.cents).toBe(2650);
     const undo = (await rig.rt.view(chatId, rig.host.userId)).chips.filter((c) => c.kind === "undo").map((c) => c.label);
     expect(undo).toEqual([expect.stringMatching(/^Bought milk: \$\d+\.\d{2} \(priced as Milk, whole\)/)]);
+  });
+});
+
+describe("where the item is bought chooses between rows that name it alike", () => {
+  /** A typed walk to `place` that buys `item` (`qty` of them) in the same turn: what the POV's history charged, and the sales tax it paid. */
+  async function boughtAt(place: string, item: string, qty: number): Promise<{ memo: string; cents: number; tax: number }> {
+    const { rig, chatId } = await chat();
+    const taxAccount = "economy.external:tax:sales:mi";
+    const taxBefore = (await folded(rig, chatId)).state.accounts[taxAccount] ?? 0;
+    const buy = { action: "buy", params: { item, qty }, text: `I buy ${qty} ${item}` };
+    rig.host.quietReply = (req) => (req.messages.map((m) => m.content).join("\n").includes(INTERPRET_MARK) ? JSON.stringify({ action: "go", params: { to: place }, confidence: 0.9, more: [buy] }) : "{}");
+    await rig.turn(chatId, `I jog across to the ${place} and buy ${qty} ${item}.`, "You order at the counter.");
+    expect(rig.rt.ledger.errors).toEqual([]);
+    const charges = await bought(rig, chatId);
+    expect(charges).toHaveLength(1);
+    const { state } = await folded(rig, chatId);
+    return { memo: charges[0]?.memo ?? "", cents: charges[0]?.cents ?? 0, tax: (state.accounts[taxAccount] ?? 0) - taxBefore };
+  }
+
+  test("two large coffees at Bluebird Coffee are two cafe drips, taxed as prepared food at Money 4", async () => {
+    const got = await boughtAt("bluebird_coffee", "large coffee", 2);
+    expect(got.memo).toBe("Bought Drip coffee, 12 oz, cafe ×2");
+    expect(got.tax).toBeGreaterThan(0);
+    expect(got.tax).toBe(salesTaxOn(got.cents - got.tax, 6));
+  });
+
+  test("coffee at Alder Market is a bag of ground coffee, which groceries' exemption leaves untaxed", async () => {
+    for (const item of ["coffee", "large coffee"]) {
+      const got = await boughtAt("alder_market", item, 1);
+      expect(got.memo).toBe("Bought Coffee, ground");
+      expect(got.tax).toBe(0);
+    }
+  });
+
+  test("an item only one row names is that row wherever it's bought; a place that sells neither, or the purchase's own category, decides as before", async () => {
+    const { rig, chatId } = await chat();
+    const { ctx } = await folded(rig, chatId);
+    for (const place of [null, "bluebird_coffee", "alder_market", "shoreline_fuel"]) {
+      expect(matchCatalog(ctx, "ground coffee", place)).toBe("coffee_ground");
+      expect(matchCatalog(ctx, "drip coffee", place)).toBe("coffee_drip_cafe");
+      expect(matchCatalog(ctx, "large latte", place)).toBe("latte_16oz");
+      expect(matchCatalog(ctx, "lantern oil", place)).toBeNull();
+    }
+    // Nowhere, at home or at the garage, nothing sold tells the kinds apart: the row that names the item outright stands.
+    for (const place of [null, "harbor_street_114", "alder_automotive"]) expect(matchCatalog(ctx, "large coffee", place)).toBe("coffee_ground");
+    expect(matchCatalog(ctx, "large coffee", "bluebird_coffee", "groceries_staples")).toBe("coffee_ground");
   });
 });
 

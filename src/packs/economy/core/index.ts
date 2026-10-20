@@ -36,7 +36,7 @@ import { currentScore } from "./credit";
 import { allFlows, businessDay, livingCost, occurrences, splitAmount } from "./flows";
 import { EVENTS, isOpened, reject } from "./journal";
 import { financeKinds } from "./kinds";
-import { catalogName, itemName, stem } from "./items";
+import { type CatalogName, catalogName, itemName, stem } from "./items";
 import {
   CORRECTION_ACCOUNT,
   accountsOf,
@@ -144,9 +144,13 @@ function offersAtPlace(ctx: ReadContext, place: string | null): Offer[] {
  * muffin"; "desk lamp" doesn't fit "Desk", nor "chocolate bar" "Bar or club cover charge"), and
  * isn't another kind of it: an item with a qualifier the row lacks doesn't fit a row with
  * qualifiers of its own ("lantern oil" isn't "Vegetable or canola oil"; "coffee" is "Drip coffee").
- * Of the rows that fit, the one holding the most of the item's words wins ("pint of beer" is "Beer
- * at a bar", by its id); then one whose own noun is that noun, one in the category the purchase
- * gives, one the place sells, one that mentions a place tag (a pint at a bar), then the first id.
+ * A qualifier no row of the noun names ("large" in "large coffee") tells none of them apart, so
+ * the place may: where it sells the category of a row kept out by that qualifier alone and of no
+ * row that fits outright, that row fits too (a large coffee at a cafe is a drip coffee, at a
+ * grocery ground coffee). Of the rows that fit, the one holding the most of the item's words wins
+ * ("pint of beer" is "Beer at a bar", by its id); then one whose own noun is that noun, one in the
+ * category the purchase gives, one the place sells, one that mentions a place tag (a pint at a
+ * bar), then the first id.
  */
 export function matchCatalog(ctx: ReadContext, text: string, place: string | null, category = ""): string | null {
   const item = itemName(text);
@@ -155,14 +159,21 @@ export function matchCatalog(ctx: ReadContext, text: string, place: string | nul
   const rows = ctx.tables.get("economy.catalog")?.rows ?? {};
   const trade = placeTrade(ctx, place);
   const tags = trade.tags.map((t) => stem(t.toLowerCase()));
+  const nouns = Object.keys(rows)
+    .sort()
+    .map((id) => ({ id, name: catalogName(id, strOf(rows[id]?.name, id)) }))
+    .filter((r) => r.name.heads.has(item.head));
+  const unnamed = (name: CatalogName): string[] => [...item.words].filter((w) => w !== item.head && !name.words.has(w));
+  const otherKind = (name: CatalogName): boolean => unnamed(name).length > 0 && [...name.qualifiers].some((q) => !said.has(q));
+  const sold = (id: string): boolean => trade.categories.includes(strOf(rows[id]?.category));
+  const outright = nouns.filter((r) => !otherKind(r.name));
+  // Only the place lets a row back in, and only over rows it doesn't sell: with none fitting outright the item is another kind than every one ("lantern oil").
+  const placeChooses = outright.length > 0 && !outright.some((r) => sold(r.id));
+  const known = (w: string): boolean => nouns.some((r) => r.name.words.has(w));
   let best: { id: string; score: number[] } | null = null;
-  for (const id of Object.keys(rows).sort()) {
-    const row = rows[id];
-    const name = catalogName(id, strOf(row?.name, id));
-    if (!name.heads.has(item.head)) continue;
-    const unnamed = [...item.words].some((w) => w !== item.head && !name.words.has(w));
-    if (unnamed && [...name.qualifiers].some((q) => !said.has(q))) continue;
-    const rowCategory = strOf(row?.category);
+  for (const { id, name } of nouns) {
+    if (otherKind(name) && !(placeChooses && sold(id) && unnamed(name).every((w) => !known(w)))) continue;
+    const rowCategory = strOf(rows[id]?.category);
     const score = [[...said].filter((w) => name.words.has(w)).length, name.main === item.head ? 1 : 0, rowCategory === category ? 1 : 0, trade.categories.includes(rowCategory) ? 1 : 0, tags.some((t) => name.words.has(t)) ? 1 : 0];
     const first = best ? score.findIndex((s, i) => s !== best?.score[i]) : 0;
     if (!best || (first >= 0 && (score[first] ?? 0) > (best.score[first] ?? 0))) best = { id, score };
