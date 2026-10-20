@@ -14,7 +14,7 @@ import { humanize } from "../../../frontend/format";
 import { AmountField, Reveal, SelectField, type Choice } from "./forms";
 import type { HubControls, SectionProps } from "./hub";
 import { accountBlocks, accountControls, accountGroups, cardControls, groupOf, paySources, transferTargets, utilisation, type AccountGroup } from "./layout";
-import { AmountAction, EntityFields, TxnRows } from "./lines";
+import { AmountAction, EntityFields, OwnerRows, TxnRows } from "./lines";
 import { PayTiersEditor, tierText } from "./pay-prefs";
 import { accountStatusOps, amountOf, autopayAction, autopayOps, cardAction, cashAction, closeAccountOps, payCardAction, payPrefsAction, payPrefsOps, releaseHoldOps, transferAction, type CardChange } from "./requests";
 
@@ -166,9 +166,7 @@ function AccountCard(props: { view: FinanceView; account: AccountView; controls:
       {blocks.owners ? (
         <>
           <div class="lre-h">Owners</div>
-          {a.owners.map((o) => (
-            <Row key={o.party} k={o.name} sub={humanize(o.role)} v={o.share > 0 ? `${Math.round(o.share * 10) / 10}%` : undefined} />
-          ))}
+          <OwnerRows owners={a.owners} />
         </>
       ) : null}
       {blocks.terms ? (

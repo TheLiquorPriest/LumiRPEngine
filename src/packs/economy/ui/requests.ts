@@ -180,8 +180,9 @@ export function flowFormProblem(form: FlowForm, currency: WorldCurrency, require
 
 /**
  * A flow form as `flow_create` and `flow_update` take it: the amount in minor units; a one-off as
- * `once` (`YYYY-MM-DDTHH:MM`), a repeat as `every` with its interval, weekday, day or month, time,
- * start, end and count; the shortfall with what it needs.
+ * `once` (`YYYY-MM-DDTHH:MM`), a repeat as `every` with its interval (1 too, so an edit back to
+ * every time goes), weekday, day or month, time, start, end and count; the shortfall with what it
+ * needs.
  */
 export function flowParams(form: FlowForm, currency: WorldCurrency): JsonObject {
   const params: JsonObject = { label: form.label.trim(), kind: form.kind, from: form.from, to: form.to.trim(), every: form.every, shortfall: form.shortfall };
@@ -189,7 +190,7 @@ export function flowParams(form: FlowForm, currency: WorldCurrency): JsonObject 
   if (cents !== null) params.amount = cents;
   if (form.every === "once") params.once = `${form.start}T${form.at || "09:00"}`;
   else {
-    if (form.interval > 1) params.interval = form.interval;
+    params.interval = form.interval;
     if ((form.every === "month" || form.every === "year") && form.day !== null) params.day = form.day;
     if (form.every === "week" && form.weekday !== null) params.weekday = form.weekday;
     if (form.every === "year" && form.month !== null) params.month = form.month;
@@ -215,13 +216,22 @@ export function flowCreateAction(form: FlowForm, currency: WorldCurrency): Actio
 /** The schedule's params: sent whole when any of them changes, so a new monthly schedule never keeps an old weekday. */
 const SCHEDULE_PARAMS = ["every", "interval", "day", "weekday", "month", "at", "once", "roll"];
 
-/** The changes a flow form makes to a stored flow (an omitted param leaves its part as it is); null when nothing changes. */
+/**
+ * A flow's optional parts an edit can empty. Neither an action's params nor a GM's set can carry an
+ * empty number or choice, so an edit names what it empties (`clear`) instead. The params and the
+ * fields they set share these names.
+ */
+const CLEARABLE = ["at", "start", "end", "count", "roll", "retry_days", "retries", "fallback", "category"];
+
+/** The changes a flow form makes to a stored flow (an omitted param leaves its part as it is, `clear` empties those it names); null when nothing changes. */
 export function flowUpdateAction(flow: Flow, form: FlowForm, currency: WorldCurrency): ActionBody | null {
   const was = flowParams(flowFormOf(flow, currency), currency);
   const now = flowParams(form, currency);
   const changed: JsonObject = {};
   for (const [key, value] of Object.entries(now)) if (JSON.stringify(was[key] ?? null) !== JSON.stringify(value)) changed[key] = value;
   if (SCHEDULE_PARAMS.some((key) => key in changed)) for (const key of SCHEDULE_PARAMS) if (now[key] !== undefined) changed[key] = now[key] as JsonValue;
+  const clear = CLEARABLE.filter((key) => was[key] !== undefined && now[key] === undefined);
+  if (clear.length > 0) changed.clear = clear.join(",");
   return Object.keys(changed).length === 0 ? null : { action: FINANCE_ACTIONS.flowUpdate, params: { flow: flow.id, ...changed } };
 }
 
@@ -237,7 +247,7 @@ export function flowFieldsOf(form: FlowForm, currency: WorldCurrency): JsonObjec
   if (form.every === "once") fields.once = `${form.start}T${form.at || "09:00"}`;
   else {
     fields.every = form.every;
-    if (form.interval > 1) fields.interval = form.interval;
+    fields.interval = form.interval;
     if ((form.every === "month" || form.every === "year") && form.day !== null) fields.days = [form.day];
     if (form.every === "week" && form.weekday !== null) fields.weekdays = [form.weekday];
     if (form.every === "year" && form.month !== null) fields.months = [form.month];
@@ -270,10 +280,10 @@ export function flowSpawnOps(id: EntityId, form: FlowForm, currency: WorldCurren
 }
 
 /**
- * The GM's change to a flow: a `set` for each declared field the form changes (its name is the
- * entity's and stays). A set can't unset, so a schedule that changes shape empties what the old
- * shape held: the weekday list goes empty when a flow turns monthly, and `once` when a one-off
- * becomes a repeat.
+ * The GM's change to a flow: a `set` for each declared field the form changes. A set can't unset,
+ * so a schedule that changes shape empties what the old shape held: the weekday list goes empty
+ * when a flow turns monthly, and `once` when a one-off becomes a repeat. A new name and the
+ * optional parts the form empties go by the GM's `economy.flow_edit`, as a set can do neither.
  */
 export function flowEditOps(flow: Flow, form: FlowForm, currency: WorldCurrency): EditOp[] {
   const was = flowFieldsOf(flowFormOf(flow, currency), currency);
@@ -282,6 +292,10 @@ export function flowEditOps(flow: Flow, form: FlowForm, currency: WorldCurrency)
   for (const [field, value] of Object.entries(now)) if (JSON.stringify(was[field] ?? null) !== JSON.stringify(value)) ops.push({ op: "set", entity: flow.id, field, value });
   for (const field of ["weekdays", "days", "months"]) if (was[field] !== undefined && now[field] === undefined) ops.push({ op: "set", entity: flow.id, field, value: [] });
   if (was.once !== undefined && now.once === undefined) ops.push({ op: "set", entity: flow.id, field: "once", value: "" });
+  const name = form.label.trim();
+  const renamed = name !== "" && name !== flow.label;
+  const clear = CLEARABLE.filter((key) => was[key] !== undefined && now[key] === undefined);
+  if (renamed || clear.length > 0) ops.push({ op: "effect", effect: "economy.flow_edit", args: { flow: flow.id, ...(renamed ? { name } : {}), ...(clear.length > 0 ? { clear: clear.join(",") } : {}) } });
   return ops;
 }
 
@@ -427,8 +441,8 @@ export function routeOps(target: RouteTarget, party: EntityId, to: string): Edit
   return [{ op: "effect", effect: "economy.route", args: { ...target, party, to } }];
 }
 
-export function propertyBuyAction(property: EntityId, price: number, opts: { from?: EntityId; down?: number; termMonths?: number; aprPct?: number } = {}): ActionBody {
-  return { action: FINANCE_ACTIONS.propertyBuy, params: { property, price, ...(opts.from ? { from: opts.from } : {}), ...(opts.down !== undefined ? { down: opts.down } : {}), ...(opts.termMonths !== undefined ? { term_months: opts.termMonths } : {}), ...(opts.aprPct !== undefined ? { apr_pct: opts.aprPct } : {}) } };
+export function propertyBuyAction(property: EntityId, price: number, opts: { from?: EntityId; down?: number; termMonths?: number } = {}): ActionBody {
+  return { action: FINANCE_ACTIONS.propertyBuy, params: { property, price, ...(opts.from ? { from: opts.from } : {}), ...(opts.down !== undefined ? { down: opts.down } : {}), ...(opts.termMonths !== undefined ? { term_months: opts.termMonths } : {}) } };
 }
 
 export function propertySellAction(property: EntityId, price: number, opts: { buyer?: EntityId; to?: EntityId } = {}): ActionBody {
@@ -489,4 +503,13 @@ export function fieldOps(entity: EntityId, was: Readonly<JsonObject>, now: Reado
 /** The GM's new job: spawned with its declared fields, active, in one edit. */
 export function jobSpawnOps(id: EntityId, name: string, fields: JsonObject): EditOp[] {
   return [{ op: "spawn", kind: "job", name, id }, ...Object.entries({ ...fields, status: "active" }).map(([field, value]): EditOp => ({ op: "set", entity: id, field, value }))];
+}
+
+/** The GM's new property for a party: spawned under its name, the party its whole owner, at its value, in one edit. */
+export function propertySpawnOps(id: EntityId, name: string, owner: EntityId, value: number): EditOp[] {
+  return [
+    { op: "spawn", kind: "property", name, id },
+    { op: "set", entity: id, field: "owners", value: [{ party: owner, role: "owner", share: 100 }] },
+    { op: "set", entity: id, field: "value", value },
+  ];
 }

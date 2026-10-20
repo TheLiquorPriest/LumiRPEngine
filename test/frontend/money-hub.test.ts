@@ -3,10 +3,21 @@
 // sends.
 
 import { describe, expect, test } from "bun:test";
-import type { AccountView, BusinessView, CardView, FinanceView, Flow, FlowView, HoldingView, PropertyView } from "../../src/shared/finance";
-import { DEFAULT_CURRENCY } from "../../src/shared/world";
+import { featureOn, FINANCE_FEATURES, type AccountView, type BusinessView, type CardView, type FinanceView, type Flow, type FlowView, type HoldingView, type PropertyView } from "../../src/shared/finance";
+import type { Level } from "../../src/shared/ids";
+import type { JsonObject } from "../../src/shared/json";
+import { isRecord } from "../../src/shared/json";
+import { DEFAULT_CURRENCY, type WorldDoc } from "../../src/shared/world";
+import { materializeAll } from "../../src/engine/materialize";
+import { createRegistry } from "../../src/engine/registry-impl";
+import { Working } from "../../src/engine/working";
+import { ALL_PACKS, STARTER_WORLDS } from "../../src/packs/index";
+import { startState } from "../packs/support";
+import { Row } from "../../src/frontend/components";
 import { decodeFinanceView } from "../../src/packs/economy/ui/decode";
-import { accountBlocks, accountControls, businessControls, cardControls, creditBlocks, endableLeases, flowControls, holdingControls, hubTabs, invoiceControls, investmentBlocks, overviewBlocks, propertyControls, transferTargets, workBlocks } from "../../src/packs/economy/ui/layout";
+import { accountBlocks, accountControls, businessControls, cardControls, creditBlocks, endableLeases, flowControls, flowSources, holdingControls, householdRows, hubTabs, invoiceControls, investmentBlocks, overviewBlocks, propertyControls, transferTargets, workBlocks } from "../../src/packs/economy/ui/layout";
+import { OwnerRows } from "../../src/packs/economy/ui/lines";
+import { gmFixture } from "../../dev/preview/fixtures";
 import {
   actionRequest,
   autopayAction,
@@ -54,6 +65,29 @@ const checking = account({ id: "chk", class: "checking", cents: 124018, availabl
 const savings = account({ id: "sav", class: "savings", cents: 350000 });
 const visa = account({ id: "visa", class: "credit_card", cents: -41255, limit: 120000, available: 78745, autopay: { mode: "minimum", from: "chk", fromName: "Checking", cents: null }, statements: [{ at: "Oct 1", closing: 41255, interest: 0, fees: 0, minimum: 3500, due: "Oct 28", paid: 0, apr: 22, stage: "current", state: "open" }], terms: [{ label: "APR", value: "22%" }], holds: [{ id: "h1", cents: 3211, until: "Oct 20", kind: "authorization", memo: "Shell" }] });
 
+/** Every money feature that runs at the top level unless a toggle turns it off. */
+const TOP = FINANCE_FEATURES.filter((f) => featureOn(4, f));
+
+const reg = createRegistry(ALL_PACKS);
+
+/** The POV's money in Port Alder at a Money level with the world's toggles, as the backend builds it and the hub decodes it. */
+function portAlderMoney(level: Level, toggles: JsonObject): FinanceView {
+  const world = (STARTER_WORLDS.modern_slice_of_life as (id: string, name: string) => WorldDoc)("pa", "Port Alder");
+  world.realism.levels.money = level;
+  world.packs.economy = { ...world.packs.economy, config: { ...(world.packs.economy?.config ?? {}), features: toggles } };
+  const w = new Working(reg, world, startState(world));
+  materializeAll(reg, w, world.pov, "run");
+  const decoded = decodeFinanceView(JSON.parse(JSON.stringify(w.ctx.query("economy.finance")(w.ctx, world.pov, true))));
+  if (!decoded) throw new Error("the hub can't draw the POV's money");
+  return decoded;
+}
+
+function accountIn(v: FinanceView, id: string): AccountView {
+  const a = v.accounts.find((x) => x.id === id);
+  if (!a) throw new Error(`no ${id} in the view`);
+  return a;
+}
+
 describe("the view as it arrives", () => {
   test("a party's view decodes field for field, and anything else is no view", () => {
     const v = view({ accounts: [checking, visa], cards: [card({ id: "debit1", account: "chk" })], recent: [{ id: "t1", at: "Tue 07:40", memo: "Coffee", cents: -325, account: "Visa", accountId: "visa", kind: "purchase", category: "dining", counterparty: "Rosie's", card: null, status: "posted" }] });
@@ -71,33 +105,85 @@ describe("the view as it arrives", () => {
     expect(decoded?.accounts.map((a) => [a.id, a.class, a.status])).toEqual([["visa", "checking", "open"]]);
     expect(decoded?.features).toEqual(["flows"]);
   });
+
+  test("household members the player can't see arrive without ids and still keep their own parts and rows", () => {
+    const home = view({ partyKind: "household", household: { id: "home", name: "Unit 2B", accounts: [], flows: [], members: [{ id: "pov", name: "You", role: "", share: 40 }, { id: null, name: "someone", role: "", share: 35 }, { id: null, name: "someone", role: "", share: 25 }], monthly: { total: 100000, parts: [{ id: "pov", name: "You", cents: 40000 }, { id: null, name: "someone", cents: 35000 }, { id: null, name: "someone", cents: 25000 }] } } });
+    const decoded = decodeFinanceView(JSON.parse(JSON.stringify(home)));
+    if (!decoded?.household) throw new Error("no household");
+    const rows = householdRows(decoded.household);
+    expect(rows.map((r) => [r.id, r.cents])).toEqual([
+      ["pov", 40000],
+      [null, 35000],
+      [null, 25000],
+    ]);
+    expect(new Set(rows.map((r) => r.key)).size).toBe(3);
+  });
+
+  test("owners the player can't see, masked as null or as an empty id, still get rows of their own", () => {
+    // The keys of the rows a component draws, read off its tree (no DOM needed).
+    const rowKeys = (node: unknown): unknown[] => (Array.isArray(node) ? node.flatMap(rowKeys) : !isRecord(node) || !isRecord(node.props) ? [] : node.type === Row ? [node.key] : rowKeys(node.props.children));
+    const owners = [
+      { party: "marcus", name: "Marcus", role: "owner" as const, share: 60 },
+      { party: null, name: "someone", role: "owner" as const, share: 20 },
+      { party: "", name: "an owner", role: "owner" as const, share: 10 },
+      { party: "", name: "an owner", role: "owner" as const, share: 10 },
+    ];
+    const keys = rowKeys(OwnerRows({ owners }));
+    expect(keys).toHaveLength(4);
+    expect(new Set(keys).size).toBe(4);
+  });
 });
 
 describe("realism gating", () => {
   test("Money 0 shows nothing, Money 1 only the overview's band; a party shows only the sections it has", () => {
-    expect(hubTabs(view({ level: 0 }))).toEqual([]);
-    expect(hubTabs(view({ level: 1, accounts: [checking] })).map((t) => t.id)).toEqual(["overview"]);
-    expect(hubTabs(view({ accounts: [checking] })).map((t) => t.id)).toEqual(["overview", "accounts", "flows"]);
+    expect(hubTabs(view({ level: 0 }), "player")).toEqual([]);
+    expect(hubTabs(view({ level: 1, accounts: [checking] }), "player").map((t) => t.id)).toEqual(["overview"]);
+    expect(hubTabs(view({ accounts: [checking] }), "player").map((t) => t.id)).toEqual(["overview", "accounts", "flows"]);
     const full = view({ level: 4, detail: true, accounts: [checking], investments: { value: 1, cost: 1, unrealised: 0, realised: 0, holdings: [] }, credit: { person: "pov", score: 712, band: "good", tier: "prime", asOf: "Oct 1", factors: null, history: [], utilisationPct: 34, ageMonths: 50, onTimePct: 100, accounts: [], inquiries: [], marks: [], offers: [] } });
-    expect(hubTabs(full).map((t) => t.id)).toEqual(["overview", "accounts", "flows", "investments", "credit"]);
+    expect(hubTabs(full, "player").map((t) => t.id)).toEqual(["overview", "accounts", "flows", "investments", "credit"]);
   });
 
   test("a household that holds no account itself shows its members, with no empty Accounts or Flows tab", () => {
     const household = { id: "home", name: "The Kowalczyks", members: [{ id: "helen", name: "Helen", role: "head", share: 60 }], accounts: [], flows: [], monthly: { total: 52000, parts: [{ id: "helen", name: "Helen", cents: 31200 }] } };
-    expect(hubTabs(view({ partyKind: "household", household })).map((t) => t.id)).toEqual(["overview", "household"]);
-    expect(hubTabs(view({ partyKind: "household" })).map((t) => t.id)).toEqual(["overview"]);
+    expect(hubTabs(view({ partyKind: "household", household }), "player").map((t) => t.id)).toEqual(["overview", "household"]);
+    expect(hubTabs(view({ partyKind: "household" }), "player").map((t) => t.id)).toEqual(["overview"]);
+  });
+
+  test("the GM also gets the sections it adds to while they're empty: a person's Jobs, Properties, and a person's Household from Money 3", () => {
+    expect(hubTabs(view({ accounts: [checking] }), "gm").map((t) => t.id)).toEqual(["overview", "accounts", "flows", "jobs", "properties", "household"]);
+    // Below Money 3 a household doesn't show, so there's nothing to add to; a business holds no job.
+    expect(hubTabs(view({ level: 2, features: [], accounts: [checking] }), "gm").map((t) => t.id)).toEqual(["overview", "accounts", "jobs", "properties"]);
+    expect(hubTabs(view({ partyKind: "business", accounts: [checking] }), "gm").map((t) => t.id)).toEqual(["overview", "accounts", "flows", "properties"]);
+    // A band and no accounts yet: what the GM adds wouldn't show.
+    expect(hubTabs(view({ overview: null, cash: { band: "modest" } }), "gm").map((t) => t.id)).toEqual(["overview"]);
   });
 
   test("below the top level an account shows its balance and a few lines, never its terms, statements, pending lines or holds", () => {
     const simple = accountBlocks(view({ accounts: [visa] }), visa);
     expect(simple).toMatchObject({ terms: false, statements: false, pending: false, holds: false, owners: false, transactions: 5 });
-    const full = accountBlocks(view({ level: 4, detail: true, accounts: [visa] }), visa);
+    const full = accountBlocks(view({ level: 4, detail: true, features: TOP, accounts: [visa] }), visa);
     expect(full).toMatchObject({ terms: true, statements: true, holds: true, owners: true, transactions: 40 });
   });
 
-  test("a Custom toggle shows its own detail below the top level, and nothing else", () => {
-    const custom = accountBlocks(view({ features: ["flows", "cards", "statements"], accounts: [visa] }), visa);
-    expect(custom).toMatchObject({ statements: true, terms: false, holds: false });
+  test("a feature the world switches on shows its own detail below the top level and nothing more; one switched off is gone at the top level too", () => {
+    const low = portAlderMoney(3, { flows: true, daily_limits: true });
+    expect([low.level, low.detail]).toEqual([3, false]);
+    expect(accountBlocks(low, accountIn(low, "acct_pov_card"))).toMatchObject({ cardLimits: true, terms: false, pending: false, holds: false, transactions: 5 });
+    expect(overviewBlocks(low)).toMatchObject({ cashFlowByCategory: false, cashFlowAhead: false, upcoming: 5, recent: 5 });
+    expect(workBlocks(low)).toMatchObject({ deductions: false, books: false, sales: false });
+    const top = portAlderMoney(4, { daily_limits: false, capital_gains: false });
+    expect([top.level, top.detail]).toEqual([4, true]);
+    expect(accountBlocks(top, accountIn(top, "acct_pov_card"))).toMatchObject({ cardLimits: false, transactions: 40 });
+    expect(investmentBlocks(top)).toEqual({ lots: false, gains: false, income: true });
+  });
+
+  test("the preview's GM money views carry the books and features the engine gives each party's level", () => {
+    const money = gmFixture().money;
+    expect(money.map((m) => m.level).sort()).toEqual([2, 4]);
+    for (const m of money) {
+      expect(m.detail).toBe(m.level >= 4);
+      expect(m.features).toEqual(FINANCE_FEATURES.filter((f) => featureOn(m.level, f)));
+    }
   });
 
   test("a shared account names its owners at any level", () => {
@@ -111,7 +197,7 @@ describe("realism gating", () => {
     expect(investmentBlocks(view())).toEqual({ lots: false, gains: false, income: false });
     expect(investmentBlocks(view({ features: ["capital_gains"] }))).toEqual({ lots: true, gains: true, income: false });
     expect(creditBlocks(view())).toEqual({ factors: false, report: false, history: 0 });
-    expect(workBlocks(view({ level: 4, detail: true }))).toEqual({ withholding: true, deductions: true, books: true, sales: true, taxes: true });
+    expect(workBlocks(view({ level: 4, detail: true, features: TOP }))).toEqual({ withholding: true, deductions: true, books: true, sales: true, taxes: true });
     expect(workBlocks(view())).toEqual({ withholding: false, deductions: false, books: false, sales: false, taxes: false });
   });
 });
@@ -132,6 +218,11 @@ describe("what a party's roles allow", () => {
     const closed = account({ id: "old", class: "checking", status: "closed" });
     expect(accountControls(view({ accounts: [checking, closed] }), closed)).toEqual([]);
     expect(accountControls(view({ level: 1, accounts: [cash, checking, savings] }), checking)).toEqual([]);
+  });
+
+  test("a standing payment comes from an account the party manages: never cash, nor one an authorized user only spends from", () => {
+    const shared = account({ id: "mom", class: "checking", role: "authorized_user" });
+    expect(flowSources(view({ accounts: [cash, checking, savings, shared] })).map((s) => s.id)).toEqual(["chk", "sav"]);
   });
 
   test("a card's holder changes its state as the state allows; someone else's card on an account they don't manage, never", () => {
@@ -221,7 +312,7 @@ describe("the requests the controls send", () => {
 
   test("a new flow sends its schedule's own parts; a one-off sends when it happens", () => {
     const monthly = { ...blankFlowForm("chk"), label: "Savings", to: "sav", amount: "250", day: -1 };
-    expect(flowCreateAction(monthly, USD)).toEqual({ action: "flow_create", params: { label: "Savings", kind: "transfer", from: "chk", to: "sav", every: "month", shortfall: "skip", amount: 25000, day: -1 } });
+    expect(flowCreateAction(monthly, USD)).toEqual({ action: "flow_create", params: { label: "Savings", kind: "transfer", from: "chk", to: "sav", every: "month", shortfall: "skip", amount: 25000, interval: 1, day: -1 } });
     const once = { ...monthly, label: "Gift", every: "once" as const, start: "2026-12-24", at: "18:00" };
     expect(flowCreateAction(once, USD).params).toEqual({ label: "Gift", kind: "transfer", from: "chk", to: "sav", every: "once", shortfall: "skip", amount: 25000, once: "2026-12-24T18:00" });
   });
@@ -231,7 +322,23 @@ describe("the requests the controls send", () => {
     expect(form.amount).toBe("995.00");
     expect(flowUpdateAction(rent, form, USD)).toBeNull();
     expect(flowUpdateAction(rent, { ...form, amount: "1050" }, USD)).toEqual({ action: "flow_update", params: { flow: "flow_rent", amount: 105000 } });
-    expect(flowUpdateAction(rent, { ...form, weekday: 1 }, USD)).toEqual({ action: "flow_update", params: { flow: "flow_rent", every: "week", weekday: 1 } });
+    expect(flowUpdateAction(rent, { ...form, weekday: 1 }, USD)).toEqual({ action: "flow_update", params: { flow: "flow_rent", every: "week", interval: 1, weekday: 1 } });
+  });
+
+  test("an edit back to every time sends an interval of 1, with the schedule whole; so does the GM's", () => {
+    const fortnightly: Flow = { ...rent, schedule: { every: "week", interval: 2, weekdays: [5], at: "07:30" } };
+    const form = flowFormOf(fortnightly, USD);
+    expect(flowUpdateAction(fortnightly, { ...form, interval: 1 }, USD)?.params).toEqual({ flow: "flow_rent", every: "week", interval: 1, weekday: 5, at: "07:30" });
+    expect(flowEditOps(fortnightly, form, USD)).toEqual([]);
+    expect(flowEditOps(fortnightly, { ...form, interval: 1 }, USD)).toEqual([{ op: "set", entity: "flow_rent", field: "interval", value: 1 }]);
+  });
+
+  test("an edit renames, and names the optional parts it empties; the GM's goes by its flow edit", () => {
+    const dated: Flow = { ...rent, schedule: { every: "week", weekdays: [5], at: "07:30" }, end: "2027-06-30", count: 12, category: "housing" };
+    const form = flowFormOf(dated, USD);
+    expect(flowUpdateAction(dated, { ...form, label: "Room rent" }, USD)?.params).toEqual({ flow: "flow_rent", label: "Room rent" });
+    expect(flowUpdateAction(dated, { ...form, at: "", end: "", count: null, category: "" }, USD)?.params).toEqual({ flow: "flow_rent", clear: "at,end,count,category" });
+    expect(flowEditOps(dated, { ...form, label: "Room rent", end: "", count: null }, USD)).toEqual([{ op: "effect", effect: "economy.flow_edit", args: { flow: "flow_rent", name: "Room rent", clear: "end,count" } }]);
   });
 
   test("the GM's change sets the declared fields and empties what an old schedule shape held", () => {

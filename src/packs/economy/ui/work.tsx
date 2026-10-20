@@ -15,7 +15,7 @@ import { RouteControl } from "./assets";
 import { AmountField, NumberField, Reveal, SelectField, TextField, type Choice } from "./forms";
 import type { GmControls, HubControls, PlayerControls, SectionProps } from "./hub";
 import { businessControls, invoiceControls, jobControls, knownPeople, workBlocks } from "./layout";
-import { AmountAction, EntityFields, TxnRows } from "./lines";
+import { AmountAction, EntityFields, OwnerRows, TxnRows } from "./lines";
 import { amountOf, distributeAction, drawAction, hireAction, invoiceAction, invoiceIssueAction, jobEndAction, jobSpawnOps, newIdFor, raiseAction, stakeSellAction, type HireForm } from "./requests";
 
 /** People a control may name: those the POV knows for the player, anyone for the GM. */
@@ -225,9 +225,7 @@ function BusinessCard(props: { view: FinanceView; business: BusinessView; contro
   const accountName = (id: string): string => view.accounts.find((a) => a.id === id)?.name ?? (controls.mode === "gm" ? (controls.gm.entities.find((e) => e.id === id)?.name ?? id) : id);
   return (
     <Card title={`🏪 ${b.name}`} aside={b.role ? <span class="lre-badge">{humanize(b.role)}</span> : null}>
-      {b.owners.map((o) => (
-        <Row key={o.party} k={o.name} sub={humanize(o.role)} v={o.share > 0 ? `${Math.round(o.share * 10) / 10}%` : undefined} />
-      ))}
+      <OwnerRows owners={b.owners} />
       {b.places.length > 0 ? <Row k="Trades at" v={b.places.map((p) => p.name).join(", ")} /> : null}
       {b.accounts.length > 0 ? <Row k="Accounts" v={b.accounts.map(accountName).join(", ")} /> : null}
       <div class="lre-h">Books · {b.books.period}</div>

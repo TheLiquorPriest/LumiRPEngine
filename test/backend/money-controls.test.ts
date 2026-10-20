@@ -6,7 +6,8 @@
 import { describe, expect, test } from "bun:test";
 import type { PayTier } from "../../src/shared/finance";
 import { adjustOp } from "../../src/frontend/requests";
-import { accountBlocks, accountControls, cardControls, creditBlocks, flowSources, hubTabs, overviewBlocks, paySources, transferTargets } from "../../src/packs/economy/ui/layout";
+import { accountBlocks, accountControls, cardControls, creditBlocks, flowSources, flowTargets, hubTabs, overviewBlocks, paySources, sharedAccounts, transferTargets } from "../../src/packs/economy/ui/layout";
+import { flowSideChoices } from "../../src/packs/economy/ui/flows";
 import {
   accountStatusOps,
   applyCreditAction,
@@ -244,7 +245,7 @@ describe("Play → Money: each control plays as the player's turn", () => {
 
     const change = flowUpdateAction(gym.spec, { ...flowFormOf(gym.spec, chat.currency), amount: "45", every: "week", weekday: 5 }, chat.currency);
     // Only what changed travels, the schedule whole.
-    expect(change?.params).toEqual({ flow: gym.id, every: "week", amount: 4500, weekday: 5 });
+    expect(change?.params).toEqual({ flow: gym.id, every: "week", amount: 4500, interval: 1, weekday: 5 });
     if (!change) throw new Error("no change");
     await chat.play(change);
     view = await chat.hub();
@@ -268,6 +269,51 @@ describe("Play → Money: each control plays as the player's turn", () => {
     expect(account(paid, CHECKING).transactions).toContainEqual(expect.objectContaining({ memo: "Dentist", cents: -12000 }));
     expect(account(paid, CHECKING).cents).toBe(account(due, CHECKING).cents - 12000);
     expect(paid.flows.find((f) => f.label === "Dentist")).toMatchObject({ done: 1, next: null, status: "ended" });
+  });
+
+  test("a standing payment's edit form keeps its own sides by name: the card a bill is charged to, the person the rent goes to; an outside payee stays typed", async () => {
+    const chat = await MoneyChat.start();
+    const view = await chat.hub();
+    const palette = (await chat.state()).palette;
+    // The player's From and To lists, as the form builds them.
+    const ends = { from: flowSources(view).map((s) => ({ value: s.id, label: s.label })), to: flowTargets(view, palette).map((t) => ({ value: t.id, label: t.label })) };
+    const sides = (id: string) => {
+      const f = view.flows.find((x) => x.id === id);
+      if (!f?.spec) throw new Error(`no ${id} with its form`);
+      return flowSideChoices(ends, { ...f, spec: f.spec });
+    };
+    // The internet bill is charged to the credit card, which isn't somewhere a new payment can come from.
+    expect(ends.from.map((c) => c.value)).not.toContain(CARD);
+    expect(sides("bill_internet").from.find((c) => c.value === CARD)?.label).toBe("Your credit card");
+    // Helen is someone the POV may pay; Midlake Mutual is a payee typed by name.
+    expect(sides("bill_rent").to).toEqual(ends.to);
+    expect(sides("bill_auto_insurance").to).toEqual(ends.to);
+  });
+
+  test("Edit takes a standing payment every other month back to every month", async () => {
+    const chat = await MoneyChat.start();
+    await chat.play(flowCreateAction({ ...gymForm(CHECKING), interval: 2 }, chat.currency));
+    const made = (await chat.hub()).flows.find((f) => f.label === "Harbor Gym");
+    if (!made?.spec) throw new Error("no Harbor Gym flow with its form");
+    expect(made).toMatchObject({ schedule: "every 2 months on the 5th" });
+    const change = flowUpdateAction(made.spec, { ...flowFormOf(made.spec, chat.currency), interval: 1 }, chat.currency);
+    if (!change) throw new Error("no change");
+    expect(await chat.play(change)).toContain("done");
+    expect((await chat.hub()).flows.find((f) => f.id === made.id)).toMatchObject({ schedule: "monthly on the 5th" });
+  });
+
+  test("Edit renames a standing payment and empties its end and its count", async () => {
+    const chat = await MoneyChat.start();
+    await chat.play(flowCreateAction({ ...gymForm(CHECKING), end: "2027-06-30", count: 6 }, chat.currency));
+    const made = (await chat.hub()).flows.find((f) => f.label === "Harbor Gym");
+    if (!made?.spec) throw new Error("no Harbor Gym flow with its form");
+    expect([made.spec.end, made.spec.count]).toEqual(["2027-06-30", 6]);
+    const change = flowUpdateAction(made.spec, { ...flowFormOf(made.spec, chat.currency), label: "Gym", end: "", count: null }, chat.currency);
+    if (!change) throw new Error("no change");
+    expect(await chat.play(change)).toContain("done");
+    const after = (await chat.hub()).flows.find((f) => f.id === made.id);
+    expect(after?.label).toBe("Gym");
+    expect([after?.spec?.end, after?.spec?.count]).toEqual([undefined, undefined]);
   });
 });
 
@@ -390,11 +436,34 @@ describe("GM view → Money: each control is one edit", () => {
     expect((await chat.hub()).flows.find((f) => f.id === mineId)).toMatchObject({ from: "Your checking account", amount: "$40.00", editable: true });
   });
 
+  test("the GM's edit takes a flow every other month back to every month", async () => {
+    const chat = await MoneyChat.start();
+    const id = newIdFor("flow", "Harbor Gym", new Set((await chat.gm()).fields.keys()));
+    accepted(await chat.edit(flowSpawnOps(id, { ...gymForm(DANNY_CHECKING), interval: 2 }, chat.currency)));
+    const made = (await chat.party(DANNY)).flows.find((f) => f.id === id);
+    if (!made?.spec) throw new Error("no Harbor Gym flow with its form");
+    expect(made).toMatchObject({ schedule: "every 2 months on the 5th" });
+    accepted(await chat.edit(flowEditOps(made.spec, { ...flowFormOf(made.spec, chat.currency), interval: 1 }, chat.currency)));
+    expect((await chat.party(DANNY)).flows.find((f) => f.id === id)).toMatchObject({ schedule: "monthly on the 5th" });
+  });
+
+  test("the GM's edit renames a flow and empties its end and its count", async () => {
+    const chat = await MoneyChat.start();
+    const id = newIdFor("flow", "Harbor Gym", new Set((await chat.gm()).fields.keys()));
+    accepted(await chat.edit(flowSpawnOps(id, { ...gymForm(DANNY_CHECKING), end: "2027-06-30", count: 6 }, chat.currency)));
+    const made = (await chat.party(DANNY)).flows.find((f) => f.id === id);
+    if (!made?.spec) throw new Error("no Harbor Gym flow with its form");
+    accepted(await chat.edit(flowEditOps(made.spec, { ...flowFormOf(made.spec, chat.currency), label: "Gym", end: "", count: null }, chat.currency)));
+    const after = (await chat.party(DANNY)).flows.find((f) => f.id === id);
+    expect(after?.label).toBe("Gym");
+    expect([after?.spec?.end, after?.spec?.count]).toEqual([undefined, undefined]);
+  });
+
   test("the GM adds someone to a household and takes them out; the POV's Money shows who shares their home", async () => {
     const chat = await MoneyChat.start();
     accepted(await chat.edit([{ op: "spawn", kind: "household", name: "Unit 2B", id: "unit_2b" }, { op: "link", rel: "member_of", from: "pov", to: "unit_2b" }]));
     let mine = await chat.hub();
-    expect(hubTabs(mine).map((t) => t.id)).toContain("household");
+    expect(hubTabs(mine, "player").map((t) => t.id)).toContain("household");
     expect(mine.household?.members.map((m) => m.id)).toEqual(["pov"]);
     // As the household's Add a member and its ✕ send them.
     accepted(await chat.edit([{ op: "link", rel: "member_of", from: DANNY, to: "unit_2b" }]));
@@ -403,6 +472,27 @@ describe("GM view → Money: each control is one edit", () => {
     expect((await chat.party("unit_2b")).partyKind).toBe("household");
     accepted(await chat.edit([{ op: "unlink", rel: "member_of", from: DANNY, to: "unit_2b" }]));
     expect((await chat.hub()).household?.members.map((m) => m.id)).toEqual(["pov"]);
+  });
+
+  test("a household's own account shows on a member's Money as one the household holds, never by its id; the household's own view names it", async () => {
+    const chat = await MoneyChat.start();
+    const kitty = "acct_unit_kitty";
+    accepted(
+      await chat.edit([
+        { op: "spawn", kind: "household", name: "Unit 2B", id: "unit_2b" },
+        { op: "link", rel: "member_of", from: "pov", to: "unit_2b" },
+        { op: "spawn", kind: "account", name: "Unit 2B kitty", id: kitty },
+        { op: "set", entity: kitty, field: "product", value: "checking" },
+        { op: "set", entity: kitty, field: "owners", value: [{ party: "unit_2b", role: "owner" }] },
+      ]),
+    );
+    const mine = await chat.hub();
+    if (!mine.household) throw new Error("no household on the POV's Money");
+    expect(mine.household.accounts).toContain(kitty);
+    expect(sharedAccounts(mine, mine.household)).toEqual({ names: [], others: [kitty] });
+    const theirs = await chat.party("unit_2b");
+    if (!theirs.household) throw new Error("no household view of its own");
+    expect(sharedAccounts(theirs, theirs.household).names).toContain("Unit 2B kitty");
   });
 
   test("the GM sets anyone's payment preferences", async () => {
@@ -437,7 +527,7 @@ describe("the hub shows what each Money level shows", () => {
     const chat = await MoneyChat.start();
     const top = await chat.hub();
     expect(top.level).toBe(4);
-    expect(hubTabs(top).map((t) => t.id)).toEqual(expect.arrayContaining(["overview", "accounts", "flows", "credit"]));
+    expect(hubTabs(top, "player").map((t) => t.id)).toEqual(expect.arrayContaining(["overview", "accounts", "flows", "credit"]));
     expect(account(top, CARD).aprPct).toBe(22);
     expect(accountBlocks(top, account(top, CARD)).terms).toBe(true);
     expect(overviewBlocks(top)).toMatchObject({ cashFlowAhead: true, upcoming: 20 });
@@ -446,7 +536,7 @@ describe("the hub shows what each Money level shows", () => {
     await chat.level(3);
     const three = await chat.hub();
     expect(three.level).toBe(3);
-    const threeTabs = hubTabs(three).map((t) => t.id);
+    const threeTabs = hubTabs(three, "player").map((t) => t.id);
     expect(threeTabs).toContain("flows");
     expect(threeTabs).not.toContain("credit");
     expect(three.accounts.map((a) => a.id).sort()).toEqual(top.accounts.map((a) => a.id).sort());
@@ -459,7 +549,7 @@ describe("the hub shows what each Money level shows", () => {
     await chat.level(2);
     const two = await chat.hub();
     expect(two.accounts.map((a) => a.id).sort()).toEqual(["acct_pov_cash", CHECKING]);
-    const twoTabs = hubTabs(two).map((t) => t.id);
+    const twoTabs = hubTabs(two, "player").map((t) => t.id);
     expect(twoTabs).toContain("accounts");
     expect(twoTabs).not.toContain("flows");
     expect(two.flows).toEqual([]);
@@ -470,7 +560,7 @@ describe("the hub shows what each Money level shows", () => {
     const one = await chat.hub();
     expect(one.accounts).toEqual([]);
     expect(one.cash).toEqual({ band: one.band ?? "" });
-    expect(hubTabs(one).map((t) => t.id)).toEqual(["overview"]);
+    expect(hubTabs(one, "player").map((t) => t.id)).toEqual(["overview"]);
   });
 
   test("the GM view draws every party with money at their own level, the POV first", async () => {
@@ -483,7 +573,7 @@ describe("the hub shows what each Money level shows", () => {
     const danny = money.find((m) => m.party === DANNY);
     expect(sam?.level).toBe(2);
     expect(sam?.flows).toEqual([]);
-    expect(sam ? hubTabs(sam).map((t) => t.id) : []).not.toContain("flows");
+    expect(sam ? hubTabs(sam, "gm").map((t) => t.id) : []).not.toContain("flows");
     expect(helen?.level).toBe(3);
     expect(helen?.flows.length).toBeGreaterThan(0);
     expect(helen?.credit).toBeNull();
@@ -492,7 +582,7 @@ describe("the hub shows what each Money level shows", () => {
     // A household shows as its members do: who's in it and the costs they share, picked itself or seen from a member's money.
     const household = money.find((m) => m.party === "household_kowalczyk");
     expect(household?.partyKind).toBe("household");
-    expect(household ? hubTabs(household).map((t) => t.id) : []).toContain("household");
+    expect(household ? hubTabs(household, "gm").map((t) => t.id) : []).toContain("household");
     for (const view of [household, helen]) {
       expect(view?.household?.members.map((m) => m.id).sort()).toEqual(["helen_kowalczyk", "jess_kowalczyk", "maddie_kowalczyk"]);
       expect(view?.household?.monthly.total ?? 0).toBeGreaterThan(0);

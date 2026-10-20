@@ -12,10 +12,10 @@ import { Card, Empty, Row } from "../../../frontend/components";
 import { humanize } from "../../../frontend/format";
 import { FlowRow } from "./flows";
 import { AmountField, NumberField, Reveal, SelectField, TextField, type Choice } from "./forms";
-import type { HubControls, PlayerControls, SectionProps } from "./hub";
+import type { GmControls, HubControls, PlayerControls, SectionProps } from "./hub";
 import { endableLeases, holdingControls, investmentBlocks, knownPeople, moveSources, propertyControls, ROUTE_ELSEWHERE, routePick, transferTargets } from "./layout";
 import { AmountAction, EntityFields } from "./lines";
-import { amountOf, exerciseAction, leaseEndAction, leaseStartAction, propertyBuyAction, propertySellAction, routeAction, routeOps, setPriceOps, tradeAction, type RouteTarget, type TradeForm } from "./requests";
+import { amountOf, exerciseAction, leaseEndAction, leaseStartAction, newIdFor, propertyBuyAction, propertySellAction, propertySpawnOps, routeAction, routeOps, setPriceOps, tradeAction, type RouteTarget, type TradeForm } from "./requests";
 
 /** Where distributions can go: the default (the account's cash, else the deposit account), reinvested (holdings only), or one of the party's accounts. */
 function routeChoices(view: FinanceView, reinvest: boolean): Choice[] {
@@ -326,7 +326,38 @@ function PropertyCard(props: { view: FinanceView; property: PropertyView; contro
   );
 }
 
+/** The GM's new property for the party: its name and value, the party its whole owner. */
+function NewProperty(props: { view: FinanceView; controls: GmControls; onDone(): void }) {
+  const { view, controls } = props;
+  const [name, setName] = useState("");
+  const [value, setValue] = useState("");
+  const cents = amountOf(value, controls.currency);
+  const ok = name.trim() !== "" && cents !== null;
+  return (
+    <form
+      class="lre-stack"
+      onSubmit={(event) => {
+        event.preventDefault();
+        if (!ok || cents === null) return;
+        const id = newIdFor("prop", name, new Set(controls.gm.entities.map((e) => e.id)));
+        void controls.edit(propertySpawnOps(id, name.trim(), view.party, cents)).then((done) => done && props.onDone());
+      }}
+    >
+      <TextField label="Name" value={name} onInput={setName} placeholder="The lake cabin" />
+      <AmountField label="Value" value={value} currency={controls.currency} onInput={setValue} invalid={value.trim() !== "" && cents === null} />
+      <button type="submit" class="lre-btn primary" disabled={controls.busy || !ok}>
+        Add the property
+      </button>
+    </form>
+  );
+}
+
 export function PropertiesSection(props: SectionProps) {
   const { view, controls } = props;
-  return view.properties.length === 0 ? <Empty>No property.</Empty> : <>{view.properties.map((p) => <PropertyCard key={p.id} view={view} property={p} controls={controls} />)}</>;
+  return (
+    <>
+      {controls.mode === "gm" ? <Reveal label="Add a property" primary>{(close) => <NewProperty view={view} controls={controls} onDone={close} />}</Reveal> : null}
+      {view.properties.length === 0 ? <Empty>No property.</Empty> : view.properties.map((p) => <PropertyCard key={p.id} view={view} property={p} controls={controls} />)}
+    </>
+  );
 }

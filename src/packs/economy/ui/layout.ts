@@ -4,7 +4,7 @@
 // dashboards show at each level is tested directly; the core already left out what the level
 // doesn't simulate, and nothing here shows detail the view marks as below the top level.
 
-import { CLASS_TRAITS, ROLE_RIGHTS, type AccountView, type BusinessView, type CardView, type DistributionRoute, type FinanceFeature, type FinanceView, type FlowView, type HoldingView, type Invoice, type JobView, type OwnerRole, type PropertyView, type RoleRights } from "../../../shared/finance";
+import { CLASS_TRAITS, ROLE_RIGHTS, type AccountView, type BusinessView, type CardView, type DistributionRoute, type FinanceFeature, type FinanceView, type FlowView, type HoldingView, type HouseholdView, type Invoice, type JobView, type OwnerRole, type PropertyView, type RoleRights } from "../../../shared/finance";
 import type { EntityId } from "../../../shared/ids";
 import type { PaletteView } from "../../../shared/state-view";
 import { cardChanges, type CardChange } from "./requests";
@@ -39,21 +39,26 @@ export interface HubTab {
  * The hub's sections for a party, in order. Money 1 is a band and nothing else; from 2 a section
  * shows when the party has something there (accounts; flows, or the feature that runs them from
  * its accounts; a job, a household, …), so a household that holds no account of its own still
- * shows its members, and a player with no job or business sees no empty tab for one.
+ * shows its members, and a player with no job or business sees no empty tab for one. The GM also
+ * gets the sections that hold its create controls while they're empty, wherever what it adds would
+ * show: a person's Jobs, anyone's Properties, and a person's Household from Money 3.
  */
-export function hubTabs(view: FinanceView): HubTab[] {
+export function hubTabs(view: FinanceView, mode: "player" | "gm"): HubTab[] {
   if (view.level <= 0) return [];
   const tabs: HubTab[] = [{ id: "overview", label: SECTION_LABELS.overview, dot: view.overview?.alerts.some((a) => a.tone !== "info") ?? false }];
   if (view.level === 1) return tabs;
   const hasAccounts = view.accounts.length > 0;
+  // A view without an overview is a band only (no accounts yet): nothing the GM adds would show in it.
+  const creates = mode === "gm" && view.overview !== null;
+  const person = view.partyKind === "person";
   if (hasAccounts) tabs.push({ id: "accounts", label: SECTION_LABELS.accounts, dot: view.accounts.some((a) => a.status !== "open" || a.statements.some((s) => s.state === "late") || a.cards.some((c) => c.state === "lost")) });
   if ((hasAccounts && view.features.includes("flows")) || view.flows.length > 0) tabs.push({ id: "flows", label: SECTION_LABELS.flows, dot: view.flows.some((f) => f.missed > 0 && f.status === "active") });
-  if (view.jobs.length > 0) tabs.push({ id: "jobs", label: SECTION_LABELS.jobs, dot: false });
+  if (view.jobs.length > 0 || (creates && person)) tabs.push({ id: "jobs", label: SECTION_LABELS.jobs, dot: false });
   if (view.businesses.length > 0) tabs.push({ id: "businesses", label: SECTION_LABELS.businesses, dot: view.businesses.some((b) => b.invoices.some((i) => i.state === "late")) });
   if (view.investments !== null) tabs.push({ id: "investments", label: SECTION_LABELS.investments, dot: false });
-  if (view.properties.length > 0) tabs.push({ id: "properties", label: SECTION_LABELS.properties, dot: view.properties.some((p) => p.leases.some((l) => l.state === "vacant")) });
+  if (view.properties.length > 0 || creates) tabs.push({ id: "properties", label: SECTION_LABELS.properties, dot: view.properties.some((p) => p.leases.some((l) => l.state === "vacant")) });
   if (view.credit !== null) tabs.push({ id: "credit", label: SECTION_LABELS.credit, dot: view.credit.marks.length > 0 });
-  if (view.household !== null) tabs.push({ id: "household", label: SECTION_LABELS.household, dot: false });
+  if (view.household !== null || (creates && person && view.level >= 3)) tabs.push({ id: "household", label: SECTION_LABELS.household, dot: false });
   return tabs;
 }
 
@@ -211,10 +216,14 @@ export function endableLeases(view: FinanceView, property: PropertyView): string
   return property.leases.filter((l) => l.state === "let" && view.flows.some((f) => f.id === l.flow)).map((l) => l.flow);
 }
 
-/** Where a new standing payment can come from: a non-cash account the party may pay from (flows never draw on wallet cash). */
+/**
+ * Where a new standing payment can come from: a non-cash account the party may pay from and
+ * manages (flows never draw on wallet cash; an authorized user spends on a card but sets up no
+ * standing payments).
+ */
 export function flowSources(view: FinanceView): { id: string; label: string }[] {
   return paySources(view)
-    .filter((a) => !CLASS_TRAITS[a.class].cash)
+    .filter((a) => !CLASS_TRAITS[a.class].cash && rights(a.role).manage)
     .map((a) => ({ id: a.id, label: a.name }));
 }
 
@@ -235,15 +244,51 @@ export function utilisation(account: AccountView): number | null {
   return account.limit !== null && account.limit > 0 ? Math.round((Math.max(0, -account.cents) * 100) / account.limit) : null;
 }
 
+export interface HouseholdRow {
+  /** The row's key: the member's id, or its place for someone the player can't see. */
+  key: string;
+  id: EntityId | null;
+  name: string;
+  role: string;
+  share: number;
+  /** Their part of the shared costs a month. */
+  cents: number | null;
+}
+
+/**
+ * A household's members as its card lists them, each with its part of the shared costs. Someone
+ * the player can't see has no id, so they're paired by place: the view lists the members and
+ * their parts in the same order.
+ */
+export function householdRows(h: HouseholdView): HouseholdRow[] {
+  return h.members.map((m, i) => {
+    const part = h.monthly.parts.find((p, j) => (m.id === null ? j === i && p.id === null : p.id === m.id));
+    return { key: m.id ?? `someone:${i}`, id: m.id, name: m.name, role: m.role, share: m.share, cents: part?.cents ?? null };
+  });
+}
+
+/** A household's shared accounts: the party's own among them by name, and the ids of the ones only the household holds, which the party's view doesn't name. */
+export function sharedAccounts(view: FinanceView, h: HouseholdView): { names: string[]; others: EntityId[] } {
+  const names: string[] = [];
+  const others: EntityId[] = [];
+  for (const id of h.accounts) {
+    const a = view.accounts.find((x) => x.id === id);
+    if (a) names.push(a.name);
+    else others.push(id);
+  }
+  return { names, others };
+}
+
 // ---------------------------------------------------------------- realism gating
 
 /**
- * Whether a party's view shows a detailed feature: always at the top level (`detail`), else only
- * where the world's Custom toggles run the feature for it. Below that the books stay simple, even
- * when the view carries more (the GM's view of someone at a lower level).
+ * Whether a party's view shows a feature's own detail: wherever the feature runs for the party,
+ * from its usual level or from its floor where the world switches it on, and nowhere it's switched
+ * off, the top level included. The rest of the full books (`detail`) is the top level's alone, so
+ * a feature switched on lower shows its own detail and nothing else.
  */
 function shows(view: FinanceView, feature: FinanceFeature): boolean {
-  return view.detail || view.features.includes(feature);
+  return view.features.includes(feature);
 }
 
 export interface OverviewBlocks {

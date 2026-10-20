@@ -1,7 +1,7 @@
 // Preview fixtures: a modern slice-of-life world in play. Shapes follow the contracts
 // (`StateView`, `WorldDoc`, `UserSettings`) and the panel view models of the UI packs.
 
-import type { AccountView, CardView, FinanceView, Flow, FlowView, JournalLine } from "../../src/shared/finance";
+import { featureOn, FINANCE_FEATURES, type AccountView, type CardView, type FinanceView, type Flow, type FlowView, type JournalLine } from "../../src/shared/finance";
 import { DOMAINS, INTERRUPT_CLASSES } from "../../src/shared/ids";
 import type { DomainId, InterruptClass, InterruptPolicy } from "../../src/shared/ids";
 import type { JsonValue } from "../../src/shared/json";
@@ -453,7 +453,7 @@ const BACKGROUND = [1, 1, 1, 1, 1, 1, 3, 2, 1];
 
 /** The GM view (`lre.gm`): everyone, the secret and the removed included, and every track's truths. */
 
-/** A party's money in the GM view: one checking account, its recent lines and notes. */
+/** A party's money in the GM view: one checking account, its recent lines and notes, with the books and features the engine gives its level. */
 function gmMoney(party: string, name: string, level: number, opened: boolean, account: string, accountName: string, cents: number, recent: { at: string; memo: string; cents: number }[], notes: { at: string; text: string }[]): FinanceView {
   const lines: JournalLine[] = recent.map((r, i) => ({ id: `${account}:${i}`, ...r, account: accountName, accountId: account, kind: null, category: null, counterparty: null, card: null, status: "posted" }));
   return {
@@ -461,8 +461,8 @@ function gmMoney(party: string, name: string, level: number, opened: boolean, ac
     name,
     partyKind: "person",
     level,
-    detail: true,
-    features: [],
+    detail: level >= 4,
+    features: FINANCE_FEATURES.filter((f) => featureOn(level, f)),
     band: "modest",
     opened,
     cash: null,

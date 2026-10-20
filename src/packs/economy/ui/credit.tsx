@@ -1,7 +1,8 @@
 // Money → Credit and Household (DESIGN §25): the credit score with its band (its history, its
 // parts and the report in the full books) and what applying for credit can ask for; a household's
 // members, shares, shared accounts and shared costs. The player applies for credit (an in-world
-// action) and handles the shared flows they may; the GM adds and removes household members.
+// action) and handles the shared flows they may; the GM adds and removes household members, and
+// puts a person who has none in a household.
 
 import { useState } from "preact/hooks";
 import { formatMoney } from "../../../shared/world";
@@ -10,7 +11,7 @@ import { humanize } from "../../../frontend/format";
 import { FlowRow } from "./flows";
 import { SelectField } from "./forms";
 import type { SectionProps } from "./hub";
-import { creditBlocks } from "./layout";
+import { creditBlocks, householdRows, sharedAccounts } from "./layout";
 import { AmountAction } from "./lines";
 import { applyCreditAction } from "./requests";
 
@@ -83,17 +84,34 @@ export function HouseholdSection(props: SectionProps) {
   const { view, controls } = props;
   const h = view.household;
   const [adding, setAdding] = useState("");
-  if (!h) return <Empty>No household.</Empty>;
+  if (!h) {
+    if (controls.mode !== "gm" || view.partyKind !== "person") return <Empty>No household.</Empty>;
+    const households = controls.gm.entities.filter((e) => e.kind === "household" && !e.gone).map((e) => ({ value: e.id, label: e.name }));
+    return (
+      <>
+        <Empty>No household.</Empty>
+        <div class="lre-inline">
+          <SelectField label="Add to a household" value={adding} empty="Choose a household" options={households} onChange={setAdding} />
+          <button type="button" class="lre-btn small" disabled={controls.busy || adding === ""} onClick={() => void controls.edit([{ op: "link", rel: "member_of", from: view.party, to: adding }]).then((ok) => ok && setAdding(""))}>
+            Add
+          </button>
+        </div>
+      </>
+    );
+  }
   const fmt = (cents: number): string => formatMoney(cents, controls.currency);
   const candidates = controls.mode === "gm" ? controls.gm.entities.filter((e) => e.kind === "person" && !e.gone && !h.members.some((m) => m.id === e.id)) : [];
+  // The household's own accounts are the GM's to name; the player sees how many there are.
+  const shared = sharedAccounts(view, h);
+  const others = controls.mode === "gm" ? shared.others.map((id) => controls.gm.entities.find((e) => e.id === id)?.name ?? id) : shared.others.length > 0 ? [`${shared.others.length} the household holds`] : [];
   return (
     <>
       <Card title={`🏡 ${h.name}`} aside={<span class="lre-badge">{fmt(h.monthly.total)} a month shared</span>}>
-        {h.members.map((m) => (
+        {householdRows(h).map((m) => (
           <Row
-            key={m.id}
+            key={m.key}
             k={m.name}
-            sub={[m.role ? humanize(m.role) : null, h.monthly.parts.find((p) => p.id === m.id) ? `${fmt(h.monthly.parts.find((p) => p.id === m.id)?.cents ?? 0)} a month` : null].filter((s) => s !== null).join(" · ") || undefined}
+            sub={[m.role ? humanize(m.role) : null, m.cents !== null ? `${fmt(m.cents)} a month` : null].filter((s) => s !== null).join(" · ") || undefined}
             v={
               <span class="lre-inline">
                 {m.share > 0 ? `${Math.round(m.share * 10) / 10}%` : null}
@@ -114,7 +132,7 @@ export function HouseholdSection(props: SectionProps) {
             </button>
           </div>
         ) : null}
-        {h.accounts.length > 0 ? <Row k="Shared accounts" v={h.accounts.map((id) => view.accounts.find((a) => a.id === id)?.name ?? id).join(", ")} /> : null}
+        {h.accounts.length > 0 ? <Row k="Shared accounts" v={[...shared.names, ...others].join(", ")} /> : null}
       </Card>
       <Card title="Shared costs">
         {h.flows.length === 0 ? <Empty>No shared costs.</Empty> : h.flows.map((f) => <FlowRow key={f.id} view={view} flow={f} controls={controls} />)}
