@@ -18,10 +18,10 @@ import type { Rng } from "../../../engine/rng";
 import { isGone, kindIs, placeOfEntity, placeWithin } from "../../../engine/scope";
 import type { WorldState } from "../../../engine/state";
 import { canSeeEntity } from "../../../engine/visibility";
-import { addToBooks, addToPayables, businessBooks, monthBook, monthOf, monthsBetween, operatingAccount, payablesOf } from "./books";
-import { allJobs, businessAt, businessIds, jobBlocks, jobView, manages, placesOf, type Job } from "./employment";
+import { addToBooks, addToPayables, businessBooks, firstBookedMonth, monthBook, monthOf, monthsBetween, operatingAccount, payablesOf } from "./books";
+import { allJobs, businessAt, businessIds, jobBlocks, jobView, placesOf, type Job } from "./employment";
 import type { FinanceApi, FinanceRegistry, FlowPosting } from "./module";
-import { unpricedCap } from "./model";
+import { managesParty, unpricedCap } from "./model";
 import { corporateTax, salesTaxAccount, salesTaxOn, salesTaxPct, structureOf, taxExempt, taxRegionOf } from "./taxes";
 
 /** The foundation's invoice kind (`kinds.ts`): one invoice a business issued. */
@@ -190,7 +190,8 @@ function settleFlows(ctx: ReadContext, api: FinanceApi, business: EntityId): Flo
   if (!deposit) return [];
   const out: Flow[] = [];
   if (marginOf(ctx.state, business) < 100) out.push({ id: `suppliers:${business}`, label: "Suppliers", kind: "bill", from: deposit, to: "Suppliers", amount: { provider: "settle", args: { business, what: "suppliers" } }, schedule: { every: "month", days: [10], roll: "after" }, shortfall: "skip", category: "cogs", link: business, status: "active", source: "business" });
-  if (own(ctx.state.entities, business)?.fields.collects_sales_tax !== false) out.push({ id: `salestax:${business}`, label: "Sales tax", kind: "tax", from: deposit, to: "Sales tax", amount: { provider: "settle", args: { business, what: "sales_tax" } }, schedule: { every: "month", days: [20], roll: "after" }, shortfall: "skip", category: "sales_tax", link: business, status: "active", source: "business" });
+  // The tax is paid to its region's authority, which the flow names as the account its posting pays.
+  if (own(ctx.state.entities, business)?.fields.collects_sales_tax !== false) out.push({ id: `salestax:${business}`, label: "Sales tax", kind: "tax", from: deposit, to: `tax:sales:${taxRegionOf(ctx, placesOf(ctx, business)[0] ?? null)}`, amount: { provider: "settle", args: { business, what: "sales_tax" } }, schedule: { every: "month", days: [20], roll: "after" }, shortfall: "skip", category: "sales_tax", link: business, status: "active", source: "business" });
   return out;
 }
 
@@ -345,7 +346,7 @@ function issueInvoice(ctx: EffectContext, api: FinanceApi, args: Record<string, 
   const business = strOf(args.business);
   if (!isBusiness(ctx, business)) return reject("missing_entity", `no business ${labelOf(ctx, business)}`);
   const by = strOf(args.by);
-  if (by !== "" && !manages(api, ctx.state, by, business)) return reject("not_owner", `${labelOf(ctx, by)} doesn't run ${labelOf(ctx, business)}`);
+  if (by !== "" && !managesParty(ctx.state, business, by)) return reject("not_owner", `${labelOf(ctx, by)} doesn't run ${labelOf(ctx, business)}`);
   const customer = strOf(args.customer) || strOf(args.customer_name).trim();
   if (customer === "" || customer === business) return reject("bad_party", "an invoice needs someone to bill");
   const cents = typeof args.cents === "number" ? Math.round(args.cents) : NaN;
@@ -375,7 +376,7 @@ function payInvoice(ctx: EffectContext, api: FinanceApi, args: Record<string, Js
   if (inv.left <= 0) return reject("settled", `${inv.memo} is ${inv.state === "void" ? "void" : "paid"}`);
   const by = strOf(args.by);
   const payer = inv.party ?? inv.customer;
-  if (by !== "" && by !== inv.party && !(inv.party && isBusiness(ctx, inv.party) && manages(api, ctx.state, by, inv.party))) return reject("not_customer", `${labelOf(ctx, by)} isn't billed for ${inv.memo}`);
+  if (by !== "" && by !== inv.party && !(inv.party && isBusiness(ctx, inv.party) && managesParty(ctx.state, inv.party, by))) return reject("not_customer", `${labelOf(ctx, by)} isn't billed for ${inv.memo}`);
   const deposit = operatingAccount(api, ctx, inv.business);
   const paid = inv.party ? api.pay(ctx, { from: inv.party, to: inv.business, cents: inv.left, memo: `Invoice: ${inv.memo}`, kind: "payment", category: "invoice", method: "account", ...(deposit ? { deposit } : {}) }) : api.post(ctx, [{ account: api.outside(`customer:${payer}`), amount: -inv.left }, { account: deposit ?? api.outside(inv.business), amount: inv.left }], { memo: `Invoice: ${inv.memo}`, kind: "payment", category: "invoice", counterparty: payer });
   if (!Array.isArray(paid)) return paid;
@@ -386,7 +387,7 @@ function voidInvoice(ctx: EffectContext, api: FinanceApi, args: Record<string, J
   const inv = readInvoice(ctx, strOf(args.invoice));
   if (!inv) return reject("missing_entity", `no invoice ${labelOf(ctx, strOf(args.invoice))}`);
   const by = strOf(args.by);
-  if (by !== "" && !manages(api, ctx.state, by, inv.business)) return reject("not_owner", `${labelOf(ctx, by)} doesn't run ${labelOf(ctx, inv.business)}`);
+  if (by !== "" && !managesParty(ctx.state, inv.business, by)) return reject("not_owner", `${labelOf(ctx, by)} doesn't run ${labelOf(ctx, inv.business)}`);
   if (inv.state === "paid" || inv.state === "void") return reject("settled", `${inv.memo} is already ${inv.state}`);
   return [{ type: "set", entity: inv.id, field: "state", value: "void" }];
 }
@@ -495,7 +496,7 @@ function distribute(ctx: EffectContext, api: FinanceApi, args: Record<string, Js
   const business = strOf(args.business);
   if (!isBusiness(ctx, business)) return reject("missing_entity", `no business ${labelOf(ctx, business)}`);
   const by = strOf(args.by);
-  if (by !== "" && !manages(api, ctx.state, by, business)) return reject("not_owner", `${labelOf(ctx, by)} doesn't run ${labelOf(ctx, business)}`);
+  if (by !== "" && !managesParty(ctx.state, business, by)) return reject("not_owner", `${labelOf(ctx, by)} doesn't run ${labelOf(ctx, business)}`);
   const since = numOf(own(objOf(sliceOf(ctx.state, "economy").distributed), business), monthStart(ctx, ctx.state.clock));
   const pct = numOf(own(ctx.state.entities, business)?.fields.distribution_pct, 100);
   // A stated amount pays out of this month; otherwise the profit of every month since the last payout that no payout has paid.
@@ -599,7 +600,10 @@ export function businessView(ctx: ReadContext, api: FinanceApi, business: Entity
   if (owed.sales_tax !== 0) taxes.push({ label: "Sales tax collected, to pay", cents: owed.sales_tax, due: nextDue(ctx, api, `salestax:${business}`) });
   if (owed.suppliers !== 0) taxes.push({ label: "Owed to suppliers", cents: owed.suppliers, due: nextDue(ctx, api, `suppliers:${business}`) });
   if (structureOf(ctx.state, business) === "c_corp" && api.feature(ctx, business, "business_tax")) taxes.push({ label: "Income tax on this year's profit", cents: corporateTax(ctx, business, year.profit), due: nextDue(ctx, api, `esttax:${business}`) });
+  // The months since its books began, the chat's start or its own, and at most the last 12: before them it had nothing to book. This month counts while nothing has yet.
+  const since = firstBookedMonth(api, ctx, business) ?? monthOf(ctx.world, now);
   const months = monthsBetween(ctx.world, now - 335 * MINUTES_PER_DAY, now + 1)
+    .filter((m) => m >= since)
     .reverse()
     .map((m) => {
       const [y, mo] = m.split("-").map(Number);

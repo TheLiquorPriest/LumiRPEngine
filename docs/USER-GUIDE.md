@@ -96,7 +96,7 @@ Each page opens over the drawer with a back button, and Escape goes back too. Ev
 
 A holding's **Held in** and a property's **Mortgage** open that account's page.
 
-Every control here is something your character does: it plays as your next turn, like an action from the Actions sheet, and the reply narrates it. Your role on an account decides what you can do with it: an owner or a joint owner spends from it and manages it, a custodian or a trustee spends from it and manages it but its worth isn't theirs, a beneficiary sees it and counts its worth but can't spend it, and an authorized user spends with a card but manages nothing.
+Every control here is something your character does: it plays as your next turn, like an action from the Actions sheet, and the reply narrates it. Your role on an account decides what you can do with it: an owner or a joint owner spends from it and manages it, a custodian or a trustee spends from it and manages it but its worth isn't theirs, a beneficiary sees it and counts its worth but can't spend it, and an authorized user spends with a card but manages nothing. If you own or run a business, you also manage its accounts by that role: you set up and change their standing payments, set their autopay and handle their cards, though you spend the business's money for yourself only with a role of your own on the account, such as an authorized user's card. Working there gives you no say over its money.
 
 ### People
 

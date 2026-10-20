@@ -559,7 +559,7 @@ Extends `thing`.
 - `holding_value(id)`
 - `holds(who, thing)`
 - `is_credit(account)`
-- `manages(who, business)`
+- `manages(who, thing)`
 - `may_draw(who, business)`
 - `money_feature(feature, who)`
 - `net_worth(who)`

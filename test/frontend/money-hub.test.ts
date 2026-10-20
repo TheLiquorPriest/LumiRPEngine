@@ -3,7 +3,7 @@
 // sends.
 
 import { describe, expect, test } from "bun:test";
-import { featureOn, FINANCE_FEATURES, type AccountView, type BusinessView, type CardView, type FinanceView, type Flow, type FlowView, type HoldingView, type PropertyView } from "../../src/shared/finance";
+import { featureOn, FINANCE_FEATURES, ROLE_RIGHTS, type AccountView, type BusinessView, type CardView, type FinanceView, type Flow, type FlowView, type HoldingView, type PropertyView } from "../../src/shared/finance";
 import type { Level } from "../../src/shared/ids";
 import type { JsonObject } from "../../src/shared/json";
 import { isRecord } from "../../src/shared/json";
@@ -48,8 +48,10 @@ import {
 
 const USD = DEFAULT_CURRENCY;
 
+/** An account in the party's view; whether they manage it follows their own role unless a test says (a business's account its owner runs). */
 function account(over: Partial<AccountView> & Pick<AccountView, "id" | "class">): AccountView {
-  return { name: over.id, classLabel: "", product: { id: over.class, label: "" }, institution: null, status: "open", cents: 0, available: null, owners: [{ party: "pov", name: "You", role: "owner", share: 100 }], role: "owner", limit: null, aprPct: null, apyPct: null, terms: [], autopay: null, due: null, statements: [], cards: [], pending: [], holds: [], transactions: [], securedBy: null, loan: null, ...over };
+  const role = over.role === undefined ? "owner" : over.role;
+  return { name: over.id, classLabel: "", product: { id: over.class, label: "" }, institution: null, status: "open", cents: 0, available: null, owners: [{ party: "pov", name: "You", role: "owner", share: 100 }], role: "owner", manages: role !== null && ROLE_RIGHTS[role].manage, limit: null, aprPct: null, apyPct: null, terms: [], autopay: null, due: null, statements: [], cards: [], pending: [], holds: [], transactions: [], securedBy: null, loan: null, ...over };
 }
 
 function card(over: Partial<CardView> & Pick<CardView, "id" | "account">): CardView {
@@ -233,6 +235,15 @@ describe("what a party's roles allow", () => {
     expect(cardControls(v, card({ id: "c", account: "chk", state: "cancelled" }))).toEqual([]);
     const theirs = account({ id: "theirs", class: "checking", role: "authorized_user" });
     expect(cardControls(view({ accounts: [theirs] }), card({ id: "c", account: "theirs", holderId: "mara" }))).toEqual([]);
+  });
+
+  test("an account the party runs for a business they own is theirs to manage, though their own role on it only spends", () => {
+    const till = account({ id: "shop", class: "business_checking", role: "authorized_user", manages: true });
+    const line = account({ id: "line", class: "line_of_credit", role: "authorized_user", manages: true, cents: -5000, autopay: { mode: "none", from: null, fromName: null, cents: null } });
+    const v = view({ accounts: [checking, till, line] });
+    expect(flowSources(v).map((s) => s.id)).toEqual(["chk", "shop"]);
+    expect(accountControls(v, line)).toContain("autopay");
+    expect(cardControls(v, card({ id: "c", account: "shop", holderId: "danny" }))).toEqual(["freeze", "lost", "replace"]);
   });
 
   const shop = (role: BusinessView["role"]): BusinessView => ({ id: "shop", name: "The shop", role, owners: [], accounts: [], places: [], books: { period: "Oct", revenue: 0, expenses: 0, payroll: 0, taxes: 0, profit: 0, lines: [] }, months: [], sales: [], invoices: [], employees: [], taxes: [], route: null });

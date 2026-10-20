@@ -1228,6 +1228,8 @@ export interface AccountView {
   owners: OwnerLine[];
   /** The viewing party's role on it. */
   role: OwnerRole | null;
+  /** Whether the viewing party manages it (its standing payments, autopay and cards): by a managing role on it, or on a business or trust that holds one (DESIGN §25.1). */
+  manages: boolean;
   limit: number | null;
   aprPct: number | null;
   apyPct: number | null;

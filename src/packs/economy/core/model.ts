@@ -33,7 +33,7 @@ import {
   type RoleRights,
 } from "../../../shared/finance";
 import { EXTERNAL_ACCOUNT_PREFIX } from "../../../engine/events";
-import { bandOfJson, numOf, objOf, sliceOf, strOf, own, rowOf } from "../../../engine/pack-kit";
+import { bandOfJson, labelOf, numOf, objOf, sliceOf, strOf, own, rowOf } from "../../../engine/pack-kit";
 import type { ReadContext } from "../../../engine/registry";
 import type { Rng } from "../../../engine/rng";
 import type { WorldState } from "../../../engine/state";
@@ -58,6 +58,44 @@ export function external(id: string): string {
 export function outsideAccount(name: string): string {
   const bare = name.startsWith(EXTERNAL_ACCOUNT_PREFIX) ? name.slice(EXTERNAL_ACCOUNT_PREFIX.length) : name;
   return external(bare.toLowerCase().replace(/[^a-z0-9:]+/g, "_").replace(/^_+|_+$/g, "") || "outside");
+}
+
+/** The foundation's and the modules' own outside payees by key, as a person reads them. */
+const OUTSIDE_NAMES: Readonly<Record<string, string>> = {
+  market: "Shops",
+  insurer: "Insurer",
+  "tax:federal": "Federal tax",
+  "tax:state": "State tax",
+  "tax:local": "Local tax",
+  "insurance:property": "Property insurance",
+  "upkeep:property": "Property upkeep",
+};
+
+/** The taxes a region's authority collects (`tax:<kind>:<region>`), by kind. */
+const REGIONAL_TAXES: Readonly<Record<string, string>> = { sales: "Sales tax", property: "Property tax" };
+
+/**
+ * An outside side of a payment as a person reads it (DESIGN §25.11): the foundation's and the
+ * modules' own payees in words, a regional tax with its region ("Sales tax (Michigan)"), an outside
+ * employer by the name or place it was given, a managed property's tenants as "Outside tenant",
+ * and any other name, an author's or a player's, as written. A journal line keeps an outside name
+ * with its `_` read as spaces, so a region is found either way.
+ */
+export function outsideName(books: TableBooks, raw: string): string {
+  const bare = raw.startsWith(EXTERNAL_ACCOUNT_PREFIX) ? raw.slice(EXTERNAL_ACCOUNT_PREFIX.length) : raw;
+  const known = own(OUTSIDE_NAMES, bare);
+  if (known !== undefined) return known;
+  const [head = "", ...rest] = bare.split(":");
+  const tax = head === "tax" ? own(REGIONAL_TAXES, rest[0] ?? "") : undefined;
+  if (tax !== undefined) {
+    const region = rest.slice(1).join(":").trim();
+    if (region === "") return tax;
+    const name = rowOf(books, "economy.regions", region.replace(/ +/g, "_"))?.name;
+    return `${tax} (${typeof name === "string" && name !== "" ? name : region.replace(/_/g, " ")})`;
+  }
+  if (head === "employer") return rest.join(":") === "" ? "Employer" : labelOf(books, rest.join(":"));
+  if (head === "tenant") return "Outside tenant";
+  return bare.replace(/_/g, " ");
 }
 
 export function bankSide(institution: string): string {
@@ -275,6 +313,27 @@ export function rightsOf(state: Readonly<WorldState>, id: EntityId, party: Entit
 
 export function canSpend(state: Readonly<WorldState>, account: EntityId, party: EntityId): boolean {
   return rightsOf(state, account, party)?.spend === true;
+}
+
+/**
+ * Whether `who` manages a party by a role on it (DESIGN §25.1): a managing role (`owner`, `joint`,
+ * `custodian`, `trustee`) on a business or a trust. A person or a household lists no owners, so no
+ * one else manages it.
+ */
+export function managesParty(state: Readonly<WorldState>, party: EntityId, who: EntityId): boolean {
+  return ownersOf(state, party).some((o) => o.party === who && ROLE_RIGHTS[o.role].manage);
+}
+
+/**
+ * Whether `who` manages an account (DESIGN §25.1): by a managing role on it, or by managing a
+ * business or a trust that holds one, so a business's owners manage its accounts by their role on
+ * the business. Managing is setting up and changing what the account pays (its standing payments,
+ * its autopay) and its cards; it isn't spending, which only a role on the account gives, and an
+ * employee, holding no role on the business, manages none of it.
+ */
+export function managesAccount(books: Books, account: EntityId, who: EntityId): boolean {
+  if (!classOf(books, account)) return false;
+  return ownersOf(books.state, account).some((o) => ROLE_RIGHTS[o.role].manage && (o.party === who || managesParty(books.state, o.party, who)));
 }
 
 /** A party's share of an entity's worth, in percent. */

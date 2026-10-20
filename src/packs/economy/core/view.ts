@@ -9,6 +9,7 @@ import type { EntityId } from "../../../shared/ids";
 import { AUTOPAY_MODES, CLASS_TRAITS, FINANCE_FEATURES, featureOn, ownersIn, worthShares, type AccountView, type AutopayMode, type CycleState, type AlertLine, type CardView, type FinanceView, type Flow, type FlowView, type HouseholdView, type JournalEntry, type JournalLine, type OverviewView, type PartyKind, type StatementView, type UpcomingLine } from "../../../shared/finance";
 import { formatMoney } from "../../../shared/world";
 import { calendarOf, formatClock, monthName, weekdayName } from "../../../engine/calendar";
+import { EXTERNAL_ACCOUNT_PREFIX } from "../../../engine/events";
 import { numOf, objOf, own, sliceOf, strOf } from "../../../engine/pack-kit";
 import type { ReadContext } from "../../../engine/registry";
 import { kindIs } from "../../../engine/scope";
@@ -19,7 +20,7 @@ import { statementState } from "./cycle";
 import { creditReport } from "./credit";
 import { allFlows, occurrences, occurrenceAmount } from "./flows";
 import { cycleOf, flowRunOf, isOpened, journalOf, NOTES_CAP } from "./journal";
-import { accountsOf, availableOf, balance, classOf, holdersOf, holdsOn, openerOf, ownersOf, productOf, rightsOf, statusOf, traitsOf, wealthBand } from "./model";
+import { accountsOf, availableOf, balance, classOf, holdersOf, holdsOn, managesAccount, managesParty, openerOf, outsideName, ownersOf, productOf, rightsOf, statusOf, traitsOf, wealthBand } from "./model";
 import { cardsOn, cardRoom, featureFor, isParty, overdraftRoom, tiersOf, toggles } from "./pay";
 import { netWorthParts } from "./worth";
 import { createRng } from "../../../engine/rng";
@@ -61,17 +62,25 @@ function idFor(ctx: ReadContext, viewer: Viewer, id: string): EntityId | null {
 }
 
 /**
- * A journal line's other side: an entity id as its name (or "someone"), else the outside party's
- * name, itself masked when it's the name of someone the viewer can't see (a module's, or a line
- * written before ids were kept).
+ * A flow's side, or a journal line's other party, as the viewer reads it: someone in the world by
+ * name ("someone" when the viewer can't see them), an outside account of someone in the world as
+ * them, and anyone outside in words (`outsideName`).
+ */
+function sideName(ctx: ReadContext, viewer: Viewer, raw: string): string {
+  const id = raw.startsWith(EXTERNAL_ACCOUNT_PREFIX) ? raw.slice(EXTERNAL_ACCOUNT_PREFIX.length) : raw;
+  return own(ctx.state.entities, id) ? nameFor(ctx, viewer, id) : outsideName(ctx, raw);
+}
+
+/**
+ * A journal line's other side as `sideName` reads it, masked too when it's the name of someone the
+ * viewer can't see (a module's, or a line written before ids were kept).
  */
 function counterpartyName(ctx: ReadContext, viewer: Viewer, raw: string): string {
-  if (own(ctx.state.entities, raw)) return nameFor(ctx, viewer, raw);
-  if (viewer.pov !== null) {
+  if (viewer.pov !== null && !own(ctx.state.entities, raw)) {
     const named = Object.keys(ctx.state.entities).find((id) => ctx.state.entities[id]?.name === raw);
     if (named !== undefined && !visible(ctx, viewer, named)) return "someone";
   }
-  return raw;
+  return sideName(ctx, viewer, raw);
 }
 
 function when(ctx: ReadContext, at: number): string {
@@ -208,6 +217,7 @@ function accountView(ctx: ReadContext, viewer: Viewer, party: EntityId, account:
     available: level >= 2 ? (t.liability ? (p?.limit === null && cls === "charge_card" ? null : shownAvailable(ctx, account)) : shownAvailable(ctx, account) + overdraftRoom(ctx, account)) : null,
     owners: owners.map((o) => ({ party: idFor(ctx, viewer, o.party), name: nameFor(ctx, viewer, o.party), role: o.role, share: Math.round((own(shares, o.party) ?? 0) * 100) / 100 })),
     role,
+    manages: managesAccount(ctx, account, party),
     limit: level >= 3 && t.liability ? (p?.limit ?? null) : null,
     aprPct: level >= 4 && t.liability ? (p?.apr_pct ?? null) : null,
     apyPct: level >= 4 && t.earns ? (p?.apy_pct ?? null) : null,
@@ -279,7 +289,8 @@ function flowView(hooks: FinanceHooks, ctx: ReadContext, viewer: Viewer, party: 
     cents = a && !("code" in a) ? a.cents : null;
   }
   const fromSide = own(ctx.state.entities, f.from);
-  const payerHolds = fromSide?.kind === "account" ? rightsOf(ctx.state, f.from, party)?.manage === true : f.from === party;
+  // The party changes it when they manage what pays it: the account (by their role on it, or on the business or trust that holds it), or the business or trust paying.
+  const payerHolds = fromSide?.kind === "account" ? managesAccount(ctx, f.from, party) : f.from === party || managesParty(ctx.state, f.from, party);
   // The flow as stored goes out only when every side of it is someone the viewer can see.
   const sides = [f.from, f.to, f.fallback ?? "", f.link ?? "", ...(f.splits ?? []).map((s) => s.to), ...(f.shares ?? []).flatMap((s) => [s.party, s.from ?? ""])].filter((id) => id !== "");
   const seen = sides.every((id) => visible(ctx, viewer, id));
@@ -287,8 +298,8 @@ function flowView(hooks: FinanceHooks, ctx: ReadContext, viewer: Viewer, party: 
     id: f.id,
     label: f.label,
     kind: f.kind,
-    from: own(ctx.state.entities, f.from) ? nameFor(ctx, viewer, f.from) : f.from.replace(/_/g, " "),
-    to: own(ctx.state.entities, f.to) ? nameFor(ctx, viewer, f.to) : f.to.replace(/_/g, " "),
+    from: sideName(ctx, viewer, f.from),
+    to: sideName(ctx, viewer, f.to),
     amount: amountWords(ctx, viewer, f),
     cents,
     schedule: scheduleWords(ctx, f),

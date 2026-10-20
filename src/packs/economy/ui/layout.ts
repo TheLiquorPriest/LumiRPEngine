@@ -98,7 +98,7 @@ export type AccountControl = "pay" | "transfer" | "autopay" | "withdraw" | "depo
  * - `pay`: something owed on a card, a line or a loan, from an account they may pay from;
  * - `transfer`: money out of an account they may spend from, to another of theirs (cash moves by
  *   Withdraw and Deposit instead, which at the top level need a machine or a branch);
- * - `autopay`: where the view offers autopay (credit accounts, at the level that runs it) and they manage the account;
+ * - `autopay`: where the view offers autopay (credit accounts, at the level that runs it) and they manage the account (by their role on it, or on the business that holds it);
  * - `withdraw` and `deposit`: cash out of and into a bank account they may spend from, when they hold cash.
  */
 export function accountControls(view: FinanceView, account: AccountView): AccountControl[] {
@@ -108,7 +108,7 @@ export function accountControls(view: FinanceView, account: AccountView): Accoun
   const out: AccountControl[] = [];
   if ((t.revolving || t.installment) && account.cents < 0 && paySources(view).some((a) => a.id !== account.id)) out.push("pay");
   if (r.spend && account.status === "open" && moveSources(view).some((a) => a.id === account.id) && transferTargets(view, account.id).length > 0) out.push("transfer");
-  if (account.autopay !== null && r.manage) out.push("autopay");
+  if (account.autopay !== null && account.manages) out.push("autopay");
   const holdsCash = view.accounts.some((a) => CLASS_TRAITS[a.class].cash && rights(a.role).spend);
   if (holdsCash && r.spend && account.status === "open" && t.asset && !t.cash && !t.locked && !t.investment && t.depositRank !== null) out.push("withdraw", "deposit");
   return out;
@@ -138,7 +138,7 @@ export function transferTargets(view: FinanceView, from: EntityId): AccountView[
 /** The card changes the player may make: on a card they hold, or on one on an account they manage. */
 export function cardControls(view: FinanceView, card: CardView): CardChange[] {
   const account = view.accounts.find((a) => a.id === card.account);
-  if (card.holderId !== view.party && !rights(account?.role ?? null).manage) return [];
+  if (card.holderId !== view.party && account?.manages !== true) return [];
   return cardChanges(card.state);
 }
 
@@ -223,12 +223,12 @@ export function endableLeases(view: FinanceView, property: PropertyView): string
 
 /**
  * Where a new standing payment can come from: a non-cash account the party may pay from and
- * manages (flows never draw on wallet cash; an authorized user spends on a card but sets up no
- * standing payments).
+ * manages, by their role on it or on the business that holds it (flows never draw on wallet cash;
+ * an authorized user spends on a card but sets up no standing payments).
  */
 export function flowSources(view: FinanceView): { id: string; label: string }[] {
   return paySources(view)
-    .filter((a) => !CLASS_TRAITS[a.class].cash && rights(a.role).manage)
+    .filter((a) => !CLASS_TRAITS[a.class].cash && a.manages)
     .map((a) => ({ id: a.id, label: a.name }));
 }
 

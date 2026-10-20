@@ -21,10 +21,11 @@ export interface GmMoney {
   values: Map<string, Record<string, unknown>>;
 }
 
-/** What a test changes in the world before the chat starts: fields added to places (a cash machine, a branch) and set on entities. */
+/** What a test changes in the world before the chat starts: fields added to places (a cash machine, a branch) and set on entities, and who the POV is. */
 export interface WorldPatch {
   places?: Record<string, JsonObject>;
   entities?: Record<string, JsonObject>;
+  pov?: string;
 }
 
 export class MoneyChat {
@@ -39,7 +40,7 @@ export class MoneyChat {
     const rig = new Rig({ shipped: true });
     const worldId = await rig.newWorld("Port Alder", "modern_slice_of_life");
     const edits = [...Object.entries(patch.places ?? {}).map(([id, fields]) => ({ collection: "places", id, fields })), ...Object.entries(patch.entities ?? {}).map(([id, fields]) => ({ collection: "entities", id, fields }))];
-    if (edits.length > 0) {
+    if (edits.length > 0 || patch.pov !== undefined) {
       const draft = rig.body(await rig.send({ type: "lre.editor", op: "get", worldId, base: null }));
       const doc = isRecord(draft.draft) ? draft.draft : {};
       for (const { collection, id, fields } of edits) {
@@ -49,6 +50,7 @@ export class MoneyChat {
         const value = { ...item, fields: { ...(isRecord(item.fields) ? item.fields : {}), ...fields } };
         rig.body(await rig.send({ type: "lre.editor", op: "put", worldId, base: draft.base, collection, id, value }));
       }
+      if (patch.pov !== undefined) rig.body(await rig.send({ type: "lre.editor", op: "set", worldId, base: draft.base, part: "meta", value: { pov: patch.pov } }));
       rig.body(await rig.send({ type: "lre.world", op: "commit", worldId, base: draft.base }));
     }
     const chatId = rig.host.createChat("Morning.");

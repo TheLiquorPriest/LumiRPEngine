@@ -48,6 +48,8 @@ import {
   external,
   hasLedger,
   holdersOf,
+  managesAccount,
+  managesParty,
   openerOf,
   ownersOf,
   priceOf,
@@ -456,6 +458,12 @@ function registerRest(r: CoreRegistry, hooks: FinanceHooks): void {
   // Whether `who` holds a thing (any role on an owners list, its owner, a card's holder) or can spend from an account.
   r.formula("holds", (ctx, who, thing) => heldBy(ctx.state.entities, String(thing ?? ""), String(who ?? ctx.world.pov)));
   r.formula("spends", (ctx, who, account) => canSpend(ctx.state, String(account ?? ""), String(who ?? ctx.world.pov)));
+  // Whether `who` manages an account (by a managing role on it, or on the business or trust that holds it) or a business or a trust (DESIGN §25.1).
+  r.formula("manages", (ctx, who, thing) => {
+    const id = String(thing ?? "");
+    const by = String(who ?? ctx.world.pov);
+    return own(ctx.state.entities, id)?.kind === "account" ? managesAccount(ctx, id, by) : managesParty(ctx.state, id, by);
+  });
   r.formula("is_credit", (ctx, account) => traitsOf(ctx, String(account ?? ""))?.liability === true);
   r.formula("money_feature", (ctx, feature, who) => (FINANCE_FEATURES as readonly string[]).includes(String(feature)) && featureFor(ctx, String(who ?? ctx.world.pov), String(feature) as FinanceFeature));
   r.formula("credit_score", (ctx, who) => currentScore(ctx, String(who ?? ctx.world.pov)) ?? 0);
@@ -693,11 +701,13 @@ function registerActions(r: CoreRegistry): void {
   r.action({ id: "withdraw_cash", label: "Withdraw cash", pack: "economy", params: { account: { type: "ref", ref: "account" }, amount: { type: "money" } }, requires: ["spends(self, account)", "amount > 0", "level.money >= 2"], outcomes: { default: [{ type: "economy.withdraw", args: { account: "account", cents: "=amount", who: "self" } }] }, duration: "3", lexicon: ["withdraw", "take out cash", "hit the atm", "get cash"], observable: "takes out cash" });
   r.action({ id: "deposit_cash", label: "Deposit cash", pack: "economy", params: { account: { type: "ref", ref: "account" }, amount: { type: "money" } }, requires: ["holds(self, account)", "amount > 0", "level.money >= 2"], outcomes: { default: [{ type: "economy.deposit", args: { account: "account", cents: "=amount", who: "self" } }] }, duration: "3", lexicon: ["deposit", "pay in cash", "bank the cash"], observable: "pays cash into the bank" });
   const card = { card: { type: "ref" as const, ref: "card" } };
-  r.action({ id: "card_freeze", label: "Freeze card", pack: "economy", params: card, requires: ["holds(self, card)", "level.money >= 3"], outcomes: { default: [{ type: "economy.card_state", args: { card: "card", state: "frozen", who: "self" } }] }, lexicon: ["freeze my card", "lock my card"], ...phone });
-  r.action({ id: "card_unfreeze", label: "Unfreeze card", pack: "economy", params: card, requires: ["holds(self, card)", "level.money >= 3"], outcomes: { default: [{ type: "economy.card_state", args: { card: "card", state: "active", who: "self" } }] }, lexicon: ["unfreeze my card", "unlock my card"], ...phone });
-  r.action({ id: "card_report_lost", label: "Report card lost", pack: "economy", params: card, requires: ["holds(self, card)", "level.money >= 3"], outcomes: { default: [{ type: "economy.card_state", args: { card: "card", state: "lost", who: "self" } }] }, lexicon: ["report my card lost", "my card was stolen", "cancel my card"], ...phone });
-  r.action({ id: "card_replace", label: "Replace card", pack: "economy", params: card, requires: ["holds(self, card)", "level.money >= 3"], outcomes: { default: [{ type: "economy.card_replace", args: { card: "card", who: "self" } }] }, lexicon: ["replace my card", "order a new card"], ...phone });
-  r.action({ id: "set_autopay", label: "Set autopay", pack: "economy", params: { account: { type: "ref", ref: "account" }, mode: { type: "text", label: "none, minimum, statement, full or fixed" }, from: { type: "ref", ref: "account", optional: true }, amount: { type: "money", optional: true } }, requires: ["holds(self, account)", "is_credit(account)", "level.money >= 3"], outcomes: { default: [{ type: "economy.set_autopay", args: { account: "account", mode: "=params.mode", from: "=params.from", cents: "=params.amount", who: "self" } }] }, lexicon: ["set up autopay", "turn on autopay", "turn off autopay"], ...phone });
+  // A card is changed by its holder, or by whoever manages its account (a business's card by the business's owner).
+  const cardBy = ["holds(self, card) or manages(self, card.account)", "level.money >= 3"];
+  r.action({ id: "card_freeze", label: "Freeze card", pack: "economy", params: card, requires: cardBy, outcomes: { default: [{ type: "economy.card_state", args: { card: "card", state: "frozen", who: "self" } }] }, lexicon: ["freeze my card", "lock my card"], ...phone });
+  r.action({ id: "card_unfreeze", label: "Unfreeze card", pack: "economy", params: card, requires: cardBy, outcomes: { default: [{ type: "economy.card_state", args: { card: "card", state: "active", who: "self" } }] }, lexicon: ["unfreeze my card", "unlock my card"], ...phone });
+  r.action({ id: "card_report_lost", label: "Report card lost", pack: "economy", params: card, requires: cardBy, outcomes: { default: [{ type: "economy.card_state", args: { card: "card", state: "lost", who: "self" } }] }, lexicon: ["report my card lost", "my card was stolen", "cancel my card"], ...phone });
+  r.action({ id: "card_replace", label: "Replace card", pack: "economy", params: card, requires: cardBy, outcomes: { default: [{ type: "economy.card_replace", args: { card: "card", who: "self" } }] }, lexicon: ["replace my card", "order a new card"], ...phone });
+  r.action({ id: "set_autopay", label: "Set autopay", pack: "economy", params: { account: { type: "ref", ref: "account" }, mode: { type: "text", label: "none, minimum, statement, full or fixed" }, from: { type: "ref", ref: "account", optional: true }, amount: { type: "money", optional: true } }, requires: ["manages(self, account)", "is_credit(account)", "level.money >= 3"], outcomes: { default: [{ type: "economy.set_autopay", args: { account: "account", mode: "=params.mode", from: "=params.from", cents: "=params.amount", who: "self" } }] }, lexicon: ["set up autopay", "turn on autopay", "turn off autopay"], ...phone });
   const flowParams = {
     label: { type: "text" as const, optional: true },
     kind: { type: "text" as const, optional: true },

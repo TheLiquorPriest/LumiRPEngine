@@ -6,7 +6,7 @@
 import { describe, expect, test } from "bun:test";
 import type { PayTier } from "../../src/shared/finance";
 import { adjustOp } from "../../src/frontend/requests";
-import { accountBlocks, accountControls, cardControls, creditBlocks, flowSources, flowTargets, hubTabs, overviewBlocks, paySources, sharedAccounts, transferTargets } from "../../src/packs/economy/ui/layout";
+import { accountBlocks, accountControls, cardControls, creditBlocks, flowControls, flowSources, flowTargets, hubTabs, overviewBlocks, paySources, sharedAccounts, transferTargets } from "../../src/packs/economy/ui/layout";
 import { flowSideChoices } from "../../src/packs/economy/ui/flows";
 import {
   accountStatusOps,
@@ -593,5 +593,39 @@ describe("the hub shows what each Money level shows", () => {
     expect(maddie ? account(maddie, "acct_maddie_savings").role : null).toBe("beneficiary");
     expect(helen ? account(helen, "acct_maddie_savings").role : null).toBe("custodian");
     expect(maddie ? accountControls(maddie, account(maddie, "acct_maddie_savings")) : null).toEqual([]);
+  });
+});
+
+describe("a business's owner manages its accounts by their role on the business", () => {
+  const SHOP = "acct_marcus_shop";
+  const LIFT_LOAN = "acct_alder_lift_loan";
+  const BUSINESS = "alder_automotive_co";
+
+  test("Marcus changes the shop's standing payment and sets its loan's autopay; an employee of the shop does neither", async () => {
+    const owner = await MoneyChat.start({ pov: "marcus_delgado" });
+    const view = await owner.hub();
+    // He holds the shop's checking only as an authorized user, who spends but manages nothing: his role on the shop is what lets him run it.
+    expect(account(view, SHOP)).toMatchObject({ role: "authorized_user", manages: true });
+    expect(flowSources(view).map((s) => s.id)).toContain(SHOP);
+    const lease = view.flows.find((f) => f.id === "flow_shop_lease");
+    if (!lease?.spec) throw new Error("no shop lease with its form");
+    expect(lease).toMatchObject({ from: "Alder Automotive operating account", amount: "$3,200.00", editable: true });
+    expect(flowControls(view, lease)).toEqual(["edit", "pause", "delete"]);
+    const change = flowUpdateAction(lease.spec, { ...flowFormOf(lease.spec, owner.currency), amount: "3350" }, owner.currency);
+    if (!change) throw new Error("no change");
+    expect(await owner.play(change)).toContain("done");
+    expect((await owner.hub()).flows.find((f) => f.id === "flow_shop_lease")?.amount).toBe("$3,350.00");
+    // The lift loan is the shop's alone, so it isn't among his own accounts; he sets its autopay as the shop's owner.
+    expect(await owner.play(autopayAction(LIFT_LOAN, "minimum", SHOP, null))).toContain("done");
+    expect(account(await owner.party(BUSINESS), LIFT_LOAN).autopay).toMatchObject({ mode: "minimum", from: SHOP });
+
+    // Jordan works at the shop but holds no role on it or its accounts.
+    const employee = await MoneyChat.start();
+    expect((await employee.hub()).flows.some((f) => f.id === "flow_shop_lease")).toBe(false);
+    expect(await employee.play({ action: "flow_update", params: { flow: "flow_shop_lease", amount: 10000 } })).toContain("Shop lease isn't Jordan Ellis's to change");
+    expect(await employee.play(autopayAction(LIFT_LOAN, "none", null, null))).toContain("requires manages(self, account)");
+    const shop = await employee.party(BUSINESS);
+    expect(shop.flows.find((f) => f.id === "flow_shop_lease")?.amount).toBe("$3,200.00");
+    expect(account(shop, LIFT_LOAN).autopay?.mode).toBe("fixed");
   });
 });

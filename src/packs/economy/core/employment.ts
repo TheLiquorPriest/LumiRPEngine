@@ -28,6 +28,7 @@ import { placeVisit } from "../../../engine/seen";
 import type { WorldState } from "../../../engine/state";
 import { minutesBetween } from "../../../engine/world-state";
 import { addToBooks, monthOf, operatingAccount } from "./books";
+import { managesParty } from "./model";
 import type { FinanceApi, FinanceRegistry, FlowPosting } from "./module";
 import { addPay, payTaxes, taxTotal, yearPay, type PayTaxes } from "./taxes";
 
@@ -738,10 +739,16 @@ function payslipEvent(ctx: ReadContext, job: Job, check: Paycheck, at: number): 
   };
 }
 
-/** Where a job's pay comes from: its business employer's operating account (its outside account while it holds none), else the outside employer. */
+/** Where a job's pay comes from: its business employer's operating account (its outside account while it holds none), else the outside employer's account. */
 export function payerOf(ctx: ReadContext, api: FinanceApi, job: Job): string {
   if (job.business) return operatingAccount(api, ctx, job.business) ?? api.outside(job.business);
   return api.outside(`employer:${(job.employer || job.occupation || "work").toLowerCase().replace(/\W+/g, "_")}`);
+}
+
+/** A job's employer by name: its business's, else the place or name the job gives; "" when it gives none. */
+function employerName(ctx: ReadContext, job: Job): string {
+  if (job.business) return labelOf(ctx, job.business);
+  return job.employer === "" ? "" : labelOf(ctx, job.employer);
 }
 
 /** The payroll flow a job derives: from the employer to the worker, on the job's cycle, from its start to the payday that settles its end. */
@@ -760,7 +767,8 @@ function payrollFlow(ctx: ReadContext, api: FinanceApi, job: Job): Flow | null {
     id: `pay:${job.id}`,
     label: `Pay: ${job.title}`,
     kind: "payroll",
-    from: payerOf(ctx, api, job),
+    // An outside employer pays as an outside payer named as the job names it, so the flow reads as its name; its pay posts from `payerOf`'s account.
+    from: job.business ? payerOf(ctx, api, job) : `employer:${job.employer}`,
     to: job.worker,
     ...(job.splits.length > 0 ? { splits: job.splits } : {}),
     amount: { provider: "payroll", args: { job: job.id } },
@@ -809,11 +817,6 @@ function timesheet(slot: SlotInfo, ctx: ReadContext): LedgerEvent[] {
 
 // ---------------------------------------------------------------- hiring, firing and raises
 
-/** Whether `who` runs a business: an owner whose role manages it. */
-export function manages(api: FinanceApi, state: Readonly<WorldState>, who: EntityId, business: EntityId): boolean {
-  return api.ownersOf(state, business).some((o) => o.party === who && (o.role === "owner" || o.role === "joint" || o.role === "trustee"));
-}
-
 function today(ctx: ReadContext): number {
   return dateAt(calendarOf(ctx.world), ctx.state.clock).dayIndex;
 }
@@ -829,7 +832,7 @@ function hire(api: FinanceApi, args: Record<string, JsonValue>, ctx: EffectConte
   if (!own(ctx.state.entities, business) || isGone(ctx.state, business) || api.partyKind(ctx, business) !== "business") return reject("missing_entity", `no business ${labelOf(ctx, business)}`);
   if (!own(ctx.state.entities, worker) || isGone(ctx.state, worker) || !kindIs(ctx.registry, ctx.world, own(ctx.state.entities, worker)?.kind ?? "", "person")) return reject("missing_entity", `no person ${labelOf(ctx, worker)}`);
   const by = strOf(args.by);
-  if (by !== "" && !manages(api, ctx.state, by, business)) return reject("not_owner", `${labelOf(ctx, by)} doesn't run ${labelOf(ctx, business)}`);
+  if (by !== "" && !managesParty(ctx.state, business, by)) return reject("not_owner", `${labelOf(ctx, by)} doesn't run ${labelOf(ctx, business)}`);
   const jobs = allJobs(ctx);
   if (jobs.some((j) => j.worker === worker && j.business === business && j.status !== "ended")) return reject("exists", `${labelOf(ctx, worker)} already works for ${labelOf(ctx, business)}`);
   const cal = calendarOf(ctx.world);
@@ -853,7 +856,7 @@ function endJob(api: FinanceApi, args: Record<string, JsonValue>, ctx: EffectCon
   const job = readJob(ctx, strOf(args.job));
   if (!job) return reject("missing_entity", `no job ${labelOf(ctx, strOf(args.job))}`);
   const by = strOf(args.by);
-  if (by !== "" && by !== job.worker && !(job.business && manages(api, ctx.state, by, job.business))) return reject("not_owner", `${labelOf(ctx, by)} can't end that job`);
+  if (by !== "" && by !== job.worker && !(job.business && managesParty(ctx.state, job.business, by))) return reject("not_owner", `${labelOf(ctx, by)} can't end that job`);
   if (job.status === "ended") return reject("ended", "that job has already ended");
   const end = typeof args.end === "string" && args.end !== "" ? args.end : dateText(calendarOf(ctx.world), today(ctx));
   return [
@@ -867,7 +870,7 @@ function raise(api: FinanceApi, args: Record<string, JsonValue>, ctx: EffectCont
   const job = readJob(ctx, strOf(args.job));
   if (!job) return reject("missing_entity", `no job ${labelOf(ctx, strOf(args.job))}`);
   const by = strOf(args.by);
-  if (by !== "" && !(job.business && manages(api, ctx.state, by, job.business))) return reject("not_owner", `${labelOf(ctx, by)} doesn't set that pay`);
+  if (by !== "" && !(job.business && managesParty(ctx.state, job.business, by))) return reject("not_owner", `${labelOf(ctx, by)} doesn't set that pay`);
   const rate = typeof args.rate === "number" && args.rate > 0 ? Math.round(args.rate) : typeof args.pct === "number" && args.pct > -100 ? Math.round(job.rate * (1 + args.pct / 100)) : NaN;
   if (!(rate > 0)) return reject("bad_amount", "a raise needs a new rate above nothing, or a percentage");
   return [{ type: "set", entity: job.id, field: "rate", value: rate }];
@@ -893,7 +896,7 @@ export function jobView(ctx: ReadContext, api: FinanceApi, job: Job): JobView {
   return {
     id: job.id,
     title: job.title,
-    employer: job.business ? labelOf(ctx, job.business) : job.employer,
+    employer: employerName(ctx, job),
     employerId: job.business,
     worker: labelOf(ctx, job.worker),
     workerId: job.worker,
@@ -924,7 +927,7 @@ export function registerEmployment(r: FinanceRegistry): void {
     const id = "provider" in flow.amount ? strOf(objOf(flow.amount.args).job, flow.link ?? "") : (flow.link ?? "");
     const job = readJob(ctx, id);
     if (!job) return null;
-    const check = paycheckFor(ctx, api, job, at, flow.from);
+    const check = paycheckFor(ctx, api, job, at, payerOf(ctx, api, job));
     if (!check) return null;
     // Nothing earned (a period on leave, out of season, no shifts): the record moves on, nothing posts.
     if (check.gross === 0) return { cents: 0, lines: [], extra: [payslipEvent(ctx, job, check, at)] };
@@ -937,7 +940,6 @@ export function registerEmployment(r: FinanceRegistry): void {
   core.effect({ type: "economy.hire", args: ["business", "worker", "title?", "occupation?", "basis?", "rate?", "hours?", "hours_per_week?", "pay_every?", "start?", "by?"], resolve: (args, ctx) => hire(api, args, ctx) });
   core.effect({ type: "economy.job_end", args: ["job", "end?", "by?"], resolve: (args, ctx) => endJob(api, args, ctx) });
   core.effect({ type: "economy.job_raise", args: ["job", "rate?", "pct?", "by?"], resolve: (args, ctx) => raise(api, args, ctx) });
-  core.formula("manages", (ctx, who, business) => manages(api, ctx.state, String(who ?? ""), String(business ?? "")));
   core.formula("employs", (ctx, business, who) => allJobs(ctx).some((j) => j.business === String(business ?? "") && j.worker === String(who ?? "") && j.status !== "ended"));
   core.action({ id: "job_hire", label: "Hire", pack: "economy", params: { business: { type: "ref", ref: "business" }, worker: { type: "ref", ref: "person" }, title: { type: "text", optional: true }, basis: { type: "text", optional: true, label: "Pay basis" }, rate: { type: "money", optional: true, label: "Pay rate" }, hours_per_week: { type: "number", optional: true }, pay_every: { type: "text", optional: true, label: "Paid every" } }, requires: ["manages(self, business)", "not employs(business, worker)", "level.money >= 3"], outcomes: { default: [{ type: "economy.hire", args: { business: "business", worker: "worker", title: "=params.title", basis: "=params.basis", rate: "=params.rate", hours_per_week: "=params.hours_per_week", pay_every: "=params.pay_every", by: "self" } }] }, duration: "15", lexicon: ["hire", "take on", "give a job to"], observable: "talks business" });
   core.action({ id: "job_end", label: "End a job", pack: "economy", params: { job: { type: "ref", ref: JOB_KIND } }, requires: ["job.worker == self or manages(self, job.employer)", "job.status != 'ended'", "level.money >= 3"], outcomes: { default: [{ type: "economy.job_end", args: { job: "job", by: "self" } }] }, duration: "10", lexicon: ["fire", "let go", "quit", "resign", "hand in my notice"], observable: "talks business" });
@@ -946,6 +948,6 @@ export function registerEmployment(r: FinanceRegistry): void {
   r.summary((ctx, who) =>
     allJobs(ctx)
       .filter((j) => j.worker === who && j.status === "active")
-      .map((j) => `${j.title} for ${j.business ? labelOf(ctx, j.business) : j.employer || "an outside employer"}, ${api.money(ctx, j.rate)} ${BASIS_WORDS[j.basis]}, paid ${j.every === null ? "nothing" : j.every.replace("_", " ")}.`),
+      .map((j) => `${j.title} for ${employerName(ctx, j) || "an outside employer"}, ${api.money(ctx, j.rate)} ${BASIS_WORDS[j.basis]}, paid ${j.every === null ? "nothing" : j.every.replace("_", " ")}.`),
   );
 }
