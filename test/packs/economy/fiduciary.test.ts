@@ -115,6 +115,54 @@ describe("money a manager only manages reaches none of their own interests", () 
     const owner = setup((wd) => Object.assign(wd.entities.daybreak!.fields, { owners: [{ party: "you", role: "owner", share: 100 }] })).w;
     expect(refusal(act(owner, "economy.hire", { business: "daybreak", worker: "you", title: "General manager", basis: "salary", rate: 20_000_000, pay_every: "weekly", by: "you" }))).toBe("");
   });
+
+  test("nor does it go into an account the manager may spend by a role of their own, unless the money is partly theirs: the café's custodian can't sweep its savings into the till he has a card on, nor a trustee pay the trust's money into an account he's custodian of", () => {
+    const custodian = setup((wd) => {
+      Object.assign(wd.entities.daybreak!.fields, { owners: [{ party: "you", role: "custodian" }, { party: "maya", role: "beneficiary", share: 100 }] });
+      wd.entities.db_operating!.fields.owners = [{ party: "daybreak", role: "owner" }, { party: "you", role: "authorized_user" }];
+      wd.entities.db_savings = account("db_savings", "daybreak", "savings", 5_000_000);
+    }).w;
+    expect(refusal(act(custodian, "economy.flow_create", { who: "you", label: "Top up the till", from: "db_savings", to: "db_operating", ...once }))).toContain("db_savings pays for Daybreak Café, not for Alex Rivera");
+    const { w } = trustee((wd) => {
+      wd.entities.jordan_kept = entity("jordan_kept", "account", "Jordan's savings", { owners: [{ party: "you", role: "custodian" }, { party: "jordan", role: "beneficiary", share: 100 }], product: "savings", opening: 0 });
+    });
+    expect(refusal(act(w, "economy.flow_create", { who: "you", label: "Grant", from: "trust_acct", to: "jordan_kept", ...once }))).toContain("Trust account pays for Chen Family Trust, not for Alex Rivera");
+  });
+
+  test("his interests run as deep as whose money is: a trustee who owns Brightline, which owns the café, pays the trust's money into neither", () => {
+    const { w } = trustee((wd) => {
+      Object.assign(wd.entities.brightline!.fields, { owners: [{ party: "you", role: "owner", share: 100 }] });
+      Object.assign(wd.entities.daybreak!.fields, { owners: [{ party: "brightline", role: "owner", share: 100 }] });
+    });
+    for (const to of ["bl_operating", "db_operating"]) expect(refusal(act(w, "economy.flow_create", { who: "you", label: "Consulting", from: "trust_acct", to, ...once }))).toContain("Trust account pays for Chen Family Trust, not for Alex Rivera");
+  });
+});
+
+describe("money wholly a manager's own keeps no one else's interest", () => {
+  test("the owner of Brightline and the café outright bills and pays between them, though he pays himself from neither but by a draw", () => {
+    const { w } = setup((wd) => {
+      Object.assign(wd.entities.brightline!.fields, { owners: [{ party: "you", role: "owner", share: 100 }] });
+      Object.assign(wd.entities.daybreak!.fields, { owners: [{ party: "you", role: "owner", share: 100 }] });
+    });
+    lapse(w, DAY);
+    expect(refusal(act(w, "economy.invoice_issue", { business: "daybreak", customer: "brightline", cents: 300_000, memo: "Catering", by: "you" }))).toBe("");
+    const invoice = Object.keys(w.state.entities).find((id) => w.state.entities[id]?.kind === "invoice" && w.state.entities[id]?.fields.customer === "brightline") ?? "";
+    const cafe = w.state.accounts.db_operating ?? 0;
+    expect(refusal(act(w, "economy.invoice_pay", { invoice, by: "you" }))).toBe("");
+    expect((w.state.accounts.db_operating ?? 0) - cafe).toBe(300_000);
+    const once = { amount: 300_000, every: "once", once: "2026-10-18T09:00" };
+    expect(refusal(act(w, "economy.flow_create", { who: "you", label: "Catering", from: "bl_operating", to: "db_operating", ...once }))).toBe("");
+    // What he takes out for himself goes by a draw, which the books and the taxes see.
+    expect(refusal(act(w, "economy.flow_create", { who: "you", label: "Pay me", from: "bl_operating", to: "checking", ...once }))).toContain("pays for Brightline Logistics, not for Alex Rivera");
+  });
+
+  test("where someone else holds a share of the payer, its money still pays nothing else of the manager's", () => {
+    const { w } = setup((wd) => {
+      Object.assign(wd.entities.brightline!.fields, { owners: [{ party: "you", role: "owner", share: 50 }, { party: "jordan", role: "owner", share: 50 }] });
+      Object.assign(wd.entities.daybreak!.fields, { owners: [{ party: "you", role: "owner", share: 100 }] });
+    });
+    expect(refusal(act(w, "economy.flow_create", { who: "you", label: "Catering", from: "bl_operating", to: "db_operating", amount: 300_000, every: "once", once: "2026-10-18T09:00" }))).toContain("pays for Brightline Logistics, not for Alex Rivera");
+  });
 });
 
 describe("the hub is told, by the same rule, where money its reader only manages may not go", () => {
@@ -139,5 +187,18 @@ describe("the hub is told, by the same rule, where money its reader only manages
     expect(page(custodian)?.selfDealing).toEqual(["you"]);
     const owner = setup((wd) => Object.assign(wd.entities.daybreak!.fields, { owners: [{ party: "you", role: "owner", share: 100 }] })).w;
     expect(page(owner)?.selfDealing).toEqual([]);
+  });
+
+  test("the café's custodian is told its savings may not go into the till he has a card on, and its owner that they may", () => {
+    const till = (role: "custodian" | "owner") => {
+      const { w } = setup((wd) => {
+        Object.assign(wd.entities.daybreak!.fields, { owners: role === "owner" ? [{ party: "you", role: "owner", share: 100 }] : [{ party: "you", role: "custodian" }, { party: "maya", role: "beneficiary", share: 100 }] });
+        wd.entities.db_operating!.fields.owners = [{ party: "daybreak", role: "owner" }, { party: "you", role: "authorized_user" }];
+        wd.entities.db_savings = account("db_savings", "daybreak", "savings", 5_000_000);
+      });
+      return (w.ctx.query("economy.finance")(w.ctx, "you", true) as FinanceView).paysFor.find((p) => p.from === "db_savings")?.to ?? [];
+    };
+    expect(till("custodian")).toContain("db_operating");
+    expect(till("owner")).not.toContain("db_operating");
   });
 });

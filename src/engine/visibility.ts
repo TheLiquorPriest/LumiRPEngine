@@ -368,7 +368,7 @@ function unaccented(text: string): string {
 }
 
 /** A word as name checks compare it: as written ("zoë", "łukasz") and plain ("zoe", "lukasz"). */
-interface Spelling {
+export interface Spelling {
   written: string;
   plain: string;
 }
@@ -386,21 +386,27 @@ const FUNCTION_WORDS: Record<string, true> = { a: true, an: true, the: true, of:
 
 const WORD_CHAR = "[\\p{L}\\p{M}\\p{N}]";
 
+/** The words a person is named by (`namesAny`): their name's words but those that name nothing alone ("the", "of"), and no lone letter or digit. */
+export function personWords(name: string): Spelling[] {
+  return spellings(name).filter((w) => !hasOwn(FUNCTION_WORDS, w.plain) && !/^[a-z0-9]$/.test(w.plain));
+}
+
 /**
- * Whether `words` come in `said` (a text's words joined by spaces) in order, each later in the same
- * word as the one before or in the next. A word of ASCII letters and digits counts only whole, so
- * "dangerous" doesn't say "dan", or with an English plural ending ("the Okafors", "two lanterns",
- * "the Joneses", "the pantries"); one with any other letter counts anywhere, since a script written
- * without spaces (李雷在监视你) or an inflected form (Вексом for Векс) has no word end to find.
- * Words are runs of letters, marks and digits, so none needs escaping in the pattern.
+ * The pattern one word of a name is said by, as `saysInOrder` reads it: a word of ASCII letters and
+ * digits only whole, so "dangerous" doesn't say "dan", or with an English plural ending ("the
+ * Okafors", "two lanterns", "the Joneses", "the pantries"); one with any other letter anywhere,
+ * since a script written without spaces (李雷在监视你) or an inflected form (Вексом for Векс) has
+ * no word end to find. Words are runs of letters, marks and digits, so none needs escaping.
  */
+export function wordPattern(w: string): string {
+  if (!/^[a-z0-9]+$/.test(w)) return w;
+  const plural = /[^aeiou]y$/.test(w) ? `(?:${w}(?:e?s)?|${w.slice(0, -1)}ies)` : `${w}(?:e?s)?`;
+  return `(?<!${WORD_CHAR})${plural}(?!${WORD_CHAR})`;
+}
+
+/** Whether `words` come in `said` (a text's words joined by spaces) in order, each said as `wordPattern` reads it, each later in the same word as the one before or in the next. */
 function saysInOrder(said: string, words: readonly string[]): boolean {
-  const parts = words.map((w) => {
-    if (!/^[a-z0-9]+$/.test(w)) return w;
-    const plural = /[^aeiou]y$/.test(w) ? `(?:${w}(?:e?s)?|${w.slice(0, -1)}ies)` : `${w}(?:e?s)?`;
-    return `(?<!${WORD_CHAR})${plural}(?!${WORD_CHAR})`;
-  });
-  return new RegExp(parts.join(`${WORD_CHAR}*(?: ${WORD_CHAR}*)?`), "u").test(said);
+  return new RegExp(words.map(wordPattern).join(`${WORD_CHAR}*(?: ${WORD_CHAR}*)?`), "u").test(said);
 }
 
 /** What a text says, read for name checks: its words as written and plain, with and without words like "the". */
@@ -436,7 +442,7 @@ export function namesAny(text: string, people: readonly string[], labels: readon
   const known = sayings(heard);
   for (const name of people) {
     const words = spellings(name).filter((w) => !hasOwn(FUNCTION_WORDS, w.plain));
-    const counted = words.filter((w) => !/^[a-z0-9]$/.test(w.plain));
+    const counted = personWords(name);
     for (const w of counted) if (said.says([w], false) && !known.says([w], false)) return true;
     if (counted.length > 0) continue;
     for (const w of words) {

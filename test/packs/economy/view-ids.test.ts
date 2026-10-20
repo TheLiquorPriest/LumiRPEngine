@@ -57,3 +57,24 @@ describe("a refusal and a job's pay name only whom the player may see", () => {
     expect((w.ctx.query("economy.finance")(w.ctx, "you", false) as FinanceView).jobs.find((j) => j.id === "job_clerk")?.splits.map((s) => s.to)).toEqual(["rosa_checking"]);
   });
 });
+
+describe("a label or a memo names a hidden person by no word of their name", () => {
+  test("Rosa's first name alone reads as someone on a label, what's coming up and the lines it posts, while a word somewhere the player sees is also called stays", () => {
+    const daily = (id: string, label: string, from: string, to: string) => entity(id, "flow", label, { flow_kind: "transfer", from, to, amount_cents: 5_000, every: "day", shortfall: "skip", status: "active" });
+    const { w } = setup((wd) => {
+      wd.entities.rosa!.visibility = "secret";
+      wd.places.deli = { id: "deli", name: "Delgado's Deli", parent: "riverton", fields: {} };
+      wd.entities.rosa_share = daily("rosa_share", "Rosa's share of the rent", "rosa_checking", "checking");
+      wd.entities.rosa_whole = daily("rosa_whole", "From Rosa Delgado", "rosa_checking", "checking");
+      wd.entities.lunch = daily("lunch", "Lunch at Delgado's Deli", "checking", "Delgado's Deli");
+    });
+    lapse(w, 2 * DAY);
+    const view = w.ctx.query("economy.finance")(w.ctx, "you", true) as FinanceView;
+    const labels = view.flows.map((f) => f.label);
+    expect(labels).toEqual(expect.arrayContaining(["Someone's share of the rent", "From someone", "Lunch at Delgado's Deli"]));
+    expect(view.overview?.upcoming.map((u) => u.label)).toEqual(expect.arrayContaining(["Someone's share of the rent", "From someone"]));
+    expect(view.accounts.find((a) => a.id === "checking")?.transactions.map((t) => t.memo)).toEqual(expect.arrayContaining(["Someone's share of the rent", "From someone"]));
+    expect(JSON.stringify(view)).not.toContain("Rosa");
+    expect((w.ctx.query("economy.finance")(w.ctx, "you", false) as FinanceView).flows.map((f) => f.label)).toContain("Rosa's share of the rent");
+  });
+});

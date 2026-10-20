@@ -14,7 +14,7 @@ import { numOf, objOf, own, sliceOf, strOf } from "../../../engine/pack-kit";
 import type { ReadContext } from "../../../engine/registry";
 import { kindIs } from "../../../engine/scope";
 import { membersOf, MEMBER_OF } from "../../../engine/selector";
-import { canSeePlace } from "../../../engine/visibility";
+import { canSeePlace, personWords, wordPattern } from "../../../engine/visibility";
 import type { FinanceHooks } from "./module";
 import { autopaySourceProblem, interestsOf, mayPayFrom, paysFor } from "./actions";
 import { statementState } from "./cycle";
@@ -31,16 +31,25 @@ const DAY = 1440;
 interface Viewer {
   /** The POV a player surface is drawn for, or null for the GM, who sees every name. */
   pov: EntityId | null;
-  /** The names in the world the viewer can't see, each with the words it reads as instead (`hiddenNames`); none for the GM. */
-  hidden: readonly HiddenName[];
+  /** The names in the world the viewer can't see, as text may carry them (`hiddenNames`); none for the GM. */
+  hidden: HiddenNames;
 }
 
-/** A name the viewer can't see, as text may carry it, and what it reads as: at the start of the text, and within it. */
-interface HiddenName {
-  pattern: RegExp;
+/** What a name the viewer can't see reads as instead: at the start of a text, and within it. */
+interface Reading {
   first: string;
   within: string;
 }
+
+/** The names the viewer can't see as one pattern, each way of saying one its own group, with what each reads as, in the same order. */
+interface HiddenNames {
+  pattern: RegExp | null;
+  reads: readonly Reading[];
+}
+
+const NO_HIDDEN: HiddenNames = { pattern: null, reads: [] };
+const SOMEONE: Reading = { first: "Someone", within: "someone" };
+const SOMEWHERE: Reading = { first: "Somewhere", within: "somewhere" };
 
 /** Whether the viewer may see an entity (`seenBy`): the GM sees everything. */
 function visible(ctx: ReadContext, viewer: Viewer, id: string): boolean {
@@ -48,9 +57,9 @@ function visible(ctx: ReadContext, viewer: Viewer, id: string): boolean {
 }
 
 /** What someone or something the viewer can't see reads as in text: someone for a party, an account by its class, a property, something else. */
-function hiddenWords(ctx: ReadContext, id: EntityId): { first: string; within: string } {
+function hiddenWords(ctx: ReadContext, id: EntityId): Reading {
   const kind = own(ctx.state.entities, id)?.kind ?? "";
-  if (isParty(ctx, id)) return { first: "Someone", within: "someone" };
+  if (isParty(ctx, id)) return SOMEONE;
   if (kind === "account") return { first: traitsOf(ctx, id)?.label ?? "An account", within: "an account" };
   if (kind === "card") return { first: "A card", within: "a card" };
   if (kindIs(ctx.registry, ctx.world, kind, "property")) return { first: "A property", within: "a property" };
@@ -60,34 +69,53 @@ function hiddenWords(ctx: ReadContext, id: EntityId): { first: string; within: s
 /**
  * The names of everyone and everything the POV can't see, as labels and memos would carry them:
  * a derived flow's label is built from names ("Lift loan autopay"), and a posting's memo is
- * written once for every side of it. A name something the POV can see also has gives nothing
- * away, so it stays, and one shorter than three letters is too likely a word.
+ * written once for every side of it. They're read as the engine reads text for names (`namesAny`):
+ * a person by any word of their name ("Rosa's share" names Rosa Delgado), anything else by its
+ * whole name. A name something the POV can see also has gives nothing away, and nor does a word
+ * of one someone or somewhere they can see is also called by, so those stay; a whole name shorter
+ * than three letters is too likely a word.
  */
-function hiddenNames(ctx: ReadContext, pov: EntityId): HiddenName[] {
-  const viewer: Viewer = { pov, hidden: [] };
-  const seen = new Set<string>();
-  const hidden: { name: string; words: { first: string; within: string } }[] = [];
+function hiddenNames(ctx: ReadContext, pov: EntityId): HiddenNames {
+  const viewer: Viewer = { pov, hidden: NO_HIDDEN };
+  const seenNames = new Set<string>();
+  const seenWords = new Set<string>();
+  const hidden: { name: string; person: boolean; reads: Reading }[] = [];
   for (const [id, e] of Object.entries(ctx.state.entities)) {
-    if (e.name.length < 3) continue;
-    if (visible(ctx, viewer, id)) seen.add(e.name.toLowerCase());
-    else hidden.push({ name: e.name, words: hiddenWords(ctx, id) });
+    const person = kindIs(ctx.registry, ctx.world, e.kind, "person");
+    if (visible(ctx, viewer, id)) {
+      seenNames.add(e.name.toLowerCase());
+      if (person) for (const w of personWords(e.name)) seenWords.add(w.plain);
+    } else hidden.push({ name: e.name, person, reads: hiddenWords(ctx, id) });
   }
   for (const [id, p] of Object.entries(ctx.world.places)) {
-    if (p.name.length < 3) continue;
-    if (canSeePlace(ctx.registry, ctx.world, ctx.state, pov, id)) seen.add(p.name.toLowerCase());
-    else hidden.push({ name: p.name, words: { first: "Somewhere", within: "somewhere" } });
+    if (canSeePlace(ctx.registry, ctx.world, ctx.state, pov, id)) {
+      seenNames.add(p.name.toLowerCase());
+      for (const w of personWords(p.name)) seenWords.add(w.plain);
+    } else hidden.push({ name: p.name, person: false, reads: SOMEWHERE });
   }
-  return hidden
-    .filter((h) => !seen.has(h.name.toLowerCase()))
-    .sort((a, b) => b.name.length - a.name.length)
-    .map((h) => ({ pattern: new RegExp(`(^|[^\\p{L}\\p{N}])${h.name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\p{L}\\p{N}])`, "giu"), ...h.words }));
+  const ways = new Map<string, { length: number; reads: Reading }>();
+  const say = (source: string, length: number, reads: Reading): void => {
+    if (!ways.has(source)) ways.set(source, { length, reads });
+  };
+  for (const h of hidden) {
+    if (h.name.length >= 3 && !seenNames.has(h.name.toLowerCase())) say(`(?<![\\p{L}\\p{M}\\p{N}])${h.name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\p{L}\\p{M}\\p{N}])`, h.name.length, h.reads);
+    if (!h.person) continue;
+    for (const w of personWords(h.name)) if (!seenWords.has(w.plain)) for (const spelt of new Set([w.written, w.plain])) say(wordPattern(spelt), spelt.length, SOMEONE);
+  }
+  // The longest way first: a whole name before the words it's made of.
+  const sorted = [...ways].sort((a, b) => b[1].length - a[1].length);
+  return sorted.length === 0 ? NO_HIDDEN : { pattern: new RegExp(sorted.map(([source]) => `(${source})`).join("|"), "giu"), reads: sorted.map(([, w]) => w.reads) };
 }
 
-/** Text as the viewer may read it: each name of someone or something they can't see in their words for it (`hiddenNames`). */
+/** Text as the viewer may read it: each name of someone or something they can't see in their words for it (`hiddenNames`), in one pass, so no word for one is read as another. */
 function says(viewer: Viewer, text: string): string {
-  let out = text;
-  for (const h of viewer.hidden) out = out.replace(h.pattern, (_match: string, before: string, at: number) => before + (at === 0 && before === "" ? h.first : h.within));
-  return out;
+  const { pattern, reads } = viewer.hidden;
+  if (pattern === null) return text;
+  return text.normalize("NFC").replace(pattern, (match: string, ...rest: unknown[]) => {
+    const reading = reads[rest.slice(0, reads.length).findIndex((group) => typeof group === "string")];
+    if (!reading) return match;
+    return rest[reads.length] === 0 ? reading.first : reading.within;
+  });
 }
 
 function nameFor(ctx: ReadContext, viewer: Viewer, id: string): string {
@@ -135,6 +163,16 @@ function when(ctx: ReadContext, at: number): string {
 
 function day(ctx: ReadContext, at: number): string {
   return formatClock(calendarOf(ctx.world), at).split(",")[0] ?? "";
+}
+
+/** Every string a value carries, however deep: the ids and the words a view already sends. */
+function stringsIn(value: unknown, out: Set<string>): void {
+  if (typeof value === "string") out.add(value);
+  else if (Array.isArray(value)) for (const v of value) stringsIn(v, out);
+  else if (typeof value === "object" && value !== null) {
+    const fields: unknown[] = Object.values(value);
+    for (const v of fields) stringsIn(v, out);
+  }
 }
 
 function partyKindOf(ctx: ReadContext, id: EntityId): PartyKind {
@@ -359,7 +397,13 @@ function linkView(ctx: ReadContext, viewer: Viewer, link: string | undefined): {
   return { id: opaqueId(link), name: at === "" ? title : `${title} at ${at}` };
 }
 
-function flowView(hooks: FinanceHooks, ctx: ReadContext, viewer: Viewer, party: EntityId, f: Flow): FlowView {
+/**
+ * A flow as `party` knows it. `runsFlows` is whether standing payments run for them (the `flows`
+ * feature), as the actions that change one require (`money_feature('flows', self)`): where they
+ * don't, no section offers a flow as theirs to change, though the household's still lists its
+ * shared costs.
+ */
+function flowView(hooks: FinanceHooks, ctx: ReadContext, viewer: Viewer, party: EntityId, runsFlows: boolean, f: Flow): FlowView {
   const run = flowRunOf(ctx.state, f.id);
   const next = run.ended || f.status !== "active" ? null : nextOf(ctx, f, 400 * DAY);
   let cents: number | null = null;
@@ -370,7 +414,7 @@ function flowView(hooks: FinanceHooks, ctx: ReadContext, viewer: Viewer, party: 
   const fromSide = own(ctx.state.entities, f.from);
   // The party changes it when they manage what pays it: the account (by their role on it, or on the business or trust that holds it), or the business or trust paying.
   const payerHolds = fromSide?.kind === "account" ? managesAccount(ctx, f.from, party) : f.from === party || managesParty(ctx.state, f.from, party);
-  const editable = f.source === "entity" && payerHolds;
+  const editable = runsFlows && f.source === "entity" && payerHolds;
   // The flow as stored goes out only when every side of it is someone the viewer can see.
   const sides = [f.from, f.to, f.fallback ?? "", f.link ?? "", ...(f.splits ?? []).map((s) => s.to), ...(f.shares ?? []).flatMap((s) => [s.party, s.from ?? ""])].filter((id) => id !== "");
   const seen = sides.every((id) => sideSeen(ctx, viewer, id));
@@ -443,13 +487,14 @@ function householdView(ctx: ReadContext, viewer: Viewer, household: EntityId, fl
 /** One party's money at its own level (DESIGN §25.11). */
 export function buildFinanceView(hooks: FinanceHooks, ctx: ReadContext, party: EntityId, player: boolean): FinanceView {
   const pov = player ? ctx.world.pov : null;
-  const viewer: Viewer = { pov, hidden: pov === null ? [] : hiddenNames(ctx, pov) };
+  const viewer: Viewer = { pov, hidden: pov === null ? NO_HIDDEN : hiddenNames(ctx, pov) };
   // Each flow goes out once for the whole view, as the viewing party knows it (`flowView`), so every section that names it, its row, its coming-up lines and alerts, the household's and a business's, sends the same id and lets them do the same with it.
+  const runsFlows = featureFor(ctx, party, "flows");
   const shownFlows = new Map<string, FlowView>();
   const viewOf = (f: Flow): FlowView => {
     const known = shownFlows.get(f.id);
     if (known) return known;
-    const made = flowView(hooks, ctx, viewer, party, f);
+    const made = flowView(hooks, ctx, viewer, party, runsFlows, f);
     shownFlows.set(f.id, made);
     return made;
   };
@@ -480,7 +525,7 @@ export function buildFinanceView(hooks: FinanceHooks, ctx: ReadContext, party: E
   const shownAccounts = level >= 3 ? mine : mine.filter((id) => classOf(ctx, id) === "cash" || id === firstTransactional);
   const accounts = shownAccounts.map((id) => accountView(ctx, viewer, party, id, level, detail));
   const cash = mine.filter((id) => classOf(ctx, id) === "cash" && rightsOf(ctx.state, id, party)?.spend).reduce((a, id) => a + shown(ctx, id), 0);
-  const flows = featureFor(ctx, party, "flows") ? allFlows(hooks, ctx).filter((f) => flowTouches(ctx, viewer, f, party)) : [];
+  const flows = runsFlows ? allFlows(hooks, ctx).filter((f) => flowTouches(ctx, viewer, f, party)) : [];
   const flowViews = flows.map(viewOf);
   const now = ctx.state.clock;
   const upcoming: UpcomingLine[] = [];
@@ -587,12 +632,13 @@ export function buildFinanceView(hooks: FinanceHooks, ctx: ReadContext, party: E
     a.autopayFrom = a.autopay !== null && a.manages ? others.filter((id) => autopaySourceProblem(ctx, party, a.id, id) === null) : [];
     a.fallbacks = pays(a.id) ? others.filter((id) => pays(id) && fallsBackOn(ctx, a.id, id)) : [];
   }
-  // Where money the party only manages may not go, by the actions' own rule (`paysFor`): for each payer the hub may set a standing payment or a fallback from, which ids it may not pay. Only an interest of theirs, or an account one of those counts the worth of, can be one, so the list holds for any payee, one typed by hand too.
+  // Where money the party only manages may not go, by the actions' own rule (`paysFor`): for each payer they may run standing payments from and only manage, which of the ids the view already carries it may not pay. The list adds no id to the view, so it names nothing the view doesn't.
   const interests = interestsOf(ctx, party);
-  const onlyManaged = (side: string): boolean => side !== "" && side !== party && visible(ctx, viewer, side) && (isParty(ctx, side) || !canSpend(ctx.state, side, party));
+  const onlyManaged = (side: string): boolean => side !== "" && side !== party && visible(ctx, viewer, side) && mayPayFrom(ctx, party, side) && (isParty(ctx, side) || !canSpend(ctx.state, side, party));
   const payers = [...new Set([...listed.map((a) => a.id), ...view.flows.flatMap((f) => (f.spec ? [f.spec.from, f.spec.fallback ?? ""] : []))])].filter(onlyManaged);
-  const counted = Object.keys(ctx.state.entities).filter((id) => own(ctx.state.entities, id)?.kind === "account" && holdersOf(ctx.state, id).some((h) => interests.has(h) && rightsOf(ctx.state, id, h)?.worth === true));
-  const payees = [...interests, ...counted].filter((id) => visible(ctx, viewer, id));
+  const carried = new Set<string>();
+  stringsIn(view, carried);
+  const payees = [...carried].filter((id) => own(ctx.state.entities, id)?.kind === "account" || isParty(ctx, id));
   view.paysFor = payers.map((from) => ({ from, to: payees.filter((to) => paysFor(ctx, party, to, from, interests)) }));
   // And the keys a typed payee is theirs by: their id's and name's, and their household's.
   const home = householdOf(ctx, party);

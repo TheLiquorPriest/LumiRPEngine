@@ -550,6 +550,21 @@ describe("a world's money switches open their controls below Money 3", () => {
     expect([...gm.fields.keys()]).toEqual(entities);
     expect(gm.values.get(DEBIT)?.state ?? "active").toBe("active");
   });
+
+  test("at Money 2 with households switched on, Helen's shared costs are hers to change only where standing payments run too, as their actions are", async () => {
+    const GROCERIES = "flow_kowalczyk_groceries";
+    for (const [features, changes] of [[{ households: true }, false], [{ households: true, flows: true }, true]] as const) {
+      const chat = await MoneyChat.start({ pov: "helen_kowalczyk", features });
+      await chat.level(2);
+      const view = await chat.hub();
+      const groceries = view.household?.flows.find((f) => f.id === GROCERIES);
+      if (!groceries) throw new Error("the household's groceries aren't on Helen's Household page");
+      expect(groceries.editable).toBe(changes);
+      expect(flowControls(view, groceries)).toEqual(changes ? ["edit", "pause", "delete"] : []);
+      // Whatever the page offers, the action takes.
+      if (changes) expect(await chat.play(flowStatusAction(GROCERIES, "pause"))).toContain("done");
+    }
+  }, 60_000);
 });
 
 describe("the hub shows what each Money level shows", () => {
