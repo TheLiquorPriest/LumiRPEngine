@@ -294,14 +294,23 @@ function toldAsAnother(narration: string, head: string, ctx: ReadContext): boole
   });
 }
 
+/** The catalog row `economy.buy` prices `item` as where the player character is: the row it names by id, else the one its words name there (`matchCatalog`). Null when none does. */
+function rowAt(ctx: ReadContext, item: string, category: string): string | null {
+  const rows = ctx.tables.get("economy.catalog")?.rows ?? {};
+  return hasOwn(rows, item) ? item : matchCatalog(ctx, item, placeOfEntity(ctx.state, ctx.world.pov), category);
+}
+
 /**
  * A narrated purchase measured against the Buy this turn's own actions made (DESIGN §11 Confirm
  * chips). Only the same thing can be the Buy told again: the same main noun, as `itemName` reads
  * names ("milk" for the bought "Milk, whole", "brass lantern" for "old brass lantern"; "lantern
  * oil" is oil, not the lantern). Even then it's another purchase when its own words say so
  * ("another coffee", "a second one", "coffee for Danny"), when it names a different quantity, or a
- * qualifier that rules the Buy's out (green for red, large for small, iced for hot). It is the Buy
- * told again (`retold`) when one name's words hold all of the other's and any price the narration
+ * qualifier that rules the Buy's out (green for red, large for small, iced for hot), in the Buy's
+ * charged name or the words the player typed for it (`items`). It is the Buy told again
+ * (`retold`) when one name's words hold all of the other's, the player's own words for the Buy
+ * included ("large black coffee" after a typed "large coffee" charged as "Drip coffee, 12 oz,
+ * cafe"), or it is priced as the Buy's own row where it was bought; and any price the narration
  * states is the Buy's: within ±25% of what it charged, of a price the player typed for a Buy
  * (`typed`, minor units), or of anywhere in its catalog row's (or category's) range, since a
  * catalogued Buy is charged the catalog's price ("you pay $3 for the coffee" after a typed $3
@@ -312,15 +321,19 @@ function toldAsAnother(narration: string, head: string, ctx: ReadContext): boole
  * for the latte), unless its words or the narration's make it another one or it names another
  * quantity. Only a purchase the player character (or something they own) pays for.
  */
-export function boughtAlong(p: JsonObject, pre: readonly LedgerEvent[], ctx: ReadContext, typed: readonly number[] = [], narration = ""): Along {
-  const { world, state } = ctx;
-  if (p.type !== "purchase" || typeof p.item !== "string" || !povPays(p, world, state)) return null;
+export function boughtAlong(p: JsonObject, pre: readonly LedgerEvent[], ctx: ReadContext, typed: readonly number[] = [], narration = "", items: readonly string[] = []): Along {
+  const { world } = ctx;
+  if (p.type !== "purchase" || typeof p.item !== "string" || !povPays(p, world, ctx.state)) return null;
   const said = itemName(p.item);
   if (!said) return null;
   const stated = typeof p.price === "number" && Number.isFinite(p.price) ? Math.abs(p.price) : null;
   const near = (v: number): boolean => stated === null || Math.abs(stated - v) <= 0.25 * v;
   const another = ANOTHER.test(`${p.item} ${typeof p.name === "string" ? p.name : ""}`) || (said.trailing?.word === "for" && forSomeone(said.trailing.words, ctx));
   const buys = buysIn(pre);
+  const typedNames = items.flatMap((item) => itemName(item) ?? []);
+  const rows = ctx.tables.get("economy.catalog")?.rows ?? {};
+  const row = rowAt(ctx, p.item, typeof p.category === "string" ? p.category : "");
+  const rowDef = row === null ? undefined : own(rows, row);
   let verdict: Along = null;
   let sameNoun = false;
   for (const buy of buys) {
@@ -329,9 +342,12 @@ export function boughtAlong(p: JsonObject, pre: readonly LedgerEvent[], ctx: Rea
     sameNoun = true;
     if (another) continue;
     if (typeof p.qty === "number" && p.qty !== buy.qty) continue;
-    const contrast = [...said.words].some((w) => CONTRAST[w] !== undefined && !bought.words.has(w) && [...bought.words].some((b) => b !== w && CONTRAST[b] === CONTRAST[w]));
+    // The player's own words for a Buy of this noun say what kind it was where the charged row's name doesn't ("large" for a drip coffee).
+    const typedOwn = typedNames.filter((n) => n.head === bought.head);
+    const words = new Set([...bought.words, ...typedOwn.flatMap((n) => [...n.words])]);
+    const contrast = [...said.words].some((w) => CONTRAST[w] !== undefined && !words.has(w) && [...words].some((b) => b !== w && CONTRAST[b] === CONTRAST[w]));
     if (contrast) continue;
-    const holds = [...said.words].every((w) => bought.words.has(w)) || [...bought.words].every((w) => said.words.has(w));
+    const holds = [...said.words].every((w) => words.has(w)) || [...bought.words].every((w) => said.words.has(w)) || typedOwn.some((n) => [...n.words].every((w) => said.words.has(w))) || (rowDef !== undefined && rowDef.name === buy.name);
     const inBand = (): boolean => {
       const band = stated === null ? null : optionalQuery(ctx, "economy.bought_band")?.(ctx, buy.name, buy.qty, world.pov);
       return !!band && stated !== null && stated >= 0.75 * band.min && stated <= 1.25 * band.max;
@@ -341,12 +357,9 @@ export function boughtAlong(p: JsonObject, pre: readonly LedgerEvent[], ctx: Rea
     verdict = "unsure";
   }
   if (sameNoun || another || toldAsAnother(narration, said.head, ctx)) return verdict;
-  // Siblings are rows of one group in the price table. The narrated purchase's row is the one
-  // `economy.buy` prices it as where the player character is (by id, else what its words name); a
-  // catalogued Buy carries its own row's name.
-  const rows = ctx.tables.get("economy.catalog")?.rows ?? {};
-  const row = hasOwn(rows, p.item) ? p.item : matchCatalog(ctx, p.item, placeOfEntity(state, world.pov), typeof p.category === "string" ? p.category : "");
-  const group = row === null ? undefined : own(rows, row)?.category;
+  // Siblings are rows of one group in the price table: the narrated purchase's row, and a
+  // catalogued Buy's, which carries its own row's name.
+  const group = rowDef?.category;
   if (typeof group !== "string" || group === "") return null;
   return buys.some((buy) => (typeof p.qty !== "number" || p.qty === buy.qty) && Object.values(rows).some((r) => r.name === buy.name && r.category === group)) ? "unsure" : null;
 }
@@ -354,19 +367,33 @@ export function boughtAlong(p: JsonObject, pre: readonly LedgerEvent[], ctx: Rea
 /**
  * A narrated purchase that names several things ("coffee and bran muffin", "a coffee, a muffin and a
  * bagel") one of which is the turn's own Buy: the Buy's part is dropped, and every other part is a
- * purchase of its own, priced on its own (a price the narration gave was for them together). A
- * purchase that holds no part of the Buy stays whole ("fish and chips").
+ * purchase of its own, priced on its own (a price the narration gave was for them together). A part
+ * is the Buy as `boughtAlong` holds one: one name's words hold the other's, the player's own words
+ * for it (`items`) included, or it is priced as the Buy's own row where it was bought. A purchase
+ * that holds no part of the Buy stays whole ("fish and chips").
  */
-export function splitAlongBuy(p: JsonObject, pre: readonly LedgerEvent[], ctx: ReadContext): JsonObject[] {
+export function splitAlongBuy(p: JsonObject, pre: readonly LedgerEvent[], ctx: ReadContext, items: readonly string[] = []): JsonObject[] {
   if (p.type !== "purchase" || typeof p.item !== "string" || !povPays(p, ctx.world, ctx.state)) return [p];
   const parts = p.item
     .split(/\s*(?:,|&|\band\b|\bplus\b)\s*/i)
     .map((part) => part.trim())
     .filter((part) => itemName(part) !== null);
-  const buys = buysIn(pre).map((b) => itemName(b.name));
+  const buys = buysIn(pre);
+  const typedNames = items.flatMap((item) => itemName(item) ?? []);
+  const rows = ctx.tables.get("economy.catalog")?.rows ?? {};
   const isBuy = (part: string): boolean => {
     const n = itemName(part);
-    return !!n && buys.some((b) => !!b && b.head === n.head && ([...n.words].every((w) => b.words.has(w)) || [...b.words].every((w) => n.words.has(w))));
+    if (!n) return false;
+    // The part's own row, without the whole purchase's category, which may be another part's.
+    const row = rowAt(ctx, part, "");
+    const rowName = row === null ? undefined : own(rows, row)?.name;
+    return buys.some((buy) => {
+      const b = itemName(buy.name);
+      if (!b || b.head !== n.head) return false;
+      const typedOwn = typedNames.filter((t) => t.head === b.head);
+      const words = new Set([...b.words, ...typedOwn.flatMap((t) => [...t.words])]);
+      return [...n.words].every((w) => words.has(w)) || [...b.words].every((w) => n.words.has(w)) || typedOwn.some((t) => [...t.words].every((w) => n.words.has(w))) || rowName === buy.name;
+    });
   };
   if (parts.length < 2 || !parts.some(isBuy)) return [p];
   const { price: _price, qty: _qty, name: _name, ...rest } = p;
@@ -1454,8 +1481,11 @@ export class Runtime implements TurnHooks {
     // other things keeps the others, each its own purchase; one that may be the Buy told again is only
     // ever offered ("Also bought …?").
     const intent = pre ? bridge.intentOf(pre.text) : null;
-    // The prices the player typed for this turn's Buys (minor units): the first action's and the queued ones'.
-    const typed = intent ? [{ action: intent.action, params: intent.params }, ...(intent.queue ?? [])].flatMap((a) => (a.action === "buy" && typeof a.params.price === "number" ? [a.params.price] : [])) : [];
+    // The prices the player typed for this turn's Buys (minor units), the first action's and the queued
+    // ones', and the items as typed, whose words say what kind of thing the charged row's name may not.
+    const buyActions = intent ? [{ action: intent.action, params: intent.params }, ...(intent.queue ?? [])].filter((a) => a.action === "buy") : [];
+    const typed = buyActions.flatMap((a) => (typeof a.params.price === "number" ? [a.params.price] : []));
+    const typedItems = buyActions.flatMap((a) => (typeof a.params.item === "string" ? [a.params.item] : []));
     const unsure = new Set<JsonObject>();
     const narrated = [...extracted.proposals, ...effects.flat()];
     // Where the reply leaves the POV when no move says so is a guess (a flashback, a phone call, a look
@@ -1463,11 +1493,11 @@ export class Runtime implements TurnHooks {
     // chip is no outcome for the type's learning (DESIGN §9.4). `never` still ignores it.
     const guessed = new Set(replyPlace(extracted.where, narrated, context));
     const deduped = dedupeProposals(
-      [...narrated, ...guessed].flatMap((p) => splitAlongBuy(p, context.pre, ctx)),
+      [...narrated, ...guessed].flatMap((p) => splitAlongBuy(p, context.pre, ctx, typedItems)),
       context.world.pov,
     ).filter((p) => {
       if (lentAlong(p, context.pre, context.state) || movedAlong(p, context.pre, context.state)) return false;
-      const along = boughtAlong(p, context.pre, ctx, typed, text);
+      const along = boughtAlong(p, context.pre, ctx, typed, text, typedItems);
       if (along === "unsure") unsure.add(p);
       return along !== "retold";
     });
