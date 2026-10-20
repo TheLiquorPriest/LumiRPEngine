@@ -150,4 +150,15 @@ describe("business books: dashboards", () => {
     expect(b?.invoices.map((i) => i.customerName)).toEqual(["a customer"]);
     expect(JSON.stringify(b).toLowerCase()).not.toContain("dana");
   });
+
+  test("the books by month begin with the first month the business recorded anything, not a year of empty months", () => {
+    const { w } = setup((wd) => void Object.assign(wd.entities.daybreak!.fields, { owners: [{ party: "you", role: "owner", share: 100 }], daily_sales: 50_000 }));
+    // Its accounts haven't opened, so nothing is booked yet: only the month under way shows.
+    expect(cafe(w, true)?.months.map((m) => m.period)).toEqual(["2026-10"]);
+    lapse(w, 26 * DAY);
+    // From its opening in October to the November under way, newest first.
+    const months = cafe(w, true)?.months ?? [];
+    expect(months.map((m) => m.period)).toEqual(["2026-11", "2026-10"]);
+    expect(months[1]?.revenue).toBeGreaterThan(0);
+  });
 });

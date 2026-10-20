@@ -18,7 +18,7 @@ import type { Rng } from "../../../engine/rng";
 import { isGone, kindIs, placeOfEntity, placeWithin } from "../../../engine/scope";
 import type { WorldState } from "../../../engine/state";
 import { canSeeEntity } from "../../../engine/visibility";
-import { addToBooks, addToPayables, businessBooks, monthBook, monthOf, monthsBetween, operatingAccount, payablesOf } from "./books";
+import { addToBooks, addToPayables, businessBooks, firstBookedMonth, monthBook, monthOf, monthsBetween, operatingAccount, payablesOf } from "./books";
 import { allJobs, businessAt, businessIds, jobBlocks, jobView, manages, placesOf, type Job } from "./employment";
 import type { FinanceApi, FinanceRegistry, FlowPosting } from "./module";
 import { unpricedCap } from "./model";
@@ -600,7 +600,10 @@ export function businessView(ctx: ReadContext, api: FinanceApi, business: Entity
   if (owed.sales_tax !== 0) taxes.push({ label: "Sales tax collected, to pay", cents: owed.sales_tax, due: nextDue(ctx, api, `salestax:${business}`) });
   if (owed.suppliers !== 0) taxes.push({ label: "Owed to suppliers", cents: owed.suppliers, due: nextDue(ctx, api, `suppliers:${business}`) });
   if (structureOf(ctx.state, business) === "c_corp" && api.feature(ctx, business, "business_tax")) taxes.push({ label: "Income tax on this year's profit", cents: corporateTax(ctx, business, year.profit), due: nextDue(ctx, api, `esttax:${business}`) });
+  // The months since its books began, the chat's start or its own, and at most the last 12: before them it had nothing to book. This month counts while nothing has yet.
+  const since = firstBookedMonth(api, ctx, business) ?? monthOf(ctx.world, now);
   const months = monthsBetween(ctx.world, now - 335 * MINUTES_PER_DAY, now + 1)
+    .filter((m) => m >= since)
     .reverse()
     .map((m) => {
       const [y, mo] = m.split("-").map(Number);

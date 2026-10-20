@@ -1520,7 +1520,7 @@ Each owner's part goes where the holdings module routes their stake (`economy.st
 Owner draws, distributions, transfers between its own accounts and the sales tax it passes through count as neither, and nor do balance-sheet moves: money it borrows (`loan`), and investments and property it buys or sells (`investment`, `property`), which change what it holds, not what it makes. Its receivables are its unpaid invoices. Its payables are the invoices billed to it, the sales tax it holds and what it owes its suppliers. The holdings module values a stake from them (`economy.business_books`, `economy.operating_account`).
 
 **On the dashboards**, a party sees itself when it is a business, and each business it holds a role on:
-- its books for the year and for each of the last 12 months;
+- its books for the year, and for each month since its books or accounts first recorded anything (the chat's first month for a business it starts with, else the month it began), the last 12 at most;
 - its last 20 sales;
 - its invoices;
 - its staff, with their pay;

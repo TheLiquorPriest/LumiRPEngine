@@ -116,6 +116,17 @@ function totalsOf(state: Readonly<WorldState>, account: EntityId, month: string)
 }
 
 /**
+ * The first month a business's books, or the journal of any account counting toward it, recorded
+ * anything (its accounts' openings among it): the chat's first month for a business it starts
+ * with, a later one for a business that starts trading later; null when nothing has been recorded.
+ */
+export function firstBookedMonth(api: FinanceApi, books: Books, business: EntityId): string | null {
+  const economy = sliceOf(books.state, "economy");
+  const months = [...Object.keys(objOf(own(objOf(economy.books), business))), ...api.accountsOf(books, business, "worth").flatMap((a) => Object.keys(objOf(own(objOf(economy.totals), a))))];
+  return months.length === 0 ? null : months.reduce((a, b) => (b < a ? b : a));
+}
+
+/**
  * The account a business's takings land in and its payroll and payouts come from: its
  * `operating_account` when that is one of its own, else the first of its accounts that takes
  * deposits, by the class's deposit rank.
