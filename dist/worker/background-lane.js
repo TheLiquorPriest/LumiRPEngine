@@ -4650,6 +4650,7 @@ function bookkeeping(type) {
     [ENGINE_EVENTS.pause]: true,
     [ENGINE_EVENTS.beat]: true,
     [ENGINE_EVENTS.observed]: true,
+    [ENGINE_EVENTS.rewind]: true,
     [ENGINE_EVENTS.adjudged]: true,
     "castlife.decision": true,
     "castlife.override": true,
@@ -5172,6 +5173,332 @@ var spawnChannel = {
   }
 };
 
+// src/engine/relations.ts
+function relationDef(types, world, id) {
+  return own(world.relations, id) ?? types.relations.get(id);
+}
+function counterpartOf(types, world, id) {
+  const def = relationDef(types, world, id);
+  if (!def)
+    return null;
+  if (def.inverse)
+    return def.inverse;
+  if (def.symmetric)
+    return id;
+  for (const [other, d] of Object.entries(world.relations))
+    if (d.inverse === id)
+      return other;
+  for (const [other, d] of types.relations)
+    if (d.inverse === id && !own(world.relations, other))
+      return other;
+  return null;
+}
+function oneTarget(c) {
+  return c === "many_one" || c === "one_one";
+}
+function oneSource(c) {
+  return c === "one_many" || c === "one_one";
+}
+function kindPhrase(reg, world, kind) {
+  const label = (kindDef(reg, world, kind)?.label ?? kind.replace(/_/g, " ")).toLowerCase();
+  return `${/^[aeiou]/.test(label) ? "an" : "a"} ${label}`;
+}
+function inline(def) {
+  return def.label.charAt(0).toLowerCase() + def.label.slice(1);
+}
+function reject2(code, reason) {
+  return { code, reason };
+}
+function endOf(state, id) {
+  const e = own(state.entities, id);
+  return e ? { id, kind: e.kind, name: e.name, relations: e.relations } : null;
+}
+function linkProblem(reg, world, state, def, a, b) {
+  const worded = (code, say) => {
+    const sentence = (text) => text.charAt(0).toUpperCase() + text.slice(1);
+    const reason = sentence(say((end) => playerKnows(reg, world, state, world.pov, end.id) ? end.name : "someone"));
+    const gm = sentence(say((end) => end.name));
+    return reason === gm ? reject2(code, reason) : { code, reason, gm };
+  };
+  if (def.from !== "*" && !kindIs(reg, world, a.kind, def.from))
+    return worded("relation_kind", (name) => `\u201C${def.label}\u201D runs from ${kindPhrase(reg, world, def.from)}; ${name(a)} is ${kindPhrase(reg, world, a.kind)}`);
+  if (def.to !== "*" && !kindIs(reg, world, b.kind, def.to))
+    return worded("relation_kind", (name) => `\u201C${def.label}\u201D runs to ${kindPhrase(reg, world, def.to)}; ${name(b)} is ${kindPhrase(reg, world, b.kind)}`);
+  if (oneTarget(def.cardinality)) {
+    const other = a.relations.find((r) => r.type === def.id && r.to !== b.id);
+    if (other)
+      return worded("cardinality", (name) => `${name(a)} is already ${inline(def)} ${name({ id: other.to, name: own(state.entities, other.to)?.name ?? other.to })}; \u201C${def.label}\u201D allows one at a time`);
+  }
+  if (oneSource(def.cardinality)) {
+    const holder = Object.keys(state.entities).sort().find((id) => id !== a.id && own(state.entities, id)?.relations.some((r) => r.type === def.id && r.to === b.id));
+    if (holder)
+      return worded("cardinality", (name) => `${name({ id: holder, name: own(state.entities, holder)?.name ?? holder })} is already ${inline(def)} ${name(b)}; \u201C${def.label}\u201D allows one at a time`);
+  }
+  return null;
+}
+function linkEvents(reg, world, state, link) {
+  const extra = { ...link.fields ? { fields: link.fields } : {}, ...link.until !== undefined ? { until: link.until } : {} };
+  const events = [{ type: "link", rel: link.rel, from: link.from, to: link.to, ...extra }];
+  const a = endOf(state, link.from);
+  const b = endOf(state, link.to);
+  if (!a || !b)
+    return events;
+  const def = relationDef(reg, world, link.rel);
+  const problem = def ? linkProblem(reg, world, state, def, a, b) : null;
+  if (problem)
+    return problem;
+  const back = counterpartOf(reg, world, link.rel);
+  if (!back || back === link.rel && link.from === link.to)
+    return events;
+  const backDef = relationDef(reg, world, back);
+  const backProblem = backDef ? linkProblem(reg, world, state, backDef, b, a) : null;
+  if (backProblem)
+    return backProblem;
+  events.push({ type: "link", rel: back, from: link.to, to: link.from, ...extra });
+  return events;
+}
+function spawnLinks(reg, world, state, entity) {
+  const self = { id: entity.id, kind: entity.kind, name: entity.name, relations: entity.relations };
+  const out = [];
+  for (const r of entity.relations) {
+    const def = relationDef(reg, world, r.type);
+    const target = r.to === entity.id ? self : endOf(state, r.to);
+    if (!target) {
+      if (def && def.to !== "*") {
+        const name = own(world.places, r.to)?.name ?? r.to;
+        const reason = (place) => `\u201C${def.label}\u201D runs to ${kindPhrase(reg, world, def.to)}; ${place} isn't one`;
+        return canSeePlace(reg, world, state, world.pov, r.to) ? reject2("relation_kind", reason(name)) : { code: "relation_kind", reason: reason("that place"), gm: reason(name) };
+      }
+      continue;
+    }
+    const problem = def ? linkProblem(reg, world, state, def, self, target) : null;
+    if (problem)
+      return problem;
+    const back = counterpartOf(reg, world, r.type);
+    if (!back || back === r.type && r.to === entity.id)
+      continue;
+    const backDef = relationDef(reg, world, back);
+    const backProblem = backDef ? linkProblem(reg, world, state, backDef, target, self) : null;
+    if (backProblem)
+      return backProblem;
+    out.push({ type: "link", rel: back, from: r.to, to: entity.id });
+  }
+  return out;
+}
+function unlinkEvents(reg, world, state, link) {
+  const events = [{ type: "unlink", rel: link.rel, from: link.from, to: link.to }];
+  const back = counterpartOf(reg, world, link.rel);
+  if (!back || back === link.rel && link.from === link.to)
+    return events;
+  if (own(state.entities, link.to)?.relations.some((r) => r.type === back && r.to === link.from))
+    events.push({ type: "unlink", rel: back, from: link.to, to: link.from });
+  return events;
+}
+function completeRelations(types, world, entities) {
+  const added = [];
+  for (const id of Object.keys(entities).sort()) {
+    for (const r of own(entities, id)?.relations ?? []) {
+      const back = counterpartOf(types, world, r.type);
+      const holder = own(entities, r.to);
+      if (!back || !holder || back === r.type && r.to === id)
+        continue;
+      const present = (x) => x.type === back && x.to === id;
+      if (holder.relations.some(present) || added.some((a) => a.holder === r.to && present(a.relation)))
+        continue;
+      added.push({ holder: r.to, relation: { type: back, to: id, ...r.fields ? { fields: structuredClone(r.fields) } : {}, ...r.until !== undefined ? { until: r.until } : {} } });
+    }
+  }
+  for (const { holder, relation } of added)
+    own(entities, holder)?.relations.push(relation);
+}
+function relationIssues(reg, world) {
+  const issues = [];
+  const err = (path, code, message) => void issues.push({ severity: "error", path, code, message });
+  for (const [id, def] of Object.entries(world.relations)) {
+    if (def.inverse && !relationDef(reg, world, def.inverse))
+      err(`relations.${id}.inverse`, "refs", `Relation ${def.label}'s inverse "${def.inverse}" isn't a relation type.`);
+  }
+  const nameOf = (id) => own(world.entities, id)?.name ?? own(world.places, id)?.name ?? id;
+  for (const [id, e] of Object.entries(world.entities)) {
+    for (const r of e.relations) {
+      const def = relationDef(reg, world, r.type);
+      if (!def)
+        continue;
+      const target = own(world.entities, r.to);
+      const path = `entities.${id}.relations`;
+      if (def.from !== "*" && !kindIs(reg, world, e.kind, def.from))
+        err(path, "relation_kind", `${e.name}'s \u201C${def.label}\u201D link needs ${kindPhrase(reg, world, def.from)} on ${e.name}'s side; ${e.name} is ${kindPhrase(reg, world, e.kind)}.`);
+      if (def.to !== "*" && (!target || !kindIs(reg, world, target.kind, def.to)))
+        err(path, "relation_kind", `${e.name}'s \u201C${def.label}\u201D link to ${nameOf(r.to)} needs ${kindPhrase(reg, world, def.to)} at the other end; ${nameOf(r.to)} is ${target ? kindPhrase(reg, world, target.kind) : "a place"}.`);
+      const back = counterpartOf(reg, world, r.type);
+      if (!back || !target || back === r.type && r.to === id || target.relations.some((x) => x.type === back && x.to === id))
+        continue;
+      const backLabel = relationDef(reg, world, back)?.label ?? back;
+      issues.push({ severity: "warning", path, code: "one_sided", message: `${e.name} is ${inline(def)} ${target.name}, but ${target.name} has no \u201C${backLabel}\u201D link back to ${e.name}; a chat adds it when it starts.` });
+    }
+  }
+  const start = {};
+  for (const [id, e] of Object.entries(world.entities))
+    start[id] = { relations: e.relations.map((r) => ({ ...r })) };
+  completeRelations(reg, world, start);
+  const sources = new Map;
+  for (const id of Object.keys(start).sort()) {
+    const counts = new Map;
+    for (const r of own(start, id)?.relations ?? []) {
+      const def = relationDef(reg, world, r.type);
+      if (!def)
+        continue;
+      if (oneTarget(def.cardinality))
+        counts.set(r.type, [...counts.get(r.type) ?? [], r.to]);
+      if (oneSource(def.cardinality))
+        sources.set(`${r.type}\x00${r.to}`, [...sources.get(`${r.type}\x00${r.to}`) ?? [], id]);
+    }
+    for (const [type, targets] of counts) {
+      const def = relationDef(reg, world, type);
+      if (def && targets.length > 1)
+        err(`entities.${id}.relations`, "cardinality", `${nameOf(id)} is ${inline(def)} ${targets.map(nameOf).join(" and ")}; \u201C${def.label}\u201D allows one.`);
+    }
+  }
+  for (const [key, from] of sources) {
+    const [type = "", to = ""] = key.split("\x00");
+    const def = relationDef(reg, world, type);
+    const last = from.at(-1);
+    if (def && last !== undefined && from.length > 1)
+      err(`entities.${last}.relations`, "cardinality", `${from.map(nameOf).join(" and ")} are each ${inline(def)} ${nameOf(to)}; \u201C${def.label}\u201D allows one.`);
+  }
+  return issues;
+}
+
+// src/engine/time-limits.ts
+var TIME_LIMITS = Object.freeze({
+  tickMinutes: MINUTES_PER_DAY,
+  scale: [0.25, 10],
+  timelapseMinutes: 366 * MINUTES_PER_DAY,
+  unitCap: Object.freeze({ agentDays: 600, events: 5000 }),
+  thresholdMinutes: SPEED_THRESHOLD_MINUTES
+});
+function finite(v) {
+  return typeof v === "number" && Number.isFinite(v) ? v : null;
+}
+function within(v, lo, hi) {
+  return Math.min(hi, Math.max(lo, v));
+}
+function clampUnitCap(cap) {
+  const max = TIME_LIMITS.unitCap;
+  const days = finite(cap?.agentDays);
+  const events = finite(cap?.events);
+  return {
+    agentDays: days === null ? max.agentDays : within(days, 1 / 24, max.agentDays),
+    events: events === null ? max.events : Math.round(within(events, 1, max.events))
+  };
+}
+function clampTick(v, fallback = 2) {
+  const n = finite(v);
+  return n === null ? fallback : within(n, 0, TIME_LIMITS.tickMinutes);
+}
+function clampScale(v) {
+  const n = finite(v);
+  const [lo, hi] = TIME_LIMITS.scale;
+  return n === null || n === 0 ? 1 : within(n, lo, hi);
+}
+function clampThreshold(v) {
+  const n = finite(v);
+  const [lo, hi] = TIME_LIMITS.thresholdMinutes;
+  return n === null ? lo : Math.round(within(n, lo, hi));
+}
+function clampLevel(v) {
+  const n = finite(v);
+  return n === null ? 0 : Math.round(within(n, 0, 4));
+}
+
+// src/engine/world-state.ts
+var LOCAL_RE = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/;
+function minutesBetween(from, to) {
+  const a = LOCAL_RE.exec(from);
+  const b = LOCAL_RE.exec(to);
+  if (!a || !b)
+    throw new RangeError(`expected YYYY-MM-DDTHH:MM, got ${!a ? from : to}`);
+  const ms = (m) => Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]), Number(m[4]), Number(m[5]));
+  return Math.round((ms(b) - ms(a)) / 60000);
+}
+function clampLevels(levels) {
+  const out = {};
+  for (const d of DOMAINS)
+    if (levels[d] !== undefined)
+      out[d] = clampLevel(levels[d]);
+  return out;
+}
+function domainLevels(levels) {
+  const out = {};
+  for (const d of DOMAINS)
+    out[d] = clampLevel(levels[d]);
+  return out;
+}
+function initialState(world, revision, types) {
+  const entities = {};
+  for (const [id, e] of Object.entries(world.entities)) {
+    entities[id] = {
+      kind: e.kind,
+      name: e.name,
+      tier: e.tier,
+      fields: structuredClone(e.fields),
+      relations: structuredClone(e.relations),
+      levels: clampLevels(e.levels ?? {}),
+      agent: agentOf(world, { id, tier: e.tier, agent: e.agent }),
+      ...typeof e.life === "string" && e.life !== ALIVE ? { life: e.life } : {}
+    };
+  }
+  completeRelations(types, world, entities);
+  const pov = entities[world.pov];
+  if (pov && placeOfEntity({ entities }, world.pov) === null && hasOwn(world.places, world.start.place))
+    pov.fields.place = world.start.place;
+  for (const item of placedItems(world)) {
+    const thing = own(entities, item.id);
+    if (!thing || thing.relations.some((r) => r.type === "in"))
+      continue;
+    Object.assign(thing.fields, { place: item.place, x: item.cell.x, y: item.cell.y });
+  }
+  const here = placeOfEntity({ entities }, world.pov);
+  if (pov && here !== null && mapSettingsOf(world).grid.movement) {
+    const stand = standingGrid(world, here);
+    const { x, y } = pov.fields;
+    const placed = stand !== null && typeof x === "number" && typeof y === "number" && cellIndex(stand.grid, { x, y }) !== null;
+    const entry = placed ? null : arrivalCell(world, here);
+    if (entry)
+      Object.assign(pov.fields, { x: entry.cell.x, y: entry.cell.y });
+  }
+  const tierCaps = {};
+  for (const band of BANDS) {
+    const caps = world.realism.tierCaps[band];
+    tierCaps[band] = isRecord(caps) ? clampLevels(caps) : {};
+  }
+  const tracks = {};
+  for (const [id, t] of Object.entries(world.tracks))
+    tracks[id] = { stage: t.start, since: 0 };
+  const state = {
+    revision,
+    clock: minutesBetween(world.calendar.epoch, world.start.at),
+    entities,
+    accounts: {},
+    tracks,
+    realism: { levels: domainLevels(world.realism.levels), tierCaps },
+    time: {
+      sceneTicks: Object.fromEntries(Object.entries(world.time.sceneTicks).map(([k, v]) => [k, clampTick(v)])),
+      scale: 1,
+      paused: false,
+      interrupts: { ...world.time.interrupts },
+      speedThrough: Object.fromEntries(Object.entries(world.time.speedThrough).map(([k, p]) => [k, { mode: p.mode, thresholdMinutes: clampThreshold(p.thresholdMinutes) }])),
+      montage: world.time.montage,
+      unitCap: clampUnitCap(world.time.unitCap)
+    },
+    materialized: {},
+    packs: {}
+  };
+  seedObservations(world, state);
+  seedLife(world, state);
+  return state;
+}
+
 // src/engine/engine-pack.ts
 var ENGINE_PACK = "engine";
 var ENGINE_EVENTS = {
@@ -5191,7 +5518,8 @@ var ENGINE_EVENTS = {
   observed: "engine.observed",
   adjudged: "engine.adjudged",
   life: "engine.life",
-  told: "engine.told"
+  told: "engine.told",
+  rewind: "engine.rewind"
 };
 function readEngineSlice(state) {
   const s = state.packs[ENGINE_PACK] ?? {};
@@ -5229,6 +5557,7 @@ function readEngineSlice(state) {
     agents,
     rr: typeof s.rr === "number" ? s.rr : 0,
     pauseScene: typeof s.pauseScene === "string" ? s.pauseScene : null,
+    reached: typeof s.reached === "number" ? s.reached : null,
     tries
   };
 }
@@ -5359,6 +5688,27 @@ var events = [
       slice(state).pauseScene = typeof e.data.scene === "string" ? e.data.scene : null;
     },
     describe: () => "clock pause"
+  },
+  {
+    type: ENGINE_EVENTS.rewind,
+    validate: (e, ctx) => {
+      const minutes = e.data.minutes;
+      if (typeof minutes !== "number" || !Number.isInteger(minutes) || minutes <= 0)
+        return { code: "bad_event", reason: "a clock set back needs whole minutes above zero" };
+      const start = minutesBetween(ctx.world.calendar.epoch, ctx.world.start.at);
+      if (ctx.state.clock - minutes >= start)
+        return null;
+      return { code: "before_start", reason: `the story starts at ${formatClock(calendarOf(ctx.world), start, placeOffset(ctx.world, start, placeOfEntity(ctx.state, ctx.world.pov)))}` };
+    },
+    apply: (e, state) => {
+      const minutes = e.data.minutes;
+      if (typeof minutes !== "number")
+        return;
+      const s = slice(state);
+      s.reached = Math.max(typeof s.reached === "number" ? s.reached : state.clock, state.clock);
+      state.clock -= minutes;
+    },
+    describe: (e) => `clock set back ${String(e.data.minutes)} min`
   },
   {
     type: ENGINE_EVENTS.check,
@@ -5702,332 +6052,6 @@ function dropTouches(state) {
   delete slice[SLICE3];
   if (Object.keys(slice).length === 0)
     delete state.packs[PACK3];
-}
-
-// src/engine/relations.ts
-function relationDef(types, world, id) {
-  return own(world.relations, id) ?? types.relations.get(id);
-}
-function counterpartOf(types, world, id) {
-  const def = relationDef(types, world, id);
-  if (!def)
-    return null;
-  if (def.inverse)
-    return def.inverse;
-  if (def.symmetric)
-    return id;
-  for (const [other, d] of Object.entries(world.relations))
-    if (d.inverse === id)
-      return other;
-  for (const [other, d] of types.relations)
-    if (d.inverse === id && !own(world.relations, other))
-      return other;
-  return null;
-}
-function oneTarget(c) {
-  return c === "many_one" || c === "one_one";
-}
-function oneSource(c) {
-  return c === "one_many" || c === "one_one";
-}
-function kindPhrase(reg, world, kind) {
-  const label = (kindDef(reg, world, kind)?.label ?? kind.replace(/_/g, " ")).toLowerCase();
-  return `${/^[aeiou]/.test(label) ? "an" : "a"} ${label}`;
-}
-function inline(def) {
-  return def.label.charAt(0).toLowerCase() + def.label.slice(1);
-}
-function reject2(code, reason) {
-  return { code, reason };
-}
-function endOf(state, id) {
-  const e = own(state.entities, id);
-  return e ? { id, kind: e.kind, name: e.name, relations: e.relations } : null;
-}
-function linkProblem(reg, world, state, def, a, b) {
-  const worded = (code, say) => {
-    const sentence = (text) => text.charAt(0).toUpperCase() + text.slice(1);
-    const reason = sentence(say((end) => playerKnows(reg, world, state, world.pov, end.id) ? end.name : "someone"));
-    const gm = sentence(say((end) => end.name));
-    return reason === gm ? reject2(code, reason) : { code, reason, gm };
-  };
-  if (def.from !== "*" && !kindIs(reg, world, a.kind, def.from))
-    return worded("relation_kind", (name) => `\u201C${def.label}\u201D runs from ${kindPhrase(reg, world, def.from)}; ${name(a)} is ${kindPhrase(reg, world, a.kind)}`);
-  if (def.to !== "*" && !kindIs(reg, world, b.kind, def.to))
-    return worded("relation_kind", (name) => `\u201C${def.label}\u201D runs to ${kindPhrase(reg, world, def.to)}; ${name(b)} is ${kindPhrase(reg, world, b.kind)}`);
-  if (oneTarget(def.cardinality)) {
-    const other = a.relations.find((r) => r.type === def.id && r.to !== b.id);
-    if (other)
-      return worded("cardinality", (name) => `${name(a)} is already ${inline(def)} ${name({ id: other.to, name: own(state.entities, other.to)?.name ?? other.to })}; \u201C${def.label}\u201D allows one at a time`);
-  }
-  if (oneSource(def.cardinality)) {
-    const holder = Object.keys(state.entities).sort().find((id) => id !== a.id && own(state.entities, id)?.relations.some((r) => r.type === def.id && r.to === b.id));
-    if (holder)
-      return worded("cardinality", (name) => `${name({ id: holder, name: own(state.entities, holder)?.name ?? holder })} is already ${inline(def)} ${name(b)}; \u201C${def.label}\u201D allows one at a time`);
-  }
-  return null;
-}
-function linkEvents(reg, world, state, link) {
-  const extra = { ...link.fields ? { fields: link.fields } : {}, ...link.until !== undefined ? { until: link.until } : {} };
-  const events = [{ type: "link", rel: link.rel, from: link.from, to: link.to, ...extra }];
-  const a = endOf(state, link.from);
-  const b = endOf(state, link.to);
-  if (!a || !b)
-    return events;
-  const def = relationDef(reg, world, link.rel);
-  const problem = def ? linkProblem(reg, world, state, def, a, b) : null;
-  if (problem)
-    return problem;
-  const back = counterpartOf(reg, world, link.rel);
-  if (!back || back === link.rel && link.from === link.to)
-    return events;
-  const backDef = relationDef(reg, world, back);
-  const backProblem = backDef ? linkProblem(reg, world, state, backDef, b, a) : null;
-  if (backProblem)
-    return backProblem;
-  events.push({ type: "link", rel: back, from: link.to, to: link.from, ...extra });
-  return events;
-}
-function spawnLinks(reg, world, state, entity) {
-  const self = { id: entity.id, kind: entity.kind, name: entity.name, relations: entity.relations };
-  const out = [];
-  for (const r of entity.relations) {
-    const def = relationDef(reg, world, r.type);
-    const target = r.to === entity.id ? self : endOf(state, r.to);
-    if (!target) {
-      if (def && def.to !== "*") {
-        const name = own(world.places, r.to)?.name ?? r.to;
-        const reason = (place) => `\u201C${def.label}\u201D runs to ${kindPhrase(reg, world, def.to)}; ${place} isn't one`;
-        return canSeePlace(reg, world, state, world.pov, r.to) ? reject2("relation_kind", reason(name)) : { code: "relation_kind", reason: reason("that place"), gm: reason(name) };
-      }
-      continue;
-    }
-    const problem = def ? linkProblem(reg, world, state, def, self, target) : null;
-    if (problem)
-      return problem;
-    const back = counterpartOf(reg, world, r.type);
-    if (!back || back === r.type && r.to === entity.id)
-      continue;
-    const backDef = relationDef(reg, world, back);
-    const backProblem = backDef ? linkProblem(reg, world, state, backDef, target, self) : null;
-    if (backProblem)
-      return backProblem;
-    out.push({ type: "link", rel: back, from: r.to, to: entity.id });
-  }
-  return out;
-}
-function unlinkEvents(reg, world, state, link) {
-  const events = [{ type: "unlink", rel: link.rel, from: link.from, to: link.to }];
-  const back = counterpartOf(reg, world, link.rel);
-  if (!back || back === link.rel && link.from === link.to)
-    return events;
-  if (own(state.entities, link.to)?.relations.some((r) => r.type === back && r.to === link.from))
-    events.push({ type: "unlink", rel: back, from: link.to, to: link.from });
-  return events;
-}
-function completeRelations(types, world, entities) {
-  const added = [];
-  for (const id of Object.keys(entities).sort()) {
-    for (const r of own(entities, id)?.relations ?? []) {
-      const back = counterpartOf(types, world, r.type);
-      const holder = own(entities, r.to);
-      if (!back || !holder || back === r.type && r.to === id)
-        continue;
-      const present = (x) => x.type === back && x.to === id;
-      if (holder.relations.some(present) || added.some((a) => a.holder === r.to && present(a.relation)))
-        continue;
-      added.push({ holder: r.to, relation: { type: back, to: id, ...r.fields ? { fields: structuredClone(r.fields) } : {}, ...r.until !== undefined ? { until: r.until } : {} } });
-    }
-  }
-  for (const { holder, relation } of added)
-    own(entities, holder)?.relations.push(relation);
-}
-function relationIssues(reg, world) {
-  const issues = [];
-  const err = (path, code, message) => void issues.push({ severity: "error", path, code, message });
-  for (const [id, def] of Object.entries(world.relations)) {
-    if (def.inverse && !relationDef(reg, world, def.inverse))
-      err(`relations.${id}.inverse`, "refs", `Relation ${def.label}'s inverse "${def.inverse}" isn't a relation type.`);
-  }
-  const nameOf = (id) => own(world.entities, id)?.name ?? own(world.places, id)?.name ?? id;
-  for (const [id, e] of Object.entries(world.entities)) {
-    for (const r of e.relations) {
-      const def = relationDef(reg, world, r.type);
-      if (!def)
-        continue;
-      const target = own(world.entities, r.to);
-      const path = `entities.${id}.relations`;
-      if (def.from !== "*" && !kindIs(reg, world, e.kind, def.from))
-        err(path, "relation_kind", `${e.name}'s \u201C${def.label}\u201D link needs ${kindPhrase(reg, world, def.from)} on ${e.name}'s side; ${e.name} is ${kindPhrase(reg, world, e.kind)}.`);
-      if (def.to !== "*" && (!target || !kindIs(reg, world, target.kind, def.to)))
-        err(path, "relation_kind", `${e.name}'s \u201C${def.label}\u201D link to ${nameOf(r.to)} needs ${kindPhrase(reg, world, def.to)} at the other end; ${nameOf(r.to)} is ${target ? kindPhrase(reg, world, target.kind) : "a place"}.`);
-      const back = counterpartOf(reg, world, r.type);
-      if (!back || !target || back === r.type && r.to === id || target.relations.some((x) => x.type === back && x.to === id))
-        continue;
-      const backLabel = relationDef(reg, world, back)?.label ?? back;
-      issues.push({ severity: "warning", path, code: "one_sided", message: `${e.name} is ${inline(def)} ${target.name}, but ${target.name} has no \u201C${backLabel}\u201D link back to ${e.name}; a chat adds it when it starts.` });
-    }
-  }
-  const start = {};
-  for (const [id, e] of Object.entries(world.entities))
-    start[id] = { relations: e.relations.map((r) => ({ ...r })) };
-  completeRelations(reg, world, start);
-  const sources = new Map;
-  for (const id of Object.keys(start).sort()) {
-    const counts = new Map;
-    for (const r of own(start, id)?.relations ?? []) {
-      const def = relationDef(reg, world, r.type);
-      if (!def)
-        continue;
-      if (oneTarget(def.cardinality))
-        counts.set(r.type, [...counts.get(r.type) ?? [], r.to]);
-      if (oneSource(def.cardinality))
-        sources.set(`${r.type}\x00${r.to}`, [...sources.get(`${r.type}\x00${r.to}`) ?? [], id]);
-    }
-    for (const [type, targets] of counts) {
-      const def = relationDef(reg, world, type);
-      if (def && targets.length > 1)
-        err(`entities.${id}.relations`, "cardinality", `${nameOf(id)} is ${inline(def)} ${targets.map(nameOf).join(" and ")}; \u201C${def.label}\u201D allows one.`);
-    }
-  }
-  for (const [key, from] of sources) {
-    const [type = "", to = ""] = key.split("\x00");
-    const def = relationDef(reg, world, type);
-    const last = from.at(-1);
-    if (def && last !== undefined && from.length > 1)
-      err(`entities.${last}.relations`, "cardinality", `${from.map(nameOf).join(" and ")} are each ${inline(def)} ${nameOf(to)}; \u201C${def.label}\u201D allows one.`);
-  }
-  return issues;
-}
-
-// src/engine/time-limits.ts
-var TIME_LIMITS = Object.freeze({
-  tickMinutes: MINUTES_PER_DAY,
-  scale: [0.25, 10],
-  timelapseMinutes: 366 * MINUTES_PER_DAY,
-  unitCap: Object.freeze({ agentDays: 600, events: 5000 }),
-  thresholdMinutes: SPEED_THRESHOLD_MINUTES
-});
-function finite(v) {
-  return typeof v === "number" && Number.isFinite(v) ? v : null;
-}
-function within(v, lo, hi) {
-  return Math.min(hi, Math.max(lo, v));
-}
-function clampUnitCap(cap) {
-  const max = TIME_LIMITS.unitCap;
-  const days = finite(cap?.agentDays);
-  const events = finite(cap?.events);
-  return {
-    agentDays: days === null ? max.agentDays : within(days, 1 / 24, max.agentDays),
-    events: events === null ? max.events : Math.round(within(events, 1, max.events))
-  };
-}
-function clampTick(v, fallback = 2) {
-  const n = finite(v);
-  return n === null ? fallback : within(n, 0, TIME_LIMITS.tickMinutes);
-}
-function clampScale(v) {
-  const n = finite(v);
-  const [lo, hi] = TIME_LIMITS.scale;
-  return n === null || n === 0 ? 1 : within(n, lo, hi);
-}
-function clampThreshold(v) {
-  const n = finite(v);
-  const [lo, hi] = TIME_LIMITS.thresholdMinutes;
-  return n === null ? lo : Math.round(within(n, lo, hi));
-}
-function clampLevel(v) {
-  const n = finite(v);
-  return n === null ? 0 : Math.round(within(n, 0, 4));
-}
-
-// src/engine/world-state.ts
-var LOCAL_RE = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/;
-function minutesBetween(from, to) {
-  const a = LOCAL_RE.exec(from);
-  const b = LOCAL_RE.exec(to);
-  if (!a || !b)
-    throw new RangeError(`expected YYYY-MM-DDTHH:MM, got ${!a ? from : to}`);
-  const ms = (m) => Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]), Number(m[4]), Number(m[5]));
-  return Math.round((ms(b) - ms(a)) / 60000);
-}
-function clampLevels(levels) {
-  const out = {};
-  for (const d of DOMAINS)
-    if (levels[d] !== undefined)
-      out[d] = clampLevel(levels[d]);
-  return out;
-}
-function domainLevels(levels) {
-  const out = {};
-  for (const d of DOMAINS)
-    out[d] = clampLevel(levels[d]);
-  return out;
-}
-function initialState(world, revision, types) {
-  const entities = {};
-  for (const [id, e] of Object.entries(world.entities)) {
-    entities[id] = {
-      kind: e.kind,
-      name: e.name,
-      tier: e.tier,
-      fields: structuredClone(e.fields),
-      relations: structuredClone(e.relations),
-      levels: clampLevels(e.levels ?? {}),
-      agent: agentOf(world, { id, tier: e.tier, agent: e.agent }),
-      ...typeof e.life === "string" && e.life !== ALIVE ? { life: e.life } : {}
-    };
-  }
-  completeRelations(types, world, entities);
-  const pov = entities[world.pov];
-  if (pov && placeOfEntity({ entities }, world.pov) === null && hasOwn(world.places, world.start.place))
-    pov.fields.place = world.start.place;
-  for (const item of placedItems(world)) {
-    const thing = own(entities, item.id);
-    if (!thing || thing.relations.some((r) => r.type === "in"))
-      continue;
-    Object.assign(thing.fields, { place: item.place, x: item.cell.x, y: item.cell.y });
-  }
-  const here = placeOfEntity({ entities }, world.pov);
-  if (pov && here !== null && mapSettingsOf(world).grid.movement) {
-    const stand = standingGrid(world, here);
-    const { x, y } = pov.fields;
-    const placed = stand !== null && typeof x === "number" && typeof y === "number" && cellIndex(stand.grid, { x, y }) !== null;
-    const entry = placed ? null : arrivalCell(world, here);
-    if (entry)
-      Object.assign(pov.fields, { x: entry.cell.x, y: entry.cell.y });
-  }
-  const tierCaps = {};
-  for (const band of BANDS) {
-    const caps = world.realism.tierCaps[band];
-    tierCaps[band] = isRecord(caps) ? clampLevels(caps) : {};
-  }
-  const tracks = {};
-  for (const [id, t] of Object.entries(world.tracks))
-    tracks[id] = { stage: t.start, since: 0 };
-  const state = {
-    revision,
-    clock: minutesBetween(world.calendar.epoch, world.start.at),
-    entities,
-    accounts: {},
-    tracks,
-    realism: { levels: domainLevels(world.realism.levels), tierCaps },
-    time: {
-      sceneTicks: Object.fromEntries(Object.entries(world.time.sceneTicks).map(([k, v]) => [k, clampTick(v)])),
-      scale: 1,
-      paused: false,
-      interrupts: { ...world.time.interrupts },
-      speedThrough: Object.fromEntries(Object.entries(world.time.speedThrough).map(([k, p]) => [k, { mode: p.mode, thresholdMinutes: clampThreshold(p.thresholdMinutes) }])),
-      montage: world.time.montage,
-      unitCap: clampUnitCap(world.time.unitCap)
-    },
-    materialized: {},
-    packs: {}
-  };
-  seedObservations(world, state);
-  seedLife(world, state);
-  return state;
 }
 
 // src/engine/events.ts
@@ -9784,6 +9808,10 @@ function agentCursor(world, state, agent) {
 function completedSlot(world, state) {
   return slotIndexAt(calendarOf(world), state.clock) - 1;
 }
+function ranTo(state) {
+  const reached = readEngineSlice(state).reached;
+  return reached !== null && reached > state.clock ? reached : state.clock;
+}
 function interruptPolicy(state, overrides = {}) {
   const out = {};
   for (const c of INTERRUPT_CLASSES)
@@ -9833,9 +9861,10 @@ function advance(reg, w, to, opts) {
   if (to <= from)
     return result;
   const cal = calendarOf(w.world);
+  const since = ranTo(w.state);
   const schedules = allSchedules(reg, w.world);
-  const instants = scheduleInstants(w.world, schedules, from, to);
-  const slots = slotsEnding(cal, from, to);
+  const instants = scheduleInstants(w.world, schedules, since, to);
+  const slots = slotsEnding(cal, since, to);
   const e = emitter(reg, w, opts.runSeed, result.rules);
   const timelapse = opts.mode === "timelapse";
   const stepping = () => {
@@ -9856,7 +9885,7 @@ function advance(reg, w, to, opts) {
     const timed = reg.processes.filter((d) => d.scope === "agent" && d.instants);
     if (timed.length === 0)
       return [];
-    const after = w.state.clock;
+    const after = Math.max(w.state.clock, since);
     const who = timelapse ? stepping() : lod1Agents(w.world, w.state).filter((a) => a !== w.world.pov);
     const info = { start: slot.start, end: slot.end, index: slot.index };
     const out = [];
@@ -9980,7 +10009,7 @@ function advance(reg, w, to, opts) {
     const tail = slotOf(cal, slotIndexAt(cal, to));
     let open = tail.start < to && result.slots === 0 && opts.open?.slot === tail.index ? opts.open : null;
     if (tail.start < to && !open) {
-      const stepped = timelapse && opts.segmentTo !== undefined && tail.end <= opts.segmentTo && result.slots + spent.slots > 0;
+      const stepped = timelapse && opts.segmentTo !== undefined && tail.end <= opts.segmentTo && tail.end > since && result.slots + spent.slots > 0;
       if (stepped && (overDays(tail, stepping().length) || spent.events + w.events.length - startEvents >= cap.events))
         result.stop = "cap";
       else {

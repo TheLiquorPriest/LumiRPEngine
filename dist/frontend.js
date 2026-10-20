@@ -5389,6 +5389,9 @@ function travelRequest(action, params, chatId) {
 function fixRequest(target, value, chatId) {
   return { type: "lre.fix", chatId, entity: target.entity, field: target.field, value };
 }
+function timeFixRequest(time, chatId) {
+  return { type: "lre.fix", chatId, time };
+}
 function editRequest(chatId, ops) {
   return { type: "lre.edit", chatId, ops };
 }
@@ -14679,6 +14682,118 @@ function expected(target, currency) {
     return `Enter a number${span}.`;
   return 'Enter a list, like ["a", "b"].';
 }
+var pad2 = (n) => String(n).padStart(2, "0");
+function leapYear(year) {
+  return year % 4 === 0 && year % 100 !== 0 || year % 400 === 0;
+}
+function readTimeFix(target, date, time) {
+  const d = /^\s*(-?\d{1,6})-(\d{1,2})-(\d{1,2})\s*$/.exec(date);
+  const year = Number(d?.[1]);
+  const month = Number(d?.[2]);
+  const day = Number(d?.[3]);
+  const named = d ? target.months[month - 1] : undefined;
+  const february = target.gregorian && month === 2;
+  const days = !named ? 0 : february && !leapYear(year) ? 28 : named.days;
+  const now = target.value.split(" ")[0] ?? "";
+  const dateProblem = !d ? `Enter a date as year-month-day, like ${now}.` : !named ? `Enter a month from 1 to ${target.months.length}.` : day < 1 || day > days ? `${named.name}${february ? ` ${year}` : ""} has ${days} days.` : null;
+  const t = /^\s*(\d{1,2}):(\d{2})\s*$/.exec(time);
+  const hour = Number(t?.[1]);
+  const minute = Number(t?.[2]);
+  const timeProblem = t && hour <= 23 && minute <= 59 ? null : "Enter a time of day from 00:00 to 23:59.";
+  if (dateProblem !== null || timeProblem !== null || !named)
+    return { date: dateProblem, time: timeProblem };
+  return { stamp: `${year < 0 ? "-" : ""}${String(Math.abs(year)).padStart(4, "0")}-${pad2(month)}-${pad2(day)} ${pad2(hour)}:${pad2(minute)}`, words: `${day} ${named.name} ${year}, ${pad2(hour)}:${pad2(minute)}` };
+}
+function TimeFixForm(props) {
+  const dateId = P2();
+  const timeId = P2();
+  const [nowDate = "", nowTime = ""] = props.target.value.split(" ");
+  const [date, setDate] = d2(nowDate);
+  const [time, setTime] = d2(nowTime);
+  const read = readTimeFix(props.target, date, time);
+  const problems = "stamp" in read ? { date: null, time: null } : read;
+  return /* @__PURE__ */ u3("form", {
+    ref: props.formRef,
+    class: "lre-chat-fix",
+    "data-lre-fix": "time",
+    onKeyDown: props.onKeyDown,
+    onSubmit: (event) => {
+      event.preventDefault();
+      if ("stamp" in read)
+        props.onSave(read.stamp);
+    },
+    children: [
+      /* @__PURE__ */ u3("span", {
+        class: "lre-chat-fix-head",
+        children: [
+          /* @__PURE__ */ u3(Icon, {
+            name: "edit",
+            size: 16
+          }, undefined, false, undefined, this),
+          props.title
+        ]
+      }, undefined, true, undefined, this),
+      /* @__PURE__ */ u3("div", {
+        class: "lre-chat-fix-when",
+        children: [
+          /* @__PURE__ */ u3(Field, {
+            label: "Date",
+            for: dateId,
+            help: "words" in read ? read.words : undefined,
+            error: problems.date,
+            children: props.target.gregorian ? /* @__PURE__ */ u3("input", {
+              id: dateId,
+              type: "date",
+              class: problems.date ? "lre-input invalid" : "lre-input",
+              "aria-invalid": problems.date ? true : undefined,
+              value: date,
+              onInput: (event) => setDate(event.currentTarget.value)
+            }, undefined, false, undefined, this) : /* @__PURE__ */ u3("input", {
+              id: dateId,
+              class: problems.date ? "lre-input invalid" : "lre-input",
+              "aria-invalid": problems.date ? true : undefined,
+              value: date,
+              onInput: (event) => setDate(event.currentTarget.value)
+            }, undefined, false, undefined, this)
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3(Field, {
+            label: "Time",
+            for: timeId,
+            error: problems.time,
+            children: /* @__PURE__ */ u3("input", {
+              id: timeId,
+              type: "time",
+              class: problems.time ? "lre-input invalid" : "lre-input",
+              "aria-invalid": problems.time ? true : undefined,
+              value: time,
+              onInput: (event) => setTime(event.currentTarget.value)
+            }, undefined, false, undefined, this)
+          }, undefined, false, undefined, this)
+        ]
+      }, undefined, true, undefined, this),
+      /* @__PURE__ */ u3("div", {
+        class: "lre-chat-actions",
+        children: [
+          /* @__PURE__ */ u3(Button, {
+            type: "submit",
+            variant: "primary",
+            size: "sm",
+            icon: "check",
+            busy: props.busy,
+            disabled: !("stamp" in read),
+            children: "Save fix"
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3(Button, {
+            variant: "ghost",
+            size: "sm",
+            onClick: props.onCancel,
+            children: "Cancel"
+          }, undefined, false, undefined, this)
+        ]
+      }, undefined, true, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+}
 function FixEditor(props) {
   const app = useApp();
   const view = useView();
@@ -14697,8 +14812,8 @@ function FixEditor(props) {
   if (!chatId)
     return null;
   const title = `Fix ${props.label.toLowerCase()}`;
-  const save = (value) => run(async () => {
-    const result = await app.request(fixRequest(target, value, chatId));
+  const send = (request) => run(async () => {
+    const result = await app.request(request);
     if (result) {
       if (result.pending)
         app.toast("Fix saved — it applies when the reply finishes.", "info");
@@ -14711,6 +14826,17 @@ function FixEditor(props) {
     event.stopPropagation();
     props.onDone();
   };
+  if (target.type === "time")
+    return /* @__PURE__ */ u3(TimeFixForm, {
+      title,
+      target,
+      busy,
+      formRef: form,
+      onSave: (time) => send(timeFixRequest(time, chatId)),
+      onCancel: props.onDone,
+      onKeyDown: cancelOnEscape
+    }, undefined, false, undefined, this);
+  const save = (value) => send(fixRequest(target, value, chatId));
   if (target.options && target.options.length > 0) {
     const now = JSON.stringify(target.value);
     return /* @__PURE__ */ u3("div", {
@@ -21663,7 +21789,7 @@ function createHost(ctx) {
 }
 
 // src/frontend/hud.tsx
-var FIX_LABEL = { place: "Place", weather: "Weather", cash: "Cash", scene: "Scene type" };
+var FIX_LABEL = { time: "Time", place: "Place", weather: "Weather", cash: "Cash", scene: "Scene type" };
 function cashText(cash) {
   if (!cash)
     return null;
@@ -21936,7 +22062,8 @@ function WorldDetails(props) {
                 class: "lre-num",
                 children: clockText(hud)
               }, undefined, false, undefined, this),
-              subtitle: paused ? `${hud.clock.dayPart} · clock paused` : hud.clock.dayPart
+              subtitle: paused ? `${hud.clock.dayPart} · clock paused` : hud.clock.dayPart,
+              value: fix("time")
             }, undefined, false, undefined, this),
             /* @__PURE__ */ u3(ListRow, {
               icon: "pin",
@@ -24929,10 +25056,223 @@ function sliceRecord(state, pack, key) {
 
 // src/engine/calendar.ts
 var MINUTES_PER_DAY = 1440;
+var DEFAULT_DAY_PARTS = [
+  { id: "night", label: "Night", start: "00:00" },
+  { id: "morning", label: "Morning", start: "06:00" },
+  { id: "afternoon", label: "Afternoon", start: "12:00" },
+  { id: "evening", label: "Evening", start: "18:00" }
+];
+var GREGORIAN_MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+var GREGORIAN_WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+var HHMM = /^(\d{1,2}):(\d{2})$/;
+var ISO_LOCAL = /^(-?\d{1,6})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/;
+function floorDiv(a, b) {
+  return Math.floor(a / b);
+}
+function mod(a, b) {
+  return (a % b + b) % b;
+}
+function parseHHMM(text) {
+  const m = HHMM.exec(text.trim());
+  if (!m)
+    throw new RangeError(`expected HH:MM, got ${text}`);
+  const h = Number(m[1]);
+  const min = Number(m[2]);
+  if (h > 24 || min > 59 || h === 24 && min !== 0)
+    throw new RangeError(`bad time ${text}`);
+  return h * 60 + min;
+}
+function formatHHMM(minuteOfDay) {
+  const m = mod(minuteOfDay, MINUTES_PER_DAY);
+  return `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
+}
+function daysFromCivil(y, m, d) {
+  const yy = m <= 2 ? y - 1 : y;
+  const era = floorDiv(yy, 400);
+  const yoe = yy - era * 400;
+  const doy = floorDiv(153 * (m + (m > 2 ? -3 : 9)) + 2, 5) + d - 1;
+  const doe = yoe * 365 + floorDiv(yoe, 4) - floorDiv(yoe, 100) + doy;
+  return era * 146097 + doe - 719468;
+}
+function civilFromDays(z0) {
+  const z = z0 + 719468;
+  const era = floorDiv(z, 146097);
+  const doe = z - era * 146097;
+  const yoe = floorDiv(doe - floorDiv(doe, 1460) + floorDiv(doe, 36524) - floorDiv(doe, 146096), 365);
+  const y = yoe + era * 400;
+  const doy = doe - (365 * yoe + floorDiv(yoe, 4) - floorDiv(yoe, 100));
+  const mp = floorDiv(5 * doy + 2, 153);
+  const d = doy - floorDiv(153 * mp + 2, 5) + 1;
+  const m = mp < 10 ? mp + 3 : mp - 9;
+  return { year: m <= 2 ? y + 1 : y, month: m, day: d };
+}
+function gregorianMonthLength(year, month) {
+  return daysFromCivil(month === 12 ? year + 1 : year, month === 12 ? 1 : month + 1, 1) - daysFromCivil(year, month, 1);
+}
+var GREGORIAN = {
+  abs: daysFromCivil,
+  date: civilFromDays,
+  weekday: (abs) => mod(abs + 4, 7),
+  monthLength: gregorianMonthLength,
+  months: 12,
+  monthNames: GREGORIAN_MONTHS,
+  weekdayNames: GREGORIAN_WEEKDAYS
+};
+function customSystem(def) {
+  const lengths = def.monthLengths.length > 0 ? def.monthLengths.map((n) => Math.max(1, Math.floor(n))) : [30];
+  const yearLength = lengths.reduce((a, b) => a + b, 0);
+  const weekdays = def.weekdayNames.length > 0 ? def.weekdayNames : ["Day"];
+  return {
+    abs(year, month, day) {
+      let doy = day - 1;
+      for (let i = 0;i < month - 1 && i < lengths.length; i++)
+        doy += lengths[i] ?? 0;
+      return year * yearLength + doy;
+    },
+    date(abs) {
+      const year = floorDiv(abs, yearLength);
+      let doy = abs - year * yearLength;
+      let month = 1;
+      for (const len of lengths) {
+        if (doy < len)
+          break;
+        doy -= len;
+        month++;
+      }
+      return { year, month, day: doy + 1 };
+    },
+    weekday: (abs) => mod(abs, weekdays.length),
+    monthLength: (_year, month) => lengths[month - 1] ?? 0,
+    months: lengths.length,
+    monthNames: def.monthNames.length >= lengths.length ? def.monthNames : lengths.map((_, i) => `M${i + 1}`),
+    weekdayNames: weekdays
+  };
+}
 var cache = new WeakMap;
+function calendarOf(world) {
+  const def = world.calendar;
+  const hit = cache.get(def);
+  if (hit)
+    return hit;
+  const system = def.system === "custom" && def.custom ? customSystem(def.custom) : GREGORIAN;
+  const m = ISO_LOCAL.exec(def.epoch);
+  if (!m)
+    throw new RangeError(`calendar epoch must be YYYY-MM-DDTHH:MM, got ${def.epoch}`);
+  const parts = [...def.dayParts.length > 0 ? def.dayParts : DEFAULT_DAY_PARTS].sort((a, b) => parseHHMM(a.start) - parseHHMM(b.start));
+  const cal = {
+    def,
+    system,
+    epochAbs: system.abs(Number(m[1]), Number(m[2]), Number(m[3])),
+    epochMinute: Number(m[4]) * 60 + Number(m[5]),
+    dayParts: parts,
+    partStarts: parts.map((p) => parseHHMM(p.start))
+  };
+  cache.set(def, cal);
+  return cal;
+}
+function dateAt(cal, clock) {
+  const local = cal.epochMinute + Math.floor(clock);
+  const dayIndex = floorDiv(local, MINUTES_PER_DAY);
+  const abs = cal.epochAbs + dayIndex;
+  const d = cal.system.date(abs);
+  return { ...d, weekday: cal.system.weekday(abs), dayIndex, minuteOfDay: local - dayIndex * MINUTES_PER_DAY };
+}
 var NUMBER_WORDS = { a: 1, an: 1, one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10, eleven: 11, twelve: 12 };
 var SPAN_MINUTES = { minute: 1, min: 1, hour: 60, hr: 60, day: MINUTES_PER_DAY, week: 7 * MINUTES_PER_DAY };
 var SPAN = new RegExp(`\\s(\\d+|${Object.keys(NUMBER_WORDS).join("|")})\\s+(minute|min|hour|hr|day|week)s?(?=\\s)`);
+function monthName(cal, month) {
+  return cal.system.monthNames[month - 1] ?? `M${month}`;
+}
+function weekdayName(cal, weekday) {
+  return cal.system.weekdayNames[weekday] ?? `D${weekday}`;
+}
+function formatClock(cal, clock, offsetMinutes = 0) {
+  const d = dateAt(cal, clock + offsetMinutes);
+  return `${weekdayName(cal, d.weekday)} ${d.day} ${monthName(cal, d.month)} ${d.year}, ${formatHHMM(d.minuteOfDay)}`;
+}
+var ZONES = {
+  UTC: { standard: 0, dst: null },
+  "Etc/UTC": { standard: 0, dst: null },
+  "America/New_York": { standard: -300, dst: "us" },
+  "America/Detroit": { standard: -300, dst: "us" },
+  "America/Indiana/Indianapolis": { standard: -300, dst: "us" },
+  "America/Kentucky/Louisville": { standard: -300, dst: "us" },
+  "America/Chicago": { standard: -360, dst: "us" },
+  "America/Menominee": { standard: -360, dst: "us" },
+  "America/Denver": { standard: -420, dst: "us" },
+  "America/Boise": { standard: -420, dst: "us" },
+  "America/Phoenix": { standard: -420, dst: null },
+  "America/Los_Angeles": { standard: -480, dst: "us" },
+  "America/Anchorage": { standard: -540, dst: "us" },
+  "America/Juneau": { standard: -540, dst: "us" },
+  "America/Adak": { standard: -600, dst: "us" },
+  "Pacific/Honolulu": { standard: -600, dst: null },
+  "America/Puerto_Rico": { standard: -240, dst: null },
+  "Europe/London": { standard: 0, dst: "eu" },
+  "Europe/Dublin": { standard: 0, dst: "eu" },
+  "Europe/Paris": { standard: 60, dst: "eu" },
+  "Europe/Berlin": { standard: 60, dst: "eu" },
+  "Europe/Madrid": { standard: 60, dst: "eu" },
+  "Europe/Rome": { standard: 60, dst: "eu" },
+  "Europe/Athens": { standard: 120, dst: "eu" },
+  "Asia/Tokyo": { standard: 540, dst: null },
+  "Asia/Shanghai": { standard: 480, dst: null },
+  "Asia/Kolkata": { standard: 330, dst: null },
+  "Australia/Sydney": { standard: 600, dst: "south" }
+};
+function knownZone(zone) {
+  return Object.prototype.hasOwnProperty.call(ZONES, zone);
+}
+function zoneOffset(zone, year, month, day, minuteOfDay) {
+  const rule = own(ZONES, zone);
+  if (!rule)
+    return 0;
+  if (!rule.dst)
+    return rule.standard;
+  const abs = daysFromCivil(year, month, day);
+  const nthSunday = (m, n) => {
+    const first = daysFromCivil(year, m, 1);
+    return first + mod(-mod(first + 4, 7), 7) + (n - 1) * 7;
+  };
+  const lastSunday = (m) => {
+    const last = daysFromCivil(year, m, gregorianMonthLength(year, m));
+    return last - mod(last + 4, 7);
+  };
+  const at = (d, minute) => abs > d || abs === d && minuteOfDay >= minute;
+  let summer;
+  if (rule.dst === "us")
+    summer = at(nthSunday(3, 2), 120) && !at(nthSunday(11, 1), 120);
+  else if (rule.dst === "eu")
+    summer = at(lastSunday(3), 60 + rule.standard) && !at(lastSunday(10), 60 + rule.standard);
+  else
+    summer = !(at(nthSunday(4, 1), 180) && !at(nthSunday(10, 1), 120));
+  return rule.standard + (summer ? 60 : 0);
+}
+function placeZone(world, placeId) {
+  let id = placeId ?? undefined;
+  for (let guard = 0;id && guard < 32; guard++) {
+    const place = own(world.places, id);
+    if (!place)
+      break;
+    if (place.timeZone)
+      return place.timeZone;
+    id = place.parent;
+  }
+  return world.calendar.timeZone;
+}
+function placeOffset(world, clock, placeId) {
+  const cal = calendarOf(world);
+  if (world.calendar.system !== "gregorian")
+    return 0;
+  const zone = placeZone(world, placeId);
+  if (zone === world.calendar.timeZone)
+    return 0;
+  const d = dateAt(cal, clock);
+  const home = zoneOffset(world.calendar.timeZone, d.year, d.month, d.day, d.minuteOfDay);
+  if (!knownZone(zone) || !knownZone(world.calendar.timeZone))
+    return 0;
+  return zoneOffset(zone, d.year, d.month, d.day, d.minuteOfDay) - home;
+}
 
 // src/engine/dice.ts
 var DICE_LIMITS = Object.freeze({
@@ -25152,6 +25492,26 @@ function tellLife(state, subject, who) {
 // src/engine/player-events.ts
 var POV_ONLY = new Set(["castlife.need", "economy.anchor"]);
 
+// src/engine/time-limits.ts
+var TIME_LIMITS = Object.freeze({
+  tickMinutes: MINUTES_PER_DAY,
+  scale: [0.25, 10],
+  timelapseMinutes: 366 * MINUTES_PER_DAY,
+  unitCap: Object.freeze({ agentDays: 600, events: 5000 }),
+  thresholdMinutes: SPEED_THRESHOLD_MINUTES
+});
+
+// src/engine/world-state.ts
+var LOCAL_RE = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/;
+function minutesBetween(from, to) {
+  const a = LOCAL_RE.exec(from);
+  const b = LOCAL_RE.exec(to);
+  if (!a || !b)
+    throw new RangeError(`expected YYYY-MM-DDTHH:MM, got ${!a ? from : to}`);
+  const ms = (m) => Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]), Number(m[4]), Number(m[5]));
+  return Math.round((ms(b) - ms(a)) / 60000);
+}
+
 // src/engine/engine-pack.ts
 var ENGINE_PACK = "engine";
 var ENGINE_EVENTS = {
@@ -25171,7 +25531,8 @@ var ENGINE_EVENTS = {
   observed: "engine.observed",
   adjudged: "engine.adjudged",
   life: "engine.life",
-  told: "engine.told"
+  told: "engine.told",
+  rewind: "engine.rewind"
 };
 function slice(state) {
   const s = state.packs[ENGINE_PACK] ?? {};
@@ -25300,6 +25661,27 @@ var events = [
       slice(state).pauseScene = typeof e.data.scene === "string" ? e.data.scene : null;
     },
     describe: () => "clock pause"
+  },
+  {
+    type: ENGINE_EVENTS.rewind,
+    validate: (e, ctx) => {
+      const minutes = e.data.minutes;
+      if (typeof minutes !== "number" || !Number.isInteger(minutes) || minutes <= 0)
+        return { code: "bad_event", reason: "a clock set back needs whole minutes above zero" };
+      const start = minutesBetween(ctx.world.calendar.epoch, ctx.world.start.at);
+      if (ctx.state.clock - minutes >= start)
+        return null;
+      return { code: "before_start", reason: `the story starts at ${formatClock(calendarOf(ctx.world), start, placeOffset(ctx.world, start, placeOfEntity(ctx.state, ctx.world.pov)))}` };
+    },
+    apply: (e, state) => {
+      const minutes = e.data.minutes;
+      if (typeof minutes !== "number")
+        return;
+      const s = slice(state);
+      s.reached = Math.max(typeof s.reached === "number" ? s.reached : state.clock, state.clock);
+      state.clock -= minutes;
+    },
+    describe: (e) => `clock set back ${String(e.data.minutes)} min`
   },
   {
     type: ENGINE_EVENTS.check,
@@ -25473,15 +25855,6 @@ function witnessesOf2(e) {
   const seen = e.data.witnesses;
   return Array.isArray(seen) ? seen.filter((id) => typeof id === "string") : null;
 }
-
-// src/engine/time-limits.ts
-var TIME_LIMITS = Object.freeze({
-  tickMinutes: MINUTES_PER_DAY,
-  scale: [0.25, 10],
-  timelapseMinutes: 366 * MINUTES_PER_DAY,
-  unitCap: Object.freeze({ agentDays: 600, events: 5000 }),
-  thresholdMinutes: SPEED_THRESHOLD_MINUTES
-});
 
 // src/engine/events.ts
 var EXTERNAL_ACCOUNT_PREFIX = "economy.external:";
@@ -43170,7 +43543,7 @@ function QuickActions(props) {
 }
 
 // src/frontend/play/scene.tsx
-var FIX_LABEL2 = { place: "Place", weather: "Weather", cash: "Cash", scene: "Scene type" };
+var FIX_LABEL2 = { time: "Time", place: "Place", weather: "Weather", cash: "Cash", scene: "Scene type" };
 function weatherIcon(weather) {
   const text = weather.toLowerCase();
   if (/snow|sleet|hail|blizzard/.test(text))
@@ -43323,8 +43696,9 @@ function SceneCard(props) {
     class: "lre-play-scene",
     "aria-label": "Where you are",
     children: [
-      hud ? /* @__PURE__ */ u3("div", {
+      hud && fixing === "time" && editor ? editor : hud ? /* @__PURE__ */ u3("div", {
         class: "lre-play-clock",
+        "data-lre-fact": "time",
         children: [
           /* @__PURE__ */ u3("span", {
             class: "lre-play-time lre-num",
@@ -43347,7 +43721,8 @@ function SceneCard(props) {
               }, undefined, false, undefined, this),
               "Clock paused"
             ]
-          }, undefined, true, undefined, this) : null
+          }, undefined, true, undefined, this) : null,
+          fixes.time ? fixFor("time") : null
         ]
       }, undefined, true, undefined, this) : null,
       fixing === "place" && editor ? editor : /* @__PURE__ */ u3("div", {
@@ -44081,6 +44456,7 @@ var CHAT_CSS = `
 .lre .lre-chat-fix{display:flex;flex-direction:column;gap:var(--lre-s2);min-width:0;padding:var(--lre-s3);border:1px solid color-mix(in srgb,var(--lre-accent) 35%,transparent);border-radius:var(--lre-r-xl);background:var(--lre-card)}
 .lre .lre-chat-fix-head{display:inline-flex;align-items:center;gap:6px;font-size:var(--lre-fs-sm);font-weight:600;color:var(--lre-fg)}
 .lre .lre-chat-fix-head>.lre-icon,.lre .lre-chat-fix .lre-item>.lre-icon{color:var(--lre-accent-text)}
+.lre .lre-chat-fix-when{display:grid;grid-template-columns:repeat(auto-fit,minmax(8.5rem,1fr));gap:var(--lre-s2);min-width:0}
 
 .lre.lre-chat-mapframe{position:relative;width:100%;height:100%;overflow:hidden;border:1px solid var(--lre-border);border-radius:var(--lre-r-xl);background:var(--lre-bar-bg);box-shadow:var(--lre-shadow-lg)}
 .lre.lre-chat-mapframe.full{border:0;border-radius:0;box-shadow:none}
@@ -44922,6 +45298,7 @@ var PLAY_CSS = `
 .lre-play-fixbtn{flex:none;display:inline-flex;width:var(--lre-tap);margin-right:calc(-1 * var(--lre-s2))}
 .lre-play-fixbtn>.lre-iconbtn{color:var(--lre-muted)}
 .lre-play-fixbtn>.lre-iconbtn:hover:not(:disabled){color:var(--lre-fg)}
+.lre-play-clock>.lre-play-fixbtn{margin-left:auto}
 .lre-play-fix{padding:var(--lre-s2) 0 var(--lre-s3)}
 .lre-play-none{margin:0;padding:var(--lre-s3);color:var(--lre-muted)}
 .lre-play-badges{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:var(--lre-s1)}
