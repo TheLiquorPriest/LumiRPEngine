@@ -353,10 +353,12 @@ function moneyOf(ctx: ReadContext, who: EntityId, from: string): { forHolder: Se
  * Whether `who` may spend `account` by a role of their own (an authorized user's card, a
  * custodian's or a trustee's), so could move money on from it, where it isn't wholly the money's
  * own people's: every holder of its worth someone the money ends with (`people`, a trust's
- * beneficiary, a business's owner). Money paid to its own people is theirs whoever holds the card or
- * the custodianship, so a parent who is trustee of a child's trust and custodian of the child's
- * account pays the child; the custodian's power over that account is the custodian's role's, and no
- * part of this rule.
+ * beneficiary, a business's owner). A business the money passes through isn't one of them, any more
+ * than the business paying is: the till of a company that owns the café is as much in its
+ * custodian's reach, card in hand, as the café's own. Money paid to its own people is theirs
+ * whoever holds the card or the custodianship, so a parent who is trustee of a child's trust and
+ * custodian of the child's account pays the child; the custodian's power over that account is the
+ * custodian's role's, and no part of this rule.
  */
 function inReach(ctx: ReadContext, who: EntityId, account: EntityId, people: ReadonlySet<EntityId>): boolean {
   if (!canSpend(ctx.state, account, who)) return false;
