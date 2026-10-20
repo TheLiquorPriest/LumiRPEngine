@@ -8,6 +8,7 @@ import type { Level } from "../../src/shared/ids";
 import type { JsonObject } from "../../src/shared/json";
 import { isRecord } from "../../src/shared/json";
 import { DEFAULT_CURRENCY, type WorldDoc } from "../../src/shared/world";
+import { buildGmWorld } from "../../src/engine/gm-view";
 import { materializeAll } from "../../src/engine/materialize";
 import { createRegistry } from "../../src/engine/registry-impl";
 import { Working } from "../../src/engine/working";
@@ -15,7 +16,7 @@ import { ALL_PACKS, STARTER_WORLDS } from "../../src/packs/index";
 import { startState } from "../packs/support";
 import { ListRow } from "../../src/frontend/components";
 import { decodeFinanceView } from "../../src/packs/economy/ui/decode";
-import { accountBlocks, accountControls, autopaySources, businessAccounts, businessControls, cardControls, creditBlocks, endableLeases, findAccount, flowControls, flowSources, holdingControls, householdRows, hubTabs, invoiceControls, investmentBlocks, overviewBlocks, propertyControls, transferTargets, workBlocks } from "../../src/packs/economy/ui/layout";
+import { accountBlocks, accountControls, autopaySources, businessAccounts, businessControls, cardControls, creditBlocks, endableLeases, findAccount, flowControls, flowSources, gmKindIs, holdingControls, householdRows, hubTabs, invoiceControls, investmentBlocks, overviewBlocks, propertyControls, transferTargets, workBlocks } from "../../src/packs/economy/ui/layout";
 import { OwnerRows } from "../../src/packs/economy/ui/lines";
 import { gmFixture } from "../../dev/preview/fixtures";
 import {
@@ -426,5 +427,27 @@ describe("the requests the controls send", () => {
     expect(setPriceOps("vti", 31250)).toEqual([{ op: "effect", effect: "economy.set_price", args: { asset: "vti", price: 31250 } }]);
     expect(routeOps({ property: "duplex" }, "helen", "sav")).toEqual([{ op: "effect", effect: "economy.route", args: { property: "duplex", party: "helen", to: "sav" } }]);
     expect(closeAccountOps("old")).toEqual([{ op: "effect", effect: "economy.close_account", args: { account: "old" } }]);
+  });
+});
+
+describe("the GM view's kinds", () => {
+  test("a world's own kind matches the kind it extends, up the chain the GM view carries; a loop ends the walk", () => {
+    const world = (STARTER_WORLDS.modern_slice_of_life as (id: string, name: string) => WorldDoc)("pa", "Port Alder");
+    const { kinds } = buildGmWorld(reg, world, startState(world));
+    // Port Alder's people are characters, a kind of its own that extends the engine's person, which extends thing.
+    expect(kinds.find((k) => k.id === "character")?.extends).toBe("person");
+    expect(kinds.find((k) => k.id === "thing")?.extends).toBeNull();
+    expect(gmKindIs(kinds, "character", "person")).toBe(true);
+    expect(gmKindIs(kinds, "character", "thing")).toBe(true);
+    expect(gmKindIs(kinds, "person", "person")).toBe(true);
+    expect(gmKindIs(kinds, "person", "character")).toBe(false);
+    expect(gmKindIs(kinds, "business", "person")).toBe(false);
+    expect(gmKindIs(kinds, "household", "group")).toBe(true);
+    const loop = [
+      { id: "a", label: "A", extends: "b" },
+      { id: "b", label: "B", extends: "a" },
+    ];
+    expect(gmKindIs(loop, "a", "person")).toBe(false);
+    expect(gmKindIs(loop, "a", "b")).toBe(true);
   });
 });

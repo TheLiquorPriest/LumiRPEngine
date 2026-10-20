@@ -6,7 +6,7 @@
 
 import { CLASS_TRAITS, ROLE_RIGHTS, type AccountView, type AlertLine, type BusinessView, type CardView, type DistributionRoute, type FinanceFeature, type FinanceView, type FlowView, type HoldingView, type HouseholdView, type Invoice, type JobView, type OwnerRole, type PropertyView, type RoleRights, type UpcomingLine } from "../../../shared/finance";
 import type { EntityId } from "../../../shared/ids";
-import type { PaletteView } from "../../../shared/state-view";
+import type { GmView, PaletteView } from "../../../shared/state-view";
 import { cardChanges, type CardChange } from "./requests";
 
 /** What a route picker opens on when the route in force is another owner's account, which the viewer can't pick. */
@@ -287,6 +287,16 @@ export function autopaySources(view: FinanceView, account: AccountView): Account
 export function knownPeople(palette: PaletteView | null): { id: string; label: string }[] {
   const pay = palette?.entries.find((e) => e.action === "pay");
   return (pay?.options ?? []).flatMap((o) => (typeof o.params.to === "string" ? [{ id: o.params.to, label: o.label }] : []));
+}
+
+/** True when `kind` is `ancestor` or extends it, up the GM view's kinds as the engine's `kindIs` walks them (a loop ends the walk). */
+export function gmKindIs(kinds: GmView["kinds"], kind: string, ancestor: string): boolean {
+  const seen = new Set<string>();
+  for (let id: string | null = kind; id !== null && !seen.has(id); id = kinds.find((k) => k.id === id)?.extends ?? null) {
+    if (id === ancestor) return true;
+    seen.add(id);
+  }
+  return false;
 }
 
 /** Where a standing payment can go: the party's own accounts (savings, a card to pay off), the people the player may pay, or an outside payee by name (typed). */

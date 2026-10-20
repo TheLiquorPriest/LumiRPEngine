@@ -99,14 +99,15 @@ export function buildGmWorld(reg: Registry, world: WorldDoc, state: Readonly<Wor
     relationTypes.set(def.id, { id: def.id, label: def.label, from: def.from, to: def.to, fields: Object.entries(isRecord(def.fields) ? def.fields : {}).map(([id, f]) => ({ id, label: f.label ?? id.replace(/_/g, " "), type: f.type, ...(f.min !== undefined ? { min: f.min } : {}), ...(f.max !== undefined ? { max: f.max } : {}), ...(f.values ? { values: f.values } : {}) })) });
   }
   for (const id of BUILTIN_RELATIONS) if (!relationTypes.has(id)) relationTypes.set(id, { id, label: id.replace(/_/g, " "), from: "*", to: "*", fields: [] });
-  const kinds = new Map<string, string>();
-  for (const k of reg.kinds.values()) kinds.set(k.id, k.label);
-  for (const k of Object.values(world.kinds)) kinds.set(k.id, k.label);
+  // The world's own kinds override built-in ones of the same id, as `kindDef` resolves them.
+  const kinds = new Map<string, { label: string; extends: string | null }>();
+  for (const k of reg.kinds.values()) kinds.set(k.id, { label: k.label, extends: k.extends ?? null });
+  for (const k of Object.values(world.kinds)) kinds.set(k.id, { label: k.label, extends: k.extends ?? null });
   return {
     entities: Object.keys(state.entities)
       .sort()
       .flatMap((id) => entityOf(reg, ctx, id) ?? []),
-    kinds: [...kinds].map(([id, label]) => ({ id, label })).sort((a, b) => a.label.localeCompare(b.label)),
+    kinds: [...kinds].map(([id, k]) => ({ id, label: k.label, extends: k.extends })).sort((a, b) => a.label.localeCompare(b.label)),
     tiers: tiersInOrder(world).map(([id, t]) => ({ id, label: t.label })),
     lifeStates: lifeStatesOf(world).map(([id, def]) => ({ id, label: def.label, acts: def.acts })),
     domains: DOMAINS.map((id) => ({ id, label: reg.packs.find((p) => p.domain === id)?.label ?? id })),
