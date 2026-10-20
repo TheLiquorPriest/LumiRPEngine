@@ -488,6 +488,43 @@ export class LedgerCore {
   }
 
   /**
+   * Engine first (DESIGN §5.1): a turn the engine plans before its generation exists, under the
+   * engine's own id. It is pending without a window, and only while the engine run plans it: `take`
+   * then hands it out, so no other operation meets it and it is never persisted.
+   */
+  prepare(input: StartedInput, observed: readonly ChainMessage[]): void {
+    this.started(input, observed);
+    this.journal.windows = this.journal.windows.filter((w) => w !== input.generationId);
+  }
+
+  /** The prepared turn `prepare` began, taken out of the journal; null when there is none. */
+  take(id: GenerationId): PendingTurn | null {
+    const p = this.journal.pending[id];
+    if (!p) return null;
+    delete this.journal.pending[id];
+    return p;
+  }
+
+  /**
+   * The generation the guard let through takes the prepared turn's plan (DESIGN §5.1): its kind,
+   * seed, planned events and start markers, the chain they were folded on, and a Re-narrate's copies.
+   * Its own target, window and save tracking stay. False when the generation has no pending turn or
+   * the prepared one has no plan (a Continue's).
+   */
+  adopt(generationId: GenerationId, prepared: PendingTurn): boolean {
+    const p = this.journal.pending[generationId];
+    if (!p || !prepared.planned) return false;
+    const from = structuredClone(prepared);
+    Object.assign(p, { kind: from.kind, planned: true, chain: from.chain, userMessages: from.userMessages, seed: from.seed, markersApplied: from.markersApplied, parentPath: from.parentPath, events: from.events, startMarkers: from.startMarkers } satisfies Partial<PendingTurn>);
+    if (from.renarrateOf) p.renarrateOf = from.renarrateOf;
+    else delete p.renarrateOf;
+    if (from.copies) p.copies = from.copies;
+    if (from.undone) p.undone = from.undone;
+    if (from.dropped) p.dropped = from.dropped;
+    return true;
+  }
+
+  /**
    * The state a turn is planned from (DESIGN §5.1 step 2): the fold before its target, the target's
    * live markers, and before the chat's first record its starting markers. A time skip's pre phase
    * reads it, so it reaches its beats in the state the plan will (DESIGN §24.7). Pure; null when the
@@ -538,7 +575,7 @@ export class LedgerCore {
     return { prefix, out, state, parentPath, target, users, userMessages, world, startMarkers, seq };
   }
 
-  /** The context handler (DESIGN §5.1 step 2): plan the turn and store it. Continue, Impersonate and a turn under a pause get no plan; a dry run's is returned, never stored. */
+  /** The engine run (DESIGN §5.1 step 2): plan the turn and store it. Continue, Impersonate and a turn under a pause get no plan; a dry run's is returned, never stored. */
   plan(generationId: GenerationId, observed: readonly ChainMessage[], dryRun: boolean): LedgerEvent[] {
     const p = this.journal.pending[generationId];
     if (!p || p.kind === "continue" || p.kind === "impersonate") return [];

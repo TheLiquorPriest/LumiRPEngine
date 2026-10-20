@@ -178,7 +178,7 @@ export class Dispatcher {
       case "lre.hello":
       case "lre.state.resync": {
         if (r.type === "lre.hello") {
-          reply("lre.hello", { accepted: true, agentApi: AGENT_API, requestMs: (await this.rt.settings.get(userId)).timeouts.requestMs });
+          reply("lre.hello", { accepted: true, agentApi: AGENT_API, requestMs: (await this.rt.settings.get(userId)).timeouts.requestMs, canStop: this.rt.host.capabilities.cancel });
           this.meet(userId, session, r.client);
         } else reply("lre.state.resync", { accepted: true });
         // The frontend says which Loom preset is active: the preset prompts assemble with (DESIGN §6.8).
@@ -226,11 +226,11 @@ export class Dispatcher {
       case "lre.view.open": {
         await this.requireWorldChat(r.chatId, userId);
         if (r.panel === "core.context") {
-          // Opening the inspector checks slot deliverability between generations (decision #5c). The
-          // check waits on a dry run of the whole prompt, so it runs after the reply, and its result
-          // comes with the next state push.
+          // Opening the inspector runs the preset lint on a dry run (decision #5c); delivery is each
+          // turn's own (`onActivated`). The lint waits on a dry run of the whole prompt, so it runs
+          // after the reply, and its warnings come with the next state push.
           reply("lre.view.open", { materialized: false, pending: false });
-          this.rt.checkDeliveryLater(r.chatId, userId);
+          this.rt.checkPresetLater(r.chatId, userId);
           return;
         }
         const run = await this.rt.runOf(r.chatId, userId);

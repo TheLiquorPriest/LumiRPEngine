@@ -66,14 +66,14 @@ export function createHost(ctx: SpindleFrontendContext): Host {
       setTimeout(() => URL.revokeObjectURL(url), 1000);
     },
     activeChat: () => ctx.getActiveChat().chatId,
-    async regenerate() {
+    async generate(as) {
       const surfaces = ctx.host.surfaces;
       if (!surfaces) return false;
       try {
-        await surfaces.invoke({ kind: "command", id: "action-regenerate" });
+        await surfaces.invoke({ kind: "command", id: as === "continue" ? "action-continue" : "action-regenerate" });
         return true;
       } catch (error) {
-        console.warn("[LumiRPEngine] regenerate failed", error);
+        console.warn(`[LumiRPEngine] ${as} failed`, error);
         return false;
       }
     },

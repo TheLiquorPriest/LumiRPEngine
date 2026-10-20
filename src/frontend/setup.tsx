@@ -24,7 +24,7 @@ import { ProtocolClient } from "./protocol-client";
 import type { FrontendToBackend } from "../shared/protocol";
 import { STATE_EVENT, STATE_REQUEST_EVENT, STUDIO_INBOUND, STUDIO_OFFER_EVENT } from "../shared/studio-bridge";
 import type { StudioState } from "../shared/world";
-import { OPEN_DIAGNOSTICS_EVENT } from "./diagnostics";
+import { CannotStopNotice, OPEN_DIAGNOSTICS_EVENT } from "./diagnostics";
 import { ENGINE_VERSION, WORLD_FORMAT } from "../shared/world";
 import { timeMarker } from "./requests";
 import { createStore } from "./store";
@@ -91,6 +91,21 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     setTimeout(() => toasts.update((all) => all.filter((entry) => entry.id !== id)), tone === "error" ? 6000 : 3500);
   };
   cleanups.push(client.onError((error) => toast(error.message, "error")));
+  // The engine ran before a reply the guard stopped (DESIGN §5.1): the frontend open on that chat
+  // starts it again with Lumiverse's own command; a new reply after a reply only Send can start.
+  cleanups.push(
+    client.onGenerate((push) => {
+      if (host.activeChat() !== push.chatId) return;
+      if (push.as === "send") {
+        toast("The engine is ready: press Send for the reply.", "info");
+        return;
+      }
+      const command = push.as === "continue" ? "Continue" : "Regenerate";
+      void host.generate(push.as).then((started) => {
+        if (!started) toast(`The engine is ready, but ${command} couldn't start here: use ${command} on the last message.`, "error");
+      });
+    }),
+  );
 
   let overlays: OverlaySet | null = null;
   const app: App = {
@@ -248,6 +263,7 @@ export function setup(ctx: SpindleFrontendContext): () => void {
         render(
           <AppContext.Provider value={app}>
             <div class="lre">
+              <CannotStopNotice inChat />
               <StatusLine />
             </div>
           </AppContext.Provider>,

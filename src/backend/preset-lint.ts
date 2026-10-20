@@ -6,8 +6,12 @@
 import type { DryRun } from "./host";
 
 export interface PresetCaveat {
-  /** `preset_lint_pending`: the dry run is still running; `preset_lint_failed`: it failed, so the preset's warnings aren't known. */
-  code: "preset_json_ledger" | "preset_low_max_tokens" | "preset_lint_pending" | "preset_lint_failed";
+  /**
+   * `preset_lint_pending`: the dry run is still running; `preset_lint_failed`: it failed, so the
+   * preset's warnings aren't known; `host_cannot_stop`: this Lumiverse can't stop a generation for
+   * the engine run (DESIGN §5.1).
+   */
+  code: "preset_json_ledger" | "preset_low_max_tokens" | "preset_lint_pending" | "preset_lint_failed" | "host_cannot_stop";
   message: string;
 }
 

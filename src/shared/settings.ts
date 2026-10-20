@@ -7,7 +7,7 @@ import type { Band, BoundMode, DomainId, InterruptClass, InterruptPolicy, Level,
 import type { AdjudicationDef, StepPurpose } from "./world";
 import type { MindsSettings } from "./minds";
 import { isMindPurpose } from "./minds";
-import { HOST_LIMITS, type TimeoutSettings } from "./timeouts";
+import type { TimeoutSettings } from "./timeouts";
 
 /**
  * How hard a model reasons on a call (Lumiverse's per-request reasoning override): `inherit` leaves
@@ -152,11 +152,6 @@ export interface StepConfig {
 export interface LookupLimits {
   calls: number;
 }
-
-/** Lumiverse's longest wait for a context handler, from its limits table (`HOST_LIMITS`). */
-export const CONTEXT_HANDLER_MAX_MS = HOST_LIMITS.contextHandler.maxMs;
-/** What a turn's plan needs of the context handler's wait once the before-the-reply steps stop: the plan, its lines and the journal write. */
-export const PLAN_MARGIN_MS = 15_000;
 
 /** The activities Speed through always lists (DESIGN §9.2), each offered as a timelapse past 30 minutes unless set otherwise; worlds may add more. */
 export const SPEED_ACTIVITIES = ["sleep", "work_shift", "travel", "waiting"] as const;

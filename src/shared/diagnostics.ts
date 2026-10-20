@@ -1,5 +1,5 @@
 // Diagnostics (DESIGN §6.9): what the engine did each turn, step by step, with its model calls, its
-// failures and why, the interceptor's fills and slow requests; and the in-flight activity line. The
+// failures and why, the sections each engine run wrote and slow requests; and the in-flight activity line. The
 // records are GM-level (a step's reason may name what the player hasn't met): they are read only on
 // request (`lre.diag`), never pushed. The activity line is player-safe: a step's label, no names.
 
@@ -43,7 +43,7 @@ export interface DiagSection {
 export interface DiagRecord {
   /** Increasing per chat. */
   seq: number;
-  kind: "step" | "error" | "interceptor" | "slow" | "turn";
+  kind: "step" | "error" | "sections" | "slow" | "turn";
   level: DiagLevel;
   /** The generation the record belongs to; null outside a turn. */
   turn: string | null;
@@ -59,7 +59,7 @@ export interface DiagRecord {
   /** What the player can do about a failure. */
   fix?: string;
   calls?: DiagCall[];
-  /** Interceptor runs: the generation path and each section with its outlet and whether it got text. */
+  /** Section records: the generation path and each section with its outlet and whether it got text. */
   path?: string;
   sections?: DiagSection[];
 }
@@ -81,8 +81,12 @@ export interface Activity {
   since: number;
 }
 
+/** What the chat, Settings and Diagnostics say when this Lumiverse can't stop a generation for the engine run (DESIGN §5.1). */
+export const CANNOT_STOP = "This Lumiverse can't stop generation; engine state may be missing.";
+
 /** A phase's or a model call's in-flight label, by phase or step purpose. */
 export const STEP_LABEL: Record<string, string> = {
+  engine: "Running the engine…",
   pre: "Planning…",
   interpret: "Reading your action…",
   judge: "Judging the approach…",
@@ -95,6 +99,9 @@ export const STEP_LABEL: Record<string, string> = {
   brief: "Writing the outline…",
   outline: "Writing the outline…",
   sections: "Filling the prompt…",
+  book: "Waiting for another chat of this world…",
+  restart: "Starting the reply…",
+  ready: "Ready: press Send for the reply",
   reply: "Waiting for the reply…",
   read: "Reading the reply…",
   extract: "Reading the reply…",

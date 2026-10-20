@@ -13,6 +13,7 @@ const ROLE: Record<ChipKind, ChipRole> = {
   keep_report: "decision",
   contradiction: "decision",
   read_failed: "decision",
+  engine_failed: "decision",
   retry: "decision",
   retry_read: "decision",
   reread: "decision",
@@ -39,6 +40,7 @@ const ROLE: Record<ChipKind, ChipRole> = {
 const TONE: Record<ChipKind, ChipTone> = {
   decline: "neg",
   read_failed: "neg",
+  engine_failed: "neg",
   refused: "neg",
   degraded: "warn",
   pending: "warn",

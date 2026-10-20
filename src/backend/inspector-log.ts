@@ -1,6 +1,6 @@
-// The inspector's history (DESIGN §6.5): the last interceptor runs per chat with their sections,
-// clipping and delivery badges, the lore each model step read (§5.4), the minds calls (§24.5, no
-// text), and the last delivery check by slot. Kept in `userStorage/runs/<chatId>/inspector.json` and
+// The inspector's history (DESIGN §6.5): the last engine runs per chat with their sections,
+// clipping and delivery badges (set when the reply's World Info activates), the lore each model step
+// read (§5.4) and the minds calls (§24.5, no text). Kept in `userStorage/runs/<chatId>/inspector.json` and
 // read when the chat is first viewed or generates, so the inspector shows the same history after a
 // restart. A history written before the traces withheld a secret-reading step's lookups (`v: 1`)
 // keeps its searches' kinds and counts but not their text: there is no telling now which of them
@@ -17,16 +17,15 @@ import { FIDELITIES, MIND_PURPOSES } from "../shared/minds";
 import type { HostPort } from "./host";
 import { readStoredJson } from "./stored-json";
 
-/** One interceptor run (`core.context`, DESIGN §6.5), with what the activation check and warnings need. */
+/** One engine run's sections (`core.context`, DESIGN §6.5), with what the activation check needs. */
 export interface InspectorRecord extends ContextGeneration {
-  /** Entries forced, for the activation check (not shown). */
+  /** Entries the turn switched on, for the activation check (not shown). */
   forced: string[];
-  warnings?: string[];
+  /** Each section's entry, by slot, for its delivery badge (not shown). */
+  entries?: Record<string, string>;
 }
 
-export type Delivery = Record<string, "verified" | "unverified">;
-
-/** Interceptor runs kept per chat; the oldest go first. */
+/** Engine runs kept per chat; the oldest go first. */
 export const INSPECTOR_RUNS = 10;
 
 /** The history's format; a `v: 1` history is read with its queries' text dropped (see above). */
@@ -35,7 +34,6 @@ const FORMAT = 2;
 interface ChatLog {
   userId: UserId;
   records: InspectorRecord[];
-  delivery: Delivery;
 }
 
 const ACTIVATIONS: Record<ContextGeneration["activation"], true> = { confirmed: true, unconfirmed: true };
@@ -48,7 +46,7 @@ function strings(v: unknown): v is string[] {
 function isInspectorRecord(raw: unknown): raw is InspectorRecord {
   if (!isRecord(raw) || typeof raw.id !== "string" || typeof raw.at !== "number" || typeof raw.activation !== "string" || !hasOwn(ACTIVATIONS, raw.activation)) return false;
   if (!isRecord(raw.budget) || typeof raw.budget.sections !== "number" || typeof raw.budget.used !== "number" || !strings(raw.forced)) return false;
-  if (raw.warnings !== undefined && !strings(raw.warnings)) return false;
+  if (raw.entries !== undefined && !(isRecord(raw.entries) && Object.values(raw.entries).every((e) => typeof e === "string"))) return false;
   return Array.isArray(raw.sections) && raw.sections.every((s) => isRecord(s) && typeof s.slot === "string" && typeof s.label === "string" && typeof s.tokens === "number" && typeof s.clipped === "boolean" && typeof s.delivery === "string" && hasOwn(DELIVERIES, s.delivery));
 }
 
@@ -115,23 +113,13 @@ export function mindTracesOf(raw: unknown): MindCallTrace[] | undefined {
   });
 }
 
-function deliveryOf(raw: unknown): Delivery {
-  const out: Delivery = {};
-  if (!isRecord(raw)) return out;
-  for (const slot of Object.keys(raw)) {
-    const v = raw[slot];
-    if (v === "verified" || v === "unverified") out[slot] = v;
-  }
-  return out;
-}
-
 export class InspectorLog {
   /**
    * Each chat's log, by chat: `WORLD_INFO_ACTIVATED` may arrive without a user, and a chat has one
    * owner. The owner is kept with the log, and another user's lookup reads that user's own file.
    */
   private readonly logs = new Map<ChatId, ChatLog>();
-  /** Writes in order per chat; the interceptor queues its write rather than waiting on storage. */
+  /** Writes in order per chat; the engine run queues its write rather than waiting on storage. */
   private readonly writes = new Map<ChatId, Promise<void>>();
 
   constructor(private readonly host: HostPort) {}
@@ -159,7 +147,6 @@ export class InspectorLog {
         const calls = mindTracesOf(minds);
         return { ...r, ...(traces ? { lore: traces } : {}), ...(calls ? { minds: calls } : {}) };
       }),
-      delivery: isRecord(raw) ? deliveryOf(raw.delivery) : {},
     };
     this.logs.delete(chatId);
     this.logs.set(chatId, log);
@@ -180,14 +167,14 @@ export class InspectorLog {
     this.save(chatId);
   }
 
-  /** Queues a write of the chat's log as it stands (a change made to a loaded record or its delivery). */
+  /** Queues a write of the chat's log as it stands (a change made to a loaded record). */
   save(chatId: ChatId): void {
     const log = this.logs.get(chatId);
     if (!log) return;
     const path = this.path(chatId);
     const write = (this.writes.get(chatId) ?? Promise.resolve())
       .then(async () => {
-        await this.host.storage.write(`${path}.tmp`, JSON.stringify({ v: FORMAT, records: log.records, delivery: log.delivery }), log.userId);
+        await this.host.storage.write(`${path}.tmp`, JSON.stringify({ v: FORMAT, records: log.records }), log.userId);
         await this.host.storage.move(`${path}.tmp`, path, log.userId);
       })
       .catch((error: unknown) => this.host.log("warn", `[LumiRPEngine] chat ${chatId}: the inspector history wasn't saved (${error instanceof Error ? error.message : String(error)})`, log.userId));

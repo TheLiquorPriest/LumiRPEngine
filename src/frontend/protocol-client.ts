@@ -12,7 +12,7 @@ import { formatMs, TIMEOUTS, timerMs } from "../shared/timeouts";
 import type { Activity } from "../shared/diagnostics";
 import type { ChatId } from "../shared/ids";
 import { PROTOCOL_VERSION } from "../shared/protocol";
-import type { DeltaOp, DraftChanged, ErrorCode, ErrorMessage, FrontendToBackend, JobUpdate, MindsRunUpdate, ResultBodies, ResultMessage } from "../shared/protocol";
+import type { DeltaOp, DraftChanged, ErrorCode, ErrorMessage, FrontendToBackend, GeneratePush, JobUpdate, MindsRunUpdate, ResultBodies, ResultMessage } from "../shared/protocol";
 import type { StateView } from "../shared/state-view";
 import { applyDelta, DeltaError } from "./delta";
 import type { RequestBody, Send } from "./registry";
@@ -52,6 +52,8 @@ export interface SyncState {
   resyncs: number;
   /** What the engine is doing for the chat now, or what failed last (`lre.activity`); null when idle. */
   activity: Activity | null;
+  /** Whether this Lumiverse stops a generation for the engine run (`lre.hello`'s `canStop`); null until a hello answers. */
+  canStop: boolean | null;
 }
 
 interface Pending {
@@ -107,12 +109,13 @@ export class ProtocolClient {
   private readonly jobListeners = new Set<(update: JobUpdate) => void>();
   private readonly mindsListeners = new Set<(update: MindsRunUpdate) => void>();
   private readonly draftListeners = new Set<(push: DraftChanged) => void>();
+  private readonly generateListeners = new Set<(push: GeneratePush) => void>();
   private readonly unsubscribe: () => void;
   private requestMs: Limit;
   private readonly newReqId: () => string;
   private readonly schedule: (fn: () => void) => void;
   private readonly timers: Timers;
-  private state: SyncState = { chatId: null, rev: null, view: null, status: "closed", resyncs: 0, activity: null };
+  private state: SyncState = { chatId: null, rev: null, view: null, status: "closed", resyncs: 0, activity: null, canStop: null };
   private notifyQueued = false;
   private disposed = false;
   private counter = 0;
@@ -159,12 +162,18 @@ export class ProtocolClient {
     return () => this.draftListeners.delete(listener);
   }
 
+  /** The engine prepared a chat's next generation and asks this frontend to start it (`lre.generate`, DESIGN §5.1). */
+  onGenerate(listener: (push: GeneratePush) => void): () => void {
+    this.generateListeners.add(listener);
+    return () => this.generateListeners.delete(listener);
+  }
+
   /** The active Loom preset the frontend's state reports (`loom.activePresetId`), sent with each hello; undefined when it can't say. */
   presetId: string | null | undefined = undefined;
 
   /** Switches to a chat (or none) and asks for its snapshot. Pushes for any other chat are ignored. */
   open(chatId: ChatId | null): Promise<ResultMessage | ErrorMessage> {
-    this.update({ chatId, rev: null, view: null, status: chatId === null ? "closed" : "syncing", resyncs: 0, activity: null });
+    this.update({ chatId, rev: null, view: null, status: chatId === null ? "closed" : "syncing", resyncs: 0, activity: null, canStop: this.state.canStop });
     const reply = this.request({ type: "lre.hello", chatId, ...(this.presetId !== undefined ? { presetId: this.presetId } : {}) });
     void reply.then((message) => {
       if (message.type === "lre.error" && this.state.chatId === chatId) {
@@ -263,6 +272,12 @@ export class ProtocolClient {
           for (const listener of this.draftListeners) listener(push);
         }
         return;
+      case "lre.generate":
+        if (typeof payload.chatId === "string" && (payload.as === "regenerate" || payload.as === "continue" || payload.as === "send")) {
+          const push: GeneratePush = { lre: PROTOCOL_VERSION, type: "lre.generate", chatId: payload.chatId, as: payload.as };
+          for (const listener of this.generateListeners) listener(push);
+        }
+        return;
     }
   }
 
@@ -287,6 +302,7 @@ export class ProtocolClient {
     const settings = payload.request === "lre.settings.get" || payload.request === "lre.settings.set" ? body.settings : undefined;
     const limit = payload.request === "lre.hello" ? body.requestMs : isRecord(settings) && isRecord(settings.timeouts) ? settings.timeouts.requestMs : undefined;
     if (limit === "none" || (typeof limit === "number" && Number.isFinite(limit) && limit >= 0)) this.requestMs = limit;
+    if (payload.request === "lre.hello" && typeof body.canStop === "boolean" && body.canStop !== this.state.canStop) this.update({ ...this.state, canStop: body.canStop });
     entry.resolve(payload as unknown as ResultMessage);
   }
 

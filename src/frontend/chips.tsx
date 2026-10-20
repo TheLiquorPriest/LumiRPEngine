@@ -47,6 +47,7 @@ const CHIP_ICON: Record<ChipKind, IconName> = {
   choice: "send",
   contradiction: "info",
   read_failed: "alert",
+  engine_failed: "alert",
   fix: "edit",
   refused: "alert",
 };
@@ -163,7 +164,7 @@ function useChipAction(chip: Chip, chatId: ChatId): [boolean, (choice: string, p
           }
           if (message.request === "lre.chip" && message.body.pending && !intent.regenerate) app.toast("Saved — it applies when the reply finishes.", "info");
         }
-        if (intent.regenerate && !(await app.host.regenerate())) app.toast("Couldn't start Regenerate here; use the message's Regenerate button.", "error");
+        if (intent.regenerate && !(await app.host.generate("regenerate"))) app.toast("Couldn't start Regenerate here; use the message's Regenerate button.", "error");
       }),
   ];
 }

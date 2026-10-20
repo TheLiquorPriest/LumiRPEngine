@@ -376,7 +376,7 @@ export class MockBackend {
     switch (message.type) {
       case "lre.hello":
         if (message.chatId === null) {
-          this.result(reqId, "lre.hello", { accepted: true, agentApi: AGENT_API, requestMs: this.settings.timeouts.requestMs });
+          this.result(reqId, "lre.hello", { accepted: true, agentApi: AGENT_API, requestMs: this.settings.timeouts.requestMs, canStop: true });
           return;
         }
         this.view = this.options.scenario === "paused" ? pausedFixture(message.chatId) : this.options.scenario === "fresh" ? freshFixture(message.chatId) : stateFixture(message.chatId);
@@ -397,7 +397,7 @@ export class MockBackend {
         }
         // Play → You with the Modern profile's sheet, as the engine builds it.
         if (this.options.scenario === "sheet") this.view.panels["sheets.you"] = modernSheetFixture();
-        this.result(reqId, "lre.hello", { accepted: true, agentApi: AGENT_API, requestMs: this.settings.timeouts.requestMs });
+        this.result(reqId, "lre.hello", { accepted: true, agentApi: AGENT_API, requestMs: this.settings.timeouts.requestMs, canStop: true });
         setTimeout(() => this.snapshot(), 50);
         if (this.options.activity) setTimeout(() => this.activity(this.options.activity === "busy" ? { state: "running", label: "Asking 3 minds…", since: Date.now() - 12_000 } : { state: "failed", label: "Failed: Planning", since: Date.now() - 60_000 }), 80);
         return;
@@ -776,7 +776,7 @@ function diagnosticsFixture(): DiagRecord[] {
     step(1, "gen-a1b2c3d4", "pre", "pre", 0, 4100, { calls: [call("interpret", 180, "stop", 2100), call("mind", 420, "stop", 3900), call("mind", 380, "stop", 3600), call("mind", 510, "stop", 4000)] }),
     step(2, "gen-a1b2c3d4", "plan", "plan", 4100, 90),
     step(3, "gen-a1b2c3d4", "prose", "prose", 4190, 5200, { status: "failed", level: "warn", calls: [call("outline", 2000, "length", 5200)], reason: "outline answer cut off at 2000 tokens (finish_reason length)", fix: "The model's answer was cut off at 2000 max tokens: raise Max tokens for outline in Settings → Steps and connections (a reasoning model spends tokens thinking first)." }),
-    { seq: 4, kind: "interceptor", level: "info", turn: "gen-a1b2c3d4", phase: "sections", step: "interceptor", status: "ok", start: t + 9400, end: t + 9430, ms: 30, path: "normal turn, preset loom-1", reason: "4 of 6 section(s) filled, 4 of them at the preset's outlets", sections: [{ slot: "scene", outlet: "lre_scene", filled: true }, { slot: "people", outlet: "lre_people", filled: true }, { slot: "outcome", outlet: "lre_outcome", filled: true }, { slot: "minds", outlet: "lre_minds", filled: true }, { slot: "outline", outlet: "lre_outline", filled: false }, { slot: "montage", outlet: null, filled: false }] },
+    { seq: 4, kind: "sections", level: "info", turn: "gen-a1b2c3d4", phase: "sections", step: "sections", status: "ok", start: t + 9400, end: t + 9430, ms: 30, path: "normal turn, preset loom-1", reason: "4 of 6 section(s) filled, 4 of them at the preset's outlets", sections: [{ slot: "scene", outlet: "lre_scene", filled: true }, { slot: "people", outlet: "lre_people", filled: true }, { slot: "outcome", outlet: "lre_outcome", filled: true }, { slot: "minds", outlet: "lre_minds", filled: true }, { slot: "outline", outlet: "lre_outline", filled: false }, { slot: "montage", outlet: null, filled: false }] },
     step(5, "gen-a1b2c3d4", "read", "read", 31_000, 2600, { calls: [call("extract", 240, "stop", 2500)] }),
     { seq: 6, kind: "turn", level: "warn", turn: "gen-a1b2c3d4", phase: null, step: "turn", status: "failed", start: t, end: t + 34_000, ms: 34_000, reason: "step prose/prose failed" },
     { seq: 7, kind: "slow", level: "warn", turn: null, phase: "request", step: "state view", status: "ok", start: t + 40_000, end: t + 44_200, ms: 4200, reason: "state view took 4.2 s" },

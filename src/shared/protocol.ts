@@ -603,8 +603,13 @@ export interface SettingsResult {
 
 /** Results per request type. */
 export interface ResultBodies {
-  /** `agentApi`: the outside-client level this build speaks (`AGENT_API`). `requestMs`: how long the frontend waits for each answer, the user's Engine requests timeout (Settings → Timeouts). */
-  "lre.hello": { accepted: true; agentApi: number; requestMs: Limit };
+  /**
+   * `agentApi`: the outside-client level this build speaks (`AGENT_API`). `requestMs`: how long the
+   * frontend waits for each answer, the user's Engine requests timeout (Settings → Timeouts).
+   * `canStop`: this Lumiverse stops a generation for the engine run (DESIGN §5.1); without it, engine
+   * state may be missing from replies.
+   */
+  "lre.hello": { accepted: true; agentApi: number; requestMs: Limit; canStop: boolean };
   "lre.state.resync": { accepted: true };
   "lre.action": { messageId: MessageId };
   "lre.chip": { applied: boolean; pending: boolean };
@@ -702,4 +707,17 @@ export interface MindsRunUpdate extends Envelope<"lre.minds.update"> {
   run: MindsRunView;
 }
 
-export type BackendToFrontend = StateSnapshot | StateDelta | ResultMessage | ErrorMessage | JobUpdate | DraftChanged | ActivityPush | MindsRunUpdate;
+/**
+ * How the frontend starts a generation the guard stopped, once the engine prepared it (DESIGN §5.1):
+ * `regenerate` and `continue` run Lumiverse's own commands; a new reply after a reply only the
+ * player can start again, with Send.
+ */
+export type GenerateAs = "regenerate" | "continue" | "send";
+
+/** The engine prepared the chat's next generation: the frontend open on that chat starts it (DESIGN §5.1). */
+export interface GeneratePush extends Envelope<"lre.generate"> {
+  chatId: ChatId;
+  as: GenerateAs;
+}
+
+export type BackendToFrontend = StateSnapshot | StateDelta | ResultMessage | ErrorMessage | JobUpdate | DraftChanged | ActivityPush | MindsRunUpdate | GeneratePush;

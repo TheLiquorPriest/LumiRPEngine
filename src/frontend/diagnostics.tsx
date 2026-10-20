@@ -6,7 +6,7 @@
 // once the player opens its curtain, and never keeps them in pushed state.
 
 import { useEffect, useState } from "preact/hooks";
-import type { Activity, DiagRecord } from "../shared/diagnostics";
+import { CANNOT_STOP, type Activity, type DiagRecord } from "../shared/diagnostics";
 import { useApp } from "./app";
 import { Badge, Banner, Button, Empty, List, ListRow, Section, Seg, useBusy } from "./components";
 import { Icon } from "./icons";
@@ -100,6 +100,23 @@ export function ActivityBanner() {
         The engine didn't finish its work for the last reply. Diagnostics says which step failed and what to change.
       </Banner>
     </div>
+  );
+}
+
+/**
+ * This Lumiverse can't stop a generation for the engine run (DESIGN §5.1), so a reply may go out
+ * without what the engine prepared: said above the chat's composer in world chats, and on the
+ * Diagnostics page. Nothing until the backend's hello says so.
+ */
+export function CannotStopNotice(props: { inChat?: boolean }) {
+  const app = useApp();
+  const canStop = useSelect(app.sync, (state) => state.canStop);
+  const world = useSelect(app.sync, (state) => state.view !== null && state.view.status !== "not_world");
+  if (canStop !== false || (props.inChat && !world)) return null;
+  return (
+    <Banner tone="warn" title="The engine can't run before replies here">
+      {CANNOT_STOP} Update Lumiverse to one that lets extensions stop a generation.
+    </Banner>
   );
 }
 
@@ -231,6 +248,7 @@ export function DiagnosticsPage() {
   if (!revealed)
     return (
       <div class="lre-stack" data-lre-settings-page="diagnostics">
+        <CannotStopNotice />
         <Banner tone="gm" title="GM detail" actions={<Button icon="eye" onClick={() => setRevealed(true)}>Show diagnostics</Button>}>
           Diagnostics show each step the engine ran for this chat, its model calls and why one failed. A reason can name someone or something your character hasn't met yet.
         </Banner>
@@ -241,6 +259,7 @@ export function DiagnosticsPage() {
   const problems = (records ?? []).filter((r) => r.status === "failed" && (r.kind !== "turn" || !(records ?? []).some((s) => s !== r && s.turn === r.turn && s.status === "failed"))).slice(-20).reverse();
   return (
     <div class="lre-stack lre-diag" data-lre-settings-page="diagnostics">
+      <CannotStopNotice />
       <div class="lre-diag-tools">
         <Seg<DiagFilter> label="Show" value={filter} options={FILTERS} onChange={setFilter} />
         <div class="lre-diag-actions">

@@ -54,7 +54,7 @@ interface ChatDiag {
 const FORMAT = 1;
 const STATUSES: readonly DiagStatus[] = ["ok", "skipped", "failed"];
 const LEVELS: readonly DiagLevel[] = ["debug", "info", "warn", "error"];
-const KINDS: readonly DiagRecord["kind"][] = ["step", "error", "interceptor", "slow", "turn"];
+const KINDS: readonly DiagRecord["kind"][] = ["step", "error", "sections", "slow", "turn"];
 
 function isDiagRecord(raw: unknown): raw is DiagRecord {
   if (!isRecord(raw)) return false;
@@ -296,15 +296,44 @@ export class Diagnostics {
     this.add({ chatId: null, userId, turn: null }, { kind: "step", level: failure ? "warn" : "debug", turn: null, phase: null, step: call.purpose, status: failure ? "failed" : "ok", start: t - call.ms, end: t, ms: call.ms, calls: [call], ...(failure ? { reason: failure.reason } : {}) });
   }
 
-  /** The interceptor filled the prompt: which sections reached which outlets, on which path. */
-  interceptor(at: DiagAt, path: string, sections: readonly DiagSection[], start: number): void {
+  /** The engine run wrote the turn's sections into the world's book: which reach which outlets, on which path. */
+  sections(at: DiagAt, path: string, sections: readonly DiagSection[], start: number): void {
     const end = this.now();
     const filled = sections.filter((s) => s.filled).length;
     const routed = sections.filter((s) => s.outlet !== null);
     const status: DiagStatus = sections.length === 0 ? "skipped" : filled === 0 ? "failed" : "ok";
     const reason = sections.length === 0 ? "the world has no sections" : filled === 0 ? `no section had text to send, so every outlet (${routed.length} the preset holds) stays empty` : `${filled} of ${sections.length} section(s) filled, ${routed.filter((s) => s.filled).length} of them at the preset's outlets`;
     const fix = status === "failed" ? suggestFix("outlet") : undefined;
-    this.add(at, { kind: "interceptor", level: status === "failed" ? "warn" : "info", turn: at.turn, phase: "sections", step: "interceptor", status, start, end, ms: end - start, path, sections: [...sections], reason, ...(fix ? { fix } : {}) });
+    this.add(at, { kind: "sections", level: status === "failed" ? "warn" : "info", turn: at.turn, phase: "sections", step: "sections", status, start, end, ms: end - start, path, sections: [...sections], reason, ...(fix ? { fix } : {}) });
+  }
+
+  /**
+   * The first failure of a turn so far (the engine run halts on it, DESIGN §5.1): a model call that
+   * failed, was cut off or came back empty, or a step that failed. A Decision call the helper answered
+   * after is the helper's, and lore lookups don't count: a step answers without them.
+   */
+  failure(at: DiagAt): { step: string; reason: string } | null {
+    for (const r of this.chats.get(at.chatId)?.records ?? []) {
+      if (r.turn !== at.turn) continue;
+      const calls = r.calls ?? [];
+      for (const [i, c] of calls.entries()) {
+        const failed = c.lookup ? null : callFailure([c]);
+        if (!failed || (c.via === "decision" && calls.slice(i + 1).some((d) => d.purpose === c.purpose && d.via === "helper" && !callFailure([d])))) continue;
+        return { step: c.purpose, reason: failed.reason };
+      }
+      if (r.status === "failed") return { step: r.step, reason: r.reason ?? "it failed" };
+    }
+    return null;
+  }
+
+  /** The turn under `from` goes on as `to` (a prepared turn a generation took): its records and its activity line. */
+  rename(chatId: ChatId, from: string, to: string): void {
+    for (const r of this.chats.get(chatId)?.records ?? []) if (r.turn === from) r.turn = to;
+    const turn = this.turns.get(chatId);
+    if (turn?.at.turn === from) turn.at = { ...turn.at, turn: to };
+    for (const stack of this.open.values()) for (const s of stack) if (s.at.chatId === chatId && s.at.turn === from) s.at = { ...s.at, turn: to };
+    const activity = this.activities.get(chatId);
+    if (activity?.turn === from) this.activities.set(chatId, { ...activity, turn: to });
   }
 
   /** A request that took `ms`: kept when it is slower than `SLOW_MS`. */

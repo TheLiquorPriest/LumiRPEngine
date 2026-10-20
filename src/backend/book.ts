@@ -1,10 +1,11 @@
-// The engine-managed lore book per world (DESIGN §4.2, D11): "LumiRPEngine · <World>", one slot
-// entry per section, stored `disabled:true, key:[]` so nothing activates natively; only the
-// interceptor enables them, with content rendered from the fold (DESIGN §6.3) and chat-depth
-// placement (§6.4). Each entry sits where its section's Position puts it, and follows the Position
-// when it changes. The book is attached to world chats through `chat_world_book_ids`. It holds
-// slots only: world lore stays in the world document, and copies an earlier build synced into the
-// book are removed.
+// The engine-managed lore book per world (DESIGN §4.2, §6.8, D11): "LumiRPEngine · <World>", one
+// slot entry per section and an outlet twin per section, stored blank, `disabled:true, key:[]`, so
+// nothing activates natively. The engine run fills the entries a turn needs and switches them on as
+// constant entries just before the reply's generation, and empties and switches them off again once
+// it ends (DESIGN §5.1). Each slot entry sits where its section's Position puts it for the chat's
+// revision, and follows the Position when it changes. The book is attached to world chats through
+// `chat_world_book_ids`. It holds slots only: world lore stays in the world document, and copies an
+// earlier build synced into the book are removed.
 
 import type { ChatId, SlotId, UserId } from "../shared/ids";
 import type { JsonObject } from "../shared/json";
@@ -13,7 +14,7 @@ import { LEDGER_NAMESPACE } from "../shared/ledger";
 import { neutralizeMacros } from "../shared/macros";
 import type { SectionTemplate, SlotPosition, WorldDoc, WorldIndex } from "../shared/world";
 import { MINDS_SECTION_TEMPLATE, MINDS_SLOT } from "../shared/minds";
-import type { HostBookEntry, HostEntryPlacement, HostPort, PlacementOverride } from "./host";
+import type { HostBookEntry, HostEntryPlacement, HostPort } from "./host";
 import { NARRATOR_OUTLET, outletOf } from "./preset-binding";
 import type { WorldStore } from "./worlds";
 
@@ -41,17 +42,11 @@ export function sectionsOf(world: WorldDoc): SectionTemplate[] {
   return list.sort((a, b) => a.rank - b.rank);
 }
 
-/** The host placement for a section, or null to keep native placement (outlets, native). */
-export function placementOf(section: SectionTemplate): PlacementOverride | null {
-  const p = section.position;
-  return p.type === "chat_depth" ? { type: "chat_depth", role: p.role, depth: p.depth, direction: p.direction } : null;
-}
-
 /**
- * Where a section's entry is stored for its Position: at its chat depth (the interceptor's placement
- * repeats it each turn, with its direction); only at its outlet (host position 8, outlet-only, so the
- * section lands at `{{outlet::name}}` and nowhere else); or before the character, where a native entry
- * starts and the host's World Info editor may move it.
+ * Where a section's entry is stored for its Position: at its chat depth, counted from the end of the
+ * chat; only at its outlet (host position 8, outlet-only, so the section lands at `{{outlet::name}}`
+ * and nowhere else); or before the character, where a native entry starts and the host's World Info
+ * editor may move it.
  */
 export function entryPlacement(position: SlotPosition): HostEntryPlacement {
   if (position.type === "chat_depth") return { position: 4, depth: position.depth, role: position.role, outlet: null };
@@ -107,6 +102,8 @@ function sortEntries(all: readonly HostBookEntry[]): { found: BookEntries; slots
 export class EngineBook {
   /** The engine's entries by book. */
   private readonly known = new Map<string, BookEntries>();
+  /** The engine entries switched on in each book (one turn's, DESIGN §5.1); read from the book the first time, so a turn a restart cut short leaves none on. */
+  private readonly on = new Map<string, Set<string>>();
 
   constructor(
     private readonly host: HostPort,
@@ -127,7 +124,12 @@ export class EngineBook {
       await this.worlds.setLoreBook(world.id, bookId, userId);
     }
     // Read the book afresh: an entry deleted in the host's UI is recreated.
-    const { found, slots, leftoverLore } = sortEntries(await this.host.books.entries(bookId, userId));
+    const all = await this.host.books.entries(bookId, userId);
+    const { found, slots, leftoverLore } = sortEntries(all);
+    if (!this.on.has(bookId)) {
+      const engine = new Set([...found.slots.values(), ...found.twins.values(), found.narrator, found.narratorOutlet]);
+      this.on.set(bookId, new Set(all.filter((e) => engine.has(e.id) && (!e.disabled || e.content !== "")).map((e) => e.id)));
+    }
     const blank = { content: "", keys: [] as string[], disabled: true, constant: false };
     for (const section of sectionsOf(world)) {
       const p = section.position;
@@ -163,6 +165,35 @@ export class EngineBook {
   /** Each section's own entry, by slot. */
   async slotEntries(bookId: string, userId: UserId): Promise<Map<SlotId, string>> {
     return (await this.entriesOf(bookId, userId)).slots;
+  }
+
+  /**
+   * A turn's entries filled and switched on as constant entries, and every other engine entry that is
+   * on switched off (DESIGN §5.1): the book holds one turn's sections at a time. Throws when any write
+   * failed; what may be on stays known, so the next write or clear switches it off.
+   */
+  async write(bookId: string, fills: ReadonlyMap<string, string>, userId: UserId): Promise<void> {
+    const on = this.on.get(bookId) ?? new Set<string>();
+    this.on.set(bookId, on);
+    const off = [...on].filter((id) => !fills.has(id));
+    for (const id of fills.keys()) on.add(id);
+    const results = await Promise.allSettled([...[...fills].map(([id, content]) => this.host.books.fill(id, content, userId)), ...off.map((id) => this.host.books.fill(id, null, userId))]);
+    off.forEach((id, i) => {
+      if (results[fills.size + i]?.status === "fulfilled") on.delete(id);
+    });
+    const failed = results.find((r) => r.status === "rejected");
+    if (failed?.status === "rejected") throw failed.reason;
+  }
+
+  /** Empties and switches off entries a turn's write switched on. Throws when any write failed. */
+  async clear(bookId: string, entries: readonly string[], userId: UserId): Promise<void> {
+    const on = this.on.get(bookId);
+    const results = await Promise.allSettled(entries.map((id) => this.host.books.fill(id, null, userId)));
+    entries.forEach((id, i) => {
+      if (results[i]?.status === "fulfilled") on?.delete(id);
+    });
+    const failed = results.find((r) => r.status === "rejected");
+    if (failed?.status === "rejected") throw failed.reason;
   }
 
   /** Appends the book to the chat's `chat_world_book_ids` (read-merge-write). */

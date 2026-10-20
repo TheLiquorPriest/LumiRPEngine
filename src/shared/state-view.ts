@@ -118,6 +118,8 @@ export type ChipKind =
   | "contradiction"
   /** The call that reads typed text failed, so the turn ran as plain roleplay; Retry runs it again (DESIGN §9.4). */
   | "read_failed"
+  /** The engine run before the reply failed, so nothing was generated; Retry runs the engine and then the reply (DESIGN §5.1). */
+  | "engine_failed"
   /** A ✎ fix or GM edit on the head ("Corrected …"), with Undo (DESIGN §12). */
   | "fix"
   /** A write held during a reply that no longer applied when the reply finished (P2), with Dismiss. */

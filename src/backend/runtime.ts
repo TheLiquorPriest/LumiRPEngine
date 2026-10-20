@@ -1,9 +1,9 @@
 // The backend composition root (ARCHITECTURE §2): builds the registry from the packs, wires the
-// ledger to the host, and implements the turn hooks (interpret before planning, extract before
-// the commit, chips after it), the World Info interceptor (engine slots) and the state push.
+// ledger to the host, and implements the turn hooks (the engine run's steps and the sections it writes
+// into the world's book before the reply, extract before the commit, chips after it) and the state push.
 
 import { hashParts } from "../shared/hash";
-import type { ChatId, ChipId, InterruptClass, MessageId, RevisionId, UserId } from "../shared/ids";
+import type { ChatId, ChipId, InterruptClass, MessageId, RevisionId, UserId, WorldId } from "../shared/ids";
 import type { JsonObject, JsonValue } from "../shared/json";
 import { heldBy } from "../shared/finance";
 import { hasOwn, isRecord } from "../shared/json";
@@ -16,7 +16,7 @@ import { EXTRACTION_TYPES, helperCallOf, stepLoreOf } from "../shared/settings";
 import type { ChipAction, ContextGeneration, ContextView, LoreStepTrace, StateView } from "../shared/state-view";
 import type { ActionDef, AdjudicationDef, SectionTemplate, StepPurpose, WorldDoc } from "../shared/world";
 import { formatMoney, offersAction } from "../shared/world";
-import { limitOf, MINDS_SLOT, worldMindsOf, type MindCallTrace } from "../shared/minds";
+import { MINDS_SLOT, worldMindsOf, type MindCallTrace } from "../shared/minds";
 import { firedTimeout, TimeoutFired, TIMEOUTS } from "../shared/timeouts";
 import { mindsOn, postMinds, preMinds, runMinds, type MindsDeps } from "./minds";
 import { runSkip, type BeatMinds, type SkipRun } from "./skip";
@@ -53,11 +53,11 @@ import { openPuzzle, openPuzzles } from "../packs/story/core/index";
 import { REGARD_CHANNEL_CAP } from "../packs/relationships/core/index";
 import { Working } from "../engine/working";
 import type { PresetCard, TemplateInfo } from "../shared/protocol";
-import { type BookEntries, DEFAULT_SECTIONS, EngineBook, loreOfEntry, placementOf, renderSection, sectionsOf, sectionTokens } from "./book";
+import { DEFAULT_SECTIONS, EngineBook, renderSection, sectionsOf, sectionTokens } from "./book";
 import { ChatPrefs } from "./chat-prefs";
 import { ChipStore, idAfterSwipeDelete, type StoredChip } from "./chips";
-import type { DryRun, HostPort, InterceptorInput, InterceptorResult } from "./host";
-import { LedgerService, toChain, type TurnContext, type TurnHooks } from "./ledger-io";
+import type { DryRun, HostPort } from "./host";
+import { LedgerService, toChain, type Delivered, type TurnContext, type TurnHooks } from "./ledger-io";
 import { MessageCache } from "./message-cache";
 import { StatePush } from "./push";
 import { effectiveMode, recordOutcome, SettingsStore } from "./settings-store";
@@ -77,7 +77,7 @@ import { buildView, clockMinutes, compactSpan, notWorldView, recentLines, spanTe
 import { StudioBridge } from "./studio";
 import { WorldStore } from "./worlds";
 import { Diagnostics, type DiagAt } from "./diagnostics";
-import { STEP_LABEL, type DiagPhase } from "../shared/diagnostics";
+import { CANNOT_STOP, STEP_LABEL, type DiagPhase } from "../shared/diagnostics";
 
 export interface RuntimeOptions {
   host: HostPort;
@@ -113,9 +113,6 @@ interface LorePhase {
 
 /** Chips a read stores for its swipe; a read that replaces it (Re-read edit, Retry read) drops them. */
 const READ_CHIP_KINDS: ReadonlySet<string> = new Set(["undo", "confirm", "decline", "choice", "contradiction"]);
-
-/** Slots only a real turn's plan fills (DESIGN §5.1 Dry Run plans nothing), so a dry run can't confirm them. */
-const TURN_ONLY_SLOTS: Readonly<Record<string, true>> = { outcome: true, montage: true, outline: true };
 
 /**
  * The most a host token count may be, as a multiple of the section's padded estimate (which stays at
@@ -474,6 +471,14 @@ function lruSet<K, V>(map: Map<K, V>, key: K, value: V, cap: number): void {
   trimMap(map, cap);
 }
 
+/** Moves `from`'s value to `to` (a prepared turn's records, once its generation takes it). */
+function rekey<V>(map: Map<string, V>, from: string, to: string): void {
+  const value = map.get(from);
+  if (value === undefined) return;
+  map.delete(from);
+  map.set(to, value);
+}
+
 function signalWithin(signal: AbortSignal, ms: number): AbortSignal {
   return ms > 0 ? AbortSignal.any([signal, AbortSignal.timeout(ms)]) : signal;
 }
@@ -521,7 +526,7 @@ export class Runtime implements TurnHooks {
    * Host tokenizer counts of rendered section texts, by user and text hash: the host counts with each
    * user's own main model, so one user's count never prices another's section. A section costs its
    * count once the host has counted that exact text for that user; until then the estimate (with
-   * margin) stands in and the count is fetched in the background, so the interceptor never waits on
+   * margin) stands in and the count is fetched in the background, so the engine run never waits on
    * the host. A count that isn't a finite number from 0 to `TOKEN_COUNT_CAP` times the estimate is
    * ignored, so a bogus count can't clip every section.
    */
@@ -534,12 +539,8 @@ export class Runtime implements TurnHooks {
   private readonly presetWarnings = new Map<ChatId, string[]>();
   /** Settings → Caveats' preset lint by `user \0 chat \0 preset \0 preset revision \0 settings revision`: done, or its dry run still running. */
   private readonly caveatRuns = new Map<string, Promise<PresetCaveat[]>>();
-  /** Delivery checks running after their request's reply (`checkDeliveryLater`). */
-  private readonly deliveryChecks = new Set<Promise<void>>();
-  /** The sections each chat's last interceptor run sent to the preset's outlets, with the preset revision it read (`preset \0 revision`). */
-  private readonly routedLast = new Map<ChatId, { preset: string; slots: Set<string> }>();
-  /** Per chat, a preset revision whose outlets a delivery check didn't find some routed sections at, and those sections: the world places them again (DESIGN §6.8). */
-  private readonly outletMisses = new Map<ChatId, { preset: string; slots: Set<string> }>();
+  /** Preset checks running after their request's reply (`checkPresetLater`). */
+  private readonly presetChecks = new Set<Promise<void>>();
   /** Each open chat's pinned world revisions, by `user \0 chat`. */
   private readonly pins = new Map<string, Map<RevisionId, WorldDoc>>();
   /** The pre-phase call budget per generation, shared by `beforePlan` and `afterPlan`. */
@@ -566,8 +567,8 @@ export class Runtime implements TurnHooks {
     this.templates = options.templates ?? {};
     this.templateInfo = options.templateInfo ?? [];
     this.worlds = new WorldStore(this.host, this.registry);
-    // The context handler waits as long as the users' engine runs need.
-    this.settings = new SettingsStore(this.host, (userId, settings) => this.ledger.preReplyBudget(userId, limitOf(settings.timeouts.engineRunMs)));
+    // The guard asks Lumiverse to wait as long as the users' guard timeouts say.
+    this.settings = new SettingsStore(this.host, (userId, settings) => this.ledger.guardBudget(userId, settings.timeouts.guardMs));
     this.chips = new ChipStore(this.host);
     this.planNotes = new PlanNotes(this.host);
     this.outcomeNotes = new OutcomeNotes(this.host);
@@ -600,21 +601,6 @@ export class Runtime implements TurnHooks {
     this.ledger.hooks = this;
     this.ledger.diag = this.diag;
     this.ledger.attach();
-    // Diagnostics see the interceptor at work, a world chat it filled nothing for, and what it threw.
-    this.host.registerInterceptor(async (input) => {
-      const at = { chatId: input.chatId, userId: input.userId, turn: null };
-      this.diag.rest(at, STEP_LABEL.sections ?? "Filling the prompt…");
-      try {
-        const result = await this.intercept(input);
-        if (!result && this.runs.get(`${input.userId}\u0000${input.chatId}`)) this.diag.failed(at, "sections", "interceptor", "the chat's world revision isn't loaded, so no section reached the prompt (every outlet is empty)");
-        return result;
-      } catch (error) {
-        this.diag.error(at, "interceptor", error, "no section reached the prompt");
-        throw error;
-      } finally {
-        this.diag.rest(at, STEP_LABEL.reply ?? "Waiting for the reply…");
-      }
-    }, 50);
     this.host.on("MESSAGE_SENT", (e, userId) => {
       if (e.message.isUser && userId) void this.lapse(e.chatId, userId);
     });
@@ -731,15 +717,14 @@ export class Runtime implements TurnHooks {
    * `puzzle.answer` when an answer needs judging, and `judge` when the adjudication policy weighs the
    * player's words or leaves the check to the story. One call budget covers this and `afterPlan`.
    */
-  async beforePlan(input: { chatId: ChatId; userId: UserId; core: LedgerCore; observed: ChainMessage[]; generationId: string | null; dryRun: boolean; connectionId: string | null; signal: AbortSignal }): Promise<void> {
-    await this.keepBookAttached(input.chatId, input.userId);
+  async beforePlan(input: { chatId: ChatId; userId: UserId; core: LedgerCore; observed: ChainMessage[]; generationId: string; connectionId: string | null; signal: AbortSignal }): Promise<void> {
     const bridge = this.bridges.get(input.chatId);
-    const p = input.generationId ? input.core.journal.pending[input.generationId] : null;
+    const p = input.core.journal.pending[input.generationId];
     // A Re-narrate copies its source's plan (P3): no resolve, simulate or model calls before it.
-    if (!bridge || input.dryRun || !p || p.kind === "continue" || p.kind === "impersonate" || (p.kind === "renarrate" && p.renarrateOf)) return;
+    if (!bridge || !p || p.kind === "continue" || p.kind === "impersonate" || (p.kind === "renarrate" && p.renarrateOf)) return;
     const settings = await this.settings.get(input.userId);
     lruSet(this.settingsCache, input.userId, settings, 256);
-    // The preset this generation assembles with, read once for its phases and its interceptor run.
+    // The preset the reply assembles with, read once for the engine run's phases and its sections.
     const preset = await this.presets.current(input.chatId, input.userId, input.connectionId);
     const target = p.messageId ? input.observed.findIndex((m) => m.id === p.messageId) : input.observed.length;
     const before = input.observed.slice(0, target < 0 ? input.observed.length : target);
@@ -815,12 +800,24 @@ export class Runtime implements TurnHooks {
   }
 
   /**
-   * The plan phase (DESIGN §5.2, §5.3): with the plan made, `brief` and the prose `outline` (stacked
-   * on the engine's beats) run side by side on the pre budget, except that an outline template
-   * naming `{{brief}}` waits for the brief; their text goes to the Outline slot. They see only
-   * player-visible facts (secrecy batching rule).
+   * The plan phase (DESIGN §5.2, §5.3), then what ran out of the engine run's time: the pre budget's
+   * limit and its lookups' window, in the turn's diagnostics, where a fired limit stops the run.
    */
   async afterPlan(input: { chatId: ChatId; userId: UserId; core: LedgerCore; observed: ChainMessage[]; generationId: string; signal: AbortSignal }): Promise<void> {
+    try {
+      await this.prose(input);
+    } finally {
+      const budget = this.preBudgets.get(input.generationId);
+      if (budget) this.timeLimits({ chatId: input.chatId, userId: input.userId, turn: input.generationId }, "pre", budget);
+    }
+  }
+
+  /**
+   * `brief` and the prose `outline` (stacked on the engine's beats) run side by side on the pre
+   * budget, except that an outline template naming `{{brief}}` waits for the brief; their text goes
+   * to the Outline slot. They see only player-visible facts (secrecy batching rule).
+   */
+  private async prose(input: { chatId: ChatId; userId: UserId; core: LedgerCore; observed: ChainMessage[]; generationId: string; signal: AbortSignal }): Promise<void> {
     const bridge = this.bridges.get(input.chatId);
     const p = input.core.journal.pending[input.generationId];
     const pre = this.prePhase.get(input.generationId);
@@ -1257,13 +1254,9 @@ export class Runtime implements TurnHooks {
 
   /**
    * The world's book must stay in the chat's `chat_world_book_ids` (DESIGN §4.2): attaching another
-   * chat book from the host's UI replaces the list, which would silently drop every engine slot.
+   * chat book from the host's UI replaces the list, which would silently drop every engine section.
    */
-  private async keepBookAttached(chatId: ChatId, userId: UserId): Promise<void> {
-    const run = await this.runOf(chatId, userId);
-    if (!run) return;
-    const bookId = (await this.worlds.index(run.worldId, userId))?.loreBookId;
-    if (!bookId) return;
+  private async keepBookAttached(chatId: ChatId, bookId: string, userId: UserId): Promise<void> {
     const meta = await this.host.chats.chatMetadata(chatId, userId);
     const ids = Array.isArray(meta.chat_world_book_ids) ? meta.chat_world_book_ids : [];
     if (ids.includes(bookId)) return;
@@ -1745,76 +1738,70 @@ export class Runtime implements TurnHooks {
     ]);
   }
 
-  // ---------------------------------------------------------------- the World Info interceptor
+  // ---------------------------------------------------------------- the sections in the book (DESIGN §5.1, §6.4)
 
-  async intercept(input: InterceptorInput): Promise<InterceptorResult | null> {
+  /** The chat's world, from its metadata: the guard's check (DESIGN §5.1). */
+  async worldOf(chatId: ChatId, userId: UserId): Promise<WorldId | null> {
+    return (await this.runOf(chatId, userId))?.worldId ?? null;
+  }
+
+  /**
+   * The engine run's last step (DESIGN §5.1, §6.4): the prepared turn's sections, rendered from its
+   * plan and the fold on the section budget, written into the world's book. Each goes into its
+   * section's entry, or the preset outlet's twin, switched on as a constant entry, and every other
+   * engine entry goes off: the reply's prompt holds them where each section's Position, or the
+   * preset's outlet, puts them. The book is made, repaired, placed for the chat's revision and
+   * attached first; the turn's inspector record is kept.
+   */
+  async deliver(input: { chatId: ChatId; userId: UserId; core: LedgerCore; observed: ChainMessage[]; generationId: string }): Promise<Delivered> {
     const started = Date.now();
     const run = await this.runOf(input.chatId, input.userId);
-    if (!run) return null;
+    if (!run) throw new Error("the chat has no world attached");
     lruSet(this.lastWorldChat, input.userId, input.chatId, 1024);
-    const core = await this.ledger.core(input.chatId, input.userId);
-    if (!core) return null;
-    const observed = toChain(await this.host.chats.messages(input.chatId, input.userId));
-    const render = core.renderState(observed);
-    if (!render) return null;
+    const render = input.core.renderState(input.observed);
+    if (!render) throw new Error("the chat's world revision isn't loaded");
     const { world, state } = render;
     const index = await this.worlds.index(run.worldId, input.userId);
+    if (!index) throw new Error("the chat's world is gone");
+    // A slot entry deleted in the host's UI is made again, and each sits where this chat's revision puts it.
+    const bookId = await this.book.ensure(world, index, input.userId);
+    await this.keepBookAttached(input.chatId, bookId, input.userId);
+    const entries = await this.book.entriesOf(bookId, input.userId);
     const settings = await this.settings.get(input.userId);
-    const result: InterceptorResult = { disabled: [], enabled: [], forced: [], mutated: [] };
-    const bookId = index?.loreBookId ?? null;
-    const entries: BookEntries = bookId ? await this.book.entriesOf(bookId, input.userId) : { slots: new Map(), twins: new Map(), atOutlet: new Set(), narrator: null, narratorOutlet: null };
-    const slotIds = entries.slots;
-    const present = new Set(input.entries.filter((e) => e.bookId === bookId).map((e) => e.id));
     const secrets = unrevealedSecrets(this.registry, world, state);
-    const plan = Object.values(core.journal.pending).filter((p) => p.planned).at(-1);
+    const pending = input.core.journal.pending[input.generationId];
+    const plan = pending?.planned ? pending : undefined;
     const turnPlan = plan ? this.bridges.get(input.chatId)?.planFor(plan.seed) : undefined;
     const prose = turnPlan && plan ? this.bridges.get(input.chatId)?.proseFor(plan.seed) : undefined;
-    // What the active preset says this generation: the one its pre phase read, else read now (a dry run).
-    const preset = (plan ? this.prePhase.get(plan.generationId)?.preset : undefined) ?? (await this.presets.current(input.chatId, input.userId));
-    const presetKey = preset.preset ? `${preset.preset.id}\u0000${preset.preset.revision}` : "";
-    const misses = this.outletMisses.get(input.chatId);
-    const routedSlots = new Set<string>();
-    // A plan the bridge no longer holds (a restart, or 64 newer plans) comes back from storage.
+    // The preset the reply assembles with: the one the pre phase read, else read now (a Continue).
+    const preset = this.prePhase.get(input.generationId)?.preset ?? (await this.presets.current(input.chatId, input.userId));
+    // A plan the bridge no longer holds (a Re-narrate of a turn from before a restart) comes back from storage.
     const kept = plan && !turnPlan ? await this.planNotes.get(input.chatId, input.userId, plan.seed) : null;
     const outline = turnPlan ? planOutline(turnPlan, prose) : (kept?.outline ?? []);
     const planned = turnPlan ? planLines(turnPlan, world, this.registry) : kept ? { outcome: kept.outcome, montage: kept.montage } : { outcome: [], montage: [] };
     // Declines from the last reply (DESIGN §9.5), for the next turn and its swipes only.
-    for (const n of await this.outcomeNotes.list(input.chatId, input.userId)) if (n.messageId !== plan?.messageId && (n.toldTo === undefined || n.toldTo === plan?.messageId)) planned.outcome.unshift(n.text);
-    const record: InspectorRecord = { id: plan?.generationId ?? `dry:${Date.now().toString(36)}`, at: Date.now(), activation: "unconfirmed", sections: [], budget: { sections: settings.modelUse.tokens.sections, used: 0 }, forced: [] };
-    const traces = plan ? this.loreTraces.get(plan.generationId) : undefined;
+    const target = pending?.messageId ?? null;
+    for (const n of await this.outcomeNotes.list(input.chatId, input.userId)) if (n.messageId !== target && (n.toldTo === undefined || n.toldTo === target)) planned.outcome.unshift(n.text);
+    const record: InspectorRecord = { id: input.generationId, at: Date.now(), activation: "unconfirmed", sections: [], budget: { sections: settings.modelUse.tokens.sections, used: 0 }, forced: [], entries: {} };
+    const traces = this.loreTraces.get(input.generationId);
     if (traces) record.lore = structuredClone(traces);
-    const minded = plan ? this.mindTraces.get(plan.generationId) : undefined;
+    const minded = this.mindTraces.get(input.generationId);
     if (minded) record.minds = structuredClone(minded);
-    if (bookId && present.size === 0) record.warnings = ["The world's book wasn't attached to this chat, so no engine sections reached the narrator. It is re-attached for the next turn."];
-    else if (bookId && index) {
-      // A slot entry deleted in the host's UI (or a stale cache) is recreated for the next turn, and
-      // world lore an earlier build synced into the book is removed; the hook itself reads nothing.
-      const missing = sectionsOf(world).some((s) => !present.has(slotIds.get(s.id) ?? ""));
-      if (missing) record.warnings = ["Some engine slot entries were missing from the world's book; they are recreated for the next turn."];
-      // A book an earlier build made has no outlet twins or narrator entries yet: they are added quietly.
-      const unrouted = sectionsOf(world).some((s) => !present.has(entries.twins.get(s.id) ?? "")) || !present.has(entries.narrator ?? "") || !present.has(entries.narratorOutlet ?? "");
-      if (missing || unrouted || input.entries.some((e) => e.bookId === bookId && loreOfEntry(e.extensions) !== null)) void this.book.ensure(world, index, input.userId).catch((error: unknown) => this.host.log("warn", `[LumiRPEngine] book repair failed: ${error instanceof Error ? error.message : String(error)}`, input.userId));
-    }
     // Slots in rank order on the section budget; Outcome (rank 0) is never clipped (DESIGN §6.2).
     // The Minds section has its own budget and never spends the shared one (DESIGN §24.3).
     let budget = settings.modelUse.tokens.sections;
     const mindsBudget = settings.minds.tokens;
     const fullMinds = worldMindsOf(world).secrecy === "full";
-    const { delivery } = await this.inspector.load(input.chatId, input.userId);
     const uncounted: string[] = [];
+    // What goes into the book, in rank order: each entry and its text.
+    const fills: { id: string; content: string }[] = [];
     // Sections with hint lines (Stance's cues, §6.6), which ride once every section has its place.
-    const hinted: { entry: { content?: string }; label: string; template: string; lines: string[]; hints: string[]; cost: number }[] = [];
-    // The entry a section fills, and whether the preset's outlet places it.
-    const entryOf = (section: SectionTemplate): { id: string; routed: boolean } | null => {
-      // The preset places the section itself when an enabled block holds `{{outlet::lre_<slot>}}`
-      // (DESIGN §6.8): its outlet twin is filled instead, and the world's placement waits.
+    const hinted: { fill: { content: string }; label: string; template: string; lines: string[]; hints: string[]; cost: number }[] = [];
+    // The entry a section fills: the preset places the section itself when an enabled block holds
+    // `{{outlet::lre_<slot>}}` (DESIGN §6.8), so its outlet twin is filled; else its own entry.
+    const entryOf = (section: SectionTemplate): string | null => {
       const twin = entries.twins.get(section.id);
-      const routed = twin !== undefined && present.has(twin) && preset.outlets.has(outletOf(section.id)) && !(misses?.preset === presetKey && misses.slots.has(section.id));
-      // A later revision may have moved the section's own entry to an outlet while this chat's revision
-      // places it in the chat: filled, that entry would land at both, so its twin takes the placement.
-      const astray = !routed && section.position.type === "chat_depth" && entries.atOutlet.has(section.id) && twin !== undefined && present.has(twin);
-      const id = routed || astray ? twin : slotIds.get(section.id);
-      return id && present.has(id) ? { id, routed } : null;
+      return twin !== undefined && preset.outlets.has(outletOf(section.id)) ? twin : (entries.slots.get(section.id) ?? null);
     };
     const sectionCost = (content: string): number => this.tokenCounts.get(hashParts("lre.tokens", input.userId, content)) ?? sectionTokens(content);
     // The sections all read the head's state, many times over: one read pass (DESIGN §9.6).
@@ -1826,14 +1813,13 @@ export class Runtime implements TurnHooks {
       const mindsSection = sectionsOf(world).find((s) => s.id === MINDS_SLOT);
       const read = this.registry.context(world, state);
       const allMinds = mindsSection && entryOf(mindsSection) ? mindLines(read).filter((l) => fullMinds || findLeaks(l.line, secrets).length === 0) : [];
-      const said = plan ? (this.prePhase.get(plan.generationId)?.text ?? "") : "";
+      const said = this.prePhase.get(input.generationId)?.text ?? "";
       const ladder = (optionalQuery(read, "minds.fidelity")?.(read, { user: said, reply: "" }) ?? []).map((s) => s.entity);
       const mindsFit = mindsSection ? fitMindLines(allMinds, ladder, mindsBudget, (kept) => sectionCost(renderSection(mindsSection.label, mindsSection.template, kept.map((l) => l.line)))) : [];
       const ctx = this.registry.context(world, state, { "minds.minded": () => mindsFit.map((l) => l.entity) });
       for (const section of sectionsOf(world)) {
-        const at = entryOf(section);
-        if (!at) continue;
-        const { id: entryId, routed } = at;
+        const entryId = entryOf(section);
+        if (!entryId) continue;
         const minds = section.id === MINDS_SLOT;
         const lines: string[] = minds ? mindsFit.map((l) => l.line) : [];
         const hints: string[] = [];
@@ -1867,29 +1853,22 @@ export class Runtime implements TurnHooks {
         if (counted === undefined) uncounted.push(content);
         const cost = counted ?? sectionTokens(content);
         const clipped = minds ? cost > mindsBudget : section.rank > 0 && cost > budget;
-        // A clipped section wasn't in the prompt, so an earlier delivery check says nothing about it.
-        record.sections.push({ slot: section.id, label: section.label, tokens: cost, clipped, ...(minds && mindsFit.length < allMinds.length ? { cut: allMinds.length - mindsFit.length } : {}), delivery: clipped ? "unchecked" : (delivery[section.id] ?? "unchecked") });
+        // Whether it reached the prompt is known once the reply's World Info activates (`onActivated`).
+        record.sections.push({ slot: section.id, label: section.label, tokens: cost, clipped, ...(minds && mindsFit.length < allMinds.length ? { cut: allMinds.length - mindsFit.length } : {}), delivery: "unchecked" });
         if (clipped) continue;
         if (!minds) budget -= cost;
-        if (routed) routedSlots.add(section.id);
-        const placement = routed ? null : placementOf(section);
-        result.enabled.push(entryId);
-        result.forced.push(entryId);
-        const entry = { id: entryId, content, ...(placement ? { placement } : {}) };
-        result.mutated.push(entry);
+        const fill = { id: entryId, content };
+        fills.push(fill);
+        (record.entries ??= {})[section.id] = entryId;
         const safeHints = hints.filter((l) => findLeaks(l, secrets).length === 0);
-        if (safeHints.length > 0) hinted.push({ entry, label: section.label, template: section.template, lines: safe, hints: safeHints, cost });
+        if (safeHints.length > 0) hinted.push({ fill, label: section.label, template: section.template, lines: safe, hints: safeHints, cost });
       }
     });
     // The preset's narrator rules, for world chats only: at its `{{outlet::lre_narrator}}`, else
     // before the character. They are the preset's own text, apart from the section budget.
     const rules = preset.guidance.narrator;
-    const rulesAt = entries.narratorOutlet !== null && present.has(entries.narratorOutlet) && preset.outlets.has(NARRATOR_OUTLET) ? entries.narratorOutlet : entries.narrator;
-    if (rules && rulesAt && present.has(rulesAt)) {
-      result.enabled.push(rulesAt);
-      result.forced.push(rulesAt);
-      result.mutated.push({ id: rulesAt, content: `[Narrator rules]\n${rules}` });
-    }
+    const rulesAt = entries.narratorOutlet !== null && preset.outlets.has(NARRATOR_OUTLET) ? entries.narratorOutlet : entries.narrator;
+    if (rules && rulesAt) fills.push({ id: rulesAt, content: `[Narrator rules]\n${rules}` });
     record.budget.used = settings.modelUse.tokens.sections - budget;
     // Hints follow what the POV doesn't know (a hidden flag, a lore gate), so they ride last, in what
     // the budget has left, and the inspector counts none of them: no clip, size or total the player
@@ -1901,83 +1880,90 @@ export class Runtime implements TurnHooks {
       const extra = Math.max(0, (counted ?? sectionTokens(content)) - h.cost);
       if (extra > budget) continue;
       budget -= extra;
-      h.entry.content = content;
+      h.fill.content = content;
     }
     this.countLater(input.userId, uncounted);
-    // Every engine-book entry the engine didn't fill this turn is voted off, so one re-enabled in the
-    // host's UI (an unused slot, a lore entry an earlier build left) can't activate natively. Other
-    // books' entries are left to native World Info: no vote, no force, no recursion override.
-    const picked = new Set([...result.enabled, ...result.forced]);
-    for (const e of input.entries) if (e.bookId === bookId && !picked.has(e.id)) result.disabled.push(e.id);
-    record.forced = [...result.forced];
-    lruSet(this.routedLast, input.chatId, { preset: presetKey, slots: routedSlots }, 256);
-    // Only real turns enter the history; a dry run (inspector check, preview) records nothing.
-    if (plan) {
-      await this.inspector.add(input.chatId, input.userId, record);
-      this.push.changed(input.chatId, input.userId);
-      // Diagnostics: each section, the outlet the preset gives it, and whether it went out with text.
-      const sent = new Set(record.sections.filter((s) => !s.clipped).map((s) => s.slot));
-      const at = { chatId: input.chatId, userId: input.userId, turn: plan.generationId };
-      this.diag.interceptor(at, `${plan.kind} turn, ${preset.preset ? `preset ${preset.preset.id}` : "no preset"}`, sectionsOf(world).map((s) => ({ slot: s.id, outlet: preset.outlets.has(outletOf(s.id)) ? outletOf(s.id) : null, filled: sent.has(s.id) })), started);
-      for (const warning of record.warnings ?? []) this.diag.failed(at, "sections", "book", warning);
-    }
-    return result;
+    // Only the turn's entries are on in the book; the rest of the world's engine entries are off.
+    await this.book.write(bookId, new Map(fills.map((f) => [f.id, f.content])), input.userId);
+    record.forced = fills.map((f) => f.id);
+    await this.inspector.add(input.chatId, input.userId, record);
+    this.push.changed(input.chatId, input.userId);
+    // Diagnostics: each section, the outlet the preset gives it, and whether it went out with text.
+    const sent = new Set(record.sections.filter((s) => !s.clipped).map((s) => s.slot));
+    this.diag.sections({ chatId: input.chatId, userId: input.userId, turn: input.generationId }, `${pending?.kind ?? "continue"} turn, ${preset.preset ? `preset ${preset.preset.id}` : "no preset"}`, sectionsOf(world).map((s) => ({ slot: s.id, outlet: preset.outlets.has(outletOf(s.id)) ? outletOf(s.id) : null, filled: sent.has(s.id) })), started);
+    return { bookId, entries: record.forced };
   }
 
-  /** `WORLD_INFO_ACTIVATED`: confirms the latest interceptor record when every forced entry activated. */
+  /** After the reply that took them (DESIGN §5.1): the turn's entries emptied and off, so no later prompt holds them. */
+  async clear(_chatId: ChatId, userId: UserId, delivered: Delivered): Promise<void> {
+    await this.book.clear(delivered.bookId, delivered.entries, userId);
+  }
+
+  /** A generation took the prepared turn: what the engine run kept under the turn's id is the generation's now, and an earlier run's failure flag goes. */
+  async adopted(chatId: ChatId, userId: UserId, from: string, to: string): Promise<void> {
+    rekey(this.preBudgets, from, to);
+    rekey(this.prePhase, from, to);
+    rekey(this.loreTraces, from, to);
+    rekey(this.mindTraces, from, to);
+    const record = this.inspector.records(chatId)?.find((r) => r.id === from);
+    if (record) {
+      record.id = to;
+      this.inspector.save(chatId);
+    }
+    await this.chips.removeWhere(chatId, userId, (chip) => chip.kind === "engine_failed");
+  }
+
+  /**
+   * The engine run failed (DESIGN §5.1): nothing was generated. The chat's last message says which
+   * step failed and why, with a Retry that runs the engine again and then the reply.
+   */
+  async failed(input: { chatId: ChatId; userId: UserId; turn: string; step: string; reason: string }): Promise<void> {
+    const last = (await this.host.chats.messages(input.chatId, input.userId)).at(-1);
+    if (!last) return;
+    const step = (STEP_LABEL[input.step] ?? input.step).replace(/…$/, "");
+    await this.chips.add(input.chatId, input.userId, [{ id: `engine_failed:${input.turn}`, kind: "engine_failed", messageId: last.id, label: "The engine didn't finish, so nothing was generated", detail: `${step}: ${input.reason}`, actions: [{ id: "regenerate", label: "Retry", style: "primary" }], expires: "next_send", payload: {} }]);
+    this.push.changed(input.chatId, input.userId);
+  }
+
+  /**
+   * `WORLD_INFO_ACTIVATED` for the reply the guard let through (DESIGN §4.2): a section whose entry
+   * activated reached its prompt, one whose entry didn't did not (the host's World Info budget left it
+   * out, say); the record is confirmed when every entry the turn filled activated.
+   */
   private onActivated(chatId: ChatId, activated: readonly string[]): void {
+    const turn = this.ledger.preparedOf(chatId);
+    if (!turn?.generationId) return;
     const record = this.inspector.records(chatId)?.at(-1);
-    if (!record || record.activation !== "unconfirmed") return;
+    if (!record || (record.id !== turn.id && record.id !== turn.generationId) || record.activation === "confirmed") return;
     const ids = new Set(activated);
     record.activation = record.forced.every((id) => ids.has(id)) ? "confirmed" : "unconfirmed";
-    this.inspector.save(chatId);
-  }
-
-  /**
-   * Starts a delivery check once the request that asked for it has its reply: the check waits on a
-   * dry run of the whole prompt, which the host takes a while to assemble on a long chat, and its
-   * result reaches the frontend with the state push it ends with.
-   */
-  checkDeliveryLater(chatId: ChatId, userId: UserId): void {
-    const check: Promise<void> = this.checkDelivery(chatId, userId)
-      .catch((error: unknown) => this.host.log("warn", `[LumiRPEngine] delivery check ${chatId}: ${error instanceof Error ? error.message : String(error)}`, userId))
-      .finally(() => this.deliveryChecks.delete(check));
-    this.deliveryChecks.add(check);
-  }
-
-  /** Resolves once every delivery check started after a reply has finished (tests). */
-  async deliveryChecked(): Promise<void> {
-    while (this.deliveryChecks.size > 0) await Promise.all([...this.deliveryChecks]);
-  }
-
-  /**
-   * Deliverability (DESIGN §4.2): between generations, a dry-run assembly is
-   * searched for each slot's text; a slot whose text is found is `verified`, else `unverified`.
-   * Outcome, Montage and Outline hold only what a real turn planned, so a dry run (which plans
-   * nothing) never carries them: they stay `unchecked` rather than reading as not delivered.
-   */
-  async checkDelivery(chatId: ChatId, userId: UserId): Promise<void> {
-    const core = await this.ledger.core(chatId, userId);
-    if (!core || core.inFlight) return;
-    const assembly = await this.host.dryRun(chatId, userId);
-    const text = assembly.messages.map((m) => m.content).join("\n");
-    lruSet(this.presetWarnings, chatId, (await this.lintOf(chatId, assembly, userId)).map((c) => c.message), 256);
-    const log = await this.inspector.load(chatId, userId);
-    const last = log.records.at(-1);
-    const out: Record<string, "verified" | "unverified"> = {};
-    for (const s of last?.sections ?? []) if (!s.clipped && !hasOwn(TURN_ONLY_SLOTS, s.slot)) out[s.slot] = text.includes(`[${neutralizeMacros(s.label)}]`) ? "verified" : "unverified";
-    // A section the preset's outlet should have held but the test build didn't find goes back to the
-    // world's placement while that preset revision stands: the host left the outlet's block out (a
-    // profile's block states, an activation script), so the section would stay missing there.
-    const routed = this.routedLast.get(chatId);
-    const missed = routed ? [...routed.slots].filter((slot) => out[slot] === "unverified") : [];
-    if (routed && missed.length > 0) {
-      const earlier = this.outletMisses.get(chatId);
-      lruSet(this.outletMisses, chatId, { preset: routed.preset, slots: new Set([...(earlier?.preset === routed.preset ? earlier.slots : []), ...missed]) }, 256);
+    for (const s of record.sections) {
+      const entry = record.entries?.[s.slot];
+      if (!s.clipped && entry) s.delivery = ids.has(entry) ? "verified" : "unverified";
     }
-    log.delivery = out;
-    for (const s of last?.sections ?? []) s.delivery = s.clipped ? "unchecked" : (out[s.slot] ?? s.delivery);
     this.inspector.save(chatId);
+  }
+
+  /**
+   * Opening the Context panel runs the D32 preset lint on a dry run of the chat (DESIGN §13), for its
+   * warnings. The dry run assembles the whole prompt, which takes a while on a long chat, so it starts
+   * once the request has its reply, and the warnings reach the frontend with the push it ends with.
+   */
+  checkPresetLater(chatId: ChatId, userId: UserId): void {
+    const check: Promise<void> = this.checkPreset(chatId, userId)
+      .catch((error: unknown) => this.host.log("warn", `[LumiRPEngine] preset check ${chatId}: ${error instanceof Error ? error.message : String(error)}`, userId))
+      .finally(() => this.presetChecks.delete(check));
+    this.presetChecks.add(check);
+  }
+
+  /** Resolves once every preset check started after a reply has finished (tests). */
+  async presetChecked(): Promise<void> {
+    while (this.presetChecks.size > 0) await Promise.all([...this.presetChecks]);
+  }
+
+  private async checkPreset(chatId: ChatId, userId: UserId): Promise<void> {
+    const assembly = await this.host.dryRun(chatId, userId);
+    lruSet(this.presetWarnings, chatId, (await this.lintOf(chatId, assembly, userId)).map((c) => c.message), 256);
     this.push.changed(chatId, userId);
   }
 
@@ -2035,9 +2021,11 @@ export class Runtime implements TurnHooks {
    * and is run again on the next ask.
    */
   async presetCaveats(userId: UserId, waitMs = CAVEATS_WAIT_MS): Promise<PresetCaveat[]> {
+    // Before any preset: a Lumiverse that can't stop a generation for the engine run (DESIGN §5.1).
+    const host: PresetCaveat[] = this.host.capabilities.cancel ? [] : [{ code: "host_cannot_stop", message: CANNOT_STOP }];
     const open = await this.host.chats.active(userId).catch(() => null);
     const chatId = open && (await this.runOf(open, userId)) ? open : this.lastWorldChat.get(userId);
-    if (!chatId) return [];
+    if (!chatId) return host;
     const preset = (await this.presets.current(chatId, userId)).preset;
     const key = `${userId}\u0000${chatId}\u0000${preset?.id ?? ""}\u0000${preset?.revision ?? ""}\u0000${this.settings.revision(userId)}`;
     let run = this.caveatRuns.get(key);
@@ -2056,7 +2044,7 @@ export class Runtime implements TurnHooks {
     const pending = Promise.withResolvers<PresetCaveat[]>();
     const timer = setTimeout(() => pending.resolve([{ code: "preset_lint_pending", message: "The preset check is still building a test prompt for this chat, which takes a while on a long chat. Open Caveats again in a moment." }]), waitMs);
     try {
-      return await Promise.race([run, pending.promise]);
+      return [...host, ...(await Promise.race([run, pending.promise]))];
     } finally {
       clearTimeout(timer);
     }
@@ -2070,19 +2058,18 @@ export class Runtime implements TurnHooks {
     return preset ? presetCaveats(assembly, preset.name) : found;
   }
 
-  /** The interceptor records kept for a chat (newest last). */
+  /** The engine runs' section records kept for a chat (newest last). */
   inspectorRecords(chatId: ChatId): readonly InspectorRecord[] | undefined {
     return this.inspector.records(chatId);
   }
 
   /** The inspector panel (`core.context`, `ContextView`), from the chat's loaded history (`view` loads it). */
   inspectorView(chatId: ChatId, userId: UserId): JsonValue {
-    const warnings: string[] = [];
+    const warnings: string[] = this.host.capabilities.cancel ? [] : [CANNOT_STOP];
     const records = this.inspector.records(chatId) ?? [];
-    for (const r of records) for (const w of r.warnings ?? []) if (!warnings.includes(w)) warnings.push(w);
     for (const w of this.presetWarnings.get(chatId) ?? []) if (!warnings.includes(w)) warnings.push(w);
     for (const w of this.ledger.notices(chatId, userId)) if (!warnings.includes(w)) warnings.push(w);
-    const view: ContextView = { generations: records.map(({ forced: _forced, warnings: _w, ...r }) => r).reverse(), warnings };
+    const view: ContextView = { generations: records.map(({ forced: _forced, entries: _entries, ...r }) => r).reverse(), warnings };
     return JSON.parse(JSON.stringify(view)) as JsonValue;
   }
 

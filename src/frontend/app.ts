@@ -141,8 +141,8 @@ export interface HostBridge {
   connections(): Promise<{ id: string; name: string; model: string | null }[]>;
   download(fileName: string, text: string): void;
   activeChat(): ChatId | null;
-  /** Runs the host's Regenerate (`command:action-regenerate`, gated by `generation`); false when unavailable. */
-  regenerate(): Promise<boolean>;
+  /** Runs the host's Regenerate or Continue (`command:action-regenerate`, `action-continue`, gated by `generation`); false when unavailable. */
+  generate(as: "regenerate" | "continue"): Promise<boolean>;
   /** Scrolls a reply into view in the chat; false when it isn't mounted (scrolled out of a virtual list, another chat). */
   revealMessage(messageId: MessageId): boolean;
 }

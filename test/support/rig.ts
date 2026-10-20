@@ -41,7 +41,7 @@ export class Rig {
       await this.jobs.idle();
       await this.rt.ledger.idle();
       await this.rt.push.settle();
-      await this.rt.deliveryChecked();
+      await this.rt.presetChecked();
       await this.rt.inspector.settle();
       await this.rt.meter.settle();
       await this.rt.diag.settle();

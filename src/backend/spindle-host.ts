@@ -23,9 +23,7 @@ import type {
   HostGenerationType,
   HostMessage,
   HostPort,
-  InterceptorEntry,
-  InterceptorInput,
-  InterceptorResult,
+  HostCapabilities,
   HostRegexScript,
   QuietToolCall,
   SwipeAction,
@@ -67,6 +65,23 @@ const GENERATION_TYPES: Record<string, HostGenerationType> = { normal: "normal",
 
 function generationType(o: unknown): HostGenerationType {
   return GENERATION_TYPES[str(o, "generationType") ?? "normal"] ?? "normal";
+}
+
+/** A generation context's type; one the engine doesn't play (the host's `quiet`) is `other`. */
+function contextType(o: unknown): HostGenerationType | "other" {
+  const type = str(o, "generationType");
+  return type === undefined ? "normal" : (GENERATION_TYPES[type] ?? "other");
+}
+
+/**
+ * What this Lumiverse does with the guard's answer: `cancelGeneration` under the
+ * `preAssemblyGenerationContext` contract (worker-runtime.ts:4201-4203 on staging 7524546f), and
+ * `required` under the `required-context-handlers-v1` capability (worker-host.ts:1328).
+ */
+function hostCapabilities(): HostCapabilities {
+  const contracts: Readonly<Record<string, number>> = spindle.contracts ?? {};
+  const capabilities: Readonly<Record<string, number>> = spindle.host?.capabilities ?? {};
+  return { cancel: (contracts.preAssemblyGenerationContext ?? 0) >= 1, required: (capabilities["required-context-handlers-v1"] ?? 0) >= 1 };
 }
 
 /** A World Info entry as the port reads it. */
@@ -307,6 +322,9 @@ export function createSpindleHost(): HostPort {
       async active(userId) {
         return (await spindle.chats.getActive(userId))?.id ?? null;
       },
+      async setSwipes(chatId, messageId, swipes, swipeId) {
+        await spindle.chat.updateMessage(chatId, messageId, { swipes: [...swipes], swipe_id: swipeId });
+      },
       // The host lists the newest first by offset, so the list shifts while it is read: a chat
       // updated or made meanwhile moves to the front, and one deleted moves the rest up. The pages
       // overlap, so a few shifts between two reads skip nothing, and the front is read again until
@@ -355,49 +373,29 @@ export function createSpindleHost(): HostPort {
         if (decoded) handler(decoded, userId ?? null);
       });
     },
-    registerContextHandler(handler, timeoutMs) {
+    capabilities: hostCapabilities(),
+    registerContextHandler(handler, options) {
       spindle.registerContextHandler(
         async (context: unknown, signal?: AbortSignal) => {
           const chatId = str(context, "chatId");
           const userId = str(context, "userId");
-          if (chatId && userId) {
-            const input: ContextHandlerInput = {
-              chatId,
-              userId,
-              generationType: generationType(context),
-              dryRun: isRecord(context) && context.dryRun === true,
-              connectionId: str(context, "connectionId") ?? null,
-              personaId: str(context, "personaId") ?? null,
-            };
-            const session = str(context, "frontendSessionId");
-            if (session) input.frontendSessionId = session;
-            await handler(input, signal ?? new AbortController().signal);
-          }
-          return context;
+          if (!chatId || !userId) return context;
+          const input: ContextHandlerInput = {
+            chatId,
+            userId,
+            generationType: contextType(context),
+            dryRun: isRecord(context) && context.dryRun === true,
+            connectionId: str(context, "connectionId") ?? null,
+            personaId: str(context, "personaId") ?? null,
+          };
+          const session = str(context, "frontendSessionId");
+          if (session) input.frontendSessionId = session;
+          const verdict = await handler(input, signal ?? new AbortController().signal);
+          return verdict === "cancel" && isRecord(context) ? { ...context, cancelGeneration: true } : context;
         },
         100,
-        { timeoutMs },
+        { timeoutMs: options.timeoutMs, required: options.required },
       );
-    },
-    registerInterceptor(handler, priority) {
-      spindle.registerWorldInfoInterceptor(async (ctx) => {
-        const userId = ctx.userId;
-        if (!userId) return undefined;
-        const input: InterceptorInput = {
-          chatId: ctx.chatId,
-          userId,
-          entries: ctx.entries.map((e): InterceptorEntry => ({ id: e.id, bookId: e.world_book_id, extensions: toJsonObject(e.extensions) })),
-        };
-        const result: InterceptorResult | null = await handler(input);
-        if (!result) return undefined;
-        // Only the world's own book is voted on; no activation override, so recursion follows the user's settings.
-        return {
-          disabled: result.disabled,
-          enabled: result.enabled,
-          forced: result.forced,
-          mutated: result.mutated.map((m) => ({ id: m.id, ...(m.content !== undefined ? { content: m.content } : {}), ...(m.placement ? { placement: m.placement } : {}) })),
-        };
-      }, priority);
     },
     models: {
       async quiet(request, userId, signal) {
@@ -514,6 +512,10 @@ export function createSpindleHost(): HostPort {
       async place(entryId, placement, extensions, userId) {
         // The outlet goes beside the other fields: an update keeps the entry's old one otherwise.
         await spindle.world_books.entries.update(entryId, { position: placement.position, depth: placement.depth, role: placement.role, outlet_name: placement.outlet, extensions }, userId);
+      },
+      async fill(entryId, content, userId) {
+        // Only these three fields: where the entry sits, its outlet and its extension data stay.
+        await spindle.world_books.entries.update(entryId, content === null ? { content: "", disabled: true, constant: false } : { content, disabled: false, constant: true }, userId);
       },
       async deleteEntry(entryId, userId) {
         await spindle.world_books.entries.delete(entryId, userId);

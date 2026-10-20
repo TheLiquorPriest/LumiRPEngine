@@ -144,40 +144,23 @@ export type HostEventName = keyof HostEventMap;
 export interface ContextHandlerInput {
   chatId: ChatId;
   userId: UserId;
-  generationType: HostGenerationType;
+  /** `other`: a type the engine doesn't play (the host's `quiet`). */
+  generationType: HostGenerationType | "other";
   dryRun: boolean;
   connectionId: string | null;
   personaId: string | null;
   frontendSessionId?: string;
 }
 
-/** A World Info entry as the interceptor sees it: the engine reads only which book it is in and its extension data. */
-export interface InterceptorEntry {
-  id: string;
-  bookId: string;
-  /** The entry's extension data (`lumi_rp_engine`: a slot, or the lore id of an entry an earlier build synced). */
-  extensions: JsonObject;
-}
+/** What a context handler tells the host: go on to the prompt, or stop the generation before it (`cancelGeneration`). */
+export type ContextVerdict = "go" | "cancel";
 
-/** The interceptor context; it carries no dry-run flag (G1). */
-export interface InterceptorInput {
-  chatId: ChatId;
-  userId: UserId;
-  entries: InterceptorEntry[];
-}
-
-export interface PlacementOverride {
-  type: "chat_depth";
-  role: "system" | "user" | "assistant";
-  depth: number;
-  direction: "from_start" | "from_end";
-}
-
-export interface InterceptorResult {
-  disabled: string[];
-  enabled: string[];
-  forced: string[];
-  mutated: { id: string; content?: string; placement?: PlacementOverride }[];
+/** What the running Lumiverse does with a context handler's answer (DESIGN §5.1). */
+export interface HostCapabilities {
+  /** `cancelGeneration` stops the generation (the `preAssemblyGenerationContext` contract). */
+  cancel: boolean;
+  /** A `required` handler that fails or runs out of time stops the generation instead of being skipped (`required-context-handlers-v1`). */
+  required: boolean;
 }
 
 // ---------------------------------------------------------------- model calls
@@ -373,6 +356,8 @@ export interface HostPort {
     active(userId: UserId): Promise<ChatId | null>;
     /** Every chat of the user's, most recently updated first (`chats.list`, paged through). */
     list(userId: UserId): Promise<HostChat[]>;
+    /** Rewrites a message's swipes and the one shown (`chat.updateMessage`); the host keeps the swipe dates in step. */
+    setSwipes(chatId: ChatId, messageId: MessageId, swipes: readonly string[], swipeId: number, userId: UserId): Promise<void>;
   };
   storage: {
     read(path: string, userId: UserId): Promise<string | null>;
@@ -383,8 +368,10 @@ export interface HostPort {
     list(prefix: string, userId: UserId): Promise<string[]>;
   };
   on<K extends HostEventName>(event: K, handler: (payload: HostEventMap[K], userId: UserId | null) => void): () => void;
-  registerContextHandler(handler: (input: ContextHandlerInput, signal: AbortSignal) => Promise<void>, timeoutMs: number): void;
-  registerInterceptor(handler: (input: InterceptorInput) => Promise<InterceptorResult | null>, priority: number): void;
+  /** What the host does with the context handler's answer, read once at start. */
+  readonly capabilities: HostCapabilities;
+  /** The one context handler (the guard, DESIGN §5.1): `required` asks the host to stop the generation when it fails or runs out of time. */
+  registerContextHandler(handler: (input: ContextHandlerInput, signal: AbortSignal) => Promise<ContextVerdict>, options: { timeoutMs: number; required: boolean }): void;
   models: {
     quiet(request: QuietRequest, userId: UserId, signal: AbortSignal): Promise<QuietResult>;
     decide(request: DecideRequest, userId: UserId, signal: AbortSignal): Promise<DecideResult>;
@@ -410,6 +397,8 @@ export interface HostPort {
     createEntry(bookId: string, entry: HostBookEntryInput, userId: UserId): Promise<string>;
     /** Moves an entry (its position, depth, role and outlet) and rewrites its extension data. */
     place(entryId: string, placement: HostEntryPlacement, extensions: JsonObject, userId: UserId): Promise<void>;
+    /** Fills an entry and switches it on as a constant one, or with null empties it and switches it off; where it sits stays. */
+    fill(entryId: string, content: string | null, userId: UserId): Promise<void>;
     deleteEntry(entryId: string, userId: UserId): Promise<void>;
   };
   /** A dry-run assembly of the chat's next prompt (deliverability check, DESIGN §4.2; the D32 preset lint). */
