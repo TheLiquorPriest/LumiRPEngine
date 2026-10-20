@@ -296,17 +296,20 @@ function paysFor(ctx: ReadContext, who: EntityId, to: string): boolean {
  * `fallback`, or null (DESIGN §25.1, §25.5). Each is money they may pay from. A fallback is the
  * payer's own, as the money step draws on it (`fallsBackOn`): an outside name would pay with money
  * nobody has, and someone else's account isn't the payer's to draw on. Money they reach only by
- * managing it, a business's or a trust's they hold no spending role on, pays for its holder: never
- * to them, their accounts or their household.
+ * managing it pays for its holder: never to them, their accounts or their household. That is a
+ * business's or a trust's account they hold no spending role on, and the business or trust itself
+ * paying as a party, whatever their role on it: a party's money is never a manager's own, though
+ * every managing role on it carries the spending right.
  */
 function flowProblem(ctx: ReadContext, who: EntityId, from: string, to: string, fallback: string): Rejection | null {
   if (!mayPayFrom(ctx, who, from)) return reject("not_owner", `${labelOf(ctx, who)} can't pay from ${labelOf(ctx, from)}`);
   if (fallback !== "" && (!mayPayFrom(ctx, who, fallback) || !fallsBackOn(ctx, from, fallback))) {
     return reject("not_owner", own(ctx.state.entities, fallback) ? `${labelOf(ctx, who)} can't fall back on ${labelOf(ctx, fallback)}` : `a fallback is an account of ${labelOf(ctx, who)}'s, not "${fallback}"`);
   }
-  const managed = [from, fallback].find((side) => side !== "" && side !== who && !canSpend(ctx.state, side, who));
+  const managed = [from, fallback].find((side) => side !== "" && side !== who && (isParty(ctx, side) || !canSpend(ctx.state, side, who)));
   if (managed !== undefined && paysFor(ctx, who, to)) {
-    const holder = isParty(ctx, managed) ? managed : (holdersOf(ctx.state, managed).find((h) => managesParty(ctx.state, h, who)) ?? managed);
+    if (isParty(ctx, managed)) return reject("not_owner", `${labelOf(ctx, managed)} pays for itself, not for ${labelOf(ctx, who)}`);
+    const holder = holdersOf(ctx.state, managed).find((h) => managesParty(ctx.state, h, who)) ?? managed;
     return reject("not_owner", `${labelOf(ctx, managed)} pays for ${labelOf(ctx, holder)}, not for ${labelOf(ctx, who)}`);
   }
   return null;
