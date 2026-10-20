@@ -185,16 +185,18 @@ function occasion(scope: MindScope, place: PlaceId | null): string {
   return `It is ${formatClock(cal, state.clock)} (${dayPartAt(cal, state.clock).label.toLowerCase()})${holidays.length > 0 ? `, ${holidays.join(", ")}` : ""}${sky ? `; the weather: ${sky.replace(/_/g, " ")}` : ""}.`;
 }
 
+/** Who they are: their own fields, a list of words or ids (traits, likes) as a comma list; the engine's own records and other objects left out. */
 function sheetLines(scope: MindScope): string[] {
   const { reg, world, state, who } = scope;
   const e = own(state.entities, who);
   if (!e) return [];
   const out: string[] = [];
   for (const [field, value] of Object.entries(e.fields).sort(([a], [b]) => a.localeCompare(b))) {
-    if (SKIPPED_FIELDS[field] || value === null || typeof value === "object") continue;
+    if (SKIPPED_FIELDS[field] || value === null) continue;
+    const items = Array.isArray(value) ? value.filter((v): v is string => typeof v === "string") : typeof value === "object" ? [] : [value];
+    if (items.length === 0) continue;
     const label = fieldDef(reg, world, e.kind, field)?.label ?? field.replace(/_/g, " ");
-    const shown = typeof value === "string" && own(state.entities, value) ? nameOf(scope, value) : typeof value === "string" && own(world.places, value) ? nameOf(scope, value) : String(value).replace(/_/g, " ");
-    out.push(`- ${label}: ${shown}`);
+    out.push(`- ${label}: ${items.map((v) => (typeof v === "string" && (own(state.entities, v) || own(world.places, v)) ? nameOf(scope, v) : String(v).replace(/_/g, " "))).join(", ")}`);
   }
   return out;
 }

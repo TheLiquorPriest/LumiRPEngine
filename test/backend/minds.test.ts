@@ -333,6 +333,15 @@ describe("minds around a turn", () => {
 });
 
 describe("a mind's context", () => {
+  test("who they are includes their list fields, such as traits, as words", async () => {
+    const rig = new Rig({ shipped: true });
+    fakeModels(rig);
+    const chatId = await alderChat(rig);
+    await rig.turn(chatId, "Hello.", "They look up.");
+    const danny = mindCalls(rig).find((c) => MIND.exec(c.messages[0]?.content ?? "")?.[1] === "Danny Okafor")?.messages[1]?.content ?? "";
+    expect(danny).toMatch(/\n- Traits: funny, competitive, loyal\n/i);
+  });
+
   test("the previous reply is told by how it ended, in the next mind and in the memory step", async () => {
     const rig = new Rig({ shipped: true });
     fakeModels(rig);
