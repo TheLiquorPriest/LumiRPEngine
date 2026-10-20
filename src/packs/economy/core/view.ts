@@ -475,8 +475,12 @@ export function buildFinanceView(hooks: FinanceHooks, ctx: ReadContext, party: E
     if (extra.upcoming && view.overview) view.overview.upcoming = [...view.overview.upcoming, ...extra.upcoming].sort((a, b) => a.clock - b.clock).slice(0, 20);
     if (extra.alerts && view.overview) view.overview.alerts.push(...extra.alerts);
   }
-  // A business's accounts its owner manages without a role of their own on them are on its page, not among theirs.
-  for (const b of view.businesses) b.managed = level >= 3 ? b.accounts.filter((id) => !mine.includes(id) && managesAccount(ctx, id, party)).map((id) => accountView(ctx, viewer, party, id, level, detail)) : [];
+  for (const b of view.businesses) {
+    // An account of the business the viewer can't see stays off its page, by id as much as in full.
+    b.accounts = b.accounts.filter((id) => visible(ctx, viewer, id));
+    // Its accounts its owner manages without a role of their own on them are on its page, not among theirs.
+    b.managed = level >= 3 ? b.accounts.filter((id) => !mine.includes(id) && managesAccount(ctx, id, party)).map((id) => accountView(ctx, viewer, party, id, level, detail)) : [];
+  }
   // What each account's controls may draw on, by the actions' own rules: its autopay's sources, and what may back a standing payment from it.
   const listed = [...view.accounts, ...view.businesses.flatMap((b) => b.managed)];
   const pays = (id: EntityId): boolean => traitsOf(ctx, id)?.pays === true && mayPayFrom(ctx, party, id);
