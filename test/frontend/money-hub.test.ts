@@ -17,6 +17,7 @@ import { Row } from "../../src/frontend/components";
 import { decodeFinanceView } from "../../src/packs/economy/ui/decode";
 import { accountBlocks, accountControls, businessControls, cardControls, creditBlocks, endableLeases, flowControls, holdingControls, householdRows, hubTabs, invoiceControls, investmentBlocks, overviewBlocks, propertyControls, transferTargets, workBlocks } from "../../src/packs/economy/ui/layout";
 import { OwnerRows } from "../../src/packs/economy/ui/lines";
+import { gmFixture } from "../../dev/preview/fixtures";
 import {
   actionRequest,
   autopayAction,
@@ -174,6 +175,15 @@ describe("realism gating", () => {
     expect([top.level, top.detail]).toEqual([4, true]);
     expect(accountBlocks(top, accountIn(top, "acct_pov_card"))).toMatchObject({ cardLimits: false, transactions: 40 });
     expect(investmentBlocks(top)).toEqual({ lots: false, gains: false, income: true });
+  });
+
+  test("the preview's GM money views carry the books and features the engine gives each party's level", () => {
+    const money = gmFixture().money;
+    expect(money.map((m) => m.level).sort()).toEqual([2, 4]);
+    for (const m of money) {
+      expect(m.detail).toBe(m.level >= 4);
+      expect(m.features).toEqual(FINANCE_FEATURES.filter((f) => featureOn(m.level, f)));
+    }
   });
 
   test("a shared account names its owners at any level", () => {
