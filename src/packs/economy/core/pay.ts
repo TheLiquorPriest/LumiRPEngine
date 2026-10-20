@@ -309,6 +309,39 @@ export interface Picked {
   via: Source["via"];
 }
 
+/** What a payer's method tries, in order, once each: a way named in words, else the payer's preferences, then anything they can spend from in the usual order. */
+function sourcesToTry(ctx: ReadContext, payer: EntityId, cents: number, opts: { method?: PayMethod; category?: string; except?: EntityId; till: boolean }, problems: string[]): Source[] {
+  const level = ctx.levelOf(payer, "money");
+  const method = opts.method ?? "auto";
+  const category = opts.category ?? "";
+  let uses: string[];
+  if (method === "account") uses = ["checking", "credit", "charge", "savings"];
+  else if (method === "auto") {
+    const tiers = level >= 2 && featureFor(ctx, payer, "payment_prefs") ? tiersOf(ctx, payer).filter((t) => tierFits(t, cents, category)).map((t) => t.use) : [];
+    uses = [...tiers, ...(level >= 2 ? ["cash", "debit", "credit", "charge"] : ["cash", "debit", "credit", "savings"])];
+  } else uses = method === "card" ? ["credit", "charge"] : method === "checking" ? ["debit"] : [method];
+  const tried = new Set<string>();
+  const out: Source[] = [];
+  for (const use of uses) {
+    for (const s of sourcesFor(ctx, payer, use, opts.till, problems)) {
+      const key = `${s.account}|${s.card ?? ""}`;
+      if (s.account === opts.except || tried.has(key)) continue;
+      tried.add(key);
+      out.push(s);
+    }
+  }
+  return out;
+}
+
+/**
+ * The most one payment could take now from any single source the payer's method would use (what
+ * a partial payment can pay): never more than that source has, with what overdraft its policy allows.
+ */
+export function mostPayable(ctx: ReadContext, payer: EntityId, cents: number, opts: { method?: PayMethod; category?: string; till: boolean; overdraft: boolean }): number {
+  const room = (s: Source): number => Math.min(s.card ? cardRoom(ctx, s.card, "purchase") : Infinity, availableOf(ctx, s.account) + (opts.overdraft ? overdraftRoom(ctx, s.account) : 0));
+  return Math.max(0, ...sourcesToTry(ctx, payer, cents, opts, []).map(room));
+}
+
 /**
  * What a payment comes from, or a decline (from level 2; level 1 overdraws instead). A named source
  * (an account or a card of the payer's) pays when it can; a named loan or brokerage account falls
@@ -319,9 +352,8 @@ export function chooseSource(ctx: ReadContext, payer: EntityId, cents: number, o
   const level = ctx.levelOf(payer, "money");
   const problems: string[] = [];
   const money = (c: number): string => formatMoney(c, ctx.world.currency);
-  const usable = (s: Source): boolean => s.account !== opts.except;
   if (opts.source) {
-    const named = sourcesFor(ctx, payer, opts.source, opts.till, problems).filter(usable);
+    const named = sourcesFor(ctx, payer, opts.source, opts.till, problems).filter((s) => s.account !== opts.except);
     const first = named[0];
     if (first) {
       if (level < 2 || covers(ctx, first, cents, opts.overdraft)) return first;
@@ -330,24 +362,9 @@ export function chooseSource(ctx: ReadContext, payer: EntityId, cents: number, o
     if (problems.length > 0) return reject("declined", `${problems[0]}`);
   }
   const method = opts.method ?? "auto";
-  const category = opts.category ?? "";
-  let uses: string[];
-  if (method === "account") uses = ["checking", "credit", "charge", "savings"];
-  else if (method === "auto") {
-    const tiers = level >= 2 && featureFor(ctx, payer, "payment_prefs") ? tiersOf(ctx, payer).filter((t) => tierFits(t, cents, category)).map((t) => t.use) : [];
-    uses = [...tiers, ...(level >= 2 ? ["cash", "debit", "credit", "charge"] : ["cash", "debit", "credit", "savings"])];
-  } else uses = method === "card" ? ["credit", "charge"] : method === "checking" ? ["debit"] : [method];
-  const tried = new Set<string>();
-  const candidates: Source[] = [];
-  for (const use of uses) {
-    for (const s of sourcesFor(ctx, payer, use, opts.till, problems).filter(usable)) {
-      const key = `${s.account}|${s.card ?? ""}`;
-      if (tried.has(key)) continue;
-      tried.add(key);
-      candidates.push(s);
-      if (covers(ctx, s, cents, opts.overdraft)) return s;
-    }
-  }
+  const candidates = sourcesToTry(ctx, payer, cents, opts, problems);
+  const hit = candidates.find((s) => covers(ctx, s, cents, opts.overdraft));
+  if (hit) return hit;
   if (level < 2) {
     const fallback = candidates[0] ?? spendable(ctx, payer).filter((id) => id !== opts.except).map((account): Source => ({ account, via: "account" }))[0];
     if (fallback) return fallback;

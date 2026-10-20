@@ -574,3 +574,17 @@ describe("someone else's credit is theirs alone", () => {
     expect(playerLines(reg, w.world, w.state, "you", scores, 20)).toHaveLength(1);
   });
 });
+
+describe("a partial payment pays what the payer's own way of paying can", () => {
+  test("living costs with a little in checking and a lot in savings pay part from checking and leave savings alone", () => {
+    const w = setup((world) => {
+      world.entities.rosa_checking = entity("rosa_checking", "account", { owners: [{ party: "rosa", role: "owner" }], product: "checking", opening: 3_000 });
+      world.entities.rosa_savings = entity("rosa_savings", "account", { owners: [{ party: "rosa", role: "owner" }], product: "savings", opening: 1_000_000 });
+    }, ["rosa"]);
+    lapse(w, 4); // Monday 19 Oct
+    const [run] = flowRuns(w, "living:rosa");
+    expect(run?.outcome).toBe("partial");
+    expect(Number(run?.cents)).toBeGreaterThan(0);
+    expect(w.state.accounts.rosa_savings).toBe(1_000_000);
+  });
+});

@@ -19,8 +19,8 @@ import type { Rng } from "../../../engine/rng";
 import { isGone, kindIs, scopeEnv } from "../../../engine/scope";
 import type { FinanceHooks, FlowPosting } from "./module";
 import { cycleOf, flowRunOf, reject } from "./journal";
-import { accountsOf, availableOf, balance, canSpend, classOf, hasLedger, holdersOf, outsideAccount, priceOf, productOf, statusOf, traitsOf } from "./model";
-import { accountLevel, asUnit, charge, chooseSource, depositAccount, isParty, isRejection, overdraftEvents, overdraftRoom, payeeSide, posting, signal, toggles, type PayMethod } from "./pay";
+import { availableOf, balance, canSpend, classOf, hasLedger, holdersOf, outsideAccount, priceOf, productOf, statusOf, traitsOf } from "./model";
+import { accountLevel, asUnit, charge, chooseSource, depositAccount, isParty, isRejection, mostPayable, overdraftEvents, overdraftRoom, payeeSide, posting, signal, toggles, type PayMethod } from "./pay";
 import { Run } from "./run";
 
 export const DEFAULT_FLOW_MINUTE = 9 * 60;
@@ -566,7 +566,8 @@ export function runOccurrence(hooks: FinanceHooks, run: Run, flow: Flow, at: num
   switch (flow.shortfall) {
     case "partial": {
       const side = sideOf(ctx, flow.from);
-      const have = "account" in side ? Math.max(0, availableOf(ctx, side.account)) : "party" in side ? partyHas(ctx, side.party) : 0;
+      // As much as one payment can take: from the account, or from the one source the payer's way of paying would use.
+      const have = "account" in side ? Math.max(0, availableOf(ctx, side.account)) : "party" in side ? mostPayable(ctx, side.party, cents, { method: (flow.method as PayMethod | undefined) ?? "account", till: false, overdraft }) : 0;
       const part = Math.min(have, cents - 1);
       const paid = part > 0 && !own_lines ? computed(part) : null;
       if (paid && !("code" in paid) && run.emit(paid.events).length > 0) {
@@ -634,11 +635,6 @@ function fallbackOf(ctx: ReadContext, flow: Flow): string | null {
   const payers = "account" in from ? holdersOf(ctx.state, from.account).filter((h) => canSpend(ctx.state, from.account, h)) : "party" in from ? [from.party] : [];
   if (payers.includes(fallback)) return fallback;
   return own(ctx.state.entities, fallback)?.kind === "account" && payers.some((p) => canSpend(ctx.state, fallback, p)) ? fallback : null;
-}
-
-/** What a party has to pay with now: their spendable accounts' availability. */
-function partyHas(ctx: ReadContext, party: EntityId): number {
-  return accountsOf(ctx, party, "spend").reduce((a, id) => a + (traitsOf(ctx, id)?.asset && !traitsOf(ctx, id)?.locked ? Math.max(0, availableOf(ctx, id)) : 0), 0);
 }
 
 /**
