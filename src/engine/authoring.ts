@@ -8,7 +8,7 @@ import type { LedgerEvent } from "../shared/ledger";
 import { macroHazards } from "../shared/macros";
 import type { LintIssue } from "../shared/protocol";
 import type { SheetSectionView } from "../shared/state-view";
-import { knownSignal, STEP_OUTPUTS, STEP_PLACEHOLDERS } from "../shared/steps";
+import { currentSignals, hasRetiredSignal, knownSignal, STEP_OUTPUTS, STEP_PLACEHOLDERS } from "../shared/steps";
 import { defaultTiers, leadTierOf, tierOf } from "../shared/tiers";
 import type { WorldCurrency, WorldDoc } from "../shared/world";
 import type { DataTable } from "../shared/tables";
@@ -168,8 +168,9 @@ export function currencyOf(v: unknown): WorldCurrency | null {
  * Modern US money, no lore, an empty lookup table (a malformed one keeps its well-formed half), no
  * classifications, no maps and the three default tiers, whose ids are the band ids their entities
  * already name; a POV still on the legacy `pov` tier moves to the lead tier (the POV is `pov`, never
- * capped whatever its tier); step templates for the retired `select` purpose are dropped; and the
- * economy pack's old `unpricedCapCents` becomes `unpricedCap` (the same minor units; a set
+ * capped whatever its tier); step templates for the retired `select` purpose are dropped, and a
+ * template's retired signal reads as the one that stands for it (`classifier` as `typed_input`); and
+ * the economy pack's old `unpricedCapCents` becomes `unpricedCap` (the same minor units; a set
  * `unpricedCap` wins). A world without a `ruleset` keeps none: every part of one is optional, and
  * nothing reads a missing one; one without a `spawnCap` keeps none too and plays at the default 24.
  * Lore entries need nothing: their new fields are optional, and one
@@ -189,17 +190,22 @@ export function migrateWorld(stored: WorldDoc): WorldDoc {
   const hasTiers = isRecord(doc.tiers);
   const tiers = hasTiers ? doc.tiers : defaultTiers();
   const retired = isRecord(steps) ? Object.entries(steps).flatMap(([id, t]) => (isRecord(t) && t.purpose === "select" ? [id] : [])) : [];
+  const resignaled = isRecord(steps) ? Object.entries(steps).flatMap(([id, t]) => (isRecord(t) && t.purpose !== "select" && Array.isArray(t.signals) && hasRetiredSignal(t.signals.filter((s): s is string => typeof s === "string")) ? [id] : [])) : [];
   const pov = hasOwn(doc.entities, doc.pov) ? doc.entities[doc.pov] : undefined;
   const legacyPov = pov?.tier === "pov" && !tierOf({ tiers }, "pov");
   const economy: unknown = isRecord(doc.packs) ? doc.packs.economy : undefined;
   const config = isRecord(economy) && isRecord(economy.config) ? economy.config : null;
   const oldCap = config !== null && "unpricedCapCents" in config;
-  if (isCurrency(currency) && isRecord(lore) && indexed && isRecord(classifications) && isRecord(maps) && hasTiers && retired.length === 0 && !legacyPov && !oldCap) return compileMaps(doc);
+  if (isCurrency(currency) && isRecord(lore) && indexed && isRecord(classifications) && isRecord(maps) && hasTiers && retired.length === 0 && resignaled.length === 0 && !legacyPov && !oldCap) return compileMaps(doc);
   const out: WorldDoc = { ...doc, currency: isCurrency(currency) ? currency : { ...DEFAULT_CURRENCY }, lore: isRecord(lore) ? doc.lore : {}, classifications: isRecord(classifications) ? doc.classifications : {}, maps: isRecord(maps) ? doc.maps : {}, tiers };
   if (!indexed) out.loreIndex = { terms: isRecord(loreIndex) && isRecord(loreIndex.terms) ? doc.loreIndex.terms : {}, topics: isRecord(loreIndex) && isRecord(loreIndex.topics) ? doc.loreIndex.topics : {} };
-  if (retired.length > 0) {
+  if (retired.length > 0 || resignaled.length > 0) {
     out.steps = { ...doc.steps };
     for (const id of retired) delete out.steps[id];
+    for (const id of resignaled) {
+      const t = out.steps[id];
+      if (t) out.steps[id] = { ...t, signals: currentSignals(t.signals) };
+    }
   }
   if (pov && legacyPov) out.entities = { ...doc.entities, [doc.pov]: { ...pov, tier: leadTierOf(out) } };
   const pack = out.packs.economy;

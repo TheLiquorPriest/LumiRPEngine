@@ -163,8 +163,6 @@ export function unfitRef(registry: Registry, action: ActionDef, params: JsonObje
 export interface SignalFacts {
   /** The turn's user text was typed (not a palette or chip action). */
   typed: boolean;
-  /** The typed-input classifier fired. */
-  classifier: boolean;
   /** A reply exists (the post phase). */
   reply: boolean;
   /** The POV's place changed since the last turn (or by this turn's plan). */
@@ -193,12 +191,11 @@ export interface SignalFacts {
 }
 
 export function noFacts(turn = 0): SignalFacts {
-  return { typed: false, classifier: false, reply: false, sceneChange: false, slotCrossed: false, dayStart: false, beat: false, agentsPresent: false, present: false, offscreen: false, tieZone: false, invitation: false, timelapse: false, conflict: false, turn };
+  return { typed: false, reply: false, sceneChange: false, slotCrossed: false, dayStart: false, beat: false, agentsPresent: false, present: false, offscreen: false, tieZone: false, invitation: false, timelapse: false, conflict: false, turn };
 }
 
 const FACT_OF: Record<Exclude<StepSignal, "always" | "never">, keyof SignalFacts> = {
   typed_input: "typed",
-  classifier: "classifier",
   reply: "reply",
   scene_change: "sceneChange",
   slot_crossed: "slotCrossed",
@@ -352,6 +349,8 @@ function dataBlock(vars: Readonly<Record<string, string>>): string {
   add("Outcome", "outcome");
   add("Engine beats", "beats");
   add("Brief", "brief");
+  // The outline step's only: what the narrator has this turn (DESIGN §9.5).
+  add("Sections the narrator has this turn (point at no other)", "sections");
   add("Recent turns", "recent");
   add("The player wrote", "user");
   add("The narrator's reply", "reply");

@@ -115,3 +115,36 @@ describe("settings saved before lore policies existed", () => {
     expect(loaded.budgets).toEqual({ pre: { calls: 3, lookup: standard.budgets.pre.lookup }, post: { calls: 2, lookup: { calls: 0 } } });
   });
 });
+
+describe("settings saved while the classifier gated interpret", () => {
+  test("a step on the classifier runs on every typed message; every other signal the user chose stays", async () => {
+    const host = new FakeHost();
+    const standard = MODEL_USE_PRESETS.standard;
+    const steps = {
+      ...standard.steps,
+      interpret: { ...standard.steps.interpret, signals: ["classifier"] },
+      judge: { ...standard.steps.judge, signals: ["classifier", "conflict", "typed_input"] },
+      choices: { enabled: true, signals: ["never"] },
+    };
+    await host.storage.write("settings.json", JSON.stringify({ ...defaultSettings(), modelUse: { ...defaultSettings().modelUse, preset: "custom", steps } }), host.userId);
+    const store = new SettingsStore(host);
+    const loaded = (await store.get(host.userId)).modelUse.steps;
+    expect(loaded.interpret?.signals).toEqual(["typed_input"]);
+    expect(loaded.judge?.signals).toEqual(["typed_input", "conflict"]);
+    expect(loaded.choices?.signals).toEqual(["never"]);
+    expect(loaded.extract?.signals).toEqual(["reply"]);
+    // The next save writes the signals as read.
+    await store.set(host.userId, { swipeDefault: "renarrate" });
+    expect(await host.storage.read("settings.json", host.userId)).not.toContain("classifier");
+  });
+
+  test("a file still on Lean's or Standard's old default reads as its preset", async () => {
+    for (const id of ["lean", "standard"] as const) {
+      const host = new FakeHost();
+      const preset = MODEL_USE_PRESETS[id];
+      const old = { ...defaultSettings(), modelUse: { preset: id, ...structuredClone(preset), steps: { ...structuredClone(preset.steps), interpret: { ...preset.steps.interpret, signals: ["classifier"] } } } };
+      await host.storage.write("settings.json", JSON.stringify(old), host.userId);
+      expect((await new SettingsStore(host).get(host.userId)).modelUse).toEqual({ preset: id, ...preset });
+    }
+  });
+});

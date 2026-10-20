@@ -27,6 +27,6 @@ describe("interpret's catalog", () => {
     expect(ids).toContain("fight");
     expect(ids).not.toContain("attack");
     // The rows are one param's choices, so the param after them can't read as another row.
-    expect(catalog.find((line) => line.startsWith("skill_check"))).toMatch(/\(params: skill \(one of: athletics \| [^()]*\), difficulty\)/);
+    expect(catalog.find((line) => line.startsWith("skill_check"))).toMatch(/Params: skill \(one of: athletics \| [^()]*\), difficulty\? \(/);
   });
 });

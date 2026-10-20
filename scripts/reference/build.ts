@@ -188,9 +188,9 @@ function actionRows(actions: readonly ActionDef[]): string[] {
   const rows = sortedBy(actions, (a) => a.id).map((a) => {
     const params = Object.entries(a.params).map(([name, p]) => `${name}${p.optional ? "?" : ""}: ${p.type === "ref" && p.ref ? `ref → ${p.ref}` : p.type}`);
     const check = a.check === undefined ? "" : typeof a.check === "string" ? code(a.check) : code(a.check.dice);
-    return [code(a.id), a.label, params.length === 0 ? "" : params.map(code).join(", "), check, codes(Object.keys(a.outcomes).sort(byText)), code(a.duration), (a.lexicon ?? []).join(", ")];
+    return [code(a.id), a.label, a.description ?? "", params.length === 0 ? "" : params.map(code).join(", "), check, codes(Object.keys(a.outcomes).sort(byText)), code(a.duration), (a.lexicon ?? []).join(", ")];
   });
-  return table(["Action", "Label", "Parameters", "Check", "Outcomes", "Minutes", "Lexicon"], rows);
+  return table(["Action", "Label", "Description", "Parameters", "Check", "Outcomes", "Minutes", "Lexicon"], rows);
 }
 
 function tableRows(tables: readonly TableDef[]): string[] {

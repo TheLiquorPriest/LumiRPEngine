@@ -385,6 +385,7 @@ export const combatPack: PackDef = {
     r.action({
       id: "fight",
       label: "Fight",
+      description: "Start a fight with someone.",
       pack: PACK,
       params: { target: { type: "ref", label: "Opponent" } },
       requires: ["can_fight(target)"],
@@ -397,6 +398,7 @@ export const combatPack: PackDef = {
     r.action({
       id: "end_turn",
       label: "End turn",
+      description: "End your turn in a fight.",
       pack: PACK,
       params: {},
       requires: [],

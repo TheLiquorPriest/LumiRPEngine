@@ -253,7 +253,7 @@ describe("a second action in the same message", () => {
     expect((await replyChips(rig, chatId)).filter((c) => c.kind === "choice").map((c) => c.label)).toEqual(["I buy a latte"]);
   });
 
-  test("a secret in it, or a name that leads to secret lore, drops only it: the walk still plays; time passing is never offered", async () => {
+  test("a secret in it, or a name that leads to secret lore, drops only it: the walk still plays", async () => {
     const { rig, chatId } = await chat({ truth: true, secretAlias: "Rena" });
     const { state, world } = await folded(rig, chatId);
     expect(unrevealedSecrets(rig.rt.registry, world, state)).toContain(TRUTH);
@@ -265,14 +265,19 @@ describe("a second action in the same message", () => {
     expect(chips.some((c) => c.kind === "choice")).toBe(false);
     for (const c of chips) expect(`${c.label} ${c.detail ?? ""}`).not.toContain(TRUTH);
 
-    for (const [typed, next] of [
-      ["I walk to Bluebird Coffee and buy Rena a latte.", "I buy Rena a latte"],
-      ["I walk to Bluebird Coffee and sleep until the next morning.", "I sleep until the next morning"],
-    ] as const) {
-      reading(rig, walkThenBuy(next));
-      await rig.turn(chatId, typed, "The cafe is quiet.");
-      expect((await replyChips(rig, chatId)).some((c) => c.kind === "choice")).toBe(false);
-    }
+    reading(rig, walkThenBuy("I buy Rena a latte"));
+    await rig.turn(chatId, "I walk to Bluebird Coffee and buy Rena a latte.", "The cafe is quiet.");
+    expect((await replyChips(rig, chatId)).some((c) => c.kind === "choice")).toBe(false);
+  });
+
+  test("time the read puts after the walk is offered as a Timelapse, never as words to send", async () => {
+    const { rig, chatId } = await chat();
+    const walkThenSleep: JsonObject = { action: "go", params: { to: "bluebird_coffee" }, confidence: 0.9, then: { until: "morning" } };
+    reading(rig, (text) => (text.startsWith("I walk") ? walkThenSleep : { action: null, params: {}, confidence: 0.9 }));
+    await rig.turn(chatId, "I walk to Bluebird Coffee and sleep until the next morning.", "The cafe is quiet.");
+    const kinds = (await replyChips(rig, chatId)).map((c) => c.kind);
+    expect(kinds).toContain("timelapse_offer");
+    expect(kinds).not.toContain("choice");
   });
 
   test("a placeholder, or the message or its first action said again, is never offered; any other words are, whatever their verb", async () => {
@@ -288,6 +293,8 @@ describe("a second action in the same message", () => {
       ["I walk to Bluebird Coffee to get a latte.", "get a latte"],
       ["I walk to the market to pick up groceries.", "pick up groceries"],
       ["I walk to Bluebird Coffee and smile at the barista.", "I smile at the barista"],
+      // Whether words only let time pass is the read's call too: what it leaves in words is offered.
+      ["I walk to Bluebird Coffee and wait for Dev there.", "wait for Dev"],
     ] as const) {
       reading(rig, walkThenBuy(next));
       await rig.turn(chatId, typed, "The cafe is quiet.");
@@ -303,6 +310,7 @@ describe("a second action in the same message", () => {
       "get a latte": "get a latte",
       "pick up groceries": "pick up groceries",
       "I smile at the barista": "I smile at the barista",
+      "wait for Dev": "wait for Dev",
     });
   });
 

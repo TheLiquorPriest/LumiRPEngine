@@ -7,10 +7,11 @@ import { BANDS, DOMAINS, INTERRUPT_CLASSES } from "../shared/ids";
 import type { JsonObject, JsonValue } from "../shared/json";
 import { hasOwn, isRecord, safeKey } from "../shared/json";
 import type { ExtractionModeView, SettingsResult } from "../shared/protocol";
-import type { ExtractionBounds, ExtractionLearning, ExtractionType, ExtractionTypeStats, HelperDefault, LookupLimits, LorePolicy, ModelUseSettings, PhaseBudget, RealismSettings, SamplingParams, StepConfig, StepLore, StepRoute, TimeSettings, UserSettings } from "../shared/settings";
+import type { ExtractionBounds, ExtractionLearning, ExtractionType, ExtractionTypeStats, HelperDefault, LookupLimits, LorePolicy, ModelUseSettings, PhaseBudget, RealismSettings, RecentHistory, SamplingParams, StepConfig, StepLore, StepRoute, TimeSettings, UserSettings } from "../shared/settings";
 import { DEFAULT_HELPER, EXTRACTION_DEFAULTS, EXTRACTION_LEARNING, EXTRACTION_TYPES, LORE_POLICIES, LORE_TRANSPORTS, REASONING_CHOICES, SAMPLING_PARAMS, SETTINGS_DEFAULTS_REV, SPEED_ACTIVITIES, SPEED_DEFAULT, SPEED_THRESHOLD_MINUTES } from "../shared/settings";
 import type { BoundMode } from "../shared/ids";
 import type { StepPurpose } from "../shared/world";
+import { currentSignals } from "../shared/steps";
 import { defaultMindsSettings, MINDS_PRESETS, mindsSettingsOf } from "../shared/minds";
 import { defaultTimeouts, migrateTimeouts, timeoutsOf } from "../shared/timeouts";
 import type { HostPort } from "./host";
@@ -51,7 +52,8 @@ const NO_LOOKUPS: LookupLimits = { calls: 0 };
 
 /**
  * Model-use presets (DESIGN §5.3, §5.4). Routing per D10: `interpret` and `extract` on the helper;
- * `npc.choose` on the Decision connection. `judge` runs only when a world's adjudication policy
+ * `npc.choose` on the Decision connection. `interpret` reads every typed message: whether one holds
+ * an action is its call, never a word list's. `judge` runs only when a world's adjudication policy
  * needs it (the player's words weigh, or the story decides), never on Lean. Lore: Lean prefetches
  * and never looks up; Standard and Full let their decision and JSON steps look lore up on a budget
  * per phase, apart from the phase's calls; prose steps prefetch only. The tokens and lore are sized
@@ -61,7 +63,7 @@ const NO_LOOKUPS: LookupLimits = { calls: 0 };
 export const MODEL_USE_PRESETS: Record<Exclude<ModelUsePresetId, "custom">, Omit<ModelUseSettings, "preset">> = {
   lean: {
     steps: {
-      interpret: step(true, ["classifier"], HELPER, lore("prefetch", 800)),
+      interpret: step(true, ["typed_input"], HELPER, lore("prefetch", 800)),
       extract: step(true, ["reply"], HELPER, lore("prefetch", 800)),
       "npc.choose": step(false, [], DECISION, lore("prefetch", 800)),
       judge: step(false, ["always"], HELPER, lore("prefetch", 800)),
@@ -71,7 +73,7 @@ export const MODEL_USE_PRESETS: Record<Exclude<ModelUsePresetId, "custom">, Omit
   },
   standard: {
     steps: {
-      interpret: step(true, ["classifier"], HELPER, lore("prefetch+lookup", 1600)),
+      interpret: step(true, ["typed_input"], HELPER, lore("prefetch+lookup", 1600)),
       extract: step(true, ["reply"], HELPER, lore("prefetch+lookup", 1600)),
       "npc.choose": step(true, ["tie_zone", "invitation"], DECISION, lore("prefetch+lookup", 1600)),
       judge: step(true, ["always"], HELPER, lore("prefetch+lookup", 1600)),
@@ -301,19 +303,30 @@ function loreOf(v: unknown): StepLore | undefined {
   return policy && tokens !== undefined ? { policy, tokens, ...(transport ? { transport } : {}) } : undefined;
 }
 
+/** A step's settings, checked; a signal an earlier build had reads as the one that stands for it now (`currentSignals`), so a step on `classifier` runs on every typed message and anything else the user chose stays. */
 function stepOf(v: unknown, base: StepConfig | undefined): StepConfig | undefined {
   if (!isRecord(v)) return base;
   const route = routeOf(v.route);
   const maxTokens = atLeast(v.maxTokens, 1);
   const lore = loreOf(v.lore) ?? base?.lore;
+  const recent = recentHistoryOf(v.recent) ?? base?.recent;
   return {
     enabled: typeof v.enabled === "boolean" ? v.enabled : (base?.enabled ?? false),
-    signals: Array.isArray(v.signals) ? v.signals.filter((s): s is string => typeof s === "string").slice(0, 32).map((s) => s.slice(0, 64)) : (base?.signals ?? []),
+    signals: currentSignals(Array.isArray(v.signals) ? v.signals.filter((s): s is string => typeof s === "string").slice(0, 32).map((s) => s.slice(0, 64)) : (base?.signals ?? [])),
     ...(route ? { route } : {}),
     ...(typeof v.template === "string" ? { template: v.template.slice(0, 20_000) } : {}),
     ...(maxTokens !== undefined ? { maxTokens } : {}),
     ...(lore ? { lore: { ...lore } } : {}),
+    ...(recent ? { recent: { ...recent } } : {}),
   };
+}
+
+/** How much history a step reads: whole numbers from 0, with no ceiling; one that isn't reads as unset. */
+function recentHistoryOf(v: unknown): RecentHistory | undefined {
+  if (!isRecord(v)) return undefined;
+  const messages = atLeast(v.messages, 0);
+  const tokens = atLeast(v.tokens, 0);
+  return messages !== undefined && tokens !== undefined ? { messages, tokens } : undefined;
 }
 
 /**

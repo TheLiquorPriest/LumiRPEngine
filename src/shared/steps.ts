@@ -7,7 +7,6 @@ import type { StepPurpose, StepTemplateDef } from "./world";
 /** The signals a step can fire on; `every_n:<k>` is also accepted. */
 export const STEP_SIGNALS = [
   "typed_input",
-  "classifier",
   "reply",
   "scene_change",
   "slot_crossed",
@@ -26,9 +25,31 @@ export const STEP_SIGNALS = [
 
 export type StepSignal = (typeof STEP_SIGNALS)[number];
 
+/**
+ * Signals earlier builds had, each with the one that stands for it now. `classifier` fired when a
+ * word list thought typed text looked like an action; whether it is one is `interpret`'s call, so
+ * it reads as `typed_input` (DESIGN §5.2).
+ */
+const RETIRED_SIGNALS: ReadonlyMap<string, StepSignal> = new Map<string, StepSignal>([["classifier", "typed_input"]]);
+
 /** Whether a signal name is known. */
 export function knownSignal(s: string): boolean {
   return (STEP_SIGNALS as readonly string[]).includes(s) || /^every_n:[1-9]\d*$/.test(s);
+}
+
+/** Signals as this build reads them: each retired one becomes the one that stands for it, listed once. */
+export function currentSignals(signals: readonly string[]): string[] {
+  const out: string[] = [];
+  for (const s of signals) {
+    const now = RETIRED_SIGNALS.get(s) ?? s;
+    if (!out.includes(now)) out.push(now);
+  }
+  return out;
+}
+
+/** Whether any of `signals` is a retired one (`currentSignals` changes them). */
+export function hasRetiredSignal(signals: readonly string[]): boolean {
+  return signals.some((s) => RETIRED_SIGNALS.has(s));
 }
 
 /**

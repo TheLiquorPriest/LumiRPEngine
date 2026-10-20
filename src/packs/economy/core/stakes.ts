@@ -190,6 +190,7 @@ export function registerStakes(r: FinanceRegistry): void {
   r.core.action({
     id: "stake_sell",
     label: "Sell a share of a business",
+    description: "Sell part of your share of a business.",
     pack: "economy",
     params: { business: { type: "ref", ref: "business" }, share: { type: "number", label: "Share, %" }, price: { type: "money", label: "Price" }, buyer: { type: "ref", ref: "person", label: "Buyer", optional: true }, to: { type: "ref", ref: "account", label: "Proceeds to", optional: true } },
     requires: ["money_feature('investments', self)"],

@@ -515,6 +515,8 @@ export interface CombatActionDef {
 export interface ActionDef {
   id: ActionId;
   label: string;
+  /** What the action does, in a line: `interpret`'s catalog gives it the model with the label (DESIGN §5.2). Public text, like the label. */
+  description?: string;
   params: Record<string, ParamDef>;
   requires: Expr[];
   /** Inline check or a reference to `checks`. */
@@ -524,7 +526,7 @@ export interface ActionDef {
   /** Duration in minutes. */
   duration: Expr;
   activity?: ActivitySpec;
-  /** Verbs and phrases for the typed-input classifier. */
+  /** Ways players say it ("head over to", "walk to"): `interpret`'s catalog shows them as hints (DESIGN §5.2); no word list decides what an input is. */
   lexicon?: string[];
   /** The label other characters can observe (no secrets; linted). */
   observable?: string;
