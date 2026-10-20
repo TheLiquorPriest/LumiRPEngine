@@ -221,11 +221,18 @@ export function jobControls(view: FinanceView, job: JobView, employer: BusinessV
 
 export type BusinessControl = "hire" | "invoice" | "draw" | "distribute" | "stake";
 
-/** The player's controls on a business from Money 3: running it (hiring, invoicing, drawing, paying out profit) for whoever manages it; selling a stake, where investments run, for whoever holds a share of its worth. */
+/**
+ * The player's controls on a business from Money 3: running it (hiring, invoicing, paying out
+ * profit) for whoever manages it, and a draw for whoever may take one (an owner or a joint owner,
+ * never from a corporation, as the view says); selling a stake, where investments run, for whoever
+ * holds a share of its worth.
+ */
 export function businessControls(view: FinanceView, business: BusinessView): BusinessControl[] {
   if (view.level < 3) return [];
   const r = rights(business.role);
-  const out: BusinessControl[] = r.manage ? ["hire", "invoice", "draw", "distribute"] : [];
+  const out: BusinessControl[] = r.manage ? ["hire", "invoice"] : [];
+  if (business.mayDraw) out.push("draw");
+  if (r.manage) out.push("distribute");
   if (r.worth && view.features.includes("investments")) out.push("stake");
   return out;
 }

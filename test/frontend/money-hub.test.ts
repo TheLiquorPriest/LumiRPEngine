@@ -341,7 +341,11 @@ describe("what a party's roles allow", () => {
   test("someone who only shares in a business's worth sells a stake where investments run, and runs nothing", () => {
     expect(businessControls(view({ level: 4, features: ["investments"] }), shop("beneficiary"))).toEqual(["stake"]);
     expect(businessControls(view({ level: 3 }), shop("beneficiary"))).toEqual([]);
-    expect(businessControls(view({ level: 3 }), shop("trustee"))).toEqual(["hire", "invoice", "draw", "distribute"]);
+    // A trustee runs the business but takes no draw: only an owner or a joint owner does, and never from a corporation.
+    expect(businessControls(view({ level: 3 }), shop("trustee"))).toEqual(["hire", "invoice", "distribute"]);
+    expect(businessControls(view({ level: 3 }), shop("custodian"))).toEqual(["hire", "invoice", "distribute"]);
+    expect(businessControls(view({ level: 3 }), shop("owner"))).toEqual(["hire", "invoice", "draw", "distribute"]);
+    expect(businessControls(view({ level: 3 }), { ...shop("owner"), mayDraw: false })).toEqual(["hire", "invoice", "distribute"]);
     const invoice = { id: "inv1", business: "shop", customer: "pov", cents: 5000, memo: "", issued: 0, due: 0, state: "paid" as const, customerName: "You", issuedAt: "", dueAt: "" };
     expect(invoiceControls(view({ level: 3 }), shop("owner"), invoice)).toEqual([]);
     expect(invoiceControls(view({ level: 3 }), shop("owner"), { ...invoice, state: "late" })).toEqual(["void", "pay"]);

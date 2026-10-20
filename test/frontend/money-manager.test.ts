@@ -4,7 +4,7 @@
 
 import { describe, expect, test } from "bun:test";
 import type { AccountView, FinanceView } from "../../src/shared/finance";
-import { autopaySources, fallbackSources, findAccount, flowSources, flowTargets, jobControls, payeeProblem } from "../../src/packs/economy/ui/layout";
+import { autopaySources, businessControls, fallbackSources, findAccount, flowSources, flowTargets, jobControls, payeeProblem } from "../../src/packs/economy/ui/layout";
 import { autopayAction, flowCreateAction, blankFlowForm } from "../../src/packs/economy/ui/requests";
 import { MoneyChat } from "../support/money-chat";
 
@@ -66,5 +66,18 @@ describe("a manager's pickers", () => {
     expect(hidden.worker).toBe("an employee");
     expect(jobControls(view, hidden, shop)).toEqual([]);
     expect(jobControls(view, seen, shop)).toEqual(["raise", "let_go"]);
+  });
+
+  test("Marcus is offered an owner's draw from the shop as an LLC, and none from it as a corporation", async () => {
+    const draws = async (structure: string): Promise<boolean> => {
+      const view = await (await MoneyChat.start({ pov: MARCUS, entities: { [BUSINESS]: { structure } } })).hub();
+      const shop = view.businesses.find((b) => b.id === BUSINESS);
+      if (!shop) throw new Error("Marcus doesn't run the shop");
+      // He runs it either way.
+      expect(businessControls(view, shop)).toEqual(expect.arrayContaining(["hire", "invoice", "distribute"]));
+      return businessControls(view, shop).includes("draw");
+    };
+    expect(await draws("llc")).toBe(true);
+    expect(await draws("c_corp")).toBe(false);
   });
 });
