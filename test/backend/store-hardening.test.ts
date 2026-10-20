@@ -179,6 +179,8 @@ describe("a damaged record in message metadata (an imported or forked chat)", ()
     if (!reply || !ledger || !rec) throw new Error("no stored record");
     delete rec.undone;
     reply.bag = { ...reply.bag, [LEDGER_NAMESPACE]: ledger as unknown as JsonObject };
+    // Found when the chat is next opened (the engine was off while it was written).
+    rig.rt.ledger.forget(chatId);
     await rig.rt.ledger.open(chatId, user);
     await rig.host.settle();
     expect(rig.rt.ledger.errors).toEqual([]);
