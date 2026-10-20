@@ -4,7 +4,7 @@
 // dashboards show at each level is tested directly; the core already left out what the level
 // doesn't simulate, and nothing here shows detail the view marks as below the top level.
 
-import { CLASS_TRAITS, ROLE_RIGHTS, type AccountView, type AlertLine, type BusinessView, type CardView, type DistributionRoute, type FinanceFeature, type FinanceView, type FlowView, type HoldingView, type Invoice, type JobView, type OwnerRole, type PropertyView, type RoleRights, type UpcomingLine } from "../../../shared/finance";
+import { CLASS_TRAITS, ROLE_RIGHTS, type AccountView, type AlertLine, type BusinessView, type CardView, type DistributionRoute, type FinanceFeature, type FinanceView, type FlowView, type HoldingView, type HouseholdView, type Invoice, type JobView, type OwnerRole, type PropertyView, type RoleRights, type UpcomingLine } from "../../../shared/finance";
 import type { EntityId } from "../../../shared/ids";
 import type { PaletteView } from "../../../shared/state-view";
 import { cardChanges, type CardChange } from "./requests";
@@ -22,6 +22,11 @@ export function routePick(route: DistributionRoute | null): string {
   if (route.reinvest) return "reinvest";
   if (route.elsewhere) return ROUTE_ELSEWHERE;
   return route.to ?? " ";
+}
+
+/** A party's name as an owner: "Marcus Delgado's", and a household's, which is its family's and so a plural, "The Kowalczyks'". */
+export function possessive(name: string, household: boolean): string {
+  return household && name.endsWith("s") ? `${name}'` : `${name}'s`;
 }
 
 export type HubSection = "overview" | "accounts" | "flows" | "jobs" | "businesses" | "investments" | "properties" | "credit" | "household";

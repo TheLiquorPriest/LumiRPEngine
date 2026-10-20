@@ -3,9 +3,11 @@
 // narrated price charges for something no catalog row prices, typed as the world's currency writes
 // it and stored in whole minor units; left empty, the engine derives it from the tables. The region
 // prices living and taxes for whoever names none; living costs are a week's spending per wealth
-// band. The Custom toggles (DESIGN §25) switch a money feature on or off at the levels its floor
-// allows, on a page of their own; products are the world's own account products and assets are
-// what holdings hold (§27), each a row that opens as a sheet. Styles: styles/packs-money.ts.
+// band; taxes are the spending categories sales tax never falls on and the corporate rate (§26).
+// The Custom toggles (DESIGN §25) switch a money feature on or off, under any preset, at the levels
+// its floor allows, on a page of their own; products are the world's own account products and
+// assets are what holdings hold (§27), each a row that opens as a sheet. Styles:
+// styles/packs-money.ts.
 
 import type { ComponentChildren } from "preact";
 import { useState } from "preact/hooks";
@@ -18,10 +20,11 @@ import { formatMoney, type WorldCurrency, type WorldDoc } from "../../../shared/
 import { Button, IconButton, IdText, Seg, type SegOption } from "../../../frontend/components";
 import { FormGroup, FormSheet, Issues, ItemRow, RefPicker, type RefOption } from "../../../frontend/build/form-kit";
 import type { FieldSpec } from "../../../frontend/build/schema";
-import { ChoiceInput, DateInput, type FormCtx, lintAt, LintBadge, MinorMoneyInput, NewKey, SchemaFields } from "../../../frontend/build/schema-form";
+import { ChoiceInput, DateInput, type FormCtx, lintAt, LintBadge, MinorMoneyInput, NewKey, NumberInput, SchemaFields } from "../../../frontend/build/schema-form";
 import { humanize } from "../../../frontend/format";
 import type { PackConfigProps } from "../../../frontend/registry";
 import { derivedUnpricedCap, WEALTH_BANDS } from "../core/model";
+import { CORPORATE_PCT } from "../core/taxes";
 
 /** A Custom toggle's state: as the level decides, or forced on or off. */
 export type ToggleState = "level" | "on" | "off";
@@ -61,6 +64,22 @@ export function withLivingCost(config: Readonly<JsonObject>, band: string, cents
   else costs[band] = Math.round(cents);
   const { livingCosts: _old, ...rest } = config;
   return Object.keys(costs).length > 0 ? { ...rest, livingCosts: costs } : { ...rest };
+}
+
+/** The config with one of its tax settings set, or removed (undefined); with none left, `taxes` goes too. */
+export function withTax(config: Readonly<JsonObject>, key: "exempt" | "corporatePct", value: JsonValue | undefined): JsonObject {
+  const taxes: JsonObject = isRecord(config.taxes) ? { ...config.taxes } : {};
+  if (value === undefined) delete taxes[key];
+  else taxes[key] = value;
+  const { taxes: _old, ...rest } = config;
+  return Object.keys(taxes).length > 0 ? { ...rest, taxes } : { ...rest };
+}
+
+/** The spending categories sales tax could spare: the categories table's rows by name, and any the config exempts that the table doesn't have, kept as they are. */
+export function exemptChoices(world: WorldDoc, exempt: readonly string[]): RefOption[] {
+  const rows = world.tables["economy.categories"]?.rows ?? {};
+  const known = Object.entries(rows).map(([id, row]) => ({ value: id, label: typeof row.name === "string" && row.name !== "" ? row.name : id }));
+  return [...known, ...exempt.filter((c) => !hasOwn(rows, c)).map((c) => ({ value: c, label: `${c} (not in the categories table)` }))];
 }
 
 const CONFIG = "packs.economy.config";
@@ -192,15 +211,78 @@ function LivingCosts(props: PackConfigProps) {
   );
 }
 
+type TaxState = "taxed" | "exempt";
+
+const TAX_CHOICES: readonly SegOption<TaxState>[] = [
+  { value: "taxed", label: "Taxed" },
+  { value: "exempt", label: "Exempt" },
+];
+
+const EXEMPT_NOTE = "A category exempt here is never taxed, wherever it's sold; a place can exempt more of its own.";
+
+/** What a C corporation pays and what sales tax spares: the corporate rate, then a row naming the exempt categories, which opens them all on a page of their own. */
+function Taxes(props: PackConfigProps) {
+  const [open, setOpen] = useState(false);
+  const taxes = isRecord(props.config.taxes) ? props.config.taxes : {};
+  const exempt = Array.isArray(taxes.exempt) ? taxes.exempt.filter((c): c is string => typeof c === "string") : [];
+  const choices = exemptChoices(props.world, exempt);
+  const lint = lintAt(props.lint, `${CONFIG}.taxes.exempt`);
+  const named = choices.filter((c) => exempt.includes(c.value)).map((c) => c.label);
+  const setExempt = (category: string, on: boolean) => {
+    const next = on ? [...exempt.filter((c) => c !== category), category] : exempt.filter((c) => c !== category);
+    props.onChange(withTax(props.config, "exempt", next.length > 0 ? next : undefined));
+  };
+  return (
+    <FormGroup title="Taxes">
+      <NumberInput
+        label="Corporate tax rate (%)"
+        value={taxes.corporatePct}
+        min={0}
+        max={100}
+        optional
+        placeholder={String(CORPORATE_PCT)}
+        hint={`What a C corporation pays on its profit, with its state's rate. Empty, it's the federal rate, ${CORPORATE_PCT}%.`}
+        issues={lintAt(props.lint, `${CONFIG}.taxes.corporatePct`)}
+        onChange={(v) => props.onChange(withTax(props.config, "corporatePct", typeof v === "number" ? v : undefined))}
+      />
+      <div class="lre-form-items">
+        <ItemRow title="Exempt from sales tax" subtitle={named.length > 0 ? named.join(", ") : "None: every category is taxed"} badge={<LintBadge issues={lint} />} onOpen={() => setOpen(true)} openLabel="Edit the categories exempt from sales tax" />
+      </div>
+      {open ? (
+        <FormSheet title="Sales tax" subtitle="Categories exempt everywhere" backLabel="Economy" onClose={() => setOpen(false)}>
+          <span class="lre-field-help">{EXEMPT_NOTE}</span>
+          <div class="lre-form-items" data-lre-money-exempt>
+            {choices.length === 0 ? <span class="lre-form-items-none">The world's tables list no spending categories.</span> : null}
+            {choices.map((c) => (
+              <div key={c.value} class="lre-money-build-feature" data-lre-category={c.value}>
+                <span class="lre-money-build-feature-text">
+                  <span class="lre-money-build-feature-name">{c.label}</span>
+                </span>
+                <Seg<TaxState> label={`${c.label}: sales tax`} value={exempt.includes(c.value) ? "exempt" : "taxed"} options={TAX_CHOICES} onChange={(state) => setExempt(c.value, state === "exempt")} />
+              </div>
+            ))}
+          </div>
+          <Issues issues={lint} />
+          <div class="lre-form-sheet-actions lre-money-build-done">
+            <Button variant="primary" onClick={() => setOpen(false)}>
+              Done
+            </Button>
+          </div>
+        </FormSheet>
+      ) : null}
+    </FormGroup>
+  );
+}
+
 const TOGGLE_CHOICES: readonly SegOption<ToggleState>[] = [
   { value: "level", label: "By level" },
   { value: "on", label: "On" },
   { value: "off", label: "Off" },
 ];
 
-const FEATURES_NOTE = "Each runs from its usual Money level; switch one on to run it from its lowest level, or off. The dashboards show the full books for what runs.";
+const FEATURES_NOTE = "Each runs from its usual Money level; switch one on to run it from its lowest level, or off. The money hub shows each one's detail wherever it runs; the rest of the full books show only at the top level.";
 
-/** The Custom toggles: a row naming the ones switched, which opens them all on a page of their own. */
+/** The Custom toggles, under any preset: a row naming the ones switched, which opens them all on a page of their own. */
 function FeatureToggles(props: PackConfigProps) {
   const [open, setOpen] = useState(false);
   const lint = lintAt(props.lint, `${CONFIG}.features`);
@@ -213,13 +295,13 @@ function FeatureToggles(props: PackConfigProps) {
   }
   const summary = on.length === 0 && off.length === 0 ? "Each as its Money level decides" : [on.length > 0 ? `On: ${on.join(", ")}` : null, off.length > 0 ? `Off: ${off.join(", ")}` : null].filter((s) => s !== null).join(" · ");
   return (
-    <FormGroup title="Money features (Custom)">
+    <FormGroup title="Money features">
       <span class="lre-field-help">{FEATURES_NOTE}</span>
       <div class="lre-form-items">
         <ItemRow title="Feature switches" subtitle={summary} badge={<LintBadge issues={lint} />} onOpen={() => setOpen(true)} openLabel="Edit the money feature switches" />
       </div>
       {open ? (
-        <FormSheet title="Money features" subtitle="Custom switches" backLabel="Economy" onClose={() => setOpen(false)}>
+        <FormSheet title="Money features" subtitle="Under any preset" backLabel="Economy" onClose={() => setOpen(false)}>
           <span class="lre-field-help">{FEATURES_NOTE}</span>
           <div class="lre-form-items" data-lre-money-features>
             {FINANCE_FEATURES.map((f) => {

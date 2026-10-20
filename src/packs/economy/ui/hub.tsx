@@ -4,10 +4,11 @@
 // sections with a line from the view, which opens that section's page. The player's Play → Me →
 // Money shows the POV's, with in-world actions as controls; the GM's Money tab shows anyone's,
 // with edits. Both draw the same `FinanceView`, which the core built at the party's Money level: a
-// band at level 1, the simple books below the top level, everything at the top level or where
-// Custom turns a feature on.
+// band at level 1, the simple books below the top level, and everything at the top level; a feature
+// the world switches on shows its own detail wherever it runs, and one it switches off shows nowhere.
 
-import type { FinanceView } from "../../../shared/finance";
+import type { ComponentChildren } from "preact";
+import type { FinanceView, UpcomingLine } from "../../../shared/finance";
 import type { EditOp } from "../../../shared/protocol";
 import type { GmView, PaletteView } from "../../../shared/state-view";
 import { formatMoney, type WorldCurrency } from "../../../shared/world";
@@ -53,6 +54,19 @@ export function lineTarget(view: FinanceView, flow: string | null | undefined, a
   return a ? { page: detailPage("account", a.id), name: a.name } : null;
 }
 
+/**
+ * What's coming up, as its row shows the amount: signed, in the world's money. A 0 is either money
+ * that stays the party's own (a transfer between its accounts), shown muted at the flow's amount,
+ * or an amount the engine can't know ahead (a payroll, a day's sales), whose flow's words stand in
+ * for it at a reading size; a 0 the view holds no flow for shows as it is.
+ */
+export function upcomingValue(view: FinanceView, u: UpcomingLine, currency: WorldCurrency): { value: ComponentChildren; tone?: "pos" | "neg" | "muted" } {
+  const f = u.cents === 0 && u.flow ? [...view.flows, ...view.properties.flatMap((p) => p.costs), ...(view.household?.flows ?? [])].find((x) => x.id === u.flow) : undefined;
+  if (f && f.cents !== null) return { value: formatMoney(f.cents, currency), tone: "muted" };
+  if (f) return { value: <span class="lre-money-row-words">{f.amount}</span> };
+  return { value: `${u.cents > 0 ? "+" : ""}${formatMoney(u.cents, currency)}`, tone: u.cents < 0 ? "neg" : "pos" };
+}
+
 function counted(n: number, one: string, many: string): string {
   return `${n} ${n === 1 ? one : many}`;
 }
@@ -74,6 +88,7 @@ function summaryOf(view: FinanceView, section: Exclude<HubSection, "overview">, 
     }
     case "jobs": {
       const [job] = view.jobs;
+      if (view.jobs.length === 0) return "None yet";
       if (view.jobs.length !== 1 || !job) return counted(view.jobs.length, "job", "jobs");
       return parts(`${job.title || humanize(job.basis)} at ${job.employer}`, job.nextPay ? `payday ${job.nextPay}` : null);
     }
@@ -88,10 +103,11 @@ function summaryOf(view: FinanceView, section: Exclude<HubSection, "overview">, 
       return parts(`Worth ${fmt(inv.value)}`, `${inv.unrealised > 0 ? "+" : ""}${fmt(inv.unrealised)} not yet taken`);
     }
     case "properties": {
+      if (view.properties.length === 0) return "None yet";
       const owned = view.properties.filter((p) => p.share > 0);
       const forSale = view.properties.filter((p) => p.share <= 0 && p.forSale !== null && p.forSale !== undefined).length;
       const [home] = owned;
-      return parts(owned.length === 1 && home ? `${home.name}, ${fmt(home.equity)} equity` : owned.length > 0 ? `${owned.length} yours` : null, forSale > 0 ? `${forSale} for sale` : null);
+      return parts(owned.length === 1 && home ? `${home.name}, ${fmt(home.equity)} equity` : owned.length > 0 ? `${owned.length} owned` : null, forSale > 0 ? `${forSale} for sale` : null);
     }
     case "credit": {
       const c = view.credit;
@@ -100,7 +116,7 @@ function summaryOf(view: FinanceView, section: Exclude<HubSection, "overview">, 
     }
     case "household": {
       const h = view.household;
-      if (!h) return "";
+      if (!h) return "None yet";
       return parts(h.name, counted(h.members.length, "person", "people"), `${fmt(h.monthly.total)} a month shared`);
     }
   }
@@ -173,7 +189,8 @@ function Overview(props: SectionProps) {
           <List>
             {o.upcoming.slice(0, blocks.upcoming).map((u, i) => {
               const target = lineTarget(view, u.flow, u.account);
-              return <ListRow key={`${u.clock}:${i}`} icon="calendar" title={u.label} subtitle={u.at} value={`${u.cents > 0 ? "+" : ""}${fmt(u.cents)}`} valueTone={u.cents < 0 ? "neg" : "pos"} chevron={target !== null} onClick={target ? () => nav.open(target.page) : undefined} />;
+              const amount = upcomingValue(view, u, controls.currency);
+              return <ListRow key={`${u.clock}:${i}`} icon="calendar" title={u.label} subtitle={u.at} value={amount.value} valueTone={amount.tone} chevron={target !== null} onClick={target ? () => nav.open(target.page) : undefined} />;
             })}
           </List>
         </Section>
@@ -218,7 +235,7 @@ function Overview(props: SectionProps) {
 /** One party's money hub: the overview, then a row for each other section the party has, which opens its page. */
 export function MoneyHub(props: SectionProps & { label: string }) {
   const { view, controls, nav } = props;
-  const tabs = hubTabs(view);
+  const tabs = hubTabs(view, controls.mode);
   if (tabs.length === 0) return <Empty icon="coins">Money is off for {view.name}.</Empty>;
   const fmt = (cents: number): string => formatMoney(cents, controls.currency);
   const rows = tabs.flatMap((t) => (t.id === "overview" ? [] : [{ id: t.id, dot: t.dot }]));

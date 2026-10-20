@@ -4,10 +4,12 @@
 // of its own with one button that returns to the flow when it's done. The player creates,
 // edits, pauses, resumes and deletes the ones they may (in-world actions), pays an invoice billed
 // to them and gives notice on a lease they rent under; a flow a job, a lease or a loan derives is
-// changed at its source. The GM edits any flow's fields and status.
+// changed at its source. The GM edits any stored flow's fields, name and status. An edit fills its
+// form from the flow as stored, which a player's view leaves out when a side is someone they can't
+// see, so such a flow has no Edit.
 
 import { useState } from "preact/hooks";
-import { CLASS_TRAITS, FLOW_KINDS, FLOW_SHORTFALLS, FLOW_STATUSES, type FinanceView, type FlowStatus, type FlowView } from "../../../shared/finance";
+import { CLASS_TRAITS, FLOW_KINDS, FLOW_SHORTFALLS, FLOW_STATUSES, type FinanceView, type Flow, type FlowStatus, type FlowView } from "../../../shared/finance";
 import { formatMoney } from "../../../shared/world";
 import { Badge, Button, Disclosure, Empty, IdText, List, ListRow, Section } from "../../../frontend/components";
 import { humanize } from "../../../frontend/format";
@@ -56,6 +58,27 @@ function endpoints(view: FinanceView, controls: HubControls): { from: Choice[]; 
   const accounts = view.accounts.filter((a) => !CLASS_TRAITS[a.class].cash).map((a) => ({ value: a.id, label: a.name }));
   const parties = controls.gm.entities.filter((e) => !e.gone && (e.kind === "person" || e.kind === "business" || e.kind === "trust" || e.kind === "household")).map((e) => ({ value: e.id, label: `${e.name} (${e.kind})` }));
   return { from: [...accounts, { value: view.party, label: `${view.name} (as their preferences choose)` }], to: [...accounts, ...parties] };
+}
+
+/**
+ * The From and To choices for a flow's form, with the flow's own sides kept under the names its
+ * view gives them when the lists don't offer them (an account the player can't pay from, someone
+ * the POV's palette doesn't name, a party of a kind the GM's list leaves out), so no side ever
+ * shows as an id. A To the view names as it's stored is an outside payee typed by name, and stays
+ * typed.
+ */
+export function flowSideChoices(ends: { from: Choice[]; to: Choice[] }, flow: (FlowView & { spec: Flow }) | undefined): { from: Choice[]; to: Choice[] } {
+  if (!flow) return ends;
+  const { from, to } = flow.spec;
+  return {
+    from: ends.from.some((c) => c.value === from) ? ends.from : [...ends.from, { value: from, label: flow.from }],
+    to: flow.to === to || ends.to.some((c) => c.value === to) ? ends.to : [...ends.to, { value: to, label: flow.to }],
+  };
+}
+
+/** Whether a flow carries its stored form, which its edit fills from (a player's view leaves it out when a side is someone they can't see). */
+function withSpec(f: FlowView): f is FlowView & { spec: Flow } {
+  return f.spec !== null;
 }
 
 /** A flow as a row: its name, from where to where and when, its amount and any trouble; it opens the flow's page. */
@@ -112,12 +135,14 @@ const CONTROL: Readonly<Record<FlowControl, { label: string; icon: IconName }>> 
 function FlowPage(props: SectionProps & { flow: FlowView }) {
   const { view, controls, nav, flow: f } = props;
   const runs = view.detail && f.done + f.missed > 0 ? `${f.done} paid, ${f.missed} missed${f.deferred > 0 ? `, ${formatMoney(f.deferred, controls.currency)} carried` : ""}` : null;
-  const can = controls.mode === "player" ? flowControls(view, f) : [];
+  const can = controls.mode === "player" ? flowControls(view, f).filter((c) => c !== "edit" || withSpec(f)) : [];
+  // A flow whose stored form the viewer can't see still leads as a figure when its words are one.
+  const figure = f.spec ? "fixed" in f.spec.amount : f.cents !== null && f.amount === formatMoney(f.cents, controls.currency);
   return (
     <MoneyPage nav={nav} name="flow" title={f.label} subtitle={humanize(f.kind).toLowerCase() === f.label.toLowerCase() ? undefined : humanize(f.kind)}>
       <IdText id={f.id} />
       {/* A fixed amount leads as a figure; one worked out each time ("the minimum due") reads as words, at a size words read well at. */}
-      <Hero label="Amount" value={"fixed" in f.spec.amount ? f.amount : <span class="lre-money-hero-words">{f.amount}</span>} sub={f.schedule} badges={<Badge tone={f.status !== "active" ? "neutral" : f.missed > 0 ? "warn" : "pos"}>{f.status === "active" && f.missed > 0 ? "Active · missed" : humanize(f.status)}</Badge>} />
+      <Hero label="Amount" value={figure ? f.amount : <span class="lre-money-hero-words">{f.amount}</span>} sub={f.schedule} badges={<Badge tone={f.status !== "active" ? "neutral" : f.missed > 0 ? "warn" : "pos"}>{f.status === "active" && f.missed > 0 ? "Active · missed" : humanize(f.status)}</Badge>} />
       {controls.mode === "player" ? (
         can.length > 0 ? (
           <Controls name={f.id}>
@@ -128,13 +153,15 @@ function FlowPage(props: SectionProps & { flow: FlowView }) {
             ))}
           </Controls>
         ) : (
-          <Note>Set by its {humanize(f.source).toLowerCase()}; change it there.</Note>
+          <Note>{f.source === "entity" ? "Only whoever pays it can change it." : `Set by its ${humanize(f.source).toLowerCase()}; change it there.`}</Note>
         )
       ) : f.source === "entity" ? (
         <Controls name={f.id}>
-          <Button icon="edit" onClick={() => nav.open(actionPage("flow", f.id, "edit"))}>
-            Edit
-          </Button>
+          {withSpec(f) ? (
+            <Button icon="edit" onClick={() => nav.open(actionPage("flow", f.id, "edit"))}>
+              Edit
+            </Button>
+          ) : null}
           <Button icon="sliders" onClick={() => nav.open(actionPage("flow", f.id, "status"))}>
             Status
           </Button>
@@ -163,15 +190,10 @@ function FlowPage(props: SectionProps & { flow: FlowView }) {
 }
 
 /** A new flow, or the change to one: the player's action, or the GM's edit. */
-function FlowFormPage(props: SectionProps & { flow?: FlowView }) {
+function FlowFormPage(props: SectionProps & { flow?: FlowView & { spec: Flow } }) {
   const { view, controls, nav, flow } = props;
   const ends = endpoints(view, controls);
-  // A flow's own payer and payee stay choices when the lists don't hold them (an account the player
-  // can't pay from, someone the POV's palette doesn't name, a party of a kind the GM's list leaves
-  // out), under the names the view gives them, never their ids. A payee whose name is the stored
-  // value itself is someone outside the world, typed.
-  const fromChoices = flow && !ends.from.some((f) => f.value === flow.spec.from) ? [...ends.from, { value: flow.spec.from, label: flow.from }] : ends.from;
-  const toChoices = flow && flow.to !== flow.spec.to && !ends.to.some((t) => t.value === flow.spec.to) ? [...ends.to, { value: flow.spec.to, label: flow.to }] : ends.to;
+  const { from: fromChoices, to: toChoices } = flowSideChoices(ends, flow);
   const [form, setForm] = useState<FlowForm>(() => (flow ? flowFormOf(flow.spec, controls.currency) : { ...blankFlowForm(ends.from[0]?.value ?? "") }));
   const typedTo = form.to !== "" && !toChoices.some((t) => t.value === form.to);
   const [otherTo, setOtherTo] = useState(typedTo);
@@ -313,7 +335,7 @@ export const flowPages: HubPages = {
       case "status":
         return gm ? <FlowStatusPage {...props} flow={flow} /> : null;
       case "edit":
-        return gm || (controls.mode === "player" && flowControls(view, flow).includes("edit")) ? <FlowFormPage {...props} flow={flow} /> : null;
+        return withSpec(flow) && (gm || (controls.mode === "player" && flowControls(view, flow).includes("edit"))) ? <FlowFormPage {...props} flow={flow} /> : null;
       case "delete":
         return gm || (controls.mode === "player" && flowControls(view, flow).includes("delete")) ? <FlowControlPage {...props} flow={flow} control="delete" /> : null;
       case "pause":

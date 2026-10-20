@@ -13,6 +13,7 @@ import { Icon } from "../../../frontend/icons";
 import type { GmSectionProps } from "../../../frontend/registry";
 import { decodeFinanceView } from "./decode";
 import { MoneyHub, type GmControls } from "./hub";
+import { possessive } from "./layout";
 import type { HubNav, HubPage } from "./nav";
 import { HubPageView, pageLabel } from "./pages";
 
@@ -59,7 +60,7 @@ function usePageStack() {
 function GmHub(props: { view: FinanceView; controls: GmControls; picker: ComponentChildren; extra: ComponentChildren }) {
   const { view, controls } = props;
   const pages = usePageStack();
-  const label = `${view.name}'s money`;
+  const label = `${possessive(view.name, view.partyKind === "household")} money`;
   const top = pages.stack.length;
   const navAt = (level: number): HubNav => {
     const under = level >= 2 ? pages.stack[level - 2] : undefined;

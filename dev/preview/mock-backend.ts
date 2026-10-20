@@ -17,7 +17,7 @@ import { decodeMapView } from "../../src/packs/space/ui/view";
 import { mapProposal, readMapAnswer, readMapRequest } from "../../src/backend/map-job";
 import { macroReview, WORLD_COLLECTIONS } from "../../src/backend/worlds";
 import type { StudioCase } from "./fixtures";
-import { DECLINED_PURCHASE, extractionView, freshFixture, gmFixture, pausedFixture, settingsFixture, starterMap, stateFixture, studioOfferFixture, UPGRADE_PREVIEW, WORLDS, worldFixture } from "./fixtures";
+import { DECLINED_PURCHASE, extractionView, freshFixture, gmFixture, pausedFixture, portAlderMoney, settingsFixture, starterMap, stateFixture, studioOfferFixture, UPGRADE_PREVIEW, WORLDS, worldFixture } from "./fixtures";
 import { combatFixture } from "./combat-fixture";
 import { isWorldDoc, lintWorld, migrateWorld, previewSheet } from "../../src/engine/authoring";
 import { createRegistry } from "../../src/engine/registry-impl";
@@ -37,6 +37,8 @@ export interface MockOptions {
   scenario: "play" | "paused" | "not_world" | "fresh" | "combat" | "sheet";
   /** A starter template id: the map is that starter's in a new chat, as the engine builds it. */
   map?: string;
+  /** A Port Alder party (`?money=`): Play's money is theirs and GM → Money everyone's, as the engine keeps them nine days in. */
+  money?: string;
   /** What LumiRPEngine Studio has waiting (`?studio=`); nothing by default. */
   studio?: StudioCase;
   /** `?draft=elsewhere`: this long after Build first loads a draft, another window changes it (`changeDraftElsewhere`). */
@@ -367,6 +369,11 @@ export class MockBackend {
         this.view = this.options.scenario === "paused" ? pausedFixture(message.chatId) : this.options.scenario === "fresh" ? freshFixture(message.chatId) : stateFixture(message.chatId);
         if (this.options.scenario === "not_world") this.view = { ...stateFixture(message.chatId), status: "not_world", hud: null, scene: null, chips: [], panels: {}, palette: null, controls: null };
         else if (this.options.map) this.view.panels["space.map"] = starterMap(this.options.map);
+        const money = this.options.money && this.options.scenario !== "not_world" ? portAlderMoney(this.options.money) : null;
+        if (money) {
+          this.view.panels["economy.money"] = money.play;
+          this.gm = { ...this.gm, money: money.gm };
+        }
         if (this.options.scenario === "combat") {
           const fight = combatFixture();
           this.view.panels["combat.encounter"] = fight.panel;

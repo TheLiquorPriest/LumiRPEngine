@@ -3,13 +3,13 @@
 // At most three rows, and nothing when there's nothing; a row opens the account or flow page it
 // names, over Now.
 
-import { DEFAULT_CURRENCY, formatMoney } from "../../../shared/world";
+import { DEFAULT_CURRENCY } from "../../../shared/world";
 import { pushSheet, useApp } from "../../../frontend/app";
 import { Badge, ListRow } from "../../../frontend/components";
 import { GLANCE_ROWS, GlanceCard } from "../../../frontend/play/glance";
 import type { PanelProps } from "../../../frontend/registry";
 import { decodeFinanceView } from "./decode";
-import { lineTarget } from "./hub";
+import { lineTarget, upcomingValue } from "./hub";
 import { glanceLines } from "./layout";
 import type { HubPage } from "./nav";
 import { routeOf } from "./routes";
@@ -32,7 +32,8 @@ export function MoneyGlance(props: PanelProps) {
         }
         const u = line.line;
         const target = lineTarget(view, u.flow, u.account);
-        return <ListRow key={`soon:${i}`} icon="calendar" title={u.label} subtitle={u.at} value={`${u.cents > 0 ? "+" : ""}${formatMoney(u.cents, currency)}`} valueTone={u.cents < 0 ? "neg" : "pos"} chevron={target !== null} onClick={target ? () => open(target.page) : undefined} />;
+        const amount = upcomingValue(view, u, currency);
+        return <ListRow key={`soon:${i}`} icon="calendar" title={u.label} subtitle={u.at} value={amount.value} valueTone={amount.tone} chevron={target !== null} onClick={target ? () => open(target.page) : undefined} />;
       })}
     </GlanceCard>
   );

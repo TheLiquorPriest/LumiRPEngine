@@ -15,8 +15,8 @@ import type { IconName } from "../../../frontend/icons";
 import { RoutePage, RouteRow } from "./assets";
 import { ActionPage, AmountField, AmountPage, ChoiceField, NumberField, SelectField, TextField, type Choice } from "./forms";
 import type { PlayerControls, SectionProps } from "./hub";
-import { businessControls, invoiceControls, jobControls, knownPeople, workBlocks, type BusinessControl, type InvoiceControl } from "./layout";
-import { FieldsPage, TxnRows } from "./lines";
+import { businessControls, invoiceControls, jobControls, knownPeople, possessive, workBlocks, type BusinessControl, type InvoiceControl } from "./layout";
+import { FieldsPage, OwnerRows, TxnRows } from "./lines";
 import { actionPage, Controls, detailPage, Hero, MoneyPage, Note, type HubPages } from "./nav";
 import { amountOf, distributeAction, drawAction, hireAction, invoiceAction, invoiceIssueAction, jobEndAction, jobSpawnOps, newIdFor, raiseAction, stakeSellAction, type HireForm } from "./requests";
 
@@ -338,13 +338,11 @@ function BusinessPage(props: SectionProps & { business: BusinessView }) {
       {b.owners.length > 0 ? (
         <Section title="Owners" flush>
           <List>
-            {b.owners.map((o) => (
-              <ListRow key={o.party} title={o.name} subtitle={humanize(o.role)} value={o.share > 0 ? `${Math.round(o.share * 10) / 10}%` : undefined} />
-            ))}
+            <OwnerRows owners={b.owners} />
           </List>
         </Section>
       ) : null}
-      {b.role !== null && ROLE_RIGHTS[b.role].worth ? <RouteRow view={view} controls={controls} nav={nav} route={b.route} reinvest label={controls.mode === "player" ? "Your share of its profit goes to" : `${view.name}'s share of its profit goes to`} page={actionPage("business", b.id, "route")} /> : null}
+      {b.role !== null && ROLE_RIGHTS[b.role].worth ? <RouteRow view={view} controls={controls} nav={nav} route={b.route} reinvest label={controls.mode === "player" ? "Your share of its profit goes to" : `${possessive(view.name, view.partyKind === "household")} share of its profit goes to`} page={actionPage("business", b.id, "route")} /> : null}
       <Section title={`Books · ${b.books.period}`} flush>
         <List>
           <ListRow title="Revenue" value={fmt(b.books.revenue)} valueTone="pos" />
@@ -525,7 +523,7 @@ function businessPage(control: string | undefined, inner: string | undefined, pr
   const invoice = inner === undefined ? undefined : b.invoices.find((i) => i.id === inner);
   if (control === undefined) return <BusinessPage {...props} business={b} />;
   if (control === "fields") return <FieldsPage nav={nav} controls={controls} name="business-fields" title="Business fields" subtitle={b.name} entity={b.id} />;
-  if (control === "route") return b.role !== null && ROLE_RIGHTS[b.role].worth ? <RoutePage view={view} controls={controls} nav={nav} target={{ business: b.id }} route={b.route} reinvest label={controls.mode === "player" ? "Your share of its profit goes to" : `${view.name}'s share of its profit goes to`} subtitle={b.name} /> : null;
+  if (control === "route") return b.role !== null && ROLE_RIGHTS[b.role].worth ? <RoutePage view={view} controls={controls} nav={nav} target={{ business: b.id }} route={b.route} reinvest label={controls.mode === "player" ? "Your share of its profit goes to" : `${possessive(view.name, view.partyKind === "household")} share of its profit goes to`} subtitle={b.name} /> : null;
   if (inner !== undefined) {
     if (!invoice) return null;
     if (control === "state") return <InvoiceStatePage {...props} business={b} invoice={invoice} />;

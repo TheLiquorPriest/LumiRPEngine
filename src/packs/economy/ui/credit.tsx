@@ -2,7 +2,8 @@
 // parts, and the report on its own page in the full books) and the credit an application can ask
 // for, each offer opening its Apply page; a household's members, shares, shared accounts and
 // shared costs, each cost opening its flow's page. The player applies for credit (an in-world
-// action) and handles the shared flows they may; the GM adds and takes out household members.
+// action) and handles the shared flows they may; the GM adds and takes out household members, and
+// puts a person who has none in a household.
 
 import { useState } from "preact/hooks";
 import { SCORE_MAX, SCORE_MIN, type FinanceView } from "../../../shared/finance";
@@ -12,7 +13,7 @@ import { humanize } from "../../../frontend/format";
 import { FlowListRow } from "./flows";
 import { ActionPage, AmountPage, ChoiceField, SelectField } from "./forms";
 import type { SectionProps } from "./hub";
-import { creditBlocks } from "./layout";
+import { creditBlocks, householdRows, possessive, sharedAccounts } from "./layout";
 import { actionPage, Controls, Hero, MoneyPage, Note, type HubPage, type HubPages } from "./nav";
 import { applyCreditAction } from "./requests";
 
@@ -137,11 +138,19 @@ function HouseholdSection(props: SectionProps) {
   if (!h) {
     return (
       <MoneyPage nav={nav} name="household" title="Household">
+        {controls.mode === "gm" && view.partyKind === "person" ? (
+          <Button variant="primary" icon="user-plus" block onClick={() => nav.open(actionPage("household", "join"))}>
+            Add to a household
+          </Button>
+        ) : null}
         <Empty icon="users">No household.</Empty>
       </MoneyPage>
     );
   }
   const fmt = (cents: number): string => formatMoney(cents, controls.currency);
+  // The household's own accounts are the GM's to name; the player sees how many there are.
+  const shared = sharedAccounts(view, h);
+  const others = controls.mode === "gm" ? shared.others.map((id) => controls.gm.entities.find((e) => e.id === id)?.name ?? id) : shared.others.length > 0 ? [`${shared.others.length} the household holds`] : [];
   return (
     <MoneyPage nav={nav} name="household" title={h.name} subtitle="Household">
       <Hero label="Shared costs a month" value={fmt(h.monthly.total)} />
@@ -150,7 +159,7 @@ function HouseholdSection(props: SectionProps) {
           <Button icon="user-plus" onClick={() => nav.open(actionPage("household", "add"))}>
             Add a member
           </Button>
-          {h.members.length > 0 ? (
+          {h.members.some((m) => m.id !== null) ? (
             <Button variant="danger" icon="close" onClick={() => nav.open(actionPage("household", "remove"))}>
               Remove a member
             </Button>
@@ -162,17 +171,16 @@ function HouseholdSection(props: SectionProps) {
           <Empty icon="users">No one lives here.</Empty>
         ) : (
           <List>
-            {h.members.map((m) => {
-              const part = h.monthly.parts.find((p) => p.id === m.id);
-              return <ListRow key={m.id} title={m.name} subtitle={[m.role ? humanize(m.role) : null, part ? `${fmt(part.cents)} a month` : null].filter((s) => s !== null).join(" · ") || undefined} value={m.share > 0 ? `${Math.round(m.share * 10) / 10}%` : undefined} />;
-            })}
+            {householdRows(h).map((m) => (
+              <ListRow key={m.key} title={m.name} subtitle={[m.role ? humanize(m.role) : null, m.cents !== null ? `${fmt(m.cents)} a month` : null].filter((s) => s !== null).join(" · ") || undefined} value={m.share > 0 ? `${Math.round(m.share * 10) / 10}%` : undefined} />
+            ))}
           </List>
         )}
       </Section>
       {h.accounts.length > 0 ? (
         <Section flush>
           <List>
-            <ListRow icon="bank" title="Shared accounts" value={h.accounts.map((id) => view.accounts.find((a) => a.id === id)?.name ?? "another account").join(", ")} />
+            <ListRow icon="bank" title="Shared accounts" value={[...shared.names, ...others].join(", ")} />
           </List>
         </Section>
       ) : null}
@@ -205,28 +213,42 @@ function AddMemberPage(props: SectionProps) {
   );
 }
 
-/** The GM takes a member out of the household (`member_of`), one edit. */
-function RemoveMemberPage(props: SectionProps) {
+/** The GM puts a person who lives in no household into one (`member_of`), one edit. */
+function JoinHouseholdPage(props: SectionProps) {
   const { view, controls, nav } = props;
-  const [leaving, setLeaving] = useState("");
-  const h = view.household;
-  if (controls.mode !== "gm" || !h || h.members.length === 0) return null;
-  const who = h.members.find((m) => m.id === leaving);
+  const [joining, setJoining] = useState("");
+  if (controls.mode !== "gm" || view.household !== null || view.partyKind !== "person") return null;
+  const households = controls.gm.entities.filter((e) => e.kind === "household" && !e.gone).map((e) => ({ value: e.id, label: e.name }));
   return (
-    <ActionPage nav={nav} controls={controls} name="household-remove" title="Remove a member" subtitle={h.name} go="Remove" danger disabled={!who} submit={() => controls.edit([{ op: "unlink", rel: "member_of", from: leaving, to: h.id }])}>
-      <ChoiceField label="Who" value={leaving} options={h.members.map((m) => ({ value: m.id, label: m.name, detail: m.role ? humanize(m.role) : undefined }))} onChange={setLeaving} />
-      {who ? <Note>{`${who.name} no longer shares ${h.name}'s costs.`}</Note> : null}
+    <ActionPage nav={nav} controls={controls} name="household-join" title="Add to a household" subtitle={view.name} go="Add" disabled={joining === ""} submit={() => controls.edit([{ op: "link", rel: "member_of", from: view.party, to: joining }])}>
+      {households.length > 0 ? <SelectField label="Household" value={joining} empty="Choose a household" options={households} onChange={setJoining} /> : <Note>The world has no household yet.</Note>}
     </ActionPage>
   );
 }
 
-/** Credit's and the household's pages: each section, the report, an offer's Apply page and the GM's member changes. What the view doesn't hold, or the mode may not do, draws nothing (gone). */
+/** The GM takes a member out of the household (`member_of`), one edit; someone the view doesn't name can't be picked. */
+function RemoveMemberPage(props: SectionProps) {
+  const { view, controls, nav } = props;
+  const [leaving, setLeaving] = useState("");
+  const h = view.household;
+  const members = (h?.members ?? []).flatMap((m) => (m.id === null ? [] : [{ id: m.id, name: m.name, role: m.role }]));
+  if (controls.mode !== "gm" || !h || members.length === 0) return null;
+  const who = members.find((m) => m.id === leaving);
+  return (
+    <ActionPage nav={nav} controls={controls} name="household-remove" title="Remove a member" subtitle={h.name} go="Remove" danger disabled={!who} submit={() => controls.edit([{ op: "unlink", rel: "member_of", from: leaving, to: h.id }])}>
+      <ChoiceField label="Who" value={leaving} options={members.map((m) => ({ value: m.id, label: m.name, detail: m.role ? humanize(m.role) : undefined }))} onChange={setLeaving} />
+      {who ? <Note>{`${who.name} no longer shares ${possessive(h.name, true)} costs.`}</Note> : null}
+    </ActionPage>
+  );
+}
+
+/** Credit's and the household's pages: each section, the report, an offer's Apply page and the GM's member changes, a person's household among them. What the view doesn't hold, or the mode may not do, draws nothing (gone). */
 export const creditPages: HubPages = {
   heads: ["credit", "household"],
   render(page, props) {
     const { view, controls, nav } = props;
     const [head, id, inner] = page.path;
-    if (head === "household") return id === undefined ? <HouseholdSection {...props} /> : id === "add" ? <AddMemberPage {...props} /> : id === "remove" ? <RemoveMemberPage {...props} /> : null;
+    if (head === "household") return id === undefined ? <HouseholdSection {...props} /> : id === "add" ? <AddMemberPage {...props} /> : id === "remove" ? <RemoveMemberPage {...props} /> : id === "join" ? <JoinHouseholdPage {...props} /> : null;
     if (head !== "credit") return null;
     if (id === undefined) return <CreditSection {...props} />;
     if (id === "report") return <ReportPage {...props} />;

@@ -1,11 +1,14 @@
 // The money hub's pages (overview, section rows, detail pages, action pages): a page survives the
 // trip through a Play sheet's id, an account's page is an `account` sheet, Now's glance picks its
-// rows by the clock and never by words, and a line opens the flow or account it names.
+// rows by the clock and never by words, a line opens the flow or account it names, and an amount
+// the engine can't know ahead reads in words, never as $0.00.
 
 import { describe, expect, test } from "bun:test";
 import type { AccountView, FinanceView, FlowView, UpcomingLine } from "../../src/shared/finance";
-import { lineTarget } from "../../src/packs/economy/ui/hub";
-import { GLANCE_AHEAD_MINUTES, glanceLines } from "../../src/packs/economy/ui/layout";
+import { isRecord } from "../../src/shared/json";
+import { DEFAULT_CURRENCY } from "../../src/shared/world";
+import { lineTarget, upcomingValue } from "../../src/packs/economy/ui/hub";
+import { GLANCE_AHEAD_MINUTES, glanceLines, possessive } from "../../src/packs/economy/ui/layout";
 import { actionPage, detailPage, sectionPage } from "../../src/packs/economy/ui/nav";
 import { pageOf, routeOf } from "../../src/packs/economy/ui/routes";
 
@@ -18,7 +21,7 @@ function account(id: string, name: string): AccountView {
 }
 
 function flow(id: string, label: string): FlowView {
-  return { id, label, kind: "bill", from: "Checking", to: "Landlord", amount: "$1.00", cents: 100, schedule: "monthly", next: null, shortfall: "skip", status: "active", category: null, link: null, editable: true, source: "entity", done: 0, missed: 0, deferred: 0, spec: { id, label, kind: "bill", from: "chk", to: "landlord", amount: { fixed: 100 }, schedule: { every: "month" }, shortfall: "skip", status: "active", source: "entity" } };
+  return { id, label, kind: "bill", from: "Checking", to: "Landlord", amount: "$1.00", cents: 100, schedule: "monthly", next: null, shortfall: "skip", status: "active", category: null, link: null, editable: true, source: "entity", payer: null, done: 0, missed: 0, deferred: 0, spec: { id, label, kind: "bill", from: "chk", to: "landlord", amount: { fixed: 100 }, schedule: { every: "month" }, shortfall: "skip", status: "active", source: "entity" } };
 }
 
 const checking = account("chk", "Checking");
@@ -89,5 +92,30 @@ describe("what a money line opens", () => {
     const tax = flow("flow_tax", "Property tax");
     const owned = view({ properties: [{ id: "house", name: "House", place: null, owners: [], share: 100, value: 1, equity: 1, mortgage: null, leases: [], costs: [tax], route: null }] });
     expect(lineTarget(owned, "flow_tax", null)?.name).toBe("Property tax");
+  });
+});
+
+describe("what a money line shows", () => {
+  const due = (flowId: string | null, cents: number): UpcomingLine => ({ at: "Fri 09:00", clock: 1, label: "Due", cents, flow: flowId, account: null });
+
+  test("a 0 is the flow's own figure, muted, where the money stays the party's, and its words where it can't be known ahead", () => {
+    const saving = { ...flow("flow_save", "Savings"), amount: "$50.00", cents: 5000 };
+    const payroll = { ...flow("job:pay", "Payday"), amount: "worked out each time", cents: null };
+    const v = view({ flows: [rent, saving, payroll] });
+    expect(upcomingValue(v, due("flow_save", 0), DEFAULT_CURRENCY)).toEqual({ value: "$50.00", tone: "muted" });
+    const words = upcomingValue(v, due("job:pay", 0), DEFAULT_CURRENCY);
+    expect(words.tone).toBeUndefined();
+    expect(isRecord(words.value) && isRecord(words.value.props) ? words.value.props.children : null).toBe("worked out each time");
+    // Anything else is the signed figure, a 0 that names no flow the view holds included.
+    expect(upcomingValue(v, due("flow_rent", -99500), DEFAULT_CURRENCY)).toEqual({ value: "-$995.00", tone: "neg" });
+    expect(upcomingValue(v, due("flow_rent", 6124), DEFAULT_CURRENCY)).toEqual({ value: "+$61.24", tone: "pos" });
+    expect(upcomingValue(v, due(null, 0), DEFAULT_CURRENCY)).toEqual({ value: "$0.00", tone: "pos" });
+  });
+
+  test("an owner's name: a household's is its family's, a plural", () => {
+    expect(possessive("Marcus Delgado", false)).toBe("Marcus Delgado's");
+    expect(possessive("Silas", false)).toBe("Silas's");
+    expect(possessive("The Kowalczyks", true)).toBe("The Kowalczyks'");
+    expect(possessive("Unit 2B", true)).toBe("Unit 2B's");
   });
 });
