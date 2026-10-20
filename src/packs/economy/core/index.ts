@@ -31,7 +31,7 @@ import type { Rng } from "../../../engine/rng";
 import { kindIs, placeOfEntity } from "../../../engine/scope";
 import { FINANCE_MODULES } from "./modules";
 import type { FinanceApi, FinanceHooks, FinanceKind, FinanceRegistry, Payment, PostMeta } from "./module";
-import { applyForCredit, closeAccount, createFlow, deposit, openAccount, releaseHold, replaceCard, setAutopay, setCardState, setFlowStatus, setPayPrefs, setStatus, updateFlow, withdraw } from "./actions";
+import { applyForCredit, closeAccount, createFlow, creditApplication, deposit, openAccount, releaseHold, replaceCard, setAutopay, setCardState, setFlowStatus, setPayPrefs, setStatus, updateFlow, withdraw } from "./actions";
 import { currentScore } from "./credit";
 import { allFlows, businessDay, livingCost, occurrences, splitAmount } from "./flows";
 import { EVENTS, isOpened, reject } from "./journal";
@@ -300,6 +300,11 @@ function makeApi(hooks: FinanceHooks): FinanceApi {
     businessDay: (ctx, day, roll) => businessDay(calendarOf(ctx.world), day, roll),
     flows: (ctx) => allFlows(hooks, ctx),
     openAccount: (ctx, spec) => openAccount(ctx, spec),
+    applyCredit: (ctx, who, app) => {
+      const made = creditApplication(ctx, who, app);
+      if ("code" in made) return made;
+      return made.decision.approved ? made.events : reject("declined", made.decision.reason);
+    },
     securedBy: (state, asset) =>
       Object.keys(state.entities)
         .filter((id) => own(state.entities, id)?.kind === "account" && own(state.entities, id)?.fields.secured_by === asset)

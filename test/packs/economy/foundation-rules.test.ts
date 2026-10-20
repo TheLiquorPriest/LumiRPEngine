@@ -348,3 +348,37 @@ describe("one check decides which accounts a payment may use", () => {
     expect([w.state.accounts.cd, w.state.accounts.ira]).toEqual([100_000, 510_000]);
   });
 });
+
+describe("a lender extends no more than the applicant's score earns", () => {
+  const apply = (w: Working, params: JsonObject): void => {
+    resolveAction(reg, w, { action: "apply_credit", params }, createRng(`credit:${JSON.stringify(params)}`));
+  };
+  const opened = (w: Working, cls: string): JsonObject[] => Object.values(w.state.entities).flatMap((e) => (e.kind === "account" && e.fields.product === cls ? [e.fields] : []));
+  const declines = (w: Working): string[] => dataOf(w, "engine.signal").flatMap((d) => (d.class === "decline" ? [String(d.text)] : []));
+
+  test("an unsecured loan larger than a lender lends is declined and pays nothing out; one within it is paid out", () => {
+    const w = setup();
+    const checking = w.state.accounts.checking ?? 0;
+    apply(w, { product: "loan", amount: 10_000_000_000 });
+    expect([opened(w, "loan"), w.state.accounts.checking]).toEqual([[], checking]);
+    expect(declines(w).at(-1)).toContain("more than a lender would lend");
+    apply(w, { product: "loan", amount: 2_000_000 });
+    expect(opened(w, "loan")).toHaveLength(1);
+    expect(w.state.accounts.checking).toBe(checking + 2_000_000);
+  });
+
+  test("below Money 4, without credit reports, the same ceiling holds", () => {
+    const w = setup((world) => {
+      world.realism.levels.money = 3;
+    });
+    apply(w, { product: "loan", amount: 10_000_000_000 });
+    expect(opened(w, "loan")).toEqual([]);
+  });
+
+  test("a charge card applied for with no amount gets a limit it can be used to", () => {
+    const w = setup();
+    apply(w, { product: "charge_card" });
+    const [charge] = opened(w, "charge_card");
+    expect(Number(charge?.limit)).toBeGreaterThan(0);
+  });
+});
