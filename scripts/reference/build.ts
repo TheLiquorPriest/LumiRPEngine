@@ -19,6 +19,7 @@ import { createRegistry } from "../../src/engine/registry-impl";
 import { BUILTIN_FUNCTIONS } from "../../src/engine/scope";
 import { ALL_PACKS } from "../../src/packs/index";
 import { ADJUDICATION_PRESETS } from "../../src/shared/adjudication";
+import { LORE_PIN_LINTS } from "../../src/shared/lore";
 import { BANDS, DOMAINS, INTERRUPT_CLASSES } from "../../src/shared/ids";
 import { STEP_OUTPUTS, STEP_PLACEHOLDERS, STEP_SIGNALS } from "../../src/shared/steps";
 import { BAND_LABEL } from "../../src/shared/tiers";
@@ -243,6 +244,12 @@ function builtInSection(engine: PackRecord): string[] {
   out.push("### Sections", "", "The slots a world gets when it defines none, kept in rank order on the section budget.", "");
   out.push(...table(["Slot", "Label", "Rank"], Object.values(DEFAULT_SECTIONS).sort((a, b) => a.rank - b.rank).map((s) => [code(s.id), s.label, String(s.rank)])), "");
   out.push("### Realism", "", `Domains: ${codes([...DOMAINS])}; each at a level from 0 to 4.`, "", `Detail bands: ${BANDS.map((b) => `${code(b)} (${BAND_LABEL[b]})`).join(", ")}.`, "", `Interrupt classes: ${codes([...INTERRUPT_CLASSES])}.`, "");
+  out.push("### Lore pins", "");
+  out.push(
+    `The world's ${code("lorePins")} part: ${code("characters")} and ${code("places")}, each a map from an id to a list of pins, where a pin is ${code('{"lore": id}')} (one of the world's lore entries) or ${code('{"book": id, "entry": id}')} (an entry of one of the user's World Info books). A character's pins reach only their own mind's calls; a place's reach every helper and mind call there or in a place inside it, nearest place first. Pinned text comes first within a call's lore tokens, and a pin that doesn't fit is cut, with a note in the Context panel.`,
+    "",
+  );
+  out.push(...table(["Lint", "Means"], sortedBy(Object.entries(LORE_PIN_LINTS), ([c]) => c).map(([c, meaning]) => [code(c), meaning])), "");
   out.push("### Adjudication presets", "");
   const presets = Object.values(ADJUDICATION_PRESETS);
   const keys = ["checks", "riskyAt", "trivialAt", "impossibleAt", "description", "authority", "closeBy", "retry", "retryAfter"] as const;

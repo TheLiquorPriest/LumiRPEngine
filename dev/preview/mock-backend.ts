@@ -5,6 +5,8 @@
 import { CLASS_TRAITS, type AccountView, type FinanceView, type JournalLine } from "../../src/shared/finance";
 import type { JsonObject, JsonValue } from "../../src/shared/json";
 import { hasOwn, isRecord } from "../../src/shared/json";
+import type { MindsRunView } from "../../src/shared/minds";
+import type { LorePinView } from "../../src/shared/protocol";
 import type { DeltaOp, EditOp, FrontendToBackend, JobProposal, JobSummary, JobUpdate, LintIssue, LoreDrift, PresetCard, ResultBodies, StudioOfferView } from "../../src/shared/protocol";
 import { AGENT_API } from "../../src/shared/protocol";
 import type { UserSettings } from "../../src/shared/settings";
@@ -91,6 +93,8 @@ const LORE_PROPOSALS: JobProposal[] = [
 ];
 
 export class MockBackend {
+  /** The chat's latest minds run (`lre.minds`): the preview runs it one mind at a time, and the third fails as a cut-off call does. */
+  private mindsRun: MindsRunView | null = null;
   private view: StateView | null = null;
   private rev = 0;
   private settings: UserSettings = settingsFixture();
@@ -680,14 +684,57 @@ export class MockBackend {
           this.draft.lore[id] = { id, title: "Rosie sets down the coffee pot", content, keys: [], links: [], source: { kind: "chat", chatId: message.chatId, messageId: "m-latest" } };
           return this.result(reqId, "lre.lore", { worldId: WORLDS[0]?.id ?? "", id });
         }
-        // The preview has no World Info books of its own, and its world pins no lore.
-        if (message.op === "books") return this.result(reqId, "lre.lore", { books: [] });
-        if (message.op === "entries") return this.result(reqId, "lre.lore", { entries: [] });
-        if (message.op === "pins") return this.result(reqId, "lre.lore", { pins: { characters: {}, places: {} } });
+        // The preview's World Info: one book attached to the chat and one that isn't; the first GM character and where they are have pins.
+        if (message.op === "books") return this.result(reqId, "lre.lore", { books: [ { id: "book_town", name: "Town lore", attached: true }, { id: "book_lost", name: "Lost cities", attached: false } ] });
+        if (message.op === "entries") return this.result(reqId, "lre.lore", { entries: message.bookId === "book_town" ? [ { id: "e1", title: "Town notice", disabled: true, chars: 120 }, { id: "e2", title: "Harbor hours", disabled: false, chars: 300 } ] : [] });
+        if (message.op === "pins") {
+          const who = this.gm.minds.characters[0]?.entity;
+          const place = this.gm.entities.find((e) => e.id === who)?.place ?? this.gm.places[0]?.id;
+          const ledger: LorePinView = { key: "lore:rosies_diner", pin: { lore: "rosies_diner" }, title: "Rosie's Diner", source: "World lore", status: "ok", secret: false };
+          const notice: LorePinView = { key: "book:book_town/e1", pin: { book: "book_town", entry: "e1" }, title: "Town notice", source: "Town lore", status: "off", secret: false };
+          return this.result(reqId, "lre.lore", { pins: { characters: who ? { [who]: [ledger] } : {}, places: place ? { [place]: [notice] } : {} } });
+        }
         // The preview's "Rosie's Diner" was indexed from Town lore, whose entry has changed since.
         const content = "Rosie's opens at six and closes at two since the new lunch place opened. The booths by the window go first; the counter is for regulars.";
         const drift: Record<string, LoreDrift> = this.draft.lore.rosies_diner?.source?.kind === "book" && this.draft.lore.rosies_diner.source.hash === "stale" ? { rosies_diner: { status: "changed", content, hash: "fresh" } } : {};
         return this.result(reqId, "lre.lore", { drift: message.id === undefined || message.id === "rosies_diner" ? drift : {} });
+      }
+      case "lre.minds": {
+        if (message.op === "status") return this.result(reqId, "lre.minds", { run: this.mindsRun });
+        const current = this.mindsRun;
+        if (message.op === "cancel") {
+          if (current?.status === "running" && current.runId === message.runId) {
+            current.status = "cancelled";
+            for (const e of current.entries) if (e.status === "waiting" || e.status === "thinking") e.status = "cancelled";
+            current.message = "Cancelled before every mind was asked; nothing was recorded.";
+            this.emit({ lre: 1, type: "lre.minds.update", chatId: message.chatId, run: structuredClone(current) });
+          }
+          return this.result(reqId, "lre.minds", { run: this.mindsRun });
+        }
+        if (current?.status === "running") return this.error(reqId, "conflict", "A minds run is already under way in this chat: wait for it, or cancel it.");
+        const chosen = this.gm.minds.characters.filter((c) => (message.who ? message.who.includes(c.entity) : c.fidelity.level === "live" || c.fidelity.level === "near"));
+        if (chosen.length === 0) return this.error(reqId, "invalid", "Nobody is Live or Near here to run.");
+        const run: MindsRunView = { runId: `run_${this.rev}_${chosen.length}`, status: "running", startedAt: Date.now(), entries: chosen.map((c) => ({ entity: c.entity, name: c.name, level: c.fidelity.level, status: "waiting" })), message: null, pending: false, undo: null };
+        this.mindsRun = run;
+        const step = (i: number): void =>
+          void setTimeout(() => {
+            if (run.status !== "running") return;
+            const last = run.entries[i - 1];
+            if (last) {
+              Object.assign(last, i === 3 ? { status: "failed", reason: "the answer was cut off at 900 tokens before it said anything", ms: 30_400, tokens: 900 } : { status: "recorded", ms: 4_200 + i * 310, tokens: 412, pinned: [{ title: "Rosie's Diner", tokens: 96, cut: false }] });
+            }
+            const next = run.entries[i];
+            if (next) next.status = "thinking";
+            else {
+              run.status = run.entries.some((e) => e.status === "recorded") ? "done" : "failed";
+              run.undo = run.status === "done" ? "fix:preview:minds-run" : null;
+              if (run.status === "failed") run.message = "No mind came back, so nothing was recorded.";
+            }
+            this.emit({ lre: 1, type: "lre.minds.update", chatId: message.chatId, run: structuredClone(run) });
+            if (next) step(i + 1);
+          }, 900);
+        step(0);
+        return this.result(reqId, "lre.minds", { run: structuredClone(run) });
       }
       case "lre.studio":
         return this.studio(reqId, message);

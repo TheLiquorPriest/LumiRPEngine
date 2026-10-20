@@ -19,9 +19,11 @@ import { formatMinutes } from "../../../frontend/format";
 import { GmPage, usePages } from "../../../frontend/gm/ui";
 import { Icon } from "../../../frontend/icons";
 import { MoneyInput } from "../../../frontend/money-input";
-import type { GmSectionProps } from "../../../frontend/registry";
+import type { GmSectionProps, Send } from "../../../frontend/registry";
+import type { GmView } from "../../../shared/state-view";
 import type { PlanFormDraft } from "./ops";
 import { COMMITMENT_KIND_LABEL, COMMITMENT_STATUS_LABEL, commitmentDraft, commitmentOp, deleteOp, FIDELITY_LABEL, isMoneyPlan, narratorGets, noteDraft, noteOp, pinOp, PLAN_KIND_LABEL, PLAN_STATUS_LABEL, planDraft, planLasts, planOp, refreshOp, startPlanIn } from "./ops";
+import { PinnedLore, RunCard, useMindsRun, type MindsRun } from "./run";
 
 type Tone = "neutral" | "accent" | "pos" | "neg";
 type Mind = NonNullable<MindsGmCharacter["mind"]>;
@@ -76,6 +78,11 @@ interface Ctx {
   currency: WorldCurrency;
   places: { id: PlaceId; name: string }[];
   edit(ops: EditOp[]): Promise<boolean>;
+  /** The chat's minds run on demand (DESIGN §24.9), and what the pinned-lore section reads with. */
+  minds: MindsRun;
+  chatId: string;
+  send: Send;
+  gm: GmView;
 }
 
 function nameIn(list: readonly { id: string; name: string }[], id: string | null): string {
@@ -103,6 +110,11 @@ export function GmMindsSection(props: GmSectionProps) {
   const pages = usePages<EntityId>();
   const [query, setQuery] = useState("");
   const [level, setLevel] = useState<Fidelity | "">("");
+  // Choosing who to run: tapping a row picks them instead of opening their page.
+  const [picking, setPicking] = useState(false);
+  const [picked, setPicked] = useState<EntityId[]>([]);
+  const minds = useMindsRun(props.chatId, props.send, props.reload);
+  const running = minds.run?.status === "running";
   const pov = props.gm.entities.find((e) => e.pov);
   const ctx: Ctx = {
     view,
@@ -111,7 +123,12 @@ export function GmMindsSection(props: GmSectionProps) {
     places: props.gm.places.map((p) => ({ id: p.id, name: p.name })),
     currency: props.currency,
     edit: props.edit,
+    minds,
+    chatId: props.chatId,
+    send: props.send,
+    gm: props.gm,
   };
+  const liveNear = view.characters.filter((c) => c.fidelity.level === "live" || c.fidelity.level === "near").length;
   const page = pages.page;
   const selected = page === null ? undefined : view.characters.find((c) => c.entity === page);
   // Someone no longer among the characters (an Undo took back a spawn) gives way to the list.
@@ -137,6 +154,13 @@ export function GmMindsSection(props: GmSectionProps) {
             </List>
           </Section>
         </div>
+        <RunCard minds={minds} busy={props.busy} />
+        <Section title="Run minds now" flush>
+          <List>
+            <ListRow icon="sparkle" title={`Run everyone Live and Near (${liveNear})`} subtitle="From the chat so far and their lore, as a turn would; recorded as one edit you can undo" chevron disabled={props.busy || running || liveNear === 0} onClick={() => void minds.start()} />
+            <ListRow icon="users" title={picking ? "Stop choosing" : "Choose who to run"} subtitle={picking ? "Tap people below to pick them" : "Pick one or more from the list below"} chevron disabled={props.busy || running} onClick={() => (setPicking(!picking), setPicked([]))} />
+          </List>
+        </Section>
         <div class="lre-gm-tools">
           <label class="lre-gm-search">
             <Icon name="search" size={16} />
@@ -164,6 +188,7 @@ export function GmMindsSection(props: GmSectionProps) {
                     key={c.entity}
                     id={c.entity}
                     title={c.name}
+                    leading={picking ? <input type="checkbox" class="lre-gm-minds-pick" aria-label={`Pick ${c.name}`} checked={picked.includes(c.entity)} tabIndex={-1} /> : undefined}
                     subtitle={
                       <span class="lre-gm-minds-sub">
                         <span>{c.mind ? `Last mind ${c.mind.clock}` : "No mind yet"}</span>
@@ -178,14 +203,22 @@ export function GmMindsSection(props: GmSectionProps) {
                         <span class="lre-gm-minds-score-k">score</span>
                       </span>
                     }
-                    chevron
-                    onClick={() => pages.open(c.entity)}
+                    chevron={!picking}
+                    onClick={() => (picking ? setPicked(picked.includes(c.entity) ? picked.filter((id) => id !== c.entity) : [...picked, c.entity]) : pages.open(c.entity))}
                   />
                 ))}
               </List>
             </div>
           )}
         </Section>
+        {picking ? (
+          <div class="lre-gm-minds-pickbar" role="group" aria-label="Run the chosen minds">
+            <span>{picked.length === 1 ? "1 chosen" : `${picked.length} chosen`}</span>
+            <Button variant="primary" icon="sparkle" disabled={picked.length === 0 || running || props.busy} onClick={() => void minds.start(picked).then((ok) => ok && (setPicking(false), setPicked([])))}>
+              Run their minds
+            </Button>
+          </div>
+        ) : null}
       </div>
       {selected ? <CharacterPages ctx={ctx} c={selected} onBack={pages.back} /> : null}
     </div>
@@ -237,8 +270,15 @@ function CharacterPages(props: { ctx: Ctx; c: MindsGmCharacter; onBack(): void }
           onBack={props.onBack}
         >
           <div class="lre-gm-minds" data-lre-gm-minds={c.entity}>
+            <Section title="Run their mind now" flush>
+              <List>
+                <ListRow icon="sparkle" title="Run their mind now" subtitle="From the chat so far and their lore, as a turn would; recorded as one edit you can undo" chevron disabled={ctx.busy || ctx.minds.run?.status === "running"} onClick={() => void ctx.minds.start([c.entity])} />
+              </List>
+            </Section>
+            {ctx.minds.run?.entries.some((e) => e.entity === c.entity) || ctx.minds.error ? <RunCard minds={ctx.minds} busy={ctx.busy} /> : null}
             <Ladder c={c} busy={ctx.busy} open={changes.open} />
             <LatestMind ctx={ctx} c={c} />
+            <PinnedLore gm={ctx.gm} chatId={ctx.chatId} who={c.entity} send={ctx.send} />
             <Plans ctx={ctx} c={c} open={changes.open} />
             <Commitments c={c} busy={ctx.busy} open={changes.open} />
             <Notes c={c} busy={ctx.busy} open={changes.open} />

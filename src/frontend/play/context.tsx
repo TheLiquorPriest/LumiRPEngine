@@ -37,7 +37,7 @@ function decodeLore(value: unknown): LoreStepTrace[] {
     policy: oneOf(t.policy, LORE_POLICIES, "prefetch"),
     transport: oneOf(t.transport, ["none", "tools", "need"] as const, "none"),
     queries: list(t.queries, (q) => ({ kind: oneOf(q.kind, ["prefetch", "search", "get", "list"] as const, "search"), text: str(q.text), matched: optNum(q.matched) })),
-    entries: list(t.entries, (e) => ({ title: str(e.title), tokens: num(e.tokens), cut: e.cut === true })),
+    entries: list(t.entries, (e) => ({ title: str(e.title), tokens: num(e.tokens), cut: e.cut === true, ...(e.pinned === true ? { pinned: true as const } : {}) })),
     ...(t.private === true ? { private: true as const } : {}),
     lookups: num(t.lookups),
     notes: strings(t.notes),
@@ -61,6 +61,8 @@ function decodeMinds(value: unknown): MindCallTrace[] {
     ms: num(t.ms),
     tokens: num(t.tokens),
     prompt: oneOf(t.prompt, ["world", "override", "default"] as const, "default"),
+    pinned: list(t.pinned, (p) => ({ title: str(p.title), tokens: num(p.tokens), cut: p.cut === true })),
+    notes: strings(t.notes),
   }));
 }
 
@@ -213,7 +215,7 @@ export function ContextPanel(props: PanelProps) {
                       ) : null}
                     </ActionRow>
                     {t.entries.map((e, j) => (
-                      <ActionRow key={`e${j}`} title={e.title === "" ? "—" : e.title} subtitle={e.cut ? "Cut to fit" : undefined} value={`${e.tokens} tok`} />
+                      <ActionRow key={`e${j}`} title={e.title === "" ? "—" : e.title} subtitle={[e.pinned ? "Pinned here" : "", e.cut ? "Cut to fit" : ""].filter((s) => s !== "").join(" · ") || undefined} value={`${e.tokens} tok`} />
                     ))}
                   </ActionRows>
                   {t.notes.map((n) => (
@@ -236,7 +238,19 @@ export function ContextPanel(props: PanelProps) {
                     subtitle={[...(m.level ? [FIDELITY_LABEL[m.level]] : []), MIND_PHASE[m.phase], MIND_PROMPT[m.prompt]].join(" · ")}
                     value={`${(m.ms / 1000).toFixed(1)} s · ${m.tokens} tok`}
                     actions={<Badge tone={MIND_OUTCOME[m.outcome].tone}>{MIND_OUTCOME[m.outcome].text}</Badge>}
-                  />
+                  >
+                    {(m.pinned ?? []).length > 0 || (m.notes ?? []).length > 0 ? (
+                      <div class="lre-gm-minds-pinned" data-lre-mind-pins>
+                        {(m.pinned ?? []).length > 0 ? <span>Pinned lore: {(m.pinned ?? []).map((p) => `${p.title} (${p.tokens} tok${p.cut ? ", cut" : ""})`).join(", ")}</span> : null}
+                        {(m.notes ?? []).map((n) => (
+                          <p key={n} class="lre-gm-warnline">
+                            <Icon name="alert" size={16} />
+                            {n}
+                          </p>
+                        ))}
+                      </div>
+                    ) : null}
+                  </ActionRow>
                 ))}
               </ActionRows>
             </Section>

@@ -180,6 +180,8 @@ Six concepts plus one pipeline.
 - **User-owned settings** (`userStorage/settings.json`): model-use preset, per-step provider, connection and model, budgets, realism and time controls (§9.1, §9.2). Realism and time **seed new chats only**, filling in what the world's own defaults leave out (or replacing them, with "Use my settings instead of a world's defaults for new chats" on); a running chat changes through markers. Imports never change them. A settings file is conformed field by field to its schema when read (types, enums, ranges; open maps keep safe keys only; a bad value falls back to its default).
 
 ### 4.2 Engine-managed lore book (D11)
+
+Lore pins (§24.5) can name an entry of any of the user's World Info books, but never one in this engine-managed book: its entries mirror the world's lore, which a pin names directly.
 - **Created per world:** "LumiRPEngine · <World>".
 - **Slot entries** (Outcome, Montage, Scene, People, Stance, Money, Gear, Vehicles, Quest, Outline…):
   - stored `disabled:true, key:[]`;
@@ -402,6 +404,8 @@ The most a turn can run is what the preset's steps and phase budgets allow: each
 - **Lean** is the documented floor of D3 and does not meet "a model decides" on its own.
 
 ### 5.4 Lore for the engine's helpers
+
+Pinned lore (§24.5) comes first: every helper at a place reads what is pinned to it and to the places holding it, never a character's pins, given ahead of the prefetch and searched with what is left of the step's lore tokens. The step's lore trace marks those entries `pinned`, and a note says when pinned text went over the step's lore tokens.
 
 Every model step reads the world lore it needs (§4.2) through the engine's own search; native World Info activation plays no part.
 
@@ -1255,6 +1259,10 @@ Four layers, each tunable (the world's defaults, then the user's overrides):
   - **Answer format:** the engine appends the purpose's answer format (`MIND_ANSWER_FORMATS`), which no template replaces, and then the preset's `RPEngine · <purpose>` block (§6.8).
   - **Lint:** a minds template's signals are ignored (`minds.step_signals`), a blank one is skipped (`minds.step_blank`), and every other template for the purpose but the one used is warned of (`minds.step_duplicate`). The runtime, lint and Build → World → Minds pick the used one alike (`worldMindTemplate`: the first by id, in `localeCompare` order, with any text).
 - **Calls:** every mind is its own call, made in parallel on the pre phase's wall clock, apart from its call count. The inspector lists each call (§6.5) with no text: purpose, phase, level, outcome (`recorded` or `failed`), time, tokens, whose prompt it ran, and the character by name. A call for someone the POV can't see or hasn't met isn't listed at all, so the panel never shows that someone unseen is in the room or that an unmet person matters; a history kept by an earlier build, which named them "Someone", reads back without those calls.
+- **Pinned lore** (the world's `lorePins` part, `{characters: {id: [pin]}, places: {id: [pin]}}`; a pin is `{lore: id}` or `{book: id, entry: id}`): what is pinned to the character, then to their place and each place holding it, nearest first (`pinsFor`), is read once per run and given first in the lore block, ahead of searched lore, within the mind step's lore tokens and the context's room. A pin that doesn't fit is cut at a word, or left out, and the call's trace says so (`pinned[].cut`, `notes`). Pins live on the world, not on a place, because a map-drawn place's Build page is read-only.
+  - A world entry is read as the character reads lore: a secret one only when it is theirs, an AI-written one only once accepted, a `known_by` one by what they know.
+  - A book entry is read with `world_books` straight from its book, attached to the chat or not and switched off in it or not; LRE's own engine book is never offered. The extension doesn't request `characters` or `personas`, so the picker can't tell which books a character card or the persona brings.
+  - Lint: `pin_shape` (error), `pin_missing`, `pin_target`, `pin_duplicate`, `pin_unread`, `pin_pending`; each path is `lorePins.characters.<id>` or `lorePins.places.<id>`, and Build → Check opens that character's or place's page.
 
 ### 24.6 Settings and cost
 - **The user's minds settings** (`UserSettings.minds`, Settings → Minds): on or off; the Live limit; the Near triggers and their counts; the Far period; the refresh limit; the levels that get memory; the Minds section's budget; memory overrides; prompt overrides; and a time skip's caps (beats per skip, minds per beat). "No limit" is `"none"`.
@@ -1325,6 +1333,8 @@ The Cast life planner (§8) lays each character's own plans into their days and 
   - pin a level, or unpin (`mind_pin`);
   - ask for a fresh mind next turn (`mind_refresh`);
   - add, edit or delete a note, commitment or plan (`mind_memory`; a value names only the fields that change).
+  - **Run minds now** (`lre.minds`, `{op: "run", who?}`): one character, those chosen, or (nobody named) everyone Live and Near, asked from the chat so far as the turn would, with the same lore and pins, four at a time. The moment is the waiting player message if there is one, else how the latest reply ended (reason `BETWEEN_TURNS`), and the reason recorded is `gm`. It opens no `minds.round`, so the narrator's next Minds section has these minds only if the cadence runs them again.
+  - The run's minds are one `fix` entry with its Undo; while a reply is being written the edit is held and lands when it finishes (`pending`). Progress, each mind's outcome with why it failed in words (`helperJson`'s failure reasons), its time, tokens and pinned lore, go to the requesting session as `lre.minds.update`; `{op: "cancel"}` stops it and records nothing, and `{op: "status"}` reads the latest run. One run per chat at a time; it gives up after 10 minutes.
 - **Player surfaces:** never any of it. Every minds event words nothing for a player's line, so no Journal note, chip, Cast or other panel tells a mind. The inspector's traces carry no text, list only people the POV can see and has met, and never say a depiction was kept from the narrator.
 
 ### 24.10 Determinism
