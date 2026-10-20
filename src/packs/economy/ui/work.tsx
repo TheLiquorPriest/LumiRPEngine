@@ -17,7 +17,7 @@ import { AccountRow } from "./accounts";
 import { RoutePage, RouteRow } from "./assets";
 import { ActionPage, AmountField, AmountPage, ChoiceField, NumberField, SelectField, TextField, type Choice } from "./forms";
 import type { PlayerControls, SectionProps } from "./hub";
-import { businessAccounts, businessControls, invoiceControls, jobControls, knownPeople, possessive, workBlocks, type BusinessControl, type InvoiceControl } from "./layout";
+import { businessAccounts, businessControls, gmParties, invoiceControls, jobControls, knownPeople, possessive, workBlocks, type BusinessControl, type InvoiceControl } from "./layout";
 import { FieldsPage, OwnerRows, TxnRows } from "./lines";
 import { actionPage, Controls, detailPage, Hero, MoneyPage, Note, type HubPages } from "./nav";
 import { amountOf, distributeAction, drawAction, hireAction, invoiceAction, invoiceIssueAction, jobEndAction, jobSpawnOps, newIdFor, raiseAction, stakeSellAction, type HireForm } from "./requests";
@@ -192,7 +192,7 @@ function NewJobPage(props: SectionProps) {
   const [every, setEvery] = useState<string>("biweekly");
   if (controls.mode !== "gm") return null;
   const cents = amountOf(rate, controls.currency);
-  const businesses = controls.gm.entities.filter((e) => e.kind === "business" && !e.gone).map((e) => ({ value: e.id, label: e.name }));
+  const businesses = gmParties(controls.gm, ["business"]).map((p) => ({ value: p.id, label: p.name }));
   // The job's `employer`: the business's id, or the outside employer's name as typed.
   const named = employer === OUTSIDE ? outside.trim() : employer;
   const submit = (): Promise<boolean> => {

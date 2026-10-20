@@ -3,7 +3,7 @@
 // sends.
 
 import { describe, expect, test } from "bun:test";
-import { featureOn, FINANCE_FEATURES, ROLE_RIGHTS, type AccountView, type BusinessView, type CardView, type FinanceView, type Flow, type FlowView, type HoldingView, type PropertyView } from "../../src/shared/finance";
+import { featureOn, FINANCE_FEATURES, PARTY_KINDS, ROLE_RIGHTS, type AccountView, type BusinessView, type CardView, type FinanceView, type Flow, type FlowView, type HoldingView, type PropertyView } from "../../src/shared/finance";
 import type { Level } from "../../src/shared/ids";
 import type { JsonObject } from "../../src/shared/json";
 import { isRecord } from "../../src/shared/json";
@@ -16,7 +16,7 @@ import { ALL_PACKS, STARTER_WORLDS } from "../../src/packs/index";
 import { startState } from "../packs/support";
 import { ListRow } from "../../src/frontend/components";
 import { decodeFinanceView } from "../../src/packs/economy/ui/decode";
-import { accountBlocks, accountControls, autopaySources, businessAccounts, businessControls, cardControls, creditBlocks, endableLeases, findAccount, flowControls, flowSources, gmKindIs, holdingControls, householdRows, hubTabs, invoiceControls, investmentBlocks, overviewBlocks, propertyControls, transferTargets, workBlocks } from "../../src/packs/economy/ui/layout";
+import { accountBlocks, accountControls, autopaySources, businessAccounts, businessControls, cardControls, creditBlocks, endableLeases, findAccount, flowControls, flowSources, gmKindIs, gmParties, holdingControls, householdRows, hubTabs, invoiceControls, investmentBlocks, overviewBlocks, propertyControls, transferTargets, workBlocks } from "../../src/packs/economy/ui/layout";
 import { OwnerRows } from "../../src/packs/economy/ui/lines";
 import { gmFixture } from "../../dev/preview/fixtures";
 import {
@@ -449,5 +449,21 @@ describe("the GM view's kinds", () => {
     ];
     expect(gmKindIs(loop, "a", "person")).toBe(false);
     expect(gmKindIs(loop, "a", "b")).toBe(true);
+  });
+
+  test("the GM's pickers in Port Alder list its people, characters all, its household and its business; every party has the kind the economy gives it", () => {
+    const world = (STARTER_WORLDS.modern_slice_of_life as (id: string, name: string) => WorldDoc)("pa", "Port Alder");
+    const w = new Working(reg, world, startState(world));
+    materializeAll(reg, w, world.pov, "run");
+    const gm = buildGmWorld(reg, w.world, w.state);
+    // Add a member offers people; the new flow's To offers every party, Add a job every business, Add to a household every household.
+    expect(gmParties(gm, ["person"]).map((p) => p.id)).toEqual(expect.arrayContaining(["pov", "marcus_delgado", "danny_okafor", "helen_kowalczyk"]));
+    expect(gmParties(gm, ["household"]).map((p) => p.id)).toEqual(["household_kowalczyk"]);
+    expect(gmParties(gm, ["business"]).map((p) => p.id)).toEqual(["alder_automotive_co"]);
+    expect(gmParties(gm, ["person"]).some((p) => p.id.startsWith("acct_"))).toBe(false);
+    const kinds = new Map(gmParties(gm, PARTY_KINDS).map((p) => [p.id, p.kind]));
+    const money = w.ctx.query("economy.people_money")(w.ctx) as FinanceView[];
+    expect(money.length).toBeGreaterThan(3);
+    for (const v of money) expect([v.party, kinds.get(v.party)]).toEqual([v.party, v.partyKind]);
   });
 });

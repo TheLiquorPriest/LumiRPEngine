@@ -4,7 +4,7 @@
 // dashboards show at each level is tested directly; the core already left out what the level
 // doesn't simulate, and nothing here shows detail the view marks as below the top level.
 
-import { CLASS_TRAITS, ROLE_RIGHTS, type AccountView, type AlertLine, type BusinessView, type CardView, type DistributionRoute, type FinanceFeature, type FinanceView, type FlowView, type HoldingView, type HouseholdView, type Invoice, type JobView, type OwnerRole, type PropertyView, type RoleRights, type UpcomingLine } from "../../../shared/finance";
+import { CLASS_TRAITS, ROLE_RIGHTS, type AccountView, type AlertLine, type BusinessView, type CardView, type DistributionRoute, type FinanceFeature, type FinanceView, type FlowView, type HoldingView, type HouseholdView, type Invoice, type JobView, type OwnerRole, type PartyKind, type PropertyView, type RoleRights, type UpcomingLine } from "../../../shared/finance";
 import type { EntityId } from "../../../shared/ids";
 import type { GmView, PaletteView } from "../../../shared/state-view";
 import { cardChanges, type CardChange } from "./requests";
@@ -297,6 +297,19 @@ export function gmKindIs(kinds: GmView["kinds"], kind: string, ancestor: string)
     seen.add(id);
   }
   return false;
+}
+
+/** The party kinds in the order the economy tries them (`partyKindOf`): a business, a trust or a household before a person, which any of them might extend. */
+const PARTY_KIND_ORDER: readonly PartyKind[] = ["business", "trust", "household", "person"];
+
+/** The world's parties of `kinds` for a GM's picker, each with the kind the economy gives it (a kind that extends a person's is a person); whoever is gone is left out. */
+export function gmParties(gm: Pick<GmView, "entities" | "kinds">, kinds: readonly PartyKind[]): { id: EntityId; name: string; kind: PartyKind }[] {
+  const out: { id: EntityId; name: string; kind: PartyKind }[] = [];
+  for (const e of gm.entities) {
+    const kind = e.gone ? undefined : PARTY_KIND_ORDER.find((k) => gmKindIs(gm.kinds, e.kind, k));
+    if (kind !== undefined && kinds.includes(kind)) out.push({ id: e.id, name: e.name, kind });
+  }
+  return out;
 }
 
 /** Where a standing payment can go: the party's own accounts (savings, a card to pay off), the people the player may pay, or an outside payee by name (typed). */

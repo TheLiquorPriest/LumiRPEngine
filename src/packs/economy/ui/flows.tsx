@@ -9,14 +9,14 @@
 // see, so such a flow has no Edit.
 
 import { useState } from "preact/hooks";
-import { CLASS_TRAITS, FLOW_KINDS, FLOW_SHORTFALLS, FLOW_STATUSES, type FinanceView, type Flow, type FlowStatus, type FlowView } from "../../../shared/finance";
+import { CLASS_TRAITS, FLOW_KINDS, FLOW_SHORTFALLS, FLOW_STATUSES, PARTY_KINDS, type FinanceView, type Flow, type FlowStatus, type FlowView } from "../../../shared/finance";
 import { formatMoney } from "../../../shared/world";
 import { Badge, Button, Disclosure, Empty, IdText, List, ListRow, Section } from "../../../frontend/components";
 import { humanize } from "../../../frontend/format";
 import type { IconName } from "../../../frontend/icons";
 import { ActionPage, AmountField, ChoiceField, MONTH_CHOICES, NumberField, SelectField, TextField, WEEKDAY_CHOICES, type Choice } from "./forms";
 import type { HubControls, SectionProps } from "./hub";
-import { flowControls, flowSources, flowTargets, viewAccounts, type FlowControl } from "./layout";
+import { flowControls, flowSources, flowTargets, gmParties, viewAccounts, type FlowControl } from "./layout";
 import { FieldsPage } from "./lines";
 import { actionPage, Controls, detailPage, Hero, MoneyPage, Note, type HubNav, type HubPages } from "./nav";
 import { amountOf, blankFlowForm, flowCreateAction, flowEditOps, flowFormOf, flowFormProblem, flowSpawnOps, flowStatusAction, flowStatusOps, flowUpdateAction, invoiceAction, leaseEndAction, newIdFor, type FlowEvery, type FlowForm } from "./requests";
@@ -56,7 +56,7 @@ function canCreate(view: FinanceView, controls: HubControls): boolean {
 function endpoints(view: FinanceView, controls: HubControls): { from: Choice[]; to: Choice[] } {
   if (controls.mode === "player") return { from: flowSources(view).map((s) => ({ value: s.id, label: s.label })), to: flowTargets(view, controls.palette).map((t) => ({ value: t.id, label: t.label })) };
   const accounts = viewAccounts(view).filter((a) => !CLASS_TRAITS[a.class].cash).map((a) => ({ value: a.id, label: a.name }));
-  const parties = controls.gm.entities.filter((e) => !e.gone && (e.kind === "person" || e.kind === "business" || e.kind === "trust" || e.kind === "household")).map((e) => ({ value: e.id, label: `${e.name} (${e.kind})` }));
+  const parties = gmParties(controls.gm, PARTY_KINDS).map((p) => ({ value: p.id, label: `${p.name} (${p.kind})` }));
   return { from: [...accounts, { value: view.party, label: `${view.name} (as their preferences choose)` }], to: [...accounts, ...parties] };
 }
 
