@@ -301,6 +301,26 @@ describe("the merge", () => {
     expect(inClass(taken.b, taken.state, "dev", "role", ["ally"])).toBe(true);
   });
 
+  test("a standing payment renamed in play keeps its name through an Upgrade that renames it too, unless the name is picked", () => {
+    const gym = (w: WorldDoc): void => {
+      w.entities.gym = { id: "gym", kind: "flow", name: "Harbor Gym", tier: "background", fields: { flow_kind: "subscription", from: "acct", to: "Harbor Gym", amount_cents: 4000, every: "month", days: [5], status: "active" }, relations: [] };
+    };
+    const rename = (b: WorldDoc): void => {
+      const flow = b.entities.gym;
+      if (flow) flow.name = "Harbor Fitness";
+    };
+    const renamed: LedgerEvent[] = [{ type: "economy.flow_renamed", data: { flow: "gym", name: "Gym" } }];
+    const kept = chat(rename, gym);
+    play(kept, renamed);
+    upgrade(kept);
+    expect(kept.state.entities.gym?.name).toBe("Gym");
+    const taken = chat(rename, gym);
+    play(taken, renamed);
+    upgrade(taken, { gym: { name: "take" } });
+    expect(taken.state.entities.gym?.name).toBe("Harbor Fitness");
+    expect(touchedAspect(taken.state, "gym", "name")).toBe(false);
+  });
+
   test("classes and tags a GM edit set are play's: kept by default, the revision's when picked", () => {
     const edit = (b: WorldDoc): void => {
       const dev = b.entities.dev;

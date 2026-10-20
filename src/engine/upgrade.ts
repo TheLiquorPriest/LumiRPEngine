@@ -233,7 +233,7 @@ export function planUpgrade(state: Readonly<WorldState>, env: MarkerEnv, to: Rev
       if (!same(earlier, later)) aspects[aspect] = { now: held, next: later, touched: whole || touched };
     };
     part("kind", base.kind, next.kind, now.kind, false);
-    part("name", base.name, next.name, now.name, false);
+    part("name", base.name, next.name, now.name, touchedAspect(state, id, "name"));
     part("tier", base.tier, next.tier, now.tier, touchedAspect(state, id, "tier"));
     part("agent", was ? agentOf(before, was) : now.agent, agentOf(after, next), now.agent, touchedAspect(state, id, "agent"));
     part("levels", clampLevels(base.levels ?? {}), clampLevels(next.levels ?? {}), now.levels, touchedAspect(state, id, "levels"));
@@ -407,7 +407,7 @@ function applyUpgrade(state: WorldState, plan: UpgradePlan, picks: UpgradePicks,
         delete e.class;
         delete e.tags;
       }
-      if (aspect === "tier" || aspect === "agent" || aspect === "levels" || aspect === "class" || aspect === "life") forget(state, d.id, { aspect });
+      if (aspect === "name" || aspect === "tier" || aspect === "agent" || aspect === "levels" || aspect === "class" || aspect === "life") forget(state, d.id, { aspect });
     }
     // The place and cell go together: taken only when every one of them that differs is taken, once
     // the relations are merged (below).

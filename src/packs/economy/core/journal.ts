@@ -281,6 +281,8 @@ export const EVENTS: EventTypeDef<PackEvent>[] = [
       if (flow) flow.name = str(e, "name");
     },
     describe: (e, _ctx, viewer) => (viewer ? "" : `Standing payment renamed ${str(e, "name")}`),
+    // Play's name, so an Upgrade that renames the flow too keeps the chat's.
+    touches: (e) => [{ entity: str(e, "flow"), aspect: "name" }],
     coarsen: { key: (e) => str(e, "flow"), merge: (_a, b) => b },
   },
   {

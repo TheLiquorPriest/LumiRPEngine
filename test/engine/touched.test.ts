@@ -121,6 +121,7 @@ function everythingWorld(): WorldDoc {
   w.entities.hold = { id: "hold", kind: "holding", name: "IDX", tier: "background", fields: { account: "acct", asset: "idx", lots: [{ qty: 10, cost: 100000, at: 0 }] }, relations: [] };
   w.entities.hold_call = { id: "hold_call", kind: "holding", name: "IDX call", tier: "background", fields: { account: "acct", asset: "opt:idx:call:10000:2026-11-20", lots: [{ qty: 1, cost: 20000, at: 0 }] }, relations: [] };
   w.entities.house = { id: "house", kind: "property", name: "House", tier: "background", fields: { place: "inn", owners: [{ party: "you", role: "owner", share: 100 }], value: 30000000 }, relations: [] };
+  w.entities.gym = { id: "gym", kind: "flow", name: "Harbor Gym", tier: "background", fields: { flow_kind: "subscription", from: "acct", to: "Harbor Gym", amount_cents: 4000, every: "month", days: [5], status: "active" }, relations: [] };
   w.tracks.heist = { id: "heist", kind: "quest", label: "The heist", start: "idea", visibility: "public", stages: { idea: { label: "An idea", next: [] }, on: { label: "Underway", next: [] } } };
   w.checks.initiative = { id: "initiative", dice: "d20" };
   w.ruleset = { combat: { initiative: "initiative", economy: { action: { label: "Action" } }, hp: "hp" } };
@@ -169,6 +170,7 @@ const EVERY_TYPE: LedgerEvent[] = [
   { type: "economy.card_paid", data: { account: "card", cents: 10 } },
   { type: "economy.delinquency", data: { account: "card", stage: "30", past_due: 10, lates: 1, penalty: false } },
   { type: "economy.flow_run", data: { flow: "flow_rent", label: "Rent", at: 0, outcome: "paid", cents: 100, state: {} } },
+  { type: "economy.flow_renamed", data: { flow: "gym", name: "Gym" } },
   { type: "economy.hold", data: { id: "h1", account: "acct", cents: 10, until: 2000, kind: "deposit", memo: "Cash deposit" } },
   { type: "economy.settle", data: { account: "card", upto: 2000 } },
   { type: "economy.credit", data: { person: "dev", at: 0, kind: "inquiry" } },
@@ -239,6 +241,7 @@ function written(before: Readonly<WorldState>, after: Readonly<WorldState>): Tou
       const [rel = "", to = ""] = key.split("\u0000");
       if (differs(was.relations.filter((x) => x.type === rel && x.to === to), e.relations.filter((x) => x.type === rel && x.to === to))) out.push({ entity: id, rel, to });
     }
+    if (was.name !== e.name) out.push({ entity: id, aspect: "name" });
     if (was.tier !== e.tier) out.push({ entity: id, aspect: "tier" });
     if (was.agent !== e.agent) out.push({ entity: id, aspect: "agent" });
     if (differs(was.levels, e.levels)) out.push({ entity: id, aspect: "levels" });
