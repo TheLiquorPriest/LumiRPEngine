@@ -6,7 +6,7 @@
 import type { JsonObject, JsonValue } from "../../../shared/json";
 import type { EntityId } from "../../../shared/ids";
 import type { LedgerEvent, PostingLine } from "../../../shared/ledger";
-import { ACCOUNT_STATUSES, AUTOPAY_MODES, CARD_STATES, CLASS_TRAITS, FINANCE_EVENTS, FLOW_KINDS, FLOW_SHORTFALLS, isAccountClass, isCredit, type AtmFeature, type CreditApplication, type Owner } from "../../../shared/finance";
+import { ACCOUNT_STATUSES, AUTOPAY_MODES, CARD_STATES, CLASS_TRAITS, FINANCE_EVENTS, FLOW_KINDS, FLOW_SHORTFALLS, isAccountClass, isCredit, payeeKey, type AtmFeature, type CreditApplication, type Owner } from "../../../shared/finance";
 import { hashParts } from "../../../shared/hash";
 import { formatMoney, type EntityDef } from "../../../shared/world";
 import { calendarOf, dateAt } from "../../../engine/calendar";
@@ -19,7 +19,7 @@ import { decide, type Decision } from "./credit";
 import type { OpenAccount } from "./module";
 import { fallsBackOn } from "./flows";
 import { isOpened, reject, spendOf } from "./journal";
-import { availableOf, balance, bankSide, canSpend, classOf, debtorsOf, external, holdersOf, householdOf, managesAccount, managesParty, openerOf, outsideAccount, productOf, rightsOf, statusOf, traitsOf, worldProducts } from "./model";
+import { availableOf, balance, bankSide, canSpend, classOf, debtorsOf, external, holdersOf, householdOf, managesAccount, managesParty, openerOf, productOf, rightsOf, statusOf, traitsOf, worldProducts } from "./model";
 import { accountFeature, asUnit, cardProblem, cardRoom, cardsOn, cashAccount, cashAdvanceFee, depositAccount, featureFor, isParty, mayUse, posting, signal } from "./pay";
 
 function money(ctx: ReadContext, cents: number): string {
@@ -277,7 +277,9 @@ export function mayPayFrom(ctx: ReadContext, who: EntityId, from: string): boole
 
 /**
  * Whether a payment to `to` would be for `who`: to them, an account they hold, their household or
- * an account it holds, or the outside account their own name gives (a typed payee lands there).
+ * an account it holds, or an outside payee typed as any of their own: its key (`payeeKey`) is their
+ * id's or their name's, or their household's ("Jordan Ellis", " POV "). The hub refuses by the
+ * same keys.
  */
 function paysFor(ctx: ReadContext, who: EntityId, to: string): boolean {
   const household = householdOf(ctx, who);
@@ -285,8 +287,8 @@ function paysFor(ctx: ReadContext, who: EntityId, to: string): boolean {
   const id = to.startsWith(EXTERNAL_ACCOUNT_PREFIX) ? to.slice(EXTERNAL_ACCOUNT_PREFIX.length) : to;
   if (theirs(id)) return true;
   if (own(ctx.state.entities, id)?.kind === "account") return holdersOf(ctx.state, id).some(theirs);
-  const landing = outsideAccount(to);
-  return landing === external(who) || (household !== null && landing === external(household));
+  const key = payeeKey(id);
+  return key !== "" && [who, household].some((p) => p !== null && (key === payeeKey(p) || key === payeeKey(own(ctx.state.entities, p)?.name ?? "")));
 }
 
 /**
