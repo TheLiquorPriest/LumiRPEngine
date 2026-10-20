@@ -59,8 +59,9 @@ describe("a refusal and a job's pay name only whom the player may see", () => {
 });
 
 describe("a label or a memo names a hidden person by no word of their name", () => {
+  const daily = (id: string, label: string, from: string, to: string) => entity(id, "flow", label, { flow_kind: "transfer", from, to, amount_cents: 5_000, every: "day", shortfall: "skip", status: "active" });
+
   test("Rosa's first name alone reads as someone on a label, what's coming up and the lines it posts, while a word somewhere the player sees is also called stays", () => {
-    const daily = (id: string, label: string, from: string, to: string) => entity(id, "flow", label, { flow_kind: "transfer", from, to, amount_cents: 5_000, every: "day", shortfall: "skip", status: "active" });
     const { w } = setup((wd) => {
       wd.entities.rosa!.visibility = "secret";
       wd.places.deli = { id: "deli", name: "Delgado's Deli", parent: "riverton", fields: {} };
@@ -76,5 +77,22 @@ describe("a label or a memo names a hidden person by no word of their name", () 
     expect(view.accounts.find((a) => a.id === "checking")?.transactions.map((t) => t.memo)).toEqual(expect.arrayContaining(["Someone's share of the rent", "From someone"]));
     expect(JSON.stringify(view)).not.toContain("Rosa");
     expect((w.ctx.query("economy.finance")(w.ctx, "you", false) as FinanceView).flows.map((f) => f.label)).toContain("Rosa's share of the rent");
+  });
+
+  test("a word of any name the player sees stays, whatever it names: with Rusty's Garage among his payees, his wallet called Cash and a job of his on Holloway Road, Rusty Malone and Cash Holloway, both hidden, mask none of them, though a word only theirs still reads as someone", () => {
+    const { w } = setup((wd) => {
+      for (const [id, name] of [["rusty_malone", "Rusty Malone"], ["cash_holloway", "Cash Holloway"]]) wd.entities[id] = { ...entity(id, "person", name, {}), visibility: "secret" };
+      wd.entities.rusty_garage = entity("rusty_garage", "business", "Rusty's Garage", { owners: [{ party: "maya", role: "owner", share: 100 }] });
+      wd.entities.job_courier = entity("job_courier", "job", "Your courier job", { ...CLERK, title: "Holloway Road courier" });
+      wd.entities.garage = daily("garage", "Rusty's Garage", "checking", "rusty_garage");
+      wd.entities.pocket = daily("pocket", "Cash for the week", "checking", "savings");
+      wd.entities.tolls = daily("tolls", "Holloway Road tolls", "checking", "savings");
+      wd.entities.tab = daily("tab", "Malone's tab", "checking", "savings");
+    });
+    lapse(w, 2 * DAY);
+    const view = w.ctx.query("economy.finance")(w.ctx, "you", true) as FinanceView;
+    const said = ["Rusty's Garage", "Cash for the week", "Holloway Road tolls", "Someone's tab"];
+    expect(view.flows.map((f) => f.label)).toEqual(expect.arrayContaining(said));
+    expect(view.accounts.find((a) => a.id === "checking")?.transactions.map((t) => t.memo)).toEqual(expect.arrayContaining(said));
   });
 });

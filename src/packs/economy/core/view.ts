@@ -66,14 +66,18 @@ function hiddenWords(ctx: ReadContext, id: EntityId): Reading {
   return { first: "Something", within: "something" };
 }
 
+/** The foundation's kinds whose names are writing, not names: a flow's label, a job's (for its worker), an invoice's memo. They're what the mask reads, so no word of theirs is one the POV has seen. */
+const WRITTEN_KINDS: Record<string, true> = { flow: true, job: true, invoice: true };
+
 /**
  * The names of everyone and everything the POV can't see, as labels and memos would carry them:
  * a derived flow's label is built from names ("Lift loan autopay"), and a posting's memo is
  * written once for every side of it. They're read as the engine reads text for names (`namesAny`):
  * a person by any word of their name ("Rosa's share" names Rosa Delgado), anything else by its
  * whole name. A name something the POV can see also has gives nothing away, and nor does a word
- * of one someone or somewhere they can see is also called by, so those stay; a whole name shorter
- * than three letters is too likely a word.
+ * of any name they can see, whatever it names (a person, a place, a business, an account, an
+ * item) or of a job's title, so those stay: with Rusty's Garage on their page, "Rusty" names no
+ * one hidden. A whole name shorter than three letters is too likely a word.
  */
 function hiddenNames(ctx: ReadContext, pov: EntityId): HiddenNames {
   const viewer: Viewer = { pov, hidden: NO_HIDDEN };
@@ -81,11 +85,13 @@ function hiddenNames(ctx: ReadContext, pov: EntityId): HiddenNames {
   const seenWords = new Set<string>();
   const hidden: { name: string; person: boolean; reads: Reading }[] = [];
   for (const [id, e] of Object.entries(ctx.state.entities)) {
-    const person = kindIs(ctx.registry, ctx.world, e.kind, "person");
     if (visible(ctx, viewer, id)) {
-      seenNames.add(e.name.toLowerCase());
-      if (person) for (const w of personWords(e.name)) seenWords.add(w.plain);
-    } else hidden.push({ name: e.name, person, reads: hiddenWords(ctx, id) });
+      for (const name of [own(WRITTEN_KINDS, e.kind) ? "" : e.name, strOf(e.fields.title)]) {
+        if (name === "") continue;
+        seenNames.add(name.toLowerCase());
+        for (const w of personWords(name)) seenWords.add(w.plain);
+      }
+    } else hidden.push({ name: e.name, person: kindIs(ctx.registry, ctx.world, e.kind, "person"), reads: hiddenWords(ctx, id) });
   }
   for (const [id, p] of Object.entries(ctx.world.places)) {
     if (canSeePlace(ctx.registry, ctx.world, ctx.state, pov, id)) {
