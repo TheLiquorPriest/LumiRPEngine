@@ -1,4 +1,4 @@
-// ../../LumiRPEngine/node_modules/preact/dist/preact.mjs
+// node_modules/preact/dist/preact.mjs
 var n;
 var t;
 var i;
@@ -347,7 +347,7 @@ n = { __e: function(n, t, i, r) {
   return n.__v.__b - t.__v.__b;
 }, e = Symbol(), l = /(PointerCapture)$|Capture$/i, c = 0, a = {}, s = 0;
 
-// ../../LumiRPEngine/node_modules/preact/hooks/dist/hooks.mjs
+// node_modules/preact/hooks/dist/hooks.mjs
 var t2;
 var r2;
 var u2;
@@ -1098,7 +1098,7 @@ function humanize(id) {
   const words = id.replace(/[_.]+/g, " ").trim();
   return words.length === 0 ? id : words[0]?.toUpperCase() + words.slice(1);
 }
-// ../../LumiRPEngine/node_modules/preact/jsx-runtime/dist/jsxRuntime.mjs
+// node_modules/preact/jsx-runtime/dist/jsxRuntime.mjs
 var o3 = 0;
 function u3(t, e, n2, f, u, i) {
   e || (e = {});

@@ -67639,7 +67639,7 @@ class Runtime {
     this.steps.onCallStart = (userId, purpose) => this.diag.callStart(userId, purpose);
     this.toolSupport = new ToolSupport(this.host);
     this.minds = { host: this.host, registry: this.registry, steps: this.steps, settings: this.settings, presets: this.presets };
-    this.ledger = new LedgerService(this.host, (chatId, userId) => this.resolveEnv(chatId, userId), new LedgerFold(this.registry, { fingerprint: "1792529157" }), (chatId) => messages.forget(chatId));
+    this.ledger = new LedgerService(this.host, (chatId, userId) => this.resolveEnv(chatId, userId), new LedgerFold(this.registry, { fingerprint: "1792529848" }), (chatId) => messages.forget(chatId));
     this.studio = new StudioBridge(this.host, this.worlds);
     this.worlds.onChange = (worldId, userId) => this.studio.worldChanged(worldId, userId);
     this.push = new StatePush(this.host, async (chatId, userId) => {
@@ -70588,6 +70588,12 @@ function entryInput(entry) {
 }
 var DIAGNOSTICS_LOG = "diagnostics/backend.log";
 var USER_DIAGNOSTICS_LOG = "diagnostics.log";
+var JSON_MODE_PROVIDERS = new Set(["openai", "deepseek", "openrouter", "mistral", "xai", "groq", "fireworks", "moonshot", "zai", "siliconflow"]);
+async function takesJsonMode(connectionId, userId) {
+  const list = await spindle.connections.list(userId);
+  const c = connectionId ? list.find((x) => x.id === connectionId) : list.find((x) => x.is_default);
+  return c !== undefined && JSON_MODE_PROVIDERS.has(c.provider);
+}
 function reasoningOverride(effort) {
   if (effort === undefined || effort === "inherit")
     return;
@@ -70757,7 +70763,7 @@ function createSpindleHost() {
     models: {
       async quiet(request, userId, signal) {
         const parameters = { ...request.params, max_tokens: request.maxTokens };
-        if (request.json)
+        if (request.json && await takesJsonMode(request.connectionId, userId))
           parameters.response_format = { type: "json_object" };
         if (request.model)
           parameters.model = request.model;
