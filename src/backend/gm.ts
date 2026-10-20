@@ -11,6 +11,7 @@ import type { ChainMessage } from "../engine/ledger/chain";
 import type { LedgerCore } from "../engine/ledger/journal";
 import { activeRecord } from "../engine/ledger/path";
 import { authorLines } from "../engine/player-events";
+import { readPass } from "../engine/read-pass";
 import type { Registry } from "../engine/registry-impl";
 import { appliedEvents } from "./view";
 
@@ -21,19 +22,23 @@ export function buildGmView(core: LedgerCore, observed: readonly ChainMessage[],
   const render = core.renderState(observed);
   if (!render) return null;
   const fold = core.fold(observed);
-  const edits: GmView["edits"] = [];
-  core.chain(observed).forEach((m, i) => {
-    const rec = m.isUser ? null : activeRecord(m, core.journal.tombstones);
-    if (!rec) return;
-    for (const fix of appliedEvents(rec, fold, i).fixes) edits.push({ messageId: m.id, seq: fix.seq, lines: authorLines(registry, render.world, render.state, fix.events, 12) });
+  const chain = core.chain(observed);
+  // Everything else only reads the folded states, many times over: one read pass (DESIGN §9.6).
+  return readPass(() => {
+    const edits: GmView["edits"] = [];
+    chain.forEach((m, i) => {
+      const rec = m.isUser ? null : activeRecord(m, core.journal.tombstones);
+      if (!rec) return;
+      for (const fix of appliedEvents(rec, fold, i).fixes) edits.push({ messageId: m.id, seq: fix.seq, lines: authorLines(registry, render.world, render.state, fix.events, 12) });
+    });
+    return {
+      ...buildGmWorld(registry, render.world, render.state),
+      edits: edits.reverse().slice(0, GM_EDITS),
+      refused: (core.journal.refused ?? []).map((r) => ({ id: r.write.id, reason: r.reason })),
+      // Fidelity reads the chat's latest message and reply, as the next turn's would.
+      minds: buildMindsGm(registry.context(render.world, render.state), latestTexts(observed), minds.enabled, effectiveMemory(render.world, minds)),
+    };
   });
-  return {
-    ...buildGmWorld(registry, render.world, render.state),
-    edits: edits.reverse().slice(0, GM_EDITS),
-    refused: (core.journal.refused ?? []).map((r) => ({ id: r.write.id, reason: r.reason })),
-    // Fidelity reads the chat's latest message and reply, as the next turn's would.
-    minds: buildMindsGm(registry.context(render.world, render.state), latestTexts(observed), minds.enabled, effectiveMemory(render.world, minds)),
-  };
 }
 
 /** The latest user message and the reply before it, as a turn's fidelity reads them; a GM's minds run picks Live and Near by them too. */

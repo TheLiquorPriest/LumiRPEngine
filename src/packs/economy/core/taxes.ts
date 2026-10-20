@@ -18,10 +18,11 @@ import { FILING_STATUSES, type FilingStatus, type Flow } from "../../../shared/f
 import { calendarOf, clockAt, dateAt, dayIndexOf } from "../../../engine/calendar";
 import { labelOf, numOf, objOf, own, rowOf, sliceOf, sliceRecord, strOf } from "../../../engine/pack-kit";
 import type { EventTypeDef, ReadContext, Rejection } from "../../../engine/registry";
+import { passMemo } from "../../../engine/read-pass";
 import { isGone, kindIs } from "../../../engine/scope";
 import type { WorldState } from "../../../engine/state";
 import { addToBooks, businessBooks, monthOf, operatingAccount } from "./books";
-import { regionRow } from "./model";
+import { holdersOf, regionRow } from "./model";
 import type { FinanceApi, FinanceRegistry, FlowPosting } from "./module";
 
 type Tables = Pick<ReadContext, "tables">;
@@ -286,17 +287,41 @@ function monthsSpan(ctx: Pick<ReadContext, "world">, year: number, months: reado
   return { from: clockAt(cal, dayIndexOf(cal, year, first, 1), 0), to: clockAt(cal, next, 0) };
 }
 
+/** A person's share of a pass-through business. */
+interface PassThroughShare {
+  business: EntityId;
+  share: number;
+  selfEmployed: boolean;
+}
+
+/**
+ * Every person's shares of pass-through businesses, by business id (`passThroughShares`): one walk of
+ * the businesses and their owners, kept for a read pass (DESIGN §9.6), where views ask it per person.
+ */
+function passThroughOwners(ctx: ReadContext, api: FinanceApi): Map<EntityId, PassThroughShare[]> {
+  return passMemo([ctx.state, ctx.world, api], "economy.pass_through", () => {
+    const out = new Map<EntityId, PassThroughShare[]>();
+    for (const id of Object.keys(ctx.state.entities).sort()) {
+      if (isGone(ctx.state, id) || !kindIs(ctx.registry, ctx.world, own(ctx.state.entities, id)?.kind ?? "", "business")) continue;
+      const structure = structureOf(ctx.state, id);
+      if (structure === "c_corp") continue;
+      // Only a party on its owners list has a share of it.
+      for (const person of holdersOf(ctx.state, id)) {
+        const share = api.shareOf(ctx.state, id, person);
+        if (share <= 0) continue;
+        const held = out.get(person);
+        const one = { business: id, share, selfEmployed: selfEmployedProfit(structure) };
+        if (held) held.push(one);
+        else out.set(person, [one]);
+      }
+    }
+    return out;
+  });
+}
+
 /** Pass-through businesses a person owns a share of, with the share. */
-function passThroughShares(ctx: ReadContext, api: FinanceApi, person: EntityId): { business: EntityId; share: number; selfEmployed: boolean }[] {
-  const out: { business: EntityId; share: number; selfEmployed: boolean }[] = [];
-  for (const id of Object.keys(ctx.state.entities).sort()) {
-    if (isGone(ctx.state, id) || !kindIs(ctx.registry, ctx.world, own(ctx.state.entities, id)?.kind ?? "", "business")) continue;
-    const structure = structureOf(ctx.state, id);
-    if (structure === "c_corp") continue;
-    const share = api.shareOf(ctx.state, id, person);
-    if (share > 0) out.push({ business: id, share, selfEmployed: selfEmployedProfit(structure) });
-  }
-  return out;
+function passThroughShares(ctx: ReadContext, api: FinanceApi, person: EntityId): PassThroughShare[] {
+  return [...(passThroughOwners(ctx, api).get(person) ?? [])];
 }
 
 /**
@@ -440,17 +465,31 @@ function estimateFlow(id: string, label: string, from: string, to: string, party
   return { id, label, kind: "tax", from, to, amount: { provider: "estimated_tax", args: { party, business } }, schedule: { every: "year", months: ESTIMATE_DUE.map((d) => d.month), days: [15], roll: "after" }, shortfall: "skip", category: business ? "business_tax" : "tax", link: party, status: "active", source: "estimated_tax" };
 }
 
-/** The occupations of a person's contract jobs, ended ones too, since their pay still owes estimated tax (a job's own, else the person's), by job id. */
-function contractOccupations(ctx: ReadContext, person: EntityId): string[] {
-  const mine = strOf(own(ctx.state.entities, person)?.fields.occupation);
-  return Object.keys(ctx.state.entities)
-    .sort()
-    .flatMap((id) => {
+/**
+ * Each person's contract jobs' occupations, ended ones too, since their pay still owes estimated tax
+ * (a job's own, else the person's), by job id (`contractOccupations`): one walk of the jobs, kept for
+ * a read pass (DESIGN §9.6).
+ */
+function contractWork(ctx: ReadContext): Map<EntityId, string[]> {
+  return passMemo([ctx.state, ctx.world], "economy.contract_work", () => {
+    const out = new Map<EntityId, string[]>();
+    for (const id of Object.keys(ctx.state.entities).sort()) {
       const e = own(ctx.state.entities, id);
-      if (!e || e.kind !== "job" || e.fields.worker !== person) return [];
-      const occupation = strOf(e.fields.occupation, mine);
-      return e.fields.contractor === true || (e.fields.contractor === undefined && rowOf(ctx, "economy.occupations", occupation)?.self_employed === true) ? [occupation] : [];
-    });
+      const worker = e?.kind === "job" ? e.fields.worker : undefined;
+      if (!e || typeof worker !== "string") continue;
+      const occupation = strOf(e.fields.occupation, strOf(own(ctx.state.entities, worker)?.fields.occupation));
+      if (e.fields.contractor !== true && (e.fields.contractor !== undefined || rowOf(ctx, "economy.occupations", occupation)?.self_employed !== true)) continue;
+      const held = out.get(worker);
+      if (held) held.push(occupation);
+      else out.set(worker, [occupation]);
+    }
+    return out;
+  });
+}
+
+/** The occupations of a person's contract jobs (`contractWork`). */
+function contractOccupations(ctx: ReadContext, person: EntityId): string[] {
+  return [...(contractWork(ctx).get(person) ?? [])];
 }
 
 /** The occupation a person's estimated tax sets aside by: their contract job's, else their own. */
@@ -459,8 +498,8 @@ function setAsideOccupation(ctx: ReadContext, person: EntityId): string {
 }
 
 /** Whether a person may have income nobody withholds from: a contract job, or a share of a pass-through business. */
-function owesEstimates(ctx: ReadContext, api: FinanceApi, person: EntityId): boolean {
-  return passThroughShares(ctx, api, person).length > 0 || contractOccupations(ctx, person).length > 0;
+function owesEstimates(person: EntityId, shares: ReadonlyMap<EntityId, readonly PassThroughShare[]>, work: ReadonlyMap<EntityId, readonly string[]>): boolean {
+  return (shares.get(person)?.length ?? 0) > 0 || (work.get(person)?.length ?? 0) > 0;
 }
 
 /** Estimated tax: a flow per person with contract pay or pass-through profit and per C corporation, its provider, and the tax queries the holdings module shares. */
@@ -471,11 +510,13 @@ export function registerTaxes(r: FinanceRegistry): void {
     id: "estimated_tax",
     flows: (ctx) => {
       const out: Flow[] = [];
+      const shares = passThroughOwners(ctx, api);
+      const work = contractWork(ctx);
       for (const id of Object.keys(ctx.state.entities).sort()) {
         const e = own(ctx.state.entities, id);
         if (!e || isGone(ctx.state, id)) continue;
         // The payee is named as a flow names someone outside (`tax:federal`), not as their outside account.
-        if (kindIs(ctx.registry, ctx.world, e.kind, "person") && owesEstimates(ctx, api, id)) out.push(estimateFlow(`esttax:${id}`, "Estimated tax", id, "tax:federal", id, false));
+        if (kindIs(ctx.registry, ctx.world, e.kind, "person") && owesEstimates(id, shares, work)) out.push(estimateFlow(`esttax:${id}`, "Estimated tax", id, "tax:federal", id, false));
         else if (kindIs(ctx.registry, ctx.world, e.kind, "business") && structureOf(ctx.state, id) === "c_corp") out.push(estimateFlow(`esttax:${id}`, "Corporate income tax", operatingAccount(api, ctx, id) ?? id, "tax:federal", id, true));
       }
       return out;

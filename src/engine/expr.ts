@@ -368,14 +368,25 @@ export interface Program {
   readonly nodeCount: number;
 }
 
+/** Formulas parsed with the default limits, by their text: a view or a turn evaluates the same few many times over. */
+const PARSED = new Map<string, Program>();
+const PARSED_CAP = 4096;
+
 /** Parse a formula. Throws ExprError for bad syntax and ExprLimitError for source length, depth or node count. */
 export function compile(src: string, limits?: Partial<ExprLimits>): Program {
+  const known = limits === undefined ? PARSED.get(src) : undefined;
+  if (known) return known;
   const lim = resolveLimits(limits);
   if (typeof src !== "string") throw new TypeError("formula must be a string");
   if (src.length > lim.maxSourceLength) throw new ExprLimitError("sourceLength", lim.maxSourceLength);
   const source = src.trim();
   const { root, nodeCount } = new Parser(tokenize(source), lim).parse();
-  return { source, root, nodeCount };
+  const program: Program = { source, root, nodeCount };
+  if (limits === undefined) {
+    if (PARSED.size >= PARSED_CAP) PARSED.delete(PARSED.keys().next().value ?? "");
+    PARSED.set(src, program);
+  }
+  return program;
 }
 
 // ───────────────────────────── evaluation ─────────────────────────────

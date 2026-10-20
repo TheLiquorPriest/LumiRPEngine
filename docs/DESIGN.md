@@ -689,6 +689,25 @@ I then re-measured with the engine's own `extract` step as shipped (strict rules
 - **Materialization** records only player-facing views and actions.
 - **Previews** are never stored.
 - **Turn-critical work** (simulation, catch-up and timelapse segments) runs in the backend process, inside the context handler, bounded by the deterministic unit caps (§9.2). A default-cap segment took 38 ms on a child process and 2.5 ms in process, far inside the host's 15 s watchdog, so a second process and a per-chat registry copy would have bought nothing (D9).
+- **One worker.** The backend runs one task at a time, so a request or a step that holds it holds everything else, a generation's guard and its interceptor included. Every synchronous stretch stays well under a second. I measured on the TLS world (257 places, 521 entities, an 844-message chat), with the host's reads simulated: the longest stretch was about 0.2–0.35 s, either one GM view or one read of the chat.
+  - **Chat reads.** The host reads a chat only whole: every message, with all its reasoning (174 MB on that chat). The backend keeps a copy of each chat's messages (eight chats at most) and patches it from the host's message events (sent, edited, swiped, deleted) and from its own metadata writes. It reads the chat afresh:
+    - after each generation, because the host saves the reply and its reasoning itself;
+    - when an event can't be applied in place;
+    - when a chat's ledger starts over (`forget`).
+
+    Once a chat is open, a drawer request reads none of its messages and a turn reads them once.
+  - **Read passes.** A view, the GM view, the fact lines and the interceptor's sections are each built in a read pass (`readPass`), after the folds, with synchronous reads only. Within a pass, each of these is gathered once (`passMemo`), keyed by the state and world it reads:
+    - each travel mode's route graph;
+    - the economy's flows, account holders, pass-through shares and contract work;
+    - the hidden-name check.
+
+    Applying an event to a state drops what was kept for it. Nothing is kept outside a pass, so a simulation that changes its states in place always reads them afresh.
+  - **Pure memos.** Each of these is a pure function of its text, so it is kept across passes, with the oldest dropped first:
+    - content ids, 4,096 kept;
+    - name spellings and compiled name patterns, 8,192 kept;
+    - compiled expressions, 4,096 kept.
+  - **Pushes.** A change schedules a push 40 ms later. While one push builds, at most one more waits behind it, and it carries every change made in the meantime.
+  - **Giving way.** Every ledger operation and every pushed view yields to the event loop before it folds (`giveWay`), so a message already waiting is answered first.
 - **Background lane** (one child process, `dist/worker/background-lane.js`): Check world, Playtest, imports, Build with AI validation. It sends heartbeats within the host watchdog (15 s) and never blocks a turn.
 - **Jobs** are kept per user in `userStorage/jobs.json`: kind, world, input, status, progress, message and result. A request for a kind the runner doesn't have, or with an input that isn't an object, is refused. The input is kept as the job runs it: only the fields its kind reads, each cut to what the job can use (Refine's request at 4,000 characters, a map's prose at 4,000, 50 playtest turns of 2,000, pasted text a part past what an index job reads), while an id longer than 200 characters or more than 64 books for an import is refused. An import keeps its checked proposals after every chunk. A job stored as running that the process isn't running (the extension stopped while it ran) reads as **interrupted**: its proposals so far can be reviewed and applied, and **Run it again** starts it with the same input. Running jobs are always kept; of the ended ones, the newest 8, and **Dismiss** removes one. Build lists a world's kept jobs when a tool opens.
 - **G9** (follow-up) if chat-open payloads grow.
@@ -971,6 +990,7 @@ These are the places where Lumiverse itself would make LumiRPEngine simpler or s
 | G7 | Entry ids on World Info-derived prompt messages | ~15–25 LOC |
 | G8 | Forced entries skip inclusion-group competition | ~10–20 LOC |
 | G9 | Keep `spindle_metadata` out of the light message list | Small |
+| G10 | A message read without `extra` (reasoning), or by range: `getMessages` sends every message with all its reasoning, 174 MB on an 844-message chat, so the backend keeps its own copy (§9.6) | Small |
 
 **Shipped caveats** (Settings and README):
 - While the extension is enabled, prompt assembly for **all users on the host** runs on the main process. On a 1,000-message chat the measured overhead was about 23 ms per prompt build (§18.5).

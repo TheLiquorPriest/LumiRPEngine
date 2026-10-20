@@ -15,12 +15,13 @@ import { EXTERNAL_ACCOUNT_PREFIX } from "../../../engine/events";
 import { evalNumber } from "../../../engine/expr";
 import { labelOf, numOf, objOf, optionalQuery, own, strOf } from "../../../engine/pack-kit";
 import type { ReadContext, Rejection } from "../../../engine/registry";
+import { passMemo } from "../../../engine/read-pass";
 import type { Rng } from "../../../engine/rng";
 import { isGone, kindIs, scopeEnv } from "../../../engine/scope";
 import type { FinanceHooks, FlowPosting } from "./module";
 import type { MindPlan } from "../../../shared/minds";
 import { cycleOf, flowRunOf, reject } from "./journal";
-import { availableOf, balance, canSpend, classOf, hasLedger, holdersOf, outsideAccount, priceOf, productOf, statusOf, traitsOf } from "./model";
+import { availableOf, balance, canSpend, classOf, holdersOf, ledgerHolders, outsideAccount, priceOf, productOf, statusOf, traitsOf } from "./model";
 import { accountLevel, asUnit, charge, chooseSource, depositAccount, isParty, isRejection, mostPayable, overdraftEvents, overdraftRoom, payeeSide, posting, signal, toggles, type PayMethod } from "./pay";
 import { Run } from "./run";
 
@@ -292,9 +293,10 @@ function foundationFlows(ctx: ReadContext): Flow[] {
     out.push({ id: `autopay:${id}`, label: `${e.name} autopay`, kind: t.installment ? "loan_payment" : "card_payment", from, to: id, amount, schedule, shortfall: "skip", category: "transfer", link: id, status: "active", source: "autopay" });
   }
   const pov = ctx.world.pov;
+  const holders = ledgerHolders(ctx);
   for (const id of Object.keys(s.entities).sort()) {
     const e = own(s.entities, id);
-    if (!e || id === pov || isGone(s, id) || !hasLedger(ctx, id) || !isParty(ctx, id) || e.kind === "household") continue;
+    if (!e || id === pov || isGone(s, id) || !holders.has(id) || !isParty(ctx, id) || e.kind === "household") continue;
     // Living costs are a person's everyday spending; businesses and trusts have none.
     if (!featureOn(ctx.levelOf(id, "money"), "living_costs", toggles(ctx.world)) || !kindIs(ctx.registry, ctx.world, e.kind, "person")) continue;
     out.push({ id: `living:${id}`, label: "Living costs", kind: "living", from: id, to: "market", amount: { provider: "economy.living" }, schedule: { every: "week", weekdays: [1] }, shortfall: "partial", category: "living", status: "active", method: "auto", source: "living" });
@@ -348,16 +350,23 @@ export function planPayments(ctx: ReadContext): PlanPayment[] {
 }
 
 
-/** Every flow in force: flow entities, the foundation's derived flows, and every module's. */
+/**
+ * Every flow in force: flow entities, the foundation's derived flows, and every module's. Kept for
+ * a read pass (DESIGN §9.6), where a view lists them for each party it shows; a fresh list each time.
+ */
 export function allFlows(hooks: FinanceHooks, ctx: ReadContext): Flow[] {
-  const out: Flow[] = [];
-  for (const id of Object.keys(ctx.state.entities).sort()) {
-    const f = flowOfEntity(ctx, id);
-    if (f) out.push(f);
-  }
-  out.push(...foundationFlows(ctx));
-  for (const source of hooks.flows) out.push(...source.flows(ctx));
-  return out;
+  return [
+    ...passMemo([ctx.state, ctx.world, hooks], "economy.flows", () => {
+      const out: Flow[] = [];
+      for (const id of Object.keys(ctx.state.entities).sort()) {
+        const f = flowOfEntity(ctx, id);
+        if (f) out.push(f);
+      }
+      out.push(...foundationFlows(ctx));
+      for (const source of hooks.flows) out.push(...source.flows(ctx));
+      return out;
+    }),
+  ];
 }
 
 // ---------------------------------------------------------------- sides and levels

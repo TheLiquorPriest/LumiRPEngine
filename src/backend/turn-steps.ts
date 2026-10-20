@@ -24,6 +24,7 @@ import type { Answers, Questions } from "../engine/decide";
 import { sample } from "../engine/decide";
 import { optionalQuery } from "../engine/pack-kit";
 import type { ReadContext } from "../engine/registry";
+import { readPass } from "../engine/read-pass";
 import type { Registry } from "../engine/registry-impl";
 import type { Rng } from "../engine/rng";
 import { kindIs, placeOfEntity } from "../engine/scope";
@@ -44,22 +45,25 @@ import { inMinorUnits, type Steps } from "./steps";
  * narrator may read, to depict and never state (DESIGN §24.3).
  */
 export function factLines(registry: Registry, world: WorldDoc, state: Readonly<WorldState>, secrets: readonly string[]): string[] {
-  const ctx = registry.context(world, state);
-  const out: string[] = [];
-  const pov = state.entities[world.pov];
-  // Where the POV is, as every player surface names it: a place it can't see is somewhere unnamed.
-  const place = povPlace(registry, world, state);
-  out.push(`${pov?.name ?? world.pov} is ${place === null ? "at an unknown place" : place.id === null ? "somewhere" : `at ${place.name}`}; it is ${formatClock(calendarOf(world), state.clock)}.`);
-  for (const r of registry.renderers) {
-    if (r.slot === "outcome" || r.slot === "montage" || r.slot === "outline" || r.slot === "stance" || r.slot === MINDS_SLOT) continue;
-    try {
-      for (const line of r.render(ctx)) if (findLeaks(line, secrets).length === 0 && !out.includes(line)) out.push(line);
-    } catch {
-      // A renderer that can't render this state contributes nothing.
+  // Every renderer reads the same state: one read pass (DESIGN §9.6).
+  return readPass(() => {
+    const ctx = registry.context(world, state);
+    const out: string[] = [];
+    const pov = state.entities[world.pov];
+    // Where the POV is, as every player surface names it: a place it can't see is somewhere unnamed.
+    const place = povPlace(registry, world, state);
+    out.push(`${pov?.name ?? world.pov} is ${place === null ? "at an unknown place" : place.id === null ? "somewhere" : `at ${place.name}`}; it is ${formatClock(calendarOf(world), state.clock)}.`);
+    for (const r of registry.renderers) {
+      if (r.slot === "outcome" || r.slot === "montage" || r.slot === "outline" || r.slot === "stance" || r.slot === MINDS_SLOT) continue;
+      try {
+        for (const line of r.render(ctx)) if (findLeaks(line, secrets).length === 0 && !out.includes(line)) out.push(line);
+      } catch {
+        // A renderer that can't render this state contributes nothing.
+      }
+      if (out.length >= 40) break;
     }
-    if (out.length >= 40) break;
-  }
-  return out.slice(0, 40);
+    return out.slice(0, 40);
+  });
 }
 
 /** Agents at the POV's place that it can see: a hidden or removed one is never among them. */

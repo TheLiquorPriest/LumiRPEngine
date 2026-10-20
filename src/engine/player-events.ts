@@ -13,6 +13,7 @@ import type { LedgerEvent } from "../shared/ledger";
 import type { WorldDoc } from "../shared/world";
 import { formatMoney } from "../shared/world";
 import { ENGINE_EVENTS, readEngineSlice } from "./engine-pack";
+import { passMemo } from "./read-pass";
 import type { Registry } from "./registry-impl";
 import { bandOf, fieldDef, GONE_FIELD, kindIs } from "./scope";
 import type { WorldState } from "./state";
@@ -315,12 +316,15 @@ export function hiddenNames(reg: Registry, world: WorldDoc, state: Readonly<Worl
  * someone or something `pov` can't see, or a secret lore entry. A hidden person counts by any word of
  * their name ("Vex is watching" names Vex Morrow, while a hidden Dan doesn't make "dangerous" a
  * leak); a hidden place or thing, a track's label and a secret entry's title only by all their words
- * in order. The names are gathered once, so one check reads many texts.
+ * in order. The names are gathered once, so one check reads many texts, and once per read pass
+ * (DESIGN §9.6), where every section checks its lines.
  */
 export function hiddenNameCheck(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, pov: EntityId): (text: string) => boolean {
-  const hidden = hiddenEntityNames(reg, world, state, pov);
-  const labels = [...hidden.things, ...unseenPlaceNames(reg, world, state, pov), ...hiddenTrackLabels(reg, world, state, pov), ...secretLoreTitles(reg, world, state)];
-  return (text) => namesAny(text, hidden.people, labels);
+  return passMemo([state, world, reg], `visibility.hidden_names\u0000${pov}`, () => {
+    const hidden = hiddenEntityNames(reg, world, state, pov);
+    const labels = [...hidden.things, ...unseenPlaceNames(reg, world, state, pov), ...hiddenTrackLabels(reg, world, state, pov), ...secretLoreTitles(reg, world, state)];
+    return (text: string) => namesAny(text, hidden.people, labels);
+  });
 }
 
 /** Whether text the player reads names anything the world's POV can't see (`hiddenNameCheck`). */

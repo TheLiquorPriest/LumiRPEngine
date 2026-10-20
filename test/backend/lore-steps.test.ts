@@ -203,7 +203,7 @@ describe("lookups", () => {
     expect(next.every((r) => r.tools === undefined)).toBe(true);
     expect(next[0]?.messages[0]?.content).toContain('{"need"');
     // A restart reads the record from storage.
-    const restarted = new Rig({ host: rig.host });
+    const restarted = rig.restart();
     restarted.host.quietReply = model;
     const kept = rig.host.quietCalls.length;
     await restarted.turn(chatId, "I wait some more by the ferry.", "Gulls cry.");

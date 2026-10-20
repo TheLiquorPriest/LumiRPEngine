@@ -38,6 +38,7 @@ import { optionalQuery, own } from "../engine/pack-kit";
 import type { PackDef, ReadContext } from "../engine/registry";
 import { createRegistry, type Registry } from "../engine/registry-impl";
 import { createRng } from "../engine/rng";
+import { readPass } from "../engine/read-pass";
 import { kindIs, placeOfEntity } from "../engine/scope";
 import type { WorldState } from "../engine/state";
 import { actionOdds, findAction, type Resolution } from "../engine/resolve";
@@ -56,6 +57,7 @@ import { ChatPrefs } from "./chat-prefs";
 import { ChipStore, idAfterSwipeDelete, type StoredChip } from "./chips";
 import type { DryRun, HostPort, InterceptorInput, InterceptorResult } from "./host";
 import { LedgerService, toChain, type TurnContext, type TurnHooks } from "./ledger-io";
+import { MessageCache } from "./message-cache";
 import { StatePush } from "./push";
 import { effectiveMode, recordOutcome, SettingsStore } from "./settings-store";
 import { startMarkersFrom } from "./start-markers";
@@ -551,7 +553,9 @@ export class Runtime implements TurnHooks {
   beatMinds: BeatMinds = (input) => runMinds(this.minds, input);
 
   constructor(options: RuntimeOptions) {
-    this.host = options.host;
+    // Chat reads come from a copy the host's message events keep current (DESIGN §9.6).
+    const messages = new MessageCache(options.host);
+    this.host = messages.host;
     this.registry = createRegistry(options.packs);
     this.pipeline = options.pipeline;
     this.templates = options.templates ?? {};
@@ -575,7 +579,7 @@ export class Runtime implements TurnHooks {
     this.toolSupport = new ToolSupport(this.host);
     this.minds = { host: this.host, registry: this.registry, steps: this.steps, settings: this.settings, presets: this.presets };
     // Snapshots from another build never apply (the build defines LRE_BUILD_ID; tests fold as "dev").
-    this.ledger = new LedgerService(this.host, (chatId, userId) => this.resolveEnv(chatId, userId), new LedgerFold(this.registry, { fingerprint: process.env.LRE_BUILD_ID ?? "dev" }));
+    this.ledger = new LedgerService(this.host, (chatId, userId) => this.resolveEnv(chatId, userId), new LedgerFold(this.registry, { fingerprint: process.env.LRE_BUILD_ID ?? "dev" }), (chatId) => messages.forget(chatId));
     this.studio = new StudioBridge(this.host, this.worlds);
     this.worlds.onChange = (worldId, userId) => this.studio.worldChanged(worldId, userId);
     // Every view pushed to a chat also refreshes the summary the Studio reads of it.
@@ -1785,67 +1789,70 @@ export class Runtime implements TurnHooks {
       return id && present.has(id) ? { id, routed } : null;
     };
     const sectionCost = (content: string): number => this.tokenCounts.get(hashParts("lre.tokens", input.userId, content)) ?? sectionTokens(content);
-    // The Minds section on its own budget (DESIGN §24.3): the best on the ladder first, the lowest left
-    // out until it fits. Under `full` the narrator gets each mind whole, to depict and never state;
-    // under `brief` the lines are leak-checked once more after their own screens. Only those it tells
-    // of are out of Stance, which tells of everyone else.
-    const mindsSection = sectionsOf(world).find((s) => s.id === MINDS_SLOT);
-    const read = this.registry.context(world, state);
-    const allMinds = mindsSection && entryOf(mindsSection) ? mindLines(read).filter((l) => fullMinds || findLeaks(l.line, secrets).length === 0) : [];
-    const said = plan ? (this.prePhase.get(plan.generationId)?.text ?? "") : "";
-    const ladder = (optionalQuery(read, "minds.fidelity")?.(read, { user: said, reply: "" }) ?? []).map((s) => s.entity);
-    const mindsFit = mindsSection ? fitMindLines(allMinds, ladder, mindsBudget, (kept) => sectionCost(renderSection(mindsSection.label, mindsSection.template, kept.map((l) => l.line)))) : [];
-    const ctx = this.registry.context(world, state, { "minds.minded": () => mindsFit.map((l) => l.entity) });
-    for (const section of sectionsOf(world)) {
-      const at = entryOf(section);
-      if (!at) continue;
-      const { id: entryId, routed } = at;
-      const minds = section.id === MINDS_SLOT;
-      const lines: string[] = minds ? mindsFit.map((l) => l.line) : [];
-      const hints: string[] = [];
-      for (const r of this.registry.renderers) {
-        if (r.slot !== section.id || minds) continue;
-        try {
-          (r.hint ? hints : lines).push(...r.render(ctx));
-        } catch (error) {
-          this.host.log("warn", `[LumiRPEngine] section ${section.id}: ${error instanceof Error ? error.message : String(error)}`, input.userId);
+    // The sections all read the head's state, many times over: one read pass (DESIGN §9.6).
+    readPass(() => {
+      // The Minds section on its own budget (DESIGN §24.3): the best on the ladder first, the lowest left
+      // out until it fits. Under `full` the narrator gets each mind whole, to depict and never state;
+      // under `brief` the lines are leak-checked once more after their own screens. Only those it tells
+      // of are out of Stance, which tells of everyone else.
+      const mindsSection = sectionsOf(world).find((s) => s.id === MINDS_SLOT);
+      const read = this.registry.context(world, state);
+      const allMinds = mindsSection && entryOf(mindsSection) ? mindLines(read).filter((l) => fullMinds || findLeaks(l.line, secrets).length === 0) : [];
+      const said = plan ? (this.prePhase.get(plan.generationId)?.text ?? "") : "";
+      const ladder = (optionalQuery(read, "minds.fidelity")?.(read, { user: said, reply: "" }) ?? []).map((s) => s.entity);
+      const mindsFit = mindsSection ? fitMindLines(allMinds, ladder, mindsBudget, (kept) => sectionCost(renderSection(mindsSection.label, mindsSection.template, kept.map((l) => l.line)))) : [];
+      const ctx = this.registry.context(world, state, { "minds.minded": () => mindsFit.map((l) => l.entity) });
+      for (const section of sectionsOf(world)) {
+        const at = entryOf(section);
+        if (!at) continue;
+        const { id: entryId, routed } = at;
+        const minds = section.id === MINDS_SLOT;
+        const lines: string[] = minds ? mindsFit.map((l) => l.line) : [];
+        const hints: string[] = [];
+        for (const r of this.registry.renderers) {
+          if (r.slot !== section.id || minds) continue;
+          try {
+            (r.hint ? hints : lines).push(...r.render(ctx));
+          } catch (error) {
+            this.host.log("warn", `[LumiRPEngine] section ${section.id}: ${error instanceof Error ? error.message : String(error)}`, input.userId);
+          }
         }
+        if (section.id === "outline") lines.push(...outline);
+        // DESIGN §9.2: every turn has an elapsed time, and the Scene slot states it.
+        if (section.id === "scene" && plan) {
+          const minutes = clockMinutes(plan.events);
+          lines.push(minutes > 0 ? `This turn took ${spanText(minutes)}.` : "No time passes this turn.");
+        }
+        // The turn's resolution leads the Outcome slot; a timelapse's Montage fills its own.
+        if (section.id === "outcome") lines.unshift(...planned.outcome);
+        if (section.id === "montage") lines.push(...planned.montage);
+        const safe = minds ? lines : lines.filter((l) => findLeaks(l, secrets).length === 0);
+        if (safe.length === 0) {
+          // A Minds section whose best line alone is over its budget is left out whole.
+          if (minds && allMinds.length > 0) record.sections.push({ slot: section.id, label: section.label, tokens: sectionCost(renderSection(section.label, section.template, allMinds.map((l) => l.line))), clipped: true, cut: allMinds.length, delivery: "unchecked" });
+          // Hints alone never make a section: its being there would tell of them.
+          continue;
+        }
+        const content = renderSection(section.label, section.template, safe);
+        const key = hashParts("lre.tokens", input.userId, content);
+        const counted = this.tokenCounts.get(key);
+        if (counted === undefined) uncounted.push(content);
+        const cost = counted ?? sectionTokens(content);
+        const clipped = minds ? cost > mindsBudget : section.rank > 0 && cost > budget;
+        // A clipped section wasn't in the prompt, so an earlier delivery check says nothing about it.
+        record.sections.push({ slot: section.id, label: section.label, tokens: cost, clipped, ...(minds && mindsFit.length < allMinds.length ? { cut: allMinds.length - mindsFit.length } : {}), delivery: clipped ? "unchecked" : (delivery[section.id] ?? "unchecked") });
+        if (clipped) continue;
+        if (!minds) budget -= cost;
+        if (routed) routedSlots.add(section.id);
+        const placement = routed ? null : placementOf(section);
+        result.enabled.push(entryId);
+        result.forced.push(entryId);
+        const entry = { id: entryId, content, ...(placement ? { placement } : {}) };
+        result.mutated.push(entry);
+        const safeHints = hints.filter((l) => findLeaks(l, secrets).length === 0);
+        if (safeHints.length > 0) hinted.push({ entry, label: section.label, template: section.template, lines: safe, hints: safeHints, cost });
       }
-      if (section.id === "outline") lines.push(...outline);
-      // DESIGN §9.2: every turn has an elapsed time, and the Scene slot states it.
-      if (section.id === "scene" && plan) {
-        const minutes = clockMinutes(plan.events);
-        lines.push(minutes > 0 ? `This turn took ${spanText(minutes)}.` : "No time passes this turn.");
-      }
-      // The turn's resolution leads the Outcome slot; a timelapse's Montage fills its own.
-      if (section.id === "outcome") lines.unshift(...planned.outcome);
-      if (section.id === "montage") lines.push(...planned.montage);
-      const safe = minds ? lines : lines.filter((l) => findLeaks(l, secrets).length === 0);
-      if (safe.length === 0) {
-        // A Minds section whose best line alone is over its budget is left out whole.
-        if (minds && allMinds.length > 0) record.sections.push({ slot: section.id, label: section.label, tokens: sectionCost(renderSection(section.label, section.template, allMinds.map((l) => l.line))), clipped: true, cut: allMinds.length, delivery: "unchecked" });
-        // Hints alone never make a section: its being there would tell of them.
-        continue;
-      }
-      const content = renderSection(section.label, section.template, safe);
-      const key = hashParts("lre.tokens", input.userId, content);
-      const counted = this.tokenCounts.get(key);
-      if (counted === undefined) uncounted.push(content);
-      const cost = counted ?? sectionTokens(content);
-      const clipped = minds ? cost > mindsBudget : section.rank > 0 && cost > budget;
-      // A clipped section wasn't in the prompt, so an earlier delivery check says nothing about it.
-      record.sections.push({ slot: section.id, label: section.label, tokens: cost, clipped, ...(minds && mindsFit.length < allMinds.length ? { cut: allMinds.length - mindsFit.length } : {}), delivery: clipped ? "unchecked" : (delivery[section.id] ?? "unchecked") });
-      if (clipped) continue;
-      if (!minds) budget -= cost;
-      if (routed) routedSlots.add(section.id);
-      const placement = routed ? null : placementOf(section);
-      result.enabled.push(entryId);
-      result.forced.push(entryId);
-      const entry = { id: entryId, content, ...(placement ? { placement } : {}) };
-      result.mutated.push(entry);
-      const safeHints = hints.filter((l) => findLeaks(l, secrets).length === 0);
-      if (safeHints.length > 0) hinted.push({ entry, label: section.label, template: section.template, lines: safe, hints: safeHints, cost });
-    }
+    });
     // The preset's narrator rules, for world chats only: at its `{{outlet::lre_narrator}}`, else
     // before the character. They are the preset's own text, apart from the section budget.
     const rules = preset.guidance.narrator;
