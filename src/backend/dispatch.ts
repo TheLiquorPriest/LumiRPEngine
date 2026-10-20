@@ -18,7 +18,7 @@ import { formulaFunctions } from "../engine/scope";
 import { neutralizeMacros } from "../shared/macros";
 import type { DraftChanged, ErrorCode, FrontendToBackend, LintIssue, MarkerPreview, ResultBodies, StudioOfferView, UpgradePreview, WorldChatInfo } from "../shared/protocol";
 import { AGENT_API, PROTOCOL_VERSION } from "../shared/protocol";
-import { EXTRACTION_TYPES } from "../shared/settings";
+import { EXTRACTION_TYPES, helperCallOf } from "../shared/settings";
 import type { TimelapseTarget } from "../shared/ledger";
 import { TIME_CONTROLS, validMarkerBody } from "../engine/events";
 import { materializeIfNeeded } from "../engine/materialize";
@@ -310,11 +310,15 @@ export class Dispatcher {
           if (hides !== hid) await this.rt.hidingChanged(userId, hides);
         }
         const settings = await this.rt.settings.get(userId);
-        const routed = settings.modelUse.steps.extract?.route?.connectionId ?? null;
-        // The connection whose learning Settings shows: extraction's route, else the user's default.
+        const routed = helperCallOf(settings.modelUse.steps.extract, settings.helper).connectionId;
+        // The connection whose learning Settings shows: extraction's (its own, else the helper model's), else the user's default.
         const active = routed ? null : await this.rt.host.connections.active(userId).catch(() => null);
         const id = routed ?? active?.id ?? ACTIVE_CONNECTION;
-        reply(r.type, await this.rt.settings.result(userId, { id, name: active?.name ?? (id === ACTIVE_CONNECTION ? "Active connection" : id) }, await this.rt.presetCaveats(userId)));
+        reply(r.type, await this.rt.settings.result(userId, { id, name: active?.name ?? (id === ACTIVE_CONNECTION ? "Active connection" : id) }));
+        return;
+      }
+      case "lre.settings.caveats": {
+        reply("lre.settings.caveats", { caveats: await this.rt.presetCaveats(userId) });
         return;
       }
       case "lre.editor": {

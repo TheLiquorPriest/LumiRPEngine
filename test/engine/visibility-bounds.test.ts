@@ -9,6 +9,7 @@ import { outline } from "../../src/engine/beats";
 import { createRng } from "../../src/engine/rng";
 import { baseWorld, POV, registryOf, startState } from "../packs/support";
 import type { LedgerEvent } from "../../src/shared/ledger";
+import type { Resolution } from "../../src/engine/resolve";
 
 describe("visibility", () => {
   test("public, known_by through knows relations, and secret", () => {
@@ -148,5 +149,13 @@ describe("beats", () => {
     expect(a).toEqual(outline(reg, world, s, { events }, createRng("x")));
     expect(a.filter((l) => ["A stranger watches.", "The radio crackles.", "Rain begins."].includes(l))).toHaveLength(2);
     expect(a.join(" ")).not.toContain("secret plot");
+  });
+
+  test("an action a requirement stopped is told as not possible, never by the requirement, which can name a secret", () => {
+    const world = baseWorld();
+    const stopped: Pick<Resolution, "action" | "ok" | "failed"> = { action: "read_notice", ok: false, failed: { code: "requirement", reason: "requires stage('s_hidden') == 'notice'" } };
+    const lines = outline(registryOf(), world, startState(world), { resolutions: [stopped as Resolution], events: [] }, createRng("x"));
+    expect(lines[0]).toBe("read_notice doesn't happen: not possible here and now.");
+    expect(lines.join(" ")).not.toContain("s_hidden");
   });
 });

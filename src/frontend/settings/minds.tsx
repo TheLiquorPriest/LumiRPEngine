@@ -177,7 +177,7 @@ export function MindsSection(props: { minds: MindsSettings; patch(patch: JsonObj
             <Disclosure summary="Advanced: the Minds section budget and time skips">
               <div class="lre-minds-group">
                 <span class="lre-minds-group-title">The narrator's Minds section</span>
-                <NumberStepper label="Minds section budget (tokens)" value={minds.tokens} min={0} max={100_000} step={100} integer disabled={busy} onChange={(tokens) => policy({ tokens })} />
+                <NumberStepper label="Minds section budget (tokens)" value={minds.tokens} min={0} step={100} integer disabled={busy} onChange={(tokens) => policy({ tokens })} />
                 <Note>The narrator's Minds section has its own budget, apart from the engine's section budget, so minds never crowd out Scene or People.</Note>
               </div>
               <div class="lre-minds-group">

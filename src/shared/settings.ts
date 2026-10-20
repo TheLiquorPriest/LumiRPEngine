@@ -8,11 +8,91 @@ import type { AdjudicationDef, StepPurpose } from "./world";
 import type { MindsSettings } from "./minds";
 import { isMindPurpose } from "./minds";
 
+/**
+ * How hard a model reasons on a call (Lumiverse's per-request reasoning override): `inherit` leaves
+ * it to the connection's reasoning binding, else the user's Lumiverse setting; `off` turns reasoning
+ * off; the rest ask for that effort, which the host maps to each provider's own field.
+ */
+export type ReasoningChoice = "inherit" | "off" | "auto" | "minimal" | "low" | "medium" | "high" | "max" | "xhigh";
+export const REASONING_CHOICES: readonly ReasoningChoice[] = ["inherit", "off", "auto", "minimal", "low", "medium", "high", "max", "xhigh"];
+
+/**
+ * Helper steps run on reasoning models, which spend most of a reply thinking before the JSON
+ * (DESIGN §5.3): too little room and the answer comes back empty.
+ */
+export const HELPER_MAX_TOKENS = 8192;
+
+/**
+ * Sampling parameters a helper call may set, by the names Lumiverse's generation call takes
+ * (`GenerationParameters`). One left out is the connection's own (its preset's); the provider
+ * decides which it honours.
+ */
+export interface SamplingParams {
+  temperature?: number;
+  top_p?: number;
+  top_k?: number;
+  frequency_penalty?: number;
+  presence_penalty?: number;
+}
+
+export const SAMPLING_PARAMS: readonly { key: keyof SamplingParams; label: string; min: number; max: number; step: number; integer: boolean; fallback: number }[] = [
+  { key: "temperature", label: "Temperature", min: 0, max: 2, step: 0.05, integer: false, fallback: 1 },
+  { key: "top_p", label: "Top P", min: 0, max: 1, step: 0.01, integer: false, fallback: 1 },
+  { key: "top_k", label: "Top K", min: 0, max: 1000, step: 1, integer: true, fallback: 40 },
+  { key: "frequency_penalty", label: "Frequency penalty", min: -2, max: 2, step: 0.05, integer: false, fallback: 0 },
+  { key: "presence_penalty", label: "Presence penalty", min: -2, max: 2, step: 0.05, integer: false, fallback: 0 },
+];
+
 /** Where a model step runs. `decision` uses `decisions.evaluate`; `helper` a helper JSON call. */
 export interface StepRoute {
   provider: "decision" | "helper";
+  /** Null: the helper model's connection (a helper call), or the Decisions API's default (a decision). */
+  connectionId: string | null;
+  /** Null: the connection's own model. Read only with this route's own connection. */
+  model: string | null;
+  /** Absent: the helper model's effort. The Decisions API takes none. */
+  effort?: ReasoningChoice;
+  /** Each one absent is the helper model's. The Decisions API takes none. */
+  params?: SamplingParams;
+}
+
+/** The helper model (Settings → Helper model): what every helper call runs on unless its step chooses otherwise. */
+export interface HelperDefault {
+  /** Null: Lumiverse's default connection. */
+  connectionId: string | null;
+  /** Null: that connection's own model. */
+  model: string | null;
+  effort: ReasoningChoice;
+  maxTokens: number;
+  params: SamplingParams;
+}
+
+export const DEFAULT_HELPER: Readonly<HelperDefault> = Object.freeze({ connectionId: null, model: null, effort: "inherit", maxTokens: HELPER_MAX_TOKENS, params: Object.freeze({}) });
+
+/** What a helper call runs with: the step's own choices, else the helper model's. */
+export interface HelperCall {
   connectionId: string | null;
   model: string | null;
+  effort: ReasoningChoice;
+  maxTokens: number;
+  params: SamplingParams;
+}
+
+/**
+ * A helper call's settings: a step that chose a connection runs on it with its own model; one that
+ * didn't runs on the helper model's connection and model. Its effort, max tokens and each sampling
+ * parameter are its own, else the helper model's.
+ */
+export function helperCallOf(config: Pick<StepConfig, "route" | "maxTokens"> | null | undefined, helper: Readonly<HelperDefault>): HelperCall {
+  const route = config?.route;
+  const own = route?.connectionId ?? null;
+  return {
+    connectionId: own ?? helper.connectionId,
+    model: own !== null ? (route?.model ?? null) : helper.model,
+    effort: route?.effort ?? helper.effort,
+    maxTokens: config?.maxTokens ?? helper.maxTokens,
+    params: { ...helper.params, ...route?.params },
+  };
 }
 
 /** What a step does with the world's lore (DESIGN §5.4): nothing; a prefetch from its own inputs, at no extra call; lookups the model asks for, on the phase's lookup budget; or both. */
@@ -32,15 +112,12 @@ export interface StepLore {
 }
 
 /** A step no preset gives a lore setting (puzzle answers, or a step only Custom turns on): a prefetch, which costs no call. */
-export const DEFAULT_STEP_LORE: Readonly<StepLore> = Object.freeze({ policy: "prefetch", tokens: 300 });
+export const DEFAULT_STEP_LORE: Readonly<StepLore> = Object.freeze({ policy: "prefetch", tokens: 1200 });
 
 /** The step's lore setting: its own, else `DEFAULT_STEP_LORE`. */
 export function stepLoreOf(config: StepConfig | null | undefined): Readonly<StepLore> {
   return config?.lore ?? DEFAULT_STEP_LORE;
 }
-
-/** Helper steps on reasoning models need room to think (DESIGN §5.3). */
-export const HELPER_MAX_TOKENS = 2000;
 
 /**
  * A step's saved settings, else what it runs with while none are saved: `puzzle.answer` is the
@@ -53,7 +130,7 @@ export const HELPER_MAX_TOKENS = 2000;
  */
 export function stepConfigOf(steps: Partial<Record<StepPurpose, StepConfig>>, purpose: StepPurpose): StepConfig {
   const saved = steps[purpose];
-  if (isMindPurpose(purpose)) return saved ?? { enabled: purpose !== "skip", signals: [], maxTokens: HELPER_MAX_TOKENS };
+  if (isMindPurpose(purpose)) return saved ?? { enabled: purpose !== "skip", signals: [] };
   if (purpose !== "puzzle.answer") return saved ?? { enabled: false, signals: [] };
   const signals = ["always"];
   return saved ? (saved.signals.length > 0 ? saved : { ...saved, signals }) : { enabled: true, signals };
@@ -189,6 +266,13 @@ export interface ExtractionLearning {
 
 export interface UserSettings {
   v: 1;
+  /**
+   * Which shipped defaults the file was last read against: a file from before the defaults rose
+   * for reasoning models (absent) has every value still at an old default lifted to the new one.
+   */
+  defaults: typeof SETTINGS_DEFAULTS_REV;
+  /** The helper model, apart from the presets: picking one never changes it. */
+  helper: HelperDefault;
   modelUse: ModelUseSettings;
   realism: RealismSettings;
   time: TimeSettings;
@@ -205,3 +289,6 @@ export interface UserSettings {
   /** Character minds (DESIGN §24.6): on or off, the Live limit, refresh policies, memory, the Minds section's budget, prompts and time-skip caps. */
   minds: MindsSettings;
 }
+
+/** The shipped defaults' revision (`UserSettings.defaults`). */
+export const SETTINGS_DEFAULTS_REV = 2;

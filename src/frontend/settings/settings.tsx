@@ -1,7 +1,8 @@
 // Settings (DESIGN §12): a home list of pages in groups, each page under a header with
-// Back. Getting started: Model use, Steps and connections. Defaults for new chats: Realism, Checks,
-// Time. Replies: Changes from the reply, Swipes. Your preset. Display: Show ids. About: Caveats,
-// Diagnostics (each turn's steps, model calls and failures; behind its own curtain).
+// Back. Getting started: Helper model, Model use, Steps and connections, Minds. Defaults for new
+// chats: Realism, Checks, Time. Replies: Changes from the reply, Swipes. Your preset. Display: Show
+// ids. About: Caveats, fetched on their own (a dry run of the chat) by home and the Caveats page,
+// and Diagnostics (each turn's steps, model calls and failures; behind its own curtain).
 // The page is UI state (`ui.settings.page`), so it holds while the drawer switches modes. A running
 // chat's own rules (realism, checks, time, pins and Upgrade) live in GM → This chat.
 
@@ -21,12 +22,14 @@ import { ChecksPage, RealismPage, TimePage } from "./defaults";
 import { MindsSection } from "./minds";
 import { PresetPage } from "./preset";
 import { ExtractionPage, SwipesPage } from "./replies";
-import { ModelUseSection, STEP_LABEL, StepsSection } from "./steps";
+import { type Connection, HelperSection, helperSummary, ModelUseSection, STEP_LABEL, StepsSection, useConnections } from "./steps";
 import { DiagnosticsPage } from "../diagnostics";
 
 type Page = Exclude<SettingsPage, "home">;
+type Caveat = { code: string; message: string };
 
 const PAGE: Record<Page, { title: string; subtitle: string; icon: IconName }> = {
+  helper: { title: "Helper model", subtitle: "What the engine's model calls run on", icon: "sliders" },
   model: { title: "Model use", subtitle: "How much the engine asks a model", icon: "bolt" },
   steps: { title: "Steps and connections", subtitle: "Which model runs each step", icon: "branch" },
   minds: { title: "Minds", subtitle: "How characters think and remember", icon: "sparkle" },
@@ -43,7 +46,7 @@ const PAGE: Record<Page, { title: string; subtitle: string; icon: IconName }> = 
 
 /** The home list's groups, in order. */
 const GROUPS: readonly { title: string; pages: readonly Page[] }[] = [
-  { title: "Getting started", pages: ["model", "steps", "minds"] },
+  { title: "Getting started", pages: ["helper", "model", "steps", "minds"] },
   { title: "Defaults for new chats", pages: ["realism", "checks", "time"] },
   { title: "Replies", pages: ["extraction", "swipes"] },
   { title: "Your preset", pages: ["preset"] },
@@ -59,10 +62,12 @@ const STATIC_CAVEATS = [
   "Undo covers the latest reply; earlier changes go through Keep or Discard.",
 ];
 
-/** Each home row's one-line summary of the page behind it. */
-function summaryOf(page: Page, data: SettingsResult, showIds: boolean): { subtitle?: string; value?: string; badge?: ComponentChildren } {
+/** Each home row's one-line summary of the page behind it; `caveats` is null while they're checked. */
+function summaryOf(page: Page, data: SettingsResult, caveats: readonly Caveat[] | null, showIds: boolean, connections: readonly Connection[]): { subtitle?: string; value?: string; badge?: ComponentChildren } {
   const { settings } = data;
   switch (page) {
+    case "helper":
+      return { subtitle: helperSummary(settings.helper, connections) };
     case "model":
       return { subtitle: `${humanize(settings.modelUse.preset)} preset` };
     case "minds":
@@ -88,15 +93,20 @@ function summaryOf(page: Page, data: SettingsResult, showIds: boolean): { subtit
       return { subtitle: settings.hideJsonBlocks ? "JSON blocks hidden in world chats" : "JSON blocks shown" };
     case "display":
       return { subtitle: "Show ids", value: showIds ? "On" : "Off" };
-    case "caveats":
-      return data.caveats.length > 0 ? { subtitle: "Warnings and what to know", badge: <Badge tone="warn">{`${data.caveats.length} active`}</Badge> } : { subtitle: "What to know" };
+    case "caveats": {
+      // A check still running isn't a warning: the row says it's checking until the dry run answers.
+      const found = caveats?.filter((c) => c.code !== "preset_lint_pending") ?? [];
+      if (caveats === null || (found.length === 0 && caveats.length > 0)) return { subtitle: "Checking your preset…" };
+      return found.length > 0 ? { subtitle: "Warnings and what to know", badge: <Badge tone="warn">{`${found.length} active`}</Badge> } : { subtitle: "What to know" };
+    }
     case "diagnostics":
       return { subtitle: "Each turn's steps, model calls and errors" };
   }
 }
 
-function Home(props: { data: SettingsResult; open(page: Page): void }) {
+function Home(props: { data: SettingsResult; caveats: readonly Caveat[] | null; open(page: Page): void }) {
   const showIds = useShowIds();
+  const connections = useConnections();
   return (
     <div class="lre-stack lre-set-home" data-lre-settings-page="home">
       <PageHeader title="Settings" subtitle="Yours, for every world chat" />
@@ -104,7 +114,7 @@ function Home(props: { data: SettingsResult; open(page: Page): void }) {
         <Section key={group.title} title={group.title} flush>
           <List>
             {group.pages.map((page) => {
-              const summary = summaryOf(page, props.data, showIds);
+              const summary = summaryOf(page, props.data, props.caveats, showIds, connections);
               return (
                 <div key={page} class="lre-set-home-row" data-lre-settings={page}>
                   <ListRow icon={PAGE[page].icon} title={PAGE[page].title} subtitle={summary.subtitle} value={summary.value} valueTone="muted" badge={summary.badge} chevron onClick={() => props.open(page)} />
@@ -133,13 +143,15 @@ function DisplayPage() {
   );
 }
 
-function CaveatsPage(props: { data: SettingsResult }) {
+function CaveatsPage(props: { caveats: readonly Caveat[] | null }) {
   return (
     <div class="lre-stack" data-lre-settings-page="caveats">
-      {props.data.caveats.length > 0 ? (
+      {props.caveats === null ? (
+        <Empty>Checking your preset against this chat…</Empty>
+      ) : props.caveats.length > 0 ? (
         <div class="lre-stack">
-          {props.data.caveats.map((caveat) => (
-            <Banner key={caveat.code} tone="warn">
+          {props.caveats.map((caveat) => (
+            <Banner key={caveat.code} tone={caveat.code === "preset_lint_pending" ? "info" : "warn"}>
               {caveat.message}
             </Banner>
           ))}
@@ -164,6 +176,9 @@ export function Settings() {
   const page = useUi((ui) => ui.settings.page);
   const [data, setData] = useState<SettingsResult | null>(null);
   const [failed, setFailed] = useState(false);
+  // The preset caveats, checked apart from settings (a dry run of the chat takes long on a long chat): null while checking.
+  const [caveats, setCaveats] = useState<Caveat[] | null>(null);
+  const caveatsAsked = useRef(0);
   const [busy, run] = useBusy();
   const root = useRef<HTMLDivElement>(null);
   // The page last opened from home, so Back returns focus to its row.
@@ -174,6 +189,16 @@ export function Settings() {
       else setFailed(true);
     });
   }, []);
+  // Home and Caveats ask for the caveats each time they open; the latest ask wins.
+  useEffect(() => {
+    if (page !== "home" && page !== "caveats") return;
+    const asked = (caveatsAsked.current += 1);
+    setCaveats(null);
+    void app.request({ type: "lre.settings.caveats" }).then((result) => {
+      if (asked !== caveatsAsked.current) return;
+      setCaveats(result ? result.caveats : [{ code: "preset_lint_failed", message: "The preset check didn't answer, so its warnings aren't known. Open Caveats again to retry." }]);
+    });
+  }, [page]);
   useEffect(() => {
     const el = root.current;
     if (!el || !data) return;
@@ -195,6 +220,7 @@ export function Settings() {
       <div ref={root} class="lre-set" data-lre-section="settings">
         <Home
           data={data}
+          caveats={caveats}
           open={(next) => {
             opener.current = next;
             go(next);
@@ -205,10 +231,12 @@ export function Settings() {
   }
   const { settings } = data;
   const body =
-    page === "model" ? (
+    page === "helper" ? (
+      <HelperSection helper={settings.helper} patch={patch} busy={busy} />
+    ) : page === "model" ? (
       <ModelUseSection modelUse={settings.modelUse} meter={view?.meter ?? null} patch={patch} busy={busy} />
     ) : page === "steps" ? (
-      <StepsSection modelUse={settings.modelUse} patch={patch} busy={busy} />
+      <StepsSection modelUse={settings.modelUse} helper={settings.helper} patch={patch} openHelper={() => go("helper")} busy={busy} />
     ) : page === "minds" ? (
       <MindsSection minds={settings.minds} patch={patch} busy={busy} />
     ) : page === "realism" ? (
@@ -228,7 +256,7 @@ export function Settings() {
     ) : page === "diagnostics" ? (
       <DiagnosticsPage />
     ) : (
-      <CaveatsPage data={data} />
+      <CaveatsPage caveats={caveats} />
     );
   return (
     <div

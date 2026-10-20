@@ -8,6 +8,7 @@ import type { JsonValue } from "../../src/shared/json";
 import type { ExtractionModeView, UpgradePreview } from "../../src/shared/protocol";
 import type { StudioOffer } from "../../src/shared/studio-bridge";
 import type { ExtractionType, UserSettings } from "../../src/shared/settings";
+import { SETTINGS_DEFAULTS_REV } from "../../src/shared/settings";
 import { defaultMindsSettings } from "../../src/shared/minds";
 import type { MindCommitment, MindNote, MindPlan, MindsGmCharacter, MindsGmView, WitnessEntry } from "../../src/shared/minds";
 import { calendarOf, formatClock } from "../../src/engine/calendar";
@@ -1242,6 +1243,8 @@ export function studioOfferFixture(kind: StudioCase, chatId: string): StudioOffe
 export function settingsFixture(): UserSettings {
   return {
     v: 1,
+    defaults: SETTINGS_DEFAULTS_REV,
+    helper: { connectionId: "conn-ds", model: "deepseek-v4-flash", effort: "high", maxTokens: 8192, params: { temperature: 0.7 } },
     modelUse: {
       preset: "standard",
       steps: {

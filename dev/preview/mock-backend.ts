@@ -523,7 +523,11 @@ export class MockBackend {
         this.result(reqId, "lre.view.open", { materialized: message.panel !== "core.context", pending: false });
         return;
       case "lre.settings.get":
-        this.result(reqId, "lre.settings.get", { settings: structuredClone(this.settings), extraction: extractionView(this.settings), caveats: [{ code: "preset_json_ledger", message: "Your active preset “Default” has an enabled block “Caravan Ledger” that asks the narrator for JSON; replies will carry it. Turn it off in the preset if you don't want it." }] });
+        this.result(reqId, "lre.settings.get", { settings: structuredClone(this.settings), extraction: extractionView(this.settings) });
+        return;
+      case "lre.settings.caveats":
+        // A dry run takes a moment: the home badge and the Caveats page show they're checking.
+        setTimeout(() => this.result(reqId, "lre.settings.caveats", { caveats: [{ code: "preset_json_ledger", message: "Your active preset “Default” has an enabled block “Caravan Ledger” that asks the narrator for JSON; replies will carry it. Turn it off in the preset if you don't want it." }] }), 900);
         return;
       case "lre.settings.set": {
         const next = mergePatch(this.settings, message.patch) as UserSettings;
@@ -531,7 +535,7 @@ export class MockBackend {
         const levels = REALISM_PRESETS[preset];
         if (isRecord(message.patch.realism) && message.patch.realism.preset && levels) next.realism.levels = { ...next.realism.levels, ...(levels as UserSettings["realism"]["levels"]) };
         this.settings = next;
-        this.result(reqId, "lre.settings.set", { settings: structuredClone(this.settings), extraction: extractionView(this.settings), caveats: [] });
+        this.result(reqId, "lre.settings.set", { settings: structuredClone(this.settings), extraction: extractionView(this.settings) });
         return;
       }
       case "lre.world":

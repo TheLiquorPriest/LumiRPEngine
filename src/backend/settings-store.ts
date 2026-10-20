@@ -7,8 +7,8 @@ import { BANDS, DOMAINS, INTERRUPT_CLASSES } from "../shared/ids";
 import type { JsonObject, JsonValue } from "../shared/json";
 import { hasOwn, isRecord, safeKey } from "../shared/json";
 import type { ExtractionModeView, SettingsResult } from "../shared/protocol";
-import type { ExtractionBounds, ExtractionLearning, ExtractionType, ExtractionTypeStats, LookupLimits, LorePolicy, ModelUseSettings, PhaseBudget, RealismSettings, StepConfig, StepLore, StepRoute, TimeSettings, UserSettings } from "../shared/settings";
-import { EXTRACTION_DEFAULTS, EXTRACTION_LEARNING, EXTRACTION_TYPES, HELPER_MAX_TOKENS, LORE_POLICIES, LORE_TRANSPORTS, PRE_REPLY_MAX_MS, SPEED_ACTIVITIES, SPEED_DEFAULT, SPEED_THRESHOLD_MINUTES } from "../shared/settings";
+import type { ExtractionBounds, ExtractionLearning, ExtractionType, ExtractionTypeStats, HelperDefault, LookupLimits, LorePolicy, ModelUseSettings, PhaseBudget, RealismSettings, SamplingParams, StepConfig, StepLore, StepRoute, TimeSettings, UserSettings } from "../shared/settings";
+import { DEFAULT_HELPER, EXTRACTION_DEFAULTS, EXTRACTION_LEARNING, EXTRACTION_TYPES, LORE_POLICIES, LORE_TRANSPORTS, PRE_REPLY_MAX_MS, REASONING_CHOICES, SAMPLING_PARAMS, SETTINGS_DEFAULTS_REV, SPEED_ACTIVITIES, SPEED_DEFAULT, SPEED_THRESHOLD_MINUTES } from "../shared/settings";
 import type { BoundMode } from "../shared/ids";
 import type { StepPurpose } from "../shared/world";
 import { defaultMindsSettings, MINDS_PRESETS, mindsSettingsOf } from "../shared/minds";
@@ -41,7 +41,8 @@ const DECISION = { provider: "decision", connectionId: null, model: null } as co
 const HELPER = { provider: "helper", connectionId: null, model: null } as const;
 
 function step(enabled: boolean, signals: string[], route: StepConfig["route"], lore?: StepLore): StepConfig {
-  return { enabled, signals, ...(route ? { route: { ...route } } : {}), maxTokens: HELPER_MAX_TOKENS, ...(lore ? { lore: { ...lore } } : {}) };
+  // No max tokens of its own: a preset's step runs with the helper model's.
+  return { enabled, signals, ...(route ? { route: { ...route } } : {}), ...(lore ? { lore: { ...lore } } : {}) };
 }
 
 const lore = (policy: LorePolicy, tokens: number): StepLore => ({ policy, tokens });
@@ -51,57 +52,129 @@ const NO_LOOKUPS: LookupLimits = { calls: 0, ms: 0 };
  * Model-use presets (DESIGN §5.3, §5.4). Routing per D10: `interpret` and `extract` on the helper;
  * `npc.choose` on the Decision connection. `judge` runs only when a world's adjudication policy
  * needs it (the player's words weigh, or the story decides), never on Lean. Lore: Lean prefetches
- * and never looks up; Standard and Full let their decision and JSON steps look lore up on a small
- * budget per phase, apart from the phase's calls; prose steps prefetch only.
+ * and never looks up; Standard and Full let their decision and JSON steps look lore up on a budget
+ * per phase, apart from the phase's calls; prose steps prefetch only. The tokens, lore and wall
+ * clocks are sized for reasoning models on long chats with large lorebooks, where a call takes tens
+ * of seconds and thinks before it answers.
  */
 export const MODEL_USE_PRESETS: Record<Exclude<ModelUsePresetId, "custom">, Omit<ModelUseSettings, "preset">> = {
   lean: {
     steps: {
-      interpret: step(true, ["classifier"], HELPER, lore("prefetch", 200)),
-      extract: step(true, ["reply"], HELPER, lore("prefetch", 200)),
-      "npc.choose": step(false, [], DECISION, lore("prefetch", 200)),
-      judge: step(false, ["always"], HELPER, lore("prefetch", 200)),
+      interpret: step(true, ["classifier"], HELPER, lore("prefetch", 800)),
+      extract: step(true, ["reply"], HELPER, lore("prefetch", 800)),
+      "npc.choose": step(false, [], DECISION, lore("prefetch", 800)),
+      judge: step(false, ["always"], HELPER, lore("prefetch", 800)),
     },
     budgets: { pre: { calls: 1, ms: 20_000, lookup: { ...NO_LOOKUPS } }, post: { calls: 1, ms: 30_000, lookup: { ...NO_LOOKUPS } } },
-    tokens: { sections: 300 },
+    tokens: { sections: 2000 },
   },
   standard: {
     steps: {
-      interpret: step(true, ["classifier"], HELPER, lore("prefetch+lookup", 400)),
-      extract: step(true, ["reply"], HELPER, lore("prefetch+lookup", 400)),
-      "npc.choose": step(true, ["tie_zone", "invitation"], DECISION, lore("prefetch+lookup", 400)),
-      judge: step(true, ["always"], HELPER, lore("prefetch+lookup", 400)),
+      interpret: step(true, ["classifier"], HELPER, lore("prefetch+lookup", 1600)),
+      extract: step(true, ["reply"], HELPER, lore("prefetch+lookup", 1600)),
+      "npc.choose": step(true, ["tie_zone", "invitation"], DECISION, lore("prefetch+lookup", 1600)),
+      judge: step(true, ["always"], HELPER, lore("prefetch+lookup", 1600)),
       // Minds run on their own cadence (`UserSettings.minds`): these cards set only where they run and their lore. The skip step is off until the user turns it on (DESIGN §24.7).
-      mind: step(true, ["always"], HELPER, lore("prefetch", 400)),
+      mind: step(true, ["always"], HELPER, lore("prefetch", 1600)),
       memory: step(true, ["reply"], HELPER, lore("none", 0)),
-      skip: step(false, ["timelapse"], HELPER, lore("prefetch", 300)),
+      skip: step(false, ["timelapse"], HELPER, lore("prefetch", 1200)),
       consolidate: step(true, ["reply"], HELPER, lore("none", 0)),
     },
-    budgets: { pre: { calls: 2, ms: 30_000, lookup: { calls: 2, ms: 15_000 } }, post: { calls: 2, ms: 45_000, lookup: { calls: 1, ms: 20_000 } } },
-    tokens: { sections: 600 },
+    budgets: { pre: { calls: 2, ms: 30_000, lookup: { calls: 4, ms: 15_000 } }, post: { calls: 2, ms: 45_000, lookup: { calls: 3, ms: 20_000 } } },
+    tokens: { sections: 4000 },
   },
   full: {
     steps: {
-      interpret: step(true, ["always"], HELPER, lore("prefetch+lookup", 600)),
-      brief: step(true, ["always"], HELPER, lore("prefetch", 400)),
-      outline: step(true, ["always"], HELPER, lore("prefetch", 400)),
-      extract: step(true, ["reply"], HELPER, lore("prefetch+lookup", 600)),
-      contradiction: step(true, ["reply"], HELPER, lore("prefetch+lookup", 600)),
-      "npc.choose": step(true, ["present", "offscreen"], DECISION, lore("prefetch+lookup", 600)),
-      judge: step(true, ["always"], HELPER, lore("prefetch+lookup", 600)),
-      mind: step(true, ["always"], HELPER, lore("prefetch", 600)),
+      interpret: step(true, ["always"], HELPER, lore("prefetch+lookup", 2400)),
+      brief: step(true, ["always"], HELPER, lore("prefetch", 1600)),
+      outline: step(true, ["always"], HELPER, lore("prefetch", 1600)),
+      extract: step(true, ["reply"], HELPER, lore("prefetch+lookup", 2400)),
+      contradiction: step(true, ["reply"], HELPER, lore("prefetch+lookup", 2400)),
+      "npc.choose": step(true, ["present", "offscreen"], DECISION, lore("prefetch+lookup", 2400)),
+      judge: step(true, ["always"], HELPER, lore("prefetch+lookup", 2400)),
+      mind: step(true, ["always"], HELPER, lore("prefetch", 2400)),
       memory: step(true, ["reply"], HELPER, lore("none", 0)),
-      skip: step(false, ["timelapse"], HELPER, lore("prefetch", 400)),
+      skip: step(false, ["timelapse"], HELPER, lore("prefetch", 1600)),
       consolidate: step(true, ["reply"], HELPER, lore("none", 0)),
     },
-    budgets: { pre: { calls: 8, ms: 60_000, lookup: { calls: 3, ms: 30_000 } }, post: { calls: 4, ms: 60_000, lookup: { calls: 2, ms: 30_000 } } },
-    tokens: { sections: 1000 },
+    budgets: { pre: { calls: 8, ms: 60_000, lookup: { calls: 6, ms: 30_000 } }, post: { calls: 4, ms: 60_000, lookup: { calls: 4, ms: 30_000 } } },
+    tokens: { sections: 8000 },
   },
 };
+
+/**
+ * The defaults before they rose for reasoning models (`UserSettings.defaults` absent), each old
+ * value with the one that replaced it. A file's value that still equals an old default is taken
+ * as one the user never changed, and is lifted; any other value is the user's and stays. A step's
+ * old 2,000 max tokens is dropped, so the step takes the helper model's.
+ */
+const LIFTED = {
+  maxTokens: 2000,
+  loreTokens: new Map([
+    [200, 800],
+    [300, 1200],
+    [400, 1600],
+    [600, 2400],
+  ]),
+  /** Per phase: each preset's old lookups (`calls|ms`), lifted to that preset's new lookup count. */
+  lookups: {
+    pre: [
+      { preset: "standard", was: "2|15000" },
+      { preset: "full", was: "3|30000" },
+    ],
+    post: [
+      { preset: "standard", was: "1|20000" },
+      { preset: "full", was: "2|30000" },
+    ],
+  } satisfies Record<"pre" | "post", { preset: Exclude<ModelUsePresetId, "custom">; was: string }[]>,
+  sections: new Map([
+    [300, MODEL_USE_PRESETS.lean.tokens.sections],
+    [600, MODEL_USE_PRESETS.standard.tokens.sections],
+    [1000, MODEL_USE_PRESETS.full.tokens.sections],
+  ]),
+  /** The Minds section's own budget (`minds.tokens`), which shipped at the sections' values. */
+  minds: new Map([
+    [300, MINDS_PRESETS.lean.tokens],
+    [600, MINDS_PRESETS.standard.tokens],
+    [1000, MINDS_PRESETS.full.tokens],
+  ]),
+};
+
+/**
+ * A settings file read against older defaults, with each value still at an old default lifted to
+ * its new one (`LIFTED`). Only plain values are touched; anything malformed is left to `conform`.
+ */
+function lifted(raw: Readonly<Record<string, unknown>>): JsonObject {
+  const out = JSON.parse(JSON.stringify(raw)) as JsonObject;
+  if (out.defaults === SETTINGS_DEFAULTS_REV) return out;
+  const lift = (map: ReadonlyMap<number, number>, n: number): number => map.get(n) ?? n;
+  const mu = isRecord(out.modelUse) ? out.modelUse : null;
+  if (mu && isRecord(mu.steps)) {
+    for (const s of Object.values(mu.steps)) {
+      if (!isRecord(s)) continue;
+      if (s.maxTokens === LIFTED.maxTokens) delete s.maxTokens;
+      if (isRecord(s.lore) && typeof s.lore.tokens === "number") s.lore.tokens = lift(LIFTED.loreTokens, s.lore.tokens);
+    }
+  }
+  if (mu && isRecord(mu.budgets)) {
+    for (const phase of ["pre", "post"] as const) {
+      const b = mu.budgets[phase];
+      const l = isRecord(b) && isRecord(b.lookup) ? b.lookup : null;
+      const old = l ? LIFTED.lookups[phase].find((x) => x.was === `${String(l.calls)}|${String(l.ms)}`) : undefined;
+      if (l && old) l.calls = MODEL_USE_PRESETS[old.preset].budgets[phase].lookup?.calls ?? l.calls;
+    }
+  }
+  if (mu && isRecord(mu.tokens) && typeof mu.tokens.sections === "number") mu.tokens.sections = lift(LIFTED.sections, mu.tokens.sections);
+  if (isRecord(out.minds) && typeof out.minds.tokens === "number") out.minds.tokens = lift(LIFTED.minds, out.minds.tokens);
+  out.defaults = SETTINGS_DEFAULTS_REV;
+  return out;
+}
 
 export function defaultSettings(): UserSettings {
   return {
     v: 1,
+    defaults: SETTINGS_DEFAULTS_REV,
+    helper: { ...DEFAULT_HELPER, params: {} },
     modelUse: { preset: "standard", ...structuredClone(MODEL_USE_PRESETS.standard) },
     realism: { preset: "story", ...structuredClone(REALISM_PRESETS.story) },
     time: {
@@ -154,7 +227,7 @@ function normalize(raw: unknown): UserSettings {
     fill.modelUse = { preset, ...structuredClone(MODEL_USE_PRESETS[preset]) };
     fill.minds = defaultMindsSettings(preset);
   }
-  const merged = mergePatch(JSON.parse(JSON.stringify(fill)) as JsonValue, JSON.parse(JSON.stringify(raw)) as JsonValue);
+  const merged = mergePatch(JSON.parse(JSON.stringify(fill)) as JsonValue, lifted(raw));
   return isRecord(merged) && merged.v === 1 ? conform(merged, fill) : defaultSettings();
 }
 
@@ -165,6 +238,8 @@ const STEP_PURPOSES: readonly StepPurpose[] = ["interpret", "npc.choose", "contr
 const MAX_PHASE_MS = 600_000;
 
 const int = (v: unknown, lo: number, hi: number): number | undefined => (typeof v === "number" && Number.isInteger(v) && v >= lo && v <= hi ? v : undefined);
+/** A token or call budget: a whole number from `lo` (below it the budget can't work), with no ceiling. */
+const atLeast = (v: unknown, lo: number): number | undefined => int(v, lo, Number.MAX_SAFE_INTEGER);
 const real = (v: unknown, lo: number, hi: number): number | undefined => (typeof v === "number" && Number.isFinite(v) && v >= lo && v <= hi ? v : undefined);
 const oneOf = <T extends string>(v: unknown, values: readonly T[]): T | undefined => values.find((x) => x === v);
 const LEVELS: readonly Level[] = [0, 1, 2, 3, 4];
@@ -189,18 +264,37 @@ function entries<T>(v: unknown, max: number, entry: (value: unknown) => T | unde
   return out;
 }
 
+const text = (x: unknown): string | null => (typeof x === "string" && x !== "" ? x.slice(0, 200) : null);
+
+/** Sampling parameters, each within its range; one out of range or of the wrong type is left out. */
+function paramsOf(v: unknown): SamplingParams {
+  const out: SamplingParams = {};
+  if (!isRecord(v)) return out;
+  for (const p of SAMPLING_PARAMS) {
+    const x = real(v[p.key], p.min, p.max);
+    if (x !== undefined) out[p.key] = p.integer ? Math.round(x) : x;
+  }
+  return out;
+}
+
 function routeOf(v: unknown): StepRoute | undefined {
   if (!isRecord(v)) return undefined;
   const provider = oneOf(v.provider, ["decision", "helper"] as const);
   if (!provider) return undefined;
-  const text = (x: unknown): string | null => (typeof x === "string" && x !== "" ? x.slice(0, 200) : null);
-  return { provider, connectionId: text(v.connectionId), model: text(v.model) };
+  const effort = oneOf(v.effort, REASONING_CHOICES);
+  const params = paramsOf(v.params);
+  return { provider, connectionId: text(v.connectionId), model: text(v.model), ...(effort ? { effort } : {}), ...(Object.keys(params).length > 0 ? { params } : {}) };
+}
+
+function helperOf(v: unknown, d: Readonly<HelperDefault>): HelperDefault {
+  if (!isRecord(v)) return { ...d, params: { ...d.params } };
+  return { connectionId: text(v.connectionId), model: text(v.model), effort: oneOf(v.effort, REASONING_CHOICES) ?? d.effort, maxTokens: atLeast(v.maxTokens, 1) ?? d.maxTokens, params: paramsOf(v.params) };
 }
 
 function loreOf(v: unknown): StepLore | undefined {
   if (!isRecord(v)) return undefined;
   const policy = oneOf(v.policy, LORE_POLICIES);
-  const tokens = int(v.tokens, 0, 8000);
+  const tokens = atLeast(v.tokens, 0);
   const transport = oneOf(v.transport, LORE_TRANSPORTS);
   return policy && tokens !== undefined ? { policy, tokens, ...(transport ? { transport } : {}) } : undefined;
 }
@@ -208,7 +302,7 @@ function loreOf(v: unknown): StepLore | undefined {
 function stepOf(v: unknown, base: StepConfig | undefined): StepConfig | undefined {
   if (!isRecord(v)) return base;
   const route = routeOf(v.route);
-  const maxTokens = int(v.maxTokens, 1, 65_536);
+  const maxTokens = atLeast(v.maxTokens, 1);
   const lore = loreOf(v.lore) ?? base?.lore;
   return {
     enabled: typeof v.enabled === "boolean" ? v.enabled : (base?.enabled ?? false),
@@ -233,8 +327,8 @@ function conform(v: JsonObject, d: UserSettings): UserSettings {
   const phase = (x: unknown, b: PhaseBudget, max: number): PhaseBudget => {
     if (!isRecord(x)) return b;
     const l = isRecord(x.lookup) ? x.lookup : null;
-    const lookup = l ? { calls: int(l.calls, 0, 32) ?? b.lookup?.calls ?? 0, ms: int(l.ms, 0, MAX_PHASE_MS) ?? b.lookup?.ms ?? 0 } : b.lookup;
-    return { calls: int(x.calls, 0, 32) ?? b.calls, ms: Math.min(max, int(x.ms, 0, MAX_PHASE_MS) ?? b.ms), ...(lookup ? { lookup: { ...lookup } } : {}) };
+    const lookup = l ? { calls: atLeast(l.calls, 0) ?? b.lookup?.calls ?? 0, ms: int(l.ms, 0, MAX_PHASE_MS) ?? b.lookup?.ms ?? 0 } : b.lookup;
+    return { calls: atLeast(x.calls, 0) ?? b.calls, ms: Math.min(max, int(x.ms, 0, MAX_PHASE_MS) ?? b.ms), ...(lookup ? { lookup: { ...lookup } } : {}) };
   };
   const rawSteps = isRecord(mu.steps) ? mu.steps : {};
   const steps: ModelUseSettings["steps"] = {};
@@ -247,7 +341,7 @@ function conform(v: JsonObject, d: UserSettings): UserSettings {
     preset: oneOf(mu.preset, ["lean", "standard", "full", "custom"] as const) ?? d.modelUse.preset,
     steps,
     budgets: { pre: phase(budgets.pre, d.modelUse.budgets.pre, PRE_REPLY_MAX_MS), post: phase(budgets.post, d.modelUse.budgets.post, MAX_PHASE_MS) },
-    tokens: { sections: int(tokens.sections, 0, 100_000) ?? d.modelUse.tokens.sections },
+    tokens: { sections: atLeast(tokens.sections, 0) ?? d.modelUse.tokens.sections },
   };
   const re = isRecord(v.realism) ? v.realism : {};
   const rawLevels = isRecord(re.levels) ? re.levels : {};
@@ -295,6 +389,8 @@ function conform(v: JsonObject, d: UserSettings): UserSettings {
   }
   return {
     v: 1,
+    defaults: SETTINGS_DEFAULTS_REV,
+    helper: helperOf(v.helper, d.helper),
     modelUse,
     realism,
     time,
@@ -427,6 +523,7 @@ export function undoModeChange(learning: ExtractionLearning, change: ModeChange)
 export class SettingsStore {
   private readonly settings = new Map<UserId, UserSettings>();
   private readonly learning = new Map<UserId, ExtractionLearning>();
+  private readonly revisions = new Map<UserId, number>();
 
   /** `loaded` hears each user's settings as they are read or set (the context handler's timeout follows them). */
   constructor(
@@ -451,8 +548,14 @@ export class SettingsStore {
     await this.host.storage.write(`${SETTINGS_PATH}.tmp`, JSON.stringify(next), userId);
     await this.host.storage.move(`${SETTINGS_PATH}.tmp`, SETTINGS_PATH, userId);
     this.settings.set(userId, next);
+    this.revisions.set(userId, this.revision(userId) + 1);
     this.loaded(userId, next);
     return next;
+  }
+
+  /** How many times the user's settings were set since the backend started (what a finding read from them is kept against). */
+  revision(userId: UserId): number {
+    return this.revisions.get(userId) ?? 0;
   }
 
   /** The settings already loaded for the user (the latest set), without reading storage. */
@@ -475,8 +578,8 @@ export class SettingsStore {
     await this.host.storage.move(`${LEARNING_PATH}.tmp`, LEARNING_PATH, userId);
   }
 
-  /** Settings plus each type's effective mode for `connection` and the caveats. */
-  async result(userId: UserId, connection: { id: string; name: string } | null, caveats: SettingsResult["caveats"]): Promise<SettingsResult> {
+  /** Settings plus each type's effective mode for `connection`. */
+  async result(userId: UserId, connection: { id: string; name: string } | null): Promise<SettingsResult> {
     const settings = await this.get(userId);
     const learning = await this.learningOf(userId);
     const extraction = {} as Record<ExtractionType, ExtractionModeView>;
@@ -485,7 +588,7 @@ export class SettingsStore {
       const stats = connection ? statsOf(learning, connection.id, type) : undefined;
       extraction[type] = { mode, source, connection, accepted: stats?.accepted ?? 0, rejected: stats?.rejected ?? 0 };
     }
-    return { settings, extraction, caveats };
+    return { settings, extraction };
   }
 
   /** The configured step, falling back to the preset's (DESIGN §5.3). */
