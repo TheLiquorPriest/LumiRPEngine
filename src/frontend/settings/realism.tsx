@@ -1,10 +1,13 @@
 // Realism (DESIGN §9.1). For new chats (Settings → Realism): presets, per-domain levels on the host
-// range slider and band caps, which fill in what a world's own realism leaves out (or replace it,
-// with "Use my settings" on). For this chat (GM → This chat → Realism): promote or demote a domain
-// on the running chat through a `resolve` marker, after a migration preview of what freezes,
-// promotes or materializes (§9.2).
+// range slider, band caps and player claims, which fill in what a world's own realism leaves out
+// (or replace it, with "Use my settings" on). For this chat (GM → This chat → Realism): promote or
+// demote a domain on the running chat through a `resolve` marker, after a migration preview of what
+// freezes, promotes or materializes (§9.2), and change its player claims through a `claims` marker
+// (§9.4). Build's Realism defaults set the world's claims with the same control (`ClaimsControl`).
 
 import { useEffect, useRef, useState } from "preact/hooks";
+import type { ClaimsPolicy } from "../../shared/claims";
+import { CLAIM_MODE_LABEL, CLAIM_MODES } from "../../shared/claims";
 import type { JsonObject } from "../../shared/json";
 import { BANDS, DOMAINS } from "../../shared/ids";
 import type { Band, DomainId, Level, RealismPresetId } from "../../shared/ids";
@@ -17,7 +20,7 @@ import { useApp } from "../app";
 import { Banner, Button, Empty, HostSlider, HostSwitch, Seg, useBusy } from "../components";
 import type { IconName } from "../icons";
 import { Icon } from "../icons";
-import { resolveMarker } from "../requests";
+import { claimsMarker, resolveMarker, type Req } from "../requests";
 import { revealInScroller } from "../scroll";
 
 export const DOMAIN_LABEL: Record<DomainId, string> = {
@@ -104,6 +107,33 @@ export function OverrideWorldSwitch(props: { checked: boolean; busy: boolean; pa
   );
 }
 
+const CLAIM_CHOICES = CLAIM_MODES.map((mode) => ({ value: mode, label: CLAIM_MODE_LABEL[mode] }));
+
+/**
+ * Player claims (DESIGN §9.4): what a typed action's thing the world doesn't have becomes, and
+ * whether Make it real asks first above the world's claim cap. The one control for the policy in all
+ * three places it is set (Settings → Realism, GM → This chat → Realism, Build's Realism defaults),
+ * so each reads the same. The cap switch keeps its value under the other modes, where it does
+ * nothing, so switching back to Make it real finds it as it was.
+ */
+export function ClaimsControl(props: { value: ClaimsPolicy; disabled?: boolean; onChange(next: ClaimsPolicy): void }) {
+  const { mode, capped } = props.value;
+  const help = mode === "real" ? (capped ? "It's added where your action needs it, unless it costs more than the world's claim cap: then you're asked first." : "It's added where your action needs it, at any price.") : mode === "ask" ? "The turn waits for your answer: Add it, or Not an action." : "The action doesn't play, and a chip says why.";
+  return (
+    <div class="lre-stack" data-lre-claims>
+      <div class="lre-field">
+        <span class="label">When you say you have something the world doesn't</span>
+        <Seg<ClaimsPolicy["mode"]> label="When you say you have something the world doesn't" value={mode} options={CLAIM_CHOICES} disabled={props.disabled} onChange={(next) => props.onChange({ mode: next, capped })} />
+        <span class="lre-field-help">{help} Money is never made this way.</span>
+      </div>
+      <div class="lre-field">
+        <HostSwitch label="Ask first above the world's claim cap" checked={capped} disabled={props.disabled || mode !== "real"} onChange={(next) => props.onChange({ mode, capped: next })} />
+        {mode === "real" ? null : <span class="lre-field-help">Only for Make it real.</span>}
+      </div>
+    </div>
+  );
+}
+
 export function RealismSeed(props: { realism: RealismSettings; overrideWorld: boolean; patch(patch: JsonObject): void; busy: boolean }) {
   const { realism } = props;
   return (
@@ -160,6 +190,9 @@ export function RealismSeed(props: { realism: RealismSettings; overrideWorld: bo
           ))}
         </div>
       </div>
+      <div class="lre-gm-subtitle">Player claims</div>
+      <p class="lre-gm-note">What a thing your typed action uses becomes when the world doesn't have it, as far as your character knows. Each preset sets its own.</p>
+      <ClaimsControl value={realism.claims} disabled={props.busy} onChange={(claims) => props.patch({ realism: { preset: "custom", claims: { mode: claims.mode, capped: claims.capped } } })} />
     </div>
   );
 }
@@ -180,7 +213,12 @@ const TONE_ICON: Record<MarkerPreview["lines"][number]["tone"], { icon: IconName
   info: { icon: "info", label: "Note" },
 };
 
-/** Promote or demote a domain on the running chat, with the migration preview first. */
+/** The `claims` marker a pick in GM → This chat → Realism sends, or null when the pick is the policy already in force (as a slider left where it was sends nothing). */
+export function chatClaimsChange(chatId: string, current: ClaimsPolicy, next: ClaimsPolicy): Req<"lre.marker"> | null {
+  return next.mode === current.mode && next.capped === current.capped ? null : claimsMarker(chatId, { mode: next.mode, capped: next.capped });
+}
+
+/** Promote or demote a domain on the running chat, with the migration preview first; change its player claims at once. */
 export function RealismThisChat(props: { chatId: string; controls: ControlsView | null }) {
   const app = useApp();
   const [scope, setScope] = useState<ScopeChoice>("all");
@@ -215,6 +253,13 @@ export function RealismThisChat(props: { chatId: string; controls: ControlsView 
         app.toast(result.pending ? "Saved — the change applies when the reply finishes." : `${DOMAIN_LABEL[pending.domain]} is now ${LEVEL_LABEL[pending.to]}.`, "info");
         setPending(null);
       }
+    });
+  // A claims change has nothing to preview: what it does shows only on a later turn's claim.
+  const claims = (next: ClaimsPolicy) =>
+    run(async () => {
+      const change = chatClaimsChange(props.chatId, realism.claims, next);
+      const result = change ? await app.request(change) : null;
+      if (result) app.toast(result.pending ? "Saved — the change applies when the reply finishes." : `This chat plays claims as ${CLAIM_MODE_LABEL[next.mode]} from the next turn.`, "info");
     });
   // Which of the world's tiers the chosen band's caps reach, unless that is just the band itself.
   const reached = scope === "all" ? [] : realism.bandTiers[scope];
@@ -272,6 +317,9 @@ export function RealismThisChat(props: { chatId: string; controls: ControlsView 
           <LevelSlider key={`${scope}:${domain}`} domain={domain} value={levelFor(domain)} floor={floorOf(domain)} disabled={busy || pending !== null} onCommit={(to) => (to === levelFor(domain) ? undefined : ask(domain, to))} />
         ))}
       </div>
+      <div class="lre-gm-subtitle">Player claims</div>
+      <p class="lre-gm-note">What a thing your typed action uses becomes when the world doesn't have it, as far as your character knows. A change applies from the next turn.</p>
+      <ClaimsControl value={realism.claims} disabled={busy || pending !== null} onChange={claims} />
     </div>
   );
 }

@@ -1,9 +1,10 @@
 // Build → Packs → economy: the economy pack's own config fields, in the Build forms' idiom, above
-// its config as JSON. The narrated-price cap (DESIGN §9.5) is the most a
-// narrated price charges for something no catalog row prices, typed as the world's currency writes
-// it and stored in whole minor units; left empty, the engine derives it from the tables. The region
-// prices living and taxes for whoever names none; living costs are a week's spending per wealth
-// band; taxes are the spending categories sales tax never falls on and the corporate rate (§26).
+// its config as JSON. The narrated-price cap (DESIGN §9.5) is the most a narrated price charges for
+// something no catalog row prices, and the claim cap (§9.4) the most a thing the player says they
+// have may cost before a capped Make it real asks first; each is typed as the world's currency
+// writes it and stored in whole minor units, and left empty, the engine derives it from the tables.
+// The region prices living and taxes for whoever names none; living costs are a week's spending
+// per wealth band; taxes are the spending categories sales tax never falls on and the corporate rate (§26).
 // The Custom toggles (DESIGN §25) switch a money feature on or off, under any preset, at the levels
 // its floor allows, on a page of their own; products are the world's own account products and
 // assets are what holdings hold (§27), each a row that opens as a sheet. Styles:
@@ -23,7 +24,7 @@ import type { FieldSpec } from "../../../frontend/build/schema";
 import { ChoiceInput, DateInput, type FormCtx, lintAt, LintBadge, MinorMoneyInput, NewKey, NumberInput, SchemaFields } from "../../../frontend/build/schema-form";
 import { humanize } from "../../../frontend/format";
 import type { PackConfigProps } from "../../../frontend/registry";
-import { derivedUnpricedCap, WEALTH_BANDS } from "../core/model";
+import { derivedClaimCap, derivedUnpricedCap, WEALTH_BANDS } from "../core/model";
 import { CORPORATE_PCT } from "../core/taxes";
 
 /** A Custom toggle's state: as the level decides, or forced on or off. */
@@ -158,10 +159,11 @@ const ASSET_TAIL: FieldSpec[] = [
   { kind: "ref", key: "entity", label: "Stands for (a business or a property)", collection: "entities", optional: true },
 ];
 
-/** The narrated-price cap and the region: what prices, rents and taxes follow. */
+/** The narrated-price cap, the claim cap and the region: what prices, rents, taxes and claims follow. */
 function Prices(props: PackConfigProps) {
   const currency = props.world.currency;
   const derived = derivedUnpricedCap(props.world);
+  const meal = derivedClaimCap(props.world);
   const { unpricedCap, ...rest } = props.config;
   const region = typeof props.config.region === "string" ? props.config.region : "";
   const choices = regionChoices(props.world);
@@ -179,6 +181,17 @@ function Prices(props: PackConfigProps) {
         hint={`Empty uses ${formatMoney(derived, currency)}, the highest price band in the catalog and categories. A price the player states is never capped.`}
         issues={lintAt(props.lint, `${CONFIG}.unpricedCap`)}
         onChange={(value) => props.onChange(value === undefined ? rest : { ...rest, unpricedCap: value })}
+      />
+      <MinorMoneyInput
+        label="Claim cap"
+        value={props.config.claimCap}
+        currency={currency}
+        min={1}
+        optional
+        placeholder={formatMoneyInput(meal, currency)}
+        hint={`Empty uses ${formatMoney(meal, currency)}, about the price of a meal. When the player says they have something the world doesn't, Make it real with the cap on asks first about anything that costs more.`}
+        issues={lintAt(props.lint, `${CONFIG}.claimCap`)}
+        onChange={(value) => props.onChange(withKey(props.config, "claimCap", value))}
       />
       <div class="lre-field">
         <RefPicker label="Region" value={region} none="Not set: the national averages" options={options} onChange={(v) => props.onChange(withRegion(props.config, v))} />

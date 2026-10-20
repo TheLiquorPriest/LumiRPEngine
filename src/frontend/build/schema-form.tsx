@@ -11,6 +11,7 @@ import type { ComponentChildren } from "preact";
 import { useEffect, useId, useRef, useState } from "preact/hooks";
 import type { DomainId, Level } from "../../shared/ids";
 import { BANDS, DOMAINS } from "../../shared/ids";
+import { CLAIM_PRESETS, DEFAULT_CLAIMS, readClaims } from "../../shared/claims";
 import type { JsonObject, JsonValue } from "../../shared/json";
 import { hasOwn, isRecord, safeKey } from "../../shared/json";
 import { formatMoneyInput, parseMoneyInput } from "../../shared/money";
@@ -19,11 +20,11 @@ import { tableChoices } from "../../shared/tables";
 import { BAND_LABEL, tierOf, tiersInOrder } from "../../shared/tiers";
 import { ALIVE, BUILTIN_RELATIONS, formatMoney, lifeStatesOf } from "../../shared/world";
 import type { CalendarDef, FacetValueDef, FieldDef, WorldCurrency, WorldDoc } from "../../shared/world";
-import { Button, Disclosure, IconButton, IdText, Seg, useShowIds } from "../components";
+import { Button, Disclosure, HostSwitch, IconButton, IdText, Seg, useShowIds } from "../components";
 import { humanize } from "../format";
 import { MoneyInput } from "../money-input";
 import type { FieldEditorDef } from "../registry";
-import { DOMAIN_LABEL, floorNote, LEVEL_LABEL } from "../settings/realism";
+import { ClaimsControl, DOMAIN_LABEL, floorNote, LEVEL_LABEL } from "../settings/realism";
 import { useSelect } from "../store";
 import { EffectArgsInput } from "./effect-args";
 import { ExprEditor, ExprReadout } from "./expr-editor";
@@ -1315,6 +1316,28 @@ function BandCapsInput(props: { label: string; value: JsonValue | undefined; iss
   );
 }
 
+/**
+ * The world's player-claims default (DESIGN §9.4), with the control Settings and GM mode use. Off, the
+ * world sets none and a new chat takes the player's own; switched on, it starts from what the world's
+ * realism preset plays claims by, so a Simulation world starts at Ask first.
+ */
+export function ClaimsInput(props: { label: string; value: JsonValue | undefined; preset: JsonValue | undefined; issues: readonly LintIssue[]; onChange(value: JsonValue | undefined): void }) {
+  const policy = readClaims(props.value);
+  const seed = props.preset === "story" || props.preset === "grounded" || props.preset === "simulation" ? CLAIM_PRESETS[props.preset] : DEFAULT_CLAIMS;
+  return (
+    <div class="lre-field" data-lre-claims="world">
+      <span class="label">{props.label}</span>
+      <HostSwitch label="This world sets what new chats make of them" checked={props.value !== undefined} onChange={(on) => props.onChange(on ? { mode: seed.mode, capped: seed.capped } : undefined)} />
+      {policy ? (
+        <ClaimsControl value={policy} onChange={(next) => props.onChange({ mode: next.mode, capped: next.capped })} />
+      ) : props.value === undefined ? (
+        <span class="lre-field-help">Not set: a new chat takes the player's own setting (Settings → Realism).</span>
+      ) : null}
+      <Issues issues={props.issues} />
+    </div>
+  );
+}
+
 // ---------------------------------------------------------------- the form
 
 /** Whether a checkbox shows ticked: as the engine reads the value (a lore `secret` that isn't false is secret), else only `true`. */
@@ -1436,6 +1459,8 @@ export function FieldInput(props: { spec: FieldSpec; value: JsonValue | undefine
       return <LevelsInput label={spec.label} value={props.value} floors={spec.floored ? { ...ctx.doc.ruleset?.minLevels } : undefined} issues={issues} onChange={props.onChange} />;
     case "bandCaps":
       return <BandCapsInput label={spec.label} value={props.value} issues={issues} onChange={props.onChange} />;
+    case "claims":
+      return <ClaimsInput label={spec.label} value={props.value} preset={props.parent.preset} issues={issues} onChange={props.onChange} />;
     case "tier":
       return <RefInput label={spec.label} value={props.value} options={tiersInOrder(ctx.doc).map(([id, t]) => (t.label === BAND_LABEL[t.band] ? { value: id, label: t.label } : { value: id, label: t.label, sublabel: BAND_LABEL[t.band] }))} issues={issues} onChange={props.onChange} />;
     case "agent": {

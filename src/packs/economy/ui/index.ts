@@ -1,6 +1,6 @@
 // Economy UI: the money hub (Play → Me → Money, its pages riding Play's sheet stack as `money` and
 // `account` sheets, and everyone's in GM mode), Now's money glance, the economy pack's config in
-// Build (the narrated-price cap, the Custom money features, products and assets), and Build's
+// Build (the narrated-price cap, the claim cap, the Custom money features, products and assets), and Build's
 // editors for the structured money fields of its kinds and for places' cash machines and branches.
 // The data tables (catalog, categories, occupations, regions, finance) are all `tables`.
 

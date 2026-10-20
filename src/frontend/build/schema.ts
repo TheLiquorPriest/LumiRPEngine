@@ -56,6 +56,8 @@ export type FieldSpec =
   | { kind: "life"; key: string; label: string }
   /** A cap per domain for each detail band, keyed by band id. */
   | { kind: "bandCaps"; key: string; label: string }
+  /** A player-claims policy (`shared/claims.ts`), or none: unset, a new chat takes the player's own. */
+  | { kind: "claims"; key: string; label: string }
   /** Game minutes, typed as a span ("1 h 30 min"). */
   | { kind: "duration"; key: string; label: string; optional?: boolean; hint?: string }
   /** A moment of the world's clock (game minutes since its calendar's epoch), typed as a date and time. */
@@ -553,6 +555,7 @@ export const PART_SPECS: Record<Exclude<WorldPart, "tiers" | "loreIndex" | "rule
     { kind: "enum", key: "preset", label: "Preset", values: ["story", "grounded", "simulation", "custom"] },
     { kind: "levels", key: "levels", label: "Domain levels", floored: true },
     { kind: "bandCaps", key: "tierCaps", label: "Band caps" },
+    { kind: "claims", key: "claims", label: "Player claims" },
   ],
   time: [
     { kind: "record", key: "sceneTicks", label: "Default tick per scene type", keyLabel: "Scene type", item: { kind: "duration", key: "", label: "Tick" } },

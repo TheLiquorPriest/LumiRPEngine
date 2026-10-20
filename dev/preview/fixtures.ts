@@ -1171,7 +1171,7 @@ export function worldFixture(): WorldDoc {
         },
       },
     },
-    realism: { preset: "story", levels: { money: 1, gear: 1, vehicles: 1, castlife: 1, relationships: 1, space: 2, calendar: 2, weather: 1, sheets: 1 }, tierCaps: { principal: {}, supporting: {}, background: {} } },
+    realism: { preset: "story", levels: { money: 1, gear: 1, vehicles: 1, castlife: 1, relationships: 1, space: 2, calendar: 2, weather: 1, sheets: 1 }, tierCaps: { principal: {}, supporting: {}, background: {} }, claims: { mode: "ask", capped: true } },
     time: { sceneTicks: { conversation: 2, action: 0.5, exploration: 10, downtime: 30 }, interrupts, speedThrough: { sleep: { mode: "offer", thresholdMinutes: 30 } }, montage: "key", unitCap: { agentDays: 600, events: 5000 } },
     sections: { scene: { id: "scene", label: "Scene", rank: 10, template: "Place: {place}. Present: {present}.", position: { type: "native" } } },
     lore: {
