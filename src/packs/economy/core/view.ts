@@ -14,7 +14,7 @@ import { numOf, objOf, own, sliceOf, strOf } from "../../../engine/pack-kit";
 import type { ReadContext } from "../../../engine/registry";
 import { kindIs } from "../../../engine/scope";
 import { membersOf, MEMBER_OF } from "../../../engine/selector";
-import { canSeePlace } from "../../../engine/visibility";
+import { canSeePlace, personWords, wordPattern } from "../../../engine/visibility";
 import type { FinanceHooks } from "./module";
 import { autopaySourceProblem, interestsOf, mayPayFrom, paysFor } from "./actions";
 import { statementState } from "./cycle";
@@ -31,16 +31,25 @@ const DAY = 1440;
 interface Viewer {
   /** The POV a player surface is drawn for, or null for the GM, who sees every name. */
   pov: EntityId | null;
-  /** The names in the world the viewer can't see, each with the words it reads as instead (`hiddenNames`); none for the GM. */
-  hidden: readonly HiddenName[];
+  /** The names in the world the viewer can't see, as text may carry them (`hiddenNames`); none for the GM. */
+  hidden: HiddenNames;
 }
 
-/** A name the viewer can't see, as text may carry it, and what it reads as: at the start of the text, and within it. */
-interface HiddenName {
-  pattern: RegExp;
+/** What a name the viewer can't see reads as instead: at the start of a text, and within it. */
+interface Reading {
   first: string;
   within: string;
 }
+
+/** The names the viewer can't see as one pattern, each way of saying one its own group, with what each reads as, in the same order. */
+interface HiddenNames {
+  pattern: RegExp | null;
+  reads: readonly Reading[];
+}
+
+const NO_HIDDEN: HiddenNames = { pattern: null, reads: [] };
+const SOMEONE: Reading = { first: "Someone", within: "someone" };
+const SOMEWHERE: Reading = { first: "Somewhere", within: "somewhere" };
 
 /** Whether the viewer may see an entity (`seenBy`): the GM sees everything. */
 function visible(ctx: ReadContext, viewer: Viewer, id: string): boolean {
@@ -48,9 +57,9 @@ function visible(ctx: ReadContext, viewer: Viewer, id: string): boolean {
 }
 
 /** What someone or something the viewer can't see reads as in text: someone for a party, an account by its class, a property, something else. */
-function hiddenWords(ctx: ReadContext, id: EntityId): { first: string; within: string } {
+function hiddenWords(ctx: ReadContext, id: EntityId): Reading {
   const kind = own(ctx.state.entities, id)?.kind ?? "";
-  if (isParty(ctx, id)) return { first: "Someone", within: "someone" };
+  if (isParty(ctx, id)) return SOMEONE;
   if (kind === "account") return { first: traitsOf(ctx, id)?.label ?? "An account", within: "an account" };
   if (kind === "card") return { first: "A card", within: "a card" };
   if (kindIs(ctx.registry, ctx.world, kind, "property")) return { first: "A property", within: "a property" };
@@ -60,34 +69,53 @@ function hiddenWords(ctx: ReadContext, id: EntityId): { first: string; within: s
 /**
  * The names of everyone and everything the POV can't see, as labels and memos would carry them:
  * a derived flow's label is built from names ("Lift loan autopay"), and a posting's memo is
- * written once for every side of it. A name something the POV can see also has gives nothing
- * away, so it stays, and one shorter than three letters is too likely a word.
+ * written once for every side of it. They're read as the engine reads text for names (`namesAny`):
+ * a person by any word of their name ("Rosa's share" names Rosa Delgado), anything else by its
+ * whole name. A name something the POV can see also has gives nothing away, and nor does a word
+ * of one someone or somewhere they can see is also called by, so those stay; a whole name shorter
+ * than three letters is too likely a word.
  */
-function hiddenNames(ctx: ReadContext, pov: EntityId): HiddenName[] {
-  const viewer: Viewer = { pov, hidden: [] };
-  const seen = new Set<string>();
-  const hidden: { name: string; words: { first: string; within: string } }[] = [];
+function hiddenNames(ctx: ReadContext, pov: EntityId): HiddenNames {
+  const viewer: Viewer = { pov, hidden: NO_HIDDEN };
+  const seenNames = new Set<string>();
+  const seenWords = new Set<string>();
+  const hidden: { name: string; person: boolean; reads: Reading }[] = [];
   for (const [id, e] of Object.entries(ctx.state.entities)) {
-    if (e.name.length < 3) continue;
-    if (visible(ctx, viewer, id)) seen.add(e.name.toLowerCase());
-    else hidden.push({ name: e.name, words: hiddenWords(ctx, id) });
+    const person = kindIs(ctx.registry, ctx.world, e.kind, "person");
+    if (visible(ctx, viewer, id)) {
+      seenNames.add(e.name.toLowerCase());
+      if (person) for (const w of personWords(e.name)) seenWords.add(w.plain);
+    } else hidden.push({ name: e.name, person, reads: hiddenWords(ctx, id) });
   }
   for (const [id, p] of Object.entries(ctx.world.places)) {
-    if (p.name.length < 3) continue;
-    if (canSeePlace(ctx.registry, ctx.world, ctx.state, pov, id)) seen.add(p.name.toLowerCase());
-    else hidden.push({ name: p.name, words: { first: "Somewhere", within: "somewhere" } });
+    if (canSeePlace(ctx.registry, ctx.world, ctx.state, pov, id)) {
+      seenNames.add(p.name.toLowerCase());
+      for (const w of personWords(p.name)) seenWords.add(w.plain);
+    } else hidden.push({ name: p.name, person: false, reads: SOMEWHERE });
   }
-  return hidden
-    .filter((h) => !seen.has(h.name.toLowerCase()))
-    .sort((a, b) => b.name.length - a.name.length)
-    .map((h) => ({ pattern: new RegExp(`(^|[^\\p{L}\\p{N}])${h.name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\p{L}\\p{N}])`, "giu"), ...h.words }));
+  const ways = new Map<string, { length: number; reads: Reading }>();
+  const say = (source: string, length: number, reads: Reading): void => {
+    if (!ways.has(source)) ways.set(source, { length, reads });
+  };
+  for (const h of hidden) {
+    if (h.name.length >= 3 && !seenNames.has(h.name.toLowerCase())) say(`(?<![\\p{L}\\p{M}\\p{N}])${h.name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\p{L}\\p{M}\\p{N}])`, h.name.length, h.reads);
+    if (!h.person) continue;
+    for (const w of personWords(h.name)) if (!seenWords.has(w.plain)) for (const spelt of new Set([w.written, w.plain])) say(wordPattern(spelt), spelt.length, SOMEONE);
+  }
+  // The longest way first: a whole name before the words it's made of.
+  const sorted = [...ways].sort((a, b) => b[1].length - a[1].length);
+  return sorted.length === 0 ? NO_HIDDEN : { pattern: new RegExp(sorted.map(([source]) => `(${source})`).join("|"), "giu"), reads: sorted.map(([, w]) => w.reads) };
 }
 
-/** Text as the viewer may read it: each name of someone or something they can't see in their words for it (`hiddenNames`). */
+/** Text as the viewer may read it: each name of someone or something they can't see in their words for it (`hiddenNames`), in one pass, so no word for one is read as another. */
 function says(viewer: Viewer, text: string): string {
-  let out = text;
-  for (const h of viewer.hidden) out = out.replace(h.pattern, (_match: string, before: string, at: number) => before + (at === 0 && before === "" ? h.first : h.within));
-  return out;
+  const { pattern, reads } = viewer.hidden;
+  if (pattern === null) return text;
+  return text.normalize("NFC").replace(pattern, (match: string, ...rest: unknown[]) => {
+    const reading = reads[rest.slice(0, reads.length).findIndex((group) => typeof group === "string")];
+    if (!reading) return match;
+    return rest[reads.length] === 0 ? reading.first : reading.within;
+  });
 }
 
 function nameFor(ctx: ReadContext, viewer: Viewer, id: string): string {
@@ -459,7 +487,7 @@ function householdView(ctx: ReadContext, viewer: Viewer, household: EntityId, fl
 /** One party's money at its own level (DESIGN §25.11). */
 export function buildFinanceView(hooks: FinanceHooks, ctx: ReadContext, party: EntityId, player: boolean): FinanceView {
   const pov = player ? ctx.world.pov : null;
-  const viewer: Viewer = { pov, hidden: pov === null ? [] : hiddenNames(ctx, pov) };
+  const viewer: Viewer = { pov, hidden: pov === null ? NO_HIDDEN : hiddenNames(ctx, pov) };
   // Each flow goes out once for the whole view, as the viewing party knows it (`flowView`), so every section that names it, its row, its coming-up lines and alerts, the household's and a business's, sends the same id and lets them do the same with it.
   const runsFlows = featureFor(ctx, party, "flows");
   const shownFlows = new Map<string, FlowView>();
