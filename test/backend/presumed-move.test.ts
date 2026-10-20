@@ -2,13 +2,13 @@
 // granted a move the engine didn't make ("I sit down next to Marcus" while the engine has the POV at
 // the market) is read as that move before the reply, from where the POV last saw Marcus and what its
 // last message left unplayed (DESIGN §5.2); and a reply that puts the POV somewhere else with no move
-// says so on screen, as the POV's move under the location mode (DESIGN §9.4).
+// says so on screen, offering the POV's move there for Apply (DESIGN §9.4).
 
 import { describe, expect, test } from "bun:test";
 import type { QuietRequest } from "../../src/backend/host";
 import { toChain } from "../../src/backend/ledger-io";
 import { placeOfEntity } from "../../src/engine/scope";
-import type { JsonObject } from "../../src/shared/json";
+import { isRecord, type JsonObject } from "../../src/shared/json";
 import type { Chip } from "../../src/shared/state-view";
 import { Rig } from "../support/rig";
 
@@ -182,24 +182,54 @@ describe("a message that takes for granted a move the engine didn't make", () =>
   });
 });
 
-describe("a reply that puts the POV somewhere the engine doesn't have them", () => {
-  test("with no move: the reply's place is the POV's move under the location mode, applied with its Undo, or offered for Apply under confirm", async () => {
-    // The read misses what the message takes for granted; the reply plays at the shop.
-    const auto = await heldUpAtTheMarket({ read: () => NONE, extract: (narration) => ({ proposals: [], where: narration.includes(AT_THE_SHOP) ? "alder_automotive" : "alder_market" }) });
-    await auto.rig.turn(auto.chatId, SECOND, AT_THE_SHOP);
-    const [undo, ...others] = await moveChips(auto.rig, auto.chatId);
-    expect(others).toEqual([]);
-    expect(undo).toMatchObject({ kind: "undo", label: "you → Alder Automotive", detail: "Applied automatically." });
-    expect(await povPlace(auto.rig, auto.chatId)).toBe("alder_automotive");
+/** Replies the safety net reads: at the shop and at the cafe with no move told, and a walk to the lakefront told. */
+const AT_THE_CAFE = "You sip a latte at a window table in Bluebird Coffee.";
+const TO_THE_LAKE = "You wander down to the lakefront and sit on a picnic table.";
 
-    const confirm = await heldUpAtTheMarket({ read: () => NONE, extract: (narration) => ({ proposals: [], where: narration.includes(AT_THE_SHOP) ? "alder_automotive" : "alder_market" }) });
-    confirm.rig.body(await confirm.rig.send({ type: "lre.settings.set", patch: { extraction: { location: { mode: "confirm" } } } }));
-    await confirm.rig.turn(confirm.chatId, SECOND, AT_THE_SHOP);
-    const [apply] = await moveChips(confirm.rig, confirm.chatId);
+/** The reply's read of each: where it leaves the POV, and the move the lakefront one tells. */
+function replyRead(narration: string): JsonObject {
+  if (narration.includes(AT_THE_SHOP)) return { proposals: [], where: "alder_automotive" };
+  if (narration.includes(AT_THE_CAFE)) return { proposals: [], where: "bluebird_coffee" };
+  if (narration.includes(TO_THE_LAKE)) return { proposals: [{ type: "location", entity: "pov", place: "lakefront_park" }], where: "lakefront_park" };
+  return { proposals: [], where: null };
+}
+
+/** Moves as Settings → Changes from the reply shows them on the player's connection: the mode, and the outcomes learned from. */
+async function movesSetting(rig: Rig): Promise<Record<string, unknown>> {
+  const { extraction } = rig.body(await rig.send({ type: "lre.settings.get" }));
+  return isRecord(extraction) && isRecord(extraction.location) ? extraction.location : {};
+}
+
+describe("a reply that puts the POV somewhere the engine doesn't have them", () => {
+  test("with no move, under auto: the POV stays put until Apply plays the move, Apply or No counts nothing toward the learning, and a told move still applies by itself and counts", async () => {
+    // The read misses what the message takes for granted; the reply plays at the shop.
+    const { rig, chatId } = await heldUpAtTheMarket({ read: () => NONE, extract: replyRead });
+    rig.host.activeConnection = { id: "conn-ds", name: "Deepseek" };
+    expect(await movesSetting(rig)).toMatchObject({ mode: "auto", accepted: 0, rejected: 0 });
+    await rig.turn(chatId, SECOND, AT_THE_SHOP);
+    expect(await povPlace(rig, chatId)).toBe("alder_market");
+    const [apply, ...others] = await moveChips(rig, chatId);
+    expect(others).toEqual([]);
     expect(apply).toMatchObject({ kind: "confirm", label: "you → Alder Automotive" });
-    expect(await povPlace(confirm.rig, confirm.chatId)).toBe("alder_market");
-    expect(confirm.rig.body(await confirm.rig.send({ type: "lre.chip", chatId: confirm.chatId, chip: apply?.id, choice: "confirm" })).applied).toBe(true);
-    expect(await povPlace(confirm.rig, confirm.chatId)).toBe("alder_automotive");
+    expect(rig.body(await rig.send({ type: "lre.chip", chatId, chip: apply?.id, choice: "confirm" })).applied).toBe(true);
+    expect(await povPlace(rig, chatId)).toBe("alder_automotive");
+    // A reply that has the POV at the cafe: No keeps them at the shop.
+    await rig.turn(chatId, "I look around.", AT_THE_CAFE);
+    const [offered] = await moveChips(rig, chatId);
+    expect(offered).toMatchObject({ kind: "confirm", label: "you → Bluebird Coffee" });
+    rig.body(await rig.send({ type: "lre.chip", chatId, chip: offered?.id, choice: "reject" }));
+    expect(await povPlace(rig, chatId)).toBe("alder_automotive");
+    expect(await movesSetting(rig)).toMatchObject({ mode: "auto", accepted: 0, rejected: 0 });
+    // A move the reply tells applies by itself, with its Undo, and the Undo counts.
+    await rig.turn(chatId, "I look around.", TO_THE_LAKE);
+    expect(await povPlace(rig, chatId)).toBe("lakefront_park");
+    const [undo, ...more] = await moveChips(rig, chatId);
+    expect(more).toEqual([]);
+    expect(undo).toMatchObject({ kind: "undo", label: "you → Lakefront Park" });
+    rig.body(await rig.send({ type: "lre.chip", chatId, chip: undo?.id, choice: "undo" }));
+    expect(await povPlace(rig, chatId)).toBe("alder_automotive");
+    expect(await movesSetting(rig)).toMatchObject({ mode: "auto", accepted: 0, rejected: 1 });
+    expect(rig.rt.ledger.errors).toEqual([]);
   });
 
   test("only a place the engine doesn't have the POV at or inside, with no move of the turn's own or the reply's, is offered", async () => {
@@ -225,13 +255,13 @@ describe("a reply that puts the POV somewhere the engine doesn't have them", () 
     // A narrated move of the POV's says where they went: it is the only one.
     read = { proposals: [{ type: "location", entity: "pov", place: "lakefront_park" }], where: "bluebird_coffee" };
     await rig.turn(chatId, "I look around.", "You wander down to the lakefront.");
-    expect((await moveChips(rig, chatId)).map((c) => c.label)).toEqual(["you → Lakefront Park"]);
+    expect((await moveChips(rig, chatId)).map((c) => [c.kind, c.label])).toEqual([["undo", "you → Lakefront Park"]]);
     expect(await povPlace(rig, chatId)).toBe("lakefront_park");
-    // A reply that has them somewhere else, with no move: the move there.
+    // A reply that has them somewhere else, with no move: the move there, offered.
     read = { proposals: [], where: "bluebird_coffee" };
     await rig.turn(chatId, "I look around.", "You sip a latte at Bluebird Coffee.");
-    expect((await moveChips(rig, chatId)).map((c) => c.label)).toEqual(["you → Bluebird Coffee"]);
-    expect(await povPlace(rig, chatId)).toBe("bluebird_coffee");
+    expect((await moveChips(rig, chatId)).map((c) => [c.kind, c.label])).toEqual([["confirm", "you → Bluebird Coffee"]]);
+    expect(await povPlace(rig, chatId)).toBe("lakefront_park");
     expect(rig.rt.ledger.errors).toEqual([]);
   });
 });

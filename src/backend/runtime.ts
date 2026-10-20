@@ -392,8 +392,9 @@ export function splitAlongBuy(p: JsonObject, pre: readonly LedgerEvent[], ctx: R
  * Where the reply leaves the POV (`extract`'s `where`, DESIGN §9.4) as their move there, when the
  * engine has them elsewhere: a reply can take a move as given without telling it ("at the counter
  * with Marcus" while the engine has the POV at the market), and no change would say the story and the
- * world have parted. None when the engine has them there or inside it, when the turn's own events
- * moved them (the engine's outcome wins), or when a narrated move of theirs already says where.
+ * world have parted. It is a guess, which the read only offers. None when the engine has them there
+ * or inside it, when the turn's own events moved them (the engine's outcome wins), or when a narrated
+ * move of theirs already says where.
  */
 function replyPlace(where: string | null, narrated: readonly JsonObject[], context: ReadInput): JsonObject[] {
   const { world, state } = context;
@@ -1475,8 +1476,12 @@ export class Runtime implements TurnHooks {
     const typed = intent ? [{ action: intent.action, params: intent.params }, ...(intent.queue ?? [])].flatMap((a) => (a.action === "buy" && typeof a.params.price === "number" ? [a.params.price] : [])) : [];
     const unsure = new Set<JsonObject>();
     const narrated = [...extracted.proposals, ...effects.flat()];
+    // Where the reply leaves the POV when no move says so is a guess (a flashback, a phone call, a look
+    // across the street read as being there): whatever the location mode it waits for Apply, and its
+    // chip is no outcome for the type's learning (DESIGN §9.4). `never` still ignores it.
+    const guessed = new Set(replyPlace(extracted.where, narrated, context));
     const deduped = dedupeProposals(
-      [...narrated, ...replyPlace(extracted.where, narrated, context)].flatMap((p) => splitAlongBuy(p, context.pre, ctx)),
+      [...narrated, ...guessed].flatMap((p) => splitAlongBuy(p, context.pre, ctx)),
       context.world.pov,
     ).filter((p) => {
       if (lentAlong(p, context.pre, context.state) || movedAlong(p, context.pre, context.state)) return false;
@@ -1529,7 +1534,8 @@ export class Runtime implements TurnHooks {
         continue;
       }
       if (unsure.has(p)) unsure.add(fitted);
-      if (bounded.mode === "auto" && !unsure.has(p)) auto.push(fitted);
+      if (guessed.has(p)) guessed.add(fitted);
+      if (bounded.mode === "auto" && !unsure.has(p) && !guessed.has(p)) auto.push(fitted);
       else confirm.push(fitted);
     }
     bridge.prepareRead(input.content, { auto, post, events: decisions, minds: minded.events });
@@ -1628,17 +1634,21 @@ export class Runtime implements TurnHooks {
         return;
       }
       const quote = purchaseQuote(proposal, check.events, context.world);
+      // A guessed move says why it asks (where the engine has the POV, as every player surface names
+      // it) and carries no type, so Apply or No on it counts nothing toward the learning (DESIGN §11).
+      const guess = guessed.has(proposal);
+      const here = guess ? povPlace(this.registry, context.world, context.state) : null;
       stored.push({
         id: `confirm:${input.messageId}:${input.generationId}:${i}`,
         kind: "confirm",
         messageId: input.messageId,
         swipeId,
         label: also ? `Also bought ${describeItem(proposal)}?${quote?.text ?? ""}` : `${describeProposal(proposal, context.world, context.state)}${quote?.text ?? ""}`,
-        detail: also ? "The reply may be telling your purchase again. Apply it only if this was bought too." : "The narration says this happened. Apply it?",
+        detail: also ? "The reply may be telling your purchase again. Apply it only if this was bought too." : guess ? `The reply has you there, but the engine still has you ${here?.id ? `at ${here.name}` : "elsewhere"}. Apply the move?` : "The narration says this happened. Apply it?",
         actions: [{ id: "confirm", label: "Apply", style: "primary" }, ...(quote?.limited ? [{ id: "amount", label: "Edit amount", input: { type: "money" as const, label: "Amount", value: quote.cents } }] : []), { id: "reject", label: "No" }],
         expires: "next_send",
         // Applied with the check's seed, so a purchase charges the amount its label shows.
-        payload: { type: String(proposal.type), connection, proposal, seed: `${context.seed}:check` },
+        payload: { ...(guess ? {} : { type: String(proposal.type), connection }), proposal, seed: `${context.seed}:check` },
       });
     });
     // Another swipe of this reply replaces its notes; this swipe's note on its typed action stays.
