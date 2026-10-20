@@ -8,6 +8,8 @@ import { hashJson } from "../../../src/shared/hash";
 import type { LedgerEvent, PackEvent, PostEvent } from "../../../src/shared/ledger";
 import type { EntityDef, WorldDoc } from "../../../src/shared/world";
 import type { JsonObject } from "../../../src/shared/json";
+import type { PropertyView } from "../../../src/shared/finance";
+import { objOf } from "../../../src/engine/pack-kit";
 import { calendarOf, clockOfLocal } from "../../../src/engine/calendar";
 import { applyEffects } from "../../../src/engine/effects";
 import { materializeAll } from "../../../src/engine/materialize";
@@ -524,6 +526,40 @@ describe("holdings: property", () => {
     // The application goes on the buyer's credit report, as any does.
     expect(events.filter((e) => e.type === "economy.credit" && JSON.stringify(e).includes("inquiry"))).toHaveLength(1);
     expect(trialBalance(w.state)).toBe(0);
+  });
+
+  test("a property the POV may buy carries the terms its lenders offer, from the world's finance table, and a purchase takes those and no others", () => {
+    const cabin = (world: WorldDoc): void => {
+      world.entities.cabin = { id: "cabin", kind: "property", name: "The cabin", tier: "background", fields: { place: "apartment", owners: [], value: 20_000_000, asking_price: 20_000_000 }, relations: [] };
+      world.entities.savings!.fields.opening = 6_500_000;
+    };
+    /** The world's finance table with its lenders' mortgage terms replaced. */
+    const offering = (world: WorldDoc, term_months: JsonObject): void => {
+      const finance = world.tables["economy.finance"];
+      if (!finance) throw new Error("the world has no finance table");
+      const loans = objOf(finance.rows.loans?.values);
+      world.tables = { ...world.tables, "economy.finance": { ...finance, rows: { ...finance.rows, loans: { ...finance.rows.loans, values: { ...loans, mortgage: { ...objOf(loans.mortgage), term_months } } } } } };
+    };
+    const terms = (w: Working): PropertyView["mortgageTerms"] => w.ctx.query("economy.finance")(w.ctx, "you", true).properties.find((p) => p.id === "cabin")?.mortgageTerms;
+    // The Modern US table's: 30 years as usual, else 20 or 15.
+    expect(terms(setup(cabin))).toEqual([{ months: 360, usual: true }, { months: 240, usual: false }, { months: 180, usual: false }]);
+    // A world whose lenders offer 25 years, or 10: those, and a purchase over any other is refused.
+    const w = setup((world) => {
+      cabin(world);
+      offering(world, { typical: 300, alternatives: [120] });
+    });
+    expect(terms(w)).toEqual([{ months: 300, usual: true }, { months: 120, usual: false }]);
+    expect(refuse(w, "economy.property_buy", { party: "you", property: "cabin", from: "savings", down: 4_000_000, term_months: 360 })).toBe("bad_term");
+    run(w, "economy.property_buy", { party: "you", property: "cabin", from: "savings", down: 4_000_000, term_months: 120 });
+    expect(w.state.entities[String(w.state.entities.cabin?.fields.mortgage)]?.fields.term_months).toBe(120);
+    // Bought, it's the POV's own: there's nothing to offer it.
+    expect(terms(w)).toBeUndefined();
+    // A world without a finance table: 30 years only.
+    const bare = setup((world) => {
+      cabin(world);
+      world.tables = Object.fromEntries(Object.entries(world.tables).filter(([id]) => id !== "economy.finance"));
+    });
+    expect(terms(bare)).toEqual([{ months: 360, usual: true }]);
   });
 
   test("a share of a property owned with someone sells only to a buyer in the world: the other owner's share stays theirs", () => {
