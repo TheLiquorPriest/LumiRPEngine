@@ -4,7 +4,9 @@
 
 import { describe, expect, test } from "bun:test";
 import { commitmentDraft, commitmentOp, deleteOp, noteDraft, noteOp, pinOp, planDraft, planOp, refreshOp, startPlanIn } from "../../src/packs/minds/ui/ops";
-import { editRequest } from "../../src/frontend/requests";
+import { editRequest, timelapseRequest } from "../../src/frontend/requests";
+import { toChain } from "../../src/backend/ledger-io";
+import { journalOf } from "../../src/packs/economy/core/journal";
 import type { MindsGmCharacter, MindsGmView } from "../../src/shared/minds";
 import type { EditOp } from "../../src/shared/protocol";
 import { Rig } from "../support/rig";
@@ -105,5 +107,39 @@ describe("GM view → Minds round trip", () => {
     expect(JSON.stringify(refused)).toContain("isn't a person");
     await edit(rig, chatId, commitmentOp("danny_okafor", null, { ...commitmentDraft(), kind: "debt", text: "Owes Priya a coffee", with: ["priya_nair"] }));
     expect((await character(rig, chatId, "danny_okafor")).commitments.map((c) => c.with)).toEqual([["priya_nair"]]);
+  });
+
+  test("a pay plan the GM makes with an amount, then edits, is paid at its time from the planner to the person it's with", async () => {
+    const rig = new Rig({ shipped: true });
+    const worldId = await rig.newWorld("Alder", "modern_slice_of_life");
+    const chatId = rig.host.createChat("Morning.");
+    rig.body(await rig.send({ type: "lre.world", op: "attach", worldId, chatId }));
+    const view = await minds(rig, chatId);
+    const draft = startPlanIn({ ...planDraft(view.now), what: "Pay Priya back for the ferry", kind: "pay", with: ["priya_nair"], cents: 2500 }, view.now, 1);
+    // The form refuses a pay plan with no amount, or no one to hand it to.
+    expect(planOp("danny_okafor", null, { ...draft, cents: null })).toBeNull();
+    expect(planOp("danny_okafor", null, { ...draft, with: [] })).toBeNull();
+    await edit(rig, chatId, planOp("danny_okafor", null, draft));
+    let plan = (await character(rig, chatId, "danny_okafor")).plans.find((p) => p.kind === "pay");
+    expect([plan?.cents, plan?.with, plan?.status]).toEqual([2500, ["priya_nair"], "open"]);
+    // Editing it from its own draft keeps the amount unless the GM changes it.
+    await edit(rig, chatId, planOp("danny_okafor", plan?.id ?? "", { ...planDraft(view.now, plan), priority: 4 }));
+    expect((await character(rig, chatId, "danny_okafor")).plans.find((p) => p.id === plan?.id)?.cents).toBe(2500);
+    await edit(rig, chatId, planOp("danny_okafor", plan?.id ?? "", { ...planDraft(view.now, plan), cents: 3000 }));
+    plan = (await character(rig, chatId, "danny_okafor")).plans.find((p) => p.id === plan?.id);
+    expect(plan?.cents).toBe(3000);
+
+    const palette = (await rig.rt.view(chatId, rig.host.userId)).palette?.timelapse;
+    if (!palette) throw new Error("no Timelapse");
+    rig.body(await rig.send(timelapseRequest(palette, { type: "duration", minutes: 3 * 60 }, {}, chatId)));
+    await rig.host.settle();
+    await rig.host.finish(await rig.host.start(chatId, { type: "normal" }), "Time passes.");
+    const core = await rig.rt.ledger.core(chatId, rig.host.userId);
+    if (!core) throw new Error("no ledger");
+    const { state } = core.fold(toChain(await rig.host.chats.messages(chatId, rig.host.userId)));
+    const flow = `plan:danny_okafor:${plan?.id}`;
+    expect(journalOf(state, "acct_danny_checking").filter((j) => j.flow === flow).map((j) => j.cents)).toEqual([-3000]);
+    expect(journalOf(state, "acct_priya_checking").filter((j) => j.flow === flow).map((j) => j.cents)).toEqual([3000]);
+    expect((await character(rig, chatId, "danny_okafor")).plans.find((p) => p.id === plan?.id)?.status).toBe("done");
   });
 });
