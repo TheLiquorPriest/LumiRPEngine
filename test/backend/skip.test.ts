@@ -7,12 +7,12 @@ import type { LedgerEvent } from "../../src/shared/ledger";
 import type { JsonObject } from "../../src/shared/json";
 import { calendarOf, clockAt, dateAt, formatHHMM, formatStamp } from "../../src/engine/calendar";
 import { placeOfEntity } from "../../src/engine/scope";
-import { runTimelapse } from "../../src/engine/time";
-import { turnStart } from "../../src/engine/turn";
+import { replaySkip, runTimelapse } from "../../src/engine/time";
+import { timelapseIntent, turnStart } from "../../src/engine/turn";
 import { Working } from "../../src/engine/working";
 import { toChain } from "../../src/backend/ledger-io";
 import { readRun } from "../../src/backend/runtime";
-import type { BeatMinds } from "../../src/backend/skip";
+import { runSkip, type BeatMinds } from "../../src/backend/skip";
 import { Rig } from "../support/rig";
 
 const MARCUS = "marcus_delgado";
@@ -253,5 +253,27 @@ describe("time skips", () => {
     expect(record?.events.find((e) => e.type === "timelapse")).toMatchObject({ stoppedBy: null, to: first });
     const chip = (await rig.rt.view(chatId, rig.host.userId)).chips.find((c) => c.kind === "continue_timelapse");
     expect(chip?.label).toMatch(/^Continue timelapse/);
+  });
+
+  test("a clock already out before the first beat still takes the skip to that beat, so its Continue gets further", async () => {
+    const { rig, chatId, day, at } = await portAlder();
+    await marcusPlans(rig, chatId, [at(day + 1, "19:00")]);
+    const { state, world } = await folded(rig, chatId);
+    const settings = await rig.rt.settings.get(rig.host.userId);
+    const target = { type: "duration" as const, minutes: 3 * 1440 };
+    const asked: number[] = [];
+    const skip = await runSkip({ registry: rig.rt.registry, steps: rig.rt.steps, minds: async (input) => (asked.push(input.moment.at), { events: [], traces: [] }) }, { chatId, userId: rig.host.userId, world, state, intent: { ...timelapseIntent(target, { invitation: "note" }) }, runSeed: "seed", settings, signal: AbortSignal.abort() });
+    if (!skip) throw new Error("no skip");
+    const beats = skip.record.beats.map((b) => b.at);
+    expect(skip.record.stop).toEqual({ by: "clock", at: beats[1] ?? NaN });
+    expect(beats[1]).toBeGreaterThan(state.clock);
+    expect(asked).toEqual([]);
+    // The plan replays it there, and offers the rest.
+    const w = new Working(rig.rt.registry, world, state);
+    turnStart(rig.rt.registry, w, "seed");
+    const out = replaySkip(rig.rt.registry, w, target, skip.record, { runSeed: "seed", overrides: { invitation: "note" } });
+    if ("code" in out) throw new Error(out.reason);
+    expect(out.summary.to).toBe(beats[1] ?? NaN);
+    expect(out.chip).toEqual({ kind: "continue_timelapse", target: { type: "duration", minutes: state.clock + target.minutes - (beats[1] ?? 0) }, remaining: state.clock + target.minutes - (beats[1] ?? 0) });
   });
 });

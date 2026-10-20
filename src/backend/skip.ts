@@ -213,9 +213,10 @@ function interrupter(w: Working, events: readonly LedgerEvent[]): EntityId | nul
  * A time skip's pre phase (DESIGN §24.7): from the state the plan starts from, the beats, the `skip`
  * step's proposals, and the timelapse run beat by beat with the minds at each, capped by the user's
  * settings ("none" is no cap, which the before-the-reply clock still bounds). A mind's interrupt stops
- * it at its beat; the clock running out stops it at the next beat, with the rest left for Continue.
- * Past the last beat it runs to its end, where those with the player character think once more as the
- * turn's own minds. Null when the timelapse can't run, which the plan then says.
+ * it at its beat; the clock running out stops it at the next beat it reaches, the first one too, so
+ * a Continue always gets further, with the rest left for it. Past the last beat it runs to its end,
+ * where those with the player character think once more as the turn's own minds. Null when the
+ * timelapse can't run, which the plan then says.
  */
 export async function runSkip(deps: SkipDeps, input: SkipInput): Promise<SkipRun | null> {
   const reg = deps.registry;
@@ -231,18 +232,19 @@ export async function runSkip(deps: SkipDeps, input: SkipInput): Promise<SkipRun
   const traces: MindCallTrace[] = [];
   const record: SkipRecord = { beats: [{ at: run.from, events: run.apply([{ type: MINDS_EVENTS.skip, data: { from: run.from, to: run.to, beats: beats.map((b) => ({ at: b.at, reason: b.reason, source: b.source })) } }]) }], stop: null };
   for (const beat of beats) {
-    if (input.signal.aborted) {
-      record.stop = { by: "clock", at: run.clock };
-      return { record, traces };
-    }
     run.advanceTo(beat.at);
     if (run.clock !== beat.at) break;
-    const applied = run.apply(await mindsAt(deps, input, w, beat.who, perBeat, `Time skips ahead; it is now ${formatClock(cal, beat.at)}.`, traces));
+    // Once the before-the-reply clock has run out no one else is asked.
+    const applied = input.signal.aborted ? [] : run.apply(await mindsAt(deps, input, w, beat.who, perBeat, `Time skips ahead; it is now ${formatClock(cal, beat.at)}.`, traces));
     // Every beat reached is recorded, with its minds' events or none, so the plan's replay cuts the run where this one did.
     record.beats.push({ at: beat.at, events: applied });
     const stopper = interrupter(w, applied);
     if (stopper) {
       record.stop = { by: "mind", at: beat.at, entity: stopper };
+      return { record, traces };
+    }
+    if (input.signal.aborted) {
+      record.stop = { by: "clock", at: beat.at };
       return { record, traces };
     }
   }
