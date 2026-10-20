@@ -4,7 +4,8 @@
 
 import { describe, expect, test } from "bun:test";
 import type { FinanceView } from "../../../src/shared/finance";
-import { entity, lapse, setup } from "./work-world";
+import type { JsonObject } from "../../../src/shared/json";
+import { act, CLERK, entity, lapse, setup } from "./work-world";
 
 const DAY = 1440;
 
@@ -31,5 +32,28 @@ describe("every reference to a flow in the player's view meets its row", () => {
     const row = view.flows.find((f) => f.source === "invoice");
     expect(row?.id.startsWith("hidden:")).toBe(true);
     expect(view.overview?.alerts.filter((a) => /Freight/.test(a.text)).map((a) => a.flow)).toEqual([row?.id]);
+  });
+});
+
+describe("a refusal and a job's pay name only whom the player may see", () => {
+  test("a custodial card can't be paid from the custodian's own checking, and the refusal names its debtor, whom the player can't see, as someone", () => {
+    const custodial: JsonObject[] = [{ party: "you", role: "custodian" }, { party: "maya", role: "beneficiary", share: 100 }];
+    const { w } = setup((wd) => {
+      wd.entities.maya!.visibility = "secret";
+      wd.entities.kid_card = entity("kid_card", "account", "The card", { owners: custodial, product: "credit_card", opening: -5_000 });
+    });
+    const why = act(w, "economy.set_autopay", { who: "you", account: "kid_card", mode: "full", from: "checking" }).rejected.map((r) => r.rejection.reason);
+    expect(why).toEqual([expect.stringContaining("The card is paid from someone's own money")]);
+    expect(why.join(" ")).not.toContain("Maya");
+  });
+
+  test("the player's own pay, half of it routed to Rosa's checking, says it goes to someone where they can't see her", () => {
+    const { w } = setup((wd) => {
+      wd.entities.rosa!.visibility = "secret";
+      wd.entities.job_clerk = entity("job_clerk", "job", "Office clerk", { ...CLERK, splits: [{ to: "rosa_checking", pct: 50 }] });
+    });
+    const job = (w.ctx.query("economy.finance")(w.ctx, "you", true) as FinanceView).jobs.find((j) => j.id === "job_clerk");
+    expect(job?.splits.map((s) => s.to)).toEqual(["someone"]);
+    expect((w.ctx.query("economy.finance")(w.ctx, "you", false) as FinanceView).jobs.find((j) => j.id === "job_clerk")?.splits.map((s) => s.to)).toEqual(["rosa_checking"]);
   });
 });

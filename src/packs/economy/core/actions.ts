@@ -20,7 +20,7 @@ import { decide, type Decision } from "./credit";
 import type { OpenAccount } from "./module";
 import { fallsBackOn } from "./flows";
 import { isOpened, reject, spendOf } from "./journal";
-import { availableOf, balance, bankSide, canSpend, classOf, debtorsOf, external, holdersOf, householdOf, managesAccount, managesParty, openerOf, productOf, rightsOf, statusOf, traitsOf, worldProducts } from "./model";
+import { availableOf, balance, bankSide, canSpend, classOf, debtorsOf, external, holdersOf, householdOf, managesAccount, managesParty, openerOf, productOf, rightsOf, shownLabel, statusOf, traitsOf, worldProducts } from "./model";
 import { accountFeature, asUnit, cardProblem, cardRoom, cardsOn, cashAccount, cashAdvanceFee, depositAccount, featureFor, isParty, mayUse, posting, signal } from "./pay";
 
 function money(ctx: ReadContext, cents: number): string {
@@ -201,6 +201,11 @@ export function replaceCard(ctx: EffectContext, who: EntityId, card: EntityId): 
   return asUnit(out);
 }
 
+/** A name in why something was refused, as the player may read it (`shownLabel`): the refusal reaches the narrator and the decline chip. */
+function said(ctx: ReadContext, id: string): string {
+  return shownLabel(ctx, ctx.world.pov, id);
+}
+
 /**
  * What's wrong with a credit account's autopay drawing on `from` when `who` sets it (DESIGN
  * §25.1), or null: an account that pays and isn't credit, which `who` may spend from or manages,
@@ -211,9 +216,9 @@ export function replaceCard(ctx: EffectContext, who: EntityId, card: EntityId): 
  */
 export function autopaySourceProblem(ctx: ReadContext, who: EntityId, account: EntityId, from: EntityId): Rejection | null {
   const t = traitsOf(ctx, from);
-  if ((!canSpend(ctx.state, from, who) && !managesAccount(ctx, from, who)) || !t?.pays || t.liability) return reject("bad_account", `${labelOf(ctx, who)} can't pay from ${labelOf(ctx, from)}`);
+  if ((!canSpend(ctx.state, from, who) && !managesAccount(ctx, from, who)) || !t?.pays || t.liability) return reject("bad_account", `${said(ctx, who)} can't pay from ${said(ctx, from)}`);
   const debtors = debtorsOf(ctx.state, account);
-  if (!debtors.some((d) => canSpend(ctx.state, from, d) || rightsOf(ctx.state, from, d)?.worth === true)) return reject("bad_account", `${labelOf(ctx, account)} is paid from ${labelOf(ctx, debtors[0] ?? who)}'s own money, not from ${labelOf(ctx, from)}`);
+  if (!debtors.some((d) => canSpend(ctx.state, from, d) || rightsOf(ctx.state, from, d)?.worth === true)) return reject("bad_account", `${said(ctx, account)} is paid from ${said(ctx, debtors[0] ?? who)}'s own money, not from ${said(ctx, from)}`);
   return null;
 }
 
@@ -345,16 +350,16 @@ export function paysFor(ctx: ReadContext, who: EntityId, to: string, from: strin
  * on it carries the spending right.
  */
 function flowProblem(ctx: ReadContext, who: EntityId, from: string, to: string, fallback: string): Rejection | null {
-  if (!mayPayFrom(ctx, who, from)) return reject("not_owner", `${labelOf(ctx, who)} can't pay from ${labelOf(ctx, from)}`);
+  if (!mayPayFrom(ctx, who, from)) return reject("not_owner", `${said(ctx, who)} can't pay from ${said(ctx, from)}`);
   if (fallback !== "" && (!mayPayFrom(ctx, who, fallback) || !fallsBackOn(ctx, from, fallback))) {
-    return reject("not_owner", own(ctx.state.entities, fallback) ? `${labelOf(ctx, who)} can't fall back on ${labelOf(ctx, fallback)}` : `a fallback is an account of ${labelOf(ctx, who)}'s, not "${fallback}"`);
+    return reject("not_owner", own(ctx.state.entities, fallback) ? `${said(ctx, who)} can't fall back on ${said(ctx, fallback)}` : `a fallback is an account of ${said(ctx, who)}'s, not "${fallback}"`);
   }
   const managed = [from, fallback].filter((side) => side !== "" && side !== who && (isParty(ctx, side) || !canSpend(ctx.state, side, who)));
   const paying = managed.find((side) => paysFor(ctx, who, to, side));
   if (paying === undefined) return null;
-  if (isParty(ctx, paying)) return reject("not_owner", `${labelOf(ctx, paying)} pays for itself, not for ${labelOf(ctx, who)}`);
+  if (isParty(ctx, paying)) return reject("not_owner", `${said(ctx, paying)} pays for itself, not for ${said(ctx, who)}`);
   const holder = holdersOf(ctx.state, paying).find((h) => managesParty(ctx.state, h, who)) ?? paying;
-  return reject("not_owner", `${labelOf(ctx, paying)} pays for ${labelOf(ctx, holder)}, not for ${labelOf(ctx, who)}`);
+  return reject("not_owner", `${said(ctx, paying)} pays for ${said(ctx, holder)}, not for ${said(ctx, who)}`);
 }
 
 export function createFlow(ctx: ReadContext, who: EntityId, args: Record<string, JsonValue>): LedgerEvent[] | Rejection {

@@ -28,7 +28,7 @@ import { placeVisit } from "../../../engine/seen";
 import type { WorldState } from "../../../engine/state";
 import { minutesBetween } from "../../../engine/world-state";
 import { addToBooks, monthOf, operatingAccount } from "./books";
-import { hiddenFrom, managesParty, outsideHidden, outsideName } from "./model";
+import { hiddenFrom, managesParty, outsideHidden, outsideName, shownLabel } from "./model";
 import type { FinanceApi, FinanceRegistry, FlowPosting } from "./module";
 import { addPay, payTaxes, taxTotal, yearPay, type PayTaxes } from "./taxes";
 
@@ -838,7 +838,7 @@ function hire(api: FinanceApi, args: Record<string, JsonValue>, ctx: EffectConte
   const by = strOf(args.by);
   if (by !== "" && !managesParty(ctx.state, business, by)) return reject("not_owner", `${labelOf(ctx, by)} doesn't run ${labelOf(ctx, business)}`);
   // Running a business for others, a manager puts neither themselves nor their own on its payroll: they'd pay themselves from its money (DESIGN §25.1).
-  if (by !== "" && api.interestsOf(ctx, by).has(worker) && api.shareOf(ctx.state, business, by) <= 0) return reject("not_owner", `${labelOf(ctx, by)} runs ${labelOf(ctx, business)} for others, so can't put ${worker === by ? "themselves" : labelOf(ctx, worker)} on its payroll`);
+  if (by !== "" && api.interestsOf(ctx, by).has(worker) && api.shareOf(ctx.state, business, by) <= 0) return reject("not_owner", `${shownLabel(ctx, ctx.world.pov, by)} runs ${shownLabel(ctx, ctx.world.pov, business)} for others, so can't put ${worker === by ? "themselves" : shownLabel(ctx, ctx.world.pov, worker)} on its payroll`);
   const jobs = allJobs(ctx);
   if (jobs.some((j) => j.worker === worker && j.business === business && j.status !== "ended")) return reject("exists", `${labelOf(ctx, worker)} already works for ${labelOf(ctx, business)}`);
   const cal = calendarOf(ctx.world);
@@ -877,7 +877,7 @@ function raise(api: FinanceApi, args: Record<string, JsonValue>, ctx: EffectCont
   if (!job) return reject("missing_entity", `no job ${labelOf(ctx, strOf(args.job))}`);
   const by = strOf(args.by);
   if (by !== "" && !(job.business && managesParty(ctx.state, job.business, by))) return reject("not_owner", `${labelOf(ctx, by)} doesn't set that pay`);
-  if (by !== "" && job.business && api.interestsOf(ctx, by).has(job.worker) && api.shareOf(ctx.state, job.business, by) <= 0) return reject("not_owner", `${labelOf(ctx, by)} runs ${labelOf(ctx, job.business)} for others, so can't set ${job.worker === by ? "their own" : `${labelOf(ctx, job.worker)}'s`} pay`);
+  if (by !== "" && job.business && api.interestsOf(ctx, by).has(job.worker) && api.shareOf(ctx.state, job.business, by) <= 0) return reject("not_owner", `${shownLabel(ctx, ctx.world.pov, by)} runs ${shownLabel(ctx, ctx.world.pov, job.business)} for others, so can't set ${job.worker === by ? "their own" : `${shownLabel(ctx, ctx.world.pov, job.worker)}'s`} pay`);
   const rate = typeof args.rate === "number" && args.rate > 0 ? Math.round(args.rate) : typeof args.pct === "number" && args.pct > -100 ? Math.round(job.rate * (1 + args.pct / 100)) : NaN;
   if (!(rate > 0)) return reject("bad_amount", "a raise needs a new rate above nothing, or a percentage");
   return [{ type: "set", entity: job.id, field: "rate", value: rate }];
@@ -908,7 +908,7 @@ export function jobView(ctx: ReadContext, api: FinanceApi, job: Job, viewer: Ent
     title: job.title,
     employer: employerName(ctx, job, viewer),
     employerId: job.business && !hiddenFrom(ctx, viewer, job.business) ? job.business : null,
-    worker: labelOf(ctx, job.worker),
+    worker: shownLabel(ctx, viewer, job.worker),
     workerId: job.worker,
     basis: job.basis,
     pay: job.basis === "commission" ? `${job.commissionPct || job.rate}% commission` : `${money(job.rate)} ${BASIS_WORDS[job.basis]}${job.tipsPerHour > 0 ? ` plus about ${money(job.tipsPerHour)} an hour in tips` : ""}${job.commissionPct > 0 ? ` plus ${job.commissionPct}% commission` : ""}`,
@@ -921,7 +921,8 @@ export function jobView(ctx: ReadContext, api: FinanceApi, job: Job, viewer: Ent
     hours: scheduled === null && job.hours !== "attended" ? null : { scheduled: Math.round((scheduled ?? 0) / 6) / 10, attended: Math.round(numOf(sheet.minutes) / 6) / 10 },
     lastPay: Object.keys(last).length > 0 ? { at: formatClock(cal, numOf(last.at)), gross: numOf(last.gross), taxes: numOf(last.taxes), deductions: numOf(last.deductions), net: numOf(last.net) } : null,
     deductions: job.deductions.map((d) => ({ label: d.label, value: d.cents !== undefined ? money(d.cents) : `${d.pct ?? 0}%` })),
-    splits: job.splits.map((s) => ({ to: labelOf(ctx, s.to), value: s.cents !== undefined ? money(s.cents) : `${s.pct ?? 0}%` })),
+    // Where the pay goes, as the viewer may read it: an account of someone they can't see is someone's.
+    splits: job.splits.map((s) => ({ to: shownLabel(ctx, viewer, s.to), value: s.cents !== undefined ? money(s.cents) : `${s.pct ?? 0}%` })),
     spec: { ...fields, ...unseen } as unknown as JobFields,
   };
 }
