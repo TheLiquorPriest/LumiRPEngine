@@ -34,6 +34,8 @@ interface Channel {
   last: JsonValue | null;
   timer: ReturnType<typeof setTimeout> | null;
   running: Promise<void> | null;
+  /** A push waits behind the one being built: every change until it starts is in it. */
+  queued: boolean;
 }
 
 export class StatePush {
@@ -48,7 +50,7 @@ export class StatePush {
     const key = `${userId}\u0000${chatId}`;
     let c = this.channels.get(key);
     if (!c) {
-      c = { rev: 0, last: null, timer: null, running: null };
+      c = { rev: 0, last: null, timer: null, running: null, queued: false };
       this.channels.set(key, c);
     }
     return c;
@@ -73,10 +75,16 @@ export class StatePush {
     }, 40);
   }
 
+  /** Builds after the push being built, once however many changes arrive meanwhile (a turn's steps each tell of one). */
   private run(c: Channel, chatId: ChatId, userId: UserId): void {
+    if (c.queued) return;
+    c.queued = true;
     const prior = c.running ?? Promise.resolve();
     c.running = prior
-      .then(() => this.flush(chatId, userId))
+      .then(() => {
+        c.queued = false;
+        return this.flush(chatId, userId);
+      })
       .catch((error: unknown) => this.host.log("error", `[LumiRPEngine] push ${chatId}: ${error instanceof Error ? error.message : String(error)}`));
   }
 
