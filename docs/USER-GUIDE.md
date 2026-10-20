@@ -46,7 +46,7 @@ Details open as sheets inside the drawer: a person, a place, an item, an account
 
 If the chat isn't a world chat, Play says **Not a world chat** and lists **Your worlds**, each with an **Attach** button. Tap **Attach** and confirm in the **Attach world** box. **Open Build** takes you to the editors. A chat keeps the world it started with: attaching the same world again only re-attaches its lore book, and attaching a different one is refused with "This chat already plays another world. Start a new chat for this one."
 
-The other modes: **GM** shows and edits everything, secrets included (see [GM mode](#gm-mode)), **Build** is where you make worlds (see [Authoring](#authoring)), and **Settings** holds your own defaults. Settings opens on a list of pages in groups: **Getting started** (**Model use**, **Steps and connections**, **Minds**), **Defaults for new chats** (**Realism**, **Checks**, **Time**), **Replies** (**Changes from the reply**, **Swipes**), **Your preset** (**Preset**), **Display** and **About** (**Caveats**). Tap a page to open it; its back button, or Escape, returns to the list. **Realism**, **Checks** and **Time** there set up chats you start from now on; the chat you have open has its own in GM mode, and each of those pages says so, with **Open GM → This chat** to go there. **Settings → Display → Show ids** is off by default. Turn it on to see the id the engine and the world's files use beside each name, in Build's lists, in Problems and in GM mode. Play never shows them: it names things only as your character knows them.
+The other modes: **GM** shows and edits everything, secrets included (see [GM mode](#gm-mode)), **Build** is where you make worlds (see [Authoring](#authoring)), and **Settings** holds your own defaults. Settings opens on a list of pages in groups: **Getting started** (**Model use**, **Steps and connections**, **Minds**), **Defaults for new chats** (**Realism**, **Checks**, **Time**), **Replies** (**Changes from the reply**, **Swipes**), **Your preset** (**Preset**), **Display** and **About** (**Caveats**, **[Diagnostics](#diagnostics)**). Tap a page to open it; its back button, or Escape, returns to the list. **Realism**, **Checks** and **Time** there set up chats you start from now on; the chat you have open has its own in GM mode, and each of those pages says so, with **Open GM → This chat** to go there. **Settings → Display → Show ids** is off by default. Turn it on to see the id the engine and the world's files use beside each name, in Build's lists, in Problems and in GM mode. Play never shows them: it names things only as your character knows them.
 
 What you can see is always filtered to what your point-of-view character knows. Facts are public, known by particular characters, or secret, and a secret stays out of every place, sheet, chip, choice and Journal line until the story reveals it.
 
@@ -114,9 +114,9 @@ Tap someone for their person sheet: where they are, or **Last seen** (from Cast 
 
 ### The status line and the pill
 
-On a phone, a **status line** sits just above the message box: the time (with the pause icon when the clock is paused, and the time scale as n× when it isn't 1×), your place and your cash, a pulse while a turn is running, and **Paused** while the chat waits on an edit. **Act** beside it opens the Actions sheet. Tap the line for the **World** sheet.
+On a phone, a **status line** sits just above the message box: the time (with the pause icon when the clock is paused, and the time scale as n× when it isn't 1×), your place and your cash, what the engine is doing while a turn runs ("Planning…", "Asking 3 minds…", "Reading the reply…", with the seconds it has taken), and **Paused** while the chat waits on an edit. When the engine's last turn failed, a red **!** beside the line opens [Diagnostics](#diagnostics). **Act** beside it opens the Actions sheet. Tap the line for the **World** sheet.
 
-On a wider screen, and on a phone where Lumiverse has no room above the message box, a small **pill** floats over the chat instead. You can drag it, and it remembers where you left it (the phone and the desktop remember it separately, and when the window crosses between phone and desktop width, the pill moves to that layout's place straight away; until you move it, it stays centred as its content changes). It shows the time (with the pause icon when the clock is paused, and the time scale as n× when it isn't 1×), your place, the weather and your cash. On screens narrower than 760 px it collapses to the time and a **Show place, weather and cash** button. A pulse means a turn is running, and **Paused** means the chat is waiting on an edit. Tap the pill for its details; its **Fix a value** button opens them too.
+On a wider screen, and on a phone where Lumiverse has no room above the message box, a small **pill** floats over the chat instead. You can drag it, and it remembers where you left it (the phone and the desktop remember it separately, and when the window crosses between phone and desktop width, the pill moves to that layout's place straight away; until you move it, it stays centred as its content changes). It shows the time (with the pause icon when the clock is paused, and the time scale as n× when it isn't 1×), your place, the weather and your cash. On screens narrower than 760 px it collapses to the time and a **Show place, weather and cash** button. While a turn runs it says what the engine is doing and for how long (collapsed, a pulse and the seconds); **Failed: …** in red means the last turn's work failed, and opens [Diagnostics](#diagnostics). **Paused** means the chat is waiting on an edit. Tap the pill for its details; its **Fix a value** button opens them too.
 
 The World sheet and the pill's details show the same things: the time and the part of the day, your place, the scene (and the last turn), the weather and your cash, then **This turn** (calls, seconds and tokens: the [call meter](#the-call-meter)), the clock button (**Pause clock** or **Resume clock**), and the **Map** and **Actions** buttons.
 
@@ -558,6 +558,19 @@ The call meter counts each turn's engine model calls, seconds and tokens, and it
 ### Engine tokens versus your context
 
 The engine's sections are a fixed overhead in every prompt, up to the engine budget. Nothing checks that budget against your connection's context size, so keep it well inside it: if the fixed part of the prompt is larger than the context, Lumiverse drops the chat history, including your latest message.
+
+### Diagnostics
+
+While a turn runs, the pill, the status line and the top of the drawer say what the engine is doing and for how long. If a step fails, they turn red ("Failed: Planning"); the drawer's banner has **Diagnostics** and **Dismiss**.
+
+**Settings → Diagnostics** (also under About) shows what the engine did in this chat. It can name someone your character hasn't met, so it opens behind **Show diagnostics**. Then:
+
+- **Errors** lists what failed, newest first, with the reason and what to change: for example, an answer cut off at its max tokens tells you to raise **Max tokens** for that step in **Settings → Steps and connections**.
+- Each **turn** lists its steps in order (planning, the plan, the outline, filling the prompt, reading the reply, memory) with their time and outcome, and under each the model calls it made: the connection and model, tokens in and out, why the answer ended, and the time. Filling the prompt lists each section, the preset outlet it goes to, and whether it got text.
+- **Slow** marks a view or an edit that took over a second.
+- **Show** filters to **Problems**, **Model calls** or **Slow**; **Copy** puts the shown records on the clipboard as text, **Download** saves them all as JSON for a bug report, and **Clear** forgets them.
+
+The engine keeps the last 400 records of each chat, so they survive a restart, and writes each as a line to your `diagnostics.log`.
 
 ## Character minds
 
