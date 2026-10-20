@@ -109,7 +109,11 @@ function shownAvailable(ctx: ReadContext, account: EntityId): number {
 }
 
 function journalLine(ctx: ReadContext, viewer: Viewer, j: JournalEntry): JournalLine {
-  return { id: j.id, at: when(ctx, j.at), memo: j.memo, cents: j.cents, account: nameFor(ctx, viewer, j.account), accountId: j.account, kind: j.kind ?? null, category: j.category ?? null, counterparty: j.counterparty ? counterpartyName(ctx, viewer, j.counterparty) : null, card: j.card ? nameFor(ctx, viewer, j.card) : null, status: j.status };
+  // A line whose other side is its own account's holder names no one: money between their own
+  // accounts, or a line kept from before each line named its own side, when it named the payee on both.
+  const self = holdersOf(ctx.state, j.account).find((h) => own(ctx.state.entities, h)) ?? j.account;
+  const counterparty = j.counterparty && j.counterparty !== self ? counterpartyName(ctx, viewer, j.counterparty) : null;
+  return { id: j.id, at: when(ctx, j.at), memo: j.memo, cents: j.cents, account: nameFor(ctx, viewer, j.account), accountId: j.account, kind: j.kind ?? null, category: j.category ?? null, counterparty, card: j.card ? nameFor(ctx, viewer, j.card) : null, status: j.status };
 }
 
 function cardView(ctx: ReadContext, viewer: Viewer, card: EntityId): CardView {

@@ -378,16 +378,20 @@ export function flowLevel(ctx: ReadContext, flow: Flow): number {
   return level(sideOf(ctx, flow.from)) ?? level(sideOf(ctx, flow.to)) ?? 0;
 }
 
-/** Where a payment to a side lands: an account, a party's deposit account, or outside; and who the payer's journal line names (an id, or the outside name). */
+/** Who a side is on a journal line: the party holding its account, the party, or someone outside by their name, never their account id. */
+function sideParty(side: Side): string {
+  if ("account" in side) return side.party ?? side.account;
+  if ("party" in side) return side.party;
+  return (side.outside.startsWith(EXTERNAL_ACCOUNT_PREFIX) ? side.outside.slice(EXTERNAL_ACCOUNT_PREFIX.length) : side.outside).replace(/_/g, " ");
+}
+
+/** Where a payment to a side lands: an account, a party's deposit account, or outside; and who it's paid to (`sideParty`). */
 function landing(ctx: ReadContext, to: string, cents: number): { account: string; extra: LedgerEvent[]; counterparty: string } {
   const side = sideOf(ctx, to);
-  if ("account" in side) return { account: side.account, extra: [], counterparty: side.party ?? side.account };
-  if ("party" in side) {
-    const dest = payeeSide(ctx, { payee: side.party }, cents);
-    return { ...dest, counterparty: side.party };
-  }
-  // The outside payee by its name, never its account id: a person's payment names it, and an account's, so both land in one account.
-  return { account: outsideAccount(side.outside), extra: [], counterparty: (side.outside.startsWith(EXTERNAL_ACCOUNT_PREFIX) ? side.outside.slice(EXTERNAL_ACCOUNT_PREFIX.length) : side.outside).replace(/_/g, " ") };
+  if ("account" in side) return { account: side.account, extra: [], counterparty: sideParty(side) };
+  if ("party" in side) return { ...payeeSide(ctx, { payee: side.party }, cents), counterparty: sideParty(side) };
+  // Paid by a person or from an account, an outside payee's money lands in the one account its name gives.
+  return { account: outsideAccount(side.outside), extra: [], counterparty: sideParty(side) };
 }
 
 // ---------------------------------------------------------------- amounts
@@ -521,7 +525,7 @@ function payFrom(hooks: FinanceHooks, ctx: ReadContext, flow: Flow, fromId: stri
   if (finalLines.length < 2) return reject("bad_flow", `${flow.label} pays itself`);
   // Into overdraft, the account's own policy applies: the gap from its linked account first, or its overdraft fee after.
   const od = "account" in from && overdraft ? overdraftEvents(ctx, from.account, cents, at) : { before: [], after: [] };
-  return { events: asUnit([...od.before, ...posting(finalLines, { memo, ...meta, counterparty }), ...extra, ...od.after]), paid: cents };
+  return { events: asUnit([...od.before, ...posting(finalLines, { memo, ...meta, counterparty, payer: sideParty(from) }), ...extra, ...od.after]), paid: cents };
 }
 
 /** A module's own posting for an occurrence, checked as the fold will check it. */
@@ -536,7 +540,7 @@ function providedAttempt(ctx: ReadContext, flow: Flow, made: FlowPosting, at: nu
   }
   const memo = made.memo ?? flow.label;
   const card: LedgerEvent[] = lines.filter((l) => l.amount > 0 && traitsOf(ctx, l.account)?.liability).map((l) => ({ type: FINANCE_EVENTS.cardPaid, data: { account: l.account, cents: l.amount } }));
-  return { events: asUnit([...posting(lines, { memo, kind: made.kind ?? "payment", category: made.category ?? flow.category ?? flow.kind, flow: flow.id, at }), ...card, ...(made.extra ?? [])]), paid: made.cents };
+  return { events: asUnit([...posting(lines, { memo, kind: made.kind ?? "payment", category: made.category ?? flow.category ?? flow.kind, flow: flow.id, at, counterparty: sideParty(sideOf(ctx, flow.to)), payer: sideParty(sideOf(ctx, flow.from)) }), ...card, ...(made.extra ?? [])]), paid: made.cents };
 }
 
 /** The party a flow's notes are about: its payer's holder, else its payee. */

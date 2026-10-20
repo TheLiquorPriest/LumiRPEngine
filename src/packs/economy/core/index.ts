@@ -350,7 +350,7 @@ function postWith(ctx: ReadContext, lines: PostingLine[], meta: PostMeta): Ledge
     const party = l.account.startsWith("economy.external:") ? l.account.slice("economy.external:".length) : "";
     if (party !== "" && own(ctx.state.entities, party) && !hasLedger(ctx, party) && ctx.levelOf(party, "money") >= 1) bands.push(...l1Move(ctx.state, party, l.amount));
   }
-  return asUnit([...posting(clean, { memo: meta.memo, ...(meta.kind ? { kind: meta.kind } : {}), ...(meta.category ? { category: meta.category } : {}), ...(meta.counterparty ? { counterparty: meta.counterparty } : {}), ...(meta.flow ? { flow: meta.flow } : {}) }), ...bands]);
+  return asUnit([...posting(clean, { memo: meta.memo, ...(meta.kind ? { kind: meta.kind } : {}), ...(meta.category ? { category: meta.category } : {}), ...(meta.counterparty ? { counterparty: meta.counterparty } : {}), ...(meta.payer ? { payer: meta.payer } : {}), ...(meta.flow ? { flow: meta.flow } : {}) }), ...bands]);
 }
 
 /** A party's money that's spendable now: what they can spend from (cash carried, accounts, credit left). */

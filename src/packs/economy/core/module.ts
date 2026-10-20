@@ -114,12 +114,15 @@ export interface Payment {
   flow?: string;
 }
 
-/** What a posting is, for its journal lines. */
+/** What a posting is, for its journal lines; a side it doesn't name is whoever holds its biggest line. */
 export interface PostMeta {
   memo: string;
   kind?: TxnKind;
   category?: string;
+  /** Who the money goes to: someone in the world by id, else an outside payee by name. */
   counterparty?: string;
+  /** Who it comes from, the same way. */
+  payer?: string;
   flow?: string;
   /** Skip the funds check (an opening balance, a correction); a posting is otherwise refused when a paying account can't cover its line. */
   unchecked?: boolean;

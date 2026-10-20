@@ -11,10 +11,11 @@ import type { PackEvent } from "../../../shared/ledger";
 import { ACCOUNT_STATUSES, DELINQUENCY_STAGES, FINANCE_EVENTS, isCredit, type AccountStatus, type CycleState, type DelinquencyStage, type FlowRunState, type JournalEntry } from "../../../shared/finance";
 import { formatMoney } from "../../../shared/world";
 import { calendarOf, dateAt } from "../../../engine/calendar";
+import { EXTERNAL_ACCOUNT_PREFIX } from "../../../engine/events";
 import { mutableSlice, numOf, objOf, own, sliceOf, sliceRecord, strOf } from "../../../engine/pack-kit";
 import type { EventTypeDef, ReadContext, Rejection } from "../../../engine/registry";
 import type { WorldState } from "../../../engine/state";
-import { availableOf, balance, classOf } from "./model";
+import { availableOf, balance, classOf, holdersOf } from "./model";
 
 /** Journal lines kept per account, notes per party, months of totals per account, credit entries and scores per person. */
 export const JOURNAL_CAP = 40;
@@ -23,6 +24,9 @@ const MONTHS_KEPT = 13;
 const CREDIT_CAP = 60;
 const SCORES_KEPT = 24;
 const STATEMENTS_KEPT = 6;
+
+/** What isn't a payment between two sides (an account's opening, a correction, a loss): its journal lines name no other side. */
+export const UNSIDED_KINDS: ReadonlySet<string> = new Set(["opening", "adjustment"]);
 
 export function reject(code: string, reason: string): Rejection {
   return { code, reason };
@@ -119,12 +123,23 @@ function pushCapped(list: JsonValue | undefined, entry: JsonValue, cap: number):
   return [...(Array.isArray(list) ? list.slice(-(cap - 1)) : []), entry];
 }
 
-/** Files one journal line, its month's total, and the average-daily-balance accrual. */
-function fileLine(state: WorldState, ctx: ReadContext, account: EntityId, amount: number, at: number, data: JsonObject, seq: number): void {
+/**
+ * A posting's side as a journal line names it: an account in the world as the party holding it, an
+ * outside account of someone in the world as them, and anyone else as the posting named them.
+ */
+function partyOfSide(state: Readonly<WorldState>, side: string): string {
+  if (own(state.entities, side)?.kind === "account") return holdersOf(state, side).find((h) => own(state.entities, h)) ?? side;
+  const bare = side.startsWith(EXTERNAL_ACCOUNT_PREFIX) ? side.slice(EXTERNAL_ACCOUNT_PREFIX.length) : "";
+  return bare !== "" && own(state.entities, bare) ? bare : side;
+}
+
+/** Files one journal line, naming `other` as its other side, its month's total, and the average-daily-balance accrual. */
+function fileLine(state: WorldState, ctx: ReadContext, account: EntityId, amount: number, at: number, data: JsonObject, other: string, seq: number): void {
   const journal = sliceRecord(state, "economy", "journal");
   const status = data.status === "pending" ? "pending" : "posted";
   const entry: JsonObject = { id: `j${seq}`, at, account, cents: amount, memo: strOf(data.memo), status };
-  for (const k of ["kind", "category", "counterparty", "card", "flow"] as const) if (typeof data[k] === "string" && data[k] !== "") entry[k] = data[k];
+  for (const k of ["kind", "category", "card", "flow"] as const) if (typeof data[k] === "string" && data[k] !== "") entry[k] = data[k];
+  if (other !== "") entry.counterparty = other;
   if (status === "pending" && typeof data.settles === "number") entry.settles = data.settles;
   journal[account] = pushCapped(journal[account], entry, JOURNAL_CAP);
 
@@ -190,9 +205,16 @@ export const EVENTS: EventTypeDef<PackEvent>[] = [
         if (!own(state.entities, account)) continue;
         totals.set(account, (totals.get(account) ?? 0) + Math.round(numOf(l.amount)));
       }
+      // Each line names the side opposite it: whoever the money went to, for money out, and whoever
+      // it came from, for money in. An event from before postings named their payer names only the
+      // payee: money in then names whoever in the world paid most of it, where the posting shows them.
+      const sided = !UNSIDED_KINDS.has(strOf(e.data.kind));
+      const payee = sided ? strOf(e.data.counterparty) : "";
+      const paidMost = [...totals].reduce<[string, number] | undefined>((top, l) => (l[1] < 0 && (top === undefined || l[1] < top[1]) ? l : top), undefined)?.[0];
+      const payer = sided ? strOf(e.data.payer) || (paidMost ?? payee) : "";
       for (const [account, amount] of totals) {
         seq += 1;
-        fileLine(state, ctx, account, amount, at, e.data, seq);
+        fileLine(state, ctx, account, amount, at, e.data, partyOfSide(state, amount < 0 ? payee : payer), seq);
         // What a credit account's line was: a purchase earns rewards, a cash advance its own interest.
         const use = !isCreditAccount(ctx, account) ? null : e.data.kind === "purchase" ? "purchase" : e.data.category === "cash_advance" && e.data.kind !== "fee" && amount < 0 ? "advance" : null;
         accrue(state, account, amount, at, use);

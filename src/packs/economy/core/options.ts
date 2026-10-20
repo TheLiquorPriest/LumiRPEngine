@@ -177,7 +177,7 @@ function settlements(api: FinanceApi, ctx: ReadContext, slot: SlotInfo): LedgerE
       const label = `${a.label} matured`;
       // Its last coupon is paid with it, to where its coupons go, and is the year's interest.
       const coupon = holdingIncome(api, ctx, holding, at.at, true);
-      const paid = coupon?.lines ? api.post(ctx, coupon.lines, { memo: coupon.memo ?? label, kind: "income", category: coupon.category ?? "interest" }) : [];
+      const paid = coupon?.lines ? api.post(ctx, coupon.lines, { memo: coupon.memo ?? label, kind: "income", category: coupon.category ?? "interest", payer: a.label }) : [];
       const couponEvents = isRejection(paid) || !coupon ? [] : [...paid, ...(coupon.extra ?? [])];
       const couponCents = couponEvents.length > 0 && coupon ? coupon.cents : 0;
       const settled = settle(api, ctx, holding, { ...a, option: null }, qty, cash, label);

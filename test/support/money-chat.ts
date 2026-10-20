@@ -21,10 +21,11 @@ export interface GmMoney {
   values: Map<string, Record<string, unknown>>;
 }
 
-/** What a test changes in the world before the chat starts: fields added to places (a cash machine, a branch) and set on entities, and who the POV is. */
+/** What a test changes in the world before the chat starts: fields added to places (a cash machine, a branch) and set on entities, entities the player never sees, and who the POV is. */
 export interface WorldPatch {
   places?: Record<string, JsonObject>;
   entities?: Record<string, JsonObject>;
+  secret?: string[];
   pov?: string;
 }
 
@@ -41,15 +42,17 @@ export class MoneyChat {
   static async start(patch: WorldPatch = {}): Promise<MoneyChat> {
     const rig = new Rig({ shipped: true });
     const worldId = await rig.newWorld("Port Alder", "modern_slice_of_life");
-    const edits = [...Object.entries(patch.places ?? {}).map(([id, fields]) => ({ collection: "places", id, fields })), ...Object.entries(patch.entities ?? {}).map(([id, fields]) => ({ collection: "entities", id, fields }))];
+    const secret = new Set(patch.secret ?? []);
+    const touched = [...new Set([...Object.keys(patch.entities ?? {}), ...secret])];
+    const edits = [...Object.entries(patch.places ?? {}).map(([id, fields]) => ({ collection: "places", id, fields, hidden: false })), ...touched.map((id) => ({ collection: "entities", id, fields: patch.entities?.[id] ?? {}, hidden: secret.has(id) }))];
     if (edits.length > 0 || patch.pov !== undefined) {
       const draft = rig.body(await rig.send({ type: "lre.editor", op: "get", worldId, base: null }));
       const doc = isRecord(draft.draft) ? draft.draft : {};
-      for (const { collection, id, fields } of edits) {
+      for (const { collection, id, fields, hidden } of edits) {
         const items = doc[collection];
         const item = isRecord(items) ? items[id] : undefined;
         if (!isRecord(item)) throw new Error(`no ${collection} ${id}`);
-        const value = { ...item, fields: { ...(isRecord(item.fields) ? item.fields : {}), ...fields } };
+        const value = { ...item, ...(hidden ? { visibility: "secret" } : {}), fields: { ...(isRecord(item.fields) ? item.fields : {}), ...fields } };
         rig.body(await rig.send({ type: "lre.editor", op: "put", worldId, base: draft.base, collection, id, value }));
       }
       if (patch.pov !== undefined) rig.body(await rig.send({ type: "lre.editor", op: "set", worldId, base: draft.base, part: "meta", value: { pov: patch.pov } }));

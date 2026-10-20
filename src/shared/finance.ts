@@ -534,7 +534,11 @@ export interface JournalEntry {
   memo: string;
   kind?: TxnKind;
   category?: string;
-  /** The other side: the entity id of someone in the world (views name it, or mask it), else an outside party's name. */
+  /**
+   * This line's other side: whoever was paid, for money out, or whoever paid, for money in (§25.6).
+   * Someone in the world by entity id (views name them, or mask them), else an outside payee by
+   * name or key, or an outside account. A view names no one where it's the line's own holder.
+   */
   counterparty?: string;
   card?: EntityId;
   flow?: string;
@@ -1049,7 +1053,10 @@ export interface TxnData {
   lines: { account: EntityId; amount: number }[];
   kind?: TxnKind;
   category?: string;
+  /** Who the money went to: someone in the world, an outside payee by name or key, or an account (filed as its holder). Older events: the one side they named. */
   counterparty?: string;
+  /** Who it came from, the same way; events from before it was recorded don't carry it. */
+  payer?: string;
   card?: EntityId;
   flow?: string;
   /** Pending until `settles` (card payments where holds run). */
