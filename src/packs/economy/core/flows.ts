@@ -559,7 +559,7 @@ export function runOccurrence(hooks: FinanceHooks, run: Run, flow: Flow, at: num
     }
   }
   const reason = "code" in attempt ? attempt.reason : "the payment didn't go through";
-  const nsf = bounceFee(ctx, flow, at);
+  const nsf = bounceFee(ctx, flow, cents, at, overdraft);
   switch (flow.shortfall) {
     case "partial": {
       const side = sideOf(ctx, flow.from);
@@ -636,10 +636,15 @@ function partyHas(ctx: ReadContext, party: EntityId): number {
   return accountsOf(ctx, party, "spend").reduce((a, id) => a + (traitsOf(ctx, id)?.asset && !traitsOf(ctx, id)?.locked ? Math.max(0, availableOf(ctx, id)) : 0), 0);
 }
 
-/** A bounced payment's returned-item fee, where fees run, from a transactional account whose policy declined it. */
-function bounceFee(ctx: ReadContext, flow: Flow, at: number): LedgerEvent[] {
+/**
+ * A bounced payment's returned-item fee, where fees run: only when an open transactional account
+ * didn't have the money (with what overdraft its policy allows), never for a closed, frozen or
+ * locked one, which the payment couldn't come from whatever it held.
+ */
+function bounceFee(ctx: ReadContext, flow: Flow, cents: number, at: number, overdraft: boolean): LedgerEvent[] {
   const side = sideOf(ctx, flow.from);
   if (!("account" in side) || !traitsOf(ctx, side.account)?.transactional || !featureOn(accountLevel(ctx, side.account), "fees", toggles(ctx.world))) return [];
+  if (statusOf(ctx.state, side.account) !== "open" || availableOf(ctx, side.account) + (overdraft ? overdraftRoom(ctx, side.account) : 0) >= cents) return [];
   const p = productOf(ctx, side.account);
   if (!p || p.fees.nsf <= 0) return [];
   const lines: PostingLine[] = [

@@ -1389,7 +1389,7 @@ The machine rule holds only in a world that places at least one `atm` or `branch
 
 ### 25.10 Overdraft
 
-A deposit account's `overdraft` policy decides a payment the balance can't cover. `decline` refuses it. `fee` pays it up to `overdraft_limit` and charges the product's overdraft fee. `linked` draws the gap from `overdraft_link`. A flow that bounces may charge a fee for insufficient funds.
+A deposit account's `overdraft` policy decides a payment the balance can't cover. `decline` refuses it. `fee` pays it up to `overdraft_limit` and charges the product's overdraft fee. `linked` draws the gap from `overdraft_link`. A flow from an open account that doesn't have the money bounces with the returned-payment fee, where fees run; one from a closed or frozen account is declined without it.
 
 ### 25.11 Households and views
 
