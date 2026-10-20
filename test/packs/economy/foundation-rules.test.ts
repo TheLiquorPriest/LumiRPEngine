@@ -138,6 +138,30 @@ describe("the player's money view never names or sends someone they can't see", 
     expect(view.accounts.find((a) => a.id === "joint")?.transactions.find((t) => t.cents === -20_000)?.counterparty).toBe("Viktor Kane");
     expect(view.flows.find((f) => f.id === "hush")?.spec?.to).toBe("viktor");
   });
+
+  test("an outside employer at a place the player can't see reads as an employer on their job, its pay and the paychecks on a shared account, and its id stays out", () => {
+    const w = setup((world) => {
+      world.places.blind_tiger = { id: "blind_tiger", name: "The Blind Tiger", parent: "riverton", visibility: "secret", fields: {} };
+      world.entities.joint = entity("joint", "account", { owners: [{ party: "you", role: "joint" }, { party: "rosa", role: "joint" }], product: "checking", opening: 10_000 });
+      const nights = { employer: "blind_tiger", title: "Night work", basis: "hourly", rate: 2000, hours: "contract", hours_per_week: 20, weeks_per_year: 52, pay_every: "weekly", pay_weekday: 5, start: "2025-01-06" };
+      world.entities.job_rosa_nights = entity("job_rosa_nights", "job", { ...nights, worker: "rosa", splits: [{ to: "joint", pct: 50 }] });
+      world.entities.job_you_nights = entity("job_you_nights", "job", { ...nights, worker: "you" });
+    }, ["rosa"]);
+    lapse(w, 8);
+    const view = w.ctx.query("economy.finance")(w.ctx, "you", true);
+    expect(view.jobs.filter((j) => j.title === "Night work").map((j) => [j.employer, j.employerId, j.spec.employer])).toEqual([["Employer", null, ""]]);
+    // Rosa's pay and theirs, each under a stand-in id, as a flow's own can name where the work is.
+    const pay = view.flows.filter((f) => f.label === "Pay: Night work");
+    expect(pay.map((f) => [f.from, f.spec, f.id.startsWith("hidden:")])).toEqual([["Employer", null, true], ["Employer", null, true]]);
+    // Their own pay into their checking, and Rosa's half into the account they share.
+    const paychecks = ["checking", "joint"].flatMap((id) => (view.accounts.find((a) => a.id === id)?.transactions ?? []).filter((t) => t.memo.startsWith("Payroll")));
+    expect(paychecks.length).toBeGreaterThanOrEqual(2);
+    expect(new Set(paychecks.map((t) => t.counterparty))).toEqual(new Set(["Employer"]));
+    expect(JSON.stringify(view)).not.toContain("Blind Tiger");
+    expect(JSON.stringify(view)).not.toContain("blind_tiger");
+    // The GM names it.
+    expect(w.ctx.query("economy.finance")(w.ctx, "you", false).flows.find((f) => f.id === "pay:job_you_nights")?.from).toBe("The Blind Tiger");
+  });
 });
 
 describe("a late payment counts toward what was past due", () => {
@@ -477,6 +501,28 @@ describe("only a role that manages an account runs standing payments from it", (
   test("the owner still can", () => {
     const w = setup(authorized, ["maya"]);
     expect(done(w, "you", "flow_pause", { flow: "save" })).toBe(true);
+  });
+});
+
+describe("money a party only manages pays for its holder, never for them", () => {
+  // The player is the trustee of a trust for Maya; the trust holds its account, which the trustee holds no role on.
+  const trust = (world: WorldDoc): void => {
+    mayaChecking(world);
+    world.entities.family_trust = { ...entity("family_trust", "trust", { owners: [{ party: "you", role: "trustee" }, { party: "maya", role: "beneficiary", share: 100 }] }), name: "Chen Family Trust" };
+    world.entities.trust_acct = { ...entity("trust_acct", "account", { owners: [{ party: "family_trust", role: "owner" }], product: "trust", opening: 5_000_000 }), name: "Trust account" };
+  };
+  const refusal = (w: Working, action: string, params: JsonObject): string | null => {
+    const r = resolveAction(reg, w, { action, actor: "you", params }, createRng(`${action}:${String(params.label ?? params.account)}`));
+    return r.failed?.reason ?? r.rejected[0]?.rejection.reason ?? null;
+  };
+
+  test("a trustee pays the trust's beneficiary from its account, never their own card's autopay or themselves", () => {
+    const w = setup(trust, ["maya", "family_trust"]);
+    expect(refusal(w, "set_autopay", { account: "card", mode: "full", from: "trust_acct" })).toContain("not from Trust account");
+    expect(refusal(w, "flow_create", { label: "Trustee fee, self-set", from: "trust_acct", to: "checking", amount: 300_000, every: "month", day: 20 })).toContain("Trust account pays for Chen Family Trust, not for");
+    expect(refusal(w, "flow_create", { label: "Maya's allowance", from: "trust_acct", to: "maya_checking", amount: 20_000, every: "month", day: 20 })).toBeNull();
+    expect(w.state.entities.card?.fields.autopay_from).not.toBe("trust_acct");
+    expect(Object.values(w.state.entities).filter((e) => e.kind === "flow" && e.fields.from === "trust_acct").map((e) => e.name)).toEqual(["Maya's allowance"]);
   });
 });
 

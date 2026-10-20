@@ -17,11 +17,10 @@ import type { EffectContext, EventTypeDef, ReadContext, Rejection, SlotInfo } fr
 import type { Rng } from "../../../engine/rng";
 import { isGone, kindIs, placeOfEntity, placeWithin } from "../../../engine/scope";
 import type { WorldState } from "../../../engine/state";
-import { canSeeEntity } from "../../../engine/visibility";
 import { addToBooks, addToPayables, businessBooks, firstBookedMonth, monthBook, monthOf, monthsBetween, operatingAccount, payablesOf } from "./books";
 import { allJobs, businessAt, businessIds, jobBlocks, jobView, placesOf, type Job } from "./employment";
 import type { FinanceApi, FinanceRegistry, FlowPosting } from "./module";
-import { managesParty, unpricedCap } from "./model";
+import { hiddenFrom, managesParty, opaqueId, unpricedCap } from "./model";
 import { corporateTax, salesTaxAccount, salesTaxOn, salesTaxPct, structureOf, taxExempt, taxRegionOf } from "./taxes";
 
 /** The foundation's invoice kind (`kinds.ts`): one invoice a business issued. */
@@ -544,11 +543,6 @@ function distributionFlow(ctx: ReadContext, api: FinanceApi, business: EntityId)
 
 // ---------------------------------------------------------------- views
 
-/** Whether `viewer` (the player; null for the GM) can't see `id`: their views carry neither its name nor its id (DESIGN §7). */
-function hiddenFrom(ctx: ReadContext, viewer: EntityId | null, id: string): boolean {
-  return viewer !== null && own(ctx.state.entities, id) !== undefined && !canSeeEntity(ctx.registry, ctx.world, ctx.state, viewer, id);
-}
-
 /** A name as `viewer` may read it: anyone hidden from them reads as `fallback`; the GM's views name everyone. */
 function shownName(ctx: ReadContext, viewer: EntityId | null, id: string, fallback: string): string {
   if (!own(ctx.state.entities, id)) return id;
@@ -590,10 +584,10 @@ export function businessView(ctx: ReadContext, api: FinanceApi, business: Entity
   const employees = allJobs(ctx)
     .filter((j) => j.business === business && j.status !== "ended")
     .map((j) => {
-      const v = jobView(ctx, api, j);
+      const v = jobView(ctx, api, j, viewer);
       if (!hiddenFrom(ctx, viewer, j.worker)) return v;
-      // Where their pay goes, and to whom, would name them too.
-      return { ...v, worker: "an employee", workerId: "", splits: [], spec: { ...v.spec, worker: "", splits: [], deductions: [] } };
+      // Where their pay goes, and to whom, would name them too, and so can the job's id (`job_danny_mechanic`): its payroll's link sends the same stand-in.
+      return { ...v, id: opaqueId(v.id), worker: "an employee", workerId: "", splits: [], spec: { ...v.spec, worker: "", splits: [], deductions: [] } };
     });
   const owed = payablesOf(ctx.state, business);
   const taxes: BusinessView["taxes"] = [];
@@ -617,6 +611,7 @@ export function businessView(ctx: ReadContext, api: FinanceApi, business: Entity
     id: business,
     name: labelOf(ctx, business),
     role,
+    mayDraw: mayDraw(api, ctx.state, party, business),
     owners: ownerLines(ctx, api, viewer, business),
     accounts: api.accountsOf(ctx, business, "sees"),
     // The finance view fills these: it knows which accounts it already shows as the viewer's own.

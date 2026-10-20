@@ -16,11 +16,12 @@ import { kindIs } from "../../../engine/scope";
 import { membersOf, MEMBER_OF } from "../../../engine/selector";
 import { canSeeEntity } from "../../../engine/visibility";
 import type { FinanceHooks } from "./module";
+import { autopaySourceProblem, mayPayFrom } from "./actions";
 import { statementState } from "./cycle";
 import { creditReport } from "./credit";
-import { allFlows, occurrences, occurrenceAmount } from "./flows";
+import { allFlows, fallsBackOn, occurrences, occurrenceAmount } from "./flows";
 import { cycleOf, flowRunOf, isOpened, journalOf, NOTES_CAP } from "./journal";
-import { accountsOf, availableOf, balance, classOf, holdersOf, holdsOn, managesAccount, managesParty, openerOf, outsideName, ownersOf, productOf, rightsOf, statusOf, traitsOf, wealthBand } from "./model";
+import { accountsOf, availableOf, balance, canSpend, classOf, holdersOf, holdsOn, householdOf, managesAccount, managesParty, opaqueId, openerOf, outsideHidden, outsideName, ownersOf, productOf, rightsOf, shareOf, statusOf, traitsOf, wealthBand } from "./model";
 import { cardsOn, cardRoom, featureFor, isParty, overdraftRoom, tiersOf, toggles } from "./pay";
 import { netWorthParts } from "./worth";
 import { createRng } from "../../../engine/rng";
@@ -64,11 +65,17 @@ function idFor(ctx: ReadContext, viewer: Viewer, id: string): EntityId | null {
 /**
  * A flow's side, or a journal line's other party, as the viewer reads it: someone in the world by
  * name ("someone" when the viewer can't see them), an outside account of someone in the world as
- * them, and anyone outside in words (`outsideName`).
+ * them, and anyone outside in words, naming only what the viewer may see (`outsideName`).
  */
 function sideName(ctx: ReadContext, viewer: Viewer, raw: string): string {
   const id = raw.startsWith(EXTERNAL_ACCOUNT_PREFIX) ? raw.slice(EXTERNAL_ACCOUNT_PREFIX.length) : raw;
-  return own(ctx.state.entities, id) ? nameFor(ctx, viewer, id) : outsideName(ctx, raw);
+  return own(ctx.state.entities, id) ? nameFor(ctx, viewer, id) : outsideName(ctx, raw, viewer.pov);
+}
+
+/** Whether the viewer may see a flow's side as it's stored: someone in the world (or their outside account) they can see, or an outside name that says no one and nowhere hidden from them. */
+function sideSeen(ctx: ReadContext, viewer: Viewer, raw: string): boolean {
+  const id = raw.startsWith(EXTERNAL_ACCOUNT_PREFIX) ? raw.slice(EXTERNAL_ACCOUNT_PREFIX.length) : raw;
+  return own(ctx.state.entities, id) ? visible(ctx, viewer, id) : !outsideHidden(ctx, raw, viewer.pov);
 }
 
 /**
@@ -108,11 +115,14 @@ function shownAvailable(ctx: ReadContext, account: EntityId): number {
   return availableOf(ctx, account) + shown(ctx, account) - balance(ctx.state, account);
 }
 
-function journalLine(ctx: ReadContext, viewer: Viewer, j: JournalEntry): JournalLine {
-  // A line whose other side is its own account's holder names no one: money between their own
-  // accounts, or a line kept from before each line named its own side, when it named the payee on both.
-  const self = holdersOf(ctx.state, j.account).find((h) => own(ctx.state.entities, h)) ?? j.account;
-  const counterparty = j.counterparty && j.counterparty !== self ? counterpartyName(ctx, viewer, j.counterparty) : null;
+function journalLine(ctx: ReadContext, viewer: Viewer, party: EntityId, j: JournalEntry): JournalLine {
+  // A line names no one where its other side is the party reading it, or the one party whose money
+  // the account is: money between their own accounts (a business's too, read by its manager), or a
+  // line kept from before each line named its own side, when it named the payee on both. On an
+  // account two hold, money one of them paid in reads by their name to the other.
+  const worth = Object.entries(worthShares(ownersOf(ctx.state, j.account))).filter(([, share]) => share > 0);
+  const whose = worth.length === 1 ? (worth[0]?.[0] ?? j.account) : j.account;
+  const counterparty = j.counterparty && j.counterparty !== party && j.counterparty !== whose ? counterpartyName(ctx, viewer, j.counterparty) : null;
   return { id: j.id, at: when(ctx, j.at), memo: j.memo, cents: j.cents, account: nameFor(ctx, viewer, j.account), accountId: j.account, kind: j.kind ?? null, category: j.category ?? null, counterparty, card: j.card ? nameFor(ctx, viewer, j.card) : null, status: j.status };
 }
 
@@ -201,9 +211,10 @@ function accountView(ctx: ReadContext, viewer: Viewer, party: EntityId, account:
   const cycle = cycleOf(ctx.state, account);
   const journal = journalOf(ctx.state, account);
   const cents = shown(ctx, account);
-  // Statements and holds show where they run: their level, or where Custom turns them on or off.
+  // Statements, holds and cards show where they run: their level, or where Custom turns them on or off.
   const statements = featureOn(level, "statements", toggles(ctx.world));
   const holds = featureOn(level, "holds", toggles(ctx.world));
+  const cards = featureOn(level, "cards", toggles(ctx.world));
   const autopayMode = strOf(e?.fields.autopay, "none");
   const autopayFrom = strOf(e?.fields.autopay_from);
   const securedBy = strOf(e?.fields.secured_by);
@@ -222,6 +233,10 @@ function accountView(ctx: ReadContext, viewer: Viewer, party: EntityId, account:
     owners: owners.map((o) => ({ party: idFor(ctx, viewer, o.party), name: nameFor(ctx, viewer, o.party), role: o.role, share: Math.round((own(shares, o.party) ?? 0) * 100) / 100 })),
     role,
     manages: managesAccount(ctx, account, party),
+    spends: canSpend(ctx.state, account, party),
+    // Filled once the view holds every account it shows (`buildFinanceView`).
+    autopayFrom: [],
+    fallbacks: [],
     limit: level >= 3 && t.liability ? (p?.limit ?? null) : null,
     aprPct: level >= 4 && t.liability ? (p?.apr_pct ?? null) : null,
     apyPct: level >= 4 && t.earns ? (p?.apy_pct ?? null) : null,
@@ -229,10 +244,10 @@ function accountView(ctx: ReadContext, viewer: Viewer, party: EntityId, account:
     autopay: level >= 3 && (t.revolving || t.installment) ? { mode: (AUTOPAY_MODES as readonly string[]).includes(autopayMode) ? (autopayMode as AutopayMode) : "none", from: autopayFrom ? idFor(ctx, viewer, autopayFrom) : null, fromName: autopayFrom ? nameFor(ctx, viewer, autopayFrom) : null, cents: autopayMode === "fixed" ? numOf(e?.fields.autopay_cents) : null } : null,
     due: statements ? due : null,
     statements: statements && (t.revolving || t.installment) ? [statementView(ctx, cycle), ...pastStatements(ctx, account)].filter((s): s is StatementView => s !== null) : [],
-    cards: level >= 3 ? cardsOn(ctx.state, account).map((c) => cardView(ctx, viewer, c)) : [],
-    pending: holds ? journal.filter((j) => j.status === "pending").reverse().map((j) => journalLine(ctx, viewer, j)) : [],
+    cards: cards ? cardsOn(ctx.state, account).map((c) => cardView(ctx, viewer, c)) : [],
+    pending: holds ? journal.filter((j) => j.status === "pending").reverse().map((j) => journalLine(ctx, viewer, party, j)) : [],
     holds: holds ? holdsOn(ctx.state, account).map((h) => ({ id: h.id, cents: h.cents, until: day(ctx, h.until), kind: h.kind, memo: h.memo })) : [],
-    transactions: level >= 2 ? journal.slice(-(level >= 4 ? 40 : 20)).reverse().map((j) => journalLine(ctx, viewer, j)) : [],
+    transactions: level >= 2 ? journal.slice(-(level >= 4 ? 40 : 20)).reverse().map((j) => journalLine(ctx, viewer, party, j)) : [],
     securedBy: securedBy !== "" && own(ctx.state.entities, securedBy) && visible(ctx, viewer, securedBy) ? { id: securedBy, name: nameFor(ctx, viewer, securedBy) } : null,
     loan: t.installment && level >= 3 ? { payment: typeof e?.fields.payment === "number" ? e.fields.payment : (cycle?.minimum ?? 0), monthsLeft: cycle?.months_left ?? numOf(e?.fields.months_left, numOf(e?.fields.remaining_months, p?.term_months ?? 0)), payoff: Math.max(0, -cents) } : null,
   };
@@ -270,10 +285,15 @@ function amountWords(ctx: ReadContext, viewer: Viewer, f: Flow): string {
   return "worked out each time";
 }
 
-/** Whether a flow touches a party: it pays from or into them, or an account of theirs, or shares it. */
-function flowTouches(ctx: ReadContext, f: Flow, party: EntityId): boolean {
+/**
+ * Whether a flow touches a party: it pays from or into them, or an account of theirs, or shares it;
+ * or it pays from money they manage, a business's account the viewer can see or the business
+ * itself, whose standing payments are theirs to change (DESIGN §25.1).
+ */
+function flowTouches(ctx: ReadContext, viewer: Viewer, f: Flow, party: EntityId): boolean {
   const sides = [f.from, f.to, ...(f.splits ?? []).map((s) => s.to), ...(f.shares ?? []).flatMap((s) => [s.party, s.from ?? ""])];
-  return sides.some((id) => id === party || (own(ctx.state.entities, id)?.kind === "account" && rightsOf(ctx.state, id, party)?.sees === true));
+  if (sides.some((id) => id === party || (own(ctx.state.entities, id)?.kind === "account" && rightsOf(ctx.state, id, party)?.sees === true))) return true;
+  return own(ctx.state.entities, f.from)?.kind === "account" ? managesAccount(ctx, f.from, party) && visible(ctx, viewer, f.from) : managesParty(ctx.state, f.from, party);
 }
 
 function nextOf(ctx: ReadContext, f: Flow, horizon: number): number | null {
@@ -282,6 +302,22 @@ function nextOf(ctx: ReadContext, f: Flow, horizon: number): number | null {
   const first = occurrences(ctx, f.schedule, from, from + horizon, f.start, f.end)[0];
   const candidates = [first?.at, retry?.at].filter((x): x is number => typeof x === "number" && x > from);
   return candidates.length > 0 ? Math.min(...candidates) : null;
+}
+
+/**
+ * What a flow belongs to as the viewer may read it: an entity they can see, by name. A job is named
+ * after its worker ("Danny's job at Alder Automotive"), so one whose worker they can't see reads by
+ * its title and employer, under the id its employer's page sends it by (`opaqueId`). The job kind
+ * is the foundation's (`kinds.ts`).
+ */
+function linkView(ctx: ReadContext, viewer: Viewer, link: string | undefined): { id: EntityId; name: string } | null {
+  const e = link === undefined ? undefined : own(ctx.state.entities, link);
+  if (link === undefined || !e || !visible(ctx, viewer, link)) return null;
+  if (!kindIs(ctx.registry, ctx.world, e.kind, "job") || visible(ctx, viewer, strOf(e.fields.worker))) return { id: link, name: nameFor(ctx, viewer, link) };
+  const employer = strOf(e.fields.employer);
+  const at = employer === "" || outsideHidden(ctx, employer, viewer.pov) ? "" : own(ctx.state.entities, employer) ? nameFor(ctx, viewer, employer) : outsideName(ctx, `employer:${employer}`, viewer.pov);
+  const title = strOf(e.fields.title) || "A job";
+  return { id: opaqueId(link), name: at === "" ? title : `${title} at ${at}` };
 }
 
 function flowView(hooks: FinanceHooks, ctx: ReadContext, viewer: Viewer, party: EntityId, f: Flow): FlowView {
@@ -295,11 +331,15 @@ function flowView(hooks: FinanceHooks, ctx: ReadContext, viewer: Viewer, party: 
   const fromSide = own(ctx.state.entities, f.from);
   // The party changes it when they manage what pays it: the account (by their role on it, or on the business or trust that holds it), or the business or trust paying.
   const payerHolds = fromSide?.kind === "account" ? managesAccount(ctx, f.from, party) : f.from === party || managesParty(ctx.state, f.from, party);
+  const editable = f.source === "entity" && payerHolds;
   // The flow as stored goes out only when every side of it is someone the viewer can see.
   const sides = [f.from, f.to, f.fallback ?? "", f.link ?? "", ...(f.splits ?? []).map((s) => s.to), ...(f.shares ?? []).flatMap((s) => [s.party, s.from ?? ""])].filter((id) => id !== "");
-  const seen = sides.every((id) => visible(ctx, viewer, id));
+  const seen = sides.every((id) => sideSeen(ctx, viewer, id));
+  // What the party acts on by its id: a flow theirs to change, or a lease of a property they own a share of, which they may end (`lease_end`).
+  const actsOn = editable || (f.kind === "rent" && f.link !== undefined && shareOf(ctx.state, f.link, party) > 0);
   return {
-    id: f.id,
+    // Nor, unless they act on it by it, does its id, which can name whom it's for (`pay:<job>`, an author's `bill_jess_household`).
+    id: seen || actsOn ? f.id : opaqueId(f.id),
     label: f.label,
     kind: f.kind,
     from: sideName(ctx, viewer, f.from),
@@ -312,9 +352,9 @@ function flowView(hooks: FinanceHooks, ctx: ReadContext, viewer: Viewer, party: 
     // A one-off flow entity that has run is over. Its run isn't marked ended: a derived flow (autopay) keeps its id while its one-off date moves on.
     status: run.ended || (f.schedule.once !== undefined && run.done > 0 && own(ctx.state.entities, f.id)?.kind === "flow") ? "ended" : f.status,
     category: f.category ?? null,
-    link: f.link && own(ctx.state.entities, f.link) && visible(ctx, viewer, f.link) ? { id: f.link, name: nameFor(ctx, viewer, f.link) } : null,
+    link: linkView(ctx, viewer, f.link),
     payer: fromSide && visible(ctx, viewer, f.from) ? f.from : null,
-    editable: f.source === "entity" && payerHolds,
+    editable,
     source: f.source,
     done: run.done,
     missed: run.missed,
@@ -329,12 +369,6 @@ function signedFor(ctx: ReadContext, f: Flow, party: EntityId, cents: number): n
   if (mine(f.from) && !mine(f.to)) return -cents;
   if (!mine(f.from) && mine(f.to)) return cents;
   return 0;
-}
-
-function householdOf(ctx: ReadContext, party: EntityId): EntityId | null {
-  if (kindIs(ctx.registry, ctx.world, own(ctx.state.entities, party)?.kind ?? "", "household")) return party;
-  const rel = own(ctx.state.entities, party)?.relations.find((r) => r.type === MEMBER_OF && kindIs(ctx.registry, ctx.world, own(ctx.state.entities, r.to)?.kind ?? "", "household"));
-  return rel?.to ?? null;
 }
 
 function householdView(hooks: FinanceHooks, ctx: ReadContext, viewer: Viewer, household: EntityId, flows: readonly Flow[]): HouseholdView {
@@ -388,16 +422,17 @@ export function buildFinanceView(hooks: FinanceHooks, ctx: ReadContext, party: E
   const shownAccounts = level >= 3 ? mine : mine.filter((id) => classOf(ctx, id) === "cash" || id === firstTransactional);
   const accounts = shownAccounts.map((id) => accountView(ctx, viewer, party, id, level, detail));
   const cash = mine.filter((id) => classOf(ctx, id) === "cash" && rightsOf(ctx.state, id, party)?.spend).reduce((a, id) => a + shown(ctx, id), 0);
-  const flows = level >= 3 && featureFor(ctx, party, "flows") ? allFlows(hooks, ctx).filter((f) => flowTouches(ctx, f, party)) : [];
+  const flows = featureFor(ctx, party, "flows") ? allFlows(hooks, ctx).filter((f) => flowTouches(ctx, viewer, f, party)) : [];
   const flowViews = flows.map((f) => flowView(hooks, ctx, viewer, party, f));
   const now = ctx.state.clock;
   const upcoming: UpcomingLine[] = [];
-  for (const f of flows) {
-    const v = flowViews.find((x) => x.id === f.id);
+  for (const [i, f] of flows.entries()) {
+    const v = flowViews[i];
     const next = f.status === "active" && !flowRunOf(ctx.state, f.id).ended ? nextOf(ctx, f, 31 * DAY) : null;
     if (next === null || !v) continue;
     const cents = v.cents === null ? 0 : signedFor(ctx, f, party, v.cents);
-    upcoming.push({ at: when(ctx, next), clock: next, label: f.label, cents, flow: f.id, account: own(ctx.state.entities, f.from)?.kind === "account" ? f.from : null });
+    // The account paying it, where the viewer can see it: money into theirs can come from an account of someone they can't.
+    upcoming.push({ at: when(ctx, next), clock: next, label: f.label, cents, flow: v.id, account: own(ctx.state.entities, f.from)?.kind === "account" && visible(ctx, viewer, f.from) ? f.from : null });
   }
   for (const a of accounts) {
     const cycle = cycleOf(ctx.state, a.id);
@@ -442,7 +477,7 @@ export function buildFinanceView(hooks: FinanceHooks, ctx: ReadContext, party: E
     .flatMap((id) => journalOf(ctx.state, id))
     .sort((a, b) => b.at - a.at || (a.id < b.id ? 1 : -1))
     .slice(0, 10)
-    .map((j) => journalLine(ctx, viewer, j));
+    .map((j) => journalLine(ctx, viewer, party, j));
   const notesRaw = own(objOf(sliceOf(ctx.state, "economy").notes), party);
   const notes = player ? [] : (Array.isArray(notesRaw) ? notesRaw : []).slice(-NOTES_CAP).map((n) => objOf(n)).reverse().map((n) => ({ at: when(ctx, numOf(n.at)), text: strOf(n.text) }));
   const household = kind === "household" ? party : householdOf(ctx, party);
@@ -459,7 +494,7 @@ export function buildFinanceView(hooks: FinanceHooks, ctx: ReadContext, party: E
     household: household && featureOn(level, "households", tog) ? householdView(hooks, ctx, viewer, household, allFlows(hooks, ctx)) : null,
     recent,
     notes,
-    payPrefs: level >= 3 && partyKindOf(ctx, party) === "person" ? tiersOf(ctx, party) : [],
+    payPrefs: featureFor(ctx, party, "payment_prefs") && partyKindOf(ctx, party) === "person" ? tiersOf(ctx, party) : [],
   };
   for (const section of hooks.views) {
     const extra = section(ctx, party, view, viewer.pov);
@@ -470,8 +505,20 @@ export function buildFinanceView(hooks: FinanceHooks, ctx: ReadContext, party: E
     if (extra.upcoming && view.overview) view.overview.upcoming = [...view.overview.upcoming, ...extra.upcoming].sort((a, b) => a.clock - b.clock).slice(0, 20);
     if (extra.alerts && view.overview) view.overview.alerts.push(...extra.alerts);
   }
-  // A business's accounts its owner manages without a role of their own on them are on its page, not among theirs.
-  for (const b of view.businesses) b.managed = level >= 3 ? b.accounts.filter((id) => !mine.includes(id) && managesAccount(ctx, id, party)).map((id) => accountView(ctx, viewer, party, id, level, detail)) : [];
+  for (const b of view.businesses) {
+    // An account of the business the viewer can't see stays off its page, by id as much as in full.
+    b.accounts = b.accounts.filter((id) => visible(ctx, viewer, id));
+    // Its accounts its owner manages without a role of their own on them are on its page, not among theirs.
+    b.managed = level >= 3 ? b.accounts.filter((id) => !mine.includes(id) && managesAccount(ctx, id, party)).map((id) => accountView(ctx, viewer, party, id, level, detail)) : [];
+  }
+  // What each account's controls may draw on, by the actions' own rules: its autopay's sources, and what may back a standing payment from it.
+  const listed = [...view.accounts, ...view.businesses.flatMap((b) => b.managed)];
+  const pays = (id: EntityId): boolean => traitsOf(ctx, id)?.pays === true && mayPayFrom(ctx, party, id);
+  for (const a of listed) {
+    const others = listed.filter((x) => x.id !== a.id).map((x) => x.id);
+    a.autopayFrom = a.autopay !== null && a.manages ? others.filter((id) => autopaySourceProblem(ctx, party, a.id, id) === null) : [];
+    a.fallbacks = pays(a.id) ? others.filter((id) => pays(id) && fallsBackOn(ctx, a.id, id)) : [];
+  }
   return view;
 }
 

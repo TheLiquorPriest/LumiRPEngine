@@ -1,11 +1,13 @@
 // The player's money view names everyone outside the world in words (DESIGN §25.11): the
 // foundation's and the modules' own payees ("Federal tax", "Property upkeep", "Sales tax
 // (Michigan)"), an outside employer by its place, a managed property's tenants, and an author's
-// own payees as written. Each journal line names the other side of its own payment (§25.6): who it
-// paid, or who paid it. Port Alder chats on the fake host, as Play → Money decodes them.
+// own payees as written, naming only what the player may see. Each journal line names the other
+// side of its own payment (§25.6): who it paid, or who paid it. Port Alder chats on the fake host,
+// as Play → Money decodes them.
 
 import { describe, expect, test } from "bun:test";
 import type { FinanceView } from "../../src/shared/finance";
+import { endableLeases } from "../../src/packs/economy/ui/layout";
 import { invoiceAction, tradeAction, transferAction } from "../../src/packs/economy/ui/requests";
 import { MoneyChat } from "../support/money-chat";
 
@@ -58,6 +60,58 @@ describe("the player's money view names outside payees in words", () => {
   });
 });
 
+describe("an outside name says only what the player may see", () => {
+  test("someone hidden from the player, named inside an outside key, reads as someone, as they would by id", async () => {
+    const chat = await MoneyChat.start({ secret: ["danny_okafor"] });
+    for (const [label, to] of [["By id", "danny_okafor"], ["To his bank", "bank:danny_okafor"], ["As his employer", "employer:danny_okafor"]]) {
+      expect(await chat.play({ action: "flow_create", params: { label, from: "acct_pov_checking", to, amount: 500, every: "once", once: "2026-09-14T10:00" } })).toContain("done");
+    }
+    await chat.timelapse(1440);
+    const view = await chat.hub();
+    const lines = view.accounts.flatMap((a) => a.transactions);
+    for (const label of ["By id", "To his bank", "As his employer"]) {
+      expect(view.flows.find((f) => f.label === label)).toMatchObject({ to: "someone", spec: null });
+      expect(lines.find((t) => t.memo === label)?.counterparty).toBe("someone");
+    }
+    expect(JSON.stringify((await chat.state()).panels["economy.money"])).not.toContain("Danny");
+  });
+});
+
+describe("an id or a link that would name someone hidden reaches the player under a stand-in", () => {
+  test("Danny's job, where Marcus can't see him, is the shop's Mechanic: its payroll links it by title and employer under the id its row on the shop's page has, and nothing on his money names Danny", async () => {
+    const chat = await MoneyChat.start({ pov: "marcus_delgado", secret: ["danny_okafor"] });
+    const view = await chat.hub();
+    const pay = view.flows.find((f) => f.label === "Pay: Mechanic" && f.to === "someone");
+    expect(pay?.link?.name).toBe("Mechanic at Alder Automotive");
+    const row = view.businesses.find((b) => b.id === "alder_automotive_co")?.employees.find((j) => j.worker === "an employee");
+    expect(row?.id).toBe(pay?.link?.id ?? "");
+    expect(view.overview?.upcoming.some((u) => u.flow === pay?.id)).toBe(true);
+    expect(JSON.stringify((await chat.state()).panels["economy.money"]).toLowerCase()).not.toContain("danny");
+    // The GM's views name him.
+    const gm = await chat.party("marcus_delgado");
+    expect(gm.flows.find((f) => f.id === "pay:job_danny_mechanic")?.link).toEqual({ id: "job_danny_mechanic", name: "Danny's job at Alder Automotive" });
+  });
+
+  test("Jess's share into the household account is coming up on Helen's money, where she can't see Jess, without Jess's account", async () => {
+    // Her job is named for her, so it's secret with her.
+    const chat = await MoneyChat.start({ pov: "helen_kowalczyk", secret: ["jess_kowalczyk", "job_jess_kowalczyk"] });
+    const upcoming = (await chat.hub()).overview?.upcoming ?? [];
+    const share = upcoming.filter((u) => u.label === "Household share, 1A");
+    expect(share.length).toBeGreaterThan(0);
+    expect(share.map((u) => [u.account, u.flow?.startsWith("hidden:")])).toEqual(share.map(() => [null, true]));
+    expect(JSON.stringify(upcoming).toLowerCase()).not.toContain("jess");
+  });
+
+  test("a lease of a tenant Helen can't see keeps its id, as she ends it by its id from her building's page", async () => {
+    const chat = await MoneyChat.start({ pov: "helen_kowalczyk", secret: ["danny_okafor"] });
+    const view = await chat.hub();
+    const harbor = view.properties.find((p) => p.id === "prop_harbor_114");
+    if (!harbor) throw new Error("Helen's building isn't on her money");
+    expect(view.flows.find((f) => f.id === "bill_danny_rent")).toMatchObject({ from: "someone", spec: null });
+    expect(endableLeases(view, harbor)).toContain("bill_danny_rent");
+  });
+});
+
 describe("each journal line names the other side of its own payment", () => {
   const SHOP = "acct_marcus_shop";
   const CHECKING = "acct_pov_checking";
@@ -103,6 +157,24 @@ describe("each journal line names the other side of its own payment", () => {
     expect(others(shop, SHOP, "Invoice: Trailer brakes")).toEqual(["Jordan Ellis"]);
     expect(others(shop, SHOP, /^Payroll/)).toEqual(expect.arrayContaining(["Jordan Ellis", "Danny Okafor"]));
   });
+
+  test("on the Kowalczyks' joint account each of them reads the other's share in by name, and their own as no one", async () => {
+    const JOINT = "acct_kowalczyk_household";
+    for (const [pov, mine, theirs, them] of [
+      ["helen_kowalczyk", "Household share", "Household share, 1A", "Jess Kowalczyk"],
+      ["jess_kowalczyk", "Household share, 1A", "Household share", "Helen Kowalczyk"],
+    ] as const) {
+      const chat = await MoneyChat.start({ pov });
+      // Both pay their shares in on the 1st of October; a timelapse stops where something interrupts it, so time passes until they're in.
+      let view = await chat.hub();
+      for (let i = 0; i < 12 && others(view, JOINT, theirs).length === 0; i++) {
+        await chat.timelapse(4 * 1440);
+        view = await chat.hub();
+      }
+      expect(others(view, JOINT, mine)).toEqual([null]);
+      expect(others(view, JOINT, theirs)).toEqual([them]);
+    }
+  }, 120_000);
 
   test("a trade names the market it was made on, never its key", async () => {
     const chat = await MoneyChat.start();

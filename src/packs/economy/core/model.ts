@@ -8,6 +8,7 @@
 
 import type { JsonObject } from "../../../shared/json";
 import type { EntityId } from "../../../shared/ids";
+import { hashParts } from "../../../shared/hash";
 import type { Band } from "../../../shared/tables";
 import type { WorldDoc } from "../../../shared/world";
 import {
@@ -33,11 +34,13 @@ import {
   type RoleRights,
 } from "../../../shared/finance";
 import { EXTERNAL_ACCOUNT_PREFIX } from "../../../engine/events";
-import { bandOfJson, labelOf, numOf, objOf, sliceOf, strOf, own, rowOf } from "../../../engine/pack-kit";
+import { bandOfJson, numOf, objOf, sliceOf, strOf, own, rowOf } from "../../../engine/pack-kit";
 import type { ReadContext } from "../../../engine/registry";
 import type { Rng } from "../../../engine/rng";
 import type { WorldState } from "../../../engine/state";
-import { placeOfEntity } from "../../../engine/scope";
+import { kindIs, placeOfEntity } from "../../../engine/scope";
+import { MEMBER_OF } from "../../../engine/selector";
+import { canSeeEntity, canSeePlace } from "../../../engine/visibility";
 
 /** The outside account corrections post against (a ✎ cash fix, a GM money edit): money they add or remove comes from or goes to it, so the books still balance. Shown as "Correction". */
 export const CORRECTION_ACCOUNT = `${EXTERNAL_ACCOUNT_PREFIX}correction`;
@@ -77,18 +80,45 @@ const REGIONAL_TAXES: Readonly<Record<string, string>> = { sales: "Sales tax", p
 /** Outside keys that name who they are after the kind (`bank:<institution>`), and what each reads as when nothing follows. */
 const NAMED_OUTSIDE: Readonly<Record<string, string>> = { bank: "Bank", atm: "Cash machine", employer: "Employer" };
 
-/** Outside keys that say what kind of party they are and what they're about (`seller:<property>`), by the kind. */
-const OUTSIDE_KINDS: Readonly<Record<string, string>> = { buyer: "Buyer", seller: "Seller", market: "Market", tenant: "Outside tenant" };
+/** Outside keys that say what kind of party they are and what they're about (`seller:<property>`), by the kind. A purchase's mortgage pays its money out to the purchase's closing (`closing:<property>`). */
+const OUTSIDE_KINDS: Readonly<Record<string, string>> = { buyer: "Buyer", seller: "Seller", market: "Market", tenant: "Outside tenant", closing: "Closing" };
+
+/** What a view reads names with: who may see what, as well as the books. */
+export type ViewBooks = Pick<ReadContext, "world" | "state" | "tables" | "registry">;
 
 /**
- * An outside side of a payment as a person reads it (DESIGN §25.11): the foundation's and the
- * modules' own payees in words, a regional tax with its region ("Sales tax (Michigan)"), a bank, a
- * cash machine's bank and an outside employer by the name or place they were given, a property's
- * outside buyer, seller or tenant and a holding's market by what they are, and any other name, an
- * author's or a player's, as written. A journal line keeps an outside name with its `_` read as
- * spaces, so a region or a place is found either way.
+ * Whether `viewer` (the player's POV; null for the GM) may see what an id in an outside name names
+ * (`rosa` in `bank:rosa`, `blind_tiger` in `employer:blind_tiger`): someone or somewhere in the
+ * world as visibility allows, and never a story track; undefined for an id that names no one and
+ * nowhere, as an author's or a player's own words don't.
  */
-export function outsideName(books: TableBooks, raw: string): string {
+function seenIn(books: ViewBooks, viewer: EntityId | null, id: string): boolean | undefined {
+  if (own(books.state.entities, id)) return viewer === null || canSeeEntity(books.registry, books.world, books.state, viewer, id);
+  if (own(books.world.places, id)) return viewer === null || canSeePlace(books.registry, books.world, books.state, viewer, id);
+  return own(books.world.tracks, id) ? false : undefined;
+}
+
+/** Words in an outside name as `viewer` reads them: what they name in the world, as the viewer may see it (`unseen` where they can't), else the words as written. */
+function wordsFor(books: ViewBooks, viewer: EntityId | null, words: string, unseen: string): string {
+  const id = words.trim().replace(/ +/g, "_");
+  const seen = seenIn(books, viewer, id);
+  if (seen === undefined) return words.replace(/_/g, " ").trim();
+  const entity = own(books.state.entities, id);
+  if (!seen) return entity ? "someone" : unseen;
+  return entity?.name ?? own(books.world.places, id)?.name ?? unseen;
+}
+
+/**
+ * An outside side of a payment as `viewer` (the player's POV; null for the GM) reads it (DESIGN
+ * §25.11): the foundation's and the modules' own payees in words, a regional tax with its region
+ * ("Sales tax (Michigan)"), a bank, a cash machine's bank and an outside employer by the name or
+ * place they were given, a property's outside buyer, seller or tenant and a holding's market by
+ * what they are, and any other name, an author's or a player's, as written. What such a name says
+ * that's in the world reads as the viewer may see it: someone they can't see as "someone", a place
+ * they can't see as the plain word ("Employer"), a story track never. A journal line keeps an
+ * outside name with its `_` read as spaces, so a region or a place is found either way.
+ */
+export function outsideName(books: ViewBooks, raw: string, viewer: EntityId | null): string {
   const bare = raw.startsWith(EXTERNAL_ACCOUNT_PREFIX) ? raw.slice(EXTERNAL_ACCOUNT_PREFIX.length) : raw;
   const known = own(OUTSIDE_NAMES, bare);
   if (known !== undefined) return known;
@@ -103,9 +133,31 @@ export function outsideName(books: TableBooks, raw: string): string {
   }
   const named = own(NAMED_OUTSIDE, head);
   // A bank with no name of its own is `bank:bank` (`bankSide`).
-  if (named !== undefined) return tail === "" || tail === head ? named : labelOf(books, tail.replace(/ +/g, "_"));
+  if (named !== undefined) return tail === "" || tail === head ? named : wordsFor(books, viewer, tail, named);
   const kind = tail === "" ? undefined : own(OUTSIDE_KINDS, head);
-  return kind ?? bare.replace(/_/g, " ");
+  return kind ?? wordsFor(books, viewer, bare, "someone");
+}
+
+/** Whether an outside name says, by id, someone or somewhere `viewer` can't see, so a payment's spec that carries it would show them. */
+export function outsideHidden(books: ViewBooks, raw: string, viewer: EntityId | null): boolean {
+  if (viewer === null) return false;
+  const bare = raw.startsWith(EXTERNAL_ACCOUNT_PREFIX) ? raw.slice(EXTERNAL_ACCOUNT_PREFIX.length) : raw;
+  const ids = (bare.includes(":") ? bare.split(":").slice(1) : [bare]).map((p) => p.trim().replace(/ +/g, "_"));
+  return ids.some((id) => seenIn(books, viewer, id) === false);
+}
+
+/** Whether `viewer` (the player's POV; null for the GM) can't see `id`, someone in the world: their views carry neither its name nor its id (DESIGN §7). */
+export function hiddenFrom(books: ViewBooks, viewer: EntityId | null, id: string): boolean {
+  return viewer !== null && own(books.state.entities, id) !== undefined && !canSeeEntity(books.registry, books.world, books.state, viewer, id);
+}
+
+/**
+ * The id a player's view sends in place of one that names someone they can't see (a job's
+ * `job_danny_mechanic`, its payroll's `pay:job_danny_mechanic`): a digest of it, the same on every
+ * view, so the view's own references to it still meet.
+ */
+export function opaqueId(id: string): string {
+  return `hidden:${hashParts(id).slice(0, 12)}`;
 }
 
 export function bankSide(institution: string): string {
@@ -344,6 +396,23 @@ export function managesParty(state: Readonly<WorldState>, party: EntityId, who: 
 export function managesAccount(books: Books, account: EntityId, who: EntityId): boolean {
   if (!classOf(books, account)) return false;
   return ownersOf(books.state, account).some((o) => ROLE_RIGHTS[o.role].manage && (o.party === who || managesParty(books.state, o.party, who)));
+}
+
+/**
+ * Who owes a credit account (DESIGN §25.1): the holders it counts against (an owner, a joint
+ * owner), not one who only spends on it or manages it; whoever holds it, when no role counts it.
+ */
+export function debtorsOf(state: Readonly<WorldState>, account: EntityId): EntityId[] {
+  const owners = ownersOf(state, account);
+  const owing = owners.filter((o) => ROLE_RIGHTS[o.role].worth);
+  return [...new Set((owing.length > 0 ? owing : owners).map((o) => o.party))];
+}
+
+/** The household a party is, or belongs to (a `member_of` relation to one); null for none. */
+export function householdOf(ctx: Pick<ReadContext, "registry" | "world" | "state">, party: EntityId): EntityId | null {
+  const isHousehold = (id: string): boolean => kindIs(ctx.registry, ctx.world, own(ctx.state.entities, id)?.kind ?? "", "household");
+  if (isHousehold(party)) return party;
+  return own(ctx.state.entities, party)?.relations.find((r) => r.type === MEMBER_OF && isHousehold(r.to))?.to ?? null;
 }
 
 /** A party's share of an entity's worth, in percent. */
