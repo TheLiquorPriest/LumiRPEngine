@@ -3,6 +3,7 @@
 // as their dashboards draw them and as the first weeks play.
 import { describe, expect, test } from "bun:test";
 import type { PostEvent } from "../../../src/shared/ledger";
+import type { WorldDoc } from "../../../src/shared/world";
 import { calendarOf, clockOfLocal } from "../../../src/engine/calendar";
 import { materializeAll } from "../../../src/engine/materialize";
 import { createRegistry } from "../../../src/engine/registry-impl";
@@ -18,11 +19,12 @@ import { startState, trialBalance } from "../support";
 const reg = createRegistry(ALL_PACKS);
 
 /** The starter in play with every account open; `without` takes entities out, to compare a party's worth against. */
-function portAlder(without: readonly string[] = []): Working {
+function portAlder(without: readonly string[] = [], patch: (world: WorldDoc) => void = () => undefined): Working {
   const make = STARTER_WORLDS.modern_slice_of_life;
   if (!make) throw new Error("no Port Alder starter");
   const world = make("pa", "Port Alder");
   for (const id of without) delete world.entities[id];
+  patch(world);
   const w = new Working(reg, world, startState(world));
   materializeAll(reg, w, world.pov, "run");
   return w;
@@ -99,6 +101,23 @@ describe("Port Alder's holdings and property", () => {
     // Marcus's own view, as the GM sees it, still shows all of it.
     const his = w.ctx.query("economy.finance")(w.ctx, "marcus_delgado", false).properties.find((p) => p.id === "prop_birch_lane_12");
     expect([his?.place, his?.mortgage?.id, his?.owners.map((o) => o.name)]).toEqual(["12 Birch Lane", "acct_marcus_mortgage", ["Marcus Delgado"]]);
+  });
+
+  test("on a property the POV owns with someone it can't see, that owner shows as someone, with no id", () => {
+    const w = portAlder([], (world) => {
+      // Priya is someone the POV knows only once it meets her.
+      const priya = world.entities.priya_nair;
+      if (priya) priya.visibility = "known_by";
+      for (const e of Object.values(world.entities)) e.relations = e.relations.filter((r) => !(r.type === "knows" && r.to === "priya_nair"));
+    });
+    const pov = w.world.pov;
+    w.apply({ type: "set", entity: "prop_birch_lane_12", field: "owners", value: [{ party: pov, role: "owner", share: 50 }, { party: "priya_nair", role: "owner", share: 50 }] });
+    const house = w.ctx.query("economy.finance")(w.ctx, pov, true).properties.find((p) => p.id === "prop_birch_lane_12");
+    expect(house?.owners.map((o) => [o.party, o.name, o.share])).toEqual([
+      [pov, w.state.entities[pov]?.name, 50],
+      [null, "someone", 50],
+    ]);
+    expect(JSON.stringify(house)).not.toContain("riya");
   });
 
   test("the POV's pickup, ATV and boat count in its net worth at their used prices, so it reads comfortable, not broke", () => {

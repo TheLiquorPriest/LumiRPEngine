@@ -657,8 +657,8 @@ function ownerLines(api: FinanceApi, ctx: ReadContext, id: EntityId, viewer: Ent
   const shares = worthShares(owners);
   return owners.map((o) => {
     const hidden = viewer === ctx.world.pov && own(ctx.state.entities, o.party) !== undefined && !canSeeEntity(ctx.registry, ctx.world, ctx.state, viewer, o.party);
-    // An owner the viewer can't see goes unnamed, and without their id.
-    return { party: hidden ? "" : o.party, name: hidden ? "an owner" : labelOf(ctx, o.party), role: o.role, share: Math.round((shares[o.party] ?? 0) * 100) / 100 };
+    // An owner the viewer can't see goes as the foundation's views send one: "someone", with no id.
+    return { party: hidden ? null : o.party, name: hidden ? "someone" : labelOf(ctx, o.party), role: o.role, share: Math.round((shares[o.party] ?? 0) * 100) / 100 };
   });
 }
 
