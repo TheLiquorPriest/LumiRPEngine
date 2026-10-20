@@ -522,6 +522,35 @@ describe("GM view → Money: each control is one edit", () => {
   });
 });
 
+describe("a world's money switches open their controls below Money 3", () => {
+  test("at Money 2 with standing payments, payment preferences and cards switched on, each of their controls plays; at the defaults, none does", async () => {
+    const tiers: PayTier[] = [{ use: "cash", max: 2000 }, { use: "debit" }];
+    const chat = await MoneyChat.start({ features: { flows: true, payment_prefs: true, cards: true } });
+    await chat.level(2);
+    const view = await chat.hub();
+    expect(view.level).toBe(2);
+    expect(view.features).toEqual(expect.arrayContaining(["flows", "payment_prefs", "cards"]));
+    expect(await chat.play(flowCreateAction(gymForm(CHECKING), chat.currency))).toContain("done");
+    expect((await chat.hub()).flows.find((f) => f.label === "Harbor Gym")?.editable).toBe(true);
+    expect(await chat.play(payPrefsAction(tiers))).toContain("done");
+    expect((await chat.hub()).payPrefs).toEqual(tiers);
+    expect((await chat.hub()).cards.find((c) => c.id === DEBIT)?.state).toBe("active");
+    expect(await chat.play(cardAction(DEBIT, "freeze"))).toContain("done");
+    expect((await chat.hub()).cards.find((c) => c.id === DEBIT)?.state).toBe("frozen");
+
+    const plain = await MoneyChat.start();
+    await plain.level(2);
+    const two = await plain.hub();
+    expect(two.features.filter((f) => f === "flows" || f === "payment_prefs" || f === "cards")).toEqual([]);
+    expect([two.flows, two.cards, two.payPrefs]).toEqual([[], [], []]);
+    const entities = [...(await plain.gm()).fields.keys()];
+    for (const body of [flowCreateAction(gymForm(CHECKING), plain.currency), payPrefsAction(tiers), cardAction(DEBIT, "freeze")]) expect(await plain.play(body)).toContain("didn't happen");
+    const gm = await plain.gm();
+    expect([...gm.fields.keys()]).toEqual(entities);
+    expect(gm.values.get(DEBIT)?.state ?? "active").toBe("active");
+  });
+});
+
 describe("the hub shows what each Money level shows", () => {
   test("the POV at Money 4, 3, 2 and 1: credit and the full books, then every account and flow, then cash and one account, then a band", async () => {
     const chat = await MoneyChat.start();

@@ -21,11 +21,12 @@ export interface GmMoney {
   values: Map<string, Record<string, unknown>>;
 }
 
-/** What a test changes in the world before the chat starts: fields added to places (a cash machine, a branch) and set on entities, entities the player never sees, and who the POV is. */
+/** What a test changes in the world before the chat starts: fields added to places (a cash machine, a branch) and set on entities, entities the player never sees, the world's money switches (Build's Custom toggles) and who the POV is. */
 export interface WorldPatch {
   places?: Record<string, JsonObject>;
   entities?: Record<string, JsonObject>;
   secret?: string[];
+  features?: Record<string, boolean>;
   pov?: string;
 }
 
@@ -45,7 +46,7 @@ export class MoneyChat {
     const secret = new Set(patch.secret ?? []);
     const touched = [...new Set([...Object.keys(patch.entities ?? {}), ...secret])];
     const edits = [...Object.entries(patch.places ?? {}).map(([id, fields]) => ({ collection: "places", id, fields, hidden: false })), ...touched.map((id) => ({ collection: "entities", id, fields: patch.entities?.[id] ?? {}, hidden: secret.has(id) }))];
-    if (edits.length > 0 || patch.pov !== undefined) {
+    if (edits.length > 0 || patch.features !== undefined || patch.pov !== undefined) {
       const draft = rig.body(await rig.send({ type: "lre.editor", op: "get", worldId, base: null }));
       const doc = isRecord(draft.draft) ? draft.draft : {};
       for (const { collection, id, fields, hidden } of edits) {
@@ -54,6 +55,14 @@ export class MoneyChat {
         if (!isRecord(item)) throw new Error(`no ${collection} ${id}`);
         const value = { ...item, ...(hidden ? { visibility: "secret" } : {}), fields: { ...(isRecord(item.fields) ? item.fields : {}), ...fields } };
         rig.body(await rig.send({ type: "lre.editor", op: "put", worldId, base: draft.base, collection, id, value }));
+      }
+      if (patch.features !== undefined) {
+        const packs = isRecord(doc.packs) ? doc.packs : {};
+        const economy = isRecord(packs.economy) ? packs.economy : {};
+        const config = isRecord(economy.config) ? economy.config : {};
+        const features = isRecord(config.features) ? config.features : {};
+        const value = { ...economy, config: { ...config, features: { ...features, ...patch.features } } };
+        rig.body(await rig.send({ type: "lre.editor", op: "put", worldId, base: draft.base, collection: "packs", id: "economy", value }));
       }
       if (patch.pov !== undefined) rig.body(await rig.send({ type: "lre.editor", op: "set", worldId, base: draft.base, part: "meta", value: { pov: patch.pov } }));
       rig.body(await rig.send({ type: "lre.world", op: "commit", worldId, base: draft.base }));
