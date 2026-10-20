@@ -3,12 +3,13 @@
 // event payloads carry no userId; handlers receive it as the second argument) and maps the port's
 // calls onto `lumiverse-spindle-types` 0.6.49 plus the local augmentation.
 
-import type { PromptBlockDTO, PromptBlockSnapshotDTO, WorldBookEntryCreateDTO } from "lumiverse-spindle-types";
+import type { GenerationReasoningOverrideDTO, PromptBlockDTO, PromptBlockSnapshotDTO, WorldBookEntryCreateDTO } from "lumiverse-spindle-types";
 import type { HostSpindleAPI, RegexScriptInput } from "../spindle-augment";
 import type { HostPresetBlockInput } from "./host";
 import type { JsonObject, JsonValue } from "../shared/json";
 import { isRecord } from "../shared/json";
 import type { ChatId, UserId } from "../shared/ids";
+import type { ReasoningChoice } from "../shared/settings";
 import type { Answer, Answers } from "../engine/decide";
 import type {
   ActivatedEntry,
@@ -211,6 +212,16 @@ export const DIAGNOSTICS_LOG = "diagnostics/backend.log";
 /** Each user's own diagnostics, in their user storage: lines about their chats. */
 export const USER_DIAGNOSTICS_LOG = "diagnostics.log";
 
+/**
+ * A call's effort as the host's per-request reasoning override: none for `inherit` (the
+ * connection's reasoning binding, else the user's setting, stands), the off-switch for `off`, else
+ * that effort, which the host maps to the provider's own field.
+ */
+export function reasoningOverride(effort: ReasoningChoice | undefined): GenerationReasoningOverrideDTO | undefined {
+  if (effort === undefined || effort === "inherit") return undefined;
+  return effort === "off" ? { source: "off" } : { source: "custom", apiReasoning: true, effort };
+}
+
 /** How long a section token count may take before the estimate stands in (a tokenizer still loading takes seconds). */
 const TOKEN_COUNT_MS = 1000;
 
@@ -386,16 +397,19 @@ export function createSpindleHost(): HostPort {
     },
     models: {
       async quiet(request, userId, signal) {
-        const parameters: Record<string, unknown> = { max_tokens: request.maxTokens };
+        // The host merges these over the connection's preset parameters, so one left out stays the connection's own.
+        const parameters: Record<string, unknown> = { ...request.params, max_tokens: request.maxTokens };
         if (request.json) parameters.response_format = { type: "json_object" };
         // The host reads `parameters.model` as a per-request model override.
         if (request.model) parameters.model = request.model;
+        const reasoning = reasoningOverride(request.effort);
         const raw = await spindle.generate.quiet({
           type: "quiet",
           messages: request.messages,
           parameters,
           ...(request.connectionId ? { connection_id: request.connectionId } : {}),
           ...(request.tools && request.tools.length > 0 ? { tools: request.tools.map((t) => ({ name: t.name, description: t.description, parameters: t.parameters })) } : {}),
+          ...(reasoning ? { reasoning } : {}),
           userId,
           signal,
         });

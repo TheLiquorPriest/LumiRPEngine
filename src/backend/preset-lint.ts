@@ -6,7 +6,8 @@
 import type { DryRun } from "./host";
 
 export interface PresetCaveat {
-  code: "preset_json_ledger" | "preset_low_max_tokens";
+  /** `preset_lint_pending`: the dry run is still running; `preset_lint_failed`: it failed, so the preset's warnings aren't known. */
+  code: "preset_json_ledger" | "preset_low_max_tokens" | "preset_lint_pending" | "preset_lint_failed";
   message: string;
 }
 

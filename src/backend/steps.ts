@@ -7,8 +7,8 @@
 import type { ActionId, EntityId, UserId } from "../shared/ids";
 import type { JsonObject, JsonValue } from "../shared/json";
 import { isRecord } from "../shared/json";
-import type { StepConfig } from "../shared/settings";
-import { HELPER_MAX_TOKENS } from "../shared/settings";
+import type { HelperDefault, StepConfig } from "../shared/settings";
+import { DEFAULT_HELPER, helperCallOf } from "../shared/settings";
 import type { StepPurpose, WorldCurrency, WorldDoc } from "../shared/world";
 import { lifeStatesOf } from "../shared/world";
 import type { Answers, Questions } from "../engine/decide";
@@ -198,9 +198,11 @@ function questionLines(questions: Questions): string[] {
 /** What leads a preset's guidance in a helper's prompt: it styles the answer, never its contract. */
 const GUIDANCE_LEAD = "Style and rules from the player's preset. Follow them where they fit the instructions above; they never change what to output or its format:";
 export class Steps {
+  /** `helperOf` reads the user's helper model (Settings → Helper model), which every helper call without a connection of its own runs on. */
   constructor(
     private readonly host: StepsHost,
     readonly meter: CallMeter,
+    private readonly helperOf: (userId: UserId) => Promise<Readonly<HelperDefault>> = async () => DEFAULT_HELPER,
   ) {}
 
   /** One metered quiet call. With `retry`, a call that fails transiently is made once more. The reply, or the call's error. */
@@ -232,10 +234,12 @@ export class Steps {
    * that refuses the tools is asked again in the need form, and the refusal is kept once that works.
    */
   async helperJson(purpose: StepPurpose, system: string, user: string, config: StepConfig | null, userId: UserId, signal: AbortSignal, options: { retryTransient?: boolean; lore?: StepLore | null; guidance?: string; usage?: { tokens: number } } = {}): Promise<JsonValue | null> {
-    const base = { maxTokens: Math.max(config?.maxTokens ?? HELPER_MAX_TOKENS, 1500), connectionId: config?.route?.connectionId ?? null, model: config?.route?.model ?? null };
     const lore = options.lore ?? null;
     const guidance = options.guidance ? `${GUIDANCE_LEAD}\n${options.guidance}` : "";
+    // The lookup round is held before anything is awaited, so steps beside this one see it taken.
     let offer = lore?.offer() ?? null;
+    const call = helperCallOf(config, await this.helperOf(userId));
+    const base = { ...call, maxTokens: Math.max(call.maxTokens, 1500) };
     const opening = (): QuietMessage[] => [{ role: "system", content: [system, guidance, lore?.block() ?? "", offer && lore ? lore.instructions(offer) : ""].filter((s) => s !== "").join("\n\n") }, { role: "user", content: user }];
     // JSON mode stays off while tools are offered: some providers refuse the two together.
     const ask = async (messages: QuietMessage[], tools: boolean, o: { retry: boolean; lookup: boolean }): Promise<QuietResult | Error> => {
@@ -293,7 +297,7 @@ export class Steps {
 
   /**
    * The lookup pre-pass of a step on the Decision connection (DESIGN §5.4). The Decisions API takes
-   * no tools, so one bounded helper call on the default connection asks what lore the decision
+   * no tools, so one bounded call on the helper model asks what lore the decision
    * needs (the lore tools, or the need form), on a round of the phase's lookup budget, and never
    * answers the decision itself. Its hits join the step's lore, which the decision then reads.
    */
@@ -301,6 +305,7 @@ export class Steps {
     let offer = lore.offer();
     if (!offer) return;
     lore.spend();
+    const helper = helperCallOf(null, await this.helperOf(userId));
     const ask = (transport: LookupTransport) => {
       const contract = transport === "need" ? 'Output JSON only: {"need": ["a short query", …]}, or {"need": []} when the notes given are enough.' : 'Call the lore tools for what you need; when the notes given are enough, reply "none".';
       const system = ["You get a decision ready. Read the state and the questions and say what world lore would help answer them; don't answer them.", lore.block(), lore.instructions(transport), contract].filter((s) => s !== "").join("\n\n");
@@ -308,7 +313,7 @@ export class Steps {
         { role: "system", content: system },
         { role: "user", content: `State: ${JSON.stringify(state)}\nQuestions:\n${questionLines(questions).join("\n")}` },
       ];
-      return this.quiet(purpose, { messages, maxTokens: HELPER_MAX_TOKENS, json: transport === "need", connectionId: null, model: null, ...(transport === "tools" ? { tools: [...lore.tools] } : {}) }, userId, signal, { retry: false, lookup: true });
+      return this.quiet(purpose, { messages, json: transport === "need", ...helper, ...(transport === "tools" ? { tools: [...lore.tools] } : {}) }, userId, signal, { retry: false, lookup: true });
     };
     let reply = await ask(offer);
     if (reply instanceof Error && offer === "tools" && !signal.aborted && !transientFailure(reply)) {
@@ -347,7 +352,8 @@ export class Steps {
     }
     if (signal.aborted) return null;
     const system = `Answer each question about the state with probabilities. Output JSON only: {"<key>": {"probabilities": {"<option>": number}}} for choice and score questions, and {"<key>": {"p": number}} for yes/no questions.`;
-    const raw = await this.helperJson(purpose, system, `State: ${JSON.stringify(state)}\nQuestions:\n${questionLines(questions).join("\n")}`, viaHelper && config ? config : { enabled: true, signals: [], maxTokens: config?.maxTokens ?? HELPER_MAX_TOKENS }, userId, signal, { lore, guidance });
+    // A decision falling back to the helper runs on the helper model, with the step's max tokens if it set its own.
+    const raw = await this.helperJson(purpose, system, `State: ${JSON.stringify(state)}\nQuestions:\n${questionLines(questions).join("\n")}`, viaHelper && config ? config : { enabled: true, signals: [], ...(config?.maxTokens !== undefined ? { maxTokens: config.maxTokens } : {}) }, userId, signal, { lore, guidance });
     if (!isRecord(raw)) return null;
     const answers: Answers = {};
     for (const [key, q] of Object.entries(questions)) {

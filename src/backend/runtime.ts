@@ -12,7 +12,7 @@ import type { ChatRun, EventRef, GenerationKind, LedgerEvent, PostEvent, Timelap
 import { LEDGER_NAMESPACE } from "../shared/ledger";
 import { neutralizeMacros } from "../shared/macros";
 import type { ExtractionType, StepConfig, UserSettings } from "../shared/settings";
-import { EXTRACTION_TYPES, stepLoreOf } from "../shared/settings";
+import { EXTRACTION_TYPES, helperCallOf, stepLoreOf } from "../shared/settings";
 import type { ChipAction, ContextGeneration, ContextView, LoreStepTrace, StateView } from "../shared/state-view";
 import type { ActionDef, AdjudicationDef, SectionTemplate, StepPurpose, WorldDoc } from "../shared/world";
 import { formatMoney, offersAction } from "../shared/world";
@@ -113,6 +113,8 @@ const TURN_ONLY_SLOTS: Readonly<Record<string, true>> = { outcome: true, montage
  * or above the real tokenizers); a larger count is ignored and the estimate stands in.
  */
 const TOKEN_COUNT_CAP = 4;
+/** How long Settings → Caveats waits on the preset lint's dry run before saying it's still running (the frontend gives a request 30 s). */
+const CAVEATS_WAIT_MS = 20_000;
 
 /** The chat's run as its metadata holds it (DESIGN §4.1), or null for a chat that plays no world. */
 export function readRun(meta: JsonObject): ChatRun | null {
@@ -517,6 +519,8 @@ export class Runtime implements TurnHooks {
   private readonly lastWorldChat = new Map<UserId, ChatId>();
   /** The D32 preset caveats each chat's last dry run found (shown in the inspector). */
   private readonly presetWarnings = new Map<ChatId, string[]>();
+  /** Settings → Caveats' preset lint by `user \0 chat \0 preset \0 preset revision \0 settings revision`: done, or its dry run still running. */
+  private readonly caveatRuns = new Map<string, Promise<PresetCaveat[]>>();
   /** The sections each chat's last interceptor run sent to the preset's outlets, with the preset revision it read (`preset \0 revision`). */
   private readonly routedLast = new Map<ChatId, { preset: string; slots: Set<string> }>();
   /** Per chat, a preset revision whose outlets a delivery check didn't find some routed sections at, and those sections: the world places them again (DESIGN §6.8). */
@@ -556,7 +560,7 @@ export class Runtime implements TurnHooks {
     this.jsonHiding = new JsonHiding(this.host, async (userId) => (await this.settings.get(userId)).hideJsonBlocks, async (worldId, userId) => (await this.worlds.index(worldId, userId)) !== null);
     this.presets = new PresetBinding(this.host);
     this.meter = new CallMeter(this.host);
-    this.steps = new Steps(this.host, this.meter);
+    this.steps = new Steps(this.host, this.meter, async (userId) => (await this.settings.get(userId)).helper);
     this.toolSupport = new ToolSupport(this.host);
     this.minds = { host: this.host, registry: this.registry, steps: this.steps, settings: this.settings, presets: this.presets };
     // Snapshots from another build never apply (the build defines LRE_BUILD_ID; tests fold as "dev").
@@ -1323,10 +1327,10 @@ export class Runtime implements TurnHooks {
     if (proposals.length < known.length) this.host.log("info", `[LumiRPEngine] read ${messageId.slice(0, 8)}: dropped ${known.length - proposals.length} proposal(s) carrying an unrevealed secret`, userId);
     this.host.log("info", `[LumiRPEngine] read ${messageId.slice(0, 8)}: ${proposals.length} proposal(s), ${decisions.length} npc decision(s), contradiction ${contradicted ? "yes" : "no"}, ${choices.flat().length} choice(s), ${budget.spent} post call(s)`, userId);
     const learning = await this.settings.learningOf(input.userId);
-    // D4 learning counts on the connection that read the reply. A chip-triggered read
-    // (Re-read, Retry read) or a Continue without a pre phase was read on the user's default
-    // connection, the one Settings shows.
-    const connection = extractRun?.config.route?.connectionId ?? pre?.connectionId ?? (await this.activeConnectionId(userId));
+    // D4 learning counts on the connection that read the reply: the extract step's own, else the
+    // helper model's. A chip-triggered read (Re-read, Retry read) or a Continue without a pre phase
+    // was read on the user's default connection, the one Settings shows.
+    const connection = helperCallOf(extractRun?.config, (await this.settings.get(userId)).helper).connectionId ?? pre?.connectionId ?? (await this.activeConnectionId(userId));
     const auto: JsonObject[] = [];
     const confirm: JsonObject[] = [];
     // A pair's regard moves by at most the channel cap a reply, so later proposals for it are cut
@@ -1936,17 +1940,37 @@ export class Runtime implements TurnHooks {
 
   /**
    * The D32 preset lint (DESIGN §13) for Settings → Caveats: a dry run of the world chat the user has
-   * open, else the one they last played; none when there is neither.
+   * open, else the one they last played; none when there is neither. A dry run is a whole prompt
+   * assembly, which takes long on a long chat, so its finding is kept per chat, preset revision and
+   * settings revision, and the wait for it is bounded by `waitMs`: past that the answer says the check
+   * is still running, and the run carries on for the next ask. A failed run reads as a caveat too,
+   * and is run again on the next ask.
    */
-  async presetCaveats(userId: UserId): Promise<PresetCaveat[]> {
+  async presetCaveats(userId: UserId, waitMs = CAVEATS_WAIT_MS): Promise<PresetCaveat[]> {
     const open = await this.host.chats.active(userId).catch(() => null);
     const chatId = open && (await this.runOf(open, userId)) ? open : this.lastWorldChat.get(userId);
     if (!chatId) return [];
+    const preset = (await this.presets.current(chatId, userId)).preset;
+    const key = `${userId}\u0000${chatId}\u0000${preset?.id ?? ""}\u0000${preset?.revision ?? ""}\u0000${this.settings.revision(userId)}`;
+    let run = this.caveatRuns.get(key);
+    if (!run) {
+      run = this.host
+        .dryRun(chatId, userId)
+        .then((assembly) => this.lintOf(chatId, assembly, userId))
+        .catch((error: unknown): PresetCaveat[] => {
+          const message = error instanceof Error ? error.message : String(error);
+          this.host.log("warn", `[LumiRPEngine] preset lint: ${message}`, userId);
+          this.caveatRuns.delete(key);
+          return [{ code: "preset_lint_failed", message: `The preset check couldn't build a test prompt for this chat (${message.slice(0, 200)}), so its warnings aren't known. Open Caveats again to retry.` }];
+        });
+      lruSet(this.caveatRuns, key, run, 64);
+    }
+    const pending = Promise.withResolvers<PresetCaveat[]>();
+    const timer = setTimeout(() => pending.resolve([{ code: "preset_lint_pending", message: "The preset check is still building a test prompt for this chat, which takes a while on a long chat. Open Caveats again in a moment." }]), waitMs);
     try {
-      return await this.lintOf(chatId, await this.host.dryRun(chatId, userId), userId);
-    } catch (error) {
-      this.host.log("warn", `[LumiRPEngine] preset lint: ${error instanceof Error ? error.message : String(error)}`, userId);
-      return [];
+      return await Promise.race([run, pending.promise]);
+    } finally {
+      clearTimeout(timer);
     }
   }
 

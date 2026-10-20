@@ -1,20 +1,22 @@
-// Settings → Model use and Settings → Steps and connections (DESIGN §5.3, §5.4, D25).
-// Model use leads with the preset (Lean, Standard, Full, Custom) and what each one means for you,
-// then the call meter; budgets per phase (calls, wall clock and lore lookups) and the engine token
-// budget sit under Advanced. Steps and connections has a card per step: enabled, provider,
-// connection, model and max tokens (≥1,500 for reasoning models, DESIGN §5.3), with signals and
-// lore (the policy, its tokens and how lookups reach the model) under Advanced.
+// Settings → Helper model, Settings → Model use and Settings → Steps and connections (DESIGN §5.3,
+// §5.4, D25). Helper model sets the connection, model and reasoning effort every helper call runs
+// on unless its step picks its own. Model use leads with the preset (Lean, Standard, Full, Custom)
+// and what each one means for you, then the call meter; budgets per phase (calls, wall clock and
+// lore lookups) and the engine token budget sit under Advanced. Steps and connections has a card per
+// step: enabled, provider, connection, model, reasoning effort and max tokens (several thousand for
+// reasoning models, DESIGN §5.3), with signals and lore (the policy, its tokens and how lookups reach
+// the model) under Advanced. Each card's summary names the connection, model and effort it runs on.
 
 import { useEffect, useState } from "preact/hooks";
 import type { JsonObject } from "../../shared/json";
 import type { ModelUsePresetId } from "../../shared/ids";
 import { PROSE_STEPS } from "../../shared/lore";
-import type { LorePolicy, LoreTransport, ModelUseSettings, StepConfig } from "../../shared/settings";
-import { PRE_REPLY_MAX_MS, stepConfigOf, stepLoreOf } from "../../shared/settings";
+import type { HelperDefault, LorePolicy, LoreTransport, ModelUseSettings, ReasoningChoice, SamplingParams, StepConfig, StepRoute } from "../../shared/settings";
+import { helperCallOf, PRE_REPLY_MAX_MS, REASONING_CHOICES, SAMPLING_PARAMS, stepConfigOf, stepLoreOf } from "../../shared/settings";
 import type { CallMeterView } from "../../shared/state-view";
 import type { StepPurpose } from "../../shared/world";
 import { useApp } from "../app";
-import { Badge, Disclosure, Empty, Field, HostModelPicker, HostSwitch, NumberStepper, Section, Seg } from "../components";
+import { Badge, Disclosure, Empty, Field, HostModelPicker, HostSwitch, List, ListRow, NumberStepper, Section, Seg } from "../components";
 import { Icon } from "../icons";
 
 const PRESETS: { value: ModelUsePresetId; label: string }[] = [
@@ -35,8 +37,8 @@ const PRESET_PLAIN: Record<ModelUsePresetId, string> = {
 /** Each preset's exact ceiling; the test in test/backend/presets.test.ts holds it to the preset's steps and budgets. */
 export const PRESET_NOTE: Record<ModelUsePresetId, string> = {
   lean: "Narrator + up to 2 model steps a turn, and no lore lookups: helpers get the lore their inputs find. The floor: it doesn't meet “a model decides” on its own. The call meter shows each turn's real count.",
-  standard: "Narrator + up to 4 model steps a turn, plus up to 3 lore lookups. The call meter shows each turn's real count.",
-  full: "Narrator + up to 9 model steps a turn, plus up to 5 lore lookups. The call meter shows each turn's real count.",
+  standard: "Narrator + up to 4 model steps a turn, plus up to 7 lore lookups. The call meter shows each turn's real count.",
+  full: "Narrator + up to 9 model steps a turn, plus up to 10 lore lookups. The call meter shows each turn's real count.",
   custom: "Your own steps, signals, providers, lore and budgets. The count depends on the steps you enable; the call meter shows it live.",
 };
 
@@ -90,6 +92,10 @@ const PHASES = ["pre", "post"] as const;
 const PHASE_LABEL: Record<(typeof PHASES)[number], string> = { pre: "Before the reply", post: "After the reply" };
 /** Lumiverse waits at most 120 s for a turn's plan, so the before-the-reply steps get what planning leaves of it. */
 const WALL_CLOCK_MAX: Record<(typeof PHASES)[number], number> = { pre: PRE_REPLY_MAX_MS, post: 120_000 };
+/** Below this, a reasoning model can spend the whole reply thinking and answer nothing. */
+const LOW_TOKENS = 4096;
+
+export const EFFORT_LABEL: Record<ReasoningChoice, string> = { inherit: "Connection's own", off: "Off", auto: "Auto", minimal: "Minimal", low: "Low", medium: "Medium", high: "High", max: "Max", xhigh: "Extra high" };
 
 /** The preset cards: one choice from four, each saying what it means before its exact ceiling. */
 function PresetCards(props: { value: ModelUsePresetId; busy: boolean; onChange(preset: ModelUsePresetId): void }) {
@@ -135,10 +141,10 @@ export function ModelUseSection(props: { modelUse: ModelUseSettings; meter: Call
           {PHASES.map((phase) => (
             <div key={phase} class="lre-set-group" data-lre-budget={phase}>
               <div class="lre-h">{PHASE_LABEL[phase]}</div>
-              <NumberStepper label="Calls" value={modelUse.budgets[phase].calls} min={0} max={20} integer disabled={props.busy} onChange={(calls) => props.patch({ modelUse: { preset: "custom", budgets: { [phase]: { calls } } } })} />
+              <NumberStepper label="Calls" value={modelUse.budgets[phase].calls} min={0} integer disabled={props.busy} onChange={(calls) => props.patch({ modelUse: { preset: "custom", budgets: { [phase]: { calls } } } })} />
               <NumberStepper label="Wall clock (ms)" value={modelUse.budgets[phase].ms} min={500} max={WALL_CLOCK_MAX[phase]} step={500} integer disabled={props.busy} onChange={(ms) => props.patch({ modelUse: { preset: "custom", budgets: { [phase]: { ms } } } })} />
               {phase === "pre" ? <p class="lre-small lre-muted" style={{ margin: 0 }}>At most {PRE_REPLY_MAX_MS.toLocaleString("en-US")} ms: Lumiverse waits 120 s for a turn's plan, and planning needs the rest.</p> : null}
-              <NumberStepper label="Lore lookups" value={modelUse.budgets[phase].lookup?.calls ?? 0} min={0} max={10} integer disabled={props.busy} onChange={(calls) => props.patch({ modelUse: { preset: "custom", budgets: { [phase]: { lookup: { calls, ms: modelUse.budgets[phase].lookup?.ms ?? 0 } } } } })} />
+              <NumberStepper label="Lore lookups" value={modelUse.budgets[phase].lookup?.calls ?? 0} min={0} integer disabled={props.busy} onChange={(calls) => props.patch({ modelUse: { preset: "custom", budgets: { [phase]: { lookup: { calls, ms: modelUse.budgets[phase].lookup?.ms ?? 0 } } } } })} />
               <NumberStepper label="Lookups may start within (ms)" value={modelUse.budgets[phase].lookup?.ms ?? 0} min={0} max={120000} step={500} integer disabled={props.busy} onChange={(ms) => props.patch({ modelUse: { preset: "custom", budgets: { [phase]: { lookup: { calls: modelUse.budgets[phase].lookup?.calls ?? 0, ms } } } } })} />
             </div>
           ))}
@@ -147,7 +153,7 @@ export function ModelUseSection(props: { modelUse: ModelUseSettings; meter: Call
             <p class="lre-small lre-muted" style={{ margin: 0 }}>
               How much of the prompt the engine's own sections may take.
             </p>
-            <NumberStepper label="Sections" value={modelUse.tokens.sections} min={100} max={8000} step={50} integer disabled={props.busy} onChange={(sections) => props.patch({ modelUse: { preset: "custom", tokens: { sections } } })} />
+            <NumberStepper label="Sections" value={modelUse.tokens.sections} min={100} step={100} integer disabled={props.busy} onChange={(sections) => props.patch({ modelUse: { preset: "custom", tokens: { sections } } })} />
           </div>
         </Disclosure>
       </Section>
@@ -200,42 +206,159 @@ function CallMeter(props: { meter: CallMeterView }) {
   );
 }
 
-/** A step card's change as a settings patch: the card's whole config, dropping absent optional fields, under Custom. */
+/** A step card's change as a settings patch: the card's whole config under Custom. What the step leaves to the helper model (effort, max tokens, each parameter) is deleted. */
 export function stepUpdatePatch(purpose: StepPurpose, config: StepConfig): JsonObject {
-  const out: JsonObject = { enabled: config.enabled, signals: [...config.signals] };
-  if (config.route) out.route = { provider: config.route.provider, connectionId: config.route.connectionId, model: config.route.model };
+  const out: JsonObject = { enabled: config.enabled, signals: [...config.signals], maxTokens: config.maxTokens ?? null };
+  if (config.route) {
+    const params: JsonObject = {};
+    for (const p of SAMPLING_PARAMS) params[p.key] = config.route.params?.[p.key] ?? null;
+    out.route = { provider: config.route.provider, connectionId: config.route.connectionId, model: config.route.model, effort: config.route.effort ?? null, params };
+  }
   if (config.template !== undefined) out.template = config.template;
-  if (config.maxTokens !== undefined) out.maxTokens = config.maxTokens;
   if (config.lore) out.lore = { policy: config.lore.policy, tokens: config.lore.tokens, ...(config.lore.transport ? { transport: config.lore.transport } : {}) };
   return { modelUse: { preset: "custom", steps: { [purpose]: out } } };
 }
 
-type Connection = { id: string; name: string; model: string | null };
+export type Connection = { id: string; name: string; model: string | null };
 
-export function StepsSection(props: { modelUse: ModelUseSettings; patch(patch: JsonObject): void; busy: boolean }) {
+export function useConnections(): Connection[] {
   const app = useApp();
   const [connections, setConnections] = useState<Connection[]>([]);
   useEffect(() => {
     void app.host.connections().then(setConnections);
   }, []);
+  return connections;
+}
+
+/** Where a helper call runs, in words: the connection's name (or Lumiverse's default), and the model when one is known. */
+function placeOf(call: { connectionId: string | null; model: string | null }, connections: readonly Connection[]): string {
+  if (!call.connectionId) return "Lumiverse's default connection";
+  const c = connections.find((x) => x.id === call.connectionId);
+  const model = call.model ?? c?.model ?? null;
+  return `${c?.name ?? call.connectionId}${model ? ` · ${model}` : ""}`;
+}
+
+/** A call's parameters in a line: effort, max tokens and each sampling parameter it sets. */
+function paramsSummary(call: { effort: ReasoningChoice; maxTokens: number; params: SamplingParams }): string {
+  const set = SAMPLING_PARAMS.flatMap((p) => (call.params[p.key] !== undefined ? [`${p.label.toLowerCase()} ${String(call.params[p.key])}`] : []));
+  return [`effort ${EFFORT_LABEL[call.effort].toLowerCase()}`, `${call.maxTokens.toLocaleString("en-US")} max tokens`, ...set].join(" · ");
+}
+
+/** The helper model in a line: where it runs and its parameters (Settings home, the Steps page). */
+export function helperSummary(helper: Readonly<HelperDefault>, connections: readonly Connection[] = []): string {
+  return `${placeOf(helper, connections)} · ${paramsSummary(helper)}`;
+}
+
+function EffortSelect(props: { label: string; value: ReasoningChoice | ""; inheritLabel?: string; disabled: boolean; onChange(effort: ReasoningChoice | ""): void }) {
+  return (
+    <label class="lre-field">
+      <span class="label">{props.label}</span>
+      <select class="lre-input" value={props.value} disabled={props.disabled} onChange={(event) => props.onChange(REASONING_CHOICES.find((c) => c === event.currentTarget.value) ?? "")}>
+        {props.inheritLabel !== undefined ? <option value="">{props.inheritLabel}</option> : null}
+        {REASONING_CHOICES.map((c) => (
+          <option key={c} value={c}>
+            {EFFORT_LABEL[c]}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+}
+
+/** A number that may be left to someone else (the connection, or the helper model): a switch, and the number while it's set here. */
+function OptionalNumber(props: { label: string; otherLabel: string; value: number | undefined; min: number; max?: number; step: number; integer: boolean; fallback: number; disabled: boolean; onChange(next: number | undefined): void }) {
+  return (
+    <div class="lre-minds-limit">
+      <HostSwitch label={`${props.label}: ${props.otherLabel}`} checked={props.value === undefined} disabled={props.disabled} onChange={(other) => props.onChange(other ? undefined : props.fallback)} />
+      {props.value === undefined ? null : <NumberStepper label={props.label} value={props.value} min={props.min} max={props.max} step={props.step} integer={props.integer} disabled={props.disabled} onChange={props.onChange} />}
+    </div>
+  );
+}
+
+function ConnectionSelect(props: { value: string | null; connections: readonly Connection[]; firstLabel: string; help?: string; disabled: boolean; onChange(id: string | null): void }) {
+  return (
+    <label class="lre-field">
+      <span class="label">Connection</span>
+      <select class="lre-input" value={props.value ?? ""} disabled={props.disabled} onChange={(event) => props.onChange(event.currentTarget.value || null)}>
+        <option value="">{props.firstLabel}</option>
+        {props.connections.map((c) => (
+          <option key={c.id} value={c.id}>
+            {c.name}
+            {c.model ? ` — ${c.model}` : ""}
+          </option>
+        ))}
+      </select>
+      {props.help ? <span class="lre-field-help">{props.help}</span> : null}
+    </label>
+  );
+}
+
+/** Settings → Helper model: the connection, model and parameters every helper call runs with unless its step sets its own. */
+export function HelperSection(props: { helper: HelperDefault; patch(patch: JsonObject): void; busy: boolean }) {
+  const { helper, busy } = props;
+  const connections = useConnections();
+  const set = (next: JsonObject) => props.patch({ helper: next });
+  return (
+    <div class="lre-stack" data-lre-settings-page="helper">
+      <p class="lre-set-lead">Every call the engine makes to a model for itself (reading your actions and the reply, deciding for people, judging, minds and their memory, time skips, lore lookups) runs on the helper model, unless its card in Steps and connections sets its own. Picking a preset never changes it.</p>
+      <Section title="Connection and model">
+        <ConnectionSelect value={helper.connectionId} connections={connections} firstLabel="None: Lumiverse's default connection" help="None runs each call on the connection Lumiverse marks as your default, with that connection's model and settings." disabled={busy} onChange={(connectionId) => set({ connectionId, model: null })} />
+        {helper.connectionId ? (
+          <>
+            <HostModelPicker connectionId={helper.connectionId} value={helper.model ?? ""} label="Model" onChange={(model) => set({ model: model || null })} />
+            <span class="lre-field-help">Pick from the connection's models, or type one. Empty uses the connection's own model.</span>
+          </>
+        ) : null}
+      </Section>
+      <Section title="Parameters">
+        <EffortSelect label="Reasoning effort" value={helper.effort} disabled={busy} onChange={(effort) => set({ effort: effort === "" ? "inherit" : effort })} />
+        <span class="lre-field-help">Sent as Lumiverse's reasoning setting, which it turns into the provider's own (DeepSeek reads Low to High as High, Max and Extra high as Max). Connection's own leaves the connection's reasoning setting as it is.</span>
+        <NumberStepper label="Max tokens" value={helper.maxTokens} min={64} step={512} integer disabled={busy} onChange={(maxTokens) => set({ maxTokens })} />
+        {helper.maxTokens < LOW_TOKENS ? (
+          <div class="lre-set-warn" role="note">
+            <Icon name="alert" size={16} />
+            <span>Reasoning models think before they answer; below {LOW_TOKENS.toLocaleString("en-US")}, calls can come back empty.</span>
+          </div>
+        ) : null}
+        {SAMPLING_PARAMS.map((p) => (
+          <OptionalNumber key={p.key} label={p.label} otherLabel="the connection's own" value={helper.params[p.key]} min={p.min} max={p.max} step={p.step} integer={p.integer} fallback={p.fallback} disabled={busy} onChange={(value) => set({ params: { [p.key]: value ?? null } })} />
+        ))}
+        <span class="lre-field-help">A parameter left to the connection takes its preset's value. Lumiverse passes each one set here to the provider, which uses those it supports (Anthropic, for one, has no penalties). The Decisions API takes none of these: steps on it run with their connection's own settings.</span>
+      </Section>
+    </div>
+  );
+}
+
+export function StepsSection(props: { modelUse: ModelUseSettings; helper: HelperDefault; patch(patch: JsonObject): void; openHelper(): void; busy: boolean }) {
+  const connections = useConnections();
   const update = (purpose: StepPurpose, next: StepConfig) => props.patch(stepUpdatePatch(purpose, next));
   return (
     <div class="lre-stack" data-lre-settings-page="steps">
-      <p class="lre-set-lead">Each step is one small job a model can do, on the connection and model you choose. Changing a step makes your model use Custom.</p>
+      <p class="lre-set-lead">Each step is one small job a model can do. A helper step runs on the helper model, unless you set its own connection, model or parameters here. Changing a step makes your model use Custom.</p>
+      <List>
+        <ListRow icon="sliders" title="Helper model" subtitle={helperSummary(props.helper, connections)} chevron onClick={props.openHelper} />
+      </List>
       {(Object.keys(STEP_LABEL) as StepPurpose[]).map((purpose) => (
-        <StepCard key={purpose} purpose={purpose} config={stepConfigOf(props.modelUse.steps, purpose)} connections={connections} busy={props.busy} update={(next) => update(purpose, next)} />
+        <StepCard key={purpose} purpose={purpose} config={stepConfigOf(props.modelUse.steps, purpose)} helper={props.helper} connections={connections} busy={props.busy} update={(next) => update(purpose, next)} />
       ))}
     </div>
   );
 }
 
-function StepCard(props: { purpose: StepPurpose; config: StepConfig; connections: readonly Connection[]; busy: boolean; update(next: StepConfig): void }) {
+function StepCard(props: { purpose: StepPurpose; config: StepConfig; helper: HelperDefault; connections: readonly Connection[]; busy: boolean; update(next: StepConfig): void }) {
   const { purpose, config, busy, update } = props;
-  const route = config.route ?? { provider: purpose === "npc.choose" ? "decision" : "helper", connectionId: null, model: null };
-  const lowTokens = config.maxTokens !== undefined && config.maxTokens < 1500;
+  const route: StepRoute = config.route ?? { provider: purpose === "npc.choose" ? "decision" : "helper", connectionId: null, model: null };
+  const call = helperCallOf({ ...config, route }, props.helper);
+  const lowTokens = route.provider === "helper" && call.maxTokens < LOW_TOKENS;
   const lore = stepLoreOf(config);
-  const connection = route.connectionId ? (props.connections.find((c) => c.id === route.connectionId)?.name ?? route.connectionId) : "default connection";
-  const summary = config.enabled ? `${route.provider === "decision" ? "Decision" : "Helper"} · ${connection}${route.model ? ` · ${route.model}` : ""}` : "Off";
+  const where = route.provider === "decision" ? `Decision · ${route.connectionId ? placeOf(route, props.connections) : "the Decisions API's default"}` : `Helper · ${placeOf(call, props.connections)} · ${paramsSummary(call)}`;
+  const summary = config.enabled ? where : "Off";
+  const setParam = (key: keyof SamplingParams, value: number | undefined) => {
+    const params: SamplingParams = { ...route.params };
+    if (value === undefined) delete params[key];
+    else params[key] = value;
+    update({ ...config, route: { ...route, params } });
+  };
   return (
     <div class="lre-card lre-set-step" data-lre-step={purpose}>
       <Disclosure
@@ -259,7 +382,7 @@ function StepCard(props: { purpose: StepPurpose; config: StepConfig; connections
           {STEP_PLAIN[purpose]}
         </p>
         <HostSwitch label="Enabled" checked={config.enabled} disabled={busy} onChange={(enabled) => update({ ...config, enabled })} />
-        <Field label="Provider" help={route.provider === "decision" ? "Lumiverse's Decisions API; falls back to the helper if a call fails." : "A small JSON call on the connection below."}>
+        <Field label="Provider" help={route.provider === "decision" ? "Lumiverse's Decisions API, which takes no reasoning effort, max tokens or sampling parameters; if a call fails, the helper model answers instead." : "A small JSON call, on the helper model unless you set this step's own below."}>
           <Seg<"decision" | "helper">
             label="Provider"
             value={route.provider}
@@ -271,25 +394,24 @@ function StepCard(props: { purpose: StepPurpose; config: StepConfig; connections
             onChange={(provider) => update({ ...config, route: { ...route, provider } })}
           />
         </Field>
-        <label class="lre-field">
-          <span class="label">Connection</span>
-          <select class="lre-input" value={route.connectionId ?? ""} disabled={busy} onChange={(event) => update({ ...config, route: { ...route, connectionId: event.currentTarget.value || null, model: null } })}>
-            <option value="">Default (the chat's helper)</option>
-            {props.connections.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.name}
-                {c.model ? ` — ${c.model}` : ""}
-              </option>
-            ))}
-          </select>
-        </label>
+        <ConnectionSelect value={route.connectionId} connections={props.connections} firstLabel={route.provider === "decision" ? "The Decisions API's default" : `Use helper default (${placeOf(props.helper, props.connections)})`} disabled={busy} onChange={(connectionId) => update({ ...config, route: { ...route, connectionId, model: null } })} />
         {route.connectionId ? <HostModelPicker connectionId={route.connectionId} value={route.model ?? ""} label="Model" onChange={(model) => update({ ...config, route: { ...route, model: model || null } })} /> : null}
-        <NumberStepper label="Max tokens" value={config.maxTokens ?? null} min={64} max={32000} step={100} integer disabled={busy} onChange={(maxTokens) => update({ ...config, maxTokens })} />
-        {lowTokens ? (
-          <div class="lre-set-warn" role="note">
-            <Icon name="alert" size={16} />
-            <span>Reasoning models need about 1,500 or more; below that, calls can come back empty.</span>
-          </div>
+        {route.provider === "helper" ? (
+          <>
+            <EffortSelect label="Reasoning effort" value={route.effort ?? ""} inheritLabel={`Use helper default (${EFFORT_LABEL[props.helper.effort]})`} disabled={busy} onChange={(effort) => update({ ...config, route: { ...route, effort: effort === "" ? undefined : effort } })} />
+            <OptionalNumber label="Max tokens" otherLabel={`use helper default (${props.helper.maxTokens.toLocaleString("en-US")})`} value={config.maxTokens} min={64} step={512} integer fallback={props.helper.maxTokens} disabled={busy} onChange={(maxTokens) => update({ ...config, maxTokens })} />
+            {lowTokens ? (
+              <div class="lre-set-warn" role="note">
+                <Icon name="alert" size={16} />
+                <span>Reasoning models think before they answer and need several thousand; below {LOW_TOKENS.toLocaleString("en-US")}, calls can come back empty.</span>
+              </div>
+            ) : null}
+            <Disclosure summary="Sampling parameters">
+              {SAMPLING_PARAMS.map((p) => (
+                <OptionalNumber key={p.key} label={p.label} otherLabel={`use helper default (${String(props.helper.params[p.key] ?? "the connection's own")})`} value={route.params?.[p.key]} min={p.min} max={p.max} step={p.step} integer={p.integer} fallback={props.helper.params[p.key] ?? p.fallback} disabled={busy} onChange={(value) => setParam(p.key, value)} />
+              ))}
+            </Disclosure>
+          </>
         ) : null}
         <Disclosure summary="Advanced: signals and lore">
           <label class="lre-field">
@@ -313,7 +435,7 @@ function StepCard(props: { purpose: StepPurpose; config: StepConfig; connections
           <Field label="Lore">
             <Seg<LorePolicy> label="Lore" value={lore.policy} options={LORE_POLICY} disabled={busy} onChange={(policy) => update({ ...config, lore: { ...lore, policy } })} />
           </Field>
-          {lore.policy !== "none" ? <NumberStepper label="Lore tokens" value={lore.tokens} min={0} max={8000} step={50} integer disabled={busy} onChange={(tokens) => update({ ...config, lore: { ...lore, tokens } })} /> : null}
+          {lore.policy !== "none" ? <NumberStepper label="Lore tokens" value={lore.tokens} min={0} step={100} integer disabled={busy} onChange={(tokens) => update({ ...config, lore: { ...lore, tokens } })} /> : null}
           {lore.policy === "lookup" || lore.policy === "prefetch+lookup" ? (
             <Field label="Lookups by">
               <Seg<LoreTransport> label="Lookups by" value={lore.transport ?? "auto"} options={LORE_TRANSPORT} disabled={busy} onChange={(transport) => update({ ...config, lore: { ...lore, transport } })} />

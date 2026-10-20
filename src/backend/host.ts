@@ -7,6 +7,7 @@
 // as the handler's second argument.
 
 import type { JsonObject, JsonValue } from "../shared/json";
+import type { ReasoningChoice, SamplingParams } from "../shared/settings";
 import type { ChatId, GenerationId, MessageId, UserId } from "../shared/ids";
 import type { BackendToFrontend } from "../shared/protocol";
 import type { Answers, Questions } from "../engine/decide";
@@ -194,6 +195,10 @@ export interface QuietRequest {
   model: string | null;
   /** Tools the model may call instead of answering (lore lookups, DESIGN §5.4); absent: none. */
   tools?: QuietTool[];
+  /** How hard the model reasons (a step's or the helper model's effort); absent or `inherit`: the connection's own reasoning settings. */
+  effort?: ReasoningChoice;
+  /** Sampling parameters by the host's names; each left out is the connection's own (its preset's). */
+  params?: SamplingParams;
 }
 
 /** A tool a quiet call offers (the host's `ToolSchemaDTO`): its parameters as a JSON Schema. */

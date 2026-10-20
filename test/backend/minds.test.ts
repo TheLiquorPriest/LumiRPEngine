@@ -6,7 +6,7 @@
 import { describe, expect, test } from "bun:test";
 import type { JsonObject } from "../../src/shared/json";
 import type { LedgerEvent } from "../../src/shared/ledger";
-import { DEFAULT_MINDS_MEMORY, type MindMoment } from "../../src/shared/minds";
+import { DEFAULT_MINDS_MEMORY, MINDS_PRESETS, type MindMoment } from "../../src/shared/minds";
 import type { WorldDoc } from "../../src/shared/world";
 import { toChain } from "../../src/backend/ledger-io";
 import type { QuietRequest } from "../../src/backend/host";
@@ -211,8 +211,8 @@ describe("minds around a turn", () => {
     // Only being named scores, so the two named lead the ladder and Maddie comes last.
     const weights = { here: 0, nearby: 0, mentioned: 100, regard: 0, knows: 0, owner: 0, track: 0, roles: {}, rule: 0, pending: 0, band: { principal: 0, supporting: 0, background: 0 }, recent: 0 };
     const chatId = await alderChat(rig, { secrecy: "full", weights }, [...PEOPLE, "maddie_kowalczyk"]);
-    // Standard's Minds budget; the shared section budget roomy enough that Stance goes in.
-    rig.body(await rig.send({ type: "lre.settings.set", patch: { modelUse: { tokens: { sections: 4000 } } } }));
+    // A Minds budget the three minds overrun (Standard's before it rose); the shared section budget roomy enough that Stance goes in.
+    rig.body(await rig.send({ type: "lre.settings.set", patch: { modelUse: { tokens: { sections: 4000 } }, minds: { tokens: 600 } } }));
     expect((await rig.rt.settings.get(rig.host.userId)).minds.tokens).toBe(600);
     await rig.turn(chatId, "Morning, Danny. Morning, Priya.", "They look up.");
     expect(mindCalls(rig).length).toBe(3);
@@ -417,7 +417,7 @@ describe("the model-use presets' minds", () => {
     // Standard again: its limits and memory for Live alone, and still the player's own.
     rig.body(await rig.send({ type: "lre.settings.set", patch: { modelUse: { preset: "standard" } } }));
     s = await minds();
-    expect([s.enabled, s.liveLimit, s.refreshLimit, s.memoryLevels, s.tokens, s.prompts, s.memory]).toEqual([true, 3, 2, ["live"], 600, mine.prompts, mine.memory]);
+    expect([s.enabled, s.liveLimit, s.refreshLimit, s.memoryLevels, s.tokens, s.prompts, s.memory]).toEqual([true, 3, 2, ["live"], MINDS_PRESETS.standard.tokens, mine.prompts, mine.memory]);
   });
 });
 

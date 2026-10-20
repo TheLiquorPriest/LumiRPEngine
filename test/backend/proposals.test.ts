@@ -234,7 +234,7 @@ describe("Import and Refine proposals", () => {
     await finished(rig, "refine", worldId, { instructions: "Add a lighthouse keeper." });
     expect(asked.length).toBeGreaterThan(0);
     expect(asked.every((n) => n >= PROPOSAL_MAX_TOKENS)).toBe(true);
-    expect((rig.host.userLogs.get(rig.host.userId) ?? []).some((l) => l.startsWith("warn: [LumiRPEngine] brief helper reply was cut off at 6000 tokens"))).toBe(true);
+    expect((rig.host.userLogs.get(rig.host.userId) ?? []).some((l) => l.startsWith(`warn: [LumiRPEngine] brief helper reply was cut off at ${PROPOSAL_MAX_TOKENS} tokens`))).toBe(true);
   });
 
   test("a retry that fails too keeps the reason; retries only spend calls no chunk needs", async () => {

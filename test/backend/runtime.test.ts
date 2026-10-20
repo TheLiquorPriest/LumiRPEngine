@@ -7,6 +7,7 @@ import { loreOfEntry, slotOfEntry } from "../../src/backend/book";
 import type { HostBookEntryInput } from "../../src/backend/host";
 import { toChain } from "../../src/backend/ledger-io";
 import { describeProposal, playerReason } from "../../src/backend/runtime";
+import { defaultSettings } from "../../src/backend/settings-store";
 import { compactSpan, keepSummary, playerDrops, spanText, TIMELAPSE_ACTION } from "../../src/backend/view";
 import { UNSEEN_DROP } from "../../src/engine/player-events";
 import type { Rec } from "../../src/shared/ledger";
@@ -422,7 +423,7 @@ describe("backend runtime", () => {
     if (!isRecord(latest) || !Array.isArray(latest.sections)) throw new Error("no record");
     expect("candidates" in latest).toBe(false);
     const shown = latest.sections.flatMap((s) => (isRecord(s) && s.clipped === false && typeof s.tokens === "number" ? [s.tokens] : []));
-    expect(latest.budget).toEqual({ sections: 600, used: shown.reduce((sum, n) => sum + n, 0) });
+    expect(latest.budget).toEqual({ sections: defaultSettings().modelUse.tokens.sections, used: shown.reduce((sum, n) => sum + n, 0) });
     expect(latest.sections.some((s) => isRecord(s) && s.slot === "scene" && s.delivery === "verified")).toBe(true);
     expect(panel.warnings.some((w) => typeof w === "string" && /council|lore/i.test(w))).toBe(false);
     // Opening ran a dry-run assembly; it added nothing to the history.
@@ -466,7 +467,7 @@ describe("backend runtime", () => {
     rig.host.activeChat = chatId;
     const ledger = "[Ledger] Gold: 10. Carrying 1 items; newest: torch.\nEnd every reply with the updated ledger as JSON ledger:\n<json>{\"gold\": 10}</json>";
     rig.host.preset = { name: "Default", blocks: [{ id: "b1", name: "Main", content: "You are the narrator." }, { id: "b2", name: "Ledger (JSON)", content: ledger }], maxTokens: 800, model: "deepseek-v4-flash" };
-    const result = rig.body(await rig.send({ type: "lre.settings.get" }));
+    const result = rig.body(await rig.send({ type: "lre.settings.caveats" }));
     const caveats = Array.isArray(result.caveats) ? result.caveats.filter(isRecord) : [];
     expect(caveats.map((c) => c.code)).toEqual(["preset_json_ledger", "preset_low_max_tokens"]);
     expect(String(caveats[0]?.message)).toContain("“Default” has an enabled block “Ledger (JSON)”");
@@ -475,9 +476,10 @@ describe("backend runtime", () => {
     const panel = (await rig.rt.view(chatId, rig.host.userId)).panels["core.context"];
     if (!isRecord(panel) || !Array.isArray(panel.warnings)) throw new Error("no inspector panel");
     expect(panel.warnings.some((w) => typeof w === "string" && w.includes("Ledger (JSON)"))).toBe(true);
-    // A clean preset: no caveats.
+    // A clean preset (a new revision of it): no caveats.
     rig.host.preset = { name: "Default", blocks: [{ id: "b1", name: "Main", content: "Never output JSON; write prose." }], maxTokens: 4000, model: "deepseek-v4-flash" };
-    const clean = rig.body(await rig.send({ type: "lre.settings.get" }));
+    rig.host.presetRevision += 1;
+    const clean = rig.body(await rig.send({ type: "lre.settings.caveats" }));
     expect(clean.caveats).toEqual([]);
   });
 

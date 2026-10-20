@@ -20,10 +20,10 @@ export const ENTRY_MAX_CHARS = 1500;
 export const PROPOSALS_PER_CALL = 15;
 export const PROPOSALS_MAX = 120;
 /**
- * The least a proposal call may answer in, in tokens: up to 15 proposals with their fields (and a
- * reasoning model's thinking) don't fit the helper's 2,000, and a reply cut off there reads as no JSON.
+ * The least a proposal call may answer in, in tokens: up to 15 proposals with their fields, after a
+ * reasoning model's thinking, need more than a step's 8,192, and a reply cut off reads as no JSON.
  */
-export const PROPOSAL_MAX_TOKENS = 6000;
+export const PROPOSAL_MAX_TOKENS = 16_384;
 
 export type ProposalMode = "import" | "refine";
 

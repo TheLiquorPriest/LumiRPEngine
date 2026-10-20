@@ -62,6 +62,7 @@ const REQUEST_TYPES: Record<keyof ResultBodies, true> = {
   "lre.keep": true,
   "lre.settings.get": true,
   "lre.settings.set": true,
+  "lre.settings.caveats": true,
   "lre.editor": true,
   "lre.world": true,
   "lre.ui": true,
