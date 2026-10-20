@@ -18,12 +18,17 @@ import { Rig } from "../support/rig";
 const MIND = /You are the private mind of (.+?) in the roleplay world/;
 const MEMORY = /You keep the memory of (.+?) in the roleplay world/;
 
-/** Port Alder with Danny and Priya the only Live minds, both with the POV, each mind answering with its own plans. */
+/** Port Alder with Danny and Priya the only Live minds, both with the POV, each mind giving its own plans on its first call. */
 async function alderChat(rig: Rig, plans: Record<string, JsonObject[]>, money: number | null = null): Promise<string> {
+  const asked = new Set<string>();
   rig.host.quietReply = (req: QuietRequest) => {
     const system = req.messages[0]?.content ?? "";
     const mind = MIND.exec(system)?.[1];
-    if (mind) return JSON.stringify({ monologue: `${mind} thinks it over.`, depiction: `${mind} looks up`, intent: "settle up", reactions: [], plans: plans[mind] ?? [], mood: "calm" });
+    if (mind) {
+      const first = !asked.has(mind);
+      asked.add(mind);
+      return JSON.stringify({ monologue: `${mind} thinks it over.`, depiction: `${mind} looks up`, intent: "settle up", reactions: [], plans: first ? (plans[mind] ?? []) : [], mood: "calm" });
+    }
     if (MEMORY.test(system)) return JSON.stringify({ notes: [], commitments: [], resolved: [], plans: [], told: [] });
     return JSON.stringify({ proposals: [] });
   };
@@ -78,6 +83,11 @@ describe("a mind's plan to pay or lend someone", () => {
     expect(readCharacter(before, "danny_okafor").plans.map((p) => [p.kind, p.cents, p.with])).toEqual([["pay", 2000, ["priya_nair"]]]);
     expect(lend).toMatchObject({ cents: 100_000_000, with: ["danny_okafor"], status: "open" });
     if (!pay || !lend) throw new Error("no plans");
+    // Danny's memory, and his mind on the next turn, are told what he means to hand over.
+    const toldOf = (pattern: RegExp): string => rig.host.quietCalls.filter((c) => pattern.exec(c.messages[0]?.content ?? "")?.[1] === "Danny Okafor").map((c) => c.messages[1]?.content ?? "").join("\n");
+    expect(toldOf(MEMORY)).toContain("- Pay Priya back for the ferry tickets she covered, $20.00 (");
+    await rig.turn(chatId, "Anything else?", "Danny shrugs.");
+    expect(toldOf(MIND)).toContain("- Plan (pay): Pay Priya back for the ferry tickets she covered, $20.00, ");
 
     await timelapse(rig, chatId, 8 * 60);
     const { state } = await stateOf(rig, chatId);

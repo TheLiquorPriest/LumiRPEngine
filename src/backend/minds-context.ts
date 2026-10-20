@@ -9,6 +9,7 @@ import type { EntityId, MessageId, PlaceId } from "../shared/ids";
 import type { MindMoment, MindsCharacter, MindsMemoryConfig } from "../shared/minds";
 import { loreIsSecret } from "../shared/lore";
 import type { LoreEntryDef, WorldDoc } from "../shared/world";
+import { formatMoney } from "../shared/world";
 import { calendarOf, dateAt, dayPartAt, formatClock, formatHHMM, holidaysOn } from "../engine/calendar";
 import { cuesOf } from "../engine/cues";
 import { loreHeldBy, loreSearch } from "../engine/lore";
@@ -252,7 +253,7 @@ function lifeLines(scope: MindScope, c: MindsCharacter): string[] {
   for (const a of agendaFor(world, state, who)) out.push(`- Your aim, ${a.label}: ${a.stageLabel}`);
   out.push(...secretLines(scope));
   for (const x of openCommitments(c).slice(0, scope.memory.commitments.show)) out.push(`- Commitment (${x.kind}${x.with.length > 0 ? ` with ${x.with.map((id) => nameOf(scope, id)).join(", ")}` : ""}): ${x.text}${x.due !== null ? `, due ${formatClock(cal, x.due)}` : ""}`);
-  for (const p of openPlans(c).slice(0, 8)) out.push(`- Plan (${p.kind}): ${p.what}, ${formatClock(cal, p.when.from)} to ${formatHHMM(dateAt(cal, p.when.to).minuteOfDay)}${p.where ? ` at ${nameOf(scope, p.where)}` : ""}${p.with.length > 0 ? ` with ${p.with.map((id) => nameOf(scope, id)).join(", ")}` : ""}`);
+  for (const p of openPlans(c).slice(0, 8)) out.push(`- Plan (${p.kind}): ${p.what}${p.cents !== undefined ? `, ${formatMoney(p.cents, world.currency)}` : ""}, ${formatClock(cal, p.when.from)} to ${formatHHMM(dateAt(cal, p.when.to).minuteOfDay)}${p.where ? ` at ${nameOf(scope, p.where)}` : ""}${p.with.length > 0 ? ` with ${p.with.map((id) => nameOf(scope, id)).join(", ")}` : ""}`);
   return out;
 }
 
@@ -354,7 +355,7 @@ export function memoryContext(scope: MindScope, turn: { user: string; reply: str
   const c = readCharacter(state, who);
   const cal = calendarOf(world);
   const commitments = openCommitments(c).map((x) => `- [${x.id}] ${x.kind}${x.with.length > 0 ? ` with ${x.with.map((id) => nameOf(scope, id)).join(", ")}` : ""}: ${x.text}`);
-  const plans = openPlans(c).map((p) => `- ${p.what} (${formatClock(cal, p.when.from)})`);
+  const plans = openPlans(c).map((p) => `- ${p.what}${p.cents !== undefined ? `, ${formatMoney(p.cents, world.currency)}` : ""} (${formatClock(cal, p.when.from)})`);
   const fit = new ContextFit(block("The turn just written", [storyVoice(scope), turn.left ? `${povLabel(scope)} left you partway through this turn: whatever the story tells after they left happened without you.` : "", turn.user.trim() !== "" ? `${povLabel(scope)} (the player character) wrote: ${clip(turn.user, RECALL_SIDE)}` : "", `Story: ${tail(readableReply(turn.reply, scope.hideJson), RECALL_SIDE * 2)}`].filter((l) => l !== "")));
   fit.add(`You are ${nameOf(scope, who)}. ${occasion(scope, placeOfEntity(state, who))}`);
   fit.add(c.summary !== "" ? block("Your story so far", [c.summary]) : "");
