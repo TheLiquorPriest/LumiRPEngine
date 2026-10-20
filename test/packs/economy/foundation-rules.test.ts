@@ -673,3 +673,20 @@ describe("an older world's bills migrate as the old money read them", () => {
     expect(other.ctx.query("economy.finance")(other.ctx, "you", false).flows.map((f) => f.id)).toContain("insurance:truck");
   });
 });
+
+describe("a cash advance costs its fee and its own interest", () => {
+  test("money moved from the card to checking is a cash advance: its fee at once, and the cash-advance rate from that day, grace or not", () => {
+    const w = setup();
+    const drawn = w.state.clock;
+    const r = resolveAction(reg, w, { action: "move_money", params: { from: "card", to: "checking", amount: 100_000 } }, createRng("advance"));
+    expect([r.ok, r.rejected]).toEqual([true, []]);
+    // 5 % of it, at least $10.
+    expect(w.state.accounts.card).toBe(-38_000 - 100_000 - 5_000);
+    lapse(w, 20); // the 3 Nov statement, the card's first, in grace
+    const statement = dataOf(w, "economy.statement").find((s) => s.account === "card");
+    const interest = dataOf(w, "economy.txn").filter((t) => t.memo === "Visa card cash advance interest");
+    const held = 100_000 * (Number(statement?.at) - drawn);
+    expect(interest.map((t) => t.lines)).toEqual([[{ account: "card", amount: -Math.round((held * 27) / 100 / (365 * 1440)) }]]);
+    expect(statement?.interest).toBe(Math.round((held * 27) / 100 / (365 * 1440)));
+  });
+});

@@ -157,8 +157,9 @@ function closeRevolving(run: Run, account: EntityId, at: number): void {
   const grace = !prev || prev.closing <= 0 || prev.paid >= prev.closing;
   const apr = prev?.penalty && p.penalty_apr_pct > 0 ? p.penalty_apr_pct : p.apr_pct;
   let interest = 0;
+  const daily = feature(ctx, account, "average_daily") && p.interest === "average_daily" && prev !== null;
   if (!grace && feature(ctx, account, "interest") && apr > 0) {
-    if (feature(ctx, account, "average_daily") && p.interest === "average_daily" && prev) {
+    if (daily && prev) {
       const owedOnAverage = Math.max(0, -averageBalance(ctx.state, account, at));
       const days = Math.max(1, (at - (accrualOf(ctx.state, account)?.from ?? prev.at)) / 1440);
       interest = Math.round((owedOnAverage * apr * days) / 100 / 365);
@@ -168,6 +169,13 @@ function closeRevolving(run: Run, account: EntityId, at: number): void {
     }
   }
   if (interest > 0) run.emit(asUnit(posting(bankLines(account, p.institution, interest), { memo: `${name} interest`, kind: "interest", category: "interest", at })));
+  // A cash advance has no grace: it runs the cash-advance rate from the day it was drawn (less the
+  // purchase rate the average daily balance already charged on it).
+  const acc = accrualOf(ctx.state, account);
+  const held = acc ? acc.advanced * (at - acc.from) - acc.advancedAt : 0;
+  const advanceApr = p.cash_advance_apr_pct - (!grace && daily && apr > 0 ? apr : 0);
+  const advanceInterest = feature(ctx, account, "interest") && advanceApr > 0 && held > 0 ? Math.round((held * advanceApr) / 100 / (365 * 1440)) : 0;
+  if (advanceInterest > 0 && run.emit(asUnit(posting(bankLines(account, p.institution, advanceInterest), { memo: `${name} cash advance interest`, kind: "interest", category: "interest", at }))).length > 0) interest += advanceInterest;
   let fees = 0;
   if (feature(ctx, account, "fees") && p.fees.annual > 0 && annualFeeDue(ctx, account, at)) {
     if (run.emit(asUnit(posting(bankLines(account, p.institution, p.fees.annual), { memo: `${name} annual fee`, kind: "fee", category: "annual_fee", at }))).length > 0) fees += p.fees.annual;

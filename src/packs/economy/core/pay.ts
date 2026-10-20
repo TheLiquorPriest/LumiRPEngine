@@ -605,10 +605,18 @@ export function mayUse(ctx: ReadContext, party: EntityId, account: EntityId, sid
   return classOf(ctx, account) === "cd" ? reject("locked", `${labelOf(ctx, account)} takes nothing in after it opens`) : null;
 }
 
+/** A cash advance's fee on a credit account, where fees run: the product's percentage of it, at least its minimum. */
+export function cashAdvanceFee(ctx: ReadContext, account: EntityId, cents: number): number {
+  const p = productOf(ctx, account);
+  if (!p || !traitsOf(ctx, account)?.revolving || !accountFeature(ctx, account, "fees")) return 0;
+  return p.fees.cash_advance_pct > 0 || p.fees.cash_advance_min > 0 ? Math.max(p.fees.cash_advance_min, Math.round((cents * p.fees.cash_advance_pct) / 100)) : 0;
+}
+
 /**
  * A posting between two accounts a party holds (a savings transfer, a card or loan payment). A
  * payment to credit pays at most what it owes (`cap`, or refused as an overpayment); money in a CD
  * or retirement account doesn't move out here, and nothing moves into a closed account or a CD.
+ * Money moved from a credit card into an account is a cash advance, with its fee posted first.
  */
 export function move(ctx: ReadContext, from: EntityId, to: EntityId, cents: number, memo: string, opts: { cap?: boolean; flow?: string; at?: number; unchecked?: boolean } = {}): LedgerEvent[] | Rejection {
   const s = ctx.state;
@@ -631,14 +639,18 @@ export function move(ctx: ReadContext, from: EntityId, to: EntityId, cents: numb
       c = owed;
     }
   }
-  if (!opts.unchecked && ctx.levelOf(party, "money") >= 2 && availableOf(ctx, from) < c) return reject("declined", `${labelOf(ctx, from)} doesn't have ${formatMoney(c, ctx.world.currency)}`);
+  const advance = fromTraits.revolving && !toTraits.liability;
+  const fee = advance ? cashAdvanceFee(ctx, from, c) : 0;
+  if (!opts.unchecked && ctx.levelOf(party, "money") >= 2 && availableOf(ctx, from) < c + fee) return reject("declined", `${labelOf(ctx, from)} doesn't have ${formatMoney(c + fee, ctx.world.currency)}`);
   const lines: PostingLine[] = [
     { account: from, amount: -c },
     { account: to, amount: c },
   ];
-  const out: LedgerEvent[] = [{ type: "post", lines, memo }];
+  const p = productOf(ctx, from);
+  const charged = fee > 0 ? posting([{ account: from, amount: -fee }, { account: bankSide(p?.institution ?? ""), amount: fee }], { memo: "Cash advance fee", kind: "fee", category: "cash_advance", ...(opts.at !== undefined ? { at: opts.at } : {}) }) : [];
+  const out: LedgerEvent[] = [...charged, { type: "post", lines, memo }];
   if (toTraits.liability) out.push({ type: FINANCE_EVENTS.cardPaid, data: { account: to, cents: c } });
-  out.push(txn(lines, { memo, kind: toTraits.liability ? "payment" : "transfer", category: "transfer", ...(opts.flow ? { flow: opts.flow } : {}), ...(opts.at !== undefined ? { at: opts.at } : {}) }));
+  out.push(txn(lines, { memo, kind: toTraits.liability ? "payment" : "transfer", category: advance ? "cash_advance" : "transfer", ...(opts.flow ? { flow: opts.flow } : {}), ...(opts.at !== undefined ? { at: opts.at } : {}) }));
   return asUnit(out);
 }
 

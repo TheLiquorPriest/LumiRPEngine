@@ -90,10 +90,14 @@ export function isOpened(state: Readonly<WorldState>, account: EntityId, opener:
   return opener !== null && Object.prototype.hasOwnProperty.call(state.materialized, `${opener}:money`);
 }
 
-/** The average daily balance accrual of an account: since when, the last change, and balance × minutes so far. */
-export function accrualOf(state: Readonly<WorldState>, account: EntityId): { from: number; at: number; sum: number; spent: number } | null {
+/**
+ * The average daily balance accrual of an account: since when, the last change, and balance ×
+ * minutes so far; with a credit account's purchases (for rewards) and cash advances (for their own
+ * interest) since its statement.
+ */
+export function accrualOf(state: Readonly<WorldState>, account: EntityId): { from: number; at: number; sum: number; spent: number; advanced: number; advancedAt: number } | null {
   const raw = objOf(own(objOf(sliceOf(state, "economy").adb), account));
-  return typeof raw.from === "number" ? { from: raw.from, at: numOf(raw.at, raw.from), sum: numOf(raw.sum), spent: numOf(raw.spent) } : null;
+  return typeof raw.from === "number" ? { from: raw.from, at: numOf(raw.at, raw.from), sum: numOf(raw.sum), spent: numOf(raw.spent), advanced: numOf(raw.advanced), advancedAt: numOf(raw.advanced_at) } : null;
 }
 
 /** The average balance over `[from, now]`, from the accrual (the current balance when nothing accrued). */
@@ -136,17 +140,23 @@ function fileLine(state: WorldState, ctx: ReadContext, account: EntityId, amount
   totals[account] = months;
 }
 
-function accrue(state: WorldState, account: EntityId, amount: number, at: number, purchase: boolean): void {
+function accrue(state: WorldState, account: EntityId, amount: number, at: number, use: "purchase" | "advance" | null): void {
   const adb = sliceRecord(state, "economy", "adb");
   const cur = objOf(adb[account]);
   const before = balance(state, account) - amount;
+  const spent = use === "purchase" ? -amount : 0;
+  // Cash advances, and each one's amount times the minutes into the period it was drawn, so its interest runs from that day.
+  const drawn = use === "advance" ? -amount : 0;
+  const since = typeof cur.from === "number" ? cur.from : at;
+  const advanced = numOf(cur.advanced) + drawn;
+  const advances: JsonObject = advanced !== 0 ? { advanced, advanced_at: numOf(cur.advanced_at) + drawn * (at - since) } : {};
   if (typeof cur.from !== "number") {
-    adb[account] = { from: at, at, sum: 0, spent: purchase ? -amount : 0 };
+    adb[account] = { from: at, at, sum: 0, spent, ...advances };
     return;
   }
   const last = numOf(cur.at, cur.from);
   const dt = Math.max(0, at - last);
-  adb[account] = { from: cur.from, at: Math.max(last, at), sum: numOf(cur.sum) + before * dt, spent: numOf(cur.spent) + (purchase ? -amount : 0) };
+  adb[account] = { from: cur.from, at: Math.max(last, at), sum: numOf(cur.sum) + before * dt, spent: numOf(cur.spent) + spent, ...advances };
 }
 
 function isCreditAccount(ctx: ReadContext, account: EntityId): boolean {
@@ -183,7 +193,9 @@ export const EVENTS: EventTypeDef<PackEvent>[] = [
       for (const [account, amount] of totals) {
         seq += 1;
         fileLine(state, ctx, account, amount, at, e.data, seq);
-        accrue(state, account, amount, at, e.data.kind === "purchase" && isCreditAccount(ctx, account));
+        // What a credit account's line was: a purchase earns rewards, a cash advance its own interest.
+        const use = !isCreditAccount(ctx, account) ? null : e.data.kind === "purchase" ? "purchase" : e.data.category === "cash_advance" && e.data.kind !== "fee" && amount < 0 ? "advance" : null;
+        accrue(state, account, amount, at, use);
       }
       mutableSlice(state, "economy").seq = seq;
     },

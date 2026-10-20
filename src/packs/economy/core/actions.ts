@@ -18,7 +18,7 @@ import { decide, type Decision } from "./credit";
 import type { OpenAccount } from "./module";
 import { isOpened, reject, spendOf } from "./journal";
 import { availableOf, balance, bankSide, canSpend, classOf, external, holdersOf, openerOf, productOf, rightsOf, statusOf, traitsOf, worldProducts } from "./model";
-import { accountFeature, asUnit, cardProblem, cardRoom, cardsOn, cashAccount, depositAccount, featureFor, isParty, mayUse, posting, signal } from "./pay";
+import { accountFeature, asUnit, cardProblem, cardRoom, cardsOn, cashAccount, cashAdvanceFee, depositAccount, featureFor, isParty, mayUse, posting, signal } from "./pay";
 
 function money(ctx: ReadContext, cents: number): string {
   return formatMoney(cents, ctx.world.currency);
@@ -99,12 +99,10 @@ export function withdraw(ctx: ReadContext, who: EntityId, account: EntityId, raw
       }
     } else return reject("no_atm", `there's no cash machine or ${p.institution || "bank"} branch here`);
   }
-  if (t?.revolving && accountFeature(ctx, account, "fees")) {
-    const advance = Math.max(p.fees.cash_advance_min, Math.round((cents * p.fees.cash_advance_pct) / 100));
-    if (advance > 0) {
-      advanceLines.push({ account: bankSide(p.institution), amount: advance });
-      fees += advance;
-    }
+  const advance = cashAdvanceFee(ctx, account, cents);
+  if (advance > 0) {
+    advanceLines.push({ account: bankSide(p.institution), amount: advance });
+    fees += advance;
   }
   const total = cents + fees;
   if (availableOf(ctx, account) < total) return reject("declined", `${labelOf(ctx, account)} can't cover ${money(ctx, total)}`);
@@ -114,7 +112,8 @@ export function withdraw(ctx: ReadContext, who: EntityId, account: EntityId, raw
   };
   const memo = `Cash withdrawal${where ? ` ${where}` : ""}${fees > 0 ? ` (${money(ctx, fees)} in fees)` : ""}`;
   // Fees first, so the cash is checked against what they leave: a rebased view that can't cover it drops the unit, fees and all.
-  return asUnit([...charge(machine, "Cash machine fees", "atm"), ...charge(advanceLines, "Cash advance fee", "cash_advance"), ...posting([{ account, amount: -cents }, { account: wallet, amount: cents }], { memo, kind: "withdrawal", category: "transfer", ...(card ? { card } : {}) }), ...extra]);
+  // Cash from a credit account is a cash advance, which runs its own interest from the day it's drawn.
+  return asUnit([...charge(machine, "Cash machine fees", "atm"), ...charge(advanceLines, "Cash advance fee", "cash_advance"), ...posting([{ account, amount: -cents }, { account: wallet, amount: cents }], { memo, kind: "withdrawal", category: t?.revolving ? "cash_advance" : "transfer", ...(card ? { card } : {}) }), ...extra]);
 }
 
 /**
