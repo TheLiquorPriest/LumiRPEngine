@@ -45,7 +45,7 @@ import type { InterpretOutput, QueuedAction } from "../engine/steps";
 import { checkAnswer } from "../engine/tracks";
 import { secretLoreNames } from "../engine/lore";
 import { pinsFor, type PinnedText } from "../engine/lore-pins";
-import { namesHidden, playerKnows } from "../engine/player-events";
+import { namesHidden, povMayKnow } from "../engine/player-events";
 import { canSeeEntity, canSeePlace, findLeaks, namesAny, playerTrack, povPlace, shownTrackId, unrevealedSecrets, unseenPlaceNames } from "../engine/visibility";
 import { openPuzzle } from "../packs/story/core/index";
 import { REGARD_CHANNEL_CAP } from "../packs/relationships/core/index";
@@ -128,21 +128,6 @@ export function readRun(meta: JsonObject): ChatRun | null {
   const raw = meta[LEDGER_NAMESPACE];
   if (!isRecord(raw) || raw.v !== 1 || typeof raw.worldId !== "string" || typeof raw.revision !== "string" || typeof raw.runSeed !== "string") return null;
   return { v: 1, worldId: raw.worldId, revision: raw.revision, runSeed: raw.runSeed, startedAt: typeof raw.startedAt === "number" ? raw.startedAt : 0 };
-}
-
-/**
- * Whether the POV may be told about an entity: itself, someone it has met, its own thing, or someone
- * it can see where it stands (an extraction chip must never name a stranger). A world
- * that doesn't place the POV can't tell who is present: every entity it can see counts.
- */
-function povMayKnow(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, id: string): boolean {
-  const pov = world.pov;
-  if (id === pov || playerKnows(reg, world, state, pov, id)) return true;
-  if (!canSeeEntity(reg, world, state, pov, id)) return false;
-  const e = state.entities[id];
-  if (heldBy(state.entities, id, pov)) return true;
-  const here = placeOfEntity(state, pov);
-  return here === undefined || placeOfEntity(state, id) === here;
 }
 
 /** The world as the POV may know it, for model prompts that list entities and places (`interpret`, `extract`). */

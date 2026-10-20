@@ -681,7 +681,7 @@ After the narrator writes, the engine reads the reply for changes the story impl
 | **Money transfers** (Payments) · `transfer` | Money moves between people, or between someone's own accounts | confirm |
 | **Feelings toward others** (Feelings) · `regard` | Someone's feelings change: by at most 10 on each feeling per reply, however often the reply says so | confirm |
 | **Quantities** · `quantity` | A count changes (ammunition, supplies) | confirm (no starting mode of its own; Settings shows *From the field's bound*) |
-| **New people** (New characters) · `spawn` | A new character appears (up to the world's limit, 24 by default, and duplicates are removed) | confirm |
+| **New people** (New characters) · `spawn` | A new character appears (up to the world's limit, 24 by default). A name someone you know already has is a duplicate and isn't added (under Auto, a chip says so); a name only someone you don't know has is left out without a word, so it never tells you such a person exists | confirm |
 | **Life and death (dying, dead, collapsed…)** (Life and death) · `life` | Someone dies, is dying, collapses or comes round (what you already knew is left out) | confirm |
 
 Beyond the mode, every field has a limit on how much a single change may be, and **the strictest rule always wins**. Fields a world marks as locked are never offered to the model. If a narrated change contradicts the engine's own outcome, the engine's outcome wins. A purchase takes in the seller's handover and the payment, so one sale is not applied three times, and a payer has to be an account.
