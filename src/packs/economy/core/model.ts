@@ -80,8 +80,8 @@ const REGIONAL_TAXES: Readonly<Record<string, string>> = { sales: "Sales tax", p
 /** Outside keys that name who they are after the kind (`bank:<institution>`), and what each reads as when nothing follows. */
 const NAMED_OUTSIDE: Readonly<Record<string, string>> = { bank: "Bank", atm: "Cash machine", employer: "Employer" };
 
-/** Outside keys that say what kind of party they are and what they're about (`seller:<property>`), by the kind. */
-const OUTSIDE_KINDS: Readonly<Record<string, string>> = { buyer: "Buyer", seller: "Seller", market: "Market", tenant: "Outside tenant" };
+/** Outside keys that say what kind of party they are and what they're about (`seller:<property>`), by the kind. A purchase's mortgage pays its money out to the purchase's closing (`closing:<property>`). */
+const OUTSIDE_KINDS: Readonly<Record<string, string>> = { buyer: "Buyer", seller: "Seller", market: "Market", tenant: "Outside tenant", closing: "Closing" };
 
 /** What a view reads names with: who may see what, as well as the books. */
 export type ViewBooks = Pick<ReadContext, "world" | "state" | "tables" | "registry">;
