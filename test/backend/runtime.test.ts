@@ -375,8 +375,7 @@ describe("backend runtime", () => {
       return "{}";
     };
     const chatId = await rig.worldChat();
-    const settings = await rig.rt.settings.get(rig.host.userId);
-    rig.body(await rig.send({ type: "lre.settings.set", patch: { modelUse: { budgets: { post: { calls: settings.modelUse.budgets.post.calls, ms: 0 } } } } }));
+    rig.body(await rig.send({ type: "lre.settings.set", patch: { timeouts: { postReplyMs: 0 } } }));
     await rig.turn(chatId, "earn", "Dev slips you seven bucks.");
     expect(extracts).toBe(0);
     expect(rig.rt.ledger.errors).toEqual([]);
