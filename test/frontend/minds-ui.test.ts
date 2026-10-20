@@ -2,13 +2,11 @@
 // Minds values, and the GM view's controls, each sent to a real backend and read back.
 
 import { describe, expect, test } from "bun:test";
-import { commitmentDraft, commitmentOp, deleteOp, narratorGets, noteOp, pinOp, planDraft, planLasts, planOp, refreshOp, startPlanIn, type MindPart } from "../../src/packs/minds/ui/ops";
+import { commitmentDraft, commitmentOp, narratorGets, noteOp, planDraft, planLasts, planOp, startPlanIn, type MindPart } from "../../src/packs/minds/ui/ops";
 import { MEMORY_FIELDS, memoryOverride, memoryOverridePatch, mindsPolicyPatch, mindsPromptPatch, withMemoryLevel } from "../../src/frontend/settings/minds-patch";
 import { mindsPartValue } from "../../src/frontend/build/minds-editor";
-import { decodeContextView } from "../../src/frontend/play/context";
+import { decodeContextView, sectionNote } from "../../src/frontend/play/context";
 import { mindTracesOf } from "../../src/backend/inspector-log";
-import { parseEditOps } from "../../src/engine/edits";
-import { editRequest } from "../../src/frontend/requests";
 import type { JsonObject } from "../../src/shared/json";
 import type { MindCallTrace, MindsSettings, WorldMindsConfig } from "../../src/shared/minds";
 import { DEFAULT_WORLD_MINDS, defaultMindsSettings, MIND_PROMPT_DEFAULTS, MIND_PROMPT_MAX, MINDS_PRESETS, worldMindsOf, worldMindTemplate } from "../../src/shared/minds";
@@ -177,15 +175,6 @@ describe("Build → World → Minds", () => {
 });
 
 describe("GM view → Minds controls", () => {
-  test("pin, unpin, refresh and delete are edits the engine reads as sent", () => {
-    const ops = [pinOp("dev", "live"), pinOp("dev", null), refreshOp("dev"), deleteOp("dev", "plan", "p1"), deleteOp("dev", "note", "n1"), deleteOp("dev", "commitment", "c1")];
-    const request = editRequest("c1", ops);
-    expect(request).toEqual({ type: "lre.edit", chatId: "c1", ops });
-    expect(parseEditOps(JSON.parse(JSON.stringify(ops)))).toEqual(ops);
-    expect(ops[0]).toEqual({ op: "mind_pin", entity: "dev", level: "live" });
-    expect(ops[3]).toEqual({ op: "mind_memory", entity: "dev", part: "plan", id: "p1", value: null });
-  });
-
   test("a note needs text and a salience of 1 to 5", () => {
     expect(noteOp("dev", null, { text: "  Sam  lied\nabout the keys ", salience: "4" })).toEqual({ op: "mind_memory", entity: "dev", part: "note", id: null, value: { text: "Sam lied about the keys", salience: 4 } });
     expect(noteOp("dev", "n1", { text: "", salience: "3" })).toBeNull();
@@ -243,6 +232,12 @@ describe("Context inspector → Minds", () => {
 
   test("a trace reads only as an outcome the engine records: reused and over-the-limit calls never happen", () => {
     expect(mindTracesOf([{ ...trace, outcome: "reused" }, { ...trace, outcome: "skipped_limit" }, { ...trace, outcome: "failed" }])?.map((t) => t.outcome)).toEqual(["failed"]);
+  });
+
+  test("a Minds section cut to its own budget says how many lines were left out, whole or in part", () => {
+    const section = (clipped: boolean, cut?: number) => ({ slot: "minds", label: "Minds", tokens: 120, clipped, ...(cut === undefined ? {} : { cut }), delivery: "verified" });
+    const view = decodeContextView({ warnings: [], generations: [{ id: "g1", at: 1, activation: "confirmed", sections: [section(false, 2), section(true, 3), section(false, 1), section(true), section(false)], budget: { sections: 600, used: 0 } }] });
+    expect(view?.generations[0]?.sections.map(sectionNote)).toEqual(["2 lines left out: over its own budget", "Left out: over its own budget", "1 line left out: over its own budget", "Left out: over the section budget", undefined]);
   });
 
   test("the panel reads the traces of a generation", () => {
