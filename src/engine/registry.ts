@@ -71,7 +71,7 @@ export type Touch =
   | { entity: EntityId; rel: RelationTypeId; to: string }
   | { entity: EntityId; aspect: TouchAspect };
 
-export type TouchAspect = "tier" | "agent" | "levels" | "class" | "life" | "spawned" | "posted";
+export type TouchAspect = "tier" | "agent" | "levels" | "class" | "life" | "spawned" | "posted" | "name";
 
 /** A registered event type: validation against the state before it, and its reducer. */
 export interface EventTypeDef<E extends LedgerEvent = LedgerEvent> {
