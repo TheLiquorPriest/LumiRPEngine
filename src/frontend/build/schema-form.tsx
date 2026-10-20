@@ -24,11 +24,13 @@ import { humanize } from "../format";
 import { MoneyInput } from "../money-input";
 import type { FieldEditorDef } from "../registry";
 import { DOMAIN_LABEL, floorNote, LEVEL_LABEL } from "../settings/realism";
+import { useSelect } from "../store";
 import { EffectArgsInput } from "./effect-args";
 import { ExprEditor, ExprReadout } from "./expr-editor";
 import { ClassesInput, classesOf, FacetValuesInput, facetValuesOf } from "./facet-editor";
 import type { RefOption } from "./form-kit";
 import { AddPicker, CheckField, Chip, FormGroup, FormSheet, Issues, ItemRow, RefPicker } from "./form-kit";
+import { theirsLoaded, typedFields } from "./held";
 import type { FieldSpec, RefCollection } from "./schema";
 import { deriveId, LIST_ITEMS } from "./schema";
 import { kindIs, SelectorEditor, selectorOf, TagListInput, worldTags } from "./selector-editor";
@@ -227,7 +229,7 @@ function clockWords(clock: number, calendar: Clockwork): string {
 // ---------------------------------------------------------------- field frame and inputs
 
 /** A field's frame: its label over the control (tied to it by `for`), then its help, a typing problem and the lint. */
-function FieldFrame(props: { label: ComponentChildren; optional?: boolean; for?: string; help?: ComponentChildren; problem?: string | null; issues: readonly LintIssue[]; children: ComponentChildren }) {
+export function FieldFrame(props: { label: ComponentChildren; optional?: boolean; for?: string; help?: ComponentChildren; problem?: string | null; issues: readonly LintIssue[]; children: ComponentChildren }) {
   const label = (
     <>
       {props.label}
@@ -247,31 +249,58 @@ function FieldFrame(props: { label: ComponentChildren; optional?: boolean; for?:
 
 /**
  * The text a field shows: what is typed while it is edited, else the value as text. A value that
- * changes from outside (Revert, Load theirs, a draft reload) replaces what was typed.
+ * changes from outside (Revert, Load theirs, a draft reload the form follows) replaces what was
+ * typed, and Load theirs does even when it leaves the value as it was. From the first keystroke
+ * until the field hands its value to the form (`handed`: as typed for plain text, on blur where
+ * typed text is parsed), the typed text counts as an edit (`typedFields`): a change made elsewhere
+ * then holds the form behind Build's notice rather than reaching the field.
  */
-function useFieldText(shown: string): [string, (text: string) => void] {
-  const [text, setText] = useState(shown);
-  // Only a change replaces the text: resetting on mount too would drop what is typed before the effect runs.
-  const last = useRef(shown);
+export function useFieldText(shown: string): [text: string, type: (text: string) => void, handed: () => void] {
+  const loads = useSelect(theirsLoaded, (n) => n);
+  const [, rerender] = useState(0);
+  // What is typed, and the value and Load theirs it was typed over. A change of either replaces it as
+  // the field renders, not in an effect: an effect still pending from the last keystroke's render
+  // would put back that keystroke's value over the next one.
+  const field = useRef({ text: shown, shown, loads, typing: false });
+  if (field.current.shown !== shown || field.current.loads !== loads) field.current = { text: shown, shown, loads, typing: false };
+  const { text, typing } = field.current;
   useEffect(() => {
-    if (last.current === shown) return;
-    last.current = shown;
-    setText(shown);
-  }, [shown]);
-  return [text, setText];
+    if (!typing) return undefined;
+    typedFields.update((n) => n + 1);
+    return () => typedFields.update((n) => n - 1);
+  }, [typing]);
+  const type = (next: string): void => {
+    field.current = { ...field.current, text: next, typing: true };
+    rerender((n) => n + 1);
+  };
+  const handed = (): void => {
+    field.current = { ...field.current, typing: false };
+    rerender((n) => n + 1);
+  };
+  return [text, type, handed];
 }
 
-function TextInput(props: { label: string; value: JsonValue | undefined; multiline?: boolean; optional?: boolean; readonly?: boolean; hint?: string; mono?: boolean; placeholder?: string; issues: readonly LintIssue[]; onChange(value: JsonValue | undefined): void }) {
+/**
+ * A text field. It hands what is typed to the form as it is typed, so the form (its Save, Revert and
+ * Build's changed-elsewhere notice) has the edit from the first keystroke. With `commitOnBlur`, it
+ * hands it over on blur instead: a date or time typed as text, which turns into a picker once it reads as one.
+ */
+export function TextInput(props: { label: string; value: JsonValue | undefined; multiline?: boolean; optional?: boolean; readonly?: boolean; hint?: string; mono?: boolean; placeholder?: string; commitOnBlur?: boolean; issues: readonly LintIssue[]; onChange(value: JsonValue | undefined): void }) {
   const id = useId();
   const shown = typeof props.value === "string" ? props.value : "";
-  const [text, setText] = useFieldText(shown);
-  const commit = () => {
-    if (!props.readonly && text !== shown) props.onChange(text === "" && props.optional ? undefined : text);
+  const [text, type, handed] = useFieldText(shown);
+  const hand = (next: string) => {
+    if (!props.readonly && next !== shown) props.onChange(next === "" && props.optional ? undefined : next);
+    handed();
   };
-  const attrs = { id, class: props.mono ? "lre-input lre-form-mono" : props.multiline ? "lre-input lre-form-prose" : "lre-input", readOnly: props.readonly, placeholder: props.placeholder, value: text, onBlur: commit };
+  const input = (next: string) => {
+    type(next);
+    if (!props.commitOnBlur) hand(next);
+  };
+  const attrs = { id, class: props.mono ? "lre-input lre-form-mono" : props.multiline ? "lre-input lre-form-prose" : "lre-input", readOnly: props.readonly, placeholder: props.placeholder, value: text, onBlur: () => hand(text) };
   return (
     <FieldFrame label={props.label} optional={props.optional} for={id} help={props.hint} issues={props.issues}>
-      {props.multiline ? <textarea {...attrs} rows={6} onInput={(event) => setText(event.currentTarget.value)} /> : <input {...attrs} onInput={(event) => setText(event.currentTarget.value)} />}
+      {props.multiline ? <textarea {...attrs} rows={6} onInput={(event) => input(event.currentTarget.value)} /> : <input {...attrs} onInput={(event) => input(event.currentTarget.value)} />}
     </FieldFrame>
   );
 }
@@ -288,10 +317,10 @@ function numberProblem(text: string, field: { min?: number; max?: number; step?:
   return null;
 }
 
-function NumberInput(props: { label: string; value: JsonValue | undefined; min?: number; max?: number; step?: number; optional?: boolean; hint?: string; placeholder?: string; issues: readonly LintIssue[]; onChange(value: JsonValue | undefined): void }) {
+export function NumberInput(props: { label: string; value: JsonValue | undefined; min?: number; max?: number; step?: number; optional?: boolean; hint?: string; placeholder?: string; issues: readonly LintIssue[]; onChange(value: JsonValue | undefined): void }) {
   const id = useId();
   const shown = typeof props.value === "number" ? String(props.value) : "";
-  const [text, setText] = useFieldText(shown);
+  const [text, type, handed] = useFieldText(shown);
   // A stored value is the backend's to lint; only what is typed here is checked here.
   const problem = text === shown ? null : numberProblem(text, props);
   const range = props.min !== undefined && props.max !== undefined ? `${props.min} to ${props.max}` : props.min !== undefined ? `${props.min} or more` : props.max !== undefined ? `${props.max} or less` : null;
@@ -305,9 +334,12 @@ function NumberInput(props: { label: string; value: JsonValue | undefined; min?:
         aria-invalid={problem ? true : undefined}
         placeholder={props.placeholder}
         value={text}
-        onInput={(event) => setText(event.currentTarget.value)}
+        onInput={(event) => type(event.currentTarget.value)}
         onBlur={() => {
-          if (problem !== null || text === shown) return;
+          // Text that can't be kept stays typed, an edit, until it can be or the value changes.
+          if (problem !== null) return;
+          handed();
+          if (text === shown) return;
           const t = text.trim().replace(/\u2212/g, "-");
           props.onChange(t === "" ? undefined : Number(t));
         }}
@@ -332,7 +364,7 @@ function moneyProblem(text: string, parsed: number | null, field: { currency: Wo
  */
 export function MinorMoneyInput(props: { label: string; value: JsonValue | undefined; currency: WorldCurrency; min?: number; max?: number; optional?: boolean; hint?: string; placeholder?: string; issues: readonly LintIssue[]; onChange(value: JsonValue | undefined): void }) {
   const shown = typeof props.value === "number" ? formatMoneyInput(props.value, props.currency) : "";
-  const [text, setText] = useFieldText(shown);
+  const [text, type, handed] = useFieldText(shown);
   const parsed = text.trim() === "" ? null : parseMoneyInput(text, props.currency);
   const problem = text === shown ? null : moneyProblem(text, parsed, props);
   return (
@@ -340,12 +372,14 @@ export function MinorMoneyInput(props: { label: string; value: JsonValue | undef
       <MoneyInput
         currency={props.currency}
         value={text}
-        onInput={setText}
+        onInput={type}
         label={props.label}
         invalid={problem !== null}
         placeholder={props.placeholder}
         onBlur={() => {
-          if (problem === null && text !== shown) props.onChange(parsed === null ? undefined : parsed);
+          if (problem !== null) return;
+          handed();
+          if (text !== shown) props.onChange(parsed === null ? undefined : parsed);
         }}
       />
     </FieldFrame>
@@ -356,7 +390,7 @@ export function MinorMoneyInput(props: { label: string; value: JsonValue | undef
 function DurationInput(props: { label: string; value: JsonValue | undefined; optional?: boolean; hint?: string; issues: readonly LintIssue[]; onChange(value: JsonValue | undefined): void }) {
   const id = useId();
   const shown = typeof props.value === "number" ? durationText(props.value) : "";
-  const [text, setText] = useFieldText(shown);
+  const [text, type, handed] = useFieldText(shown);
   const parsed = parseDuration(text);
   const problem = text === shown ? null : text.trim() === "" ? (props.optional ? null : "Give a length of time.") : parsed === null ? "Type a span like 1 h 30 min, 90 (minutes) or 1:30." : null;
   return (
@@ -368,9 +402,11 @@ function DurationInput(props: { label: string; value: JsonValue | undefined; opt
         placeholder="e.g. 1 h 30 min"
         autoComplete="off"
         value={text}
-        onInput={(event) => setText(event.currentTarget.value)}
+        onInput={(event) => type(event.currentTarget.value)}
         onBlur={() => {
-          if (problem === null && text !== shown) props.onChange(text.trim() === "" ? undefined : (parsed ?? undefined));
+          if (problem !== null) return;
+          handed();
+          if (text !== shown) props.onChange(text.trim() === "" ? undefined : (parsed ?? undefined));
         }}
       />
     </FieldFrame>
@@ -450,7 +486,7 @@ function GameTimeInput(props: { label: string; value: JsonValue | undefined; cal
 function LocalTimeInput(props: { label: string; value: JsonValue | undefined; gregorian: boolean; optional?: boolean; hint?: string; issues: readonly LintIssue[]; onChange(value: JsonValue | undefined): void }) {
   const id = useId();
   const text = typeof props.value === "string" ? props.value : "";
-  if (!props.gregorian || (text !== "" && !LOCAL.test(text))) return <TextInput label={props.label} value={props.value} optional={props.optional} mono hint={[props.hint, "Written YYYY-MM-DDTHH:MM"].filter((h) => h).join(" · ")} issues={props.issues} onChange={props.onChange} />;
+  if (!props.gregorian || (text !== "" && !LOCAL.test(text))) return <TextInput label={props.label} value={props.value} optional={props.optional} mono commitOnBlur hint={[props.hint, "Written YYYY-MM-DDTHH:MM"].filter((h) => h).join(" · ")} issues={props.issues} onChange={props.onChange} />;
   return (
     <FieldFrame label={props.label} optional={props.optional} for={id} help={props.hint} issues={props.issues}>
       <input
@@ -472,7 +508,7 @@ function LocalTimeInput(props: { label: string; value: JsonValue | undefined; gr
 function TimeOfDayInput(props: { label: string; value: JsonValue | undefined; optional?: boolean; hint?: string; issues: readonly LintIssue[]; onChange(value: JsonValue | undefined): void }) {
   const id = useId();
   const text = typeof props.value === "string" ? props.value : "";
-  if (text !== "" && !/^\d{2}:\d{2}$/.test(text)) return <TextInput label={props.label} value={props.value} optional={props.optional} mono hint={[props.hint, "Written HH:MM"].filter((h) => h).join(" · ")} issues={props.issues} onChange={props.onChange} />;
+  if (text !== "" && !/^\d{2}:\d{2}$/.test(text)) return <TextInput label={props.label} value={props.value} optional={props.optional} mono commitOnBlur hint={[props.hint, "Written HH:MM"].filter((h) => h).join(" · ")} issues={props.issues} onChange={props.onChange} />;
   return (
     <FieldFrame label={props.label} optional={props.optional} for={id} help={props.hint} issues={props.issues}>
       <input
@@ -491,11 +527,11 @@ function TimeOfDayInput(props: { label: string; value: JsonValue | undefined; op
 }
 
 /** A date field (relations' `since`): a date picker kept as `YYYY-MM-DD` in a Gregorian world; a clock reading stays one. */
-function DateInput(props: { label: string; value: JsonValue | undefined; calendar: Clockwork; hint?: string; issues: readonly LintIssue[]; onChange(value: JsonValue | undefined): void }) {
+export function DateInput(props: { label: string; value: JsonValue | undefined; calendar: Clockwork; hint?: string; issues: readonly LintIssue[]; onChange(value: JsonValue | undefined): void }) {
   const id = useId();
   if (typeof props.value === "number") return <GameTimeInput label={props.label} value={props.value} calendar={props.calendar} optional hint={props.hint} issues={props.issues} onChange={props.onChange} />;
   const text = typeof props.value === "string" ? props.value : "";
-  if (props.calendar.system !== "gregorian" || (text !== "" && !/^\d{4}-\d{2}-\d{2}$/.test(text))) return <TextInput label={props.label} value={props.value} optional hint={[props.hint, "Written YYYY-MM-DD"].filter((h) => h).join(" · ")} issues={props.issues} onChange={props.onChange} />;
+  if (props.calendar.system !== "gregorian" || (text !== "" && !/^\d{4}-\d{2}-\d{2}$/.test(text))) return <TextInput label={props.label} value={props.value} optional commitOnBlur hint={[props.hint, "Written YYYY-MM-DD"].filter((h) => h).join(" · ")} issues={props.issues} onChange={props.onChange} />;
   return (
     <FieldFrame label={props.label} optional for={id} help={props.hint} issues={props.issues}>
       <input id={id} type="date" class="lre-input" value={text} onChange={(event) => props.onChange(event.currentTarget.value === "" ? undefined : event.currentTarget.value)} />
@@ -507,15 +543,16 @@ function DateInput(props: { label: string; value: JsonValue | undefined; calenda
 function ScalarInput(props: { label: string; value: JsonValue | undefined; optional?: boolean; hint?: string; issues: readonly LintIssue[]; onChange(value: JsonValue | undefined): void }) {
   const id = useId();
   const shown = typeof props.value === "number" || typeof props.value === "string" ? String(props.value) : "";
-  const [text, setText] = useFieldText(shown);
+  const [text, type, handed] = useFieldText(shown);
   return (
     <FieldFrame label={props.label} optional={props.optional} for={id} help={props.hint} issues={props.issues}>
       <input
         id={id}
         class="lre-input"
         value={text}
-        onInput={(event) => setText(event.currentTarget.value)}
+        onInput={(event) => type(event.currentTarget.value)}
         onBlur={() => {
+          handed();
           if (text === shown) return;
           const t = text.trim();
           props.onChange(t === "" ? (props.optional ? undefined : "") : /^-?\d+(?:\.\d+)?$/.test(t) ? Number(t) : t);
@@ -528,29 +565,35 @@ function ScalarInput(props: { label: string; value: JsonValue | undefined; optio
 function JsonInput(props: { label: string; value: JsonValue | undefined; optional?: boolean; hint?: string; issues: readonly LintIssue[]; onChange(value: JsonValue | undefined): void }) {
   const id = useId();
   const shown = props.value === undefined ? "" : JSON.stringify(props.value, null, 2);
-  const [text, setText] = useFieldText(shown);
+  const [text, type, handed] = useFieldText(shown);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => setError(null), [shown]);
   return (
-    <FieldFrame label={props.label} optional={props.optional} for={id} help={props.hint} problem={error} issues={props.issues}>
+    <FieldFrame label={props.label} optional={props.optional} for={id} help={props.hint} problem={text === shown ? null : error} issues={props.issues}>
       <textarea
         id={id}
         class={error ? "lre-input lre-form-mono invalid" : "lre-input lre-form-mono"}
         rows={Math.min(10, Math.max(2, text.split("\n").length))}
         spellcheck={false}
         value={text}
-        onInput={(event) => setText(event.currentTarget.value)}
+        onInput={(event) => type(event.currentTarget.value)}
         onBlur={() => {
-          if (text === shown) return;
+          if (text === shown) {
+            handed();
+            return;
+          }
           if (text.trim() === "") {
             setError(null);
+            handed();
             props.onChange(props.optional ? undefined : null);
             return;
           }
           try {
             props.onChange(JSON.parse(text) as JsonValue);
             setError(null);
+            handed();
           } catch (e) {
+            // Text that doesn't parse stays typed, an edit, until it does or the value changes.
             setError(`Not valid JSON: ${e instanceof Error ? e.message : "it doesn't parse"}. The last valid value is kept.`);
           }
         }}
@@ -568,7 +611,7 @@ function words(value: string): string {
  * One of a fixed set of values: a segmented control when a required choice has four short values or
  * fewer, else a native select (the phone's own picker). A value outside the set stays listed as missing.
  */
-function ChoiceInput(props: { label: string; value: JsonValue | undefined; options: readonly RefOption[]; optional?: boolean; hint?: string; issues: readonly LintIssue[]; onChange(value: JsonValue | undefined): void }) {
+export function ChoiceInput(props: { label: string; value: JsonValue | undefined; options: readonly RefOption[]; optional?: boolean; hint?: string; issues: readonly LintIssue[]; onChange(value: JsonValue | undefined): void }) {
   const id = useId();
   const current = typeof props.value === "string" ? props.value : "";
   const listed = props.options.some((o) => o.value === current);
@@ -597,7 +640,7 @@ function ChoiceInput(props: { label: string; value: JsonValue | undefined; optio
 }
 
 /** A reference by name (`RefPicker`), with the field's help and lint under it. */
-function RefInput(props: { label: string; value: JsonValue | undefined; options: readonly RefOption[]; optional?: boolean; hint?: string; issues: readonly LintIssue[]; onChange(value: JsonValue | undefined): void }) {
+export function RefInput(props: { label: string; value: JsonValue | undefined; options: readonly RefOption[]; optional?: boolean; hint?: string; issues: readonly LintIssue[]; onChange(value: JsonValue | undefined): void }) {
   return (
     <div class="lre-field">
       <RefPicker label={props.optional ? `${props.label} · optional` : props.label} value={typeof props.value === "string" ? props.value : ""} options={props.options} none={props.optional ? "None" : undefined} onChange={(next) => props.onChange(next === "" ? (props.optional ? undefined : "") : next)} />
@@ -697,7 +740,7 @@ function itemSummary(item: JsonValue | undefined, spec: FieldSpec, titleKey: str
 }
 
 /** The lint count on an item row, in the colour of its worst issue. */
-function LintBadge(props: { issues: readonly LintIssue[] }) {
+export function LintBadge(props: { issues: readonly LintIssue[] }) {
   if (props.issues.length === 0) return null;
   const tone = props.issues.some((i) => i.severity === "error") ? "neg" : props.issues.some((i) => i.severity === "warning") ? "warn" : "";
   return <span class={tone ? `lre-badge ${tone}` : "lre-badge"}>{props.issues.length === 1 ? "1 issue" : `${props.issues.length} issues`}</span>;
@@ -806,7 +849,7 @@ function keyProblem(key: string, taken: ReadonlySet<string>): string | null {
  * (D-UI6), the key editable under Advanced or in the open while Show ids is on; any other asks
  * for the key itself, with suggestions.
  */
-function NewKey(props: { named: boolean; keyLabel: string; noun: string; taken: ReadonlySet<string>; suggestions: readonly string[]; onAdd(key: string, label?: string): void; onCancel(): void }) {
+export function NewKey(props: { named: boolean; keyLabel: string; noun: string; taken: ReadonlySet<string>; suggestions: readonly string[]; onAdd(key: string, label?: string): void; onCancel(): void }) {
   const showIds = useShowIds();
   const nameId = useId();
   const keyId = useId();

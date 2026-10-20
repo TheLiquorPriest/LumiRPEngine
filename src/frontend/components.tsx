@@ -5,7 +5,7 @@
 // buttons, the shared focus ring.
 
 import type { ComponentChildren } from "preact";
-import { useEffect, useId, useRef, useState } from "preact/hooks";
+import { useEffect, useId, useLayoutEffect, useRef, useState } from "preact/hooks";
 import type { JsonValue } from "../shared/json";
 import { isRecord } from "../shared/json";
 import type { OutcomeOdds } from "../shared/state-view";
@@ -13,6 +13,7 @@ import { useApp, useUi } from "./app";
 import { formatOdds } from "./format";
 import type { IconName } from "./icons";
 import { Icon } from "./icons";
+import { isMobile } from "./layout";
 import { useSelect } from "./store";
 
 export interface SegOption<T extends string | number> {
@@ -220,18 +221,46 @@ export type ToastSurface = "map" | "palette" | "world" | "drawer" | "chat";
 
 /**
  * Toasts render on the topmost visible surface only: an open overlay, else the open drawer, else
- * the chat toolbar (inline, above the composer).
+ * the chat toolbar (inline, above the composer). A phone's drawer fills the screen, so its toasts
+ * sit centred above its bottom bar; a desktop's drawer is a column beside the chat, so its toasts
+ * sit over that column, never over the composer and its buttons.
  */
 export function Toasts(props: { surface: ToastSurface }) {
   const app = useApp();
   const list = useSelect(app.toasts, (all) => all);
   const overlay = useSelect(app.ui, (ui) => ui.overlay);
   const drawerOpen = useSelect(app.host.drawer, (drawer) => drawer.open);
+  const docked = useSelect(app.host.viewport, (viewport) => props.surface === "drawer" && !isMobile(viewport));
+  const box = useRef<HTMLDivElement>(null);
   const active: ToastSurface = overlay ?? (drawerOpen ? "drawer" : "chat");
-  if (list.length === 0 || active !== props.surface) return null;
+  const shown = list.length > 0 && active === props.surface;
+  useLayoutEffect(() => {
+    const el = box.current;
+    // The drawer's tab root, which spans its column.
+    const column = el?.parentElement;
+    if (!shown || !docked || !el || !column) return undefined;
+    // Rendered pixels; the stylesheet turns them into the host's layout pixels by its UI scale.
+    const place = () => {
+      const rect = column.getBoundingClientRect();
+      el.style.setProperty("--lre-toasts-x", `${rect.left + rect.width / 2}px`);
+      el.style.setProperty("--lre-toasts-w", `${rect.width}px`);
+    };
+    place();
+    const observer = new ResizeObserver(place);
+    observer.observe(column);
+    window.addEventListener("resize", place);
+    // The host slides the drawer with a transform, which no ResizeObserver sees.
+    document.addEventListener("transitionend", place, true);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("resize", place);
+      document.removeEventListener("transitionend", place, true);
+    };
+  }, [shown, docked]);
+  if (!shown) return null;
   const toasts = app.toasts;
   return (
-    <div class={props.surface === "chat" ? "lre lre-toasts inline" : "lre lre-toasts"} aria-live="polite" data-lre-toasts={props.surface}>
+    <div ref={box} class={props.surface === "chat" ? "lre lre-toasts inline" : docked ? "lre lre-toasts docked" : "lre lre-toasts"} aria-live="polite" data-lre-toasts={props.surface}>
       {list.map((toast) => (
         <div key={toast.id} class={toast.tone === "error" ? "lre-toast error" : "lre-toast"} role={toast.tone === "error" ? "alert" : "status"}>
           <Icon name={toast.tone === "error" ? "alert" : "info"} size={16} />

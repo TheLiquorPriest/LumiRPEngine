@@ -1,8 +1,9 @@
 // Build's forms over a draft that can change under them (DESIGN §23). A form follows the draft
 // while it is untouched, and after Build's own writes; once edited, a reload (a change made in
-// another window or by an outside agent) never resets it. When the draft's own value of what the
-// form edits changes under the edits, Build's bar says so with Load theirs and Keep mine, and a
-// save over that change asks first, so overwriting it is the user's choice.
+// another window or by an outside agent) never resets it. Text typed into a field counts as an
+// edit from the first keystroke, even where the field hands it to the form only on blur. When the draft's own value
+// of what the form edits changes under the edits, Build's bar says so with Load theirs and Keep
+// mine, and a save over that change asks first, so overwriting it is the user's choice.
 
 import { useEffect, useState } from "preact/hooks";
 import { PROTOCOL_VERSION } from "../../shared/protocol";
@@ -21,6 +22,16 @@ export interface HeldForm {
 
 /** The forms holding edits over a change made elsewhere (one, unless several editors are open). */
 export const heldForms = createStore<readonly HeldForm[]>([]);
+
+/**
+ * How many fields hold text typed since they last handed their value to the form (a number,
+ * money, duration or JSON field hands it on blur, once it parses). While any does, a change made
+ * elsewhere holds the form rather than replacing what is being typed.
+ */
+export const typedFields = createStore(0);
+
+/** Counts the user's Load theirs: a field drops the text typed into it when it changes. */
+export const theirsLoaded = createStore(0);
 
 /** What a form's edits were made over. */
 export interface HeldBase<T> {
@@ -48,14 +59,15 @@ export function heldStart<T>(key: string, watch: string, initial: T): HeldBase<T
 /**
  * A form's step when the item it edits (`key`), or the draft's value of it (`watch`), may have
  * changed; null when neither did. Another item, Build's own write, an untouched form or one that
- * already matches follows the draft, as forms always did. Edits over a reload are kept, with the
- * draft's value as theirs, and stay made over what they were made over.
+ * already matches follows the draft, as forms always did. A form with text being typed into it
+ * (`typing`) isn't untouched. Edits over a reload are kept, with the draft's value as theirs, and
+ * stay made over what they were made over.
  */
-export function holdOrFollow<T>(base: HeldBase<T>, now: { key: string; watch: string; value: T; initial: T; reloaded: boolean }): HeldStep<T> | null {
+export function holdOrFollow<T>(base: HeldBase<T>, now: { key: string; watch: string; value: T; initial: T; reloaded: boolean; typing: boolean }): HeldStep<T> | null {
   if (now.key === base.key && now.watch === base.watch) return null;
   const mine = JSON.stringify(now.value);
   const next = JSON.stringify(now.initial);
-  if (now.key !== base.key || !now.reloaded || mine === base.from || mine === next) {
+  if (now.key !== base.key || !now.reloaded || (mine === base.from && !now.typing) || mine === next) {
     const followed: HeldBase<T> = { key: now.key, watch: now.watch, from: next, theirs: null };
     return mine === next ? { base: followed } : { base: followed, load: { value: now.initial } };
   }
@@ -84,12 +96,19 @@ export function useHeld<T>(value: T, set: (next: T) => void, initial: T, key: st
     // A copy, so the form's edits never write into the draft's own value.
     if (step.load) set(structuredClone(step.load.value));
   };
-  useEffect(() => apply(holdOrFollow(base, { key, watch, value, initial, reloaded })), [key, watch]);
+  useEffect(() => apply(holdOrFollow(base, { key, watch, value, initial, reloaded, typing: typedFields.get() > 0 })), [key, watch]);
   const theirs = base.theirs;
   useEffect(() => {
     if (!theirs) return undefined;
     // The base stays as it is while this form is registered: every step that changes it changes `theirs` too.
-    const form: HeldForm = { loadTheirs: () => apply(heldChoice(base, "theirs")), keepMine: () => apply(heldChoice(base, "mine")) };
+    const form: HeldForm = {
+      loadTheirs: () => {
+        apply(heldChoice(base, "theirs"));
+        // Theirs replaces what is typed too, even in a field whose value theirs leaves as it was.
+        theirsLoaded.update((n) => n + 1);
+      },
+      keepMine: () => apply(heldChoice(base, "mine")),
+    };
     heldForms.update((all) => [...all, form]);
     return () => heldForms.update((all) => all.filter((f) => f !== form));
   }, [theirs]);

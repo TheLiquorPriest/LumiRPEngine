@@ -67,23 +67,27 @@ export function useStudioOffer(props: { installed(): void; review(next: { worldI
   return { offer, message, busy, load, dismiss: () => setOffer(null), install };
 }
 
-const COUNTED: readonly [string, string][] = [
-  ["entities", "entities"],
-  ["places", "places"],
-  ["routes", "routes"],
-  ["maps", "maps"],
-  ["tracks", "tracks"],
-  ["schedules", "schedules"],
-  ["lore", "lore entries"],
-  ["rules", "rules"],
-  ["actions", "actions"],
+/** What the offer holds, counted: the collection, then its word for one and for several. */
+const COUNTED: readonly [string, string, string][] = [
+  ["entities", "entity", "entities"],
+  ["places", "place", "places"],
+  ["routes", "route", "routes"],
+  ["maps", "map", "maps"],
+  ["tracks", "track", "tracks"],
+  ["schedules", "schedule", "schedules"],
+  ["lore", "lore entry", "lore entries"],
+  ["rules", "rule", "rules"],
+  ["actions", "action", "actions"],
 ];
 
 /** The offer's review: what it is, what it holds, its problems and macros, and Install. */
 export function StudioOfferReview(props: { state: StudioOfferState }) {
   const { offer, busy } = props.state;
   if (!offer) return null;
-  const counts = COUNTED.flatMap(([key, label]) => (offer.counts[key] ? [`${offer.counts[key]} ${label}`] : []));
+  const counts = COUNTED.flatMap(([key, one, many]) => {
+    const n = offer.counts[key];
+    return n ? [`${n} ${n === 1 ? one : many}`] : [];
+  });
   const what = offer.mode === "new" ? "A new world" : offer.target?.name ? `The next revision of “${offer.target.name}”` : "A revision of a world you don't have";
   const open = offer.blocked === null && offer.installed === null;
   return (
@@ -107,7 +111,8 @@ export function StudioOfferReview(props: { state: StudioOfferState }) {
             Already installed.
           </Banner>
         ) : offer.blocked ? (
-          <Banner tone="warn">{offer.blocked}</Banner>
+          // Errors block it as the badge says: danger, like the badge; any other reason is a warning.
+          <Banner tone={offer.errors > 0 ? "neg" : "warn"}>{offer.blocked}</Banner>
         ) : null}
         {offer.lint.length > 0 ? (
           <div class="lre-build-issues lre-build-well" role="list">

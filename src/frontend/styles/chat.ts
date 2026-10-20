@@ -182,6 +182,8 @@ export const CHAT_CSS = `
 
 .lre.lre-toasts{position:fixed;left:50%;bottom:84px;z-index:2147483000;transform:translateX(-50%);display:flex;flex-direction:column;gap:var(--lre-s2);width:min(420px,calc(100vw - 24px));pointer-events:none}
 .lre.lre-toasts.inline{position:static;transform:none;width:auto;margin:var(--lre-s1) 0}
+/* A desktop drawer's toasts: over its column (Toasts measures it, in rendered px), clear of the chat's composer. */
+.lre.lre-toasts.docked{left:calc(var(--lre-toasts-x,50vw) / var(--lumiverse-ui-scale,1));width:min(420px,calc(var(--lre-toasts-w,100vw) / var(--lumiverse-ui-scale,1) - 24px))}
 .lre .lre-toast{pointer-events:auto;display:flex;align-items:center;gap:var(--lre-s2);min-height:var(--lre-tap-lg);padding:var(--lre-s1) var(--lre-s1) var(--lre-s1) var(--lre-s3);border:1px solid var(--lre-border);border-radius:var(--lre-r-lg);background:var(--lre-bar-bg);box-shadow:var(--lre-shadow-lg);color:var(--lre-fg);font-size:var(--lre-fs-sm)}
 .lre .lre-toast>.lre-icon{flex:none;color:var(--lre-accent-text)}
 .lre .lre-toast.error{border-color:color-mix(in srgb,var(--lre-danger) 50%,transparent)}
