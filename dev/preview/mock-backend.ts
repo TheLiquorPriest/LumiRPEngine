@@ -3,6 +3,7 @@
 // frontend's delta/resync path runs exactly as against the real backend.
 
 import { CLASS_TRAITS, type AccountView, type FinanceView, type JournalLine } from "../../src/shared/finance";
+import { CLAIM_PRESETS } from "../../src/shared/claims";
 import type { DiagCall, DiagRecord } from "../../src/shared/diagnostics";
 import type { JsonObject, JsonValue } from "../../src/shared/json";
 import { hasOwn, isRecord } from "../../src/shared/json";
@@ -293,7 +294,7 @@ export class MockBackend {
     for (const op of ops) {
       if (op.op === "spawn") {
         const id = op.id ?? `${op.kind}:${gm.entities.length}`;
-        gm.entities.push({ id, name: op.name, kind: op.kind, tier: op.tier ?? "background", agent: op.agent ?? false, pov: false, gone: false, spawned: true, visibility: "public", place: op.place ?? null, holder: null, fields: [], relations: [], levels: [], class: {}, tags: [], sheet: null, life: { state: "alive", label: "Alive", acts: true, everyone: true, aware: [], unaware: [] } });
+        gm.entities.push({ id, name: op.name, kind: op.kind, tier: op.tier ?? "background", agent: op.agent ?? false, pov: false, gone: false, spawned: true, visibility: "public", place: op.place ?? null, holder: null, claimed: false, fields: [], relations: [], levels: [], class: {}, tags: [], sheet: null, life: { state: "alive", label: "Alive", acts: true, everyone: true, aware: [], unaware: [] } });
         lines.push(`${op.name} is here`);
         continue;
       }
@@ -525,6 +526,7 @@ export class MockBackend {
           }
           if (message.kind === "resolve" && view.controls && "all" in message.scope) view.controls.realism.levels[message.domain] = message.to;
           if (message.kind === "adjudicate" && view.controls) view.controls.adjudication = message.to;
+          if (message.kind === "claims" && view.controls) view.controls.realism.claims = { ...message.to };
         }, 40);
         return;
       case "lre.view.open":
@@ -544,6 +546,8 @@ export class MockBackend {
         const preset = next.realism.preset;
         const levels = REALISM_PRESETS[preset];
         if (isRecord(message.patch.realism) && message.patch.realism.preset && levels) next.realism.levels = { ...next.realism.levels, ...(levels as UserSettings["realism"]["levels"]) };
+        // A named preset carries its own player claims, as the real settings store's do.
+        if (isRecord(message.patch.realism) && message.patch.realism.preset && preset !== "custom") next.realism.claims = { ...CLAIM_PRESETS[preset] };
         this.settings = next;
         this.result(reqId, "lre.settings.set", { settings: structuredClone(this.settings), extraction: extractionView(this.settings) });
         return;
@@ -646,7 +650,9 @@ export class MockBackend {
         else if (message.op !== "get") this.draftVersion++;
         const cap = this.draft.packs.economy?.config.unpricedCap;
         const capLint = cap === undefined || (typeof cap === "number" && Number.isSafeInteger(cap) && cap > 0) ? [] : [{ severity: "warning" as const, path: "packs.economy.config.unpricedCap", code: "economy.unpriced_cap", message: "The narrated-price cap should be a whole number of cents above zero; narrated prices are capped at the default, $14.00." }];
-        return this.result(reqId, "lre.editor", { draft: structuredClone(this.draft), base: this.worldList[0]?.head ?? null, stored, version: this.draftVersion, lint: [{ severity: "warning", path: "tracks.q_raise.stages.orphan", code: "unreachable_stage", message: "Stage “Old idea” can't be reached from the start." }, ...capLint, ...mapLint(this.draft)] });
+        const claimCap = this.draft.packs.economy?.config.claimCap;
+        const claimCapLint = claimCap === undefined || (typeof claimCap === "number" && Number.isSafeInteger(claimCap) && claimCap > 0) ? [] : [{ severity: "warning" as const, path: "packs.economy.config.claimCap", code: "economy.claim_cap", message: "The claim cap should be a whole number of cents above zero; a capped Make it real asks first above the default, $25.00." }];
+        return this.result(reqId, "lre.editor", { draft: structuredClone(this.draft), base: this.worldList[0]?.head ?? null, stored, version: this.draftVersion, lint: [{ severity: "warning", path: "tracks.q_raise.stages.orphan", code: "unreachable_stage", message: "Stage “Old idea” can't be reached from the start." }, ...capLint, ...claimCapLint, ...mapLint(this.draft)] });
       }
       case "lre.ui":
         this.options.closeDrawer();

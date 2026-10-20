@@ -1,9 +1,11 @@
 // Structural world lint (DESIGN §13): references, field types, cycles, unreachable track stages,
 // tiers, classifications and selectors, relation kinds, cardinality and one-sided kinship,
 // overlapping schedules, expressions that don't parse, unbalanced authored postings, predicates
-// frozen at the world's current realism, and the ruleset primitives' own lint (engine/ruleset-lint).
+// frozen at the world's current realism, player claims (its default policy and the params a claim
+// may fill), and the ruleset primitives' own lint (engine/ruleset-lint).
 // Pure; the authoring lint runs it with the registry (pack kinds, fields and relation types).
 
+import { CLAIM_MODE_LABEL, CLAIM_MODES, readClaims } from "../shared/claims";
 import type { JsonValue } from "../shared/json";
 import { hasOwn, isRecord } from "../shared/json";
 import type { LintIssue } from "../shared/protocol";
@@ -79,6 +81,13 @@ export function lintStructure(world: WorldDoc, reg: Registry): LintIssue[] {
         const at = `actions.${id}.params.${name}.table`;
         if (p.type !== "text") warn(at, "types", `${a.label}'s ${p.label ?? name} isn't a text parameter, so it never names a row of ${p.table}.`);
         else if (!own(world.tables, p.table)) err(at, "refs", `${a.label}'s ${p.label ?? name} names rows of the data table "${p.table}", which this world doesn't have.`);
+      }
+      if (p.claim !== undefined) {
+        // A place the engine doesn't read leaves the param one no claim ever fills (DESIGN §9.4).
+        const place: unknown = p.claim;
+        const at = `actions.${id}.params.${name}.claim`;
+        if (place !== "held" && place !== "here") err(at, "claims", `${a.label}'s ${p.label ?? name} says a claimed thing appears "${String(place)}"; it should be "held" (in the actor's hands) or "here" (where the actor is).`);
+        else if (p.type !== "ref") warn(at, "claims", `${a.label}'s ${p.label ?? name} isn't a ref parameter, so no claimed thing ever fills it.`);
       }
       if (p.of === undefined) continue;
       if (p.type !== "ref") warn(`actions.${id}.params.${name}.of`, "selector", `${a.label}'s ${p.label ?? name} isn't a ref parameter, so its selector never applies.`);
@@ -258,6 +267,16 @@ export function lintStructure(world: WorldDoc, reg: Registry): LintIssue[] {
     for (const p of frozenPredicates(reg, world, domain, level)) {
       warn(`${p.where}s.${p.id}`, "frozen_predicate", `A condition of ${p.where} ${p.id} reads ${p.field}, which ${domain} level ${level} doesn't track, so it never changes.`);
     }
+  }
+
+  // The world's player-claims default (DESIGN §9.4): one the engine can't read is no default, and
+  // new chats quietly take the player's own setting instead.
+  const claims: unknown = world.realism.claims;
+  if (claims !== undefined && !readClaims(claims)) {
+    const modes = CLAIM_MODES.map((m) => `${CLAIM_MODE_LABEL[m]} ("${m}")`);
+    err("realism.claims", "claims", `Player claims should be ${modes.slice(0, -1).join(", ")} or ${modes.at(-1) ?? ""}; new chats take the player's own setting instead.`);
+  } else if (isRecord(claims) && claims.capped !== undefined && typeof claims.capped !== "boolean") {
+    warn("realism.claims.capped", "claims", "Player claims' cap should be true or false; anything else reads as off.");
   }
   issues.push(...lintRuleset(world, reg));
   return issues;

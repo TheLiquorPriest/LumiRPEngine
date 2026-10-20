@@ -1,9 +1,9 @@
 // The GM view's world (DESIGN §7): everything as it stands, secrets and removed entities included,
 // shaped for the GM editor: every entity with its fields as their definitions type them, its
-// relations, levels, classes, tags and designed sheet; places with their visibility; tracks with
-// every stage and truth; the relation types the editor can add; the world's facets, hidden ones
-// too; and everyone's money. Read on request only, and it records nothing (L34): unopened accounts
-// show the opening balances they'll start from.
+// relations, levels, classes, tags and designed sheet, and whether the player claimed it into being;
+// places with their visibility; tracks with every stage and truth; the relation types the editor
+// can add; the world's facets, hidden ones too; and everyone's money. Read on request only, and it
+// records nothing (L34): unopened accounts show the opening balances they'll start from.
 
 import type { JsonValue } from "../shared/json";
 import { isRecord } from "../shared/json";
@@ -68,6 +68,7 @@ function entityOf(reg: Registry, ctx: ReadContext, id: string): GmEntity | null 
     visibility: entityVisibility(world, state, id),
     place: placeOfEntity(state, id),
     holder: e.relations.find((r) => r.type === "in")?.to ?? null,
+    claimed: e.fields.claimed === true,
     ...(own(state.accounts, id) !== undefined ? { balance: own(state.accounts, id) } : {}),
     fields,
     relations: e.relations.map((r) => ({

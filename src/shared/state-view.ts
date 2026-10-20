@@ -352,6 +352,8 @@ export interface GmEntity {
   place: PlaceId | null;
   /** What holds it (`in`), if anything. */
   holder: EntityId | null;
+  /** A thing the player said they had, made real for their action (`fields.claimed`, DESIGN §9.4 player claims). */
+  claimed: boolean;
   /** The posting total on it, for an account (minor units). */
   balance?: number;
   fields: GmField[];

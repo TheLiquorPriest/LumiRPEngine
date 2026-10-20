@@ -143,6 +143,7 @@ describe("GM edits", () => {
     visibility: "public",
     place: "diner",
     holder: null,
+    claimed: false,
     fields: [],
     relations: [],
     levels: [
