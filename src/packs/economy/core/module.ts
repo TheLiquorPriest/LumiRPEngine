@@ -155,6 +155,10 @@ export interface FinanceApi {
   ownersOf(state: Readonly<WorldState>, entity: EntityId): Owner[];
   /** A party's share of an entity's worth, percent (0 when its role carries none). */
   shareOf(state: Readonly<WorldState>, entity: EntityId, party: EntityId): number;
+  /** Whom a party's own interests are: them, their household and its members, and each party any of those counts the worth of (DESIGN §25.1). */
+  interestsOf(ctx: ReadContext, who: EntityId): ReadonlySet<EntityId>;
+  /** Whether money from `from`, which `who` only manages, paid to `to` would be for `who` rather than for whom the money is (DESIGN §25.1). */
+  paysFor(ctx: ReadContext, who: EntityId, to: string, from: string): boolean;
   /** The accounts a party holds with a right (`spend`, `worth` or `sees`), in class order. */
   accountsOf(books: Books, party: EntityId, right?: "spend" | "worth" | "sees"): EntityId[];
   balance(state: Readonly<WorldState>, account: EntityId): number;
