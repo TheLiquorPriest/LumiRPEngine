@@ -530,6 +530,26 @@ describe("holdings: property", () => {
     expect(paid("Property tax, The duplex")).toEqual([-72_000]);
     expect(trialBalance(w.state)).toBe(0);
   });
+
+  test("property tax its owner can't pay waits, and is paid with the next installment", () => {
+    const w = setup((world) => {
+      // $500 of property tax a month, on the 1st, with $10 in checking, nothing saved and the card at its limit.
+      duplex(world, { value: 12_000_000, appreciation_pct: 0, volatility_pct: 0, tax_pct: 5, tax_installments: 12, insurance: 0, upkeep_pct: 0 });
+      world.entities.checking!.fields.opening = 1_000;
+      world.entities.savings!.fields.opening = 0;
+      world.entities.card!.fields.limit = 38_000;
+    });
+    const tax = (from: number): number[] => w.events.slice(from).flatMap((e) => (e.type === "post" && e.memo === "Property tax, The duplex" ? e.lines.filter((l) => l.account === "checking").map((l) => l.amount) : []));
+    lapseTo(w, "2026-11-20T12:00");
+    expect(tax(0)).toEqual([]);
+    // Money comes in before the next installment.
+    w.apply({ type: "post", lines: [{ account: "economy.external:family", amount: -2_000_000 }, { account: "checking", amount: 2_000_000 }], memo: "A gift" });
+    const start = w.events.length;
+    lapseTo(w, "2026-12-02T12:00");
+    // November's $500, deferred, with December's.
+    expect(tax(start)).toEqual([-100_000]);
+    expect(trialBalance(w.state)).toBe(0);
+  });
 });
 
 describe("holdings: rent on a property owned with someone", () => {
