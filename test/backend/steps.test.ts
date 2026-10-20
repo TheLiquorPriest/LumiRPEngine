@@ -145,6 +145,8 @@ describe("model calls per preset (DESIGN §5.3)", () => {
     const rig = new Rig();
     rig.body(await rig.send({ type: "lre.settings.set", patch: { modelUse: { preset: "full" } } }));
     rig.body(await rig.send({ type: "lre.settings.set", patch: { modelUse: { preset: "custom", budgets: { pre: { calls: 1 }, post: { calls: 1 } } } } }));
+    // Character minds have calls of their own, apart from the phase budgets (DESIGN §24.6).
+    rig.body(await rig.send({ type: "lre.settings.set", patch: { minds: { enabled: false } } }));
     const chatId = await rig.worldChat();
     rig.host.quietReply = quiet;
     rig.host.decideReply = decide;

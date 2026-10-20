@@ -96,11 +96,13 @@ async function folded(rig: Rig, chatId: string) {
 
 describe("a typed skip to Friday at 6 PM", () => {
   test("runs as a time skip to exactly then, stopping at its beats; the model was told the day and time", async () => {
-    const rig = new Rig({ shipped: true });
+    // The skip runs its beats' minds, so minds are on, and every mind the turn asks answers plainly.
+    const rig = new Rig({ shipped: true, minds: true });
     const prompts: string[] = [];
     let reading: JsonObject = {};
     rig.host.quietReply = (req) => {
       const system = req.messages[0]?.content ?? "";
+      if (system.includes("You are the private mind of")) return JSON.stringify({ monologue: "Not yet.", depiction: "busy", intent: "Keep working.", reactions: [], plans: [], mood: "calm" });
       if (!system.includes("You map a player's typed input")) return "{}";
       prompts.push(system);
       return JSON.stringify(reading);

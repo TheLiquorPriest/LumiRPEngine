@@ -400,7 +400,8 @@ export class Steps {
         const ms = performance.now() - t0;
         this.meter.record({ purpose, via: "decision", ok: true, ms, tokens: r.tokens }, userId);
         const answered = Object.keys(r.answers).length > 0;
-        this.onCall?.(userId, { ...route, model: r.model, tokensOut: answered ? r.tokens : 0, ms, ok: true });
+        // An answer with no token count is an answer: the count is unknown, never zero.
+        this.onCall?.(userId, { ...route, model: r.model, tokensOut: answered ? (r.tokens > 0 ? r.tokens : null) : 0, ms, ok: true });
         if (answered) return { answers: r.answers, via: "decision" };
       } catch (error) {
         const ms = performance.now() - t0;

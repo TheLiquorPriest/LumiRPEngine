@@ -38,8 +38,10 @@ export class MessageCache {
     inner.on("MESSAGE_SWIPED", (e) => this.change(e.chatId, (list) => replaced(list, e.message)));
     inner.on("MESSAGE_DELETED", (e) => this.change(e.chatId, (list) => deleted(list, e.messageId)));
     // The host saves a generation's reply and its reasoning itself: the chat is read afresh after one.
+    // A stop that saved no text (the guard's, before the prompt) changed nothing the copy holds: its
+    // staged message's removal comes as MESSAGE_DELETED, and a staged swipe stays as it was.
     inner.on("GENERATION_ENDED", (e) => this.change(e.chatId, () => false));
-    inner.on("GENERATION_STOPPED", (e) => this.change(e.chatId, () => false));
+    inner.on("GENERATION_STOPPED", (e) => this.change(e.chatId, () => e.content === ""));
     inner.on("CHAT_DELETED", (e) => this.change(e.chatId, () => false));
     const chats: HostPort["chats"] = {
       ...inner.chats,

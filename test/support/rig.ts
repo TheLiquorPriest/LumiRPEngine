@@ -1,5 +1,6 @@
 // The whole backend on the fake host: runtime, dispatcher and job runner, driven over the protocol.
 
+import type { QuietRequest } from "../../src/backend/host";
 import { isRecord } from "../../src/shared/json";
 import type { BackendToFrontend, FrontendToBackend } from "../../src/shared/protocol";
 import { PROTOCOL_VERSION } from "../../src/shared/protocol";
@@ -20,6 +21,12 @@ export interface RigOptions {
   host?: FakeHost;
   /** Character minds on, as Settings has them by default; the test answers their calls (`quietReply`). */
   minds?: boolean;
+}
+
+/** A helper that answers every mind plainly (no plans, no interrupt) and every other call with nothing. */
+export function plainMinds(req: QuietRequest): string {
+  if (!(req.messages[0]?.content ?? "").includes("You are the private mind of")) return "{}";
+  return JSON.stringify({ monologue: "Nothing yet.", depiction: "busy", intent: "Keep working.", reactions: [], plans: [], mood: "calm" });
 }
 
 export class Rig {
@@ -85,6 +92,11 @@ export class Rig {
     const reqId = `r${++this.req}`;
     const before = this.host.sent.length;
     await this.dispatch.handle({ lre: PROTOCOL_VERSION, reqId, ...request } as unknown as FrontendToBackend, this.host.userId, session);
+    // A Model use preset sets the minds' policy too (DESIGN §24.6): they stay off unless the rig was asked for them.
+    const patch = request.type === "lre.settings.set" && isRecord(request.patch) ? request.patch : null;
+    if (!this.options.minds && patch && isRecord(patch.modelUse) && typeof patch.modelUse.preset === "string" && !("minds" in patch)) {
+      await this.dispatch.handle({ lre: PROTOCOL_VERSION, reqId: `r${++this.req}`, type: "lre.settings.set", patch: { minds: { enabled: false } } } as unknown as FrontendToBackend, this.host.userId, session);
+    }
     await this.host.settle();
     const reply = this.host.sent.slice(before).find((m) => (m.type === "lre.result" || m.type === "lre.error") && m.reqId === reqId);
     if (!reply) throw new Error(`no reply to ${String(request.type)}`);

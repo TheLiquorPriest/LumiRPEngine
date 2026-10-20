@@ -438,6 +438,9 @@ describe("ledger scenarios", () => {
     expect(await cash(h, chat)).toBe(113);
     const greeting = assistantIds(h, chat)[0];
     if (!greeting) throw new Error("no greeting");
+    // Lumiverse's Continue continues the last reply, the only one the engine can start again (DESIGN
+    // §5.1); one of an earlier message, asked through the API, reaches the ledger on a host that can't stop it.
+    h.host.capabilities = { ...h.host.capabilities, cancel: false };
     const before = await h.folds(chat);
     g = await h.host.start(chat, { type: "continue", messageId: greeting });
     await h.host.finish(g, "Earlier text. [found:1000]");
@@ -637,7 +640,8 @@ describe("ledger scenarios", () => {
     expect(wins).toBeGreaterThan(70);
     expect(wins).toBeLessThan(130);
     await expectAgree(h, chat);
-  });
+    // 200 Re-runs, each stopped and started again after its engine run.
+  }, 30_000);
 
   test("a same-roll world reproduces the roll on every Re-run (L12)", async () => {
     const h = new Harness("same_roll");

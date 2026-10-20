@@ -1,5 +1,5 @@
 // Diagnostics (DESIGN §6.9): each chat's ring of records (turns, their steps with their model calls,
-// errors, interceptor runs, slow requests), kept in `userStorage/runs/<chatId>/diagnostics.json` and
+// errors, the engine run's section fills, slow requests), kept in `userStorage/runs/<chatId>/diagnostics.json` and
 // mirrored as lines to the user's `diagnostics.log` with their level and turn; and the in-flight
 // activity line, pushed to the chat's frontends as `lre.activity`.
 //
@@ -197,7 +197,9 @@ export class Diagnostics {
     const status: DiagStatus = failed !== null ? "failed" : (outcome?.status ?? "ok");
     const reason = failed !== null ? (outcome?.status === "failed" ? outcome.reason : `step ${failed} failed`) : outcome?.reason;
     this.add(at, { kind: "turn", level: status === "failed" ? "warn" : "info", turn: at.turn, phase: null, step: "turn", status, start: turn.start, end, ms: end - turn.start, ...(reason ? { reason } : {}), ...(outcome?.fix ? { fix: outcome.fix } : {}) });
-    if (failed !== null) this.activities.set(at.chatId, { chatId: at.chatId, turn: at.turn, state: "failed", label: `Failed: ${STEP_LABEL[failed.split("/").at(-1) ?? ""]?.replace("…", "") ?? failed}`, since: end });
+    // The line names only the step that failed, never a reason or a model's error: the record keeps those.
+    const step = turn.failed?.split("/").at(-1);
+    if (failed !== null) this.activities.set(at.chatId, { chatId: at.chatId, turn: at.turn, state: "failed", label: step ? `Failed: ${STEP_LABEL[step]?.replace("…", "") ?? step}` : "Failed", since: end });
     else this.activities.delete(at.chatId);
     this.send(at.chatId, at.userId);
   }

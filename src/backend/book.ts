@@ -102,7 +102,7 @@ function sortEntries(all: readonly HostBookEntry[]): { found: BookEntries; slots
 export class EngineBook {
   /** The engine's entries by book. */
   private readonly known = new Map<string, BookEntries>();
-  /** The engine entries switched on in each book (one turn's, DESIGN §5.1); read from the book the first time, so a turn a restart cut short leaves none on. */
+  /** The engine entries that may be on in each book: one turn's (DESIGN §5.1), and any found on when the book is read. */
   private readonly on = new Map<string, Set<string>>();
 
   constructor(
@@ -126,10 +126,12 @@ export class EngineBook {
     // Read the book afresh: an entry deleted in the host's UI is recreated.
     const all = await this.host.books.entries(bookId, userId);
     const { found, slots, leftoverLore } = sortEntries(all);
-    if (!this.on.has(bookId)) {
-      const engine = new Set([...found.slots.values(), ...found.twins.values(), found.narrator, found.narratorOutlet]);
-      this.on.set(bookId, new Set(all.filter((e) => engine.has(e.id) && (!e.disabled || e.content !== "")).map((e) => e.id)));
-    }
+    // Any engine entry on now is switched off by the next write unless that turn fills it: a turn a
+    // restart cut short, or an entry switched on in the host's UI.
+    const on = this.on.get(bookId) ?? new Set<string>();
+    this.on.set(bookId, on);
+    const engine = new Set([...found.slots.values(), ...found.twins.values(), found.narrator, found.narratorOutlet]);
+    for (const e of all) if (engine.has(e.id) && (!e.disabled || e.content !== "")) on.add(e.id);
     const blank = { content: "", keys: [] as string[], disabled: true, constant: false };
     for (const section of sectionsOf(world)) {
       const p = section.position;

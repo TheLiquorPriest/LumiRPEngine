@@ -4,6 +4,7 @@
 // the beat scan and the beats cap on their own.
 
 import { describe, expect, test } from "bun:test";
+import type { QuietRequest } from "../../src/backend/host";
 import type { LedgerEvent } from "../../src/shared/ledger";
 import type { JsonObject } from "../../src/shared/json";
 import { calendarOf, clockAt, clockOfLocal, dateAt, formatHHMM, formatStamp } from "../../src/engine/calendar";
@@ -24,6 +25,12 @@ import { Rig } from "../support/rig";
 
 const MARCUS = "marcus_delgado";
 
+/** Every mind a turn asks answers plainly, and every other helper call with nothing. */
+function plainly(req: QuietRequest): string {
+  if (!(req.messages[0]?.content ?? "").includes("You are the private mind of")) return "{}";
+  return JSON.stringify({ monologue: "Nothing yet.", depiction: "busy", intent: "Keep working.", reactions: [], plans: [], mood: "calm" });
+}
+
 async function folded(rig: Rig, chatId: string) {
   const core = await rig.rt.ledger.core(chatId, rig.host.userId);
   if (!core) throw new Error("not a world chat");
@@ -35,10 +42,10 @@ async function folded(rig: Rig, chatId: string) {
   return { state, world, record: head?.ledger?.swipes[String(head.swipeId)] };
 }
 
-/** Port Alder after one ordinary turn, with every helper call answered with nothing. */
+/** Port Alder after one ordinary turn, with the helper answering `plainly`. */
 async function portAlder(): Promise<{ rig: Rig; chatId: string; day: number; at: (day: number, hhmm: string) => number }> {
   const rig = new Rig({ shipped: true, minds: true });
-  rig.host.quietReply = () => "{}";
+  rig.host.quietReply = plainly;
   const worldId = await rig.newWorld("Port Alder", "modern_slice_of_life");
   const chatId = rig.host.createChat("Morning.");
   rig.body(await rig.send({ type: "lre.world", op: "attach", worldId, chatId }));
@@ -256,21 +263,21 @@ describe("time skips", () => {
     expect(calls.filter((m) => m.purpose === "skip")).toEqual([expect.objectContaining({ purpose: "skip", phase: "skip", who: "", level: null, outcome: "recorded", prompt: "default" })]);
   });
 
-  test("when the before-the-reply clock runs out the skip stops at a beat, keeps what it ran and offers Continue; the turn commits", async () => {
+  test("when the engine run's clock runs out during a skip, the run stops: nothing is generated, the clock stays, and the flag says so, with a Retry", async () => {
     const { rig, chatId, day, at } = await portAlder();
-    rig.body(await rig.send({ type: "lre.settings.set", patch: { modelUse: { budgets: { pre: { calls: 4, ms: 250 } } } } }));
+    rig.body(await rig.send({ type: "lre.settings.set", patch: { timeouts: { engineRunMs: 1000 } } }));
     await marcusPlans(rig, chatId, [at(day + 1, "19:00"), at(day + 2, "19:00")]);
     rig.rt.beatMinds = fakeMinds([], () => false, true);
-    await skipDays(rig, chatId, 3);
-    const { state, record } = await folded(rig, chatId);
-    expect(record?.status).toBe("ok");
-    // It stopped at its first beat, the one whose minds were still thinking, well short of the target.
-    const skip = ofType(record?.events, "minds.skip")[0];
-    const first = skip && "data" in skip && Array.isArray(skip.data.beats) && typeof (skip.data.beats[0] as JsonObject | undefined)?.at === "number" ? Number((skip.data.beats[0] as JsonObject).at) : NaN;
-    expect(state.clock).toBe(first);
-    expect(record?.events.find((e) => e.type === "timelapse")).toMatchObject({ stoppedBy: null, to: first });
-    const chip = (await rig.rt.view(chatId, rig.host.userId)).chips.find((c) => c.kind === "continue_timelapse");
-    expect(chip?.label).toMatch(/^Continue timelapse/);
+    const before = (await folded(rig, chatId)).state.clock;
+    rig.body(await rig.send({ type: "lre.action", chatId, action: "timelapse", params: { target: { type: "duration", minutes: 3 * 1440 }, overrides: { invitation: "note" } }, source: "palette" }));
+    const g = await rig.host.start(chatId, { type: "normal" });
+    expect(g.halted).toBe("cancelled");
+    expect(rig.host.restarts).toEqual([]);
+    expect(rig.host.chat(chatId).messages.at(-1)?.isUser).toBe(true);
+    expect((await folded(rig, chatId)).state.clock).toBe(before);
+    const flag = (await rig.rt.view(chatId, rig.host.userId)).chips.find((c) => c.kind === "engine_failed");
+    expect(flag?.detail).toMatch(/^Time limit: Engine run ran out after 1 s/);
+    expect(flag?.actions.map((a) => a.label)).toEqual(["Retry", "Diagnostics"]);
   });
 
   test("a clock already out before the first beat still takes the skip to that beat, so its Continue gets further", async () => {
@@ -297,7 +304,7 @@ describe("time skips", () => {
 
   test("no skip runs while a fight holds the clock: no one is asked, and the turn notes why", async () => {
     const rig = new Rig({ shipped: true, minds: true });
-    rig.host.quietReply = () => "{}";
+    rig.host.quietReply = plainly;
     const worldId = await rig.newWorld("Port Alder", "modern_slice_of_life");
     // The Modern profile brings combat.
     rig.body(await rig.send({ type: "lre.editor", worldId, base: null, op: "profile", profile: "modern", choices: {} }));

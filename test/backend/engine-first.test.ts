@@ -11,6 +11,7 @@ import { isRecord, type JsonObject } from "../../src/shared/json";
 import { LEDGER_NAMESPACE } from "../../src/shared/ledger";
 import { placeOfEntity } from "../../src/engine/scope";
 import { toChain } from "../../src/backend/ledger-io";
+import { NOT_LAST_REPLY } from "../../src/shared/diagnostics";
 import { Rig } from "../support/rig";
 
 const block = (name: string, content: string): HostPresetBlock => ({ id: `b_${name}`, name, content, enabled: true, marker: null, injectionTrigger: [], characterTagTrigger: [], categoryMode: null });
@@ -272,6 +273,22 @@ describe("engine first", () => {
     expect(reply.halted).toBeUndefined();
   });
 
+  test("the page asked to start the reply reads 'Waiting for the reply…' while it does; when no page shows the chat, the line says to reopen it", async () => {
+    const rig = new Rig();
+    const chatId = await rig.worldChat();
+    rig.body(await rig.send({ type: "lre.hello", chatId }, "desk"));
+    rig.host.sendUser(chatId, "I look around.");
+    await rig.host.settle();
+    const from = rig.host.sent.length;
+    expect((await rig.host.begin(chatId, { type: "normal", session: "desk" })).halted).toBe("cancelled");
+    expect(rig.host.restarts.map((r) => r.session)).toEqual(["desk"]);
+    expect(activitiesTo(rig, "desk", from).at(-1)).toBe("Waiting for the reply…");
+    // The desk goes home before starting it, and no other page shows the chat.
+    const home = rig.host.sent.length;
+    rig.body(await rig.send({ type: "lre.page", chatId: null, viewing: true }, "desk"));
+    expect(activitiesTo(rig, "desk", home).at(-1)).toBe("Ready; reopen the chat to continue");
+  });
+
   test("a page that opens the chat takes the restart from a holder that went home; the old holder's claim is refused, so one reply comes", async () => {
     const rig = new Rig();
     const chatId = await rig.worldChat();
@@ -316,9 +333,34 @@ describe("engine first", () => {
     for (const page of ["desk", "phone"]) expect(rig.body(await rig.send({ type: "lre.restart", chatId, turn: offered?.turn ?? "" }, page)).start).toBe(false);
     expect(rig.host.chat(chatId).messages.filter((m) => !m.isUser).at(-1)?.swipes).toEqual(["Quiet."]);
   });
+
+  test("a reply for an earlier message is refused before any model call: nothing is generated, nothing goes to the last reply, and the flag says why with no Retry", async () => {
+    const rig = new Rig();
+    const chatId = await rig.worldChat();
+    await rig.turn(chatId, "I look around.", "The square is quiet.");
+    await rig.turn(chatId, "I wait.", "A bell rings.");
+    const [earlier, last] = rig.host.chat(chatId).messages.filter((m) => !m.isUser).slice(-2);
+    if (!earlier || !last) throw new Error("no replies");
+    const calls = rig.rt.meter.log.length;
+    // Edit and Send in place on the first message stages a swipe on the reply after it; Lumiverse's
+    // Regenerate, the only restart there is, would make a swipe of the last reply instead.
+    const g = await rig.host.start(chatId, { type: "swipe", messageId: earlier.id });
+    expect(g.halted).toBe("cancelled");
+    expect(rig.rt.meter.log.length).toBe(calls);
+    expect(rig.host.restarts).toEqual([]);
+    const after = rig.host.chat(chatId).messages;
+    expect(after.find((m) => m.id === earlier.id)?.swipes).toEqual(["The square is quiet."]);
+    expect(after.find((m) => m.id === last.id)?.swipes).toEqual(["A bell rings."]);
+    const flag = await flagOf(rig, chatId);
+    expect(flag).toMatchObject({ messageId: last.id, detail: NOT_LAST_REPLY });
+    expect(flag?.actions).toEqual([{ id: "diagnostics", label: "Diagnostics" }]);
+  });
 });
 
-/** The activity lines sent to one page since `from` in the host's sends. */
+/** The activity lines one page got since `from` in the host's sends: those sent to it and those sent to every page. */
 function activitiesTo(rig: Rig, session: string, from: number): string[] {
-  return rig.host.sent.flatMap((m, i) => (i >= from && rig.host.sentTo[i]?.session === session && m.type === "lre.activity" && m.activity ? [m.activity.label] : []));
+  return rig.host.sent.flatMap((m, i) => {
+    const to = rig.host.sentTo[i]?.session;
+    return i >= from && (to === session || to === undefined) && m.type === "lre.activity" && m.activity ? [m.activity.label] : [];
+  });
 }

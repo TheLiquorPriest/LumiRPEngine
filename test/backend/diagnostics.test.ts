@@ -125,7 +125,7 @@ describe("activity line", () => {
 });
 
 describe("diagnostics on a running chat", () => {
-  test("a turn records its phases, the interceptor's fills and the turn, and keeps them in the chat's run folder", async () => {
+  test("a turn records its phases, the engine run's fills and the turn, and keeps them in the chat's run folder", async () => {
     const rig = new Rig();
     const chatId = await rig.worldChat();
     // A model that answers every step (with nothing to change).
@@ -136,7 +136,7 @@ describe("diagnostics on a running chat", () => {
     const turn = records.find((r) => r.kind === "turn");
     expect(turn).toBeDefined();
     const steps = records.filter((r) => r.turn === turn?.turn).map((r) => `${r.kind}:${r.phase}/${r.step}`);
-    for (const phase of ["step:pre/pre", "step:plan/plan", "interceptor:sections/interceptor", "step:read/read", "step:memory/memory"]) expect(steps).toContain(phase);
+    for (const phase of ["step:pre/pre", "step:plan/plan", "sections:sections/sections", "step:read/read", "step:memory/memory"]) expect(steps).toContain(phase);
     expect(rig.host.files.has(`${rig.host.userId}/runs/${chatId}/diagnostics.json`)).toBe(true);
     // The turn is over: the activity line went idle.
     expect(reply.activity).toBeNull();
@@ -158,7 +158,7 @@ describe("diagnostics on a running chat", () => {
     expect(pushes.at(-1)?.activity?.state).toBe("failed");
   });
 
-  test("records reach no pushed state: snapshots, deltas and the activity line carry none of their reasons", async () => {
+  test("records reach no pushed state but the failed run's flag: snapshots, deltas and the activity line carry no other reason", async () => {
     const rig = new Rig();
     const chatId = await rig.worldChat();
     rig.host.quietReply = () => {
@@ -169,7 +169,11 @@ describe("diagnostics on a running chat", () => {
     expect(JSON.stringify(records)).toContain("DIAG-SENTINEL");
     const pushed = rig.host.sent.filter((m) => m.type === "lre.state.snapshot" || m.type === "lre.state.delta" || m.type === "lre.activity");
     expect(pushed.length).toBeGreaterThan(0);
-    expect(JSON.stringify(pushed)).not.toContain("DIAG-SENTINEL");
+    // The failed run's flag says what failed and why (DESIGN §5.1); no other pushed text carries a reason.
+    const text = JSON.stringify(pushed);
+    const flagged = '"detail":"Reading your action: DIAG-SENTINEL failure"';
+    expect(text).toContain(flagged);
+    expect(text.split("DIAG-SENTINEL").length).toBe(text.split(flagged).length);
     for (const m of pushed) if (m.type === "lre.activity" && m.activity) expect(Object.keys(m.activity).sort()).toEqual(["chatId", "label", "since", "state", "turn"]);
     for (const m of pushed) if (m.type === "lre.state.snapshot") expect(isRecord(m.view) && "diagnostics" in m.view).toBe(false);
   });

@@ -25,7 +25,7 @@ import type { ContextHandlerInput, ContextVerdict, GenerationStartedEvent, HostG
 import { setAside } from "./stored-json";
 import type { Diagnostics } from "./diagnostics";
 import { messageOf } from "./diagnostics";
-import { CANNOT_STOP, STEP_LABEL } from "../shared/diagnostics";
+import { CANNOT_STOP, NOT_LAST_REPLY, STEP_LABEL } from "../shared/diagnostics";
 
 /** Resolves a chat's ledger environment; null when the chat is not a world chat. */
 export type EnvResolver = (chatId: ChatId, userId: UserId) => Promise<LedgerEnv | null>;
@@ -711,7 +711,7 @@ export class LedgerService {
   private handOver(chatId: ChatId, userId: UserId, p: Prepared): void {
     p.holder = this.viewerOf(chatId, userId);
     if (p.holder !== null) this.host.frontend.send(restartPush(chatId, p), userId, p.holder);
-    else this.host.frontend.send({ lre: PROTOCOL_VERSION, type: "lre.activity", chatId, activity: this.diag?.activityOf(chatId) ?? null }, userId);
+    else if (this.diag) this.diag.rest({ chatId, userId }, STEP_LABEL.restart ?? "Ready; reopen the chat to continue");
   }
 
   /**
@@ -917,6 +917,9 @@ export class LedgerService {
       let delivered: Delivered | null = null;
       let claimed = false;
       try {
+        // Lumiverse starts only the last reply again, so a reply for an earlier message (Edit and Send
+        // in place, a swipe of an earlier reply) is refused before any model call, never sent to the last one.
+        if (halt.target !== null && observed.at(-1)?.id !== target?.id) throw new EngineFailure("target", NOT_LAST_REPLY);
         await step("pre", () => hooks.beforePlan({ chatId, userId, core, observed, generationId: halt.id, connectionId: halt.connectionId, runKey: `${stamp}\u0000${epoch}`, signal }));
         await step("plan", async () => core.plan(halt.id, observed, false));
         await step("prose", () => hooks.afterPlan({ chatId, userId, core, observed, generationId: halt.id, signal }));
@@ -944,7 +947,8 @@ export class LedgerService {
       // Anything that changed while the engine ran makes the turn stale at once: nothing is generated.
       this.dropIfStale(chatId);
       if (this.gates.get(chatId)?.prepared !== prepared) return;
-      this.diag?.rest(at, as === "send" ? (STEP_LABEL.ready ?? "Ready: press Send for the reply") : (STEP_LABEL.restart ?? "Ready; reopen the chat to continue"));
+      // A page asked to start it starts it at once; "reopen the chat" is for when no page shows the chat.
+      this.diag?.rest(at, as === "send" ? (STEP_LABEL.ready ?? "Ready: press Send for the reply") : holder !== null || !this.host.capabilities.sessions ? (STEP_LABEL.reply ?? "Waiting for the reply…") : (STEP_LABEL.restart ?? "Ready; reopen the chat to continue"));
       // A host that names no page asks every page.
       if (prepared.holder !== null) this.host.frontend.send(restartPush(chatId, prepared), userId, prepared.holder);
       else if (!this.host.capabilities.sessions) this.host.frontend.send(restartPush(chatId, prepared), userId);
