@@ -426,7 +426,8 @@ export function buildFinanceView(hooks: FinanceHooks, ctx: ReadContext, party: E
     const next = f.status === "active" && !flowRunOf(ctx.state, f.id).ended ? nextOf(ctx, f, 31 * DAY) : null;
     if (next === null || !v) continue;
     const cents = v.cents === null ? 0 : signedFor(ctx, f, party, v.cents);
-    upcoming.push({ at: when(ctx, next), clock: next, label: f.label, cents, flow: v.id, account: own(ctx.state.entities, f.from)?.kind === "account" ? f.from : null });
+    // The account paying it, where the viewer can see it: money into theirs can come from an account of someone they can't.
+    upcoming.push({ at: when(ctx, next), clock: next, label: f.label, cents, flow: v.id, account: own(ctx.state.entities, f.from)?.kind === "account" && visible(ctx, viewer, f.from) ? f.from : null });
   }
   for (const a of accounts) {
     const cycle = cycleOf(ctx.state, a.id);
