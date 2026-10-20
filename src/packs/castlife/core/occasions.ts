@@ -60,23 +60,12 @@ export function birthdayOn(cal: Calendar, v: JsonValue | undefined, date: CalDat
   return b.day === date.day || (b.day > last && date.day === last);
 }
 
-/** A day of the world's calendar: whether it is the weekend, and the holidays on it as Calendar 4 shows them. */
-function calendarDay(ctx: ReadContext, cal: Calendar, day: number): { date: CalDate; weekend: boolean; holidays: Occasion["holidays"] } {
-  const date = dateAt(cal, clockAt(cal, day, 0));
-  const holidays = ctx.levelOf(ctx.world.pov, "calendar") >= 4 ? holidaysOn(cal, day).map((h) => ({ id: h.id, label: h.label, dayOff: h.dayOff })) : [];
-  return { date, weekend: date.weekday === 0 || date.weekday === 6, holidays };
-}
-
-/** Whether a day is a day off for everyone: the weekend, or a holiday that gives one. */
-export function dayOffOn(ctx: ReadContext, day: number): boolean {
-  const d = calendarDay(ctx, calendarOf(ctx.world), day);
-  return d.weekend || d.holidays.some((h) => h.dayOff);
-}
-
-/** The occasion of `who`'s day (`day` a day index), from the state as it stands. */
+/** The occasion of `who`'s day (`day` a day index), from the state as it stands, with the holidays as Calendar 4 shows them. */
 export function occasionOf(ctx: ReadContext, who: EntityId, day: number): Occasion {
   const cal = calendarOf(ctx.world);
-  const { date, weekend, holidays } = calendarDay(ctx, cal, day);
+  const date = dateAt(cal, clockAt(cal, day, 0));
+  const weekend = date.weekday === 0 || date.weekday === 6;
+  const holidays = ctx.levelOf(ctx.world.pov, "calendar") >= 4 ? holidaysOn(cal, day).map((h) => ({ id: h.id, label: h.label, dayOff: h.dayOff })) : [];
   const regard = optionalQuery(ctx, "regard");
   const friends = regard
     ? Object.keys(ctx.state.entities)
