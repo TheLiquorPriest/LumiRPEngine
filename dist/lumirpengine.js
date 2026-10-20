@@ -400,48 +400,6 @@ var MIND_ANSWER_FORMATS = Object.freeze({
 });
 
 // src/shared/timeouts.ts
-var HOST_LIMITS = {
-  contextHandler: {
-    what: "A context handler, per call",
-    minMs: 1000,
-    maxMs: 120000,
-    source: "src/spindle/worker-host.ts:4498-4500 (the clamp), src/spindle/context-handler.ts:64-78 (the timer)",
-    effect: "Lumiverse aborts the handler; a required one stops the generation, any other is skipped and the generation goes on without it."
-  },
-  decision: {
-    what: "A Decision call (decisions.evaluate)",
-    maxMs: 30000,
-    source: "src/services/decisions.service.ts:47",
-    effect: "The call fails with “Decision evaluation timed out after 30 seconds”; the step falls back to the helper."
-  },
-  processStartup: {
-    what: "A background process's start-up",
-    minMs: 1000,
-    maxMs: 120000,
-    source: "src/spindle/worker-host-process-api.ts:768",
-    effect: "Lumiverse stops the process as timed out; its job fails."
-  },
-  processHeartbeat: {
-    what: "The gap between a background process's heartbeats",
-    minMs: 1000,
-    maxMs: 120000,
-    noneMs: 0,
-    source: "src/spindle/worker-host-process-api.ts:769 (the clamp), 273-286 (the watchdog; 0 checks nothing)",
-    effect: "Lumiverse terminates the process (“Backend process heartbeat timed out”); its job fails."
-  },
-  sharedRpc: {
-    what: "Another extension's read of LumiRPEngine's shared endpoint (LumiRPEngine Studio)",
-    maxMs: 1e4,
-    source: "src/spindle/worker-host.ts:971, 1715-1719",
-    effect: "The reader's request fails as timed out."
-  },
-  socketIdle: {
-    what: "An idle event socket (the command line and MCP server)",
-    maxMs: 120000,
-    source: "Bun's WebSocket idle timeout: src/app.ts:7 takes hono/bun's `websocket`, and src/main.ts:293-309 sets only the HTTP idleTimeout",
-    effect: "Lumiverse closes the socket; the client pings every 45 s to keep it open."
-  }
-};
 var MIN = 60000;
 var TIMEOUTS = {
   engineRunMs: {
@@ -2133,7 +2091,6 @@ function readAdjudication(raw) {
 var HELPER_MAX_TOKENS = 8192;
 var DEFAULT_HELPER = Object.freeze({ connectionId: null, model: null, effort: "inherit", maxTokens: HELPER_MAX_TOKENS, params: Object.freeze({}) });
 var DEFAULT_STEP_LORE = Object.freeze({ policy: "prefetch", tokens: 1200 });
-var CONTEXT_HANDLER_MAX_MS = HOST_LIMITS.contextHandler.maxMs;
 var SPEED_DEFAULT = Object.freeze({ mode: "offer", thresholdMinutes: 30 });
 var SPEED_THRESHOLD_MINUTES = [1, 7 * 1440];
 var EXTRACTION_DEFAULTS = Object.freeze({

@@ -4416,6 +4416,7 @@ var ROLE = {
   keep_report: "decision",
   contradiction: "decision",
   read_failed: "decision",
+  engine_failed: "decision",
   retry: "decision",
   retry_read: "decision",
   reread: "decision",
@@ -4440,6 +4441,7 @@ var ROLE = {
 var TONE = {
   decline: "neg",
   read_failed: "neg",
+  engine_failed: "neg",
   refused: "neg",
   degraded: "warn",
   pending: "warn",
@@ -4468,6 +4470,828 @@ function chipRole(chip) {
 }
 function chipTone(chip) {
   return TONE[chip.kind];
+}
+
+// src/shared/minds.ts
+var FIDELITIES = ["live", "near", "far", "background"];
+var DEFAULT_FIDELITY_WEIGHTS = Object.freeze({
+  here: 45,
+  nearby: 20,
+  mentioned: 40,
+  regard: 10,
+  knows: 10,
+  owner: 15,
+  track: 8,
+  roles: { antagonist: 20 },
+  rule: 5,
+  pending: 15,
+  band: { principal: 15, supporting: 5, background: 0 },
+  recent: 10
+});
+var DEFAULT_FIDELITY_THRESHOLDS = Object.freeze({ live: 60, near: 35, far: 15 });
+var DEFAULT_MINDS_MEMORY = Object.freeze({
+  witness: { show: 8 },
+  recall: { recent: 4, relevant: 4, tokens: 4000 },
+  notes: { show: 8, keep: 24 },
+  commitments: { show: 8 },
+  salience: { halfLifeDays: 7, floor: 0.5 },
+  consolidate: { enabled: true, periodDays: 1 }
+});
+var DEFAULT_WORLD_MINDS = Object.freeze({
+  secrecy: "brief",
+  weights: DEFAULT_FIDELITY_WEIGHTS,
+  thresholds: DEFAULT_FIDELITY_THRESHOLDS,
+  always: null,
+  never: null,
+  memory: DEFAULT_MINDS_MEMORY
+});
+var MINDS_RANGES = {
+  weight: [-100, 200],
+  threshold: [0, 1000],
+  show: [0, 64],
+  keep: [1, 64],
+  recallTokens: [0, Number.MAX_SAFE_INTEGER],
+  halfLifeDays: [0.1, 3650],
+  floor: [0, 5],
+  periodDays: [0.1, 365]
+};
+var num2 = (v, [lo, hi], fallback) => typeof v === "number" && Number.isFinite(v) && v >= lo && v <= hi ? v : fallback;
+var whole = (v, range, fallback) => Math.round(num2(v, range, fallback));
+var obj2 = (v) => isRecord(v) ? v : {};
+function selectorOrNull(v) {
+  if (!isRecord(v))
+    return null;
+  const out = {};
+  const list = (x) => Array.isArray(x) && x.every((s) => typeof s === "string") ? x.slice(0, 200) : undefined;
+  const ids = list(v.ids);
+  const kind = list(v.kind);
+  const tier = list(v.tier);
+  const memberOf = list(v.memberOf);
+  const tag = list(v.tag);
+  if (ids)
+    out.ids = ids;
+  if (kind)
+    out.kind = kind;
+  if (tier)
+    out.tier = tier;
+  if (memberOf)
+    out.memberOf = memberOf;
+  if (tag)
+    out.tag = tag;
+  if (isRecord(v.class)) {
+    const classes = {};
+    for (const [facet, values] of Object.entries(v.class)) {
+      const vs = list(values);
+      if (safeKey(facet) && vs)
+        classes[facet] = vs;
+    }
+    out.class = classes;
+  }
+  return Object.keys(out).length > 0 ? out : null;
+}
+function memoryConfigOf(raw, base = DEFAULT_MINDS_MEMORY) {
+  const m = obj2(raw);
+  const witness = obj2(m.witness);
+  const recall = obj2(m.recall);
+  const notes = obj2(m.notes);
+  const commitments = obj2(m.commitments);
+  const salience = obj2(m.salience);
+  const consolidate = obj2(m.consolidate);
+  return {
+    witness: { show: whole(witness.show, MINDS_RANGES.show, base.witness.show) },
+    recall: { recent: whole(recall.recent, MINDS_RANGES.show, base.recall.recent), relevant: whole(recall.relevant, MINDS_RANGES.show, base.recall.relevant), tokens: whole(recall.tokens, MINDS_RANGES.recallTokens, base.recall.tokens) },
+    notes: { show: whole(notes.show, MINDS_RANGES.show, base.notes.show), keep: whole(notes.keep, MINDS_RANGES.keep, base.notes.keep) },
+    commitments: { show: whole(commitments.show, MINDS_RANGES.show, base.commitments.show) },
+    salience: { halfLifeDays: num2(salience.halfLifeDays, MINDS_RANGES.halfLifeDays, base.salience.halfLifeDays), floor: num2(salience.floor, MINDS_RANGES.floor, base.salience.floor) },
+    consolidate: { enabled: typeof consolidate.enabled === "boolean" ? consolidate.enabled : base.consolidate.enabled, periodDays: num2(consolidate.periodDays, MINDS_RANGES.periodDays, base.consolidate.periodDays) }
+  };
+}
+function worldMindsOf(world) {
+  const raw = obj2(world.minds);
+  const w = obj2(raw.weights);
+  const band = obj2(w.band);
+  const d = DEFAULT_FIDELITY_WEIGHTS;
+  const weight = (v, fallback) => num2(v, MINDS_RANGES.weight, fallback);
+  const roles = {};
+  const rawRoles = isRecord(w.roles) ? w.roles : d.roles;
+  for (const [value, points] of Object.entries(rawRoles))
+    if (safeKey(value) && typeof points === "number" && Number.isFinite(points))
+      roles[value] = weight(points, 0);
+  const t = obj2(raw.thresholds);
+  const far = num2(t.far, MINDS_RANGES.threshold, DEFAULT_FIDELITY_THRESHOLDS.far);
+  const near = Math.max(far, num2(t.near, MINDS_RANGES.threshold, DEFAULT_FIDELITY_THRESHOLDS.near));
+  const live = Math.max(near, num2(t.live, MINDS_RANGES.threshold, DEFAULT_FIDELITY_THRESHOLDS.live));
+  return {
+    secrecy: raw.secrecy === "full" ? "full" : "brief",
+    weights: {
+      here: weight(w.here, d.here),
+      nearby: weight(w.nearby, d.nearby),
+      mentioned: weight(w.mentioned, d.mentioned),
+      regard: weight(w.regard, d.regard),
+      knows: weight(w.knows, d.knows),
+      owner: weight(w.owner, d.owner),
+      track: weight(w.track, d.track),
+      roles,
+      rule: weight(w.rule, d.rule),
+      pending: weight(w.pending, d.pending),
+      band: { principal: weight(band.principal, d.band.principal), supporting: weight(band.supporting, d.band.supporting), background: weight(band.background, d.band.background) },
+      recent: weight(w.recent, d.recent)
+    },
+    thresholds: { live, near, far },
+    always: selectorOrNull(raw.always),
+    never: selectorOrNull(raw.never),
+    memory: memoryConfigOf(raw.memory)
+  };
+}
+function limitOf(limit) {
+  return limit === "none" ? Number.POSITIVE_INFINITY : limit;
+}
+var MIND_PURPOSES = ["mind", "memory", "skip", "consolidate"];
+function isMindPurpose(purpose) {
+  return MIND_PURPOSES.includes(purpose);
+}
+function worldMindTemplate(world, purpose) {
+  return Object.values(world.steps).filter((t) => t.purpose === purpose && t.template.trim() !== "").sort((a, b) => a.id.localeCompare(b.id))[0];
+}
+var MINDS_PRESETS = Object.freeze({
+  lean: { enabled: false, liveLimit: 3, nearRefresh: { scene: true, mention: true, turns: 6, minutes: 120 }, farRefreshMinutes: 1440, refreshLimit: 1, memoryLevels: [], tokens: 1200, skip: { maxBeats: 4, maxMindsPerBeat: 2 } },
+  standard: { enabled: true, liveLimit: 3, nearRefresh: { scene: true, mention: true, turns: 6, minutes: 120 }, farRefreshMinutes: 1440, refreshLimit: 2, memoryLevels: ["live"], tokens: 2400, skip: { maxBeats: 6, maxMindsPerBeat: 3 } },
+  full: { enabled: true, liveLimit: "none", nearRefresh: { scene: true, mention: true, turns: 4, minutes: 60 }, farRefreshMinutes: 720, refreshLimit: "none", memoryLevels: ["live", "near"], tokens: 4000, skip: { maxBeats: "none", maxMindsPerBeat: "none" } }
+});
+function defaultMindsSettings(preset = "standard") {
+  return { ...structuredClone(MINDS_PRESETS[preset]), memory: {}, prompts: {} };
+}
+var MINDS_DEFAULTS = Object.freeze(defaultMindsSettings());
+var MIND_PROMPT_MAX = 20000;
+var PLAN_KINDS = ["errand", "meet", "visit", "work", "rest", "leisure", "pay", "lend", "other"];
+var PLAN_PRIORITY = { min: 1, max: 5, normal: 3 };
+var COMMITMENT_KINDS = ["promise", "debt", "grudge", "favour", "plan", "other"];
+var COMMITMENT_STATUSES = ["open", "kept", "broken", "released"];
+var MIND_TEXT_CAPS = {
+  monologue: 1200,
+  depiction: 600,
+  intent: 300,
+  reaction: 200,
+  reactions: 4,
+  plans: 4,
+  planWhat: 160,
+  mood: 40,
+  interrupt: 200,
+  note: 300,
+  notes: 4,
+  commitment: 240,
+  commitments: 3,
+  summary: 900,
+  told: 240,
+  tolds: 3,
+  reason: 160
+};
+var MIND_PROMPT_DEFAULTS = Object.freeze({
+  mind: [
+    "You are the private mind of {{character}} in the roleplay world {{world}}. Think as {{character}}, from only what {{character}} knows: the context below is everything they perceive and remember. Other people's private thoughts are closed to you; ignore any narration of them in the recalled turns.",
+    "Decide how {{character}} reads this moment and what they intend. Everyone else decides for themselves: never script their actions or replies, and never plan around what they will do. Intend broadly, so the intent holds whatever they do. Write no narration and no dialogue."
+  ].join(`
+`),
+  memory: "You keep the memory of {{character}} in the roleplay world {{world}}. Below is what {{character}} knows, then the turn that just happened, as it was written. Only what was written happened, and only what {{character}} could see or hear of it counts; ignore narration of other people's private thoughts.",
+  skip: [
+    "The player character in the roleplay world {{world}} is skipping ahead in time. Below are the skip's span, the moments the engine already found in it, and what the people involved intend.",
+    "Propose further moments inside the span where something worth stopping for may happen: someone acting on a plan that involves the player character, a deadline, an occasion. Only moments the context supports; never invent people or places."
+  ].join(`
+`),
+  consolidate: "You keep the long-term memory of {{character}} in the roleplay world {{world}}. Fold the older notes below into their summary: keep what still matters to them, let the rest go, and keep everything the summary already holds that is still true."
+});
+var MIND_ANSWER_FORMATS = Object.freeze({
+  mind: [
+    'Answer with JSON only: {"monologue": "...", "depiction": "...", "intent": "...", "reactions": ["..."], "plans": [{"what": "...", "kind": "errand|meet|visit|work|rest|leisure|pay|lend|other", "when": {"from": "YYYY-MM-DD HH:MM", "to": "YYYY-MM-DD HH:MM"}, "where": "a place", "with": ["a name"], "priority": 3, "amount": 20}], "mood": "...", "interrupt": {"reason": "..."}}',
+    "- monologue: their private reasoning in the first person, at most six sentences.",
+    "- depiction: how they come across right now, as behaviour anyone present could see (posture, tone, what they do). Never a secret, an unspoken reason or a thought.",
+    "- intent: what they mean to do next, in one sentence.",
+    '- reactions: up to three short conditional reactions ("if pressed about the cellar, changes the subject").',
+    "- plans: only real intentions for later, with local times; priority 1 (whenever it fits) to 5 (it must happen); kind pay or lend, with amount, when they mean to hand someone money, and no amount otherwise. Leave the list empty when there are none.",
+    "- mood: one or two words.",
+    "- interrupt: only when the moment is a beat inside a time skip and what they'd do now would interrupt the player character's skipped time (seeking them out, calling them). Leave it out otherwise."
+  ].join(`
+`),
+  memory: [
+    'Answer with JSON only: {"notes": [{"text": "...", "salience": 3}], "commitments": [{"kind": "promise|debt|grudge|favour|plan|other", "with": ["a name"], "text": "...", "due": "YYYY-MM-DD HH:MM"}], "resolved": [{"id": "...", "status": "kept|broken|released"}], "plans": [{"what": "...", "kind": "errand|meet|visit|work|rest|leisure|pay|lend|other", "when": {"from": "YYYY-MM-DD HH:MM", "to": "YYYY-MM-DD HH:MM"}, "where": "a place", "with": ["a name"], "priority": 3, "amount": 20}], "told": [{"to": ["a name"], "what": "..."}], "summary": "..."}',
+    "- notes: at most three things they will remember, in their own perspective; salience 1 (passing) to 5 (unforgettable).",
+    "- commitments: promises, debts, grudges, favours and plans with someone that this turn made; due only when a time was set.",
+    "- resolved: their open commitments (listed with ids) that this turn kept, broke or released.",
+    "- plans: intentions with times that this turn formed; kind pay or lend, with amount, when they mean to hand someone money, and no amount otherwise.",
+    "- told: what they told whom in this turn, in a few words each.",
+    "- summary: their one-paragraph summary rewritten, only when this turn changed who they are or what they're about; leave it out otherwise.",
+    "Use empty lists for anything the turn didn't give."
+  ].join(`
+`),
+  skip: 'Answer with JSON only: {"beats": [{"at": "YYYY-MM-DD HH:MM", "reason": "..."}]}, at most five, in time order; an empty list when there are none.',
+  consolidate: 'Answer with JSON only: {"summary": "..."}: at most 900 characters of plain prose, in their own perspective.'
+});
+
+// src/shared/timeouts.ts
+var TIMER_MAX_MS = 2147483647;
+var HOST_LIMITS = {
+  contextHandler: {
+    what: "A context handler, per call",
+    minMs: 1000,
+    maxMs: 120000,
+    source: "src/spindle/worker-host.ts:4498-4500 (the clamp), src/spindle/context-handler.ts:64-78 (the timer)",
+    effect: "Lumiverse aborts the handler; a required one stops the generation, any other is skipped and the generation goes on without it."
+  },
+  decision: {
+    what: "A Decision call (decisions.evaluate)",
+    maxMs: 30000,
+    source: "src/services/decisions.service.ts:47",
+    effect: "The call fails with “Decision evaluation timed out after 30 seconds”; the step falls back to the helper."
+  },
+  processStartup: {
+    what: "A background process's start-up",
+    minMs: 1000,
+    maxMs: 120000,
+    source: "src/spindle/worker-host-process-api.ts:768",
+    effect: "Lumiverse stops the process as timed out; its job fails."
+  },
+  processHeartbeat: {
+    what: "The gap between a background process's heartbeats",
+    minMs: 1000,
+    maxMs: 120000,
+    noneMs: 0,
+    source: "src/spindle/worker-host-process-api.ts:769 (the clamp), 273-286 (the watchdog; 0 checks nothing)",
+    effect: "Lumiverse terminates the process (“Backend process heartbeat timed out”); its job fails."
+  },
+  sharedRpc: {
+    what: "Another extension's read of LumiRPEngine's shared endpoint (LumiRPEngine Studio)",
+    maxMs: 1e4,
+    source: "src/spindle/worker-host.ts:971, 1715-1719",
+    effect: "The reader's request fails as timed out."
+  },
+  socketIdle: {
+    what: "An idle event socket (the command line and MCP server)",
+    maxMs: 120000,
+    source: "Bun's WebSocket idle timeout: src/app.ts:7 takes hono/bun's `websocket`, and src/main.ts:293-309 sets only the HTTP idleTimeout",
+    effect: "Lumiverse closes the socket; the client pings every 45 s to keep it open."
+  }
+};
+var TIMEOUT_KEYS = ["engineRunMs", "preLookupMs", "postReplyMs", "postLookupMs", "guardMs", "requestMs", "caveatsMs", "mindsRunMs", "jobCallMs", "tokenCountMs", "laneStartupMs", "laneHeartbeatMs"];
+var MIN = 60000;
+var TIMEOUTS = {
+  engineRunMs: {
+    label: "Engine run",
+    group: "turn",
+    limits: "Everything the engine does before the reply is generated: reading your action, people's choices, judging your approach, puzzle answers, the minds, the plan, the brief and the outline.",
+    fires: "The engine run stops: no reply is generated, and the chat says which step ran out, with a Retry.",
+    defaultMs: 5 * MIN,
+    minMs: 1000,
+    none: "the run takes as long as it needs"
+  },
+  preLookupMs: {
+    label: "Lore lookups before the reply",
+    group: "turn",
+    limits: "How long after the engine run starts a helper may still ask for lore; a lookup also starts only while a third of the run's time is left.",
+    fires: "Helpers answer with the lore they already have.",
+    defaultMs: 2 * MIN,
+    minMs: 0,
+    zero: "no lookups",
+    none: "lookups may start until the run's last third"
+  },
+  postReplyMs: {
+    label: "Reading the reply",
+    group: "turn",
+    limits: "Everything the engine asks a model after the reply: what changed, the contradiction check, people elsewhere, suggested choices, memory.",
+    fires: "The reads still waiting are skipped; the reply stands, and Re-read tries again.",
+    defaultMs: 5 * MIN,
+    minMs: 0,
+    zero: "no model calls after the reply",
+    none: "the reads take as long as they need"
+  },
+  postLookupMs: {
+    label: "Lore lookups after the reply",
+    group: "turn",
+    limits: "How long after the reply's reading starts a helper may still ask for lore; a lookup also starts only while a third of the reading's time is left.",
+    fires: "Helpers answer with the lore they already have.",
+    defaultMs: 2 * MIN,
+    minMs: 0,
+    zero: "no lookups",
+    none: "lookups may start until the reading's last third"
+  },
+  guardMs: {
+    label: "Generation guard",
+    group: "turn",
+    limits: "Lumiverse's wait for the engine's check, as a generation starts, that the engine's lore entries are fresh. The check itself is instant; this matters only while the engine is busy.",
+    fires: "Lumiverse stops the generation, so nothing goes out with stale entries.",
+    defaultMs: 2 * MIN,
+    minMs: 1000,
+    none: "as long as Lumiverse waits",
+    host: "contextHandler"
+  },
+  requestMs: {
+    label: "Engine requests",
+    group: "app",
+    limits: "How long this tab waits for the engine to answer a request: a view, an edit, a setting.",
+    fires: "The tab says the engine didn't answer; the engine may still finish the request.",
+    defaultMs: 5 * MIN,
+    minMs: 1000,
+    none: "the tab waits as long as it takes"
+  },
+  caveatsMs: {
+    label: "Preset check",
+    group: "app",
+    limits: "How long Settings → Caveats waits for its test prompt of the chat before saying the check is still running.",
+    fires: "Caveats says the check is still running; it finishes in the background for the next look.",
+    defaultMs: MIN,
+    minMs: 0,
+    zero: "always answer at once",
+    none: "wait for the check (Engine requests still bounds the tab's wait)"
+  },
+  mindsRunMs: {
+    label: "Minds run on demand",
+    group: "work",
+    limits: "A minds run started from GM → Minds, from start to end.",
+    fires: "The run stops; the minds it finished are kept.",
+    defaultMs: 10 * MIN,
+    minMs: 1000,
+    none: "the run goes on until it ends or you cancel it"
+  },
+  jobCallMs: {
+    label: "Import and Refine calls",
+    group: "work",
+    limits: "Each model call of an Import, a Refine, a lore index or a map description in Build.",
+    fires: "That call counts as failed; the job goes on with what the other calls proposed.",
+    defaultMs: 10 * MIN,
+    minMs: 1000,
+    none: "a call takes as long as it needs (Cancel still stops the job)"
+  },
+  tokenCountMs: {
+    label: "Token counts",
+    group: "work",
+    limits: "How long Lumiverse's tokenizer may take to count a section before the engine's estimate stands in for it.",
+    fires: "The section is priced by the engine's estimate, which stays above the real count.",
+    defaultMs: 30000,
+    minMs: 0,
+    zero: "always the estimate",
+    none: "wait for every count"
+  },
+  laneStartupMs: {
+    label: "Background lane start-up",
+    group: "work",
+    limits: "How long Playtest and Check world's background process may take to start.",
+    fires: "Lumiverse stops the process and the job fails.",
+    defaultMs: MIN,
+    minMs: 1000,
+    none: "as long as Lumiverse waits",
+    host: "processStartup"
+  },
+  laneHeartbeatMs: {
+    label: "Background lane heartbeat",
+    group: "work",
+    limits: "The longest gap between the background process's heartbeats; it beats after each simulated day or turn.",
+    fires: "Lumiverse terminates the process and the job fails.",
+    defaultMs: MIN,
+    minMs: 1000,
+    none: "Lumiverse checks no heartbeat",
+    host: "processHeartbeat"
+  }
+};
+function formatMs(ms) {
+  if (!Number.isFinite(ms))
+    return "no limit";
+  if (ms < 1000)
+    return `${Math.round(ms)} ms`;
+  if (ms < MIN)
+    return `${Number((ms / 1000).toFixed(1))} s`;
+  const totalSeconds = Math.round(ms / 1000);
+  const h = Math.floor(totalSeconds / 3600);
+  const m = Math.floor(totalSeconds % 3600 / 60);
+  const s = totalSeconds % 60;
+  return [h > 0 ? `${h} h` : "", m > 0 ? `${m} min` : "", s > 0 && h === 0 ? `${s} s` : ""].filter((p) => p !== "").join(" ");
+}
+function timerMs(limit) {
+  const ms = limitOf(limit);
+  return ms >= TIMER_MAX_MS ? null : Math.max(0, ms);
+}
+
+// src/shared/diagnostics.ts
+var CANNOT_STOP = "This Lumiverse can't stop generation; engine state may be missing.";
+
+// src/frontend/diagnostics.tsx
+var OPEN_DIAGNOSTICS_EVENT = "lre:open-diagnostics";
+function openDiagnostics() {
+  window.dispatchEvent(new CustomEvent(OPEN_DIAGNOSTICS_EVENT));
+}
+function elapsedText(ms) {
+  const s = Math.max(0, Math.floor(ms / 1000));
+  return s < 60 ? `${s} s` : `${Math.floor(s / 60)} m ${String(s % 60).padStart(2, "0")} s`;
+}
+function useActivity() {
+  const app = useApp();
+  const activity = useSelect(app.sync, (state) => state.activity);
+  const [now, setNow] = d2(() => Date.now());
+  const running = activity?.state === "running";
+  A(() => {
+    if (!running)
+      return;
+    setNow(Date.now());
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, [running]);
+  return { activity, now };
+}
+function ActivityLine(props) {
+  const { activity, now } = useActivity();
+  if (!activity)
+    return null;
+  if (activity.state === "failed")
+    return /* @__PURE__ */ u3("button", {
+      type: "button",
+      class: "lre-activity failed",
+      "data-lre-activity": "failed",
+      onClick: openDiagnostics,
+      "aria-label": `${activity.label}. Open Diagnostics`,
+      title: "Open Diagnostics",
+      children: [
+        /* @__PURE__ */ u3(Icon, {
+          name: "alert",
+          size: 16
+        }, undefined, false, undefined, this),
+        props.compact ? null : /* @__PURE__ */ u3("span", {
+          class: "lre-activity-label",
+          children: activity.label
+        }, undefined, false, undefined, this)
+      ]
+    }, undefined, true, undefined, this);
+  const elapsed = elapsedText(now - activity.since);
+  return /* @__PURE__ */ u3("span", {
+    class: "lre-activity",
+    "data-lre-activity": "running",
+    role: "status",
+    "aria-live": "polite",
+    "aria-label": `${activity.label} ${elapsed}`,
+    children: [
+      /* @__PURE__ */ u3("span", {
+        class: "lre-chat-pulse",
+        "aria-hidden": "true"
+      }, undefined, false, undefined, this),
+      props.compact ? null : /* @__PURE__ */ u3("span", {
+        class: "lre-activity-label",
+        children: activity.label
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3("span", {
+        class: "lre-num lre-activity-time",
+        children: elapsed
+      }, undefined, false, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+}
+function ActivityBanner() {
+  const app = useApp();
+  const chatId = useSelect(app.sync, (state) => state.chatId);
+  const onPage = useSelect(app.ui, (ui) => ui.mode === "settings" && ui.settings.page === "diagnostics");
+  const { activity, now } = useActivity();
+  if (onPage && activity?.state === "failed")
+    return null;
+  if (!activity || !chatId)
+    return null;
+  if (activity.state === "running")
+    return /* @__PURE__ */ u3("div", {
+      class: "lre-activity-bar",
+      "data-lre-activity-bar": "running",
+      role: "status",
+      "aria-live": "polite",
+      children: [
+        /* @__PURE__ */ u3("span", {
+          class: "lre-chat-pulse",
+          "aria-hidden": "true"
+        }, undefined, false, undefined, this),
+        /* @__PURE__ */ u3("span", {
+          class: "lre-activity-label",
+          children: activity.label
+        }, undefined, false, undefined, this),
+        /* @__PURE__ */ u3("span", {
+          class: "lre-num lre-activity-time",
+          children: elapsedText(now - activity.since)
+        }, undefined, false, undefined, this)
+      ]
+    }, undefined, true, undefined, this);
+  return /* @__PURE__ */ u3("div", {
+    class: "lre-activity-banner",
+    "data-lre-activity-bar": "failed",
+    children: /* @__PURE__ */ u3(Banner, {
+      tone: "neg",
+      title: activity.label,
+      actions: /* @__PURE__ */ u3(M, {
+        children: [
+          /* @__PURE__ */ u3(Button, {
+            size: "sm",
+            variant: "secondary",
+            icon: "list",
+            onClick: openDiagnostics,
+            children: "Diagnostics"
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3(Button, {
+            size: "sm",
+            variant: "ghost",
+            onClick: () => void app.request({ type: "lre.diag", chatId, op: "dismiss" }),
+            children: "Dismiss"
+          }, undefined, false, undefined, this)
+        ]
+      }, undefined, true, undefined, this),
+      children: "The engine didn't finish its work for the last reply. Diagnostics says which step failed and what to change."
+    }, undefined, false, undefined, this)
+  }, undefined, false, undefined, this);
+}
+function CannotStopNotice(props) {
+  const app = useApp();
+  const canStop = useSelect(app.sync, (state) => state.canStop);
+  const world = useSelect(app.sync, (state) => state.view !== null && state.view.status !== "not_world");
+  if (canStop !== false || props.inChat && !world)
+    return null;
+  return /* @__PURE__ */ u3(Banner, {
+    tone: "warn",
+    title: "The engine can't run before replies here",
+    children: [
+      CANNOT_STOP,
+      " Update Lumiverse to one that lets extensions stop a generation."
+    ]
+  }, undefined, true, undefined, this);
+}
+var FILTERS = [
+  { value: "all", label: "All" },
+  { value: "problems", label: "Problems" },
+  { value: "calls", label: "Model calls" },
+  { value: "slow", label: "Slow" }
+];
+function filterRecords(records, filter) {
+  if (filter === "problems")
+    return records.filter((r) => r.status === "failed" || r.level === "warn" || r.level === "error");
+  if (filter === "calls")
+    return records.filter((r) => (r.calls?.length ?? 0) > 0);
+  if (filter === "slow")
+    return records.filter((r) => r.kind === "slow");
+  return [...records];
+}
+function groupByTurn(records) {
+  const groups = [];
+  const byTurn = new Map;
+  for (const r of records) {
+    const known = r.turn !== null ? byTurn.get(r.turn) : undefined;
+    if (known) {
+      known.records.push(r);
+      known.start = Math.min(known.start, r.start);
+      continue;
+    }
+    const group = { turn: r.turn, records: [r], start: r.start };
+    groups.push(group);
+    if (r.turn !== null)
+      byTurn.set(r.turn, group);
+  }
+  for (const g of groups)
+    g.records.sort((a, b) => Number(a.kind === "turn") - Number(b.kind === "turn") || a.start - b.start || a.seq - b.seq);
+  return groups.sort((a, b) => b.start - a.start);
+}
+function callText(r) {
+  return (r.calls ?? []).map((c) => `    call ${c.purpose} via ${c.via} on ${c.connection} / ${c.model}: ${c.ok ? "ok" : "failed"}, ${c.tokensIn ?? "?"} in, ${c.tokensOut ?? "?"} out${c.maxTokens !== null ? ` of ${c.maxTokens}` : ""}, finish ${c.finishReason || "-"}, ${Math.round(c.ms)} ms${c.error ? `: ${c.error}` : ""}`);
+}
+function diagText(records) {
+  return records.flatMap((r) => [
+    `${new Date(r.start).toISOString()} ${r.level.toUpperCase().padEnd(5)} ${r.turn ? `[turn ${r.turn.slice(0, 8)}] ` : ""}${r.kind} ${r.phase ? `${r.phase}/` : ""}${r.step} ${r.status} ${Math.round(r.ms)} ms${r.reason ? `: ${r.reason}` : ""}`,
+    ...r.fix ? [`    fix: ${r.fix}`] : [],
+    ...r.path ? [`    path: ${r.path}`] : [],
+    ...(r.sections ?? []).map((s) => `    section ${s.slot}${s.outlet ? ` → ${s.outlet}` : ""}: ${s.filled ? "filled" : "empty"}`),
+    ...callText(r)
+  ]).join(`
+`);
+}
+var STATUS_TONE = { ok: "pos", failed: "neg", skipped: "neutral" };
+function msText(ms) {
+  return ms >= 1000 ? `${(ms / 1000).toFixed(1)} s` : `${Math.round(ms)} ms`;
+}
+function titleOf(r) {
+  if (r.kind === "turn")
+    return "The turn";
+  return r.phase && r.phase !== r.step && r.phase !== "request" ? `${r.phase} · ${r.step}` : r.step;
+}
+function RecordRow(props) {
+  const r = props.record;
+  const calls = r.calls ?? [];
+  const tokens = calls.reduce((n, c) => n + (c.tokensOut ?? 0), 0);
+  const subtitle = [r.reason, calls.length > 0 ? `${calls.length} call${calls.length === 1 ? "" : "s"}, ${tokens} tokens out` : null].filter((s) => s).join(" · ");
+  return /* @__PURE__ */ u3("div", {
+    class: "lre-diag-row",
+    "data-lre-diag-status": r.status,
+    "data-lre-diag-kind": r.kind,
+    children: [
+      /* @__PURE__ */ u3(ListRow, {
+        icon: r.status === "failed" ? "alert" : r.status === "skipped" ? "minus" : r.kind === "slow" ? "hourglass" : "check",
+        title: titleOf(r),
+        subtitle: subtitle || undefined,
+        value: msText(r.ms),
+        valueTone: r.status === "failed" ? "neg" : "muted",
+        badge: r.kind === "slow" ? /* @__PURE__ */ u3(Badge, {
+          tone: "warn",
+          children: "slow"
+        }, undefined, false, undefined, this) : /* @__PURE__ */ u3(Badge, {
+          tone: STATUS_TONE[r.status],
+          children: r.status
+        }, undefined, false, undefined, this)
+      }, undefined, false, undefined, this),
+      r.fix ? /* @__PURE__ */ u3("p", {
+        class: "lre-diag-fix",
+        children: [
+          "Fix: ",
+          r.fix
+        ]
+      }, undefined, true, undefined, this) : null,
+      calls.length > 0 || (r.sections?.length ?? 0) > 0 ? /* @__PURE__ */ u3("ul", {
+        class: "lre-diag-calls",
+        children: [
+          calls.map((c, i) => /* @__PURE__ */ u3("li", {
+            "data-lre-diag-call": c.ok && c.finishReason !== "length" ? "ok" : "bad",
+            children: [
+              /* @__PURE__ */ u3("span", {
+                class: "lre-num",
+                children: c.purpose
+              }, undefined, false, undefined, this),
+              " · ",
+              c.model,
+              " on ",
+              c.connection,
+              " · ",
+              c.tokensIn ?? "?",
+              " in / ",
+              c.tokensOut ?? "?",
+              " out",
+              c.maxTokens !== null ? ` of ${c.maxTokens}` : "",
+              " · ",
+              c.finishReason || "no finish reason",
+              " · ",
+              msText(c.ms),
+              c.error ? ` · ${c.error}` : ""
+            ]
+          }, i, true, undefined, this)),
+          (r.sections ?? []).map((s) => /* @__PURE__ */ u3("li", {
+            "data-lre-diag-call": s.filled ? "ok" : "bad",
+            children: [
+              s.slot,
+              s.outlet ? ` → ${s.outlet}` : " (world placement)",
+              ": ",
+              s.filled ? "filled" : "empty"
+            ]
+          }, s.slot, true, undefined, this))
+        ]
+      }, undefined, true, undefined, this) : null
+    ]
+  }, undefined, true, undefined, this);
+}
+function DiagnosticsPage() {
+  const app = useApp();
+  const chatId = useSelect(app.sync, (state) => state.chatId);
+  const [revealed, setRevealed] = d2(false);
+  const [records, setRecords] = d2(null);
+  const [filter, setFilter] = d2("all");
+  const [busy, run] = useBusy();
+  const load = () => run(async () => {
+    if (!chatId)
+      return;
+    const result = await app.request({ type: "lre.diag", chatId, op: "get" });
+    setRecords(result ? result.records : []);
+  });
+  A(() => {
+    setRevealed(false);
+    setRecords(null);
+  }, [chatId]);
+  A(() => {
+    if (revealed)
+      load();
+  }, [revealed]);
+  if (!chatId)
+    return /* @__PURE__ */ u3(Empty, {
+      icon: "list",
+      children: "Open a chat to see what the engine did in it."
+    }, undefined, false, undefined, this);
+  if (!revealed)
+    return /* @__PURE__ */ u3("div", {
+      class: "lre-stack",
+      "data-lre-settings-page": "diagnostics",
+      children: [
+        /* @__PURE__ */ u3(CannotStopNotice, {}, undefined, false, undefined, this),
+        /* @__PURE__ */ u3(Banner, {
+          tone: "gm",
+          title: "GM detail",
+          actions: /* @__PURE__ */ u3(Button, {
+            icon: "eye",
+            onClick: () => setRevealed(true),
+            children: "Show diagnostics"
+          }, undefined, false, undefined, this),
+          children: "Diagnostics show each step the engine ran for this chat, its model calls and why one failed. A reason can name someone or something your character hasn't met yet."
+        }, undefined, false, undefined, this)
+      ]
+    }, undefined, true, undefined, this);
+  const shown = records ? filterRecords(records, filter) : [];
+  const problems = (records ?? []).filter((r) => r.status === "failed" && (r.kind !== "turn" || !(records ?? []).some((s) => s !== r && s.turn === r.turn && s.status === "failed"))).slice(-20).reverse();
+  return /* @__PURE__ */ u3("div", {
+    class: "lre-stack lre-diag",
+    "data-lre-settings-page": "diagnostics",
+    children: [
+      /* @__PURE__ */ u3(CannotStopNotice, {}, undefined, false, undefined, this),
+      /* @__PURE__ */ u3("div", {
+        class: "lre-diag-tools",
+        children: [
+          /* @__PURE__ */ u3(Seg, {
+            label: "Show",
+            value: filter,
+            options: FILTERS,
+            onChange: setFilter
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3("div", {
+            class: "lre-diag-actions",
+            children: [
+              /* @__PURE__ */ u3(Button, {
+                size: "sm",
+                variant: "secondary",
+                icon: "refresh",
+                busy,
+                onClick: load,
+                children: "Refresh"
+              }, undefined, false, undefined, this),
+              /* @__PURE__ */ u3(Button, {
+                size: "sm",
+                variant: "secondary",
+                icon: "copy",
+                disabled: !records || records.length === 0,
+                onClick: () => void navigator.clipboard.writeText(diagText(shown)).then(() => app.toast("Diagnostics copied"), () => app.toast("The clipboard refused the copy; use Download", "error")),
+                children: "Copy"
+              }, undefined, false, undefined, this),
+              /* @__PURE__ */ u3(Button, {
+                size: "sm",
+                variant: "secondary",
+                icon: "download",
+                disabled: !records || records.length === 0,
+                onClick: () => app.host.download(`lre-diagnostics-${chatId}.json`, JSON.stringify({ chatId, at: new Date().toISOString(), records }, null, 2)),
+                children: "Download"
+              }, undefined, false, undefined, this),
+              /* @__PURE__ */ u3(Button, {
+                size: "sm",
+                variant: "ghost",
+                icon: "trash",
+                disabled: !records || records.length === 0,
+                onClick: () => run(async () => {
+                  await app.request({ type: "lre.diag", chatId, op: "clear" });
+                  setRecords([]);
+                }),
+                children: "Clear"
+              }, undefined, false, undefined, this)
+            ]
+          }, undefined, true, undefined, this)
+        ]
+      }, undefined, true, undefined, this),
+      problems.length > 0 ? /* @__PURE__ */ u3(Section, {
+        title: "Errors",
+        flush: true,
+        children: /* @__PURE__ */ u3("div", {
+          class: "lre-stack lre-diag-errors",
+          children: problems.map((r) => /* @__PURE__ */ u3(Banner, {
+            tone: "neg",
+            title: `${titleOf(r)}${r.turn ? ` · turn ${r.turn.slice(0, 8)}` : ""}`,
+            children: [
+              /* @__PURE__ */ u3("p", {
+                class: "lre-diag-fix",
+                children: r.reason ?? "failed"
+              }, undefined, false, undefined, this),
+              r.fix ? /* @__PURE__ */ u3("p", {
+                class: "lre-diag-fix",
+                children: [
+                  "Fix: ",
+                  r.fix
+                ]
+              }, undefined, true, undefined, this) : null
+            ]
+          }, r.seq, true, undefined, this))
+        }, undefined, false, undefined, this)
+      }, undefined, false, undefined, this) : null,
+      records === null ? /* @__PURE__ */ u3(Empty, {
+        icon: "hourglass",
+        children: "Reading diagnostics…"
+      }, undefined, false, undefined, this) : shown.length === 0 ? /* @__PURE__ */ u3(Empty, {
+        icon: "check",
+        children: records.length === 0 ? "Nothing recorded for this chat yet: the next turn's steps show here." : "Nothing matches this filter."
+      }, undefined, false, undefined, this) : groupByTurn(shown).map((group) => {
+        const failed = group.records.some((r) => r.status === "failed");
+        const slow = group.records.some((r) => r.kind === "slow");
+        return /* @__PURE__ */ u3(Section, {
+          title: group.turn ? `Turn ${group.turn.slice(0, 8)} · ${new Date(group.start).toLocaleTimeString()}` : `Outside a turn · ${new Date(group.start).toLocaleTimeString()}`,
+          aside: /* @__PURE__ */ u3(Badge, {
+            tone: failed ? "neg" : slow ? "warn" : "pos",
+            children: failed ? "failed" : slow ? "slow" : "ok"
+          }, undefined, false, undefined, this),
+          flush: true,
+          children: /* @__PURE__ */ u3(List, {
+            children: group.records.map((r) => /* @__PURE__ */ u3(RecordRow, {
+              record: r
+            }, r.seq, false, undefined, this))
+          }, undefined, false, undefined, this)
+        }, `${group.turn ?? "none"}-${group.start}`, false, undefined, this);
+      })
+    ]
+  }, undefined, true, undefined, this);
 }
 
 // src/frontend/money-input.tsx
@@ -4649,6 +5473,7 @@ var CHIP_ICON = {
   choice: "send",
   contradiction: "info",
   read_failed: "alert",
+  engine_failed: "alert",
   fix: "edit",
   refused: "alert"
 };
@@ -4787,6 +5612,8 @@ function useChipAction(chip, chatId) {
   return [
     busy,
     (choice, payload) => run(async () => {
+      if (choice === "diagnostics")
+        return openDiagnostics();
       const intent = chipIntent(chip, choice, chatId, payload);
       if (intent.request) {
         const message = await app.send(intent.request);
@@ -4797,7 +5624,7 @@ function useChipAction(chip, chatId) {
         if (message.request === "lre.chip" && message.body.pending && !intent.regenerate)
           app.toast("Saved — it applies when the reply finishes.", "info");
       }
-      if (intent.regenerate && !await app.host.regenerate())
+      if (intent.regenerate && !await app.host.generate("regenerate"))
         app.toast("Couldn't start Regenerate here; use the message's Regenerate button.", "error");
     })
   ];
@@ -11144,403 +11971,6 @@ function LookupTableEditor(props) {
   }, undefined, true, undefined, this);
 }
 
-// src/shared/minds.ts
-var FIDELITIES = ["live", "near", "far", "background"];
-var DEFAULT_FIDELITY_WEIGHTS = Object.freeze({
-  here: 45,
-  nearby: 20,
-  mentioned: 40,
-  regard: 10,
-  knows: 10,
-  owner: 15,
-  track: 8,
-  roles: { antagonist: 20 },
-  rule: 5,
-  pending: 15,
-  band: { principal: 15, supporting: 5, background: 0 },
-  recent: 10
-});
-var DEFAULT_FIDELITY_THRESHOLDS = Object.freeze({ live: 60, near: 35, far: 15 });
-var DEFAULT_MINDS_MEMORY = Object.freeze({
-  witness: { show: 8 },
-  recall: { recent: 4, relevant: 4, tokens: 4000 },
-  notes: { show: 8, keep: 24 },
-  commitments: { show: 8 },
-  salience: { halfLifeDays: 7, floor: 0.5 },
-  consolidate: { enabled: true, periodDays: 1 }
-});
-var DEFAULT_WORLD_MINDS = Object.freeze({
-  secrecy: "brief",
-  weights: DEFAULT_FIDELITY_WEIGHTS,
-  thresholds: DEFAULT_FIDELITY_THRESHOLDS,
-  always: null,
-  never: null,
-  memory: DEFAULT_MINDS_MEMORY
-});
-var MINDS_RANGES = {
-  weight: [-100, 200],
-  threshold: [0, 1000],
-  show: [0, 64],
-  keep: [1, 64],
-  recallTokens: [0, Number.MAX_SAFE_INTEGER],
-  halfLifeDays: [0.1, 3650],
-  floor: [0, 5],
-  periodDays: [0.1, 365]
-};
-var num2 = (v, [lo, hi], fallback) => typeof v === "number" && Number.isFinite(v) && v >= lo && v <= hi ? v : fallback;
-var whole = (v, range, fallback) => Math.round(num2(v, range, fallback));
-var obj2 = (v) => isRecord(v) ? v : {};
-function selectorOrNull(v) {
-  if (!isRecord(v))
-    return null;
-  const out = {};
-  const list = (x) => Array.isArray(x) && x.every((s) => typeof s === "string") ? x.slice(0, 200) : undefined;
-  const ids = list(v.ids);
-  const kind = list(v.kind);
-  const tier = list(v.tier);
-  const memberOf = list(v.memberOf);
-  const tag = list(v.tag);
-  if (ids)
-    out.ids = ids;
-  if (kind)
-    out.kind = kind;
-  if (tier)
-    out.tier = tier;
-  if (memberOf)
-    out.memberOf = memberOf;
-  if (tag)
-    out.tag = tag;
-  if (isRecord(v.class)) {
-    const classes = {};
-    for (const [facet, values] of Object.entries(v.class)) {
-      const vs = list(values);
-      if (safeKey(facet) && vs)
-        classes[facet] = vs;
-    }
-    out.class = classes;
-  }
-  return Object.keys(out).length > 0 ? out : null;
-}
-function memoryConfigOf(raw, base = DEFAULT_MINDS_MEMORY) {
-  const m = obj2(raw);
-  const witness = obj2(m.witness);
-  const recall = obj2(m.recall);
-  const notes = obj2(m.notes);
-  const commitments = obj2(m.commitments);
-  const salience = obj2(m.salience);
-  const consolidate = obj2(m.consolidate);
-  return {
-    witness: { show: whole(witness.show, MINDS_RANGES.show, base.witness.show) },
-    recall: { recent: whole(recall.recent, MINDS_RANGES.show, base.recall.recent), relevant: whole(recall.relevant, MINDS_RANGES.show, base.recall.relevant), tokens: whole(recall.tokens, MINDS_RANGES.recallTokens, base.recall.tokens) },
-    notes: { show: whole(notes.show, MINDS_RANGES.show, base.notes.show), keep: whole(notes.keep, MINDS_RANGES.keep, base.notes.keep) },
-    commitments: { show: whole(commitments.show, MINDS_RANGES.show, base.commitments.show) },
-    salience: { halfLifeDays: num2(salience.halfLifeDays, MINDS_RANGES.halfLifeDays, base.salience.halfLifeDays), floor: num2(salience.floor, MINDS_RANGES.floor, base.salience.floor) },
-    consolidate: { enabled: typeof consolidate.enabled === "boolean" ? consolidate.enabled : base.consolidate.enabled, periodDays: num2(consolidate.periodDays, MINDS_RANGES.periodDays, base.consolidate.periodDays) }
-  };
-}
-function worldMindsOf(world) {
-  const raw = obj2(world.minds);
-  const w = obj2(raw.weights);
-  const band = obj2(w.band);
-  const d = DEFAULT_FIDELITY_WEIGHTS;
-  const weight = (v, fallback) => num2(v, MINDS_RANGES.weight, fallback);
-  const roles = {};
-  const rawRoles = isRecord(w.roles) ? w.roles : d.roles;
-  for (const [value, points] of Object.entries(rawRoles))
-    if (safeKey(value) && typeof points === "number" && Number.isFinite(points))
-      roles[value] = weight(points, 0);
-  const t = obj2(raw.thresholds);
-  const far = num2(t.far, MINDS_RANGES.threshold, DEFAULT_FIDELITY_THRESHOLDS.far);
-  const near = Math.max(far, num2(t.near, MINDS_RANGES.threshold, DEFAULT_FIDELITY_THRESHOLDS.near));
-  const live = Math.max(near, num2(t.live, MINDS_RANGES.threshold, DEFAULT_FIDELITY_THRESHOLDS.live));
-  return {
-    secrecy: raw.secrecy === "full" ? "full" : "brief",
-    weights: {
-      here: weight(w.here, d.here),
-      nearby: weight(w.nearby, d.nearby),
-      mentioned: weight(w.mentioned, d.mentioned),
-      regard: weight(w.regard, d.regard),
-      knows: weight(w.knows, d.knows),
-      owner: weight(w.owner, d.owner),
-      track: weight(w.track, d.track),
-      roles,
-      rule: weight(w.rule, d.rule),
-      pending: weight(w.pending, d.pending),
-      band: { principal: weight(band.principal, d.band.principal), supporting: weight(band.supporting, d.band.supporting), background: weight(band.background, d.band.background) },
-      recent: weight(w.recent, d.recent)
-    },
-    thresholds: { live, near, far },
-    always: selectorOrNull(raw.always),
-    never: selectorOrNull(raw.never),
-    memory: memoryConfigOf(raw.memory)
-  };
-}
-function limitOf(limit) {
-  return limit === "none" ? Number.POSITIVE_INFINITY : limit;
-}
-var MIND_PURPOSES = ["mind", "memory", "skip", "consolidate"];
-function isMindPurpose(purpose) {
-  return MIND_PURPOSES.includes(purpose);
-}
-function worldMindTemplate(world, purpose) {
-  return Object.values(world.steps).filter((t) => t.purpose === purpose && t.template.trim() !== "").sort((a, b) => a.id.localeCompare(b.id))[0];
-}
-var MINDS_PRESETS = Object.freeze({
-  lean: { enabled: false, liveLimit: 3, nearRefresh: { scene: true, mention: true, turns: 6, minutes: 120 }, farRefreshMinutes: 1440, refreshLimit: 1, memoryLevels: [], tokens: 1200, skip: { maxBeats: 4, maxMindsPerBeat: 2 } },
-  standard: { enabled: true, liveLimit: 3, nearRefresh: { scene: true, mention: true, turns: 6, minutes: 120 }, farRefreshMinutes: 1440, refreshLimit: 2, memoryLevels: ["live"], tokens: 2400, skip: { maxBeats: 6, maxMindsPerBeat: 3 } },
-  full: { enabled: true, liveLimit: "none", nearRefresh: { scene: true, mention: true, turns: 4, minutes: 60 }, farRefreshMinutes: 720, refreshLimit: "none", memoryLevels: ["live", "near"], tokens: 4000, skip: { maxBeats: "none", maxMindsPerBeat: "none" } }
-});
-function defaultMindsSettings(preset = "standard") {
-  return { ...structuredClone(MINDS_PRESETS[preset]), memory: {}, prompts: {} };
-}
-var MINDS_DEFAULTS = Object.freeze(defaultMindsSettings());
-var MIND_PROMPT_MAX = 20000;
-var PLAN_KINDS = ["errand", "meet", "visit", "work", "rest", "leisure", "pay", "lend", "other"];
-var PLAN_PRIORITY = { min: 1, max: 5, normal: 3 };
-var COMMITMENT_KINDS = ["promise", "debt", "grudge", "favour", "plan", "other"];
-var COMMITMENT_STATUSES = ["open", "kept", "broken", "released"];
-var MIND_TEXT_CAPS = {
-  monologue: 1200,
-  depiction: 600,
-  intent: 300,
-  reaction: 200,
-  reactions: 4,
-  plans: 4,
-  planWhat: 160,
-  mood: 40,
-  interrupt: 200,
-  note: 300,
-  notes: 4,
-  commitment: 240,
-  commitments: 3,
-  summary: 900,
-  told: 240,
-  tolds: 3,
-  reason: 160
-};
-var MIND_PROMPT_DEFAULTS = Object.freeze({
-  mind: [
-    "You are the private mind of {{character}} in the roleplay world {{world}}. Think as {{character}}, from only what {{character}} knows: the context below is everything they perceive and remember. Other people's private thoughts are closed to you; ignore any narration of them in the recalled turns.",
-    "Decide how {{character}} reads this moment and what they intend. Everyone else decides for themselves: never script their actions or replies, and never plan around what they will do. Intend broadly, so the intent holds whatever they do. Write no narration and no dialogue."
-  ].join(`
-`),
-  memory: "You keep the memory of {{character}} in the roleplay world {{world}}. Below is what {{character}} knows, then the turn that just happened, as it was written. Only what was written happened, and only what {{character}} could see or hear of it counts; ignore narration of other people's private thoughts.",
-  skip: [
-    "The player character in the roleplay world {{world}} is skipping ahead in time. Below are the skip's span, the moments the engine already found in it, and what the people involved intend.",
-    "Propose further moments inside the span where something worth stopping for may happen: someone acting on a plan that involves the player character, a deadline, an occasion. Only moments the context supports; never invent people or places."
-  ].join(`
-`),
-  consolidate: "You keep the long-term memory of {{character}} in the roleplay world {{world}}. Fold the older notes below into their summary: keep what still matters to them, let the rest go, and keep everything the summary already holds that is still true."
-});
-var MIND_ANSWER_FORMATS = Object.freeze({
-  mind: [
-    'Answer with JSON only: {"monologue": "...", "depiction": "...", "intent": "...", "reactions": ["..."], "plans": [{"what": "...", "kind": "errand|meet|visit|work|rest|leisure|pay|lend|other", "when": {"from": "YYYY-MM-DD HH:MM", "to": "YYYY-MM-DD HH:MM"}, "where": "a place", "with": ["a name"], "priority": 3, "amount": 20}], "mood": "...", "interrupt": {"reason": "..."}}',
-    "- monologue: their private reasoning in the first person, at most six sentences.",
-    "- depiction: how they come across right now, as behaviour anyone present could see (posture, tone, what they do). Never a secret, an unspoken reason or a thought.",
-    "- intent: what they mean to do next, in one sentence.",
-    '- reactions: up to three short conditional reactions ("if pressed about the cellar, changes the subject").',
-    "- plans: only real intentions for later, with local times; priority 1 (whenever it fits) to 5 (it must happen); kind pay or lend, with amount, when they mean to hand someone money, and no amount otherwise. Leave the list empty when there are none.",
-    "- mood: one or two words.",
-    "- interrupt: only when the moment is a beat inside a time skip and what they'd do now would interrupt the player character's skipped time (seeking them out, calling them). Leave it out otherwise."
-  ].join(`
-`),
-  memory: [
-    'Answer with JSON only: {"notes": [{"text": "...", "salience": 3}], "commitments": [{"kind": "promise|debt|grudge|favour|plan|other", "with": ["a name"], "text": "...", "due": "YYYY-MM-DD HH:MM"}], "resolved": [{"id": "...", "status": "kept|broken|released"}], "plans": [{"what": "...", "kind": "errand|meet|visit|work|rest|leisure|pay|lend|other", "when": {"from": "YYYY-MM-DD HH:MM", "to": "YYYY-MM-DD HH:MM"}, "where": "a place", "with": ["a name"], "priority": 3, "amount": 20}], "told": [{"to": ["a name"], "what": "..."}], "summary": "..."}',
-    "- notes: at most three things they will remember, in their own perspective; salience 1 (passing) to 5 (unforgettable).",
-    "- commitments: promises, debts, grudges, favours and plans with someone that this turn made; due only when a time was set.",
-    "- resolved: their open commitments (listed with ids) that this turn kept, broke or released.",
-    "- plans: intentions with times that this turn formed; kind pay or lend, with amount, when they mean to hand someone money, and no amount otherwise.",
-    "- told: what they told whom in this turn, in a few words each.",
-    "- summary: their one-paragraph summary rewritten, only when this turn changed who they are or what they're about; leave it out otherwise.",
-    "Use empty lists for anything the turn didn't give."
-  ].join(`
-`),
-  skip: 'Answer with JSON only: {"beats": [{"at": "YYYY-MM-DD HH:MM", "reason": "..."}]}, at most five, in time order; an empty list when there are none.',
-  consolidate: 'Answer with JSON only: {"summary": "..."}: at most 900 characters of plain prose, in their own perspective.'
-});
-
-// src/shared/timeouts.ts
-var TIMER_MAX_MS = 2147483647;
-var HOST_LIMITS = {
-  contextHandler: {
-    what: "A context handler, per call",
-    minMs: 1000,
-    maxMs: 120000,
-    source: "src/spindle/worker-host.ts:4498-4500 (the clamp), src/spindle/context-handler.ts:64-78 (the timer)",
-    effect: "Lumiverse aborts the handler; a required one stops the generation, any other is skipped and the generation goes on without it."
-  },
-  decision: {
-    what: "A Decision call (decisions.evaluate)",
-    maxMs: 30000,
-    source: "src/services/decisions.service.ts:47",
-    effect: "The call fails with “Decision evaluation timed out after 30 seconds”; the step falls back to the helper."
-  },
-  processStartup: {
-    what: "A background process's start-up",
-    minMs: 1000,
-    maxMs: 120000,
-    source: "src/spindle/worker-host-process-api.ts:768",
-    effect: "Lumiverse stops the process as timed out; its job fails."
-  },
-  processHeartbeat: {
-    what: "The gap between a background process's heartbeats",
-    minMs: 1000,
-    maxMs: 120000,
-    noneMs: 0,
-    source: "src/spindle/worker-host-process-api.ts:769 (the clamp), 273-286 (the watchdog; 0 checks nothing)",
-    effect: "Lumiverse terminates the process (“Backend process heartbeat timed out”); its job fails."
-  },
-  sharedRpc: {
-    what: "Another extension's read of LumiRPEngine's shared endpoint (LumiRPEngine Studio)",
-    maxMs: 1e4,
-    source: "src/spindle/worker-host.ts:971, 1715-1719",
-    effect: "The reader's request fails as timed out."
-  },
-  socketIdle: {
-    what: "An idle event socket (the command line and MCP server)",
-    maxMs: 120000,
-    source: "Bun's WebSocket idle timeout: src/app.ts:7 takes hono/bun's `websocket`, and src/main.ts:293-309 sets only the HTTP idleTimeout",
-    effect: "Lumiverse closes the socket; the client pings every 45 s to keep it open."
-  }
-};
-var TIMEOUT_KEYS = ["engineRunMs", "preLookupMs", "postReplyMs", "postLookupMs", "guardMs", "requestMs", "caveatsMs", "mindsRunMs", "jobCallMs", "tokenCountMs", "laneStartupMs", "laneHeartbeatMs"];
-var MIN = 60000;
-var TIMEOUTS = {
-  engineRunMs: {
-    label: "Engine run",
-    group: "turn",
-    limits: "Everything the engine does before the reply is generated: reading your action, people's choices, judging your approach, puzzle answers, the minds, the plan, the brief and the outline.",
-    fires: "The engine run stops: no reply is generated, and the chat says which step ran out, with a Retry.",
-    defaultMs: 5 * MIN,
-    minMs: 1000,
-    none: "the run takes as long as it needs"
-  },
-  preLookupMs: {
-    label: "Lore lookups before the reply",
-    group: "turn",
-    limits: "How long after the engine run starts a helper may still ask for lore; a lookup also starts only while a third of the run's time is left.",
-    fires: "Helpers answer with the lore they already have.",
-    defaultMs: 2 * MIN,
-    minMs: 0,
-    zero: "no lookups",
-    none: "lookups may start until the run's last third"
-  },
-  postReplyMs: {
-    label: "Reading the reply",
-    group: "turn",
-    limits: "Everything the engine asks a model after the reply: what changed, the contradiction check, people elsewhere, suggested choices, memory.",
-    fires: "The reads still waiting are skipped; the reply stands, and Re-read tries again.",
-    defaultMs: 5 * MIN,
-    minMs: 0,
-    zero: "no model calls after the reply",
-    none: "the reads take as long as they need"
-  },
-  postLookupMs: {
-    label: "Lore lookups after the reply",
-    group: "turn",
-    limits: "How long after the reply's reading starts a helper may still ask for lore; a lookup also starts only while a third of the reading's time is left.",
-    fires: "Helpers answer with the lore they already have.",
-    defaultMs: 2 * MIN,
-    minMs: 0,
-    zero: "no lookups",
-    none: "lookups may start until the reading's last third"
-  },
-  guardMs: {
-    label: "Generation guard",
-    group: "turn",
-    limits: "Lumiverse's wait for the engine's check, as a generation starts, that the engine's lore entries are fresh. The check itself is instant; this matters only while the engine is busy.",
-    fires: "Lumiverse stops the generation, so nothing goes out with stale entries.",
-    defaultMs: 2 * MIN,
-    minMs: 1000,
-    none: "as long as Lumiverse waits",
-    host: "contextHandler"
-  },
-  requestMs: {
-    label: "Engine requests",
-    group: "app",
-    limits: "How long this tab waits for the engine to answer a request: a view, an edit, a setting.",
-    fires: "The tab says the engine didn't answer; the engine may still finish the request.",
-    defaultMs: 5 * MIN,
-    minMs: 1000,
-    none: "the tab waits as long as it takes"
-  },
-  caveatsMs: {
-    label: "Preset check",
-    group: "app",
-    limits: "How long Settings → Caveats waits for its test prompt of the chat before saying the check is still running.",
-    fires: "Caveats says the check is still running; it finishes in the background for the next look.",
-    defaultMs: MIN,
-    minMs: 0,
-    zero: "always answer at once",
-    none: "wait for the check (Engine requests still bounds the tab's wait)"
-  },
-  mindsRunMs: {
-    label: "Minds run on demand",
-    group: "work",
-    limits: "A minds run started from GM → Minds, from start to end.",
-    fires: "The run stops; the minds it finished are kept.",
-    defaultMs: 10 * MIN,
-    minMs: 1000,
-    none: "the run goes on until it ends or you cancel it"
-  },
-  jobCallMs: {
-    label: "Import and Refine calls",
-    group: "work",
-    limits: "Each model call of an Import, a Refine, a lore index or a map description in Build.",
-    fires: "That call counts as failed; the job goes on with what the other calls proposed.",
-    defaultMs: 10 * MIN,
-    minMs: 1000,
-    none: "a call takes as long as it needs (Cancel still stops the job)"
-  },
-  tokenCountMs: {
-    label: "Token counts",
-    group: "work",
-    limits: "How long Lumiverse's tokenizer may take to count a section before the engine's estimate stands in for it.",
-    fires: "The section is priced by the engine's estimate, which stays above the real count.",
-    defaultMs: 30000,
-    minMs: 0,
-    zero: "always the estimate",
-    none: "wait for every count"
-  },
-  laneStartupMs: {
-    label: "Background lane start-up",
-    group: "work",
-    limits: "How long Playtest and Check world's background process may take to start.",
-    fires: "Lumiverse stops the process and the job fails.",
-    defaultMs: MIN,
-    minMs: 1000,
-    none: "as long as Lumiverse waits",
-    host: "processStartup"
-  },
-  laneHeartbeatMs: {
-    label: "Background lane heartbeat",
-    group: "work",
-    limits: "The longest gap between the background process's heartbeats; it beats after each simulated day or turn.",
-    fires: "Lumiverse terminates the process and the job fails.",
-    defaultMs: MIN,
-    minMs: 1000,
-    none: "Lumiverse checks no heartbeat",
-    host: "processHeartbeat"
-  }
-};
-function formatMs(ms) {
-  if (!Number.isFinite(ms))
-    return "no limit";
-  if (ms < 1000)
-    return `${Math.round(ms)} ms`;
-  if (ms < MIN)
-    return `${Number((ms / 1000).toFixed(1))} s`;
-  const totalSeconds = Math.round(ms / 1000);
-  const h = Math.floor(totalSeconds / 3600);
-  const m = Math.floor(totalSeconds % 3600 / 60);
-  const s = totalSeconds % 60;
-  return [h > 0 ? `${h} h` : "", m > 0 ? `${m} min` : "", s > 0 && h === 0 ? `${s} s` : ""].filter((p) => p !== "").join(" ");
-}
-function timerMs(limit) {
-  const ms = limitOf(limit);
-  return ms >= TIMER_MAX_MS ? null : Math.max(0, ms);
-}
-
 // src/shared/settings.ts
 var REASONING_CHOICES = ["inherit", "off", "auto", "minimal", "low", "medium", "high", "max", "xhigh"];
 var HELPER_MAX_TOKENS = 8192;
@@ -11577,7 +12007,6 @@ function stepConfigOf(steps, purpose) {
   const signals = ["always"];
   return saved ? saved.signals.length > 0 ? saved : { ...saved, signals } : { enabled: true, signals };
 }
-var CONTEXT_HANDLER_MAX_MS = HOST_LIMITS.contextHandler.maxMs;
 var SPEED_ACTIVITIES = ["sleep", "work_shift", "travel", "waiting"];
 var SPEED_DEFAULT = Object.freeze({ mode: "offer", thresholdMinutes: 30 });
 var SPEED_THRESHOLD_MINUTES = [1, 7 * 1440];
@@ -18607,409 +19036,6 @@ function SchemaPartView(props) {
   }, undefined, true, undefined, this);
 }
 
-// src/frontend/diagnostics.tsx
-var OPEN_DIAGNOSTICS_EVENT = "lre:open-diagnostics";
-function openDiagnostics() {
-  window.dispatchEvent(new CustomEvent(OPEN_DIAGNOSTICS_EVENT));
-}
-function elapsedText(ms) {
-  const s = Math.max(0, Math.floor(ms / 1000));
-  return s < 60 ? `${s} s` : `${Math.floor(s / 60)} m ${String(s % 60).padStart(2, "0")} s`;
-}
-function useActivity() {
-  const app = useApp();
-  const activity = useSelect(app.sync, (state) => state.activity);
-  const [now, setNow] = d2(() => Date.now());
-  const running = activity?.state === "running";
-  A(() => {
-    if (!running)
-      return;
-    setNow(Date.now());
-    const timer = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(timer);
-  }, [running]);
-  return { activity, now };
-}
-function ActivityLine(props) {
-  const { activity, now } = useActivity();
-  if (!activity)
-    return null;
-  if (activity.state === "failed")
-    return /* @__PURE__ */ u3("button", {
-      type: "button",
-      class: "lre-activity failed",
-      "data-lre-activity": "failed",
-      onClick: openDiagnostics,
-      "aria-label": `${activity.label}. Open Diagnostics`,
-      title: "Open Diagnostics",
-      children: [
-        /* @__PURE__ */ u3(Icon, {
-          name: "alert",
-          size: 16
-        }, undefined, false, undefined, this),
-        props.compact ? null : /* @__PURE__ */ u3("span", {
-          class: "lre-activity-label",
-          children: activity.label
-        }, undefined, false, undefined, this)
-      ]
-    }, undefined, true, undefined, this);
-  const elapsed = elapsedText(now - activity.since);
-  return /* @__PURE__ */ u3("span", {
-    class: "lre-activity",
-    "data-lre-activity": "running",
-    role: "status",
-    "aria-live": "polite",
-    "aria-label": `${activity.label} ${elapsed}`,
-    children: [
-      /* @__PURE__ */ u3("span", {
-        class: "lre-chat-pulse",
-        "aria-hidden": "true"
-      }, undefined, false, undefined, this),
-      props.compact ? null : /* @__PURE__ */ u3("span", {
-        class: "lre-activity-label",
-        children: activity.label
-      }, undefined, false, undefined, this),
-      /* @__PURE__ */ u3("span", {
-        class: "lre-num lre-activity-time",
-        children: elapsed
-      }, undefined, false, undefined, this)
-    ]
-  }, undefined, true, undefined, this);
-}
-function ActivityBanner() {
-  const app = useApp();
-  const chatId = useSelect(app.sync, (state) => state.chatId);
-  const onPage = useSelect(app.ui, (ui) => ui.mode === "settings" && ui.settings.page === "diagnostics");
-  const { activity, now } = useActivity();
-  if (onPage && activity?.state === "failed")
-    return null;
-  if (!activity || !chatId)
-    return null;
-  if (activity.state === "running")
-    return /* @__PURE__ */ u3("div", {
-      class: "lre-activity-bar",
-      "data-lre-activity-bar": "running",
-      role: "status",
-      "aria-live": "polite",
-      children: [
-        /* @__PURE__ */ u3("span", {
-          class: "lre-chat-pulse",
-          "aria-hidden": "true"
-        }, undefined, false, undefined, this),
-        /* @__PURE__ */ u3("span", {
-          class: "lre-activity-label",
-          children: activity.label
-        }, undefined, false, undefined, this),
-        /* @__PURE__ */ u3("span", {
-          class: "lre-num lre-activity-time",
-          children: elapsedText(now - activity.since)
-        }, undefined, false, undefined, this)
-      ]
-    }, undefined, true, undefined, this);
-  return /* @__PURE__ */ u3("div", {
-    class: "lre-activity-banner",
-    "data-lre-activity-bar": "failed",
-    children: /* @__PURE__ */ u3(Banner, {
-      tone: "neg",
-      title: activity.label,
-      actions: /* @__PURE__ */ u3(M, {
-        children: [
-          /* @__PURE__ */ u3(Button, {
-            size: "sm",
-            variant: "secondary",
-            icon: "list",
-            onClick: openDiagnostics,
-            children: "Diagnostics"
-          }, undefined, false, undefined, this),
-          /* @__PURE__ */ u3(Button, {
-            size: "sm",
-            variant: "ghost",
-            onClick: () => void app.request({ type: "lre.diag", chatId, op: "dismiss" }),
-            children: "Dismiss"
-          }, undefined, false, undefined, this)
-        ]
-      }, undefined, true, undefined, this),
-      children: "The engine didn't finish its work for the last reply. Diagnostics says which step failed and what to change."
-    }, undefined, false, undefined, this)
-  }, undefined, false, undefined, this);
-}
-var FILTERS = [
-  { value: "all", label: "All" },
-  { value: "problems", label: "Problems" },
-  { value: "calls", label: "Model calls" },
-  { value: "slow", label: "Slow" }
-];
-function filterRecords(records, filter) {
-  if (filter === "problems")
-    return records.filter((r) => r.status === "failed" || r.level === "warn" || r.level === "error");
-  if (filter === "calls")
-    return records.filter((r) => (r.calls?.length ?? 0) > 0);
-  if (filter === "slow")
-    return records.filter((r) => r.kind === "slow");
-  return [...records];
-}
-function groupByTurn(records) {
-  const groups = [];
-  const byTurn = new Map;
-  for (const r of records) {
-    const known = r.turn !== null ? byTurn.get(r.turn) : undefined;
-    if (known) {
-      known.records.push(r);
-      known.start = Math.min(known.start, r.start);
-      continue;
-    }
-    const group = { turn: r.turn, records: [r], start: r.start };
-    groups.push(group);
-    if (r.turn !== null)
-      byTurn.set(r.turn, group);
-  }
-  for (const g of groups)
-    g.records.sort((a, b) => Number(a.kind === "turn") - Number(b.kind === "turn") || a.start - b.start || a.seq - b.seq);
-  return groups.sort((a, b) => b.start - a.start);
-}
-function callText(r) {
-  return (r.calls ?? []).map((c) => `    call ${c.purpose} via ${c.via} on ${c.connection} / ${c.model}: ${c.ok ? "ok" : "failed"}, ${c.tokensIn ?? "?"} in, ${c.tokensOut ?? "?"} out${c.maxTokens !== null ? ` of ${c.maxTokens}` : ""}, finish ${c.finishReason || "-"}, ${Math.round(c.ms)} ms${c.error ? `: ${c.error}` : ""}`);
-}
-function diagText(records) {
-  return records.flatMap((r) => [
-    `${new Date(r.start).toISOString()} ${r.level.toUpperCase().padEnd(5)} ${r.turn ? `[turn ${r.turn.slice(0, 8)}] ` : ""}${r.kind} ${r.phase ? `${r.phase}/` : ""}${r.step} ${r.status} ${Math.round(r.ms)} ms${r.reason ? `: ${r.reason}` : ""}`,
-    ...r.fix ? [`    fix: ${r.fix}`] : [],
-    ...r.path ? [`    path: ${r.path}`] : [],
-    ...(r.sections ?? []).map((s) => `    section ${s.slot}${s.outlet ? ` → ${s.outlet}` : ""}: ${s.filled ? "filled" : "empty"}`),
-    ...callText(r)
-  ]).join(`
-`);
-}
-var STATUS_TONE = { ok: "pos", failed: "neg", skipped: "neutral" };
-function msText(ms) {
-  return ms >= 1000 ? `${(ms / 1000).toFixed(1)} s` : `${Math.round(ms)} ms`;
-}
-function titleOf(r) {
-  if (r.kind === "turn")
-    return "The turn";
-  return r.phase && r.phase !== r.step && r.phase !== "request" ? `${r.phase} · ${r.step}` : r.step;
-}
-function RecordRow(props) {
-  const r = props.record;
-  const calls = r.calls ?? [];
-  const tokens = calls.reduce((n, c) => n + (c.tokensOut ?? 0), 0);
-  const subtitle = [r.reason, calls.length > 0 ? `${calls.length} call${calls.length === 1 ? "" : "s"}, ${tokens} tokens out` : null].filter((s) => s).join(" · ");
-  return /* @__PURE__ */ u3("div", {
-    class: "lre-diag-row",
-    "data-lre-diag-status": r.status,
-    "data-lre-diag-kind": r.kind,
-    children: [
-      /* @__PURE__ */ u3(ListRow, {
-        icon: r.status === "failed" ? "alert" : r.status === "skipped" ? "minus" : r.kind === "slow" ? "hourglass" : "check",
-        title: titleOf(r),
-        subtitle: subtitle || undefined,
-        value: msText(r.ms),
-        valueTone: r.status === "failed" ? "neg" : "muted",
-        badge: r.kind === "slow" ? /* @__PURE__ */ u3(Badge, {
-          tone: "warn",
-          children: "slow"
-        }, undefined, false, undefined, this) : /* @__PURE__ */ u3(Badge, {
-          tone: STATUS_TONE[r.status],
-          children: r.status
-        }, undefined, false, undefined, this)
-      }, undefined, false, undefined, this),
-      r.fix ? /* @__PURE__ */ u3("p", {
-        class: "lre-diag-fix",
-        children: [
-          "Fix: ",
-          r.fix
-        ]
-      }, undefined, true, undefined, this) : null,
-      calls.length > 0 || (r.sections?.length ?? 0) > 0 ? /* @__PURE__ */ u3("ul", {
-        class: "lre-diag-calls",
-        children: [
-          calls.map((c, i) => /* @__PURE__ */ u3("li", {
-            "data-lre-diag-call": c.ok && c.finishReason !== "length" ? "ok" : "bad",
-            children: [
-              /* @__PURE__ */ u3("span", {
-                class: "lre-num",
-                children: c.purpose
-              }, undefined, false, undefined, this),
-              " · ",
-              c.model,
-              " on ",
-              c.connection,
-              " · ",
-              c.tokensIn ?? "?",
-              " in / ",
-              c.tokensOut ?? "?",
-              " out",
-              c.maxTokens !== null ? ` of ${c.maxTokens}` : "",
-              " · ",
-              c.finishReason || "no finish reason",
-              " · ",
-              msText(c.ms),
-              c.error ? ` · ${c.error}` : ""
-            ]
-          }, i, true, undefined, this)),
-          (r.sections ?? []).map((s) => /* @__PURE__ */ u3("li", {
-            "data-lre-diag-call": s.filled ? "ok" : "bad",
-            children: [
-              s.slot,
-              s.outlet ? ` → ${s.outlet}` : " (world placement)",
-              ": ",
-              s.filled ? "filled" : "empty"
-            ]
-          }, s.slot, true, undefined, this))
-        ]
-      }, undefined, true, undefined, this) : null
-    ]
-  }, undefined, true, undefined, this);
-}
-function DiagnosticsPage() {
-  const app = useApp();
-  const chatId = useSelect(app.sync, (state) => state.chatId);
-  const [revealed, setRevealed] = d2(false);
-  const [records, setRecords] = d2(null);
-  const [filter, setFilter] = d2("all");
-  const [busy, run] = useBusy();
-  const load = () => run(async () => {
-    if (!chatId)
-      return;
-    const result = await app.request({ type: "lre.diag", chatId, op: "get" });
-    setRecords(result ? result.records : []);
-  });
-  A(() => {
-    setRevealed(false);
-    setRecords(null);
-  }, [chatId]);
-  A(() => {
-    if (revealed)
-      load();
-  }, [revealed]);
-  if (!chatId)
-    return /* @__PURE__ */ u3(Empty, {
-      icon: "list",
-      children: "Open a chat to see what the engine did in it."
-    }, undefined, false, undefined, this);
-  if (!revealed)
-    return /* @__PURE__ */ u3("div", {
-      class: "lre-stack",
-      "data-lre-settings-page": "diagnostics",
-      children: /* @__PURE__ */ u3(Banner, {
-        tone: "gm",
-        title: "GM detail",
-        actions: /* @__PURE__ */ u3(Button, {
-          icon: "eye",
-          onClick: () => setRevealed(true),
-          children: "Show diagnostics"
-        }, undefined, false, undefined, this),
-        children: "Diagnostics show each step the engine ran for this chat, its model calls and why one failed. A reason can name someone or something your character hasn't met yet."
-      }, undefined, false, undefined, this)
-    }, undefined, false, undefined, this);
-  const shown = records ? filterRecords(records, filter) : [];
-  const problems = (records ?? []).filter((r) => r.status === "failed" && (r.kind !== "turn" || !(records ?? []).some((s) => s !== r && s.turn === r.turn && s.status === "failed"))).slice(-20).reverse();
-  return /* @__PURE__ */ u3("div", {
-    class: "lre-stack lre-diag",
-    "data-lre-settings-page": "diagnostics",
-    children: [
-      /* @__PURE__ */ u3("div", {
-        class: "lre-diag-tools",
-        children: [
-          /* @__PURE__ */ u3(Seg, {
-            label: "Show",
-            value: filter,
-            options: FILTERS,
-            onChange: setFilter
-          }, undefined, false, undefined, this),
-          /* @__PURE__ */ u3("div", {
-            class: "lre-diag-actions",
-            children: [
-              /* @__PURE__ */ u3(Button, {
-                size: "sm",
-                variant: "secondary",
-                icon: "refresh",
-                busy,
-                onClick: load,
-                children: "Refresh"
-              }, undefined, false, undefined, this),
-              /* @__PURE__ */ u3(Button, {
-                size: "sm",
-                variant: "secondary",
-                icon: "copy",
-                disabled: !records || records.length === 0,
-                onClick: () => void navigator.clipboard.writeText(diagText(shown)).then(() => app.toast("Diagnostics copied"), () => app.toast("The clipboard refused the copy; use Download", "error")),
-                children: "Copy"
-              }, undefined, false, undefined, this),
-              /* @__PURE__ */ u3(Button, {
-                size: "sm",
-                variant: "secondary",
-                icon: "download",
-                disabled: !records || records.length === 0,
-                onClick: () => app.host.download(`lre-diagnostics-${chatId}.json`, JSON.stringify({ chatId, at: new Date().toISOString(), records }, null, 2)),
-                children: "Download"
-              }, undefined, false, undefined, this),
-              /* @__PURE__ */ u3(Button, {
-                size: "sm",
-                variant: "ghost",
-                icon: "trash",
-                disabled: !records || records.length === 0,
-                onClick: () => run(async () => {
-                  await app.request({ type: "lre.diag", chatId, op: "clear" });
-                  setRecords([]);
-                }),
-                children: "Clear"
-              }, undefined, false, undefined, this)
-            ]
-          }, undefined, true, undefined, this)
-        ]
-      }, undefined, true, undefined, this),
-      problems.length > 0 ? /* @__PURE__ */ u3(Section, {
-        title: "Errors",
-        flush: true,
-        children: /* @__PURE__ */ u3("div", {
-          class: "lre-stack lre-diag-errors",
-          children: problems.map((r) => /* @__PURE__ */ u3(Banner, {
-            tone: "neg",
-            title: `${titleOf(r)}${r.turn ? ` · turn ${r.turn.slice(0, 8)}` : ""}`,
-            children: [
-              /* @__PURE__ */ u3("p", {
-                class: "lre-diag-fix",
-                children: r.reason ?? "failed"
-              }, undefined, false, undefined, this),
-              r.fix ? /* @__PURE__ */ u3("p", {
-                class: "lre-diag-fix",
-                children: [
-                  "Fix: ",
-                  r.fix
-                ]
-              }, undefined, true, undefined, this) : null
-            ]
-          }, r.seq, true, undefined, this))
-        }, undefined, false, undefined, this)
-      }, undefined, false, undefined, this) : null,
-      records === null ? /* @__PURE__ */ u3(Empty, {
-        icon: "hourglass",
-        children: "Reading diagnostics…"
-      }, undefined, false, undefined, this) : shown.length === 0 ? /* @__PURE__ */ u3(Empty, {
-        icon: "check",
-        children: records.length === 0 ? "Nothing recorded for this chat yet: the next turn's steps show here." : "Nothing matches this filter."
-      }, undefined, false, undefined, this) : groupByTurn(shown).map((group) => {
-        const failed = group.records.some((r) => r.status === "failed");
-        const slow = group.records.some((r) => r.kind === "slow");
-        return /* @__PURE__ */ u3(Section, {
-          title: group.turn ? `Turn ${group.turn.slice(0, 8)} · ${new Date(group.start).toLocaleTimeString()}` : `Outside a turn · ${new Date(group.start).toLocaleTimeString()}`,
-          aside: /* @__PURE__ */ u3(Badge, {
-            tone: failed ? "neg" : slow ? "warn" : "pos",
-            children: failed ? "failed" : slow ? "slow" : "ok"
-          }, undefined, false, undefined, this),
-          flush: true,
-          children: /* @__PURE__ */ u3(List, {
-            children: group.records.map((r) => /* @__PURE__ */ u3(RecordRow, {
-              record: r
-            }, r.seq, false, undefined, this))
-          }, undefined, false, undefined, this)
-        }, `${group.turn ?? "none"}-${group.start}`, false, undefined, this);
-      })
-    ]
-  }, undefined, true, undefined, this);
-}
-
 // src/frontend/settings/adjudication.tsx
 function AdjudicationSeed(props) {
   const mine = props.settings.overrideWorldAdjudication;
@@ -21548,15 +21574,15 @@ function createHost(ctx) {
       setTimeout(() => URL.revokeObjectURL(url), 1000);
     },
     activeChat: () => ctx.getActiveChat().chatId,
-    async regenerate() {
+    async generate(as) {
       const surfaces = ctx.host.surfaces;
       if (!surfaces)
         return false;
       try {
-        await surfaces.invoke({ kind: "command", id: "action-regenerate" });
+        await surfaces.invoke({ kind: "command", id: as === "continue" ? "action-continue" : "action-regenerate" });
         return true;
       } catch (error) {
-        console.warn("[LumiRPEngine] regenerate failed", error);
+        console.warn(`[LumiRPEngine] ${as} failed`, error);
         return false;
       }
     },
@@ -43522,12 +43548,13 @@ class ProtocolClient {
   jobListeners = new Set;
   mindsListeners = new Set;
   draftListeners = new Set;
+  generateListeners = new Set;
   unsubscribe;
   requestMs;
   newReqId;
   schedule;
   timers;
-  state = { chatId: null, rev: null, view: null, status: "closed", resyncs: 0, activity: null };
+  state = { chatId: null, rev: null, view: null, status: "closed", resyncs: 0, activity: null, canStop: null };
   notifyQueued = false;
   disposed = false;
   counter = 0;
@@ -43563,9 +43590,13 @@ class ProtocolClient {
     this.draftListeners.add(listener);
     return () => this.draftListeners.delete(listener);
   }
+  onGenerate(listener) {
+    this.generateListeners.add(listener);
+    return () => this.generateListeners.delete(listener);
+  }
   presetId = undefined;
   open(chatId) {
-    this.update({ chatId, rev: null, view: null, status: chatId === null ? "closed" : "syncing", resyncs: 0, activity: null });
+    this.update({ chatId, rev: null, view: null, status: chatId === null ? "closed" : "syncing", resyncs: 0, activity: null, canStop: this.state.canStop });
     const reply = this.request({ type: "lre.hello", chatId, ...this.presetId !== undefined ? { presetId: this.presetId } : {} });
     reply.then((message) => {
       if (message.type === "lre.error" && this.state.chatId === chatId) {
@@ -43664,6 +43695,13 @@ class ProtocolClient {
             listener(push);
         }
         return;
+      case "lre.generate":
+        if (typeof payload.chatId === "string" && (payload.as === "regenerate" || payload.as === "continue" || payload.as === "send")) {
+          const push = { lre: PROTOCOL_VERSION, type: "lre.generate", chatId: payload.chatId, as: payload.as };
+          for (const listener of this.generateListeners)
+            listener(push);
+        }
+        return;
     }
   }
   settle(reqId) {
@@ -43689,6 +43727,8 @@ class ProtocolClient {
     const limit = payload.request === "lre.hello" ? body.requestMs : isRecord(settings) && isRecord(settings.timeouts) ? settings.timeouts.requestMs : undefined;
     if (limit === "none" || typeof limit === "number" && Number.isFinite(limit) && limit >= 0)
       this.requestMs = limit;
+    if (payload.request === "lre.hello" && typeof body.canStop === "boolean" && body.canStop !== this.state.canStop)
+      this.update({ ...this.state, canStop: body.canStop });
     entry.resolve(payload);
   }
   receiveError(payload) {
@@ -45234,6 +45274,19 @@ function setup(ctx) {
     setTimeout(() => toasts.update((all) => all.filter((entry) => entry.id !== id)), tone === "error" ? 6000 : 3500);
   };
   cleanups.push(client.onError((error) => toast(error.message, "error")));
+  cleanups.push(client.onGenerate((push) => {
+    if (host.activeChat() !== push.chatId)
+      return;
+    if (push.as === "send") {
+      toast("The engine is ready: press Send for the reply.", "info");
+      return;
+    }
+    const command = push.as === "continue" ? "Continue" : "Regenerate";
+    host.generate(push.as).then((started) => {
+      if (!started)
+        toast(`The engine is ready, but ${command} couldn't start here: use ${command} on the last message.`, "error");
+    });
+  }));
   let overlays = null;
   const app = {
     client,
@@ -45259,7 +45312,10 @@ function setup(ctx) {
   const set = overlays;
   cleanups.push(() => set.destroy());
   cleanups.push(trackDraft(app));
-  const recheck = () => void recheckDraft(app);
+  const recheck = () => {
+    recheckDraft(app);
+    client.resync();
+  };
   const visible = () => {
     if (document.visibilityState === "visible")
       recheck();
@@ -45379,8 +45435,13 @@ function setup(ctx) {
         value: app,
         children: /* @__PURE__ */ u3("div", {
           class: "lre",
-          children: /* @__PURE__ */ u3(StatusLine, {}, undefined, false, undefined, this)
-        }, undefined, false, undefined, this)
+          children: [
+            /* @__PURE__ */ u3(CannotStopNotice, {
+              inChat: true
+            }, undefined, false, undefined, this),
+            /* @__PURE__ */ u3(StatusLine, {}, undefined, false, undefined, this)
+          ]
+        }, undefined, true, undefined, this)
       }, undefined, false, undefined, this), root);
       statusLines.update((count) => count + 1);
       return () => {
