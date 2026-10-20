@@ -126,6 +126,54 @@ describe("a narrated purchase of a sibling of the turn's Buy", () => {
   });
 });
 
+describe("a reply that tells a Buy again in its own words, priced as the same row where it was bought", () => {
+  /**
+   * The live turn on Port Alder: a walk to Bluebird Coffee and a typed Buy of two large coffees on
+   * the card, then a reply ("Two larges, black.") the extractor reads as `narrated`. The confirm and
+   * decline chips left, and what the payer's history charged.
+   */
+  async function cafe(narrated: JsonObject[]) {
+    const rig = new Rig({ shipped: true });
+    const worldId = await rig.newWorld("Alder", "modern_slice_of_life");
+    const chatId = rig.host.createChat("Morning.");
+    rig.body(await rig.send({ type: "lre.world", op: "attach", worldId, chatId }));
+    const buy = { action: "buy", params: { item: "large coffee", qty: 2, method: "card" }, text: "buy us two large coffees with my credit card" };
+    rig.host.quietReply = (req) => {
+      const prompt = req.messages[0]?.content ?? "";
+      if (prompt.includes("You map a player's typed input")) return JSON.stringify({ action: "go", params: { to: "bluebird_coffee" }, confidence: 0.9, more: [buy] });
+      if (prompt.includes(EXTRACT_MARK)) return JSON.stringify({ proposals: narrated.map((p) => ({ type: "purchase", payer: "pov", ...p })) });
+      return "{}";
+    };
+    await rig.turn(chatId, "I jog across to Bluebird Coffee and buy us two large coffees with my credit card.", "Two larges, black.");
+    expect(rig.rt.ledger.errors).toEqual([]);
+    const chips = (await rig.rt.view(chatId, rig.host.userId)).chips.filter((c) => c.kind === "confirm" || c.kind === "decline");
+    return { chips: chips.map((c) => c.label), memos: (await boughtLines(rig, chatId)).map((l) => l.memo) };
+  }
+  const told = { item: "Large black coffee", category: "coffee", qty: 2 };
+
+  test("'Large black coffee' ×2 after two large coffees bought as cafe drips offers no second purchase", async () => {
+    const got = await cafe([told]);
+    expect(got.memos).toEqual(["Bought Drip coffee, 12 oz, cafe ×2"]);
+    expect(got.chips).toEqual([]);
+  });
+
+  test("a sandwich bought in the same reply is still offered, told apart or with the coffees", async () => {
+    for (const narrated of [[told, { item: "sandwich", category: "meals_out" }], [{ ...told, item: "large black coffee and a sandwich" }]]) {
+      const got = await cafe(narrated);
+      expect(got.memos).toEqual(["Bought Drip coffee, 12 oz, cafe ×2"]);
+      expect(got.chips).toEqual([expect.stringMatching(/^Bought (?:a )?sandwich: .*\(priced as Deli sandwich\)/)]);
+    }
+  });
+
+  test("another quantity, a size the Buy ruled out, or another one is still a purchase of its own", async () => {
+    for (const narrated of [{ ...told, qty: 3 }, { ...told, item: "small black coffee" }, { ...told, item: "another large coffee" }]) {
+      const got = await cafe([narrated]);
+      expect(got.chips).toHaveLength(1);
+      expect(got.chips[0]).toMatch(/^Bought /);
+    }
+  });
+});
+
 describe("with purchases on auto, a reply that tells a catalog-matched Buy again charges it once", () => {
   const cases: { typed: string; price?: number; narrated: JsonObject; charged: string }[] = [
     { typed: "milk", narrated: { item: "milk" }, charged: "Bought Milk, whole" },
