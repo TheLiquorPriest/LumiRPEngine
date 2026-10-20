@@ -314,7 +314,7 @@ export interface MindsSettings {
   /** The Minds section's own token budget, apart from the shared section budget (DESIGN §24.3). */
   tokens: number;
   memory: MindsMemoryOverrides;
-  /** The user's own prompt for a purpose; absent, the world's template, else the built-in (`MIND_PROMPT_DEFAULTS`). It wins over both. */
+  /** The user's own prompt for a purpose, which wins over a world template; absent, the world's (`worldMindTemplate`), else the built-in (`MIND_PROMPT_DEFAULTS`). */
   prompts: Partial<Record<MindPurpose, string>>;
   /** A time skip's caps (DESIGN §24.7): beats per skip and minds per beat. */
   skip: { maxBeats: Limit; maxMindsPerBeat: Limit };
