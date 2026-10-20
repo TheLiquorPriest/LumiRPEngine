@@ -2741,7 +2741,8 @@ var PART_SPECS = {
   realism: [
     { kind: "enum", key: "preset", label: "Preset", values: ["story", "grounded", "simulation", "custom"] },
     { kind: "levels", key: "levels", label: "Domain levels", floored: true },
-    { kind: "bandCaps", key: "tierCaps", label: "Band caps" }
+    { kind: "bandCaps", key: "tierCaps", label: "Band caps" },
+    { kind: "claims", key: "claims", label: "Player claims" }
   ],
   time: [
     { kind: "record", key: "sceneTicks", label: "Default tick per scene type", keyLabel: "Scene type", item: { kind: "duration", key: "", label: "Tick" } },
@@ -4419,6 +4420,7 @@ var ROLE = {
   contradiction: "decision",
   read_failed: "decision",
   engine_failed: "decision",
+  claim: "decision",
   retry: "decision",
   retry_read: "decision",
   reread: "decision",
@@ -4433,6 +4435,7 @@ var ROLE = {
   roll: "done",
   price: "done",
   undo: "done",
+  claimed: "done",
   not_action: "done",
   mode_change: "done",
   fix: "done",
@@ -4444,6 +4447,7 @@ var TONE = {
   decline: "neg",
   read_failed: "neg",
   engine_failed: "neg",
+  claim: "neutral",
   refused: "neg",
   degraded: "warn",
   pending: "warn",
@@ -4463,6 +4467,7 @@ var TONE = {
   roll: "neutral",
   price: "neutral",
   undo: "neutral",
+  claimed: "neutral",
   not_action: "neutral",
   mode_change: "neutral",
   fix: "neutral"
@@ -5360,7 +5365,7 @@ function chipIntent(chip, choice, chatId, payload) {
   if (choice === "regenerate")
     return { request: null, regenerate: true };
   const request = payload ? { type: "lre.chip", chatId, chip: chip.id, choice, payload } : { type: "lre.chip", chatId, chip: chip.id, choice };
-  return { request, regenerate: chip.kind === "swipe_option" && (choice === "renarrate" || choice === "rerun") || chip.kind === "contradiction" && choice === "renarrate" || chip.kind === "read_failed" && choice === "rerun" };
+  return { request, regenerate: chip.kind === "swipe_option" && (choice === "renarrate" || choice === "rerun") || chip.kind === "contradiction" && choice === "renarrate" || chip.kind === "read_failed" && choice === "rerun" || chip.kind === "claim" && (choice === "add" || choice === "drop") };
 }
 function convertRequest(line, chatId) {
   if ("marker" in line.ref)
@@ -5452,6 +5457,9 @@ function resolveMarker(chatId, domain, scope, to, preview = false) {
 function adjudicateMarker(chatId, to) {
   return { type: "lre.marker", chatId, kind: "adjudicate", to };
 }
+function claimsMarker(chatId, to) {
+  return { type: "lre.marker", chatId, kind: "claims", to };
+}
 function sheetPreviewRequest(worldId, ruleset, entity) {
   return entity === undefined ? { type: "lre.world", op: "sheet", worldId, ruleset } : { type: "lre.world", op: "sheet", worldId, ruleset, entity };
 }
@@ -5481,6 +5489,8 @@ var CHIP_ICON = {
   contradiction: "info",
   read_failed: "alert",
   engine_failed: "alert",
+  claim: "help",
+  claimed: "sparkle",
   fix: "edit",
   refused: "alert"
 };
@@ -7259,6 +7269,22 @@ function Chip(props) {
   }, undefined, false, undefined, this);
 }
 
+// src/shared/claims.ts
+var CLAIM_MODES = ["real", "ask", "hold"];
+var CLAIM_MODE_LABEL = { real: "Make it real", ask: "Ask first", hold: "Hold me to the world" };
+var CLAIM_PRESETS = {
+  story: { mode: "real", capped: false },
+  grounded: { mode: "real", capped: true },
+  simulation: { mode: "ask", capped: true }
+};
+var DEFAULT_CLAIMS = CLAIM_PRESETS.story;
+function readClaims(raw) {
+  if (!isRecord(raw))
+    return null;
+  const mode = CLAIM_MODES.find((m) => m === raw.mode);
+  return mode ? { mode, capped: raw.capped === true } : null;
+}
+
 // src/shared/tables.ts
 function tableChoices(table) {
   if (!table || typeof table.rows !== "object" || table.rows === null)
@@ -7372,6 +7398,55 @@ function OverrideWorldSwitch(props) {
     ]
   }, undefined, true, undefined, this);
 }
+var CLAIM_CHOICES = CLAIM_MODES.map((mode) => ({ value: mode, label: CLAIM_MODE_LABEL[mode] }));
+function ClaimsControl(props) {
+  const { mode, capped } = props.value;
+  const help = mode === "real" ? capped ? "It's added where your action needs it, unless it costs more than the world's claim cap: then you're asked first." : "It's added where your action needs it, at any price." : mode === "ask" ? "The turn waits for your answer: Add, or Not an action." : "The action doesn't play, and a chip says why.";
+  return /* @__PURE__ */ u3("div", {
+    class: "lre-stack",
+    "data-lre-claims": true,
+    children: [
+      /* @__PURE__ */ u3("div", {
+        class: "lre-field",
+        children: [
+          /* @__PURE__ */ u3("span", {
+            class: "label",
+            children: "When you say you have something the world doesn't"
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3(Seg, {
+            label: "When you say you have something the world doesn't",
+            value: mode,
+            options: CLAIM_CHOICES,
+            disabled: props.disabled,
+            onChange: (next) => props.onChange({ mode: next, capped })
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3("span", {
+            class: "lre-field-help",
+            children: [
+              help,
+              " Money is never made this way."
+            ]
+          }, undefined, true, undefined, this)
+        ]
+      }, undefined, true, undefined, this),
+      /* @__PURE__ */ u3("div", {
+        class: "lre-field",
+        children: [
+          /* @__PURE__ */ u3(HostSwitch, {
+            label: "Ask first above the world's claim cap",
+            checked: capped,
+            disabled: props.disabled || mode !== "real",
+            onChange: (next) => props.onChange({ mode, capped: next })
+          }, undefined, false, undefined, this),
+          mode === "real" ? null : /* @__PURE__ */ u3("span", {
+            class: "lre-field-help",
+            children: "Only for Make it real."
+          }, undefined, false, undefined, this)
+        ]
+      }, undefined, true, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+}
 function RealismSeed(props) {
   const { realism } = props;
   return /* @__PURE__ */ u3("div", {
@@ -7472,6 +7547,19 @@ function RealismSeed(props) {
             }, domain, true, undefined, this))
           ]
         }, undefined, true, undefined, this)
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3("div", {
+        class: "lre-gm-subtitle",
+        children: "Player claims"
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3("p", {
+        class: "lre-gm-note",
+        children: "What a thing your typed action uses becomes when the world doesn't have it, as far as your character knows. Each preset sets its own."
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(ClaimsControl, {
+        value: realism.claims,
+        disabled: props.busy,
+        onChange: (claims) => props.patch({ realism: { preset: "custom", claims: { mode: claims.mode, capped: claims.capped } } })
       }, undefined, false, undefined, this)
     ]
   }, undefined, true, undefined, this);
@@ -7482,6 +7570,9 @@ var TONE_ICON = {
   materialize: { icon: "sparkle", label: "Gains detail" },
   info: { icon: "info", label: "Note" }
 };
+function chatClaimsChange(chatId, current, next) {
+  return next.mode === current.mode && next.capped === current.capped ? null : claimsMarker(chatId, { mode: next.mode, capped: next.capped });
+}
 function RealismThisChat(props) {
   const app = useApp();
   const [scope, setScope] = d2("all");
@@ -7518,6 +7609,12 @@ function RealismThisChat(props) {
       app.toast(result.pending ? "Saved — the change applies when the reply finishes." : `${DOMAIN_LABEL[pending.domain]} is now ${LEVEL_LABEL[pending.to]}.`, "info");
       setPending(null);
     }
+  });
+  const claims = (next) => run(async () => {
+    const change = chatClaimsChange(props.chatId, realism.claims, next);
+    const result = change ? await app.request(change) : null;
+    if (result)
+      app.toast(result.pending ? "Saved — the change applies when the reply finishes." : `This chat plays claims as ${CLAIM_MODE_LABEL[next.mode]} from the next turn.`, "info");
   });
   const reached = scope === "all" ? [] : realism.bandTiers[scope];
   const tiersNote = scope === "all" ? "" : reached.length === 0 ? `No tier in this world belongs to ${BAND_LABEL[scope]}. ` : reached.length === 1 && reached[0] === BAND_LABEL[scope] ? "" : `Tiers in this band: ${reached.join(", ")}. `;
@@ -7608,6 +7705,19 @@ function RealismThisChat(props) {
           disabled: busy || pending !== null,
           onCommit: (to) => to === levelFor(domain) ? undefined : ask(domain, to)
         }, `${scope}:${domain}`, false, undefined, this))
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3("div", {
+        class: "lre-gm-subtitle",
+        children: "Player claims"
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3("p", {
+        class: "lre-gm-note",
+        children: "What a thing your typed action uses becomes when the world doesn't have it, as far as your character knows. A change applies from the next turn."
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(ClaimsControl, {
+        value: realism.claims,
+        disabled: busy || pending !== null,
+        onChange: claims
       }, undefined, false, undefined, this)
     ]
   }, undefined, true, undefined, this);
@@ -10831,6 +10941,35 @@ function BandCapsInput(props) {
     ]
   }, undefined, true, undefined, this);
 }
+function ClaimsInput(props) {
+  const policy = readClaims(props.value);
+  const seed = props.preset === "story" || props.preset === "grounded" || props.preset === "simulation" ? CLAIM_PRESETS[props.preset] : DEFAULT_CLAIMS;
+  return /* @__PURE__ */ u3("div", {
+    class: "lre-field",
+    "data-lre-claims": "world",
+    children: [
+      /* @__PURE__ */ u3("span", {
+        class: "label",
+        children: props.label
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(HostSwitch, {
+        label: "This world sets what new chats make of them",
+        checked: props.value !== undefined,
+        onChange: (on) => props.onChange(on ? { mode: seed.mode, capped: seed.capped } : undefined)
+      }, undefined, false, undefined, this),
+      policy ? /* @__PURE__ */ u3(ClaimsControl, {
+        value: policy,
+        onChange: (next) => props.onChange({ mode: next.mode, capped: next.capped })
+      }, undefined, false, undefined, this) : props.value === undefined ? /* @__PURE__ */ u3("span", {
+        class: "lre-field-help",
+        children: "Not set: a new chat takes the player's own setting (Settings → Realism)."
+      }, undefined, false, undefined, this) : null,
+      /* @__PURE__ */ u3(Issues, {
+        issues: props.issues
+      }, undefined, false, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+}
 function boolChecked(spec, value) {
   return spec.reads ? spec.reads(value) : value === true;
 }
@@ -11151,6 +11290,14 @@ function FieldInput(props) {
       return /* @__PURE__ */ u3(BandCapsInput, {
         label: spec.label,
         value: props.value,
+        issues,
+        onChange: props.onChange
+      }, undefined, false, undefined, this);
+    case "claims":
+      return /* @__PURE__ */ u3(ClaimsInput, {
+        label: spec.label,
+        value: props.value,
+        preset: props.parent.preset,
         issues,
         onChange: props.onChange
       }, undefined, false, undefined, this);
@@ -25878,6 +26025,10 @@ function derivedUnpricedCap(world) {
       top = Math.max(top, bandOfJson(row.price_cents)?.max ?? 0);
   return top > 0 ? Math.round(top) : 500 * 10 ** Math.max(0, Math.min(6, Math.trunc(world.currency.decimals)));
 }
+function derivedClaimCap(world) {
+  const meal = bandOfJson(world.tables["economy.categories"]?.rows.meals_out?.price_cents)?.typical ?? 0;
+  return meal > 0 ? Math.round(meal * 2) : 25 * 10 ** Math.max(0, Math.min(6, Math.trunc(world.currency.decimals)));
+}
 
 // src/packs/economy/core/taxes.ts
 var CORPORATE_PCT = 21;
@@ -25995,6 +26146,7 @@ var ASSET_TAIL = [
 function Prices(props) {
   const currency = props.world.currency;
   const derived = derivedUnpricedCap(props.world);
+  const meal = derivedClaimCap(props.world);
   const { unpricedCap, ...rest } = props.config;
   const region = typeof props.config.region === "string" ? props.config.region : "";
   const choices = regionChoices(props.world);
@@ -26012,6 +26164,17 @@ function Prices(props) {
         hint: `Empty uses ${formatMoney(derived, currency)}, the highest price band in the catalog and categories. A price the player states is never capped.`,
         issues: lintAt(props.lint, `${CONFIG}.unpricedCap`),
         onChange: (value) => props.onChange(value === undefined ? rest : { ...rest, unpricedCap: value })
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(MinorMoneyInput, {
+        label: "Claim cap",
+        value: props.config.claimCap,
+        currency,
+        min: 1,
+        optional: true,
+        placeholder: formatMoneyInput(meal, currency),
+        hint: `Empty uses ${formatMoney(meal, currency)}, about the price of a meal. When the player says they have something the world doesn't, Make it real with the cap on asks first about anything that costs more.`,
+        issues: lintAt(props.lint, `${CONFIG}.claimCap`),
+        onChange: (value) => props.onChange(withKey2(props.config, "claimCap", value))
       }, undefined, false, undefined, this),
       /* @__PURE__ */ u3("div", {
         class: "lre-field",
@@ -29174,6 +29337,9 @@ function findEntities(entities, query, kind) {
   const q = query.trim().toLowerCase();
   return entities.filter((e) => (kind === "" || e.kind === kind) && (q === "" || e.name.toLowerCase().includes(q) || e.id.toLowerCase().includes(q))).sort((a, b) => Number(a.gone) - Number(b.gone) || a.name.localeCompare(b.name));
 }
+function claimedThings(gm) {
+  return gm.entities.filter((e) => e.claimed && !e.gone).sort((a, b) => a.name.localeCompare(b.name)).map((entity) => ({ entity, where: entity.holder !== null ? `held by ${nameOf3(gm, entity.holder)}` : entity.place !== null ? `at ${nameOf3(gm, entity.place)}` : "nowhere" }));
+}
 
 // src/frontend/gm/entity.tsx
 var LEVELS = [0, 1, 2, 3, 4];
@@ -29196,6 +29362,9 @@ function EntityBadges(props) {
       tone: "gm",
       children: humanize(entity.visibility)
     }, "vis", false, undefined, this) : null,
+    entity.claimed ? /* @__PURE__ */ u3(Badge, {
+      children: "Claimed"
+    }, "claimed", false, undefined, this) : null,
     full && entity.agent ? /* @__PURE__ */ u3(Badge, {
       children: "Own day"
     }, "agent", false, undefined, this) : null,
@@ -43055,6 +43224,7 @@ function WorldSection(props) {
   });
   const list = findEntities(editor.gm.entities, query, kind);
   const kinds = editor.gm.kinds.filter((k) => editor.gm.entities.some((e) => e.kind === k.id));
+  const claimed = claimedThings(editor.gm);
   return /* @__PURE__ */ u3("div", {
     ref: pages.host.ref,
     class: "lre-gm-pages",
@@ -43068,6 +43238,25 @@ function WorldSection(props) {
             fight,
             turn,
             onOpen: () => pages.open("fight")
+          }, undefined, false, undefined, this) : null,
+          claimed.length > 0 ? /* @__PURE__ */ u3(Section, {
+            title: "Claimed by the player",
+            flush: true,
+            children: /* @__PURE__ */ u3("div", {
+              "data-lre-gm-list": "claimed",
+              children: /* @__PURE__ */ u3(List, {
+                children: claimed.map(({ entity: e, where }) => /* @__PURE__ */ u3(ListRow, {
+                  id: e.id,
+                  title: e.name,
+                  subtitle: where,
+                  badge: /* @__PURE__ */ u3(EntityBadges, {
+                    entity: e
+                  }, undefined, false, undefined, this),
+                  chevron: true,
+                  onClick: () => pages.open({ entity: e.id })
+                }, e.id, false, undefined, this))
+              }, undefined, false, undefined, this)
+            }, undefined, false, undefined, this)
           }, undefined, false, undefined, this) : null,
           /* @__PURE__ */ u3("div", {
             class: "lre-gm-tools",

@@ -1179,6 +1179,22 @@ function readAdjudication(raw) {
   };
 }
 
+// src/shared/claims.ts
+var CLAIM_MODES = ["real", "ask", "hold"];
+var CLAIM_MODE_LABEL = { real: "Make it real", ask: "Ask first", hold: "Hold me to the world" };
+var CLAIM_PRESETS = {
+  story: { mode: "real", capped: false },
+  grounded: { mode: "real", capped: true },
+  simulation: { mode: "ask", capped: true }
+};
+var DEFAULT_CLAIMS = CLAIM_PRESETS.story;
+function readClaims(raw) {
+  if (!isRecord(raw))
+    return null;
+  const mode = CLAIM_MODES.find((m) => m === raw.mode);
+  return mode ? { mode, capped: raw.capped === true } : null;
+}
+
 // src/shared/minds.ts
 var FIDELITIES = ["live", "near", "far", "background"];
 var WORLD_MINDS_KEYS = ["secrecy", "weights", "thresholds", "always", "never", "memory"];
@@ -8169,6 +8185,14 @@ function lintStructure(world, reg) {
         else if (!own(world.tables, p.table))
           err(at, "refs", `${a.label}'s ${p.label ?? name} names rows of the data table "${p.table}", which this world doesn't have.`);
       }
+      if (p.claim !== undefined) {
+        const place = p.claim;
+        const at = `actions.${id}.params.${name}.claim`;
+        if (place !== "held" && place !== "here")
+          err(at, "claims", `${a.label}'s ${p.label ?? name} says a claimed thing appears "${String(place)}"; it should be "held" (in the actor's hands) or "here" (where the actor is).`);
+        else if (p.type !== "ref")
+          warn(at, "claims", `${a.label}'s ${p.label ?? name} isn't a ref parameter, so no claimed thing ever fills it.`);
+      }
       if (p.of === undefined)
         continue;
       if (p.type !== "ref")
@@ -8363,6 +8387,13 @@ function lintStructure(world, reg) {
     for (const p of frozenPredicates(reg, world, domain, level)) {
       warn(`${p.where}s.${p.id}`, "frozen_predicate", `A condition of ${p.where} ${p.id} reads ${p.field}, which ${domain} level ${level} doesn't track, so it never changes.`);
     }
+  }
+  const claims = world.realism.claims;
+  if (claims !== undefined && !readClaims(claims)) {
+    const modes = CLAIM_MODES.map((m) => `${CLAIM_MODE_LABEL[m]} ("${m}")`);
+    err("realism.claims", "claims", `Player claims should be ${modes.slice(0, -1).join(", ")} or ${modes.at(-1) ?? ""}; new chats take the player's own setting instead.`);
+  } else if (isRecord(claims) && claims.capped !== undefined && typeof claims.capped !== "boolean") {
+    warn("realism.claims.capped", "claims", "Player claims' cap should be true or false; anything else reads as off.");
   }
   issues.push(...lintRuleset(world, reg));
   return issues;
@@ -10675,6 +10706,19 @@ function timelapseOptions(intent, runSeed) {
   const seg = intent.params.segment;
   return { target: parseTarget(intent.params.target), opts: { runSeed, overrides: parseOverrides(intent.params.overrides), segment: typeof seg === "number" ? seg : 1 } };
 }
+function claimThing(w, claim, salt) {
+  const made = optionalService(w.ctx, "gear.claim")?.(w.ctx, { ...claim, by: w.world.pov, salt });
+  if (!made || !("entity" in made))
+    return null;
+  const before = w.mark();
+  for (const e of made.events) {
+    if (w.apply(e)) {
+      w.restore(before);
+      return null;
+    }
+  }
+  return { entity: made.entity, events: made.events.length };
+}
 function planTurn(input) {
   const reg = input.registry;
   const w = new Working(reg, input.world, input.state);
@@ -10695,7 +10739,7 @@ function planTurn(input) {
     else
       timelapse = outcome;
   } else {
-    const steps = intent?.action ? [{ action: intent.action, params: intent.params, judgement: intent.judgement ?? null }, ...(intent.queue ?? []).map((q) => ({ action: q.action, params: q.params, judgement: q.judgement ?? null }))] : [];
+    const steps = intent?.action ? [{ action: intent.action, params: intent.params, judgement: intent.judgement ?? null, claim: intent.claim ?? null }, ...(intent.queue ?? []).map((q) => ({ action: q.action, params: q.params, judgement: q.judgement ?? null, claim: q.claim ?? null }))] : [];
     for (let i = 0;i < Math.max(1, steps.length); i++) {
       const step = steps[i] ?? null;
       const draws = i === 0 ? rng : rng.fork(`queue:${i}`);
@@ -10705,22 +10749,30 @@ function planTurn(input) {
       const inFight = fightHoldsClock(w.ctx);
       let resolution = null;
       let scene = sceneKey(w.world, w.state);
+      let made = null;
+      let ruled = mark;
       if (step) {
-        resolution = resolveAction(reg, w, { action: step.action, params: step.params }, draws, { runSeed: input.runSeed, judgement: step.judgement });
+        const claimed = step.claim ? claimThing(w, step.claim, hashParts(seed, "claim")) : null;
+        if (claimed && step.claim)
+          made = { entity: claimed.entity, name: step.claim.name, events: claimed.events };
+        const params = claimed && step.claim ? { ...step.params, [step.claim.param]: claimed.entity } : step.params;
+        resolution = resolveAction(reg, w, { action: step.action, params }, draws, { runSeed: input.runSeed, judgement: step.judgement });
         scene = sceneKey(w.world, w.state);
-        if (resolution.events.length > 0)
-          runRulesOnEvents(reg, w, resolution.events, { seed });
+        const done = w.events.slice(mark, mark + (made?.events ?? 0) + resolution.events.length);
+        if (done.length > 0)
+          runRulesOnEvents(reg, w, done, { seed });
+        ruled = w.events.length;
       }
       combat.push(...fight?.after(resolution ? { resolution, params: step?.params ?? {} } : null) ?? []);
       if (resolution) {
-        let end = mark + resolution.events.length;
+        let end = mark + (made?.events ?? 0) + resolution.events.length;
         const groups = new Set(w.events.slice(mark, end).flatMap((e) => e.group !== undefined ? [e.group] : []));
         for (;end < w.events.length; end++) {
           const group = w.events[end]?.group;
           if (group === undefined || !groups.has(group))
             break;
         }
-        resolution = { ...resolution, events: w.events.slice(mark, end) };
+        resolution = { ...resolution, events: w.events.slice(mark, end), ...made && made.events > 0 ? { claimed: { entity: made.entity, name: made.name, events: w.events.slice(mark, ruled) } } : {} };
         resolutions.push(resolution);
       }
       const fighting = fightHoldsClock(w.ctx);
@@ -12757,6 +12809,10 @@ function derivedUnpricedCap(world) {
     for (const row of Object.values(world.tables[table]?.rows ?? {}))
       top = Math.max(top, bandOfJson(row.price_cents)?.max ?? 0);
   return top > 0 ? Math.round(top) : 500 * 10 ** Math.max(0, Math.min(6, Math.trunc(world.currency.decimals)));
+}
+function derivedClaimCap(world) {
+  const meal = bandOfJson(world.tables["economy.categories"]?.rows.meals_out?.price_cents)?.typical ?? 0;
+  return meal > 0 ? Math.round(meal * 2) : 25 * 10 ** Math.max(0, Math.min(6, Math.trunc(world.currency.decimals)));
 }
 
 // src/packs/economy/core/taxes.ts
@@ -22326,6 +22382,16 @@ function registerRest(r, hooks) {
       return [{ severity: "warning", code: "economy.unpriced_cap", message: `The narrated-price cap should be a whole number of ${minorUnitPlural(world.currency)} above zero; narrated prices are capped at ${fallback}.`, path: "packs.economy.config.unpricedCap" }];
     }
   });
+  r.lint({
+    code: "economy.claim_cap",
+    check(world) {
+      const cap = world.packs.economy?.config.claimCap;
+      if (cap === undefined || typeof cap === "number" && Number.isSafeInteger(cap) && cap > 0)
+        return [];
+      const fallback = typeof cap === "number" && Number.isFinite(cap) && cap > 0 ? `${formatMoney(Math.round(cap), world.currency)}, rounded` : `the default, ${formatMoney(derivedClaimCap(world), world.currency)}`;
+      return [{ severity: "warning", code: "economy.claim_cap", message: `The claim cap should be a whole number of ${minorUnitPlural(world.currency)} above zero; a capped Make it real asks first above ${fallback}.`, path: "packs.economy.config.claimCap" }];
+    }
+  });
 }
 function actor(ctx, args, key = "who") {
   return strOf(args[key]) || ctx.world.pov;
@@ -23094,7 +23160,7 @@ var give = (ctx, item, from, to) => {
     return moved;
   const owner = e.fields.owner === from || e.fields.owner === undefined ? [{ type: "set", entity: item, field: "owner", value: to }] : [];
   const loansEnd = e.fields.owner === to || owner.length > 0;
-  return [...moved, ...owner, ...loansEnd ? endLoans(ctx, item) : []];
+  return [...moved, ...owner, ...loansEnd ? endLoans(ctx, item) : [], ...usedUp(ctx, item, from !== to)];
 };
 function spawnId2(ctx, spec) {
   return `item:${hashParts(spec.name, spec.owner ?? "", spec.holder ?? "", spec.catalog ?? "", ctx.state.clock, spec.salt ?? "", Object.keys(ctx.state.entities).length).slice(0, 12)}`;
@@ -23131,6 +23197,57 @@ var spawn = (ctx, spec) => {
   const kind = spec.kind ?? (row && typeof row.capacity_l === "number" ? "container" : "item");
   const entity = { id, kind, name: spec.name, tier: "background", fields, relations };
   return [{ type: "spawn", entity }];
+};
+function usedUp(ctx, item, done) {
+  const e = own(ctx.state.entities, item);
+  return done && e?.fields.claimed === true && e.fields.consumable === true && e.fields[GONE_FIELD] !== true ? [{ type: "set", entity: item, field: GONE_FIELD, value: true }] : [];
+}
+function claimId(ctx, c) {
+  for (let n = 0;; n++) {
+    const id = `item:claim_${hashParts("lre.claim", c.salt, c.name, String(n)).slice(0, 12)}`;
+    if (!own(ctx.state.entities, id))
+      return id;
+  }
+}
+var claim = (ctx, c) => {
+  if (!own(ctx.state.entities, c.by))
+    return reject9("missing_entity", `no claimer ${labelOf(ctx, c.by)}`);
+  const name = c.name.trim();
+  if (c.at === "held") {
+    const held = carriedBy(ctx.state, c.by).find((id) => {
+      const e = own(ctx.state.entities, id);
+      return e !== undefined && !isGone(ctx.state, id) && (c.catalog ? e.fields.catalog === c.catalog : e.name.trim().toLowerCase() === name.toLowerCase());
+    });
+    if (held)
+      return { entity: held, events: [] };
+  }
+  const place = placeOfEntity(ctx.state, c.by);
+  if (c.at === "here" && !place)
+    return reject9("no_place", `${labelOf(ctx, c.by)} is nowhere`);
+  const row = c.like ? rowOf(ctx, "gear.items", c.like) ?? rowOf(ctx, "gear.containers", c.like) : undefined;
+  const fields = { claimed: true };
+  if (c.at === "held")
+    fields.owner = c.by;
+  else if (place)
+    fields.place = place;
+  if (c.catalog)
+    fields.catalog = c.catalog;
+  if (c.category)
+    fields.category = c.category;
+  if (c.consumable)
+    fields.consumable = true;
+  if (row) {
+    if (typeof row.weight_g === "number")
+      fields.weight_g = row.weight_g;
+    if (typeof row.empty_weight_g === "number")
+      fields.weight_g = row.empty_weight_g;
+    if (typeof row.volume_l === "number")
+      fields.volume_l = row.volume_l;
+    if (typeof row.equip_slot === "string" && row.equip_slot !== "none")
+      fields.slot = row.equip_slot;
+  }
+  const id = claimId(ctx, c);
+  return { entity: id, events: [{ type: "spawn", entity: { id, kind: c.kind, name, tier: "background", fields, relations: c.at === "held" ? [{ type: "in", to: c.by }] : [] } }] };
 };
 var takePiece = (ctx, kit, piece, to) => {
   const k = own(ctx.state.entities, kit);
@@ -23240,6 +23357,7 @@ var gearPack = {
     r.service("gear.drop", drop);
     r.service("gear.give", give);
     r.service("gear.spawn", spawn);
+    r.service("gear.claim", claim);
     r.service("gear.take_piece", takePiece);
     r.service("gear.lend", lend);
     r.service("gear.retrieve", retrieve);
@@ -23303,10 +23421,11 @@ var gearPack = {
           if (wearBy > 0 && condition > 0)
             out.push(bump(ctx.state, item, "condition", -Math.min(wearBy, condition), condition));
         }
+        out.push(...usedUp(ctx, item, true));
         return out;
       }
     });
-    r.action({ id: "take", label: "Take", description: "Pick up something that is here.", pack: "gear", params: { item: { type: "ref", ref: "item" } }, requires: ["place(item) == here", "not carries(self, item)", "reach(self, item)"], outcomes: { default: [{ type: "gear.transfer", args: { item: "item", to: "self" } }] }, duration: "1", lexicon: ["take", "pick up", "grab"], observable: "picks something up" });
+    r.action({ id: "take", label: "Take", description: "Pick up something that is here.", pack: "gear", params: { item: { type: "ref", ref: "item", claim: "here" } }, requires: ["place(item) == here", "not carries(self, item)", "reach(self, item)"], outcomes: { default: [{ type: "gear.transfer", args: { item: "item", to: "self" } }] }, duration: "1", lexicon: ["take", "pick up", "grab"], observable: "picks something up" });
     r.effect({
       type: "gear.lose",
       args: ["item", "thief?"],
@@ -23335,13 +23454,13 @@ var gearPack = {
       }
     });
     r.action({ id: "lose", label: "Lose something", description: "Something you own or carry is lost or gone, whereabouts unknown.", pack: "gear", params: { item: { type: "ref", ref: "item" } }, requires: ["item.owner == self or carries(self, item)", "item.lost != true"], outcomes: { default: [{ type: "gear.lose", args: { item: "item" } }] }, duration: "1", lexicon: ["lost my", "lose", "can't find my", "is gone", "is missing"], observable: "searches their pockets" });
-    r.action({ id: "drop", label: "Drop", description: "Put down something you carry, here.", pack: "gear", params: { item: { type: "ref", ref: "item" } }, requires: ["carries(self, item)"], outcomes: { default: [{ type: "gear.drop", args: { item: "item", place: "=here" } }] }, duration: "1", lexicon: ["drop", "put down", "leave"], observable: "puts something down" });
-    r.action({ id: "give", label: "Give", description: "Hand something you carry to someone here, for keeps.", pack: "gear", params: { item: { type: "ref", ref: "item" }, to: { type: "ref", ref: "person" } }, requires: ["carries(self, item)", "at(to, here)"], outcomes: { default: [{ type: "gear.give", args: { item: "item", from: "self", to: "to" } }] }, duration: "1", lexicon: ["give", "hand", "pass"], observable: "hands something over" });
+    r.action({ id: "drop", label: "Drop", description: "Put down something you carry, here.", pack: "gear", params: { item: { type: "ref", ref: "item", claim: "held" } }, requires: ["carries(self, item)"], outcomes: { default: [{ type: "gear.drop", args: { item: "item", place: "=here" } }] }, duration: "1", lexicon: ["drop", "put down", "leave"], observable: "puts something down" });
+    r.action({ id: "give", label: "Give", description: "Hand something you carry to someone here, for keeps.", pack: "gear", params: { item: { type: "ref", ref: "item", claim: "held" }, to: { type: "ref", ref: "person" } }, requires: ["carries(self, item)", "at(to, here)"], outcomes: { default: [{ type: "gear.give", args: { item: "item", from: "self", to: "to" } }] }, duration: "1", lexicon: ["give", "hand", "pass"], observable: "hands something over" });
     r.action({ id: "lend", label: "Lend", description: "Lend something of yours to someone, for some days or until a time.", pack: "gear", params: { item: { type: "ref", ref: "item" }, to: { type: "ref", ref: "person" }, days: { type: "number", optional: true }, until: { type: "text", optional: true, label: "Until (a time: 7 pm, tonight, tomorrow)" } }, requires: ["item.owner == self", "days > 0 or params.until != null", "at(to, here) or at(item, here)"], outcomes: { default: [{ type: "gear.lend", args: { item: "item", to: "to", until: "=days > 0 ? clock + days(days) : 0", said: "=params.until" } }] }, duration: "2", lexicon: ["lend", "loan", "let borrow"], observable: "lends something" });
     r.action({ id: "reclaim", label: "Take back", description: "Take back something of yours that you lent out.", pack: "gear", params: { item: { type: "ref", ref: "item" } }, requires: ["item.owner == self", "lent_out(item)"], outcomes: { default: [{ type: "gear.retrieve", args: { item: "item" } }] }, duration: "5", lexicon: ["take back", "get back", "reclaim"], observable: "takes something back" });
-    r.action({ id: "wear", label: "Wear or equip", description: "Put on or equip clothing, armor or gear.", pack: "gear", params: { item: { type: "ref", ref: "item" } }, requires: ["carries(self, item) or (place(item) == here and reach(self, item))", "level.gear >= 3"], outcomes: { default: [{ type: "gear.wear", args: { item: "item", wearer: "self" } }] }, duration: "2", lexicon: ["wear", "put on", "equip"], observable: "puts something on" });
+    r.action({ id: "wear", label: "Wear or equip", description: "Put on or equip clothing, armor or gear.", pack: "gear", params: { item: { type: "ref", ref: "item", claim: "held" } }, requires: ["carries(self, item) or (place(item) == here and reach(self, item))", "level.gear >= 3"], outcomes: { default: [{ type: "gear.wear", args: { item: "item", wearer: "self" } }] }, duration: "2", lexicon: ["wear", "put on", "equip"], observable: "puts something on" });
     r.action({ id: "remove", label: "Take off", description: "Take off something you wear or have equipped.", pack: "gear", params: { item: { type: "ref", ref: "item" } }, requires: ["carries(self, item)"], outcomes: { default: [{ type: "gear.remove", args: { item: "item" } }] }, duration: "2", lexicon: ["take off", "remove", "unequip"], observable: "takes something off" });
-    r.action({ id: "use", label: "Use", description: "Use an item you carry or can reach.", pack: "gear", params: { item: { type: "ref", ref: "item" } }, requires: ["carries(self, item) or (on_grid(item) and reach(self, item))"], outcomes: { default: [{ type: "gear.use", args: { item: "item", user: "self" } }] }, duration: "5", lexicon: ["use", "apply"], observable: "uses something" });
+    r.action({ id: "use", label: "Use", description: "Use an item you carry or can reach.", pack: "gear", params: { item: { type: "ref", ref: "item", claim: "held" } }, requires: ["carries(self, item) or (on_grid(item) and reach(self, item))"], outcomes: { default: [{ type: "gear.use", args: { item: "item", user: "self" } }] }, duration: "5", lexicon: ["use", "apply"], observable: "uses something" });
     r.action({ id: "take_piece", label: "Take from a kit", description: "Take one piece, such as a tool or a part, out of a kit.", pack: "gear", params: { kit: { type: "ref", ref: "kit" }, piece: { type: "text" } }, requires: ["(place(kit) == here and reach(self, kit)) or carries(self, kit)", "level.gear >= 3"], outcomes: { default: [{ type: "gear.take_piece", args: { kit: "kit", piece: "=piece", to: "self" } }] }, duration: "1", lexicon: ["take the", "grab a", "get a"], observable: "takes a tool" });
     r.process({
       id: "gear.grants",
