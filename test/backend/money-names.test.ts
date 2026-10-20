@@ -148,6 +148,24 @@ describe("each journal line names the other side of its own payment", () => {
     expect(others(shop, SHOP, /^Payroll/)).toEqual(expect.arrayContaining(["Jordan Ellis", "Danny Okafor"]));
   });
 
+  test("on the Kowalczyks' joint account each of them reads the other's share in by name, and their own as no one", async () => {
+    const JOINT = "acct_kowalczyk_household";
+    for (const [pov, mine, theirs, them] of [
+      ["helen_kowalczyk", "Household share", "Household share, 1A", "Jess Kowalczyk"],
+      ["jess_kowalczyk", "Household share, 1A", "Household share", "Helen Kowalczyk"],
+    ] as const) {
+      const chat = await MoneyChat.start({ pov });
+      // Both pay their shares in on the 1st of October; a timelapse stops where something interrupts it, so time passes until they're in.
+      let view = await chat.hub();
+      for (let i = 0; i < 12 && others(view, JOINT, theirs).length === 0; i++) {
+        await chat.timelapse(4 * 1440);
+        view = await chat.hub();
+      }
+      expect(others(view, JOINT, mine)).toEqual([null]);
+      expect(others(view, JOINT, theirs)).toEqual([them]);
+    }
+  }, 120_000);
+
   test("a trade names the market it was made on, never its key", async () => {
     const chat = await MoneyChat.start();
     const buy = tradeAction({ side: "buy", holding: "", asset: "broad_us_equity_index", account: "acct_pov_brokerage", qty: null, amount: "100", from: CHECKING, to: "", option: null }, chat.currency);
