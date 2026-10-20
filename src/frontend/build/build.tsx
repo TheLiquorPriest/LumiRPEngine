@@ -15,6 +15,8 @@ import { mapSettingsOf } from "../../shared/maps";
 import type { JobKind, LintIssue, WorldCollection, WorldPart } from "../../shared/protocol";
 import { spawnCapOf, type WorldDoc, type WorldIndex } from "../../shared/world";
 import type { BuildRoute } from "../app";
+import { lorePinsJson, lorePinsOf } from "../../shared/lore";
+import { LorePinsSection } from "./lore-pins";
 import { useApp, useUi, useView } from "../app";
 import { Badge, Banner, Button, Empty, Field, IconButton, IdText, JsonView, List, ListRow, PageHeader, SaveBar, Section, useBusy } from "../components";
 import { humanize } from "../format";
@@ -624,6 +626,7 @@ export function MapOwned(props: { worldId: string; collection: WorldCollection; 
       <Section title="As stored">
         <JsonView value={props.value} />
       </Section>
+      {props.collection === "places" ? <LorePinsSection target="places" id={props.id} /> : null}
     </div>
   );
 }
@@ -695,6 +698,7 @@ export function SchemaEditor(props: EditorProps & { children?: ComponentChildren
             );
           })
         : null}
+      {!isNew && (props.collection === "entities" || props.collection === "places") ? <LorePinsSection target={props.collection === "entities" ? "characters" : "places"} id={id} /> : null}
       {props.children}
       <SaveBar>
         <Button variant="primary" disabled={!changed && !isNew} busy={busy} onClick={save}>
@@ -718,7 +722,7 @@ function ItemView(props: { collection: WorldCollection; id: string | null }) {
   return <Editor world={draft.doc} collection={props.collection} id={props.id} send={send} />;
 }
 
-function partValue(doc: WorldDoc, part: Exclude<WorldPart, "tiers" | "loreIndex" | "ruleset" | "minds">): JsonObject {
+function partValue(doc: WorldDoc, part: Exclude<WorldPart, "tiers" | "loreIndex" | "ruleset" | "minds" | "lorePins">): JsonObject {
   switch (part) {
     case "calendar":
       return doc.calendar as unknown as JsonObject;
@@ -741,10 +745,20 @@ function PartView(props: { part: WorldPart }) {
   if (props.part === "loreIndex") return <LookupTableEditor doc={draft.doc} lint={draft.lint} save={(value) => send({ type: "lre.editor", worldId: draft.worldId, base: draft.base, op: "set", part: "loreIndex", value })} />;
   if (props.part === "ruleset") return <RulesetEditor />;
   if (props.part === "minds") return <MindsEditor />;
+  if (props.part === "lorePins") {
+    return (
+      <div class="lre-build-page" data-lre-editor="part:lorePins">
+        <PageHeader title={PART_INFO.lorePins.label} subtitle={PART_INFO.lorePins.hint} />
+        <Section title="As stored">
+          <JsonView value={lorePinsJson(lorePinsOf(draft.doc))} />
+        </Section>
+      </div>
+    );
+  }
   return <SchemaPartView part={props.part} />;
 }
 
-function SchemaPartView(props: { part: Exclude<WorldPart, "tiers" | "loreIndex" | "ruleset" | "minds"> }) {
+function SchemaPartView(props: { part: Exclude<WorldPart, "tiers" | "loreIndex" | "ruleset" | "minds" | "lorePins"> }) {
   const app = useApp();
   const draft = useSelect(app.drafts, (d) => d);
   const send = useMemo(() => draftSend(app), [app]);

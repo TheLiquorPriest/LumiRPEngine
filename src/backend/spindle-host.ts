@@ -3,7 +3,7 @@
 // event payloads carry no userId; handlers receive it as the second argument) and maps the port's
 // calls onto `lumiverse-spindle-types` 0.6.49 plus the local augmentation.
 
-import type { GenerationReasoningOverrideDTO, PromptBlockDTO, PromptBlockSnapshotDTO, WorldBookEntryCreateDTO } from "lumiverse-spindle-types";
+import type { GenerationReasoningOverrideDTO, PromptBlockDTO, PromptBlockSnapshotDTO, WorldBookEntryCreateDTO, WorldBookEntryDTO } from "lumiverse-spindle-types";
 import type { HostSpindleAPI, RegexScriptInput } from "../spindle-augment";
 import type { HostPresetBlockInput } from "./host";
 import type { JsonObject, JsonValue } from "../shared/json";
@@ -66,6 +66,11 @@ const GENERATION_TYPES: Record<string, HostGenerationType> = { normal: "normal",
 
 function generationType(o: unknown): HostGenerationType {
   return GENERATION_TYPES[str(o, "generationType") ?? "normal"] ?? "normal";
+}
+
+/** A World Info entry as the port reads it. */
+function bookEntryOf(e: WorldBookEntryDTO): HostBookEntry {
+  return { id: e.id, bookId: e.world_book_id, comment: e.comment, content: e.content, keys: [...e.key], disabled: e.disabled, constant: e.constant, position: e.position, depth: e.depth, role: e.role, order: e.order_value, extensions: toJsonObject(e.extensions) };
 }
 
 /** A host message (`getMessages` row or event DTO). `spindle_metadata` arrives as `metadata` or inside `extra`. */
@@ -474,29 +479,27 @@ export function createSpindleHost(): HostPort {
       async exists(bookId, userId) {
         return (await spindle.world_books.get(bookId, userId)) !== null;
       },
+      async list(userId) {
+        const out: { id: string; name: string; engine: boolean }[] = [];
+        for (let offset = 0; offset < 100_000; offset += 200) {
+          const page = await spindle.world_books.list({ limit: 200, offset, userId });
+          for (const b of page.data) out.push({ id: b.id, name: b.name, engine: isRecord(b.metadata) && b.metadata.lumi_rp_engine === true });
+          if (page.data.length < 200 || out.length >= page.total) break;
+        }
+        return out;
+      },
       async entries(bookId, userId) {
         const out: HostBookEntry[] = [];
         for (let offset = 0; offset < 100_000; offset += 200) {
           const page = await spindle.world_books.entries.list(bookId, { limit: 200, offset, userId });
-          for (const e of page.data) {
-            out.push({
-              id: e.id,
-              bookId: e.world_book_id,
-              comment: e.comment,
-              content: e.content,
-              keys: [...e.key],
-              disabled: e.disabled,
-              constant: e.constant,
-              position: e.position,
-              depth: e.depth,
-              role: e.role,
-              order: e.order_value,
-              extensions: toJsonObject(e.extensions),
-            });
-          }
+          for (const e of page.data) out.push(bookEntryOf(e));
           if (page.data.length < 200 || out.length >= page.total) break;
         }
         return out;
+      },
+      async entry(entryId, userId) {
+        const e = await spindle.world_books.entries.get(entryId, userId);
+        return e ? bookEntryOf(e) : null;
       },
       async createEntry(bookId, entry, userId) {
         const created = await spindle.world_books.entries.create(bookId, entryInput(entry), userId);

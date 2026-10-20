@@ -151,6 +151,19 @@ Detail bands: `principal` (Leads), `supporting` (Supporting), `background` (Back
 
 Interrupt classes: `invitation`, `bill`, `decline`, `incident`, `quest`, `rule`, `arrival`, `overdue`, `needs`, `weather`.
 
+### Lore pins
+
+The world's `lorePins` part: `characters` and `places`, each a map from an id to a list of pins, where a pin is `{"lore": id}` (one of the world's lore entries) or `{"book": id, "entry": id}` (an entry of one of the user's World Info books). A character's pins reach only their own mind's calls; a place's reach every helper and mind call there or in a place inside it, nearest place first. Pinned text comes first within a call's lore tokens, and a pin that doesn't fit is cut, with a note in the Context panel.
+
+| Lint | Means |
+|---|---|
+| `pin_duplicate` | the same entry pinned twice to one character or place |
+| `pin_missing` | a pin naming a lore entry the world doesn't have |
+| `pin_pending` | an AI-written entry still waiting for review: no call reads it until it is accepted |
+| `pin_shape` | a pin that is neither {"lore": id} nor {"book": id, "entry": id}: it is ignored |
+| `pin_target` | pins under a character or place the world doesn't have: no call reads them |
+| `pin_unread` | a secret entry pinned to someone whose own it isn't: their mind never reads it |
+
 ### Adjudication presets
 
 | Value | `narrative` | `balanced` | `crunchy` |

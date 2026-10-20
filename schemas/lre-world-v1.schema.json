@@ -69,6 +69,7 @@
     },
     "lore": { "type": "object", "propertyNames": { "minLength": 1 }, "additionalProperties": { "$ref": "#/$defs/loreEntry" } },
     "loreIndex": { "$ref": "#/$defs/loreIndex" },
+    "lorePins": { "$ref": "#/$defs/lorePins" },
     "mapSettings": {
       "type": "object",
       "description": "How the map shows the world, and the optional grid system. Absent: knowledge display, movement off, sight 3.",
@@ -899,6 +900,21 @@
             "properties": { "label": { "type": "string" }, "entries": { "$ref": "#/$defs/ids" } }
           }
         }
+      }
+    },
+    "lorePin": {
+      "anyOf": [
+        { "title": "{\"lore\": id}", "type": "object", "required": ["lore"], "additionalProperties": false, "properties": { "lore": { "$ref": "#/$defs/id", "description": "one of the world's lore entries" } } },
+        { "title": "{\"book\": id, \"entry\": id}", "type": "object", "required": ["book", "entry"], "additionalProperties": false, "properties": { "book": { "type": "string", "minLength": 1, "description": "one of the user's Lumiverse World Info books" }, "entry": { "type": "string", "minLength": 1, "description": "an entry of that book, read from it whenever it is used" } } }
+      ]
+    },
+    "lorePins": {
+      "type": "object",
+      "description": "Lore pinned where calls always read it first, within their lore tokens: a character's mind calls, and every helper and mind call at a place or inside it. Absent: none.",
+      "additionalProperties": false,
+      "properties": {
+        "characters": { "type": "object", "description": "entity id → the entries pinned to that character", "additionalProperties": { "type": "array", "items": { "$ref": "#/$defs/lorePin" } } },
+        "places": { "type": "object", "description": "place id → the entries pinned to that place", "additionalProperties": { "type": "array", "items": { "$ref": "#/$defs/lorePin" } } }
       }
     },
     "facet": {

@@ -8,7 +8,7 @@ import { isRecord } from "../shared/json";
 import type { Activity } from "../shared/diagnostics";
 import type { ChatId } from "../shared/ids";
 import { PROTOCOL_VERSION } from "../shared/protocol";
-import type { DeltaOp, DraftChanged, ErrorCode, ErrorMessage, FrontendToBackend, JobUpdate, ResultBodies, ResultMessage } from "../shared/protocol";
+import type { DeltaOp, DraftChanged, ErrorCode, ErrorMessage, FrontendToBackend, JobUpdate, MindsRunUpdate, ResultBodies, ResultMessage } from "../shared/protocol";
 import type { StateView } from "../shared/state-view";
 import { applyDelta, DeltaError } from "./delta";
 import type { RequestBody, Send } from "./registry";
@@ -79,6 +79,7 @@ const REQUEST_TYPES: Record<keyof ResultBodies, true> = {
   "lre.studio": true,
   "lre.preset": true,
   "lre.diag": true,
+  "lre.minds": true,
 };
 
 function isRequestType(value: unknown): value is keyof ResultBodies {
@@ -100,6 +101,7 @@ export class ProtocolClient {
   private readonly listeners = new Set<(state: SyncState) => void>();
   private readonly errorListeners = new Set<(error: ErrorMessage) => void>();
   private readonly jobListeners = new Set<(update: JobUpdate) => void>();
+  private readonly mindsListeners = new Set<(update: MindsRunUpdate) => void>();
   private readonly draftListeners = new Set<(push: DraftChanged) => void>();
   private readonly unsubscribe: () => void;
   private readonly timeoutMs: number;
@@ -139,6 +141,12 @@ export class ProtocolClient {
   onJob(listener: (update: JobUpdate) => void): () => void {
     this.jobListeners.add(listener);
     return () => this.jobListeners.delete(listener);
+  }
+
+  /** A GM's minds run moved on or ended (`lre.minds.update`): GM data, which only GM → Minds shows. */
+  onMindsRun(listener: (update: MindsRunUpdate) => void): () => void {
+    this.mindsListeners.add(listener);
+    return () => this.mindsListeners.delete(listener);
   }
 
   /** A world's draft changed on the backend (`lre.draft.changed`): written, discarded or committed by any session. */
@@ -234,6 +242,12 @@ export class ProtocolClient {
         return;
       case "lre.activity":
         if (payload.chatId === this.state.chatId && (payload.activity === null || isActivity(payload.activity))) this.update({ ...this.state, activity: payload.activity });
+        return;
+      case "lre.minds.update":
+        if (typeof payload.chatId === "string" && isRecord(payload.run) && typeof payload.run.runId === "string") {
+          const update = payload as unknown as MindsRunUpdate;
+          for (const listener of this.mindsListeners) listener(update);
+        }
         return;
       case "lre.draft.changed":
         if (typeof payload.worldId === "string" && typeof payload.version === "number" && typeof payload.stored === "boolean" && (typeof payload.base === "string" || payload.base === null)) {

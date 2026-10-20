@@ -742,6 +742,17 @@ export type MindEditOp =
   | { op: "mind_memory"; entity: EntityId; part: "note" | "commitment" | "plan"; id: string | null; value: JsonObject | null };
 
 /**
+ * A pinned lore entry a call was given (DESIGN §24.5), as a player surface may show it: its title
+ * (or "A hidden entry" when the title would say what the player doesn't know), its token cost, and
+ * whether it was cut to fit the call's lore tokens.
+ */
+export interface PinnedTrace {
+  title: string;
+  tokens: number;
+  cut: boolean;
+}
+
+/**
  * One minds model call in the inspector (DESIGN §6.5), a player surface: never any text, only calls
  * for people the POV can see and has met, and a withheld depiction reads as a plain `recorded`.
  */
@@ -756,6 +767,10 @@ export interface MindCallTrace {
   tokens: number;
   /** Whose prompt it ran: the world's template, the user's override, or the built-in. */
   prompt: "world" | "override" | "default";
+  /** The pinned lore it was given (DESIGN §24.5) that the player may know of; absent: none. */
+  pinned?: PinnedTrace[];
+  /** What the player should know of how it went: pinned lore cut or left out over the lore tokens. */
+  notes?: string[];
 }
 
 // ---------------------------------------------------------------- running minds
@@ -765,11 +780,43 @@ export interface MindMoment {
   kind: "turn" | "beat";
   /** Game minutes they think at. */
   at: number;
-  /** Why now, in words, which a mind is told when the player said nothing: a beat's reason ("Marcus's appointment") or a time skip's end; "" on a plain turn. */
+  /** Why now, in words, which a mind is told when the player said nothing: a beat's reason ("Marcus's appointment"), a time skip's end, or a GM's run between turns; "" on a plain turn. */
   reason: string;
   /** The player's latest message and the reply before it, on a turn; empty at a beat. */
   user: string;
   reply: string;
+}
+
+/**
+ * How one mind of a GM's run went (DESIGN §24.9): GM data, never on a player surface. `pinned`
+ * lists the pinned lore it was given, by its own title, with what was cut or left out to fit.
+ */
+export interface MindsRunEntry {
+  entity: EntityId;
+  name: string;
+  level: Fidelity;
+  status: "waiting" | "thinking" | "recorded" | "failed" | "cancelled";
+  /** Why it failed, in words. */
+  reason?: string;
+  ms?: number;
+  tokens?: number;
+  pinned?: (PinnedTrace & { left?: true })[];
+}
+
+/**
+ * A GM's minds run (`lre.minds`, DESIGN §24.9): the minds asked, each with how it went, and how the
+ * run ended. `message` says why it failed or how it ended when nothing was recorded; `pending`: its
+ * edit was held while a reply was written and lands when it finishes; `undo`: the Corrected chip
+ * that takes the recorded minds back, once there is one.
+ */
+export interface MindsRunView {
+  runId: string;
+  status: "running" | "done" | "failed" | "cancelled";
+  startedAt: number;
+  entries: MindsRunEntry[];
+  message: string | null;
+  pending: boolean;
+  undo: string | null;
 }
 
 // ---------------------------------------------------------------- built-in prompts

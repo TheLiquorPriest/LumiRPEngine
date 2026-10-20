@@ -7,13 +7,13 @@
 
 import type { JsonObject, JsonValue } from "./json";
 import type { LoreIndexAddition } from "./lore";
-import type { MindEditOp } from "./minds";
+import type { MindEditOp, MindsRunView } from "./minds";
 import type { ActionId, BoundMode, ChatId, ChipId, DomainId, EntityId, FieldId, KindId, Level, MessageId, PanelId, PlaceId, RelationTypeId, RevisionId, StageId, TierId, TrackId, WorldId } from "./ids";
 import type { EntityUpgradePick, EventRef, PathHash, ResolveScope, TimeControl, TimeScope, UpgradeAspect, UpgradePicks } from "./ledger";
 import type { ExtractionType, UserSettings } from "./settings";
 import type { Activity, DiagRecord } from "./diagnostics";
 import type { GmView, SheetSectionView, StateView } from "./state-view";
-import type { AdjudicationDef, FacetId, FacetValueId, KindDef, LifeStateId, MapDisplay, RelationTypeDef, RevisionNote, WorldDoc, WorldIndex } from "./world";
+import type { AdjudicationDef, FacetId, FacetValueId, KindDef, LifeStateId, LorePin, MapDisplay, RelationTypeDef, RevisionNote, WorldDoc, WorldIndex } from "./world";
 
 export const PROTOCOL_VERSION = 1;
 
@@ -341,9 +341,10 @@ export type WorldCollection =
 /**
  * Singleton parts of a world document. `tiers` is `{tiers, spawnTier?}` (DESIGN §9.1); `ruleset` is
  * optional: an empty one removes it; `loreIndex` is the lore lookup table `{terms, topics}`, whole;
- * `minds` is `world.minds` (DESIGN §24.2), whole: the defaults remove it.
+ * `minds` is `world.minds` (DESIGN §24.2), whole: the defaults remove it; `lorePins` is
+ * `world.lorePins` (DESIGN §24.5), whole: one that pins nothing removes it.
  */
-export type WorldPart = "calendar" | "realism" | "time" | "meta" | "tiers" | "ruleset" | "loreIndex" | "minds";
+export type WorldPart = "calendar" | "realism" | "time" | "meta" | "tiers" | "ruleset" | "loreIndex" | "minds" | "lorePins";
 
 /** One RFC 6902 operation, its paths RFC 6901 JSON Pointers into the whole world document. */
 export type JsonPatchOp =
@@ -427,15 +428,65 @@ export interface WorldChatInfo {
 }
 
 /**
- * Lore curation (DESIGN §4.2). `drift`: the draft's entries indexed from a World Info book whose
- * book entry changed since (its current text and hash) or is gone; `id` asks about one entry.
- * `save`: the chat's latest reply, or `text` (an excerpt of the chat), becomes a lore entry in the
- * draft of the chat's world, its source the message it came from.
+ * Lore curation (DESIGN §4.2) and pins (§24.5). `drift`: the draft's entries indexed from a World
+ * Info book whose book entry changed since (its current text and hash) or is gone; `id` asks about
+ * one entry. `save`: the chat's latest reply, or `text` (an excerpt of the chat), becomes a lore
+ * entry in the draft of the chat's world, its source the message it came from. `books`: the user's
+ * World Info books a pin may name an entry of, those attached to `chatId` first (the engine's own
+ * books left out). `entries`: one book's entries. `pins`: every pin of the world's draft (with
+ * `worldId`) or of the revision the chat plays (with `chatId`), each read now.
  */
-export type LoreRequest = Request<"lre.lore"> & ({ op: "drift"; worldId: WorldId; id?: string } | { op: "save"; chatId: ChatId; text?: string });
+export type LoreRequest = Request<"lre.lore"> &
+  ({ op: "drift"; worldId: WorldId; id?: string } | { op: "save"; chatId: ChatId; text?: string } | { op: "books"; chatId?: ChatId } | { op: "entries"; bookId: string } | { op: "pins"; worldId?: WorldId; chatId?: ChatId });
 
 /** A book-sourced lore entry whose World Info entry changed since it was indexed (with its text now), or is gone. */
 export type LoreDrift = { status: "changed"; content: string; hash: string } | { status: "missing" };
+
+/** A World Info book a pin may name an entry of (`lre.lore books`); `attached`: to the chat asked about. */
+export interface LoreBookView {
+  id: string;
+  name: string;
+  attached: boolean;
+}
+
+/** One entry of a World Info book, for a pin picker (`lre.lore entries`); `disabled`: switched off in its book, which a pin still reads. */
+export interface LoreBookEntryView {
+  id: string;
+  title: string;
+  disabled: boolean;
+  /** Its text's length, in characters. */
+  chars: number;
+}
+
+/**
+ * A pin as read now (`lre.lore pins`): its entry's title and where it comes from (the world's lore,
+ * or a book by name). `missing`: no such lore entry, or gone from its book; `pending`: an AI-written
+ * entry not reviewed yet, which nothing reads; `off`: switched off in its book, which a pin still
+ * reads. `secret`: a secret world entry, which reaches only the readers it allows.
+ */
+export interface LorePinView {
+  key: string;
+  pin: LorePin;
+  title: string;
+  source: string;
+  status: "ok" | "missing" | "pending" | "off";
+  secret: boolean;
+}
+
+/** Every pin of a world, read now (`lre.lore pins`), by character and by place, in order. */
+export interface LorePinsView {
+  characters: Record<EntityId, LorePinView[]>;
+  places: Record<PlaceId, LorePinView[]>;
+}
+
+/**
+ * Character minds on demand (DESIGN §24.9), from GM → Minds behind the GM gate. `run` asks the minds
+ * of `who` (absent: everyone Live and Near) now, at the chat's head, from its messages and lore as a
+ * turn would, and records them as one GM edit with its Undo; it answers at once, and the run's
+ * progress and end arrive as `lre.minds.update`. `cancel` stops a run, recording nothing; `status`
+ * reads the chat's latest run.
+ */
+export type MindsRequest = Request<"lre.minds"> & { chatId: ChatId } & ({ op: "run"; who?: EntityId[] } | { op: "cancel"; runId: string } | { op: "status" });
 
 /**
  * LumiRPEngine Studio's offer (DESIGN §15). `offer` reads the world the Studio offers and reviews
@@ -521,7 +572,8 @@ export type FrontendToBackend =
   | LoreRequest
   | StudioRequest
   | PresetRequest
-  | DiagRequest;
+  | DiagRequest
+  | MindsRequest;
 
 // ---------------------------------------------------------------- responses (backend → frontend)
 
@@ -582,8 +634,11 @@ export interface ResultBodies {
   "lre.map": { display?: MapDisplay; walk?: { minutes: number; disabled?: string } };
   /** `start`, `cancel` and `dismiss` name the job; `list` returns the world's kept jobs. */
   "lre.job": { jobId?: string; jobs?: JobSummary[] };
-  /** `drift`: book-sourced entries whose book entry changed or is gone, by lore id (unchanged ones are left out); `save`: the world and the new entry's id. */
-  "lre.lore": { drift?: Record<string, LoreDrift>; worldId?: WorldId; id?: string };
+  /**
+   * `drift`: book-sourced entries whose book entry changed or is gone, by lore id (unchanged ones are
+   * left out); `save`: the world and the new entry's id; `books`, `entries` and `pins` answer theirs.
+   */
+  "lre.lore": { drift?: Record<string, LoreDrift>; worldId?: WorldId; id?: string; books?: LoreBookView[]; entries?: LoreBookEntryView[]; pins?: LorePinsView };
   /**
    * `offer`: the offer under review, or null and why there is none (`message`). `install`: what it
    * became, with the macros to review before playing it (`lint`).
@@ -592,6 +647,8 @@ export interface ResultBodies {
   "lre.preset": { card: PresetCard };
   /** `get`: the chat's records, oldest first, and its activity line now. */
   "lre.diag": { records: DiagRecord[]; activity: Activity | null };
+  /** The run started, cancelled or asked about; null when the chat has had none since the extension started. */
+  "lre.minds": { run: MindsRunView | null };
 }
 
 export type ResultMessage = {
@@ -639,4 +696,10 @@ export interface ActivityPush extends Envelope<"lre.activity"> {
   activity: Activity | null;
 }
 
-export type BackendToFrontend = StateSnapshot | StateDelta | ResultMessage | ErrorMessage | JobUpdate | DraftChanged | ActivityPush;
+/** A GM's minds run moved on or ended (`lre.minds`), sent to the session that started it: GM data, shown only behind the GM gate. */
+export interface MindsRunUpdate extends Envelope<"lre.minds.update"> {
+  chatId: ChatId;
+  run: MindsRunView;
+}
+
+export type BackendToFrontend = StateSnapshot | StateDelta | ResultMessage | ErrorMessage | JobUpdate | DraftChanged | ActivityPush | MindsRunUpdate;

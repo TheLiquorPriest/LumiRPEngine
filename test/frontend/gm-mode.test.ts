@@ -40,7 +40,7 @@ describe("World's search", () => {
 });
 
 describe("GM Places", () => {
-  const place = (id: string, parent: string | null): GmView["places"][number] => ({ id, name: id, visibility: "public", parent });
+  const place = (id: string, parent: string | null): GmView["places"][number] => ({ id, name: id, visibility: "public", parent, pins: 0 });
 
   test("each place reads under its parent, depth first, in the world's order", () => {
     const order = placesInOrder([place("office", "diner"), place("diner", null), place("apartment", null), place("booth", "diner"), place("drawer", "office")]);

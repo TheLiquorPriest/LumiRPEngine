@@ -2,8 +2,9 @@
 // mind is its own call, blind to every other, made in parallel; every answer is checked, screened and
 // recorded as an event, so the fold, a Re-narrate and the background lane never call a model.
 //
-//   runMinds   one mind per character for a moment (a turn, or a beat inside a time skip); records
-//              nothing: it returns the validated `minds.mind` events, for the turn or the skip.
+//   runMinds   one mind per character for a moment (a turn, a beat inside a time skip, or a GM's run
+//              between turns); records nothing: it returns the validated `minds.mind` events, for
+//              the turn, the skip or the GM's edit, with how each mind went.
 //   preMinds   the pre phase: the round, then the minds the ladder and the cadence pick.
 //   postMinds  the post phase: who was present, then each one's memory of what was written, then
 //              consolidation, each character at most once per period.
@@ -13,26 +14,29 @@ import type { ChatId, EntityId, MessageId, UserId } from "../shared/ids";
 import type { JsonObject, JsonValue } from "../shared/json";
 import { isRecord } from "../shared/json";
 import type { LedgerEvent } from "../shared/ledger";
-import type { CommitmentKind, Fidelity, MindCallTrace, MindCommitment, MindEventData, MindMoment, MindNote, MindPlan, MindPurpose, MindsSettings, PlanKind, PresenceEventData } from "../shared/minds";
+import type { CommitmentKind, Fidelity, MindCallTrace, MindCommitment, MindEventData, MindMoment, MindNote, MindPlan, MindPurpose, MindsRunEntry, MindsSettings, PlanKind, PresenceEventData } from "../shared/minds";
 import { COMMITMENT_KINDS, effectiveMemory, MIND_ANSWER_FORMATS, MIND_PROMPT_DEFAULTS, MIND_TEXT_CAPS, MINDS_EVENTS, PLAN_KINDS, PLAN_PRIORITY, worldMindsOf, worldMindTemplate } from "../shared/minds";
 import type { ModelUseSettings, StepConfig } from "../shared/settings";
 import { stepConfigOf } from "../shared/settings";
 import type { WorldDoc } from "../shared/world";
 import { parseMoneyInput } from "../shared/money";
 import { calendarOf, clockOfStamp, formatClock, nextTimeOfDay } from "../engine/calendar";
+import { loreReadable } from "../engine/lore";
+import { pinsFor } from "../engine/lore-pins";
 import { own } from "../engine/pack-kit";
 import { hiddenNameCheck, playerKnows, witnessLines } from "../engine/player-events";
 import type { Registry } from "../engine/registry-impl";
 import { isGone, kindIs, placeOfEntity } from "../engine/scope";
 import type { WorldState } from "../engine/state";
-import { findLeaks, unrevealedSecrets } from "../engine/visibility";
+import { findLeaks, loreGateReader, unrevealedSecrets } from "../engine/visibility";
 import { acts } from "../engine/life";
 import { Working } from "../engine/working";
 import { capText } from "../packs/minds/core/edit";
 import { fidelityOf, pickMinds } from "../packs/minds/core/fidelity";
 import { faded, readCharacter, readSlice, salienceNow } from "../packs/minds/core/state";
 import type { HostMessage, HostPort } from "./host";
-import { consolidateContext, memoryContext, mindContext, povLabel, type MindScope } from "./minds-context";
+import { readPins } from "./lore-pins";
+import { consolidateContext, memoryContext, mindContext, povLabel, type MindContextReport, type MindScope } from "./minds-context";
 import type { PresetBinding } from "./preset-binding";
 import type { SettingsStore } from "./settings-store";
 import type { Steps } from "./steps";
@@ -68,11 +72,17 @@ export interface RunMindsInput {
   messages?: readonly HostMessage[];
   /** The trace's phase: the turn's pre phase, or a skip's beat. */
   phase?: MindCallTrace["phase"];
+  /** How many calls run at once; absent, all of them. */
+  concurrency?: number;
+  /** Hears each mind start thinking, then how it went (a GM's run shows its progress, DESIGN §24.9). */
+  progress?: (entry: MindsRunEntry) => void;
 }
 
 export interface RunMindsResult {
   events: LedgerEvent[];
   traces: MindCallTrace[];
+  /** How each mind went, in `who`'s order: GM data, for a GM's run (DESIGN §24.9); absent where nothing ran. */
+  report?: MindsRunEntry[];
 }
 
 /** The step card a minds purpose runs with (`stepConfigOf`: on with the helper's tokens while unsaved); null when the user saved it off. */
@@ -220,10 +230,20 @@ async function chatMessages(deps: MindsDeps, chatId: ChatId, userId: UserId): Pr
   }
 }
 
+/** One mind's call as `runMinds` keeps it: its event data (null when it said nothing), its inspector trace and the GM's report of it. */
+interface MindCallResult {
+  data: MindEventData | null;
+  trace: MindCallTrace;
+  entry: MindsRunEntry;
+}
+
 /**
- * One mind per character in `who` for `moment` (DESIGN §24.5): separate calls, made in parallel,
- * each on that character's scoped context. Nothing is recorded: the validated `minds.mind` events
- * come back in `who`'s order, with whatever finished before `signal` ended the phase.
+ * One mind per character in `who` for `moment` (DESIGN §24.5): separate calls, made in parallel (at
+ * most `concurrency` at once), each on that character's scoped context, the lore pinned to them and
+ * to where they are first. Nothing is recorded: the validated `minds.mind` events come back in
+ * `who`'s order, with whatever finished before `signal` ended the phase, and how each mind went: the
+ * inspector's traces (no text, only people the POV may know, only the pinned lore the player may know
+ * of) and the GM's report (why one failed, every pin it was given).
  */
 export async function runMinds(deps: MindsDeps, input: RunMindsInput): Promise<RunMindsResult> {
   const { registry: reg } = deps;
@@ -236,30 +256,92 @@ export async function runMinds(deps: MindsDeps, input: RunMindsInput): Promise<R
   const messages = input.messages ?? (await chatMessages(deps, input.chatId, userId));
   const loreTokens = config.lore && config.lore.policy !== "none" ? config.lore.tokens : config.lore ? 0 : 400;
   const phase = input.phase ?? (input.moment.kind === "beat" ? "skip" : "pre");
-  const calls = input.who.map(async (who): Promise<{ data: MindEventData | null; trace: MindCallTrace }> => {
+  // The lore pinned to each of them and to where they are (DESIGN §24.5), each book entry read once.
+  const refs = new Map(input.who.map((who) => [who, pinsFor(world, placeOfEntity(state, who), who)]));
+  const texts = new Map((await readPins(deps.host, world, [...refs.values()].flat(), userId)).map((t) => [t.key, t]));
+  // What the inspector may name of a pin (§6.5): an entry the player may read, by a title that says
+  // nothing the player doesn't know; a secret, or anything only the character may read, isn't listed.
+  const open = loreGateReader(reg, world, state);
+  let screen: ((title: string) => string) | null = null;
+  const shownTitle = (title: string): string => {
+    if (!screen) {
+      const secrets = unrevealedSecrets(reg, world, state);
+      const hidden = hiddenNameCheck(reg, world, state, world.pov);
+      screen = (t) => (findLeaks(t, secrets).length > 0 || hidden(t) ? "A hidden entry" : t);
+    }
+    return screen(title);
+  };
+  const listed = (p: MindContextReport["pinned"][number]): boolean => !p.secret && (p.entry === null || loreReadable(reg, world, state, p.entry, "brief", false, open));
+  const one = async (who: EntityId): Promise<MindCallResult> => {
     const level = input.levels[who] ?? "near";
     const e = own(state.entities, who);
-    const base = { purpose: "mind" as const, phase, who: e?.name ?? who, level };
+    const name = e?.name ?? who;
+    const base = { purpose: "mind" as const, phase, who: name, level };
     const prompt = mindPrompt("mind", world, settings.minds, varsFor(world, state, who));
-    if (!e) return { data: null, trace: { ...base, outcome: "failed", ms: 0, tokens: 0, prompt: prompt.source } };
-    const scope: MindScope = { reg, world, state, who, memory, messages, hideJson: settings.hideJsonBlocks, moment: input.moment, loreTokens };
+    if (!e) return { data: null, trace: { ...base, outcome: "failed", ms: 0, tokens: 0, prompt: prompt.source }, entry: { entity: who, name, level, status: "failed", reason: "they aren't in the world any more" } };
+    if (input.signal.aborted) return { data: null, trace: { ...base, outcome: "failed", ms: 0, tokens: 0, prompt: prompt.source }, entry: { entity: who, name, level, status: "cancelled", reason: "the run stopped before they were asked" } };
+    input.progress?.({ entity: who, name, level, status: "thinking" });
+    const pinned = (refs.get(who) ?? []).flatMap((r) => {
+      const t = texts.get(r.key);
+      return t ? [{ ...t, on: r.on }] : [];
+    });
+    const scope: MindScope = { reg, world, state, who, memory, messages, hideJson: settings.hideJsonBlocks, moment: input.moment, loreTokens, pinned };
+    const report: MindContextReport = { pinned: [] };
     const usage = { tokens: 0 };
+    const failure = { reason: "" };
     const t0 = performance.now();
-    const raw = input.signal.aborted ? null : await deps.steps.helperJson("mind", prompt.text, mindContext(scope), config, userId, input.signal, { guidance, usage });
+    const raw = await deps.steps.helperJson("mind", prompt.text, mindContext(scope, report), config, userId, input.signal, { guidance, usage, failure });
     const ms = Math.round(performance.now() - t0);
     const data = raw === null ? null : mindData(reg, world, state, who, raw, input.moment, level, input.reasons?.[who] ?? input.moment.reason);
-    return { data, trace: { ...base, outcome: data === null ? "failed" : "recorded", ms, tokens: usage.tokens, prompt: prompt.source } };
-  });
-  const results = await Promise.all(calls);
+    const shown = report.pinned.filter(listed);
+    const given = shown.filter((p) => !p.left).map((p) => ({ title: shownTitle(p.title), tokens: p.tokens, cut: p.cut }));
+    const cut = given.filter((p) => p.cut).length;
+    const left = shown.length - given.length;
+    const notes = cut + left > 0 ? [`Pinned lore didn't all fit: ${[cut > 0 ? `${cut} cut to fit` : "", left > 0 ? `${left} left out` : ""].filter((s) => s !== "").join(", ")}. The mind step reads ${loreTokens} lore tokens; raise them in Settings → Steps.`] : [];
+    const trace: MindCallTrace = { ...base, outcome: data === null ? "failed" : "recorded", ms, tokens: usage.tokens, prompt: prompt.source, ...(given.length > 0 ? { pinned: given } : {}), ...(notes.length > 0 ? { notes } : {}) };
+    const why = data !== null ? null : raw !== null ? "the answer said nothing: no thoughts, intent or depiction" : failure.reason !== "" ? failure.reason : "the call failed";
+    if (why !== null) deps.host.log("warn", `[LumiRPEngine] mind for ${who}: ${why}`, userId);
+    const entry: MindsRunEntry = {
+      entity: who,
+      name,
+      level,
+      status: data !== null ? "recorded" : input.signal.aborted ? "cancelled" : "failed",
+      ...(why !== null ? { reason: why } : {}),
+      ms,
+      tokens: usage.tokens,
+      ...(report.pinned.length > 0 ? { pinned: report.pinned.map((p) => ({ title: p.title, tokens: p.tokens, cut: p.cut, ...(p.left ? { left: true as const } : {}) })) } : {}),
+    };
+    return { data, trace, entry };
+  };
+  const results: MindCallResult[] = [];
+  let next = 0;
+  const lane = async (): Promise<void> => {
+    while (next < input.who.length) {
+      const i = next++;
+      const who = input.who[i];
+      if (who === undefined) continue;
+      const r = await one(who);
+      results[i] = r;
+      input.progress?.(r.entry);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.max(1, Math.min(input.concurrency ?? input.who.length, input.who.length)) }, lane));
   // Each checked against the state it will fold on: one that doesn't validate is dropped.
   const w = new Working(reg, world, state);
   const events: LedgerEvent[] = [];
   for (const r of results) {
     if (!r.data) continue;
     const event: LedgerEvent = { type: MINDS_EVENTS.mind, data: r.data as unknown as JsonObject };
-    if (!w.apply(event)) events.push(event);
+    const rejection = w.apply(event);
+    if (!rejection) {
+      events.push(event);
+      continue;
+    }
+    r.entry.status = "failed";
+    r.entry.reason = `it didn't fit the world as it is now: ${rejection.reason}`;
+    input.progress?.(r.entry);
   }
-  return { events, traces: results.flatMap((r, i) => (traced(reg, world, state, input.who[i] ?? "") ? [r.trace] : [])) };
+  return { events, traces: results.flatMap((r, i) => (traced(reg, world, state, input.who[i] ?? "") ? [r.trace] : [])), report: results.map((r) => r.entry) };
 }
 
 export interface PreMindsInput {

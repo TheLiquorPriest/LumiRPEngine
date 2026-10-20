@@ -90,6 +90,17 @@ export class FakeHost implements HostPort {
   readonly sent: BackendToFrontend[] = [];
   /** Whom each message in `sent` went to: a user, and one session of theirs or (none named) every one. */
   readonly sentTo: { userId: UserId | null; session?: string }[] = [];
+  /** Tests waiting for a message the backend sends later (`sentWhere`). */
+  private readonly sendWaiters: { match: (message: BackendToFrontend) => boolean; resolve: (message: BackendToFrontend) => void }[] = [];
+
+  /** The first message sent so far that `match` accepts, or, when there is none yet, the first one sent from now on. */
+  sentWhere(match: (message: BackendToFrontend) => boolean): Promise<BackendToFrontend> {
+    const found = this.sent.find(match);
+    if (found) return Promise.resolve(found);
+    const { promise, resolve } = Promise.withResolvers<BackendToFrontend>();
+    this.sendWaiters.push({ match, resolve });
+    return promise;
+  }
   private readonly handlers = new Map<HostEventName, Set<Handler>>();
   private readonly frontendHandlers = new Set<(message: unknown, userId: UserId, sessionId?: string) => void>();
   private contextHandler: ((input: ContextHandlerInput, signal: AbortSignal) => Promise<void>) | null = null;
@@ -304,6 +315,10 @@ export class FakeHost implements HostPort {
     send: (message, userId, frontendSessionId) => {
       this.sent.push(message);
       this.sentTo.push({ userId, ...(frontendSessionId !== undefined ? { session: frontendSessionId } : {}) });
+      for (const waiter of this.sendWaiters.filter((w) => w.match(message))) {
+        this.sendWaiters.splice(this.sendWaiters.indexOf(waiter), 1);
+        waiter.resolve(message);
+      }
     },
     onMessage: (handler) => {
       this.frontendHandlers.add(handler);
@@ -619,7 +634,14 @@ export class FakeHost implements HostPort {
       return id;
     },
     exists: async (bookId) => this.bookStore.has(bookId),
+    list: async () => [...this.bookStore.entries()].map(([id, book]) => ({ id, name: book.name, engine: book.name.startsWith("LumiRPEngine · ") })),
     entries: async (bookId) => [...(this.bookStore.get(bookId)?.entries.values() ?? [])].map(({ outlet: _outlet, ...e }) => structuredClone(e)),
+    entry: async (entryId) => {
+      const stored = this.storedEntry(entryId);
+      if (!stored) return null;
+      const { outlet: _outlet, ...e } = stored;
+      return e;
+    },
     createEntry: async (bookId, entry) => {
       const book = this.bookStore.get(bookId);
       if (!book) throw new Error(`no book ${bookId}`);

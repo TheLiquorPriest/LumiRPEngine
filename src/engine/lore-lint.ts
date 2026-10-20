@@ -2,14 +2,16 @@
 // needs links, since only knowing what it links lets a helper read it); secrets (a `secret` that
 // isn't true or false, which reads as secret; a secret entry needs a gate, and a step whose output
 // reaches the narrator or the player is flagged in its audience, since the lore search never gives
-// it the secret; its holders are people in the world, and only a secret has any); and the lookup
+// it the secret; its holders are people in the world, and only a secret has any); the lookup
 // table: entries it names that don't exist, blank or empty terms, terms not in the form lookups
-// match, and terms that are an entry's alias but lead elsewhere.
+// match, and terms that are an entry's alias but lead elsewhere; and the lore pinned to characters
+// and places (DESIGN §24.5, `LORE_PIN_LINTS`).
 
-import { hasOwn } from "../shared/json";
-import { LORE_AUDIENCE, loreIsSecret, loreTerm, PROSE_STEPS } from "../shared/lore";
+import { hasOwn, isRecord } from "../shared/json";
+import { isLorePin, LORE_AUDIENCE, loreIsSecret, lorePinKey, loreSourceOf, loreTerm, PROSE_STEPS } from "../shared/lore";
 import type { LintIssue } from "../shared/protocol";
 import type { WorldDoc } from "../shared/world";
+import { loreHeldBy } from "./lore";
 
 export function lintLore(world: WorldDoc): LintIssue[] {
   const issues: LintIssue[] = [];
@@ -66,6 +68,62 @@ export function lintLore(world: WorldDoc): LintIssue[] {
     const path = `loreIndex.topics.${id}`;
     if (typeof topic.label !== "string" || topic.label.trim() === "") push("warning", path, "topic_label", "the topic needs a label");
     for (const entry of ids(topic.entries)) if (!hasOwn(world.lore, entry)) push("warning", path, "missing_ref", `"${entry}" is not a lore entry`);
+  }
+  issues.push(...lintLorePins(world));
+  return issues;
+}
+
+/**
+ * The lore pinned to characters and places (DESIGN §24.5): each pin is `{lore}` or `{book, entry}`,
+ * under a character or place the world has; a world entry it names exists, isn't pinned twice to the
+ * same one, and is one their mind may read: a secret pinned to someone it doesn't belong to never
+ * reaches them, and an AI-written entry waiting for review reaches nobody. A book's entry is read
+ * from the host when it is used, so only its shape is checked here.
+ */
+function lintLorePins(world: WorldDoc): LintIssue[] {
+  const raw: unknown = world.lorePins;
+  if (raw === undefined) return [];
+  const issues: LintIssue[] = [];
+  const push = (severity: LintIssue["severity"], path: string, code: string, message: string): void => {
+    issues.push({ severity, path, code, message });
+  };
+  if (!isRecord(raw)) return [{ severity: "error", path: "lorePins", code: "pin_shape", message: "Lore pins are an object of characters and places; none are read." }];
+  for (const key of Object.keys(raw)) if (key !== "characters" && key !== "places") push("warning", `lorePins.${key}`, "pin_shape", `"${key}" isn't part of the lore pins; nothing reads it.`);
+  for (const part of ["characters", "places"] as const) {
+    const targets: unknown = raw[part];
+    if (targets === undefined) continue;
+    if (!isRecord(targets)) {
+      push("error", `lorePins.${part}`, "pin_shape", `The pins to ${part} are an object of lists by id; none are read.`);
+      continue;
+    }
+    for (const [id, list] of Object.entries(targets)) {
+      const path = `lorePins.${part}.${id}`;
+      const name = part === "characters" ? (hasOwn(world.entities, id) ? world.entities[id]?.name : undefined) : hasOwn(world.places, id) ? world.places[id]?.name : undefined;
+      if (name === undefined) push("warning", path, "pin_target", `"${id}" is not ${part === "characters" ? "an entity" : "a place"} in the world, so no call reads what is pinned to it.`);
+      if (!Array.isArray(list)) {
+        push("error", path, "pin_shape", "The pins are a list; none are read.");
+        continue;
+      }
+      const seen = new Set<string>();
+      for (const [i, pin] of list.entries()) {
+        if (!isLorePin(pin)) {
+          push("error", path, "pin_shape", `Pin ${i + 1} is neither {"lore": id} nor {"book": id, "entry": id}, so it is ignored.`);
+          continue;
+        }
+        const key = lorePinKey(pin);
+        if (seen.has(key)) push("warning", path, "pin_duplicate", `${"lore" in pin ? `"${pin.lore}"` : "A book entry"} is pinned here twice; it is read once.`);
+        seen.add(key);
+        if (!("lore" in pin)) continue;
+        const entry = hasOwn(world.lore, pin.lore) ? world.lore[pin.lore] : undefined;
+        if (!entry) {
+          push("warning", path, "pin_missing", `"${pin.lore}" is not a lore entry, so nothing is pinned.`);
+          continue;
+        }
+        const source = loreSourceOf(entry.source);
+        if (source.kind === "ai" && source.status === "pending") push("warning", path, "pin_pending", `"${entry.title}" was written by an indexing job and isn't reviewed yet; no call reads it until it is.`);
+        if (part === "characters" && name !== undefined && loreIsSecret(entry) && !loreHeldBy(world, entry, id)) push("warning", path, "pin_unread", `"${entry.title}" is a secret that isn't ${name}'s own, so their mind never reads it; name them among its holders, or pin something else.`);
+      }
+    }
   }
   return issues;
 }

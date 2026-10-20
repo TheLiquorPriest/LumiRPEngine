@@ -926,11 +926,11 @@ export function gmFixture(): GmView {
     // The world fixture's facets, its GM-only one included.
     classifications: worldFixture().classifications,
     places: [
-      { id: "diner", name: "Rosie's Diner", visibility: "public", parent: null },
-      { id: "back_office", name: "Rosie's back office", visibility: "secret", parent: "diner" },
-      { id: "apartment", name: "Apartment 4B", visibility: "public", parent: null },
-      { id: "garage", name: "Kim's Garage", visibility: "public", parent: null },
-      { id: "quarry", name: "The old quarry", visibility: "discoverable", parent: null },
+      { id: "diner", name: "Rosie's Diner", visibility: "public", parent: null, pins: 0 },
+      { id: "back_office", name: "Rosie's back office", visibility: "secret", parent: "diner", pins: 0 },
+      { id: "apartment", name: "Apartment 4B", visibility: "public", parent: null, pins: 0 },
+      { id: "garage", name: "Kim's Garage", visibility: "public", parent: null, pins: 0 },
+      { id: "quarry", name: "The old quarry", visibility: "discoverable", parent: null, pins: 0 },
     ],
     tracks: [
       { id: "q_raise", label: "Ask for a raise", kind: "quest", visibility: "public", owner: null, stage: "case", stages: [{ id: "idea", label: "Thinking about it" }, { id: "case", label: "Build the case", truth: "Rosie gave the last raise to whoever covered the holiday shifts." }, { id: "ask", label: "Ask Rosie" }, { id: "raise", label: "Got the raise" }] },

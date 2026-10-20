@@ -35,6 +35,8 @@ import type { StoredChip } from "./chips";
 import { toChain } from "./ledger-io";
 import { JobError, type JobRunner } from "./jobs";
 import { bookDrift, saveFromChat } from "./lore";
+import { pinBooks, pinEntries, pinViews } from "./lore-pins";
+import { MindsRuns, RunError } from "./minds-run";
 import { ACTIVE_CONNECTION, declineNote, readRun, Runtime } from "./runtime";
 import { recordOutcome, undoModeChange, type ModeChange } from "./settings-store";
 import { applyProposals, TIME_ADVANCE_CAP } from "./turn-model";
@@ -75,11 +77,15 @@ export class Dispatcher {
   private readonly chipLocks = new Map<string, Promise<void>>();
   /** Sessions that said `lre.hello` with `client` (DESIGN §23), by `user \0 session`: their commits are `agent`'s. */
   private readonly clients = new Map<string, { name: string; version: string }>();
+  /** GM → Minds' runs on demand (DESIGN §24.9). */
+  private readonly minds: MindsRuns;
 
   constructor(
     private readonly rt: Runtime,
     private readonly jobs: JobRunner,
-  ) {}
+  ) {
+    this.minds = new MindsRuns(rt);
+  }
 
   start(): void {
     this.rt.host.frontend.onMessage((message, userId, session) => {
@@ -379,9 +385,39 @@ export class Dispatcher {
           reply("lre.lore", saved);
           return;
         }
+        if (r.op === "books") {
+          reply("lre.lore", { books: await pinBooks(this.rt.host, r.chatId ?? null, userId) });
+          return;
+        }
+        if (r.op === "entries") {
+          if (typeof r.bookId !== "string" || r.bookId === "") throw new RequestError("bad_request", "name the book");
+          reply("lre.lore", { entries: await pinEntries(this.rt.host, r.bookId, userId) });
+          return;
+        }
+        if (r.op === "pins") {
+          // The world's draft (Build), or the revision the chat plays (GM view).
+          if (typeof r.worldId === "string") {
+            reply("lre.lore", { pins: await pinViews(this.rt.host, await this.rt.worlds.working(r.worldId, userId), userId) });
+            return;
+          }
+          if (typeof r.chatId !== "string") throw new RequestError("bad_request", "name the world or the chat");
+          reply("lre.lore", { pins: await pinViews(this.rt.host, (await this.head(r.chatId, userId)).world, userId) });
+          return;
+        }
         const world = await this.rt.worlds.working(r.worldId, userId);
         if (r.id !== undefined && !(safeKey(r.id) && hasOwn(world.lore, r.id))) throw new RequestError("not_found", "no such lore entry");
         reply("lre.lore", { drift: await bookDrift(this.rt.host, world, userId, r.id) });
+        return;
+      }
+      case "lre.minds": {
+        // GM → Minds (DESIGN §24.9): sent only from behind the GM gate; its progress goes to this session.
+        try {
+          const run = r.op === "run" ? await this.minds.start(r.chatId, userId, session, Array.isArray(r.who) ? r.who.filter((id) => typeof id === "string") : undefined) : r.op === "cancel" ? this.minds.cancel(r.chatId, userId, r.runId) : this.minds.status(r.chatId, userId);
+          reply("lre.minds", { run });
+        } catch (error) {
+          if (error instanceof RunError) throw new RequestError(error.code, error.message);
+          throw error;
+        }
         return;
       }
       case "lre.studio": {
