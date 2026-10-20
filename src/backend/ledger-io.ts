@@ -711,7 +711,7 @@ export class LedgerService {
   private handOver(chatId: ChatId, userId: UserId, p: Prepared): void {
     p.holder = this.viewerOf(chatId, userId);
     if (p.holder !== null) this.host.frontend.send(restartPush(chatId, p), userId, p.holder);
-    else this.host.frontend.send({ lre: PROTOCOL_VERSION, type: "lre.activity", chatId, activity: this.diag?.activityOf(chatId) ?? null }, userId);
+    else if (this.diag) this.diag.rest({ chatId, userId }, STEP_LABEL.restart ?? "Ready; reopen the chat to continue");
   }
 
   /**
@@ -947,7 +947,8 @@ export class LedgerService {
       // Anything that changed while the engine ran makes the turn stale at once: nothing is generated.
       this.dropIfStale(chatId);
       if (this.gates.get(chatId)?.prepared !== prepared) return;
-      this.diag?.rest(at, as === "send" ? (STEP_LABEL.ready ?? "Ready: press Send for the reply") : (STEP_LABEL.restart ?? "Ready; reopen the chat to continue"));
+      // A page asked to start it starts it at once; "reopen the chat" is for when no page shows the chat.
+      this.diag?.rest(at, as === "send" ? (STEP_LABEL.ready ?? "Ready: press Send for the reply") : holder !== null || !this.host.capabilities.sessions ? (STEP_LABEL.reply ?? "Waiting for the reply…") : (STEP_LABEL.restart ?? "Ready; reopen the chat to continue"));
       // A host that names no page asks every page.
       if (prepared.holder !== null) this.host.frontend.send(restartPush(chatId, prepared), userId, prepared.holder);
       else if (!this.host.capabilities.sessions) this.host.frontend.send(restartPush(chatId, prepared), userId);

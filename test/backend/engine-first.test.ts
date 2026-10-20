@@ -273,6 +273,22 @@ describe("engine first", () => {
     expect(reply.halted).toBeUndefined();
   });
 
+  test("the page asked to start the reply reads 'Waiting for the reply…' while it does; when no page shows the chat, the line says to reopen it", async () => {
+    const rig = new Rig();
+    const chatId = await rig.worldChat();
+    rig.body(await rig.send({ type: "lre.hello", chatId }, "desk"));
+    rig.host.sendUser(chatId, "I look around.");
+    await rig.host.settle();
+    const from = rig.host.sent.length;
+    expect((await rig.host.begin(chatId, { type: "normal", session: "desk" })).halted).toBe("cancelled");
+    expect(rig.host.restarts.map((r) => r.session)).toEqual(["desk"]);
+    expect(activitiesTo(rig, "desk", from).at(-1)).toBe("Waiting for the reply…");
+    // The desk goes home before starting it, and no other page shows the chat.
+    const home = rig.host.sent.length;
+    rig.body(await rig.send({ type: "lre.page", chatId: null, viewing: true }, "desk"));
+    expect(activitiesTo(rig, "desk", home).at(-1)).toBe("Ready; reopen the chat to continue");
+  });
+
   test("a page that opens the chat takes the restart from a holder that went home; the old holder's claim is refused, so one reply comes", async () => {
     const rig = new Rig();
     const chatId = await rig.worldChat();
@@ -317,12 +333,6 @@ describe("engine first", () => {
     for (const page of ["desk", "phone"]) expect(rig.body(await rig.send({ type: "lre.restart", chatId, turn: offered?.turn ?? "" }, page)).start).toBe(false);
     expect(rig.host.chat(chatId).messages.filter((m) => !m.isUser).at(-1)?.swipes).toEqual(["Quiet."]);
   });
-});
-
-/** The activity lines sent to one page since `from` in the host's sends. */
-function activitiesTo(rig: Rig, session: string, from: number): string[] {
-  return rig.host.sent.flatMap((m, i) => (i >= from && rig.host.sentTo[i]?.session === session && m.type === "lre.activity" && m.activity ? [m.activity.label] : []));
-}
 
   test("a reply for an earlier message is refused before any model call: nothing is generated, nothing goes to the last reply, and the flag says why with no Retry", async () => {
     const rig = new Rig();
@@ -345,3 +355,12 @@ function activitiesTo(rig: Rig, session: string, from: number): string[] {
     expect(flag).toMatchObject({ messageId: last.id, detail: NOT_LAST_REPLY });
     expect(flag?.actions).toEqual([{ id: "diagnostics", label: "Diagnostics" }]);
   });
+});
+
+/** The activity lines one page got since `from` in the host's sends: those sent to it and those sent to every page. */
+function activitiesTo(rig: Rig, session: string, from: number): string[] {
+  return rig.host.sent.flatMap((m, i) => {
+    const to = rig.host.sentTo[i]?.session;
+    return i >= from && (to === session || to === undefined) && m.type === "lre.activity" && m.activity ? [m.activity.label] : [];
+  });
+}
