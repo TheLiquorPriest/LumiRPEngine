@@ -1,8 +1,9 @@
 // Settings → Minds (DESIGN §24.6): whether characters get minds, how many think a
 // turn, what refreshes a Near mind and how often a Far one thinks, which levels write memory notes,
-// the Minds section's own budget and a time skip's caps (under Advanced), the user's memory
-// overrides of the world's settings (a disclosure, as they're long), and the four minds prompts, each
-// beside its built-in default with Reset. Every patch is `minds-patch.ts`'s. Styles: styles/minds.ts.
+// how much of the latest reply minds read, the Minds section's own budget and a time skip's caps
+// (under Advanced), the user's memory overrides of the world's settings (a disclosure, as they're
+// long), and the four minds prompts, each beside its built-in default with Reset. Every patch is
+// `minds-patch.ts`'s. Styles: styles/minds.ts.
 
 import { useEffect, useState } from "preact/hooks";
 import type { JsonObject } from "../../shared/json";
@@ -11,7 +12,7 @@ import { DEFAULT_MINDS_MEMORY, FIDELITIES, MIND_PROMPT_DEFAULTS, MIND_PROMPT_MAX
 import { Badge, Button, Disclosure, HostSwitch, NumberStepper, Section } from "../components";
 import { Icon } from "../icons";
 import type { MemoryField } from "./minds-patch";
-import { MEMORY_FIELDS, memoryOverride, memoryOverridePatch, memoryValue, mindsPolicyPatch, mindsPromptPatch, withMemoryLevel } from "./minds-patch";
+import { MEMORY_FIELDS, memoryOverride, memoryOverridePatch, memoryValue, mindsPolicyPatch, mindsPromptPatch, mindsReplyPatch, withMemoryLevel } from "./minds-patch";
 import { STEP_LABEL } from "./steps";
 import { FIDELITY_LABEL } from "../../packs/minds/ui/ops";
 
@@ -26,8 +27,11 @@ function Note(props: { children: string }) {
   return <p class="lre-minds-note">{props.children}</p>;
 }
 
+/** Where the reply's allowance starts when it stops being the whole reply: room for a long scene's end. */
+const REPLY_TOKENS_START = 1000;
+
 /** A count or period that may have no limit: a switch, and the number while there is one. */
-function LimitField(props: { label: string; noneLabel: string; value: Limit; min: number; max: number; step?: number; fallback: Limit; disabled: boolean; onChange(next: Limit): void }) {
+function LimitField(props: { label: string; noneLabel: string; value: Limit; min: number; max?: number; step?: number; fallback: Limit; disabled: boolean; onChange(next: Limit): void }) {
   const fallback = props.fallback === "none" ? props.min : props.fallback;
   return (
     <div class="lre-minds-limit">
@@ -136,7 +140,7 @@ export function MindsSection(props: { minds: MindsSettings; patch(patch: JsonObj
       <Section>
         <div class="lre-minds-body">
           <HostSwitch label="Character minds" checked={minds.enabled} disabled={busy} onChange={(enabled) => policy({ enabled })} />
-          <Note>Picking a Model use preset sets everything here but your prompts and memory overrides; changing any of these makes it Custom.</Note>
+          <Note>Picking a Model use preset sets everything here but how much of the reply minds read, your prompts and memory overrides; changing any of the rest makes it Custom.</Note>
         </div>
       </Section>
       {minds.enabled ? (
@@ -171,6 +175,12 @@ export function MindsSection(props: { minds: MindsSettings; patch(patch: JsonObj
               {FIDELITIES.filter((f) => f !== "background").map((level) => (
                 <HostSwitch key={level} label={`${FIDELITY_LABEL[level]} characters who heard you`} checked={minds.memoryLevels.includes(level)} disabled={busy} onChange={(on) => policy({ memoryLevels: withMemoryLevel(minds.memoryLevels, level, on) })} />
               ))}
+            </div>
+          </Section>
+          <Section title="The latest reply">
+            <div class="lre-minds-body">
+              <LimitField label="Latest reply minds read (tokens)" noneLabel="the whole reply" value={minds.replyTokens} min={1} step={100} fallback={REPLY_TOKENS_START} disabled={busy} onChange={(replyTokens) => props.patch(mindsReplyPatch(replyTokens))} />
+              <Note>What a character thinks from, before the reply and when you run minds now, and what the memory step reads after it. Cut to a number, they read its end. It comes on top of the rest of what they're given, and only characters who were there for the reply read it.</Note>
             </div>
           </Section>
           <Section>

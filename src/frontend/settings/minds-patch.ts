@@ -1,11 +1,12 @@
 // Settings → Minds as `lre.settings.set` merge patches (DESIGN §24.6). A cadence change (on or off,
 // the Live limit, refresh, which levels get memory notes, the section budget, the skip caps) is part
-// of the Model use preset, so it makes the preset Custom, as a step change does; prompts and memory
-// overrides are the user's own and leave the preset alone. `null` deletes a key: a prompt or a memory
-// override set back to null reads the built-in prompt, or the world's memory setting, again.
+// of the Model use preset, so it makes the preset Custom, as a step change does; prompts, memory
+// overrides and how much of the latest reply minds read are the user's own and leave the preset
+// alone. `null` deletes a key: a prompt or a memory override set back to null reads the built-in
+// prompt, or the world's memory setting, again.
 
 import type { JsonObject } from "../../shared/json";
-import type { Fidelity, MindPurpose, MindsMemoryConfig, MindsSettings } from "../../shared/minds";
+import type { Fidelity, Limit, MindPurpose, MindsMemoryConfig, MindsSettings } from "../../shared/minds";
 import { FIDELITIES, MIND_PROMPT_DEFAULTS, MIND_PROMPT_MAX, MINDS_RANGES } from "../../shared/minds";
 
 /** The fields a Model use preset sets; changing one makes the preset Custom. */
@@ -30,6 +31,11 @@ export function mindsPolicyPatch(change: MindsPolicy): JsonObject {
 /** The levels that get memory notes with one level turned on or off. */
 export function withMemoryLevel(levels: readonly Fidelity[], level: Fidelity, on: boolean): Fidelity[] {
   return FIDELITIES.filter((f) => f !== "background" && (f === level ? on : levels.includes(f)));
+}
+
+/** How much of the latest reply minds read, in tokens, or "none" for all of it: the user's own, so the preset stays. */
+export function mindsReplyPatch(replyTokens: Limit): JsonObject {
+  return { minds: { replyTokens } };
 }
 
 /**

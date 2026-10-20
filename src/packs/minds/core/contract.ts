@@ -12,7 +12,7 @@ declare module "../../../engine/registry" {
     "minds.edit": (ctx: ReadContext, op: MindEditOp) => LedgerEvent[] | Rejection;
   }
   interface QueryMap {
-    /** A character's plans as kept, open and settled, soonest first: the castlife planner lays open ones into their day, and settled ones for the times before they were settled. */
+    /** A character's plans in force as kept (the memory step's and the GM's, never a mind's own: `planInForce`), open and settled, soonest first: the castlife planner lays open ones into their day, and settled ones for the times before they were settled. */
     "minds.plans": (ctx: ReadContext, who: EntityId) => MindPlan[];
     /** A character's fidelity as recorded, with no turn texts: the GM's pin, else the level of their latest mind, else Background. */
     "minds.tier": (ctx: ReadContext, who: EntityId) => Fidelity;

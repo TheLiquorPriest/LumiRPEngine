@@ -228,11 +228,14 @@ export function renderSection(label: string, template: string, lines: readonly s
 }
 
 /**
- * Token estimate for the section budget. Conservative (3.2 characters per token): against the
+ * The characters a token is taken to hold. Conservative (3.2 characters per token): against the
  * host's own counts the old 4-per-token estimate ran 4–17 tokens short per section.
  */
+export const CHARS_PER_TOKEN = 3.2;
+
+/** Token estimate for the section budget, at `CHARS_PER_TOKEN`. */
 export function tokensOf(text: string): number {
-  return Math.ceil(text.length / 3.2);
+  return Math.ceil(text.length / CHARS_PER_TOKEN);
 }
 
 /**

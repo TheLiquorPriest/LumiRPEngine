@@ -299,7 +299,7 @@ export function worldMindTemplate(world: Pick<WorldDoc, "steps">, purpose: MindP
 /** The user's overrides of a world's memory config: whatever they set wins, part by part. */
 export type MindsMemoryOverrides = { [K in keyof MindsMemoryConfig]?: Partial<MindsMemoryConfig[K]> };
 
-/** `UserSettings.minds` (DESIGN §24.6). A named Model use preset sets everything here but `prompts` and `memory`. */
+/** `UserSettings.minds` (DESIGN §24.6). A named Model use preset sets everything here but `prompts`, `memory` and `replyTokens`. */
 export interface MindsSettings {
   enabled: boolean;
   /** How many Live minds run a turn, best score first; the rest wait for Near's triggers. */
@@ -313,6 +313,8 @@ export interface MindsSettings {
   memoryLevels: Fidelity[];
   /** The Minds section's own token budget, apart from the shared section budget (DESIGN §24.3). */
   tokens: number;
+  /** How much of the latest reply a mind and the memory step read, by its end, in tokens; "none" reads it whole (DESIGN §24.5). The user's own: no preset sets it. */
+  replyTokens: Limit;
   memory: MindsMemoryOverrides;
   /** The user's own prompt for a purpose, which wins over a world template; absent, the world's (`worldMindTemplate`), else the built-in (`MIND_PROMPT_DEFAULTS`). */
   prompts: Partial<Record<MindPurpose, string>>;
@@ -320,7 +322,7 @@ export interface MindsSettings {
   skip: { maxBeats: Limit; maxMindsPerBeat: Limit };
 }
 
-type PresetMinds = Omit<MindsSettings, "prompts" | "memory">;
+type PresetMinds = Omit<MindsSettings, "prompts" | "memory" | "replyTokens">;
 
 /** The minds part of each Model use preset (D25): Lean off; Standard 3 Live with notes for Live; Full no limit with notes for Live and Near. */
 export const MINDS_PRESETS: Readonly<Record<"lean" | "standard" | "full", Readonly<PresetMinds>>> = Object.freeze({
@@ -329,9 +331,9 @@ export const MINDS_PRESETS: Readonly<Record<"lean" | "standard" | "full", Readon
   full: { enabled: true, liveLimit: "none", nearRefresh: { scene: true, mention: true, turns: 4, minutes: 60 }, farRefreshMinutes: 720, refreshLimit: "none", memoryLevels: ["live", "near"], tokens: 4000, skip: { maxBeats: "none", maxMindsPerBeat: "none" } },
 });
 
-/** A new user's minds settings: Standard's. */
+/** A new user's minds settings: Standard's, reading the whole latest reply. */
 export function defaultMindsSettings(preset: keyof typeof MINDS_PRESETS = "standard"): MindsSettings {
-  return { ...structuredClone(MINDS_PRESETS[preset]) as PresetMinds, memory: {}, prompts: {} };
+  return { ...structuredClone(MINDS_PRESETS[preset]) as PresetMinds, replyTokens: "none", memory: {}, prompts: {} };
 }
 
 /** Kept equal to `defaultMindsSettings()`: what Settings shows as the defaults. */
@@ -385,6 +387,7 @@ export function mindsSettingsOf(raw: unknown, base: Readonly<MindsSettings> = MI
     refreshLimit: limitIn(m.refreshLimit, 0, 64, base.refreshLimit),
     memoryLevels: levels,
     tokens: typeof m.tokens === "number" && Number.isSafeInteger(m.tokens) && m.tokens >= 0 ? m.tokens : base.tokens,
+    replyTokens: limitIn(m.replyTokens, 1, Number.MAX_SAFE_INTEGER, base.replyTokens),
     memory: isRecord(m.memory) ? memoryOverridesOf(m.memory) : structuredClone(base.memory),
     prompts: isRecord(m.prompts) ? prompts : { ...base.prompts },
     skip: { maxBeats: limitIn(skip.maxBeats, 0, 200, base.skip.maxBeats), maxMindsPerBeat: limitIn(skip.maxMindsPerBeat, 0, 64, base.skip.maxMindsPerBeat) },
@@ -413,9 +416,9 @@ export type PlanStatus = "open" | "done" | "dropped";
 export const PLAN_PRIORITY = { min: 1, max: 5, normal: 3 } as const;
 
 /**
- * Something a character means to do later (DESIGN §24.8): from a mind, the memory step or the GM.
- * Times are absolute game minutes. The castlife planner lays open plans into the character's day and
- * marks them `done` or `dropped` with `minds.plan`.
+ * Something a character means to do later (DESIGN §24.8): from the memory step or the GM. Times are
+ * absolute game minutes. The castlife planner lays open plans in force (`planInForce`) into the
+ * character's day and marks them `done` or `dropped` with `minds.plan`.
  */
 export type MindPlan = {
   id: string;
@@ -435,6 +438,17 @@ export type MindPlan = {
   /** What a `pay` or `lend` plan hands over, in the world currency's minor units; no other kind has one. */
   cents?: number;
 };
+
+/**
+ * Whether a plan drives anything: schedules, money, skip beats, fidelity and what a mind is told it
+ * plans. Only plans the turn stated (the memory step's) and the GM's do. A mind's own (`source:
+ * "mind"`), made in chats from before minds stopped proposing plans, were its guesses at a day the
+ * story never set up, so they stay as thoughts the GM view shows and nothing acts on. Every consumer
+ * reads plans through `keptPlans`, which keeps only these, so none can drift from another.
+ */
+export function planInForce(p: Pick<MindPlan, "source">): boolean {
+  return p.source !== "mind";
+}
 
 /** A promise, debt, grudge, favour or plan with someone: kept until resolved, never faded (DESIGN §24.4). */
 export type CommitmentKind = "promise" | "debt" | "grudge" | "favour" | "plan" | "other";
@@ -574,7 +588,6 @@ export interface MindOutput {
   depiction: string;
   intent: string;
   reactions: string[];
-  plans: PlanDraft[];
   mood?: string;
   interrupt?: { reason: string };
 }
@@ -641,7 +654,6 @@ export type MindEventData = {
   depiction: string;
   intent: string;
   reactions: string[];
-  plans: MindPlan[];
   mood: string | null;
   interrupt: { reason: string } | null;
   withheld: boolean;
@@ -846,21 +858,20 @@ export const MIND_PROMPT_DEFAULTS: Readonly<Record<MindPurpose, string>> = Objec
 /** Each minds step's answer: the JSON the engine reads, appended after the instructions whoever wrote them. */
 export const MIND_ANSWER_FORMATS: Readonly<Record<MindPurpose, string>> = Object.freeze({
   mind: [
-    'Answer with JSON only: {"monologue": "...", "depiction": "...", "intent": "...", "reactions": ["..."], "plans": [{"what": "...", "kind": "errand|meet|visit|work|rest|leisure|pay|lend|other", "when": {"from": "YYYY-MM-DD HH:MM", "to": "YYYY-MM-DD HH:MM"}, "where": "a place", "with": ["a name"], "priority": 3, "amount": 20}], "mood": "...", "interrupt": {"reason": "..."}}',
+    'Answer with JSON only: {"monologue": "...", "depiction": "...", "intent": "...", "reactions": ["..."], "mood": "...", "interrupt": {"reason": "..."}}',
     "- monologue: their private reasoning in the first person, at most six sentences.",
     "- depiction: how they come across right now, as behaviour anyone present could see (posture, tone, what they do). Never a secret, an unspoken reason or a thought.",
     "- intent: what they mean to do next, in one sentence.",
     '- reactions: up to three short conditional reactions ("if pressed about the cellar, changes the subject").',
-    "- plans: only real intentions for later, with local times; priority 1 (whenever it fits) to 5 (it must happen); kind pay or lend, with amount, when they mean to hand someone money, and no amount otherwise. Leave the list empty when there are none.",
     "- mood: one or two words.",
     "- interrupt: only when the moment is a beat inside a time skip and what they'd do now would interrupt the player character's skipped time (seeking them out, calling them). Leave it out otherwise.",
   ].join("\n"),
   memory: [
-    'Answer with JSON only: {"notes": [{"text": "...", "salience": 3}], "commitments": [{"kind": "promise|debt|grudge|favour|plan|other", "with": ["a name"], "text": "...", "due": "YYYY-MM-DD HH:MM"}], "resolved": [{"id": "...", "status": "kept|broken|released"}], "plans": [{"what": "...", "kind": "errand|meet|visit|work|rest|leisure|pay|lend|other", "when": {"from": "YYYY-MM-DD HH:MM", "to": "YYYY-MM-DD HH:MM"}, "where": "a place", "with": ["a name"], "priority": 3, "amount": 20}], "told": [{"to": ["a name"], "what": "..."}], "summary": "..."}',
+    'Answer with JSON only: {"notes": [{"text": "...", "salience": 3}], "commitments": [{"kind": "promise|debt|grudge|favour|plan|other", "with": ["a name"], "text": "...", "due": "YYYY-MM-DD HH:MM"}], "resolved": [{"id": "...", "status": "kept|broken|released"}], "plans": [], "told": [{"to": ["a name"], "what": "..."}], "summary": "..."}',
     "- notes: at most three things they will remember, in their own perspective; salience 1 (passing) to 5 (unforgettable).",
     "- commitments: promises, debts, grudges, favours and plans with someone that this turn made; due only when a time was set.",
     "- resolved: their open commitments (listed with ids) that this turn kept, broke or released.",
-    "- plans: intentions with times that this turn formed; kind pay or lend, with amount, when they mean to hand someone money, and no amount otherwise.",
+    '- plans: only what this turn states they will do later: said aloud, agreed with someone, or scheduled in the story as written; never a guess at what they might do. Each {"what": "...", "kind": "errand|meet|visit|work|rest|leisure|pay|lend|other", "when": {"from": "YYYY-MM-DD HH:MM", "to": "YYYY-MM-DD HH:MM"}, "where": "a place", "with": ["a name"], "priority": 3, "amount": 20}, with local times; priority 1 (whenever it fits) to 5 (it must happen); kind pay or lend, with amount, when they mean to hand someone money, and no amount otherwise.',
     "- told: what they told whom in this turn, in a few words each.",
     "- summary: their one-paragraph summary rewritten, only when this turn changed who they are or what they're about; leave it out otherwise.",
     "Use empty lists for anything the turn didn't give.",

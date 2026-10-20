@@ -155,10 +155,11 @@ function placeNamed(world: WorldDoc, name: string): string | null {
 }
 
 /**
- * Plans as a model wrote them, resolved to ids and game minutes; a plan with no time, or wholly past,
- * is left out, and so is a pay or lend plan with no positive amount or no one to hand it to.
+ * The plans a memory answer gives, resolved to ids and game minutes; a plan with no time, or wholly
+ * past, is left out, and so is a pay or lend plan with no positive amount or no one to hand it to.
+ * Only the memory step gives plans (DESIGN §24.8): it reads the turn as written.
  */
-export function plansFrom(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, who: EntityId, raw: JsonValue | undefined, source: MindPlan["source"]): MindPlan[] {
+export function plansFrom(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, who: EntityId, raw: JsonValue | undefined): MindPlan[] {
   const now = state.clock;
   const out: MindPlan[] = [];
   for (const [i, d] of (Array.isArray(raw) ? raw : []).slice(0, MIND_TEXT_CAPS.plans).entries()) {
@@ -177,7 +178,7 @@ export function plansFrom(reg: Registry, world: WorldDoc, state: Readonly<WorldS
     const money = kind === "pay" || kind === "lend";
     const cents = !money ? 0 : typeof d.amount === "number" && Number.isFinite(d.amount) ? Math.round(d.amount * 10 ** world.currency.decimals) : (parseMoneyInput(str(d.amount), world.currency) ?? 0);
     if (money && (cents <= 0 || withIds.length === 0)) continue;
-    out.push({ id: `p_${hashParts("minds.plan", who, String(now), String(i), what).slice(0, 10)}`, what, kind, when: { from, to }, where: placeNamed(world, str(d.where)), with: withIds, priority, status: "open", made: now, source, closed: null, reason: null, ...(money ? { cents } : {}) });
+    out.push({ id: `p_${hashParts("minds.plan", who, String(now), String(i), what).slice(0, 10)}`, what, kind, when: { from, to }, where: placeNamed(world, str(d.where)), with: withIds, priority, status: "open", made: now, source: "memory", closed: null, reason: null, ...(money ? { cents } : {}) });
   }
   return out;
 }
@@ -185,7 +186,9 @@ export function plansFrom(reg: Registry, world: WorldDoc, state: Readonly<WorldS
 /**
  * A mind's answer as its event data, or null when it says nothing usable. Lengths are capped; under
  * `brief` the depiction is screened as Stance's cues are (an unrevealed secret, a name the POV can't
- * see), and one that fails is kept for the GM but `withheld` from the narrator.
+ * see), and one that fails is kept for the GM but `withheld` from the narrator. Any plans it gives are
+ * ignored: a mind sees what its character knows, not where the story is going, so plans come only
+ * from the memory step (DESIGN §24.8).
  */
 export function mindData(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, who: EntityId, raw: JsonValue, moment: MindMoment, level: Fidelity, reason: string): MindEventData | null {
   if (!isRecord(raw)) return null;
@@ -212,7 +215,6 @@ export function mindData(reg: Registry, world: WorldDoc, state: Readonly<WorldSt
     depiction,
     intent,
     reactions,
-    plans: plansFrom(reg, world, state, who, raw.plans, "mind"),
     mood: mood === "" ? null : mood,
     interrupt: interruptReason === "" ? null : { reason: interruptReason },
     withheld,
@@ -292,7 +294,7 @@ export async function runMinds(deps: MindsDeps, input: RunMindsInput): Promise<R
       const t = texts.get(r.key);
       return t ? [{ ...t, on: r.on }] : [];
     });
-    const scope: MindScope = { reg, world, state, who, memory, messages, hideJson: settings.hideJsonBlocks, moment: input.moment, loreTokens, pinned };
+    const scope: MindScope = { reg, world, state, who, memory, messages, hideJson: settings.hideJsonBlocks, replyTokens: settings.minds.replyTokens, moment: input.moment, loreTokens, pinned };
     const report: MindContextReport = { pinned: [] };
     const usage = { tokens: 0 };
     const failure = { reason: "" };
@@ -493,7 +495,7 @@ function memoryData(reg: Registry, world: WorldDoc, state: Readonly<WorldState>,
     return what === "" || to.length === 0 ? [] : [{ to, what }];
   });
   const summary = capText(str(raw.summary), MIND_TEXT_CAPS.summary);
-  return { entity: who, at: now, notes, commitments, resolved, plans: plansFrom(reg, world, state, who, raw.plans, "memory"), told, summary: summary === "" ? null : summary } as unknown as JsonObject;
+  return { entity: who, at: now, notes, commitments, resolved, plans: plansFrom(reg, world, state, who, raw.plans), told, summary: summary === "" ? null : summary } as unknown as JsonObject;
 }
 
 /** How many characters' notes one turn folds at most: consolidation is upkeep, never the turn's work. */
@@ -527,7 +529,7 @@ export async function postMinds(deps: MindsDeps, input: PostMindsInput): Promise
   const remembered = await Promise.all(
     remembering.map(async (id) => {
       const prompt = mindPrompt("memory", world, settings.minds, varsFor(world, w.state, id));
-      const scope: MindScope = { reg, world, state: w.state, who: id, memory, messages, hideJson: settings.hideJsonBlocks, moment, loreTokens: 0 };
+      const scope: MindScope = { reg, world, state: w.state, who: id, memory, messages, hideJson: settings.hideJsonBlocks, replyTokens: settings.minds.replyTokens, moment, loreTokens: 0 };
       const usage = { tokens: 0 };
       const t0 = performance.now();
       const raw = input.signal.aborted ? null : await deps.steps.helperJson("memory", prompt.text, memoryContext(scope, { user: input.user, reply: input.reply, left: left.includes(id) }), memoryConfig, userId, input.signal, { guidance: input.guidance?.memory ?? deps.presets.last(userId).guidance.memory ?? "", usage });

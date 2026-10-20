@@ -5,7 +5,7 @@
 
 import type { EntityId } from "../../../shared/ids";
 import type { MindCommitment, MindNote, MindPlan, MindsCharacter, MindsMemoryConfig, MindsSlice, WitnessEntry } from "../../../shared/minds";
-import { MINDS_KEEP } from "../../../shared/minds";
+import { MINDS_KEEP, planInForce } from "../../../shared/minds";
 import { own } from "../../../engine/pack-kit";
 import type { WorldState } from "../../../engine/state";
 
@@ -115,12 +115,16 @@ export function faded(note: Pick<MindNote, "salience" | "at">, clock: number, me
   return salienceNow(note, clock, memory) < memory.salience.floor;
 }
 
-/** A character's plans as kept, open and settled, soonest first (ties by id). */
+/**
+ * A character's plans in force (`planInForce`), open and settled, soonest first (ties by id): what the
+ * planner, the economy, a skip, fidelity and a mind's context read. A mind's own plans from an older
+ * chat stay in the state for the GM view, but no reader of plans ever meets them.
+ */
 export function keptPlans(c: MindsCharacter): MindPlan[] {
-  return [...c.plans].sort((a, b) => a.when.from - b.when.from || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+  return c.plans.filter(planInForce).sort((a, b) => a.when.from - b.when.from || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
 }
 
-/** A character's open plans, soonest first (ties by id). */
+/** A character's open plans in force, soonest first (ties by id). */
 export function openPlans(c: MindsCharacter): MindPlan[] {
   return keptPlans(c).filter((p) => p.status === "open");
 }

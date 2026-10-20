@@ -113,12 +113,17 @@ const round: EventTypeDef<PackEvent> = {
 function validMind(data: JsonObject): Rejection | null {
   const { at, place, level, moment, reason, monologue, depiction, intent, reactions, plans, mood, interrupt, withheld } = data;
   if (!finite(at) || !(place === null || str(place)) || !isFidelity(level) || (moment !== "turn" && moment !== "beat") || !str(reason)) return bad("a mind needs its clock, place, level, moment and reason");
-  if (!str(monologue) || !str(depiction) || !str(intent) || !texts(reactions) || !Array.isArray(plans) || !plans.every((p) => isPlan(p))) return bad("a mind needs its monologue, depiction, intent, reactions and plans");
+  // Only a mind from an older chat carries plans (minds no longer make them); any it has must be well formed.
+  if (!str(monologue) || !str(depiction) || !str(intent) || !texts(reactions) || (plans !== undefined && (!Array.isArray(plans) || !plans.every((p) => isPlan(p))))) return bad("a mind needs its monologue, depiction, intent and reactions, and any plans it carries well formed");
   if (!(mood === null || str(mood)) || !(interrupt === null || (isRecord(interrupt) && str(interrupt.reason))) || typeof withheld !== "boolean") return bad("a mind's mood, interrupt or withheld flag is malformed");
   return null;
 }
 
-/** `minds.mind`: one character's mind. Its plans join theirs; a GM's refresh request is met. */
+/**
+ * `minds.mind`: one character's mind; a GM's refresh request is met. A mind recorded before minds
+ * stopped proposing plans carries its plans: they join theirs as the mind's (`source: "mind"`), so an
+ * old chat folds as it did and the GM still sees them, though nothing acts on them (`planInForce`).
+ */
 const mind: EventTypeDef<PackEvent> = {
   type: MINDS_EVENTS.mind,
   validate: (e, ctx) => person(ctx, e.data) ?? validMind(e.data),
