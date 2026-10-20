@@ -130,6 +130,33 @@ describe("money a manager only manages reaches none of their own interests", () 
   });
 });
 
+describe("money wholly a manager's own keeps no one else's interest", () => {
+  test("the owner of Brightline and the café outright bills and pays between them, though he pays himself from neither but by a draw", () => {
+    const { w } = setup((wd) => {
+      Object.assign(wd.entities.brightline!.fields, { owners: [{ party: "you", role: "owner", share: 100 }] });
+      Object.assign(wd.entities.daybreak!.fields, { owners: [{ party: "you", role: "owner", share: 100 }] });
+    });
+    lapse(w, DAY);
+    expect(refusal(act(w, "economy.invoice_issue", { business: "daybreak", customer: "brightline", cents: 300_000, memo: "Catering", by: "you" }))).toBe("");
+    const invoice = Object.keys(w.state.entities).find((id) => w.state.entities[id]?.kind === "invoice" && w.state.entities[id]?.fields.customer === "brightline") ?? "";
+    const cafe = w.state.accounts.db_operating ?? 0;
+    expect(refusal(act(w, "economy.invoice_pay", { invoice, by: "you" }))).toBe("");
+    expect((w.state.accounts.db_operating ?? 0) - cafe).toBe(300_000);
+    const once = { amount: 300_000, every: "once", once: "2026-10-18T09:00" };
+    expect(refusal(act(w, "economy.flow_create", { who: "you", label: "Catering", from: "bl_operating", to: "db_operating", ...once }))).toBe("");
+    // What he takes out for himself goes by a draw, which the books and the taxes see.
+    expect(refusal(act(w, "economy.flow_create", { who: "you", label: "Pay me", from: "bl_operating", to: "checking", ...once }))).toContain("pays for Brightline Logistics, not for Alex Rivera");
+  });
+
+  test("where someone else holds a share of the payer, its money still pays nothing else of the manager's", () => {
+    const { w } = setup((wd) => {
+      Object.assign(wd.entities.brightline!.fields, { owners: [{ party: "you", role: "owner", share: 50 }, { party: "jordan", role: "owner", share: 50 }] });
+      Object.assign(wd.entities.daybreak!.fields, { owners: [{ party: "you", role: "owner", share: 100 }] });
+    });
+    expect(refusal(act(w, "economy.flow_create", { who: "you", label: "Catering", from: "bl_operating", to: "db_operating", amount: 300_000, every: "once", once: "2026-10-18T09:00" }))).toContain("pays for Brightline Logistics, not for Alex Rivera");
+  });
+});
+
 describe("the hub is told, by the same rule, where money its reader only manages may not go", () => {
   test("the trust's allowance, on its trustee's money, may pay its beneficiary but not him or his checking; his own names are his keys", () => {
     const { w } = setup((wd) => {

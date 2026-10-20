@@ -14,7 +14,7 @@ import { EXTERNAL_ACCOUNT_PREFIX } from "../../../engine/events";
 import { GONE_FIELD } from "../../../engine/scope";
 import { labelOf, numOf, objOf, optionalService, own, strOf } from "../../../engine/pack-kit";
 import type { EffectContext, ReadContext, Rejection } from "../../../engine/registry";
-import { placeOfEntity } from "../../../engine/scope";
+import { kindIs, placeOfEntity } from "../../../engine/scope";
 import { membersOf } from "../../../engine/selector";
 import { decide, type Decision } from "./credit";
 import type { OpenAccount } from "./module";
@@ -302,19 +302,31 @@ export function interestsOf(ctx: ReadContext, who: EntityId): Set<EntityId> {
 }
 
 /**
- * Whom the money `side` is for: a party paying for itself, or the holders an account counts the
- * worth of, and in turn whom those are for (a business's owners, a trust's beneficiaries), a few
- * levels deep.
+ * Whom the money `side` is for (`all`): a party paying for itself, or the holders an account counts
+ * the worth of, and in turn whom those are for (a business's owners, a trust's beneficiaries), a
+ * few levels deep; and whom it ends with (`last`), who hold it for no one further.
  */
-function whoseMoney(ctx: ReadContext, side: string): Set<EntityId> {
-  const out = new Set<EntityId>();
+function whoseMoney(ctx: ReadContext, side: string): { all: Set<EntityId>; last: Set<EntityId> } {
+  const all = new Set<EntityId>();
+  const last = new Set<EntityId>();
   let next = isParty(ctx, side) ? [side] : worthHolders(ctx, side);
   for (let depth = 0; depth < 4 && next.length > 0; depth++) {
-    const fresh = next.filter((p) => !out.has(p));
-    for (const p of fresh) out.add(p);
-    next = fresh.flatMap((p) => worthHolders(ctx, p));
+    const deeper: EntityId[] = [];
+    for (const p of next.filter((q) => !all.has(q))) {
+      all.add(p);
+      const holders = worthHolders(ctx, p);
+      if (holders.length === 0 || depth === 3) last.add(p);
+      else deeper.push(...holders);
+    }
+    next = deeper;
   }
-  return out;
+  return { all, last };
+}
+
+/** Whether a party is someone's own self or family, a person or a household, rather than something they own. */
+function personal(ctx: ReadContext, id: string): boolean {
+  const kind = own(ctx.state.entities, id)?.kind ?? "";
+  return kind !== "" && (kindIs(ctx.registry, ctx.world, kind, "person") || kindIs(ctx.registry, ctx.world, kind, "household"));
 }
 
 /**
@@ -327,13 +339,16 @@ function whoseMoney(ctx: ReadContext, side: string): Set<EntityId> {
  * trustee's daughter. An account the manager may spend by a role of their own (an authorized
  * user's card, a custodian's or a trustee's) is theirs too, whoever's worth it is, as they could
  * move the money on from it, unless they hold a share of the money themselves: then it's partly
- * theirs, and the account no way round anyone else's.
+ * theirs, and the account no way round anyone else's. Money wholly theirs (a business they own
+ * outright) keeps no one else's interest, so it pays anything else they own; what goes to them,
+ * their household or its members still goes by a draw or a salary, so the books and taxes see it.
  */
 export function paysFor(ctx: ReadContext, who: EntityId, to: string, from: string, interests: ReadonlySet<EntityId> = interestsOf(ctx, who)): boolean {
-  const forHolder = whoseMoney(ctx, from);
+  const { all: forHolder, last } = whoseMoney(ctx, from);
   const stake = forHolder.has(who);
+  const wholly = last.size > 0 && [...last].every((p) => p === who);
   forHolder.delete(who);
-  const mine = (party: string): boolean => interests.has(party) && !forHolder.has(party);
+  const mine = (party: string): boolean => interests.has(party) && !forHolder.has(party) && (!wholly || personal(ctx, party));
   const id = to.startsWith(EXTERNAL_ACCOUNT_PREFIX) ? to.slice(EXTERNAL_ACCOUNT_PREFIX.length) : to;
   const e = own(ctx.state.entities, id);
   if (e?.kind === "account") return (!stake && canSpend(ctx.state, id, who)) || worthHolders(ctx, id).some(mine);
