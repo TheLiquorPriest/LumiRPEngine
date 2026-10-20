@@ -44,7 +44,7 @@ export function basisOf(api: Pick<FinanceApi, "shareOf">, ctx: Pick<ReadContext,
 }
 
 /** Whether a property is the party's home: their `home` names it or its place. */
-function isHome(state: Readonly<WorldState>, property: EntityId, party: EntityId): boolean {
+export function isHome(state: Readonly<WorldState>, property: EntityId, party: EntityId): boolean {
   const home = own(state.entities, party)?.fields.home;
   const place = own(state.entities, property)?.fields.place;
   return typeof home === "string" && home !== "" && (home === property || home === place);

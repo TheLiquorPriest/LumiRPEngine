@@ -8,8 +8,9 @@
 // author or the landlord starts is a `flow` entity linked to the property; a property let to
 // outside tenants (`managed`) lets each unit no lease covers, one lease after another at the market
 // rent of its day, with a vacancy between tenants drawn from the property's and unit's ids, so it is
-// the same on every fold. A unit without a lease is vacant. Buying and selling settle the mortgages
-// the property secures, move its leases to the new owner and realise the seller's gain.
+// the same on every fold. A unit to let without a lease is vacant; a house its owner lives in has
+// none to let. Buying and selling settle the mortgages the property secures, move its leases to the
+// new owner and realise the seller's gain.
 
 import type { EntityId } from "../../../shared/ids";
 import type { JsonObject, JsonValue } from "../../../shared/json";
@@ -26,7 +27,7 @@ import type { WorldState } from "../../../engine/state";
 import { canSeeEntity, canSeePlace } from "../../../engine/visibility";
 import type { AmountProvider, FinanceApi, FinanceRegistry, FlowPosting } from "./module";
 import { addMonths, clockOfDate, dateText, instantIn, investingRows, reject } from "./assets";
-import { acquisition, disposal } from "./gains";
+import { acquisition, disposal, isHome } from "./gains";
 import { shownRoute, unit } from "./holdings";
 import { paymentMonths } from "./income";
 import { isOpened } from "./journal";
@@ -335,10 +336,22 @@ function managedFlow(api: FinanceApi, ctx: ReadContext, id: EntityId, l: Managed
   };
 }
 
-/** A property's leases as its view lists them: each lease, then a vacant line for each unit without one. */
+/**
+ * How many of a property's units are to let, and so stand vacant when no lease covers them: its
+ * `units` when its author gives them (units to let: an owner's own flat in the building isn't one);
+ * else one, or none when one of its owners lives in it, since a house its owner lives in is their
+ * home, not a unit to let (a lease they start on it anyway still shows as let).
+ */
+function unitsToLet(api: FinanceApi, state: Readonly<WorldState>, id: EntityId): number {
+  const units = num(fieldsOf(state, id).units);
+  if (units !== undefined) return Math.max(1, Math.round(units));
+  return api.ownersOf(state, id).some((o) => isHome(state, id, o.party)) ? 0 : 1;
+}
+
+/** A property's leases as its view lists them: each lease, then a vacant line for each unit to let that none covers. */
 function leaseViews(api: FinanceApi, ctx: ReadContext, id: EntityId, viewer: EntityId): LeaseView[] {
   const now = ctx.state.clock;
-  const units = Math.max(1, Math.round(numOf(fieldsOf(ctx.state, id).units, 1)));
+  const units = unitsToLet(api, ctx.state, id);
   const out: LeaseView[] = [];
   let let_ = 0;
   for (const l of authoredLeases(ctx, id)) {
