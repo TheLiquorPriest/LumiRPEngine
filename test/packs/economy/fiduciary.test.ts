@@ -229,6 +229,18 @@ describe("money a manager only manages is judged where it lands, however its pay
     expect(savings).not.toContain("maya");
     expect(savings).not.toContain("maya_checking");
   });
+
+  test("a business the money passes through isn't one of its people: the café being Brightline's and Brightline Maya's, its custodian, with cards on Brightline's till and on Maya's checking, pays the café's money into Maya's checking but not into Brightline's till, by account or by name", () => {
+    const { w } = setup((wd) => {
+      Object.assign(wd.entities.brightline!.fields, { owners: [{ party: "maya", role: "owner", share: 100 }] });
+      Object.assign(wd.entities.daybreak!.fields, { owners: [{ party: "brightline", role: "owner", share: 100 }, { party: "you", role: "custodian" }] });
+      wd.entities.bl_operating!.fields.owners = [{ party: "brightline", role: "owner" }, { party: "you", role: "authorized_user" }];
+      wd.entities.maya_checking!.fields.owners = [{ party: "maya", role: "owner" }, { party: "you", role: "authorized_user" }];
+      wd.entities.db_savings = account("db_savings", "daybreak", "savings", 5_000_000);
+    });
+    for (const to of ["bl_operating", "brightline"]) expect([to, refusal(pay(w, "db_savings", to))]).toEqual([to, "db_savings pays for Daybreak Café, not for Alex Rivera"]);
+    for (const to of ["maya_checking", "maya"]) expect([to, refusal(pay(w, "db_savings", to))]).toEqual([to, ""]);
+  });
 });
 
 describe("a share of the money isn't the whole of it: only money wholly a manager's own goes into an account they may spend", () => {
