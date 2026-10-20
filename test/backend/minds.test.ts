@@ -19,6 +19,7 @@ import type { WorldState } from "../../src/engine/state";
 import { planTurn, postTurn } from "../../src/engine/turn";
 import { unrevealedSecrets } from "../../src/engine/visibility";
 import { readCharacter, readSlice } from "../../src/packs/minds/core/state";
+import { STARTER_WORLDS } from "../../src/packs/index";
 import { placeOfEntity } from "../../src/engine/scope";
 import { Rig } from "../support/rig";
 
@@ -314,19 +315,29 @@ describe("minds around a turn", () => {
     expect(prompts()).toEqual(["override"]);
   });
 
-  test("the inspector lists each minds call, with no text and strangers unnamed", async () => {
+  test("the inspector lists only the minds calls of people the POV can see and has met, by name and with no text", async () => {
     const rig = new Rig({ shipped: true });
     fakeModels(rig);
-    const chatId = await alderChat(rig);
+    const worldId = await rig.newWorld("Alder", "modern_slice_of_life");
+    const here = STARTER_WORLDS.modern_slice_of_life?.("a", "Alder").entities.pov?.fields.place;
+    // One hidden in the POV's room, one public but never met, away at the marina: both Live, by `always`.
+    for (const [id, name, place, extra] of [["lurker", "The Lurker", here, { visibility: "secret" }], ["drifter", "Vera Drift", "alder_harbor_marina", {}]] as const) rig.body(await rig.send({ type: "lre.editor", op: "put", worldId, base: null, collection: "entities", id, value: { id, kind: "person", name, tier: "background", fields: { place }, relations: [], ...extra } }));
+    rig.body(await rig.send({ type: "lre.editor", op: "set", worldId, base: null, part: "minds", value: { thresholds: { live: 900, near: 900, far: 900 }, always: { ids: ["danny_okafor", "lurker", "drifter"] } } }));
+    rig.body(await rig.send({ type: "lre.world", op: "commit", worldId, base: null }));
+    const chatId = rig.host.createChat("Morning.");
+    rig.body(await rig.send({ type: "lre.world", op: "attach", worldId, chatId }));
+    rig.body(await rig.send({ type: "lre.settings.set", patch: { minds: { refreshLimit: 0 } } }));
+    rig.body(await rig.send({ type: "lre.edit", chatId, ops: [{ op: "move", entity: "danny_okafor", to: here ?? "" }] }));
     await rig.turn(chatId, "Hello.", "They look up.");
-    const record = rig.rt.inspectorRecords(chatId)?.at(-1);
-    const traces = record?.minds ?? [];
-    expect(traces.filter((t) => t.purpose === "mind").map((t) => [t.phase, t.outcome, t.prompt])).toEqual([
-      ["pre", "recorded", "default"],
-      ["pre", "recorded", "default"],
+    // Each of them thought, and the two in the room remembered.
+    expect(mindCalls(rig).map((c) => MIND.exec(c.messages[0]?.content ?? "")?.[1]).sort()).toEqual(["Danny Okafor", "The Lurker", "Vera Drift"]);
+    expect(rig.host.quietCalls.map((c) => MEMORY.exec(c.messages[0]?.content ?? "")?.[1]).filter(Boolean).sort()).toEqual(["Danny Okafor", "The Lurker"]);
+    const traces = rig.rt.inspectorRecords(chatId)?.at(-1)?.minds ?? [];
+    expect(traces.map((t) => [t.who, t.purpose, t.phase, t.outcome, t.prompt])).toEqual([
+      ["Danny Okafor", "mind", "pre", "recorded", "default"],
+      ["Danny Okafor", "memory", "post", "recorded", "default"],
     ]);
-    expect(traces.filter((t) => t.purpose === "memory").length).toBe(2);
-    expect(JSON.stringify(traces)).not.toContain("PRIVATE");
+    for (const word of ["Someone", "Lurker", "Drift", "PRIVATE"]) expect(JSON.stringify(traces)).not.toContain(word);
   });
 
   test("a mind's secret never reaches the narrator under brief, nor the Journal, Cast or chips", async () => {
@@ -344,7 +355,7 @@ describe("minds around a turn", () => {
     expect(section(rig, "Minds")).toContain("Priya Nair:");
     const danny = (await headRecord(rig, chatId)).find((e) => e.type === "minds.mind" && "data" in e && e.data.entity === "danny_okafor");
     expect(danny && "data" in danny ? danny.data.withheld : null).toBe(true);
-    expect(rig.rt.inspectorRecords(chatId)?.at(-1)?.minds?.some((t) => t.outcome === "leak_blocked")).toBe(true);
+    expect(rig.rt.inspectorRecords(chatId)?.at(-1)?.minds?.filter((t) => t.purpose === "mind").map((t) => t.outcome)).toEqual(["recorded", "recorded"]);
     // Every player surface: the state view (Journal, Cast, chips and the rest) never carries it.
     expect(JSON.stringify(rig.latestView(chatId))).not.toContain(secret);
     expect(JSON.stringify(rig.host.sent.filter((m) => m.type !== "lre.result"))).not.toContain(secret);

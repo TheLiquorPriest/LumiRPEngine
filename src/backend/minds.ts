@@ -196,9 +196,12 @@ export function mindData(reg: Registry, world: WorldDoc, state: Readonly<WorldSt
   };
 }
 
-/** How the inspector names someone (DESIGN §6.5): by name only when the POV knows them. */
-function traceName(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, who: EntityId): string {
-  return playerKnows(reg, world, state, world.pov, who) ? (own(state.entities, who)?.name ?? "Someone") : "Someone";
+/**
+ * Whether the inspector lists a minds call for someone (DESIGN §6.5): only when the POV may see and
+ * has met them, so it never tells of anyone hidden or unknown. It names them; it shows no text.
+ */
+function traced(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, who: EntityId): boolean {
+  return playerKnows(reg, world, state, world.pov, who);
 }
 
 async function chatMessages(deps: MindsDeps, chatId: ChatId, userId: UserId): Promise<HostMessage[]> {
@@ -228,7 +231,7 @@ export async function runMinds(deps: MindsDeps, input: RunMindsInput): Promise<R
   const calls = input.who.map(async (who): Promise<{ data: MindEventData | null; trace: MindCallTrace }> => {
     const level = input.levels[who] ?? "near";
     const e = own(state.entities, who);
-    const base = { purpose: "mind" as const, phase, who: traceName(reg, world, state, who), level };
+    const base = { purpose: "mind" as const, phase, who: e?.name ?? who, level };
     const prompt = mindPrompt("mind", world, settings.minds, varsFor(world, state, who));
     if (!e) return { data: null, trace: { ...base, outcome: "failed", ms: 0, tokens: 0, prompt: prompt.source } };
     const scope: MindScope = { reg, world, state, who, memory, messages, hideJson: settings.hideJsonBlocks, moment: input.moment, loreTokens };
@@ -237,7 +240,7 @@ export async function runMinds(deps: MindsDeps, input: RunMindsInput): Promise<R
     const raw = input.signal.aborted ? null : await deps.steps.helperJson("mind", prompt.text, mindContext(scope), config, userId, input.signal, { guidance, usage });
     const ms = Math.round(performance.now() - t0);
     const data = raw === null ? null : mindData(reg, world, state, who, raw, input.moment, level, input.reasons?.[who] ?? input.moment.reason);
-    return { data, trace: { ...base, outcome: data === null ? "failed" : data.withheld ? "leak_blocked" : "recorded", ms, tokens: usage.tokens, prompt: prompt.source } };
+    return { data, trace: { ...base, outcome: data === null ? "failed" : "recorded", ms, tokens: usage.tokens, prompt: prompt.source } };
   });
   const results = await Promise.all(calls);
   // Each checked against the state it will fold on: one that doesn't validate is dropped.
@@ -248,7 +251,7 @@ export async function runMinds(deps: MindsDeps, input: RunMindsInput): Promise<R
     const event: LedgerEvent = { type: MINDS_EVENTS.mind, data: r.data as unknown as JsonObject };
     if (!w.apply(event)) events.push(event);
   }
-  return { events, traces: results.map((r) => r.trace) };
+  return { events, traces: results.flatMap((r, i) => (traced(reg, world, state, input.who[i] ?? "") ? [r.trace] : [])) };
 }
 
 export interface PreMindsInput {
@@ -431,7 +434,7 @@ export async function postMinds(deps: MindsDeps, input: PostMindsInput): Promise
       // Their listeners: who heard the turn with them, and, unless the POV left them, whoever it met.
       const listeners = left.includes(id) ? said.who : [...said.who, ...(met?.who ?? [])];
       const data = raw === null ? null : memoryData(reg, world, w.state, id, raw, listeners);
-      traces.push({ purpose: "memory", phase: "post", who: traceName(reg, world, state, id), level: levels.get(id) ?? "near", outcome: data ? "recorded" : "failed", ms: Math.round(performance.now() - t0), tokens: usage.tokens, prompt: prompt.source });
+      if (traced(reg, world, state, id)) traces.push({ purpose: "memory", phase: "post", who: own(state.entities, id)?.name ?? id, level: levels.get(id) ?? "near", outcome: data ? "recorded" : "failed", ms: Math.round(performance.now() - t0), tokens: usage.tokens, prompt: prompt.source });
       return data;
     }),
   );
@@ -463,7 +466,7 @@ export async function postMinds(deps: MindsDeps, input: PostMindsInput): Promise
         const t0 = performance.now();
         const raw = input.signal.aborted ? null : await deps.steps.helperJson("consolidate", prompt.text, consolidateContext({ state: w.state, world, who: id }, fold), consolidateConfig, userId, input.signal, { guidance: input.guidance?.consolidate ?? deps.presets.last(userId).guidance.consolidate ?? "", usage });
         const summary = isRecord(raw) ? capText(str(raw.summary), MIND_TEXT_CAPS.summary) : "";
-        traces.push({ purpose: "consolidate", phase: "post", who: traceName(reg, world, state, id), level: levels.get(id) ?? "background", outcome: summary === "" ? "failed" : "recorded", ms: Math.round(performance.now() - t0), tokens: usage.tokens, prompt: prompt.source });
+        if (traced(reg, world, state, id)) traces.push({ purpose: "consolidate", phase: "post", who: own(state.entities, id)?.name ?? id, level: levels.get(id) ?? "background", outcome: summary === "" ? "failed" : "recorded", ms: Math.round(performance.now() - t0), tokens: usage.tokens, prompt: prompt.source });
         return summary === "" ? null : ({ type: MINDS_EVENTS.consolidated, data: { entity: id, at: now, notes: fold.map((n) => n.id), summary } } satisfies LedgerEvent);
       }),
     );
