@@ -18,7 +18,7 @@ import type { HubControls, SectionProps } from "./hub";
 import { endableLeases, holdingControls, investmentBlocks, knownPeople, moveSources, propertyControls, ROUTE_ELSEWHERE, routePick, transferTargets, type HoldingControl, type PropertyControl } from "./layout";
 import { FieldsPage } from "./lines";
 import { actionPage, Controls, detailPage, Hero, MoneyPage, Note, type HubNav, type HubPage, type HubPages } from "./nav";
-import { amountOf, exerciseAction, leaseEndAction, leaseStartAction, propertyBuyAction, propertySellAction, routeAction, routeOps, setPriceOps, tradeAction, type RouteTarget, type TradeForm } from "./requests";
+import { amountOf, exerciseAction, leaseEndAction, leaseStartAction, newIdFor, propertyBuyAction, propertySellAction, propertySpawnOps, routeAction, routeOps, setPriceOps, tradeAction, type RouteTarget, type TradeForm } from "./requests";
 
 /** A gain or a loss with its sign: "+$12.00", "-$3.50". */
 function signed(cents: number, currency: WorldCurrency): string {
@@ -272,6 +272,11 @@ function PropertiesSection(props: SectionProps) {
   const { view, controls, nav } = props;
   return (
     <MoneyPage nav={nav} name="properties" title="Properties">
+      {controls.mode === "gm" ? (
+        <Button variant="primary" icon="plus" block onClick={() => nav.open(actionPage("properties", "new"))}>
+          Add a property
+        </Button>
+      ) : null}
       {view.properties.length === 0 ? (
         <Empty icon="home">No property.</Empty>
       ) : (
@@ -284,6 +289,23 @@ function PropertiesSection(props: SectionProps) {
         </Section>
       )}
     </MoneyPage>
+  );
+}
+
+/** The GM's new property for the party: its name and value, the party its whole owner, one edit. */
+function NewPropertyPage(props: SectionProps) {
+  const { view, controls, nav } = props;
+  const [name, setName] = useState("");
+  const [value, setValue] = useState("");
+  if (controls.mode !== "gm") return null;
+  const cents = amountOf(value, controls.currency);
+  const ok = name.trim() !== "" && cents !== null;
+  return (
+    <ActionPage nav={nav} controls={controls} name="property-new" title="Add a property" subtitle={view.name} go="Add the property" disabled={!ok} submit={() => (!ok || cents === null ? Promise.resolve(false) : controls.edit(propertySpawnOps(newIdFor("prop", name, new Set(controls.gm.entities.map((e) => e.id))), name.trim(), view.party, cents)))}>
+      <TextField label="Name" value={name} onInput={setName} placeholder="The lake cabin" />
+      <AmountField label="Value" value={value} currency={controls.currency} onInput={setValue} invalid={value.trim() !== "" && cents === null} />
+      <Note>{`${view.name} owns it whole.`}</Note>
+    </ActionPage>
   );
 }
 
@@ -396,21 +418,30 @@ function SellPropertyPage(props: SectionProps & { property: PropertyView }) {
   );
 }
 
+/** The terms a lender offers a mortgage over, months, the usual first: the finance table's (`loans.mortgage.term_months`), which the purchase refuses any other than. */
+const MORTGAGE_TERMS: readonly ChoiceOption[] = [
+  { value: "360", label: "30 years", detail: "The usual" },
+  { value: "240", label: "20 years" },
+  { value: "180", label: "15 years" },
+];
+
 function BuyPropertyPage(props: SectionProps & { property: PropertyView }) {
   const { view, controls, nav, property: p } = props;
   const [price, setPrice] = useState(String((p.forSale ?? p.value) / 10 ** controls.currency.decimals));
   const [down, setDown] = useState("");
-  const [term, setTerm] = useState<number | null>(null);
+  const [term, setTerm] = useState("360");
   const [from, setFrom] = useState("");
   if (controls.mode !== "player") return null;
   const cents = amountOf(price, controls.currency);
   const downCents = down.trim() === "" ? null : amountOf(down, controls.currency);
   const ok = cents !== null && (down.trim() === "" || downCents !== null);
+  // Only what isn't paid down is a mortgage, and only a mortgage has a term.
+  const financed = cents !== null && downCents !== null && downCents < cents;
   return (
-    <ActionPage nav={nav} controls={controls} name="property-buy" title="Buy" subtitle={p.name} go="Buy" disabled={!ok} submit={() => (!ok || cents === null ? Promise.resolve(false) : controls.act(propertyBuyAction(p.id, cents, { ...(from ? { from } : {}), ...(downCents !== null ? { down: downCents } : {}), ...(term !== null ? { termMonths: term } : {}) })))}>
+    <ActionPage nav={nav} controls={controls} name="property-buy" title="Buy" subtitle={p.name} go="Buy" disabled={!ok} submit={() => (!ok || cents === null ? Promise.resolve(false) : controls.act(propertyBuyAction(p.id, cents, { ...(from ? { from } : {}), ...(downCents !== null ? { down: downCents } : {}), ...(financed ? { termMonths: Number(term) } : {}) })))}>
       <AmountField label="Offer" value={price} currency={controls.currency} onInput={setPrice} invalid={cents === null} />
       <AmountField label="Down payment (empty: pay it all)" value={down} currency={controls.currency} onInput={setDown} invalid={down.trim() !== "" && downCents === null} />
-      {downCents !== null ? <NumberField label="Mortgage term (months)" value={term} min={1} onChange={setTerm} /> : null}
+      {financed ? <ChoiceField label="Mortgage over" value={term} options={MORTGAGE_TERMS} onChange={setTerm} /> : null}
       <SelectField label="Paid from" value={from} empty="Your usual account" options={moveSources(view).map((a) => ({ value: a.id, label: a.name }))} onChange={setFrom} />
     </ActionPage>
   );
@@ -490,7 +521,7 @@ export const assetPages: HubPages = {
     const { view, controls } = props;
     const [head, id, control, inner] = page.path;
     if (head === "investments") return id === undefined ? <InvestmentsSection {...props} /> : id === "buy" && canBuyNew(view, controls) ? <TradePage {...props} side="buy" /> : null;
-    if (head === "properties") return id === undefined ? <PropertiesSection {...props} /> : null;
+    if (head === "properties") return id === undefined ? <PropertiesSection {...props} /> : id === "new" && controls.mode === "gm" ? <NewPropertyPage {...props} /> : null;
     if (id === undefined) return null;
     if (head === "holding") {
       const holding = view.investments?.holdings.find((h) => h.id === id);

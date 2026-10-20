@@ -2,7 +2,7 @@
 // the action forms and Now's money glance. Built on the tokens only.
 
 export const PACKS_MONEY_CSS = `
-/* Money in Build (economy/ui/config.tsx, field-editors.tsx): living costs in a grid, the feature switches page, a place's cash machine and branch */
+/* Money in Build (economy/ui/config.tsx, field-editors.tsx): living costs in a grid, the feature and sales tax switches pages, a place's cash machine and branch */
 .lre .lre-money-build-bands{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,13rem),1fr));gap:var(--lre-s3);min-width:0}
 .lre .lre-money-build-feature{display:flex;flex-wrap:wrap;align-items:center;gap:var(--lre-s2) var(--lre-s3);min-width:0;padding:var(--lre-s2) var(--lre-s3)}
 .lre .lre-money-build-feature+.lre-money-build-feature{border-top:1px solid var(--lre-hairline)}

@@ -17,7 +17,7 @@ import type { IconName } from "../../../frontend/icons";
 import { ActionPage, AmountField, AmountPage, ChoiceField, SelectField, type Choice } from "./forms";
 import type { GmControls, HubControls, PlayerControls, SectionProps } from "./hub";
 import { accountBlocks, accountControls, accountGroups, cardControls, cardLimitsShown, groupOf, paySources, transferTargets, utilisation, type AccountGroup } from "./layout";
-import { FieldsPage, TxnRows } from "./lines";
+import { FieldsPage, OwnerRows, TxnRows } from "./lines";
 import { actionPage, Controls, detailPage, Hero, MoneyPage, Note, type HubNav, type HubPages } from "./nav";
 import { PayTiersEditor, tierText } from "./pay-prefs";
 import { accountStatusOps, amountOf, autopayAction, autopayOps, cardAction, cashAction, closeAccountOps, payCardAction, payPrefsAction, payPrefsOps, releaseHoldOps, transferAction, type CardChange } from "./requests";
@@ -252,9 +252,7 @@ function AccountPage(props: SectionProps & { account: AccountView }) {
       {blocks.owners ? (
         <Section title="Owners" flush>
           <List>
-            {a.owners.map((o) => (
-              <ListRow key={o.party} icon="user" title={o.name} subtitle={humanize(o.role)} value={o.share > 0 ? `${Math.round(o.share * 10) / 10}%` : undefined} />
-            ))}
+            <OwnerRows owners={a.owners} icon="user" />
           </List>
         </Section>
       ) : null}

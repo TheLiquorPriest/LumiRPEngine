@@ -16,7 +16,7 @@ import { RoutePage, RouteRow } from "./assets";
 import { ActionPage, AmountField, AmountPage, ChoiceField, NumberField, SelectField, TextField, type Choice } from "./forms";
 import type { PlayerControls, SectionProps } from "./hub";
 import { businessControls, invoiceControls, jobControls, knownPeople, workBlocks, type BusinessControl, type InvoiceControl } from "./layout";
-import { FieldsPage, TxnRows } from "./lines";
+import { FieldsPage, OwnerRows, TxnRows } from "./lines";
 import { actionPage, Controls, detailPage, Hero, MoneyPage, Note, type HubPages } from "./nav";
 import { amountOf, distributeAction, drawAction, hireAction, invoiceAction, invoiceIssueAction, jobEndAction, jobSpawnOps, newIdFor, raiseAction, stakeSellAction, type HireForm } from "./requests";
 
@@ -338,9 +338,7 @@ function BusinessPage(props: SectionProps & { business: BusinessView }) {
       {b.owners.length > 0 ? (
         <Section title="Owners" flush>
           <List>
-            {b.owners.map((o) => (
-              <ListRow key={o.party} title={o.name} subtitle={humanize(o.role)} value={o.share > 0 ? `${Math.round(o.share * 10) / 10}%` : undefined} />
-            ))}
+            <OwnerRows owners={b.owners} />
           </List>
         </Section>
       ) : null}

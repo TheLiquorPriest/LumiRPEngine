@@ -13,7 +13,7 @@ import { createRegistry } from "../../src/engine/registry-impl";
 import { Working } from "../../src/engine/working";
 import { ALL_PACKS, STARTER_WORLDS } from "../../src/packs/index";
 import { startState } from "../packs/support";
-import { Row } from "../../src/frontend/components";
+import { ListRow } from "../../src/frontend/components";
 import { decodeFinanceView } from "../../src/packs/economy/ui/decode";
 import { accountBlocks, accountControls, businessControls, cardControls, creditBlocks, endableLeases, flowControls, flowSources, holdingControls, householdRows, hubTabs, invoiceControls, investmentBlocks, overviewBlocks, propertyControls, transferTargets, workBlocks } from "../../src/packs/economy/ui/layout";
 import { OwnerRows } from "../../src/packs/economy/ui/lines";
@@ -121,7 +121,7 @@ describe("the view as it arrives", () => {
 
   test("owners the player can't see, masked as null or as an empty id, still get rows of their own", () => {
     // The keys of the rows a component draws, read off its tree (no DOM needed).
-    const rowKeys = (node: unknown): unknown[] => (Array.isArray(node) ? node.flatMap(rowKeys) : !isRecord(node) || !isRecord(node.props) ? [] : node.type === Row ? [node.key] : rowKeys(node.props.children));
+    const rowKeys = (node: unknown): unknown[] => (Array.isArray(node) ? node.flatMap(rowKeys) : !isRecord(node) || !isRecord(node.props) ? [] : node.type === ListRow ? [node.key] : rowKeys(node.props.children));
     const owners = [
       { party: "marcus", name: "Marcus", role: "owner" as const, share: 60 },
       { party: null, name: "someone", role: "owner" as const, share: 20 },

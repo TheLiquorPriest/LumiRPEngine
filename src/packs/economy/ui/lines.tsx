@@ -1,15 +1,31 @@
-// Rows the money pages share: journal lines, and the GM's edit of an entity's declared fields (on a
-// page of their own, each field one edit with its own Undo, as GM mode's entity page edits them).
+// Rows the money pages share: journal lines, an account's or a business's owners, and the GM's edit
+// of an entity's declared fields (on a page of their own, each field one edit with its own Undo, as
+// GM mode's entity page edits them).
 
 import { useState } from "preact/hooks";
 import type { JournalLine, OwnerLine } from "../../../shared/finance";
 import { formatMoney, type WorldCurrency } from "../../../shared/world";
 import { Badge, Button, Empty, List, ListRow, Section } from "../../../frontend/components";
 import { humanize } from "../../../frontend/format";
+import type { IconName } from "../../../frontend/icons";
 import { FieldRow } from "../../../frontend/gm/entity";
 import { ActionRows } from "../../../frontend/gm/ui";
 import type { GmControls, HubControls } from "./hub";
 import { MoneyPage, type HubNav } from "./nav";
+
+/**
+ * Owners with their roles and shares. An owner the player can't see comes without an id (null, or
+ * "" from a module that masks it so), so rows are told apart by place where the id is missing.
+ */
+export function OwnerRows(props: { owners: readonly OwnerLine[]; icon?: IconName }) {
+  return (
+    <>
+      {props.owners.map((o, i) => (
+        <ListRow key={o.party || `someone:${i}`} icon={props.icon} title={o.name} subtitle={humanize(o.role)} value={o.share > 0 ? `${Math.round(o.share * 10) / 10}%` : undefined} />
+      ))}
+    </>
+  );
+}
 
 /** Journal lines, newest first: at most `max`, with a Show all when there are more. `account` names each line's account. */
 export function TxnRows(props: { lines: readonly JournalLine[]; max: number; currency: WorldCurrency; account?: boolean }) {

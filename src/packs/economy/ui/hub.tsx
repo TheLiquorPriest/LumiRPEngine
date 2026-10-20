@@ -4,8 +4,8 @@
 // sections with a line from the view, which opens that section's page. The player's Play → Me →
 // Money shows the POV's, with in-world actions as controls; the GM's Money tab shows anyone's,
 // with edits. Both draw the same `FinanceView`, which the core built at the party's Money level: a
-// band at level 1, the simple books below the top level, everything at the top level or where
-// Custom turns a feature on.
+// band at level 1, the simple books below the top level, and everything at the top level; a feature
+// the world switches on shows its own detail wherever it runs, and one it switches off shows nowhere.
 
 import type { FinanceView } from "../../../shared/finance";
 import type { EditOp } from "../../../shared/protocol";
@@ -218,7 +218,7 @@ function Overview(props: SectionProps) {
 /** One party's money hub: the overview, then a row for each other section the party has, which opens its page. */
 export function MoneyHub(props: SectionProps & { label: string }) {
   const { view, controls, nav } = props;
-  const tabs = hubTabs(view);
+  const tabs = hubTabs(view, controls.mode);
   if (tabs.length === 0) return <Empty icon="coins">Money is off for {view.name}.</Empty>;
   const fmt = (cents: number): string => formatMoney(cents, controls.currency);
   const rows = tabs.flatMap((t) => (t.id === "overview" ? [] : [{ id: t.id, dot: t.dot }]));

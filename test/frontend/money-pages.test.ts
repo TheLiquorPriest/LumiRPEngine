@@ -18,7 +18,7 @@ function account(id: string, name: string): AccountView {
 }
 
 function flow(id: string, label: string): FlowView {
-  return { id, label, kind: "bill", from: "Checking", to: "Landlord", amount: "$1.00", cents: 100, schedule: "monthly", next: null, shortfall: "skip", status: "active", category: null, link: null, editable: true, source: "entity", done: 0, missed: 0, deferred: 0, spec: { id, label, kind: "bill", from: "chk", to: "landlord", amount: { fixed: 100 }, schedule: { every: "month" }, shortfall: "skip", status: "active", source: "entity" } };
+  return { id, label, kind: "bill", from: "Checking", to: "Landlord", amount: "$1.00", cents: 100, schedule: "monthly", next: null, shortfall: "skip", status: "active", category: null, link: null, editable: true, source: "entity", payer: null, done: 0, missed: 0, deferred: 0, spec: { id, label, kind: "bill", from: "chk", to: "landlord", amount: { fixed: 100 }, schedule: { every: "month" }, shortfall: "skip", status: "active", source: "entity" } };
 }
 
 const checking = account("chk", "Checking");
