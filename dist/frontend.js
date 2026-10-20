@@ -4271,7 +4271,8 @@ var COLLECTION_SPECS = {
     { kind: "number", key: "priority", label: "Priority", optional: true, step: 1, hint: "Higher comes first among otherwise equal entries" },
     { kind: "enum", key: "visibility", label: "Who may read it (Known by: once the player character knows everything it links)", values: ["public", "known_by"], optional: true },
     { kind: "bool", key: "secret", label: "Secret", hint: "Only the helpers you pick read it, until the gate holds", reads: (secret) => loreIsSecret({ secret }) },
-    { kind: "expr", key: "gate", label: "Gate (revealed once it holds)", optional: true }
+    { kind: "expr", key: "gate", label: "Gate (revealed once it holds)", optional: true },
+    { kind: "refs", key: "holders", label: "Whose own secret it is (their minds read it, gate or no gate)", collections: ["entities"] }
   ],
   classifications: [
     { kind: "text", key: "label", label: "Label" },
@@ -7455,6 +7456,12 @@ function worldMindsOf(world) {
   };
 }
 var MIND_PURPOSES = ["mind", "memory", "skip", "consolidate"];
+function isMindPurpose(purpose) {
+  return MIND_PURPOSES.includes(purpose);
+}
+function worldMindTemplate(world, purpose) {
+  return Object.values(world.steps).filter((t) => t.purpose === purpose && t.template.trim() !== "").sort((a, b) => a.id.localeCompare(b.id))[0];
+}
 var MINDS_PRESETS = Object.freeze({
   lean: { enabled: false, liveLimit: 3, nearRefresh: { scene: true, mention: true, turns: 6, minutes: 120 }, farRefreshMinutes: 1440, refreshLimit: 1, memoryLevels: [], tokens: 300, skip: { maxBeats: 4, maxMindsPerBeat: 2 } },
   standard: { enabled: true, liveLimit: 3, nearRefresh: { scene: true, mention: true, turns: 6, minutes: 120 }, farRefreshMinutes: 1440, refreshLimit: 2, memoryLevels: ["live"], tokens: 600, skip: { maxBeats: 6, maxMindsPerBeat: 3 } },
@@ -7465,7 +7472,7 @@ function defaultMindsSettings(preset = "standard") {
 }
 var MINDS_DEFAULTS = Object.freeze(defaultMindsSettings());
 var MIND_PROMPT_MAX = 20000;
-var PLAN_KINDS = ["errand", "meet", "visit", "work", "rest", "leisure", "other"];
+var PLAN_KINDS = ["errand", "meet", "visit", "work", "rest", "leisure", "pay", "lend", "other"];
 var PLAN_PRIORITY = { min: 1, max: 5, normal: 3 };
 var COMMITMENT_KINDS = ["promise", "debt", "grudge", "favour", "plan", "other"];
 var COMMITMENT_STATUSES = ["open", "kept", "broken", "released"];
@@ -7504,22 +7511,22 @@ var MIND_PROMPT_DEFAULTS = Object.freeze({
 });
 var MIND_ANSWER_FORMATS = Object.freeze({
   mind: [
-    'Answer with JSON only: {"monologue": "...", "depiction": "...", "intent": "...", "reactions": ["..."], "plans": [{"what": "...", "kind": "errand|meet|visit|work|rest|leisure|other", "when": {"from": "YYYY-MM-DD HH:MM", "to": "YYYY-MM-DD HH:MM"}, "where": "a place", "with": ["a name"], "priority": 3}], "mood": "...", "interrupt": {"reason": "..."}}',
+    'Answer with JSON only: {"monologue": "...", "depiction": "...", "intent": "...", "reactions": ["..."], "plans": [{"what": "...", "kind": "errand|meet|visit|work|rest|leisure|pay|lend|other", "when": {"from": "YYYY-MM-DD HH:MM", "to": "YYYY-MM-DD HH:MM"}, "where": "a place", "with": ["a name"], "priority": 3, "amount": 20}], "mood": "...", "interrupt": {"reason": "..."}}',
     "- monologue: their private reasoning in the first person, at most six sentences.",
     "- depiction: how they come across right now, as behaviour anyone present could see (posture, tone, what they do). Never a secret, an unspoken reason or a thought.",
     "- intent: what they mean to do next, in one sentence.",
     '- reactions: up to three short conditional reactions ("if pressed about the cellar, changes the subject").',
-    "- plans: only real intentions for later, with local times; priority 1 (whenever it fits) to 5 (it must happen). Leave the list empty when there are none.",
+    "- plans: only real intentions for later, with local times; priority 1 (whenever it fits) to 5 (it must happen); kind pay or lend, with amount, when they mean to hand someone money, and no amount otherwise. Leave the list empty when there are none.",
     "- mood: one or two words.",
     "- interrupt: only when the moment is a beat inside a time skip and what they'd do now would interrupt the player character's skipped time (seeking them out, calling them). Leave it out otherwise."
   ].join(`
 `),
   memory: [
-    'Answer with JSON only: {"notes": [{"text": "...", "salience": 3}], "commitments": [{"kind": "promise|debt|grudge|favour|plan|other", "with": ["a name"], "text": "...", "due": "YYYY-MM-DD HH:MM"}], "resolved": [{"id": "...", "status": "kept|broken|released"}], "plans": [{"what": "...", "kind": "errand|meet|visit|work|rest|leisure|other", "when": {"from": "YYYY-MM-DD HH:MM", "to": "YYYY-MM-DD HH:MM"}, "where": "a place", "with": ["a name"], "priority": 3}], "told": [{"to": ["a name"], "what": "..."}], "summary": "..."}',
+    'Answer with JSON only: {"notes": [{"text": "...", "salience": 3}], "commitments": [{"kind": "promise|debt|grudge|favour|plan|other", "with": ["a name"], "text": "...", "due": "YYYY-MM-DD HH:MM"}], "resolved": [{"id": "...", "status": "kept|broken|released"}], "plans": [{"what": "...", "kind": "errand|meet|visit|work|rest|leisure|pay|lend|other", "when": {"from": "YYYY-MM-DD HH:MM", "to": "YYYY-MM-DD HH:MM"}, "where": "a place", "with": ["a name"], "priority": 3, "amount": 20}], "told": [{"to": ["a name"], "what": "..."}], "summary": "..."}',
     "- notes: at most three things they will remember, in their own perspective; salience 1 (passing) to 5 (unforgettable).",
     "- commitments: promises, debts, grudges, favours and plans with someone that this turn made; due only when a time was set.",
     "- resolved: their open commitments (listed with ids) that this turn kept, broke or released.",
-    "- plans: intentions with times that this turn formed.",
+    "- plans: intentions with times that this turn formed; kind pay or lend, with amount, when they mean to hand someone money, and no amount otherwise.",
     "- told: what they told whom in this turn, in a few words each.",
     "- summary: their one-paragraph summary rewritten, only when this turn changed who they are or what they're about; leave it out otherwise.",
     "Use empty lists for anything the turn didn't give."
@@ -7535,8 +7542,11 @@ var DEFAULT_STEP_LORE = Object.freeze({ policy: "prefetch", tokens: 300 });
 function stepLoreOf(config) {
   return config?.lore ?? DEFAULT_STEP_LORE;
 }
+var HELPER_MAX_TOKENS = 2000;
 function stepConfigOf(steps, purpose) {
   const saved = steps[purpose];
+  if (isMindPurpose(purpose))
+    return saved ?? { enabled: purpose !== "skip", signals: [], maxTokens: HELPER_MAX_TOKENS };
   if (purpose !== "puzzle.answer")
     return saved ?? { enabled: false, signals: [] };
   const signals = ["always"];
@@ -7791,7 +7801,7 @@ function Meter(props) {
     ]
   }, undefined, true, undefined, this);
 }
-function stepPatch(config) {
+function stepUpdatePatch(purpose, config) {
   const out = { enabled: config.enabled, signals: [...config.signals] };
   if (config.route)
     out.route = { provider: config.route.provider, connectionId: config.route.connectionId, model: config.route.model };
@@ -7801,7 +7811,7 @@ function stepPatch(config) {
     out.maxTokens = config.maxTokens;
   if (config.lore)
     out.lore = { policy: config.lore.policy, tokens: config.lore.tokens, ...config.lore.transport ? { transport: config.lore.transport } : {} };
-  return out;
+  return { modelUse: { preset: "custom", steps: { [purpose]: out } } };
 }
 function StepsSection(props) {
   const app = useApp();
@@ -7810,7 +7820,7 @@ function StepsSection(props) {
   A(() => {
     app.host.connections().then(setConnections);
   }, []);
-  const update = (purpose, next) => props.patch({ modelUse: { preset: "custom", steps: { [purpose]: stepPatch(next) } } });
+  const update = (purpose, next) => props.patch(stepUpdatePatch(purpose, next));
   return /* @__PURE__ */ u3("div", {
     class: "lre-list",
     children: Object.keys(STEP_LABEL).map((purpose) => {
@@ -8038,10 +8048,15 @@ function memoryOverridePatch(field, value) {
 
 // src/packs/minds/ui/ops.ts
 var FIDELITY_LABEL = { live: "Live", near: "Near", far: "Far", background: "Background" };
-var PLAN_KIND_LABEL = { errand: "Errand", meet: "Meet", visit: "Visit", work: "Work", rest: "Rest", leisure: "Leisure", other: "Other" };
+var PLAN_KIND_LABEL = { errand: "Errand", meet: "Meet", visit: "Visit", work: "Work", rest: "Rest", leisure: "Leisure", pay: "Pay someone", lend: "Lend money", other: "Other" };
 var PLAN_STATUS_LABEL = { open: "Open", done: "Done", dropped: "Dropped" };
 var COMMITMENT_KIND_LABEL = { promise: "Promise", debt: "Debt", grudge: "Grudge", favour: "Favour", plan: "Plan together", other: "Other" };
 var COMMITMENT_STATUS_LABEL = { open: "Open", kept: "Kept", broken: "Broken", released: "Released" };
+function narratorGets(secrecy, mind) {
+  const full = secrecy === "full";
+  const shown = full || !mind.withheld;
+  return { mood: full, monologue: full, depiction: shown, intent: full, reactions: full, interrupt: shown };
+}
 function pinOp(entity, level) {
   return { op: "mind_pin", entity, level };
 }
@@ -8082,10 +8097,13 @@ function commitmentOp(entity, id, draft) {
   const value = { kind: draft.kind, with: withIds, text, due: draft.due === null ? null : Math.round(draft.due), status: draft.status };
   return { op: "mind_memory", entity, part: "commitment", id, value };
 }
+function isMoneyPlan(kind) {
+  return kind === "pay" || kind === "lend";
+}
 function planDraft(now, plan) {
   if (plan)
-    return { what: plan.what, kind: plan.kind, from: plan.when.from, to: plan.when.to, where: plan.where, with: [...plan.with], priority: plan.priority, status: plan.status };
-  return { what: "", kind: "errand", from: now + 60, to: now + 120, where: null, with: [], priority: PLAN_PRIORITY.normal, status: "open" };
+    return { what: plan.what, kind: plan.kind, from: plan.when.from, to: plan.when.to, where: plan.where, with: [...plan.with], priority: plan.priority, status: plan.status, cents: plan.cents ?? null };
+  return { what: "", kind: "errand", from: now + 60, to: now + 120, where: null, with: [], priority: PLAN_PRIORITY.normal, status: "open", cents: null };
 }
 function startPlanIn(draft, now, hours) {
   const from = Math.round(now + hours * 60);
@@ -8097,9 +8115,11 @@ function planLasts(draft, minutes) {
 function planOp(entity, id, draft) {
   const what = textIn(draft.what, MIND_TEXT_CAPS.planWhat);
   const ok = Number.isInteger(draft.from) && Number.isInteger(draft.to) && draft.from < draft.to && Number.isInteger(draft.priority) && draft.priority >= PLAN_PRIORITY.min && draft.priority <= PLAN_PRIORITY.max;
-  if (what === null || !ok)
+  const withIds = [...new Set(draft.with.filter((w) => w !== "" && w !== entity))];
+  const money = isMoneyPlan(draft.kind);
+  if (what === null || !ok || money && (draft.cents === null || !Number.isSafeInteger(draft.cents) || draft.cents <= 0 || withIds.length === 0))
     return null;
-  const value = { what, kind: draft.kind, when: { from: draft.from, to: draft.to }, where: draft.where, with: [...new Set(draft.with.filter((w) => w !== "" && w !== entity))], priority: draft.priority, status: draft.status };
+  const value = { what, kind: draft.kind, when: { from: draft.from, to: draft.to }, where: draft.where, with: withIds, priority: draft.priority, status: draft.status, ...money && draft.cents !== null ? { cents: draft.cents } : {} };
   return { op: "mind_memory", entity, part: "plan", id, value };
 }
 
@@ -8111,7 +8131,7 @@ var SECRECY_EXPLAINED = {
   },
   full: {
     label: "Full",
-    text: "The narrator also gets each character's inner monologue and what they mean to do, told to show them through behaviour and never say them outright. Richer, more consistent characters; a careless narrator could let a thought or a secret slip."
+    text: "The narrator also gets each character's inner monologue, what they mean to do, their reactions and their mood, told to show them through behaviour and never say them outright. Richer, more consistent characters; a careless narrator could let a thought or a secret slip."
   }
 };
 var WEIGHT_LABEL = {
@@ -8236,10 +8256,11 @@ function MindTemplates(props) {
     children: [
       /* @__PURE__ */ u3("div", {
         class: "lre-small lre-muted",
-        children: "A world's template for a step wins over the player's own prompt and the built-in one; only a step's first template (by id) is used, and its signals are ignored. A new template starts from the built-in prompt."
+        children: "A world's template for a step wins over the built-in prompt, and a player's own prompt wins over it; only a step's first template (by id) with any text is used, and its signals are ignored. A new template starts from the built-in prompt."
       }, undefined, false, undefined, this),
       MIND_PURPOSES.map((purpose) => {
         const templates = Object.values(props.doc.steps).filter((t) => t.purpose === purpose).sort((a, b) => a.id.localeCompare(b.id));
+        const used = worldMindTemplate(props.doc, purpose);
         return /* @__PURE__ */ u3("div", {
           class: "lre-stack",
           style: { gap: "2px" },
@@ -8256,7 +8277,7 @@ function MindTemplates(props) {
               }, undefined, false, undefined, this) : undefined,
               sub: templates.length === 0 ? "None: the player's prompt, else the built-in" : undefined
             }, undefined, false, undefined, this),
-            templates.map((t, i) => /* @__PURE__ */ u3("button", {
+            templates.map((t) => /* @__PURE__ */ u3("button", {
               type: "button",
               class: "lre-item",
               onClick: () => open(t.id),
@@ -8267,10 +8288,10 @@ function MindTemplates(props) {
                     children: t.id
                   }, undefined, false, undefined, this)
                 }, undefined, false, undefined, this),
-                i > 0 ? /* @__PURE__ */ u3("span", {
+                t === used ? null : /* @__PURE__ */ u3("span", {
                   class: "lre-badge warn",
-                  children: "Not used"
-                }, undefined, false, undefined, this) : null,
+                  children: t.template.trim() === "" ? "Blank: not used" : "Not used"
+                }, undefined, false, undefined, this),
                 /* @__PURE__ */ u3("span", {
                   class: "lre-dim",
                   "aria-hidden": "true",
@@ -8476,7 +8497,7 @@ var specs = (keys) => COLLECTION_SPECS.lore.filter((s) => keys.includes(s.key));
 var TEXT = specs(["title", "content"]);
 var MORE = specs(["keys", "links", "group", "priority"]);
 var SECRET = specs(["visibility", "secret"]);
-var GATE = specs(["gate"]);
+var GATE = specs(["gate", "holders"]);
 function useDrift(app, worldId, lore, id) {
   const [drift, setDrift] = d2(null);
   const sourced = Object.entries(lore).filter(([key, l]) => (id === undefined || key === id) && loreSourceOf(l.source).kind === "book");
@@ -14091,7 +14112,7 @@ function MindsSection(props) {
         children: "Prompts"
       }, undefined, false, undefined, this),
       /* @__PURE__ */ u3(Row, {
-        k: "A world's own step template for a purpose wins over these (Build → Step templates)."
+        k: "Your prompt wins over the world's own step template for a purpose (Build → Step templates), and that over the built-in."
       }, undefined, false, undefined, this),
       MIND_PURPOSES.map((purpose) => /* @__PURE__ */ u3(PromptEditor, {
         purpose,
@@ -17996,6 +18017,13 @@ var BOOKKEEPING = new Set([
   "economy.price",
   "economy.txn",
   "economy.flow_run",
+  "economy.sale",
+  "economy.remit",
+  "economy.invoice_paid",
+  "economy.payout",
+  "economy.payslip",
+  "economy.commission",
+  "economy.estimated_tax",
   "economy.quote",
   "economy.mint",
   "economy.lots",
@@ -18042,6 +18070,9 @@ function derivedUnpricedCap(world) {
       top = Math.max(top, bandOfJson(row.price_cents)?.max ?? 0);
   return top > 0 ? Math.round(top) : 500 * 10 ** Math.max(0, Math.min(6, Math.trunc(world.currency.decimals)));
 }
+
+// src/packs/economy/core/taxes.ts
+var CORPORATE_PCT = 21;
 
 // src/packs/economy/ui/forms.tsx
 function SelectField(props) {
@@ -18229,6 +18260,20 @@ function withLivingCost(config, band, cents) {
   const { livingCosts: _old, ...rest } = config;
   return Object.keys(costs).length > 0 ? { ...rest, livingCosts: costs } : { ...rest };
 }
+function withTax(config, key, value) {
+  const taxes = isRecord(config.taxes) ? { ...config.taxes } : {};
+  if (value === undefined)
+    delete taxes[key];
+  else
+    taxes[key] = value;
+  const { taxes: _old, ...rest } = config;
+  return Object.keys(taxes).length > 0 ? { ...rest, taxes } : { ...rest };
+}
+function exemptChoices(world, exempt) {
+  const rows = world.tables["economy.categories"]?.rows ?? {};
+  const known = Object.entries(rows).map(([id, row]) => ({ value: id, label: typeof row.name === "string" && row.name !== "" ? row.name : id }));
+  return [...known, ...exempt.filter((c) => !hasOwn(rows, c)).map((c) => ({ value: c, label: `${c} (not in the categories table)` }))];
+}
 var money = (key, label, unit) => ({ kind: "number", key, label: `${label} (${unit})`, min: 0, step: 1, optional: true });
 var pct = (key, label) => ({ kind: "number", key, label: `${label} (%)`, min: 0, optional: true });
 function productSpecs(currency) {
@@ -18290,11 +18335,11 @@ function assetSpecs(currency) {
 }
 function FeatureToggles(props) {
   return /* @__PURE__ */ u3(Card, {
-    title: "Money features (Custom)",
+    title: "Money features",
     children: [
       /* @__PURE__ */ u3("span", {
         class: "lre-small lre-muted",
-        children: "Each runs from its usual Money level; switch one on to run it from its lowest level, or off. The dashboards show the full books for what runs."
+        children: "Each runs from its usual Money level; switch one on to run it from its lowest level, or off. The money hub shows each one's detail wherever it runs; the rest of the full books show only at the top level."
       }, undefined, false, undefined, this),
       FINANCE_FEATURES.map((f) => {
         const def = FEATURE_DEFS[f];
@@ -18371,6 +18416,64 @@ function LivingCosts(props) {
     ]
   }, undefined, true, undefined, this);
 }
+function Taxes(props) {
+  const taxes = isRecord(props.config.taxes) ? props.config.taxes : {};
+  const exempt = Array.isArray(taxes.exempt) ? taxes.exempt.filter((c) => typeof c === "string") : [];
+  const corporate = typeof taxes.corporatePct === "number" ? taxes.corporatePct : null;
+  const setExempt = (category, on) => {
+    const next = on ? [...exempt.filter((c) => c !== category), category] : exempt.filter((c) => c !== category);
+    props.onChange(withTax(props.config, "exempt", next.length > 0 ? next : undefined));
+  };
+  return /* @__PURE__ */ u3(Card, {
+    title: "Taxes",
+    children: [
+      /* @__PURE__ */ u3(NumberField, {
+        label: "Corporate tax rate (%)",
+        value: corporate,
+        min: 0,
+        max: 100,
+        placeholder: String(CORPORATE_PCT),
+        onChange: (v) => props.onChange(withTax(props.config, "corporatePct", v ?? undefined))
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3("span", {
+        class: "lre-small lre-muted",
+        children: [
+          "What a C corporation pays on its profit, with its state's rate. Empty, it's the federal rate, ",
+          CORPORATE_PCT,
+          "%."
+        ]
+      }, undefined, true, undefined, this),
+      /* @__PURE__ */ u3("div", {
+        class: "lre-h",
+        children: "Sales tax"
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3("span", {
+        class: "lre-small lre-muted",
+        children: "A category exempt here is never taxed, wherever it's sold; a place can exempt more of its own."
+      }, undefined, false, undefined, this),
+      exemptChoices(props.world, exempt).map((c) => /* @__PURE__ */ u3(Row, {
+        k: c.label,
+        v: /* @__PURE__ */ u3("select", {
+          class: "lre-input",
+          style: { width: "auto" },
+          "aria-label": `${c.label}: sales tax`,
+          value: exempt.includes(c.value) ? "exempt" : "taxed",
+          onChange: (event) => setExempt(c.value, event.currentTarget.value === "exempt"),
+          children: [
+            /* @__PURE__ */ u3("option", {
+              value: "taxed",
+              children: "Taxed"
+            }, undefined, false, undefined, this),
+            /* @__PURE__ */ u3("option", {
+              value: "exempt",
+              children: "Exempt"
+            }, undefined, false, undefined, this)
+          ]
+        }, undefined, true, undefined, this)
+      }, c.value, false, undefined, this))
+    ]
+  }, undefined, true, undefined, this);
+}
 function EconomyConfig(props) {
   const currency = props.world.currency;
   const derived = derivedUnpricedCap(props.world);
@@ -18400,6 +18503,9 @@ function EconomyConfig(props) {
         ...props
       }, undefined, false, undefined, this),
       /* @__PURE__ */ u3(LivingCosts, {
+        ...props
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(Taxes, {
         ...props
       }, undefined, false, undefined, this),
       /* @__PURE__ */ u3(FeatureToggles, {
@@ -19300,7 +19406,8 @@ function journalLine(o) {
   };
 }
 function ownerLine(o) {
-  return typeof o.party === "string" ? { party: o.party, name: str(o.name, o.party), role: oneOf(o.role, OWNER_ROLES, "owner"), share: num(o.share) } : null;
+  const party = typeof o.party === "string" ? o.party : o.party === null ? null : undefined;
+  return party !== undefined ? { party, name: str(o.name, party ?? "someone"), role: oneOf(o.role, OWNER_ROLES, "owner"), share: num(o.share) } : null;
 }
 function card(o) {
   if (typeof o.id !== "string")
@@ -19311,7 +19418,7 @@ function card(o) {
     network: oneOf(o.network, CARD_NETWORKS, "debit"),
     state: oneOf(o.state, CARD_STATES, "active"),
     holder: str(o.holder),
-    holderId: str(o.holderId),
+    holderId: nullableStr(o.holderId),
     account: str(o.account),
     last4: nullableStr(o.last4),
     item: nullableStr(o.item),
@@ -19454,12 +19561,13 @@ function flowView(o) {
     status: oneOf(o.status, FLOW_STATUSES, "active"),
     category: nullableStr(o.category),
     link: idName(o.link),
+    payer: nullableStr(o.payer),
     editable: bool(o.editable),
     source: str(o.source, "entity"),
     done: num(o.done),
     missed: num(o.missed),
     deferred: num(o.deferred),
-    spec: decodeFlow({ id: o.id, ...obj(o.spec) ?? {} })
+    spec: obj(o.spec) ? decodeFlow({ id: o.id, ...obj(o.spec) ?? {} }) : null
   };
 }
 function jobSpec(o) {
@@ -19654,10 +19762,10 @@ function decodeFinanceView(value) {
     household: household && typeof household.id === "string" ? {
       id: household.id,
       name: str(household.name, household.id),
-      members: list(household.members, (m) => typeof m.id === "string" ? { id: m.id, name: str(m.name, m.id), role: str(m.role), share: num(m.share) } : null),
+      members: list(household.members, (m) => typeof m.id === "string" || m.id === null ? { id: typeof m.id === "string" ? m.id : null, name: str(m.name, typeof m.id === "string" ? m.id : "someone"), role: str(m.role), share: num(m.share) } : null),
       accounts: strings(household.accounts),
       flows: list(household.flows, flowView),
-      monthly: { total: num(obj(household.monthly)?.total), parts: list(obj(household.monthly)?.parts, (p) => typeof p.id === "string" ? { id: p.id, name: str(p.name, p.id), cents: num(p.cents) } : null) }
+      monthly: { total: num(obj(household.monthly)?.total), parts: list(obj(household.monthly)?.parts, (p) => typeof p.id === "string" || p.id === null ? { id: typeof p.id === "string" ? p.id : null, name: str(p.name, typeof p.id === "string" ? p.id : "someone"), cents: num(p.cents) } : null) }
     } : null,
     recent: list(value.recent, journalLine),
     notes: list(value.notes, (n) => ({ at: str(n.at), text: str(n.text) })),
@@ -19791,8 +19899,7 @@ function flowParams(form, currency) {
   if (form.every === "once")
     params.once = `${form.start}T${form.at || "09:00"}`;
   else {
-    if (form.interval > 1)
-      params.interval = form.interval;
+    params.interval = form.interval;
     if ((form.every === "month" || form.every === "year") && form.day !== null)
       params.day = form.day;
     if (form.every === "week" && form.weekday !== null)
@@ -19826,6 +19933,7 @@ function flowCreateAction(form, currency) {
   return { action: FINANCE_ACTIONS.flowCreate, params: flowParams(form, currency) };
 }
 var SCHEDULE_PARAMS = ["every", "interval", "day", "weekday", "month", "at", "once", "roll"];
+var CLEARABLE = ["at", "start", "end", "count", "roll", "retry_days", "retries", "fallback", "category"];
 function flowUpdateAction(flow, form, currency) {
   const was = flowParams(flowFormOf(flow, currency), currency);
   const now = flowParams(form, currency);
@@ -19838,6 +19946,9 @@ function flowUpdateAction(flow, form, currency) {
       if (now[key] !== undefined)
         changed[key] = now[key];
   }
+  const clear = CLEARABLE.filter((key) => was[key] !== undefined && now[key] === undefined);
+  if (clear.length > 0)
+    changed.clear = clear.join(",");
   return Object.keys(changed).length === 0 ? null : { action: FINANCE_ACTIONS.flowUpdate, params: { flow: flow.id, ...changed } };
 }
 function flowStatusAction(flow, change) {
@@ -19852,8 +19963,7 @@ function flowFieldsOf(form, currency) {
     fields.once = `${form.start}T${form.at || "09:00"}`;
   else {
     fields.every = form.every;
-    if (form.interval > 1)
-      fields.interval = form.interval;
+    fields.interval = form.interval;
     if ((form.every === "month" || form.every === "year") && form.day !== null)
       fields.days = [form.day];
     if (form.every === "week" && form.weekday !== null)
@@ -19907,6 +20017,11 @@ function flowEditOps(flow, form, currency) {
       ops.push({ op: "set", entity: flow.id, field, value: [] });
   if (was.once !== undefined && now.once === undefined)
     ops.push({ op: "set", entity: flow.id, field: "once", value: "" });
+  const name = form.label.trim();
+  const renamed = name !== "" && name !== flow.label;
+  const clear = CLEARABLE.filter((key) => was[key] !== undefined && now[key] === undefined);
+  if (renamed || clear.length > 0)
+    ops.push({ op: "effect", effect: "economy.flow_edit", args: { flow: flow.id, ...renamed ? { name } : {}, ...clear.length > 0 ? { clear: clear.join(",") } : {} } });
   return ops;
 }
 function flowStatusOps(flow, status) {
@@ -20012,7 +20127,7 @@ function routeOps(target, party, to) {
   return [{ op: "effect", effect: "economy.route", args: { ...target, party, to } }];
 }
 function propertyBuyAction(property, price, opts = {}) {
-  return { action: FINANCE_ACTIONS.propertyBuy, params: { property, price, ...opts.from ? { from: opts.from } : {}, ...opts.down !== undefined ? { down: opts.down } : {}, ...opts.termMonths !== undefined ? { term_months: opts.termMonths } : {}, ...opts.aprPct !== undefined ? { apr_pct: opts.aprPct } : {} } };
+  return { action: FINANCE_ACTIONS.propertyBuy, params: { property, price, ...opts.from ? { from: opts.from } : {}, ...opts.down !== undefined ? { down: opts.down } : {}, ...opts.termMonths !== undefined ? { term_months: opts.termMonths } : {} } };
 }
 function propertySellAction(property, price, opts = {}) {
   return { action: FINANCE_ACTIONS.propertySell, params: { property, price, ...opts.buyer ? { buyer: opts.buyer } : {}, ...opts.to ? { to: opts.to } : {} } };
@@ -20041,6 +20156,13 @@ function accountStatusOps(account, status) {
 function jobSpawnOps(id, name, fields) {
   return [{ op: "spawn", kind: "job", name, id }, ...Object.entries({ ...fields, status: "active" }).map(([field, value]) => ({ op: "set", entity: id, field, value }))];
 }
+function propertySpawnOps(id, name, owner, value) {
+  return [
+    { op: "spawn", kind: "property", name, id },
+    { op: "set", entity: id, field: "owners", value: [{ party: owner, role: "owner", share: 100 }] },
+    { op: "set", entity: id, field: "value", value }
+  ];
+}
 
 // src/packs/economy/ui/layout.ts
 var ROUTE_ELSEWHERE = " elsewhere";
@@ -20054,28 +20176,30 @@ function routePick(route) {
   return route.to ?? " ";
 }
 var SECTION_LABELS = { overview: "Overview", accounts: "Accounts", flows: "Flows", jobs: "Jobs", businesses: "Businesses", investments: "Investments", properties: "Properties", credit: "Credit", household: "Household" };
-function hubTabs(view) {
+function hubTabs(view, mode) {
   if (view.level <= 0)
     return [];
   const tabs = [{ id: "overview", label: SECTION_LABELS.overview, dot: view.overview?.alerts.some((a) => a.tone !== "info") ?? false }];
   if (view.level === 1)
     return tabs;
   const hasAccounts = view.accounts.length > 0;
+  const creates = mode === "gm" && view.overview !== null;
+  const person = view.partyKind === "person";
   if (hasAccounts)
     tabs.push({ id: "accounts", label: SECTION_LABELS.accounts, dot: view.accounts.some((a) => a.status !== "open" || a.statements.some((s) => s.state === "late") || a.cards.some((c) => c.state === "lost")) });
   if (hasAccounts && view.features.includes("flows") || view.flows.length > 0)
     tabs.push({ id: "flows", label: SECTION_LABELS.flows, dot: view.flows.some((f) => f.missed > 0 && f.status === "active") });
-  if (view.jobs.length > 0)
+  if (view.jobs.length > 0 || creates && person)
     tabs.push({ id: "jobs", label: SECTION_LABELS.jobs, dot: false });
   if (view.businesses.length > 0)
     tabs.push({ id: "businesses", label: SECTION_LABELS.businesses, dot: view.businesses.some((b) => b.invoices.some((i) => i.state === "late")) });
   if (view.investments !== null)
     tabs.push({ id: "investments", label: SECTION_LABELS.investments, dot: false });
-  if (view.properties.length > 0)
+  if (view.properties.length > 0 || creates)
     tabs.push({ id: "properties", label: SECTION_LABELS.properties, dot: view.properties.some((p) => p.leases.some((l) => l.state === "vacant")) });
   if (view.credit !== null)
     tabs.push({ id: "credit", label: SECTION_LABELS.credit, dot: view.credit.marks.length > 0 });
-  if (view.household !== null)
+  if (view.household !== null || creates && person && view.level >= 3)
     tabs.push({ id: "household", label: SECTION_LABELS.household, dot: false });
   return tabs;
 }
@@ -20151,7 +20275,8 @@ function flowControls(view, flow) {
     out.push("delete");
     return out;
   }
-  const billed = flow.spec.from === view.party || view.businesses.some((b) => b.id === flow.spec.from && rights(b.role).manage);
+  const payer = flow.payer;
+  const billed = payer !== null && (payer === view.party || view.businesses.some((b) => b.id === payer && rights(b.role).manage));
   return view.level >= 3 && flow.source === "invoice" && flow.link !== null && billed ? ["pay_now"] : [];
 }
 function jobControls(view, job, employer) {
@@ -20199,7 +20324,7 @@ function endableLeases(view, property) {
   return property.leases.filter((l) => l.state === "let" && view.flows.some((f) => f.id === l.flow)).map((l) => l.flow);
 }
 function flowSources(view) {
-  return paySources(view).filter((a) => !CLASS_TRAITS[a.class].cash).map((a) => ({ id: a.id, label: a.name }));
+  return paySources(view).filter((a) => !CLASS_TRAITS[a.class].cash && rights(a.role).manage).map((a) => ({ id: a.id, label: a.name }));
 }
 function knownPeople(palette) {
   const pay = palette?.entries.find((e) => e.action === "pay");
@@ -20212,8 +20337,26 @@ function flowTargets(view, palette) {
 function utilisation(account) {
   return account.limit !== null && account.limit > 0 ? Math.round(Math.max(0, -account.cents) * 100 / account.limit) : null;
 }
+function householdRows(h) {
+  return h.members.map((m, i) => {
+    const part = h.monthly.parts.find((p, j) => m.id === null ? j === i && p.id === null : p.id === m.id);
+    return { key: m.id ?? `someone:${i}`, id: m.id, name: m.name, role: m.role, share: m.share, cents: part?.cents ?? null };
+  });
+}
+function sharedAccounts(view, h) {
+  const names = [];
+  const others = [];
+  for (const id of h.accounts) {
+    const a = view.accounts.find((x) => x.id === id);
+    if (a)
+      names.push(a.name);
+    else
+      others.push(id);
+  }
+  return { names, others };
+}
 function shows(view, feature) {
-  return view.detail || view.features.includes(feature);
+  return view.features.includes(feature);
 }
 function overviewBlocks(view) {
   const assets = view.detail || shows(view, "investments") || shows(view, "property");
@@ -21253,6 +21396,15 @@ function GmPanel(props) {
 }
 
 // src/packs/economy/ui/lines.tsx
+function OwnerRows(props) {
+  return /* @__PURE__ */ u3(M, {
+    children: props.owners.map((o, i) => /* @__PURE__ */ u3(Row, {
+      k: o.name,
+      sub: humanize(o.role),
+      v: o.share > 0 ? `${Math.round(o.share * 10) / 10}%` : undefined
+    }, o.party || `someone:${i}`, false, undefined, this))
+  }, undefined, false, undefined, this);
+}
 function TxnRows(props) {
   const [all, setAll] = d2(false);
   if (props.lines.length === 0)
@@ -21343,9 +21495,18 @@ function endpoints(view, controls) {
   const parties = controls.gm.entities.filter((e) => !e.gone && (e.kind === "person" || e.kind === "business" || e.kind === "trust" || e.kind === "household")).map((e) => ({ value: e.id, label: `${e.name} (${e.kind})` }));
   return { from: [...accounts, { value: view.party, label: `${view.name} (as their preferences choose)` }], to: [...accounts, ...parties] };
 }
+function flowSideChoices(ends, flow) {
+  if (!flow)
+    return ends;
+  const { from, to } = flow.spec;
+  return {
+    from: ends.from.some((c) => c.value === from) ? ends.from : [...ends.from, { value: from, label: flow.from }],
+    to: flow.to === to || ends.to.some((c) => c.value === to) ? ends.to : [...ends.to, { value: to, label: flow.to }]
+  };
+}
 function FlowFormView(props) {
   const { view, controls, flow } = props;
-  const ends = endpoints(view, controls);
+  const ends = flowSideChoices(endpoints(view, controls), flow);
   const [form, setForm] = d2(() => flow ? flowFormOf(flow.spec, controls.currency) : { ...blankFlowForm(ends.from[0]?.value ?? "") });
   const [more, setMore] = d2(false);
   const typedTo = form.to !== "" && !ends.to.some((t) => t.value === form.to);
@@ -21373,12 +21534,12 @@ function FlowFormView(props) {
         submit().then((ok) => ok && props.onDone());
     },
     children: [
-      controls.mode === "player" || !flow ? /* @__PURE__ */ u3(TextField, {
+      /* @__PURE__ */ u3(TextField, {
         label: "Name",
         value: form.label,
         onInput: (label) => set({ label }),
         placeholder: "Rent, Savings, Allowance…"
-      }, undefined, false, undefined, this) : null,
+      }, undefined, false, undefined, this),
       /* @__PURE__ */ u3(SelectField, {
         label: "Kind",
         value: form.kind,
@@ -21389,7 +21550,7 @@ function FlowFormView(props) {
         label: "From",
         value: form.from,
         empty: "Choose",
-        options: ends.from.some((f) => f.value === form.from) || form.from === "" ? ends.from : [...ends.from, { value: form.from, label: form.from }],
+        options: ends.from,
         onChange: (from) => set({ from })
       }, undefined, false, undefined, this),
       /* @__PURE__ */ u3(SelectField, {
@@ -21557,6 +21718,9 @@ var SHORTFALL_LABEL = {
   overdraft: "Go into overdraft as the account allows",
   defer: "Carry it to the next time"
 };
+function withSpec(f) {
+  return f.spec !== null;
+}
 function FlowRow(props) {
   const app = useApp();
   const { view, flow: f, controls } = props;
@@ -21593,7 +21757,7 @@ function FlowRow(props) {
       controls.mode === "player" ? can.length > 0 ? /* @__PURE__ */ u3("div", {
         class: "lre-inline",
         children: [
-          can.includes("edit") ? /* @__PURE__ */ u3(Reveal, {
+          can.includes("edit") && withSpec(f) ? /* @__PURE__ */ u3(Reveal, {
             label: "Edit",
             children: (close) => /* @__PURE__ */ u3(FlowFormView, {
               view,
@@ -21656,7 +21820,7 @@ function FlowRow(props) {
       }, undefined, true, undefined, this) : /* @__PURE__ */ u3("div", {
         class: "lre-inline",
         children: [
-          f.source === "entity" ? /* @__PURE__ */ u3(Reveal, {
+          f.source === "entity" && withSpec(f) ? /* @__PURE__ */ u3(Reveal, {
             label: "Edit",
             children: (close) => /* @__PURE__ */ u3(FlowFormView, {
               view,
@@ -22379,17 +22543,66 @@ function PropertyCard(props) {
     ]
   }, undefined, true, undefined, this);
 }
+function NewProperty(props) {
+  const { view, controls } = props;
+  const [name, setName] = d2("");
+  const [value, setValue] = d2("");
+  const cents = amountOf(value, controls.currency);
+  const ok = name.trim() !== "" && cents !== null;
+  return /* @__PURE__ */ u3("form", {
+    class: "lre-stack",
+    onSubmit: (event) => {
+      event.preventDefault();
+      if (!ok || cents === null)
+        return;
+      const id = newIdFor("prop", name, new Set(controls.gm.entities.map((e) => e.id)));
+      controls.edit(propertySpawnOps(id, name.trim(), view.party, cents)).then((done) => done && props.onDone());
+    },
+    children: [
+      /* @__PURE__ */ u3(TextField, {
+        label: "Name",
+        value: name,
+        onInput: setName,
+        placeholder: "The lake cabin"
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(AmountField, {
+        label: "Value",
+        value,
+        currency: controls.currency,
+        onInput: setValue,
+        invalid: value.trim() !== "" && cents === null
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3("button", {
+        type: "submit",
+        class: "lre-btn primary",
+        disabled: controls.busy || !ok,
+        children: "Add the property"
+      }, undefined, false, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+}
 function PropertiesSection(props) {
   const { view, controls } = props;
-  return view.properties.length === 0 ? /* @__PURE__ */ u3(Empty, {
-    children: "No property."
-  }, undefined, false, undefined, this) : /* @__PURE__ */ u3(M, {
-    children: view.properties.map((p) => /* @__PURE__ */ u3(PropertyCard, {
-      view,
-      property: p,
-      controls
-    }, p.id, false, undefined, this))
-  }, undefined, false, undefined, this);
+  return /* @__PURE__ */ u3(M, {
+    children: [
+      controls.mode === "gm" ? /* @__PURE__ */ u3(Reveal, {
+        label: "Add a property",
+        primary: true,
+        children: (close) => /* @__PURE__ */ u3(NewProperty, {
+          view,
+          controls,
+          onDone: close
+        }, undefined, false, undefined, this)
+      }, undefined, false, undefined, this) : null,
+      view.properties.length === 0 ? /* @__PURE__ */ u3(Empty, {
+        children: "No property."
+      }, undefined, false, undefined, this) : view.properties.map((p) => /* @__PURE__ */ u3(PropertyCard, {
+        view,
+        property: p,
+        controls
+      }, p.id, false, undefined, this))
+    ]
+  }, undefined, true, undefined, this);
 }
 
 // src/packs/economy/ui/accounts.tsx
@@ -22654,11 +22867,9 @@ function AccountCard(props) {
             class: "lre-h",
             children: "Owners"
           }, undefined, false, undefined, this),
-          a.owners.map((o) => /* @__PURE__ */ u3(Row, {
-            k: o.name,
-            sub: humanize(o.role),
-            v: o.share > 0 ? `${Math.round(o.share * 10) / 10}%` : undefined
-          }, o.party, false, undefined, this))
+          /* @__PURE__ */ u3(OwnerRows, {
+            owners: a.owners
+          }, undefined, false, undefined, this)
         ]
       }, undefined, true, undefined, this) : null,
       blocks.terms ? /* @__PURE__ */ u3(M, {
@@ -23093,12 +23304,43 @@ function HouseholdSection(props) {
   const { view, controls } = props;
   const h = view.household;
   const [adding, setAdding] = d2("");
-  if (!h)
-    return /* @__PURE__ */ u3(Empty, {
-      children: "No household."
-    }, undefined, false, undefined, this);
+  if (!h) {
+    if (controls.mode !== "gm" || view.partyKind !== "person")
+      return /* @__PURE__ */ u3(Empty, {
+        children: "No household."
+      }, undefined, false, undefined, this);
+    const households = controls.gm.entities.filter((e) => e.kind === "household" && !e.gone).map((e) => ({ value: e.id, label: e.name }));
+    return /* @__PURE__ */ u3(M, {
+      children: [
+        /* @__PURE__ */ u3(Empty, {
+          children: "No household."
+        }, undefined, false, undefined, this),
+        /* @__PURE__ */ u3("div", {
+          class: "lre-inline",
+          children: [
+            /* @__PURE__ */ u3(SelectField, {
+              label: "Add to a household",
+              value: adding,
+              empty: "Choose a household",
+              options: households,
+              onChange: setAdding
+            }, undefined, false, undefined, this),
+            /* @__PURE__ */ u3("button", {
+              type: "button",
+              class: "lre-btn small",
+              disabled: controls.busy || adding === "",
+              onClick: () => void controls.edit([{ op: "link", rel: "member_of", from: view.party, to: adding }]).then((ok) => ok && setAdding("")),
+              children: "Add"
+            }, undefined, false, undefined, this)
+          ]
+        }, undefined, true, undefined, this)
+      ]
+    }, undefined, true, undefined, this);
+  }
   const fmt = (cents) => formatMoney(cents, controls.currency);
   const candidates = controls.mode === "gm" ? controls.gm.entities.filter((e) => e.kind === "person" && !e.gone && !h.members.some((m) => m.id === e.id)) : [];
+  const shared = sharedAccounts(view, h);
+  const others = controls.mode === "gm" ? shared.others.map((id) => controls.gm.entities.find((e) => e.id === id)?.name ?? id) : shared.others.length > 0 ? [`${shared.others.length} the household holds`] : [];
   return /* @__PURE__ */ u3(M, {
     children: [
       /* @__PURE__ */ u3(Card, {
@@ -23111,24 +23353,24 @@ function HouseholdSection(props) {
           ]
         }, undefined, true, undefined, this),
         children: [
-          h.members.map((m) => /* @__PURE__ */ u3(Row, {
+          householdRows(h).map((m) => /* @__PURE__ */ u3(Row, {
             k: m.name,
-            sub: [m.role ? humanize(m.role) : null, h.monthly.parts.find((p) => p.id === m.id) ? `${fmt(h.monthly.parts.find((p) => p.id === m.id)?.cents ?? 0)} a month` : null].filter((s) => s !== null).join(" · ") || undefined,
+            sub: [m.role ? humanize(m.role) : null, m.cents !== null ? `${fmt(m.cents)} a month` : null].filter((s) => s !== null).join(" · ") || undefined,
             v: /* @__PURE__ */ u3("span", {
               class: "lre-inline",
               children: [
                 m.share > 0 ? `${Math.round(m.share * 10) / 10}%` : null,
-                controls.mode === "gm" ? /* @__PURE__ */ u3("button", {
+                controls.mode === "gm" && m.id !== null ? /* @__PURE__ */ u3("button", {
                   type: "button",
                   class: "lre-btn small danger",
                   disabled: controls.busy,
                   "aria-label": `Take ${m.name} out of ${h.name}`,
-                  onClick: () => void controls.edit([{ op: "unlink", rel: "member_of", from: m.id, to: h.id }]),
+                  onClick: () => m.id !== null && void controls.edit([{ op: "unlink", rel: "member_of", from: m.id, to: h.id }]),
                   children: "✕"
                 }, undefined, false, undefined, this) : null
               ]
             }, undefined, true, undefined, this)
-          }, m.id, false, undefined, this)),
+          }, m.key, false, undefined, this)),
           controls.mode === "gm" ? /* @__PURE__ */ u3("div", {
             class: "lre-inline",
             children: [
@@ -23150,7 +23392,7 @@ function HouseholdSection(props) {
           }, undefined, true, undefined, this) : null,
           h.accounts.length > 0 ? /* @__PURE__ */ u3(Row, {
             k: "Shared accounts",
-            v: h.accounts.map((id) => view.accounts.find((a) => a.id === id)?.name ?? id).join(", ")
+            v: [...shared.names, ...others].join(", ")
           }, undefined, false, undefined, this) : null
         ]
       }, undefined, true, undefined, this),
@@ -23559,11 +23801,9 @@ function BusinessCard(props) {
       children: humanize(b.role)
     }, undefined, false, undefined, this) : null,
     children: [
-      b.owners.map((o) => /* @__PURE__ */ u3(Row, {
-        k: o.name,
-        sub: humanize(o.role),
-        v: o.share > 0 ? `${Math.round(o.share * 10) / 10}%` : undefined
-      }, o.party, false, undefined, this)),
+      /* @__PURE__ */ u3(OwnerRows, {
+        owners: b.owners
+      }, undefined, false, undefined, this),
       b.places.length > 0 ? /* @__PURE__ */ u3(Row, {
         k: "Trades at",
         v: b.places.map((p) => p.name).join(", ")
@@ -23903,8 +24143,8 @@ function Overview(props) {
   }, undefined, true, undefined, this);
 }
 function MoneyHub(props) {
-  const { view } = props;
-  const tabs = hubTabs(view);
+  const { view, controls } = props;
+  const tabs = hubTabs(view, controls.mode);
   const [section, setSection] = d2("overview");
   const panelId = P2();
   const shown = tabs.some((t) => t.id === section) ? section : "overview";
@@ -24266,7 +24506,7 @@ var ui_default5 = gear;
 // src/packs/minds/ui/gm.tsx
 var LEVEL_TONE = { live: "accent", near: "", far: "", background: "" };
 var SECRECY_NOTE = {
-  full: "Full: the narrator gets each mind's monologue and intent, told to show them and never state them.",
+  full: "Full: the narrator gets each mind whole (monologue, intent, reactions, mood and depiction), told to show it and never state it.",
   brief: "Brief: the narrator gets only the depiction, checked for leaks; the monologue and intent stay here."
 };
 function nameIn(list, id) {
@@ -24459,6 +24699,8 @@ function PlanForm(props) {
   const now = props.ctx.view.now;
   const [startIn, setStartIn] = d2(String(Math.round((draft.from - now) / 60 * 4) / 4));
   const [lasts, setLasts] = d2(String(draft.to - draft.from));
+  const currency = props.ctx.section.currency;
+  const [amount, setAmount] = d2(draft.cents === null ? "" : formatMoneyInput(draft.cents, currency));
   return /* @__PURE__ */ u3("div", {
     class: "lre-stack",
     "data-lre-minds-form": "plan",
@@ -24539,6 +24781,26 @@ function PlanForm(props) {
           }, p.id, false, undefined, this))
         ]
       }, undefined, true, undefined, this),
+      isMoneyPlan(draft.kind) ? /* @__PURE__ */ u3("div", {
+        class: "lre-field",
+        children: [
+          /* @__PURE__ */ u3("span", {
+            class: "label",
+            children: "Amount (handed to the first person it's with)"
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3(MoneyInput, {
+            currency,
+            label: "Amount",
+            value: amount,
+            invalid: amount.trim() !== "" && draft.cents === null,
+            onInput: (text) => {
+              setAmount(text);
+              const cents = parseMoneyInput(text, currency);
+              setDraft({ ...draft, cents: cents !== null && cents > 0 ? cents : null });
+            }
+          }, undefined, false, undefined, this)
+        ]
+      }, undefined, true, undefined, this) : null,
       /* @__PURE__ */ u3(PeoplePicker, {
         label: "With",
         value: draft.with,
@@ -24566,7 +24828,7 @@ function PlanForm(props) {
       /* @__PURE__ */ u3(FormButtons, {
         ctx: props.ctx,
         op: planOp(props.entity, props.id, draft),
-        invalid: "A plan needs what it is, and a length.",
+        invalid: isMoneyPlan(draft.kind) ? "A plan to pay or lend needs what it is, a length, an amount and someone it is with." : "A plan needs what it is, and a length.",
         onDone: props.onDone
       }, undefined, false, undefined, this)
     ]
@@ -24657,7 +24919,7 @@ function LatestMind(props) {
         children: "No mind yet."
       }, undefined, false, undefined, this)
     }, undefined, false, undefined, this);
-  const full = ctx.view.secrecy === "full";
+  const sent = narratorGets(ctx.view.secrecy, m);
   const toNarrator = /* @__PURE__ */ u3("span", {
     class: "lre-badge",
     children: "to the narrator"
@@ -24675,7 +24937,13 @@ function LatestMind(props) {
         sub: `${m.moment === "beat" ? "At a time-skip beat" : "On a turn"} · ${m.reason}${m.place ? ` · at ${nameIn(ctx.places, m.place)}` : ""}`
       }, undefined, false, undefined, this),
       m.mood ? /* @__PURE__ */ u3(Row, {
-        k: "Mood",
+        k: /* @__PURE__ */ u3("span", {
+          class: "lre-inline",
+          children: [
+            "Mood ",
+            sent.mood ? toNarrator : null
+          ]
+        }, undefined, true, undefined, this),
         v: m.mood
       }, undefined, false, undefined, this) : null,
       /* @__PURE__ */ u3(Row, {
@@ -24683,7 +24951,7 @@ function LatestMind(props) {
           class: "lre-inline",
           children: [
             "Monologue ",
-            full ? toNarrator : null
+            sent.monologue ? toNarrator : null
           ]
         }, undefined, true, undefined, this),
         sub: m.monologue || "—"
@@ -24693,7 +24961,7 @@ function LatestMind(props) {
           class: "lre-inline",
           children: [
             "Depiction ",
-            full || m.withheld ? null : toNarrator
+            sent.depiction ? toNarrator : null
           ]
         }, undefined, true, undefined, this),
         sub: m.depiction || "—"
@@ -24707,17 +24975,29 @@ function LatestMind(props) {
           class: "lre-inline",
           children: [
             "Intent ",
-            full ? toNarrator : null
+            sent.intent ? toNarrator : null
           ]
         }, undefined, true, undefined, this),
         sub: m.intent || "—"
       }, undefined, false, undefined, this),
       m.reactions.length > 0 ? /* @__PURE__ */ u3(Row, {
-        k: "Reactions",
+        k: /* @__PURE__ */ u3("span", {
+          class: "lre-inline",
+          children: [
+            "Reactions ",
+            sent.reactions ? toNarrator : null
+          ]
+        }, undefined, true, undefined, this),
         sub: m.reactions.join(" · ")
       }, undefined, false, undefined, this) : null,
       m.interrupt ? /* @__PURE__ */ u3(Row, {
-        k: "Interrupted the skip",
+        k: /* @__PURE__ */ u3("span", {
+          class: "lre-inline",
+          children: [
+            "Interrupted the skip ",
+            sent.interrupt ? toNarrator : null
+          ]
+        }, undefined, true, undefined, this),
         v: m.interrupt,
         tone: "warn"
       }, undefined, false, undefined, this) : null
@@ -24748,7 +25028,7 @@ function Plans(props) {
         onDone: () => setEditing(null)
       }, p.id, false, undefined, this) : /* @__PURE__ */ u3(Row, {
         k: p.what,
-        sub: `${PLAN_KIND_LABEL[p.kind]} · ${p.fromText} – ${p.toText}${p.where ? ` · ${nameIn(ctx.places, p.where)}` : ""}${p.with.length > 0 ? ` · with ${p.with.map((w) => nameIn(ctx.people, w)).join(", ")}` : ""} · priority ${p.priority} · ${PLAN_STATUS_LABEL[p.status]}${p.reason ? ` (${p.reason})` : ""} · from ${p.source === "gm" ? "you" : `their ${p.source}`}`,
+        sub: `${PLAN_KIND_LABEL[p.kind]}${p.cents !== undefined ? ` ${formatMoney(p.cents, ctx.section.currency)}` : ""} · ${p.fromText} – ${p.toText}${p.where ? ` · ${nameIn(ctx.places, p.where)}` : ""}${p.with.length > 0 ? ` · with ${p.with.map((w) => nameIn(ctx.people, w)).join(", ")}` : ""} · priority ${p.priority} · ${PLAN_STATUS_LABEL[p.status]}${p.reason ? ` (${p.reason})` : ""} · from ${p.source === "gm" ? "you" : `their ${p.source}`}`,
         tone: p.status === "open" ? undefined : "muted",
         v: /* @__PURE__ */ u3(ItemActions, {
           ctx,
@@ -27958,10 +28238,7 @@ function decodeLore(value) {
 }
 var MIND_OUTCOME = {
   recorded: { text: "recorded", tone: "pos" },
-  reused: { text: "reused", tone: "" },
-  failed: { text: "failed", tone: "neg" },
-  leak_blocked: { text: "kept from the narrator", tone: "warn" },
-  skipped_limit: { text: "over the limit", tone: "" }
+  failed: { text: "failed", tone: "neg" }
 };
 var MIND_PHASE = { pre: "Before the reply", post: "After the reply", skip: "In a time skip" };
 var MIND_PROMPT = { world: "the world's prompt", override: "your prompt", default: "the built-in prompt" };
@@ -27970,8 +28247,8 @@ function decodeMinds(value) {
     purpose: oneOf(t.purpose, MIND_PURPOSES, "mind"),
     phase: oneOf(t.phase, ["pre", "post", "skip"], "pre"),
     who: str(t.who, "Someone"),
-    level: oneOf(t.level, FIDELITIES, "near"),
-    outcome: oneOf(t.outcome, ["recorded", "reused", "failed", "leak_blocked", "skipped_limit"], "failed"),
+    level: t.level === null ? null : oneOf(t.level, FIDELITIES, "near"),
+    outcome: oneOf(t.outcome, ["recorded", "failed"], "failed"),
     ms: num(t.ms),
     tokens: num(t.tokens),
     prompt: oneOf(t.prompt, ["world", "override", "default"], "default")
@@ -28155,18 +28432,18 @@ function ContextPanel(props) {
           (generation.minds ?? []).length > 0 ? /* @__PURE__ */ u3(Card, {
             title: "Minds",
             children: (generation.minds ?? []).map((m, i) => /* @__PURE__ */ u3(Row, {
-              k: `${m.who} · ${STEP_LABEL[m.purpose]}`,
+              k: m.who === "" ? STEP_LABEL[m.purpose] : `${m.who} · ${STEP_LABEL[m.purpose]}`,
               v: /* @__PURE__ */ u3("span", {
                 class: "lre-inline",
                 children: [
-                  m.outcome === "skipped_limit" || m.outcome === "reused" ? null : `${(m.ms / 1000).toFixed(1)} s · ${m.tokens} tok`,
+                  `${(m.ms / 1000).toFixed(1)} s · ${m.tokens} tok`,
                   /* @__PURE__ */ u3("span", {
                     class: `lre-badge ${MIND_OUTCOME[m.outcome].tone}`,
                     children: MIND_OUTCOME[m.outcome].text
                   }, undefined, false, undefined, this)
                 ]
               }, undefined, true, undefined, this),
-              sub: `${FIDELITY_LABEL[m.level]} · ${MIND_PHASE[m.phase]} · ${MIND_PROMPT[m.prompt]}`
+              sub: [...m.level ? [FIDELITY_LABEL[m.level]] : [], MIND_PHASE[m.phase], MIND_PROMPT[m.prompt]].join(" · ")
             }, `${m.phase}:${m.purpose}:${i}`, false, undefined, this))
           }, undefined, false, undefined, this) : null
         ]
