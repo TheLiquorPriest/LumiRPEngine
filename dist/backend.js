@@ -57425,6 +57425,7 @@ var STEP_LABEL = {
   sections: "Filling the prompt\u2026",
   book: "Waiting for another chat of this world\u2026",
   restart: "Ready; reopen the chat to continue",
+  elsewhere: "Already started in another window",
   ready: "Ready: press Send for the reply",
   reply: "Waiting for the reply\u2026",
   read: "Reading the reply\u2026",
@@ -58044,6 +58045,9 @@ function restartAs(type, observed) {
     return observed.at(-1)?.isUser ? "regenerate" : "send";
   return type === "continue" ? "continue" : "regenerate";
 }
+function restartPush(chatId, p) {
+  return { lre: PROTOCOL_VERSION, type: "lre.generate", chatId, as: p.as, turn: p.id };
+}
 
 class LedgerService {
   host;
@@ -58076,7 +58080,7 @@ class LedgerService {
   }
   attach() {
     const h = this.host;
-    this.unsubscribe.push(h.on("MESSAGE_SENT", (e, userId) => {
+    this.unsubscribe.push(h.on("FRONTEND_SESSION_CLOSED", (e, userId) => this.sessionClosed(e.frontendSessionId, userId)), h.on("MESSAGE_SENT", (e, userId) => {
       this.mirror(e.chatId, e.message);
       this.onMessage(e.chatId, userId, e.message.id, "sent");
     }), h.on("MESSAGE_EDITED", (e, userId) => {
@@ -58235,7 +58239,24 @@ class LedgerService {
     const p = gate?.prepared;
     if (!gate || gate.userId !== userId || !p || p.generationId !== null)
       return;
-    this.host.frontend.send({ lre: PROTOCOL_VERSION, type: "lre.generate", chatId, as: p.as }, userId, session);
+    if (session === undefined || !this.host.capabilities.sessions) {
+      this.host.frontend.send(restartPush(chatId, p), userId);
+      return;
+    }
+    p.holder ??= session;
+    if (p.holder === session)
+      this.host.frontend.send(restartPush(chatId, p), userId, session);
+    else
+      this.host.frontend.send({ lre: PROTOCOL_VERSION, type: "lre.activity", chatId, activity: { chatId, turn: p.id, state: "running", label: STEP_LABEL.elsewhere ?? "Already started in another window", since: Date.now() } }, userId, session);
+  }
+  sessionClosed(session, userId) {
+    for (const [chatId, gate] of this.gates) {
+      const p = gate.prepared;
+      if (!p || p.generationId !== null || p.holder !== session || userId !== null && gate.userId !== userId)
+        continue;
+      p.holder = null;
+      this.host.frontend.send({ lre: PROTOCOL_VERSION, type: "lre.activity", chatId, activity: this.diag?.activityOf(chatId) ?? null }, gate.userId);
+    }
   }
   async gateFor(chatId, userId) {
     const known = this.gates.get(chatId);
@@ -58371,7 +58392,7 @@ class LedgerService {
       let delivered = null;
       let claimed = false;
       try {
-        await step("pre", () => hooks.beforePlan({ chatId, userId, core, observed, generationId: halt.id, connectionId: halt.connectionId, runKey: `${stamp}\x00${epoch}\x00${inputs}`, signal }));
+        await step("pre", () => hooks.beforePlan({ chatId, userId, core, observed, generationId: halt.id, connectionId: halt.connectionId, runKey: `${stamp}\x00${epoch}`, signal }));
         await step("plan", async () => core.plan(halt.id, observed, false));
         await step("prose", () => hooks.afterPlan({ chatId, userId, core, observed, generationId: halt.id, signal }));
         this.failedStep(at);
@@ -58392,13 +58413,16 @@ class LedgerService {
       }
       const turn = core.take(halt.id);
       const as = restartAs(halt.type, observed);
-      const prepared = { id: halt.id, type: halt.type, target: target?.id ?? null, turn: turn?.planned ? turn : null, stamp, epoch, inputs, worldId: gate.worldId, delivered, as, generationId: null };
+      const prepared = { id: halt.id, type: halt.type, target: target?.id ?? null, turn: turn?.planned ? turn : null, stamp, epoch, inputs, worldId: gate.worldId, delivered, as, holder: halt.session ?? null, generationId: null };
       gate.prepared = prepared;
       this.dropIfStale(chatId);
       if (this.gates.get(chatId)?.prepared !== prepared)
         return;
       this.diag?.rest(at, as === "send" ? STEP_LABEL.ready ?? "Ready: press Send for the reply" : STEP_LABEL.restart ?? "Ready; reopen the chat to continue");
-      this.host.frontend.send({ lre: PROTOCOL_VERSION, type: "lre.generate", chatId, as }, userId, halt.session);
+      if (prepared.holder !== null)
+        this.host.frontend.send(restartPush(chatId, prepared), userId, prepared.holder);
+      else if (!this.host.capabilities.sessions)
+        this.host.frontend.send(restartPush(chatId, prepared), userId);
     });
   }
   failedStep(at) {
@@ -67249,7 +67273,7 @@ class Runtime {
     this.steps.onCallStart = (userId, purpose) => this.diag.callStart(userId, purpose);
     this.toolSupport = new ToolSupport(this.host);
     this.minds = { host: this.host, registry: this.registry, steps: this.steps, settings: this.settings, presets: this.presets };
-    this.ledger = new LedgerService(this.host, (chatId, userId) => this.resolveEnv(chatId, userId), new LedgerFold(this.registry, { fingerprint: "1792519101" }), (chatId) => messages.forget(chatId));
+    this.ledger = new LedgerService(this.host, (chatId, userId) => this.resolveEnv(chatId, userId), new LedgerFold(this.registry, { fingerprint: "1792519891" }), (chatId) => messages.forget(chatId));
     this.studio = new StudioBridge(this.host, this.worlds);
     this.worlds.onChange = (worldId, userId) => this.studio.worldChanged(worldId, userId);
     this.push = new StatePush(this.host, async (chatId, userId) => {
@@ -67412,7 +67436,7 @@ class Runtime {
     trimMap(this.prePhase);
     const lastReply = before.findLast((m) => !m.isUser);
     const runAt = { chatId: input.chatId, userId: input.userId, turn: p.generationId };
-    const mindsKey = `${input.runKey}\x00${text}`;
+    const mindsKey = [input.runKey, render.state.revision, text, hashParts("lre.kept-minds", JSON.stringify({ minds: settings.minds, step: mindsStepConfig(settings.modelUse, "mind"), guidance: preset.guidance.mind ?? "" }))].join("\x00");
     const kept = this.keptMinds.get(input.chatId);
     this.keptMinds.delete(input.chatId);
     const mindsTask = preMinds(this.minds, { chatId: input.chatId, userId: input.userId, world: render.world, state: render.state, user: text, reply: lastReply ? lastReply.swipes[lastReply.swipeId] ?? "" : "", timelapse: bridge.intentOf(text)?.action === TIMELAPSE_ACTION2, signal: budget.signal, guidance: preset.guidance.mind ?? "", ...kept?.key === mindsKey ? { kept: kept.minds } : {} });
@@ -70023,7 +70047,7 @@ function contextType(o) {
 function hostCapabilities() {
   const contracts = spindle.contracts ?? {};
   const capabilities = spindle.host?.capabilities ?? {};
-  return { cancel: (contracts.preAssemblyGenerationContext ?? 0) >= 1, required: (capabilities["required-context-handlers-v1"] ?? 0) >= 1 };
+  return { cancel: (contracts.preAssemblyGenerationContext ?? 0) >= 1, required: (capabilities["required-context-handlers-v1"] ?? 0) >= 1, sessions: (capabilities["frontend-session-routing-v1"] ?? 0) >= 1 };
 }
 function bookEntryOf(e) {
   return { id: e.id, bookId: e.world_book_id, comment: e.comment, content: e.content, keys: [...e.key], disabled: e.disabled, constant: e.constant, position: e.position, depth: e.depth, role: e.role, order: e.order_value, extensions: toJsonObject(e.extensions) };
@@ -70060,6 +70084,10 @@ function decodeEvent(event, p) {
     return { presetId: str16(p, "id") ?? null };
   if (event === "SETTINGS_UPDATED")
     return { key: str16(p, "key") ?? null };
+  if (event === "FRONTEND_SESSION_CLOSED") {
+    const frontendSessionId = str16(p, "frontendSessionId");
+    return frontendSessionId ? { frontendSessionId } : null;
+  }
   const chatId = str16(p, event === "CHAT_DELETED" ? "id" : "chatId");
   if (!chatId)
     return null;

@@ -43696,8 +43696,8 @@ class ProtocolClient {
         }
         return;
       case "lre.generate":
-        if (typeof payload.chatId === "string" && (payload.as === "regenerate" || payload.as === "continue" || payload.as === "send")) {
-          const push = { lre: PROTOCOL_VERSION, type: "lre.generate", chatId: payload.chatId, as: payload.as };
+        if (typeof payload.chatId === "string" && typeof payload.turn === "string" && (payload.as === "regenerate" || payload.as === "continue" || payload.as === "send")) {
+          const push = { lre: PROTOCOL_VERSION, type: "lre.generate", chatId: payload.chatId, as: payload.as, turn: payload.turn };
           for (const listener of this.generateListeners)
             listener(push);
         }
@@ -45274,13 +45274,17 @@ function setup(ctx) {
     setTimeout(() => toasts.update((all) => all.filter((entry) => entry.id !== id)), tone === "error" ? 6000 : 3500);
   };
   cleanups.push(client.onError((error) => toast(error.message, "error")));
+  const startedTurns = new Set;
   cleanups.push(client.onGenerate((push) => {
-    if (host.activeChat() !== push.chatId)
+    if (host.activeChat() !== push.chatId || startedTurns.has(push.turn))
       return;
     if (push.as === "send") {
       toast("The engine is ready: press Send for the reply.", "info");
       return;
     }
+    startedTurns.add(push.turn);
+    if (startedTurns.size > 64)
+      startedTurns.delete(startedTurns.values().next().value ?? "");
     const command = push.as === "continue" ? "Continue" : "Regenerate";
     host.generate(push.as).then((started) => {
       if (!started)
