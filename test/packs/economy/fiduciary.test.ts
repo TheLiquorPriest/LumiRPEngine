@@ -315,6 +315,24 @@ describe("the hub is told, by the same rule, where money its reader only manages
     expect(view.ownKeys).toEqual(["you", "alex_rivera"]);
   });
 
+  test("with households off, nothing else in his view carries his household or Rosa in it, yet the trust's allowance is told it may pay neither, as the backend refuses", () => {
+    for (const households of [true, false]) {
+      const { w } = setup((wd) => {
+        wd.entities.family_trust = entity("family_trust", "trust", "Chen Family Trust", { owners: [{ party: "you", role: "trustee" }, { party: "maya", role: "beneficiary", share: 100 }] }, "principal");
+        wd.entities.trust_acct = entity("trust_acct", "account", "Trust account", { owners: [{ party: "family_trust", role: "owner" }], product: "checking", opening: 5_000_000 });
+        wd.entities.trust_allowance = entity("trust_allowance", "flow", "Maya's allowance", { flow_kind: "transfer", from: "family_trust", to: "maya_checking", amount_cents: 100_000, every: "day", shortfall: "skip", status: "active" });
+        wd.entities.home = entity("home", "household", "The household", {});
+        for (const id of ["you", "rosa"]) wd.entities[id]!.relations.push({ type: "member_of", to: "home" });
+        const economy = wd.packs.economy;
+        if (economy) economy.config = { ...economy.config, features: { households } };
+      });
+      const view = w.ctx.query("economy.finance")(w.ctx, "you", true) as FinanceView;
+      const trust = view.paysFor.find((p) => p.from === "family_trust")?.to ?? [];
+      expect([households, view.household === null, trust.includes("rosa"), trust.includes("home")]).toEqual([households, !households, true, true]);
+      for (const to of ["rosa", "home"]) expect(refusal(act(w, "economy.flow_update", { who: "you", flow: "trust_allowance", to }))).toBe("Chen Family Trust pays for itself, not for Alex Rivera");
+    }
+  });
+
   test("a business page names whom its custodian may neither hire nor raise there, and no one for its owner", () => {
     const custodian = setup((wd) => Object.assign(wd.entities.daybreak!.fields, { owners: [{ party: "you", role: "custodian" }, { party: "maya", role: "beneficiary", share: 100 }] })).w;
     const page = (w: typeof custodian) => (w.ctx.query("economy.finance")(w.ctx, "you", true) as FinanceView).businesses.find((b) => b.id === "daybreak");

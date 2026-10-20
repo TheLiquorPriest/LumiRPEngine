@@ -639,12 +639,13 @@ export function buildFinanceView(hooks: FinanceHooks, ctx: ReadContext, party: E
     a.autopayFrom = a.autopay !== null && a.manages ? others.filter((id) => autopaySourceProblem(ctx, party, a.id, id) === null) : [];
     a.fallbacks = pays(a.id) ? others.filter((id) => pays(id) && fallsBackOn(ctx, a.id, id)) : [];
   }
-  // Where money the party only manages may not go, by the actions' own rule (`paysFor`): for each payer they may run standing payments from and only manage, which of the ids the view already carries it may not pay. The list adds no id to the view, so it names nothing the view doesn't.
+  // Where money the party only manages may not go, by the actions' own rule (`paysFor`): for each payer they may run standing payments from and only manage, which of the ids the view already carries it may not pay, and which of the party's own interests they can see (with households off, nothing else carries their household or its members). So the list names no one the viewer can't see.
   const interests = interestsOf(ctx, party);
   const onlyManaged = (side: string): boolean => side !== "" && side !== party && visible(ctx, viewer, side) && mayPayFrom(ctx, party, side) && (isParty(ctx, side) || !canSpend(ctx.state, side, party));
   const payers = [...new Set([...listed.map((a) => a.id), ...view.flows.flatMap((f) => (f.spec ? [f.spec.from, f.spec.fallback ?? ""] : []))])].filter(onlyManaged);
   const carried = new Set<string>();
   stringsIn(view, carried);
+  for (const id of interests) if (visible(ctx, viewer, id)) carried.add(id);
   const payees = [...carried].filter((id) => own(ctx.state.entities, id)?.kind === "account" || isParty(ctx, id));
   view.paysFor = payers.map((from) => ({ from, to: payees.filter((to) => paysFor(ctx, party, to, from, { interests })) }));
   // And the keys a typed payee is theirs by: their id's and name's, and their household's.
