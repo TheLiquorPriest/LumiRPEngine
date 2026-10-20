@@ -110,6 +110,15 @@ describe("an id or a link that would name someone hidden reaches the player unde
     expect(view.flows.find((f) => f.id === "bill_danny_rent")).toMatchObject({ from: "someone", spec: null });
     expect(endableLeases(view, harbor)).toContain("bill_danny_rent");
   });
+
+  test("the household's groceries, paid to someone Jess can't see from the account she holds, are one flow on her Flows and her Household: one id, hers to change on both", async () => {
+    const chat = await MoneyChat.start({ pov: "jess_kowalczyk", entities: { flow_kowalczyk_groceries: { to: "danny_okafor" } }, secret: ["danny_okafor"] });
+    const view = await chat.hub();
+    const inFlows = view.flows.find((f) => f.label === "Groceries");
+    const inHousehold = view.household?.flows.find((f) => f.label === "Groceries");
+    expect(inFlows).toMatchObject({ id: "flow_kowalczyk_groceries", editable: true });
+    expect(inHousehold).toEqual(inFlows);
+  });
 });
 
 describe("a label or a memo names only what the player may see", () => {
