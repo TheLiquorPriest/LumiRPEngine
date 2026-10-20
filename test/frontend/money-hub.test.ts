@@ -153,8 +153,10 @@ describe("realism gating", () => {
     expect(hubTabs(view({ partyKind: "household" }), "player").map((t) => t.id)).toEqual(["overview"]);
   });
 
-  test("the GM also gets the sections it adds to while they're empty: a person's Jobs, Properties, and a person's Household from Money 3", () => {
-    expect(hubTabs(view({ accounts: [checking] }), "gm").map((t) => t.id)).toEqual(["overview", "accounts", "flows", "jobs", "properties", "household"]);
+  test("the GM also gets the sections it adds to while they're empty: a person's Jobs, Properties, and a person's Household where households run", () => {
+    expect(hubTabs(view({ features: ["flows", "cards", "households"], accounts: [checking] }), "gm").map((t) => t.id)).toEqual(["overview", "accounts", "flows", "jobs", "properties", "household"]);
+    // Switched off at Money 3, households show nothing, even for someone in one: no empty Household offering one to join.
+    expect(hubTabs(view({ accounts: [checking] }), "gm").map((t) => t.id)).toEqual(["overview", "accounts", "flows", "jobs", "properties"]);
     // Below Money 3 a household doesn't show, so there's nothing to add to; a business holds no job.
     expect(hubTabs(view({ level: 2, features: [], accounts: [checking] }), "gm").map((t) => t.id)).toEqual(["overview", "accounts", "jobs", "properties"]);
     expect(hubTabs(view({ partyKind: "business", accounts: [checking] }), "gm").map((t) => t.id)).toEqual(["overview", "accounts", "flows", "properties"]);

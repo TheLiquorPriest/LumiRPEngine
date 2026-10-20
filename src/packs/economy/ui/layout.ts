@@ -46,7 +46,8 @@ export interface HubTab {
  * its accounts; a job, a household, …), so a household that holds no account of its own still
  * shows its members, and a player with no job or business sees no empty tab for one. The GM also
  * gets the sections that hold its create controls while they're empty, wherever what it adds would
- * show: a person's Jobs, anyone's Properties, and a person's Household from Money 3.
+ * show: a person's Jobs, anyone's Properties, and a person's Household where households run for
+ * them (a household switched off shows nothing, so a member's would read as none).
  */
 export function hubTabs(view: FinanceView, mode: "player" | "gm"): HubTab[] {
   if (view.level <= 0) return [];
@@ -63,7 +64,7 @@ export function hubTabs(view: FinanceView, mode: "player" | "gm"): HubTab[] {
   if (view.investments !== null) tabs.push({ id: "investments", label: SECTION_LABELS.investments, dot: false });
   if (view.properties.length > 0 || creates) tabs.push({ id: "properties", label: SECTION_LABELS.properties, dot: view.properties.some((p) => p.leases.some((l) => l.state === "vacant")) });
   if (view.credit !== null) tabs.push({ id: "credit", label: SECTION_LABELS.credit, dot: view.credit.marks.length > 0 });
-  if (view.household !== null || (creates && person && view.level >= 3)) tabs.push({ id: "household", label: SECTION_LABELS.household, dot: false });
+  if (view.household !== null || (creates && person && view.features.includes("households"))) tabs.push({ id: "household", label: SECTION_LABELS.household, dot: false });
   return tabs;
 }
 

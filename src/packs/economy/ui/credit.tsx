@@ -136,14 +136,16 @@ function HouseholdSection(props: SectionProps) {
   const { view, controls, nav } = props;
   const h = view.household;
   if (!h) {
+    // Where households don't run, none shows, even for someone who is in one: so the page says that, and offers no household to join.
+    const runs = view.features.includes("households");
     return (
       <MoneyPage nav={nav} name="household" title="Household">
-        {controls.mode === "gm" && view.partyKind === "person" ? (
+        {controls.mode === "gm" && view.partyKind === "person" && runs ? (
           <Button variant="primary" icon="user-plus" block onClick={() => nav.open(actionPage("household", "join"))}>
             Add to a household
           </Button>
         ) : null}
-        <Empty icon="users">No household.</Empty>
+        <Empty icon="users">{runs ? "No household." : "Households don't run at this Money level."}</Empty>
       </MoneyPage>
     );
   }
@@ -217,7 +219,7 @@ function AddMemberPage(props: SectionProps) {
 function JoinHouseholdPage(props: SectionProps) {
   const { view, controls, nav } = props;
   const [joining, setJoining] = useState("");
-  if (controls.mode !== "gm" || view.household !== null || view.partyKind !== "person") return null;
+  if (controls.mode !== "gm" || view.household !== null || view.partyKind !== "person" || !view.features.includes("households")) return null;
   const households = gmParties(controls.gm, ["household"]).map((p) => ({ value: p.id, label: p.name }));
   return (
     <ActionPage nav={nav} controls={controls} name="household-join" title="Add to a household" subtitle={view.name} go="Add" disabled={joining === ""} submit={() => controls.edit([{ op: "link", rel: "member_of", from: view.party, to: joining }])}>
