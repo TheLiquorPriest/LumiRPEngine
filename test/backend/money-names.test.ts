@@ -28,9 +28,9 @@ describe("the player's money view names outside payees in words", () => {
     // Past Tuesday the 15th, when the house's upkeep is paid.
     await chat.timelapse(2 * 1440);
     const view = await chat.hub();
-    expect(flow(view, "property_tax:prop_birch_lane_12").to).toBe("Property tax (Michigan)");
-    expect(flow(view, "property_insurance:prop_birch_lane_12").to).toBe("Property insurance");
-    expect(flow(view, "property_upkeep:prop_birch_lane_12").to).toBe("Property upkeep");
+    expect(flow(view, "property_tax:prop_marcus_home").to).toBe("Property tax (Michigan)");
+    expect(flow(view, "property_insurance:prop_marcus_home").to).toBe("Property insurance");
+    expect(flow(view, "property_upkeep:prop_marcus_home").to).toBe("Property upkeep");
     expect(flow(view, "esttax:marcus_delgado").to).toBe("Federal tax");
     expect(flow(view, "salestax:alder_automotive_co").to).toBe("Sales tax (Michigan)");
     expect(flow(view, "insurance:shop_tow_truck").to).toBe("Insurer");

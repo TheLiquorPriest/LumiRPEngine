@@ -789,6 +789,7 @@ Touch targets are at least 40 px (including a number stepper of our own with nam
   - refs, types, cycles, unreachable stages;
   - oversized sections;
   - leaky labels, secret truth in public lore, secret lore without a gate or read by a prose step, cues that give their secret away, name what the player may not know or can never show (§6.6), and lookup-table terms and topics that name missing entries, lead nowhere or contradict an alias;
+  - ids that give a secret away (`story.leaky_id`, a warning): a non-secret entity's id (an account, a flow, an invoice, a lease, a job or anything else) holding a secret entity's or place's id, or a word of its name four or more letters long that no person or place the player can see is also called (`bill_danny_rent` while Danny Okafor is secret). A player's views carry an id wherever the player acts on what it names, and the engine can't rename an author's ids, so the warning names the secret and suggests an id that names no one. A possession's name doesn't make a word public, as it is named for whoever holds it ("Danny's checking");
   - attachment, groups;
   - unbalanced postings;
   - double-booked commitments;

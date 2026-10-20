@@ -167,7 +167,7 @@ describe("realism gating", () => {
 
   test("the house its owner lives in has nothing to let, so Properties asks nothing of Marcus", () => {
     const marcus = portAlderMoney(3, {}, "marcus_delgado");
-    expect(marcus.properties.find((p) => p.id === "prop_birch_lane_12")?.leases).toEqual([]);
+    expect(marcus.properties.find((p) => p.id === "prop_marcus_home")?.leases).toEqual([]);
     expect(hubTabs(marcus, "player").find((t) => t.id === "properties")).toMatchObject({ dot: false });
   });
 

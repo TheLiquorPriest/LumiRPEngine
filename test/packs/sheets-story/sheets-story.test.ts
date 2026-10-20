@@ -8,7 +8,7 @@ import { createRng } from "../../../src/engine/rng";
 import { stepTracks } from "../../../src/engine/tracks";
 import { findLeaks, unrevealedTruths } from "../../../src/engine/visibility";
 import { Working } from "../../../src/engine/working";
-import { ALL_PACKS } from "../../../src/packs/index";
+import { ALL_PACKS, STARTER_WORLDS } from "../../../src/packs/index";
 import { buildSheetView, STAT_CHECK } from "../../../src/packs/sheets/core/index";
 import { buildQuestLog, leakyLabels } from "../../../src/packs/story/core/index";
 import { modernUsWorld } from "../riverton";
@@ -149,5 +149,34 @@ describe("story", () => {
     storyWorld(leaky);
     leaky.places.park!.name = "Park where Jordan Price takes the tips";
     expect(leakyLabels(leaky).map((l) => l.path)).toEqual(["places.park.name"]);
+  });
+
+  /** What the world's lints warn of ids that give a secret away. */
+  const idIssues = (world: WorldDoc) => reg.lints.flatMap((l) => l.check(world, reg)).filter((i) => i.code === "story.leaky_id");
+
+  test("an id that spells a secret person's name gives them away: bill_danny_rent warns while Danny is secret, with an id to use instead, and not once he isn't", () => {
+    const world = modernUsWorld("w", "R");
+    world.entities.danny_okafor = { id: "danny_okafor", kind: "person", name: "Danny Okafor", tier: "background", visibility: "secret", fields: {}, relations: [] };
+    world.entities.bill_danny_rent = { id: "bill_danny_rent", kind: "flow", name: "Rent, Unit 2A", tier: "background", fields: {}, relations: [] };
+    expect(idIssues(world)).toEqual([
+      {
+        severity: "warning",
+        code: "story.leaky_id",
+        path: "entities.bill_danny_rent.id",
+        message: `The id "bill_danny_rent" gives away a secret ("Danny Okafor"): a player's views carry it wherever the player acts on what it names. Give it an id that names no one, such as "bill_rent".`,
+      },
+    ]);
+    world.entities.danny_okafor.visibility = "public";
+    expect(idIssues(world)).toEqual([]);
+  });
+
+  test("no shipped starter's ids give a secret away; in Port Alder, Jess's own ids do once she is secret, but not the household's, which Helen's name makes public", () => {
+    // Fantasy Town's chapel_bell isn't one: the secret under the chapel is named for the public Chapel of the Quiet Bell.
+    for (const [id, make] of Object.entries(STARTER_WORLDS)) expect(idIssues(make(id, id))).toEqual([]);
+    const port = STARTER_WORLDS.modern_slice_of_life?.("w", "Port Alder");
+    const jess = port?.entities.jess_kowalczyk;
+    if (!port || !jess) throw new Error("no Port Alder with Jess in it");
+    jess.visibility = "secret";
+    expect(idIssues(port).map((i) => i.path)).toEqual(["entities.acct_jess_checking.id", "entities.bill_jess_household.id", "entities.bill_jess_phone.id", "entities.job_jess_kowalczyk.id"]);
   });
 });

@@ -1,14 +1,16 @@
 // Story pack (DESIGN §7, §9.3): flags, the quest log over the engine's tracks (quests, secret ladders,
 // puzzles), puzzle answers through `checkAnswer` with the author's opt-in decision threshold, and
-// the leaky-label lint. Track stepping, gates, reveals and hints are the engine's (tracks.ts);
-// this pack is how they reach effects, formulas, the narrator and the panel. Story has no realism
-// domain: tracks behave the same at every level.
+// the leaky-label and leaky-id lints. Track stepping, gates, reveals and hints are the engine's
+// (tracks.ts); this pack is how they reach effects, formulas, the narrator and the panel. Story has
+// no realism domain: tracks behave the same at every level.
 
 import type { JsonValue } from "../../../shared/json";
 import type { PackEvent } from "../../../shared/ledger";
 import type { WorldDoc } from "../../../shared/world";
 import { labelOf, mutableSlice, objOf, sliceOf, strOf, own } from "../../../engine/pack-kit";
 import type { PackDef, ReadContext, Rejection } from "../../../engine/registry";
+import type { Registry } from "../../../engine/registry-impl";
+import { kindIs } from "../../../engine/scope";
 import { checkAnswer } from "../../../engine/tracks";
 import { playerTrack, shownTrackId, type PlayerTrack } from "../../../engine/visibility";
 
@@ -68,6 +70,82 @@ export function leakyLabels(world: WorldDoc): { path: string; text: string; secr
   }
   for (const e of Object.values(world.entities)) if (e.visibility !== "secret") check(`entities.${e.id}.name`, e.name);
   for (const p of Object.values(world.places)) if (p.visibility !== "secret") check(`places.${p.id}.name`, p.name);
+  return out;
+}
+
+/** An id's words: its parts between separators and case changes, lowercased (`bill_danny_rent` and `billDannyRent` are bill, danny, rent). */
+function idWords(id: string): string[] {
+  return id.replace(/([a-z0-9])([A-Z])/g, "$1_$2").toLowerCase().split(/[^a-z0-9]+/).filter((w) => w !== "");
+}
+
+/** A name's words of four or more letters, lowercased: what of it an id could spell. */
+function nameWords(name: string): string[] {
+  return name.toLowerCase().split(/[^a-z]+/).filter((w) => w.length >= 4);
+}
+
+/** An id the player's views can carry that gives a secret away, with the secrets it gives and an id that names none of them. */
+export interface LeakyId {
+  path: string;
+  id: string;
+  secrets: string[];
+  neutral: string;
+}
+
+/**
+ * The ids that give a secret away: a non-secret entity's id (an account, a flow, an invoice, a
+ * lease, a job or anything else in the world) holding a secret entity's or place's id, or a word of
+ * its name four or more letters long that no one and nowhere the player can see is also called
+ * (`bill_danny_rent` while Danny Okafor is secret, but not `chapel_bell` under the public Chapel of
+ * the Quiet Bell). Only people and places make a word public: a possession is named for whoever
+ * holds it ("Danny's checking"), so its name says nothing more. A player's views send an id
+ * wherever the player acts on what it names, and the engine can't rename an author's ids.
+ */
+export function leakyIds(world: WorldDoc, registry?: Registry): LeakyId[] {
+  // Someone the player can know by name: a person, by the registry's kinds where the lint has them, else by the world's own.
+  const person = (kind: string): boolean => {
+    if (registry) return kindIs(registry, world, kind, "person");
+    let k: string | undefined = kind;
+    for (let guard = 0; k !== undefined && guard < 32; guard++) {
+      if (k === "person") return true;
+      k = own(world.kinds, k)?.extends;
+    }
+    return false;
+  };
+  const known = new Set<string>();
+  for (const p of Object.values(world.places)) if (p.visibility !== "secret") for (const w of nameWords(p.name)) known.add(w);
+  for (const e of Object.values(world.entities)) if (e.visibility !== "secret" && person(e.kind)) for (const w of nameWords(e.name)) known.add(w);
+  const secrets = [...Object.values(world.entities).filter((e) => e.visibility === "secret"), ...Object.values(world.places).filter((p) => p.visibility === "secret")].map((s) => ({
+    name: s.name || s.id,
+    id: idWords(s.id),
+    words: nameWords(s.name).filter((w) => !known.has(w)),
+  }));
+  if (secrets.length === 0) return [];
+  const taken = new Set([...Object.keys(world.entities), ...Object.keys(world.places)]);
+  const unused = (base: string): string => {
+    let id = base;
+    for (let n = 2; taken.has(id); n++) id = `${base}_${n}`;
+    taken.add(id);
+    return id;
+  };
+  const out: LeakyId[] = [];
+  for (const e of Object.values(world.entities)) {
+    if (e.visibility === "secret") continue;
+    const words = idWords(e.id);
+    const spelt = new Set<number>();
+    const gives: string[] = [];
+    for (const s of secrets) {
+      const at: number[] = [];
+      for (let i = 0; s.id.length > 0 && i + s.id.length <= words.length; i++) if (s.id.every((w, j) => words[i + j] === w)) for (let j = 0; j < s.id.length; j++) at.push(i + j);
+      words.forEach((w, i) => {
+        if (s.words.some((n) => w === n || w === `${n}s`)) at.push(i);
+      });
+      if (at.length === 0) continue;
+      gives.push(s.name);
+      for (const i of at) spelt.add(i);
+    }
+    if (gives.length === 0) continue;
+    out.push({ path: `entities.${e.id}.id`, id: e.id, secrets: gives, neutral: unused(words.filter((_, i) => !spelt.has(i)).join("_") || e.kind) });
+  }
   return out;
 }
 
@@ -179,6 +257,17 @@ export const storyPack: PackDef = {
     r.lint({
       code: "story.leaky_label",
       check: (world) => leakyLabels(world).map((l) => ({ severity: "error" as const, code: "story.leaky_label", message: `"${l.text}" gives away a secret ("${l.secret}").`, path: l.path })),
+    });
+    // A warning: the id may never reach the player, as when they never act on what it names, but nothing here can tell.
+    r.lint({
+      code: "story.leaky_id",
+      check: (world, registry) =>
+        leakyIds(world, registry).map((l) => ({
+          severity: "warning" as const,
+          code: "story.leaky_id",
+          message: `The id "${l.id}" gives away a secret (${l.secrets.map((s) => `"${s}"`).join(", ")}): a player's views carry it wherever the player acts on what it names. Give it an id that names no one, such as "${l.neutral}".`,
+          path: l.path,
+        })),
     });
   },
 };

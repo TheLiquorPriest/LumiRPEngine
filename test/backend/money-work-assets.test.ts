@@ -55,7 +55,7 @@ const KOWALCZYKS = "household_kowalczyk";
 const INDEX = "hold_pov_index";
 const LKFR = "hold_pov_lkfr";
 /** Marcus's house on Birch Lane, and the POV's rent on 114 Harbor Street. */
-const HOUSE = "prop_birch_lane_12";
+const HOUSE = "prop_marcus_home";
 const RENT = "bill_rent";
 const TODAY = "2026-09-14";
 
