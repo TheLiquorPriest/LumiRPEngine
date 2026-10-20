@@ -17,8 +17,9 @@ import { resolveAction } from "../../../src/engine/resolve";
 import { createRng } from "../../../src/engine/rng";
 import { runTimelapse } from "../../../src/engine/time";
 import { Working } from "../../../src/engine/working";
-import { withdraw } from "../../../src/packs/economy/core/actions";
+import { closeAccount, setStatus, withdraw } from "../../../src/packs/economy/core/actions";
 import { flowOfEntity } from "../../../src/packs/economy/core/flows";
+import { statusOf } from "../../../src/packs/economy/core/model";
 import { move } from "../../../src/packs/economy/core/pay";
 import { ALL_PACKS } from "../../../src/packs/index";
 import { modernUsWorld } from "../riverton";
@@ -586,5 +587,30 @@ describe("a partial payment pays what the payer's own way of paying can", () => 
     expect(run?.outcome).toBe("partial");
     expect(Number(run?.cents)).toBeGreaterThan(0);
     expect(w.state.accounts.rosa_savings).toBe(1_000_000);
+  });
+});
+
+describe("an account isn't closed with money still to come into it", () => {
+  const rosa = (world: WorldDoc): void => {
+    world.entities.rosa_checking = entity("rosa_checking", "account", { owners: [{ party: "rosa", role: "owner" }], product: "checking", opening: 195_000 });
+  };
+
+  test("an account whose opening hasn't posted can't be closed, and the opening lands in it open", () => {
+    const w = setup(rosa);
+    for (const close of [closeAccount(w.ctx, "rosa_checking"), setStatus(w.ctx, "rosa_checking", "closed")]) expect("code" in close && close.code).toBe("not_empty");
+    lapse(w, 1);
+    expect(w.state.accounts.rosa_checking).toBe(195_000);
+    expect(statusOf(w.state, "rosa_checking")).toBe("open");
+  });
+
+  test("once it's emptied it closes", () => {
+    const w = setup(rosa, ["rosa"]);
+    const empty = optionalService(w.ctx, "economy.adjust")?.(w.ctx, "rosa_checking", -(w.state.accounts.rosa_checking ?? 0));
+    if (!empty || "code" in empty) throw new Error("no adjust");
+    w.applyAll(empty);
+    const close = closeAccount(w.ctx, "rosa_checking");
+    if ("code" in close) throw new Error(close.reason);
+    w.applyAll(close);
+    expect(statusOf(w.state, "rosa_checking")).toBe("closed");
   });
 });

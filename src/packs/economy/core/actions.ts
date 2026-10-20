@@ -16,8 +16,8 @@ import type { EffectContext, ReadContext, Rejection } from "../../../engine/regi
 import { placeOfEntity } from "../../../engine/scope";
 import { decide, type Decision } from "./credit";
 import type { OpenAccount } from "./module";
-import { reject, spendOf } from "./journal";
-import { availableOf, balance, bankSide, canSpend, classOf, external, holdersOf, productOf, rightsOf, statusOf, traitsOf, worldProducts } from "./model";
+import { isOpened, reject, spendOf } from "./journal";
+import { availableOf, balance, bankSide, canSpend, classOf, external, holdersOf, openerOf, productOf, rightsOf, statusOf, traitsOf, worldProducts } from "./model";
 import { accountFeature, asUnit, cardProblem, cardRoom, cardsOn, cashAccount, depositAccount, featureFor, isParty, mayUse, posting, signal } from "./pay";
 
 function money(ctx: ReadContext, cents: number): string {
@@ -439,17 +439,25 @@ export function setPayPrefs(ctx: ReadContext, who: EntityId, tiers: JsonValue | 
   return [{ type: "set", entity: who, field: "pay_prefs", value: list }];
 }
 
-/** GM: closes an account that owes and holds nothing; its cards are cancelled. */
+/**
+ * GM: closes an account that owes and holds nothing, and has nothing still to come in (an opening
+ * that posts when its holder's money opens); its cards are cancelled.
+ */
 export function closeAccount(ctx: ReadContext, account: EntityId): LedgerEvent[] | Rejection {
-  if (own(ctx.state.entities, account)?.kind !== "account") return reject("not_account", `${labelOf(ctx, account)} isn't an account`);
+  const e = own(ctx.state.entities, account);
+  if (e?.kind !== "account") return reject("not_account", `${labelOf(ctx, account)} isn't an account`);
   if (balance(ctx.state, account) !== 0) return reject("not_empty", `${labelOf(ctx, account)} still has ${money(ctx, balance(ctx.state, account))} on it`);
+  const opening = Math.round(numOf(e.fields.opening));
+  if (opening !== 0 && !isOpened(ctx.state, account, openerOf(ctx.state, account))) return reject("not_empty", `${labelOf(ctx, account)} opens with ${money(ctx, opening)} still to post`);
   return [{ type: FINANCE_EVENTS.status, data: { account, status: "closed" } }, ...cardsOn(ctx.state, account).map((c): LedgerEvent => ({ type: "set", entity: c, field: "state", value: "cancelled" }))];
 }
 
+/** GM: an account's status; closing it is closing the account, with the same checks. */
 export function setStatus(ctx: ReadContext, account: EntityId, status: string): LedgerEvent[] | Rejection {
   if (own(ctx.state.entities, account)?.kind !== "account") return reject("not_account", `${labelOf(ctx, account)} isn't an account`);
   if (!(ACCOUNT_STATUSES as readonly string[]).includes(status)) return reject("bad_status", `an account can't be ${status}`);
-  return statusOf(ctx.state, account) === status ? [] : [{ type: FINANCE_EVENTS.status, data: { account, status } }];
+  if (statusOf(ctx.state, account) === status) return [];
+  return status === "closed" ? closeAccount(ctx, account) : [{ type: FINANCE_EVENTS.status, data: { account, status } }];
 }
 
 export function releaseHold(ctx: ReadContext, account: EntityId, hold: string): LedgerEvent[] | Rejection {
