@@ -105,6 +105,7 @@ export const STEP_LABEL: Record<string, string> = {
   sections: "Filling the prompt…",
   book: "Waiting for another chat of this world…",
   restart: "Ready; reopen the chat to continue",
+  elsewhere: "Already started in another window",
   ready: "Ready: press Send for the reply",
   reply: "Waiting for the reply…",
   read: "Reading the reply…",

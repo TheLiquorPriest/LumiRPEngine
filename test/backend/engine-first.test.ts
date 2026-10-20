@@ -77,7 +77,7 @@ describe("engine first", () => {
     // Stopped before its prompt; the engine ran and asked the frontend to start the reply again.
     expect(first.halted).toBe("cancelled");
     expect(rig.host.assembled).toEqual([]);
-    expect(rig.host.restarts).toEqual([{ chatId, as: "regenerate" }]);
+    expect(rig.host.restarts).toMatchObject([{ chatId, as: "regenerate", session: "page" }]);
     const reply = await rig.host.begin(chatId, { type: "regenerate" });
     expect(reply.halted).toBeUndefined();
     expect(reply.type).toBe("normal");
@@ -135,6 +135,33 @@ describe("engine first", () => {
     expect(await flagOf(rig, chatId)).toBeUndefined();
   });
 
+  test("a failed read of the action halts the run; fixing that step's settings and pressing Retry reads it again and keeps every mind", async () => {
+    const rig = new Rig({ shipped: true, minds: true });
+    const chatId = await alderChat(rig);
+    let readDown = true;
+    rig.host.quietReply = (req) => {
+      if ((req.messages[0]?.content ?? "").includes("You map a player's typed input")) {
+        if (readDown) throw new Error("no such connection");
+        return JSON.stringify({ action: null, params: {}, confidence: 0.9 });
+      }
+      return mindAnswer(req);
+    };
+    rig.host.sendUser(chatId, "I walk over to the counter.");
+    await rig.host.settle();
+    expect((await rig.host.start(chatId, { type: "normal" })).halted).toBe("cancelled");
+    expect(String((await flagOf(rig, chatId))?.detail)).toMatch(/^Reading your action: no such connection$/);
+    expect(mindsAsked(rig.host.quietCalls)).toEqual(["Danny Okafor", "Priya Nair"]);
+    // The player fixes the step's connection in Settings, then presses Retry.
+    rig.body(await rig.send({ type: "lre.settings.set", patch: { modelUse: { steps: { interpret: { maxTokens: 900 } } } } }));
+    readDown = false;
+    const before = rig.host.quietCalls.length;
+    expect((await rig.host.start(chatId, { type: "regenerate" })).halted).toBeUndefined();
+    const asked = rig.host.quietCalls.slice(before);
+    expect(asked.filter((c) => (c.messages[0]?.content ?? "").includes("You map a player's typed input"))).toHaveLength(1);
+    expect(mindsAsked(asked)).toEqual([]);
+    expect(rig.host.section("Minds")).toContain("Danny Okafor: Danny Okafor leans on the counter");
+  });
+
   test("a transient provider error is asked again before the step fails, and the reply goes ahead", async () => {
     const rig = new Rig({ shipped: true, minds: true });
     const chatId = await alderChat(rig);
@@ -170,7 +197,7 @@ describe("engine first", () => {
     // The restart the engine asked for is stopped again, and the engine runs for the edited message.
     rig.host.restarts.length = 0;
     expect((await rig.host.begin(chatId, { type: "regenerate" })).halted).toBe("cancelled");
-    expect(rig.host.restarts).toEqual([{ chatId, as: "regenerate" }]);
+    expect(rig.host.restarts).toMatchObject([{ chatId, as: "regenerate", session: "page" }]);
     const reply = await rig.host.begin(chatId, { type: "regenerate" });
     expect(reply.halted).toBeUndefined();
     expect(rig.host.section("Scene")).toMatch(/^\[Scene\]\n/);
@@ -191,4 +218,48 @@ describe("engine first", () => {
     expect(dry.messages.some((m) => m.content.startsWith("["))).toBe(false);
     expect(JSON.stringify((await rig.rt.ledger.core(chatId, rig.host.userId))?.journal)).toBe(before);
   });
+
+  test("the restart fires once with two pages open: only the page the stopped reply ran for starts it, the other sees it already started, and no second reply or swipe comes", async () => {
+    const rig = new Rig();
+    const chatId = await rig.worldChat();
+    rig.host.sendUser(chatId, "I look around.");
+    await rig.host.settle();
+    expect((await rig.host.begin(chatId, { type: "normal", session: "desk" })).halted).toBe("cancelled");
+    expect(rig.host.restarts.map((r) => r.session)).toEqual(["desk"]);
+    // The phone opens the chat and resyncs: it isn't asked, and its activity line says why.
+    const before = rig.host.sent.length;
+    rig.body(await rig.send({ type: "lre.hello", chatId }, "phone"));
+    rig.body(await rig.send({ type: "lre.state.resync", chatId }, "phone"));
+    expect(rig.host.restarts.map((r) => r.session)).toEqual(["desk"]);
+    expect(activitiesTo(rig, "phone", before).at(-1)).toBe("Already started in another window");
+    // The desktop starts it once; the guard lets it through and the turn is consumed.
+    const [restart] = rig.host.restarts.splice(0);
+    const reply = await rig.host.begin(chatId, { type: "regenerate", session: restart?.session ?? "" });
+    expect(reply.halted).toBeUndefined();
+    for (const page of ["phone", "desk"]) rig.body(await rig.send({ type: "lre.state.resync", chatId }, page));
+    expect(rig.host.restarts).toEqual([]);
+    await rig.host.finish(reply, "The square is quiet.");
+    const replies = rig.host.chat(chatId).messages.filter((m) => !m.isUser);
+    expect(replies.at(-1)?.swipes).toEqual(["The square is quiet."]);
+  });
+
+  test("a page holding the restart closes: the next page to open the chat takes it, and only that one", async () => {
+    const rig = new Rig();
+    const chatId = await rig.worldChat();
+    rig.host.sendUser(chatId, "I look around.");
+    await rig.host.settle();
+    expect((await rig.host.begin(chatId, { type: "normal", session: "desk" })).halted).toBe("cancelled");
+    rig.host.restarts.length = 0;
+    rig.host.closeSession("desk");
+    await rig.host.settle();
+    rig.body(await rig.send({ type: "lre.hello", chatId }, "phone"));
+    rig.body(await rig.send({ type: "lre.hello", chatId }, "tablet"));
+    expect(rig.host.restarts.map((r) => r.session)).toEqual(["phone"]);
+    expect((await rig.host.begin(chatId, { type: "regenerate", session: "phone" })).halted).toBeUndefined();
+  });
 });
+
+/** The activity lines sent to one page since `from` in the host's sends. */
+function activitiesTo(rig: Rig, session: string, from: number): string[] {
+  return rig.host.sent.flatMap((m, i) => (i >= from && rig.host.sentTo[i]?.session === session && m.type === "lre.activity" && m.activity ? [m.activity.label] : []));
+}

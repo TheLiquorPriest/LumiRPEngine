@@ -87,6 +87,8 @@ export interface StartOptions {
   createAtEnd?: boolean;
   /** The host stops waiting for the context handler (its timeout): a required one stops the generation, any other is skipped. */
   abandonContext?: boolean;
+  /** The page the generation runs for (the host's execution document, `frontendSessionId`). */
+  session?: string;
 }
 
 export interface FinishOptions {
@@ -99,6 +101,8 @@ export interface FinishOptions {
 }
 
 export class FakeHost implements HostPort {
+  /** The page a generation runs for when a test names none: the one Lumiverse page open. */
+  static readonly PAGE = "page";
   readonly userId: UserId = "user-1";
   readonly chatsById = new Map<ChatId, FakeChat>();
   readonly files = new Map<string, string>();
@@ -123,10 +127,10 @@ export class FakeHost implements HostPort {
   contextTimeoutMs = 0;
   /** Whether the handler registered as required: its failure or timeout stops the generation. */
   contextRequired = false;
-  /** What this host does with the handler's answer (`cancelGeneration`, `required`); a test plays an older host by switching one off. */
-  capabilities: HostCapabilities = { cancel: true, required: true };
-  /** The frontend's side of `lre.generate` (DESIGN §5.1): what the engine asked to start, in order, until `start` plays it. */
-  readonly restarts: { chatId: ChatId; as: GenerateAs }[] = [];
+  /** What this host does with the handler's answer (`cancelGeneration`, `required`) and frontend pages; a test plays an older host by switching one off. */
+  capabilities: HostCapabilities = { cancel: true, required: true, sessions: true };
+  /** The frontend's side of `lre.generate` (DESIGN §5.1): what the engine asked to start, of which page, in order, until `start` plays it. */
+  readonly restarts: { chatId: ChatId; as: GenerateAs; turn: string; session?: string }[] = [];
   private readonly queue: { event: HostEventName; payload: HostEventMap[HostEventName] }[] = [];
   private readonly inFlight = new Map<string, Generation>();
   private nextId = 0;
@@ -341,7 +345,7 @@ export class FakeHost implements HostPort {
       this.sent.push(message);
       this.sentTo.push({ userId, ...(frontendSessionId !== undefined ? { session: frontendSessionId } : {}) });
       // The frontend open on the chat starts the generation the engine prepared (`start` plays it).
-      if (message.type === "lre.generate") this.restarts.push({ chatId: message.chatId, as: message.as });
+      if (message.type === "lre.generate") this.restarts.push({ chatId: message.chatId, as: message.as, turn: message.turn, ...(frontendSessionId !== undefined ? { session: frontendSessionId } : {}) });
       for (const waiter of this.sendWaiters.filter((w) => w.match(message))) {
         this.sendWaiters.splice(this.sendWaiters.indexOf(waiter), 1);
         waiter.resolve(message);
@@ -526,6 +530,11 @@ export class FakeHost implements HostPort {
     this.emit("MESSAGE_EDITED", { chatId, message: this.hostMessage(chatId, messageId) });
   }
 
+  /** One of the user's Lumiverse pages disconnects (`FRONTEND_SESSION_CLOSED`). */
+  closeSession(session: string): void {
+    this.emit("FRONTEND_SESSION_CLOSED", { frontendSessionId: session });
+  }
+
   /** Host restart: in-flight generations vanish and their staged empty replies are removed; the extension's handlers go with it. */
   restart(): void {
     for (const g of this.inFlight.values()) {
@@ -563,7 +572,7 @@ export class FakeHost implements HostPort {
       if (at < 0) return g;
       const [restart] = this.restarts.splice(at, 1);
       const type: HostGenerationType = restart?.as === "continue" ? "continue" : restart?.as === "send" ? "normal" : "regenerate";
-      g = await this.begin(chatId, { type, ...(opts.createAtEnd ? { createAtEnd: true } : {}) });
+      g = await this.begin(chatId, { type, ...(opts.createAtEnd ? { createAtEnd: true } : {}), ...(restart?.session !== undefined ? { session: restart.session } : {}) });
     }
     return g;
   }
@@ -615,7 +624,8 @@ export class FakeHost implements HostPort {
     this.inFlight.set(g.id, g);
     this.emit("GENERATION_STARTED", { generationId: g.id, chatId, model: "fake", targetMessageId, targetSwipeId, characterId: null, characterName: "Narrator", generationType: type });
     await this.settle();
-    const verdict = await this.runContext({ chatId, userId: this.userId, generationType: type, dryRun: false, connectionId: this.contextConnectionId, personaId: null }, opts.abandonContext === true);
+    // The host names the page the generation runs for; with one page open, it is that page.
+    const verdict = await this.runContext({ chatId, userId: this.userId, generationType: type, dryRun: false, connectionId: this.contextConnectionId, personaId: null, frontendSessionId: opts.session ?? FakeHost.PAGE }, opts.abandonContext === true);
     if (verdict !== "go") return this.halt(g, verdict);
     const prompt = this.worldInfo(chatId);
     this.assembled = prompt.placed;

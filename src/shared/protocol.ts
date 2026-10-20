@@ -714,10 +714,14 @@ export interface MindsRunUpdate extends Envelope<"lre.minds.update"> {
  */
 export type GenerateAs = "regenerate" | "continue" | "send";
 
-/** The engine prepared the chat's next generation: the frontend open on that chat starts it (DESIGN §5.1). */
+/**
+ * The engine prepared the chat's next generation: the frontend open on that chat starts it (DESIGN
+ * §5.1). Only the page holding the turn's claim is asked, and it starts each `turn` once.
+ */
 export interface GeneratePush extends Envelope<"lre.generate"> {
   chatId: ChatId;
   as: GenerateAs;
+  turn: string;
 }
 
 export type BackendToFrontend = StateSnapshot | StateDelta | ResultMessage | ErrorMessage | JobUpdate | DraftChanged | ActivityPush | MindsRunUpdate | GeneratePush;

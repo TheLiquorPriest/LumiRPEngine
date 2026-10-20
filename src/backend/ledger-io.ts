@@ -12,7 +12,7 @@ import type { ChatId, MessageId, UserId, WorldId } from "../shared/ids";
 import { runDir } from "../shared/ids";
 import type { ChatRun, GenerationKind, HeldWrite, Journal, Marker, MarkerBody, MessageLedger, PendingTurn, PostKind, Rec, RecStatus } from "../shared/ledger";
 import { LEDGER_NAMESPACE } from "../shared/ledger";
-import { PROTOCOL_VERSION, type GenerateAs } from "../shared/protocol";
+import { PROTOCOL_VERSION, type GenerateAs, type GeneratePush } from "../shared/protocol";
 import type { Limit } from "../shared/minds";
 import { HOST_LIMITS, hostBound } from "../shared/timeouts";
 import { validMarkerBody } from "../engine/events";
@@ -312,8 +312,9 @@ export interface TurnContext {
  */
 export interface TurnHooks {
   /**
-   * The engine run's pre phase. `runKey` stands for everything the run is made from (its chain, the
-   * journal, `inputs`): a run with the same key after a failed one may keep what that one got right.
+   * The engine run's pre phase. `runKey` stands for the chain and the journal the run reads: a run of
+   * the same turn after a failed one may keep what that one got right while they, and whatever else
+   * that part depends on, are unchanged.
    */
   beforePlan(input: { chatId: ChatId; userId: UserId; core: LedgerCore; observed: ChainMessage[]; generationId: string; connectionId: string | null; runKey: string; signal: AbortSignal }): Promise<void>;
   /** After the plan, before the reply: the plan-phase prose steps (DESIGN §5.2 brief, prose outline). */
@@ -405,7 +406,12 @@ interface Prepared {
   delivered: Delivered;
   /** How the frontend starts the generation again (asked again when a frontend comes back to the chat). */
   as: GenerateAs;
-  /** The generation the guard let through with it; null until one came. */
+  /**
+   * The one page asked to start it (DESIGN §5.1): the page the stopped generation ran for, else the
+   * first to open the chat; another page gets it only once this one disconnects. Null: none yet.
+   */
+  holder: string | null;
+  /** The generation the guard let through with it; null until one came: then it is consumed. */
   generationId: string | null;
 }
 
@@ -435,6 +441,11 @@ class EngineFailure extends Error {
 function restartAs(type: HostGenerationType, observed: readonly ChainMessage[]): GenerateAs {
   if (type === "normal") return observed.at(-1)?.isUser ? "regenerate" : "send";
   return type === "continue" ? "continue" : "regenerate";
+}
+
+/** The ask to start a prepared turn's generation; the frontend starts each `turn` once. */
+function restartPush(chatId: ChatId, p: Prepared): GeneratePush {
+  return { lre: PROTOCOL_VERSION, type: "lre.generate", chatId, as: p.as, turn: p.id };
 }
 
 export class LedgerService {
@@ -481,6 +492,8 @@ export class LedgerService {
   attach(): void {
     const h = this.host;
     this.unsubscribe.push(
+      // A page that held a waiting reply's claim closed: the next page to open the chat takes it.
+      h.on("FRONTEND_SESSION_CLOSED", (e, userId) => this.sessionClosed(e.frontendSessionId, userId)),
       h.on("MESSAGE_SENT", (e, userId) => {
         this.mirror(e.chatId, e.message);
         this.onMessage(e.chatId, userId, e.message.id, "sent");
@@ -666,13 +679,35 @@ export class LedgerService {
 
   /**
    * A frontend said hello to the chat, or resynced: a turn the engine prepared that no generation
-   * took yet is asked for again (DESIGN §5.1), so a tab that slept through the first ask starts it.
+   * took yet is asked for again (DESIGN §5.1), so a page that slept through the first ask starts it.
+   * Only the page holding the turn's claim is asked; the first page to come when none holds it takes
+   * it, and any other page's activity line says the reply already started elsewhere.
    */
   askAgain(chatId: ChatId, userId: UserId, session?: string): void {
     const gate = this.gates.get(chatId);
     const p = gate?.prepared;
     if (!gate || gate.userId !== userId || !p || p.generationId !== null) return;
-    this.host.frontend.send({ lre: PROTOCOL_VERSION, type: "lre.generate", chatId, as: p.as }, userId, session);
+    // A host that names no page can't hold a claim: every page of the user's is asked.
+    if (session === undefined || !this.host.capabilities.sessions) {
+      this.host.frontend.send(restartPush(chatId, p), userId);
+      return;
+    }
+    p.holder ??= session;
+    if (p.holder === session) this.host.frontend.send(restartPush(chatId, p), userId, session);
+    else this.host.frontend.send({ lre: PROTOCOL_VERSION, type: "lre.activity", chatId, activity: { chatId, turn: p.id, state: "running", label: STEP_LABEL.elsewhere ?? "Already started in another window", since: Date.now() } }, userId, session);
+  }
+
+  /**
+   * A page disconnected: a waiting reply whose claim it held goes to the next page that opens or
+   * resyncs its chat (`askAgain`), and the user's pages show the chat's own activity line again.
+   */
+  private sessionClosed(session: string, userId: UserId | null): void {
+    for (const [chatId, gate] of this.gates) {
+      const p = gate.prepared;
+      if (!p || p.generationId !== null || p.holder !== session || (userId !== null && gate.userId !== userId)) continue;
+      p.holder = null;
+      this.host.frontend.send({ lre: PROTOCOL_VERSION, type: "lre.activity", chatId, activity: this.diag?.activityOf(chatId) ?? null }, gate.userId);
+    }
   }
 
   /** The chat's guard state, for a world chat; its world is read from the chat's metadata the first time. */
@@ -831,7 +866,7 @@ export class LedgerService {
       let delivered: Delivered | null = null;
       let claimed = false;
       try {
-        await step("pre", () => hooks.beforePlan({ chatId, userId, core, observed, generationId: halt.id, connectionId: halt.connectionId, runKey: `${stamp}\u0000${epoch}\u0000${inputs}`, signal }));
+        await step("pre", () => hooks.beforePlan({ chatId, userId, core, observed, generationId: halt.id, connectionId: halt.connectionId, runKey: `${stamp}\u0000${epoch}`, signal }));
         await step("plan", async () => core.plan(halt.id, observed, false));
         await step("prose", () => hooks.afterPlan({ chatId, userId, core, observed, generationId: halt.id, signal }));
         this.failedStep(at);
@@ -850,13 +885,16 @@ export class LedgerService {
       }
       const turn = core.take(halt.id);
       const as = restartAs(halt.type, observed);
-      const prepared: Prepared = { id: halt.id, type: halt.type, target: target?.id ?? null, turn: turn?.planned ? turn : null, stamp, epoch, inputs, worldId: gate.worldId, delivered, as, generationId: null };
+      const prepared: Prepared = { id: halt.id, type: halt.type, target: target?.id ?? null, turn: turn?.planned ? turn : null, stamp, epoch, inputs, worldId: gate.worldId, delivered, as, holder: halt.session ?? null, generationId: null };
       gate.prepared = prepared;
       // Anything that changed while the engine ran makes the turn stale at once: nothing is generated.
       this.dropIfStale(chatId);
       if (this.gates.get(chatId)?.prepared !== prepared) return;
       this.diag?.rest(at, as === "send" ? (STEP_LABEL.ready ?? "Ready: press Send for the reply") : (STEP_LABEL.restart ?? "Ready; reopen the chat to continue"));
-      this.host.frontend.send({ lre: PROTOCOL_VERSION, type: "lre.generate", chatId, as }, userId, halt.session);
+      // The page the stopped generation ran for starts it; with none named, the first page to open the
+      // chat claims it (`askAgain`). A host that names no page asks every page.
+      if (prepared.holder !== null) this.host.frontend.send(restartPush(chatId, prepared), userId, prepared.holder);
+      else if (!this.host.capabilities.sessions) this.host.frontend.send(restartPush(chatId, prepared), userId);
     });
   }
 

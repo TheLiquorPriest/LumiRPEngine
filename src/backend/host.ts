@@ -134,6 +134,11 @@ export interface SettingsUpdatedEvent {
   key: string | null;
 }
 
+/** A loaded Lumiverse page of the user's disconnected (`FRONTEND_SESSION_CLOSED`): the session routing named it. */
+export interface FrontendSessionClosedEvent {
+  frontendSessionId: string;
+}
+
 export interface HostEventMap {
   GENERATION_STARTED: GenerationStartedEvent;
   GENERATION_IN_PROGRESS: GenerationInProgressEvent;
@@ -147,6 +152,7 @@ export interface HostEventMap {
   CHAT_DELETED: ChatDeletedEvent;
   PRESET_CHANGED: PresetChangedEvent;
   SETTINGS_UPDATED: SettingsUpdatedEvent;
+  FRONTEND_SESSION_CLOSED: FrontendSessionClosedEvent;
 }
 
 export type HostEventName = keyof HostEventMap;
@@ -173,6 +179,8 @@ export interface HostCapabilities {
   cancel: boolean;
   /** A `required` handler that fails or runs out of time stops the generation instead of being skipped (`required-context-handlers-v1`). */
   required: boolean;
+  /** Frontend messages name the page they came from, and a send may go to that page alone (`frontend-session-routing-v1`). */
+  sessions: boolean;
 }
 
 // ---------------------------------------------------------------- model calls
