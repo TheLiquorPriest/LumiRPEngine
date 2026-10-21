@@ -16,6 +16,7 @@ import type { JobKind, LintIssue, WorldCollection, WorldPart } from "../../share
 import { spawnCapOf, type WorldDoc, type WorldIndex } from "../../shared/world";
 import type { BuildRoute } from "../app";
 import { lorePinsJson, lorePinsOf } from "../../shared/lore";
+import { routineSettingsOf } from "../../shared/routines";
 import { LorePinsSection } from "./lore-pins";
 import { useApp, useUi, useView } from "../app";
 import { Badge, Banner, Button, Empty, Field, IconButton, IdText, JsonView, List, ListRow, PageHeader, SaveBar, Section, useBusy } from "../components";
@@ -485,7 +486,7 @@ function WorldHome() {
                 icon={COLLECTION_INFO[collection].icon}
                 title={COLLECTION_INFO[collection].label}
                 subtitle={COLLECTION_INFO[collection].hint}
-                value={Object.keys(doc[collection]).length}
+                value={Object.keys(doc[collection] ?? {}).length}
                 valueTone="muted"
                 badge={<IssueBadge issues={lintAt(draft.lint, collection)} />}
                 chevron
@@ -722,7 +723,7 @@ function ItemView(props: { collection: WorldCollection; id: string | null }) {
   return <Editor world={draft.doc} collection={props.collection} id={props.id} send={send} />;
 }
 
-function partValue(doc: WorldDoc, part: Exclude<WorldPart, "tiers" | "loreIndex" | "ruleset" | "minds" | "lorePins">): JsonObject {
+function partValue(doc: WorldDoc, part: Exclude<WorldPart, "tiers" | "loreIndex" | "ruleset" | "minds" | "lorePins" | "routineSettings">): JsonObject {
   switch (part) {
     case "calendar":
       return doc.calendar as unknown as JsonObject;
@@ -755,10 +756,20 @@ function PartView(props: { part: WorldPart }) {
       </div>
     );
   }
+  if (props.part === "routineSettings") {
+    return (
+      <div class="lre-build-page" data-lre-editor="part:routineSettings">
+        <PageHeader title={PART_INFO.routineSettings.label} subtitle={PART_INFO.routineSettings.hint} />
+        <Section title="In force">
+          <JsonView value={{ ...routineSettingsOf(draft.doc) }} />
+        </Section>
+      </div>
+    );
+  }
   return <SchemaPartView part={props.part} />;
 }
 
-function SchemaPartView(props: { part: Exclude<WorldPart, "tiers" | "loreIndex" | "ruleset" | "minds" | "lorePins"> }) {
+function SchemaPartView(props: { part: Exclude<WorldPart, "tiers" | "loreIndex" | "ruleset" | "minds" | "lorePins" | "routineSettings"> }) {
   const app = useApp();
   const draft = useSelect(app.drafts, (d) => d);
   const send = useMemo(() => draftSend(app), [app]);

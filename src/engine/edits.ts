@@ -14,6 +14,8 @@ import type { JsonObject, JsonValue } from "../shared/json";
 import { isRecord, safeKey } from "../shared/json";
 import type { LedgerEvent } from "../shared/ledger";
 import type { EditOp } from "../shared/protocol";
+import type { ChatScheduleChange, RoutineEntry } from "../shared/routines";
+import { ROUTINE_AWARENESS, ROUTINE_MODES } from "../shared/routines";
 import { isBand, tierOf } from "../shared/tiers";
 import type { EffectSpec, FieldDef, FieldType, WorldDoc } from "../shared/world";
 import { BUILTIN_RELATIONS, formatMoney } from "../shared/world";
@@ -399,6 +401,15 @@ function applyOp(reg: Registry, w: Working, op: EditOp, opts: EditOptions, rng: 
       const out = edit(w.ctx, op);
       return Array.isArray(out) ? applyAll(w, out) : out;
     }
+    case "routine_follow":
+    case "routine_block":
+    case "schedule_override": {
+      // A character's routine and schedules in a chat are Cast life's (DESIGN §8): it words the control as its events.
+      const edit = optionalService(w.ctx, "castlife.edit");
+      if (!edit) return reject("no_castlife", "this world has no Cast life");
+      const out = edit(w.ctx, op);
+      return Array.isArray(out) ? applyAll(w, out) : out;
+    }
     case "effect":
       return effectOp(reg, w, op, opts, rng);
   }
@@ -485,6 +496,20 @@ export function parseEditOps(raw: unknown): EditOp[] | null {
           // Each part is optional (absent keeps it), but one of them must be there.
           if (!str(o.entity) || (o.text !== undefined && !str(o.text)) || (o.approach !== undefined && o.approach !== null && o.approach !== "reactive" && o.approach !== "proactive") || (o.text === undefined && o.approach === undefined)) return null;
           return { op: "mind_intent", entity: o.entity, ...(str(o.text) ? { text: o.text } : {}), ...(o.approach !== undefined ? { approach: o.approach } : {}) };
+        case "routine_follow": {
+          // Each part is optional (absent keeps it), but one of them must be there; null returns it to the world's.
+          const mode = o.mode === undefined || o.mode === null || ROUTINE_MODES.some((m) => m === o.mode);
+          const awareness = o.awareness === undefined || o.awareness === null || ROUTINE_AWARENESS.some((a) => a === o.awareness);
+          if (!str(o.entity) || !mode || !awareness || (o.mode === undefined && o.awareness === undefined)) return null;
+          return { op: "routine_follow", entity: o.entity, ...(o.mode !== undefined ? { mode: ROUTINE_MODES.find((m) => m === o.mode) ?? null } : {}), ...(o.awareness !== undefined ? { awareness: ROUTINE_AWARENESS.find((a) => a === o.awareness) ?? null } : {}) };
+        }
+        case "routine_block":
+          // The block's shape is checked when it resolves, against the chat's own sources.
+          if (!str(o.entity) || !str(o.block) || !(o.value === null || isRecord(o.value))) return null;
+          return { op: "routine_block", entity: o.entity, block: o.block, value: o.value as RoutineEntry | null };
+        case "schedule_override":
+          if (!str(o.entity) || !str(o.schedule) || !(o.value === null || isRecord(o.value))) return null;
+          return { op: "schedule_override", entity: o.entity, schedule: o.schedule, value: o.value as ChatScheduleChange | null };
         case "effect":
           return str(o.effect) && isRecord(o.args) ? { op: "effect", effect: o.effect, args: o.args as JsonObject } : null;
         default:

@@ -32,7 +32,8 @@ import { calendarOf, clockAt, dateAt, formatClock, formatHHMM, MINUTES_PER_DAY }
 import { ENGINE_EVENTS } from "../../../engine/engine-pack";
 import { labelOf, mutableSlice, numOf, objOf, optionalQuery, optionalService, sliceOf, sliceRecord, strOf, own } from "../../../engine/pack-kit";
 import { planDay, tieKey, type PlanBlock, type PlanOption } from "../../../engine/plan-day";
-import type { AgentInstant, EventTypeDef, PackDef, ReadContext, SlotInfo } from "../../../engine/registry";
+import type { AgentInstant, EventTypeDef, PackDef, ReadContext, Rejection, SlotInfo } from "../../../engine/registry";
+import type { RoutineEditOp } from "../../../shared/routines";
 import { createRng, type Rng } from "../../../engine/rng";
 import { hashParts } from "../../../shared/hash";
 import { routineStays, scheduleInstants } from "../../../engine/schedules";
@@ -819,6 +820,10 @@ export function stanceCues(ctx: ReadContext): string[] {
 }
 
 declare module "../../../engine/registry" {
+  interface ServiceMap {
+    /** The GM's routine controls (DESIGN §8): a character's follow setting, one block of their routine and one of their schedules in this chat, as events. */
+    "castlife.edit": (ctx: ReadContext, op: RoutineEditOp) => LedgerEvent[] | Rejection;
+  }
   interface QueryMap {
     /** Ties the planner left to the seed and invitations not yet decided: inputs for `npc.choose`. */
     "castlife.tie_zones": (ctx: ReadContext) => { key: string; agent: EntityId; options: string[] }[];

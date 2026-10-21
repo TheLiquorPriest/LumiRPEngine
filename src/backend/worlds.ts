@@ -23,6 +23,7 @@ import type { RevisionNote, RulesetDef, WorldDoc, WorldIndex } from "../shared/w
 import { DEFAULT_SPAWN_CAP, EXPORT_FORMAT, WORLD_FORMAT } from "../shared/world";
 import { WORLD_MINDS_KEYS, type WorldMindsConfig } from "../shared/minds";
 import { lorePinsOf } from "../shared/lore";
+import { DEFAULT_ROUTINE_SETTINGS, routineSettingsOf } from "../shared/routines";
 import { currencyOf, isWorldDoc, lintWorld, macrosIn, migrateWorld, newBlankWorld, shapeIssues, stamped } from "../engine/authoring";
 import { compileMaps, mapSettingsOf } from "../shared/maps";
 import type { Registry } from "../engine/registry-impl";
@@ -81,7 +82,7 @@ export const NOTE_CAP = 200;
 const PATCH_PROTECTED = ["id", "format", "engineVersion", "pins", "suppressed"] as const;
 
 /** Every part `set` writes: any other name is refused, so a set never reaches the rest of the document. */
-const WORLD_PARTS: Record<WorldPart, true> = { calendar: true, realism: true, time: true, meta: true, tiers: true, ruleset: true, loreIndex: true, minds: true, lorePins: true };
+const WORLD_PARTS: Record<WorldPart, true> = { calendar: true, realism: true, time: true, meta: true, tiers: true, ruleset: true, loreIndex: true, minds: true, lorePins: true, routineSettings: true };
 
 export class WorldError extends Error {
   constructor(
@@ -125,6 +126,7 @@ export const WORLD_COLLECTIONS: Record<WorldCollection, true> = {
   packs: true,
   lore: true,
   classifications: true,
+  routines: true,
 };
 
 /** Loaded revisions kept across chats; an open chat pins the ones its ledger references, so eviction never breaks a fold. */
@@ -607,6 +609,8 @@ function unreadable(what: string, error: unknown): WorldError {
 
 /** A collection of the document as a mutable JSON record (the editors write raw JSON values). */
 function collectionOf(doc: WorldDoc, name: WorldCollection): Record<string, JsonValue> {
+  // Routines are optional (absent: none), so the first one written makes the collection.
+  if (name === "routines" && doc.routines === undefined) doc.routines = {};
   const value: unknown = doc[name];
   if (!isRecord(value)) throw new WorldError("bad_request", `collection ${name} is not an object`);
   return value as Record<string, JsonValue>;
@@ -726,6 +730,14 @@ function setPart(doc: WorldDoc, part: WorldPart, value: JsonValue): void {
     const pins = lorePinsOf({ lorePins: value });
     if (Object.keys(pins.characters).length === 0 && Object.keys(pins.places).length === 0) delete doc.lorePins;
     else doc.lorePins = structuredClone(pins);
+    return;
+  }
+  // `world.routineSettings` as the engine reads it (DESIGN §8): the defaults are no settings, so a
+  // world saved untouched stays as it was.
+  if (part === "routineSettings") {
+    const settings = routineSettingsOf({ routineSettings: value });
+    if (JSON.stringify(settings) === JSON.stringify(DEFAULT_ROUTINE_SETTINGS)) delete doc.routineSettings;
+    else doc.routineSettings = settings;
     return;
   }
   // `calendar`, `realism` and `time` are whole singletons, written as the editors send them.
