@@ -348,7 +348,18 @@ export const spacePack: PackDef = {
         if (from && !reachable(ctx, from, place)) return { code: "no_route", reason: `There's no way from ${named(from)} to ${named(place)}` };
         return null;
       },
-      toEffects: (p, ctx) => [{ type: "move", args: { entity: typeof p.entity === "string" ? p.entity : ctx.world.pov, to: typeof p.place === "string" ? p.place : "" } }],
+      toEffects: (p, ctx) => {
+        const entity = typeof p.entity === "string" ? p.entity : ctx.world.pov;
+        const to = typeof p.place === "string" ? p.place : "";
+        const move = { type: "move", args: { entity, to } };
+        // A told move to another place doesn't carry over what they were doing where they were (the
+        // shift their routine or the planner gave them): their activity goes back to idle, unless the
+        // proposal says what they do there.
+        const doing = own(ctx.state.entities, entity)?.fields.activity;
+        if (to === placeOfEntity(ctx.state, entity) || doing === undefined) return [move];
+        const next = typeof p.activity === "string" && p.activity.trim() !== "" ? p.activity.trim() : "idle";
+        return next === doing ? [move] : [move, { type: "set", args: { entity, field: "activity", value: next } }];
+      },
     });
 
     r.lint({
