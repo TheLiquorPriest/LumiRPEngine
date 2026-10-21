@@ -116,8 +116,9 @@ describe("the routine read model", () => {
       if (you) you.fields.place = "cafe";
     });
     gmEdit(w, [{ op: "routine_block", entity: "maya", block: "tea", value: { id: "tea", label: "Tea break", activity: "leisure", kind: "fixed", at: "14:30", minutes: 30, place: { place: "cafe" } } }]);
-    // The story's own change, as the reply's read records it.
-    record(w, [{ type: "castlife.routine", data: { entity: "maya", block: "swim", value: { id: "swim", label: "A late swim", activity: "exercise", kind: "fixed", at: "21:00", minutes: 30, place: { place: "lake" } }, source: { type: "story", at: w.state.clock, turn: "a3" } } }]);
+    // The story's own change, as the reply's read records it, told the day before: a block the story
+    // adds is theirs from the day after its turn, so it's in her day today.
+    record(w, [{ type: "castlife.routine", data: { entity: "maya", block: "swim", value: { id: "swim", label: "A late swim", activity: "exercise", kind: "fixed", at: "21:00", minutes: 30, place: { place: "lake" } }, source: { type: "story", at: w.state.clock - 24 * 60, turn: "a3" } } }]);
     return w;
   }
 
