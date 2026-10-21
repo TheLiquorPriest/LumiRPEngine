@@ -2,9 +2,9 @@
 // with temp dirs standing in for the installed extension's dist/: a running server loads a newer kit
 // when LumiRPEngine reports a new build whose hash matches, tells its client once and lists the new
 // kit's tools; a hash that differs, a path that isn't an installed extension's (its symlinks
-// resolved), a kit or directory other users can change, and --pin keep the tools loaded, and say
-// why; and it looks on connecting, before a call once its last look is old, every minute, and when
-// LumiRPEngine asks.
+// resolved), a kit of another level, a kit or directory other users can change, and --pin keep the
+// tools loaded, and say why; and it looks on connecting, before a call once its last look is old,
+// every minute, and when LumiRPEngine asks.
 
 import { afterAll, describe, expect, test } from "bun:test";
 import { chmodSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync } from "node:fs";
@@ -17,6 +17,7 @@ import type { Clock } from "../../src/cli/serve";
 import { McpSession, serveMcp } from "../../src/cli/serve";
 import { runtimeCannotFollow, versionLine } from "../../src/cli/version";
 import type { KitReport } from "../../src/shared/agents";
+import { KIT_API } from "../../src/shared/agents";
 import { isRecord } from "../../src/shared/json";
 import { disk, distOf as distIn, writeKit } from "../support/kits";
 import { FakeLumiverse, USER } from "./fake-lumiverse";
@@ -124,6 +125,17 @@ describe("following the extension's kit", () => {
     }
   });
 
+  test("a kit of another level isn't loaded: its line says to install again, or to run the extension's own copy under Bun or Node, Bun first", async () => {
+    const fake = new FakeLumiverse();
+    fake.lre.build = "b7";
+    const report = { ...writeKit(distOf("m"), "b7", ["lre_never"]), api: KIT_API + 1 };
+    fake.lre.kit = report;
+    const s = serve(fake);
+    await s.start();
+    expect(await s.tools()).toEqual(own);
+    expect(checkIns(fake).at(-1)).toEqual(expect.objectContaining({ kit: bundled.build, follows: false, why: { code: "kit_api", text: expect.stringContaining(`install it again (npm i -g github:TheLiquorPriest/LumiRPEngine) or run the extension's own copy (bun ${report.core} mcp, or node ${report.core} mcp)`) } }));
+  });
+
   test("a kit loads only when no one but this user or root can change it: a link out of the extension's layout, a directory others can write and a file another user owns are refused and said, and the tools loaded stay", async () => {
     // Laid out as the extension's kit, but a link to a file elsewhere.
     const elsewhere = writeKit(join(root, "f", "downloads"), "b5", ["lre_never"]);
@@ -221,9 +233,9 @@ describe("following the extension's kit", () => {
 });
 
 describe("on a Bun that can't load a kit", () => {
-  const CANNOT = "run it with Node 22 or newer (Bun before 1.4 can't load the kit)";
+  const CANNOT = "run it with Bun 1.4 or newer, or Node 22 or newer (Bun before 1.4 can't load the kit)";
 
-  test("Bun before 1.4 can't follow, and --version says so; Bun 1.4 and Node can", () => {
+  test("Bun before 1.4 can't follow, and --version says so and names either runtime that can; Bun 1.4 and Node can", () => {
     for (const bun of ["1.3.14", "1.0.0", "0.9.9"]) expect([bun, runtimeCannotFollow(bun)]).toEqual([bun, CANNOT]);
     for (const bun of ["1.4.0", "1.4.3", "2.0.0", undefined]) expect([bun, runtimeCannotFollow(bun)]).toEqual([bun, null]);
     expect(versionLine("1.3.14")).toEndWith(`; under Bun 1.3.14 it can't follow LumiRPEngine's tools: ${CANNOT}`);

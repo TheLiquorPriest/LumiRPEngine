@@ -10,7 +10,7 @@
 // toast once.
 
 import type { AgentClientView, AgentState, AgentsView, FollowCode, KitReport } from "../shared/agents";
-import { CORE_FILE, followCommand, KIT_API, KIT_FILE, pathOfFileUrl } from "../shared/agents";
+import { CORE_FILE, followCommands, KIT_API, KIT_FILE, pathOfFileUrl } from "../shared/agents";
 import { hashParts } from "../shared/hash";
 import type { UserId } from "../shared/ids";
 import { hasOwn, isRecord } from "../shared/json";
@@ -327,7 +327,7 @@ export class Agents {
     return {
       build,
       notice: started.previous !== null && file.dismissed !== started.build ? { build: started.build, previous: started.previous, at: started.at } : null,
-      setup: kit === null ? null : { core: kit.core, command: followCommand(kit.core) },
+      setup: kit === null ? null : { core: kit.core, commands: followCommands(kit.core) },
       clients: Object.entries(file.clients)
         .sort(([, a], [, b]) => b.seen - a.seen)
         .map(([id, stored]): AgentClientView => {

@@ -7,6 +7,7 @@
     "lumirpengine": "dist/lumirpengine.js"
   },
   "engines": {
+    "bun": ">=1.4",
     "node": ">=22"
   },
   "exports": {

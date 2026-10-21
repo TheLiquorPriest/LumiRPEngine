@@ -8,7 +8,7 @@ import { useEffect } from "preact/hooks";
 import type { AgentsView } from "../shared/agents";
 import { useApp } from "./app";
 import type { App } from "./app";
-import { serverLine } from "./agents-view";
+import { serverLine, setupSection } from "./agents-view";
 import { Banner, Button, Empty, List, ListRow, Section } from "./components";
 import { useSelect } from "./store";
 
@@ -77,7 +77,7 @@ export function UpdateNotice() {
   );
 }
 
-/** Settings → MCP server: the setup that follows the extension, and each server as it stands. */
+/** Settings → MCP server: the setup that follows the extension, under each runtime, and each server as it stands. */
 export function McpServerPage() {
   const app = useApp();
   const view = useSelect(app.agents, (v) => v);
@@ -85,18 +85,24 @@ export function McpServerPage() {
     void app.request({ type: "lre.agents", op: "get" }).then((r) => r?.view && app.agents.set(r.view));
   }, []);
   if (view === null) return <Empty>Loading your MCP servers…</Empty>;
+  const setup = view.setup === null ? null : setupSection(view.setup);
   return (
     <div class="lre-stack" data-lre-settings-page="mcp">
       <Section title="Set one up that follows LumiRPEngine">
-        {view.setup === null ? (
+        {setup === null ? (
           <Empty icon="info">This LumiRPEngine was built without an agent kit, so there is nothing to follow.</Empty>
         ) : (
-          <div class="lre-field" data-lre-mcp-setup>
-            <code class="lre-num">{view.setup.command}</code>
-            <span class="lre-field-help">{`Give your agent's harness this command for its lumirpengine server (claude mcp add lumirpengine -- ${view.setup.command}). It runs this extension's own copy, on the machine Lumiverse runs on, and takes each update's tools by itself. Sign in once first: node ${view.setup.core} login --url <your Lumiverse>. For Lumiverse itself to run it (its Settings → MCP Servers), add a Stdio server with the command node and the arguments ${view.setup.core}, mcp.`}</span>
-            <Button size="sm" variant="secondary" icon="copy" onClick={() => copy(app, view.setup?.command ?? "")}>
-              Copy
-            </Button>
+          <div data-lre-mcp-setup>
+            {setup.choices.map((choice) => (
+              <div key={choice.runtime} class="lre-field" data-lre-mcp-setup-runtime={choice.runtime}>
+                <span class="label">{choice.label}</span>
+                <code class="lre-num">{choice.command}</code>
+                <Button size="sm" variant="secondary" icon="copy" onClick={() => copy(app, choice.command)}>
+                  Copy
+                </Button>
+              </div>
+            ))}
+            <span class="lre-field-help">{setup.help}</span>
           </div>
         )}
       </Section>

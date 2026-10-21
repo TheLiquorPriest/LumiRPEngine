@@ -2,6 +2,7 @@
 // format that engine reads and writes, and the agent API level it needs of LumiRPEngine on the host.
 
 import pkg from "../../package.json";
+import { RUNTIMES } from "../shared/agents";
 import { AGENT_API } from "../shared/protocol";
 import { ENGINE_VERSION, WORLD_FORMAT } from "../shared/world";
 
@@ -13,12 +14,13 @@ export const BUILD: string = process.env.LRE_BUILD_ID ?? "dev";
 /**
  * Why this runtime can't follow LumiRPEngine's kit, or null when it can. The core imports the kit
  * as a data URL of a few megabytes, and Bun before 1.4 refuses one over about 2 KB, so there
- * following is off before it is tried, rather than fail with the whole URL in its error.
+ * following is off before it is tried, rather than fail with the whole URL in its error. Either
+ * runtime that can is the fix: a newer Bun, as Lumiverse's own machine has, or Node.
  */
 export function runtimeCannotFollow(bun: string | undefined): string | null {
   if (bun === undefined) return null;
   const [major = 0, minor = 0] = bun.split(".").map(Number);
-  return major > 1 || (major === 1 && minor >= 4) ? null : "run it with Node 22 or newer (Bun before 1.4 can't load the kit)";
+  return major > 1 || (major === 1 && minor >= 4) ? null : `run it with ${RUNTIMES.map((r) => r.needs).join(", or ")} (Bun before 1.4 can't load the kit)`;
 }
 
 /** `--version`'s line, with why it can't follow under this runtime when it can't. */

@@ -1,7 +1,7 @@
-// What the update notice and Settings → MCP server say of each MCP server (DESIGN §23). Pure, so
-// the words are tested directly.
+// What the update notice and Settings → MCP server say of each MCP server and of the setup that
+// follows (DESIGN §23). Pure, so the words are tested directly.
 
-import type { AgentClientView, AgentState, AgentsView } from "../shared/agents";
+import type { AgentClientView, AgentState, AgentsView, SetupCommand } from "../shared/agents";
 import { LUMIVERSE_HARNESS, NPM_INSTALL } from "../shared/agents";
 
 export interface ServerLine {
@@ -19,7 +19,8 @@ export function serverLine(client: AgentClientView, view: AgentsView): ServerLin
   const processes = client.processes > 1 ? ` (${client.processes} processes)` : "";
   const name = `${client.host !== null ? `${client.name}${client.harness !== null ? ` for ${client.harness}` : ""} on ${client.host}` : `${client.name} ${client.version}`}${processes}`;
   const install = { label: "Copy the install", text: NPM_INSTALL };
-  const setup = view.setup === null ? [] : [{ label: "Copy the setup", text: view.setup.command }];
+  // The setup that follows: its command under each runtime, Bun first, each labelled with the version it needs.
+  const setup = (view.setup?.commands ?? []).map((c) => ({ label: `Copy the setup for ${c.needs}`, text: c.command }));
   switch (client.state) {
     case "updated":
       // Lumiverse's own MCP client lists a server's tools once, when it connects, and ignores
@@ -35,7 +36,25 @@ export function serverLine(client: AgentClientView, view: AgentsView): ServerLin
       const fix = client.why?.code === "elsewhere" || client.why?.code === "kit_api" ? [install] : client.why?.code === "pinned" || client.why?.code === "unsafe" ? [] : setup;
       return { state: client.state, text: `${name} can't follow LumiRPEngine: ${client.why?.text ?? "it didn't say why"}.`, update: false, copy: fix };
     }
-    case "old":
-      return { state: client.state, text: `${name} is from before MCP servers followed LumiRPEngine, so it keeps the tools it was installed with. Update it once (${NPM_INSTALL}), or set it up to run the extension's own copy${view.setup === null ? "" : ` (${view.setup.command})`}, which follows from then on.`, update: false, copy: [install, ...setup] };
+    case "old": {
+      const commands = view.setup === null ? "" : ` (${view.setup.commands.map((c) => `${c.command} with ${c.needs}`).join(", or ")})`;
+      return { state: client.state, text: `${name} is from before MCP servers followed LumiRPEngine, so it keeps the tools it was installed with. Update it once (${NPM_INSTALL}), or set it up to run the extension's own copy${commands}, which follows from then on.`, update: false, copy: [install, ...setup] };
+    }
   }
+}
+
+/** Why a runtime is offered, after the version it needs: Bun leads, as the one Lumiverse's machine always has. */
+const OFFERED: Record<SetupCommand["runtime"], string> = {
+  bun: ", which Lumiverse itself runs on, so it is always on Lumiverse's machine",
+  node: "",
+};
+
+/** Settings → MCP server's setup: each command that follows, Bun first, under what it needs; then how to give one to a harness. */
+export function setupSection(setup: NonNullable<AgentsView["setup"]>): { choices: (SetupCommand & { label: string })[]; help: string } {
+  // The first runtime (Bun) gives the examples; the others are the same with their own command.
+  const [lead] = setup.commands;
+  return {
+    choices: setup.commands.map((c) => ({ ...c, label: `For ${c.needs}${OFFERED[c.runtime]}` })),
+    help: `Give your agent's harness one of these commands for its lumirpengine server (claude mcp add lumirpengine -- ${lead.command}). It runs this extension's own copy, on the machine Lumiverse runs on, and takes each update's tools by itself. Sign in once first: ${lead.runtime} ${setup.core} login --url <your Lumiverse>. For Lumiverse itself to run it (its Settings → MCP Servers), add a Stdio server with the command ${setup.commands.map((c) => c.runtime).join(" or ")} and the arguments ${setup.core}, mcp.`,
+  };
 }

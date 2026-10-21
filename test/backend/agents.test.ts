@@ -287,7 +287,9 @@ describe("the update notice", () => {
     expect(lines.laptop?.why).toEqual({ code: "elsewhere", text: "LumiRPEngine's tools aren't on this machine" });
     // Since the restart only mini has said anything: the others' sessions aren't known to be open.
     expect(Object.fromEntries(Object.entries(lines).map(([host, c]) => [host, c.connected]))).toEqual({ mini: true, studio: false, laptop: false, "(none)": false });
-    expect(shown?.view.setup).toEqual({ core: `${DIST}/lumirpengine.js`, command: `node ${DIST}/lumirpengine.js mcp` });
+    // The setup that follows runs the extension's own core: under Bun first, which Lumiverse's machine always has, then Node.
+    expect(shown?.view.setup?.core).toBe(`${DIST}/lumirpengine.js`);
+    expect(shown?.view.setup?.commands.map((c) => c.command)).toEqual([`bun ${DIST}/lumirpengine.js mcp`, `node ${DIST}/lumirpengine.js mcp`]);
     expect(rig.host.toasts.at(-1)?.message).toBe("Updated to build b2. The drawer says how each of your MCP servers took it.");
 
     // Update now: sent to every session of the user, so it reaches a server the restarted extension hasn't heard from yet.

@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 // lumirpengine's core (DESIGN §23): manage your LumiRPEngine worlds on Lumiverse from a shell, and
-// the same as an MCP server (`mcp`) for agents. Built to dist/lumirpengine.js (plain Node 22+, no
-// dependencies) beside its agent kit, dist/agent-kit.js, which holds every tool and runs the
-// command line; `mcp` serves the kit's tools and follows the extension's own kit. This is the only
-// file that touches the disk, the terminal, the network and the process; the extension's backend
-// and frontend never import src/cli.
+// the same as an MCP server (`mcp`) for agents. Built to dist/lumirpengine.js (no dependencies, for
+// Bun 1.4+ or Node 22+) beside its agent kit, dist/agent-kit.js, which holds every tool and runs
+// the command line; `mcp` serves the kit's tools and follows the extension's own kit. This is the
+// only file that touches the disk, the terminal, the network and the process; the extension's
+// backend and frontend never import src/cli.
 
 import { chmodSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { lstat, open, realpath } from "node:fs/promises";

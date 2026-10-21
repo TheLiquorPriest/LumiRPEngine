@@ -7,7 +7,7 @@
 // why. `--pin` keeps the bundled kit whatever is said.
 
 import type { FollowCode, KitReport } from "../shared/agents";
-import { KIT_API, kitPathProblem, NPM_INSTALL } from "../shared/agents";
+import { followCommands, KIT_API, kitPathProblem, NPM_INSTALL } from "../shared/agents";
 import { isRecord } from "../shared/json";
 import type { AgentKit } from "./kit-api";
 import { kitOf } from "./kit-api";
@@ -116,7 +116,11 @@ export class KitFollower {
     if (news.kit === null) return this.cannot("no_kit", `LumiRPEngine on ${where} runs without an agent kit (it was built without one), so there is nothing to follow`);
     const report = reportOf(news.kit);
     if (report === null || !SHA256.test(report.sha256)) return this.cannot("refused", `LumiRPEngine on ${where} described its tools in a way this lumirpengine doesn't read`);
-    if (report.api !== KIT_API) return this.cannot("kit_api", report.api > KIT_API ? `LumiRPEngine's tools need a newer lumirpengine (kit API ${report.api}; this one reads ${KIT_API}): install it again (${NPM_INSTALL}) or run the extension's own copy (node ${report.core} mcp)` : `LumiRPEngine's tools are older than this lumirpengine reads (kit API ${report.api}; it reads ${KIT_API}): update LumiRPEngine in Lumiverse's Extensions tab, or run the extension's own copy (node ${report.core} mcp)`);
+    if (report.api !== KIT_API) {
+      // The extension's own copy is its kit's own core, under either runtime: the setup Settings → MCP server offers, Bun first.
+      const own = followCommands(report.core).map((c) => c.command).join(", or ");
+      return this.cannot("kit_api", report.api > KIT_API ? `LumiRPEngine's tools need a newer lumirpengine (kit API ${report.api}; this one reads ${KIT_API}): install it again (${NPM_INSTALL}) or run the extension's own copy (${own})` : `LumiRPEngine's tools are older than this lumirpengine reads (kit API ${report.api}; it reads ${KIT_API}): update LumiRPEngine in Lumiverse's Extensions tab, or run the extension's own copy (${own})`);
+    }
     const problem = kitPathProblem(report.path, this.options.identifier);
     if (problem !== null) return this.cannot("refused", `LumiRPEngine named ${report.path} as its tools, which ${problem}, so it wasn't loaded`);
     const key = `${report.path}\u0000${report.sha256}`;

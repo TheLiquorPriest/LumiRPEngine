@@ -81,8 +81,8 @@ export interface AgentsView {
   build: string;
   /** The extension started as another build than it last ran as, and this user hasn't dismissed the notice. */
   notice: { build: string; previous: string; at: number } | null;
-  /** The setup that follows the extension: its own core, as a command; null when this build has no kit. */
-  setup: { core: string; command: string } | null;
+  /** The setup that follows the extension: its own core, and the command that runs it under each runtime, Bun first; null when this build has no kit. */
+  setup: { core: string; commands: SetupCommand[] } | null;
   /** The servers this account has seen, the latest first. */
   clients: AgentClientView[];
 }
@@ -126,7 +126,24 @@ function shellWord(text: string): string {
   return `'${text.replaceAll("'", "'\\''")}'`;
 }
 
-/** The setup that follows the extension: its own core, run by Node. */
-export function followCommand(core: string): string {
-  return `node ${shellWord(core)} mcp`;
+/**
+ * The runtimes the core runs on, each with the least version of it that follows the extension.
+ * Bun first: Lumiverse runs only on Bun (1.4.2 or newer), so one that follows is always on
+ * Lumiverse's machine, where a server must run to follow; a machine set up with Node can use that.
+ */
+export const RUNTIMES = [
+  { runtime: "bun", needs: "Bun 1.4 or newer" },
+  { runtime: "node", needs: "Node 22 or newer" },
+] as const;
+
+/** One way to run the setup that follows the extension: the runtime's command, the version it needs, and the whole command. */
+export interface SetupCommand {
+  runtime: (typeof RUNTIMES)[number]["runtime"];
+  needs: string;
+  command: string;
+}
+
+/** The setup that follows the extension: its own core, under each runtime, Bun first. */
+export function followCommands(core: string): SetupCommand[] {
+  return RUNTIMES.map(({ runtime, needs }) => ({ runtime, needs, command: `${runtime} ${shellWord(core)} mcp` }));
 }

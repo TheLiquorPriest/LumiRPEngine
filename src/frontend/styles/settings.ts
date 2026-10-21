@@ -53,6 +53,7 @@ export const SETTINGS_CSS = `
 [data-lre-mcp-server="cannot"] .lre-set-caveat,[data-lre-mcp-server="old"] .lre-set-caveat{color:var(--lre-muted)}
 .lre-row-actions{display:flex;flex-wrap:wrap;gap:var(--lre-s2);padding:0 var(--lre-s3) var(--lre-s2)}
 .lre-row-actions:empty{display:none}
-[data-lre-mcp-setup]{display:flex;flex-direction:column;align-items:flex-start;gap:var(--lre-s2)}
+[data-lre-mcp-setup]{display:flex;flex-direction:column;align-items:flex-start;gap:var(--lre-s3)}
+[data-lre-mcp-setup-runtime]{align-self:stretch;align-items:flex-start}
 [data-lre-mcp-setup] code{display:block;width:100%;box-sizing:border-box;padding:var(--lre-s2);border:1px solid var(--lre-hairline);background:var(--lre-accent-soft);font-size:var(--lre-fs-sm);overflow-wrap:anywhere;user-select:all}
 `;
