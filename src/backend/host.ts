@@ -387,6 +387,11 @@ export interface HostPort {
     /** Every file under the prefix directory, recursively, as full storage paths (`"worlds/w_1/index.json"`). */
     list(prefix: string, userId: UserId): Promise<string[]>;
   };
+  /** The extension's own storage (`spindle.storage`), shared by every user: only what is no one's, such as the build it last started as. */
+  extensionStorage: {
+    read(path: string): Promise<string | null>;
+    write(path: string, data: string): Promise<void>;
+  };
   on<K extends HostEventName>(event: K, handler: (payload: HostEventMap[K], userId: UserId | null) => void): () => void;
   /** What the host does with the context handler's answer, read once at start. */
   readonly capabilities: HostCapabilities;
@@ -406,6 +411,8 @@ export interface HostPort {
     /** `spindle.ui.closeDrawer` (the frontend has no such API; DESIGN §12). */
     closeDrawer(userId: UserId): Promise<void>;
   };
+  /** A toast on the user's open pages (`spindle.toast.info`), titled LumiRPEngine. */
+  toast(message: string, userId: UserId): void;
   books: {
     create(name: string, description: string, userId: UserId): Promise<string>;
     exists(bookId: string, userId: UserId): Promise<boolean>;

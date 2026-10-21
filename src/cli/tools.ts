@@ -299,7 +299,8 @@ async function statusTool(ctx: ToolContext): Promise<ToolResult> {
     user: host.username,
     session: host.session,
     lumiRPEngine: host.extension === null ? null : { status: host.extension.status, enabled: host.extension.enabled, version: host.extension.version, agentApi: host.agentApi },
-    client: VERSIONS,
+    // An MCP server adds its core's build and whether it follows the extension's kit (DESIGN §23).
+    client: host.checkIn ? { ...VERSIONS, core: host.checkIn.core, follows: host.checkIn.follows, ...(host.checkIn.why ? { whyNot: host.checkIn.why.text } : {}) } : VERSIONS,
     readOnly: ctx.readOnly,
     ...(host.problem !== null ? { problem: host.problem } : {}),
   };

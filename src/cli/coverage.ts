@@ -73,4 +73,11 @@ export const COVERAGE: Coverage = {
     active: { excluded: "The page reporting the Loom preset Lumiverse has active, which prompts assemble with: an outside client can't see Loom's state, and a guess would change what the user's prompts are built with." },
   },
   "lre.diag": { get: { tools: ["lre_diag"] }, clear: { tools: ["lre_diag_clear"] }, dismiss: { tools: ["lre_activity_dismiss"] } },
+  "lre.agents": {
+    get: { excluded: "The update notice and Settings → MCP server read the MCP servers the extension knows of; an agent's own server state is lre_status." },
+    kit: { excluded: "The MCP server's own check for a newer kit of tools, which its core runs on connect and on a timer, never an agent's call." },
+    update: { excluded: "The notice's Update now button, which asks another MCP server to reload; the user presses it, not an agent through one." },
+    dismiss: { excluded: "Dismissing the update notice in the drawer is the user's acknowledgement of it, so no agent tool does it for them." },
+    forget: { excluded: "Settings → MCP server's Forget, which drops a server the user no longer runs from the list; the user's call, on the page." },
+  },
 };

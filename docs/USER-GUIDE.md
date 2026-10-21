@@ -1130,6 +1130,20 @@ A change that would give a secret away (someone or somewhere your character does
 
 A quest sitting at a stage the revision removed goes back to its first stage, with a Journal note. If an earlier Upgrade moved the chat without bringing these changes in, Pins and upgrade says so (**Not everything came in**) and offers the Upgrade even at the latest revision.
 
+## Your agent's MCP server
+
+Your own agent (Claude Code, Codex, Cursor…) reaches your worlds through the `lumirpengine` MCP server ([MCP.md](MCP.md)). It follows LumiRPEngine: when you update LumiRPEngine, a server on the same machine as Lumiverse loads the new build's tools and guide by itself, with no reinstall.
+
+**Settings → MCP server** (under *Your agent*) shows the setup that follows LumiRPEngine, `node <path>/dist/lumirpengine.js mcp` with this extension's own path, and **Copy**; give it to your agent's harness as the command for its lumirpengine server. Below it is each server that has connected from your account, with its machine, its builds and whether it is connected now: **Update now** asks one that hasn't reloaded yet to do it, and **Forget** drops one you no longer use. Servers Lumiverse runs itself (Lumiverse's Settings → MCP servers, for its owner and admins) are listed too, with **Restart**, and one that runs an npm or npx copy can be switched to the extension's own copy.
+
+**After an update** the drawer opens on **LumiRPEngine updated**, with a toast the first time, and a line for each server:
+- *reloaded this build's tools*: nothing to do;
+- *hasn't reloaded yet*: it does within a minute, or press **Update now**; one that isn't connected takes the new tools when it next connects;
+- *can't follow*: why, and what to do, such as installing again on another machine (**Copy the install**) or using the setup above (**Copy the setup**);
+- *from before MCP servers followed LumiRPEngine*: update it once (`npm i -g github:TheLiquorPriest/LumiRPEngine`), or switch it to the setup above.
+
+The notice stays until you press **Dismiss**, and comes back with the next update.
+
 ## Troubleshooting
 
 **A reply came back empty, and the turn says "degraded" with a Retry chip.**

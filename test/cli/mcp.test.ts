@@ -4,14 +4,19 @@
 
 import { describe, expect, test } from "bun:test";
 import { isRecord } from "../../src/shared/json";
+import { kit } from "../../src/cli/agent-kit";
+import type { KitContext } from "../../src/cli/kit-api";
 import type { RpcReply } from "../../src/cli/mcp";
 import { lineServer, McpServer, PROTOCOL_VERSIONS } from "../../src/cli/mcp";
-import { TOOLS } from "../../src/cli/tools";
+import { KeyedQueue, TOOLS } from "../../src/cli/tools";
 import { client, FakeLumiverse } from "./fake-lumiverse";
 
 function serve(fake: FakeLumiverse, readOnly = false): { feed(text: string): void; replies(): Promise<RpcReply[]> } {
   const lines: string[] = [];
-  const server = lineServer(new McpServer(client(fake, { readOnly }).ctx), (line) => {
+  const { conn } = client(fake, { readOnly });
+  const queue = new KeyedQueue();
+  const context: KitContext = { readFile: () => "", readOnly, connection: () => conn, serialize: (key, work) => queue.run(key, work) };
+  const server = lineServer(new McpServer({ readOnly, kit: () => kit, ready: async () => undefined, context }), (line) => {
     lines.push(line);
   });
   return {

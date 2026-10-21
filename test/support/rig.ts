@@ -1,5 +1,6 @@
 // The whole backend on the fake host: runtime, dispatcher and job runner, driven over the protocol.
 
+import type { BuildInfo } from "../../src/backend/agents";
 import type { QuietRequest } from "../../src/backend/host";
 import { isRecord } from "../../src/shared/json";
 import type { BackendToFrontend, FrontendToBackend } from "../../src/shared/protocol";
@@ -21,6 +22,8 @@ export interface RigOptions {
   host?: FakeHost;
   /** Character minds on, as Settings has them by default; the test answers their calls (`quietReply`). */
   minds?: boolean;
+  /** This build and its agent kit, as the build would define them (DESIGN §23): "dev" with none unless named. */
+  build?: BuildInfo;
 }
 
 /** A helper that answers every mind plainly (no plans, no interrupt) and every other call with nothing. */
@@ -45,8 +48,8 @@ export class Rig {
     const settingsFile = `${this.host.userId}/settings.json`;
     if (!options.minds && !this.host.files.has(settingsFile)) this.host.files.set(settingsFile, JSON.stringify({ v: 1, minds: { enabled: false } }));
     this.rt = options.shipped
-      ? new Runtime({ host: this.host, packs: ALL_PACKS, pipeline: { plan: planTurn, post: postTurn }, templates: STARTER_WORLDS, templateInfo: STARTER_INFO })
-      : new Runtime({ host: this.host, packs: [enginePack, testPack, tieStubPack], pipeline: { plan: planTurn, post: postTurn }, templates: { test: () => testWorld() } });
+      ? new Runtime({ host: this.host, packs: ALL_PACKS, pipeline: { plan: planTurn, post: postTurn }, templates: STARTER_WORLDS, templateInfo: STARTER_INFO, ...(options.build ? { build: options.build } : {}) })
+      : new Runtime({ host: this.host, packs: [enginePack, testPack, tieStubPack], pipeline: { plan: planTurn, post: postTurn }, templates: { test: () => testWorld() }, ...(options.build ? { build: options.build } : {}) });
     this.jobs = new JobRunner(this.host, this.rt.worlds, this.rt.steps, this.rt.settings, this.rt.registry);
     this.dispatch = new Dispatcher(this.rt, this.jobs);
     this.rt.start();
@@ -60,6 +63,7 @@ export class Rig {
       await this.rt.inspector.settle();
       await this.rt.meter.settle();
       await this.rt.diag.settle();
+      await this.rt.agents.settle();
     };
     // The page asked to start a prepared reply claims it first, as the frontend does (DESIGN §5.1).
     this.host.claimRestart = async (restart) => {
@@ -71,10 +75,11 @@ export class Rig {
   /**
    * A server or extension restart: the host drops this backend's handlers and in-flight
    * generations, and a new runtime, job runner and stores start over the same chats and storage.
+   * `options` changes what starts, such as another build (an update).
    */
-  restart(): Rig {
+  restart(options: RigOptions = {}): Rig {
     this.host.restart();
-    return new Rig({ ...this.options, host: this.host });
+    return new Rig({ ...this.options, ...options, host: this.host });
   }
 
   async cashOf(chatId: string): Promise<unknown> {

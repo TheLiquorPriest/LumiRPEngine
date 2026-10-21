@@ -3,12 +3,14 @@
 // changes under it, and what logout says when the host didn't confirm.
 
 import { describe, expect, test } from "bun:test";
-import type { CliIO, RunResult } from "../../src/cli/commands";
+import { kit } from "../../src/cli/agent-kit";
+import type { CliIO } from "../../src/cli/commands";
 import { run } from "../../src/cli/commands";
 import type { Http } from "../../src/cli/connection";
 import { CredentialStore } from "../../src/cli/credentials";
-import type { McpServer } from "../../src/cli/mcp";
+import { McpServer } from "../../src/cli/mcp";
 import { templateFile } from "../../src/cli/offline";
+import { McpSession } from "../../src/cli/serve";
 import { isRecord } from "../../src/shared/json";
 import { FakeLumiverse, USER } from "./fake-lumiverse";
 
@@ -57,9 +59,12 @@ function terminal(fake: FakeLumiverse, options: { env?: Record<string, string>; 
   return { io, out, err, asked };
 }
 
-function serverOf(result: RunResult): { mcp: McpServer; close(): void } {
+/** `mcp` as the core starts it: the command line reads its options, a session serves the kit's tools. */
+async function serverOf(argv: string[], io: CliIO): Promise<{ mcp: McpServer; close(): void }> {
+  const result = await run(argv, io);
   if (!("mcp" in result)) throw new Error(`mcp didn't start: exit ${result.code}`);
-  return result;
+  const session = new McpSession({ bundled: kit, mcp: result.mcp, io, files: { read: () => Promise.reject(new Error("no kit files here")) }, host: "test-host", log: () => undefined });
+  return { mcp: new McpServer(session), close: () => session.close() };
 }
 
 async function call(mcp: McpServer, name: string, args: Record<string, unknown> = {}): Promise<{ text: string; isError: boolean }> {
@@ -85,7 +90,7 @@ describe("a running mcp server", () => {
     const t = terminal(fake);
     const first = fake.session();
     t.io.credentials.put(fake.base, { username: USER.username, token: first, savedAt: 1 });
-    const server = serverOf(await run(["mcp"], t.io));
+    const server = await serverOf(["mcp"], t.io);
     expect((await call(server.mcp, "lre_worlds")).isError).toBe(false);
     // The session ends on the host (unused for 7 days, or signed out), and the socket with it.
     fake.tokens.delete(first);
@@ -129,12 +134,12 @@ describe("a running mcp server", () => {
       ["", false],
     ];
     for (const [value, readOnly] of cases) {
-      const server = serverOf(await run(["mcp"], terminal(fake, { env: { LRE_READ_ONLY: value } }).io));
+      const server = await serverOf(["mcp"], terminal(fake, { env: { LRE_READ_ONLY: value } }).io);
       const names = await toolNames(server.mcp);
       expect([value, names.includes("lre_edit"), names.includes("lre_world_delete")]).toEqual([value, !readOnly, !readOnly]);
       server.close();
     }
-    const flagged = serverOf(await run(["mcp", "--read-only"], terminal(fake).io));
+    const flagged = await serverOf(["mcp", "--read-only"], terminal(fake).io);
     expect(await toolNames(flagged.mcp)).not.toContain("lre_edit");
     flagged.close();
   });

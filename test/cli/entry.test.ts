@@ -89,9 +89,9 @@ describe("the lumirpengine entry", () => {
     expect(calls.length).toBe(before);
   });
 
-  test("--version names the CLI, the engine, the world format and the agent API", async () => {
+  test("--version names the CLI and its build, the engine, the world format and the agent API", async () => {
     const run = await cli(["--version"]);
-    expect(run.out.trim()).toMatch(/^lumirpengine \d+\.\d+\.\d+ \(engine \d+\.\d+\.\d+, world format lre-world-v1, agent API \d+\)$/);
+    expect(run.out.trim()).toMatch(/^lumirpengine \d+\.\d+\.\d+ \(build [\w.-]+, engine \d+\.\d+\.\d+, world format lre-world-v1, agent API \d+\)$/);
   });
 
   test("a piped template prints the whole export file, which check then reads; check exits 1 on a file that fails", async () => {

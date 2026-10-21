@@ -25,6 +25,7 @@ import { ExtractionPage, SwipesPage } from "./replies";
 import { type Connection, HelperSection, helperSummary, ModelUseSection, STEP_LABEL, StepsSection, useConnections } from "./steps";
 import { limitText, TimeoutsSection } from "./timeouts";
 import { DiagnosticsPage } from "../diagnostics";
+import { McpServerPage } from "../agents";
 
 type Page = Exclude<SettingsPage, "home">;
 type Caveat = { code: string; message: string };
@@ -44,6 +45,7 @@ const PAGE: Record<Page, { title: string; subtitle: string; icon: IconName }> = 
   display: { title: "Display", subtitle: "How LumiRPEngine looks on this device", icon: "eye" },
   caveats: { title: "Caveats", subtitle: "What to know", icon: "info" },
   diagnostics: { title: "Diagnostics", subtitle: "What the engine did each turn, and what failed", icon: "list" },
+  mcp: { title: "MCP server", subtitle: "Your agent's lumirpengine, and how it follows updates", icon: "branch" },
 };
 
 /** The home list's groups, in order. */
@@ -53,6 +55,7 @@ const GROUPS: readonly { title: string; pages: readonly Page[] }[] = [
   { title: "Replies", pages: ["extraction", "swipes"] },
   { title: "Your preset", pages: ["preset"] },
   { title: "Display", pages: ["display"] },
+  { title: "Your agent", pages: ["mcp"] },
   { title: "About", pages: ["caveats", "diagnostics"] },
 ];
 
@@ -105,6 +108,8 @@ function summaryOf(page: Page, data: SettingsResult, caveats: readonly Caveat[] 
     }
     case "diagnostics":
       return { subtitle: "Each turn's steps, model calls and errors" };
+    case "mcp":
+      return { subtitle: "The setup that follows LumiRPEngine, and each server's state" };
   }
 }
 
@@ -261,6 +266,8 @@ export function Settings() {
       <DisplayPage />
     ) : page === "diagnostics" ? (
       <DiagnosticsPage />
+    ) : page === "mcp" ? (
+      <McpServerPage />
     ) : (
       <CaveatsPage caveats={caveats} />
     );

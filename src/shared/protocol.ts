@@ -6,6 +6,7 @@
 // `lre.error` carrying the same `reqId`. State arrives unsolicited as snapshots and deltas.
 
 import type { JsonObject, JsonValue } from "./json";
+import type { AgentsView, HelloClient, KitReport } from "./agents";
 import type { ClaimsPolicy } from "./claims";
 import type { InferredChecks, SheetSkill } from "./inferred";
 import type { LoreIndexAddition } from "./lore";
@@ -62,8 +63,12 @@ export interface HelloRequest extends Request<"lre.hello"> {
   chatId: ChatId | null;
   /** The active Loom preset as the frontend's state has it (`loom.activePresetId`); absent when it can't say. */
   presetId?: string | null;
-  /** An outside client (the `lumirpengine` CLI or MCP server, DESIGN §23) names itself: its commits are labelled `agent`, and the log says who connected. */
-  client?: { name: string; version: string };
+  /**
+   * An outside client (the `lumirpengine` CLI or MCP server, DESIGN §23) names itself: its commits
+   * are labelled `agent`, and the log says who connected. An MCP server checks in with what it runs
+   * and whether it follows the extension's agent kit.
+   */
+  client?: HelloClient;
   /** The page shows the chat on screen (its route is the chat and the document is visible); absent: it does. */
   viewing?: boolean;
 }
@@ -582,6 +587,14 @@ export interface PresetCard {
   blocks: { target: string; name: string; state: "missing" | "empty" | "read" | "enabled" }[];
 }
 
+/**
+ * The outside MCP servers (DESIGN §23). `kit` is a server's own check: this build and where its
+ * kit is, and whether this session checked in since the extension started. Settings → MCP server
+ * and the update notice `get` the servers this account has seen; `update` asks the one named to
+ * reload now; `dismiss` puts the notice away until the next update; `forget` drops a server.
+ */
+export type AgentsRequest = Request<"lre.agents"> & ({ op: "get" | "kit" | "dismiss" } | { op: "update" | "forget"; client: string });
+
 export type FrontendToBackend =
   | HelloRequest
   | ResyncRequest
@@ -608,7 +621,8 @@ export type FrontendToBackend =
   | StudioRequest
   | PresetRequest
   | DiagRequest
-  | MindsRequest;
+  | MindsRequest
+  | AgentsRequest;
 
 // ---------------------------------------------------------------- responses (backend → frontend)
 
@@ -642,9 +656,10 @@ export interface ResultBodies {
    * `agentApi`: the outside-client level this build speaks (`AGENT_API`). `requestMs`: how long the
    * frontend waits for each answer, the user's Engine requests timeout (Settings → Timeouts).
    * `canStop`: this Lumiverse stops a generation for the engine run (DESIGN §5.1); without it, engine
-   * state may be missing from replies.
+   * state may be missing from replies. An outside client (DESIGN §23) also learns this `build` and
+   * where its agent `kit` is (null when it has none), and an MCP server that checked in, its `client` id.
    */
-  "lre.hello": { accepted: true; agentApi: number; requestMs: Limit; canStop: boolean };
+  "lre.hello": { accepted: true; agentApi: number; requestMs: Limit; canStop: boolean; build?: string; kit?: KitReport | null; client?: string };
   "lre.state.resync": { accepted: true };
   "lre.restart": { start: boolean };
   "lre.page": { accepted: true };
@@ -694,6 +709,8 @@ export interface ResultBodies {
   "lre.diag": { records: DiagRecord[]; activity: Activity | null };
   /** The run started, cancelled or asked about; null when the chat has had none since the extension started. */
   "lre.minds": { run: MindsRunView | null };
+  /** `kit`: this build, where its kit is, and whether the asking session checked in since the extension started; every other op answers the `view`. */
+  "lre.agents": { view?: AgentsView; build?: string; kit?: KitReport | null; known?: boolean };
 }
 
 export type ResultMessage = {
@@ -764,4 +781,18 @@ export interface GeneratePush extends Envelope<"lre.generate"> {
   turn: string;
 }
 
-export type BackendToFrontend = StateSnapshot | StateDelta | ResultMessage | ErrorMessage | JobUpdate | DraftChanged | ActivityPush | MindsRunUpdate | GeneratePush;
+/**
+ * The MCP servers this account has seen changed (DESIGN §23): one checked in, connected or went,
+ * or the notice was dismissed; sent to every session of the user. A page's hello gets it too while
+ * an update notice is waiting for that user.
+ */
+export interface AgentsChanged extends Envelope<"lre.agents.changed"> {
+  view: AgentsView;
+}
+
+/** Update now (DESIGN §23): asks the MCP servers that checked in as `client` to check the extension's kit now; sent to every session of the user, and the others ignore it. */
+export interface KitReload extends Envelope<"lre.kit.reload"> {
+  client: string;
+}
+
+export type BackendToFrontend = StateSnapshot | StateDelta | ResultMessage | ErrorMessage | JobUpdate | DraftChanged | ActivityPush | MindsRunUpdate | GeneratePush | AgentsChanged | KitReload;
