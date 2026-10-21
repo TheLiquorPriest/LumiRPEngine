@@ -30,6 +30,21 @@ Cursor (`~/.cursor/mcp.json`, or `.cursor/mcp.json` in a project):
 
 Installed, the server answers a harness in about a tenth of a second (measured on one machine), well inside any start-up timeout.
 
+### Follow LumiRPEngine's updates
+
+`lumirpengine` is two files: a small core (`dist/lumirpengine.js`: the MCP transport, the sign-in and the connection) and the agent kit beside it (`dist/agent-kit.js`: every tool, this guide's text, the docs, the schema, the starters and the engine). A running `mcp` server follows the LumiRPEngine it is connected to: LumiRPEngine tells it which build it is, where its own kit is (`<Lumiverse data>/extensions/lumi_rp_engine/repo/dist/agent-kit.js`) and the kit's sha256, and when that file is on this machine and hashes so, the server loads it, swaps its tools and sends `notifications/tools/list_changed`, with no reinstall or restart. `lre_guide` and `lre_docs` then serve the new build's text. It looks when it connects (at start), before a call once its last look is 30 seconds old, every minute while connected, and when you press **Update now** in Lumiverse. It needs to run on the machine Lumiverse runs on, as a user who can read Lumiverse's extensions folder; a harness that ignores `list_changed` gets the new list when it next restarts the server (calls already use the new tools).
+
+The setup that follows the extension best runs the extension's own copy, so its core stays current too. **Settings → MCP server** in LumiRPEngine shows the command with its absolute path, to copy:
+
+```bash
+node <Lumiverse data>/extensions/lumi_rp_engine/repo/dist/lumirpengine.js login --url http://localhost:7860 --username you
+claude mcp add lumirpengine -- node <Lumiverse data>/extensions/lumi_rp_engine/repo/dist/lumirpengine.js mcp
+```
+
+A server installed with npm or run with npx follows the extension's kit as well, from this version on; one from before needs the install above once. `lumirpengine mcp --pin` (or `LRE_PIN_KIT=1`) keeps the kit it was installed with. The command line, unlike `mcp`, runs the tools it was installed with: run the extension's copy (`node …/dist/lumirpengine.js <command>`) to have the current ones. `lre_status` says which builds a server runs (`client.build` its tools, `client.core` its core) and whether it follows, and why not.
+
+Each server checks in with LumiRPEngine when it connects and after each change: its builds, whether it follows (and why not) and its machine's name. After LumiRPEngine updates, the drawer shows **LumiRPEngine updated** with a line for each server: reloaded this build's tools; not yet, with **Update now**; can't follow, with why and what to do; or from before this, with the one-time install. A server Lumiverse runs itself (Settings → MCP servers, owner and admins) can be restarted from there, and an npm or npx one switched to the extension's own copy.
+
 ### Without installing: npx
 
 `npx -y github:TheLiquorPriest/LumiRPEngine <command>` runs any command without an install, `login` and `mcp` included, and takes the same `#<tag or commit>`. But npx looks the GitHub ref up again on every launch, so the server takes about 9 s to answer the first time and still about 7 s after that (on the same machine; yours will differ), and npx needs GitHub reachable to start at all, even for the offline tools. That is close to Codex's default start-up timeout of 10 s, and past the 1 s Codex waits for an optional server before it lists the tools for the first turn. In Codex, give it the time in `~/.codex/config.toml`:
@@ -83,6 +98,8 @@ Read-only limits what this MCP server offers, not what your agent can do. An age
 
 ## Safety
 
+- **A server loads only the kit LumiRPEngine names, on this machine, laid out as an installed extension's.** It loads a local file whose path ends with `/extensions/lumi_rp_engine/repo/dist/agent-kit.js` (either separator), whose sha256 is the one the running extension was built with, and it imports the very bytes it hashed. Anything else (another machine, a file it can't read, another hash, another path) keeps the tools it has, and the check-in and `lre_status` say why. The kit runs with your permissions, as the installed copy does; `--pin` (or `LRE_PIN_KIT=1`) keeps the installed one whatever LumiRPEngine says.
+- **The check-in names your machine.** Each MCP server tells LumiRPEngine its host name and builds, kept in your Lumiverse account's storage and shown only to you, in Settings → MCP server and the update notice.
 - **The token is a whole-account session.** It is what your browser holds when you are signed in, valid for 7 days and extended by use, and the credentials file is readable by every program you run as yourself, your agent included. `logout` ends the session on Lumiverse as well as deleting it. When Lumiverse can't be reached or doesn't confirm, `logout` says so: the session then stays valid until it expires, after 7 days unused.
 - **To cut an agent off, run `lumirpengine logout` on its machine, or stop its harness.** Lumiverse trusts an open event socket for as long as it stays open, even after the session it was opened with has ended. `logout` on the machine the agent runs on deletes the saved sign-in, and a running `mcp` server then drops its socket at its next call. A session that ends any other way (revoked from elsewhere, expired, or ended by a password change, which ends every other session of the account) leaves a running server able to act until its harness stops it.
 - **Plain `http` to another machine sends it in clear.** Your password at sign-in, and the token on every call after, cross the network readable by anyone on the way, who can then use your account. `login` refuses that unless you pass `--allow-http`, which is saved with the sign-in, so `mcp` and the other commands need no flag. `localhost` and `127.0.0.1` never leave the machine. Before it sends your password, `login` asks Lumiverse as nobody, and stops if the address redirects to https: sign in at the https address instead.

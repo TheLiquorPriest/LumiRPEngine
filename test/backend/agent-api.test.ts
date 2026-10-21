@@ -629,7 +629,8 @@ describe("pushes and hello", () => {
     // and whether this Lumiverse can stop a generation for the engine run (DESIGN §5.1).
     const { requestMs } = (await rig.rt.settings.get(rig.host.userId)).timeouts;
     expect(rig.body(await rig.send({ type: "lre.hello", chatId: null }, "browser"))).toEqual({ accepted: true, agentApi: AGENT_API, requestMs, canStop: true });
-    expect(rig.body(await rig.send({ type: "lre.hello", chatId: null, client: { name: "lumirpengine\nforged: line", version: "0.1.0" } }, "cli"))).toEqual({ accepted: true, agentApi: AGENT_API, requestMs, canStop: true });
+    // An outside client also learns this build and where its agent kit is (none when run from source), and its check-in's id (DESIGN §23).
+    expect(rig.body(await rig.send({ type: "lre.hello", chatId: null, client: { name: "lumirpengine\nforged: line", version: "0.1.0" } }, "cli"))).toEqual({ accepted: true, agentApi: AGENT_API, requestMs, canStop: true, build: "dev", kit: null, client: expect.stringMatching(/^[0-9a-f]{16}$/) });
     expect(rig.host.userLogs.get(rig.host.userId)?.filter((l) => l.includes("outside client"))).toEqual(["info: [LumiRPEngine] outside client connected: lumirpengine forged: line 0.1.0"]);
     // The browser's session stays Build's.
     const worldId = await rig.newWorld();
