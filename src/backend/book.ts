@@ -128,10 +128,7 @@ export class EngineBook {
     const { found, slots, leftoverLore } = sortEntries(all);
     // Any engine entry on now is switched off by the next write unless that turn fills it: a turn a
     // restart cut short, or an entry switched on in the host's UI.
-    const on = this.on.get(bookId) ?? new Set<string>();
-    this.on.set(bookId, on);
-    const engine = new Set([...found.slots.values(), ...found.twins.values(), found.narrator, found.narratorOutlet]);
-    for (const e of all) if (engine.has(e.id) && (!e.disabled || e.content !== "")) on.add(e.id);
+    this.note(bookId, all);
     const blank = { content: "", keys: [] as string[], disabled: true, constant: false };
     for (const section of sectionsOf(world)) {
       const p = section.position;
@@ -185,6 +182,32 @@ export class EngineBook {
     });
     const failed = results.find((r) => r.status === "rejected");
     if (failed?.status === "rejected") throw failed.reason;
+  }
+
+  /**
+   * Every engine entry in the book that may be on, emptied and switched off (DESIGN §6.4), for a
+   * prompt that must hold none of them: what a turn a restart cut short or a clear the host refused
+   * left on, and an entry switched on in the host's UI. A book the engine hasn't read since it
+   * started is read first, so what an earlier run left there is found. Throws when the host refuses
+   * a write; what may still be on stays known.
+   */
+  async vacate(bookId: string, userId: UserId): Promise<void> {
+    let on = this.on.get(bookId);
+    if (!on) {
+      if (!(await this.host.books.exists(bookId, userId))) return;
+      on = this.note(bookId, await this.host.books.entries(bookId, userId));
+    }
+    if (on.size > 0) await this.clear(bookId, [...on], userId);
+  }
+
+  /** Notes each engine entry among the book's that holds text or is on: what may be on, which the next write or clear switches off unless a turn fills it. */
+  private note(bookId: string, all: readonly HostBookEntry[]): Set<string> {
+    const on = this.on.get(bookId) ?? new Set<string>();
+    this.on.set(bookId, on);
+    const { found } = sortEntries(all);
+    const engine = new Set([...found.slots.values(), ...found.twins.values(), found.narrator, found.narratorOutlet]);
+    for (const e of all) if (engine.has(e.id) && (!e.disabled || e.content !== "")) on.add(e.id);
+    return on;
   }
 
   /** Empties and switches off entries a turn's write switched on. Throws when any write failed. */
