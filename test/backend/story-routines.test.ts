@@ -152,6 +152,41 @@ async function who(chat: Chat): Promise<string[]> {
   return (await changed(chat)).map((c) => c.entity);
 }
 
+describe("a place the change names", () => {
+  /** The log lines of the reply's read that dropped a routine change, as the GM's log has them. */
+  const refusals = (chat: Chat): string[] => chat.rig.host.logs.filter((l) => l.includes("dropped") && l.includes("routine"));
+  const LAPS: JsonObject = { type: "routine", entity: "marcus_delgado", change: "start", days: "tuesday", start: "evening", activity: "exercise" };
+
+  test("a place the world doesn't have records nothing, by its words or as its place, and its refusal is logged", async () => {
+    const chat = await alder();
+    await told(chat, [{ ...LAPS, label: "Tuesday evening laps at the community pool" }], "Swimming?", "Marcus says he's started laps at the community pool on Tuesday evenings.");
+    expect(await who(chat)).toEqual([]);
+    await told(chat, [{ ...LAPS, label: "Tuesday evening laps", place: "community pool" }], "Swimming?", "Marcus says he's started laps at the community pool on Tuesday evenings.");
+    expect(await who(chat)).toEqual([]);
+    expect(refusals(chat).filter((l) => l.includes("there's no such place"))).toHaveLength(2);
+    expect((await chips(chat)).some((c) => c.label.includes("pool"))).toBe(false);
+  });
+
+  test("a secret place is refused as one the world doesn't have: the same log line, and nothing else tells them apart", async () => {
+    const chat = await alder();
+    await told(chat, [{ ...LAPS, label: "Tuesday evening laps at 12 Birch Lane" }], "Evenings?", "Marcus says he's at 12 Birch Lane on Tuesday evenings now.");
+    await told(chat, [{ ...LAPS, label: "Tuesday evening laps at the community pool" }], "Evenings?", "Marcus says he's at the community pool on Tuesday evenings now.");
+    expect(await who(chat)).toEqual([]);
+    const [secret, missing] = refusals(chat).map((l) => l.replace(/^.*\(/, "("));
+    expect(secret).toBeDefined();
+    expect(secret).toBe(missing);
+    expect(JSON.stringify(await chips(chat))).not.toContain("Birch");
+  });
+
+  test("a place its words name that the player knows is where it happens; a habit naming no place still applies", async () => {
+    const chat = await alder();
+    await told(chat, [{ ...LAPS, label: "Tuesday evening laps at Lakefront Park" }, { type: "routine", entity: "priya_nair", change: "start", label: "Reads every evening", days: "daily", start: "evening", activity: "leisure" }], "News?", "Marcus swims laps at Lakefront Park on Tuesday evenings now; Priya reads every evening.");
+    expect(await who(chat)).toEqual(["marcus_delgado", "priya_nair"]);
+    const view = await day(chat, "marcus_delgado", 1);
+    expect(view.blocks.find((b) => "label" in b.block && b.block.label === "Tuesday evening laps at Lakefront Park")?.block).toMatchObject({ place: { place: "lakefront_park" } });
+  });
+});
+
 describe("what changes no one's routine", () => {
   test("a habit only mentioned in passing: already their schedule or their routine", async () => {
     const swim = { id: "priya_swim", owner: "priya_nair", blocks: [{ id: "swim", label: "Swim at the lake", activity: "exercise", kind: "fixed", at: "07:00", minutes: 60, days: { weekdays: [2] }, place: { place: "lakefront_park" } }] };

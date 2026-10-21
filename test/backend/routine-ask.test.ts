@@ -10,10 +10,12 @@ import type { QuietRequest } from "../../src/backend/host";
 import { toChain } from "../../src/backend/ledger-io";
 import type { JsonObject } from "../../src/shared/json";
 import type { VNode } from "preact";
-import { IdText, ListRow } from "../../src/frontend/components";
+import { Badge, IdText, ListRow } from "../../src/frontend/components";
 import { gmReloadKey } from "../../src/frontend/play/gm";
-import { RoutineSections } from "../../src/packs/castlife/ui/routines-gm";
+import { CharacterRows, RoutineSections } from "../../src/packs/castlife/ui/routines-gm";
+import { routineRows } from "../../src/packs/castlife/ui/routines-ops";
 import type { LaidBlock, RoutineChangeSummary, RoutineGmView } from "../../src/shared/routines";
+import { DEFAULT_ROUTINE_ROLES } from "../../src/shared/routines";
 import type { Chip, GmView, StateView } from "../../src/shared/state-view";
 import { Rig } from "../support/rig";
 import { expand, propsOf, type Props } from "../support/tree";
@@ -104,6 +106,18 @@ async function storyRows(chat: Chat, entity: string): Promise<{ title: unknown; 
   return propsOf(list?.children, ListRow).map((r) => ({ title: r.title, ids: propsOf(r.subtitle, IdText).map((p) => p.id), text: textOf(r.subtitle) }));
 }
 
+/** GM → Routines' list as rendered from the backend's reads: each badged row's badge words, by entity. */
+async function listBadges(chat: Chat): Promise<Record<string, string>> {
+  const gm = chat.rig.body(await chat.rig.send({ type: "lre.gm", chatId: chat.chatId })) as unknown as GmView;
+  const tree = CharacterRows({ rows: routineRows(gm.minds.characters, gm.entities, await changed(chat), DEFAULT_ROUTINE_ROLES), onOpen: () => undefined });
+  const out: Record<string, string> = {};
+  for (const row of propsOf(tree, ListRow)) {
+    const badge = propsOf(row.subtitle, Badge)[0];
+    if (badge && typeof row.id === "string") out[row.id] = textOf(badge.children);
+  }
+  return out;
+}
+
 const SWIM_SAID = "Marcus says he's started swimming at Lakefront Park on Tuesdays at six";
 const SWIM: JsonObject = { entity: "marcus_delgado", change: "start", label: "Swimming", days: ["tuesday"], start: "06:00", end: "06:25", activity: "exercise", place: "lakefront_park", said: SWIM_SAID };
 
@@ -169,25 +183,27 @@ describe("a routine the player's message states", () => {
     expect(gmReloadKey(await pushed(chat))).not.toBe(gmReloadKey(yes));
   });
 
-  test("GM → Routines lists it by its own name, from the player's message with its turn; the reply's change stays the story's", async () => {
+  test("GM → Routines lists it by its own name, from the player's message with its turn, in its row and its badge; the reply's change stays the story's", async () => {
     const chat = await alder();
     await said(chat, `${SWIM_SAID}.`, [{ ...SWIM, label: "Swimming at Lakefront Park" }]);
     const turn = await lastUser(chat);
     const [ask] = await asks(chat);
     if (!ask) throw new Error("no ask");
     await answer(chat, ask, "yes");
-    // The reply's own change, beside it.
-    chat.rig.host.quietReply = (req: QuietRequest) => ((req.messages[0]?.content ?? "").includes("propose concrete state changes") ? JSON.stringify({ proposals: [{ type: "routine", entity: "marcus_delgado", change: "start", label: "Night shift at the marina", days: "weekdays", start: "22:00", end: "06:00", activity: "work", place: "alder_harbor_marina" }] }) : "{}");
-    await chat.rig.turn(chat.chatId, "Marcus, you look beat.", "Marcus rubs his eyes. \"Took the night shift at the marina, weekdays, ten till six.\"");
-    const rows = await storyRows(chat, "marcus_delgado");
-    expect(rows.map((r) => [r.title, r.ids])).toEqual([
-      ["Swimming at Lakefront Park", [turn]],
-      ["Night shift at the marina", [expect.any(String)]],
-    ]);
-    // The wording is what's at stake: where each came from, plainly.
-    expect(rows[0]?.text).toContain("From your message");
-    expect(rows[0]?.text).not.toContain("The story");
-    expect(rows[1]?.text).toContain("The story");
+    // The reply's own change, for someone else.
+    chat.rig.host.quietReply = (req: QuietRequest) => ((req.messages[0]?.content ?? "").includes("propose concrete state changes") ? JSON.stringify({ proposals: [{ type: "routine", entity: "danny_okafor", change: "start", label: "Night shift at the marina", days: "weekdays", start: "22:00", end: "06:00", activity: "work", place: "alder_harbor_marina" }] }) : "{}");
+    await chat.rig.turn(chat.chatId, "Danny, you look beat.", "Danny rubs his eyes. \"Took the night shift at the marina, weekdays, ten till six.\"");
+    const mine = await storyRows(chat, "marcus_delgado");
+    const told = await storyRows(chat, "danny_okafor");
+    expect(mine.map((r) => [r.title, r.ids])).toEqual([["Swimming at Lakefront Park", [turn]]]);
+    expect(told.map((r) => r.title)).toEqual(["Night shift at the marina"]);
+    // The wording is what's at stake: where each came from, plainly, and the in-force line names no source.
+    expect(mine[0]?.text).toContain("From your message");
+    expect(mine[0]?.text).not.toContain("story");
+    expect(told[0]?.text).toContain("The story");
+    const badges = await listBadges(chat);
+    expect(badges.marcus_delgado).toBe("Changed from your message");
+    expect(badges.danny_okafor).toBe("Changed by the story");
   });
 
   test("No records nothing", async () => {
@@ -236,6 +252,16 @@ describe("what brings up no ask", () => {
     await said(chat, `${words}.`, [{ ...evenings, place: "birch_lane_12" }, { ...evenings, place: "12 Birch Lane" }]);
     expect(await asks(chat)).toEqual([]);
     expect(JSON.stringify(await chips(chat))).not.toContain("Birch");
+    expect(await changed(chat)).toEqual([]);
+  });
+
+  test("a place the world doesn't have, named only in its words, brings up no ask", async () => {
+    const chat = await alder();
+    // Port Alder has no pool: the read leaves the place out, and the label still names it.
+    const words = "Marcus mentions he's started swimming at the community pool every Tuesday evening";
+    const { place: _place, ...placeless } = SWIM;
+    await said(chat, `${words}.`, [{ ...placeless, label: "swimming at the community pool", start: "evening", said: words }]);
+    expect(await asks(chat)).toEqual([]);
     expect(await changed(chat)).toEqual([]);
   });
 });
