@@ -9895,6 +9895,18 @@ function advance(reg, w, to, opts) {
     }
     return out;
   };
+  const stepThrough = (agents, last, slot) => {
+    for (const agent of agents) {
+      let k = cursors.get(agent) ?? agentCursor(w.world, w.state, agent);
+      while (k < last && stillActs(w, agent)) {
+        k++;
+        const applied = stepAgent(reg, w, agent, k === slot.index ? slot : slotOf(cal, k), opts.runSeed, povRoutine, timelapse);
+        if (applied.length > 0)
+          result.rules.push(...runRulesOnEvents(reg, w, applied, { seed: hashParts(opts.runSeed, "agent", agent, k) }));
+      }
+      cursors.set(agent, k);
+    }
+  };
   const overDays = (slot, agents) => timelapse && result.slots + spent.slots > 0 && spent.agentDays + result.agentDays + agents * (slot.end - slot.start) / MINUTES_PER_DAY > cap.agentDays;
   for (const slot of slots) {
     const agents = stepping();
@@ -9915,6 +9927,7 @@ function advance(reg, w, to, opts) {
     const before = opened ? opened.since : w.events.length;
     const rulesBefore = result.rules.length;
     const tracksBefore = result.tracks.length;
+    stepThrough(agents, slot.index - 1, slot);
     applyInstants(slot.end, slot);
     clockTo(w, slot.end, cause, e);
     const info = infoOf(slot);
@@ -9923,16 +9936,7 @@ function advance(reg, w, to, opts) {
         continue;
       e.emit(def.step(info, w.ctx, rngFactory(opts.runSeed, def.id, slot.index)));
     }
-    for (const agent of agents) {
-      let k = cursors.get(agent) ?? agentCursor(w.world, w.state, agent);
-      while (k < slot.index && stillActs(w, agent)) {
-        k++;
-        const applied = stepAgent(reg, w, agent, k === slot.index ? slot : slotOf(cal, k), opts.runSeed, povRoutine, timelapse);
-        if (applied.length > 0)
-          result.rules.push(...runRulesOnEvents(reg, w, applied, { seed: hashParts(opts.runSeed, "agent", agent, k) }));
-      }
-      cursors.set(agent, k);
-    }
+    stepThrough(agents, slot.index, slot);
     const dayEnds = (slot.index + 1) % cal.partStarts.length === 0;
     const tickSeed = hashParts(opts.runSeed, "tick", slot.index);
     result.rules.push(...runRulesOnTick(reg, w, "slot", { seed: tickSeed }));
@@ -9986,6 +9990,7 @@ function advance(reg, w, to, opts) {
       }
     }
     if (result.stop === "target") {
+      stepThrough(stepping(), tail.index - 1, tail);
       applyInstants(to, tail);
       clockTo(w, to, cause, e);
       result.open = open;
@@ -26501,7 +26506,7 @@ function takeUp(ctx, who, place, activity, at, holdUntil, quiet = false, seen = 
     return out;
   if (!held2(ctx.state, who, "place", at) && place && own(ctx.world.places, place) && placeOfEntity(ctx.state, who) !== place) {
     if (seen && withPov(ctx, who))
-      out.push({ type: ENGINE_EVENTS.note, data: { text: `${e.name} leaves.`, entity: who, visibility: "known_by" } });
+      out.push({ type: ENGINE_EVENTS.note, data: { text: `${e.name} leaves.`, entity: who, visibility: "public" } });
     out.push({ type: "set", entity: who, field: "place", value: place });
     if (who !== ctx.world.pov && place === placeOfEntity(ctx.state, ctx.world.pov))
       out.push({ type: ENGINE_EVENTS.signal, data: { class: "arrival", text: `${e.name} arrives.`, entity: who, ...quiet ? { stops: false } : {} } });
@@ -59358,7 +59363,7 @@ Routines are informative by default (§8): the engine never moves Live, Near or 
   - **Off screen:** catch-up on every \`slot_crossed\` up to K agents per turn from a round-robin queue, in process (D9). It runs before the reply when the player's action advances time, otherwise after it.
   - **During a timelapse,** and in the catch-up for an applied \`time.advance\` (§9.2): every LOD1 agent steps through the interval inside the unit cap; tie-zone choices are utility-only by default (§9.2).
   - **Living the day:** in play every block of an LOD1 agent's day is taken up at its own start, as a plan's is (an agent process's moment between slot steps, §24.8), not only the block holding at each day part's end: dinner at dinner time, a fixed block at its time, a trip by its own process. When a block with a place ends and free time follows, they go home, as after a plan. The story still comes first (\`routineYields\`, below): a step reads where their routine had them as every block since the step before could have put them, so a block a catch-up passed over is never taken for the story moving them. A catch-up steps by slot; a turn takes the moments of an agent it has caught up.
-  - **Observable fidelity in a Timelapse:** what the POV could see or meet happens at its minute, and nothing else spends events. The POV and the Live, Near and Far cast live every block at its start; a Background agent lives a block at its start only where the POV could meet them there while it lasts, or sees them leave (the POV's place read from its own day, or where the story holds it). Otherwise an off-screen Background agent lives the day at slot steps, as net state: at each step exactly where their routine has them then, so a block that starts and ends inside a slot leaves no trace, by design. Both folds replay the run as recorded.
+  - **Observable fidelity in a Timelapse:** what the POV could see or meet happens at its minute, and nothing else spends events. The POV and the Live, Near and Far cast live every block at its start; a Background agent lives a block at its start only where the POV could meet them there while it lasts, or sees them leave (the POV's place read from its own day, or where the story holds it). Otherwise an off-screen Background agent lives the day at slot steps, as net state: at each step exactly where their routine has them then, so a block that starts and ends inside a slot leaves no trace, by design. Anyone whose cursor lags behind the slot a run reaches (one the turns before didn't step through) first steps through the slots before it, so their own moments in it happen at their minute as everyone's do, and a skip's first slot never passes over them. Both folds replay the run as recorded.
 - **The player's character** follows its own routine (place and activity schedules, and its day plan when it is an agent) only when time runs on its own (a timelapse: the palette's, whatever its target, a run to a routine point, a stated time, an activity's Speed through), and never against what the player or the narration set: a span the player's own words spend doing something (a typed out-of-character span, "OOC: for the next two hours, I service the fleet", \`TimelapseOptions.povRoutine\` false), a narrated skip (an applied \`time.advance\`) and the clock's ✎ fix keep it where the story has it until the span is over (\`AdvanceOptions.povRoutine\`). An ordinary turn leaves it where the player took it. A narrated move across a gap that no single-mode route spans is declined ("There's no way from … to …"), and a POV that is stranded, or whose routine's place cannot be reached, stays where it is.
   - **Its Continue:** the stop or cap chip of a span the story held keeps the hold (\`povRoutine\` false on the chip's action), so the rest runs as the span did.
 - **Where a character's day comes from** (\`shared/routines.ts\`, \`packs/castlife/core/routines.ts\`), most binding first:
@@ -59372,7 +59377,7 @@ Routines are informative by default (§8): the engine never moves Live, Near or 
   Nothing else fills a day: no outing, gathering, holiday or birthday party, and no invitation, that nothing in the world or the story grounds. The occasion-shaped template earlier builds planned every day from (sleep, meals, seeing friends, time out, holidays, birthdays) plans no new day; it is kept only for folding what those builds recorded (below).
 - **Routines are defaults, never authority.** A routine or a schedule never moves anyone out of a scene with the POV, never moves a Live or Near character (their mind and the scene speak for them: a routine is only a soft suggestion), never makes an invitation that interrupts for them, and never stops a time skip for them. The scene with the POV is the one the story holds: an ordinary turn and its catch-up, a typed span, a narrated skip or a ✎ fix (\`SlotInfo.povRoutine\` false) keep whoever is in it there; while time runs on its own the POV follows its routine and no scene holds anyone, so in a Timelapse a housemate still goes to work and a trip still leaves. Otherwise it yields to what the story set (\`routineYields\`): someone the story put elsewhere than their routine last had them stays there, between the routine's own edges always, and at an edge as the world's **awareness** (\`routineSettings.awareness\`, per character in a chat with \`routine_follow\`) says: \`story_first\` keeps it until the story or the GM releases it, and Background and Far characters bend for story plans and the GM's intent; \`balanced\` (the default, the precedence by fidelity) keeps it until their night (the edge into their sleep block, or a schedule's first slot of a day), Background characters keep their routine and schedules, Far ones bend for story plans and the GM's intent; \`routine_first\` lets the routine's next edge take them back. A trip waits until they're out of the POV's scene. Schedules ask Cast life the same (\`castlife.yields\`).
 - **Routine roles** (issue #48): routines and schedules inform; they don't dictate. Each level of closeness has a role (\`routineSettings.roles\`), and the GM can set one per character in a chat (\`routine_follow\` \`role\`; null returns them to their level's): **informative** (the default for Live, Near and Far) is context only, what their mind (the \`routine\` read source, §24.5) and the narrator may consider: the planner and their own place and activity schedules never move or occupy them, in a turn or in any skip, with the POV or away from it, and their routine asks no one along; **enforced** (Background's default) is the planner living it, every story-first rule kept; **off** is not even context. A level is read as it is now (§24.1), with no mind asked. What isn't routine still runs whatever the role: their story plans (after one, someone whose routine isn't enforced stays where it left them, at rest), trips, the GM's intent, and the world's schedules and money (weather, prices, business hours, bills, paydays: a job pays its scheduled shifts though the worker's place isn't enforced). An enforced Live or Near routine still never stops a skip for them: their arrival where the POV is only notes (the signal's \`stops: false\`). A trip's end, like its start, takes no one out of the scene the story holds with the POV: the trip still holds them, and they go home once the scene lets them go. Older chats replay what they recorded; the roles reach a running chat from its next turn.
-- **Skip lives** (issue #53): how someone whose routine is informative spends a time skip (a palette Timelapse, a typed span or a narrated skip; \`SlotInfo.timelapse\`) is their level's choice (\`routineSettings.skips\`) or the GM's for them (\`routine_follow\` \`skips\`; null returns them to their level's): **stay** where the story has them; their **routine**, lived for the skip as an enforced one is (\`routineLived\`), except where a story plan, a trip, the GM's intent or an appointment holds them; or **model**, the blocks the model planned for them at the skip's start, recorded as \`castlife.skip_plan\` ahead of the timelapse and kept whole in the castlife slice (\`skipPlanOf\`), lived for its span. Someone the plan doesn't name (its call failed, or it left them out) stays. By default Live, Near and Far are planned by the model and Background (when informative) follows their routine. In a skip, and only there, a block their skip life gives them may take them out of the scene the story holds with the POV and later bring them back: the POV sees them go (an \`engine.note\` the Montage tells), and their arrival where the POV is only notes and never stops the skip. Under stay nothing moves them, and outside skips nobody is moved into or out of the POV's scene. An enforced routine is always lived and an off one never. A replay reads the recorded plan and never asks again, and a Continue inside its span lives it on.
+- **Skip lives** (issue #53): how someone whose routine is informative spends a time skip (a palette Timelapse, a typed span or a narrated skip; \`SlotInfo.timelapse\`) is their level's choice (\`routineSettings.skips\`) or the GM's for them (\`routine_follow\` \`skips\`; null returns them to their level's): **stay** where the story has them; their **routine**, lived for the skip as an enforced one is (\`routineLived\`), except where a story plan, a trip, the GM's intent or an appointment holds them; or **model**, the blocks the model planned for them at the skip's start, recorded as \`castlife.skip_plan\` ahead of the timelapse and kept whole in the castlife slice (\`skipPlanOf\`), lived for its span, each block at its own minute. Only someone the engine lives a day for is planned (an LOD1 agent from Cast life 3, as for a story plan, §24.8; \`livesPlans\`), so no plan is made that nothing would live. Someone the plan doesn't name (its call failed, or it left them out) stays. By default Live, Near and Far are planned by the model and Background (when informative) follows their routine. In a skip, and only there, a block their skip life gives them may take them out of the scene the story holds with the POV and later bring them back: the POV sees them go (an \`engine.note\` the Montage tells, seen as their arrival is, by a POV that can see them and has met them, whether or not it holds a \`knows\` link), and their arrival where the POV is only notes and never stops the skip. The turn's record keeps each person's net place, as every timelapse's does (§4.3), with where the POV saw them in \`engine.observed\`. Under stay nothing moves them, and outside skips nobody is moved into or out of the POV's scene. An enforced routine is always lived and an off one never. A replay reads the recorded plan and never asks again, and a Continue inside its span lives it on.
 - **Tuning** (\`world.routineSettings\`, Build → Routines → Settings; absent, the defaults): \`awareness\`; \`invitations\` (\`off\`, \`player\`, the default, or \`everyone\`: a fixed block that asks its company along lays the block in their days too, when they know the host and follow their routine with invitations); \`sociability\` (\`reserved\`, \`usual\`, \`outgoing\`: how fast an NPC's social and fun needs grow, half, as they are, half again); \`planBend\` (\`must\`, \`strong\`, \`standard\`, the default and the rule of §24.8, \`ordinary\`: which story plans take their time from work and school); \`roles\` (above); \`narrator\` (on by default: present characters' usual routines go to the narrator as soft context); and \`paletteFollowsRoutine\` (off by default: where the palette Timelapse's Follow my routine starts, §9.2).
 - **Writes are shape-checked** (\`backend/worlds.ts\`): a routine whose shape the planner can't read (\`routineShapeProblems\`: a block's kind, \`at\`, window, minutes, \`perWeek\`, chance, priority, days, place, company, needs or source) and routine settings with a setting or value the engine doesn't take (\`routineSettingsProblems\`) are refused before anything is written, by Build's put and set and by a patch alike (the outside tools' too), with a message naming each field at fault. The planner skips a malformed routine and reads a bad setting as its default, so a save the check let through would change nothing unseen. What a routine names that the world lacks (a place, an owner who matches nobody, a lore entry) stays a lint warning after the write.
 - **A chat's own changes** are GM edits (§24.9), each one \`fix\` entry with its Undo: \`routine_follow {entity, mode?, awareness?, role?}\` (mode \`follows\`, \`no_invitations\` or \`off\`; role \`informative\`, \`enforced\` or \`off\`; null returns a part to the world's), \`routine_block {entity, block, value}\` (a block, \`{id, off: true}\`, or null to drop the change) and \`schedule_override {entity, schedule, value}\` (\`{off: true, until}\` or their own \`{slots, recurrence?}\`, ranked as their own; null drops it). They record as \`castlife.follow\`, \`castlife.routine\` and \`castlife.schedule\`, each carrying the change whole (an earlier build's \`castlife.follow\` has no role and folds as it did). The world's routine data is only where a chat starts.
@@ -63378,7 +63383,7 @@ var package_default = {
 // src/cli/version.ts
 var CLI_NAME = "lumirpengine";
 var CLI_VERSION = package_default.version;
-var BUILD = "e7650faa";
+var BUILD = "a11d755d";
 function runtimeCannotFollow(bun) {
   if (bun === undefined)
     return null;

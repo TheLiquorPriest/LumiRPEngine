@@ -9137,6 +9137,18 @@ function advance(reg, w, to, opts) {
     }
     return out;
   };
+  const stepThrough = (agents, last, slot) => {
+    for (const agent of agents) {
+      let k = cursors.get(agent) ?? agentCursor(w.world, w.state, agent);
+      while (k < last && stillActs(w, agent)) {
+        k++;
+        const applied = stepAgent(reg, w, agent, k === slot.index ? slot : slotOf(cal, k), opts.runSeed, povRoutine, timelapse);
+        if (applied.length > 0)
+          result.rules.push(...runRulesOnEvents(reg, w, applied, { seed: hashParts(opts.runSeed, "agent", agent, k) }));
+      }
+      cursors.set(agent, k);
+    }
+  };
   const overDays = (slot, agents) => timelapse && result.slots + spent.slots > 0 && spent.agentDays + result.agentDays + agents * (slot.end - slot.start) / MINUTES_PER_DAY > cap.agentDays;
   for (const slot of slots) {
     const agents = stepping();
@@ -9157,6 +9169,7 @@ function advance(reg, w, to, opts) {
     const before = opened ? opened.since : w.events.length;
     const rulesBefore = result.rules.length;
     const tracksBefore = result.tracks.length;
+    stepThrough(agents, slot.index - 1, slot);
     applyInstants(slot.end, slot);
     clockTo(w, slot.end, cause, e);
     const info = infoOf(slot);
@@ -9165,16 +9178,7 @@ function advance(reg, w, to, opts) {
         continue;
       e.emit(def.step(info, w.ctx, rngFactory(opts.runSeed, def.id, slot.index)));
     }
-    for (const agent of agents) {
-      let k = cursors.get(agent) ?? agentCursor(w.world, w.state, agent);
-      while (k < slot.index && stillActs(w, agent)) {
-        k++;
-        const applied = stepAgent(reg, w, agent, k === slot.index ? slot : slotOf(cal, k), opts.runSeed, povRoutine, timelapse);
-        if (applied.length > 0)
-          result.rules.push(...runRulesOnEvents(reg, w, applied, { seed: hashParts(opts.runSeed, "agent", agent, k) }));
-      }
-      cursors.set(agent, k);
-    }
+    stepThrough(agents, slot.index, slot);
     const dayEnds = (slot.index + 1) % cal.partStarts.length === 0;
     const tickSeed = hashParts(opts.runSeed, "tick", slot.index);
     result.rules.push(...runRulesOnTick(reg, w, "slot", { seed: tickSeed }));
@@ -9228,6 +9232,7 @@ function advance(reg, w, to, opts) {
       }
     }
     if (result.stop === "target") {
+      stepThrough(stepping(), tail.index - 1, tail);
       applyInstants(to, tail);
       clockTo(w, to, cause, e);
       result.open = open;
@@ -26140,7 +26145,7 @@ function takeUp(ctx, who, place, activity, at, holdUntil, quiet = false, seen = 
     return out;
   if (!held2(ctx.state, who, "place", at) && place && own(ctx.world.places, place) && placeOfEntity(ctx.state, who) !== place) {
     if (seen && withPov(ctx, who))
-      out.push({ type: ENGINE_EVENTS.note, data: { text: `${e.name} leaves.`, entity: who, visibility: "known_by" } });
+      out.push({ type: ENGINE_EVENTS.note, data: { text: `${e.name} leaves.`, entity: who, visibility: "public" } });
     out.push({ type: "set", entity: who, field: "place", value: place });
     if (who !== ctx.world.pov && place === placeOfEntity(ctx.state, ctx.world.pov))
       out.push({ type: ENGINE_EVENTS.signal, data: { class: "arrival", text: `${e.name} arrives.`, entity: who, ...quiet ? { stops: false } : {} } });
@@ -68962,7 +68967,7 @@ async function planSkip(deps, input) {
   if (last && last.from <= from && from < last.to && to <= last.to)
     return null;
   const ctx = deps.registry.context(input.world, input.state);
-  const people = Object.keys(input.state.entities).sort().filter((id) => kindIs(deps.registry, input.world, input.state.entities[id]?.kind ?? "", "person") && !isGone(input.state, id) && skipLifeOf(ctx, id) === "model");
+  const people = Object.keys(input.state.entities).sort().filter((id) => kindIs(deps.registry, input.world, input.state.entities[id]?.kind ?? "", "person") && !isGone(input.state, id) && livesPlans(ctx, id) && skipLifeOf(ctx, id) === "model");
   if (people.length === 0)
     return null;
   const brief = skipPlanBrief(ctx, people, from, to);
@@ -69462,9 +69467,9 @@ function thisBuild(moduleUrl = import.meta.url) {
   const dir = moduleUrl.replace(/[^/]*$/, "");
   const path = pathOfFileUrl(`${dir}${KIT_FILE}`);
   const core = pathOfFileUrl(`${dir}${CORE_FILE}`);
-  const sha256 = "696ca9cf01fc73a7218d1732deb961275faec6583b5fc4b71abaee22d4cee9b0";
+  const sha256 = "a6421378d5434141cc3928edf81a24bd829c50c0f422ca65a48bb543070579c3";
   const tools = ["18ab4cc48319d3329b4f414f8503d74f", "9748f93066a93461e251d2677fe4f3b6"].filter((f) => f !== undefined);
-  return { id: "e7650faa", kit: sha256 !== undefined && path !== null && core !== null ? { path, core, sha256, api: KIT_API } : null, tools };
+  return { id: "a11d755d", kit: sha256 !== undefined && path !== null && core !== null ? { path, core, sha256, api: KIT_API } : null, tools };
 }
 var BUILD_FILE = "agents/build.json";
 var USER_FILE = "agents.json";
@@ -72629,7 +72634,7 @@ class Runtime {
     this.steps.onCallStart = (userId, purpose) => this.diag.callStart(userId, purpose);
     this.toolSupport = new ToolSupport(this.host);
     this.minds = { host: this.host, registry: this.registry, steps: this.steps, settings: this.settings, presets: this.presets };
-    this.ledger = new LedgerService(this.host, (chatId, userId) => this.resolveEnv(chatId, userId), new LedgerFold(this.registry, { fingerprint: "e7650faa" }), (chatId) => messages.forget(chatId));
+    this.ledger = new LedgerService(this.host, (chatId, userId) => this.resolveEnv(chatId, userId), new LedgerFold(this.registry, { fingerprint: "a11d755d" }), (chatId) => messages.forget(chatId));
     this.studio = new StudioBridge(this.host, this.worlds);
     this.worlds.onChange = (worldId, userId) => this.studio.worldChanged(worldId, userId);
     this.agents = new Agents(this.host, options.build ?? thisBuild(), async (userId) => (await this.settings.get(userId)).timeouts.mcpReconnectMs);

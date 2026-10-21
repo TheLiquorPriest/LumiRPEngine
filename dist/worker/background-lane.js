@@ -10372,6 +10372,18 @@ function advance(reg, w, to, opts) {
     }
     return out;
   };
+  const stepThrough = (agents, last, slot) => {
+    for (const agent of agents) {
+      let k = cursors.get(agent) ?? agentCursor(w.world, w.state, agent);
+      while (k < last && stillActs(w, agent)) {
+        k++;
+        const applied = stepAgent(reg, w, agent, k === slot.index ? slot : slotOf(cal, k), opts.runSeed, povRoutine, timelapse);
+        if (applied.length > 0)
+          result.rules.push(...runRulesOnEvents(reg, w, applied, { seed: hashParts(opts.runSeed, "agent", agent, k) }));
+      }
+      cursors.set(agent, k);
+    }
+  };
   const overDays = (slot, agents) => timelapse && result.slots + spent.slots > 0 && spent.agentDays + result.agentDays + agents * (slot.end - slot.start) / MINUTES_PER_DAY > cap.agentDays;
   for (const slot of slots) {
     const agents = stepping();
@@ -10392,6 +10404,7 @@ function advance(reg, w, to, opts) {
     const before = opened ? opened.since : w.events.length;
     const rulesBefore = result.rules.length;
     const tracksBefore = result.tracks.length;
+    stepThrough(agents, slot.index - 1, slot);
     applyInstants(slot.end, slot);
     clockTo(w, slot.end, cause, e);
     const info = infoOf(slot);
@@ -10400,16 +10413,7 @@ function advance(reg, w, to, opts) {
         continue;
       e.emit(def.step(info, w.ctx, rngFactory(opts.runSeed, def.id, slot.index)));
     }
-    for (const agent of agents) {
-      let k = cursors.get(agent) ?? agentCursor(w.world, w.state, agent);
-      while (k < slot.index && stillActs(w, agent)) {
-        k++;
-        const applied = stepAgent(reg, w, agent, k === slot.index ? slot : slotOf(cal, k), opts.runSeed, povRoutine, timelapse);
-        if (applied.length > 0)
-          result.rules.push(...runRulesOnEvents(reg, w, applied, { seed: hashParts(opts.runSeed, "agent", agent, k) }));
-      }
-      cursors.set(agent, k);
-    }
+    stepThrough(agents, slot.index, slot);
     const dayEnds = (slot.index + 1) % cal.partStarts.length === 0;
     const tickSeed = hashParts(opts.runSeed, "tick", slot.index);
     result.rules.push(...runRulesOnTick(reg, w, "slot", { seed: tickSeed }));
@@ -10463,6 +10467,7 @@ function advance(reg, w, to, opts) {
       }
     }
     if (result.stop === "target") {
+      stepThrough(stepping(), tail.index - 1, tail);
       applyInstants(to, tail);
       clockTo(w, to, cause, e);
       result.open = open;
@@ -27026,7 +27031,7 @@ function takeUp(ctx, who, place, activity, at, holdUntil, quiet = false, seen = 
     return out;
   if (!held2(ctx.state, who, "place", at) && place && own(ctx.world.places, place) && placeOfEntity(ctx.state, who) !== place) {
     if (seen && withPov(ctx, who))
-      out.push({ type: ENGINE_EVENTS.note, data: { text: `${e.name} leaves.`, entity: who, visibility: "known_by" } });
+      out.push({ type: ENGINE_EVENTS.note, data: { text: `${e.name} leaves.`, entity: who, visibility: "public" } });
     out.push({ type: "set", entity: who, field: "place", value: place });
     if (who !== ctx.world.pov && place === placeOfEntity(ctx.state, ctx.world.pov))
       out.push({ type: ENGINE_EVENTS.signal, data: { class: "arrival", text: `${e.name} arrives.`, entity: who, ...quiet ? { stops: false } : {} } });
