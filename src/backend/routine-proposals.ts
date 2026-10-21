@@ -395,6 +395,7 @@ const OUTPUT =
 /** The system prompt: the task, what each kind of item is, the rules that keep it to what the text says, and the shape. */
 export function routineSystem(scope: RoutineScope): string {
   const parts = scope.cal.def.dayParts.map((p, i, all) => `${p.label.toLowerCase()} ${p.start}–${all[(i + 1) % all.length]?.start ?? p.start}`).join(", ");
+  const partHours = parts === "" ? "" : `, or for a part of the day it names, that part's hours (${parts})`;
   const holidays = scope.cal.def.holidays.slice(0, 20).map((h) => `${h.id} (${h.label})`);
   const start = scope.start === null ? "" : ` The story starts ${formatStamp(scope.cal, scope.start)}, a ${weekdayName(scope.cal, dateAt(scope.cal, scope.start).weekday)}.`;
   return [
@@ -408,7 +409,7 @@ export function routineSystem(scope: RoutineScope): string {
     '- The owner is one of the people or groups under "Propose for", by id. A habit a household, family or club shares is the group\'s item, once, not each member\'s.',
     '- A routine\'s place is "home", "work" (their workplace), "with" (the home of its company) or a place id from the list; a schedule\'s is a place id.',
     '- Company is only people listed with an id who are tied to the owner, or whom the cited text names with them: {"ids": [...]}, or a group the owner belongs to: {"group": "<id>"}. "invite": true only when the text says one asks the other along.',
-    `- Times are 24-hour HH:MM: the times the text gives, or for a part of the day it names, that part's hours (${parts}). A fixed block has "at" and "minutes"; a flexible or optional one a "window" and "minutes"; a schedule "start" and "end".`,
+    `- Times are 24-hour HH:MM: the times the text gives${partHours}. A fixed block has "at" and "minutes"; a flexible or optional one a "window" and "minutes"; a schedule "start" and "end".`,
     `- Weekdays are 0 (Sunday) to 6; "off": "only" for days off, "never" for working days.${holidays.length > 0 ? ` Holidays: ${holidays.join(", ")}.` : ""}`,
     '- A label says what they do, never with whom ("Dinner at home", not "Dinner with Ada"): its company says who. The activity is a word or two ("work", "school", "dinner", "worship", "socialize"); a shift\'s says work, a class\'s school.',
     '- A meal they have every day takes the meal\'s id ("breakfast", "lunch", "dinner") and replaces the usual one; anything narrower takes its own id ("sunday_dinner").',
@@ -449,9 +450,9 @@ export interface CheckedSource {
   refs: string[];
 }
 
-/** A quote cut to a short one at a word. */
+/** A quote as the source keeps it: cut to a short one at a word, and never a host macro (it lands in world data the player's views read). */
 function shortQuote(quote: string): string {
-  const q = quote.replace(/\s+/g, " ").trim();
+  const q = neutralizeMacros(quote).replace(/\s+/g, " ").trim();
   if (q.length <= QUOTE_MAX) return q;
   const cut = q.slice(0, QUOTE_MAX);
   return `${cut.slice(0, Math.max(cut.lastIndexOf(" "), 1))}…`;
@@ -465,7 +466,7 @@ function checkSource(scope: RoutineScope, raw: JsonValue | undefined): CheckedSo
   const entry = typeof raw.lore === "string" ? raw.lore : raw.type === "lore" && typeof raw.entry === "string" ? raw.entry : null;
   if (entry !== null) {
     const def = own(scope.world.lore, entry);
-    if (!def || !scope.lore.has(entry)) return `its source "${entry}" isn't a lore entry it was given`;
+    if (!def || !scope.lore.has(entry)) return `its source "${entry}" isn't a lore entry it may cite`;
     const text = `${def.title}\n${def.content}`;
     if (!plainText(text).includes(plainText(quote))) return `its quote isn't in ${entry}: copy it word for word`;
     return { source: { type: "lore", entry, quote: shortQuote(quote) }, key: entry, name: def.title || entry, text, refs: [...def.links] };
@@ -473,7 +474,7 @@ function checkSource(scope: RoutineScope, raw: JsonValue | undefined): CheckedSo
   const entity = typeof raw.sheet === "string" ? raw.sheet : raw.type === "sheet" && typeof raw.entity === "string" ? raw.entity : null;
   const field = typeof raw.field === "string" ? raw.field : "";
   if (entity === null) return 'its source is neither {"lore"} nor {"sheet", "field"}';
-  if (!(scope.people.has(entity) || scope.groups.has(entity))) return `its source "${entity}" isn't a sheet it was given`;
+  if (!(scope.people.has(entity) || scope.groups.has(entity))) return `its source "${entity}" isn't a person or group whose sheet it may cite`;
   const shown = sheetFields(scope, entity).find((f) => f.field === field);
   if (!shown) return `${nameOf(scope, entity)}'s sheet has no field "${field}" to cite`;
   if (!plainText(shown.text).includes(plainText(quote))) return `its quote isn't in ${nameOf(scope, entity)}'s ${field}: copy it word for word`;
@@ -754,6 +755,15 @@ export function routineRepairText(request: string, reply: JsonValue | null, chec
   return `${request}\n\n${what}\n\nYour answer was:\n${reply === null ? "(nothing usable)" : JSON.stringify(reply)}\n\nAnswer again with every item, the right ones as they were and the listed ones fixed; leave out any you can't ground in what's above. JSON only, in this shape: ${OUTPUT}.`;
 }
 
+/**
+ * What a batch keeps after its repair call: the repair's answer, and what the first answer had right
+ * that the repair left out (nothing the repair already has, by what makes two proposals the same).
+ */
+export function afterRepair(first: RoutineCheck, again: RoutineCheck): RoutineCheck {
+  const have = new Set(again.candidates.map(sameKey));
+  return { ...again, candidates: [...again.candidates, ...first.candidates.filter((c) => c.fatal.length === 0 && c.problems.length === 0 && !c.leak && !have.has(sameKey(c)))] };
+}
+
 // ---------------------------------------------------------------- clashes, dedupe and the proposals
 
 /** A span of clock minutes, [start, end). */
@@ -853,9 +863,10 @@ function placeFor(scope: RoutineScope, who: EntityId, place: RoutinePlace | Plac
 }
 
 /**
- * One run of what an owner's days already hold, named for the review: a schedule's slot, setting an
- * activity or a place; a fixed routine block's run; or a flexible block's reach (`floating`), which
- * clashes with nothing but is repeated by a block of its activity.
+ * One run of what an owner's days hold, named for the review: a schedule's slot, setting an activity
+ * or a place; a fixed routine block's run; or a flexible block's reach (`floating`), which clashes
+ * with nothing but is repeated by a block of its activity. A run of an earlier proposal (`proposed`)
+ * clashes as the world's do, but nothing repeats it: two proposals alike are the dedupe's.
  */
 interface HeldRun {
   what: string;
@@ -863,6 +874,7 @@ interface HeldRun {
   activity?: string;
   place?: PlaceId | null;
   floating?: boolean;
+  proposed?: boolean;
 }
 
 /** What an owner's own schedules and routine blocks hold over the checked days (another target than place or activity contends with no block). */
@@ -899,30 +911,33 @@ interface ProposedRuns {
 }
 
 /**
- * How a proposal stands against what the owner's days hold: `repeat`, when what it does is already
- * there at those times (every fixed run covered by runs of its activity, or a flexible one's reach
- * meeting one); otherwise the runs it clashes with (another activity, or another place, at a fixed
- * run's time).
+ * How a proposal stands against what the owner's days hold: `repeat`, when it is already there at
+ * those times (every fixed run covered by runs of its activity, or by place runs at its place; a
+ * flexible one's reach meeting a run of its activity); otherwise the runs it clashes with (another
+ * activity, or another place, at a fixed run's time).
  */
 function standing(scope: RoutineScope, p: ProposedRuns, held: readonly HeldRun[]): { repeat: string | null; clashes: string[] } {
-  const same = (h: HeldRun): boolean => h.activity !== undefined && plainText(h.activity) === plainText(p.activity);
+  const doing = (h: HeldRun): boolean => h.activity !== undefined && plainText(h.activity) === plainText(p.activity);
+  const there = (h: HeldRun): boolean => h.activity === undefined && !!h.place && !!p.place && (h.place === p.place || placeWithin(scope.world, p.place, h.place) || placeWithin(scope.world, h.place, p.place));
   if (p.fixed.length > 0) {
-    const covered = p.fixed.every(([s, e]) => {
-      let at = s;
-      for (const h of held.filter((x) => same(x) && !x.floating && meets(x.span, [s, e])).sort((x, y) => x.span[0] - y.span[0])) if (h.span[0] <= at) at = Math.max(at, h.span[1]);
-      return at >= e;
-    });
-    const by = held.find((h) => same(h) && !h.floating && p.fixed.some((r) => meets(h.span, r)));
-    if (covered && by) return { repeat: by.what, clashes: [] };
+    for (const agrees of [doing, there]) {
+      const runs = held.filter((h) => agrees(h) && !h.floating && !h.proposed).sort((x, y) => x.span[0] - y.span[0]);
+      const covered = p.fixed.every(([s, e]) => {
+        let at = s;
+        for (const h of runs) if (h.span[0] <= at && h.span[1] > at) at = h.span[1];
+        return at >= e;
+      });
+      const by = runs.find((h) => p.fixed.some((r) => meets(h.span, r)));
+      if (covered && by) return { repeat: by.what, clashes: [] };
+    }
   } else {
-    const by = held.find((h) => same(h) && p.reach.some((r) => meets(h.span, r)));
+    const by = held.find((h) => doing(h) && !h.proposed && p.reach.some((r) => meets(h.span, r)));
     if (by) return { repeat: by.what, clashes: [] };
   }
   const clashes = new Set<string>();
   for (const h of held) {
     if (h.floating || !p.fixed.some((r) => meets(h.span, r))) continue;
-    if (h.activity !== undefined && !same(h)) clashes.add(h.what);
-    else if (h.activity === undefined && h.place && p.place && h.place !== p.place && !placeWithin(scope.world, p.place, h.place) && !placeWithin(scope.world, h.place, p.place)) clashes.add(h.what);
+    if (h.activity !== undefined ? !doing(h) : !!h.place && !!p.place && !there(h)) clashes.add(h.what);
   }
   return { repeat: null, clashes: [...clashes] };
 }
@@ -1016,7 +1031,8 @@ export function finishRoutines(scope: RoutineScope, candidates: readonly Routine
       if (away) problems.push(away);
       // A meal or sleep's id replaces it on every day: a block on fewer days, or not every time, takes its own.
       const narrow = block.days !== undefined || block.perWeek !== undefined || block.kind === "optional";
-      let id = hasOwn(BASIC_IDS, block.id) && narrow ? snake(`${block.label} ${block.id}`) : block.id;
+      const named = snake(block.label);
+      let id = hasOwn(BASIC_IDS, block.id) && narrow ? (named !== "" && !hasOwn(BASIC_IDS, named) ? named : `${block.id}_${block.kind}`) : block.id;
       let mine = takenBlocks.get(c.owner);
       if (!mine) {
         mine = new Set(Object.values(routines).flatMap((r: RoutineDef) => (r.owner === c.owner ? r.blocks.map((b) => b.id) : [])));
@@ -1029,7 +1045,7 @@ export function finishRoutines(scope: RoutineScope, candidates: readonly Routine
         id = free;
       }
       mine.add(id);
-      held.push(...p.reach.map((r) => ({ what: `the proposed block ${id}`, span: r, activity: block.activity, place, ...(block.kind === "fixed" ? {} : { floating: true }) })));
+      held.push(...p.reach.map((r) => ({ what: `the proposed block ${id}`, span: r, activity: block.activity, place, proposed: true, ...(block.kind === "fixed" ? {} : { floating: true }) })));
       const routineId = freeId(snake(`${c.owner} ${id}`), (x) => hasOwn(routines, x) || takenRoutines.has(x));
       takenRoutines.add(routineId);
       const value: RoutineDef = { id: routineId, label: block.label, owner: c.owner, blocks: [{ ...block, id }] };
@@ -1048,7 +1064,7 @@ export function finishRoutines(scope: RoutineScope, candidates: readonly Routine
     const away = pullsAway(scope, c.owner, fixed, () => s.place);
     if (away) problems.push(away);
     const base = freeId(snake(`${c.owner} ${s.id}`), (x) => [`${x}_activity`, `${x}_place`].some((y) => hasOwn(scope.world.schedules, y) || takenSchedules.has(y)));
-    held.push(...fixed.map((r) => ({ what: `the proposed schedule ${base}`, span: r, activity: s.activity, place: s.place })));
+    held.push(...fixed.map((r) => ({ what: `the proposed schedule ${base}`, span: r, activity: s.activity, place: s.place, proposed: true })));
     const source = c.sources[0]?.source;
     const twins = [{ target: "activity", value: s.activity }, ...(s.place ? [{ target: "place", value: s.place }] : [])];
     for (const t of twins) {

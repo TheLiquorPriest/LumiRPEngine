@@ -22,7 +22,7 @@ import type { HostPort, ProcessEvent, ProcessHandle } from "./host";
 import { checkIndexProposals, INDEX_TEXT_CHUNK, indexReplyProblem, indexRetry, indexSystem, readIndexProposals, textChunks, type IndexBook } from "./lore-index";
 import { checkProposals, dropSummary, entryTitle, IMPORT_CHUNK, IMPORT_MAX_CALLS, loreChunk, PROPOSAL_MAX_TOKENS, proposalRetry, proposalSystem, readProposals, replyProblem, type DropCounts, type ProposalMode } from "./proposals";
 import { MAP_PROSE_MAX, mapProposal, mapRepairText, mapRequestText, mapSystem, problemLines, readMapAnswer, readMapRequest } from "./map-job";
-import { checkRoutineReply, finishRoutines, readRoutineInput, ROUTINE_MAX_CALLS, ROUTINE_OWNERS_MAX, routineCallText, routinePass, routineRepairText, routineScope, routineSystem, type RoutineCandidate } from "./routine-proposals";
+import { afterRepair, checkRoutineReply, finishRoutines, readRoutineInput, ROUTINE_MAX_CALLS, ROUTINE_OWNERS_MAX, routineCallText, routinePass, routineRepairText, routineScope, routineSystem, type RoutineCandidate } from "./routine-proposals";
 import { own } from "../engine/pack-kit";
 import type { SettingsStore } from "./settings-store";
 import type { Steps } from "./steps";
@@ -439,7 +439,9 @@ export class JobRunner {
         calls++;
         if (signal.aborted) return;
         const again = checkRoutineReply(scope, batch, second.reply);
-        if (again.problem === null) check = again;
+        // The repair's answer stands, with what the first had right that the repair left out.
+        if (again.problem === null) check = afterRepair(check, again);
+        else if (second.failed !== null) failures.push(`a repair call: ${second.failed}`);
       }
       if (first.failed !== null) failures.push(first.failed);
       else if (check.problem !== null) failures.push(`the answer couldn't be read (${check.problem})`);

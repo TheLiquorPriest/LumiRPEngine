@@ -849,6 +849,7 @@ Touch targets are at least 40 px (including a number stepper of our own with nam
 ## 13. Authoring and validation
 - **Schema-driven editors** for every pack. Four special widgets: **map/grid, schedule/timeline, track graph, expression**; and the **map editor**, a map's `lre-map-v1` JSON checked on every keystroke against the schema and the map lint (each problem marked on its line), with a preview drawn as Play's map draws it, and grid and node templates. The expression editor's functions are the registry's (`formulaFunctions`, sent with `lre.world get`), never a list kept in the frontend; an effect's arguments are edited one at a time, as a value or a `=` formula, and only those formulas run the editor in effect mode, which adds `roll(`.
 - **Describe a map:** a background job like Refine. The author's prose about a place goes to one helper JSON call whose prompt carries the schema and a short example; the answer, with the requested id and place, is checked against the schema and the map lint on the draft, and errors get one repair call that lists them. The map comes back as one proposal with its preview, ticked when it has no errors; applied, it goes into the draft like any map. An answer that is no map fails the job and says why.
+- **Propose routines from lore:** a background job like Import that proposes people's and groups' routine blocks and schedules from the world's lore and sheets, each resting on what it quotes (§13.1).
 - **Lint** (live, plain language):
   - refs, types, cycles, unreachable stages;
   - oversized sections;
@@ -868,6 +869,56 @@ Touch targets are at least 40 px (including a number stepper of our own with nam
 - **Templates:** three starter worlds, each converted from a neutral template into `lre-world-v1` by `bun run templates`: **Brindlemere** (a fantasy town; Story preset, a custom 13-moon calendar), **Harrowmere Hall** (a 1934 mystery manor; Grounded preset) and **Port Alder** (a modern slice-of-life town; Simulation preset). They carry 24, 21 and 26 public lore entries. Each lints clean, runs eight days with its books balanced, and has scripted walkthrough tests: quests finish, secrets stay hidden until found, puzzles appear once found.
 - **World import/export:** `lre-world-v1`, one document with the world's lore inside; World Books are not exported.
 - **The authors' reference and recipes:** `bun run reference` writes `docs/REFERENCE.md` from what the engine and each pack register (kinds and fields, effects with the arguments they declare, formula functions, actions, events, proposals, panels, slots, tables and lint codes), and a test keeps it current; every recipe in `docs/RECIPES.md` is a world fragment a test loads, lints and plays.
+
+### 13.1 Propose routines from lore
+Build's job for a world's routines and schedules (`propose_routines`, `backend/routine-proposals.ts`, run like Import and Refine). It writes the routine data people's days rest on (§8, `shared/routines`) only where the world's own text says so. A character the text gives no routine gets none.
+- **What it reads:** the draft, as a chat starts from it (`initialState`).
+  - **People and groups:** people in a life state that acts, and groups (families, households and clubs: the `group` kinds), the secret ones and the POV aside.
+  - **Sheets:** their public sheet fields, not the engine's own state (place, activity, needs, holds). A value naming a secret person or a hidden place keeps that field out.
+  - **Who they're with:** each group's members, each person's groups, and their ties: a relation either way, but not placement, gear, enmity or membership.
+  - **What they already have:** their schedules and routine blocks.
+  - **Places:** public places inside public places.
+  - **Lore:** read by the lore readers' rules for a step whose output reaches the player (`extract`, as an effects template, §5.4), on the start state. So it reads no secret entry whose gate doesn't hold, no entry waiting for review, and a `known_by` one only once the POV knows everything it links. The engine's search finds it person by person: links to them, their home, workplace and groups, and their names, role and occupation.
+  - **Why so little:** what the job proposes reaches the player as a block's label and source in Cast's day and in the narrator's sections, so it reads nothing the player may not.
+- **Calls:**
+  - **Batches:** people and groups go in id order, three to a call. Each call gets the six lore entries most about them (each one's best in turn) and the places they use, then the rest the job may name, 80 in all.
+  - **Bare owners:** someone with no sheet field and no entry about them gets no call.
+  - **The pass:** a pass makes at most Import's 12 calls, repairs included, and starts a call only while its repair still has one, so it reads at most 72 entries. A pass that stops early returns `next` (`{after, owners?}`), the input that continues it.
+  - **Settings:** the `brief` step's connection and max tokens (else `interpret`'s), with room for 16,384 tokens as Import's; each call has its own deadline (Settings → Timeouts → Import and Refine calls, No limit allowed). Cancel stops the job.
+- **The prompt** asks for two kinds of item:
+  - `schedules`: shifts, school and class timetables, services. A business's opening hours are its staff's shifts, since nothing reads a business's own schedule.
+  - `routines`: habits as blocks. A block is fixed, at a set time; flexible, somewhere in a window, on all its days or `perWeek` of them; or optional, only sometimes.
+
+  Its rules:
+  - only what an entry or a sheet states;
+  - a habit stated loosely is flexible or optional, never fixed;
+  - a household's or club's shared habit is the group's, once;
+  - a label says what, never who;
+  - a meal had every day takes the meal's id;
+  - nothing takes someone from where the text places them, or from where the story starts them;
+  - nothing contradicts or repeats what they already have.
+- **Sources:** every item cites one lore entry or sheet field it may read, with a quote. The check compares the quote with the whole entry or field, letters and digits alone, and an item whose source doesn't hold is dropped. The block's or schedule's `source` is the first that holds; its quote is cut to 240 characters and is never a macro.
+- **Checks against the draft** (`checkRoutineReply`):
+  - the owner is one of the call's;
+  - the block's shape reads (`blockShapeProblems`), or the schedule's recurrence and times do;
+  - a place is a role or a place the job may name;
+  - company is people it reads, with a tie to the owner, a group they share or the cited text naming them;
+  - a label names no one but its owner (and a group's members) and no place the POV can't see yet.
+
+  Problems the helper can fix go to one repair call that lists them with its answer, under a fresh deadline. A call that failed or ran out of time isn't asked again. The repair's answer stands, together with whatever the first answer had right and the repair left out. A proposal carrying an unrevealed secret's words (`unrevealedSecrets`) is dropped.
+- **Clashes and dedupe** (`finishRoutines`), over the story's first 14 days:
+  - the same item twice keeps the more confident;
+  - what the world already has is dropped: its activity, or its place, over all its fixed times, or a flexible block meeting a run of its activity;
+  - a fixed run at the time of another activity or place in the owner's own schedules, routine blocks or an earlier proposal clashes;
+  - so does a flexible block that never finds room, and a fixed run that would take someone, or a group's members, from where the story starts them as it starts.
+
+  A clash is pointed out, never resolved by overriding what the world holds.
+- **Proposals:**
+  - **Routine blocks:** each is a routine of its own (`routines/<owner>_<block>`), so each one applies alone. A block takes a basic need's id only when it is on every day (no days, perWeek or chance); otherwise it takes its own.
+  - **Schedules:** each is an activity schedule and, at a place, a place schedule (`<owner>_<id>_activity` and `_place`), each with the source, and each one's note names the other.
+  - **Review:** each proposal names its `owner`, which the review groups by, and its `problems`. One with problems keeps a confidence under 70%, so the review starts it unticked, and `lre_job_apply` applies it only when named.
+  - **Applying** is the editor's `put`, as for every job.
+- **Failure and the awareness setting:** a job with no one to read, or with no call that answered, fails and says why. The awareness setting (§8) bears on the runtime only: the job proposes the same under every setting.
 
 ## 14. Quality gates and acceptance (D15)
 
