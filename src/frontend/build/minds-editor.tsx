@@ -7,7 +7,7 @@
 
 import { useMemo, useState } from "preact/hooks";
 import type { JsonObject } from "../../shared/json";
-import type { FidelityWeights, MindPurpose, MindsSecrecy, WorldMindsConfig } from "../../shared/minds";
+import type { FidelityWeights, Limit, MindPurpose, MindsSecrecy, WorldMindsConfig } from "../../shared/minds";
 import { DEFAULT_WORLD_MINDS, MIND_PROMPT_DEFAULTS, MIND_PURPOSES, MINDS_RANGES, worldMindsOf, worldMindTemplate } from "../../shared/minds";
 import type { LintIssue } from "../../shared/protocol";
 import type { WorldDoc } from "../../shared/world";
@@ -245,11 +245,17 @@ export function MindsEditor() {
         <div class="lre-minds-fields">
           {MEMORY_FIELDS.map((field) => {
             const current = memoryValue(value.memory, field);
-            const set = (v: number | boolean) => setValue({ ...value, memory: { ...value.memory, [field.part]: { ...(value.memory[field.part] as unknown as JsonObject), [field.key]: v } } });
-            return field.range ? (
-              <NumberStepper key={`${field.part}.${field.key}`} label={field.label} value={typeof current === "number" ? current : null} min={field.range[0]} max={field.range[1]} step={field.step ?? 1} integer={field.integer === true} disabled={busy} onChange={set} />
-            ) : (
-              <CheckField key={`${field.part}.${field.key}`} label={field.label} checked={current === true} disabled={busy} onChange={set} />
+            const set = (v: Limit | boolean) => setValue({ ...value, memory: { ...value.memory, [field.part]: { ...(value.memory[field.part] as unknown as JsonObject), [field.key]: v } } });
+            const key = `${field.part}.${field.key}`;
+            if (!field.range) return <CheckField key={key} label={field.label} checked={current === true} disabled={busy} onChange={set} />;
+            const range = field.range;
+            // A field that may have no limit has its switch; back from none it starts at the built-in default.
+            const builtIn = memoryValue(DEFAULT_WORLD_MINDS.memory, field);
+            return (
+              <div key={key} class="lre-minds-fields">
+                {field.none ? <CheckField label={`${field.label}: ${field.none}`} checked={current === "none"} disabled={busy} onChange={(none) => set(none ? "none" : typeof builtIn === "number" ? builtIn : range[0])} /> : null}
+                {current === "none" ? null : <NumberStepper label={field.label} value={typeof current === "number" ? current : null} min={range[0]} max={range[1]} step={field.step ?? 1} integer={field.integer === true} disabled={busy} onChange={set} />}
+              </div>
             );
           })}
         </div>

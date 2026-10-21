@@ -9535,6 +9535,81 @@ function resolveTarget(reg, world, state, target) {
     return { code: "too_long", reason: `a timelapse reaches at most ${TIME_LIMITS.timelapseMinutes / MINUTES_PER_DAY} days ahead` };
   return { to, label, ...stopWhen ? { stopWhen } : {} };
 }
+var NEXT_DAY_PART_GAP = 180;
+function nextDayPart(cal, now, index) {
+  const start = cal.partStarts[index] ?? 0;
+  const at = nextTimeOfDay(cal, now, start);
+  return { type: "at", at: at - now < NEXT_DAY_PART_GAP ? nextTimeOfDay(cal, at, start) : at };
+}
+var SPAN_COUNTS = { a: 1, an: 1, one: 1, next: 1, "a couple of": 2, "couple of": 2, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10, eleven: 11, twelve: 12, fifteen: 15, twenty: 20, thirty: 30, forty: 40, "forty five": 45, ninety: 90 };
+var SPAN_UNITS = { minute: 1, min: 1, hour: 60, hr: 60, day: MINUTES_PER_DAY, week: 7 * MINUTES_PER_DAY };
+var longestFirst = (words) => [...words].sort((a, b) => b.length - a.length).join("|");
+var plain = (name) => name.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+var SPAN_TERM = new RegExp(` (${longestFirst(Object.keys(SPAN_COUNTS))}|\\d+(?:\\.\\d+)?)( and a half)? (${longestFirst(Object.keys(SPAN_UNITS))})s?( and a half)?(?= )`, "g");
+var SPAN_NOT_BEFORE = / (?:last|past|previous|every|per|each|\d+(?:\.\d+)?)$/;
+var SPAN_NOT_AFTER = /^ (?:ago|earlier|before|already|back|previously|old)(?= )/;
+var SPAN_CONTEXT = 24;
+var STATED_TIME = / \d{1,2}:\d{2}| (?:\d{1,2} ?(?:am|pm)|o clock|at \d+|noon|midnight|\d{1,2}(?:st|nd|rd|th)|\d{4} \d{1,2} \d{1,2})(?= )/;
+var PART_LEADS = { until: "until", till: "until", til: "until", to: "until", by: "until", "later that": "today", "later this": "today", "later in the": "today", that: "today", this: "today", next: "next", following: "next", tomorrow: "tomorrow" };
+var COMMITMENT_SPAN = / (?:until|till|til)(?: my| the| our)?(?: next)? (shift|work|commitment|appointment)s?(?= )/g;
+function typedSpan(cal, now, words) {
+  const t = ` ${words.toLowerCase().replace(/([ap])\.\s?m\.?/g, "$1m").replace(/(?<!\d)[.,;!?]|[.,;!?](?!\d)/g, " | ").replace(/[^a-z0-9.:|]+/g, " ").replace(/\s+/g, " ").trim()} `.replace(/ (?:a |an )?half (?:an? )?hour(?= )/g, " 30 minutes").replace(/ (?:a |an )?quarter (?:of )?(?:an? )?hour(?= )/g, " 15 minutes");
+  const weekdays = cal.system.weekdayNames.map(plain).filter((n) => n.length > 3);
+  const months = cal.system.monthNames.map(plain).filter((n) => n !== "");
+  if (STATED_TIME.test(t) || weekdays.some((d) => t.includes(` ${d} `)) || months.some((m) => new RegExp(` (?:${m} \\d|\\d+ (?:of )?${m} )`).test(t)))
+    return null;
+  const found = [];
+  const lengths = [];
+  for (const m of t.matchAll(SPAN_TERM)) {
+    const count = m[1] ?? "";
+    const unit = SPAN_UNITS[m[3] ?? ""] ?? 0;
+    if (count === "next" && unit >= MINUTES_PER_DAY || SPAN_NOT_BEFORE.test(t.slice(Math.max(0, m.index - SPAN_CONTEXT), m.index)))
+      continue;
+    lengths.push({ start: m.index, end: m.index + m[0].length, minutes: ((SPAN_COUNTS[count] ?? Number(count)) + (m[2] || m[4] ? 0.5 : 0)) * unit });
+  }
+  const runs = [];
+  for (const length of lengths) {
+    const last = runs.at(-1);
+    if (last && /^(?: and)?$/.test(t.slice(last.end, length.start))) {
+      last.end = length.end;
+      last.minutes += length.minutes;
+    } else
+      runs.push({ end: length.end, minutes: length.minutes });
+  }
+  for (const run of runs)
+    if (run.minutes > 0 && !SPAN_NOT_AFTER.test(t.slice(run.end, run.end + SPAN_CONTEXT)))
+      found.push({ type: "duration", minutes: Math.round(run.minutes) });
+  const named = cal.dayParts.flatMap((p, index) => [p.id, p.label].map((n) => ({ name: plain(n), index }))).filter((n) => n.name !== "");
+  const day = dateAt(cal, now);
+  const aheadToday = (index) => clockAt(cal, day.dayIndex, cal.partStarts[index] ?? 0) > now ? { type: "day_part", dayPart: cal.dayParts[index]?.id ?? "" } : null;
+  for (const m of t.matchAll(new RegExp(` (${longestFirst(Object.keys(PART_LEADS))})(?: the)? (${longestFirst(named.map((n) => n.name))})(?= )`, "g"))) {
+    const index = named.find((n) => n.name === m[2])?.index ?? -1;
+    const lead = PART_LEADS[m[1] ?? ""];
+    if (index < 0)
+      continue;
+    if (lead === "until")
+      found.push({ type: "day_part", dayPart: cal.dayParts[index]?.id ?? "" });
+    else if (lead === "next")
+      found.push(nextDayPart(cal, now, index));
+    else if (lead === "tomorrow") {
+      const base = day.minuteOfDay < (cal.partStarts[0] ?? 0) ? day.dayIndex - 1 : day.dayIndex;
+      found.push({ type: "at", at: clockAt(cal, base + 1, cal.partStarts[index] ?? 0) });
+    } else {
+      const ahead = aheadToday(index);
+      if (ahead)
+        found.push(ahead);
+    }
+  }
+  if (/ tonight(?= )/.test(t)) {
+    const ahead = cal.dayParts.map((p, index) => p.id === "evening" || p.id === "night" ? aheadToday(index) : null).find((target) => target !== null);
+    if (ahead)
+      found.push(ahead);
+  }
+  for (const m of t.matchAll(COMMITMENT_SPAN))
+    found.push({ type: m[1] === "shift" || m[1] === "work" ? "shift" : "commitment" });
+  const distinct = [...new Map(found.map((f) => [JSON.stringify(f), f])).values()];
+  return distinct.length === 1 ? distinct[0] ?? null : null;
+}
 function parseOverrides(v) {
   const out = {};
   if (!isRecord(v))
@@ -25282,12 +25357,12 @@ var MIN_TERM = 3;
 var MIN_WORDS = 4;
 var WORD_CAP = 3;
 var STOP_WORDS = Object.fromEntries("the and for with that this from into onto have has had was were are you your yours my mine our ours his her hers their theirs them they she him its not but all any can will would could should about then than there here what when where which who whom how why just very some more most other out over under again also like get got one two too off own same such only each both few nor yet".split(" ").map((w) => [w, true]));
-function plain(text) {
+function plain2(text) {
   const words = text.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim();
   return words === "" ? "" : ` ${words} `;
 }
 function wordsOf2(text) {
-  return plain(text).trim().split(" ").filter((w) => w.length >= MIN_TERM && !hasOwn(STOP_WORDS, w)).map((w) => w.length > 4 && w.endsWith("s") && !w.endsWith("ss") ? w.slice(0, -1) : w);
+  return plain2(text).trim().split(" ").filter((w) => w.length >= MIN_TERM && !hasOwn(STOP_WORDS, w)).map((w) => w.length > 4 && w.endsWith("s") && !w.endsWith("ss") ? w.slice(0, -1) : w);
 }
 var listOf = (v) => Array.isArray(v) ? v.filter((x) => typeof x === "string") : [];
 function loreHeldBy(world, entry, who) {
@@ -25378,12 +25453,12 @@ function topicMembers(world, topic) {
 function loreSearch(r, q) {
   const { reg, world, state } = r;
   const open = loreGateReader(reg, world, state);
-  const text = plain(q.query ?? "");
-  const exact = new Set((q.terms ?? []).map(plain).filter((t) => t.trim().length >= MIN_TERM));
+  const text = plain2(q.query ?? "");
+  const exact = new Set((q.terms ?? []).map(plain2).filter((t) => t.trim().length >= MIN_TERM));
   const said = (name) => {
     if (typeof name !== "string")
       return null;
-    const p = plain(name);
+    const p = plain2(name);
     return p.trim().length >= MIN_TERM && (exact.has(p) || text !== "" && text.includes(p)) ? p.trim() : null;
   };
   const tableTerms = new Map;
@@ -64065,13 +64140,16 @@ async function interpret(steps, text, context, actions, config, userId, signal, 
   const rules = [
     `Read what the player character does in the input. Work out what it refers to ("what she offered", "there", "him") from the scene and the recent messages.`,
     `Only the player character's own deliberate actions count, whether said in the first person ("I", "we"), as a stage direction ("[${pov.name} heads to the roof]") or as narration about ${pov.name} in the third person. "I'll \u2026" about what the player character does now is an action.`,
-    `No action ("action": null) for speech alone, out-of-character text ("OOC:", "((\u2026))"), questions, requests to others, what someone else does, hypotheticals, plans for another time, recaps or feelings.`,
+    `No action ("action": null) for speech alone, out-of-character text ("OOC:", "((\u2026))") that doesn't say time passes, questions, requests to others, what someone else does, hypotheticals, plans for another time, recaps or feelings.`,
+    ...actions.some((a) => a.id === TIMELAPSE_ACTION) ? [
+      `A time skip is "action": "${TIMELAPSE_ACTION}", whatever else the input says: an out-of-character instruction that time passes or skips ahead ("OOC: over the next hour, I sort the stock", "(OOC: skip ahead two hours)", "[OOC] later that evening", "((cover the next hour))"), and in character a span spent on something no catalog action covers ("I spend the next hour sorting the stock"). Its "params" hold "span", the input's own words for how long or until when ("over the next hour"), with "minutes", "until" or "at" as the catalog says. What the input says happens in that time fills it: never an action of its own, nor in "more", "next" or "then".`
+    ] : [],
     `Use only the catalog's actions, as described there: never invent one. When no catalog action fits, "action" is null. An incidental action that fits none, or names someone or somewhere nothing lists, is left out: it never hides the actions after it.`,
     `An action on a thing the player says they have that nothing lists ("I pour Theresa a coffee" with no coffee listed) is still read, in order with the rest: its param holds the thing in the input's own words ("coffee"), and "thing" says what sort of thing it is: "food", "drink", "weapon", "key", "document", "money" or "other".`,
     `When the input and its context still leave it unclear which action or which target is meant, give "action": null and a short "reason"; never guess.`,
     `Params are world ids, from the scene, Places and the catalog's lists, except a thing nothing lists, which keeps the input's own words. A text param that names an item keeps its qualifiers as written ("large pizza, delivered", not "pizza"). Money params are plain amounts in ${world.currency.code} as written (200 for ${world.currency.symbol}200).`,
     `Read every action in the input, in order, not only the first. Return the first as "action" with its "params". If the input has more actions after it, list them in order in "more" (at most ${ACTION_QUEUE_LIMIT - 1}), each {"action": a catalog id, "params": {...}, "text": that action written as the player would type it}: "I walk to the market and buy bread" \u2192 "action" for the walk, and "more": [{"action": <the buy's id>, "params": {"item": "bread"}, "text": "I buy bread"}]. An action after them that no catalog action fits goes in "next", written as the player would type it.`,
-    `If the input lets time pass after its last action ("\u2026and sleep until the next morning", "\u2026then wait two hours", "\u2026then skip ahead to Friday at 6 PM"), add "then": {"minutes": number}, {"until": a day part, "shift" or "commitment"} or {"at": "YYYY-MM-DD HH:MM"} for a stated day and time; time passing is never in "more" or "next", nor is anything else that isn't an action.`
+    `If, in character, the input lets time pass after its last action ("\u2026and sleep until the next morning", "\u2026then wait two hours", "\u2026then skip ahead to Friday at 6 PM"), add "then": {"span": its words for how long or until when, with "minutes", "until" (a day part, "shift" or "commitment") or "at" ("YYYY-MM-DD HH:MM" for a stated day and time)}; time passing is never in "more" or "next", nor is anything else that isn't an action.`
   ];
   if (actions.some((a) => a.id === TRY_ACTION)) {
     rules.push(`An attempt whose outcome is uncertain that no other catalog action covers is "${TRY_ACTION}" (Try something), even asked as a question ("I watch him as he answers: is he lying?" is the player character's reading of him against his deceit). Never read an attempt a catalog action covers as "${TRY_ACTION}", nor both: that action alone. "attempt" is what is attempted, in the input's words; "skill" and "difficulty" come from its lists; "with" lists the companions the input has join in ("we sneak past"); "against" lists the people here it opposes or targets, each with the skill they resist with.`);
@@ -64101,7 +64179,7 @@ ${rules.map((r) => `- ${r}`).join(`
 `)}`,
     presumed.map((r) => `- ${r}`).join(`
 `),
-    `Output JSON only, exactly this shape: {"action": string|null, "params": {...}, "thing"?: string, "confidence": number, "reason"?: string, "more"?: [{"action": string, "params": {...}, "text": string, "thing"?: string}], "then"?: {...}, "next"?: string}.`
+    `Output JSON only, exactly this shape: {"action": string|null, "params": {...}, "thing"?: string, "confidence": number, "reason"?: string, "more"?: [{"action": string, "params": {...}, "text": string, "thing"?: string}], "then"?: {"span": string, "minutes"?: number, "until"?: string, "at"?: string}, "next"?: string}.`
   ].filter((part) => part !== "").join(`
 `);
   const raw = await steps.helperJson("interpret", system, text, config, userId, signal, { lore, guidance });
@@ -66038,8 +66116,8 @@ function thisBuild(moduleUrl = import.meta.url) {
   const dir = moduleUrl.replace(/[^/]*$/, "");
   const path = pathOfFileUrl(`${dir}${KIT_FILE}`);
   const core = pathOfFileUrl(`${dir}${CORE_FILE}`);
-  const sha256 = "f0e6f4573143a73ae8f1559d4675b7204dd02d26fa61b5d8338669785a3fbbc0";
-  return { id: "c0408ef1", kit: sha256 !== undefined && path !== null && core !== null ? { path, core, sha256, api: KIT_API } : null };
+  const sha256 = "8ee404ef33bff9c8f5910444fe8bb9e31a5f55b9122a64fc6f7b6371fbde535e";
+  return { id: "f1b46a94", kit: sha256 !== undefined && path !== null && core !== null ? { path, core, sha256, api: KIT_API } : null };
 }
 var BUILD_FILE = "agents/build.json";
 var USER_FILE = "agents.json";
@@ -67502,7 +67580,7 @@ function failureWords(req) {
 }
 
 // src/backend/interpret-context.ts
-var TIMELAPSE_LEXICON = ["wait until", "sleep until", "next morning", "skip ahead", "skip to", "pass the time", "sleep through", "hours later", "days later", "wait for"];
+var TIMELAPSE_LEXICON = ["skip ahead", "time skip", "over the next hour", "later that evening", "wait until", "sleep until", "next morning", "skip to", "pass the time", "sleep through", "hours later", "days later", "wait for"];
 function localNow(world, state) {
   const cal = calendarOf(world);
   const offset = placeOffset(world, state.clock, placeOfEntity(state, world.pov));
@@ -67584,8 +67662,8 @@ function timelapseEntry(world, state) {
   return {
     id: TIMELAPSE_ACTION2,
     label: "Let time pass",
-    description: `wait, sleep or skip ahead: minutes for a stated duration; until one of ${parts.join(", ")} ("next <day part>" for the following day's); or at a stated day and time, as "YYYY-MM-DD HH:MM" (it is now ${localNow(world, state)})`,
-    params: ["minutes? (number)", "until? (text)", "at? (text)"],
+    description: `a time skip: wait, sleep, skip ahead, or spend a stated span on something no other action covers; an out-of-character instruction that time passes is always this, whatever else the input says ("OOC: over the next hour, I sort the stock" is a skip of an hour, the sorting what fills it). span: the input's own words for how long or until when ("over the next hour", "later that evening"); with it, minutes for a stated duration; until one of ${parts.join(", ")} ("next <day part>" for the following day's); or at a stated day and time, as "YYYY-MM-DD HH:MM" (it is now ${localNow(world, state)})`,
+    params: ["span (text: the input's words for how long or until when)", "minutes? (number)", "until? (text)", "at? (text)"],
     needs: [],
     lexicon: TIMELAPSE_LEXICON
   };
@@ -68966,7 +69044,7 @@ class Runtime {
     this.steps.onCallStart = (userId, purpose) => this.diag.callStart(userId, purpose);
     this.toolSupport = new ToolSupport(this.host);
     this.minds = { host: this.host, registry: this.registry, steps: this.steps, settings: this.settings, presets: this.presets };
-    this.ledger = new LedgerService(this.host, (chatId, userId) => this.resolveEnv(chatId, userId), new LedgerFold(this.registry, { fingerprint: "c0408ef1" }), (chatId) => messages.forget(chatId));
+    this.ledger = new LedgerService(this.host, (chatId, userId) => this.resolveEnv(chatId, userId), new LedgerFold(this.registry, { fingerprint: "f1b46a94" }), (chatId) => messages.forget(chatId));
     this.studio = new StudioBridge(this.host, this.worlds);
     this.worlds.onChange = (worldId, userId) => this.studio.worldChanged(worldId, userId);
     this.agents = new Agents(this.host, options.build ?? thisBuild());
@@ -69327,7 +69405,7 @@ class Runtime {
     const lore = this.stepLore(run, at, { text: `${text}
 ${this.trackWords(render.world, render.state)}`, links: this.sceneLinks(render.world, render.state) });
     if (run.config.route?.provider === "decision") {
-      const criteria = { none: "Not an action: speech, out-of-character text, a request, a feeling or a recap." };
+      const criteria = { none: "Not an action: speech, a request, a feeling, a recap, or out-of-character text that doesn't say time passes." };
       for (const c of catalog)
         criteria[c.id] = c.description ? `${c.label}: ${c.description}` : c.label;
       const answer = await this.steps.decide("interpret", { text, scene: context.scene.lines, recent: context.scene.recent }, { action: { type: "choice", instructions: run.template?.template ?? "Which engine action does the player character deliberately take in this typed input?", criteria } }, run.config, userId, budget.signal, lore, run.guidance);
@@ -69364,10 +69442,11 @@ ${this.trackWords(render.world, render.state)}`, links: this.sceneLinks(render.w
     }
     const chipText = (piece) => offeredNext(this.registry, render.world, render.state, piece, text, secrets) ?? "";
     let next = (result.next ?? []).map(chipText);
-    const timeOnly = result.action === TIMELAPSE_ACTION2 ? result.params : !result.action && result.then ? result.then : null;
-    if (timeOnly) {
+    if (result.action === TIMELAPSE_ACTION2 || !result.action && result.then !== undefined) {
       bridge.setNext(text, joinActions([...(result.queue ?? []).map((q) => chipText(q.text)), ...next]) || null);
-      const target = interpretedTarget(timeOnly, render.world, render.state, text);
+      const target = (result.action === TIMELAPSE_ACTION2 ? interpretedTarget(result.params, render.world, render.state, text) : null) ?? (result.then ? interpretedTarget(result.then, render.world, render.state, text) : null) ?? typedSpan(calendarOf(render.world), render.state.clock, text);
+      if (!target)
+        this.host.log("info", `[LumiRPEngine] interpret: lets time pass but states no span it can read; the turn plays as roleplay`, userId);
       const over = target?.type === "duration" && target.minutes > INTERPRETED_TIMELAPSE_CAP;
       bridge.setOffer(text, over ? target : null);
       bridge.setIntent(text, target && !over ? timelapseIntent(target) : null, target !== null && !over);
@@ -70371,30 +70450,33 @@ var TYPE_LABELS = {
   life: "Life and death"
 };
 var INTERPRETED_TIMELAPSE_CAP = 1440;
-var NEXT_DAY_PART_GAP = 180;
 function interpretedTarget(params, world, state, text) {
   const cal = calendarOf(world);
   const now = state.clock;
+  const said = typeof params.span === "string" ? typedSpan(cal, now, params.span) : null;
+  if (said)
+    return said;
   const local = typeof params.at === "string" ? clockOfStamp(cal, params.at) : null;
   if (local !== null)
     return { type: "at", at: local - placeOffset(world, local, placeOfEntity(state, world.pov)) };
   const raw = typeof params.until === "string" ? params.until.trim().toLowerCase() : "";
+  const spoken = raw === "" ? null : typedSpan(cal, now, raw);
+  if (spoken)
+    return spoken;
   const next = /^(the\s+)?(next|tomorrow)\b/.test(raw);
   const until = raw.replace(/^(the\s+)?(next|tomorrow)\s*/, "");
   const idx = cal.dayParts.findIndex((d) => d.id.toLowerCase() === until || d.label.toLowerCase() === until);
   const part = cal.dayParts[idx];
   if (part) {
     const words = [until, part.label.toLowerCase()].map((w) => w.replace(/[^a-z0-9 ]/g, "")).filter((w) => w !== "");
-    if (next || /\btomorrow\b/i.test(text) || new RegExp(`\\bnext\\s+(${words.join("|")})\\b`, "i").test(text)) {
-      const start = cal.partStarts[idx] ?? 0;
-      const at = nextTimeOfDay(cal, now, start);
-      return { type: "at", at: at - now < NEXT_DAY_PART_GAP ? nextTimeOfDay(cal, at, start) : at };
-    }
+    if (next || /\btomorrow\b/i.test(text) || new RegExp(`\\bnext\\s+(${words.join("|")})\\b`, "i").test(text))
+      return nextDayPart(cal, now, idx);
     return { type: "day_part", dayPart: part.id };
   }
   if (until === "shift" || until === "commitment")
     return { type: until };
-  const minutes = typeof params.minutes === "number" && Number.isFinite(params.minutes) ? Math.round(params.minutes) : 0;
+  const given = typeof params.minutes === "string" && /^\s*\d+(?:\.\d+)?\s*$/.test(params.minutes) ? Number(params.minutes) : params.minutes;
+  const minutes = typeof given === "number" && Number.isFinite(given) ? Math.round(given) : 0;
   return minutes > 0 ? { type: "duration", minutes } : null;
 }
 function playerReason(failed) {
