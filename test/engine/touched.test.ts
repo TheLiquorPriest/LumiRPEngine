@@ -209,6 +209,8 @@ const EVERY_TYPE: LedgerEvent[] = [
   { type: "castlife.follow", data: { entity: "dev", follow: { mode: "no_invitations", awareness: "story_first" } } },
   { type: "castlife.routine", data: { entity: "dev", block: "dinner", value: { id: "dinner", off: true }, source: { type: "gm", at: 0 } } },
   { type: "castlife.schedule", data: { entity: "dev", schedule: "dev_shift", value: { off: true, until: null }, source: { type: "story", at: 0 } } },
+  // A skip's plan is the Cast life slice's record of the skip, never an entity's definition.
+  { type: "castlife.skip_plan", data: { from: 0, to: 60, plans: [], note: "No one to plan." } },
   { type: "story.flag", data: { name: "met_dev", value: true } },
   { type: "combat.start", data: { encounter: "e1", place: "taproom", order: [{ id: "you", side: "party", init: 15, left: { action: 1 } }, { id: "rat", side: "foes", init: 5, left: { action: 1 } }] } },
   { type: "combat.spend", data: { encounter: "e1", who: "you", cost: { action: 1 } } },
