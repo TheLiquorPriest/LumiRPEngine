@@ -56923,6 +56923,7 @@ function emptyJournal(chatId) {
 var EMPTY_LEDGER = () => ({ v: 1, swipes: {}, markers: [] });
 var REFUSED_KEPT = 8;
 var GONE_SWIPE = -1;
+var PAUSED_DROP = "the chat was paused";
 function readElsewhereRefusal(latest) {
   const cause = "This reply was written while an earlier message or swipe it depended on changed, so switching back can't restore it.";
   return latest ? `${cause} Re-run it to play the turn again.` : `${cause} It can't be undone or read again.`;
@@ -57292,6 +57293,9 @@ class LedgerCore {
         }
       }
     }
+    const swiped = input.targetMessageId && (input.kind === "swipe" || input.kind === "regenerate" || input.kind === "renarrate") ? observed.findIndex((m) => m.id === input.targetMessageId) : -1;
+    if (swiped >= 0)
+      pending.parentPath = this.fold(observed.slice(0, swiped)).messages.at(-1)?.path ?? ROOT_PATH;
     j.pending[input.generationId] = pending;
   }
   prepare(input, observed) {
@@ -57473,24 +57477,35 @@ class LedgerCore {
     }
     return out;
   }
-  carryFixes(rec, target, swipeId, prefix) {
-    if (!target)
-      return;
-    let source;
-    for (let s = swipeId - 1;s >= 0 && !source; s--) {
-      const candidate = target.ledger?.swipes[String(s)];
-      if (candidate && !isTombstoned(this.journal.tombstones, target.id, candidate))
-        source = candidate;
+  rerunFixes(target, swipeId, parents) {
+    for (let s = swipeId - 1;s >= 0; s--) {
+      const source = target.ledger?.swipes[String(s)];
+      if (!source || isTombstoned(this.journal.tombstones, target.id, source))
+        continue;
+      const fixes = source.post.filter((e) => e.kind === "fix" && parents.some((parent) => isLive(e.at, parent, turnPath(source))));
+      return fixes.length > 0 ? { source, fixes } : null;
     }
-    const fixes = source ? source.post.filter((e) => e.kind === "fix" && isLive(e.at, prefix.parent, turnPath(source))) : [];
-    if (!source || fixes.length === 0)
+    return null;
+  }
+  carryFixes(rec, target, swipeId, prefix) {
+    const found = target ? this.rerunFixes(target, swipeId, [prefix.parent]) : null;
+    if (!target || !found)
       return;
     const markers = (target.ledger?.markers ?? []).filter((mk) => mk.seq > rec.markersApplied && isLive(mk.at, prefix.parent, rec.path));
-    const carried = this.carry(prefix.state, prefix.world, fixes, source.undone, markers);
+    const carried = this.carry(prefix.state, prefix.world, found.fixes, found.source.undone, markers);
     rec.post = carried.kept.map((e) => ({ ...e, at: rec.path }));
     rec.undone = carried.undone;
     if (carried.dropped.length > 0)
       rec.dropped = carried.dropped;
+  }
+  leaveFixes(rec, target, swipeId, parents) {
+    const found = target ? this.rerunFixes(target, swipeId, parents) : null;
+    if (!found)
+      return;
+    const off = (seq, index) => found.source.undone.some((u) => u.in === "post" && u.seq === seq && u.index === index);
+    const left = found.fixes.filter((e) => !e.events.every((_, i) => off(e.seq, i)));
+    if (left.length > 0)
+      rec.dropped = left.map((e) => ({ seq: e.seq, kind: e.kind, reason: PAUSED_DROP }));
   }
   saved(generationId, createdId) {
     const p = this.journal.pending[generationId];
@@ -57633,8 +57648,9 @@ class LedgerCore {
       return;
     const paused = this.pausedWithin(observed.slice(0, index));
     const read = readReply && content !== "" && !paused;
-    const rerun = !p.copies && !paused && (p.kind === "swipe" || p.kind === "regenerate");
-    const at = read || rerun || !p.planned ? this.plannedPrefix(p, observed, index) : null;
+    const rerun = !p.copies && (p.kind === "swipe" || p.kind === "regenerate" || p.kind === "renarrate");
+    const carries = rerun && !paused;
+    const at = read || carries || !p.planned ? this.plannedPrefix(p, observed, index) : null;
     const [target] = this.chain(observed.slice(index, index + 1));
     const start = this.journal.started ? [] : p.startMarkers;
     const rec = {
@@ -57677,12 +57693,15 @@ class LedgerCore {
         if (events.length > 0)
           rec.post.push({ seq: ++this.journal.seq, at: rec.path, kind: "narr", events });
       }
-    } else if (at && (read || rerun)) {
+    } else if (at && (read || carries)) {
       const prefix = this.prefixState(at.out, target, rec, start);
       if (prefix && read)
         rec.events.push(...this.read(prefix.state, prefix.world, `${p.seed}:read`, content));
-      if (prefix && rerun)
+      if (prefix && carries)
         this.carryFixes(rec, target, swipeId, start.length > 0 && rec.events.length === 0 ? this.prefixState(at.out, target, rec) ?? prefix : prefix);
+    } else if (rerun && paused) {
+      const inForce = (at?.out ?? this.fold(observed.slice(0, index))).messages.at(-1)?.path ?? ROOT_PATH;
+      this.leaveFixes(rec, target, swipeId, [p.parentPath, inForce]);
     }
     const ledger = this.ledgerFor(messageId, observed[index]);
     ledger.swipes[String(swipeId)] = rec;
@@ -66015,8 +66034,8 @@ function thisBuild(moduleUrl = import.meta.url) {
   const dir = moduleUrl.replace(/[^/]*$/, "");
   const path = pathOfFileUrl(`${dir}${KIT_FILE}`);
   const core = pathOfFileUrl(`${dir}${CORE_FILE}`);
-  const sha256 = "11748ce42e7ad109c6e42346d443719ab89e82e578952711830acf786d337e6b";
-  return { id: "a1e20f30", kit: sha256 !== undefined && path !== null && core !== null ? { path, core, sha256, api: KIT_API } : null };
+  const sha256 = "3684371c81c07f75e5a0622d2ec1d4b5f19e11480cc134ff6d2fb129c5033327";
+  return { id: "c974c41a", kit: sha256 !== undefined && path !== null && core !== null ? { path, core, sha256, api: KIT_API } : null };
 }
 var BUILD_FILE = "agents/build.json";
 var USER_FILE = "agents.json";
@@ -68867,7 +68886,7 @@ class Runtime {
     this.steps.onCallStart = (userId, purpose) => this.diag.callStart(userId, purpose);
     this.toolSupport = new ToolSupport(this.host);
     this.minds = { host: this.host, registry: this.registry, steps: this.steps, settings: this.settings, presets: this.presets };
-    this.ledger = new LedgerService(this.host, (chatId, userId) => this.resolveEnv(chatId, userId), new LedgerFold(this.registry, { fingerprint: "a1e20f30" }), (chatId) => messages.forget(chatId));
+    this.ledger = new LedgerService(this.host, (chatId, userId) => this.resolveEnv(chatId, userId), new LedgerFold(this.registry, { fingerprint: "c974c41a" }), (chatId) => messages.forget(chatId));
     this.studio = new StudioBridge(this.host, this.worlds);
     this.worlds.onChange = (worldId, userId) => this.studio.worldChanged(worldId, userId);
     this.agents = new Agents(this.host, options.build ?? thisBuild());
