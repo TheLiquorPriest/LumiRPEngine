@@ -14,6 +14,8 @@ import { placeOfEntity } from "../../src/engine/scope";
 import type { WorldState } from "../../src/engine/state";
 import type { JsonObject } from "../../src/shared/json";
 import type { LedgerEvent } from "../../src/shared/ledger";
+import { LEDGER_NAMESPACE } from "../../src/shared/ledger";
+import { objOf } from "../../src/engine/pack-kit";
 import type { WorldDoc } from "../../src/shared/world";
 import { ALL_PACKS, STARTER_WORLDS } from "../../src/packs/index";
 import { startState } from "../packs/support";
@@ -246,5 +248,31 @@ describe("a message without a skip", () => {
     expect(placeOfEntity(moved.state, moved.world.pov)).toBe("bluebird_coffee");
     expect(timelapseOf(moved.record?.events)).toBeUndefined();
     expect(await offers(rig, chatId)).toEqual([]);
+  });
+});
+
+describe("the palette's Timelapse", () => {
+  /** Four hours from the palette (every interrupt noted) after the first turn, into the POV's morning at the garage; whether the POV ended where it started, and what its message recorded. */
+  async function palette(params: JsonObject): Promise<{ held: boolean; recorded: unknown }> {
+    const { rig, chatId } = await alder(() => NONE);
+    const before = await folded(rig, chatId);
+    const here = placeOfEntity(before.state, before.world.pov);
+    rig.body(await rig.send({ type: "lre.action", chatId, action: "timelapse", params: { target: { type: "duration", minutes: 240 }, overrides: { invitation: "note", decline: "note", incident: "note", quest: "note", arrival: "note" }, ...params }, source: "palette" }));
+    const sent = objOf(objOf((await rig.host.chats.messages(chatId, rig.host.userId)).at(-1)?.metadata[LEDGER_NAMESPACE]).params);
+    const g = await rig.host.start(chatId, { type: "normal" });
+    await rig.host.finish(g, "The hours go by.");
+    const after = await folded(rig, chatId);
+    return { held: placeOfEntity(after.state, after.world.pov) === here, recorded: sent.povRoutine };
+  }
+
+  test("holds the POV where the story has it by default, and lives its routine when Follow my routine is chosen", async () => {
+    // The world leaves Follow my routine off, and the sheet opens with it so.
+    const { rig, chatId } = await alder(() => NONE);
+    expect((await rig.rt.view(chatId, rig.host.userId)).palette?.timelapse?.followRoutine).toBe(false);
+    // Held, the message records the hold as a typed span's does, so its Continue keeps it (DESIGN §8); followed, none.
+    expect(await palette({})).toEqual({ held: true, recorded: false });
+    expect(await palette({ followRoutine: false })).toEqual({ held: true, recorded: false });
+    // Its work takes the POV to the garage.
+    expect(await palette({ followRoutine: true })).toEqual({ held: false, recorded: undefined });
   });
 });

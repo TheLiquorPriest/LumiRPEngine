@@ -225,7 +225,7 @@ Version 1 · realism domain `castlife` · requires `gear`, `relationships`, `spa
 |---|---|
 | `castlife.decide` | `key`, `choice` |
 | `castlife.override` | `who`, `minutes?`, `place?`, `activity?` |
-| `castlife.routine` | `entity`, `blocks?`, `schedules?`, `turn?` |
+| `castlife.routine` | `entity`, `blocks?`, `schedules?`, `turn?`, `by?` |
 | `castlife.satisfy` | `need`, `entity?` |
 
 ### Formula functions

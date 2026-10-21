@@ -8,6 +8,7 @@ import { INFER_MODE_LABEL } from "../shared/inferred";
 import { DOMAINS, pathSafe } from "../shared/ids";
 import type { JsonObject, JsonValue } from "../shared/json";
 import { hasOwn, isRecord, safeKey } from "../shared/json";
+import { routineSettingsOf } from "../shared/routines";
 import type { EventRef, HeldWrite, LedgerEvent, MarkerBody } from "../shared/ledger";
 import { LEDGER_NAMESPACE } from "../shared/ledger";
 import type { RulesetDef, WorldDoc } from "../shared/world";
@@ -219,17 +220,23 @@ export class Dispatcher {
         // any, the message is only the action's label.
         const said = r.text?.trim() ?? "";
         let text = said;
+        let params = r.params;
         if (r.action === TIMELAPSE_ACTION) {
           const target = parseTarget(r.params.target);
           if (!target) throw new RequestError("bad_request", "a timelapse needs a target");
           text ||= `(Timelapse: ${neutralizeMacros(targetLabel(target))})`;
+          // "Follow my routine" (DESIGN §8, §9.2): the player's choice, else the world's default. Held, the
+          // skip keeps the POV where the story has it, as a typed span does. The message records the
+          // choice as the engine reads it, so a Re-run or a Continue runs it alike whatever the setting is then.
+          const follows = typeof r.params.followRoutine === "boolean" ? r.params.followRoutine : routineSettingsOf((await this.head(r.chatId, userId)).world).paletteFollowsRoutine;
+          params = { ...Object.fromEntries(Object.entries(r.params).filter(([k]) => k !== "followRoutine" && k !== "povRoutine")), ...(follows ? {} : { povRoutine: false }) };
         } else {
           const { world } = await this.head(r.chatId, userId);
           const action = (hasOwn(world.actions, r.action) ? world.actions[r.action] : undefined) ?? this.rt.registry.actions.get(r.action);
           if (!action) throw new RequestError("not_found", `unknown action ${r.action}`);
           text ||= `(${neutralizeMacros(action.label)})`;
         }
-        const messageId = await this.rt.host.chats.appendUserMessage(r.chatId, text, { [LEDGER_NAMESPACE]: { action: r.action, params: r.params, source: r.source, ...(said !== "" ? { described: true } : {}) } }, true, userId);
+        const messageId = await this.rt.host.chats.appendUserMessage(r.chatId, text, { [LEDGER_NAMESPACE]: { action: r.action, params, source: r.source, ...(said !== "" ? { described: true } : {}) } }, true, userId);
         reply("lre.action", { messageId });
         return;
       }

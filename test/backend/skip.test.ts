@@ -366,11 +366,15 @@ describe("time skips", () => {
     expect(interrupting).toEqual([stopper ?? ""]);
   });
 
-  test("in a skip the cast the story is about follows their routine once the POV has left them, and one still with it stays (§24.1)", async () => {
+  // Decision (issue #48, routine roles): the Live and Near cast's routine is informative by default, so
+  // no skip moves them by it any more, whether or not the POV has left them; this replaces the earlier
+  // rule that released them to their routine once the POV was gone.
+  test("in a skip the cast the story is about stays where the story has them, the POV gone or not (§8 routine roles)", async () => {
     const { rig, chatId } = await portAlder();
     rig.body(await rig.send({ type: "lre.edit", chatId, ops: [{ op: "mind_pin", entity: DANNY, level: "live" }, { op: "mind_pin", entity: MARCUS, level: "near" }] }));
     const { state, world } = await folded(rig, chatId);
     const home = placeOfEntity(state, world.pov);
+    const marcus = placeOfEntity(state, MARCUS);
     expect(placeOfEntity(state, DANNY)).toBe(home);
     // Under the world's own interrupts, where an arrival stops a skip.
     const lapse = (povRoutine: boolean): { w: Working; stoppedBy: string | null } => {
@@ -380,16 +384,15 @@ describe("time skips", () => {
       if ("code" in out) throw new Error(out.reason);
       return { w, stoppedBy: out.summary.stoppedBy };
     };
-    // The palette's Timelapse: the POV's day takes it to the garage; Danny, held while it's with him,
-    // and Marcus, from his own home, go to work there, their levels read again at each step, no mind
-    // asked. Their coming is their routine's, which never stops a skip for them: it runs to its end.
+    // A Timelapse that follows the POV's routine takes it to the garage; Danny, left behind, and
+    // Marcus, at his own home, stay where they are, their levels read again at each step, no mind asked.
     const { w: palette, stoppedBy } = lapse(true);
-    expect([world.pov, DANNY, MARCUS].map((who) => placeOfEntity(palette.state, who))).toEqual(["alder_automotive", "alder_automotive", "alder_automotive"]);
+    expect([world.pov, DANNY, MARCUS].map((who) => placeOfEntity(palette.state, who))).toEqual(["alder_automotive", home, marcus]);
     expect(stoppedBy).toBeNull();
     expect(palette.events.some((e) => e.type === "minds.mind")).toBe(false);
-    // A span the player's words spend at home: Danny, still with the POV, stays; Marcus still goes.
+    // One that holds the POV at home: everyone stays.
     const held = lapse(false).w;
-    expect([world.pov, DANNY, MARCUS].map((who) => placeOfEntity(held.state, who))).toEqual([home, home, "alder_automotive"]);
+    expect([world.pov, DANNY, MARCUS].map((who) => placeOfEntity(held.state, who))).toEqual([home, home, marcus]);
   });
 });
 

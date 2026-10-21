@@ -87,15 +87,18 @@ describe("invitations", () => {
     expect(asked(() => undefined, true)).toEqual([["maya", "plan:catch_up"]]);
   });
 
-  test("none from the cast the story is about: a Live or Near host asks no one, a Far or Background one does", () => {
+  // Decision (issue #48, routine roles): a Far character's routine is informative by default, so it
+  // moves them nowhere and asks no one along either; only an enforced routine (Background's by
+  // default) invites. Earlier a Far host's routine invited as a Background one's does.
+  test("none from a routine that isn't enforced: a Live, Near or Far host's routine asks no one, a Background one does", () => {
     const asked = (level: Fidelity | null): unknown[] => {
       const w = evening();
       if (level) record(w, [pin("maya", level)]);
       lapse(w, at(w, 0, "20:30"));
       return invitations(w.events);
     };
-    expect([asked("live"), asked("near")]).toEqual([[], []]);
-    expect([asked("far"), asked(null)]).toEqual([[["maya", "routine:drinks"]], [["maya", "routine:drinks"]]]);
+    expect([asked("live"), asked("near"), asked("far")]).toEqual([[], [], []]);
+    expect(asked(null)).toEqual([["maya", "routine:drinks"]]);
   });
 
   test("none to a POV already with the host, or already where they'd meet", () => {

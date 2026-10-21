@@ -381,29 +381,28 @@ export function withPov(ctx: ReadContext, who: EntityId): boolean {
 
 /**
  * Whether a routine or a schedule must leave someone's place or activity as it is (DESIGN §8): a
- * routine is a default, never authority, so it never moves anyone out of a scene with the POV, never
- * moves a Live or Near character (the story is theirs), and gives way to the GM's intent for a Far
- * character (for anyone, story first). Otherwise it yields to what the story set: when `who` isn't
- * where the routine last had them (`expected`), something else put them there. Between its own
- * edges it never moves them then; at an edge it does under routine first, never under story first,
- * and under balanced only where the story's day ends (`release`: going to bed, or a schedule's first
- * slot of a day). The POV's routine runs only in a timelapse, and yields to what the player or the
- * narration set as anyone's does. A scene with the POV holds whoever is in it while the story holds
- * the POV (`scene`: an ordinary turn, a span the player's words spend, a narrated skip); while time
- * runs on its own (`scene` false: a timelapse the POV's routine runs in) there's no scene to keep
- * them in, so a housemate still goes to work and a trip still leaves.
+ * routine is a default, never authority, so it never moves anyone out of a scene with the POV, and
+ * moves no one whose routine isn't enforced (`routineRole`: by default the Live, Near and Far cast,
+ * whose minds, story plans and the narration decide what they do, in turns and in every skip alike).
+ * An enforced routine gives way to the GM's intent for anyone but a Background character (for
+ * anyone, story first). Otherwise it yields to what the story set: when `who` isn't where the routine
+ * last had them (`expected`), something else put them there. Between its own edges it never moves
+ * them then; at an edge it does under routine first, never under story first, and under balanced
+ * only where the story's day ends (`release`: going to bed, or a schedule's first slot of a day). The
+ * POV has no role: its routine runs only in a timelapse that follows it, and yields to what the player
+ * or the narration set as anyone's does. A scene with the POV holds whoever is in it while the story
+ * holds the POV (`scene`: an ordinary turn, a span the player's words spend, a narrated skip, a
+ * palette Timelapse that holds it); while time runs on its own (`scene` false: a timelapse the POV's
+ * routine runs in) there's no scene to keep them in, so a housemate still goes to work and a trip still leaves.
  */
-export function routineYields(ctx: ReadContext, who: EntityId, field: "place" | "activity", expected: JsonValue | null, opts: { edge: boolean; release?: boolean; scene?: boolean; skip?: boolean }): boolean {
+export function routineYields(ctx: ReadContext, who: EntityId, field: "place" | "activity", expected: JsonValue | null, opts: { edge: boolean; release?: boolean; scene?: boolean }): boolean {
   if (opts.scene !== false && withPov(ctx, who)) return true;
   const pov = who === ctx.world.pov;
   const awareness = followOf(ctx, who).awareness;
   if (!pov) {
+    if (routineRole(ctx, who) !== "enforced") return true;
     const tier = optionalQuery(ctx, "minds.tier")?.(ctx, who) ?? "background";
-    // The cast the story is about keeps narrative precedence in play. In a skip a level is read again
-    // at every step (§24.1): one the POV is no longer with follows their routine off screen, as Far.
-    const cast = tier === "live" || tier === "near";
-    if (cast && (opts.skip !== true || withPov(ctx, who))) return true;
-    if ((tier === "far" || cast || awareness === "story_first") && optionalQuery(ctx, "minds.intent")?.(ctx, who) === true) return true;
+    if ((tier !== "background" || awareness === "story_first") && optionalQuery(ctx, "minds.intent")?.(ctx, who) === true) return true;
   }
   const current = own(ctx.state.entities, who)?.fields[field];
   const diverged = expected === null || expected === undefined ? !opts.edge : current !== undefined && current !== expected;

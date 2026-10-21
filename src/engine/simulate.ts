@@ -283,7 +283,7 @@ export function advance(reg: Registry, w: Working, to: number, opts: AdvanceOpti
       if (edge && edgeAt <= (moment?.at ?? Infinity)) {
         next++;
         clockTo(w, edgeAt, cause, e);
-        e.emit(instantEvents(reg, w.ctx, edge, opts.runSeed, { povRoutine, timelapse }));
+        e.emit(instantEvents(reg, w.ctx, edge, opts.runSeed, { povRoutine }));
       } else if (moment) {
         t++;
         clockTo(w, moment.at, cause, e);
