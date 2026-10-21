@@ -19,7 +19,7 @@
 import type { EntityId, KindId, MessageId, PlaceId, ScheduleId, SceneTypeId } from "./ids";
 import type { JsonValue } from "./json";
 import { hasOwn, isRecord } from "./json";
-import type { Fidelity } from "./minds";
+import { FIDELITIES, type Fidelity } from "./minds";
 import type { Recurrence, ScheduleSlot, Selector } from "./world";
 
 // ---------------------------------------------------------------- world data
@@ -571,19 +571,25 @@ export function routineShapeProblems(v: unknown): string[] {
   return out;
 }
 
-/** Each setting's allowed values: a setting not named here is none the engine reads. */
-const SETTING_VALUES: Record<string, readonly string[]> = { awareness: ROUTINE_AWARENESS, invitations: ROUTINE_INVITATIONS, sociability: ROUTINE_SOCIABILITY, planBend: ROUTINE_PLAN_BEND } satisfies Record<keyof RoutineSettings, readonly string[]>;
+/** Each setting's allowed values: a word of its list, a switch, or a role for each level of closeness. A setting not named here is none the engine reads. */
+const SETTING_VALUES: Record<string, readonly string[] | "switch" | "roles"> = { awareness: ROUTINE_AWARENESS, invitations: ROUTINE_INVITATIONS, sociability: ROUTINE_SOCIABILITY, planBend: ROUTINE_PLAN_BEND, roles: "roles", narrator: "switch", paletteFollowsRoutine: "switch" } satisfies Record<keyof RoutineSettings, readonly string[] | "switch" | "roles">;
 
 /**
  * What is wrong with routine settings as a write sends them (a Build save, an outside tool), one
- * phrase per field at fault; none when they read. A part left out keeps its default, so `{}` reads.
- * Stored settings are read leniently (`routineSettingsOf`); a write is held to this.
+ * phrase per field at fault; none when they read. A part left out keeps its default, so `{}` reads,
+ * and so does a level `roles` leaves out. Stored settings are read leniently (`routineSettingsOf`); a
+ * write is held to this.
  */
 export function routineSettingsProblems(v: unknown): string[] {
   if (!isRecord(v)) return ["routine settings are an object"];
   return Object.entries(v).flatMap(([key, value]) => {
     const allowed = hasOwn(SETTING_VALUES, key) ? SETTING_VALUES[key] : undefined;
     if (!allowed) return [`there's no setting ${key} (${Object.keys(SETTING_VALUES).join(", ")})`];
+    if (allowed === "switch") return typeof value === "boolean" ? [] : [`${key} is true or false`];
+    if (allowed === "roles") {
+      if (!isRecord(value)) return [`roles give ${FIDELITIES.join(", ")} each a role`];
+      return Object.entries(value).flatMap(([level, role]) => (!FIDELITIES.some((f) => f === level) ? [`roles have no level ${level} (${FIDELITIES.join(", ")})`] : typeof role === "string" && ROUTINE_ROLES.some((r) => r === role) ? [] : [`roles.${level} is ${ROUTINE_ROLES.join(", ")}`]));
+    }
     return typeof value === "string" && allowed.includes(value) ? [] : [`${key} is ${allowed.join(", ")}`];
   });
 }

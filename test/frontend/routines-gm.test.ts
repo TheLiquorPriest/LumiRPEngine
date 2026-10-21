@@ -96,7 +96,7 @@ describe("GM view → Routines round trip", () => {
 
     await edit(rig, chatId, followOp(WHO, "off", null));
     let v = await day(rig, chatId);
-    expect([v.follow.mode, v.follow.chat]).toEqual(["off", { mode: "off", awareness: null }]);
+    expect([v.follow.mode, v.follow.chat]).toEqual(["off", { mode: "off", awareness: null, role: null }]);
     expect(bindingOf(v.tier, v.follow.mode, v.planned)).toBe("none");
     expect(shownBinding(page(v, await gmView(rig, chatId)))).toBe("none");
     let summary = await changed(rig, chatId);
@@ -114,14 +114,14 @@ describe("GM view → Routines round trip", () => {
     expect(followOp(WHO, "follows", "story_first")).toEqual({ op: "routine_follow", entity: WHO, mode: null, awareness: "story_first" });
     await edit(rig, chatId, followOp(WHO, "follows", "story_first"));
     v = await day(rig, chatId);
-    expect([v.follow.awareness, v.follow.chat]).toEqual(["story_first", { mode: null, awareness: "story_first" }]);
+    expect([v.follow.awareness, v.follow.chat]).toEqual(["story_first", { mode: null, awareness: "story_first", role: null }]);
     await edit(rig, chatId, followOp(WHO, "no_invitations", "story_first"));
     expect((await day(rig, chatId)).follow.mode).toBe("no_invitations");
     await undoLatest(rig, chatId);
-    expect((await day(rig, chatId)).follow).toEqual({ mode: "follows", awareness: "story_first", chat: { mode: null, awareness: "story_first" } });
+    expect((await day(rig, chatId)).follow).toEqual({ mode: "follows", awareness: "story_first", role: before.follow.role, chat: { mode: null, awareness: "story_first", role: null } });
     // Back to the world's clears the setting.
     await edit(rig, chatId, followOp(WHO, "follows", null));
-    expect((await day(rig, chatId)).follow).toEqual({ mode: "follows", awareness: before.follow.awareness, chat: null });
+    expect((await day(rig, chatId)).follow).toEqual({ mode: "follows", awareness: before.follow.awareness, role: before.follow.role, chat: null });
     expect(await changed(rig, chatId)).toEqual([]);
     expect(rig.rt.ledger.errors).toEqual([]);
   });
