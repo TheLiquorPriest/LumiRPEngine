@@ -68951,7 +68951,7 @@ function checkSkipPlan(ctx, brief, raw) {
 // src/backend/skip-plan.ts
 var REPLY_CAP = 2000;
 var SKIP_PLAN_SYSTEM = [
-  "You plan how some people in a roleplay spend a stretch of time that is skipped over. For each person, lay out what they do during the skip as a few blocks of time.",
+  "You plan how some people in a roleplay spend a stretch of time that is skipped over. For each person, lay out what they do during the skip as blocks of time that cover all of it, start to end, with no gaps: where they are at every hour, and at night where they sleep.",
   "Their usual routine is background you may follow, bend or ignore as the story suggests; it is never a rule. What the story already set for them comes first. Keep each person in character and consistent with the latest reply.",
   "Use only the places and activities listed, by id and word as given. Every block lies inside the skip, and one person's blocks never overlap. A label is a few plain words saying what they do, naming no one.",
   'Answer with JSON only: {"plans":[{"entity":"<person id>","blocks":[{"label":"...","start":"YYYY-MM-DD HH:MM","end":"YYYY-MM-DD HH:MM","place":"<place id>","activity":"<activity>"}]}]}. Leave out anyone with nothing worth planning.'
@@ -69467,9 +69467,9 @@ function thisBuild(moduleUrl = import.meta.url) {
   const dir = moduleUrl.replace(/[^/]*$/, "");
   const path = pathOfFileUrl(`${dir}${KIT_FILE}`);
   const core = pathOfFileUrl(`${dir}${CORE_FILE}`);
-  const sha256 = "a6421378d5434141cc3928edf81a24bd829c50c0f422ca65a48bb543070579c3";
+  const sha256 = "28766c95165d2b08a2c1ab1775f95f319408922837140b839d79af75a0e28171";
   const tools = ["18ab4cc48319d3329b4f414f8503d74f", "9748f93066a93461e251d2677fe4f3b6"].filter((f) => f !== undefined);
-  return { id: "a11d755d", kit: sha256 !== undefined && path !== null && core !== null ? { path, core, sha256, api: KIT_API } : null, tools };
+  return { id: "01ec3e83", kit: sha256 !== undefined && path !== null && core !== null ? { path, core, sha256, api: KIT_API } : null, tools };
 }
 var BUILD_FILE = "agents/build.json";
 var USER_FILE = "agents.json";
@@ -72634,7 +72634,7 @@ class Runtime {
     this.steps.onCallStart = (userId, purpose) => this.diag.callStart(userId, purpose);
     this.toolSupport = new ToolSupport(this.host);
     this.minds = { host: this.host, registry: this.registry, steps: this.steps, settings: this.settings, presets: this.presets };
-    this.ledger = new LedgerService(this.host, (chatId, userId) => this.resolveEnv(chatId, userId), new LedgerFold(this.registry, { fingerprint: "a11d755d" }), (chatId) => messages.forget(chatId));
+    this.ledger = new LedgerService(this.host, (chatId, userId) => this.resolveEnv(chatId, userId), new LedgerFold(this.registry, { fingerprint: "01ec3e83" }), (chatId) => messages.forget(chatId));
     this.studio = new StudioBridge(this.host, this.worlds);
     this.worlds.onChange = (worldId, userId) => this.studio.worldChanged(worldId, userId);
     this.agents = new Agents(this.host, options.build ?? thisBuild(), async (userId) => (await this.settings.get(userId)).timeouts.mcpReconnectMs);
