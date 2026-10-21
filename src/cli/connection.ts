@@ -6,6 +6,7 @@
 // acknowledges a frame, so every request has a timeout. HTTP and the socket are passed in: the
 // tests run all of this against a fake host.
 
+import type { AgentCheckIn, HelloClient } from "../shared/agents";
 import { isRecord } from "../shared/json";
 import type { ErrorCode, FrontendToBackend, LintIssue, ResultBodies } from "../shared/protocol";
 import { AGENT_API, PROTOCOL_VERSION } from "../shared/protocol";
@@ -44,19 +45,36 @@ export type OpenSocket = (url: string, events: SocketEvents) => Socket;
 
 export type LiveProblem = "login" | "locked" | "unreachable" | "forbidden" | "insecure" | "not_installed" | "not_running" | "too_old" | "timeout" | "closed" | "too_large" | "protocol";
 
+/**
+ * The brands the errors below carry. The core and each agent kit are bundles of their own, each with
+ * its own copy of these classes (DESIGN §23), so `instanceof` checks a brand that every copy sets
+ * rather than the class: an error the core's connection throws is still a LiveError to a kit's tools.
+ */
+const LIVE_ERROR = Symbol.for("lumirpengine.LiveError");
+const LRE_ERROR = Symbol.for("lumirpengine.LreError");
+
 /** Why a call to the host failed, in words the user can act on. */
 export class LiveError extends Error {
+  static override [Symbol.hasInstance](value: unknown): value is LiveError {
+    return typeof value === "object" && value !== null && (value as Record<symbol, unknown>)[LIVE_ERROR] === true;
+  }
+
   constructor(
     readonly problem: LiveProblem,
     message: string,
   ) {
     super(message);
     this.name = "LiveError";
+    Object.defineProperty(this, LIVE_ERROR, { value: true });
   }
 }
 
 /** LumiRPEngine refused a request (`lre.error`): its code, its words, and the lint behind a refused commit. */
 export class LreError extends Error {
+  static override [Symbol.hasInstance](value: unknown): value is LreError {
+    return typeof value === "object" && value !== null && (value as Record<symbol, unknown>)[LRE_ERROR] === true;
+  }
+
   constructor(
     readonly code: ErrorCode,
     message: string,
@@ -64,6 +82,7 @@ export class LreError extends Error {
   ) {
     super(message);
     this.name = "LreError";
+    Object.defineProperty(this, LRE_ERROR, { value: true });
   }
 }
 
@@ -98,6 +117,8 @@ export interface HostDescription {
   agentApi: number | null;
   /** What stopped the description short, if anything. */
   problem: string | null;
+  /** What an MCP server checks in with (DESIGN §23): its builds and whether it follows the extension's kit; null from a command-line run. */
+  checkIn: AgentCheckIn | null;
 }
 
 /** The saved sign-in a connection uses (`StoredLogin`). */
@@ -254,8 +275,16 @@ export interface ConnectionOptions {
   credentials(): Credentials | null;
   http: Http;
   openSocket: OpenSocket;
-  /** Named in `lre.hello`: LumiRPEngine labels this client's commits `agent`. */
-  client: { name: string; version: string };
+  /** Named in `lre.hello`: LumiRPEngine labels this client's commits `agent`. A command-line run says it serves no MCP. */
+  client: HelloClient;
+  /** An MCP server's check-in (DESIGN §23), sent with every hello: read again for each one. */
+  checkIn?(): AgentCheckIn;
+  /** The agent API level the tools need: the loaded kit's (DESIGN §23). AGENT_API when not given. */
+  needs?(): number;
+  /** Each hello's answer: an MCP server learns there which build LumiRPEngine is and where its kit is. */
+  onHello?(answer: Record<string, unknown>): void;
+  /** What LumiRPEngine sends unasked (no reqId of ours): an MCP server is asked to reload there. */
+  onPush?(push: Record<string, unknown>): void;
   /** Null: no limit. */
   timeoutMs?: number | null;
   pingMs?: number;
@@ -288,15 +317,20 @@ export class HostConnection implements Connection {
     this.pingMs = options.pingMs ?? PING_MS;
   }
 
+  /** The Lumiverse this connection is to. */
+  get base(): string {
+    return this.options.base;
+  }
+
   async request<T extends RequestType>(type: T, fields: RequestFields<T>): Promise<ResultBodies[T]> {
     const opened = await this.ensure();
-    if (opened.agentApi === null || opened.agentApi < AGENT_API) throw new LiveError("too_old", this.tooOld(opened.agentApi));
+    if (opened.agentApi === null || opened.agentApi < this.needs()) throw new LiveError("too_old", this.tooOld(opened.agentApi));
     return (await this.send(type, fields)) as ResultBodies[T];
   }
 
   async describe(): Promise<HostDescription> {
     const { base, http } = this.options;
-    const out: HostDescription = { base, username: this.options.credentials()?.username ?? null, session: { valid: null, expiresAt: null }, extension: null, agentApi: null, problem: null };
+    const out: HostDescription = { base, username: this.options.credentials()?.username ?? null, session: { valid: null, expiresAt: null }, extension: null, agentApi: null, problem: null, checkIn: this.options.checkIn?.() ?? null };
     try {
       out.session = await sessionOf(http, base, this.signedIn().token);
       if (out.session.valid === false) {
@@ -306,12 +340,27 @@ export class HostConnection implements Connection {
       const opened = await this.ensure();
       out.extension = opened.extension;
       out.agentApi = opened.agentApi;
-      if (opened.agentApi === null || opened.agentApi < AGENT_API) out.problem = this.tooOld(opened.agentApi);
+      if (opened.agentApi === null || opened.agentApi < this.needs()) out.problem = this.tooOld(opened.agentApi);
     } catch (error) {
       out.problem = error instanceof Error ? error.message : String(error);
       out.extension = this.lastExtension;
     }
     return out;
+  }
+
+  /** Opens the socket, saying hello, unless it is open already. */
+  async ensureOpen(): Promise<void> {
+    await this.ensure();
+  }
+
+  /** Whether the socket is open and greeted. */
+  isOpen(): boolean {
+    return this.opened !== null && this.socket !== null;
+  }
+
+  /** Says hello again on the open socket (an MCP server checks in after a change of what it runs); nothing when none is open. */
+  async checkInAgain(): Promise<void> {
+    if (this.isOpen()) await this.greet();
   }
 
   close(): void {
@@ -321,9 +370,13 @@ export class HostConnection implements Connection {
     this.closed(1000, "closed by the client");
   }
 
+  private needs(): number {
+    return this.options.needs?.() ?? AGENT_API;
+  }
+
   private tooOld(agentApi: number | null): string {
     const speaks = agentApi === null ? "doesn't speak the agent API" : `speaks agent API ${agentApi}`;
-    return `LumiRPEngine on ${this.options.base} is too old for lumirpengine ${this.options.client.version}: it ${speaks}, and this client needs ${AGENT_API}. Update LumiRPEngine on your Lumiverse (Extensions → LumiRPEngine → Update), then try again.`;
+    return `LumiRPEngine on ${this.options.base} is too old for lumirpengine ${this.options.client.version}: it ${speaks}, and this client needs ${this.needs()}. Update LumiRPEngine on your Lumiverse (Extensions → LumiRPEngine → Update), then try again.`;
   }
 
   /** The sign-in to use now. Plain http to another machine needs the consent `login --allow-http` saved with it. */
@@ -388,15 +441,23 @@ export class HostConnection implements Connection {
     // `opened` gates `request`, so the hello goes through `send` directly.
     this.opened = { extension, agentApi: null };
     try {
-      const hello = await this.send("lre.hello", { chatId: null, client: this.options.client });
-      const agentApi = isRecord(hello) ? hello.agentApi : undefined;
-      this.opened = { extension, agentApi: typeof agentApi === "number" ? agentApi : null };
+      await this.greet();
     } catch (error) {
       this.close();
       if (error instanceof LiveError && error.problem === "timeout") throw new LiveError("timeout", `LumiRPEngine on ${this.options.base} didn't answer within ${formatMs(this.timeoutMs ?? 0)}. Check that it's running (lumirpengine status), and restart it in Lumiverse's Extensions tab if it is. ${RAISE}`);
       throw error;
     }
     return this.opened;
+  }
+
+  /** The hello: names this client (an MCP server checks in with it) and takes the agent API level from the answer. */
+  private async greet(): Promise<void> {
+    const opened = this.opened;
+    const hello = await this.send("lre.hello", { chatId: null, client: { ...this.options.client, ...this.options.checkIn?.() } });
+    const agentApi = isRecord(hello) ? hello.agentApi : undefined;
+    // Only the socket the hello was said on takes its answer.
+    if (opened !== null && this.opened === opened) this.opened = { extension: opened.extension, agentApi: typeof agentApi === "number" ? agentApi : null };
+    if (isRecord(hello)) this.options.onHello?.(hello);
   }
 
   private connect(ticket: string): Promise<void> {
@@ -450,8 +511,12 @@ export class HostConnection implements Connection {
     }
     if (msg.event !== "SPINDLE_FRONTEND_MSG" || !isRecord(msg.payload) || msg.payload.extensionId !== this.opened?.extension.id) return;
     const data = msg.payload.data;
-    // Pushes (state, jobs, draft changes) carry no reqId of ours: nothing here waits for them.
-    if (!isRecord(data) || data.lre !== PROTOCOL_VERSION || typeof data.reqId !== "string") return;
+    if (!isRecord(data) || data.lre !== PROTOCOL_VERSION) return;
+    // Pushes (state, jobs, draft changes, a reload asked for) carry no reqId of ours: nothing here waits for them.
+    if (typeof data.reqId !== "string") {
+      this.options.onPush?.(data);
+      return;
+    }
     const waiting = this.pending.get(data.reqId);
     if (!waiting || (data.type !== "lre.result" && data.type !== "lre.error")) return;
     this.pending.delete(data.reqId);

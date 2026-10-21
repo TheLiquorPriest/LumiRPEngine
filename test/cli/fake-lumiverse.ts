@@ -50,6 +50,16 @@ export class FakeLre {
   preview: MarkerPreview = { lines: [] };
   /** Whether an applied Upgrade waits for the chat's turn to end. */
   upgradePending = false;
+  /**
+   * Its build and where its agent kit is (DESIGN §23), as `lre.hello` and the `lre.agents` kit check
+   * answer them; undefined answers neither, as a build from before following does.
+   */
+  build: string | undefined = undefined;
+  kit: { path: string; sha256: string; api: number; core: string } | null = null;
+  /** Whether the kit check knows the asking session (false: the extension restarted since its hello). */
+  known = true;
+  /** The id a server's check-in is given. */
+  readonly clientId = "c0ffee0000000001";
   private seq = 0;
 
   /** A world as `create` makes one, from a starter or blank. */
@@ -181,7 +191,8 @@ export class FakeLre {
     this.received.push(structuredClone(r));
     const reply = (body: Payload): Payload => ({ lre: 1, type: "lre.result", reqId: r.reqId, request: r.type, body });
     try {
-      if (r.type === "lre.hello") return reply(this.agentApi === undefined ? { accepted: true } : { accepted: true, agentApi: this.agentApi });
+      if (r.type === "lre.hello") return reply({ accepted: true, ...(this.agentApi === undefined ? {} : { agentApi: this.agentApi }), ...(this.build === undefined ? {} : { build: this.build, kit: structuredClone(this.kit), client: this.clientId }) });
+      if (r.type === "lre.agents" && r.op === "kit" && this.build !== undefined) return reply({ build: this.build, kit: structuredClone(this.kit), known: this.known });
       if (r.type === "lre.world") return reply(this.worldOp(r));
       if (r.type === "lre.editor") return reply(this.editor(r));
       if (r.type === "lre.marker" && r.kind === "migrate" && r.preview === true) return reply({ pending: false, preview: structuredClone(this.preview) as unknown as JsonValue as Payload });
@@ -316,6 +327,11 @@ export class FakeLumiverse {
   release(): void {
     this.holdConnected = false;
     for (const greet of this.pendingGreetings.splice(0)) greet();
+  }
+
+  /** LumiRPEngine sends `data` unasked to every open socket of the user (`lre.kit.reload`). */
+  push(data: Payload): void {
+    for (const s of this.sockets.filter((x) => x.open)) s.events.message(JSON.stringify({ event: "SPINDLE_FRONTEND_MSG", payload: { extensionId: this.extension.id, identifier: "lumi_rp_engine", data: { lre: 1, ...data } } }));
   }
 
   /** The server restarts: every socket closes and every ticket is lost. */

@@ -1,19 +1,23 @@
 #!/usr/bin/env node
-// lumirpengine: manage your LumiRPEngine worlds on Lumiverse from a shell, and the same as an MCP
-// server (`mcp`) for agents. Built to dist/lumirpengine.js (plain Node 22+, no dependencies). This
-// is the only file that touches the disk, the terminal, the network and the process; the
-// extension's backend and frontend never import src/cli.
+// lumirpengine's core (DESIGN §23): manage your LumiRPEngine worlds on Lumiverse from a shell, and
+// the same as an MCP server (`mcp`) for agents. Built to dist/lumirpengine.js (plain Node 22+, no
+// dependencies) beside its agent kit, dist/agent-kit.js, which holds every tool and runs the
+// command line; `mcp` serves the kit's tools and follows the extension's own kit. This is the only
+// file that touches the disk, the terminal, the network and the process; the extension's backend
+// and frontend never import src/cli.
 
 import { chmodSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
-import { homedir } from "node:os";
+import { readFile } from "node:fs/promises";
+import { homedir, hostname } from "node:os";
 import { dirname } from "node:path";
 import { createInterface } from "node:readline";
-import { run } from "./commands";
+import { KIT_FILE } from "../shared/agents";
 import type { CliIO } from "./commands";
 import type { Http, OpenSocket } from "./connection";
 import { CredentialStore, credentialsPath } from "./credentials";
 import type { CredentialFiles } from "./credentials";
-import { lineServer } from "./mcp";
+import { bundledKitOf } from "./kit-api";
+import { McpSession, serveMcp } from "./serve";
 
 const nodeMajor = Number((process.versions.node ?? "0").split(".")[0]);
 // Bun reports a Node version too; only Node itself needs checking for its built-in WebSocket.
@@ -111,18 +115,28 @@ const io: CliIO = {
   openSocket,
 };
 
-const result = await run(process.argv.slice(2), io);
+// The kit beside this file (src/cli/agent-kit.ts when run from source, which Bun resolves): a
+// bundle of its own, imported at run time, since a static import would bundle every tool into the core.
+const kit = bundledKitOf(await import(new URL(KIT_FILE, import.meta.url).href));
+if (typeof kit === "string") {
+  process.stderr.write(`lumirpengine's agent kit (${KIT_FILE}, beside ${import.meta.url}) can't run: ${kit}. Install lumirpengine again.\n`);
+  process.exit(1);
+}
+
+const result = await kit.run(process.argv.slice(2), io);
 if ("mcp" in result) {
-  const server = lineServer(result.mcp, (line) => {
+  const session = new McpSession({ bundled: kit, mcp: result.mcp, io, files: { read: (path) => readFile(path) }, host: hostname(), log: (text) => process.stderr.write(`${text}\n`) });
+  const server = serveMcp(session, (line) => {
     // Resolves once Node has taken the line, so the next waits its turn instead of piling up in memory.
     const { promise, resolve } = Promise.withResolvers<void>();
     process.stdout.write(`${line}\n`, () => resolve());
     return promise;
   });
+  session.start();
   process.stdin.setEncoding("utf8");
   process.stdin.on("data", (chunk: string) => server.feed(chunk));
   process.stdin.on("end", () => {
-    void server.drain().then(() => result.close());
+    void server.drain().then(() => session.close());
   });
 } else {
   process.exitCode = result.code;

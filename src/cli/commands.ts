@@ -9,8 +9,8 @@ import type { CredentialStore } from "./credentials";
 import { inClear, normalizeBase } from "./credentials";
 import type { Http, OpenSocket, SignOutResult } from "./connection";
 import { HostConnection, LiveError, sessionOf, signIn, signOut } from "./connection";
+import type { McpOptions } from "./kit-api";
 import { Live, resolveRevision } from "./live";
-import { McpServer } from "./mcp";
 import { templateFile } from "./offline";
 import type { ToolContext } from "./tools";
 import { callTool, findTool, KeyedQueue } from "./tools";
@@ -77,7 +77,8 @@ Your worlds on Lumiverse
   attach <worldId> <chatId>                   A chat plays the world
   upgrade <chatId> [--to <revision>] [--preview] [--spoilers]
 
-  mcp [--read-only]                           All of it as an MCP server on stdio
+  mcp [--read-only] [--pin]                   All of it as an MCP server on stdio, following LumiRPEngine's own
+                                              tools (--pin, or LRE_PIN_KIT=1: keep these)
   version, --version                          ${CLI_NAME}, engine, world format and agent API versions
 
   <s> is draft, head or a revision. Everywhere: --url <base> (or LUMIVERSE_URL) picks the Lumiverse when you
@@ -93,9 +94,9 @@ interface Parsed {
   flags: Record<string, true>;
 }
 
-const BOOLEAN_FLAGS: Record<string, true> = { "--read-only": true, "--allow-http": true, "--preview": true, "--spoilers": true, "--map": true, "--help": true, "--version": true };
+const BOOLEAN_FLAGS: Record<string, true> = { "--read-only": true, "--allow-http": true, "--preview": true, "--spoilers": true, "--map": true, "--help": true, "--version": true, "--pin": true };
 
-/** What `LRE_READ_ONLY` may say. Anything else stops the run: a value meant as "on" must never serve the write tools. */
+/** What `LRE_READ_ONLY` and `LRE_PIN_KIT` may say. Anything else stops the run: a value meant as "on" must never serve the write tools, or follow a kit it was meant to keep. */
 const READ_ONLY_VALUES: Record<string, boolean> = { "": false, "0": false, false: false, no: false, off: false, "1": true, true: true, yes: true, on: true };
 
 /** Whether this run is read-only: `--read-only`, or `LRE_READ_ONLY` in any case. */
@@ -104,6 +105,14 @@ function readOnlyOf(p: Parsed, env: CliIO["env"]): boolean {
   const value = (raw ?? "").trim().toLowerCase();
   if (!hasOwn(READ_ONLY_VALUES, value)) throw new UsageError(`LRE_READ_ONLY is ${JSON.stringify(raw)}, which isn't a yes or a no: set it to 1 (read-only) or 0, or unset it.`);
   return p.flags["--read-only"] === true || READ_ONLY_VALUES[value] === true;
+}
+
+/** Whether `mcp` keeps the kit it was installed with (DESIGN §23): `--pin`, or `LRE_PIN_KIT` in any case. */
+function pinOf(p: Parsed, env: CliIO["env"]): boolean {
+  const raw = env.LRE_PIN_KIT;
+  const value = (raw ?? "").trim().toLowerCase();
+  if (!hasOwn(READ_ONLY_VALUES, value)) throw new UsageError(`LRE_PIN_KIT is ${JSON.stringify(raw)}, which isn't a yes or a no: set it to 1 (keep the installed tools) or 0, or unset it.`);
+  return p.flags["--pin"] === true || READ_ONLY_VALUES[value] === true;
 }
 
 /** Refuses options a command doesn't take, and positionals where it takes none: a misspelled `--read-only` must stop the run, not be ignored. */
@@ -259,7 +268,7 @@ function timeoutOf(p: Parsed, env: CliIO["env"]): number | null | undefined {
 function liveFor(base: string, io: CliIO, timeoutMs: number | null | undefined): Live {
   if (io.credentials.get(base) === null) throw new LiveError("login", `Not signed in to ${base}. Run: ${CLI_NAME} login --url ${base}`);
   // Read again whenever the connection opens: a `login` while an `mcp` server runs takes effect without a restart.
-  return new Live(new HostConnection({ base, credentials: () => io.credentials.get(base), http: io.http, openSocket: io.openSocket, client: { name: CLI_NAME, version: CLI_VERSION }, ...(timeoutMs !== undefined ? { timeoutMs } : {}) }));
+  return new Live(new HostConnection({ base, credentials: () => io.credentials.get(base), http: io.http, openSocket: io.openSocket, client: { name: CLI_NAME, version: CLI_VERSION, serves: "command" }, ...(timeoutMs !== undefined ? { timeoutMs } : {}) }));
 }
 
 interface Session {
@@ -371,9 +380,9 @@ async function writeOut(command: string, p: Parsed, io: CliIO, session: Session,
   return 0;
 }
 
-export type RunResult = { code: number } | { mcp: McpServer; close(): void };
+export type RunResult = { code: number } | { mcp: McpOptions };
 
-/** Runs one command; `mcp` hands back the server for the caller to serve on stdin. */
+/** Runs one command; `mcp` hands back what to serve with, for the core to serve on stdin (DESIGN §23). */
 export async function run(argv: readonly string[], io: CliIO): Promise<RunResult> {
   let p: Parsed;
   try {
@@ -396,9 +405,8 @@ export async function run(argv: readonly string[], io: CliIO): Promise<RunResult
     const readOnly = readOnlyOf(p, io.env);
     if (command === "mcp") {
       // Checked like any command's: a misspelled --read-only must refuse to start, never serve the write tools.
-      onlyOptions("mcp", p, ["--url", "--read-only", "--timeout"], "mcp [--read-only] [--url <base>] [--timeout <seconds|none>]", false);
-      const server = sessionFor(p, io, readOnly);
-      return { mcp: new McpServer(server.ctx), close: server.close };
+      onlyOptions("mcp", p, ["--url", "--read-only", "--timeout", "--pin"], "mcp [--read-only] [--pin] [--url <base>] [--timeout <seconds|none>]", false);
+      return { mcp: { readOnly, pin: pinOf(p, io.env), base: () => chooseBase(p, io), timeoutMs: timeoutOf(p, io.env) } };
     }
     session = sessionFor(p, io, readOnly);
     if (command === "login") {
