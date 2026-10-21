@@ -1,15 +1,19 @@
 // The person sheet: someone from the cast, as the POV knows them: who they are,
 // whether they're here (what they're doing) or where and when the POV last saw them, today's plan
-// with "Why this plan?", how they regard the POV per axis, the agendas the POV knows about, their
-// next commitment, their groups, the classes players may see, and a life state other than alive.
+// with "Why this plan?" and their usual day with where each block comes from, how they regard the
+// POV per axis, the agendas the POV knows about, their next commitment, their groups, the classes
+// players may see, and a life state other than alive.
 // Opening it is a player-facing observation of that person (DESIGN §9.2), sent once on mount;
-// nothing here is GM data, the cast view is already POV-filtered.
+// nothing here is GM data: the cast view is already POV-filtered, and the usual day is the player's
+// projection of their routine (`lre.routine`, view "player"), asked only where Cast shows a day.
 
 import { useEffect, useState } from "preact/hooks";
 import { useApp } from "../../../frontend/app";
-import { Avatar, Badge, Button, Empty, IdText, List, ListRow, PageHeader, Section } from "../../../frontend/components";
+import { Avatar, Badge, Button, Disclosure, Empty, IdText, List, ListRow, PageHeader, Section } from "../../../frontend/components";
 import { Icon } from "../../../frontend/icons";
 import type { SheetProps } from "../../../frontend/registry";
+import type { ChatId, EntityId } from "../../../shared/ids";
+import type { PlayerBlock, RoutinePlayerView } from "../../../shared/routines";
 import { decodeCastView, SLOT_KINDS, whereabouts, type CastPerson, type CastView, type SlotKind } from "./panel";
 
 /** Each kind of plan block in words, and its categorical fill (a `--lre-series-*` token). */
@@ -70,6 +74,84 @@ export function Timeline(props: { slots: CastPerson["timeline"] }) {
         </div>
       ) : null}
     </div>
+  );
+}
+
+/**
+ * Why a block of someone's usual day is there, in the player's words. Only what the player's
+ * projection gives: a lore entry the POV may read comes with its title, anything else it hides
+ * reads as their routine. Routine blocks read as what they usually do, never as what they do now.
+ */
+const SOURCE_WORDS: Record<PlayerBlock["source"]["type"], string> = {
+  routine: "Usually · their routine",
+  lore: "Usually · from lore",
+  commitment: "A commitment",
+  story: "As the story has it",
+  plan: "A plan of theirs",
+  free: "Free time",
+};
+
+export interface UsualRow {
+  from: string;
+  to: string;
+  label: string;
+  /** Why it's there, in words. */
+  source: string;
+  reasons: string[];
+}
+
+/**
+ * Someone's usual day as Cast shows it: each block the player's projection gives (DESIGN §7), in its
+ * order, with why in words; null when it gives none, so the sheet shows nothing. Nothing is added
+ * here: no place, company or lore title the projection left out.
+ */
+export function usualDay(view: RoutinePlayerView | null | undefined): { label: string; rows: UsualRow[] } | null {
+  const day = view?.day;
+  if (!day || day.blocks.length === 0) return null;
+  return {
+    label: day.label,
+    rows: day.blocks.map((b) => ({ from: b.from, to: b.to, label: b.label, source: b.source.type === "lore" ? `${SOURCE_WORDS.lore}: ${b.source.title}` : SOURCE_WORDS[b.source.type], reasons: b.reasons })),
+  };
+}
+
+/**
+ * Their usual day, under Today: where each block of their day comes from, as far as the POV may
+ * know, framed as what they usually do. It's asked again whenever Cast's day for them changes, and
+ * shows nothing until the answer has blocks.
+ */
+function UsualDay(props: { chatId: ChatId; entity: EntityId; dayKey: string }) {
+  const app = useApp();
+  const [view, setView] = useState<RoutinePlayerView | null>(null);
+  const [why, setWhy] = useState(false);
+  useEffect(() => {
+    let current = true;
+    void app.request({ type: "lre.routine", chatId: props.chatId, op: "day", entity: props.entity, view: "player" }).then((result) => {
+      if (current) setView(result?.player ?? null);
+    });
+    return () => {
+      current = false;
+    };
+  }, [props.chatId, props.entity, props.dayKey]);
+  const day = usualDay(view);
+  if (!day) return null;
+  return (
+    <Disclosure summary="Their usual day">
+      <div class="lre-stack" data-lre-usual-day={props.entity}>
+        <span class="lre-small lre-muted">What they'd usually do on a day like this, as far as you know. What happens in the story always comes first.</span>
+        <List>
+          {day.rows.map((r, i) => (
+            <ListRow key={i} title={r.label} subtitle={why && r.reasons.length > 0 ? `${r.source} · ${r.reasons.join(", ")}` : r.source} value={`${r.from}–${r.to}`} valueTone="muted" />
+          ))}
+        </List>
+        {day.rows.some((r) => r.reasons.length > 0) ? (
+          <div>
+            <Button variant="ghost" size="sm" icon="help" onClick={() => setWhy(!why)}>
+              {why ? "Hide reasons" : "Why?"}
+            </Button>
+          </div>
+        ) : null}
+      </div>
+    </Disclosure>
   );
 }
 
@@ -137,7 +219,10 @@ export function PersonSheet(props: SheetProps) {
       ) : null}
       {person.timeline.length > 0 ? (
         <Section title="Today">
-          <Timeline slots={person.timeline} />
+          <div class="lre-stack">
+            <Timeline slots={person.timeline} />
+            <UsualDay chatId={props.chatId} entity={person.id} dayKey={JSON.stringify(person.timeline)} />
+          </div>
         </Section>
       ) : null}
       {person.regard.length > 0 ? (

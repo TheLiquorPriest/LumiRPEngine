@@ -54,7 +54,7 @@ const GROUPS: readonly { title: string; collections: readonly WorldCollection[] 
 
 const PARTS: readonly WorldPart[] = ["meta", "calendar", "realism", "tiers", "time", "ruleset", "loreIndex", "minds", "routineSettings"];
 
-const TOOLS: readonly JobKind[] = ["import_lore", "index_book", "index_text", "refine", "describe_map", "playtest", "check_world"];
+const TOOLS: readonly JobKind[] = ["import_lore", "index_book", "index_text", "refine", "describe_map", "propose_routines", "playtest", "check_world"];
 
 export function Build() {
   const route = useUi((ui) => ui.build);
