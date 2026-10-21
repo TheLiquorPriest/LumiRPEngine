@@ -1,15 +1,16 @@
 // GM → Minds (DESIGN §24.9): every character's place on the fidelity ladder and why,
-// their latest mind (monologue, depiction, intent, reactions), plans, commitments, notes, what they
-// witnessed and their summary. It lives in GM mode behind the gate, and its data comes with `lre.gm`
-// only. A character opens as a page over the list, and each change opens as its own page over theirs:
-// the pin, a refresh, and adding, editing or deleting a plan, commitment or note. Every change is one
-// `lre.edit` (one Corrected chip with its Undo), and success goes back to the character's page.
+// their latest mind (monologue, depiction, intent, reactions), the intent you set for them, plans,
+// commitments, notes, what they witnessed and their summary. It lives in GM mode behind the gate, and
+// its data comes with `lre.gm` only. A character opens as a page over the list, and each change opens
+// as its own page over theirs: the pin, a refresh, their intent, and adding, editing or deleting a
+// plan, commitment or note. Every change is one `lre.edit` (one Corrected chip with its Undo), and
+// success goes back to the character's page.
 
 import type { ComponentChildren } from "preact";
 import { useEffect, useId, useRef, useState } from "preact/hooks";
 import type { EntityId, PlaceId } from "../../../shared/ids";
-import type { CommitmentKind, CommitmentStatus, Fidelity, MindsGmCharacter, MindsGmView, PlanKind, PlanStatus, RefreshReason } from "../../../shared/minds";
-import { COMMITMENT_KINDS, COMMITMENT_STATUSES, FIDELITIES, MIND_TEXT_CAPS, PLAN_KINDS, PLAN_PRIORITY, planInForce } from "../../../shared/minds";
+import type { CommitmentKind, CommitmentStatus, Fidelity, MindApproach, MindIntent, MindsGmCharacter, MindsGmView, PlanKind, PlanStatus, RefreshReason } from "../../../shared/minds";
+import { COMMITMENT_KINDS, COMMITMENT_STATUSES, FIDELITIES, MIND_APPROACHES, MIND_TEXT_CAPS, PLAN_KINDS, PLAN_PRIORITY, planInForce } from "../../../shared/minds";
 import type { EditOp } from "../../../shared/protocol";
 import { formatMoneyInput, parseMoneyInput } from "../../../shared/money";
 import { formatMoney, type WorldCurrency } from "../../../shared/world";
@@ -22,7 +23,7 @@ import { MoneyInput } from "../../../frontend/money-input";
 import type { GmSectionProps, Send } from "../../../frontend/registry";
 import type { GmView } from "../../../shared/state-view";
 import type { PlanFormDraft } from "./ops";
-import { COMMITMENT_KIND_LABEL, COMMITMENT_STATUS_LABEL, commitmentDraft, commitmentOp, deleteOp, FIDELITY_LABEL, isMoneyPlan, narratorGets, noteDraft, noteOp, pinOp, PLAN_KIND_LABEL, PLAN_STATUS_LABEL, planDraft, planLasts, planOp, refreshOp, startPlanIn } from "./ops";
+import { APPROACH_LABEL, COMMITMENT_KIND_LABEL, COMMITMENT_STATUS_LABEL, commitmentDraft, commitmentOp, deleteOp, FIDELITY_LABEL, intentOp, isMoneyPlan, narratorGets, noteDraft, noteOp, pinOp, PLAN_KIND_LABEL, PLAN_STATUS_LABEL, planDraft, planLasts, planOp, refreshOp, startPlanIn } from "./ops";
 import { PinnedLore, RunCard, useMindsRun, type MindsRun } from "./run";
 
 type Tone = "neutral" | "accent" | "pos" | "neg";
@@ -32,7 +33,7 @@ type Commitment = MindsGmCharacter["commitments"][number];
 type Note = MindsGmCharacter["notes"][number];
 
 /** A change to one character, each its own page over theirs; an item's `id` is null while adding one. */
-type Change = { kind: "pin" } | { kind: "refresh" } | { kind: "plan" | "commitment" | "note"; id: string | null };
+type Change = { kind: "pin" } | { kind: "refresh" } | { kind: "intent" } | { kind: "plan" | "commitment" | "note"; id: string | null };
 
 const LEVEL_TONE: Record<Fidelity, Tone> = { live: "accent", near: "neutral", far: "neutral", background: "neutral" };
 const PLAN_TONE: Record<PlanStatus, Tone> = { open: "neutral", done: "pos", dropped: "neutral" };
@@ -50,6 +51,12 @@ const LEVEL_NOTE: Record<Fidelity, string> = {
   near: "They think again when something calls for it.",
   far: "They think now and then, on the Far refresh period.",
   background: "No mind; they follow their routine.",
+};
+
+/** What each approach means for their mind, for choosing one. */
+const APPROACH_NOTE: Record<MindApproach, string> = {
+  reactive: "They answer the scene and what is asked of them, and start nothing of their own.",
+  proactive: "They pursue their own aims unprompted, without waiting to be asked.",
 };
 
 /** Why a turn's mind ran, in words; a time-skip beat's reason is words already. */
@@ -194,6 +201,7 @@ export function GmMindsSection(props: GmSectionProps) {
                         <span>{c.mind ? `Last mind ${c.mind.clock}` : "No mind yet"}</span>
                         {c.fidelity.pin.gm || c.fidelity.pin.author ? <Badge tone="warn">Pinned</Badge> : null}
                         {c.refreshQueued ? <Badge>Refresh</Badge> : null}
+                        {c.intent ? <Badge tone="accent">Intent</Badge> : null}
                       </span>
                     }
                     badge={<Badge tone={LEVEL_TONE[c.fidelity.level]}>{FIDELITY_LABEL[c.fidelity.level]}</Badge>}
@@ -277,6 +285,7 @@ function CharacterPages(props: { ctx: Ctx; c: MindsGmCharacter; onBack(): void }
             </Section>
             {ctx.minds.run?.entries.some((e) => e.entity === c.entity) || ctx.minds.error ? <RunCard minds={ctx.minds} busy={ctx.busy} /> : null}
             <Ladder c={c} busy={ctx.busy} open={changes.open} />
+            <Intent c={c} busy={ctx.busy} open={changes.open} />
             <LatestMind ctx={ctx} c={c} />
             <PinnedLore gm={ctx.gm} chatId={ctx.chatId} who={c.entity} send={ctx.send} />
             <Plans ctx={ctx} c={c} open={changes.open} />
@@ -289,6 +298,7 @@ function CharacterPages(props: { ctx: Ctx; c: MindsGmCharacter; onBack(): void }
       </div>
       {change?.kind === "pin" ? <PinPage ctx={ctx} c={c} onBack={changes.back} /> : null}
       {change?.kind === "refresh" ? <RefreshPage ctx={ctx} c={c} onBack={changes.back} /> : null}
+      {change?.kind === "intent" ? <IntentPage ctx={ctx} c={c} onBack={changes.back} /> : null}
       {change?.kind === "plan" && (change.id === null || plan) ? <PlanPage key={change.id ?? ""} ctx={ctx} c={c} plan={plan ?? null} onBack={changes.back} /> : null}
       {change?.kind === "commitment" && (change.id === null || commitment) ? <CommitmentPage key={change.id ?? ""} ctx={ctx} c={c} commitment={commitment ?? null} onBack={changes.back} /> : null}
       {change?.kind === "note" && (change.id === null || note) ? <NotePage key={change.id ?? ""} ctx={ctx} c={c} note={note ?? null} onBack={changes.back} /> : null}
@@ -341,6 +351,25 @@ function Ladder(props: { c: MindsGmCharacter; busy: boolean; open(change: Change
         </List>
       </Section>
     </>
+  );
+}
+
+/** The intent you set for them: what they mean to do now, which only their own mind reads, and how they go about it. */
+function Intent(props: { c: MindsGmCharacter; busy: boolean; open(change: Change): void }) {
+  const i = props.c.intent;
+  return (
+    <Section title="Your intent for them" aside={i ? <Badge tone="accent">Set</Badge> : undefined} flush>
+      <List>
+        <ListRow
+          icon="flag"
+          title={i && i.text !== "" ? i.text : "What they mean to do"}
+          subtitle={i ? (i.approach ? `${APPROACH_LABEL[i.approach]}: ${APPROACH_NOTE[i.approach]}` : "Their mind decides how they go about it") : "Not set: their mind decides for itself"}
+          chevron
+          disabled={props.busy}
+          onClick={() => props.open({ kind: "intent" })}
+        />
+      </List>
+    </Section>
   );
 }
 
@@ -655,6 +684,68 @@ function RefreshPage(props: { ctx: Ctx; c: MindsGmCharacter; onBack(): void }) {
           Refresh their mind next turn
         </Button>
       </Section>
+    </ChangePage>
+  );
+}
+
+const NO_INTENT: MindIntent = { text: "", approach: null };
+
+function IntentPage(props: { ctx: Ctx; c: MindsGmCharacter; onBack(): void }) {
+  const { ctx, c } = props;
+  const current = c.intent ?? NO_INTENT;
+  const [draft, setDraft] = useState<MindIntent>(current);
+  const textId = useId();
+  const group = useId();
+  const op = intentOp(c.entity, draft);
+  const clear = intentOp(c.entity, NO_INTENT);
+  // Saving only what changes; spaces alone are no change.
+  const changed = draft.text.trim().replace(/\s+/g, " ") !== current.text || draft.approach !== current.approach;
+  const choices: readonly (MindApproach | null)[] = [null, ...MIND_APPROACHES];
+  return (
+    <ChangePage name="mind-intent" title="Your intent for them" c={c} onBack={props.onBack}>
+      <form
+        class="lre-stack"
+        data-lre-minds-form="intent"
+        onSubmit={(event) => {
+          event.preventDefault();
+          if (op && changed) send(ctx, op, props.onBack);
+        }}
+      >
+        <Section>
+          <p class="lre-gm-note">What {c.name} means to do now, in your words. Only their own mind reads it, first after who they are, and works from it, so the story follows; no other mind, the narrator or Play ever sees it. It stays until you change or clear it.</p>
+          <Field label="What they mean to do" for={textId} help={used(draft.text, MIND_TEXT_CAPS.gmIntent)}>
+            <textarea id={textId} class="lre-input lre-gm-prose" rows={4} maxLength={MIND_TEXT_CAPS.gmIntent} value={draft.text} onInput={(event) => setDraft({ ...draft, text: event.currentTarget.value })} />
+          </Field>
+          <Field label="How they go about it">
+            <fieldset class="lre-gm-minds-choices">
+              <legend class="lre-sr">How they go about it</legend>
+              {choices.map((choice) => (
+                <label key={choice ?? "mind"} class="lre-gm-minds-choice">
+                  <input type="radio" name={group} value={choice ?? "mind"} checked={draft.approach === choice} disabled={ctx.busy} onChange={() => setDraft({ ...draft, approach: choice })} />
+                  <span class="lre-gm-minds-choice-text">
+                    <span class="lre-gm-minds-choice-name">
+                      {choice === null ? "Their mind decides" : APPROACH_LABEL[choice]}
+                      {choice === current.approach ? <Badge>Now</Badge> : null}
+                    </span>
+                    <span class="lre-gm-minds-choice-help">{choice === null ? "As the moment and what they know lead them." : APPROACH_NOTE[choice]}</span>
+                  </span>
+                </label>
+              ))}
+            </fieldset>
+          </Field>
+        </Section>
+        <Submit ctx={ctx} ready={op !== null && changed} icon="check" invalid={op === null ? `At most ${MIND_TEXT_CAPS.gmIntent} characters.` : undefined}>
+          {op !== null && changed && draft.text.trim() === "" && draft.approach === null ? "Clear intent" : "Save"}
+        </Submit>
+      </form>
+      {c.intent && clear ? (
+        <Section title="Clear">
+          <p class="lre-gm-note">Clears your intent: their mind decides for itself again. The edit's Undo brings it back.</p>
+          <Button variant="danger" icon="trash" disabled={ctx.busy} onClick={() => send(ctx, clear, props.onBack)}>
+            Clear intent
+          </Button>
+        </Section>
+      ) : null}
     </ChangePage>
   );
 }

@@ -117,7 +117,7 @@ const LIFE_FIXES: LedgerEvent[][] = [
 // Turns where Dev thinks, and replies he remembers (DESIGN §24): the minds pre and post phases' events, kept apart as the others are.
 const MIND_TEXTS = ["mind:dev"];
 const MIND_REPLIES = ["Dev weighs it up. [recall:dev]", "Dev says nothing.", "You both remember this. [recall:dev] [found:3]"];
-// GM minds controls as `lre.edit` records them: a pin, a refresh, a plan added and its status (which a branch without the plan drops).
+// GM minds controls as `lre.edit` records them: a pin, a refresh, a plan added and its status (which a branch without the plan drops), and an intent set, changed and cleared.
 const GM_PLAN: LedgerEvent = { type: "minds.plan_edit", data: { entity: "dev", plan: "p_gm", value: { id: "p_gm", what: "Fix the boat", kind: "errand", when: { from: 60, to: 120 }, where: null, with: [], priority: 2, status: "open", made: 0, source: "gm", closed: null, reason: null } } };
 const MIND_FIXES: LedgerEvent[][] = [
   [{ type: "minds.pin", data: { entity: "dev", level: "live" } }],
@@ -129,11 +129,14 @@ const MIND_FIXES: LedgerEvent[][] = [
     { ...GM_PLAN, group: "edit:mind" },
     { type: "minds.plan", data: { entity: "dev", plan: "p_gm", status: "dropped", at: 90, reason: "GM edit" }, group: "edit:mind" },
   ],
+  [{ type: "minds.intent", data: { entity: "dev", intent: { text: "Get the boat fixed before the storm", approach: "proactive" } } }],
+  [{ type: "minds.intent", data: { entity: "dev", intent: { text: "", approach: "reactive" } } }],
+  [{ type: "minds.intent", data: { entity: "dev", intent: null } }],
 ];
 
 const FIGHT_EVENTS: Record<string, keyof Coverage["fights"]> = { "combat.start": "start", "combat.act": "act", "combat.turn": "turn", "combat.end": "end" };
 const LIFE_EVENTS: Record<string, keyof Coverage["lives"]> = { "engine.life": "life", "engine.told": "told" };
-const MIND_EVENTS: Record<string, keyof Coverage["minds"]> = { "minds.mind": "mind", "minds.memory": "memory", "minds.presence": "presence", "minds.pin": "fix", "minds.refresh": "fix", "minds.plan_edit": "fix", "minds.plan": "fix" };
+const MIND_EVENTS: Record<string, keyof Coverage["minds"]> = { "minds.mind": "mind", "minds.memory": "memory", "minds.presence": "presence", "minds.pin": "fix", "minds.refresh": "fix", "minds.plan_edit": "fix", "minds.plan": "fix", "minds.intent": "fix" };
 
 /**
  * The indexes of the source's events a carried copy left out, or null when the copy isn't the source

@@ -11,6 +11,7 @@ import type { InferredChecks } from "../shared/inferred";
 import type { JsonObject, JsonValue } from "../shared/json";
 import { isRecord } from "../shared/json";
 import type { EventRef, ResolveScope, TimeControl, TimeScope } from "../shared/ledger";
+import type { MindEditOp } from "../shared/minds";
 import type { EditOp, ResultBodies } from "../shared/protocol";
 import type { Chip } from "../shared/state-view";
 import { chipRegenerates } from "../shared/state-view";
@@ -350,7 +351,9 @@ function mindsCancel(args: Args, ctx: ToolContext): Promise<ToolResult> {
 // ---------------------------------------------------------------- the tools
 
 const OPS_ITEM: JsonObject = { type: "object", properties: { op: { type: "string" } }, required: ["op"] };
-const MIND_OPS = ["mind_pin", "mind_refresh", "mind_memory"] as const;
+/** Every minds control `lre_mind_edit` takes: a lookup over the ops, so a new one fails the typecheck until it is here. */
+const MIND_OP: Record<MindEditOp["op"], true> = { mind_pin: true, mind_refresh: true, mind_memory: true, mind_intent: true };
+const MIND_OPS = Object.keys(MIND_OP);
 
 export const PLAY_TOOLS: readonly ToolModule[] = [
   {
@@ -415,7 +418,7 @@ export const PLAY_TOOLS: readonly ToolModule[] = [
   {
     name: "lre_gm_edit",
     description:
-      'GM edits on the chat\'s latest message (GM view → Edit): the operations in order, all or none, as one edit with an Undo chip; locked fields are writable. Each names its op: set {entity, field, value}; add {entity, field, delta}; link {rel, from, to, fields?, until?}; unlink {rel, from, to}; move {entity, to: place}; put {entity, into: entity or null}; adjust {account, cents} (money in or out against a correction); stage {track, to}; entity {entity, tier?, agent?, levels?}; classify {entity, class, tags}; life {entity, to?, tell?}; spawn {kind, name, id?, tier?, place?, agent?}; despawn {entity}; restore {entity}; mind_pin, mind_refresh, mind_memory (as lre_mind_edit); effect {effect, args}. Ids come from lre_gm. Needs spoilers: true.',
+      'GM edits on the chat\'s latest message (GM view → Edit): the operations in order, all or none, as one edit with an Undo chip; locked fields are writable. Each names its op: set {entity, field, value}; add {entity, field, delta}; link {rel, from, to, fields?, until?}; unlink {rel, from, to}; move {entity, to: place}; put {entity, into: entity or null}; adjust {account, cents} (money in or out against a correction); stage {track, to}; entity {entity, tier?, agent?, levels?}; classify {entity, class, tags}; life {entity, to?, tell?}; spawn {kind, name, id?, tier?, place?, agent?}; despawn {entity}; restore {entity}; mind_pin, mind_refresh, mind_memory, mind_intent (as lre_mind_edit); effect {effect, args}. Ids come from lre_gm. Needs spoilers: true.',
     inputSchema: object({ chatId: CHAT_ID, spoilers: SPOILERS, ops: { type: "array", minItems: 1, maxItems: 200, items: OPS_ITEM, description: 'The operations, applied in order: [{"op": "set", "entity": "pov", "field": "mood", "value": "calm"}].' } }, ["chatId", "spoilers", "ops"]),
     write: { destructive: true, idempotent: false },
     run: (args, ctx) => gmEdit(args, ctx, "lre_gm_edit"),
@@ -424,11 +427,11 @@ export const PLAY_TOOLS: readonly ToolModule[] = [
   {
     name: "lre_mind_edit",
     description:
-      'Change characters\' minds (GM → Minds), as one GM edit with an Undo chip: mind_pin {entity, level: "live", "near", "far", "background", or null to unpin} pins a character\'s fidelity; mind_refresh {entity} asks for a fresh mind next turn; mind_memory {entity, part: "note", "commitment" or "plan", id, value} edits one (value: the fields to change), adds one (id null; value needs its text, and a plan its what and when) or deletes one (value null). lre_minds shows the ids. Needs spoilers: true.',
-    inputSchema: object({ chatId: CHAT_ID, spoilers: SPOILERS, ops: { type: "array", minItems: 1, maxItems: 200, items: { type: "object", properties: { op: { type: "string", enum: [...MIND_OPS] } }, required: ["op", "entity"] }, description: 'The operations, in order: [{"op": "mind_pin", "entity": "danny_okafor", "level": "live"}].' } }, ["chatId", "spoilers", "ops"]),
+      'Change characters\' minds (GM → Minds), as one GM edit with an Undo chip: mind_pin {entity, level: "live", "near", "far", "background", or null to unpin} pins a character\'s fidelity; mind_refresh {entity} asks for a fresh mind next turn; mind_memory {entity, part: "note", "commitment" or "plan", id, value} edits one (value: the fields to change), adds one (id null; value needs its text, and a plan its what and when) or deletes one (value null); mind_intent {entity, text?, approach?} sets what they mean to do now, in your words (at most 600 characters), which only their own mind reads, first, and works from, and how they go about it ("reactive": answer the scene; "proactive": pursue their own aims; null: their mind decides); give either or both, "" and null empty them, and with both empty the intent is cleared. lre_minds shows the ids and each intent. Needs spoilers: true.',
+    inputSchema: object({ chatId: CHAT_ID, spoilers: SPOILERS, ops: { type: "array", minItems: 1, maxItems: 200, items: { type: "object", properties: { op: { type: "string", enum: MIND_OPS } }, required: ["op", "entity"] }, description: 'The operations, in order: [{"op": "mind_pin", "entity": "danny_okafor", "level": "live"}].' } }, ["chatId", "spoilers", "ops"]),
     write: { destructive: true, idempotent: false },
     run: (args, ctx) => gmEdit(args, ctx, "lre_mind_edit", MIND_OPS),
-    cli: { command: "mind-edit", section: SECTION, usage: "mind-edit <chatId> --ops <file|json> --spoilers", summary: "Pin, refresh or edit characters' minds", positionals: ["chatId"], needs: 1, options: { "--ops": { arg: "ops", as: "json" }, "--spoilers": { arg: "spoilers", as: "flag" } } },
+    cli: { command: "mind-edit", section: SECTION, usage: "mind-edit <chatId> --ops <file|json> --spoilers", summary: "Pin, refresh, edit or steer characters' minds", positionals: ["chatId"], needs: 1, options: { "--ops": { arg: "ops", as: "json" }, "--spoilers": { arg: "spoilers", as: "flag" } } },
   },
   {
     name: "lre_marker",
