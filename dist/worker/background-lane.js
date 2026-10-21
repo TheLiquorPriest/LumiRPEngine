@@ -1329,6 +1329,7 @@ var MINDS_RANGES = {
 };
 var num = (v, [lo, hi], fallback) => typeof v === "number" && Number.isFinite(v) && v >= lo && v <= hi ? v : fallback;
 var whole2 = (v, range, fallback) => Math.round(num(v, range, fallback));
+var wholeOrNone = (v, range, fallback) => v === "none" ? "none" : typeof v === "number" && Number.isFinite(v) && v >= range[0] && v <= range[1] ? Math.round(v) : fallback;
 var obj = (v) => isRecord(v) ? v : {};
 function selectorOrNull(v) {
   if (!isRecord(v))
@@ -1371,7 +1372,7 @@ function memoryConfigOf(raw, base = DEFAULT_MINDS_MEMORY) {
   const consolidate = obj(m.consolidate);
   return {
     witness: { show: whole2(witness.show, MINDS_RANGES.show, base.witness.show) },
-    recall: { recent: whole2(recall.recent, MINDS_RANGES.show, base.recall.recent), relevant: whole2(recall.relevant, MINDS_RANGES.show, base.recall.relevant), tokens: whole2(recall.tokens, MINDS_RANGES.recallTokens, base.recall.tokens) },
+    recall: { recent: whole2(recall.recent, MINDS_RANGES.show, base.recall.recent), relevant: whole2(recall.relevant, MINDS_RANGES.show, base.recall.relevant), tokens: wholeOrNone(recall.tokens, MINDS_RANGES.recallTokens, base.recall.tokens) },
     notes: { show: whole2(notes.show, MINDS_RANGES.show, base.notes.show), keep: whole2(notes.keep, MINDS_RANGES.keep, base.notes.keep) },
     commitments: { show: whole2(commitments.show, MINDS_RANGES.show, base.commitments.show) },
     salience: { halfLifeDays: num(salience.halfLifeDays, MINDS_RANGES.halfLifeDays, base.salience.halfLifeDays), floor: num(salience.floor, MINDS_RANGES.floor, base.salience.floor) },
@@ -1422,13 +1423,24 @@ function isMindPurpose(purpose) {
 function worldMindTemplate(world, purpose) {
   return Object.values(world.steps).filter((t) => t.purpose === purpose && t.template.trim() !== "").sort((a, b) => a.id.localeCompare(b.id))[0];
 }
+var DEFAULT_MIND_READS = Object.freeze({
+  pinned: { on: true, tokens: "none" },
+  activated: { on: true, tokens: 1600 },
+  reply: { on: true, tokens: "none" },
+  message: { on: true, tokens: "none" },
+  summary: { on: false, tokens: "none" },
+  memory: { on: false, tokens: "none" },
+  thoughts: { on: false, tokens: "none" },
+  recall: { on: false },
+  life: { on: false, tokens: "none" }
+});
 var MINDS_PRESETS = Object.freeze({
   lean: { enabled: false, liveLimit: 3, nearRefresh: { scene: true, mention: true, turns: 6, minutes: 120 }, farRefreshMinutes: 1440, refreshLimit: 1, memoryLevels: [], tokens: 1200, skip: { maxBeats: 4, maxMindsPerBeat: 2 } },
   standard: { enabled: true, liveLimit: 3, nearRefresh: { scene: true, mention: true, turns: 6, minutes: 120 }, farRefreshMinutes: 1440, refreshLimit: 2, memoryLevels: ["live"], tokens: 2400, skip: { maxBeats: 6, maxMindsPerBeat: 3 } },
   full: { enabled: true, liveLimit: "none", nearRefresh: { scene: true, mention: true, turns: 4, minutes: 60 }, farRefreshMinutes: 720, refreshLimit: "none", memoryLevels: ["live", "near"], tokens: 4000, skip: { maxBeats: "none", maxMindsPerBeat: "none" } }
 });
 function defaultMindsSettings(preset = "standard") {
-  return { ...structuredClone(MINDS_PRESETS[preset]), replyTokens: "none", memory: {}, prompts: {} };
+  return { ...structuredClone(MINDS_PRESETS[preset]), reads: structuredClone(DEFAULT_MIND_READS), memory: {}, prompts: {} };
 }
 var MINDS_DEFAULTS = Object.freeze(defaultMindsSettings());
 var PLAN_KINDS = ["errand", "meet", "visit", "work", "rest", "leisure", "pay", "lend", "other"];
@@ -1438,11 +1450,13 @@ function planInForce(p) {
 }
 var COMMITMENT_KINDS = ["promise", "debt", "grudge", "favour", "plan", "other"];
 var COMMITMENT_STATUSES = ["open", "kept", "broken", "released"];
+var MIND_APPROACHES = ["reactive", "proactive"];
 var MINDS_KEEP = { notes: 64, openCommitments: 48, closedCommitments: 16, openPlans: 24, closedPlans: 16, witness: 48, presence: 400 };
 var MIND_TEXT_CAPS = {
   monologue: 1200,
   depiction: 600,
   intent: 300,
+  gmIntent: 600,
   reaction: 200,
   reactions: 4,
   plans: 4,
@@ -1471,6 +1485,7 @@ var MINDS_EVENTS = {
   consolidated: "minds.consolidated",
   pin: "minds.pin",
   refresh: "minds.refresh",
+  intent: "minds.intent",
   skip: "minds.skip"
 };
 var MINDS_SLOT = "minds";
@@ -10793,6 +10808,10 @@ function resolveTarget(reg, world, state, target) {
     return { code: "too_long", reason: `a timelapse reaches at most ${TIME_LIMITS.timelapseMinutes / MINUTES_PER_DAY} days ahead` };
   return { to, label, ...stopWhen ? { stopWhen } : {} };
 }
+var SPAN_COUNTS = { a: 1, an: 1, one: 1, next: 1, "a couple of": 2, "couple of": 2, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10, eleven: 11, twelve: 12, fifteen: 15, twenty: 20, thirty: 30, forty: 40, "forty five": 45, ninety: 90 };
+var SPAN_UNITS = { minute: 1, min: 1, hour: 60, hr: 60, day: MINUTES_PER_DAY, week: 7 * MINUTES_PER_DAY };
+var longestFirst = (words) => [...words].sort((a, b) => b.length - a.length).join("|");
+var SPAN_TERM = new RegExp(` (${longestFirst(Object.keys(SPAN_COUNTS))}|\\d+(?:\\.\\d+)?)( and a half)? (${longestFirst(Object.keys(SPAN_UNITS))})s?( and a half)?(?= )`, "g");
 function parseOverrides(v) {
   const out = {};
   if (!isRecord(v))
@@ -28303,6 +28322,25 @@ var refresh = {
   },
   describe: (e, ctx, viewer) => viewer !== undefined ? "" : `${nameOf4(ctx, String(e.data.entity))}: a fresh mind next turn`
 };
+function isIntent(v) {
+  if (!isRecord(v) || !str13(v.text))
+    return false;
+  const approach = v.approach === null || typeof v.approach === "string" && MIND_APPROACHES.includes(v.approach);
+  return approach && (v.text !== "" || v.approach !== null);
+}
+var intent = {
+  type: MINDS_EVENTS.intent,
+  validate: (e, ctx) => person(ctx, e.data) ?? (e.data.intent === null || isIntent(e.data.intent) ? null : bad("an intent is its text, its approach or both, or null to clear it")),
+  apply: (e, state) => {
+    const c = writeCharacter(state, String(e.data.entity));
+    const v = e.data.intent;
+    if (isIntent(v))
+      c.intent = { text: v.text, approach: v.approach };
+    else
+      delete c.intent;
+  },
+  describe: (e, ctx, viewer) => viewer !== undefined ? "" : `${nameOf4(ctx, String(e.data.entity))}: intent ${e.data.intent === null ? "cleared" : "set"}`
+};
 var skip = {
   type: MINDS_EVENTS.skip,
   validate: (e) => finite2(e.data.from) && finite2(e.data.to) && Array.isArray(e.data.beats) && e.data.beats.every((b) => isRecord(b) && finite2(b.at) && str13(b.reason) && (b.source === "scan" || b.source === "model")) ? null : bad("a skip's beats need their span and each beat's clock, reason and source"),
@@ -28311,7 +28349,7 @@ var skip = {
   },
   describe: (e, _ctx, viewer) => viewer !== undefined ? "" : `Time skip beats: ${Array.isArray(e.data.beats) ? e.data.beats.length : 0}`
 };
-var MINDS_EVENT_DEFS = [round, mind, memory, presence, planStatus, planEdit, noteEdit, commitmentStatus, commitmentEdit, consolidated, pin, refresh, skip];
+var MINDS_EVENT_DEFS = [round, mind, memory, presence, planStatus, planEdit, noteEdit, commitmentStatus, commitmentEdit, consolidated, pin, refresh, intent, skip];
 function mindsOn(ctx) {
   return readSlice(ctx.state).on;
 }
@@ -28429,6 +28467,13 @@ function mindEdit(ctx, op) {
   if (op.op === "mind_refresh")
     return [{ type: MINDS_EVENTS.refresh, data: { entity: op.entity } }];
   const c = readCharacter(state, op.entity);
+  if (op.op === "mind_intent") {
+    if (op.text === undefined && op.approach === undefined)
+      return reject16("bad_value", "say what they mean to do, or how they go about it");
+    const text = op.text === undefined ? c.intent?.text ?? "" : capText(op.text, MIND_TEXT_CAPS.gmIntent);
+    const approach = op.approach === undefined ? c.intent?.approach ?? null : op.approach;
+    return [{ type: MINDS_EVENTS.intent, data: { entity: op.entity, intent: text === "" && approach === null ? null : { text, approach } } }];
+  }
   const value = op.value;
   if (op.part === "note") {
     const before = op.id === null ? undefined : c.notes.find((n) => n.id === op.id);
@@ -28637,7 +28682,7 @@ ${texts.reply}`);
 var WEIGHT_KEYS = ["here", "nearby", "mentioned", "regard", "knows", "owner", "track", "rule", "pending", "recent"];
 var MEMORY_PARTS = {
   witness: { show: { range: MINDS_RANGES.show, whole: true } },
-  recall: { recent: { range: MINDS_RANGES.show, whole: true }, relevant: { range: MINDS_RANGES.show, whole: true }, tokens: { range: MINDS_RANGES.recallTokens, whole: true } },
+  recall: { recent: { range: MINDS_RANGES.show, whole: true }, relevant: { range: MINDS_RANGES.show, whole: true }, tokens: { range: MINDS_RANGES.recallTokens, whole: true, none: true } },
   notes: { show: { range: MINDS_RANGES.show, whole: true }, keep: { range: MINDS_RANGES.keep, whole: true } },
   commitments: { show: { range: MINDS_RANGES.show, whole: true } },
   salience: { halfLifeDays: { range: MINDS_RANGES.halfLifeDays, whole: false }, floor: { range: MINDS_RANGES.floor, whole: false } },
@@ -28739,7 +28784,7 @@ function configIssues(world, registry) {
         else if (field === "bool") {
           if (typeof v !== "boolean")
             err(`minds.memory.${part}.${key}`, "On (true) or off (false); the default plays instead.");
-        } else
+        } else if (!(field.none && v === "none"))
           number(`minds.memory.${part}.${key}`, v, field.range, field.whole);
       }
     }

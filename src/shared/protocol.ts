@@ -62,8 +62,6 @@ export interface StateDelta extends Envelope<"lre.state.delta"> {
 /** The frontend opened (or switched to) a chat; the backend replies with a snapshot. */
 export interface HelloRequest extends Request<"lre.hello"> {
   chatId: ChatId | null;
-  /** The active Loom preset as the frontend's state has it (`loom.activePresetId`); absent when it can't say. */
-  presetId?: string | null;
   /**
    * An outside client (the `lumirpengine` CLI or MCP server, DESIGN §23) names itself: its commits
    * are labelled `agent`, and the log says who connected. An MCP server checks in with what it runs
@@ -583,10 +581,10 @@ export interface StudioOfferView {
 }
 
 /**
- * Settings → Preset (DESIGN §6.8): `get` reads the active preset's card; `add` adds the RPEngine
- * blocks it lacks, then reads it; `active` tells the backend the active Loom preset changed.
+ * Settings → Preset (DESIGN §6.8): `get` reads the card of the preset Lumiverse generates with; `add`
+ * adds the RPEngine blocks it lacks, then reads it.
  */
-export type PresetRequest = Request<"lre.preset"> & ({ op: "get" | "add" } | { op: "active"; presetId: string | null });
+export type PresetRequest = Request<"lre.preset"> & { op: "get" | "add" };
 
 /**
  * Diagnostics (DESIGN §6.9), GM-level like `lre.gm`: answered on request, never pushed. `get` reads

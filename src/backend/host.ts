@@ -129,9 +129,13 @@ export interface PresetChangedEvent {
   presetId: string | null;
 }
 
-/** One of the user's Lumiverse settings was written (`SETTINGS_UPDATED`), the active preset among them. */
+/**
+ * Settings of the user's were written (`SETTINGS_UPDATED`), the active preset maybe among them: the
+ * keys written, one for a single write (`{key}`) and every one for a batch (`{keys}`, which is how
+ * Lumiverse's own pages save); null when the event names none.
+ */
 export interface SettingsUpdatedEvent {
-  key: string | null;
+  keys: string[] | null;
 }
 
 /** A loaded Lumiverse page of the user's disconnected (`FRONTEND_SESSION_CLOSED`): the session routing named it. */
@@ -433,10 +437,12 @@ export interface HostPort {
   presets: {
     /** A preset with its revision (each change to it bumps it); null when there's no such preset. */
     get(presetId: string, userId: UserId): Promise<{ id: string; name: string; revision: number } | null>;
-    /** The preset a connection links, if it links one. */
-    ofConnection(connectionId: string, userId: UserId): Promise<string | null>;
-    /** The preset the chat's last reply was assembled with, when the host kept its breakdown. */
-    lastUsed(chatId: ChatId, userId: UserId): Promise<string | null>;
+    /**
+     * The preset the host generates the chat with, by its own resolution as prompt assembly makes it
+     * (the selected Loom preset, else the chat's connection's, then the profile bindings), and the
+     * block states those bindings set, by block id. With no chat: the selected preset and its defaults.
+     */
+    active(chatId: ChatId | null, userId: UserId): Promise<{ presetId: string | null; blockStates: Readonly<Record<string, boolean>> }>;
     /** The preset's blocks, in order. */
     blocks(presetId: string, userId: UserId): Promise<HostPresetBlock[]>;
     /** Inserts blocks at `at` (null: the end) in one write of the preset's stored blocks as they are, while it is still at `revision`. */

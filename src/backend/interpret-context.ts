@@ -52,8 +52,8 @@ export interface InterpretScene {
   recent: string[];
 }
 
-/** Typed phrases that let time pass: hints in the timelapse's catalog entry. */
-const TIMELAPSE_LEXICON = ["wait until", "sleep until", "next morning", "skip ahead", "skip to", "pass the time", "sleep through", "hours later", "days later", "wait for"];
+/** Typed phrases that let time pass: hints in the timelapse's catalog entry, whose line shows the first six. */
+const TIMELAPSE_LEXICON = ["skip ahead", "time skip", "over the next hour", "later that evening", "wait until", "sleep until", "next morning", "skip to", "pass the time", "sleep through", "hours later", "days later", "wait for"];
 
 /** The day and time where the POV is, as the HUD shows them ("Mon 2026-09-14 06:45"). */
 function localNow(world: WorldDoc, state: Readonly<WorldState>): string {
@@ -153,16 +153,20 @@ export function interpretCatalog(reg: Registry, world: WorldDoc, state: Readonly
 
 /**
  * Letting time pass, always in the catalog, so a world without actions still interprets ("I sleep
- * until the next morning", "skip ahead to Friday at 6 PM"). It tells the model the day and time as
- * the HUD shows them (the place's time zone), so a stated day and time can be named exactly.
+ * until the next morning", "skip ahead to Friday at 6 PM"). An out-of-character instruction that
+ * time passes is always it, whatever else the input says (DESIGN §5.2): what happens in that time
+ * fills it. Its `span` is required, the input's own words for how long or until when, which the
+ * engine reads the same way every time (`typedSpan`), so a read that picks it always says how long.
+ * It tells the model the day and time as the HUD shows them (the place's time zone), so a stated
+ * day and time can be named exactly.
  */
 export function timelapseEntry(world: WorldDoc, state: Readonly<WorldState>): CatalogEntry {
   const parts = [...world.calendar.dayParts.map((d) => d.id), "shift", "commitment"];
   return {
     id: TIMELAPSE_ACTION,
     label: "Let time pass",
-    description: `wait, sleep or skip ahead: minutes for a stated duration; until one of ${parts.join(", ")} ("next <day part>" for the following day's); or at a stated day and time, as "YYYY-MM-DD HH:MM" (it is now ${localNow(world, state)})`,
-    params: ["minutes? (number)", "until? (text)", "at? (text)"],
+    description: `a time skip: wait, sleep, skip ahead, or spend a stated span on something no other action covers; an out-of-character instruction that time passes is always this, whatever else the input says ("OOC: over the next hour, I sort the stock" is a skip of an hour, the sorting what fills it). span: the input's own words for how long or until when ("over the next hour", "later that evening"); with it, minutes for a stated duration; until one of ${parts.join(", ")} ("next <day part>" for the following day's); or at a stated day and time, as "YYYY-MM-DD HH:MM" (it is now ${localNow(world, state)})`,
+    params: ["span (text: the input's words for how long or until when)", "minutes? (number)", "until? (text)", "at? (text)"],
     needs: [],
     lexicon: TIMELAPSE_LEXICON,
   };
