@@ -160,3 +160,4 @@ Read-only limits what this MCP server offers, not what your agent can do. An age
 - **"LumiRPEngine … is too old for lumirpengine".** The extension on your Lumiverse predates the agent API this client needs: update LumiRPEngine in the Extensions tab.
 - **No answer within 60 s.** LumiRPEngine isn't running, or is busy: `lumirpengine status` says which. A write that timed out may still have been made; check before repeating it.
 - **A request over 4 MiB** is refused by the client, since Lumiverse would drop it without a word: import or edit in smaller pieces.
+- **Settings → MCP server lists a server you no longer run.** A line stays after its server stops, showing when it was last seen, so a harness you removed keeps one: **Forget** drops it, and it comes back only if that server connects again.
