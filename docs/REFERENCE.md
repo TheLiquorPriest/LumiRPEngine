@@ -244,7 +244,7 @@ Version 1 · realism domain `castlife` · requires `gear`, `relationships`, `spa
 
 ### Events
 
-Its own: `castlife.decision`, `castlife.invitation`, `castlife.need`.
+Its own: `castlife.decision`, `castlife.follow`, `castlife.invitation`, `castlife.need`, `castlife.routine`, `castlife.schedule`.
 
 ### Panels and slots
 
@@ -260,7 +260,7 @@ Panels: `castlife.cast`. Slots it writes: `people`, `stance`.
 
 ### Lint codes
 
-`castlife.birthday`, `castlife.cues`, `castlife.double_booking`.
+`castlife.birthday`, `castlife.cues`, `castlife.double_booking`, `castlife.routines`.
 
 ## Combat pack (`combat`)
 

@@ -15,6 +15,7 @@ import { WORLD_FORMAT } from "../shared/world";
 import type { StudioOffer } from "../shared/studio-bridge";
 import { isWorldDoc, migrateWorld, previewSheet, previewSkills } from "../engine/authoring";
 import { parseEditOps, resolveEdit } from "../engine/edits";
+import { routineChanges, routineGmView, routinePlayerView } from "../packs/castlife/core/view";
 import { sheetRulesetProblem } from "../engine/ruleset";
 import { formulaFunctions } from "../engine/scope";
 import { neutralizeMacros } from "../shared/macros";
@@ -303,6 +304,27 @@ export class Dispatcher {
         const view = core ? buildGmView(core, toChain(await this.rt.host.chats.messages(r.chatId, userId)), this.rt.registry, (await this.rt.settings.get(userId)).minds) : null;
         if (!view) throw new RequestError("unavailable", "the chat's world revision is not loaded");
         reply("lre.gm", view);
+        return;
+      }
+      case "lre.routine": {
+        // A character's routine (DESIGN §8): the GM's view behind the GM gate, as `lre.gm` is; the
+        // player's only what Cast shows of someone the POV may know, else as for no one.
+        await this.requireWorldChat(r.chatId, userId);
+        const { state, world } = await this.head(r.chatId, userId);
+        const ctx = this.rt.registry.context(world, state);
+        if (r.op === "changed") {
+          reply("lre.routine", { changed: routineChanges(ctx) });
+          return;
+        }
+        if (typeof r.entity !== "string" || (r.view !== "gm" && r.view !== "player") || (r.day !== undefined && !Number.isInteger(r.day))) throw new RequestError("bad_request", "name a character, and the gm or player view");
+        if (r.view === "gm") {
+          if (!Object.prototype.hasOwnProperty.call(state.entities, r.entity)) throw new RequestError("not_found", "no such character");
+          reply("lre.routine", { gm: routineGmView(ctx, r.entity, r.day) });
+          return;
+        }
+        const player = routinePlayerView(ctx, r.entity);
+        if (!player) throw new RequestError("not_found", "no such character");
+        reply("lre.routine", { player });
         return;
       }
       case "lre.state.get": {
