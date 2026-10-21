@@ -157,7 +157,7 @@ export function RoutineSettingsEditor() {
       <p class="lre-build-note">
         Whatever you pick, the story comes first for anyone in a scene with the player's character: a routine never moves them out of it, contradicts what's been told or interrupts play. These settings tune what routines are to the engine, and how far everyone else's days follow the story and its lore.
       </p>
-      <Issues issues={lint.filter((issue) => !["awareness", "invitations", "sociability", "planBend", "roles", "skips", "narrator", "paletteFollowsRoutine"].some((key) => issue.path === `routineSettings.${key}` || issue.path.startsWith(`routineSettings.${key}.`)))} />
+      <Issues issues={lint.filter((issue) => !Object.keys(DEFAULT_ROUTINE_SETTINGS).some((key) => issue.path === `routineSettings.${key}` || issue.path.startsWith(`routineSettings.${key}.`)))} />
       <RoutineRoleSettings value={value} lint={lint} disabled={busy} onChange={setValue} />
       <FormGroup title="Story and lore awareness">
         <p class="lre-minds-note">How strictly an enforced routine keeps to itself against what the story and its lore establish.</p>

@@ -8,7 +8,8 @@ import type { JsonObject, JsonValue } from "../shared/json";
 import { hasOwn, isRecord } from "../shared/json";
 import { planProfile, PROFILE_IDS, PROFILES, type ProfileChoice, type ProfileId } from "../shared/profiles/index";
 import type { JsonPatchOp, ResultBodies } from "../shared/protocol";
-import { DEFAULT_ROUTINE_SETTINGS, routineSettingsOf, routineSettingsProblems } from "../shared/routines";
+import { FIDELITIES } from "../shared/minds";
+import { DEFAULT_ROUTINE_SETTINGS, ROUTINE_SETTING_VALUES, routineSettingsOf, routineSettingsProblems } from "../shared/routines";
 import type { EditorBody as DraftRead } from "./live";
 import type { Args } from "./args";
 import { boolArg, intArg, neededText, textArg, textsArg, ToolError } from "./args";
@@ -24,6 +25,11 @@ import type { ToolContext } from "./tools";
 const WORLD_ID: JsonObject = { type: "string", description: "The world's id (w_…), from lre_worlds." };
 const CHAT_ID: JsonObject = { type: "string", description: "The chat's id (lre_chats lists the chats that play a world)." };
 const EXPECT_VERSION: JsonObject = { type: "integer", minimum: 0, description: "The draft version you last read: refused if the draft has moved on since, so a change you haven't seen is never overwritten." };
+
+/** Each routine setting and the values it takes, read from the table a write is held to, so the tool never names fewer than LumiRPEngine takes. */
+const ROUTINE_SETTINGS_TAKEN = Object.entries(ROUTINE_SETTING_VALUES)
+  .map(([key, allowed]) => (allowed === "switch" ? `${key} (true or false)` : "levels" in allowed ? `${key} ({${FIDELITIES.join(", ")}} each one of ${allowed.levels.map((v) => `"${v}"`).join(", ")})` : `${key} (${allowed.map((v) => `"${v}"`).join(", ")})`))
+  .join(", ");
 
 /** The engine's packs, read once: a profile plans against the kinds they define, as the backend applies it. */
 let packs: Registry | null = null;
@@ -184,7 +190,7 @@ export const BUILD_TOOLS: readonly ToolModule[] = [
   ...itemTools("schedules", "schedule", "lre_schedule", "lre_schedules"),
   {
     name: "lre_routine_settings",
-    description: 'A world draft\'s routine settings (DESIGN §8): awareness ("story_first", "balanced", "routine_first": how strictly people keep to routine against the story), invitations ("off", "player", "everyone"), sociability ("reserved", "usual", "outgoing") and planBend ("must", "strong", "standard", "ordinary"). Without value it reads them; with value it sets them whole (a part left out takes its default; the defaults remove them). A setting or value the engine doesn\'t take is refused, naming it. Pass expectVersion so a change made since is refused.',
+    description: `A world draft's routine settings (DESIGN §8): ${ROUTINE_SETTINGS_TAKEN}. Without value it reads them; with value it sets them whole (a part left out takes its default; the defaults remove them). A setting or value the engine doesn't take is refused, naming it. Pass expectVersion so a change made since is refused.`,
     inputSchema: object({ worldId: WORLD_ID, value: { type: "object", description: "The settings to set, whole." }, expectVersion: EXPECT_VERSION }, ["worldId"]),
     write: { destructive: true, idempotent: true },
     run: async (args, ctx) => {
@@ -192,7 +198,7 @@ export const BUILD_TOOLS: readonly ToolModule[] = [
       const live = ctx.live();
       const read = await live.draft(worldId);
       if (args.value === undefined) return { text: json({ worldId, version: read.version, settings: routineSettingsOf(read.draft) }) };
-      if (!isRecord(args.value)) throw new ToolError("value is an object: {awareness?, invitations?, sociability?, planBend?, roles?: {live?, near?, far?, background?}, narrator?, paletteFollowsRoutine?}.");
+      if (!isRecord(args.value)) throw new ToolError(`value is an object: {${Object.keys(ROUTINE_SETTING_VALUES).map((key) => `${key}?`).join(", ")}}.`);
       // The defaults are no settings; anything else goes as sent, so LumiRPEngine refuses a bad one as it refuses Build's.
       const same = routineSettingsProblems(args.value).length === 0 && JSON.stringify(routineSettingsOf({ routineSettings: args.value })) === JSON.stringify(DEFAULT_ROUTINE_SETTINGS);
       const ops = same ? (read.draft.routineSettings === undefined ? [] : [{ op: "remove" as const, path: "/routineSettings" }]) : [{ op: "add" as const, path: "/routineSettings", value: args.value as JsonObject }];
