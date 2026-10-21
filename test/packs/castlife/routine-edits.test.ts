@@ -154,11 +154,13 @@ describe("the routine read model", () => {
     const w = sourced();
     const view = routinePlayerView(w.ctx, "maya");
     const block = (from: string) => view?.day?.blocks.find((b) => b.from === from);
-    expect(block("18:00")).toEqual({ from: "18:00", to: "21:00", label: "Pours pints", kind: "work", reasons: ["routine"], source: { type: "lore", entry: "anchor_nights", title: "Friday nights at the Anchor" } });
+    expect(block("18:00")).toMatchObject({ from: "18:00", to: "21:00", label: "Pours pints", kind: "work", source: { type: "lore", entry: "anchor_nights", title: "Friday nights at the Anchor" } });
+    expect(Object.keys(block("18:00") ?? {}).sort()).toEqual(["from", "kind", "label", "reasons", "source", "to"]);
     // A secret entry is never named: the block reads as her routine.
     expect(block("15:00")?.source).toEqual({ type: "routine" });
-    // A private block is her own business.
-    expect(block("16:00")).toMatchObject({ label: "Busy", source: { type: "routine" } });
+    // A private block is her own business: neither its label nor what it rests on.
+    expect(block("16:00")?.source).toEqual({ type: "routine" });
+    expect(block("16:00")?.label).not.toBe("Sketches");
     // The GM's change reads as her routine; the story's as the story.
     expect(block("14:30")?.source).toEqual({ type: "routine" });
     expect(block("21:00")?.source).toEqual({ type: "story" });
