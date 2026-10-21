@@ -53,12 +53,42 @@ const READ_NOTE: Record<MindSource, string> = {
   memory: "Their memory notes, most salient first, and what they saw happen. Never what someone's memory says they were told: that came from another mind.",
   thoughts: "Their own latest mind: what they thought, what they meant to do and how they felt.",
   recall: "Earlier turns they were there for: the latest, and those that best match the moment. Its limit is the memory setting's, which the world sets and you can override.",
-  routine: "Their routine and schedules as the world and the story set them, while their routine isn't off: what they usually do, theirs to weigh, never what they must do. Never a private block, and never social life the planner made up.",
+  routine: "What they usually do, from their routine and schedules as the world and the story set them, while their routine isn't off: theirs to weigh, never what they must do. A private block only when it's their own, and never social life the planner made up.",
   life: "Their money, the rest of today as the planner lays it (with what it fills free time with: meals, friends, outings), their commitments and their plans. None of it is the story as it stands.",
 };
 
-/** The story as it stands; the rest of the sources are their own memory and life. */
-const STORY_SOURCES: Readonly<Record<MindSource, boolean>> = { pinned: true, activated: true, reply: true, message: true, summary: false, memory: false, thoughts: false, recall: false, routine: false, life: false };
+/** Where each source is listed: the story as it stands, what they usually do, or their own memory and life. */
+type ReadGroup = "story" | "usual" | "own";
+const READ_GROUP: Readonly<Record<MindSource, ReadGroup>> = { pinned: "story", activated: "story", reply: "story", message: "story", summary: "own", memory: "own", thoughts: "own", recall: "own", routine: "usual", life: "own" };
+
+const GROUP_TITLE: Record<ReadGroup, string> = { story: "The story as it stands", usual: "What they usually do", own: "Their own memory and life" };
+
+/** Each group's note; the story as it stands needs none. */
+const GROUP_NOTE: Record<ReadGroup, string | null> = {
+  story: null,
+  usual: "On unless you turn it off: their routine as context, so they can keep to their days without the planner deciding for them.",
+  own: "Off unless you turn them on: each can carry what the story never set up, like a day the planner filled with meals and friends, or a plan their memory took from narration that showed another character's mind.",
+};
+
+/** What a mind reads: every source in its group, each its own row. */
+export function ReadSources(props: { reads: MindsReads; memory: MindsSettings["memory"]; busy: boolean; patch(patch: JsonObject): void }) {
+  return (
+    <>
+      {(["story", "usual", "own"] as const).map((group) => {
+        const note = GROUP_NOTE[group];
+        return (
+          <div key={group} class="lre-minds-group">
+            <span class="lre-minds-group-title">{GROUP_TITLE[group]}</span>
+            {note ? <Note>{note}</Note> : null}
+            {MIND_SOURCES.filter((s) => READ_GROUP[s] === group).map((source) => (
+              <ReadRow key={source} source={source} reads={props.reads} memory={props.memory} busy={props.busy} patch={props.patch} />
+            ))}
+          </div>
+        );
+      })}
+    </>
+  );
+}
 
 /** A count, period or allowance that may have no limit: a switch, and the number while there is one. Settings → Steps uses it for Build's jobs too. */
 export function LimitField(props: { label: string; noneLabel: string; value: Limit; min: number; max?: number; step?: number; fallback: Limit; disabled: boolean; onChange(next: Limit): void }) {
@@ -106,7 +136,7 @@ function MemoryOverride(props: { field: MemoryField; memory: MindsSettings["memo
 }
 
 /** One source of what a mind reads: its switch and, while it's on, its limit (recall's is its memory override). */
-function ReadRow(props: { source: MindSource; reads: MindsReads; memory: MindsSettings["memory"]; busy: boolean; patch(patch: JsonObject): void }) {
+export function ReadRow(props: { source: MindSource; reads: MindsReads; memory: MindsSettings["memory"]; busy: boolean; patch(patch: JsonObject): void }) {
   const { source, reads, busy } = props;
   const on = reads[source].on;
   const recall = MEMORY_FIELDS.find((f) => f.part === "recall" && f.key === "tokens");
@@ -223,19 +253,7 @@ export function MindsSection(props: { minds: MindsSettings; patch(patch: JsonObj
           <Section title="What a mind reads">
             <div class="lre-minds-body">
               <Note>Who they are (their own sheet, aims and secrets), where they are and whom they see there, and what they mean to do are always in it. Each source below is yours to switch on or off and to limit; within its limit it comes whole, and nothing else cuts it.</Note>
-              <div class="lre-minds-group">
-                <span class="lre-minds-group-title">The story as it stands</span>
-                {MIND_SOURCES.filter((s) => STORY_SOURCES[s]).map((source) => (
-                  <ReadRow key={source} source={source} reads={minds.reads} memory={minds.memory} busy={busy} patch={props.patch} />
-                ))}
-              </div>
-              <div class="lre-minds-group">
-                <span class="lre-minds-group-title">Their own memory and life</span>
-                <Note>Off unless you turn them on: each can carry what the story never set up, like a day the planner filled with meals and friends, or a plan their memory took from narration that showed another character's mind.</Note>
-                {MIND_SOURCES.filter((s) => !STORY_SOURCES[s]).map((source) => (
-                  <ReadRow key={source} source={source} reads={minds.reads} memory={minds.memory} busy={busy} patch={props.patch} />
-                ))}
-              </div>
+              <ReadSources reads={minds.reads} memory={minds.memory} busy={busy} patch={props.patch} />
             </div>
           </Section>
           <Section>
