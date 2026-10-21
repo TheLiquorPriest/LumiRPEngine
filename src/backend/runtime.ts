@@ -852,7 +852,9 @@ export class Runtime implements TurnHooks {
     // or No; the turn doesn't wait on it. Its turn is the message, which the model can't set.
     const routine = lastUser ? bridge.takeRoutineAsks(text) : [];
     if (lastUser && routine.length > 0) {
-      await this.chips.add(input.chatId, input.userId, routine.map((ask, i): StoredChip => ({ id: `routine_ask:${lastUser.id}:${i}`, kind: "routine_ask", messageId: lastUser.id, label: ask.question, detail: ask.detail, actions: [{ id: "yes", label: "Yes", style: "primary" }, { id: "no", label: "No" }], expires: "next_send", payload: { proposal: { ...ask.proposal, turn: lastUser.id }, added: ask.added } })));
+      // Several places fit the one the player named: each is its own choice (`at:<i>`), then No.
+      const turnOf = (proposal: JsonObject): JsonObject => ({ ...proposal, turn: lastUser.id });
+      await this.chips.add(input.chatId, input.userId, routine.map((ask, i): StoredChip => ({ id: `routine_ask:${lastUser.id}:${i}`, kind: "routine_ask", messageId: lastUser.id, label: ask.question, detail: ask.detail, actions: [...(ask.places ? ask.places.map((p, n): ChipAction => ({ id: `at:${n}`, label: p.label, ...(n === 0 ? { style: "primary" as const } : {}) })) : [{ id: "yes", label: "Yes", style: "primary" as const }]), { id: "no", label: "No" }], expires: "next_send", payload: { proposal: turnOf(ask.proposal), added: ask.added, ...(ask.places ? { places: ask.places.map((p) => turnOf(p.proposal)) } : {}) } })));
       this.push.changed(input.chatId, input.userId);
     }
     // A claim, or a check the chat only suggests (DESIGN §9.4 player claims, §11 inferred checks),

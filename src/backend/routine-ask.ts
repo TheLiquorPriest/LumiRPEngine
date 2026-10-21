@@ -16,7 +16,8 @@ import { hasOwn } from "../shared/json";
 import type { WorldDoc } from "../shared/world";
 import type { Registry } from "../engine/registry-impl";
 import type { WorldState } from "../engine/state";
-import { findLeaks } from "../engine/visibility";
+import { canSeePlace, findLeaks } from "../engine/visibility";
+import { own } from "../engine/pack-kit";
 import { namedInText } from "../packs/minds/core/fidelity";
 import { ROUTINE_CHANNEL, storyChange } from "../packs/castlife/core/story";
 import type { SaidRoutine } from "./steps";
@@ -74,10 +75,37 @@ function plainly(p: JsonObject, world: WorldDoc, state: Readonly<WorldState>): {
 /** The `routine` channel's own fields: nothing else the read gave rides into the proposal. */
 const FIELDS = ["entity", "change", "label", "days", "start", "end", "minutes", "activity", "place", "with", "replaces"] as const;
 
+/** Words that name no place ("the", "at the"). */
+const NOT_PLACE: Record<string, true> = { the: true, and: true, our: true, his: true, her: true, their: true };
+
+function wordsIn(s: string): string[] {
+  return (s.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? []).filter((w) => w.length >= 2 && !NOT_PLACE[w]);
+}
+
+/**
+ * Where the player's place words lead, among the places the POV may know only: the place itself (its
+ * id or its whole name), else every place each of whose words starts one of its name's words ("the
+ * lake": Lakefront Park and Lakeshore County). A place the world lacks and one the POV may not know
+ * both fit none, so the ask reads alike for both and never offers a secret one.
+ */
+function placesFor(registry: Registry, world: WorldDoc, state: Readonly<WorldState>, said: string): string[] {
+  const known = Object.keys(world.places).filter((id) => canSeePlace(registry, world, state, world.pov, id));
+  const exact = known.filter((id) => id === said || own(world.places, id)?.name.toLowerCase() === said.toLowerCase());
+  if (exact.length > 0) return exact.slice(0, 1);
+  const words = wordsIn(said);
+  if (words.length === 0) return [];
+  return known.filter((id) => {
+    const name = wordsIn(own(world.places, id)?.name ?? "");
+    return words.every((w) => name.some((n) => n.startsWith(w)));
+  });
+}
+
 /**
  * The routine changes a typed message states that the chat may ask about, each as the `routine`
  * channel's proposal with `by: "player"`, its question and its plain words. What fails a bound is
  * left out in silence: the player stated it, and the turn plays as their message does either way.
+ * A place the player named is theirs to settle, unlike a reply's: several places they may know fit
+ * it and the ask offers each; none fits and it asks still, saying it would have no set place.
  * `known`: whether everything a proposal names is what the POV may know (`proposalKnown`).
  */
 export function routineAsks(registry: Registry, world: WorldDoc, state: Readonly<WorldState>, said: readonly SaidRoutine[], text: string, secrets: readonly string[], known: (p: JsonObject) => boolean): RoutineAsk[] {
@@ -91,11 +119,28 @@ export function routineAsks(registry: Registry, world: WorldDoc, state: Readonly
     const who: EntityId = str(proposal.entity);
     if (who !== world.pov && !namedInText(state.entities[who]?.name ?? "", text)) continue;
     if (!known(proposal) || findLeaks(proposal, secrets).length > 0) continue;
-    if ("code" in storyChange(proposal, ctx)) continue;
+    // The place words, for a new block: home and work are their own; a move's home must be a place.
+    const placeWords = str(proposal.place);
+    const open = placeWords !== "" && placeWords.toLowerCase() !== "home" && placeWords.toLowerCase() !== "work" && str(proposal.change).toLowerCase() === "start";
+    const fits = open ? placesFor(registry, world, state, placeWords) : [];
+    const { place: _place, ...placeless } = proposal;
+    const variants = !open ? [proposal] : fits.length === 0 ? [placeless] : fits.map((id): JsonObject => ({ ...proposal, place: id }));
+    const holding = variants.filter((v) => !("code" in storyChange(v, ctx)));
+    const first = holding[0];
+    if (!first) continue;
     // One message asks once about the same change.
-    if (asks.some((a) => JSON.stringify(a.proposal) === JSON.stringify(proposal))) continue;
-    const { whose, detail } = plainly(proposal, world, state);
-    asks.push({ proposal, question: `Would you like to add this to ${whose}?`, detail, added: `Added to ${whose}` });
+    if (asks.some((a) => JSON.stringify(a.proposal) === JSON.stringify(first))) continue;
+    const { whose } = plainly(first, world, state);
+    const base = { question: `Would you like to add this to ${whose}?`, added: `Added to ${whose}` };
+    if (holding.length > 1) {
+      const { detail } = plainly(placeless, world, state);
+      asks.push({ ...base, proposal: first, detail: `${detail} Which place?`, places: holding.map((v) => ({ label: `At ${own(world.places, str(v.place))?.name ?? str(v.place)}`, proposal: v })) });
+      continue;
+    }
+    const { detail } = plainly(first, world, state);
+    // The player's own words, quoted only when the message holds them, so a read's guess never names a place.
+    const quoted = text.toLowerCase().includes(placeWords.toLowerCase()) ? `"${placeWords}"` : "the place you named";
+    asks.push({ ...base, proposal: first, detail: open && fits.length === 0 ? `${detail} No place you know of fits ${quoted}, so it would have no set place.` : detail });
   }
   return asks;
 }
