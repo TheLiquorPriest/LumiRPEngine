@@ -61293,7 +61293,7 @@ var package_default = {
 // src/cli/version.ts
 var CLI_NAME = "lumirpengine";
 var CLI_VERSION = package_default.version;
-var BUILD = "4adfc6be";
+var BUILD = "5e9dbb8f";
 function runtimeCannotFollow(bun) {
   if (bun === undefined)
     return null;
