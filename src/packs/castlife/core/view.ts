@@ -27,9 +27,9 @@ function scheduleOwner(ctx: ReadContext, id: string, rank: number | null, owner:
   return ownerOf(ctx, rank === 0 ? "own" : rank === 1 ? "group" : rank === 2 ? "kind" : rank === 3 ? "selector" : "world", owner);
 }
 
-/** The block of someone's routine in force with this id, if any. */
-function appliedBlock(ctx: ReadContext, who: EntityId, id: string): Applied | undefined {
-  return activeBlocks(ctx, who).find((x) => x.block.id === id)?.from;
+/** The block of someone's routine in force on `day` with this id, if any. */
+function appliedBlock(ctx: ReadContext, who: EntityId, id: string, day: number): Applied | undefined {
+  return activeBlocks(ctx, who, day).find((x) => x.block.id === id)?.from;
 }
 
 /** The invitations someone made and was made (recorded; still to come today and tomorrow; laid in their day), each with its ground. */
@@ -52,7 +52,7 @@ function invitationsOf(ctx: ReadContext, who: EntityId, blocks: LaidBlock[]): { 
     origin,
     status,
   });
-  const routineOrigin = (host: EntityId, block: string): InvitationView["origin"] => ({ type: "routine", block, source: sourceView(ctx, appliedBlock(ctx, host, block)?.source ?? { type: "authored" }) });
+  const routineOrigin = (host: EntityId, block: string): InvitationView["origin"] => ({ type: "routine", block, source: sourceView(ctx, appliedBlock(ctx, host, block, day)?.source ?? { type: "authored" }) });
   // An invitation an earlier build recorded names no origin: a plan's key still says so; the rest were the formula's.
   const originOf = (inv: JsonObject): InvitationView["origin"] => {
     const o = strOf(inv.origin);
@@ -69,11 +69,11 @@ function invitationsOf(ctx: ReadContext, who: EntityId, blocks: LaidBlock[]): { 
   return { made: [...sent.filter((s) => s.host === who), ...coming], received: who === pov ? sent : laid };
 }
 
-/** Why a block of the day is there, from its option and reason. */
-function originOf(ctx: ReadContext, who: EntityId, option: string, reason: string): BlockOrigin {
+/** Why a block of the day is there, from its option and reason, as `day` had its routine. */
+function originOf(ctx: ReadContext, who: EntityId, option: string, reason: string, day: number): BlockOrigin {
   if (option.startsWith("routine:")) {
     const id = option.slice(8).replace(/:carried$/, "");
-    const a = appliedBlock(ctx, who, id);
+    const a = appliedBlock(ctx, who, id, day);
     if (a) return { type: "routine", block: id, owner: ownerOf(ctx, a.level, a.routine?.owner), source: sourceView(ctx, a.source) };
   }
   if (option.startsWith("plan:")) {
@@ -126,7 +126,8 @@ export function routineGmView(ctx: ReadContext, who: EntityId, day = dateAt(cale
     };
   });
   const plan = dayPlan(ctx, who, day);
-  const laid: LaidBlock[] = plan.blocks.map((b) => ({ start: b.start, end: b.end, from: formatHHMM(dateAt(cal, b.start).minuteOfDay), to: formatHHMM(dateAt(cal, b.end).minuteOfDay), label: b.label, activity: b.activity, place: b.place, placeName: b.place ? (own(ctx.world.places, b.place)?.name ?? b.place) : null, kind: kindOfBlock(b.activity), reasons: b.reasons, origin: originOf(ctx, who, b.option, b.reasons[0] ?? "") }));
+  // A morning carried over from the night before is that night's block, as its day had it.
+  const laid: LaidBlock[] = plan.blocks.map((b) => ({ start: b.start, end: b.end, from: formatHHMM(dateAt(cal, b.start).minuteOfDay), to: formatHHMM(dateAt(cal, b.end).minuteOfDay), label: b.label, activity: b.activity, place: b.place, placeName: b.place ? (own(ctx.world.places, b.place)?.name ?? b.place) : null, kind: kindOfBlock(b.activity), reasons: b.reasons, origin: originOf(ctx, who, b.option, b.reasons[0] ?? "", b.option.endsWith(":carried") ? day - 1 : day) }));
   // What the story holds now: holds (a plan under way, a trip, an override), and a place the routine would have them elsewhere than.
   const story: StoryHoldView[] = [];
   const holds = objOf(e?.fields.holds);

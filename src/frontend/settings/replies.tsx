@@ -21,6 +21,7 @@ const EXTRACTION_LABEL: Record<ExtractionType, string> = {
   quantity: "Quantities",
   spawn: "New people",
   life: "Life and death (dying, dead, collapsed…)",
+  routine: "Routines (a new job, a habit, a move…)",
 };
 
 const MODE_OPTIONS: { value: BoundMode; label: string }[] = [

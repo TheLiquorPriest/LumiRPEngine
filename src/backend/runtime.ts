@@ -20,6 +20,7 @@ import { firedTimeout, TimeoutFired, TIMEOUTS } from "../shared/timeouts";
 import { mindsOn, mindsStepConfig, postMinds, preMinds, runMinds, type MindsDeps, type RunMindsResult } from "./minds";
 import { runSkip, type BeatMinds, type SkipRun } from "./skip";
 import { fitMindLines, mindLines } from "../packs/minds/core/section";
+import { namedInText } from "../packs/minds/core/fidelity";
 import { matchCatalog, transferCents } from "../packs/economy/core/index";
 import { itemName, stem } from "../packs/economy/core/items";
 import { needsJudge, outcomeChoices, policyFor, policyOf, type Verdict } from "../engine/adjudication";
@@ -1560,8 +1561,18 @@ export class Runtime implements TurnHooks {
     const known = deduped.filter((p) => proposalKnown(p, this.registry, context.world, context.state));
     if (known.length < deduped.length) this.host.log("info", `[LumiRPEngine] read ${messageId.slice(0, 8)}: dropped ${deduped.length - known.length} proposal(s) naming what the player hasn't seen`, userId);
     // So is one carrying a secret's unrevealed truth: its chip would show it.
-    const proposals = known.filter((p) => findLeaks(p, secrets).length === 0);
-    if (proposals.length < known.length) this.host.log("info", `[LumiRPEngine] read ${messageId.slice(0, 8)}: dropped ${known.length - proposals.length} proposal(s) carrying an unrevealed secret`, userId);
+    const unleaked = known.filter((p) => findLeaks(p, secrets).length === 0);
+    if (unleaked.length < known.length) this.host.log("info", `[LumiRPEngine] read ${messageId.slice(0, 8)}: dropped ${known.length - unleaked.length} proposal(s) carrying an unrevealed secret`, userId);
+    // A change to someone's routine is the story's only for someone the reply speaks of: the player
+    // character, or a person it names (DESIGN §9.4). It carries the reply's message as its turn, which
+    // the model can't set, so the change records where it came from.
+    const proposals = unleaked.flatMap((p): JsonObject[] => {
+      if (p.type !== "routine") return [p];
+      const who = typeof p.entity === "string" ? p.entity : "";
+      if (who === context.world.pov || namedInText(context.state.entities[who]?.name ?? "", text)) return [{ ...p, turn: messageId }];
+      this.host.log("info", `[LumiRPEngine] read ${messageId.slice(0, 8)}: dropped a routine change for someone the reply doesn't name`, userId);
+      return [];
+    });
     this.host.log("info", `[LumiRPEngine] read ${messageId.slice(0, 8)}: ${proposals.length} proposal(s), ${decisions.length} npc decision(s), contradiction ${contradicted ? "yes" : "no"}, ${choices.flat().length} choice(s), ${budget.spent} post call(s)`, userId);
     const learning = await this.settings.learningOf(input.userId);
     // D4 learning counts on the connection that read the reply: the extract step's own, else the
@@ -2414,6 +2425,7 @@ export const TYPE_LABELS: Record<ExtractionType, string> = {
   quantity: "Quantities",
   spawn: "New characters",
   life: "Life and death",
+  routine: "Routine changes",
 };
 
 /** The longest typed timelapse a turn runs on its own (minutes); longer ones are offered as a chip. */
@@ -2823,6 +2835,18 @@ export function describeProposal(p: JsonObject, world?: WorldDoc, state?: Readon
       return `New: ${s("name")}`;
     case "life":
       return `${s("entity")}: ${raw("state").replace(/_/g, " ")}`;
+    case "routine": {
+      // The reply's own words for it: what changed, and the days and times it gave.
+      const you = world !== undefined && p.entity === world.pov;
+      const who = you ? "You" : s("entity");
+      const what = typeof p.label === "string" && p.label.trim() !== "" ? p.label.trim() : typeof p.place === "string" ? s("place") : "?";
+      if (p.change === "move") return `${who} moved to ${s("place")}`;
+      if (p.change === "stop") return `${who} gave up: ${what}`;
+      const days = Array.isArray(p.days) ? p.days.filter((d) => typeof d === "string" || typeof d === "number").join(", ") : typeof p.days === "string" ? p.days : "";
+      const time = typeof p.start === "string" && p.start !== "" ? `${p.start}${typeof p.end === "string" && p.end !== "" ? `–${p.end}` : ""}` : "";
+      const when = [days, time].filter((x) => x !== "").join(", ");
+      return `${you ? "Your" : `${who}'s`} routine: ${what}${when !== "" ? ` (${when})` : ""}`;
+    }
     case "time_advance":
       return `+${s("minutes")} min`;
     default:

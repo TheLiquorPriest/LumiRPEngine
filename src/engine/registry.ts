@@ -209,7 +209,7 @@ export interface ProposalChannelDef {
   /** Proposal type, e.g. `purchase`, `regard`, `time_advance`. */
   type: string;
   /** The field type whose bound applies. */
-  boundField: FieldType | "spawn" | "knows" | "life";
+  boundField: FieldType | "spawn" | "knows" | "life" | "routine";
   validate(proposal: JsonObject, ctx: ReadContext): Rejection | null;
   toEffects(proposal: JsonObject, ctx: ReadContext): EffectSpec[];
 }
