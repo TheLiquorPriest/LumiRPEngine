@@ -29,7 +29,7 @@ const REPLY_CAP = 2_000;
 
 /** The call's instructions; tests tell the call apart by them. */
 export const SKIP_PLAN_SYSTEM = [
-  "You plan how some people in a roleplay spend a stretch of time that is skipped over. For each person, lay out what they do during the skip as a few blocks of time.",
+  "You plan how some people in a roleplay spend a stretch of time that is skipped over. For each person, lay out what they do during the skip as blocks of time that cover all of it, start to end, with no gaps: where they are at every hour, and at night where they sleep.",
   "Their usual routine is background you may follow, bend or ignore as the story suggests; it is never a rule. What the story already set for them comes first. Keep each person in character and consistent with the latest reply.",
   "Use only the places and activities listed, by id and word as given. Every block lies inside the skip, and one person's blocks never overlap. A label is a few plain words saying what they do, naming no one.",
   'Answer with JSON only: {"plans":[{"entity":"<person id>","blocks":[{"label":"...","start":"YYYY-MM-DD HH:MM","end":"YYYY-MM-DD HH:MM","place":"<place id>","activity":"<activity>"}]}]}. Leave out anyone with nothing worth planning.',
