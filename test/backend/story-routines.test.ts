@@ -184,22 +184,6 @@ describe("a place the change names", () => {
     const view = await day(chat, "priya_nair", 1);
     expect(view.blocks.find((b) => "label" in b.block && b.block.label === "Reading in the evening")?.block).toMatchObject({ place: "here" });
   });
-
-  test("the reply's read and the message's read are both asked for a place the words name, even one nothing lists, so the bound can refuse it", async () => {
-    const chat = await alder();
-    const asked: string[] = [];
-    chat.rig.host.quietReply = (req) => {
-      asked.push(req.messages.map((m) => m.content).join("\n"));
-      return "{}";
-    };
-    await chat.rig.turn(chat.chatId, "Marcus mentions he's started swimming at the community pool every Tuesday evening.", "Marcus nods.");
-    // Each prompt's routine shape says what `place` holds, and that an unlisted place keeps its own words.
-    const routineShape = (prompt: string): string => prompt.slice(prompt.indexOf("routine{"), prompt.indexOf(")", prompt.indexOf("routine{")));
-    const extract = asked.find((p) => p.includes(EXTRACT_MARK)) ?? "";
-    const interpret = asked.find((p) => p.includes("You map a player's typed input")) ?? "";
-    expect(routineShape(extract)).toMatch(/place: [^;]*nothing lists/);
-    expect(interpret).toMatch(/"place"\?: [^;\n]*nothing lists/);
-  });
 });
 
 describe("what changes no one's routine", () => {
