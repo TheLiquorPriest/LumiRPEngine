@@ -245,22 +245,63 @@ describe("what brings up no ask", () => {
     expect(await changed(chat)).toEqual([]);
   });
 
-  test("a place the player can't know of, by its id or its name, is never asked about", async () => {
+  test("a secret place given by its id is never asked about", async () => {
     const chat = await alder();
-    const words = "Marcus says he works evenings at 12 Birch Lane now, six till nine";
-    const evenings: JsonObject = { entity: "marcus_delgado", change: "start", label: "Evening shift", days: "weekdays", start: "18:00", end: "21:00", activity: "work", said: words };
-    await said(chat, `${words}.`, [{ ...evenings, place: "birch_lane_12" }, { ...evenings, place: "12 Birch Lane" }]);
+    const words = "Marcus says he swims at 12 Birch Lane on Tuesdays at six";
+    await said(chat, `${words}.`, [{ ...SWIM, place: "birch_lane_12", said: words }]);
     expect(await asks(chat)).toEqual([]);
-    expect(JSON.stringify(await chips(chat))).not.toContain("Birch");
     expect(await changed(chat)).toEqual([]);
   });
+});
 
-  test("a place the world doesn't have brings up no ask", async () => {
+describe("a place the player names that doesn't settle on one", () => {
+  /** The ask's detail with the player's place words taken out: what it says of the place, apart from what they typed. */
+  const without = (detail: string | undefined, words: string): string => (detail ?? "").replace(words, "…");
+
+  test("several places they may know fit: each is offered, never a secret one, and the one chosen is where it happens", async () => {
     const chat = await alder();
-    // Port Alder has no pool: the read gives the place in the message's own words, as nothing lists it.
-    const words = "Marcus mentions he's started swimming at the community pool every Tuesday evening";
-    await said(chat, `${words}.`, [{ ...SWIM, label: "Swimming", place: "the community pool", start: "evening", said: words }]);
-    expect(await asks(chat)).toEqual([]);
-    expect(await changed(chat)).toEqual([]);
+    const words = "Marcus says he's started swimming at the lake on Tuesdays at six";
+    await said(chat, `${words}.`, [{ ...SWIM, place: "the lake", said: words }]);
+    const [ask, ...more] = await asks(chat);
+    if (!ask) throw new Error("no ask");
+    expect(more).toEqual([]);
+    const offered = ask.actions.filter((a) => a.id !== "no");
+    expect(offered.length).toBeGreaterThan(1);
+    expect(offered.map((a) => a.label)).toContain("At Lakefront Park");
+    expect(ask.actions.at(-1)?.id).toBe("no");
+    const park = offered.find((a) => a.label === "At Lakefront Park");
+    if (!park) throw new Error("no Lakefront Park");
+    chat.rig.body(await chat.rig.send({ type: "lre.chip", chatId: chat.chatId, chip: ask.id, choice: park.id }));
+    expect((await changedOn(chat, "marcus_delgado", 1)).map((b) => [b.from, b.place])).toEqual([["06:00", "lakefront_park"]]);
+    expect((await chips(chat)).some((c) => c.kind === "routine_added")).toBe(true);
+  });
+
+  test("no place they may know fits: it asks still, saying so, and Yes records it with no set place", async () => {
+    const chat = await alder();
+    const words = "Marcus mentions he's started swimming at the community pool every Tuesday at six";
+    await said(chat, `${words}.`, [{ ...SWIM, place: "the community pool", said: words }]);
+    const [ask] = await asks(chat);
+    if (!ask) throw new Error("no ask");
+    expect(ask.detail).toContain("the community pool");
+    expect(ask.actions.map((a) => a.id)).toEqual(["yes", "no"]);
+    await answer(chat, ask, "yes");
+    const [block] = await changedOn(chat, "marcus_delgado", 1);
+    expect(block?.from).toBe("06:00");
+    expect(block?.place).not.toBe("lakefront_park");
+    expect((await changed(chat))[0]?.blocks.map((b) => b.source)).toEqual([expect.objectContaining({ by: "player" })]);
+  });
+
+  test("a secret place reads as one the world doesn't have: the same words, and nothing offers it", async () => {
+    const chat = await alder();
+    const secret = "Marcus says he swims at 12 Birch Lane on Tuesdays at six";
+    await said(chat, `${secret}.`, [{ ...SWIM, place: "12 Birch Lane", said: secret }]);
+    const [hidden] = await asks(chat);
+    const missing = "Marcus says he swims at the community pool on Tuesdays at six";
+    await said(chat, `${missing}.`, [{ ...SWIM, place: "the community pool", said: missing }]);
+    const [absent] = await asks(chat);
+    if (!hidden || !absent) throw new Error("no ask");
+    expect(without(hidden.detail, "12 Birch Lane")).toBe(without(absent.detail, "the community pool"));
+    expect(hidden.actions.map((a) => a.id)).toEqual(["yes", "no"]);
+    expect(hidden.actions.some((a) => a.label.includes("Birch"))).toBe(false);
   });
 });

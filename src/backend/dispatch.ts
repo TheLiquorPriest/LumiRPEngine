@@ -1001,8 +1001,11 @@ export class Dispatcher {
           this.rt.push.changed(chatId, userId);
           return { applied: false, pending: false };
         }
-        if (choice !== "yes") throw new RequestError("bad_request", `unknown choice ${choice}`);
-        const proposal = isRecord(chip.payload.proposal) ? (JSON.parse(JSON.stringify(chip.payload.proposal)) as JsonObject) : null;
+        // Yes takes the change as asked; `at:<i>` takes it at the place the player picked of those that fit.
+        const pick = /^at:(\d+)$/.exec(choice);
+        if (choice !== "yes" && !pick) throw new RequestError("bad_request", `unknown choice ${choice}`);
+        const picked = pick ? (Array.isArray(chip.payload.places) ? chip.payload.places[Number(pick[1])] : undefined) : chip.payload.proposal;
+        const proposal = isRecord(picked) ? (JSON.parse(JSON.stringify(picked)) as JsonObject) : null;
         if (!proposal || proposal.type !== ROUTINE_CHANNEL) throw new RequestError("bad_request", "the chip has no routine change");
         const { state, world } = await this.head(chatId, userId);
         const [outcome] = applyProposals(this.rt.registry, new Working(this.rt.registry, world, state), [proposal], `${id}:yes`, this.runSeedOf(chatId));

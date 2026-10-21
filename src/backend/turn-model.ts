@@ -146,6 +146,8 @@ export interface RoutineAsk {
   detail: string;
   /** What the chip says once the player said yes ("Added to Marcus's routine"). */
   added: string;
+  /** Several places the POV may know fit the place the player named: each its own choice, the change at that place. */
+  places?: { label: string; proposal: JsonObject }[];
 }
 
 export class TurnBridge implements TurnModel {
