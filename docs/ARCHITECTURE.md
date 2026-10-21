@@ -228,7 +228,7 @@ Transport: `ctx.sendToBackend` / `spindle.sendToFrontend(payload, userId, {front
 
 | Request | Payload | Result body |
 |---|---|---|
-| `lre.hello` | `chatId \| null`, `presetId?`, `client?: {name, version}` (an outside client, DESIGN §23) | `{accepted, agentApi}`, then a snapshot when `chatId` is set |
+| `lre.hello` | `chatId \| null`, `client?: {name, version}` (an outside client, DESIGN §23) | `{accepted, agentApi}`, then a snapshot when `chatId` is set |
 | `lre.state.resync` | `chatId` | `{accepted}`, then a snapshot |
 | `lre.action` | `chatId, action, params, source, text?` | `{messageId}` of the appended user message (with `intent`, `triggerGeneration`) |
 | `lre.chip` | `chatId, chip, choice, payload?` | `{applied, pending}` |

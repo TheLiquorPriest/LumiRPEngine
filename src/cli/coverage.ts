@@ -94,7 +94,6 @@ export const COVERAGE: Coverage = {
   "lre.preset": {
     get: { tools: ["lre_preset", "lre_preset_add_blocks"] },
     add: { tools: ["lre_preset_add_blocks"] },
-    active: { excluded: "The page reporting the Loom preset Lumiverse has active, which prompts assemble with: an outside client can't see Loom's state, and a guess would change what the user's prompts are built with." },
   },
   "lre.diag": { get: { tools: ["lre_diag"] }, clear: { tools: ["lre_diag_clear"] }, dismiss: { tools: ["lre_activity_dismiss"] } },
   "lre.agents": {

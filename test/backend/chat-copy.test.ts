@@ -72,8 +72,8 @@ describe("a chat's messages", () => {
     await same();
     rig.host.sendUser(chatId, "I listen.");
     await same();
-    // Last: the fake host numbers messages by position, so one sent after a deletion would look
-    // out of order and be read afresh (the real host never renumbers).
+    // The host never renumbers (`index_in_chat`, which the fake host keeps the same way), so the copy
+    // takes a deletion in place too.
     rig.host.deleteMessage(chatId, first.id);
     await same();
     expect(reads.count()).toBe(0);

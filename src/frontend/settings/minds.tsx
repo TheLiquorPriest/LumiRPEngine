@@ -1,18 +1,18 @@
 // Settings → Minds (DESIGN §24.6): whether characters get minds, how many think a
 // turn, what refreshes a Near mind and how often a Far one thinks, which levels write memory notes,
-// how much of the latest reply minds read, the Minds section's own budget and a time skip's caps
-// (under Advanced), the user's memory overrides of the world's settings (a disclosure, as they're
-// long), and the four minds prompts, each beside its built-in default with Reset. Every patch is
-// `minds-patch.ts`'s. Styles: styles/minds.ts.
+// what a mind reads (each source on or off with its own limit), the Minds section's own budget and a
+// time skip's caps (under Advanced), the user's memory overrides of the world's settings (a
+// disclosure, as they're long), and the four minds prompts, each beside its built-in default with
+// Reset. Every patch is `minds-patch.ts`'s. Styles: styles/minds.ts.
 
 import { useEffect, useState } from "preact/hooks";
 import type { JsonObject } from "../../shared/json";
-import type { Limit, MindPurpose, MindsSettings } from "../../shared/minds";
-import { DEFAULT_MINDS_MEMORY, FIDELITIES, MIND_PROMPT_DEFAULTS, MIND_PROMPT_MAX, MIND_PURPOSES, MINDS_DEFAULTS } from "../../shared/minds";
+import type { Limit, MindPurpose, MindSource, MindsReads, MindsSettings } from "../../shared/minds";
+import { DEFAULT_MIND_READS, DEFAULT_MINDS_MEMORY, FIDELITIES, MIND_PROMPT_DEFAULTS, MIND_PROMPT_MAX, MIND_PURPOSES, MIND_SOURCES, MINDS_DEFAULTS } from "../../shared/minds";
 import { Badge, Button, Disclosure, HostSwitch, NumberStepper, Section } from "../components";
 import { Icon } from "../icons";
 import type { MemoryField } from "./minds-patch";
-import { MEMORY_FIELDS, memoryOverride, memoryOverridePatch, memoryValue, mindsPolicyPatch, mindsPromptPatch, mindsReplyPatch, withMemoryLevel } from "./minds-patch";
+import { MEMORY_FIELDS, memoryOverride, memoryOverridePatch, memoryValue, mindsPolicyPatch, mindsPromptPatch, mindsReadPatch, withMemoryLevel } from "./minds-patch";
 import { STEP_LABEL } from "./steps";
 import { FIDELITY_LABEL } from "../../packs/minds/ui/ops";
 
@@ -27,8 +27,36 @@ function Note(props: { children: string }) {
   return <p class="lre-minds-note">{props.children}</p>;
 }
 
-/** Where the reply's allowance starts when it stops being the whole reply: room for a long scene's end. */
-const REPLY_TOKENS_START = 1000;
+/** Where a source's limit starts when it stops being "no limit": room for a long scene's end. */
+const TOKENS_START = 1000;
+
+/** Each source of what a mind reads, as Settings names it. */
+const READ_LABEL: Record<MindSource, string> = {
+  pinned: "Lore pinned to them and to where they are",
+  activated: "Lore the turn activates",
+  reply: "The latest reply",
+  message: "Your message",
+  summary: "Their summary",
+  memory: "Their notes and what they saw",
+  thoughts: "Their last thoughts",
+  recall: "Turns they were there for",
+  life: "Their life: money, the day, commitments and plans",
+};
+
+const READ_NOTE: Record<MindSource, string> = {
+  pinned: "What Build pins to the character, then to their place and each place around it, nearest first. Within the limit every entry comes whole; the Context panel says what didn't fit.",
+  activated: "The world's lore entries the turn names, by a key, an alias, a title or a lookup-table term, as World Info activates them, read as the character: by your message and the latest reply when they were there for them, else by where they are.",
+  reply: "How the latest reply ended, for those who were there for it; cut to a number, they read its end. The memory step reads the reply within this limit too.",
+  message: "What you say and do, for those with you. The memory step reads it within this limit too.",
+  summary: "The summary their memory keeps and folds their old notes into.",
+  memory: "Their memory notes, most salient first, and what they saw happen. Never what someone's memory says they were told: that came from another mind.",
+  thoughts: "Their own latest mind: what they thought, what they meant to do and how they felt.",
+  recall: "Earlier turns they were there for: the latest, and those that best match the moment. Its limit is the memory setting's, which the world sets and you can override.",
+  life: "Their money, the rest of today as the planner lays it (with what it fills free time with: meals, friends, outings), their commitments and their plans. None of it is the story as it stands.",
+};
+
+/** The story as it stands; the rest of the sources are their own memory and life. */
+const STORY_SOURCES: Readonly<Record<MindSource, boolean>> = { pinned: true, activated: true, reply: true, message: true, summary: false, memory: false, thoughts: false, recall: false, life: false };
 
 /** A count or period that may have no limit: a switch, and the number while there is one. */
 function LimitField(props: { label: string; noneLabel: string; value: Limit; min: number; max?: number; step?: number; fallback: Limit; disabled: boolean; onChange(next: Limit): void }) {
@@ -41,43 +69,54 @@ function LimitField(props: { label: string; noneLabel: string; value: Limit; min
   );
 }
 
-/** One memory tunable as the user's override: unset, the world's applies; set, "Use the world's" deletes it. */
+/** One memory tunable as the user's override: unset, the world's applies; set, "Use the world's" deletes it. A field that may have no limit has its switch. */
 function MemoryOverride(props: { field: MemoryField; memory: MindsSettings["memory"]; busy: boolean; patch(patch: JsonObject): void }) {
   const { field, busy } = props;
   const own = memoryOverride(props.memory, field);
   const builtIn = memoryValue(DEFAULT_MINDS_MEMORY, field);
   const id = `${field.part}.${field.key}`;
+  const set = (value: Limit | boolean | null): void => {
+    const p = memoryOverridePatch(field, value);
+    if (p) props.patch(p);
+  };
   return (
     <div class="lre-minds-override" data-lre-minds-memory={id}>
-      {field.range ? (
-        <NumberStepper
-          label={field.label}
-          value={typeof own === "number" ? own : null}
-          min={field.range[0]}
-          max={field.range[1]}
-          step={field.step ?? 1}
-          integer={field.integer === true}
-          disabled={busy}
-          onChange={(value) => {
-            const p = memoryOverridePatch(field, value);
-            if (p) props.patch(p);
-          }}
-        />
-      ) : (
-        <HostSwitch label={field.label} checked={typeof own === "boolean" ? own : builtIn === true} disabled={busy} onChange={(on) => props.patch(memoryOverridePatch(field, on) ?? {})} />
+      {field.none ? <HostSwitch label={`${field.label}: ${field.none}`} checked={own === "none" || (own === undefined && builtIn === "none")} disabled={busy} onChange={(none) => set(none ? "none" : typeof builtIn === "number" ? builtIn : (field.range?.[0] ?? 0))} /> : null}
+      {field.range && own !== "none" ? (
+        <NumberStepper label={field.label} value={typeof own === "number" ? own : null} min={field.range[0]} max={field.range[1]} step={field.step ?? 1} integer={field.integer === true} disabled={busy} onChange={set} />
+      ) : field.range ? null : (
+        <HostSwitch label={field.label} checked={typeof own === "boolean" ? own : builtIn === true} disabled={busy} onChange={set} />
       )}
       <div class="lre-minds-override-foot">
         {own === undefined ? (
-          <span class="lre-minds-note">The world's applies (built in: {typeof builtIn === "boolean" ? (builtIn ? "on" : "off") : builtIn})</span>
+          <span class="lre-minds-note">The world's applies (built in: {typeof builtIn === "boolean" ? (builtIn ? "on" : "off") : builtIn === "none" ? (field.none ?? "none") : builtIn})</span>
         ) : (
           <>
             <Badge tone="accent">Yours</Badge>
-            <Button size="sm" variant="ghost" icon="undo" label={`Use the world's ${field.label.toLowerCase()}`} disabled={busy} onClick={() => props.patch(memoryOverridePatch(field, null) ?? {})}>
+            <Button size="sm" variant="ghost" icon="undo" label={`Use the world's ${field.label.toLowerCase()}`} disabled={busy} onClick={() => set(null)}>
               Use the world's
             </Button>
           </>
         )}
       </div>
+    </div>
+  );
+}
+
+/** One source of what a mind reads: its switch and, while it's on, its limit (recall's is its memory override). */
+function ReadRow(props: { source: MindSource; reads: MindsReads; memory: MindsSettings["memory"]; busy: boolean; patch(patch: JsonObject): void }) {
+  const { source, reads, busy } = props;
+  const on = reads[source].on;
+  const recall = MEMORY_FIELDS.find((f) => f.part === "recall" && f.key === "tokens");
+  return (
+    <div class="lre-minds-override" data-lre-minds-read={source}>
+      <HostSwitch label={READ_LABEL[source]} checked={on} disabled={busy} onChange={(next) => props.patch(mindsReadPatch(source, { on: next }))} />
+      {!on ? null : source === "recall" ? (
+        recall ? <MemoryOverride field={recall} memory={props.memory} busy={busy} patch={props.patch} /> : null
+      ) : (
+        <LimitField label={`${READ_LABEL[source]} (tokens)`} noneLabel="no limit" value={reads[source].tokens} min={1} step={100} fallback={DEFAULT_MIND_READS[source].tokens === "none" ? TOKENS_START : DEFAULT_MIND_READS[source].tokens} disabled={busy} onChange={(tokens) => props.patch(mindsReadPatch(source, { tokens }))} />
+      )}
+      <Note>{READ_NOTE[source]}</Note>
     </div>
   );
 }
@@ -133,14 +172,16 @@ function PromptEditor(props: { purpose: MindPurpose; value: string | undefined; 
 export function MindsSection(props: { minds: MindsSettings; patch(patch: JsonObject): void; busy: boolean }) {
   const { minds, busy } = props;
   const policy = (change: Parameters<typeof mindsPolicyPatch>[0]) => props.patch(mindsPolicyPatch(change));
-  const overrides = MEMORY_FIELDS.filter((field) => memoryOverride(minds.memory, field) !== undefined).length;
+  // Recall's tokens are its limit in What a mind reads, so the overrides leave them out.
+  const memoryFields = MEMORY_FIELDS.filter((field) => !(field.part === "recall" && field.key === "tokens"));
+  const overrides = memoryFields.filter((field) => memoryOverride(minds.memory, field) !== undefined).length;
   return (
     <div class="lre-stack lre-minds-set" data-lre-settings-page="minds">
       <p class="lre-set-lead">Each character near the story thinks for themselves in their own model call, scoped to what they know.</p>
       <Section>
         <div class="lre-minds-body">
           <HostSwitch label="Character minds" checked={minds.enabled} disabled={busy} onChange={(enabled) => policy({ enabled })} />
-          <Note>Picking a Model use preset sets everything here but how much of the reply minds read, your prompts and memory overrides; changing any of the rest makes it Custom.</Note>
+          <Note>Picking a Model use preset sets everything here but what a mind reads, your prompts and memory overrides; changing any of the rest makes it Custom.</Note>
         </div>
       </Section>
       {minds.enabled ? (
@@ -177,10 +218,22 @@ export function MindsSection(props: { minds: MindsSettings; patch(patch: JsonObj
               ))}
             </div>
           </Section>
-          <Section title="The latest reply">
+          <Section title="What a mind reads">
             <div class="lre-minds-body">
-              <LimitField label="Latest reply minds read (tokens)" noneLabel="the whole reply" value={minds.replyTokens} min={1} step={100} fallback={REPLY_TOKENS_START} disabled={busy} onChange={(replyTokens) => props.patch(mindsReplyPatch(replyTokens))} />
-              <Note>What a character thinks from, before the reply and when you run minds now, and what the memory step reads after it. Cut to a number, they read its end. It comes on top of the rest of what they're given, and only characters who were there for the reply read it.</Note>
+              <Note>Who they are (their own sheet, aims and secrets), where they are and whom they see there, and what they mean to do are always in it. Each source below is yours to switch on or off and to limit; within its limit it comes whole, and nothing else cuts it.</Note>
+              <div class="lre-minds-group">
+                <span class="lre-minds-group-title">The story as it stands</span>
+                {MIND_SOURCES.filter((s) => STORY_SOURCES[s]).map((source) => (
+                  <ReadRow key={source} source={source} reads={minds.reads} memory={minds.memory} busy={busy} patch={props.patch} />
+                ))}
+              </div>
+              <div class="lre-minds-group">
+                <span class="lre-minds-group-title">Their own memory and life</span>
+                <Note>Off unless you turn them on: each can carry what the story never set up, like a day the planner filled with meals and friends, or a plan their memory took from narration that showed another character's mind.</Note>
+                {MIND_SOURCES.filter((s) => !STORY_SOURCES[s]).map((source) => (
+                  <ReadRow key={source} source={source} reads={minds.reads} memory={minds.memory} busy={busy} patch={props.patch} />
+                ))}
+              </div>
             </div>
           </Section>
           <Section>
@@ -211,7 +264,7 @@ export function MindsSection(props: { minds: MindsSettings; patch(patch: JsonObj
             }
           >
             <div class="lre-minds-overrides">
-              {MEMORY_FIELDS.map((field) => (
+              {memoryFields.map((field) => (
                 <MemoryOverride key={`${field.part}.${field.key}`} field={field} memory={minds.memory} busy={busy} patch={props.patch} />
               ))}
             </div>
