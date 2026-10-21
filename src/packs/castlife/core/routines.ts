@@ -20,6 +20,7 @@ import {
   ROUTINE_ROLES,
   routineSettingsOf,
   routineShapeProblems,
+  storySourceLabel,
   type ChatRoutineSource,
   type ChatScheduleChange,
   type OwnerRef,
@@ -427,7 +428,7 @@ export function sourceView(ctx: Pick<ReadContext, "world" | "state">, source: Ro
     case "builtin":
       return { ...source, label: "Basic needs" };
     case "story":
-      return { ...source, label: "The story" };
+      return { ...source, label: storySourceLabel(source) };
     case "gm":
       return { ...source, label: "The GM" };
   }

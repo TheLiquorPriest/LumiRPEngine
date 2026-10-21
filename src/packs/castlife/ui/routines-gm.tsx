@@ -15,7 +15,7 @@ import type { EntityId, ScheduleId } from "../../../shared/ids";
 import { nameOfId } from "../../../shared/maps";
 import type { EditOp } from "../../../shared/protocol";
 import type { EffectiveBlock, EffectiveSchedule, InvitationView, RoutineAwareness, RoutineBlock, RoutineBlockId, RoutineChangeSummary, RoutineGmView, RoutineMode, RoutineRole, SourceView } from "../../../shared/routines";
-import { AWARENESS_LABEL, BLOCK_KIND_LABEL, isOff, ROUTINE_AWARENESS, ROUTINE_MODE_LABEL, ROUTINE_MODES, ROUTINE_ROLE_LABEL, ROUTINE_ROLES, routineSettingsOf } from "../../../shared/routines";
+import { AWARENESS_LABEL, BLOCK_KIND_LABEL, isOff, ROUTINE_AWARENESS, ROUTINE_MODE_LABEL, ROUTINE_MODES, ROUTINE_ROLE_LABEL, ROUTINE_ROLES, routineSettingsOf, storySourceLabel } from "../../../shared/routines";
 import type { GmView } from "../../../shared/state-view";
 import type { ScheduleDef, WorldDoc } from "../../../shared/world";
 import { useApp, useView } from "../../../frontend/app";
@@ -504,11 +504,11 @@ function StoryMade(props: { changes: StoryChange[]; now: number; busy: boolean; 
                 key={`${c.kind}:${c.id}`}
                 id={c.id}
                 icon={c.kind === "schedule" ? "calendar" : "clock"}
-                title={shown ? shown.label : nameOfId(c.id)}
+                title={shown?.label ?? (c.kind === "block" ? c.label : undefined) ?? nameOfId(c.id)}
                 subtitle={
                   <span class="lre-gm-routines-lines">
                     <span>{what}</span>
-                    <span>{sourceWords({ ...c.source, label: "The story" }, props.now)}</span>
+                    <span>{sourceWords({ ...c.source, label: storySourceLabel(c.source) }, props.now)}</span>
                     {c.source.turn ? <IdText id={c.source.turn} /> : null}
                   </span>
                 }

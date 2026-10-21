@@ -65,7 +65,7 @@ describe("the GM's routine controls in a chat", () => {
         name: "Maya Chen",
         follow: { mode: "no_invitations", awareness: "story_first", role: null },
         blocks: [
-          { block: "evening", source: { type: "gm", at: at(ctx, 0, "07:30") }, off: false },
+          { block: "evening", label: "Settling up", source: { type: "gm", at: at(ctx, 0, "07:30") }, off: false },
           { block: "dinner", source: { type: "gm", at: at(ctx, 0, "07:30") }, off: true },
         ],
         schedules: [
@@ -188,6 +188,6 @@ describe("a change the story made today", () => {
     expect([swimOn()?.owner.level, swimOn(today)?.owner.level, swimOn(today + 1)?.owner.level]).toEqual([undefined, undefined, "chat"]);
     expect(swimOn(today + 1)?.source).toMatchObject({ type: "story", turn: "a3", by: "player" });
     const folded = foldBoth(w.world, w.events.slice(from)).state;
-    expect(routineChanges(reg.context(w.world, folded))).toEqual([expect.objectContaining({ entity: "maya", blocks: [{ block: "swim", source: { type: "story", at: w.state.clock, turn: "a3", by: "player" }, off: false }] })]);
+    expect(routineChanges(reg.context(w.world, folded))).toEqual([expect.objectContaining({ entity: "maya", blocks: [{ block: "swim", label: "A late swim", source: { type: "story", at: w.state.clock, turn: "a3", by: "player" }, off: false }] })]);
   });
 });

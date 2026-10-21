@@ -61,6 +61,11 @@ export type WorldRoutineSource = Extract<RoutineSource, { type: "authored" | "lo
 /** The sources a chat's own change carries. */
 export type ChatRoutineSource = Extract<RoutineSource, { type: "story" | "gm" }>;
 
+/** Where a story change came from, as the GM reads it: the player's own message (`by: "player"`, asked and answered Yes), else the reply. */
+export function storySourceLabel(source: Extract<RoutineSource, { type: "story" }>): string {
+  return source.by === "player" ? "From your message" : "The story";
+}
+
 /**
  * Where a block happens: their `home`; their `work` (their workplace, else home); `here`, wherever
  * they are when it starts (the story's place); `with`, the home of the first of its company (a
@@ -440,7 +445,8 @@ export interface RoutineChangeSummary {
   entity: EntityId;
   name: string;
   follow: RoutineFollow | null;
-  blocks: { block: RoutineBlockId; source: ChatRoutineSource; off: boolean }[];
+  /** `label`: the block's own name, as the chat holds it (none for one switched off), so a change not yet in force reads by its name, never its id. */
+  blocks: { block: RoutineBlockId; source: ChatRoutineSource; off: boolean; label?: string }[];
   schedules: { schedule: ScheduleId; source: ChatRoutineSource; off: boolean }[];
 }
 

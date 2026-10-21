@@ -183,7 +183,7 @@ export function routineChanges(ctx: ReadContext): RoutineChangeSummary[] {
     entity: id,
     name: own(ctx.state.entities, id)?.name ?? id,
     follow: chatFollow(ctx.state, id),
-    blocks: Object.entries(chatBlocks(ctx.state, id)).map(([block, c]) => ({ block, source: c.source, off: isOff(c.value) })),
+    blocks: Object.entries(chatBlocks(ctx.state, id)).map(([block, c]) => ({ block, source: c.source, off: isOff(c.value), ...(isOff(c.value) ? {} : { label: c.value.label }) })),
     schedules: Object.entries(chatSchedules(ctx.state, id)).map(([schedule, c]) => ({ schedule, source: c.source, off: "off" in c.value })),
   }));
 }

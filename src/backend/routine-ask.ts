@@ -62,8 +62,11 @@ function plainly(p: JsonObject, world: WorldDoc, state: Readonly<WorldState>): {
   const start = str(p.start);
   const end = str(p.end);
   const time = start === "" ? "" : end === "" ? start : `${start}–${end}`;
-  const where = str(p.place) === "" ? "" : `at ${placeName(p.place)}`;
-  const company = (Array.isArray(p.with) ? p.with : []).flatMap((id) => (typeof id === "string" && state.entities[id] ? [state.entities[id]?.name ?? id] : []));
+  // Each part once: a place or a person the label already names ("Swimming at Lakefront Park") isn't named again.
+  const said = label.toLowerCase();
+  const place = str(p.place) === "" ? "" : placeName(p.place);
+  const where = place === "" || said.includes(place.toLowerCase()) ? "" : `at ${place}`;
+  const company = (Array.isArray(p.with) ? p.with : []).flatMap((id) => (typeof id === "string" && state.entities[id] ? [state.entities[id]?.name ?? id] : [])).filter((n) => !said.includes(n.toLowerCase()));
   const parts = [label, days, time, where, company.length > 0 ? `with ${company.join(" and ")}` : ""].filter((s) => s !== "");
   return { whose, detail: `${subject}: ${parts.join(", ")}, from the next day.` };
 }

@@ -8,7 +8,7 @@
 // its own Undo chip.
 
 import { useEffect, useRef, useState } from "preact/hooks";
-import type { GmView } from "../../shared/state-view";
+import type { GmView, StateView } from "../../shared/state-view";
 import { DEFAULT_CURRENCY } from "../../shared/world";
 import { useApp, useUi } from "../app";
 import { Empty, useBusy } from "../components";
@@ -19,6 +19,15 @@ import { EditsLog, PlacesSection, StorySection } from "../gm/sections";
 import { WorldSection } from "../gm/world";
 import type { PanelProps } from "../registry";
 import { editRequest } from "../requests";
+
+/**
+ * What the GM view is loaded again on: the chat moving on (a turn, an edit, an undo), as the
+ * player's state shows it. Chips count by id, not by number: an answer that swaps one chip for
+ * another (a routine's Yes leaves its Undo) changes the chat while their count stays.
+ */
+export function gmReloadKey(state: Pick<StateView, "status" | "chips" | "journal">): string {
+  return `${state.status}\u0000${state.journal.length}\u0000${state.chips.map((c) => c.id).join("\u0000")}`;
+}
 
 export function GmPanel(props: PanelProps) {
   const app = useApp();
@@ -42,7 +51,7 @@ export function GmPanel(props: PanelProps) {
     }
     loads.current++;
     setGm(null);
-  }, [revealed, props.chatId, props.state.status, props.state.chips.length, props.state.journal.length]);
+  }, [revealed, props.chatId, gmReloadKey(props.state)]);
   if (!revealed) return <Gate onReveal={() => app.ui.update(revealTruth)} />;
   const pack = app.catalog.gmSections.find((def) => def.id === section);
   const editor: Editor | null = gm

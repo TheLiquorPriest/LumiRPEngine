@@ -145,13 +145,13 @@ export function sourceWords(source: SourceView, now: number): string {
  * block it will replace, if any, and never the story's.
  */
 export type StoryChange =
-  | { kind: "block"; id: RoutineBlockId; source: Extract<ChatRoutineSource, { type: "story" }>; off: boolean; block: EffectiveBlock | null }
+  | { kind: "block"; id: RoutineBlockId; source: Extract<ChatRoutineSource, { type: "story" }>; off: boolean; block: EffectiveBlock | null; label?: string }
   | { kind: "schedule"; id: ScheduleId; source: Extract<ChatRoutineSource, { type: "story" }>; off: boolean; schedule: EffectiveSchedule | null };
 
 /** The changes the story made to their routine and schedules in this chat (`summary`, what the chat changed of them), in the order the story made them. */
 export function storyChanges(view: Pick<RoutineGmView, "blocks" | "schedules">, summary: RoutineChangeSummary | undefined): StoryChange[] {
   const out: StoryChange[] = [];
-  for (const b of summary?.blocks ?? []) if (b.source.type === "story") out.push({ kind: "block", id: b.block, source: b.source, off: b.off, block: view.blocks.find((x) => x.block.id === b.block) ?? null });
+  for (const b of summary?.blocks ?? []) if (b.source.type === "story") out.push({ kind: "block", id: b.block, source: b.source, off: b.off, block: view.blocks.find((x) => x.block.id === b.block) ?? null, ...(b.label !== undefined ? { label: b.label } : {}) });
   for (const s of summary?.schedules ?? []) if (s.source.type === "story") out.push({ kind: "schedule", id: s.schedule, source: s.source, off: s.off, schedule: view.schedules.find((x) => x.schedule === s.schedule) ?? null });
   return out.sort((a, b) => a.source.at - b.source.at);
 }
