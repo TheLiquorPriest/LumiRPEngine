@@ -312,8 +312,14 @@ export async function runMinds(deps: MindsDeps, input: RunMindsInput): Promise<R
     const data = raw === null ? null : mindData(reg, world, state, who, raw, input.moment, level, input.reasons?.[who] ?? input.moment.reason);
     const given = shownLore(report.pinned);
     const activated = shownLore(report.activated);
-    const notes = [...fitNote("Pinned lore", report.pinned, reads.pinned.tokens), ...fitNote("The lore the turn activated", report.activated, reads.activated.tokens)];
-    const trace: MindCallTrace = { ...base, outcome: data === null ? "failed" : "recorded", ms, tokens: usage.tokens, prompt: prompt.source, ...(given.length > 0 ? { pinned: given } : {}), ...(activated.length > 0 ? { activated } : {}), ...(notes.length > 0 ? { notes } : {}) };
+    const routineLeft = report.routine?.left ?? 0;
+    const notes = [
+      ...fitNote("Pinned lore", report.pinned, reads.pinned.tokens),
+      ...fitNote("The lore the turn activated", report.activated, reads.activated.tokens),
+      ...(routineLeft > 0 ? [`Their usual routine didn't all fit: ${routineLeft} line${routineLeft === 1 ? "" : "s"} left out, over the ${reads.routine.tokens} tokens a mind reads of it; raise that in Settings → Minds → What a mind reads.`] : []),
+    ];
+    const routine = report.routine?.given ?? 0;
+    const trace: MindCallTrace = { ...base, outcome: data === null ? "failed" : "recorded", ms, tokens: usage.tokens, prompt: prompt.source, ...(given.length > 0 ? { pinned: given } : {}), ...(activated.length > 0 ? { activated } : {}), ...(routine > 0 ? { routine } : {}), ...(notes.length > 0 ? { notes } : {}) };
     const why = data !== null ? null : raw !== null ? "the answer said nothing: no thoughts, intent or depiction" : failure.reason !== "" ? failure.reason : "the call failed";
     if (why !== null) deps.host.log("warn", `[LumiRPEngine] mind for ${who}: ${why}`, userId);
     const entry: MindsRunEntry = {

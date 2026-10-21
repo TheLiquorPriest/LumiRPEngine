@@ -307,7 +307,8 @@ export type MindsMemoryOverrides = { [K in keyof MindsMemoryConfig]?: Partial<Mi
  * are, the lore the turn activates, the latest reply and the player's message), then their own
  * summary, notes and what they saw, last thoughts, recall of the turns they were there for, their
  * usual routine (their routine blocks and schedules while their routine is informative or enforced,
- * never a private block, never social life the planner made up: `RoutineRole`), and their life (money,
+ * a private block only when it is their own, never social life the planner made up: `RoutineRole`),
+ * and their life (money,
  * the day, commitments and plans). Who they are, where they are and what they mean to do are in every
  * context, outside these.
  */
@@ -913,7 +914,9 @@ export interface MindCallTrace {
   pinned?: PinnedTrace[];
   /** The lore the turn activated that it was given, the player may know of; absent: none. */
   activated?: PinnedTrace[];
-  /** What the player should know of how it went: lore cut or left out over what a mind reads of it, and why. */
+  /** How many lines of their usual routine it was given (DESIGN §24.5); absent: none. A count, never the lines: a routine can hold a private block. */
+  routine?: number;
+  /** What the player should know of how it went: lore or routine cut or left out over what a mind reads of it, and why. */
   notes?: string[];
 }
 

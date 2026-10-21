@@ -43,13 +43,13 @@ test("someone on an agenda reads as busy in Cast and the narrator's lines unless
   if (!here) throw new Error("the POV has no place");
   state.entities.maya!.fields.place = here;
   state.entities.maya!.fields.activity = "agenda";
-  /** Every place the player or the narrator reads Maya's activity. */
+  /** Every place the player or the narrator reads Maya's activity (People's usual-routine hint tells her usual hours, never what she is doing now). */
   const said = () => {
     const ctx = reg.context(world, state);
     return {
       cast: buildCastView(ctx).people.find((p) => p.id === "maya")?.activity,
       journal: playerLines(reg, world, state, world.pov, [{ type: "set", entity: "maya", field: "activity", value: "agenda" }]),
-      people: reg.renderers.filter((r) => r.slot === "people").flatMap((r) => r.render(ctx)).filter((l) => l.startsWith("Maya")),
+      people: reg.renderers.filter((r) => r.slot === "people" && !r.hint).flatMap((r) => r.render(ctx)).filter((l) => l.startsWith("Maya")),
       outline: outline(reg, world, state, { events: [] }, createRng("beats")).filter((l) => l.startsWith("Maya")),
     };
   };

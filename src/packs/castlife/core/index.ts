@@ -55,6 +55,7 @@ import { birthdayOf, FOND, occasionOf } from "./occasions";
 import { homeOf, placeOfType } from "./places";
 import { activeBlocks, blockOnDay, blockPlace, chatScheduleDefs, followOf, ROUTINE_OPTION, routineDay, routinesLint, routineYields, scheduleOff, schedulesLint, withPov, worldRoutines } from "./routines";
 import { ROUTINE_EFFECT, routineChannel, storyEvents } from "./story";
+import { usualRoutineHints } from "./usual";
 
 export { commitments, type CommitmentBlock, type CommitmentKind } from "./commitments";
 
@@ -1326,6 +1327,9 @@ export const castlifePack: PackDef = {
         return lines;
       },
     });
+    // Their usual routine as background the narrator may use or ignore (DESIGN §6.6): a hint, so it
+    // rides last on the budget and stays out of the helpers' facts.
+    r.renderer({ slot: "people", hint: true, render: usualRoutineHints });
     r.view({ panel: "castlife.cast", build: (ctx) => buildCastView(ctx) as unknown as JsonValue });
     r.renderer({ slot: "stance", render: stanceLines });
     r.renderer({ slot: "stance", hint: true, render: stanceCues });

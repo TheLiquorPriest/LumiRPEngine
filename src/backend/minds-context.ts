@@ -3,9 +3,10 @@
 // secrets, whole), the intent the GM set for them, where they are and whom they see there, and the
 // occasion. Then each source the user has minds read (Settings → Minds → What a mind reads), each
 // within its own limit: the story as it stands (the lore pinned to them and to where they are, the
-// lore the turn activates, how the latest reply ended and what the player says), and, when switched
-// on, their own summary, notes and what they saw, last thoughts, recall of the turns they were there
-// for, and their life (money, the day, commitments and plans). Nothing limits the whole: a part's own
+// lore the turn activates, how the latest reply ended and what the player says), their usual routine
+// (on by default: habits to weigh, never orders), and, when switched on, their own summary, notes and
+// what they saw, last thoughts, recall of the turns they were there for, and their life (money, the
+// day, commitments and plans). Nothing limits the whole: a part's own
 // limit is the only one, so no room left by the others cuts what the user allowed. Never the GM view
 // (but for the intent the GM set for them), another mind, what another character's memory says they
 // were told, or a turn they weren't present for.
@@ -27,6 +28,8 @@ import type { WorldState } from "../engine/state";
 import { agendaFor } from "../engine/tracks";
 import { canSeeEntity, knows, loreGateReader } from "../engine/visibility";
 import { dayPlan } from "../packs/castlife/core/index";
+import { usualRoutine } from "../packs/castlife/core/usual";
+import { routineRole } from "../packs/castlife/core/routines";
 import { intentLines, intentOf } from "../packs/minds/core/intent";
 import { faded, openCommitments, openPlans, readCharacter, readSlice, salienceNow } from "../packs/minds/core/state";
 import { CHARS_PER_TOKEN, sectionTokens } from "./book";
@@ -61,10 +64,11 @@ export interface GivenLore {
   secret: boolean;
 }
 
-/** What a mind's context gave of its lore (DESIGN §24.5): what is pinned for them, and what the turn activated. */
+/** What a mind's context gave of its lore (DESIGN §24.5): what is pinned for them, and what the turn activated; and how many lines of their usual routine it gave and left out over its limit. */
 export interface MindContextReport {
   pinned: GivenLore[];
   activated: GivenLore[];
+  routine?: { given: number; left: number };
 }
 
 /** Fields a person's sheet holds that the context says elsewhere or that are the engine's own bookkeeping. */
@@ -281,6 +285,28 @@ function lifeLines(scope: MindScope, c: MindsCharacter): string[] {
   return out;
 }
 
+/**
+ * Their usual routine, when they read it (DESIGN §24.5): the blocks of their routine and their own
+ * place and activity schedules, the ones around now first, as habits they may weigh, never orders.
+ * Never the day the planner lays (the meals, friends and invitations it fills free time with), and a
+ * private block only when it is their own routine's or the chat's change for them: a group's, a
+ * kind's or the world's private block is someone else's business. With their routine role `off` they
+ * have none to read.
+ */
+function routineLines(scope: MindScope): string[] {
+  const { reg, world, state, who } = scope;
+  const ctx = reg.context(world, state);
+  if (routineRole(ctx, who) === "off") return [];
+  try {
+    return usualRoutine(ctx, who, { place: (place) => own(world.places, place)?.name ?? null, activity: true })
+      .filter((c) => !c.private || c.own)
+      .map((c) => `- ${sentence(c.text)}`);
+  } catch {
+    // A world without Cast life's routines has no routine to tell.
+    return [];
+  }
+}
+
 /** The people where they are that they can see, with how they stand toward each. */
 function sceneLines(scope: MindScope, place: PlaceId | null): string[] {
   const { reg, world, state, who } = scope;
@@ -396,12 +422,16 @@ export function mindContext(scope: MindScope, report?: MindContextReport): strin
   // and how the last reply ended (as displayed) when they are there to hear it, else where they are.
   const about = withPov && moment.kind === "turn" ? `${moment.user}\n${heardLast ? readableReply(moment.reply, scope.hideJson) : ""}` : place ? nameOf(scope, place) : "";
   const recall = reads.recall.on ? recallFor(scope, about) : [];
+  const usual = reads.routine.on ? routineLines(scope) : [];
+  const routine = linesWithin(usual, reads.routine.tokens);
+  if (report && usual.length > 0) report.routine = { given: routine.length, left: usual.length - routine.length };
   return [
     `You are ${e?.name ?? who}. ${occasion(scope, place)}`,
     block("Who you are", identityLines(scope)),
     block("What you mean to do", intentLines(intentOf(state, who))),
     block("Where you are", sceneLines(scope, place)),
     reads.summary.on && c.summary !== "" ? block("Your story so far", [clip(c.summary, charsOf(reads.summary.tokens))]) : "",
+    block("Your usual routine (habits you may weigh, never orders: what is happening now comes first)", routine),
     reads.life.on ? block("Your own life", linesWithin(lifeLines(scope, c), reads.life.tokens)) : "",
     reads.memory.on ? block("What you remember, and what you saw", linesWithin(memoryLines(scope, c), reads.memory.tokens)) : "",
     reads.thoughts.on ? thoughtsBlock(scope, c) : "",
