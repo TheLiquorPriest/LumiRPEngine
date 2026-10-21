@@ -15,7 +15,8 @@
     "presets",
     "regex_scripts",
     "decisions",
-    "ui_panels"
+    "ui_panels",
+    "mcp_servers"
   ],
   "entry_backend": "dist/backend.js",
   "entry_frontend": "dist/frontend.js"

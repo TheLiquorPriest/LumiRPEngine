@@ -4757,7 +4757,7 @@ var HOST_LIMITS = {
     effect: "Lumiverse closes the socket; the client pings every 45 s to keep it open."
   }
 };
-var TIMEOUT_KEYS = ["engineRunMs", "preLookupMs", "postReplyMs", "postLookupMs", "guardMs", "requestMs", "caveatsMs", "mindsRunMs", "jobCallMs", "tokenCountMs", "laneStartupMs", "laneHeartbeatMs"];
+var TIMEOUT_KEYS = ["engineRunMs", "preLookupMs", "postReplyMs", "postLookupMs", "guardMs", "requestMs", "caveatsMs", "mindsRunMs", "jobCallMs", "tokenCountMs", "laneStartupMs", "laneHeartbeatMs", "mcpReconnectMs"];
 var MIN = 60000;
 var TIMEOUTS = {
   engineRunMs: {
@@ -4827,6 +4827,15 @@ var TIMEOUTS = {
     minMs: 0,
     zero: "always answer at once",
     none: "wait for the check (Engine requests still bounds the tab's wait)"
+  },
+  mcpReconnectMs: {
+    label: "MCP server reconnect",
+    group: "work",
+    limits: "How long Reconnect in Lumiverse waits for a server Lumiverse runs to come back with this build's tools, after it is asked to exit.",
+    fires: "The server's line says it isn't back, with how to disconnect and connect it in Lumiverse's Settings → MCP Servers.",
+    defaultMs: MIN,
+    minMs: 1000,
+    none: "the line waits until the server is back"
   },
   mindsRunMs: {
     label: "Minds run on demand",
@@ -19782,9 +19791,28 @@ function SchemaPartView(props) {
 
 // src/shared/agents.ts
 var NPM_INSTALL = "npm i -g github:TheLiquorPriest/LumiRPEngine";
-var LUMIVERSE_HARNESS = "lumiverse";
 
 // src/frontend/agents-view.ts
+var BY_HAND = "in Lumiverse's Settings → MCP Servers, Disconnect it and Connect it again";
+var GRANT = "In Lumiverse's Extensions tab, switch on LumiRPEngine's Mcp Servers permission (an owner or admin grants it) and this line checks Lumiverse's own tool list.";
+function lumiverseLine(name, run) {
+  const line = (text, reconnect = false) => ({ state: "updated", text, update: false, reconnect, copy: [] });
+  const unchecked = run.profiles === null ? ` Without the mcp_servers permission LumiRPEngine can't check Lumiverse's own tool list, only the server's. ${GRANT}` : "";
+  if (run.reconnect?.state === "waiting")
+    return line(`${name} reloaded this build's tools; it was asked to exit once its calls are answered, and Lumiverse connects it again. Waiting for it back with them${run.reconnect.through === "server" ? ", as its new process says (Lumiverse's own list can't be checked without the mcp_servers permission)" : ""}.`);
+  if (run.reconnect?.state === "late") {
+    const within = run.reconnect.waitMs === null ? "" : ` within ${formatMs(run.reconnect.waitMs)} (Settings → Timeouts → MCP server reconnect)`;
+    return line(`${name} isn't back from Reconnect in Lumiverse with this build's tools${within}: ${BY_HAND}.`, run.stale > 0);
+  }
+  if (run.stale > 0)
+    return line(`${name} reloaded this build's tools, but Lumiverse's MCP client keeps the list it got when it connected. Reconnect in Lumiverse ends the server's process once its calls are answered, and Lumiverse connects it again with this build's tools.${unchecked}`, true);
+  const old = run.profiles !== null && run.profiles.some((p) => !p.current);
+  if (old || run.profiles === null && run.unknown > 0)
+    return line(`${name} reloaded this build's tools, but Lumiverse's MCP client keeps its old tool list until the server restarts: ${BY_HAND}.`);
+  if (run.profiles !== null && run.profiles.length > 0)
+    return line(`${name} reloaded this build's tools, and Lumiverse's MCP client has them.`);
+  return line(`${name} serves this build's tools, and gave them to Lumiverse's MCP client when it connected.${unchecked}`);
+}
 function serverLine(client, view) {
   const processes = client.processes > 1 ? ` (${client.processes} processes)` : "";
   const name = `${client.host !== null ? `${client.name}${client.harness !== null ? ` for ${client.harness}` : ""} on ${client.host}` : `${client.name} ${client.version}`}${processes}`;
@@ -19792,18 +19820,18 @@ function serverLine(client, view) {
   const setup = (view.setup?.commands ?? []).map((c) => ({ label: `Copy the setup for ${c.needs}`, text: c.command }));
   switch (client.state) {
     case "updated":
-      if (client.harness === LUMIVERSE_HARNESS)
-        return { state: client.state, text: `${name} reloaded this build's tools, but Lumiverse's MCP client keeps its old tool list until the server restarts: in Lumiverse's Settings → MCP Servers, Disconnect it and Connect it again.`, update: false, copy: [] };
-      return { state: client.state, text: `${name} reloaded this build's tools.`, update: false, copy: [] };
+      if (client.lumiverse !== null)
+        return lumiverseLine(name, client.lumiverse);
+      return { state: client.state, text: `${name} reloaded this build's tools.`, update: false, reconnect: false, copy: [] };
     case "behind":
-      return { state: client.state, text: `${name} hasn't reloaded this build's tools yet${client.connected ? "." : ": it hasn't checked in since LumiRPEngine restarted. Running, it takes them at its next check, within a minute; stopped, when it next starts."}`, update: true, copy: [] };
+      return { state: client.state, text: `${name} hasn't reloaded this build's tools yet${client.connected ? "." : ": it hasn't checked in since LumiRPEngine restarted. Running, it takes them at its next check, within a minute; stopped, when it next starts."}`, update: true, reconnect: false, copy: [] };
     case "cannot": {
       const fix = client.why?.code === "elsewhere" || client.why?.code === "kit_api" ? [install] : client.why?.code === "pinned" || client.why?.code === "unsafe" ? [] : setup;
-      return { state: client.state, text: `${name} can't follow LumiRPEngine: ${client.why?.text ?? "it didn't say why"}.`, update: false, copy: fix };
+      return { state: client.state, text: `${name} can't follow LumiRPEngine: ${client.why?.text ?? "it didn't say why"}.`, update: false, reconnect: false, copy: fix };
     }
     case "old": {
       const commands = view.setup === null ? "" : ` (${view.setup.commands.map((c) => `${c.command} with ${c.needs}`).join(", or ")})`;
-      return { state: client.state, text: `${name} is from before MCP servers followed LumiRPEngine, so it keeps the tools it was installed with. Update it once (${NPM_INSTALL}), or set it up to run the extension's own copy${commands}, which follows from then on.`, update: false, copy: [install, ...setup] };
+      return { state: client.state, text: `${name} is from before MCP servers followed LumiRPEngine, so it keeps the tools it was installed with. Update it once (${NPM_INSTALL}), or set it up to run the extension's own copy${commands}, which follows from then on.`, update: false, reconnect: false, copy: [install, ...setup] };
     }
   }
 }
@@ -19852,6 +19880,12 @@ function Servers(props) {
                 variant: "primary",
                 onClick: () => void app.request({ type: "lre.agents", op: "update", client: client.id }).then((r) => r && app.toast("Asked it to reload: its line turns once it has")),
                 children: "Update now"
+              }, undefined, false, undefined, this) : null,
+              line.reconnect ? /* @__PURE__ */ u3(Button, {
+                size: "sm",
+                variant: "primary",
+                onClick: () => void app.request({ type: "lre.agents", op: "reconnect", client: client.id }).then((r) => r?.view && app.agents.set(r.view)),
+                children: "Reconnect in Lumiverse"
               }, undefined, false, undefined, this) : null,
               line.copy.map((c) => /* @__PURE__ */ u3(Button, {
                 size: "sm",
@@ -22118,7 +22152,7 @@ var GROUPS3 = [
   { group: "app", title: "This tab", lead: "How long LumiRPEngine's tab waits for the engine." },
   { group: "work", title: "Jobs and background work", lead: "Build's model jobs, minds runs you start, and the engine's work in the background." }
 ];
-var STEP_S = { engineRunMs: 30, preLookupMs: 15, postReplyMs: 30, postLookupMs: 15, guardMs: 10, requestMs: 30, caveatsMs: 10, mindsRunMs: 60, jobCallMs: 60, tokenCountMs: 5, laneStartupMs: 10, laneHeartbeatMs: 10 };
+var STEP_S = { engineRunMs: 30, preLookupMs: 15, postReplyMs: 30, postLookupMs: 15, guardMs: 10, requestMs: 30, caveatsMs: 10, mindsRunMs: 60, jobCallMs: 60, tokenCountMs: 5, laneStartupMs: 10, laneHeartbeatMs: 10, mcpReconnectMs: 10 };
 function limitText(limit) {
   return limit === "none" ? "No limit" : formatMs(limit);
 }

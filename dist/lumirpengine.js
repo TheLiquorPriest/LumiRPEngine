@@ -11,6 +11,7 @@ import { createInterface } from "node:readline";
 var KIT_API = 1;
 var KIT_FILE = "agent-kit.js";
 var NPM_INSTALL = "npm i -g github:TheLiquorPriest/LumiRPEngine";
+var LUMIVERSE_HARNESS = "lumiverse";
 function kitPathProblem(path, identifier) {
   const slashed = path.replaceAll("\\", "/");
   if (!(slashed.startsWith("/") || /^[A-Za-z]:\//.test(slashed)))
@@ -318,6 +319,15 @@ var TIMEOUTS = {
     minMs: 0,
     zero: "always answer at once",
     none: "wait for the check (Engine requests still bounds the tab's wait)"
+  },
+  mcpReconnectMs: {
+    label: "MCP server reconnect",
+    group: "work",
+    limits: "How long Reconnect in Lumiverse waits for a server Lumiverse runs to come back with this build's tools, after it is asked to exit.",
+    fires: "The server's line says it isn't back, with how to disconnect and connect it in Lumiverse's Settings → MCP Servers.",
+    defaultMs: MIN,
+    minMs: 1000,
+    none: "the line waits until the server is back"
   },
   mindsRunMs: {
     label: "Minds run on demand",
@@ -631,12 +641,13 @@ class HostConnection {
   }
   async greet() {
     const opened = this.opened;
-    const hello = await this.send("lre.hello", { chatId: null, client: { ...this.options.client, ...this.options.checkIn?.() } });
+    const checkIn = this.options.checkIn?.() ?? null;
+    const hello = await this.send("lre.hello", { chatId: null, client: { ...this.options.client, ...checkIn } });
     const agentApi = isRecord(hello) ? hello.agentApi : undefined;
     if (opened !== null && this.opened === opened)
       this.opened = { extension: opened.extension, agentApi: typeof agentApi === "number" ? agentApi : null };
     if (isRecord(hello))
-      this.options.onHello?.(hello);
+      this.options.onHello?.(hello, checkIn);
   }
   connect(ticket) {
     const session = frontendSession();
@@ -898,7 +909,7 @@ var package_default = {
 // src/cli/version.ts
 var CLI_NAME = "lumirpengine";
 var CLI_VERSION = package_default.version;
-var BUILD = "e78b89ac";
+var BUILD = "c61c17bb";
 function runtimeCannotFollow(bun) {
   if (bun === undefined)
     return null;
@@ -961,8 +972,12 @@ class McpServer {
         }
         case "ping":
           return reply({});
-        case "tools/list":
-          return reply({ tools: this.host.kit().tools(this.host.readOnly).map((t) => ({ name: t.name, description: t.description, inputSchema: t.inputSchema, annotations: t.annotations })) });
+        case "tools/list": {
+          const kit = this.host.kit();
+          const tools = kit.tools(this.host.readOnly).map((t) => ({ name: t.name, description: t.description, inputSchema: t.inputSchema, annotations: t.annotations }));
+          this.host.listed?.(kit.build);
+          return reply({ tools });
+        }
         case "tools/call": {
           if (typeof params.name !== "string")
             return fail(id, -32602, "Invalid params: tools/call needs the tool's name");
@@ -1071,6 +1086,9 @@ class McpSession {
   toolsChanged = () => {
     return;
   };
+  leave = () => {
+    return;
+  };
   conn = null;
   follower;
   clock;
@@ -1078,6 +1096,8 @@ class McpSession {
   followable = false;
   harness = null;
   initializedOnce = false;
+  listedBuild = null;
+  leaving = false;
   looked = Number.NEGATIVE_INFINITY;
   work = Promise.resolve();
   starting = Promise.resolve();
@@ -1092,14 +1112,14 @@ class McpSession {
     this.follower = new KitFollower(options.bundled, { pin: options.mcp.pin, cannotLoad: options.cannotLoad ?? null, identifier: ENGINE_EXTENSION, files: options.files, where: () => this.conn?.base ?? "your Lumiverse" });
     const queue = new Queue;
     this.context = { readFile: (path) => options.io.readFile(path), readOnly: this.readOnly, connection: () => this.connection(), serialize: (key, work) => queue.run(key, work) };
-    this.said = this.stance();
+    this.said = stanceOf(this.checkIn());
   }
   kit() {
     return this.follower.kit;
   }
   checkIn() {
     const { follows, why } = this.follower.state;
-    return { serves: "mcp", core: BUILD, kit: this.follower.kit.build, follows, why, host: this.options.host, harness: this.harness };
+    return { serves: "mcp", core: BUILD, kit: this.follower.kit.build, follows, why, host: this.options.host, harness: this.harness, listed: this.listedBuild };
   }
   start() {
     this.stopTimer = this.clock.every(EVERY_MS, () => {
@@ -1117,6 +1137,12 @@ class McpSession {
         await this.connection().ensureOpen();
       } catch {}
     })();
+  }
+  listed(build) {
+    if (this.listedBuild === build)
+      return;
+    this.listedBuild = build;
+    this.after(() => this.tell());
   }
   async ready() {
     if (this.followable && this.conn?.isOpen() && this.clock.now() - this.looked > STALE_MS)
@@ -1150,19 +1176,33 @@ class McpSession {
       client: { name: CLI_NAME, version: CLI_VERSION },
       checkIn: () => this.checkIn(),
       needs: () => this.follower.kit.versions.agentApi,
-      onHello: (answer) => {
+      onHello: (answer, sent) => {
         if (typeof answer.client === "string")
           this.agent = answer.client;
+        if (sent !== null)
+          this.said = stanceOf(sent);
         this.looked = this.clock.now();
         this.after(() => this.take(answer));
       },
       onPush: (push) => {
-        if (push.type === "lre.kit.reload" && this.agent !== null && push.client === this.agent)
+        if (this.agent === null || !("client" in push) || push.client !== this.agent)
+          return;
+        if (push.type === "lre.kit.reload")
           this.look();
+        else if (push.type === "lre.kit.reconnect")
+          this.reconnect();
       },
       ...this.options.mcp.timeoutMs !== undefined ? { timeoutMs: this.options.mcp.timeoutMs } : {}
     });
     return this.conn;
+  }
+  reconnect() {
+    const serving = this.follower.kit.build;
+    if (this.leaving || this.harness !== LUMIVERSE_HARNESS || this.listedBuild === null || this.listedBuild === serving)
+      return;
+    this.leaving = true;
+    this.options.log(`lumirpengine: exiting, as LumiRPEngine's Reconnect in Lumiverse asked, once the calls in flight are answered: Lumiverse's MCP client holds build ${this.listedBuild}'s tools until it connects again, and on connecting it lists build ${serving}'s`);
+    this.leave();
   }
   after(step) {
     this.work = this.work.then(step).catch((error) => this.options.log(`lumirpengine: following LumiRPEngine's tools failed: ${error instanceof Error ? error.message : String(error)}`));
@@ -1189,28 +1229,34 @@ class McpSession {
   async take(news) {
     this.followable = this.follower.able && "kit" in news && isRecord(news.kit);
     const was = this.follower.kit.build;
+    const before = this.follower.state.why?.code ?? null;
     const changed = await this.follower.follow(news);
     if (changed) {
       this.options.log(`lumirpengine: serving the tools of LumiRPEngine build ${this.follower.kit.build} (was build ${was})`);
       this.toolsChanged();
     }
-    const stance = this.stance();
-    if (stance === this.said)
-      return;
-    this.said = stance;
     const { why } = this.follower.state;
-    if (why !== null)
+    if (why !== null && why.code !== before)
       this.options.log(`lumirpengine: keeping the tools of build ${this.follower.kit.build}: ${why.text}`);
-    await this.conn?.checkInAgain();
+    await this.tell();
   }
-  stance() {
-    const { follows, why } = this.follower.state;
-    return `${this.follower.kit.build}\x00${String(follows)}\x00${why?.code ?? ""}`;
+  async tell() {
+    if (stanceOf(this.checkIn()) !== this.said)
+      await this.conn?.checkInAgain();
   }
 }
-function serveMcp(session, write) {
+function stanceOf(c) {
+  return `${c.kit}\x00${String(c.follows)}\x00${c.why?.code ?? ""}\x00${c.listed ?? ""}`;
+}
+function serveMcp(session, write, exit = () => {
+  return;
+}) {
   const line = lineServer(new McpServer(session), write);
   session.toolsChanged = () => line.notify("notifications/tools/list_changed");
+  session.leave = () => void line.drain().then(() => {
+    session.close();
+    exit();
+  });
   return line;
 }
 
@@ -1349,7 +1395,7 @@ if ("mcp" in result) {
     process.stdout.write(`${line}
 `, () => resolve());
     return promise;
-  });
+  }, () => process.exit(0));
   session.start();
   process.stdin.setEncoding("utf8");
   process.stdin.on("data", (chunk) => server.feed(chunk));

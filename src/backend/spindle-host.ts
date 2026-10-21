@@ -5,6 +5,7 @@
 
 import type { GenerationReasoningOverrideDTO, PromptBlockDTO, PromptBlockSnapshotDTO, WorldBookEntryCreateDTO, WorldBookEntryDTO } from "lumiverse-spindle-types";
 import type { HostSpindleAPI, RegexScriptInput } from "../spindle-augment";
+import { MCP_PERMISSION } from "../shared/agents";
 import type { HostPresetBlockInput } from "./host";
 import type { JsonObject, JsonValue } from "../shared/json";
 import { isRecord } from "../shared/json";
@@ -609,6 +610,24 @@ export function createSpindleHost(): HostPort {
       async active(userId) {
         const c = (await spindle.connections.list(userId)).find((x) => x.is_default);
         return c ? { id: c.id, name: c.name } : null;
+      },
+    },
+    mcp: {
+      granted: () => spindle.permissions.has(MCP_PERMISSION),
+      async stdioProfiles(userId) {
+        // Spindle gives at most 100 a page. Only the id and name of a stdio profile are kept: the
+        // rest of each profile (its env's names, whether it has headers) is no business of this one.
+        const out: { id: string; name: string }[] = [];
+        for (let offset = 0; ; ) {
+          const page = await spindle.mcp.servers.list({ limit: 100, offset, userId });
+          for (const p of page.data) if (p.transport_type === "stdio") out.push({ id: p.id, name: p.name });
+          offset += page.data.length;
+          if (page.data.length === 0 || offset >= page.total) return out;
+        }
+      },
+      async status(profileId, userId) {
+        const s = await spindle.mcp.servers.status(profileId, userId);
+        return { connected: s.connected, tools: s.tools.map((t) => ({ name: t.name, description: t.description, input_schema: t.input_schema })) };
       },
     },
     regex: {

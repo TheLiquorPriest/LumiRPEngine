@@ -590,9 +590,11 @@ export interface PresetCard {
  * The outside MCP servers (DESIGN §23). `kit` is a server's own check: this build and where its
  * kit is, and whether this session checked in since the extension started. Settings → MCP server
  * and the update notice `get` the servers this account has seen; `update` asks the one named to
- * reload now; `dismiss` puts the notice away until the next update; `forget` drops a server.
+ * reload now; `reconnect` (Reconnect in Lumiverse) asks the Lumiverse-run one named to leave, so
+ * Lumiverse's client connects it again and lists this build's tools; `dismiss` puts the notice away
+ * until the next update; `forget` drops a server.
  */
-export type AgentsRequest = Request<"lre.agents"> & ({ op: "get" | "kit" | "dismiss" } | { op: "update" | "forget"; client: string });
+export type AgentsRequest = Request<"lre.agents"> & ({ op: "get" | "kit" | "dismiss" } | { op: "update" | "reconnect" | "forget"; client: string });
 
 export type FrontendToBackend =
   | HelloRequest
@@ -794,4 +796,13 @@ export interface KitReload extends Envelope<"lre.kit.reload"> {
   client: string;
 }
 
-export type BackendToFrontend = StateSnapshot | StateDelta | ResultMessage | ErrorMessage | JobUpdate | DraftChanged | ActivityPush | MindsRunUpdate | GeneratePush | AgentsChanged | KitReload;
+/**
+ * Reconnect in Lumiverse (DESIGN §23): asks the processes of the Lumiverse-run server `client`
+ * whose client holds another build's tools to answer the calls in flight and exit, so Lumiverse's
+ * client connects again and lists the tools anew. Sent to those processes' sessions alone.
+ */
+export interface KitReconnect extends Envelope<"lre.kit.reconnect"> {
+  client: string;
+}
+
+export type BackendToFrontend = StateSnapshot | StateDelta | ResultMessage | ErrorMessage | JobUpdate | DraftChanged | ActivityPush | MindsRunUpdate | GeneratePush | AgentsChanged | KitReload | KitReconnect;

@@ -56780,7 +56780,7 @@ function hostBound(host, limit) {
     return host.noneMs ?? host.maxMs;
   return Math.min(host.maxMs, Math.max(host.minMs ?? 0, limit));
 }
-var TIMEOUT_KEYS = ["engineRunMs", "preLookupMs", "postReplyMs", "postLookupMs", "guardMs", "requestMs", "caveatsMs", "mindsRunMs", "jobCallMs", "tokenCountMs", "laneStartupMs", "laneHeartbeatMs"];
+var TIMEOUT_KEYS = ["engineRunMs", "preLookupMs", "postReplyMs", "postLookupMs", "guardMs", "requestMs", "caveatsMs", "mindsRunMs", "jobCallMs", "tokenCountMs", "laneStartupMs", "laneHeartbeatMs", "mcpReconnectMs"];
 var MIN = 60000;
 var TIMEOUTS = {
   engineRunMs: {
@@ -56850,6 +56850,15 @@ var TIMEOUTS = {
     minMs: 0,
     zero: "always answer at once",
     none: "wait for the check (Engine requests still bounds the tab's wait)"
+  },
+  mcpReconnectMs: {
+    label: "MCP server reconnect",
+    group: "work",
+    limits: "How long Reconnect in Lumiverse waits for a server Lumiverse runs to come back with this build's tools, after it is asked to exit.",
+    fires: "The server's line says it isn't back, with how to disconnect and connect it in Lumiverse's Settings \u2192 MCP Servers.",
+    defaultMs: MIN,
+    minMs: 1000,
+    none: "the line waits until the server is back"
   },
   mindsRunMs: {
     label: "Minds run on demand",
@@ -66289,6 +66298,12 @@ class LedgerFold {
 var KIT_API = 1;
 var KIT_FILE = "agent-kit.js";
 var CORE_FILE = "lumirpengine.js";
+var LUMIVERSE_HARNESS = "lumiverse";
+var MCP_PERMISSION = "mcp_servers";
+var KIT_MARKS = ["lre_guide", "lre_status"];
+function toolsFingerprint(tools) {
+  return hashJson(tools.map((t) => ({ name: t.name, description: t.description, input_schema: t.input_schema })));
+}
 function pathOfFileUrl(url) {
   let parsed;
   let path;
@@ -66319,19 +66334,38 @@ function followCommands(core) {
   return RUNTIMES.map(({ runtime, needs }) => ({ runtime, needs, command: `${runtime} ${shellWord(core)} mcp` }));
 }
 
+// src/backend/lumiverse-mcp.ts
+function holdsBuild(tools, fingerprints) {
+  return fingerprints.includes(toolsFingerprint(tools));
+}
+async function lreProfiles(mcp, userId, fingerprints) {
+  const profiles = await mcp.stdioProfiles(userId);
+  const statuses = await Promise.all(profiles.map((p) => mcp.status(p.id, userId)));
+  const out = [];
+  profiles.forEach((p, i) => {
+    const s = statuses[i];
+    if (s === undefined || !s.connected || !KIT_MARKS.every((mark) => s.tools.some((t) => t.name === mark)))
+      return;
+    out.push({ id: p.id, name: p.name, current: holdsBuild(s.tools, fingerprints) });
+  });
+  return out;
+}
+
 // src/backend/agents.ts
 function thisBuild(moduleUrl = import.meta.url) {
   const dir = moduleUrl.replace(/[^/]*$/, "");
   const path = pathOfFileUrl(`${dir}${KIT_FILE}`);
   const core = pathOfFileUrl(`${dir}${CORE_FILE}`);
-  const sha256 = "eea961a09ecc64c17809beb74558a06902d3143f09f1793a3ac5214df3f9667a";
-  return { id: "e78b89ac", kit: sha256 !== undefined && path !== null && core !== null ? { path, core, sha256, api: KIT_API } : null };
+  const sha256 = "efbcf5078f60ab42584d29e031af63da56ea4ba7ecd9c41e1db5e78f5d86c411";
+  const tools = ["2598d62d66f2e9fcd20b607cd74f20b0", "281be0c0999ff26faa819913005dd553"].filter((f) => f !== undefined);
+  return { id: "c61c17bb", kit: sha256 !== undefined && path !== null && core !== null ? { path, core, sha256, api: KIT_API } : null, tools };
 }
 var BUILD_FILE = "agents/build.json";
 var USER_FILE = "agents.json";
 var CLIENTS_KEPT = 32;
 var SESSIONS_KEPT = 256;
 var LIVE_MS = 120000;
+var RECONNECT_POLL_MS = 1000;
 var RANK3 = { old: 0, cannot: 1, behind: 2, updated: 3 };
 var FOLLOW_CODES = { pinned: true, runtime: true, unsupported: true, no_kit: true, kit_api: true, refused: true, unsafe: true, elsewhere: true, unreadable: true, mismatch: true, broken: true };
 var errorText = (error) => error instanceof Error ? error.message : String(error);
@@ -66344,7 +66378,7 @@ function checkInOf(client, seen) {
   const text = (value, max) => typeof value === "string" && shown3(value, max) !== "" ? shown3(value, max) : null;
   const follows = client.follows === true;
   const why = !follows && isRecord(client.why) && typeof client.why.text === "string" ? { code: typeof client.why.code === "string" && hasOwn(FOLLOW_CODES, client.why.code) ? client.why.code : "other", text: shown3(client.why.text, 400) } : null;
-  return { name: shown3(client.name, 80), version: shown3(client.version, 40), host: text(client.host, 80), harness: text(client.harness, 80), core: text(client.core, 40), kit: text(client.kit, 40), follows, why, seen };
+  return { name: shown3(client.name, 80), version: shown3(client.version, 40), host: text(client.host, 80), harness: text(client.harness, 80), core: text(client.core, 40), kit: text(client.kit, 40), follows, why, seen, ...hasOwn(client, "listed") ? { listed: text(client.listed, 40) } : {} };
 }
 function idOf(client) {
   if (client.kit === null)
@@ -66359,6 +66393,9 @@ function stateOf(client, build) {
     return "old";
   return client.follows ? "behind" : "cannot";
 }
+function isStale(client) {
+  return client.harness === LUMIVERSE_HARNESS && typeof client.listed === "string" && client.listed !== client.kit;
+}
 function worstOf(heard, build) {
   let worst = null;
   for (const h of heard) {
@@ -66372,16 +66409,19 @@ function worstOf(heard, build) {
 class Agents {
   host;
   build;
+  reconnectWait;
   now;
   users = new Map;
   writes = new Map;
   working = new Set;
   sessions = new Map;
   restored = new Map;
+  reconnecting = new Map;
   started;
-  constructor(host, build, now = Date.now) {
+  constructor(host, build, reconnectWait, now = Date.now) {
     this.host = host;
     this.build = build;
+    this.reconnectWait = reconnectWait;
     this.now = now;
     this.started = Promise.resolve({ build: build.id, previous: null, at: 0 });
   }
@@ -66391,12 +66431,15 @@ class Agents {
       if (userId === null)
         return;
       const key = `${userId}\x00${e.frontendSessionId}`;
-      const heard = this.sessions.delete(key);
-      if (!this.restored.delete(key) && !heard)
+      const heard = this.sessions.get(key);
+      this.sessions.delete(key);
+      if (!this.restored.delete(key) && heard === undefined)
         return;
       this.track(this.change(userId, () => {
         return;
       }), "the MCP servers' view wasn't sent");
+      if (heard !== undefined && this.reconnecting.has(`${userId}\x00${heard.id}`))
+        this.track(this.confirm(userId, heard.id), "Reconnect in Lumiverse wasn't checked");
     });
   }
   async settle() {
@@ -66451,6 +66494,8 @@ class Agents {
       file.clients[id] = checkIn;
       file.clients = Object.fromEntries(Object.entries(file.clients).sort(([, a], [, b]) => b.seen - a.seen).slice(0, CLIENTS_KEPT));
     }), "an MCP server's check-in wasn't kept");
+    if (this.reconnecting.has(`${userId}\x00${id}`))
+      this.track(this.confirm(userId, id), "Reconnect in Lumiverse wasn't checked");
     return { ...answer, client: id };
   }
   page(userId, session) {
@@ -66463,12 +66508,14 @@ class Agents {
     const file = await this.file(userId);
     if (file.dismissed === started.build)
       return;
-    this.host.frontend.send({ lre: PROTOCOL_VERSION, type: "lre.agents.changed", view: this.viewOf(userId, file, started) }, userId, session);
-    if (file.toasted === started.build)
-      return;
-    file.toasted = started.build;
-    this.save(userId, file);
-    this.host.toast(Object.keys(file.clients).length > 0 ? `Updated to build ${started.build}. The drawer says how each of your MCP servers took it.` : `Updated to build ${started.build}.`, userId);
+    const toast = file.toasted !== started.build;
+    if (toast) {
+      file.toasted = started.build;
+      this.save(userId, file);
+    }
+    this.host.frontend.send({ lre: PROTOCOL_VERSION, type: "lre.agents.changed", view: await this.viewOf(userId, file, started) }, userId, session);
+    if (toast)
+      this.host.toast(Object.keys(file.clients).length > 0 ? `Updated to build ${started.build}. The drawer says how each of your MCP servers took it.` : `Updated to build ${started.build}.`, userId);
   }
   async request(r, userId, session) {
     if (r.op === "kit") {
@@ -66486,6 +66533,9 @@ class Agents {
     if (r.op === "update") {
       if (typeof r.client === "string")
         this.host.frontend.send({ lre: PROTOCOL_VERSION, type: "lre.kit.reload", client: r.client }, userId);
+    } else if (r.op === "reconnect") {
+      if (typeof r.client === "string")
+        await this.reconnect(userId, r.client);
     } else if (r.op === "dismiss") {
       const { build } = await this.started;
       await this.change(userId, (file) => {
@@ -66499,18 +66549,106 @@ class Agents {
     }
     return { view: await this.view(userId) };
   }
+  async reconnect(userId, id) {
+    const prefix = `${userId}\x00`;
+    const asked = new Set;
+    const before = new Set;
+    for (const [key, heard] of this.sessions) {
+      if (!key.startsWith(prefix) || heard.id !== id)
+        continue;
+      before.add(key.slice(prefix.length));
+      if (isStale(heard.client))
+        asked.add(key.slice(prefix.length));
+    }
+    if (asked.size === 0)
+      return;
+    let profiles = null;
+    if (this.host.mcp.granted()) {
+      try {
+        profiles = (await lreProfiles(this.host.mcp, userId, this.build.tools)).filter((p) => !p.current).map((p) => p.id);
+      } catch (error) {
+        this.host.log("warn", `[LumiRPEngine] Lumiverse's MCP server profiles couldn't be read (${errorText(error)}); Reconnect in Lumiverse checks only the server's own processes`, userId);
+      }
+    }
+    const key = `${prefix}${id}`;
+    this.stop(key);
+    const r = { asked, before, profiles: profiles !== null && profiles.length > 0 ? profiles : null, at: this.now(), wait: await this.reconnectWait(userId), late: false, timers: [] };
+    this.reconnecting.set(key, r);
+    for (const session of asked)
+      this.host.frontend.send({ lre: PROTOCOL_VERSION, type: "lre.kit.reconnect", client: id }, userId, session);
+    const ms = timerMs(r.wait);
+    if (ms !== null)
+      r.timers.push(setTimeout(() => this.track(this.confirm(userId, id), "Reconnect in Lumiverse wasn't checked"), ms));
+    if (r.profiles !== null)
+      r.timers.push(setInterval(() => this.track(this.confirm(userId, id), "Reconnect in Lumiverse wasn't checked"), RECONNECT_POLL_MS));
+  }
+  async confirm(userId, id) {
+    const key = `${userId}\x00${id}`;
+    const r = this.reconnecting.get(key);
+    if (r === undefined)
+      return;
+    const back = await this.isBack(userId, id, r);
+    if (this.reconnecting.get(key) !== r)
+      return;
+    if (back) {
+      this.stop(key);
+      await this.tell(userId);
+    } else if (!r.late && this.overdue(r)) {
+      r.late = true;
+      for (const timer of r.timers)
+        clearTimeout(timer);
+      await this.tell(userId);
+    }
+  }
+  async isBack(userId, id, r) {
+    if (r.profiles !== null) {
+      try {
+        const statuses = await Promise.all(r.profiles.map((p) => this.host.mcp.status(p, userId)));
+        return statuses.every((s) => s.connected && holdsBuild(s.tools, this.build.tools));
+      } catch (error) {
+        this.host.log("debug", `[LumiRPEngine] Reconnect in Lumiverse: Spindle couldn't say whether Lumiverse has this build's tools (${errorText(error)})`, userId);
+        return false;
+      }
+    }
+    const prefix = `${userId}\x00`;
+    let returned = 0;
+    for (const [key, heard] of this.sessions) {
+      if (!key.startsWith(prefix) || heard.id !== id)
+        continue;
+      const session = key.slice(prefix.length);
+      if (r.asked.has(session))
+        return false;
+      if (!r.before.has(session) && heard.client.listed === this.build.id && heard.client.kit === this.build.id)
+        returned++;
+    }
+    return returned >= r.asked.size;
+  }
+  overdue(r) {
+    return r.late || r.wait !== "none" && this.now() - r.at >= r.wait;
+  }
+  stop(key) {
+    const r = this.reconnecting.get(key);
+    if (r === undefined)
+      return;
+    for (const timer of r.timers)
+      clearTimeout(timer);
+    this.reconnecting.delete(key);
+  }
   async view(userId) {
     return this.viewOf(userId, await this.file(userId), await this.started);
   }
-  viewOf(userId, file, started) {
+  async viewOf(userId, file, started) {
     const prefix = `${userId}\x00`;
     const now = this.now();
     const connected = new Set;
     const live = new Map;
+    const stale = new Map;
     for (const [key, heard] of this.sessions) {
       if (!key.startsWith(prefix))
         continue;
       connected.add(heard.id);
+      if (isStale(heard.client))
+        stale.set(heard.id, (stale.get(heard.id) ?? 0) + 1);
       if (now - heard.seen > LIVE_MS)
         continue;
       const same = live.get(heard.id);
@@ -66530,16 +66668,30 @@ class Agents {
     }
     const build = this.build.id;
     const kit = this.build.kit;
+    const profiles = Object.values(file.clients).some((c) => c.harness === LUMIVERSE_HARNESS) ? await this.profilesOf(userId) : null;
     return {
       build,
       notice: started.previous !== null && file.dismissed !== started.build ? { build: started.build, previous: started.previous, at: started.at } : null,
       setup: kit === null ? null : { core: kit.core, commands: followCommands(kit.core) },
       clients: Object.entries(file.clients).sort(([, a], [, b]) => b.seen - a.seen).map(([id, stored]) => {
         const heard = live.get(id) ?? [];
-        const client = worstOf(heard, build)?.client ?? stored;
-        return { id, ...client, seen: stored.seen, connected: connected.has(id), processes: heard.length, state: stateOf(client, build) };
+        const { listed: _listed, ...client } = worstOf(heard, build)?.client ?? stored;
+        const r = this.reconnecting.get(`${prefix}${id}`);
+        const reconnect = r === undefined ? null : { state: this.overdue(r) ? "late" : "waiting", waitMs: r.wait === "none" ? null : r.wait, through: r.profiles !== null ? "lumiverse" : "server" };
+        const lumiverse = client.harness === LUMIVERSE_HARNESS ? { stale: stale.get(id) ?? 0, unknown: heard.filter((h) => h.client.listed === undefined).length, profiles, reconnect } : null;
+        return { id, ...client, seen: stored.seen, connected: connected.has(id), processes: heard.length, state: stateOf(client, build), lumiverse };
       })
     };
+  }
+  async profilesOf(userId) {
+    if (!this.host.mcp.granted())
+      return null;
+    try {
+      return (await lreProfiles(this.host.mcp, userId, this.build.tools)).map((p) => ({ name: p.name, current: p.current }));
+    } catch (error) {
+      this.host.log("warn", `[LumiRPEngine] Lumiverse's MCP server profiles couldn't be read (${errorText(error)}); the MCP servers' lines say only what the servers do`, userId);
+      return null;
+    }
   }
   async tell(userId) {
     this.host.frontend.send({ lre: PROTOCOL_VERSION, type: "lre.agents.changed", view: await this.view(userId) }, userId);
@@ -69275,10 +69427,10 @@ class Runtime {
     this.steps.onCallStart = (userId, purpose) => this.diag.callStart(userId, purpose);
     this.toolSupport = new ToolSupport(this.host);
     this.minds = { host: this.host, registry: this.registry, steps: this.steps, settings: this.settings, presets: this.presets };
-    this.ledger = new LedgerService(this.host, (chatId, userId) => this.resolveEnv(chatId, userId), new LedgerFold(this.registry, { fingerprint: "e78b89ac" }), (chatId) => messages.forget(chatId));
+    this.ledger = new LedgerService(this.host, (chatId, userId) => this.resolveEnv(chatId, userId), new LedgerFold(this.registry, { fingerprint: "c61c17bb" }), (chatId) => messages.forget(chatId));
     this.studio = new StudioBridge(this.host, this.worlds);
     this.worlds.onChange = (worldId, userId) => this.studio.worldChanged(worldId, userId);
-    this.agents = new Agents(this.host, options.build ?? thisBuild());
+    this.agents = new Agents(this.host, options.build ?? thisBuild(), async (userId) => (await this.settings.get(userId)).timeouts.mcpReconnectMs);
     this.push = new StatePush(this.host, async (chatId, userId) => {
       const view = await this.diag.timed(userId, chatId, "state view", () => this.view(chatId, userId));
       this.studio.seen(userId, view);
@@ -72695,6 +72847,25 @@ function createSpindleHost() {
       async active(userId) {
         const c = (await spindle.connections.list(userId)).find((x) => x.is_default);
         return c ? { id: c.id, name: c.name } : null;
+      }
+    },
+    mcp: {
+      granted: () => spindle.permissions.has(MCP_PERMISSION),
+      async stdioProfiles(userId) {
+        const out = [];
+        for (let offset = 0;; ) {
+          const page = await spindle.mcp.servers.list({ limit: 100, offset, userId });
+          for (const p of page.data)
+            if (p.transport_type === "stdio")
+              out.push({ id: p.id, name: p.name });
+          offset += page.data.length;
+          if (page.data.length === 0 || offset >= page.total)
+            return out;
+        }
+      },
+      async status(profileId, userId) {
+        const s = await spindle.mcp.servers.status(profileId, userId);
+        return { connected: s.connected, tools: s.tools.map((t) => ({ name: t.name, description: t.description, input_schema: t.input_schema })) };
       }
     },
     regex: {

@@ -657,7 +657,7 @@ export class Runtime implements TurnHooks {
     this.ledger = new LedgerService(this.host, (chatId, userId) => this.resolveEnv(chatId, userId), new LedgerFold(this.registry, { fingerprint: process.env.LRE_BUILD_ID ?? "dev" }), (chatId) => messages.forget(chatId));
     this.studio = new StudioBridge(this.host, this.worlds);
     this.worlds.onChange = (worldId, userId) => this.studio.worldChanged(worldId, userId);
-    this.agents = new Agents(this.host, options.build ?? thisBuild());
+    this.agents = new Agents(this.host, options.build ?? thisBuild(), async (userId) => (await this.settings.get(userId)).timeouts.mcpReconnectMs);
     // Every view pushed to a chat also refreshes the summary the Studio reads of it.
     this.push = new StatePush(this.host, async (chatId, userId) => {
       // A view slower than a second is kept in the chat's diagnostics (a slow tab says where it went).

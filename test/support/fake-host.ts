@@ -8,6 +8,7 @@
 // Event delivery: every host step queues its events; `settle()` delivers them in order and waits
 // for the handlers' work. Handlers always read the host's current state, as on the real host.
 
+import type { ListedTool } from "../../src/shared/agents";
 import type { JsonObject, JsonValue } from "../../src/shared/json";
 import type { ChatId, MessageId, UserId } from "../../src/shared/ids";
 import type { BackendToFrontend, GenerateAs } from "../../src/shared/protocol";
@@ -243,6 +244,27 @@ export class FakeHost implements HostPort {
 
   connections: HostPort["connections"] = {
     active: async () => this.activeConnection,
+  };
+
+  /** `mcp_servers`, granted or not; Lumiverse's MCP server profiles, each with what its client holds; and each Spindle read, in order. */
+  mcpGranted = false;
+  readonly mcpProfiles: { id: string; name: string; transport: "stdio" | "streamable_http" | "sse"; connected: boolean; tools: ListedTool[] }[] = [];
+  readonly mcpReads: string[] = [];
+
+  mcp: HostPort["mcp"] = {
+    granted: () => this.mcpGranted,
+    stdioProfiles: async () => {
+      if (!this.mcpGranted) throw new Error("Permission denied: mcp_servers — MCP server permission not granted");
+      this.mcpReads.push("list");
+      return this.mcpProfiles.filter((p) => p.transport === "stdio").map((p) => ({ id: p.id, name: p.name }));
+    },
+    status: async (profileId) => {
+      if (!this.mcpGranted) throw new Error("Permission denied: mcp_servers — MCP server permission not granted");
+      this.mcpReads.push(`status ${profileId}`);
+      const p = this.mcpProfiles.find((x) => x.id === profileId);
+      if (p === undefined) throw new Error("MCP server not found");
+      return { connected: p.connected, tools: p.connected ? structuredClone(p.tools) : [] };
+    },
   };
 
   /** The user's regex scripts: the engine's own, and any a test plants (`mine: false` for one the engine may not change). */

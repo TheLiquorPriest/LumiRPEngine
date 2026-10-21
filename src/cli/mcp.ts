@@ -28,6 +28,8 @@ export interface ToolHost {
   ready(): Promise<void>;
   /** The client's `initialize`: the harness that runs this server (its clientInfo.name), or null when it gave none. */
   initialized?(harness: string | null): void;
+  /** The client was answered a `tools/list` with this kit build's tools: a client that never lists again (Lumiverse's) keeps them. */
+  listed?(build: string): void;
   readonly context: KitContext;
 }
 
@@ -77,8 +79,12 @@ export class McpServer {
         }
         case "ping":
           return reply({});
-        case "tools/list":
-          return reply({ tools: this.host.kit().tools(this.host.readOnly).map((t): JsonObject => ({ name: t.name, description: t.description, inputSchema: t.inputSchema, annotations: t.annotations })) });
+        case "tools/list": {
+          const kit = this.host.kit();
+          const tools = kit.tools(this.host.readOnly).map((t): JsonObject => ({ name: t.name, description: t.description, inputSchema: t.inputSchema, annotations: t.annotations }));
+          this.host.listed?.(kit.build);
+          return reply({ tools });
+        }
         case "tools/call": {
           if (typeof params.name !== "string") return fail(id, -32602, "Invalid params: tools/call needs the tool's name");
           await this.host.ready();

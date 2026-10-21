@@ -7,16 +7,21 @@
 // update is one) still counts each until it says hello again, closes or goes quiet. The build the
 // extension last started as is kept in extension storage, so starting as another one is an update:
 // each user's next page hello gets a notice for the top of the drawer, shown until dismissed, and a
-// toast once.
+// toast once. A server Lumiverse runs itself keeps the tool list Lumiverse's client got when it
+// connected: Reconnect in Lumiverse asks its processes holding an old list to exit, so Lumiverse
+// connects them again, and waits for them back (G13).
 
-import type { AgentClientView, AgentState, AgentsView, FollowCode, KitReport } from "../shared/agents";
-import { CORE_FILE, followCommands, KIT_API, KIT_FILE, pathOfFileUrl } from "../shared/agents";
+import type { AgentClientView, AgentState, AgentsView, FollowCode, KitReport, LumiverseProfileView, ReconnectView } from "../shared/agents";
+import { CORE_FILE, followCommands, KIT_API, KIT_FILE, LUMIVERSE_HARNESS, pathOfFileUrl } from "../shared/agents";
 import { hashParts } from "../shared/hash";
 import type { UserId } from "../shared/ids";
 import { hasOwn, isRecord } from "../shared/json";
+import type { Limit } from "../shared/minds";
 import type { AgentsRequest, ResultBodies } from "../shared/protocol";
 import { PROTOCOL_VERSION } from "../shared/protocol";
+import { timerMs } from "../shared/timeouts";
 import type { HostPort } from "./host";
+import { holdsBuild, lreProfiles } from "./lumiverse-mcp";
 import { readStoredJson } from "./stored-json";
 
 export interface BuildInfo {
@@ -24,6 +29,8 @@ export interface BuildInfo {
   id: string;
   /** Where this build's agent kit is; null when it has none (run from source, as the tests are). */
   kit: KitReport | null;
+  /** The fingerprints of its kit's two tool lists (read-only and full), which `bun run build` defines; none when run from source. */
+  tools: string[];
 }
 
 /**
@@ -36,7 +43,8 @@ export function thisBuild(moduleUrl = import.meta.url): BuildInfo {
   const path = pathOfFileUrl(`${dir}${KIT_FILE}`);
   const core = pathOfFileUrl(`${dir}${CORE_FILE}`);
   const sha256 = process.env.LRE_KIT_SHA256;
-  return { id: process.env.LRE_BUILD_ID ?? "dev", kit: sha256 !== undefined && path !== null && core !== null ? { path, core, sha256, api: KIT_API } : null };
+  const tools = [process.env.LRE_TOOLS_FULL, process.env.LRE_TOOLS_READ_ONLY].filter((f): f is string => f !== undefined);
+  return { id: process.env.LRE_BUILD_ID ?? "dev", kit: sha256 !== undefined && path !== null && core !== null ? { path, core, sha256, api: KIT_API } : null, tools };
 }
 
 /** The build the extension last started as, in extension storage. */
@@ -49,6 +57,8 @@ const CLIENTS_KEPT = 32;
 const SESSIONS_KEPT = 256;
 /** How long a process counts toward its server's line after it last checked in or looked: two of its minute's looks. */
 const LIVE_MS = 120_000;
+/** How often a Reconnect in Lumiverse asks Spindle again whether Lumiverse's client has this build's tools: it lists them just after the server checks in. */
+const RECONNECT_POLL_MS = 1_000;
 
 /** A server's states, worst first: its line is its worst process's. One from before check-ins is a line of its own, never mixed with these. */
 const RANK: Record<AgentState, number> = { old: 0, cannot: 1, behind: 2, updated: 3 };
@@ -70,6 +80,23 @@ interface StoredClient {
   follows: boolean;
   why: { code: FollowCode | "other"; text: string } | null;
   seen: number;
+  /** The build whose tools its client last listed (null: not yet); absent from a core from before Reconnect in Lumiverse. */
+  listed?: string | null;
+}
+
+/** Reconnect in Lumiverse under way for one server (DESIGN §23, G13). */
+interface Reconnecting {
+  /** The sessions of its processes asked to exit. */
+  asked: Set<string>;
+  /** Its sessions when they were asked: a process back from Lumiverse is a session not among them. */
+  before: Set<string>;
+  /** Lumiverse's profiles of it that held another build's tools then, checked through Spindle; null without `mcp_servers`, or with none found. */
+  profiles: string[] | null;
+  at: number;
+  /** Settings → Timeouts → MCP server reconnect. */
+  wait: Limit;
+  late: boolean;
+  timers: Timer[];
 }
 
 /** One server process, as its own session last told the extension (this run, or the one before a restart). */
@@ -108,7 +135,7 @@ function checkInOf(client: unknown, seen: number): StoredClient | null {
   const text = (value: unknown, max: number): string | null => (typeof value === "string" && shown(value, max) !== "" ? shown(value, max) : null);
   const follows = client.follows === true;
   const why = !follows && isRecord(client.why) && typeof client.why.text === "string" ? { code: typeof client.why.code === "string" && hasOwn(FOLLOW_CODES, client.why.code) ? (client.why.code as FollowCode) : ("other" as const), text: shown(client.why.text, 400) } : null;
-  return { name: shown(client.name, 80), version: shown(client.version, 40), host: text(client.host, 80), harness: text(client.harness, 80), core: text(client.core, 40), kit: text(client.kit, 40), follows, why, seen };
+  return { name: shown(client.name, 80), version: shown(client.version, 40), host: text(client.host, 80), harness: text(client.harness, 80), core: text(client.core, 40), kit: text(client.kit, 40), follows, why, seen, ...(hasOwn(client, "listed") ? { listed: text(client.listed, 40) } : {}) };
 }
 
 /**
@@ -128,6 +155,11 @@ function stateOf(client: StoredClient, build: string): AgentState {
   if (client.kit === build) return "updated";
   if (client.kit === null) return "old";
   return client.follows ? "behind" : "cannot";
+}
+
+/** A process whose Lumiverse client holds another build's tools than it serves, and which exits when asked so Lumiverse connects it again. */
+function isStale(client: StoredClient): boolean {
+  return client.harness === LUMIVERSE_HARNESS && typeof client.listed === "string" && client.listed !== client.kit;
 }
 
 /** Of a server's processes, the one furthest behind this build (the latest check-in of any level with it); null for none. */
@@ -155,11 +187,15 @@ export class Agents {
    * says hello again (and is heard in `sessions`), closes, or goes unheard for LIVE_MS.
    */
   private readonly restored = new Map<string, Heard>();
+  /** Reconnect in Lumiverse under way, by `user \0 server`. */
+  private readonly reconnecting = new Map<string, Reconnecting>();
   private started: Promise<StartedAs>;
 
   constructor(
     private readonly host: HostPort,
     readonly build: BuildInfo,
+    /** The user's Settings → Timeouts → MCP server reconnect. */
+    private readonly reconnectWait: (userId: UserId) => Promise<Limit>,
     private readonly now: () => number = Date.now,
   ) {
     this.started = Promise.resolve({ build: build.id, previous: null, at: 0 });
@@ -171,12 +207,15 @@ export class Agents {
       if (userId === null) return;
       // A closed session's process is gone: it no longer counts toward its server's line, and Settings → MCP server says which servers are connected.
       const key = `${userId}\u0000${e.frontendSessionId}`;
-      const heard = this.sessions.delete(key);
-      if (!this.restored.delete(key) && !heard) return;
+      const heard = this.sessions.get(key);
+      this.sessions.delete(key);
+      if (!this.restored.delete(key) && heard === undefined) return;
       this.track(
         this.change(userId, () => undefined),
         "the MCP servers' view wasn't sent",
       );
+      // A process asked to exit has: Lumiverse connects it again.
+      if (heard !== undefined && this.reconnecting.has(`${userId}\u0000${heard.id}`)) this.track(this.confirm(userId, heard.id), "Reconnect in Lumiverse wasn't checked");
     });
   }
 
@@ -244,6 +283,8 @@ export class Agents {
       }),
       "an MCP server's check-in wasn't kept",
     );
+    // A process back from Lumiverse checks in at once, and again once its client has listed its tools.
+    if (this.reconnecting.has(`${userId}\u0000${id}`)) this.track(this.confirm(userId, id), "Reconnect in Lumiverse wasn't checked");
     return { ...answer, client: id };
   }
 
@@ -257,12 +298,14 @@ export class Agents {
     if (started.previous === null) return;
     const file = await this.file(userId);
     if (file.dismissed === started.build) return;
-    this.host.frontend.send({ lre: PROTOCOL_VERSION, type: "lre.agents.changed", view: this.viewOf(userId, file, started) }, userId, session);
-    if (file.toasted === started.build) return;
-    // Marked before the write, so a second page saying hello meanwhile doesn't toast again.
-    file.toasted = started.build;
-    this.save(userId, file);
-    this.host.toast(Object.keys(file.clients).length > 0 ? `Updated to build ${started.build}. The drawer says how each of your MCP servers took it.` : `Updated to build ${started.build}.`, userId);
+    const toast = file.toasted !== started.build;
+    if (toast) {
+      // Marked before the view is read (it may ask Spindle), so a second page saying hello meanwhile doesn't toast again.
+      file.toasted = started.build;
+      this.save(userId, file);
+    }
+    this.host.frontend.send({ lre: PROTOCOL_VERSION, type: "lre.agents.changed", view: await this.viewOf(userId, file, started) }, userId, session);
+    if (toast) this.host.toast(Object.keys(file.clients).length > 0 ? `Updated to build ${started.build}. The drawer says how each of your MCP servers took it.` : `Updated to build ${started.build}.`, userId);
   }
 
   async request(r: AgentsRequest, userId: UserId, session: string | undefined): Promise<ResultBodies["lre.agents"]> {
@@ -284,6 +327,8 @@ export class Agents {
     if (r.op === "update") {
       // To every session of the user, not the ones on record: after a restart the extension hasn't heard from a server again until its next check.
       if (typeof r.client === "string") this.host.frontend.send({ lre: PROTOCOL_VERSION, type: "lre.kit.reload", client: r.client }, userId);
+    } else if (r.op === "reconnect") {
+      if (typeof r.client === "string") await this.reconnect(userId, r.client);
     } else if (r.op === "dismiss") {
       const { build } = await this.started;
       await this.change(userId, (file) => {
@@ -297,19 +342,112 @@ export class Agents {
     return { view: await this.view(userId) };
   }
 
+  /**
+   * Reconnect in Lumiverse (DESIGN §23, G13), on the user's press alone: Spindle can't reconnect a
+   * profile, but Lumiverse's client connects a stdio server again about a second after it exits. So
+   * the line's processes whose Lumiverse client holds another build's tools are asked, each on its
+   * own session, to exit once their calls are answered (the core checks again, and only a
+   * Lumiverse-run one does). Back is: with `mcp_servers`, each profile that held an old list holding
+   * this build's, by Spindle; without it, each process gone and as many new ones having listed this
+   * build's tools. Not back within the user's wait, the line says so.
+   */
+  private async reconnect(userId: UserId, id: string): Promise<void> {
+    const prefix = `${userId}\u0000`;
+    const asked = new Set<string>();
+    const before = new Set<string>();
+    for (const [key, heard] of this.sessions) {
+      if (!key.startsWith(prefix) || heard.id !== id) continue;
+      before.add(key.slice(prefix.length));
+      if (isStale(heard.client)) asked.add(key.slice(prefix.length));
+    }
+    // None holds an old list now (it is back, or its processes went): the view says how it stands.
+    if (asked.size === 0) return;
+    let profiles: string[] | null = null;
+    if (this.host.mcp.granted()) {
+      try {
+        profiles = (await lreProfiles(this.host.mcp, userId, this.build.tools)).filter((p) => !p.current).map((p) => p.id);
+      } catch (error) {
+        this.host.log("warn", `[LumiRPEngine] Lumiverse's MCP server profiles couldn't be read (${errorText(error)}); Reconnect in Lumiverse checks only the server's own processes`, userId);
+      }
+    }
+    const key = `${prefix}${id}`;
+    this.stop(key);
+    const r: Reconnecting = { asked, before, profiles: profiles !== null && profiles.length > 0 ? profiles : null, at: this.now(), wait: await this.reconnectWait(userId), late: false, timers: [] };
+    this.reconnecting.set(key, r);
+    for (const session of asked) this.host.frontend.send({ lre: PROTOCOL_VERSION, type: "lre.kit.reconnect", client: id }, userId, session);
+    const ms = timerMs(r.wait);
+    if (ms !== null) r.timers.push(setTimeout(() => this.track(this.confirm(userId, id), "Reconnect in Lumiverse wasn't checked"), ms));
+    // Lumiverse's list changes with no word to the extension: it is asked again until it is this build's.
+    if (r.profiles !== null) r.timers.push(setInterval(() => this.track(this.confirm(userId, id), "Reconnect in Lumiverse wasn't checked"), RECONNECT_POLL_MS));
+  }
+
+  /** Whether a Reconnect in Lumiverse is back; once it is, the line no longer waits; past its wait, the line says it isn't. */
+  private async confirm(userId: UserId, id: string): Promise<void> {
+    const key = `${userId}\u0000${id}`;
+    const r = this.reconnecting.get(key);
+    if (r === undefined) return;
+    const back = await this.isBack(userId, id, r);
+    // Pressed again meanwhile: that one is checked on its own.
+    if (this.reconnecting.get(key) !== r) return;
+    if (back) {
+      this.stop(key);
+      await this.tell(userId);
+    } else if (!r.late && this.overdue(r)) {
+      r.late = true;
+      for (const timer of r.timers) clearTimeout(timer);
+      await this.tell(userId);
+    }
+  }
+
+  private async isBack(userId: UserId, id: string, r: Reconnecting): Promise<boolean> {
+    if (r.profiles !== null) {
+      try {
+        const statuses = await Promise.all(r.profiles.map((p) => this.host.mcp.status(p, userId)));
+        return statuses.every((s) => s.connected && holdsBuild(s.tools, this.build.tools));
+      } catch (error) {
+        // A profile mid-reconnect, gone, or the permission taken back: not back yet, and the wait still runs.
+        this.host.log("debug", `[LumiRPEngine] Reconnect in Lumiverse: Spindle couldn't say whether Lumiverse has this build's tools (${errorText(error)})`, userId);
+        return false;
+      }
+    }
+    const prefix = `${userId}\u0000`;
+    let returned = 0;
+    for (const [key, heard] of this.sessions) {
+      if (!key.startsWith(prefix) || heard.id !== id) continue;
+      const session = key.slice(prefix.length);
+      if (r.asked.has(session)) return false;
+      if (!r.before.has(session) && heard.client.listed === this.build.id && heard.client.kit === this.build.id) returned++;
+    }
+    return returned >= r.asked.size;
+  }
+
+  private overdue(r: Reconnecting): boolean {
+    return r.late || (r.wait !== "none" && this.now() - r.at >= r.wait);
+  }
+
+  private stop(key: string): void {
+    const r = this.reconnecting.get(key);
+    if (r === undefined) return;
+    for (const timer of r.timers) clearTimeout(timer);
+    this.reconnecting.delete(key);
+  }
+
   private async view(userId: UserId): Promise<AgentsView> {
     return this.viewOf(userId, await this.file(userId), await this.started);
   }
 
-  private viewOf(userId: UserId, file: UserAgents, started: StartedAs): AgentsView {
+  private async viewOf(userId: UserId, file: UserAgents, started: StartedAs): Promise<AgentsView> {
     const prefix = `${userId}\u0000`;
     const now = this.now();
     const connected = new Set<string>();
     /** Each server's processes heard from in the last LIVE_MS: a quiet one may be hung or asleep, and no longer says how its server stands. */
     const live = new Map<string, Heard[]>();
+    /** Each server's connected processes whose Lumiverse client holds an old list. */
+    const stale = new Map<string, number>();
     for (const [key, heard] of this.sessions) {
       if (!key.startsWith(prefix)) continue;
       connected.add(heard.id);
+      if (isStale(heard.client)) stale.set(heard.id, (stale.get(heard.id) ?? 0) + 1);
       if (now - heard.seen > LIVE_MS) continue;
       const same = live.get(heard.id);
       if (same) same.push(heard);
@@ -324,6 +462,7 @@ export class Agents {
     }
     const build = this.build.id;
     const kit = this.build.kit;
+    const profiles = Object.values(file.clients).some((c) => c.harness === LUMIVERSE_HARNESS) ? await this.profilesOf(userId) : null;
     return {
       build,
       notice: started.previous !== null && file.dismissed !== started.build ? { build: started.build, previous: started.previous, at: started.at } : null,
@@ -333,10 +472,24 @@ export class Agents {
         .map(([id, stored]): AgentClientView => {
           const heard = live.get(id) ?? [];
           // None heard lately (after a restart, or all quiet): the last check-in says how it stands.
-          const client = worstOf(heard, build)?.client ?? stored;
-          return { id, ...client, seen: stored.seen, connected: connected.has(id), processes: heard.length, state: stateOf(client, build) };
+          const { listed: _listed, ...client } = worstOf(heard, build)?.client ?? stored;
+          const r = this.reconnecting.get(`${prefix}${id}`);
+          const reconnect: ReconnectView | null = r === undefined ? null : { state: this.overdue(r) ? "late" : "waiting", waitMs: r.wait === "none" ? null : r.wait, through: r.profiles !== null ? "lumiverse" : "server" };
+          const lumiverse = client.harness === LUMIVERSE_HARNESS ? { stale: stale.get(id) ?? 0, unknown: heard.filter((h) => h.client.listed === undefined).length, profiles, reconnect } : null;
+          return { id, ...client, seen: stored.seen, connected: connected.has(id), processes: heard.length, state: stateOf(client, build), lumiverse };
         }),
     };
+  }
+
+  /** Lumiverse's profiles that run lumirpengine, by name and whether each holds this build's tools; null without `mcp_servers`, or when Spindle can't say. */
+  private async profilesOf(userId: UserId): Promise<LumiverseProfileView[] | null> {
+    if (!this.host.mcp.granted()) return null;
+    try {
+      return (await lreProfiles(this.host.mcp, userId, this.build.tools)).map((p) => ({ name: p.name, current: p.current }));
+    } catch (error) {
+      this.host.log("warn", `[LumiRPEngine] Lumiverse's MCP server profiles couldn't be read (${errorText(error)}); the MCP servers' lines say only what the servers do`, userId);
+      return null;
+    }
   }
 
   /** The servers' view, to every session of the user: Settings → MCP server and the notice update as servers check in. */

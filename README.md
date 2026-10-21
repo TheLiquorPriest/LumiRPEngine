@@ -44,7 +44,7 @@ LumiRPEngine requires **Lumiverse's `staging` branch from 16 October 2026 (commi
 
 ## Permissions
 
-LumiRPEngine asks for nine permissions. Here is why each one is there:
+LumiRPEngine asks for ten permissions. Here is why each one is there:
 
 - `generation`: to follow each reply from start to finish, to stop a reply the engine hasn't prepared yet so the engine can run first, and to make its own small helper calls.
 - `context_handler`: to check, just before each reply, that the engine has prepared it (the turn's plan, and the world's sections in the prompt), and stop it when it hasn't.
@@ -55,6 +55,7 @@ LumiRPEngine asks for nine permissions. Here is why each one is there:
 - `regex_scripts`: to keep the JSON blocks some presets ask replies to carry out of World Info scanning and hide them in world chats, with two regex scripts in each world chat and two global ones that take the engine's wrapper off again before your own scripts read a reply. **Settings → Preset** turns the hiding off.
 - `decisions`: to use Lumiverse's Decisions API for the probability questions the engine asks, such as what an NPC does on a close call.
 - `ui_panels`: for the status pill, the map and the action palette with its Timelapse tab, which float over the chat. The drawer tab needs no permission.
+- `mcp_servers` (optional; only an owner or admin can switch it on): if Lumiverse runs LumiRPEngine's MCP server itself, to check that Lumiverse's own MCP client has the new tools after an update, for **Reconnect in Lumiverse**. It reads which of your Lumiverse MCP servers hold LumiRPEngine's tools and nothing else of them, and never adds, changes, connects or disconnects one. Without it, Reconnect in Lumiverse still works and goes by what the server says.
 
 LumiRPEngine deliberately does **not** request the `characters` permission. Character cards stay out of its reach. To know whether the world's sections really reached a reply's prompt, it reads which of its entries Lumiverse activated for that reply, and a section whose entry didn't activate shows as "not delivered".
 
