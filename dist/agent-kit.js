@@ -24873,14 +24873,14 @@ function routineShapeProblems(v) {
   });
   return out;
 }
-var SETTING_VALUES = { awareness: ROUTINE_AWARENESS, invitations: ROUTINE_INVITATIONS, sociability: ROUTINE_SOCIABILITY, planBend: ROUTINE_PLAN_BEND, roles: { levels: ROUTINE_ROLES }, skips: { levels: SKIP_LIVES }, skipPlanCalls: SKIP_PLAN_CALLS, narrator: "switch", paletteFollowsRoutine: "switch" };
+var ROUTINE_SETTING_VALUES = { awareness: ROUTINE_AWARENESS, invitations: ROUTINE_INVITATIONS, sociability: ROUTINE_SOCIABILITY, planBend: ROUTINE_PLAN_BEND, roles: { levels: ROUTINE_ROLES }, skips: { levels: SKIP_LIVES }, skipPlanCalls: SKIP_PLAN_CALLS, narrator: "switch", paletteFollowsRoutine: "switch" };
 function routineSettingsProblems(v) {
   if (!isRecord(v))
     return ["routine settings are an object"];
   return Object.entries(v).flatMap(([key, value]) => {
-    const allowed = hasOwn(SETTING_VALUES, key) ? SETTING_VALUES[key] : undefined;
+    const allowed = hasOwn(ROUTINE_SETTING_VALUES, key) ? ROUTINE_SETTING_VALUES[key] : undefined;
     if (!allowed)
-      return [`there's no setting ${key} (${Object.keys(SETTING_VALUES).join(", ")})`];
+      return [`there's no setting ${key} (${Object.keys(ROUTINE_SETTING_VALUES).join(", ")})`];
     if (allowed === "switch")
       return typeof value === "boolean" ? [] : [`${key} is true or false`];
     if ("levels" in allowed) {
@@ -25378,7 +25378,7 @@ function routinesLint(world, reg, state) {
   for (const id of Object.keys(raw).sort())
     issues.push(...routineIssues(world, reg, id, own(raw, id), state));
   const settings = isRecord(world.routineSettings) ? world.routineSettings : {};
-  const known = { awareness: ROUTINE_AWARENESS, invitations: ["off", "player", "everyone"], sociability: ["reserved", "usual", "outgoing"], planBend: ["must", "strong", "standard", "ordinary"], roles: { levels: ROUTINE_ROLES }, skips: { levels: SKIP_LIVES }, narrator: "switch", paletteFollowsRoutine: "switch" };
+  const known = ROUTINE_SETTING_VALUES;
   const warn = (path, message) => void issues.push({ severity: "warning", code: ROUTINE_LINT.settings, path: `routineSettings.${path}`, message });
   for (const [key, v] of Object.entries(settings)) {
     const allowed = own(known, key);
@@ -63429,7 +63429,7 @@ var package_default = {
 // src/cli/version.ts
 var CLI_NAME = "lumirpengine";
 var CLI_VERSION = package_default.version;
-var BUILD = "d2deff6f";
+var BUILD = "7f14c1c0";
 function runtimeCannotFollow(bun) {
   if (bun === undefined)
     return null;

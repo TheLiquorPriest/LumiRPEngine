@@ -24277,14 +24277,14 @@ function routineShapeProblems(v) {
   });
   return out;
 }
-var SETTING_VALUES = { awareness: ROUTINE_AWARENESS, invitations: ROUTINE_INVITATIONS, sociability: ROUTINE_SOCIABILITY, planBend: ROUTINE_PLAN_BEND, roles: { levels: ROUTINE_ROLES }, skips: { levels: SKIP_LIVES }, skipPlanCalls: SKIP_PLAN_CALLS, narrator: "switch", paletteFollowsRoutine: "switch" };
+var ROUTINE_SETTING_VALUES = { awareness: ROUTINE_AWARENESS, invitations: ROUTINE_INVITATIONS, sociability: ROUTINE_SOCIABILITY, planBend: ROUTINE_PLAN_BEND, roles: { levels: ROUTINE_ROLES }, skips: { levels: SKIP_LIVES }, skipPlanCalls: SKIP_PLAN_CALLS, narrator: "switch", paletteFollowsRoutine: "switch" };
 function routineSettingsProblems(v) {
   if (!isRecord(v))
     return ["routine settings are an object"];
   return Object.entries(v).flatMap(([key, value]) => {
-    const allowed = hasOwn(SETTING_VALUES, key) ? SETTING_VALUES[key] : undefined;
+    const allowed = hasOwn(ROUTINE_SETTING_VALUES, key) ? ROUTINE_SETTING_VALUES[key] : undefined;
     if (!allowed)
-      return [`there's no setting ${key} (${Object.keys(SETTING_VALUES).join(", ")})`];
+      return [`there's no setting ${key} (${Object.keys(ROUTINE_SETTING_VALUES).join(", ")})`];
     if (allowed === "switch")
       return typeof value === "boolean" ? [] : [`${key} is true or false`];
     if ("levels" in allowed) {
@@ -24989,7 +24989,7 @@ function routinesLint(world, reg, state) {
   for (const id of Object.keys(raw).sort())
     issues.push(...routineIssues(world, reg, id, own(raw, id), state));
   const settings = isRecord(world.routineSettings) ? world.routineSettings : {};
-  const known = { awareness: ROUTINE_AWARENESS, invitations: ["off", "player", "everyone"], sociability: ["reserved", "usual", "outgoing"], planBend: ["must", "strong", "standard", "ordinary"], roles: { levels: ROUTINE_ROLES }, skips: { levels: SKIP_LIVES }, narrator: "switch", paletteFollowsRoutine: "switch" };
+  const known = ROUTINE_SETTING_VALUES;
   const warn = (path, message) => void issues.push({ severity: "warning", code: ROUTINE_LINT.settings, path: `routineSettings.${path}`, message });
   for (const [key, v] of Object.entries(settings)) {
     const allowed = own(known, key);
@@ -69523,9 +69523,9 @@ function thisBuild(moduleUrl = import.meta.url) {
   const dir = moduleUrl.replace(/[^/]*$/, "");
   const path = pathOfFileUrl(`${dir}${KIT_FILE}`);
   const core = pathOfFileUrl(`${dir}${CORE_FILE}`);
-  const sha256 = "7203dd5c471130826deb2c6053643f20c8b02ff8fd2edbc4545dbc89da6418fc";
+  const sha256 = "72b4dfff16fe10f90b00e6ff3d2c285654521079141af875c4ab3c592e732519";
   const tools = ["18ab4cc48319d3329b4f414f8503d74f", "9748f93066a93461e251d2677fe4f3b6"].filter((f) => f !== undefined);
-  return { id: "d2deff6f", kit: sha256 !== undefined && path !== null && core !== null ? { path, core, sha256, api: KIT_API } : null, tools };
+  return { id: "7f14c1c0", kit: sha256 !== undefined && path !== null && core !== null ? { path, core, sha256, api: KIT_API } : null, tools };
 }
 var BUILD_FILE = "agents/build.json";
 var USER_FILE = "agents.json";
@@ -72722,7 +72722,7 @@ class Runtime {
     this.steps.onCallStart = (userId, purpose) => this.diag.callStart(userId, purpose);
     this.toolSupport = new ToolSupport(this.host);
     this.minds = { host: this.host, registry: this.registry, steps: this.steps, settings: this.settings, presets: this.presets };
-    this.ledger = new LedgerService(this.host, (chatId, userId) => this.resolveEnv(chatId, userId), new LedgerFold(this.registry, { fingerprint: "d2deff6f" }), (chatId) => messages.forget(chatId));
+    this.ledger = new LedgerService(this.host, (chatId, userId) => this.resolveEnv(chatId, userId), new LedgerFold(this.registry, { fingerprint: "7f14c1c0" }), (chatId) => messages.forget(chatId));
     this.studio = new StudioBridge(this.host, this.worlds);
     this.worlds.onChange = (worldId, userId) => this.studio.worldChanged(worldId, userId);
     this.agents = new Agents(this.host, options.build ?? thisBuild(), async (userId) => (await this.settings.get(userId)).timeouts.mcpReconnectMs);
