@@ -26,6 +26,7 @@ import { macroReview, WORLD_COLLECTIONS } from "../../src/backend/worlds";
 import type { StudioCase } from "./fixtures";
 import { DECLINED_PURCHASE, extractionView, freshFixture, gmFixture, pausedFixture, portAlderMoney, settingsFixture, starterMap, stateFixture, studioOfferFixture, UPGRADE_PREVIEW, WORLDS, worldFixture } from "./fixtures";
 import { combatFixture } from "./combat-fixture";
+import { ROUTINE_PROPOSALS, routinePlayerFixture } from "./routines-player-fixture";
 import { isWorldDoc, lintWorld, migrateWorld, previewSheet, previewSkills } from "../../src/engine/authoring";
 import { createRegistry } from "../../src/engine/registry-impl";
 import { formulaFunctions } from "../../src/engine/scope";
@@ -688,7 +689,9 @@ export class MockBackend {
         this.jobs += 1;
         const jobId = `job-${this.jobs}`;
         const kind = message.kind;
-        const proposals = kind === "describe_map" ? this.mapProposals(message.input) : kind === "index_book" || kind === "index_text" ? LORE_PROPOSALS : PROPOSALS;
+        // Propose routines' first pass stops after Rosie (Continue); the next reads the crew.
+        const after = isRecord(message.input) && typeof message.input.after === "string";
+        const proposals = kind === "describe_map" ? this.mapProposals(message.input) : kind === "index_book" || kind === "index_text" ? LORE_PROPOSALS : kind === "propose_routines" ? (after ? ROUTINE_PROPOSALS.filter((p) => p.owner === "diner_crew") : ROUTINE_PROPOSALS) : PROPOSALS;
         this.result(reqId, "lre.job", { jobId });
         const update = (status: JobUpdate["status"], progress: number, extra: Partial<JobUpdate> = {}) => this.emit({ lre: 1, type: "lre.job.update", jobId, kind, status, progress, ...extra });
         setTimeout(() => update("running", 0.35, { message: kind === "playtest" ? "Turn 2 of 5" : "Reading 14 entries…" }), 200);
@@ -701,12 +704,17 @@ export class MockBackend {
                   ? { turns: [{ user: "I ask Rosie for a raise.", reply: "Rosie sets down the coffee pot. “After the rush,” she says.", notes: ["Check persuade: 9 vs 8 (success)", "+5 min"] }, { user: "I cover Mara's shift.", reply: "The afternoon blurs into orders and refills.", notes: ["Timelapse 6 h", "Payroll accrues"] }], lint: [{ severity: "warning", path: "rules.payday", code: "no_effect", message: "Rule payday never fired in 2 turns." }] }
                   : {
                       proposals,
+                      ...(kind === "propose_routines" && !after ? { next: { after: "npc_rosie" } } : {}),
                     },
             }),
           1200,
         );
         return;
       }
+      case "lre.routine":
+        // Cast's usual day: someone's day as the POV may know it.
+        if (message.op === "day" && message.view === "player") return this.result(reqId, "lre.routine", { player: routinePlayerFixture(message.entity) });
+        return this.result(reqId, "lre.routine", {});
       case "lre.lore": {
         if (message.op === "save") {
           // As the backend does: the latest reply (or the excerpt) becomes a draft entry with a chat source.
