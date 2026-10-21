@@ -14,7 +14,7 @@ import { BINDING_LABEL, bindingOf, blockOffOp, blockOp, changedBy, dropBlockOp, 
 import { blankBlock } from "../../src/frontend/build/routine-editor";
 import type { EditOp } from "../../src/shared/protocol";
 import type { RoutineBlock, RoutineChangeSummary, RoutineGmView, RoutineRole } from "../../src/shared/routines";
-import { DEFAULT_ROUTINE_ROLES, isOff, ROUTINE_ROLES } from "../../src/shared/routines";
+import { DEFAULT_ROUTINE_ROLES, isOff, ROUTINE_ROLES, SKIP_LIFE_LABEL, SKIP_LIVES } from "../../src/shared/routines";
 import type { GmView } from "../../src/shared/state-view";
 import { Rig } from "../support/rig";
 import { expand, propsOf, type Props } from "../support/tree";
@@ -101,7 +101,7 @@ describe("GM view → Routines round trip", () => {
     expect(await changed(rig, chatId)).toEqual([]);
     expect(badged(await gmView(rig, chatId), [])).toEqual([]);
 
-    await edit(rig, chatId, followOp(WHO, "off", null, null));
+    await edit(rig, chatId, followOp(WHO, "off", null, null, null));
     let v = await day(rig, chatId);
     expect([v.follow.mode, v.follow.chat]).toEqual(["off", { mode: "off", awareness: null, role: null, skips: null }]);
     expect(bindingOf(v.follow.role, v.follow.mode, v.planned)).toBe("none");
@@ -118,16 +118,16 @@ describe("GM view → Routines round trip", () => {
     expect(badged(await gmView(rig, chatId), summary)).toEqual([]);
 
     // Awareness for them alone; following is the world's way, so it sends no mode of its own.
-    expect(followOp(WHO, "follows", "story_first", null)).toEqual({ op: "routine_follow", entity: WHO, mode: null, awareness: "story_first", role: null });
-    await edit(rig, chatId, followOp(WHO, "follows", "story_first", null));
+    expect(followOp(WHO, "follows", "story_first", null, null)).toEqual({ op: "routine_follow", entity: WHO, mode: null, awareness: "story_first", role: null, skips: null });
+    await edit(rig, chatId, followOp(WHO, "follows", "story_first", null, null));
     v = await day(rig, chatId);
     expect([v.follow.awareness, v.follow.chat]).toEqual(["story_first", { mode: null, awareness: "story_first", role: null, skips: null }]);
-    await edit(rig, chatId, followOp(WHO, "no_invitations", "story_first", null));
+    await edit(rig, chatId, followOp(WHO, "no_invitations", "story_first", null, null));
     expect((await day(rig, chatId)).follow.mode).toBe("no_invitations");
     await undoLatest(rig, chatId);
     expect((await day(rig, chatId)).follow).toEqual({ mode: "follows", awareness: "story_first", role: before.follow.role, skips: before.follow.skips, chat: { mode: null, awareness: "story_first", role: null, skips: null } });
     // Back to the world's clears the setting.
-    await edit(rig, chatId, followOp(WHO, "follows", null, null));
+    await edit(rig, chatId, followOp(WHO, "follows", null, null, null));
     expect((await day(rig, chatId)).follow).toEqual({ mode: "follows", awareness: before.follow.awareness, role: before.follow.role, skips: before.follow.skips, chat: null });
     expect(await changed(rig, chatId)).toEqual([]);
     expect(rig.rt.ledger.errors).toEqual([]);
@@ -140,7 +140,7 @@ describe("GM view → Routines round trip", () => {
     expect([before.tier, before.planned, before.follow.role, before.follow.chat]).toEqual(["far", true, before.settings.roles.far, null]);
     const expected: Record<RoutineRole, RoutineBinding> = { informative: "story", enforced: "routine", off: "none" };
     for (const role of ROUTINE_ROLES) {
-      await edit(rig, chatId, followOp(WHO, "follows", null, role));
+      await edit(rig, chatId, followOp(WHO, "follows", null, role, null));
       const v = await day(rig, chatId);
       const summary = await changed(rig, chatId);
       const gm = await gmView(rig, chatId);
@@ -152,12 +152,28 @@ describe("GM view → Routines round trip", () => {
       expect([role, undone.follow.role, undone.follow.chat]).toEqual([role, before.follow.role, null]);
     }
     // A role kept while the mode changes, then everything back to the world's.
-    await edit(rig, chatId, followOp(WHO, "follows", null, "enforced"));
-    await edit(rig, chatId, followOp(WHO, "no_invitations", null, "enforced"));
+    await edit(rig, chatId, followOp(WHO, "follows", null, "enforced", null));
+    await edit(rig, chatId, followOp(WHO, "no_invitations", null, "enforced", null));
     expect((await day(rig, chatId)).follow.chat).toEqual({ mode: "no_invitations", awareness: null, role: "enforced", skips: null });
-    await edit(rig, chatId, followOp(WHO, "follows", null, null));
+    await edit(rig, chatId, followOp(WHO, "follows", null, null, null));
     expect((await day(rig, chatId)).follow).toEqual(before.follow);
     expect(await changed(rig, chatId)).toEqual([]);
+    expect(rig.rt.ledger.errors).toEqual([]);
+  });
+
+  test("how they spend a time skip: each choice sends its op, shows on their page, and Undo restores their level's", async () => {
+    const { rig, chatId } = await chat();
+    const before = await day(rig, chatId);
+    expect(before.follow.chat).toBeNull();
+    for (const skips of SKIP_LIVES) {
+      await edit(rig, chatId, followOp(WHO, "follows", null, null, skips));
+      const v = await day(rig, chatId);
+      expect([skips, v.follow.skips, v.follow.chat]).toEqual([skips, skips, { mode: null, awareness: null, role: null, skips }]);
+      expect([skips, propsOf(page(v, await gmView(rig, chatId)), ListRow).some((row) => row.value === SKIP_LIFE_LABEL[skips])]).toEqual([skips, true]);
+      expect((await changed(rig, chatId)).map((s) => [s.entity, changedBy(s)])).toEqual([[WHO, "gm"]]);
+      await undoLatest(rig, chatId);
+      expect([skips, (await day(rig, chatId)).follow]).toEqual([skips, before.follow]);
+    }
     expect(rig.rt.ledger.errors).toEqual([]);
   });
 
@@ -292,6 +308,24 @@ describe("GM view → Routines: what the page shows", () => {
     expect(storyChanges(view, { ...summary, blocks: [{ block: "lunch", source: { type: "gm", at: told.at }, off: false }] })).toEqual([]);
   });
 
+  test("the skip plan shows their planned blocks and the plan's note, and nothing before any skip", async () => {
+    const { rig, chatId } = await chat();
+    const v = await day(rig, chatId);
+    const gm = await gmView(rig, chatId);
+    const planned = (tree: unknown[]) => propsOf(propsOf(tree, "div").filter((p) => p["data-lre-gm-list"] === "skip-plan").map((p) => p.children), ListRow).map((row) => row.title);
+    expect(v.skip).toBeNull();
+    expect(planned(page(v, gm))).toEqual([]);
+    const place = gm.places[0]?.id ?? "home";
+    const from = gm.minds.now;
+    const blocks = [
+      { label: "Opens the shop", start: from + 60, end: from + 240, place, activity: "work" },
+      { label: "Lunch out", start: from + 240, end: from + 300, place, activity: "meal" },
+    ];
+    const tree = page({ ...v, skip: { from, to: from + 600, blocks, note: "Only some of them were planned." } }, gm);
+    expect(planned(tree)).toEqual(blocks.map((b) => b.label));
+    expect(textOf(tree)).toContain("Only some of them were planned.");
+  });
+
   test("the binding shown follows the effective role: the world's for their level unless this chat sets theirs, none with no routine", async () => {
     const { rig, chatId } = await chat();
     const shown = async (): Promise<[unknown, unknown, unknown]> => {
@@ -314,11 +348,11 @@ describe("GM view → Routines: what the page shows", () => {
     await edit(rig, chatId, pinOp(WHO, "live"));
     expect(await shown()).toEqual(["live", "informative", "story"]);
     // This chat's role for them leads: enforced lets their routine lead, even for Live; off leaves none.
-    await edit(rig, chatId, followOp(WHO, "follows", null, "off"));
+    await edit(rig, chatId, followOp(WHO, "follows", null, "off", null));
     expect(await shown()).toEqual(["live", "off", "none"]);
-    await edit(rig, chatId, followOp(WHO, "follows", null, "enforced"));
+    await edit(rig, chatId, followOp(WHO, "follows", null, "enforced", null));
     expect(await shown()).toEqual(["live", "enforced", "routine"]);
-    await edit(rig, chatId, followOp(WHO, "off", null, "enforced"));
+    await edit(rig, chatId, followOp(WHO, "off", null, "enforced", null));
     expect(await shown()).toEqual(["live", "enforced", "none"]);
   });
 });

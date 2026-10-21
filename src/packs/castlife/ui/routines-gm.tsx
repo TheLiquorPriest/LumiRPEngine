@@ -14,8 +14,8 @@ import { useEffect, useId, useRef, useState } from "preact/hooks";
 import type { EntityId, ScheduleId } from "../../../shared/ids";
 import { nameOfId } from "../../../shared/maps";
 import type { EditOp } from "../../../shared/protocol";
-import type { EffectiveBlock, EffectiveSchedule, InvitationView, RoutineAwareness, RoutineBlock, RoutineBlockId, RoutineChangeSummary, RoutineGmView, RoutineMode, RoutineRole, SourceView } from "../../../shared/routines";
-import { AWARENESS_LABEL, BLOCK_KIND_LABEL, isOff, ROUTINE_AWARENESS, ROUTINE_MODE_LABEL, ROUTINE_MODES, ROUTINE_ROLE_LABEL, ROUTINE_ROLES, routineSettingsOf, storySourceLabel } from "../../../shared/routines";
+import type { EffectiveBlock, EffectiveSchedule, InvitationView, RoutineAwareness, RoutineBlock, RoutineBlockId, RoutineChangeSummary, RoutineGmView, RoutineMode, RoutineRole, SkipLife, SourceView } from "../../../shared/routines";
+import { AWARENESS_LABEL, BLOCK_KIND_LABEL, isOff, ROUTINE_AWARENESS, ROUTINE_MODE_LABEL, ROUTINE_MODES, ROUTINE_ROLE_LABEL, ROUTINE_ROLES, routineSettingsOf, SKIP_LIFE_LABEL, SKIP_LIVES, storySourceLabel } from "../../../shared/routines";
 import type { GmView } from "../../../shared/state-view";
 import type { ScheduleDef, WorldDoc } from "../../../shared/world";
 import { useApp, useView } from "../../../frontend/app";
@@ -23,6 +23,7 @@ import { blankBlock, RoutineBlockForm } from "../../../frontend/build/routine-ed
 import { EVERY, ScheduleForm } from "../../../frontend/build/schedule-form";
 import { deriveId } from "../../../frontend/build/schema";
 import { Badge, Banner, Button, Empty, IdText, List, ListRow, NumberStepper, Section, Seg } from "../../../frontend/components";
+import { formatMinutes } from "../../../frontend/format";
 import { nameOf } from "../../../frontend/gm/editor";
 import { GmPage, usePages } from "../../../frontend/gm/ui";
 import { Icon } from "../../../frontend/icons";
@@ -56,6 +57,7 @@ import {
   scheduleOwnOp,
   scheduleRows,
   shadowWords,
+  SKIP_NOTE,
   sourceWords,
   storyChanges,
   targetWords,
@@ -270,6 +272,7 @@ export function RoutineSections(props: { view: RoutineGmView; gm: GmView; summar
     <div class="lre-gm-routines" data-lre-gm-routine={view.entity}>
       <BindingSection view={view} busy={busy} open={open} />
       <StoryHolds view={view} now={gm.minds.now} />
+      <SkipPlanned view={view} gm={gm} />
       <Blocks view={view} gm={gm} busy={busy} open={open} />
       <Schedules view={view} now={gm.minds.now} busy={busy} open={open} />
       <Today view={view} gm={gm} />
@@ -298,7 +301,27 @@ function BindingSection(props: { view: RoutineGmView; busy: boolean; open(change
         <ListRow icon="sliders" title="In this chat" subtitle={chat?.mode ? "Set for them in this chat" : "As the world has it"} value={ROUTINE_MODE_LABEL[view.follow.mode]} chevron disabled={props.busy} onClick={() => props.open({ kind: "follow" })} />
         <ListRow icon="route" title="Their routine's role" subtitle={chat?.role ? "Set for them in this chat" : "Their level's default"} value={ROUTINE_ROLE_LABEL[view.follow.role]} chevron disabled={props.busy} onClick={() => props.open({ kind: "follow" })} />
         <ListRow icon="book" title="Story and lore awareness" subtitle={chat?.awareness ? "Set for them in this chat" : "The world's setting"} value={AWARENESS_LABEL[view.follow.awareness]} chevron disabled={props.busy} onClick={() => props.open({ kind: "follow" })} />
+        <ListRow icon="fast-forward" title="In a time skip" subtitle={chat?.skips ? "Set for them in this chat" : "Their level's default"} value={SKIP_LIFE_LABEL[view.follow.skips]} chevron disabled={props.busy} onClick={() => props.open({ kind: "follow" })} />
       </List>
+    </Section>
+  );
+}
+
+/** Their part of the latest time skip's plan (`castlife.skip_plan`): the blocks the model planned for them in it, and its note when the call failed or was skipped. */
+function SkipPlanned(props: { view: RoutineGmView; gm: GmView }) {
+  const { skip } = props.view;
+  if (!skip) return null;
+  return (
+    <Section title="Planned for the skip" aside={<Badge>{props.gm.minds.now < skip.to ? "This skip" : "The last skip"}</Badge>} flush>
+      {skip.note ? <p class="lre-gm-note">{skip.note}</p> : null}
+      {skip.blocks.length === 0 ? <None>Nothing planned for them: they stayed where the story had them.</None> : null}
+      <div data-lre-gm-list="skip-plan">
+        <List>
+          {skip.blocks.map((b) => (
+            <ListRow key={b.start} title={b.label} subtitle={[b.days, `At ${nameOf(props.gm, b.place)}`, `${formatMinutes(b.start - skip.from)} in, for ${formatMinutes(b.end - b.start)}`].filter((part) => part !== undefined).join(" · ")} />
+          ))}
+        </List>
+      </div>
     </Section>
   );
 }
@@ -581,15 +604,17 @@ function Choices<T extends string | null>(props: { legend: string; value: T; cho
   );
 }
 
-/** How they follow their routine in this chat, its role, and how aware of the story they are: each part the world's unless set here. */
+/** How they follow their routine in this chat, its role, how they spend a time skip and how aware of the story they are: each part the world's unless set here. */
 function FollowPage(props: { ctx: Ctx; view: RoutineGmView; onBack(): void }) {
   const { ctx, view } = props;
   const chat = view.follow.chat;
   const [mode, setMode] = useState<RoutineMode>(chat?.mode ?? "follows");
   const [role, setRole] = useState<RoutineRole | null>(chat?.role ?? null);
+  const [skips, setSkips] = useState<SkipLife | null>(chat?.skips ?? null);
   const [awareness, setAwareness] = useState<RoutineAwareness | null>(chat?.awareness ?? null);
-  const changed = mode !== (chat?.mode ?? "follows") || role !== (chat?.role ?? null) || awareness !== (chat?.awareness ?? null);
+  const changed = mode !== (chat?.mode ?? "follows") || role !== (chat?.role ?? null) || skips !== (chat?.skips ?? null) || awareness !== (chat?.awareness ?? null);
   const levelRole = effectiveRole(view.tier, view.settings.roles, null);
+  const levelSkips = view.settings.skips[view.tier ?? "background"];
   return (
     <ChangePage name="routine-follow" title="How they follow their routine" view={view} onBack={props.onBack}>
       <form
@@ -597,7 +622,7 @@ function FollowPage(props: { ctx: Ctx; view: RoutineGmView; onBack(): void }) {
         data-lre-routine-form="follow"
         onSubmit={(event) => {
           event.preventDefault();
-          if (changed) sendOp(ctx, followOp(view.entity, mode, awareness, role), props.onBack);
+          if (changed) sendOp(ctx, followOp(view.entity, mode, awareness, role, skips), props.onBack);
         }}
       >
         <Section title="In this chat">
@@ -611,6 +636,16 @@ function FollowPage(props: { ctx: Ctx; view: RoutineGmView; onBack(): void }) {
             choices={[{ value: null, label: `Their level's default: ${ROUTINE_ROLE_LABEL[levelRole]}`, help: ROLE_NOTE[levelRole], now: chat?.role == null }, ...ROUTINE_ROLES.map((r) => ({ value: r, label: ROUTINE_ROLE_LABEL[r], help: ROLE_NOTE[r], now: chat?.role === r }))]}
             disabled={ctx.busy}
             onChange={setRole}
+          />
+        </Section>
+        <Section title="In a time skip">
+          <p class="lre-gm-note">How they spend a time skip while their routine is informative. An enforced routine is always lived through a skip, and an off one never.</p>
+          <Choices<SkipLife | null>
+            legend="In a time skip"
+            value={skips}
+            choices={[{ value: null, label: `Their level's default: ${SKIP_LIFE_LABEL[levelSkips]}`, help: SKIP_NOTE[levelSkips], now: chat?.skips == null }, ...SKIP_LIVES.map((s) => ({ value: s, label: SKIP_LIFE_LABEL[s], help: SKIP_NOTE[s], now: chat?.skips === s }))]}
+            disabled={ctx.busy}
+            onChange={setSkips}
           />
         </Section>
         <Section title="Story and lore awareness">
@@ -630,7 +665,7 @@ function FollowPage(props: { ctx: Ctx; view: RoutineGmView; onBack(): void }) {
       {chat ? (
         <Section title="Back to the world's">
           <p class="lre-gm-note">They follow their routine as the world has it again. The edit's Undo brings your setting back.</p>
-          <Button icon="undo" disabled={ctx.busy} onClick={() => sendOp(ctx, followOp(view.entity, "follows", null, null), props.onBack)}>
+          <Button icon="undo" disabled={ctx.busy} onClick={() => sendOp(ctx, followOp(view.entity, "follows", null, null, null), props.onBack)}>
             Use the world's settings
           </Button>
         </Section>
