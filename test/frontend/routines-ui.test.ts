@@ -7,7 +7,7 @@ import { createRng } from "../../src/engine/rng";
 import { ownerRank, sampleSlot, scheduleOwners } from "../../src/engine/schedules";
 import { ownerLevel, ownerOptions, type Owner, type OwnerLevel } from "../../src/frontend/build/owner-picker";
 import { kindIs } from "../../src/frontend/build/selector-editor";
-import { givenKey, givenValue, scheduleWrite, slotValueType } from "../../src/packs/calendar/ui/schedule-editor";
+import { givenKey, givenValue, scheduleWrite, slotValueType } from "../../src/frontend/build/schedule-form";
 import { ALL_PACKS } from "../../src/packs/index";
 import type { ScheduleDef, WorldDoc } from "../../src/shared/world";
 import { modernUsWorld } from "../packs/riverton";

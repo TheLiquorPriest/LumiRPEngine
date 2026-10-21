@@ -9,7 +9,7 @@ import { visiblePanels } from "../../src/frontend/play/play";
 import { settingsTimePatch, speedRows } from "../../src/frontend/time-controls";
 import type { PanelDef } from "../../src/frontend/registry";
 import type { UiCatalog } from "../../src/frontend/ui-registry";
-import { slotProblems } from "../../src/packs/calendar/ui/schedule-editor";
+import { slotProblems } from "../../src/frontend/build/schedule-form";
 import { cellAt, paintCell, resizeGrid } from "../../src/packs/space/ui/editors";
 import { layoutTrack } from "../../src/packs/story/ui/track-editor";
 import type { JobProposal } from "../../src/shared/protocol";
