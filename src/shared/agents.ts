@@ -36,6 +36,8 @@ export interface AgentCheckIn {
   why: { code: FollowCode; text: string } | null;
   /** The machine it runs on. */
   host: string;
+  /** The agent harness that runs it (its MCP client's `initialize` clientInfo.name: claude-code, codex…), null when it gave none. */
+  harness: string | null;
 }
 
 /** A hello's `client`: every outside client names itself; an MCP server from this build on checks in as well. */
@@ -50,6 +52,8 @@ export interface AgentClientView {
   name: string;
   version: string;
   host: string | null;
+  /** The harness that runs it; null for one that gave none, and for a server from before check-ins or harnesses. */
+  harness: string | null;
   /** Null for a server from before check-ins. */
   core: string | null;
   kit: string | null;

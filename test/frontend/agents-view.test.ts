@@ -9,11 +9,12 @@ import { NPM_INSTALL } from "../../src/shared/agents";
 
 const CORE = "/srv/lumiverse/data/extensions/lumi_rp_engine/repo/dist/lumirpengine.js";
 const view: AgentsView = { build: "b2", notice: { build: "b2", previous: "a1", at: 1 }, setup: { core: CORE, command: `node ${CORE} mcp` }, clients: [] };
-const client = (over: Partial<AgentClientView>): AgentClientView => ({ id: "c1", name: "lumirpengine", version: "0.0.1", host: "studio", core: "c0", kit: "b2", follows: true, why: null, seen: 1, connected: true, state: "updated", ...over });
+const client = (over: Partial<AgentClientView>): AgentClientView => ({ id: "c1", name: "lumirpengine", version: "0.0.1", host: "studio", harness: null, core: "c0", kit: "b2", follows: true, why: null, seen: 1, connected: true, state: "updated", ...over });
 
 describe("each server's line", () => {
   test("reloaded, not yet with Update now, and can't follow with why and what fixes it", () => {
     expect(serverLine(client({}), view)).toEqual({ state: "updated", text: "lumirpengine on studio reloaded this build's tools.", update: false, copy: [] });
+    expect(serverLine(client({ harness: "claude-code" }), view).text).toBe("lumirpengine for claude-code on studio reloaded this build's tools.");
     expect(serverLine(client({ state: "behind", kit: "a1" }), view)).toMatchObject({ update: true, text: "lumirpengine on studio hasn't reloaded this build's tools yet." });
     expect(serverLine(client({ state: "behind", kit: "a1", connected: false }), view).text).toContain("isn't connected now");
     const elsewhere = serverLine(client({ state: "cannot", kit: "a1", follows: false, why: { code: "elsewhere", text: "LumiRPEngine's tools aren't on this machine" } }), view);

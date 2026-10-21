@@ -85,6 +85,9 @@ export class McpSession implements ToolHost {
   private agent: string | null = null;
   /** LumiRPEngine said where its kit is, so there is something to look at. */
   private followable = false;
+  /** The harness that runs this server, from its client's initialize; checked in with, so each harness's server is a line of its own. */
+  private harness: string | null = null;
+  private initializedOnce = false;
   private looked = Number.NEGATIVE_INFINITY;
   /** Following, one step at a time. */
   private work: Promise<void> = Promise.resolve();
@@ -109,11 +112,21 @@ export class McpSession implements ToolHost {
   /** What this server checks in with. */
   checkIn(): AgentCheckIn {
     const { follows, why } = this.follower.state;
-    return { serves: "mcp", core: BUILD, kit: this.follower.kit.build, follows, why, host: this.options.host };
+    return { serves: "mcp", core: BUILD, kit: this.follower.kit.build, follows, why, host: this.options.host, harness: this.harness };
   }
 
-  /** Connects now rather than at the first call that needs it, so the tools follow LumiRPEngine from the start; then looks every minute. */
+  /** Looks every minute while connected. The connection opens at the client's initialize, so the first check-in names the harness. */
   start(): void {
+    this.stopTimer = this.clock.every(EVERY_MS, () => {
+      if (this.followable && this.conn?.isOpen()) void this.look();
+    });
+  }
+
+  /** The client's initialize: who runs this server, then the connection now rather than at the first call that needs it, so the tools follow LumiRPEngine from the start. */
+  initialized(harness: string | null): void {
+    if (this.initializedOnce) return;
+    this.initializedOnce = true;
+    this.harness = harness;
     this.starting = (async () => {
       try {
         await this.connection().ensureOpen();
@@ -121,9 +134,6 @@ export class McpSession implements ToolHost {
         // Not signed in, or Lumiverse unreachable: the first call that needs it says why, and connects then.
       }
     })();
-    this.stopTimer = this.clock.every(EVERY_MS, () => {
-      if (this.followable && this.conn?.isOpen()) void this.look();
-    });
   }
 
   /** Before a call: a look when the last is old, and whatever following is under way, waited for a while. */

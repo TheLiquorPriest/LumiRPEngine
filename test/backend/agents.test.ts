@@ -76,7 +76,7 @@ describe("check-ins", () => {
     expect(id).toMatch(/^[0-9a-f]{16}$/);
     expect(hello).toMatchObject({ accepted: true, build: "b2", kit: build("b2").kit });
     const stored = (): Record<string, unknown> => JSON.parse(rig.host.files.get(`${rig.host.userId}/agents.json`) ?? "{}").clients;
-    expect(stored()).toEqual({ [id]: { name: "lumirpengine", version: "0.0.1", host: "mac-mini", core: "c0ffee00", kit: "b2", follows: true, why: null, seen: expect.any(Number) } });
+    expect(stored()).toEqual({ [id]: { name: "lumirpengine", version: "0.0.1", host: "mac-mini", harness: null, core: "c0ffee00", kit: "b2", follows: true, why: null, seen: expect.any(Number) } });
 
     // A run of the command line names itself and learns the build, and keeps nothing.
     const run = rig.body(await rig.send({ type: "lre.hello", chatId: null, client: { name: "lumirpengine", version: "0.0.1", serves: "command" } }, "cli-1"));
@@ -92,6 +92,49 @@ describe("check-ins", () => {
     expect(rig.body(await rig.send({ type: "lre.agents", op: "kit" }, "srv-1"))).toEqual({ build: "b2", kit: build("b2").kit, known: true });
     expect(rig.body(await rig.send({ type: "lre.agents", op: "kit" }, "srv-9")).known).toBe(false);
     expect(rig.body(await rig.restart({ build: build("b2") }).send({ type: "lre.agents", op: "kit" }, "srv-1")).known).toBe(false);
+  });
+
+  test("a server is its name, machine and harness: two harnesses on one machine are two lines, each with its own state, and the same harness restarted stays one", async () => {
+    const rig = new Rig({ build: build("b2") });
+    const stored = (): Record<string, { harness: string | null; kit: string | null; follows: boolean }> => JSON.parse(rig.host.files.get(`${rig.host.userId}/agents.json`) ?? "{}").clients;
+    const claude = String(rig.body(await rig.send({ type: "lre.hello", chatId: null, client: server("lumi-dev", "a1", { harness: "claude-code" }) }, "srv-claude")).client);
+    const codex = String(rig.body(await rig.send({ type: "lre.hello", chatId: null, client: server("lumi-dev", "b2", { harness: "codex" }) }, "srv-codex")).client);
+    expect(claude).not.toBe(codex);
+    let view = rig.body(await rig.send({ type: "lre.agents", op: "get" }, "page-1")).view as AgentsView;
+    expect(Object.fromEntries(view.clients.map((c) => [c.harness, [c.id, c.state, c.connected]]))).toEqual({ "claude-code": [claude, "behind", true], codex: [codex, "updated", true] });
+
+    // Claude Code's server restarted (a new process, a new session) on another kit: still its one line, at its latest.
+    const again = String(rig.body(await rig.send({ type: "lre.hello", chatId: null, client: server("lumi-dev", "b2", { harness: "claude-code", follows: false, why: { code: "pinned", text: "--pin keeps the installed tools" } }) }, "srv-claude-2")).client);
+    expect(again).toBe(claude);
+    expect(Object.keys(stored()).sort()).toEqual([claude, codex].sort());
+    expect(stored()[claude]).toMatchObject({ harness: "claude-code", kit: "b2", follows: false });
+    expect(stored()[codex]).toMatchObject({ harness: "codex", kit: "b2", follows: true });
+    view = rig.body(await rig.send({ type: "lre.agents", op: "get" }, "page-1")).view as AgentsView;
+    expect(view.clients.map((c) => c.id).sort()).toEqual([claude, codex].sort());
+  });
+
+  test("a server from before check-ins never shares a line with one that follows, even one that names no machine", async () => {
+    const rig = new Rig({ build: build("b2") });
+    const old = String(rig.body(await rig.send({ type: "lre.hello", chatId: null, client: { name: "lumirpengine", version: "0.0.1" } }, "srv-old")).client);
+    // An empty host name is no machine: the rule before this one keyed such a server as it keyed one from before check-ins.
+    const following = String(rig.body(await rig.send({ type: "lre.hello", chatId: null, client: server("", "b2") }, "srv-new")).client);
+    const onHost = String(rig.body(await rig.send({ type: "lre.hello", chatId: null, client: server("lumi-dev", "b2") }, "srv-host")).client);
+    expect(new Set([old, following, onHost]).size).toBe(3);
+    const view = rig.body(await rig.send({ type: "lre.agents", op: "get" }, "page-1")).view as AgentsView;
+    expect(Object.fromEntries(view.clients.map((c) => [c.id, c.state]))).toEqual({ [old]: "old", [following]: "updated", [onHost]: "updated" });
+  });
+
+  test("servers kept under an earlier rule's ids are keyed again as their check-ins say, the latest of any two kept", async () => {
+    const rig = new Rig({ build: build("b2") });
+    const kept = (host: string | null, kit: string | null, seen: number) => ({ name: "lumirpengine", version: "0.0.1", host, core: kit === null ? null : "c0ffee00", kit, follows: kit !== null, why: null, seen });
+    rig.host.files.set(`${rig.host.userId}/agents.json`, JSON.stringify({ v: 1, toasted: null, dismissed: null, clients: { "0000000000000001": kept(null, null, 1), "0000000000000002": kept("lumi-dev", "a1", 2), "0000000000000003": kept("lumi-dev", "b2", 3) } }));
+    const old = String(rig.body(await rig.send({ type: "lre.hello", chatId: null, client: { name: "lumirpengine", version: "0.0.1" } }, "srv-old")).client);
+    const view = rig.body(await rig.send({ type: "lre.agents", op: "get" }, "page-1")).view as AgentsView;
+    expect(view.clients.map((c) => [c.host, c.kit])).toEqual([
+      [null, null],
+      ["lumi-dev", "b2"],
+    ]);
+    expect(view.clients[0]?.id).toBe(old);
   });
 });
 

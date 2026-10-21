@@ -1,8 +1,9 @@
 // Outside MCP servers (DESIGN §23): this build and where its agent kit is, what each server checks
-// in with, and the notice after an update. A server's latest check-in (it is known by its name and
-// machine) is kept in the user's storage with when it was seen. The build the extension last
-// started as is kept in extension storage, so starting as another one is an update: each user's
-// next page hello gets a notice for the top of the drawer, shown until dismissed, and a toast once.
+// in with, and the notice after an update. A server's latest check-in (it is known by its name, its
+// machine and the harness that runs it) is kept in the user's storage with when it was seen. The
+// build the extension last started as is kept in extension storage, so starting as another one is
+// an update: each user's next page hello gets a notice for the top of the drawer, shown until
+// dismissed, and a toast once.
 
 import type { AgentClientView, AgentState, AgentsView, FollowCode, KitReport } from "../shared/agents";
 import { CORE_FILE, followCommand, KIT_API, KIT_FILE, pathOfFileUrl } from "../shared/agents";
@@ -54,6 +55,7 @@ interface StoredClient {
   name: string;
   version: string;
   host: string | null;
+  harness: string | null;
   core: string | null;
   kit: string | null;
   follows: boolean;
@@ -87,7 +89,19 @@ function checkInOf(client: unknown, seen: number): StoredClient | null {
   const text = (value: unknown, max: number): string | null => (typeof value === "string" && shown(value, max) !== "" ? shown(value, max) : null);
   const follows = client.follows === true;
   const why = !follows && isRecord(client.why) && typeof client.why.text === "string" ? { code: typeof client.why.code === "string" && hasOwn(FOLLOW_CODES, client.why.code) ? (client.why.code as FollowCode) : ("other" as const), text: shown(client.why.text, 400) } : null;
-  return { name: shown(client.name, 80), version: shown(client.version, 40), host: text(client.host, 80), core: text(client.core, 40), kit: text(client.kit, 40), follows, why, seen };
+  return { name: shown(client.name, 80), version: shown(client.version, 40), host: text(client.host, 80), harness: text(client.harness, 80), core: text(client.core, 40), kit: text(client.kit, 40), follows, why, seen };
+}
+
+/**
+ * A server's id: its name, its machine and the harness that runs it, so Claude Code's and Codex's on
+ * one machine are two, and a restarted one (or another process of the same harness) is the same. One
+ * that names no harness keeps the id it had before harnesses were sent. One from before check-ins
+ * (no kit) is kept apart from every server that follows, so neither overwrites the other's state.
+ */
+function idOf(client: StoredClient): string {
+  if (client.kit === null) return hashParts("lre.agent.old", client.name).slice(0, 16);
+  const machine = client.host ?? "";
+  return (client.harness === null ? hashParts("lre.agent", client.name, machine) : hashParts("lre.agent", client.name, machine, client.harness)).slice(0, 16);
 }
 
 /** How a server stands against this build: its kit is this build's, it is from before check-ins, it can't follow, or it hasn't reloaded yet. */
@@ -169,8 +183,8 @@ export class Agents {
     const answer = { build: this.build.id, kit: this.build.kit };
     const checkIn = checkInOf(client, this.now());
     if (checkIn === null) return answer;
-    // Known by its name and machine: a restarted server, or another process of it, is the same one.
-    const id = hashParts("lre.agent", checkIn.name, checkIn.host ?? "").slice(0, 16);
+    // Known by its name, machine and harness: a restarted server, or another process of it, is the same one.
+    const id = idOf(checkIn);
     if (session !== undefined) {
       this.sessions.delete(`${userId}\u0000${session}`);
       this.sessions.set(`${userId}\u0000${session}`, id);
@@ -275,10 +289,12 @@ export class Agents {
     const read = readStoredJson(this.host, USER_FILE, userId, "MCP servers", (raw) => isRecord(raw) && raw.v === 1 && isRecord(raw.clients)).then((raw): UserAgents => {
       const stored = isRecord(raw) ? raw : {};
       const clients: Record<string, StoredClient> = {};
-      for (const [id, entry] of Object.entries(isRecord(stored.clients) ? stored.clients : {})) {
+      for (const entry of Object.values(isRecord(stored.clients) ? stored.clients : {})) {
         const client = isRecord(entry) && typeof entry.seen === "number" ? checkInOf(entry, entry.seen) : null;
-        // Ids are the hex digests `meet` makes: nothing else becomes a key.
-        if (client !== null && /^[0-9a-f]{16}$/.test(id)) clients[id] = client;
+        if (client === null) continue;
+        // Keyed again as `meet` keys it, so an id kept under an earlier rule is this one's, and the latest of any two that meet wins.
+        const id = idOf(client);
+        if ((clients[id]?.seen ?? Number.NEGATIVE_INFINITY) < client.seen) clients[id] = client;
       }
       return { v: 1, clients, toasted: typeof stored.toasted === "string" ? stored.toasted : null, dismissed: typeof stored.dismissed === "string" ? stored.dismissed : null };
     });

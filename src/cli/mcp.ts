@@ -26,6 +26,8 @@ export interface ToolHost {
   kit(): AgentKit;
   /** Waited for before each call: a session checks there whether LumiRPEngine's kit moved on. */
   ready(): Promise<void>;
+  /** The client's `initialize`: the harness that runs this server (its clientInfo.name), or null when it gave none. */
+  initialized?(harness: string | null): void;
   readonly context: KitContext;
 }
 
@@ -70,6 +72,7 @@ export class McpServer {
       switch (message.method) {
         case "initialize": {
           const protocolVersion = PROTOCOL_VERSIONS.find((v) => v === params.protocolVersion) ?? PROTOCOL_VERSIONS[0];
+          this.host.initialized?.(isRecord(params.clientInfo) && typeof params.clientInfo.name === "string" ? params.clientInfo.name : null);
           return reply({ protocolVersion, capabilities: { tools: { listChanged: true } }, serverInfo: { name: CLI_NAME, version: CLI_VERSION }, instructions: instructions(this.host.readOnly) });
         }
         case "ping":

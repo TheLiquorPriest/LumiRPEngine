@@ -65,7 +65,7 @@ function serve(fake: FakeLumiverse, pin = false) {
     return isRecord(reply?.result) ? reply.result : {};
   };
   const start = async (): Promise<void> => {
-    await ask("initialize", { protocolVersion: "2025-06-18" });
+    await ask("initialize", { protocolVersion: "2025-06-18", clientInfo: { name: "test-harness", version: "1" } });
     session.start();
     await settle();
   };
@@ -96,7 +96,7 @@ describe("following the extension's kit", () => {
     await s.start();
     expect(await s.tools()).toEqual(own);
     expect(s.changed()).toBe(0);
-    expect(checkIns(fake)).toEqual([{ name: "lumirpengine", version: "0.0.1", serves: "mcp", core: "dev", kit: bundled.build, follows: true, why: null, host: "test-host" }]);
+    expect(checkIns(fake)).toEqual([{ name: "lumirpengine", version: "0.0.1", serves: "mcp", core: "dev", kit: bundled.build, follows: true, why: null, host: "test-host", harness: "test-harness" }]);
 
     // The extension updates: its new kit is on disk, and LumiRPEngine now reports that build.
     fake.lre.build = "b2";
