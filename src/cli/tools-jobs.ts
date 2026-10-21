@@ -158,8 +158,8 @@ export const JOB_TOOLS: readonly ToolModule[] = [
     cli: {
       command: "job-start",
       section: "Jobs",
-      usage: "job-start <worldId> <kind> [--book <id> …] [--book-id <id>] [--text <t>] [--instructions <t>] [--scope <placeId>] [--prose <t>] [--map-id <id>] [--turn <t> …] [--days <n>]",
-      summary: "Start a Build job: import_lore, index_book, index_text, refine, describe_map, playtest, check_world",
+      usage: "job-start <worldId> <kind> [<input options>]",
+      summary: "Start a Build job: import_lore --book <id> …, index_book --book-id <id>, index_text --text <t>, refine --instructions <t>, describe_map --scope <place> --prose <t> [--map-id <id>], playtest --turn <t> …, check_world [--days <n>]",
       positionals: ["worldId", "kind"],
       needs: 2,
       options: { "--book": { arg: "bookIds", as: "many" }, "--book-id": { arg: "bookId", as: "text" }, "--text": { arg: "text", as: "text" }, "--instructions": { arg: "instructions", as: "text" }, "--scope": { arg: "scope", as: "text" }, "--prose": { arg: "prose", as: "text" }, "--map-id": { arg: "mapId", as: "text" }, "--turn": { arg: "turns", as: "many" }, "--days": { arg: "days", as: "int" } },
