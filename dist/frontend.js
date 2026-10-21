@@ -29630,11 +29630,11 @@ function Invitations(props) {
 }
 function StoryMade(props) {
   return /* @__PURE__ */ u3(Section, {
-    title: "Changes the story made",
+    title: "Changes made in play",
     flush: true,
     children: [
       props.changes.length === 0 ? /* @__PURE__ */ u3(None, {
-        children: "The story hasn't changed their routine or schedules in this chat."
+        children: "Nothing in play has changed their routine or schedules in this chat."
       }, undefined, false, undefined, this) : null,
       /* @__PURE__ */ u3("div", {
         "data-lre-gm-list": "routine-story",
