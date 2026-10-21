@@ -334,17 +334,18 @@ function acquainted(state: Readonly<WorldState>, a: EntityId, b: EntityId): bool
  * Someone takes up a block of their day (DESIGN §8): its place and its activity (null leaves either
  * as it is), unless a hold keeps either, a fight under way keeps them (the combat pack's
  * `combat.engaged`) or the POV's routine can't take it there (stranded, or the place out of reach).
- * Arriving where the POV is says so. A block of their own plan (`holdUntil`, its end) holds its place
+ * Arriving where the POV is says so; `quiet`, it only notes, as an arrival a Live or Near character's
+ * routine makes in a skip never stops it. A block of their own plan (`holdUntil`, its end) holds its place
  * and activity for its span, as a trip does, so a routine's schedule edge inside it doesn't take them
  * back (DESIGN §24.8).
  */
-function takeUp(ctx: ReadContext, who: EntityId, place: PlaceId | null, activity: string | null, at: number, holdUntil?: number): LedgerEvent[] {
+function takeUp(ctx: ReadContext, who: EntityId, place: PlaceId | null, activity: string | null, at: number, holdUntil?: number, quiet = false): LedgerEvent[] {
   const out: LedgerEvent[] = [];
   const e = own(ctx.state.entities, who);
   if (!e || routineStays(ctx, who, place) || optionalQuery(ctx, "combat.engaged")?.(ctx, who) === true) return out;
   if (!held(ctx.state, who, "place", at) && place && own(ctx.world.places, place) && placeOfEntity(ctx.state, who) !== place) {
     out.push({ type: "set", entity: who, field: "place", value: place });
-    if (who !== ctx.world.pov && place === placeOfEntity(ctx.state, ctx.world.pov)) out.push({ type: ENGINE_EVENTS.signal, data: { class: "arrival", text: `${e.name} arrives.`, entity: who } });
+    if (who !== ctx.world.pov && place === placeOfEntity(ctx.state, ctx.world.pov)) out.push({ type: ENGINE_EVENTS.signal, data: { class: "arrival", text: `${e.name} arrives.`, entity: who, ...(quiet ? { stops: false } : {}) } });
   }
   if (activity !== null && !held(ctx.state, who, "activity", at) && e.fields.activity !== activity) out.push({ type: "set", entity: who, field: "activity", value: activity });
   if (holdUntil !== undefined && holdUntil > at) {
@@ -393,7 +394,9 @@ function liveBlock(ctx: ReadContext, who: EntityId, plan: DayPlan, block: DayPla
   const target = block.place ?? (edge && earlier.at(-1)?.place ? home : null);
   const place = target !== null && !routineYields(ctx, who, "place", wasPlace, opts) ? target : null;
   const doing = routineYields(ctx, who, "activity", wasDoing, opts) ? null : activity;
-  return takeUp(ctx, who, place, doing, at);
+  // The cast's routine moves them only in a skip, once the POV has left them; it never stops the skip.
+  const tier = skip && place !== null ? (optionalQuery(ctx, "minds.tier")?.(ctx, who) ?? "background") : "background";
+  return takeUp(ctx, who, place, doing, at, undefined, tier === "live" || tier === "near");
 }
 
 /**
