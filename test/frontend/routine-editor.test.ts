@@ -16,7 +16,7 @@ import { FIDELITIES } from "../../src/shared/minds";
 import { ALL_PACKS } from "../../src/packs/index";
 import type { JsonValue } from "../../src/shared/json";
 import type { RoutineBlock, RoutineDef, RoutineSettings } from "../../src/shared/routines";
-import { blockShapeProblems, DEFAULT_ROUTINE_SETTINGS, ROUTINE_AWARENESS, ROUTINE_INVITATIONS, ROUTINE_PLAN_BEND, ROUTINE_ROLES, ROUTINE_SOCIABILITY, routineSettingsOf, routineShapeProblems } from "../../src/shared/routines";
+import { blockShapeProblems, DEFAULT_ROUTINE_SETTINGS, ROUTINE_AWARENESS, ROUTINE_INVITATIONS, ROUTINE_PLAN_BEND, ROUTINE_ROLES, ROUTINE_SOCIABILITY, routineSettingsOf, routineShapeProblems, SKIP_LIVES } from "../../src/shared/routines";
 import type { StateView } from "../../src/shared/state-view";
 import type { EntityDef, WorldDoc } from "../../src/shared/world";
 import { Rig } from "../support/rig";
@@ -145,7 +145,9 @@ describe("Build → World → Routines and the story", () => {
     let value: RoutineSettings = { ...DEFAULT_ROUTINE_SETTINGS };
     const controls = () => {
       const tree = RoutineRoleSettings({ value, lint: [], disabled: false, onChange: (next) => void (value = next) });
-      return { roles: propsOf(tree, Seg), switches: propsOf(tree, HostSwitch) };
+      // A role control is the one that offers the roles (the time skip's offer the skip lives).
+      const roles = propsOf(tree, Seg).filter((seg) => (seg.options as { value: string }[]).every((o) => ROUTINE_ROLES.some((r) => r === o.value)));
+      return { roles, switches: propsOf(tree, HostSwitch) };
     };
     // One role control per level, in the ladder's order, then the narrator's switch and the Timelapse default's.
     expect(controls().roles.map((seg) => seg.value)).toEqual(FIDELITIES.map((level) => DEFAULT_ROUTINE_SETTINGS.roles[level]));
@@ -170,6 +172,23 @@ describe("Build → World → Routines and the story", () => {
     const draft = await send(routineSettingsWrite(worldId, value));
     expect([routineSettingsOf(draft).narrator, routineSettingsOf(draft).paletteFollowsRoutine]).toEqual([false, true]);
     expect(controls().switches.map((s) => s.checked)).toEqual([false, true]);
+  });
+
+  test("each level's time skip choice: pressed on the page, saved to the draft and read back", async () => {
+    const { worldId, send } = await portAlder();
+    let value: RoutineSettings = { ...DEFAULT_ROUTINE_SETTINGS };
+    const skips = () => propsOf(RoutineRoleSettings({ value, lint: [], disabled: false, onChange: (next) => void (value = next) }), Seg).filter((seg) => (seg.options as { value: string }[]).every((o) => SKIP_LIVES.some((s) => s === o.value)));
+    expect(skips().map((seg) => seg.value)).toEqual(FIDELITIES.map((level) => DEFAULT_ROUTINE_SETTINGS.skips[level]));
+    for (const [i, level] of FIDELITIES.entries()) {
+      for (const skip of SKIP_LIVES) {
+        const seg = skips()[i];
+        if (!seg) throw new Error(`no time skip control for ${level}`);
+        press(seg, skip);
+        const draft = await send(routineSettingsWrite(worldId, value));
+        expect([level, skip, routineSettingsOf(draft).skips[level]]).toEqual([level, skip, skip]);
+        expect(skips()[i]?.value).toBe(skip);
+      }
+    }
   });
 
   test("the Timelapse sheet's Follow my routine starts at the world's default and travels with the request", async () => {

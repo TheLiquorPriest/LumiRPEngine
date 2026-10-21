@@ -14,9 +14,10 @@ import type { JsonValue } from "../../shared/json";
 import type { LintIssue } from "../../shared/protocol";
 import type { Fidelity } from "../../shared/minds";
 import { FIDELITIES } from "../../shared/minds";
-import type { RoutineAwareness, RoutineInvitations, RoutinePlanBend, RoutineRole, RoutineSettings, RoutineSociability } from "../../shared/routines";
-import { AWARENESS_LABEL, DEFAULT_ROUTINE_SETTINGS, INVITATIONS_LABEL, PLAN_BEND_LABEL, ROUTINE_AWARENESS, ROUTINE_INVITATIONS, ROUTINE_PLAN_BEND, ROUTINE_ROLE_LABEL, ROUTINE_ROLES, ROUTINE_SOCIABILITY, routineSettingsOf, SOCIABILITY_LABEL } from "../../shared/routines";
+import type { RoutineAwareness, RoutineInvitations, RoutinePlanBend, RoutineRole, RoutineSettings, RoutineSociability, SkipLife } from "../../shared/routines";
+import { AWARENESS_LABEL, DEFAULT_ROUTINE_SETTINGS, INVITATIONS_LABEL, PLAN_BEND_LABEL, ROUTINE_AWARENESS, ROUTINE_INVITATIONS, ROUTINE_PLAN_BEND, ROUTINE_ROLE_LABEL, ROUTINE_ROLES, ROUTINE_SOCIABILITY, routineSettingsOf, SKIP_LIFE_LABEL, SKIP_LIVES, SOCIABILITY_LABEL } from "../../shared/routines";
 import { FIDELITY_LABEL } from "../../packs/minds/ui/ops";
+import { SKIP_NOTE } from "../../packs/castlife/ui/routines-ops";
 import { useApp } from "../app";
 import { Button, Field, HostSwitch, PageHeader, SaveBar, Seg, useBusy } from "../components";
 import { Icon } from "../icons";
@@ -109,6 +110,16 @@ export function RoutineRoleSettings(props: { value: RoutineSettings; lint: reado
         <p class="lre-minds-note">The GM can set it apart for one character in a chat. A world's schedules (weather, prices, bills, paydays, opening hours) and pay run whatever you pick.</p>
         <Issues issues={lintAt(lint, "routineSettings.roles")} />
       </FormGroup>
+      <FormGroup title="In a time skip">
+        <p class="lre-minds-note">How each level spends a time skip while their routine is informative. An enforced routine is always lived through a skip, and an off one never.</p>
+        {FIDELITIES.map((level) => (
+          <Field key={level} label={LEVEL_NAME[level]} help={value.roles[level] === "informative" ? SKIP_NOTE[value.skips[level]] : `Their routine is ${ROUTINE_ROLE_LABEL[value.roles[level]].toLowerCase()} here, so this applies only to characters the GM makes informative.`}>
+            <Seg<SkipLife> label={`${FIDELITY_LABEL[level]} characters in a time skip`} value={value.skips[level]} options={SKIP_LIVES.map((s) => ({ value: s, label: SKIP_LIFE_LABEL[s] }))} disabled={disabled} onChange={(skip) => props.onChange({ ...value, skips: { ...value.skips, [level]: skip } })} />
+          </Field>
+        ))}
+        <p class="lre-minds-note">The GM can set it apart for one character in a chat. Planned by the model makes one helper call at the skip's start for everyone it plans.</p>
+        <Issues issues={lintAt(lint, "routineSettings.skips")} />
+      </FormGroup>
       <FormGroup title="The narrator">
         <HostSwitch label="Tell the narrator people's usual routines" checked={value.narrator} disabled={disabled} onChange={(narrator) => props.onChange({ ...value, narrator })} />
         <p class="lre-minds-note">For the characters in the scene whose routine isn't off: what they usually do, as context the narrator may use, never what they must do.</p>
@@ -142,7 +153,7 @@ export function RoutineSettingsEditor() {
       <p class="lre-build-note">
         Whatever you pick, the story comes first for anyone in a scene with the player's character: a routine never moves them out of it, contradicts what's been told or interrupts play. These settings tune what routines are to the engine, and how far everyone else's days follow the story and its lore.
       </p>
-      <Issues issues={lint.filter((issue) => !["awareness", "invitations", "sociability", "planBend", "roles", "narrator", "paletteFollowsRoutine"].some((key) => issue.path === `routineSettings.${key}` || issue.path.startsWith(`routineSettings.${key}.`)))} />
+      <Issues issues={lint.filter((issue) => !["awareness", "invitations", "sociability", "planBend", "roles", "skips", "narrator", "paletteFollowsRoutine"].some((key) => issue.path === `routineSettings.${key}` || issue.path.startsWith(`routineSettings.${key}.`)))} />
       <RoutineRoleSettings value={value} lint={lint} disabled={busy} onChange={setValue} />
       <FormGroup title="Story and lore awareness">
         <p class="lre-minds-note">How strictly an enforced routine keeps to itself against what the story and its lore establish.</p>

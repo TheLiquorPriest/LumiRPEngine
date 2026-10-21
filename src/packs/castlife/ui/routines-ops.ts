@@ -8,7 +8,7 @@ import type { EntityId, ScheduleId } from "../../../shared/ids";
 import { nameOfId } from "../../../shared/maps";
 import type { Fidelity } from "../../../shared/minds";
 import type { EditOp } from "../../../shared/protocol";
-import type { BlockOrigin, ChatRoutineSource, EffectiveBlock, EffectiveSchedule, InvitationView, OwnerRef, RoutineAwareness, RoutineBlock, RoutineBlockId, RoutineChangeSummary, RoutineGmView, RoutineMode, RoutinePlace, RoutineRole, SourceView, StoryHoldView } from "../../../shared/routines";
+import type { BlockOrigin, ChatRoutineSource, EffectiveBlock, EffectiveSchedule, InvitationView, OwnerRef, RoutineAwareness, RoutineBlock, RoutineBlockId, RoutineChangeSummary, RoutineGmView, RoutineMode, RoutinePlace, RoutineRole, SkipLife, SourceView, StoryHoldView } from "../../../shared/routines";
 import { blockShapeProblems, isOff, PLAN_BEND_LABEL, ROUTINE_ROLE_LABEL } from "../../../shared/routines";
 import type { GmEntity } from "../../../shared/state-view";
 import type { Recurrence, ScheduleDef, ScheduleSlot } from "../../../shared/world";
@@ -76,6 +76,13 @@ export const ROLE_NOTE: Record<RoutineRole, string> = {
   informative: "The story and planning decide what they do; their routine and schedules are only context their mind and the narrator may weigh.",
   enforced: "The planner lives their routine and their schedules run whenever the story doesn't hold them, never in a scene with you.",
   off: "Their routine isn't used at all, not even as context.",
+};
+
+/** What each way of spending a time skip means, for someone whose routine is informative (Build's levels and the GM's per character). */
+export const SKIP_NOTE: Record<SkipLife, string> = {
+  stay: "They stay where the story has them while the time passes.",
+  routine: "They go about their usual routine through the skip, unless a story plan, a trip or an appointment covers them.",
+  model: "At the skip's start the helper model plans their time from their routine, plans and the story; if it can't, they stay.",
 };
 
 /** What each awareness does (DESIGN §8), for choosing one: it shapes only an enforced routine. */
@@ -279,10 +286,11 @@ export const HOLD_BY: Record<StoryHoldView["by"], string> = { story: "The story 
 
 /**
  * How they follow their routine in this chat: following it is the world's way, so it clears the
- * chat's mode; a null awareness is the world's, a null role their level's. All cleared clear the setting.
+ * chat's mode; a null awareness is the world's, a null role or skip life their level's. All cleared
+ * clear the setting.
  */
-export function followOp(entity: EntityId, mode: RoutineMode, awareness: RoutineAwareness | null, role: RoutineRole | null): EditOp {
-  return { op: "routine_follow", entity, mode: mode === "follows" ? null : mode, awareness, role };
+export function followOp(entity: EntityId, mode: RoutineMode, awareness: RoutineAwareness | null, role: RoutineRole | null, skips: SkipLife | null): EditOp {
+  return { op: "routine_follow", entity, mode: mode === "follows" ? null : mode, awareness, role, skips };
 }
 
 /** A block of their routine for this chat, added or changed: its shape must read (the backend stamps it as yours). Refused, with the problems, when it doesn't. */
