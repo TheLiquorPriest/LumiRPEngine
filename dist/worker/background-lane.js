@@ -25297,9 +25297,10 @@ var ROUTINE_SOCIABILITY = ["reserved", "usual", "outgoing"];
 var ROUTINE_PLAN_BEND = ["must", "strong", "standard", "ordinary"];
 var ROUTINE_ROLES = ["informative", "enforced", "off"];
 var SKIP_LIVES = ["stay", "routine", "model"];
+var SKIP_PLAN_CALLS = ["together", "parallel"];
 var DEFAULT_ROUTINE_ROLES = Object.freeze({ live: "informative", near: "informative", far: "informative", background: "enforced" });
 var DEFAULT_SKIP_LIVES = Object.freeze({ live: "model", near: "model", far: "model", background: "routine" });
-var DEFAULT_ROUTINE_SETTINGS = Object.freeze({ awareness: "balanced", invitations: "player", sociability: "usual", planBend: "standard", roles: DEFAULT_ROUTINE_ROLES, skips: DEFAULT_SKIP_LIVES, narrator: true, paletteFollowsRoutine: false });
+var DEFAULT_ROUTINE_SETTINGS = Object.freeze({ awareness: "balanced", invitations: "player", sociability: "usual", planBend: "standard", roles: DEFAULT_ROUTINE_ROLES, skips: DEFAULT_SKIP_LIVES, skipPlanCalls: "together", narrator: true, paletteFollowsRoutine: false });
 function routineSettingsOf(world) {
   const raw = isRecord(world.routineSettings) ? world.routineSettings : {};
   const pick = (v, allowed, fallback) => allowed.find((a) => a === v) ?? fallback;
@@ -25314,6 +25315,7 @@ function routineSettingsOf(world) {
     planBend: pick(raw.planBend, ROUTINE_PLAN_BEND, DEFAULT_ROUTINE_SETTINGS.planBend),
     roles: perLevel(raw.roles, ROUTINE_ROLES, DEFAULT_ROUTINE_ROLES),
     skips: perLevel(raw.skips, SKIP_LIVES, DEFAULT_SKIP_LIVES),
+    skipPlanCalls: pick(raw.skipPlanCalls, SKIP_PLAN_CALLS, DEFAULT_ROUTINE_SETTINGS.skipPlanCalls),
     narrator: typeof raw.narrator === "boolean" ? raw.narrator : DEFAULT_ROUTINE_SETTINGS.narrator,
     paletteFollowsRoutine: typeof raw.paletteFollowsRoutine === "boolean" ? raw.paletteFollowsRoutine : DEFAULT_ROUTINE_SETTINGS.paletteFollowsRoutine
   };

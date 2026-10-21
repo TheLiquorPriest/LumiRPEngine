@@ -24109,9 +24109,10 @@ var ROUTINE_SOCIABILITY = ["reserved", "usual", "outgoing"];
 var ROUTINE_PLAN_BEND = ["must", "strong", "standard", "ordinary"];
 var ROUTINE_ROLES = ["informative", "enforced", "off"];
 var SKIP_LIVES = ["stay", "routine", "model"];
+var SKIP_PLAN_CALLS = ["together", "parallel"];
 var DEFAULT_ROUTINE_ROLES = Object.freeze({ live: "informative", near: "informative", far: "informative", background: "enforced" });
 var DEFAULT_SKIP_LIVES = Object.freeze({ live: "model", near: "model", far: "model", background: "routine" });
-var DEFAULT_ROUTINE_SETTINGS = Object.freeze({ awareness: "balanced", invitations: "player", sociability: "usual", planBend: "standard", roles: DEFAULT_ROUTINE_ROLES, skips: DEFAULT_SKIP_LIVES, narrator: true, paletteFollowsRoutine: false });
+var DEFAULT_ROUTINE_SETTINGS = Object.freeze({ awareness: "balanced", invitations: "player", sociability: "usual", planBend: "standard", roles: DEFAULT_ROUTINE_ROLES, skips: DEFAULT_SKIP_LIVES, skipPlanCalls: "together", narrator: true, paletteFollowsRoutine: false });
 function routineSettingsOf(world) {
   const raw = isRecord(world.routineSettings) ? world.routineSettings : {};
   const pick = (v, allowed, fallback) => allowed.find((a) => a === v) ?? fallback;
@@ -24126,6 +24127,7 @@ function routineSettingsOf(world) {
     planBend: pick(raw.planBend, ROUTINE_PLAN_BEND, DEFAULT_ROUTINE_SETTINGS.planBend),
     roles: perLevel(raw.roles, ROUTINE_ROLES, DEFAULT_ROUTINE_ROLES),
     skips: perLevel(raw.skips, SKIP_LIVES, DEFAULT_SKIP_LIVES),
+    skipPlanCalls: pick(raw.skipPlanCalls, SKIP_PLAN_CALLS, DEFAULT_ROUTINE_SETTINGS.skipPlanCalls),
     narrator: typeof raw.narrator === "boolean" ? raw.narrator : DEFAULT_ROUTINE_SETTINGS.narrator,
     paletteFollowsRoutine: typeof raw.paletteFollowsRoutine === "boolean" ? raw.paletteFollowsRoutine : DEFAULT_ROUTINE_SETTINGS.paletteFollowsRoutine
   };
@@ -24275,7 +24277,7 @@ function routineShapeProblems(v) {
   });
   return out;
 }
-var SETTING_VALUES = { awareness: ROUTINE_AWARENESS, invitations: ROUTINE_INVITATIONS, sociability: ROUTINE_SOCIABILITY, planBend: ROUTINE_PLAN_BEND, roles: { levels: ROUTINE_ROLES }, skips: { levels: SKIP_LIVES }, narrator: "switch", paletteFollowsRoutine: "switch" };
+var SETTING_VALUES = { awareness: ROUTINE_AWARENESS, invitations: ROUTINE_INVITATIONS, sociability: ROUTINE_SOCIABILITY, planBend: ROUTINE_PLAN_BEND, roles: { levels: ROUTINE_ROLES }, skips: { levels: SKIP_LIVES }, skipPlanCalls: SKIP_PLAN_CALLS, narrator: "switch", paletteFollowsRoutine: "switch" };
 function routineSettingsProblems(v) {
   if (!isRecord(v))
     return ["routine settings are an object"];
@@ -69014,24 +69016,34 @@ async function planSkip(deps, input) {
   const people = Object.keys(input.state.entities).sort().filter((id) => kindIs(deps.registry, input.world, input.state.entities[id]?.kind ?? "", "person") && !isGone(input.state, id) && livesPlans(ctx, id) && skipLifeOf(ctx, id) === "model");
   if (people.length === 0)
     return null;
-  const brief = skipPlanBrief(ctx, people, from, to);
   const safe = povSafe(ctx);
   const reply = input.reply.slice(-REPLY_CAP);
-  const user = skipPlanText(ctx, brief, safe(reply) ? reply : "", input.journal.filter(safe));
+  const told = safe(reply) ? reply : "";
+  const journal = input.journal.filter(safe);
   const signal = within4(input.signal, "skipPlanMs", input.limit);
-  const failure = { reason: "" };
-  const raw = signal.aborted ? null : await deps.steps.helperJson("skip", SKIP_PLAN_SYSTEM, user, null, input.userId, signal, { failure, spared: true });
-  const record = (plan) => ({ type: ROUTINE_EVENTS.skipPlan, data: JSON.parse(JSON.stringify(plan)) });
-  if (raw === null) {
+  const groups = routineSettingsOf(input.world).skipPlanCalls === "parallel" ? people.map((id) => [id]) : [people];
+  const answers = await Promise.all(groups.map(async (group) => {
+    const brief = skipPlanBrief(ctx, group, from, to);
+    const failure = { reason: "" };
+    const raw = signal.aborted ? null : await deps.steps.helperJson("skip", SKIP_PLAN_SYSTEM, skipPlanText(ctx, brief, told, journal), null, input.userId, signal, { failure, spared: true });
+    if (raw !== null)
+      return { people: group.length, checked: checkSkipPlan(ctx, brief, raw), why: null };
     const fired = firedTimeout(signal);
-    const why = fired ? fired.message : failure.reason || "the call didn't answer";
-    deps.log(`skip plan for ${people.length} people failed: ${why}`);
-    return record({ from, to, plans: [], note: `The skip plan wasn't made (${why}), so everyone it would have planned keeps to their basic needs.` });
-  }
-  const checked = checkSkipPlan(ctx, brief, raw);
-  if (checked.dropped.length > 0)
-    deps.log(`skip plan dropped ${checked.dropped.length} block(s): ${checked.dropped.join("; ")}`);
-  return record({ from, to, plans: checked.plans });
+    return { people: group.length, checked: null, why: fired ? fired.message : failure.reason || "the call didn't answer" };
+  }));
+  const record = (plan) => ({ type: ROUTINE_EVENTS.skipPlan, data: JSON.parse(JSON.stringify(plan)) });
+  const dropped = answers.flatMap((a) => a.checked?.dropped ?? []);
+  if (dropped.length > 0)
+    deps.log(`skip plan dropped ${dropped.length} block(s): ${dropped.join("; ")}`);
+  const plans = answers.flatMap((a) => a.checked?.plans ?? []);
+  const failed = answers.filter((a) => a.why !== null);
+  if (failed.length === 0)
+    return record({ from, to, plans });
+  const why = failed[0]?.why ?? "the call didn't answer";
+  const missed = failed.reduce((n, a) => n + a.people, 0);
+  deps.log(`skip plan for ${missed} of ${people.length} people failed: ${why}`);
+  const note = missed === people.length ? `The skip plan wasn't made (${why}), so everyone it would have planned keeps to their basic needs.` : `The skip plan wasn't made for ${missed} of ${people.length} people (${why}), so they keep to their basic needs.`;
+  return record({ from, to, plans, note });
 }
 
 // src/engine/bounds.ts
@@ -69511,9 +69523,9 @@ function thisBuild(moduleUrl = import.meta.url) {
   const dir = moduleUrl.replace(/[^/]*$/, "");
   const path = pathOfFileUrl(`${dir}${KIT_FILE}`);
   const core = pathOfFileUrl(`${dir}${CORE_FILE}`);
-  const sha256 = "ef6e209146e056f444191dd4f957967f1272cd84e1ef2a3c4efe9bd09e0c9673";
+  const sha256 = "7203dd5c471130826deb2c6053643f20c8b02ff8fd2edbc4545dbc89da6418fc";
   const tools = ["18ab4cc48319d3329b4f414f8503d74f", "9748f93066a93461e251d2677fe4f3b6"].filter((f) => f !== undefined);
-  return { id: "04556a20", kit: sha256 !== undefined && path !== null && core !== null ? { path, core, sha256, api: KIT_API } : null, tools };
+  return { id: "d2deff6f", kit: sha256 !== undefined && path !== null && core !== null ? { path, core, sha256, api: KIT_API } : null, tools };
 }
 var BUILD_FILE = "agents/build.json";
 var USER_FILE = "agents.json";
@@ -71484,6 +71496,23 @@ function plainly(p, world, state) {
   return { whose, detail: `${subject}: ${parts.join(", ")}, from the next day.` };
 }
 var FIELDS = ["entity", "change", "label", "days", "start", "end", "minutes", "activity", "place", "with", "replaces"];
+var NOT_PLACE = { the: true, and: true, our: true, his: true, her: true, their: true };
+function wordsIn(s) {
+  return (s.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? []).filter((w) => w.length >= 2 && !NOT_PLACE[w]);
+}
+function placesFor(registry, world, state, said) {
+  const known = Object.keys(world.places).filter((id) => canSeePlace(registry, world, state, world.pov, id));
+  const exact = known.filter((id) => id === said || own(world.places, id)?.name.toLowerCase() === said.toLowerCase());
+  if (exact.length > 0)
+    return exact.slice(0, 1);
+  const words = wordsIn(said);
+  if (words.length === 0)
+    return [];
+  return known.filter((id) => {
+    const name = wordsIn(own(world.places, id)?.name ?? "");
+    return words.every((w) => name.some((n) => n.startsWith(w)));
+  });
+}
 function routineAsks(registry, world, state, said, text, secrets, known) {
   const ctx = registry.context(world, state);
   const asks = [];
@@ -71500,12 +71529,27 @@ function routineAsks(registry, world, state, said, text, secrets, known) {
       continue;
     if (!known(proposal) || findLeaks(proposal, secrets).length > 0)
       continue;
-    if ("code" in storyChange(proposal, ctx))
+    const placeWords = str17(proposal.place);
+    const open = placeWords !== "" && placeWords.toLowerCase() !== "home" && placeWords.toLowerCase() !== "work" && str17(proposal.change).toLowerCase() === "start";
+    const fits = open ? placesFor(registry, world, state, placeWords) : [];
+    const { place: _place, ...placeless } = proposal;
+    const variants = !open ? [proposal] : fits.length === 0 ? [placeless] : fits.map((id) => ({ ...proposal, place: id }));
+    const holding = variants.filter((v) => !("code" in storyChange(v, ctx)));
+    const first = holding[0];
+    if (!first)
       continue;
-    if (asks.some((a) => JSON.stringify(a.proposal) === JSON.stringify(proposal)))
+    if (asks.some((a) => JSON.stringify(a.proposal) === JSON.stringify(first)))
       continue;
-    const { whose, detail } = plainly(proposal, world, state);
-    asks.push({ proposal, question: `Would you like to add this to ${whose}?`, detail, added: `Added to ${whose}` });
+    const { whose } = plainly(first, world, state);
+    const base = { question: `Would you like to add this to ${whose}?`, added: `Added to ${whose}` };
+    if (holding.length > 1) {
+      const { detail } = plainly(placeless, world, state);
+      asks.push({ ...base, proposal: first, detail: `${detail} Which place?`, places: holding.map((v) => ({ label: `At ${own(world.places, str17(v.place))?.name ?? str17(v.place)}`, proposal: v })) });
+      continue;
+    }
+    const { detail } = plainly(first, world, state);
+    const quoted = text.toLowerCase().includes(placeWords.toLowerCase()) ? `"${placeWords}"` : "the place you named";
+    asks.push({ ...base, proposal: first, detail: open && fits.length === 0 ? `${detail} No place you know of fits ${quoted}, so it would have no set place.` : detail });
   }
   return asks;
 }
@@ -72678,7 +72722,7 @@ class Runtime {
     this.steps.onCallStart = (userId, purpose) => this.diag.callStart(userId, purpose);
     this.toolSupport = new ToolSupport(this.host);
     this.minds = { host: this.host, registry: this.registry, steps: this.steps, settings: this.settings, presets: this.presets };
-    this.ledger = new LedgerService(this.host, (chatId, userId) => this.resolveEnv(chatId, userId), new LedgerFold(this.registry, { fingerprint: "04556a20" }), (chatId) => messages.forget(chatId));
+    this.ledger = new LedgerService(this.host, (chatId, userId) => this.resolveEnv(chatId, userId), new LedgerFold(this.registry, { fingerprint: "d2deff6f" }), (chatId) => messages.forget(chatId));
     this.studio = new StudioBridge(this.host, this.worlds);
     this.worlds.onChange = (worldId, userId) => this.studio.worldChanged(worldId, userId);
     this.agents = new Agents(this.host, options.build ?? thisBuild(), async (userId) => (await this.settings.get(userId)).timeouts.mcpReconnectMs);
@@ -72832,7 +72876,8 @@ class Runtime {
     const [, early] = await Promise.all([intentTask, choose && budget.take(judging ? 1 : 0) ? choose() : null]);
     const routine = lastUser ? bridge.takeRoutineAsks(text) : [];
     if (lastUser && routine.length > 0) {
-      await this.chips.add(input.chatId, input.userId, routine.map((ask, i) => ({ id: `routine_ask:${lastUser.id}:${i}`, kind: "routine_ask", messageId: lastUser.id, label: ask.question, detail: ask.detail, actions: [{ id: "yes", label: "Yes", style: "primary" }, { id: "no", label: "No" }], expires: "next_send", payload: { proposal: { ...ask.proposal, turn: lastUser.id }, added: ask.added } })));
+      const turnOf = (proposal) => ({ ...proposal, turn: lastUser.id });
+      await this.chips.add(input.chatId, input.userId, routine.map((ask, i) => ({ id: `routine_ask:${lastUser.id}:${i}`, kind: "routine_ask", messageId: lastUser.id, label: ask.question, detail: ask.detail, actions: [...ask.places ? ask.places.map((p, n) => ({ id: `at:${n}`, label: p.label, ...n === 0 ? { style: "primary" } : {} })) : [{ id: "yes", label: "Yes", style: "primary" }], { id: "no", label: "No" }], expires: "next_send", payload: { proposal: turnOf(ask.proposal), added: ask.added, ...ask.places ? { places: ask.places.map((p) => turnOf(p.proposal)) } : {} } })));
       this.push.changed(input.chatId, input.userId);
     }
     const asked = bridge.askOf(text);
@@ -75510,9 +75555,11 @@ class Dispatcher {
           this.rt.push.changed(chatId, userId);
           return { applied: false, pending: false };
         }
-        if (choice !== "yes")
+        const pick = /^at:(\d+)$/.exec(choice);
+        if (choice !== "yes" && !pick)
           throw new RequestError("bad_request", `unknown choice ${choice}`);
-        const proposal = isRecord(chip.payload.proposal) ? JSON.parse(JSON.stringify(chip.payload.proposal)) : null;
+        const picked = pick ? Array.isArray(chip.payload.places) ? chip.payload.places[Number(pick[1])] : undefined : chip.payload.proposal;
+        const proposal = isRecord(picked) ? JSON.parse(JSON.stringify(picked)) : null;
         if (!proposal || proposal.type !== ROUTINE_CHANNEL)
           throw new RequestError("bad_request", "the chip has no routine change");
         const { state, world } = await this.head(chatId, userId);

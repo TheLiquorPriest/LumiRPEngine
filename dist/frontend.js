@@ -3832,9 +3832,11 @@ var ROUTINE_ROLES = ["informative", "enforced", "off"];
 var ROUTINE_ROLE_LABEL = { informative: "Informative", enforced: "Enforced", off: "Off" };
 var SKIP_LIVES = ["stay", "routine", "model"];
 var SKIP_LIFE_LABEL = { stay: "Stay put", routine: "Follow their routine", model: "Planned by the model" };
+var SKIP_PLAN_CALLS = ["together", "parallel"];
+var SKIP_PLAN_CALLS_LABEL = { together: "All in one call", parallel: "One call per person, at once" };
 var DEFAULT_ROUTINE_ROLES = Object.freeze({ live: "informative", near: "informative", far: "informative", background: "enforced" });
 var DEFAULT_SKIP_LIVES = Object.freeze({ live: "model", near: "model", far: "model", background: "routine" });
-var DEFAULT_ROUTINE_SETTINGS = Object.freeze({ awareness: "balanced", invitations: "player", sociability: "usual", planBend: "standard", roles: DEFAULT_ROUTINE_ROLES, skips: DEFAULT_SKIP_LIVES, narrator: true, paletteFollowsRoutine: false });
+var DEFAULT_ROUTINE_SETTINGS = Object.freeze({ awareness: "balanced", invitations: "player", sociability: "usual", planBend: "standard", roles: DEFAULT_ROUTINE_ROLES, skips: DEFAULT_SKIP_LIVES, skipPlanCalls: "together", narrator: true, paletteFollowsRoutine: false });
 var AWARENESS_LABEL = { story_first: "Story first", balanced: "Balanced", routine_first: "Routine first" };
 var INVITATIONS_LABEL = { off: "Off", player: "To the player only", everyone: "Between everyone" };
 var SOCIABILITY_LABEL = { reserved: "Reserved", usual: "Usual", outgoing: "Outgoing" };
@@ -3854,6 +3856,7 @@ function routineSettingsOf(world) {
     planBend: pick(raw.planBend, ROUTINE_PLAN_BEND, DEFAULT_ROUTINE_SETTINGS.planBend),
     roles: perLevel(raw.roles, ROUTINE_ROLES, DEFAULT_ROUTINE_ROLES),
     skips: perLevel(raw.skips, SKIP_LIVES, DEFAULT_SKIP_LIVES),
+    skipPlanCalls: pick(raw.skipPlanCalls, SKIP_PLAN_CALLS, DEFAULT_ROUTINE_SETTINGS.skipPlanCalls),
     narrator: typeof raw.narrator === "boolean" ? raw.narrator : DEFAULT_ROUTINE_SETTINGS.narrator,
     paletteFollowsRoutine: typeof raw.paletteFollowsRoutine === "boolean" ? raw.paletteFollowsRoutine : DEFAULT_ROUTINE_SETTINGS.paletteFollowsRoutine
   };
@@ -18047,10 +18050,24 @@ function RoutineRoleSettings(props) {
           }, level, false, undefined, this)),
           /* @__PURE__ */ u3("p", {
             class: "lre-minds-note",
-            children: "The GM can set it apart for one character in a chat. Planned by the model makes one helper call at the skip's start for everyone it plans."
+            children: "The GM can set it apart for one character in a chat."
           }, undefined, false, undefined, this),
           /* @__PURE__ */ u3(Issues, {
             issues: lintAt(lint, "routineSettings.skips")
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3(Field, {
+            label: "Plan a skip",
+            help: "One call is cheaper; one call per person keeps each answer small, which suits a large cast or a long skip.",
+            children: /* @__PURE__ */ u3(Seg, {
+              label: "How the model plans a time skip",
+              value: value.skipPlanCalls,
+              options: SKIP_PLAN_CALLS.map((c) => ({ value: c, label: SKIP_PLAN_CALLS_LABEL[c] })),
+              disabled,
+              onChange: (skipPlanCalls) => props.onChange({ ...value, skipPlanCalls })
+            }, undefined, false, undefined, this)
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3(Issues, {
+            issues: lintAt(lint, "routineSettings.skipPlanCalls")
           }, undefined, false, undefined, this)
         ]
       }, undefined, true, undefined, this),
