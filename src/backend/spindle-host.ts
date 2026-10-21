@@ -116,11 +116,17 @@ export function decodeMessage(raw: unknown, chatId: ChatId): HostMessage | null 
 
 const SWIPE_ACTIONS: Record<string, SwipeAction> = { added: "added", navigated: "navigated", updated: "updated", deleted: "deleted" };
 
-function decodeEvent<K extends HostEventName>(event: K, p: unknown): HostEventMap[K] | null;
-function decodeEvent(event: HostEventName, p: unknown): HostEventMap[HostEventName] | null {
+/** A host event's payload as the engine reads it; null when it isn't one (the fake host replays Lumiverse's raw payloads through it). */
+export function decodeEvent<K extends HostEventName>(event: K, p: unknown): HostEventMap[K] | null;
+export function decodeEvent(event: HostEventName, p: unknown): HostEventMap[HostEventName] | null {
   // A preset or a setting written, or a page closed, belongs to no chat (`{ id, preset }`, `{ key, value }`, `{ frontendSessionId }`).
   if (event === "PRESET_CHANGED") return { presetId: str(p, "id") ?? null };
-  if (event === "SETTINGS_UPDATED") return { key: str(p, "key") ?? null };
+  if (event === "SETTINGS_UPDATED") {
+    // A batch write (`settings.putMany`, how Lumiverse's pages save) names its keys in `keys`.
+    const key = str(p, "key");
+    const keys = isRecord(p) && Array.isArray(p.keys) ? p.keys.filter((k): k is string => typeof k === "string") : null;
+    return { keys: key !== undefined ? [key] : keys };
+  }
   if (event === "FRONTEND_SESSION_CLOSED") {
     const frontendSessionId = str(p, "frontendSessionId");
     return frontendSessionId ? { frontendSessionId } : null;

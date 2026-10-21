@@ -72,8 +72,6 @@ export interface TraceWithheld {
   names: readonly string[];
 }
 
-/** Hits a prefetch or a search may give; the token budget usually binds first. */
-const SEARCH_LIMIT = 6;
 /** Entries one `lore_list` answer names; the round's lore tokens usually bind first. */
 const LIST_LIMIT = 12;
 /** Asks one lookup round answers; the rest of a round's asks are dropped. */
@@ -238,7 +236,8 @@ export class StepLore {
   /** The prefetch: the index searched with the step's own inputs, at no extra call, within what the pinned lore left of its tokens. */
   prefetch(inputs: LoreInputs): void {
     if (this.setting.policy !== "prefetch" && this.setting.policy !== "prefetch+lookup") return;
-    this.take("prefetch", inputs.shown === undefined ? inputs.text : (inputs.shown ?? ""), loreSearch(this.reader, { query: inputs.text, links: inputs.links, purpose: this.purpose, effects: this.effects, limit: SEARCH_LIMIT, tokenBudget: Math.max(0, this.setting.tokens - this.pinTokens), skip: new Set(this.given.keys()) }));
+    // The step's lore tokens are the only limit on what it is given (DESIGN §5.4): every entry its inputs find, while they last.
+    this.take("prefetch", inputs.shown === undefined ? inputs.text : (inputs.shown ?? ""), loreSearch(this.reader, { query: inputs.text, links: inputs.links, purpose: this.purpose, effects: this.effects, tokenBudget: Math.max(0, this.setting.tokens - this.pinTokens), skip: new Set(this.given.keys()) }));
   }
 
   /** An entry's title as the trace may show it (§6.5): "A hidden entry" when it carries an unrevealed secret or names someone or somewhere the player doesn't know. */
@@ -414,7 +413,7 @@ export class StepLore {
         const hit = loreGet(this.reader, a.text, this.purpose, left, this.effects);
         result = { hits: hit ? [hit] : [], matched: hit ? 1 : 0, secret: hit?.secret === true ? 1 : 0 };
       } else {
-        result = loreSearch(this.reader, { query: a.text, ...(a.topic ? { topics: [topicIdOf(a.topic)] } : {}), purpose: this.purpose, effects: this.effects, limit: SEARCH_LIMIT, tokenBudget: left, skip: new Set(this.given.keys()) });
+        result = loreSearch(this.reader, { query: a.text, ...(a.topic ? { topics: [topicIdOf(a.topic)] } : {}), purpose: this.purpose, effects: this.effects, tokenBudget: left, skip: new Set(this.given.keys()) });
       }
       const fresh = this.take(a.kind, a.text, result);
       left = Math.max(0, left - fresh.reduce((s, h) => s + h.tokens, 0));

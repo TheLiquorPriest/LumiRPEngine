@@ -137,6 +137,12 @@ interface ChatSlot {
   snapshots: ChatSnapshots;
   /** Per message, the ledger last re-asserted after a clobber (as written) and how many times in a row. */
   reasserts: Map<MessageId, { text: string; count: number }>;
+  /**
+   * The windows the journal held when it was read: turns of a backend that stopped, whose
+   * generations are gone (DESIGN §5.1 step 7). Only these are closed when the chat is opened again;
+   * a generation under way in this backend keeps its window, however often a page resyncs.
+   */
+  leftOpen: Set<string>;
 }
 
 /** Open chats kept in memory; the least recently opened idle ones are evicted past this. */
@@ -308,6 +314,21 @@ export interface TurnContext {
 export type PreOutcome = { waiting: string };
 
 /**
+ * What a prepared turn is made from besides its chain and the journal (`TurnHooks.inputs`), and what
+ * the chat says when one changes before its reply starts (DESIGN §5.1).
+ */
+const TURN_INPUTS = {
+  revision: "the chat's world revision changed",
+  settings: "your RPEngine settings changed",
+  notes: "a note for the next reply was reworded or dismissed",
+} as const satisfies Record<string, string>;
+
+/** Each of a turn's other inputs (`TURN_INPUTS`), as one comparable value. */
+export type TurnInputs = Record<keyof typeof TURN_INPUTS, string>;
+
+const TURN_INPUT_NAMES = Object.keys(TURN_INPUTS) as (keyof typeof TURN_INPUTS)[];
+
+/**
  * Async work around the core's synchronous steps (DESIGN §5.1): the engine run's pre phase, plan
  * phase and sections, and `extract` before the commit, run here inside the chat's queue, so the
  * core then folds their results as plain data. `afterCommit` collects chips; `changed` fires after
@@ -345,10 +366,11 @@ export interface TurnHooks {
   /** The chat's world, read from its metadata alone (the guard's check); null when it isn't a world chat. */
   worldOf(chatId: ChatId, userId: UserId): Promise<WorldId | null>;
   /**
-   * What else the chat's sections are made from, as one key read from memory (DESIGN §5.1): the
-   * chat's world revision, the user's settings revision, and the active preset and its writes.
+   * What else the chat's sections are made from, each read from memory (DESIGN §5.1): the chat's
+   * world revision, the user's settings revision, the active preset and the presets written, and the
+   * chat's Outcome notes. Each is named, so a turn dropped for it says which changed.
    */
-  inputs(chatId: ChatId, userId: UserId): string;
+  inputs(chatId: ChatId, userId: UserId): TurnInputs;
   beforeCommit(input: TurnContext): Promise<void>;
   afterCommit(input: TurnContext): Promise<void>;
   changed(chatId: ChatId, userId: UserId): void;
@@ -422,7 +444,7 @@ interface Prepared {
   /** The chain it was planned on (`chainStamp`), the journal's epoch then, and the other inputs (`TurnHooks.inputs`). */
   stamp: string;
   epoch: number;
-  inputs: string;
+  inputs: TurnInputs;
   worldId: WorldId;
   delivered: Delivered;
   /** The guard's write of its sections, once a generation took it: what emptying them waits for. */
@@ -694,12 +716,19 @@ export class LedgerService {
   private fresh(chatId: ChatId, gate: Gate, p: Prepared, type: HostGenerationType, started: GenerationStartedEvent): boolean {
     if (p.generationId !== null || !(p.type === type || (isSwipe(p.type) && isSwipe(type)))) return false;
     if (isSwipe(type) && started.targetMessageId !== p.target) return false;
-    return this.unchanged(chatId, gate, p);
+    return this.changedSince(chatId, gate, p) === null;
   }
 
-  /** Whether nothing a prepared turn was made from changed: its chain, the journal, and the other inputs (DESIGN §5.1). */
-  private unchanged(chatId: ChatId, gate: Gate, p: Prepared): boolean {
-    return gate.mirror !== null && p.epoch === gate.epoch && p.inputs === (this.hooks?.inputs(chatId, gate.userId) ?? p.inputs) && chainStamp(gate.mirror, p.type, p.target) === p.stamp;
+  /**
+   * What changed since a prepared turn was made (DESIGN §5.1), in the chat's words: its chain, the
+   * journal, or one of the other inputs; null when nothing did.
+   */
+  private changedSince(chatId: ChatId, gate: Gate, p: Prepared): string | null {
+    if (gate.mirror === null || chainStamp(gate.mirror, p.type, p.target) !== p.stamp) return "a message of the chat was sent, edited, swiped or deleted";
+    if (p.epoch !== gate.epoch) return "a change was made to the chat's world (a fix, a confirmed change, detail opened)";
+    const now = this.hooks?.inputs(chatId, gate.userId) ?? p.inputs;
+    const input = TURN_INPUT_NAMES.find((name) => now[name] !== p.inputs[name]);
+    return input ? TURN_INPUTS[input] : null;
   }
 
   /**
@@ -710,10 +739,22 @@ export class LedgerService {
   private dropIfStale(chatId: ChatId): void {
     const gate = this.gates.get(chatId);
     const p = gate?.prepared;
-    if (!gate || !p || p.generationId !== null || this.unchanged(chatId, gate, p)) return;
+    const changed = gate && p && p.generationId === null ? this.changedSince(chatId, gate, p) : null;
+    if (!gate || !p || changed === null) return;
     gate.prepared = null;
-    this.diag?.end({ chatId, userId: gate.userId, turn: p.id }, { status: "skipped", reason: "the chat, its settings or its preset changed before its reply started; the engine runs again when you generate" });
+    this.notStarted(chatId, gate.userId, p, `${changed} after the engine ran and before the reply started`);
     this.drop(chatId, gate.userId, p);
+  }
+
+  /**
+   * A turn the engine prepared whose reply will never start (DESIGN §5.1): a finished run that
+   * generates nothing is never silent. Its turn ends failed with why, and the chat's last message
+   * gets the flag with a Retry, which runs the engine again and then the reply.
+   */
+  private notStarted(chatId: ChatId, userId: UserId, p: Prepared, why: string): void {
+    const at = { chatId, userId, turn: p.id };
+    this.diag?.end(at, { status: "failed", reason: `${why}, so nothing was generated` });
+    void this.hooks?.failed({ chatId, userId, turn: p.id, step: "stale", reason: why }).catch((error: unknown) => this.diag?.error(at, "restart", error, "the chat wasn't told its reply didn't start"));
   }
 
   /** The user's settings or preset changed (`TurnHooks.inputs`): each of their chats' waiting turns is checked. */
@@ -741,6 +782,16 @@ export class LedgerService {
     return page === undefined || (page.chatId === chatId && page.viewing);
   }
 
+  /**
+   * Whether a page has said it shows the chat on screen (hello, resync, `lre.page`). A page that
+   * never said anything may have no engine frontend to start a reply (DESIGN §5.1), so one that has
+   * said it shows the chat is asked instead.
+   */
+  private reports(session: string, chatId: ChatId): boolean {
+    const page = this.pages.get(session);
+    return page !== undefined && page.chatId === chatId && page.viewing;
+  }
+
   /** The page that last said it shows the chat on screen, or null. */
   private viewerOf(chatId: ChatId, userId: UserId): string | null {
     let last: string | null = null;
@@ -759,8 +810,9 @@ export class LedgerService {
    * A frontend said hello to the chat, or resynced: a turn the engine prepared that no generation
    * took yet is asked for again (DESIGN §5.1), so a page that slept through the first ask starts it.
    * Only the page holding the turn's claim is asked. A page showing the chat takes the claim when
-   * none holds it or its holder doesn't show the chat; any other page's activity line says the
-   * reply already started elsewhere.
+   * none holds it, or its holder hasn't said it shows the chat (it went elsewhere, or never said
+   * anything, as a page without the engine's frontend doesn't); any other page's activity line says
+   * the reply already started elsewhere.
    */
   askAgain(chatId: ChatId, userId: UserId, session?: string): void {
     const gate = this.gates.get(chatId);
@@ -772,7 +824,7 @@ export class LedgerService {
       return;
     }
     const here = this.shows(session, chatId);
-    if (here && p.holder !== session && (p.holder === null || !this.shows(p.holder, chatId))) p.holder = session;
+    if (here && p.holder !== session && (p.holder === null || !this.reports(p.holder, chatId))) p.holder = session;
     if (p.holder === session) this.host.frontend.send(restartPush(chatId, p), userId, session);
     else if (here) this.host.frontend.send({ lre: PROTOCOL_VERSION, type: "lre.activity", chatId, activity: { chatId, turn: p.id, state: "running", label: STEP_LABEL.elsewhere ?? "Already started in another window", since: Date.now() } }, userId, session);
   }
@@ -1096,9 +1148,11 @@ export class LedgerService {
       }
       const turn = core.take(halt.id);
       const as = restartAs(halt.type, observed);
-      // The page to start it: the one the stopped generation ran for when it shows the chat, else the
-      // page that last said it shows it; with none, the first page to show the chat claims it (`askAgain`).
-      const holder = halt.session !== undefined && this.shows(halt.session, chatId) ? halt.session : this.viewerOf(chatId, userId);
+      // The page to start it: the one the stopped generation ran for when it shows the chat, unless it
+      // never said so and another page did; else the page that last said it shows the chat; with none,
+      // the first page to show the chat claims it (`askAgain`).
+      const viewer = this.viewerOf(chatId, userId);
+      const holder = halt.session !== undefined && (this.reports(halt.session, chatId) || (viewer === null && this.shows(halt.session, chatId))) ? halt.session : viewer;
       const prepared: Prepared = { id: halt.id, type: halt.type, target: target?.id ?? null, turn: turn?.planned ? turn : null, stamp, epoch, inputs, worldId: gate.worldId, delivered, writing: null, as, holder, generationId: null };
       gate.prepared = prepared;
       // Anything that changed while the engine ran makes the turn stale at once: nothing is generated.
@@ -1161,11 +1215,15 @@ export class LedgerService {
     return result;
   }
 
-  /** Restart recovery and chat open: classify against the snapshot and close any window left open. */
+  /** Restart recovery and chat open: classify against the snapshot, and close the windows a stopped backend left open (never a turn under way here). */
   async open(chatId: ChatId, userId: UserId): Promise<void> {
     await this.run(chatId, userId, (core, observed) => {
       core.sync(observed);
-      if (core.journal.windows.length > 0) core.restart(observed);
+      const slot = this.chats.get(chatId);
+      const gone = new Set([...(slot?.leftOpen ?? [])].filter((id) => !this.generating.has(id)));
+      if (gone.size === 0) return;
+      core.restart(observed, gone);
+      for (const id of gone) slot?.leftOpen.delete(id);
     });
   }
 
@@ -1279,7 +1337,7 @@ export class LedgerService {
       // Snapshots are a shortcut: a missing or unreadable file only means a full fold.
       const snapshots = ChatSnapshots.parse(await this.host.storage.read(snapshotsPath(chatId), userId).catch(() => null));
       // A stamped journal differs from the stored text, so the next persist writes it.
-      const slot: ChatSlot = { core: new LedgerCore(journal, { ...env, snapshots }, this.folder), userId, queue: Promise.resolve(), written: reset ? null : raw, ops: 0, snapshots, reasserts: new Map() };
+      const slot: ChatSlot = { core: new LedgerCore(journal, { ...env, snapshots }, this.folder), userId, queue: Promise.resolve(), written: reset ? null : raw, ops: 0, snapshots, reasserts: new Map(), leftOpen: new Set([...journal.windows, ...Object.keys(journal.pending)]) };
       // The revisions its folds will ask for are loaded before anyone folds it.
       await slot.core.prepareWorlds(this.observe(chatId, userId, await this.host.chats.messages(chatId, userId)));
       this.chats.set(chatId, slot);

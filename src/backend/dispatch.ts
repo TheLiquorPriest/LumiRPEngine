@@ -27,8 +27,7 @@ import { TIME_CONTROLS, validMarkerBody } from "../engine/events";
 import { materializeIfNeeded } from "../engine/materialize";
 import { optionalService } from "../engine/pack-kit";
 import { rulesetFloor } from "../engine/registry-impl";
-import { applyTimeAdvance, clockFix, IN_FIGHT, parseOverrides, parseTarget } from "../engine/time";
-import { timelapseIntent } from "../engine/turn";
+import { applyTimeAdvance, clockFix, IN_FIGHT, parseTarget } from "../engine/time";
 import { definitionsLag, planUpgrade } from "../engine/upgrade";
 import { actionOdds } from "../engine/resolve";
 import { Working } from "../engine/working";
@@ -215,7 +214,6 @@ export class Dispatcher {
         return;
       case "lre.action": {
         await this.requireWorldChat(r.chatId, userId);
-        const bridge = this.rt.bridgeOf(r.chatId);
         // Words typed with the action describe the player's approach (the judge rates them); without
         // any, the message is only the action's label.
         const said = r.text?.trim() ?? "";
@@ -223,15 +221,12 @@ export class Dispatcher {
         if (r.action === TIMELAPSE_ACTION) {
           const target = parseTarget(r.params.target);
           if (!target) throw new RequestError("bad_request", "a timelapse needs a target");
-          const intent = timelapseIntent(target, stringRecord(parseOverrides(r.params.overrides)));
           text ||= `(Timelapse: ${neutralizeMacros(targetLabel(target))})`;
-          bridge?.setIntent(text, intent);
         } else {
           const { world } = await this.head(r.chatId, userId);
           const action = (hasOwn(world.actions, r.action) ? world.actions[r.action] : undefined) ?? this.rt.registry.actions.get(r.action);
           if (!action) throw new RequestError("not_found", `unknown action ${r.action}`);
           text ||= `(${neutralizeMacros(action.label)})`;
-          bridge?.setIntent(text, { action: r.action, params: r.params, probabilities: { [r.action]: 1 } });
         }
         const messageId = await this.rt.host.chats.appendUserMessage(r.chatId, text, { [LEDGER_NAMESPACE]: { action: r.action, params: r.params, source: r.source, ...(said !== "" ? { described: true } : {}) } }, true, userId);
         reply("lre.action", { messageId });
@@ -760,7 +755,6 @@ export class Dispatcher {
       const owner = state.entities[thing]?.fields.owner;
       const params: JsonObject = action === "reclaim" ? { item: thing } : { item: thing, to: typeof owner === "string" ? owner : "" };
       const text = neutralizeMacros(`(${def.label}: ${state.entities[thing]?.name ?? thing})`);
-      this.rt.bridgeOf(chatId)?.setIntent(text, { action, params, probabilities: { [action]: 1 } });
       await this.rt.host.chats.appendUserMessage(chatId, text, { [LEDGER_NAMESPACE]: { action, params, source: "chip" } }, true, userId);
       return { applied: true, pending: false };
     }
@@ -932,7 +926,6 @@ export class Dispatcher {
         if (!target) throw new RequestError("bad_request", "the chip has no target");
         const text = neutralizeMacros(`(Timelapse: ${targetLabel(target)})`);
         const overrides = chip.payload.allNote === true ? { invitation: "note", bill: "note", decline: "note", incident: "note", quest: "note", rule: "note", arrival: "note", overdue: "note", needs: "note", weather: "note" } : undefined;
-        this.rt.bridgeOf(chatId)?.setIntent(text, timelapseIntent(target, overrides));
         await this.rt.host.chats.appendUserMessage(chatId, text, { [LEDGER_NAMESPACE]: { action: TIMELAPSE_ACTION, params: JSON.parse(JSON.stringify({ target, ...(overrides ? { overrides } : {}) })) as JsonValue, source: "chip" } }, true, userId);
         return { applied: true, pending: false };
       }
@@ -1056,12 +1049,6 @@ function chipValue(chip: StoredChip, choice: string, payload: JsonObject | undef
   if (!input || !payload) return null;
   if (input.type === "money") return typeof payload.cents === "number" && Number.isSafeInteger(payload.cents) && payload.cents > 0 ? payload.cents : null;
   return typeof payload.value === "string" && input.options.some((o) => o.value === payload.value) ? payload.value : null;
-}
-
-function stringRecord(o: Record<string, string> | Partial<Record<string, string>>): Record<string, string> {
-  const out: Record<string, string> = {};
-  for (const [k, v] of Object.entries(o)) if (typeof v === "string") out[k] = v;
-  return out;
 }
 
 function targetLabel(t: TimelapseTarget): string {

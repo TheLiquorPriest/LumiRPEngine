@@ -260,7 +260,7 @@ describe("no stale outlets", () => {
     expect(atOutlet(rig, "lre_scene")).toMatch(/^\[Scene\]\n/);
   });
 
-  test("only the generation's own preset counts: another preset saved, the same one saved with nothing the sections use changed, or pages reporting other presets drop nothing", async () => {
+  test("only the generation's own preset counts: another preset saved, the same one saved with nothing the sections use changed, or old pages still reporting presets drop nothing", async () => {
     const rig = new Rig();
     rig.host.presetPlacesOutlets = true;
     rig.host.presetBlocks = [block("Story", "{{outlet::lre_scene}}"), block("Style", "Write tersely.")];
@@ -276,10 +276,10 @@ describe("no stale outlets", () => {
     rig.host.emitPresetChanged("workshop");
     rig.host.emitPresetChanged("preset-1");
     for (const [page, presetId] of [["desk", "preset-1"], ["phone", "workshop"], ["tablet", null]] as const) rig.body(await rig.send({ type: "lre.hello", chatId, presetId }, page));
+    // A page from before the backend stopped reading reports still sends one with its preset change: it reads as a card request.
+    expect(rig.body(await rig.send({ type: "lre.preset", op: "active", presetId: "workshop" }, "phone")).card).toMatchObject({ preset: { name: expect.any(String) } });
     await rig.host.settle();
-    const turn = rig.host.restarts.at(-1)?.turn;
     rig.host.restarts.length = 0;
-    expect(rig.body(await rig.send({ type: "lre.restart", chatId, turn }, "page")).start).toBe(true);
     const reply = await rig.host.begin(chatId, { type: "regenerate" });
     expect(reply.halted).toBeUndefined();
     expect(rig.host.quietCalls.length).toBe(calls);

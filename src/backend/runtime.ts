@@ -26,10 +26,10 @@ import { needsJudge, outcomeChoices, policyFor, policyOf, type Verdict } from ".
 import type { EngineTurnPlan, QueueStop } from "../engine/turn";
 import { timelapseIntent } from "../engine/turn";
 import { checkOf } from "../engine/checks";
-import { applyTimeAdvance, fightHoldsClock, IN_FIGHT, parseOverrides, parseTarget } from "../engine/time";
+import { applyTimeAdvance, fightHoldsClock, IN_FIGHT, nextDayPart, parseOverrides, parseTarget, typedSpan } from "../engine/time";
 import { EXTERNAL_ACCOUNT_PREFIX } from "../engine/events";
 import { boundProposal } from "../engine/bounds";
-import { calendarOf, clockOfStamp, dateAt, formatClock, formatHHMM, nextTimeOfDay, placeOffset, weekdayName } from "../engine/calendar";
+import { calendarOf, clockOfStamp, dateAt, formatClock, formatHHMM, placeOffset, weekdayName } from "../engine/calendar";
 import type { ChainMessage } from "../engine/ledger/chain";
 import { LedgerFold } from "../engine/ledger/fold";
 import type { LedgerCore, LedgerEnv } from "../engine/ledger/journal";
@@ -58,7 +58,7 @@ import { DEFAULT_SECTIONS, EngineBook, renderSection, sectionsOf, sectionTokens 
 import { ChatPrefs } from "./chat-prefs";
 import { ChipStore, idAfterSwipeDelete, type StoredChip } from "./chips";
 import type { DryRun, HostPort } from "./host";
-import { LedgerService, toChain, type Delivered, type PreOutcome, type TurnContext, type TurnHooks } from "./ledger-io";
+import { LedgerService, toChain, type Delivered, type PreOutcome, type TurnContext, type TurnHooks, type TurnInputs } from "./ledger-io";
 import { MessageCache } from "./message-cache";
 import { StatePush } from "./push";
 import { effectiveMode, recordOutcome, SettingsStore } from "./settings-store";
@@ -803,6 +803,9 @@ export class Runtime implements TurnHooks {
     const text = lastUser ? (lastUser.swipes[lastUser.swipeId] ?? "") : "";
     const render = input.core.renderState(input.observed);
     if (!render) return;
+    // What the bridge keeps for these words is one turn's (DESIGN §5.1): the same words in a later
+    // turn, or this turn after an earlier message changed, are read again; a Re-run or a Retry of it isn't.
+    bridge.begin(text, input.core.planState(p.generationId, input.observed)?.parentPath ?? "");
     const budget = phaseBudget(settings, "pre", input.signal);
     this.preBudgets.set(p.generationId, budget);
     trimMap(this.preBudgets);
@@ -1084,7 +1087,7 @@ export class Runtime implements TurnHooks {
     const lore = this.stepLore(run, at, { text: `${text}\n${this.trackWords(render.world, render.state)}`, links: this.sceneLinks(render.world, render.state) });
     if (run.config.route?.provider === "decision") {
       // A Decision route answers which action (or none); a helper call fills its params when it has any.
-      const criteria: Record<string, string> = { none: "Not an action: speech, out-of-character text, a request, a feeling or a recap." };
+      const criteria: Record<string, string> = { none: "Not an action: speech, a request, a feeling, a recap, or out-of-character text that doesn't say time passes." };
       for (const c of catalog) criteria[c.id] = c.description ? `${c.label}: ${c.description}` : c.label;
       const answer = await this.steps.decide("interpret", { text, scene: context.scene.lines, recent: context.scene.recent }, { action: { type: "choice", instructions: run.template?.template ?? "Which engine action does the player character deliberately take in this typed input?", criteria } }, run.config, userId, budget.signal, lore, run.guidance);
       const a = answer?.answers.action;
@@ -1124,13 +1127,15 @@ export class Runtime implements TurnHooks {
     // §5.2), each piece only when it may be (`offeredNext`); "" when it may not.
     const chipText = (piece: string): string => offeredNext(this.registry, render.world, render.state, piece, text, secrets) ?? "";
     let next = (result.next ?? []).map(chipText);
-    // A bare time span reads as the timelapse itself, which plays alone: anything after it is offered
-    // in words once it has run. One after another action ("I head home and sleep until the next
-    // morning") is offered once the actions have run.
-    const timeOnly = result.action === TIMELAPSE_ACTION ? result.params : !result.action && result.then ? result.then : null;
-    if (timeOnly) {
+    // A time skip, the timelapse itself or time with no action before it (DESIGN §9.2), plays alone:
+    // anything after it is offered in words once it has run. Time after another action ("I head home
+    // and sleep until the next morning") is offered once the actions have run. The read names the
+    // skip; its span is the read's own (its params, else a `then` it split off), else the one the
+    // message states when it states exactly one, so a chosen skip isn't lost to a half-filled answer.
+    if (result.action === TIMELAPSE_ACTION || (!result.action && result.then !== undefined)) {
       bridge.setNext(text, joinActions([...(result.queue ?? []).map((q) => chipText(q.text)), ...next]) || null);
-      const target = interpretedTarget(timeOnly, render.world, render.state, text);
+      const target = (result.action === TIMELAPSE_ACTION ? interpretedTarget(result.params, render.world, render.state, text) : null) ?? (result.then ? interpretedTarget(result.then, render.world, render.state, text) : null) ?? typedSpan(calendarOf(render.world), render.state.clock, text);
+      if (!target) this.host.log("info", `[LumiRPEngine] interpret: lets time pass but states no span it can read; the turn plays as roleplay`, userId);
       // A short span runs in the turn; a longer one is offered (a misread can't skip days unasked).
       const over = target?.type === "duration" && target.minutes > INTERPRETED_TIMELAPSE_CAP;
       bridge.setOffer(text, over ? target : null);
@@ -1958,11 +1963,15 @@ export class Runtime implements TurnHooks {
   /**
    * What a chat's sections are made from besides its messages and journal, read from memory for the
    * guard (DESIGN §5.1): the chat's world revision, the user's settings revision (section budgets,
-   * secrecy, minds), the active Loom preset and the presets written since start (which outlets it
-   * places), and the chat's Outcome notes (a decline reworded or dismissed on its chip).
+   * secrecy, minds) and the chat's Outcome notes (a decline reworded or dismissed on its chip). The
+   * preset isn't one: the reply's guard checks the one that reply is assembled with (`fill`).
    */
-  inputs(chatId: ChatId, userId: UserId): string {
-    return [this.runs.get(`${userId}\u0000${chatId}`)?.revision ?? "", this.settings.revision(userId), this.outcomeNotes.revision(chatId, userId)].join("\u0000");
+  inputs(chatId: ChatId, userId: UserId): TurnInputs {
+    return {
+      revision: this.runs.get(`${userId}\u0000${chatId}`)?.revision ?? "",
+      settings: String(this.settings.revision(userId)),
+      notes: String(this.outcomeNotes.revision(chatId, userId)),
+    };
   }
 
   /**
@@ -2186,13 +2195,14 @@ export class Runtime implements TurnHooks {
     const last = (await this.host.chats.messages(input.chatId, input.userId)).at(-1);
     if (!last) return;
     // "interpret call failed: …" reads as "Reading your action: …"; a mind's record already says whose,
-    // and a refused earlier message's reply says why and what to do instead: no Retry can start it.
+    // and a refused earlier message's reply says why and what to do instead: no Retry can start it. A
+    // finished run whose reply never started (`stale`) says what changed; its Retry runs the engine again.
     const why = (input.reason.startsWith(`${input.step} `) ? input.reason.slice(input.step.length + 1) : input.reason).replace(/(?:^|\b)(?:the )?call failed: /g, "");
-    const said = input.step === "mind" || input.step === "target" ? why : `${(STEP_LABEL[input.step] ?? input.step).replace(/…$/, "")}: ${why}`;
+    const said = input.step === "mind" || input.step === "target" || input.step === "stale" ? why : `${(STEP_LABEL[input.step] ?? input.step).replace(/…$/, "")}: ${why}`;
     const cleared = input.step === "clear";
     const detail = `${said.charAt(0).toUpperCase()}${said.slice(1)}${cleared ? ". Nothing went out with them; try again, and if it keeps failing, Diagnostics shows each attempt." : ""}`;
     const retry = input.step === "target" || cleared ? [] : [{ id: "regenerate", label: "Retry", style: "primary" as const }];
-    const label = cleared ? "An earlier turn's sections couldn't be cleared, so nothing was generated" : "The engine didn't finish, so nothing was generated";
+    const label = cleared ? "An earlier turn's sections couldn't be cleared, so nothing was generated" : input.step === "stale" ? "The reply didn't start, so nothing was generated" : "The engine didn't finish, so nothing was generated";
     await this.chips.add(input.chatId, input.userId, [{ id: `engine_failed:${input.turn}`, kind: "engine_failed", messageId: last.id, label, detail, actions: [...retry, { id: "diagnostics", label: "Diagnostics" }], expires: "next_send", payload: {} }]);
     this.push.changed(input.chatId, input.userId);
   }
@@ -2409,22 +2419,25 @@ export const TYPE_LABELS: Record<ExtractionType, string> = {
 /** The longest typed timelapse a turn runs on its own (minutes); longer ones are offered as a chip. */
 export const INTERPRETED_TIMELAPSE_CAP = 1440;
 
-/** A "next" day part closer than this is the one after it: "sleep until the next morning" at 07:14 means tomorrow's. */
-const NEXT_DAY_PART_GAP = 180;
-
 /**
- * A typed timelapse's target from `interpret` params (DESIGN §9.2): `at` a stated day and time
- * ("YYYY-MM-DD HH:MM", local to where the POV is, as the HUD shows it), else `until` a day part (or
- * the next one), shift or commitment, else `minutes`. A stated time that has passed or lies beyond a
- * timelapse's reach is still the target, so the turn refuses it with its note as it does any target
- * it can't reach; text that isn't a day and time the calendar has is no stated time.
+ * A typed timelapse's target from `interpret`'s read of it (DESIGN §9.2): its `span`, the player's
+ * own words for how long or until when, read the same way every time (`typedSpan`); else `at` a
+ * stated day and time ("YYYY-MM-DD HH:MM", local to where the POV is, as the HUD shows it); else
+ * `until`, in the player's words ("later that evening", "tomorrow morning") or as a day part (or
+ * the next one), shift or commitment; else `minutes`. A stated time that has passed or lies beyond
+ * a timelapse's reach is still the target, so the turn refuses it with its note as it does any
+ * target it can't reach; text that isn't a day and time the calendar has is no stated time.
  */
 export function interpretedTarget(params: JsonObject, world: WorldDoc, state: Readonly<WorldState>, text: string): TimelapseTarget | null {
   const cal = calendarOf(world);
   const now = state.clock;
+  const said = typeof params.span === "string" ? typedSpan(cal, now, params.span) : null;
+  if (said) return said;
   const local = typeof params.at === "string" ? clockOfStamp(cal, params.at) : null;
   if (local !== null) return { type: "at", at: local - placeOffset(world, local, placeOfEntity(state, world.pov)) };
   const raw = typeof params.until === "string" ? params.until.trim().toLowerCase() : "";
+  const spoken = raw === "" ? null : typedSpan(cal, now, raw);
+  if (spoken) return spoken;
   const next = /^(the\s+)?(next|tomorrow)\b/.test(raw);
   const until = raw.replace(/^(the\s+)?(next|tomorrow)\s*/, "");
   const idx = cal.dayParts.findIndex((d) => d.id.toLowerCase() === until || d.label.toLowerCase() === until);
@@ -2432,15 +2445,13 @@ export function interpretedTarget(params: JsonObject, world: WorldDoc, state: Re
   if (part) {
     // The model may drop the "next" the player typed ("…sleep until the next morning" → until "morning").
     const words = [until, part.label.toLowerCase()].map((w) => w.replace(/[^a-z0-9 ]/g, "")).filter((w) => w !== "");
-    if (next || /\btomorrow\b/i.test(text) || new RegExp(`\\bnext\\s+(${words.join("|")})\\b`, "i").test(text)) {
-      const start = cal.partStarts[idx] ?? 0;
-      const at = nextTimeOfDay(cal, now, start);
-      return { type: "at", at: at - now < NEXT_DAY_PART_GAP ? nextTimeOfDay(cal, at, start) : at };
-    }
+    if (next || /\btomorrow\b/i.test(text) || new RegExp(`\\bnext\\s+(${words.join("|")})\\b`, "i").test(text)) return nextDayPart(cal, now, idx);
     return { type: "day_part", dayPart: part.id };
   }
   if (until === "shift" || until === "commitment") return { type: until };
-  const minutes = typeof params.minutes === "number" && Number.isFinite(params.minutes) ? Math.round(params.minutes) : 0;
+  // A number, or one written as text ("90").
+  const given = typeof params.minutes === "string" && /^\s*\d+(?:\.\d+)?\s*$/.test(params.minutes) ? Number(params.minutes) : params.minutes;
+  const minutes = typeof given === "number" && Number.isFinite(given) ? Math.round(given) : 0;
   return minutes > 0 ? { type: "duration", minutes } : null;
 }
 

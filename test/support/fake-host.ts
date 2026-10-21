@@ -32,10 +32,13 @@ import type {
   QuietToolCall,
 } from "../../src/backend/host";
 import { ENGINE_EXTENSION, STUDIO_EXTENSION } from "../../src/shared/studio-bridge";
+import { decodeEvent } from "../../src/backend/spindle-host";
 import { FakeRpcPool } from "./fake-rpc";
 
 export interface FakeMessage {
   id: MessageId;
+  /** The host's `index_in_chat`: one past the chat's highest when the message is made, never renumbered after a deletion. */
+  index: number;
   isUser: boolean;
   name: string;
   swipes: string[];
@@ -159,7 +162,7 @@ export class FakeHost implements HostPort {
   rpc: HostPort["rpc"] = this.rpcPool.port(ENGINE_EXTENSION);
 
   chats: HostPort["chats"] = {
-    messages: async (chatId) => this.chat(chatId).messages.map((m, index) => this.toHost(chatId, m, index)),
+    messages: async (chatId) => this.chat(chatId).messages.map((m) => this.toHost(chatId, m)),
     writeMetadata: async (chatId, messageId, bag) => {
       const m = this.message(chatId, messageId);
       m.bag = structuredClone(bag);
@@ -431,7 +434,7 @@ export class FakeHost implements HostPort {
     const id = `chat-${++this.nextId}`;
     const chat: FakeChat = { id, name: `Chat ${this.nextId}`, metadata: {}, messages: [] };
     this.chatsById.set(id, chat);
-    if (greeting !== undefined) chat.messages.push({ id: this.newId("m"), isUser: false, name: "Narrator", swipes: [greeting], swipeId: 0, bag: {} });
+    if (greeting !== undefined) this.append(chat, { id: this.newId("m"), isUser: false, name: "Narrator", swipes: [greeting], swipeId: 0, bag: {} });
     return id;
   }
 
@@ -455,23 +458,25 @@ export class FakeHost implements HostPort {
     return `${prefix}${++this.nextId}`;
   }
 
-  private toHost(chatId: ChatId, m: FakeMessage, index: number): HostMessage {
-    return { id: m.id, chatId, index, isUser: m.isUser, name: m.name, content: m.swipes[m.swipeId] ?? "", swipeId: m.swipeId, swipes: [...m.swipes], metadata: structuredClone(m.bag) };
+  /** A new message at the chat's end, numbered as the host numbers it (`createMessage`: one past the highest `index_in_chat`). */
+  append(chat: FakeChat, message: Omit<FakeMessage, "index">): FakeMessage {
+    const m: FakeMessage = { ...message, index: chat.messages.reduce((top, x) => Math.max(top, x.index), -1) + 1 };
+    chat.messages.push(m);
+    return m;
+  }
+
+  private toHost(chatId: ChatId, m: FakeMessage): HostMessage {
+    return { id: m.id, chatId, index: m.index, isUser: m.isUser, name: m.name, content: m.swipes[m.swipeId] ?? "", swipeId: m.swipeId, swipes: [...m.swipes], metadata: structuredClone(m.bag) };
   }
 
   private hostMessage(chatId: ChatId, messageId: MessageId): HostMessage {
-    const c = this.chat(chatId);
-    const index = c.messages.findIndex((m) => m.id === messageId);
-    const m = c.messages[index];
-    if (!m) throw new Error(`no message ${messageId}`);
-    return this.toHost(chatId, m, index);
+    return this.toHost(chatId, this.message(chatId, messageId));
   }
 
   // ------------------------------------------------------------------ user operations
 
   sendUser(chatId: ChatId, text: string, metadata: JsonObject = {}): MessageId {
-    const m: FakeMessage = { id: this.newId("u"), isUser: true, name: "User", swipes: [text], swipeId: 0, bag: structuredClone(metadata) };
-    this.chat(chatId).messages.push(m);
+    const m = this.append(this.chat(chatId), { id: this.newId("u"), isUser: true, name: "User", swipes: [text], swipeId: 0, bag: structuredClone(metadata) });
     this.emit("MESSAGE_SENT", { chatId, message: this.hostMessage(chatId, m.id) });
     return m.id;
   }
@@ -562,6 +567,12 @@ export class FakeHost implements HostPort {
     this.emit("FRONTEND_SESSION_CLOSED", { frontendSessionId: session });
   }
 
+  /** The user's settings are written (`SETTINGS_UPDATED`): a Lumiverse page saves its settings as one batch naming every key (`settings.putMany`), read as the engine reads the host's payload. */
+  settingsSaved(keys: string[]): void {
+    const event = decodeEvent("SETTINGS_UPDATED", { keys });
+    if (event) this.emit("SETTINGS_UPDATED", event);
+  }
+
   /** Host restart: in-flight generations vanish and their staged empty replies are removed; the extension's handlers go with it. */
   restart(): void {
     for (const g of this.inFlight.values()) {
@@ -623,8 +634,7 @@ export class FakeHost implements HostPort {
     let targetSwipeId: number | null = 0;
     if (type === "normal") {
       if (!opts.createAtEnd) {
-        const m: FakeMessage = { id: this.newId("m"), isUser: false, name: "Narrator", swipes: [""], swipeId: 0, bag: {} };
-        c.messages.push(m);
+        const m = this.append(c, { id: this.newId("m"), isUser: false, name: "Narrator", swipes: [""], swipeId: 0, bag: {} });
         this.emit("MESSAGE_SENT", { chatId, message: this.hostMessage(chatId, m.id) });
         g.messageId = m.id;
         targetMessageId = m.id;
@@ -882,8 +892,7 @@ export class FakeHost implements HostPort {
       return;
     }
     if (g.type === "normal" && !g.messageId) {
-      const m: FakeMessage = { id: this.newId("m"), isUser: false, name: "Narrator", swipes: [text], swipeId: 0, bag: {} };
-      this.chat(chatId).messages.push(m);
+      const m = this.append(this.chat(chatId), { id: this.newId("m"), isUser: false, name: "Narrator", swipes: [text], swipeId: 0, bag: {} });
       g.messageId = m.id;
       this.emit("MESSAGE_SENT", { chatId, message: this.hostMessage(chatId, m.id) });
     } else {

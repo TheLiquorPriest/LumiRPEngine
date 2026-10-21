@@ -37,7 +37,8 @@ import type { FoldTypes } from "./reference";
 
 /** What the core needs to plan a turn and read a reply. Supplied by the engine (and by test packs). */
 export interface TurnModel {
-  plan(input: { state: WorldState; ctx: ReadContext; seed: string; kind: GenerationKind; userTexts: string[] }): LedgerEvent[];
+  /** `parentPath` is the path the turn is planned at: the chain before its reply, its user messages included. */
+  plan(input: { state: WorldState; ctx: ReadContext; seed: string; kind: GenerationKind; userTexts: string[]; parentPath: PathHash }): LedgerEvent[];
   read(input: { state: WorldState; ctx: ReadContext; seed: string; text: string }): LedgerEvent[];
 }
 
@@ -537,10 +538,10 @@ export class LedgerCore {
    * reads it, so it reaches its beats in the state the plan will (DESIGN §24.7). Pure; null when the
    * turn gets no plan.
    */
-  planState(generationId: GenerationId, observed: readonly ChainMessage[]): { state: WorldState; world: WorldDoc } | null {
+  planState(generationId: GenerationId, observed: readonly ChainMessage[]): { state: WorldState; world: WorldDoc; parentPath: PathHash } | null {
     const p = this.journal.pending[generationId];
     const base = p && p.kind !== "continue" && p.kind !== "impersonate" ? this.planBase(p, observed) : null;
-    return base ? { state: base.state, world: base.world } : null;
+    return base ? { state: base.state, world: base.world, parentPath: base.parentPath } : null;
   }
 
   /** What `plan` folds before it plans; null under a pause or without the world. */
@@ -600,7 +601,7 @@ export class LedgerCore {
     }
     const seed = world.seedMode === "same_roll" ? hashParts("lre.seed", this.env.run.runSeed, parentPath) : this.env.newSeed();
     const ctx = this.env.types.context(world, state);
-    const planned = this.env.model.plan({ state, ctx, seed, kind: p.kind === "renarrate" ? "swipe" : p.kind, userTexts: users });
+    const planned = this.env.model.plan({ state, ctx, seed, kind: p.kind === "renarrate" ? "swipe" : p.kind, userTexts: users, parentPath });
     const events = applyValidUnits(this.env.types, planned, state, (s) => this.env.types.context(world, s));
     // A Re-narrate that can't copy its source (none, or the chain changed under it) is a Re-run.
     if (p.kind === "renarrate") p.kind = "swipe";
@@ -1078,9 +1079,13 @@ export class LedgerCore {
     return true;
   }
 
-  /** Restart recovery (DESIGN §5.1 step 7): every open window closes. */
-  restart(observed: readonly ChainMessage[]): void {
+  /**
+   * Restart recovery (DESIGN §5.1 step 7): the windows of `gone`, generations a stopped backend left
+   * open, close. A turn under way keeps its pending entry, so its reply is still read and recorded.
+   */
+  restart(observed: readonly ChainMessage[], gone: ReadonlySet<GenerationId>): void {
     for (const p of Object.values(this.journal.pending)) {
+      if (!gone.has(p.generationId)) continue;
       const index = p.messageId ? observed.findIndex((m) => m.id === p.messageId) : -1;
       const m = index >= 0 ? observed[index] : undefined;
       const saved = m ? (m.swipes[p.swipeId ?? m.swipeId] ?? "") : "";

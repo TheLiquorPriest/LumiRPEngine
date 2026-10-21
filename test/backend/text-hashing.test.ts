@@ -28,7 +28,7 @@ describe("a long chat's texts", () => {
     const chat = rig.host.chat(chatId);
     for (let i = 0; i < 60; i++) {
       const isUser = i % 2 === 0;
-      chat.messages.push({ id: `long-${i}`, isUser, name: isUser ? "You" : "Narrator", swipes: [`${"The tide turns over the harbor stones. ".repeat(100)}(${i})`], swipeId: 0, bag: {} });
+      rig.host.append(chat, { id: `long-${i}`, isUser, name: isUser ? "You" : "Narrator", swipes: [`${"The tide turns over the harbor stones. ".repeat(100)}(${i})`], swipeId: 0, bag: {} });
     }
     rig.body(await rig.send({ type: "lre.world", op: "attach", worldId, chatId }));
     rig.body(await rig.send({ type: "lre.hello", chatId, client: { version: "test" } }));

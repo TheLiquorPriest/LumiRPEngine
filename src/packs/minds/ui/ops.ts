@@ -4,7 +4,7 @@
 
 import type { EntityId, PlaceId } from "../../../shared/ids";
 import type { JsonObject } from "../../../shared/json";
-import type { CommitmentKind, CommitmentStatus, Fidelity, MindCommitment, MindNote, MindPlan, MindRecord, MindsSecrecy, PlanKind, PlanStatus } from "../../../shared/minds";
+import type { CommitmentKind, CommitmentStatus, Fidelity, MindApproach, MindCommitment, MindIntent, MindNote, MindPlan, MindRecord, MindsSecrecy, PlanKind, PlanStatus } from "../../../shared/minds";
 import { MIND_TEXT_CAPS, PLAN_PRIORITY } from "../../../shared/minds";
 import type { EditOp } from "../../../shared/protocol";
 
@@ -14,6 +14,7 @@ export const PLAN_KIND_LABEL: Record<PlanKind, string> = { errand: "Errand", mee
 export const PLAN_STATUS_LABEL: Record<PlanStatus, string> = { open: "Open", done: "Done", dropped: "Dropped" };
 export const COMMITMENT_KIND_LABEL: Record<CommitmentKind, string> = { promise: "Promise", debt: "Debt", grudge: "Grudge", favour: "Favour", plan: "Plan together", other: "Other" };
 export const COMMITMENT_STATUS_LABEL: Record<CommitmentStatus, string> = { open: "Open", kept: "Kept", broken: "Broken", released: "Released" };
+export const APPROACH_LABEL: Record<MindApproach, string> = { reactive: "Reactive", proactive: "Proactive" };
 
 export type MindPart = "mood" | "monologue" | "depiction" | "intent" | "reactions" | "interrupt";
 
@@ -41,6 +42,15 @@ export function refreshOp(entity: EntityId): EditOp {
 /** Deletes a note, commitment or plan. */
 export function deleteOp(entity: EntityId, part: "note" | "commitment" | "plan", id: string): EditOp {
   return { op: "mind_memory", entity, part, id, value: null };
+}
+
+/**
+ * Sets what they mean to do now and how they go about it, both as the form holds them: blank text
+ * and no approach clear the intent. Refused (null) when the text is over its cap.
+ */
+export function intentOp(entity: EntityId, draft: MindIntent): EditOp | null {
+  const text = draft.text.trim().replace(/\s+/g, " ");
+  return text.length > MIND_TEXT_CAPS.gmIntent ? null : { op: "mind_intent", entity, text, approach: draft.approach };
 }
 
 function textIn(text: string, cap: number): string | null {

@@ -247,7 +247,7 @@ function builtInSection(engine: PackRecord): string[] {
   out.push("### Realism", "", `Domains: ${codes([...DOMAINS])}; each at a level from 0 to 4.`, "", `Detail bands: ${BANDS.map((b) => `${code(b)} (${BAND_LABEL[b]})`).join(", ")}.`, "", `Interrupt classes: ${codes([...INTERRUPT_CLASSES])}.`, "");
   out.push("### Lore pins", "");
   out.push(
-    `The world's ${code("lorePins")} part: ${code("characters")} and ${code("places")}, each a map from an id to a list of pins, where a pin is ${code('{"lore": id}')} (one of the world's lore entries) or ${code('{"book": id, "entry": id}')} (an entry of one of the user's World Info books). A character's pins reach only their own mind's calls; a place's reach every helper and mind call there or in a place inside it, nearest place first. Pinned text comes first within a call's lore tokens, and a pin that doesn't fit is cut, with a note in the Context panel.`,
+    `The world's ${code("lorePins")} part: ${code("characters")} and ${code("places")}, each a map from an id to a list of pins, where a pin is ${code('{"lore": id}')} (one of the world's lore entries) or ${code('{"book": id, "entry": id}')} (an entry of one of the user's World Info books). A character's pins reach only their own mind's calls; a place's reach every helper and mind call there or in a place inside it, nearest place first. Pinned text comes first within a helper call's lore tokens, or within the pinned lore a mind reads (Settings → Minds → What a mind reads), and a pin that doesn't fit is cut, with a note in the Context panel.`,
     "",
   );
   out.push(...table(["Lint", "Means"], sortedBy(Object.entries(LORE_PIN_LINTS), ([c]) => c).map(([c, meaning]) => [code(c), meaning])), "");
