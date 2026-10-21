@@ -347,6 +347,9 @@ export class TimelapseRun {
       mode: "timelapse",
       cause: "timelapse",
       includePov: true,
+      // A span the player spends doing something keeps the POV where the story has it (DESIGN §8):
+      // its routine resumes after; a run to a routine point (a shift, a day part) follows it.
+      povRoutine: this.target.type !== "duration",
       ...(this.opts.overrides ? { interrupts: this.opts.overrides } : {}),
       unitCap: this.cap,
       spent: { slots: this.result.slots, agentDays: this.result.agentDays, events: this.w.events.length - this.start },
@@ -459,7 +462,8 @@ export function applyTimeAdvance(reg: Registry, w: Working, minutes: number, opt
   if (minutes > TIME_LIMITS.timelapseMinutes) return { applied: false, reason: "over_cap", chip: null };
   if (minutes > opts.capMinutes) return { applied: false, reason: "over_cap", chip };
   const mark = w.mark();
-  const result = advance(reg, w, w.state.clock + minutes, { runSeed: opts.runSeed, mode: "timelapse", cause: "advance", includePov: true, interrupts: ALL_NOTE, unitCap: clampUnitCap(opts.unitCap ?? w.state.time.unitCap) });
+  // The narration told what the POV did in the skip, so its own routine doesn't move it (DESIGN §8).
+  const result = advance(reg, w, w.state.clock + minutes, { runSeed: opts.runSeed, mode: "timelapse", cause: "advance", includePov: true, povRoutine: false, interrupts: ALL_NOTE, unitCap: clampUnitCap(opts.unitCap ?? w.state.time.unitCap) });
   if (result.stop !== "target") {
     w.restore(mark);
     return { applied: false, reason: "unit_cap", chip };
