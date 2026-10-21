@@ -1,19 +1,26 @@
 // Build → Routines and Routines and the story (#48): the routine editor's and the tuning editor's
-// writes, sent to a real backend's draft and read back as the world keeps them, and a routine
-// block's problem opening on that block.
+// writes, sent to a real backend's draft and read back as the world keeps them, the Timelapse
+// sheet's Follow my routine starting at the world's default and travelling with the request, and a
+// routine block's problem opening on that block.
 
 import { describe, expect, test } from "bun:test";
 import { createRegistry } from "../../src/engine/registry-impl";
 import { issueRoute } from "../../src/frontend/build/check";
 import { ownerLevel, type Owner, type OwnerLevel } from "../../src/frontend/build/owner-picker";
 import { blankBlock, blockAt, blockFromSlot, blockKindChange, blockSlot, isNoRoutine, routineWrite } from "../../src/frontend/build/routine-editor";
-import { routineSettingsWrite } from "../../src/frontend/build/routine-settings";
+import { RoutineRoleSettings, routineSettingsWrite } from "../../src/frontend/build/routine-settings";
+import { HostSwitch, Seg } from "../../src/frontend/components";
+import { FollowRoutineChoice } from "../../src/frontend/palette";
+import { timelapseRequest } from "../../src/frontend/requests";
+import { FIDELITIES } from "../../src/shared/minds";
 import { ALL_PACKS } from "../../src/packs/index";
 import type { JsonValue } from "../../src/shared/json";
 import type { RoutineBlock, RoutineDef, RoutineSettings } from "../../src/shared/routines";
-import { blockShapeProblems, DEFAULT_ROUTINE_SETTINGS, ROUTINE_AWARENESS, ROUTINE_INVITATIONS, ROUTINE_PLAN_BEND, ROUTINE_SOCIABILITY, routineSettingsOf, routineShapeProblems } from "../../src/shared/routines";
+import { blockShapeProblems, DEFAULT_ROUTINE_SETTINGS, ROUTINE_AWARENESS, ROUTINE_INVITATIONS, ROUTINE_PLAN_BEND, ROUTINE_ROLES, ROUTINE_SOCIABILITY, routineSettingsOf, routineShapeProblems } from "../../src/shared/routines";
+import type { StateView } from "../../src/shared/state-view";
 import type { EntityDef, WorldDoc } from "../../src/shared/world";
 import { Rig } from "../support/rig";
+import { press, propsOf } from "../support/tree";
 
 /** The draft as Build's forms read it: the packs' kinds merged in, the world's own winning. */
 function formDoc(w: WorldDoc): WorldDoc {
@@ -131,6 +138,72 @@ describe("Build → World → Routines and the story", () => {
     draft = await send(routineSettingsWrite(worldId, DEFAULT_ROUTINE_SETTINGS));
     expect(draft.routineSettings).toBeUndefined();
     expect(routineSettingsOf(draft)).toEqual(DEFAULT_ROUTINE_SETTINGS);
+  });
+
+  test("each level's role, the narrator and the Timelapse default: pressed on the page, saved to the draft and read back", async () => {
+    const { worldId, send } = await portAlder();
+    let value: RoutineSettings = { ...DEFAULT_ROUTINE_SETTINGS };
+    const controls = () => {
+      const tree = RoutineRoleSettings({ value, lint: [], disabled: false, onChange: (next) => void (value = next) });
+      return { roles: propsOf(tree, Seg), switches: propsOf(tree, HostSwitch) };
+    };
+    // One role control per level, in the ladder's order, then the narrator's switch and the Timelapse default's.
+    expect(controls().roles.map((seg) => seg.value)).toEqual(FIDELITIES.map((level) => DEFAULT_ROUTINE_SETTINGS.roles[level]));
+    expect(controls().switches.map((s) => s.checked)).toEqual([DEFAULT_ROUTINE_SETTINGS.narrator, DEFAULT_ROUTINE_SETTINGS.paletteFollowsRoutine]);
+    for (const [i, level] of FIDELITIES.entries()) {
+      for (const role of ROUTINE_ROLES) {
+        const seg = controls().roles[i];
+        if (!seg) throw new Error(`no role control for ${level}`);
+        press(seg, role);
+        const draft = await send(routineSettingsWrite(worldId, value));
+        expect([level, role, routineSettingsOf(draft)]).toEqual([level, role, value]);
+        expect(controls().roles[i]?.value).toBe(role);
+      }
+    }
+    // Each press on the page as it stands after the last, as a re-render hands it.
+    const narrator = controls().switches[0];
+    if (!narrator) throw new Error("no narrator switch");
+    press(narrator, false);
+    const palette = controls().switches[1];
+    if (!palette) throw new Error("no Timelapse default switch");
+    press(palette, true);
+    const draft = await send(routineSettingsWrite(worldId, value));
+    expect([routineSettingsOf(draft).narrator, routineSettingsOf(draft).paletteFollowsRoutine]).toEqual([false, true]);
+    expect(controls().switches.map((s) => s.checked)).toEqual([false, true]);
+  });
+
+  test("the Timelapse sheet's Follow my routine starts at the world's default and travels with the request", async () => {
+    const { rig, worldId, send } = await portAlder();
+    const sheet = async (chatId: string) => {
+      const timelapse = ((await rig.rt.view(chatId, rig.host.userId)) as StateView).palette?.timelapse;
+      if (!timelapse) throw new Error("no Timelapse sheet");
+      return timelapse;
+    };
+    const chatOn = async (): Promise<string> => {
+      const chatId = rig.host.createChat("Morning.");
+      rig.body(await rig.send({ type: "lre.world", op: "attach", worldId, chatId }));
+      return chatId;
+    };
+    rig.body(await rig.send({ type: "lre.world", op: "commit", worldId, base: null }));
+    const plain = await chatOn();
+    expect((await sheet(plain)).followRoutine).toBe(false);
+
+    await send(routineSettingsWrite(worldId, { ...DEFAULT_ROUTINE_SETTINGS, paletteFollowsRoutine: true }));
+    rig.body(await rig.send({ type: "lre.world", op: "commit", worldId, base: null }));
+    const chatId = await chatOn();
+    const timelapse = await sheet(chatId);
+    expect(timelapse.followRoutine).toBe(true);
+
+    let follow = timelapse.followRoutine;
+    const choice = () => propsOf(FollowRoutineChoice({ value: follow, disabled: false, onChange: (next) => void (follow = next) }), HostSwitch);
+    expect(choice().map((s) => s.checked)).toEqual([true]);
+    const [toggle] = choice();
+    if (!toggle) throw new Error("no Follow my routine");
+    press(toggle, false);
+    const request = timelapseRequest(timelapse, { type: "duration", minutes: 60 }, {}, chatId, follow);
+    expect(request.params).toEqual({ target: { type: "duration", minutes: 60 }, overrides: {}, followRoutine: false });
+    rig.body(await rig.send(request as unknown as Record<string, unknown>));
+    expect(rig.rt.ledger.errors).toEqual([]);
   });
 });
 

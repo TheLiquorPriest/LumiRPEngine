@@ -1,17 +1,24 @@
-// Build → World → Routines and the story (DESIGN §8): how aware of the story and its lore people's
-// routines are (Story first, Balanced, Routine first), whom routine blocks may invite, how social
-// people are, and which story plans may move their work or school. Saved whole as `lre.editor set
-// part routineSettings`; the defaults remove it, so a world left as it was keeps no settings. Whatever
-// is picked, the story leads for anyone on screen: no setting lets a routine move someone out of a
-// scene with the player's character, contradict the narration or interrupt play. Routines' own list
-// links here. Styles: the choice cards of styles/minds.ts, styles/forms.ts.
+// Build → World → Routines and the story (DESIGN §8): what someone's routine is to the engine at each
+// level of closeness (Informative, Enforced or Off), whether the narrator hears the present characters'
+// usual routines, whether a Timelapse from the Actions sheet follows the player's routine unless asked
+// otherwise, how aware of the story and its lore enforced routines are (Story first, Balanced,
+// Routine first), whom routine blocks may invite, how social people are, and which story plans may
+// move their work or school. Saved whole as `lre.editor set part routineSettings`; the defaults remove
+// it, so a world left as it was keeps no settings. Whatever is picked, the story leads for anyone on
+// screen: no setting lets a routine move someone out of a scene with the player's character,
+// contradict the narration or interrupt play. Routines' own list links here. Styles: the choice cards
+// of styles/minds.ts, styles/forms.ts.
 
 import { useMemo, useState } from "preact/hooks";
 import type { JsonValue } from "../../shared/json";
-import type { RoutineAwareness, RoutineInvitations, RoutinePlanBend, RoutineSettings, RoutineSociability } from "../../shared/routines";
-import { AWARENESS_LABEL, DEFAULT_ROUTINE_SETTINGS, INVITATIONS_LABEL, PLAN_BEND_LABEL, ROUTINE_AWARENESS, ROUTINE_INVITATIONS, ROUTINE_PLAN_BEND, ROUTINE_SOCIABILITY, routineSettingsOf, SOCIABILITY_LABEL } from "../../shared/routines";
+import type { LintIssue } from "../../shared/protocol";
+import type { Fidelity } from "../../shared/minds";
+import { FIDELITIES } from "../../shared/minds";
+import type { RoutineAwareness, RoutineInvitations, RoutinePlanBend, RoutineRole, RoutineSettings, RoutineSociability } from "../../shared/routines";
+import { AWARENESS_LABEL, DEFAULT_ROUTINE_SETTINGS, INVITATIONS_LABEL, PLAN_BEND_LABEL, ROUTINE_AWARENESS, ROUTINE_INVITATIONS, ROUTINE_PLAN_BEND, ROUTINE_ROLE_LABEL, ROUTINE_ROLES, ROUTINE_SOCIABILITY, routineSettingsOf, SOCIABILITY_LABEL } from "../../shared/routines";
+import { FIDELITY_LABEL } from "../../packs/minds/ui/ops";
 import { useApp } from "../app";
-import { Button, Field, PageHeader, SaveBar, Seg, useBusy } from "../components";
+import { Button, Field, HostSwitch, PageHeader, SaveBar, Seg, useBusy } from "../components";
 import { Icon } from "../icons";
 import type { Req } from "../requests";
 import { useSelect } from "../store";
@@ -21,11 +28,26 @@ import { FormGroup, Issues } from "./form-kit";
 import { useHeld } from "./held";
 import { lintAt } from "./schema-form";
 
-/** Each awareness in one plain line. */
+/** Each role in one plain line: what someone's routine and their own schedules are to the engine. */
+export const ROLE_EXPLAINED: Record<RoutineRole, string> = {
+  informative: "The story and planning decide what they do; their routine is only context their mind and the narrator may weigh.",
+  enforced: "Their routine and schedules run their day when the story doesn't, and never pull them out of a scene with you.",
+  off: "Their routine isn't used at all, not even as context.",
+};
+
+/** Each level of closeness as this page names it: who the level is, in a few words. */
+const LEVEL_NAME: Record<Fidelity, string> = {
+  live: `${FIDELITY_LABEL.live}: in the scene with you`,
+  near: `${FIDELITY_LABEL.near}: close to the story`,
+  far: `${FIDELITY_LABEL.far}: off screen, still followed`,
+  background: `${FIDELITY_LABEL.background}: everyone else`,
+};
+
+/** Each awareness in one plain line; it shapes only the days of those whose routine is enforced. */
 export const AWARENESS_EXPLAINED: Record<RoutineAwareness, string> = {
-  story_first: "People off screen bend their routine for the story's plans and the GM's, what the story sets holds until it's released, and characters close to the player get no routine nudges at all.",
-  balanced: "Background characters keep their routine, distant ones bend it for the story's plans, what the story sets holds for the rest of that day, and characters close to the player get it only as a soft suggestion.",
-  routine_first: "Background and distant characters keep to their routine, bending only as the plans setting below allows, and what the story sets holds until their next block.",
+  story_first: "Enforced routines bend for the story's plans and the GM's, and what the story sets holds until it's released.",
+  balanced: "Background characters keep their enforced routine, others bend it for the story's plans, and what the story sets holds for the rest of that day.",
+  routine_first: "Enforced routines hold, bending only as the plans setting below allows, and what the story sets holds until their next block.",
 };
 
 /** Each invitations setting in one plain line. */
@@ -72,7 +94,36 @@ function Choices<T extends string>(props: { label: string; value: T; options: re
   );
 }
 
-/** Build → World → Routines and the story: the four settings, saved together from the sticky bar. */
+/** The settings this page saves with the rest that say what a routine is to the engine: each level's role, the narrator's context and the Timelapse default. */
+export function RoutineRoleSettings(props: { value: RoutineSettings; lint: readonly LintIssue[]; disabled: boolean; onChange(next: RoutineSettings): void }) {
+  const { value, lint, disabled } = props;
+  return (
+    <>
+      <FormGroup title="What a routine is, by closeness">
+        <p class="lre-minds-note">For each level of closeness on the minds ladder. Informative is the default for everyone but Background: routines and schedules tell, they don't dictate.</p>
+        {FIDELITIES.map((level) => (
+          <Field key={level} label={LEVEL_NAME[level]} help={ROLE_EXPLAINED[value.roles[level]]}>
+            <Seg<RoutineRole> label={`${FIDELITY_LABEL[level]} characters' routine`} value={value.roles[level]} options={ROUTINE_ROLES.map((r) => ({ value: r, label: ROUTINE_ROLE_LABEL[r] }))} disabled={disabled} onChange={(role) => props.onChange({ ...value, roles: { ...value.roles, [level]: role } })} />
+          </Field>
+        ))}
+        <p class="lre-minds-note">The GM can set it apart for one character in a chat. A world's schedules (weather, prices, bills, paydays, opening hours) and pay run whatever you pick.</p>
+        <Issues issues={lintAt(lint, "routineSettings.roles")} />
+      </FormGroup>
+      <FormGroup title="The narrator">
+        <HostSwitch label="Tell the narrator people's usual routines" checked={value.narrator} disabled={disabled} onChange={(narrator) => props.onChange({ ...value, narrator })} />
+        <p class="lre-minds-note">For the characters in the scene whose routine isn't off: what they usually do, as context the narrator may use, never what they must do.</p>
+        <Issues issues={lintAt(lint, "routineSettings.narrator")} />
+      </FormGroup>
+      <FormGroup title="Timelapse from the Actions sheet">
+        <HostSwitch label="Follow my routine by default" checked={value.paletteFollowsRoutine} disabled={disabled} onChange={(paletteFollowsRoutine) => props.onChange({ ...value, paletteFollowsRoutine })} />
+        <p class="lre-minds-note">Where the sheet's Follow my routine starts. On, your character goes about their usual day through a Timelapse; off, they stay where the story left them. Each Timelapse can change it.</p>
+        <Issues issues={lintAt(lint, "routineSettings.paletteFollowsRoutine")} />
+      </FormGroup>
+    </>
+  );
+}
+
+/** Build → World → Routines and the story: every setting, saved together from the sticky bar. */
 export function RoutineSettingsEditor() {
   const app = useApp();
   const draft = useSelect(app.drafts, (d) => d);
@@ -89,10 +140,12 @@ export function RoutineSettingsEditor() {
     <div class="lre-build-page" data-lre-editor="part:routineSettings">
       <PageHeader title={PART_INFO.routineSettings.label} subtitle={PART_INFO.routineSettings.hint} />
       <p class="lre-build-note">
-        Whatever you pick, the story comes first for anyone in a scene with the player's character: a routine never moves them out of it, contradicts what's been told or interrupts play. These settings tune how far everyone else's days follow the story and its lore, and how far they keep to routine.
+        Whatever you pick, the story comes first for anyone in a scene with the player's character: a routine never moves them out of it, contradicts what's been told or interrupts play. These settings tune what routines are to the engine, and how far everyone else's days follow the story and its lore.
       </p>
-      <Issues issues={lint.filter((issue) => !["awareness", "invitations", "sociability", "planBend"].some((key) => issue.path === `routineSettings.${key}`))} />
+      <Issues issues={lint.filter((issue) => !["awareness", "invitations", "sociability", "planBend", "roles", "narrator", "paletteFollowsRoutine"].some((key) => issue.path === `routineSettings.${key}` || issue.path.startsWith(`routineSettings.${key}.`)))} />
+      <RoutineRoleSettings value={value} lint={lint} disabled={busy} onChange={setValue} />
       <FormGroup title="Story and lore awareness">
+        <p class="lre-minds-note">How strictly an enforced routine keeps to itself against what the story and its lore establish.</p>
         <Choices label="Story and lore awareness" value={value.awareness} options={ROUTINE_AWARENESS} names={AWARENESS_LABEL} lines={AWARENESS_EXPLAINED} disabled={busy} onChange={(awareness) => setValue({ ...value, awareness })} />
         <p class="lre-minds-note">The GM can set it apart for one character in a chat.</p>
         <Issues issues={lintAt(lint, "routineSettings.awareness")} />
