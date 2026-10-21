@@ -108,10 +108,10 @@ describe("the clock's ✎ fix", () => {
     await rig.turn(chatId, "I wait.", "You wait.");
     await setTime(rig, chatId, "2026-09-14 12:00");
     expect(await world(rig, chatId)).toEqual({ clock: "Mon 14 Sep 2026, 12:00", danny: HOME, marcus: "rusty_anchor", you: HOME, bills: 1 });
-    // Past 12:00 the schedules run again: at 12:45 Marcus goes back to the garage. The story put the
-    // player character and Danny at home, away from their 12:00 slots, so the rest of the day keeps them there.
+    // Past 12:00 the schedules run again: at 12:30 the player character and Danny go back to the
+    // garage (home is where their routine's rest has them), and at 12:45 Marcus does.
     await timelapse(rig, chatId, 45);
-    expect(await world(rig, chatId)).toEqual({ clock: "Mon 14 Sep 2026, 12:45", danny: HOME, marcus: "alder_automotive", you: HOME, bills: 1 });
+    expect(await world(rig, chatId)).toEqual({ clock: "Mon 14 Sep 2026, 12:45", danny: "alder_automotive", marcus: "alder_automotive", you: "alder_automotive", bills: 1 });
   });
 
   test("Undo takes a fix of the time back: the clock and the state from before it", async () => {
