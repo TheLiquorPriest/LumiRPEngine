@@ -110,6 +110,8 @@ Every control here is something your character does: it plays as your next turn,
 
 Tap someone for their person sheet: where they are, or **Last seen** (from Cast life 2) with where and when you last saw them; their **Next** commitment; **Today**, a 24-hour timeline of where they will be, for someone who lives their own day, where **Why this plan?** gives the reasons for each block: a fixed commitment, the need pressing them ("hungry (hunger 62)"), a close call ("close call, Maddie chose"), or "a close friend"; **How they see you**, each axis in words; **What they're after**, their public agendas; their **Groups**; and **Known as**, the classifications you can see. Agendas show only when they're public, each on its own: time someone spends on an agenda that isn't public shows in their day as **Busy**, for "their own business", and someone working on one of their agendas is doing "agenda" only when all their agendas are public, else they are "busy" (here, in the Journal and to the narrator).
 
+**Their usual day**, folded under **Today**, says where each block of that day comes from, as far as you may know: **Usually · their routine**, **Usually · from lore:** with the lore entry's title (only an entry you may read; a block resting on any other reads as their routine), **A commitment** (a shift, an appointment, a trip), **As the story has it**, **A plan of theirs** or **Free time**, with **Why?** for the reasons. It shows only for someone whose day Cast already shows, and never more than Cast does: a private block, or one spent on an agenda that isn't public, reads **Busy**, and no place or company shows. It's what they'd usually do, not a fact about what they're doing now: what happens in the story always comes first.
+
 ### Story
 
 **Story** has three tabs.
@@ -271,12 +273,13 @@ The truth sits behind a spoiler gate, **Spoilers ahead**: tap **Show the truth**
 
 ### The GM bar
 
-A gold bar along the bottom of the drawer holds the GM's places: **World**, **Places** and **Story**, then a place for each pack that adds one (**Minds** and **Money**), then **This chat**. All but **This chat** are behind the gate.
+A gold bar along the bottom of the drawer holds the GM's places: **World**, **Places** and **Story**, then a place for each pack that adds one (**Minds**, **Routines** and **Money**), then **This chat**. All but **This chat** are behind the gate.
 
 - **World**: every person, item, vehicle, group and account in the world, including the ones spawned during this chat and the removed ones, with **Search by name** and a kind filter. Badges mark **You**, **Removed**, a life state other than alive, anything that isn't public (**Known by**, **Secret**) and **Claimed**, a thing you said you had that the engine made real (see [Player claims](#player-claims)), and a row says when someone lives their own day or was spawned here. Tap one to open its page (see below). **Spawn** opens a page that adds someone or something new to this chat: a name, a kind, a place and a tier. While a fight is under way, a **Fight under way** card leads the list; tap it for the **Fight** page, with everyone in the fight, seen or not, in initiative order, with HP exact and the round's acts. While there are claimed things, **Claimed by the player** comes next: each one still in the world, by name, with who holds it or where it lies ("held by Sam Rivera", "at Rosie's Diner"). Tap one to open its page, where **Remove from the world** takes it out of the story; one removed, or a drink or a meal used up, leaves that list. Kinds and the world's places are the world's own definitions: the button at the bottom of the list, **Kinds and places are the world's: edit them in Build**, takes you to Build.
 - **Places**: every place, under the place it's in, with its visibility (public, discoverable, secret and so on).
 - **Story**: every quest, secret and agenda, with its stage and the stages that carry a truth (the one it's at is marked **Now**). Pick a stage under **Stage** to move the track there at once.
 - **Minds**: every character's place on the fidelity ladder and why, their latest mind, plans, commitments, notes and summary, with pins and edits (see [Minds in GM mode](#minds-in-gm-mode)).
+- **Routines**: every character's routine and schedules as this chat has them, how much their routine binds them now, today as laid, their invitations and what the story changed, with per-chat changes (see [Routines in GM mode](#routines-in-gm-mode)).
 - **Money**: anyone's money, as their own money hub with the GM's controls (see [Everyone else's money](#everyone-elses-money)).
 - **This chat**: this chat's rules, its edits and the inspector (see [This chat](#this-chat)).
 
@@ -501,6 +504,36 @@ A character at a low level can still deal with one at a high level: each side re
 
 From Money level 3, the people in the world live on their money as you do. They are paid, they pay their bills, and every Monday they pay a week of living costs that follows their wealth band (a world can set its own amounts; the Modern US data prices them from a weekly grocery basket), so their balances go down as well as up. A bill paid to someone in the world, like your rent to your landlord, lands in that person's own account. The first morning their bills run, the engine opens their accounts with the balances the world gives them. You see all of this only in [GM mode](#everyone-elses-money).
 
+## Routines and schedules
+
+People in a world have days of their own. A **routine** is what someone can be relied on to do on an ordinary day: opening the shop at seven, coffee somewhere three mornings a week, a walk by the lake on a fair weekend. Its blocks can be **fixed** (at a set time), **flexible** (somewhere in a window, or a few times a week) or **optional** (only likely, and the first thing a busy day drops), and someone can have no routine at all. A **schedule** is a commitment with set hours, such as a shift or school. A world's routines can rest on its lore or a character's sheet, and say so.
+
+Routines and schedules are defaults the world relies on, never a script the story has to follow. Where someone's day comes from, most binding first:
+
+1. **What the story established:** where the narration, your actions or the GM put them, a trip, a plan under way, and what the GM says they mean to do.
+2. **Their commitments:** schedules, appointments and trips.
+3. **Their plans** from the story.
+4. **Their routine.**
+5. **Their basic needs:** sleep and meals.
+6. **Chores, their agenda's steps and things to get back** that the world grounds.
+
+Nothing else fills a day: no outing, party or invitation that nothing in the world or the story grounds. The story always leads the people in it. A routine or a schedule never moves anyone out of a scene with you, and never moves a character close to the story (Live or Near on the [fidelity ladder](#the-fidelity-ladder)): their mind and the scene speak for them, and their routine is at most a suggestion. No routine interrupts play or stops a time skip. Background characters, off screen, keep their routines and schedules most closely, which is where routines matter most. Your own character follows its routine only when time runs on its own (a Timelapse to your next shift, say); a span you spend doing something ("for the next two hours, I sort the stock") or a skip the reply narrates leaves you where the story has you.
+
+**Tuning.** A world sets how routines and the story share the day in **Build → Routines**:
+
+- **How strictly people keep to routine** against the story: **Story first** (someone the story put somewhere stays there until the story or the GM releases them), **Balanced** (the default: until their night, with Background characters keeping their routine) or **Routine first** (their routine's next block takes them back).
+- **Invitations** from routine blocks that ask company along: **Off**, **To the player only** (the default) or **Between everyone**. Plans the story makes, and the GM, invite whatever this says.
+- **Sociability:** **Reserved**, **Usual** or **Outgoing**, how fast people want company and fun.
+- **How plans bend routine:** which plans the story makes take time from work and school.
+
+In a chat, the GM can change any of this for one character without touching the world: whether and how strictly they keep their routine, one block, or one schedule, each with its Undo.
+
+Where you meet them:
+
+- **Play → People**: someone's usual day, as far as you may know it, and why each block is there ([People](#people)).
+- **GM → Routines**: everyone's routine, schedules and day as this chat has them, with what the story changed and the GM's changes ([Routines in GM mode](#routines-in-gm-mode)).
+- **Build → Routines**: the world's routines and their settings ([Routines in Build](#routines-in-build)), and routines proposed from the world's lore ([Proposing routines from lore](#proposing-routines-from-lore)). A routine Build can't read, or a setting it doesn't take, isn't saved: the message names the field to fix. Outside agents edit them the same way, with the same checks ([MCP.md](MCP.md)).
+
 ## How checks are decided
 
 A check is the dice an action rolls (see [Checks, pools, progression and sheets](#checks-pools-progression-and-sheets)). How much those dice matter, against how you describe what your character does, is up to the world and to you. A world can set its own rules for checks in **Build → Ruleset**, under **How checks are decided**. A world that sets none rolls every check and lets the roll settle it, exactly as before.
@@ -641,7 +674,7 @@ Settings saved before these defaults rose keep every value you changed; a value 
 
 - **Turns**: **Engine run** (5 min: everything before the reply is generated; when it runs out the run stops, no reply is generated, and the chat says which step ran out, with a Retry), **Lore lookups before the reply** (2 min), **Reading the reply** (5 min: what changed, the contradiction check, people elsewhere, choices, memory), **Lore lookups after the reply** (2 min) and **Generation guard** (2 min: Lumiverse's wait for the engine's check, and for its writing of the turn's sections, as a generation starts; Lumiverse caps it at 2 min).
 - **This tab**: **Engine requests** (5 min: how long the tab waits for each answer) and **Preset check** (1 min: how long Caveats waits for its test prompt before saying it's still running).
-- **Jobs and background work**: **Minds run on demand** (10 min), **Import and Refine calls** (10 min each), **Token counts** (30 s; 0 always uses the engine's estimate), **Background lane start-up** and **Background lane heartbeat** (1 min each; Lumiverse caps both at 2 min, and No limit on the heartbeat asks it to check none).
+- **Jobs and background work**: **Minds run on demand** (10 min), **Import and Refine calls** (10 min each; the lore index, map and routine proposal calls in Build take it too), **Token counts** (30 s; 0 always uses the engine's estimate), **Background lane start-up** and **Background lane heartbeat** (1 min each; Lumiverse caps both at 2 min, and No limit on the heartbeat asks it to check none), and **MCP server reconnect** (1 min: how long **Reconnect in Lumiverse** waits for a server Lumiverse runs to come back with the new tools before its line tells you to reconnect it by hand).
 
 The page ends with **Lumiverse's own limits**, which no setting changes. When a timeout runs out, [Diagnostics](#diagnostics) records it with the setting's name and how to raise it, and a request the tab gave up on says so in its error. Settings saved before Timeouts existed keep the wall clocks you set; one still at an old preset's default rises to the new default. The command line and the MCP server take `--timeout <seconds|none>` (or `LRE_TIMEOUT`), 300 seconds by default.
 
@@ -738,6 +771,22 @@ Above the list, **Run minds now** has **Run everyone Live and Near** and **Choos
 
 Each change is a GM edit like any other: one correction with its own **Undo**. Minds stay in GM mode: nothing a mind thinks reaches Play, the Journal, People or chips. **GM → This chat → Context** lists each mind call with the pinned lore it read and whether any was cut.
 
+### Routines in GM mode
+
+**GM → Routines** shows the routines and schedules everyone follows in this chat. A routine or a schedule is a default the world relies on, never a script: the story leads whoever shares a scene with you, and no routine interrupts play. The world's routines and schedules are edited in Build (**The world's routines are in Build** goes there); what you change here is this chat's alone.
+
+The list has everyone but you, closest on the minds ladder first, with **Search by name** and a filter (everyone, **Changed in this chat**, **Routine leads**, **Story leads**, **No routine**). Each row shows their fidelity and how much their routine binds them, and a gold badge when this chat changed their routine or schedules: **Changed by you**, **Changed by the story**, or both. Tap someone for their page:
+
+- **How much their routine binds them**: **Routine leads** for Background and Far characters, **Story leads** for Near and Live ones (their routine is at most a soft suggestion, and no routine or schedule moves them), and **No routine** when their routine is off in this chat or the planner doesn't lay their day (it needs an agent who acts, at Cast life 3 or higher). The lines under it say what the world's awareness setting does for them. **In this chat** and **Story and lore awareness** open a page with both: **Follows their routine**, **Follows it, no invitations** or **No routine**, and **As the world has it**, **Story first**, **Balanced** or **Routine first**. **Use the world's settings** clears what you set.
+- **What the story holds now**: a place or activity the story established, which their routine yields to, and for how long.
+- **Their routine**: each block with when and where it happens, whose it is (their own, a group's, a kind's, a selector's, the world's default, the basic needs, or **Changed in this chat**), what it rests on (authored, a lore entry, a sheet field, the story or you, with how long ago) and what it replaces. Tap a block to change it for this chat with the same form as Build's, **Switch it off for them**, or, for a change this chat made, **Use the world's block** (or **Remove the block** when only this chat has it). The block's page shows the lore entry's quote, with **Open the entry** in Build. **Add a block for this chat** adds one only this chat has.
+- **Their schedules**: each schedule that applies to them, the most specific owner first for each thing schedules set, with what it rests on, and **In force**, **Shadowed** (a more specific schedule wins where both run) or this chat's change. Tap one to give them **Their own version** in this chat, with Build's schedule form, or put it **Off for them** until you clear it or for some hours; **Use the world's schedule** drops the change.
+- **Today**: their day as the planner laid it, each block with where, why it is there (their routine, a schedule, a plan, an appointment, a trip, an invitation, free time) and the reasons it gave.
+- **Invitations**: the ones they made and received, each with where it came from: a plan the story made, a block of their routine (with its source), you, or one recorded before invitations needed a ground.
+- **Changes the story made**: each block or schedule the story changed in this chat, with the turn it came from (its id shows under **Show ids**) and how long ago. A block the story adds is in force from the next day, and its row says so until then. Tap one in force to keep it, change it or go back to the world's.
+
+Each change is a GM edit like any other: one correction with its own **Undo**, and the list's badge follows it.
+
 ## Extraction modes
 
 After the narrator writes, the engine reads the reply for changes the story implies. Each kind of change is a **type**, and each type has a **mode**.
@@ -831,7 +880,7 @@ You build worlds in **Build**, which works at phone width as well as on a deskto
 - **Worlds.** Build opens on your worlds. Each row shows the world's name and how many revisions it has, with a **This chat** badge on the world the open chat plays; tap it to open the world. Its **More for** *name* button (⋯) holds **Export** and **Delete**, and Delete asks first ("Delete “*name*” and all its revisions? Chats attached to it stop simulating."). An offer from LumiRPEngine Studio and the **Review before playing** card, when there are any, sit at the top (see [Import and export](#import-and-export)).
 - **New world** opens a page of its own. Under **Start from**, pick **Blank** or one of the [templates](#templates), each with a line on what it is. The **Name** field takes the template's name until you type your own; then tap **Create world**. **Or bring one in** has **Import a file** (an lre-world-v1 file, as Export writes it) and **Import from LumiRPEngine Studio**.
 - **The world bar.** An open world has a bar that stays at the top as you scroll: the back button, the world's name, the state of its draft (**Uncommitted** or **All committed**, with its error and warning counts) and **Commit**. Its **Draft actions** button (⋯) holds **Discard changes**. See [Revisions and Upgrade](#revisions-and-upgrade).
-- **The world home** lists the world's parts, **World**, **Calendar**, **Realism defaults**, **Tiers**, **Time defaults**, **Ruleset**, **Lore lookup table** and **Minds**, each with a line on what it holds and a badge for its issues. Then come its 18 collections in five groups: **People & things** (Entities, Kinds, Classifications, Relations), **Places** (Places, Maps, Routes, Grids), **Rules** (Actions, Checks, Rules, Schedules), **Story** (Tracks, Lore) and **Engine** (Data tables, Sections, Step templates, Packs), each with a count and an issue badge. Last are its **Tools**: **Problems**, **Import from lore**, **Index a World Info book**, **Index this text**, **Build / Refine with AI**, **Describe a map**, **Playtest**, **Check world** and, when the chat you have open isn't a world chat yet, **Attach to this chat**. A tool that has run shows how its last run went (**Running**, **Done**, **Failed**, **Cancelled** or **Interrupted**).
+- **The world home** lists the world's parts, **World**, **Calendar**, **Realism defaults**, **Tiers**, **Time defaults**, **Ruleset**, **Lore lookup table**, **Minds** and **Routines and the story**, each with a line on what it holds and a badge for its issues. Then come its 19 collections in six groups: **People & things** (Entities, Kinds, Classifications, Relations), **Places** (Places, Maps, Routes, Grids), **Daily life** (Routines, Schedules), **Rules** (Actions, Checks, Rules), **Story** (Tracks, Lore) and **Engine** (Data tables, Sections, Step templates, Packs), each with a count and an issue badge. Last are its **Tools**: **Problems**, **Import from lore**, **Index a World Info book**, **Index this text**, **Build / Refine with AI**, **Describe a map**, **Propose routines from lore**, **Playtest**, **Check world** and, when the chat you have open isn't a world chat yet, **Attach to this chat**. A tool that has run shows how its last run went (**Running**, **Done**, **Failed**, **Cancelled** or **Interrupted**).
 - **Collections** list their items by name, with a search box once there are more than eight. **New** asks for the name of the new item and makes its id from the name ("Old Miller Tom" becomes `old_miller_tom`, with `_2` added if that id is taken). You can change the id under **Advanced**, or in the open with **Show ids** on. **Continue** opens the new item's page, and **Create** adds it to the draft. Data tables have no New: new tables come from packs, and you open one to edit this world's copy of it.
 - **An item's page** is headed with its name. **Save to draft** and **Revert** sit in a bar that stays at the bottom of the page, and a part's page has the same bar. Your first keystroke in a field counts as a change, so **Save to draft** lights up at once. Its **Item actions** button (⋯) holds **Delete**, which asks first and names the item ("Delete the entity “Rosie Alvarez”? References to it will show in Problems.").
 
@@ -841,7 +890,7 @@ For the formulas you write in requirements, checks, derived fields and rules, se
 
 ### Editors and lint
 
-Every part of the world has an editor built from its definition: a page of sections, each field with its label over it, then its help, then any problem with it. A reference to something in the world is picked by name; the line under a choice names its pack, or its id when two share a name. Money is typed as the currency writes it ("$12.50"), a length of time like "1 h 30 min" (a rule's cooldown, a route's time, a scene's tick), and a moment of the world's clock with a date picker (a day number and a time on a calendar of your own). A list of things (effects, a relation's fields, appointments, trips, chores, conditions, bills, a kit's pieces) shows a row for each, which opens as a sheet, with buttons to add, reorder and remove; a list the editor knows no shape for stays JSON. A new entry in a keyed list asks for a name and takes its id from it. An optional field says "· optional". Some parts get visual editors: maps are drawn and grids painted (see [Maps](#maps)), a schedule's day is a bar of slots and a track's stages a graph (see [Schedules and tracks](#schedules-and-tracks)), and formulas have an **expression** editor.
+Every part of the world has an editor built from its definition: a page of sections, each field with its label over it, then its help, then any problem with it. A reference to something in the world is picked by name; the line under a choice names its pack, or its id when two share a name. Money is typed as the currency writes it ("$12.50"), a length of time like "1 h 30 min" (a rule's cooldown, a route's time, a scene's tick), and a moment of the world's clock with a date picker (a day number and a time on a calendar of your own). A list of things (effects, a relation's fields, appointments, trips, chores, conditions, bills, a kit's pieces) shows a row for each, which opens as a sheet, with buttons to add, reorder and remove; a list the editor knows no shape for stays JSON. A new entry in a keyed list asks for a name and takes its id from it. An optional field says "· optional". Some parts get visual editors: maps are drawn and grids painted (see [Maps](#maps)), a schedule's day is a bar of slots and a track's stages a graph (see [Schedules and tracks](#schedules-and-tracks)), a routine block's time is a bar across the day (see [Routines in Build](#routines-in-build)), and formulas have an **expression** editor.
 
 What you can define:
 
@@ -853,7 +902,8 @@ What you can define:
 - **Actions**: a label and a **Description** (a line on what the action does: the helper that reads typed messages is told it, so it knows when your words mean this action), parameters, requirements, an optional dice **check** with outcome bands (the odds shown to players are computed exactly from it), effects per outcome, a duration, and the activity it starts. A ref parameter can say **Only candidates matching** a [selector](#selectors): the Actions sheet offers only those, and typed text or a request naming anyone else is refused.
 - **Rules**: "when this happens and that is true, do this", with run-once and cooldowns. A cascade stops at eight steps.
 - **Tracks**: quests, secrets (revealed by conditions only), puzzles with attempts and a hint ladder, and NPC agendas.
-- **Schedules**: calendar recurrence plus tables of fixed values or weighted choices, for shifts, timetables, routines, weather, bills, paydays and price paths. A schedule's owner is an entity, a group (its members), a kind, or a [selector](#selectors). When several set the same field of the same person, the most specific owner wins while its slot runs: their own schedule, then a group's, then their kind's, then a selector's; when the more specific slot ends, the field returns to the less specific one still running.
+- **Routines**: how people's days usually go, owner by owner (everyone's, a group's, a kind's, a selector's or someone's own), as blocks at a set time, within a window or optional, each resting on what you wrote, a lore entry or a sheet field (see [Routines in Build](#routines-in-build)).
+- **Schedules**: calendar recurrence plus tables of fixed values or weighted choices, for shifts, timetables, opening hours, weather, bills, paydays and price paths. A schedule's owner is an entity, a group (its members), a kind, or a [selector](#selectors). When several set the same field of the same person, the most specific owner wins while its slot runs: their own schedule, then a group's, then their kind's, then a selector's; when the more specific slot ends, the field returns to the less specific one still running.
 - **Lore**: what the world knows, as entries with a title, text, keywords, aliases, topics and links, where each came from, and secrets with a gate and the helpers that may read them, plus a lookup table of terms and topics (see [World lore](#world-lore)). It is kept in the world and the engine's helpers read it; the narrator gets no lore section.
 - The **calendar** (Gregorian or your own) and **realism** defaults, with the band caps under the band labels.
 - **Tiers**: the world's own ranks of importance, on the **Tiers** part. Each has a **Label**, a **Band** (Leads, Supporting or Background), a place in the order (its move up and move down buttons), an optional description, and whether its people live their own day (agendas and plans) by default. Type a name under **New tier's name** and tap **Add tier** to make a new one (its id comes from the name, under **Advanced**); a tier still in use can't be removed. **New people join** picks the tier for people the story introduces (by default the first Background tier). An entity's editor picks its tier from these, and its **Lives their own day** choice can follow the tier ("As its tier"); lint flags an entity whose tier the world doesn't have.
@@ -880,6 +930,46 @@ In the **expression editor**, the **Operators and functions** button (ƒx) opens
 The **Stage** button asks for the new stage's **Name** and what it **Comes after** (it is added there as a next stage, with "true" as its condition until you change it), then **Add the stage**.
 
 On both pages the **Item actions** button (⋯) holds **Delete**, **JSON (Advanced)** shows the whole schedule or track as the world file keeps it, and **Save to draft** and **Revert** sit in the bar at the bottom.
+
+### Routines in Build
+
+A **routine** is how someone's days usually go: when they open the shop, eat with the family or go to the gym. It is something the world can rely on, never a rule, and it never outranks the story. For anyone in a scene with your character, and for the cast close to you (Near and Live), a routine is at most a soft suggestion: it never moves them out of a scene, contradicts what's been told or interrupts play. People off screen keep to their routines as far as **Routines and the story** says (below), and a chat changes anyone's routine as it goes, through the story or the GM.
+
+**Where a character's day comes from**, most binding first: what the story has established (where they are, what they're doing, a trip, a plan under way); their commitments (schedules such as shifts and school, appointments, trips); the plans the story or the GM gave them; their routine; and their basic needs, sleep and meals. A character with no routine has the rest of that list, and nothing more: no outings, visits or invitations are made up for them.
+
+**Build → Daily life → Routines** lists the routines by whom they're for, the most specific first: **Someone's own**, **A group's** (a family, a household, a crew), **A kind's**, **By selector** and **Everyone's** (the world's default). Where routines set the same block for someone, the most specific wins: their own, then a group's, a kind's, a selector's, then everyone's. **Routines and the story**, at the top, opens the settings. **New** names a new routine, as in any collection; a routine without a name goes by whom it's for.
+
+A routine's page has:
+
+- **Whose routine**: **It's for** picks the level (**Someone**, **Group**, **Kind**, **Selector** or **Everyone**), then who, and an optional **Name**.
+- **Their days**, for anyone but everyone: **Have a routine** or **No routine**. With no routine, their days come only from the story, the GM, their commitments and their basic needs, and no broader routine applies to them. With a routine, **Keeps the blocks of broader routines** says whether a group's, a kind's and everyone's blocks still apply where this one doesn't set the same block.
+- **Blocks**, in the order of the day, each with its kind, its time, its place and where it comes from. The **Block** button adds one, and **Change a basic need or a broader block…** copies sleep, a meal or another routine's block in, to change it for whom this routine covers. Tap a block to open its sheet.
+- **Turned off here**: blocks that don't apply to whom this routine covers, such as breakfast for a night owl. **Turn off a block…** adds one, and its undo button puts it back.
+- **Where this routine comes from**: what its blocks rest on unless a block names its own.
+
+A block's sheet has:
+
+- **What it reads as** ("Opens the shop") and **What they're doing**: sleep, a meal, work, socialize, leisure or the world's own activity.
+- **When it happens**: **At a set time** (the same time on each day it's on), **Within a window** (somewhere in its window, wherever the day has room; **How often** can make it **A few times a week**, with **Times a week**) or **Optional** (only likely, with **How likely**: **Rarely**, **Sometimes**, **Often** or **Usually**, and the first thing a busier day leaves out). The bar across the day shows when it runs, or for a window when it may start: drag either end, or type the times. **How long** takes a length such as "1 h 30 min".
+- **How much it matters**, **Least** to **Most**: when blocks want the same free time, the one that matters more goes first.
+- **Where**: **At home**, **At work**, **Wherever they are**, **At the home of whoever they're with**, **A chosen place**, or **The nearest place of a type**.
+- **Who with**: a [selector](#selectors) that names people or groups, and **Asks them along**, which makes the block an invitation, made only as **Routines and the story** allows.
+- **Which days**: weekdays, days off, holidays, birthdays (their own or a friend's), seasons and weather; with none set, every day.
+- **Needs and privacy**: the needs it meets, and **Private**, which shows it to the player only as "Busy".
+- **Where it comes from**: **Written here**, **From lore** (an entry picked by its title, with **The words it rests on**; the entry's row opens it) or **From a sheet** (whose sheet, and which field). The list shows each block's source too.
+- **Its id (Advanced)**: a block with the id of a basic need (`sleep`, `breakfast`, `lunch`, `dinner`) or of a broader routine's block replaces it. A block added on the page takes its id from what it reads as.
+- **Remove block**.
+
+**Save to draft** (**Create routine** for a new one) and **Revert** sit in the bar at the bottom, and the **Item actions** button (⋯) holds **Delete**. A routine's problems show on its page, and **Problems** opens a block's problem on that block's sheet.
+
+**Routines and the story** (in **World**, and at the top of Routines) tunes how aware people's routines are of the story and its lore:
+
+- **Story and lore awareness**: **Story first** (people off screen bend their routine for the story's plans and the GM's, what the story sets holds until it's released, and characters close to your character get no routine nudges at all), **Balanced**, the default (Background characters keep their routine, distant ones bend it for the story's plans, what the story sets holds for the rest of that day, and characters close to your character get it only as a soft suggestion), or **Routine first** (Background and distant characters keep to their routine, bending only as **How plans bend routine** allows, and what the story sets holds until their next block). The GM can set it apart for one character in a chat.
+- **Invitations**: whom routine blocks may invite: **Off**, **To the player only** (the default) or **Between everyone**. A block invites only when it names its company and asks them along, so nobody is invited out of nowhere; plans from the story and the GM's invitations need no setting.
+- **Sociability**: **Reserved**, **Usual** or **Outgoing**, how fast the wish for company and fun grows.
+- **How plans bend routine**: which plans made in the story may move work or school: **Only plans that must happen**, **Strong plans**, **Strong plans, and set-time plans for the cast** (the default) or **Strong plans, and set-time plans for anyone**.
+
+**Save to draft** saves all four, and **Use the defaults** takes the world's own settings out again: a world never tuned keeps none.
 
 ### Maps
 
@@ -1081,6 +1171,50 @@ Each tool remembers its last run, with its status and its proposals, so you can 
 
 **Describe a map** draws a map from your own words. Pick the place it maps, give the map an id if you like, and describe the inside ("A small inn: the taproom at the front, the kitchen behind it through a door, and a corridor down the side to the stable yard."), then tap **Draw the map**. The AI writes an lre-map-v1 map, and the engine checks it as the map editor would; if it has problems, the AI gets one more try with the list of them. You get one proposal with a preview of the map, ticked when it came back clean and unticked, with what's still wrong, when it didn't. Applying it puts the map in your draft like any other, where the map editor can fix the rest; nothing reaches your chats until you commit. Like the other tools, it remembers its last run.
 
+### Proposing routines from lore
+
+**Propose routines from lore**, a tool inside a world, gives your people and groups [routines](#routines-in-build) and schedules from what the world already says about them: its lore entries, their sheets (role, occupation, workplace, home, traits, description), their families, households and clubs, and who they know. It proposes two kinds of thing:
+
+- **Schedules**: shifts, school and class timetables, services. A shop's opening hours become the shifts of the people who work there.
+- **Routine blocks**: habits.
+  - **Fixed** blocks happen at a set time ("dinner at six").
+  - **Flexible** blocks happen somewhere in a window, every day or a few times a week ("most mornings", "twice a week").
+  - **Optional** blocks happen only sometimes ("now and then").
+
+A household's dinner, a club's evening or worship with a congregation comes back as the group's block, with its members as company.
+
+**Sources.** Every block and schedule cites the lore entry or sheet field it rests on, with a short quote from it. The engine checks the quote against that text, and anything without a source that holds is never proposed. So someone the lore says nothing about gets no routine at all, and a habit the lore states loosely comes back flexible or optional, never fixed.
+
+**What it reads.** It reads only what may reach the player: public lore, entries whose secret is already out, public sheets and places. Secret lore and secret people never go into it, so nothing it proposes gives a secret away.
+
+**How much lore each one gets.** Each person and group gets their lore in whole entries, the most about them first, up to **Lore each person or group reads** in **Settings → Steps and connections → Build jobs** (8,000 tokens to start; turn on **all of it** for everything, however long). No entry is ever cut short. When the limit leaves entries out, the job says whose and how many of theirs it read. People whose lore fills the limit get a helper call of their own.
+**What the engine checks.** Each proposal is checked against your draft:
+
+- its places, people and company exist;
+- its times can be;
+- anyone it names as company is tied to the person, belongs with them, or is named with them in the cited text;
+- its label names no one.
+
+When the AI got any of this wrong, it gets one more try with the list of what to fix.
+
+**What it points out.** A proposal can clash with something already there:
+
+- a schedule or a routine block the person already has;
+- another proposal;
+- the opening scene, by taking someone away from where the story starts them.
+
+The clash is pointed out in its problems, and it never replaces what you wrote. Something the world already has is left out.
+
+**Using it:**
+
+1. Choose whom for: **Everyone** (every person and group the job may read, never a secret one or your own character), or **Choose** and tick people and groups.
+2. It runs in the background, with its progress and **Cancel**. It reads a few people and groups at a time, within the same twelve helper calls an import makes; a pass that stops before everyone was read says so and offers **Continue**, which starts the next pass where this one stopped. Apply what you want from a pass first: the next pass's proposals replace it.
+3. The review groups the proposals by the person or group they're for. Each says what it sets (a block's kind, time, length, days, place and company; a schedule's field, how it repeats and its slots) and what it rests on, **From lore:** *entry* or **From a sheet:** *name · field*, with the quote; tap a lore entry's title to read it in place. Under it is what checking it against the draft found: a clash with their schedules or routine, a place or company it can't have, pulling someone away from where the story starts them, or a routine or schedule of the same id already in the draft. A proposal with any of these starts unticked; the rest start ticked at 70% or more. A proposal that doesn't rest on a lore entry or a sheet field is never offered, and the review says how many were left out.
+4. **Edit** opens a proposal in Build's own routine or schedule form. **Done** keeps the edit and ticks it, and **As proposed** drops it. The edit is what's applied, and anything wrong with its shape shows before you apply.
+5. **Apply n to the draft** writes the ticked proposals into the draft, each as a routine or schedule of its own, where the editors can change them; nothing reaches your chats until you **Commit**. A schedule comes as a pair, where they are and what they're doing: apply both.
+
+Like the other tools, it remembers its last run, and your ticks and edits stay while you open a lore entry or another page and come back, until you reload.
+
 ### Money in Build
 
 A world's money lives in its entities and the economy pack's config, and every part of it has a form. Amounts are typed as the world's currency writes them. Lists inside a money field (owners, splits, shares, lots, deductions and payment-preference tiers) show a row for each entry that opens it as a sheet, with a button below to add one (**Add owner**, **Add split** and so on); weekdays and months are chips to toggle, and days of the month are typed in a row. Problems show in place, beside the field, row or switch they belong to.
@@ -1153,10 +1287,13 @@ Your own agent (Claude Code, Codex, Cursor…) reaches your worlds through the `
 
 **Settings → MCP server** (under *Your agent*) shows the setup that follows LumiRPEngine, with this extension's own path, under each runtime that runs it, each with **Copy**: first `bun <path>/dist/lumirpengine.js mcp`, for Bun 1.4 or newer, which Lumiverse itself runs on, so it is always on Lumiverse's machine; then `node <path>/dist/lumirpengine.js mcp`, for Node 22 or newer. Give one to your agent's harness as the command for its lumirpengine server. On a machine with only Bun, use the Bun one: installing with npm, or running with npx, needs Node. Below it is each server that has connected from your account, with the harness that runs it, its machine, its builds and whether it is connected now (Claude Code's and Codex's servers on one machine are two lines; a restarted one keeps its line): **Update now** asks one that hasn't reloaded yet to do it, and **Forget** drops one you no longer use. A server running as more than one process (two Claude Code windows on one machine) says how many, *2 processes*, and its line is the one furthest behind: it says *reloaded* only once all of them have.
 
-**Lumiverse can run the server too.** In Lumiverse's Settings → MCP Servers, add a Stdio server with the command `bun` (or `node`) and the arguments `<path>/dist/lumirpengine.js, mcp` (the same path): Lumiverse runs only `node`, `bun`, `deno` and `python` there, not `lumirpengine`. Sign in once first, as the user Lumiverse runs as. It is listed like any other server, as *lumirpengine for lumiverse*, and follows each update; but Lumiverse keeps the tool list it read when it connected, so once the server has reloaded, its line says to **Disconnect** it and **Connect** it again in Lumiverse's Settings → MCP Servers. LumiRPEngine doesn't restart or change Lumiverse's own MCP servers itself.
+**Lumiverse can run the server too.** In Lumiverse's Settings → MCP Servers, add a Stdio server with the command `bun` (or `node`) and the arguments `<path>/dist/lumirpengine.js, mcp` (the same path): Lumiverse runs only `node`, `bun`, `deno` and `python` there, not `lumirpengine`. Sign in once first, as the user Lumiverse runs as. It is listed like any other server, as *lumirpengine for lumiverse*, and follows each update. Lumiverse, though, keeps the tool list it read when it connected, so once the server has reloaded, its line offers **Reconnect in Lumiverse**. Pressing it asks the server to finish any tool call in progress and exit; Lumiverse starts it again about a second later, with the same command, and reads the new tools. The line waits for it to come back (Settings → Timeouts → **MCP server reconnect**, 1 min) and then reads updated; if it isn't back in time, the line says so, and you can **Disconnect** it and **Connect** it again in Lumiverse's Settings → MCP Servers. LumiRPEngine never adds or changes a Lumiverse MCP server. A server set up before this button existed doesn't know how to exit when asked, so its line asks you to reconnect it by hand that one time.
+
+To have the line check Lumiverse's own tool list rather than take the server's word for it, switch on LumiRPEngine's **Mcp Servers** permission in Lumiverse's Extensions tab (only an owner or admin can). With it, LumiRPEngine reads which of your Lumiverse MCP servers hold LumiRPEngine's tools, and nothing more of them: only those servers' names show on the line. Without it, **Reconnect in Lumiverse** still works, and the line says Lumiverse's own list can't be checked.
 
 **After an update** a toast says so, once, and LumiRPEngine's tab in the drawer opens on **LumiRPEngine updated**, with a line for each server:
 - *reloaded this build's tools*: nothing to do;
+- a server Lumiverse runs that *reloaded this build's tools, but Lumiverse's MCP client keeps the list it got when it connected*: press **Reconnect in Lumiverse** (above);
 - *hasn't reloaded yet*: it does within a minute, or press **Update now**. Right after the update no server has checked in with the restarted LumiRPEngine yet, so the line says so: a running one takes the new tools at its next check, and a stopped one when it next starts;
 - *can't follow*: why, and what to do, such as installing again on another machine (**Copy the install**) or using the setup above (**Copy the setup for Bun 1.4 or newer**, or **for Node 22 or newer**). A server never loads tools other users of the machine could change: when Lumiverse's extensions folder, or the extension's files in it, can be written by anyone but their owner, the line names the path, and the fix is to make it writable by its owner only (on Linux and macOS; Windows isn't checked);
 - *from before MCP servers followed LumiRPEngine*: update it once (`npm i -g github:TheLiquorPriest/LumiRPEngine`), or switch it to the setup above.

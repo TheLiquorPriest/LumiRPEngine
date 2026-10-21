@@ -149,12 +149,17 @@ if (typeof kit === "string") {
 const result = await kit.run(process.argv.slice(2), io);
 if ("mcp" in result) {
   const session = new McpSession({ bundled: kit, mcp: result.mcp, io, files: kitFiles, host: hostname(), log: (text) => process.stderr.write(`${text}\n`), cannotLoad: runtimeCannotFollow(process.versions.bun) });
-  const server = serveMcp(session, (line) => {
-    // Resolves once Node has taken the line, so the next waits its turn instead of piling up in memory.
-    const { promise, resolve } = Promise.withResolvers<void>();
-    process.stdout.write(`${line}\n`, () => resolve());
-    return promise;
-  });
+  const server = serveMcp(
+    session,
+    (line) => {
+      // Resolves once Node has taken the line, so the next waits its turn instead of piling up in memory.
+      const { promise, resolve } = Promise.withResolvers<void>();
+      process.stdout.write(`${line}\n`, () => resolve());
+      return promise;
+    },
+    // Reconnect in Lumiverse: every reply is written by now, and the open stdin would keep the process up.
+    () => process.exit(0),
+  );
   session.start();
   process.stdin.setEncoding("utf8");
   process.stdin.on("data", (chunk: string) => server.feed(chunk));

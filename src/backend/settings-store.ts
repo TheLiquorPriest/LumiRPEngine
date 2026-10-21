@@ -16,6 +16,7 @@ import type { StepPurpose } from "../shared/world";
 import { currentSignals } from "../shared/steps";
 import { defaultMindsSettings, isMindPurpose, migrateMindReads, MINDS_PRESETS, mindsSettingsOf } from "../shared/minds";
 import { defaultTimeouts, migrateTimeouts, timeoutsOf } from "../shared/timeouts";
+import { JOB_SETTINGS_DEFAULTS, jobSettingsOf } from "../shared/settings";
 import type { HostPort } from "./host";
 import { readStoredJson } from "./stored-json";
 
@@ -206,6 +207,7 @@ export function defaultSettings(): UserSettings {
     hideJsonBlocks: true,
     minds: defaultMindsSettings(),
     timeouts: defaultTimeouts(),
+    jobs: { ...JOB_SETTINGS_DEFAULTS },
   };
 }
 
@@ -435,6 +437,7 @@ function conform(v: JsonObject, d: UserSettings): UserSettings {
     hideJsonBlocks: typeof v.hideJsonBlocks === "boolean" ? v.hideJsonBlocks : d.hideJsonBlocks,
     minds: mindsSettingsOf(v.minds, d.minds),
     timeouts: timeoutsOf(v.timeouts, d.timeouts),
+    jobs: jobSettingsOf(v.jobs, d.jobs),
   };
 }
 

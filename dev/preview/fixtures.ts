@@ -907,14 +907,15 @@ export function gmFixture(): GmView {
           { type: "knows", to: "pov", toName: "Sam Rivera" },
           { type: "regard", to: "npc_mara", toName: "Mara Lopez", fields: { warmth: 60, trust: 50, respect: 45 }, value: 55 },
         ],
-        levels: gmLevels(SUPPORTING, { money: 4 }),
+        // Cast life 3: the planner lays his day (GM → Routines).
+        levels: gmLevels(SUPPORTING, { money: 4, castlife: 3 }),
         class: { story_role: ["best_friend"] },
         tags: ["mechanic", "night_owl"],
       }),
       entity("npc_mara", "Mara Lopez", "npc", "supporting", "apartment", { fields: npcFields(0, 80, "calm", "Landlord", "Planning Sam's surprise party"), relations: [{ type: "knows", to: "pov", toName: "Sam Rivera" }] }),
       entity("npc_teo", "Teo Brandt", "npc", "background", "diner", { spawned: true, fields: npcFields(1200, 50, "calm", "Delivery driver", "") }),
       entity("npc_vic", "Vic Moreau", "npc", "background", "garage", { gone: true, fields: npcFields(800, 40, "tense", "Tow driver", "") }),
-      entity("npc_haskell", "Mr. Haskell", "npc", "supporting", null, { agent: true, visibility: "secret", fields: npcFields(0, 60, "calm", "Developer", "Buying up Main Street through a shell company") }),
+      entity("npc_haskell", "Mr. Haskell", "npc", "supporting", null, { agent: true, visibility: "secret", levels: gmLevels(SUPPORTING, { castlife: 3 }), fields: npcFields(0, 60, "calm", "Developer", "Buying up Main Street through a shell company") }),
       entity("diner_crew", "Rosie's crew", "group", "background", "diner"),
       entity("civic", "Honda Civic", "vehicle", "background", "apartment", { fields: [{ id: "fuel", label: "fuel", type: "number", value: 38, min: 0, max: 100 }, { id: "owner", label: "owner", type: "ref", value: "pov", ref: "person" }] }),
       entity("glovebox", "Glovebox", "container", "background", "apartment", { holder: "civic", visibility: "discoverable", fields: [{ id: "capacity_l", label: "capacity_l", type: "number", value: 4 }, { id: "stock", label: "stock", type: "text", value: "Registration, gum, $7 in quarters" }] }),
@@ -1197,6 +1198,22 @@ export function worldFixture(): WorldDoc {
       rosie_debt: { id: "rosie_debt", title: "Rosie's debt", content: "Rosie owes the bank for the diner's new fryer and hides it from the staff.", keys: [], links: ["npc_rosie"], topics: ["Rosie"], secret: true, gate: "stage.secret_debt == 'known'", audience: ["npc.choose", "brief"] },
       okafor_breakfast: { id: "okafor_breakfast", title: "Mr. Okafor's breakfast", content: "Mr. Okafor takes two eggs over easy and reads the paper front to back.", keys: [], links: [], source: { kind: "chat", chatId: "chat-1", messageId: "m-12" } },
     },
+    // Build → Routines: the crew's opening shift and the regulars' lunch rest on lore, Dev's week on his sheet; night owls sleep late; Mara has no routine.
+    routines: {
+      crew_days: { id: "crew_days", label: "The diner crew's days", owner: "diner_crew", blocks: [{ id: "open_diner", label: "Opens the diner", activity: "work", kind: "fixed", at: "05:30", minutes: 570, priority: 5, place: { place: "diner" }, days: { off: "never" }, source: { type: "lore", entry: "rosies_diner", quote: "Rosie's opens at six and closes at three." } }] },
+      regulars: { id: "regulars", label: "Regulars at the counter", owner: "npc", blocks: [{ id: "counter_lunch", label: "Lunch at the counter", activity: "lunch", kind: "optional", window: { from: "11:30", to: "13:30" }, minutes: 40, chance: 0.5, perWeek: 2, place: { place: "diner" }, source: { type: "lore", entry: "rosies_diner", quote: "the counter is for regulars" } }] },
+      night_owls: { id: "night_owls", label: "Night owls", owner: { tag: ["night_owl"] }, blocks: [{ id: "sleep", label: "Sleep", activity: "sleep", kind: "flexible", window: { from: "01:00", to: "03:00" }, minutes: 450, priority: 5, place: "home" }] },
+      dev_week: {
+        id: "dev_week",
+        label: "Dev's week",
+        owner: "npc_dev",
+        blocks: [
+          { id: "boat", label: "Works on the boat", activity: "leisure", kind: "flexible", window: { from: "17:00", to: "20:00" }, minutes: 120, perWeek: 3, priority: 4, place: "here", company: { who: { ids: ["pov"] }, invite: true }, source: { type: "sheet", entity: "npc_dev", field: "job", quote: "Mechanic" } },
+          { id: "breakfast", off: true },
+        ],
+      },
+      mara_none: { id: "mara_none", owner: "npc_mara", inherit: false, blocks: [] },
+    },
     loreIndex: { terms: { "the diner": ["rosies_diner"], cannery: ["harbor_history"] }, topics: { town_places: { label: "Town places", entries: ["rosies_diner"] } } },
     steps: { brief: { id: "brief", purpose: "brief", template: "Summarize the scene for the narrator.", output: "text", signals: ["scene_change"] } },
     suppressed: [],
@@ -1288,6 +1305,7 @@ export function settingsFixture(): UserSettings {
     hideJsonBlocks: true,
     minds: defaultMindsSettings(),
     timeouts: { ...defaultTimeouts(), requestMs: 600_000, laneHeartbeatMs: "none" },
+    jobs: { routineLoreTokens: 8000 },
   };
 }
 

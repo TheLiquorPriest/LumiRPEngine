@@ -1,9 +1,12 @@
 // The MCP server's session (DESIGN §23): its one connection to LumiRPEngine, the kit its tools come
 // from, and following the extension's kit. It looks at what kit LumiRPEngine has on connecting (the
 // hello's answer), before a call once the last look is 30 s old, every 60 s while connected, and
-// when LumiRPEngine asks (Update now). After any change of what it runs it checks in again, so the
-// extension's Settings → MCP server and its update notice say how this server stands.
+// when LumiRPEngine asks (Update now). After any change of what it runs, or of the tools its client
+// last listed, it checks in again, so the extension's Settings → MCP server and its update notice
+// say how this server stands. Run by Lumiverse, it exits when LumiRPEngine asks (Reconnect in
+// Lumiverse), since Lumiverse's client only lists tools on connecting and connects again on an exit.
 
+import { LUMIVERSE_HARNESS } from "../shared/agents";
 import type { AgentCheckIn } from "../shared/agents";
 import { isRecord } from "../shared/json";
 import type { ResultBodies } from "../shared/protocol";
@@ -80,6 +83,8 @@ export class McpSession implements ToolHost {
   readonly context: KitContext;
   /** Called once the loaded kit changed: the server tells its client the tool list did. */
   toolsChanged: () => void = () => undefined;
+  /** Called once to end the process (Reconnect in Lumiverse): the server answers the calls in flight first. */
+  leave: () => void = () => undefined;
   private conn: HostConnection | null = null;
   private readonly follower: KitFollower;
   private readonly clock: Clock;
@@ -90,12 +95,15 @@ export class McpSession implements ToolHost {
   /** The harness that runs this server, from its client's initialize; checked in with, so each harness's server is a line of its own. */
   private harness: string | null = null;
   private initializedOnce = false;
+  /** The kit build whose tools the client last listed; null before it asked. */
+  private listedBuild: string | null = null;
+  private leaving = false;
   private looked = Number.NEGATIVE_INFINITY;
   /** Following, one step at a time. */
   private work: Promise<void> = Promise.resolve();
   private starting: Promise<void> = Promise.resolve();
   private stopTimer: () => void = () => undefined;
-  /** What the last check-in said: another is due when it changes. */
+  /** What the last check-in sent said (its stance): another is due when that changes. */
   private said: string;
 
   constructor(private readonly options: SessionOptions) {
@@ -104,7 +112,7 @@ export class McpSession implements ToolHost {
     this.follower = new KitFollower(options.bundled, { pin: options.mcp.pin, cannotLoad: options.cannotLoad ?? null, identifier: ENGINE_EXTENSION, files: options.files, where: () => this.conn?.base ?? "your Lumiverse" });
     const queue = new Queue();
     this.context = { readFile: (path) => options.io.readFile(path), readOnly: this.readOnly, connection: () => this.connection(), serialize: (key, work) => queue.run(key, work) };
-    this.said = this.stance();
+    this.said = stanceOf(this.checkIn());
   }
 
   kit(): AgentKit {
@@ -114,7 +122,7 @@ export class McpSession implements ToolHost {
   /** What this server checks in with. */
   checkIn(): AgentCheckIn {
     const { follows, why } = this.follower.state;
-    return { serves: "mcp", core: BUILD, kit: this.follower.kit.build, follows, why, host: this.options.host, harness: this.harness };
+    return { serves: "mcp", core: BUILD, kit: this.follower.kit.build, follows, why, host: this.options.host, harness: this.harness, listed: this.listedBuild };
   }
 
   /** Looks every minute while connected. The connection opens at the client's initialize, so the first check-in names the harness. */
@@ -136,6 +144,13 @@ export class McpSession implements ToolHost {
         // Not signed in, or Lumiverse unreachable: the first call that needs it says why, and connects then.
       }
     })();
+  }
+
+  /** The client was answered a `tools/list`: a Lumiverse-run server's line says whether Lumiverse's client holds this build's tools by it. */
+  listed(build: string): void {
+    if (this.listedBuild === build) return;
+    this.listedBuild = build;
+    void this.after(() => this.tell());
   }
 
   /** Before a call: a look when the last is old, and whatever following is under way, waited for a while. */
@@ -173,18 +188,36 @@ export class McpSession implements ToolHost {
       client: { name: CLI_NAME, version: CLI_VERSION },
       checkIn: () => this.checkIn(),
       needs: () => this.follower.kit.versions.agentApi,
-      onHello: (answer) => {
+      onHello: (answer, sent) => {
         if (typeof answer.client === "string") this.agent = answer.client;
+        // What that hello said, not what this server says now: a list answered while it was on its way is still to be told.
+        if (sent !== null) this.said = stanceOf(sent);
         this.looked = this.clock.now();
         void this.after(() => this.take(answer));
       },
       onPush: (push) => {
+        if (this.agent === null || !("client" in push) || push.client !== this.agent) return;
         // Update now: LumiRPEngine asks this server, by the id its hello was given, to look at once.
-        if (push.type === "lre.kit.reload" && this.agent !== null && push.client === this.agent) void this.look();
+        if (push.type === "lre.kit.reload") void this.look();
+        else if (push.type === "lre.kit.reconnect") this.reconnect();
       },
       ...(this.options.mcp.timeoutMs !== undefined ? { timeoutMs: this.options.mcp.timeoutMs } : {}),
     });
     return this.conn;
+  }
+
+  /**
+   * Reconnect in Lumiverse: Lumiverse's MCP client lists a server's tools only on connecting and
+   * ignores tools/list_changed, but connects a stdio server again about a second after it exits.
+   * Only a Lumiverse-run server whose client holds another build's tools than it serves leaves; any
+   * other harness would just lose its server.
+   */
+  private reconnect(): void {
+    const serving = this.follower.kit.build;
+    if (this.leaving || this.harness !== LUMIVERSE_HARNESS || this.listedBuild === null || this.listedBuild === serving) return;
+    this.leaving = true;
+    this.options.log(`lumirpengine: exiting, as LumiRPEngine's Reconnect in Lumiverse asked, once the calls in flight are answered: Lumiverse's MCP client holds build ${this.listedBuild}'s tools until it connects again, and on connecting it lists build ${serving}'s`);
+    this.leave();
   }
 
   private after(step: () => Promise<void>): Promise<void> {
@@ -215,30 +248,36 @@ export class McpSession implements ToolHost {
   private async take(news: KitNews): Promise<void> {
     this.followable = this.follower.able && "kit" in news && isRecord(news.kit);
     const was = this.follower.kit.build;
+    const before = this.follower.state.why?.code ?? null;
     const changed = await this.follower.follow(news);
     if (changed) {
       this.options.log(`lumirpengine: serving the tools of LumiRPEngine build ${this.follower.kit.build} (was build ${was})`);
       this.toolsChanged();
     }
-    const stance = this.stance();
-    if (stance === this.said) return;
-    this.said = stance;
     const { why } = this.follower.state;
-    if (why !== null) this.options.log(`lumirpengine: keeping the tools of build ${this.follower.kit.build}: ${why.text}`);
-    // Its answer comes back through onHello, after this step.
-    await this.conn?.checkInAgain();
+    if (why !== null && why.code !== before) this.options.log(`lumirpengine: keeping the tools of build ${this.follower.kit.build}: ${why.text}`);
+    await this.tell();
   }
 
-  /** What a check-in says, as a key: the kit loaded, and whether (and why not) it follows. */
-  private stance(): string {
-    const { follows, why } = this.follower.state;
-    return `${this.follower.kit.build}\u0000${String(follows)}\u0000${why?.code ?? ""}`;
+  /** Checks in again when what it would say differs from what it last said; the answer comes back through onHello, after this step. */
+  private async tell(): Promise<void> {
+    if (stanceOf(this.checkIn()) !== this.said) await this.conn?.checkInAgain();
   }
 }
 
-/** The MCP server over a session, on lines: it tells its client when the session swaps the tools. */
-export function serveMcp(session: McpSession, write: (line: string) => Promise<void> | void): LineServer {
+/** What a check-in says, as a key: the kit loaded, whether (and why not) it follows, and the tools its client last listed. */
+function stanceOf(c: AgentCheckIn): string {
+  return `${c.kit}\u0000${String(c.follows)}\u0000${c.why?.code ?? ""}\u0000${c.listed ?? ""}`;
+}
+
+/** The MCP server over a session, on lines: it tells its client when the session swaps the tools, and ends (`exit`) once every call is answered when the session leaves. */
+export function serveMcp(session: McpSession, write: (line: string) => Promise<void> | void, exit: () => void = () => undefined): LineServer {
   const line = lineServer(new McpServer(session), write);
   session.toolsChanged = () => line.notify("notifications/tools/list_changed");
+  session.leave = () =>
+    void line.drain().then(() => {
+      session.close();
+      exit();
+    });
   return line;
 }

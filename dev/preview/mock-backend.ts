@@ -26,6 +26,8 @@ import { macroReview, WORLD_COLLECTIONS } from "../../src/backend/worlds";
 import type { StudioCase } from "./fixtures";
 import { DECLINED_PURCHASE, extractionView, freshFixture, gmFixture, pausedFixture, portAlderMoney, settingsFixture, starterMap, stateFixture, studioOfferFixture, UPGRADE_PREVIEW, WORLDS, worldFixture } from "./fixtures";
 import { combatFixture } from "./combat-fixture";
+import { applyRoutineOp, previewRoutines, routineChangedFixture, routineGmFixture, type PreviewRoutines } from "./routines-fixture";
+import { ROUTINE_PROPOSALS, routinePlayerFixture } from "./routines-player-fixture";
 import { isWorldDoc, lintWorld, migrateWorld, previewSheet, previewSkills } from "../../src/engine/authoring";
 import { createRegistry } from "../../src/engine/registry-impl";
 import { formulaFunctions } from "../../src/engine/scope";
@@ -116,8 +118,10 @@ export class MockBackend {
   private elsewhereCount = 0;
   private jobs = 0;
   private gm: GmView = gmFixture();
-  /** The GM view as it was before each GM edit, by the edit's Undo chip. */
-  private readonly beforeEdit = new Map<string, GmView>();
+  /** This chat's routine changes (GM → Routines), as the castlife slice keeps them. */
+  private routines: PreviewRoutines = previewRoutines();
+  /** The GM view and the routine changes as they were before each GM edit, by the edit's Undo chip. */
+  private readonly beforeEdit = new Map<string, { gm: GmView; routines: PreviewRoutines }>();
   /** Kept jobs (`lre.job list`): an import a restart cut off after its first chunk. */
   private kept: JobSummary[] = [{ jobId: "job-kept", kind: "import_lore", worldId: WORLDS[0]?.id ?? "", status: "interrupted", progress: 0.5, message: "Interrupted by a restart. The 2 proposal(s) it made before it stopped are below; run it again for the rest.", result: { proposals: PROPOSALS.slice(0, 2) }, input: { bookIds: ["book-1"] }, at: Date.now() - 600_000 }];
   /** The active preset as the backend reads it: one section outlet placed, one unknown, and guidance blocks in each state. */
@@ -289,6 +293,7 @@ export class MockBackend {
   /** Applies a GM edit to the GM view and words it for the Journal; a string is why it was refused (nothing applied). */
   private applyEdit(ops: EditOp[]): string[] | string {
     const gm = structuredClone(this.gm);
+    const routines = structuredClone(this.routines);
     const find = (id: string) => gm.entities.find((e) => e.id === id);
     const name = (id: string | null) => (id === null ? "nowhere" : (find(id)?.name ?? gm.places.find((p) => p.id === id)?.name ?? id));
     const lines: string[] = [];
@@ -366,9 +371,15 @@ export class MockBackend {
           entity.gone = op.op === "despawn";
           lines.push(`${entity.name} is ${entity.gone ? "gone" : "back"}`);
           break;
+        case "routine_follow":
+        case "routine_block":
+        case "schedule_override":
+          lines.push(applyRoutineOp(routines, op, entity.name, gm.minds.now));
+          break;
       }
     }
     this.gm = gm;
+    this.routines = routines;
     return lines;
   }
 
@@ -411,7 +422,10 @@ export class MockBackend {
         const chip = this.view?.chips.find((c) => c.id === message.chip);
         if (!chip) return this.error(reqId, "not_found", "That chip has expired.");
         const undone = chip.kind === "fix" ? this.beforeEdit.get(chip.id) : undefined;
-        if (undone) this.gm = undone;
+        if (undone) {
+          this.gm = undone.gm;
+          this.routines = undone.routines;
+        }
         if (chip.kind === "decline" && message.choice === "other" && !this.payAnotherWay()) return this.error(reqId, "validation", "No other way to pay covers it.");
         this.result(reqId, "lre.chip", { applied: true, pending: false });
         this.mutate((view) => {
@@ -459,10 +473,10 @@ export class MockBackend {
       case "lre.gm":
         return this.result(reqId, "lre.gm", structuredClone(this.gm));
       case "lre.edit": {
-        const before = structuredClone(this.gm);
+        const before = { gm: structuredClone(this.gm), routines: structuredClone(this.routines) };
         const lines = this.applyEdit(message.ops);
         if (typeof lines === "string") return this.error(reqId, "validation", lines);
-        const seq = (before.edits[0]?.seq ?? 0) + 1;
+        const seq = (before.gm.edits[0]?.seq ?? 0) + 1;
         const chip = `fix:m4:0:${seq}`;
         this.gm.edits.unshift({ messageId: "m4", seq, lines });
         this.beforeEdit.set(chip, before);
@@ -688,7 +702,9 @@ export class MockBackend {
         this.jobs += 1;
         const jobId = `job-${this.jobs}`;
         const kind = message.kind;
-        const proposals = kind === "describe_map" ? this.mapProposals(message.input) : kind === "index_book" || kind === "index_text" ? LORE_PROPOSALS : PROPOSALS;
+        // Propose routines' first pass stops after Rosie (Continue); the next reads the crew.
+        const after = isRecord(message.input) && typeof message.input.after === "string";
+        const proposals = kind === "describe_map" ? this.mapProposals(message.input) : kind === "index_book" || kind === "index_text" ? LORE_PROPOSALS : kind === "propose_routines" ? (after ? ROUTINE_PROPOSALS.filter((p) => p.owner === "diner_crew") : ROUTINE_PROPOSALS) : PROPOSALS;
         this.result(reqId, "lre.job", { jobId });
         const update = (status: JobUpdate["status"], progress: number, extra: Partial<JobUpdate> = {}) => this.emit({ lre: 1, type: "lre.job.update", jobId, kind, status, progress, ...extra });
         setTimeout(() => update("running", 0.35, { message: kind === "playtest" ? "Turn 2 of 5" : "Reading 14 entries…" }), 200);
@@ -701,6 +717,7 @@ export class MockBackend {
                   ? { turns: [{ user: "I ask Rosie for a raise.", reply: "Rosie sets down the coffee pot. “After the rush,” she says.", notes: ["Check persuade: 9 vs 8 (success)", "+5 min"] }, { user: "I cover Mara's shift.", reply: "The afternoon blurs into orders and refills.", notes: ["Timelapse 6 h", "Payroll accrues"] }], lint: [{ severity: "warning", path: "rules.payday", code: "no_effect", message: "Rule payday never fired in 2 turns." }] }
                   : {
                       proposals,
+                      ...(kind === "propose_routines" && !after ? { next: { after: "npc_rosie" } } : {}),
                     },
             }),
           1200,
@@ -777,6 +794,15 @@ export class MockBackend {
       case "lre.diag":
         if (message.op === "dismiss") this.activity(null);
         return this.result(reqId, "lre.diag", { records: message.op === "clear" ? [] : diagnosticsFixture(), activity: null });
+      case "lre.routine": {
+        // Cast's usual day: someone's day as the POV may know it.
+        if (message.op === "day" && message.view === "player") return this.result(reqId, "lre.routine", { player: routinePlayerFixture(message.entity) });
+        // GM → Routines reads everyone this chat changed, and one character's day as the GM reads it.
+        if (message.op === "changed") return this.result(reqId, "lre.routine", { changed: routineChangedFixture(this.routines, this.gm) });
+        if (message.view !== "gm") return this.result(reqId, "lre.routine", {});
+        const gm = routineGmFixture(message.entity, this.routines, this.gm);
+        return gm ? this.result(reqId, "lre.routine", { gm }) : this.error(reqId, "not_found", `${message.entity} isn't a character.`);
+      }
     }
   }
 

@@ -88,7 +88,7 @@ export function hostBound(host: HostLimit, limit: Limit): number {
 
 // ---------------------------------------------------------------- the settings
 
-export const TIMEOUT_KEYS = ["engineRunMs", "preLookupMs", "postReplyMs", "postLookupMs", "guardMs", "requestMs", "caveatsMs", "mindsRunMs", "jobCallMs", "tokenCountMs", "laneStartupMs", "laneHeartbeatMs"] as const;
+export const TIMEOUT_KEYS = ["engineRunMs", "preLookupMs", "postReplyMs", "postLookupMs", "guardMs", "requestMs", "caveatsMs", "mindsRunMs", "jobCallMs", "tokenCountMs", "laneStartupMs", "laneHeartbeatMs", "mcpReconnectMs"] as const;
 
 export type TimeoutKey = (typeof TIMEOUT_KEYS)[number];
 
@@ -187,6 +187,15 @@ export const TIMEOUTS: Readonly<Record<TimeoutKey, TimeoutDef>> = {
     zero: "always answer at once",
     none: "wait for the check (Engine requests still bounds the tab's wait)",
   },
+  mcpReconnectMs: {
+    label: "MCP server reconnect",
+    group: "work",
+    limits: "How long Reconnect in Lumiverse waits for a server Lumiverse runs to come back with this build's tools, after it is asked to exit.",
+    fires: "The server's line says it isn't back, with how to disconnect and connect it in Lumiverse's Settings → MCP Servers.",
+    defaultMs: MIN,
+    minMs: 1_000,
+    none: "the line waits until the server is back",
+  },
   mindsRunMs: {
     label: "Minds run on demand",
     group: "work",
@@ -199,7 +208,7 @@ export const TIMEOUTS: Readonly<Record<TimeoutKey, TimeoutDef>> = {
   jobCallMs: {
     label: "Import and Refine calls",
     group: "work",
-    limits: "Each model call of an Import, a Refine, a lore index or a map description in Build.",
+    limits: "Each model call of an Import, a Refine, a lore index, a map description or a routine proposal in Build.",
     fires: "That call counts as failed; the job goes on with what the other calls proposed.",
     defaultMs: 10 * MIN,
     minMs: 1_000,

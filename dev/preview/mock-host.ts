@@ -139,8 +139,10 @@ export function createMockHost(options: MockHostOptions): MockHost {
       };
       paint();
       floats.appendChild(root);
+      // Like the host, the widget's root goes into the page only after the frame its widget mounts in,
+      // so whatever renders into it first runs its effects while it is still detached.
       const inner = el("div");
-      root.appendChild(inner);
+      requestAnimationFrame(() => requestAnimationFrame(() => root.appendChild(inner)));
       return {
         root: inner,
         widgetId: `w-${Math.random().toString(36).slice(2)}`,

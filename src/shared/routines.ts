@@ -18,8 +18,8 @@
 
 import type { EntityId, KindId, MessageId, PlaceId, ScheduleId, SceneTypeId } from "./ids";
 import type { JsonValue } from "./json";
-import { isRecord } from "./json";
-import type { Fidelity } from "./minds";
+import { hasOwn, isRecord } from "./json";
+import { FIDELITIES, type Fidelity } from "./minds";
 import type { Recurrence, ScheduleSlot, Selector } from "./world";
 
 // ---------------------------------------------------------------- world data
@@ -535,12 +535,12 @@ export function blockShapeProblems(v: unknown, world = true): string[] {
   if (v.off === true) return out;
   if (typeof v.label !== "string" || v.label.trim() === "") out.push("a block has a label");
   if (typeof v.activity !== "string" || v.activity.trim() === "") out.push("a block has an activity");
-  if (!ROUTINE_BLOCK_KINDS.some((k) => k === v.kind)) out.push("a block is fixed, flexible or optional");
-  if (typeof v.minutes !== "number" || !Number.isInteger(v.minutes) || v.minutes < 1 || v.minutes > 1440) out.push("its length is 1 to 1,440 minutes");
-  if (v.kind === "fixed" && !isTime(v.at)) out.push("a fixed block starts at an HH:MM time");
-  if (v.kind !== "fixed" && v.at !== undefined) out.push("only a fixed block has a start time");
+  if (!ROUTINE_BLOCK_KINDS.some((k) => k === v.kind)) out.push("its kind is fixed, flexible or optional");
+  if (typeof v.minutes !== "number" || !Number.isInteger(v.minutes) || v.minutes < 1 || v.minutes > 1440) out.push("its length (minutes) is 1 to 1,440 minutes");
+  if (v.kind === "fixed" && !isTime(v.at)) out.push("a fixed block starts at an HH:MM time (at)");
+  if (v.kind !== "fixed" && v.at !== undefined) out.push("only a fixed block has a start time (at)");
   if (v.kind !== "fixed" && !(isRecord(v.window) && isTime(v.window.from) && isTime(v.window.to))) out.push("its window is HH:MM to HH:MM");
-  if (v.perWeek !== undefined && !(v.kind !== "fixed" && Number.isInteger(v.perWeek) && typeof v.perWeek === "number" && v.perWeek >= 1 && v.perWeek <= 7)) out.push("times a week is 1 to 7, for a flexible or optional block");
+  if (v.perWeek !== undefined && !(v.kind !== "fixed" && Number.isInteger(v.perWeek) && typeof v.perWeek === "number" && v.perWeek >= 1 && v.perWeek <= 7)) out.push("times a week (perWeek) is 1 to 7, for a flexible or optional block");
   if (v.chance !== undefined && !(v.kind === "optional" && typeof v.chance === "number" && v.chance > 0 && v.chance <= 1)) out.push("a chance is above 0 and at most 1, for an optional block");
   if (v.priority !== undefined && !(typeof v.priority === "number" && Number.isInteger(v.priority) && v.priority >= 1 && v.priority <= 5)) out.push("its priority is 1 to 5");
   if (v.needs !== undefined && !(Array.isArray(v.needs) && v.needs.every((n) => typeof n === "string"))) out.push("its needs are names");
@@ -569,4 +569,27 @@ export function routineShapeProblems(v: unknown): string[] {
     ids.add(id);
   });
   return out;
+}
+
+/** Each setting's allowed values: a word of its list, a switch, or a role for each level of closeness. A setting not named here is none the engine reads. */
+const SETTING_VALUES: Record<string, readonly string[] | "switch" | "roles"> = { awareness: ROUTINE_AWARENESS, invitations: ROUTINE_INVITATIONS, sociability: ROUTINE_SOCIABILITY, planBend: ROUTINE_PLAN_BEND, roles: "roles", narrator: "switch", paletteFollowsRoutine: "switch" } satisfies Record<keyof RoutineSettings, readonly string[] | "switch" | "roles">;
+
+/**
+ * What is wrong with routine settings as a write sends them (a Build save, an outside tool), one
+ * phrase per field at fault; none when they read. A part left out keeps its default, so `{}` reads,
+ * and so does a level `roles` leaves out. Stored settings are read leniently (`routineSettingsOf`); a
+ * write is held to this.
+ */
+export function routineSettingsProblems(v: unknown): string[] {
+  if (!isRecord(v)) return ["routine settings are an object"];
+  return Object.entries(v).flatMap(([key, value]) => {
+    const allowed = hasOwn(SETTING_VALUES, key) ? SETTING_VALUES[key] : undefined;
+    if (!allowed) return [`there's no setting ${key} (${Object.keys(SETTING_VALUES).join(", ")})`];
+    if (allowed === "switch") return typeof value === "boolean" ? [] : [`${key} is true or false`];
+    if (allowed === "roles") {
+      if (!isRecord(value)) return [`roles give ${FIDELITIES.join(", ")} each a role`];
+      return Object.entries(value).flatMap(([level, role]) => (!FIDELITIES.some((f) => f === level) ? [`roles have no level ${level} (${FIDELITIES.join(", ")})`] : typeof role === "string" && ROUTINE_ROLES.some((r) => r === role) ? [] : [`roles.${level} is ${ROUTINE_ROLES.join(", ")}`]));
+    }
+    return typeof value === "string" && allowed.includes(value) ? [] : [`${key} is ${allowed.join(", ")}`];
+  });
 }

@@ -31,8 +31,8 @@ const distOf = (name: string): string => distIn(root, name);
 /** Someone else: never this user, never root. */
 const OTHER_UID = (process.getuid?.() ?? 0) + 4242;
 
-/** A server as the core runs one, signed in to `fake`, on a clock the test moves; following's disk is the real one unless `files` says otherwise, and `cannotLoad` is the runtime's word that it can't load a kit. */
-function serve(fake: FakeLumiverse, options: { pin?: boolean; files?: KitFiles; cannotLoad?: string } = {}) {
+/** A server as the core runs one, signed in to `fake`, on a clock the test moves; following's disk is the real one unless `files` says otherwise, and `cannotLoad` is the runtime's word that it can't load a kit. `harness` is its client's name; `order` records each reply written and the process's exit, in turn. */
+function serve(fake: FakeLumiverse, options: { pin?: boolean; files?: KitFiles; cannotLoad?: string; harness?: string; timeoutMs?: number } = {}) {
   let now = 1_000_000;
   const ticks: (() => void)[] = [];
   const clock: Clock = { now: () => now, every: (_ms, tick) => (ticks.push(tick), () => undefined) };
@@ -40,9 +40,18 @@ function serve(fake: FakeLumiverse, options: { pin?: boolean; files?: KitFiles; 
   const credentials = new CredentialStore({ read: () => saved, write: (_path, text) => void (saved = text) }, "credentials.json");
   credentials.put(fake.base, { username: USER.username, token: fake.session(), savedAt: 1 });
   const logs: string[] = [];
-  const session = new McpSession({ bundled, mcp: { readOnly: false, pin: options.pin ?? false, base: () => fake.base, timeoutMs: 3000 }, io: { credentials, http: fake.http, openSocket: fake.openSocket, readFile: () => "" }, files: options.files ?? disk, host: "test-host", log: (text) => void logs.push(text), cannotLoad: options.cannotLoad ?? null, clock });
+  const session = new McpSession({ bundled, mcp: { readOnly: false, pin: options.pin ?? false, base: () => fake.base, timeoutMs: options.timeoutMs ?? 3000 }, io: { credentials, http: fake.http, openSocket: fake.openSocket, readFile: () => "" }, files: options.files ?? disk, host: "test-host", log: (text) => void logs.push(text), cannotLoad: options.cannotLoad ?? null, clock });
   const lines: Record<string, unknown>[] = [];
-  const server = serveMcp(session, (line) => void lines.push(JSON.parse(line) as Record<string, unknown>));
+  const order: string[] = [];
+  const server = serveMcp(
+    session,
+    (line) => {
+      const message = JSON.parse(line) as Record<string, unknown>;
+      lines.push(message);
+      if (message.id !== undefined) order.push(`reply ${String(message.id)}`);
+    },
+    () => void order.push("exit"),
+  );
   let id = 0;
   const settle = async (): Promise<void> => {
     for (let i = 0; i < 3; i++) {
@@ -58,15 +67,23 @@ function serve(fake: FakeLumiverse, options: { pin?: boolean; files?: KitFiles; 
     const reply = lines.find((l) => l.id === asked);
     return isRecord(reply?.result) ? reply.result : {};
   };
+  /** Sends a request and doesn't wait for it: its id. */
+  const send = (method: string, params?: Record<string, unknown>): number => {
+    const asked = ++id;
+    server.feed(`${JSON.stringify({ jsonrpc: "2.0", id: asked, method, ...(params ? { params } : {}) })}\n`);
+    return asked;
+  };
   const start = async (): Promise<void> => {
-    await ask("initialize", { protocolVersion: "2025-06-18", clientInfo: { name: "test-harness", version: "1" } });
+    await ask("initialize", { protocolVersion: "2025-06-18", clientInfo: { name: options.harness ?? "test-harness", version: "1" } });
     session.start();
     await settle();
   };
   return {
     lines,
     logs,
+    order,
     ask,
+    send,
     start,
     settle,
     tick: () => ticks.forEach((tick) => tick()),
@@ -90,7 +107,12 @@ describe("following the extension's kit", () => {
     await s.start();
     expect(await s.tools()).toEqual(own);
     expect(s.changed()).toBe(0);
-    expect(checkIns(fake)).toEqual([{ name: "lumirpengine", version: "0.0.1", serves: "mcp", core: "dev", kit: bundled.build, follows: true, why: null, host: "test-host", harness: "test-harness" }]);
+    // It checked in on connecting, and again once its client had listed the tools.
+    const first = { name: "lumirpengine", version: "0.0.1", serves: "mcp", core: "dev", kit: bundled.build, follows: true, why: null, host: "test-host", harness: "test-harness" };
+    expect(checkIns(fake)).toEqual([
+      { ...first, listed: null },
+      { ...first, listed: bundled.build },
+    ]);
 
     // The extension updates: its new kit is on disk, and LumiRPEngine now reports that build.
     fake.lre.build = "b2";
@@ -197,7 +219,8 @@ describe("following the extension's kit", () => {
     await s.settle();
     expect(await s.tools()).toEqual(own);
     expect(s.changed()).toBe(0);
-    expect(checkIns(fake)).toEqual([expect.objectContaining({ follows: false, why: expect.objectContaining({ code: "pinned" }) })]);
+    // On connecting, and once its client listed the tools: each says it is pinned.
+    expect(checkIns(fake)).toEqual([expect.objectContaining({ follows: false, why: expect.objectContaining({ code: "pinned" }), listed: null }), expect.objectContaining({ follows: false, why: expect.objectContaining({ code: "pinned" }), listed: bundled.build })]);
     expect(fake.lre.sent("lre.agents", "kit")).toEqual([]);
   });
 
@@ -242,7 +265,7 @@ describe("on a Bun that can't load a kit", () => {
     expect(versionLine("1.4.3")).toMatch(/^lumirpengine \d+\.\d+\.\d+ \(build [\w.-]+, engine \d+\.\d+\.\d+, world format lre-world-v1, agent API \d+\)$/);
   });
 
-  test("its server doesn't try: its one check-in and lre_status say why, it never looks, and the tools it has stay", async () => {
+  test("its server doesn't try: its check-ins and lre_status say why, it never looks, and the tools it has stay", async () => {
     const fake = new FakeLumiverse();
     fake.lre.build = "b10";
     fake.lre.kit = writeKit(distOf("k"), "b10", ["lre_never"]);
@@ -252,9 +275,74 @@ describe("on a Bun that can't load a kit", () => {
     await s.settle();
     expect(await s.tools()).toEqual(own);
     expect(s.changed()).toBe(0);
-    expect(checkIns(fake)).toEqual([expect.objectContaining({ kit: bundled.build, follows: false, why: { code: "runtime", text: CANNOT } })]);
+    expect(checkIns(fake)).toEqual([expect.objectContaining({ kit: bundled.build, follows: false, why: { code: "runtime", text: CANNOT }, listed: null }), expect.objectContaining({ kit: bundled.build, follows: false, why: { code: "runtime", text: CANNOT }, listed: bundled.build })]);
     expect(fake.lre.sent("lre.agents", "kit")).toEqual([]);
     const status = (await s.ask("tools/call", { name: "lre_status", arguments: {} })).content as { text: string }[];
     expect(JSON.parse(status[0]?.text ?? "{}").client).toMatchObject({ follows: false, whyNot: CANNOT });
+  });
+});
+
+describe("Reconnect in Lumiverse", () => {
+  /** A server run by `harness` whose client listed the bundled tools, after which it reloaded build b9's kit: that client, if it never lists again, holds the old list. */
+  async function reloaded(harness: string, dir: string) {
+    const fake = new FakeLumiverse();
+    fake.lre.build = bundled.build;
+    fake.lre.kit = writeKit(distOf(dir), bundled.build, ["lre_unused"]);
+    const s = serve(fake, { harness, timeoutMs: 300 });
+    await s.start();
+    await s.tools();
+    fake.lre.build = "b9";
+    fake.lre.kit = writeKit(distOf(dir), "b9", ["lre_new_tool"]);
+    s.tick();
+    await s.settle();
+    return { fake, s };
+  }
+  const ask = (fake: FakeLumiverse, client = fake.lre.clientId) => fake.push({ type: "lre.kit.reconnect", client });
+
+  test("a server checks in with the build whose tools its client last listed, so a Lumiverse-run one's line can tell its client holds an old list", async () => {
+    const { fake } = await reloaded("lumiverse", "r1");
+    expect(checkIns(fake).map((c) => [c.kit, c.listed])).toEqual([
+      [bundled.build, null],
+      [bundled.build, bundled.build],
+      ["b9", bundled.build],
+    ]);
+  });
+
+  test("asked by its id, a Lumiverse-run server whose client holds an old list answers the call in flight, says why on stderr, then exits", async () => {
+    const { fake, s } = await reloaded("lumiverse", "r2");
+    // A call waits on a look LumiRPEngine doesn't answer (until the 300 ms timeout): it is in flight when the server is asked.
+    fake.silent.add("lre.agents");
+    s.advance(31_000);
+    const call = s.send("tools/call", { name: "lre_new_tool", arguments: {} });
+    ask(fake);
+    await s.settle();
+    await s.settle();
+    expect(s.order.slice(-2)).toEqual([`reply ${call}`, "exit"]);
+    expect(s.lines.find((l) => l.id === call)?.result).toEqual({ content: [{ type: "text", text: "lre_new_tool answered by build b9" }] });
+    expect(s.logs.at(-1)).toStartWith("lumirpengine: exiting, as LumiRPEngine's Reconnect in Lumiverse asked, once the calls in flight are answered");
+    expect(s.logs.at(-1)).toContain(`holds build ${bundled.build}'s tools`);
+    // Asked again on its way out: it exits once.
+    ask(fake);
+    await s.settle();
+    expect(s.order.filter((o) => o === "exit")).toHaveLength(1);
+  });
+
+  test("another server's id, another harness's server, and a Lumiverse-run server whose client has its tools don't exit", async () => {
+    const lumiverse = await reloaded("lumiverse", "r3");
+    ask(lumiverse.fake, "another-server");
+    await lumiverse.s.settle();
+    // Claude Code lists again on list_changed, and would only lose its server.
+    const claude = await reloaded("claude-code", "r4");
+    ask(claude.fake);
+    await claude.s.settle();
+    // Lumiverse connected after the reload: its client listed the tools it serves.
+    const fresh = await reloaded("lumiverse", "r5");
+    await fresh.s.tools();
+    ask(fresh.fake);
+    await fresh.s.settle();
+    for (const { s } of [lumiverse, claude, fresh]) {
+      expect(s.order).not.toContain("exit");
+      expect(s.logs.some((l) => l.includes("exiting"))).toBe(false);
+    }
   });
 });

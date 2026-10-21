@@ -3,6 +3,8 @@
 // backend, which says where its kit is and keeps the check-ins, the frontend, which shows them, and
 // the `lumirpengine` CLI, which loads the kit.
 
+import { hashJson } from "./hash";
+
 /** The level of the contract between the CLI's core and an agent kit: a kit of another level is refused, not loaded. */
 export const KIT_API = 1;
 
@@ -19,6 +21,28 @@ export const NPM_INSTALL = "npm i -g github:TheLiquorPriest/LumiRPEngine";
  * src/services/mcp-client-manager.ts).
  */
 export const LUMIVERSE_HARNESS = "lumiverse";
+
+/** The permission that lets the extension see the user's Lumiverse MCP server profiles and the tools Lumiverse's client holds for each (Spindle's `mcp.servers`). */
+export const MCP_PERMISSION = "mcp_servers";
+
+/** Tools every kit lists, read-only or not: a Lumiverse profile whose client holds both runs a lumirpengine server. */
+export const KIT_MARKS = ["lre_guide", "lre_status"] as const;
+
+/** A tool as Lumiverse's MCP client keeps it from a server's `tools/list` (its `McpDiscoveredTool`, without the server it came from). */
+export interface ListedTool {
+  name: string;
+  description: string;
+  input_schema: Record<string, unknown>;
+}
+
+/**
+ * A tool list's fingerprint, its key order aside: `bun run build` takes it of the kit's two lists
+ * (read-only and full) and the backend of the list Lumiverse's client holds for a profile, so the
+ * two match exactly when Lumiverse has this build's tools.
+ */
+export function toolsFingerprint(tools: readonly ListedTool[]): string {
+  return hashJson(tools.map((t) => ({ name: t.name, description: t.description, input_schema: t.input_schema })));
+}
 
 /** This build's agent kit, as LumiRPEngine tells an outside client: its absolute path, its sha256 (hex), its contract level, and the core beside it. */
 export interface KitReport {
@@ -45,6 +69,12 @@ export interface AgentCheckIn {
   host: string;
   /** The agent harness that runs it (its MCP client's `initialize` clientInfo.name: claude-code, codex…), null when it gave none. */
   harness: string | null;
+  /**
+   * The build of the kit whose tools it last answered its client's `tools/list` with, null before
+   * the client asked; a core from before Reconnect in Lumiverse doesn't send it. Lumiverse's client
+   * lists only on connecting, so a Lumiverse-run server listed another build holds an old list.
+   */
+  listed: string | null;
 }
 
 /** A hello's `client`: every outside client names itself; an MCP server from this build on checks in as well. */
@@ -73,6 +103,35 @@ export interface AgentClientView {
   /** Its processes heard from in the last 2 minutes (each a session of its own, since the extension started). */
   processes: number;
   state: AgentState;
+  /** A server Lumiverse runs itself (harness `lumiverse`): what Lumiverse's client holds, and Reconnect in Lumiverse; null for any other. */
+  lumiverse: LumiverseRunView | null;
+}
+
+/** Reconnect in Lumiverse (DESIGN §23) under way: its processes were asked to exit, and the line waits for them back with this build's tools, or they weren't back within the wait. */
+export interface ReconnectView {
+  state: "waiting" | "late";
+  /** The wait it was given (Settings → Timeouts → MCP server reconnect), in ms; null for no limit. */
+  waitMs: number | null;
+  /** What says it is back: Lumiverse's own tool list, through Spindle (`mcp_servers`), or only the server's new processes. */
+  through: "lumiverse" | "server";
+}
+
+/** What a server Lumiverse runs itself adds to its line. */
+export interface LumiverseRunView {
+  /** Its connected processes whose client holds another build's tools than they serve: Reconnect in Lumiverse asks these to exit, and Lumiverse connects them again. */
+  stale: number;
+  /** Its processes from before Reconnect in Lumiverse: they don't say what their client listed, and don't exit when asked. */
+  unknown: number;
+  /** Lumiverse's own profiles that hold LumiRPEngine's tools, each with whether that is this build's list; null without the `mcp_servers` permission (or when Spindle couldn't say). */
+  profiles: LumiverseProfileView[] | null;
+  reconnect: ReconnectView | null;
+}
+
+/** A Lumiverse MCP server profile whose client holds lumirpengine's tools, as Spindle shows it: its name, and nothing else of its configuration. */
+export interface LumiverseProfileView {
+  name: string;
+  /** Lumiverse's client holds this build's tools for it. */
+  current: boolean;
 }
 
 /** What Settings → MCP server and the update notice show. */

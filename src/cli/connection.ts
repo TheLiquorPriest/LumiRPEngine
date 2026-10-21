@@ -281,8 +281,8 @@ export interface ConnectionOptions {
   checkIn?(): AgentCheckIn;
   /** The agent API level the tools need: the loaded kit's (DESIGN §23). AGENT_API when not given. */
   needs?(): number;
-  /** Each hello's answer: an MCP server learns there which build LumiRPEngine is and where its kit is. */
-  onHello?(answer: Record<string, unknown>): void;
+  /** Each hello's answer, with the check-in that hello carried: an MCP server learns there which build LumiRPEngine is and where its kit is. */
+  onHello?(answer: Record<string, unknown>, sent: AgentCheckIn | null): void;
   /** What LumiRPEngine sends unasked (no reqId of ours): an MCP server is asked to reload there. */
   onPush?(push: Record<string, unknown>): void;
   /** Null: no limit. */
@@ -453,11 +453,12 @@ export class HostConnection implements Connection {
   /** The hello: names this client (an MCP server checks in with it) and takes the agent API level from the answer. */
   private async greet(): Promise<void> {
     const opened = this.opened;
-    const hello = await this.send("lre.hello", { chatId: null, client: { ...this.options.client, ...this.options.checkIn?.() } });
+    const checkIn = this.options.checkIn?.() ?? null;
+    const hello = await this.send("lre.hello", { chatId: null, client: { ...this.options.client, ...checkIn } });
     const agentApi = isRecord(hello) ? hello.agentApi : undefined;
     // Only the socket the hello was said on takes its answer.
     if (opened !== null && this.opened === opened) this.opened = { extension: opened.extension, agentApi: typeof agentApi === "number" ? agentApi : null };
-    if (isRecord(hello)) this.options.onHello?.(hello);
+    if (isRecord(hello)) this.options.onHello?.(hello, checkIn);
   }
 
   private connect(ticket: string): Promise<void> {
