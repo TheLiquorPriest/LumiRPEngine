@@ -137,6 +137,12 @@ interface ChatSlot {
   snapshots: ChatSnapshots;
   /** Per message, the ledger last re-asserted after a clobber (as written) and how many times in a row. */
   reasserts: Map<MessageId, { text: string; count: number }>;
+  /**
+   * The windows the journal held when it was read: turns of a backend that stopped, whose
+   * generations are gone (DESIGN §5.1 step 7). Only these are closed when the chat is opened again;
+   * a generation under way in this backend keeps its window, however often a page resyncs.
+   */
+  leftOpen: Set<string>;
 }
 
 /** Open chats kept in memory; the least recently opened idle ones are evicted past this. */
@@ -765,6 +771,16 @@ export class LedgerService {
     return page === undefined || (page.chatId === chatId && page.viewing);
   }
 
+  /**
+   * Whether a page has said it shows the chat on screen (hello, resync, `lre.page`). A page that
+   * never said anything may have no engine frontend to start a reply (DESIGN §5.1), so one that has
+   * said it shows the chat is asked instead.
+   */
+  private reports(session: string, chatId: ChatId): boolean {
+    const page = this.pages.get(session);
+    return page !== undefined && page.chatId === chatId && page.viewing;
+  }
+
   /** The page that last said it shows the chat on screen, or null. */
   private viewerOf(chatId: ChatId, userId: UserId): string | null {
     let last: string | null = null;
@@ -783,8 +799,9 @@ export class LedgerService {
    * A frontend said hello to the chat, or resynced: a turn the engine prepared that no generation
    * took yet is asked for again (DESIGN §5.1), so a page that slept through the first ask starts it.
    * Only the page holding the turn's claim is asked. A page showing the chat takes the claim when
-   * none holds it or its holder doesn't show the chat; any other page's activity line says the
-   * reply already started elsewhere.
+   * none holds it, or its holder hasn't said it shows the chat (it went elsewhere, or never said
+   * anything, as a page without the engine's frontend doesn't); any other page's activity line says
+   * the reply already started elsewhere.
    */
   askAgain(chatId: ChatId, userId: UserId, session?: string): void {
     const gate = this.gates.get(chatId);
@@ -796,7 +813,7 @@ export class LedgerService {
       return;
     }
     const here = this.shows(session, chatId);
-    if (here && p.holder !== session && (p.holder === null || !this.shows(p.holder, chatId))) p.holder = session;
+    if (here && p.holder !== session && (p.holder === null || !this.reports(p.holder, chatId))) p.holder = session;
     if (p.holder === session) this.host.frontend.send(restartPush(chatId, p), userId, session);
     else if (here) this.host.frontend.send({ lre: PROTOCOL_VERSION, type: "lre.activity", chatId, activity: { chatId, turn: p.id, state: "running", label: STEP_LABEL.elsewhere ?? "Already started in another window", since: Date.now() } }, userId, session);
   }
@@ -1084,9 +1101,11 @@ export class LedgerService {
       }
       const turn = core.take(halt.id);
       const as = restartAs(halt.type, observed);
-      // The page to start it: the one the stopped generation ran for when it shows the chat, else the
-      // page that last said it shows it; with none, the first page to show the chat claims it (`askAgain`).
-      const holder = halt.session !== undefined && this.shows(halt.session, chatId) ? halt.session : this.viewerOf(chatId, userId);
+      // The page to start it: the one the stopped generation ran for when it shows the chat, unless it
+      // never said so and another page did; else the page that last said it shows the chat; with none,
+      // the first page to show the chat claims it (`askAgain`).
+      const viewer = this.viewerOf(chatId, userId);
+      const holder = halt.session !== undefined && (this.reports(halt.session, chatId) || (viewer === null && this.shows(halt.session, chatId))) ? halt.session : viewer;
       const prepared: Prepared = { id: halt.id, type: halt.type, target: target?.id ?? null, turn: turn?.planned ? turn : null, stamp, epoch, inputs, worldId: gate.worldId, delivered, as, holder, generationId: null };
       gate.prepared = prepared;
       // Anything that changed while the engine ran makes the turn stale at once: nothing is generated.
@@ -1151,11 +1170,15 @@ export class LedgerService {
     return result;
   }
 
-  /** Restart recovery and chat open: classify against the snapshot and close any window left open. */
+  /** Restart recovery and chat open: classify against the snapshot, and close the windows a stopped backend left open (never a turn under way here). */
   async open(chatId: ChatId, userId: UserId): Promise<void> {
     await this.run(chatId, userId, (core, observed) => {
       core.sync(observed);
-      if (core.journal.windows.length > 0) core.restart(observed);
+      const slot = this.chats.get(chatId);
+      const gone = new Set([...(slot?.leftOpen ?? [])].filter((id) => !this.generating.has(id)));
+      if (gone.size === 0) return;
+      core.restart(observed, gone);
+      for (const id of gone) slot?.leftOpen.delete(id);
     });
   }
 
@@ -1269,7 +1292,7 @@ export class LedgerService {
       // Snapshots are a shortcut: a missing or unreadable file only means a full fold.
       const snapshots = ChatSnapshots.parse(await this.host.storage.read(snapshotsPath(chatId), userId).catch(() => null));
       // A stamped journal differs from the stored text, so the next persist writes it.
-      const slot: ChatSlot = { core: new LedgerCore(journal, { ...env, snapshots }, this.folder), userId, queue: Promise.resolve(), written: reset ? null : raw, ops: 0, snapshots, reasserts: new Map() };
+      const slot: ChatSlot = { core: new LedgerCore(journal, { ...env, snapshots }, this.folder), userId, queue: Promise.resolve(), written: reset ? null : raw, ops: 0, snapshots, reasserts: new Map(), leftOpen: new Set([...journal.windows, ...Object.keys(journal.pending)]) };
       // The revisions its folds will ask for are loaded before anyone folds it.
       await slot.core.prepareWorlds(this.observe(chatId, userId, await this.host.chats.messages(chatId, userId)));
       this.chats.set(chatId, slot);

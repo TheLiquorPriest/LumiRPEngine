@@ -1078,9 +1078,13 @@ export class LedgerCore {
     return true;
   }
 
-  /** Restart recovery (DESIGN §5.1 step 7): every open window closes. */
-  restart(observed: readonly ChainMessage[]): void {
+  /**
+   * Restart recovery (DESIGN §5.1 step 7): the windows of `gone`, generations a stopped backend left
+   * open, close. A turn under way keeps its pending entry, so its reply is still read and recorded.
+   */
+  restart(observed: readonly ChainMessage[], gone: ReadonlySet<GenerationId>): void {
     for (const p of Object.values(this.journal.pending)) {
+      if (!gone.has(p.generationId)) continue;
       const index = p.messageId ? observed.findIndex((m) => m.id === p.messageId) : -1;
       const m = index >= 0 ? observed[index] : undefined;
       const saved = m ? (m.swipes[p.swipeId ?? m.swipeId] ?? "") : "";
