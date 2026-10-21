@@ -143,9 +143,16 @@ const guideBlocks: { title: string; text: string }[] = [];
 const docSections: Record<string, Section[]> = Object.fromEntries(Object.entries(DOCS).map(([name, d]) => [name, sectionsOf(d.text).flatMap(partsOf).map((s) => ({ ...s, title: `${d.file} › ${s.title}` }))]));
 
 /**
+ * Sections the guide's first answer always holds, whatever their size: how a world is built and
+ * worked on, the people and their minds (where secrets leak), and the checks before a commit.
+ */
+const GUIDE_KEPT: Readonly<Record<string, true>> = { "The world model": true, "How to work on a user's world": true, People: true, "Character minds": true, "Before you commit": true };
+
+/**
  * The agent guide. Without a topic: the whole guide when it fits one answer; else all of it but its
- * largest sections, which are the most particular (Money), named so a second call can read them.
- * A topic that names a heading returns that section with its subsections; any other is looked up.
+ * largest sections that aren't kept, which are the most particular (Money), named so a second call
+ * can read them. A topic that names a heading returns that section with its subsections; any other
+ * is looked up.
  */
 export function guide(topic?: string): string {
   const wanted = (topic ?? "").trim().toLowerCase();
@@ -154,7 +161,8 @@ export function guide(topic?: string): string {
     const out = new Set<number>();
     // Room for the closing note that names what was left out.
     let size = guideBlocks.reduce((n, b) => n + b.text.length + 2, 400);
-    for (const i of guideBlocks.map((_, i) => i).sort((a, b) => (guideBlocks[b]?.text.length ?? 0) - (guideBlocks[a]?.text.length ?? 0))) {
+    const optional = guideBlocks.flatMap((b, i) => (hasOwn(GUIDE_KEPT, b.title) ? [] : [i]));
+    for (const i of optional.sort((a, b) => (guideBlocks[b]?.text.length ?? 0) - (guideBlocks[a]?.text.length ?? 0))) {
       if (size <= ANSWER_LIMIT) break;
       out.add(i);
       size -= (guideBlocks[i]?.text.length ?? 0) + 2;
