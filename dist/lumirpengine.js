@@ -841,7 +841,7 @@ var package_default = {
 // src/cli/version.ts
 var CLI_NAME = "lumirpengine";
 var CLI_VERSION = package_default.version;
-var BUILD = "822697e4";
+var BUILD = "49567a69";
 var VERSION_LINE = `${CLI_NAME} ${CLI_VERSION} (build ${BUILD}, engine ${ENGINE_VERSION}, world format ${WORLD_FORMAT}, agent API ${AGENT_API})`;
 
 // src/cli/mcp.ts
