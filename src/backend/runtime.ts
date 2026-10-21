@@ -20,6 +20,7 @@ import { firedTimeout, TimeoutFired, TIMEOUTS } from "../shared/timeouts";
 import { mindsOn, mindsStepConfig, postMinds, preMinds, runMinds, type MindsDeps, type RunMindsResult } from "./minds";
 import { runSkip, type BeatMinds, type SkipRun } from "./skip";
 import { fitMindLines, mindLines } from "../packs/minds/core/section";
+import { namedInText } from "../packs/minds/core/fidelity";
 import { matchCatalog, transferCents } from "../packs/economy/core/index";
 import { itemName, stem } from "../packs/economy/core/items";
 import { needsJudge, outcomeChoices, policyFor, policyOf, type Verdict } from "../engine/adjudication";
@@ -1057,7 +1058,8 @@ export class Runtime implements TurnHooks {
       const target = recorded.action === TIMELAPSE_ACTION ? parseTarget(params.target) : null;
       const overrides: Record<string, string> = {};
       for (const [k, v] of Object.entries(parseOverrides(params.overrides))) if (typeof v === "string") overrides[k] = v;
-      bridge.setIntent(text, recorded.action === TIMELAPSE_ACTION ? (target ? timelapseIntent(target, overrides) : null) : { action: recorded.action, params, probabilities: { [recorded.action]: 1 } });
+      // A Continue of a span the player's words spent keeps the POV where the story has it, as the span did.
+      bridge.setIntent(text, recorded.action === TIMELAPSE_ACTION ? (target ? timelapseIntent(target, overrides, 1, params.povRoutine !== false) : null) : { action: recorded.action, params, probabilities: { [recorded.action]: 1 } });
       return;
     }
     const run = runsOf(settings.modelUse, render.world, "interpret", facts, { guidance: at.guidance })[0];
@@ -1139,7 +1141,9 @@ export class Runtime implements TurnHooks {
       // A short span runs in the turn; a longer one is offered (a misread can't skip days unasked).
       const over = target?.type === "duration" && target.minutes > INTERPRETED_TIMELAPSE_CAP;
       bridge.setOffer(text, over ? target : null);
-      bridge.setIntent(text, target && !over ? timelapseIntent(target) : null, target !== null && !over);
+      // A span the player's words spend ("for the next two hours, I service the fleet") keeps the POV
+      // where the story has it until it's over (DESIGN §8); a run to a routine point follows its routine.
+      bridge.setIntent(text, target && !over ? timelapseIntent(target, undefined, 1, target.type !== "duration") : null, target !== null && !over);
       return;
     }
     const chosen = result.action ? all.find((a) => a.id === result.action) : undefined;
@@ -1560,8 +1564,18 @@ export class Runtime implements TurnHooks {
     const known = deduped.filter((p) => proposalKnown(p, this.registry, context.world, context.state));
     if (known.length < deduped.length) this.host.log("info", `[LumiRPEngine] read ${messageId.slice(0, 8)}: dropped ${deduped.length - known.length} proposal(s) naming what the player hasn't seen`, userId);
     // So is one carrying a secret's unrevealed truth: its chip would show it.
-    const proposals = known.filter((p) => findLeaks(p, secrets).length === 0);
-    if (proposals.length < known.length) this.host.log("info", `[LumiRPEngine] read ${messageId.slice(0, 8)}: dropped ${known.length - proposals.length} proposal(s) carrying an unrevealed secret`, userId);
+    const unleaked = known.filter((p) => findLeaks(p, secrets).length === 0);
+    if (unleaked.length < known.length) this.host.log("info", `[LumiRPEngine] read ${messageId.slice(0, 8)}: dropped ${known.length - unleaked.length} proposal(s) carrying an unrevealed secret`, userId);
+    // A change to someone's routine is the story's only for someone the reply speaks of: the player
+    // character, or a person it names (DESIGN §9.4). It carries the reply's message as its turn, which
+    // the model can't set, so the change records where it came from.
+    const proposals = unleaked.flatMap((p): JsonObject[] => {
+      if (p.type !== "routine") return [p];
+      const who = typeof p.entity === "string" ? p.entity : "";
+      if (who === context.world.pov || namedInText(context.state.entities[who]?.name ?? "", text)) return [{ ...p, turn: messageId }];
+      this.host.log("info", `[LumiRPEngine] read ${messageId.slice(0, 8)}: dropped a routine change for someone the reply doesn't name`, userId);
+      return [];
+    });
     this.host.log("info", `[LumiRPEngine] read ${messageId.slice(0, 8)}: ${proposals.length} proposal(s), ${decisions.length} npc decision(s), contradiction ${contradicted ? "yes" : "no"}, ${choices.flat().length} choice(s), ${budget.spent} post call(s)`, userId);
     const learning = await this.settings.learningOf(input.userId);
     // D4 learning counts on the connection that read the reply: the extract step's own, else the
@@ -1826,11 +1840,13 @@ export class Runtime implements TurnHooks {
     await this.ageNotes(input.chatId, input.userId, input.messageId);
     const headState = input.core.fold(input.observed).state;
     const chipWorld = input.core.worldAt(headState.revision) ?? input.core.worldAt(rec?.defHash ?? "");
+    // A span the player's words spent held the POV where the story has it; its Continue keeps that (DESIGN §8).
+    const hold: JsonObject = bridge.intentOf(userText)?.params.povRoutine === false ? { povRoutine: false } : {};
     for (const [i, chip] of (plan?.chips ?? []).entries()) {
       // DESIGN §9.2 wording: "Timelapse to 07:00 (8 h 55 min)?"
       const to = chip.target.type === "at" && chipWorld ? ` to ${shortClock(chipWorld, headState, chip.target.at)}` : "";
       const label = chip.kind === "timelapse_offer" ? `Timelapse${to} (${compactSpan(chip.remaining)})?` : `Continue timelapse (${compactSpan(chip.remaining)} left)`;
-      stored.push({ id: `tl:${at}:${i}`, kind: chip.kind, ...base, label, actions: [{ id: "timelapse", label: chip.kind === "timelapse_offer" ? "Timelapse" : "Continue", style: "primary" }], expires: "next_send", payload: { target: JSON.parse(JSON.stringify(chip.target)) as JsonValue } });
+      stored.push({ id: `tl:${at}:${i}`, kind: chip.kind, ...base, label, actions: [{ id: "timelapse", label: chip.kind === "timelapse_offer" ? "Timelapse" : "Continue", style: "primary" }], expires: "next_send", payload: { target: JSON.parse(JSON.stringify(chip.target)) as JsonValue, ...(chip.kind === "continue_timelapse" ? hold : {}) } });
     }
     // A typed timelapse longer than a turn runs on its own: offered, never run unasked. Time the
     // message lets pass after its actions isn't offered while some of them are left to play.
@@ -1853,7 +1869,7 @@ export class Runtime implements TurnHooks {
       const elapsed = summary.to - summary.from;
       const rest = summary.target.type === "duration" ? { type: "duration" as const, minutes: Math.max(1, summary.target.minutes - elapsed) } : summary.target;
       const left = rest.type === "duration" ? ` (${compactSpan(rest.minutes)} left)` : "";
-      stored.push({ id: `tl:${at}:stop`, kind: "continue_timelapse", ...base, label: `Timelapse stopped: ${summary.stoppedBy === "mind" ? (plan?.timelapse?.mindName ?? "someone") : STOP_LABEL[summary.stoppedBy]}`, detail: `Continue to the original target${left}?`, actions: [{ id: "timelapse", label: "Continue", style: "primary" }], expires: "next_send", payload: { target: JSON.parse(JSON.stringify(rest)) as JsonValue } });
+      stored.push({ id: `tl:${at}:stop`, kind: "continue_timelapse", ...base, label: `Timelapse stopped: ${summary.stoppedBy === "mind" ? (plan?.timelapse?.mindName ?? "someone") : STOP_LABEL[summary.stoppedBy]}`, detail: `Continue to the original target${left}?`, actions: [{ id: "timelapse", label: "Continue", style: "primary" }], expires: "next_send", payload: { target: JSON.parse(JSON.stringify(rest)) as JsonValue, ...hold } });
     }
     for (const [i, chip] of bridge.chipsFor(input.content).entries()) stored.push(skipAheadChip(`adv:${at}:${i}`, base, chip.target, chip.reason));
     await this.chips.add(input.chatId, input.userId, stored);
@@ -2414,6 +2430,7 @@ export const TYPE_LABELS: Record<ExtractionType, string> = {
   quantity: "Quantities",
   spawn: "New characters",
   life: "Life and death",
+  routine: "Routine changes",
 };
 
 /** The longest typed timelapse a turn runs on its own (minutes); longer ones are offered as a chip. */
@@ -2823,6 +2840,18 @@ export function describeProposal(p: JsonObject, world?: WorldDoc, state?: Readon
       return `New: ${s("name")}`;
     case "life":
       return `${s("entity")}: ${raw("state").replace(/_/g, " ")}`;
+    case "routine": {
+      // The reply's own words for it: what changed, and the days and times it gave.
+      const you = world !== undefined && p.entity === world.pov;
+      const who = you ? "You" : s("entity");
+      const what = typeof p.label === "string" && p.label.trim() !== "" ? p.label.trim() : typeof p.place === "string" ? s("place") : "?";
+      if (p.change === "move") return `${who} moved to ${s("place")}`;
+      if (p.change === "stop") return `${who} gave up: ${what}`;
+      const days = Array.isArray(p.days) ? p.days.filter((d) => typeof d === "string" || typeof d === "number").join(", ") : typeof p.days === "string" ? p.days : "";
+      const time = typeof p.start === "string" && p.start !== "" ? `${p.start}${typeof p.end === "string" && p.end !== "" ? `–${p.end}` : ""}` : "";
+      const when = [days, time].filter((x) => x !== "").join(", ");
+      return `${you ? "Your" : `${who}'s`} routine: ${what}${when !== "" ? ` (${when})` : ""}`;
+    }
     case "time_advance":
       return `+${s("minutes")} min`;
     default:

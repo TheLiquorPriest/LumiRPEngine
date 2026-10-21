@@ -50,6 +50,11 @@ export function namedIn(name: string, said: readonly string[]): boolean {
   return own.some((w) => w.length >= 3 && !NAME_FILLER[w] && present.has(w));
 }
 
+/** Whether a text names someone, as `namedIn` reads a turn's words: the reply's read checks whom a change it reads is about. */
+export function namedInText(name: string, text: string): boolean {
+  return namedIn(name, words(text));
+}
+
 /** The entity ids a value's strings name: an id as a whole string, or an identifier in a formula. */
 function namesIn(value: JsonValue | undefined, ids: ReadonlySet<string>, out: Set<string>): void {
   if (typeof value === "string") {

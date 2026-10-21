@@ -154,11 +154,18 @@ export interface SlotInfo {
   end: number;
   index: number;
   /**
-   * False when the POV's own routine doesn't run in this step (DESIGN §8, §9.2): a timelapse the
-   * player spends doing something for a span of time, or a narrated time skip, keeps the POV where
-   * the story has it. Absent: it runs (a timelapse's agent steps take the POV as an LOD1 agent).
+   * False while the story holds the POV in this step (DESIGN §8, §9.2): an ordinary turn and its
+   * catch-up, a span the player's words spend doing something, or a narrated time skip. The POV's own
+   * routine doesn't move it then, and a scene with it holds whoever is in it. Absent: time runs on its
+   * own (a timelapse): the POV follows its routine and no scene holds anyone.
    */
   povRoutine?: boolean;
+  /**
+   * True in a Timelapse (time skipped, not played): an off-screen Background agent lives their day at
+   * slot steps only, as net state, and the cast the story is about is held only while with the POV
+   * (DESIGN §8, §24.1).
+   */
+  timelapse?: boolean;
 }
 
 /** A moment inside a slot at which an agent process acts between its slot steps (`ProcessDef.instants`). */
@@ -181,15 +188,16 @@ export interface ProcessDef {
   scope?: "world" | "agent";
   step(slot: SlotInfo, ctx: ReadContext, rng: (entity: EntityId) => Rng, agent?: EntityId): LedgerEvent[];
   /**
-   * An agent process's moments strictly inside a slot (DESIGN §8): a character's own plan starting
-   * or ending between slot steps (§24.8). They apply at their time among the schedule edges, in a
-   * turn and in a timelapse, to an agent stepped through the slot before; catch-up has none. Read
+   * An agent process's moments strictly inside a slot (DESIGN §8): the blocks of a character's day
+   * starting between slot steps, their own plans' starts and ends among them (§24.8). They apply at
+   * their time among the schedule edges, in a turn and in a timelapse, to an agent stepped through
+   * the slot before; catch-up has none. `slot.povRoutine` says whether the POV's routine runs. Read
    * from a state the slot's other moments may have changed already, so they must not depend on the
    * clock or on what moments change: a segment that starts mid-slot then gets the same ones.
    */
   instants?(ctx: ReadContext, agent: EntityId, slot: SlotInfo): AgentInstant[];
-  /** What the process does at one of its instants, at that instant's clock. */
-  atInstant?(ctx: ReadContext, agent: EntityId, instant: AgentInstant): LedgerEvent[];
+  /** What the process does at one of its instants, at that instant's clock, in the slot it falls in (`slot.povRoutine`: whether the story holds the POV). */
+  atInstant?(ctx: ReadContext, agent: EntityId, instant: AgentInstant, slot: SlotInfo): LedgerEvent[];
 }
 
 /** A pack's default table and its column contract (ARCHITECTURE §6). */
@@ -209,7 +217,7 @@ export interface ProposalChannelDef {
   /** Proposal type, e.g. `purchase`, `regard`, `time_advance`. */
   type: string;
   /** The field type whose bound applies. */
-  boundField: FieldType | "spawn" | "knows" | "life";
+  boundField: FieldType | "spawn" | "knows" | "life" | "routine";
   validate(proposal: JsonObject, ctx: ReadContext): Rejection | null;
   toEffects(proposal: JsonObject, ctx: ReadContext): EffectSpec[];
 }

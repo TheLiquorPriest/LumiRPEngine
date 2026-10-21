@@ -26,6 +26,7 @@ import { decodeContextView } from "../../src/frontend/play/context";
 import { Rig } from "../support/rig";
 
 const MARCUS = "marcus_delgado";
+const DANNY = "danny_okafor";
 
 /** Every mind a turn asks answers plainly, and every other helper call with nothing. */
 function plainly(req: QuietRequest): string {
@@ -86,8 +87,12 @@ function fakeMinds(calls: { at: number; who: string[]; reason: string }[], inter
   };
 }
 
-/** A timelapse of `days` under `overrides`: by default invitations only note (the plan's own invitation would end it first otherwise). */
-async function skipDays(rig: Rig, chatId: string, days: number, overrides: JsonObject = { invitation: "note" }): Promise<void> {
+/**
+ * A timelapse of `days` under `overrides`: by default invitations only note (the plan's own invitation
+ * would end it first otherwise), and so do arrivals: Danny and Marcus, Live or Near but not with the
+ * POV, follow their routine off screen in a skip (§24.1) and come to the garage where it works.
+ */
+async function skipDays(rig: Rig, chatId: string, days: number, overrides: JsonObject = { invitation: "note", arrival: "note" }): Promise<void> {
   rig.body(await rig.send({ type: "lre.action", chatId, action: "timelapse", params: { target: { type: "duration", minutes: days * 1440 }, overrides }, source: "palette" }));
   const g = await rig.host.start(chatId, { type: "normal" });
   await rig.host.finish(g, "Days pass.");
@@ -96,12 +101,12 @@ async function skipDays(rig: Rig, chatId: string, days: number, overrides: JsonO
 const ofType = (events: readonly LedgerEvent[] | undefined, type: string): LedgerEvent[] => (events ?? []).filter((e) => e.type === type);
 
 describe("time skips", () => {
-  test("under the default policy an invitation stops the skip where the span run whole stops, and Continue's scan finds the beat after it", async () => {
+  test("a Live character's plan with the POV sends no invitation, so the skip runs on to the meeting, the scan's beat, where his mind steps in", async () => {
     const { rig, chatId, day, at } = await portAlder();
     const meet = at(day + 1, "19:00");
     await marcusPlans(rig, chatId, [meet]);
-    // The same span run whole, as a plain timelapse from the state the skip starts from: Marcus's
-    // invitation, asked six hours before the meeting, stops it at the end of that slot.
+    // The same span run whole, as a plain timelapse from the state the skip starts from: Marcus is
+    // Live, so his plan asks the POV along in no invitation, and none stops the run.
     const start = await folded(rig, chatId);
     const run = readRun(await rig.host.chats.chatMetadata(chatId, rig.host.userId));
     if (!run) throw new Error("no run");
@@ -109,25 +114,16 @@ describe("time skips", () => {
     turnStart(rig.rt.registry, whole, run.runSeed);
     const plain = runTimelapse(rig.rt.registry, whole, { type: "duration", minutes: 3 * 1440 }, { runSeed: run.runSeed });
     if ("code" in plain) throw new Error(plain.reason);
-    expect(plain.summary.stoppedBy).toBe("invitation");
+    expect(whole.events.some((e) => e.type === "castlife.invitation")).toBe(false);
+    expect(plain.summary.stoppedBy).not.toBe("invitation");
     const calls: { at: number; who: string[]; reason: string }[] = [];
     rig.rt.beatMinds = fakeMinds(calls, (who, when) => who === MARCUS && when === meet);
-    await skipDays(rig, chatId, 3, {});
+    await skipDays(rig, chatId, 3, { arrival: "note" });
     const first = await folded(rig, chatId);
-    expect(first.record?.events.find((e) => e.type === "timelapse")).toMatchObject({ stoppedBy: "invitation", to: plain.summary.to });
-    expect(first.state.clock).toBe(plain.summary.to);
-    // Continue runs the rest: its scan finds the meeting, where Marcus thinks and steps in.
-    const chip = (await rig.rt.view(chatId, rig.host.userId)).chips.find((c) => c.kind === "continue_timelapse");
-    expect(chip?.label).toBe("Timelapse stopped: an invitation");
-    if (!chip) throw new Error("no stop chip");
-    rig.body(await rig.send({ type: "lre.chip", chatId, chip: chip.id, choice: "timelapse" }));
-    const g = await rig.host.start(chatId, { type: "normal" });
-    await rig.host.finish(g, "Evening comes.");
-    const second = await folded(rig, chatId);
-    const skip = ofType(second.record?.events, "minds.skip")[0];
+    const skip = ofType(first.record?.events, "minds.skip")[0];
     expect(skip && "data" in skip ? skip.data.beats : null).toEqual(expect.arrayContaining([expect.objectContaining({ at: meet, source: "scan" })]));
     expect(calls.some((c) => c.at === meet && c.who.includes(MARCUS))).toBe(true);
-    expect(second.record?.events.find((e) => e.type === "timelapse")).toMatchObject({ stoppedBy: "mind", mind: MARCUS, to: meet });
+    expect(first.record?.events.find((e) => e.type === "timelapse")).toMatchObject({ stoppedBy: "mind", mind: MARCUS, to: meet });
   });
 
   test("a 3-day skip finds the beats, runs the minds at them and stops on an interrupt at its time, with the chip; replay is identical", async () => {
@@ -205,18 +201,26 @@ describe("time skips", () => {
     const { world } = await folded(rig, chatId);
     const lunch = at(day, "12:30");
     rig.host.quietReply = (req) => (req.messages.some((m) => m.content.includes("skipping ahead in time")) ? JSON.stringify({ beats: [{ at: formatStamp(calendarOf(world), lunch), reason: "Lunch at the diner" }] }) : "{}");
-    // Every mind's call fails, so no beat records a mind; the last minds asked are the skip's end.
+    // Every mind's call fails, so no beat records a mind.
     const calls: { at: number; reason: string }[] = [];
     rig.rt.beatMinds = async (input) => {
       calls.push({ at: input.moment.at, reason: input.moment.reason });
       return { events: [], traces: [] };
     };
+    // The same span run whole, as a plain timelapse from the state the skip starts from, under the same cap.
+    const start = await folded(rig, chatId);
+    const run = readRun(await rig.host.chats.chatMetadata(chatId, rig.host.userId));
+    if (!run) throw new Error("no run");
+    const whole = new Working(rig.rt.registry, start.world, start.state);
+    turnStart(rig.rt.registry, whole, run.runSeed);
+    const plain = runTimelapse(rig.rt.registry, whole, { type: "duration", minutes: 3 * 1440 }, { runSeed: run.runSeed, overrides: { invitation: "note", arrival: "note" } });
+    if ("code" in plain) throw new Error(plain.reason);
     await skipDays(rig, chatId, 3);
-    const end = calls.at(-1);
-    expect(end?.reason).toStartWith("The time skip ends");
     const { state, record } = await folded(rig, chatId);
-    expect(record?.events.find((e) => e.type === "timelapse")).toMatchObject({ to: end?.at });
-    expect(state.clock).toBe(end?.at ?? NaN);
+    expect(record?.events.find((e) => e.type === "timelapse")).toMatchObject({ to: plain.summary.to });
+    expect(state.clock).toBe(plain.summary.to);
+    // Whoever was asked at the skip's end was asked there.
+    for (const call of calls.filter((c) => c.reason.startsWith("The time skip ends"))) expect(call.at).toBe(plain.summary.to);
   });
 
   test("the unit cap ends a skip on a slot boundary, though a beat falls inside the slot it can't run", async () => {
@@ -289,7 +293,7 @@ describe("time skips", () => {
     const settings = await rig.rt.settings.get(rig.host.userId);
     const target = { type: "duration" as const, minutes: 3 * 1440 };
     const asked: number[] = [];
-    const skip = await runSkip({ registry: rig.rt.registry, steps: rig.rt.steps, minds: async (input) => (asked.push(input.moment.at), { events: [], traces: [] }) }, { chatId, userId: rig.host.userId, world, state, intent: { ...timelapseIntent(target, { invitation: "note" }) }, runSeed: "seed", settings, signal: AbortSignal.abort() });
+    const skip = await runSkip({ registry: rig.rt.registry, steps: rig.rt.steps, minds: async (input) => (asked.push(input.moment.at), { events: [], traces: [] }) }, { chatId, userId: rig.host.userId, world, state, intent: { ...timelapseIntent(target, { invitation: "note", arrival: "note" }) }, runSeed: "seed", settings, signal: AbortSignal.abort() });
     if (!skip) throw new Error("no skip");
     const beats = skip.record.beats.map((b) => b.at);
     expect(skip.record.stop).toEqual({ by: "clock", at: beats[1] ?? NaN });
@@ -298,7 +302,7 @@ describe("time skips", () => {
     // The plan replays it there, and offers the rest.
     const w = new Working(rig.rt.registry, world, state);
     turnStart(rig.rt.registry, w, "seed");
-    const out = replaySkip(rig.rt.registry, w, target, skip.record, { runSeed: "seed", overrides: { invitation: "note" } });
+    const out = replaySkip(rig.rt.registry, w, target, skip.record, { runSeed: "seed", overrides: { invitation: "note", arrival: "note" } });
     if ("code" in out) throw new Error(out.reason);
     expect(out.summary.to).toBe(beats[1] ?? NaN);
     expect(out.chip).toEqual({ kind: "continue_timelapse", target: { type: "duration", minutes: state.clock + target.minutes - (beats[1] ?? 0) }, remaining: state.clock + target.minutes - (beats[1] ?? 0) });
@@ -365,15 +369,40 @@ describe("time skips", () => {
     const interrupting = ofType(record?.events, "minds.mind").flatMap((e) => ("data" in e && e.data.interrupt !== null ? [e.data.entity] : []));
     expect(interrupting).toEqual([stopper ?? ""]);
   });
+
+  test("in a skip the cast the story is about follows their routine once the POV has left them, and one still with it stays (§24.1)", async () => {
+    const { rig, chatId } = await portAlder();
+    rig.body(await rig.send({ type: "lre.edit", chatId, ops: [{ op: "mind_pin", entity: DANNY, level: "live" }, { op: "mind_pin", entity: MARCUS, level: "near" }] }));
+    const { state, world } = await folded(rig, chatId);
+    const home = placeOfEntity(state, world.pov);
+    expect(placeOfEntity(state, DANNY)).toBe(home);
+    const lapse = (povRoutine: boolean): Working => {
+      const w = new Working(rig.rt.registry, world, state);
+      turnStart(rig.rt.registry, w, "seed");
+      const out = runTimelapse(rig.rt.registry, w, { type: "duration", minutes: 4 * 60 }, { runSeed: "seed", overrides: ALL_NOTE, ...(povRoutine ? {} : { povRoutine: false }) });
+      if ("code" in out) throw new Error(out.reason);
+      return w;
+    };
+    // The palette's Timelapse: the POV's day takes it to the garage; Danny, held while it's with him,
+    // and Marcus, from his own home, go to work there, their levels read again at each step, no mind asked.
+    const palette = lapse(true);
+    expect([world.pov, DANNY, MARCUS].map((who) => placeOfEntity(palette.state, who))).toEqual(["alder_automotive", "alder_automotive", "alder_automotive"]);
+    expect(palette.events.some((e) => e.type === "minds.mind")).toBe(false);
+    // A span the player's words spend at home: Danny, still with the POV, stays; Marcus still goes.
+    const held = lapse(false);
+    expect([world.pov, DANNY, MARCUS].map((who) => placeOfEntity(held.state, who))).toEqual([home, home, "alder_automotive"]);
+  });
 });
 
 describe("the beat scan and the beats cap", () => {
   test("the scan finds the player character's appointments, the story's moments and their money, up to where the skip would end", () => {
     const reg = createRegistry(ALL_PACKS);
-    // Riverton, from Friday 16 October 2026 at 07:30: a time rule, and three appointments, one in the span.
+    // Riverton, from Friday 16 October 2026 at 07:30: a time rule, three appointments, one in the span,
+    // and the player character's Friday coffee at the café, where its quest's first stage is met.
     const world = modernUsWorld("w", "R");
     const cal = calendarOf(world);
     world.rules.siren = { id: "siren", on: { at: "hour >= 18" }, do: [{ type: "signal", args: { class: "incident", text: "A siren wails." } }], once: true, interrupt: true };
+    world.routines = { coffee: { id: "coffee", owner: "you", blocks: [{ id: "coffee", label: "Coffee with the neighbors", activity: "socialize", kind: "fixed", at: "17:00", minutes: 90, days: { weekdays: [5] }, place: { place: "cafe" } }] } };
     const you = world.entities.you;
     if (!you) throw new Error("no POV");
     you.fields.appointments = ["2026-10-16T06:00", "2026-10-19T15:00", "2026-11-05T10:00"].map((at, i) => ({ at: clockOfLocal(cal, at), minutes: 60, place: "park", label: ["Before", "Dentist", "After"][i] ?? "" }));

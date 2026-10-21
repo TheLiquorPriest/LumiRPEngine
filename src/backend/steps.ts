@@ -610,6 +610,7 @@ export const EXTRACT_STRICT_RULES = [
   "A purchase already covers its payment: do not add a transfer for it.",
   "One purchase per item: two things bought are two purchases, each with its own item and price; never one item that names both.",
   "life only when the prose states that someone died, is dying, collapsed or came round, or that the player character is told so; never a threat, a fear or a guess.",
+  "routine only when the prose states a lasting change to someone's week: a new job or shift, a new habit, one they gave up, or a move to a new home, with the days and times the prose gives; never a one-off, a plan, a wish, someone's thoughts, or a habit only mentioned.",
   "Never duplicate a change. When unsure, leave it out.",
 ];
 
@@ -640,7 +641,7 @@ export async function extract(
   const types =
     `time_advance{minutes} · location{entity,place} · purchase{item,category,payer?,qty?,price?,method?} (payer: the person who pays, an entity id, never an account or a card; method: how the prose says they paid, in its words, e.g. "cash", "debit card", "credit card" or "savings"; leave it out when not said) · transfer{from,to,amount,method?} (from and to: people, entity ids, or a person's own cash, checking, savings or card account, never things; method: "cash" when bills or coins change hands in person, as in "hands me $20" or "slips her a twenty"; leave it out for a bank transfer, an app payment or a card) · give{item,from,to,amount?} (amount: for cash or money handed over, the amount) · quantity{entity,item,delta} · condition{who,condition,minutes?,clear?} (a named condition such as tired or injured; clear:true when it ends) · regard{from,to,axis,delta} (axis trust|affection|respect; delta -3..3) · knows{who,fact} (public facts only) · spawn{kind,name,place?,role?} · life{entity,state} (state: ${lifeStatesOf(world)
       .map(([id]) => id)
-      .join("|")})`;
+      .join("|")}) · routine{entity,change,label,days,start?,end?,minutes?,activity?,place?,with?,replaces?} (change: start for a new job, shift or habit, stop for one given up, move for a new home, its place the home; days: weekday names, weekdays, weekends or daily; start and end: HH:MM, or start morning|afternoon|evening|night; activity: work|school|exercise|leisure|socialize|errand; with: people's ids; replaces: true only when the prose says it takes the place of what they did then)`;
   const allowed = channels.length > 0 ? `Only these types are enabled: ${channels.join(", ")}.` : "";
   const system = `${instructions ? `${instructions}\n` : ""}You read a narrator's roleplay reply and propose concrete state changes that the prose states actually happened.\n${worldBrief(world, `Minutes already applied this turn: ${appliedMinutes}.`)}\nProposal types: ${types}. ${allowed}\nRules: no considered, refused or hypothetical changes; use world ids where they exist; one proposal per change. Money amounts are plain amounts in ${world.currency.code} as written (8 for ${world.currency.symbol}8).\nStrict rules:\n- ${EXTRACT_STRICT_RULES.join("\n- ")}\nOutput JSON only: {"proposals":[{"type":...}, ...]}.`;
   const asked = channels.length === 0 || channels.includes("location") ? `${system}\n${EXTRACT_WHERE}` : system;

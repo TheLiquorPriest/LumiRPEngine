@@ -112,7 +112,7 @@ export function turnStart(reg: Registry, w: Working, runSeed: string): void {
 /** A timelapse intent's target and run options, read alike by the plan and by a time skip's pre phase (DESIGN §24.7). */
 export function timelapseOptions(intent: InterpretOutput, runSeed: string): { target: TimelapseTarget | null; opts: TimelapseOptions } {
   const seg = intent.params.segment;
-  return { target: parseTarget(intent.params.target), opts: { runSeed, overrides: parseOverrides(intent.params.overrides), segment: typeof seg === "number" ? seg : 1 } };
+  return { target: parseTarget(intent.params.target), opts: { runSeed, overrides: parseOverrides(intent.params.overrides), segment: typeof seg === "number" ? seg : 1, ...(intent.params.povRoutine === false ? { povRoutine: false } : {}) } };
 }
 
 /**
@@ -270,7 +270,10 @@ export function postTurn(input: PostTurnInput): LedgerEvent[] {
 
 export const turnPipeline: TurnPipeline = { plan: planTurn, post: postTurn };
 
-/** A timelapse intent for a target (palette, chips, commands). */
-export function timelapseIntent(target: TimelapseTarget, overrides?: Record<string, string>, segment = 1): { action: string; params: Record<string, JsonValue>; probabilities: Record<string, number> } {
-  return { action: TIMELAPSE_ACTION, params: { target, ...(overrides ? { overrides } : {}), segment }, probabilities: {} };
+/**
+ * A timelapse intent for a target (palette, chips, commands). `povRoutine` false: a span the player's
+ * own words spend doing something, which keeps the POV where the story has it (`TimelapseOptions`).
+ */
+export function timelapseIntent(target: TimelapseTarget, overrides?: Record<string, string>, segment = 1, povRoutine = true): { action: string; params: Record<string, JsonValue>; probabilities: Record<string, number> } {
+  return { action: TIMELAPSE_ACTION, params: { target, ...(overrides ? { overrides } : {}), segment, ...(povRoutine ? {} : { povRoutine: false }) }, probabilities: {} };
 }

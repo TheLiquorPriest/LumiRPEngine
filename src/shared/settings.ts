@@ -212,7 +212,7 @@ export interface TimeSettings {
 }
 
 /** Extraction proposal types with a per-type mode (DESIGN §9.4, §11). */
-export const EXTRACTION_TYPES = ["time_advance", "location", "condition", "knows", "give", "purchase", "transfer", "regard", "quantity", "spawn", "life"] as const;
+export const EXTRACTION_TYPES = ["time_advance", "location", "condition", "knows", "give", "purchase", "transfer", "regard", "quantity", "spawn", "life", "routine"] as const;
 export type ExtractionType = (typeof EXTRACTION_TYPES)[number];
 
 /**
@@ -224,6 +224,8 @@ export const EXTRACTION_DEFAULTS: Readonly<Partial<Record<ExtractionType, BoundM
   time_advance: "auto",
   location: "auto",
   condition: "auto",
+  // A routine is a default that never moves anyone the story has: a wrong one costs little, and its chip undoes it.
+  routine: "auto",
   regard: "confirm",
   transfer: "confirm",
   spawn: "confirm",

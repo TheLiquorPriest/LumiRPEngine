@@ -303,23 +303,35 @@ describe("realism examples: NPC lives", () => {
     expect(buildCastView(w.ctx).people.find((p) => p.id === "jordan")?.agenda).toEqual([{ label: "Open a second office", stage: "Sign the lease" }]);
   });
 
-  test("an invitation in the tie zone reaches the Montage, and a recorded decision overrides it", () => {
+  /** Riverton at Cast life 4, where Maya is fond of the POV; `drinks` gives her an evening at the café that asks the POV along. */
+  function invitingWorld(drinks: boolean): WorldDoc {
     const world = modernUsWorld("inv", "Riverton");
     world.realism.levels.castlife = 4;
     world.realism.levels.relationships = 4;
     world.entities.maya!.relations.push({ type: "regard", to: "you", fields: { warmth: 60, trust: 50, respect: 40, t: 0 } });
-    const plan = planTurn({ registry: reg, world, state: startState(world), runSeed: "inv", seed: "s", kind: "normal", userTexts: [""], intent: timelapseIntent({ type: "duration", minutes: 4 * 1440 }, ALL_NOTE) });
-    const lines = (plan.montage?.groups ?? []).flatMap((g) => g.lines);
-    expect(lines.some((l) => /^Maya Chen invites you/.test(l))).toBe(true);
-    const choice = plan.events.find((e) => e.type === "engine.choice" && "data" in e && String(e.data.key).startsWith("maya:invite:"));
-    expect(choice).toBeDefined();
+    if (drinks) world.routines = { maya_evenings: { id: "maya_evenings", owner: "maya", blocks: [{ id: "drinks", label: "Drinks", activity: "socialize", kind: "fixed", at: "19:00", minutes: 90, place: { place: "cafe" }, company: { who: { ids: ["you"] }, invite: true } }] } };
+    return world;
+  }
+
+  test("an invitation on a ground reaches the Montage; fondness alone sends none, and the chat can stop it", () => {
+    const montage = (world: WorldDoc, state = startState(world)): string[] => {
+      const plan = planTurn({ registry: reg, world, state, runSeed: "inv", seed: "s", kind: "normal", userTexts: [""], intent: timelapseIntent({ type: "duration", minutes: 4 * 1440 }, ALL_NOTE) });
+      return (plan.montage?.groups ?? []).flatMap((g) => g.lines).filter((l) => /^Maya Chen invites you/.test(l));
+    };
+    // A block of her routine that asks the POV along: its invitations reach the Montage.
+    expect(montage(invitingWorld(true)).length).toBeGreaterThan(0);
+    // Fondness alone grounds nothing.
+    expect(montage(invitingWorld(false))).toEqual([]);
+    // Set to make no invitations in this chat (the GM's `routine_follow`), she sends none.
+    const world = invitingWorld(true);
+    const w = new Working(reg, world, startState(world));
+    w.apply({ type: "castlife.follow", data: { entity: "maya", follow: { mode: "no_invitations", awareness: null } } });
+    expect(montage(world, w.state)).toEqual([]);
   });
 
   test("an invitation to a place the POV can't see names it in no player line or Montage, only in the GM's line", () => {
-    const world = modernUsWorld("inv", "Riverton");
-    world.realism.levels.castlife = 4;
-    world.realism.levels.relationships = 4;
-    world.entities.maya!.relations.push({ type: "regard", to: "you", fields: { warmth: 60, trust: 50, respect: 40, t: 0 } });
+    // Maya's evening drinks at the café ask the POV along.
+    const world = invitingWorld(true);
     // Away from the POV's own building, every place is one it doesn't know.
     const own = new Set(["riverton", "apartment_bldg", "apartment", "apartment_hall", "garage"]);
     for (const p of Object.values(world.places)) if (!own.has(p.id)) p.visibility = "secret";

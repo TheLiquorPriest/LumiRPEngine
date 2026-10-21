@@ -55,8 +55,10 @@ describe("castlife: commitments and the day planner", () => {
     for (let i = 1; i < plan.blocks.length; i++) expect(plan.blocks[i]!.start).toBeGreaterThanOrEqual(plan.blocks[i - 1]!.end);
     expect(plan.blocks.some((b) => b.activity === "sleep")).toBe(true);
     expect(plan.blocks.some((b) => b.activity === "dinner")).toBe(true);
-    // Utility reasons: chosen blocks say why and with what utility; commitments say what they are.
-    expect(plan.blocks.find((b) => b.activity === "dinner")?.reasons).toEqual(expect.arrayContaining(["evening meal", expect.stringMatching(/^utility \d/)]));
+    // Utility reasons: chosen blocks say why they're there and with what utility; commitments say what they are.
+    const dinner = plan.blocks.find((b) => b.activity === "dinner");
+    expect(dinner?.reasons.filter((r) => /^utility \d/.test(r))).toHaveLength(1);
+    expect(dinner?.reasons.some((r) => !r.startsWith("utility"))).toBe(true);
     expect(shift?.reasons.some((r) => r.startsWith("utility"))).toBe(false);
     expect(planFor(w.ctx, "maya", day, createRng("p"))).toEqual(plan);
   });
@@ -169,29 +171,34 @@ describe("castlife: needs, encounters and invitations (level 4)", () => {
     expect(needValue(w.ctx, "you", "hunger")).toBe(0);
   });
 
-  test("NPCs who share a place meet, which changes regard; a fond NPC invites the POV via a recorded tie", () => {
-    const w = setup(4, (wd) => {
+  test("NPCs who share a place meet, which changes regard; a fond NPC invites the POV only on a ground, and the chat can stop it", () => {
+    const patch = (wd: WorldDoc, ground: boolean): void => {
       wd.entities.maya!.relations.push({ type: "regard", to: "you", fields: { warmth: 60, trust: 50, respect: 40, t: 0 } });
       wd.entities.maya!.fields.home = "cafe";
       wd.entities.rosa!.fields.home = "cafe";
-    });
+      // Maya's own evening drinks at the café, asking the POV along.
+      if (ground) wd.routines = { maya_drinks: { id: "maya_drinks", owner: "maya", blocks: [{ id: "drinks", label: "Drinks", activity: "socialize", kind: "fixed", at: "19:00", minutes: 90, place: { place: "cafe" }, company: { who: { ids: ["you"] }, invite: true } }] } };
+    };
+    const w = setup(4, (wd) => patch(wd, false));
     lapse(w, 4 * 1440);
     const regard = w.events.filter((e) => e.type === "relationships.regard" && String(e.data.why).startsWith("encounter") || (e.type === "relationships.regard" && String(e.data.why).startsWith("argument")));
     expect(regard.length).toBeGreaterThan(0);
-    const invites = w.events.filter((e) => e.type === "castlife.invitation");
-    expect(invites.length).toBeGreaterThan(0);
+    // Fondness alone asks no one along: nothing in the world or the story grounds it.
+    expect(w.events.filter((e) => e.type === "castlife.invitation")).toEqual([]);
     expect(fold(reg, w.world, startState(w.world), w.events)).toEqual(w.state);
-    // An npc.choose decision recorded for that choice point overrides the planner's own choice.
-    const key = w.events.flatMap((e) => (e.type === "castlife.invitation" ? [String(e.data.key)] : []))[0] ?? "";
-    const again = setup(4, (wd) => {
-      wd.entities.maya!.relations.push({ type: "regard", to: "you", fields: { warmth: 60, trust: 50, respect: 40, t: 0 } });
-      wd.entities.maya!.fields.home = "cafe";
-      wd.entities.rosa!.fields.home = "cafe";
-    });
-    applyEffects(reg, again, [{ type: "castlife.decide", args: { key, choice: "stay" } }], { bindings: {}, rng: createRng("d") });
-    lapse(again, 4 * 1440);
-    expect(again.events.some((e) => e.type === "castlife.invitation" && e.data.key === key)).toBe(false);
-    expect(again.events.some((e) => e.type === "engine.choice" && e.data.key === key && e.data.via === "recorded")).toBe(true);
+    // A block of her routine that asks the POV along does, once each day it's on, with its ground recorded.
+    const grounded = setup(4, (wd) => patch(wd, true));
+    lapse(grounded, 4 * 1440);
+    const invites = grounded.events.flatMap((e) => (e.type === "castlife.invitation" ? [e.data] : []));
+    expect(invites.length).toBeGreaterThan(0);
+    for (const invite of invites) expect(invite).toMatchObject({ agent: "maya", place: "cafe", origin: "routine:drinks" });
+    expect(new Set(invites.map((invite) => invite.key)).size).toBe(invites.length);
+    expect(fold(reg, grounded.world, startState(grounded.world), grounded.events)).toEqual(grounded.state);
+    // The chat setting her to make no invitations (the GM's `routine_follow`) stops them.
+    const quiet = setup(4, (wd) => patch(wd, true));
+    quiet.apply({ type: "castlife.follow", data: { entity: "maya", follow: { mode: "no_invitations", awareness: null } } });
+    lapse(quiet, 4 * 1440);
+    expect(quiet.events.some((e) => e.type === "castlife.invitation")).toBe(false);
   });
 
   test("a trip preempts the routine it overlaps and starts on time (Danny's Friday drinks give way to Chicago)", () => {
@@ -217,6 +224,16 @@ describe("castlife: needs, encounters and invitations (level 4)", () => {
   test("a close call reads as such; once the person's choice is recorded it says they chose", () => {
     const make = STARTER_WORLDS.modern_slice_of_life as (id: string, name: string) => WorldDoc;
     const world = make("w", "Port Alder");
+    // Two evening habits of everyone's, each worth as much as the other: the planner's choice between them is a close call.
+    world.routines = {
+      evenings: {
+        id: "evenings",
+        blocks: [
+          { id: "gym", label: "The gym", activity: "exercise", kind: "flexible", window: { from: "19:00", to: "21:00" }, minutes: 45, priority: 5 },
+          { id: "walk", label: "A walk", activity: "leisure", kind: "flexible", window: { from: "19:00", to: "21:00" }, minutes: 45, priority: 5 },
+        ],
+      },
+    };
     const w = new Working(reg, world, startState(world));
     let found: { who: string; day: number; key: string; options: string[]; at: number } | null = null;
     for (const who of Object.keys(w.state.entities).filter((id) => w.state.entities[id]?.agent).sort()) {

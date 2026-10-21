@@ -147,6 +147,26 @@ describe("an out-of-character instruction that states a span", () => {
     expect(ran.record?.events.some((e) => e.type === "minds.skip")).toBe(true);
   });
 
+  test("its Continue keeps the POV where the story has it, as the span did", async () => {
+    const { rig, chatId } = await alder(() => ({ action: "timelapse", params: { span: "over the next ten hours" }, confidence: 0.9 }));
+    // Two agent-days a segment: the span stops on a slot boundary and offers the rest on a Continue.
+    rig.body(await rig.send({ type: "lre.marker", chatId, kind: "time", control: "unit_cap", scope: { all: true }, to: { agentDays: 2, events: 5000 } }));
+    const before = await folded(rig, chatId);
+    const here = placeOfEntity(before.state, before.world.pov);
+    await rig.turn(chatId, "OOC: over the next ten hours, I sort the stock.", "The hours go by among the shelves.");
+    const stopped = await folded(rig, chatId);
+    expect(stopped.state.clock).toBeLessThan(before.state.clock + 600);
+    const chip = (await rig.rt.view(chatId, rig.host.userId)).chips.find((c) => c.kind === "continue_timelapse");
+    if (!chip) throw new Error("no Continue");
+    rig.body(await rig.send({ type: "lre.chip", chatId, chip: chip.id, choice: "timelapse" }));
+    const g = await rig.host.start(chatId, { type: "normal" });
+    await rig.host.finish(g, "More hours go by.");
+    // The rest runs as the span did: past the POV's own lunch and work, it stays where the story has it.
+    const after = await folded(rig, chatId);
+    expect(after.state.clock).toBeGreaterThan(stopped.state.clock);
+    expect(placeOfEntity(after.state, after.world.pov)).toBe(here);
+  });
+
   test("a skip the read splits between its params and then keeps the span", async () => {
     const { rig, chatId } = await alder(() => ({ action: "timelapse", params: {}, confidence: 0.9, then: { minutes: 120 } }));
     const before = await folded(rig, chatId);
