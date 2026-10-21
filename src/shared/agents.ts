@@ -53,7 +53,7 @@ export type HelloClient = { name: string; version: string } & Partial<AgentCheck
 /** How a server stands against this build: on its tools, not yet, unable to follow, or from before following. */
 export type AgentState = "updated" | "behind" | "cannot" | "old";
 
-/** One MCP server as its last check-in left it. */
+/** One MCP server: as the process of it furthest behind left it, of those heard from in the last 2 minutes, else as its last check-in did. */
 export interface AgentClientView {
   id: string;
   name: string;
@@ -70,6 +70,8 @@ export interface AgentClientView {
   seen: number;
   /** A session of it is open now. */
   connected: boolean;
+  /** Its processes heard from in the last 2 minutes (each a session of its own, since the extension started). */
+  processes: number;
   state: AgentState;
 }
 

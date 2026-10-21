@@ -7,7 +7,7 @@ import { NPM_INSTALL } from "../../src/shared/agents";
 
 const CORE = "/srv/lumiverse/data/extensions/lumi_rp_engine/repo/dist/lumirpengine.js";
 const view: AgentsView = { build: "b2", notice: { build: "b2", previous: "a1", at: 1 }, setup: { core: CORE, command: `node ${CORE} mcp` }, clients: [] };
-const client = (over: Partial<AgentClientView>): AgentClientView => ({ id: "c1", name: "lumirpengine", version: "0.0.1", host: "studio", harness: null, core: "c0", kit: "b2", follows: true, why: null, seen: 1, connected: true, state: "updated", ...over });
+const client = (over: Partial<AgentClientView>): AgentClientView => ({ id: "c1", name: "lumirpengine", version: "0.0.1", host: "studio", harness: null, core: "c0", kit: "b2", follows: true, why: null, seen: 1, connected: true, processes: 1, state: "updated", ...over });
 
 describe("each server's line", () => {
   test("reloaded, not yet with Update now, and can't follow with why and what fixes it", () => {
@@ -29,6 +29,13 @@ describe("each server's line", () => {
       { label: "Copy the install", text: NPM_INSTALL },
       { label: "Copy the setup", text: `node ${CORE} mcp` },
     ]);
+  });
+
+  test("a server running as more than one process says how many", () => {
+    expect(serverLine(client({ harness: "claude-code", processes: 2, state: "behind", kit: "a1" }), view).text).toBe("lumirpengine for claude-code on studio (2 processes) hasn't reloaded this build's tools yet.");
+    expect(serverLine(client({ harness: "claude-code", processes: 2 }), view).text).toBe("lumirpengine for claude-code on studio (2 processes) reloaded this build's tools.");
+    // One, or none heard from lately: nothing to count.
+    for (const processes of [0, 1]) expect(serverLine(client({ harness: "claude-code", processes }), view).text).toBe("lumirpengine for claude-code on studio reloaded this build's tools.");
   });
 
   test("a server Lumiverse runs itself is a line like any other; once it reloads, the line says Lumiverse's MCP client keeps its old tool list until the server restarts, and where to restart it", () => {
