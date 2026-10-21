@@ -40,7 +40,7 @@ import { blockShapeProblems, isOff, ROUTINE_AWARENESS, ROUTINE_EVENTS, ROUTINE_M
 import { createRng, type Rng } from "../../../engine/rng";
 import { hashParts } from "../../../shared/hash";
 import { allSchedules, routineStays, scheduleInstants, scheduleOwners } from "../../../engine/schedules";
-import { isGone, kindDef, kindIs, placeOfEntity } from "../../../engine/scope";
+import { fieldDef, isGone, kindDef, kindIs, placeOfEntity } from "../../../engine/scope";
 import { acts as lifeActs, povLife } from "../../../engine/life";
 import { classValues, isGroup, isMemberOf, MEMBER_OF, selectEntities } from "../../../engine/selector";
 import type { WorldState } from "../../../engine/state";
@@ -377,14 +377,18 @@ function liveBlock(ctx: ReadContext, who: EntityId, plan: DayPlan, block: DayPla
   const index = plan.blocks.indexOf(block);
   const earlier = from < clockAt(calendarOf(ctx.world), plan.day, 0) ? [...dayPlan(ctx, who, plan.day - 1).blocks, ...plan.blocks.slice(0, index)] : plan.blocks.slice(0, index);
   const had = (edge ? earlier.filter((b) => b.end > from) : [...earlier.slice(-1), block]).reverse();
-  const fields = own(ctx.state.entities, who)?.fields;
-  // A place or activity any of those blocks set is the routine's own; anything else, the story's.
-  const places = had.flatMap((b) => (b.place !== null ? [b.place] : []));
-  const doings = had.map((b) => blockActivity(b.activity));
-  const wasPlace = places.find((p) => p === fields?.place) ?? places[0] ?? [...earlier].reverse().find((b) => b.place !== null)?.place ?? homeOf(ctx, who);
-  const wasDoing = doings.find((d) => d === fields?.activity) ?? doings[0] ?? null;
+  const e = own(ctx.state.entities, who);
+  const home = homeOf(ctx, who);
+  // A place or activity any of those blocks set is the routine's own; anything else, the story's. So is
+  // home after free time (which takes them there), and resting after a schedule (whose end returns them to rest).
+  const rests = had.some((b) => b.option.startsWith("schedule:"));
+  const places = [...had.flatMap((b) => (b.place !== null ? [b.place] : [])), ...(home !== null && (rests || had.some((b) => b.place === null)) ? [home] : [])];
+  const resting = rests && e ? fieldDef(ctx.registry, ctx.world, e.kind, "activity")?.default : undefined;
+  const doings = [...had.map((b) => blockActivity(b.activity)), ...(typeof resting === "string" ? [resting] : [])];
+  const wasPlace = places.find((p) => p === e?.fields.place) ?? places[0] ?? [...earlier].reverse().find((b) => b.place !== null)?.place ?? home;
+  const wasDoing = doings.find((d) => d === e?.fields.activity) ?? doings[0] ?? null;
   const opts = { edge, release: block.activity === "sleep" };
-  const target = block.place ?? (edge && earlier.at(-1)?.place ? homeOf(ctx, who) : null);
+  const target = block.place ?? (edge && earlier.at(-1)?.place ? home : null);
   const place = target !== null && !routineYields(ctx, who, "place", wasPlace, opts) ? target : null;
   const doing = routineYields(ctx, who, "activity", wasDoing, opts) ? null : activity;
   return takeUp(ctx, who, place, doing, at);
