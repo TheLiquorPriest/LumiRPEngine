@@ -11,6 +11,7 @@ import type { ChatRun, EventRef, HeldWrite, JournalNote, KeepLine, LedgerEvent, 
 import type { CallMeterView, Chip, ControlsView, HudView, PaletteEntry, PaletteOption, PaletteView, PendingMark, SceneView, StateView, TimelapseView } from "../shared/state-view";
 import type { ActionDef, MapDisplay, WorldDoc } from "../shared/world";
 import { tableChoices } from "../shared/tables";
+import { routineSettingsOf } from "../shared/routines";
 import { checkView, policyOf } from "../engine/adjudication";
 import { calendarMonths, calendarOf, dayPartAt, formatClock, formatStamp, placeOffset } from "../engine/calendar";
 import { ENGINE_EVENTS } from "../engine/engine-pack";
@@ -290,6 +291,7 @@ function palette(world: WorldDoc, state: WorldState, registry: Registry): Palett
     ],
     interrupts: { ...state.time.interrupts },
     dayParts: calendar === 1,
+    followRoutine: routineSettingsOf(world).paletteFollowsRoutine,
   };
   const encounter = paletteEncounter(ctx);
   return { entries, timelapse, ...(encounter ? { encounter } : {}) };

@@ -40,6 +40,7 @@ const READ_LABEL: Record<MindSource, string> = {
   memory: "Their notes and what they saw",
   thoughts: "Their last thoughts",
   recall: "Turns they were there for",
+  routine: "Their usual routine",
   life: "Their life: money, the day, commitments and plans",
 };
 
@@ -52,11 +53,12 @@ const READ_NOTE: Record<MindSource, string> = {
   memory: "Their memory notes, most salient first, and what they saw happen. Never what someone's memory says they were told: that came from another mind.",
   thoughts: "Their own latest mind: what they thought, what they meant to do and how they felt.",
   recall: "Earlier turns they were there for: the latest, and those that best match the moment. Its limit is the memory setting's, which the world sets and you can override.",
+  routine: "Their routine and schedules as the world and the story set them, while their routine isn't off: what they usually do, theirs to weigh, never what they must do. Never a private block, and never social life the planner made up.",
   life: "Their money, the rest of today as the planner lays it (with what it fills free time with: meals, friends, outings), their commitments and their plans. None of it is the story as it stands.",
 };
 
 /** The story as it stands; the rest of the sources are their own memory and life. */
-const STORY_SOURCES: Readonly<Record<MindSource, boolean>> = { pinned: true, activated: true, reply: true, message: true, summary: false, memory: false, thoughts: false, recall: false, life: false };
+const STORY_SOURCES: Readonly<Record<MindSource, boolean>> = { pinned: true, activated: true, reply: true, message: true, summary: false, memory: false, thoughts: false, recall: false, routine: false, life: false };
 
 /** A count, period or allowance that may have no limit: a switch, and the number while there is one. Settings → Steps uses it for Build's jobs too. */
 export function LimitField(props: { label: string; noneLabel: string; value: Limit; min: number; max?: number; step?: number; fallback: Limit; disabled: boolean; onChange(next: Limit): void }) {

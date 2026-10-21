@@ -381,7 +381,8 @@ export const routineChannel: ProposalChannelDef = {
     // Moving house moves every block at home with them, the schedules' rest place included.
     if ("home" in change) return [{ type: "set", args: { entity: change.entity, field: "home", value: change.home } }];
     const turn = text(p.turn);
-    return [{ type: ROUTINE_EFFECT, args: { entity: change.entity, blocks: change.blocks as unknown as JsonValue, schedules: change.schedules as unknown as JsonValue, ...(turn !== "" ? { turn } : {}) } }];
+    // A change the player's own message stated, which the player said yes to adding, says so (`by`).
+    return [{ type: ROUTINE_EFFECT, args: { entity: change.entity, blocks: change.blocks as unknown as JsonValue, schedules: change.schedules as unknown as JsonValue, ...(turn !== "" ? { turn } : {}), ...(p.by === "player" ? { by: "player" } : {}) } }];
   },
 };
 
@@ -396,7 +397,7 @@ export function storyEvents(args: Record<string, JsonValue>, ctx: EffectContext)
   const e = own(ctx.state.entities, who);
   if (!e || !kindIs(ctx.registry, ctx.world, e.kind, "person")) return { code: "not_person", reason: "only people have a routine" };
   const turn = text(args.turn);
-  const source: JsonObject = { type: "story", at: ctx.state.clock, ...(turn !== "" ? { turn } : {}) };
+  const source: JsonObject = { type: "story", at: ctx.state.clock, ...(turn !== "" ? { turn } : {}), ...(args.by === "player" ? { by: "player" } : {}) };
   const list = (v: JsonValue | undefined): JsonObject[] => (Array.isArray(v) ? v.filter(isRecord).map(objOf) : []);
   return [
     ...list(args.schedules).map((s): LedgerEvent => ({ type: ROUTINE_EVENTS.schedule, data: { entity: who, schedule: text(s.schedule), value: s.value ?? null, source } })),
