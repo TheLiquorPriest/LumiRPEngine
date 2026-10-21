@@ -388,6 +388,7 @@ export function stateFixture(chatId: string): StateView {
         ],
         interrupts,
         dayParts: false,
+        followRoutine: false,
       },
     },
     controls: {

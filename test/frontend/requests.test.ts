@@ -107,7 +107,7 @@ describe("palette and map actions", () => {
   test("a timelapse sends its target and only the overrides that change the policy", () => {
     const interrupts = Object.fromEntries(INTERRUPT_CLASSES.map((cls) => [cls, "ignore"])) as Record<InterruptClass, InterruptPolicy>;
     interrupts.invitation = "stop";
-    const view: TimelapseView = { action: "calendar.timelapse", blocked: null, durations: [60], until: [], interrupts, dayParts: false };
+    const view: TimelapseView = { action: "calendar.timelapse", blocked: null, durations: [60], until: [], interrupts, dayParts: false, followRoutine: false };
     expect(timelapseRequest(view, { type: "duration", minutes: 480 }, { invitation: "stop", bill: "note", weather: "stop" }, "c1")).toEqual({
       type: "lre.action",
       chatId: "c1",

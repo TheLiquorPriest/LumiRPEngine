@@ -9,6 +9,7 @@ import type { JsonObject, JsonValue } from "../../../shared/json";
 import { isRecord } from "../../../shared/json";
 import { hashParts } from "../../../shared/hash";
 import type { LintIssue } from "../../../shared/protocol";
+import { FIDELITIES } from "../../../shared/minds";
 import {
   BASIC_BLOCKS,
   blockShapeProblems,
@@ -16,6 +17,7 @@ import {
   ROUTINE_AWARENESS,
   ROUTINE_LINT,
   ROUTINE_MODES,
+  ROUTINE_ROLES,
   routineSettingsOf,
   routineShapeProblems,
   type ChatRoutineSource,
@@ -28,6 +30,7 @@ import {
   type RoutineEntry,
   type RoutineFollow,
   type RoutineMode,
+  type RoutineRole,
   type RoutineSource,
   type SourceView,
 } from "../../../shared/routines";
@@ -67,7 +70,7 @@ export interface ChatSchedule {
 function chatSource(v: JsonValue | undefined): ChatRoutineSource | null {
   const o = objOf(v);
   if (o.type === "gm" && typeof o.at === "number") return { type: "gm", at: o.at };
-  if (o.type === "story" && typeof o.at === "number") return { type: "story", at: o.at, ...(typeof o.turn === "string" ? { turn: o.turn } : {}) };
+  if (o.type === "story" && typeof o.at === "number") return { type: "story", at: o.at, ...(typeof o.turn === "string" ? { turn: o.turn } : {}), ...(o.by === "player" ? { by: "player" as const } : {}) };
   return null;
 }
 
@@ -77,7 +80,8 @@ export function chatFollow(state: Readonly<WorldState>, who: EntityId): RoutineF
   if (!isRecord(raw)) return null;
   const mode = ROUTINE_MODES.find((m) => m === raw.mode) ?? null;
   const awareness = ROUTINE_AWARENESS.find((a) => a === raw.awareness) ?? null;
-  return mode === null && awareness === null ? null : { mode, awareness };
+  const role = ROUTINE_ROLES.find((r) => r === raw.role) ?? null;
+  return mode === null && awareness === null && role === null ? null : { mode, awareness, role };
 }
 
 /** The blocks a chat changed for someone (`castlife.routine`), by block id. */
@@ -109,6 +113,16 @@ export function chatSchedules(state: Readonly<WorldState>, who: EntityId): Recor
 export function followOf(ctx: Pick<ReadContext, "world" | "state">, who: EntityId): { mode: RoutineMode; awareness: RoutineAwareness; chat: RoutineFollow | null } {
   const chat = chatFollow(ctx.state, who);
   return { mode: chat?.mode ?? "follows", awareness: chat?.awareness ?? routineSettingsOf(ctx.world).awareness, chat };
+}
+
+/**
+ * What someone's routine and their own place and activity schedules are to the engine now (DESIGN §8,
+ * `RoutineRole`): the chat's role for them (`routine_follow`), else their level's in the world's
+ * settings, their level read as it is now (`minds.tier`, recomputed every turn and at every beat;
+ * Background without minds). The POV has none: whether its routine runs is the timelapse's.
+ */
+export function routineRole(ctx: ReadContext, who: EntityId): RoutineRole {
+  return chatFollow(ctx.state, who)?.role ?? routineSettingsOf(ctx.world).roles[optionalQuery(ctx, "minds.tier")?.(ctx, who) ?? "background"];
 }
 
 // ---------------------------------------------------------------- whose blocks apply
@@ -503,11 +517,22 @@ export function routinesLint(world: WorldDoc, reg: Registry, state: Readonly<Wor
   const raw = world.routines ?? {};
   for (const id of Object.keys(raw).sort()) issues.push(...routineIssues(world, reg, id, own(raw, id), state));
   const settings = isRecord(world.routineSettings) ? world.routineSettings : {};
-  const known: Record<string, readonly string[]> = { awareness: ROUTINE_AWARENESS, invitations: ["off", "player", "everyone"], sociability: ["reserved", "usual", "outgoing"], planBend: ["must", "strong", "standard", "ordinary"] };
+  // Each part a world may set: a word of its list, a switch, or a role for each level of closeness.
+  const known: Record<string, readonly string[] | "switch" | "roles"> = { awareness: ROUTINE_AWARENESS, invitations: ["off", "player", "everyone"], sociability: ["reserved", "usual", "outgoing"], planBend: ["must", "strong", "standard", "ordinary"], roles: "roles", narrator: "switch", paletteFollowsRoutine: "switch" };
+  const warn = (path: string, message: string): void => void issues.push({ severity: "warning", code: ROUTINE_LINT.settings, path: `routineSettings.${path}`, message });
   for (const [key, v] of Object.entries(settings)) {
     const allowed = own(known, key);
-    if (!allowed) issues.push({ severity: "warning", code: ROUTINE_LINT.settings, path: `routineSettings.${key}`, message: `Routine settings have no ${key}; it does nothing.` });
-    else if (typeof v !== "string" || !allowed.includes(v)) issues.push({ severity: "warning", code: ROUTINE_LINT.settings, path: `routineSettings.${key}`, message: `Routine settings: ${key} is ${allowed.join(", ")}; the default stands.` });
+    if (!allowed) warn(key, `Routine settings have no ${key}; it does nothing.`);
+    else if (allowed === "switch") {
+      if (typeof v !== "boolean") warn(key, `Routine settings: ${key} is true or false; the default stands.`);
+    } else if (allowed === "roles") {
+      if (!isRecord(v)) warn(key, "Routine settings: roles give live, near, far and background each a role; the defaults stand.");
+      else
+        for (const [level, role] of Object.entries(v)) {
+          if (!FIDELITIES.some((f) => f === level)) warn(`roles.${level}`, `Routine settings: roles have no ${level}; it does nothing.`);
+          else if (!ROUTINE_ROLES.some((r) => r === role)) warn(`roles.${level}`, `Routine settings: a role is ${ROUTINE_ROLES.join(", ")}; the default stands.`);
+        }
+    } else if (typeof v !== "string" || !allowed.includes(v)) warn(key, `Routine settings: ${key} is ${allowed.join(", ")}; the default stands.`);
   }
   if (Object.keys(raw).length > 0 && !world.packs.castlife) issues.push({ severity: "warning", code: ROUTINE_LINT.pack, path: "routines", message: "The world has routines but not the Cast life pack, which lives them." });
   // Equal precedence, the same block, the same person: the routine with the lower id wins.
