@@ -508,10 +508,14 @@ export const COLLECTION_SPECS: Record<WorldCollection, FieldSpec[]> = {
     { kind: "text", key: "description", label: "Description", multiline: true, optional: true },
     { kind: "facetValues", key: "values", label: "Values" },
   ],
+  routines: [
+    { kind: "text", key: "label", label: "Label", optional: true },
+    { kind: "bool", key: "inherit", label: "Keeps the blocks of less specific routines", reads: (inherit) => inherit !== false },
+  ],
 };
 
-/** The schema-driven singletons; Tiers, Ruleset, the lore lookup table and Minds have their own editors (`tiers-editor.tsx`, `ruleset-editor.tsx`, `lookup-editor.tsx`, `minds-editor.tsx`). */
-export const PART_SPECS: Record<Exclude<WorldPart, "tiers" | "loreIndex" | "ruleset" | "minds" | "lorePins">, FieldSpec[]> = {
+/** The schema-driven singletons; Tiers, Ruleset, the lore lookup table, Minds and the routine settings have their own editors (`tiers-editor.tsx`, `ruleset-editor.tsx`, `lookup-editor.tsx`, `minds-editor.tsx`). */
+export const PART_SPECS: Record<Exclude<WorldPart, "tiers" | "loreIndex" | "ruleset" | "minds" | "lorePins" | "routineSettings">, FieldSpec[]> = {
   calendar: [
     { kind: "enum", key: "system", label: "System", values: ["gregorian", "custom"] },
     { kind: "localTime", key: "epoch", label: "Clock starts at (the epoch)", hint: "Minute 0 of the world's clock, in its own calendar" },
@@ -707,5 +711,7 @@ export function newItem(collection: WorldCollection, id: string, world: Pick<Wor
       return { id, title: shown, content: "", keys: [], links: [] };
     case "classifications":
       return { id, label: name?.trim() || id.replace(/_/g, " "), multiple: false, values: {} };
+    case "routines":
+      return { id, label: shown, blocks: [] };
   }
 }

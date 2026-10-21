@@ -41,6 +41,7 @@ export const COLLECTION_INFO: Readonly<Record<WorldCollection, CollectionInfo>> 
   checks: { label: "Checks", hint: "Dice and outcome bands", noun: "check", icon: "dice" },
   rules: { label: "Rules", hint: "When this, do that", noun: "rule", icon: "branch" },
   schedules: { label: "Schedules", hint: "Routines, shifts, weather", noun: "schedule", icon: "calendar" },
+  routines: { label: "Routines", hint: "The soft shape of people's days", noun: "routine", icon: "clock" },
   tracks: { label: "Tracks", hint: "Quests, secrets, puzzles, agendas", noun: "track", icon: "flag" },
   lore: { label: "Lore", hint: "Entries, lookup table, indexing", noun: "lore entry", icon: "book" },
   tables: { label: "Data tables", hint: "Prices, jobs, regions…", noun: "data table", icon: "table" },
@@ -60,6 +61,7 @@ export const PART_INFO: Readonly<Record<WorldPart, { label: string; hint: string
   loreIndex: { label: "Lore lookup table", hint: "Terms and topics that lead to lore entries", icon: "search" },
   minds: { label: "Minds", hint: "How closely characters think, what they remember, and their prompts", icon: "sparkle" },
   lorePins: { label: "Pinned lore", hint: "Lore every call for a character, or at a place, always reads", icon: "pin" },
+  routineSettings: { label: "Routine settings", hint: "How strictly people keep to routine against the story", icon: "sliders" },
 };
 
 /** Shows a Build page: the route is Build's whole stack position (Worlds → World → Collection → Item). */
