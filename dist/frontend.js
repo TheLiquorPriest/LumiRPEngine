@@ -37977,19 +37977,21 @@ function canvasPalette(el) {
   if (hit && hit.version === version)
     return hit.palette;
   const style = getComputedStyle(el);
+  const text = usable(style.color, "currentcolor");
   const read = (name, fallback) => usable(style.getPropertyValue(name).trim(), fallback);
   const palette = {
     bg: read(TOKENS.bg, "transparent"),
-    ink: read(TOKENS.ink, "currentcolor"),
-    muted: read(TOKENS.muted, "currentcolor"),
-    line: read(TOKENS.line, "currentcolor"),
-    pov: read(TOKENS.pov, "currentcolor"),
+    ink: read(TOKENS.ink, text),
+    muted: read(TOKENS.muted, text),
+    line: read(TOKENS.line, text),
+    pov: read(TOKENS.pov, text),
     fog: read(TOKENS.fog, "transparent"),
-    item: read(TOKENS.item, "currentcolor"),
-    series: SERIES.map((name) => read(name, "currentcolor")),
+    item: read(TOKENS.item, text),
+    series: SERIES.map((name) => read(name, text)),
     font: style.fontFamily || "system-ui, sans-serif"
   };
-  cache2.set(el, { version, palette });
+  if (el.isConnected)
+    cache2.set(el, { version, palette });
   return palette;
 }
 function watchTheme(onChange) {

@@ -82,7 +82,8 @@ const listeners = new Set<() => void>();
 let observer: MutationObserver | null = null;
 
 // One palette per element per theme, while the theme is watched: drawing runs on every pan frame,
-// the tokens change only with the theme.
+// the tokens change only with the theme. Only a palette read in the page is kept: an element out of
+// it (a float widget's root before the host puts it in the page) computes no tokens at all.
 const cache = new WeakMap<Element, { version: number; palette: CanvasPalette }>();
 
 /** The canvas palette as the tokens compute at `el` (a canvas inside a `.lre` root). */
@@ -90,20 +91,22 @@ export function canvasPalette(el: Element): CanvasPalette {
   const hit = observer ? cache.get(el) : undefined;
   if (hit && hit.version === version) return hit.palette;
   const style = getComputedStyle(el);
+  // With no tokens at all (outside a `.lre` root) marks take the element's text colour: a canvas
+  // reads `currentcolor` from an inline colour only, and else draws black.
+  const text = usable(style.color, "currentcolor");
   const read = (name: string, fallback: string): string => usable(style.getPropertyValue(name).trim(), fallback);
-  // With no tokens at all (outside a `.lre` root) marks fall back to the element's text colour.
   const palette: CanvasPalette = {
     bg: read(TOKENS.bg, "transparent"),
-    ink: read(TOKENS.ink, "currentcolor"),
-    muted: read(TOKENS.muted, "currentcolor"),
-    line: read(TOKENS.line, "currentcolor"),
-    pov: read(TOKENS.pov, "currentcolor"),
+    ink: read(TOKENS.ink, text),
+    muted: read(TOKENS.muted, text),
+    line: read(TOKENS.line, text),
+    pov: read(TOKENS.pov, text),
     fog: read(TOKENS.fog, "transparent"),
-    item: read(TOKENS.item, "currentcolor"),
-    series: SERIES.map((name) => read(name, "currentcolor")),
+    item: read(TOKENS.item, text),
+    series: SERIES.map((name) => read(name, text)),
     font: style.fontFamily || "system-ui, sans-serif",
   };
-  cache.set(el, { version, palette });
+  if (el.isConnected) cache.set(el, { version, palette });
   return palette;
 }
 
