@@ -94,7 +94,7 @@ function textOf(node: unknown): string {
   return "";
 }
 
-/** GM → Routines' "Changes the story made" for someone, as rendered from the backend's reads: each row's title, its turns and its words. */
+/** GM → Routines' "Changes made in play" for someone, as rendered from the backend's reads: each row's title, its turns and its words. */
 async function storyRows(chat: Chat, entity: string): Promise<{ title: unknown; ids: unknown[]; text: string }[]> {
   const view = chat.rig.body(await chat.rig.send({ type: "lre.routine", chatId: chat.chatId, op: "day", entity, view: "gm" })).gm as RoutineGmView;
   const gm = chat.rig.body(await chat.rig.send({ type: "lre.gm", chatId: chat.chatId })) as unknown as GmView;

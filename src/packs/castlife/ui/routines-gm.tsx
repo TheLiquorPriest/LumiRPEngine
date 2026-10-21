@@ -489,8 +489,8 @@ function Invitations(props: { view: RoutineGmView }) {
  */
 function StoryMade(props: { changes: StoryChange[]; now: number; busy: boolean; open(change: RoutineChange): void }) {
   return (
-    <Section title="Changes the story made" flush>
-      {props.changes.length === 0 ? <None>The story hasn't changed their routine or schedules in this chat.</None> : null}
+    <Section title="Changes made in play" flush>
+      {props.changes.length === 0 ? <None>Nothing in play has changed their routine or schedules in this chat.</None> : null}
       <div data-lre-gm-list="routine-story">
         <List>
           {props.changes.map((c) => {
