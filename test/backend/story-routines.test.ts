@@ -87,7 +87,7 @@ describe("a reply that states a change to someone's week", () => {
     // The GM's list has it among the changes the story made, for him alone; the player has its chip.
     const list = await changed(chat);
     expect(list.map((c) => c.entity)).toEqual(["marcus_delgado"]);
-    expect(list[0]?.blocks).toEqual([{ block: expect.any(String), source: expect.objectContaining({ type: "story", turn }), off: false }]);
+    expect(list[0]?.blocks).toEqual([{ block: expect.any(String), label: "Night shift at the marina", source: expect.objectContaining({ type: "story", turn }), off: false }]);
     expect(list[0]?.schedules).toEqual([]);
     expect((await chips(chat)).some((c) => c.kind === "undo" && c.label.includes("Night shift at the marina"))).toBe(true);
     expect(chat.rig.rt.ledger.errors).toEqual([]);

@@ -1014,6 +1014,8 @@ export class Dispatcher {
         const result = await this.write(chatId, userId, { kind: "post", id: this.nextId(), target: "head", entry: { kind: "confirm", events } });
         const added = typeof chip.payload.added === "string" ? chip.payload.added : "Added to the routine";
         await this.rt.chips.add(chatId, userId, [{ id: id.replace(/^routine_ask:/, "routine_added:"), kind: "routine_added", messageId: chip.messageId, label: added, ...(chip.detail !== undefined ? { detail: chip.detail } : {}), actions: [{ id: "undo", label: "Undo", style: "danger" }], expires: "next_send", payload: { events: JSON.parse(JSON.stringify(events)) as JsonValue } }]);
+        // The state the write pushed may predate its Undo chip: push again, so every view shows both.
+        this.rt.push.changed(chatId, userId);
         return { applied: result.applied, pending: result.pending };
       }
       case "routine_added": {

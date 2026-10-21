@@ -9,9 +9,14 @@ import { describe, expect, test } from "bun:test";
 import type { QuietRequest } from "../../src/backend/host";
 import { toChain } from "../../src/backend/ledger-io";
 import type { JsonObject } from "../../src/shared/json";
+import type { VNode } from "preact";
+import { IdText, ListRow } from "../../src/frontend/components";
+import { gmReloadKey } from "../../src/frontend/play/gm";
+import { RoutineSections } from "../../src/packs/castlife/ui/routines-gm";
 import type { LaidBlock, RoutineChangeSummary, RoutineGmView } from "../../src/shared/routines";
-import type { Chip } from "../../src/shared/state-view";
+import type { Chip, GmView, StateView } from "../../src/shared/state-view";
 import { Rig } from "../support/rig";
+import { expand, propsOf, type Props } from "../support/tree";
 
 const INTERPRET_MARK = "You map a player's typed input";
 
@@ -72,6 +77,33 @@ async function answer(chat: Chat, chip: Chip, choice: string): Promise<void> {
   chat.rig.body(await chat.rig.send({ type: "lre.chip", chatId: chat.chatId, chip: chip.id, choice }));
 }
 
+/** The state the chat's pages hold once every scheduled push is sent (a delta of it, after the first snapshot). */
+async function pushed(chat: Chat): Promise<StateView> {
+  await chat.rig.rt.push.settle();
+  return chat.rig.rt.view(chat.chatId, chat.rig.host.userId);
+}
+
+/** The words a rendered tree shows. */
+function textOf(node: unknown): string {
+  if (node === null || node === undefined || typeof node === "boolean") return "";
+  if (typeof node === "string" || typeof node === "number") return String(node);
+  if (Array.isArray(node)) return node.map(textOf).join("");
+  if (typeof node === "object" && "props" in node) return textOf((node as VNode<Props>).props.children);
+  return "";
+}
+
+/** GM → Routines' "Changes the story made" for someone, as rendered from the backend's reads: each row's title, its turns and its words. */
+async function storyRows(chat: Chat, entity: string): Promise<{ title: unknown; ids: unknown[]; text: string }[]> {
+  const view = chat.rig.body(await chat.rig.send({ type: "lre.routine", chatId: chat.chatId, op: "day", entity, view: "gm" })).gm as RoutineGmView;
+  const gm = chat.rig.body(await chat.rig.send({ type: "lre.gm", chatId: chat.chatId })) as unknown as GmView;
+  const summary = (await changed(chat)).find((s) => s.entity === entity);
+  const root = RoutineSections({ view, gm, summary, busy: false, open: () => undefined }) as VNode<Props>;
+  const children = root.props.children;
+  const tree = (Array.isArray(children) ? children : [children]).map((child) => expand(child));
+  const list = propsOf(tree, "div").find((p) => p["data-lre-gm-list"] === "routine-story");
+  return propsOf(list?.children, ListRow).map((r) => ({ title: r.title, ids: propsOf(r.subtitle, IdText).map((p) => p.id), text: textOf(r.subtitle) }));
+}
+
 const SWIM_SAID = "Marcus says he's started swimming at Lakefront Park on Tuesdays at six";
 const SWIM: JsonObject = { entity: "marcus_delgado", change: "start", label: "Swimming", days: ["tuesday"], start: "06:00", end: "06:25", activity: "exercise", place: "lakefront_park", said: SWIM_SAID };
 
@@ -105,7 +137,7 @@ describe("a routine the player's message states", () => {
     await answer(chat, ask, "yes");
     const list = await changed(chat);
     expect(list.map((c) => c.entity)).toEqual(["marcus_delgado"]);
-    expect(list[0]?.blocks).toEqual([{ block: expect.any(String), source: expect.objectContaining({ type: "story", turn, by: "player" }), off: false }]);
+    expect(list[0]?.blocks).toEqual([{ block: expect.any(String), label: "Swimming", source: expect.objectContaining({ type: "story", turn, by: "player" }), off: false }]);
     // Today (Monday) was laid already; tomorrow, Tuesday, he swims at six.
     expect(await changedOn(chat, "marcus_delgado", 0)).toEqual([]);
     expect((await changedOn(chat, "marcus_delgado", 1)).map((b) => [b.from, b.place, b.activity])).toEqual([["06:00", "lakefront_park", "exercise"]]);
@@ -120,6 +152,44 @@ describe("a routine the player's message states", () => {
     expect(chat.rig.rt.ledger.errors).toEqual([]);
   });
 
+  test("Yes and its Undo each move the chat on, so GM mode reads it again at once", async () => {
+    const chat = await alder();
+    await said(chat, `${SWIM_SAID}.`, [SWIM]);
+    const before = await pushed(chat);
+    const [ask] = await asks(chat);
+    if (!ask) throw new Error("no ask");
+    await answer(chat, ask, "yes");
+    const yes = await pushed(chat);
+    // The pushed state already has the Undo, and its change is one GM mode reloads on.
+    expect(yes.chips.some((c) => c.kind === "routine_added")).toBe(true);
+    expect(gmReloadKey(yes)).not.toBe(gmReloadKey(before));
+    const added = yes.chips.find((c) => c.kind === "routine_added");
+    if (!added) throw new Error("no Undo");
+    await answer(chat, added, "undo");
+    expect(gmReloadKey(await pushed(chat))).not.toBe(gmReloadKey(yes));
+  });
+
+  test("GM → Routines lists it by its own name, from the player's message with its turn; the reply's change stays the story's", async () => {
+    const chat = await alder();
+    await said(chat, `${SWIM_SAID}.`, [{ ...SWIM, label: "Swimming at Lakefront Park" }]);
+    const turn = await lastUser(chat);
+    const [ask] = await asks(chat);
+    if (!ask) throw new Error("no ask");
+    await answer(chat, ask, "yes");
+    // The reply's own change, beside it.
+    chat.rig.host.quietReply = (req: QuietRequest) => ((req.messages[0]?.content ?? "").includes("propose concrete state changes") ? JSON.stringify({ proposals: [{ type: "routine", entity: "marcus_delgado", change: "start", label: "Night shift at the marina", days: "weekdays", start: "22:00", end: "06:00", activity: "work", place: "alder_harbor_marina" }] }) : "{}");
+    await chat.rig.turn(chat.chatId, "Marcus, you look beat.", "Marcus rubs his eyes. \"Took the night shift at the marina, weekdays, ten till six.\"");
+    const rows = await storyRows(chat, "marcus_delgado");
+    expect(rows.map((r) => [r.title, r.ids])).toEqual([
+      ["Swimming at Lakefront Park", [turn]],
+      ["Night shift at the marina", [expect.any(String)]],
+    ]);
+    // The wording is what's at stake: where each came from, plainly.
+    expect(rows[0]?.text).toContain("From your message");
+    expect(rows[0]?.text).not.toContain("The story");
+    expect(rows[1]?.text).toContain("The story");
+  });
+
   test("No records nothing", async () => {
     const chat = await alder();
     await said(chat, `${SWIM_SAID}.`, [SWIM]);
@@ -130,6 +200,18 @@ describe("a routine the player's message states", () => {
     expect((await chips(chat)).some((c) => c.kind === "routine_added")).toBe(false);
     expect(await changed(chat)).toEqual([]);
     expect(await changedOn(chat, "marcus_delgado", 1)).toEqual([]);
+  });
+
+  test("the ask names each part once: a place its label names isn't named again", async () => {
+    const chat = await alder();
+    const { end: _end, ...evening } = SWIM;
+    await said(chat, "Marcus says he's started swimming at Lakefront Park on Thursday evenings.", [{ ...evening, label: "swimming at Lakefront Park", days: ["thursday"], start: "evening", said: "Marcus says he's started swimming at Lakefront Park on Thursday evenings" }]);
+    const [ask] = await asks(chat);
+    if (!ask) throw new Error("no ask");
+    // The place once, and the label and the day still named.
+    expect(ask.detail?.split("Lakefront Park").length).toBe(2);
+    expect(ask.detail).toContain("swimming at Lakefront Park");
+    expect(ask.detail).toContain("thursday");
   });
 });
 
