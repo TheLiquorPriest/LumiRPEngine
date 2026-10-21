@@ -187,8 +187,6 @@ export class Dispatcher {
           // A page's hello shows an update notice the user hasn't dismissed.
           if (r.client === undefined) this.rt.agents.page(userId, session);
         } else reply("lre.state.resync", { accepted: true });
-        // The frontend says which Loom preset is active: the preset prompts assemble with (DESIGN §6.8).
-        if (r.type === "lre.hello" && r.presetId !== undefined && this.rt.presets.useLoom(userId, typeof r.presetId === "string" ? r.presetId : null)) this.rt.ledger.inputsChanged(userId);
         // Which chat this page shows, and whether on screen: who starts a prepared reply (DESIGN §5.1). An outside client is no page.
         if (session !== undefined && !(r.type === "lre.hello" && r.client !== undefined)) this.rt.ledger.page(session, userId, r.chatId, r.chatId !== null && r.viewing !== false);
         if (r.chatId) {
@@ -415,7 +413,6 @@ export class Dispatcher {
         return;
       }
       case "lre.preset": {
-        if (r.op === "active") this.rt.presets.useLoom(userId, typeof r.presetId === "string" ? r.presetId : null);
         const card = await this.rt.presetCard(userId, r.op === "add");
         if (!card) throw new RequestError("not_found", "There is no active preset to add the blocks to.");
         reply("lre.preset", { card });

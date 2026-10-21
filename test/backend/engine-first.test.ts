@@ -190,7 +190,8 @@ describe("engine first", () => {
     const said = rig.host.sendUser(chatId, "I look around.");
     await rig.host.settle();
     expect((await rig.host.begin(chatId, { type: "normal" })).halted).toBe("cancelled");
-    expect((await liveEntries(rig, chatId)).length).toBeGreaterThan(0);
+    // A turn waiting for its reply holds nothing in the book: its reply's guard writes it.
+    expect(await liveEntries(rig, chatId)).toEqual([]);
     // The player edits their message before the reply starts: the prepared turn goes, and its entries.
     rig.host.editMessage(chatId, said, "I check the time.");
     await rig.host.settle();
