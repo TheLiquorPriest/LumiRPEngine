@@ -60213,7 +60213,7 @@ Your own agent (Claude Code, Codex, Cursor…) reaches your worlds through the \
 
 **After an update** the drawer opens on **LumiRPEngine updated**, with a toast the first time, and a line for each server:
 - *reloaded this build's tools*: nothing to do;
-- *hasn't reloaded yet*: it does within a minute, or press **Update now**; one that isn't connected takes the new tools when it next connects;
+- *hasn't reloaded yet*: it does within a minute, or press **Update now**. Right after the update no server has checked in with the restarted LumiRPEngine yet, so the line says so: a running one takes the new tools at its next check, and a stopped one when it next starts;
 - *can't follow*: why, and what to do, such as installing again on another machine (**Copy the install**) or using the setup above (**Copy the setup**);
 - *from before MCP servers followed LumiRPEngine*: update it once (\`npm i -g github:TheLiquorPriest/LumiRPEngine\`), or switch it to the setup above.
 
@@ -61273,7 +61273,7 @@ var package_default = {
 // src/cli/version.ts
 var CLI_NAME = "lumirpengine";
 var CLI_VERSION = package_default.version;
-var BUILD = "a6c11c82";
+var BUILD = "a1e20f30";
 var VERSION_LINE = `${CLI_NAME} ${CLI_VERSION} (build ${BUILD}, engine ${ENGINE_VERSION}, world format ${WORLD_FORMAT}, agent API ${AGENT_API})`;
 var VERSIONS = { cli: CLI_VERSION, build: BUILD, engine: ENGINE_VERSION, worldFormat: WORLD_FORMAT, agentApi: AGENT_API };
 

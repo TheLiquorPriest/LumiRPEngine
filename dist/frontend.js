@@ -19747,7 +19747,7 @@ function serverLine(client, view) {
     case "updated":
       return { state: client.state, text: `${name} reloaded this build's tools.`, update: false, copy: [] };
     case "behind":
-      return { state: client.state, text: `${name} hasn't reloaded this build's tools yet${client.connected ? "." : ": it isn't connected now, and takes them when it next connects."}`, update: true, copy: [] };
+      return { state: client.state, text: `${name} hasn't reloaded this build's tools yet${client.connected ? "." : ": it hasn't checked in since LumiRPEngine restarted. Running, it takes them at its next check, within a minute; stopped, when it next starts."}`, update: true, copy: [] };
     case "cannot": {
       const fix = client.why?.code === "elsewhere" || client.why?.code === "kit_api" ? [install] : client.why?.code === "pinned" ? [] : setup;
       return { state: client.state, text: `${name} can't follow LumiRPEngine: ${client.why?.text ?? "it didn't say why"}.`, update: false, copy: fix };
