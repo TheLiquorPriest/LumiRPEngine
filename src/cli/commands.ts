@@ -12,8 +12,9 @@ import { HostConnection, LiveError, sessionOf, signIn, signOut } from "./connect
 import { Live, resolveRevision } from "./live";
 import { McpServer } from "./mcp";
 import { templateFile } from "./offline";
+import type { ToolModule } from "./tool-module";
 import type { ToolContext } from "./tools";
-import { callTool, findTool, KeyedQueue } from "./tools";
+import { callTool, findTool, KeyedQueue, MODULE_TOOLS } from "./tools";
 import { CLI_NAME, CLI_VERSION, VERSION_LINE } from "./version";
 
 export interface CliIO {
@@ -77,7 +78,7 @@ Your worlds on Lumiverse
   attach <worldId> <chatId>                   A chat plays the world
   upgrade <chatId> [--to <revision>] [--preview] [--spoilers]
 
-  mcp [--read-only]                           All of it as an MCP server on stdio
+${moduleUsage()}  mcp [--read-only]                           All of it as an MCP server on stdio
   version, --version                          ${CLI_NAME}, engine, world format and agent API versions
 
   <s> is draft, head or a revision. Everywhere: --url <base> (or LUMIVERSE_URL) picks the Lumiverse when you
@@ -93,7 +94,10 @@ interface Parsed {
   flags: Record<string, true>;
 }
 
-const BOOLEAN_FLAGS: Record<string, true> = { "--read-only": true, "--allow-http": true, "--preview": true, "--spoilers": true, "--map": true, "--help": true, "--version": true };
+/** The switches the tools kept in files of their own take, beside the ones the commands here take. */
+const MODULE_FLAGS: Record<string, true> = Object.fromEntries(MODULE_TOOLS.flatMap((t) => Object.entries(t.cli.options ?? {}).flatMap(([option, o]) => (o.as === "flag" ? [[option, true] as const] : []))));
+
+const BOOLEAN_FLAGS: Record<string, true> = { "--read-only": true, "--allow-http": true, "--preview": true, "--spoilers": true, "--map": true, "--help": true, "--version": true, ...MODULE_FLAGS };
 
 /** What `LRE_READ_ONLY` may say. Anything else stops the run: a value meant as "on" must never serve the write tools. */
 const READ_ONLY_VALUES: Record<string, boolean> = { "": false, "0": false, false: false, no: false, off: false, "1": true, true: true, yes: true, on: true };
@@ -206,6 +210,59 @@ const MIRRORS: Readonly<Record<string, Mirror>> = {
   attach: { tool: "lre_attach", options: [], needs: 2, usage: "attach <worldId> <chatId>", args: (p) => ({ worldId: pos(p, 0), chatId: pos(p, 1) }) },
   upgrade: { tool: "lre_upgrade", options: ["--to", "--preview", "--spoilers"], needs: 1, usage: "upgrade <chatId> [--to <revision>] [--preview] [--spoilers]", args: (p) => ({ chatId: pos(p, 0), ...(one(p, "--to") !== undefined ? { to: one(p, "--to") } : {}), ...(p.flags["--preview"] ? { preview: true } : {}), ...(p.flags["--spoilers"] ? { spoilers: true } : {}) }) },
 };
+
+/** The usage text of the tools kept in files of their own, under their headings, in the order they are registered. Called while USAGE is made, so it reads nothing declared below. */
+function moduleUsage(): string {
+  const sections = new Map<string, string[]>();
+  for (const { cli } of MODULE_TOOLS) {
+    const line = cli.usage.length <= 42 ? `  ${cli.usage.padEnd(44)}${cli.summary}` : `  ${cli.usage}\n${" ".repeat(46)}${cli.summary}`;
+    sections.set(cli.section, [...(sections.get(cli.section) ?? []), line]);
+  }
+  return [...sections].map(([heading, lines]) => `${heading}\n${lines.join("\n")}\n\n`).join("");
+}
+
+/** JSON as an option gives it: inline (it reads as JSON: an object, a list, a string, a number, true, false or null), or a file holding it. */
+function jsonFrom(option: string, given: string, io: CliIO): JsonValue {
+  const text = /^\s*([[{"]|-?\d|true\s*$|false\s*$|null\s*$)/.test(given) ? given : io.readFile(given);
+  try {
+    return JSON.parse(text) as JsonValue;
+  } catch (error) {
+    throw new UsageError(`${option} isn't JSON: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
+/** A tool module's command, read from its mirror: each positional and option fills the argument it names. */
+function moduleMirror(tool: ToolModule): Mirror {
+  const { cli } = tool;
+  const options = cli.options ?? {};
+  const names = cli.positionals ?? [];
+  return {
+    tool: tool.name,
+    options: Object.keys(options),
+    needs: cli.needs ?? 0,
+    usage: cli.usage,
+    args: (p, io) => {
+      const out: Record<string, unknown> = {};
+      names.forEach((name, i) => {
+        const value = cli.rest === true && i === names.length - 1 ? p.positionals.slice(i).join(" ") || undefined : pos(p, i);
+        if (value !== undefined) out[name] = value;
+      });
+      for (const [option, { arg, as }] of Object.entries(options)) {
+        if (as === "flag") {
+          if (p.flags[option] === true) out[arg] = true;
+          continue;
+        }
+        const all = p.values[option];
+        const given = all?.at(-1);
+        if (all === undefined || given === undefined) continue;
+        out[arg] = as === "many" ? all : as === "int" ? number(p, option) : as === "list" ? given.split(",").map((v) => v.trim()).filter((v) => v !== "") : as === "json" ? jsonFrom(option, given, io) : given;
+      }
+      return out;
+    },
+  };
+}
+
+const MODULE_MIRRORS: ReadonlyMap<string, Mirror> = new Map(MODULE_TOOLS.map((t) => [t.cli.command, moduleMirror(t)]));
 
 function pointerAndOffset(p: Parsed): Args {
   const offset = number(p, "--offset");
@@ -410,7 +467,7 @@ export async function run(argv: readonly string[], io: CliIO): Promise<RunResult
       onlyOptions("logout", p, ["--url"], "logout [--url <base>]", false);
       return { code: await logout(p, io) };
     }
-    const mirror = hasOwn(MIRRORS, command) ? MIRRORS[command] : undefined;
+    const mirror = hasOwn(MIRRORS, command) ? MIRRORS[command] : MODULE_MIRRORS.get(command);
     if (mirror === undefined || findTool(mirror.tool) === undefined) {
       io.err(`There is no command ${command}.\n\n${USAGE}`);
       return { code: 2 };
