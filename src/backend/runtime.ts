@@ -681,8 +681,11 @@ export class Runtime implements TurnHooks {
       this.ledger.inputsChanged(userId);
     };
     this.host.on("PRESET_CHANGED", (_e, userId) => presetWritten(userId));
+    // Only a write that names a preset key can switch the preset. Lumiverse's pages save every setting
+    // in batches (a drawer, a dock, a one-shot guide), and one landing while the engine runs must not
+    // throw away the turn it prepared; a write that names no key still counts.
     this.host.on("SETTINGS_UPDATED", (e, userId) => {
-      if (e.key === null || /preset/i.test(e.key)) presetWritten(userId);
+      if (e.keys === null || e.keys.some((key) => /preset/i.test(key))) presetWritten(userId);
     });
     // The host keeps a deleted chat's chat-scoped regex scripts, so the engine removes its own (DESIGN §6.7).
     this.host.on("CHAT_DELETED", (e, userId) => {
@@ -2156,12 +2159,14 @@ export class Runtime implements TurnHooks {
     const last = (await this.host.chats.messages(input.chatId, input.userId)).at(-1);
     if (!last) return;
     // "interpret call failed: …" reads as "Reading your action: …"; a mind's record already says whose,
-    // and a refused earlier message's reply says why and what to do instead: no Retry can start it.
+    // and a refused earlier message's reply says why and what to do instead: no Retry can start it. A
+    // finished run whose reply never started (`stale`) says what changed; its Retry runs the engine again.
     const why = (input.reason.startsWith(`${input.step} `) ? input.reason.slice(input.step.length + 1) : input.reason).replace(/(?:^|\b)(?:the )?call failed: /g, "");
-    const said = input.step === "mind" || input.step === "target" ? why : `${(STEP_LABEL[input.step] ?? input.step).replace(/…$/, "")}: ${why}`;
+    const said = input.step === "mind" || input.step === "target" || input.step === "stale" ? why : `${(STEP_LABEL[input.step] ?? input.step).replace(/…$/, "")}: ${why}`;
     const detail = said.charAt(0).toUpperCase() + said.slice(1);
     const retry = input.step === "target" ? [] : [{ id: "regenerate", label: "Retry", style: "primary" as const }];
-    await this.chips.add(input.chatId, input.userId, [{ id: `engine_failed:${input.turn}`, kind: "engine_failed", messageId: last.id, label: "The engine didn't finish, so nothing was generated", detail, actions: [...retry, { id: "diagnostics", label: "Diagnostics" }], expires: "next_send", payload: {} }]);
+    const label = input.step === "stale" ? "The reply didn't start, so nothing was generated" : "The engine didn't finish, so nothing was generated";
+    await this.chips.add(input.chatId, input.userId, [{ id: `engine_failed:${input.turn}`, kind: "engine_failed", messageId: last.id, label, detail, actions: [...retry, { id: "diagnostics", label: "Diagnostics" }], expires: "next_send", payload: {} }]);
     this.push.changed(input.chatId, input.userId);
   }
 

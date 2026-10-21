@@ -674,8 +674,19 @@ export class LedgerService {
     const p = gate?.prepared;
     if (!gate || !p || p.generationId !== null || this.unchanged(chatId, gate, p)) return;
     gate.prepared = null;
-    this.diag?.end({ chatId, userId: gate.userId, turn: p.id }, { status: "skipped", reason: "the chat, its settings or its preset changed before its reply started; the engine runs again when you generate" });
+    this.notStarted(chatId, gate.userId, p, "the chat, its settings or its preset changed after the engine ran and before the reply started");
     void this.serial(chatId, () => this.unfill(chatId, gate.userId, p));
+  }
+
+  /**
+   * A turn the engine prepared whose reply will never start (DESIGN §5.1): a finished run that
+   * generates nothing is never silent. Its turn ends failed with why, and the chat's last message
+   * gets the flag with a Retry, which runs the engine again and then the reply.
+   */
+  private notStarted(chatId: ChatId, userId: UserId, p: Prepared, why: string): void {
+    const at = { chatId, userId, turn: p.id };
+    this.diag?.end(at, { status: "failed", reason: `${why}, so nothing was generated` });
+    void this.hooks?.failed({ chatId, userId, turn: p.id, step: "stale", reason: why }).catch((error: unknown) => this.diag?.error(at, "restart", error, "the chat wasn't told its reply didn't start"));
   }
 
   /** The user's settings or preset changed (`TurnHooks.inputs`): each of their chats' waiting turns is checked. */
@@ -801,7 +812,7 @@ export class LedgerService {
     const p = gate.prepared;
     if (p && p.generationId === null) {
       gate.prepared = null;
-      this.diag?.end({ chatId, userId: gate.userId, turn: p.id }, { status: "skipped", reason: "Impersonate ran before the reply; the engine runs again for the next reply" });
+      this.notStarted(chatId, gate.userId, p, "Impersonate ran before the reply the engine prepared");
       await this.unfill(chatId, gate.userId, p);
     }
     const lease = this.leases.get(gate.worldId);
@@ -863,7 +874,7 @@ export class LedgerService {
       }
       if (p.generationId === null) {
         holder.prepared = null;
-        this.diag?.end({ chatId: lease.chatId, userId: holder.userId, turn: p.id }, { status: "skipped", reason: "another chat of this world ran a turn first; the engine runs again here when you generate" });
+        this.notStarted(lease.chatId, holder.userId, p, "another chat of this world ran a turn before this chat's reply started");
         this.letGo(worldId, lease.chatId);
         break;
       }
