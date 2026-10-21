@@ -61,8 +61,6 @@ export interface StateDelta extends Envelope<"lre.state.delta"> {
 /** The frontend opened (or switched to) a chat; the backend replies with a snapshot. */
 export interface HelloRequest extends Request<"lre.hello"> {
   chatId: ChatId | null;
-  /** The active Loom preset as the frontend's state has it (`loom.activePresetId`); absent when it can't say. */
-  presetId?: string | null;
   /**
    * An outside client (the `lumirpengine` CLI or MCP server, DESIGN §23) names itself: its commits
    * are labelled `agent`, and the log says who connected. An MCP server checks in with what it runs
@@ -143,8 +141,9 @@ export type FixRequest = Request<"lre.fix"> & { chatId: ChatId } & ({ entity: En
  *    tags, both whole; the chat holds them from then on over the world's definition.
  *  - `spawn` adds an entity; `despawn` takes one out of the world (`gone`, its relations unlinked)
  *    and `restore` brings it back.
- *  - `mind_pin`, `mind_refresh`, `mind_memory`: a character's mind (DESIGN §24.9): pin their fidelity,
- *    ask for a fresh mind next turn, edit or delete a note, commitment or plan (`MindEditOp`).
+ *  - `mind_pin`, `mind_refresh`, `mind_memory`, `mind_intent`: a character's mind (DESIGN §24.9): pin
+ *    their fidelity, ask for a fresh mind next turn, edit or delete a note, commitment or plan, and
+ *    set what they mean to do now and how they go about it (`MindEditOp`).
  *  - `effect` runs a pack effect registered for GM edits (`EffectDef.gm`) with literal arguments:
  *    what no entity field holds, such as an asset's price.
  */
@@ -569,10 +568,10 @@ export interface StudioOfferView {
 }
 
 /**
- * Settings → Preset (DESIGN §6.8): `get` reads the active preset's card; `add` adds the RPEngine
- * blocks it lacks, then reads it; `active` tells the backend the active Loom preset changed.
+ * Settings → Preset (DESIGN §6.8): `get` reads the card of the preset Lumiverse generates with; `add`
+ * adds the RPEngine blocks it lacks, then reads it.
  */
-export type PresetRequest = Request<"lre.preset"> & ({ op: "get" | "add" } | { op: "active"; presetId: string | null });
+export type PresetRequest = Request<"lre.preset"> & { op: "get" | "add" };
 
 /**
  * Diagnostics (DESIGN §6.9), GM-level like `lre.gm`: answered on request, never pushed. `get` reads

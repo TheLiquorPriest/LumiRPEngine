@@ -7,11 +7,11 @@
 // text: it resolves no host macro in them (their braces are neutralized), skips their `//` note lines
 // and bounds their length. Each preset revision is read once.
 //
-// The preset is the one the host assembles with, as far as the engine can tell: the active Loom preset,
-// which only the frontend can read (`loom.activePresetId`, sent with each hello and when it changes),
-// else the preset the generation's connection links, else the one the chat's last reply was assembled
-// with. Presets and block states the host binds to a chat, persona, character or connection aren't
-// visible to the engine.
+// The preset is the one the host generates the chat with, by its own resolution (`presets.getActive`,
+// as prompt assembly makes it: the selected Loom preset, else the chat's connection's, then the
+// profile bindings), with the block states those bindings set for the chat, its character, persona
+// or connection. When the host can't say, the engine can't tell where the sections go: the engine
+// run stops, and the chat says why.
 
 import type { ChatId, UserId } from "../shared/ids";
 import { neutralizeMacros } from "../shared/macros";
@@ -42,8 +42,10 @@ export type Guidance = Readonly<Partial<Record<GuidanceTarget, string>>>;
 export type GuidanceState = "missing" | "empty" | "read" | "enabled";
 
 export interface PresetConfig {
-  /** The preset world chats assemble with and the revision read; null when the engine can't tell. */
+  /** The preset the chat generates with and the revision read; null when it generates with none. */
   preset: { id: string; name: string; revision: number } | null;
+  /** What the placement is decided from: the preset, its revision and the block states its bindings set. */
+  placed: string;
   /** The `lre_` outlets its enabled blocks hold, lowercase, as the host matches them. */
   outlets: ReadonlySet<string>;
   guidance: Guidance;
@@ -52,7 +54,7 @@ export interface PresetConfig {
 
 const MISSING = Object.fromEntries(GUIDANCE_TARGETS.map((t) => [t, "missing"])) as Record<GuidanceTarget, GuidanceState>;
 
-export const NO_PRESET: PresetConfig = { preset: null, outlets: new Set(), guidance: {}, blocks: MISSING };
+export const NO_PRESET: PresetConfig = { preset: null, placed: "", outlets: new Set(), guidance: {}, blocks: MISSING };
 
 /** The outlet a section's twin fills: `lre_<slot>`, lowercase as the host matches it. */
 export function outletOf(slot: string): string {
@@ -81,7 +83,7 @@ export function guidanceText(content: string): string {
  * type and every character, and under a radio category only its first switched-on block, the one the
  * host keeps. A section routed to an outlet some prompts leave out would go missing from them.
  */
-export function readPreset(blocks: readonly HostPresetBlock[]): Omit<PresetConfig, "preset"> {
+export function readPreset(blocks: readonly HostPresetBlock[]): Omit<PresetConfig, "preset" | "placed"> {
   const outlets = new Set<string>();
   const guidance: Partial<Record<GuidanceTarget, string>> = {};
   const states = { ...MISSING };
@@ -144,61 +146,40 @@ function starterText(target: GuidanceTarget): string {
 
 /** The active preset's say, read once per preset revision. */
 export class PresetBinding {
-  /** What each revision says, by `user \0 preset \0 revision`. */
-  private readonly said = new Map<string, Omit<PresetConfig, "preset">>();
+  /** What each revision says with its block states, by `user \0 preset \0 revision \0 states`. */
+  private readonly said = new Map<string, Omit<PresetConfig, "preset" | "placed">>();
   /** Each user's latest read, for a read of a reply that had no pre phase. */
   private readonly latest = new Map<UserId, PresetConfig>();
-  /** Each user's active Loom preset, as their frontend last reported it (null: none is active). */
-  private readonly loom = new Map<UserId, string | null>();
 
   constructor(private readonly host: HostPort) {}
 
-  /** The frontend's report of the user's active Loom preset (`loom.activePresetId`); true when it changed. */
-  useLoom(userId: UserId, presetId: string | null): boolean {
-    const changed = this.loom.get(userId) !== presetId;
-    this.loom.delete(userId);
-    this.loom.set(userId, presetId);
-    if (this.loom.size > 1024) this.loom.delete(this.loom.keys().next().value ?? "");
-    return changed;
-  }
-
-  /** The user's active Loom preset as their frontend last reported it; undefined before any report. */
-  loomOf(userId: UserId): string | null | undefined {
-    return this.loom.get(userId);
-  }
-
-  /** The preset prompts assemble with, in the host's order: the active Loom preset, else the one the generation's connection links, else the one the chat's last reply used. */
-  private async resolve(chatId: ChatId | null, userId: UserId, connectionId: string | null): Promise<{ id: string; name: string; revision: number } | null> {
-    const candidates = [async () => this.loom.get(userId) ?? null, async () => (connectionId ? this.host.presets.ofConnection(connectionId, userId) : null), async () => (chatId ? this.host.presets.lastUsed(chatId, userId) : null)];
-    for (const candidate of candidates) {
-      const id = await candidate();
-      // One that no longer exists (deleted since) is skipped for the next.
-      const preset = id ? await this.host.presets.get(id, userId) : null;
-      if (preset) return preset;
-    }
-    return null;
-  }
-
-  /** What the preset prompts assemble with says now; nothing when the engine can't tell (logged). `connectionId` is the generation's, when it has one. */
-  async current(chatId: ChatId | null, userId: UserId, connectionId: string | null = null): Promise<PresetConfig> {
-    try {
-      const preset = await this.resolve(chatId, userId, connectionId);
-      if (!preset) return NO_PRESET;
-      const key = `${userId}\u0000${preset.id}\u0000${preset.revision}`;
+  /**
+   * What the preset the chat generates with says now, its bindings' block states applied (none when it
+   * generates with none). `placed` is what a turn's sections depend on: the preset and what its blocks
+   * route and say (its outlets, its guidance and narrator rules), so a save that changes none of those
+   * leaves it as it was. Throws when the host can't say: then the engine can't tell where the sections
+   * go, nor what guidance applies.
+   */
+  async current(chatId: ChatId | null, userId: UserId): Promise<PresetConfig> {
+    const active = await this.host.presets.active(chatId, userId);
+    let config = NO_PRESET;
+    if (active.presetId !== null) {
+      const preset = await this.host.presets.get(active.presetId, userId);
+      if (!preset) throw new Error(`the preset Lumiverse names for this chat (${active.presetId}) is gone`);
+      const states = Object.entries(active.blockStates).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+      const key = [userId, preset.id, preset.revision, JSON.stringify(states)].join("\u0000");
       let said = this.said.get(key);
       if (!said) {
-        said = readPreset(await this.host.presets.blocks(preset.id, userId));
+        const blocks = await this.host.presets.blocks(preset.id, userId);
+        said = readPreset(blocks.map((b) => (Object.hasOwn(active.blockStates, b.id) ? { ...b, enabled: active.blockStates[b.id] === true } : b)));
         this.said.set(key, said);
         if (this.said.size > 64) this.said.delete(this.said.keys().next().value ?? "");
       }
-      const config = { preset, ...said };
-      this.latest.set(userId, config);
-      if (this.latest.size > 256) this.latest.delete(this.latest.keys().next().value ?? "");
-      return config;
-    } catch (error) {
-      this.host.log("warn", `[LumiRPEngine] the active preset couldn't be read (${error instanceof Error ? error.message : String(error)}); the world places every section and no helper gets the preset's guidance`, userId);
-      return NO_PRESET;
+      config = { preset, placed: [preset.id, JSON.stringify([...said.outlets].sort()), JSON.stringify(said.guidance), JSON.stringify(said.blocks)].join("\u0000"), ...said };
     }
+    this.latest.set(userId, config);
+    if (this.latest.size > 256) this.latest.delete(this.latest.keys().next().value ?? "");
+    return config;
   }
 
   /** What the user's latest read found (nothing before one), without asking the host. */
@@ -212,7 +193,7 @@ export class PresetBinding {
    * at the end. Null when there is no active preset.
    */
   async addBlocks(chatId: ChatId | null, userId: UserId): Promise<PresetConfig | null> {
-    const preset = await this.resolve(chatId, userId, null);
+    const preset = (await this.current(chatId, userId)).preset;
     if (!preset) return null;
     const blocks = await this.host.presets.blocks(preset.id, userId);
     const missing = GUIDANCE_TARGETS.filter((t) => readPreset(blocks).blocks[t] === "missing");

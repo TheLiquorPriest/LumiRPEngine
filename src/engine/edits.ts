@@ -391,7 +391,8 @@ function applyOp(reg: Registry, w: Working, op: EditOp, opts: EditOptions, rng: 
       return restoreOp(reg, w, op.entity, rng);
     case "mind_pin":
     case "mind_refresh":
-    case "mind_memory": {
+    case "mind_memory":
+    case "mind_intent": {
       // A character's mind is the minds pack's (DESIGN §24.9): it words the control as its events.
       const edit = optionalService(w.ctx, "minds.edit");
       if (!edit) return reject("no_minds", "this world has no character minds");
@@ -480,6 +481,10 @@ export function parseEditOps(raw: unknown): EditOp[] | null {
         case "mind_memory":
           if (!str(o.entity) || (o.part !== "note" && o.part !== "commitment" && o.part !== "plan") || !(o.id === null || str(o.id)) || !(o.value === null || isRecord(o.value))) return null;
           return { op: "mind_memory", entity: o.entity, part: o.part, id: o.id, value: o.value as JsonObject | null };
+        case "mind_intent":
+          // Each part is optional (absent keeps it), but one of them must be there.
+          if (!str(o.entity) || (o.text !== undefined && !str(o.text)) || (o.approach !== undefined && o.approach !== null && o.approach !== "reactive" && o.approach !== "proactive") || (o.text === undefined && o.approach === undefined)) return null;
+          return { op: "mind_intent", entity: o.entity, ...(str(o.text) ? { text: o.text } : {}), ...(o.approach !== undefined ? { approach: o.approach } : {}) };
         case "effect":
           return str(o.effect) && isRecord(o.args) ? { op: "effect", effect: o.effect, args: o.args as JsonObject } : null;
         default:

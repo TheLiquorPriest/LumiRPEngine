@@ -10,7 +10,7 @@ import { heldBy } from "../shared/finance";
 import { INTERRUPT_CLASSES } from "../shared/ids";
 import type { LedgerEvent, TimelapseEvent, TimelapseTarget } from "../shared/ledger";
 import type { WorldDoc } from "../shared/world";
-import { calendarOf, clockOfStamp, dateAt, formatClock, MINUTES_PER_DAY, nextTimeOfDay, placeOffset, shortestSlot, slotIndexAt, slotStart } from "./calendar";
+import { calendarOf, clockAt, clockOfStamp, dateAt, formatClock, MINUTES_PER_DAY, nextTimeOfDay, placeOffset, shortestSlot, slotIndexAt, slotStart, type Calendar } from "./calendar";
 import { ENGINE_EVENTS, readEngineSlice, signalOf, type Signal } from "./engine-pack";
 import type { ReadContext, Rejection } from "./registry";
 import type { Registry } from "./registry-impl";
@@ -236,6 +236,124 @@ export function resolveTarget(reg: Registry, world: WorldDoc, state: Readonly<Wo
   if (!Number.isFinite(to) || to <= now) return { code: "past", reason: "that time has passed" };
   if (to - now > TIME_LIMITS.timelapseMinutes) return { code: "too_long", reason: `a timelapse reaches at most ${TIME_LIMITS.timelapseMinutes / MINUTES_PER_DAY} days ahead` };
   return { to, label, ...(stopWhen ? { stopWhen } : {}) };
+}
+
+// ---------------------------------------------------------------- typed spans
+
+/** A "next" day part closer than this is the one after it: "sleep until the next morning" at 07:14 means tomorrow's. */
+const NEXT_DAY_PART_GAP = 180;
+
+/**
+ * "The next <day part>" (by its index in the calendar's day parts) as a target: its coming start,
+ * or the one after that when the coming one is under three hours away, so "sleep until the next
+ * morning" at 07:14 sleeps the night (DESIGN §9.2).
+ */
+export function nextDayPart(cal: Calendar, now: number, index: number): TimelapseTarget {
+  const start = cal.partStarts[index] ?? 0;
+  const at = nextTimeOfDay(cal, now, start);
+  return { type: "at", at: at - now < NEXT_DAY_PART_GAP ? nextTimeOfDay(cal, at, start) : at };
+}
+
+/** Counts a typed span gives before its unit ("two hours", "a couple of hours"); "next" is one ("the next hour"). */
+const SPAN_COUNTS: Readonly<Record<string, number>> = { a: 1, an: 1, one: 1, next: 1, "a couple of": 2, "couple of": 2, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10, eleven: 11, twelve: 12, fifteen: 15, twenty: 20, thirty: 30, forty: 40, "forty five": 45, ninety: 90 };
+/** Minutes in each unit a typed span names, by its singular. */
+const SPAN_UNITS: Readonly<Record<string, number>> = { minute: 1, min: 1, hour: 60, hr: 60, day: MINUTES_PER_DAY, week: 7 * MINUTES_PER_DAY };
+const longestFirst = (words: readonly string[]): string => [...words].sort((a, b) => b.length - a.length).join("|");
+/** A name as typed text is read: lower case, anything but letters and digits a space. */
+const plain = (name: string): string => name.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+/** One length of time: a count, a unit, and "and a half" before or after the unit ("two and a half hours", "an hour and a half"). */
+const SPAN_TERM = new RegExp(` (${longestFirst(Object.keys(SPAN_COUNTS))}|\\d+(?:\\.\\d+)?)( and a half)? (${longestFirst(Object.keys(SPAN_UNITS))})s?( and a half)?(?= )`, "g");
+/** Words just before a length that make it no span ahead: one gone by ("the last two hours"), a rate ("every hour", "$20 an hour"). */
+const SPAN_NOT_BEFORE = / (?:last|past|previous|every|per|each|\d+(?:\.\d+)?)$/;
+/** Words just after a length that make it no span ahead: one gone by ("two hours ago", "an hour already"), an age ("a four day old"). */
+const SPAN_NOT_AFTER = /^ (?:ago|earlier|before|already|back|previously|old)(?= )/;
+/** How far either side of a length those words are looked for: a word or two, whatever the message's length. */
+const SPAN_CONTEXT = 24;
+/** A day and time in the words ("Friday at 6 PM", "at 8", "18:00", "1:45p", "noon", "the 18th"): the read's stated time, never half-read here. */
+const STATED_TIME = / \d{1,2}:\d{2}| (?:\d{1,2} ?(?:am|pm)|o clock|at \d+|noon|midnight|\d{1,2}(?:st|nd|rd|th)|\d{4} \d{1,2} \d{1,2})(?= )/;
+/** How a part of the day is led: up to it, later the same day, the coming one counted as "next", or tomorrow's. */
+const PART_LEADS: Readonly<Record<string, "until" | "today" | "next" | "tomorrow">> = { until: "until", till: "until", til: "until", to: "until", by: "until", "later that": "today", "later this": "today", "later in the": "today", that: "today", this: "today", next: "next", following: "next", tomorrow: "tomorrow" };
+/** Up to the player character's next shift or commitment ("until my next shift", "till work", "until my appointment"). */
+const COMMITMENT_SPAN = / (?:until|till|til)(?: my| the| our)?(?: next)? (shift|work|commitment|appointment)s?(?= )/g;
+
+/**
+ * The timelapse target a span typed in the player's own words names (DESIGN §9.2 typed time),
+ * read the same way every time:
+ * - a length: "over the next hour", "for the next two hours", "half an hour", "an hour and a half",
+ *   "three hours later"; one gone by ("two hours ago") or a rate ("every hour") is none;
+ * - a part of the day: "skip ahead to evening", "until the afternoon" (its coming start, as the
+ *   Timelapse sheet's Until runs it); "later that night", "this evening" and "tonight" only while
+ *   that part is still ahead today; "the next morning" by `nextDayPart`; "tomorrow evening" that
+ *   part tomorrow (before the day's first part it is still last night, so tomorrow is today);
+ * - the next shift or commitment: "until my next shift", "till work", "until my appointment".
+ *
+ * It is read only once `interpret` has chosen to let time pass, so it never decides whether typed
+ * text is a time skip. Words that also name a day and time ("Friday at 6 PM") are left to the
+ * read's stated time; words that name no span ("a while", "a few hours"), or two different ones,
+ * read as none.
+ */
+export function typedSpan(cal: Calendar, now: number, words: string): TimelapseTarget | null {
+  // A sentence's or a clause's end stays as a break ("|"), so lengths either side of it never add up;
+  // a decimal point stays as it is.
+  const t = ` ${words
+    .toLowerCase()
+    .replace(/([ap])\.\s?m\.?/g, "$1m")
+    .replace(/(?<!\d)[.,;!?]|[.,;!?](?!\d)/g, " | ")
+    .replace(/[^a-z0-9.:|]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()} `
+    .replace(/ (?:a |an )?half (?:an? )?hour(?= )/g, " 30 minutes")
+    .replace(/ (?:a |an )?quarter (?:of )?(?:an? )?hour(?= )/g, " 15 minutes");
+  const weekdays = cal.system.weekdayNames.map(plain).filter((n) => n.length > 3);
+  const months = cal.system.monthNames.map(plain).filter((n) => n !== "");
+  if (STATED_TIME.test(t) || weekdays.some((d) => t.includes(` ${d} `)) || months.some((m) => new RegExp(` (?:${m} \\d|\\d+ (?:of )?${m} )`).test(t))) return null;
+  const found: TimelapseTarget[] = [];
+  const lengths: { start: number; end: number; minutes: number }[] = [];
+  for (const m of t.matchAll(SPAN_TERM)) {
+    const count = m[1] ?? "";
+    const unit = SPAN_UNITS[m[3] ?? ""] ?? 0;
+    // "The next day" names a day, not a length of one.
+    if ((count === "next" && unit >= MINUTES_PER_DAY) || SPAN_NOT_BEFORE.test(t.slice(Math.max(0, m.index - SPAN_CONTEXT), m.index))) continue;
+    lengths.push({ start: m.index, end: m.index + m[0].length, minutes: ((SPAN_COUNTS[count] ?? Number(count)) + (m[2] || m[4] ? 0.5 : 0)) * unit });
+  }
+  // Lengths side by side ("an hour and twenty minutes") add up as one.
+  const runs: { end: number; minutes: number }[] = [];
+  for (const length of lengths) {
+    const last = runs.at(-1);
+    if (last && /^(?: and)?$/.test(t.slice(last.end, length.start))) {
+      last.end = length.end;
+      last.minutes += length.minutes;
+    } else runs.push({ end: length.end, minutes: length.minutes });
+  }
+  for (const run of runs) if (run.minutes > 0 && !SPAN_NOT_AFTER.test(t.slice(run.end, run.end + SPAN_CONTEXT))) found.push({ type: "duration", minutes: Math.round(run.minutes) });
+  // Parts of the day, by id or label, longest first so "early morning" isn't read as "morning".
+  const named = cal.dayParts.flatMap((p, index) => [p.id, p.label].map((n) => ({ name: plain(n), index }))).filter((n) => n.name !== "");
+  const day = dateAt(cal, now);
+  /** A part while its start is still ahead today, as the Timelapse sheet's Until runs it; null once it has begun. */
+  const aheadToday = (index: number): TimelapseTarget | null => (clockAt(cal, day.dayIndex, cal.partStarts[index] ?? 0) > now ? { type: "day_part", dayPart: cal.dayParts[index]?.id ?? "" } : null);
+  for (const m of t.matchAll(new RegExp(` (${longestFirst(Object.keys(PART_LEADS))})(?: the)? (${longestFirst(named.map((n) => n.name))})(?= )`, "g"))) {
+    const index = named.find((n) => n.name === m[2])?.index ?? -1;
+    const lead = PART_LEADS[m[1] ?? ""];
+    if (index < 0) continue;
+    if (lead === "until") found.push({ type: "day_part", dayPart: cal.dayParts[index]?.id ?? "" });
+    else if (lead === "next") found.push(nextDayPart(cal, now, index));
+    else if (lead === "tomorrow") {
+      // Before the day's first part it is still last night: tomorrow is the day that has begun.
+      const base = day.minuteOfDay < (cal.partStarts[0] ?? 0) ? day.dayIndex - 1 : day.dayIndex;
+      found.push({ type: "at", at: clockAt(cal, base + 1, cal.partStarts[index] ?? 0) });
+    } else {
+      const ahead = aheadToday(index);
+      if (ahead) found.push(ahead);
+    }
+  }
+  // Tonight: the evening while it is still ahead, else the night.
+  if (/ tonight(?= )/.test(t)) {
+    const ahead = cal.dayParts.map((p, index) => (p.id === "evening" || p.id === "night" ? aheadToday(index) : null)).find((target) => target !== null);
+    if (ahead) found.push(ahead);
+  }
+  for (const m of t.matchAll(COMMITMENT_SPAN)) found.push({ type: m[1] === "shift" || m[1] === "work" ? "shift" : "commitment" });
+  const distinct = [...new Map(found.map((f) => [JSON.stringify(f), f])).values()];
+  return distinct.length === 1 ? (distinct[0] ?? null) : null;
 }
 
 // ---------------------------------------------------------------- timelapse

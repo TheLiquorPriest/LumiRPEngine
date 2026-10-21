@@ -1,14 +1,14 @@
 // Every request LumiRPEngine's protocol accepts, and every op of one that has ops, mapped to the
 // tools that send it, or to why no tool does (DESIGN §23). The type is complete by construction:
-// a new request type or op without a row fails the typecheck, so no surface ships without tools
-// or a stated reason, and the tests check that every tool named here exists.
+// a new request type or op (a GM edit's included) without a row fails the typecheck, so no surface
+// ships without tools or a stated reason, and the tests check that every tool named here exists.
 
 import type { FrontendToBackend } from "../shared/protocol";
 
 type RequestType = FrontendToBackend["type"];
 
-/** The ops one request of the union takes, or never when it has no `op` (an optional op counts, without its absence). */
-type OpOf<R> = R extends unknown ? ("op" extends keyof R ? Exclude<R[keyof R & "op"], undefined> : never) : never;
+/** The ops one request of the union takes: its `op` (an optional op counts, without its absence), else those of its list of `ops` (a GM edit's); never when it has neither. */
+type OpOf<R> = R extends unknown ? ("op" extends keyof R ? Exclude<R[keyof R & "op"], undefined> : "ops" extends keyof R ? (R[keyof R & "ops"] extends readonly { op: infer O }[] ? O : never) : never) : never;
 type OpsOf<T extends RequestType> = OpOf<Extract<FrontendToBackend, { type: T }>>;
 
 /** The tools that send a request, or why none does. */
@@ -28,7 +28,27 @@ export const COVERAGE: Coverage = {
   "lre.chip": { tools: ["lre_chip"] },
   "lre.view.open": { tools: ["lre_view_open"] },
   "lre.fix": { tools: ["lre_fix"] },
-  "lre.edit": { tools: ["lre_gm_edit", "lre_mind_edit"] },
+  "lre.edit": {
+    set: { tools: ["lre_gm_edit"] },
+    add: { tools: ["lre_gm_edit"] },
+    link: { tools: ["lre_gm_edit"] },
+    unlink: { tools: ["lre_gm_edit"] },
+    move: { tools: ["lre_gm_edit"] },
+    put: { tools: ["lre_gm_edit"] },
+    adjust: { tools: ["lre_gm_edit"] },
+    stage: { tools: ["lre_gm_edit"] },
+    entity: { tools: ["lre_gm_edit"] },
+    classify: { tools: ["lre_gm_edit"] },
+    life: { tools: ["lre_gm_edit"] },
+    spawn: { tools: ["lre_gm_edit"] },
+    despawn: { tools: ["lre_gm_edit"] },
+    restore: { tools: ["lre_gm_edit"] },
+    mind_pin: { tools: ["lre_gm_edit", "lre_mind_edit"] },
+    mind_refresh: { tools: ["lre_gm_edit", "lre_mind_edit"] },
+    mind_memory: { tools: ["lre_gm_edit", "lre_mind_edit"] },
+    mind_intent: { tools: ["lre_gm_edit", "lre_mind_edit"] },
+    effect: { tools: ["lre_gm_edit"] },
+  },
   "lre.gm": { tools: ["lre_gm", "lre_minds"] },
   "lre.marker": { tools: ["lre_marker", "lre_upgrade"] },
   "lre.keep": { tools: ["lre_keep"] },
@@ -70,7 +90,6 @@ export const COVERAGE: Coverage = {
   "lre.preset": {
     get: { tools: ["lre_preset", "lre_preset_add_blocks"] },
     add: { tools: ["lre_preset_add_blocks"] },
-    active: { excluded: "The page reporting the Loom preset Lumiverse has active, which prompts assemble with: an outside client can't see Loom's state, and a guess would change what the user's prompts are built with." },
   },
   "lre.diag": { get: { tools: ["lre_diag"] }, clear: { tools: ["lre_diag_clear"] }, dismiss: { tools: ["lre_activity_dismiss"] } },
   "lre.agents": {

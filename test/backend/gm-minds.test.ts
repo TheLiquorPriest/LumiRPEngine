@@ -3,7 +3,7 @@
 // out of everything Play is pushed.
 
 import { describe, expect, test } from "bun:test";
-import { commitmentDraft, commitmentOp, deleteOp, noteDraft, noteOp, pinOp, planDraft, planOp, refreshOp, startPlanIn } from "../../src/packs/minds/ui/ops";
+import { commitmentDraft, commitmentOp, deleteOp, intentOp, noteDraft, noteOp, pinOp, planDraft, planOp, refreshOp, startPlanIn } from "../../src/packs/minds/ui/ops";
 import { editRequest, timelapseRequest } from "../../src/frontend/requests";
 import { toChain } from "../../src/backend/ledger-io";
 import { journalOf } from "../../src/packs/economy/core/journal";
@@ -26,6 +26,12 @@ async function character(rig: Rig, chatId: string, entity: string): Promise<Mind
 async function edit(rig: Rig, chatId: string, op: EditOp | null): Promise<void> {
   if (!op) throw new Error("the form refused it");
   rig.body(await rig.send(editRequest(chatId, [op]) as unknown as Record<string, unknown>));
+}
+
+async function undoLatest(rig: Rig, chatId: string): Promise<void> {
+  const undo = (await rig.rt.view(chatId, rig.host.userId)).chips.filter((c) => c.kind === "fix").at(-1);
+  if (!undo) throw new Error("no Undo chip");
+  rig.body(await rig.send({ type: "lre.chip", chatId, chip: undo.id, choice: "undo" }));
 }
 
 describe("GM view → Minds round trip", () => {
@@ -107,6 +113,45 @@ describe("GM view → Minds round trip", () => {
     expect(JSON.stringify(refused)).toContain("isn't a person");
     await edit(rig, chatId, commitmentOp("danny_okafor", null, { ...commitmentDraft(), kind: "debt", text: "Owes Priya a coffee", with: ["priya_nair"] }));
     expect((await character(rig, chatId, "danny_okafor")).commitments.map((c) => c.with)).toEqual([["priya_nair"]]);
+  });
+
+  test("an intent is set, changed and cleared from its page, each with its Undo; swipes keep it, and Play never sees it", async () => {
+    const rig = new Rig({ shipped: true });
+    const worldId = await rig.newWorld("Alder", "modern_slice_of_life");
+    const chatId = rig.host.createChat("Morning.");
+    rig.body(await rig.send({ type: "lre.world", op: "attach", worldId, chatId }));
+    await rig.turn(chatId, "I wait on the porch.", "The street wakes up around you.");
+    const AIM = "AIM-MARK: get Priya to sell him the boat before the auction";
+    const intent = async () => (await character(rig, chatId, "danny_okafor")).intent;
+    expect(await intent()).toBeNull();
+
+    await edit(rig, chatId, intentOp("danny_okafor", { text: AIM, approach: "proactive" }));
+    expect(await intent()).toEqual({ text: AIM, approach: "proactive" });
+    await edit(rig, chatId, intentOp("danny_okafor", { text: "Keep his head down at the shop", approach: "reactive" }));
+    expect(await intent()).toEqual({ text: "Keep his head down at the shop", approach: "reactive" });
+    await undoLatest(rig, chatId);
+    expect(await intent()).toEqual({ text: AIM, approach: "proactive" });
+    // Over its cap the form refuses it.
+    expect(intentOp("danny_okafor", { text: "x".repeat(601), approach: null })).toBeNull();
+
+    // A swipe keeps it, Re-narrate and Re-run alike, as it keeps a pin.
+    rig.rt.setSwipeChoice(chatId, "renarrate");
+    await rig.host.finish(await rig.host.start(chatId, { type: "swipe" }), "The street wakes slowly.");
+    expect(await intent()).toEqual({ text: AIM, approach: "proactive" });
+    rig.rt.setSwipeChoice(chatId, "rerun");
+    await rig.host.finish(await rig.host.start(chatId, { type: "swipe" }), "A third morning.");
+    expect(await intent()).toEqual({ text: AIM, approach: "proactive" });
+
+    // Nothing Play is pushed carries it.
+    for (const m of rig.host.sent) if (m.type === "lre.state.snapshot" || m.type === "lre.state.delta") expect(JSON.stringify(m)).not.toContain("AIM-MARK");
+    expect(JSON.stringify(rig.latestView(chatId))).not.toContain("AIM-MARK");
+
+    // Blank text and no approach clear it; Undo brings it back.
+    await edit(rig, chatId, intentOp("danny_okafor", { text: "  ", approach: null }));
+    expect(await intent()).toBeNull();
+    await undoLatest(rig, chatId);
+    expect(await intent()).toEqual({ text: AIM, approach: "proactive" });
+    expect(rig.rt.ledger.errors).toEqual([]);
   });
 
   test("a pay plan the GM makes with an amount, then edits, is paid at its time from the planner to the person it's with", async () => {

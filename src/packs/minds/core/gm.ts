@@ -31,6 +31,7 @@ function characterView(ctx: ReadContext, id: EntityId, c: MindsCharacter, fideli
     name: name(id),
     fidelity,
     refreshQueued: c.refresh,
+    intent: c.intent ? { ...c.intent } : null,
     mind,
     plans: plans.map((p) => ({ ...p, fromText: clock(p.when.from), toText: clock(p.when.to) })),
     notes: [...c.notes].reverse().map((n) => ({ ...n, now: Math.round(salienceNow(n, state.clock, memory) * 100) / 100, faded: faded(n, state.clock, memory), clock: clock(n.at) })),
