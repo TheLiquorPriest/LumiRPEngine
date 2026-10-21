@@ -192,7 +192,7 @@ export const BUILD_TOOLS: readonly ToolModule[] = [
       const live = ctx.live();
       const read = await live.draft(worldId);
       if (args.value === undefined) return { text: json({ worldId, version: read.version, settings: routineSettingsOf(read.draft) }) };
-      if (!isRecord(args.value)) throw new ToolError("value is an object: {awareness?, invitations?, sociability?, planBend?}.");
+      if (!isRecord(args.value)) throw new ToolError("value is an object: {awareness?, invitations?, sociability?, planBend?, roles?: {live?, near?, far?, background?}, narrator?, paletteFollowsRoutine?}.");
       const settings = routineSettingsOf({ routineSettings: args.value });
       const same = JSON.stringify(settings) === JSON.stringify(DEFAULT_ROUTINE_SETTINGS);
       const ops = same ? (read.draft.routineSettings === undefined ? [] : [{ op: "remove" as const, path: "/routineSettings" }]) : [{ op: "add" as const, path: "/routineSettings", value: { ...settings } }];

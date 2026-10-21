@@ -7,6 +7,7 @@ import { hashJson } from "../../../src/shared/hash";
 import type { EventRef, LedgerEvent, PostEntry, Rec } from "../../../src/shared/ledger";
 import type { Fidelity, MindPlan } from "../../../src/shared/minds";
 import type { RoutineBlock, RoutineDef, RoutineEditOp, RoutineSettings } from "../../../src/shared/routines";
+import { DEFAULT_ROUTINE_SETTINGS } from "../../../src/shared/routines";
 import type { WorldDoc } from "../../../src/shared/world";
 import { calendarOf, clockAt, parseHHMM } from "../../../src/engine/calendar";
 import { resolveEdit } from "../../../src/engine/edits";
@@ -72,7 +73,7 @@ export function fixed(id: string, at: string, minutes: number, place: RoutineBlo
 /** The world's routines and settings, in place. */
 export function withRoutines(world: WorldDoc, routines: readonly RoutineDef[], settings?: Partial<RoutineSettings>): void {
   world.routines = Object.fromEntries(routines.map((r) => [r.id, r]));
-  if (settings) world.routineSettings = { awareness: "balanced", invitations: "player", sociability: "usual", planBend: "standard", ...settings };
+  if (settings) world.routineSettings = { ...DEFAULT_ROUTINE_SETTINGS, ...settings };
 }
 
 /** Applies recorded events, as a turn would leave them; every one must apply. */

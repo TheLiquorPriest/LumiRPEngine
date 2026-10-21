@@ -25,6 +25,7 @@ const MARKS: Record<MindSource, string> = {
   memory: "NOTE-MARK",
   thoughts: "THOUGHT-MARK",
   recall: "FIRST-REPLY-MARK",
+  routine: "ROUTINE-MARK",
   life: "COMMIT-MARK",
 };
 

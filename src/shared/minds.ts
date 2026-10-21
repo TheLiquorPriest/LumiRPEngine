@@ -305,12 +305,14 @@ export type MindsMemoryOverrides = { [K in keyof MindsMemoryConfig]?: Partial<Mi
  * The sources a mind's context is read from (DESIGN §24.5, Settings → Minds → What a mind reads), in
  * the order Settings lists them: the story as it stands (the lore pinned to them and to where they
  * are, the lore the turn activates, the latest reply and the player's message), then their own
- * summary, notes and what they saw, last thoughts, recall of the turns they were there for, and their
- * life (money, the day, commitments and plans). Who they are, where they are and what they mean to do
- * are in every context, outside these.
+ * summary, notes and what they saw, last thoughts, recall of the turns they were there for, their
+ * usual routine (their routine blocks and schedules while their routine is informative or enforced,
+ * never a private block, never social life the planner made up: `RoutineRole`), and their life (money,
+ * the day, commitments and plans). Who they are, where they are and what they mean to do are in every
+ * context, outside these.
  */
-export type MindSource = "pinned" | "activated" | "reply" | "message" | "summary" | "memory" | "thoughts" | "recall" | "life";
-export const MIND_SOURCES: readonly MindSource[] = ["pinned", "activated", "reply", "message", "summary", "memory", "thoughts", "recall", "life"];
+export type MindSource = "pinned" | "activated" | "reply" | "message" | "summary" | "memory" | "thoughts" | "recall" | "routine" | "life";
+export const MIND_SOURCES: readonly MindSource[] = ["pinned", "activated", "reply", "message", "summary", "memory", "thoughts", "recall", "routine", "life"];
 
 /** One source as the user sets it: whether a mind reads it, and the most it may take, in tokens ("none": no limit). */
 export interface MindRead {
@@ -325,10 +327,11 @@ export interface MindRead {
 export type MindsReads = Record<Exclude<MindSource, "recall">, MindRead> & { recall: Pick<MindRead, "on"> };
 
 /**
- * What a mind reads unless the user says otherwise: the story as it stands, and nothing of its own
- * memory or life. Each of those can carry what no story set up: the day the Cast life planner lays
- * (meals, friends, outings), plans and commitments the memory step took from narration that
- * depicted another mind, and older replies and thoughts that acted on them (DESIGN §24.5).
+ * What a mind reads unless the user says otherwise: the story as it stands, their usual routine as
+ * context, and nothing of its own memory or life. Each of those can carry what no story set up: the
+ * day the Cast life planner lays (meals, friends, outings), plans and commitments the memory step took
+ * from narration that depicted another mind, and older replies and thoughts that acted on them
+ * (DESIGN §24.5). Their usual routine is the world's and the story's, never the planner's guesses.
  */
 export const DEFAULT_MIND_READS: Readonly<MindsReads> = Object.freeze({
   pinned: { on: true, tokens: "none" },
@@ -339,6 +342,7 @@ export const DEFAULT_MIND_READS: Readonly<MindsReads> = Object.freeze({
   memory: { on: false, tokens: "none" },
   thoughts: { on: false, tokens: "none" },
   recall: { on: false },
+  routine: { on: true, tokens: 400 },
   life: { on: false, tokens: "none" },
 });
 
@@ -424,6 +428,7 @@ function readsOf(raw: unknown, base: Readonly<MindsReads>): MindsReads {
     memory: readOf(r.memory, base.memory),
     thoughts: readOf(r.thoughts, base.thoughts),
     recall: { on: typeof recall.on === "boolean" ? recall.on : base.recall.on },
+    routine: readOf(r.routine, base.routine),
     life: readOf(r.life, base.life),
   };
 }
