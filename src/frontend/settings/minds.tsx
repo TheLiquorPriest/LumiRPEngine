@@ -58,8 +58,8 @@ const READ_NOTE: Record<MindSource, string> = {
 /** The story as it stands; the rest of the sources are their own memory and life. */
 const STORY_SOURCES: Readonly<Record<MindSource, boolean>> = { pinned: true, activated: true, reply: true, message: true, summary: false, memory: false, thoughts: false, recall: false, life: false };
 
-/** A count or period that may have no limit: a switch, and the number while there is one. */
-function LimitField(props: { label: string; noneLabel: string; value: Limit; min: number; max?: number; step?: number; fallback: Limit; disabled: boolean; onChange(next: Limit): void }) {
+/** A count, period or allowance that may have no limit: a switch, and the number while there is one. Settings → Steps uses it for Build's jobs too. */
+export function LimitField(props: { label: string; noneLabel: string; value: Limit; min: number; max?: number; step?: number; fallback: Limit; disabled: boolean; onChange(next: Limit): void }) {
   const fallback = props.fallback === "none" ? props.min : props.fallback;
   return (
     <div class="lre-minds-limit">

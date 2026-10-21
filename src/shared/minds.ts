@@ -385,7 +385,8 @@ export const MINDS_DEFAULTS: Readonly<MindsSettings> = Object.freeze(defaultMind
 /** The longest prompt a user or a world template may set for a minds step. */
 export const MIND_PROMPT_MAX = 20_000;
 
-function limitIn(v: unknown, lo: number, hi: number, fallback: Limit): Limit {
+/** A stored limit as read: "none", or a whole number from `lo` to `hi`; anything else is `fallback`. Job settings read theirs so too. */
+export function limitIn(v: unknown, lo: number, hi: number, fallback: Limit): Limit {
   if (v === "none") return "none";
   return typeof v === "number" && Number.isInteger(v) && v >= lo && v <= hi ? v : fallback;
 }

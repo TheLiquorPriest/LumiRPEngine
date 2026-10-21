@@ -1304,6 +1304,7 @@ export function settingsFixture(): UserSettings {
     hideJsonBlocks: true,
     minds: defaultMindsSettings(),
     timeouts: { ...defaultTimeouts(), requestMs: 600_000, laneHeartbeatMs: "none" },
+    jobs: { routineLoreTokens: 8000 },
   };
 }
 
