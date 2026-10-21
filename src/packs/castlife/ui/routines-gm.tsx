@@ -498,7 +498,8 @@ function StoryMade(props: { changes: StoryChange[]; now: number; busy: boolean; 
             // The story's block once in force; before then, the block it will replace, if any.
             const shown = block && !isOff(block.block) && !c.off ? block.block : null;
             const live = c.kind === "block" ? block?.owner.level === "chat" : c.schedule !== null;
-            const what = c.kind === "schedule" ? (c.schedule?.chat ? chatScheduleWords(c.schedule.chat, props.now) : c.off ? "Off for them" : "Their own version in this chat") : c.off ? "Switched off for them" : live && shown ? blockWhen(shown) : "In force from the day after the story made it";
+            // Where it came from is the line below; the in-force line names no source.
+            const what = c.kind === "schedule" ? (c.schedule?.chat ? chatScheduleWords(c.schedule.chat, props.now) : c.off ? "Off for them" : "Their own version in this chat") : c.off ? "Switched off for them" : live && shown ? blockWhen(shown) : "In force from the next day";
             return (
               <ListRow
                 key={`${c.kind}:${c.id}`}

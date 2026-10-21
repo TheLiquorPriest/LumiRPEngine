@@ -152,6 +152,56 @@ async function who(chat: Chat): Promise<string[]> {
   return (await changed(chat)).map((c) => c.entity);
 }
 
+describe("a place the change names", () => {
+  /** The log lines of the reply's read that dropped a routine change, as the GM's log has them. */
+  const refusals = (chat: Chat): string[] => chat.rig.host.logs.filter((l) => l.includes("dropped") && l.includes("routine"));
+  const LAPS: JsonObject = { type: "routine", entity: "marcus_delgado", change: "start", days: "tuesday", start: "evening", activity: "exercise" };
+
+  test("a place the world doesn't have records nothing, and its refusal is logged", async () => {
+    const chat = await alder();
+    await told(chat, [{ ...LAPS, label: "Tuesday evening laps", place: "community pool" }], "Swimming?", "Marcus says he's started laps at the community pool on Tuesday evenings.");
+    expect(await who(chat)).toEqual([]);
+    expect(refusals(chat).filter((l) => l.includes("there's no such place"))).toHaveLength(1);
+    expect((await chips(chat)).some((c) => c.label.includes("laps"))).toBe(false);
+  });
+
+  test("a secret place is refused as one the world doesn't have: the same log line, and nothing else tells them apart", async () => {
+    const chat = await alder();
+    await told(chat, [{ ...LAPS, label: "Tuesday evening laps", place: "12 Birch Lane" }], "Evenings?", "Marcus says he's at 12 Birch Lane on Tuesday evenings now.");
+    await told(chat, [{ ...LAPS, label: "Tuesday evening laps", place: "community pool" }], "Evenings?", "Marcus says he's at the community pool on Tuesday evenings now.");
+    expect(await who(chat)).toEqual([]);
+    const [secret, missing] = refusals(chat).map((l) => l.replace(/^.*\(/, "("));
+    expect(secret).toBeDefined();
+    expect(secret).toBe(missing);
+    expect(JSON.stringify(await chips(chat))).not.toContain("Birch");
+  });
+
+  test("a change naming no place stays placeless, whatever its words say", async () => {
+    const chat = await alder();
+    const habit = (entity: string, label: string): JsonObject => ({ type: "routine", entity, change: "start", label, days: "daily", start: "evening", activity: "leisure" });
+    await told(chat, [habit("priya_nair", "Reading in the evening"), habit("danny_okafor", "Coffee in the morning"), { ...LAPS, label: "Tuesday evening laps at the lake" }], "News?", "Priya reads in the evening, Danny has his coffee in the morning, and Marcus swims laps at the lake on Tuesday evenings now.");
+    expect(await who(chat)).toEqual(["danny_okafor", "marcus_delgado", "priya_nair"]);
+    const view = await day(chat, "priya_nair", 1);
+    expect(view.blocks.find((b) => "label" in b.block && b.block.label === "Reading in the evening")?.block).toMatchObject({ place: "here" });
+  });
+
+  test("the reply's read and the message's read are both asked for a place the words name, even one nothing lists, so the bound can refuse it", async () => {
+    const chat = await alder();
+    const asked: string[] = [];
+    chat.rig.host.quietReply = (req) => {
+      asked.push(req.messages.map((m) => m.content).join("\n"));
+      return "{}";
+    };
+    await chat.rig.turn(chat.chatId, "Marcus mentions he's started swimming at the community pool every Tuesday evening.", "Marcus nods.");
+    // Each prompt's routine shape says what `place` holds, and that an unlisted place keeps its own words.
+    const routineShape = (prompt: string): string => prompt.slice(prompt.indexOf("routine{"), prompt.indexOf(")", prompt.indexOf("routine{")));
+    const extract = asked.find((p) => p.includes(EXTRACT_MARK)) ?? "";
+    const interpret = asked.find((p) => p.includes("You map a player's typed input")) ?? "";
+    expect(routineShape(extract)).toMatch(/place: [^;]*nothing lists/);
+    expect(interpret).toMatch(/"place"\?: [^;\n]*nothing lists/);
+  });
+});
+
 describe("what changes no one's routine", () => {
   test("a habit only mentioned in passing: already their schedule or their routine", async () => {
     const swim = { id: "priya_swim", owner: "priya_nair", blocks: [{ id: "swim", label: "Swim at the lake", activity: "exercise", kind: "fixed", at: "07:00", minutes: 60, days: { weekdays: [2] }, place: { place: "lakefront_park" } }] };

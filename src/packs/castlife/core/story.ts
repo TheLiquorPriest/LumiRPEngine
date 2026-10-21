@@ -237,7 +237,9 @@ function startBlock(ctx: ReadContext, who: EntityId, p: JsonObject): RoutineBloc
   const stated = typeof p.minutes === "number" && Number.isInteger(p.minutes) ? p.minutes : null;
   const minutes = at !== null && endHm ? (parseHHMM(`${(endHm[1] ?? "").padStart(2, "0")}:${endHm[2] ?? "00"}`) - parseHHMM(at) + MINUTES_PER_DAY) % MINUTES_PER_DAY || MINUTES_PER_DAY : (stated ?? MINUTES[activity] ?? basic?.minutes ?? DEFAULT_MINUTES);
   if (minutes < 1 || minutes > MINUTES_PER_DAY) return refuse("its length is a day at most");
-  // A place it names, or their home or work; else where the reply leaves it: their work for a job, and wherever they are for anything else, so the block moves no one the reply didn't.
+  // A place it names, or their home or work; else where the reply leaves it: their work for a job,
+  // and wherever they are for anything else, so the block moves no one the reply didn't. A place it
+  // names that resolves to none (the world lacks it, or the POV may not know it) is refused alike.
   const keyword = text(p.place).toLowerCase();
   const named = keyword === "home" || keyword === "work" ? null : placeOf(ctx, p.place);
   if (named === null && keyword !== "" && keyword !== "home" && keyword !== "work") return refuse("there's no such place");

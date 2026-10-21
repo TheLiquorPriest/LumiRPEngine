@@ -51,7 +51,7 @@ export interface RoutineRow {
   name: string;
   tier: Fidelity;
   binding: RoutineBinding;
-  changed: "gm" | "story" | "both" | null;
+  changed: ChangedBy | null;
 }
 
 /** The list's rows: every person but the POV, as the minds ladder orders them, each bound by their effective role (`roles`, the world's) and marked as this chat changed them (`lre.routine {op: "changed"}`). */
@@ -121,16 +121,31 @@ export function bindingNote(view: Pick<RoutineGmView, "tier" | "planned" | "foll
 
 // ---------------------------------------------------------------- what the chat changed
 
-/** Who changed someone's routine or schedules in this chat: the GM (a follow setting is always the GM's), the story, or both; null when nothing changed. */
-export function changedBy(summary: RoutineChangeSummary | undefined): "gm" | "story" | "both" | null {
+/** Who changed someone's routine or schedules in this chat: the GM (a follow setting is always the GM's), the story's replies, the player's own messages (asked, and answered Yes), or more than one of them. */
+export type ChangedBy = "gm" | "story" | "player" | "gm_story" | "gm_player" | "story_player" | "all";
+
+/** Who changed someone's routine or schedules in this chat; null when nothing changed. */
+export function changedBy(summary: RoutineChangeSummary | undefined): ChangedBy | null {
   if (!summary) return null;
   const sources: ChatRoutineSource[] = [...summary.blocks.map((b) => b.source), ...summary.schedules.map((s) => s.source)];
   const gm = summary.follow !== null || sources.some((s) => s.type === "gm");
-  const story = sources.some((s) => s.type === "story");
-  return gm && story ? "both" : gm ? "gm" : story ? "story" : null;
+  const story = sources.some((s) => s.type === "story" && s.by !== "player");
+  const player = sources.some((s) => s.type === "story" && s.by === "player");
+  if (gm && story && player) return "all";
+  if (gm) return story ? "gm_story" : player ? "gm_player" : "gm";
+  if (story) return player ? "story_player" : "story";
+  return player ? "player" : null;
 }
 
-export const CHANGED_LABEL: Record<"gm" | "story" | "both", string> = { gm: "Changed by you", story: "Changed by the story", both: "Changed by you and the story" };
+export const CHANGED_LABEL: Record<ChangedBy, string> = {
+  gm: "Changed by you",
+  story: "Changed by the story",
+  player: "Changed from your message",
+  gm_story: "Changed by you and the story",
+  gm_player: "Changed by you and from your message",
+  story_player: "Changed by the story and from your message",
+  all: "Changed by you, the story and your message",
+};
 
 /** A source as a row reads it: its label, and for a change this chat made (the story's or yours) how long ago, by the chat's clock. */
 export function sourceWords(source: SourceView, now: number): string {
