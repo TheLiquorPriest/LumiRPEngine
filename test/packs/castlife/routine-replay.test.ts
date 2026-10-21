@@ -22,7 +22,7 @@ interface OlderChat {
   world: WorldDoc;
   events: LedgerEvent[];
   /** Where the recording build's fold left the clock, its people and the castlife slice. */
-  recorded: { clock: number; people: Record<string, EntityState>; castlife: JsonObject | null };
+  recorded: { clock: number; people: Record<string, EntityState>; castlife: JsonObject };
 }
 
 const older = JSON.parse(readFileSync(join(import.meta.dir, "older-chat.json"), "utf8")) as OlderChat;
@@ -34,7 +34,7 @@ describe("an older chat", () => {
     const folded = foldBoth(older.world, older.events).state;
     expect(folded.clock).toBe(older.recorded.clock);
     for (const [id, person] of Object.entries(older.recorded.people)) expect(folded.entities[id]).toEqual(person);
-    expect(folded.packs.castlife ?? null).toEqual(older.recorded.castlife);
+    expect(folded.packs.castlife).toEqual(older.recorded.castlife);
   });
 
   test("plans its next turn with the new defaults on the same revision: no outing or invitation nothing grounds", () => {
