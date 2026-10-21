@@ -116,11 +116,17 @@ export function decodeMessage(raw: unknown, chatId: ChatId): HostMessage | null 
 
 const SWIPE_ACTIONS: Record<string, SwipeAction> = { added: "added", navigated: "navigated", updated: "updated", deleted: "deleted" };
 
-function decodeEvent<K extends HostEventName>(event: K, p: unknown): HostEventMap[K] | null;
-function decodeEvent(event: HostEventName, p: unknown): HostEventMap[HostEventName] | null {
+/** A host event's payload as the engine reads it; null when it isn't one (the fake host replays Lumiverse's raw payloads through it). */
+export function decodeEvent<K extends HostEventName>(event: K, p: unknown): HostEventMap[K] | null;
+export function decodeEvent(event: HostEventName, p: unknown): HostEventMap[HostEventName] | null {
   // A preset or a setting written, or a page closed, belongs to no chat (`{ id, preset }`, `{ key, value }`, `{ frontendSessionId }`).
   if (event === "PRESET_CHANGED") return { presetId: str(p, "id") ?? null };
-  if (event === "SETTINGS_UPDATED") return { key: str(p, "key") ?? null };
+  if (event === "SETTINGS_UPDATED") {
+    // A batch write (`settings.putMany`, how Lumiverse's pages save) names its keys in `keys`.
+    const key = str(p, "key");
+    const keys = isRecord(p) && Array.isArray(p.keys) ? p.keys.filter((k): k is string => typeof k === "string") : null;
+    return { keys: key !== undefined ? [key] : keys };
+  }
   if (event === "FRONTEND_SESSION_CLOSED") {
     const frontendSessionId = str(p, "frontendSessionId");
     return frontendSessionId ? { frontendSessionId } : null;
@@ -566,12 +572,17 @@ export function createSpindleHost(): HostPort {
         const preset = await spindle.presets.get(presetId, userId);
         return preset ? { id: preset.id, name: preset.name, revision: preset.cache_revision } : null;
       },
-      async ofConnection(connectionId, userId) {
-        return (await spindle.connections.list(userId)).find((c) => c.id === connectionId)?.preset_id ?? null;
-      },
-      async lastUsed(chatId, userId) {
-        const reply = (await spindle.chat.getMessages(chatId)).findLast((row) => !row.is_user);
-        return reply ? ((await spindle.generate.getBreakdown(reply.id, userId))?.presetId ?? null) : null;
+      async active(chatId, userId) {
+        // `presets.getActive` (staging 7524546f, worker-runtime.ts:2940) is newer than the published types.
+        const presets: unknown = spindle.presets;
+        const getActive = isRecord(presets) ? presets.getActive : undefined;
+        if (typeof getActive !== "function") throw new Error("this Lumiverse can't say which preset a chat generates with");
+        const call = getActive as unknown as (this: unknown, chatId?: string, userId?: string) => Promise<unknown>;
+        const raw = await call.call(presets, chatId ?? undefined, userId);
+        const states = isRecord(raw) && isRecord(raw.block_states) ? raw.block_states : {};
+        const blockStates: Record<string, boolean> = {};
+        for (const [id, on] of Object.entries(states)) if (typeof on === "boolean") blockStates[id] = on;
+        return { presetId: str(raw, "preset_id") ?? null, blockStates };
       },
       async blocks(presetId, userId) {
         return (await spindle.presets.blocks.list(presetId, userId)).map((b) => ({

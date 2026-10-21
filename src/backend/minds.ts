@@ -14,7 +14,7 @@ import type { ChatId, EntityId, MessageId, UserId } from "../shared/ids";
 import type { JsonObject, JsonValue } from "../shared/json";
 import { isRecord } from "../shared/json";
 import type { LedgerEvent } from "../shared/ledger";
-import type { CommitmentKind, Fidelity, MindCallTrace, MindCommitment, MindEventData, MindMoment, MindNote, MindPlan, MindPurpose, MindsRunEntry, MindsSettings, PlanKind, PresenceEventData } from "../shared/minds";
+import type { CommitmentKind, Fidelity, Limit, MindCallTrace, MindCommitment, MindEventData, MindMoment, MindNote, MindPlan, MindPurpose, MindsRunEntry, MindsSettings, PinnedTrace, PlanKind, PresenceEventData } from "../shared/minds";
 import { COMMITMENT_KINDS, effectiveMemory, MIND_ANSWER_FORMATS, MIND_PROMPT_DEFAULTS, MIND_TEXT_CAPS, MINDS_EVENTS, PLAN_KINDS, PLAN_PRIORITY, worldMindsOf, worldMindTemplate } from "../shared/minds";
 import type { ModelUseSettings, StepConfig } from "../shared/settings";
 import { stepConfigOf } from "../shared/settings";
@@ -36,7 +36,7 @@ import { fidelityOf, pickMinds } from "../packs/minds/core/fidelity";
 import { faded, readCharacter, readSlice, salienceNow } from "../packs/minds/core/state";
 import type { HostMessage, HostPort } from "./host";
 import { readPins } from "./lore-pins";
-import { consolidateContext, memoryContext, mindContext, povLabel, type MindContextReport, type MindScope } from "./minds-context";
+import { consolidateContext, memoryContext, mindContext, povLabel, type GivenLore, type MindContextReport, type MindScope } from "./minds-context";
 import type { PresetBinding } from "./preset-binding";
 import type { SettingsStore } from "./settings-store";
 import type { Steps } from "./steps";
@@ -261,10 +261,10 @@ export async function runMinds(deps: MindsDeps, input: RunMindsInput): Promise<R
   const memory = effectiveMemory(world, settings.minds);
   const guidance = input.guidance ?? deps.presets.last(userId).guidance.mind ?? "";
   const messages = input.messages ?? (await chatMessages(deps, input.chatId, userId));
-  const loreTokens = config.lore && config.lore.policy !== "none" ? config.lore.tokens : config.lore ? 0 : 400;
+  const reads = settings.minds.reads;
   const phase = input.phase ?? (input.moment.kind === "beat" ? "skip" : "pre");
-  // The lore pinned to each of them and to where they are (DESIGN §24.5), each book entry read once.
-  const refs = new Map(input.who.map((who) => [who, pinsFor(world, placeOfEntity(state, who), who)]));
+  // The lore pinned to each of them and to where they are (DESIGN §24.5), each book entry read once, when minds read it.
+  const refs = new Map(input.who.map((who) => [who, reads.pinned.on ? pinsFor(world, placeOfEntity(state, who), who) : []]));
   const texts = new Map((await readPins(deps.host, world, [...refs.values()].flat(), userId)).map((t) => [t.key, t]));
   // What the inspector may name of a pin (§6.5): an entry the player may read, by a title that says
   // nothing the player doesn't know; a secret, or anything only the character may read, isn't listed.
@@ -278,7 +278,15 @@ export async function runMinds(deps: MindsDeps, input: RunMindsInput): Promise<R
     }
     return screen(title);
   };
-  const listed = (p: MindContextReport["pinned"][number]): boolean => !p.secret && (p.entry === null || loreReadable(reg, world, state, p.entry, "brief", false, open));
+  const listed = (p: GivenLore): boolean => !p.secret && (p.entry === null || loreReadable(reg, world, state, p.entry, "brief", false, open));
+  // What the player may know of the lore a mind was given, and whether any of it was cut or left out over its limit, and why.
+  const shownLore = (items: readonly GivenLore[]): PinnedTrace[] => items.filter((p) => listed(p) && !p.left).map((p) => ({ title: shownTitle(p.title), tokens: p.tokens, cut: p.cut }));
+  const fitNote = (what: string, items: readonly GivenLore[], limit: Limit): string[] => {
+    const shown = items.filter(listed);
+    const cut = shown.filter((p) => !p.left && p.cut).length;
+    const left = shown.filter((p) => p.left).length;
+    return cut + left > 0 ? [`${what} didn't all fit: ${[cut > 0 ? `${cut} cut to fit` : "", left > 0 ? `${left} left out` : ""].filter((s) => s !== "").join(", ")}, over the ${limit} tokens a mind reads of it; raise that in Settings → Minds → What a mind reads.`] : [];
+  };
   const one = async (who: EntityId): Promise<MindCallResult> => {
     const level = input.levels[who] ?? "near";
     const e = own(state.entities, who);
@@ -294,20 +302,18 @@ export async function runMinds(deps: MindsDeps, input: RunMindsInput): Promise<R
       const t = texts.get(r.key);
       return t ? [{ ...t, on: r.on }] : [];
     });
-    const scope: MindScope = { reg, world, state, who, memory, messages, hideJson: settings.hideJsonBlocks, replyTokens: settings.minds.replyTokens, moment: input.moment, loreTokens, pinned };
-    const report: MindContextReport = { pinned: [] };
+    const scope: MindScope = { reg, world, state, who, memory, messages, hideJson: settings.hideJsonBlocks, reads, moment: input.moment, pinned };
+    const report: MindContextReport = { pinned: [], activated: [] };
     const usage = { tokens: 0 };
     const failure = { reason: "" };
     const t0 = performance.now();
     const raw = await deps.steps.helperJson("mind", prompt.text, mindContext(scope, report), config, userId, input.signal, { guidance, usage, failure });
     const ms = Math.round(performance.now() - t0);
     const data = raw === null ? null : mindData(reg, world, state, who, raw, input.moment, level, input.reasons?.[who] ?? input.moment.reason);
-    const shown = report.pinned.filter(listed);
-    const given = shown.filter((p) => !p.left).map((p) => ({ title: shownTitle(p.title), tokens: p.tokens, cut: p.cut }));
-    const cut = given.filter((p) => p.cut).length;
-    const left = shown.length - given.length;
-    const notes = cut + left > 0 ? [`Pinned lore didn't all fit: ${[cut > 0 ? `${cut} cut to fit` : "", left > 0 ? `${left} left out` : ""].filter((s) => s !== "").join(", ")}. The mind step reads ${loreTokens} lore tokens; raise them in Settings → Steps.`] : [];
-    const trace: MindCallTrace = { ...base, outcome: data === null ? "failed" : "recorded", ms, tokens: usage.tokens, prompt: prompt.source, ...(given.length > 0 ? { pinned: given } : {}), ...(notes.length > 0 ? { notes } : {}) };
+    const given = shownLore(report.pinned);
+    const activated = shownLore(report.activated);
+    const notes = [...fitNote("Pinned lore", report.pinned, reads.pinned.tokens), ...fitNote("The lore the turn activated", report.activated, reads.activated.tokens)];
+    const trace: MindCallTrace = { ...base, outcome: data === null ? "failed" : "recorded", ms, tokens: usage.tokens, prompt: prompt.source, ...(given.length > 0 ? { pinned: given } : {}), ...(activated.length > 0 ? { activated } : {}), ...(notes.length > 0 ? { notes } : {}) };
     const why = data !== null ? null : raw !== null ? "the answer said nothing: no thoughts, intent or depiction" : failure.reason !== "" ? failure.reason : "the call failed";
     if (why !== null) deps.host.log("warn", `[LumiRPEngine] mind for ${who}: ${why}`, userId);
     const entry: MindsRunEntry = {
@@ -529,7 +535,7 @@ export async function postMinds(deps: MindsDeps, input: PostMindsInput): Promise
   const remembered = await Promise.all(
     remembering.map(async (id) => {
       const prompt = mindPrompt("memory", world, settings.minds, varsFor(world, w.state, id));
-      const scope: MindScope = { reg, world, state: w.state, who: id, memory, messages, hideJson: settings.hideJsonBlocks, replyTokens: settings.minds.replyTokens, moment, loreTokens: 0 };
+      const scope: MindScope = { reg, world, state: w.state, who: id, memory, messages, hideJson: settings.hideJsonBlocks, reads: settings.minds.reads, moment };
       const usage = { tokens: 0 };
       const t0 = performance.now();
       const raw = input.signal.aborted ? null : await deps.steps.helperJson("memory", prompt.text, memoryContext(scope, { user: input.user, reply: input.reply, left: left.includes(id) }), memoryConfig, userId, input.signal, { guidance: input.guidance?.memory ?? deps.presets.last(userId).guidance.memory ?? "", usage });

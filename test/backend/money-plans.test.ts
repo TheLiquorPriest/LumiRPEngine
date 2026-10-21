@@ -8,6 +8,7 @@ import { describe, expect, test } from "bun:test";
 import type { QuietRequest } from "../../src/backend/host";
 import { toChain } from "../../src/backend/ledger-io";
 import { timelapseRequest } from "../../src/frontend/requests";
+import { mindsReadPatch } from "../../src/frontend/settings/minds-patch";
 import { placeOfEntity } from "../../src/engine/scope";
 import type { WorldState } from "../../src/engine/state";
 import { journalOf } from "../../src/packs/economy/core/journal";
@@ -104,8 +105,12 @@ describe("a character's plan to pay or lend someone", () => {
     expect(readCharacter(before, "danny_okafor").plans.map((p) => [p.kind, p.cents, p.with, p.source])).toEqual([["pay", 2000, ["priya_nair"], "memory"]]);
     expect(lend).toMatchObject({ cents: 100_000_000, with: ["danny_okafor"], status: "open" });
     if (!pay || !lend) throw new Error("no plans");
-    // His mind on the next turn is told what he means to hand over, and so is his memory.
+    // His memory is told what he means to hand over on the next turn; his mind only once the user has
+    // it read his life (Settings → Minds → What a mind reads; off by default, DESIGN §24.5).
     const toldOf = (pattern: RegExp): string => rig.host.quietCalls.filter((c) => pattern.exec(c.messages[0]?.content ?? "")?.[1] === "Danny Okafor").map((c) => c.messages[1]?.content ?? "").join("\n");
+    const life = mindsReadPatch("life", { on: true, tokens: "none" });
+    if (!life) throw new Error("no patch");
+    rig.body(await rig.send({ type: "lre.settings.set", patch: life }));
     await rig.turn(chatId, "Anything else?", "Danny shrugs.");
     expect(toldOf(MIND)).toContain("- Plan (pay): Pay Priya back for the ferry tickets she covered, $20.00, ");
     expect(toldOf(MEMORY)).toContain("- Pay Priya back for the ferry tickets she covered, $20.00 (");

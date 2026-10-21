@@ -4526,6 +4526,7 @@ var MINDS_RANGES = {
 };
 var num2 = (v, [lo, hi], fallback) => typeof v === "number" && Number.isFinite(v) && v >= lo && v <= hi ? v : fallback;
 var whole = (v, range, fallback) => Math.round(num2(v, range, fallback));
+var wholeOrNone = (v, range, fallback) => v === "none" ? "none" : typeof v === "number" && Number.isFinite(v) && v >= range[0] && v <= range[1] ? Math.round(v) : fallback;
 var obj2 = (v) => isRecord(v) ? v : {};
 function selectorOrNull(v) {
   if (!isRecord(v))
@@ -4568,7 +4569,7 @@ function memoryConfigOf(raw, base = DEFAULT_MINDS_MEMORY) {
   const consolidate = obj2(m.consolidate);
   return {
     witness: { show: whole(witness.show, MINDS_RANGES.show, base.witness.show) },
-    recall: { recent: whole(recall.recent, MINDS_RANGES.show, base.recall.recent), relevant: whole(recall.relevant, MINDS_RANGES.show, base.recall.relevant), tokens: whole(recall.tokens, MINDS_RANGES.recallTokens, base.recall.tokens) },
+    recall: { recent: whole(recall.recent, MINDS_RANGES.show, base.recall.recent), relevant: whole(recall.relevant, MINDS_RANGES.show, base.recall.relevant), tokens: wholeOrNone(recall.tokens, MINDS_RANGES.recallTokens, base.recall.tokens) },
     notes: { show: whole(notes.show, MINDS_RANGES.show, base.notes.show), keep: whole(notes.keep, MINDS_RANGES.keep, base.notes.keep) },
     commitments: { show: whole(commitments.show, MINDS_RANGES.show, base.commitments.show) },
     salience: { halfLifeDays: num2(salience.halfLifeDays, MINDS_RANGES.halfLifeDays, base.salience.halfLifeDays), floor: num2(salience.floor, MINDS_RANGES.floor, base.salience.floor) },
@@ -4622,13 +4623,25 @@ function isMindPurpose(purpose) {
 function worldMindTemplate(world, purpose) {
   return Object.values(world.steps).filter((t) => t.purpose === purpose && t.template.trim() !== "").sort((a, b) => a.id.localeCompare(b.id))[0];
 }
+var MIND_SOURCES = ["pinned", "activated", "reply", "message", "summary", "memory", "thoughts", "recall", "life"];
+var DEFAULT_MIND_READS = Object.freeze({
+  pinned: { on: true, tokens: "none" },
+  activated: { on: true, tokens: 1600 },
+  reply: { on: true, tokens: "none" },
+  message: { on: true, tokens: "none" },
+  summary: { on: false, tokens: "none" },
+  memory: { on: false, tokens: "none" },
+  thoughts: { on: false, tokens: "none" },
+  recall: { on: false },
+  life: { on: false, tokens: "none" }
+});
 var MINDS_PRESETS = Object.freeze({
   lean: { enabled: false, liveLimit: 3, nearRefresh: { scene: true, mention: true, turns: 6, minutes: 120 }, farRefreshMinutes: 1440, refreshLimit: 1, memoryLevels: [], tokens: 1200, skip: { maxBeats: 4, maxMindsPerBeat: 2 } },
   standard: { enabled: true, liveLimit: 3, nearRefresh: { scene: true, mention: true, turns: 6, minutes: 120 }, farRefreshMinutes: 1440, refreshLimit: 2, memoryLevels: ["live"], tokens: 2400, skip: { maxBeats: 6, maxMindsPerBeat: 3 } },
   full: { enabled: true, liveLimit: "none", nearRefresh: { scene: true, mention: true, turns: 4, minutes: 60 }, farRefreshMinutes: 720, refreshLimit: "none", memoryLevels: ["live", "near"], tokens: 4000, skip: { maxBeats: "none", maxMindsPerBeat: "none" } }
 });
 function defaultMindsSettings(preset = "standard") {
-  return { ...structuredClone(MINDS_PRESETS[preset]), replyTokens: "none", memory: {}, prompts: {} };
+  return { ...structuredClone(MINDS_PRESETS[preset]), reads: structuredClone(DEFAULT_MIND_READS), memory: {}, prompts: {} };
 }
 var MINDS_DEFAULTS = Object.freeze(defaultMindsSettings());
 var MIND_PROMPT_MAX = 20000;
@@ -4639,10 +4652,12 @@ function planInForce(p) {
 }
 var COMMITMENT_KINDS = ["promise", "debt", "grudge", "favour", "plan", "other"];
 var COMMITMENT_STATUSES = ["open", "kept", "broken", "released"];
+var MIND_APPROACHES = ["reactive", "proactive"];
 var MIND_TEXT_CAPS = {
   monologue: 1200,
   depiction: 600,
   intent: 300,
+  gmIntent: 600,
   reaction: 200,
   reactions: 4,
   plans: 4,
@@ -12947,39 +12962,46 @@ function StepCard(props) {
                 }, undefined, false, undefined, this)
               ]
             }, undefined, true, undefined, this),
-            /* @__PURE__ */ u3(Field, {
-              label: "Lore",
-              children: /* @__PURE__ */ u3(Seg, {
-                label: "Lore",
-                value: lore.policy,
-                options: LORE_POLICY,
-                disabled: busy,
-                onChange: (policy) => update({ ...config, lore: { ...lore, policy } })
-              }, undefined, false, undefined, this)
-            }, undefined, false, undefined, this),
-            lore.policy !== "none" ? /* @__PURE__ */ u3(NumberStepper, {
-              label: "Lore tokens",
-              value: lore.tokens,
-              min: 0,
-              step: 100,
-              integer: true,
-              disabled: busy,
-              onChange: (tokens) => update({ ...config, lore: { ...lore, tokens } })
-            }, undefined, false, undefined, this) : null,
-            lore.policy === "lookup" || lore.policy === "prefetch+lookup" ? /* @__PURE__ */ u3(Field, {
-              label: "Lookups by",
-              children: /* @__PURE__ */ u3(Seg, {
-                label: "Lookups by",
-                value: lore.transport ?? "auto",
-                options: LORE_TRANSPORT,
-                disabled: busy,
-                onChange: (transport) => update({ ...config, lore: { ...lore, transport } })
-              }, undefined, false, undefined, this)
-            }, undefined, false, undefined, this) : null,
-            lore.policy !== "none" && PROSE_STEPS.includes(purpose) ? /* @__PURE__ */ u3("div", {
+            isMindPurpose(purpose) ? /* @__PURE__ */ u3("div", {
               class: "lre-small lre-muted",
-              children: "Reads no secret lore: what it writes reaches the narrator or the player."
-            }, undefined, false, undefined, this) : null
+              children: purpose === "mind" ? "What a mind reads, its lore included, is set in Settings → Minds → What a mind reads." : "Reads no world lore."
+            }, undefined, false, undefined, this) : /* @__PURE__ */ u3(M, {
+              children: [
+                /* @__PURE__ */ u3(Field, {
+                  label: "Lore",
+                  children: /* @__PURE__ */ u3(Seg, {
+                    label: "Lore",
+                    value: lore.policy,
+                    options: LORE_POLICY,
+                    disabled: busy,
+                    onChange: (policy) => update({ ...config, lore: { ...lore, policy } })
+                  }, undefined, false, undefined, this)
+                }, undefined, false, undefined, this),
+                lore.policy !== "none" ? /* @__PURE__ */ u3(NumberStepper, {
+                  label: "Lore tokens",
+                  value: lore.tokens,
+                  min: 0,
+                  step: 100,
+                  integer: true,
+                  disabled: busy,
+                  onChange: (tokens) => update({ ...config, lore: { ...lore, tokens } })
+                }, undefined, false, undefined, this) : null,
+                lore.policy === "lookup" || lore.policy === "prefetch+lookup" ? /* @__PURE__ */ u3(Field, {
+                  label: "Lookups by",
+                  children: /* @__PURE__ */ u3(Seg, {
+                    label: "Lookups by",
+                    value: lore.transport ?? "auto",
+                    options: LORE_TRANSPORT,
+                    disabled: busy,
+                    onChange: (transport) => update({ ...config, lore: { ...lore, transport } })
+                  }, undefined, false, undefined, this)
+                }, undefined, false, undefined, this) : null,
+                lore.policy !== "none" && PROSE_STEPS.includes(purpose) ? /* @__PURE__ */ u3("div", {
+                  class: "lre-small lre-muted",
+                  children: "Reads no secret lore: what it writes reaches the narrator or the player."
+                }, undefined, false, undefined, this) : null
+              ]
+            }, undefined, true, undefined, this)
           ]
         }, undefined, true, undefined, this)
       ]
@@ -13011,8 +13033,8 @@ function mindsPolicyPatch(change) {
 function withMemoryLevel(levels, level, on) {
   return FIDELITIES.filter((f) => f !== "background" && (f === level ? on : levels.includes(f)));
 }
-function mindsReplyPatch(replyTokens) {
-  return { minds: { replyTokens } };
+function mindsReadPatch(source, change) {
+  return { minds: { reads: { [source]: { ...change } } } };
 }
 function mindsPromptPatch(purpose, text) {
   if (text !== null && text.length > MIND_PROMPT_MAX)
@@ -13024,7 +13046,7 @@ var MEMORY_FIELDS = [
   { part: "witness", key: "show", label: "Witness log lines a mind sees", range: MINDS_RANGES.show, integer: true },
   { part: "recall", key: "recent", label: "Recall: latest turns they were there for", range: MINDS_RANGES.show, integer: true },
   { part: "recall", key: "relevant", label: "Recall: turns that best match the moment", range: MINDS_RANGES.show, integer: true },
-  { part: "recall", key: "tokens", label: "Recall: tokens it may take", range: MINDS_RANGES.recallTokens, integer: true, step: 100 },
+  { part: "recall", key: "tokens", label: "Recall: tokens it may take", range: MINDS_RANGES.recallTokens, integer: true, step: 100, none: "no limit" },
   { part: "notes", key: "show", label: "Notes a mind sees", range: MINDS_RANGES.show, integer: true },
   { part: "notes", key: "keep", label: "Notes kept before the oldest are folded", range: MINDS_RANGES.keep, integer: true },
   { part: "commitments", key: "show", label: "Open commitments a mind sees", range: MINDS_RANGES.show, integer: true },
@@ -13042,6 +13064,8 @@ function memoryOverride(memory, field) {
   return part?.[field.key];
 }
 function memoryOverridePatch(field, value) {
+  if (value === "none" && !field.none)
+    return null;
   if (typeof value === "number") {
     const [lo, hi] = field.range ?? [Number.NEGATIVE_INFINITY, Number.POSITIVE_INFINITY];
     if (!field.range || !Number.isFinite(value) || value < lo || value > hi || field.integer && !Number.isInteger(value))
@@ -13057,6 +13081,7 @@ var PLAN_KIND_LABEL = { errand: "Errand", meet: "Meet", visit: "Visit", work: "W
 var PLAN_STATUS_LABEL = { open: "Open", done: "Done", dropped: "Dropped" };
 var COMMITMENT_KIND_LABEL = { promise: "Promise", debt: "Debt", grudge: "Grudge", favour: "Favour", plan: "Plan together", other: "Other" };
 var COMMITMENT_STATUS_LABEL = { open: "Open", kept: "Kept", broken: "Broken", released: "Released" };
+var APPROACH_LABEL = { reactive: "Reactive", proactive: "Proactive" };
 function narratorGets(secrecy, mind) {
   const full = secrecy === "full";
   const shown = full || !mind.withheld;
@@ -13070,6 +13095,10 @@ function refreshOp(entity) {
 }
 function deleteOp(entity, part, id) {
   return { op: "mind_memory", entity, part, id, value: null };
+}
+function intentOp(entity, draft) {
+  const text = draft.text.trim().replace(/\s+/g, " ");
+  return text.length > MIND_TEXT_CAPS.gmIntent ? null : { op: "mind_intent", entity, text, approach: draft.approach };
 }
 function textIn(text, cap) {
   const t = text.trim().replace(/\s+/g, " ");
@@ -13522,21 +13551,37 @@ function MindsEditor() {
             children: MEMORY_FIELDS.map((field) => {
               const current = memoryValue(value.memory, field);
               const set = (v) => setValue({ ...value, memory: { ...value.memory, [field.part]: { ...value.memory[field.part], [field.key]: v } } });
-              return field.range ? /* @__PURE__ */ u3(NumberStepper, {
-                label: field.label,
-                value: typeof current === "number" ? current : null,
-                min: field.range[0],
-                max: field.range[1],
-                step: field.step ?? 1,
-                integer: field.integer === true,
-                disabled: busy,
-                onChange: set
-              }, `${field.part}.${field.key}`, false, undefined, this) : /* @__PURE__ */ u3(CheckField, {
-                label: field.label,
-                checked: current === true,
-                disabled: busy,
-                onChange: set
-              }, `${field.part}.${field.key}`, false, undefined, this);
+              const key = `${field.part}.${field.key}`;
+              if (!field.range)
+                return /* @__PURE__ */ u3(CheckField, {
+                  label: field.label,
+                  checked: current === true,
+                  disabled: busy,
+                  onChange: set
+                }, key, false, undefined, this);
+              const range = field.range;
+              const builtIn = memoryValue(DEFAULT_WORLD_MINDS.memory, field);
+              return /* @__PURE__ */ u3("div", {
+                class: "lre-minds-fields",
+                children: [
+                  field.none ? /* @__PURE__ */ u3(CheckField, {
+                    label: `${field.label}: ${field.none}`,
+                    checked: current === "none",
+                    disabled: busy,
+                    onChange: (none) => set(none ? "none" : typeof builtIn === "number" ? builtIn : range[0])
+                  }, undefined, false, undefined, this) : null,
+                  current === "none" ? null : /* @__PURE__ */ u3(NumberStepper, {
+                    label: field.label,
+                    value: typeof current === "number" ? current : null,
+                    min: range[0],
+                    max: range[1],
+                    step: field.step ?? 1,
+                    integer: field.integer === true,
+                    disabled: busy,
+                    onChange: set
+                  }, undefined, false, undefined, this)
+                ]
+              }, key, true, undefined, this);
             })
           }, undefined, false, undefined, this),
           /* @__PURE__ */ u3(Issues, {
@@ -21237,7 +21282,30 @@ function Note(props) {
     children: props.children
   }, undefined, false, undefined, this);
 }
-var REPLY_TOKENS_START = 1000;
+var TOKENS_START = 1000;
+var READ_LABEL = {
+  pinned: "Lore pinned to them and to where they are",
+  activated: "Lore the turn activates",
+  reply: "The latest reply",
+  message: "Your message",
+  summary: "Their summary",
+  memory: "Their notes and what they saw",
+  thoughts: "Their last thoughts",
+  recall: "Turns they were there for",
+  life: "Their life: money, the day, commitments and plans"
+};
+var READ_NOTE = {
+  pinned: "What Build pins to the character, then to their place and each place around it, nearest first. Within the limit every entry comes whole; the Context panel says what didn't fit.",
+  activated: "The world's lore entries the turn names, by a key, an alias, a title or a lookup-table term, as World Info activates them, read as the character: by your message and the latest reply when they were there for them, else by where they are.",
+  reply: "How the latest reply ended, for those who were there for it; cut to a number, they read its end. The memory step reads the reply within this limit too.",
+  message: "What you say and do, for those with you. The memory step reads it within this limit too.",
+  summary: "The summary their memory keeps and folds their old notes into.",
+  memory: "Their memory notes, most salient first, and what they saw happen. Never what someone's memory says they were told: that came from another mind.",
+  thoughts: "Their own latest mind: what they thought, what they meant to do and how they felt.",
+  recall: "Earlier turns they were there for: the latest, and those that best match the moment. Its limit is the memory setting's, which the world sets and you can override.",
+  life: "Their money, the rest of today as the planner lays it (with what it fills free time with: meals, friends, outings), their commitments and their plans. None of it is the story as it stands."
+};
+var STORY_SOURCES = { pinned: true, activated: true, reply: true, message: true, summary: false, memory: false, thoughts: false, recall: false, life: false };
 function LimitField(props) {
   const fallback = props.fallback === "none" ? props.min : props.fallback;
   return /* @__PURE__ */ u3("div", {
@@ -21267,11 +21335,22 @@ function MemoryOverride(props) {
   const own = memoryOverride(props.memory, field);
   const builtIn = memoryValue(DEFAULT_MINDS_MEMORY, field);
   const id = `${field.part}.${field.key}`;
+  const set = (value) => {
+    const p = memoryOverridePatch(field, value);
+    if (p)
+      props.patch(p);
+  };
   return /* @__PURE__ */ u3("div", {
     class: "lre-minds-override",
     "data-lre-minds-memory": id,
     children: [
-      field.range ? /* @__PURE__ */ u3(NumberStepper, {
+      field.none ? /* @__PURE__ */ u3(HostSwitch, {
+        label: `${field.label}: ${field.none}`,
+        checked: own === "none" || own === undefined && builtIn === "none",
+        disabled: busy,
+        onChange: (none) => set(none ? "none" : typeof builtIn === "number" ? builtIn : field.range?.[0] ?? 0)
+      }, undefined, false, undefined, this) : null,
+      field.range && own !== "none" ? /* @__PURE__ */ u3(NumberStepper, {
         label: field.label,
         value: typeof own === "number" ? own : null,
         min: field.range[0],
@@ -21279,16 +21358,12 @@ function MemoryOverride(props) {
         step: field.step ?? 1,
         integer: field.integer === true,
         disabled: busy,
-        onChange: (value) => {
-          const p = memoryOverridePatch(field, value);
-          if (p)
-            props.patch(p);
-        }
-      }, undefined, false, undefined, this) : /* @__PURE__ */ u3(HostSwitch, {
+        onChange: set
+      }, undefined, false, undefined, this) : field.range ? null : /* @__PURE__ */ u3(HostSwitch, {
         label: field.label,
         checked: typeof own === "boolean" ? own : builtIn === true,
         disabled: busy,
-        onChange: (on) => props.patch(memoryOverridePatch(field, on) ?? {})
+        onChange: set
       }, undefined, false, undefined, this),
       /* @__PURE__ */ u3("div", {
         class: "lre-minds-override-foot",
@@ -21296,7 +21371,7 @@ function MemoryOverride(props) {
           class: "lre-minds-note",
           children: [
             "The world's applies (built in: ",
-            typeof builtIn === "boolean" ? builtIn ? "on" : "off" : builtIn,
+            typeof builtIn === "boolean" ? builtIn ? "on" : "off" : builtIn === "none" ? field.none ?? "none" : builtIn,
             ")"
           ]
         }, undefined, true, undefined, this) : /* @__PURE__ */ u3(M, {
@@ -21311,11 +21386,46 @@ function MemoryOverride(props) {
               icon: "undo",
               label: `Use the world's ${field.label.toLowerCase()}`,
               disabled: busy,
-              onClick: () => props.patch(memoryOverridePatch(field, null) ?? {}),
+              onClick: () => set(null),
               children: "Use the world's"
             }, undefined, false, undefined, this)
           ]
         }, undefined, true, undefined, this)
+      }, undefined, false, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+}
+function ReadRow(props) {
+  const { source, reads, busy } = props;
+  const on = reads[source].on;
+  const recall = MEMORY_FIELDS.find((f) => f.part === "recall" && f.key === "tokens");
+  return /* @__PURE__ */ u3("div", {
+    class: "lre-minds-override",
+    "data-lre-minds-read": source,
+    children: [
+      /* @__PURE__ */ u3(HostSwitch, {
+        label: READ_LABEL[source],
+        checked: on,
+        disabled: busy,
+        onChange: (next) => props.patch(mindsReadPatch(source, { on: next }))
+      }, undefined, false, undefined, this),
+      !on ? null : source === "recall" ? recall ? /* @__PURE__ */ u3(MemoryOverride, {
+        field: recall,
+        memory: props.memory,
+        busy,
+        patch: props.patch
+      }, undefined, false, undefined, this) : null : /* @__PURE__ */ u3(LimitField, {
+        label: `${READ_LABEL[source]} (tokens)`,
+        noneLabel: "no limit",
+        value: reads[source].tokens,
+        min: 1,
+        step: 100,
+        fallback: DEFAULT_MIND_READS[source].tokens === "none" ? TOKENS_START : DEFAULT_MIND_READS[source].tokens,
+        disabled: busy,
+        onChange: (tokens) => props.patch(mindsReadPatch(source, { tokens }))
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(Note, {
+        children: READ_NOTE[source]
       }, undefined, false, undefined, this)
     ]
   }, undefined, true, undefined, this);
@@ -21424,7 +21534,8 @@ function PromptEditor(props) {
 function MindsSection(props) {
   const { minds, busy } = props;
   const policy = (change) => props.patch(mindsPolicyPatch(change));
-  const overrides = MEMORY_FIELDS.filter((field) => memoryOverride(minds.memory, field) !== undefined).length;
+  const memoryFields = MEMORY_FIELDS.filter((field) => !(field.part === "recall" && field.key === "tokens"));
+  const overrides = memoryFields.filter((field) => memoryOverride(minds.memory, field) !== undefined).length;
   return /* @__PURE__ */ u3("div", {
     class: "lre-stack lre-minds-set",
     "data-lre-settings-page": "minds",
@@ -21444,7 +21555,7 @@ function MindsSection(props) {
               onChange: (enabled) => policy({ enabled })
             }, undefined, false, undefined, this),
             /* @__PURE__ */ u3(Note, {
-              children: "Picking a Model use preset sets everything here but how much of the reply minds read, your prompts and memory overrides; changing any of the rest makes it Custom."
+              children: "Picking a Model use preset sets everything here but what a mind reads, your prompts and memory overrides; changing any of the rest makes it Custom."
             }, undefined, false, undefined, this)
           ]
         }, undefined, true, undefined, this)
@@ -21572,23 +21683,48 @@ function MindsSection(props) {
             }, undefined, true, undefined, this)
           }, undefined, false, undefined, this),
           /* @__PURE__ */ u3(Section, {
-            title: "The latest reply",
+            title: "What a mind reads",
             children: /* @__PURE__ */ u3("div", {
               class: "lre-minds-body",
               children: [
-                /* @__PURE__ */ u3(LimitField, {
-                  label: "Latest reply minds read (tokens)",
-                  noneLabel: "the whole reply",
-                  value: minds.replyTokens,
-                  min: 1,
-                  step: 100,
-                  fallback: REPLY_TOKENS_START,
-                  disabled: busy,
-                  onChange: (replyTokens) => props.patch(mindsReplyPatch(replyTokens))
-                }, undefined, false, undefined, this),
                 /* @__PURE__ */ u3(Note, {
-                  children: "What a character thinks from, before the reply and when you run minds now, and what the memory step reads after it. Cut to a number, they read its end. It comes on top of the rest of what they're given, and only characters who were there for the reply read it."
-                }, undefined, false, undefined, this)
+                  children: "Who they are (their own sheet, aims and secrets), where they are and whom they see there, and what they mean to do are always in it. Each source below is yours to switch on or off and to limit; within its limit it comes whole, and nothing else cuts it."
+                }, undefined, false, undefined, this),
+                /* @__PURE__ */ u3("div", {
+                  class: "lre-minds-group",
+                  children: [
+                    /* @__PURE__ */ u3("span", {
+                      class: "lre-minds-group-title",
+                      children: "The story as it stands"
+                    }, undefined, false, undefined, this),
+                    MIND_SOURCES.filter((s) => STORY_SOURCES[s]).map((source) => /* @__PURE__ */ u3(ReadRow, {
+                      source,
+                      reads: minds.reads,
+                      memory: minds.memory,
+                      busy,
+                      patch: props.patch
+                    }, source, false, undefined, this))
+                  ]
+                }, undefined, true, undefined, this),
+                /* @__PURE__ */ u3("div", {
+                  class: "lre-minds-group",
+                  children: [
+                    /* @__PURE__ */ u3("span", {
+                      class: "lre-minds-group-title",
+                      children: "Their own memory and life"
+                    }, undefined, false, undefined, this),
+                    /* @__PURE__ */ u3(Note, {
+                      children: "Off unless you turn them on: each can carry what the story never set up, like a day the planner filled with meals and friends, or a plan their memory took from narration that showed another character's mind."
+                    }, undefined, false, undefined, this),
+                    MIND_SOURCES.filter((s) => !STORY_SOURCES[s]).map((source) => /* @__PURE__ */ u3(ReadRow, {
+                      source,
+                      reads: minds.reads,
+                      memory: minds.memory,
+                      busy,
+                      patch: props.patch
+                    }, source, false, undefined, this))
+                  ]
+                }, undefined, true, undefined, this)
               ]
             }, undefined, true, undefined, this)
           }, undefined, false, undefined, this),
@@ -21676,7 +21812,7 @@ function MindsSection(props) {
               }, undefined, true, undefined, this),
               children: /* @__PURE__ */ u3("div", {
                 class: "lre-minds-overrides",
-                children: MEMORY_FIELDS.map((field) => /* @__PURE__ */ u3(MemoryOverride, {
+                children: memoryFields.map((field) => /* @__PURE__ */ u3(MemoryOverride, {
                   field,
                   memory: minds.memory,
                   busy,
@@ -21757,7 +21893,7 @@ function PresetCardView() {
           children: /* @__PURE__ */ u3(ListRow, {
             icon: "layers",
             title: card.preset?.name ?? "None",
-            subtitle: "The preset world chats assemble with now: the active Loom preset, else the one the chat's connection links, else the one the last reply was assembled with."
+            subtitle: "The preset world chats generate with, as Lumiverse picks it: the selected preset, else the one the chat's connection links. A preset profile can switch its blocks on or off for a chat."
           }, undefined, false, undefined, this)
         }, undefined, false, undefined, this)
       }, undefined, false, undefined, this),
@@ -36101,6 +36237,10 @@ var LEVEL_NOTE = {
   far: "They think now and then, on the Far refresh period.",
   background: "No mind; they follow their routine."
 };
+var APPROACH_NOTE = {
+  reactive: "They answer the scene and what is asked of them, and start nothing of their own.",
+  proactive: "They pursue their own aims unprompted, without waiting to be asked."
+};
 var TURN_WHY = {
   live: "Live: every turn",
   gm: "you asked for it",
@@ -36297,6 +36437,10 @@ function GmMindsSection(props) {
                       }, undefined, false, undefined, this) : null,
                       c.refreshQueued ? /* @__PURE__ */ u3(Badge, {
                         children: "Refresh"
+                      }, undefined, false, undefined, this) : null,
+                      c.intent ? /* @__PURE__ */ u3(Badge, {
+                        tone: "accent",
+                        children: "Intent"
                       }, undefined, false, undefined, this) : null
                     ]
                   }, undefined, true, undefined, this),
@@ -36422,6 +36566,11 @@ function CharacterPages(props) {
                 busy: ctx.busy,
                 open: changes.open
               }, undefined, false, undefined, this),
+              /* @__PURE__ */ u3(Intent, {
+                c,
+                busy: ctx.busy,
+                open: changes.open
+              }, undefined, false, undefined, this),
               /* @__PURE__ */ u3(LatestMind, {
                 ctx,
                 c
@@ -36471,6 +36620,11 @@ function CharacterPages(props) {
         onBack: changes.back
       }, undefined, false, undefined, this) : null,
       change?.kind === "refresh" ? /* @__PURE__ */ u3(RefreshPage, {
+        ctx,
+        c,
+        onBack: changes.back
+      }, undefined, false, undefined, this) : null,
+      change?.kind === "intent" ? /* @__PURE__ */ u3(IntentPage, {
         ctx,
         c,
         onBack: changes.back
@@ -36569,6 +36723,27 @@ function Ladder(props) {
       }, undefined, false, undefined, this)
     ]
   }, undefined, true, undefined, this);
+}
+function Intent(props) {
+  const i = props.c.intent;
+  return /* @__PURE__ */ u3(Section, {
+    title: "Your intent for them",
+    aside: i ? /* @__PURE__ */ u3(Badge, {
+      tone: "accent",
+      children: "Set"
+    }, undefined, false, undefined, this) : undefined,
+    flush: true,
+    children: /* @__PURE__ */ u3(List, {
+      children: /* @__PURE__ */ u3(ListRow, {
+        icon: "flag",
+        title: i && i.text !== "" ? i.text : "What they mean to do",
+        subtitle: i ? i.approach ? `${APPROACH_LABEL[i.approach]}: ${APPROACH_NOTE[i.approach]}` : "Their mind decides how they go about it" : "Not set: their mind decides for itself",
+        chevron: true,
+        disabled: props.busy,
+        onClick: () => props.open({ kind: "intent" })
+      }, undefined, false, undefined, this)
+    }, undefined, false, undefined, this)
+  }, undefined, false, undefined, this);
 }
 function Thought(props) {
   return /* @__PURE__ */ u3("div", {
@@ -37075,6 +37250,128 @@ function RefreshPage(props) {
       ]
     }, undefined, true, undefined, this)
   }, undefined, false, undefined, this);
+}
+var NO_INTENT = { text: "", approach: null };
+function IntentPage(props) {
+  const { ctx, c } = props;
+  const current = c.intent ?? NO_INTENT;
+  const [draft, setDraft] = d2(current);
+  const textId = P2();
+  const group = P2();
+  const op = intentOp(c.entity, draft);
+  const clear = intentOp(c.entity, NO_INTENT);
+  const changed = draft.text.trim().replace(/\s+/g, " ") !== current.text || draft.approach !== current.approach;
+  const choices = [null, ...MIND_APPROACHES];
+  return /* @__PURE__ */ u3(ChangePage, {
+    name: "mind-intent",
+    title: "Your intent for them",
+    c,
+    onBack: props.onBack,
+    children: [
+      /* @__PURE__ */ u3("form", {
+        class: "lre-stack",
+        "data-lre-minds-form": "intent",
+        onSubmit: (event) => {
+          event.preventDefault();
+          if (op && changed)
+            send(ctx, op, props.onBack);
+        },
+        children: [
+          /* @__PURE__ */ u3(Section, {
+            children: [
+              /* @__PURE__ */ u3("p", {
+                class: "lre-gm-note",
+                children: [
+                  "What ",
+                  c.name,
+                  " means to do now, in your words. Only their own mind reads it, first after who they are, and works from it, so the story follows; no other mind, the narrator or Play ever sees it. It stays until you change or clear it."
+                ]
+              }, undefined, true, undefined, this),
+              /* @__PURE__ */ u3(Field, {
+                label: "What they mean to do",
+                for: textId,
+                help: used(draft.text, MIND_TEXT_CAPS.gmIntent),
+                children: /* @__PURE__ */ u3("textarea", {
+                  id: textId,
+                  class: "lre-input lre-gm-prose",
+                  rows: 4,
+                  maxLength: MIND_TEXT_CAPS.gmIntent,
+                  value: draft.text,
+                  onInput: (event) => setDraft({ ...draft, text: event.currentTarget.value })
+                }, undefined, false, undefined, this)
+              }, undefined, false, undefined, this),
+              /* @__PURE__ */ u3(Field, {
+                label: "How they go about it",
+                children: /* @__PURE__ */ u3("fieldset", {
+                  class: "lre-gm-minds-choices",
+                  children: [
+                    /* @__PURE__ */ u3("legend", {
+                      class: "lre-sr",
+                      children: "How they go about it"
+                    }, undefined, false, undefined, this),
+                    choices.map((choice) => /* @__PURE__ */ u3("label", {
+                      class: "lre-gm-minds-choice",
+                      children: [
+                        /* @__PURE__ */ u3("input", {
+                          type: "radio",
+                          name: group,
+                          value: choice ?? "mind",
+                          checked: draft.approach === choice,
+                          disabled: ctx.busy,
+                          onChange: () => setDraft({ ...draft, approach: choice })
+                        }, undefined, false, undefined, this),
+                        /* @__PURE__ */ u3("span", {
+                          class: "lre-gm-minds-choice-text",
+                          children: [
+                            /* @__PURE__ */ u3("span", {
+                              class: "lre-gm-minds-choice-name",
+                              children: [
+                                choice === null ? "Their mind decides" : APPROACH_LABEL[choice],
+                                choice === current.approach ? /* @__PURE__ */ u3(Badge, {
+                                  children: "Now"
+                                }, undefined, false, undefined, this) : null
+                              ]
+                            }, undefined, true, undefined, this),
+                            /* @__PURE__ */ u3("span", {
+                              class: "lre-gm-minds-choice-help",
+                              children: choice === null ? "As the moment and what they know lead them." : APPROACH_NOTE[choice]
+                            }, undefined, false, undefined, this)
+                          ]
+                        }, undefined, true, undefined, this)
+                      ]
+                    }, choice ?? "mind", true, undefined, this))
+                  ]
+                }, undefined, true, undefined, this)
+              }, undefined, false, undefined, this)
+            ]
+          }, undefined, true, undefined, this),
+          /* @__PURE__ */ u3(Submit, {
+            ctx,
+            ready: op !== null && changed,
+            icon: "check",
+            invalid: op === null ? `At most ${MIND_TEXT_CAPS.gmIntent} characters.` : undefined,
+            children: op !== null && changed && draft.text.trim() === "" && draft.approach === null ? "Clear intent" : "Save"
+          }, undefined, false, undefined, this)
+        ]
+      }, undefined, true, undefined, this),
+      c.intent && clear ? /* @__PURE__ */ u3(Section, {
+        title: "Clear",
+        children: [
+          /* @__PURE__ */ u3("p", {
+            class: "lre-gm-note",
+            children: "Clears your intent: their mind decides for itself again. The edit's Undo brings it back."
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3(Button, {
+            variant: "danger",
+            icon: "trash",
+            disabled: ctx.busy,
+            onClick: () => send(ctx, clear, props.onBack),
+            children: "Clear intent"
+          }, undefined, false, undefined, this)
+        ]
+      }, undefined, true, undefined, this) : null
+    ]
+  }, undefined, true, undefined, this);
 }
 function NotePage(props) {
   const { ctx, c, note } = props;
@@ -43328,6 +43625,7 @@ function decodeMinds(value) {
     tokens: num(t.tokens),
     prompt: oneOf(t.prompt, ["world", "override", "default"], "default"),
     pinned: list(t.pinned, (p) => ({ title: str(p.title), tokens: num(p.tokens), cut: p.cut === true })),
+    activated: list(t.activated, (p) => ({ title: str(p.title), tokens: num(p.tokens), cut: p.cut === true })),
     notes: strings(t.notes)
   }));
 }
@@ -43562,7 +43860,7 @@ function ContextPanel(props) {
                   tone: MIND_OUTCOME[m.outcome].tone,
                   children: MIND_OUTCOME[m.outcome].text
                 }, undefined, false, undefined, this),
-                children: (m.pinned ?? []).length > 0 || (m.notes ?? []).length > 0 ? /* @__PURE__ */ u3("div", {
+                children: (m.pinned ?? []).length > 0 || (m.activated ?? []).length > 0 || (m.notes ?? []).length > 0 ? /* @__PURE__ */ u3("div", {
                   class: "lre-gm-minds-pinned",
                   "data-lre-mind-pins": true,
                   children: [
@@ -43570,6 +43868,12 @@ function ContextPanel(props) {
                       children: [
                         "Pinned lore: ",
                         (m.pinned ?? []).map((p) => `${p.title} (${p.tokens} tok${p.cut ? ", cut" : ""})`).join(", ")
+                      ]
+                    }, undefined, true, undefined, this) : null,
+                    (m.activated ?? []).length > 0 ? /* @__PURE__ */ u3("span", {
+                      children: [
+                        "Lore the turn activated: ",
+                        (m.activated ?? []).map((p) => `${p.title} (${p.tokens} tok${p.cut ? ", cut" : ""})`).join(", ")
                       ]
                     }, undefined, true, undefined, this) : null,
                     (m.notes ?? []).map((n) => /* @__PURE__ */ u3("p", {
@@ -44927,11 +45231,10 @@ class ProtocolClient {
     this.agentsListeners.add(listener);
     return () => this.agentsListeners.delete(listener);
   }
-  presetId = undefined;
   visible = () => true;
   open(chatId) {
     this.update({ chatId, rev: null, view: null, status: chatId === null ? "closed" : "syncing", resyncs: 0, activity: null, canStop: this.state.canStop });
-    const reply = this.request({ type: "lre.hello", chatId, viewing: chatId !== null && this.visible(), ...this.presetId !== undefined ? { presetId: this.presetId } : {} });
+    const reply = this.request({ type: "lre.hello", chatId, viewing: chatId !== null && this.visible() });
     reply.then((message) => {
       if (message.type === "lre.error" && this.state.chatId === chatId) {
         this.update({ ...this.state, status: "closed" });
@@ -46868,13 +47171,6 @@ function setup(ctx) {
   }));
   const openActive = (chatId) => switchChat(app, chatId);
   if (ctx.state) {
-    client.presetId = ctx.state.get("loom.activePresetId") ?? null;
-    cleanups.push(ctx.state.subscribe("loom.activePresetId", (presetId) => {
-      if ((presetId ?? null) === client.presetId)
-        return;
-      client.presetId = presetId ?? null;
-      app.request({ type: "lre.preset", op: "active", presetId: client.presetId });
-    }));
     cleanups.push(ctx.state.subscribe("chat.active", (value) => openActive(value.chatId)));
   } else {
     for (const event of ["CHAT_CHANGED", "CHAT_SWITCHED"])

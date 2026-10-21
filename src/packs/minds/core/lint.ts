@@ -11,9 +11,10 @@ import type { Registry } from "../../../engine/registry-impl";
 import { selectorProblems } from "../../../engine/selector";
 
 const WEIGHT_KEYS = ["here", "nearby", "mentioned", "regard", "knows", "owner", "track", "rule", "pending", "recent"] as const;
-const MEMORY_PARTS: Readonly<Record<string, Readonly<Record<string, { range: readonly [number, number]; whole: boolean } | "bool">>>> = {
+/** Each memory setting: a number in its range (whole or not, and `"none"` allowed where it may have no limit), or a switch. */
+const MEMORY_PARTS: Readonly<Record<string, Readonly<Record<string, { range: readonly [number, number]; whole: boolean; none?: true } | "bool">>>> = {
   witness: { show: { range: MINDS_RANGES.show, whole: true } },
-  recall: { recent: { range: MINDS_RANGES.show, whole: true }, relevant: { range: MINDS_RANGES.show, whole: true }, tokens: { range: MINDS_RANGES.recallTokens, whole: true } },
+  recall: { recent: { range: MINDS_RANGES.show, whole: true }, relevant: { range: MINDS_RANGES.show, whole: true }, tokens: { range: MINDS_RANGES.recallTokens, whole: true, none: true } },
   notes: { show: { range: MINDS_RANGES.show, whole: true }, keep: { range: MINDS_RANGES.keep, whole: true } },
   commitments: { show: { range: MINDS_RANGES.show, whole: true } },
   salience: { halfLifeDays: { range: MINDS_RANGES.halfLifeDays, whole: false }, floor: { range: MINDS_RANGES.floor, whole: false } },
@@ -91,7 +92,7 @@ function configIssues(world: WorldDoc, registry: Registry | undefined): LintIssu
         if (!field) warn(`minds.memory.${part}.${key}`, `"${key}" isn't a ${part} setting; nothing reads it.`);
         else if (field === "bool") {
           if (typeof v !== "boolean") err(`minds.memory.${part}.${key}`, "On (true) or off (false); the default plays instead.");
-        } else number(`minds.memory.${part}.${key}`, v, field.range, field.whole);
+        } else if (!(field.none && v === "none")) number(`minds.memory.${part}.${key}`, v, field.range, field.whole);
       }
     }
   }

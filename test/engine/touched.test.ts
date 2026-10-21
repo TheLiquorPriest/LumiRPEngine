@@ -225,6 +225,7 @@ const EVERY_TYPE: LedgerEvent[] = [
   { type: "minds.consolidated", data: { entity: "dev", at: 0, notes: [], summary: "s2" } },
   { type: "minds.pin", data: { entity: "dev", level: "live" } },
   { type: "minds.refresh", data: { entity: "dev" } },
+  { type: "minds.intent", data: { entity: "dev", intent: { text: "t", approach: null } } },
   { type: "minds.skip", data: { from: 0, to: 60, beats: [{ at: 30, reason: "r", source: "scan" }] } },
 ];
 
