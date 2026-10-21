@@ -245,7 +245,7 @@ Version 1 · realism domain `castlife` · requires `gear`, `relationships`, `spa
 
 ### Events
 
-Its own: `castlife.decision`, `castlife.follow`, `castlife.invitation`, `castlife.need`, `castlife.routine`, `castlife.schedule`.
+Its own: `castlife.decision`, `castlife.follow`, `castlife.invitation`, `castlife.need`, `castlife.routine`, `castlife.schedule`, `castlife.skip_plan`.
 
 ### Proposals
 

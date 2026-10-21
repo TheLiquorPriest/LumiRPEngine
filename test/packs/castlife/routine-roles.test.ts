@@ -8,7 +8,7 @@ import { describe, expect, test } from "bun:test";
 import { hashJson } from "../../../src/shared/hash";
 import type { EventRef, LedgerEvent } from "../../../src/shared/ledger";
 import { FIDELITIES, type Fidelity } from "../../../src/shared/minds";
-import { DEFAULT_ROUTINE_ROLES, ROUTINE_ROLES, type RoutineEditOp, type RoutineRole } from "../../../src/shared/routines";
+import { DEFAULT_ROUTINE_ROLES, ROUTINE_ROLES, type RoutineEditOp, type RoutineRole, type SkipLife } from "../../../src/shared/routines";
 import { resolveEdit } from "../../../src/engine/edits";
 import { advance, catchUp } from "../../../src/engine/simulate";
 import type { WorldState } from "../../../src/engine/state";
@@ -33,6 +33,11 @@ function movedBy(w: Working, run: (w: Working, to: number) => void): boolean {
   return whereabouts(w, "maya")[0] !== "cafe";
 }
 
+// Decision (issue #53, skip lives): an informative routine is lived in a skip whose life for them is
+// `routine` (Background's by default), so the role tests below have every level stay put in skips, to
+// show what the role alone does.
+const STAY: Record<Fidelity, SkipLife> = { live: "stay", near: "stay", far: "stay", background: "stay" };
+
 describe("the cast's routine informs; it doesn't move them", () => {
   test("Live, Near and Far characters stay where the story has them through turns and every skip, with the POV or away from it", () => {
     for (const level of ["live", "near", "far"] satisfies Fidelity[]) {
@@ -53,7 +58,7 @@ describe("the cast's routine informs; it doesn't move them", () => {
   test("each level's role is the world's to set; only an enforced routine moves anyone", () => {
     for (const level of FIDELITIES) {
       for (const role of ROUTINE_ROLES) {
-        const w = town((wd) => withRoutines(wd, [], { roles: { ...DEFAULT_ROUTINE_ROLES, [level]: role } }));
+        const w = town((wd) => withRoutines(wd, [], { roles: { ...DEFAULT_ROUTINE_ROLES, [level]: role }, skips: STAY }));
         record(w, [pin("maya", level)]);
         expect({ level, role, moved: movedBy(w, RUNS["a Timelapse the POV's routine runs in"]!) }).toEqual({ level, role, moved: role === "enforced" });
       }
@@ -69,7 +74,7 @@ describe("the cast's routine informs; it doesn't move them", () => {
 
   test("the GM sets one character's role in a chat; null returns them to their level's", () => {
     const roled = (level: Fidelity, ops: RoutineEditOp[]): boolean => {
-      const w = town();
+      const w = town((wd) => withRoutines(wd, [], { skips: STAY }));
       record(w, [pin("maya", level)]);
       for (const op of ops) gmEdit(w, [op]);
       return movedBy(w, RUNS["a Timelapse the POV's routine runs in"]!);

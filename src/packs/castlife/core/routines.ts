@@ -402,29 +402,42 @@ export function withPov(ctx: ReadContext, who: EntityId): boolean {
 }
 
 /**
+ * Whether someone's routine moves them in this slot (DESIGN §8): an enforced one always; an
+ * informative one only in a time skip (`skip`: a palette Timelapse, a typed span, a narrated skip)
+ * they spend on their routine (`skipLifeOf`). Never an off one.
+ */
+export function routineLived(ctx: ReadContext, who: EntityId, skip: boolean): boolean {
+  return routineRole(ctx, who) === "enforced" || (skip && skipLifeOf(ctx, who) === "routine");
+}
+
+/**
  * Whether a routine or a schedule must leave someone's place or activity as it is (DESIGN §8): a
  * routine is a default, never authority, so it never moves anyone out of a scene with the POV, and
- * moves no one whose routine isn't enforced (`routineRole`: by default the Live, Near and Far cast,
- * whose minds, story plans and the narration decide what they do, in turns and in every skip alike).
- * An enforced routine gives way to the GM's intent for anyone but a Background character (for
- * anyone, story first). Otherwise it yields to what the story set: when `who` isn't where the routine
- * last had them (`expected`), something else put them there. Between its own edges it never moves
- * them then; at an edge it does under routine first, never under story first, and under balanced
- * only where the story's day ends (`release`: going to bed, or a schedule's first slot of a day). The
- * POV has no role: its routine runs only in a timelapse that follows it, and yields to what the player
- * or the narration set as anyone's does. A scene with the POV holds whoever is in it while the story
- * holds the POV (`scene`: an ordinary turn, a span the player's words spend, a narrated skip, a
- * palette Timelapse that holds it); while time runs on its own (`scene` false: a timelapse the POV's
- * routine runs in) there's no scene to keep them in, so a housemate still goes to work and a trip still leaves.
+ * moves no one whose routine it doesn't live (`routineLived`: by default the Live, Near and Far cast's
+ * is lived only in a skip they spend on it; otherwise their minds, story plans and the narration
+ * decide what they do). An enforced routine gives way to the GM's intent for anyone but a Background
+ * character (for anyone, story first); a skip's always does, and never takes anyone into the scene the
+ * story holds with the POV (`to`, the place it would take them). Otherwise it yields to what the
+ * story set: when `who` isn't where the routine last had them (`expected`), something else put them
+ * there. Between its own edges it never moves them then; at an edge it does under routine first,
+ * never under story first, and under balanced only where the story's day ends (`release`: going to
+ * bed, or a schedule's first slot of a day). The POV has no role: its routine runs only in a timelapse
+ * that follows it, and yields to what the player or the narration set as anyone's does. A scene with
+ * the POV holds whoever is in it while the story holds the POV (`scene`: an ordinary turn, a span the
+ * player's words spend, a narrated skip, a palette Timelapse that holds it); while time runs on its
+ * own (`scene` false: a timelapse the POV's routine runs in) there's no scene to keep them in, so a
+ * housemate still goes to work and a trip still leaves.
  */
-export function routineYields(ctx: ReadContext, who: EntityId, field: "place" | "activity", expected: JsonValue | null, opts: { edge: boolean; release?: boolean; scene?: boolean }): boolean {
+export function routineYields(ctx: ReadContext, who: EntityId, field: "place" | "activity", expected: JsonValue | null, opts: { edge: boolean; release?: boolean; scene?: boolean; skip?: boolean; to?: JsonValue | null }): boolean {
   if (opts.scene !== false && withPov(ctx, who)) return true;
   const pov = who === ctx.world.pov;
   const awareness = followOf(ctx, who).awareness;
   if (!pov) {
-    if (routineRole(ctx, who) !== "enforced") return true;
+    if (!routineLived(ctx, who, opts.skip === true)) return true;
+    const enforced = routineRole(ctx, who) === "enforced";
     const tier = optionalQuery(ctx, "minds.tier")?.(ctx, who) ?? "background";
-    if ((tier !== "background" || awareness === "story_first") && optionalQuery(ctx, "minds.intent")?.(ctx, who) === true) return true;
+    if ((!enforced || tier !== "background" || awareness === "story_first") && optionalQuery(ctx, "minds.intent")?.(ctx, who) === true) return true;
+    if (!enforced && opts.scene !== false && typeof opts.to === "string" && opts.to === placeOfEntity(ctx.state, ctx.world.pov)) return true;
   }
   const current = own(ctx.state.entities, who)?.fields[field];
   const diverged = expected === null || expected === undefined ? !opts.edge : current !== undefined && current !== expected;

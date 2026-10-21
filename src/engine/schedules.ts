@@ -254,13 +254,13 @@ function firstOfDay(instant: ScheduleInstant): boolean {
  * Timelapse that holds the POV) leaves the POV's own place and activity to the player: its routine
  * moves it only when time runs on its own and follows it (a timelapse), DESIGN §9.2. A place or
  * activity edge gives way to the story (Cast life's `castlife.yields`, DESIGN §8): someone whose
- * routine isn't enforced (by default the Live, Near and Far cast: their schedules are context only),
- * someone the story put elsewhere than the schedule last had them, and while the story holds the POV
- * (`povRoutine: false`) anyone in a scene with it, stays as they are; and to a chat that took them off
- * the schedule (`castlife.schedule_off`). Every other target (weather, prices, a business's hours)
- * runs whatever anyone's role, as money flows do.
+ * routine isn't lived (by default the Live, Near and Far cast's, outside a skip they spend on it:
+ * `timelapse`; their schedules are context only), someone the story put elsewhere than the schedule
+ * last had them, and while the story holds the POV (`povRoutine: false`) anyone in a scene with it,
+ * stays as they are; and to a chat that took them off the schedule (`castlife.schedule_off`). Every
+ * other target (weather, prices, a business's hours) runs whatever anyone's role, as money flows do.
  */
-export function instantEvents(reg: Registry, ctx: ReadContext, instant: ScheduleInstant, runSeed: string, opts: { povRoutine?: boolean } = {}): LedgerEvent[] {
+export function instantEvents(reg: Registry, ctx: ReadContext, instant: ScheduleInstant, runSeed: string, opts: { povRoutine?: boolean; timelapse?: boolean } = {}): LedgerEvent[] {
   const { schedule } = instant;
   const out: LedgerEvent[] = [];
   const domain = scheduleDomain(reg, schedule);
@@ -299,7 +299,7 @@ export function instantEvents(reg: Registry, ctx: ReadContext, instant: Schedule
       // the slot of this one handing over, else rest; before an end, this slot's own value.
       const lower = mine.filter((r) => rank !== null && r.rank > rank).sort((a, b) => a.rank - b.rank)[0];
       const expected = instant.edge === "end" ? (slot.value ?? null) : lower ? (lower.slot.value ?? null) : valueBefore(reg, ctx, instant, entity);
-      if (yields(ctx, entity, schedule.target === "place" ? "place" : "activity", expected, firstOfDay(instant), opts.povRoutine === false)) continue;
+      if (yields(ctx, entity, schedule.target === "place" ? "place" : "activity", expected, firstOfDay(instant), opts.povRoutine === false, opts.timelapse === true, schedule.target === "place" ? value : null)) continue;
     }
     out.push({ type: "set", entity, field: schedule.target, value });
   }

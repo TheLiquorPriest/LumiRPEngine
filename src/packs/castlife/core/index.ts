@@ -35,7 +35,7 @@ import { ENGINE_EVENTS } from "../../../engine/engine-pack";
 import { labelOf, mutableSlice, numOf, objOf, optionalQuery, optionalService, sliceOf, sliceRecord, strOf, own } from "../../../engine/pack-kit";
 import { planDay, tieKey, type FixedBlock, type PlanBlock, type PlanOption } from "../../../engine/plan-day";
 import type { AgentInstant, EventTypeDef, PackDef, ReadContext, Rejection, SlotInfo } from "../../../engine/registry";
-import type { PlayerBlock, RoutineEditOp, RoutineSociability } from "../../../shared/routines";
+import type { PlayerBlock, RoutineEditOp, RoutineSociability, SkipBlock } from "../../../shared/routines";
 import { blockShapeProblems, isOff, ROUTINE_AWARENESS, ROUTINE_EVENTS, ROUTINE_MODES, ROUTINE_ROLES, routineSettingsOf, SKIP_LIVES } from "../../../shared/routines";
 import { createRng, type Rng } from "../../../engine/rng";
 import { hashParts } from "../../../shared/hash";
@@ -53,7 +53,7 @@ import { commitments, isPlayed, laidPlans, livesPlans, planTier, plansOf, type C
 import { cueIssues, cuesFor } from "./cues";
 import { birthdayOf, FOND, occasionOf } from "./occasions";
 import { homeOf, placeOfType } from "./places";
-import { activeBlocks, blockOnDay, blockPlace, chatScheduleDefs, followOf, ROUTINE_OPTION, routineDay, routineRole, routinesLint, routineYields, scheduleOff, schedulesLint, withPov, worldRoutines } from "./routines";
+import { activeBlocks, blockOnDay, blockPlace, chatScheduleDefs, followOf, ROUTINE_OPTION, routineDay, routineLived, routineRole, routinesLint, routineYields, scheduleOff, schedulesLint, skipLifeOf, skipPlanOf, withPov, worldRoutines } from "./routines";
 import { ROUTINE_EFFECT, routineChannel, storyEvents } from "./story";
 import { usualRoutineHints } from "./usual";
 
@@ -367,8 +367,8 @@ function blockActivity(activity: string): string {
  * Someone lives the block of their day that holds from `at` (DESIGN §8): what the story established
  * wins over it. A block of their own plan (the story's) moves them unless they're in a scene with the
  * POV. Any other block of their day (their routine, their schedules, the basic needs, what the world
- * grounds) moves only someone whose routine is enforced (`routineRole`): for anyone else it is context
- * only. It moves them at its own start (`edge`), as `routineYields` decides against
+ * grounds) moves only someone whose routine is lived now (`routineLived`: enforced, or informative in
+ * a skip they spend on it, `skip`): for anyone else it is context only. It moves them at its own start (`edge`), as `routineYields` decides against
  * where their routine had them since the step before (`from`): on an edge, every block from the one
  * that held at `from` (the day before's, across midnight) to the one before this one, since the
  * blocks between were lived at their own moments in a timelapse, or not at all in a catch-up; between
@@ -380,7 +380,7 @@ function blockActivity(activity: string): string {
 function liveBlock(ctx: ReadContext, who: EntityId, plan: DayPlan, block: DayPlan["blocks"][number], from: number, at: number, scene: boolean, skip: boolean): LedgerEvent[] {
   const activity = blockActivity(block.activity);
   if (block.option.startsWith("plan:")) return scene && withPov(ctx, who) ? [] : takeUp(ctx, who, block.place, activity, at, block.end);
-  if (who !== ctx.world.pov && routineRole(ctx, who) !== "enforced") return [];
+  if (who !== ctx.world.pov && !routineLived(ctx, who, skip)) return [];
   const edge = block.start > from && block.start <= at;
   const index = plan.blocks.indexOf(block);
   const earlier = from < clockAt(calendarOf(ctx.world), plan.day, 0) ? [...dayPlan(ctx, who, plan.day - 1).blocks, ...plan.blocks.slice(0, index)] : plan.blocks.slice(0, index);
@@ -395,13 +395,14 @@ function liveBlock(ctx: ReadContext, who: EntityId, plan: DayPlan, block: DayPla
   const doings = [...had.map((b) => blockActivity(b.activity)), ...(typeof resting === "string" ? [resting] : [])];
   const wasPlace = places.find((p) => p === e?.fields.place) ?? places[0] ?? [...earlier].reverse().find((b) => b.place !== null)?.place ?? home;
   const wasDoing = doings.find((d) => d === e?.fields.activity) ?? doings[0] ?? null;
-  const opts = { edge, release: block.activity === "sleep", scene };
   const target = block.place ?? (edge && earlier.at(-1)?.place ? home : null);
+  // The place the block takes them to rides along, so a skip keeps them, block and all, out of the scene the story holds.
+  const opts = { edge, release: block.activity === "sleep", scene, skip, to: target };
   const place = target !== null && !routineYields(ctx, who, "place", wasPlace, opts) ? target : null;
   const doing = routineYields(ctx, who, "activity", wasDoing, opts) ? null : activity;
-  // A Live or Near character's enforced routine never stops a skip for them: their arrival only notes.
+  // A routine never stops a skip for the cast the story is about, nor for anyone it moves only in a skip: their arrival only notes.
   const tier = skip && place !== null ? (optionalQuery(ctx, "minds.tier")?.(ctx, who) ?? "background") : "background";
-  return takeUp(ctx, who, place, doing, at, undefined, tier === "live" || tier === "near");
+  return takeUp(ctx, who, place, doing, at, undefined, tier === "live" || tier === "near" || (skip && who !== ctx.world.pov && routineRole(ctx, who) !== "enforced"));
 }
 
 /**
@@ -510,12 +511,13 @@ function invitation(ctx: ReadContext, who: EntityId, ask: Ask): LedgerEvent[] {
 
 /**
  * An agent's moments between slot steps (DESIGN §8, §24.8, `ProcessDef.instants`): each block of
- * their plans starting or ending inside the slot; while their routine is enforced (`routineRole`), the
+ * their plans starting or ending inside the slot; while their routine is lived (`routineLived`), the
  * start of every other block of their day inside it, so a fixed block happens at its time and dinner
  * at dinner time, unless a plan's end hands them to it or it is a trip (`stepTrips` takes them away);
- * and from Cast life 4 the moment something of theirs asks the POV along. The POV's day only while
- * its routine runs (`SlotInfo.povRoutine`). Laid from the plans, the routine and the commitments
- * alone, so every segment of a timelapse finds the same.
+ * in a skip the model planned for them, the start of each of its blocks (`skipBlocksOf`); and from
+ * Cast life 4 the moment something of theirs asks the POV along. The POV's day only while its routine
+ * runs (`SlotInfo.povRoutine`). Laid from the plans, the routine, the commitments and the recorded
+ * skip plan alone, so every segment of a timelapse finds the same.
  */
 function planMoments(ctx: ReadContext, who: EntityId, slot: SlotInfo): AgentInstant[] {
   const inside = (at: number): boolean => at > slot.start && at < slot.end;
@@ -527,7 +529,8 @@ function planMoments(ctx: ReadContext, who: EntityId, slot: SlotInfo): AgentInst
       if (inside(c.end)) out.push({ at: c.end, key: `end:${c.plan}` });
     }
   }
-  if (who === ctx.world.pov ? slot.povRoutine !== false : routineRole(ctx, who) === "enforced") {
+  for (const b of skipBlocksOf(ctx, who, slot)) if (inside(b.start)) out.push({ at: b.start, key: `skip:${b.start}` });
+  if (who === ctx.world.pov ? slot.povRoutine !== false : routineLived(ctx, who, slot.timelapse === true)) {
     const cal = calendarOf(ctx.world);
     const handed = new Set(out.flatMap((m) => (m.key.startsWith("end:") ? [m.at] : [])));
     const lived = livedAtMinute(ctx, who, slot);
@@ -596,13 +599,37 @@ function livedAtMinute(ctx: ReadContext, who: EntityId, slot: SlotInfo): (block:
 }
 
 /**
+ * The blocks the model planned for someone in this slot's skip (DESIGN §8, `castlife.skip_plan`),
+ * while they spend skips as it plans: none outside a skip or for anyone else, and none for someone
+ * the latest plan didn't name (its call failed, or it left them out), who stays.
+ */
+function skipBlocksOf(ctx: ReadContext, who: EntityId, slot: SlotInfo): readonly SkipBlock[] {
+  if (slot.timelapse !== true || skipLifeOf(ctx, who) !== "model") return [];
+  return skipPlanOf(ctx.state)?.plans.find((p) => p.entity === who)?.blocks ?? [];
+}
+
+/**
+ * Someone takes up a block the model planned for their skip (DESIGN §8), as an enforced routine's
+ * block is taken up: not while a story plan, a trip or an appointment of theirs holds the moment, nor
+ * against the GM's intent; never out of the scene the story holds with the POV (`scene`) or into it;
+ * and their arrival where the POV is only notes.
+ */
+function liveSkipBlock(ctx: ReadContext, who: EntityId, block: SkipBlock, at: number, scene: boolean): LedgerEvent[] {
+  if (commitments(ctx, who, at, at + 1).some((c) => c.kind === "plan" || c.kind === "trip" || c.kind === "appointment")) return [];
+  if (optionalQuery(ctx, "minds.intent")?.(ctx, who) === true) return [];
+  if (scene && (withPov(ctx, who) || block.place === placeOfEntity(ctx.state, ctx.world.pov))) return [];
+  return takeUp(ctx, who, block.place, block.activity, at, undefined, true);
+}
+
+/**
  * What an agent does at a moment: the invitation goes out; at a block of their day starting, they
- * live it as a slot step would (`liveBlock`, so the story still comes first); or at their own plan's
- * start or end they take up the block of their day that holds from then (the plan's own, held for
- * its span; after its end what follows, home when that names no place), unless they are in a scene
- * with the POV while the story holds the POV (`SlotInfo.povRoutine` false). Someone whose routine
- * isn't enforced takes up only their plans: after one they stay where it left them, at rest, until
- * the story moves them.
+ * live it as a slot step would (`liveBlock`, so the story still comes first); at a block the model
+ * planned for their skip starting, they take it up (`liveSkipBlock`); or at their own plan's start or
+ * end they take up the block of their day that holds from then (the plan's own, held for its span;
+ * after its end what follows, home when that names no place), unless they are in a scene with the POV
+ * while the story holds the POV (`SlotInfo.povRoutine` false). Someone whose routine isn't lived
+ * takes up only their plans: after one they take up the skip's planned block holding then, if any,
+ * else stay where it left them, at rest, until the story moves them.
  */
 function atPlanMoment(ctx: ReadContext, who: EntityId, moment: AgentInstant, slot: SlotInfo): LedgerEvent[] {
   const cal = calendarOf(ctx.world);
@@ -611,6 +638,11 @@ function atPlanMoment(ctx: ReadContext, who: EntityId, moment: AgentInstant, slo
     return ask ? invitation(ctx, who, ask) : [];
   }
   const scene = slot.povRoutine === false;
+  const planned = skipBlocksOf(ctx, who, slot);
+  if (moment.key.startsWith("skip:")) {
+    const starting = planned.find((b) => `skip:${b.start}` === moment.key);
+    return starting ? liveSkipBlock(ctx, who, starting, moment.at, scene) : [];
+  }
   const plan = dayPlan(ctx, who, dateAt(cal, moment.at).dayIndex);
   if (moment.key.startsWith("block:")) {
     const starting = plan.blocks.find((b) => b.start === moment.at);
@@ -621,7 +653,9 @@ function atPlanMoment(ctx: ReadContext, who: EntityId, moment: AgentInstant, slo
   }
   const block = plan.blocks.find((b) => b.start <= moment.at && moment.at < b.end);
   if (!block || (scene && withPov(ctx, who))) return [];
-  if (who !== ctx.world.pov && !block.option.startsWith("plan:") && routineRole(ctx, who) !== "enforced") {
+  if (who !== ctx.world.pov && !block.option.startsWith("plan:") && !routineLived(ctx, who, slot.timelapse === true)) {
+    const holding = planned.find((b) => b.start <= moment.at && moment.at < b.end);
+    if (holding) return liveSkipBlock(ctx, who, holding, moment.at, scene);
     const rest = fieldDef(ctx.registry, ctx.world, own(ctx.state.entities, who)?.kind ?? "", "activity")?.default;
     return takeUp(ctx, who, null, typeof rest === "string" ? rest : null, moment.at);
   }
@@ -657,6 +691,9 @@ function stepAgent(slot: SlotInfo, ctx: ReadContext, rngFor: (entity: EntityId) 
     }
   }
   if (who !== pov || slot.povRoutine !== false) out.push(...liveBlock(ctx, who, plan, block, slot.start, slot.end, slot.povRoutine === false, slot.timelapse === true));
+  // In a skip the model planned for them, the planned block holding from the slot's end (taken up at its start already, unless the story held it then).
+  const planned = skipBlocksOf(ctx, who, slot).find((b) => b.start <= slot.end && slot.end < b.end);
+  if (planned) out.push(...liveSkipBlock(ctx, who, planned, slot.end, slot.povRoutine === false));
   out.push(...planOutcomes(ctx, who, slot));
   if (level < 4) return out;
 
@@ -1251,8 +1288,8 @@ declare module "../../../engine/registry" {
     "castlife.commitments": (ctx: ReadContext, who: EntityId, start: number, end: number) => CommitmentBlock[];
     /** Invitations to the POV still open (`invited`), each with its host and as `viewer` reads it ("Danny invites you to Bluebird Coffee at 19:00."). */
     "castlife.invitations": (ctx: ReadContext, viewer: EntityId) => { host: EntityId; text: string }[];
-    /** Whether a schedule's edge must leave someone's place or activity as the story has it (`routineYields`: their routine role, `release` where a balanced routine takes the day back, `scene` false while time runs on its own). */
-    "castlife.yields": (ctx: ReadContext, who: EntityId, field: "place" | "activity", expected: JsonValue | null, release: boolean, scene: boolean) => boolean;
+    /** Whether a schedule's edge must leave someone's place or activity as the story has it (`routineYields`: whether their routine is lived, `release` where a balanced routine takes the day back, `scene` false while time runs on its own, `skip` in a time skip, `to` the place it would take them). */
+    "castlife.yields": (ctx: ReadContext, who: EntityId, field: "place" | "activity", expected: JsonValue | null, release: boolean, scene: boolean, skip: boolean, to: JsonValue | null) => boolean;
     /** Whether the chat took someone off a schedule at `at` (`schedule_override`). */
     "castlife.schedule_off": (ctx: ReadContext, who: EntityId, schedule: string, at: number) => boolean;
     /** The chat's own versions of schedules, each owned by the one person it's for. */
@@ -1269,7 +1306,7 @@ export const castlifePack: PackDef = {
   register(r) {
     for (const def of EVENTS) r.event(def);
     r.service("castlife.edit", routineEdit);
-    r.query("castlife.yields", (ctx, who, field, expected, release, scene) => routineYields(ctx, who, field, expected, { edge: true, release, scene }));
+    r.query("castlife.yields", (ctx, who, field, expected, release, scene, skip, to) => routineYields(ctx, who, field, expected, { edge: true, release, scene, skip, to }));
     r.query("castlife.schedule_off", (ctx, who, schedule, at) => scheduleOff(ctx.state, who, schedule, at));
     r.query("castlife.chat_schedules", chatScheduleDefs);
     r.process({ id: "castlife.agents", domain: "castlife", minLevel: 3, scope: "agent", step: (slot, ctx, rng, agent) => (agent ? stepAgent(slot, ctx, rng, agent) : []), instants: planMoments, atInstant: atPlanMoment });
