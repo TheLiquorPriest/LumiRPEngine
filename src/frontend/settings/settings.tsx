@@ -248,7 +248,7 @@ export function Settings() {
     ) : page === "realism" ? (
       <RealismPage settings={settings} patch={patch} busy={busy} />
     ) : page === "checks" ? (
-      <ChecksPage settings={settings} patch={patch} busy={busy} />
+      <ChecksPage settings={settings} skills={view?.controls?.skills ?? []} patch={patch} busy={busy} />
     ) : page === "time" ? (
       <TimePage settings={settings} patch={patch} busy={busy} />
     ) : page === "extraction" ? (

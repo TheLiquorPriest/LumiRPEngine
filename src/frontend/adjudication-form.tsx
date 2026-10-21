@@ -53,7 +53,8 @@ export function policyLines(p: AdjudicationDef): string[] {
   ].filter((line) => line !== "");
 }
 
-function Choice<T extends string>(props: { label: string; help: string; value: T; labels: Record<T, string>; disabled?: boolean; onChange(value: T): void }) {
+/** A labelled select over a closed set of values, with a short help under it; the inferred-checks control reuses it. */
+export function Choice<T extends string>(props: { label: string; help: string; value: T; labels: Record<T, string>; disabled?: boolean; onChange(value: T): void }) {
   const values = Object.keys(props.labels) as T[];
   return (
     <label class="lre-field">

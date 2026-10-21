@@ -77,6 +77,8 @@ textarea.lre-input.lre-gm-prose{font-family:inherit;font-size:var(--lre-fs-md)}
 .lre-gm-truth-stage{display:flex;align-items:center;gap:var(--lre-s2);font-size:var(--lre-fs-sm);font-weight:600;color:var(--lre-muted)}
 .lre-gm-truth>p{margin:2px 0 0}
 .lre-gm-lines{margin:0;padding-left:18px;display:flex;flex-direction:column;gap:var(--lre-s1);font-size:var(--lre-fs-sm)}
+/* a control's fields that mean nothing under its current choice (inferred checks while Off): greyed as a whole, the host's selects and inputs not dimming on their own */
+.lre-gm-dimmed{opacity:.55}
 .lre-gm-preview-lines{margin:var(--lre-s1) 0 0;padding:0;list-style:none;display:flex;flex-direction:column;gap:var(--lre-s1)}
 .lre-gm-preview-lines>li{display:flex;align-items:flex-start;gap:var(--lre-s2)}
 .lre-gm-preview-lines .lre-icon{margin-top:2px;color:var(--lre-accent-text)}

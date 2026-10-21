@@ -4,6 +4,7 @@
 
 import { CLASS_TRAITS, type AccountView, type FinanceView, type JournalLine } from "../../src/shared/finance";
 import { CLAIM_PRESETS } from "../../src/shared/claims";
+import { readInferred } from "../../src/shared/inferred";
 import type { DiagCall, DiagRecord } from "../../src/shared/diagnostics";
 import type { JsonObject, JsonValue } from "../../src/shared/json";
 import { hasOwn, isRecord } from "../../src/shared/json";
@@ -25,7 +26,7 @@ import { macroReview, WORLD_COLLECTIONS } from "../../src/backend/worlds";
 import type { StudioCase } from "./fixtures";
 import { DECLINED_PURCHASE, extractionView, freshFixture, gmFixture, pausedFixture, portAlderMoney, settingsFixture, starterMap, stateFixture, studioOfferFixture, UPGRADE_PREVIEW, WORLDS, worldFixture } from "./fixtures";
 import { combatFixture } from "./combat-fixture";
-import { isWorldDoc, lintWorld, migrateWorld, previewSheet } from "../../src/engine/authoring";
+import { isWorldDoc, lintWorld, migrateWorld, previewSheet, previewSkills } from "../../src/engine/authoring";
 import { createRegistry } from "../../src/engine/registry-impl";
 import { formulaFunctions } from "../../src/engine/scope";
 import { ALL_PACKS } from "../../src/packs/index";
@@ -514,6 +515,10 @@ export class MockBackend {
           this.result(reqId, "lre.marker", { pending: false, preview: { lines } });
           return;
         }
+        if (message.kind === "infer" && message.preview) {
+          this.result(reqId, "lre.marker", { pending: false, preview: { lines: [{ text: "Typed attempts are read as checks this way from the next turn; earlier turns keep how theirs were read.", tone: "info" }] } });
+          return;
+        }
         this.result(reqId, "lre.marker", { pending: false });
         this.mutate((view) => {
           if (message.kind === "time" && message.control === "pause" && view.hud && view.controls) {
@@ -526,6 +531,7 @@ export class MockBackend {
           }
           if (message.kind === "resolve" && view.controls && "all" in message.scope) view.controls.realism.levels[message.domain] = message.to;
           if (message.kind === "adjudicate" && view.controls) view.controls.adjudication = message.to;
+          if (message.kind === "infer" && view.controls) view.controls.inferred = structuredClone(message.to);
           if (message.kind === "claims" && view.controls) view.controls.realism.claims = { ...message.to };
         }, 40);
         return;
@@ -548,6 +554,8 @@ export class MockBackend {
         if (isRecord(message.patch.realism) && message.patch.realism.preset && levels) next.realism.levels = { ...next.realism.levels, ...(levels as UserSettings["realism"]["levels"]) };
         // A named preset carries its own player claims, as the real settings store's do.
         if (isRecord(message.patch.realism) && message.patch.realism.preset && preset !== "custom") next.realism.claims = { ...CLAIM_PRESETS[preset] };
+        // A merge patch drops a policy's null skills list; the store reads it back as every skill.
+        next.inferred = readInferred(next.inferred);
         this.settings = next;
         this.result(reqId, "lre.settings.set", { settings: structuredClone(this.settings), extraction: extractionView(this.settings) });
         return;
@@ -611,9 +619,9 @@ export class MockBackend {
           case "upgrade":
             return this.result(reqId, "lre.world", {});
           case "sheet": {
-            // As the backend does: the draft with the unsaved ruleset, read on the POV unless another entity is named.
+            // As the backend does: the draft with the unsaved ruleset, read on the POV unless another entity is named, and the skills its sheet has.
             const world: WorldDoc = { ...structuredClone(this.draft), ruleset: isRecord(message.ruleset) ? (message.ruleset as unknown as WorldDoc["ruleset"]) : undefined };
-            return this.result(reqId, "lre.world", { sheet: previewSheet(REGISTRY, world, message.entity) });
+            return this.result(reqId, "lre.world", { sheet: previewSheet(REGISTRY, world, message.entity), skills: previewSkills(REGISTRY, world) });
           }
         }
         return;
