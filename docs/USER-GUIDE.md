@@ -339,7 +339,7 @@ If you change what *you* wrote earlier in the chat, every turn after it was buil
 - **Keep**: the later turns are re-checked against the edited message, as in the swipe case above, with a Keep report.
 - **Discard**: the later turns' records are removed for good. Their messages stay in the chat as plain text, and the world forgets what happened in them. This cannot be restored, not even after a restart.
 
-While the chat is paused, a new turn is written but gets no simulation (it is marked *degraded*), and fixes and confirmations are refused until you choose. If the edit lands while a reply is streaming, that reply is left unread.
+While the chat is paused, a new turn is written but gets no simulation (it is marked *degraded*), and fixes and confirmations are refused until you choose. If the edit lands while a reply is streaming, that reply is left unread. A swipe that finishes while the chat is paused carries none of the fixes and GM edits of the swipe it replaced: each gets a **Not carried** note in the Journal.
 
 **Edit and Send** on an earlier message works in a world chat as a branch: Lumiverse makes a new chat from the edited message, and its reply is that chat's latest. In place, the reply would be written onto the older message after yours, which the engine can't prepare, because Lumiverse can start only the last reply again. So an in-place Edit and Send on an earlier message stops with **The engine didn't finish, so nothing was generated**, and nothing is written: your edit stays and pauses the chat as above. Instead, use Edit and Send as a branch (Lumiverse's setting to branch on Edit and Send), or regenerate the last reply.
 

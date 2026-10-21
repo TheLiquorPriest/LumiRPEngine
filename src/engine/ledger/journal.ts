@@ -84,6 +84,9 @@ const REFUSED_KEPT = 8;
 /** A swipe an in-flight turn names by index (its plan's, or its target), deleted while the reply streamed. */
 const GONE_SWIPE = -1;
 
+/** Why a Re-run committed under a pause didn't carry a fix of the swipe it was made from (P3, L43). */
+const PAUSED_DROP = "the chat was paused";
+
 /** Why a read-elsewhere record refuses Undo and reads. Only the latest reply can be Re-run, so only it is offered one. */
 function readElsewhereRefusal(latest: boolean): string {
   const cause = "This reply was written while an earlier message or swipe it depended on changed, so switching back can't restore it.";
@@ -484,6 +487,10 @@ export class LedgerCore {
         }
       }
     }
+    // A swipe's source fixes are those live where it was made (P3, L43). Its plan takes that parent
+    // again; one that gets no plan (under a pause) keeps it, so the fixes it leaves are still named.
+    const swiped = input.targetMessageId && (input.kind === "swipe" || input.kind === "regenerate" || input.kind === "renarrate") ? observed.findIndex((m) => m.id === input.targetMessageId) : -1;
+    if (swiped >= 0) pending.parentPath = this.fold(observed.slice(0, swiped)).messages.at(-1)?.path ?? ROOT_PATH;
     j.pending[input.generationId] = pending;
   }
 
@@ -696,26 +703,48 @@ export class LedgerCore {
   }
 
   /**
+   * The swipe a Re-run was made from (the nearest earlier swipe of `target` holding a record) and
+   * its ✎ fixes and GM edits live on any of `parents`; null when it has none.
+   */
+  private rerunFixes(target: ChainMessage, swipeId: number, parents: readonly PathHash[]): { source: Rec; fixes: PostEntry[] } | null {
+    for (let s = swipeId - 1; s >= 0; s--) {
+      const source = target.ledger?.swipes[String(s)];
+      if (!source || isTombstoned(this.journal.tombstones, target.id, source)) continue;
+      const fixes = source.post.filter((e) => e.kind === "fix" && parents.some((parent) => isLive(e.at, parent, turnPath(source))));
+      return fixes.length > 0 ? { source, fixes } : null;
+    }
+    return null;
+  }
+
+  /**
    * A Re-run carries the live ✎ fixes and GM edits of the swipe it was made from (the nearest
    * earlier swipe holding a record) as P3 carries a Re-narrate's: same `seq`s and undos, anchored at
    * the new record's path, each re-validated after the new turn's events. One that no longer applies
    * is dropped with a Journal note.
    */
   private carryFixes(rec: Rec, target: ChainMessage | undefined, swipeId: number, prefix: { state: WorldState; world: WorldDoc; parent: PathHash }): void {
-    if (!target) return;
-    let source: Rec | undefined;
-    for (let s = swipeId - 1; s >= 0 && !source; s--) {
-      const candidate = target.ledger?.swipes[String(s)];
-      if (candidate && !isTombstoned(this.journal.tombstones, target.id, candidate)) source = candidate;
-    }
     // The fixes in force on the chain the Re-run was read on (the one it was planned on, when it could be rebuilt).
-    const fixes = source ? source.post.filter((e) => e.kind === "fix" && isLive(e.at, prefix.parent, turnPath(source))) : [];
-    if (!source || fixes.length === 0) return;
+    const found = target ? this.rerunFixes(target, swipeId, [prefix.parent]) : null;
+    if (!target || !found) return;
     const markers = (target.ledger?.markers ?? []).filter((mk) => mk.seq > rec.markersApplied && isLive(mk.at, prefix.parent, rec.path));
-    const carried = this.carry(prefix.state, prefix.world, fixes, source.undone, markers);
+    const carried = this.carry(prefix.state, prefix.world, found.fixes, found.source.undone, markers);
     rec.post = carried.kept.map((e) => ({ ...e, at: rec.path }));
     rec.undone = carried.undone;
     if (carried.dropped.length > 0) rec.dropped = carried.dropped;
+  }
+
+  /**
+   * A Re-run committed under a pause carries none of its source's fixes (P3): nothing after the
+   * pause folds, so none can be re-validated after the new turn's events. None goes unsaid either:
+   * each it would have carried (live on one of `parents`, and not wholly undone) is dropped with a
+   * Journal note (L43), so a GM's correction never just disappears from the new swipe.
+   */
+  private leaveFixes(rec: Rec, target: ChainMessage | undefined, swipeId: number, parents: readonly PathHash[]): void {
+    const found = target ? this.rerunFixes(target, swipeId, parents) : null;
+    if (!found) return;
+    const off = (seq: number, index: number): boolean => found.source.undone.some((u) => u.in === "post" && u.seq === seq && u.index === index);
+    const left = found.fixes.filter((e) => !e.events.every((_, i) => off(e.seq, i)));
+    if (left.length > 0) rec.dropped = left.map((e) => ({ seq: e.seq, kind: e.kind, reason: PAUSED_DROP }));
   }
 
   /**
@@ -891,11 +920,13 @@ export class LedgerCore {
     // reply goes unread (there is no state to read it against) and the record is degraded.
     const paused = this.pausedWithin(observed.slice(0, index));
     const read = readReply && content !== "" && !paused;
-    // A Re-run reads its reply on its fold prefix, then carries its source's fixes after it.
-    const rerun = !p.copies && !paused && (p.kind === "swipe" || p.kind === "regenerate");
+    // A Re-run (a Re-narrate that couldn't copy its source is one, P3) reads its reply on its fold
+    // prefix, then carries its source's fixes after it; under a pause it carries none of them.
+    const rerun = !p.copies && (p.kind === "swipe" || p.kind === "regenerate" || p.kind === "renarrate");
+    const carries = rerun && !paused;
     // Read against the chain the turn was planned on, which places its record; one that reads and
     // carries nothing holds only what was validated where it was planned, and stays there.
-    const at = read || rerun || !p.planned ? this.plannedPrefix(p, observed, index) : null;
+    const at = read || carries || !p.planned ? this.plannedPrefix(p, observed, index) : null;
     const [target] = this.chain(observed.slice(index, index + 1));
     // The chat's first record folds its starting markers ahead of its events, so it is read with them.
     const start = this.journal.started ? [] : p.startMarkers;
@@ -938,11 +969,17 @@ export class LedgerCore {
         const events = this.read(prefix.state, prefix.world, `${p.seed}:narr`, content);
         if (events.length > 0) rec.post.push({ seq: ++this.journal.seq, at: rec.path, kind: "narr", events });
       }
-    } else if (at && (read || rerun)) {
+    } else if (at && (read || carries)) {
       const prefix = this.prefixState(at.out, target, rec, start);
       if (prefix && read) rec.events.push(...this.read(prefix.state, prefix.world, `${p.seed}:read`, content));
       // Starting markers land only on a record that holds events: one left with none folds its carried fixes without them.
-      if (prefix && rerun) this.carryFixes(rec, target, swipeId, start.length > 0 && rec.events.length === 0 ? (this.prefixState(at.out, target, rec) ?? prefix) : prefix);
+      if (prefix && carries) this.carryFixes(rec, target, swipeId, start.length > 0 && rec.events.length === 0 ? (this.prefixState(at.out, target, rec) ?? prefix) : prefix);
+    } else if (rerun && paused) {
+      // What it leaves is what was live where it was made or on the chain in force, where it would
+      // be read: the edit that paused it changed a user message of the chain it was planned on, or
+      // it had no plan and commits where it lands.
+      const inForce = (at?.out ?? this.fold(observed.slice(0, index))).messages.at(-1)?.path ?? ROOT_PATH;
+      this.leaveFixes(rec, target, swipeId, [p.parentPath, inForce]);
     }
     const ledger = this.ledgerFor(messageId, observed[index]);
     ledger.swipes[String(swipeId)] = rec;
