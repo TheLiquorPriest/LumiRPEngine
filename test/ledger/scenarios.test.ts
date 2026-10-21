@@ -575,6 +575,109 @@ describe("ledger scenarios", () => {
     await expectAgree(h, chat);
   });
 
+  test("a Re-run committed under a pause carries none of the swipe's fixes, and each it would have carried is a Journal drop (L43)", async () => {
+    const h = new Harness();
+    const chat = await h.newChat();
+    await h.send(chat, "buy:lamp:20", "Bought.");
+    const head = h.host.head(chat);
+    const user = h.host.chat(chat).messages.find((m) => m.isUser);
+    if (!head || !user) throw new Error("no turn");
+    const fix = (id: string, events: LedgerEvent[]) => h.write(chat, { kind: "post", id, target: "head", entry: { kind: "fix", events } });
+    await fix("mood", [{ type: "set", entity: POV, field: "mood", value: "calm" }]);
+    await fix("detail", [{ type: "set", entity: POV, field: "detail", value: "scar" }]);
+    const [mood, detail] = (await h.core(chat)).journal.messages[head.id]?.ledger.swipes["0"]?.post ?? [];
+    if (!mood || !detail) throw new Error("no fixes");
+    // An undone fix is in force nowhere, so the new swipe has nothing to say about it.
+    expect((await h.write(chat, { kind: "undo", id: "u1", messageId: head.id, swipeId: 0, refs: [{ in: "post", seq: detail.seq, index: 0 }] })).applied).toBe(true);
+    // The player edits the message the Re-run answers while it streams, so it commits under the pause.
+    const g = await h.host.start(chat, { type: "swipe", messageId: head.id });
+    h.host.editMessage(chat, user.id, "buy:map:30");
+    await h.host.settle();
+    await h.host.finish(g, "Okay.");
+    const made = (await h.core(chat)).journal.messages[head.id]?.ledger.swipes[String(h.host.message(chat, head.id).swipeId)];
+    expect(made?.post).toEqual([]);
+    expect(made?.dropped).toEqual([{ seq: mood.seq, kind: "fix", reason: "the chat was paused" }]);
+    const notCarried = async () => (await h.folds(chat)).optimized.notes.filter((n) => n.kind === "not_carried").map((n) => [n.ref, n.text]);
+    expect(await notCarried()).toEqual([[{ in: "post", seq: mood.seq, index: 0 }, "the chat was paused"]]);
+    await expectAgree(h, chat);
+    // Kept, the new swipe folds as a view without the correction and still says it wasn't carried.
+    expect((await h.write(chat, { kind: "keep", id: "k1", messageId: user.id, parentPath: "", convert: [] })).applied).toBe(true);
+    expect((await h.folds(chat)).optimized.state.entities[POV]?.fields.mood).toBe("fine");
+    expect(await notCarried()).toEqual([[{ in: "post", seq: mood.seq, index: 0 }, "the chat was paused"]]);
+    await expectAgree(h, chat);
+  });
+
+  test("a Re-narrate that got no plan is a Re-run: under a pause it notes each fix it would have carried, and with the pause lifted mid-stream it carries them (P3, L43)", async () => {
+    // Two chats, each with a calm fix on the turn's reply, its first user message then edited (the pause).
+    const setUp = async () => {
+      const h = new Harness();
+      const chat = await h.newChat();
+      await h.send(chat, "look around");
+      await h.send(chat, "buy:lamp:20", "Bought.");
+      const head = h.host.head(chat);
+      const first = h.host.chat(chat).messages.find((m) => m.isUser);
+      if (!head || !first) throw new Error("no turn");
+      await h.write(chat, { kind: "post", id: "mood", target: "head", entry: { kind: "fix", events: [{ type: "set", entity: POV, field: "mood", value: "calm" }] } });
+      const mood = (await h.core(chat)).journal.messages[head.id]?.ledger.swipes["0"]?.post[0];
+      if (!mood) throw new Error("no fix");
+      h.host.editMessage(chat, first.id, "earn:5");
+      await h.host.settle();
+      // A swipe under the pause gets no plan, so it can't copy its source.
+      h.renarrateNext = true;
+      const g = await h.host.start(chat, { type: "swipe", messageId: head.id });
+      const made = async () => (await h.core(chat)).journal.messages[head.id]?.ledger.swipes[String(h.host.message(chat, head.id).swipeId)];
+      return { h, chat, first, mood, g, made };
+    };
+    const paused = await setUp();
+    await paused.h.host.finish(paused.g, "Okay.");
+    expect((await paused.made())?.post).toEqual([]);
+    expect((await paused.made())?.dropped).toEqual([{ seq: paused.mood.seq, kind: "fix", reason: "the chat was paused" }]);
+    await expectAgree(paused.h, paused.chat);
+    // Deleting the edited message lifts the pause before the reply ends: it commits where it lands, carrying the fix.
+    const lifted = await setUp();
+    lifted.h.host.deleteMessage(lifted.chat, lifted.first.id);
+    await lifted.h.host.settle();
+    await lifted.h.host.finish(lifted.g, "Okay.");
+    const rec = await lifted.made();
+    expect(rec?.post).toEqual([{ ...lifted.mood, at: rec?.path ?? "" }]);
+    expect(rec?.dropped).toBeUndefined();
+    expect((await lifted.h.folds(lifted.chat)).optimized.state.entities[POV]?.fields.mood).toBe("calm");
+    await expectAgree(lifted.h, lifted.chat);
+  });
+
+  test("a Re-run made under a pause names the fixes live where it was made, though a switch moved the chain before it ended (L43)", async () => {
+    const h = new Harness();
+    const chat = await h.newChat();
+    await h.send(chat, "look around");
+    const greeting = h.host.chat(chat).messages[0];
+    if (!greeting) throw new Error("no greeting");
+    h.host.addSwipe(chat, greeting.id, "Another way.");
+    await h.host.settle();
+    // A fix held while a reply streams lands after it, under the pause its user message's edit made:
+    // it is live only where the chat stood then, not on its own record's path.
+    const user = h.host.sendUser(chat, "buy:map:30");
+    await h.host.settle();
+    const w1 = await h.host.start(chat, { type: "normal" });
+    expect((await h.write(chat, { kind: "post", id: "mood", target: "head", entry: { kind: "fix", events: [{ type: "set", entity: POV, field: "mood", value: "calm" }] } })).pending).toBe(true);
+    h.host.editMessage(chat, user, "buy:lamp:20");
+    await h.host.settle();
+    await h.host.finish(w1, "Okay.");
+    const head = h.host.head(chat);
+    const mood = head ? (await h.core(chat)).journal.messages[head.id]?.ledger.swipes["0"]?.post[0] : undefined;
+    if (!head || !mood) throw new Error("no fix");
+    // The Re-run under the pause gets no plan; the greeting switched back moves its chain, and a Keep held in its window lifts the pause after it.
+    const g = await h.host.start(chat, { type: "swipe", messageId: head.id });
+    h.host.navigate(chat, greeting.id, 0);
+    await h.host.settle();
+    expect((await h.write(chat, { kind: "keep", id: "k1", messageId: user, parentPath: "", convert: [] })).pending).toBe(true);
+    await h.host.finish(g, "Okay.");
+    const made = (await h.core(chat)).journal.messages[head.id]?.ledger.swipes[String(h.host.message(chat, head.id).swipeId)];
+    expect(made?.post).toEqual([]);
+    expect(made?.dropped).toEqual([{ seq: mood.seq, kind: "fix", reason: "the chat was paused" }]);
+    expect((await h.core(chat)).journal.pauses).toEqual([]);
+    await expectAgree(h, chat);
+  });
+
   // A ✎ cash fix on Dev as the GM view records it while his money isn't open: the opening first (+50), then the correction to 30.
   const devCashFix: LedgerEvent[] = [openMoney("dev"), { type: "post", lines: [{ account: "dev", amount: -20 }, { account: `${EXTERNAL_ACCOUNT_PREFIX}correction`, amount: 20 }], memo: "Correction" }];
   const OPENS_DEV = "Dev counts out his wages. [opens:dev]";

@@ -264,7 +264,7 @@ export interface KeepOverlay {
   convert: EventRef[];
 }
 
-/** A post entry that failed re-validation when carried onto a swipe (P3: a Re-narrate's copies, a Re-run's fixes) or kept past a Re-read. */
+/** A post entry a swipe didn't carry over (P3: a Re-narrate's copy or a Re-run's fix that failed re-validation, or a Re-run's fix it couldn't re-validate under a pause) or a Re-read didn't keep. */
 export interface CarryDrop {
   seq: number;
   kind: PostKind;
@@ -398,7 +398,7 @@ export interface PendingTurn {
   saved: boolean;
   seed: string;
   markersApplied: number;
-  /** The target's parent path when planned (before P4 re-renders). */
+  /** The target's parent path when planned (before P4 re-renders); a swipe or regenerate takes it as it starts, so one that gets no plan still knows where it was made (P3). */
   parentPath: PathHash;
   /** Planned (`pre`) events. */
   events: LedgerEvent[];
