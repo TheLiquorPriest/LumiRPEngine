@@ -302,6 +302,15 @@ var TIMEOUTS = {
     none: "as long as Lumiverse waits",
     host: "contextHandler"
   },
+  skipPlanMs: {
+    label: "Time skip plan",
+    group: "turn",
+    limits: "The one call, as a time skip starts, that plans how the people whose skip is planned by the model spend it.",
+    fires: "Nobody is planned: they stay where they are, the GM gets a note, and the skip still runs.",
+    defaultMs: 2 * MIN,
+    minMs: 1000,
+    none: "the call takes as long as the engine run allows"
+  },
   requestMs: {
     label: "Engine requests",
     group: "app",
@@ -910,7 +919,7 @@ var package_default = {
 // src/cli/version.ts
 var CLI_NAME = "lumirpengine";
 var CLI_VERSION = package_default.version;
-var BUILD = "4f4d4c30";
+var BUILD = "e7650faa";
 function runtimeCannotFollow(bun) {
   if (bun === undefined)
     return null;

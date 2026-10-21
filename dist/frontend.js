@@ -3830,8 +3830,11 @@ var ROUTINE_SOCIABILITY = ["reserved", "usual", "outgoing"];
 var ROUTINE_PLAN_BEND = ["must", "strong", "standard", "ordinary"];
 var ROUTINE_ROLES = ["informative", "enforced", "off"];
 var ROUTINE_ROLE_LABEL = { informative: "Informative", enforced: "Enforced", off: "Off" };
+var SKIP_LIVES = ["stay", "routine", "model"];
+var SKIP_LIFE_LABEL = { stay: "Stay put", routine: "Follow their routine", model: "Planned by the model" };
 var DEFAULT_ROUTINE_ROLES = Object.freeze({ live: "informative", near: "informative", far: "informative", background: "enforced" });
-var DEFAULT_ROUTINE_SETTINGS = Object.freeze({ awareness: "balanced", invitations: "player", sociability: "usual", planBend: "standard", roles: DEFAULT_ROUTINE_ROLES, narrator: true, paletteFollowsRoutine: false });
+var DEFAULT_SKIP_LIVES = Object.freeze({ live: "model", near: "model", far: "model", background: "routine" });
+var DEFAULT_ROUTINE_SETTINGS = Object.freeze({ awareness: "balanced", invitations: "player", sociability: "usual", planBend: "standard", roles: DEFAULT_ROUTINE_ROLES, skips: DEFAULT_SKIP_LIVES, narrator: true, paletteFollowsRoutine: false });
 var AWARENESS_LABEL = { story_first: "Story first", balanced: "Balanced", routine_first: "Routine first" };
 var INVITATIONS_LABEL = { off: "Off", player: "To the player only", everyone: "Between everyone" };
 var SOCIABILITY_LABEL = { reserved: "Reserved", usual: "Usual", outgoing: "Outgoing" };
@@ -3840,13 +3843,17 @@ var BLOCK_KIND_LABEL = { fixed: "Fixed", flexible: "Flexible", optional: "Option
 function routineSettingsOf(world) {
   const raw = isRecord(world.routineSettings) ? world.routineSettings : {};
   const pick = (v, allowed, fallback) => allowed.find((a) => a === v) ?? fallback;
-  const roles = isRecord(raw.roles) ? raw.roles : {};
+  const perLevel = (v, allowed, fallback) => {
+    const set = isRecord(v) ? v : {};
+    return { live: pick(set.live, allowed, fallback.live), near: pick(set.near, allowed, fallback.near), far: pick(set.far, allowed, fallback.far), background: pick(set.background, allowed, fallback.background) };
+  };
   return {
     awareness: pick(raw.awareness, ROUTINE_AWARENESS, DEFAULT_ROUTINE_SETTINGS.awareness),
     invitations: pick(raw.invitations, ROUTINE_INVITATIONS, DEFAULT_ROUTINE_SETTINGS.invitations),
     sociability: pick(raw.sociability, ROUTINE_SOCIABILITY, DEFAULT_ROUTINE_SETTINGS.sociability),
     planBend: pick(raw.planBend, ROUTINE_PLAN_BEND, DEFAULT_ROUTINE_SETTINGS.planBend),
-    roles: { live: pick(roles.live, ROUTINE_ROLES, DEFAULT_ROUTINE_ROLES.live), near: pick(roles.near, ROUTINE_ROLES, DEFAULT_ROUTINE_ROLES.near), far: pick(roles.far, ROUTINE_ROLES, DEFAULT_ROUTINE_ROLES.far), background: pick(roles.background, ROUTINE_ROLES, DEFAULT_ROUTINE_ROLES.background) },
+    roles: perLevel(raw.roles, ROUTINE_ROLES, DEFAULT_ROUTINE_ROLES),
+    skips: perLevel(raw.skips, SKIP_LIVES, DEFAULT_SKIP_LIVES),
     narrator: typeof raw.narrator === "boolean" ? raw.narrator : DEFAULT_ROUTINE_SETTINGS.narrator,
     paletteFollowsRoutine: typeof raw.paletteFollowsRoutine === "boolean" ? raw.paletteFollowsRoutine : DEFAULT_ROUTINE_SETTINGS.paletteFollowsRoutine
   };
@@ -12247,7 +12254,7 @@ var HOST_LIMITS = {
     effect: "Lumiverse closes the socket; the client pings every 45 s to keep it open."
   }
 };
-var TIMEOUT_KEYS = ["engineRunMs", "preLookupMs", "postReplyMs", "postLookupMs", "guardMs", "requestMs", "caveatsMs", "mindsRunMs", "jobCallMs", "tokenCountMs", "laneStartupMs", "laneHeartbeatMs", "mcpReconnectMs"];
+var TIMEOUT_KEYS = ["engineRunMs", "preLookupMs", "postReplyMs", "postLookupMs", "guardMs", "skipPlanMs", "requestMs", "caveatsMs", "mindsRunMs", "jobCallMs", "tokenCountMs", "laneStartupMs", "laneHeartbeatMs", "mcpReconnectMs"];
 var MIN = 60000;
 var TIMEOUTS = {
   engineRunMs: {
@@ -12298,6 +12305,15 @@ var TIMEOUTS = {
     minMs: 1000,
     none: "as long as Lumiverse waits",
     host: "contextHandler"
+  },
+  skipPlanMs: {
+    label: "Time skip plan",
+    group: "turn",
+    limits: "The one call, as a time skip starts, that plans how the people whose skip is planned by the model spend it.",
+    fires: "Nobody is planned: they stay where they are, the GM gets a note, and the skip still runs.",
+    defaultMs: 2 * MIN,
+    minMs: 1000,
+    none: "the call takes as long as the engine run allows"
   },
   requestMs: {
     label: "Engine requests",
@@ -17622,6 +17638,290 @@ function LoreEditor(props) {
   }, undefined, true, undefined, this);
 }
 
+// src/packs/castlife/ui/routines-ops.ts
+var BINDING_LABEL = { routine: "Routine leads", story: "Story leads; routine informs", none: "No routine" };
+function bindingOf(role, mode, planned) {
+  if (mode === "off" || role === "off")
+    return "none";
+  return role === "enforced" && planned ? "routine" : "story";
+}
+function effectiveRole(tier, roles, chat) {
+  return chat ?? roles[tier ?? "background"];
+}
+function plannedHint(entity) {
+  if (!entity || entity.gone || !entity.agent || !entity.life.acts)
+    return false;
+  return (entity.levels.find((l) => l.domain === "castlife")?.level ?? 0) >= 3;
+}
+var TIER_LABEL = { live: "Live", near: "Near", far: "Far", background: "Background" };
+function routineRows(characters, entities, changed, roles) {
+  return characters.map((c) => {
+    const summary = changed.find((s) => s.entity === c.entity);
+    const role = effectiveRole(c.fidelity.level, roles, summary?.follow?.role);
+    const binding = bindingOf(role, summary?.follow?.mode ?? "follows", plannedHint(entities.find((e) => e.id === c.entity)));
+    return { entity: c.entity, name: c.name, tier: c.fidelity.level, binding, changed: changedBy(summary) };
+  });
+}
+var MODE_NOTE = {
+  follows: "Their routine and schedules count as their role says.",
+  no_invitations: "As they follow it, but their routine makes and accepts no invitations.",
+  off: "No routine at all in this chat, not even as context: only the story, your edits, their commitments and their basic needs."
+};
+var ROLE_NOTE = {
+  informative: "The story and planning decide what they do; their routine and schedules are only context their mind and the narrator may weigh.",
+  enforced: "The planner lives their routine and their schedules run whenever the story doesn't hold them, never in a scene with you.",
+  off: "Their routine isn't used at all, not even as context."
+};
+var SKIP_NOTE = {
+  stay: "They stay where the story has them while the time passes.",
+  routine: "They go about their usual routine through the skip, unless a story plan, a trip or an appointment covers them.",
+  model: "At the skip's start the helper model plans their time from their routine, plans and the story; if it can't, they stay."
+};
+var AWARENESS_NOTE = {
+  story_first: "An enforced routine bends for story plans and your intent, and what the story set holds until the story or you release it.",
+  balanced: "Background characters keep an enforced routine; others bend it for story plans and intent. What the story set holds for the rest of that day.",
+  routine_first: "An enforced routine holds, bending only as the world lets story plans bend it. What the story set holds until the routine's next block."
+};
+var ENFORCED_NOTE = {
+  story_first: {
+    background: "Off screen they keep to their routine, but bend for story plans and your intent. What the story set holds until the story or you release it.",
+    closer: "Their routine leads, but they bend for story plans and your intent. What the story set holds until the story or you release it."
+  },
+  balanced: {
+    background: "Off screen they keep their routine and schedules. What the story set holds for the rest of that day.",
+    closer: "Their routine leads, but they bend for story plans and intent. What the story set holds for the rest of that day."
+  },
+  routine_first: {
+    background: "They keep to their routine. What the story set holds until their routine's next block.",
+    closer: "They keep to their routine. What the story set holds until their routine's next block."
+  }
+};
+function bindingNote(view) {
+  const always = "Nobody is moved out of a scene with you, and no routine interrupts play.";
+  if (view.follow.mode === "off")
+    return ["No routine in this chat: their day is the story, your edits, their commitments and their basic needs.", always];
+  const role = view.follow.role;
+  const lines = [`${ROUTINE_ROLE_LABEL[role]}: ${ROLE_NOTE[role]}`];
+  lines.push(view.follow.chat?.role ? "You set their role in this chat." : view.tier ? `The role of their level, ${TIER_LABEL[view.tier]}, as the world sets it.` : "Without minds there is no level of closeness: they take Background's role.");
+  if (role === "enforced" && !view.planned)
+    lines.push("The planner doesn't lay their day (it needs an agent who acts, at Cast life 3 or higher), so their routine only informs.");
+  if (role === "enforced" && view.planned) {
+    const awareness = view.follow.awareness;
+    lines.push(ENFORCED_NOTE[awareness][view.tier === null || view.tier === "background" ? "background" : "closer"]);
+    if (awareness === "routine_first")
+      lines.push(`Story plans bend it only as the world allows: ${PLAN_BEND_LABEL[view.settings.planBend].toLowerCase()}.`);
+  }
+  if (role !== "off" && view.follow.mode === "no_invitations")
+    lines.push("They make and accept no invitations.");
+  lines.push(always);
+  return lines;
+}
+function changedBy(summary) {
+  if (!summary)
+    return null;
+  const sources = [...summary.blocks.map((b) => b.source), ...summary.schedules.map((s) => s.source)];
+  const gm = summary.follow !== null || sources.some((s) => s.type === "gm");
+  const story = sources.some((s) => s.type === "story" && s.by !== "player");
+  const player = sources.some((s) => s.type === "story" && s.by === "player");
+  if (gm && story && player)
+    return "all";
+  if (gm)
+    return story ? "gm_story" : player ? "gm_player" : "gm";
+  if (story)
+    return player ? "story_player" : "story";
+  return player ? "player" : null;
+}
+var CHANGED_LABEL = {
+  gm: "Changed by you",
+  story: "Changed by the story",
+  player: "Changed from your message",
+  gm_story: "Changed by you and the story",
+  gm_player: "Changed by you and from your message",
+  story_player: "Changed by the story and from your message",
+  all: "Changed by you, the story and your message"
+};
+function sourceWords2(source, now) {
+  if (source.type !== "story" && source.type !== "gm")
+    return source.label;
+  return `${source.label}, ${source.at >= now ? "just now" : `${formatMinutes(now - source.at)} ago`}`;
+}
+function storyChanges(view, summary) {
+  const out = [];
+  for (const b of summary?.blocks ?? [])
+    if (b.source.type === "story")
+      out.push({ kind: "block", id: b.block, source: b.source, off: b.off, block: view.blocks.find((x) => x.block.id === b.block) ?? null, ...b.label !== undefined ? { label: b.label } : {} });
+  for (const s of summary?.schedules ?? [])
+    if (s.source.type === "story")
+      out.push({ kind: "schedule", id: s.schedule, source: s.source, off: s.off, schedule: view.schedules.find((x) => x.schedule === s.schedule) ?? null });
+  return out.sort((a, b) => a.source.at - b.source.at);
+}
+function ownerWords2(owner) {
+  switch (owner.level) {
+    case "chat":
+      return "Changed in this chat";
+    case "own":
+      return "Their own";
+    case "group":
+      return `Group: ${owner.name}`;
+    case "kind":
+      return `Kind: ${owner.name}`;
+    case "selector":
+      return `Selector: ${owner.name}`;
+    case "world":
+      return "The world's default";
+    case "builtin":
+      return "Basic needs";
+  }
+}
+var WEEKDAY = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+function blockWhen(block) {
+  const length = formatMinutes(block.minutes);
+  if (block.kind === "fixed")
+    return `${block.at ?? "—"} for ${length}`;
+  const parts = [`${length} between ${block.window?.from ?? "—"} and ${block.window?.to ?? "—"}`];
+  if (block.perWeek !== undefined)
+    parts.push(`${block.perWeek}× a week`);
+  if (block.kind === "optional")
+    parts.push(`${Math.round((block.chance ?? 0.5) * 100)}% likely`);
+  return parts.join(", ");
+}
+function daysWords(block) {
+  const d = block.days;
+  if (!d)
+    return null;
+  const parts = [];
+  if (d.weekdays && d.weekdays.length > 0 && d.weekdays.length < 7)
+    parts.push([...d.weekdays].sort((a, b) => a - b).map((w) => WEEKDAY[w] ?? String(w)).join(" "));
+  if (d.off === "only")
+    parts.push("days off only");
+  if (d.off === "never")
+    parts.push("not on days off");
+  if (d.holidays && d.holidays.length > 0)
+    parts.push(`on ${d.holidays.map(humanize).join(", ")}`);
+  if (d.except && d.except.length > 0)
+    parts.push(`not on ${d.except.map(humanize).join(", ")}`);
+  if (d.birthday === "own")
+    parts.push("on their birthday");
+  if (d.birthday === "friend")
+    parts.push("on a friend's birthday");
+  if (d.seasons && d.seasons.length > 0)
+    parts.push(`in ${d.seasons.join(", ")}`);
+  if (d.weather)
+    parts.push(`in ${d.weather} weather`);
+  return parts.length > 0 ? parts.join(" · ") : null;
+}
+function placeWords2(place, placeName) {
+  if (place === undefined || place === "home")
+    return "At home";
+  if (place === "work")
+    return "At work";
+  if (place === "here")
+    return "Wherever they are";
+  if (place === "with")
+    return "At their company's home";
+  return "place" in place ? `At ${placeName(place.place)}` : `At the nearest ${humanize(place.nearest).toLowerCase()}`;
+}
+function originWords(origin, name) {
+  switch (origin.type) {
+    case "routine":
+      return origin.owner.level === "builtin" ? "Routine · Basic needs" : `Routine · ${ownerWords2(origin.owner)} · ${origin.source.label}`;
+    case "schedule":
+      return origin.owner.level === "chat" ? `Their own schedule in this chat · ${origin.source.label}` : `Schedule ${nameOfId(origin.schedule)} · ${ownerWords2(origin.owner)} · ${origin.source.label}`;
+    case "appointment":
+      return "An appointment";
+    case "trip":
+      return "A trip";
+    case "plan":
+      return origin.source === "gm" ? "Your plan for them" : origin.source === "memory" ? "A plan from the story" : "A plan from their mind";
+    case "agenda":
+      return `Their agenda: ${name(origin.track)}`;
+    case "invitation":
+      return `${name(origin.host)}'s invitation`;
+    case "free":
+      return "Free time";
+  }
+}
+function invitationGround(origin) {
+  switch (origin.type) {
+    case "plan":
+      return "From a plan the story made";
+    case "routine":
+      return `From their routine's ${nameOfId(origin.block)} · ${origin.source.label}`;
+    case "gm":
+      return "From you";
+    case "legacy":
+      return "Recorded before invitations needed a ground";
+  }
+}
+function untilWords(until, now) {
+  if (until === null)
+    return "until the story or you release it";
+  return until <= now ? "ending now" : `for ${formatMinutes(until - now)} more`;
+}
+var HOLD_BY = { story: "The story set it", trip: "A trip", override: "An override", plan: "A plan under way" };
+function followOp(entity, mode, awareness, role, skips) {
+  return { op: "routine_follow", entity, mode: mode === "follows" ? null : mode, awareness, role, skips };
+}
+function blockOp(entity, block) {
+  const value = { ...block };
+  delete value.source;
+  const problems = blockShapeProblems(value, false);
+  return problems.length > 0 ? { problems } : { op: { op: "routine_block", entity, block: value.id, value } };
+}
+function blockOffOp(entity, block) {
+  return { op: "routine_block", entity, block, value: { id: block, off: true } };
+}
+function dropBlockOp(entity, block) {
+  return { op: "routine_block", entity, block, value: null };
+}
+function scheduleOwnOp(entity, schedule, slots, recurrence, was) {
+  const problems = slots.length === 0 ? ["Give it at least one slot."] : slotProblems(slots);
+  if (problems.length > 0)
+    return { problems };
+  const same = JSON.stringify(recurrence) === JSON.stringify(was);
+  return { op: { op: "schedule_override", entity, schedule, value: same ? { slots } : { slots, recurrence } } };
+}
+function scheduleOffOp(entity, schedule, until) {
+  return { op: "schedule_override", entity, schedule, value: { off: true, until } };
+}
+function dropScheduleOp(entity, schedule) {
+  return { op: "schedule_override", entity, schedule, value: null };
+}
+function scheduleDraft(effective, entity) {
+  const own = effective.chat && "slots" in effective.chat ? effective.chat : null;
+  const slots = (own?.slots ?? effective.slots).map((slot) => {
+    const plain = { start: slot.start, end: slot.end };
+    if (slot.value !== undefined)
+      plain.value = structuredClone(slot.value);
+    if (slot.weighted)
+      plain.weighted = structuredClone(slot.weighted);
+    if (slot.given)
+      plain.given = structuredClone(slot.given);
+    return plain;
+  });
+  return { id: effective.schedule, owner: entity, target: effective.target, recurrence: structuredClone(own?.recurrence ?? effective.recurrence), slots };
+}
+function targetWords2(target) {
+  return target === "place" ? "where they are" : target === "activity" ? "what they're doing" : humanize(target).toLowerCase();
+}
+function scheduleRows(view) {
+  const versions = view.schedules.filter((s) => s.owner.level === "chat").map((s) => s.schedule);
+  return view.schedules.filter((s) => s.owner.level !== "chat").sort((a, b) => a.target.localeCompare(b.target) || a.owner.rank - b.owner.rank || a.schedule.localeCompare(b.schedule)).map((schedule) => ({ schedule, over: schedule.shadowedBy.filter((id) => !versions.includes(id)) }));
+}
+function blockDraft(effective, fresh) {
+  if (!effective)
+    return fresh;
+  if (!isOff(effective.block))
+    return structuredClone(effective.block);
+  const under = effective.shadowed.map((s) => s.block).find((b) => !isOff(b));
+  return under ? { ...structuredClone(under), id: effective.block.id } : { ...fresh, id: effective.block.id };
+}
+function shadowWords(block) {
+  if (block.shadowed.length === 0)
+    return null;
+  return `Over ${block.shadowed.map((s) => s.owner.level === "builtin" ? "the basic need" : ownerWords2(s.owner).toLowerCase()).join(", ")}`;
+}
+
 // src/frontend/build/routine-settings.tsx
 var ROLE_EXPLAINED = {
   informative: "The story and planning decide what they do; their routine is only context their mind and the narrator may weigh.",
@@ -17728,6 +18028,33 @@ function RoutineRoleSettings(props) {
         ]
       }, undefined, true, undefined, this),
       /* @__PURE__ */ u3(FormGroup, {
+        title: "In a time skip",
+        children: [
+          /* @__PURE__ */ u3("p", {
+            class: "lre-minds-note",
+            children: "How each level spends a time skip while their routine is informative. An enforced routine is always lived through a skip, and an off one never."
+          }, undefined, false, undefined, this),
+          FIDELITIES.map((level) => /* @__PURE__ */ u3(Field, {
+            label: LEVEL_NAME[level],
+            help: value.roles[level] === "informative" ? SKIP_NOTE[value.skips[level]] : `Their routine is ${ROUTINE_ROLE_LABEL[value.roles[level]].toLowerCase()} here, so this applies only to characters the GM makes informative.`,
+            children: /* @__PURE__ */ u3(Seg, {
+              label: `${FIDELITY_LABEL[level]} characters in a time skip`,
+              value: value.skips[level],
+              options: SKIP_LIVES.map((s) => ({ value: s, label: SKIP_LIFE_LABEL[s] })),
+              disabled,
+              onChange: (skip) => props.onChange({ ...value, skips: { ...value.skips, [level]: skip } })
+            }, undefined, false, undefined, this)
+          }, level, false, undefined, this)),
+          /* @__PURE__ */ u3("p", {
+            class: "lre-minds-note",
+            children: "The GM can set it apart for one character in a chat. Planned by the model makes one helper call at the skip's start for everyone it plans."
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3(Issues, {
+            issues: lintAt(lint, "routineSettings.skips")
+          }, undefined, false, undefined, this)
+        ]
+      }, undefined, true, undefined, this),
+      /* @__PURE__ */ u3(FormGroup, {
         title: "The narrator",
         children: [
           /* @__PURE__ */ u3(HostSwitch, {
@@ -17792,7 +18119,7 @@ function RoutineSettingsEditor() {
         children: "Whatever you pick, the story comes first for anyone in a scene with the player's character: a routine never moves them out of it, contradicts what's been told or interrupts play. These settings tune what routines are to the engine, and how far everyone else's days follow the story and its lore."
       }, undefined, false, undefined, this),
       /* @__PURE__ */ u3(Issues, {
-        issues: lint.filter((issue) => !["awareness", "invitations", "sociability", "planBend", "roles", "narrator", "paletteFollowsRoutine"].some((key) => issue.path === `routineSettings.${key}` || issue.path.startsWith(`routineSettings.${key}.`)))
+        issues: lint.filter((issue) => !["awareness", "invitations", "sociability", "planBend", "roles", "skips", "narrator", "paletteFollowsRoutine"].some((key) => issue.path === `routineSettings.${key}` || issue.path.startsWith(`routineSettings.${key}.`)))
       }, undefined, false, undefined, this),
       /* @__PURE__ */ u3(RoutineRoleSettings, {
         value,
@@ -25351,7 +25678,7 @@ var GROUPS3 = [
   { group: "app", title: "This tab", lead: "How long LumiRPEngine's tab waits for the engine." },
   { group: "work", title: "Jobs and background work", lead: "Build's model jobs, minds runs you start, and the engine's work in the background." }
 ];
-var STEP_S = { engineRunMs: 30, preLookupMs: 15, postReplyMs: 30, postLookupMs: 15, guardMs: 10, requestMs: 30, caveatsMs: 10, mindsRunMs: 60, jobCallMs: 60, tokenCountMs: 5, laneStartupMs: 10, laneHeartbeatMs: 10, mcpReconnectMs: 10 };
+var STEP_S = { engineRunMs: 30, preLookupMs: 15, postReplyMs: 30, postLookupMs: 15, guardMs: 10, skipPlanMs: 30, requestMs: 30, caveatsMs: 10, mindsRunMs: 60, jobCallMs: 60, tokenCountMs: 5, laneStartupMs: 10, laneHeartbeatMs: 10, mcpReconnectMs: 10 };
 function limitText(limit) {
   return limit === "none" ? "No limit" : formatMs(limit);
 }
@@ -28685,285 +29012,6 @@ function claimedThings(gm) {
   return gm.entities.filter((e) => e.claimed && !e.gone).sort((a, b) => a.name.localeCompare(b.name)).map((entity) => ({ entity, where: entity.holder !== null ? `held by ${nameOf3(gm, entity.holder)}` : entity.place !== null ? `at ${nameOf3(gm, entity.place)}` : "nowhere" }));
 }
 
-// src/packs/castlife/ui/routines-ops.ts
-var BINDING_LABEL = { routine: "Routine leads", story: "Story leads; routine informs", none: "No routine" };
-function bindingOf(role, mode, planned) {
-  if (mode === "off" || role === "off")
-    return "none";
-  return role === "enforced" && planned ? "routine" : "story";
-}
-function effectiveRole(tier, roles, chat) {
-  return chat ?? roles[tier ?? "background"];
-}
-function plannedHint(entity) {
-  if (!entity || entity.gone || !entity.agent || !entity.life.acts)
-    return false;
-  return (entity.levels.find((l) => l.domain === "castlife")?.level ?? 0) >= 3;
-}
-var TIER_LABEL = { live: "Live", near: "Near", far: "Far", background: "Background" };
-function routineRows(characters, entities, changed, roles) {
-  return characters.map((c) => {
-    const summary = changed.find((s) => s.entity === c.entity);
-    const role = effectiveRole(c.fidelity.level, roles, summary?.follow?.role);
-    const binding = bindingOf(role, summary?.follow?.mode ?? "follows", plannedHint(entities.find((e) => e.id === c.entity)));
-    return { entity: c.entity, name: c.name, tier: c.fidelity.level, binding, changed: changedBy(summary) };
-  });
-}
-var MODE_NOTE = {
-  follows: "Their routine and schedules count as their role says.",
-  no_invitations: "As they follow it, but their routine makes and accepts no invitations.",
-  off: "No routine at all in this chat, not even as context: only the story, your edits, their commitments and their basic needs."
-};
-var ROLE_NOTE = {
-  informative: "The story and planning decide what they do; their routine and schedules are only context their mind and the narrator may weigh.",
-  enforced: "The planner lives their routine and their schedules run whenever the story doesn't hold them, never in a scene with you.",
-  off: "Their routine isn't used at all, not even as context."
-};
-var AWARENESS_NOTE = {
-  story_first: "An enforced routine bends for story plans and your intent, and what the story set holds until the story or you release it.",
-  balanced: "Background characters keep an enforced routine; others bend it for story plans and intent. What the story set holds for the rest of that day.",
-  routine_first: "An enforced routine holds, bending only as the world lets story plans bend it. What the story set holds until the routine's next block."
-};
-var ENFORCED_NOTE = {
-  story_first: {
-    background: "Off screen they keep to their routine, but bend for story plans and your intent. What the story set holds until the story or you release it.",
-    closer: "Their routine leads, but they bend for story plans and your intent. What the story set holds until the story or you release it."
-  },
-  balanced: {
-    background: "Off screen they keep their routine and schedules. What the story set holds for the rest of that day.",
-    closer: "Their routine leads, but they bend for story plans and intent. What the story set holds for the rest of that day."
-  },
-  routine_first: {
-    background: "They keep to their routine. What the story set holds until their routine's next block.",
-    closer: "They keep to their routine. What the story set holds until their routine's next block."
-  }
-};
-function bindingNote(view) {
-  const always = "Nobody is moved out of a scene with you, and no routine interrupts play.";
-  if (view.follow.mode === "off")
-    return ["No routine in this chat: their day is the story, your edits, their commitments and their basic needs.", always];
-  const role = view.follow.role;
-  const lines = [`${ROUTINE_ROLE_LABEL[role]}: ${ROLE_NOTE[role]}`];
-  lines.push(view.follow.chat?.role ? "You set their role in this chat." : view.tier ? `The role of their level, ${TIER_LABEL[view.tier]}, as the world sets it.` : "Without minds there is no level of closeness: they take Background's role.");
-  if (role === "enforced" && !view.planned)
-    lines.push("The planner doesn't lay their day (it needs an agent who acts, at Cast life 3 or higher), so their routine only informs.");
-  if (role === "enforced" && view.planned) {
-    const awareness = view.follow.awareness;
-    lines.push(ENFORCED_NOTE[awareness][view.tier === null || view.tier === "background" ? "background" : "closer"]);
-    if (awareness === "routine_first")
-      lines.push(`Story plans bend it only as the world allows: ${PLAN_BEND_LABEL[view.settings.planBend].toLowerCase()}.`);
-  }
-  if (role !== "off" && view.follow.mode === "no_invitations")
-    lines.push("They make and accept no invitations.");
-  lines.push(always);
-  return lines;
-}
-function changedBy(summary) {
-  if (!summary)
-    return null;
-  const sources = [...summary.blocks.map((b) => b.source), ...summary.schedules.map((s) => s.source)];
-  const gm = summary.follow !== null || sources.some((s) => s.type === "gm");
-  const story = sources.some((s) => s.type === "story" && s.by !== "player");
-  const player = sources.some((s) => s.type === "story" && s.by === "player");
-  if (gm && story && player)
-    return "all";
-  if (gm)
-    return story ? "gm_story" : player ? "gm_player" : "gm";
-  if (story)
-    return player ? "story_player" : "story";
-  return player ? "player" : null;
-}
-var CHANGED_LABEL = {
-  gm: "Changed by you",
-  story: "Changed by the story",
-  player: "Changed from your message",
-  gm_story: "Changed by you and the story",
-  gm_player: "Changed by you and from your message",
-  story_player: "Changed by the story and from your message",
-  all: "Changed by you, the story and your message"
-};
-function sourceWords2(source, now) {
-  if (source.type !== "story" && source.type !== "gm")
-    return source.label;
-  return `${source.label}, ${source.at >= now ? "just now" : `${formatMinutes(now - source.at)} ago`}`;
-}
-function storyChanges(view, summary) {
-  const out = [];
-  for (const b of summary?.blocks ?? [])
-    if (b.source.type === "story")
-      out.push({ kind: "block", id: b.block, source: b.source, off: b.off, block: view.blocks.find((x) => x.block.id === b.block) ?? null, ...b.label !== undefined ? { label: b.label } : {} });
-  for (const s of summary?.schedules ?? [])
-    if (s.source.type === "story")
-      out.push({ kind: "schedule", id: s.schedule, source: s.source, off: s.off, schedule: view.schedules.find((x) => x.schedule === s.schedule) ?? null });
-  return out.sort((a, b) => a.source.at - b.source.at);
-}
-function ownerWords2(owner) {
-  switch (owner.level) {
-    case "chat":
-      return "Changed in this chat";
-    case "own":
-      return "Their own";
-    case "group":
-      return `Group: ${owner.name}`;
-    case "kind":
-      return `Kind: ${owner.name}`;
-    case "selector":
-      return `Selector: ${owner.name}`;
-    case "world":
-      return "The world's default";
-    case "builtin":
-      return "Basic needs";
-  }
-}
-var WEEKDAY = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-function blockWhen(block) {
-  const length = formatMinutes(block.minutes);
-  if (block.kind === "fixed")
-    return `${block.at ?? "—"} for ${length}`;
-  const parts = [`${length} between ${block.window?.from ?? "—"} and ${block.window?.to ?? "—"}`];
-  if (block.perWeek !== undefined)
-    parts.push(`${block.perWeek}× a week`);
-  if (block.kind === "optional")
-    parts.push(`${Math.round((block.chance ?? 0.5) * 100)}% likely`);
-  return parts.join(", ");
-}
-function daysWords(block) {
-  const d = block.days;
-  if (!d)
-    return null;
-  const parts = [];
-  if (d.weekdays && d.weekdays.length > 0 && d.weekdays.length < 7)
-    parts.push([...d.weekdays].sort((a, b) => a - b).map((w) => WEEKDAY[w] ?? String(w)).join(" "));
-  if (d.off === "only")
-    parts.push("days off only");
-  if (d.off === "never")
-    parts.push("not on days off");
-  if (d.holidays && d.holidays.length > 0)
-    parts.push(`on ${d.holidays.map(humanize).join(", ")}`);
-  if (d.except && d.except.length > 0)
-    parts.push(`not on ${d.except.map(humanize).join(", ")}`);
-  if (d.birthday === "own")
-    parts.push("on their birthday");
-  if (d.birthday === "friend")
-    parts.push("on a friend's birthday");
-  if (d.seasons && d.seasons.length > 0)
-    parts.push(`in ${d.seasons.join(", ")}`);
-  if (d.weather)
-    parts.push(`in ${d.weather} weather`);
-  return parts.length > 0 ? parts.join(" · ") : null;
-}
-function placeWords2(place, placeName) {
-  if (place === undefined || place === "home")
-    return "At home";
-  if (place === "work")
-    return "At work";
-  if (place === "here")
-    return "Wherever they are";
-  if (place === "with")
-    return "At their company's home";
-  return "place" in place ? `At ${placeName(place.place)}` : `At the nearest ${humanize(place.nearest).toLowerCase()}`;
-}
-function originWords(origin, name) {
-  switch (origin.type) {
-    case "routine":
-      return origin.owner.level === "builtin" ? "Routine · Basic needs" : `Routine · ${ownerWords2(origin.owner)} · ${origin.source.label}`;
-    case "schedule":
-      return origin.owner.level === "chat" ? `Their own schedule in this chat · ${origin.source.label}` : `Schedule ${nameOfId(origin.schedule)} · ${ownerWords2(origin.owner)} · ${origin.source.label}`;
-    case "appointment":
-      return "An appointment";
-    case "trip":
-      return "A trip";
-    case "plan":
-      return origin.source === "gm" ? "Your plan for them" : origin.source === "memory" ? "A plan from the story" : "A plan from their mind";
-    case "agenda":
-      return `Their agenda: ${name(origin.track)}`;
-    case "invitation":
-      return `${name(origin.host)}'s invitation`;
-    case "free":
-      return "Free time";
-  }
-}
-function invitationGround(origin) {
-  switch (origin.type) {
-    case "plan":
-      return "From a plan the story made";
-    case "routine":
-      return `From their routine's ${nameOfId(origin.block)} · ${origin.source.label}`;
-    case "gm":
-      return "From you";
-    case "legacy":
-      return "Recorded before invitations needed a ground";
-  }
-}
-function untilWords(until, now) {
-  if (until === null)
-    return "until the story or you release it";
-  return until <= now ? "ending now" : `for ${formatMinutes(until - now)} more`;
-}
-var HOLD_BY = { story: "The story set it", trip: "A trip", override: "An override", plan: "A plan under way" };
-function followOp(entity, mode, awareness, role) {
-  return { op: "routine_follow", entity, mode: mode === "follows" ? null : mode, awareness, role };
-}
-function blockOp(entity, block) {
-  const value = { ...block };
-  delete value.source;
-  const problems = blockShapeProblems(value, false);
-  return problems.length > 0 ? { problems } : { op: { op: "routine_block", entity, block: value.id, value } };
-}
-function blockOffOp(entity, block) {
-  return { op: "routine_block", entity, block, value: { id: block, off: true } };
-}
-function dropBlockOp(entity, block) {
-  return { op: "routine_block", entity, block, value: null };
-}
-function scheduleOwnOp(entity, schedule, slots, recurrence, was) {
-  const problems = slots.length === 0 ? ["Give it at least one slot."] : slotProblems(slots);
-  if (problems.length > 0)
-    return { problems };
-  const same = JSON.stringify(recurrence) === JSON.stringify(was);
-  return { op: { op: "schedule_override", entity, schedule, value: same ? { slots } : { slots, recurrence } } };
-}
-function scheduleOffOp(entity, schedule, until) {
-  return { op: "schedule_override", entity, schedule, value: { off: true, until } };
-}
-function dropScheduleOp(entity, schedule) {
-  return { op: "schedule_override", entity, schedule, value: null };
-}
-function scheduleDraft(effective, entity) {
-  const own = effective.chat && "slots" in effective.chat ? effective.chat : null;
-  const slots = (own?.slots ?? effective.slots).map((slot) => {
-    const plain = { start: slot.start, end: slot.end };
-    if (slot.value !== undefined)
-      plain.value = structuredClone(slot.value);
-    if (slot.weighted)
-      plain.weighted = structuredClone(slot.weighted);
-    if (slot.given)
-      plain.given = structuredClone(slot.given);
-    return plain;
-  });
-  return { id: effective.schedule, owner: entity, target: effective.target, recurrence: structuredClone(own?.recurrence ?? effective.recurrence), slots };
-}
-function targetWords2(target) {
-  return target === "place" ? "where they are" : target === "activity" ? "what they're doing" : humanize(target).toLowerCase();
-}
-function scheduleRows(view) {
-  const versions = view.schedules.filter((s) => s.owner.level === "chat").map((s) => s.schedule);
-  return view.schedules.filter((s) => s.owner.level !== "chat").sort((a, b) => a.target.localeCompare(b.target) || a.owner.rank - b.owner.rank || a.schedule.localeCompare(b.schedule)).map((schedule) => ({ schedule, over: schedule.shadowedBy.filter((id) => !versions.includes(id)) }));
-}
-function blockDraft(effective, fresh) {
-  if (!effective)
-    return fresh;
-  if (!isOff(effective.block))
-    return structuredClone(effective.block);
-  const under = effective.shadowed.map((s) => s.block).find((b) => !isOff(b));
-  return under ? { ...structuredClone(under), id: effective.block.id } : { ...fresh, id: effective.block.id };
-}
-function shadowWords(block) {
-  if (block.shadowed.length === 0)
-    return null;
-  return `Over ${block.shadowed.map((s) => s.owner.level === "builtin" ? "the basic need" : ownerWords2(s.owner).toLowerCase()).join(", ")}`;
-}
-
 // src/packs/castlife/ui/routines-gm.tsx
 var BINDING_TONE = { routine: "neutral", story: "accent", none: "warn" };
 function sendOp(ctx, op, onDone) {
@@ -29270,6 +29318,10 @@ function RoutineSections(props) {
         view,
         now: gm.minds.now
       }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(SkipPlanned, {
+        view,
+        gm
+      }, undefined, false, undefined, this),
       /* @__PURE__ */ u3(Blocks, {
         view,
         gm,
@@ -29352,9 +29404,48 @@ function BindingSection(props) {
             chevron: true,
             disabled: props.busy,
             onClick: () => props.open({ kind: "follow" })
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3(ListRow, {
+            icon: "fast-forward",
+            title: "In a time skip",
+            subtitle: chat?.skips ? "Set for them in this chat" : "Their level's default",
+            value: SKIP_LIFE_LABEL[view.follow.skips],
+            chevron: true,
+            disabled: props.busy,
+            onClick: () => props.open({ kind: "follow" })
           }, undefined, false, undefined, this)
         ]
       }, undefined, true, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+}
+function SkipPlanned(props) {
+  const { skip } = props.view;
+  if (!skip)
+    return null;
+  return /* @__PURE__ */ u3(Section, {
+    title: "Planned for the skip",
+    aside: /* @__PURE__ */ u3(Badge, {
+      children: props.gm.minds.now < skip.to ? "This skip" : "The last skip"
+    }, undefined, false, undefined, this),
+    flush: true,
+    children: [
+      skip.note ? /* @__PURE__ */ u3("p", {
+        class: "lre-gm-note",
+        children: skip.note
+      }, undefined, false, undefined, this) : null,
+      skip.blocks.length === 0 ? /* @__PURE__ */ u3(None, {
+        children: "Nothing planned for them: they stayed where the story had them."
+      }, undefined, false, undefined, this) : null,
+      /* @__PURE__ */ u3("div", {
+        "data-lre-gm-list": "skip-plan",
+        children: /* @__PURE__ */ u3(List, {
+          children: skip.blocks.map((b) => /* @__PURE__ */ u3(ListRow, {
+            title: b.label,
+            subtitle: [b.days, `At ${nameOf3(props.gm, b.place)}`, `${formatMinutes(b.start - skip.from)} in, for ${formatMinutes(b.end - b.start)}`].filter((part) => part !== undefined).join(" · ")
+          }, b.start, false, undefined, this))
+        }, undefined, false, undefined, this)
+      }, undefined, false, undefined, this)
     ]
   }, undefined, true, undefined, this);
 }
@@ -29749,9 +29840,11 @@ function FollowPage(props) {
   const chat = view.follow.chat;
   const [mode, setMode] = d2(chat?.mode ?? "follows");
   const [role, setRole] = d2(chat?.role ?? null);
+  const [skips, setSkips] = d2(chat?.skips ?? null);
   const [awareness, setAwareness] = d2(chat?.awareness ?? null);
-  const changed = mode !== (chat?.mode ?? "follows") || role !== (chat?.role ?? null) || awareness !== (chat?.awareness ?? null);
+  const changed = mode !== (chat?.mode ?? "follows") || role !== (chat?.role ?? null) || skips !== (chat?.skips ?? null) || awareness !== (chat?.awareness ?? null);
   const levelRole = effectiveRole(view.tier, view.settings.roles, null);
+  const levelSkips = view.settings.skips[view.tier ?? "background"];
   return /* @__PURE__ */ u3(ChangePage, {
     name: "routine-follow",
     title: "How they follow their routine",
@@ -29764,7 +29857,7 @@ function FollowPage(props) {
         onSubmit: (event) => {
           event.preventDefault();
           if (changed)
-            sendOp(ctx, followOp(view.entity, mode, awareness, role), props.onBack);
+            sendOp(ctx, followOp(view.entity, mode, awareness, role, skips), props.onBack);
         },
         children: [
           /* @__PURE__ */ u3(Section, {
@@ -29790,6 +29883,22 @@ function FollowPage(props) {
                 choices: [{ value: null, label: `Their level's default: ${ROUTINE_ROLE_LABEL[levelRole]}`, help: ROLE_NOTE[levelRole], now: chat?.role == null }, ...ROUTINE_ROLES.map((r) => ({ value: r, label: ROUTINE_ROLE_LABEL[r], help: ROLE_NOTE[r], now: chat?.role === r }))],
                 disabled: ctx.busy,
                 onChange: setRole
+              }, undefined, false, undefined, this)
+            ]
+          }, undefined, true, undefined, this),
+          /* @__PURE__ */ u3(Section, {
+            title: "In a time skip",
+            children: [
+              /* @__PURE__ */ u3("p", {
+                class: "lre-gm-note",
+                children: "How they spend a time skip while their routine is informative. An enforced routine is always lived through a skip, and an off one never."
+              }, undefined, false, undefined, this),
+              /* @__PURE__ */ u3(Choices3, {
+                legend: "In a time skip",
+                value: skips,
+                choices: [{ value: null, label: `Their level's default: ${SKIP_LIFE_LABEL[levelSkips]}`, help: SKIP_NOTE[levelSkips], now: chat?.skips == null }, ...SKIP_LIVES.map((s) => ({ value: s, label: SKIP_LIFE_LABEL[s], help: SKIP_NOTE[s], now: chat?.skips === s }))],
+                disabled: ctx.busy,
+                onChange: setSkips
               }, undefined, false, undefined, this)
             ]
           }, undefined, true, undefined, this),
@@ -29826,7 +29935,7 @@ function FollowPage(props) {
           /* @__PURE__ */ u3(Button, {
             icon: "undo",
             disabled: ctx.busy,
-            onClick: () => sendOp(ctx, followOp(view.entity, "follows", null, null), props.onBack),
+            onClick: () => sendOp(ctx, followOp(view.entity, "follows", null, null, null), props.onBack),
             children: "Use the world's settings"
           }, undefined, false, undefined, this)
         ]

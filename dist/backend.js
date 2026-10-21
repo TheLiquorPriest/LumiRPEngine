@@ -6486,7 +6486,7 @@ function instantEvents(reg, ctx, instant, runSeed, opts = {}) {
     if (routine && yields) {
       const lower = mine.filter((r) => rank !== null && r.rank > rank).sort((a, b) => a.rank - b.rank)[0];
       const expected = instant.edge === "end" ? slot.value ?? null : lower ? lower.slot.value ?? null : valueBefore(reg, ctx, instant, entity);
-      if (yields(ctx, entity, schedule.target === "place" ? "place" : "activity", expected, firstOfDay(instant), opts.povRoutine === false))
+      if (yields(ctx, entity, schedule.target === "place" ? "place" : "activity", expected, firstOfDay(instant), opts.povRoutine === false, opts.timelapse === true))
         continue;
     }
     out.push({ type: "set", entity, field: schedule.target, value });
@@ -9118,7 +9118,7 @@ function advance(reg, w, to, opts) {
       if (edge && edgeAt <= (moment?.at ?? Infinity)) {
         next++;
         clockTo(w, edgeAt, cause, e);
-        e.emit(instantEvents(reg, w.ctx, edge, opts.runSeed, { povRoutine }));
+        e.emit(instantEvents(reg, w.ctx, edge, opts.runSeed, { povRoutine, timelapse }));
       } else if (moment) {
         t++;
         clockTo(w, moment.at, cause, e);
@@ -11269,7 +11269,16 @@ var spacePack = {
           return { code: "no_route", reason: `There's no way from ${named(from)} to ${named(place)}` };
         return null;
       },
-      toEffects: (p, ctx) => [{ type: "move", args: { entity: typeof p.entity === "string" ? p.entity : ctx.world.pov, to: typeof p.place === "string" ? p.place : "" } }]
+      toEffects: (p, ctx) => {
+        const entity = typeof p.entity === "string" ? p.entity : ctx.world.pov;
+        const to = typeof p.place === "string" ? p.place : "";
+        const move = { type: "move", args: { entity, to } };
+        const doing = own(ctx.state.entities, entity)?.fields.activity;
+        if (to === placeOfEntity(ctx.state, entity) || doing === undefined)
+          return [move];
+        const next = typeof p.activity === "string" && p.activity.trim() !== "" ? p.activity.trim() : "idle";
+        return next === doing ? [move] : [move, { type: "set", args: { entity, field: "activity", value: next } }];
+      }
     });
     r.lint({
       code: "space.references",
@@ -24091,24 +24100,30 @@ var ROUTINE_INVITATIONS = ["off", "player", "everyone"];
 var ROUTINE_SOCIABILITY = ["reserved", "usual", "outgoing"];
 var ROUTINE_PLAN_BEND = ["must", "strong", "standard", "ordinary"];
 var ROUTINE_ROLES = ["informative", "enforced", "off"];
+var SKIP_LIVES = ["stay", "routine", "model"];
 var DEFAULT_ROUTINE_ROLES = Object.freeze({ live: "informative", near: "informative", far: "informative", background: "enforced" });
-var DEFAULT_ROUTINE_SETTINGS = Object.freeze({ awareness: "balanced", invitations: "player", sociability: "usual", planBend: "standard", roles: DEFAULT_ROUTINE_ROLES, narrator: true, paletteFollowsRoutine: false });
+var DEFAULT_SKIP_LIVES = Object.freeze({ live: "model", near: "model", far: "model", background: "routine" });
+var DEFAULT_ROUTINE_SETTINGS = Object.freeze({ awareness: "balanced", invitations: "player", sociability: "usual", planBend: "standard", roles: DEFAULT_ROUTINE_ROLES, skips: DEFAULT_SKIP_LIVES, narrator: true, paletteFollowsRoutine: false });
 function routineSettingsOf(world) {
   const raw = isRecord(world.routineSettings) ? world.routineSettings : {};
   const pick = (v, allowed, fallback) => allowed.find((a) => a === v) ?? fallback;
-  const roles = isRecord(raw.roles) ? raw.roles : {};
+  const perLevel = (v, allowed, fallback) => {
+    const set = isRecord(v) ? v : {};
+    return { live: pick(set.live, allowed, fallback.live), near: pick(set.near, allowed, fallback.near), far: pick(set.far, allowed, fallback.far), background: pick(set.background, allowed, fallback.background) };
+  };
   return {
     awareness: pick(raw.awareness, ROUTINE_AWARENESS, DEFAULT_ROUTINE_SETTINGS.awareness),
     invitations: pick(raw.invitations, ROUTINE_INVITATIONS, DEFAULT_ROUTINE_SETTINGS.invitations),
     sociability: pick(raw.sociability, ROUTINE_SOCIABILITY, DEFAULT_ROUTINE_SETTINGS.sociability),
     planBend: pick(raw.planBend, ROUTINE_PLAN_BEND, DEFAULT_ROUTINE_SETTINGS.planBend),
-    roles: { live: pick(roles.live, ROUTINE_ROLES, DEFAULT_ROUTINE_ROLES.live), near: pick(roles.near, ROUTINE_ROLES, DEFAULT_ROUTINE_ROLES.near), far: pick(roles.far, ROUTINE_ROLES, DEFAULT_ROUTINE_ROLES.far), background: pick(roles.background, ROUTINE_ROLES, DEFAULT_ROUTINE_ROLES.background) },
+    roles: perLevel(raw.roles, ROUTINE_ROLES, DEFAULT_ROUTINE_ROLES),
+    skips: perLevel(raw.skips, SKIP_LIVES, DEFAULT_SKIP_LIVES),
     narrator: typeof raw.narrator === "boolean" ? raw.narrator : DEFAULT_ROUTINE_SETTINGS.narrator,
     paletteFollowsRoutine: typeof raw.paletteFollowsRoutine === "boolean" ? raw.paletteFollowsRoutine : DEFAULT_ROUTINE_SETTINGS.paletteFollowsRoutine
   };
 }
 var ROUTINE_MODES = ["follows", "no_invitations", "off"];
-var ROUTINE_EVENTS = { follow: "castlife.follow", block: "castlife.routine", schedule: "castlife.schedule" };
+var ROUTINE_EVENTS = { follow: "castlife.follow", block: "castlife.routine", schedule: "castlife.schedule", skipPlan: "castlife.skip_plan" };
 var ROUTINE_LINT = {
   shape: "routine.shape",
   window: "routine.window",
@@ -24252,7 +24267,7 @@ function routineShapeProblems(v) {
   });
   return out;
 }
-var SETTING_VALUES = { awareness: ROUTINE_AWARENESS, invitations: ROUTINE_INVITATIONS, sociability: ROUTINE_SOCIABILITY, planBend: ROUTINE_PLAN_BEND, roles: "roles", narrator: "switch", paletteFollowsRoutine: "switch" };
+var SETTING_VALUES = { awareness: ROUTINE_AWARENESS, invitations: ROUTINE_INVITATIONS, sociability: ROUTINE_SOCIABILITY, planBend: ROUTINE_PLAN_BEND, roles: { levels: ROUTINE_ROLES }, skips: { levels: SKIP_LIVES }, narrator: "switch", paletteFollowsRoutine: "switch" };
 function routineSettingsProblems(v) {
   if (!isRecord(v))
     return ["routine settings are an object"];
@@ -24262,10 +24277,10 @@ function routineSettingsProblems(v) {
       return [`there's no setting ${key} (${Object.keys(SETTING_VALUES).join(", ")})`];
     if (allowed === "switch")
       return typeof value === "boolean" ? [] : [`${key} is true or false`];
-    if (allowed === "roles") {
+    if ("levels" in allowed) {
       if (!isRecord(value))
-        return [`roles give ${FIDELITIES.join(", ")} each a role`];
-      return Object.entries(value).flatMap(([level, role]) => !FIDELITIES.some((f) => f === level) ? [`roles have no level ${level} (${FIDELITIES.join(", ")})`] : typeof role === "string" && ROUTINE_ROLES.some((r) => r === role) ? [] : [`roles.${level} is ${ROUTINE_ROLES.join(", ")}`]);
+        return [`${key} give ${FIDELITIES.join(", ")} each one of ${allowed.levels.join(", ")}`];
+      return Object.entries(value).flatMap(([level, one]) => !FIDELITIES.some((f) => f === level) ? [`${key} have no level ${level} (${FIDELITIES.join(", ")})`] : typeof one === "string" && allowed.levels.includes(one) ? [] : [`${key}.${level} is ${allowed.levels.join(", ")}`]);
     }
     return typeof value === "string" && allowed.includes(value) ? [] : [`${key} is ${allowed.join(", ")}`];
   });
@@ -24575,7 +24590,8 @@ function chatFollow(state, who) {
   const mode = ROUTINE_MODES.find((m) => m === raw.mode) ?? null;
   const awareness = ROUTINE_AWARENESS.find((a) => a === raw.awareness) ?? null;
   const role = ROUTINE_ROLES.find((r) => r === raw.role) ?? null;
-  return mode === null && awareness === null && role === null ? null : { mode, awareness, role };
+  const skips = SKIP_LIVES.find((s) => s === raw.skips) ?? null;
+  return mode === null && awareness === null && role === null && skips === null ? null : { mode, awareness, role, skips };
 }
 function chatBlocks(state, who) {
   const out = {};
@@ -24608,6 +24624,15 @@ function followOf(ctx, who) {
 }
 function routineRole(ctx, who) {
   return chatFollow(ctx.state, who)?.role ?? routineSettingsOf(ctx.world).roles[optionalQuery(ctx, "minds.tier")?.(ctx, who) ?? "background"];
+}
+function skipLifeOf(ctx, who) {
+  if (who === ctx.world.pov || routineRole(ctx, who) !== "informative")
+    return null;
+  return chatFollow(ctx.state, who)?.skips ?? routineSettingsOf(ctx.world).skips[optionalQuery(ctx, "minds.tier")?.(ctx, who) ?? "background"];
+}
+function skipPlanOf(state) {
+  const raw = sliceOf(state, "castlife").skipPlan;
+  return isRecord(raw) && typeof raw.from === "number" && typeof raw.to === "number" && Array.isArray(raw.plans) ? raw : null;
 }
 function routineRank(reg, world, state, def) {
   const rank = ownerRank(reg, world, state, def);
@@ -24819,16 +24844,20 @@ function withPov(ctx, who) {
   const here = placeOfEntity(ctx.state, pov);
   return here !== null && placeOfEntity(ctx.state, who) === here && canSeeEntity(ctx.registry, ctx.world, ctx.state, pov, who);
 }
+function routineLived(ctx, who, skip) {
+  return routineRole(ctx, who) === "enforced" || skip && skipLifeOf(ctx, who) === "routine";
+}
 function routineYields(ctx, who, field, expected, opts) {
-  if (opts.scene !== false && withPov(ctx, who))
-    return true;
   const pov = who === ctx.world.pov;
+  const enforced = routineRole(ctx, who) === "enforced";
+  if ((pov || enforced || opts.skip !== true) && opts.scene !== false && withPov(ctx, who))
+    return true;
   const awareness = followOf(ctx, who).awareness;
   if (!pov) {
-    if (routineRole(ctx, who) !== "enforced")
+    if (!routineLived(ctx, who, opts.skip === true))
       return true;
     const tier = optionalQuery(ctx, "minds.tier")?.(ctx, who) ?? "background";
-    if ((tier !== "background" || awareness === "story_first") && optionalQuery(ctx, "minds.intent")?.(ctx, who) === true)
+    if ((!enforced || tier !== "background" || awareness === "story_first") && optionalQuery(ctx, "minds.intent")?.(ctx, who) === true)
       return true;
   }
   const current = own(ctx.state.entities, who)?.fields[field];
@@ -24950,7 +24979,7 @@ function routinesLint(world, reg, state) {
   for (const id of Object.keys(raw).sort())
     issues.push(...routineIssues(world, reg, id, own(raw, id), state));
   const settings = isRecord(world.routineSettings) ? world.routineSettings : {};
-  const known = { awareness: ROUTINE_AWARENESS, invitations: ["off", "player", "everyone"], sociability: ["reserved", "usual", "outgoing"], planBend: ["must", "strong", "standard", "ordinary"], roles: "roles", narrator: "switch", paletteFollowsRoutine: "switch" };
+  const known = { awareness: ROUTINE_AWARENESS, invitations: ["off", "player", "everyone"], sociability: ["reserved", "usual", "outgoing"], planBend: ["must", "strong", "standard", "ordinary"], roles: { levels: ROUTINE_ROLES }, skips: { levels: SKIP_LIVES }, narrator: "switch", paletteFollowsRoutine: "switch" };
   const warn = (path, message) => void issues.push({ severity: "warning", code: ROUTINE_LINT.settings, path: `routineSettings.${path}`, message });
   for (const [key, v] of Object.entries(settings)) {
     const allowed = own(known, key);
@@ -24959,15 +24988,15 @@ function routinesLint(world, reg, state) {
     else if (allowed === "switch") {
       if (typeof v !== "boolean")
         warn(key, `Routine settings: ${key} is true or false; the default stands.`);
-    } else if (allowed === "roles") {
+    } else if ("levels" in allowed) {
       if (!isRecord(v))
-        warn(key, "Routine settings: roles give live, near, far and background each a role; the defaults stand.");
+        warn(key, `Routine settings: ${key} give live, near, far and background each one of ${allowed.levels.join(", ")}; the defaults stand.`);
       else
-        for (const [level, role] of Object.entries(v)) {
+        for (const [level, one] of Object.entries(v)) {
           if (!FIDELITIES.some((f) => f === level))
-            warn(`roles.${level}`, `Routine settings: roles have no ${level}; it does nothing.`);
-          else if (!ROUTINE_ROLES.some((r) => r === role))
-            warn(`roles.${level}`, `Routine settings: a role is ${ROUTINE_ROLES.join(", ")}; the default stands.`);
+            warn(`${key}.${level}`, `Routine settings: ${key} have no ${level}; it does nothing.`);
+          else if (typeof one !== "string" || !allowed.levels.includes(one))
+            warn(`${key}.${level}`, `Routine settings: ${key}.${level} is ${allowed.levels.join(", ")}; the default stands.`);
         }
     } else if (typeof v !== "string" || !allowed.includes(v))
       warn(key, `Routine settings: ${key} is ${allowed.join(", ")}; the default stands.`);
@@ -25854,23 +25883,29 @@ function presentUsual(ctx, place) {
       continue;
     if (routineRole(ctx, id) === "off")
       continue;
-    const named = (p) => {
-      const def = own(world.places, p);
-      return def && canSeePlace(reg, world, state, pov, p) ? place(p, def.name) : null;
-    };
-    const clauses = usualRoutine(ctx, id, { place: named, activity: canSeeField(reg, world, state, pov, id, "activity") }).filter((c) => !c.private && c.text !== "");
-    if (clauses.length === 0)
-      continue;
-    if (!safe) {
-      const secrets = unrevealedSecrets(reg, world, state);
-      const namesHidden = hiddenNameCheck(reg, world, state, pov);
-      safe = (t) => findLeaks(t, secrets).length === 0 && !namesHidden(t);
-    }
-    const told = clauses.map((c) => c.text).filter(safe).slice(0, 3);
+    const told = knownUsual(ctx, id, place, (t) => (safe ??= povSafe(ctx))(t)).slice(0, 3);
     if (told.length > 0)
       out.push({ id, name: e.name, told });
   }
   return out;
+}
+function povSafe(ctx) {
+  const { registry: reg, world, state } = ctx;
+  const secrets = unrevealedSecrets(reg, world, state);
+  const namesHidden = hiddenNameCheck(reg, world, state, world.pov);
+  return (t) => findLeaks(t, secrets).length === 0 && !namesHidden(t);
+}
+function knownUsual(ctx, who, place, safe) {
+  const { registry: reg, world, state } = ctx;
+  const pov = world.pov;
+  const named = (p) => {
+    const def = own(world.places, p);
+    return def && canSeePlace(reg, world, state, pov, p) ? place(p, def.name) : null;
+  };
+  const clauses = usualRoutine(ctx, who, { place: named, activity: canSeeField(reg, world, state, pov, who, "activity") }).filter((c) => !c.private && c.text !== "");
+  if (clauses.length === 0)
+    return [];
+  return clauses.map((c) => c.text).filter(safe ?? povSafe(ctx));
 }
 function usualRoutineHints(ctx) {
   if (!routineSettingsOf(ctx.world).narrator)
@@ -26098,12 +26133,14 @@ var ACQUAINT_CHANCE = 0.15;
 function acquainted(state, a, b) {
   return !!own(state.entities, a)?.relations.some((r) => r.type === "regard" && r.to === b) || !!own(state.entities, b)?.relations.some((r) => r.type === "regard" && r.to === a);
 }
-function takeUp(ctx, who, place, activity, at, holdUntil, quiet = false) {
+function takeUp(ctx, who, place, activity, at, holdUntil, quiet = false, seen = false) {
   const out = [];
   const e = own(ctx.state.entities, who);
   if (!e || routineStays(ctx, who, place) || optionalQuery(ctx, "combat.engaged")?.(ctx, who) === true)
     return out;
   if (!held2(ctx.state, who, "place", at) && place && own(ctx.world.places, place) && placeOfEntity(ctx.state, who) !== place) {
+    if (seen && withPov(ctx, who))
+      out.push({ type: ENGINE_EVENTS.note, data: { text: `${e.name} leaves.`, entity: who, visibility: "known_by" } });
     out.push({ type: "set", entity: who, field: "place", value: place });
     if (who !== ctx.world.pov && place === placeOfEntity(ctx.state, ctx.world.pov))
       out.push({ type: ENGINE_EVENTS.signal, data: { class: "arrival", text: `${e.name} arrives.`, entity: who, ...quiet ? { stops: false } : {} } });
@@ -26125,7 +26162,7 @@ function liveBlock(ctx, who, plan, block, from, at, scene, skip) {
   const activity = blockActivity(block.activity);
   if (block.option.startsWith("plan:"))
     return scene && withPov(ctx, who) ? [] : takeUp(ctx, who, block.place, activity, at, block.end);
-  if (who !== ctx.world.pov && routineRole(ctx, who) !== "enforced")
+  if (who !== ctx.world.pov && !routineLived(ctx, who, skip))
     return [];
   const edge = block.start > from && block.start <= at;
   const index = plan.blocks.indexOf(block);
@@ -26139,12 +26176,13 @@ function liveBlock(ctx, who, plan, block, from, at, scene, skip) {
   const doings = [...had.map((b) => blockActivity(b.activity)), ...typeof resting === "string" ? [resting] : []];
   const wasPlace = places.find((p) => p === e?.fields.place) ?? places[0] ?? [...earlier].reverse().find((b) => b.place !== null)?.place ?? home;
   const wasDoing = doings.find((d) => d === e?.fields.activity) ?? doings[0] ?? null;
-  const opts = { edge, release: block.activity === "sleep", scene };
   const target = block.place ?? (edge && earlier.at(-1)?.place ? home : null);
+  const opts = { edge, release: block.activity === "sleep", scene, skip };
   const place = target !== null && !routineYields(ctx, who, "place", wasPlace, opts) ? target : null;
   const doing = routineYields(ctx, who, "activity", wasDoing, opts) ? null : activity;
+  const skipLife = skip && who !== ctx.world.pov && routineRole(ctx, who) !== "enforced";
   const tier = skip && place !== null ? optionalQuery(ctx, "minds.tier")?.(ctx, who) ?? "background" : "background";
-  return takeUp(ctx, who, place, doing, at, undefined, tier === "live" || tier === "near");
+  return takeUp(ctx, who, place, doing, at, undefined, tier === "live" || tier === "near" || skipLife, skipLife);
 }
 function planOutcomes(ctx, who, slot) {
   if (who === ctx.world.pov)
@@ -26234,7 +26272,10 @@ function planMoments(ctx, who, slot) {
         out.push({ at: c.end, key: `end:${c.plan}` });
     }
   }
-  if (who === ctx.world.pov ? slot.povRoutine !== false : routineRole(ctx, who) === "enforced") {
+  for (const b of skipBlocksOf(ctx, who, slot))
+    if (inside(b.start))
+      out.push({ at: b.start, key: `skip:${b.start}` });
+  if (who === ctx.world.pov ? slot.povRoutine !== false : routineLived(ctx, who, slot.timelapse === true)) {
     const cal = calendarOf(ctx.world);
     const handed = new Set(out.flatMap((m) => m.key.startsWith("end:") ? [m.at] : []));
     const lived = livedAtMinute(ctx, who, slot);
@@ -26296,6 +26337,18 @@ function livedAtMinute(ctx, who, slot) {
   };
   return (block, before) => block.place !== null && povAt(block.start, block.end).has(block.place) || before !== null && povAt(block.start, block.start + 1).has(before);
 }
+function skipBlocksOf(ctx, who, slot) {
+  if (slot.timelapse !== true || skipLifeOf(ctx, who) !== "model")
+    return [];
+  return skipPlanOf(ctx.state)?.plans.find((p) => p.entity === who)?.blocks ?? [];
+}
+function liveSkipBlock(ctx, who, block, at) {
+  if (commitments(ctx, who, at, at + 1).some((c) => c.kind === "plan" || c.kind === "trip" || c.kind === "appointment"))
+    return [];
+  if (optionalQuery(ctx, "minds.intent")?.(ctx, who) === true)
+    return [];
+  return takeUp(ctx, who, block.place, block.activity, at, undefined, true, true);
+}
 function atPlanMoment(ctx, who, moment, slot) {
   const cal = calendarOf(ctx.world);
   if (moment.key.startsWith("invite:")) {
@@ -26303,6 +26356,11 @@ function atPlanMoment(ctx, who, moment, slot) {
     return ask ? invitation(ctx, who, ask) : [];
   }
   const scene = slot.povRoutine === false;
+  const planned = skipBlocksOf(ctx, who, slot);
+  if (moment.key.startsWith("skip:")) {
+    const starting = planned.find((b) => `skip:${b.start}` === moment.key);
+    return starting ? liveSkipBlock(ctx, who, starting, moment.at) : [];
+  }
   const plan = dayPlan(ctx, who, dateAt(cal, moment.at).dayIndex);
   if (moment.key.startsWith("block:")) {
     const starting = plan.blocks.find((b) => b.start === moment.at);
@@ -26310,13 +26368,21 @@ function atPlanMoment(ctx, who, moment, slot) {
     return starting ? liveBlock(ctx, who, plan, starting, from, moment.at, scene, slot.timelapse === true) : [];
   }
   const block = plan.blocks.find((b) => b.start <= moment.at && moment.at < b.end);
-  if (!block || scene && withPov(ctx, who))
+  if (!block)
     return [];
-  if (who !== ctx.world.pov && !block.option.startsWith("plan:") && routineRole(ctx, who) !== "enforced") {
+  const skipLife = slot.timelapse === true && who !== ctx.world.pov && routineRole(ctx, who) !== "enforced" && !block.option.startsWith("plan:");
+  if (scene && withPov(ctx, who) && !skipLife)
+    return [];
+  if (who !== ctx.world.pov && !block.option.startsWith("plan:") && !routineLived(ctx, who, slot.timelapse === true)) {
+    const holding = planned.find((b) => b.start <= moment.at && moment.at < b.end);
+    if (holding)
+      return liveSkipBlock(ctx, who, holding, moment.at);
+    if (scene && withPov(ctx, who))
+      return [];
     const rest = fieldDef(ctx.registry, ctx.world, own(ctx.state.entities, who)?.kind ?? "", "activity")?.default;
     return takeUp(ctx, who, null, typeof rest === "string" ? rest : null, moment.at);
   }
-  return takeUp(ctx, who, block.place ?? (moment.key.startsWith("end:") ? homeOf(ctx, who) : null), blockActivity(block.activity), moment.at, block.option.startsWith("plan:") ? block.end : undefined);
+  return takeUp(ctx, who, block.place ?? (moment.key.startsWith("end:") ? homeOf(ctx, who) : null), blockActivity(block.activity), moment.at, block.option.startsWith("plan:") ? block.end : undefined, skipLife, skipLife);
 }
 function stepAgent2(slot, ctx, rngFor, who) {
   const out = [];
@@ -26344,6 +26410,9 @@ function stepAgent2(slot, ctx, rngFor, who) {
   }
   if (who !== pov || slot.povRoutine !== false)
     out.push(...liveBlock(ctx, who, plan, block, slot.start, slot.end, slot.povRoutine === false, slot.timelapse === true));
+  const planned = skipBlocksOf(ctx, who, slot).find((b) => b.start <= slot.end && slot.end < b.end);
+  if (planned)
+    out.push(...liveSkipBlock(ctx, who, planned, slot.end));
   out.push(...planOutcomes(ctx, who, slot));
   if (level < 4)
     return out;
@@ -26487,7 +26556,9 @@ var EVENTS3 = [
       const mode = o.mode === null || ROUTINE_MODES.some((m) => m === o.mode);
       const awareness = o.awareness === null || ROUTINE_AWARENESS.some((a) => a === o.awareness);
       const role = o.role === undefined || o.role === null || ROUTINE_ROLES.some((r) => r === o.role);
-      return mode && awareness && role && (o.mode !== null || o.awareness !== null || o.role !== undefined && o.role !== null) ? null : { code: "bad_event", reason: "a routine setting is a mode, an awareness, a role or some of them, or null to clear it" };
+      const skips = o.skips === undefined || o.skips === null || SKIP_LIVES.some((s) => s === o.skips);
+      const some = o.mode !== null || o.awareness !== null || o.role !== undefined && o.role !== null || o.skips !== undefined && o.skips !== null;
+      return mode && awareness && role && skips && some ? null : { code: "bad_event", reason: "a routine setting is a mode, an awareness, a role, a skip life or some of them, or null to clear it" };
     },
     apply: (e, state) => {
       const follow = sliceRecord(state, "castlife", "follow");
@@ -26496,9 +26567,27 @@ var EVENTS3 = [
       if (e.data.follow === null)
         delete follow[who];
       else
-        follow[who] = { mode: f.mode ?? null, awareness: f.awareness ?? null, ...f.role !== undefined ? { role: f.role } : {} };
+        follow[who] = { mode: f.mode ?? null, awareness: f.awareness ?? null, ...f.role !== undefined ? { role: f.role } : {}, ...f.skips !== undefined ? { skips: f.skips } : {} };
     },
-    describe: (e, ctx, viewer) => changeLine(ctx, e, viewer, e.data.follow === null ? "routine setting cleared" : `routine: ${[objOf(e.data.follow).mode, objOf(e.data.follow).awareness, objOf(e.data.follow).role].filter((x) => typeof x === "string").join(", ").replace(/_/g, " ")}`)
+    describe: (e, ctx, viewer) => changeLine(ctx, e, viewer, e.data.follow === null ? "routine setting cleared" : `routine: ${[objOf(e.data.follow).mode, objOf(e.data.follow).awareness, objOf(e.data.follow).role, objOf(e.data.follow).skips].filter((x) => typeof x === "string").join(", ").replace(/_/g, " ")}`)
+  },
+  {
+    type: ROUTINE_EVENTS.skipPlan,
+    validate: (e, ctx) => {
+      const { from, to, plans, note } = e.data;
+      if (typeof from !== "number" || typeof to !== "number" || from >= to || !Array.isArray(plans) || note !== undefined && typeof note !== "string")
+        return { code: "bad_event", reason: "a skip plan has its span, its plans and an optional note" };
+      const block = (raw) => {
+        const b = objOf(raw);
+        return typeof b.label === "string" && typeof b.start === "number" && typeof b.end === "number" && from <= b.start && b.start < b.end && b.end <= to && own(ctx.world.places, strOf(b.place)) !== undefined && strOf(b.activity) !== "" && (b.days === undefined || typeof b.days === "string");
+      };
+      const planned = plans.every((raw) => own(ctx.state.entities, strOf(objOf(raw).entity)) !== undefined && Array.isArray(objOf(raw).blocks) && objOf(raw).blocks.every(block));
+      return planned ? null : { code: "bad_value", reason: "a skip plan names people in the world, each block inside its span at a place the world has" };
+    },
+    apply: (e, state) => {
+      mutableSlice(state, "castlife").skipPlan = structuredClone(e.data);
+    },
+    describe: (e, _ctx, viewer) => viewer !== undefined ? "" : `skip planned for ${Array.isArray(e.data.plans) ? e.data.plans.length : 0}${typeof e.data.note === "string" ? ` (${e.data.note})` : ""}`
   },
   {
     type: ROUTINE_EVENTS.block,
@@ -26565,7 +26654,8 @@ function routineEdit(ctx, op) {
     const mode = op.mode === undefined ? now?.mode ?? null : op.mode;
     const awareness = op.awareness === undefined ? now?.awareness ?? null : op.awareness;
     const role = op.role === undefined ? now?.role ?? null : op.role;
-    return [{ type: ROUTINE_EVENTS.follow, data: { entity: op.entity, follow: mode === null && awareness === null && role === null ? null : { mode, awareness, role } } }];
+    const skips = op.skips === undefined ? now?.skips ?? null : op.skips;
+    return [{ type: ROUTINE_EVENTS.follow, data: { entity: op.entity, follow: mode === null && awareness === null && role === null && skips === null ? null : { mode, awareness, role, skips } } }];
   }
   if (op.op === "routine_block") {
     if (op.value === null)
@@ -26792,7 +26882,7 @@ var castlifePack = {
     for (const def of EVENTS3)
       r.event(def);
     r.service("castlife.edit", routineEdit);
-    r.query("castlife.yields", (ctx, who, field, expected, release, scene) => routineYields(ctx, who, field, expected, { edge: true, release, scene }));
+    r.query("castlife.yields", (ctx, who, field, expected, release, scene, skip) => routineYields(ctx, who, field, expected, { edge: true, release, scene, skip }));
     r.query("castlife.schedule_off", (ctx, who, schedule, at) => scheduleOff(ctx.state, who, schedule, at));
     r.query("castlife.chat_schedules", chatScheduleDefs);
     r.process({ id: "castlife.agents", domain: "castlife", minLevel: 3, scope: "agent", step: (slot, ctx, rng, agent) => agent ? stepAgent2(slot, ctx, rng, agent) : [], instants: planMoments, atInstant: atPlanMoment });
@@ -58314,9 +58404,10 @@ function parseEditOps(raw) {
           const mode = o.mode === undefined || o.mode === null || ROUTINE_MODES.some((m) => m === o.mode);
           const awareness = o.awareness === undefined || o.awareness === null || ROUTINE_AWARENESS.some((a) => a === o.awareness);
           const role = o.role === undefined || o.role === null || ROUTINE_ROLES.some((r) => r === o.role);
-          if (!str14(o.entity) || !mode || !awareness || !role || o.mode === undefined && o.awareness === undefined && o.role === undefined)
+          const skips = o.skips === undefined || o.skips === null || SKIP_LIVES.some((s) => s === o.skips);
+          if (!str14(o.entity) || !mode || !awareness || !role || !skips || o.mode === undefined && o.awareness === undefined && o.role === undefined && o.skips === undefined)
             return null;
-          return { op: "routine_follow", entity: o.entity, ...o.mode !== undefined ? { mode: ROUTINE_MODES.find((m) => m === o.mode) ?? null } : {}, ...o.awareness !== undefined ? { awareness: ROUTINE_AWARENESS.find((a) => a === o.awareness) ?? null } : {}, ...o.role !== undefined ? { role: ROUTINE_ROLES.find((r) => r === o.role) ?? null } : {} };
+          return { op: "routine_follow", entity: o.entity, ...o.mode !== undefined ? { mode: ROUTINE_MODES.find((m) => m === o.mode) ?? null } : {}, ...o.awareness !== undefined ? { awareness: ROUTINE_AWARENESS.find((a) => a === o.awareness) ?? null } : {}, ...o.role !== undefined ? { role: ROUTINE_ROLES.find((r) => r === o.role) ?? null } : {}, ...o.skips !== undefined ? { skips: SKIP_LIVES.find((s) => s === o.skips) ?? null } : {} };
         }
         case "routine_block":
           if (!str14(o.entity) || !str14(o.block) || !(o.value === null || isRecord(o.value)))
@@ -58457,13 +58548,17 @@ function routineGmView(ctx, who, day = dateAt(calendarOf(ctx.world), ctx.state.c
     const bed = plan.blocks.find((b) => b.start > ctx.state.clock && b.activity === "sleep")?.start ?? null;
     story.push({ field: "place", value: e?.fields.place ?? null, label: own(ctx.world.places, strOf(e?.fields.place))?.name ?? strOf(e?.fields.place), since: null, until: awareness === "story_first" ? null : awareness === "balanced" ? bed : now.end, by: "story" });
   }
+  const follow = followOf(ctx, who);
+  const settings = routineSettingsOf(ctx.world);
+  const skip = skipPlanOf(ctx.state);
   return {
     entity: who,
     name: e?.name ?? who,
     tier: optionalQuery(ctx, "minds.tier")?.(ctx, who) ?? null,
     planned: livesPlans(ctx, who),
-    follow: { ...followOf(ctx, who), role: routineRole(ctx, who) },
-    settings: routineSettingsOf(ctx.world),
+    follow: { ...follow, role: routineRole(ctx, who), skips: follow.chat?.skips ?? settings.skips[optionalQuery(ctx, "minds.tier")?.(ctx, who) ?? "background"] },
+    skip: skip ? { from: skip.from, to: skip.to, blocks: skip.plans.find((p) => p.entity === who)?.blocks ?? [], note: skip.note ?? null } : null,
+    settings,
     blocks,
     schedules,
     day: { index: day, label: formatClock(cal, plan.blocks[0]?.start ?? ctx.state.clock).split(" ")[0] ?? "", blocks: laid },
@@ -58549,7 +58644,7 @@ function hostBound(host, limit) {
     return host.noneMs ?? host.maxMs;
   return Math.min(host.maxMs, Math.max(host.minMs ?? 0, limit));
 }
-var TIMEOUT_KEYS = ["engineRunMs", "preLookupMs", "postReplyMs", "postLookupMs", "guardMs", "requestMs", "caveatsMs", "mindsRunMs", "jobCallMs", "tokenCountMs", "laneStartupMs", "laneHeartbeatMs", "mcpReconnectMs"];
+var TIMEOUT_KEYS = ["engineRunMs", "preLookupMs", "postReplyMs", "postLookupMs", "guardMs", "skipPlanMs", "requestMs", "caveatsMs", "mindsRunMs", "jobCallMs", "tokenCountMs", "laneStartupMs", "laneHeartbeatMs", "mcpReconnectMs"];
 var MIN = 60000;
 var TIMEOUTS = {
   engineRunMs: {
@@ -58600,6 +58695,15 @@ var TIMEOUTS = {
     minMs: 1000,
     none: "as long as Lumiverse waits",
     host: "contextHandler"
+  },
+  skipPlanMs: {
+    label: "Time skip plan",
+    group: "turn",
+    limits: "The one call, as a time skip starts, that plans how the people whose skip is planned by the model spend it.",
+    fires: "Nobody is planned: they stay where they are, the GM gets a note, and the skip still runs.",
+    defaultMs: 2 * MIN,
+    minMs: 1000,
+    none: "the call takes as long as the engine run allows"
   },
   requestMs: {
     label: "Engine requests",
@@ -60089,7 +60193,7 @@ function messageOf(error) {
   return error instanceof Error ? error.message : String(error);
 }
 function callFailure(calls) {
-  const last = calls.at(-1);
+  const last = calls.findLast((c) => c.spared !== true);
   if (!last)
     return null;
   let reason = null;
@@ -66958,7 +67062,7 @@ class Steps {
     const t0 = performance.now();
     const lookup = o.lookup ? { lookup: true } : {};
     const tried = attempt > 0 ? { retries: attempt } : {};
-    const route = { purpose, via: "helper", connection: request.connectionId ?? "active", maxTokens: request.maxTokens, ...lookup };
+    const route = { purpose, via: "helper", connection: request.connectionId ?? "active", maxTokens: request.maxTokens, ...lookup, ...o.spared ? { spared: true } : {} };
     this.onCallStart?.(userId, purpose);
     try {
       const r = await this.host.models.quiet(request, userId, signal);
@@ -66994,7 +67098,7 @@ ${options.guidance}` : "";
 
 `) }, { role: "user", content: user }];
     const ask = async (messages, tools, o) => {
-      const r = await this.quiet(purpose, { ...base, messages, json: !tools, ...tools && lore ? { tools: [...lore.tools] } : {} }, userId, signal, o);
+      const r = await this.quiet(purpose, { ...base, messages, json: !tools, ...tools && lore ? { tools: [...lore.tools] } : {} }, userId, signal, { ...o, spared: options.spared === true });
       if (options.usage && !(r instanceof Error))
         options.usage.tokens += r.tokens;
       return r;
@@ -68722,6 +68826,165 @@ async function runSkip(deps, input) {
   return { record, traces };
 }
 
+// src/packs/castlife/core/skip-plan.ts
+var BUILTIN_ACTIVITIES = ["work", "socialize", "leisure"];
+var STORY_KINDS = { appointment: true, trip: true, plan: true };
+var LABEL_CAP = 80;
+function worldActivities(ctx, people) {
+  const out = new Set([...BUILTIN_ACTIVITIES, ...BASIC_BLOCKS.map((b) => b.activity)]);
+  for (const def of Object.values(ctx.world.routines ?? {}))
+    for (const entry of def.blocks)
+      if ("activity" in entry)
+        out.add(entry.activity);
+  for (const id of people)
+    for (const { block } of activeBlocks(ctx, id))
+      out.add(block.activity);
+  for (const s of chatSchedulesIn(ctx))
+    if (s.target === "activity") {
+      for (const slot of s.slots)
+        if (typeof slot.value === "string" && slot.value.trim() !== "")
+          out.add(slot.value.trim());
+    }
+  return [...out].sort();
+}
+function skipPlanBrief(ctx, people, from, to) {
+  const { registry: reg, world, state } = ctx;
+  const pov = world.pov;
+  const cal = calendarOf(world);
+  const safe = povSafe(ctx);
+  const places = Object.keys(world.places).filter((p) => canSeePlace(reg, world, state, pov, p)).sort().map((id) => ({ id, name: own(world.places, id)?.name ?? id }));
+  const seen = new Set(places.map((p) => p.id));
+  const named = (id) => `${own(world.places, id)?.name ?? id} (${id})`;
+  const out = people.map((id) => {
+    const e = own(state.entities, id);
+    const here = placeOfEntity(state, id);
+    const activity = e && canSeeField(reg, world, state, pov, id, "activity") && typeof e.fields.activity === "string" ? e.fields.activity : null;
+    const story = commitments(ctx, id, from, to).filter((c) => STORY_KINDS[c.kind] === true).map((c) => `${formatStamp(cal, c.start)} to ${formatStamp(cal, c.end)}: ${c.label}${c.place && seen.has(c.place) ? ` at ${named(c.place)}` : ""}`).filter(safe);
+    return {
+      id,
+      name: e && povMayKnow(reg, world, state, id) ? e.name : "someone the player character hasn't met",
+      place: here !== null && seen.has(here) && canSeeField(reg, world, state, pov, id, "place") ? { id: here, name: own(world.places, here)?.name ?? here } : null,
+      activity: activity !== null && safe(activity) ? activity : null,
+      usual: knownUsual(ctx, id, (p, name) => `${name} (${p})`, safe),
+      story
+    };
+  });
+  return { from, to, people: out, places, activities: worldActivities(ctx, people) };
+}
+function skipPlanText(ctx, brief, reply, journal) {
+  const cal = calendarOf(ctx.world);
+  const person = (p) => [
+    `- ${p.name} (id ${p.id}): ${p.place ? `at ${p.place.name} (${p.place.id})` : "somewhere of their own"}${p.activity ? `, ${p.activity.replace(/_/g, " ")}` : ""}.`,
+    p.usual.length > 0 ? `  Usually: ${p.usual.join("; ")}.` : "",
+    p.story.length > 0 ? `  Already set by the story: ${p.story.join("; ")}.` : ""
+  ].filter((s) => s !== "").join(`
+`);
+  return [
+    `The time skip runs from ${formatStamp(cal, brief.from)} to ${formatStamp(cal, brief.to)}.`,
+    `People to plan:
+${brief.people.map(person).join(`
+`)}`,
+    `Places they may use (id: name):
+${brief.places.map((p) => `- ${p.id}: ${p.name}`).join(`
+`)}`,
+    `Activities: ${brief.activities.join(", ")}.`,
+    journal.length > 0 ? `The story so far:
+${journal.map((l) => `- ${l}`).join(`
+`)}` : "",
+    reply.trim() !== "" ? `The latest reply:
+${reply.trim()}` : ""
+  ].filter((s) => s !== "").join(`
+
+`);
+}
+function checkSkipPlan(ctx, brief, raw) {
+  const cal = calendarOf(ctx.world);
+  const safe = povSafe(ctx);
+  const asked = new Set(brief.people.map((p) => p.id));
+  const places = new Set(brief.places.map((p) => p.id));
+  const activities = new Set(brief.activities);
+  const dropped = [];
+  const byEntity = new Map;
+  for (const plan of isRecord(raw) && Array.isArray(raw.plans) ? raw.plans : []) {
+    if (!isRecord(plan) || typeof plan.entity !== "string" || !asked.has(plan.entity)) {
+      dropped.push(`a plan for someone not asked about (${isRecord(plan) ? String(plan.entity) : "no entity"})`);
+      continue;
+    }
+    const who = plan.entity;
+    const blocks = byEntity.get(who) ?? [];
+    const candidates = [];
+    for (const b of Array.isArray(plan.blocks) ? plan.blocks : []) {
+      if (!isRecord(b))
+        continue;
+      const start = typeof b.start === "string" ? clockOfStamp(cal, b.start) : null;
+      const end = typeof b.end === "string" ? clockOfStamp(cal, b.end) : null;
+      const place = typeof b.place === "string" ? b.place : "";
+      const activity = typeof b.activity === "string" ? b.activity.trim() : "";
+      const label = neutralizeMacros(typeof b.label === "string" ? b.label : "").replace(/\s+/g, " ").trim().slice(0, LABEL_CAP);
+      const why = start === null || end === null ? "a time that isn't a day and time" : start < brief.from || end > brief.to || end <= start ? "outside the skip" : !places.has(place) ? `a place not offered (${place})` : !activities.has(activity) ? `an activity the world hasn't (${activity})` : label === "" ? "no label" : !safe(label) ? "a label naming what the player may not know" : null;
+      if (why !== null || start === null || end === null) {
+        dropped.push(`${who}: ${why ?? "unreadable"}`);
+        continue;
+      }
+      candidates.push({ label, start, end, place, activity });
+    }
+    for (const c of candidates.sort((a, b) => a.start - b.start)) {
+      if (blocks.some((k) => c.start < k.end && k.start < c.end))
+        dropped.push(`${who}: a block overlapping another`);
+      else
+        blocks.push(c);
+    }
+    byEntity.set(who, blocks);
+  }
+  const plans = brief.people.flatMap((p) => {
+    const blocks = (byEntity.get(p.id) ?? []).sort((a, b) => a.start - b.start);
+    return blocks.length > 0 ? [{ entity: p.id, blocks }] : [];
+  });
+  return { plans, dropped };
+}
+
+// src/backend/skip-plan.ts
+var REPLY_CAP = 2000;
+var SKIP_PLAN_SYSTEM = [
+  "You plan how some people in a roleplay spend a stretch of time that is skipped over. For each person, lay out what they do during the skip as a few blocks of time.",
+  "Their usual routine is background you may follow, bend or ignore as the story suggests; it is never a rule. What the story already set for them comes first. Keep each person in character and consistent with the latest reply.",
+  "Use only the places and activities listed, by id and word as given. Every block lies inside the skip, and one person's blocks never overlap. A label is a few plain words saying what they do, naming no one.",
+  'Answer with JSON only: {"plans":[{"entity":"<person id>","blocks":[{"label":"...","start":"YYYY-MM-DD HH:MM","end":"YYYY-MM-DD HH:MM","place":"<place id>","activity":"<activity>"}]}]}. Leave out anyone with nothing worth planning.'
+].join(`
+`);
+async function planSkip(deps, input) {
+  const { target, opts } = timelapseOptions(input.intent, input.runSeed);
+  const run = target ? TimelapseRun.start(deps.registry, new Working(deps.registry, input.world, input.state), target, opts) : null;
+  if (!run || "code" in run || run.to <= run.from)
+    return null;
+  const { from, to } = run;
+  const last = skipPlanOf(input.state);
+  if (last && last.from <= from && from < last.to && to <= last.to)
+    return null;
+  const ctx = deps.registry.context(input.world, input.state);
+  const people = Object.keys(input.state.entities).sort().filter((id) => kindIs(deps.registry, input.world, input.state.entities[id]?.kind ?? "", "person") && !isGone(input.state, id) && skipLifeOf(ctx, id) === "model");
+  if (people.length === 0)
+    return null;
+  const brief = skipPlanBrief(ctx, people, from, to);
+  const safe = povSafe(ctx);
+  const reply = input.reply.slice(-REPLY_CAP);
+  const user = skipPlanText(ctx, brief, safe(reply) ? reply : "", input.journal.filter(safe));
+  const signal = within4(input.signal, "skipPlanMs", input.limit);
+  const failure = { reason: "" };
+  const raw = signal.aborted ? null : await deps.steps.helperJson("skip", SKIP_PLAN_SYSTEM, user, null, input.userId, signal, { failure, spared: true });
+  const record = (plan) => ({ type: ROUTINE_EVENTS.skipPlan, data: JSON.parse(JSON.stringify(plan)) });
+  if (raw === null) {
+    const fired = firedTimeout(signal);
+    const why = fired ? fired.message : failure.reason || "the call didn't answer";
+    deps.log(`skip plan for ${people.length} people failed: ${why}`);
+    return record({ from, to, plans: [], note: `The skip plan wasn't made (${why}), so everyone it would have planned stays where they are.` });
+  }
+  const checked = checkSkipPlan(ctx, brief, raw);
+  if (checked.dropped.length > 0)
+    deps.log(`skip plan dropped ${checked.dropped.length} block(s): ${checked.dropped.join("; ")}`);
+  return record({ from, to, plans: checked.plans });
+}
+
 // src/engine/bounds.ts
 var RANK2 = { auto: 0, confirm: 1, never: 2 };
 function strictest(...modes) {
@@ -69199,9 +69462,9 @@ function thisBuild(moduleUrl = import.meta.url) {
   const dir = moduleUrl.replace(/[^/]*$/, "");
   const path = pathOfFileUrl(`${dir}${KIT_FILE}`);
   const core = pathOfFileUrl(`${dir}${CORE_FILE}`);
-  const sha256 = "51c7ca4a993a0c60d68a3da0cc5b9cb0d49e5184196945ea7645a93355007b3d";
+  const sha256 = "696ca9cf01fc73a7218d1732deb961275faec6583b5fc4b71abaee22d4cee9b0";
   const tools = ["18ab4cc48319d3329b4f414f8503d74f", "9748f93066a93461e251d2677fe4f3b6"].filter((f) => f !== undefined);
-  return { id: "4f4d4c30", kit: sha256 !== undefined && path !== null && core !== null ? { path, core, sha256, api: KIT_API } : null, tools };
+  return { id: "e7650faa", kit: sha256 !== undefined && path !== null && core !== null ? { path, core, sha256, api: KIT_API } : null, tools };
 }
 var BUILD_FILE = "agents/build.json";
 var USER_FILE = "agents.json";
@@ -71520,6 +71783,7 @@ class TurnBridge {
   prose = new Map;
   offers = new Map;
   skips = new Map;
+  skipPlans = new Map;
   held = new Map;
   routineAsks = new Map;
   readAt = new Map;
@@ -71531,7 +71795,7 @@ class TurnBridge {
   begin(userText, at) {
     if (this.readAt.get(userText) === at)
       return;
-    for (const kept of [this.intents, this.unfit, this.nexts, this.decisions, this.minds, this.offers, this.skips, this.held, this.routineAsks])
+    for (const kept of [this.intents, this.unfit, this.nexts, this.decisions, this.minds, this.offers, this.skips, this.skipPlans, this.held, this.routineAsks])
       kept.delete(userText);
     this.interpreted.delete(userText);
     this.unread.delete(userText);
@@ -71648,7 +71912,18 @@ class TurnBridge {
     trim(this.minds);
   }
   prePlan(userText) {
-    return [...this.decisions.get(userText) ?? [], ...this.minds.get(userText) ?? []];
+    const plan = this.skipPlans.get(userText);
+    return [...this.decisions.get(userText) ?? [], ...this.minds.get(userText) ?? [], ...plan ? [plan] : []];
+  }
+  setSkipPlan(userText, event) {
+    if (event)
+      this.skipPlans.set(userText, event);
+    else
+      this.skipPlans.delete(userText);
+    trim(this.skipPlans);
+  }
+  hasSkipPlan(userText) {
+    return this.skipPlans.has(userText);
   }
   setSkip(userText, record) {
     if (record)
@@ -72354,7 +72629,7 @@ class Runtime {
     this.steps.onCallStart = (userId, purpose) => this.diag.callStart(userId, purpose);
     this.toolSupport = new ToolSupport(this.host);
     this.minds = { host: this.host, registry: this.registry, steps: this.steps, settings: this.settings, presets: this.presets };
-    this.ledger = new LedgerService(this.host, (chatId, userId) => this.resolveEnv(chatId, userId), new LedgerFold(this.registry, { fingerprint: "4f4d4c30" }), (chatId) => messages.forget(chatId));
+    this.ledger = new LedgerService(this.host, (chatId, userId) => this.resolveEnv(chatId, userId), new LedgerFold(this.registry, { fingerprint: "e7650faa" }), (chatId) => messages.forget(chatId));
     this.studio = new StudioBridge(this.host, this.worlds);
     this.worlds.onChange = (worldId, userId) => this.studio.worldChanged(worldId, userId);
     this.agents = new Agents(this.host, options.build ?? thisBuild(), async (userId) => (await this.settings.get(userId)).timeouts.mcpReconnectMs);
@@ -72539,6 +72814,16 @@ class Runtime {
     if (text.trim() !== "")
       this.host.log("info", `[LumiRPEngine] plan ${String(input.generationId).slice(0, 8)}: intent ${bridge.intentOf(text)?.action ?? "none"} ${JSON.stringify(bridge.intentOf(text)?.params ?? {}).slice(0, 240)}, ${decisions.length} npc decision(s), ${minds.traces.length} mind(s), ${budget.spent} pre call(s)`, input.userId);
     const intent = bridge.intentOf(text);
+    if (intent?.action === TIMELAPSE_ACTION2 && !bridge.hasSkipPlan(text)) {
+      const from = input.core.planState(p.generationId, input.observed);
+      if (from) {
+        const start = new Working(this.registry, from.world, from.state);
+        start.applyAll(bridge.prePlan(text));
+        const journal = recentLines(input.core, input.observed, target < 0 ? input.observed.length : target, this.registry);
+        const log = (message) => this.host.log("info", `[LumiRPEngine] plan ${p.generationId.slice(0, 8)}: ${message}`, input.userId);
+        bridge.setSkipPlan(text, await planSkip({ registry: this.registry, steps: this.steps, log }, { userId: input.userId, world: from.world, state: start.state, intent, runSeed: bridge.runSeed, reply: lastReply ? lastReply.swipes[lastReply.swipeId] ?? "" : "", journal, signal: budget.signal, limit: settings.timeouts.skipPlanMs }));
+      }
+    }
     const base = intent?.action === TIMELAPSE_ACTION2 && mindsOn2(settings) ? input.core.planState(p.generationId, input.observed) : null;
     let skip = null;
     if (intent && base) {
