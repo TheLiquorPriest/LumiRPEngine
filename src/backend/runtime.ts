@@ -807,6 +807,9 @@ export class Runtime implements TurnHooks {
     const text = lastUser ? (lastUser.swipes[lastUser.swipeId] ?? "") : "";
     const render = input.core.renderState(input.observed);
     if (!render) return;
+    // What the bridge keeps for these words is one turn's (DESIGN §5.1): the same words in a later
+    // turn, or this turn after an earlier message changed, are read again; a Re-run or a Retry of it isn't.
+    bridge.begin(text, input.core.planState(p.generationId, input.observed)?.parentPath ?? "");
     const budget = phaseBudget(settings, "pre", input.signal);
     this.preBudgets.set(p.generationId, budget);
     trimMap(this.preBudgets);
