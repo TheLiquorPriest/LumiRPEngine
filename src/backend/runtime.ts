@@ -52,6 +52,7 @@ import { namesHidden, povMayKnow } from "../engine/player-events";
 import { canSeeEntity, canSeePlace, findLeaks, namesAny, playerTrack, povPlace, shownTrackId, unrevealedSecrets, unseenPlaceNames } from "../engine/visibility";
 import { openPuzzle } from "../packs/story/core/index";
 import { REGARD_CHANNEL_CAP } from "../packs/relationships/core/index";
+import { resolveUsualMoves, usualRoutineForExtract } from "../packs/castlife/core/usual";
 import { Working } from "../engine/working";
 import type { PresetCard, TemplateInfo } from "../shared/protocol";
 import { Agents, type BuildInfo, thisBuild } from "./agents";
@@ -1512,8 +1513,12 @@ export class Runtime implements TurnHooks {
     // The user's reading time as set (Settings → Timeouts), with no silent floor.
     const budget = phaseBudget(settings, "post");
     const secrets = unrevealedSecrets(this.registry, context.world, context.state);
+    // The usual routines of the people with the POV, as it may know them: extract's own input, never a
+    // fact, only to tell where a move the reply describes is going (DESIGN §9.4, §6.10). A world's own
+    // extract or effects template reads them as `{{usual}}`.
+    const usual = usualRoutineForExtract(ctx);
     // The brief the plan's step wrote, while the bridge still holds the plan (as `outcome` and `beats`).
-    const vars = safeVars(this.stepVars(context.world, context.state, plan, pre?.text ?? "", text, (plan && bridge.proseFor(context.seed)?.brief) ?? "", context.recent), secrets);
+    const vars = safeVars({ ...this.stepVars(context.world, context.state, plan, pre?.text ?? "", text, (plan && bridge.proseFor(context.seed)?.brief) ?? "", context.recent), usual: usual.join("\n") }, secrets);
     const modelUse = settings.modelUse;
     // What the reply's steps search lore with: the reply and the player's message, in the POV's scene.
     const read = { text: `${text}\n${pre?.text ?? ""}`, links: this.sceneLinks(context.world, context.state) };
@@ -1524,7 +1529,7 @@ export class Runtime implements TurnHooks {
     // L27: a timelapse or speed-through turn's time passed as its timelapse, so its reply proposes no skip.
     const skipped = facts.timelapse || !!plan?.timelapse;
     const extractTask = extractRun && budget.take()
-      ? extract(this.steps, text, povWorld(this.registry, context.world, context.state), prefixSummary(this.registry, context.world, context.state), clockMinutes(context.pre), EXTRACTION_TYPES.filter((t) => (t === "time_advance" ? !skipped : this.registry.proposals.has(t))), extractRun.config, userId, budget.signal, extractRun.template ? renderTemplate(extractRun.template.template, vars) : undefined, lore(extractRun), extractRun.guidance)
+      ? extract(this.steps, text, povWorld(this.registry, context.world, context.state), prefixSummary(this.registry, context.world, context.state), clockMinutes(context.pre), EXTRACTION_TYPES.filter((t) => (t === "time_advance" ? !skipped : this.registry.proposals.has(t))), extractRun.config, userId, budget.signal, extractRun.template ? renderTemplate(extractRun.template.template, vars) : undefined, lore(extractRun), extractRun.guidance, usual)
       : Promise.resolve({ proposals: [], where: null });
     const effectsTasks = (["extract", "contradiction", "choices"] as const).flatMap((purpose) => runsOf(modelUse, context.world, purpose, facts, { output: "effects", guidance })).map((r) => (budget.take() ? promptedEffects(this.steps, r, vars, context.world.currency, userId, budget.signal, lore(r, true)) : Promise.resolve([])));
     const npcRun = runsOf(modelUse, context.world, "npc.choose", facts, { guidance })[0];
@@ -1560,7 +1565,9 @@ export class Runtime implements TurnHooks {
     const typed = buyActions.flatMap((a) => (typeof a.params.price === "number" ? [a.params.price] : []));
     const typedItems = buyActions.flatMap((a) => (typeof a.params.item === "string" ? [a.params.item] : []));
     const unsure = new Set<JsonObject>();
-    const narrated = [...extracted.proposals, ...effects.flat()];
+    // A move to someone's usual place ("usual") goes where their routine has them now, as the POV may
+    // know it; one that resolves to none is left out (DESIGN §9.4).
+    const narrated = [...resolveUsualMoves(ctx, extracted.proposals), ...effects.flat()];
     // Where the reply leaves the POV when no move says so is a guess (a flashback, a phone call, a look
     // across the street read as being there): whatever the location mode it waits for Apply, and its
     // chip is no outcome for the type's learning (DESIGN §9.4). `never` still ignores it.

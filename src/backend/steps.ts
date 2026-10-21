@@ -643,7 +643,10 @@ export interface ExtractRead {
 /** Where the reply leaves the player character, asked beside the changes: a reply can take a move as given without telling it, and no change holds that (DESIGN §9.4). */
 const EXTRACT_WHERE = `Beside "proposals", give "where": the id of the place where the reply leaves the player character at its end, whether it tells how they got there or takes it as given; null when it doesn't say.`;
 
-/** `extract`: proposals read from a reply (DESIGN §9.4), and where it leaves the player character (`where`, asked while `location` is a channel). `instructions` (a world text template) lead the prompt; the contract stays; the preset's guidance and the step's lore follow. Empty on failure. */
+/** How `extract` may use the usual routines it is given (DESIGN §9.4): to place a move the reply describes, never to make one. */
+const EXTRACT_USUAL = `Usual routines are given below the state, only to tell where a move the reply describes is going: someone who heads out to their usual spot ("his usual lunch place", "off to her regular bar") moves to that place; give its id from their usual routine, or place "usual" when the reply doesn't say which. A usual routine is never a move by itself: no location for someone the reply doesn't describe leaving or arriving.`;
+
+/** `extract`: proposals read from a reply (DESIGN §9.4), and where it leaves the player character (`where`, asked while `location` is a channel). `instructions` (a world text template) lead the prompt; the contract stays; the preset's guidance and the step's lore follow. `usual`: the usual routines of the people with the player character as it may know them, given while `location` is a channel, apart from any fact. Empty on failure. */
 export async function extract(
   steps: Steps,
   narration: string,
@@ -657,6 +660,7 @@ export async function extract(
   instructions?: string,
   lore: StepLore | null = null,
   guidance = "",
+  usual: readonly string[] = [],
 ): Promise<ExtractRead> {
   const types =
     `time_advance{minutes} · location{entity,place} · purchase{item,category,payer?,qty?,price?,method?} (payer: the person who pays, an entity id, never an account or a card; method: how the prose says they paid, in its words, e.g. "cash", "debit card", "credit card" or "savings"; leave it out when not said) · transfer{from,to,amount,method?} (from and to: people, entity ids, or a person's own cash, checking, savings or card account, never things; method: "cash" when bills or coins change hands in person, as in "hands me $20" or "slips her a twenty"; leave it out for a bank transfer, an app payment or a card) · give{item,from,to,amount?} (amount: for cash or money handed over, the amount) · quantity{entity,item,delta} · condition{who,condition,minutes?,clear?} (a named condition such as tired or injured; clear:true when it ends) · regard{from,to,axis,delta} (axis trust|affection|respect; delta -3..3) · knows{who,fact} (public facts only) · spawn{kind,name,place?,role?} · life{entity,state} (state: ${lifeStatesOf(world)
@@ -664,8 +668,10 @@ export async function extract(
       .join("|")}) · routine{entity,change,label,days,start?,end?,minutes?,activity?,place?,with?,replaces?} (change: start for a new job, shift or habit, stop for one given up, move for a new home, its place the home; days: weekday names, weekdays, weekends or daily; start and end: HH:MM, or start morning|afternoon|evening|night; activity: work|school|exercise|leisure|socialize|errand; with: people's ids; replaces: true only when the prose says it takes the place of what they did then)`;
   const allowed = channels.length > 0 ? `Only these types are enabled: ${channels.join(", ")}.` : "";
   const system = `${instructions ? `${instructions}\n` : ""}You read a narrator's roleplay reply and propose concrete state changes that the prose states actually happened.\n${worldBrief(world, `Minutes already applied this turn: ${appliedMinutes}.`)}\nProposal types: ${types}. ${allowed}\nRules: no considered, refused or hypothetical changes; use world ids where they exist; one proposal per change. Money amounts are plain amounts in ${world.currency.code} as written (8 for ${world.currency.symbol}8).\nStrict rules:\n- ${EXTRACT_STRICT_RULES.join("\n- ")}\nOutput JSON only: {"proposals":[{"type":...}, ...]}.`;
-  const asked = channels.length === 0 || channels.includes("location") ? `${system}\n${EXTRACT_WHERE}` : system;
-  const raw = await steps.helperJson("extract", asked, `State before: ${JSON.stringify(prefix)}\nNarration:\n${narration}`, config, userId, signal, { lore, guidance });
+  const moves = channels.length === 0 || channels.includes("location");
+  const routines = moves && usual.length > 0;
+  const asked = `${moves ? `${system}\n${EXTRACT_WHERE}` : system}${routines ? `\n${EXTRACT_USUAL}` : ""}`;
+  const raw = await steps.helperJson("extract", asked, `State before: ${JSON.stringify(prefix)}\n${routines ? `Usual routines (where a described move goes; never a move by itself):\n${usual.join("\n")}\n` : ""}Narration:\n${narration}`, config, userId, signal, { lore, guidance });
   const list = isRecord(raw) && Array.isArray(raw.proposals) ? raw.proposals : Array.isArray(raw) ? raw : [];
   const proposals: JsonObject[] = [];
   for (const p of list) {
@@ -673,7 +679,7 @@ export async function extract(
     // Scaled once: a cash give becomes a transfer carrying its scaled amount.
     proposals.push(inMinorUnits(JSON.parse(JSON.stringify(p)) as JsonObject, world.currency));
   }
-  const where = asked !== system && isRecord(raw) && typeof raw.where === "string" && raw.where.trim() !== "" ? raw.where.trim() : null;
+  const where = moves && isRecord(raw) && typeof raw.where === "string" && raw.where.trim() !== "" ? raw.where.trim() : null;
   return { proposals: dedupeProposals(proposals, world.pov), where };
 }
 
