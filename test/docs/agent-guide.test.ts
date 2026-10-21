@@ -1,4 +1,4 @@
-// docs/AGENT-GUIDE.md's minds and money sections, held to the engine. Their JSON Patch examples,
+// docs/AGENT-GUIDE.md's minds, money and routines sections, held to the engine. Their JSON Patch examples,
 // taken from the page itself and applied in order to the modern starter as lre_edit would: the
 // world still loads, they bring in no lint error or warning, and it still conforms to the
 // published schema. An agent copies these, so a wrong field name or a refused value here is a

@@ -6,8 +6,8 @@ Read this before you touch a LumiRPEngine world through the `lumirpengine` MCP s
 
 A world is one JSON document in the `lre-world-v1` format, with a published JSON Schema (`lre_schema`). Each commit makes an immutable **revision**, named by its content hash; the newest is the world's **head**, and a chat plays the revision it was started on until the player upgrades it. Changes go to a **draft** first: a working copy that a commit turns into the next revision.
 
-- **Collections** are objects keyed by id: `kinds`, `relations`, `entities`, `places`, `routes`, `grids`, `maps`, `rules`, `actions`, `checks`, `schedules`, `tracks`, `tables`, `sections`, `steps`, `packs`, `lore`, `classifications`, `tiers`, and `lifeStates` when the world has its own.
-- **Parts** are single values: `calendar`, `realism`, `time`, `start` (`{place, at}`), `pov` (the entity the player plays), `currency`, `loreIndex`, `pins`, and the optional `ruleset`, `mapSettings`, `spawnTier` and `spawnCap`.
+- **Collections** are objects keyed by id: `kinds`, `relations`, `entities`, `places`, `routes`, `grids`, `maps`, `rules`, `actions`, `checks`, `schedules`, `tracks`, `tables`, `sections`, `steps`, `packs`, `lore`, `classifications`, `tiers`, and `lifeStates` and `routines` when the world has them.
+- **Parts** are single values: `calendar`, `realism`, `time`, `start` (`{place, at}`), `pov` (the entity the player plays), `currency`, `loreIndex`, `pins`, and the optional `ruleset`, `mapSettings`, `spawnTier`, `spawnCap` and `routineSettings`.
 - **Checks:** `ruleset.adjudication` decides how checks are decided, and `ruleset.inferred` how a typed attempt no action with its own check covers is read as a check of the world's sheet (`mode`, `when`, `who`, `skills`, `difficulty`, `detail`, `others`, `guidance`, `most`; it must name its `mode`). A world without one leaves inferred checks to each chat's realism preset. The skills it rolls are the world's own: the rows of a skill action's table (Use a skill, Make a save) or the Sheets pack's stats, so give an attempt that matters to the story its own action with its own check, which keeps it.
 - **Kinds** are types with fields and single inheritance (`extends`). The packs define the common ones: `thing` (with `owner` and `place`), `person`, `item`, `container`, `kit`, `vehicle`, `region`, the money kinds (`account`, `card`, `flow`, `job`, `holding`, `property`, `business`, `trust`, `invoice`), and `group` with its `faction`, `family`, `household` and `company`. A world kind with a pack kind's id replaces it whole, so extend a pack kind rather than redefine it.
 - **Entities** are the people and things: `{id, kind, name, tier, fields, relations}`, plus `life`, `lifeKnownBy`, `agent`, `cues`, `class`, `tags`, `visibility` and `knownBy` as needed. Fields hold values; relations are `{type, to, fields?}` links to other entities.
@@ -50,7 +50,7 @@ A world is one JSON document in the `lre-world-v1` format, with a published JSON
 ## People
 
 - **The POV** (`pov`) is the entity the player plays, a `person` on a lead tier, never capped by realism. `start` is where and when play begins, and the POV stands there unless its `fields.place` says otherwise.
-- **Tiers** say how deeply someone is simulated: by default `principal` (Leads), `supporting` and `background`. `"agent": true` makes someone pursue their own agenda off-screen, and live the plans the story gives them. Anyone else only follows their schedules: their plans are never lived and lapse, so mark `agent` on whoever should act on their own plans.
+- **Tiers** say how deeply someone is simulated: by default `principal` (Leads), `supporting` and `background`. `"agent": true` makes someone pursue their own agenda off-screen, and live the plans the story gives them. Anyone else only follows their schedules: their plans are never lived and lapse, so mark `agent` on whoever should act on their own plans. An agent's ordinary day comes from their routine (see Routines and schedules).
 - **Who knows the POV.** Everyone who has met the POV holds a `knows` relation toward the POV, or a `regard`. The narrator learns from exactly that whether Mara knows you, so a friend without either greets the player as a stranger.
 - **Regard** is one directed relation with `warmth`, `trust` and `respect` from −100 to 100; write each direction that matters. Kinship (`parent_of` and `child_of`, `sibling_of`, `spouse_of`, `partner_of`) is kept two-sided: write both sides.
 - **Life and death.** `life` is the state someone starts in: `alive` when unset, `dying`, `dead`, or one of the world's own `lifeStates`. The dead keep their place: give a body a `fields.place` where it lies, and no schedule (someone who doesn't act follows none).
@@ -96,6 +96,53 @@ Who gets a mind is decided each turn by a **focus score**: points for being in t
 [{ "op": "add", "path": "/steps/mind_port_alder", "value": { "id": "mind_port_alder", "purpose": "mind", "output": "text", "signals": [],
   "template": "You are the private mind of {{character}} in {{world}}, a lake town where everyone knows everyone's business and says less than they mean. Think as {{character}}, from only what they know below. Decide how they read this moment and what they intend; never script anyone else, and keep to what a neighbour would notice." } }]
 ```
+
+## Routines and schedules
+
+A **routine** is what someone can be relied on to do on an ordinary day; a **schedule** is a commitment with set hours (a shift, school). Both are defaults the world leans on, never authority over the story: what the story established (a place or activity an action, the narration or the GM set, a trip, the GM's intent) always comes first, then schedules and appointments, then story plans, then the routine, then the basic needs (sleep, breakfast, lunch, dinner), then chores and agenda steps. Nothing else fills a day. A routine never moves anyone out of a scene with the POV and never moves a Live or Near character; it matters most for the Background cast off screen. So write a routine as a person's habits, not a timetable they must keep: leave people with no routine at all when the world says nothing about their days, and they live on the story, their commitments and their basic needs.
+
+A routine is one item of `routines`: `{id, label?, owner?, inherit?, blocks, source?}`. Its **owner** is read as a schedule's is: an entity, a group (its members), a kind, a selector, or none for the world's default for everyone. For each block id the most specific owner wins (their own, a group's, a kind's, a selector's, the world's, then the basic needs), and `inherit: false` drops the less specific routines' blocks for whom it covers. Each block has an `id`, a `label`, an `activity` (`work`, `socialize`, `leisure`, a meal, `sleep` or the world's own), `minutes`, and a `kind`:
+
+- **`fixed`** starts at `at` (`HH:MM`);
+- **`flexible`** takes its minutes somewhere in its `window` (`{from, to}`, `HH:MM`; a `to` at or before `from` runs past midnight), and `perWeek` makes it a floating block ("the gym three times a week");
+- **`optional`** is flexible by `chance` (above 0, at most 1): the first thing a busy day leaves out.
+
+The rest is optional: `days` (`weekdays` with 0 for Sunday, `off: "only"` or `"never"` for days off, `holidays` and `except` by the calendar's ids, `birthday`, `seasons`, `weather`), `place` (`home`, the default, `work`, `here`, `with` its company's home, `{place}` or `{nearest: sceneType}`), `company` (`{who: selector, invite?}`), `priority` (1 to 5), `needs`, `private` (the player reads it as "Busy") and `source`. Give a block its ground when the world has one: `{"type": "lore", "entry": …, "quote": …}` or `{"type": "sheet", "entity": …, "field": …, "quote": …}`, with the short quote it rests on, so the GM sees why it's there. `{"id": "lunch", "off": true}` turns off a less specific block or a basic need.
+
+```json
+[{ "op": "add", "path": "/routines", "value": { "dale_mornings": {
+  "id": "dale_mornings", "label": "Dale at the marina", "owner": "dale_whitcomb",
+  "blocks": [
+    { "id": "open_marina", "label": "Opens the marina", "activity": "work", "kind": "fixed", "at": "06:30", "minutes": 90, "place": { "place": "alder_harbor_marina" }, "days": { "weekdays": [1, 2, 3, 4, 5, 6] },
+      "source": { "type": "lore", "entry": "lore_marina", "quote": "Dale Whitcomb has run it for twenty-five years." } },
+    { "id": "coffee", "label": "Coffee at the Bluebird", "activity": "socialize", "kind": "flexible", "window": { "from": "09:00", "to": "11:00" }, "minutes": 30, "perWeek": 3, "place": { "place": "bluebird_coffee" } }
+  ] } } }]
+```
+
+A block that asks someone along makes an invitation only when the world's settings allow it: here the POV, on Thursday evenings, from the Rusty Anchor's trivia night the lore tells of.
+
+```json
+[{ "op": "add", "path": "/routines/marcus_trivia", "value": {
+  "id": "marcus_trivia", "owner": "marcus_delgado",
+  "blocks": [{ "id": "trivia", "label": "Trivia night at the Anchor", "activity": "socialize", "kind": "fixed", "at": "19:30", "minutes": 120, "days": { "weekdays": [4] }, "place": { "place": "rusty_anchor" },
+    "company": { "who": { "ids": ["pov"] }, "invite": true },
+    "source": { "type": "lore", "entry": "lore_anchor", "quote": "a Thursday trivia night that gets competitive" } }] } }]
+```
+
+**Tuning** is the `routineSettings` part; each part left out keeps its default, and the defaults are no part at all:
+
+- **`awareness`**: how long someone the story put somewhere stays there against their routine. `story_first` keeps them until the story or the GM releases them; `balanced` (the default) until their night, with Background characters keeping their routine and Far ones bending for story plans and the GM's intent; `routine_first` lets the routine's next edge take them back.
+- **`invitations`**: `off`, `player` (the default: routine blocks may invite the POV) or `everyone` (people's days take each other's invitations too). Story plans and the GM invite under any setting.
+- **`sociability`**: `reserved`, `usual` or `outgoing`, how fast NPCs' social and fun needs grow.
+- **`planBend`**: which story plans take their time from work and school: `must`, `strong`, `standard` (the default) or `ordinary`.
+
+```json
+[{ "op": "add", "path": "/routineSettings", "value": { "awareness": "story_first" } }]
+```
+
+**Editing.** `lre_routine_put` and `lre_routine_delete` write one routine whole, and `lre_routine_settings` the settings, each at the version you read; `lre_edit` works on `/routines` and `/routineSettings` as above. A routine whose shape the engine can't read, or a setting or value it doesn't take, is refused before anything is written, with a message naming the field (`window`, `kind`, `minutes`, `awareness`…), exactly as Build's save is: fix that field and send it again. What a routine names that the world lacks (a place, an owner who matches nobody, a lore entry) is a lint warning after the write. `lre_schedules`, `lre_schedule`, `lre_schedule_put` and `lre_schedule_delete` do the same for schedules.
+
+**In a chat** the world's routines are only where it starts. Change someone's routine in one chat with `lre_routine_edit` (`routine_follow` for whether and how strictly they keep it, `routine_block` for one block, `schedule_override` for a schedule; each is one Undo-able fix), read their day and why each block is there with `lre_day`, and what the chat changed with `lre_routine_changes`. Change the world's routine only for what is true of the world; what happened in one story belongs to that chat.
 
 ## Things and who owns them
 

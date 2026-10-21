@@ -7,7 +7,9 @@ import { ALL_PACKS } from "../packs/index";
 import type { JsonObject, JsonValue } from "../shared/json";
 import { hasOwn, isRecord } from "../shared/json";
 import { planProfile, PROFILE_IDS, PROFILES, type ProfileChoice, type ProfileId } from "../shared/profiles/index";
-import type { ResultBodies } from "../shared/protocol";
+import type { JsonPatchOp, ResultBodies } from "../shared/protocol";
+import { DEFAULT_ROUTINE_SETTINGS, routineSettingsOf, routineSettingsProblems } from "../shared/routines";
+import type { EditorBody as DraftRead } from "./live";
 import type { Args } from "./args";
 import { boolArg, intArg, neededText, textArg, textsArg, ToolError } from "./args";
 import { LreError } from "./connection";
@@ -178,4 +180,127 @@ export const BUILD_TOOLS: readonly ToolModule[] = [
     },
     cli: { command: "map-walk", section: "Play", usage: "map-walk <chatId> --x <n> --y <n>", summary: "What Walk here takes to a cell", positionals: ["chatId"], needs: 1, options: { "--x": { arg: "x", as: "int" }, "--y": { arg: "y", as: "int" } } },
   },
+  ...itemTools("routines", "routine", "lre_routine", "lre_routines"),
+  ...itemTools("schedules", "schedule", "lre_schedule", "lre_schedules"),
+  {
+    name: "lre_routine_settings",
+    description: 'A world draft\'s routine settings (DESIGN §8): awareness ("story_first", "balanced", "routine_first": how strictly people keep to routine against the story), invitations ("off", "player", "everyone"), sociability ("reserved", "usual", "outgoing") and planBend ("must", "strong", "standard", "ordinary"). Without value it reads them; with value it sets them whole (a part left out takes its default; the defaults remove them). A setting or value the engine doesn\'t take is refused, naming it. Pass expectVersion so a change made since is refused.',
+    inputSchema: object({ worldId: WORLD_ID, value: { type: "object", description: "The settings to set, whole." }, expectVersion: EXPECT_VERSION }, ["worldId"]),
+    write: { destructive: true, idempotent: true },
+    run: async (args, ctx) => {
+      const worldId = worldIdOf(args);
+      const live = ctx.live();
+      const read = await live.draft(worldId);
+      if (args.value === undefined) return { text: json({ worldId, version: read.version, settings: routineSettingsOf(read.draft) }) };
+      if (!isRecord(args.value)) throw new ToolError("value is an object: {awareness?, invitations?, sociability?, planBend?}.");
+      // The defaults are no settings; anything else goes as sent, so LumiRPEngine refuses a bad one as it refuses Build's.
+      const same = routineSettingsProblems(args.value).length === 0 && JSON.stringify(routineSettingsOf({ routineSettings: args.value })) === JSON.stringify(DEFAULT_ROUTINE_SETTINGS);
+      const ops = same ? (read.draft.routineSettings === undefined ? [] : [{ op: "remove" as const, path: "/routineSettings" }]) : [{ op: "add" as const, path: "/routineSettings", value: args.value as JsonObject }];
+      return draftPatch(ctx, worldId, read, ops, intArg(args, "expectVersion", 0, Number.MAX_SAFE_INTEGER), "routineSettings");
+    },
+    cli: { command: "routine-settings", section: "Build", usage: "routine-settings <worldId> [--value <json>] [--expect-version <n>]", summary: "Read or set a world's routine settings", positionals: ["worldId"], needs: 1, options: { "--value": { arg: "value", as: "json" }, "--expect-version": { arg: "expectVersion", as: "int" } } },
+  },
 ];
+
+/** A JSON Pointer token: `~` and `/` escaped. */
+function token(id: string): string {
+  return id.replace(/~/g, "~0").replace(/\//g, "~1");
+}
+
+/** Applies a patch to a draft at the version read (or the one expected), answering the new version and the lint under `path`. */
+async function draftPatch(ctx: ToolContext, worldId: string, read: DraftRead, ops: JsonPatchOp[], expected: number | undefined, path: string): Promise<ToolResult> {
+  if (expected !== undefined && read.version !== expected) throw new ToolError(`Nothing applied: the draft of ${worldId} is at version ${read.version}, not ${expected}. Read it again, then apply against version ${read.version}.`);
+  if (ops.length === 0) return { text: json({ worldId, version: read.version, note: "Nothing to change." }) };
+  return ctx.serialize(`world:${worldId}`, async () => {
+    let after: ResultBodies["lre.editor"];
+    try {
+      after = await ctx.live().conn.request("lre.editor", { op: "patch", worldId, base: read.base, version: read.version, ops });
+    } catch (error) {
+      if (error instanceof LreError && error.code === "conflict") throw new ToolError(`Nothing applied: the draft of ${worldId} was written since it was read (version ${read.version}). Read it again and apply against its version.`);
+      // A write LumiRPEngine refuses (a malformed routine, a setting it doesn't take) says why, as Build's save does.
+      if (error instanceof LreError && (error.code === "bad_request" || error.code === "validation")) throw new ToolError(`Nothing applied: LumiRPEngine refused it. ${error.message}`);
+      throw error;
+    }
+    return { text: json({ worldId, version: after.version, lint: lintSummary(after.lint.filter((i) => i.path === path || i.path.startsWith(`${path}.`)), 20), next: "It is in the draft (Build's too): lre_commit makes it the head." }) };
+  });
+}
+
+/**
+ * List, get, put and delete tools for one world collection (routines or schedules) of a draft, each
+ * through the draft's patch at the version read. LumiRPEngine checks a routine's shape as it checks
+ * Build's put; a schedule's outline is checked here before it is sent.
+ */
+function itemTools(collection: "routines" | "schedules", noun: string, one: string, many: string): ToolModule[] {
+  const ID: JsonObject = { type: "string", description: `The ${noun}'s id.` };
+  const shape = (value: unknown): string[] => (collection === "routines" || (isRecord(value) && typeof value.target === "string" && isRecord(value.recurrence) && Array.isArray(value.slots)) ? [] : ["a schedule has a target, a recurrence and slots"]);
+  // The draft's collection as plain JSON: what the tools read and answer.
+  const items = (read: DraftRead): Record<string, JsonValue> => {
+    const raw: unknown = read.draft[collection];
+    return isRecord(raw) ? (raw as Record<string, JsonValue>) : {};
+  };
+  return [
+    {
+      name: many,
+      description: `A world draft's ${collection} (DESIGN §8): each ${noun}'s id, label or target, owner and size. ${one} reads one whole.`,
+      inputSchema: object({ worldId: WORLD_ID }, ["worldId"]),
+      write: false,
+      run: async (args, ctx) => {
+        const worldId = worldIdOf(args);
+        const read = await ctx.live().draft(worldId);
+        const list = Object.entries(items(read)).map(([id, v]) => {
+          const o = isRecord(v) ? v : {};
+          return { id, ...(typeof o.label === "string" ? { label: o.label } : {}), ...(typeof o.target === "string" ? { target: o.target } : {}), owner: o.owner ?? null, size: Array.isArray(o.blocks) ? o.blocks.length : Array.isArray(o.slots) ? o.slots.length : 0 };
+        });
+        return { text: json({ worldId, version: read.version, [collection]: list }) };
+      },
+      cli: { command: many.replace(/^lre_/, ""), section: "Build", usage: `${many.replace(/^lre_/, "")} <worldId>`, summary: `List a world's ${collection}`, positionals: ["worldId"], needs: 1 },
+    },
+    {
+      name: one,
+      description: `One ${noun} of a world draft, whole, with its lint.`,
+      write: false,
+      inputSchema: object({ worldId: WORLD_ID, id: ID }, ["worldId", "id"]),
+      run: async (args, ctx) => {
+        const worldId = worldIdOf(args);
+        const id = neededText(args, "id", `the ${noun}'s id (${many} lists them)`);
+        const read = await ctx.live().draft(worldId);
+        const value = items(read)[id];
+        if (value === undefined || !hasOwn(items(read), id)) throw new ToolError(`The draft of ${worldId} has no ${noun} ${id}.`);
+        return { text: json({ worldId, version: read.version, id, [noun]: value }) };
+      },
+      cli: { command: one.replace(/^lre_/, ""), section: "Build", usage: `${one.replace(/^lre_/, "")} <worldId> <id>`, summary: `Read one of a world's ${collection}`, positionals: ["worldId", "id"], needs: 2 },
+    },
+    {
+      name: `${one}_put`,
+      description: `Create or replace one ${noun} of a world draft, whole (${collection === "routines" ? "{id, label?, owner?, inherit?, blocks: [{id, label, activity, kind: fixed|flexible|optional, at|window, minutes, perWeek?, chance?, priority?, days?, place?, company?, needs?, private?, source?}] or {id, off: true}}, source?}" : "{id, owner?, target, recurrence, slots: [{start, end, value?, source?}], source?}"}). A malformed one is refused, naming the field, and nothing is written; the answer has the new version and its lint. Pass expectVersion so a change made since is refused.`,
+      inputSchema: object({ worldId: WORLD_ID, id: ID, value: { type: "object", description: `The ${noun}, whole; its id is the one given.` }, expectVersion: EXPECT_VERSION }, ["worldId", "id", "value"]),
+      write: { destructive: true, idempotent: true },
+      run: async (args, ctx) => {
+        const worldId = worldIdOf(args);
+        const id = neededText(args, "id", `the ${noun}'s id`);
+        if (!isRecord(args.value)) throw new ToolError(`value is the ${noun}, an object.`);
+        const value = { ...args.value, id } as JsonObject;
+        const problems = shape(value);
+        if (problems.length > 0) throw new ToolError(`Nothing applied: ${problems.join("; ")}.`);
+        const read = await ctx.live().draft(worldId);
+        const ops: JsonPatchOp[] = [...(isRecord(read.draft[collection]) ? [] : [{ op: "add" as const, path: `/${collection}`, value: {} }]), { op: "add", path: `/${collection}/${token(id)}`, value }];
+        return draftPatch(ctx, worldId, read, ops, intArg(args, "expectVersion", 0, Number.MAX_SAFE_INTEGER), `${collection}.${id}`);
+      },
+      cli: { command: `${one.replace(/^lre_/, "")}-put`, section: "Build", usage: `${one.replace(/^lre_/, "")}-put <worldId> <id> --value <file|json> [--expect-version <n>]`, summary: `Create or replace one of a world's ${collection}`, positionals: ["worldId", "id"], needs: 2, options: { "--value": { arg: "value", as: "json" }, "--expect-version": { arg: "expectVersion", as: "int" } } },
+    },
+    {
+      name: `${one}_delete`,
+      description: `Delete one ${noun} of a world draft. Pass expectVersion so a change made since is refused.`,
+      inputSchema: object({ worldId: WORLD_ID, id: ID, expectVersion: EXPECT_VERSION }, ["worldId", "id"]),
+      write: { destructive: true, idempotent: true },
+      run: async (args, ctx) => {
+        const worldId = worldIdOf(args);
+        const id = neededText(args, "id", `the ${noun}'s id`);
+        const read = await ctx.live().draft(worldId);
+        if (!hasOwn(items(read), id)) throw new ToolError(`The draft of ${worldId} has no ${noun} ${id}.`);
+        return draftPatch(ctx, worldId, read, [{ op: "remove", path: `/${collection}/${token(id)}` }], intArg(args, "expectVersion", 0, Number.MAX_SAFE_INTEGER), `${collection}.${id}`);
+      },
+      cli: { command: `${one.replace(/^lre_/, "")}-delete`, section: "Build", usage: `${one.replace(/^lre_/, "")}-delete <worldId> <id> [--expect-version <n>]`, summary: `Delete one of a world's ${collection}`, positionals: ["worldId", "id"], needs: 2, options: { "--expect-version": { arg: "expectVersion", as: "int" } } },
+    },
+  ];
+}

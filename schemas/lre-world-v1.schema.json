@@ -51,6 +51,8 @@
     "checks": { "type": "object", "propertyNames": { "minLength": 1 }, "additionalProperties": { "$ref": "#/$defs/check" } },
     "calendar": { "$ref": "#/$defs/calendar" },
     "schedules": { "type": "object", "propertyNames": { "minLength": 1 }, "additionalProperties": { "$ref": "#/$defs/schedule" } },
+    "routines": { "type": "object", "description": "Routines by id: the soft shape of people's days, owner by owner (absent: none; everyone keeps the basic needs).", "propertyNames": { "minLength": 1 }, "additionalProperties": { "$ref": "#/$defs/routine" } },
+    "routineSettings": { "$ref": "#/$defs/routineSettings" },
     "tracks": { "type": "object", "propertyNames": { "minLength": 1 }, "additionalProperties": { "$ref": "#/$defs/track" } },
     "tables": { "type": "object", "propertyNames": { "minLength": 1 }, "additionalProperties": { "$ref": "#/$defs/table" } },
     "realism": { "$ref": "#/$defs/realism" },
@@ -639,11 +641,89 @@
               "end": { "type": "string", "description": "HH:MM" },
               "value": {},
               "weighted": { "$ref": "#/$defs/weighted" },
-              "given": { "type": "object", "description": "the previous slot's value → its distribution", "additionalProperties": { "$ref": "#/$defs/weighted" } }
+              "given": { "type": "object", "description": "the previous slot's value → its distribution", "additionalProperties": { "$ref": "#/$defs/weighted" } },
+              "source": { "$ref": "#/$defs/worldRoutineSource" }
             }
           }
         },
-        "pack": { "type": "string" }
+        "pack": { "type": "string" },
+        "source": { "$ref": "#/$defs/worldRoutineSource" }
+      }
+    },
+    "worldRoutineSource": {
+      "title": "what it rests on",
+      "anyOf": [
+        { "title": "authored", "type": "object", "required": ["type"], "additionalProperties": false, "properties": { "type": { "const": "authored" } } },
+        { "title": "a lore entry", "type": "object", "required": ["type", "entry"], "additionalProperties": false, "properties": { "type": { "const": "lore" }, "entry": { "type": "string", "minLength": 1 }, "quote": { "type": "string" } } },
+        { "title": "a sheet field", "type": "object", "required": ["type", "entity", "field"], "additionalProperties": false, "properties": { "type": { "const": "sheet" }, "entity": { "type": "string", "minLength": 1 }, "field": { "type": "string", "minLength": 1 }, "quote": { "type": "string" } } }
+      ]
+    },
+    "hhmm": { "type": "string", "pattern": "^([01][0-9]|2[0-3]):[0-5][0-9]$", "description": "HH:MM" },
+    "routineBlock": {
+      "type": "object",
+      "description": "One block of a routine. A more specific owner's block with the same id replaces this one; off turns an inherited block (or a basic need) off.",
+      "required": ["id"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "label": { "type": "string" },
+        "activity": { "type": "string" },
+        "kind": { "enum": ["fixed", "flexible", "optional"] },
+        "at": { "$ref": "#/$defs/hhmm" },
+        "window": { "type": "object", "required": ["from", "to"], "additionalProperties": false, "properties": { "from": { "$ref": "#/$defs/hhmm" }, "to": { "$ref": "#/$defs/hhmm" } } },
+        "minutes": { "type": "integer", "minimum": 1, "maximum": 1440 },
+        "perWeek": { "type": "integer", "minimum": 1, "maximum": 7 },
+        "chance": { "type": "number", "exclusiveMinimum": 0, "maximum": 1 },
+        "priority": { "type": "integer", "minimum": 1, "maximum": 5 },
+        "days": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "weekdays": { "type": "array", "items": { "type": "integer", "minimum": 0, "maximum": 6 } },
+            "off": { "enum": ["only", "never"] },
+            "holidays": { "$ref": "#/$defs/ids" },
+            "except": { "$ref": "#/$defs/ids" },
+            "birthday": { "enum": ["own", "friend"] },
+            "seasons": { "type": "array", "items": { "enum": ["spring", "summer", "autumn", "winter"] } },
+            "weather": { "enum": ["fair", "foul"] }
+          }
+        },
+        "place": {
+          "anyOf": [
+            { "enum": ["home", "work", "here", "with"] },
+            { "title": "a place", "type": "object", "required": ["place"], "additionalProperties": false, "properties": { "place": { "type": "string", "minLength": 1 } } },
+            { "title": "the nearest place of a scene type", "type": "object", "required": ["nearest"], "additionalProperties": false, "properties": { "nearest": { "type": "string", "minLength": 1 } } }
+          ]
+        },
+        "company": { "type": "object", "required": ["who"], "additionalProperties": false, "properties": { "who": { "$ref": "#/$defs/selector" }, "invite": { "type": "boolean" } } },
+        "needs": { "$ref": "#/$defs/strings" },
+        "private": { "type": "boolean" },
+        "off": { "type": "boolean" },
+        "source": { "$ref": "#/$defs/worldRoutineSource" }
+      }
+    },
+    "routine": {
+      "type": "object",
+      "required": ["id", "blocks"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "label": { "type": "string" },
+        "owner": { "anyOf": [{ "title": "an entity, group or kind id", "type": "string", "minLength": 1 }, { "$ref": "#/$defs/selector" }] },
+        "inherit": { "type": "boolean" },
+        "blocks": { "type": "array", "items": { "$ref": "#/$defs/routineBlock" } },
+        "source": { "$ref": "#/$defs/worldRoutineSource" }
+      }
+    },
+    "routineSettings": {
+      "type": "object",
+      "description": "How strictly people keep to routine against the story, whom routines invite, how social people are and how story plans bend routine. Absent parts take the defaults (balanced, player, usual, standard).",
+      "additionalProperties": false,
+      "properties": {
+        "awareness": { "enum": ["story_first", "balanced", "routine_first"] },
+        "invitations": { "enum": ["off", "player", "everyone"] },
+        "sociability": { "enum": ["reserved", "usual", "outgoing"] },
+        "planBend": { "enum": ["must", "strong", "standard", "ordinary"] }
       }
     },
     "stage": {

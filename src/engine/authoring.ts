@@ -111,15 +111,19 @@ export function isWorldDoc(v: unknown): v is WorldDoc {
 
 /** Collections every document has, each an object keyed by id. */
 const COLLECTIONS = ["packs", "kinds", "relations", "entities", "places", "routes", "grids", "rules", "actions", "checks", "schedules", "tracks", "tables", "sections", "steps"] as const;
-/** Collections documents written before them lack; `migrateWorld` adds them (empty, or the default tiers), so they're checked only when present. */
-const LATER_COLLECTIONS = ["maps", "lore", "classifications", "tiers"] as const;
+/**
+ * Collections checked only when present: those documents written before them lack, which
+ * `migrateWorld` adds (empty, or the default tiers), and routines, which a world may simply not have.
+ */
+const LATER_COLLECTIONS = ["maps", "lore", "classifications", "tiers", "routines"] as const;
 /** Parts every document has. */
 const PARTS = ["pins", "calendar", "realism", "time", "start"] as const;
 /**
  * Parts a document may leave out: `migrateWorld` fills the currency (Modern US) and the lore lookup
- * table (empty), and a world without a ruleset, map settings, minds config or lore pins plays by the defaults.
+ * table (empty), and a world without a ruleset, map settings, minds config, lore pins or routine
+ * settings plays by the defaults.
  */
-const OPTIONAL_PARTS = ["currency", "loreIndex", "ruleset", "mapSettings", "minds", "lorePins"] as const;
+const OPTIONAL_PARTS = ["currency", "loreIndex", "ruleset", "mapSettings", "minds", "lorePins", "routineSettings"] as const;
 
 /**
  * Shape checks for an untrusted document, before `migrateWorld` and `lintWorld` read it: every

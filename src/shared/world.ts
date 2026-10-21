@@ -54,6 +54,7 @@ import type { ClaimPlace, ClaimsPolicy } from "./claims";
 import type { InferredChecks } from "./inferred";
 import type { DataTable } from "./tables";
 import type { WorldMindsConfig } from "./minds";
+import type { RoutineDef, RoutineId, RoutineSettings, WorldRoutineSource } from "./routines";
 
 export const WORLD_FORMAT = "lre-world-v1";
 
@@ -607,6 +608,8 @@ export interface ScheduleSlot {
   weighted?: WeightedValue[];
   /** Distribution conditioned on the previous slot's value. */
   given?: Record<string, WeightedValue[]>;
+  /** What the slot rests on (`shared/routines`); absent, the schedule's own source. */
+  source?: WorldRoutineSource;
 }
 
 /**
@@ -627,6 +630,8 @@ export interface ScheduleDef {
   recurrence: Recurrence;
   slots: ScheduleSlot[];
   pack?: PackId;
+  /** What the schedule rests on (`shared/routines`): authored (absent), a lore entry or a sheet field, with its quote. */
+  source?: WorldRoutineSource;
 }
 
 export type TrackKind = "quest" | "secret" | "puzzle" | "agenda";
@@ -1055,6 +1060,10 @@ export interface WorldDoc {
   checks: Record<CheckId, CheckDef>;
   calendar: CalendarDef;
   schedules: Record<ScheduleId, ScheduleDef>;
+  /** Routines by id (DESIGN §8, `shared/routines`): the soft shape of people's days, owner by owner; absent, none (everyone has the basic needs only). */
+  routines?: Record<RoutineId, RoutineDef>;
+  /** How strictly people keep to routine against the story, whom routines invite, how social people are and how plans bend routine; absent, the defaults (`routineSettingsOf`). */
+  routineSettings?: RoutineSettings;
   tracks: Record<TrackId, TrackDef>;
   tables: Record<TableId, DataTable>;
   realism: RealismDefaults;

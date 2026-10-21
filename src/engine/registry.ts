@@ -153,6 +153,12 @@ export interface SlotInfo {
   start: number;
   end: number;
   index: number;
+  /**
+   * False when the POV's own routine doesn't run in this step (DESIGN §8, §9.2): a timelapse the
+   * player spends doing something for a span of time, or a narrated time skip, keeps the POV where
+   * the story has it. Absent: it runs (a timelapse's agent steps take the POV as an LOD1 agent).
+   */
+  povRoutine?: boolean;
 }
 
 /** A moment inside a slot at which an agent process acts between its slot steps (`ProcessDef.instants`). */

@@ -176,3 +176,59 @@ test("every patch the agent guide shows for minds and money goes through lre_edi
   expect(applied).toBeGreaterThan(5);
   expect(await call("lre_commit", { worldId, note: "The guide's examples", expectVersion: version })).toMatchObject({ worldId, warnings: { errors: 0 } });
 });
+
+test("a malformed routine or routine settings is refused, naming the field, through Build's editor and the outside tools alike; a good one saves", async () => {
+  const { conn, ctx, call } = await tools();
+  const worldId = String((await call("lre_world_create", { name: "Port Alder", template: "modern_slice_of_life" })).worldId);
+  const good = { id: "sam_rounds", label: "Sam's rounds", owner: "sam_reyes", blocks: [{ id: "coffee", label: "Coffee at the Bluebird", activity: "having coffee", kind: "flexible", window: { from: "07:00", to: "09:00" }, minutes: 30, place: { place: "bluebird_coffee" } }] };
+  const refusal = async (send: () => Promise<unknown>): Promise<string> => {
+    try {
+      await send();
+    } catch (error) {
+      if (error instanceof LreError) return error.message;
+      throw error;
+    }
+    throw new Error("the write was taken");
+  };
+  const draftNow = async () => conn.request("lre.editor", { op: "get", worldId, base: null });
+  const before = await draftNow();
+
+  // Build's put and set: each refusal names the field at fault, and nothing is written.
+  const noWindow = { ...good, blocks: [{ ...good.blocks[0], window: { from: "7am", to: "09:00" } }] };
+  expect(await refusal(() => conn.request("lre.editor", { op: "put", worldId, base: null, collection: "routines", id: "sam_rounds", value: noWindow }))).toContain("window");
+  expect(await refusal(() => conn.request("lre.editor", { op: "put", worldId, base: null, collection: "routines", id: "sam_rounds", value: { ...good, blocks: [{ ...good.blocks[0], kind: "sometimes" }] } }))).toContain("kind");
+  expect(await refusal(() => conn.request("lre.editor", { op: "put", worldId, base: null, collection: "routines", id: "sam_rounds", value: { ...good, blocks: "coffee" } }))).toContain("blocks");
+  expect(await refusal(() => conn.request("lre.editor", { op: "set", worldId, base: null, part: "routineSettings", value: { awareness: "sometimes" } }))).toContain("awareness");
+  expect(await refusal(() => conn.request("lre.editor", { op: "set", worldId, base: null, part: "routineSettings", value: { strictness: "high" } }))).toContain("strictness");
+  // A patch that leaves either malformed is refused the same way.
+  expect(await refusal(() => conn.request("lre.editor", { op: "patch", worldId, base: null, ops: [{ op: "add", path: "/routines", value: { sam_rounds: noWindow } }] }))).toContain("window");
+  expect(await refusal(() => conn.request("lre.editor", { op: "patch", worldId, base: null, ops: [{ op: "add", path: "/routineSettings", value: { invitations: "always" } }] }))).toContain("invitations");
+  const after = await draftNow();
+  expect({ version: after.version, routines: after.draft.routines, settings: after.draft.routineSettings }).toEqual({ version: before.version, routines: before.draft.routines, settings: before.draft.routineSettings });
+
+  // The outside tools get the same refusals, and still nothing is written.
+  const tool = async (name: string, args: Record<string, unknown>): Promise<string> => {
+    const result = await callTool(name, args, ctx);
+    expect([name, result.isError]).toEqual([name, true]);
+    return result.text;
+  };
+  expect(await tool("lre_routine_put", { worldId, id: "sam_rounds", value: noWindow })).toContain("window");
+  expect(await tool("lre_routine_put", { worldId, id: "sam_rounds", value: { ...good, blocks: [{ ...good.blocks[0], minutes: 0 }] } })).toContain("minutes");
+  expect(await tool("lre_edit", { worldId, ops: [{ op: "add", path: "/routines", value: { sam_rounds: { ...good, blocks: [{ ...good.blocks[0], priority: 9 }] } } }] })).toContain("priority");
+  expect(await tool("lre_routine_settings", { worldId, value: { sociability: "loud" } })).toContain("sociability");
+  expect((await draftNow()).version).toBe(before.version);
+
+  // Good ones save, through either.
+  const put = await conn.request("lre.editor", { op: "put", worldId, base: null, collection: "routines", id: "sam_rounds", value: good });
+  expect(put.draft.routines?.sam_rounds as unknown).toEqual(good);
+  expect(put.lint.filter((i) => i.severity === "error" && i.path.startsWith("routines."))).toEqual([]);
+  await call("lre_routine_put", { worldId, id: "dale_mornings", value: { owner: "dale_whitcomb", blocks: [{ id: "boat", label: "Checks the boats", activity: "checking the boats", kind: "fixed", at: "06:30", minutes: 60, place: "work" }] } });
+  expect(await call("lre_routine", { worldId, id: "dale_mornings" })).toMatchObject({ routine: { id: "dale_mornings", owner: "dale_whitcomb" } });
+  await call("lre_routine_settings", { worldId, value: { awareness: "story_first", invitations: "off" } });
+  expect(await call("lre_routine_settings", { worldId })).toMatchObject({ settings: { awareness: "story_first", invitations: "off", sociability: "usual", planBend: "standard" } });
+  const set = await conn.request("lre.editor", { op: "set", worldId, base: null, part: "routineSettings", value: { sociability: "outgoing" } });
+  expect(set.draft.routineSettings).toMatchObject({ sociability: "outgoing", awareness: "balanced" });
+  // The defaults are no settings.
+  await call("lre_routine_settings", { worldId, value: {} });
+  expect((await draftNow()).draft.routineSettings).toBeUndefined();
+});

@@ -14,7 +14,8 @@ import { ALL_NOTE, advance, catchUp } from "../../../src/engine/simulate";
 import { runTimelapse } from "../../../src/engine/time";
 import { Working } from "../../../src/engine/working";
 import { ALL_PACKS } from "../../../src/packs/index";
-import { buildCastView, dayOptions, dayPlan, needValue, stanceLines } from "../../../src/packs/castlife/core/index";
+// The occasion-shaped template is what earlier builds planned with; it now lays only the days their recorded need events fold against.
+import { buildCastView, legacyDayOptions as dayOptions, dayPlan, needValue, stanceLines } from "../../../src/packs/castlife/core/index";
 import { readCharacter } from "../../../src/packs/minds/core/state";
 import { birthdayOn } from "../../../src/packs/castlife/core/occasions";
 import { modernUsWorld } from "../riverton";

@@ -11,6 +11,7 @@ import type { ClaimsPolicy } from "./claims";
 import type { InferredChecks, SheetSkill } from "./inferred";
 import type { LoreIndexAddition } from "./lore";
 import type { Limit, MindEditOp, MindsRunView } from "./minds";
+import type { RoutineEditOp, RoutineRead, RoutineReadResult } from "./routines";
 import type { ActionId, BoundMode, ChatId, ChipId, DomainId, EntityId, FieldId, KindId, Level, MessageId, PanelId, PlaceId, RelationTypeId, RevisionId, StageId, TierId, TrackId, WorldId } from "./ids";
 import type { EntityUpgradePick, EventRef, PathHash, ResolveScope, TimeControl, TimeScope, UpgradeAspect, UpgradePicks } from "./ledger";
 import type { ExtractionType, UserSettings } from "./settings";
@@ -144,6 +145,8 @@ export type FixRequest = Request<"lre.fix"> & { chatId: ChatId } & ({ entity: En
  *  - `mind_pin`, `mind_refresh`, `mind_memory`, `mind_intent`: a character's mind (DESIGN §24.9): pin
  *    their fidelity, ask for a fresh mind next turn, edit or delete a note, commitment or plan, and
  *    set what they mean to do now and how they go about it (`MindEditOp`).
+ *  - `routine_follow`, `routine_block`, `schedule_override`: a character's routine and schedules in
+ *    this chat (DESIGN §8): how they follow it, one block of it, one of their schedules (`RoutineEditOp`).
  *  - `effect` runs a pack effect registered for GM edits (`EffectDef.gm`) with literal arguments:
  *    what no entity field holds, such as an asset's price.
  */
@@ -164,6 +167,7 @@ export type EditOp =
   | { op: "despawn"; entity: EntityId }
   | { op: "restore"; entity: EntityId }
   | MindEditOp
+  | RoutineEditOp
   | { op: "effect"; effect: string; args: JsonObject };
 
 /** A GM edit on the head (DESIGN §7): the operations in order, all or none, as one `post` entry of kind `fix`; locked fields are writable. */
@@ -176,6 +180,13 @@ export interface EditRequest extends Request<"lre.edit"> {
 export interface GmRequest extends Request<"lre.gm"> {
   chatId: ChatId;
 }
+
+/**
+ * A character's routine (DESIGN §8): `day`, their effective routine, schedules and day with where each
+ * block comes from, as the GM reads it (`view: "gm"`, behind the GM gate: everything) or as the POV
+ * may know it (`view: "player"`: what Cast shows, with why); `changed`, everyone the chat changed.
+ */
+export type RoutineRequest = Request<"lre.routine"> & { chatId: ChatId } & RoutineRead;
 
 /**
  * A chat's state view, as a page's snapshot holds it, answered to an outside client (DESIGN §23),
@@ -372,15 +383,17 @@ export type WorldCollection =
   | "steps"
   | "packs"
   | "lore"
-  | "classifications";
+  | "classifications"
+  | "routines";
 
 /**
  * Singleton parts of a world document. `tiers` is `{tiers, spawnTier?}` (DESIGN §9.1); `ruleset` is
  * optional: an empty one removes it; `loreIndex` is the lore lookup table `{terms, topics}`, whole;
  * `minds` is `world.minds` (DESIGN §24.2), whole: the defaults remove it; `lorePins` is
- * `world.lorePins` (DESIGN §24.5), whole: one that pins nothing removes it.
+ * `world.lorePins` (DESIGN §24.5), whole: one that pins nothing removes it; `routineSettings` is
+ * `world.routineSettings` (DESIGN §8), whole: the defaults remove it.
  */
-export type WorldPart = "calendar" | "realism" | "time" | "meta" | "tiers" | "ruleset" | "loreIndex" | "minds" | "lorePins";
+export type WorldPart = "calendar" | "realism" | "time" | "meta" | "tiers" | "ruleset" | "loreIndex" | "minds" | "lorePins" | "routineSettings";
 
 /** One RFC 6902 operation, its paths RFC 6901 JSON Pointers into the whole world document. */
 export type JsonPatchOp =
@@ -623,6 +636,7 @@ export type FrontendToBackend =
   | PresetRequest
   | DiagRequest
   | MindsRequest
+  | RoutineRequest
   | AgentsRequest;
 
 // ---------------------------------------------------------------- responses (backend → frontend)
@@ -710,6 +724,7 @@ export interface ResultBodies {
   "lre.diag": { records: DiagRecord[]; activity: Activity | null };
   /** The run started, cancelled or asked about; null when the chat has had none since the extension started. */
   "lre.minds": { run: MindsRunView | null };
+  "lre.routine": RoutineReadResult;
   /** `kit`: this build, where its kit is, and whether the asking session checked in since the extension started; every other op answers the `view`. */
   "lre.agents": { view?: AgentsView; build?: string; kit?: KitReport | null; known?: boolean };
 }

@@ -1,23 +1,25 @@
 // Cast life pack (DESIGN §8, §9.3, §24.8): commitments (jobs, school terms and timetables,
-// appointments, trips and vacations, and each character's own plans), chores, needs and drives,
-// agendas, occasions, the day planner, off-screen LOD1 execution, NPC↔NPC encounters and
-// invitations, and the narrator's Stance section (§6.6): how the people with the POV stand toward
-// it, what they are about, and the cues for their secrets.
+// appointments, trips and vacations, and each character's own plans), routines, chores, needs and
+// drives, agendas, the day planner, off-screen LOD1 execution, NPC↔NPC encounters and invitations,
+// and the narrator's Stance section (§6.6): how the people with the POV stand toward it, what they
+// are about, and the cues for their secrets.
 //
 // Commitments are what the planner treats as fixed blocks (`commitments.ts`): activity schedules
 // (shifts, school timetables; terms are recurrence `from`/`until`), the person fields `appointments`
 // [{at, minutes, place, label}] and `trips` [{from, until, place, label}], and the open plans a
-// character's memory or the GM recorded (`minds.plans`), laid into their windows. Chores
-// [{label, minutes, place?, utility?}] are options. A day's occasion (`occasions.ts`: the weekend,
-// holidays, birthdays, the season, the weather) shapes its options. Needs live in `needs`
-// {name: {v, t}} for the POV; an NPC's are read from what their day's plan has them do.
+// character's memory or the GM recorded (`minds.plans`), laid into their windows. Around them a
+// person's routine (`routines.ts`: the world's routines, the chat's own changes, the basic needs)
+// fills the day, with their chores [{label, minutes, place?, utility?}], agendas and overdue loans.
+// Nothing else does: no outing, gathering or invitation that nothing in the world or the story
+// grounds. Needs live in `needs` {name: {v, t}} for the POV; an NPC's are read from their day's plan.
+// What the story established always wins over a routine (`routineYields`).
 //
 // Level contract (domain `castlife`, read at each person):
 //   0  off
 //   1  day-part routines (schedules) and agendas as tracks; trips hold people away
 //   2  commitments set the day
-//   3  the day planner schedules whole days for LOD1 agents (seeded tie-breaks, recorded ties), with
-//      their own plans at their times
+//   3  the day planner lays whole days for LOD1 agents from their routines (seeded tie-breaks,
+//      recorded ties), with their own plans at their times
 //   4  needs and drives, invitations, NPC↔NPC encounters (regard through relationship.appraise)
 
 import type { JsonObject, JsonValue } from "../../../shared/json";
@@ -25,29 +27,33 @@ import type { EntityId, PlaceId, TierId } from "../../../shared/ids";
 import { facetsInOrder, facetTree } from "../../../shared/classes";
 import { MINDS_EVENTS } from "../../../shared/minds";
 import { tierLabel, tierOf, tiersInOrder } from "../../../shared/tiers";
-import type { FacetId, FacetValueId, WorldDoc } from "../../../shared/world";
-import { minutesBetween } from "../../../engine/world-state";
+import type { FacetId, FacetValueId, ScheduleDef, WorldDoc } from "../../../shared/world";
+import { initialState, minutesBetween } from "../../../engine/world-state";
 import type { LedgerEvent, PackEvent } from "../../../shared/ledger";
-import { calendarOf, clockAt, dateAt, formatClock, formatHHMM, MINUTES_PER_DAY } from "../../../engine/calendar";
+import { calendarOf, clockAt, dateAt, formatClock, formatHHMM, MINUTES_PER_DAY, parseHHMM } from "../../../engine/calendar";
 import { ENGINE_EVENTS } from "../../../engine/engine-pack";
 import { labelOf, mutableSlice, numOf, objOf, optionalQuery, optionalService, sliceOf, sliceRecord, strOf, own } from "../../../engine/pack-kit";
-import { planDay, tieKey, type PlanBlock, type PlanOption } from "../../../engine/plan-day";
-import type { AgentInstant, EventTypeDef, PackDef, ReadContext, SlotInfo } from "../../../engine/registry";
+import { planDay, tieKey, type FixedBlock, type PlanBlock, type PlanOption } from "../../../engine/plan-day";
+import type { AgentInstant, EventTypeDef, PackDef, ReadContext, Rejection, SlotInfo } from "../../../engine/registry";
+import type { PlayerBlock, RoutineEditOp, RoutineSociability } from "../../../shared/routines";
+import { blockShapeProblems, isOff, ROUTINE_AWARENESS, ROUTINE_EVENTS, ROUTINE_MODES, routineSettingsOf } from "../../../shared/routines";
 import { createRng, type Rng } from "../../../engine/rng";
 import { hashParts } from "../../../shared/hash";
-import { routineStays, scheduleInstants } from "../../../engine/schedules";
+import { allSchedules, routineStays, scheduleInstants, scheduleOwners } from "../../../engine/schedules";
 import { isGone, kindDef, kindIs, placeOfEntity } from "../../../engine/scope";
 import { acts as lifeActs, povLife } from "../../../engine/life";
-import { classValues, isGroup, isMemberOf, MEMBER_OF } from "../../../engine/selector";
+import { classValues, isGroup, isMemberOf, MEMBER_OF, selectEntities } from "../../../engine/selector";
 import type { WorldState } from "../../../engine/state";
 import { agendaFor } from "../../../engine/tracks";
 import { lastSighting } from "../../../engine/seen";
 import { hiddenNameCheck, playerKnows } from "../../../engine/player-events";
-import { canSeeEntity, canSeeField, canSeePlace, findLeaks, HIDDEN_PLACE_NAME, knows, unrevealedSecrets, visibilityOf } from "../../../engine/visibility";
+import { canSeeEntity, canSeeField, canSeePlace, findLeaks, HIDDEN_PLACE_NAME, knows, loreGateReader, unrevealedSecrets, visibilityOf } from "../../../engine/visibility";
+import { loreReadable } from "../../../engine/lore";
 import { commitments, isPlayed, laidPlans, livesPlans, planTier, plansOf, type CommitmentBlock } from "./commitments";
 import { cueIssues, cuesFor } from "./cues";
 import { birthdayOf, FOND, occasionOf } from "./occasions";
 import { homeOf, placeOfType } from "./places";
+import { activeBlocks, blockOnDay, blockPlace, chatScheduleDefs, followOf, ROUTINE_OPTION, routineDay, routinesLint, routineYields, scheduleOff, schedulesLint, withPov, worldRoutines } from "./routines";
 
 export { commitments, type CommitmentBlock, type CommitmentKind } from "./commitments";
 
@@ -72,6 +78,14 @@ function satisfies(activity: string, need: string): boolean {
   return own(NEEDS, need)?.satisfiedBy.some((w) => activity.includes(w)) ?? false;
 }
 
+/** How fast the social and fun needs grow for each sociability (DESIGN §8): half as fast, as they are, half again. */
+const SOCIABILITY_RATE: Record<RoutineSociability, number> = { reserved: 0.5, usual: 1, outgoing: 1.5 };
+
+/** A need's growth per hour for someone: the world's sociability sets an NPC's social and fun needs; the POV's are its own. */
+function rateOf(ctx: ReadContext, who: EntityId, need: string, rate: number): number {
+  return who === ctx.world.pov || (need !== "social" && need !== "fun") ? rate : rate * SOCIABILITY_RATE[routineSettingsOf(ctx.world).sociability];
+}
+
 /**
  * A need at `at` given the blocks of the person's day: from its recorded anchor `{v, t}` (the POV's
  * starts at 20 at the world's start); else from when those blocks last met it (the end of the latest
@@ -80,11 +94,12 @@ function satisfies(activity: string, need: string): boolean {
 function needIn(ctx: ReadContext, who: EntityId, need: string, at: number, blocks: readonly Pick<PlanBlock, "start" | "end" | "activity">[]): number {
   const def = own(NEEDS, need);
   if (!def) return 0;
+  const rate = rateOf(ctx, who, need, def.rate);
   const n = objOf(own(objOf(own(ctx.state.entities, who)?.fields.needs), need));
   if (typeof n.t === "number" || who === ctx.world.pov) {
     const v = numOf(n.v, 20);
     const t = numOf(n.t, minutesBetween(ctx.world.calendar.epoch, ctx.world.start.at));
-    return Math.max(0, Math.min(100, v + (def.rate * Math.max(0, at - t)) / 60));
+    return Math.max(0, Math.min(100, v + (rate * Math.max(0, at - t)) / 60));
   }
   let met = -Infinity;
   for (const b of blocks) if (b.start <= at && satisfies(b.activity, need)) met = Math.max(met, Math.min(b.end, at));
@@ -92,17 +107,20 @@ function needIn(ctx: ReadContext, who: EntityId, need: string, at: number, block
     const minute = dateAt(calendarOf(ctx.world), at).minuteOfDay;
     met = at - Math.min(...def.daily.map((t) => (minute - t + MINUTES_PER_DAY) % MINUTES_PER_DAY));
   }
-  return Math.min(100, (def.rate * (at - met)) / 60);
+  return Math.min(100, (rate * (at - met)) / 60);
 }
 
 /**
  * A need now (DESIGN §8, §24.8): recorded, or for an NPC the planner plans (an LOD1 agent from Cast
- * life 3) from what their day's plan had them do by then, else from the routine's times.
+ * life 3) from what their day's plan had them do by then, else from the routine's times. `legacy`
+ * reads the day as the template of earlier builds laid it: only to fold a `castlife.need` event they
+ * recorded without the value it started from, so an older chat folds as it did.
  */
-export function needValue(ctx: ReadContext, who: EntityId, need: string, at = ctx.state.clock): number {
+export function needValue(ctx: ReadContext, who: EntityId, need: string, at = ctx.state.clock, legacy = false): number {
   const recorded = typeof objOf(own(objOf(own(ctx.state.entities, who)?.fields.needs), need)).t === "number";
   const planned = !recorded && livesPlans(ctx, who);
-  return needIn(ctx, who, need, at, planned ? dayPlan(ctx, who, dateAt(calendarOf(ctx.world), at).dayIndex).blocks : []);
+  const day = dateAt(calendarOf(ctx.world), at).dayIndex;
+  return needIn(ctx, who, need, at, planned ? (legacy ? legacyDayPlan(ctx, who, day) : dayPlan(ctx, who, day)).blocks : []);
 }
 
 // ---------------------------------------------------------------- planning
@@ -117,6 +135,9 @@ const AGENDA_OPTION = "agenda:";
 /** The activity an agenda's step sets; which agenda it is isn't recorded with it. */
 const AGENDA_ACTIVITY = "agenda";
 
+/** The option id prefix for the block a host's invitation lays in a guest's day: `invited:<host>:<block>`. */
+const INVITED_OPTION = "invited:";
+
 /** Whether a track is public: the only agendas the player is shown. */
 function publicTrack(world: WorldDoc, track: string): boolean {
   return visibilityOf(own(world.tracks, track)?.visibility) === "public";
@@ -124,31 +145,54 @@ function publicTrack(world: WorldDoc, track: string): boolean {
 
 /**
  * A person's activity as the player and the narrator read it (DESIGN §7): as it is, except an
- * agenda's step. That doesn't say which agenda it is, so it reads "busy" unless every agenda the
- * person has is public: it never says they are pursuing one the player may not know of.
+ * agenda's step or a private block of their routine. An agenda's step doesn't say which agenda it is,
+ * so it reads "busy" unless every agenda the person has is public: it never says they are pursuing
+ * one the player may not know of; a private routine block's activity always reads "busy".
  */
 export function shownActivity(ctx: ReadContext, who: EntityId, activity: string): string {
-  if (activity !== AGENDA_ACTIVITY) return activity;
+  if (activity !== AGENDA_ACTIVITY) return activeBlocks(ctx, who).some((a) => a.block.private === true && a.block.activity === activity) ? "busy" : activity;
   const agendas = agendaFor(ctx.world, ctx.state, who);
   return agendas.length > 0 && agendas.every((a) => publicTrack(ctx.world, a.track)) ? activity : "busy";
 }
 
 /**
- * The planner's options for one agent and day: sleep, meals, socializing, leisure, chores, agenda
- * steps and retrievals, shaped by the day's occasion (DESIGN §24.8). A day off makes a slow morning
- * and more time for friends and leisure; a holiday, an observance, their own birthday or a close
- * friend's brings an option of its own; summer draws people out to their time out and winter holds
- * them back from it, at the same place; bad weather keeps them in, with their time out at home.
+ * The planner's options besides someone's routine, each grounded in the world or the story: their own
+ * chores (authored), the steps of their agendas (story tracks), and getting back a thing an overdue
+ * loan keeps from them.
  */
-export function dayOptions(ctx: ReadContext, who: EntityId, dayStart: number): PlanOption[] {
+function groundedOptions(ctx: ReadContext, who: EntityId, dayStart: number): PlanOption[] {
+  const home = homeOf(ctx, who);
+  const options: PlanOption[] = [];
+  const chores = own(ctx.state.entities, who)?.fields.chores;
+  if (Array.isArray(chores)) {
+    chores.forEach((raw, i) => {
+      const c = objOf(raw);
+      options.push({ id: `chore:${i}`, label: strOf(c.label, "Chores"), activity: "chores", place: strOf(c.place) || home, duration: numOf(c.minutes, 45), window: within(dayStart, 8, 20), utility: numOf(c.utility, 2), reasons: ["chore"] });
+    });
+  }
+  for (const a of agendaFor(ctx.world, ctx.state, who)) options.push({ id: `${AGENDA_OPTION}${a.track}`, label: a.stageLabel, activity: AGENDA_ACTIVITY, place: home, duration: 60, window: within(dayStart, 9, 20), utility: 1 + a.priority, reasons: [`agenda: ${a.label}`] });
+  const overdue = optionalQuery(ctx, "gear.overdue");
+  if (overdue) {
+    for (const g of overdue(ctx, who)) {
+      const where = placeOfEntity(ctx.state, g.borrower) ?? placeOfEntity(ctx.state, g.thing);
+      options.push({ id: `retrieve:${g.thing}`, label: `Get ${own(ctx.state.entities, g.thing)?.name ?? g.thing} back from ${own(ctx.state.entities, g.borrower)?.name ?? g.borrower}`, activity: `retrieve:${g.thing}`, place: where, duration: 45, window: within(dayStart, 8, 20), utility: 7, reasons: ["overdue loan"] });
+    }
+  }
+  return options;
+}
+
+/**
+ * The day template earlier builds planned every agent's day from, story or no story: sleep, meals,
+ * seeing friends and time out, holidays and birthdays, shaped by the day's occasion. It plans no new
+ * day: it is kept only so a `castlife.need` event an earlier build recorded, without the value it
+ * started from, folds as it did (`needValue` with `legacy`), which reads that day as it was laid then.
+ */
+export function legacyDayOptions(ctx: ReadContext, who: EntityId, dayStart: number): PlanOption[] {
   const level = ctx.levelOf(who, "castlife");
   const home = homeOf(ctx, who);
   const cal = calendarOf(ctx.world);
   const hourOf = (t: number): number => dateAt(cal, t).minuteOfDay / 60;
-  // From level 4 needs push options as the day so far leaves them: a meal already laid meets hunger,
-  // and a plan that took the lunch hour leaves it unmet.
   const need = (n: string, t: number, laid: readonly PlanBlock[]): number => (level >= 4 ? needIn(ctx, who, n, t, laid) : 0);
-  // Reasons name what drives each option: its purpose, the day's occasion, and a need pressing when it's chosen.
   const pressed =
     (n: string, word: string) =>
     (t: number, laid: readonly PlanBlock[]): string[] => {
@@ -172,27 +216,11 @@ export function dayOptions(ctx: ReadContext, who: EntityId, dayStart: number): P
   let fondness = 0;
   if (social) for (const other of Object.keys(ctx.state.entities)) if (other !== who && kindIs(ctx.registry, ctx.world, own(ctx.state.entities, other)?.kind ?? "", "person")) fondness = Math.max(fondness, social(ctx, who, other));
   options.push({ id: "socialize", label: "See friends", activity: "socialize", place: company, duration: 90, window: off ? within(dayStart, 12, 23) : within(dayStart, 17, 22), utility: (t, laid) => 2.5 + (off ? 1 : 0) - (occasion.foul ? 0.5 : 0) + fondness / 50 + need("social", t, laid) / 25, reasons: ["company", ...(fondness >= FOND ? ["a close friend"] : []), ...(off ? ["a day off"] : [])], because: pressed("social", "lonely") });
-  const chores = own(ctx.state.entities, who)?.fields.chores;
-  if (Array.isArray(chores)) {
-    chores.forEach((raw, i) => {
-      const c = objOf(raw);
-      options.push({ id: `chore:${i}`, label: strOf(c.label, "Chores"), activity: "chores", place: strOf(c.place) || home, duration: numOf(c.minutes, 45), window: within(dayStart, 8, 20), utility: numOf(c.utility, 2), reasons: ["chore"] });
-    });
-  }
-  for (const a of agendaFor(ctx.world, ctx.state, who)) options.push({ id: `${AGENDA_OPTION}${a.track}`, label: a.stageLabel, activity: AGENDA_ACTIVITY, place: home, duration: 60, window: within(dayStart, 9, 20), utility: 1 + a.priority, reasons: [`agenda: ${a.label}`] });
-  const overdue = optionalQuery(ctx, "gear.overdue");
-  if (overdue) {
-    for (const g of overdue(ctx, who)) {
-      const where = placeOfEntity(ctx.state, g.borrower) ?? placeOfEntity(ctx.state, g.thing);
-      options.push({ id: `retrieve:${g.thing}`, label: `Get ${own(ctx.state.entities, g.thing)?.name ?? g.thing} back from ${own(ctx.state.entities, g.borrower)?.name ?? g.borrower}`, activity: `retrieve:${g.thing}`, place: where, duration: 45, window: within(dayStart, 8, 20), utility: 7, reasons: ["overdue loan"] });
-    }
-  }
-  // The day's own occasions: calendar holidays and observances are public (the Scene line names them).
+  options.push(...groundedOptions(ctx, who, dayStart));
   for (const h of occasion.holidays) {
     options.push(h.dayOff ? { id: `holiday:${h.id}`, label: h.label, activity: "socialize", place: home, duration: 180, window: within(dayStart, 12, 20), utility: 5.5, reasons: [h.label] } : { id: `holiday:${h.id}`, label: h.label, activity: "leisure", place: company, duration: 90, window: within(dayStart, 17, 22), utility: 3, reasons: [h.label] });
   }
   if (occasion.birthday) options.push({ id: "birthday", label: "Birthday", activity: "socialize", place: company, duration: 150, window: within(dayStart, 17, 23), utility: 6.5, reasons: ["their birthday"] });
-  // A close friend's birthday, at their home when it is a place: whose it is stays out of what Cast shows.
   for (const friend of occasion.friends.slice(0, 2)) {
     const theirs = homeOf(ctx, friend);
     options.push({ id: `birthday:${friend}`, label: "A friend's birthday", activity: "socialize", place: theirs !== null && own(ctx.world.places, theirs) ? theirs : company, duration: 90, window: within(dayStart, 17, 22), utility: 4 + (social?.(ctx, who, friend) ?? 0) / 50, reasons: ["a friend's birthday"] });
@@ -200,9 +228,35 @@ export function dayOptions(ctx: ReadContext, who: EntityId, dayStart: number): P
   return options;
 }
 
+/**
+ * The blocks invitations lay in a guest's day (DESIGN §8, with invitations between everyone): each
+ * fixed block of someone's routine that asks its company along, on that day, with the guest among
+ * its company, when the guest knows the host and follows their routine with invitations, cut around
+ * the guest's commitments.
+ */
+function invitedBlocks(ctx: ReadContext, guest: EntityId, day: number, commitments: readonly FixedBlock[]): FixedBlock[] {
+  if (routineSettingsOf(ctx.world).invitations !== "everyone" || followOf(ctx, guest).mode !== "follows" || guest === ctx.world.pov) return [];
+  const cal = calendarOf(ctx.world);
+  const start = clockAt(cal, day, 0);
+  const hosts = new Set<EntityId>();
+  for (const def of worldRoutines(ctx.world)) if (def.blocks.some((b) => !isOff(b) && b.company?.invite === true)) for (const who of Object.keys(ctx.state.entities).sort()) hosts.add(who);
+  const out: FixedBlock[] = [];
+  for (const host of [...hosts].sort()) {
+    if (host === guest || !acquainted(ctx.state, host, guest) || followOf(ctx, host).mode !== "follows") continue;
+    for (const { block } of activeBlocks(ctx, host)) {
+      if (block.kind !== "fixed" || block.company?.invite !== true || !selectEntities(ctx.registry, ctx.world, ctx.state, block.company.who).includes(guest) || !blockOnDay(ctx, host, block, day)) continue;
+      const s = start + parseHHMM(block.at ?? "00:00");
+      const e = s + block.minutes;
+      if (commitments.some((c) => c.start < e && c.end > s)) continue;
+      out.push({ start: s, end: e, label: block.label, activity: block.activity, place: blockPlace(ctx, host, block), reason: "invited", option: `${INVITED_OPTION}${host}:${block.id}` });
+    }
+  }
+  return out;
+}
+
 export interface DayPlan {
   day: number;
-  /** `option` is the planner's option the block came from (`agenda:<track>` for an agenda's step). */
+  /** `option` is the planner's option the block came from (`routine:<block>`, `plan:<plan>`, `agenda:<track>` for an agenda's step, `invited:<host>:<block>`). */
   blocks: { start: number; end: number; option: string; label: string; activity: string; place: PlaceId | null; reasons: string[]; fixed: boolean }[];
   ties: { key: string; chosen: string; via: string; options: string[] }[];
   tieZone: boolean;
@@ -214,12 +268,24 @@ function decisions(state: Readonly<WorldState>): Record<string, string> {
   return out;
 }
 
-/** Plans a day: commitments fixed, free time by utility; ties use a recorded `npc.choose` decision, else the seed. */
-export function planFor(ctx: ReadContext, who: EntityId, day: number, rng: Rng): DayPlan {
+/**
+ * Plans a day (DESIGN §8, §24.8): commitments fixed (schedules, appointments, trips, story plans),
+ * then the fixed blocks of their routine and blocks invitations lay, then the flexible and optional
+ * ones and what the world grounds (chores, agendas, overdue loans) by utility in the free time; ties
+ * use a recorded `npc.choose` decision, else the seed. Only a person has a routine. `legacy` lays the
+ * day from the template of earlier builds instead (`legacyDayOptions`), for folding what they recorded.
+ */
+export function planFor(ctx: ReadContext, who: EntityId, day: number, rng: Rng, legacy = false): DayPlan {
   const cal = calendarOf(ctx.world);
   const start = clockAt(cal, day, 0);
   const end = start + MINUTES_PER_DAY;
-  const plan = planDay({ agent: who, start, end, fixed: commitments(ctx, who, start, end), options: dayOptions(ctx, who, start), rng, recorded: decisions(ctx.state) });
+  const fixed = commitments(ctx, who, start, end);
+  const person = kindIs(ctx.registry, ctx.world, own(ctx.state.entities, who)?.kind ?? "", "person");
+  const level = ctx.levelOf(who, "castlife");
+  const routine = !legacy && person ? routineDay(ctx, who, day, fixed, { need: (n, t, laid) => (level >= 4 ? needIn(ctx, who, n, t, laid) : 0), meets: (activity) => Object.keys(NEEDS).filter((n) => satisfies(activity, n)) }) : { fixed: [], options: [] };
+  const invited = legacy || !person ? [] : invitedBlocks(ctx, who, day, [...fixed, ...routine.fixed]);
+  const options = legacy ? legacyDayOptions(ctx, who, start) : [...routine.options, ...groundedOptions(ctx, who, start)];
+  const plan = planDay({ agent: who, start, end, fixed: [...fixed, ...routine.fixed, ...invited], options, rng, recorded: decisions(ctx.state) });
   return {
     day,
     // Chosen-by-utility blocks state their utility; a close call says so, and says when the person's own choice (the recorded `npc.choose` decision) settled it.
@@ -242,6 +308,11 @@ export function dayPlan(ctx: ReadContext, who: EntityId, day = dateAt(calendarOf
   return planFor(ctx, who, day, createRng(hashParts("castlife.plan", ctx.world.id, who, String(day))));
 }
 
+/** A day as the template of earlier builds laid it, with the same seed: only for folding what they recorded (`needValue` with `legacy`). */
+function legacyDayPlan(ctx: ReadContext, who: EntityId, day: number): DayPlan {
+  return planFor(ctx, who, day, createRng(hashParts("castlife.plan", ctx.world.id, who, String(day))), true);
+}
+
 function held(state: Readonly<WorldState>, who: EntityId, target: string, at: number): boolean {
   const until = own(objOf(own(state.entities, who)?.fields.holds), target);
   return typeof until === "number" && until > at;
@@ -259,13 +330,14 @@ function acquainted(state: Readonly<WorldState>, a: EntityId, b: EntityId): bool
 // ---------------------------------------------------------------- the agent process
 
 /**
- * Someone takes up a block of their day (DESIGN §8): its place and its activity, unless a hold keeps
- * either, a fight under way keeps them (the combat pack's `combat.engaged`) or the POV's routine
- * can't take it there (stranded, or the place out of reach). Arriving where the POV is says so. A
- * block of their own plan (`holdUntil`, its end) holds its place and activity for its span, as a
- * trip does, so a routine's schedule edge inside it doesn't take them back (DESIGN §24.8).
+ * Someone takes up a block of their day (DESIGN §8): its place and its activity (null leaves either
+ * as it is), unless a hold keeps either, a fight under way keeps them (the combat pack's
+ * `combat.engaged`) or the POV's routine can't take it there (stranded, or the place out of reach).
+ * Arriving where the POV is says so. A block of their own plan (`holdUntil`, its end) holds its place
+ * and activity for its span, as a trip does, so a routine's schedule edge inside it doesn't take them
+ * back (DESIGN §24.8).
  */
-function takeUp(ctx: ReadContext, who: EntityId, place: PlaceId | null, activity: string, at: number, holdUntil?: number): LedgerEvent[] {
+function takeUp(ctx: ReadContext, who: EntityId, place: PlaceId | null, activity: string | null, at: number, holdUntil?: number): LedgerEvent[] {
   const out: LedgerEvent[] = [];
   const e = own(ctx.state.entities, who);
   if (!e || routineStays(ctx, who, place) || optionalQuery(ctx, "combat.engaged")?.(ctx, who) === true) return out;
@@ -273,13 +345,36 @@ function takeUp(ctx: ReadContext, who: EntityId, place: PlaceId | null, activity
     out.push({ type: "set", entity: who, field: "place", value: place });
     if (who !== ctx.world.pov && place === placeOfEntity(ctx.state, ctx.world.pov)) out.push({ type: ENGINE_EVENTS.signal, data: { class: "arrival", text: `${e.name} arrives.`, entity: who } });
   }
-  if (!held(ctx.state, who, "activity", at) && e.fields.activity !== activity) out.push({ type: "set", entity: who, field: "activity", value: activity });
+  if (activity !== null && !held(ctx.state, who, "activity", at) && e.fields.activity !== activity) out.push({ type: "set", entity: who, field: "activity", value: activity });
   if (holdUntil !== undefined && holdUntil > at) {
     const holds = objOf(e.fields.holds);
     const kept = { ...holds, place: Math.max(numOf(holds.place, 0), holdUntil), activity: Math.max(numOf(holds.activity, 0), holdUntil) };
     if (kept.place !== holds.place || kept.activity !== holds.activity) out.push({ type: "set", entity: who, field: "holds", value: kept });
   }
   return out;
+}
+
+/** The activity a block sets: an overdue loan's retrieval is an errand. */
+function blockActivity(activity: string): string {
+  return activity.startsWith("retrieve:") ? "errand" : activity;
+}
+
+/**
+ * Someone lives the block of their day that holds from `at` (DESIGN §8): what the story established
+ * wins over it. A block of their own plan (the story's) moves them unless they're in a scene with the
+ * POV. A routine's block moves them at its own start (`edge`), else only where the routine last had
+ * them (the blocks before it), as `routineYields` decides; going to bed is where balanced awareness
+ * hands the day back to the routine.
+ */
+function liveBlock(ctx: ReadContext, who: EntityId, plan: DayPlan, block: DayPlan["blocks"][number], from: number, at: number): LedgerEvent[] {
+  const story = block.option.startsWith("plan:");
+  const activity = blockActivity(block.activity);
+  if (story) return withPov(ctx, who) ? [] : takeUp(ctx, who, block.place, activity, at, block.end);
+  const before = plan.blocks.slice(0, plan.blocks.indexOf(block)).reverse();
+  const opts = { edge: block.start > from && block.start <= at, release: block.activity === "sleep" };
+  const place = block.place !== null && !routineYields(ctx, who, "place", before.find((b) => b.place !== null)?.place ?? homeOf(ctx, who), opts) ? block.place : null;
+  const doing = routineYields(ctx, who, "activity", before[0] ? blockActivity(before[0].activity) : null, opts) ? null : activity;
+  return takeUp(ctx, who, place, doing, at);
 }
 
 /**
@@ -293,13 +388,14 @@ function planOutcomes(ctx: ReadContext, who: EntityId, slot: SlotInfo): LedgerEv
   const due = (optionalQuery(ctx, "minds.plans")?.(ctx, who) ?? []).filter((p) => p.status === "open" && isPlayed(p) && p.when.from <= slot.end);
   if (due.length === 0) return [];
   const tier = planTier(ctx, who);
-  const laid = laidPlans(ctx, who, tier === "background" ? [] : due);
+  const routineOnly = tier === "background" && followOf(ctx, who).awareness !== "story_first";
+  const laid = laidPlans(ctx, who, routineOnly ? [] : due);
   const out: LedgerEvent[] = [];
   for (const p of due) {
     const blocks = laid.get(p.id) ?? [];
     const last = Math.max(...blocks.map((b) => b.end));
     if (blocks.length > 0 && last <= slot.end) out.push({ type: MINDS_EVENTS.plan, data: { entity: who, plan: p.id, status: "done", at: last, reason: null } });
-    else if (blocks.length === 0 && p.when.to <= slot.end) out.push({ type: MINDS_EVENTS.plan, data: { entity: who, plan: p.id, status: "dropped", at: p.when.to, reason: tier === "background" ? "routine only" : "no time for it" } });
+    else if (blocks.length === 0 && p.when.to <= slot.end) out.push({ type: MINDS_EVENTS.plan, data: { entity: who, plan: p.id, status: "dropped", at: p.when.to, reason: routineOnly ? "routine only" : "no time for it" } });
   }
   return out;
 }
@@ -307,73 +403,124 @@ function planOutcomes(ctx: ReadContext, who: EntityId, slot: SlotInfo): LedgerEv
 /** How far ahead of a plan with the POV its invitation comes, at most: never before the day it's on, and at the earliest the moment after the plan was made. */
 const INVITE_LEAD = 6 * 60;
 
-/** A plan with the POV asking it along: when it asks, and when and where the plan meets. */
-interface PlanAsk {
-  plan: string;
+/** Something that asks the POV along: when it asks, and when and where it meets, under a key naming it once. */
+export interface Ask {
+  key: string;
   ask: number;
   at: number;
   place: PlaceId | null;
-}
-
-/** Each of a character's plans with the POV that something was laid for, with when it asks the POV along (DESIGN §24.8). */
-function planAsks(ctx: ReadContext, who: EntityId): PlanAsk[] {
-  const pov = ctx.world.pov;
-  const plans = plansOf(ctx, who).filter((p) => p.with.includes(pov));
-  if (plans.length === 0) return [];
-  const cal = calendarOf(ctx.world);
-  const laid = laidPlans(ctx, who, plans);
-  return plans.flatMap((p) => {
-    const first = laid.get(p.id)?.[0];
-    return first ? [{ plan: p.id, ask: Math.max(first.start - INVITE_LEAD, p.made + 1, clockAt(cal, dateAt(cal, first.start).dayIndex, 0)), at: first.start, place: first.place ?? null }] : [];
-  });
+  origin: { type: "plan"; plan: string } | { type: "routine"; block: string };
 }
 
 /**
- * A plan's invitation (DESIGN §24.8), once: the POV asked to where and when the plan meets, under a
- * key naming the plan, while the POV acts. Its text never names a place the POV can't see.
+ * Whether `host` may ask the POV along to `place` now (DESIGN §8): only on a ground (an ask is one),
+ * and never from the cast the story is about (Live and Near characters: their minds and the scene
+ * speak for them, so nothing interrupts play for them), from someone with the POV already, from
+ * someone the chat set to make no invitations, to a POV that doesn't act, is held away, or is where
+ * they'd meet, nor between people who don't know each other or where the host regards the POV badly.
  */
-function planInvitation(ctx: ReadContext, who: EntityId, ask: PlanAsk): LedgerEvent[] {
-  const key = `${who}:plan:${ask.plan}`;
+function mayInvite(ctx: ReadContext, host: EntityId, place: PlaceId | null): boolean {
+  const pov = ctx.world.pov;
+  if (followOf(ctx, host).mode !== "follows" || withPov(ctx, host) || !acts(ctx, pov)) return false;
+  const tier = optionalQuery(ctx, "minds.tier")?.(ctx, host) ?? "background";
+  if (tier === "live" || tier === "near") return false;
+  if (held(ctx.state, pov, "place", ctx.state.clock) || (place !== null && placeOfEntity(ctx.state, pov) === place)) return false;
+  if (!acquainted(ctx.state, host, pov) && !knows(ctx.state, host, pov)) return false;
+  return (optionalQuery(ctx, "regard")?.(ctx, host, pov) ?? 0) >= 0;
+}
+
+/**
+ * Everything of a character's that asks the POV along (DESIGN §8, §24.8): each of their plans with
+ * the POV that something was laid for, and from their routine each block on `days` that asks its
+ * company along with the POV among it, while the world's invitations reach the player. Each asks at
+ * most 6 hours ahead, never before the day it's on, and a plan never before the moment after it was made.
+ */
+export function asksOf(ctx: ReadContext, who: EntityId, days: readonly number[]): Ask[] {
+  const pov = ctx.world.pov;
+  const cal = calendarOf(ctx.world);
+  const out: Ask[] = [];
+  const plans = plansOf(ctx, who).filter((p) => p.with.includes(pov));
+  if (plans.length > 0) {
+    const laid = laidPlans(ctx, who, plans);
+    for (const p of plans) {
+      const first = laid.get(p.id)?.[0];
+      if (first) out.push({ key: `${who}:plan:${p.id}`, ask: Math.max(first.start - INVITE_LEAD, p.made + 1, clockAt(cal, dateAt(cal, first.start).dayIndex, 0)), at: first.start, place: first.place ?? null, origin: { type: "plan", plan: p.id } });
+    }
+  }
+  if (routineSettingsOf(ctx.world).invitations === "off" || followOf(ctx, who).mode !== "follows") return out;
+  const asking = activeBlocks(ctx, who).filter(({ block }) => block.company?.invite === true && selectEntities(ctx.registry, ctx.world, ctx.state, block.company.who).includes(pov));
+  if (asking.length === 0) return out;
+  for (const day of days) {
+    for (const b of dayPlan(ctx, who, day).blocks) {
+      const id = b.option.startsWith(ROUTINE_OPTION) ? b.option.slice(ROUTINE_OPTION.length) : null;
+      if (id === null || !asking.some((a) => a.block.id === id)) continue;
+      out.push({ key: `${who}:routine:${id}:${day}`, ask: Math.max(b.start - INVITE_LEAD, clockAt(cal, day, 0)), at: b.start, place: b.place, origin: { type: "routine", block: id } });
+    }
+  }
+  return out;
+}
+
+/** The days a slot touches, for the asks inside it. */
+function slotDays(ctx: ReadContext, slot: SlotInfo): number[] {
+  const cal = calendarOf(ctx.world);
+  const first = dateAt(cal, slot.start).dayIndex;
+  const last = dateAt(cal, slot.end).dayIndex;
+  return first === last ? [first] : [first, last];
+}
+
+/**
+ * An ask's invitation (DESIGN §8, §24.8), once: the POV asked to where and when it meets, under its
+ * key, when the host may invite (`mayInvite`) at that moment. Its text never names a place the POV
+ * can't see.
+ */
+function invitation(ctx: ReadContext, who: EntityId, ask: Ask): LedgerEvent[] {
   const given = sliceOf(ctx.state, "castlife").invitations;
-  if (!acts(ctx, ctx.world.pov) || (Array.isArray(given) && given.some((i) => objOf(i).key === key))) return [];
+  if (!mayInvite(ctx, who, ask.place) || (Array.isArray(given) && given.some((i) => objOf(i).key === ask.key))) return [];
   const text = invitationText(ctx, who, ask.place, ask.at, ctx.world.pov);
-  return [{ type: "castlife.invitation", data: { agent: who, place: ask.place, at: ask.at, text, key } }, { type: ENGINE_EVENTS.signal, data: { class: "invitation", text, entity: who } }];
+  return [{ type: "castlife.invitation", data: { agent: who, place: ask.place, at: ask.at, text, key: ask.key, origin: ask.origin.type === "plan" ? `plan:${ask.origin.plan}` : `routine:${ask.origin.block}` } }, { type: ENGINE_EVENTS.signal, data: { class: "invitation", text, entity: who } }];
 }
 
 /**
  * An agent's moments between slot steps (DESIGN §24.8, `ProcessDef.instants`): each block of their
- * plans starting or ending inside the slot, and from Cast life 4 the moment a plan with the POV asks
- * it along. Laid from the plans and commitments alone, so every segment of a timelapse finds the same.
+ * plans starting or ending inside the slot, and from Cast life 4 the moment something of theirs asks
+ * the POV along. Laid from the plans, the routine and the commitments alone, so every segment of a
+ * timelapse finds the same.
  */
 function planMoments(ctx: ReadContext, who: EntityId, slot: SlotInfo): AgentInstant[] {
-  if (plansOf(ctx, who).length === 0) return [];
   const inside = (at: number): boolean => at > slot.start && at < slot.end;
   const out: AgentInstant[] = [];
-  for (const c of commitments(ctx, who, slot.start, slot.end)) {
-    if (c.plan === undefined) continue;
-    if (inside(c.start)) out.push({ at: c.start, key: `start:${c.plan}` });
-    if (inside(c.end)) out.push({ at: c.end, key: `end:${c.plan}` });
+  if (plansOf(ctx, who).length > 0) {
+    for (const c of commitments(ctx, who, slot.start, slot.end)) {
+      if (c.plan === undefined) continue;
+      if (inside(c.start)) out.push({ at: c.start, key: `start:${c.plan}` });
+      if (inside(c.end)) out.push({ at: c.end, key: `end:${c.plan}` });
+    }
   }
-  if (ctx.levelOf(who, "castlife") >= 4) for (const a of planAsks(ctx, who)) if (inside(a.ask)) out.push({ at: a.ask, key: `invite:${a.plan}` });
+  if (ctx.levelOf(who, "castlife") >= 4) for (const a of asksOf(ctx, who, slotDays(ctx, slot))) if (inside(a.ask)) out.push({ at: a.ask, key: `invite:${a.key}` });
   return out;
 }
 
 /**
  * What an agent does at a plan moment: the invitation goes out, or they take up the block of their
  * day that holds from then (the plan's own at its start, held for its span; after its end what
- * follows, home when that names no place).
+ * follows, home when that names no place), unless they are in a scene with the POV.
  */
 function atPlanMoment(ctx: ReadContext, who: EntityId, moment: AgentInstant): LedgerEvent[] {
+  const cal = calendarOf(ctx.world);
   if (moment.key.startsWith("invite:")) {
-    const ask = planAsks(ctx, who).find((a) => `invite:${a.plan}` === moment.key);
-    return ask ? planInvitation(ctx, who, ask) : [];
+    const ask = asksOf(ctx, who, [dateAt(cal, moment.at).dayIndex, dateAt(cal, moment.at).dayIndex + 1]).find((a) => `invite:${a.key}` === moment.key);
+    return ask ? invitation(ctx, who, ask) : [];
   }
-  const block = dayPlan(ctx, who, dateAt(calendarOf(ctx.world), moment.at).dayIndex).blocks.find((b) => b.start <= moment.at && moment.at < b.end);
-  if (!block) return [];
-  return takeUp(ctx, who, block.place ?? (moment.key.startsWith("end:") ? homeOf(ctx, who) : null), block.activity.startsWith("retrieve:") ? "errand" : block.activity, moment.at, block.option.startsWith("plan:") ? block.end : undefined);
+  const block = dayPlan(ctx, who, dateAt(cal, moment.at).dayIndex).blocks.find((b) => b.start <= moment.at && moment.at < b.end);
+  if (!block || withPov(ctx, who)) return [];
+  return takeUp(ctx, who, block.place ?? (moment.key.startsWith("end:") ? homeOf(ctx, who) : null), blockActivity(block.activity), moment.at, block.option.startsWith("plan:") ? block.end : undefined);
 }
 
-/** Steps one LOD1 agent through one slot (Cast life ≥ 3): plan the day, live the block, settle their plans, needs, encounters, invitations; nothing for someone who doesn't act. */
+/**
+ * Steps one LOD1 agent through one slot (Cast life ≥ 3): plan the day, live the block (the POV only
+ * while its routine runs: `SlotInfo.povRoutine`), settle their plans, needs, encounters and
+ * invitations; nothing for someone who doesn't act.
+ */
 function stepAgent(slot: SlotInfo, ctx: ReadContext, rngFor: (entity: EntityId) => Rng, who: EntityId): LedgerEvent[] {
   const out: LedgerEvent[] = [];
   const e = own(ctx.state.entities, who);
@@ -397,7 +544,8 @@ function stepAgent(slot: SlotInfo, ctx: ReadContext, rngFor: (entity: EntityId) 
       if (Array.isArray(got)) out.push(...got, { type: ENGINE_EVENTS.note, data: { text: `${e.name} got ${own(ctx.state.entities, thing)?.name ?? thing} back.`, entity: who, visibility: "known_by" } });
     }
   }
-  out.push(...takeUp(ctx, who, block.place, block.activity.startsWith("retrieve:") ? "errand" : block.activity, slot.end, block.option.startsWith("plan:") ? block.end : undefined), ...planOutcomes(ctx, who, slot));
+  if (who !== pov || slot.povRoutine !== false) out.push(...liveBlock(ctx, who, plan, block, slot.start, slot.end));
+  out.push(...planOutcomes(ctx, who, slot));
   if (level < 4) return out;
 
   // Needs: only the POV's are recorded (an NPC's follow their day's plan); it gets alerts when it is an agent.
@@ -424,28 +572,10 @@ function stepAgent(slot: SlotInfo, ctx: ReadContext, rngFor: (entity: EntityId) 
     }
   }
 
-  // Invitations come from plans with the POV: at their moment inside a slot, or here when the ask
-  // falls on the slot's end or catch-up steps the agent late. The old formula (a fond agent with free
-  // evening time, a tie-zone decision) runs only while minds are off.
-  for (const a of planAsks(ctx, who)) if (a.ask > slot.start && a.ask <= slot.end) out.push(...planInvitation(ctx, who, a));
-  if (optionalQuery(ctx, "minds.on")?.(ctx) === true) return out;
-  const regard = optionalQuery(ctx, "regard");
-  const hour = dateAt(cal, slot.start).minuteOfDay / 60;
-  if (regard && acts(ctx, pov) && !block.fixed && hour >= 12 && hour < 20 && regard(ctx, who, pov) >= 20) {
-    const key = `${who}:invite:${slot.index}`;
-    const invite = 1 + needValue(ctx, who, "social", slot.start) / 50 + regard(ctx, who, pov) / 50;
-    const stay = 2;
-    const recorded = own(decisions(ctx.state), key);
-    const tie = Math.abs(invite - stay) <= 0.5;
-    const choice = recorded ?? (tie ? (rng.fork(key).next() < 0.5 ? "invite" : "stay") : invite > stay ? "invite" : "stay");
-    if (tie || recorded) out.push({ type: ENGINE_EVENTS.choice, data: { key, choice, via: recorded ? "recorded" : "seed", agent: who, options: "invite,stay" } });
-    if (choice === "invite") {
-      const where = block.place ?? placeOfType(ctx, "conversation", homeOf(ctx, who));
-      // The invitation is the POV's: its text never names a place the POV can't see.
-      const text = invitationText(ctx, who, where, slot.end, pov);
-      out.push({ type: "castlife.invitation", data: { agent: who, place: where, at: slot.end, text, key } }, { type: ENGINE_EVENTS.signal, data: { class: "invitation", text, entity: who } });
-    }
-  }
+  // Invitations come only on a ground (a plan with the POV, a routine block that asks it along): at
+  // their moment inside a slot, or here when the ask falls on the slot's end or catch-up steps the
+  // agent late. Nothing asks the POV along for company's sake alone.
+  for (const a of asksOf(ctx, who, slotDays(ctx, slot))) if (a.ask > slot.start && a.ask <= slot.end) out.push(...invitation(ctx, who, a));
   return out;
 }
 
@@ -453,7 +583,7 @@ function stepAgent(slot: SlotInfo, ctx: ReadContext, rngFor: (entity: EntityId) 
  * An invitation as `viewer` reads it: where to meet only when they can see the place, else just "meet
  * up"; with no viewer (the GM's lines, Check world), the place by its own name.
  */
-function invitationText(ctx: ReadContext, agent: EntityId, place: PlaceId | null, at: number, viewer?: EntityId): string {
+export function invitationText(ctx: ReadContext, agent: EntityId, place: PlaceId | null, at: number, viewer?: EntityId): string {
   const named = place !== null && (viewer === undefined || canSeePlace(ctx.registry, ctx.world, ctx.state, viewer, place)) ? (own(ctx.world.places, place)?.name ?? place) : null;
   return `${own(ctx.state.entities, agent)?.name ?? agent} invites you to ${named ?? "meet up"} at ${formatHHMM(dateAt(calendarOf(ctx.world), at).minuteOfDay)}.`;
 }
@@ -500,7 +630,8 @@ function stepTrips(slot: SlotInfo, ctx: ReadContext): LedgerEvent[] {
       // The trip took them away and hasn't let go of them yet.
       const holding = objOf(e.fields.holds).place === until;
       const away = holding && e.fields.place === place;
-      if (from <= slot.end && slot.end < until && !away && own(ctx.world.places, place)) {
+      // A trip doesn't take anyone out of a scene with the POV (DESIGN §8): they leave once it ends.
+      if (from <= slot.end && slot.end < until && !away && own(ctx.world.places, place) && !withPov(ctx, who)) {
         holds = { ...holds, place: until, activity: until };
         out.push({ type: "set", entity: who, field: "holds", value: holds }, { type: "set", entity: who, field: "place", value: place }, { type: "set", entity: who, field: "activity", value: "trip" });
       }
@@ -523,16 +654,38 @@ function stepTrips(slot: SlotInfo, ctx: ReadContext): LedgerEvent[] {
 
 // ---------------------------------------------------------------- events, view, pack
 
+/** A chat's own source as an event carries it: the GM's or the story's, with its time. */
+function isChatSource(v: JsonValue | undefined): boolean {
+  const o = objOf(v);
+  return typeof o.at === "number" && (o.type === "gm" || (o.type === "story" && (o.turn === undefined || typeof o.turn === "string")));
+}
+
+/** A schedule change as an event carries it: off (until a time or for good), or their own slots with an optional recurrence. */
+function isScheduleChange(v: JsonValue | undefined): boolean {
+  const o = objOf(v);
+  if (o.off === true) return o.until === null || typeof o.until === "number";
+  const time = /^([01]\d|2[0-4]):[0-5]\d$/;
+  return Array.isArray(o.slots) && o.slots.length > 0 && o.slots.every((s) => typeof objOf(s).start === "string" && time.test(strOf(objOf(s).start)) && time.test(strOf(objOf(s).end))) && (o.recurrence === undefined || typeof objOf(o.recurrence).every === "string");
+}
+
+/** Whose a chat change is, for the GM's lines: a player's line never tells of one (DESIGN §8, §24.9). */
+function changeLine(ctx: ReadContext, e: PackEvent, viewer: EntityId | undefined, what: string): string {
+  return viewer !== undefined ? "" : `${own(ctx.state.entities, strOf(e.data.entity))?.name ?? strOf(e.data.entity)}: ${what} (${objOf(e.data.source).type === "story" ? "the story" : "GM"})`;
+}
+
 const EVENTS: EventTypeDef<PackEvent>[] = [
   {
     type: "castlife.need",
     validate: (e, ctx) => (own(ctx.state.entities, strOf(e.data.entity)) && own(NEEDS, strOf(e.data.need)) && typeof e.data.delta === "number" ? null : { code: "bad_event", reason: "need needs an entity, a known need and a delta" }),
+    // The need it started from rides with it (`from`), so the fold reads no day plan; an event an
+    // earlier build recorded without it reads the day as that build laid it, so it folds as it did.
     apply: (e, state, ctx) => {
       const who = own(state.entities, strOf(e.data.entity));
       if (!who) return;
       const at = numOf(e.data.at, state.clock);
       const need = strOf(e.data.need);
-      const v = Math.max(0, Math.min(100, needValue(ctx, strOf(e.data.entity), need, at) + numOf(e.data.delta)));
+      const from = typeof e.data.from === "number" ? e.data.from : needValue(ctx, strOf(e.data.entity), need, at, true);
+      const v = Math.max(0, Math.min(100, from + numOf(e.data.delta)));
       who.fields.needs = { ...objOf(who.fields.needs), [need]: { v, t: at } };
     },
     touches: (e) => [{ entity: strOf(e.data.entity), field: "needs" }],
@@ -552,12 +705,105 @@ const EVENTS: EventTypeDef<PackEvent>[] = [
     apply: (e, state) => {
       const s = mutableSlice(state, "castlife");
       const list = Array.isArray(s.invitations) ? s.invitations.slice(-9) : [];
-      list.push({ agent: strOf(e.data.agent), place: e.data.place ?? null, at: numOf(e.data.at), text: strOf(e.data.text), ...(typeof e.data.key === "string" ? { key: e.data.key } : {}) });
+      list.push({ agent: strOf(e.data.agent), place: e.data.place ?? null, at: numOf(e.data.at), text: strOf(e.data.text), ...(typeof e.data.key === "string" ? { key: e.data.key } : {}), ...(typeof e.data.origin === "string" ? { origin: e.data.origin } : {}) });
       s.invitations = list;
     },
     describe: (e, ctx, viewer) => invitationText(ctx, strOf(e.data.agent), typeof e.data.place === "string" ? e.data.place : null, numOf(e.data.at), viewer),
   },
+  {
+    // How someone follows their routine in this chat (`routine_follow`), set whole; null clears it.
+    type: ROUTINE_EVENTS.follow,
+    validate: (e, ctx) => {
+      if (!own(ctx.state.entities, strOf(e.data.entity))) return { code: "missing_entity", reason: "a routine setting names someone in the world" };
+      const f = e.data.follow;
+      if (f === null) return null;
+      const o = objOf(f);
+      const mode = o.mode === null || ROUTINE_MODES.some((m) => m === o.mode);
+      const awareness = o.awareness === null || ROUTINE_AWARENESS.some((a) => a === o.awareness);
+      return mode && awareness && (o.mode !== null || o.awareness !== null) ? null : { code: "bad_event", reason: "a routine setting is a mode, an awareness or both, or null to clear it" };
+    },
+    apply: (e, state) => {
+      const follow = sliceRecord(state, "castlife", "follow");
+      const who = strOf(e.data.entity);
+      const f = objOf(e.data.follow);
+      if (e.data.follow === null) delete follow[who];
+      else follow[who] = { mode: f.mode ?? null, awareness: f.awareness ?? null };
+    },
+    describe: (e, ctx, viewer) => changeLine(ctx, e, viewer, e.data.follow === null ? "routine setting cleared" : `routine: ${[objOf(e.data.follow).mode, objOf(e.data.follow).awareness].filter((x) => typeof x === "string").join(", ").replace(/_/g, " ")}`),
+  },
+  {
+    // One block of someone's routine in this chat (`routine_block`, or the story's): the block whole, or null to drop the chat's change.
+    type: ROUTINE_EVENTS.block,
+    validate: (e, ctx) => {
+      if (!own(ctx.state.entities, strOf(e.data.entity))) return { code: "missing_entity", reason: "a routine change names someone in the world" };
+      if (strOf(e.data.block) === "" || !isChatSource(e.data.source)) return { code: "bad_event", reason: "a routine change names its block and where it came from" };
+      const v = e.data.value;
+      if (v === null) return null;
+      const problems = blockShapeProblems(v, false);
+      return problems.length === 0 && objOf(v).id === e.data.block ? null : { code: "bad_value", reason: problems[0] ?? "the block's id is the one it changes" };
+    },
+    apply: (e, state) => {
+      const routines = sliceRecord(state, "castlife", "routines");
+      const who = strOf(e.data.entity);
+      const mine = { ...objOf(routines[who]) };
+      if (e.data.value === null) delete mine[strOf(e.data.block)];
+      else mine[strOf(e.data.block)] = { value: structuredClone(e.data.value ?? null), source: structuredClone(e.data.source ?? null) };
+      if (Object.keys(mine).length === 0) delete routines[who];
+      else routines[who] = mine;
+    },
+    describe: (e, ctx, viewer) => changeLine(ctx, e, viewer, `routine block ${strOf(e.data.block)} ${e.data.value === null ? "back to the world's" : objOf(e.data.value).off === true ? "off" : "changed"}`),
+  },
+  {
+    // One of someone's schedules in this chat (`schedule_override`, or the story's): off, their own slots, or null to drop the chat's change.
+    type: ROUTINE_EVENTS.schedule,
+    validate: (e, ctx) => {
+      if (!own(ctx.state.entities, strOf(e.data.entity))) return { code: "missing_entity", reason: "a schedule change names someone in the world" };
+      if (!allSchedules(ctx.registry, ctx.world).some((s) => s.id === strOf(e.data.schedule)) || !isChatSource(e.data.source)) return { code: "bad_event", reason: "a schedule change names one of the world's schedules and where it came from" };
+      return e.data.value === null || isScheduleChange(e.data.value) ? null : { code: "bad_value", reason: "a schedule change is off (until a time or for good) or their own slots" };
+    },
+    apply: (e, state) => {
+      const schedules = sliceRecord(state, "castlife", "schedules");
+      const who = strOf(e.data.entity);
+      const mine = { ...objOf(schedules[who]) };
+      if (e.data.value === null) delete mine[strOf(e.data.schedule)];
+      else mine[strOf(e.data.schedule)] = { value: structuredClone(e.data.value ?? null), source: structuredClone(e.data.source ?? null) };
+      if (Object.keys(mine).length === 0) delete schedules[who];
+      else schedules[who] = mine;
+    },
+    describe: (e, ctx, viewer) => changeLine(ctx, e, viewer, `schedule ${strOf(e.data.schedule)} ${e.data.value === null ? "back to the world's" : objOf(e.data.value).off === true ? "off" : "changed"}`),
+  },
 ];
+
+/**
+ * The GM's routine controls as the events of one `fix` entry (DESIGN §8): how someone follows their
+ * routine (each part kept unless given; null returns it to the world's), one block of their routine,
+ * or one of their schedules, in this chat. Each event carries the change whole.
+ */
+function routineEdit(ctx: ReadContext, op: RoutineEditOp): LedgerEvent[] | Rejection {
+  const e = own(ctx.state.entities, op.entity);
+  if (!e) return { code: "missing_entity", reason: `no ${labelOf(ctx, op.entity)}` };
+  if (!kindIs(ctx.registry, ctx.world, e.kind, "person")) return { code: "not_person", reason: `${e.name} has no routine: only people do` };
+  const source = { type: "gm", at: ctx.state.clock };
+  if (op.op === "routine_follow") {
+    const now = followOf(ctx, op.entity).chat;
+    const mode = op.mode === undefined ? (now?.mode ?? null) : op.mode;
+    const awareness = op.awareness === undefined ? (now?.awareness ?? null) : op.awareness;
+    return [{ type: ROUTINE_EVENTS.follow, data: { entity: op.entity, follow: mode === null && awareness === null ? null : { mode, awareness } } }];
+  }
+  if (op.op === "routine_block") {
+    if (op.value === null) return [{ type: ROUTINE_EVENTS.block, data: { entity: op.entity, block: op.block, value: null, source } }];
+    const value = { ...op.value, id: op.block } as unknown as JsonObject;
+    const problems = blockShapeProblems(value, false);
+    if (problems.length > 0) return { code: "bad_value", reason: problems.join("; ") };
+    return [{ type: ROUTINE_EVENTS.block, data: { entity: op.entity, block: op.block, value, source } }];
+  }
+  const schedule = allSchedules(ctx.registry, ctx.world).find((s) => s.id === op.schedule);
+  if (!schedule) return { code: "missing_schedule", reason: `there's no schedule ${op.schedule}` };
+  if (op.value !== null && "off" in op.value && !scheduleOwners(ctx.registry, ctx.world, ctx.state, schedule).includes(op.entity)) return { code: "not_owner", reason: `${e.name} doesn't follow ${op.schedule}` };
+  const value = op.value === null ? null : (structuredClone(op.value) as unknown as JsonObject);
+  if (value !== null && !isScheduleChange(value)) return { code: "bad_value", reason: "a schedule change is off (until a time or for good) or their own slots (HH:MM to HH:MM)" };
+  return [{ type: ROUTINE_EVENTS.schedule, data: { entity: op.entity, schedule: op.schedule, value, source } }];
+}
 
 export interface CastPerson {
   id: EntityId;
@@ -571,7 +817,8 @@ export interface CastPerson {
   /** Their life state as the POV knows it (DESIGN §8), when that isn't alive: its label. */
   life?: string;
   regard?: { axis: string; band: string; value?: number }[];
-  timeline?: { start: string; end: string; label: string; kind: "work" | "sleep" | "free" | "travel" | "other"; reasons: string[] }[];
+  /** Their day as the POV may know it (`playerBlocks`): no place, company or GM change; `source` says why each block is there. */
+  timeline?: { start: string; end: string; label: string; kind: "work" | "sleep" | "free" | "travel" | "other"; reasons: string[]; source: PlayerBlock["source"] }[];
   agenda?: { label: string; stage: string }[];
   next?: { at: string; label: string };
   /**
@@ -608,12 +855,41 @@ export interface CastView {
   mine: CastGroup[];
 }
 
-function kindOfBlock(activity: string): "work" | "sleep" | "free" | "travel" | "other" {
+export function kindOfBlock(activity: string): "work" | "sleep" | "free" | "travel" | "other" {
   if (/work|shift|school/.test(activity)) return "work";
   if (activity === "sleep") return "sleep";
   if (activity === "trip" || activity === "travel") return "travel";
   if (/leisure|socialize|idle|breakfast|lunch|dinner/.test(activity)) return "free";
   return "other";
+}
+
+/**
+ * A day's blocks as the player may know them (DESIGN §7, §8), for Cast and the player's routine view:
+ * each with its times, label, kind and reasons, and why it's there: their routine, a lore entry the
+ * POV may read (by its title), the story, their own plan, a commitment, or free time. A block of an
+ * agenda that isn't public, or a private routine block, reads "Busy" for their own business; a lore
+ * entry the POV may not read, and any change the GM made, read as their routine.
+ */
+export function playerBlocks(ctx: ReadContext, who: EntityId, plan: DayPlan): (PlayerBlock & { start: number })[] {
+  const cal = calendarOf(ctx.world);
+  const applied = new Map(activeBlocks(ctx, who).map((a) => [a.block.id, a]));
+  const open = loreGateReader(ctx.registry, ctx.world, ctx.state);
+  return plan.blocks.map((b) => {
+    const from = formatHHMM(dateAt(cal, b.start).minuteOfDay);
+    const to = formatHHMM(dateAt(cal, b.end).minuteOfDay);
+    const routineId = b.option.startsWith(ROUTINE_OPTION) ? b.option.slice(ROUTINE_OPTION.length).replace(/:carried$/, "") : null;
+    const a = routineId !== null ? applied.get(routineId) : undefined;
+    if ((b.option.startsWith(AGENDA_OPTION) && !publicTrack(ctx.world, b.option.slice(AGENDA_OPTION.length))) || a?.block.private === true) return { start: b.start, from, to, label: "Busy", kind: "other", reasons: ["their own business"], source: { type: "routine" } };
+    let source: PlayerBlock["source"];
+    if (a) {
+      const entry = a.from.source.type === "lore" ? own(ctx.world.lore, a.from.source.entry) : undefined;
+      source = entry && loreReadable(ctx.registry, ctx.world, ctx.state, entry, "brief", false, open) ? { type: "lore", entry: entry.id, title: entry.title } : a.from.source.type === "story" ? { type: "story" } : { type: "routine" };
+    } else if (b.option.startsWith("plan:")) source = { type: "plan" };
+    else if (b.fixed && !b.option.startsWith(INVITED_OPTION)) source = { type: "commitment" };
+    else if (b.option === "idle" || b.option.startsWith("retrieve:")) source = { type: "free" };
+    else source = { type: "routine" };
+    return { start: b.start, from, to, label: b.label, kind: kindOfBlock(b.activity), reasons: b.reasons, source };
+  });
 }
 
 /**
@@ -680,8 +956,8 @@ export function buildCastView(ctx: ReadContext): CastView {
     const regard = view ? view(ctx, id, pov) : [];
     if (regard.length > 0) p.regard = regard;
     const plan = present && e.agent && !still ? dayPlan(ctx, id) : null;
-    const blocks = plan?.blocks.map((b) => (b.option.startsWith(AGENDA_OPTION) && !publicTrack(ctx.world, b.option.slice(AGENDA_OPTION.length)) ? { ...b, label: "Busy", reasons: ["their own business"] } : b));
-    if (blocks && level >= 3) p.timeline = blocks.map((b) => ({ start: formatHHMM(dateAt(cal, b.start).minuteOfDay), end: formatHHMM(dateAt(cal, b.end).minuteOfDay), label: b.label, kind: kindOfBlock(b.activity), reasons: b.reasons }));
+    const blocks = plan ? playerBlocks(ctx, id, plan) : null;
+    if (blocks && level >= 3) p.timeline = blocks.map((b) => ({ start: b.from, end: b.to, label: b.label, kind: b.kind, reasons: b.reasons, source: b.source }));
     const agenda = agendaFor(ctx.world, ctx.state, id).filter((a) => publicTrack(ctx.world, a.track));
     if (agenda.length > 0) p.agenda = agenda.map((a) => ({ label: a.label, stage: a.stageLabel }));
     const next = blocks?.find((b) => b.start > ctx.state.clock);
@@ -729,18 +1005,18 @@ function listed(label: string, clauses: readonly string[]): string {
 
 /**
  * The block of today's plan that `who`'s own recorded choice settled (`npc.choose`, or an author's
- * `castlife.decide`), the one under way or the next, named as Cast names the day: a block of an
- * agenda that isn't public is "Busy". Null when no such block is left today.
+ * `castlife.decide`), the one under way or the next, named as Cast names the day (`playerBlocks`): a
+ * block of an agenda that isn't public, or a private routine block, is "Busy". Null when no such
+ * block is left today.
  */
 function decidedBlock(ctx: ReadContext, who: EntityId): string | null {
   const cal = calendarOf(ctx.world);
   const plan = dayPlan(ctx, who);
   const dayStart = clockAt(cal, plan.day, 0);
   const chosen = new Set(plan.ties.filter((t) => t.via === "recorded").map((t) => t.key));
-  const block = plan.blocks.find((b) => b.end > ctx.state.clock && chosen.has(tieKey(who, dayStart, b.start)));
+  const block = playerBlocks(ctx, who, plan).find((b, i) => (plan.blocks[i]?.end ?? 0) > ctx.state.clock && chosen.has(tieKey(who, dayStart, b.start)));
   if (!block) return null;
-  const label = block.option.startsWith(AGENDA_OPTION) && !publicTrack(ctx.world, block.option.slice(AGENDA_OPTION.length)) ? "Busy" : block.label;
-  return block.start <= ctx.state.clock ? label : `${label} at ${formatHHMM(dateAt(cal, block.start).minuteOfDay)}`;
+  return block.start <= ctx.state.clock ? block.label : `${block.label} at ${block.from}`;
 }
 
 /**
@@ -819,6 +1095,10 @@ export function stanceCues(ctx: ReadContext): string[] {
 }
 
 declare module "../../../engine/registry" {
+  interface ServiceMap {
+    /** The GM's routine controls (DESIGN §8): a character's follow setting, one block of their routine and one of their schedules in this chat, as events. */
+    "castlife.edit": (ctx: ReadContext, op: RoutineEditOp) => LedgerEvent[] | Rejection;
+  }
   interface QueryMap {
     /** Ties the planner left to the seed and invitations not yet decided: inputs for `npc.choose`. */
     "castlife.tie_zones": (ctx: ReadContext) => { key: string; agent: EntityId; options: string[] }[];
@@ -828,6 +1108,12 @@ declare module "../../../engine/registry" {
     "castlife.commitments": (ctx: ReadContext, who: EntityId, start: number, end: number) => CommitmentBlock[];
     /** Invitations to the POV still open (`invited`), each with its host and as `viewer` reads it ("Danny invites you to Bluebird Coffee at 19:00."). */
     "castlife.invitations": (ctx: ReadContext, viewer: EntityId) => { host: EntityId; text: string }[];
+    /** Whether a schedule's edge must leave someone's place or activity as the story has it (`routineYields`; `release` where a balanced routine takes the day back). */
+    "castlife.yields": (ctx: ReadContext, who: EntityId, field: "place" | "activity", expected: JsonValue | null, release: boolean) => boolean;
+    /** Whether the chat took someone off a schedule at `at` (`schedule_override`). */
+    "castlife.schedule_off": (ctx: ReadContext, who: EntityId, schedule: string, at: number) => boolean;
+    /** The chat's own versions of schedules, each owned by the one person it's for. */
+    "castlife.chat_schedules": (ctx: ReadContext) => ScheduleDef[];
   }
 }
 
@@ -839,6 +1125,10 @@ export const castlifePack: PackDef = {
   requires: ["space", "gear", "relationships"],
   register(r) {
     for (const def of EVENTS) r.event(def);
+    r.service("castlife.edit", routineEdit);
+    r.query("castlife.yields", (ctx, who, field, expected, release) => routineYields(ctx, who, field, expected, { edge: true, release }));
+    r.query("castlife.schedule_off", (ctx, who, schedule, at) => scheduleOff(ctx.state, who, schedule, at));
+    r.query("castlife.chat_schedules", chatScheduleDefs);
     r.process({ id: "castlife.agents", domain: "castlife", minLevel: 3, scope: "agent", step: (slot, ctx, rng, agent) => (agent ? stepAgent(slot, ctx, rng, agent) : []), instants: planMoments, atInstant: atPlanMoment });
     r.process({ id: "castlife.trips", domain: "castlife", minLevel: 1, step: (slot, ctx) => stepTrips(slot, ctx) });
     // Whatever the level: a plan nothing lives is still settled.
@@ -872,7 +1162,8 @@ export const castlifePack: PackDef = {
       return commitments(ctx, id, ctx.state.clock, ctx.state.clock + 1).length > 0;
     });
 
-    r.effect({ type: "castlife.satisfy", args: ["need", "entity?"], resolve: (a, ctx) => { const who = strOf(a.entity) || ctx.world.pov; const need = strOf(a.need); const v = needValue(ctx, who, need); return own(NEEDS, need) && v > 0 ? [{ type: "castlife.need", data: { entity: who, need, delta: -v, at: ctx.state.clock } }] : []; } });
+    // The need it starts from rides with the event, so a fold reads no day plan (DESIGN §8).
+    r.effect({ type: "castlife.satisfy", args: ["need", "entity?"], resolve: (a, ctx) => { const who = strOf(a.entity) || ctx.world.pov; const need = strOf(a.need); const v = needValue(ctx, who, need); return own(NEEDS, need) && v > 0 ? [{ type: "castlife.need", data: { entity: who, need, delta: -v, at: ctx.state.clock, from: v } }] : []; } });
     r.effect({ type: "castlife.decide", args: ["key", "choice"], resolve: (a) => [{ type: "castlife.decision", data: { key: strOf(a.key), choice: strOf(a.choice) } }] });
     r.effect({
       type: "castlife.override",
@@ -966,6 +1257,16 @@ export const castlifePack: PackDef = {
           }
         }
         return issues;
+      },
+    });
+
+    // Routines and the schedule checks they lean on (DESIGN §8, §13): owners as a chat starts.
+    r.lint({
+      code: "castlife.routines",
+      check(world, registry) {
+        if (!registry) return [];
+        const state = initialState(world, "", registry);
+        return [...routinesLint(world, registry, state), ...schedulesLint(world, registry, state)];
       },
     });
   },

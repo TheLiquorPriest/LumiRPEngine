@@ -23,6 +23,7 @@ import type { RevisionNote, RulesetDef, WorldDoc, WorldIndex } from "../shared/w
 import { DEFAULT_SPAWN_CAP, EXPORT_FORMAT, WORLD_FORMAT } from "../shared/world";
 import { WORLD_MINDS_KEYS, type WorldMindsConfig } from "../shared/minds";
 import { lorePinsOf } from "../shared/lore";
+import { DEFAULT_ROUTINE_SETTINGS, routineSettingsOf, routineSettingsProblems, routineShapeProblems } from "../shared/routines";
 import { currencyOf, isWorldDoc, lintWorld, macrosIn, migrateWorld, newBlankWorld, shapeIssues, stamped } from "../engine/authoring";
 import { compileMaps, mapSettingsOf } from "../shared/maps";
 import type { Registry } from "../engine/registry-impl";
@@ -81,7 +82,7 @@ export const NOTE_CAP = 200;
 const PATCH_PROTECTED = ["id", "format", "engineVersion", "pins", "suppressed"] as const;
 
 /** Every part `set` writes: any other name is refused, so a set never reaches the rest of the document. */
-const WORLD_PARTS: Record<WorldPart, true> = { calendar: true, realism: true, time: true, meta: true, tiers: true, ruleset: true, loreIndex: true, minds: true, lorePins: true };
+const WORLD_PARTS: Record<WorldPart, true> = { calendar: true, realism: true, time: true, meta: true, tiers: true, ruleset: true, loreIndex: true, minds: true, lorePins: true, routineSettings: true };
 
 export class WorldError extends Error {
   constructor(
@@ -125,6 +126,7 @@ export const WORLD_COLLECTIONS: Record<WorldCollection, true> = {
   packs: true,
   lore: true,
   classifications: true,
+  routines: true,
 };
 
 /** Loaded revisions kept across chats; an open chat pins the ones its ledger references, so eviction never breaks a fold. */
@@ -414,6 +416,10 @@ export class WorldStore {
         if (owner !== null) throw new WorldError("bad_request", `${request.collection} ${request.id} is drawn by the map ${owner}; edit it there`);
         if (request.op === "put" && request.collection !== "maps" && isRecord(request.value) && request.value.map !== undefined) throw new WorldError("bad_request", "only a map marks what it draws (map)");
         if (request.op === "put" && typeof measure(request.value, { size: Number.MAX_SAFE_INTEGER, depth: DOC_DEPTH_CAP - 2 }) === "string") throw new WorldError("bad_request", `${request.collection} ${request.id} nests deeper than ${DOC_DEPTH_CAP - 2} levels`);
+        if (request.op === "put" && request.collection === "routines") {
+          const problem = routineProblem(request.id, request.value);
+          if (problem !== null) throw new WorldError("bad_request", problem);
+        }
         what = `${request.collection} ${request.id}`;
         const tables = request.collection === "tables" ? { ...doc.tables } : null;
         if (request.op === "put") collection[request.id] = request.value;
@@ -509,11 +515,19 @@ export class WorldStore {
         if (jsonEqual(from, to)) continue;
         if (isRecord(from) && typeof from.map === "string") throw refusal([name, id], `${name} ${id} is drawn by the map ${from.map}; edit it there`);
         if (name !== "maps" && isRecord(to) && to.map !== undefined) throw refusal([name, id], "only a map marks what it draws (map)");
+        if (name === "routines" && to !== undefined) {
+          const problem = routineProblem(id, to);
+          if (problem !== null) throw refusal([name, id], problem);
+        }
         // Build's editors and the engine's lookups take only these ids, so an item under any other couldn't be edited or found.
         const length = id.length;
         if (to !== undefined && !safeKey(id)) throw refusal([name, id], `${name} ids are 1 to 200 characters long; this one is ${length}`);
         items.push(`${name} ${id}`);
       }
+    }
+    if (!jsonEqual(was.routineSettings, after.routineSettings) && after.routineSettings !== undefined) {
+      const problem = settingsProblem(after.routineSettings);
+      if (problem !== null) throw refusal(["routineSettings"], problem);
     }
     const shape = shapeIssues(after);
     if (shape.length > 0 || !isWorldDoc(after)) throw new WorldError("validation", "the patch leaves the world malformed", shape);
@@ -605,8 +619,27 @@ function unreadable(what: string, error: unknown): WorldError {
   return new WorldError("validation", `${what}: the engine can't read it (${error instanceof Error ? error.message : String(error)}); check it against the lre-world-v1 schema`);
 }
 
+/**
+ * A routine as a write sends it (DESIGN §8), refused before anything is written when its shape is
+ * wrong: the planner skips a routine it can't read, so the save would quietly plan nothing. Build's
+ * put and the outside tools' patch get the same refusal, naming each field at fault. What it names
+ * that the world lacks (a place, an owner) is the lint's, after the write.
+ */
+function routineProblem(id: string, value: unknown): string | null {
+  const problems = routineShapeProblems(value);
+  return problems.length === 0 ? null : `routine ${id}: ${problems.join("; ")}`;
+}
+
+/** The routine settings as a write sends them, refused when one is no setting or no value of it: a stored bad value would quietly read as the default. */
+function settingsProblem(value: unknown): string | null {
+  const problems = routineSettingsProblems(value);
+  return problems.length === 0 ? null : `routine settings: ${problems.join("; ")}`;
+}
+
 /** A collection of the document as a mutable JSON record (the editors write raw JSON values). */
 function collectionOf(doc: WorldDoc, name: WorldCollection): Record<string, JsonValue> {
+  // Routines are optional (absent: none), so the first one written makes the collection.
+  if (name === "routines" && doc.routines === undefined) doc.routines = {};
   const value: unknown = doc[name];
   if (!isRecord(value)) throw new WorldError("bad_request", `collection ${name} is not an object`);
   return value as Record<string, JsonValue>;
@@ -726,6 +759,16 @@ function setPart(doc: WorldDoc, part: WorldPart, value: JsonValue): void {
     const pins = lorePinsOf({ lorePins: value });
     if (Object.keys(pins.characters).length === 0 && Object.keys(pins.places).length === 0) delete doc.lorePins;
     else doc.lorePins = structuredClone(pins);
+    return;
+  }
+  // `world.routineSettings` as the engine reads it (DESIGN §8), each part a value it takes (else the
+  // write is refused); the defaults are no settings, so a world saved untouched stays as it was.
+  if (part === "routineSettings") {
+    const problem = settingsProblem(value);
+    if (problem !== null) throw new WorldError("bad_request", problem);
+    const settings = routineSettingsOf({ routineSettings: value });
+    if (JSON.stringify(settings) === JSON.stringify(DEFAULT_ROUTINE_SETTINGS)) delete doc.routineSettings;
+    else doc.routineSettings = settings;
     return;
   }
   // `calendar`, `realism` and `time` are whole singletons, written as the editors send them.

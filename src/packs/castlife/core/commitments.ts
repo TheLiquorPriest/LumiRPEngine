@@ -11,8 +11,10 @@ import { calendarOf, clockAt, dateAt, MINUTES_PER_DAY } from "../../../engine/ca
 import type { FixedBlock } from "../../../engine/plan-day";
 import { numOf, objOf, optionalQuery, own, strOf } from "../../../engine/pack-kit";
 import type { ReadContext } from "../../../engine/registry";
-import { activeSlot, allSchedules, ownerRank, scheduleInstants, scheduleOwners } from "../../../engine/schedules";
+import { activeSlot, chatSchedulesIn, ownerRank, scheduleInstants, scheduleOwners } from "../../../engine/schedules";
+import { routineSettingsOf } from "../../../shared/routines";
 import { homeOf, workPlace } from "./places";
+import { followOf, scheduleOff } from "./routines";
 
 /** What a block of someone's commitments is: routine work or school, an appointment, a trip, one of their own plans, or other routine. */
 export type CommitmentKind = "work" | "school" | "appointment" | "trip" | "plan" | "other";
@@ -82,11 +84,11 @@ export function cutAround(blocks: Commitment[], cutters: readonly Commitment[]):
   );
 }
 
-/** Where a person's place schedules have them at `at`: the most specific schedule with a slot running wins (DESIGN §8 precedence). */
+/** Where a person's place schedules have them at `at`: the most specific schedule with a slot running wins (DESIGN §8 precedence), the chat's own included and any it took them off left out. */
 function personPlaceFor(ctx: ReadContext, who: EntityId, at: number): PlaceId | null {
   let best: { rank: number; place: PlaceId } | null = null;
-  for (const s of allSchedules(ctx.registry, ctx.world)) {
-    if (s.target !== "place" || !scheduleOwners(ctx.registry, ctx.world, ctx.state, s).includes(who)) continue;
+  for (const s of chatSchedulesIn(ctx)) {
+    if (s.target !== "place" || !scheduleOwners(ctx.registry, ctx.world, ctx.state, s).includes(who) || scheduleOff(ctx.state, who, s.id, at)) continue;
     const rank = ownerRank(ctx.registry, ctx.world, ctx.state, s) ?? Number.MAX_SAFE_INTEGER;
     const a = activeSlot(ctx.world, s, at);
     if (a && typeof a.slot.value === "string" && (!best || rank < best.rank)) best = { rank, place: a.slot.value };
@@ -103,23 +105,24 @@ interface Authored {
 
 /**
  * A person's authored commitments overlapping [start, end): activity schedules (a more specific one,
- * their own over a group's over their kind's, cutting the less specific ones it overlaps),
- * appointments and trips, each as authored.
+ * their own over a group's over their kind's, cutting the less specific ones it overlaps; the chat's
+ * own versions of them as their own, and none the chat took them off), appointments and trips, each
+ * as authored.
  */
 function authored(ctx: ReadContext, who: EntityId, start: number, end: number): Authored {
   const ranked: { block: Commitment; rank: number }[] = [];
-  for (const s of allSchedules(ctx.registry, ctx.world)) {
+  for (const s of chatSchedulesIn(ctx)) {
     if (s.target !== "activity" || !scheduleOwners(ctx.registry, ctx.world, ctx.state, s).includes(who)) continue;
     const rank = ownerRank(ctx.registry, ctx.world, ctx.state, s) ?? Number.MAX_SAFE_INTEGER;
     const edges = scheduleInstants(ctx.world, [s], start - MINUTES_PER_DAY, end + MINUTES_PER_DAY);
     for (const e of edges) {
-      if (e.edge !== "start") continue;
+      if (e.edge !== "start" || scheduleOff(ctx.state, who, s.id, e.at)) continue;
       const close = edges.find((x) => x.edge === "end" && x.occurrence === e.occurrence);
       const value = s.slots[e.slot]?.value;
       if (!close || typeof value !== "string" || close.at <= start || e.at >= end) continue;
       const kind = /school|class/.test(value) ? "school" : /work|shift/.test(value) ? "work" : "other";
       const place = personPlaceFor(ctx, who, e.at) ?? (kind === "work" ? workPlace(ctx, who) : null) ?? homeOf(ctx, who);
-      ranked.push({ block: { start: e.at, end: close.at, label: value.replace(/_/g, " "), activity: value, place, reason: kind === "other" ? "commitment" : kind, kind }, rank });
+      ranked.push({ block: { start: e.at, end: close.at, label: value.replace(/_/g, " "), activity: value, place, reason: kind === "other" ? "commitment" : kind, kind, option: `schedule:${s.id}` }, rank });
     }
   }
   const routine = ranked.flatMap(({ block, rank }) => cutAround([block], ranked.filter((r) => r.rank < rank).map((r) => r.block)));
@@ -175,7 +178,8 @@ interface Layable {
  * plans the planner doesn't live.
  */
 function layable(ctx: ReadContext, who: EntityId, tier: Fidelity): Layable[] {
-  if (tier === "background" || !livesPlans(ctx, who)) return [];
+  // A Background character follows routine only, unless the story comes first for them (DESIGN §8).
+  if ((tier === "background" && followOf(ctx, who).awareness !== "story_first") || !livesPlans(ctx, who)) return [];
   return (optionalQuery(ctx, "minds.plans")?.(ctx, who) ?? []).flatMap((p) => {
     const played = PLAYED[p.kind];
     const from = Math.max(p.when.from, p.made + 1);
@@ -200,12 +204,22 @@ function searchEnd(l: Layable): number {
 }
 
 /**
- * Whether a plan takes its time from routine (work, school): a strong one for anyone who follows
- * plans; for a Live or Near character also an ordinary one at a set time. A Far character's
- * routine bends only for strong plans.
+ * Whether a plan takes its time from routine (work, school), as the world's plan bend says (DESIGN
+ * §8): by default a strong one for anyone who follows plans, and for a Live or Near character also an
+ * ordinary one at a set time, so a Far character's routine bends only for strong plans; `must` only a
+ * plan that must happen; `strong` strong plans only; `ordinary` an ordinary one at a set time for anyone.
  */
-function cutsRoutine(l: Layable, tier: Fidelity): boolean {
-  return l.p.priority >= 4 || (tier !== "far" && l.p.priority >= 3 && tight(l));
+function cutsRoutine(ctx: ReadContext, l: Layable, tier: Fidelity): boolean {
+  switch (routineSettingsOf(ctx.world).planBend) {
+    case "must":
+      return l.p.priority >= 5;
+    case "strong":
+      return l.p.priority >= 4;
+    case "standard":
+      return l.p.priority >= 4 || (tier !== "far" && l.p.priority >= 3 && tight(l));
+    case "ordinary":
+      return l.p.priority >= 4 || (l.p.priority >= 3 && tight(l));
+  }
 }
 
 /** Higher priority first, then the older plan, then by id. */
@@ -230,7 +244,7 @@ function placed(ctx: ReadContext, who: EntityId, l: Layable, tier: Fidelity, a: 
   const cal = calendarOf(ctx.world);
   const { minutes, hours } = l.played;
   const to = searchEnd(l);
-  const blockers = [...a.trips, ...(l.p.priority >= 5 ? [] : a.appointments), ...(cutsRoutine(l, tier) ? [] : a.routine), ...stronger];
+  const blockers = [...a.trips, ...(l.p.priority >= 5 ? [] : a.appointments), ...(cutsRoutine(ctx, l, tier) ? [] : a.routine), ...stronger];
   const candidates = new Set<number>([l.from]);
   for (const b of blockers) if (b.end > l.from && b.end < to) candidates.add(b.end);
   for (let day = dateAt(cal, l.from).dayIndex; clockAt(cal, day, 0) < to; day++) candidates.add(clockAt(cal, day, hours[0] * 60));
@@ -295,12 +309,12 @@ export function commitments(ctx: ReadContext, who: EntityId, start: number, end:
   }
   const pieces: Commitment[] = [];
   laid.forEach(({ l, block }, i) => {
-    const cutters = [...blocks.slice(0, i), ...(l.p.priority >= 5 ? [] : a.appointments), ...(cutsRoutine(l, tier) ? [] : a.routine)];
+    const cutters = [...blocks.slice(0, i), ...(l.p.priority >= 5 ? [] : a.appointments), ...(cutsRoutine(ctx, l, tier) ? [] : a.routine)];
     pieces.push(...cutAround([block], cutters));
   });
   const routine = cutAround(
     a.routine,
-    laid.filter((x) => cutsRoutine(x.l, tier)).map((x) => x.block),
+    laid.filter((x) => cutsRoutine(ctx, x.l, tier)).map((x) => x.block),
   );
   const appointments = cutAround(
     a.appointments,

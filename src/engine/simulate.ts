@@ -28,7 +28,7 @@ import type { AgentInstant, ProcessDef, ReadContext, SlotInfo } from "./registry
 import { rulesetFloor, type Registry } from "./registry-impl";
 import { createRng, type Rng } from "./rng";
 import { runRulesOnEvents, runRulesOnTick, type RuleFiring } from "./rules";
-import { allSchedules, instantEvents, scheduleInstants, type ScheduleInstant } from "./schedules";
+import { chatSchedulesIn, instantEvents, scheduleInstants, type ScheduleInstant } from "./schedules";
 import { acts } from "./life";
 import { isGone } from "./scope";
 import { lostObservations, unobserved } from "./seen";
@@ -86,6 +86,12 @@ export interface AdvanceOptions {
   cause?: ClockEvent["cause"];
   /** Timelapse: step the POV's own agent processes like an LOD1 agent (default true). */
   includePov?: boolean;
+  /**
+   * Timelapse: whether the POV's own routine (its place and activity schedules, its day plan) moves it
+   * (default true). False for a span the player spends doing something, or a skip the narration told:
+   * the POV stays where the story has it until the span is over (DESIGN §8, §9.2).
+   */
+  povRoutine?: boolean;
   /** Per-run interrupt overrides on top of `state.time.interrupts`. */
   interrupts?: Partial<Record<InterruptClass, InterruptPolicy>>;
   /** Timelapse unit cap per segment; default `state.time.unitCap`. */
@@ -155,13 +161,13 @@ function rngFactory(runSeed: string, process: string, slot: number): (entity: En
   return (entity) => createRng(processSeed(runSeed, process, entity, slot));
 }
 
-/** Steps one agent through one slot: its agent processes at its effective level. */
-function stepAgent(reg: Registry, w: Working, agent: EntityId, slot: Slot, runSeed: string): LedgerEvent[] {
+/** Steps one agent through one slot: its agent processes at its effective level; `povRoutine` false keeps the POV's routine from moving it. */
+function stepAgent(reg: Registry, w: Working, agent: EntityId, slot: Slot, runSeed: string, povRoutine = true): LedgerEvent[] {
   const applied: LedgerEvent[] = [];
   for (const def of reg.processes) {
     if (def.scope !== "agent") continue;
     if (w.ctx.levelOf(agent, def.domain) < def.minLevel) continue;
-    applied.push(...w.applyAll(def.step({ start: slot.start, end: slot.end, index: slot.index }, w.ctx, rngFactory(runSeed, def.id, slot.index), agent)));
+    applied.push(...w.applyAll(def.step({ start: slot.start, end: slot.end, index: slot.index, ...(povRoutine ? {} : { povRoutine: false }) }, w.ctx, rngFactory(runSeed, def.id, slot.index), agent)));
   }
   return applied;
 }
@@ -207,7 +213,8 @@ export function advance(reg: Registry, w: Working, to: number, opts: AdvanceOpti
   // Up to how far the world has run (after the clock was set back), everything already happened:
   // the run moves the clock across it and steps only what lies past it (L48).
   const since = ranTo(w.state);
-  const schedules = allSchedules(reg, w.world);
+  // The chat's own versions of schedules step with the world's (DESIGN §8, `schedule_override`).
+  const schedules = chatSchedulesIn(w.ctx);
   const instants = scheduleInstants(w.world, schedules, since, to);
   const slots = slotsEnding(cal, since, to);
   const e = emitter(reg, w, opts.runSeed, result.rules);
@@ -266,7 +273,7 @@ export function advance(reg: Registry, w: Working, to: number, opts: AdvanceOpti
       if (edge && edgeAt <= (moment?.at ?? Infinity)) {
         next++;
         clockTo(w, edgeAt, cause, e);
-        e.emit(instantEvents(reg, w.ctx, edge, opts.runSeed, { povRoutine: timelapse }));
+        e.emit(instantEvents(reg, w.ctx, edge, opts.runSeed, { povRoutine: timelapse && opts.povRoutine !== false }));
       } else if (moment) {
         t++;
         clockTo(w, moment.at, cause, e);
@@ -322,7 +329,7 @@ export function advance(reg: Registry, w: Working, to: number, opts: AdvanceOpti
       // Someone a death earlier in the slot stopped, or who dies on the way, steps no further.
       while (k < slot.index && stillActs(w, agent)) {
         k++;
-        const applied = stepAgent(reg, w, agent, k === slot.index ? slot : slotOf(cal, k), opts.runSeed);
+        const applied = stepAgent(reg, w, agent, k === slot.index ? slot : slotOf(cal, k), opts.runSeed, opts.povRoutine !== false);
         if (applied.length > 0) result.rules.push(...runRulesOnEvents(reg, w, applied, { seed: hashParts(opts.runSeed, "agent", agent, k) }));
       }
       cursors.set(agent, k);
