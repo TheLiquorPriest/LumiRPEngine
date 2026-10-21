@@ -1,7 +1,7 @@
-// Record size (DESIGN §4.3, §18.5): a dense timelapse segment — Riverton plus 17 more LOD1 agents,
-// each living a full world routine on top of the basic needs, every interrupt at `note`, running to
-// the 600 agent-day unit cap — records at most 32 KB after coarsening, folds to exactly the raw
-// fold's state, and its Montage matches the record.
+// Record size (DESIGN §4.3, §9.6, §18.5): a dense timelapse segment — Riverton plus 17 more LOD1
+// agents, everyone (the POV too) living a full world routine on top of the basic needs, every
+// interrupt at `note`, running to the unit cap — records at most 32 KB after coarsening, folds to
+// exactly the raw fold's state, and its Montage matches the record.
 import { describe, expect, test } from "bun:test";
 import type { LedgerEvent } from "../../src/shared/ledger";
 import type { WorldDoc } from "../../src/shared/world";
@@ -25,9 +25,10 @@ function denseWorld(preset: "simulation" | "level4"): WorldDoc {
   const maya = world.entities.maya;
   if (!maya) throw new Error("no Maya in Riverton");
   for (let i = 0; i < 17; i++) world.entities[`agent_${i}`] = { ...structuredClone(maya), id: `agent_${i}`, name: `Agent ${i}` };
-  // A dense day for everyone (DESIGN §8): coffee out, a walk, errands three days a week, drinks most
-  // evenings. In a Timelapse an off-screen Background agent lives it at slot steps, as net state, so
-  // the segment still reaches the agent-day cap before the event cap.
+  // A dense day for everyone, the POV included (DESIGN §8): coffee out, a walk, errands three days a
+  // week, drinks most evenings. Everyone meets the POV at the café, the park and the office, so those
+  // blocks are lived at their minute (observable fidelity) and the unit cap's events end the segment
+  // before its agent-days do (§9.6).
   world.routines = {
     daily: {
       id: "daily",
@@ -39,9 +40,6 @@ function denseWorld(preset: "simulation" | "level4"): WorldDoc {
         { id: "drinks", label: "Drinks", activity: "socialize", kind: "optional", window: { from: "18:00", to: "21:00" }, minutes: 90, chance: 0.6, place: { place: "cafe" } },
       ],
     },
-    // The POV keeps its own day: the segment measures the town's density, not everyone sharing the
-    // POV's every place (where all of it is observable and lived at its minute).
-    pov_day: { id: "pov_day", owner: world.pov, blocks: ["coffee", "walk", "errands", "drinks"].map((id) => ({ id, off: true as const })) },
   };
   return world;
 }
@@ -64,14 +62,15 @@ function moneyOf(events: readonly LedgerEvent[], accounts: ReadonlySet<string>):
   return out;
 }
 
-describe("a 600 agent-day timelapse segment records ≤ 32 KB, exactly", () => {
+describe("a dense timelapse segment run to the unit cap records ≤ 32 KB, exactly", () => {
   for (const preset of ["simulation", "level4"] as const) {
     test(`${preset}: the coarsened record is small, folds exactly, and the Montage matches it`, () => {
       const world = denseWorld(preset);
       const s0 = startState(world);
       const plan = planTurn({ registry: reg, world, state: s0, runSeed: "bench", seed: "s1", kind: "normal", userTexts: [""], intent: timelapseIntent({ type: "duration", minutes: 30 * 1440 }, ALL_NOTE_OVERRIDES(world)) });
-      // The unit cap ends the segment near 28 days for 20 agents plus the POV.
-      expect(plan.elapsedMinutes).toBeGreaterThanOrEqual(27 * 1440);
+      // The unit cap's 5,000 events end the segment after 23 days for 20 agents plus the POV (33,390
+      // minutes when measured), before its 600 agent-days: a denser world stops sooner (§9.6).
+      expect(plan.elapsedMinutes).toBeGreaterThanOrEqual(23 * 1440);
       expect(JSON.stringify(plan.events).length).toBeLessThanOrEqual(RECORD_CAP);
 
       // Exactness: the same segment uncoarsened folds to the state the record folds to.
