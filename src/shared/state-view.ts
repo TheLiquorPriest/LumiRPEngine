@@ -143,6 +143,8 @@ export type ChipKind =
   | "claim"
   /** A thing the player said they had, made real for their action ("Added: a coffee"), with Undo (DESIGN §9.4 player claims). */
   | "claimed"
+  /** A typed attempt the chat reads as a check only suggests it ("Roll Persuasion?"): the turn waits, nothing generated, on Roll or No roll; either resumes it (DESIGN §11 inferred checks). */
+  | "check"
   /** A ✎ fix or GM edit on the head ("Corrected …"), with Undo (DESIGN §12). */
   | "fix"
   /** A write held during a reply that no longer applied when the reply finished (P2), with Dismiss. */

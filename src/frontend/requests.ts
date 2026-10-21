@@ -56,7 +56,7 @@ export function upgradeRequest(chatId: ChatId, preview: UpgradePreview, choices:
 export function chipIntent(chip: Chip, choice: string, chatId: ChatId, payload?: JsonObject): ChipIntent {
   if (choice === "regenerate") return { request: null, regenerate: true };
   const request: Req<"lre.chip"> = payload ? { type: "lre.chip", chatId, chip: chip.id, choice, payload } : { type: "lre.chip", chatId, chip: chip.id, choice };
-  return { request, regenerate: (chip.kind === "swipe_option" && (choice === "renarrate" || choice === "rerun")) || (chip.kind === "contradiction" && choice === "renarrate") || (chip.kind === "read_failed" && choice === "rerun") || (chip.kind === "claim" && (choice === "add" || choice === "drop")) };
+  return { request, regenerate: (chip.kind === "swipe_option" && (choice === "renarrate" || choice === "rerun")) || (chip.kind === "contradiction" && choice === "renarrate") || (chip.kind === "read_failed" && choice === "rerun") || (chip.kind === "claim" && (choice === "add" || choice === "drop")) || (chip.kind === "check" && (choice === "roll" || choice === "drop")) };
 }
 
 /** Convert one Keep-report entry; markers have no event ref and cannot be converted. */

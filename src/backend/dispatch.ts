@@ -935,12 +935,15 @@ export class Dispatcher {
         const result = await this.write(chatId, userId, { kind: "undo", id: this.nextId(), messageId: m.id, swipeId: m.swipeId, refs });
         return { applied: result.applied, pending: result.pending };
       }
-      case "claim": {
-        // The answer to a claim's question (DESIGN §9.4): kept with the read; the frontend's Regenerate then resumes the turn.
-        if (choice !== "add" && choice !== "drop") throw new RequestError("bad_request", `unknown choice ${choice}`);
+      case "claim":
+      case "check": {
+        // The answer to a claim's question (DESIGN §9.4) or a suggested check (§11): kept with the
+        // read; the frontend's Regenerate then resumes the turn, with that action or without it.
+        const keep = chip.kind === "claim" ? "add" : "roll";
+        if (choice !== keep && choice !== "drop") throw new RequestError("bad_request", `unknown choice ${choice}`);
         const text = typeof chip.payload.text === "string" ? chip.payload.text : "";
         const index = typeof chip.payload.index === "number" ? chip.payload.index : -1;
-        return { applied: this.rt.answerClaim(chatId, text, index, choice === "add"), pending: false };
+        return { applied: this.rt.answerAsk(chatId, text, index, choice === keep), pending: false };
       }
       case "claimed": {
         // Undo of a thing the player said they had: it goes, with what its action did (DESIGN §9.4).

@@ -23,6 +23,7 @@ import { ENGINE_EVENTS, signalOf } from "./engine-pack";
 import { materializeAll } from "./materialize";
 import type { Registry } from "./registry-impl";
 import { resolveAction, type Resolution } from "./resolve";
+import { resolveTry, TRY_ACTION } from "./inferred";
 import { createRng } from "./rng";
 import { runRulesOnEvents, runRulesOnTick } from "./rules";
 import { acts } from "./life";
@@ -184,7 +185,8 @@ export function planTurn(input: TurnPlanInput): EngineTurnPlan {
         const claimed = step.claim ? claimThing(w, step.claim, hashParts(seed, "claim")) : null;
         if (claimed && step.claim) made = { entity: claimed.entity, name: step.claim.name, events: claimed.events };
         const params = claimed && step.claim ? { ...step.params, [step.claim.param]: claimed.entity } : step.params;
-        resolution = resolveAction(reg, w, { action: step.action, params }, draws, { runSeed: input.runSeed, judgement: step.judgement });
+        // An inferred check plays as Try something, carrying the world's own check (DESIGN §11).
+        resolution = step.action === TRY_ACTION ? resolveTry(reg, w, params, draws, { runSeed: input.runSeed, judgement: step.judgement }) : resolveAction(reg, w, { action: step.action, params }, draws, { runSeed: input.runSeed, judgement: step.judgement });
         scene = sceneKey(w.world, w.state);
         // The rules see the claimed thing's making too, so a world rule can react to its mark.
         const done = w.events.slice(mark, mark + (made?.events ?? 0) + resolution.events.length);

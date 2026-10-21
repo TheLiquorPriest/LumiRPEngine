@@ -56,7 +56,7 @@ export function outline(reg: Registry, world: WorldDoc, state: Readonly<WorldSta
   const pov: EntityId = world.pov;
   const lines: string[] = [];
   for (const r of input.resolutions ?? []) {
-    const label = own(world.actions, r.action)?.label ?? reg.actions.get(r.action)?.label ?? r.action;
+    const label = r.inferred?.label ?? own(world.actions, r.action)?.label ?? reg.actions.get(r.action)?.label ?? r.action;
     // A requirement's expression can name a secret or its stage: it reads as not possible, as on the Outcome.
     if (!r.ok) lines.push(`${label} doesn't happen: ${r.failed && r.failed.code !== "requirement" ? r.failed.reason : "not possible here and now"}.`);
     // A check the adjudication policy settled without a roll is decided all the same.

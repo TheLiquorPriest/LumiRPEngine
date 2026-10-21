@@ -42,6 +42,7 @@ import { claimsOf } from "../engine/realism";
 import { kindIs, placeOfEntity, placeWithin } from "../engine/scope";
 import type { WorldState } from "../engine/state";
 import { actionOdds, findAction, type Resolution } from "../engine/resolve";
+import { allowedSkills, inferredOf, inferredRead, rolledByTry, skillSources, TRY_ACTION, tryJudged } from "../engine/inferred";
 import type { InterpretOutput, QueuedAction } from "../engine/steps";
 import { checkAnswer } from "../engine/tracks";
 import { secretLoreNames } from "../engine/lore";
@@ -64,7 +65,8 @@ import { startMarkersFrom } from "./start-markers";
 import { claimFor } from "./claims";
 import { StepLore, ToolSupport, type LoreInputs, type LookupTransport } from "./lore-steps";
 import { readPins } from "./lore-pins";
-import { interpretCatalog, interpretScene, timelapseEntry } from "./interpret-context";
+import { interpretCatalog, interpretScene, timelapseEntry, tryEntry } from "./interpret-context";
+import { checkQuestion, inferredChip, inferredOutcome } from "./inferred-words";
 import { failureWords } from "./requirement-words";
 import { missingSections, withoutMissing } from "./section-refs";
 import { CallMeter, dedupeProposals, extract, interpret, saidPayMethod, Steps, type InterpretContext, type InterpretRead, type ThingSort } from "./steps";
@@ -836,12 +838,13 @@ export class Runtime implements TurnHooks {
     const npcRun = runsOf(settings.modelUse, render.world, "npc.choose", facts, { guidance: at.guidance })[0];
     const choose = npcRun && ties.present.length > 0 ? () => npcChoose(this.steps, npcRun, ties.present, (t) => this.describeTie(t, render.world, render.state), createRng(hashParts("lre.npc.pre", bridge.runSeed, p.generationId)), input.userId, budget.signal, this.stepLore(npcRun, at, this.tieInputs(ties.present, render.world, render.state))) : null;
     const [, early] = await Promise.all([intentTask, choose && budget.take(judging ? 1 : 0) ? choose() : null]);
-    // A claim waits on the player's answer (DESIGN §9.4 player claims): nothing is generated; the
-    // chat asks, on the player's message, and the answer's Regenerate runs the engine again with
-    // the read kept, so exactly one reply follows.
+    // A claim, or a check the chat only suggests (DESIGN §9.4 player claims, §11 inferred checks),
+    // waits on the player's answer: nothing is generated; the chat asks, on the player's message,
+    // and the answer's Regenerate runs the engine again with the read kept, so exactly one reply follows.
     const asked = bridge.askOf(text);
     if (asked && lastUser) {
-      await this.chips.add(input.chatId, input.userId, [{ id: `claim:${lastUser.id}`, kind: "claim", messageId: lastUser.id, label: asked.question, detail: asked.detail, actions: [{ id: "add", label: "Add", style: "primary" }, { id: "drop", label: "Not an action" }], expires: "next_send", payload: { text, index: asked.index } }]);
+      const actions: ChipAction[] = asked.kind === "check" ? [{ id: "roll", label: "Roll", style: "primary" }, { id: "drop", label: "No roll" }] : [{ id: "add", label: "Add", style: "primary" }, { id: "drop", label: "Not an action" }];
+      await this.chips.add(input.chatId, input.userId, [{ id: `${asked.kind}:${lastUser.id}`, kind: asked.kind, messageId: lastUser.id, label: asked.question, detail: asked.detail, actions, expires: "next_send", payload: { text, index: asked.index } }]);
       this.push.changed(input.chatId, input.userId);
       return { waiting: `waiting for the player's answer: ${asked.question}` };
     }
@@ -1062,10 +1065,16 @@ export class Runtime implements TurnHooks {
       return;
     }
     // The actions the POV can take now, as the palette offers them, and letting time pass, which is
-    // always there, so a world without actions still interprets.
+    // always there, so a world without actions still interprets. Try something stands in for the
+    // world's own skill actions (DESIGN §11 inferred checks): it rolls their checks under the chat's
+    // policy, so a typed attempt is never read as both; with the policy off, a typed attempt is no
+    // skill check at all, while the palette still offers those actions for a tap.
     const mayKnow = (id: EntityId): boolean => povMayKnow(this.registry, render.world, render.state, id);
-    const offered = interpretCatalog(this.registry, render.world, render.state, all, mayKnow);
-    const catalog = [...offered.entries.map((o) => o.entry), timelapseEntry(render.world, render.state)];
+    const inferred = inferredOf(render.world, render.state);
+    const sources = skillSources(this.registry, render.world, render.state);
+    const skills = allowedSkills(inferred, sources);
+    const offered = interpretCatalog(this.registry, render.world, render.state, all.filter((a) => !rolledByTry(a, sources)), mayKnow);
+    const catalog = [...offered.entries.map((o) => o.entry), ...(inferred.mode !== "off" && skills.length > 0 ? [tryEntry(inferred, skills)] : []), timelapseEntry(render.world, render.state)];
     const context: InterpretContext = {
       world: render.world,
       pov: { id: render.world.pov, name: render.state.entities[render.world.pov]?.name ?? render.world.pov },
@@ -1140,23 +1149,42 @@ export class Runtime implements TurnHooks {
     const policy = claimsOf(render.world, render.state);
     const dropped: UnfitAction[] = [];
     const steps: ReadStep[] = [];
+    // Whether a step that rolls its own check was kept: a Try something after it is never kept (DESIGN
+    // §11), since the queue stops at that check, and leaving it in words would offer the same attempt again.
+    let rolls = false;
     const take = (def: ActionDef, given: JsonObject, words: string, thing: ThingSort | undefined, said: readonly string[]): void => {
       const ref = unfitRef(this.registry, def, given, render.world, render.state, mayKnow);
       if (!ref) {
         steps.push({ action: def.id, params: given, text: words });
+        rolls ||= checkOf(render.world, def.check) !== null;
         return;
       }
       const verdict = claimFor({ registry: this.registry, world: render.world, state: render.state, action: def, params: given, unfit: ref, said, thing, policy, mayKnow });
       // A thing the POV may know by those words keeps its own rules: the action takes it, and fits or fails as it would.
       if (verdict?.kind === "known") return take(def, verdict.params, words, undefined, said);
       if (verdict?.kind === "real") steps.push({ action: def.id, params: given, text: words, claim: verdict.claim });
-      else if (verdict?.kind === "ask") steps.push({ action: def.id, params: given, text: words, claim: verdict.claim, ask: { question: verdict.question, detail: verdict.detail } });
+      else if (verdict?.kind === "ask") steps.push({ action: def.id, params: given, text: words, claim: verdict.claim, ask: { kind: "claim", question: verdict.question, detail: verdict.detail } });
       else {
         this.host.log("info", `[LumiRPEngine] interpret: ${def.id} names nothing in the world (${JSON.stringify(given)}); dropped`, userId);
         dropped.push({ label: def.label, reason: verdict?.kind === "hold" && verdict.reason ? verdict.reason : unfitReason(this.registry, render.world, render.state, ref, text, secrets, mayKnow) });
+        return;
       }
+      rolls ||= checkOf(render.world, def.check) !== null;
+    };
+    // Try something (DESIGN §11 inferred checks), checked against the chat's policy and the world's
+    // sheet: one that isn't a check here is no action, so the message plays without it (no decline:
+    // nothing the player typed was wrong). Under suggest it waits on the player's Roll or No roll.
+    const takeTry = (given: JsonObject, words: string): void => {
+      const verdict = rolls ? ({ ok: false, why: "an action before it rolls its own check" } as const) : inferredRead(this.registry, render.world, render.state, given);
+      if (!verdict.ok) {
+        this.host.log("info", `[LumiRPEngine] interpret: Try something isn't a check here (${verdict.why}); the message plays without it`, userId);
+        return;
+      }
+      const asked = verdict.policy.mode === "suggest" ? checkQuestion(verdict, (id) => render.state.entities[id]?.name ?? id) : null;
+      steps.push({ action: TRY_ACTION, params: verdict.params, text: words, ...(asked ? { ask: { kind: "check" as const, ...asked } } : {}) });
     };
     if (chosen) take(chosen, params, "", result.thing, [text]);
+    else if (result.action === TRY_ACTION) takeTry(result.params, "");
     // The further actions (DESIGN §11 action queue), each read as the first is. Time passing is never
     // queued: as the last it is the input's `then`, and earlier it ends the queue and is left in words.
     // One carrying a secret is dropped on its own, as a second action carrying one always was, and
@@ -1165,8 +1193,8 @@ export class Runtime implements TurnHooks {
     let then = result.then;
     const further = result.queue ?? [];
     for (const [k, q] of further.entries()) {
-      const def = all.find((a) => a.id === q.action);
-      if (q.action === TIMELAPSE_ACTION || !def) {
+      const def = q.action === TRY_ACTION ? undefined : all.find((a) => a.id === q.action);
+      if (q.action === TIMELAPSE_ACTION || (!def && q.action !== TRY_ACTION)) {
         if (k === further.length - 1 && !then && q.action === TIMELAPSE_ACTION) then = q.params;
         else next = [...further.slice(k).map((r) => chipText(r.text)), ...next];
         break;
@@ -1175,13 +1203,17 @@ export class Runtime implements TurnHooks {
         next = [...further.slice(k + 1).map((r) => chipText(r.text)), ...next];
         break;
       }
+      if (!def) {
+        takeTry(q.params, chipText(q.text));
+        continue;
+      }
       const ready = playable(def, q.params, render.world, [q.text, text]);
       take(def, ready, chipText(q.text), q.thing, [q.text, text]);
     }
     bridge.setNext(text, joinActions(next) || null);
     bridge.setOffer(text, then ? interpretedTarget(then, render.world, render.state, text) : null);
     // A claim waiting on the player holds the read until it is answered (`TurnBridge.setRead`).
-    bridge.setRead(text, { lead: result.action, params, probabilities: result.probabilities, chosen: chosen !== undefined, ...(then ? { then } : {}), steps, dropped });
+    bridge.setRead(text, { lead: result.action, params, probabilities: result.probabilities, chosen: chosen !== undefined || result.action === TRY_ACTION, ...(then ? { then } : {}), steps, dropped });
   }
 
   /** `puzzle.answer` (DESIGN §10): an Answer the stage can't match exactly is judged, then retried with the probability. */
@@ -1211,14 +1243,16 @@ export class Runtime implements TurnHooks {
   private judgeTarget(intent: InterpretOutput | null, render: { world: WorldDoc; state: WorldState }): { intent: InterpretOutput; index: number; action: ActionDef; params: JsonObject; verdict: Verdict; odds: Record<string, number>; policy: AdjudicationDef } | null {
     if (!intent?.action || intent.action === TIMELAPSE_ACTION) return null;
     const steps = [{ action: intent.action, params: intent.params, judgement: intent.judgement }, ...(intent.queue ?? [])];
-    const index = steps.findIndex((s) => checkOf(render.world, findAction(this.registry, render.world, s.action)?.check) !== null);
+    const index = steps.findIndex((s) => s.action === TRY_ACTION || checkOf(render.world, findAction(this.registry, render.world, s.action)?.check) !== null);
     const step = steps[index];
-    const action = step ? findAction(this.registry, render.world, step.action) : undefined;
+    // An inferred check is weighed against how hard it looks, so no opponent's numbers reach the judge (DESIGN §11).
+    const tried = step?.action === TRY_ACTION ? tryJudged(this.registry, render.world, render.state, step.params) : null;
+    const action = tried?.action ?? (step ? findAction(this.registry, render.world, step.action) : undefined);
     if (!step || !action || step.judgement) return null;
-    const shown = actionOdds(this.registry, render.world, render.state, { action, params: step.params });
+    const shown = actionOdds(this.registry, render.world, render.state, tried ?? { action, params: step.params });
     const policy = policyFor(render.world, render.state, action, render.world.pov);
     if (!shown.available || !shown.verdict || !shown.odds || !needsJudge(policy, shown.verdict)) return null;
-    return { intent, index, action, params: step.params, verdict: shown.verdict, odds: shown.odds, policy };
+    return { intent, index, action, params: tried?.params ?? step.params, verdict: shown.verdict, odds: shown.odds, policy };
   }
 
   /**
@@ -1741,7 +1775,7 @@ export class Runtime implements TurnHooks {
     if (played.length > 0) {
       // The actions live in the revision the chat folds at (after any Upgrade), not the run's first.
       const world = input.core.worldAt(input.core.fold(input.observed).state.revision) ?? input.core.worldAt(rec?.defHash ?? "");
-      const labelOf = (res: Resolution): string => (world?.actions[res.action] ?? this.registry.actions.get(res.action))?.label ?? res.action;
+      const labelOf = (res: Resolution): string => res.inferred?.label ?? (world?.actions[res.action] ?? this.registry.actions.get(res.action))?.label ?? res.action;
       for (const [i, res] of played.entries()) {
         const label = labelOf(res);
         // A turn of one action keeps the chip ids it always had.
@@ -1856,9 +1890,9 @@ export class Runtime implements TurnHooks {
     lruSet(this.swipeChoice, chatId, mode, 256);
   }
 
-  /** The player's answer to a claim's question (DESIGN §9.4): kept with the read, so the Regenerate that follows resumes the turn. */
-  answerClaim(chatId: ChatId, text: string, index: number, add: boolean): boolean {
-    return this.bridges.get(chatId)?.answerClaim(text, index, add) ?? false;
+  /** The player's answer to what a read waits on (DESIGN §9.4 a claim's question, §11 a suggested check): kept with the read, so the Regenerate that follows resumes the turn. */
+  answerAsk(chatId: ChatId, text: string, index: number, keep: boolean): boolean {
+    return this.bridges.get(chatId)?.answerAsk(text, index, keep) ?? false;
   }
 
   async kindOf(input: { chatId: ChatId; userId: UserId; kind: GenerationKind }): Promise<GenerationKind> {
@@ -2097,7 +2131,7 @@ export class Runtime implements TurnHooks {
       record.id = to;
       this.inspector.save(chatId);
     }
-    await this.chips.removeWhere(chatId, userId, (chip) => chip.kind === "engine_failed" || chip.kind === "claim");
+    await this.chips.removeWhere(chatId, userId, (chip) => chip.kind === "engine_failed" || chip.kind === "claim" || chip.kind === "check");
   }
 
   /**
@@ -2526,11 +2560,12 @@ function planOutline(plan: EngineTurnPlan, prose: PlanProse | undefined): string
 export function planLines(plan: EngineTurnPlan, world: WorldDoc, registry: Registry): { outcome: string[]; montage: string[] } {
   const outcome: string[] = [];
   for (const res of plan.resolutions) {
-    const label = (world.actions[res.action] ?? registry.actions.get(res.action))?.label ?? res.action;
+    const label = res.inferred?.label ?? (world.actions[res.action] ?? registry.actions.get(res.action))?.label ?? res.action;
     const reasons = res.rejected.slice(0, 3).map((r) => r.rejection.reason);
     if (!res.ok) outcome.push(`${label}: it didn't happen (${res.failed ? playerReason(res.failed).replace(/\.$/, "") : "not possible"}). Narrate the attempt failing.`);
     else if (res.check || res.adjudged) {
-      outcome.push(checkLine(label, res));
+      // An inferred check is told with its people and the policy's detail and guidance (DESIGN §11).
+      outcome.push(res.inferred ? inferredOutcome(res, res.inferred) : checkLine(label, res));
       for (const r of reasons) outcome.push(`Not possible: ${r}.`);
     } else if (reasons.length > 0) outcome.push(`${label}: it didn't go through (${reasons.join("; ")}). Narrate it failing; nothing changed hands.`);
     else outcome.push(`${label}: done.`);
@@ -2597,6 +2632,7 @@ function checkLine(label: string, res: Resolution): string {
  * means nothing judged the approach, so the dice decided. Null without a check.
  */
 export function rollChip(label: string, res: Resolution): { label: string; detail: string } | null {
+  if (res.inferred) return inferredChip(res, res.inferred);
   const a = res.adjudged;
   const c = res.check;
   const approach = a?.approach ? ` Your approach: ${a.approach.rating} of ${a.approach.max}${a.approach.reason ? ` (${a.approach.reason})` : ""}.` : "";
