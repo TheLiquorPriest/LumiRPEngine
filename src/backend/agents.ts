@@ -88,7 +88,7 @@ interface UserAgents {
   dismissed: string | null;
 }
 
-const FOLLOW_CODES: Record<FollowCode, true> = { pinned: true, unsupported: true, no_kit: true, kit_api: true, refused: true, elsewhere: true, unreadable: true, mismatch: true, broken: true };
+const FOLLOW_CODES: Record<FollowCode, true> = { pinned: true, unsupported: true, no_kit: true, kit_api: true, refused: true, unsafe: true, elsewhere: true, unreadable: true, mismatch: true, broken: true };
 
 const errorText = (error: unknown): string => (error instanceof Error ? error.message : String(error));
 

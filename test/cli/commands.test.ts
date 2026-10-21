@@ -59,11 +59,14 @@ function terminal(fake: FakeLumiverse, options: { env?: Record<string, string>; 
   return { io, out, err, asked };
 }
 
+/** No kit file anywhere: these tests never follow one. */
+const nowhere = (): Promise<never> => Promise.reject(new Error("no kit files here"));
+
 /** `mcp` as the core starts it: the command line reads its options, a session serves the kit's tools. */
 async function serverOf(argv: string[], io: CliIO): Promise<{ mcp: McpServer; close(): void }> {
   const result = await run(argv, io);
   if (!("mcp" in result)) throw new Error(`mcp didn't start: exit ${result.code}`);
-  const session = new McpSession({ bundled: kit, mcp: result.mcp, io, files: { read: () => Promise.reject(new Error("no kit files here")) }, host: "test-host", log: () => undefined });
+  const session = new McpSession({ bundled: kit, mcp: result.mcp, io, files: { realpath: nowhere, stat: nowhere, read: nowhere, uid: null }, host: "test-host", log: () => undefined });
   return { mcp: new McpServer(session), close: () => session.close() };
 }
 

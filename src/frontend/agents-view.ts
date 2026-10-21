@@ -30,8 +30,9 @@ export function serverLine(client: AgentClientView, view: AgentsView): ServerLin
       // Not connected is not heard from since LumiRPEngine started: right after an update that is every server, running or not.
       return { state: client.state, text: `${name} hasn't reloaded this build's tools yet${client.connected ? "." : ": it hasn't checked in since LumiRPEngine restarted. Running, it takes them at its next check, within a minute; stopped, when it next starts."}`, update: true, copy: [] };
     case "cannot": {
-      // Another machine, or a core too old for this kit: only a new install there helps. Anything else: the setup that follows.
-      const fix = client.why?.code === "elsewhere" || client.why?.code === "kit_api" ? [install] : client.why?.code === "pinned" ? [] : setup;
+      // Another machine, or a core too old for this kit: only a new install there helps. Pinned, or a kit other users can change
+      // (the extension's own copy would refuse it too): no command fixes it. Anything else: the setup that follows.
+      const fix = client.why?.code === "elsewhere" || client.why?.code === "kit_api" ? [install] : client.why?.code === "pinned" || client.why?.code === "unsafe" ? [] : setup;
       return { state: client.state, text: `${name} can't follow LumiRPEngine: ${client.why?.text ?? "it didn't say why"}.`, update: false, copy: fix };
     }
     case "old":

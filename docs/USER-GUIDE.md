@@ -1141,7 +1141,7 @@ Your own agent (Claude Code, Codex, Cursor…) reaches your worlds through the `
 **After an update** the drawer opens on **LumiRPEngine updated**, with a toast the first time, and a line for each server:
 - *reloaded this build's tools*: nothing to do;
 - *hasn't reloaded yet*: it does within a minute, or press **Update now**. Right after the update no server has checked in with the restarted LumiRPEngine yet, so the line says so: a running one takes the new tools at its next check, and a stopped one when it next starts;
-- *can't follow*: why, and what to do, such as installing again on another machine (**Copy the install**) or using the setup above (**Copy the setup**);
+- *can't follow*: why, and what to do, such as installing again on another machine (**Copy the install**) or using the setup above (**Copy the setup**). A server never loads tools other users of the machine could change: when Lumiverse's extensions folder, or the extension's files in it, can be written by anyone but their owner, the line names the path, and the fix is to make it writable by its owner only (on Linux and macOS; Windows isn't checked);
 - *from before MCP servers followed LumiRPEngine*: update it once (`npm i -g github:TheLiquorPriest/LumiRPEngine`), or switch it to the setup above.
 
 The notice stays until you press **Dismiss**, and comes back with the next update.
