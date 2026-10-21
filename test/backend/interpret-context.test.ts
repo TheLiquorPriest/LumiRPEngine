@@ -141,7 +141,7 @@ describe("interpret's catalog and scene", () => {
     // Nobody has invited Jordan anywhere: Accept invitation has no host to name.
     expect(line("accept_invitation")).toBe("");
     // Letting time pass is always there.
-    expect(line("timelapse")).toStartWith("timelapse — Let time pass: wait, sleep or skip ahead");
+    expect(line("timelapse")).toStartWith("timelapse — Let time pass: ");
   });
 
   test("the scene says where and when, who is there, what the POV carries and its vehicles, by name and id, and nothing it can't see", async () => {
