@@ -1,9 +1,11 @@
 // Background-lane jobs (DESIGN §13, §4.2): Import from lore, Build/Refine with AI, the lore indexing
-// jobs, Playtest and Check world. A job's updates arrive as `lre.job.update`; proposals are reviewed
-// one by one and the accepted ones are written to the draft as `lre.editor put` (an indexed entry's
-// terms and topics join the lookup table in one more write), then committed from the Build bar. The
-// backend keeps each job (`lre.job list`), so a reload or a restart shows the last run of each tool
-// again, and a job a restart cut off as interrupted, with its proposals so far and Run it again.
+// jobs, Propose routines from lore, Playtest and Check world. A job's updates arrive as
+// `lre.job.update`; proposals are reviewed one by one and the accepted ones are written to the draft
+// as `lre.editor put` (an indexed entry's terms and topics join the lookup table in one more write),
+// then committed from the Build bar. The backend keeps each job (`lre.job list`), so a reload or a
+// restart shows the last run of each tool again, and a job a restart cut off as interrupted, with its
+// proposals so far and Run it again. A pass of Propose routines that stops before everyone was read
+// offers Continue (propose-routines.tsx has its start form and review).
 // A job's page leads with its status and results; Apply stays in reach in
 // a sticky bar while the review scrolls.
 
@@ -27,6 +29,7 @@ import { createStore, useSelect } from "../store";
 import { IssueRow } from "./check";
 import { COLLECTION_INFO, itemLabel } from "./chrome";
 import { draftSend } from "./draft";
+import { RoutineJobStart, RoutineProposalReview } from "./propose-routines";
 
 export interface JobState {
   jobId: string;
@@ -124,6 +127,7 @@ function JobInput(props: { kind: JobKind; onStart(input: Record<string, string |
   useEffect(() => {
     if (props.kind === "import_lore" || props.kind === "index_book") void app.host.worldBooks().then(setBooks, () => setBooks([]));
   }, [props.kind]);
+  if (props.kind === "propose_routines") return <RoutineJobStart busy={props.busy} onStart={(start) => props.onStart(start.owners ? { owners: start.owners } : {})} />;
   if (props.kind === "index_book") {
     return (
       <div class="lre-stack">
@@ -533,6 +537,8 @@ export function JobView(props: { worldId: string; kind: JobKind }) {
     });
   // A running import keeps its proposals so far for a restart; they are reviewed once it ends.
   const result = job?.status === "running" ? undefined : job?.result;
+  // A pass that stopped before everyone was read (Propose routines) says where the next one starts.
+  const next = result && "proposals" in result ? result.next : undefined;
   const info = JOB_INFO[props.kind];
   const input = <JobInput kind={props.kind} onStart={start} busy={busy} />;
   return (
@@ -545,6 +551,7 @@ export function JobView(props: { worldId: string; kind: JobKind }) {
             <span style={{ width: `${Math.round(job.progress * 100)}%` }} />
           </div>
           {job.message ? <p class="lre-build-note">{job.message}</p> : null}
+          {next ? <p class="lre-build-note">This pass stopped before everyone was read. Apply what you want from it first: Continue starts the next pass, whose proposals replace these.</p> : null}
           <div class="lre-build-actions">
             {job.status === "running" ? (
               <Button
@@ -563,6 +570,11 @@ export function JobView(props: { worldId: string; kind: JobKind }) {
                 {job.status === "interrupted" && job.input ? (
                   <Button size="sm" variant="primary" icon="refresh" disabled={busy} onClick={() => job.input && start(job.input)}>
                     Run it again
+                  </Button>
+                ) : null}
+                {next ? (
+                  <Button size="sm" variant="primary" iconAfter="chevron-right" disabled={busy} onClick={() => start(next)}>
+                    Continue
                   </Button>
                 ) : null}
                 <Button
@@ -585,7 +597,15 @@ export function JobView(props: { worldId: string; kind: JobKind }) {
           {job.status !== "running" ? <Disclosure summary="Run again with new input">{input}</Disclosure> : null}
         </Section>
       ) : null}
-      {result && "proposals" in result ? result.proposals.length === 0 ? <Empty icon="checklist">No proposals.</Empty> : <ProposalReview key={job?.jobId} app={app} worldId={props.worldId} proposals={result.proposals} /> : null}
+      {result && "proposals" in result ? (
+        result.proposals.length === 0 ? (
+          <Empty icon="checklist">No proposals.</Empty>
+        ) : props.kind === "propose_routines" && job ? (
+          <RoutineProposalReview key={job.jobId} app={app} worldId={props.worldId} jobId={job.jobId} proposals={result.proposals} />
+        ) : (
+          <ProposalReview key={job?.jobId} app={app} worldId={props.worldId} proposals={result.proposals} />
+        )
+      ) : null}
       {result && "turns" in result ? <RunReport kind={props.kind} worldId={props.worldId} report={result} /> : null}
     </div>
   );
