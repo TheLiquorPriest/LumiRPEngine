@@ -830,7 +830,8 @@ export function RoutineEditor(props: EditorProps) {
         onDelete={isNew ? undefined : () => run(() => deleteItem(app, props.send, { worldId: props.world.id, collection: "routines", id, name }))}
         busy={busy}
       />
-      <RoutineForm key={reverts} value={routine} doc={doc} path={path} lint={lintAt(draft?.lint ?? [], path)} at={at} onChange={setRoutine} />
+      {/* The block Problems opened on opens with the page, not again after a Revert. */}
+      <RoutineForm key={reverts} value={routine} doc={doc} path={path} lint={lintAt(draft?.lint ?? [], path)} at={reverts === 0 ? at : undefined} onChange={setRoutine} />
       <SaveBar>
         <Button variant="primary" disabled={(!changed && !isNew) || busy} busy={busy} onClick={save}>
           {isNew ? "Create routine" : "Save to draft"}
@@ -878,6 +879,8 @@ export function RoutineList(props: { worldId: string }) {
       <PageHeader title={info.label} subtitle={info.hint} actions={adding ? undefined : add} />
       {adding ? <NewItem worldId={draft.worldId} collection="routines" taken={new Set(Object.keys(draft.doc.routines ?? {}))} onDone={() => setAdding(false)} /> : null}
       <p class="lre-build-note">A routine is what someone usually does, never what they must. For anyone in a scene with you the story leads: a routine never moves them out of it or contradicts what's been told.</p>
+      {/* The collection's own problems (routines without the Cast life pack to live them), which no single routine opens. */}
+      <Issues issues={draft.lint.filter((issue) => issue.path === "routines")} />
       <Section title="Settings" flush>
         <List>
           <ListRow
