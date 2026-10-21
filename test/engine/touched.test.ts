@@ -110,6 +110,8 @@ function everythingWorld(): WorldDoc {
   w.start = { ...w.start, place: "taproom" };
   Object.assign(w.entities.you?.fields ?? {}, { place: "taproom" });
   w.entities.dev = { id: "dev", kind: "person", name: "Dev", tier: "principal", fields: { place: "home" }, relations: [], agent: true };
+  // A schedule of Dev's, for a chat's own change to one.
+  w.schedules.dev_shift = { id: "dev_shift", owner: "dev", target: "place", recurrence: { every: "day" }, slots: [{ start: "09:00", end: "17:00", value: "inn" }] };
   w.entities.rat = { id: "rat", kind: "person", name: "Rat", tier: "background", fields: { place: "taproom", max_hp: 3 }, relations: [] };
   w.entities.acct = { id: "acct", kind: "account", name: "Checking", tier: "background", fields: { owner: "you", type: "checking" }, relations: [] };
   w.entities.card = { id: "card", kind: "account", name: "Card", tier: "background", fields: { owner: "you", type: "card" }, relations: [] };
@@ -203,6 +205,10 @@ const EVERY_TYPE: LedgerEvent[] = [
   { type: "castlife.need", data: { entity: "you", need: "hunger", delta: 10 } },
   { type: "castlife.decision", data: { key: "dev:evening", choice: "rest" } },
   { type: "castlife.invitation", data: { agent: "dev", place: "home", at: 100, text: "Drinks?" } },
+  // A chat's own routine changes write the Cast life slice, never an entity's definition.
+  { type: "castlife.follow", data: { entity: "dev", follow: { mode: "no_invitations", awareness: "story_first" } } },
+  { type: "castlife.routine", data: { entity: "dev", block: "dinner", value: { id: "dinner", off: true }, source: { type: "gm", at: 0 } } },
+  { type: "castlife.schedule", data: { entity: "dev", schedule: "dev_shift", value: { off: true, until: null }, source: { type: "story", at: 0 } } },
   { type: "story.flag", data: { name: "met_dev", value: true } },
   { type: "combat.start", data: { encounter: "e1", place: "taproom", order: [{ id: "you", side: "party", init: 15, left: { action: 1 } }, { id: "rat", side: "foes", init: 5, left: { action: 1 } }] } },
   { type: "combat.spend", data: { encounter: "e1", who: "you", cost: { action: 1 } } },
