@@ -22,7 +22,8 @@ export function serverLine(client: AgentClientView, view: AgentsView): ServerLin
     case "updated":
       return { state: client.state, text: `${name} reloaded this build's tools.`, update: false, copy: [] };
     case "behind":
-      return { state: client.state, text: `${name} hasn't reloaded this build's tools yet${client.connected ? "." : ": it isn't connected now, and takes them when it next connects."}`, update: true, copy: [] };
+      // Not connected is not heard from since LumiRPEngine started: right after an update that is every server, running or not.
+      return { state: client.state, text: `${name} hasn't reloaded this build's tools yet${client.connected ? "." : ": it hasn't checked in since LumiRPEngine restarted. Running, it takes them at its next check, within a minute; stopped, when it next starts."}`, update: true, copy: [] };
     case "cannot": {
       // Another machine, or a core too old for this kit: only a new install there helps. Anything else: the setup that follows.
       const fix = client.why?.code === "elsewhere" || client.why?.code === "kit_api" ? [install] : client.why?.code === "pinned" ? [] : setup;
