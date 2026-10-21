@@ -5,7 +5,7 @@
 // their buttons and switches pressed through the props the screen hands them.
 
 import { describe, expect, test } from "bun:test";
-import { h, type VNode } from "preact";
+import { h } from "preact";
 import { FieldInput, type FormCtx } from "../../src/frontend/build/schema-form";
 import { PART_SPECS } from "../../src/frontend/build/schema";
 import { HostSwitch, Seg } from "../../src/frontend/components";
@@ -15,29 +15,7 @@ import type { JsonObject, JsonValue } from "../../src/shared/json";
 import type { UserSettings } from "../../src/shared/settings";
 import type { WorldDoc } from "../../src/shared/world";
 import { Rig } from "../support/rig";
-
-type Props = Record<string, unknown>;
-
-/** The props of every element of `type` in a rendered tree, in order. */
-function propsOf(node: unknown, type: unknown): Props[] {
-  if (Array.isArray(node)) return node.flatMap((n) => propsOf(n, type));
-  if (!node || typeof node !== "object" || !("props" in node)) return [];
-  const v = node as VNode<Props>;
-  return [...(v.type === type ? [v.props] : []), ...propsOf(v.props.children, type)];
-}
-
-/** The one element of `type` labelled `label`. */
-function labelled(node: unknown, type: unknown, label: string): Props {
-  const found = propsOf(node, type).filter((p) => p.label === label);
-  if (found.length !== 1) throw new Error(`${found.length} controls labelled ${label}`);
-  return found[0] ?? {};
-}
-
-function press(props: Props, value: unknown): void {
-  const onChange = props.onChange;
-  if (typeof onChange !== "function") throw new Error("not a control");
-  onChange(value);
-}
+import { expand, labelled, press, propsOf } from "../support/tree";
 
 const MODE = "When you say you have something the world doesn't";
 const CAP = "Ask first above the world's claim cap";
@@ -121,11 +99,4 @@ describe("the player claims control", () => {
 function withClaims(realism: JsonObject, claims: JsonValue | undefined): JsonObject {
   const { claims: _old, ...rest } = realism;
   return claims === undefined ? rest : { ...rest, claims };
-}
-
-/** A component element rendered one level down, so the controls it lays out can be pressed. */
-function expand(node: unknown): unknown {
-  if (!node || typeof node !== "object" || !("type" in node) || typeof node.type !== "function") throw new Error("not a component");
-  const v = node as VNode<Props>;
-  return (v.type as (props: Props) => unknown)(v.props);
 }
