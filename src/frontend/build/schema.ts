@@ -508,13 +508,14 @@ export const COLLECTION_SPECS: Record<WorldCollection, FieldSpec[]> = {
     { kind: "text", key: "description", label: "Description", multiline: true, optional: true },
     { kind: "facetValues", key: "values", label: "Values" },
   ],
+  // Build draws a routine with its own editor (`routine-editor.tsx`); these stand in only where nothing else does.
   routines: [
     { kind: "text", key: "label", label: "Label", optional: true },
     { kind: "bool", key: "inherit", label: "Keeps the blocks of less specific routines", reads: (inherit) => inherit !== false },
   ],
 };
 
-/** The schema-driven singletons; Tiers, Ruleset, the lore lookup table, Minds and the routine settings have their own editors (`tiers-editor.tsx`, `ruleset-editor.tsx`, `lookup-editor.tsx`, `minds-editor.tsx`). */
+/** The schema-driven singletons; Tiers, Ruleset, the lore lookup table, Minds and the routine settings have their own editors (`tiers-editor.tsx`, `ruleset-editor.tsx`, `lookup-editor.tsx`, `minds-editor.tsx`, `routine-settings.tsx`). */
 export const PART_SPECS: Record<Exclude<WorldPart, "tiers" | "loreIndex" | "ruleset" | "minds" | "lorePins" | "routineSettings">, FieldSpec[]> = {
   calendar: [
     { kind: "enum", key: "system", label: "System", values: ["gregorian", "custom"] },

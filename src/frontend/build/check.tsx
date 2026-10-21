@@ -14,9 +14,9 @@ import { Icon } from "../icons";
 import { useSelect } from "../store";
 import { COLLECTION_INFO, go, itemLabel, PART_INFO } from "./chrome";
 
-const COLLECTIONS: readonly WorldCollection[] = ["kinds", "relations", "entities", "places", "maps", "routes", "grids", "rules", "actions", "checks", "schedules", "tracks", "tables", "sections", "steps", "packs", "lore", "classifications"];
+const COLLECTIONS: readonly WorldCollection[] = ["kinds", "relations", "entities", "places", "maps", "routes", "grids", "rules", "actions", "checks", "routines", "schedules", "tracks", "tables", "sections", "steps", "packs", "lore", "classifications"];
 /** World parts whose issues open the part: `ruleset.progression.level.thresholds` → the Ruleset part; `loreIndex.terms.ferry` → the lookup table. */
-const PARTS: readonly WorldPart[] = ["calendar", "realism", "tiers", "time", "ruleset", "loreIndex"];
+const PARTS: readonly WorldPart[] = ["calendar", "realism", "tiers", "time", "ruleset", "loreIndex", "routineSettings"];
 /** The world's own top-level fields, which the World part edits. */
 const META_FIELDS: readonly string[] = ["name", "pov", "start", "seedMode", "lenientPricing", "spawnCap", "lifeStates", "currency", "mapSettings"];
 
@@ -64,7 +64,7 @@ export function IssueRow(props: { issue: LintIssue; worldId?: WorldId; doc?: Wor
   const part = target ? null : issuePart(issue.path);
   let where = issue.path;
   if (target) {
-    const items = doc ? (doc[target.collection] as Record<string, unknown>) : {};
+    const items = doc ? ((doc[target.collection] ?? {}) as Record<string, unknown>) : {};
     where = `${COLLECTION_INFO[target.collection].label} › ${itemLabel(target.collection, target.id, hasOwn(items, target.id) ? items[target.id] : undefined, doc?.places)}`;
   } else if (part) where = PART_INFO[part].label;
   const open = worldId === undefined ? null : target ? () => go(app, { view: "item", worldId, collection: target.collection, id: target.id }) : part ? () => go(app, { view: "part", worldId, part }) : null;
