@@ -13,6 +13,13 @@ export const CORE_FILE = "lumirpengine.js";
 /** The one-time install that brings a server from before following up to date. */
 export const NPM_INSTALL = "npm i -g github:TheLiquorPriest/LumiRPEngine";
 
+/**
+ * The harness a server Lumiverse runs itself (its Settings → MCP Servers) checks in with: the name
+ * Lumiverse's MCP client gives in `initialize` (`new Client({ name: "lumiverse" })`, in Lumiverse's
+ * src/services/mcp-client-manager.ts).
+ */
+export const LUMIVERSE_HARNESS = "lumiverse";
+
 /** This build's agent kit, as LumiRPEngine tells an outside client: its absolute path, its sha256 (hex), its contract level, and the core beside it. */
 export interface KitReport {
   path: string;
@@ -21,8 +28,8 @@ export interface KitReport {
   core: string;
 }
 
-/** Why an MCP server doesn't follow the extension's kit. */
-export type FollowCode = "pinned" | "unsupported" | "no_kit" | "kit_api" | "refused" | "elsewhere" | "unreadable" | "mismatch" | "broken";
+/** Why an MCP server doesn't follow the extension's kit; `unsafe`: the kit, or a directory it sits in, can be changed by other users. */
+export type FollowCode = "pinned" | "unsupported" | "no_kit" | "kit_api" | "refused" | "unsafe" | "elsewhere" | "unreadable" | "mismatch" | "broken";
 
 /** What an MCP server checks in with, in its hello's `client`, on connecting and after each change of what it runs. */
 export interface AgentCheckIn {
@@ -46,7 +53,7 @@ export type HelloClient = { name: string; version: string } & Partial<AgentCheck
 /** How a server stands against this build: on its tools, not yet, unable to follow, or from before following. */
 export type AgentState = "updated" | "behind" | "cannot" | "old";
 
-/** One MCP server as its last check-in left it. */
+/** One MCP server: as the process of it furthest behind left it, of those heard from in the last 2 minutes, else as its last check-in did. */
 export interface AgentClientView {
   id: string;
   name: string;
@@ -63,6 +70,8 @@ export interface AgentClientView {
   seen: number;
   /** A session of it is open now. */
   connected: boolean;
+  /** Its processes heard from in the last 2 minutes (each a session of its own, since the extension started). */
+  processes: number;
   state: AgentState;
 }
 

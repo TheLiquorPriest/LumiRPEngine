@@ -2,7 +2,7 @@
 // of an MCP server's check-in, how a start under another build is taken for an update, and the
 // notice after one: each server's line, Update now, and the line turning once the server reloads.
 
-import { describe, expect, test } from "bun:test";
+import { describe, expect, setSystemTime, test } from "bun:test";
 import type { BuildInfo } from "../../src/backend/agents";
 import type { AgentClientView, AgentsView } from "../../src/shared/agents";
 import { Rig } from "../support/rig";
@@ -135,6 +135,52 @@ describe("check-ins", () => {
       ["lumi-dev", "b2"],
     ]);
     expect(view.clients[0]?.id).toBe(old);
+  });
+});
+
+describe("a server's processes", () => {
+  test("a server stands as its process furthest behind, says how many it has, and drops one not heard from for two minutes", async () => {
+    let now = Date.UTC(2026, 9, 20, 12);
+    const later = (ms: number): void => {
+      now += ms;
+      setSystemTime(new Date(now));
+    };
+    later(0);
+    try {
+      const rig = new Rig({ build: build("b2") });
+      const hello = async (session: string, kit: string): Promise<string> => String(rig.body(await rig.send({ type: "lre.hello", chatId: null, client: server("studio", kit, { harness: "claude-code" }) }, session)).client);
+      const look = (session: string) => rig.send({ type: "lre.agents", op: "kit" }, session);
+      const lines = async () => (rig.body(await rig.send({ type: "lre.agents", op: "get" }, "page-1")).view as AgentsView).clients.map((c) => ({ id: c.id, state: c.state, kit: c.kit, processes: c.processes }));
+
+      // Two windows of Claude Code on one machine: the one that lags checked in first, the one that reloaded last. One lagging is not updated.
+      const id = await hello("srv-a", "a1");
+      expect(await hello("srv-b", "b2")).toBe(id);
+      expect(await lines()).toEqual([{ id, state: "behind", kit: "a1", processes: 2 }]);
+      // Both reloaded: updated.
+      await hello("srv-a", "b2");
+      expect(await lines()).toEqual([{ id, state: "updated", kit: "b2", processes: 2 }]);
+
+      // A third process checks in on the old build and goes quiet (hung, or its machine asleep), while the others look every minute.
+      await hello("srv-c", "a1");
+      expect(await lines()).toEqual([{ id, state: "behind", kit: "a1", processes: 3 }]);
+      for (const step of [61_000, 61_000]) {
+        later(step);
+        await look("srv-a");
+        await look("srv-b");
+      }
+      // Unheard for two minutes, its socket still open: it no longer says how its server stands.
+      expect(await lines()).toEqual([{ id, state: "updated", kit: "b2", processes: 2 }]);
+      // Heard from again, it counts again, and the pages are told.
+      const from = rig.host.sent.length;
+      await look("srv-c");
+      expect(pushed(rig, from).at(-1)?.view.clients.map((c) => [c.state, c.processes])).toEqual([["behind", 3]]);
+      // Its socket closes: it is gone at once.
+      rig.host.closeSession("srv-c");
+      await rig.host.settle();
+      expect(await lines()).toEqual([{ id, state: "updated", kit: "b2", processes: 2 }]);
+    } finally {
+      setSystemTime();
+    }
   });
 });
 

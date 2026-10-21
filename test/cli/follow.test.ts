@@ -1,44 +1,36 @@
 // Following the extension's agent kit (DESIGN §23), the MCP server in process over a fake Lumiverse,
 // with temp dirs standing in for the installed extension's dist/: a running server loads a newer kit
 // when LumiRPEngine reports a new build whose hash matches, tells its client once and lists the new
-// kit's tools; a hash that differs, a path that isn't an installed extension's, and --pin keep the
-// tools loaded, and say why; and it looks on connecting, before a call once its last look is old,
-// every minute, and when LumiRPEngine asks.
+// kit's tools; a hash that differs, a path that isn't an installed extension's (its symlinks
+// resolved), a kit or directory other users can change, and --pin keep the tools loaded, and say
+// why; and it looks on connecting, before a call once its last look is old, every minute, and when
+// LumiRPEngine asks.
 
 import { afterAll, describe, expect, test } from "bun:test";
-import { createHash } from "node:crypto";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { readFile } from "node:fs/promises";
+import { chmodSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { kit as bundled } from "../../src/cli/agent-kit";
 import { CredentialStore } from "../../src/cli/credentials";
+import type { KitFiles } from "../../src/cli/follow";
 import type { Clock } from "../../src/cli/serve";
 import { McpSession, serveMcp } from "../../src/cli/serve";
+import type { KitReport } from "../../src/shared/agents";
 import { isRecord } from "../../src/shared/json";
+import { disk, distOf as distIn, writeKit } from "../support/kits";
 import { FakeLumiverse, USER } from "./fake-lumiverse";
 
 const root = mkdtempSync(join(tmpdir(), "lre-follow-"));
 afterAll(() => rmSync(root, { recursive: true, force: true }));
 
 /** An installed extension's dist/ under its own Lumiverse data dir. */
-const distOf = (name: string): string => join(root, name, "data/extensions/lumi_rp_engine/repo/dist");
+const distOf = (name: string): string => distIn(root, name);
 
-/** A kit as an extension's build writes one, of build `build`, offering the tools named; and its report. */
-function writeKit(dir: string, build: string, tools: string[]): { path: string; sha256: string; api: number; core: string } {
-  const names = JSON.stringify(tools);
-  const text = `export const kit = { api: 1, build: ${JSON.stringify(build)}, versions: { cli: "0.0.1", engine: "9.9.9", worldFormat: "lre-world-v1", agentApi: 1 },
-  tools: () => ${names}.map((name) => ({ name, description: "from build ${build}", inputSchema: { type: "object", properties: {}, additionalProperties: false }, annotations: { readOnlyHint: true, openWorldHint: false } })),
-  has: (name) => ${names}.includes(name),
-  call: async (name) => ({ text: name + " answered by build ${build}" }) };\n`;
-  mkdirSync(dir, { recursive: true });
-  const path = join(dir, "agent-kit.js");
-  writeFileSync(path, text);
-  return { path, sha256: createHash("sha256").update(text).digest("hex"), api: 1, core: join(dir, "lumirpengine.js") };
-}
+/** Someone else: never this user, never root. */
+const OTHER_UID = (process.getuid?.() ?? 0) + 4242;
 
-/** A server as the core runs one, signed in to `fake`, on a clock the test moves. */
-function serve(fake: FakeLumiverse, pin = false) {
+/** A server as the core runs one, signed in to `fake`, on a clock the test moves; following's disk is the real one unless `files` says otherwise. */
+function serve(fake: FakeLumiverse, options: { pin?: boolean; files?: KitFiles } = {}) {
   let now = 1_000_000;
   const ticks: (() => void)[] = [];
   const clock: Clock = { now: () => now, every: (_ms, tick) => (ticks.push(tick), () => undefined) };
@@ -46,7 +38,7 @@ function serve(fake: FakeLumiverse, pin = false) {
   const credentials = new CredentialStore({ read: () => saved, write: (_path, text) => void (saved = text) }, "credentials.json");
   credentials.put(fake.base, { username: USER.username, token: fake.session(), savedAt: 1 });
   const logs: string[] = [];
-  const session = new McpSession({ bundled, mcp: { readOnly: false, pin, base: () => fake.base, timeoutMs: 3000 }, io: { credentials, http: fake.http, openSocket: fake.openSocket, readFile: () => "" }, files: { read: (path) => readFile(path) }, host: "test-host", log: (text) => void logs.push(text), clock });
+  const session = new McpSession({ bundled, mcp: { readOnly: false, pin: options.pin ?? false, base: () => fake.base, timeoutMs: 3000 }, io: { credentials, http: fake.http, openSocket: fake.openSocket, readFile: () => "" }, files: options.files ?? disk, host: "test-host", log: (text) => void logs.push(text), clock });
   const lines: Record<string, unknown>[] = [];
   const server = serveMcp(session, (line) => void lines.push(JSON.parse(line) as Record<string, unknown>));
   let id = 0;
@@ -114,7 +106,7 @@ describe("following the extension's kit", () => {
   });
 
   test("a hash that differs or a path that isn't an installed extension's kit is refused and said, and the tools loaded stay", async () => {
-    const cases: [string, { path: string; sha256: string; api: number; core: string }, string, string][] = [
+    const cases: [string, KitReport, string, string][] = [
       ["a hash that differs", { ...writeKit(distOf("b"), "b3", ["lre_never"]), sha256: "0".repeat(64) }, "mismatch", "its sha256 differs"],
       ["a path elsewhere", writeKit(join(root, "c", "downloads", "dist"), "b3", ["lre_never"]), "refused", "isn't where Lumiverse installs an extension's kit"],
     ];
@@ -131,11 +123,62 @@ describe("following the extension's kit", () => {
     }
   });
 
+  test("a kit loads only when no one but this user or root can change it: a link out of the extension's layout, a directory others can write and a file another user owns are refused and said, and the tools loaded stay", async () => {
+    // Laid out as the extension's kit, but a link to a file elsewhere.
+    const elsewhere = writeKit(join(root, "f", "downloads"), "b5", ["lre_never"]);
+    mkdirSync(distOf("f"), { recursive: true, mode: 0o755 });
+    const link = join(distOf("f"), "agent-kit.js");
+    symlinkSync(elsewhere.path, link);
+    // repo/ writable by its group: anyone in it could put another kit in its place.
+    const shared = writeKit(distOf("g"), "b5", ["lre_never"]);
+    const repo = dirname(distOf("g"));
+    chmodSync(repo, 0o775);
+    // A file another user planted (the disk says so: a test can't chown).
+    const planted = writeKit(distOf("h"), "b5", ["lre_never"]);
+    const theirs: KitFiles = { ...disk, read: async (path) => ({ ...(await disk.read(path)), uid: OTHER_UID }) };
+    const cases: [string, KitReport, KitFiles, string, string][] = [
+      ["a link out of the layout", { ...elsewhere, path: link }, disk, "refused", `whose real path ${realpathSync(elsewhere.path)} isn't where Lumiverse installs an extension's kit`],
+      ["a directory others can write", shared, disk, "unsafe", `${realpathSync(repo)} can be changed by other users`],
+      ["a file another user owns", planted, theirs, "unsafe", `${realpathSync(planted.path)} can be changed by other users`],
+    ];
+    for (const [label, report, files, code, said] of cases) {
+      const fake = new FakeLumiverse();
+      fake.lre.build = "b5";
+      fake.lre.kit = report;
+      const s = serve(fake, { files });
+      await s.start();
+      expect([label, await s.tools()]).toEqual([label, own]);
+      expect([label, s.changed()]).toEqual([label, 0]);
+      expect([label, checkIns(fake).at(-1)]).toEqual([label, expect.objectContaining({ kit: bundled.build, follows: false, why: { code, text: expect.stringContaining(said) } })]);
+    }
+  });
+
+  test("a kit reached through a linked data dir loads, its real path being an installed extension's; and where owners aren't checked (Windows) a shared directory doesn't stop one", async () => {
+    // Lumiverse's data dir is a link to another disk.
+    const linked = writeKit(join(root, "i", "disk", "data/extensions/lumi_rp_engine/repo/dist"), "b6", ["lre_linked_tool"]);
+    symlinkSync(join(root, "i", "disk", "data"), join(root, "i", "data"));
+    const windows = writeKit(distOf("j"), "b6", ["lre_windows_tool"]);
+    chmodSync(dirname(distOf("j")), 0o777);
+    const cases: [string, KitReport, KitFiles, string][] = [
+      ["a linked data dir", { ...linked, path: join(distOf("i"), "agent-kit.js") }, disk, "lre_linked_tool"],
+      ["no owners to check", windows, { ...disk, uid: null }, "lre_windows_tool"],
+    ];
+    for (const [label, report, files, tool] of cases) {
+      const fake = new FakeLumiverse();
+      fake.lre.build = "b6";
+      fake.lre.kit = report;
+      const s = serve(fake, { files });
+      await s.start();
+      expect([label, await s.tools()]).toEqual([label, [tool]]);
+      expect([label, checkIns(fake).at(-1)]).toEqual([label, expect.objectContaining({ kit: "b6", follows: true, why: null })]);
+    }
+  });
+
   test("--pin keeps the bundled kit whatever LumiRPEngine reports, and says so in its check-in", async () => {
     const fake = new FakeLumiverse();
     fake.lre.build = "b4";
     fake.lre.kit = writeKit(distOf("d"), "b4", ["lre_never"]);
-    const s = serve(fake, true);
+    const s = serve(fake, { pin: true });
     await s.start();
     s.tick();
     await s.settle();

@@ -7,7 +7,7 @@
 // and frontend never import src/cli.
 
 import { chmodSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
-import { readFile } from "node:fs/promises";
+import { lstat, open, realpath } from "node:fs/promises";
 import { homedir, hostname } from "node:os";
 import { dirname } from "node:path";
 import { createInterface } from "node:readline";
@@ -16,6 +16,7 @@ import type { CliIO } from "./commands";
 import type { Http, OpenSocket } from "./connection";
 import { CredentialStore, credentialsPath } from "./credentials";
 import type { CredentialFiles } from "./credentials";
+import type { KitFiles } from "./follow";
 import { bundledKitOf } from "./kit-api";
 import { McpSession, serveMcp } from "./serve";
 
@@ -115,6 +116,27 @@ const io: CliIO = {
   openSocket,
 };
 
+/** Following's side of the disk (DESIGN §23): symlinks resolved, and owners as the files themselves say. */
+const kitFiles: KitFiles = {
+  realpath: (path) => realpath(path),
+  async stat(path) {
+    const entry = await lstat(path);
+    return { uid: entry.uid, mode: entry.mode };
+  },
+  async read(path) {
+    // Owner and bytes through one handle: they are one file's, whatever is renamed into its place meanwhile.
+    const handle = await open(path, "r");
+    try {
+      const entry = await handle.stat();
+      return { uid: entry.uid, mode: entry.mode, bytes: await handle.readFile() };
+    } finally {
+      await handle.close();
+    }
+  },
+  // Owners and mode bits are POSIX's: Windows gives neither to check.
+  uid: process.platform === "win32" ? null : (process.getuid?.() ?? null),
+};
+
 // The kit beside this file (src/cli/agent-kit.ts when run from source, which Bun resolves): a
 // bundle of its own, imported at run time, since a static import would bundle every tool into the core.
 const kit = bundledKitOf(await import(new URL(KIT_FILE, import.meta.url).href));
@@ -125,7 +147,7 @@ if (typeof kit === "string") {
 
 const result = await kit.run(process.argv.slice(2), io);
 if ("mcp" in result) {
-  const session = new McpSession({ bundled: kit, mcp: result.mcp, io, files: { read: (path) => readFile(path) }, host: hostname(), log: (text) => process.stderr.write(`${text}\n`) });
+  const session = new McpSession({ bundled: kit, mcp: result.mcp, io, files: kitFiles, host: hostname(), log: (text) => process.stderr.write(`${text}\n`) });
   const server = serveMcp(session, (line) => {
     // Resolves once Node has taken the line, so the next waits its turn instead of piling up in memory.
     const { promise, resolve } = Promise.withResolvers<void>();

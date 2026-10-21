@@ -1,15 +1,13 @@
-// The update notice's and Settings → MCP server's words for each MCP server (DESIGN §23), and which
-// of Lumiverse's own MCP server profiles run lumirpengine and how one is switched to the extension's copy.
+// The update notice's and Settings → MCP server's words for each MCP server (DESIGN §23).
 
 import { describe, expect, test } from "bun:test";
-import { extensionArgs, lumirpengineProfiles, serverLine } from "../../src/frontend/agents-view";
-import type { McpProfile } from "../../src/frontend/agents-view";
+import { serverLine } from "../../src/frontend/agents-view";
 import type { AgentClientView, AgentsView } from "../../src/shared/agents";
 import { NPM_INSTALL } from "../../src/shared/agents";
 
 const CORE = "/srv/lumiverse/data/extensions/lumi_rp_engine/repo/dist/lumirpengine.js";
 const view: AgentsView = { build: "b2", notice: { build: "b2", previous: "a1", at: 1 }, setup: { core: CORE, command: `node ${CORE} mcp` }, clients: [] };
-const client = (over: Partial<AgentClientView>): AgentClientView => ({ id: "c1", name: "lumirpengine", version: "0.0.1", host: "studio", harness: null, core: "c0", kit: "b2", follows: true, why: null, seen: 1, connected: true, state: "updated", ...over });
+const client = (over: Partial<AgentClientView>): AgentClientView => ({ id: "c1", name: "lumirpengine", version: "0.0.1", host: "studio", harness: null, core: "c0", kit: "b2", follows: true, why: null, seen: 1, connected: true, processes: 1, state: "updated", ...over });
 
 describe("each server's line", () => {
   test("reloaded, not yet with Update now, and can't follow with why and what fixes it", () => {
@@ -32,30 +30,20 @@ describe("each server's line", () => {
       { label: "Copy the setup", text: `node ${CORE} mcp` },
     ]);
   });
-});
 
-describe("Lumiverse's own MCP servers", () => {
-  const profile = (id: string, command: string, args: string[], transport_type = "stdio"): McpProfile => ({ id, name: id, transport_type, command, args, is_enabled: true });
-  const profiles = [
-    profile("own", "node", [CORE, "mcp"]),
-    profile("global", "/usr/local/bin/node", ["/usr/local/lib/node_modules/lumi-rp-engine/dist/lumirpengine.js", "mcp", "--read-only"]),
-    profile("npx", "npx", ["-y", "github:TheLiquorPriest/LumiRPEngine#v1", "mcp"]),
-    profile("bin", "C:\\npm\\lumirpengine.exe", ["mcp"]),
-    profile("other", "node", ["/opt/other-server/index.js"]),
-    profile("remote", "", [], "streamable_http"),
-  ];
-
-  test("the ones that run lumirpengine, and from where", () => {
-    expect(lumirpengineProfiles(profiles, CORE).map((p) => [p.profile.id, p.kind])).toEqual([
-      ["own", "extension"],
-      ["global", "npm"],
-      ["npx", "npx"],
-      ["bin", "npm"],
-    ]);
+  test("a server running as more than one process says how many", () => {
+    expect(serverLine(client({ harness: "claude-code", processes: 2, state: "behind", kit: "a1" }), view).text).toBe("lumirpengine for claude-code on studio (2 processes) hasn't reloaded this build's tools yet.");
+    expect(serverLine(client({ harness: "claude-code", processes: 2 }), view).text).toBe("lumirpengine for claude-code on studio (2 processes) reloaded this build's tools.");
+    // One, or none heard from lately: nothing to count.
+    for (const processes of [0, 1]) expect(serverLine(client({ harness: "claude-code", processes }), view).text).toBe("lumirpengine for claude-code on studio reloaded this build's tools.");
   });
 
-  test("switched to the extension's own copy, an npm or npx one keeps the options after mcp", () => {
-    expect(extensionArgs(profiles[1] as McpProfile, CORE)).toEqual([CORE, "mcp", "--read-only"]);
-    expect(extensionArgs(profiles[2] as McpProfile, CORE)).toEqual([CORE, "mcp"]);
+  test("a server Lumiverse runs itself is a line like any other; once it reloads, the line says Lumiverse's MCP client keeps its old tool list until the server restarts, and where to restart it", () => {
+    const updated = serverLine(client({ harness: "lumiverse" }), view);
+    expect(updated).toMatchObject({ state: "updated", update: false, copy: [] });
+    expect(updated.text).toStartWith("lumirpengine for lumiverse on studio reloaded this build's tools, but Lumiverse's MCP client keeps its old tool list until the server restarts");
+    expect(updated.text).toContain("Lumiverse's Settings → MCP Servers, Disconnect it and Connect it again");
+    // Not yet: Update now reaches it as it does any other server.
+    expect(serverLine(client({ harness: "lumiverse", state: "behind", kit: "a1" }), view)).toMatchObject({ update: true, text: "lumirpengine for lumiverse on studio hasn't reloaded this build's tools yet." });
   });
 });

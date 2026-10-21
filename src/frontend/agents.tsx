@@ -1,72 +1,21 @@
 // The MCP servers that follow LumiRPEngine (DESIGN §23): the update notice at the top of the drawer
-// and Settings → MCP server. Each server's line comes from its last check-in (pushed as servers
-// check in, so a line turns as soon as one reloads); Update now asks one to reload. The servers
-// Lumiverse runs itself (Settings → MCP servers) are read from Lumiverse's own API, same-origin as
-// this page, and can be restarted or switched to the extension's own copy from here.
+// and Settings → MCP server. Each server's line comes from its check-ins (pushed as servers check
+// in, so a line turns as soon as one reloads); Update now asks one to reload. A server Lumiverse
+// runs itself checks in like any other: this page calls none of Lumiverse's own routes, which are
+// Lumiverse's rather than Spindle's, and a command set through them would run outside Spindle's sandbox.
 
-import { useEffect, useState } from "preact/hooks";
+import { useEffect } from "preact/hooks";
 import type { AgentsView } from "../shared/agents";
 import { useApp } from "./app";
 import type { App } from "./app";
-import type { McpProfile, ProfileKind } from "./agents-view";
-import { extensionArgs, lumirpengineProfiles, serverLine } from "./agents-view";
+import { serverLine } from "./agents-view";
 import { Banner, Button, Empty, List, ListRow, Section } from "./components";
 import { useSelect } from "./store";
-
-/** Lumiverse's MCP server routes (`/api/v1/mcp-servers`): the owner's or an admin's, with the page's own session. */
-async function lumiverse<T>(path: string, method: "GET" | "POST" | "PUT" = "GET", body?: unknown): Promise<T> {
-  const res = await fetch(new URL(`/api/v1/mcp-servers${path}`, location.origin), { method, credentials: "include", cache: "no-store", headers: { Accept: "application/json", ...(body !== undefined ? { "Content-Type": "application/json" } : {}) }, ...(body !== undefined ? { body: JSON.stringify(body) } : {}) });
-  if (!res.ok) throw new Error(res.status === 403 ? "Only Lumiverse's owner or an admin sees its MCP servers." : `Lumiverse answered ${res.status}.`);
-  return (await res.json()) as T;
-}
 
 function copy(app: App, text: string): void {
   void navigator.clipboard.writeText(text).then(
     () => app.toast("Copied"),
     () => app.toast("The clipboard refused the copy", "error"),
-  );
-}
-
-const KIND: Record<ProfileKind, string> = { extension: "runs the extension's own copy", npm: "runs an npm install of lumirpengine", npx: "runs lumirpengine with npx" };
-
-/** The servers Lumiverse runs itself: Restart, and for an npm or npx copy, a switch to the extension's own. */
-function LumiverseRun(props: { view: AgentsView }) {
-  const app = useApp();
-  const [found, setFound] = useState<{ profile: McpProfile; kind: ProfileKind }[] | string | null>(null);
-  const core = props.view.setup?.core ?? null;
-  const load = () =>
-    void lumiverse<{ data: McpProfile[] }>("?limit=1000").then(
-      (page) => setFound(lumirpengineProfiles(page.data, core)),
-      (error: unknown) => setFound(error instanceof Error ? error.message : String(error)),
-    );
-  useEffect(load, [core]);
-  if (found === null || (Array.isArray(found) && found.length === 0)) return null;
-  if (typeof found === "string") return <p class="lre-field-help" data-lre-lumiverse-mcp="unreadable">{`Lumiverse's own MCP servers can't be read here: ${found}`}</p>;
-  const restart = (id: string, name: string) =>
-    lumiverse(`/${id}/reconnect`, "POST").then(
-      () => app.toast(`${name} restarted`),
-      (error: unknown) => app.toast(`${name} didn't restart: ${error instanceof Error ? error.message : String(error)}`, "error"),
-    );
-  return (
-    <List>
-      {found.map(({ profile, kind }) => (
-        <div key={profile.id} data-lre-lumiverse-mcp={kind}>
-          <ListRow icon="refresh" title={`Lumiverse's “${profile.name}”`} subtitle={`${KIND[kind]}${profile.is_enabled ? "" : " (switched off)"}`} />
-          <div class="lre-row-actions">
-            {profile.is_enabled ? (
-              <Button size="sm" variant="secondary" onClick={() => void restart(profile.id, profile.name)}>
-                Restart
-              </Button>
-            ) : null}
-            {kind !== "extension" && core !== null ? (
-              <Button size="sm" variant="ghost" onClick={() => void lumiverse(`/${profile.id}`, "PUT", { command: "node", args: extensionArgs(profile, core) }).then(() => restart(profile.id, profile.name).then(load), (error: unknown) => app.toast(`${profile.name} wasn't switched: ${error instanceof Error ? error.message : String(error)}`, "error"))}>
-                Use the extension's copy
-              </Button>
-            ) : null}
-          </div>
-        </div>
-      ))}
-    </List>
   );
 }
 
@@ -123,7 +72,6 @@ export function UpdateNotice() {
       >
         <p>{`Now build ${view.notice.build} (it was ${view.notice.previous}). Your MCP servers:`}</p>
         <Servers view={view} />
-        <LumiverseRun view={view} />
       </Banner>
     </div>
   );
@@ -145,7 +93,7 @@ export function McpServerPage() {
         ) : (
           <div class="lre-field" data-lre-mcp-setup>
             <code class="lre-num">{view.setup.command}</code>
-            <span class="lre-field-help">{`Give your agent's harness this command for its lumirpengine server (claude mcp add lumirpengine -- ${view.setup.command}). It runs this extension's own copy, on the machine Lumiverse runs on, and takes each update's tools by itself. Sign in once first: node ${view.setup.core} login --url <your Lumiverse>.`}</span>
+            <span class="lre-field-help">{`Give your agent's harness this command for its lumirpengine server (claude mcp add lumirpengine -- ${view.setup.command}). It runs this extension's own copy, on the machine Lumiverse runs on, and takes each update's tools by itself. Sign in once first: node ${view.setup.core} login --url <your Lumiverse>. For Lumiverse itself to run it (its Settings → MCP Servers), add a Stdio server with the command node and the arguments ${view.setup.core}, mcp.`}</span>
             <Button size="sm" variant="secondary" icon="copy" onClick={() => copy(app, view.setup?.command ?? "")}>
               Copy
             </Button>
@@ -155,7 +103,6 @@ export function McpServerPage() {
       <Section title={`Your MCP servers (this is build ${view.build})`} flush>
         <Servers view={view} forget />
       </Section>
-      <LumiverseRun view={view} />
     </div>
   );
 }

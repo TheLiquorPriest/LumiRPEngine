@@ -1,8 +1,10 @@
 // Following the extension's agent kit (DESIGN §23). LumiRPEngine says which build it is, where its
-// kit is and what the kit hashes to. When that path is laid out as an installed extension's, the
-// file is on this machine, its sha256 is the one reported and its build isn't the loaded kit's, the
-// kit is imported from the very bytes that were hashed and becomes the server's. Anything else
-// keeps the tools already loaded, and says why. `--pin` keeps the bundled kit whatever is said.
+// kit is and what the kit hashes to. A kit that is followed runs with this user's rights, so it is
+// loaded only when the file, its symlinks resolved, is laid out as an installed extension's kit on
+// this machine, no other user can change it or the directories it sits in (on POSIX), its sha256
+// is the one reported and its build isn't the loaded kit's: then it is imported from the very bytes
+// that were hashed and becomes the server's. Anything else keeps the tools already loaded, and says
+// why. `--pin` keeps the bundled kit whatever is said.
 
 import type { FollowCode, KitReport } from "../shared/agents";
 import { KIT_API, kitPathProblem, NPM_INSTALL } from "../shared/agents";
@@ -10,10 +12,22 @@ import { isRecord } from "../shared/json";
 import type { AgentKit } from "./kit-api";
 import { kitOf } from "./kit-api";
 
-/** The machine side: the entry (main.ts) reads with Node's fs. */
+/** Who owns a file or directory, and its mode, as `stat` gives them. */
+export interface Owned {
+  uid: number;
+  mode: number;
+}
+
+/** The machine side: the entry (main.ts) does it with Node's fs. Each rejects with the system's error, whose `code` says why (ENOENT, EACCES…). */
 export interface KitFiles {
-  /** The file's bytes; rejects with the system's error, whose `code` says why (ENOENT, EACCES…). */
-  read(path: string): Promise<Uint8Array<ArrayBuffer>>;
+  /** The path with every symlink in it resolved. */
+  realpath(path: string): Promise<string>;
+  /** A directory's owner and mode: the entry's own, a symlink's rather than what it points to. */
+  stat(path: string): Promise<Owned>;
+  /** The file's bytes, with the owner and mode of the very file they were read from. */
+  read(path: string): Promise<Owned & { bytes: Uint8Array<ArrayBuffer> }>;
+  /** The user this process runs as, who (or root) must own a kit; null where owners aren't checked (Windows has no such mode bits). */
+  readonly uid: number | null;
 }
 
 export interface FollowState {
@@ -49,6 +63,27 @@ function reportOf(value: unknown): KitReport | null {
 async function sha256Of(bytes: Uint8Array<ArrayBuffer>): Promise<string> {
   const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", bytes));
   return [...digest].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+/** Write bits for the file's group and for others. */
+const SHARED_WRITE = 0o022;
+
+/** Only this user or root can change it: one of theirs, and writable by no one else. */
+function ownersOnly(entry: Owned, uid: number): boolean {
+  return (entry.uid === uid || entry.uid === 0) && (entry.mode & SHARED_WRITE) === 0;
+}
+
+/**
+ * The directories a kit at `real` (laid out as an installed extension's) sits in, from
+ * `extensions/` down to `dist/`: whoever can write one of them can put another file in its place.
+ */
+function kitDirs(real: string): string[] {
+  const dirs: string[] = [];
+  for (let at = real, i = 0; i < 4; i++) {
+    at = at.slice(0, Math.max(at.lastIndexOf("/"), at.lastIndexOf("\\")));
+    dirs.unshift(at);
+  }
+  return dirs;
 }
 
 export class KitFollower {
@@ -89,16 +124,30 @@ export class KitFollower {
     return true;
   }
 
-  /** Reads, checks and (when its build is another) imports the kit at `report.path`. */
+  /** Resolves, checks, reads and (when its build is another) imports the kit at `report.path`. */
   private async look(report: KitReport, build: string): Promise<Verdict> {
+    const { files, identifier } = this.options;
     let bytes: Uint8Array<ArrayBuffer>;
     try {
-      bytes = await this.options.files.read(report.path);
+      // Its symlinks resolved: a path laid out as an extension's kit can still lead anywhere.
+      const real = await files.realpath(report.path);
+      const problem = kitPathProblem(real, identifier);
+      if (problem !== null) return { code: "refused", text: `LumiRPEngine named ${report.path} as its tools, whose real path ${real} ${problem}, so it wasn't loaded` };
+      // Whoever can change the kit, or a directory it sits in, chooses the code this user runs: a file another user planted is never loaded.
+      const { uid } = files;
+      if (uid !== null) for (const dir of kitDirs(real)) if (!ownersOnly(await files.stat(dir), uid)) return { code: "unsafe", text: `${dir} can be changed by other users` };
+      // The owner is the very file's whose bytes these are, so nothing swapped in after the checks is read unchecked.
+      const file = await files.read(real);
+      if (uid !== null && !ownersOnly(file, uid)) return { code: "unsafe", text: `${real} can be changed by other users` };
+      bytes = file.bytes;
     } catch (error) {
       const code = isRecord(error) && typeof error.code === "string" ? error.code : "";
       if (code === "ENOENT" || code === "ENOTDIR") return { code: "elsewhere", text: `LumiRPEngine's tools aren't on this machine (${report.path}): this lumirpengine runs on another machine than Lumiverse, so update it there (${NPM_INSTALL})` };
       return { code: "unreadable", text: `LumiRPEngine's tools at ${report.path} can't be read here (${error instanceof Error ? error.message : String(error)}): run lumirpengine as a user who can read Lumiverse's extensions folder` };
     }
+    // The hash is LumiRPEngine's word for the kit its build was made with. It catches a kit read while
+    // it was being written, or rebuilt since LumiRPEngine started; it is no guard against LumiRPEngine
+    // itself, which can name any hash. That guard is the path and owner checks above.
     if ((await sha256Of(bytes)) !== report.sha256) return { code: "mismatch", text: `The kit at ${report.path} isn't the one the running LumiRPEngine was built with (its sha256 differs): its files changed since it started, so restart it in Lumiverse's Extensions tab` };
     if (build === this.kit.build) return { kit: null };
     let module: unknown;

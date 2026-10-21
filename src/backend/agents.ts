@@ -1,9 +1,11 @@
 // Outside MCP servers (DESIGN §23): this build and where its agent kit is, what each server checks
 // in with, and the notice after an update. A server's latest check-in (it is known by its name, its
-// machine and the harness that runs it) is kept in the user's storage with when it was seen. The
-// build the extension last started as is kept in extension storage, so starting as another one is
-// an update: each user's next page hello gets a notice for the top of the drawer, shown until
-// dismissed, and a toast once.
+// machine and the harness that runs it) is kept in the user's storage with when it was seen. Since
+// the extension started, each of a server's processes (a session of its own) is kept apart as well,
+// and a server stands as the one furthest behind of those heard from lately: one process that
+// reloaded doesn't make another that lags "updated". The build the extension last started as is
+// kept in extension storage, so starting as another one is an update: each user's next page hello
+// gets a notice for the top of the drawer, shown until dismissed, and a toast once.
 
 import type { AgentClientView, AgentState, AgentsView, FollowCode, KitReport } from "../shared/agents";
 import { CORE_FILE, followCommand, KIT_API, KIT_FILE, pathOfFileUrl } from "../shared/agents";
@@ -43,6 +45,11 @@ const USER_FILE = "agents.json";
 const CLIENTS_KEPT = 32;
 /** Open sessions remembered: one per server process. */
 const SESSIONS_KEPT = 256;
+/** How long a process counts toward its server's line after it last checked in or looked: two of its minute's looks. */
+const LIVE_MS = 120_000;
+
+/** A server's states, worst first: its line is its worst process's. One from before check-ins is a line of its own, never mixed with these. */
+const RANK: Record<AgentState, number> = { old: 0, cannot: 1, behind: 2, updated: 3 };
 
 /** The build the extension started as, and the one before it when that start was an update. */
 interface StartedAs {
@@ -63,6 +70,16 @@ interface StoredClient {
   seen: number;
 }
 
+/** One server process, as its own session last told the extension since it started. */
+interface Heard {
+  /** The server it checked in as. */
+  id: string;
+  /** Its latest check-in. */
+  client: StoredClient;
+  /** When it last checked in or looked, in ms since the epoch. */
+  seen: number;
+}
+
 interface UserAgents {
   v: 1;
   clients: Record<string, StoredClient>;
@@ -71,7 +88,7 @@ interface UserAgents {
   dismissed: string | null;
 }
 
-const FOLLOW_CODES: Record<FollowCode, true> = { pinned: true, unsupported: true, no_kit: true, kit_api: true, refused: true, elsewhere: true, unreadable: true, mismatch: true, broken: true };
+const FOLLOW_CODES: Record<FollowCode, true> = { pinned: true, unsupported: true, no_kit: true, kit_api: true, refused: true, unsafe: true, elsewhere: true, unreadable: true, mismatch: true, broken: true };
 
 const errorText = (error: unknown): string => (error instanceof Error ? error.message : String(error));
 
@@ -111,6 +128,16 @@ function stateOf(client: StoredClient, build: string): AgentState {
   return client.follows ? "behind" : "cannot";
 }
 
+/** Of a server's processes, the one furthest behind this build (the latest check-in of any level with it); null for none. */
+function worstOf(heard: readonly Heard[], build: string): Heard | null {
+  let worst: Heard | null = null;
+  for (const h of heard) {
+    const by = worst === null ? -1 : RANK[stateOf(h.client, build)] - RANK[stateOf(worst.client, build)];
+    if (by < 0 || (by === 0 && worst !== null && h.client.seen > worst.client.seen)) worst = h;
+  }
+  return worst;
+}
+
 export class Agents {
   /** Each user's file, read once. */
   private readonly users = new Map<UserId, Promise<UserAgents>>();
@@ -118,8 +145,8 @@ export class Agents {
   private readonly writes = new Map<UserId, Promise<void>>();
   /** Work not yet done (check-ins, notices), for `settle`. */
   private readonly working = new Set<Promise<void>>();
-  /** The server each open session checked in as, by `user \0 session`. */
-  private readonly sessions = new Map<string, string>();
+  /** Each open session's process, by `user \0 session`: the server it checked in as, what it said and when it was last heard. */
+  private readonly sessions = new Map<string, Heard>();
   private started: Promise<StartedAs>;
 
   constructor(
@@ -133,8 +160,8 @@ export class Agents {
   start(): void {
     this.started = this.compare();
     this.host.on("FRONTEND_SESSION_CLOSED", (e, userId) => {
+      // A closed session's process is gone: it no longer counts toward its server's line, and Settings → MCP server says which servers are connected.
       if (userId === null || !this.sessions.delete(`${userId}\u0000${e.frontendSessionId}`)) return;
-      // Settings → MCP server says which servers are connected.
       this.track(this.tell(userId), "the MCP servers' view wasn't sent");
     });
   }
@@ -186,8 +213,10 @@ export class Agents {
     // Known by its name, machine and harness: a restarted server, or another process of it, is the same one.
     const id = idOf(checkIn);
     if (session !== undefined) {
-      this.sessions.delete(`${userId}\u0000${session}`);
-      this.sessions.set(`${userId}\u0000${session}`, id);
+      // Each process says hello on a session of its own: its state is kept apart from its server's others.
+      const key = `${userId}\u0000${session}`;
+      this.sessions.delete(key);
+      this.sessions.set(key, { id, client: checkIn, seen: checkIn.seen });
       for (const oldest of this.sessions.keys()) {
         if (this.sessions.size <= SESSIONS_KEPT) break;
         this.sessions.delete(oldest);
@@ -222,7 +251,17 @@ export class Agents {
   }
 
   async request(r: AgentsRequest, userId: UserId, session: string | undefined): Promise<ResultBodies["lre.agents"]> {
-    if (r.op === "kit") return { build: this.build.id, kit: this.build.kit, known: session !== undefined && this.sessions.has(`${userId}\u0000${session}`) };
+    if (r.op === "kit") {
+      const heard = session === undefined ? undefined : this.sessions.get(`${userId}\u0000${session}`);
+      if (heard !== undefined) {
+        // A server's look is its process heard from. One that had gone quiet counts toward its line again, so its pages are told.
+        const now = this.now();
+        const quiet = now - heard.seen > LIVE_MS;
+        heard.seen = now;
+        if (quiet) this.track(this.tell(userId), "the MCP servers' view wasn't sent");
+      }
+      return { build: this.build.id, kit: this.build.kit, known: heard !== undefined };
+    }
     if (r.op === "update") {
       // To every session of the user, not the ones on record: after a restart the extension hasn't heard from a server again until its next check.
       if (typeof r.client === "string") this.host.frontend.send({ lre: PROTOCOL_VERSION, type: "lre.kit.reload", client: r.client }, userId);
@@ -245,16 +284,32 @@ export class Agents {
 
   private viewOf(userId: UserId, file: UserAgents, started: StartedAs): AgentsView {
     const prefix = `${userId}\u0000`;
+    const now = this.now();
     const connected = new Set<string>();
-    for (const [key, id] of this.sessions) if (key.startsWith(prefix)) connected.add(id);
+    /** Each server's processes heard from in the last LIVE_MS: a quiet one may be hung or asleep, and no longer says how its server stands. */
+    const live = new Map<string, Heard[]>();
+    for (const [key, heard] of this.sessions) {
+      if (!key.startsWith(prefix)) continue;
+      connected.add(heard.id);
+      if (now - heard.seen > LIVE_MS) continue;
+      const same = live.get(heard.id);
+      if (same) same.push(heard);
+      else live.set(heard.id, [heard]);
+    }
+    const build = this.build.id;
     const kit = this.build.kit;
     return {
-      build: this.build.id,
+      build,
       notice: started.previous !== null && file.dismissed !== started.build ? { build: started.build, previous: started.previous, at: started.at } : null,
       setup: kit === null ? null : { core: kit.core, command: followCommand(kit.core) },
       clients: Object.entries(file.clients)
         .sort(([, a], [, b]) => b.seen - a.seen)
-        .map(([id, client]): AgentClientView => ({ id, ...client, connected: connected.has(id), state: stateOf(client, this.build.id) })),
+        .map(([id, stored]): AgentClientView => {
+          const heard = live.get(id) ?? [];
+          // None heard lately (after a restart, or all quiet): the last check-in says how it stands.
+          const client = worstOf(heard, build)?.client ?? stored;
+          return { id, ...client, seen: stored.seen, connected: connected.has(id), processes: heard.length, state: stateOf(client, build) };
+        }),
     };
   }
 
