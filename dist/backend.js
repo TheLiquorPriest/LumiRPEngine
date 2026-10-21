@@ -6632,6 +6632,98 @@ function readClaims(raw) {
   return mode ? { mode, capped: raw.capped === true } : null;
 }
 
+// src/shared/inferred.ts
+var INFER_MODES = ["off", "suggest", "auto"];
+var INFER_WHENS = ["uncertain", "risky", "tries"];
+var INFER_WHOS = ["pov", "companions", "everyone"];
+var INFER_DETAILS = ["result", "margin", "roll"];
+var INFER_OTHERS = ["hidden", "shown"];
+var INFER_MODE_LABEL = { off: "Off", suggest: "Suggest a roll", auto: "Roll automatically" };
+var DIFFICULTY_BANDS = [
+  { id: "trivial", label: "Trivial", dc: 5 },
+  { id: "easy", label: "Easy", dc: 8 },
+  { id: "moderate", label: "Moderate", dc: 10 },
+  { id: "tricky", label: "Tricky", dc: 12 },
+  { id: "hard", label: "Hard", dc: 15 },
+  { id: "very_hard", label: "Very hard", dc: 20 },
+  { id: "heroic", label: "Heroic", dc: 25 },
+  { id: "nearly_impossible", label: "Nearly impossible", dc: 30 }
+];
+var INFERRED_BOUNDS = {
+  most: [1, 12],
+  guidance: 240,
+  skills: 64,
+  skillId: 64
+};
+var DEFAULT_GUIDANCE = { pass: "Narrate it succeeding.", fail: "Narrate it failing." };
+var INFERRED_PRESETS = {
+  story: { mode: "suggest", when: "tries", who: "pov", skills: null, difficulty: { lowest: "easy", highest: "hard" }, detail: "result", others: "hidden", guidance: { ...DEFAULT_GUIDANCE }, most: 1 },
+  grounded: { mode: "auto", when: "risky", who: "companions", skills: null, difficulty: { lowest: "easy", highest: "very_hard" }, detail: "result", others: "hidden", guidance: { ...DEFAULT_GUIDANCE }, most: 3 },
+  simulation: { mode: "auto", when: "uncertain", who: "everyone", skills: null, difficulty: { lowest: "easy", highest: "heroic" }, detail: "margin", others: "hidden", guidance: { ...DEFAULT_GUIDANCE }, most: 6 }
+};
+function inferredDefaults(preset, sheets) {
+  const named = preset !== "custom" ? preset : sheets <= 1 ? "story" : sheets === 2 ? "grounded" : "simulation";
+  const out = structuredClone(INFERRED_PRESETS[named]);
+  if (sheets === 0)
+    out.mode = "off";
+  if (sheets <= 1)
+    out.detail = "result";
+  else if (sheets === 2 && out.detail === "roll")
+    out.detail = "margin";
+  return out;
+}
+function oneOf2(v, values, fallback) {
+  return values.find((x) => x === v) ?? fallback;
+}
+function line(v, fallback) {
+  const s = typeof v === "string" ? v.replace(/\s+/g, " ").trim() : "";
+  return s === "" ? fallback : s.slice(0, INFERRED_BOUNDS.guidance);
+}
+function skillList(v, fallback) {
+  if (v === null)
+    return null;
+  if (!Array.isArray(v))
+    return fallback;
+  const ids = v.flatMap((s) => typeof s === "string" && s.trim() !== "" && s.trim().length <= INFERRED_BOUNDS.skillId ? [s.trim()] : []);
+  return [...new Set(ids)].slice(0, INFERRED_BOUNDS.skills);
+}
+var bandAt = (id) => DIFFICULTY_BANDS.findIndex((b) => b.id === id);
+function readInferred(raw) {
+  if (!isRecord(raw))
+    return null;
+  const mode = INFER_MODES.find((m) => m === raw.mode);
+  if (!mode)
+    return null;
+  const base = INFERRED_PRESETS.grounded;
+  const d = isRecord(raw.difficulty) ? raw.difficulty : {};
+  const ids = DIFFICULTY_BANDS.map((b) => b.id);
+  const a = oneOf2(d.lowest, ids, base.difficulty.lowest);
+  const b = oneOf2(d.highest, ids, base.difficulty.highest);
+  const g = isRecord(raw.guidance) ? raw.guidance : {};
+  const [lo, hi] = INFERRED_BOUNDS.most;
+  return {
+    mode,
+    when: oneOf2(raw.when, INFER_WHENS, base.when),
+    who: oneOf2(raw.who, INFER_WHOS, base.who),
+    skills: skillList(raw.skills, base.skills),
+    difficulty: bandAt(a) <= bandAt(b) ? { lowest: a, highest: b } : { lowest: b, highest: a },
+    detail: oneOf2(raw.detail, INFER_DETAILS, base.detail),
+    others: oneOf2(raw.others, INFER_OTHERS, base.others),
+    guidance: { pass: line(g.pass, DEFAULT_GUIDANCE.pass), fail: line(g.fail, DEFAULT_GUIDANCE.fail) },
+    most: typeof raw.most === "number" && Number.isFinite(raw.most) ? Math.min(hi, Math.max(lo, Math.round(raw.most))) : base.most
+  };
+}
+function bandsWithin(policy) {
+  return DIFFICULTY_BANDS.slice(bandAt(policy.difficulty.lowest), bandAt(policy.difficulty.highest) + 1);
+}
+function clampBand(policy, said) {
+  const text = typeof said === "string" ? said.trim().toLowerCase().replace(/[\s-]+/g, "_") : "";
+  const n = typeof said === "number" ? said : text !== "" && Number.isFinite(Number(text)) ? Number(text) : null;
+  const named = n !== null ? DIFFICULTY_BANDS.findLastIndex((b) => b.dc <= n) : DIFFICULTY_BANDS.findIndex((b) => b.id === text);
+  const index = Math.min(bandAt(policy.difficulty.highest), Math.max(bandAt(policy.difficulty.lowest), n !== null ? Math.max(0, named) : named < 0 ? bandAt("moderate") : named));
+  return DIFFICULTY_BANDS[index] ?? { id: "moderate", label: "Moderate", dc: 10 };
+}
+
 // src/shared/ledger.ts
 var LEDGER_NAMESPACE = "lumi_rp_engine";
 var ROOT_PATH = "00000000000000000000000000000000";
@@ -7555,6 +7647,10 @@ function validMarkerBody(raw) {
       const to = readClaims(raw.to);
       return to ? { kind: "claims", to } : null;
     }
+    case "infer": {
+      const to = readInferred(raw.to);
+      return to ? { kind: "infer", to } : null;
+    }
     default:
       return null;
   }
@@ -7634,6 +7730,9 @@ function applyMarker(state, raw, env) {
       return [];
     case "claims":
       state.claims = body.to;
+      return [];
+    case "infer":
+      state.inferred = body.to;
       return [];
   }
 }
@@ -25584,6 +25683,652 @@ function checkView(a, retry) {
   return { ...parts.length > 0 ? { detail: parts.join(" \xB7 ") } : {}, ...a.odds && (rolls || v?.why === "story") ? { odds: Object.entries(a.odds).map(([outcome, p]) => ({ outcome, p })) } : {} };
 }
 
+// src/shared/tables.ts
+function tableChoices(table) {
+  if (!table || typeof table.rows !== "object" || table.rows === null)
+    return [];
+  return Object.entries(table.rows).map(([key, row]) => {
+    const label = typeof row === "object" && row !== null && !Array.isArray(row) ? row.label : undefined;
+    return { key, label: typeof label === "string" && label.trim() !== "" ? label : key.replace(/_/g, " ") };
+  });
+}
+function tableRowKey(table, text) {
+  const said = text.trim().toLowerCase();
+  const hit = tableChoices(table).find((c) => c.key.toLowerCase() === said || c.label.toLowerCase() === said);
+  return hit ? hit.key : null;
+}
+
+// src/engine/realism.ts
+function all(level) {
+  return Object.fromEntries(DOMAINS.map((d) => [d, level]));
+}
+var REALISM_PRESETS = {
+  story: {
+    levels: { money: 1, gear: 1, vehicles: 1, castlife: 1, relationships: 1, space: 2, calendar: 2, weather: 1, sheets: 1 },
+    tierCaps: { principal: {}, supporting: {}, background: {} }
+  },
+  grounded: {
+    levels: { money: 2, gear: 2, vehicles: 2, castlife: 2, relationships: 2, space: 2, calendar: 3, weather: 2, sheets: 2 },
+    tierCaps: { principal: {}, supporting: {}, background: all(1) }
+  },
+  simulation: {
+    levels: { money: 4, gear: 4, vehicles: 4, castlife: 4, relationships: 4, space: 4, calendar: 4, weather: 3, sheets: 3 },
+    tierCaps: { principal: all(4), supporting: all(3), background: all(2) }
+  }
+};
+function capOf(caps, band, domain) {
+  return caps[band][domain] ?? 4;
+}
+function presetOf(realism) {
+  for (const [id, p] of Object.entries(REALISM_PRESETS)) {
+    const same = DOMAINS.every((d) => p.levels[d] === realism.levels[d] && BANDS.every((b) => capOf(p.tierCaps, b, d) === capOf(realism.tierCaps, b, d)));
+    if (same)
+      return id;
+  }
+  return "custom";
+}
+function claimsOf(world, state) {
+  if (state.claims)
+    return state.claims;
+  const preset = presetOf(state.realism);
+  return readClaims(world.realism.claims) ?? { ...preset === "custom" ? DEFAULT_CLAIMS : CLAIM_PRESETS[preset] };
+}
+function predicates(world, reg) {
+  const out = [];
+  for (const [id, r] of Object.entries(world.rules)) {
+    if (r.when)
+      out.push({ where: "rule", id, expr: r.when });
+    if ("at" in r.on)
+      out.push({ where: "rule", id, expr: r.on.at });
+  }
+  for (const r of reg.rules)
+    if (r.when && !world.rules[r.id])
+      out.push({ where: "rule", id: r.id, expr: r.when });
+  for (const [id, t] of Object.entries(world.tracks)) {
+    for (const s of Object.values(t.stages)) {
+      for (const n of s.next)
+        out.push({ where: "track", id, expr: n.when });
+      if (s.fail)
+        out.push({ where: "track", id, expr: s.fail.when });
+      if (s.gate)
+        out.push({ where: "track", id, expr: s.gate });
+      for (const o of s.objectives ?? [])
+        out.push({ where: "track", id, expr: objectiveWhen(o) });
+    }
+  }
+  for (const [id, a] of Object.entries(world.actions))
+    for (const req of a.requires)
+      out.push({ where: "action", id, expr: req });
+  return out;
+}
+function fieldsAbove(reg, world, domain, level) {
+  const out = new Set;
+  const kinds = new Set([...Object.keys(world.kinds), ...reg.kinds.keys()]);
+  for (const k of kinds)
+    for (const [name, f] of Object.entries(kindFields(reg, world, k)))
+      if (f.domain === domain && (f.level ?? 0) > level)
+        out.add(name);
+  return out;
+}
+function frozenPredicates(reg, world, domain, level) {
+  const fields = fieldsAbove(reg, world, domain, level);
+  const out = [];
+  if (fields.size === 0)
+    return out;
+  for (const p of predicates(world, reg)) {
+    let names;
+    try {
+      names = identifiers(p.expr);
+    } catch {
+      continue;
+    }
+    for (const n of names)
+      if (fields.has(n))
+        out.push({ ...p, field: n });
+  }
+  return out;
+}
+
+// src/engine/resolve.ts
+function findAction(reg, world, id) {
+  return own(world.actions, id) ?? reg.actions.get(id);
+}
+function prepare(reg, world, state, req) {
+  const action = typeof req.action === "string" ? findAction(reg, world, req.action) : req.action;
+  if (!action)
+    return { code: "unknown_action", reason: `no action ${String(req.action)}` };
+  const actor = req.actor ?? world.pov;
+  if (!own(state.entities, actor))
+    return { code: "missing_actor", reason: `no entity ${labelOf({ world, state }, actor)}` };
+  const bindings = { self: actor, actor };
+  const params = {};
+  const given = req.params ?? {};
+  for (const [name, def] of Object.entries(action.params)) {
+    const raw = own(given, name);
+    if (raw === undefined || raw === null || raw === "") {
+      if (!def.optional)
+        return { code: "missing_param", reason: `${action.label} needs ${def.label ?? name}` };
+      continue;
+    }
+    if (def.type === "ref") {
+      const id = String(raw);
+      const target = own(state.entities, id);
+      if (!target) {
+        if (own(world.places, id)) {
+          params[name] = id;
+          continue;
+        }
+        return { code: "bad_param", reason: `no entity ${labelOf({ world, state }, id)}` };
+      }
+      if (def.ref && !kindIs(reg, world, target.kind, def.ref))
+        return { code: "bad_param", reason: `${target.name} is not ${/^[aeiou]/i.test(def.ref) ? "an" : "a"} ${(reg.kinds.get(def.ref)?.label ?? own(world.kinds, def.ref)?.label ?? def.ref).toLowerCase()}` };
+      if (def.of && !selectorMatches(reg, world, state, def.of, id))
+        return { code: "bad_param", reason: `${target.name} can't be the ${(def.label ?? name).replace(/_/g, " ").toLowerCase()} of ${action.label}` };
+      bindings[name] = id;
+      params[name] = id;
+      continue;
+    }
+    if (def.type === "text" && def.table !== undefined) {
+      const key = typeof raw === "string" ? tableRowKey(own(world.tables, def.table), raw) : null;
+      if (key === null)
+        return { code: "bad_param", reason: `${String(raw)} isn't one of the ${(def.label ?? name).toLowerCase()}s here` };
+      params[name] = key;
+      continue;
+    }
+    if ((def.type === "number" || def.type === "money" || def.type === "duration") && typeof raw !== "number")
+      return { code: "bad_param", reason: `${name} must be a number` };
+    const v = toValue(raw);
+    if (v === undefined)
+      return { code: "bad_param", reason: `${name} must be a scalar` };
+    params[name] = v;
+  }
+  const scalars = Object.fromEntries(Object.entries(params).filter(([name]) => !Object.prototype.hasOwnProperty.call(bindings, name)));
+  const absent = Object.fromEntries(Object.keys(action.params).filter((name) => !(name in params)).map((name) => [name, null]));
+  const extra = req.vars ?? {};
+  const more = typeof extra.params === "object" && extra.params !== null ? extra.params : {};
+  const vars = { ...scalars, ...extra, params: { ...absent, ...params, ...more } };
+  return { action, actor, bindings, vars, params };
+}
+function firstUnmet(action, env) {
+  for (const req of action.requires)
+    if (!truthy2(evalExpr(req, env, false)))
+      return req;
+  return null;
+}
+function combatSpend(ctx, actor, action) {
+  return action.combat ? optionalService(ctx, "combat.spend")?.(ctx, actor, action) ?? { code: "no_combat", reason: "this world has no combat" } : [];
+}
+function actionOdds(reg, world, state, req) {
+  const p = prepare(reg, world, state, req);
+  if ("code" in p)
+    return { available: false, failed: p, odds: null, modifier: 0, check: null, duration: 0, verdict: null };
+  const ctx = reg.context(world, state);
+  const env = scopeEnv({ reg, ctx, bindings: p.bindings, vars: p.vars });
+  const unmet = firstUnmet(p.action, env);
+  const def = checkOf(world, p.action.check);
+  const ready = def ? readyCheck(reg, ctx, def, p.bindings, p.vars) : null;
+  const usable = ready && !("code" in ready) ? ready : null;
+  const odds = usable ? checkOdds(usable) : null;
+  const spend = combatSpend(ctx, p.actor, p.action);
+  const refused = Array.isArray(spend) ? null : spend;
+  return {
+    available: unmet === null && refused === null && usable === ready,
+    failed: unmet !== null ? { code: "requirement", reason: `requires ${unmet}`, requirement: unmet } : refused ?? (ready && "code" in ready ? ready : null),
+    odds,
+    modifier: usable?.modifier ?? 0,
+    check: usable ? { notation: usable.notation, advantage: usable.advantage, dc: usable.dc, opponent: usable.opponent } : null,
+    duration: Math.max(0, Math.round(Number(evalExpr(p.action.duration, env, 0)) || 0)),
+    verdict: usable && odds ? verdictOf(policyFor(world, state, p.action, p.actor), { registry: reg, world, state, action: p.action, actor: p.actor, params: p.params, ready: usable, odds }) : null
+  };
+}
+function resolveAction(reg, w, req, rng, opts = {}) {
+  const start = w.events.length;
+  const actionId = typeof req.action === "string" ? req.action : req.action.id;
+  const p = prepare(reg, w.world, w.state, req);
+  const base = {
+    action: actionId,
+    actor: req.actor ?? w.world.pov,
+    ok: false,
+    failed: null,
+    check: null,
+    outcome: null,
+    events: [],
+    rejected: [],
+    duration: 0,
+    activity: null,
+    observable: null,
+    adjudged: null
+  };
+  if ("code" in p)
+    return { ...base, failed: p };
+  if (opts.runSeed !== undefined) {
+    const participants = [p.actor, ...Object.values(p.bindings)].filter((id, i, all) => all.indexOf(id) === i);
+    for (const id of participants)
+      materializeAll(reg, w, id, opts.runSeed);
+  }
+  const env = scopeEnv({ reg, ctx: w.ctx, bindings: p.bindings, vars: p.vars });
+  const unmet = firstUnmet(p.action, env);
+  if (unmet !== null)
+    return { ...base, actor: p.actor, failed: { code: "requirement", reason: `requires ${unmet}`, requirement: unmet }, events: w.events.slice(start) };
+  const duration = Math.max(0, Math.round(Number(evalExpr(p.action.duration, env, 0)) || 0));
+  let activity = null;
+  if (p.action.activity) {
+    const until = Number(evalExpr(p.action.activity.until, env, w.state.clock + duration));
+    activity = { type: p.action.activity.type, until: Math.max(w.state.clock, Math.round(Number.isFinite(until) ? until : w.state.clock + duration)) };
+  }
+  const checkDef = checkOf(w.world, p.action.check);
+  const ready = checkDef ? readyCheck(reg, w.ctx, checkDef, p.bindings, p.vars) : null;
+  if (ready && "code" in ready)
+    return { ...base, actor: p.actor, failed: ready, events: w.events.slice(start) };
+  const spend = combatSpend(w.ctx, p.actor, p.action);
+  const refused = Array.isArray(spend) ? spend.map((ev) => w.apply(ev)).find((r) => r !== null) ?? null : spend;
+  if (refused)
+    return { ...base, actor: p.actor, failed: refused, events: w.events.slice(start) };
+  let check = null;
+  let outcome;
+  let vars = p.vars;
+  let adjudged = null;
+  if (checkDef && ready) {
+    const odds = checkOdds(ready);
+    const policy = policyFor(w.world, w.state, p.action, p.actor);
+    const verdict = verdictOf(policy, { registry: reg, world: w.world, state: w.state, action: p.action, actor: p.actor, params: p.params, ready, odds });
+    const judgement = opts.judgement ?? null;
+    const place = placeOfEntity(w.state, p.actor);
+    let close = null;
+    const story = verdict.why === "story" ? judgedOutcome(judgement, outcomeChoices(p.action, Object.keys(odds)), rng.fork("judge")) : null;
+    const rolls = verdict.roll || verdict.why === "story" && story === null;
+    const why = rolls ? null : verdict.why;
+    if (rolls) {
+      const shift = verdict.roll ? approachShift(policy, judgement) : null;
+      const shifted = shift ? readyCheck(reg, w.ctx, checkDef, p.bindings, p.vars, shift) : ready;
+      const rolling = "code" in shifted ? ready : shifted;
+      const rolled = rollCheck(rolling, rng.fork("check"));
+      check = { ...rolled, check: checkDef, notation: rolling.notation, modifier: rolling.modifier, advantage: rolling.advantage, dc: rolling.dc, odds: rolling === ready ? odds : checkOdds(rolling) };
+      outcome = rolled.outcome;
+      vars = { ...p.vars, roll: rollVars(rolling, rolled) };
+      if (policy.authority === "hybrid")
+        close = closeCall(rolling, rolled, rolled.outcome, policy.closeBy);
+    } else {
+      outcome = story ?? verdict.outcome ?? passOutcome(p.action, ready, odds, verdict.pass);
+      vars = { ...p.vars, roll: { natural: null, total: null, modifier: ready.modifier, dc: ready.dc, margin: null, outcome } };
+    }
+    if (!plainRolling(policy)) {
+      const approach = judgement && (policy.authority === "narrative" ? why === "story" : verdict.roll && policy.description.weight !== "none") ? { rating: ratingOf(policy, judgement), max: policy.description.max, reason: judgement.reason } : null;
+      adjudged = { rolled: rolls, why, chance: verdict.chance, pass: verdict.pass, authority: policy.authority, retry: policy.retry, approach, close };
+      const tracked = policy.retry !== "free" && verdict.pass.length > 0 && verdict.why !== "retry";
+      const round = tracked ? fightRound(w.ctx) : null;
+      w.apply({
+        type: ENGINE_EVENTS.adjudged,
+        data: {
+          actor: p.actor,
+          action: p.action.id,
+          check: checkDef.id ?? "",
+          outcome,
+          rolled: rolls,
+          ...why ? { why } : {},
+          ...approach ? { rating: approach.rating, max: approach.max, reason: approach.reason.slice(0, 240) } : {},
+          ...close ? { close: close.outcome } : {},
+          ...tracked ? { key: tryKey(p.actor, p.action.id, p.params), place, failed: !verdict.pass.includes(outcome), odds: oddsSignature(ready), ...round !== null ? { round } : {} } : {}
+        }
+      });
+    }
+  } else {
+    outcome = Object.prototype.hasOwnProperty.call(p.action.outcomes, "default") ? "default" : Object.keys(p.action.outcomes)[0] ?? "default";
+  }
+  const effects = own(p.action.outcomes, outcome) ?? [];
+  const result = applyEffects(reg, w, effects, { bindings: p.bindings, vars, params: p.params, rng: rng.fork("effects") });
+  if (activity) {
+    w.apply({ type: "set", entity: p.actor, field: "activity", value: activity.type });
+    w.apply({ type: "set", entity: p.actor, field: "activity_until", value: activity.until });
+  }
+  return {
+    ...base,
+    actor: p.actor,
+    ok: true,
+    check,
+    outcome,
+    events: w.events.slice(start),
+    rejected: result.rejected,
+    duration,
+    activity,
+    observable: p.action.observable ?? null,
+    adjudged
+  };
+}
+function paramCandidates(reg, world, state, action, param, actor = world.pov) {
+  const def = own(action.params, param);
+  if (!def || def.type !== "ref")
+    return [];
+  const here = placeOfEntity(state, actor);
+  if (def.ref === "place")
+    return placeCandidates(reg, world, state, actor);
+  const filters = candidateFilters(action, param);
+  const ctx = filters.length > 0 ? reg.context(world, state) : null;
+  const out = [];
+  for (const id of Object.keys(state.entities).sort()) {
+    if (id === actor)
+      continue;
+    const e = own(state.entities, id);
+    if (!e || isGone(state, id))
+      continue;
+    if (def.ref && !kindIs(reg, world, e.kind, def.ref))
+      continue;
+    if (def.of && !selectorMatches(reg, world, state, def.of, id))
+      continue;
+    if (placeOfEntity(state, id) !== here && !e.relations.some((r) => r.to === actor) && !heldBy(state.entities, id, actor))
+      continue;
+    if (!canSeeEntity(reg, world, state, actor, id))
+      continue;
+    if (ctx && !filters.every((f) => truthy2(evalExpr(f, scopeEnv({ reg, ctx, bindings: { self: actor, [param]: id } }), false))))
+      continue;
+    out.push(id);
+  }
+  return out;
+}
+function placeCandidates(reg, world, state, actor = world.pov) {
+  const here = placeOfEntity(state, actor);
+  const near = new Set(Object.values(world.routes).flatMap((r) => r.from === here ? [r.to] : r.to === here && r.bidirectional ? [r.from] : []));
+  const parent = here ? own(world.places, here)?.parent : undefined;
+  if (parent)
+    near.add(parent);
+  for (const p of Object.values(world.places))
+    if (here && p.parent === here)
+      near.add(p.id);
+  const name = (id) => own(world.places, id)?.name ?? id;
+  return Object.keys(world.places).filter((id) => id !== here && canSeePlace(reg, world, state, actor, id)).sort((a, b) => Number(near.has(b)) - Number(near.has(a)) || name(a).localeCompare(name(b)));
+}
+var EXPR_WORDS = new Set(["and", "or", "not", "true", "false", "null", "self"]);
+function candidateFilters(action, param) {
+  const named = new RegExp(`(?<![\\w.])${param.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`);
+  return action.requires.filter((req) => {
+    const bare = req.replace(/'[^']*'|"[^"]*"/g, "''");
+    if (!named.test(bare))
+      return false;
+    for (const m of bare.matchAll(/(\.?)\b([A-Za-z_][A-Za-z0-9_]*)\b(\s*\()?/g)) {
+      const [, dot, name, call] = m;
+      if (call || dot === ".")
+        continue;
+      if (name !== param && !EXPR_WORDS.has(name ?? ""))
+        return false;
+    }
+    return true;
+  });
+}
+
+// src/engine/inferred.ts
+var TRY_ACTION = "try";
+function inferredOf(world, state) {
+  return state.inferred ?? readInferred(world.ruleset?.inferred) ?? inferredDefaults(presetOf(state.realism), rulesetFloor(world, "sheets", state.realism.levels.sheets));
+}
+function skillParam(reg, world, state, action) {
+  const params = Object.entries(action.params).filter(([name]) => name !== "difficulty");
+  const [entry] = params;
+  if (!entry || params.length !== 1 || action.params.difficulty?.type !== "text")
+    return null;
+  const [param, def] = entry;
+  if (def.type !== "text")
+    return null;
+  if (def.table !== undefined)
+    return { param, rows: tableChoices(own(world.tables, def.table)).map((c) => ({ id: c.key, label: c.label })) };
+  if (action.pack === "sheets" && action.id === "attempt" && param === "stat" && world.ruleset?.sheet === undefined) {
+    const ctx = reg.context(world, state);
+    return { param, rows: optionalQuery(ctx, "sheets.stats")?.(ctx) ?? [] };
+  }
+  return null;
+}
+function skillSources(reg, world, state, gated = true) {
+  const env = scopeEnv({ reg, ctx: reg.context(world, state), bindings: { self: world.pov, actor: world.pov } });
+  const actions = [...Object.values(world.actions), ...[...reg.actions.values()].filter((a) => !own(world.actions, a.id))];
+  const ready = actions.filter((a) => offersAction(world, a) && a.combat === undefined && checkOf(world, a.check) !== null && (!gated || a.requires.every((r) => truthy2(evalExpr(r, env, false)))));
+  const ordered = [...ready.filter((a) => a.requires.length === 0), ...ready.filter((a) => a.requires.length > 0)];
+  const out = [];
+  const seen = new Set;
+  for (const action of ordered) {
+    const named = skillParam(reg, world, state, action);
+    for (const row of named?.rows ?? []) {
+      if (seen.has(row.id))
+        continue;
+      seen.add(row.id);
+      out.push({ ...row, action, param: named?.param ?? "" });
+    }
+  }
+  return out;
+}
+function worldSkills(reg, world, state) {
+  return skillSources(reg, world, state).map(({ id, label }) => ({ id, label }));
+}
+var GUIDANCE_PLACEHOLDERS = new Set(["who", "skill", "attempt", "against"]);
+function lintInferred(world, reg) {
+  const raw = isRecord(world.ruleset) ? world.ruleset.inferred : undefined;
+  if (raw === undefined)
+    return [];
+  const at = "ruleset.inferred";
+  const unset = "Until it does, inferred checks play as unset, by each chat's realism preset.";
+  if (!isRecord(raw))
+    return [{ severity: "error", path: at, code: "inferred", message: `Inferred checks must be an object with a mode. ${unset}` }];
+  const policy = readInferred(raw);
+  if (!policy)
+    return [{ severity: "error", path: `${at}.mode`, code: "inferred", message: `${raw.mode === undefined ? "It names no mode" : `"${String(raw.mode)}" isn't a mode`}: use off, suggest or auto. ${unset}` }];
+  const issues = [];
+  const warn = (path, code, message) => void issues.push({ severity: "warning", path: `${at}${path}`, code, message });
+  const plays = (key, given, value) => warn(`.${key}`, "inferred_value", `${key} can't be ${JSON.stringify(given)}; it plays as ${JSON.stringify(value)}.`);
+  const choices = [["when", raw.when, INFER_WHENS, policy.when], ["who", raw.who, INFER_WHOS, policy.who], ["detail", raw.detail, INFER_DETAILS, policy.detail], ["others", raw.others, INFER_OTHERS, policy.others]];
+  for (const [key, given, values, value] of choices)
+    if (given !== undefined && !values.includes(String(given)))
+      plays(key, given, value);
+  const [lo, hi] = INFERRED_BOUNDS.most;
+  if (raw.most !== undefined && raw.most !== policy.most)
+    warn(".most", "inferred_value", `Rolls a turn are a whole number from ${lo} to ${hi}: ${JSON.stringify(raw.most)} plays as ${policy.most}.`);
+  const ids = DIFFICULTY_BANDS.map((b) => b.id);
+  const d = isRecord(raw.difficulty) ? raw.difficulty : {};
+  if (raw.difficulty !== undefined && !isRecord(raw.difficulty))
+    plays("difficulty", raw.difficulty, policy.difficulty);
+  const bound = (key) => {
+    const given = d[key];
+    const index = ids.findIndex((id) => id === given);
+    if (given !== undefined && index < 0)
+      plays(`difficulty.${key}`, given, INFERRED_PRESETS.grounded.difficulty[key]);
+    return index < 0 ? ids.indexOf(INFERRED_PRESETS.grounded.difficulty[key]) : index;
+  };
+  const lowest = bound("lowest");
+  const highest = bound("highest");
+  if (lowest > highest)
+    warn(".difficulty", "inferred_difficulty", `The easiest band, ${DIFFICULTY_BANDS[lowest]?.label}, is above the hardest, ${DIFFICULTY_BANDS[highest]?.label}: they play swapped, from ${DIFFICULTY_BANDS[highest]?.label} to ${DIFFICULTY_BANDS[lowest]?.label}.`);
+  if (raw.skills !== undefined && raw.skills !== null && !Array.isArray(raw.skills))
+    plays("skills", raw.skills, policy.skills);
+  if (Array.isArray(raw.skills)) {
+    for (const s of raw.skills)
+      if (typeof s !== "string" || s.trim() === "" || s.trim().length > INFERRED_BOUNDS.skillId)
+        warn(".skills", "inferred_value", `${JSON.stringify(s)} isn't a skill's id, so it's left out.`);
+    const sheet = new Set(skillSources(reg, world, initialState(world, "lint", reg), false).map((s) => s.id));
+    for (const id of policy.skills ?? [])
+      if (!sheet.has(id))
+        warn(".skills", "inferred_skill", `"${id}" isn't a skill the world's sheet has, so no attempt rolls it.`);
+  }
+  if (raw.guidance !== undefined && !isRecord(raw.guidance))
+    plays("guidance", raw.guidance, policy.guidance);
+  const guidance = isRecord(raw.guidance) ? raw.guidance : {};
+  for (const key of ["pass", "fail"]) {
+    const given = guidance[key];
+    if (given === undefined)
+      continue;
+    if (typeof given !== "string") {
+      plays(`guidance.${key}`, given, policy.guidance[key]);
+      continue;
+    }
+    const text = given.replace(/\s+/g, " ").trim();
+    if (text.length > INFERRED_BOUNDS.guidance)
+      warn(`.guidance.${key}`, "inferred_value", `A guidance line holds at most ${INFERRED_BOUNDS.guidance} characters; this one's ${text.length} are cut there.`);
+    for (const [, name] of text.matchAll(/\{([^{}]*)\}/g))
+      if (!GUIDANCE_PLACEHOLDERS.has(name ?? ""))
+        warn(`.guidance.${key}`, "inferred_guidance", `{${name}} isn't a placeholder ({who}, {skill}, {attempt} or {against}), so the narrator is told it as written.`);
+  }
+  return issues;
+}
+function rolledByTry(action, sources) {
+  return action.pack === "sheets" && action.id === "attempt" || sources.some((s) => s.action.id === action.id);
+}
+function allowedSkills(policy, skills) {
+  return policy.skills === null ? [...skills] : skills.filter((s) => policy.skills?.includes(s.id) === true);
+}
+function skillNamed(sources, said) {
+  const t = said.trim().toLowerCase();
+  return sources.find((s) => s.id === said.trim()) ?? sources.find((s) => s.id.toLowerCase() === t || s.label.toLowerCase() === t);
+}
+var ATTEMPT_CHARS = 160;
+var PEOPLE = 8;
+function idsOf(v) {
+  const items = Array.isArray(v) ? v : typeof v === "string" ? v.split(",") : [];
+  return items.flatMap((x) => typeof x === "string" && x.trim() !== "" ? [x.trim()] : []);
+}
+function tryRead(params) {
+  const attempt = typeof params.attempt === "string" ? params.attempt.replace(/\s+/g, " ").trim() : "";
+  const rawAgainst = Array.isArray(params.against) ? params.against : idsOf(params.against);
+  const against = [];
+  for (const x of rawAgainst) {
+    const [who = "", skill = ""] = typeof x === "string" ? x.split(":").map((s) => s.trim()) : isRecord(x) && typeof x.who === "string" ? [x.who.trim(), typeof x.skill === "string" ? x.skill.trim() : ""] : [];
+    if (who !== "" && !against.some((a) => a.who === who) && against.length < PEOPLE)
+      against.push({ who, skill });
+  }
+  return {
+    attempt: attempt.length <= ATTEMPT_CHARS ? attempt : "",
+    skill: typeof params.skill === "string" ? params.skill.trim() : "",
+    difficulty: typeof params.difficulty === "string" || typeof params.difficulty === "number" ? String(params.difficulty) : "",
+    with: [...new Set(idsOf(params.with))].slice(0, PEOPLE),
+    against,
+    tried: params.tried === true || params.tried === "true" || params.tried === "yes"
+  };
+}
+var NEUTRAL_DC = 10;
+function readyFor(reg, w, skill, who, dc) {
+  const check = checkOf(w.world, skill.action.check);
+  if (!check)
+    return { code: "unknown_check", reason: `no check rolls ${skill.label}` };
+  return readyCheck(reg, w.ctx, check, { self: who, actor: who }, { [skill.param]: skill.id, difficulty: dc, params: { [skill.param]: skill.id, difficulty: dc } });
+}
+function passiveScore(ready) {
+  const dist = diceDistribution(ready.notation);
+  return Math.floor(dist.probs.reduce((sum, p, i) => sum + p * (dist.min + i), 0)) + ready.modifier;
+}
+function tryRequest(world, skill, band, against, dc) {
+  const check = checkOf(world, skill.action.check);
+  const key = against.map((a) => a.who).sort().join(",");
+  return {
+    action: {
+      id: TRY_ACTION,
+      label: `${skill.label} check`,
+      params: { [skill.param]: skill.action.params[skill.param] ?? { type: "text" }, difficulty: { type: "text", optional: true }, against: { type: "text", optional: true } },
+      requires: [],
+      ...check ? { check } : {},
+      outcomes: {},
+      duration: skill.action.duration,
+      observable: "makes an attempt",
+      ...skill.action.adjudicate === true ? { adjudicate: true } : {}
+    },
+    params: { [skill.param]: skill.id, difficulty: band.id, ...key !== "" ? { against: key } : {} },
+    vars: { difficulty: dc, params: { difficulty: dc } }
+  };
+}
+function involvable(reg, world, state, id) {
+  return id !== world.pov && hasOwn(state.entities, id) && !isGone(state, id) && kindIs(reg, world, own(state.entities, id)?.kind ?? "", "person") && povMayKnow(reg, world, state, id);
+}
+function inferredRead(reg, world, state, params) {
+  const policy = inferredOf(world, state);
+  if (policy.mode === "off")
+    return { ok: false, why: "inferred checks are off in this chat" };
+  const read = tryRead(params);
+  const sources = allowedSkills(policy, skillSources(reg, world, state));
+  const skill = skillNamed(sources, read.skill);
+  if (!skill)
+    return { ok: false, why: `"${read.skill}" isn't a skill this chat infers checks for` };
+  if (policy.when === "tries" && !read.tried)
+    return { ok: false, why: "the message doesn't say the player character tries it" };
+  const band = clampBand(policy, read.difficulty);
+  const companions = policy.who === "pov" ? [] : read.with.filter((id) => involvable(reg, world, state, id));
+  const against = read.against.filter((a) => !companions.includes(a.who) && involvable(reg, world, state, a.who)).map((a) => ({ who: a.who, skill: skillNamed(sources, a.skill)?.id ?? skill.id }));
+  if (policy.when === "risky") {
+    const chance = actionOdds(reg, world, state, tryRequest(world, skill, band, against, band.dc)).verdict?.chance ?? null;
+    if (chance !== null && chance >= policyOf(world, state).riskyAt)
+      return { ok: false, why: `it isn't risky (${Math.round(chance * 100)}% to succeed at ${band.label.toLowerCase()})` };
+  }
+  const kept = { attempt: read.attempt, skill: skill.id, difficulty: band.id, with: companions, against: against.map((a) => ({ who: a.who, skill: a.skill })), ...read.tried ? { tried: true } : {} };
+  return { ok: true, params: kept, read: { ...read, skill: skill.id, with: companions, against }, skill, band, policy };
+}
+function tryJudged(reg, world, state, params) {
+  const read = tryRead(params);
+  const policy = inferredOf(world, state);
+  const skill = skillNamed(skillSources(reg, world, state), read.skill);
+  if (!skill)
+    return null;
+  const band = clampBand(policy, read.difficulty);
+  const request = tryRequest(world, skill, band, read.against, band.dc);
+  return read.attempt === "" ? request : { ...request, action: { ...request.action, label: `${request.action.label}: ${read.attempt}` } };
+}
+function resolveTry(reg, w, params, rng, opts = {}) {
+  const { world } = w;
+  const pov = world.pov;
+  const start = w.events.length;
+  const policy = inferredOf(world, w.state);
+  const read = tryRead(params);
+  const sources = skillSources(reg, world, w.state);
+  const skill = skillNamed(sources, read.skill);
+  const band = clampBand(policy, read.difficulty);
+  const ownCheck = skill ? readyFor(reg, w, skill, pov, band.dc) : null;
+  if (!skill || !ownCheck || "code" in ownCheck) {
+    const failed = ownCheck && "code" in ownCheck ? ownCheck : { code: "bad_param", reason: `${read.skill || "the attempt"} isn't a skill here` };
+    return { action: TRY_ACTION, actor: pov, ok: false, failed, check: null, outcome: null, events: [], rejected: [], duration: 0, activity: null, observable: null, adjudged: null };
+  }
+  const nameOf = (id) => own(w.state.entities, id)?.name ?? id;
+  const here = placeOfEntity(w.state, pov);
+  const present = (id) => here !== null && placeOfEntity(w.state, id) === here && involvable(reg, world, w.state, id) && acts(world, w.state, id) && canSeeEntity(reg, world, w.state, pov, id);
+  let rolls = policy.most - 1;
+  const companions = [];
+  for (const id of policy.who === "pov" ? [] : read.with) {
+    if (rolls <= 0)
+      break;
+    if (!present(id) || companions.includes(id))
+      continue;
+    companions.push(id);
+    rolls--;
+  }
+  const opponents = read.against.filter((a) => present(a.who) && !companions.includes(a.who));
+  if (opts.runSeed !== undefined)
+    for (const id of [...companions, ...opponents.map((o) => o.who)])
+      materializeAll(reg, w, id, opts.runSeed);
+  const against = [];
+  for (const o of opponents) {
+    const theirs = skillNamed(sources, o.skill) ?? skill;
+    const ready = readyFor(reg, w, theirs, o.who, NEUTRAL_DC);
+    if ("code" in ready)
+      continue;
+    if (policy.who === "everyone" && rolls > 0) {
+      rolls--;
+      const rolled = rollCheck(ready, rng.fork(`actor:${o.who}`));
+      w.apply({ type: ENGINE_EVENTS.check, data: { check: ready.check.id ?? "", skill: theirs.id, actor: o.who, target: pov, notation: ready.notation, natural: rolled.natural, total: rolled.total, dc: null, outcome: "opposed", npc: true } });
+      against.push({ who: o.who, name: nameOf(o.who), rolled: true, score: rolled.total });
+    } else
+      against.push({ who: o.who, name: nameOf(o.who), rolled: false, score: passiveScore(ready) });
+  }
+  const dc = against.length > 0 ? Math.max(...against.map((a) => a.score)) : band.dc;
+  const res = resolveAction(reg, w, tryRequest(world, skill, band, against, dc), rng, opts);
+  const neutral = readyFor(reg, w, skill, pov, NEUTRAL_DC);
+  const fixed = readyFor(reg, w, skill, pov, dc);
+  const share = "code" in neutral || "code" in fixed ? 0 : fixed.modifier - neutral.modifier;
+  const pass = passOutcomes(ownCheck.check, "code" in fixed ? ownCheck.bands : fixed.bands);
+  const rolled = [];
+  for (const id of res.ok ? companions : []) {
+    const ready = readyFor(reg, w, skill, id, dc);
+    const base = readyFor(reg, w, skill, id, NEUTRAL_DC);
+    if ("code" in ready || "code" in base)
+      continue;
+    const roll = rollCheck(ready, rng.fork(`actor:${id}`));
+    w.apply({ type: ENGINE_EVENTS.check, data: { check: ready.check.id ?? "", skill: skill.id, actor: id, notation: ready.notation, natural: roll.natural, total: roll.total, dc: ready.dc, outcome: roll.outcome, npc: true } });
+    rolled.push({ who: id, name: nameOf(id), outcome: roll.outcome, pass: pass.includes(roll.outcome), notation: ready.notation, modifier: base.modifier, total: roll.roll.total + base.modifier });
+  }
+  const inferred = { label: `${skill.label} check`, skill: skill.id, attempt: read.attempt, pov: nameOf(pov), band, dc, against, companions: rolled, share, pass, detail: policy.detail, others: policy.others, guidance: policy.guidance };
+  return { ...res, events: w.events.slice(start), inferred };
+}
+
 // src/engine/ruleset-lint.ts
 function specsOf(v) {
   return objects(v).flatMap((o) => typeof o.type === "string" ? [{ type: o.type, args: isRecord(o.args) ? o.args : {} }] : []);
@@ -25960,7 +26705,7 @@ function lintRuleset(world, reg) {
   const rs = world.ruleset;
   if (rs === undefined)
     return issues;
-  issues.push(...lintAdjudication(world));
+  issues.push(...lintAdjudication(world), ...lintInferred(world, reg));
   if (!isRecord(rs)) {
     err("ruleset", "ruleset", "The ruleset must be an object.");
     return issues;
@@ -26380,285 +27125,6 @@ var storyPack = {
   }
 };
 var core_default10 = storyPack;
-
-// src/shared/tables.ts
-function tableChoices(table) {
-  if (!table || typeof table.rows !== "object" || table.rows === null)
-    return [];
-  return Object.entries(table.rows).map(([key, row]) => {
-    const label = typeof row === "object" && row !== null && !Array.isArray(row) ? row.label : undefined;
-    return { key, label: typeof label === "string" && label.trim() !== "" ? label : key.replace(/_/g, " ") };
-  });
-}
-function tableRowKey(table, text) {
-  const said = text.trim().toLowerCase();
-  const hit = tableChoices(table).find((c) => c.key.toLowerCase() === said || c.label.toLowerCase() === said);
-  return hit ? hit.key : null;
-}
-
-// src/engine/resolve.ts
-function findAction(reg, world, id) {
-  return own(world.actions, id) ?? reg.actions.get(id);
-}
-function prepare(reg, world, state, req) {
-  const action = typeof req.action === "string" ? findAction(reg, world, req.action) : req.action;
-  if (!action)
-    return { code: "unknown_action", reason: `no action ${String(req.action)}` };
-  const actor = req.actor ?? world.pov;
-  if (!own(state.entities, actor))
-    return { code: "missing_actor", reason: `no entity ${labelOf({ world, state }, actor)}` };
-  const bindings = { self: actor, actor };
-  const params = {};
-  const given = req.params ?? {};
-  for (const [name, def] of Object.entries(action.params)) {
-    const raw = own(given, name);
-    if (raw === undefined || raw === null || raw === "") {
-      if (!def.optional)
-        return { code: "missing_param", reason: `${action.label} needs ${def.label ?? name}` };
-      continue;
-    }
-    if (def.type === "ref") {
-      const id = String(raw);
-      const target = own(state.entities, id);
-      if (!target) {
-        if (own(world.places, id)) {
-          params[name] = id;
-          continue;
-        }
-        return { code: "bad_param", reason: `no entity ${labelOf({ world, state }, id)}` };
-      }
-      if (def.ref && !kindIs(reg, world, target.kind, def.ref))
-        return { code: "bad_param", reason: `${target.name} is not ${/^[aeiou]/i.test(def.ref) ? "an" : "a"} ${(reg.kinds.get(def.ref)?.label ?? own(world.kinds, def.ref)?.label ?? def.ref).toLowerCase()}` };
-      if (def.of && !selectorMatches(reg, world, state, def.of, id))
-        return { code: "bad_param", reason: `${target.name} can't be the ${(def.label ?? name).replace(/_/g, " ").toLowerCase()} of ${action.label}` };
-      bindings[name] = id;
-      params[name] = id;
-      continue;
-    }
-    if (def.type === "text" && def.table !== undefined) {
-      const key = typeof raw === "string" ? tableRowKey(own(world.tables, def.table), raw) : null;
-      if (key === null)
-        return { code: "bad_param", reason: `${String(raw)} isn't one of the ${(def.label ?? name).toLowerCase()}s here` };
-      params[name] = key;
-      continue;
-    }
-    if ((def.type === "number" || def.type === "money" || def.type === "duration") && typeof raw !== "number")
-      return { code: "bad_param", reason: `${name} must be a number` };
-    const v = toValue(raw);
-    if (v === undefined)
-      return { code: "bad_param", reason: `${name} must be a scalar` };
-    params[name] = v;
-  }
-  const scalars = Object.fromEntries(Object.entries(params).filter(([name]) => !Object.prototype.hasOwnProperty.call(bindings, name)));
-  const absent = Object.fromEntries(Object.keys(action.params).filter((name) => !(name in params)).map((name) => [name, null]));
-  const vars = { ...scalars, params: { ...absent, ...params } };
-  return { action, actor, bindings, vars, params };
-}
-function firstUnmet(action, env) {
-  for (const req of action.requires)
-    if (!truthy2(evalExpr(req, env, false)))
-      return req;
-  return null;
-}
-function combatSpend(ctx, actor, action) {
-  return action.combat ? optionalService(ctx, "combat.spend")?.(ctx, actor, action) ?? { code: "no_combat", reason: "this world has no combat" } : [];
-}
-function actionOdds(reg, world, state, req) {
-  const p = prepare(reg, world, state, req);
-  if ("code" in p)
-    return { available: false, failed: p, odds: null, modifier: 0, check: null, duration: 0, verdict: null };
-  const ctx = reg.context(world, state);
-  const env = scopeEnv({ reg, ctx, bindings: p.bindings, vars: p.vars });
-  const unmet = firstUnmet(p.action, env);
-  const def = checkOf(world, p.action.check);
-  const ready = def ? readyCheck(reg, ctx, def, p.bindings, p.vars) : null;
-  const usable = ready && !("code" in ready) ? ready : null;
-  const odds = usable ? checkOdds(usable) : null;
-  const spend = combatSpend(ctx, p.actor, p.action);
-  const refused = Array.isArray(spend) ? null : spend;
-  return {
-    available: unmet === null && refused === null && usable === ready,
-    failed: unmet !== null ? { code: "requirement", reason: `requires ${unmet}`, requirement: unmet } : refused ?? (ready && "code" in ready ? ready : null),
-    odds,
-    modifier: usable?.modifier ?? 0,
-    check: usable ? { notation: usable.notation, advantage: usable.advantage, dc: usable.dc, opponent: usable.opponent } : null,
-    duration: Math.max(0, Math.round(Number(evalExpr(p.action.duration, env, 0)) || 0)),
-    verdict: usable && odds ? verdictOf(policyFor(world, state, p.action, p.actor), { registry: reg, world, state, action: p.action, actor: p.actor, params: p.params, ready: usable, odds }) : null
-  };
-}
-function resolveAction(reg, w, req, rng, opts = {}) {
-  const start = w.events.length;
-  const actionId = typeof req.action === "string" ? req.action : req.action.id;
-  const p = prepare(reg, w.world, w.state, req);
-  const base = {
-    action: actionId,
-    actor: req.actor ?? w.world.pov,
-    ok: false,
-    failed: null,
-    check: null,
-    outcome: null,
-    events: [],
-    rejected: [],
-    duration: 0,
-    activity: null,
-    observable: null,
-    adjudged: null
-  };
-  if ("code" in p)
-    return { ...base, failed: p };
-  if (opts.runSeed !== undefined) {
-    const participants = [p.actor, ...Object.values(p.bindings)].filter((id, i, all) => all.indexOf(id) === i);
-    for (const id of participants)
-      materializeAll(reg, w, id, opts.runSeed);
-  }
-  const env = scopeEnv({ reg, ctx: w.ctx, bindings: p.bindings, vars: p.vars });
-  const unmet = firstUnmet(p.action, env);
-  if (unmet !== null)
-    return { ...base, actor: p.actor, failed: { code: "requirement", reason: `requires ${unmet}`, requirement: unmet }, events: w.events.slice(start) };
-  const duration = Math.max(0, Math.round(Number(evalExpr(p.action.duration, env, 0)) || 0));
-  let activity = null;
-  if (p.action.activity) {
-    const until = Number(evalExpr(p.action.activity.until, env, w.state.clock + duration));
-    activity = { type: p.action.activity.type, until: Math.max(w.state.clock, Math.round(Number.isFinite(until) ? until : w.state.clock + duration)) };
-  }
-  const checkDef = checkOf(w.world, p.action.check);
-  const ready = checkDef ? readyCheck(reg, w.ctx, checkDef, p.bindings, p.vars) : null;
-  if (ready && "code" in ready)
-    return { ...base, actor: p.actor, failed: ready, events: w.events.slice(start) };
-  const spend = combatSpend(w.ctx, p.actor, p.action);
-  const refused = Array.isArray(spend) ? spend.map((ev) => w.apply(ev)).find((r) => r !== null) ?? null : spend;
-  if (refused)
-    return { ...base, actor: p.actor, failed: refused, events: w.events.slice(start) };
-  let check = null;
-  let outcome;
-  let vars = p.vars;
-  let adjudged = null;
-  if (checkDef && ready) {
-    const odds = checkOdds(ready);
-    const policy = policyFor(w.world, w.state, p.action, p.actor);
-    const verdict = verdictOf(policy, { registry: reg, world: w.world, state: w.state, action: p.action, actor: p.actor, params: p.params, ready, odds });
-    const judgement = opts.judgement ?? null;
-    const place = placeOfEntity(w.state, p.actor);
-    let close = null;
-    const story = verdict.why === "story" ? judgedOutcome(judgement, outcomeChoices(p.action, Object.keys(odds)), rng.fork("judge")) : null;
-    const rolls = verdict.roll || verdict.why === "story" && story === null;
-    const why = rolls ? null : verdict.why;
-    if (rolls) {
-      const shift = verdict.roll ? approachShift(policy, judgement) : null;
-      const shifted = shift ? readyCheck(reg, w.ctx, checkDef, p.bindings, p.vars, shift) : ready;
-      const rolling = "code" in shifted ? ready : shifted;
-      const rolled = rollCheck(rolling, rng.fork("check"));
-      check = { ...rolled, check: checkDef, notation: rolling.notation, modifier: rolling.modifier, advantage: rolling.advantage, dc: rolling.dc, odds: rolling === ready ? odds : checkOdds(rolling) };
-      outcome = rolled.outcome;
-      vars = { ...p.vars, roll: rollVars(rolling, rolled) };
-      if (policy.authority === "hybrid")
-        close = closeCall(rolling, rolled, rolled.outcome, policy.closeBy);
-    } else {
-      outcome = story ?? verdict.outcome ?? passOutcome(p.action, ready, odds, verdict.pass);
-      vars = { ...p.vars, roll: { natural: null, total: null, modifier: ready.modifier, dc: ready.dc, margin: null, outcome } };
-    }
-    if (!plainRolling(policy)) {
-      const approach = judgement && (policy.authority === "narrative" ? why === "story" : verdict.roll && policy.description.weight !== "none") ? { rating: ratingOf(policy, judgement), max: policy.description.max, reason: judgement.reason } : null;
-      adjudged = { rolled: rolls, why, chance: verdict.chance, pass: verdict.pass, authority: policy.authority, retry: policy.retry, approach, close };
-      const tracked = policy.retry !== "free" && verdict.pass.length > 0 && verdict.why !== "retry";
-      const round = tracked ? fightRound(w.ctx) : null;
-      w.apply({
-        type: ENGINE_EVENTS.adjudged,
-        data: {
-          actor: p.actor,
-          action: p.action.id,
-          check: checkDef.id ?? "",
-          outcome,
-          rolled: rolls,
-          ...why ? { why } : {},
-          ...approach ? { rating: approach.rating, max: approach.max, reason: approach.reason.slice(0, 240) } : {},
-          ...close ? { close: close.outcome } : {},
-          ...tracked ? { key: tryKey(p.actor, p.action.id, p.params), place, failed: !verdict.pass.includes(outcome), odds: oddsSignature(ready), ...round !== null ? { round } : {} } : {}
-        }
-      });
-    }
-  } else {
-    outcome = Object.prototype.hasOwnProperty.call(p.action.outcomes, "default") ? "default" : Object.keys(p.action.outcomes)[0] ?? "default";
-  }
-  const effects = own(p.action.outcomes, outcome) ?? [];
-  const result = applyEffects(reg, w, effects, { bindings: p.bindings, vars, params: p.params, rng: rng.fork("effects") });
-  if (activity) {
-    w.apply({ type: "set", entity: p.actor, field: "activity", value: activity.type });
-    w.apply({ type: "set", entity: p.actor, field: "activity_until", value: activity.until });
-  }
-  return {
-    ...base,
-    actor: p.actor,
-    ok: true,
-    check,
-    outcome,
-    events: w.events.slice(start),
-    rejected: result.rejected,
-    duration,
-    activity,
-    observable: p.action.observable ?? null,
-    adjudged
-  };
-}
-function paramCandidates(reg, world, state, action, param, actor = world.pov) {
-  const def = own(action.params, param);
-  if (!def || def.type !== "ref")
-    return [];
-  const here = placeOfEntity(state, actor);
-  if (def.ref === "place")
-    return placeCandidates(reg, world, state, actor);
-  const filters = candidateFilters(action, param);
-  const ctx = filters.length > 0 ? reg.context(world, state) : null;
-  const out = [];
-  for (const id of Object.keys(state.entities).sort()) {
-    if (id === actor)
-      continue;
-    const e = own(state.entities, id);
-    if (!e || isGone(state, id))
-      continue;
-    if (def.ref && !kindIs(reg, world, e.kind, def.ref))
-      continue;
-    if (def.of && !selectorMatches(reg, world, state, def.of, id))
-      continue;
-    if (placeOfEntity(state, id) !== here && !e.relations.some((r) => r.to === actor) && !heldBy(state.entities, id, actor))
-      continue;
-    if (!canSeeEntity(reg, world, state, actor, id))
-      continue;
-    if (ctx && !filters.every((f) => truthy2(evalExpr(f, scopeEnv({ reg, ctx, bindings: { self: actor, [param]: id } }), false))))
-      continue;
-    out.push(id);
-  }
-  return out;
-}
-function placeCandidates(reg, world, state, actor = world.pov) {
-  const here = placeOfEntity(state, actor);
-  const near = new Set(Object.values(world.routes).flatMap((r) => r.from === here ? [r.to] : r.to === here && r.bidirectional ? [r.from] : []));
-  const parent = here ? own(world.places, here)?.parent : undefined;
-  if (parent)
-    near.add(parent);
-  for (const p of Object.values(world.places))
-    if (here && p.parent === here)
-      near.add(p.id);
-  const name = (id) => own(world.places, id)?.name ?? id;
-  return Object.keys(world.places).filter((id) => id !== here && canSeePlace(reg, world, state, actor, id)).sort((a, b) => Number(near.has(b)) - Number(near.has(a)) || name(a).localeCompare(name(b)));
-}
-var EXPR_WORDS = new Set(["and", "or", "not", "true", "false", "null", "self"]);
-function candidateFilters(action, param) {
-  const named = new RegExp(`(?<![\\w.])${param.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`);
-  return action.requires.filter((req) => {
-    const bare = req.replace(/'[^']*'|"[^"]*"/g, "''");
-    if (!named.test(bare))
-      return false;
-    for (const m of bare.matchAll(/(\.?)\b([A-Za-z_][A-Za-z0-9_]*)\b(\s*\()?/g)) {
-      const [, dot, name, call] = m;
-      if (call || dot === ".")
-        continue;
-      if (name !== param && !EXPR_WORDS.has(name ?? ""))
-        return false;
-    }
-    return true;
-  });
-}
 
 // src/packs/combat/core/model.ts
 var PACK5 = "combat";
@@ -54431,7 +54897,7 @@ function outline(reg, world, state, input, rng, max = MAX_BEATS) {
   const pov = world.pov;
   const lines = [];
   for (const r of input.resolutions ?? []) {
-    const label = own(world.actions, r.action)?.label ?? reg.actions.get(r.action)?.label ?? r.action;
+    const label = r.inferred?.label ?? own(world.actions, r.action)?.label ?? reg.actions.get(r.action)?.label ?? r.action;
     if (!r.ok)
       lines.push(`${label} doesn't happen: ${r.failed && r.failed.code !== "requirement" ? r.failed.reason : "not possible here and now"}.`);
     else if (r.check || r.adjudged)
@@ -54574,7 +55040,7 @@ function planTurn(input) {
         if (claimed && step.claim)
           made = { entity: claimed.entity, name: step.claim.name, events: claimed.events };
         const params = claimed && step.claim ? { ...step.params, [step.claim.param]: claimed.entity } : step.params;
-        resolution = resolveAction(reg, w, { action: step.action, params }, draws, { runSeed: input.runSeed, judgement: step.judgement });
+        resolution = step.action === TRY_ACTION ? resolveTry(reg, w, params, draws, { runSeed: input.runSeed, judgement: step.judgement }) : resolveAction(reg, w, { action: step.action, params }, draws, { runSeed: input.runSeed, judgement: step.judgement });
         scene = sceneKey(w.world, w.state);
         const done = w.events.slice(mark, mark + (made?.events ?? 0) + resolution.events.length);
         if (done.length > 0)
@@ -54815,97 +55281,6 @@ function lintLorePins(world) {
     }
   }
   return issues;
-}
-
-// src/engine/realism.ts
-function all(level) {
-  return Object.fromEntries(DOMAINS.map((d) => [d, level]));
-}
-var REALISM_PRESETS = {
-  story: {
-    levels: { money: 1, gear: 1, vehicles: 1, castlife: 1, relationships: 1, space: 2, calendar: 2, weather: 1, sheets: 1 },
-    tierCaps: { principal: {}, supporting: {}, background: {} }
-  },
-  grounded: {
-    levels: { money: 2, gear: 2, vehicles: 2, castlife: 2, relationships: 2, space: 2, calendar: 3, weather: 2, sheets: 2 },
-    tierCaps: { principal: {}, supporting: {}, background: all(1) }
-  },
-  simulation: {
-    levels: { money: 4, gear: 4, vehicles: 4, castlife: 4, relationships: 4, space: 4, calendar: 4, weather: 3, sheets: 3 },
-    tierCaps: { principal: all(4), supporting: all(3), background: all(2) }
-  }
-};
-function capOf(caps, band, domain) {
-  return caps[band][domain] ?? 4;
-}
-function presetOf(realism) {
-  for (const [id, p] of Object.entries(REALISM_PRESETS)) {
-    const same = DOMAINS.every((d) => p.levels[d] === realism.levels[d] && BANDS.every((b) => capOf(p.tierCaps, b, d) === capOf(realism.tierCaps, b, d)));
-    if (same)
-      return id;
-  }
-  return "custom";
-}
-function claimsOf(world, state) {
-  if (state.claims)
-    return state.claims;
-  const preset = presetOf(state.realism);
-  return readClaims(world.realism.claims) ?? { ...preset === "custom" ? DEFAULT_CLAIMS : CLAIM_PRESETS[preset] };
-}
-function predicates(world, reg) {
-  const out = [];
-  for (const [id, r] of Object.entries(world.rules)) {
-    if (r.when)
-      out.push({ where: "rule", id, expr: r.when });
-    if ("at" in r.on)
-      out.push({ where: "rule", id, expr: r.on.at });
-  }
-  for (const r of reg.rules)
-    if (r.when && !world.rules[r.id])
-      out.push({ where: "rule", id: r.id, expr: r.when });
-  for (const [id, t] of Object.entries(world.tracks)) {
-    for (const s of Object.values(t.stages)) {
-      for (const n of s.next)
-        out.push({ where: "track", id, expr: n.when });
-      if (s.fail)
-        out.push({ where: "track", id, expr: s.fail.when });
-      if (s.gate)
-        out.push({ where: "track", id, expr: s.gate });
-      for (const o of s.objectives ?? [])
-        out.push({ where: "track", id, expr: objectiveWhen(o) });
-    }
-  }
-  for (const [id, a] of Object.entries(world.actions))
-    for (const req of a.requires)
-      out.push({ where: "action", id, expr: req });
-  return out;
-}
-function fieldsAbove(reg, world, domain, level) {
-  const out = new Set;
-  const kinds = new Set([...Object.keys(world.kinds), ...reg.kinds.keys()]);
-  for (const k of kinds)
-    for (const [name, f] of Object.entries(kindFields(reg, world, k)))
-      if (f.domain === domain && (f.level ?? 0) > level)
-        out.add(name);
-  return out;
-}
-function frozenPredicates(reg, world, domain, level) {
-  const fields = fieldsAbove(reg, world, domain, level);
-  const out = [];
-  if (fields.size === 0)
-    return out;
-  for (const p of predicates(world, reg)) {
-    let names;
-    try {
-      names = identifiers(p.expr);
-    } catch {
-      continue;
-    }
-    for (const n of names)
-      if (fields.has(n))
-        out.push({ ...p, field: n });
-  }
-  return out;
 }
 
 // src/engine/world-lint.ts
@@ -55728,6 +56103,9 @@ var CHECK_DAY_MINUTES = 24 * 60;
 function previewSheet(registry, world, entity = world.pov) {
   return buildEntitySheet(registry.context(world, initialState(world, "preview", registry)), entity);
 }
+function previewSkills(registry, world) {
+  return worldSkills(registry, world, initialState(world, "preview", registry));
+}
 function stamped(world) {
   return { ...world, engineVersion: ENGINE_VERSION };
 }
@@ -56190,7 +56568,7 @@ function parseEditOps(raw) {
 
 // src/shared/protocol.ts
 var PROTOCOL_VERSION = 1;
-var AGENT_API = 1;
+var AGENT_API = 2;
 
 // src/shared/timeouts.ts
 var TIMER_MAX_MS = 2147483647;
@@ -62247,10 +62625,12 @@ function palette(world, state, registry) {
   const encounter = paletteEncounter(ctx);
   return { entries, timelapse, ...encounter ? { encounter } : {} };
 }
-function controls(world, state, sceneType) {
+function controls(world, state, sceneType, registry) {
   return {
     realism: { preset: presetOf(state.realism), levels: { ...state.realism.levels }, tierCaps: structuredClone(state.realism.tierCaps), bandTiers: bandTiers(world), floors: levelFloors(world), claims: claimsOf(world, state) },
     adjudication: policyOf(world, state),
+    inferred: inferredOf(world, state),
+    skills: worldSkills(registry, world, state),
     time: {
       sceneType,
       sceneTicks: { ...state.time.sceneTicks },
@@ -62560,7 +62940,7 @@ function buildView(input) {
       pending,
       panels,
       palette: palette(world, next, registry),
-      controls: controls(world, next, sceneView.sceneType),
+      controls: controls(world, next, sceneView.sceneType, registry),
       meter: input.meter,
       packs,
       currency: world.currency
@@ -63674,6 +64054,9 @@ async function interpret(steps, text, context, actions, config, userId, signal, 
     `Read every action in the input, in order, not only the first. Return the first as "action" with its "params". If the input has more actions after it, list them in order in "more" (at most ${ACTION_QUEUE_LIMIT - 1}), each {"action": a catalog id, "params": {...}, "text": that action written as the player would type it}: "I walk to the market and buy bread" \u2192 "action" for the walk, and "more": [{"action": <the buy's id>, "params": {"item": "bread"}, "text": "I buy bread"}]. An action after them that no catalog action fits goes in "next", written as the player would type it.`,
     `If the input lets time pass after its last action ("\u2026and sleep until the next morning", "\u2026then wait two hours", "\u2026then skip ahead to Friday at 6 PM"), add "then": {"minutes": number}, {"until": a day part, "shift" or "commitment"} or {"at": "YYYY-MM-DD HH:MM"} for a stated day and time; time passing is never in "more" or "next", nor is anything else that isn't an action.`
   ];
+  if (actions.some((a) => a.id === TRY_ACTION)) {
+    rules.push(`An attempt whose outcome is uncertain that no other catalog action covers is "${TRY_ACTION}" (Try something), even asked as a question ("I watch him as he answers: is he lying?" is the player character's reading of him against his deceit). Never read an attempt a catalog action covers as "${TRY_ACTION}", nor both: that action alone. "attempt" is what is attempted, in the input's words; "skill" and "difficulty" come from its lists; "with" lists the companions the input has join in ("we sneak past"); "against" lists the people here it opposes or targets, each with the skill they resist with.`);
+  }
   const presumed = [
     `When the input takes for granted that ${pov.name} is somewhere other than the scene's place (beside someone who isn't here, at a fixture of another place), read the move there first, as "I go there" is read: to where that person was last seen, or the place with that fixture.`,
     `When it takes for granted that what the scene lists as left from the last message happened, read those actions first, in order.`
@@ -65597,6 +65980,235 @@ class LedgerFold {
   }
 }
 
+// src/shared/agents.ts
+var KIT_API = 1;
+var KIT_FILE = "agent-kit.js";
+var CORE_FILE = "lumirpengine.js";
+function pathOfFileUrl(url) {
+  let parsed;
+  let path;
+  try {
+    parsed = new URL(url);
+    path = decodeURIComponent(parsed.pathname);
+  } catch {
+    return null;
+  }
+  if (parsed.protocol !== "file:")
+    return null;
+  if (parsed.hostname !== "")
+    return `\\\\${parsed.hostname}${path.replaceAll("/", "\\")}`;
+  return /^\/[A-Za-z]:\//.test(path) ? path.slice(1).replaceAll("/", "\\") : path;
+}
+function shellWord(text) {
+  if (/^[\w./:\\@%+=,-]+$/.test(text))
+    return text;
+  if (!/["$`]/.test(text))
+    return `"${text}"`;
+  return `'${text.replaceAll("'", "'\\''")}'`;
+}
+function followCommand(core) {
+  return `node ${shellWord(core)} mcp`;
+}
+
+// src/backend/agents.ts
+function thisBuild(moduleUrl = import.meta.url) {
+  const dir = moduleUrl.replace(/[^/]*$/, "");
+  const path = pathOfFileUrl(`${dir}${KIT_FILE}`);
+  const core = pathOfFileUrl(`${dir}${CORE_FILE}`);
+  const sha256 = "a8dae2f843fc2872ad655d711cfabd6e0e588f7b19f4854fcabff7f5b89d6a7e";
+  return { id: "822697e4", kit: sha256 !== undefined && path !== null && core !== null ? { path, core, sha256, api: KIT_API } : null };
+}
+var BUILD_FILE = "agents/build.json";
+var USER_FILE = "agents.json";
+var CLIENTS_KEPT = 32;
+var SESSIONS_KEPT = 256;
+var FOLLOW_CODES = { pinned: true, unsupported: true, no_kit: true, kit_api: true, refused: true, elsewhere: true, unreadable: true, mismatch: true, broken: true };
+var errorText = (error) => error instanceof Error ? error.message : String(error);
+function shown3(text, max) {
+  return text.replace(/[\u0000-\u001f\u007f]/g, " ").trim().slice(0, max);
+}
+function checkInOf(client, seen) {
+  if (!isRecord(client) || typeof client.name !== "string" || typeof client.version !== "string" || client.serves === "command")
+    return null;
+  const text = (value, max) => typeof value === "string" && shown3(value, max) !== "" ? shown3(value, max) : null;
+  const follows = client.follows === true;
+  const why = !follows && isRecord(client.why) && typeof client.why.text === "string" ? { code: typeof client.why.code === "string" && hasOwn(FOLLOW_CODES, client.why.code) ? client.why.code : "other", text: shown3(client.why.text, 400) } : null;
+  return { name: shown3(client.name, 80), version: shown3(client.version, 40), host: text(client.host, 80), core: text(client.core, 40), kit: text(client.kit, 40), follows, why, seen };
+}
+function stateOf(client, build) {
+  if (client.kit === build)
+    return "updated";
+  if (client.kit === null)
+    return "old";
+  return client.follows ? "behind" : "cannot";
+}
+
+class Agents {
+  host;
+  build;
+  now;
+  users = new Map;
+  writes = new Map;
+  working = new Set;
+  sessions = new Map;
+  started;
+  constructor(host, build, now = Date.now) {
+    this.host = host;
+    this.build = build;
+    this.now = now;
+    this.started = Promise.resolve({ build: build.id, previous: null, at: 0 });
+  }
+  start() {
+    this.started = this.compare();
+    this.host.on("FRONTEND_SESSION_CLOSED", (e, userId) => {
+      if (userId === null || !this.sessions.delete(`${userId}\x00${e.frontendSessionId}`))
+        return;
+      this.track(this.tell(userId), "the MCP servers' view wasn't sent");
+    });
+  }
+  async settle() {
+    await this.started;
+    while (this.working.size > 0)
+      await Promise.all([...this.working]);
+    await Promise.all([...this.writes.values()]);
+  }
+  async compare() {
+    const fresh = { build: this.build.id, previous: null, at: this.now() };
+    let text;
+    try {
+      text = await this.host.extensionStorage.read(BUILD_FILE);
+    } catch (error) {
+      this.host.log("warn", `[LumiRPEngine] the build the extension last ran as couldn't be read (${errorText(error)}); this start shows no update notice`);
+      return fresh;
+    }
+    let last = null;
+    try {
+      const raw = JSON.parse(text ?? "null");
+      if (isRecord(raw) && typeof raw.build === "string" && (typeof raw.previous === "string" || raw.previous === null) && typeof raw.at === "number")
+        last = { build: raw.build, previous: raw.previous, at: raw.at };
+    } catch {}
+    if (last?.build === this.build.id)
+      return last;
+    const now = { ...fresh, previous: last?.build ?? null };
+    try {
+      await this.host.extensionStorage.write(BUILD_FILE, JSON.stringify(now));
+    } catch (error) {
+      this.host.log("warn", `[LumiRPEngine] the build the extension started as couldn't be kept (${errorText(error)}); the next start will see this update again`);
+    }
+    return now;
+  }
+  meet(userId, session, client) {
+    const answer = { build: this.build.id, kit: this.build.kit };
+    const checkIn = checkInOf(client, this.now());
+    if (checkIn === null)
+      return answer;
+    const id = hashParts("lre.agent", checkIn.name, checkIn.host ?? "").slice(0, 16);
+    if (session !== undefined) {
+      this.sessions.delete(`${userId}\x00${session}`);
+      this.sessions.set(`${userId}\x00${session}`, id);
+      for (const oldest of this.sessions.keys()) {
+        if (this.sessions.size <= SESSIONS_KEPT)
+          break;
+        this.sessions.delete(oldest);
+      }
+    }
+    this.track(this.change(userId, (file) => {
+      file.clients[id] = checkIn;
+      file.clients = Object.fromEntries(Object.entries(file.clients).sort(([, a], [, b]) => b.seen - a.seen).slice(0, CLIENTS_KEPT));
+    }), "an MCP server's check-in wasn't kept");
+    return { ...answer, client: id };
+  }
+  page(userId, session) {
+    this.track(this.notice(userId, session), "the update notice wasn't shown");
+  }
+  async notice(userId, session) {
+    const started = await this.started;
+    if (started.previous === null)
+      return;
+    const file = await this.file(userId);
+    if (file.dismissed === started.build)
+      return;
+    this.host.frontend.send({ lre: PROTOCOL_VERSION, type: "lre.agents.changed", view: this.viewOf(userId, file, started) }, userId, session);
+    if (file.toasted === started.build)
+      return;
+    file.toasted = started.build;
+    this.save(userId, file);
+    this.host.toast(Object.keys(file.clients).length > 0 ? `Updated to build ${started.build}. The drawer says how each of your MCP servers took it.` : `Updated to build ${started.build}.`, userId);
+  }
+  async request(r, userId, session) {
+    if (r.op === "kit")
+      return { build: this.build.id, kit: this.build.kit, known: session !== undefined && this.sessions.has(`${userId}\x00${session}`) };
+    if (r.op === "update") {
+      if (typeof r.client === "string")
+        this.host.frontend.send({ lre: PROTOCOL_VERSION, type: "lre.kit.reload", client: r.client }, userId);
+    } else if (r.op === "dismiss") {
+      const { build } = await this.started;
+      await this.change(userId, (file) => {
+        file.dismissed = build;
+      });
+    } else if (r.op === "forget") {
+      await this.change(userId, (file) => {
+        if (typeof r.client === "string")
+          delete file.clients[r.client];
+      });
+    }
+    return { view: await this.view(userId) };
+  }
+  async view(userId) {
+    return this.viewOf(userId, await this.file(userId), await this.started);
+  }
+  viewOf(userId, file, started) {
+    const prefix = `${userId}\x00`;
+    const connected = new Set;
+    for (const [key, id] of this.sessions)
+      if (key.startsWith(prefix))
+        connected.add(id);
+    const kit = this.build.kit;
+    return {
+      build: this.build.id,
+      notice: started.previous !== null && file.dismissed !== started.build ? { build: started.build, previous: started.previous, at: started.at } : null,
+      setup: kit === null ? null : { core: kit.core, command: followCommand(kit.core) },
+      clients: Object.entries(file.clients).sort(([, a], [, b]) => b.seen - a.seen).map(([id, client]) => ({ id, ...client, connected: connected.has(id), state: stateOf(client, this.build.id) }))
+    };
+  }
+  async tell(userId) {
+    this.host.frontend.send({ lre: PROTOCOL_VERSION, type: "lre.agents.changed", view: await this.view(userId) }, userId);
+  }
+  track(work, failed) {
+    const tracked = work.catch((error) => this.host.log("warn", `[LumiRPEngine] ${failed} (${errorText(error)})`));
+    this.working.add(tracked);
+    tracked.finally(() => this.working.delete(tracked));
+  }
+  async change(userId, edit) {
+    const file = await this.file(userId);
+    edit(file);
+    this.save(userId, file);
+    await this.tell(userId);
+  }
+  save(userId, file) {
+    const write = (this.writes.get(userId) ?? Promise.resolve()).then(() => this.host.storage.write(USER_FILE, JSON.stringify(file), userId)).catch((error) => this.host.log("warn", `[LumiRPEngine] the MCP servers' file wasn't written (${errorText(error)})`, userId));
+    this.writes.set(userId, write);
+  }
+  file(userId) {
+    const cached = this.users.get(userId);
+    if (cached)
+      return cached;
+    const read = readStoredJson(this.host, USER_FILE, userId, "MCP servers", (raw) => isRecord(raw) && raw.v === 1 && isRecord(raw.clients)).then((raw) => {
+      const stored = isRecord(raw) ? raw : {};
+      const clients = {};
+      for (const [id, entry] of Object.entries(isRecord(stored.clients) ? stored.clients : {})) {
+        const client = isRecord(entry) && typeof entry.seen === "number" ? checkInOf(entry, entry.seen) : null;
+        if (client !== null && /^[0-9a-f]{16}$/.test(id))
+          clients[id] = client;
+      }
+      return { v: 1, clients, toasted: typeof stored.toasted === "string" ? stored.toasted : null, dismissed: typeof stored.dismissed === "string" ? stored.dismissed : null };
+    });
+    this.users.set(userId, read);
+    read.catch(() => this.users.delete(userId));
+    return read;
+  }
+}
+
 // src/backend/chat-prefs.ts
 class ChatPrefs {
   host;
@@ -66167,6 +66779,7 @@ function defaultSettings() {
     overrideWorldDefaults: false,
     adjudication: defaultAdjudication(),
     overrideWorldAdjudication: false,
+    inferred: null,
     extraction: {},
     swipeDefault: "rerun",
     hideJsonBlocks: true,
@@ -66207,13 +66820,13 @@ var STEP_PURPOSES = ["interpret", "npc.choose", "contradiction", "puzzle.answer"
 var int = (v, lo, hi) => typeof v === "number" && Number.isInteger(v) && v >= lo && v <= hi ? v : undefined;
 var atLeast = (v, lo) => int(v, lo, Number.MAX_SAFE_INTEGER);
 var real = (v, lo, hi) => typeof v === "number" && Number.isFinite(v) && v >= lo && v <= hi ? v : undefined;
-var oneOf2 = (v, values) => values.find((x) => x === v);
+var oneOf3 = (v, values) => values.find((x) => x === v);
 var LEVELS2 = [0, 1, 2, 3, 4];
 var level = (v) => LEVELS2.find((l) => l === v);
 function speedOf(x) {
   if (!isRecord(x))
     return;
-  const mode = oneOf2(x.mode, ["offer", "auto"]);
+  const mode = oneOf3(x.mode, ["offer", "auto"]);
   const [lo, hi] = SPEED_THRESHOLD_MINUTES;
   const raw = real(x.thresholdMinutes, Number.NEGATIVE_INFINITY, Number.POSITIVE_INFINITY);
   return mode && raw !== undefined ? { mode, thresholdMinutes: Math.round(Math.min(hi, Math.max(lo, raw))) } : undefined;
@@ -66246,24 +66859,24 @@ function paramsOf(v) {
 function routeOf2(v) {
   if (!isRecord(v))
     return;
-  const provider = oneOf2(v.provider, ["decision", "helper"]);
+  const provider = oneOf3(v.provider, ["decision", "helper"]);
   if (!provider)
     return;
-  const effort = oneOf2(v.effort, REASONING_CHOICES);
+  const effort = oneOf3(v.effort, REASONING_CHOICES);
   const params = paramsOf(v.params);
   return { provider, connectionId: text4(v.connectionId), model: text4(v.model), ...effort ? { effort } : {}, ...Object.keys(params).length > 0 ? { params } : {} };
 }
 function helperOf(v, d) {
   if (!isRecord(v))
     return { ...d, params: { ...d.params } };
-  return { connectionId: text4(v.connectionId), model: text4(v.model), effort: oneOf2(v.effort, REASONING_CHOICES) ?? d.effort, maxTokens: atLeast(v.maxTokens, 1) ?? d.maxTokens, params: paramsOf(v.params) };
+  return { connectionId: text4(v.connectionId), model: text4(v.model), effort: oneOf3(v.effort, REASONING_CHOICES) ?? d.effort, maxTokens: atLeast(v.maxTokens, 1) ?? d.maxTokens, params: paramsOf(v.params) };
 }
 function loreOf(v) {
   if (!isRecord(v))
     return;
-  const policy = oneOf2(v.policy, LORE_POLICIES);
+  const policy = oneOf3(v.policy, LORE_POLICIES);
   const tokens = atLeast(v.tokens, 0);
-  const transport = oneOf2(v.transport, LORE_TRANSPORTS);
+  const transport = oneOf3(v.transport, LORE_TRANSPORTS);
   return policy && tokens !== undefined ? { policy, tokens, ...transport ? { transport } : {} } : undefined;
 }
 function stepOf(v, base) {
@@ -66309,7 +66922,7 @@ function conform(v, d) {
   }
   const tokens = isRecord(mu.tokens) ? mu.tokens : {};
   const modelUse = {
-    preset: oneOf2(mu.preset, ["lean", "standard", "full", "custom"]) ?? d.modelUse.preset,
+    preset: oneOf3(mu.preset, ["lean", "standard", "full", "custom"]) ?? d.modelUse.preset,
     steps,
     budgets: { pre: phase(budgets.pre, d.modelUse.budgets.pre), post: phase(budgets.post, d.modelUse.budgets.post) },
     tokens: { sections: atLeast(tokens.sections, 0) ?? d.modelUse.tokens.sections }
@@ -66334,13 +66947,13 @@ function conform(v, d) {
     }
     tierCaps[band] = caps;
   }
-  const realism = { preset: oneOf2(re.preset, ["story", "grounded", "simulation", "custom"]) ?? d.realism.preset, levels, tierCaps, claims: readClaims(re.claims) ?? { ...d.realism.claims } };
+  const realism = { preset: oneOf3(re.preset, ["story", "grounded", "simulation", "custom"]) ?? d.realism.preset, levels, tierCaps, claims: readClaims(re.claims) ?? { ...d.realism.claims } };
   const t = isRecord(v.time) ? v.time : {};
   const rawInterrupts = isRecord(t.interrupts) ? t.interrupts : {};
   const interrupts = { ...d.time.interrupts };
   for (const c of INTERRUPT_CLASSES)
     if (hasOwn(rawInterrupts, c))
-      interrupts[c] = oneOf2(rawInterrupts[c], ["stop", "note", "ignore"]) ?? d.time.interrupts[c];
+      interrupts[c] = oneOf3(rawInterrupts[c], ["stop", "note", "ignore"]) ?? d.time.interrupts[c];
   const unitCap = isRecord(t.unitCap) ? t.unitCap : {};
   const time = {
     sceneTicks: isRecord(t.sceneTicks) ? entries2(t.sceneTicks, 64, (x) => {
@@ -66350,14 +66963,14 @@ function conform(v, d) {
     scale: real(t.scale, 0.01, 1000) ?? d.time.scale,
     interrupts,
     speedThrough: isRecord(t.speedThrough) ? entries2(t.speedThrough, 64, speedOf) : d.time.speedThrough,
-    montage: oneOf2(t.montage, ["key", "day", "week"]) ?? d.time.montage,
+    montage: oneOf3(t.montage, ["key", "day", "week"]) ?? d.time.montage,
     unitCap: { agentDays: int(unitCap.agentDays, 1, 1e6) ?? d.time.unitCap.agentDays, events: int(unitCap.events, 1, 1e7) ?? d.time.unitCap.events }
   };
   const rawBounds = isRecord(v.extraction) ? v.extraction : {};
   const extraction = {};
   for (const type of EXTRACTION_TYPES) {
     const b = hasOwn(rawBounds, type) ? rawBounds[type] : undefined;
-    const mode = isRecord(b) ? oneOf2(b.mode, ["auto", "confirm", "never"]) : undefined;
+    const mode = isRecord(b) ? oneOf3(b.mode, ["auto", "confirm", "never"]) : undefined;
     const maxDelta = isRecord(b) ? real(b.maxDelta, 0, 1000000000000) : undefined;
     if (mode)
       extraction[type] = { mode, ...maxDelta !== undefined ? { maxDelta } : {} };
@@ -66372,8 +66985,9 @@ function conform(v, d) {
     overrideWorldDefaults: typeof v.overrideWorldDefaults === "boolean" ? v.overrideWorldDefaults : d.overrideWorldDefaults,
     adjudication: readAdjudication(v.adjudication) ?? d.adjudication,
     overrideWorldAdjudication: typeof v.overrideWorldAdjudication === "boolean" ? v.overrideWorldAdjudication : d.overrideWorldAdjudication,
+    inferred: readInferred(v.inferred),
     extraction,
-    swipeDefault: oneOf2(v.swipeDefault, ["rerun", "renarrate"]) ?? d.swipeDefault,
+    swipeDefault: oneOf3(v.swipeDefault, ["rerun", "renarrate"]) ?? d.swipeDefault,
     hideJsonBlocks: typeof v.hideJsonBlocks === "boolean" ? v.hideJsonBlocks : d.hideJsonBlocks,
     minds: mindsSettingsOf(v.minds, d.minds),
     timeouts: timeoutsOf(v.timeouts, d.timeouts)
@@ -66609,6 +67223,17 @@ function startMarkersFrom(settings, world, revision) {
   out.push({ kind: "claims", to: (mine ? null : readClaims(world.realism.claims)) ?? { ...settings.realism.claims } });
   const authored = readAdjudication(world.ruleset?.adjudication);
   out.push({ kind: "adjudicate", to: authored && !settings.overrideWorldAdjudication ? authored : settings.adjudication });
+  const start = { levels: { ...settings.realism.levels }, tierCaps: { principal: {}, supporting: {}, background: {} } };
+  for (const m of out) {
+    if (m.kind !== "resolve")
+      continue;
+    if ("all" in m.scope)
+      start.levels[m.domain] = m.to;
+    else if ("tier" in m.scope)
+      start.tierCaps[m.scope.tier][m.domain] = m.to;
+  }
+  const inferred = readInferred(world.ruleset?.inferred);
+  out.push({ kind: "infer", to: (settings.overrideWorldAdjudication ? null : inferred) ?? settings.inferred ?? inferredDefaults(presetOf(start), rulesetFloor(world, "sheets", start.levels.sheets)) });
   return out;
 }
 
@@ -66857,6 +67482,25 @@ function timelapseEntry(world, state) {
     lexicon: TIMELAPSE_LEXICON
   };
 }
+function tryEntry(policy, skills) {
+  const which = policy.when === "tries" ? "only one the input says the player character tries or attempts" : policy.when === "risky" ? "one that could go wrong" : "any whose outcome is uncertain";
+  const named = skills.map((s) => s.label.toLowerCase() === s.id.replace(/_/g, " ").toLowerCase() ? s.id : `${s.id} (${s.label})`);
+  return {
+    id: TRY_ACTION,
+    label: "Try something",
+    description: `an attempt no other action covers, ${which}, rolled with a skill: talking someone round, sneaking, noticing, deceiving, forcing something; a reaction the input asks for counts too ("I watch him as he answers: is he lying?" reads him against his deceit)`,
+    params: [
+      "attempt (text: what is attempted, in the input's words)",
+      `skill (one of: ${named.join(" | ")})`,
+      `difficulty (one of: ${bandsWithin(policy).map((b) => b.id).join(" | ")}: how hard it looks in context)`,
+      ...policy.who !== "pov" ? ['with? (a list of ids of people here who join in: "we sneak past" names each companion)'] : [],
+      'against? (a list of {"who": an id of someone here, "skill": the skill they resist with}: the people it opposes or targets)',
+      ...policy.when === "tries" ? ["tried (true when the input itself says the player character tries or attempts it)"] : []
+    ],
+    needs: [],
+    lexicon: ["try to", "attempt", "manage to", "talk into", "sneak past"]
+  };
+}
 function atWords(reg, world, state, id) {
   const place = placeOfEntity(state, id);
   return place !== null && canSeePlace(reg, world, state, world.pov, place) ? `, at ${own(world.places, place)?.name ?? place}` : "";
@@ -66929,6 +67573,124 @@ function recentMessages(messages, recent, hideJson) {
     break;
   }
   return out.reverse();
+}
+
+// src/backend/inferred-words.ts
+function listed2(names) {
+  return names.length <= 1 ? names[0] ?? "" : `${names.slice(0, -1).join(", ")} and ${names.at(-1) ?? ""}`;
+}
+function signed2(n) {
+  return n === 0 ? "" : ` ${n > 0 ? "+" : "\u2212"} ${Math.abs(n)}`;
+}
+function hiddenDc(info) {
+  return info.against.length > 0 && info.others === "hidden";
+}
+function ownRoll(res, info) {
+  const c = res.check;
+  if (!c)
+    return null;
+  const modifier = c.modifier - info.share;
+  return { notation: c.roll.notation, modifier, total: c.roll.total + modifier, dc: c.dc ?? info.dc };
+}
+function againstWords(info) {
+  if (info.against.length === 0)
+    return ` (${info.band.label.toLowerCase()})`;
+  const named = info.against.map((a) => info.others === "shown" ? `${a.name} (${a.rolled ? `rolled ${a.score}` : `${a.score} without a roll`})` : a.name);
+  return ` against ${listed2(named)}`;
+}
+function ownResult(res, info, passed) {
+  const a = res.adjudged;
+  const outcome = res.outcome ?? "";
+  const roll = ownRoll(res, info);
+  if (roll) {
+    const hidden = hiddenDc(info);
+    const close = a?.close ? passed !== a.pass.includes(a.close.outcome) ? ", only just" : `, close to ${a.close.outcome}` : "";
+    const margin = roll.total - roll.dc;
+    const detail = info.detail === "roll" ? ` (rolled ${roll.total} on ${roll.notation}${signed2(roll.modifier)}${hidden ? "" : ` against ${roll.dc}`})` : info.detail === "margin" && !hidden ? ` by ${Math.abs(margin)}` : "";
+    return `${outcome}${detail}${close}`;
+  }
+  switch (a?.why) {
+    case "impossible":
+      return `${outcome} (too hard to pull off, so no roll)`;
+    case "retry":
+      return `${outcome} again (nothing has changed since the last try, so no roll)`;
+    case "story":
+      return `${outcome}, as the story decides from the player's approach (no roll)`;
+    default:
+      return `${outcome} (no roll needed)`;
+  }
+}
+function companionResult(c, info) {
+  if (info.others !== "shown")
+    return c.outcome;
+  const margin = c.total - info.dc;
+  if (info.detail === "roll")
+    return `${c.outcome} (rolled ${c.total} on ${c.notation}${signed2(c.modifier)} against ${info.dc})`;
+  return info.detail === "margin" ? `${c.outcome} by ${Math.abs(margin)}` : c.outcome;
+}
+function guided(line, info) {
+  const fill = { who: info.pov, skill: info.label.replace(/ check$/, ""), attempt: info.attempt, against: listed2(info.against.map((a) => a.name)) };
+  return line.replace(/\{(who|skill|attempt|against)\}/g, (_, key) => fill[key] ?? "");
+}
+function inferredOutcome(res, info) {
+  const passed = info.pass.includes(res.outcome ?? "");
+  const who = info.companions.length > 0 ? `${info.pov} with ${listed2(info.companions.map((c) => c.name))}` : info.pov;
+  const head = `${info.label}${info.attempt !== "" ? ` for "${info.attempt}"` : ""}, ${who}${againstWords(info)}`;
+  const own = ownResult(res, info, passed);
+  const results = info.companions.length > 0 ? [`${info.pov} ${own}`, ...info.companions.map((c) => `${c.name} ${companionResult(c, info)}`)].join("; ") : own;
+  const line = guided(passed ? info.guidance.pass : info.guidance.fail, info);
+  const close = res.adjudged?.close ? `; it may ${passed ? "come at a cost" : "leave partial progress"}` : "";
+  const narrate = close !== "" ? `${line.replace(/[.!\s]+$/, "")}${close}.` : line;
+  return `${head}: ${results}. ${narrate}${info.companions.length > 0 ? " Narrate the others as their rolls fell." : ""}`;
+}
+function noRollWhy(res, info) {
+  const a = res.adjudged;
+  const chance = a?.chance == null || hiddenDc(info) ? "" : ` (${Math.round(a.chance * 100)}% to succeed)`;
+  switch (a?.why) {
+    case "trivial":
+      return `a sure thing${chance}`;
+    case "impossible":
+      return `too hard to try${chance}`;
+    case "safe":
+      return `only risky checks roll${chance}`;
+    case "unmarked":
+      return "checks roll only for marked actions, places and quests";
+    case "never":
+      return "this chat doesn't roll checks";
+    case "story":
+      return `the story decides, judged from your approach${chance}`;
+    case "retry":
+      return a?.retry === "once" ? "you already failed this here; it takes a new scene" : "you already failed this; it takes a change (time, another way, or better odds)";
+    default:
+      return "the policy settled it";
+  }
+}
+function inferredChip(res, info) {
+  const a = res.adjudged;
+  const c = res.check;
+  const roll = ownRoll(res, info);
+  const hidden = hiddenDc(info);
+  const approach = a?.approach ? ` Your approach: ${a.approach.rating} of ${a.approach.max}${a.approach.reason ? ` (${a.approach.reason})` : ""}.` : "";
+  let own;
+  if (c && roll) {
+    const natural = c.natural !== null && (c.check.bands ?? []).some((b) => b.natural) ? ` (natural ${c.natural})` : "";
+    const against = hidden ? ` against ${listed2(info.against.map((x) => x.name))}` : ` against ${roll.dc}`;
+    const odds = hidden ? "" : ` Odds: ${Object.entries(c.odds).map(([band, p]) => `${band} ${Math.round(p * 100)}%`).join(" \xB7 ")}.`;
+    const close = a?.close ? hidden ? " Close: it nearly went the other way." : ` Close: ${Math.abs(a.close.points)} ${Math.abs(a.close.points) === 1 ? "point" : "points"} ${a.close.points < 0 ? "lower" : "higher"} would have been ${a.close.outcome}.` : "";
+    const undecided = a?.authority === "narrative" ? " Nothing judged your approach, so the dice decided." : "";
+    own = `Rolled ${roll.notation}${signed2(roll.modifier)} = ${roll.total}${natural}${against}.${odds}${approach}${close}${undecided}`;
+  } else
+    own = `No roll: ${noRollWhy(res, info)}.${approach}`;
+  const companions = info.companions.map((x) => ` ${x.name}: ${x.outcome}${info.others === "shown" ? ` (rolled ${x.total} on ${x.notation}${signed2(x.modifier)})` : ""}.`).join("");
+  const opponents = info.others === "shown" ? info.against.map((x) => ` ${x.name} ${x.rolled ? `rolled ${x.score}` : `set it at ${x.score} without a roll`}.`).join("") : "";
+  return { label: `${info.label}: ${res.outcome ?? ""}`, detail: `${own}${companions}${opponents}` };
+}
+function checkQuestion(verdict, nameOf) {
+  const { skill, band, read } = verdict;
+  const against = read.against.length > 0 ? ` against ${listed2(read.against.map((a) => nameOf(a.who)))}` : "";
+  const joined = read.with.length > 0 ? ` with ${listed2(read.with.map(nameOf))}` : "";
+  const what = read.attempt !== "" ? `, to "${read.attempt}"` : "";
+  return { question: `Roll ${skill.label}?`, detail: `${skill.label}${joined}${against}, looking ${band.label.toLowerCase()}${what}. Roll plays your message with the roll; No roll plays it as written.` };
 }
 
 // src/backend/section-refs.ts
@@ -67359,11 +68121,11 @@ class TurnBridge {
     const ask = steps[index]?.ask;
     return ask ? { index, ...ask } : null;
   }
-  answerClaim(userText, index, add) {
+  answerAsk(userText, index, keep) {
     const read = this.held.get(userText);
     if (!read?.steps[index]?.ask)
       return false;
-    const steps = add ? read.steps.map((s, i) => i === index ? { action: s.action, params: s.params, text: s.text, ...s.claim ? { claim: s.claim } : {} } : s) : read.steps.filter((_, i) => i !== index);
+    const steps = keep ? read.steps.map((s, i) => i === index ? { action: s.action, params: s.params, text: s.text, ...s.claim ? { claim: s.claim } : {} } : s) : read.steps.filter((_, i) => i !== index);
     this.setRead(userText, { ...read, steps });
     return true;
   }
@@ -68045,6 +68807,7 @@ class Runtime {
   push;
   diag;
   studio;
+  agents;
   templates;
   templateInfo;
   pipeline;
@@ -68095,9 +68858,10 @@ class Runtime {
     this.steps.onCallStart = (userId, purpose) => this.diag.callStart(userId, purpose);
     this.toolSupport = new ToolSupport(this.host);
     this.minds = { host: this.host, registry: this.registry, steps: this.steps, settings: this.settings, presets: this.presets };
-    this.ledger = new LedgerService(this.host, (chatId, userId) => this.resolveEnv(chatId, userId), new LedgerFold(this.registry, { fingerprint: "1792538992" }), (chatId) => messages.forget(chatId));
+    this.ledger = new LedgerService(this.host, (chatId, userId) => this.resolveEnv(chatId, userId), new LedgerFold(this.registry, { fingerprint: "822697e4" }), (chatId) => messages.forget(chatId));
     this.studio = new StudioBridge(this.host, this.worlds);
     this.worlds.onChange = (worldId, userId) => this.studio.worldChanged(worldId, userId);
+    this.agents = new Agents(this.host, options.build ?? thisBuild());
     this.push = new StatePush(this.host, async (chatId, userId) => {
       const view = await this.diag.timed(userId, chatId, "state view", () => this.view(chatId, userId));
       this.studio.seen(userId, view);
@@ -68108,6 +68872,7 @@ class Runtime {
     this.ledger.hooks = this;
     this.ledger.diag = this.diag;
     this.ledger.attach();
+    this.agents.start();
     this.host.on("MESSAGE_SENT", (e, userId) => {
       if (e.message.isUser && userId)
         this.lapse(e.chatId, userId);
@@ -68257,7 +69022,8 @@ class Runtime {
     const [, early] = await Promise.all([intentTask, choose && budget.take(judging ? 1 : 0) ? choose() : null]);
     const asked = bridge.askOf(text);
     if (asked && lastUser) {
-      await this.chips.add(input.chatId, input.userId, [{ id: `claim:${lastUser.id}`, kind: "claim", messageId: lastUser.id, label: asked.question, detail: asked.detail, actions: [{ id: "add", label: "Add", style: "primary" }, { id: "drop", label: "Not an action" }], expires: "next_send", payload: { text, index: asked.index } }]);
+      const actions = asked.kind === "check" ? [{ id: "roll", label: "Roll", style: "primary" }, { id: "drop", label: "No roll" }] : [{ id: "add", label: "Add", style: "primary" }, { id: "drop", label: "Not an action" }];
+      await this.chips.add(input.chatId, input.userId, [{ id: `${asked.kind}:${lastUser.id}`, kind: asked.kind, messageId: lastUser.id, label: asked.question, detail: asked.detail, actions, expires: "next_send", payload: { text, index: asked.index } }]);
       this.push.changed(input.chatId, input.userId);
       return { waiting: `waiting for the player's answer: ${asked.question}` };
     }
@@ -68438,8 +69204,11 @@ class Runtime {
       return;
     }
     const mayKnow = (id) => povMayKnow(this.registry, render.world, render.state, id);
-    const offered = interpretCatalog(this.registry, render.world, render.state, all, mayKnow);
-    const catalog = [...offered.entries.map((o) => o.entry), timelapseEntry(render.world, render.state)];
+    const inferred = inferredOf(render.world, render.state);
+    const sources = skillSources(this.registry, render.world, render.state);
+    const skills = allowedSkills(inferred, sources);
+    const offered = interpretCatalog(this.registry, render.world, render.state, all.filter((a) => !rolledByTry(a, sources)), mayKnow);
+    const catalog = [...offered.entries.map((o) => o.entry), ...inferred.mode !== "off" && skills.length > 0 ? [tryEntry(inferred, skills)] : [], timelapseEntry(render.world, render.state)];
     const context = {
       world: render.world,
       pov: { id: render.world.pov, name: render.state.entities[render.world.pov]?.name ?? render.world.pov },
@@ -68500,10 +69269,12 @@ ${this.trackWords(render.world, render.state)}`, links: this.sceneLinks(render.w
     const policy = claimsOf(render.world, render.state);
     const dropped = [];
     const steps = [];
+    let rolls = false;
     const take = (def, given, words, thing, said) => {
       const ref = unfitRef(this.registry, def, given, render.world, render.state, mayKnow);
       if (!ref) {
         steps.push({ action: def.id, params: given, text: words });
+        rolls ||= checkOf(render.world, def.check) !== null;
         return;
       }
       const verdict = claimFor({ registry: this.registry, world: render.world, state: render.state, action: def, params: given, unfit: ref, said, thing, policy, mayKnow });
@@ -68512,19 +69283,32 @@ ${this.trackWords(render.world, render.state)}`, links: this.sceneLinks(render.w
       if (verdict?.kind === "real")
         steps.push({ action: def.id, params: given, text: words, claim: verdict.claim });
       else if (verdict?.kind === "ask")
-        steps.push({ action: def.id, params: given, text: words, claim: verdict.claim, ask: { question: verdict.question, detail: verdict.detail } });
+        steps.push({ action: def.id, params: given, text: words, claim: verdict.claim, ask: { kind: "claim", question: verdict.question, detail: verdict.detail } });
       else {
         this.host.log("info", `[LumiRPEngine] interpret: ${def.id} names nothing in the world (${JSON.stringify(given)}); dropped`, userId);
         dropped.push({ label: def.label, reason: verdict?.kind === "hold" && verdict.reason ? verdict.reason : unfitReason(this.registry, render.world, render.state, ref, text, secrets, mayKnow) });
+        return;
       }
+      rolls ||= checkOf(render.world, def.check) !== null;
+    };
+    const takeTry = (given, words) => {
+      const verdict = rolls ? { ok: false, why: "an action before it rolls its own check" } : inferredRead(this.registry, render.world, render.state, given);
+      if (!verdict.ok) {
+        this.host.log("info", `[LumiRPEngine] interpret: Try something isn't a check here (${verdict.why}); the message plays without it`, userId);
+        return;
+      }
+      const asked = verdict.policy.mode === "suggest" ? checkQuestion(verdict, (id) => render.state.entities[id]?.name ?? id) : null;
+      steps.push({ action: TRY_ACTION, params: verdict.params, text: words, ...asked ? { ask: { kind: "check", ...asked } } : {} });
     };
     if (chosen)
       take(chosen, params, "", result.thing, [text]);
+    else if (result.action === TRY_ACTION)
+      takeTry(result.params, "");
     let then = result.then;
     const further = result.queue ?? [];
     for (const [k, q] of further.entries()) {
-      const def = all.find((a) => a.id === q.action);
-      if (q.action === TIMELAPSE_ACTION2 || !def) {
+      const def = q.action === TRY_ACTION ? undefined : all.find((a) => a.id === q.action);
+      if (q.action === TIMELAPSE_ACTION2 || !def && q.action !== TRY_ACTION) {
         if (k === further.length - 1 && !then && q.action === TIMELAPSE_ACTION2)
           then = q.params;
         else
@@ -68535,12 +69319,16 @@ ${this.trackWords(render.world, render.state)}`, links: this.sceneLinks(render.w
         next = [...further.slice(k + 1).map((r) => chipText(r.text)), ...next];
         break;
       }
+      if (!def) {
+        takeTry(q.params, chipText(q.text));
+        continue;
+      }
       const ready = playable(def, q.params, render.world, [q.text, text]);
       take(def, ready, chipText(q.text), q.thing, [q.text, text]);
     }
     bridge.setNext(text, joinActions(next) || null);
     bridge.setOffer(text, then ? interpretedTarget(then, render.world, render.state, text) : null);
-    bridge.setRead(text, { lead: result.action, params, probabilities: result.probabilities, chosen: chosen !== undefined, ...then ? { then } : {}, steps, dropped });
+    bridge.setRead(text, { lead: result.action, params, probabilities: result.probabilities, chosen: chosen !== undefined || result.action === TRY_ACTION, ...then ? { then } : {}, steps, dropped });
   }
   async judgeAnswer(bridge, text, render, settings, facts, budget, at) {
     const intent = bridge.intentOf(text);
@@ -68564,16 +69352,17 @@ ${answer}`, links: owner ? [owner] : [] }));
     if (!intent?.action || intent.action === TIMELAPSE_ACTION2)
       return null;
     const steps = [{ action: intent.action, params: intent.params, judgement: intent.judgement }, ...intent.queue ?? []];
-    const index = steps.findIndex((s) => checkOf(render.world, findAction(this.registry, render.world, s.action)?.check) !== null);
+    const index = steps.findIndex((s) => s.action === TRY_ACTION || checkOf(render.world, findAction(this.registry, render.world, s.action)?.check) !== null);
     const step = steps[index];
-    const action = step ? findAction(this.registry, render.world, step.action) : undefined;
+    const tried = step?.action === TRY_ACTION ? tryJudged(this.registry, render.world, render.state, step.params) : null;
+    const action = tried?.action ?? (step ? findAction(this.registry, render.world, step.action) : undefined);
     if (!step || !action || step.judgement)
       return null;
-    const shown = actionOdds(this.registry, render.world, render.state, { action, params: step.params });
+    const shown = actionOdds(this.registry, render.world, render.state, tried ?? { action, params: step.params });
     const policy = policyFor(render.world, render.state, action, render.world.pov);
     if (!shown.available || !shown.verdict || !shown.odds || !needsJudge(policy, shown.verdict))
       return null;
-    return { intent, index, action, params: step.params, verdict: shown.verdict, odds: shown.odds, policy };
+    return { intent, index, action, params: tried?.params ?? step.params, verdict: shown.verdict, odds: shown.odds, policy };
   }
   async judgeApproach(bridge, text, render, settings, facts, budget, at) {
     const userId = at.userId;
@@ -68994,7 +69783,7 @@ ${pre?.text ?? ""}`, links: this.sceneLinks(context.world, context.state) };
     this.host.log("info", `[LumiRPEngine] turn ${input.messageId.slice(0, 8)}:${input.swipeId} ${input.kind}: plan ${plan ? "yes" : "no"}, ${checked.length > 0 ? checked.join("; ") : "action -"}${plan?.stopped ? `; queue stopped (${plan.stopped.cause}) with ${plan.stopped.left} left` : ""}`, input.userId);
     if (played.length > 0) {
       const world = input.core.worldAt(input.core.fold(input.observed).state.revision) ?? input.core.worldAt(rec?.defHash ?? "");
-      const labelOf = (res) => (world?.actions[res.action] ?? this.registry.actions.get(res.action))?.label ?? res.action;
+      const labelOf = (res) => res.inferred?.label ?? (world?.actions[res.action] ?? this.registry.actions.get(res.action))?.label ?? res.action;
       for (const [i, res] of played.entries()) {
         const label = labelOf(res);
         const n = i === 0 ? "" : `:${i}`;
@@ -69087,8 +69876,8 @@ ${pre?.text ?? ""}`, links: this.sceneLinks(context.world, context.state) };
   setSwipeChoice(chatId, mode) {
     lruSet(this.swipeChoice, chatId, mode, 256);
   }
-  answerClaim(chatId, text, index, add) {
-    return this.bridges.get(chatId)?.answerClaim(text, index, add) ?? false;
+  answerAsk(chatId, text, index, keep) {
+    return this.bridges.get(chatId)?.answerAsk(text, index, keep) ?? false;
   }
   async kindOf(input) {
     if (input.kind !== "swipe" && input.kind !== "regenerate")
@@ -69293,7 +70082,7 @@ ${rules}` });
       record.id = to;
       this.inspector.save(chatId);
     }
-    await this.chips.removeWhere(chatId, userId, (chip) => chip.kind === "engine_failed" || chip.kind === "claim");
+    await this.chips.removeWhere(chatId, userId, (chip) => chip.kind === "engine_failed" || chip.kind === "claim" || chip.kind === "check");
   }
   async failed(input) {
     const answered = this.answeredMinds.get(input.turn);
@@ -69591,12 +70380,12 @@ function planOutline(plan, prose) {
 function planLines(plan, world, registry) {
   const outcome = [];
   for (const res of plan.resolutions) {
-    const label = (world.actions[res.action] ?? registry.actions.get(res.action))?.label ?? res.action;
+    const label = res.inferred?.label ?? (world.actions[res.action] ?? registry.actions.get(res.action))?.label ?? res.action;
     const reasons = res.rejected.slice(0, 3).map((r) => r.rejection.reason);
     if (!res.ok)
       outcome.push(`${label}: it didn't happen (${res.failed ? playerReason(res.failed).replace(/\.$/, "") : "not possible"}). Narrate the attempt failing.`);
     else if (res.check || res.adjudged) {
-      outcome.push(checkLine(label, res));
+      outcome.push(res.inferred ? inferredOutcome(res, res.inferred) : checkLine(label, res));
       for (const r of reasons)
         outcome.push(`Not possible: ${r}.`);
     } else if (reasons.length > 0)
@@ -69654,6 +70443,8 @@ function checkLine(label, res) {
   }
 }
 function rollChip(label, res) {
+  if (res.inferred)
+    return inferredChip(res, res.inferred);
   const a = res.adjudged;
   const c = res.check;
   const approach = a?.approach ? ` Your approach: ${a.approach.rating} of ${a.approach.max}${a.approach.reason ? ` (${a.approach.reason})` : ""}.` : "";
@@ -70023,8 +70814,11 @@ class Dispatcher {
       case "lre.hello":
       case "lre.state.resync": {
         if (r.type === "lre.hello") {
-          reply("lre.hello", { accepted: true, agentApi: AGENT_API, requestMs: (await this.rt.settings.get(userId)).timeouts.requestMs, canStop: this.rt.host.capabilities.cancel });
+          const agent = r.client !== undefined ? this.rt.agents.meet(userId, session, r.client) : {};
+          reply("lre.hello", { accepted: true, agentApi: AGENT_API, requestMs: (await this.rt.settings.get(userId)).timeouts.requestMs, canStop: this.rt.host.capabilities.cancel, ...agent });
           this.meet(userId, session, r.client);
+          if (r.client === undefined)
+            this.rt.agents.page(userId, session);
         } else
           reply("lre.state.resync", { accepted: true });
         if (r.type === "lre.hello" && r.presetId !== undefined && this.rt.presets.useLoom(userId, typeof r.presetId === "string" ? r.presetId : null))
@@ -70150,6 +70944,11 @@ class Dispatcher {
         reply("lre.gm", view);
         return;
       }
+      case "lre.state.get": {
+        await this.requireWorldChat(r.chatId, userId);
+        reply("lre.state.get", { view: await this.rt.view(r.chatId, userId), activity: this.rt.diag.activityOf(r.chatId) });
+        return;
+      }
       case "lre.diag": {
         if (r.op === "clear")
           await this.rt.diag.clear(r.chatId, userId);
@@ -70159,7 +70958,7 @@ class Dispatcher {
         return;
       }
       case "lre.marker": {
-        const body = validMarkerBody(r.kind === "resolve" ? { kind: "resolve", domain: r.domain, scope: r.scope, to: r.to } : r.kind === "time" ? { kind: "time", control: r.control, scope: r.scope, to: r.to } : r.kind === "claims" ? { kind: "claims", to: r.to } : r.kind === "adjudicate" ? { kind: "adjudicate", to: r.to } : { kind: "migrate", to: r.to, merge: r.merge });
+        const body = validMarkerBody(r.kind === "resolve" ? { kind: "resolve", domain: r.domain, scope: r.scope, to: r.to } : r.kind === "time" ? { kind: "time", control: r.control, scope: r.scope, to: r.to } : r.kind === "claims" ? { kind: "claims", to: r.to } : r.kind === "adjudicate" ? { kind: "adjudicate", to: r.to } : r.kind === "infer" ? { kind: "infer", to: r.to } : { kind: "migrate", to: r.to, merge: r.merge });
         if (!body || body.kind === "time" && !TIME_CONTROLS.some((c) => c === body.control))
           throw new RequestError("bad_request", "not a valid settings change");
         if (body.kind === "migrate") {
@@ -70301,6 +71100,10 @@ class Dispatcher {
       }
       case "lre.studio": {
         reply("lre.studio", await this.studio(r, userId, noted));
+        return;
+      }
+      case "lre.agents": {
+        reply("lre.agents", await this.rt.agents.request(r, userId, session));
         return;
       }
     }
@@ -70456,7 +71259,7 @@ class Dispatcher {
         const draft = await store.working(r.worldId, userId);
         const world = { ...draft, ruleset: isRecord(r.ruleset) ? r.ruleset : undefined };
         const entity = typeof r.entity === "string" && hasOwn(world.entities, r.entity) ? r.entity : world.pov;
-        return { sheet: previewSheet(this.rt.registry, world, entity) };
+        return { sheet: previewSheet(this.rt.registry, world, entity), skills: previewSkills(this.rt.registry, world) };
       }
       case "templates":
         return { templates: this.rt.templateInfo.filter((t) => hasOwn(this.rt.templates, t.id)) };
@@ -70528,6 +71331,8 @@ class Dispatcher {
       lines.push({ text: `What you say you have that the world doesn't: ${CLAIM_MODE_LABEL[body.to.mode]}${body.to.mode === "real" ? body.to.capped ? ", asking above the world's claim cap" : ", at any price" : ""}, from the next turn; earlier turns keep what theirs did.`, tone: "info" });
     } else if (body.kind === "adjudicate") {
       lines.push({ text: "Checks are decided this way from the next turn; earlier turns keep how theirs were decided.", tone: "info" });
+    } else if (body.kind === "infer") {
+      lines.push({ text: `Typed attempts are read as checks this way from the next turn (${INFER_MODE_LABEL[body.to.mode].toLowerCase()}); earlier turns keep how theirs were read.`, tone: "info" });
     } else {
       lines.push({ text: `The chat moves to revision ${body.to.slice(0, 8)} of ${world.name} from the next turn.`, tone: "info" });
       return { lines, upgrade: await this.upgradePreview(chatId, userId, state, body.to) };
@@ -70782,12 +71587,14 @@ class Dispatcher {
         const result = await this.write(chatId, userId, { kind: "undo", id: this.nextId(), messageId: m.id, swipeId: m.swipeId, refs });
         return { applied: result.applied, pending: result.pending };
       }
-      case "claim": {
-        if (choice !== "add" && choice !== "drop")
+      case "claim":
+      case "check": {
+        const keep = chip.kind === "claim" ? "add" : "roll";
+        if (choice !== keep && choice !== "drop")
           throw new RequestError("bad_request", `unknown choice ${choice}`);
         const text = typeof chip.payload.text === "string" ? chip.payload.text : "";
         const index = typeof chip.payload.index === "number" ? chip.payload.index : -1;
-        return { applied: this.rt.answerClaim(chatId, text, index, choice === "add"), pending: false };
+        return { applied: this.rt.answerAsk(chatId, text, index, choice === keep), pending: false };
       }
       case "claimed": {
         const core = await this.rt.ledger.core(chatId, userId);
@@ -71256,6 +72063,14 @@ function createSpindleHost() {
         });
       }
     },
+    extensionStorage: {
+      async read(path) {
+        if (!await spindle.storage.exists(path))
+          return null;
+        return spindle.storage.read(path);
+      },
+      write: (path, data) => spindle.storage.write(path, data)
+    },
     on(event, handler) {
       return spindle.on(event, (payload, userId) => {
         const decoded = decodeEvent(event, payload);
@@ -71356,6 +72171,7 @@ function createSpindleHost() {
       },
       closeDrawer: (userId) => spindle.ui.closeDrawer({ userId })
     },
+    toast: (message, userId) => spindle.toast.info(message, { title: "LumiRPEngine", userId }),
     books: {
       async create(name, description, userId) {
         const book = await spindle.world_books.create({ name, description, metadata: { lumi_rp_engine: true } }, userId);

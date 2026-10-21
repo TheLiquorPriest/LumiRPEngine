@@ -1,4 +1,4 @@
-// node_modules/preact/dist/preact.mjs
+// ../../LumiRPEngine/node_modules/preact/dist/preact.mjs
 var n;
 var t;
 var i;
@@ -347,7 +347,7 @@ n = { __e: function(n, t, i, r) {
   return n.__v.__b - t.__v.__b;
 }, e = Symbol(), l = /(PointerCapture)$|Capture$/i, c = 0, a = {}, s = 0;
 
-// node_modules/preact/hooks/dist/hooks.mjs
+// ../../LumiRPEngine/node_modules/preact/hooks/dist/hooks.mjs
 var t2;
 var r2;
 var u2;
@@ -1098,7 +1098,7 @@ function humanize(id) {
   const words = id.replace(/[_.]+/g, " ").trim();
   return words.length === 0 ? id : words[0]?.toUpperCase() + words.slice(1);
 }
-// node_modules/preact/jsx-runtime/dist/jsxRuntime.mjs
+// ../../LumiRPEngine/node_modules/preact/jsx-runtime/dist/jsxRuntime.mjs
 var o3 = 0;
 function u3(t, e, n2, f, u, i) {
   e || (e = {});
@@ -4421,6 +4421,7 @@ var ROLE = {
   read_failed: "decision",
   engine_failed: "decision",
   claim: "decision",
+  check: "decision",
   retry: "decision",
   retry_read: "decision",
   reread: "decision",
@@ -4448,6 +4449,7 @@ var TONE = {
   read_failed: "neg",
   engine_failed: "neg",
   claim: "neutral",
+  check: "neutral",
   refused: "neg",
   degraded: "warn",
   pending: "warn",
@@ -5336,6 +5338,11 @@ function MoneyInput(props) {
   }, undefined, true, undefined, this);
 }
 
+// src/shared/state-view.ts
+function chipRegenerates(kind, choice) {
+  return choice === "regenerate" || kind === "swipe_option" && (choice === "renarrate" || choice === "rerun") || kind === "contradiction" && choice === "renarrate" || kind === "read_failed" && choice === "rerun" || kind === "claim" && (choice === "add" || choice === "drop") || kind === "check" && (choice === "roll" || choice === "drop");
+}
+
 // src/frontend/requests.ts
 function upgradeRequest(chatId, preview, choices) {
   const merge = {};
@@ -5365,7 +5372,7 @@ function chipIntent(chip, choice, chatId, payload) {
   if (choice === "regenerate")
     return { request: null, regenerate: true };
   const request = payload ? { type: "lre.chip", chatId, chip: chip.id, choice, payload } : { type: "lre.chip", chatId, chip: chip.id, choice };
-  return { request, regenerate: chip.kind === "swipe_option" && (choice === "renarrate" || choice === "rerun") || chip.kind === "contradiction" && choice === "renarrate" || chip.kind === "read_failed" && choice === "rerun" || chip.kind === "claim" && (choice === "add" || choice === "drop") };
+  return { request, regenerate: chipRegenerates(chip.kind, choice) };
 }
 function convertRequest(line, chatId) {
   if ("marker" in line.ref)
@@ -5460,6 +5467,9 @@ function adjudicateMarker(chatId, to) {
 function claimsMarker(chatId, to) {
   return { type: "lre.marker", chatId, kind: "claims", to };
 }
+function inferMarker(chatId, to) {
+  return { type: "lre.marker", chatId, kind: "infer", to };
+}
 function sheetPreviewRequest(worldId, ruleset, entity) {
   return entity === undefined ? { type: "lre.world", op: "sheet", worldId, ruleset } : { type: "lre.world", op: "sheet", worldId, ruleset, entity };
 }
@@ -5490,6 +5500,7 @@ var CHIP_ICON = {
   read_failed: "alert",
   engine_failed: "alert",
   claim: "help",
+  check: "dice",
   claimed: "sparkle",
   fix: "edit",
   refused: "alert"
@@ -14165,6 +14176,95 @@ function readAdjudication(raw) {
   };
 }
 
+// src/shared/inferred.ts
+var INFER_MODES = ["off", "suggest", "auto"];
+var INFER_WHENS = ["uncertain", "risky", "tries"];
+var INFER_WHOS = ["pov", "companions", "everyone"];
+var INFER_DETAILS = ["result", "margin", "roll"];
+var INFER_OTHERS = ["hidden", "shown"];
+var INFER_MODE_LABEL = { off: "Off", suggest: "Suggest a roll", auto: "Roll automatically" };
+var INFER_WHEN_LABEL = { uncertain: "Every uncertain attempt", risky: "Only risky attempts", tries: "Only when the message says it tries" };
+var INFER_WHO_LABEL = { pov: "The player character only", companions: "With companions", everyone: "Everyone involved" };
+var INFER_DETAIL_LABEL = { result: "The result", margin: "The result and margin", roll: "The whole roll" };
+var INFER_OTHERS_LABEL = { hidden: "Hidden", shown: "Shown" };
+var DIFFICULTY_BANDS = [
+  { id: "trivial", label: "Trivial", dc: 5 },
+  { id: "easy", label: "Easy", dc: 8 },
+  { id: "moderate", label: "Moderate", dc: 10 },
+  { id: "tricky", label: "Tricky", dc: 12 },
+  { id: "hard", label: "Hard", dc: 15 },
+  { id: "very_hard", label: "Very hard", dc: 20 },
+  { id: "heroic", label: "Heroic", dc: 25 },
+  { id: "nearly_impossible", label: "Nearly impossible", dc: 30 }
+];
+var INFERRED_BOUNDS = {
+  most: [1, 12],
+  guidance: 240,
+  skills: 64,
+  skillId: 64
+};
+var DEFAULT_GUIDANCE = { pass: "Narrate it succeeding.", fail: "Narrate it failing." };
+var INFERRED_PRESETS = {
+  story: { mode: "suggest", when: "tries", who: "pov", skills: null, difficulty: { lowest: "easy", highest: "hard" }, detail: "result", others: "hidden", guidance: { ...DEFAULT_GUIDANCE }, most: 1 },
+  grounded: { mode: "auto", when: "risky", who: "companions", skills: null, difficulty: { lowest: "easy", highest: "very_hard" }, detail: "result", others: "hidden", guidance: { ...DEFAULT_GUIDANCE }, most: 3 },
+  simulation: { mode: "auto", when: "uncertain", who: "everyone", skills: null, difficulty: { lowest: "easy", highest: "heroic" }, detail: "margin", others: "hidden", guidance: { ...DEFAULT_GUIDANCE }, most: 6 }
+};
+function inferredDefaults(preset, sheets) {
+  const named = preset !== "custom" ? preset : sheets <= 1 ? "story" : sheets === 2 ? "grounded" : "simulation";
+  const out = structuredClone(INFERRED_PRESETS[named]);
+  if (sheets === 0)
+    out.mode = "off";
+  if (sheets <= 1)
+    out.detail = "result";
+  else if (sheets === 2 && out.detail === "roll")
+    out.detail = "margin";
+  return out;
+}
+function oneOf3(v, values, fallback) {
+  return values.find((x) => x === v) ?? fallback;
+}
+function line(v, fallback) {
+  const s = typeof v === "string" ? v.replace(/\s+/g, " ").trim() : "";
+  return s === "" ? fallback : s.slice(0, INFERRED_BOUNDS.guidance);
+}
+function skillList(v, fallback) {
+  if (v === null)
+    return null;
+  if (!Array.isArray(v))
+    return fallback;
+  const ids = v.flatMap((s) => typeof s === "string" && s.trim() !== "" && s.trim().length <= INFERRED_BOUNDS.skillId ? [s.trim()] : []);
+  return [...new Set(ids)].slice(0, INFERRED_BOUNDS.skills);
+}
+var bandAt = (id) => DIFFICULTY_BANDS.findIndex((b) => b.id === id);
+function readInferred(raw) {
+  if (!isRecord(raw))
+    return null;
+  const mode = INFER_MODES.find((m) => m === raw.mode);
+  if (!mode)
+    return null;
+  const base = INFERRED_PRESETS.grounded;
+  const d = isRecord(raw.difficulty) ? raw.difficulty : {};
+  const ids = DIFFICULTY_BANDS.map((b) => b.id);
+  const a = oneOf3(d.lowest, ids, base.difficulty.lowest);
+  const b = oneOf3(d.highest, ids, base.difficulty.highest);
+  const g = isRecord(raw.guidance) ? raw.guidance : {};
+  const [lo, hi] = INFERRED_BOUNDS.most;
+  return {
+    mode,
+    when: oneOf3(raw.when, INFER_WHENS, base.when),
+    who: oneOf3(raw.who, INFER_WHOS, base.who),
+    skills: skillList(raw.skills, base.skills),
+    difficulty: bandAt(a) <= bandAt(b) ? { lowest: a, highest: b } : { lowest: b, highest: a },
+    detail: oneOf3(raw.detail, INFER_DETAILS, base.detail),
+    others: oneOf3(raw.others, INFER_OTHERS, base.others),
+    guidance: { pass: line(g.pass, DEFAULT_GUIDANCE.pass), fail: line(g.fail, DEFAULT_GUIDANCE.fail) },
+    most: typeof raw.most === "number" && Number.isFinite(raw.most) ? Math.min(hi, Math.max(lo, Math.round(raw.most))) : base.most
+  };
+}
+function bandsWithin(policy) {
+  return DIFFICULTY_BANDS.slice(bandAt(policy.difficulty.lowest), bandAt(policy.difficulty.highest) + 1);
+}
+
 // src/shared/profiles/parts.ts
 var ABILITIES = [
   { id: "str", label: "Strength" },
@@ -15564,6 +15664,222 @@ function AdjudicationForm(props) {
   }, undefined, true, undefined, this);
 }
 
+// src/frontend/inferred-form.tsx
+var MODES = INFER_MODES.map((value) => ({ value, label: INFER_MODE_LABEL[value] }));
+var OTHERS = INFER_OTHERS.map((value) => ({ value, label: INFER_OTHERS_LABEL[value] }));
+var BAND_LABEL3 = DIFFICULTY_BANDS.reduce((out, b) => ({ ...out, [b.id]: `${b.label} (DC ${b.dc})` }), {});
+var bandAt2 = (id) => DIFFICULTY_BANDS.findIndex((b) => b.id === id);
+var MODE_HELP = {
+  off: "A typed attempt no action covers plays as roleplay, and the narrator decides how it goes. The values below are kept for when you turn it back on.",
+  suggest: "A chip offers the roll; the attempt is rolled only when you take it.",
+  auto: "The engine rolls it with the world's sheet, records it like any check, and tells the narrator how it went."
+};
+function GuidanceLine(props) {
+  return /* @__PURE__ */ u3("label", {
+    class: "lre-field",
+    children: [
+      /* @__PURE__ */ u3("span", {
+        class: "label",
+        children: props.label
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3("input", {
+        class: "lre-input",
+        value: props.value,
+        maxLength: INFERRED_BOUNDS.guidance,
+        disabled: props.disabled,
+        onChange: (event) => props.onChange(event.currentTarget.value)
+      }, undefined, false, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+}
+function InferredForm(props) {
+  const p = props.value;
+  const off = props.disabled === true || p.mode === "off";
+  const set = (patch) => props.onChange({ ...p, ...patch });
+  const guide = (patch) => set({ guidance: { ...p.guidance, ...patch } });
+  const lowest = (id) => set({ difficulty: { lowest: id, highest: bandAt2(id) > bandAt2(p.difficulty.highest) ? id : p.difficulty.highest } });
+  const highest = (id) => set({ difficulty: { lowest: bandAt2(id) < bandAt2(p.difficulty.lowest) ? id : p.difficulty.lowest, highest: id } });
+  const known = new Set(props.skills.map((s) => s.id));
+  const listed = [...props.skills, ...(p.skills ?? []).filter((id) => !known.has(id)).map((id) => ({ id, label: `${id} (not on this sheet)` }))];
+  const pick = (id, on) => {
+    const picked = new Set(p.skills ?? []);
+    if (on)
+      picked.add(id);
+    else
+      picked.delete(id);
+    set({ skills: listed.map((s) => s.id).filter((s) => picked.has(s)) });
+  };
+  const range = bandsWithin(p);
+  const defaultGuidance = p.guidance.pass === DEFAULT_GUIDANCE.pass && p.guidance.fail === DEFAULT_GUIDANCE.fail;
+  return /* @__PURE__ */ u3("div", {
+    class: "lre-stack",
+    "data-lre-inferred-form": true,
+    children: [
+      /* @__PURE__ */ u3("div", {
+        class: "lre-field",
+        children: [
+          /* @__PURE__ */ u3("span", {
+            class: "label",
+            children: "Read typed attempts as checks"
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3(Seg, {
+            label: "Read typed attempts as checks",
+            value: p.mode,
+            options: MODES,
+            disabled: props.disabled,
+            onChange: (mode) => set({ mode })
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3("span", {
+            class: "lre-field-help",
+            children: MODE_HELP[p.mode]
+          }, undefined, false, undefined, this)
+        ]
+      }, undefined, true, undefined, this),
+      /* @__PURE__ */ u3("div", {
+        class: p.mode === "off" ? "lre-stack lre-gm-dimmed" : "lre-stack",
+        "data-lre-inferred-fields": true,
+        children: [
+          /* @__PURE__ */ u3(Choice, {
+            label: "Which attempts",
+            help: "Risky: only an attempt below the risky line of How checks are decided. Says it tries: only when the message says your character tries, attempts or wants to.",
+            value: p.when,
+            labels: INFER_WHEN_LABEL,
+            disabled: off,
+            onChange: (when) => set({ when })
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3(Choice, {
+            label: "Who rolls",
+            help: "Companions who join in each roll their own. Everyone involved: the people it opposes or targets roll against it too.",
+            value: p.who,
+            labels: INFER_WHO_LABEL,
+            disabled: off,
+            onChange: (who) => set({ who })
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3("div", {
+            class: "lre-field",
+            "data-lre-inferred-skills": true,
+            children: [
+              /* @__PURE__ */ u3(HostSwitch, {
+                label: "Every skill the sheet has",
+                checked: p.skills === null,
+                disabled: off || p.skills === null && props.skills.length === 0,
+                onChange: (all) => set({ skills: all ? null : props.skills.map((s) => s.id) })
+              }, undefined, false, undefined, this),
+              p.skills !== null ? listed.length > 0 ? listed.map((s) => /* @__PURE__ */ u3(HostSwitch, {
+                label: s.label,
+                checked: p.skills?.includes(s.id) === true,
+                disabled: off,
+                onChange: (on) => pick(s.id, on)
+              }, s.id, false, undefined, this)) : /* @__PURE__ */ u3("span", {
+                class: "lre-field-help",
+                children: "No skills picked: no attempt is read as a check."
+              }, undefined, false, undefined, this) : null,
+              /* @__PURE__ */ u3("span", {
+                class: "lre-field-help",
+                children: props.skillsHelp
+              }, undefined, false, undefined, this)
+            ]
+          }, undefined, true, undefined, this),
+          /* @__PURE__ */ u3(Choice, {
+            label: "Easiest difficulty",
+            help: "The difficulty is read from the attempt and its scene, within these bands; one outside them is moved to the nearest.",
+            value: p.difficulty.lowest,
+            labels: BAND_LABEL3,
+            disabled: off,
+            onChange: lowest
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3(Choice, {
+            label: "Hardest difficulty",
+            help: `${range.length} band${range.length === 1 ? "" : "s"}: ${range.map((b) => b.label).join(", ")}.`,
+            value: p.difficulty.highest,
+            labels: BAND_LABEL3,
+            disabled: off,
+            onChange: highest
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3(Choice, {
+            label: "What the narrator is told",
+            help: "The result: passed or failed. The margin: by how much. The whole roll: the dice, the modifier and the total.",
+            value: p.detail,
+            labels: INFER_DETAIL_LABEL,
+            disabled: off,
+            onChange: (detail) => set({ detail })
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3("div", {
+            class: "lre-field",
+            children: [
+              /* @__PURE__ */ u3("span", {
+                class: "label",
+                children: "Others' numbers"
+              }, undefined, false, undefined, this),
+              /* @__PURE__ */ u3(Seg, {
+                label: "Others' numbers",
+                value: p.others,
+                options: OTHERS,
+                disabled: off,
+                onChange: (others) => set({ others })
+              }, undefined, false, undefined, this),
+              /* @__PURE__ */ u3("span", {
+                class: "lre-field-help",
+                children: "Whether an opponent's or a companion's dice, modifier, total or score reach the narrator and the roll chip. Hidden keeps a hidden stat hidden."
+              }, undefined, false, undefined, this)
+            ]
+          }, undefined, true, undefined, this),
+          /* @__PURE__ */ u3(GuidanceLine, {
+            label: "After a success, tell the narrator",
+            value: p.guidance.pass,
+            disabled: off,
+            onChange: (pass) => guide({ pass })
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3(GuidanceLine, {
+            label: "After a failure, tell the narrator",
+            value: p.guidance.fail,
+            disabled: off,
+            onChange: (fail) => guide({ fail })
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3("div", {
+            class: "lre-field",
+            children: [
+              /* @__PURE__ */ u3("span", {
+                class: "lre-field-help",
+                children: `Up to ${INFERRED_BOUNDS.guidance} characters; a line left empty is the default's. {who} is who rolled, {skill} the skill, {attempt} what they tried, and {against} who or what it was against.`
+              }, undefined, false, undefined, this),
+              /* @__PURE__ */ u3("div", {
+                class: "lre-inline",
+                children: /* @__PURE__ */ u3(Button, {
+                  size: "sm",
+                  variant: "ghost",
+                  disabled: off || defaultGuidance,
+                  onClick: () => set({ guidance: { ...DEFAULT_GUIDANCE } }),
+                  children: "Reset the lines"
+                }, undefined, false, undefined, this)
+              }, undefined, false, undefined, this)
+            ]
+          }, undefined, true, undefined, this),
+          /* @__PURE__ */ u3("div", {
+            class: "lre-field",
+            children: [
+              /* @__PURE__ */ u3(NumberStepper, {
+                label: "Most rolls a turn",
+                value: p.most,
+                min: INFERRED_BOUNDS.most[0],
+                max: INFERRED_BOUNDS.most[1],
+                step: 1,
+                integer: true,
+                disabled: off,
+                onChange: (most) => set({ most })
+              }, undefined, false, undefined, this),
+              /* @__PURE__ */ u3("span", {
+                class: "lre-field-help",
+                children: "Your character's roll first, then companions', then opponents'. Past it, an opponent sets the difficulty without a roll."
+              }, undefined, false, undefined, this)
+            ]
+          }, undefined, true, undefined, this)
+        ]
+      }, undefined, true, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+}
+
 // src/frontend/build/profile-picker.tsx
 var GROUPS = [
   { id: "fields", label: "Fields" },
@@ -16127,6 +16443,71 @@ function SheetPreview(props) {
     ]
   }, undefined, true, undefined, this);
 }
+function InferredWorld(props) {
+  return /* @__PURE__ */ u3("div", {
+    class: "lre-stack",
+    "data-lre-inferred": "world",
+    children: [
+      /* @__PURE__ */ u3("div", {
+        class: "lre-gm-subtitle",
+        children: "Inferred checks"
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(HostSwitch, {
+        label: "This world sets how typed attempts are read as checks",
+        checked: props.value !== undefined,
+        disabled: props.disabled,
+        onChange: (on) => props.onChange(on ? props.start : undefined)
+      }, undefined, false, undefined, this),
+      props.value === undefined ? /* @__PURE__ */ u3("p", {
+        class: "lre-small lre-muted",
+        style: { margin: 0 },
+        children: "Not set: new chats take the player's own Settings → Checks, else play by their realism preset and Sheets level."
+      }, undefined, false, undefined, this) : /* @__PURE__ */ u3(InferredForm, {
+        value: readInferred(props.value) ?? props.start,
+        skills: props.skills,
+        skillsHelp: props.skillsHelp,
+        disabled: props.disabled,
+        onChange: (next) => props.onChange(next)
+      }, undefined, false, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+}
+function InferredCard(props) {
+  const app = useApp();
+  const [skills, setSkills] = d2(null);
+  const [failed, setFailed] = d2(false);
+  const ruleset = tidyRuleset(props.ruleset);
+  const { inferred: _inferred, adjudication: _adjudication, ...sheetParts } = ruleset;
+  const key = JSON.stringify(sheetParts);
+  A(() => {
+    let live = true;
+    const timer = setTimeout(() => {
+      app.send(sheetPreviewRequest(props.draft.worldId, ruleset)).then((message) => {
+        if (!live)
+          return;
+        if (message.type === "lre.result" && message.request === "lre.world") {
+          setSkills(message.body.skills ?? []);
+          setFailed(false);
+        } else
+          setFailed(true);
+      });
+    }, 250);
+    return () => {
+      live = false;
+      clearTimeout(timer);
+    };
+  }, [key, props.draft.worldId, props.draft.version]);
+  const help = failed ? "This world's skills aren't available right now." : skills === null ? "Reading this world's sheet…" : skills.length === 0 ? "This world's sheet has no skill an attempt can roll: one comes from an action with a check, a skill and a difficulty." : "The skills this world's sheet has, as edited.";
+  const realism = props.draft.doc.realism;
+  return /* @__PURE__ */ u3(InferredWorld, {
+    value: props.ruleset.inferred,
+    start: inferredDefaults(realism.preset, realism.levels.sheets),
+    skills: skills ?? [],
+    skillsHelp: help,
+    disabled: props.disabled,
+    onChange: props.onChange
+  }, undefined, false, undefined, this);
+}
 function ThresholdList(props) {
   const [text, setText] = d2(props.value.join(", "));
   A(() => {
@@ -16431,8 +16812,9 @@ function RulesetEditor() {
   };
   const ctx = { doc: formDoc, lint: draft.lint, path: "ruleset", identifiers, functions: draft.functions };
   const lintOf = (prefix) => draft.lint.filter((issue) => issue.path === prefix || issue.path.startsWith(`${prefix}.`));
-  const checksLint = draft.lint.filter((issue) => issue.code.startsWith("adjudication") || issue.path.startsWith("ruleset.adjudication"));
+  const checksLint = draft.lint.filter((issue) => issue.code.startsWith("adjudication") || issue.path.startsWith("ruleset.adjudication") || issue.path.startsWith("ruleset.inferred"));
   const adjudication = value.adjudication === undefined ? null : readAdjudication(value.adjudication);
+  const inferred = value.inferred === undefined ? null : readInferred(value.inferred);
   const minLevels = isRecord(value.minLevels) ? value.minLevels : {};
   const floors = Object.entries(DOMAIN_LABEL).flatMap(([domain, label]) => {
     const level = minLevels[domain];
@@ -16493,7 +16875,7 @@ function RulesetEditor() {
         children: /* @__PURE__ */ u3(List, {
           children: [
             row("profile", "wand", "Start from a profile…", changed ? "Save or revert your edits first" : "A ready-made ruleset: Modern, Classic, Fifth or Custom", []),
-            row("checks", "dice", "How checks are decided", adjudication ? PRESET_LABEL[adjudication.preset] : value.adjudication !== undefined ? "Set, but not readable: open it" : "Not set: every check rolls", checksLint),
+            row("checks", "dice", "How checks are decided", `${adjudication ? PRESET_LABEL[adjudication.preset] : value.adjudication !== undefined ? "Set, but not readable: open it" : "Not set: every check rolls"}${inferred ? ` · inferred checks: ${INFER_MODE_LABEL[inferred.mode].toLowerCase()}` : ""}`, checksLint),
             row("floors", "sliders", "Level floors", floors.length > 0 ? floors.join(", ") : "None", lintOf("ruleset.minLevels")),
             row("progression", "star", "Progression", Object.keys(progression).length > 0 ? Object.values(progression).map((p) => p.label).join(", ") : "None: levels never change on their own", lintOf("ruleset.progression")),
             row("sheet", "layers", "Sheet Designer", sections.length > 0 ? `${sections.length} section${sections.length === 1 ? "" : "s"}, ${rows} row${rows === 1 ? "" : "s"}` : "Not designed: the Sheets pack's own sheet", lintOf("ruleset.sheet")),
@@ -16525,6 +16907,12 @@ function RulesetEditor() {
             value: adjudication ?? presetAdjudication("crunchy"),
             disabled: busy,
             onChange: (next) => update("adjudication", next)
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3(InferredCard, {
+            draft,
+            ruleset: value,
+            disabled: busy,
+            onChange: (next) => update("inferred", next)
           }, undefined, false, undefined, this),
           /* @__PURE__ */ u3(Issues, {
             issues: checksLint
@@ -19347,6 +19735,243 @@ function SchemaPartView(props) {
   }, undefined, true, undefined, this);
 }
 
+// src/shared/agents.ts
+var NPM_INSTALL = "npm i -g github:TheLiquorPriest/LumiRPEngine";
+
+// src/frontend/agents-view.ts
+function serverLine(client, view) {
+  const name = client.host !== null ? `${client.name} on ${client.host}` : `${client.name} ${client.version}`;
+  const install = { label: "Copy the install", text: NPM_INSTALL };
+  const setup = view.setup === null ? [] : [{ label: "Copy the setup", text: view.setup.command }];
+  switch (client.state) {
+    case "updated":
+      return { state: client.state, text: `${name} reloaded this build's tools.`, update: false, copy: [] };
+    case "behind":
+      return { state: client.state, text: `${name} hasn't reloaded this build's tools yet${client.connected ? "." : ": it isn't connected now, and takes them when it next connects."}`, update: true, copy: [] };
+    case "cannot": {
+      const fix = client.why?.code === "elsewhere" || client.why?.code === "kit_api" ? [install] : client.why?.code === "pinned" ? [] : setup;
+      return { state: client.state, text: `${name} can't follow LumiRPEngine: ${client.why?.text ?? "it didn't say why"}.`, update: false, copy: fix };
+    }
+    case "old":
+      return { state: client.state, text: `${name} is from before MCP servers followed LumiRPEngine, so it keeps the tools it was installed with. Update it once (${NPM_INSTALL}), or set it up to run the extension's own copy${view.setup === null ? "" : ` (${view.setup.command})`}, which follows from then on.`, update: false, copy: [install, ...setup] };
+  }
+}
+var baseName = (path) => (path.replaceAll("\\", "/").split("/").at(-1) ?? "").toLowerCase().replace(/\.exe$/, "");
+function lumirpengineProfiles(profiles, core) {
+  const out = [];
+  for (const profile of profiles) {
+    if (profile.transport_type !== "stdio")
+      continue;
+    const command = baseName(profile.command);
+    if (command === "lumirpengine")
+      out.push({ profile, kind: "npm" });
+    else if (command === "npx" && profile.args.some((arg) => /^github:TheLiquorPriest\/LumiRPEngine(#.*)?$/i.test(arg) || /^lumi-rp-engine(@.*)?$/.test(arg)))
+      out.push({ profile, kind: "npx" });
+    else if (command === "node" || command === "bun") {
+      const script = profile.args.find((arg) => arg.replaceAll("\\", "/").endsWith("/lumirpengine.js"));
+      if (script !== undefined)
+        out.push({ profile, kind: core !== null && script === core ? "extension" : "npm" });
+    }
+  }
+  return out;
+}
+function extensionArgs(profile, core) {
+  const at = profile.args.indexOf("mcp");
+  return [core, "mcp", ...at >= 0 ? profile.args.slice(at + 1) : []];
+}
+
+// src/frontend/agents.tsx
+async function lumiverse(path, method = "GET", body) {
+  const res = await fetch(new URL(`/api/v1/mcp-servers${path}`, location.origin), { method, credentials: "include", cache: "no-store", headers: { Accept: "application/json", ...body !== undefined ? { "Content-Type": "application/json" } : {} }, ...body !== undefined ? { body: JSON.stringify(body) } : {} });
+  if (!res.ok)
+    throw new Error(res.status === 403 ? "Only Lumiverse's owner or an admin sees its MCP servers." : `Lumiverse answered ${res.status}.`);
+  return await res.json();
+}
+function copy(app, text) {
+  navigator.clipboard.writeText(text).then(() => app.toast("Copied"), () => app.toast("The clipboard refused the copy", "error"));
+}
+var KIND = { extension: "runs the extension's own copy", npm: "runs an npm install of lumirpengine", npx: "runs lumirpengine with npx" };
+function LumiverseRun(props) {
+  const app = useApp();
+  const [found, setFound] = d2(null);
+  const core = props.view.setup?.core ?? null;
+  const load = () => void lumiverse("?limit=1000").then((page) => setFound(lumirpengineProfiles(page.data, core)), (error) => setFound(error instanceof Error ? error.message : String(error)));
+  A(load, [core]);
+  if (found === null || Array.isArray(found) && found.length === 0)
+    return null;
+  if (typeof found === "string")
+    return /* @__PURE__ */ u3("p", {
+      class: "lre-field-help",
+      "data-lre-lumiverse-mcp": "unreadable",
+      children: `Lumiverse's own MCP servers can't be read here: ${found}`
+    }, undefined, false, undefined, this);
+  const restart = (id, name) => lumiverse(`/${id}/reconnect`, "POST").then(() => app.toast(`${name} restarted`), (error) => app.toast(`${name} didn't restart: ${error instanceof Error ? error.message : String(error)}`, "error"));
+  return /* @__PURE__ */ u3(List, {
+    children: found.map(({ profile, kind }) => /* @__PURE__ */ u3("div", {
+      "data-lre-lumiverse-mcp": kind,
+      children: [
+        /* @__PURE__ */ u3(ListRow, {
+          icon: "refresh",
+          title: `Lumiverse's “${profile.name}”`,
+          subtitle: `${KIND[kind]}${profile.is_enabled ? "" : " (switched off)"}`
+        }, undefined, false, undefined, this),
+        /* @__PURE__ */ u3("div", {
+          class: "lre-row-actions",
+          children: [
+            profile.is_enabled ? /* @__PURE__ */ u3(Button, {
+              size: "sm",
+              variant: "secondary",
+              onClick: () => void restart(profile.id, profile.name),
+              children: "Restart"
+            }, undefined, false, undefined, this) : null,
+            kind !== "extension" && core !== null ? /* @__PURE__ */ u3(Button, {
+              size: "sm",
+              variant: "ghost",
+              onClick: () => void lumiverse(`/${profile.id}`, "PUT", { command: "node", args: extensionArgs(profile, core) }).then(() => restart(profile.id, profile.name).then(load), (error) => app.toast(`${profile.name} wasn't switched: ${error instanceof Error ? error.message : String(error)}`, "error")),
+              children: "Use the extension's copy"
+            }, undefined, false, undefined, this) : null
+          ]
+        }, undefined, true, undefined, this)
+      ]
+    }, profile.id, true, undefined, this))
+  }, undefined, false, undefined, this);
+}
+function Servers(props) {
+  const app = useApp();
+  if (props.view.clients.length === 0)
+    return /* @__PURE__ */ u3(Empty, {
+      icon: "info",
+      children: "No MCP server has checked in from this account yet."
+    }, undefined, false, undefined, this);
+  return /* @__PURE__ */ u3(List, {
+    children: props.view.clients.map((client) => {
+      const line = serverLine(client, props.view);
+      return /* @__PURE__ */ u3("div", {
+        "data-lre-mcp-server": line.state,
+        children: [
+          /* @__PURE__ */ u3(ListRow, {
+            icon: line.state === "updated" ? "check" : "info",
+            title: /* @__PURE__ */ u3("span", {
+              class: "lre-set-caveat",
+              children: line.text
+            }, undefined, false, undefined, this),
+            subtitle: client.connected ? "Connected" : `Last seen ${new Date(client.seen).toLocaleString()}`
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3("div", {
+            class: "lre-row-actions",
+            children: [
+              line.update ? /* @__PURE__ */ u3(Button, {
+                size: "sm",
+                variant: "primary",
+                onClick: () => void app.request({ type: "lre.agents", op: "update", client: client.id }).then((r) => r && app.toast("Asked it to reload: its line turns once it has")),
+                children: "Update now"
+              }, undefined, false, undefined, this) : null,
+              line.copy.map((c) => /* @__PURE__ */ u3(Button, {
+                size: "sm",
+                variant: "secondary",
+                onClick: () => copy(app, c.text),
+                children: c.label
+              }, c.label, false, undefined, this)),
+              props.forget ? /* @__PURE__ */ u3(Button, {
+                size: "sm",
+                variant: "ghost",
+                onClick: () => void app.request({ type: "lre.agents", op: "forget", client: client.id }).then((r) => r?.view && app.agents.set(r.view)),
+                children: "Forget"
+              }, undefined, false, undefined, this) : null
+            ]
+          }, undefined, true, undefined, this)
+        ]
+      }, client.id, true, undefined, this);
+    })
+  }, undefined, false, undefined, this);
+}
+function UpdateNotice() {
+  const app = useApp();
+  const view = useSelect(app.agents, (v) => v);
+  if (view === null || view.notice === null)
+    return null;
+  return /* @__PURE__ */ u3("div", {
+    class: "lre-update-notice",
+    "data-lre-update-notice": true,
+    children: /* @__PURE__ */ u3(Banner, {
+      tone: "info",
+      title: "LumiRPEngine updated",
+      actions: /* @__PURE__ */ u3(Button, {
+        size: "sm",
+        variant: "ghost",
+        onClick: () => void app.request({ type: "lre.agents", op: "dismiss" }).then((r) => r?.view && app.agents.set(r.view)),
+        children: "Dismiss"
+      }, undefined, false, undefined, this),
+      children: [
+        /* @__PURE__ */ u3("p", {
+          children: `Now build ${view.notice.build} (it was ${view.notice.previous}). Your MCP servers:`
+        }, undefined, false, undefined, this),
+        /* @__PURE__ */ u3(Servers, {
+          view
+        }, undefined, false, undefined, this),
+        /* @__PURE__ */ u3(LumiverseRun, {
+          view
+        }, undefined, false, undefined, this)
+      ]
+    }, undefined, true, undefined, this)
+  }, undefined, false, undefined, this);
+}
+function McpServerPage() {
+  const app = useApp();
+  const view = useSelect(app.agents, (v) => v);
+  A(() => {
+    app.request({ type: "lre.agents", op: "get" }).then((r) => r?.view && app.agents.set(r.view));
+  }, []);
+  if (view === null)
+    return /* @__PURE__ */ u3(Empty, {
+      children: "Loading your MCP servers…"
+    }, undefined, false, undefined, this);
+  return /* @__PURE__ */ u3("div", {
+    class: "lre-stack",
+    "data-lre-settings-page": "mcp",
+    children: [
+      /* @__PURE__ */ u3(Section, {
+        title: "Set one up that follows LumiRPEngine",
+        children: view.setup === null ? /* @__PURE__ */ u3(Empty, {
+          icon: "info",
+          children: "This LumiRPEngine was built without an agent kit, so there is nothing to follow."
+        }, undefined, false, undefined, this) : /* @__PURE__ */ u3("div", {
+          class: "lre-field",
+          "data-lre-mcp-setup": true,
+          children: [
+            /* @__PURE__ */ u3("code", {
+              class: "lre-num",
+              children: view.setup.command
+            }, undefined, false, undefined, this),
+            /* @__PURE__ */ u3("span", {
+              class: "lre-field-help",
+              children: `Give your agent's harness this command for its lumirpengine server (claude mcp add lumirpengine -- ${view.setup.command}). It runs this extension's own copy, on the machine Lumiverse runs on, and takes each update's tools by itself. Sign in once first: node ${view.setup.core} login --url <your Lumiverse>.`
+            }, undefined, false, undefined, this),
+            /* @__PURE__ */ u3(Button, {
+              size: "sm",
+              variant: "secondary",
+              icon: "copy",
+              onClick: () => copy(app, view.setup?.command ?? ""),
+              children: "Copy"
+            }, undefined, false, undefined, this)
+          ]
+        }, undefined, true, undefined, this)
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(Section, {
+        title: `Your MCP servers (this is build ${view.build})`,
+        flush: true,
+        children: /* @__PURE__ */ u3(Servers, {
+          view,
+          forget: true
+        }, undefined, false, undefined, this)
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(LumiverseRun, {
+        view
+      }, undefined, false, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+}
+
 // src/frontend/settings/adjudication.tsx
 function AdjudicationSeed(props) {
   const mine = props.settings.overrideWorldAdjudication;
@@ -19423,6 +20048,150 @@ function AdjudicationThisChat(props) {
             variant: "ghost",
             disabled: busy,
             onClick: () => setDraft(null),
+            children: "Cancel"
+          }, undefined, false, undefined, this)
+        ]
+      }, undefined, true, undefined, this) : null
+    ]
+  }, undefined, true, undefined, this);
+}
+
+// src/frontend/settings/inferred.tsx
+var SOURCES = [
+  { value: "realism", label: "By the chat's realism" },
+  { value: "mine", label: "My own" }
+];
+function InferredSeed(props) {
+  const { inferred, realism, overrideWorldAdjudication } = props.settings;
+  const start = inferredDefaults(realism.preset, realism.levels.sheets);
+  const where = overrideWorldAdjudication ? "New chats read typed attempts this way, whatever their world sets." : "New chats read them as their world sets; this applies where a world sets none.";
+  return /* @__PURE__ */ u3("div", {
+    class: "lre-stack",
+    "data-lre-inferred": "seed",
+    children: [
+      /* @__PURE__ */ u3("div", {
+        class: "lre-field",
+        children: [
+          /* @__PURE__ */ u3("span", {
+            class: "label",
+            children: "Inferred checks for new chats"
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3(Seg, {
+            label: "Inferred checks for new chats",
+            value: inferred === null ? "realism" : "mine",
+            options: SOURCES,
+            disabled: props.busy,
+            onChange: (source) => props.patch({ inferred: source === "realism" ? null : start })
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3("span", {
+            class: "lre-field-help",
+            children: inferred === null ? "Each new chat plays by its realism preset and Sheets level: Story offers a roll, Grounded rolls risky attempts, Simulation rolls every uncertain one." : where
+          }, undefined, false, undefined, this)
+        ]
+      }, undefined, true, undefined, this),
+      inferred !== null ? /* @__PURE__ */ u3(InferredForm, {
+        value: inferred,
+        skills: props.skills,
+        skillsHelp: props.skills.length > 0 ? "Skills are picked from the open chat's world's sheet; a world whose sheet has none of them reads no attempt as a check." : "Open a world chat to pick from its sheet's skills.",
+        disabled: props.busy,
+        onChange: (next) => props.patch({ inferred: next })
+      }, undefined, false, undefined, this) : null
+    ]
+  }, undefined, true, undefined, this);
+}
+function chatInferChange(chatId, current, next, preview = false) {
+  if (JSON.stringify(current) === JSON.stringify(next))
+    return null;
+  const marker = inferMarker(chatId, next);
+  return preview ? { ...marker, preview: true } : marker;
+}
+function InferredThisChat(props) {
+  const app = useApp();
+  const [draft, setDraft] = d2(null);
+  const [preview, setPreview] = d2(null);
+  const [busy, run] = useBusy();
+  const current = props.controls.inferred;
+  const next = draft ?? current;
+  const change = chatInferChange(props.chatId, current, next);
+  const cancel = () => {
+    setDraft(null);
+    setPreview(null);
+  };
+  const review = () => run(async () => {
+    const ask = chatInferChange(props.chatId, current, next, true);
+    const result = ask ? await app.request(ask) : null;
+    if (result)
+      setPreview(result.preview ?? { lines: [] });
+  });
+  const apply = () => run(async () => {
+    const result = change ? await app.request(change) : null;
+    if (result) {
+      app.toast(result.pending ? "Saved — the change applies when the reply finishes." : `This chat reads typed attempts as checks this way (${INFER_MODE_LABEL[next.mode].toLowerCase()}) from the next turn.`, "info");
+      cancel();
+    }
+  });
+  return /* @__PURE__ */ u3("div", {
+    class: "lre-stack",
+    "data-lre-inferred": "chat",
+    children: [
+      /* @__PURE__ */ u3("div", {
+        class: "lre-gm-subtitle",
+        children: "Inferred checks"
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3("p", {
+        class: "lre-gm-note",
+        children: "How a typed attempt no action covers is read as a check of this world's sheet. A change applies from the next turn; earlier turns keep how theirs were read."
+      }, undefined, false, undefined, this),
+      preview && change ? /* @__PURE__ */ u3(Banner, {
+        tone: "info",
+        title: "Inferred checks for this chat",
+        actions: /* @__PURE__ */ u3(M, {
+          children: [
+            /* @__PURE__ */ u3(Button, {
+              variant: "primary",
+              busy,
+              onClick: apply,
+              children: "Apply to this chat"
+            }, undefined, false, undefined, this),
+            /* @__PURE__ */ u3(Button, {
+              variant: "ghost",
+              disabled: busy,
+              onClick: () => setPreview(null),
+              children: "Keep editing"
+            }, undefined, false, undefined, this)
+          ]
+        }, undefined, true, undefined, this),
+        children: /* @__PURE__ */ u3("ul", {
+          class: "lre-gm-preview-lines",
+          "data-lre-inferred-preview": true,
+          children: preview.lines.map((line, i) => /* @__PURE__ */ u3("li", {
+            children: line.text
+          }, i, false, undefined, this))
+        }, undefined, false, undefined, this)
+      }, undefined, false, undefined, this) : null,
+      /* @__PURE__ */ u3(InferredForm, {
+        value: next,
+        skills: props.controls.skills,
+        skillsHelp: "The skills this chat's world's sheet has.",
+        disabled: busy || preview !== null,
+        onChange: (edited) => {
+          setDraft(edited);
+          setPreview(null);
+        }
+      }, undefined, false, undefined, this),
+      change && !preview ? /* @__PURE__ */ u3("div", {
+        class: "lre-inline",
+        children: [
+          /* @__PURE__ */ u3(Button, {
+            variant: "primary",
+            busy,
+            onClick: review,
+            children: "Review the change"
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3(Button, {
+            variant: "ghost",
+            disabled: busy,
+            onClick: cancel,
             children: "Cancel"
           }, undefined, false, undefined, this)
         ]
@@ -19951,7 +20720,7 @@ function ThisChat(props) {
                 /* @__PURE__ */ u3(ListRow, {
                   icon: "dice",
                   title: "Checks",
-                  subtitle: controls ? `${ADJUDICATION_PRESET_LABEL[controls.adjudication.preset]} · how checks are decided` : "How checks are decided",
+                  subtitle: controls ? `${ADJUDICATION_PRESET_LABEL[controls.adjudication.preset]} · inferred checks: ${INFER_MODE_LABEL[controls.inferred.mode].toLowerCase()}` : "How checks are decided",
                   chevron: true,
                   onClick: () => pages.open("checks")
                 }, undefined, false, undefined, this),
@@ -20021,11 +20790,17 @@ function ThisChat(props) {
         subtitle: "This chat",
         backLabel: "This chat",
         onBack: pages.back,
-        children: /* @__PURE__ */ u3(AdjudicationThisChat, {
-          chatId: view.chatId,
-          controls
-        }, undefined, false, undefined, this)
-      }, undefined, false, undefined, this) : page === "time" ? /* @__PURE__ */ u3(GmPage, {
+        children: [
+          /* @__PURE__ */ u3(AdjudicationThisChat, {
+            chatId: view.chatId,
+            controls
+          }, undefined, false, undefined, this),
+          controls ? /* @__PURE__ */ u3(InferredThisChat, {
+            chatId: view.chatId,
+            controls
+          }, undefined, false, undefined, this) : null
+        ]
+      }, undefined, true, undefined, this) : page === "time" ? /* @__PURE__ */ u3(GmPage, {
         name: "time",
         title: "Time",
         subtitle: "This chat",
@@ -20440,12 +21215,21 @@ function ChecksPage(props) {
     children: [
       /* @__PURE__ */ u3("p", {
         class: "lre-set-lead",
-        children: "How checks are decided, from story-led (Narrative-first) to dice-heavy (Crunchy), for chats you start from now on."
+        children: "How checks are decided, from story-led (Narrative-first) to dice-heavy (Crunchy), and how typed attempts are read as checks, for chats you start from now on."
       }, undefined, false, undefined, this),
       /* @__PURE__ */ u3(ThisChatPointer, {}, undefined, false, undefined, this),
       /* @__PURE__ */ u3(Section, {
         children: /* @__PURE__ */ u3(AdjudicationSeed, {
           settings: props.settings,
+          busy: props.busy,
+          patch: props.patch
+        }, undefined, false, undefined, this)
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(Section, {
+        title: "Inferred checks",
+        children: /* @__PURE__ */ u3(InferredSeed, {
+          settings: props.settings,
+          skills: props.skills,
           busy: props.busy,
           patch: props.patch
         }, undefined, false, undefined, this)
@@ -21423,7 +22207,8 @@ var PAGE2 = {
   preset: { title: "Preset", subtitle: "Your Lumiverse preset and LumiRPEngine", icon: "scroll" },
   display: { title: "Display", subtitle: "How LumiRPEngine looks on this device", icon: "eye" },
   caveats: { title: "Caveats", subtitle: "What to know", icon: "info" },
-  diagnostics: { title: "Diagnostics", subtitle: "What the engine did each turn, and what failed", icon: "list" }
+  diagnostics: { title: "Diagnostics", subtitle: "What the engine did each turn, and what failed", icon: "list" },
+  mcp: { title: "MCP server", subtitle: "Your agent's lumirpengine, and how it follows updates", icon: "branch" }
 };
 var GROUPS4 = [
   { title: "Getting started", pages: ["helper", "model", "steps", "minds", "timeouts"] },
@@ -21431,6 +22216,7 @@ var GROUPS4 = [
   { title: "Replies", pages: ["extraction", "swipes"] },
   { title: "Your preset", pages: ["preset"] },
   { title: "Display", pages: ["display"] },
+  { title: "Your agent", pages: ["mcp"] },
   { title: "About", pages: ["caveats", "diagnostics"] }
 ];
 var PRESET_LABEL2 = { narrative: "Narrative-first", balanced: "Balanced", crunchy: "Crunchy", custom: "Custom" };
@@ -21482,6 +22268,8 @@ function summaryOf(page, data, caveats, showIds, connections) {
     }
     case "diagnostics":
       return { subtitle: "Each turn's steps, model calls and errors" };
+    case "mcp":
+      return { subtitle: "The setup that follows LumiRPEngine, and each server's state" };
   }
 }
 function Home(props) {
@@ -21678,6 +22466,7 @@ function Settings() {
     busy
   }, undefined, false, undefined, this) : page === "checks" ? /* @__PURE__ */ u3(ChecksPage, {
     settings,
+    skills: view?.controls?.skills ?? [],
     patch,
     busy
   }, undefined, false, undefined, this) : page === "time" ? /* @__PURE__ */ u3(TimePage, {
@@ -21696,7 +22485,7 @@ function Settings() {
     hideJsonBlocks: settings.hideJsonBlocks,
     patch,
     busy
-  }, undefined, false, undefined, this) : page === "display" ? /* @__PURE__ */ u3(DisplayPage, {}, undefined, false, undefined, this) : page === "diagnostics" ? /* @__PURE__ */ u3(DiagnosticsPage, {}, undefined, false, undefined, this) : /* @__PURE__ */ u3(CaveatsPage, {
+  }, undefined, false, undefined, this) : page === "display" ? /* @__PURE__ */ u3(DisplayPage, {}, undefined, false, undefined, this) : page === "diagnostics" ? /* @__PURE__ */ u3(DiagnosticsPage, {}, undefined, false, undefined, this) : page === "mcp" ? /* @__PURE__ */ u3(McpServerPage, {}, undefined, false, undefined, this) : /* @__PURE__ */ u3(CaveatsPage, {
     caveats
   }, undefined, false, undefined, this);
   return /* @__PURE__ */ u3("div", {
@@ -21722,7 +22511,7 @@ function Settings() {
 }
 
 // src/frontend/drawer.tsx
-var MODES = [
+var MODES2 = [
   { id: "play", label: "Play", icon: "dice" },
   { id: "gm", label: "GM", icon: "eye" },
   { id: "build", label: "Build", icon: "hammer" },
@@ -21792,9 +22581,9 @@ function Drawer(props) {
   }, [open]);
   const select = (next) => app.ui.update((ui) => ({ ...ui, mode: next }));
   const onKeyDown = (event, index) => {
-    const last = MODES.length - 1;
+    const last = MODES2.length - 1;
     const next = event.key === "ArrowRight" ? index === last ? 0 : index + 1 : event.key === "ArrowLeft" ? index === 0 ? last : index - 1 : event.key === "Home" ? 0 : event.key === "End" ? last : -1;
-    const target = MODES[next];
+    const target = MODES2[next];
     if (!target)
       return;
     event.preventDefault();
@@ -21815,7 +22604,7 @@ function Drawer(props) {
           class: "lre-modeseg",
           role: "tablist",
           "aria-label": "LumiRPEngine modes",
-          children: MODES.map((entry, index) => /* @__PURE__ */ u3("button", {
+          children: MODES2.map((entry, index) => /* @__PURE__ */ u3("button", {
             type: "button",
             role: "tab",
             id: `${bodyId}-tab-${entry.id}`,
@@ -21837,6 +22626,7 @@ function Drawer(props) {
         }, undefined, false, undefined, this)
       }, undefined, false, undefined, this),
       /* @__PURE__ */ u3(ActivityBanner, {}, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(UpdateNotice, {}, undefined, false, undefined, this),
       /* @__PURE__ */ u3("div", {
         class: "lre-mode-body",
         id: bodyId,
@@ -27687,7 +28477,7 @@ var isObject2 = (v) => isRecord(v);
 function nameOf2(doc, id) {
   return (hasOwn(doc.entities, id) ? doc.entities[id]?.name : undefined) || id;
 }
-function line(...parts) {
+function line2(...parts) {
   const joined = parts.filter((part) => part !== null && part !== "").join(" · ");
   return joined.charAt(0).toUpperCase() + joined.slice(1);
 }
@@ -27889,7 +28679,7 @@ function OwnersField(p) {
     blank: { party: "", role: "owner" },
     keys: ["party", "role", "share"],
     title: (o, i) => textOf(o.party) ? nameOf2(p.doc, textOf(o.party)) : `Owner ${i + 1}`,
-    summary: (o) => line(humanize(textOf(o.role) || "owner"), typeof o.share === "number" ? `${o.share}% of its worth` : null),
+    summary: (o) => line2(humanize(textOf(o.role) || "owner"), typeof o.share === "number" ? `${o.share}% of its worth` : null),
     sheet: (o, set, path) => /* @__PURE__ */ u3(M, {
       children: [
         /* @__PURE__ */ u3(PickField, {
@@ -28023,7 +28813,7 @@ function SharesField(p) {
       total
     }, undefined, false, undefined, this) : null,
     title: (s, i) => textOf(s.party) ? nameOf2(p.doc, textOf(s.party)) : `Share ${i + 1}`,
-    summary: (s) => line(`${typeof s.pct === "number" ? s.pct : 0}%`, textOf(s.from) ? `paid from ${nameOf2(p.doc, textOf(s.from))}` : null),
+    summary: (s) => line2(`${typeof s.pct === "number" ? s.pct : 0}%`, textOf(s.from) ? `paid from ${nameOf2(p.doc, textOf(s.from))}` : null),
     sheet: (s, set, path) => /* @__PURE__ */ u3(M, {
       children: [
         /* @__PURE__ */ u3(PickField, {
@@ -28169,7 +28959,7 @@ function LotsField(p) {
     blank: { qty: 1, cost: 0, at: p.doc.start.at.slice(0, 10) },
     keys: ["qty", "cost", "at"],
     title: (l, i) => typeof l.qty === "number" ? `${l.qty} ${l.qty === 1 ? "unit" : "units"}` : `Lot ${i + 1}`,
-    summary: (l) => line(typeof l.cost === "number" ? `${formatMoney(l.cost, currency)} in all` : null, textOf(l.at) ? `bought ${textOf(l.at).slice(0, 10)}` : null),
+    summary: (l) => line2(typeof l.cost === "number" ? `${formatMoney(l.cost, currency)} in all` : null, textOf(l.at) ? `bought ${textOf(l.at).slice(0, 10)}` : null),
     sheet: (l, set, path) => /* @__PURE__ */ u3(M, {
       children: [
         /* @__PURE__ */ u3(NumberInput, {
@@ -28238,7 +29028,7 @@ function DeductionsField(p) {
     blank: { label: "401(k)", kind: "retirement", pretax: true, pct: 5 },
     keys: ["label", "kind", "pretax", "cents", "pct", "match_pct", "to"],
     title: (d, i) => textOf(d.label) || `Deduction ${i + 1}`,
-    summary: (d) => line(humanize(textOf(d.kind) || "other"), typeof d.cents === "number" ? `${formatMoney(d.cents, currency)} a payday` : typeof d.pct === "number" ? `${d.pct}% of pay` : null, d.pretax === true ? "before income tax" : null, typeof d.match_pct === "number" ? `matched ${d.match_pct}%` : null, textOf(d.to) ? `to ${nameOf2(p.doc, textOf(d.to))}` : null),
+    summary: (d) => line2(humanize(textOf(d.kind) || "other"), typeof d.cents === "number" ? `${formatMoney(d.cents, currency)} a payday` : typeof d.pct === "number" ? `${d.pct}% of pay` : null, d.pretax === true ? "before income tax" : null, typeof d.match_pct === "number" ? `matched ${d.match_pct}%` : null, textOf(d.to) ? `to ${nameOf2(p.doc, textOf(d.to))}` : null),
     sheet: (d, set, path) => /* @__PURE__ */ u3(M, {
       children: [
         /* @__PURE__ */ u3(TextInput, {
@@ -28367,7 +29157,7 @@ function PayPrefsField(p) {
         children: "When no tier fits or covers the amount, any account they may spend from that covers it pays."
       }, undefined, false, undefined, this),
       title: (t) => ways.find((w) => w.value === t.use)?.label ?? t.use,
-      summary: (t) => line(t.min !== undefined ? `from ${formatMoney(t.min, currency)}` : null, t.max !== undefined ? `up to ${formatMoney(t.max, currency)}` : null, t.categories && t.categories.length > 0 ? `for ${t.categories.map(humanize).join(", ")}` : null, t.except && t.except.length > 0 ? `not ${t.except.map(humanize).join(", ")}` : null),
+      summary: (t) => line2(t.min !== undefined ? `from ${formatMoney(t.min, currency)}` : null, t.max !== undefined ? `up to ${formatMoney(t.max, currency)}` : null, t.categories && t.categories.length > 0 ? `for ${t.categories.map(humanize).join(", ")}` : null, t.except && t.except.length > 0 ? `not ${t.except.map(humanize).join(", ")}` : null),
       sheet: (t, set, path) => /* @__PURE__ */ u3(M, {
         children: [
           /* @__PURE__ */ u3(PickField, {
@@ -39237,7 +40027,7 @@ function checkMapText(text, key, world) {
   const { map } = readMap(parsed.value);
   return { value: parsed.value, problems, scope: map ? previewScope(world, key, map) : null };
 }
-var MODES2 = ["walk", "road", "offroad", "water"];
+var MODES3 = ["walk", "road", "offroad", "water"];
 function pairOf(value) {
   return Array.isArray(value) && value.length === 2 && typeof value[0] === "number" && typeof value[1] === "number" ? { x: value[0], y: value[1] } : null;
 }
@@ -39262,7 +40052,7 @@ function readModel(value) {
   (Array.isArray(links) ? links : []).forEach((l, index) => {
     if (!isRecord(l) || typeof l.from !== "string" || typeof l.to !== "string")
       return;
-    const mode = MODES2.find((m) => m === l.mode) ?? "walk";
+    const mode = MODES3.find((m) => m === l.mode) ?? "walk";
     linkList.push({ index, from: l.from, to: l.to, minutes: typeof l.minutes === "number" ? l.minutes : 0, mode, both: l.bidirectional !== false });
   });
   const kind = Array.isArray(layout) ? "grid" : placeList.length > 0 || linkList.length > 0 || value.size !== undefined ? "node" : "empty";
@@ -41404,7 +42194,7 @@ function LinkSheet(props) {
         children: /* @__PURE__ */ u3(Seg, {
           label: "By",
           value: link.mode,
-          options: MODES2.map((mode) => ({ value: mode, label: MODE_LABEL[mode] })),
+          options: MODES3.map((mode) => ({ value: mode, label: MODE_LABEL[mode] })),
           onChange: (mode) => set({ mode: mode === "walk" ? undefined : mode })
         }, undefined, false, undefined, this)
       }, undefined, false, undefined, this),
@@ -43420,7 +44210,7 @@ function GmPanel(props) {
 }
 
 // src/frontend/play/journal.tsx
-var KIND = {
+var KIND2 = {
   dropped: { label: "Dropped", tone: "neg", icon: "alert" },
   inert: { label: "Other branch", tone: "neutral", icon: "branch" },
   not_carried: { label: "Not carried", tone: "warn", icon: "undo" },
@@ -43587,8 +44377,8 @@ function JournalPanel(props) {
           "data-kind": note.kind,
           children: [
             /* @__PURE__ */ u3(Icon, {
-              name: KIND[note.kind].icon,
-              class: `lre-play-note-icon ${KIND[note.kind].tone}`
+              name: KIND2[note.kind].icon,
+              class: `lre-play-note-icon ${KIND2[note.kind].tone}`
             }, undefined, false, undefined, this),
             /* @__PURE__ */ u3("div", {
               class: "lre-play-note-body",
@@ -43598,8 +44388,8 @@ function JournalPanel(props) {
                   children: note.text
                 }, undefined, false, undefined, this),
                 /* @__PURE__ */ u3(Badge, {
-                  tone: KIND[note.kind].tone,
-                  children: KIND[note.kind].label
+                  tone: KIND2[note.kind].tone,
+                  children: KIND2[note.kind].label
                 }, undefined, false, undefined, this)
               ]
             }, undefined, true, undefined, this)
@@ -44103,6 +44893,7 @@ var REQUEST_TYPES = {
   "lre.fix": true,
   "lre.edit": true,
   "lre.gm": true,
+  "lre.state.get": true,
   "lre.marker": true,
   "lre.keep": true,
   "lre.settings.get": true,
@@ -44117,7 +44908,8 @@ var REQUEST_TYPES = {
   "lre.studio": true,
   "lre.preset": true,
   "lre.diag": true,
-  "lre.minds": true
+  "lre.minds": true,
+  "lre.agents": true
 };
 function isRequestType(value) {
   return typeof value === "string" && Object.prototype.hasOwnProperty.call(REQUEST_TYPES, value);
@@ -44139,6 +44931,7 @@ class ProtocolClient {
   mindsListeners = new Set;
   draftListeners = new Set;
   generateListeners = new Set;
+  agentsListeners = new Set;
   unsubscribe;
   requestMs;
   newReqId;
@@ -44183,6 +44976,10 @@ class ProtocolClient {
   onGenerate(listener) {
     this.generateListeners.add(listener);
     return () => this.generateListeners.delete(listener);
+  }
+  onAgents(listener) {
+    this.agentsListeners.add(listener);
+    return () => this.agentsListeners.delete(listener);
   }
   presetId = undefined;
   visible = () => true;
@@ -44294,6 +45091,13 @@ class ProtocolClient {
           const push = { lre: PROTOCOL_VERSION, type: "lre.generate", chatId: payload.chatId, as: payload.as, turn: payload.turn };
           for (const listener of this.generateListeners)
             listener(push);
+        }
+        return;
+      case "lre.agents.changed":
+        if (isRecord(payload.view) && typeof payload.view.build === "string" && Array.isArray(payload.view.clients)) {
+          const view = payload.view;
+          for (const listener of this.agentsListeners)
+            listener(view);
         }
         return;
     }
@@ -45134,6 +45938,8 @@ textarea.lre-input.lre-gm-prose{font-family:inherit;font-size:var(--lre-fs-md)}
 .lre-gm-truth-stage{display:flex;align-items:center;gap:var(--lre-s2);font-size:var(--lre-fs-sm);font-weight:600;color:var(--lre-muted)}
 .lre-gm-truth>p{margin:2px 0 0}
 .lre-gm-lines{margin:0;padding-left:18px;display:flex;flex-direction:column;gap:var(--lre-s1);font-size:var(--lre-fs-sm)}
+/* a control's fields that mean nothing under its current choice (inferred checks while Off): greyed as a whole, the host's selects and inputs not dimming on their own */
+.lre-gm-dimmed{opacity:.55}
 .lre-gm-preview-lines{margin:var(--lre-s1) 0 0;padding:0;list-style:none;display:flex;flex-direction:column;gap:var(--lre-s1)}
 .lre-gm-preview-lines>li{display:flex;align-items:flex-start;gap:var(--lre-s2)}
 .lre-gm-preview-lines .lre-icon{margin-top:2px;color:var(--lre-accent-text)}
@@ -45901,6 +46707,7 @@ function setup(ctx) {
     toasts,
     host,
     drafts: createStore(null),
+    agents: createStore(null),
     toast,
     request: makeRequest(client.send, toast),
     overlays: {
@@ -45916,6 +46723,7 @@ function setup(ctx) {
   const set = overlays;
   cleanups.push(() => set.destroy());
   cleanups.push(trackDraft(app));
+  cleanups.push(client.onAgents((view) => app.agents.set(view)));
   const recheck = () => {
     recheckDraft(app);
     client.resync();
