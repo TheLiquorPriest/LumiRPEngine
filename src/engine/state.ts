@@ -6,6 +6,7 @@
 import type { JsonObject, JsonValue } from "../shared/json";
 import type { Band, DomainId, EntityId, InterruptClass, InterruptPolicy, KindId, Level, PackId, RevisionId, SceneTypeId, StageId, TierId, TrackId } from "../shared/ids";
 import type { ClaimsPolicy } from "../shared/claims";
+import type { InferredChecks } from "../shared/inferred";
 import type { AdjudicationDef, FacetId, FacetValueId, LifeStateId, RelationInstance } from "../shared/world";
 
 export interface EntityState {
@@ -65,6 +66,8 @@ export interface WorldState {
   adjudication?: AdjudicationDef;
   /** The player-claims policy a `claims` marker set (DESIGN §9.4); absent (a chat older than claims), the world's default, else the chat's realism preset's (`claimsOf`). */
   claims?: ClaimsPolicy;
+  /** The inferred-checks policy an `infer` marker set (DESIGN §11); absent (a chat older than it), the world's default, else the chat's realism preset's at its Sheets level (`inferredOf`). */
+  inferred?: InferredChecks;
   /** First materialization per `<entityId>:<domain>`, with its pins (L24). */
   materialized: Record<string, { generatorVersion: number; tablesRevision: string }>;
   /** Pack-owned state slices, keyed by pack id. */

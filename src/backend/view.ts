@@ -24,6 +24,7 @@ import { playerDrop, playerLines, UNSEEN_DROP } from "../engine/player-events";
 import type { ReadContext } from "../engine/registry";
 import { readPass } from "../engine/read-pass";
 import { claimsOf, presetOf } from "../engine/realism";
+import { inferredOf, worldSkills } from "../engine/inferred";
 import { levelFloors, type Registry } from "../engine/registry-impl";
 import { actionOdds, paramCandidates } from "../engine/resolve";
 import { isGone, kindIs, placeOfEntity } from "../engine/scope";
@@ -294,11 +295,13 @@ function palette(world: WorldDoc, state: WorldState, registry: Registry): Palett
   return { entries, timelapse, ...(encounter ? { encounter } : {}) };
 }
 
-function controls(world: WorldDoc, state: WorldState, sceneType: string): ControlsView {
+function controls(world: WorldDoc, state: WorldState, sceneType: string, registry: Registry): ControlsView {
   return {
     // The chat's own preset: a new chat may start from the user's settings, and This chat changes it.
     realism: { preset: presetOf(state.realism), levels: { ...state.realism.levels }, tierCaps: structuredClone(state.realism.tierCaps), bandTiers: bandTiers(world), floors: levelFloors(world), claims: claimsOf(world, state) },
     adjudication: policyOf(world, state),
+    inferred: inferredOf(world, state),
+    skills: worldSkills(registry, world, state),
     time: {
       sceneType,
       sceneTicks: { ...state.time.sceneTicks },
@@ -663,7 +666,7 @@ export function buildView(input: ViewInput): StateView {
       pending,
       panels,
       palette: palette(world, next, registry),
-      controls: controls(world, next, sceneView.sceneType),
+      controls: controls(world, next, sceneView.sceneType, registry),
       meter: input.meter,
       packs,
       currency: world.currency,

@@ -18,6 +18,7 @@ import type { GmEntity, GmField, GmView, StateView } from "../../src/shared/stat
 import type { MapDisplay, WorldDoc, WorldIndex } from "../../src/shared/world";
 import { compileMaps } from "../../src/shared/maps";
 import { presetAdjudication } from "../../src/shared/adjudication";
+import { inferredDefaults } from "../../src/shared/inferred";
 import { blankWorld, migrateWorld } from "../../src/engine/authoring";
 import { buildGmWorld } from "../../src/engine/gm-view";
 import { createRegistry } from "../../src/engine/registry-impl";
@@ -392,6 +393,13 @@ export function stateFixture(chatId: string): StateView {
     controls: {
       realism: { preset: "story", levels: { money: 3, gear: 3, vehicles: 3, castlife: 3, relationships: 2, space: 3, calendar: 3, weather: 2, sheets: 2 }, tierCaps: { principal: {}, supporting: {}, background: { money: 1, castlife: 1 } }, bandTiers: { principal: ["Leads"], supporting: ["Regulars", "Supporting"], background: ["Background"] }, floors: { sheets: 3 }, claims: { mode: "real", capped: false } },
       adjudication: presetAdjudication("balanced"),
+      inferred: inferredDefaults("story", 3),
+      skills: [
+        { id: "athletics", label: "Athletics" },
+        { id: "insight", label: "Read People" },
+        { id: "persuasion", label: "Persuasion" },
+        { id: "stealth", label: "Stealth" },
+      ],
       time: {
         sceneType: "conversation",
         sceneTicks: { conversation: 2, action: 0.5, exploration: 10, downtime: 30 },
@@ -1267,6 +1275,7 @@ export function settingsFixture(): UserSettings {
     overrideWorldDefaults: false,
     adjudication: presetAdjudication("crunchy"),
     overrideWorldAdjudication: false,
+    inferred: null,
     extraction: { regard: { mode: "never" } },
     swipeDefault: "rerun",
     hideJsonBlocks: true,

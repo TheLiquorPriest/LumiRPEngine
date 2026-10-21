@@ -8,6 +8,7 @@ import type { LedgerEvent } from "../shared/ledger";
 import { macroHazards } from "../shared/macros";
 import type { LintIssue } from "../shared/protocol";
 import type { SheetSectionView } from "../shared/state-view";
+import type { SheetSkill } from "../shared/inferred";
 import { currentSignals, hasRetiredSignal, knownSignal, STEP_OUTPUTS, STEP_PLACEHOLDERS } from "../shared/steps";
 import { defaultTiers, leadTierOf, tierOf } from "../shared/tiers";
 import type { WorldCurrency, WorldDoc } from "../shared/world";
@@ -16,6 +17,7 @@ import { compileMaps } from "../shared/maps";
 import { DEFAULT_CURRENCY, ENGINE_VERSION, WORLD_FORMAT } from "../shared/world";
 import { applyEvent, validateEvent } from "./events";
 import type { Registry } from "./registry-impl";
+import { worldSkills } from "./inferred";
 import { buildEntitySheet } from "./ruleset";
 import type { InterpretOutput, TurnPipeline } from "./steps";
 import type { WorldState } from "./state";
@@ -369,6 +371,11 @@ export function checkWorldDay(registry: Registry, pipeline: TurnPipeline, world:
  */
 export function previewSheet(registry: Registry, world: WorldDoc, entity: EntityId = world.pov): SheetSectionView[] | null {
   return buildEntitySheet(registry.context(world, initialState(world, "preview", registry)), entity);
+}
+
+/** The skills a world's sheet has as a chat starts (DESIGN §11 inferred checks): what Build's skills list may name. Nothing is recorded. */
+export function previewSkills(registry: Registry, world: WorldDoc): SheetSkill[] {
+  return worldSkills(registry, world, initialState(world, "preview", registry));
 }
 
 /** Stamps the engine version the document was last written by. */

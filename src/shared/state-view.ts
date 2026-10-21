@@ -3,6 +3,7 @@
 // filtered to what the POV knows (DESIGN §7); GM previews are labelled and never recorded.
 
 import type { ClaimsPolicy } from "./claims";
+import type { InferredChecks, SheetSkill } from "./inferred";
 import type { JsonObject, JsonValue } from "./json";
 import type { MindCallTrace, MindsGmView } from "./minds";
 import type {
@@ -278,6 +279,10 @@ export interface ControlsView {
   };
   /** The policy deciding this chat's checks (DESIGN §11): its own marker's, else the world's, else plain rolling. */
   adjudication: AdjudicationDef;
+  /** How this chat reads typed attempts as checks (DESIGN §11 inferred checks): its own `infer` marker's, else the world's default, else its realism preset's at its Sheets level. */
+  inferred: InferredChecks;
+  /** The skills the chat's world's sheet has, in sheet order: what an inferred check may roll, and what its skills list may name. */
+  skills: SheetSkill[];
 }
 
 export interface StateView {

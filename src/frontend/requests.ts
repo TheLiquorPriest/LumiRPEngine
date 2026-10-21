@@ -2,6 +2,7 @@
 // Kept pure so the mapping from a tap to its message is tested directly.
 
 import type { ClaimsPolicy } from "../shared/claims";
+import type { InferredChecks } from "../shared/inferred";
 import type { JsonObject, JsonValue } from "../shared/json";
 import type { ChatId, DomainId, EntityId, InterruptClass, InterruptPolicy, Level, TierId, WorldId } from "../shared/ids";
 import type { EntityUpgradePick, KeepLine, ResolveScope, TimeControl, TimelapseTarget, TimeScope, UpgradePicks } from "../shared/ledger";
@@ -173,6 +174,11 @@ export function adjudicateMarker(chatId: ChatId, to: AdjudicationDef): Req<"lre.
 /** A `claims` marker: what a typed action's thing the world doesn't have becomes in the running chat from the next turn (GM → This chat → Realism). */
 export function claimsMarker(chatId: ChatId, to: ClaimsPolicy): Req<"lre.marker"> {
   return { type: "lre.marker", chatId, kind: "claims", to };
+}
+
+/** An `infer` marker: how typed attempts are read as checks in the running chat from the next turn (GM → This chat → Checks). */
+export function inferMarker(chatId: ChatId, to: InferredChecks): Req<"lre.marker"> {
+  return { type: "lre.marker", chatId, kind: "infer", to };
 }
 
 /**
