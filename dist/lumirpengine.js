@@ -2,7 +2,7 @@
 
 // src/cli/main.ts
 import { chmodSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
-import { readFile } from "node:fs/promises";
+import { lstat, open, realpath } from "node:fs/promises";
 import { homedir, hostname } from "node:os";
 import { dirname } from "node:path";
 import { createInterface } from "node:readline";
@@ -726,6 +726,18 @@ async function sha256Of(bytes) {
   const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", bytes));
   return [...digest].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
+var SHARED_WRITE = 18;
+function ownersOnly(entry, uid) {
+  return (entry.uid === uid || entry.uid === 0) && (entry.mode & SHARED_WRITE) === 0;
+}
+function kitDirs(real) {
+  const dirs = [];
+  for (let at = real, i = 0;i < 4; i++) {
+    at = at.slice(0, Math.max(at.lastIndexOf("/"), at.lastIndexOf("\\")));
+    dirs.unshift(at);
+  }
+  return dirs;
+}
 
 class KitFollower {
   options;
@@ -735,10 +747,13 @@ class KitFollower {
   constructor(bundled, options) {
     this.options = options;
     this.kit = bundled;
-    this.state = options.pin ? { follows: false, why: { code: "pinned", text: "--pin (or LRE_PIN_KIT) keeps the tools this lumirpengine was installed with: run it without to follow LumiRPEngine's" } } : { follows: true, why: null };
+    this.state = options.pin ? { follows: false, why: { code: "pinned", text: "--pin (or LRE_PIN_KIT) keeps the tools this lumirpengine was installed with: run it without to follow LumiRPEngine's" } } : options.cannotLoad !== null ? { follows: false, why: { code: "runtime", text: options.cannotLoad } } : { follows: true, why: null };
+  }
+  get able() {
+    return !this.options.pin && this.options.cannotLoad === null;
   }
   async follow(news) {
-    if (this.options.pin)
+    if (!this.able)
       return false;
     const where = this.options.where();
     if (!("kit" in news) || typeof news.build !== "string")
@@ -766,9 +781,23 @@ class KitFollower {
     return true;
   }
   async look(report, build) {
+    const { files, identifier } = this.options;
     let bytes;
     try {
-      bytes = await this.options.files.read(report.path);
+      const real = await files.realpath(report.path);
+      const problem = kitPathProblem(real, identifier);
+      if (problem !== null)
+        return { code: "refused", text: `LumiRPEngine named ${report.path} as its tools, whose real path ${real} ${problem}, so it wasn't loaded` };
+      const { uid } = files;
+      if (uid !== null) {
+        for (const dir of kitDirs(real))
+          if (!ownersOnly(await files.stat(dir), uid))
+            return { code: "unsafe", text: `${dir} can be changed by other users` };
+      }
+      const file = await files.read(real);
+      if (uid !== null && !ownersOnly(file, uid))
+        return { code: "unsafe", text: `${real} can be changed by other users` };
+      bytes = file.bytes;
     } catch (error) {
       const code = isRecord(error) && typeof error.code === "string" ? error.code : "";
       if (code === "ENOENT" || code === "ENOTDIR")
@@ -841,8 +870,18 @@ var package_default = {
 // src/cli/version.ts
 var CLI_NAME = "lumirpengine";
 var CLI_VERSION = package_default.version;
-var BUILD = "c974c41a";
-var VERSION_LINE = `${CLI_NAME} ${CLI_VERSION} (build ${BUILD}, engine ${ENGINE_VERSION}, world format ${WORLD_FORMAT}, agent API ${AGENT_API})`;
+var BUILD = "f15815e7";
+function runtimeCannotFollow(bun) {
+  if (bun === undefined)
+    return null;
+  const [major = 0, minor = 0] = bun.split(".").map(Number);
+  return major > 1 || major === 1 && minor >= 4 ? null : "run it with Node 22 or newer (Bun before 1.4 can't load the kit)";
+}
+function versionLine(bun) {
+  const cannot = runtimeCannotFollow(bun);
+  return `${CLI_NAME} ${CLI_VERSION} (build ${BUILD}, engine ${ENGINE_VERSION}, world format ${WORLD_FORMAT}, agent API ${AGENT_API})${cannot === null ? "" : `; under Bun ${bun ?? ""} it can't follow LumiRPEngine's tools: ${cannot}`}`;
+}
+var VERSION_LINE = versionLine(process.versions.bun);
 
 // src/cli/mcp.ts
 var PROTOCOL_VERSIONS = ["2025-06-18", "2025-03-26", "2024-11-05"];
@@ -1022,7 +1061,7 @@ class McpSession {
     this.options = options;
     this.readOnly = options.mcp.readOnly;
     this.clock = options.clock ?? REAL_CLOCK;
-    this.follower = new KitFollower(options.bundled, { pin: options.mcp.pin, identifier: ENGINE_EXTENSION, files: options.files, where: () => this.conn?.base ?? "your Lumiverse" });
+    this.follower = new KitFollower(options.bundled, { pin: options.mcp.pin, cannotLoad: options.cannotLoad ?? null, identifier: ENGINE_EXTENSION, files: options.files, where: () => this.conn?.base ?? "your Lumiverse" });
     const queue = new Queue;
     this.context = { readFile: (path) => options.io.readFile(path), readOnly: this.readOnly, connection: () => this.connection(), serialize: (key, work) => queue.run(key, work) };
     this.said = this.stance();
@@ -1120,7 +1159,7 @@ class McpSession {
     });
   }
   async take(news) {
-    this.followable = !this.options.mcp.pin && "kit" in news && isRecord(news.kit);
+    this.followable = this.follower.able && "kit" in news && isRecord(news.kit);
     const was = this.follower.kit.build;
     const changed = await this.follower.follow(news);
     if (changed) {
@@ -1250,6 +1289,23 @@ var io = {
   http,
   openSocket
 };
+var kitFiles = {
+  realpath: (path) => realpath(path),
+  async stat(path) {
+    const entry = await lstat(path);
+    return { uid: entry.uid, mode: entry.mode };
+  },
+  async read(path) {
+    const handle = await open(path, "r");
+    try {
+      const entry = await handle.stat();
+      return { uid: entry.uid, mode: entry.mode, bytes: await handle.readFile() };
+    } finally {
+      await handle.close();
+    }
+  },
+  uid: process.platform === "win32" ? null : process.getuid?.() ?? null
+};
 var kit = bundledKitOf(await import(new URL(KIT_FILE, import.meta.url).href));
 if (typeof kit === "string") {
   process.stderr.write(`lumirpengine's agent kit (${KIT_FILE}, beside ${import.meta.url}) can't run: ${kit}. Install lumirpengine again.
@@ -1258,8 +1314,8 @@ if (typeof kit === "string") {
 }
 var result = await kit.run(process.argv.slice(2), io);
 if ("mcp" in result) {
-  const session = new McpSession({ bundled: kit, mcp: result.mcp, io, files: { read: (path) => readFile(path) }, host: hostname(), log: (text) => process.stderr.write(`${text}
-`) });
+  const session = new McpSession({ bundled: kit, mcp: result.mcp, io, files: kitFiles, host: hostname(), log: (text) => process.stderr.write(`${text}
+`), cannotLoad: runtimeCannotFollow(process.versions.bun) });
   const server = serveMcp(session, (line) => {
     const { promise, resolve } = Promise.withResolvers();
     process.stdout.write(`${line}

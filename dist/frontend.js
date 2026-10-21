@@ -14205,7 +14205,7 @@ var INFERRED_BOUNDS = {
 };
 var DEFAULT_GUIDANCE = { pass: "Narrate it succeeding.", fail: "Narrate it failing." };
 var INFERRED_PRESETS = {
-  story: { mode: "suggest", when: "tries", who: "pov", skills: null, difficulty: { lowest: "easy", highest: "hard" }, detail: "result", others: "hidden", guidance: { ...DEFAULT_GUIDANCE }, most: 1 },
+  story: { mode: "auto", when: "tries", who: "pov", skills: null, difficulty: { lowest: "easy", highest: "hard" }, detail: "result", others: "hidden", guidance: { ...DEFAULT_GUIDANCE }, most: 1 },
   grounded: { mode: "auto", when: "risky", who: "companions", skills: null, difficulty: { lowest: "easy", highest: "very_hard" }, detail: "result", others: "hidden", guidance: { ...DEFAULT_GUIDANCE }, most: 3 },
   simulation: { mode: "auto", when: "uncertain", who: "everyone", skills: null, difficulty: { lowest: "easy", highest: "heroic" }, detail: "margin", others: "hidden", guidance: { ...DEFAULT_GUIDANCE }, most: 6 }
 };
@@ -19737,104 +19737,33 @@ function SchemaPartView(props) {
 
 // src/shared/agents.ts
 var NPM_INSTALL = "npm i -g github:TheLiquorPriest/LumiRPEngine";
+var LUMIVERSE_HARNESS = "lumiverse";
 
 // src/frontend/agents-view.ts
 function serverLine(client, view) {
-  const name = client.host !== null ? `${client.name}${client.harness !== null ? ` for ${client.harness}` : ""} on ${client.host}` : `${client.name} ${client.version}`;
+  const processes = client.processes > 1 ? ` (${client.processes} processes)` : "";
+  const name = `${client.host !== null ? `${client.name}${client.harness !== null ? ` for ${client.harness}` : ""} on ${client.host}` : `${client.name} ${client.version}`}${processes}`;
   const install = { label: "Copy the install", text: NPM_INSTALL };
   const setup = view.setup === null ? [] : [{ label: "Copy the setup", text: view.setup.command }];
   switch (client.state) {
     case "updated":
+      if (client.harness === LUMIVERSE_HARNESS)
+        return { state: client.state, text: `${name} reloaded this build's tools, but Lumiverse's MCP client keeps its old tool list until the server restarts: in Lumiverse's Settings → MCP Servers, Disconnect it and Connect it again.`, update: false, copy: [] };
       return { state: client.state, text: `${name} reloaded this build's tools.`, update: false, copy: [] };
     case "behind":
       return { state: client.state, text: `${name} hasn't reloaded this build's tools yet${client.connected ? "." : ": it hasn't checked in since LumiRPEngine restarted. Running, it takes them at its next check, within a minute; stopped, when it next starts."}`, update: true, copy: [] };
     case "cannot": {
-      const fix = client.why?.code === "elsewhere" || client.why?.code === "kit_api" ? [install] : client.why?.code === "pinned" ? [] : setup;
+      const fix = client.why?.code === "elsewhere" || client.why?.code === "kit_api" ? [install] : client.why?.code === "pinned" || client.why?.code === "unsafe" ? [] : setup;
       return { state: client.state, text: `${name} can't follow LumiRPEngine: ${client.why?.text ?? "it didn't say why"}.`, update: false, copy: fix };
     }
     case "old":
       return { state: client.state, text: `${name} is from before MCP servers followed LumiRPEngine, so it keeps the tools it was installed with. Update it once (${NPM_INSTALL}), or set it up to run the extension's own copy${view.setup === null ? "" : ` (${view.setup.command})`}, which follows from then on.`, update: false, copy: [install, ...setup] };
   }
 }
-var baseName = (path) => (path.replaceAll("\\", "/").split("/").at(-1) ?? "").toLowerCase().replace(/\.exe$/, "");
-function lumirpengineProfiles(profiles, core) {
-  const out = [];
-  for (const profile of profiles) {
-    if (profile.transport_type !== "stdio")
-      continue;
-    const command = baseName(profile.command);
-    if (command === "lumirpengine")
-      out.push({ profile, kind: "npm" });
-    else if (command === "npx" && profile.args.some((arg) => /^github:TheLiquorPriest\/LumiRPEngine(#.*)?$/i.test(arg) || /^lumi-rp-engine(@.*)?$/.test(arg)))
-      out.push({ profile, kind: "npx" });
-    else if (command === "node" || command === "bun") {
-      const script = profile.args.find((arg) => arg.replaceAll("\\", "/").endsWith("/lumirpengine.js"));
-      if (script !== undefined)
-        out.push({ profile, kind: core !== null && script === core ? "extension" : "npm" });
-    }
-  }
-  return out;
-}
-function extensionArgs(profile, core) {
-  const at = profile.args.indexOf("mcp");
-  return [core, "mcp", ...at >= 0 ? profile.args.slice(at + 1) : []];
-}
 
 // src/frontend/agents.tsx
-async function lumiverse(path, method = "GET", body) {
-  const res = await fetch(new URL(`/api/v1/mcp-servers${path}`, location.origin), { method, credentials: "include", cache: "no-store", headers: { Accept: "application/json", ...body !== undefined ? { "Content-Type": "application/json" } : {} }, ...body !== undefined ? { body: JSON.stringify(body) } : {} });
-  if (!res.ok)
-    throw new Error(res.status === 403 ? "Only Lumiverse's owner or an admin sees its MCP servers." : `Lumiverse answered ${res.status}.`);
-  return await res.json();
-}
 function copy(app, text) {
   navigator.clipboard.writeText(text).then(() => app.toast("Copied"), () => app.toast("The clipboard refused the copy", "error"));
-}
-var KIND = { extension: "runs the extension's own copy", npm: "runs an npm install of lumirpengine", npx: "runs lumirpengine with npx" };
-function LumiverseRun(props) {
-  const app = useApp();
-  const [found, setFound] = d2(null);
-  const core = props.view.setup?.core ?? null;
-  const load = () => void lumiverse("?limit=1000").then((page) => setFound(lumirpengineProfiles(page.data, core)), (error) => setFound(error instanceof Error ? error.message : String(error)));
-  A(load, [core]);
-  if (found === null || Array.isArray(found) && found.length === 0)
-    return null;
-  if (typeof found === "string")
-    return /* @__PURE__ */ u3("p", {
-      class: "lre-field-help",
-      "data-lre-lumiverse-mcp": "unreadable",
-      children: `Lumiverse's own MCP servers can't be read here: ${found}`
-    }, undefined, false, undefined, this);
-  const restart = (id, name) => lumiverse(`/${id}/reconnect`, "POST").then(() => app.toast(`${name} restarted`), (error) => app.toast(`${name} didn't restart: ${error instanceof Error ? error.message : String(error)}`, "error"));
-  return /* @__PURE__ */ u3(List, {
-    children: found.map(({ profile, kind }) => /* @__PURE__ */ u3("div", {
-      "data-lre-lumiverse-mcp": kind,
-      children: [
-        /* @__PURE__ */ u3(ListRow, {
-          icon: "refresh",
-          title: `Lumiverse's “${profile.name}”`,
-          subtitle: `${KIND[kind]}${profile.is_enabled ? "" : " (switched off)"}`
-        }, undefined, false, undefined, this),
-        /* @__PURE__ */ u3("div", {
-          class: "lre-row-actions",
-          children: [
-            profile.is_enabled ? /* @__PURE__ */ u3(Button, {
-              size: "sm",
-              variant: "secondary",
-              onClick: () => void restart(profile.id, profile.name),
-              children: "Restart"
-            }, undefined, false, undefined, this) : null,
-            kind !== "extension" && core !== null ? /* @__PURE__ */ u3(Button, {
-              size: "sm",
-              variant: "ghost",
-              onClick: () => void lumiverse(`/${profile.id}`, "PUT", { command: "node", args: extensionArgs(profile, core) }).then(() => restart(profile.id, profile.name).then(load), (error) => app.toast(`${profile.name} wasn't switched: ${error instanceof Error ? error.message : String(error)}`, "error")),
-              children: "Use the extension's copy"
-            }, undefined, false, undefined, this) : null
-          ]
-        }, undefined, true, undefined, this)
-      ]
-    }, profile.id, true, undefined, this))
-  }, undefined, false, undefined, this);
 }
 function Servers(props) {
   const app = useApp();
@@ -19908,9 +19837,6 @@ function UpdateNotice() {
         }, undefined, false, undefined, this),
         /* @__PURE__ */ u3(Servers, {
           view
-        }, undefined, false, undefined, this),
-        /* @__PURE__ */ u3(LumiverseRun, {
-          view
         }, undefined, false, undefined, this)
       ]
     }, undefined, true, undefined, this)
@@ -19945,7 +19871,7 @@ function McpServerPage() {
             }, undefined, false, undefined, this),
             /* @__PURE__ */ u3("span", {
               class: "lre-field-help",
-              children: `Give your agent's harness this command for its lumirpengine server (claude mcp add lumirpengine -- ${view.setup.command}). It runs this extension's own copy, on the machine Lumiverse runs on, and takes each update's tools by itself. Sign in once first: node ${view.setup.core} login --url <your Lumiverse>.`
+              children: `Give your agent's harness this command for its lumirpengine server (claude mcp add lumirpengine -- ${view.setup.command}). It runs this extension's own copy, on the machine Lumiverse runs on, and takes each update's tools by itself. Sign in once first: node ${view.setup.core} login --url <your Lumiverse>. For Lumiverse itself to run it (its Settings → MCP Servers), add a Stdio server with the command node and the arguments ${view.setup.core}, mcp.`
             }, undefined, false, undefined, this),
             /* @__PURE__ */ u3(Button, {
               size: "sm",
@@ -19964,9 +19890,6 @@ function McpServerPage() {
           view,
           forget: true
         }, undefined, false, undefined, this)
-      }, undefined, false, undefined, this),
-      /* @__PURE__ */ u3(LumiverseRun, {
-        view
       }, undefined, false, undefined, this)
     ]
   }, undefined, true, undefined, this);
@@ -20085,7 +20008,7 @@ function InferredSeed(props) {
           }, undefined, false, undefined, this),
           /* @__PURE__ */ u3("span", {
             class: "lre-field-help",
-            children: inferred === null ? "Each new chat plays by its realism preset and Sheets level: Story offers a roll, Grounded rolls risky attempts, Simulation rolls every uncertain one." : where
+            children: inferred === null ? "Each new chat plays by its realism preset and Sheets level: Story rolls what the message says it tries, Grounded rolls risky attempts, Simulation rolls every uncertain one." : where
           }, undefined, false, undefined, this)
         ]
       }, undefined, true, undefined, this),
@@ -44210,7 +44133,7 @@ function GmPanel(props) {
 }
 
 // src/frontend/play/journal.tsx
-var KIND2 = {
+var KIND = {
   dropped: { label: "Dropped", tone: "neg", icon: "alert" },
   inert: { label: "Other branch", tone: "neutral", icon: "branch" },
   not_carried: { label: "Not carried", tone: "warn", icon: "undo" },
@@ -44377,8 +44300,8 @@ function JournalPanel(props) {
           "data-kind": note.kind,
           children: [
             /* @__PURE__ */ u3(Icon, {
-              name: KIND2[note.kind].icon,
-              class: `lre-play-note-icon ${KIND2[note.kind].tone}`
+              name: KIND[note.kind].icon,
+              class: `lre-play-note-icon ${KIND[note.kind].tone}`
             }, undefined, false, undefined, this),
             /* @__PURE__ */ u3("div", {
               class: "lre-play-note-body",
@@ -44388,8 +44311,8 @@ function JournalPanel(props) {
                   children: note.text
                 }, undefined, false, undefined, this),
                 /* @__PURE__ */ u3(Badge, {
-                  tone: KIND2[note.kind].tone,
-                  children: KIND2[note.kind].label
+                  tone: KIND[note.kind].tone,
+                  children: KIND[note.kind].label
                 }, undefined, false, undefined, this)
               ]
             }, undefined, true, undefined, this)
@@ -46380,7 +46303,6 @@ var SETTINGS_CSS = `
 .lre-row-actions:empty{display:none}
 [data-lre-mcp-setup]{display:flex;flex-direction:column;align-items:flex-start;gap:var(--lre-s2)}
 [data-lre-mcp-setup] code{display:block;width:100%;box-sizing:border-box;padding:var(--lre-s2);border:1px solid var(--lre-hairline);background:var(--lre-accent-soft);font-size:var(--lre-fs-sm);overflow-wrap:anywhere;user-select:all}
-[data-lre-lumiverse-mcp="unreadable"]{padding:0 var(--lre-s3)}
 `;
 
 // src/frontend/styles/shell.ts

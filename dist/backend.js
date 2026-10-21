@@ -6657,7 +6657,7 @@ var INFERRED_BOUNDS = {
 };
 var DEFAULT_GUIDANCE = { pass: "Narrate it succeeding.", fail: "Narrate it failing." };
 var INFERRED_PRESETS = {
-  story: { mode: "suggest", when: "tries", who: "pov", skills: null, difficulty: { lowest: "easy", highest: "hard" }, detail: "result", others: "hidden", guidance: { ...DEFAULT_GUIDANCE }, most: 1 },
+  story: { mode: "auto", when: "tries", who: "pov", skills: null, difficulty: { lowest: "easy", highest: "hard" }, detail: "result", others: "hidden", guidance: { ...DEFAULT_GUIDANCE }, most: 1 },
   grounded: { mode: "auto", when: "risky", who: "companions", skills: null, difficulty: { lowest: "easy", highest: "very_hard" }, detail: "result", others: "hidden", guidance: { ...DEFAULT_GUIDANCE }, most: 3 },
   simulation: { mode: "auto", when: "uncertain", who: "everyone", skills: null, difficulty: { lowest: "easy", highest: "heroic" }, detail: "margin", others: "hidden", guidance: { ...DEFAULT_GUIDANCE }, most: 6 }
 };
@@ -66034,14 +66034,16 @@ function thisBuild(moduleUrl = import.meta.url) {
   const dir = moduleUrl.replace(/[^/]*$/, "");
   const path = pathOfFileUrl(`${dir}${KIT_FILE}`);
   const core = pathOfFileUrl(`${dir}${CORE_FILE}`);
-  const sha256 = "3684371c81c07f75e5a0622d2ec1d4b5f19e11480cc134ff6d2fb129c5033327";
-  return { id: "c974c41a", kit: sha256 !== undefined && path !== null && core !== null ? { path, core, sha256, api: KIT_API } : null };
+  const sha256 = "8c73948a5b8bd1ef3313d1821c08fe3e48b9d2de5bae2ad7b908752a598c3557";
+  return { id: "f15815e7", kit: sha256 !== undefined && path !== null && core !== null ? { path, core, sha256, api: KIT_API } : null };
 }
 var BUILD_FILE = "agents/build.json";
 var USER_FILE = "agents.json";
 var CLIENTS_KEPT = 32;
 var SESSIONS_KEPT = 256;
-var FOLLOW_CODES = { pinned: true, unsupported: true, no_kit: true, kit_api: true, refused: true, elsewhere: true, unreadable: true, mismatch: true, broken: true };
+var LIVE_MS = 120000;
+var RANK3 = { old: 0, cannot: 1, behind: 2, updated: 3 };
+var FOLLOW_CODES = { pinned: true, runtime: true, unsupported: true, no_kit: true, kit_api: true, refused: true, unsafe: true, elsewhere: true, unreadable: true, mismatch: true, broken: true };
 var errorText = (error) => error instanceof Error ? error.message : String(error);
 function shown3(text, max) {
   return text.replace(/[\u0000-\u001f\u007f]/g, " ").trim().slice(0, max);
@@ -66066,6 +66068,15 @@ function stateOf(client, build) {
   if (client.kit === null)
     return "old";
   return client.follows ? "behind" : "cannot";
+}
+function worstOf(heard, build) {
+  let worst = null;
+  for (const h of heard) {
+    const by = worst === null ? -1 : RANK3[stateOf(h.client, build)] - RANK3[stateOf(worst.client, build)];
+    if (by < 0 || by === 0 && worst !== null && h.client.seen > worst.client.seen)
+      worst = h;
+  }
+  return worst;
 }
 
 class Agents {
@@ -66129,8 +66140,9 @@ class Agents {
       return answer;
     const id = idOf(checkIn);
     if (session !== undefined) {
-      this.sessions.delete(`${userId}\x00${session}`);
-      this.sessions.set(`${userId}\x00${session}`, id);
+      const key = `${userId}\x00${session}`;
+      this.sessions.delete(key);
+      this.sessions.set(key, { id, client: checkIn, seen: checkIn.seen });
       for (const oldest of this.sessions.keys()) {
         if (this.sessions.size <= SESSIONS_KEPT)
           break;
@@ -66161,8 +66173,17 @@ class Agents {
     this.host.toast(Object.keys(file.clients).length > 0 ? `Updated to build ${started.build}. The drawer says how each of your MCP servers took it.` : `Updated to build ${started.build}.`, userId);
   }
   async request(r, userId, session) {
-    if (r.op === "kit")
-      return { build: this.build.id, kit: this.build.kit, known: session !== undefined && this.sessions.has(`${userId}\x00${session}`) };
+    if (r.op === "kit") {
+      const heard = session === undefined ? undefined : this.sessions.get(`${userId}\x00${session}`);
+      if (heard !== undefined) {
+        const now = this.now();
+        const quiet = now - heard.seen > LIVE_MS;
+        heard.seen = now;
+        if (quiet)
+          this.track(this.tell(userId), "the MCP servers' view wasn't sent");
+      }
+      return { build: this.build.id, kit: this.build.kit, known: heard !== undefined };
+    }
     if (r.op === "update") {
       if (typeof r.client === "string")
         this.host.frontend.send({ lre: PROTOCOL_VERSION, type: "lre.kit.reload", client: r.client }, userId);
@@ -66184,16 +66205,32 @@ class Agents {
   }
   viewOf(userId, file, started) {
     const prefix = `${userId}\x00`;
+    const now = this.now();
     const connected = new Set;
-    for (const [key, id] of this.sessions)
-      if (key.startsWith(prefix))
-        connected.add(id);
+    const live = new Map;
+    for (const [key, heard] of this.sessions) {
+      if (!key.startsWith(prefix))
+        continue;
+      connected.add(heard.id);
+      if (now - heard.seen > LIVE_MS)
+        continue;
+      const same = live.get(heard.id);
+      if (same)
+        same.push(heard);
+      else
+        live.set(heard.id, [heard]);
+    }
+    const build = this.build.id;
     const kit = this.build.kit;
     return {
-      build: this.build.id,
+      build,
       notice: started.previous !== null && file.dismissed !== started.build ? { build: started.build, previous: started.previous, at: started.at } : null,
       setup: kit === null ? null : { core: kit.core, command: followCommand(kit.core) },
-      clients: Object.entries(file.clients).sort(([, a], [, b]) => b.seen - a.seen).map(([id, client]) => ({ id, ...client, connected: connected.has(id), state: stateOf(client, this.build.id) }))
+      clients: Object.entries(file.clients).sort(([, a], [, b]) => b.seen - a.seen).map(([id, stored]) => {
+        const heard = live.get(id) ?? [];
+        const client = worstOf(heard, build)?.client ?? stored;
+        return { id, ...client, seen: stored.seen, connected: connected.has(id), processes: heard.length, state: stateOf(client, build) };
+      })
     };
   }
   async tell(userId) {
@@ -68886,7 +68923,7 @@ class Runtime {
     this.steps.onCallStart = (userId, purpose) => this.diag.callStart(userId, purpose);
     this.toolSupport = new ToolSupport(this.host);
     this.minds = { host: this.host, registry: this.registry, steps: this.steps, settings: this.settings, presets: this.presets };
-    this.ledger = new LedgerService(this.host, (chatId, userId) => this.resolveEnv(chatId, userId), new LedgerFold(this.registry, { fingerprint: "c974c41a" }), (chatId) => messages.forget(chatId));
+    this.ledger = new LedgerService(this.host, (chatId, userId) => this.resolveEnv(chatId, userId), new LedgerFold(this.registry, { fingerprint: "f15815e7" }), (chatId) => messages.forget(chatId));
     this.studio = new StudioBridge(this.host, this.worlds);
     this.worlds.onChange = (worldId, userId) => this.studio.worldChanged(worldId, userId);
     this.agents = new Agents(this.host, options.build ?? thisBuild());
@@ -69235,8 +69272,9 @@ class Runtime {
     const inferred = inferredOf(render.world, render.state);
     const sources = skillSources(this.registry, render.world, render.state);
     const skills = allowedSkills(inferred, sources);
-    const offered = interpretCatalog(this.registry, render.world, render.state, all.filter((a) => !rolledByTry(a, sources)), mayKnow);
-    const catalog = [...offered.entries.map((o) => o.entry), ...inferred.mode !== "off" && skills.length > 0 ? [tryEntry(inferred, skills)] : [], timelapseEntry(render.world, render.state)];
+    const trying = inferred.mode !== "off" && skills.length > 0;
+    const offered = interpretCatalog(this.registry, render.world, render.state, trying ? all.filter((a) => !rolledByTry(a, sources)) : all, mayKnow);
+    const catalog = [...offered.entries.map((o) => o.entry), ...trying ? [tryEntry(inferred, skills)] : [], timelapseEntry(render.world, render.state)];
     const context = {
       world: render.world,
       pov: { id: render.world.pov, name: render.state.entities[render.world.pov]?.name ?? render.world.pov },
