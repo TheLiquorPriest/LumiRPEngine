@@ -26706,10 +26706,12 @@ function usualRoutine(ctx, who, read) {
       continue;
     const { text, start } = blockClause(cal, day, block);
     let today = false;
+    let place = null;
     try {
       today = blockOnDay(ctx, who, block, day);
+      place = blockPlace(ctx, who, block);
     } catch {}
-    out.push({ text, start, minutes: block.minutes, today, private: block.private === true, own: from.level === "own" || from.level === "chat" });
+    out.push({ text, place, start, minutes: block.minutes, today, private: block.private === true, own: from.level === "own" || from.level === "chat" });
   }
   const spans = new Map;
   for (const s of chatSchedulesIn(ctx)) {
@@ -26720,9 +26722,9 @@ function usualRoutine(ctx, who, read) {
     const runs = [];
     for (const slot of s.slots) {
       const raw = typeof slot.value === "string" ? slot.value.trim() : "";
-      const value = raw === "" ? null : s.target === "place" ? read.place(raw) : raw.replace(/_/g, " ");
-      if (value === null)
+      if (raw === "" || s.target === "place" && !own(world.places, raw))
         continue;
+      const value = s.target === "place" ? raw : raw.replace(/_/g, " ");
       const start = parseHHMM(slot.start);
       const end = parseHHMM(slot.end);
       const last = runs[runs.length - 1];
@@ -26734,37 +26736,43 @@ function usualRoutine(ctx, who, read) {
     for (const run of runs) {
       const key = `${days}\x00${run.start}\x00${run.end}`;
       const span = spans.get(key) ?? { days, start: run.start, end: run.end, today, own: s.owner === who };
-      if (s.target === "place")
-        span.place ??= run.value;
-      else
+      if (s.target === "place" && span.place === undefined) {
+        span.place = run.value;
+        span.placeName = read.place(run.value);
+      } else if (s.target === "activity")
         span.activity ??= run.value;
       spans.set(key, span);
     }
   }
   for (const span of spans.values()) {
-    const what = span.activity !== undefined ? `${span.activity}${span.place !== undefined ? ` at ${span.place}` : ""}` : `at ${span.place ?? ""}`;
+    const at = span.placeName ? `at ${span.placeName}` : "";
+    const what = span.activity !== undefined ? `${span.activity}${at !== "" ? ` ${at}` : ""}` : at;
     const minutes = (span.end - span.start + MINUTES_PER_DAY) % MINUTES_PER_DAY || MINUTES_PER_DAY;
-    out.push({ text: `${span.days !== "" ? `${span.days}, ` : ""}${what} ${formatHHMM(span.start)}\u2013${formatHHMM(span.end)}`, start: span.start, minutes, today: span.today, private: false, own: span.own });
+    out.push({ text: what === "" ? "" : `${span.days !== "" ? `${span.days}, ` : ""}${what} ${formatHHMM(span.start)}\u2013${formatHHMM(span.end)}`, place: span.place ?? null, start: span.start, minutes, today: span.today, private: false, own: span.own });
   }
   const minute = now.minuteOfDay;
   const rank = (c) => c.today && c.start + c.minutes > minute ? 0 : 1;
   return out.sort((a, b) => rank(a) - rank(b) || a.start - b.start || a.text.localeCompare(b.text));
 }
-function usualRoutineHints(ctx) {
+function presentUsual(ctx, place) {
   const { registry: reg, world, state } = ctx;
   const pov = world.pov;
   const here = placeOfEntity(state, pov);
-  if (here === null || !routineSettingsOf(world).narrator)
+  if (here === null)
     return [];
   let safe = null;
-  const lines = [];
+  const out = [];
   for (const id of Object.keys(state.entities).sort()) {
     const e = own(state.entities, id);
     if (!e || id === pov || placeOfEntity(state, id) !== here || !kindIs(reg, world, e.kind, "person") || isGone(state, id) || !canSeeEntity(reg, world, state, pov, id) || povLife(world, state, id)?.acts === false)
       continue;
     if (routineRole(ctx, id) === "off")
       continue;
-    const clauses = usualRoutine(ctx, id, { place: (place) => canSeePlace(reg, world, state, pov, place) ? own(world.places, place)?.name ?? null : null, activity: canSeeField(reg, world, state, pov, id, "activity") }).filter((c) => !c.private);
+    const named = (p) => {
+      const def = own(world.places, p);
+      return def && canSeePlace(reg, world, state, pov, p) ? place(p, def.name) : null;
+    };
+    const clauses = usualRoutine(ctx, id, { place: named, activity: canSeeField(reg, world, state, pov, id, "activity") }).filter((c) => !c.private && c.text !== "");
     if (clauses.length === 0)
       continue;
     if (!safe) {
@@ -26774,8 +26782,14 @@ function usualRoutineHints(ctx) {
     }
     const told = clauses.map((c) => c.text).filter(safe).slice(0, 3);
     if (told.length > 0)
-      lines.push(`${e.name} usually: ${told.join("; ")}.`);
+      out.push({ id, name: e.name, told });
   }
+  return out;
+}
+function usualRoutineHints(ctx) {
+  if (!routineSettingsOf(ctx.world).narrator)
+    return [];
+  const lines = presentUsual(ctx, (_id, name) => name).map((p) => `${p.name} usually: ${p.told.join("; ")}.`);
   return lines.length === 0 ? [] : ["Usual routines (background you may use or ignore, never a fact to state; what the story establishes always comes first):", ...lines];
 }
 

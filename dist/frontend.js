@@ -28763,10 +28763,25 @@ function changedBy(summary) {
     return null;
   const sources = [...summary.blocks.map((b) => b.source), ...summary.schedules.map((s) => s.source)];
   const gm = summary.follow !== null || sources.some((s) => s.type === "gm");
-  const story = sources.some((s) => s.type === "story");
-  return gm && story ? "both" : gm ? "gm" : story ? "story" : null;
+  const story = sources.some((s) => s.type === "story" && s.by !== "player");
+  const player = sources.some((s) => s.type === "story" && s.by === "player");
+  if (gm && story && player)
+    return "all";
+  if (gm)
+    return story ? "gm_story" : player ? "gm_player" : "gm";
+  if (story)
+    return player ? "story_player" : "story";
+  return player ? "player" : null;
 }
-var CHANGED_LABEL = { gm: "Changed by you", story: "Changed by the story", both: "Changed by you and the story" };
+var CHANGED_LABEL = {
+  gm: "Changed by you",
+  story: "Changed by the story",
+  player: "Changed from your message",
+  gm_story: "Changed by you and the story",
+  gm_player: "Changed by you and from your message",
+  story_player: "Changed by the story and from your message",
+  all: "Changed by you, the story and your message"
+};
 function sourceWords2(source, now) {
   if (source.type !== "story" && source.type !== "gm")
     return source.label;
@@ -29628,7 +29643,7 @@ function StoryMade(props) {
             const block = c.kind === "block" ? c.block : null;
             const shown = block && !isOff(block.block) && !c.off ? block.block : null;
             const live = c.kind === "block" ? block?.owner.level === "chat" : c.schedule !== null;
-            const what = c.kind === "schedule" ? c.schedule?.chat ? chatScheduleWords(c.schedule.chat, props.now) : c.off ? "Off for them" : "Their own version in this chat" : c.off ? "Switched off for them" : live && shown ? blockWhen(shown) : "In force from the day after the story made it";
+            const what = c.kind === "schedule" ? c.schedule?.chat ? chatScheduleWords(c.schedule.chat, props.now) : c.off ? "Off for them" : "Their own version in this chat" : c.off ? "Switched off for them" : live && shown ? blockWhen(shown) : "In force from the next day";
             return /* @__PURE__ */ u3(ListRow, {
               id: c.id,
               icon: c.kind === "schedule" ? "calendar" : "clock",

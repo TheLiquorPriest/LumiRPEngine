@@ -26161,10 +26161,12 @@ function usualRoutine(ctx, who, read) {
       continue;
     const { text, start } = blockClause(cal, day, block);
     let today = false;
+    let place = null;
     try {
       today = blockOnDay(ctx, who, block, day);
+      place = blockPlace(ctx, who, block);
     } catch {}
-    out.push({ text, start, minutes: block.minutes, today, private: block.private === true, own: from.level === "own" || from.level === "chat" });
+    out.push({ text, place, start, minutes: block.minutes, today, private: block.private === true, own: from.level === "own" || from.level === "chat" });
   }
   const spans = new Map;
   for (const s of chatSchedulesIn(ctx)) {
@@ -26175,9 +26177,9 @@ function usualRoutine(ctx, who, read) {
     const runs = [];
     for (const slot of s.slots) {
       const raw = typeof slot.value === "string" ? slot.value.trim() : "";
-      const value = raw === "" ? null : s.target === "place" ? read.place(raw) : raw.replace(/_/g, " ");
-      if (value === null)
+      if (raw === "" || s.target === "place" && !own(world.places, raw))
         continue;
+      const value = s.target === "place" ? raw : raw.replace(/_/g, " ");
       const start = parseHHMM(slot.start);
       const end = parseHHMM(slot.end);
       const last = runs[runs.length - 1];
@@ -26189,37 +26191,43 @@ function usualRoutine(ctx, who, read) {
     for (const run of runs) {
       const key = `${days}\x00${run.start}\x00${run.end}`;
       const span = spans.get(key) ?? { days, start: run.start, end: run.end, today, own: s.owner === who };
-      if (s.target === "place")
-        span.place ??= run.value;
-      else
+      if (s.target === "place" && span.place === undefined) {
+        span.place = run.value;
+        span.placeName = read.place(run.value);
+      } else if (s.target === "activity")
         span.activity ??= run.value;
       spans.set(key, span);
     }
   }
   for (const span of spans.values()) {
-    const what = span.activity !== undefined ? `${span.activity}${span.place !== undefined ? ` at ${span.place}` : ""}` : `at ${span.place ?? ""}`;
+    const at = span.placeName ? `at ${span.placeName}` : "";
+    const what = span.activity !== undefined ? `${span.activity}${at !== "" ? ` ${at}` : ""}` : at;
     const minutes = (span.end - span.start + MINUTES_PER_DAY) % MINUTES_PER_DAY || MINUTES_PER_DAY;
-    out.push({ text: `${span.days !== "" ? `${span.days}, ` : ""}${what} ${formatHHMM(span.start)}–${formatHHMM(span.end)}`, start: span.start, minutes, today: span.today, private: false, own: span.own });
+    out.push({ text: what === "" ? "" : `${span.days !== "" ? `${span.days}, ` : ""}${what} ${formatHHMM(span.start)}–${formatHHMM(span.end)}`, place: span.place ?? null, start: span.start, minutes, today: span.today, private: false, own: span.own });
   }
   const minute = now.minuteOfDay;
   const rank = (c) => c.today && c.start + c.minutes > minute ? 0 : 1;
   return out.sort((a, b) => rank(a) - rank(b) || a.start - b.start || a.text.localeCompare(b.text));
 }
-function usualRoutineHints(ctx) {
+function presentUsual(ctx, place) {
   const { registry: reg, world, state } = ctx;
   const pov = world.pov;
   const here = placeOfEntity(state, pov);
-  if (here === null || !routineSettingsOf(world).narrator)
+  if (here === null)
     return [];
   let safe = null;
-  const lines = [];
+  const out = [];
   for (const id of Object.keys(state.entities).sort()) {
     const e = own(state.entities, id);
     if (!e || id === pov || placeOfEntity(state, id) !== here || !kindIs(reg, world, e.kind, "person") || isGone(state, id) || !canSeeEntity(reg, world, state, pov, id) || povLife(world, state, id)?.acts === false)
       continue;
     if (routineRole(ctx, id) === "off")
       continue;
-    const clauses = usualRoutine(ctx, id, { place: (place) => canSeePlace(reg, world, state, pov, place) ? own(world.places, place)?.name ?? null : null, activity: canSeeField(reg, world, state, pov, id, "activity") }).filter((c) => !c.private);
+    const named = (p) => {
+      const def = own(world.places, p);
+      return def && canSeePlace(reg, world, state, pov, p) ? place(p, def.name) : null;
+    };
+    const clauses = usualRoutine(ctx, id, { place: named, activity: canSeeField(reg, world, state, pov, id, "activity") }).filter((c) => !c.private && c.text !== "");
     if (clauses.length === 0)
       continue;
     if (!safe) {
@@ -26229,8 +26237,14 @@ function usualRoutineHints(ctx) {
     }
     const told = clauses.map((c) => c.text).filter(safe).slice(0, 3);
     if (told.length > 0)
-      lines.push(`${e.name} usually: ${told.join("; ")}.`);
+      out.push({ id, name: e.name, told });
   }
+  return out;
+}
+function usualRoutineHints(ctx) {
+  if (!routineSettingsOf(ctx.world).narrator)
+    return [];
+  const lines = presentUsual(ctx, (_id, name) => name).map((p) => `${p.name} usually: ${p.told.join("; ")}.`);
   return lines.length === 0 ? [] : ["Usual routines (background you may use or ignore, never a fact to state; what the story establishes always comes first):", ...lines];
 }
 
@@ -59203,6 +59217,7 @@ Routines are informative by default (§8): the engine never moves Live, Near or 
 - **What it tells:** their usual routine around now, at most three clauses: the blocks of their routine in force (the basic needs aside) and the spans of their own place and activity schedules they still follow in this chat (a place and an activity on the same days at the same times read as one clause), today's under way or still to come first. It reads the routine as the world and the chat set it, never the day the planner lays, so nothing the planner filled free time with (meals, friends, invitations) is told as a habit.
 - **The player's view:** never a private block, a place the POV can't see, an activity schedule of someone whose activity it may not see, or a clause carrying an unrevealed secret or a hidden name (\`findLeaks\`, \`namesHidden\`), each dropped on its own.
 - **Why People:** People names everyone with the POV that it can see, the people the Minds section tells of included; Stance leaves those out (§24.3), and with minds on they are the Live cast the line matters most for. As a hint it never displaces a section and never sends People on its own.
+- **Where a move goes:** the reply's read gets the same lines with ids (§9.4), never as facts, so a move the narrator writes toward someone's usual place ("off to their usual lunch spots") lands there by the location mode, like a move to a named place.
 
 ## 7. Knowledge and visibility
 - **Values:** \`public\`; \`known_by\`, seen by whoever knows the subject: a \`knows\` relation to it, or matching its \`knownBy\` selector (§4.1: the members of a group, people of a kind or tier); \`secret\` (GM only). Entities, fields, places and tracks take \`knownBy\` beside \`known_by\`. A place may also be \`discoverable\`: hidden until the POV has been there, has a \`knows\` link to it or lists it in \`known_places\`, and found for good after that; its \`knownBy\` counts as for \`known_by\`. A reader that doesn't understand a value (an unknown string, \`discoverable\` on anything but a place) hides the subject, and a \`knownBy\` with a constraint the engine doesn't read, a malformed list or no constraint at all grants nobody: every rule fails closed, and lint flags both.
@@ -59391,9 +59406,9 @@ Each pack ships a pure \`core\` (kinds, relations, level contract, services, que
 | \`extract\` → spawns | At most the world's spawn cap a chat (\`spawnCap\`, set in Build's World part: a whole number from 0 to 500, 24 when absent; 0 lets no reply introduce anyone), deduplicated by name against the people the POV may know; a name only someone it may not know has is dropped unseen (§7). The kind and place are validated. A newcomer's id is its name's slug and a digest of the name and how many replies introduced someone before it (\`npc_vex_morrow_1f3a9c2e\`), never the name alone, so it can't be an authored id; the \`spawn\` event stores it, so replays and swipes fold alike. |
 | \`extract\` → \`knows\` | Public facts only: a public entity, or a \`known_by\` or \`discoverable\` place the POV can't see yet (by id or name); never a secret one. Anything the POV may not know of is refused as a fact no world has (§7). |
 | \`extract\` → \`life\` | Someone died, is dying, collapsed or came round, named by a person the POV may know and a life state by id or label. Judged by what the POV knows: what it already takes to be so is refused (\`already\`), and a state it hadn't heard of is no refusal, so nothing is given away. Applying it tells the POV: the change, or, when it was already so, only that. |
-| \`extract\` → \`routine\` | A lasting change to someone's week the reply states (§8): \`start\` a new job, shift or habit, \`stop\` one, or \`move\` to a new home. Read from the reply alone, as every channel, so never from a mind (no mind reaches a helper, §24.3) nor from the player's own wishes. Its person is one the POV may know who acts and whom the reply speaks of: the POV, or someone it names (the read checks the reply's words); its places and people are ones the world has and the POV may know (one it may not reads as none). It needs the days the reply gives (weekday names in the calendar's own words, weekdays, days off or daily) and takes only the times it gives (a time, or a part of the day; none: a floating block in the waking day). A habit only mentioned, already their routine (a block by that name on those days at that time) or their schedule, changes nothing; a fixed block that clashes with one of their schedules applies only when the reply says it takes the place of what they did then (\`replaces\`), and then takes them off each such schedule in the same change, so an authored schedule is never contradicted unsaid. What it ends is only what the reply can know: never a private block. Every refusal is unseen (logged, no chip, no Outcome note): a routine is a soft default, so the next reply is never told something didn't happen. The change is the chat's own on top of the world's, with source \`story\` and its turn; a block it adds is theirs from the next day. |
+| \`extract\` → \`routine\` | A lasting change to someone's week the reply states (§8): \`start\` a new job, shift or habit, \`stop\` one, or \`move\` to a new home. Read from the reply alone, as every channel, so never from a mind (no mind reaches a helper, §24.3) nor from the player's own wishes. Its person is one the POV may know who acts and whom the reply speaks of: the POV, or someone it names (the read checks the reply's words); its places and people are ones the world has and the POV may know (one it may not reads as none). The read is asked to put any place the reply names for it in \`place\`, as a place id or, when nothing lists it, in the reply's own words ("the community pool"), so a place the world doesn't have is refused as there's no such place rather than left out; one the POV may not know is refused the same way, so nothing tells of a secret place. A change with no \`place\` stays placeless, as before: a habit at no named place ("reads every evening") is wherever they are, and the label's words never make or refuse a place. It needs the days the reply gives (weekday names in the calendar's own words, weekdays, days off or daily) and takes only the times it gives (a time, or a part of the day; none: a floating block in the waking day). A habit only mentioned, already their routine (a block by that name on those days at that time) or their schedule, changes nothing; a fixed block that clashes with one of their schedules applies only when the reply says it takes the place of what they did then (\`replaces\`), and then takes them off each such schedule in the same change, so an authored schedule is never contradicted unsaid. What it ends is only what the reply can know: never a private block. Every refusal is unseen (logged, no chip, no Outcome note): a routine is a soft default, so the next reply is never told something didn't happen. The change is the chat's own on top of the world's, with source \`story\` and its turn; a block it adds is theirs from the next day. GM → Routines badges whom it changed by where the changes came from: "Changed by you", "Changed by the story" (a reply), "Changed from your message" (\`by: "player"\`), or the ones that apply together; a change not in force yet reads "In force from the next day", whatever its source. |
 | \`interpret\` → \`routine\` | A lasting change to someone's week the player's own message states (§8): read in the \`routine\` channel's shape with \`said\`, the words that state it, and never played. It is asked about on the message ("Would you like to add this to your routine?", Yes or No) and applies only on Yes, through the \`routine\` channel, so every bound above holds, with source \`story\`, the message as its turn and \`by: "player"\`. Never asked: words the message doesn't hold, a sentence that is a question ("do you still swim on Tuesdays?"), someone the message doesn't name (other than the POV), a place or person the POV may not know of, an unrevealed secret, or what is already their routine. Undo takes it back. A Decision route's read has none. |
-| \`extract\` → NPC presence or location | Validated against routes: a move no route reaches is declined. Schedules aren't consulted. The read also says where the reply leaves the POV (\`where\`, asked while \`location\` is a channel), since a reply can take a move as given without telling it ("at the counter with Marcus" while the engine has the POV at the market) and no change would say so: a place the engine doesn't have them at, nor one around it, is offered as their move there, unless the turn's own events moved them (the engine's outcome wins) or a narrated move of theirs already says where. A place the reply only implies is weaker evidence than a told move (a flashback, a phone call, a look across the street, a misread), so it is a guess: whatever the location mode, it waits on a confirm chip whose Apply plays the move, never applies by itself, and is no outcome for the type's learning (§11), so guesses never move told moves toward \`confirm\`. Under \`never\` (the player's pin, or a locked place field) it is ignored, as any move is. |
+| \`extract\` → NPC presence or location | Validated against routes: a move no route reaches is declined. Schedules aren't consulted for anything else: a routine moves no one by itself. To tell where a move the reply describes is going, extract is given the usual routines of the people with the POV (\`usualRoutineForExtract\`: §6.10's projection with each person's and place's id, apart from every fact, whatever \`routineSettings.narrator\` says; a world's extract or effects template reads it as \`{{usual}}\`): "heads out to his usual lunch spot" at noon names that place's id, or \`usual\` when the reply doesn't say which, and a move to \`usual\` goes where their routine has them now (\`usualPlaceNow\`: the place of today's clause under way or next that isn't where they are). It then reads as any narrated move, by the location mode. One whose clause is a private block, at a place the POV can't see, or of someone whose routine role is \`off\` resolves to none and is dropped, and no later clause stands in for it. The read also says where the reply leaves the POV (\`where\`, asked while \`location\` is a channel), since a reply can take a move as given without telling it ("at the counter with Marcus" while the engine has the POV at the market) and no change would say so: a place the engine doesn't have them at, nor one around it, is offered as their move there, unless the turn's own events moved them (the engine's outcome wins) or a narrated move of theirs already says where. A place the reply only implies is weaker evidence than a told move (a flashback, a phone call, a look across the street, a misread), so it is a guess: whatever the location mode, it waits on a confirm chip whose Apply plays the move, never applies by itself, and is no outcome for the type's learning (§11), so guesses never move told moves toward \`confirm\`. Under \`never\` (the player's pin, or a locked place field) it is ignored, as any move is. |
 | \`extract\` → purchases and transfers | Priced from catalog or category bands; bounds per field; declines (§9.5). A transfer's two sides are people or their own cash, checking, savings or card accounts (§9.5). |
 | \`extract\` → regard | A reply moves each axis of a pair by at most 10 in all, net (a proposal without an axis moves every axis). In the reply's order, a later proposal for the pair is cut down to what is left; one with nothing left is refused like any change past its bound (an automatic one gets a *Didn't apply* chip and its Outcome note). |
 | \`extract\` → condition, quantities | A condition needs a person and a name. A quantity changes by a whole number up to the item kind's \`qty\` bound (10 by default); a larger step is refused. |
@@ -61657,7 +61672,7 @@ Each change is a GM edit like any other: one correction with its own **Undo**. M
 
 **GM → Routines** shows the routines and schedules everyone follows in this chat. A routine or a schedule is never a script. By default it only informs: the story and planning decide what people do, and only Background characters keep an enforced routine. Even then the story leads whoever shares a scene with you, and no routine interrupts play. The world's routines and schedules are edited in Build (**The world's routines are in Build** goes there); what you change here is this chat's alone.
 
-The list has everyone but you, closest on the minds ladder first, with **Search by name** and a filter (everyone, **Changed in this chat**, **Routine leads**, **Story leads; routine informs**, **No routine**). Each row shows their fidelity and how much their routine binds them, from their routine's role, and a gold badge when this chat changed their routine or schedules: **Changed by you**, **Changed by the story**, or both. Tap someone for their page:
+The list has everyone but you, closest on the minds ladder first, with **Search by name** and a filter (everyone, **Changed in this chat**, **Routine leads**, **Story leads; routine informs**, **No routine**). Each row shows their fidelity and how much their routine binds them, from their routine's role, and a gold badge when this chat changed their routine or schedules: **Changed by you**, **Changed by the story** (a reply), **Changed from your message** (a routine your message stated, added with **Yes**), or more than one ("Changed by you and the story"). Tap someone for their page:
 
 - **How much their routine binds them**, from the role it has for them (the role of their level, as the world sets it, unless this chat sets theirs): **Story leads; routine informs** when it's informative (the story and planning decide what they do, and their routine is only context for their mind and the narrator) or enforced while the planner doesn't lay their day (it needs an agent who acts, at Cast life 3 or higher); **Routine leads** when it's enforced and the planner lays their day; and **No routine** when its role is off or their routine is off in this chat. The lines under it say what the role does, where it comes from and, for an enforced routine, what the world's awareness setting does for them. **In this chat**, **Their routine's role** and **Story and lore awareness** open one page with all three: **Follows their routine**, **Follows it, no invitations** or **No routine**; **Their level's default** (naming it), **Informative**, **Enforced** or **Off**; and **As the world has it**, **Story first**, **Balanced** or **Routine first**. **Save for this chat** makes it one edit; **Use the world's settings** clears what you set.
 - **What the story holds now**: a place or activity the story established, which their routine yields to, and for how long.
@@ -61665,7 +61680,7 @@ The list has everyone but you, closest on the minds ladder first, with **Search 
 - **Their schedules**: each schedule that applies to them, the most specific owner first for each thing schedules set, with what it rests on, and **In force**, **Shadowed** (a more specific schedule wins where both run) or this chat's change. Tap one to give them **Their own version** in this chat, with Build's schedule form, or put it **Off for them** until you clear it or for some hours; **Use the world's schedule** drops the change.
 - **Today**: their day as the planner laid it, each block with where, why it is there (their routine, a schedule, a plan, an appointment, a trip, an invitation, free time) and the reasons it gave.
 - **Invitations**: the ones they made and received, each with where it came from: a plan the story made, a block of their routine (with its source), you, or one recorded before invitations needed a ground.
-- **Changes the story made**: each block or schedule the story changed in this chat, with the turn it came from (its id shows under **Show ids**) and how long ago. A block the story adds is in force from the next day, and its row says so until then. Tap one in force to keep it, change it or go back to the world's.
+- **Changes the story made**: each block or schedule the story changed in this chat, with where it came from (**The story** for a reply, **From your message** for one you said **Yes** to), the turn it came from (its id shows under **Show ids**) and how long ago. A block added this way is in force from the next day, and its row says **In force from the next day** until then. Tap one in force to keep it, change it or go back to the world's.
 
 Each change is a GM edit like any other: one correction with its own **Undo**, and the list's badge follows it.
 
@@ -61682,7 +61697,7 @@ After the narrator writes, the engine reads the reply for changes the story impl
 | Type in Settings (as a Mode change chip names it) | What it covers | Starting mode |
 |---|---|---|
 | **Time passing** (Time skips) · \`time_advance\` | The story jumps ahead ("three hours later"). Up to 4 hours applies with the world caught up (under confirm, when you tap **Apply**), whether or not the clock is paused; a longer jump, up to 366 days, becomes a **Run timelapse** chip in either mode, and one longer still is dropped with no chip. During a fight none applies: a **Didn't apply** chip says so, and **Apply** on an earlier chip is refused | auto |
-| **Moving somewhere** (Moves) · \`location\` | Someone moves. A reply that has you somewhere other than where the engine has you without telling the move (it takes it as given) gets an **Apply** chip for your move there, whatever the mode (none on **never**): a place the story only implies may be a flashback, a phone call or a misread, so you stay where you are until you tap **Apply**, and your answer doesn't count toward learning. None when your own action this turn took you elsewhere (the engine's outcome wins) | auto |
+| **Moving somewhere** (Moves) · \`location\` | Someone moves. A reply that sends someone to their usual spot ("Danny heads out to his usual lunch place") moves them to the place their routine has for now, as you could know it: never a private part of their routine or a place you haven't found, and never someone the reply doesn't send anywhere. A reply that has you somewhere other than where the engine has you without telling the move (it takes it as given) gets an **Apply** chip for your move there, whatever the mode (none on **never**): a place the story only implies may be a flashback, a phone call or a misread, so you stay where you are until you tap **Apply**, and your answer doesn't count toward learning. None when your own action this turn took you elsewhere (the engine's outcome wins) | auto |
 | **Conditions (hurt, tired…)** (Condition changes) · \`condition\` | A status changes (tired, injured, soaked) | auto |
 | **Learning a fact** (New facts) · \`knows\` | You learn a public fact, or hear of a place you didn't know (never a secret one) | confirm |
 | **Giving things** (Handovers) · \`give\` | A handover between two characters | confirm |
@@ -63240,7 +63255,7 @@ var package_default = {
 // src/cli/version.ts
 var CLI_NAME = "lumirpengine";
 var CLI_VERSION = package_default.version;
-var BUILD = "3b420e9d";
+var BUILD = "8ae2b1f5";
 function runtimeCannotFollow(bun) {
   if (bun === undefined)
     return null;

@@ -25792,10 +25792,12 @@ function usualRoutine(ctx, who, read) {
       continue;
     const { text, start } = blockClause(cal, day, block);
     let today = false;
+    let place = null;
     try {
       today = blockOnDay(ctx, who, block, day);
+      place = blockPlace(ctx, who, block);
     } catch {}
-    out.push({ text, start, minutes: block.minutes, today, private: block.private === true, own: from.level === "own" || from.level === "chat" });
+    out.push({ text, place, start, minutes: block.minutes, today, private: block.private === true, own: from.level === "own" || from.level === "chat" });
   }
   const spans = new Map;
   for (const s of chatSchedulesIn(ctx)) {
@@ -25806,9 +25808,9 @@ function usualRoutine(ctx, who, read) {
     const runs = [];
     for (const slot of s.slots) {
       const raw = typeof slot.value === "string" ? slot.value.trim() : "";
-      const value = raw === "" ? null : s.target === "place" ? read.place(raw) : raw.replace(/_/g, " ");
-      if (value === null)
+      if (raw === "" || s.target === "place" && !own(world.places, raw))
         continue;
+      const value = s.target === "place" ? raw : raw.replace(/_/g, " ");
       const start = parseHHMM(slot.start);
       const end = parseHHMM(slot.end);
       const last = runs[runs.length - 1];
@@ -25820,37 +25822,43 @@ function usualRoutine(ctx, who, read) {
     for (const run of runs) {
       const key = `${days}\x00${run.start}\x00${run.end}`;
       const span = spans.get(key) ?? { days, start: run.start, end: run.end, today, own: s.owner === who };
-      if (s.target === "place")
-        span.place ??= run.value;
-      else
+      if (s.target === "place" && span.place === undefined) {
+        span.place = run.value;
+        span.placeName = read.place(run.value);
+      } else if (s.target === "activity")
         span.activity ??= run.value;
       spans.set(key, span);
     }
   }
   for (const span of spans.values()) {
-    const what = span.activity !== undefined ? `${span.activity}${span.place !== undefined ? ` at ${span.place}` : ""}` : `at ${span.place ?? ""}`;
+    const at = span.placeName ? `at ${span.placeName}` : "";
+    const what = span.activity !== undefined ? `${span.activity}${at !== "" ? ` ${at}` : ""}` : at;
     const minutes = (span.end - span.start + MINUTES_PER_DAY) % MINUTES_PER_DAY || MINUTES_PER_DAY;
-    out.push({ text: `${span.days !== "" ? `${span.days}, ` : ""}${what} ${formatHHMM(span.start)}\u2013${formatHHMM(span.end)}`, start: span.start, minutes, today: span.today, private: false, own: span.own });
+    out.push({ text: what === "" ? "" : `${span.days !== "" ? `${span.days}, ` : ""}${what} ${formatHHMM(span.start)}\u2013${formatHHMM(span.end)}`, place: span.place ?? null, start: span.start, minutes, today: span.today, private: false, own: span.own });
   }
   const minute = now.minuteOfDay;
   const rank = (c) => c.today && c.start + c.minutes > minute ? 0 : 1;
   return out.sort((a, b) => rank(a) - rank(b) || a.start - b.start || a.text.localeCompare(b.text));
 }
-function usualRoutineHints(ctx) {
+function presentUsual(ctx, place) {
   const { registry: reg, world, state } = ctx;
   const pov = world.pov;
   const here = placeOfEntity(state, pov);
-  if (here === null || !routineSettingsOf(world).narrator)
+  if (here === null)
     return [];
   let safe = null;
-  const lines = [];
+  const out = [];
   for (const id of Object.keys(state.entities).sort()) {
     const e = own(state.entities, id);
     if (!e || id === pov || placeOfEntity(state, id) !== here || !kindIs(reg, world, e.kind, "person") || isGone(state, id) || !canSeeEntity(reg, world, state, pov, id) || povLife(world, state, id)?.acts === false)
       continue;
     if (routineRole(ctx, id) === "off")
       continue;
-    const clauses = usualRoutine(ctx, id, { place: (place) => canSeePlace(reg, world, state, pov, place) ? own(world.places, place)?.name ?? null : null, activity: canSeeField(reg, world, state, pov, id, "activity") }).filter((c) => !c.private);
+    const named = (p) => {
+      const def = own(world.places, p);
+      return def && canSeePlace(reg, world, state, pov, p) ? place(p, def.name) : null;
+    };
+    const clauses = usualRoutine(ctx, id, { place: named, activity: canSeeField(reg, world, state, pov, id, "activity") }).filter((c) => !c.private && c.text !== "");
     if (clauses.length === 0)
       continue;
     if (!safe) {
@@ -25860,9 +25868,43 @@ function usualRoutineHints(ctx) {
     }
     const told = clauses.map((c) => c.text).filter(safe).slice(0, 3);
     if (told.length > 0)
-      lines.push(`${e.name} usually: ${told.join("; ")}.`);
+      out.push({ id, name: e.name, told });
   }
+  return out;
+}
+function usualRoutineHints(ctx) {
+  if (!routineSettingsOf(ctx.world).narrator)
+    return [];
+  const lines = presentUsual(ctx, (_id, name) => name).map((p) => `${p.name} usually: ${p.told.join("; ")}.`);
   return lines.length === 0 ? [] : ["Usual routines (background you may use or ignore, never a fact to state; what the story establishes always comes first):", ...lines];
+}
+function usualRoutineForExtract(ctx) {
+  try {
+    return presentUsual(ctx, (id, name) => `${name} (${id})`).map((p) => `${p.id} (${p.name}) usually: ${p.told.join("; ")}.`);
+  } catch {
+    return [];
+  }
+}
+var USUAL_PLACE = "usual";
+function usualPlaceNow(ctx, who) {
+  const { registry: reg, world, state } = ctx;
+  if (routineRole(ctx, who) === "off")
+    return null;
+  const here = placeOfEntity(state, who);
+  const minute = dateAt(calendarOf(world), state.clock).minuteOfDay;
+  const next = usualRoutine(ctx, who, { place: () => null, activity: false }).find((c) => c.today && c.start + c.minutes > minute && c.place !== null && c.place !== here);
+  if (!next || next.private || next.place === null || !canSeePlace(reg, world, state, world.pov, next.place))
+    return null;
+  return next.place;
+}
+function resolveUsualMoves(ctx, proposals) {
+  return proposals.flatMap((p) => {
+    if (p.type !== "location" || typeof p.place !== "string" || p.place.trim().toLowerCase() !== USUAL_PLACE)
+      return [p];
+    const who = typeof p.entity === "string" ? p.entity.trim() : "";
+    const to = who === "" || !own(ctx.state.entities, who) ? null : usualPlaceNow(ctx, who);
+    return to === null ? [] : [{ ...p, entity: who, place: to }];
+  });
 }
 
 // src/packs/castlife/core/index.ts
@@ -67143,7 +67185,7 @@ async function interpret(steps, text, context, actions, config, userId, signal, 
     `Params are world ids, from the scene, Places and the catalog's lists, except a thing nothing lists, which keeps the input's own words. A text param that names an item keeps its qualifiers as written ("large pizza, delivered", not "pizza"). Money params are plain amounts in ${world.currency.code} as written (200 for ${world.currency.symbol}200).`,
     `Read every action in the input, in order, not only the first. Return the first as "action" with its "params". If the input has more actions after it, list them in order in "more" (at most ${ACTION_QUEUE_LIMIT - 1}), each {"action": a catalog id, "params": {...}, "text": that action written as the player would type it}: "I walk to the market and buy bread" \u2192 "action" for the walk, and "more": [{"action": <the buy's id>, "params": {"item": "bread"}, "text": "I buy bread"}]. An action after them that no catalog action fits goes in "next", written as the player would type it.`,
     `If, in character, the input lets time pass after its last action ("\u2026and sleep until the next morning", "\u2026then wait two hours", "\u2026then skip ahead to Friday at 6 PM"), add "then": {"span": its words for how long or until when, with "minutes", "until" (a day part, "shift" or "commitment") or "at" ("YYYY-MM-DD HH:MM" for a stated day and time)}; time passing is never in "more" or "next", nor is anything else that isn't an action.`,
-    `If the input itself plainly states, as settled fact, a lasting change to someone's week (the player character's own, "I start nights at the marina Monday", or one the input says someone told of, "Marcus says he's started swimming on Tuesdays"), add it to "routine": [{"entity": their id, "change": "start" for a new job, shift or habit, "stop" for one given up, "move" for a new home, "label": what it is in the input's words, "days": the days the input states (weekday names, "weekdays", "weekends" or "daily"; leave it out when the input states none, never guess), "start"?/"end"?: "HH:MM" as stated (or "start": morning|afternoon|evening|night), "activity"?: work|school|exercise|leisure|socialize|errand, "place"?: a place id (the new home for "move"), "with"?: people's ids, "replaces"?: true only when the input says it takes the place of what they did then, "said": the input's own words that state it, copied exactly}]. Never for a question ("do you still swim on Tuesdays?"), a one-off, a plan, a wish, a hypothetical, someone's thoughts, or a habit only mentioned in passing ("I walk past the pool where I swim on Tuesdays"). It is never an action, and changes nothing about "action", "more", "then" or "next".`
+    `If the input itself plainly states, as settled fact, a lasting change to someone's week (the player character's own, "I start nights at the marina Monday", or one the input says someone told of, "Marcus says he's started swimming on Tuesdays"), add it to "routine": [{"entity": their id, "change": "start" for a new job, shift or habit, "stop" for one given up, "move" for a new home, "label": what it is in the input's words, "days": the days the input states (weekday names, "weekdays", "weekends" or "daily"; leave it out when the input states none, never guess), "start"?/"end"?: "HH:MM" as stated (or "start": morning|afternoon|evening|night), "activity"?: work|school|exercise|leisure|socialize|errand, "place"?: any place the input names for it, as a place id, or in the input's own words when nothing lists it ("the community pool"); left out only when the input names none (for "move", the new home), "with"?: people's ids, "replaces"?: true only when the input says it takes the place of what they did then, "said": the input's own words that state it, copied exactly}]. Never for a question ("do you still swim on Tuesdays?"), a one-off, a plan, a wish, a hypothetical, someone's thoughts, or a habit only mentioned in passing ("I walk past the pool where I swim on Tuesdays"). It is never an action, and changes nothing about "action", "more", "then" or "next".`
   ];
   if (actions.some((a) => a.id === TRY_ACTION)) {
     rules.push(`An attempt whose outcome is uncertain that no other catalog action covers is "${TRY_ACTION}" (Try something), even asked as a question ("I watch him as he answers: is he lying?" is the player character's reading of him against his deceit). Never read an attempt a catalog action covers as "${TRY_ACTION}", nor both: that action alone. "attempt" is what is attempted, in the input's words; "skill" and "difficulty" come from its lists; "with" lists the companions the input has join in ("we sneak past"); "against" lists the people here it opposes or targets, each with the skill they resist with.`);
@@ -67234,8 +67276,9 @@ var EXTRACT_STRICT_RULES = [
   "Never duplicate a change. When unsure, leave it out."
 ];
 var EXTRACT_WHERE = `Beside "proposals", give "where": the id of the place where the reply leaves the player character at its end, whether it tells how they got there or takes it as given; null when it doesn't say.`;
-async function extract(steps, narration, world, prefix, appliedMinutes, channels, config, userId, signal, instructions, lore = null, guidance = "") {
-  const types = `time_advance{minutes} \xB7 location{entity,place} \xB7 purchase{item,category,payer?,qty?,price?,method?} (payer: the person who pays, an entity id, never an account or a card; method: how the prose says they paid, in its words, e.g. "cash", "debit card", "credit card" or "savings"; leave it out when not said) \xB7 transfer{from,to,amount,method?} (from and to: people, entity ids, or a person's own cash, checking, savings or card account, never things; method: "cash" when bills or coins change hands in person, as in "hands me $20" or "slips her a twenty"; leave it out for a bank transfer, an app payment or a card) \xB7 give{item,from,to,amount?} (amount: for cash or money handed over, the amount) \xB7 quantity{entity,item,delta} \xB7 condition{who,condition,minutes?,clear?} (a named condition such as tired or injured; clear:true when it ends) \xB7 regard{from,to,axis,delta} (axis trust|affection|respect; delta -3..3) \xB7 knows{who,fact} (public facts only) \xB7 spawn{kind,name,place?,role?} \xB7 life{entity,state} (state: ${lifeStatesOf(world).map(([id]) => id).join("|")}) \xB7 routine{entity,change,label,days,start?,end?,minutes?,activity?,place?,with?,replaces?} (change: start for a new job, shift or habit, stop for one given up, move for a new home, its place the home; days: weekday names, weekdays, weekends or daily; start and end: HH:MM, or start morning|afternoon|evening|night; activity: work|school|exercise|leisure|socialize|errand; with: people's ids; replaces: true only when the prose says it takes the place of what they did then)`;
+var EXTRACT_USUAL = `Usual routines are given below the state, only to tell where a move the reply describes is going: someone who heads out to their usual spot ("his usual lunch place", "off to her regular bar") moves to that place; give its id from their usual routine, or place "usual" when the reply doesn't say which. A usual routine is never a move by itself: no location for someone the reply doesn't describe leaving or arriving.`;
+async function extract(steps, narration, world, prefix, appliedMinutes, channels, config, userId, signal, instructions, lore = null, guidance = "", usual = []) {
+  const types = `time_advance{minutes} \xB7 location{entity,place} \xB7 purchase{item,category,payer?,qty?,price?,method?} (payer: the person who pays, an entity id, never an account or a card; method: how the prose says they paid, in its words, e.g. "cash", "debit card", "credit card" or "savings"; leave it out when not said) \xB7 transfer{from,to,amount,method?} (from and to: people, entity ids, or a person's own cash, checking, savings or card account, never things; method: "cash" when bills or coins change hands in person, as in "hands me $20" or "slips her a twenty"; leave it out for a bank transfer, an app payment or a card) \xB7 give{item,from,to,amount?} (amount: for cash or money handed over, the amount) \xB7 quantity{entity,item,delta} \xB7 condition{who,condition,minutes?,clear?} (a named condition such as tired or injured; clear:true when it ends) \xB7 regard{from,to,axis,delta} (axis trust|affection|respect; delta -3..3) \xB7 knows{who,fact} (public facts only) \xB7 spawn{kind,name,place?,role?} \xB7 life{entity,state} (state: ${lifeStatesOf(world).map(([id]) => id).join("|")}) \xB7 routine{entity,change,label,days,start?,end?,minutes?,activity?,place?,with?,replaces?} (change: start for a new job, shift or habit, stop for one given up, move for a new home, its place the home; days: weekday names, weekdays, weekends or daily; start and end: HH:MM, or start morning|afternoon|evening|night; activity: work|school|exercise|leisure|socialize|errand; place: any place the prose names for it, as a place id, or in the prose's own words when nothing lists it ("the community pool"), left out only when the prose names none; with: people's ids; replaces: true only when the prose says it takes the place of what they did then)`;
   const allowed = channels.length > 0 ? `Only these types are enabled: ${channels.join(", ")}.` : "";
   const system = `${instructions ? `${instructions}
 ` : ""}You read a narrator's roleplay reply and propose concrete state changes that the prose states actually happened.
@@ -67246,10 +67289,16 @@ Strict rules:
 - ${EXTRACT_STRICT_RULES.join(`
 - `)}
 Output JSON only: {"proposals":[{"type":...}, ...]}.`;
-  const asked = channels.length === 0 || channels.includes("location") ? `${system}
-${EXTRACT_WHERE}` : system;
+  const moves = channels.length === 0 || channels.includes("location");
+  const routines = moves && usual.length > 0;
+  const asked = `${moves ? `${system}
+${EXTRACT_WHERE}` : system}${routines ? `
+${EXTRACT_USUAL}` : ""}`;
   const raw = await steps.helperJson("extract", asked, `State before: ${JSON.stringify(prefix)}
-Narration:
+${routines ? `Usual routines (where a described move goes; never a move by itself):
+${usual.join(`
+`)}
+` : ""}Narration:
 ${narration}`, config, userId, signal, { lore, guidance });
   const list = isRecord(raw) && Array.isArray(raw.proposals) ? raw.proposals : Array.isArray(raw) ? raw : [];
   const proposals = [];
@@ -67258,7 +67307,7 @@ ${narration}`, config, userId, signal, { lore, guidance });
       continue;
     proposals.push(inMinorUnits(JSON.parse(JSON.stringify(p)), world.currency));
   }
-  const where = asked !== system && isRecord(raw) && typeof raw.where === "string" && raw.where.trim() !== "" ? raw.where.trim() : null;
+  const where = moves && isRecord(raw) && typeof raw.where === "string" && raw.where.trim() !== "" ? raw.where.trim() : null;
   return { proposals: dedupeProposals(proposals, world.pov), where };
 }
 function inMinorUnits(p, currency) {
@@ -69150,9 +69199,9 @@ function thisBuild(moduleUrl = import.meta.url) {
   const dir = moduleUrl.replace(/[^/]*$/, "");
   const path = pathOfFileUrl(`${dir}${KIT_FILE}`);
   const core = pathOfFileUrl(`${dir}${CORE_FILE}`);
-  const sha256 = "5990cf9323ba9f550ca2d5c112e0a391bb37de4d6079952de07c819f076915fb";
+  const sha256 = "fd82e466a4ce1f00ff51859b8d12a1b2291ab91509a7f05ad231d7f17384b6e8";
   const tools = ["18ab4cc48319d3329b4f414f8503d74f", "9748f93066a93461e251d2677fe4f3b6"].filter((f) => f !== undefined);
-  return { id: "3b420e9d", kit: sha256 !== undefined && path !== null && core !== null ? { path, core, sha256, api: KIT_API } : null, tools };
+  return { id: "8ae2b1f5", kit: sha256 !== undefined && path !== null && core !== null ? { path, core, sha256, api: KIT_API } : null, tools };
 }
 var BUILD_FILE = "agents/build.json";
 var USER_FILE = "agents.json";
@@ -72305,7 +72354,7 @@ class Runtime {
     this.steps.onCallStart = (userId, purpose) => this.diag.callStart(userId, purpose);
     this.toolSupport = new ToolSupport(this.host);
     this.minds = { host: this.host, registry: this.registry, steps: this.steps, settings: this.settings, presets: this.presets };
-    this.ledger = new LedgerService(this.host, (chatId, userId) => this.resolveEnv(chatId, userId), new LedgerFold(this.registry, { fingerprint: "3b420e9d" }), (chatId) => messages.forget(chatId));
+    this.ledger = new LedgerService(this.host, (chatId, userId) => this.resolveEnv(chatId, userId), new LedgerFold(this.registry, { fingerprint: "8ae2b1f5" }), (chatId) => messages.forget(chatId));
     this.studio = new StudioBridge(this.host, this.worlds);
     this.worlds.onChange = (worldId, userId) => this.studio.worldChanged(worldId, userId);
     this.agents = new Agents(this.host, options.build ?? thisBuild(), async (userId) => (await this.settings.get(userId)).timeouts.mcpReconnectMs);
@@ -72978,7 +73027,9 @@ ${answer}`, links: owner ? [owner] : [] }));
     const facts = { ...pre?.facts ?? noFacts(), ...pre ? planFacts(context.world, pre.start, context.state, plan) : {}, reply: text.trim() !== "", present: false, offscreen: ties.offscreen.length > 0, tieZone: ties.offscreen.length > 0 };
     const budget = phaseBudget(settings, "post");
     const secrets = unrevealedSecrets(this.registry, context.world, context.state);
-    const vars = safeVars(this.stepVars(context.world, context.state, plan, pre?.text ?? "", text, (plan && bridge.proseFor(context.seed)?.brief) ?? "", context.recent), secrets);
+    const usual = usualRoutineForExtract(ctx);
+    const vars = safeVars({ ...this.stepVars(context.world, context.state, plan, pre?.text ?? "", text, (plan && bridge.proseFor(context.seed)?.brief) ?? "", context.recent), usual: usual.join(`
+`) }, secrets);
     const modelUse = settings.modelUse;
     const read = { text: `${text}
 ${pre?.text ?? ""}`, links: this.sceneLinks(context.world, context.state) };
@@ -72986,7 +73037,7 @@ ${pre?.text ?? ""}`, links: this.sceneLinks(context.world, context.state) };
     const lore = (r, effects = false) => this.stepLore(r, at, read, effects);
     const extractRun = runsOf(modelUse, context.world, "extract", facts, { guidance }).find((r) => r.template === null || r.template.output !== "effects");
     const skipped = facts.timelapse || !!plan?.timelapse;
-    const extractTask = extractRun && budget.take() ? extract(this.steps, text, povWorld(this.registry, context.world, context.state), prefixSummary(this.registry, context.world, context.state), clockMinutes(context.pre), EXTRACTION_TYPES.filter((t) => t === "time_advance" ? !skipped : this.registry.proposals.has(t)), extractRun.config, userId, budget.signal, extractRun.template ? renderTemplate(extractRun.template.template, vars) : undefined, lore(extractRun), extractRun.guidance) : Promise.resolve({ proposals: [], where: null });
+    const extractTask = extractRun && budget.take() ? extract(this.steps, text, povWorld(this.registry, context.world, context.state), prefixSummary(this.registry, context.world, context.state), clockMinutes(context.pre), EXTRACTION_TYPES.filter((t) => t === "time_advance" ? !skipped : this.registry.proposals.has(t)), extractRun.config, userId, budget.signal, extractRun.template ? renderTemplate(extractRun.template.template, vars) : undefined, lore(extractRun), extractRun.guidance, usual) : Promise.resolve({ proposals: [], where: null });
     const effectsTasks = ["extract", "contradiction", "choices"].flatMap((purpose) => runsOf(modelUse, context.world, purpose, facts, { output: "effects", guidance })).map((r) => budget.take() ? promptedEffects(this.steps, r, vars, context.world.currency, userId, budget.signal, lore(r, true)) : Promise.resolve([]));
     const npcRun = runsOf(modelUse, context.world, "npc.choose", facts, { guidance })[0];
     const npcTask = npcRun && ties.offscreen.length > 0 && budget.take() ? npcChoose(this.steps, npcRun, ties.offscreen, (t) => this.describeTie(t, context.world, context.state), createRng(hashParts("lre.npc.post", bridge.runSeed, key)), userId, budget.signal, this.stepLore(npcRun, at, this.tieInputs(ties.offscreen, context.world, context.state))) : Promise.resolve([]);
@@ -73010,7 +73061,7 @@ ${pre?.text ?? ""}`, links: this.sceneLinks(context.world, context.state) };
     const typed = buyActions.flatMap((a) => typeof a.params.price === "number" ? [a.params.price] : []);
     const typedItems = buyActions.flatMap((a) => typeof a.params.item === "string" ? [a.params.item] : []);
     const unsure = new Set;
-    const narrated = [...extracted.proposals, ...effects.flat()];
+    const narrated = [...resolveUsualMoves(ctx, extracted.proposals), ...effects.flat()];
     const guessed = new Set(replyPlace(extracted.where, narrated, context));
     const deduped = dedupeProposals([...narrated, ...guessed].flatMap((p) => splitAlongBuy(p, context.pre, ctx, typedItems)), context.world.pov).filter((p) => {
       if (lentAlong(p, context.pre, context.state) || movedAlong(p, context.pre, context.state))
