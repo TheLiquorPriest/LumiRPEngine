@@ -761,10 +761,11 @@ After the narrator writes, the engine reads the reply for changes the story impl
 | **Quantities** · `quantity` | A count changes (ammunition, supplies) | confirm (no starting mode of its own; Settings shows *From the field's bound*) |
 | **New people** (New characters) · `spawn` | A new character appears (up to the world's limit, 24 by default). A name someone you know already has is a duplicate and isn't added (under Auto, a chip says so); a name only someone you don't know has is left out without a word, so it never tells you such a person exists | confirm |
 | **Life and death (dying, dead, collapsed…)** (Life and death) · `life` | Someone dies, is dying, collapses or comes round (what you already knew is left out) | confirm |
+| **Routines (a new job, a habit, a move…)** (Routine changes) · `routine` | The reply says someone's week has changed for good: a new job or shift, a new habit, one they gave up, or a move to a new home. It changes their routine in this chat from the next day (what they gave up, and a move, at once), and GM → Routine lists it among the changes the story made, with its turn. Only someone the reply names (or you), at places and with people you know of; a habit only mentioned, or what is already their routine or schedule, changes nothing, and so does a new shift that clashes with their schedule unless the reply says it takes its place. A character's thoughts never count | auto |
 
 Beyond the mode, every field has a limit on how much a single change may be, and **the strictest rule always wins**. Fields a world marks as locked are never offered to the model. If a narrated change contradicts the engine's own outcome, the engine's outcome wins. A purchase takes in the seller's handover and the payment, so one sale is not applied three times, and a payer has to be an account.
 
-The strict reading rules are: time jumps only for an explicit jump or stated duration; knowledge only for public facts you newly learn; feelings only when the prose states a change; handovers only between two characters.
+The strict reading rules are: time jumps only for an explicit jump or stated duration; knowledge only for public facts you newly learn; feelings only when the prose states a change; handovers only between two characters; routines only for a lasting change the prose states, never a one-off, a plan, a wish or a habit only mentioned.
 
 ### Learning on your own model
 

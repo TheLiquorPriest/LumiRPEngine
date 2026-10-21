@@ -153,8 +153,11 @@ export function worldRoutines(world: Pick<WorldDoc, "routines">): RoutineDef[] {
  * a group's, a kind's, a selector's, the world's default, the basic needs; equal ranks by routine id),
  * with the less specific owners' blocks left out below a routine that doesn't inherit them. With the
  * chat's mode `off` they have no routine: only the basic needs and the chat's own changes stay.
+ * With `day`, the candidates on that day: a block the story added or changed is theirs from the day
+ * after its turn, since the day it was told was already laid as the story had it; what the story
+ * turned off, and every change of the GM's, holds at once.
  */
-export function routineCandidates(ctx: Pick<ReadContext, "registry" | "world" | "state">, who: EntityId): Map<RoutineBlockId, Applied[]> {
+export function routineCandidates(ctx: Pick<ReadContext, "registry" | "world" | "state">, who: EntityId, day?: number): Map<RoutineBlockId, Applied[]> {
   const { registry: reg, world, state } = ctx;
   const out = new Map<RoutineBlockId, Applied[]>();
   const add = (a: Applied): void => {
@@ -172,15 +175,19 @@ export function routineCandidates(ctx: Pick<ReadContext, "registry" | "world" | 
     for (const entry of def.blocks) add({ entry, routine: def, level, rank, source: entry.source ?? def.source ?? { type: "authored" } });
   }
   for (const entry of BASIC_BLOCKS) add({ entry, routine: null, level: "builtin", rank: 6, source: { type: "builtin" } });
-  for (const [id, c] of Object.entries(chatBlocks(state, who))) add({ entry: { ...c.value, id }, routine: null, level: "chat", rank: 0, source: c.source });
+  const cal = calendarOf(world);
+  for (const [id, c] of Object.entries(chatBlocks(state, who))) {
+    if (day !== undefined && c.source.type === "story" && !isOff(c.value) && day <= dateAt(cal, c.source.at).dayIndex) continue;
+    add({ entry: { ...c.value, id }, routine: null, level: "chat", rank: 0, source: c.source });
+  }
   for (const list of out.values()) list.sort((a, b) => a.rank - b.rank || (a.routine?.id ?? "").localeCompare(b.routine?.id ?? ""));
   return out;
 }
 
-/** The blocks of someone's routine in force: each id's most specific entry, when it isn't turned off, with where it comes from. */
-export function activeBlocks(ctx: Pick<ReadContext, "registry" | "world" | "state">, who: EntityId): { block: RoutineBlock; from: Applied }[] {
+/** The blocks of someone's routine in force (on `day`, when given: `routineCandidates`): each id's most specific entry, when it isn't turned off, with where it comes from. */
+export function activeBlocks(ctx: Pick<ReadContext, "registry" | "world" | "state">, who: EntityId, day?: number): { block: RoutineBlock; from: Applied }[] {
   const out: { block: RoutineBlock; from: Applied }[] = [];
-  for (const list of routineCandidates(ctx, who).values()) {
+  for (const list of routineCandidates(ctx, who, day).values()) {
     const top = list[0];
     if (top && !isOff(top.entry)) out.push({ block: top.entry, from: top });
   }
@@ -284,12 +291,14 @@ export interface NeedReader {
  * times (cut around the day's commitments and the stronger fixed blocks), and flexible and optional
  * ones as options in their windows, worth their priority plus, from Cast life 4, the needs they meet.
  * A window or a fixed block that runs past midnight carries into the next day: the day before's comes
- * in as the morning's (a night's sleep).
+ * in as the morning's (a night's sleep), as the day before had the block: one the story added that
+ * day wasn't theirs yet, so it brings no morning.
  */
 export function routineDay(ctx: ReadContext, who: EntityId, day: number, commitments: readonly FixedBlock[], needs: NeedReader): { fixed: FixedBlock[]; options: PlanOption[] } {
   const cal = calendarOf(ctx.world);
   const start = clockAt(cal, day, 0);
-  const blocks = activeBlocks(ctx, who);
+  const blocks = activeBlocks(ctx, who, day);
+  const before = new Map(activeBlocks(ctx, who, day - 1).map((a) => [a.block.id, a]));
   const occasions = new Map<number, Occasion>();
   const occasion = (d: number): Occasion => {
     const cached = occasions.get(d);
@@ -311,9 +320,11 @@ export function routineDay(ctx: ReadContext, who: EntityId, day: number, commitm
   // Stronger fixed blocks first: a weaker one is cut around them, as each is around the commitments.
   const firm = blocks.filter((b) => b.block.kind === "fixed").sort((a, b) => (b.block.priority ?? 3) - (a.block.priority ?? 3) || a.block.id.localeCompare(b.block.id));
   const taken: { start: number; end: number }[] = commitments.map((c) => ({ start: c.start, end: c.end }));
-  for (const { block, from } of firm) {
+  for (const today of firm) {
     for (const d of [day - 1, day]) {
-      if (!blockOnDay(ctx, who, block, d, occasion(d))) continue;
+      const had = d === day ? today : before.get(today.block.id);
+      if (!had || had.block.kind !== "fixed" || !blockOnDay(ctx, who, had.block, d, occasion(d))) continue;
+      const { block, from } = had;
       const s = clockAt(cal, d, parseHHMM(block.at ?? "00:00"));
       const e = s + block.minutes;
       if (e <= start || s >= start + MINUTES_PER_DAY) continue;
@@ -328,15 +339,17 @@ export function routineDay(ctx: ReadContext, who: EntityId, day: number, commitm
   for (const { block, from } of blocks) {
     if (block.kind === "fixed" || !block.window) continue;
     const span = windowSpan(block.window);
+    const prior = before.get(block.id);
+    const night = prior && prior.block.kind !== "fixed" && prior.block.window ? { block: prior.block, from: prior.from, span: windowSpan(prior.block.window) } : null;
     const reasons = [blockReason(block, from)];
     // Today's window, and the day before's when it runs past midnight: then its block began last
     // night, so what is left of it is the morning's (from the window's middle, a typical start).
     if (blockOnDay(ctx, who, block, day, occasion(day))) {
       options.push({ id: `${ROUTINE_OPTION}${block.id}`, label: block.label, activity: block.activity, place: blockPlace(ctx, who, block, occasion(day)), duration: block.minutes, window: { from: start + span.from, to: start + span.to }, utility: worth(block), reasons, because: pressed(block) });
     }
-    if (span.to > MINUTES_PER_DAY && blockOnDay(ctx, who, block, day - 1, occasion(day - 1))) {
-      const left = Math.round((span.from + span.to) / 2) + block.minutes - MINUTES_PER_DAY;
-      if (left > 0) options.push({ id: `${ROUTINE_OPTION}${block.id}:carried`, label: block.label, activity: block.activity, place: blockPlace(ctx, who, block, occasion(day - 1)), duration: left, window: { from: start, to: start + 1 }, utility: (block.priority ?? 3) + 5, reasons, because: pressed(block) });
+    if (night && night.span.to > MINUTES_PER_DAY && blockOnDay(ctx, who, night.block, day - 1, occasion(day - 1))) {
+      const left = Math.round((night.span.from + night.span.to) / 2) + night.block.minutes - MINUTES_PER_DAY;
+      if (left > 0) options.push({ id: `${ROUTINE_OPTION}${block.id}:carried`, label: night.block.label, activity: night.block.activity, place: blockPlace(ctx, who, night.block, occasion(day - 1)), duration: left, window: { from: start, to: start + 1 }, utility: (night.block.priority ?? 3) + 5, reasons: [blockReason(night.block, night.from)], because: pressed(night.block) });
     }
   }
   return { fixed, options };

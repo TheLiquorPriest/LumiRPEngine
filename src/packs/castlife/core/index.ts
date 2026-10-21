@@ -54,6 +54,7 @@ import { cueIssues, cuesFor } from "./cues";
 import { birthdayOf, FOND, occasionOf } from "./occasions";
 import { homeOf, placeOfType } from "./places";
 import { activeBlocks, blockOnDay, blockPlace, chatScheduleDefs, followOf, ROUTINE_OPTION, routineDay, routinesLint, routineYields, scheduleOff, schedulesLint, withPov, worldRoutines } from "./routines";
+import { ROUTINE_EFFECT, routineChannel, storyEvents } from "./story";
 
 export { commitments, type CommitmentBlock, type CommitmentKind } from "./commitments";
 
@@ -243,7 +244,7 @@ function invitedBlocks(ctx: ReadContext, guest: EntityId, day: number, commitmen
   const out: FixedBlock[] = [];
   for (const host of [...hosts].sort()) {
     if (host === guest || !acquainted(ctx.state, host, guest) || followOf(ctx, host).mode !== "follows") continue;
-    for (const { block } of activeBlocks(ctx, host)) {
+    for (const { block } of activeBlocks(ctx, host, day)) {
       if (block.kind !== "fixed" || block.company?.invite !== true || !selectEntities(ctx.registry, ctx.world, ctx.state, block.company.who).includes(guest) || !blockOnDay(ctx, host, block, day)) continue;
       const s = start + parseHHMM(block.at ?? "00:00");
       const e = s + block.minutes;
@@ -971,7 +972,7 @@ export function kindOfBlock(activity: string): "work" | "sleep" | "free" | "trav
  */
 export function playerBlocks(ctx: ReadContext, who: EntityId, plan: DayPlan): (PlayerBlock & { start: number })[] {
   const cal = calendarOf(ctx.world);
-  const applied = new Map(activeBlocks(ctx, who).map((a) => [a.block.id, a]));
+  const applied = new Map(activeBlocks(ctx, who, plan.day).map((a) => [a.block.id, a]));
   const open = loreGateReader(ctx.registry, ctx.world, ctx.state);
   return plan.blocks.map((b) => {
     const from = formatHHMM(dateAt(cal, b.start).minuteOfDay);
@@ -1285,6 +1286,10 @@ export const castlifePack: PackDef = {
         return [{ type: "set", entity: who, field: "holds", value: holds }, ...out];
       },
     });
+    // What the story changes of someone's routine (DESIGN §8, §9.4): the `routine` narration channel,
+    // and the effect it records with, the chat's own blocks and schedules with source `story`.
+    r.proposal(routineChannel);
+    r.effect({ type: ROUTINE_EFFECT, args: ["entity", "blocks?", "schedules?", "turn?"], resolve: storyEvents });
 
     r.action({ id: "eat", label: "Eat", description: "Have a meal or a snack.", pack: "castlife", params: {}, requires: [], outcomes: { default: [{ type: "castlife.satisfy", args: { entity: "self", need: "hunger" } }, { type: "set", args: { entity: "self", field: "activity", value: "meal" } }] }, duration: "30", lexicon: ["eat", "have lunch", "have dinner", "grab a bite"], observable: "eats" });
     r.action({ id: "sleep", label: "Go to bed", description: "Go to bed and sleep until morning.", pack: "castlife", params: {}, requires: [], outcomes: { default: [{ type: "castlife.satisfy", args: { entity: "self", need: "fatigue" } }] }, duration: "5", activity: { type: "sleep", until: "next_time('07:00')" }, lexicon: ["go to bed", "sleep", "turn in", "hit the sack"], observable: "goes to bed" });
