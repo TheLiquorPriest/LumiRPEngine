@@ -126,12 +126,14 @@ describe("Propose routines from lore", () => {
     expect(rig.host.quietCalls).toHaveLength(2);
     const repair = said(rig.host.quietCalls[1] as QuietRequest);
     expect(repair).toContain("Your answer had these problems:");
-    expect(repair).toContain('routines[0] (Danny Okafor, "Trivia night"): its place trivia_barn isn\'t in the world');
-    expect(repair).toContain('routines[1] (Danny Okafor, "Boating"): its company "nobody_here" isn\'t a person in the world');
+    // A place or person the world doesn't have is named as Build's lint names it (`routineIssues`).
+    expect(repair).toContain('routines[0] (Danny Okafor, "Trivia night"): Routine danny_okafor_trivia, block trivia: there\'s no place trivia_barn; it happens at home.');
+    expect(repair).toContain('routines[1] (Danny Okafor, "Boating"): Routine danny_okafor_boating, block boating: its company matches nobody as a chat starts.');
     expect(repair).toContain('routines[2] (Danny Okafor, "A walk in the park"): Nadia Brooks (nadia_brooks) in its company has no tie to Danny Okafor, and the cited text doesn\'t name them together');
     expect(end.status).toBe("done");
     expect(end.proposals.map((p) => p.key)).toEqual(["danny_okafor_trivia", "danny_okafor_boating", "danny_okafor_walks"]);
-    expect(end.proposals.map((p) => p.problems?.length)).toEqual([1, 1, 1]);
+    expect(end.proposals.every((p) => (p.problems?.length ?? 0) > 0)).toBe(true);
+    expect(end.byKey.get("danny_okafor_trivia")?.problems).toEqual(["Routine danny_okafor_trivia, block trivia: there's no place trivia_barn; it happens at home."]);
     expect(end.proposals.every((p) => p.confidence < 0.7)).toBe(true);
     expect(end.message).toContain("3 proposal(s) have problems to look at; they start unticked.");
   });

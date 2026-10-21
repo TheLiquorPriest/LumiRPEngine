@@ -915,12 +915,13 @@ Build's job for a world's routines and schedules (`propose_routines`, `backend/r
 - **Checks against the draft** (`checkRoutineReply`):
   - the owner is one of the call's;
   - the block's shape reads (`blockShapeProblems`), or the schedule's recurrence and times do;
-  - a place is a role or a place the job may name;
+  - a place the world has is one the job may name;
+  - a routine block says nothing Build's lint would flag, which the job reads with the lint's own function (`routineIssues`: a place, holiday or company the world doesn't have, a window it can't keep), word for word;
   - company is people it reads, with a tie to the owner, a group they share or the cited text naming them;
   - a label names no one but its owner (and a group's members) and no place the POV can't see yet.
 
   Problems the helper can fix go to one repair call that lists them with its answer, under a fresh deadline. A call that failed or ran out of time isn't asked again. The repair's answer stands, together with whatever the first answer had right and the repair left out. A proposal carrying an unrevealed secret's words (`unrevealedSecrets`) is dropped.
-- **Clashes and dedupe** (`finishRoutines`), over the story's first 14 days:
+- **Clashes and dedupe** (`finishRoutines`), over the story's first 14 days, on the days the planner lays each block (`blockOnDay`: its days, weekly count and chance, read against each day's occasion):
   - the same item twice keeps the more confident;
   - what the world already has is dropped: its activity, or its place, over all its fixed times, or a flexible block meeting a run of its activity;
   - a fixed run at the time of another activity or place in the owner's own schedules, routine blocks or an earlier proposal clashes;

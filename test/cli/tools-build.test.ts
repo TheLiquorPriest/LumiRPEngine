@@ -106,7 +106,7 @@ describe("jobs through the tools", () => {
     const proposals = body((await raw("lre_job", { worldId, jobId, pointer: "/result/proposals" })).text) as { id: string; key: string; owner: string; problems?: string[] }[];
     expect(proposals.map((p) => [p.key, p.owner, p.problems])).toEqual([
       ["danny_okafor_trivia", "danny_okafor", undefined],
-      ["danny_okafor_quiz", "danny_okafor", ["its place quiz_barn isn't in the world"]],
+      ["danny_okafor_quiz", "danny_okafor", ["Routine danny_okafor_quiz, block quiz: there's no place quiz_barn; it happens at home."]],
     ]);
     const applied = await call("lre_job_apply", { worldId, jobId });
     expect(applied.applied).toEqual(["routines:danny_okafor_trivia"]);

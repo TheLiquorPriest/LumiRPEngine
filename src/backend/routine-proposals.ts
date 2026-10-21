@@ -25,7 +25,7 @@ import { neutralizeMacros } from "../shared/macros";
 import type { JobProposal, RoutineJobInput } from "../shared/protocol";
 import { blockShapeProblems, isOff, ROUTINE_BLOCK_KINDS, type RoutineBlock, type RoutineCompany, type RoutineDays, type RoutineDef, type RoutinePlace, type WorldRoutineSource } from "../shared/routines";
 import type { PlaceDef, Recurrence, ScheduleDef, WorldDoc } from "../shared/world";
-import { calendarOf, clockAt, dateAt, dayIndexOfText, formatStamp, holidaysOn, MINUTES_PER_DAY, parseHHMM, recursOn, weekdayName, type Calendar } from "../engine/calendar";
+import { calendarOf, clockAt, dateAt, dayIndexOfText, formatStamp, MINUTES_PER_DAY, parseHHMM, recursOn, weekdayName, type Calendar } from "../engine/calendar";
 import { acts } from "../engine/life";
 import { loreReadable, loreSearch } from "../engine/lore";
 import { own } from "../engine/pack-kit";
@@ -36,6 +36,7 @@ import { isGroup, isMemberOf, membersOf } from "../engine/selector";
 import type { WorldState } from "../engine/state";
 import { entityVisibility, findLeaks, loreGateReader, namesAny, unrevealedSecrets, unseenPlaceNames, visibilityOf } from "../engine/visibility";
 import { initialState, minutesBetween } from "../engine/world-state";
+import { blockOnDay, routineIssues } from "../packs/castlife/core/routines";
 import { tokensOf } from "./book";
 import { ENTRY_MAX_CHARS, IMPORT_CHUNK, IMPORT_MAX_CALLS, snake, type DropCounts } from "./proposals";
 
@@ -506,8 +507,10 @@ export interface RoutineCandidate {
   sources: CheckedSource[];
   /** What keeps it from being proposed at all: no owner it was about, nothing it rests on, a shape that doesn't read. */
   fatal: string[];
-  /** What it is proposed with, unticked: a place or company that isn't there, company with no ground, a label naming someone. */
+  /** What it is proposed with, unticked: a place the player may not be told of, company with no ground, a label naming someone. */
   problems: string[];
+  /** What Build's lint says of it as a routine (`routineIssues`): an unknown place, holiday or company, a window it can't keep. */
+  lint: string[];
   /** It still carries the words of a secret: never proposed. */
   leak: boolean;
   block?: RoutineBlock;
@@ -533,34 +536,6 @@ function hhmm(v: JsonValue | undefined): string {
   const m = /^(\d{1,2}):(\d{2})$/.exec(t);
   if (!m) return t;
   return `${m[1] === "24" && m[2] === "00" ? "00" : (m[1] ?? "").padStart(2, "0")}:${m[2] ?? ""}`;
-}
-
-/** The days a block is on, as given; problems with them go to `problems`. */
-function readDays(scope: RoutineScope, raw: JsonValue | undefined, problems: string[]): RoutineDays | undefined {
-  if (raw === undefined || raw === null) return undefined;
-  if (!isRecord(raw)) {
-    problems.push("its days aren't a set of constraints");
-    return undefined;
-  }
-  const days: RoutineDays = {};
-  const holidayIds = new Set(scope.cal.def.holidays.map((h) => h.id));
-  if (raw.weekdays !== undefined) {
-    const w = ints(raw.weekdays, 0, 6);
-    if (w && w.length > 0) days.weekdays = w;
-    else problems.push("its weekdays are 0 (Sunday) to 6");
-  }
-  if (raw.off !== undefined) {
-    if (raw.off === "only" || raw.off === "never") days.off = raw.off;
-    else problems.push('its days off are "only" or "never"');
-  }
-  for (const key of ["holidays", "except"] as const) {
-    if (raw[key] === undefined) continue;
-    const ids = strings(raw[key]);
-    const unknown = (ids ?? []).filter((id) => !holidayIds.has(id));
-    if (!ids || unknown.length > 0) problems.push(`its ${key} name holidays the calendar doesn't have${unknown.length > 0 ? ` (${unknown.join(", ")})` : ""}`);
-    else if (ids.length > 0) days[key] = ids;
-  }
-  return Object.keys(days).length > 0 ? days : undefined;
 }
 
 /** Whether `company` has a ground with `owner`: a tie either way, a group both belong to (or, for a group, membership), or a cited source that names or links them. */
@@ -591,7 +566,8 @@ function readPlace(scope: RoutineScope, raw: JsonValue | undefined, problems: st
   }
   if (hasOwn(PLACE_ROLES, id)) return PLACE_ROLES[id];
   if (scope.places.has(id)) return { place: id };
-  problems.push(hasOwn(scope.world.places, id) ? `its place ${id} isn't one the player may be told of` : `its place ${id} isn't in the world`);
+  // A place the world doesn't have is the lint's to name (`routineIssues`); one it has but may not tell of is the job's.
+  if (hasOwn(scope.world.places, id)) problems.push(`its place ${id} isn't one the player may be told of`);
   return { place: id };
 }
 
@@ -602,7 +578,7 @@ function checkItem(scope: RoutineScope, batch: RoutineBatch, item: { type: "rout
   const owner = str(raw.owner);
   const label = neutralizeMacros(str(raw.label)).replace(/\s+/g, " ").slice(0, 80);
   const activity = neutralizeMacros(str(raw.activity)).replace(/\s+/g, " ").slice(0, 40);
-  const c: RoutineCandidate = { type: item.type, owner, at: `${item.type === "routine" ? "routines" : "schedules"}[${item.index}]`, label: label || activity || "(no label)", confidence: typeof raw.confidence === "number" && Number.isFinite(raw.confidence) ? Math.min(1, Math.max(0, raw.confidence)) : 0.5, notes: typeof raw.note === "string" && raw.note.trim() !== "" ? [neutralizeMacros(raw.note.trim()).slice(0, 300)] : [], sources: [], fatal: [], problems: [], leak: false };
+  const c: RoutineCandidate = { type: item.type, owner, at: `${item.type === "routine" ? "routines" : "schedules"}[${item.index}]`, label: label || activity || "(no label)", confidence: typeof raw.confidence === "number" && Number.isFinite(raw.confidence) ? Math.min(1, Math.max(0, raw.confidence)) : 0.5, notes: typeof raw.note === "string" && raw.note.trim() !== "" ? [neutralizeMacros(raw.note.trim()).slice(0, 300)] : [], sources: [], fatal: [], problems: [], lint: [], leak: false };
   if (!batch.owners.includes(owner)) c.fatal.push(`its owner ${owner === "" ? "is missing" : `"${owner}" isn't one of ${batch.owners.join(", ")}`}`);
   if (label === "") c.fatal.push("it has no label");
   if (activity === "") c.fatal.push("it has no activity");
@@ -624,9 +600,9 @@ function checkItem(scope: RoutineScope, batch: RoutineBatch, item: { type: "rout
   if (item.type === "routine") {
     const kind = ROUTINE_BLOCK_KINDS.find((k) => k === raw.kind);
     const place = readPlace(scope, raw.place, c.problems);
-    const days = readDays(scope, raw.days, c.problems);
+    // The days as given: their shape is the block shape check's, the holidays they name the lint's.
+    const days = isRecord(raw.days) ? (JSON.parse(JSON.stringify(raw.days)) as RoutineDays) : undefined;
     const company = readCompany(scope, owner, raw.company, c);
-    if (place === "with" && !company?.who.ids?.length) c.problems.push('its place is "with" its company, but it names no one');
     const block: RoutineBlock = {
       id: id || "block",
       label,
@@ -645,6 +621,11 @@ function checkItem(scope: RoutineScope, batch: RoutineBatch, item: { type: "rout
     if (!kind) c.fatal.push("its kind is fixed, flexible or optional");
     else for (const p of blockShapeProblems(block)) c.fatal.push(p);
     c.block = block;
+    // What Build's lint will say of it as its own routine, for the repair call; `finishRoutines` asks again under its final id.
+    if (c.fatal.length === 0) {
+      const routineId = snake(`${owner} ${block.id}`);
+      c.lint = routineIssues(scope.world, scope.reg, routineId, { id: routineId, label, owner, blocks: [block] }, scope.state).map((i) => i.message);
+    }
   } else {
     let place: PlaceId | null = null;
     const given = str(raw.place);
@@ -682,8 +663,9 @@ function readCompany(scope: RoutineScope, owner: EntityId, raw: JsonValue | unde
     const kept: EntityId[] = [];
     for (const id of [...new Set(ids)]) {
       if (id === owner) continue;
-      if (!scope.people.has(id)) c.problems.push(`its company "${id}" isn't a person in the world`);
-      else if (!grounded(scope, owner, id, c.sources)) c.problems.push(`${nameOf(scope, id)} (${id}) in its company has no tie to ${nameOf(scope, owner)}, and the cited text doesn't name them together`);
+      // An id the draft has but the job may not read (a secret person) is the job's to refuse; one it doesn't have at all, the lint's.
+      if (!scope.people.has(id) && (hasOwn(scope.state.entities, id) || hasOwn(scope.world.places, id))) c.problems.push(`its company "${id}" isn't a person in the world`);
+      else if (scope.people.has(id) && !grounded(scope, owner, id, c.sources)) c.problems.push(`${nameOf(scope, id)} (${id}) in its company has no tie to ${nameOf(scope, owner)}, and the cited text doesn't name them together`);
       kept.push(id);
     }
     return kept.length > 0 ? { who: { ids: kept }, ...invite } : undefined;
@@ -745,7 +727,7 @@ export function checkRoutineReply(scope: RoutineScope, batch: RoutineBatch, repl
   if (!items) return { problem: "JSON in another shape", candidates: [], fixable: [] };
   const candidates = items.flatMap((item) => checkItem(scope, batch, item) ?? []);
   if (items.length > 0 && candidates.length === 0) return { problem: `none of its ${items.length} item(s) readable`, candidates: [], fixable: [] };
-  const fixable = candidates.filter((c) => !c.leak).flatMap((c) => [...c.fatal, ...c.problems].map((p) => `${c.at} (${nameOf(scope, c.owner)}, "${c.label}"): ${p}`));
+  const fixable = candidates.filter((c) => !c.leak).flatMap((c) => [...c.fatal, ...c.problems, ...c.lint].map((p) => `${c.at} (${nameOf(scope, c.owner)}, "${c.label}"): ${p}`));
   return { problem: null, candidates, fixable };
 }
 
@@ -773,19 +755,6 @@ type Span = [number, number];
 function checkDays(scope: RoutineScope): number[] {
   const first = dateAt(scope.cal, scope.start ?? 0).dayIndex;
   return Array.from({ length: CHECK_DAYS }, (_, i) => first + i);
-}
-
-/** Whether a block is on a day for clash checks: its weekdays, days off and holidays (a birthday-only block counts on none; seasons and weather on every day, as they might be). */
-function blockOn(scope: RoutineScope, days: RoutineDays | undefined, day: number): boolean {
-  if (!days) return true;
-  if (days.birthday) return false;
-  const date = dateAt(scope.cal, clockAt(scope.cal, day, 0));
-  const holidays = holidaysOn(scope.cal, day);
-  if (days.weekdays && !days.weekdays.includes(date.weekday)) return false;
-  const off = date.weekday === 0 || date.weekday === 6 || holidays.some((h) => h.dayOff);
-  if ((days.off === "only" && !off) || (days.off === "never" && off)) return false;
-  if (days.holidays && !holidays.some((h) => days.holidays?.includes(h.id))) return false;
-  return !(days.except && holidays.some((h) => days.except?.includes(h.id)));
 }
 
 /** A start and length of the day as clock spans: an end at or before the start runs past midnight. */
@@ -818,16 +787,17 @@ function scheduleSpans(scope: RoutineScope, recurrence: Recurrence, slots: reado
 }
 
 /**
- * A block's runs on the checked days: a fixed one's from its start for its minutes; with `reach`, a
- * flexible or optional one's whole reach, from its window's start to its latest start's end.
+ * A block's runs on the checked days for `who`, on the days the planner lays it (`blockOnDay`: its
+ * days, its weekly count and its chance): a fixed one's from its start for its minutes; with `reach`,
+ * a flexible or optional one's whole reach, from its window's start to its latest start's end.
  */
-function blockSpans(scope: RoutineScope, b: RoutineBlock, reach = false): Span[] {
+function blockSpans(scope: RoutineScope, who: EntityId, b: RoutineBlock, reach = false): Span[] {
   if (b.kind !== "fixed" && !reach) return [];
   const from = b.kind === "fixed" ? b.at : b.window?.from;
   if (from === undefined) return [];
   const minutes = b.kind === "fixed" || !b.window ? b.minutes : windowLength(b.window.from, b.window.to) + b.minutes;
   try {
-    return checkDays(scope).flatMap((day) => (blockOn(scope, b.days, day) ? [span(scope, day, from, minutes)] : []));
+    return checkDays(scope).flatMap((day) => (blockOnDay(scope.ctx, who, b, day) ? [span(scope, day, from, minutes)] : []));
   } catch {
     return [];
   }
@@ -835,10 +805,10 @@ function blockSpans(scope: RoutineScope, b: RoutineBlock, reach = false): Span[]
 
 const meets = (a: Span, b: Span): boolean => a[0] < b[1] && b[0] < a[1];
 
-/** Whether a flexible block finds room somewhere: on some day it's on, a gap in its reach as long as it, between `busy` spans. */
-function findsRoom(scope: RoutineScope, b: RoutineBlock, busy: readonly Span[]): boolean {
+/** Whether a flexible block finds room somewhere: on some day it's on for `who`, a gap in its reach as long as it, between `busy` spans. */
+function findsRoom(scope: RoutineScope, who: EntityId, b: RoutineBlock, busy: readonly Span[]): boolean {
   if (b.kind === "fixed") return true;
-  for (const [from, to] of blockSpans(scope, b, true)) {
+  for (const [from, to] of blockSpans(scope, who, b, true)) {
     let at = from;
     for (const [s, e] of busy.filter((x) => x[1] > from && x[0] < to).sort((x, y) => x[0] - y[0])) {
       if (s - at >= b.minutes) return true;
@@ -896,7 +866,7 @@ function heldRuns(scope: RoutineScope, owner: EntityId): HeldRun[] {
       if (isOff(b)) continue;
       const what = `the block ${b.id} of the routine ${id}`;
       const place = placeFor(scope, owner, b.place, b.company);
-      for (const run of blockSpans(scope, b, true)) out.push({ what, span: run, activity: b.activity, place, ...(b.kind === "fixed" ? {} : { floating: true }) });
+      for (const run of blockSpans(scope, owner, b, true)) out.push({ what, span: run, activity: b.activity, place, ...(b.kind === "fixed" ? {} : { floating: true }) });
     }
   }
   return out;
@@ -1018,7 +988,7 @@ export function finishRoutines(scope: RoutineScope, candidates: readonly Routine
     if (c.block) {
       const block = c.block;
       const place = placeFor(scope, c.owner, block.place, block.company);
-      const p: ProposedRuns = { fixed: blockSpans(scope, block), reach: blockSpans(scope, block, true), activity: block.activity, place };
+      const p: ProposedRuns = { fixed: blockSpans(scope, c.owner, block), reach: blockSpans(scope, c.owner, block, true), activity: block.activity, place };
       const { repeat, clashes } = standing(scope, p, held);
       if (repeat) {
         drop("repeated what the world already has");
@@ -1026,7 +996,7 @@ export function finishRoutines(scope: RoutineScope, candidates: readonly Routine
       }
       for (const what of clashes) problems.push(`it clashes with ${what}`);
       const busy = held.filter((h) => !h.floating).map((h) => h.span);
-      if (!findsRoom(scope, block, busy)) problems.push(`it never has room in its window: ${[...new Set(held.filter((h) => !h.floating && p.reach.some((r) => meets(h.span, r))).map((h) => h.what))].join(", ")} fill it`);
+      if (!findsRoom(scope, c.owner, block, busy)) problems.push(`it never has room in its window: ${[...new Set(held.filter((h) => !h.floating && p.reach.some((r) => meets(h.span, r))).map((h) => h.what))].join(", ")} fill it`);
       const away = pullsAway(scope, c.owner, p.fixed, (who) => placeFor(scope, who, block.place, block.company));
       if (away) problems.push(away);
       // A meal or sleep's id replaces it on every day: a block on fewer days, or not every time, takes its own.
@@ -1049,6 +1019,8 @@ export function finishRoutines(scope: RoutineScope, candidates: readonly Routine
       const routineId = freeId(snake(`${c.owner} ${id}`), (x) => hasOwn(routines, x) || takenRoutines.has(x));
       takenRoutines.add(routineId);
       const value: RoutineDef = { id: routineId, label: block.label, owner: c.owner, blocks: [{ ...block, id }] };
+      // The lint's word for the routine as it will be saved, so the review says what Build's Problems will.
+      for (const issue of routineIssues(scope.world, scope.reg, routineId, value, scope.state)) problems.push(issue.message);
       proposals.push(proposalOf("routines", routineId, value as unknown as JsonValue, c, problems, notes, sourceNames));
       continue;
     }
