@@ -5,6 +5,8 @@
 // or may not know is never named, and a requirement is never shown as its expression.
 
 import type { ActionId, EntityId } from "../shared/ids";
+import { bandsWithin, type InferredChecks, type SheetSkill } from "../shared/inferred";
+import { TRY_ACTION } from "../engine/inferred";
 import type { RecentHistory } from "../shared/settings";
 import { tableChoices } from "../shared/tables";
 import type { ActionDef, ParamDef, WorldDoc } from "../shared/world";
@@ -163,6 +165,32 @@ export function timelapseEntry(world: WorldDoc, state: Readonly<WorldState>): Ca
     params: ["minutes? (number)", "until? (text)", "at? (text)"],
     needs: [],
     lexicon: TIMELAPSE_LEXICON,
+  };
+}
+
+/**
+ * Try something (DESIGN §11 inferred checks), in the catalog while the chat's policy is on: an
+ * uncertain attempt no other action covers, rolled with one of the skills the policy allows
+ * (`skills`), a difficulty band within its bounds, the companions who join in (only when they roll)
+ * and the people it opposes, and, under `tries`, whether the input says it tries.
+ */
+export function tryEntry(policy: InferredChecks, skills: readonly SheetSkill[]): CatalogEntry {
+  const which = policy.when === "tries" ? "only one the input says the player character tries or attempts" : policy.when === "risky" ? "one that could go wrong" : "any whose outcome is uncertain";
+  const named = skills.map((s) => (s.label.toLowerCase() === s.id.replace(/_/g, " ").toLowerCase() ? s.id : `${s.id} (${s.label})`));
+  return {
+    id: TRY_ACTION,
+    label: "Try something",
+    description: `an attempt no other action covers, ${which}, rolled with a skill: talking someone round, sneaking, noticing, deceiving, forcing something; a reaction the input asks for counts too ("I watch him as he answers: is he lying?" reads him against his deceit)`,
+    params: [
+      "attempt (text: what is attempted, in the input's words)",
+      `skill (one of: ${named.join(" | ")})`,
+      `difficulty (one of: ${bandsWithin(policy).map((b) => b.id).join(" | ")}: how hard it looks in context)`,
+      ...(policy.who !== "pov" ? ['with? (a list of ids of people here who join in: "we sneak past" names each companion)'] : []),
+      'against? (a list of {"who": an id of someone here, "skill": the skill they resist with}: the people it opposes or targets)',
+      ...(policy.when === "tries" ? ["tried (true when the input itself says the player character tries or attempts it)"] : []),
+    ],
+    needs: [],
+    lexicon: ["try to", "attempt", "manage to", "talk into", "sneak past"],
   };
 }
 

@@ -26,7 +26,10 @@ describe("interpret's catalog", () => {
     const ids = catalog.map((line) => line.split(" — ")[0]);
     expect(ids).toContain("fight");
     expect(ids).not.toContain("attack");
-    // The rows are one param's choices, so the param after them can't read as another row.
-    expect(catalog.find((line) => line.startsWith("skill_check"))).toMatch(/Params: skill \(one of: athletics \| [^()]*\), difficulty\? \(/);
+    // The rows are one param's choices, so the param after them can't read as another row. Try
+    // something stands in for Use a skill (DESIGN §11), while Push a skill keeps its own.
+    expect(ids).toContain("try");
+    expect(ids).not.toContain("skill_check");
+    expect(catalog.find((line) => line.startsWith("push_skill"))).toMatch(/Params: skill \(one of: athletics \| [^()]*\), difficulty\? \(/);
   });
 });

@@ -15,6 +15,7 @@ import { lifeStatesOf } from "../shared/world";
 import { firedTimeout } from "../shared/timeouts";
 import type { Answers, Questions } from "../engine/decide";
 import { ACTION_QUEUE_LIMIT, type InterpretOutput, type QueuedAction } from "../engine/steps";
+import { TRY_ACTION } from "../engine/inferred";
 import { cashGift } from "../packs/gear/core/index";
 import type { HostPort, QuietMessage, QuietRequest, QuietResult } from "./host";
 import type { CatalogEntry, InterpretScene } from "./interpret-context";
@@ -514,6 +515,13 @@ export async function interpret(
     `Read every action in the input, in order, not only the first. Return the first as "action" with its "params". If the input has more actions after it, list them in order in "more" (at most ${ACTION_QUEUE_LIMIT - 1}), each {"action": a catalog id, "params": {...}, "text": that action written as the player would type it}: "I walk to the market and buy bread" → "action" for the walk, and "more": [{"action": <the buy's id>, "params": {"item": "bread"}, "text": "I buy bread"}]. An action after them that no catalog action fits goes in "next", written as the player would type it.`,
     `If the input lets time pass after its last action ("…and sleep until the next morning", "…then wait two hours", "…then skip ahead to Friday at 6 PM"), add "then": {"minutes": number}, {"until": a day part, "shift" or "commitment"} or {"at": "YYYY-MM-DD HH:MM"} for a stated day and time; time passing is never in "more" or "next", nor is anything else that isn't an action.`,
   ];
+  // An uncertain attempt is Try something while the chat infers checks (DESIGN §11): never beside, or
+  // instead of, a catalog action that covers it, and a reaction the input asks for counts.
+  if (actions.some((a) => a.id === TRY_ACTION)) {
+    rules.push(
+      `An attempt whose outcome is uncertain that no other catalog action covers is "${TRY_ACTION}" (Try something), even asked as a question ("I watch him as he answers: is he lying?" is the player character's reading of him against his deceit). Never read an attempt a catalog action covers as "${TRY_ACTION}", nor both: that action alone. "attempt" is what is attempted, in the input's words; "skill" and "difficulty" come from its lists; "with" lists the companions the input has join in ("we sneak past"); "against" lists the people here it opposes or targets, each with the skill they resist with.`,
+    );
+  }
   // A message can take for granted a move the engine never made, or what the last message left
   // unplayed (DESIGN §5.2): read those first, so the engine has the POV where the story does.
   const presumed = [

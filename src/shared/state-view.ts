@@ -3,6 +3,7 @@
 // filtered to what the POV knows (DESIGN §7); GM previews are labelled and never recorded.
 
 import type { ClaimsPolicy } from "./claims";
+import type { InferredChecks, SheetSkill } from "./inferred";
 import type { JsonObject, JsonValue } from "./json";
 import type { MindCallTrace, MindsGmView } from "./minds";
 import type {
@@ -142,6 +143,8 @@ export type ChipKind =
   | "claim"
   /** A thing the player said they had, made real for their action ("Added: a coffee"), with Undo (DESIGN §9.4 player claims). */
   | "claimed"
+  /** A typed attempt the chat reads as a check only suggests it ("Roll Persuasion?"): the turn waits, nothing generated, on Roll or No roll; either resumes it (DESIGN §11 inferred checks). */
+  | "check"
   /** A ✎ fix or GM edit on the head ("Corrected …"), with Undo (DESIGN §12). */
   | "fix"
   /** A write held during a reply that no longer applied when the reply finished (P2), with Dismiss. */
@@ -180,7 +183,7 @@ export interface Chip {
  * does. The frontend regenerates after them; an outside client tells the user to.
  */
 export function chipRegenerates(kind: ChipKind, choice: string): boolean {
-  return choice === "regenerate" || (kind === "swipe_option" && (choice === "renarrate" || choice === "rerun")) || (kind === "contradiction" && choice === "renarrate") || (kind === "read_failed" && choice === "rerun") || (kind === "claim" && (choice === "add" || choice === "drop"));
+  return choice === "regenerate" || (kind === "swipe_option" && (choice === "renarrate" || choice === "rerun")) || (kind === "contradiction" && choice === "renarrate") || (kind === "read_failed" && choice === "rerun") || (kind === "claim" && (choice === "add" || choice === "drop")) || (kind === "check" && (choice === "roll" || choice === "drop"));
 }
 
 /** Detail opened during an in-flight window shows "pending" until it closes (DESIGN §9.2). */
@@ -287,6 +290,10 @@ export interface ControlsView {
   };
   /** The policy deciding this chat's checks (DESIGN §11): its own marker's, else the world's, else plain rolling. */
   adjudication: AdjudicationDef;
+  /** How this chat reads typed attempts as checks (DESIGN §11 inferred checks): its own `infer` marker's, else the world's default, else its realism preset's at its Sheets level. */
+  inferred: InferredChecks;
+  /** The skills the chat's world's sheet has, in sheet order: what an inferred check may roll, and what its skills list may name. */
+  skills: SheetSkill[];
 }
 
 export interface StateView {

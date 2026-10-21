@@ -1003,6 +1003,34 @@
         "retryAfter": { "type": "number", "description": "with changed: game minutes before the same check may roll again, up to a week" }
       }
     },
+    "difficultyBand": { "enum": ["trivial", "easy", "moderate", "tricky", "hard", "very_hard", "heroic", "nearly_impossible"] },
+    "inferred": {
+      "type": "object",
+      "description": "Inferred checks: how a typed attempt no catalog action with its own check covers is read as a check of the world's sheet. A value it can't hold takes Grounded's; it must name its mode.",
+      "required": ["mode"],
+      "additionalProperties": false,
+      "properties": {
+        "mode": { "enum": ["off", "suggest", "auto"], "description": "off reads none; suggest offers the roll on a chip first; auto rolls it" },
+        "when": { "enum": ["uncertain", "risky", "tries"], "description": "every uncertain attempt; only a risky one (below the adjudication policy's riskyAt); only one the message says it tries" },
+        "who": { "enum": ["pov", "companions", "everyone"], "description": "the player character only; companions who join in too, each their own; everyone involved, opponents rolling against it" },
+        "skills": { "anyOf": [{ "title": "every skill the sheet has", "type": "null" }, { "title": "these skills, by id", "type": "array", "items": { "type": "string", "minLength": 1, "maxLength": 64 }, "maxItems": 64 }] },
+        "difficulty": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "the easiest and hardest bands a difficulty may be read from",
+          "properties": { "lowest": { "$ref": "#/$defs/difficultyBand" }, "highest": { "$ref": "#/$defs/difficultyBand" } }
+        },
+        "detail": { "enum": ["result", "margin", "roll"], "description": "how much of each roll the narrator is told" },
+        "others": { "enum": ["hidden", "shown"], "description": "whether an opponent's or a companion's numbers reach the narrator and the receipt" },
+        "guidance": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "the Narrate line after a success and after a failure; {who}, {skill}, {attempt} and {against} read as the check's",
+          "properties": { "pass": { "type": "string", "maxLength": 240 }, "fail": { "type": "string", "maxLength": 240 } }
+        },
+        "most": { "type": "integer", "minimum": 1, "maximum": 12, "description": "the most rolls one turn's inferred check makes" }
+      }
+    },
     "ruleset": {
       "type": "object",
       "description": "The world's tabletop ruleset; every part is optional.",
@@ -1027,6 +1055,7 @@
         },
         "minLevels": { "$ref": "#/$defs/domainLevels", "description": "the lowest effective level each domain plays at, whatever the realism settings" },
         "adjudication": { "$ref": "#/$defs/adjudication" },
+        "inferred": { "$ref": "#/$defs/inferred" },
         "combat": {
           "type": "object",
           "description": "Combat and encounters; its parts are checked by the engine's lint.",

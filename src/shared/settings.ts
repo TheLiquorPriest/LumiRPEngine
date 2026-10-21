@@ -5,6 +5,7 @@
 
 import type { Band, BoundMode, DomainId, InterruptClass, InterruptPolicy, Level, ModelUsePresetId, RealismPresetId, SceneTypeId } from "./ids";
 import type { ClaimsPolicy } from "./claims";
+import type { InferredChecks } from "./inferred";
 import type { AdjudicationDef, StepPurpose } from "./world";
 import type { MindsSettings } from "./minds";
 import { isMindPurpose } from "./minds";
@@ -294,6 +295,12 @@ export interface UserSettings {
   adjudication: AdjudicationDef;
   /** New chats use `adjudication` even where the world's ruleset sets a policy of its own. */
   overrideWorldAdjudication: boolean;
+  /**
+   * How typed attempts are read as checks in new chats (DESIGN §11 inferred checks): it fills in for a
+   * world whose ruleset sets none, or replaces it with `overrideWorldAdjudication` on (one switch for
+   * the user's check rules). Null: each new chat plays by its realism preset and Sheets level.
+   */
+  inferred: InferredChecks | null;
   extraction: ExtractionBounds;
   swipeDefault: "rerun" | "renarrate";
   /** World chats hide each reply's `<json>…</json>` block on display, after the preset's own display scripts. World Info skips the block either way (DESIGN §6.7). */

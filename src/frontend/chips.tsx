@@ -50,6 +50,7 @@ const CHIP_ICON: Record<ChipKind, IconName> = {
   read_failed: "alert",
   engine_failed: "alert",
   claim: "help",
+  check: "dice",
   claimed: "sparkle",
   fix: "edit",
   refused: "alert",

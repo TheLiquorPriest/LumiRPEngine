@@ -27,12 +27,15 @@ import type { WorldState } from "./state";
 import { Working } from "./working";
 import { canSeeEntity, canSeePlace } from "./visibility";
 import { labelOf, optionalService, own } from "./pack-kit";
+import type { InferredResult } from "./inferred";
 
 export interface ActionRequest {
   action: ActionId | ActionDef;
   /** Defaults to the POV. */
   actor?: EntityId;
   params?: JsonObject;
+  /** What the check and outcomes read beside the params, and outside the key a retry rule knows the attempt by: an inferred check's difficulty, which an opponent's new roll sets (DESIGN §11). */
+  vars?: EnvVars;
 }
 
 export interface CheckResult extends CheckRoll {
@@ -69,6 +72,8 @@ export interface Resolution {
    * the action's own events and the rules they fired.
    */
   claimed?: { entity: EntityId; name: string; events: LedgerEvent[] };
+  /** An inferred check's people and wording (DESIGN §11), when the action was Try something: the plan's, never recorded. */
+  inferred?: InferredResult;
 }
 
 export function findAction(reg: Registry, world: WorldDoc, id: ActionId): ActionDef | undefined {
@@ -130,7 +135,9 @@ function prepare(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, re
   // tell "not given" from a given 0.
   const scalars = Object.fromEntries(Object.entries(params).filter(([name]) => !Object.prototype.hasOwnProperty.call(bindings, name)));
   const absent = Object.fromEntries(Object.keys(action.params).filter((name) => !(name in params)).map((name): [string, Value] => [name, null]));
-  const vars: Record<string, Value | EnvVars> = { ...scalars, params: { ...absent, ...params } };
+  const extra = req.vars ?? {};
+  const more = typeof extra.params === "object" && extra.params !== null ? extra.params : {};
+  const vars: Record<string, Value | EnvVars> = { ...scalars, ...extra, params: { ...absent, ...params, ...more } };
   return { action, actor, bindings, vars, params };
 }
 

@@ -4,6 +4,7 @@
 
 import type { Band, ChatId, DomainId, RevisionId, UserId, WorldId } from "../shared/ids";
 import { CLAIM_MODE_LABEL } from "../shared/claims";
+import { INFER_MODE_LABEL } from "../shared/inferred";
 import { DOMAINS, pathSafe } from "../shared/ids";
 import type { JsonObject, JsonValue } from "../shared/json";
 import { hasOwn, isRecord, safeKey } from "../shared/json";
@@ -12,7 +13,7 @@ import { LEDGER_NAMESPACE } from "../shared/ledger";
 import type { RulesetDef, WorldDoc } from "../shared/world";
 import { WORLD_FORMAT } from "../shared/world";
 import type { StudioOffer } from "../shared/studio-bridge";
-import { isWorldDoc, migrateWorld, previewSheet } from "../engine/authoring";
+import { isWorldDoc, migrateWorld, previewSheet, previewSkills } from "../engine/authoring";
 import { parseEditOps, resolveEdit } from "../engine/edits";
 import { sheetRulesetProblem } from "../engine/ruleset";
 import { formulaFunctions } from "../engine/scope";
@@ -320,7 +321,7 @@ export class Dispatcher {
         return;
       }
       case "lre.marker": {
-        const body = validMarkerBody(r.kind === "resolve" ? { kind: "resolve", domain: r.domain, scope: r.scope, to: r.to } : r.kind === "time" ? { kind: "time", control: r.control, scope: r.scope, to: r.to } : r.kind === "claims" ? { kind: "claims", to: r.to } : r.kind === "adjudicate" ? { kind: "adjudicate", to: r.to } : { kind: "migrate", to: r.to, merge: r.merge });
+        const body = validMarkerBody(r.kind === "resolve" ? { kind: "resolve", domain: r.domain, scope: r.scope, to: r.to } : r.kind === "time" ? { kind: "time", control: r.control, scope: r.scope, to: r.to } : r.kind === "claims" ? { kind: "claims", to: r.to } : r.kind === "adjudicate" ? { kind: "adjudicate", to: r.to } : r.kind === "infer" ? { kind: "infer", to: r.to } : { kind: "migrate", to: r.to, merge: r.merge });
         // A retired control (an earlier build's starting markers) stays readable in stored ledgers, but nothing sets it now.
         if (!body || (body.kind === "time" && !TIME_CONTROLS.some((c) => c === body.control))) throw new RequestError("bad_request", "not a valid settings change");
         if (body.kind === "migrate") {
@@ -614,7 +615,7 @@ export class Dispatcher {
         const draft = await store.working(r.worldId, userId);
         const world = { ...draft, ruleset: isRecord(r.ruleset) ? (r.ruleset as unknown as RulesetDef) : undefined };
         const entity = typeof r.entity === "string" && hasOwn(world.entities, r.entity) ? r.entity : world.pov;
-        return { sheet: previewSheet(this.rt.registry, world, entity) };
+        return { sheet: previewSheet(this.rt.registry, world, entity), skills: previewSkills(this.rt.registry, world) };
       }
       case "templates":
         return { templates: this.rt.templateInfo.filter((t) => hasOwn(this.rt.templates, t.id)) };
@@ -692,6 +693,8 @@ export class Dispatcher {
       lines.push({ text: `What you say you have that the world doesn't: ${CLAIM_MODE_LABEL[body.to.mode]}${body.to.mode === "real" ? (body.to.capped ? ", asking above the world's claim cap" : ", at any price") : ""}, from the next turn; earlier turns keep what theirs did.`, tone: "info" });
     } else if (body.kind === "adjudicate") {
       lines.push({ text: "Checks are decided this way from the next turn; earlier turns keep how theirs were decided.", tone: "info" });
+    } else if (body.kind === "infer") {
+      lines.push({ text: `Typed attempts are read as checks this way from the next turn (${INFER_MODE_LABEL[body.to.mode].toLowerCase()}); earlier turns keep how theirs were read.`, tone: "info" });
     } else {
       lines.push({ text: `The chat moves to revision ${body.to.slice(0, 8)} of ${world.name} from the next turn.`, tone: "info" });
       return { lines, upgrade: await this.upgradePreview(chatId, userId, state, body.to) };
@@ -939,12 +942,15 @@ export class Dispatcher {
         const result = await this.write(chatId, userId, { kind: "undo", id: this.nextId(), messageId: m.id, swipeId: m.swipeId, refs });
         return { applied: result.applied, pending: result.pending };
       }
-      case "claim": {
-        // The answer to a claim's question (DESIGN §9.4): kept with the read; the frontend's Regenerate then resumes the turn.
-        if (choice !== "add" && choice !== "drop") throw new RequestError("bad_request", `unknown choice ${choice}`);
+      case "claim":
+      case "check": {
+        // The answer to a claim's question (DESIGN §9.4) or a suggested check (§11): kept with the
+        // read; the frontend's Regenerate then resumes the turn, with that action or without it.
+        const keep = chip.kind === "claim" ? "add" : "roll";
+        if (choice !== keep && choice !== "drop") throw new RequestError("bad_request", `unknown choice ${choice}`);
         const text = typeof chip.payload.text === "string" ? chip.payload.text : "";
         const index = typeof chip.payload.index === "number" ? chip.payload.index : -1;
-        return { applied: this.rt.answerClaim(chatId, text, index, choice === "add"), pending: false };
+        return { applied: this.rt.answerAsk(chatId, text, index, choice === keep), pending: false };
       }
       case "claimed": {
         // Undo of a thing the player said they had: it goes, with what its action did (DESIGN §9.4).

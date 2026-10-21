@@ -114,9 +114,13 @@ export interface UnfitAction {
   reason: string;
 }
 
-/** One action of a typed message's read (DESIGN §9.4): it plays, with any claim, unless it waits on the player's answer (`ask`). */
+/**
+ * One action of a typed message's read (DESIGN §9.4, §11): it plays, with any claim, unless it waits
+ * on the player's answer (`ask`): a claim's question (Add or Not an action), or a check the chat only
+ * suggests (Roll or No roll).
+ */
 export interface ReadStep extends QueuedAction {
-  ask?: { question: string; detail: string };
+  ask?: { kind: "claim" | "check"; question: string; detail: string };
 }
 
 /** A typed message's read as `interpret` gave it and the engine judged it: what leads, its actions in order, and those dropped. */
@@ -220,8 +224,8 @@ export class TurnBridge implements TurnModel {
 
   /**
    * A typed message's read (DESIGN §9.4, §11): the first action that plays leads, with the read's
-   * confidence, and the others queue behind it. While a claim in it waits on the player's answer,
-   * none of it is the turn's intent yet: it is held until each is answered (`answerClaim`).
+   * confidence, and the others queue behind it. While a step in it waits on the player's answer,
+   * none of it is the turn's intent yet: it is held until each is answered (`answerAsk`).
    */
   setRead(userText: string, read: HeldRead): void {
     if (read.steps.some((s) => s.ask)) {
@@ -242,24 +246,24 @@ export class TurnBridge implements TurnModel {
     else this.setIntent(userText, intent, true);
   }
 
-  /** Whether this text's read waits on the player's answer to a claim. */
+  /** Whether this text's read waits on the player's answer to a claim or a suggested check. */
   isHeld(userText: string): boolean {
     return this.held.has(userText);
   }
 
-  /** The first claim this text's read waits on: its place in the read, and the question the chat asks. */
-  askOf(userText: string): { index: number; question: string; detail: string } | null {
+  /** The first step this text's read waits on: its place in the read, what kind of question it is, and the question the chat asks. */
+  askOf(userText: string): { index: number; kind: "claim" | "check"; question: string; detail: string } | null {
     const steps = this.held.get(userText)?.steps ?? [];
     const index = steps.findIndex((s) => s.ask);
     const ask = steps[index]?.ask;
     return ask ? { index, ...ask } : null;
   }
 
-  /** The player's answer to a claim's question: Add makes it real as read, Not an action drops that action. False when nothing waits there. */
-  answerClaim(userText: string, index: number, add: boolean): boolean {
+  /** The player's answer to what a step waits on: Add (a claim made real as read) or Roll (the check plays) keeps it; Not an action or No roll drops that step. False when nothing waits there. */
+  answerAsk(userText: string, index: number, keep: boolean): boolean {
     const read = this.held.get(userText);
     if (!read?.steps[index]?.ask) return false;
-    const steps = add ? read.steps.map((s, i): ReadStep => (i === index ? { action: s.action, params: s.params, text: s.text, ...(s.claim ? { claim: s.claim } : {}) } : s)) : read.steps.filter((_, i) => i !== index);
+    const steps = keep ? read.steps.map((s, i): ReadStep => (i === index ? { action: s.action, params: s.params, text: s.text, ...(s.claim ? { claim: s.claim } : {}) } : s)) : read.steps.filter((_, i) => i !== index);
     this.setRead(userText, { ...read, steps });
     return true;
   }

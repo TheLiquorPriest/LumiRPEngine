@@ -51,6 +51,7 @@ import type {
   WorldId,
 } from "./ids";
 import type { ClaimPlace, ClaimsPolicy } from "./claims";
+import type { InferredChecks } from "./inferred";
 import type { DataTable } from "./tables";
 import type { WorldMindsConfig } from "./minds";
 
@@ -974,6 +975,8 @@ export interface RulesetDef {
   minLevels?: Partial<Record<DomainId, Level>>;
   /** How the world's checks are decided: when they roll, what the player's words weigh, who settles them (DESIGN §11). */
   adjudication?: AdjudicationDef;
+  /** The world's default for inferred checks: how a typed attempt no catalog action with its own check covers is read as a check of its sheet (DESIGN §11). */
+  inferred?: InferredChecks;
   /** The profile the ruleset last started from (Build → Ruleset → Start from a profile), by id; nothing reads it as rules. */
   profile?: string;
 }

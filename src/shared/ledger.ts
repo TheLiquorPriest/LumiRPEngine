@@ -8,6 +8,7 @@
 
 import type { JsonObject, JsonValue } from "./json";
 import type { ClaimsPolicy } from "./claims";
+import type { InferredChecks } from "./inferred";
 import type { AdjudicationDef } from "./world";
 import type {
   ActionId,
@@ -238,7 +239,9 @@ export type MarkerBody =
   | { kind: "time"; control: TimeControl | RetiredTimeControl; scope: TimeScope; to: JsonValue }
   | { kind: "adjudicate"; to: AdjudicationDef }
   /** What a typed action's thing the world doesn't have becomes in this chat from now on (DESIGN §9.4 player claims). */
-  | { kind: "claims"; to: ClaimsPolicy };
+  | { kind: "claims"; to: ClaimsPolicy }
+  /** How typed attempts are read as checks in this chat from now on (DESIGN §11 inferred checks). */
+  | { kind: "infer"; to: InferredChecks };
 
 /** A message-level intent marker: a pure intent with no values (DESIGN §4.3). */
 export type Marker = MarkerBody & {

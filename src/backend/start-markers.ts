@@ -1,18 +1,24 @@
 // A new chat's starting markers (DESIGN §4.3, §9.1, §9.2, §9.4, §11): the world revision, every
-// domain level, the band caps, every time control, the player-claims policy and the adjudication
-// policy, written once, with the first record that holds events. The world's own realism (its
-// claims policy included) and time defaults come first and the user's settings fill in what the
-// world leaves out; with "Use my settings" on, the user's settings replace the world's. The
-// adjudication policy is the world ruleset's, unless the user's own replaces it or the world sets none.
+// domain level, the band caps, every time control, the player-claims policy, the adjudication
+// policy and the inferred-checks policy, written once, with the first record that holds events. The
+// world's own realism (its claims policy included) and time defaults come first and the user's
+// settings fill in what the world leaves out; with "Use my settings" on, the user's settings replace
+// the world's. The adjudication and inferred-checks policies are the world ruleset's, unless the
+// user's own check rules replace them or the world sets none; with neither, inferred checks play as
+// the chat's starting realism preset does at its Sheets level.
 
 import { readAdjudication } from "../shared/adjudication";
 import { readClaims } from "../shared/claims";
+import { inferredDefaults, readInferred } from "../shared/inferred";
 import type { Level } from "../shared/ids";
 import { BANDS, DOMAINS, INTERRUPT_CLASSES } from "../shared/ids";
 import { hasOwn, isRecord, safeKey } from "../shared/json";
 import type { MarkerBody } from "../shared/ledger";
 import type { TimeSettings, UserSettings } from "../shared/settings";
 import type { WorldDoc } from "../shared/world";
+import { presetOf } from "../engine/realism";
+import { rulesetFloor } from "../engine/registry-impl";
+import type { RealismState } from "../engine/state";
 
 const LEVELS: readonly Level[] = [0, 1, 2, 3, 4];
 
@@ -55,7 +61,7 @@ function worldFirstTime(user: TimeSettings, world: WorldDoc): TimeSettings {
 
 /**
  * Starting markers for a chat on `revision` of `world`: `migrate`, a `resolve` for every domain's
- * level and for the band caps, a `time` marker for every time control, `claims` and `adjudicate`.
+ * level and for the band caps, a `time` marker for every time control, `claims`, `adjudicate` and `infer`.
  */
 export function startMarkersFrom(settings: UserSettings, world: WorldDoc, revision: string): MarkerBody[] {
   const mine = settings.overrideWorldDefaults;
@@ -81,5 +87,14 @@ export function startMarkersFrom(settings: UserSettings, world: WorldDoc, revisi
   out.push({ kind: "claims", to: (mine ? null : readClaims(world.realism.claims)) ?? { ...settings.realism.claims } });
   const authored = readAdjudication(world.ruleset?.adjudication);
   out.push({ kind: "adjudicate", to: authored && !settings.overrideWorldAdjudication ? authored : settings.adjudication });
+  // The realism the chat starts at, folded from its own `resolve` markers, picks the defaults.
+  const start: RealismState = { levels: { ...settings.realism.levels }, tierCaps: { principal: {}, supporting: {}, background: {} } };
+  for (const m of out) {
+    if (m.kind !== "resolve") continue;
+    if ("all" in m.scope) start.levels[m.domain] = m.to;
+    else if ("tier" in m.scope) start.tierCaps[m.scope.tier][m.domain] = m.to;
+  }
+  const inferred = readInferred(world.ruleset?.inferred);
+  out.push({ kind: "infer", to: (settings.overrideWorldAdjudication ? null : inferred) ?? settings.inferred ?? inferredDefaults(presetOf(start), rulesetFloor(world, "sheets", start.levels.sheets)) });
   return out;
 }

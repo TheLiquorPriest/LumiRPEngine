@@ -7,6 +7,7 @@
 
 import type { JsonObject, JsonValue } from "./json";
 import type { ClaimsPolicy } from "./claims";
+import type { InferredChecks, SheetSkill } from "./inferred";
 import type { LoreIndexAddition } from "./lore";
 import type { Limit, MindEditOp, MindsRunView } from "./minds";
 import type { ActionId, BoundMode, ChatId, ChipId, DomainId, EntityId, FieldId, KindId, Level, MessageId, PanelId, PlaceId, RelationTypeId, RevisionId, StageId, TierId, TrackId, WorldId } from "./ids";
@@ -191,6 +192,7 @@ export type MarkerRequest = Request<"lre.marker"> & { chatId: ChatId; preview?: 
     | { kind: "time"; control: TimeControl; scope: TimeScope; to: JsonValue }
     | { kind: "claims"; to: ClaimsPolicy }
     | { kind: "adjudicate"; to: AdjudicationDef }
+    | { kind: "infer"; to: InferredChecks }
     | { kind: "migrate"; to: RevisionId; merge?: UpgradePicks }
   );
 
@@ -667,11 +669,12 @@ export interface ResultBodies {
    * field forms (a world kind or relation type with the same id wins); and `functions`: every
    * function a formula may call outside an effect's arguments (the math built-ins, the engine's and
    * the packs' formulas), for the expression editor. `sheet` answers the `sheet` preview: the
-   * sections, or null when the ruleset designs no sheet. `templates` and `chats` answer their ops.
+   * sections, or null when the ruleset designs no sheet; `skills` beside it, the skills the draft's
+   * sheet has as a chat starts (what an inferred check may roll, DESIGN §11). `templates` and `chats` answer their ops.
    * `get` carries the world's `history` (oldest first; `list` leaves it out). `upgrade` says
    * `pending` when the chat is mid-turn: its Upgrade lands when the turn ends.
    */
-  "lre.world": { worlds?: WorldIndex[]; world?: WorldDoc; revision?: RevisionId; lint?: LintIssue[]; file?: JsonValue; packKinds?: Record<string, KindDef>; packRelations?: Record<string, RelationTypeDef>; functions?: string[]; sheet?: SheetSectionView[] | null; templates?: TemplateInfo[]; chats?: WorldChatInfo[]; history?: RevisionNote[]; pending?: boolean };
+  "lre.world": { worlds?: WorldIndex[]; world?: WorldDoc; revision?: RevisionId; lint?: LintIssue[]; file?: JsonValue; packKinds?: Record<string, KindDef>; packRelations?: Record<string, RelationTypeDef>; functions?: string[]; sheet?: SheetSectionView[] | null; skills?: SheetSkill[]; templates?: TemplateInfo[]; chats?: WorldChatInfo[]; history?: RevisionNote[]; pending?: boolean };
   "lre.ui": { done: true };
   "lre.map": { display?: MapDisplay; walk?: { minutes: number; disabled?: string } };
   /** `start`, `cancel` and `dismiss` name the job; `list` returns the world's kept jobs. */
