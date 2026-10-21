@@ -783,7 +783,7 @@ The list has everyone but you, closest on the minds ladder first, with **Search 
 - **Their schedules**: each schedule that applies to them, the most specific owner first for each thing schedules set, with what it rests on, and **In force**, **Shadowed** (a more specific schedule wins where both run) or this chat's change. Tap one to give them **Their own version** in this chat, with Build's schedule form, or put it **Off for them** until you clear it or for some hours; **Use the world's schedule** drops the change.
 - **Today**: their day as the planner laid it, each block with where, why it is there (their routine, a schedule, a plan, an appointment, a trip, an invitation, free time) and the reasons it gave.
 - **Invitations**: the ones they made and received, each with where it came from: a plan the story made, a block of their routine (with its source), you, or one recorded before invitations needed a ground.
-- **Changes the story made**: each block or schedule the story changed in this chat, with the turn it came from (its id shows under **Show ids**) and how long ago. Tap one to keep it or go back to the world's.
+- **Changes the story made**: each block or schedule the story changed in this chat, with the turn it came from (its id shows under **Show ids**) and how long ago. A block the story adds is in force from the next day, and its row says so until then. Tap one in force to keep it, change it or go back to the world's.
 
 Each change is a GM edit like any other: one correction with its own **Undo**, and the list's badge follows it.
 

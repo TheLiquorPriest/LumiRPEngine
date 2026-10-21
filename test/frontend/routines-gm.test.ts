@@ -7,7 +7,7 @@
 import { describe, expect, test } from "bun:test";
 import type { VNode } from "preact";
 import { editRequest } from "../../src/frontend/requests";
-import { Badge, ListRow } from "../../src/frontend/components";
+import { Badge, IdText, ListRow } from "../../src/frontend/components";
 import { pinOp } from "../../src/packs/minds/ui/ops";
 import { CharacterRows, RoutineSections } from "../../src/packs/castlife/ui/routines-gm";
 import { bindingOf, blockOffOp, blockOp, changedBy, dropBlockOp, dropScheduleOp, followOp, routineRows, scheduleDraft, scheduleOffOp, scheduleOwnOp, scheduleRows, storyChanges } from "../../src/packs/castlife/ui/routines-ops";
@@ -66,9 +66,9 @@ function textOf(node: unknown): string {
   return "";
 }
 
-/** The character's page as rendered, each of its sections drawn one level down. */
-function page(view: RoutineGmView, gm: GmView): unknown[] {
-  const root = RoutineSections({ view, gm, busy: false, open: () => undefined }) as VNode<Props>;
+/** The character's page as rendered, each of its sections drawn one level down; `summary` is what the chat changed of them. */
+function page(view: RoutineGmView, gm: GmView, summary?: RoutineChangeSummary): unknown[] {
+  const root = RoutineSections({ view, gm, summary, busy: false, open: () => undefined }) as VNode<Props>;
   const children = root.props.children;
   return (Array.isArray(children) ? children : [children]).map((child) => expand(child));
 }
@@ -226,7 +226,35 @@ describe("GM view → Routines: what the page shows", () => {
       expect([s.schedule, textOf(row?.subtitle).includes(s.source.label)]).toEqual([s.schedule, true]);
     }
     // The story's changes list only what the story made; this one is yours.
-    expect(storyChanges(v)).toEqual([]);
+    expect(storyChanges(v, (await changed(rig, chatId)).find((s) => s.entity === WHO))).toEqual([]);
+  });
+
+  test("the story's changes show with their turns, as the chat recorded them, a block the story added before it is in force included", async () => {
+    const { rig, chatId } = await chat();
+    const v = await day(rig, chatId);
+    const gm = await gmView(rig, chatId);
+    const lunch = v.blocks.find((b) => b.block.id === "lunch");
+    if (!lunch || isOff(lunch.block)) throw new Error("no lunch");
+    const base: RoutineBlock = lunch.block;
+    // As the read model gives the story's changes: lunch changed and in force; a block the story added,
+    // which the read model has only from the next day.
+    const told = { type: "story" as const, at: gm.minds.now - 30, turn: "msg-7" };
+    const here = { level: "chat" as const, name: "This chat", rank: 0 };
+    const view: RoutineGmView = { ...v, blocks: v.blocks.map((b) => (b.block.id === "lunch" ? { ...b, block: { ...base, label: "Lunch at the pier" }, owner: here, source: { ...told, label: "The story" }, shadowed: [{ routine: null, owner: b.owner, source: b.source, block: b.block }] } : b)) };
+    const summary: RoutineChangeSummary = { entity: WHO, name: v.name, follow: null, blocks: [{ block: "lunch", source: told, off: false }, { block: "story_gym", source: { ...told, at: told.at + 5 }, off: false }], schedules: [] };
+    expect(storyChanges(view, summary).map((c) => [c.id, c.kind === "block" ? (c.block?.owner.level ?? null) : null])).toEqual([
+      ["lunch", "chat"],
+      ["story_gym", null],
+    ]);
+    const list = propsOf(page(view, gm, summary), "div").find((p) => p["data-lre-gm-list"] === "routine-story");
+    const rows = propsOf(list?.children, ListRow);
+    // Each with its turn; the one in force opens to keep, change or drop, the one not yet in force doesn't.
+    expect(rows.map((r) => [r.id, propsOf(r.subtitle, IdText).map((p) => p.id), typeof r.onClick === "function"])).toEqual([
+      ["lunch", ["msg-7"], true],
+      ["story_gym", ["msg-7"], false],
+    ]);
+    // A change of yours is never listed as the story's.
+    expect(storyChanges(view, { ...summary, blocks: [{ block: "lunch", source: { type: "gm", at: told.at }, off: false }] })).toEqual([]);
   });
 
   test("the binding shown is the read model's: routine leads for Far and Background, story leads for Near and Live, none with no routine", async () => {

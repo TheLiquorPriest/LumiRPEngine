@@ -154,7 +154,7 @@ export function GmRoutinesSection(props: GmSectionProps) {
           {rows.length === 0 ? <Empty icon="users">No characters yet.</Empty> : list.length === 0 ? <Empty icon="search">No one matches.</Empty> : <CharacterRows rows={list} onOpen={pages.open} />}
         </Section>
       </div>
-      {selected ? <CharacterPages key={selected.entity} ctx={ctx} row={selected} onBack={pages.back} /> : null}
+      {selected ? <CharacterPages key={selected.entity} ctx={ctx} row={selected} summary={changed?.find((s) => s.entity === selected.entity)} onBack={pages.back} /> : null}
     </div>
   );
 }
@@ -192,7 +192,7 @@ export function CharacterRows(props: { rows: readonly RoutineRow[]; onOpen(entit
  * `lre-gm-page`, so opening it focuses its Back); inside, it hosts the change pages the same way, so
  * Back or Escape on a change returns to the row that opened it, and Escape here goes to the list.
  */
-function CharacterPages(props: { ctx: Ctx; row: RoutineRow; onBack(): void }) {
+function CharacterPages(props: { ctx: Ctx; row: RoutineRow; summary: RoutineChangeSummary | undefined; onBack(): void }) {
   const { ctx, row } = props;
   const changes = usePages<RoutineChange>();
   const [view, setView] = useState<RoutineGmView | null>(null);
@@ -249,7 +249,7 @@ function CharacterPages(props: { ctx: Ctx; row: RoutineRow; onBack(): void }) {
               {error}
             </Banner>
           ) : null}
-          {view ? <RoutineSections view={view} gm={ctx.gm} busy={ctx.busy} open={changes.open} /> : error ? null : <None>Reading their routine…</None>}
+          {view ? <RoutineSections view={view} gm={ctx.gm} summary={props.summary} busy={ctx.busy} open={changes.open} /> : error ? null : <None>Reading their routine…</None>}
         </GmPage>
       </div>
       {view && change?.kind === "follow" ? <FollowPage ctx={ctx} view={view} onBack={changes.back} /> : null}
@@ -259,8 +259,8 @@ function CharacterPages(props: { ctx: Ctx; row: RoutineRow; onBack(): void }) {
   );
 }
 
-/** Everything the GM reads of one character's routine, in the page's order; `open` opens a change over it. */
-export function RoutineSections(props: { view: RoutineGmView; gm: GmView; busy: boolean; open(change: RoutineChange): void }) {
+/** Everything the GM reads of one character's routine, in the page's order; `summary` is what this chat changed of them (`changed`), the story's changes listed from it; `open` opens a change over it. */
+export function RoutineSections(props: { view: RoutineGmView; gm: GmView; summary: RoutineChangeSummary | undefined; busy: boolean; open(change: RoutineChange): void }) {
   const { view, gm, busy, open } = props;
   return (
     <div class="lre-gm-routines" data-lre-gm-routine={view.entity}>
@@ -270,7 +270,7 @@ export function RoutineSections(props: { view: RoutineGmView; gm: GmView; busy: 
       <Schedules view={view} now={gm.minds.now} busy={busy} open={open} />
       <Today view={view} gm={gm} />
       <Invitations view={view} />
-      <StoryMade changes={storyChanges(view)} now={gm.minds.now} busy={busy} open={open} />
+      <StoryMade changes={storyChanges(view, props.summary)} now={gm.minds.now} busy={busy} open={open} />
     </div>
   );
 }
@@ -477,35 +477,44 @@ function Invitations(props: { view: RoutineGmView }) {
   );
 }
 
-/** The changes the story made to their routine and schedules in this chat, each with its turn; a tap opens it to keep or drop. */
+/**
+ * The changes the story made to their routine and schedules in this chat, each with its turn. A tap
+ * opens one in force to keep, change or drop; a block the story added is in force from the next day,
+ * and its row says so until then.
+ */
 function StoryMade(props: { changes: StoryChange[]; now: number; busy: boolean; open(change: RoutineChange): void }) {
   return (
     <Section title="Changes the story made" flush>
       {props.changes.length === 0 ? <None>The story hasn't changed their routine or schedules in this chat.</None> : null}
-      <List>
-        {props.changes.map((c) => {
-          const turn = c.source.type === "story" ? c.source.turn : undefined;
-          const title = c.kind === "schedule" ? nameOfId(c.schedule.schedule) : isOff(c.block.block) ? nameOfId(c.block.block.id) : c.block.block.label;
-          const what = c.kind === "schedule" ? (c.schedule.chat ? chatScheduleWords(c.schedule.chat, props.now) : "") : isOff(c.block.block) ? "Switched off for them" : blockWhen(c.block.block);
-          return (
-            <ListRow
-              key={c.kind === "schedule" ? `s:${c.schedule.schedule}` : `b:${c.block.block.id}`}
-              icon={c.kind === "schedule" ? "calendar" : "clock"}
-              title={title}
-              subtitle={
-                <span class="lre-gm-routines-lines">
-                  <span>{what}</span>
-                  <span>{sourceWords(c.source, props.now)}</span>
-                  {turn ? <IdText id={turn} /> : null}
-                </span>
-              }
-              chevron
-              disabled={props.busy}
-              onClick={() => props.open(c.kind === "schedule" ? { kind: "schedule", id: c.schedule.schedule } : { kind: "block", id: c.block.block.id })}
-            />
-          );
-        })}
-      </List>
+      <div data-lre-gm-list="routine-story">
+        <List>
+          {props.changes.map((c) => {
+            const block = c.kind === "block" ? c.block : null;
+            // The story's block once in force; before then, the block it will replace, if any.
+            const shown = block && !isOff(block.block) && !c.off ? block.block : null;
+            const live = c.kind === "block" ? block?.owner.level === "chat" : c.schedule !== null;
+            const what = c.kind === "schedule" ? (c.schedule?.chat ? chatScheduleWords(c.schedule.chat, props.now) : c.off ? "Off for them" : "Their own version in this chat") : c.off ? "Switched off for them" : live && shown ? blockWhen(shown) : "In force from the day after the story made it";
+            return (
+              <ListRow
+                key={`${c.kind}:${c.id}`}
+                id={c.id}
+                icon={c.kind === "schedule" ? "calendar" : "clock"}
+                title={shown ? shown.label : nameOfId(c.id)}
+                subtitle={
+                  <span class="lre-gm-routines-lines">
+                    <span>{what}</span>
+                    <span>{sourceWords({ ...c.source, label: "The story" }, props.now)}</span>
+                    {c.source.turn ? <IdText id={c.source.turn} /> : null}
+                  </span>
+                }
+                chevron={live}
+                disabled={props.busy}
+                onClick={live ? () => props.open(c.kind === "schedule" ? { kind: "schedule", id: c.id } : { kind: "block", id: c.id }) : undefined}
+              />
+            );
+          })}
+        </List>
+      </div>
     </Section>
   );
 }

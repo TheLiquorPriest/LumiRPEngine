@@ -125,15 +125,22 @@ export function sourceWords(source: SourceView, now: number): string {
   return `${source.label}, ${source.at >= now ? "just now" : `${formatMinutes(now - source.at)} ago`}`;
 }
 
-/** A change the story made to their routine or schedules in this chat, with its source: the turn and the time. */
-export type StoryChange = { kind: "block"; block: EffectiveBlock; source: SourceView } | { kind: "schedule"; schedule: EffectiveSchedule; source: SourceView };
+/**
+ * A change the story made to their routine or schedules in this chat, as `lre.routine {op: "changed"}`
+ * records it (the time and the turn), with the block or schedule as the read model has it now. A
+ * block the story adds is in force from the day after it made it: until then the read model has the
+ * block it will replace, if any, and never the story's.
+ */
+export type StoryChange =
+  | { kind: "block"; id: RoutineBlockId; source: Extract<ChatRoutineSource, { type: "story" }>; off: boolean; block: EffectiveBlock | null }
+  | { kind: "schedule"; id: ScheduleId; source: Extract<ChatRoutineSource, { type: "story" }>; off: boolean; schedule: EffectiveSchedule | null };
 
-/** The changes the story made to their routine and schedules in this chat, in the order the story made them. */
-export function storyChanges(view: Pick<RoutineGmView, "blocks" | "schedules">): StoryChange[] {
+/** The changes the story made to their routine and schedules in this chat (`summary`, what the chat changed of them), in the order the story made them. */
+export function storyChanges(view: Pick<RoutineGmView, "blocks" | "schedules">, summary: RoutineChangeSummary | undefined): StoryChange[] {
   const out: StoryChange[] = [];
-  for (const block of view.blocks) if (block.owner.level === "chat" && block.source.type === "story") out.push({ kind: "block", block, source: block.source });
-  for (const schedule of view.schedules) if (schedule.chat?.source.type === "story") out.push({ kind: "schedule", schedule, source: schedule.chat.source });
-  return out.sort((a, b) => (a.source.type === "story" ? a.source.at : 0) - (b.source.type === "story" ? b.source.at : 0));
+  for (const b of summary?.blocks ?? []) if (b.source.type === "story") out.push({ kind: "block", id: b.block, source: b.source, off: b.off, block: view.blocks.find((x) => x.block.id === b.block) ?? null });
+  for (const s of summary?.schedules ?? []) if (s.source.type === "story") out.push({ kind: "schedule", id: s.schedule, source: s.source, off: s.off, schedule: view.schedules.find((x) => x.schedule === s.schedule) ?? null });
+  return out.sort((a, b) => a.source.at - b.source.at);
 }
 
 // ---------------------------------------------------------------- words for the read model
