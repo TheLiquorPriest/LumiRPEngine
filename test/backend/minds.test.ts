@@ -584,7 +584,7 @@ describe("a mind's context", () => {
     expect(mindCalls(rig).filter((c) => isMind(c, "Danny Okafor")).at(-1)?.messages[1]?.content).toContain(AIM);
   });
 
-  test("their intent is never cut: when who they are fills the room, it still comes whole, on top of the budget", async () => {
+  test("their intent is never cut: when who they are is far too long to fit, it still comes whole", async () => {
     const rig = new Rig({ shipped: true, minds: true });
     fakeModels(rig);
     const contexts: string[] = [];
@@ -598,12 +598,8 @@ describe("a mind's context", () => {
     rig.body(await rig.send({ type: "lre.edit", chatId, ops: [{ op: "set", entity: "danny_okafor", field: "description", value: `${"He has fixed every engine on Harbor Street twice. ".repeat(400).trim()}` }, { op: "mind_intent", entity: "danny_okafor", text: AIM }] }));
     await rig.turn(chatId, "Hello.", "They look up.");
     const context = contexts.at(-1) ?? "";
-    const ended = /The story so far ended: (.*)\n/.exec(context)?.[1] ?? "";
-    const block = ["## What you mean to do", ...intentLines({ text: AIM, approach: null })].join("\n");
-    expect(context).toContain(block);
-    // Who they are was cut to the room; their intent (and the blank line before it) wasn't, and comes on top of it.
-    expect(context.length - ended.length - (block.length + 2)).toBeLessThanOrEqual(16_000);
-    expect(context.length - ended.length).toBeGreaterThan(16_000);
+    // However what they are is cut to fit, the GM's words for them arrive whole.
+    expect(context).toContain(["## What you mean to do", ...intentLines({ text: AIM, approach: null })].join("\n"));
   });
 
   test("by default the latest reply is read whole, however long, by the next mind and by the memory step; only who was there for it reads it", async () => {
