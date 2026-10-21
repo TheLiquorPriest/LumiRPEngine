@@ -347,7 +347,8 @@ function takeUp(ctx: ReadContext, who: EntityId, place: PlaceId | null, activity
   const e = own(ctx.state.entities, who);
   if (!e || routineStays(ctx, who, place) || optionalQuery(ctx, "combat.engaged")?.(ctx, who) === true) return out;
   if (!held(ctx.state, who, "place", at) && place && own(ctx.world.places, place) && placeOfEntity(ctx.state, who) !== place) {
-    if (seen && withPov(ctx, who)) out.push({ type: ENGINE_EVENTS.note, data: { text: `${e.name} leaves.`, entity: who, visibility: "known_by" } });
+    // Seen as their arrival is: by a POV that can see them, whether or not it holds a `knows` link to them.
+    if (seen && withPov(ctx, who)) out.push({ type: ENGINE_EVENTS.note, data: { text: `${e.name} leaves.`, entity: who, visibility: "public" } });
     out.push({ type: "set", entity: who, field: "place", value: place });
     if (who !== ctx.world.pov && place === placeOfEntity(ctx.state, ctx.world.pov)) out.push({ type: ENGINE_EVENTS.signal, data: { class: "arrival", text: `${e.name} arrives.`, entity: who, ...(quiet ? { stops: false } : {}) } });
   }

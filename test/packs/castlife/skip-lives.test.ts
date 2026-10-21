@@ -11,9 +11,10 @@ import type { WorldState } from "../../../src/engine/state";
 import type { Working } from "../../../src/engine/working";
 import { routineChanges } from "../../../src/packs/castlife/core/view";
 import { fold, startState } from "../support";
-import { at, foldBoth, gmEdit, lapse, pin, record, reg, town, whereabouts, withRoutines, YOU } from "./town";
+import { at, foldBoth, gmEdit, held, lapse, pin, record, reg, town, whereabouts, withRoutines, YOU } from "./town";
 import { runTimelapse } from "../../../src/engine/time";
 import { ENGINE_EVENTS } from "../../../src/engine/engine-pack";
+import { advance } from "../../../src/engine/simulate";
 
 /** The skip: twenty-two hours from Friday 07:30, the POV at home on its own day. */
 const SPAN = 22 * 60;
@@ -94,6 +95,45 @@ describe("a time skip, for someone whose routine is informative", () => {
     ]);
     const lines = out.montage.groups.flatMap((g) => g.lines);
     expect(seen.every((e) => "data" in e && lines.includes(String(e.data.text)))).toBe(true);
+  });
+
+  /** Where `who` was put, with the clock time of each move, in a run's events from `from`. */
+  function moves(w: Working, from: number, start: number, who: string): string[] {
+    let clock = start;
+    const out: string[] = [];
+    for (const e of w.events.slice(from)) {
+      if (e.type === "clock") clock += e.minutes;
+      else if (e.type === "set" && e.entity === who && e.field === "place") out.push(`${clock - start} ${String(e.value)}`);
+    }
+    return out;
+  }
+
+  test("model, as played live: the cast come to the POV's place and go at their minutes, and the Montage tells both, whether or not the POV holds a knows link to them", () => {
+    // Maya, Live, is at the pub; Alex is held at home. They know each other through her regard, but
+    // Alex holds no `knows` link to her, as Port Alder's POV holds none to Danny or Marcus.
+    const w = town((wd) => void wd.entities.maya?.relations.push({ type: "regard", to: YOU, fields: { warmth: 30, trust: 30, respect: 30, t: 0 } }));
+    record(w, [pin("maya", "live"), { type: "set", entity: "maya", field: "place", value: "pub" }]);
+    const start = w.state.clock;
+    record(w, [planned(w, [{ entity: "maya", blocks: [{ label: "Coffee at Alex's", start: start + 90, end: start + 240, place: "apartment", activity: "visiting" }, { label: "Back to the pub", start: start + 240, end: start + SPAN, place: "pub", activity: "drinks" }] }])]);
+    const from = w.events.length;
+    const out = runTimelapse(reg, w, { type: "at", at: start + SPAN }, { runSeed: "seed", povRoutine: false });
+    if ("code" in out) throw new Error(out.reason);
+    // She arrives (an event puts her there) and leaves at their own minutes, 90 and 240 in.
+    expect(moves(w, from, start, "maya")).toEqual(["90 apartment", "240 pub"]);
+    const lines = out.montage.groups.flatMap((g) => g.lines);
+    const told = w.events.slice(from).flatMap((e) => ("data" in e && e.data.entity === "maya" && (e.type === ENGINE_EVENTS.note || (e.type === ENGINE_EVENTS.signal && e.data.class === "arrival")) ? [String(e.data.text)] : []));
+    expect([told.length, told.every((t) => lines.includes(t))]).toEqual([2, true]);
+  });
+
+  test("model, as played live: someone a turn's catch-up left behind lives a short visit early in the skip's first slot at its minute", () => {
+    // Turns take the clock past noon without stepping Maya, off screen and Far: she lags two slots.
+    const w = friday("model");
+    advance(reg, w, at(w, 0, "12:10"), { runSeed: "seed", mode: "turn" });
+    const start = w.state.clock;
+    record(w, [planned(w, [{ entity: "maya", blocks: [{ label: "Lunch at the pub", start: at(w, 0, "12:30"), end: at(w, 0, "13:15"), place: "pub", activity: "lunch" }, { label: "Back to the library", start: at(w, 0, "13:15"), end: at(w, 0, "17:00"), place: "library", activity: "reading" }] }])]);
+    const from = w.events.length;
+    held(w, at(w, 0, "18:00"));
+    expect(moves(w, from, start, "maya")).toEqual([`${at(w, 0, "12:30") - start} pub`, `${at(w, 0, "13:15") - start} library`]);
   });
 
   test("the GM sets one character's skip life; null returns them to their level's, both folds agree and Undo takes it back", () => {

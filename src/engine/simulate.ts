@@ -302,6 +302,20 @@ export function advance(reg: Registry, w: Working, to: number, opts: AdvanceOpti
     return out;
   };
 
+  /** Steps each agent through every slot up to `last` it hasn't been stepped through yet: `slot` as this run reads it, the ones before it as they were. */
+  const stepThrough = (agents: readonly EntityId[], last: number, slot: Slot): void => {
+    for (const agent of agents) {
+      let k = cursors.get(agent) ?? agentCursor(w.world, w.state, agent);
+      // Someone a death earlier in the slot stopped, or who dies on the way, steps no further.
+      while (k < last && stillActs(w, agent)) {
+        k++;
+        const applied = stepAgent(reg, w, agent, k === slot.index ? slot : slotOf(cal, k), opts.runSeed, povRoutine, timelapse);
+        if (applied.length > 0) result.rules.push(...runRulesOnEvents(reg, w, applied, { seed: hashParts(opts.runSeed, "agent", agent, k) }));
+      }
+      cursors.set(agent, k);
+    }
+  };
+
   /** Whether a slot holding `agents` would take the segment past its agent-days cap, once a slot has run. */
   const overDays = (slot: Slot, agents: number): boolean => timelapse && result.slots + spent.slots > 0 && spent.agentDays + result.agentDays + (agents * (slot.end - slot.start)) / MINUTES_PER_DAY > cap.agentDays;
 
@@ -327,6 +341,10 @@ export function advance(reg: Registry, w: Working, to: number, opts: AdvanceOpti
     const before = opened ? opened.since : w.events.length;
     const rulesBefore = result.rules.length;
     const tracksBefore = result.tracks.length;
+    // Anyone a turn's catch-up left behind steps through the slots before this one first, so their own
+    // moments in it happen at their minute, after the time before it, as everyone else's do (DESIGN §8,
+    // observable fidelity): a skip's first slot no longer passes over them.
+    stepThrough(agents, slot.index - 1, slot);
     applyInstants(slot.end, slot);
     clockTo(w, slot.end, cause, e);
     const info = infoOf(slot);
@@ -334,16 +352,7 @@ export function advance(reg: Registry, w: Working, to: number, opts: AdvanceOpti
       if (def.scope === "agent" || rulesetFloor(w.world, def.domain, w.state.realism.levels[def.domain] ?? 0) < def.minLevel) continue;
       e.emit(def.step(info, w.ctx, rngFactory(opts.runSeed, def.id, slot.index)));
     }
-    for (const agent of agents) {
-      let k = cursors.get(agent) ?? agentCursor(w.world, w.state, agent);
-      // Someone a death earlier in the slot stopped, or who dies on the way, steps no further.
-      while (k < slot.index && stillActs(w, agent)) {
-        k++;
-        const applied = stepAgent(reg, w, agent, k === slot.index ? slot : slotOf(cal, k), opts.runSeed, povRoutine, timelapse);
-        if (applied.length > 0) result.rules.push(...runRulesOnEvents(reg, w, applied, { seed: hashParts(opts.runSeed, "agent", agent, k) }));
-      }
-      cursors.set(agent, k);
-    }
+    stepThrough(agents, slot.index, slot);
     const dayEnds = (slot.index + 1) % cal.partStarts.length === 0;
     const tickSeed = hashParts(opts.runSeed, "tick", slot.index);
     result.rules.push(...runRulesOnTick(reg, w, "slot", { seed: tickSeed }));
@@ -401,6 +410,8 @@ export function advance(reg: Registry, w: Working, to: number, opts: AdvanceOpti
       }
     }
     if (result.stop === "target") {
+      // A piece that ends inside its first slot catches up whoever lags as a whole slot would.
+      stepThrough(stepping(), tail.index - 1, tail);
       applyInstants(to, tail);
       clockTo(w, to, cause, e);
       result.open = open;
