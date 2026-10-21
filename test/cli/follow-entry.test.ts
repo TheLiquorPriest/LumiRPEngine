@@ -173,4 +173,17 @@ describe("lumirpengine mcp, the real entry", () => {
       expect([label, await s.stop()]).toEqual([label, expect.stringContaining(said)]);
     }
   });
+
+  test("under Bun, follows a kit the size of the real one: one tools/list_changed, then the kit's tools and answers", async () => {
+    // The real kit is about 4 MB, imported as a data URL: Bun 1.3 refuses one longer than about 2 KB, Bun 1.4 takes it.
+    lre.build = "b9";
+    lre.kit = writeKit(distOf(root, "big"), "b9", ["lre_followed"], 4_000_000);
+    const s = harness();
+    await s.start();
+    await s.out.next((m) => m.method === "notifications/tools/list_changed");
+    expect(await s.tools()).toEqual(["lre_followed"]);
+    expect((await s.ask("tools/call", { name: "lre_followed", arguments: {} })).content).toEqual([{ type: "text", text: "lre_followed answered by build b9" }]);
+    expect(await s.checkIns.next((c) => c.kit === "b9")).toMatchObject({ follows: true, why: null });
+    expect(await s.stop()).toContain("serving the tools of LumiRPEngine build b9");
+  });
 });
