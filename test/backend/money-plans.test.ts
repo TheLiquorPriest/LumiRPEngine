@@ -71,11 +71,14 @@ async function stateOf(rig: Rig, chatId: string): Promise<{ state: WorldState; w
   return { state, world };
 }
 
-/** Time passing, as the palette's Timelapse sends it. */
+/**
+ * Time passing, as the palette's Timelapse sends it. Arrivals only note: Danny and Priya, Live or Near
+ * but not with the POV, follow their routine off screen in a skip (§24.1) and come where it is.
+ */
 async function timelapse(rig: Rig, chatId: string, minutes: number): Promise<void> {
   const palette = (await rig.rt.view(chatId, rig.host.userId)).palette?.timelapse;
   if (!palette) throw new Error("no Timelapse");
-  rig.body(await rig.send(timelapseRequest(palette, { type: "duration", minutes }, {}, chatId)));
+  rig.body(await rig.send(timelapseRequest(palette, { type: "duration", minutes }, { arrival: "note" }, chatId)));
   await rig.host.settle();
   const generation = await rig.host.start(chatId, { type: "normal" });
   await rig.host.finish(generation, "Time passes.");
