@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { dayHandles, handleRange, moveHandle, slotIssues, slotSpans, timeOf } from "../../src/packs/calendar/ui/schedule-editor";
+import { dayHandles, handleRange, moveHandle, slotIssues, slotSpans, timeOf } from "../../src/frontend/build/schedule-form";
 import { strokeCells } from "../../src/packs/space/ui/editors";
 import { cellMeaning, checkMapText, fillCells, framePosition, freeChar, gridPlaceCells, moveLegendChar, nodePositions, paintLayout, readModel, removePlace, renamePlace, resizeLayout, withLayout, type MapModel, type MapValue } from "../../src/packs/space/ui/map-editor";
 import { badCells, markOf, previewMarks } from "../../src/packs/space/ui/map-preview";

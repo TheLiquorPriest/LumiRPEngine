@@ -16,7 +16,6 @@ import type { JobKind, LintIssue, WorldCollection, WorldPart } from "../../share
 import { spawnCapOf, type WorldDoc, type WorldIndex } from "../../shared/world";
 import type { BuildRoute } from "../app";
 import { lorePinsJson, lorePinsOf } from "../../shared/lore";
-import { routineSettingsOf } from "../../shared/routines";
 import { LorePinsSection } from "./lore-pins";
 import { useApp, useUi, useView } from "../app";
 import { Badge, Banner, Button, Empty, Field, IconButton, IdText, JsonView, List, ListRow, PageHeader, SaveBar, Section, useBusy } from "../components";
@@ -33,6 +32,8 @@ import { JOB_INFO, jobStore, JobStatusBadge, JobView, keptJobs } from "./jobs";
 import { LookupTableEditor } from "./lookup-editor";
 import { MindsEditor } from "./minds-editor";
 import { LoreEditor, LoreList } from "./lore-editor";
+import { RoutineEditor, RoutineList } from "./routine-editor";
+import { RoutineSettingsEditor } from "./routine-settings";
 import { RulesetEditor } from "./ruleset-editor";
 import { COLLECTION_SPECS, newItem, PART_SPECS } from "./schema";
 import { lintAt, SchemaFields, worldIdentifiers } from "./schema-form";
@@ -45,12 +46,13 @@ import { TiersEditor } from "./tiers-editor";
 const GROUPS: readonly { title: string; collections: readonly WorldCollection[] }[] = [
   { title: "People & things", collections: ["entities", "kinds", "classifications", "relations"] },
   { title: "Places", collections: ["places", "maps", "routes", "grids"] },
-  { title: "Rules", collections: ["actions", "checks", "rules", "schedules"] },
+  { title: "Daily life", collections: ["routines", "schedules"] },
+  { title: "Rules", collections: ["actions", "checks", "rules"] },
   { title: "Story", collections: ["tracks", "lore"] },
   { title: "Engine", collections: ["tables", "sections", "steps", "packs"] },
 ];
 
-const PARTS: readonly WorldPart[] = ["meta", "calendar", "realism", "tiers", "time", "ruleset", "loreIndex", "minds"];
+const PARTS: readonly WorldPart[] = ["meta", "calendar", "realism", "tiers", "time", "ruleset", "loreIndex", "minds", "routineSettings"];
 
 const TOOLS: readonly JobKind[] = ["import_lore", "index_book", "index_text", "refine", "describe_map", "playtest", "check_world"];
 
@@ -96,7 +98,7 @@ function BuildPage(props: { route: BuildRoute }) {
     case "collection":
       return (
         <WithDraft worldId={route.worldId}>
-          {route.collection === "lore" ? <LoreList worldId={route.worldId} /> : <CollectionView collection={route.collection} />}
+          {route.collection === "lore" ? <LoreList worldId={route.worldId} /> : route.collection === "routines" ? <RoutineList worldId={route.worldId} /> : <CollectionView collection={route.collection} />}
         </WithDraft>
       );
     case "item":
@@ -719,7 +721,7 @@ function ItemView(props: { collection: WorldCollection; id: string | null }) {
   const send = useMemo(() => draftSend(app), [app]);
   if (!draft) return null;
   const registered = app.catalog.editors.get(props.collection);
-  const Editor = registered ? registered.component : props.collection === "tables" ? TableEditor : props.collection === "lore" ? LoreEditor : SchemaEditor;
+  const Editor = registered ? registered.component : props.collection === "tables" ? TableEditor : props.collection === "lore" ? LoreEditor : props.collection === "routines" ? RoutineEditor : SchemaEditor;
   return <Editor world={draft.doc} collection={props.collection} id={props.id} send={send} />;
 }
 
@@ -756,16 +758,7 @@ function PartView(props: { part: WorldPart }) {
       </div>
     );
   }
-  if (props.part === "routineSettings") {
-    return (
-      <div class="lre-build-page" data-lre-editor="part:routineSettings">
-        <PageHeader title={PART_INFO.routineSettings.label} subtitle={PART_INFO.routineSettings.hint} />
-        <Section title="In force">
-          <JsonView value={{ ...routineSettingsOf(draft.doc) }} />
-        </Section>
-      </div>
-    );
-  }
+  if (props.part === "routineSettings") return <RoutineSettingsEditor />;
   return <SchemaPartView part={props.part} />;
 }
 
