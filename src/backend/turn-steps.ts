@@ -43,8 +43,10 @@ import { inMinorUnits, type Steps } from "./steps";
 /**
  * Player-visible fact lines (the engine's slot renders, minus the turn's own), leak-checked. Stance
  * is left out: its cues are hints for the narrator to play, and a prose helper given one could state
- * it (DESIGN §6.6). So is the Minds section: under `full` it carries each mind whole, which only the
- * narrator may read, to depict and never state (DESIGN §24.3).
+ * it (DESIGN §6.6). So is every other hint (People's usual routines): background for the narrator,
+ * which a helper or the contradiction check would read as fact. So is the Minds section: under
+ * `full` it carries each mind whole, which only the narrator may read, to depict and never state
+ * (DESIGN §24.3).
  */
 export function factLines(registry: Registry, world: WorldDoc, state: Readonly<WorldState>, secrets: readonly string[]): string[] {
   // Every renderer reads the same state: one read pass (DESIGN §9.6).
@@ -56,7 +58,7 @@ export function factLines(registry: Registry, world: WorldDoc, state: Readonly<W
     const place = povPlace(registry, world, state);
     out.push(`${pov?.name ?? world.pov} is ${place === null ? "at an unknown place" : place.id === null ? "somewhere" : `at ${place.name}`}; it is ${formatClock(calendarOf(world), state.clock)}.`);
     for (const r of registry.renderers) {
-      if (r.slot === "outcome" || r.slot === "montage" || r.slot === "outline" || r.slot === "stance" || r.slot === MINDS_SLOT) continue;
+      if (r.hint || r.slot === "outcome" || r.slot === "montage" || r.slot === "outline" || r.slot === "stance" || r.slot === MINDS_SLOT) continue;
       try {
         for (const line of r.render(ctx)) if (findLeaks(line, secrets).length === 0 && !out.includes(line)) out.push(line);
       } catch {

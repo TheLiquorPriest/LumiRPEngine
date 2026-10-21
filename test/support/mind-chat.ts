@@ -108,12 +108,13 @@ export function storyMemories(name: string): JsonObject {
 /** What the player says on the story's second turn: it names the lighthouse, and the breakwater only by a word. */
 export const ASK = "I ask Danny about the lighthouse by the breakwater.";
 
-/** Port Alder with the story lore, Danny's pin, `reads` as what minds read, a first turn whose memories write all of the above, and a second turn that names the lighthouse. */
+/** Port Alder with the story lore, Danny's pin and his routine, `reads` as what minds read, a first turn whose memories write all of the above, and a second turn that names the lighthouse. */
 export async function storyChat(rig: Rig, reads: JsonObject = {}): Promise<{ chatId: string; seen: Seen }> {
   const seen = fakeModels(rig, storyMemories);
   const chatId = await alderChat(rig, async (put, worldId) => {
     for (const [id, value] of Object.entries(STORY_LORE)) await put("lore", id, value);
     rig.body(await rig.send({ type: "lre.editor", op: "set", worldId, base: null, part: "lorePins", value: { characters: { [DANNY]: [{ lore: "spare_key" }] }, places: {} } }));
+    await put("routines", "r_danny", { id: "r_danny", owner: DANNY, blocks: [{ id: "pier", label: "ROUTINE-MARK fishing off the pier", activity: "leisure", kind: "fixed", at: "05:30", minutes: 45 }] });
   });
   if (Object.keys(reads).length > 0) rig.body(await rig.send({ type: "lre.settings.set", patch: { minds: { reads } } }));
   await rig.turn(chatId, "Morning, both of you.", "FIRST-REPLY-MARK: Danny nods; Priya waves a clipboard.");

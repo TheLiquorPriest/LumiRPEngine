@@ -50,6 +50,10 @@ describe("the Stance section on the section budget", () => {
     // The host can't count: every section is priced by the estimate, so the same text costs the same.
     rig.host.tokenCount = null;
     const worldId = await rig.newWorld("Alder", "modern_slice_of_life");
+    // Usual routines are People's hint lines (DESIGN §6.10), whose cost the budget doesn't count: off
+    // here, so the sections as sent cost what the budget spends.
+    rig.body(await rig.send({ type: "lre.editor", op: "set", worldId, base: null, part: "routineSettings", value: { narrator: false } }));
+    rig.body(await rig.send({ type: "lre.world", op: "commit", worldId, base: null }));
     const first = rig.host.createChat("Morning.");
     rig.body(await rig.send({ type: "lre.world", op: "attach", worldId, chatId: first }));
     const all = await sent(rig, first, 100_000);
