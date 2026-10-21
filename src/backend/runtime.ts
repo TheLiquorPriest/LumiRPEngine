@@ -58,7 +58,7 @@ import { DEFAULT_SECTIONS, EngineBook, renderSection, sectionsOf, sectionTokens 
 import { ChatPrefs } from "./chat-prefs";
 import { ChipStore, idAfterSwipeDelete, type StoredChip } from "./chips";
 import type { DryRun, HostPort } from "./host";
-import { LedgerService, toChain, type Delivered, type PreOutcome, type TurnContext, type TurnHooks } from "./ledger-io";
+import { LedgerService, toChain, type Delivered, type PreOutcome, type TurnContext, type TurnHooks, type TurnInputs } from "./ledger-io";
 import { MessageCache } from "./message-cache";
 import { StatePush } from "./push";
 import { effectiveMode, recordOutcome, SettingsStore } from "./settings-store";
@@ -71,7 +71,7 @@ import { checkQuestion, inferredChip, inferredOutcome } from "./inferred-words";
 import { failureWords } from "./requirement-words";
 import { missingSections, withoutMissing } from "./section-refs";
 import { CallMeter, dedupeProposals, extract, interpret, saidPayMethod, Steps, type InterpretContext, type InterpretRead, type ThingSort } from "./steps";
-import { PlanNotes } from "./plan-notes";
+import { PlanNotes, type PlanLines } from "./plan-notes";
 import { OutcomeNotes } from "./outcome-notes";
 import { InspectorLog, type InspectorRecord } from "./inspector-log";
 import { JsonHiding, readableReply } from "./json-hiding";
@@ -612,6 +612,14 @@ export class Runtime implements TurnHooks {
   private readonly answeredMinds = new Map<string, KeptMinds>();
   /** A failed engine run's answered minds, by chat, for the next run of the same turn (DESIGN §5.1). */
   private readonly keptMinds = new Map<ChatId, KeptMinds>();
+  /**
+   * What each engine run planned for the narrator, by its turn id (DESIGN §5.1): its prose (`brief`,
+   * the prose `outline`) and its plan's Outcome, Montage and Outline lines. Its own sections read
+   * these. They become its seed's (what the reply's steps and a later Re-narrate read, and
+   * `plans.json`) only when a generation takes the turn (`adopted`), so a run that was dropped or
+   * failed never speaks for a seed it shares with another (`same_roll`).
+   */
+  private readonly runLines = new Map<string, { seed: string; prose: PlanProse; lines: PlanLines }>();
   /** What the minds need of the backend: the runner, the pre and post phases and the time skip read it (`backend/minds.ts`). */
   readonly minds: MindsDeps;
   /** The minds a time skip runs at its beats (DESIGN §24.7): `runMinds` on this runtime's deps, which tests replace with a fake. */
@@ -681,8 +689,11 @@ export class Runtime implements TurnHooks {
       this.ledger.inputsChanged(userId);
     };
     this.host.on("PRESET_CHANGED", (_e, userId) => presetWritten(userId));
+    // Only a write that names a preset key can switch the preset. Lumiverse's pages save every setting
+    // in batches (a drawer, a dock, a one-shot guide), and one landing while the engine runs must not
+    // throw away the turn it prepared; a write that names no key still counts.
     this.host.on("SETTINGS_UPDATED", (e, userId) => {
-      if (e.key === null || /preset/i.test(e.key)) presetWritten(userId);
+      if (e.keys === null || e.keys.some((key) => /preset/i.test(key))) presetWritten(userId);
     });
     // The host keeps a deleted chat's chat-scoped regex scripts, so the engine removes its own (DESIGN §6.7).
     this.host.on("CHAT_DELETED", (e, userId) => {
@@ -953,7 +964,7 @@ export class Runtime implements TurnHooks {
     const briefRuns = runsOf(settings.modelUse, render.world, "brief", facts, { output: "text", guidance: pre.preset.guidance });
     const outlineRuns = runsOf(settings.modelUse, render.world, "outline", facts, { output: "text", guidance: pre.preset.guidance });
     if (briefRuns.length === 0 && outlineRuns.length === 0) {
-      await this.keepPlanLines(input.chatId, input.userId, p.seed, plan, render.world, undefined);
+      this.keepRunLines(input.generationId, p.seed, plan, render.world, { brief: null, outline: [] });
       return;
     }
     const budget = this.preBudgets.get(input.generationId) ?? phaseBudget(settings, "pre", input.signal);
@@ -973,8 +984,7 @@ export class Runtime implements TurnHooks {
     const [briefs, outlines] = await Promise.all([briefTask, outlineTask]);
     const brief = briefs.flat().join(" ").trim();
     const prose = { brief: brief === "" ? null : brief, outline: outlines.flat() };
-    bridge.setProse(p.seed, prose);
-    await this.keepPlanLines(input.chatId, input.userId, p.seed, plan, render.world, prose);
+    this.keepRunLines(input.generationId, p.seed, plan, render.world, prose);
     this.host.log("info", `[LumiRPEngine] plan ${input.generationId.slice(0, 8)}: brief ${brief === "" ? "none" : "yes"}, ${outlines.flat().length} outline line(s), ${budget.spent} pre call(s)`, input.userId);
   }
 
@@ -1018,14 +1028,10 @@ export class Runtime implements TurnHooks {
     this.inspector.save(chatId);
   }
 
-  /** Stores the sections a plan feeds the narrator, so Re-narrate can rebuild them. */
-  private async keepPlanLines(chatId: ChatId, userId: UserId, seed: string, plan: EngineTurnPlan | undefined, world: WorldDoc, prose: PlanProse | undefined): Promise<void> {
+  /** The sections a run's plan feeds the narrator, kept under the run until a generation takes its turn (`adopted`). */
+  private keepRunLines(turn: string, seed: string, plan: EngineTurnPlan | undefined, world: WorldDoc, prose: PlanProse): void {
     if (!plan) return;
-    try {
-      await this.planNotes.put(chatId, userId, seed, { ...planLines(plan, world, this.registry), outline: planOutline(plan, prose) });
-    } catch (error) {
-      this.host.log("warn", `[LumiRPEngine] plan lines not kept: ${error instanceof Error ? error.message : String(error)}`, userId);
-    }
+    lruSet(this.runLines, turn, { seed, prose, lines: { ...planLines(plan, world, this.registry), outline: planOutline(plan, prose) } }, 64);
   }
 
   /**
@@ -1759,7 +1765,7 @@ export class Runtime implements TurnHooks {
     await this.chips.add(input.chatId, input.userId, stored);
   }
 
-  /** Replaces (or, with `null`, drops) a pending Outcome note. */
+  /** Replaces (or, with `null`, drops) a pending Outcome note; a reply the engine prepared with the note as it read is stale now (DESIGN §5.1). */
   async setOutcomeNote(chatId: ChatId, userId: UserId, id: string, text: string | null): Promise<void> {
     const notes = await this.outcomeNotes.list(chatId, userId);
     const note = notes.find((n) => n.id === id);
@@ -1767,6 +1773,7 @@ export class Runtime implements TurnHooks {
     if (text === null) notes.splice(notes.indexOf(note), 1);
     else note.text = text;
     await this.outcomeNotes.save(chatId, userId, notes);
+    this.ledger.inputsChanged(userId);
   }
 
   async afterCommit(input: TurnContext): Promise<void> {
@@ -1971,10 +1978,17 @@ export class Runtime implements TurnHooks {
   /**
    * What a chat's sections are made from besides its messages and journal, read from memory for the
    * guard (DESIGN §5.1): the chat's world revision, the user's settings revision (section budgets,
-   * secrecy, minds), the active Loom preset and the presets written since start (which outlets it places).
+   * secrecy, minds), the active Loom preset and the presets written since start (which outlets it
+   * places), and the chat's Outcome notes (a decline reworded or dismissed on its chip).
    */
-  inputs(chatId: ChatId, userId: UserId): string {
-    return [this.runs.get(`${userId}\u0000${chatId}`)?.revision ?? "", this.settings.revision(userId), this.presets.loomOf(userId) ?? "", this.presetWrites.get(userId) ?? 0].join("\u0000");
+  inputs(chatId: ChatId, userId: UserId): TurnInputs {
+    return {
+      revision: this.runs.get(`${userId}\u0000${chatId}`)?.revision ?? "",
+      settings: String(this.settings.revision(userId)),
+      preset: this.presets.loomOf(userId) ?? "",
+      presetWrites: String(this.presetWrites.get(userId) ?? 0),
+      notes: String(this.outcomeNotes.revision(chatId, userId)),
+    };
   }
 
   /**
@@ -2003,14 +2017,17 @@ export class Runtime implements TurnHooks {
     const secrets = unrevealedSecrets(this.registry, world, state);
     const pending = input.core.journal.pending[input.generationId];
     const plan = pending?.planned ? pending : undefined;
-    const turnPlan = plan ? this.bridges.get(input.chatId)?.planFor(plan.seed) : undefined;
-    const prose = turnPlan && plan ? this.bridges.get(input.chatId)?.proseFor(plan.seed) : undefined;
+    // This run's own lines: the plan it made and the prose it wrote, never another run's of the same
+    // seed. A Re-narrate (P3) tells its source's, kept when that turn's reply took it (`adopted`).
+    const renarrated = plan?.kind === "renarrate";
+    const own = plan && !renarrated ? this.runLines.get(input.generationId) : undefined;
+    const turnPlan = plan && !renarrated && !own ? this.bridges.get(input.chatId)?.planFor(plan.seed) : undefined;
+    const kept = plan && renarrated ? await this.planNotes.get(input.chatId, input.userId, plan.seed) : null;
+    const turnLines = own?.lines ?? (turnPlan ? { ...planLines(turnPlan, world, this.registry), outline: planOutline(turnPlan, undefined) } : kept);
+    const outline = turnLines?.outline ?? [];
+    const planned = { outcome: [...(turnLines?.outcome ?? [])], montage: [...(turnLines?.montage ?? [])] };
     // The preset the reply assembles with: the one the pre phase read, else read now (a Continue).
     const preset = this.prePhase.get(input.generationId)?.preset ?? (await this.presets.current(input.chatId, input.userId));
-    // A plan the bridge no longer holds (a Re-narrate of a turn from before a restart) comes back from storage.
-    const kept = plan && !turnPlan ? await this.planNotes.get(input.chatId, input.userId, plan.seed) : null;
-    const outline = turnPlan ? planOutline(turnPlan, prose) : (kept?.outline ?? []);
-    const planned = turnPlan ? planLines(turnPlan, world, this.registry) : kept ? { outcome: kept.outcome, montage: kept.montage } : { outcome: [], montage: [] };
     // Declines from the last reply (DESIGN §9.5), for the next turn and its swipes only.
     const target = pending?.messageId ?? null;
     for (const n of await this.outcomeNotes.list(input.chatId, input.userId)) if (n.messageId !== target && (n.toldTo === undefined || n.toldTo === target)) planned.outcome.unshift(n.text);
@@ -2134,12 +2151,32 @@ export class Runtime implements TurnHooks {
     await this.book.clear(delivered.bookId, delivered.entries, userId);
   }
 
-  /** A generation took the prepared turn: what the engine run kept under the turn's id is the generation's now, and an earlier run's failure flag goes. */
+  /**
+   * The chat's world book holds none of the engine's sections (DESIGN §6.4), for a prompt with no
+   * turn of its own (Impersonate, a dry run): what a restart or a refused clear left there goes.
+   */
+  async vacate(chatId: ChatId, userId: UserId): Promise<void> {
+    const run = await this.runOf(chatId, userId);
+    const bookId = run ? (await this.worlds.index(run.worldId, userId))?.loreBookId : null;
+    if (bookId) await this.book.vacate(bookId, userId);
+  }
+
+  /**
+   * A generation took the prepared turn: what the engine run kept under the turn's id is the
+   * generation's now, its plan's lines and prose become its seed's (the reply's steps read them, and
+   * a Re-narrate of this reply tells them), and an earlier run's failure flag goes.
+   */
   async adopted(chatId: ChatId, userId: UserId, from: string, to: string): Promise<void> {
     rekey(this.preBudgets, from, to);
     rekey(this.prePhase, from, to);
     rekey(this.loreTraces, from, to);
     rekey(this.mindTraces, from, to);
+    const own = this.runLines.get(from);
+    this.runLines.delete(from);
+    if (own) {
+      this.bridges.get(chatId)?.setProse(own.seed, own.prose);
+      await this.planNotes.put(chatId, userId, own.seed, own.lines).catch((error: unknown) => this.host.log("warn", `[LumiRPEngine] plan lines not kept: ${error instanceof Error ? error.message : String(error)}`, userId));
+    }
     const record = this.inspector.records(chatId)?.find((r) => r.id === from);
     if (record) {
       record.id = to;
@@ -2152,7 +2189,9 @@ export class Runtime implements TurnHooks {
    * The engine run failed (DESIGN §5.1): nothing was generated. The chat's last message says what
    * failed and why ("Maya's mind: connection reset (after 2 retries)"), with a Retry that runs the
    * engine again, then the reply, and a way to Diagnostics. The minds that answered are kept for the
-   * Retry, which asks only the others while nothing they were made from changes.
+   * Retry, which asks only the others while nothing they were made from changes. A generation the
+   * guard stopped because an earlier turn's sections couldn't be emptied (`clear`, DESIGN §6.4) says
+   * so instead, with no Retry: pressing the same button again tries again.
    */
   async failed(input: { chatId: ChatId; userId: UserId; turn: string; step: string; reason: string }): Promise<void> {
     const answered = this.answeredMinds.get(input.turn);
@@ -2161,12 +2200,15 @@ export class Runtime implements TurnHooks {
     const last = (await this.host.chats.messages(input.chatId, input.userId)).at(-1);
     if (!last) return;
     // "interpret call failed: …" reads as "Reading your action: …"; a mind's record already says whose,
-    // and a refused earlier message's reply says why and what to do instead: no Retry can start it.
+    // and a refused earlier message's reply says why and what to do instead: no Retry can start it. A
+    // finished run whose reply never started (`stale`) says what changed; its Retry runs the engine again.
     const why = (input.reason.startsWith(`${input.step} `) ? input.reason.slice(input.step.length + 1) : input.reason).replace(/(?:^|\b)(?:the )?call failed: /g, "");
-    const said = input.step === "mind" || input.step === "target" ? why : `${(STEP_LABEL[input.step] ?? input.step).replace(/…$/, "")}: ${why}`;
-    const detail = said.charAt(0).toUpperCase() + said.slice(1);
-    const retry = input.step === "target" ? [] : [{ id: "regenerate", label: "Retry", style: "primary" as const }];
-    await this.chips.add(input.chatId, input.userId, [{ id: `engine_failed:${input.turn}`, kind: "engine_failed", messageId: last.id, label: "The engine didn't finish, so nothing was generated", detail, actions: [...retry, { id: "diagnostics", label: "Diagnostics" }], expires: "next_send", payload: {} }]);
+    const said = input.step === "mind" || input.step === "target" || input.step === "stale" ? why : `${(STEP_LABEL[input.step] ?? input.step).replace(/…$/, "")}: ${why}`;
+    const cleared = input.step === "clear";
+    const detail = `${said.charAt(0).toUpperCase()}${said.slice(1)}${cleared ? ". Nothing went out with them; try again, and if it keeps failing, Diagnostics shows each attempt." : ""}`;
+    const retry = input.step === "target" || cleared ? [] : [{ id: "regenerate", label: "Retry", style: "primary" as const }];
+    const label = cleared ? "An earlier turn's sections couldn't be cleared, so nothing was generated" : input.step === "stale" ? "The reply didn't start, so nothing was generated" : "The engine didn't finish, so nothing was generated";
+    await this.chips.add(input.chatId, input.userId, [{ id: `engine_failed:${input.turn}`, kind: "engine_failed", messageId: last.id, label, detail, actions: [...retry, { id: "diagnostics", label: "Diagnostics" }], expires: "next_send", payload: {} }]);
     this.push.changed(input.chatId, input.userId);
   }
 

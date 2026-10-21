@@ -129,9 +129,13 @@ export interface PresetChangedEvent {
   presetId: string | null;
 }
 
-/** One of the user's Lumiverse settings was written (`SETTINGS_UPDATED`), the active preset among them. */
+/**
+ * Settings of the user's were written (`SETTINGS_UPDATED`), the active preset maybe among them: the
+ * keys written, one for a single write (`{key}`) and every one for a batch (`{keys}`, which is how
+ * Lumiverse's own pages save); null when the event names none.
+ */
 export interface SettingsUpdatedEvent {
-  key: string | null;
+  keys: string[] | null;
 }
 
 /** A loaded Lumiverse page of the user's disconnected (`FRONTEND_SESSION_CLOSED`): the session routing named it. */
