@@ -425,12 +425,12 @@ describe("the model-use presets' minds", () => {
     expect([s.enabled, s.liveLimit, s.refreshLimit, s.memoryLevels, s.tokens, s.prompts, s.memory, s.reads]).toEqual([true, 3, 2, ["live"], MINDS_PRESETS.standard.tokens, mine.prompts, mine.memory, reads]);
   });
 
-  test("settings saved before what a mind reads keep their reply allowance and their mind card's lore as limits, and take the new switches", async () => {
+  test("settings saved before what a mind reads keep their reply allowance and, under Custom, their mind card's lore as limits, and take the new switches", async () => {
     const host = new FakeHost();
-    const read = async (minds: Record<string, unknown>, lore?: JsonObject): Promise<UserSettings> => {
+    const read = async (minds: Record<string, unknown>, lore?: JsonObject, preset = "custom"): Promise<UserSettings> => {
       const fresh = defaultSettings();
       const steps = { ...fresh.modelUse.steps, mind: { ...fresh.modelUse.steps.mind, enabled: true, signals: ["always"], ...(lore ? { lore } : {}) } };
-      await host.storage.write("settings.json", JSON.stringify({ ...fresh, modelUse: { ...fresh.modelUse, steps }, minds }), host.userId);
+      await host.storage.write("settings.json", JSON.stringify({ ...fresh, modelUse: { ...fresh.modelUse, preset, steps }, minds }), host.userId);
       return new SettingsStore(host).get(host.userId);
     };
     const before: Record<string, unknown> = { ...defaultSettings().minds };
@@ -451,6 +451,8 @@ describe("the model-use presets' minds", () => {
     expect([off.minds.reads.pinned.on, off.minds.reads.activated.on]).toEqual([false, false]);
     // Every other source takes the new defaults: none of their own memory or life.
     for (const source of ["summary", "memory", "thoughts", "recall", "life"] as const) expect(high.minds.reads[source].on).toBe(false);
+    // Under a preset the card's lore was the preset's, whose cap cut pinned lore: the sources take their defaults.
+    expect((await read(before, { policy: "prefetch", tokens: 1600 }, "standard")).minds.reads).toEqual(DEFAULT_MIND_READS);
   });
 });
 

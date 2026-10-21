@@ -32,23 +32,24 @@ function allPinsWhole(context: string): void {
 const pinnedUpTo = (tokens: number): JsonObject => ({ minds: { reads: { pinned: { tokens } } } });
 
 describe("the lore pinned for a mind: the user's cap is its only limit", () => {
-  test("before the reply: with the cap set high on the Character minds card, as an older settings file has it, every pinned entry reaches the mind whole", async () => {
-    // The user's settings from before minds had what they read: the mind card's lore at 90,000 tokens.
-    const host = new FakeHost();
-    const fresh = defaultSettings();
-    const minds = JSON.parse(JSON.stringify(fresh.minds)) as JsonObject;
-    delete minds.reads;
-    const steps = { ...fresh.modelUse.steps, mind: { enabled: true, signals: ["always"], route: { provider: "helper", connectionId: null, model: null }, lore: { policy: "prefetch", tokens: 90_000 } } };
-    host.files.set(`${host.userId}/settings.json`, JSON.stringify({ ...fresh, modelUse: { ...fresh.modelUse, steps }, minds }));
-    const rig = new Rig({ shipped: true, minds: true, host });
-    const seen = fakeModels(rig);
-    const chatId = await alderChat(rig, (put, worldId) => pinBig(rig, put, worldId, DANNY));
-    await rig.turn(chatId, "Hello, Danny.", "He looks up from the bench.");
-    allPinsWhole(lastFor(seen.minds, "Danny Okafor"));
-    // The lore trace says what the mind was given: every pin whole, nothing cut or left out.
-    const trace = rig.rt.inspectorRecords(chatId)?.at(-1)?.minds?.find((t) => t.who === "Danny Okafor" && t.purpose === "mind");
-    expect(trace?.pinned?.map((p) => [p.title, p.cut])).toEqual([1, 2, 3].map((k) => [`Ledger page ${k}`, false]));
-    expect(trace?.notes).toBeUndefined();
+  test("before the reply: an older settings file, its Character minds card's lore set high under Custom or left at Standard's, gives every pinned entry to the mind whole", async () => {
+    // The user's settings from before minds had what they read: their own card at 90,000 tokens, or Standard's at 1,600.
+    for (const [preset, tokens] of [["custom", 90_000], ["standard", 1600]] as const) {
+      const host = new FakeHost();
+      const fresh = defaultSettings();
+      const minds = JSON.parse(JSON.stringify(fresh.minds)) as JsonObject;
+      delete minds.reads;
+      const steps = { ...fresh.modelUse.steps, mind: { enabled: true, signals: ["always"], route: { provider: "helper", connectionId: null, model: null }, lore: { policy: "prefetch", tokens } } };
+      host.files.set(`${host.userId}/settings.json`, JSON.stringify({ ...fresh, modelUse: { ...fresh.modelUse, preset, steps }, minds }));
+      const rig = new Rig({ shipped: true, minds: true, host });
+      const seen = fakeModels(rig);
+      const chatId = await alderChat(rig, (put, worldId) => pinBig(rig, put, worldId, DANNY));
+      await rig.turn(chatId, "Hello, Danny.", "He looks up from the bench.");
+      allPinsWhole(lastFor(seen.minds, "Danny Okafor"));
+      // The lore trace says what the mind was given: every pin whole, nothing cut or left out.
+      const trace = rig.rt.inspectorRecords(chatId)?.at(-1)?.minds?.find((t) => t.who === "Danny Okafor" && t.purpose === "mind");
+      expect({ preset, pinned: trace?.pinned?.map((p) => [p.title, p.cut]), notes: trace?.notes }).toEqual({ preset, pinned: [1, 2, 3].map((k) => [`Ledger page ${k}`, false]), notes: undefined });
+    }
   });
 
   test("Run minds now: within a high cap every pinned entry reaches the mind whole, and the run's report shows none cut", async () => {

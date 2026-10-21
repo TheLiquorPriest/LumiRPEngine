@@ -431,17 +431,20 @@ function readsOf(raw: unknown, base: Readonly<MindsReads>): MindsReads {
 /**
  * A settings file saved before minds had what they read (`minds.reads`), read as before where the
  * user had a say: the reply allowance it replaces (`minds.replyTokens`) is the latest reply's limit,
- * and the lore setting of Settings → Steps' Character minds card, which no longer has one, gives each
- * lore source its tokens (or turns both off where that lore was off), so neither reads less than the
- * card allowed. The switches take the new defaults: what minds read before let the planner's day and
- * plans made from other minds into them. A file that has `reads`, or no minds settings, comes back as it is.
+ * and under Custom, the lore setting the user gave Settings → Steps' Character minds card, which no
+ * longer has one, gives each lore source its tokens (or turns both off where that lore was off), so
+ * neither reads less than the card allowed. Under a preset the card's lore was the preset's, whose
+ * cap is what cut pinned lore, so the sources take their defaults. The switches take the new
+ * defaults: what minds read before let the planner's day and plans made from other minds into them.
+ * A file that has `reads`, or no minds settings, comes back as it is.
  */
 export function migrateMindReads(raw: JsonObject): JsonObject {
   const minds = raw.minds;
   if (!isRecord(minds) || minds.reads !== undefined) return raw;
   const { replyTokens, ...rest } = minds;
   const reads: JsonObject = { reply: { tokens: limitIn(replyTokens, 1, Number.MAX_SAFE_INTEGER, DEFAULT_MIND_READS.reply.tokens) } };
-  const steps: JsonObject = isRecord(raw.modelUse) && isRecord(raw.modelUse.steps) ? raw.modelUse.steps : {};
+  const custom = isRecord(raw.modelUse) && raw.modelUse.preset === "custom";
+  const steps: JsonObject = custom && isRecord(raw.modelUse) && isRecord(raw.modelUse.steps) ? raw.modelUse.steps : {};
   const lore = isRecord(steps.mind) && isRecord(steps.mind.lore) ? steps.mind.lore : null;
   const tokens = lore && typeof lore.tokens === "number" && Number.isSafeInteger(lore.tokens) && lore.tokens >= 0 ? lore.tokens : null;
   if (lore && (lore.policy === "none" || tokens === 0)) {

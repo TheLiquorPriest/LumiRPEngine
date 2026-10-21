@@ -1358,7 +1358,7 @@ Four layers, each tunable (the world's defaults, then the user's overrides):
   | What the player says | on, no limit | the story as it stands |
   | Their story so far, notes and what they saw, last thoughts, recall, their own life | off, no limit once on | each can carry the planner's day, or another mind's plans by way of narration |
 
-  A settings file saved before `reads` keeps the limits it set: its reply allowance (`replyTokens`) is the reply's limit, and the Character minds step card's lore tokens are both lore sources' (a card with lore off turns them off). Its switches take the defaults. The minds steps' cards have no lore of their own: what a mind reads is set here, and the memory, skip and consolidate steps read none.
+  A settings file saved before `reads` keeps the limits it set: its reply allowance (`replyTokens`) is the reply's limit, and under Custom the Character minds step card's lore tokens are both lore sources' (a card with lore off turns them off). Under a preset that card's lore was the preset's, whose cap cut pinned lore, so the sources take their defaults. Its switches take the defaults. The minds steps' cards have no lore of their own: what a mind reads is set here, and the memory, skip and consolidate steps read none.
 - **Model use presets:** a preset sets all of these but what a mind reads, the prompts and memory overrides.
   - **Lean:** minds off.
   - **Standard:** a Live limit of 3, two refreshes a turn, memory for Live.
