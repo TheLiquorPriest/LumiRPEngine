@@ -298,7 +298,7 @@ A classification or tag you set here holds in this chat only, over what the worl
 
 **This chat** is a list of pages, each with a back button to the list:
 
-- **Rules**: **Realism** (see [Promote and demote](#promote-and-demote)), **Checks** (see [New chats and this chat](#new-chats-and-this-chat)), **Time** (see [Time controls](#time-controls)) and **Pins and upgrade** (see [Revisions and Upgrade](#revisions-and-upgrade)). These change the chat you have open; Settings holds the defaults for new chats.
+- **Rules**: **Realism** (see [Promote and demote](#promote-and-demote)), **Checks** (see [New chats and this chat](#new-chats-and-this-chat) and [Inferred checks](#inferred-checks)), **Time** (see [Time controls](#time-controls)) and **Pins and upgrade** (see [Revisions and Upgrade](#revisions-and-upgrade)). These change the chat you have open; Settings holds the defaults for new chats.
 - **Behind the curtain**: **Edits**, the corrections in force on this version of the story, worded in full, newest first, and any change that didn't apply after a reply, with the exact reason. It is behind the gate.
 - **Inspector**: **Context**, what each reply was given, and the call meter. See [The Context inspector](#the-context-inspector).
 
@@ -529,6 +529,28 @@ The Actions sheet says what the rules will do before you commit: **No roll neede
 ### New chats and this chat
 
 **Settings → Checks** holds your own rules for new chats: a new chat in a world that sets none uses them, and **Use my check rules instead of a world's for new chats** makes every new chat use them. A change there saves at once, and a chat keeps the rules it started with, whatever you change later. **GM → This chat → Checks** shows the rules in force in the chat you have open; change them and tap **Apply to this chat**, or **Cancel**. The change applies from the next turn, and it is recorded like a realism change, so it follows swipes and branches.
+
+### Inferred checks
+
+A typed attempt that no action covers ("I try to talk the bouncer into letting me in", "I keep my face blank while Marcus lies", "we sneak past the guard") can be read as a check of the world's own sheet, rolled and recorded like any check, so the reply follows the dice. How is set beside the rules above, in the same three places and layered the same way:
+
+- **Build → Ruleset → How checks are decided**, under **Inferred checks**: the world's default. Turn on **This world sets how typed attempts are read as checks** to set it, starting from what the world's realism defaults play; leave it off and new chats take the player's own setting.
+- **Settings → Checks**, under **Inferred checks**: yours, for new chats. **By the chat's realism** (the default) leaves each new chat to its realism preset; **My own** sets your own, starting from what your realism defaults play. It fills in for a world that sets none, and **Use my check rules instead of a world's for new chats** makes it replace a world's too. A change saves at once.
+- **GM → This chat → Checks**, under the rules in force: the chat you have open. Change any value and tap **Review the change** to see what it does, then **Apply to this chat** (or **Keep editing**); **Cancel** drops the edits. It applies from the next turn, earlier turns keep how theirs were read, and it is recorded like a realism change, so it follows swipes and branches.
+
+A chat nobody set one for plays by its realism preset at its Sheets level: **Story** offers a roll on a chip, only for an attempt the message says your character tries, and only for your character; **Grounded** rolls risky attempts by itself, each companion who joins in rolling their own; **Simulation** rolls every uncertain attempt, for everyone involved. Others' numbers stay hidden in all three. At Sheets 0 there is no sheet to roll with, so it is off; at Sheets 1 the narrator is told the result alone, and at Sheets 2 the margin at most.
+
+The values, the same in each place:
+
+- **Read typed attempts as checks**: **Off** (the attempt plays as roleplay, and the narrator decides how it goes), **Suggest a roll** (a chip offers the roll, which happens only when you take it) or **Roll automatically**. Under Off the other values are greyed out and keep what they were, for when you turn it back on.
+- **Which attempts**: **Every uncertain attempt**, **Only risky attempts** (below the risky line of the rules above) or **Only when the message says it tries**.
+- **Who rolls**: **The player character only**; **With companions**, each companion who joins in rolling their own; or **Everyone involved**, the people the attempt opposes or targets rolling against it too.
+- **Every skill the sheet has**, or turn it off and pick the skills an attempt may roll. Each place lists the skills its world's sheet has: Build the draft's sheet as you edit it, GM the chat's world's, and Settings the world of the chat you have open (with none open there is nothing to pick from). A picked skill a sheet doesn't have stays listed, marked so, until you take it off; a world whose sheet has none of the picked skills reads no attempt as a check.
+- **Easiest difficulty** and **Hardest difficulty**: the bands the difficulty is read from, from the attempt and its scene: **Trivial** (DC 5), **Easy** (8), **Moderate** (10), **Tricky** (12), **Hard** (15), **Very hard** (20), **Heroic** (25) and **Nearly impossible** (30). One outside the range is moved to the nearest band in it, and moving one bound past the other takes the other along.
+- **What the narrator is told**: **The result** (passed or failed), **The result and margin** (by how much) or **The whole roll** (the dice, the modifier and the total).
+- **Others' numbers**: **Hidden** or **Shown**: whether an opponent's or a companion's dice, modifier, total or score reach the narrator and the **Roll** chip. Hidden keeps a hidden stat hidden.
+- **After a success, tell the narrator** and **After a failure, tell the narrator**: the line the narrator is given after each result, up to 240 characters. `{who}` reads as who rolled, `{skill}` as the skill, `{attempt}` as what they tried and `{against}` as who or what it was against. A line left empty is the default's ("Narrate it succeeding.", "Narrate it failing."), and **Reset the lines** puts both back.
+- **Most rolls a turn**: 1 to 12. Your character's roll comes first, then companions', then opponents'; past the most, an opponent sets the difficulty without a roll.
 
 ## Model use
 
