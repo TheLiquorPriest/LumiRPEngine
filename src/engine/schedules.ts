@@ -18,6 +18,7 @@ import type { DomainId, EntityId } from "../shared/ids";
 import type { LedgerEvent } from "../shared/ledger";
 import type { LintIssue } from "../shared/protocol";
 import type { ScheduleDef, ScheduleSlot, WeightedValue, WorldDoc } from "../shared/world";
+import type { RoutineDef } from "../shared/routines";
 import { calendarOf, clockAt, dateAt, dayIndexOfText, MINUTES_PER_DAY, parseHHMM, recursOn } from "./calendar";
 import type { ReadContext } from "./registry";
 import type { Registry } from "./registry-impl";
@@ -49,6 +50,15 @@ export function allSchedules(reg: Registry, world: WorldDoc): ScheduleDef[] {
     .filter((s): s is ScheduleDef => s !== undefined);
   for (const s of reg.schedules) if (!own(world.schedules, s.id)) out.push(s);
   return out;
+}
+
+/**
+ * The schedules in force in a chat: the world's (`allSchedules`), and the chat's own versions of them
+ * for one person each (DESIGN §8: the GM's or the story's `schedule_override`, from Cast life).
+ */
+export function chatSchedulesIn(ctx: ReadContext): ScheduleDef[] {
+  const mine = optionalQuery(ctx, "castlife.chat_schedules")?.(ctx) ?? [];
+  return mine.length === 0 ? allSchedules(ctx.registry, ctx.world) : [...allSchedules(ctx.registry, ctx.world), ...mine];
 }
 
 function slotSpan(slot: ScheduleSlot): { start: number; length: number } {
@@ -97,7 +107,7 @@ function handedOver(world: WorldDoc, instant: ScheduleInstant): boolean {
  * A schedule's owner precedence, most specific first: 0 an entity, 1 a group, 2 a kind, 3 a
  * selector; null for a world process. An id naming both an entity and a kind is the entity.
  */
-export function ownerRank(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, schedule: ScheduleDef): number | null {
+export function ownerRank(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, schedule: ScheduleDef | RoutineDef): number | null {
   const owner = schedule.owner;
   if (isRecord(owner)) return 3;
   if (typeof owner !== "string" || owner === "") return null;
@@ -113,7 +123,7 @@ export function ownerRank(reg: Registry, world: WorldDoc, state: Readonly<WorldS
  * group routes none of its members), nor does someone whose life state doesn't act (DESIGN §8):
  * a body stays where it lies.
  */
-export function scheduleOwners(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, schedule: ScheduleDef): EntityId[] {
+export function scheduleOwners(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, schedule: ScheduleDef | RoutineDef): EntityId[] {
   const owner = schedule.owner;
   const acting = (ids: EntityId[]): EntityId[] => ids.filter((id) => acts(world, state, id));
   if (isRecord(owner)) return acting(selectEntities(reg, world, state, owner));
@@ -197,7 +207,7 @@ interface Rival {
 /** The other schedules setting the same target, with an owner of another precedence, that have a slot running at `at`. */
 function runningRivals(reg: Registry, ctx: ReadContext, schedule: ScheduleDef, rank: number, at: number): Rival[] {
   const out: Rival[] = [];
-  for (const s of allSchedules(reg, ctx.world)) {
+  for (const s of chatSchedulesIn(ctx)) {
     if (s.id === schedule.id || s.target !== schedule.target) continue;
     const r = ownerRank(reg, ctx.world, ctx.state, s);
     if (r === null || r === rank) continue;
@@ -219,10 +229,33 @@ export function overriddenAt(reg: Registry, ctx: ReadContext, schedule: Schedule
   return runningRivals(reg, ctx, schedule, rank, at).some((r) => r.rank < rank && runsFor(ctx, r, entity));
 }
 
+/** The value a schedule last set at an edge it gave way at: the slot of it handing over here, if fixed; else rest. */
+function valueBefore(reg: Registry, ctx: ReadContext, instant: ScheduleInstant, entity: EntityId): JsonValue | null {
+  const cal = calendarOf(ctx.world);
+  const s = instant.schedule;
+  for (const [i, slot] of s.slots.entries()) {
+    if (i === instant.slot) continue;
+    const span = slotSpan(slot);
+    for (const d of [instant.day - 1, instant.day]) if (recursOn(cal, s.recurrence, d) && clockAt(cal, d, span.start) + span.length === instant.at) return slot.value === undefined ? null : slot.value;
+  }
+  return restValue(reg, ctx.world, ctx.state, entity, s.target) ?? null;
+}
+
+/** Whether an edge starts the first slot of its schedule's day: where a balanced routine takes back a day the story had. */
+function firstOfDay(instant: ScheduleInstant): boolean {
+  if (instant.edge !== "start") return false;
+  const starts = instant.schedule.slots.map((slot) => slotSpan(slot).start);
+  return starts[instant.slot] === Math.min(...starts);
+}
+
 /**
  * The events one instant produces for every owner the schedule applies to. `povRoutine: false` (an
- * ordinary turn) leaves the POV's own place and activity to the player: its routine moves it only
- * when time runs on its own (a timelapse or a catch-up), DESIGN §9.2.
+ * ordinary turn, or a span the player spends doing something) leaves the POV's own place and
+ * activity to the player: its routine moves it only when time runs on its own (a timelapse or a
+ * catch-up), DESIGN §9.2. A place or activity edge gives way to the story (Cast life's
+ * `castlife.yields`, DESIGN §8): someone in a scene with the POV, a Live or Near character, or
+ * someone the story put elsewhere than the schedule last had them stays as they are; and to a
+ * chat that took them off the schedule (`castlife.schedule_off`).
  */
 export function instantEvents(reg: Registry, ctx: ReadContext, instant: ScheduleInstant, runSeed: string, opts: { povRoutine?: boolean } = {}): LedgerEvent[] {
   const { schedule } = instant;
@@ -233,12 +266,16 @@ export function instantEvents(reg: Registry, ctx: ReadContext, instant: Schedule
   const startsHere = instant.edge === "end" && handedOver(ctx.world, instant);
   const rank = ownerRank(reg, ctx.world, ctx.state, schedule);
   const rivals = rank === null ? [] : runningRivals(reg, ctx, schedule, rank, instant.at);
+  const yields = optionalQuery(ctx, "castlife.yields");
+  const off = optionalQuery(ctx, "castlife.schedule_off");
+  const routine = schedule.target === "place" || schedule.target === "activity";
   for (const entity of scheduleOwners(reg, ctx.world, ctx.state, schedule)) {
     if (domain && ctx.levelOf(entity, domain) < 1) continue;
     if (held(ctx.state, entity, schedule.target, instant.at)) continue;
-    if (opts.povRoutine === false && entity === ctx.world.pov && (schedule.target === "place" || schedule.target === "activity")) continue;
+    if (opts.povRoutine === false && entity === ctx.world.pov && routine) continue;
+    if (off?.(ctx, entity, schedule.id, instant.at) === true) continue;
     // No one in a fight under way leaves it, or stops fighting, for a schedule (the combat pack).
-    if ((schedule.target === "place" || schedule.target === "activity") && optionalQuery(ctx, "combat.engaged")?.(ctx, entity) === true) continue;
+    if (routine && optionalQuery(ctx, "combat.engaged")?.(ctx, entity) === true) continue;
     const mine = rivals.filter((r) => runsFor(ctx, r, entity));
     // A more specific slot is running: this edge gives way to it.
     if (rank !== null && mine.some((r) => r.rank < rank)) continue;
@@ -253,7 +290,14 @@ export function instantEvents(reg: Registry, ctx: ReadContext, instant: Schedule
     }
     if (value === undefined || keyOf(value) === keyOf(current)) continue;
     if (schedule.target === "place" && typeof value === "string" && !own(ctx.world.places, value)) continue;
-    if ((schedule.target === "place" || schedule.target === "activity") && routineStays(ctx, entity, schedule.target === "place" ? value : null)) continue;
+    if (routine && routineStays(ctx, entity, schedule.target === "place" ? value : null)) continue;
+    if (routine && yields) {
+      // Where their schedules last had them: before a start, a less specific slot still running, else
+      // the slot of this one handing over, else rest; before an end, this slot's own value.
+      const lower = mine.filter((r) => rank !== null && r.rank > rank).sort((a, b) => a.rank - b.rank)[0];
+      const expected = instant.edge === "end" ? (slot.value ?? null) : lower ? (lower.slot.value ?? null) : valueBefore(reg, ctx, instant, entity);
+      if (yields(ctx, entity, schedule.target === "place" ? "place" : "activity", expected, firstOfDay(instant))) continue;
+    }
     out.push({ type: "set", entity, field: schedule.target, value });
   }
   return out;
