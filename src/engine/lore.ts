@@ -50,7 +50,15 @@ export interface LoreQuery {
   purpose: LorePurpose;
   /** An `effects` template's proposals become chips, so it reads no secret whatever its purpose. */
   effects?: boolean;
-  limit: number;
+  /**
+   * Activation only (the lore a turn activates for a mind, DESIGN §24.5): an entry counts only when
+   * the query names it, by a lookup-table term, an alias, a keyword or its title said whole, as World
+   * Info activates by its keys. Links, topics and the words an entry shares with the query count for
+   * nothing, neither to find an entry nor to rank it.
+   */
+  exact?: boolean;
+  /** Hits at most; absent, every match the token budget has room for. */
+  limit?: number;
   /** Tokens all the hits' snippets may take together. */
   tokenBudget: number;
   /** Entries the caller already has: they still count as matched, but get no snippet. */
@@ -229,13 +237,15 @@ export function loreSearch(r: LoreReader, q: LoreQuery): LoreResult {
     const hit = said(term);
     if (hit) for (const id of listOf(ids)) tableTerms.set(id, [...(tableTerms.get(id) ?? []), hit]);
   }
-  // Topics asked for by id or label, or whose label the query says.
+  // Topics asked for by id or label, or whose label the query says; activation reads names alone.
   const topics = new Set((q.topics ?? []).map(topicIdOf).filter((t) => t !== ""));
-  for (const [id, topic] of Object.entries(world.loreIndex.topics)) if (isRecord(topic) && said(topic.label)) topics.add(id);
-  for (const entry of Object.values(world.lore)) for (const label of listOf(entry.topics)) if (said(label)) topics.add(topicIdOf(label));
+  if (!q.exact) {
+    for (const [id, topic] of Object.entries(world.loreIndex.topics)) if (isRecord(topic) && said(topic.label)) topics.add(id);
+    for (const entry of Object.values(world.lore)) for (const label of listOf(entry.topics)) if (said(label)) topics.add(topicIdOf(label));
+  }
   const members = new Map([...topics].map((t) => [t, new Set(topicMembers(world, t))]));
-  const links = new Set(q.links ?? []);
-  const words = [...new Set(wordsOf(q.query ?? ""))];
+  const links = new Set(q.exact ? [] : (q.links ?? []));
+  const words = q.exact ? [] : [...new Set(wordsOf(q.query ?? ""))];
   const ranked: { id: string; entry: LoreEntryDef; key: number[]; why: string[] }[] = [];
   for (const [id, entry] of Object.entries(world.lore)) {
     if (!loreReadable(reg, world, state, entry, q.purpose, q.effects === true, open, q.as)) continue;
@@ -252,7 +262,7 @@ export function loreSearch(r: LoreReader, q: LoreQuery): LoreResult {
       for (const w of wordsOf([entry.title, ...listOf(entry.aliases), ...listOf(entry.keys), entry.content].join(" "))) counts.set(w, (counts.get(w) ?? 0) + 1);
       for (const w of words) tf += Math.min(WORD_CAP, counts.get(w) ?? 0);
     }
-    if (terms.size + linked.length + inTopics.length + tf === 0) continue;
+    if (q.exact ? terms.size === 0 : terms.size + linked.length + inTopics.length + tf === 0) continue;
     const priority = typeof entry.priority === "number" && Number.isFinite(entry.priority) ? entry.priority : 0;
     const why = [...[...terms].sort().map((t) => `term:${t}`), ...linked.map((l) => `link:${l}`), ...inTopics.map((t) => `topic:${t}`), ...(tf > 0 ? ["words"] : [])];
     ranked.push({ id, entry, key: [terms.size, linked.length, inTopics.length, tf, priority], why });
@@ -276,7 +286,7 @@ export function loreSearch(r: LoreReader, q: LoreQuery): LoreResult {
   const hits: LoreHit[] = [];
   let left = Math.max(0, Math.floor(q.tokenBudget));
   for (const { id, entry, why } of best) {
-    if (hits.length >= q.limit) break;
+    if (q.limit !== undefined && hits.length >= q.limit) break;
     if (q.skip?.has(id)) continue;
     const snippet = loreSnippet((text) => r.tokens(text), entry, left);
     if (!snippet) break;

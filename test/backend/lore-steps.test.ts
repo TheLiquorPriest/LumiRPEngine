@@ -132,6 +132,15 @@ describe("the prefetch", () => {
     }
   });
 
+  test("within the step's lore tokens the block gives every entry the turn finds, however many: no count of hits cuts it", async () => {
+    const piers = Object.fromEntries(Array.from({ length: 9 }, (_, i) => [`pier_${i}`, { id: `pier_${i}`, title: `Ferry pier ${i}`, content: `PIER-${i}: berth ${i} takes the ferry on its ${i}th crossing.`, keys: ["ferry"], links: [] }]));
+    const { rig, chatId } = await loreChat([{ modelUse: { preset: "full" } }, { modelUse: { preset: "custom", steps: { interpret: { enabled: true, signals: ["always"], lore: { policy: "prefetch", tokens: 20_000 } } } } }], { ...LORE, ...piers });
+    await rig.turn(chatId, "I walk to the ferry and wait.", "The ferry horn sounds.");
+    const block = systemOf(rig, "interpret");
+    for (let i = 0; i < 9; i++) expect(block).toContain(`PIER-${i}:`);
+    expect(block).toContain("The ferry crosses to Gull Island");
+  });
+
   test("a step whose lore is off gets none, and a world without lore changes no prompt", async () => {
     const { rig, chatId } = await loreChat([{ modelUse: { preset: "full" } }, { modelUse: { preset: "custom", steps: { interpret: { enabled: true, signals: ["always"], lore: { policy: "none", tokens: 400 } } } } }]);
     await rig.turn(chatId, "I walk to the ferry and wait.", "The ferry horn sounds.");

@@ -7,7 +7,7 @@ import type { ActionId } from "../shared/ids";
 import { hashParts } from "../shared/hash";
 import type { JsonObject } from "../shared/json";
 import { hasOwn } from "../shared/json";
-import type { GenerationKind, LedgerEvent, TimelapseTarget } from "../shared/ledger";
+import type { GenerationKind, LedgerEvent, PathHash, TimelapseTarget } from "../shared/ledger";
 import { applyEffects } from "../engine/effects";
 import { materializeAll } from "../engine/materialize";
 import type { TurnModel } from "../engine/ledger/journal";
@@ -164,12 +164,31 @@ export class TurnBridge implements TurnModel {
   private readonly skips = new Map<string, SkipRecord>();
   /** Typed messages whose read waits on the player's answer to a claim (Ask first, DESIGN §9.4), keyed like `intents`; none of it plays until each is answered. */
   private readonly held = new Map<string, HeldRead>();
+  /**
+   * The path each text's turn was read at (`begin`): what is kept for a text belongs to that turn
+   * only, so a later turn with the same words, or the same turn after an earlier message changed,
+   * is read again, while a Re-run, a Retry or a held answer's Regenerate of the turn reuses it.
+   */
+  private readonly readAt = new Map<string, PathHash>();
 
   constructor(
     private readonly registry: Registry,
     private readonly pipeline: EnginePipeline,
     readonly runSeed: string,
   ) {}
+
+  /**
+   * The pre phase starts the turn whose last user text is `userText`, planned at `at` (DESIGN
+   * §5.1): what was kept for the same words read at another path is another turn's, and goes.
+   */
+  begin(userText: string, at: PathHash): void {
+    if (this.readAt.get(userText) === at) return;
+    for (const kept of [this.intents, this.unfit, this.nexts, this.decisions, this.minds, this.offers, this.skips, this.held]) kept.delete(userText);
+    this.interpreted.delete(userText);
+    this.unread.delete(userText);
+    this.readAt.set(userText, at);
+    trim(this.readAt);
+  }
 
   setIntent(userText: string, intent: InterpretOutput | null, interpreted = false): void {
     this.intents.set(userText, intent);
@@ -352,11 +371,13 @@ export class TurnBridge implements TurnModel {
     return this.readChips.get(hashParts("lre.read", text)) ?? [];
   }
 
-  plan(input: { state: WorldState; ctx: ReadContext; seed: string; kind: GenerationKind; userTexts: string[] }): LedgerEvent[] {
+  plan(input: { state: WorldState; ctx: ReadContext; seed: string; kind: GenerationKind; userTexts: string[]; parentPath: PathHash }): LedgerEvent[] {
     const last = input.userTexts.at(-1) ?? "";
+    // Only what this turn's own pre phase kept: the same words read at another path are another turn's.
+    const own = this.readAt.get(last) === input.parentPath;
     // Decisions and minds first: the plan then follows the choices they record (DESIGN §5.2 npc.choose, §24).
     const w = new Working(this.registry, input.ctx.world, input.state);
-    w.applyAll(this.prePlan(last));
+    w.applyAll(own ? this.prePlan(last) : []);
     const result = this.pipeline.plan({
       registry: this.registry,
       world: input.ctx.world,
@@ -365,8 +386,8 @@ export class TurnBridge implements TurnModel {
       seed: input.seed,
       kind: input.kind,
       userTexts: input.userTexts,
-      intent: this.intents.get(last) ?? null,
-      skip: this.skips.get(last) ?? null,
+      intent: own ? (this.intents.get(last) ?? null) : null,
+      skip: own ? (this.skips.get(last) ?? null) : null,
     });
     this.plans.set(input.seed, result);
     trim(this.plans);
