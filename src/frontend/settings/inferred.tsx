@@ -34,7 +34,7 @@ export function InferredSeed(props: { settings: UserSettings; skills: readonly S
         <span class="label">Inferred checks for new chats</span>
         {/* Null is the setting's own value, not a policy: each new chat works it out from its own realism. */}
         <Seg<Source> label="Inferred checks for new chats" value={inferred === null ? "realism" : "mine"} options={SOURCES} disabled={props.busy} onChange={(source) => props.patch({ inferred: source === "realism" ? null : (start as unknown as JsonObject) })} />
-        <span class="lre-field-help">{inferred === null ? "Each new chat plays by its realism preset and Sheets level: Story offers a roll, Grounded rolls risky attempts, Simulation rolls every uncertain one." : where}</span>
+        <span class="lre-field-help">{inferred === null ? "Each new chat plays by its realism preset and Sheets level: Story rolls what the message says it tries, Grounded rolls risky attempts, Simulation rolls every uncertain one." : where}</span>
       </div>
       {inferred !== null ? (
         <InferredForm
