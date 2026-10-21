@@ -8,7 +8,7 @@
 import { describe, expect, test } from "bun:test";
 import type { QuietRequest } from "../../src/backend/host";
 import { JobRunner } from "../../src/backend/jobs";
-import { ROUTINE_ENTRIES_PER_CALL, ROUTINE_MAX_CALLS, ROUTINE_OWNERS_PER_CALL } from "../../src/backend/routine-proposals";
+import { ROUTINE_MAX_CALLS, ROUTINE_OWNERS_PER_CALL } from "../../src/backend/routine-proposals";
 import { isRecord } from "../../src/shared/json";
 import type { JsonObject, JsonValue } from "../../src/shared/json";
 import type { JobProposal } from "../../src/shared/protocol";
@@ -60,6 +60,17 @@ function answering(answers: Record<string, { routines?: JsonValue[]; schedules?:
     }
     return JSON.stringify({ routines, schedules });
   };
+}
+
+/**
+ * A person in a flat of their own, which no lore names, with `count` long lore entries about them
+ * (about 610 tokens each, past Import's 1,500 characters), each ending with its own marker.
+ */
+async function withLongLore(rig: Rig, worldId: string, id: string, name: string, count: number): Promise<void> {
+  const first = name.split(" ")[0] ?? name;
+  await put(rig, worldId, "places", `${id}_flat`, { id: `${id}_flat`, name: `${first}'s flat`, parent: "port_alder", fields: {} });
+  await put(rig, worldId, "entities", id, stranger(id, name, { home: `${id}_flat`, description: `${first} keeps to a routine.` }));
+  for (let i = 0; i < count; i++) await put(rig, worldId, "lore", `lore_${id}_${i}`, { id: `lore_${id}_${i}`, title: `${first} ${i}`, content: `${`${first} keeps to her habits. `.repeat(70)}Marker ${i} closes this entry.`, keys: [], links: [id] });
 }
 
 /** Starts the job on the rig and returns its final update, its proposals and where a second pass starts. */
@@ -201,7 +212,6 @@ describe("Propose routines from lore", () => {
     expect(rig.host.quietCalls.length).toBe(ROUTINE_MAX_CALLS - 1);
     const read = rig.host.quietCalls.flatMap(ownersOf);
     expect(read).toHaveLength((ROUTINE_MAX_CALLS - 1) * ROUTINE_OWNERS_PER_CALL);
-    for (const call of rig.host.quietCalls) expect([...said(call).matchAll(/\(lore: /g)].length).toBeLessThanOrEqual(ROUTINE_ENTRIES_PER_CALL);
     expect(first.next).toEqual({ after: read.at(-1) ?? "" });
     expect(first.message).toContain("weren't read in this pass's 12 calls; continue for the rest.");
     rig.host.quietCalls.length = 0;
@@ -328,6 +338,50 @@ describe("Propose routines from lore", () => {
     // Sunday's dinner takes its own id; the every-day one replaces the usual dinner.
     expect(blockIds).toContain("sunday_dinner_out");
     expect(blockIds).toContain("dinner");
+  });
+
+  test("each person's lore goes in whole: every entry about them that fits the allowance, none cut", async () => {
+    const { rig, worldId } = await portAlder();
+    await withLongLore(rig, worldId, "nadia_brooks", "Nadia Brooks", 9);
+    rig.host.quietReply = () => JSON.stringify({ routines: [], schedules: [] });
+    const end = await proposed(rig, worldId, { owners: ["nadia_brooks"] });
+    expect(end.status).toBe("done");
+    const text = said(rig.host.quietCalls[0] as QuietRequest);
+    for (let i = 0; i < 9; i++) {
+      expect(text).toContain(`(lore: lore_nadia_brooks_${i})`);
+      expect(text).toContain(`Marker ${i} closes this entry.`);
+    }
+    expect(end.message).not.toContain("left out");
+  });
+
+  test("a lower allowance leaves whole entries out, never part of one, and says whose and where to raise it", async () => {
+    const { rig, worldId } = await portAlder();
+    await withLongLore(rig, worldId, "nadia_brooks", "Nadia Brooks", 9);
+    rig.body(await rig.send({ type: "lre.settings.set", patch: { jobs: { routineLoreTokens: 1500 } } }));
+    rig.host.quietReply = () => JSON.stringify({ routines: [], schedules: [] });
+    const end = await proposed(rig, worldId, { owners: ["nadia_brooks"] });
+    const text = said(rig.host.quietCalls[0] as QuietRequest);
+    expect([...text.matchAll(/\(lore: lore_nadia_brooks_\d\)/g)].map((m) => m[0])).toEqual(["(lore: lore_nadia_brooks_0)", "(lore: lore_nadia_brooks_1)"]);
+    expect(text).toContain("Marker 0 closes this entry.");
+    expect(text).toContain("Marker 1 closes this entry.");
+    expect(end.message).toContain('Lore past 1,500 tokens each was left out for Nadia Brooks (2 of 9 entries): raise "Lore each person or group reads" in Settings → Steps and connections → Build jobs, or turn on "all of it".');
+  });
+
+  test("people whose lore fills the allowance have calls of their own; with all of it they share one", async () => {
+    const { rig, worldId } = await portAlder();
+    await withLongLore(rig, worldId, "nadia_brooks", "Nadia Brooks", 3);
+    await withLongLore(rig, worldId, "omar_reyes", "Omar Reyes", 3);
+    rig.host.quietReply = () => JSON.stringify({ routines: [], schedules: [] });
+    rig.body(await rig.send({ type: "lre.settings.set", patch: { jobs: { routineLoreTokens: 2000 } } }));
+    await proposed(rig, worldId, { owners: ["nadia_brooks", "omar_reyes"] });
+    expect(rig.host.quietCalls.map(ownersOf)).toEqual([["nadia_brooks"], ["omar_reyes"]]);
+    rig.host.quietCalls.length = 0;
+    rig.body(await rig.send({ type: "lre.settings.set", patch: { jobs: { routineLoreTokens: "none" } } }));
+    const end = await proposed(rig, worldId, { owners: ["nadia_brooks", "omar_reyes"] });
+    expect(rig.host.quietCalls.map(ownersOf)).toEqual([["nadia_brooks", "omar_reyes"]]);
+    const text = said(rig.host.quietCalls[0] as QuietRequest);
+    for (const id of ["nadia_brooks", "omar_reyes"]) for (let i = 0; i < 3; i++) expect(text).toContain(`(lore: lore_${id}_${i})`);
+    expect(end.message).not.toContain("left out");
   });
 
   test("a world with no one to read fails and says why", async () => {

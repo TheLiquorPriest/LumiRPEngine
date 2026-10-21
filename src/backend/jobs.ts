@@ -22,7 +22,7 @@ import type { HostPort, ProcessEvent, ProcessHandle } from "./host";
 import { checkIndexProposals, INDEX_TEXT_CHUNK, indexReplyProblem, indexRetry, indexSystem, readIndexProposals, textChunks, type IndexBook } from "./lore-index";
 import { checkProposals, dropSummary, entryTitle, IMPORT_CHUNK, IMPORT_MAX_CALLS, loreChunk, PROPOSAL_MAX_TOKENS, proposalRetry, proposalSystem, readProposals, replyProblem, type DropCounts, type ProposalMode } from "./proposals";
 import { MAP_PROSE_MAX, mapProposal, mapRepairText, mapRequestText, mapSystem, problemLines, readMapAnswer, readMapRequest } from "./map-job";
-import { afterRepair, checkRoutineReply, finishRoutines, readRoutineInput, ROUTINE_MAX_CALLS, ROUTINE_OWNERS_MAX, routineCallText, routinePass, routineRepairText, routineScope, routineSystem, type RoutineCandidate } from "./routine-proposals";
+import { afterRepair, checkRoutineReply, finishRoutines, loreCutMessage, readRoutineInput, ROUTINE_MAX_CALLS, ROUTINE_OWNERS_MAX, routineCallText, routinePass, routineRepairText, routineScope, routineSystem, type RoutineCandidate } from "./routine-proposals";
 import { own } from "../engine/pack-kit";
 import type { SettingsStore } from "./settings-store";
 import type { Steps } from "./steps";
@@ -393,15 +393,15 @@ export class JobRunner {
    * `ROUTINE_MAX_CALLS`, so a pass that runs out says where the next one starts (`next`). The
    * proposals so far are kept with the job after each call, so a restart loses none of them.
    */
-  private async proposeRoutines(job: Job, worldId: WorldId, input: JsonObject, config: StepConfig | null, callSignal: () => AbortSignal): Promise<void> {
+  private async proposeRoutines(job: Job, worldId: WorldId, input: JsonObject, config: StepConfig | null, loreTokens: Limit, callSignal: () => AbortSignal): Promise<void> {
     // On the draft, where the author is working: what an earlier pass proposed and was applied counts as the world's.
     const draft = await this.worlds.working(worldId, job.userId);
     const scope = routineScope(this.registry, draft);
     const request = readRoutineInput(input);
-    const pass = routinePass(scope, request);
+    const pass = routinePass(scope, request, loreTokens);
     const unread = pass.unread.length > 0 ? `${pass.unread.length} named weren't read: they aren't people or groups the job may read (${pass.unread.slice(0, 6).join(", ")}${pass.unread.length > 6 ? "…" : ""}).` : null;
     if (pass.owners.length === 0) throw new Error(request.owners ? `none of the named people or groups is one the job may read; secret ones and the player character aren't proposed for${unread ? `. ${unread}` : ""}` : request.after ? `no one comes after ${request.after}: the last pass read everyone` : "the world has no people or groups the job may read; secret ones and the player character aren't proposed for");
-    if (pass.batches.length === 0) throw new Error("no one has a sheet field or a lore entry to go on: write about their days in the lore or their sheets first");
+    if (pass.batches.length === 0) throw new Error(loreCutMessage(scope, pass.cut, loreTokens) ?? "no one has a sheet field or a lore entry to go on: write about their days in the lore or their sheets first");
     const signal = job.controller.signal;
     const system = routineSystem(scope);
     const roomy: StepConfig = { ...(config ?? { enabled: true, signals: [] }), maxTokens: Math.max(config?.maxTokens ?? 0, PROPOSAL_MAX_TOKENS) };
@@ -461,6 +461,7 @@ export class JobRunner {
     const message = [
       rest > 0 ? `${rest} people and groups weren't read in this pass's ${ROUTINE_MAX_CALLS} calls; continue for the rest.` : null,
       unread,
+      loreCutMessage(scope, pass.cut, loreTokens),
       bare,
       failures.length > 0 ? `${failures.length} call(s) answered nothing: ${[...new Set(failures)].join("; ")}.` : null,
       dropSummary(candidates.length, candidates.length - dropped, drops),
@@ -577,7 +578,7 @@ export class JobRunner {
       return;
     }
     if (job.kind === "propose_routines") {
-      await this.proposeRoutines(job, worldId, input, config, callSignal);
+      await this.proposeRoutines(job, worldId, input, config, settings.jobs.routineLoreTokens, callSignal);
       return;
     }
     if (job.kind === "index_book" || job.kind === "index_text") {

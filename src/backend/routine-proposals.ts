@@ -38,12 +38,11 @@ import { entityVisibility, findLeaks, loreGateReader, namesAny, unrevealedSecret
 import { initialState, minutesBetween } from "../engine/world-state";
 import { blockOnDay, routineIssues } from "../packs/castlife/core/routines";
 import { tokensOf } from "./book";
-import { ENTRY_MAX_CHARS, IMPORT_CHUNK, IMPORT_MAX_CALLS, snake, type DropCounts } from "./proposals";
+import { IMPORT_MAX_CALLS, snake, type DropCounts } from "./proposals";
+import { limitOf, type Limit } from "../shared/minds";
 
-/** People and groups one call reads. */
+/** People and groups one call reads, at most: fewer when their lore together passes one person's allowance. */
 export const ROUTINE_OWNERS_PER_CALL = 3;
-/** Lore entries one call is given: Import's chunk, so a pass reads at most Import's 72. */
-export const ROUTINE_ENTRIES_PER_CALL = IMPORT_CHUNK;
 /** Calls a pass makes, repairs included: Import's. */
 export const ROUTINE_MAX_CALLS = IMPORT_MAX_CALLS;
 /** Items a reply may hold; the rest are left out. */
@@ -60,9 +59,6 @@ export const ROUTINE_OWNERS_MAX = 500;
 const LORE_PURPOSE = "extract";
 /** A quote is a short one: one longer than this is cut at a word. */
 const QUOTE_MAX = 240;
-/** A sheet field's text the prompt shows, and the most of a sheet it shows. */
-const FIELD_MAX = 300;
-const SHEET_MAX = 1800;
 /** The places the prompt lists by name, those the batch's people use first. */
 const PLACES_LISTED = 80;
 /** Days the clash check walks from the story's start: two weeks show every weekly pattern twice. */
@@ -237,8 +233,17 @@ function placeOf(scope: RoutineScope, who: EntityId, field: "home" | "employer")
 
 export interface RoutineBatch {
   owners: EntityId[];
-  /** The lore entries it is given, best first. */
+  /** The lore entries it is given, whole: each owner's, best first, each entry once. */
   lore: string[];
+  /** Those entries' tokens, as the allowance counts them. */
+  tokens: number;
+}
+
+/** Someone whose lore didn't all fit the allowance: how many of their entries were read, of how many found. */
+export interface LoreCut {
+  owner: EntityId;
+  read: number;
+  of: number;
 }
 
 export interface RoutinePass {
@@ -250,6 +255,8 @@ export interface RoutinePass {
   bare: EntityId[];
   /** Named in the input but not people or groups the job may read. */
   unread: string[];
+  /** Those whose lore the allowance cut: the job says so, and where to raise it. */
+  cut: LoreCut[];
 }
 
 /** A job's input as the job reads it: whom it proposes for, and where a second pass starts. */
@@ -258,49 +265,90 @@ export function readRoutineInput(input: JsonObject): RoutineJobInput {
   return { ...(owners ? { owners } : {}), ...(typeof input.after === "string" && input.after !== "" ? { after: input.after } : {}) };
 }
 
-/** The lore entries about someone, best first, by the engine's search: links to them and their places and groups, and their names. */
+/**
+ * The lore entries about someone, best first, by the engine's search: those linked to them, their
+ * home, workplace and groups (a group: its members' homes), those titled or keyed by one of those
+ * names, and those whose text says their name. Every match: the allowance decides how many go in.
+ */
 function loreAbout(scope: RoutineScope, who: EntityId): string[] {
   const group = scope.groups.has(who);
   const places = group ? membersRead(scope, who).map((m) => placeOf(scope, m, "home")) : [placeOf(scope, who, "home"), placeOf(scope, who, "employer")];
   const employer = own(scope.state.entities, who)?.fields.employer;
-  const links = [who, ...places.filter((p): p is PlaceId => p !== null), ...(typeof employer === "string" ? [employer] : []), ...(group ? [] : groupsOf(scope, who))];
-  const names = [nameOf(scope, who), ...links.slice(1).map((id) => nameOf(scope, id)), ...sheetFields(scope, who).flatMap((f) => (f.field === "role" || f.field === "occupation" ? [f.text] : []))];
+  const links = [...new Set([who, ...places.filter((p): p is PlaceId => p !== null), ...(typeof employer === "string" ? [employer] : []), ...(group ? [] : groupsOf(scope, who))])];
   const result = loreSearch(
     { reg: scope.reg, world: scope.world, state: scope.state, tokens: tokensOf },
-    { query: names.join(" "), links, purpose: LORE_PURPOSE, effects: true, limit: ROUTINE_ENTRIES_PER_CALL, tokenBudget: ROUTINE_ENTRIES_PER_CALL * tokensOf("x".repeat(ENTRY_MAX_CHARS + 120)) },
+    { query: nameOf(scope, who), terms: links.map((id) => nameOf(scope, id)), links, purpose: LORE_PURPOSE, effects: true, limit: Number.POSITIVE_INFINITY, tokenBudget: Number.POSITIVE_INFINITY },
   );
   return result.hits.map((h) => h.id).filter((id) => scope.lore.has(id));
 }
 
+/** A lore entry as a call gives it, whole: its title, the id it is cited by, and all its text. */
+function entryText(scope: RoutineScope, id: string): string {
+  const entry = own(scope.world.lore, id);
+  return entry ? `### ${entry.title || id} (lore: ${id})\n${entry.content}` : "";
+}
+
 /**
  * A pass over the people and groups the input names (else everyone the job reads, the POV aside),
- * after `after`, in id order. People with nothing to go on are passed over without a call; the rest
- * go a few to a call, with the lore entries about them (each one's best in turn, at most
- * `ROUTINE_ENTRIES_PER_CALL`).
+ * after `after`, in id order. Each brings their lore whole within `loreTokens` (Settings → Steps and
+ * connections → Build jobs): entries best first until the next would pass it, none ever cut, all of
+ * them under "none". People with nothing to go on are passed over without a call. The rest go up to
+ * `ROUTINE_OWNERS_PER_CALL` to a call while their lore together fits one allowance, so someone whose
+ * lore fills it has a call of their own.
  */
-export function routinePass(scope: RoutineScope, input: RoutineJobInput): RoutinePass {
+export function routinePass(scope: RoutineScope, input: RoutineJobInput, loreTokens: Limit): RoutinePass {
+  const allowance = limitOf(loreTokens);
   const everyone = [...scope.groups, ...scope.people].filter((id) => id !== scope.world.pov).sort();
   const named = input.owners ? [...new Set(input.owners)] : null;
   const unread = named ? named.filter((id) => !everyone.includes(id)) : [];
   const owners = (named ? everyone.filter((id) => named.includes(id)) : everyone).filter((id) => input.after === undefined || id > input.after);
-  const lore = new Map(owners.map((id) => [id, loreAbout(scope, id)]));
-  const bare = owners.filter((id) => (lore.get(id) ?? []).length === 0 && sheetFields(scope, id).length === 0);
-  const read = owners.filter((id) => !bare.includes(id));
-  const batches: RoutineBatch[] = [];
-  for (let i = 0; i < read.length; i += ROUTINE_OWNERS_PER_CALL) {
-    const chunk = read.slice(i, i + ROUTINE_OWNERS_PER_CALL);
-    const lists = chunk.map((id) => [...(lore.get(id) ?? [])]);
-    const picked: string[] = [];
-    while (picked.length < ROUTINE_ENTRIES_PER_CALL && lists.some((l) => l.length > 0)) {
-      for (const list of lists) {
-        while (list.length > 0 && picked.includes(list[0] ?? "")) list.shift();
-        const next = list.shift();
-        if (next !== undefined && picked.length < ROUTINE_ENTRIES_PER_CALL) picked.push(next);
-      }
+  const costs = new Map<string, number>();
+  const costOf = (e: string): number => {
+    const known = costs.get(e);
+    if (known !== undefined) return known;
+    const counted = tokensOf(entryText(scope, e));
+    costs.set(e, counted);
+    return counted;
+  };
+  const lore = new Map<EntityId, { ids: string[]; of: number }>();
+  for (const id of owners) {
+    const found = loreAbout(scope, id);
+    const ids: string[] = [];
+    let used = 0;
+    for (const e of found) {
+      if (used + costOf(e) > allowance) break;
+      ids.push(e);
+      used += costOf(e);
     }
-    batches.push({ owners: chunk, lore: picked });
+    lore.set(id, { ids, of: found.length });
   }
-  return { batches, owners, bare, unread };
+  const nothing = (id: EntityId): boolean => (lore.get(id)?.ids.length ?? 0) === 0 && sheetFields(scope, id).length === 0;
+  // Someone whose lore didn't fit at all is told of as cut, not as having none.
+  const bare = owners.filter((id) => nothing(id) && (lore.get(id)?.of ?? 0) === 0);
+  const batches: RoutineBatch[] = [];
+  for (const id of owners.filter((o) => !nothing(o))) {
+    const mine = lore.get(id)?.ids ?? [];
+    const extra = (b: RoutineBatch): number => mine.filter((e) => !b.lore.includes(e)).reduce((n, e) => n + costOf(e), 0);
+    const last = batches.at(-1);
+    const batch = last !== undefined && last.owners.length < ROUTINE_OWNERS_PER_CALL && last.tokens + extra(last) <= allowance ? last : { owners: [], lore: [], tokens: 0 };
+    if (batch !== last) batches.push(batch);
+    batch.tokens += extra(batch);
+    batch.owners.push(id);
+    for (const e of mine) if (!batch.lore.includes(e)) batch.lore.push(e);
+  }
+  const cut = owners.flatMap((id) => {
+    const l = lore.get(id);
+    return l && l.ids.length < l.of ? [{ owner: id, read: l.ids.length, of: l.of }] : [];
+  });
+  return { batches, owners, bare, unread, cut };
+}
+
+/** What the allowance left out of people's lore, and where to raise it; null when nothing was. */
+export function loreCutMessage(scope: RoutineScope, cut: readonly LoreCut[], loreTokens: Limit): string | null {
+  if (cut.length === 0) return null;
+  const named = cut.slice(0, 12).map((c) => `${nameOf(scope, c.owner)} (${c.read} of ${c.of} entries)`);
+  const more = cut.length > 12 ? ` and ${cut.length - 12} more` : "";
+  return `Lore past ${limitOf(loreTokens).toLocaleString("en-US")} tokens each was left out for ${named.join(", ")}${more}: raise "Lore each person or group reads" in Settings → Steps and connections → Build jobs, or turn on "all of it".`;
 }
 
 /** A schedule's days and slots in a line: "Mon–Fri 07:00–12:00 alder_automotive". */
@@ -343,12 +391,8 @@ function ownerText(scope: RoutineScope, who: EntityId): string {
   const lines = [`### ${nameOf(scope, who)} (${who}; ${group ? "a group" : "a person"}, ${e?.kind ?? "?"})`];
   const at = group ? null : placeOfEntity(scope.state, who);
   if (at !== null && scope.places.has(at)) lines.push(`Where the story starts them: ${nameOf(scope, at)} (${at}).`);
-  let size = 0;
-  const fields = sheetFields(scope, who).filter((f) => {
-    size += f.field.length + Math.min(f.text.length, FIELD_MAX);
-    return size <= SHEET_MAX;
-  });
-  if (fields.length > 0) lines.push(`Sheet:\n${fields.map((f) => `- ${f.field}: ${f.text.slice(0, FIELD_MAX)}`).join("\n")}`);
+  const fields = sheetFields(scope, who);
+  if (fields.length > 0) lines.push(`Sheet:\n${fields.map((f) => `- ${f.field}: ${f.text}`).join("\n")}`);
   if (group) {
     const members = membersRead(scope, who);
     if (members.length > 0) lines.push(`Members: ${members.map((m) => `${nameOf(scope, m)} (${m})`).join(", ")}.`);
@@ -380,12 +424,9 @@ function placesText(scope: RoutineScope, batch: RoutineBatch): string {
   return `Places (id: name):\n${listed.map((p) => `${p}: ${nameOf(scope, p)}`).join("\n")}${more > 0 ? `\n(and ${more} more)` : ""}`;
 }
 
-/** The text one call reads: whom to propose for, the lore about them, and the places. */
+/** The text one call reads: whom to propose for, the lore about them whole, and the places. */
 export function routineCallText(scope: RoutineScope, batch: RoutineBatch): string {
-  const lore = batch.lore.flatMap((id) => {
-    const entry = own(scope.world.lore, id);
-    return entry ? [`### ${entry.title || id} (lore: ${id})\n${entry.content.slice(0, ENTRY_MAX_CHARS)}`] : [];
-  });
+  const lore = batch.lore.map((id) => entryText(scope, id)).filter((text) => text !== "");
   return [`Propose for:\n\n${batch.owners.map((id) => ownerText(scope, id)).join("\n\n")}`, lore.length > 0 ? `Lore:\n\n${lore.join("\n\n")}` : "Lore: none about them.", placesText(scope, batch)].join("\n\n");
 }
 

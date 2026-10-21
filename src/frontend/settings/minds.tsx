@@ -30,8 +30,8 @@ function Note(props: { children: string }) {
 /** Where the reply's allowance starts when it stops being the whole reply: room for a long scene's end. */
 const REPLY_TOKENS_START = 1000;
 
-/** A count or period that may have no limit: a switch, and the number while there is one. */
-function LimitField(props: { label: string; noneLabel: string; value: Limit; min: number; max?: number; step?: number; fallback: Limit; disabled: boolean; onChange(next: Limit): void }) {
+/** A count, period or allowance that may have no limit: a switch, and the number while there is one. Settings → Steps uses it for Build's jobs too. */
+export function LimitField(props: { label: string; noneLabel: string; value: Limit; min: number; max?: number; step?: number; fallback: Limit; disabled: boolean; onChange(next: Limit): void }) {
   const fallback = props.fallback === "none" ? props.min : props.fallback;
   return (
     <div class="lre-minds-limit">

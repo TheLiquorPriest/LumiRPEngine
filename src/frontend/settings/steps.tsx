@@ -12,8 +12,9 @@ import { useEffect, useState } from "preact/hooks";
 import type { JsonObject } from "../../shared/json";
 import type { ModelUsePresetId } from "../../shared/ids";
 import { PROSE_STEPS } from "../../shared/lore";
-import type { HelperDefault, LorePolicy, LoreTransport, ModelUseSettings, ReasoningChoice, SamplingParams, StepConfig, StepRoute } from "../../shared/settings";
-import { helperCallOf, REASONING_CHOICES, recentOf, SAMPLING_PARAMS, stepConfigOf, stepLoreOf } from "../../shared/settings";
+import type { HelperDefault, JobSettings, LorePolicy, LoreTransport, ModelUseSettings, ReasoningChoice, SamplingParams, StepConfig, StepRoute } from "../../shared/settings";
+import { helperCallOf, JOB_SETTINGS_DEFAULTS, REASONING_CHOICES, recentOf, SAMPLING_PARAMS, stepConfigOf, stepLoreOf } from "../../shared/settings";
+import { LimitField } from "./minds";
 import type { CallMeterView } from "../../shared/state-view";
 import type { StepPurpose } from "../../shared/world";
 import { useApp } from "../app";
@@ -329,7 +330,7 @@ export function HelperSection(props: { helper: HelperDefault; patch(patch: JsonO
   );
 }
 
-export function StepsSection(props: { modelUse: ModelUseSettings; helper: HelperDefault; patch(patch: JsonObject): void; openHelper(): void; busy: boolean }) {
+export function StepsSection(props: { modelUse: ModelUseSettings; helper: HelperDefault; jobs: JobSettings; patch(patch: JsonObject): void; openHelper(): void; busy: boolean }) {
   const connections = useConnections();
   const update = (purpose: StepPurpose, next: StepConfig) => props.patch(stepUpdatePatch(purpose, next));
   return (
@@ -341,6 +342,22 @@ export function StepsSection(props: { modelUse: ModelUseSettings; helper: Helper
       {(Object.keys(STEP_LABEL) as StepPurpose[]).map((purpose) => (
         <StepCard key={purpose} purpose={purpose} config={stepConfigOf(props.modelUse.steps, purpose)} helper={props.helper} connections={connections} busy={props.busy} update={(next) => update(purpose, next)} />
       ))}
+      {/* Build's jobs take the brief step's connection and max tokens above; what they read is set here, apart from the presets. */}
+      <Section title="Build jobs">
+        <LimitField
+          label="Lore each person or group reads (tokens)"
+          noneLabel="all of it"
+          value={props.jobs.routineLoreTokens}
+          min={1}
+          step={500}
+          fallback={JOB_SETTINGS_DEFAULTS.routineLoreTokens}
+          disabled={props.busy}
+          onChange={(routineLoreTokens) => props.patch({ jobs: { routineLoreTokens } })}
+        />
+        <p class="lre-small lre-muted" style={{ margin: 0 }}>
+          Propose routines from lore gives the AI each person's and group's lore in whole entries, the most about them first, up to this many tokens. What doesn't fit is left out, and the job says whose. People whose lore fills it get a call of their own.
+        </p>
+      </Section>
     </div>
   );
 }

@@ -1091,6 +1091,8 @@ A household's dinner, a club's evening or worship with a congregation comes back
 
 **Choosing whom to propose for.** Pick the people and groups, or leave it for everyone. It reads them a few at a time, within the same twelve helper calls an import makes. In a big world, the run stops there and says how many are left; **Continue** runs the next pass from where it stopped.
 
+**How much lore each one gets.** Each person and group gets their lore in whole entries, the most about them first, up to **Lore each person or group reads** in **Settings → Steps and connections → Build jobs** (8,000 tokens to start; turn on **all of it** for everything, however long). No entry is ever cut short. When the limit leaves entries out, the job says whose and how many of theirs it read. People whose lore fills the limit get a helper call of their own.
+
 **What the engine checks.** Each proposal is checked against your draft:
 
 - its places, people and company exist;

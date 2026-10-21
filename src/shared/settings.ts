@@ -7,8 +7,9 @@ import type { Band, BoundMode, DomainId, InterruptClass, InterruptPolicy, Level,
 import type { ClaimsPolicy } from "./claims";
 import type { InferredChecks } from "./inferred";
 import type { AdjudicationDef, StepPurpose } from "./world";
-import type { MindsSettings } from "./minds";
-import { isMindPurpose } from "./minds";
+import type { Limit, MindsSettings } from "./minds";
+import { isMindPurpose, limitIn } from "./minds";
+import { isRecord } from "./json";
 import type { TimeoutSettings } from "./timeouts";
 
 /**
@@ -309,7 +310,28 @@ export interface UserSettings {
   minds: MindsSettings;
   /** Every wall clock the engine keeps (DESIGN §5.6, Settings → Timeouts), apart from the presets: picking one never changes a time limit. */
   timeouts: TimeoutSettings;
+  /** Build's jobs (Settings → Steps and connections → Build jobs), apart from the presets. */
+  jobs: JobSettings;
 }
 
 /** The shipped defaults' revision (`UserSettings.defaults`). */
 export const SETTINGS_DEFAULTS_REV = 2;
+
+/** Build's jobs (DESIGN §13.1): the user's own, which no preset sets. */
+export interface JobSettings {
+  /**
+   * The lore Propose routines from lore gives the helper about each person or group, in tokens:
+   * whole entries, the most about them first, until the next would pass it; "none" gives all of it.
+   * No ceiling: a world with long lore is read as far as the user says.
+   */
+  routineLoreTokens: Limit;
+}
+
+/** A new user's job settings: room for a dozen long entries about each person or group. */
+export const JOB_SETTINGS_DEFAULTS: Readonly<JobSettings> = Object.freeze({ routineLoreTokens: 8000 });
+
+/** `UserSettings.jobs` as the engine reads it: each field checked, else `base`'s. */
+export function jobSettingsOf(raw: unknown, base: Readonly<JobSettings> = JOB_SETTINGS_DEFAULTS): JobSettings {
+  const j = isRecord(raw) ? raw : {};
+  return { routineLoreTokens: limitIn(j.routineLoreTokens, 1, Number.MAX_SAFE_INTEGER, base.routineLoreTokens) };
+}
