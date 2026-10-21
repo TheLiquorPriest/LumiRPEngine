@@ -48,12 +48,14 @@ describe("the cast the story is about", () => {
   test("a Background character elsewhere keeps their routine and their schedules through the same skip", () => {
     const w = evening();
     record(w, [pin("maya", "live"), { type: "set", entity: "maya", field: "place", value: "apartment" }]);
+    // His shift's end, a schedule's edge, takes him home at five; off screen his routine is lived at
+    // slot steps (observable fidelity, DESIGN §8): dinner at six, when the evening slot starts.
     const seen: string[] = [];
-    for (const t of ["12:00", "17:45", "19:30", "21:15"]) {
+    for (const t of ["12:00", "17:45", "18:00"]) {
       lapse(w, at(w, 0, t));
       seen.push(`${t} ${whereabouts(w, "jordan").join("/")}`);
     }
-    expect(seen).toEqual(["12:00 office/work_shift", "17:45 jordan_house/dinner", "19:30 library/reading", "21:15 jordan_house/idle"]);
+    expect(seen).toEqual(["12:00 office/work_shift", "17:45 jordan_house/idle", "18:00 jordan_house/dinner"]);
   });
 
   test("in ordinary play nobody the POV is with is taken out of the scene by a routine or a schedule", () => {

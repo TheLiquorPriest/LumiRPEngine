@@ -166,12 +166,12 @@ function rngFactory(runSeed: string, process: string, slot: number): (entity: En
  * while the story holds the POV (an ordinary turn's catch-up, a span the player's words spend, a
  * narrated skip): its routine doesn't move it, and its scene holds whoever is in it (DESIGN §8).
  */
-function stepAgent(reg: Registry, w: Working, agent: EntityId, slot: Slot, runSeed: string, povRoutine: boolean): LedgerEvent[] {
+function stepAgent(reg: Registry, w: Working, agent: EntityId, slot: Slot, runSeed: string, povRoutine: boolean, timelapse: boolean): LedgerEvent[] {
   const applied: LedgerEvent[] = [];
   for (const def of reg.processes) {
     if (def.scope !== "agent") continue;
     if (w.ctx.levelOf(agent, def.domain) < def.minLevel) continue;
-    applied.push(...w.applyAll(def.step({ start: slot.start, end: slot.end, index: slot.index, ...(povRoutine ? {} : { povRoutine: false }) }, w.ctx, rngFactory(runSeed, def.id, slot.index), agent)));
+    applied.push(...w.applyAll(def.step({ start: slot.start, end: slot.end, index: slot.index, ...(povRoutine ? {} : { povRoutine: false }), ...(timelapse ? { timelapse: true } : {}) }, w.ctx, rngFactory(runSeed, def.id, slot.index), agent)));
   }
   return applied;
 }
@@ -246,7 +246,7 @@ export function advance(reg: Registry, w: Working, to: number, opts: AdvanceOpti
   let next = 0;
 
   /** A slot as the processes read it: while the story holds the POV, its routine doesn't run and a scene with it holds whoever is in it. */
-  const infoOf = (slot: Slot): SlotInfo => ({ start: slot.start, end: slot.end, index: slot.index, ...(povRoutine ? {} : { povRoutine: false }) });
+  const infoOf = (slot: Slot): SlotInfo => ({ start: slot.start, end: slot.end, index: slot.index, ...(povRoutine ? {} : { povRoutine: false }), ...(timelapse ? { timelapse: true } : {}) });
 
   /**
    * The agents' own moments inside a slot after the clock (and after how far the world has run) and
@@ -283,7 +283,7 @@ export function advance(reg: Registry, w: Working, to: number, opts: AdvanceOpti
       if (edge && edgeAt <= (moment?.at ?? Infinity)) {
         next++;
         clockTo(w, edgeAt, cause, e);
-        e.emit(instantEvents(reg, w.ctx, edge, opts.runSeed, { povRoutine }));
+        e.emit(instantEvents(reg, w.ctx, edge, opts.runSeed, { povRoutine, timelapse }));
       } else if (moment) {
         t++;
         clockTo(w, moment.at, cause, e);
@@ -339,7 +339,7 @@ export function advance(reg: Registry, w: Working, to: number, opts: AdvanceOpti
       // Someone a death earlier in the slot stopped, or who dies on the way, steps no further.
       while (k < slot.index && stillActs(w, agent)) {
         k++;
-        const applied = stepAgent(reg, w, agent, k === slot.index ? slot : slotOf(cal, k), opts.runSeed, povRoutine);
+        const applied = stepAgent(reg, w, agent, k === slot.index ? slot : slotOf(cal, k), opts.runSeed, povRoutine, timelapse);
         if (applied.length > 0) result.rules.push(...runRulesOnEvents(reg, w, applied, { seed: hashParts(opts.runSeed, "agent", agent, k) }));
       }
       cursors.set(agent, k);
@@ -456,7 +456,7 @@ export function catchUp(reg: Registry, w: Working, opts: CatchUpOptions): CatchU
     while (k < done && budget > 0 && stillActs(w, agent)) {
       k++;
       // A turn's catch-up: the story holds the POV, and its scene whoever is in it.
-      const applied = stepAgent(reg, w, agent, slotOf(cal, k), opts.runSeed, false);
+      const applied = stepAgent(reg, w, agent, slotOf(cal, k), opts.runSeed, false, false);
       if (applied.length > 0) runRulesOnEvents(reg, w, applied, { seed: hashParts(opts.runSeed, "agent", agent, k) });
       budget -= slotLen;
     }

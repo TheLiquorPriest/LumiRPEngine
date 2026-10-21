@@ -97,6 +97,13 @@ export function lapse(w: Working, to: number, stops = false): TimelapseOutcome {
   return out;
 }
 
+/** Time the story spends with the POV where it is (a typed span), every interrupt noted: it could meet whoever comes. */
+export function held(w: Working, to: number): TimelapseOutcome {
+  const out = runTimelapse(reg, w, { type: "at", at: to }, { runSeed: "seed", overrides: ALL_NOTE, povRoutine: false });
+  if ("code" in out) throw new Error(out.reason);
+  return out;
+}
+
 export const pin = (entity: string, level: Fidelity): LedgerEvent => ({ type: "minds.pin", data: { entity, level } });
 
 /** A plan the GM recorded for someone (GM → Plans), as its `minds.plan_edit` event carries it. */

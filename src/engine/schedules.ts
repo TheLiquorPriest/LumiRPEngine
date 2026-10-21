@@ -257,7 +257,7 @@ function firstOfDay(instant: ScheduleInstant): boolean {
  * schedule last had them, and while the story holds the POV (`povRoutine: false`) anyone in a scene
  * with it, stays as they are; and to a chat that took them off the schedule (`castlife.schedule_off`).
  */
-export function instantEvents(reg: Registry, ctx: ReadContext, instant: ScheduleInstant, runSeed: string, opts: { povRoutine?: boolean } = {}): LedgerEvent[] {
+export function instantEvents(reg: Registry, ctx: ReadContext, instant: ScheduleInstant, runSeed: string, opts: { povRoutine?: boolean; timelapse?: boolean } = {}): LedgerEvent[] {
   const { schedule } = instant;
   const out: LedgerEvent[] = [];
   const domain = scheduleDomain(reg, schedule);
@@ -296,7 +296,7 @@ export function instantEvents(reg: Registry, ctx: ReadContext, instant: Schedule
       // the slot of this one handing over, else rest; before an end, this slot's own value.
       const lower = mine.filter((r) => rank !== null && r.rank > rank).sort((a, b) => a.rank - b.rank)[0];
       const expected = instant.edge === "end" ? (slot.value ?? null) : lower ? (lower.slot.value ?? null) : valueBefore(reg, ctx, instant, entity);
-      if (yields(ctx, entity, schedule.target === "place" ? "place" : "activity", expected, firstOfDay(instant), opts.povRoutine === false)) continue;
+      if (yields(ctx, entity, schedule.target === "place" ? "place" : "activity", expected, firstOfDay(instant), opts.povRoutine === false, opts.timelapse === true)) continue;
     }
     out.push({ type: "set", entity, field: schedule.target, value });
   }

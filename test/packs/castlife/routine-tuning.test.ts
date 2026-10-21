@@ -70,7 +70,10 @@ describe("awareness: when what the story set gives way to routine", () => {
   }
 
   test("routine first takes her back at her routine's next block, balanced at bedtime, story first not at all", () => {
-    expect(night({ awareness: "routine_first" })).toEqual(["maya_flat", "pub", "maya_flat", "cafe"]);
+    // Off screen in a Timelapse a Background character lives the day at slot steps (observable
+    // fidelity, DESIGN §8): routine first takes her back at the first step after the story set her,
+    // to the Anchor at six; dinner before it, inside the slot, leaves no trace.
+    expect(night({ awareness: "routine_first" })).toEqual(["park", "pub", "maya_flat", "cafe"]);
     expect(night({ awareness: "balanced" })).toEqual(["park", "park", "maya_flat", "cafe"]);
     expect(night({ awareness: "story_first" })).toEqual(["park", "park", "park", "park"]);
     // Balanced is the default; the chat can set one person's own.

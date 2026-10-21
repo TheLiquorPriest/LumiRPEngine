@@ -366,14 +366,17 @@ export function withPov(ctx: ReadContext, who: EntityId): boolean {
  * runs on its own (`scene` false: a timelapse the POV's routine runs in) there's no scene to keep
  * them in, so a housemate still goes to work and a trip still leaves.
  */
-export function routineYields(ctx: ReadContext, who: EntityId, field: "place" | "activity", expected: JsonValue | null, opts: { edge: boolean; release?: boolean; scene?: boolean }): boolean {
+export function routineYields(ctx: ReadContext, who: EntityId, field: "place" | "activity", expected: JsonValue | null, opts: { edge: boolean; release?: boolean; scene?: boolean; skip?: boolean }): boolean {
   if (opts.scene !== false && withPov(ctx, who)) return true;
   const pov = who === ctx.world.pov;
   const awareness = followOf(ctx, who).awareness;
   if (!pov) {
     const tier = optionalQuery(ctx, "minds.tier")?.(ctx, who) ?? "background";
-    if (tier === "live" || tier === "near") return true;
-    if ((tier === "far" || awareness === "story_first") && optionalQuery(ctx, "minds.intent")?.(ctx, who) === true) return true;
+    // The cast the story is about keeps narrative precedence in play. In a skip a level is read again
+    // at every step (§24.1): one the POV is no longer with follows their routine off screen, as Far.
+    const cast = tier === "live" || tier === "near";
+    if (cast && (opts.skip !== true || withPov(ctx, who))) return true;
+    if ((tier === "far" || cast || awareness === "story_first") && optionalQuery(ctx, "minds.intent")?.(ctx, who) === true) return true;
   }
   const current = own(ctx.state.entities, who)?.fields[field];
   const diverged = expected === null || expected === undefined ? !opts.edge : current !== undefined && current !== expected;

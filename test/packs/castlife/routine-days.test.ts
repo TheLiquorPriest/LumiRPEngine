@@ -1,8 +1,10 @@
 // A routine's blocks as days are laid and lived (DESIGN §8, §24.8): a fixed block at its time, a
 // flexible one where its window has room, a floating one on that many days a week, an optional one on
 // some days by the world's seed, and someone with no routine planning only from the story, their
-// commitments and their basic needs. Every block of an agent's day is lived at its own start, in a
-// timelapse however its time is cut and in a catch-up alike, and the folds replay what it recorded.
+// commitments and their basic needs. In play every block of an agent's day is lived at its own start;
+// in a Timelapse a Background character off screen lives the day at slot steps, as net state, and at
+// its minute only where the POV could meet them (observable fidelity). However a run's time is cut,
+// it lands the same, and the folds replay what it recorded.
 
 import { describe, expect, test } from "bun:test";
 import type { RoutineBlock } from "../../../src/shared/routines";
@@ -12,7 +14,7 @@ import { advance, catchUp } from "../../../src/engine/simulate";
 import type { Working } from "../../../src/engine/working";
 import { dayPlan } from "../../../src/packs/castlife/core/index";
 import { routineGmView } from "../../../src/packs/castlife/core/view";
-import { at, fixed, foldBoth, gmEdit, gmPlan, lapse, pin, record, reg, routine, town, whereabouts, withRoutines } from "./town";
+import { at, fixed, foldBoth, gmEdit, gmPlan, held, lapse, pin, record, reg, routine, town, whereabouts, withRoutines, YOU } from "./town";
 
 /** Rosa (Cast life 3, a Background character) with `blocks` as her own routine, and none of Riverton's place schedule. */
 function rosa(blocks: RoutineBlock[], patch: (w: WorldDoc) => void = () => undefined): Working {
@@ -34,13 +36,21 @@ function daysWith(w: Working, who: string, block: string, days: readonly number[
 describe("a routine's blocks", () => {
   test("a fixed block is lived at its time on the days it's on, and its end hands them back", () => {
     const w = rosa([GARAGE, PUB]);
-    // Friday (day 0): the garage at nine, the Anchor at seven, home once it's over.
+    // Off screen in a Timelapse she's where her routine has her at each slot step (observable
+    // fidelity, DESIGN §8): the garage at noon, home at six; Friday's Anchor, from seven to nine,
+    // starts and ends inside the evening slot and leaves no trace.
     const friday: string[] = [];
-    for (const t of ["08:45", "09:30", "19:30", "21:15"]) {
+    for (const t of ["12:00", "18:00", "21:15"]) {
       lapse(w, at(w, 0, t));
-      friday.push(`${t} ${whereabouts(w, "rosa").join("/")}`);
+      friday.push(`${t} ${String(whereabouts(w, "rosa")[0])}`);
     }
-    expect(friday).toEqual(["08:45 apartment_hall/idle", "09:30 garage/work", "19:30 pub/drinks", "21:15 apartment_hall/idle"]);
+    expect(friday).toEqual(["12:00 garage", "18:00 apartment_hall", "21:15 apartment_hall"]);
+    // Where the POV could meet her, the Anchor is lived at seven.
+    const met = rosa([GARAGE, PUB]);
+    lapse(met, at(met, 0, "18:00"));
+    record(met, [{ type: "set", entity: YOU, field: "place", value: "pub" }]);
+    held(met, at(met, 0, "19:30"));
+    expect(whereabouts(met, "rosa")).toEqual(["pub", "drinks"]);
     // The GM sees it laid at its time, from her routine.
     const laid = routineGmView(w.ctx, "rosa", 0).day.blocks.find((b) => b.origin.type === "routine" && b.origin.block === "pub");
     expect(laid).toMatchObject({ from: "19:00", to: "21:00", place: "pub" });
@@ -55,20 +65,25 @@ describe("a routine's blocks", () => {
 
   test("a flexible block goes where its window has room: after a meeting that takes its start", () => {
     const walk: RoutineBlock = { id: "walk", label: "A walk by the river", activity: "leisure", kind: "flexible", window: { from: "14:00", to: "18:00" }, minutes: 60, place: { place: "park" } };
+    // Where the POV could meet her, at the river (observable fidelity, DESIGN §8: off screen in a
+    // Timelapse a Background character lives the day at slot steps), she comes at the walk's start:
+    // at two, or after a meeting that takes it, at half past three. The scene then keeps her there.
     const run = (meeting: boolean): string[] => {
       const w = rosa([walk], (wd) => {
         const r = wd.entities.rosa;
         if (r && meeting) r.fields.appointments = [{ at: clockAt(calendarOf(wd), 0, parseHHMM("14:00")), minutes: 90, place: "bank", label: "Loan meeting" }];
       });
+      lapse(w, at(w, 0, "12:00"));
+      record(w, [{ type: "set", entity: YOU, field: "place", value: "park" }]);
       const seen: string[] = [];
-      for (const t of ["14:30", "15:45", "17:10"]) {
-        lapse(w, at(w, 0, t));
+      for (const t of ["14:30", "15:45"]) {
+        held(w, at(w, 0, t));
         seen.push(`${t} ${String(whereabouts(w, "rosa")[0])}`);
       }
       return seen;
     };
-    expect(run(false)).toEqual(["14:30 park", "15:45 apartment_hall", "17:10 apartment_hall"]);
-    expect(run(true)).toEqual(["14:30 bank", "15:45 park", "17:10 apartment_hall"]);
+    expect(run(false)).toEqual(["14:30 park", "15:45 park"]);
+    expect(run(true)).toEqual(["14:30 apartment_hall", "15:45 park"]);
   });
 
   test("a floating block falls on that many days of each week, the same days however often the week is planned", () => {
@@ -80,19 +95,21 @@ describe("a routine's blocks", () => {
     expect(weeks.map((week) => daysWith(rosa([gym]), "rosa", "gym", week))).toEqual(picked);
     // A floating block floats: the weeks don't all pick the same weekdays.
     expect(new Set(picked.map((days) => days.map((d) => (d - 2) % 7).join(","))).size).toBeGreaterThan(1);
-    // On a day it falls on she is at the gym while it's laid, in its window; on another, at home then.
-    const w = rosa([gym]);
+    // On a day it falls on she is at the gym while it's laid, in its window; on another, at home
+    // then. The POV waits at the gym, so she's lived there at her minute (observable fidelity).
     const on = picked[0]?.[0] ?? 0;
     const off = weeks[0]?.find((d) => !picked[0]?.includes(d)) ?? 0;
-    const laid = dayPlan(w.ctx, "rosa", on).blocks.find((b) => b.option === "routine:gym");
-    const minute = (laid?.start ?? 0) - at(w, on, "00:00") + 10;
+    const laid = dayPlan(rosa([gym]).ctx, "rosa", on).blocks.find((b) => b.option === "routine:gym");
+    const minute = (laid?.start ?? 0) - at(rosa([gym]), on, "00:00") + 10;
     expect(minute >= parseHHMM("06:30") && minute - 10 <= parseHHMM("08:00")).toBe(true);
-    const seen: Record<number, unknown> = {};
-    for (const day of [on, off].sort((a, b) => a - b)) {
-      lapse(w, at(w, day, "00:00") + minute);
-      seen[day] = whereabouts(w, "rosa")[0];
-    }
-    expect([seen[on], seen[off]]).toEqual(["gym", "apartment_hall"]);
+    const seen = [on, off].map((day) => {
+      const w = rosa([gym]);
+      lapse(w, at(w, day, "00:00"));
+      record(w, [{ type: "set", entity: YOU, field: "place", value: "gym" }]);
+      held(w, at(w, day, "00:00") + minute);
+      return whereabouts(w, "rosa")[0];
+    });
+    expect(seen).toEqual(["gym", "apartment_hall"]);
   });
 
   test("an optional block happens on some of its days and not others, by the world's seed, the same every time", () => {

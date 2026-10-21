@@ -26,6 +26,7 @@ import { decodeContextView } from "../../src/frontend/play/context";
 import { Rig } from "../support/rig";
 
 const MARCUS = "marcus_delgado";
+const DANNY = "danny_okafor";
 
 /** Every mind a turn asks answers plainly, and every other helper call with nothing. */
 function plainly(req: QuietRequest): string {
@@ -86,8 +87,12 @@ function fakeMinds(calls: { at: number; who: string[]; reason: string }[], inter
   };
 }
 
-/** A timelapse of `days` under `overrides`: by default invitations only note (the plan's own invitation would end it first otherwise). */
-async function skipDays(rig: Rig, chatId: string, days: number, overrides: JsonObject = { invitation: "note" }): Promise<void> {
+/**
+ * A timelapse of `days` under `overrides`: by default invitations only note (the plan's own invitation
+ * would end it first otherwise), and so do arrivals: Danny and Marcus, Live or Near but not with the
+ * POV, follow their routine off screen in a skip (§24.1) and come to the garage where it works.
+ */
+async function skipDays(rig: Rig, chatId: string, days: number, overrides: JsonObject = { invitation: "note", arrival: "note" }): Promise<void> {
   rig.body(await rig.send({ type: "lre.action", chatId, action: "timelapse", params: { target: { type: "duration", minutes: days * 1440 }, overrides }, source: "palette" }));
   const g = await rig.host.start(chatId, { type: "normal" });
   await rig.host.finish(g, "Days pass.");
@@ -113,7 +118,7 @@ describe("time skips", () => {
     expect(plain.summary.stoppedBy).not.toBe("invitation");
     const calls: { at: number; who: string[]; reason: string }[] = [];
     rig.rt.beatMinds = fakeMinds(calls, (who, when) => who === MARCUS && when === meet);
-    await skipDays(rig, chatId, 3, {});
+    await skipDays(rig, chatId, 3, { arrival: "note" });
     const first = await folded(rig, chatId);
     const skip = ofType(first.record?.events, "minds.skip")[0];
     expect(skip && "data" in skip ? skip.data.beats : null).toEqual(expect.arrayContaining([expect.objectContaining({ at: meet, source: "scan" })]));
@@ -208,7 +213,7 @@ describe("time skips", () => {
     if (!run) throw new Error("no run");
     const whole = new Working(rig.rt.registry, start.world, start.state);
     turnStart(rig.rt.registry, whole, run.runSeed);
-    const plain = runTimelapse(rig.rt.registry, whole, { type: "duration", minutes: 3 * 1440 }, { runSeed: run.runSeed, overrides: { invitation: "note" } });
+    const plain = runTimelapse(rig.rt.registry, whole, { type: "duration", minutes: 3 * 1440 }, { runSeed: run.runSeed, overrides: { invitation: "note", arrival: "note" } });
     if ("code" in plain) throw new Error(plain.reason);
     await skipDays(rig, chatId, 3);
     const { state, record } = await folded(rig, chatId);
@@ -288,7 +293,7 @@ describe("time skips", () => {
     const settings = await rig.rt.settings.get(rig.host.userId);
     const target = { type: "duration" as const, minutes: 3 * 1440 };
     const asked: number[] = [];
-    const skip = await runSkip({ registry: rig.rt.registry, steps: rig.rt.steps, minds: async (input) => (asked.push(input.moment.at), { events: [], traces: [] }) }, { chatId, userId: rig.host.userId, world, state, intent: { ...timelapseIntent(target, { invitation: "note" }) }, runSeed: "seed", settings, signal: AbortSignal.abort() });
+    const skip = await runSkip({ registry: rig.rt.registry, steps: rig.rt.steps, minds: async (input) => (asked.push(input.moment.at), { events: [], traces: [] }) }, { chatId, userId: rig.host.userId, world, state, intent: { ...timelapseIntent(target, { invitation: "note", arrival: "note" }) }, runSeed: "seed", settings, signal: AbortSignal.abort() });
     if (!skip) throw new Error("no skip");
     const beats = skip.record.beats.map((b) => b.at);
     expect(skip.record.stop).toEqual({ by: "clock", at: beats[1] ?? NaN });
@@ -297,7 +302,7 @@ describe("time skips", () => {
     // The plan replays it there, and offers the rest.
     const w = new Working(rig.rt.registry, world, state);
     turnStart(rig.rt.registry, w, "seed");
-    const out = replaySkip(rig.rt.registry, w, target, skip.record, { runSeed: "seed", overrides: { invitation: "note" } });
+    const out = replaySkip(rig.rt.registry, w, target, skip.record, { runSeed: "seed", overrides: { invitation: "note", arrival: "note" } });
     if ("code" in out) throw new Error(out.reason);
     expect(out.summary.to).toBe(beats[1] ?? NaN);
     expect(out.chip).toEqual({ kind: "continue_timelapse", target: { type: "duration", minutes: state.clock + target.minutes - (beats[1] ?? 0) }, remaining: state.clock + target.minutes - (beats[1] ?? 0) });
@@ -363,6 +368,29 @@ describe("time skips", () => {
     expect(stopper).toBeDefined();
     const interrupting = ofType(record?.events, "minds.mind").flatMap((e) => ("data" in e && e.data.interrupt !== null ? [e.data.entity] : []));
     expect(interrupting).toEqual([stopper ?? ""]);
+  });
+
+  test("in a skip the cast the story is about follows their routine once the POV has left them, and one still with it stays (§24.1)", async () => {
+    const { rig, chatId } = await portAlder();
+    rig.body(await rig.send({ type: "lre.edit", chatId, ops: [{ op: "mind_pin", entity: DANNY, level: "live" }, { op: "mind_pin", entity: MARCUS, level: "near" }] }));
+    const { state, world } = await folded(rig, chatId);
+    const home = placeOfEntity(state, world.pov);
+    expect(placeOfEntity(state, DANNY)).toBe(home);
+    const lapse = (povRoutine: boolean): Working => {
+      const w = new Working(rig.rt.registry, world, state);
+      turnStart(rig.rt.registry, w, "seed");
+      const out = runTimelapse(rig.rt.registry, w, { type: "duration", minutes: 4 * 60 }, { runSeed: "seed", overrides: ALL_NOTE, ...(povRoutine ? {} : { povRoutine: false }) });
+      if ("code" in out) throw new Error(out.reason);
+      return w;
+    };
+    // The palette's Timelapse: the POV's day takes it to the garage; Danny, held while it's with him,
+    // and Marcus, from his own home, go to work there, their levels read again at each step, no mind asked.
+    const palette = lapse(true);
+    expect([world.pov, DANNY, MARCUS].map((who) => placeOfEntity(palette.state, who))).toEqual(["alder_automotive", "alder_automotive", "alder_automotive"]);
+    expect(palette.events.some((e) => e.type === "minds.mind")).toBe(false);
+    // A span the player's words spend at home: Danny, still with the POV, stays; Marcus still goes.
+    const held = lapse(false);
+    expect([world.pov, DANNY, MARCUS].map((who) => placeOfEntity(held.state, who))).toEqual([home, home, "alder_automotive"]);
   });
 });
 

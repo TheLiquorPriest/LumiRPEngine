@@ -180,13 +180,15 @@ describe("the clock in a fight", () => {
     const left = (s: WorldState): WorldState => fold(registry, world, s, [{ type: "set", entity: world.pov, field: "place", value: "bluebird_coffee" }]);
     expect(played(left(over(state)), leaves)).toBe("port_alder");
     // Danny is away here on a trip that ends within those hours: he fights on, and once the fight is
-    // over the trip brings him home.
+    // over the trip's end, like its start, takes him out of no scene with the POV: he goes home once
+    // the POV has left him.
     const returns = (w: Working): void => {
       const until = w.state.clock + 60;
       w.state.entities.danny_okafor!.fields = { ...w.state.entities.danny_okafor!.fields, home: "port_alder", holds: { place: until, activity: until }, trips: [{ from: w.state.clock - 24 * 60, until, place, label: "Visit" }] };
     };
     expect(played(state, returns)).toBe(place);
-    expect(played(state, returns, true)).toBe("port_alder");
+    expect(played(state, returns, true)).toBe(place);
+    expect(played(left(state), returns, true)).toBe("port_alder");
   });
 
   test("on a starter, talking or using a skill through a fight moves no clock, and no day plan takes the foe away", () => {

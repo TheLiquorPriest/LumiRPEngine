@@ -160,6 +160,12 @@ export interface SlotInfo {
    * own (a timelapse): the POV follows its routine and no scene holds anyone.
    */
   povRoutine?: boolean;
+  /**
+   * True in a Timelapse (time skipped, not played): an off-screen Background agent lives their day at
+   * slot steps only, as net state, and the cast the story is about is held only while with the POV
+   * (DESIGN §8, §24.1).
+   */
+  timelapse?: boolean;
 }
 
 /** A moment inside a slot at which an agent process acts between its slot steps (`ProcessDef.instants`). */

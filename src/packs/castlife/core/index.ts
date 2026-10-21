@@ -371,7 +371,7 @@ function blockActivity(activity: string): string {
  * day back to the routine. A scene with the POV holds them only while the story holds the POV
  * (`scene`, `SlotInfo.povRoutine` false); while time runs on its own, there's none.
  */
-function liveBlock(ctx: ReadContext, who: EntityId, plan: DayPlan, block: DayPlan["blocks"][number], from: number, at: number, scene: boolean): LedgerEvent[] {
+function liveBlock(ctx: ReadContext, who: EntityId, plan: DayPlan, block: DayPlan["blocks"][number], from: number, at: number, scene: boolean, skip: boolean): LedgerEvent[] {
   const activity = blockActivity(block.activity);
   if (block.option.startsWith("plan:")) return scene && withPov(ctx, who) ? [] : takeUp(ctx, who, block.place, activity, at, block.end);
   const edge = block.start > from && block.start <= at;
@@ -388,7 +388,7 @@ function liveBlock(ctx: ReadContext, who: EntityId, plan: DayPlan, block: DayPla
   const doings = [...had.map((b) => blockActivity(b.activity)), ...(typeof resting === "string" ? [resting] : [])];
   const wasPlace = places.find((p) => p === e?.fields.place) ?? places[0] ?? [...earlier].reverse().find((b) => b.place !== null)?.place ?? home;
   const wasDoing = doings.find((d) => d === e?.fields.activity) ?? doings[0] ?? null;
-  const opts = { edge, release: block.activity === "sleep", scene };
+  const opts = { edge, release: block.activity === "sleep", scene, skip };
   const target = block.place ?? (edge && earlier.at(-1)?.place ? home : null);
   const place = target !== null && !routineYields(ctx, who, "place", wasPlace, opts) ? target : null;
   const doing = routineYields(ctx, who, "activity", wasDoing, opts) ? null : activity;
@@ -519,12 +519,69 @@ function planMoments(ctx: ReadContext, who: EntityId, slot: SlotInfo): AgentInst
   if (who !== ctx.world.pov || slot.povRoutine !== false) {
     const cal = calendarOf(ctx.world);
     const handed = new Set(out.flatMap((m) => (m.key.startsWith("end:") ? [m.at] : [])));
+    const lived = livedAtMinute(ctx, who, slot);
+    const home = homeOf(ctx, who);
+    // Where they are as each block starts: where they are now, then each block's place, and home in
+    // free time after a block with one (`liveBlock`).
+    let before = placeOfEntity(ctx.state, who);
+    let placed = false;
     for (let day = dateAt(cal, slot.start).dayIndex; day <= dateAt(cal, slot.end - 1).dayIndex; day++) {
-      for (const b of dayPlan(ctx, who, day).blocks) if (inside(b.start) && !b.option.startsWith("plan:") && b.activity !== "trip" && !handed.has(b.start)) out.push({ at: b.start, key: `block:${b.option}` });
+      for (const b of dayPlan(ctx, who, day).blocks) {
+        if (!inside(b.start)) continue;
+        if (!b.option.startsWith("plan:") && b.activity !== "trip" && !handed.has(b.start) && lived(b, before)) out.push({ at: b.start, key: `block:${b.option}` });
+        before = b.place ?? (placed ? home : before);
+        placed = b.place !== null;
+      }
     }
   }
   if (ctx.levelOf(who, "castlife") >= 4) for (const a of asksOf(ctx, who, slotDays(ctx, slot))) if (inside(a.ask)) out.push({ at: a.ask, key: `invite:${a.key}` });
   return out;
+}
+
+/** Whether someone lives every block of their day at its own minute in this slot: in a turn, everyone; in a Timelapse, the POV and the Live, Near and Far cast. */
+function livesEveryBlock(ctx: ReadContext, who: EntityId, slot: SlotInfo): boolean {
+  return slot.timelapse !== true || who === ctx.world.pov || (optionalQuery(ctx, "minds.tier")?.(ctx, who) ?? "background") !== "background";
+}
+
+/**
+ * Which blocks of someone's day starting inside a slot they live at their own minute (DESIGN §8,
+ * observable fidelity): every one, if they live every block (`livesEveryBlock`); otherwise only where
+ * the POV could see it, meeting them where the block takes them while it lasts or seeing them leave
+ * (`before`, where they were). An off-screen Background agent in a Timelapse otherwise lives the day
+ * at slot steps only, as net state, so a skip spends no events on what no one sees.
+ */
+function livedAtMinute(ctx: ReadContext, who: EntityId, slot: SlotInfo): (block: DayPlan["blocks"][number], before: PlaceId | null) => boolean {
+  if (livesEveryBlock(ctx, who, slot)) return () => true;
+  const pov = ctx.world.pov;
+  const here = placeOfEntity(ctx.state, pov);
+  const home = homeOf(ctx, pov) ?? here;
+  const cal = calendarOf(ctx.world);
+  const plans = new Map<number, DayPlan>();
+  const planOf = (day: number): DayPlan => {
+    const plan = plans.get(day) ?? dayPlan(ctx, pov, day);
+    plans.set(day, plan);
+    return plan;
+  };
+  // Where the POV is over part of the slot: where the story holds it, else where its own day has it
+  // (free time after a block with a place takes it home, as `liveBlock` lives it).
+  const povAt = (from: number, to: number): Set<PlaceId> => {
+    const out = new Set<PlaceId>();
+    if (slot.povRoutine === false) {
+      if (here !== null) out.add(here);
+      return out;
+    }
+    for (let day = dateAt(cal, from).dayIndex; day <= dateAt(cal, to - 1).dayIndex; day++) {
+      const blocks = planOf(day).blocks;
+      blocks.forEach((b, i) => {
+        if (b.end <= from || b.start >= to) return;
+        const place = b.place ?? (blocks.slice(0, i).some((x) => x.place !== null) ? home : here);
+        if (place !== null) out.add(place);
+      });
+    }
+    return out;
+  };
+  // Lived at its minute where the POV could meet them there while it lasts, or sees them leave.
+  return (block, before) => (block.place !== null && povAt(block.start, block.end).has(block.place)) || (before !== null && povAt(block.start, block.start + 1).has(before));
 }
 
 /**
@@ -544,7 +601,10 @@ function atPlanMoment(ctx: ReadContext, who: EntityId, moment: AgentInstant, slo
   const plan = dayPlan(ctx, who, dateAt(cal, moment.at).dayIndex);
   if (moment.key.startsWith("block:")) {
     const starting = plan.blocks.find((b) => b.start === moment.at);
-    return starting ? liveBlock(ctx, who, plan, starting, moment.at - 1, moment.at, scene) : [];
+    // Someone who lives only the blocks the POV could see lived none since the slot's step but those:
+    // the routine had them anywhere since then, as a slot step reads it.
+    const from = livesEveryBlock(ctx, who, slot) ? moment.at - 1 : slot.start;
+    return starting ? liveBlock(ctx, who, plan, starting, from, moment.at, scene, slot.timelapse === true) : [];
   }
   const block = plan.blocks.find((b) => b.start <= moment.at && moment.at < b.end);
   if (!block || (scene && withPov(ctx, who))) return [];
@@ -579,7 +639,7 @@ function stepAgent(slot: SlotInfo, ctx: ReadContext, rngFor: (entity: EntityId) 
       if (Array.isArray(got)) out.push(...got, { type: ENGINE_EVENTS.note, data: { text: `${e.name} got ${own(ctx.state.entities, thing)?.name ?? thing} back.`, entity: who, visibility: "known_by" } });
     }
   }
-  if (who !== pov || slot.povRoutine !== false) out.push(...liveBlock(ctx, who, plan, block, slot.start, slot.end, slot.povRoutine === false));
+  if (who !== pov || slot.povRoutine !== false) out.push(...liveBlock(ctx, who, plan, block, slot.start, slot.end, slot.povRoutine === false, slot.timelapse === true));
   out.push(...planOutcomes(ctx, who, slot));
   if (level < 4) return out;
 
@@ -672,6 +732,9 @@ function stepTrips(slot: SlotInfo, ctx: ReadContext): LedgerEvent[] {
         out.push({ type: "set", entity: who, field: "holds", value: holds }, { type: "set", entity: who, field: "place", value: place }, { type: "set", entity: who, field: "activity", value: "trip" });
       }
       if (!(until <= slot.end && (until > slot.start || holding))) continue;
+      // Nor does its end take anyone out of a scene the story holds with the POV: they stay, held by
+      // the trip, and go home once the scene lets them go (DESIGN §8).
+      if (slot.povRoutine === false && withPov(ctx, who)) continue;
       // Over: home if it ended within the slot, or if it still holds them at its place after slots
       // that couldn't end it (anyone something else took elsewhere meanwhile stays there).
       const home = homeOf(ctx, who);
@@ -1145,7 +1208,7 @@ declare module "../../../engine/registry" {
     /** Invitations to the POV still open (`invited`), each with its host and as `viewer` reads it ("Danny invites you to Bluebird Coffee at 19:00."). */
     "castlife.invitations": (ctx: ReadContext, viewer: EntityId) => { host: EntityId; text: string }[];
     /** Whether a schedule's edge must leave someone's place or activity as the story has it (`routineYields`; `release` where a balanced routine takes the day back, `scene` false while time runs on its own). */
-    "castlife.yields": (ctx: ReadContext, who: EntityId, field: "place" | "activity", expected: JsonValue | null, release: boolean, scene: boolean) => boolean;
+    "castlife.yields": (ctx: ReadContext, who: EntityId, field: "place" | "activity", expected: JsonValue | null, release: boolean, scene: boolean, skip: boolean) => boolean;
     /** Whether the chat took someone off a schedule at `at` (`schedule_override`). */
     "castlife.schedule_off": (ctx: ReadContext, who: EntityId, schedule: string, at: number) => boolean;
     /** The chat's own versions of schedules, each owned by the one person it's for. */
@@ -1162,7 +1225,7 @@ export const castlifePack: PackDef = {
   register(r) {
     for (const def of EVENTS) r.event(def);
     r.service("castlife.edit", routineEdit);
-    r.query("castlife.yields", (ctx, who, field, expected, release, scene) => routineYields(ctx, who, field, expected, { edge: true, release, scene }));
+    r.query("castlife.yields", (ctx, who, field, expected, release, scene, skip) => routineYields(ctx, who, field, expected, { edge: true, release, scene, skip }));
     r.query("castlife.schedule_off", (ctx, who, schedule, at) => scheduleOff(ctx.state, who, schedule, at));
     r.query("castlife.chat_schedules", chatScheduleDefs);
     r.process({ id: "castlife.agents", domain: "castlife", minLevel: 3, scope: "agent", step: (slot, ctx, rng, agent) => (agent ? stepAgent(slot, ctx, rng, agent) : []), instants: planMoments, atInstant: atPlanMoment });
