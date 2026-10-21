@@ -27,7 +27,7 @@ import { Icon } from "../icons";
 import type { EditorProps } from "../registry";
 import type { Req } from "../requests";
 import { useSelect } from "../store";
-import { COLLECTION_INFO, deleteItem, go, ItemHeader, itemLabel, NewItem, newItemName, PART_INFO } from "./chrome";
+import { COLLECTION_INFO, deleteItem, go, ItemHeader, NewItem, newItemName, PART_INFO } from "./chrome";
 import { AddPicker, CheckField, Chip, FormGroup, FormSheet, Issues, ItemRow, RefPicker, type RefOption } from "./form-kit";
 import { useHeld } from "./held";
 import { ownerLevel, OwnerPicker, ownerWords, type OwnerLevel } from "./owner-picker";
@@ -170,6 +170,11 @@ function routineSummary(routine: RoutineDef): string {
   const off = routine.blocks.length - on;
   const parts = [`${on} block${on === 1 ? "" : "s"}`, off > 0 ? `${off} turned off` : "", routine.inherit === false ? "only its own" : ""];
   return parts.filter((p) => p !== "").join(", ");
+}
+
+/** A routine's name: its label, else whom it's for ("Mara Kim", "Every NPC"). */
+function routineName(doc: WorldDoc, routine: Pick<RoutineDef, "label" | "owner">): string {
+  return routine.label || ownerWords(doc, routine.owner, "Everyone");
 }
 
 /** A block's name, wherever it is defined: this routine, another, or the basic needs. */
@@ -543,7 +548,7 @@ function SourceFields(props: { value: WorldRoutineSource | undefined; doc: World
 // ---------------------------------------------------------------- a block's sheet
 
 /** A block of the routine as a sheet: its fields, its id under Advanced, where it comes from, and Remove. */
-function BlockSheet(props: { block: RoutineBlock; index: number; routine: RoutineDef; doc: WorldDoc; path: string; lint: readonly LintIssue[]; onChange(next: RoutineBlock): void; onRemove(): void; onClose(): void }) {
+function BlockSheet(props: { block: RoutineBlock; index: number; routine: RoutineDef; doc: WorldDoc; path: string; lint: readonly LintIssue[]; fresh: boolean; onChange(next: RoutineBlock): void; onRemove(): void; onClose(): void }) {
   const { block, doc } = props;
   const path = `${props.path}.blocks.${props.index}`;
   const idField = useId();
@@ -551,10 +556,12 @@ function BlockSheet(props: { block: RoutineBlock; index: number; routine: Routin
   const taken = props.routine.blocks.filter((_, i) => i !== props.index).map((b) => b.id);
   const known = [...new Set([...BASIC_BLOCKS.map((b) => b.id), ...Object.values(doc.routines ?? {}).flatMap((r) => r.blocks.map((b) => b.id))])].filter((id) => !taken.includes(id));
   const clash = taken.includes(block.id);
+  // A block added here takes its id from its label, as + New's id follows a name; a saved or copied block keeps its id, which chats and other routines know it by.
+  const change = (next: RoutineBlock) => props.onChange(props.fresh && next.label !== block.label ? { ...next, id: deriveId(next.label.trim() || "Block", new Set(taken)) } : next);
   return (
     <FormSheet title={block.label || "New block"} subtitle={`${KIND_WORDS[block.kind].label} · ${timeWords(block)}`} backLabel="Routine" onClose={props.onClose}>
       <Issues issues={props.lint.filter((issue) => issue.path === path || issue.path === `${path}.id`)} />
-      <RoutineBlockForm value={block} doc={doc} path={path} lint={props.lint} onChange={props.onChange} />
+      <RoutineBlockForm value={block} doc={doc} path={path} lint={props.lint} onChange={change} />
       <FormGroup title="Where it comes from">
         <SourceFields value={block.source?.type === "lore" || block.source?.type === "sheet" || block.source?.type === "authored" ? block.source : undefined} doc={doc} issues={lintAt(props.lint, `${path}.source`)} inherited={sourceWords(doc, props.routine.source)} onChange={(source) => {
           const { source: _, ...rest } = block;
@@ -601,22 +608,35 @@ export function RoutineForm(props: { value: RoutineDef; doc: WorldDoc; path: str
   });
   // The blocks "No routine" put away, back if the routine is chosen again before the page is left.
   const [stash, setStash] = useState<RoutineEntry[]>([]);
+  // The ids of the blocks added on this page, whose ids still follow their labels.
+  const [fresh, setFresh] = useState<readonly string[]>([]);
   const level = ownerLevel(doc, routine.owner);
   const none = level !== "none" && isNoRoutine(routine);
+  const whom = ownerWords(doc, routine.owner, "everyone");
+  const covered = level === "kind" || level === "selector" ? `${whom.charAt(0).toLowerCase()}${whom.slice(1)}` : whom;
   const indexed = routine.blocks.map((entry, index) => ({ entry, index }));
   const blocks = indexed.filter((b) => !isOff(b.entry)).sort((a, b) => startOf(a.entry) - startOf(b.entry));
   const offs = indexed.filter((b) => isOff(b.entry));
   const ids = new Set(routine.blocks.map((b) => b.id));
-  const basics: RefOption[] = BASIC_BLOCKS.filter((b) => !ids.has(b.id)).map((b) => ({ value: b.id, label: b.label, sublabel: timeWords(b) }));
-  // Other routines' blocks this one could turn off, each id once, named by the routine it's from.
+  const basics: RefOption[] = BASIC_BLOCKS.filter((b) => !ids.has(b.id)).map((b) => ({ value: b.id, label: b.label, sublabel: `Everyone's · ${timeWords(b)}` }));
+  // Other routines' blocks this one could change or turn off, each id once, named by the routine it's from; a basic need's id offers the basic need.
   const broader: RefOption[] = [];
   for (const r of Object.values(doc.routines ?? {})) {
     if (r.id === routine.id) continue;
-    for (const b of r.blocks) if (!isOff(b) && !ids.has(b.id) && !broader.some((o) => o.value === b.id)) broader.push({ value: b.id, label: b.label, sublabel: itemLabel("routines", r.id, r) });
+    for (const b of r.blocks) if (!isOff(b) && !ids.has(b.id) && !BASIC_BLOCKS.some((x) => x.id === b.id) && !broader.some((o) => o.value === b.id)) broader.push({ value: b.id, label: b.label, sublabel: routineName(doc, r) });
   }
   const add = (block: RoutineBlock) => {
     set({ ...routine, blocks: [...routine.blocks, block] });
     setOpen(routine.blocks.length);
+  };
+  // A copy of a basic need or a broader block, under its id, to change for whom this routine covers; a basic need's copy is written here.
+  const copy = (id: string) => {
+    const basic = BASIC_BLOCKS.find((b) => b.id === id);
+    const from = basic ?? Object.values(doc.routines ?? {}).flatMap((r) => (r.id === routine.id ? [] : r.blocks)).find((b): b is RoutineBlock => !isOff(b) && b.id === id);
+    if (!from) return;
+    const block = structuredClone(from);
+    if (basic) delete block.source;
+    add(block);
   };
   const remove = (index: number) => {
     set({ ...routine, blocks: routine.blocks.filter((_, i) => i !== index) });
@@ -687,10 +707,25 @@ export function RoutineForm(props: { value: RoutineDef; doc: WorldDoc; path: str
       ) : null}
       {none ? null : (
         <>
-          <Section title="Blocks" aside={<Button size="sm" icon="plus" onClick={() => add(blankBlock(deriveId("Block", ids), ""))}>Block</Button>}>
+          <Section
+            title="Blocks"
+            aside={
+              <Button
+                size="sm"
+                icon="plus"
+                onClick={() => {
+                  const block = blankBlock(deriveId("Block", ids), "");
+                  setFresh([...fresh, block.id]);
+                  add(block);
+                }}
+              >
+                Block
+              </Button>
+            }
+          >
             <div class="lre-stack">
               {blocks.length === 0 ? (
-                <span class="lre-small lre-muted">No blocks yet. Add one, or change a basic need below.</span>
+                <span class="lre-small lre-muted">No blocks yet. Add one, or change a basic need or a broader routine's block below.</span>
               ) : (
                 <div class="lre-form-items" data-lre-blocks>
                   {blocks.map(({ entry, index }) => {
@@ -711,13 +746,8 @@ export function RoutineForm(props: { value: RoutineDef; doc: WorldDoc; path: str
                   })}
                 </div>
               )}
-              {basics.length > 0 ? <AddPicker label="Change a basic need" placeholder="Change a basic need…" options={basics} onAdd={(id) => {
-                const basic = BASIC_BLOCKS.find((b) => b.id === id);
-                if (!basic) return;
-                const { source: _, ...rest } = basic;
-                add(structuredClone(rest));
-              }} /> : null}
-              <span class="lre-small lre-muted">Everyone sleeps and eats ({BASIC_BLOCKS.map((b) => b.label).join(", ")}) unless a block with the same id changes it or turns it off.</span>
+              {basics.length + broader.length > 0 ? <AddPicker label="Change a basic need or a broader block" placeholder="Change a basic need or a broader block…" options={[...basics, ...broader]} onAdd={copy} /> : null}
+              <span class="lre-small lre-muted">Everyone sleeps and eats ({BASIC_BLOCKS.map((b) => b.label).join(", ")}) unless a block with the same id changes it or turns it off; a block here changes a broader routine's block with the same id the same way.</span>
             </div>
           </Section>
           <Section title="Turned off here">
@@ -727,7 +757,7 @@ export function RoutineForm(props: { value: RoutineDef; doc: WorldDoc; path: str
               ) : (
                 <div class="lre-form-items" data-lre-offs>
                   {offs.map(({ entry, index }) => (
-                    <ItemRow key={index} title={blockName(doc, entry.id)} subtitle="Off for whom this routine covers" badge={<LintBadge issues={lintAt(lint, `${props.path}.blocks.${index}`)} />} actions={<IconButton icon="undo" label={`Turn ${blockName(doc, entry.id)} back on`} onClick={() => remove(index)} />} />
+                    <ItemRow key={index} title={blockName(doc, entry.id)} subtitle={`Off for ${covered}`} badge={<LintBadge issues={lintAt(lint, `${props.path}.blocks.${index}`)} />} actions={<IconButton icon="undo" label={`Turn ${blockName(doc, entry.id)} back on`} onClick={() => remove(index)} />} />
                   ))}
                 </div>
               )}
@@ -751,7 +781,12 @@ export function RoutineForm(props: { value: RoutineDef; doc: WorldDoc; path: str
           doc={doc}
           path={props.path}
           lint={lint}
-          onChange={(next) => set({ ...routine, blocks: routine.blocks.map((b, i) => (i === open ? next : b)) })}
+          fresh={fresh.includes(current.id)}
+          onChange={(next) => {
+            // An id the label moved stays fresh under its new name; one typed by hand stops following.
+            if (next.id !== current.id && fresh.includes(current.id)) setFresh(next.label !== current.label ? fresh.map((f) => (f === current.id ? next.id : f)) : fresh.filter((f) => f !== current.id));
+            set({ ...routine, blocks: routine.blocks.map((b, i) => (i === open ? next : b)) });
+          }}
           onRemove={() => remove(open)}
           onClose={() => setOpen(null)}
         />
@@ -780,7 +815,7 @@ export function RoutineEditor(props: EditorProps) {
   if (!id) return <span class="lre-muted">Choose a routine.</span>;
   const changed = JSON.stringify(routine) !== JSON.stringify(stored ?? null);
   const path = `routines.${id}`;
-  const name = itemLabel("routines", id, routine);
+  const name = routineName(doc, routine);
   const save = () =>
     run(async () => {
       const message = await props.send(routineWrite(props.world.id, id, routine));
@@ -871,7 +906,7 @@ export function RoutineList(props: { worldId: string }) {
         </Empty>
       ) : (
         LEVELS.map((level) => {
-          const here = shown.filter((r) => ownerLevel(doc, r.owner) === level).sort((a, b) => itemLabel("routines", a.id, a).localeCompare(itemLabel("routines", b.id, b)));
+          const here = shown.filter((r) => ownerLevel(doc, r.owner) === level).sort((a, b) => routineName(doc, a).localeCompare(routineName(doc, b)));
           if (here.length === 0) return null;
           return (
             <Section key={level} title={LEVEL_TITLE[level]} flush>
@@ -879,8 +914,8 @@ export function RoutineList(props: { worldId: string }) {
                 {here.map((r) => (
                   <ListRow
                     key={r.id}
-                    title={itemLabel("routines", r.id, r)}
-                    subtitle={`${ownerWords(doc, r.owner, "Everyone")} · ${routineSummary(r)}`}
+                    title={routineName(doc, r)}
+                    subtitle={r.label ? `${ownerWords(doc, r.owner, "Everyone")} · ${routineSummary(r)}` : routineSummary(r)}
                     id={r.id}
                     badge={<LintBadge issues={lintAt(draft.lint, `routines.${r.id}`)} />}
                     chevron

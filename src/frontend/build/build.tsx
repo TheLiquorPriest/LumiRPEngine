@@ -16,7 +16,6 @@ import type { JobKind, LintIssue, WorldCollection, WorldPart } from "../../share
 import { spawnCapOf, type WorldDoc, type WorldIndex } from "../../shared/world";
 import type { BuildRoute } from "../app";
 import { lorePinsJson, lorePinsOf } from "../../shared/lore";
-import { routineSettingsOf } from "../../shared/routines";
 import { LorePinsSection } from "./lore-pins";
 import { useApp, useUi, useView } from "../app";
 import { Badge, Banner, Button, Empty, Field, IconButton, IdText, JsonView, List, ListRow, PageHeader, SaveBar, Section, useBusy } from "../components";
@@ -34,6 +33,7 @@ import { LookupTableEditor } from "./lookup-editor";
 import { MindsEditor } from "./minds-editor";
 import { LoreEditor, LoreList } from "./lore-editor";
 import { RoutineEditor, RoutineList } from "./routine-editor";
+import { RoutineSettingsEditor } from "./routine-settings";
 import { RulesetEditor } from "./ruleset-editor";
 import { COLLECTION_SPECS, newItem, PART_SPECS } from "./schema";
 import { lintAt, SchemaFields, worldIdentifiers } from "./schema-form";
@@ -52,7 +52,7 @@ const GROUPS: readonly { title: string; collections: readonly WorldCollection[] 
   { title: "Engine", collections: ["tables", "sections", "steps", "packs"] },
 ];
 
-const PARTS: readonly WorldPart[] = ["meta", "calendar", "realism", "tiers", "time", "ruleset", "loreIndex", "minds"];
+const PARTS: readonly WorldPart[] = ["meta", "calendar", "realism", "tiers", "time", "ruleset", "loreIndex", "minds", "routineSettings"];
 
 const TOOLS: readonly JobKind[] = ["import_lore", "index_book", "index_text", "refine", "describe_map", "playtest", "check_world"];
 
@@ -758,16 +758,7 @@ function PartView(props: { part: WorldPart }) {
       </div>
     );
   }
-  if (props.part === "routineSettings") {
-    return (
-      <div class="lre-build-page" data-lre-editor="part:routineSettings">
-        <PageHeader title={PART_INFO.routineSettings.label} subtitle={PART_INFO.routineSettings.hint} />
-        <Section title="In force">
-          <JsonView value={{ ...routineSettingsOf(draft.doc) }} />
-        </Section>
-      </div>
-    );
-  }
+  if (props.part === "routineSettings") return <RoutineSettingsEditor />;
   return <SchemaPartView part={props.part} />;
 }
 
