@@ -39,7 +39,7 @@ function PresetCardView() {
     <div class="lre-stack" data-lre-preset-card>
       <Section title="Active preset" flush>
         <List>
-          <ListRow icon="layers" title={card.preset?.name ?? "None"} subtitle="The preset world chats assemble with now: the active Loom preset, else the one the chat's connection links, else the one the last reply was assembled with." />
+          <ListRow icon="layers" title={card.preset?.name ?? "None"} subtitle="The preset world chats generate with, as Lumiverse picks it: the selected preset, else the one the chat's connection links. A preset profile can switch its blocks on or off for a chat." />
         </List>
       </Section>
       <Section title="Outlets" flush>
