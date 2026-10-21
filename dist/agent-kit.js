@@ -9848,6 +9848,7 @@ function advance(reg, w, to, opts) {
     if (timed.length === 0)
       return [];
     const after = Math.max(w.state.clock, since);
+    const opening = w.state.clock === since;
     const who = timelapse ? stepping() : lod1Agents(w.world, w.state).filter((a) => a !== w.world.pov);
     const out = [];
     for (const agent of who) {
@@ -9856,9 +9857,11 @@ function advance(reg, w, to, opts) {
       for (const def of timed) {
         if (w.ctx.levelOf(agent, def.domain) < def.minLevel)
           continue;
-        for (const instant of def.instants?.(w.ctx, agent, info) ?? [])
-          if (instant.at > after && instant.at <= until && instant.at > slot.start && instant.at < slot.end)
+        for (const instant of def.instants?.(w.ctx, agent, info) ?? []) {
+          const due = instant.opens === true ? opening && instant.at === since : instant.at > after && instant.at > slot.start;
+          if (due && instant.at <= until && instant.at < slot.end)
             out.push({ at: instant.at, agent, def, instant });
+        }
       }
     }
     return out.sort((a, b) => a.at - b.at || a.agent.localeCompare(b.agent) || timed.indexOf(a.def) - timed.indexOf(b.def) || a.instant.key.localeCompare(b.instant.key));
@@ -26638,9 +26641,14 @@ function planMoments(ctx, who, slot) {
         out.push({ at: c.end, key: `end:${c.plan}` });
     }
   }
-  for (const b of skipBlocksOf(ctx, who, slot))
-    if (inside(b.start))
+  const from = skipPlanOf(ctx.state)?.from;
+  for (const b of skipBlocksOf(ctx, who, slot)) {
+    if (from !== undefined && b.start <= from && from < b.end) {
+      if (from >= slot.start && from < slot.end)
+        out.push({ at: from, key: `skip:${b.start}`, opens: true });
+    } else if (inside(b.start))
       out.push({ at: b.start, key: `skip:${b.start}` });
+  }
   if (who === ctx.world.pov ? slot.povRoutine !== false : routineLived(ctx, who, slot.timelapse === true)) {
     const cal = calendarOf(ctx.world);
     const handed = new Set(out.flatMap((m) => m.key.startsWith("end:") ? [m.at] : []));
@@ -26703,10 +26711,46 @@ function livedAtMinute(ctx, who, slot) {
   };
   return (block, before) => block.place !== null && povAt(block.start, block.end).has(block.place) || before !== null && povAt(block.start, block.start + 1).has(before);
 }
+function basicNeedOf(option) {
+  const id = option.startsWith(ROUTINE_OPTION) ? option.slice(ROUTINE_OPTION.length).replace(/:carried$/, "") : null;
+  return BASIC_BLOCKS.some((b) => b.id === id) ? id : null;
+}
 function skipBlocksOf(ctx, who, slot) {
   if (slot.timelapse !== true || skipLifeOf(ctx, who) !== "model")
     return [];
-  return skipPlanOf(ctx.state)?.plans.find((p) => p.entity === who)?.blocks ?? [];
+  const plan = skipPlanOf(ctx.state);
+  if (!plan)
+    return [];
+  const planned = plan.plans.find((p) => p.entity === who)?.blocks ?? [];
+  const lo = Math.max(slot.start, plan.from);
+  const hi = Math.min(slot.end, plan.to);
+  if (lo > hi)
+    return planned;
+  const open = (start, end) => {
+    let pieces = [[Math.max(start, plan.from), Math.min(end, plan.to)]];
+    for (const b of planned)
+      pieces = pieces.flatMap(([s, e]) => b.end <= s || b.start >= e ? [[s, e]] : [...s < b.start ? [[s, b.start]] : [], ...b.end < e ? [[b.end, e]] : []]);
+    return pieces.filter(([s, e]) => s < e);
+  };
+  const cal = calendarOf(ctx.world);
+  const basic = [];
+  for (let day = dateAt(cal, lo).dayIndex;day <= dateAt(cal, hi).dayIndex; day++) {
+    const atWork = activeBlocks(ctx, who, day).flatMap(({ block }) => block.place === "work" ? [block.id] : []);
+    for (const b of dayPlan(ctx, who, day).blocks) {
+      const need = basicNeedOf(b.option);
+      if (need === null)
+        continue;
+      for (const [start, end] of open(b.start, b.end))
+        basic.push({ start, end, place: atWork.includes(need) ? null : b.place, activity: b.activity });
+    }
+  }
+  const rest = fieldDef(ctx.registry, ctx.world, own(ctx.state.entities, who)?.kind ?? "", "activity")?.default;
+  const starts = [...planned, ...basic].map((b) => b.start);
+  const resting = typeof rest !== "string" ? [] : basic.flatMap((b) => {
+    const next = Math.min(plan.to, ...starts.filter((s) => s >= b.end));
+    return next > b.end ? [{ start: b.end, end: next, place: null, activity: rest }] : [];
+  });
+  return [...planned, ...basic, ...resting];
 }
 function liveSkipBlock(ctx, who, block, at) {
   if (commitments(ctx, who, at, at + 1).some((c) => c.kind === "plan" || c.kind === "trip" || c.kind === "appointment"))
@@ -59377,7 +59421,7 @@ Routines are informative by default (§8): the engine never moves Live, Near or 
   Nothing else fills a day: no outing, gathering, holiday or birthday party, and no invitation, that nothing in the world or the story grounds. The occasion-shaped template earlier builds planned every day from (sleep, meals, seeing friends, time out, holidays, birthdays) plans no new day; it is kept only for folding what those builds recorded (below).
 - **Routines are defaults, never authority.** A routine or a schedule never moves anyone out of a scene with the POV, never moves a Live or Near character (their mind and the scene speak for them: a routine is only a soft suggestion), never makes an invitation that interrupts for them, and never stops a time skip for them. The scene with the POV is the one the story holds: an ordinary turn and its catch-up, a typed span, a narrated skip or a ✎ fix (\`SlotInfo.povRoutine\` false) keep whoever is in it there; while time runs on its own the POV follows its routine and no scene holds anyone, so in a Timelapse a housemate still goes to work and a trip still leaves. Otherwise it yields to what the story set (\`routineYields\`): someone the story put elsewhere than their routine last had them stays there, between the routine's own edges always, and at an edge as the world's **awareness** (\`routineSettings.awareness\`, per character in a chat with \`routine_follow\`) says: \`story_first\` keeps it until the story or the GM releases it, and Background and Far characters bend for story plans and the GM's intent; \`balanced\` (the default, the precedence by fidelity) keeps it until their night (the edge into their sleep block, or a schedule's first slot of a day), Background characters keep their routine and schedules, Far ones bend for story plans and the GM's intent; \`routine_first\` lets the routine's next edge take them back. A trip waits until they're out of the POV's scene. Schedules ask Cast life the same (\`castlife.yields\`).
 - **Routine roles** (issue #48): routines and schedules inform; they don't dictate. Each level of closeness has a role (\`routineSettings.roles\`), and the GM can set one per character in a chat (\`routine_follow\` \`role\`; null returns them to their level's): **informative** (the default for Live, Near and Far) is context only, what their mind (the \`routine\` read source, §24.5) and the narrator may consider: the planner and their own place and activity schedules never move or occupy them, in a turn or in any skip, with the POV or away from it, and their routine asks no one along; **enforced** (Background's default) is the planner living it, every story-first rule kept; **off** is not even context. A level is read as it is now (§24.1), with no mind asked. What isn't routine still runs whatever the role: their story plans (after one, someone whose routine isn't enforced stays where it left them, at rest), trips, the GM's intent, and the world's schedules and money (weather, prices, business hours, bills, paydays: a job pays its scheduled shifts though the worker's place isn't enforced). An enforced Live or Near routine still never stops a skip for them: their arrival where the POV is only notes (the signal's \`stops: false\`). A trip's end, like its start, takes no one out of the scene the story holds with the POV: the trip still holds them, and they go home once the scene lets them go. Older chats replay what they recorded; the roles reach a running chat from its next turn.
-- **Skip lives** (issue #53): how someone whose routine is informative spends a time skip (a palette Timelapse, a typed span or a narrated skip; \`SlotInfo.timelapse\`) is their level's choice (\`routineSettings.skips\`) or the GM's for them (\`routine_follow\` \`skips\`; null returns them to their level's): **stay** where the story has them; their **routine**, lived for the skip as an enforced one is (\`routineLived\`), except where a story plan, a trip, the GM's intent or an appointment holds them; or **model**, the blocks the model planned for them at the skip's start, recorded as \`castlife.skip_plan\` ahead of the timelapse and kept whole in the castlife slice (\`skipPlanOf\`), lived for its span, each block at its own minute. Only someone the engine lives a day for is planned (an LOD1 agent from Cast life 3, as for a story plan, §24.8; \`livesPlans\`), so no plan is made that nothing would live. Someone the plan doesn't name (its call failed, or it left them out) stays. By default Live, Near and Far are planned by the model and Background (when informative) follows their routine. In a skip, and only there, a block their skip life gives them may take them out of the scene the story holds with the POV and later bring them back: the POV sees them go (an \`engine.note\` the Montage tells, seen as their arrival is, by a POV that can see them and has met them, whether or not it holds a \`knows\` link), and their arrival where the POV is only notes and never stops the skip. The turn's record keeps each person's net place, as every timelapse's does (§4.3), with where the POV saw them in \`engine.observed\`. Under stay nothing moves them, and outside skips nobody is moved into or out of the POV's scene. An enforced routine is always lived and an off one never. A replay reads the recorded plan and never asks again, and a Continue inside its span lives it on.
+- **Skip lives** (issue #53): how someone whose routine is informative spends a time skip (a palette Timelapse, a typed span or a narrated skip; \`SlotInfo.timelapse\`) is their level's choice (\`routineSettings.skips\`) or the GM's for them (\`routine_follow\` \`skips\`; null returns them to their level's): **stay** where the story has them; their **routine**, lived for the skip as an enforced one is (\`routineLived\`), except where a story plan, a trip, the GM's intent or an appointment holds them; or **model**, the blocks the model planned for them at the skip's start, recorded as \`castlife.skip_plan\` ahead of the timelapse and kept whole in the castlife slice (\`skipPlanOf\`), lived for its span, each block at its own minute; one already under way as the skip starts (planned, or a basic need below) at its first minute, a run's opening moment (\`AgentInstant.opens\`), never at the first slot's step. Only someone the engine lives a day for is planned (an LOD1 agent from Cast life 3, as for a story plan, §24.8; \`livesPlans\`), so no plan is made that nothing would live. **Basic needs are the floor:** any minute of the plan's span that no block of theirs covers (between its blocks; all of it for someone it left out, and for everyone when its call failed, timed out or was cut off) they keep to their basic needs as their day lays them (\`dayPlan\`'s sleep, breakfast, lunch and dinner, or a routine's own block with the same id: sleep at home at night), at rest where one leaves them until their next block, and nothing else of their routine (\`skipBlocksOf\`). A basic need whose place is \`work\` (lunch, by default) is had where they are: the floor never sends anyone to their workplace. So they go home to sleep on their own, and the plan never has to name a home, which the POV may not know (a secret one is never offered). A story plan, a trip, an appointment or the GM's intent still comes first. By default Live, Near and Far are planned by the model and Background (when informative) follows their routine. In a skip, and only there, a block their skip life gives them (planned or basic) may take them out of the scene the story holds with the POV and later bring them back: the POV sees them go (an \`engine.note\` the Montage tells, seen as their arrival is, by a POV that can see them and has met them, whether or not it holds a \`knows\` link), and their arrival where the POV is only notes and never stops the skip. The turn's record keeps each person's net place, as every timelapse's does (§4.3), with where the POV saw them in \`engine.observed\`. Under stay nothing moves them, and outside skips nobody is moved into or out of the POV's scene. An enforced routine is always lived and an off one never. A replay reads the recorded plan and never asks again, and a Continue inside its span lives it on.
 - **Tuning** (\`world.routineSettings\`, Build → Routines → Settings; absent, the defaults): \`awareness\`; \`invitations\` (\`off\`, \`player\`, the default, or \`everyone\`: a fixed block that asks its company along lays the block in their days too, when they know the host and follow their routine with invitations); \`sociability\` (\`reserved\`, \`usual\`, \`outgoing\`: how fast an NPC's social and fun needs grow, half, as they are, half again); \`planBend\` (\`must\`, \`strong\`, \`standard\`, the default and the rule of §24.8, \`ordinary\`: which story plans take their time from work and school); \`roles\` (above); \`narrator\` (on by default: present characters' usual routines go to the narrator as soft context); and \`paletteFollowsRoutine\` (off by default: where the palette Timelapse's Follow my routine starts, §9.2).
 - **Writes are shape-checked** (\`backend/worlds.ts\`): a routine whose shape the planner can't read (\`routineShapeProblems\`: a block's kind, \`at\`, window, minutes, \`perWeek\`, chance, priority, days, place, company, needs or source) and routine settings with a setting or value the engine doesn't take (\`routineSettingsProblems\`) are refused before anything is written, by Build's put and set and by a patch alike (the outside tools' too), with a message naming each field at fault. The planner skips a malformed routine and reads a bad setting as its default, so a save the check let through would change nothing unseen. What a routine names that the world lacks (a place, an owner who matches nobody, a lore entry) stays a lint warning after the write.
 - **A chat's own changes** are GM edits (§24.9), each one \`fix\` entry with its Undo: \`routine_follow {entity, mode?, awareness?, role?}\` (mode \`follows\`, \`no_invitations\` or \`off\`; role \`informative\`, \`enforced\` or \`off\`; null returns a part to the world's), \`routine_block {entity, block, value}\` (a block, \`{id, off: true}\`, or null to drop the change) and \`schedule_override {entity, schedule, value}\` (\`{off: true, until}\` or their own \`{slots, recurrence?}\`, ranked as their own; null drops it). They record as \`castlife.follow\`, \`castlife.routine\` and \`castlife.schedule\`, each carrying the change whole (an earlier build's \`castlife.follow\` has no role and folds as it did). The world's routine data is only where a chat starts.
@@ -59529,7 +59573,7 @@ Each pack ships a pure \`core\` (kinds, relations, level contract, services, que
 | \`extract\` → regard | A reply moves each axis of a pair by at most 10 in all, net (a proposal without an axis moves every axis). In the reply's order, a later proposal for the pair is cut down to what is left; one with nothing left is refused like any change past its bound (an automatic one gets a *Didn't apply* chip and its Outcome note). |
 | \`extract\` → condition, quantities | A condition needs a person and a name. A quantity changes by a whole number up to the item kind's \`qty\` bound (10 by default); a larger step is refused. |
 | \`npc.choose\` | Picks only from engine-enumerated valid actions; recorded. |
-| Skip plan (\`castlife.skip_plan\`) | One spared helper call as a timelapse span starts, planning how the informative people whose skip life is \`model\` (§8) spend it, as fixed blocks of place and activity. It is told only what the POV may know: the span; each person's place when the POV may know it, else "somewhere of their own"; their activity when the POV can see it; their usual routine as the narrator reads it (\`knownUsual\`, never a private block); the story's appointments, trips and plans in the span, leak-screened; the places the POV can see; the world's activities; the latest reply (bounded) and the Journal's recent lines, never a mind's. Routines are context, never rules. A block holds only when its person was asked about, its place was offered, its activity is the world's, it lies inside the span without overlapping another, and its label passes the leak checks (\`findLeaks\`, hidden names); the rest are dropped and logged, and anyone left with nothing stays. Recorded ahead of the timelapse in the same swipe, so a replay, Re-run or Re-narrate reads it and never asks again, and a Continue inside the span reuses it. On failure or its timeout (Settings → Timeouts, Time skip plan) no one is planned, the event carries a note for the GM, and the call is spared: the turn's run doesn't halt on it, and the skip still runs. |
+| Skip plan (\`castlife.skip_plan\`) | One spared helper call as a timelapse span starts, planning how the informative people whose skip life is \`model\` (§8) spend it, as a few fixed blocks of place and activity each, only for what they do other than simply being at home asleep: gaps are fine, since any minute no block covers is their basic needs (§8), so it never plans hour by hour or names a home. It is told only what the POV may know: the span; each person's place when the POV may know it, else "somewhere of their own"; their activity when the POV can see it; their usual routine as the narrator reads it (\`knownUsual\`, never a private block); the story's appointments, trips and plans in the span, leak-screened; the places the POV can see; the world's activities; the latest reply (bounded) and the Journal's recent lines, never a mind's. Routines are context, never rules. A block holds only when its person was asked about, its place was offered, its activity is the world's, it lies inside the span without overlapping another, and its label passes the leak checks (\`findLeaks\`, hidden names); the rest are dropped and logged, and anyone left with nothing keeps to their basic needs. Recorded ahead of the timelapse in the same swipe, so a replay, Re-run or Re-narrate reads it and never asks again, and a Continue inside the span reuses it. Its answer is bounded by the helper model's max tokens (Settings → Helper model). On failure, its timeout (Settings → Timeouts, Time skip plan) or an answer cut off at that limit, no one is planned, everyone it would have planned keeps to their basic needs, the event carries a note for the GM, and the call is spared: the turn's run doesn't halt on it, and the skip still runs. |
 | Prompted \`effects\` | Same validation and bounds as extraction. |
 | \`puzzle.answer\` | Authored opt-in per puzzle; a threshold on a probability. The puzzle is named by words from its label, or left out when exactly one is open. |
 
@@ -61531,7 +61575,7 @@ Nothing else fills a day: no outing, party or invitation that nothing in the wor
 
 - **Stay put**: they stay where the story has them.
 - **Follow their routine**: they go about their usual routine for the skip, as an enforced one would be lived, except while a story plan, a trip, the GM's intent or an appointment covers them.
-- **Planned by the model**, the default for Live, Near and Far: at the skip's start one helper call plans everyone it covers, from their routine, their plans and the story so far, and each lives what it planned for them. Someone it planned nothing for, or everyone when the call fails or runs out of time, stays put. A replay or a swipe reads the recorded plan rather than asking again, and a skip continued inside the planned time reuses it. **Follow their routine** is Background's default.
+- **Planned by the model**, the default for Live, Near and Far: at the skip's start one helper call plans everyone it covers, from their routine, their plans and the story so far: a few blocks each, for what they do other than simply being at home asleep, and each lives what it planned for them, from the skip's first minute for whatever is under way as it starts. Whenever no block covers them, they keep to their basic needs as their day has them: home to sleep at night, and their meals (one their day has at work they have where they are; it never sends them to work). So does someone it planned nothing for, or everyone when the call fails, runs out of time or is cut off. A replay or a swipe reads the recorded plan rather than asking again, and a skip continued inside the planned time reuses it. **Follow their routine** is Background's default.
 
 An enforced routine is always lived through a skip, and an off one never. Either way the story comes first: no one is moved into or out of a scene with you, and someone arriving where you are is only noted.
 
@@ -61694,7 +61738,7 @@ Settings saved before these defaults rose keep every value you changed; a value 
 
 **Settings → Timeouts** (under *Getting started*) holds every wait the engine keeps, each with what it limits, what happens when it runs out, its default and its value in seconds. None has a ceiling, and **No limit** lifts one wherever that can't break anything. Picking a Model use preset never changes them.
 
-- **Turns**: **Engine run** (5 min: everything before the reply is generated; when it runs out the run stops, no reply is generated, and the chat says which step ran out, with a Retry), **Lore lookups before the reply** (2 min), **Reading the reply** (5 min: what changed, the contradiction check, people elsewhere, choices, memory), **Lore lookups after the reply** (2 min), **Generation guard** (2 min: Lumiverse's wait for the engine's check, and for its writing of the turn's sections, as a generation starts; Lumiverse caps it at 2 min) and **Time skip plan** (the helper call that plans a time skip for those **Planned by the model**; when it runs out nobody is planned, the GM's routine page says why, and the skip runs).
+- **Turns**: **Engine run** (5 min: everything before the reply is generated; when it runs out the run stops, no reply is generated, and the chat says which step ran out, with a Retry), **Lore lookups before the reply** (2 min), **Reading the reply** (5 min: what changed, the contradiction check, people elsewhere, choices, memory), **Lore lookups after the reply** (2 min), **Generation guard** (2 min: Lumiverse's wait for the engine's check, and for its writing of the turn's sections, as a generation starts; Lumiverse caps it at 2 min) and **Time skip plan** (the helper call that plans a time skip for those **Planned by the model**; when it runs out nobody is planned, so they keep to their sleep and meals, the GM's routine page says why, and the skip runs).
 - **This tab**: **Engine requests** (5 min: how long the tab waits for each answer) and **Preset check** (1 min: how long Caveats waits for its test prompt before saying it's still running).
 - **Jobs and background work**: **Minds run on demand** (10 min), **Import and Refine calls** (10 min each; the lore index, map and routine proposal calls in Build take it too), **Token counts** (30 s; 0 always uses the engine's estimate), **Background lane start-up** and **Background lane heartbeat** (1 min each; Lumiverse caps both at 2 min, and No limit on the heartbeat asks it to check none), and **MCP server reconnect** (1 min: how long **Reconnect in Lumiverse** waits for a server Lumiverse runs to come back with the new tools before its line tells you to reconnect it by hand).
 
@@ -61802,7 +61846,7 @@ The list has everyone but you, closest on the minds ladder first, with **Search 
 
 - **How much their routine binds them**, from the role it has for them (the role of their level, as the world sets it, unless this chat sets theirs): **Story leads; routine informs** when it's informative (the story and planning decide what they do, and their routine is only context for their mind and the narrator) or enforced while the planner doesn't lay their day (it needs an agent who acts, at Cast life 3 or higher); **Routine leads** when it's enforced and the planner lays their day; and **No routine** when its role is off or their routine is off in this chat. The lines under it say what the role does, where it comes from and, for an enforced routine, what the world's awareness setting does for them. **In this chat**, **Their routine's role**, **Story and lore awareness** and **In a time skip** open one page with all four: **Follows their routine**, **Follows it, no invitations** or **No routine**; **Their level's default** (naming it), **Informative**, **Enforced** or **Off**; **Their level's default**, **Stay put**, **Follow their routine** or **Planned by the model** ([Routines and schedules](#routines-and-schedules)); and **As the world has it**, **Story first**, **Balanced** or **Routine first**. **Save for this chat** makes it one edit; **Use the world's settings** clears what you set.
 - **What the story holds now**: a place or activity the story established, which their routine yields to, and for how long.
-- **Planned for the skip**, once a time skip has been planned: what the model planned for them in the current or last skip (**This skip** or **The last skip**), each block with where, how far into the skip and for how long, and the plan's note when the call failed or was skipped. Nothing planned for them means they stayed.
+- **Planned for the skip**, once a time skip has been planned: what the model planned for them in the current or last skip (**This skip** or **The last skip**), each block with where, how far into the skip and for how long, and the plan's note when the call failed or was skipped. Whenever no block covered them, they kept to their sleep and meals.
 - **Their routine**: each block with when and where it happens, whose it is (their own, a group's, a kind's, a selector's, the world's default, the basic needs, or **Changed in this chat**), what it rests on (authored, a lore entry, a sheet field, the story or you, with how long ago) and what it replaces. Tap a block to change it for this chat with the same form as Build's, **Switch it off for them**, or, for a change this chat made, **Use the world's block** (or **Remove the block** when only this chat has it). The block's page shows the lore entry's quote, with **Open the entry** in Build. **Add a block for this chat** adds one only this chat has.
 - **Their schedules**: each schedule that applies to them, the most specific owner first for each thing schedules set, with what it rests on, and **In force**, **Shadowed** (a more specific schedule wins where both run) or this chat's change. Tap one to give them **Their own version** in this chat, with Build's schedule form, or put it **Off for them** until you clear it or for some hours; **Use the world's schedule** drops the change.
 - **Today**: their day as the planner laid it, each block with where, why it is there (their routine, a schedule, a plan, an appointment, a trip, an invitation, free time) and the reasons it gave.
@@ -63383,7 +63427,7 @@ var package_default = {
 // src/cli/version.ts
 var CLI_NAME = "lumirpengine";
 var CLI_VERSION = package_default.version;
-var BUILD = "01ec3e83";
+var BUILD = "04556a20";
 function runtimeCannotFollow(bun) {
   if (bun === undefined)
     return null;

@@ -9090,6 +9090,7 @@ function advance(reg, w, to, opts) {
     if (timed.length === 0)
       return [];
     const after = Math.max(w.state.clock, since);
+    const opening = w.state.clock === since;
     const who = timelapse ? stepping() : lod1Agents(w.world, w.state).filter((a) => a !== w.world.pov);
     const out = [];
     for (const agent of who) {
@@ -9098,9 +9099,11 @@ function advance(reg, w, to, opts) {
       for (const def of timed) {
         if (w.ctx.levelOf(agent, def.domain) < def.minLevel)
           continue;
-        for (const instant of def.instants?.(w.ctx, agent, info) ?? [])
-          if (instant.at > after && instant.at <= until && instant.at > slot.start && instant.at < slot.end)
+        for (const instant of def.instants?.(w.ctx, agent, info) ?? []) {
+          const due = instant.opens === true ? opening && instant.at === since : instant.at > after && instant.at > slot.start;
+          if (due && instant.at <= until && instant.at < slot.end)
             out.push({ at: instant.at, agent, def, instant });
+        }
       }
     }
     return out.sort((a, b) => a.at - b.at || a.agent.localeCompare(b.agent) || timed.indexOf(a.def) - timed.indexOf(b.def) || a.instant.key.localeCompare(b.instant.key));
@@ -26277,9 +26280,14 @@ function planMoments(ctx, who, slot) {
         out.push({ at: c.end, key: `end:${c.plan}` });
     }
   }
-  for (const b of skipBlocksOf(ctx, who, slot))
-    if (inside(b.start))
+  const from = skipPlanOf(ctx.state)?.from;
+  for (const b of skipBlocksOf(ctx, who, slot)) {
+    if (from !== undefined && b.start <= from && from < b.end) {
+      if (from >= slot.start && from < slot.end)
+        out.push({ at: from, key: `skip:${b.start}`, opens: true });
+    } else if (inside(b.start))
       out.push({ at: b.start, key: `skip:${b.start}` });
+  }
   if (who === ctx.world.pov ? slot.povRoutine !== false : routineLived(ctx, who, slot.timelapse === true)) {
     const cal = calendarOf(ctx.world);
     const handed = new Set(out.flatMap((m) => m.key.startsWith("end:") ? [m.at] : []));
@@ -26342,10 +26350,46 @@ function livedAtMinute(ctx, who, slot) {
   };
   return (block, before) => block.place !== null && povAt(block.start, block.end).has(block.place) || before !== null && povAt(block.start, block.start + 1).has(before);
 }
+function basicNeedOf(option) {
+  const id = option.startsWith(ROUTINE_OPTION) ? option.slice(ROUTINE_OPTION.length).replace(/:carried$/, "") : null;
+  return BASIC_BLOCKS.some((b) => b.id === id) ? id : null;
+}
 function skipBlocksOf(ctx, who, slot) {
   if (slot.timelapse !== true || skipLifeOf(ctx, who) !== "model")
     return [];
-  return skipPlanOf(ctx.state)?.plans.find((p) => p.entity === who)?.blocks ?? [];
+  const plan = skipPlanOf(ctx.state);
+  if (!plan)
+    return [];
+  const planned = plan.plans.find((p) => p.entity === who)?.blocks ?? [];
+  const lo = Math.max(slot.start, plan.from);
+  const hi = Math.min(slot.end, plan.to);
+  if (lo > hi)
+    return planned;
+  const open = (start, end) => {
+    let pieces = [[Math.max(start, plan.from), Math.min(end, plan.to)]];
+    for (const b of planned)
+      pieces = pieces.flatMap(([s, e]) => b.end <= s || b.start >= e ? [[s, e]] : [...s < b.start ? [[s, b.start]] : [], ...b.end < e ? [[b.end, e]] : []]);
+    return pieces.filter(([s, e]) => s < e);
+  };
+  const cal = calendarOf(ctx.world);
+  const basic = [];
+  for (let day = dateAt(cal, lo).dayIndex;day <= dateAt(cal, hi).dayIndex; day++) {
+    const atWork = activeBlocks(ctx, who, day).flatMap(({ block }) => block.place === "work" ? [block.id] : []);
+    for (const b of dayPlan(ctx, who, day).blocks) {
+      const need = basicNeedOf(b.option);
+      if (need === null)
+        continue;
+      for (const [start, end] of open(b.start, b.end))
+        basic.push({ start, end, place: atWork.includes(need) ? null : b.place, activity: b.activity });
+    }
+  }
+  const rest = fieldDef(ctx.registry, ctx.world, own(ctx.state.entities, who)?.kind ?? "", "activity")?.default;
+  const starts = [...planned, ...basic].map((b) => b.start);
+  const resting = typeof rest !== "string" ? [] : basic.flatMap((b) => {
+    const next = Math.min(plan.to, ...starts.filter((s) => s >= b.end));
+    return next > b.end ? [{ start: b.end, end: next, place: null, activity: rest }] : [];
+  });
+  return [...planned, ...basic, ...resting];
 }
 function liveSkipBlock(ctx, who, block, at) {
   if (commitments(ctx, who, at, at + 1).some((c) => c.kind === "plan" || c.kind === "trip" || c.kind === "appointment"))
@@ -68951,7 +68995,7 @@ function checkSkipPlan(ctx, brief, raw) {
 // src/backend/skip-plan.ts
 var REPLY_CAP = 2000;
 var SKIP_PLAN_SYSTEM = [
-  "You plan how some people in a roleplay spend a stretch of time that is skipped over. For each person, lay out what they do during the skip as blocks of time that cover all of it, start to end, with no gaps: where they are at every hour, and at night where they sleep.",
+  "You plan how some people in a roleplay spend a stretch of time that is skipped over. For each person, give a few blocks of time, only for what they do other than simply being at home asleep. Gaps are fine: whenever no block covers them, they go home to sleep and eat on their own, so don't plan hour by hour, and never plan a block just to send them home or to bed.",
   "Their usual routine is background you may follow, bend or ignore as the story suggests; it is never a rule. What the story already set for them comes first. Keep each person in character and consistent with the latest reply.",
   "Use only the places and activities listed, by id and word as given. Every block lies inside the skip, and one person's blocks never overlap. A label is a few plain words saying what they do, naming no one.",
   'Answer with JSON only: {"plans":[{"entity":"<person id>","blocks":[{"label":"...","start":"YYYY-MM-DD HH:MM","end":"YYYY-MM-DD HH:MM","place":"<place id>","activity":"<activity>"}]}]}. Leave out anyone with nothing worth planning.'
@@ -68982,7 +69026,7 @@ async function planSkip(deps, input) {
     const fired = firedTimeout(signal);
     const why = fired ? fired.message : failure.reason || "the call didn't answer";
     deps.log(`skip plan for ${people.length} people failed: ${why}`);
-    return record({ from, to, plans: [], note: `The skip plan wasn't made (${why}), so everyone it would have planned stays where they are.` });
+    return record({ from, to, plans: [], note: `The skip plan wasn't made (${why}), so everyone it would have planned keeps to their basic needs.` });
   }
   const checked = checkSkipPlan(ctx, brief, raw);
   if (checked.dropped.length > 0)
@@ -69467,9 +69511,9 @@ function thisBuild(moduleUrl = import.meta.url) {
   const dir = moduleUrl.replace(/[^/]*$/, "");
   const path = pathOfFileUrl(`${dir}${KIT_FILE}`);
   const core = pathOfFileUrl(`${dir}${CORE_FILE}`);
-  const sha256 = "28766c95165d2b08a2c1ab1775f95f319408922837140b839d79af75a0e28171";
+  const sha256 = "ef6e209146e056f444191dd4f957967f1272cd84e1ef2a3c4efe9bd09e0c9673";
   const tools = ["18ab4cc48319d3329b4f414f8503d74f", "9748f93066a93461e251d2677fe4f3b6"].filter((f) => f !== undefined);
-  return { id: "01ec3e83", kit: sha256 !== undefined && path !== null && core !== null ? { path, core, sha256, api: KIT_API } : null, tools };
+  return { id: "04556a20", kit: sha256 !== undefined && path !== null && core !== null ? { path, core, sha256, api: KIT_API } : null, tools };
 }
 var BUILD_FILE = "agents/build.json";
 var USER_FILE = "agents.json";
@@ -72634,7 +72678,7 @@ class Runtime {
     this.steps.onCallStart = (userId, purpose) => this.diag.callStart(userId, purpose);
     this.toolSupport = new ToolSupport(this.host);
     this.minds = { host: this.host, registry: this.registry, steps: this.steps, settings: this.settings, presets: this.presets };
-    this.ledger = new LedgerService(this.host, (chatId, userId) => this.resolveEnv(chatId, userId), new LedgerFold(this.registry, { fingerprint: "01ec3e83" }), (chatId) => messages.forget(chatId));
+    this.ledger = new LedgerService(this.host, (chatId, userId) => this.resolveEnv(chatId, userId), new LedgerFold(this.registry, { fingerprint: "04556a20" }), (chatId) => messages.forget(chatId));
     this.studio = new StudioBridge(this.host, this.worlds);
     this.worlds.onChange = (worldId, userId) => this.studio.worldChanged(worldId, userId);
     this.agents = new Agents(this.host, options.build ?? thisBuild(), async (userId) => (await this.settings.get(userId)).timeouts.mcpReconnectMs);

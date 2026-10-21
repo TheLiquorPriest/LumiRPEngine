@@ -10325,6 +10325,7 @@ function advance(reg, w, to, opts) {
     if (timed.length === 0)
       return [];
     const after = Math.max(w.state.clock, since);
+    const opening = w.state.clock === since;
     const who = timelapse ? stepping() : lod1Agents(w.world, w.state).filter((a) => a !== w.world.pov);
     const out = [];
     for (const agent of who) {
@@ -10333,9 +10334,11 @@ function advance(reg, w, to, opts) {
       for (const def of timed) {
         if (w.ctx.levelOf(agent, def.domain) < def.minLevel)
           continue;
-        for (const instant of def.instants?.(w.ctx, agent, info) ?? [])
-          if (instant.at > after && instant.at <= until && instant.at > slot.start && instant.at < slot.end)
+        for (const instant of def.instants?.(w.ctx, agent, info) ?? []) {
+          const due = instant.opens === true ? opening && instant.at === since : instant.at > after && instant.at > slot.start;
+          if (due && instant.at <= until && instant.at < slot.end)
             out.push({ at: instant.at, agent, def, instant });
+        }
       }
     }
     return out.sort((a, b) => a.at - b.at || a.agent.localeCompare(b.agent) || timed.indexOf(a.def) - timed.indexOf(b.def) || a.instant.key.localeCompare(b.instant.key));
@@ -27163,9 +27166,14 @@ function planMoments(ctx, who, slot) {
         out.push({ at: c.end, key: `end:${c.plan}` });
     }
   }
-  for (const b of skipBlocksOf(ctx, who, slot))
-    if (inside(b.start))
+  const from = skipPlanOf(ctx.state)?.from;
+  for (const b of skipBlocksOf(ctx, who, slot)) {
+    if (from !== undefined && b.start <= from && from < b.end) {
+      if (from >= slot.start && from < slot.end)
+        out.push({ at: from, key: `skip:${b.start}`, opens: true });
+    } else if (inside(b.start))
       out.push({ at: b.start, key: `skip:${b.start}` });
+  }
   if (who === ctx.world.pov ? slot.povRoutine !== false : routineLived(ctx, who, slot.timelapse === true)) {
     const cal = calendarOf(ctx.world);
     const handed = new Set(out.flatMap((m) => m.key.startsWith("end:") ? [m.at] : []));
@@ -27228,10 +27236,46 @@ function livedAtMinute(ctx, who, slot) {
   };
   return (block, before) => block.place !== null && povAt(block.start, block.end).has(block.place) || before !== null && povAt(block.start, block.start + 1).has(before);
 }
+function basicNeedOf(option) {
+  const id = option.startsWith(ROUTINE_OPTION) ? option.slice(ROUTINE_OPTION.length).replace(/:carried$/, "") : null;
+  return BASIC_BLOCKS.some((b) => b.id === id) ? id : null;
+}
 function skipBlocksOf(ctx, who, slot) {
   if (slot.timelapse !== true || skipLifeOf(ctx, who) !== "model")
     return [];
-  return skipPlanOf(ctx.state)?.plans.find((p) => p.entity === who)?.blocks ?? [];
+  const plan = skipPlanOf(ctx.state);
+  if (!plan)
+    return [];
+  const planned = plan.plans.find((p) => p.entity === who)?.blocks ?? [];
+  const lo = Math.max(slot.start, plan.from);
+  const hi = Math.min(slot.end, plan.to);
+  if (lo > hi)
+    return planned;
+  const open = (start, end) => {
+    let pieces = [[Math.max(start, plan.from), Math.min(end, plan.to)]];
+    for (const b of planned)
+      pieces = pieces.flatMap(([s, e]) => b.end <= s || b.start >= e ? [[s, e]] : [...s < b.start ? [[s, b.start]] : [], ...b.end < e ? [[b.end, e]] : []]);
+    return pieces.filter(([s, e]) => s < e);
+  };
+  const cal = calendarOf(ctx.world);
+  const basic = [];
+  for (let day = dateAt(cal, lo).dayIndex;day <= dateAt(cal, hi).dayIndex; day++) {
+    const atWork = activeBlocks(ctx, who, day).flatMap(({ block }) => block.place === "work" ? [block.id] : []);
+    for (const b of dayPlan(ctx, who, day).blocks) {
+      const need = basicNeedOf(b.option);
+      if (need === null)
+        continue;
+      for (const [start, end] of open(b.start, b.end))
+        basic.push({ start, end, place: atWork.includes(need) ? null : b.place, activity: b.activity });
+    }
+  }
+  const rest = fieldDef(ctx.registry, ctx.world, own(ctx.state.entities, who)?.kind ?? "", "activity")?.default;
+  const starts = [...planned, ...basic].map((b) => b.start);
+  const resting = typeof rest !== "string" ? [] : basic.flatMap((b) => {
+    const next = Math.min(plan.to, ...starts.filter((s) => s >= b.end));
+    return next > b.end ? [{ start: b.end, end: next, place: null, activity: rest }] : [];
+  });
+  return [...planned, ...basic, ...resting];
 }
 function liveSkipBlock(ctx, who, block, at) {
   if (commitments(ctx, who, at, at + 1).some((c) => c.kind === "plan" || c.kind === "trip" || c.kind === "appointment"))
