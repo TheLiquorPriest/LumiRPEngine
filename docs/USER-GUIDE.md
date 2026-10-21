@@ -110,6 +110,8 @@ Every control here is something your character does: it plays as your next turn,
 
 Tap someone for their person sheet: where they are, or **Last seen** (from Cast life 2) with where and when you last saw them; their **Next** commitment; **Today**, a 24-hour timeline of where they will be, for someone who lives their own day, where **Why this plan?** gives the reasons for each block: a fixed commitment, the need pressing them ("hungry (hunger 62)"), a close call ("close call, Maddie chose"), or "a close friend"; **How they see you**, each axis in words; **What they're after**, their public agendas; their **Groups**; and **Known as**, the classifications you can see. Agendas show only when they're public, each on its own: time someone spends on an agenda that isn't public shows in their day as **Busy**, for "their own business", and someone working on one of their agendas is doing "agenda" only when all their agendas are public, else they are "busy" (here, in the Journal and to the narrator).
 
+**Their usual day**, folded under **Today**, says where each block of that day comes from, as far as you may know: **Usually · their routine**, **Usually · from lore:** with the lore entry's title (only an entry you may read; a block resting on any other reads as their routine), **A commitment** (a shift, an appointment, a trip), **As the story has it**, **A plan of theirs** or **Free time**, with **Why?** for the reasons. It shows only for someone whose day Cast already shows, and never more than Cast does: a private block, or one spent on an agenda that isn't public, reads **Busy**, and no place or company shows. It's what they'd usually do, not a fact about what they're doing now: what happens in the story always comes first.
+
 ### Story
 
 **Story** has three tabs.
@@ -1079,6 +1081,18 @@ Each tool remembers its last run, with its status and its proposals, so you can 
 ### Describe a map
 
 **Describe a map** draws a map from your own words. Pick the place it maps, give the map an id if you like, and describe the inside ("A small inn: the taproom at the front, the kitchen behind it through a door, and a corridor down the side to the stable yard."), then tap **Draw the map**. The AI writes an lre-map-v1 map, and the engine checks it as the map editor would; if it has problems, the AI gets one more try with the list of them. You get one proposal with a preview of the map, ticked when it came back clean and unticked, with what's still wrong, when it didn't. Applying it puts the map in your draft like any other, where the map editor can fix the rest; nothing reaches your chats until you commit. Like the other tools, it remembers its last run.
+
+### Proposing routines from lore
+
+**Propose routines from lore**, a tool inside a world, reads the world's lore and each person's and group's sheet, and proposes their routines and schedules: a shift or opening hours, meals with the household, a weekly club night. Each rests on a lore entry or a sheet field it quotes word for word. Someone the lore gives no routine gets none, and nothing is proposed from what the player may not know (a secret entry whose gate hasn't opened, a secret person, a hidden place).
+
+1. Choose whom for: **Everyone** (every person and group the job may read, never a secret one or your own character), or **Choose** and tick people and groups.
+2. It runs in the background, with its progress and **Cancel**. It reads a few people and groups at a time; a pass that stops before everyone was read says so and offers **Continue**, which starts the next pass where this one stopped. Apply what you want from a pass first: the next pass's proposals replace it.
+3. The review groups the proposals by the person or group they're for. Each says what it sets (a block's kind, time, length, days, place and company; a schedule's field, how it repeats and its slots) and what it rests on, **From lore:** *entry* or **From a sheet:** *name · field*, with the quote; tap a lore entry's title to read it in place. Under it is what checking it against the draft found: a clash with their schedules or routine, a place or company it can't have, pulling someone away from where the story starts them, or a routine or schedule of the same id already in the draft. A proposal with any of these starts unticked; the rest start ticked at 70% or more. A proposal that doesn't rest on a lore entry or a sheet field is never offered, and the review says how many were left out.
+4. **Edit** opens a proposal in Build's own routine or schedule form. **Done** keeps the edit and ticks it, and **As proposed** drops it. The edit is what's applied, and anything wrong with its shape shows before you apply.
+5. **Apply n to the draft** writes the ticked proposals into the draft, each as a routine or schedule of its own; **Commit** when you're happy. A schedule comes as a pair, where they are and what they're doing: apply both.
+
+Like the other tools, it remembers its last run, and your ticks and edits stay while you open a lore entry or another page and come back, until you reload.
 
 ### Money in Build
 
