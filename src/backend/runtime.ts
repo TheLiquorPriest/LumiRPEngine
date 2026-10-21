@@ -52,6 +52,7 @@ import { openPuzzle } from "../packs/story/core/index";
 import { REGARD_CHANNEL_CAP } from "../packs/relationships/core/index";
 import { Working } from "../engine/working";
 import type { PresetCard, TemplateInfo } from "../shared/protocol";
+import { Agents, type BuildInfo, thisBuild } from "./agents";
 import { DEFAULT_SECTIONS, EngineBook, renderSection, sectionsOf, sectionTokens } from "./book";
 import { ChatPrefs } from "./chat-prefs";
 import { ChipStore, idAfterSwipeDelete, type StoredChip } from "./chips";
@@ -90,6 +91,8 @@ export interface RuntimeOptions {
   templates?: Record<string, (id: string, name: string) => WorldDoc>;
   /** What each template is (`lre.world templates`); a template without an entry here isn't listed. */
   templateInfo?: readonly TemplateInfo[];
+  /** This build and where its agent kit is (DESIGN §23): from what the build defined, unless a test names one. */
+  build?: BuildInfo;
 }
 
 /** The connection key D4 learning counts under when a step runs on the user's active connection. */
@@ -561,6 +564,8 @@ export class Runtime implements TurnHooks {
   readonly diag: Diagnostics;
   /** What LumiRPEngine Studio may read, and its offers (DESIGN §15). */
   readonly studio: StudioBridge;
+  /** The outside MCP servers' check-ins and the update notice (DESIGN §23). */
+  readonly agents: Agents;
   readonly templates: Record<string, (id: string, name: string) => WorldDoc>;
   readonly templateInfo: readonly TemplateInfo[];
   private readonly pipeline: EnginePipeline;
@@ -644,6 +649,7 @@ export class Runtime implements TurnHooks {
     this.ledger = new LedgerService(this.host, (chatId, userId) => this.resolveEnv(chatId, userId), new LedgerFold(this.registry, { fingerprint: process.env.LRE_BUILD_ID ?? "dev" }), (chatId) => messages.forget(chatId));
     this.studio = new StudioBridge(this.host, this.worlds);
     this.worlds.onChange = (worldId, userId) => this.studio.worldChanged(worldId, userId);
+    this.agents = new Agents(this.host, options.build ?? thisBuild());
     // Every view pushed to a chat also refreshes the summary the Studio reads of it.
     this.push = new StatePush(this.host, async (chatId, userId) => {
       // A view slower than a second is kept in the chat's diagnostics (a slow tab says where it went).
@@ -657,6 +663,7 @@ export class Runtime implements TurnHooks {
     this.ledger.hooks = this;
     this.ledger.diag = this.diag;
     this.ledger.attach();
+    this.agents.start();
     this.host.on("MESSAGE_SENT", (e, userId) => {
       if (e.message.isUser && userId) void this.lapse(e.chatId, userId);
     });

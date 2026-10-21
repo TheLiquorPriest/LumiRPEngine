@@ -388,6 +388,13 @@ export function createSpindleHost(): HostPort {
         });
       },
     },
+    extensionStorage: {
+      async read(path) {
+        if (!(await spindle.storage.exists(path))) return null;
+        return spindle.storage.read(path);
+      },
+      write: (path, data) => spindle.storage.write(path, data),
+    },
     on(event, handler) {
       return spindle.on(event, (payload: unknown, userId?: string) => {
         const decoded = decodeEvent(event, payload);
@@ -496,6 +503,7 @@ export function createSpindleHost(): HostPort {
       },
       closeDrawer: (userId: UserId) => spindle.ui.closeDrawer({ userId }),
     },
+    toast: (message, userId) => spindle.toast.info(message, { title: "LumiRPEngine", userId }),
     books: {
       async create(name, description, userId) {
         const book = await spindle.world_books.create({ name, description, metadata: { lumi_rp_engine: true } }, userId);

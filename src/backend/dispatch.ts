@@ -179,8 +179,12 @@ export class Dispatcher {
       case "lre.hello":
       case "lre.state.resync": {
         if (r.type === "lre.hello") {
-          reply("lre.hello", { accepted: true, agentApi: AGENT_API, requestMs: (await this.rt.settings.get(userId)).timeouts.requestMs, canStop: this.rt.host.capabilities.cancel });
+          // An outside client learns this build and where its agent kit is, and an MCP server checks in (DESIGN §23).
+          const agent = r.client !== undefined ? this.rt.agents.meet(userId, session, r.client) : {};
+          reply("lre.hello", { accepted: true, agentApi: AGENT_API, requestMs: (await this.rt.settings.get(userId)).timeouts.requestMs, canStop: this.rt.host.capabilities.cancel, ...agent });
           this.meet(userId, session, r.client);
+          // A page's hello shows an update notice the user hasn't dismissed.
+          if (r.client === undefined) this.rt.agents.page(userId, session);
         } else reply("lre.state.resync", { accepted: true });
         // The frontend says which Loom preset is active: the preset prompts assemble with (DESIGN §6.8).
         if (r.type === "lre.hello" && r.presetId !== undefined && this.rt.presets.useLoom(userId, typeof r.presetId === "string" ? r.presetId : null)) this.rt.ledger.inputsChanged(userId);
@@ -454,6 +458,11 @@ export class Dispatcher {
       }
       case "lre.studio": {
         reply("lre.studio", await this.studio(r, userId, noted));
+        return;
+      }
+      case "lre.agents": {
+        // The outside MCP servers (DESIGN §23): a server's own check, and Settings → MCP server.
+        reply("lre.agents", await this.rt.agents.request(r, userId, session));
         return;
       }
     }

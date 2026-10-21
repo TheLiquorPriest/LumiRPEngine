@@ -286,6 +286,15 @@ export class FakeHost implements HostPort {
     list: async (prefix, userId) => [...this.files.keys()].filter((k) => k.startsWith(`${userId}/${prefix}`)).map((k) => k.slice(userId.length + 1)),
   };
 
+  /** The extension's own storage, by path; kept across a restart, as a host keeps it. */
+  readonly extensionFiles = new Map<string, string>();
+  extensionStorage: HostPort["extensionStorage"] = {
+    read: async (path) => this.extensionFiles.get(path) ?? null,
+    write: async (path, data) => {
+      this.extensionFiles.set(path, data);
+    },
+  };
+
   on<K extends HostEventName>(event: K, handler: (payload: HostEventMap[K], userId: UserId | null) => void): () => void {
     let set = this.handlers.get(event);
     if (!set) {
@@ -362,6 +371,12 @@ export class FakeHost implements HostPort {
 
   /** How many times the backend closed the drawer. */
   drawerClosed = 0;
+
+  /** Every toast shown, with its user. */
+  readonly toasts: { message: string; userId: UserId }[] = [];
+  toast(message: string, userId: UserId): void {
+    this.toasts.push({ message, userId });
+  }
 
   readonly logs: string[] = [];
   /** Log lines tied to a user, by user (the per-user diagnostics mirror). */
