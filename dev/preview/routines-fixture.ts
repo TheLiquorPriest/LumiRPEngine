@@ -143,7 +143,7 @@ const BASES: Record<string, () => Base> = { npc_dev: devBase, npc_rosie: rosieBa
 export function previewRoutines(): PreviewRoutines {
   const late: RoutineBlock = { id: "late_coffee", label: "Late coffee at Rosie's", activity: "leisure", kind: "optional", window: { from: "15:00", to: "17:00" }, minutes: 30, chance: 0.6, place: { place: "diner" } };
   return {
-    follow: { npc_haskell: { mode: "no_invitations", awareness: null } },
+    follow: { npc_haskell: { mode: "no_invitations", awareness: null, role: null } },
     blocks: { npc_dev: { hoops: { value: { id: "hoops", off: true }, source: { type: "story", at: NOW - 620, turn: "m3" } }, late_coffee: { value: late, source: { type: "gm", at: NOW - 40 } } } },
     schedules: {},
   };
@@ -176,7 +176,7 @@ export function routineGmFixture(entity: EntityId, routines: PreviewRoutines, gm
     name: c.name,
     tier: c.fidelity.level,
     planned,
-    follow: { mode, awareness: chat?.awareness ?? settings.awareness, chat },
+    follow: { mode, awareness: chat?.awareness ?? settings.awareness, role: chat?.role ?? settings.roles[c.fidelity.level], chat },
     settings,
     blocks,
     schedules,
@@ -203,9 +203,9 @@ export function routineChangedFixture(routines: PreviewRoutines, gm: GmView): Ro
 /** Applies one of the GM's routine edits to this chat's changes, as the castlife slice folds it, and words it for the Journal. */
 export function applyRoutineOp(routines: PreviewRoutines, op: RoutineEditOp, name: string, now: number): string {
   if (op.op === "routine_follow") {
-    const was = routines.follow[op.entity] ?? { mode: null, awareness: null };
-    const next: RoutineFollow = { mode: op.mode === undefined ? was.mode : op.mode, awareness: op.awareness === undefined ? was.awareness : op.awareness };
-    if (next.mode === null && next.awareness === null) delete routines.follow[op.entity];
+    const was = routines.follow[op.entity] ?? { mode: null, awareness: null, role: null };
+    const next: RoutineFollow = { mode: op.mode === undefined ? was.mode : op.mode, awareness: op.awareness === undefined ? was.awareness : op.awareness, role: op.role === undefined ? was.role : op.role };
+    if (next.mode === null && next.awareness === null && next.role === null) delete routines.follow[op.entity];
     else routines.follow[op.entity] = next;
     return `${name}: ${ROUTINE_MODE_LABEL[next.mode ?? "follows"].toLowerCase()}`;
   }
