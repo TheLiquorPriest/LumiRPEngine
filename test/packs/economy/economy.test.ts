@@ -19,6 +19,7 @@ import { modernUsWorld } from "../riverton";
 import { bandByLabel, priceOf } from "../../../src/packs/economy/core/model";
 import type { ReadContext } from "../../../src/engine/registry";
 import { fold, startState, trialBalance } from "../support";
+import { expectMatch } from "../../support/match";
 
 const worthOf = (w: Working, who: string): number => w.ctx.query("economy.net_worth")(w.ctx, who) ?? 0;
 const bandOf = (w: Working, who: string): string => w.ctx.query("wealth")(w.ctx, who);
@@ -64,7 +65,7 @@ describe("economy: ledger and level contract", () => {
     const st = w.events.find((e) => e.type === "economy.statement");
     expect(st && "data" in st ? st.data : null).toMatchObject({ account: "card", interest: 0, closing: 38000, minimum: 3500 }); // a first statement is in its grace period: the opening balance carries no interest yet
     const view = moneyView(reg.context(w.world, w.state));
-    expect(view.accounts.find((a) => a.id === "card")?.due).toMatchObject({ label: expect.stringContaining("Minimum due"), cents: 3500 });
+    expectMatch(view.accounts.find((a) => a.id === "card")?.due, { label: expect.stringContaining("Minimum due"), cents: 3500 });
     lapse(w, 26 * 1440); // past the due date (Nov 28)
     expect(posts(w, /autopay/).some((p) => p.lines.some((l) => l.account === "card" && l.amount === 3500))).toBe(true);
     expect(trialBalance(w.state)).toBe(0);

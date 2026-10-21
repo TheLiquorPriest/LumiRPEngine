@@ -9,6 +9,7 @@ import { toolsFor } from "../../src/cli/tools";
 import { isRecord } from "../../src/shared/json";
 import type { CliRig } from "../support/cli-rig";
 import { cliRig } from "../support/cli-rig";
+import { expectMatch } from "../support/match";
 import { plainMinds } from "../support/rig";
 
 /** The frontend session the client's requests come from (cliRig's). */
@@ -144,7 +145,7 @@ describe("the chat tools", () => {
     expect(await read("lre_inspector", { pointer: "/generations" })).toHaveLength(1);
     const start = Number(await read("lre_chat_state", { pointer: "/hud/clock/minutes" }));
     const skip = await call("lre_timelapse", { chatId, target: { type: "duration", minutes: 60 } });
-    expect(skip).toMatchObject({ action: "timelapse", messageId: expect.any(String) });
+    expectMatch(skip, { action: "timelapse", messageId: expect.any(String) });
     expect(String(skip.reply)).toContain("the reply is started by Lumiverse, not by this client");
     // Lumiverse's generation for the new message, stopped while the engine prepares the turn, then started again by the page.
     const reply = async (text: string): Promise<void> => {
@@ -155,7 +156,7 @@ describe("the chat tools", () => {
     expect(Number(await read("lre_chat_state", { pointer: "/hud/clock/minutes" })) - start).toBeGreaterThanOrEqual(60);
     // Withdrawing needs a cash machine, and there is none on Harbor Street: the action is played, and declined, in the 3 minutes it takes.
     const withdraw = await call("lre_action", { chatId, action: "withdraw_cash", params: { account: "acct_pov_checking", amount: 2000 } });
-    expect(withdraw).toMatchObject({ action: "withdraw_cash", messageId: expect.any(String) });
+    expectMatch(withdraw, { action: "withdraw_cash", messageId: expect.any(String) });
     const before = Number(await read("lre_chat_state", { pointer: "/hud/clock/minutes" }));
     await reply("You look around for a cash machine.");
     expect(Number(await read("lre_chat_state", { pointer: "/hud/clock/minutes" })) - before).toBe(3);

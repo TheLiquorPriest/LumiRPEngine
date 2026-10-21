@@ -24,6 +24,7 @@ import { charge, isRejection } from "../../../src/packs/economy/core/pay";
 import { ALL_PACKS, STARTER_WORLDS } from "../../../src/packs/index";
 import { modernUsWorld } from "../riverton";
 import { startState, trialBalance } from "../support";
+import { expectMatch } from "../../support/match";
 
 const reg: Registry = createRegistry(ALL_PACKS);
 const DAY = 1440;
@@ -209,7 +210,7 @@ describe("money foundation: flows, owners and payment", () => {
 
   test("an overdraft follows the account's policy: declined, or paid with its fee up to the limit", () => {
     const declined = setup((world) => Object.assign(world.entities.checking!.fields, { overdraft: "decline" }));
-    expect(charge(NO_MODULES, declined.ctx, "you", 250000, "Bought a laptop", { method: "auto", source: "checking" })).toMatchObject({ code: expect.any(String) });
+    expectMatch(charge(NO_MODULES, declined.ctx, "you", 250000, "Bought a laptop", { method: "auto", source: "checking" }), { code: expect.any(String) });
     const paid = setup((world) => Object.assign(world.entities.checking!.fields, { overdraft: "fee", overdraft_limit: 100000 }));
     const out = charge(NO_MODULES, paid.ctx, "you", 250000, "Bought a laptop", { method: "auto", source: "checking" });
     if ("code" in out) throw new Error(out.reason);

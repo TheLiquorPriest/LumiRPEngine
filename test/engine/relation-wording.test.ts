@@ -11,6 +11,7 @@ import { Working } from "../../src/engine/working";
 import { ALL_PACKS } from "../../src/packs/index";
 import { modernUsWorld } from "../packs/riverton";
 import { startState } from "../packs/support";
+import { expectMatch } from "../support/match";
 
 const reg = createRegistry(ALL_PACKS);
 
@@ -35,9 +36,9 @@ describe("a refused relation's reason", () => {
   });
 
   test("names a public holder the POV has never met as someone too, and one it has met by name", () => {
-    expect(marryMaya("public", false)).toMatchObject({ reason: expect.stringContaining("Someone is already married to Maya Chen"), gm: expect.stringContaining("Jordan Price") });
+    expectMatch(marryMaya("public", false), { reason: expect.stringContaining("Someone is already married to Maya Chen"), gm: expect.stringContaining("Jordan Price") });
     const known = marryMaya("public", true);
-    expect(known).toMatchObject({ code: "cardinality", reason: expect.stringContaining("Jordan Price is already married to Maya Chen") });
+    expectMatch(known, { code: "cardinality", reason: expect.stringContaining("Jordan Price is already married to Maya Chen") });
     expect(known?.gm).toBeUndefined();
   });
 });

@@ -8,6 +8,7 @@ import { toChain } from "../../src/backend/ledger-io";
 import { regardBudget } from "../../src/backend/runtime";
 import { regardAxes } from "../../src/packs/relationships/core/index";
 import type { JsonObject } from "../../src/shared/json";
+import { expectMatch } from "../support/match";
 import { Rig } from "../support/rig";
 
 const EXTRACT_MARK = "propose concrete state changes";
@@ -154,7 +155,7 @@ describe("a narrated time skip, auto or confirm", () => {
       const got = await chat([{ type: "time_advance", minutes: 20 }], { time_advance: { mode } }, { fights: true, ready: fight });
       expect((await got.state()).clock).toBe(got.before);
       expect(got.chips.filter((c) => c.kind === "confirm" || c.kind === "timelapse_offer")).toEqual([]);
-      expect(got.chips.find((c) => c.kind === "decline")).toMatchObject({ label: "Didn't apply: +20 min", detail: expect.stringContaining("a fight is under way") });
+      expectMatch(got.chips.find((c) => c.kind === "decline"), { label: "Didn't apply: +20 min", detail: expect.stringContaining("a fight is under way") });
       expect(got.rig.rt.ledger.errors).toEqual([]);
     }
     // A chip offered before the fight: Apply is refused, and the clock stays.
@@ -164,7 +165,7 @@ describe("a narrated time skip, auto or confirm", () => {
     const proposal = { type: "time_advance", minutes: 45 };
     await got.rig.rt.chips.add(got.chatId, got.rig.host.userId, [{ id: "confirm:earlier", kind: "confirm", messageId: head.id, swipeId: head.swipeId, label: "+45 min", actions: [{ id: "confirm", label: "Apply" }], expires: "next_send", payload: { type: "time_advance", connection: "active", proposal } }]);
     const reply = await got.rig.send({ type: "lre.chip", chatId: got.chatId, chip: "confirm:earlier", choice: "confirm" });
-    expect(reply).toMatchObject({ type: "lre.error", message: expect.stringContaining("a fight is under way") });
+    expectMatch(reply, { type: "lre.error", message: expect.stringContaining("a fight is under way") });
     expect((await got.state()).clock).toBe(got.before);
   });
 });

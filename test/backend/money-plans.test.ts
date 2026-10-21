@@ -23,6 +23,7 @@ import { Working } from "../../src/engine/working";
 import { materializeAll } from "../../src/engine/materialize";
 import { ALL_PACKS, STARTER_WORLDS } from "../../src/packs/index";
 import { startState } from "../packs/support";
+import { expectMatch } from "../support/match";
 import { Rig } from "../support/rig";
 
 const MIND = /You are the private mind of (.+?) in the roleplay world/;
@@ -120,7 +121,7 @@ describe("a character's plan to pay or lend someone", () => {
     // Priya can't cover a million: nothing moves, and the plan is dropped with the decline's reason.
     const loan = `plan:priya_nair:${lend.id}`;
     expect([...journalOf(state, "acct_priya_checking"), ...journalOf(state, "acct_danny_checking")].filter((j) => j.flow === loan)).toEqual([]);
-    expect(planOf(state, "priya_nair", "lend")).toMatchObject({ status: "dropped", reason: expect.stringContaining("1,000,000") });
+    expectMatch(planOf(state, "priya_nair", "lend"), { status: "dropped", reason: expect.stringContaining("1,000,000") });
   });
 
   test("a mind's answer that proposes plans records none, and no money moves", async () => {

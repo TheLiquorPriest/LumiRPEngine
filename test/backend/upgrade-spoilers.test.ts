@@ -5,6 +5,7 @@
 import { describe, expect, test } from "bun:test";
 import type { JsonObject } from "../../src/shared/json";
 import type { MarkerPreview } from "../../src/shared/protocol";
+import { expectMatch } from "../support/match";
 import { Rig } from "../support/rig";
 
 describe("the Upgrade preview's spoilers", () => {
@@ -26,7 +27,7 @@ describe("the Upgrade preview's spoilers", () => {
     expect(row("the_stranger")?.secret).toBe(true);
     expect(row("the_stranger")?.changes.every((c) => c.secret === true && c.pick === "take")).toBe(true);
     expect(row("rosa_vance")?.secret).toBeUndefined();
-    expect(row("rosa_vance")?.changes).toMatchObject([{ secret: true, pick: "take", to: expect.stringContaining("Smugglers' den") }]);
+    expectMatch(row("rosa_vance")?.changes, [{ secret: true, pick: "take", to: expect.stringContaining("Smugglers' den") }]);
     expect(row("tom_reyes")?.secret).toBeUndefined();
     expect(row("tom_reyes")?.changes.some((c) => c.secret === true)).toBe(false);
   });
