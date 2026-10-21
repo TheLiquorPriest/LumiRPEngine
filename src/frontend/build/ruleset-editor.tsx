@@ -1,6 +1,7 @@
 // Build → World → Ruleset (DESIGN §11, §13): the world's rules as parts, each opening
 // as its own page (a sheet): Start from a profile…, how checks are decided (the adjudication
-// policy), the level floors, the progressions, the Sheet Designer with its live preview, and the
+// policy, and beside it the world's default for inferred checks), the level floors, the
+// progressions, the Sheet Designer with its live preview, and the
 // Combat card, saved together as the `ruleset` part. The preview is `lre.world sheet` on the POV as
 // a chat would start, with the ruleset as edited (saved or not). Keys this editor doesn't know are
 // kept as they are, so other ruleset parts survive a save. A profile is applied to the draft in its
@@ -9,6 +10,7 @@
 import type { ComponentChildren } from "preact";
 import { useEffect, useMemo, useState } from "preact/hooks";
 import { presetAdjudication, readAdjudication } from "../../shared/adjudication";
+import { INFER_MODE_LABEL, inferredDefaults, readInferred, type InferredChecks, type SheetSkill } from "../../shared/inferred";
 import type { JsonObject, JsonValue } from "../../shared/json";
 import { hasOwn, isRecord } from "../../shared/json";
 import type { LintIssue } from "../../shared/protocol";
@@ -19,6 +21,7 @@ import { SheetSectionCards } from "../../packs/sheets/ui/panel";
 import { useApp } from "../app";
 import type { Draft } from "../app";
 import { AdjudicationForm } from "../adjudication-form";
+import { InferredForm } from "../inferred-form";
 import { Badge, Button, Empty, Field, HostSwitch, IconButton, IdText, List, ListRow, PageHeader, SaveBar, Section, Seg, useBusy } from "../components";
 import type { IconName } from "../icons";
 import { sheetPreviewRequest } from "../requests";
@@ -365,6 +368,61 @@ function SheetPreview(props: { draft: Draft; ruleset: JsonObject }) {
   );
 }
 
+/**
+ * The world's default for inferred checks (DESIGN §11), on or off. Off, a new chat takes the
+ * player's own setting, else plays by its realism preset at its Sheets level; on starts from `start`,
+ * what the world's realism defaults would play. A default set but unreadable shows as `start`, so
+ * the first edit saves a readable one.
+ */
+export function InferredWorld(props: { value: unknown; start: InferredChecks; skills: readonly SheetSkill[]; skillsHelp: string; disabled: boolean; onChange(next: JsonObject | undefined): void }) {
+  return (
+    <div class="lre-stack" data-lre-inferred="world">
+      <div class="lre-gm-subtitle">Inferred checks</div>
+      <HostSwitch label="This world sets how typed attempts are read as checks" checked={props.value !== undefined} disabled={props.disabled} onChange={(on) => props.onChange(on ? (props.start as unknown as JsonObject) : undefined)} />
+      {props.value === undefined ? (
+        <p class="lre-small lre-muted" style={{ margin: 0 }}>
+          Not set: new chats take the player's own Settings → Checks, else play by their realism preset and Sheets level.
+        </p>
+      ) : (
+        <InferredForm value={readInferred(props.value) ?? props.start} skills={props.skills} skillsHelp={props.skillsHelp} disabled={props.disabled} onChange={(next) => props.onChange(next as unknown as JsonObject)} />
+      )}
+    </div>
+  );
+}
+
+/**
+ * Build's inferred-checks card, its skills those of the draft's sheet with the ruleset as edited
+ * (saved or not), read through the Sheet Designer's preview request a moment after a change to
+ * anything but the check rules themselves, which don't change what the sheet has.
+ */
+function InferredCard(props: { draft: Draft; ruleset: RulesetDef; disabled: boolean; onChange(next: JsonObject | undefined): void }) {
+  const app = useApp();
+  const [skills, setSkills] = useState<SheetSkill[] | null>(null);
+  const [failed, setFailed] = useState(false);
+  const ruleset = tidyRuleset(props.ruleset);
+  const { inferred: _inferred, adjudication: _adjudication, ...sheetParts } = ruleset;
+  const key = JSON.stringify(sheetParts);
+  useEffect(() => {
+    let live = true;
+    const timer = setTimeout(() => {
+      void app.send(sheetPreviewRequest(props.draft.worldId, ruleset)).then((message) => {
+        if (!live) return;
+        if (message.type === "lre.result" && message.request === "lre.world") {
+          setSkills(message.body.skills ?? []);
+          setFailed(false);
+        } else setFailed(true);
+      });
+    }, 250);
+    return () => {
+      live = false;
+      clearTimeout(timer);
+    };
+  }, [key, props.draft.worldId, props.draft.version]);
+  const help = failed ? "This world's skills aren't available right now." : skills === null ? "Reading this world's sheet…" : skills.length === 0 ? "This world's sheet has no skill an attempt can roll: one comes from an action with a check, a skill and a difficulty." : "The skills this world's sheet has, as edited.";
+  const realism = props.draft.doc.realism;
+  return <InferredWorld value={props.ruleset.inferred} start={inferredDefaults(realism.preset, realism.levels.sheets)} skills={skills ?? []} skillsHelp={help} disabled={props.disabled} onChange={props.onChange} />;
+}
+
 function ThresholdList(props: { value: number[]; onChange(value: number[]): void }) {
   const [text, setText] = useState(props.value.join(", "));
   useEffect(() => {
@@ -589,8 +647,9 @@ export function RulesetEditor() {
   };
   const ctx: FormCtx = { doc: formDoc, lint: draft.lint, path: "ruleset", identifiers, functions: draft.functions };
   const lintOf = (prefix: string) => draft.lint.filter((issue) => issue.path === prefix || issue.path.startsWith(`${prefix}.`));
-  const checksLint = draft.lint.filter((issue) => issue.code.startsWith("adjudication") || issue.path.startsWith("ruleset.adjudication"));
+  const checksLint = draft.lint.filter((issue) => issue.code.startsWith("adjudication") || issue.path.startsWith("ruleset.adjudication") || issue.path.startsWith("ruleset.inferred"));
   const adjudication = value.adjudication === undefined ? null : readAdjudication(value.adjudication);
+  const inferred = value.inferred === undefined ? null : readInferred(value.inferred);
   // The floors in the world's words, in the order Settings lists the domains.
   const minLevels: Record<string, unknown> = isRecord(value.minLevels) ? value.minLevels : {};
   const floors = Object.entries(DOMAIN_LABEL).flatMap(([domain, label]) => {
@@ -641,7 +700,7 @@ export function RulesetEditor() {
       <Section flush>
         <List>
           {row("profile", "wand", "Start from a profile…", changed ? "Save or revert your edits first" : "A ready-made ruleset: Modern, Classic, Fifth or Custom", [])}
-          {row("checks", "dice", "How checks are decided", adjudication ? PRESET_LABEL[adjudication.preset] : value.adjudication !== undefined ? "Set, but not readable: open it" : "Not set: every check rolls", checksLint)}
+          {row("checks", "dice", "How checks are decided", `${adjudication ? PRESET_LABEL[adjudication.preset] : value.adjudication !== undefined ? "Set, but not readable: open it" : "Not set: every check rolls"}${inferred ? ` · inferred checks: ${INFER_MODE_LABEL[inferred.mode].toLowerCase()}` : ""}`, checksLint)}
           {row("floors", "sliders", "Level floors", floors.length > 0 ? floors.join(", ") : "None", lintOf("ruleset.minLevels"))}
           {row("progression", "star", "Progression", Object.keys(progression).length > 0 ? Object.values(progression).map((p) => p.label).join(", ") : "None: levels never change on their own", lintOf("ruleset.progression"))}
           {row("sheet", "layers", "Sheet Designer", sections.length > 0 ? `${sections.length} section${sections.length === 1 ? "" : "s"}, ${rows} row${rows === 1 ? "" : "s"}` : "Not designed: the Sheets pack's own sheet", lintOf("ruleset.sheet"))}
@@ -664,6 +723,7 @@ export function RulesetEditor() {
               ) : (
                 <AdjudicationForm value={adjudication ?? presetAdjudication("crunchy")} disabled={busy} onChange={(next) => update("adjudication", next as unknown as JsonObject)} />
               )}
+              <InferredCard draft={draft} ruleset={value} disabled={busy} onChange={(next) => update("inferred", next)} />
               <Issues issues={checksLint} />
             </div>,
           )

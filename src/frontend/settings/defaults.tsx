@@ -2,12 +2,14 @@
 // behind a world's own defaults unless "Use my settings…" is on. The editors are GM mode's (S4's
 // seed exports); a running chat's own rules are in GM → This chat, which each page points to.
 
+import type { SheetSkill } from "../../shared/inferred";
 import type { JsonObject } from "../../shared/json";
 import type { UserSettings } from "../../shared/settings";
 import { useApp } from "../app";
 import { Banner, Button, Section } from "../components";
 import { settingsTimePatch, TimeControlsEditor } from "../time-controls";
 import { AdjudicationSeed } from "./adjudication";
+import { InferredSeed } from "./inferred";
 import { OverrideWorldSwitch, RealismSeed } from "./realism";
 
 interface DefaultsProps {
@@ -46,13 +48,17 @@ export function RealismPage(props: DefaultsProps) {
   );
 }
 
-export function ChecksPage(props: DefaultsProps) {
+/** Checks' page also takes the open world chat's skills, the only sheet Settings can list inferred checks' skills from. */
+export function ChecksPage(props: DefaultsProps & { skills: readonly SheetSkill[] }) {
   return (
     <div class="lre-stack" data-lre-settings-page="checks">
-      <p class="lre-set-lead">How checks are decided, from story-led (Narrative-first) to dice-heavy (Crunchy), for chats you start from now on.</p>
+      <p class="lre-set-lead">How checks are decided, from story-led (Narrative-first) to dice-heavy (Crunchy), and how typed attempts are read as checks, for chats you start from now on.</p>
       <ThisChatPointer />
       <Section>
         <AdjudicationSeed settings={props.settings} busy={props.busy} patch={props.patch} />
+      </Section>
+      <Section title="Inferred checks">
+        <InferredSeed settings={props.settings} skills={props.skills} busy={props.busy} patch={props.patch} />
       </Section>
     </div>
   );

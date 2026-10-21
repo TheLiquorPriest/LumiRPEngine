@@ -4,6 +4,7 @@
 // mayn't see, so they don't wait behind the gate; Edits is the truth's (the `core.gm` panel).
 
 import type { StateView } from "../../shared/state-view";
+import { INFER_MODE_LABEL } from "../../shared/inferred";
 import { ADJUDICATION_PRESET_LABEL } from "../adjudication-form";
 import { useApp, useUi } from "../app";
 import { Empty, List, ListRow, Section, useBusy } from "../components";
@@ -11,6 +12,7 @@ import { humanize } from "../format";
 import type { PanelDef } from "../registry";
 import { timeMarker } from "../requests";
 import { AdjudicationThisChat } from "../settings/adjudication";
+import { InferredThisChat } from "../settings/inferred";
 import { RealismThisChat } from "../settings/realism";
 import { TimeControlsEditor } from "../time-controls";
 import { PinsAndUpgrade } from "./pins";
@@ -62,7 +64,7 @@ export function ThisChat(props: { view: StateView; truth: PanelDef | undefined; 
         <Section title="Rules" flush>
           <List>
             <ListRow icon="sliders" title="Realism" subtitle={controls ? `${humanize(controls.realism.preset)} · how deeply each part of the world is simulated` : "How deeply each part of the world is simulated"} chevron onClick={() => pages.open("realism")} />
-            <ListRow icon="dice" title="Checks" subtitle={controls ? `${ADJUDICATION_PRESET_LABEL[controls.adjudication.preset]} · how checks are decided` : "How checks are decided"} chevron onClick={() => pages.open("checks")} />
+            <ListRow icon="dice" title="Checks" subtitle={controls ? `${ADJUDICATION_PRESET_LABEL[controls.adjudication.preset]} · inferred checks: ${INFER_MODE_LABEL[controls.inferred.mode].toLowerCase()}` : "How checks are decided"} chevron onClick={() => pages.open("checks")} />
             <ListRow icon="clock" title="Time" subtitle={controls ? `${controls.time.scale}× time scale · montage ${controls.time.montage === "key" ? "by key events" : `per ${controls.time.montage}`}${controls.time.paused ? " · clock paused" : ""}` : "Ticks, interrupts, Speed through, Montage"} chevron onClick={() => pages.open("time")} />
             <ListRow icon="layers" title="Pins and upgrade" subtitle="World revision, tables and generators" chevron onClick={() => pages.open("pins")} />
           </List>
@@ -91,6 +93,7 @@ export function ThisChat(props: { view: StateView; truth: PanelDef | undefined; 
       ) : page === "checks" ? (
         <GmPage name="checks" title="Checks" subtitle="This chat" backLabel="This chat" onBack={pages.back}>
           <AdjudicationThisChat chatId={view.chatId} controls={controls} />
+          {controls ? <InferredThisChat chatId={view.chatId} controls={controls} /> : null}
         </GmPage>
       ) : page === "time" ? (
         <GmPage name="time" title="Time" subtitle="This chat" backLabel="This chat" onBack={pages.back}>
