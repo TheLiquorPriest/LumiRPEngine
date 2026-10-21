@@ -36,7 +36,7 @@ import { labelOf, mutableSlice, numOf, objOf, optionalQuery, optionalService, sl
 import { planDay, tieKey, type FixedBlock, type PlanBlock, type PlanOption } from "../../../engine/plan-day";
 import type { AgentInstant, EventTypeDef, PackDef, ReadContext, Rejection, SlotInfo } from "../../../engine/registry";
 import type { PlayerBlock, RoutineEditOp, RoutineSociability, SkipBlock } from "../../../shared/routines";
-import { blockShapeProblems, isOff, ROUTINE_AWARENESS, ROUTINE_EVENTS, ROUTINE_MODES, ROUTINE_ROLES, routineSettingsOf, SKIP_LIVES } from "../../../shared/routines";
+import { BASIC_BLOCKS, blockShapeProblems, isOff, ROUTINE_AWARENESS, ROUTINE_EVENTS, ROUTINE_MODES, ROUTINE_ROLES, routineSettingsOf, SKIP_LIVES } from "../../../shared/routines";
 import { createRng, type Rng } from "../../../engine/rng";
 import { hashParts } from "../../../shared/hash";
 import { allSchedules, routineStays, scheduleInstants, scheduleOwners } from "../../../engine/schedules";
@@ -518,7 +518,8 @@ function invitation(ctx: ReadContext, who: EntityId, ask: Ask): LedgerEvent[] {
  * their plans starting or ending inside the slot; while their routine is lived (`routineLived`), the
  * start of every other block of their day inside it, so a fixed block happens at its time and dinner
  * at dinner time, unless a plan's end hands them to it or it is a trip (`stepTrips` takes them away);
- * in a skip the model planned for them, the start of each of its blocks (`skipBlocksOf`); and from
+ * in a skip the model planned for them, the start of each block of their skip life (`skipBlocksOf`:
+ * the plan's, and the basic needs filling the time it leaves open); and from
  * Cast life 4 the moment something of theirs asks the POV along. The POV's day only while its routine
  * runs (`SlotInfo.povRoutine`). Laid from the plans, the routine, the commitments and the recorded
  * skip plan alone, so every segment of a timelapse finds the same.
@@ -602,24 +603,67 @@ function livedAtMinute(ctx: ReadContext, who: EntityId, slot: SlotInfo): (block:
   return (block, before) => (block.place !== null && povAt(block.start, block.end).has(block.place)) || (before !== null && povAt(block.start, block.start + 1).has(before));
 }
 
-/**
- * The blocks the model planned for someone in this slot's skip (DESIGN §8, `castlife.skip_plan`),
- * while they spend skips as it plans: none outside a skip or for anyone else, and none for someone
- * the latest plan didn't name (its call failed, or it left them out), who stays.
- */
-function skipBlocksOf(ctx: ReadContext, who: EntityId, slot: SlotInfo): readonly SkipBlock[] {
-  if (slot.timelapse !== true || skipLifeOf(ctx, who) !== "model") return [];
-  return skipPlanOf(ctx.state)?.plans.find((p) => p.entity === who)?.blocks ?? [];
+/** A block someone lives in a skip the model planned for them (DESIGN §8): one of its blocks, or a basic need or rest in time none covers (`place` null: where they are). */
+type SkipLived = Pick<SkipBlock, "start" | "end" | "activity"> & { place: PlaceId | null };
+
+/** Whether a day plan's block is a basic need (`BASIC_BLOCKS`): laid as `routine:<id>`, a night's sleep past midnight as `routine:<id>:carried`. */
+function basicNeed(option: string): boolean {
+  const id = option.startsWith(ROUTINE_OPTION) ? option.slice(ROUTINE_OPTION.length).replace(/:carried$/, "") : null;
+  return BASIC_BLOCKS.some((b) => b.id === id);
 }
 
 /**
- * Someone takes up a block the model planned for their skip (DESIGN §8), as an enforced routine's
- * block is taken up: not while a story plan, a trip or an appointment of theirs holds the moment, nor
- * against the GM's intent. Being their skip life's, it may take them out of the scene the story holds
- * with the POV, which sees them go (a note the Montage tells), and back: their arrival where the POV
- * is only notes.
+ * The blocks someone lives in this slot's skip while they spend skips as the model plans (DESIGN §8):
+ * the recorded plan's blocks for them (`castlife.skip_plan`) and, in every minute of its span that no
+ * planned block covers (between its blocks; all of it for someone it left out, or when its call failed),
+ * their basic needs as their day lays them (sleep at home at night, their meals), at rest after one
+ * until the next block. Nothing else of their routine: basic needs are the floor, and they go home to
+ * sleep on their own, so a plan never has to name a home the POV may not know. None outside a skip or
+ * its span, or for anyone else. Laid for the slot's own days, which is all a slot looks up.
  */
-function liveSkipBlock(ctx: ReadContext, who: EntityId, block: SkipBlock, at: number): LedgerEvent[] {
+function skipBlocksOf(ctx: ReadContext, who: EntityId, slot: SlotInfo): readonly SkipLived[] {
+  if (slot.timelapse !== true || skipLifeOf(ctx, who) !== "model") return [];
+  const plan = skipPlanOf(ctx.state);
+  if (!plan) return [];
+  const planned = plan.plans.find((p) => p.entity === who)?.blocks ?? [];
+  const lo = Math.max(slot.start, plan.from);
+  const hi = Math.min(slot.end, plan.to);
+  if (lo > hi) return planned;
+  // Part of [start, end) inside the span that no planned block covers.
+  const open = (start: number, end: number): [number, number][] => {
+    let pieces: [number, number][] = [[Math.max(start, plan.from), Math.min(end, plan.to)]];
+    for (const b of planned) pieces = pieces.flatMap(([s, e]): [number, number][] => (b.end <= s || b.start >= e ? [[s, e]] : [...(s < b.start ? [[s, b.start] as [number, number]] : []), ...(b.end < e ? [[b.end, e] as [number, number]] : [])]));
+    return pieces.filter(([s, e]) => s < e);
+  };
+  const cal = calendarOf(ctx.world);
+  const basic: SkipLived[] = [];
+  for (let day = dateAt(cal, lo).dayIndex; day <= dateAt(cal, hi).dayIndex; day++) {
+    for (const b of dayPlan(ctx, who, day).blocks) {
+      if (!basicNeed(b.option)) continue;
+      for (const [start, end] of open(b.start, b.end)) basic.push({ start, end, place: b.place, activity: b.activity });
+    }
+  }
+  // After a basic need, at rest where it left them until the next block (planned or basic), as after a story plan.
+  const rest = fieldDef(ctx.registry, ctx.world, own(ctx.state.entities, who)?.kind ?? "", "activity")?.default;
+  const starts = [...planned, ...basic].map((b) => b.start);
+  const resting =
+    typeof rest !== "string"
+      ? []
+      : basic.flatMap((b): SkipLived[] => {
+          const next = Math.min(plan.to, ...starts.filter((s) => s >= b.end));
+          return next > b.end ? [{ start: b.end, end: next, place: null, activity: rest }] : [];
+        });
+  return [...planned, ...basic, ...resting];
+}
+
+/**
+ * Someone takes up a block of their skip life (DESIGN §8: the model's, or a basic need filling time it
+ * left open), as an enforced routine's block is taken up: not while a story plan, a trip or an
+ * appointment of theirs holds the moment, nor against the GM's intent. Being their skip life's, it may
+ * take them out of the scene the story holds with the POV, which sees them go (a note the Montage
+ * tells), and back: their arrival where the POV is only notes.
+ */
+function liveSkipBlock(ctx: ReadContext, who: EntityId, block: SkipLived, at: number): LedgerEvent[] {
   if (commitments(ctx, who, at, at + 1).some((c) => c.kind === "plan" || c.kind === "trip" || c.kind === "appointment")) return [];
   if (optionalQuery(ctx, "minds.intent")?.(ctx, who) === true) return [];
   return takeUp(ctx, who, block.place, block.activity, at, undefined, true, true);

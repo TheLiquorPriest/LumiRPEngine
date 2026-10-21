@@ -8,7 +8,10 @@ import type { EventRef, LedgerEvent } from "../../../src/shared/ledger";
 import { DEFAULT_SKIP_LIVES, ROUTINE_EVENTS, type RoutineEditOp, type SkipLife, type SkipPlan } from "../../../src/shared/routines";
 import { resolveEdit } from "../../../src/engine/edits";
 import type { WorldState } from "../../../src/engine/state";
-import type { Working } from "../../../src/engine/working";
+import { Working } from "../../../src/engine/working";
+import { calendarOf, clockOfStamp } from "../../../src/engine/calendar";
+import { STARTER_WORLDS } from "../../../src/packs/index";
+import { playerSurface } from "../../loop-sim/harness";
 import { routineChanges } from "../../../src/packs/castlife/core/view";
 import { fold, startState } from "../support";
 import { at, foldBoth, gmEdit, held, lapse, pin, record, reg, town, whereabouts, withRoutines, YOU } from "./town";
@@ -52,14 +55,18 @@ describe("a time skip, for someone whose routine is informative", () => {
     expect(whereabouts(w, "maya")).toEqual(["maya_flat", "sleep"]);
   });
 
-  test("model: the recorded blocks are lived, someone it didn't plan stays, and a replay folds from the record", () => {
+  test("model: the recorded blocks are lived, someone it didn't plan keeps to their basic needs, and a replay folds from the record", () => {
     const w = friday("model");
     record(w, [pin("jordan", "far"), { type: "set", entity: "jordan", field: "place", value: "bank" }, planned(w, [{ entity: "maya", blocks: EVENING(w) }])]);
     const end = w.state.clock + SPAN;
     lapse(w, at(w, 0, "21:00"));
-    expect([whereabouts(w, "maya"), whereabouts(w, "jordan")[0]]).toEqual([["pub", "drinks"], "bank"]);
+    // Jordan, left out, had dinner at home and stays there; nothing else of his routine moved him.
+    expect([whereabouts(w, "maya"), whereabouts(w, "jordan")[0]]).toEqual([["pub", "drinks"], "jordan_house"]);
     lapse(w, end);
-    expect([whereabouts(w, "maya"), whereabouts(w, "jordan")[0]]).toEqual([["maya_flat", "sleep"], "bank"]);
+    expect([whereabouts(w, "maya"), whereabouts(w, "jordan")]).toEqual([
+      ["maya_flat", "sleep"],
+      ["jordan_house", "sleep"],
+    ]);
     // The fold reads the recorded plan and moves: nothing is planned again.
     expect(fold(reg, w.world, startState(w.world), w.events)).toEqual(w.state);
   });
@@ -132,8 +139,35 @@ describe("a time skip, for someone whose routine is informative", () => {
     const start = w.state.clock;
     record(w, [planned(w, [{ entity: "maya", blocks: [{ label: "Lunch at the pub", start: at(w, 0, "12:30"), end: at(w, 0, "13:15"), place: "pub", activity: "lunch" }, { label: "Back to the library", start: at(w, 0, "13:15"), end: at(w, 0, "17:00"), place: "library", activity: "reading" }] }])]);
     const from = w.events.length;
-    held(w, at(w, 0, "18:00"));
+    held(w, at(w, 0, "16:30"));
     expect(moves(w, from, start, "maya")).toEqual([`${at(w, 0, "12:30") - start} pub`, `${at(w, 0, "13:15") - start} library`]);
+  });
+
+  test("model, as played live: time the plan leaves open overnight is spent asleep at home, a home the POV doesn't know included, and nothing the player sees names it", () => {
+    // Port Alder on Monday at 21:00: Marcus at the shop with the POV, Danny at the Anchor, both Far.
+    const world = STARTER_WORLDS.modern_slice_of_life!("w", "Port Alder");
+    const t = (stamp: string): number => clockOfStamp(calendarOf(world), stamp) ?? 0;
+    const state = startState(world, reg);
+    state.clock = t("2026-09-14 21:00");
+    const w = new Working(reg, world, state);
+    const put = (entity: string, place: string): LedgerEvent => ({ type: "set", entity, field: "place", value: place });
+    record(w, [pin("marcus_delgado", "far"), pin("danny_okafor", "far"), put(world.pov, "alder_automotive"), put("marcus_delgado", "alder_automotive"), put("danny_okafor", "rusty_anchor")]);
+    // The plan leaves 02:00 to 06:30 open for Marcus and 02:00 to 10:00 for Danny.
+    const block = (label: string, start: string, end: string, place: string): SkipPlan["plans"][number]["blocks"][number] => ({ label, start: t(start), end: t(end), place, activity: "work" });
+    const plans: SkipPlan["plans"] = [
+      { entity: "marcus_delgado", blocks: [block("Closing up", "2026-09-14 21:00", "2026-09-15 02:00", "alder_automotive"), block("Opening up", "2026-09-15 06:30", "2026-09-15 12:00", "alder_automotive")] },
+      { entity: "danny_okafor", blocks: [block("Out at the Anchor", "2026-09-14 21:00", "2026-09-15 02:00", "rusty_anchor"), block("Working on cars", "2026-09-15 10:00", "2026-09-15 12:00", "alder_automotive")] },
+    ];
+    record(w, [{ type: ROUTINE_EVENTS.skipPlan, data: JSON.parse(JSON.stringify({ from: w.state.clock, to: t("2026-09-15 12:00"), plans })) }]);
+    const night = held(w, t("2026-09-15 04:00"));
+    expect([whereabouts(w, "marcus_delgado"), whereabouts(w, "danny_okafor")]).toEqual([
+      ["birch_lane_12", "sleep"],
+      ["harbor_street_114", "sleep"],
+    ]);
+    const seen = JSON.stringify([night.montage, playerSurface(w.world, w.state)]);
+    const morning = held(w, t("2026-09-15 12:00"));
+    expect([whereabouts(w, "marcus_delgado")[0], whereabouts(w, "danny_okafor")[0]]).toEqual(["alder_automotive", "alder_automotive"]);
+    expect(["Birch Lane", "birch_lane_12"].filter((s) => `${seen}${JSON.stringify(morning.montage)}`.includes(s))).toEqual([]);
   });
 
   test("the GM sets one character's skip life; null returns them to their level's, both folds agree and Undo takes it back", () => {

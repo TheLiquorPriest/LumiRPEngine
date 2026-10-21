@@ -349,8 +349,9 @@ export interface SkipBlock {
 
 /**
  * The model's plan for a time skip (`castlife.skip_plan`): its span `[from, to)` and, for each
- * character it planned, their blocks in it. `note` is a line for the GM when the call failed or was
- * skipped (then no one is planned, and everyone it would have planned stays).
+ * character it planned, their blocks in it; any minute of the span no block of theirs covers, they
+ * keep to their basic needs. `note` is a line for the GM when the call failed or was skipped (then
+ * no one is planned, and everyone it would have planned keeps to their basic needs for the whole span).
  */
 export interface SkipPlan {
   from: number;

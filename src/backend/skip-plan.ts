@@ -29,7 +29,7 @@ const REPLY_CAP = 2_000;
 
 /** The call's instructions; tests tell the call apart by them. */
 export const SKIP_PLAN_SYSTEM = [
-  "You plan how some people in a roleplay spend a stretch of time that is skipped over. For each person, lay out what they do during the skip as blocks of time that cover all of it, start to end, with no gaps: where they are at every hour, and at night where they sleep.",
+  "You plan how some people in a roleplay spend a stretch of time that is skipped over. For each person, give a few blocks of time, only for what they do other than simply being at home asleep. Gaps are fine: whenever no block covers them, they go home to sleep and eat on their own, so don't plan hour by hour, and never plan a block just to send them home or to bed.",
   "Their usual routine is background you may follow, bend or ignore as the story suggests; it is never a rule. What the story already set for them comes first. Keep each person in character and consistent with the latest reply.",
   "Use only the places and activities listed, by id and word as given. Every block lies inside the skip, and one person's blocks never overlap. A label is a few plain words saying what they do, naming no one.",
   'Answer with JSON only: {"plans":[{"entity":"<person id>","blocks":[{"label":"...","start":"YYYY-MM-DD HH:MM","end":"YYYY-MM-DD HH:MM","place":"<place id>","activity":"<activity>"}]}]}. Leave out anyone with nothing worth planning.',
@@ -88,7 +88,7 @@ export async function planSkip(deps: SkipPlanDeps, input: SkipPlanInput): Promis
     const fired = firedTimeout(signal);
     const why = fired ? fired.message : failure.reason || "the call didn't answer";
     deps.log(`skip plan for ${people.length} people failed: ${why}`);
-    return record({ from, to, plans: [], note: `The skip plan wasn't made (${why}), so everyone it would have planned stays where they are.` });
+    return record({ from, to, plans: [], note: `The skip plan wasn't made (${why}), so everyone it would have planned keeps to their basic needs.` });
   }
   const checked = checkSkipPlan(ctx, brief, raw);
   if (checked.dropped.length > 0) deps.log(`skip plan dropped ${checked.dropped.length} block(s): ${checked.dropped.join("; ")}`);

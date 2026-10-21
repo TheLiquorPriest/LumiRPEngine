@@ -20,6 +20,9 @@ import { ALL_PACKS, STARTER_WORLDS } from "../../src/packs/index";
 import { FakeHost } from "../support/fake-host";
 import { startState } from "../packs/support";
 import { Rig } from "../support/rig";
+import { held, pin, whereabouts } from "../packs/castlife/town";
+import { skipLifeOf } from "../../src/packs/castlife/core/routines";
+import { livesPlans } from "../../src/packs/castlife/core/commitments";
 
 const reg = createRegistry(ALL_PACKS);
 const INTERPRET_MARK = "You map a player's typed input";
@@ -167,5 +170,30 @@ describe("the skip plan's checks", () => {
     const both = monday([jess, follow("model")]);
     const { event } = await plan(both.world, both.state, { plans: [{ entity: "jess_kowalczyk", blocks: [block(both.stamp(10), both.stamp(40), "rusty_anchor", "Tends bar")] }, { entity: "danny_okafor", blocks: [block(both.stamp(10), both.stamp(40), "alder_harbor_marina")] }] });
     expect(plannedOf(event).map((p) => p.entity)).toEqual(["danny_okafor"]);
+  });
+
+  test("a call that fails, times out or is cut off still sends each character whose skip the model plans home to sleep overnight", async () => {
+    // Port Alder on Monday at 21:00: Marcus at the shop with the POV, Danny at the Anchor, both Far.
+    const world = STARTER_WORLDS.modern_slice_of_life!("w", "Port Alder");
+    const cal = calendarOf(world);
+    const start = startState(world, reg);
+    start.clock = clockOfStamp(cal, "2026-09-14 21:00") ?? 0;
+    const w = new Working(reg, world, start);
+    const put = (entity: string, place: string): LedgerEvent => ({ type: "set", entity, field: "place", value: place });
+    w.applyAll([pin("marcus_delgado", "far"), pin("danny_okafor", "far"), put(world.pov, "alder_automotive"), put("marcus_delgado", "alder_automotive"), put("danny_okafor", "rusty_anchor")]);
+    const host = new FakeHost();
+    host.quietReply = () => {
+      throw new Error("the provider refused");
+    };
+    const intent = { action: "timelapse", params: { target: { type: "duration", minutes: 7 * 60 } }, probabilities: { timelapse: 1 } };
+    const event = await planSkip({ registry: reg, steps: new Steps(host, new CallMeter()), log: () => {} }, { userId: host.userId, world, state: w.state, intent, runSeed: "seed", reply: "", journal: [], signal: new AbortController().signal, limit: 60_000 });
+    if (!event) throw new Error("no plan recorded");
+    expect(plannedOf(event)).toEqual([]);
+    w.applyAll([event]);
+    const ctx = reg.context(world, w.state);
+    const model = Object.keys(w.state.entities).filter((id) => livesPlans(ctx, id) && skipLifeOf(ctx, id) === "model");
+    expect(model).toEqual(expect.arrayContaining(["danny_okafor", "marcus_delgado"]));
+    held(w, clockOfStamp(cal, "2026-09-15 04:00") ?? 0);
+    expect(model.map((id) => whereabouts(w, id))).toEqual(model.map((id) => [w.state.entities[id]?.fields.home, "sleep"]));
   });
 });
