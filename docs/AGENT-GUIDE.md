@@ -363,6 +363,60 @@ Lumiverse runs macros (`{{…}}`) in its prompt and acts on its control characte
 - Step templates use the engine's own placeholders (`{{world}}`, `{{pov}}`, `{{place}}`…); lint warns about one it doesn't know.
 - Keep `{{user}}` and `{{char}}` out of lore unless the user put them there on purpose. `lre_edit` and `lre_commit` list every hazard a change brings in; say which ones you added.
 
+## Setup, lore and jobs
+
+Beyond a world's document, the tools reach what the user sets up once and what Build runs for them. Settings and the preset are the user's own, for every chat: change them only when asked, and say what you changed.
+
+### Settings and presets
+
+`lre_settings` reads the settings as Settings shows them; a `section` narrows it to one page's part: `helper` (Helper model), `modelUse` (Model use, and Steps and connections under `steps`), `minds`, `timeouts`, `realism` (Realism, and Player claims under `claims`), `adjudication` (Checks), `time`, `extraction` (Changes from the reply), `swipeDefault` (Swipes), `hideJsonBlocks` (Preset), and the two switches that make new chats use these over a world's own (`overrideWorldDefaults`, `overrideWorldAdjudication`). `extractionModes` is read-only: each change type's mode now and where it comes from (pinned, learned on the connection, or the default).
+
+`lre_settings_set` takes a JSON merge patch, as the pages send: objects merge, a list or a value replaces, `null` deletes (unpin a change type with `{"extraction": {"purchase": null}}`).
+
+- A named preset expands: `{"realism": {"preset": "grounded"}}` sets every level and band cap, `{"modelUse": {"preset": "standard"}}` every step, budget and the minds' policy. A change to what a named preset sets makes it `custom`, as Settings does; the answer's `presets` says so.
+- LumiRPEngine keeps every value within what it takes. `adjusted` lists what came out other than sent (a value out of range, a key it doesn't know, a preset's own values): read it, don't assume the patch landed as written.
+- A step's route names a Lumiverse connection by id (`route.connectionId`, null for the helper model's); its template (`template`) is the step's prompt. A world's own step templates are its document's `/steps`, written with `lre_edit`.
+- Realism, checks and time seed new chats only. A running chat changes through its own markers (GM → This chat).
+- The answer carries the caveats as they read now; `lre_settings_caveats` reads them alone. They dry-run the chat the user plays, which takes a while on a long chat: "still checking" means ask again in a moment.
+
+`lre_preset` reads the active Lumiverse preset as the engine does: the section outlets its enabled blocks hold (`{{outlet::lre_<section>}}`) and each guidance block ("RPEngine · <step>"): missing, empty (notes only), read (switched off but written: its text goes to that helper) or enabled (switched on, so it also lands in the main prompt; it should be off). `lre_preset_add_blocks` adds the missing ones, switched off, under an RPEngine category, and touches none already there. The engine learns which preset is active from the user's open page or the chat they last played: with neither, it can't tell, and says so.
+
+### Diagnostics
+
+`lre_diag {chatId}` reads a chat's activity line (what the engine is doing now, or the step that failed last) and counts its records. The records themselves (each turn's steps, model calls with connection, model, tokens and finish reason, failures with what to do, the sections each run wrote, slow requests) come only with `spoilers: true`: a step's reason can name someone the player hasn't met. Keep them out of anything the player reads. `failures: true` keeps the failed steps, warnings and errors; `last` the newest n. A failing step's `fix` says what the user can do, often a timeout or a step's model in Settings. `lre_diag_clear` forgets the records; `lre_activity_dismiss` clears a failure from the activity line.
+
+### Lore books, pins and drift
+
+A world's lore is its document's (`/lore`, and pins at `/lorePins`), written with `lre_edit`. A pin makes a character's mind calls, or every call at a place, always read an entry: `{"lore": "<id>"}` for the world's own, `{"book": "<bookId>", "entry": "<entryId>"}` for an entry of one of the user's World Info books. `lre_lore_books` lists the books a pin may name (with `chatId`, that chat's own first), `lre_lore_entries {bookId}` a book's entries.
+
+`lre_lore_pins {worldId}` reads every pin of the draft now: its entry's title, its source, and its status (`ok`, `missing`, `pending`: an AI-written entry not reviewed yet, which nothing reads; `off`: switched off in its book, which a pin still reads). With `chatId` it reads the revision the chat plays, as GM → Minds does, and needs `spoilers: true`.
+
+`lre_lore_drift {worldId}` lists the entries indexed from a book whose book entry changed since (with its text now) or is gone. To take the new text, write it into the entry's `content` with `lre_edit`. `lre_lore_save {chatId}` makes the chat's latest reply (or `text`, an excerpt of a message) a new lore entry in the draft of the chat's world, sourced to its message.
+
+### Build's jobs
+
+`lre_job_start {worldId, kind, …}` runs one of Build's jobs on the user's Lumiverse and answers its id at once:
+
+- `import_lore {bookIds}`: entities, places and facts from World Info books;
+- `index_book {bookId}`: a lore entry per book entry, keeping the book's text, with aliases, topics, links and lookup terms;
+- `index_text {text}`: lore entries in the text's own words, marked as written by the AI;
+- `refine {instructions}`: world edits for a request in words;
+- `describe_map {scope, prose, mapId?}`: a map of a place from its description;
+- `playtest {turns}` and `check_world {days?}`: the engine alone on the draft, as `lre_playtest` and `lre_check_world`, but on the host.
+
+Model jobs spend the user's helper model calls: start one when the user asked for it. `lre_jobs {worldId}` shows each job's status and progress and what it found in counts; `lre_job {worldId, jobId, pointer}` reads it whole (`/result/proposals/0` is one proposal: collection, key, the value it writes, source, confidence, note). A job proposes; nothing changes until `lre_job_apply {worldId, jobId, proposals?, expectVersion}` writes the ones you accept into the draft in one write, as Build's review does (an AI-written entry then counts as reviewed, and accepted lore joins the lookup table). Read each proposal before you apply it, then check the draft with `lre_draft`. A proposal's key replaces an item there by that key. `lre_job_cancel` stops a job; `lre_job_dismiss` forgets one that ended, with its proposals.
+
+### Profiles, the sheet, lint and the Studio
+
+- `lre_profile {worldId, profile, preview: true}` says what a ruleset profile (`modern`, `classic`, `fifth`, `custom`) would add, what is the same already, and where it conflicts with the draft; without `preview` it applies in one write. Each conflict keeps the draft's own unless `take` names its path; `values` are people's stored values a taken field can't hold, and what they become.
+- `lre_sheet {worldId}` previews the character sheet a new chat would start with, from the draft's ruleset or one you pass as `ruleset`, on the point of view or `entity`. Nothing is saved.
+- `lre_lint {worldId}` lints the head on the host; `lre_draft` lints the draft.
+- `lre_studio_offer` reviews what LumiRPEngine Studio offers (a new world, or the next revision of one), with its lint, macros and what blocks it; `lre_studio_install {offerId, hash}` installs the one reviewed. When the target's head moved since the Studio took it, installing drops what was committed since: ask the user before passing `acceptMovedHead`.
+
+### A chat's map
+
+`lre_map_walk {chatId, x, y}` says what Walk here would take to a cell of the grid the point of view stands on, judged on the real ground; nothing moves. `lre_map_display {chatId, display}` shows the map as what the point of view knows (`knowledge`) or under fog (`fog`): presentation only, kept beside the chat.
+
 ## Before you commit
 
 - `lre_draft` shows no lint errors, and you know what each warning means.
