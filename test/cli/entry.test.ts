@@ -7,6 +7,7 @@ import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { CredentialStore, credentialsPath, normalizeBase } from "../../src/cli/credentials";
+import { AGENT_API } from "../../src/shared/protocol";
 
 const ROOT = resolve(import.meta.dir, "../..");
 const TOKEN = "tok_entry_9f3c2a_secret";
@@ -41,7 +42,7 @@ const server = Bun.serve({
       const frame: unknown = JSON.parse(String(raw));
       if (typeof frame !== "object" || frame === null || !("payload" in frame)) return;
       const payload = frame.payload as { type?: string; reqId?: string };
-      if (payload.type === "lre.hello") ws.send(JSON.stringify({ event: "SPINDLE_FRONTEND_MSG", payload: { extensionId: "ext1", data: { lre: 1, type: "lre.result", reqId: payload.reqId, request: "lre.hello", body: { accepted: true, agentApi: 1 } } } }));
+      if (payload.type === "lre.hello") ws.send(JSON.stringify({ event: "SPINDLE_FRONTEND_MSG", payload: { extensionId: "ext1", data: { lre: 1, type: "lre.result", reqId: payload.reqId, request: "lre.hello", body: { accepted: true, agentApi: AGENT_API } } } }));
     },
   },
 });
@@ -65,14 +66,14 @@ describe("the lumirpengine entry", () => {
     const login = await cli(["login", "--url", `${base}/`, "--username", "tom"], { LUMIVERSE_PASSWORD: "hunter2" });
     expect(login.code).toBe(0);
     expect(login.out).toContain(`Signed in to ${base} as tom`);
-    expect(login.out).toContain("speaks agent API 1");
+    expect(login.out).toContain(`speaks agent API ${AGENT_API}`);
     expect(statSync(file).mode & 0o777).toBe(0o600);
     expect(statSync(join(home, "config/lumirpengine")).mode & 0o777).toBe(0o700);
     const saved = JSON.parse(readFileSync(file, "utf8")) as { hosts: Record<string, { username: string; token: string }> };
     expect(saved.hosts[base]).toMatchObject({ username: "tom", token: TOKEN });
     const status = await cli(["status"]);
     expect(status.code).toBe(0);
-    expect(JSON.parse(status.out)).toMatchObject({ signedIn: true, lumiverse: base, user: "tom", lumiRPEngine: { agentApi: 1 } });
+    expect(JSON.parse(status.out)).toMatchObject({ signedIn: true, lumiverse: base, user: "tom", lumiRPEngine: { agentApi: AGENT_API } });
     const logout = await cli(["logout"]);
     expect(logout.code).toBe(0);
     expect(calls).toContain("POST /api/auth/sign-out");

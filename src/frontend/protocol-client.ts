@@ -73,6 +73,7 @@ const REQUEST_TYPES: Record<keyof ResultBodies, true> = {
   "lre.fix": true,
   "lre.edit": true,
   "lre.gm": true,
+  "lre.state.get": true,
   "lre.marker": true,
   "lre.keep": true,
   "lre.settings.get": true,
