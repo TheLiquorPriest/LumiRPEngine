@@ -12,6 +12,7 @@ A LumiRPEngine world is one JSON document (`lre-world-v1`): collections keyed by
 Use whichever is available:
 
 - **MCP** (the `lumirpengine` server; this repo's `.mcp.json` declares it): `lre_guide`, `lre_docs`, `lre_schema`, `lre_templates`, `lre_template`, `lre_check`, `lre_playtest`, `lre_check_world`, `lre_status`, `lre_worlds`, `lre_world`, `lre_search`, `lre_world_create`, `lre_world_import`, `lre_edit`, `lre_draft`, `lre_diff`, `lre_commit`, `lre_discard`, `lre_history`, `lre_restore`, `lre_world_delete`, `lre_world_export`, `lre_chats`, `lre_attach`, `lre_upgrade`.
+- **Playing a chat** (MCP too; `lre_guide` topic "Playing a chat"): `lre_chat_state`, `lre_chips`, `lre_chip`, `lre_inspector`, `lre_fix`, `lre_marker`, `lre_keep`, `lre_view_open`, `lre_action`, `lre_timelapse`, and behind `spoilers: true` `lre_gm`, `lre_gm_edit`, `lre_minds`, `lre_mind_edit`, `lre_minds_run`, with `lre_minds_cancel`.
 - **Shell**: `lumirpengine <command>` once installed (`npm i -g github:TheLiquorPriest/LumiRPEngine`, about 14 MB from GitHub; `#<tag or commit>` after the repo pins a version), `npx -y github:TheLiquorPriest/LumiRPEngine <command>` without installing (about 7 to 9 s a start, since npx looks GitHub up each time), or `node dist/lumirpengine.js <command>` in a clone. `help` lists the commands; each runs one tool (`world <id>` is `lre_world`, `create` is `lre_world_create`). The user signs in once with `login`; never ask for their password. A harness that runs the server through npx may need a longer start-up timeout (docs/MCP.md).
 
 ## Steps
@@ -39,3 +40,4 @@ Use whichever is available:
 - Deleting a world takes its exact name as `confirm`; without it, `lre_world_delete` only previews. Delete only when the user asked, and tell them its engine lore book stays in World Books for them to remove.
 - The macros you write (`{{…}}` in lore and templates) skip the user's import review: name each one you add.
 - A `path` argument reads a file on the user's machine: pass only files the user gave you or you wrote.
+- Pass `spoilers: true` only when the user asked to look behind the curtain, and keep what it shows out of the chat. A turn you post (`lre_action`, `lre_timelapse`) gets its reply only from Lumiverse: ask the user to open the chat.

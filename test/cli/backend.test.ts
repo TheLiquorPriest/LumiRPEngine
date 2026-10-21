@@ -9,7 +9,7 @@ import { Live } from "../../src/cli/live";
 import type { ToolContext } from "../../src/cli/tools";
 import { callTool, KeyedQueue } from "../../src/cli/tools";
 import type { FrontendToBackend, ResultBodies } from "../../src/shared/protocol";
-import { PROTOCOL_VERSION } from "../../src/shared/protocol";
+import { AGENT_API, PROTOCOL_VERSION } from "../../src/shared/protocol";
 import { GUIDE_SECTIONS, guidePatches } from "../support/agent-guide";
 import { Rig } from "../support/rig";
 
@@ -55,7 +55,7 @@ interface Tools {
 async function tools(): Promise<Tools> {
   const rig = new Rig({ shipped: true });
   const conn = new RigConnection(rig);
-  expect(await conn.hello()).toMatchObject({ accepted: true, agentApi: 1 });
+  expect(await conn.hello()).toMatchObject({ accepted: true, agentApi: AGENT_API });
   const live = new Live(conn);
   const queue = new KeyedQueue();
   const ctx: ToolContext = { readFile: () => "", readOnly: false, live: () => live, serialize: (k, w) => queue.run(k, w) };

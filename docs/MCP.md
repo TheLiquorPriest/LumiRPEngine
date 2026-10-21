@@ -74,10 +74,30 @@ Every answer is text, JSON for data, of at most about 24,000 characters; a large
 | `lre_world_export {worldId, revision?, offset?}` | The export file, paged (`lumirpengine export <id> --out <file>` writes it whole). |
 | `lre_chats {worldId?}` / `lre_attach {worldId, chatId}` | The chats that play a world; attach a world to a chat. |
 | `lre_upgrade {chatId, to?, preview?, spoilers?}` | Preview an Upgrade (hidden changes stay hidden without `spoilers`), or apply it with the default picks. |
+| `lre_chat_state {chatId, pointer?, offset?}` | A chat's state view as Play shows it (HUD and its ✎ fixes, scene, chips, journal, palette, controls, panels) with the engine's activity line: only what the player can know. |
+| `lre_chips {chatId}` / `lre_chip {chatId, chip, choice, payload?}` | The chips under a chat's messages and their actions; answer one. |
+| `lre_inspector {chatId, pointer?, offset?}` | The context inspector: the sections of the last ten engine runs, what their steps read of the lore, and the warnings. |
+| `lre_gm {chatId, spoilers, pointer?, offset?}` | The GM view, secrets included. Needs `spoilers: true`. |
+| `lre_gm_edit {chatId, spoilers, ops}` | GM edits (set, move, link, stage, spawn…), all or none, with an Undo chip. Needs `spoilers: true`. |
+| `lre_fix {chatId, fix? \| entity?, field?, value? \| time?}` | A ✎ fix: place, weather, cash, scene type, any field the player may fix, or the clock. |
+| `lre_marker {chatId, kind, to, domain?, control?, scope?, preview?}` | Realism, a time control, player claims or the checks policy, from the latest message on; `preview` writes nothing. |
+| `lre_keep {chatId, choice, messageId, parentPath?, refs?}` | Keep, discard or convert after an earlier message was edited. |
+| `lre_view_open {chatId, panel, entity?}` | Open a panel, settling detail the chat hadn't decided yet. |
+| `lre_action {chatId, action, params?, text?}` / `lre_timelapse {chatId, target, overrides?, text?}` | Play a palette action or a timelapse as the player's next turn. The engine prepares it; Lumiverse starts the reply (see below). |
+| `lre_minds {chatId, spoilers, pointer?, offset?}` / `lre_mind_edit {chatId, spoilers, ops}` | Characters' minds and the latest Run minds now; pin, refresh or edit them. Need `spoilers: true`. |
+| `lre_minds_run {chatId, spoilers, who?}` / `lre_minds_cancel {chatId, runId}` | Run minds now, with model calls on your connection, or stop the run. |
+
+The chat tools' commands are `chat`, `chips`, `chip`, `inspector`, `gm`, `gm-edit`, `fix`, `marker`, `keep`, `view-open`, `act`, `timelapse`, `minds`, `mind-edit`, `minds-run` and `minds-cancel`; `--spoilers` is `spoilers: true`, and a JSON argument (`--ops`, `--value`, `--to`, `--target`…) is inline or a file holding it.
+
+**A turn needs Lumiverse for its reply.** `lre_action`, `lre_timelapse` and a suggested move's Send post the player's message, and the engine prepares the turn at once. The reply is started by the chat's page in Lumiverse: when the chat is open there it starts on its own, and otherwise it waits until you open the chat. This client never starts, regenerates or swipes a reply, so a chip action that does (Re-narrate, Re-run) takes effect on the next swipe you make. Reading a chat never makes this client a page: a reply waiting for one is still yours to start.
+
+**Spoilers.** `lre_gm`, `lre_gm_edit`, `lre_minds`, `lre_mind_edit` and `lre_minds_run` show (or answer with) what the player isn't meant to know, so they refuse without `spoilers: true`, as `lre_upgrade`'s preview hides such changes without it. Everything else reads only what Play shows the player.
 
 ## Read-only mode
 
 `lumirpengine mcp --read-only` (or `LRE_READ_ONLY=1`) leaves the write tools (`lre_world_create`, `lre_world_import`, `lre_edit`, `lre_commit`, `lre_discard`, `lre_restore`, `lre_world_delete`, `lre_attach`, `lre_upgrade`) out of `tools/list`, and refuses them if called. The command line honours the same flag. `LRE_READ_ONLY` takes `1`, `true`, `yes` or `on`, or `0`, `false`, `no`, `off` or nothing, in any case. Any other value, or an option `mcp` doesn't take (a misspelled `--read-only`), stops it from starting rather than serve the write tools.
+
+The chat tools' writes (`lre_fix`, `lre_gm_edit`, `lre_mind_edit`, `lre_marker`, `lre_chip`, `lre_keep`, `lre_view_open`, `lre_action`, `lre_timelapse`, `lre_minds_run`, `lre_minds_cancel`) are left out and refused the same way; `lre_chat_state`, `lre_chips`, `lre_inspector`, `lre_gm` and `lre_minds` stay.
 
 Read-only limits what this MCP server offers, not what your agent can do. An agent that can run commands (Claude Code, Codex and the like) can still run `lumirpengine` without the flag, or read the saved token and use it against Lumiverse directly. It keeps an agent that has only these tools to reading; it doesn't fence in one with a shell.
 

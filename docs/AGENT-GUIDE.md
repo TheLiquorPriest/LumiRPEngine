@@ -363,6 +363,41 @@ Lumiverse runs macros (`{{…}}`) in its prompt and acts on its control characte
 - Step templates use the engine's own placeholders (`{{world}}`, `{{pov}}`, `{{place}}`…); lint warns about one it doesn't know.
 - Keep `{{user}}` and `{{char}}` out of lore unless the user put them there on purpose. `lre_edit` and `lre_commit` list every hazard a change brings in; say which ones you added.
 
+## Playing a chat
+
+The chat tools reach a chat that plays a world as the user's Play does; `lre_chats` gives the chat ids. They see what the player sees, unless you pass `spoilers: true`, and change the chat the way Play's own controls do. The chat is the user's game: change it when they ask, and say what you changed.
+
+A session goes like this:
+1. `lre_chats` for the chat's id, then `lre_chat_state` with pointer `""` for an outline of what Play shows, and the parts you need from there.
+2. Before a turn, read what it can be: `/palette/entries/<i>` for an action's options and their `params`, `/palette/timelapse` for the skips on offer and what interrupts them.
+3. Make the change or post the turn, then read the state again for what it did: the HUD, the journal, the chips.
+4. Tell the user what you did, what is waiting on them (a reply to start, a chip to answer), and the Undo chip that can take a correction back.
+
+**Reading.** `lre_chat_state` reads the chat's state view at a JSON Pointer, the view the chat's page is sent: `/hud` (the clock, place, weather, cash and, at `/hud/fixes`, the ✎ fixes it offers), `/scene` (who is present), `/chips`, `/journal`, `/keepReport`, `/palette` (the actions at `/palette/entries`, the timelapse at `/palette/timelapse`), `/controls` (the realism, time controls, player-claims policy and checks policy the chat plays by), `/panels` (each pack's panel: Money, Gear, Calendar, the map…) and `activity`, what the engine is doing for the chat now (null when idle). It holds only what the player can know. `lre_chips` lists the chips under the messages with their actions; `lre_inspector` reads the context inspector: what the engine put in each of the last ten prompts, what its steps read of the lore, and its warnings.
+
+**Behind the curtain.** `lre_gm` (the GM view: every entity, secrets, hidden places, track truths, everyone's money, the edits in force) and `lre_minds` (each character's fidelity, latest mind, plans, notes and commitments) need `spoilers: true`, and so do the tools that edit them and Run minds now. Pass it only when the user asked to look behind the curtain, and keep what it shows out of anything the player reads: the chat, a message you post, a fix.
+
+**Changing the chat.** A write lands on the chat's latest message, as Play's do. During a reply it is held (`pending: true`) and lands when the reply finishes. A chat whose status is `paused` (the player edited an earlier message of theirs) refuses every write until `lre_keep` settles it, naming the edited message: `keep` re-checks the later turns against the edit and lists what no longer holds in `/keepReport`; `discard` removes the later turns' records for good (their messages stay as plain text, and the world forgets them), so ask the user first; `convert` brings chosen dropped lines of the keep report back.
+- `lre_fix` is the player's ✎: `fix` names a HUD fix (`place`, `weather`, `cash`, `scene`; each at `/hud/fixes` with its type and options), or give `entity` and `field`, with the `value` in the field's type; `time` (`"2026-09-14 18:30"`) sets the clock, running the time between when it is later. A locked field is refused.
+- `lre_gm_edit` is the GM editor: operations in order, all or none, on any entity, locked fields included. They are the engine's own edits, not JSON Patch: each names its `op` and what it touches (the tool lists them all), with ids from `lre_gm`:
+
+```json
+[{ "op": "move", "entity": "pov", "to": "bluebird_coffee" },
+ { "op": "adjust", "account": "acct_pov_checking", "cents": 5000 },
+ { "op": "stage", "track": "q_pontoon_weekend", "to": "diagnose" }]
+```
+
+- `lre_marker` changes how the chat plays from its latest message on: `resolve` (a domain's realism level, for everyone, a band or one entity), `time` (a control: `tick`, `scale`, `pause`, `interrupt`, `speed_through`, `montage`, `unit_cap`), `claims` (what a typed action's thing the world doesn't have becomes) and `adjudicate` (the whole checks policy: read `/controls/adjudication`, change what you need, send it back). `preview: true` says what it would change and writes nothing; read it first, since a lower level freezes what the higher one tracked.
+- `lre_view_open` opens a panel as the player does, which settles detail the chat hadn't decided yet (a balance first looked at); opening `core.context` checks the active preset.
+- `lre_chip` answers a chip with one of its action ids (an amount or a pick in `payload` when the action asks for one).
+- Each ✎ fix and GM edit leaves an Undo chip; tell the user it is there.
+
+**Playing a turn.** `lre_action` plays a palette entry (its `action`, and the picked option's `params`) and `lre_timelapse` a skip (`target` as `/palette/timelapse/until` lists them, or `{"type": "duration", "minutes": 120}`); `text` is the player's words for how they do it. Each posts the player's message, and the engine prepares the turn at once. **The reply is Lumiverse's to start, not yours:** a page that shows the chat starts it on its own; with none, it waits until the user opens the chat in Lumiverse. So ask the user to open the chat, then read `activity` and the state for what the turn did. The same goes for a chip's Send (a suggested move) and for the actions `lre_chips` marks `regenerates` (Re-narrate, Re-run, Retry read, a claim's Add): those take effect on the reply's next swipe, which the user makes with Regenerate or a swipe, and a plain Regenerate is only that.
+
+**Minds.** `lre_minds` reads them; `lre_mind_edit` pins a character's fidelity (`mind_pin`, `level` null to unpin), asks for a fresh mind next turn (`mind_refresh`), or edits, adds (`id` null) or deletes (`value` null) a note, commitment or plan (`mind_memory`); `lre_minds_run` runs Run minds now for `who` (default everyone Live and Near), in the background, with model calls on the user's connection, so ask before you run it; `lre_minds_cancel` stops it, and a cancelled run records nothing. A run, like a GM edit, is one edit with an Undo chip.
+
+**What they can't do.** A chat tool never starts a generation, regenerates or swipes, and never writes a message but the player's turn: those are the user's, in Lumiverse. An Upgrade is `lre_upgrade`.
+
 ## Before you commit
 
 - `lre_draft` shows no lint errors, and you know what each warning means.

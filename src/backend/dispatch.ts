@@ -305,6 +305,13 @@ export class Dispatcher {
         reply("lre.gm", view);
         return;
       }
+      case "lre.state.get": {
+        // An outside client's read of what a page is pushed (DESIGN §23). Only a read: no `ledger.page`,
+        // no `askAgain` and no `ledger.open`, so it never takes a prepared reply's claim or closes a window.
+        await this.requireWorldChat(r.chatId, userId);
+        reply("lre.state.get", { view: await this.rt.view(r.chatId, userId), activity: this.rt.diag.activityOf(r.chatId) });
+        return;
+      }
       case "lre.diag": {
         // GM-level, like `lre.gm`: read only when the Diagnostics page asks, never pushed.
         if (r.op === "clear") await this.rt.diag.clear(r.chatId, userId);
