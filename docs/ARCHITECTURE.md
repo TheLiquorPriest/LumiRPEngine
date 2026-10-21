@@ -58,6 +58,7 @@ Rules, all enforced by `test/boundaries.test.ts`:
 - **Packs** never import another pack's internals. Cross-pack behavior goes through registered services and queries (§5).
 - **Nothing** in `src/` imports `data-src/` (the raw table sources) or any local reference copy.
 - The frontend never computes world state. It renders `StateView` and sends protocol requests.
+- **The page makes no request of its own.** The frontend and the packs' UI send nothing but Spindle's messages: no `fetch`, socket or Lumiverse route (DESIGN §23).
 
 Engine layout (pure):
 - `engine/ledger/*`: path hashing (`path.ts`), chain types (`chain.ts`), the journal state machine (`journal.ts`), the reference fold (`reference.ts`) and the optimized fold (`fold.ts`, with cache, overlay, snapshots and re-convergence). The two folds share only `engine/events.ts` (core event validators and reducers) and pack-registered event types.

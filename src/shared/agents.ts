@@ -13,6 +13,13 @@ export const CORE_FILE = "lumirpengine.js";
 /** The one-time install that brings a server from before following up to date. */
 export const NPM_INSTALL = "npm i -g github:TheLiquorPriest/LumiRPEngine";
 
+/**
+ * The harness a server Lumiverse runs itself (its Settings → MCP Servers) checks in with: the name
+ * Lumiverse's MCP client gives in `initialize` (`new Client({ name: "lumiverse" })`, in Lumiverse's
+ * src/services/mcp-client-manager.ts).
+ */
+export const LUMIVERSE_HARNESS = "lumiverse";
+
 /** This build's agent kit, as LumiRPEngine tells an outside client: its absolute path, its sha256 (hex), its contract level, and the core beside it. */
 export interface KitReport {
   path: string;

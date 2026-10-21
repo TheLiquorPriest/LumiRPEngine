@@ -55,5 +55,4 @@ export const SETTINGS_CSS = `
 .lre-row-actions:empty{display:none}
 [data-lre-mcp-setup]{display:flex;flex-direction:column;align-items:flex-start;gap:var(--lre-s2)}
 [data-lre-mcp-setup] code{display:block;width:100%;box-sizing:border-box;padding:var(--lre-s2);border:1px solid var(--lre-hairline);background:var(--lre-accent-soft);font-size:var(--lre-fs-sm);overflow-wrap:anywhere;user-select:all}
-[data-lre-lumiverse-mcp="unreadable"]{padding:0 var(--lre-s3)}
 `;

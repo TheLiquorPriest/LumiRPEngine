@@ -1,5 +1,6 @@
 // Module boundary lint (ARCHITECTURE §2). Every import in src/ is classified by zone and
-// checked against the allowed edges; the `spindle` global is confined to the backend adapter.
+// checked against the allowed edges; the `spindle` global is confined to the backend adapter,
+// and the page reaches Lumiverse only through Spindle's messages.
 
 import { describe, expect, test } from "bun:test";
 import { readdirSync, readFileSync, statSync } from "node:fs";
@@ -185,6 +186,16 @@ describe("module boundaries", () => {
     const offenders = all
       .filter((file) => !SPINDLE_GLOBAL.has(relative(SRC, file).split("\\").join("/")))
       .filter((file) => /(^|[^.\w$])spindle\s*\.\s*[a-zA-Z_]/m.test(readFileSync(file, "utf8").replace(/\/\/[^\n]*|\/\*[\s\S]*?\*\//g, "")))
+      .map((file) => relative(SRC, file));
+    expect(offenders).toEqual([]);
+  });
+
+  test("the frontend and the packs' UI send nothing but Spindle's messages: no route of Lumiverse's own is called from the page", () => {
+    // Lumiverse's own REST routes aren't Spindle's, and an extension that set the command Lumiverse runs
+    // for an MCP server would run code outside Spindle's sandbox (DESIGN §23).
+    const offenders = all
+      .filter((file) => ["frontend", "pack-ui", "entry-frontend"].includes(zoneOf(file).kind))
+      .filter((file) => /\bfetch\s*\(|\bXMLHttpRequest\b|\bEventSource\b|\bWebSocket\b|\bsendBeacon\b|\/api\/v1\//.test(readFileSync(file, "utf8").replace(/\/\/[^\n]*|\/\*[\s\S]*?\*\//g, "")))
       .map((file) => relative(SRC, file));
     expect(offenders).toEqual([]);
   });
