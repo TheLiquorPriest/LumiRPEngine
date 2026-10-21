@@ -164,3 +164,4 @@ Read-only limits what this MCP server offers, not what your agent can do. An age
 - **No answer within 60 s.** LumiRPEngine isn't running, or is busy: `lumirpengine status` says which. A write that timed out may still have been made; check before repeating it.
 - **A request over 4 MiB** is refused by the client, since Lumiverse would drop it without a word: import or edit in smaller pieces.
 - **Settings → MCP server lists a server you no longer run.** A line stays after its server stops, showing when it was last seen, so a harness you removed keeps one: **Forget** drops it, and it comes back only if that server connects again.
+- **A server's line says "(2 processes)".** Its harness runs more than one copy of the server on that machine (two windows, or two sessions), and the line stands as the copy furthest behind: it turns to reloaded only once every copy has.
