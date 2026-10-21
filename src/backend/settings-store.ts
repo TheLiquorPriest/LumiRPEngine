@@ -14,7 +14,7 @@ import { DEFAULT_HELPER, EXTRACTION_DEFAULTS, EXTRACTION_LEARNING, EXTRACTION_TY
 import type { BoundMode } from "../shared/ids";
 import type { StepPurpose } from "../shared/world";
 import { currentSignals } from "../shared/steps";
-import { defaultMindsSettings, MINDS_PRESETS, mindsSettingsOf } from "../shared/minds";
+import { defaultMindsSettings, isMindPurpose, migrateMindReads, MINDS_PRESETS, mindsSettingsOf } from "../shared/minds";
 import { defaultTimeouts, migrateTimeouts, timeoutsOf } from "../shared/timeouts";
 import type { HostPort } from "./host";
 import { readStoredJson } from "./stored-json";
@@ -82,11 +82,11 @@ export const MODEL_USE_PRESETS: Record<Exclude<ModelUsePresetId, "custom">, Omit
       extract: step(true, ["reply"], HELPER, lore("prefetch+lookup", 1600)),
       "npc.choose": step(true, ["tie_zone", "invitation"], DECISION, lore("prefetch+lookup", 1600)),
       judge: step(true, ["always"], HELPER, lore("prefetch+lookup", 1600)),
-      // Minds run on their own cadence (`UserSettings.minds`): these cards set only where they run and their lore. The skip step is off until the user turns it on (DESIGN §24.7).
-      mind: step(true, ["always"], HELPER, lore("prefetch", 1600)),
-      memory: step(true, ["reply"], HELPER, lore("none", 0)),
-      skip: step(false, ["timelapse"], HELPER, lore("prefetch", 1200)),
-      consolidate: step(true, ["reply"], HELPER, lore("none", 0)),
+      // Minds run on their own cadence (`UserSettings.minds`), and what a mind reads, its lore included, is Settings → Minds': these cards set only where they run. The skip step is off until the user turns it on (DESIGN §24.7).
+      mind: step(true, ["always"], HELPER),
+      memory: step(true, ["reply"], HELPER),
+      skip: step(false, ["timelapse"], HELPER),
+      consolidate: step(true, ["reply"], HELPER),
     },
     budgets: { pre: { calls: 2, lookup: { calls: 4 } }, post: { calls: 2, lookup: { calls: 3 } } },
     tokens: { sections: 4000 },
@@ -100,10 +100,10 @@ export const MODEL_USE_PRESETS: Record<Exclude<ModelUsePresetId, "custom">, Omit
       contradiction: step(true, ["reply"], HELPER, lore("prefetch+lookup", 2400)),
       "npc.choose": step(true, ["present", "offscreen"], DECISION, lore("prefetch+lookup", 2400)),
       judge: step(true, ["always"], HELPER, lore("prefetch+lookup", 2400)),
-      mind: step(true, ["always"], HELPER, lore("prefetch", 2400)),
-      memory: step(true, ["reply"], HELPER, lore("none", 0)),
-      skip: step(false, ["timelapse"], HELPER, lore("prefetch", 1600)),
-      consolidate: step(true, ["reply"], HELPER, lore("none", 0)),
+      mind: step(true, ["always"], HELPER),
+      memory: step(true, ["reply"], HELPER),
+      skip: step(false, ["timelapse"], HELPER),
+      consolidate: step(true, ["reply"], HELPER),
     },
     budgets: { pre: { calls: 8, lookup: { calls: 6 } }, post: { calls: 4, lookup: { calls: 4 } } },
     tokens: { sections: 8000 },
@@ -227,7 +227,9 @@ export function mergePatch(target: JsonValue, patch: JsonValue): JsonValue {
  * checks every field. What a file lacks comes from its own preset (Custom fills in from Standard),
  * so one saved before lore settings existed reads with its preset's lore policies and lookups; one
  * saved before timeouts had their own settings takes them from its old budgets (`migrateTimeouts`),
- * after `lifted` has read the old lookup windows it matches presets by.
+ * after `lifted` has read the old lookup windows it matches presets by; and one saved before minds
+ * had what they read takes the limits its reply allowance and its mind card's lore set
+ * (`migrateMindReads`), after `lifted` has raised that lore's old defaults.
  */
 function normalize(raw: unknown): UserSettings {
   if (!isRecord(raw)) return defaultSettings();
@@ -243,7 +245,7 @@ function normalize(raw: unknown): UserSettings {
   // A file saved before player claims existed plays them as its named realism preset does.
   const realism = isRecord(raw.realism) ? raw.realism.preset : undefined;
   if (realism === "grounded" || realism === "simulation") fill.realism.claims = { ...CLAIM_PRESETS[realism] };
-  const merged = mergePatch(JSON.parse(JSON.stringify(fill)) as JsonValue, migrateTimeouts(lifted(raw)));
+  const merged = mergePatch(JSON.parse(JSON.stringify(fill)) as JsonValue, migrateTimeouts(migrateMindReads(lifted(raw))));
   return isRecord(merged) && merged.v === 1 ? conform(merged, fill) : defaultSettings();
 }
 
@@ -313,12 +315,17 @@ function loreOf(v: unknown): StepLore | undefined {
   return policy && tokens !== undefined ? { policy, tokens, ...(transport ? { transport } : {}) } : undefined;
 }
 
-/** A step's settings, checked; a signal an earlier build had reads as the one that stands for it now (`currentSignals`), so a step on `classifier` runs on every typed message and anything else the user chose stays. */
-function stepOf(v: unknown, base: StepConfig | undefined): StepConfig | undefined {
+/**
+ * A step's settings, checked; a signal an earlier build had reads as the one that stands for it now
+ * (`currentSignals`), so a step on `classifier` runs on every typed message and anything else the
+ * user chose stays. A minds step keeps no lore of its own: what a mind reads is Settings → Minds'
+ * (`minds.reads`, which an older mind card's lore moved into), and the other minds steps read none.
+ */
+function stepOf(v: unknown, base: StepConfig | undefined, purpose: StepPurpose): StepConfig | undefined {
   if (!isRecord(v)) return base;
   const route = routeOf(v.route);
   const maxTokens = atLeast(v.maxTokens, 1);
-  const lore = loreOf(v.lore) ?? base?.lore;
+  const lore = isMindPurpose(purpose) ? undefined : (loreOf(v.lore) ?? base?.lore);
   const recent = recentHistoryOf(v.recent) ?? base?.recent;
   return {
     enabled: typeof v.enabled === "boolean" ? v.enabled : (base?.enabled ?? false),
@@ -356,7 +363,7 @@ function conform(v: JsonObject, d: UserSettings): UserSettings {
   const rawSteps = isRecord(mu.steps) ? mu.steps : {};
   const steps: ModelUseSettings["steps"] = {};
   for (const p of STEP_PURPOSES) {
-    const s = hasOwn(rawSteps, p) ? stepOf(rawSteps[p], d.modelUse.steps[p]) : d.modelUse.steps[p];
+    const s = hasOwn(rawSteps, p) ? stepOf(rawSteps[p], d.modelUse.steps[p], p) : d.modelUse.steps[p];
     if (s) steps[p] = s;
   }
   const tokens = isRecord(mu.tokens) ? mu.tokens : {};
@@ -439,8 +446,8 @@ function expandPresets(settings: UserSettings, patch: JsonObject): UserSettings 
   const modelUse = isRecord(patch.modelUse) ? patch.modelUse.preset : undefined;
   if (modelUse === "lean" || modelUse === "standard" || modelUse === "full") {
     out.modelUse = { preset: modelUse, ...structuredClone(MODEL_USE_PRESETS[modelUse]) };
-    // A preset is a whole policy for minds too; the user's own prompts, memory overrides and how much of the reply minds read stay.
-    out.minds = { ...structuredClone(MINDS_PRESETS[modelUse]), replyTokens: out.minds.replyTokens, memory: out.minds.memory, prompts: out.minds.prompts };
+    // A preset is a whole policy for minds too; what a mind reads, the user's own prompts and memory overrides stay.
+    out.minds = { ...structuredClone(MINDS_PRESETS[modelUse]), reads: out.minds.reads, memory: out.minds.memory, prompts: out.minds.prompts };
   }
   return out;
 }

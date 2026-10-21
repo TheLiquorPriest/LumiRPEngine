@@ -26,8 +26,15 @@ function isOutcomeNote(raw: unknown): raw is OutcomeNote {
 export class OutcomeNotes {
   /** Notes by `user \0 chat`: one user's cache never answers another. */
   private readonly notes = new Map<string, OutcomeNote[]>();
+  /** How many times each `user \0 chat`'s notes changed in this process: a reply the engine prepared from older notes is stale (DESIGN §5.1). */
+  private readonly changes = new Map<string, number>();
 
   constructor(private readonly host: HostPort) {}
+
+  /** The chat's notes' revision in this process (a freshness input of the guard's). */
+  revision(chatId: ChatId, userId: UserId): number {
+    return this.changes.get(`${userId}\u0000${chatId}`) ?? 0;
+  }
 
   private path(chatId: ChatId): string {
     return `${runDir(chatId)}outcome-notes.json`;
@@ -53,6 +60,10 @@ export class OutcomeNotes {
     this.notes.delete(key);
     this.notes.set(key, notes.map((n) => ({ ...n })));
     if (this.notes.size > 256) this.notes.delete(this.notes.keys().next().value ?? "");
+    const changed = (this.changes.get(key) ?? 0) + 1;
+    this.changes.delete(key);
+    this.changes.set(key, changed);
+    if (this.changes.size > 1024) this.changes.delete(this.changes.keys().next().value ?? "");
     const path = this.path(chatId);
     await this.host.storage.write(`${path}.tmp`, JSON.stringify(notes), userId);
     await this.host.storage.move(`${path}.tmp`, path, userId);
