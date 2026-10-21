@@ -12,7 +12,7 @@ import { ROUTINE_ENTRIES_PER_CALL, ROUTINE_MAX_CALLS, ROUTINE_OWNERS_PER_CALL } 
 import { isRecord } from "../../src/shared/json";
 import type { JsonObject, JsonValue } from "../../src/shared/json";
 import type { JobProposal } from "../../src/shared/protocol";
-import { routineShapeProblems } from "../../src/shared/routines";
+import { routineShapeProblems, type RoutineGmView } from "../../src/shared/routines";
 import { TimeoutFired } from "../../src/shared/timeouts";
 import type { WorldDoc } from "../../src/shared/world";
 import { Rig } from "../support/rig";
@@ -245,7 +245,7 @@ describe("Propose routines from lore", () => {
     expect(failed?.type === "lre.job.update" ? failed.message : "").toBe("no call answered: Import and Refine calls ran out after 10 min (Settings → Timeouts → Import and Refine calls)");
   });
 
-  test("applying writes the routine data into the draft through the editor", async () => {
+  test("applied and committed, a proposed block is laid by the planner on its day, at its time and place, with its lore source in the GM's read of the day", async () => {
     const { rig, worldId } = await portAlder();
     rig.host.quietReply = answering({ danny_okafor: [{ routines: [dannys({ id: "trivia", label: "Trivia night", activity: "socialize", at: "19:00", minutes: 120, days: { weekdays: [4] }, place: "rusty_anchor" })] }] });
     const end = await proposed(rig, worldId, { owners: ["danny_okafor"] });
@@ -253,6 +253,16 @@ describe("Propose routines from lore", () => {
     const applied = (await draftOf(rig, worldId)).routines?.danny_okafor_trivia;
     expect(applied).toEqual(end.proposals[0]?.value as never);
     expect(routineShapeProblems(applied)).toEqual([]);
+    rig.body(await rig.send({ type: "lre.world", op: "commit", worldId, base: null }));
+    const chatId = rig.host.createChat("Morning.");
+    rig.body(await rig.send({ type: "lre.world", op: "attach", worldId, chatId }));
+    const dayOf = async (day: number): Promise<RoutineGmView> => rig.body(await rig.send({ type: "lre.routine", chatId, op: "day", entity: "danny_okafor", view: "gm", day })).gm as RoutineGmView;
+    const trivia = (view: RoutineGmView) => view.day.blocks.find((b) => b.origin.type === "routine" && b.origin.block === "trivia");
+    // The story starts on a Monday, day 0: Thursday is day 3, and the block is laid there, from its routine, resting on the entry it quotes.
+    const thursday = await dayOf(3);
+    expect(trivia(thursday)).toMatchObject({ from: "19:00", to: "21:00", label: "Trivia night", activity: "socialize", place: "rusty_anchor", origin: { type: "routine", block: "trivia", source: { type: "lore", entry: "lore_anchor", quote: "a Thursday trivia night that gets competitive" } } });
+    // Wednesday has no trivia night.
+    expect(trivia(await dayOf(2))).toBeUndefined();
   });
 
   test("the job reads only what may reach the player: no secret lore, entry waiting for review, unknown known_by entry, secret person or secret field; a proposal carrying a secret's words is dropped", async () => {
