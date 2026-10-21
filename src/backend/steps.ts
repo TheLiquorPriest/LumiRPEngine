@@ -464,8 +464,18 @@ export interface ReadAction extends QueuedAction {
   thing?: ThingSort;
 }
 
-/** `interpret`'s read: the intent, the reason it gave when it read no action, and what it says each action's thing is. */
-export type InterpretRead = Omit<InterpretOutput, "queue"> & { reason?: string; thing?: ThingSort; queue?: ReadAction[] };
+/**
+ * A lasting change to someone's week the input itself states (DESIGN §9.4 the player's message as a
+ * routine's source), in the `routine` channel's shape, with `said`: the input's own words stating it.
+ * It is never played: the chat asks the player before it changes anyone's routine.
+ */
+export type SaidRoutine = JsonObject & { said: string };
+
+/** How many routine changes one message may state. */
+const SAID_ROUTINES_MAX = 3;
+
+/** `interpret`'s read: the intent, the reason it gave when it read no action, what it says each action's thing is, and the routine changes the input states. */
+export type InterpretRead = Omit<InterpretOutput, "queue"> & { reason?: string; thing?: ThingSort; queue?: ReadAction[]; routine?: SaidRoutine[] };
 
 /** What `interpret` is told of the world besides the catalog: its name and money, the player character, and the scene as the POV knows it (`interpretScene`). */
 export interface InterpretContext {
@@ -522,6 +532,9 @@ export async function interpret(
     `Params are world ids, from the scene, Places and the catalog's lists, except a thing nothing lists, which keeps the input's own words. A text param that names an item keeps its qualifiers as written ("large pizza, delivered", not "pizza"). Money params are plain amounts in ${world.currency.code} as written (200 for ${world.currency.symbol}200).`,
     `Read every action in the input, in order, not only the first. Return the first as "action" with its "params". If the input has more actions after it, list them in order in "more" (at most ${ACTION_QUEUE_LIMIT - 1}), each {"action": a catalog id, "params": {...}, "text": that action written as the player would type it}: "I walk to the market and buy bread" → "action" for the walk, and "more": [{"action": <the buy's id>, "params": {"item": "bread"}, "text": "I buy bread"}]. An action after them that no catalog action fits goes in "next", written as the player would type it.`,
     `If, in character, the input lets time pass after its last action ("…and sleep until the next morning", "…then wait two hours", "…then skip ahead to Friday at 6 PM"), add "then": {"span": its words for how long or until when, with "minutes", "until" (a day part, "shift" or "commitment") or "at" ("YYYY-MM-DD HH:MM" for a stated day and time)}; time passing is never in "more" or "next", nor is anything else that isn't an action.`,
+    // A routine the player's own message states is asked about, never played (DESIGN §9.4): it is no
+    // action, so it never takes an action's place, and anything short of a plain statement is none.
+    `If the input itself plainly states, as settled fact, a lasting change to someone's week (the player character's own, "I start nights at the marina Monday", or one the input says someone told of, "Marcus says he's started swimming on Tuesdays"), add it to "routine": [{"entity": their id, "change": "start" for a new job, shift or habit, "stop" for one given up, "move" for a new home, "label": what it is in the input's words, "days": the days the input states (weekday names, "weekdays", "weekends" or "daily"; leave it out when the input states none, never guess), "start"?/"end"?: "HH:MM" as stated (or "start": morning|afternoon|evening|night), "activity"?: work|school|exercise|leisure|socialize|errand, "place"?: a place id (the new home for "move"), "with"?: people's ids, "replaces"?: true only when the input says it takes the place of what they did then, "said": the input's own words that state it, copied exactly}]. Never for a question ("do you still swim on Tuesdays?"), a one-off, a plan, a wish, a hypothetical, someone's thoughts, or a habit only mentioned in passing ("I walk past the pool where I swim on Tuesdays"). It is never an action, and changes nothing about "action", "more", "then" or "next".`,
   ];
   // An uncertain attempt is Try something while the chat infers checks (DESIGN §11): never beside, or
   // instead of, a catalog action that covers it, and a reaction the input asks for counts.
@@ -546,7 +559,7 @@ export async function interpret(
     `Action catalog:\n${actions.map(catalogLine).join("\n")}`,
     `Rules:\n${rules.map((r) => `- ${r}`).join("\n")}`,
     presumed.map((r) => `- ${r}`).join("\n"),
-    `Output JSON only, exactly this shape: {"action": string|null, "params": {...}, "thing"?: string, "confidence": number, "reason"?: string, "more"?: [{"action": string, "params": {...}, "text": string, "thing"?: string}], "then"?: {"span": string, "minutes"?: number, "until"?: string, "at"?: string}, "next"?: string}.`,
+    `Output JSON only, exactly this shape: {"action": string|null, "params": {...}, "thing"?: string, "confidence": number, "reason"?: string, "more"?: [{"action": string, "params": {...}, "text": string, "thing"?: string}], "then"?: {"span": string, "minutes"?: number, "until"?: string, "at"?: string}, "next"?: string, "routine"?: [{"entity": string, "change": string, "label": string, "days"?: string|string[], "start"?: string, "end"?: string, "activity"?: string, "place"?: string, "with"?: string[], "replaces"?: boolean, "said": string}]}.`,
   ]
     .filter((part) => part !== "")
     .join("\n");
@@ -581,7 +594,14 @@ export async function interpret(
   // Why it read no action, for the log: a line at most.
   const reason = !action && typeof raw.reason === "string" ? raw.reason.replace(/\s+/g, " ").trim().slice(0, 200) : "";
   const thing = action ? THING_SORTS.find((s) => s === raw.thing) : undefined;
-  return { action, params: action ? params : {}, probabilities: action ? { [action]: confidence, none: 1 - confidence } : { none: 1 }, ...(thing ? { thing } : {}), ...(then ? { then } : {}), ...(queue.length > 0 ? { queue } : {}), ...(next.length > 0 ? { next } : {}), ...(reason !== "" ? { reason } : {}) };
+  // Routine changes the input states, read whatever its action: each keeps `said`, so the engine can
+  // check the words are the player's own and a statement (`routineAsks`).
+  const routine = (Array.isArray(raw.routine) ? raw.routine : []).flatMap((r): SaidRoutine[] => {
+    if (!isRecord(r) || typeof r.said !== "string" || r.said.trim() === "") return [];
+    const copy = JSON.parse(JSON.stringify(r)) as JsonObject;
+    return [{ ...copy, said: r.said.replace(/\s+/g, " ").trim() }];
+  }).slice(0, SAID_ROUTINES_MAX);
+  return { action, params: action ? params : {}, probabilities: action ? { [action]: confidence, none: 1 - confidence } : { none: 1 }, ...(thing ? { thing } : {}), ...(then ? { then } : {}), ...(queue.length > 0 ? { queue } : {}), ...(next.length > 0 ? { next } : {}), ...(reason !== "" ? { reason } : {}), ...(routine.length > 0 ? { routine } : {}) };
 }
 
 /** A way of paying said as a payment: a preposition or "use" before it ("pay with my credit card", "on my debit card", "in cash", "from savings"), and not a thing named after it ("a credit card holder"). */

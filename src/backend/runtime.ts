@@ -71,6 +71,7 @@ import { interpretCatalog, interpretScene, timelapseEntry, tryEntry } from "./in
 import { checkQuestion, inferredChip, inferredOutcome } from "./inferred-words";
 import { failureWords } from "./requirement-words";
 import { missingSections, withoutMissing } from "./section-refs";
+import { routineAsks } from "./routine-ask";
 import { CallMeter, dedupeProposals, extract, interpret, saidPayMethod, Steps, type InterpretContext, type InterpretRead, type ThingSort } from "./steps";
 import { PlanNotes, type PlanLines } from "./plan-notes";
 import { OutcomeNotes } from "./outcome-notes";
@@ -845,6 +846,13 @@ export class Runtime implements TurnHooks {
     const npcRun = runsOf(settings.modelUse, render.world, "npc.choose", facts, { guidance: at.guidance })[0];
     const choose = npcRun && ties.present.length > 0 ? () => npcChoose(this.steps, npcRun, ties.present, (t) => this.describeTie(t, render.world, render.state), createRng(hashParts("lre.npc.pre", bridge.runSeed, p.generationId)), input.userId, budget.signal, this.stepLore(npcRun, at, this.tieInputs(ties.present, render.world, render.state))) : null;
     const [, early] = await Promise.all([intentTask, choose && budget.take(judging ? 1 : 0) ? choose() : null]);
+    // A routine the player's message states (DESIGN §9.4) is asked about on that message, with Yes
+    // or No; the turn doesn't wait on it. Its turn is the message, which the model can't set.
+    const routine = lastUser ? bridge.takeRoutineAsks(text) : [];
+    if (lastUser && routine.length > 0) {
+      await this.chips.add(input.chatId, input.userId, routine.map((ask, i): StoredChip => ({ id: `routine_ask:${lastUser.id}:${i}`, kind: "routine_ask", messageId: lastUser.id, label: ask.question, detail: ask.detail, actions: [{ id: "yes", label: "Yes", style: "primary" }, { id: "no", label: "No" }], expires: "next_send", payload: { proposal: { ...ask.proposal, turn: lastUser.id }, added: ask.added } })));
+      this.push.changed(input.chatId, input.userId);
+    }
     // A claim, or a check the chat only suggests (DESIGN §9.4 player claims, §11 inferred checks),
     // waits on the player's answer: nothing is generated; the chat asks, on the player's message,
     // and the answer's Regenerate runs the engine again with the read kept, so exactly one reply follows.
@@ -1118,6 +1126,11 @@ export class Runtime implements TurnHooks {
     // roleplay. Words the player typed are theirs to repeat. Its further actions are checked on their own.
     const typedText = text.toLowerCase();
     const secrets = unrevealedSecrets(this.registry, render.world, render.state).filter((s) => !typedText.includes(s.toLowerCase()));
+    // A routine the message itself states is asked about on it, whatever the turn plays (DESIGN
+    // §9.4): never played, so it stands apart from the actions and their checks.
+    const asks = routineAsks(this.registry, render.world, render.state, result.routine ?? [], text, secrets, (p) => proposalKnown(p, this.registry, render.world, render.state));
+    if ((result.routine ?? []).length > asks.length) this.host.log("info", `[LumiRPEngine] interpret: ${(result.routine ?? []).length - asks.length} routine change(s) the message doesn't state as its own or that don't hold; not asked`, userId);
+    bridge.setRoutineAsks(text, asks);
     if (findLeaks({ params: result.params, ...(result.then ? { then: result.then } : {}) }, secrets).length > 0) {
       this.host.log("info", `[LumiRPEngine] interpret: ${result.action ?? "no action"} carried an unrevealed secret; played as roleplay`, userId);
       bridge.setOffer(text, null);

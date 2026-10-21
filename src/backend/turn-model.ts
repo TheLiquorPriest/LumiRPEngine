@@ -135,6 +135,19 @@ export interface HeldRead {
   dropped: UnfitAction[];
 }
 
+/**
+ * A routine change the player's own message states (DESIGN §9.4): never played, it is asked about
+ * on that message ("Would you like to add this to your routine?") and recorded only on the player's
+ * yes. `proposal` is the `routine` channel's, with the message as its turn.
+ */
+export interface RoutineAsk {
+  proposal: JsonObject;
+  question: string;
+  detail: string;
+  /** What the chip says once the player said yes ("Added to Marcus's routine"). */
+  added: string;
+}
+
 export class TurnBridge implements TurnModel {
   /** `interpret` results keyed by the turn's last user text. */
   private readonly intents = new Map<string, InterpretOutput | null>();
@@ -164,6 +177,8 @@ export class TurnBridge implements TurnModel {
   private readonly skips = new Map<string, SkipRecord>();
   /** Typed messages whose read waits on the player's answer to a claim (Ask first, DESIGN §9.4), keyed like `intents`; none of it plays until each is answered. */
   private readonly held = new Map<string, HeldRead>();
+  /** Routine changes a typed message states, keyed like `intents`: asked about once, when it is read (`takeRoutineAsks`). */
+  private readonly routineAsks = new Map<string, RoutineAsk[]>();
   /**
    * The path each text's turn was read at (`begin`): what is kept for a text belongs to that turn
    * only, so a later turn with the same words, or the same turn after an earlier message changed,
@@ -183,7 +198,7 @@ export class TurnBridge implements TurnModel {
    */
   begin(userText: string, at: PathHash): void {
     if (this.readAt.get(userText) === at) return;
-    for (const kept of [this.intents, this.unfit, this.nexts, this.decisions, this.minds, this.offers, this.skips, this.held]) kept.delete(userText);
+    for (const kept of [this.intents, this.unfit, this.nexts, this.decisions, this.minds, this.offers, this.skips, this.held, this.routineAsks]) kept.delete(userText);
     this.interpreted.delete(userText);
     this.unread.delete(userText);
     this.readAt.set(userText, at);
@@ -285,6 +300,20 @@ export class TurnBridge implements TurnModel {
     const steps = keep ? read.steps.map((s, i): ReadStep => (i === index ? { action: s.action, params: s.params, text: s.text, ...(s.claim ? { claim: s.claim } : {}) } : s)) : read.steps.filter((_, i) => i !== index);
     this.setRead(userText, { ...read, steps });
     return true;
+  }
+
+  /** The routine changes this text states, from its read (empty clears them). */
+  setRoutineAsks(userText: string, asks: RoutineAsk[]): void {
+    if (asks.length === 0) this.routineAsks.delete(userText);
+    else this.routineAsks.set(userText, asks);
+    trim(this.routineAsks);
+  }
+
+  /** The routine changes this text's read found, taken: a Re-run or a held answer's Regenerate of the turn reads none again, so nothing is asked twice. */
+  takeRoutineAsks(userText: string): RoutineAsk[] {
+    const asks = this.routineAsks.get(userText) ?? [];
+    this.routineAsks.delete(userText);
+    return asks;
   }
 
   /** Whether this text's intent came from `interpret` (not a palette or chip action). */

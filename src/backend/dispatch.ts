@@ -16,6 +16,7 @@ import type { StudioOffer } from "../shared/studio-bridge";
 import { isWorldDoc, migrateWorld, previewSheet, previewSkills } from "../engine/authoring";
 import { parseEditOps, resolveEdit } from "../engine/edits";
 import { routineChanges, routineGmView, routinePlayerView } from "../packs/castlife/core/view";
+import { ROUTINE_CHANNEL } from "../packs/castlife/core/story";
 import { sheetRulesetProblem } from "../engine/ruleset";
 import { formulaFunctions } from "../engine/scope";
 import { neutralizeMacros } from "../shared/macros";
@@ -983,6 +984,46 @@ export class Dispatcher {
         if (refs.length === 0) return { applied: false, pending: false };
         const result = await this.write(chatId, userId, { kind: "undo", id: this.nextId(), messageId: m.id, swipeId: m.swipeId, refs });
         return { applied: result.applied, pending: result.pending };
+      }
+      case "routine_ask": {
+        // The player's answer to a routine change their own message stated (DESIGN §9.4). No drops it.
+        // Yes records it as the `routine` channel records the story's, checked against the chat as it
+        // stands now: theirs from the day after the head's, and one their routine took up since
+        // changes nothing. Why one no longer holds stays in the log: a refusal may know a secret.
+        if (choice === "no") {
+          this.rt.push.changed(chatId, userId);
+          return { applied: false, pending: false };
+        }
+        if (choice !== "yes") throw new RequestError("bad_request", `unknown choice ${choice}`);
+        const proposal = isRecord(chip.payload.proposal) ? (JSON.parse(JSON.stringify(chip.payload.proposal)) as JsonObject) : null;
+        if (!proposal || proposal.type !== ROUTINE_CHANNEL) throw new RequestError("bad_request", "the chip has no routine change");
+        const { state, world } = await this.head(chatId, userId);
+        const [outcome] = applyProposals(this.rt.registry, new Working(this.rt.registry, world, state), [proposal], `${id}:yes`, this.runSeedOf(chatId));
+        if (!outcome || outcome.rejection || outcome.events.length === 0) {
+          this.rt.host.log("info", `[LumiRPEngine] ${id}: the routine change no longer applies (${outcome?.rejection?.code ?? outcome?.dropped ?? "no change"})`, userId);
+          throw new RequestError("validation", "That changes nothing in the routine now.");
+        }
+        const events = [...outcome.materialized, ...outcome.events];
+        const result = await this.write(chatId, userId, { kind: "post", id: this.nextId(), target: "head", entry: { kind: "confirm", events } });
+        const added = typeof chip.payload.added === "string" ? chip.payload.added : "Added to the routine";
+        await this.rt.chips.add(chatId, userId, [{ id: id.replace(/^routine_ask:/, "routine_added:"), kind: "routine_added", messageId: chip.messageId, label: added, ...(chip.detail !== undefined ? { detail: chip.detail } : {}), actions: [{ id: "undo", label: "Undo", style: "danger" }], expires: "next_send", payload: { events: JSON.parse(JSON.stringify(events)) as JsonValue } }]);
+        return { applied: result.applied, pending: result.pending };
+      }
+      case "routine_added": {
+        // Undo of a routine change the player said yes to: the confirmed entry it was written as stops folding.
+        if (choice !== "undo") throw new RequestError("bad_request", `unknown choice ${choice}`);
+        const core = await this.rt.ledger.core(chatId, userId);
+        const wanted = JSON.stringify(chip.payload.events);
+        for (const m of [...(core?.chain(observed) ?? [])].reverse()) {
+          const rec = core ? activeRecord(m, core.journal.tombstones) : null;
+          const entry = rec?.post.findLast((p) => p.kind === "confirm" && JSON.stringify(p.events) === wanted);
+          if (!rec || !entry) continue;
+          const refs: EventRef[] = entry.events.flatMap((_, index) => (rec.undone.some((u) => u.in === "post" && u.seq === entry.seq && u.index === index) ? [] : [{ in: "post" as const, seq: entry.seq, index }]));
+          if (refs.length === 0) return { applied: false, pending: false };
+          const result = await this.write(chatId, userId, { kind: "undo", id: this.nextId(), messageId: m.id, swipeId: m.swipeId, refs });
+          return { applied: result.applied, pending: result.pending };
+        }
+        throw new RequestError("not_found", "the routine change is gone");
       }
       case "decline": {
         const proposal = isRecord(chip.payload.proposal) ? (JSON.parse(JSON.stringify(chip.payload.proposal)) as JsonObject) : null;
