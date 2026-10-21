@@ -172,6 +172,8 @@ export interface Signal {
   text: string;
   entity?: string;
   visibility: Visibility;
+  /** False: it only notes, whatever its class's policy (a Live or Near character's routine never stops a time skip for them, DESIGN §8). */
+  stops?: false;
 }
 
 export function signalOf(e: { type: string; data?: JsonObject }): Signal | null {
@@ -185,6 +187,7 @@ export function signalOf(e: { type: string; data?: JsonObject }): Signal | null 
     ...(typeof e.data.entity === "string" ? { entity: e.data.entity } : {}),
     // A value this reader doesn't know hides the signal (fail closed); unset is public.
     visibility: vis === undefined || vis === null || vis === "public" ? "public" : vis === "known_by" ? "known_by" : "secret",
+    ...(e.data.stops === false ? { stops: false as const } : {}),
   };
 }
 

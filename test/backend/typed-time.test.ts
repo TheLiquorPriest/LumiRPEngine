@@ -118,11 +118,8 @@ describe("a typed skip to Friday at 6 PM", () => {
     if (friday === null || wednesday === null) throw new Error("no stamps");
     expect(formatStamp(cal, before.state.clock).startsWith("2026-09-14 06:")).toBe(true);
     // Marcus, pinned Live, means to talk to Jordan on Wednesday evening: a beat of the skip. His plan's
-    // invitation only notes, here, and so do arrivals (Live, but not with the POV, he follows his
-    // routine off screen in a skip, §24.1, and comes to the garage), so the skip runs on to the time
-    // the player named.
+    // invitation only notes, here, so the skip runs on to the time the player named.
     rig.body(await rig.send({ type: "lre.marker", chatId, kind: "time", control: "interrupt", scope: { interrupt: "invitation" }, to: "note" }));
-    rig.body(await rig.send({ type: "lre.marker", chatId, kind: "time", control: "interrupt", scope: { interrupt: "arrival" }, to: "note" }));
     rig.body(await rig.send({ type: "lre.edit", chatId, ops: [{ op: "mind_pin", entity: MARCUS, level: "live" }, { op: "mind_memory", entity: MARCUS, part: "plan", id: null, value: { what: "Talk to Jordan about the books", kind: "meet", when: { from: wednesday, to: wednesday + 60 }, with: ["pov"], priority: 4 } }] }));
     const calls: { at: number; who: string[] }[] = [];
     const minds: BeatMinds = async (input) => {

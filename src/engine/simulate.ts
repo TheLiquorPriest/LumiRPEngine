@@ -365,7 +365,7 @@ export function advance(reg: Registry, w: Working, to: number, opts: AdvanceOpti
       const p = own(policy, s.class);
       // A signal the POV can't see never stops a timelapse, as it never stops an action queue:
       // stopping (and the chip and Outcome line that say what stopped it) would give it away.
-      if (p === "stop" && timelapse && signalVisible(reg, w.world, w.state, w.world.pov, s)) result.stops.push(s);
+      if (p === "stop" && timelapse && s.stops !== false && signalVisible(reg, w.world, w.state, w.world.pov, s)) result.stops.push(s);
       else if (p === "note" || p === "stop") result.notes.push(s);
     }
     if (timelapse && result.stops.length > 0) {

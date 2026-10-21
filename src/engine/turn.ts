@@ -93,7 +93,7 @@ function queueStop(w: Working, res: Resolution, since: number, scene: string, sp
   const policy = interruptPolicy(w.state);
   const signalled = w.events.slice(since).some((e) => {
     const s = "data" in e ? signalOf(e) : null;
-    return s !== null && policy[s.class] === "stop" && signalVisible(w.reg, w.world, w.state, w.world.pov, s);
+    return s !== null && s.stops !== false && policy[s.class] === "stop" && signalVisible(w.reg, w.world, w.state, w.world.pov, s);
   });
   return signalled ? "interruption" : null;
 }
