@@ -4,12 +4,15 @@
 import { describe, expect, test } from "bun:test";
 import { commitmentDraft, commitmentOp, narratorGets, noteOp, planDraft, planLasts, planOp, startPlanIn, type MindPart } from "../../src/packs/minds/ui/ops";
 import { MEMORY_FIELDS, memoryOverride, memoryOverridePatch, mindsPolicyPatch, mindsPromptPatch, withMemoryLevel } from "../../src/frontend/settings/minds-patch";
+import { LimitField, ReadRow, ReadSources } from "../../src/frontend/settings/minds";
+import { HostSwitch } from "../../src/frontend/components";
+import { expand, press, propsOf } from "../support/tree";
 import { mindsPartValue } from "../../src/frontend/build/minds-editor";
 import { decodeContextView, sectionNote } from "../../src/frontend/play/context";
 import { mindTracesOf } from "../../src/backend/inspector-log";
 import type { JsonObject } from "../../src/shared/json";
-import type { MindCallTrace, MindsSettings, WorldMindsConfig } from "../../src/shared/minds";
-import { DEFAULT_WORLD_MINDS, defaultMindsSettings, MIND_PROMPT_DEFAULTS, MIND_PROMPT_MAX, MINDS_PRESETS, worldMindsOf, worldMindTemplate } from "../../src/shared/minds";
+import type { MindCallTrace, MindSource, MindsSettings, WorldMindsConfig } from "../../src/shared/minds";
+import { DEFAULT_WORLD_MINDS, defaultMindsSettings, MIND_PROMPT_DEFAULTS, MIND_PROMPT_MAX, MIND_SOURCES, MINDS_PRESETS, worldMindsOf, worldMindTemplate } from "../../src/shared/minds";
 import type { WorldDoc } from "../../src/shared/world";
 import { Rig } from "../support/rig";
 import { stepUpdatePatch } from "../../src/frontend/settings/steps";
@@ -105,6 +108,32 @@ describe("Settings → Minds patches", () => {
     expect(memoryOverride(s.minds.memory, field("recall", "tokens"))).toBeUndefined();
     expect(memoryOverride(s.minds.memory, field("consolidate", "enabled"))).toBe(false);
     expect(s.preset).toBe("full");
+  });
+
+  test("What a mind reads has a row for their usual routine, on by default, whose switch and limit reach the settings store", async () => {
+    const rig = new Rig();
+    let minds = defaultMindsSettings();
+    let sent: JsonObject | null = null;
+    const row = (source: MindSource) => {
+      const rows = propsOf(ReadSources({ reads: minds.reads, memory: minds.memory, busy: false, patch: (p) => void (sent = p) }), ReadRow).filter((p) => p.source === source);
+      const [only] = rows;
+      if (rows.length !== 1 || !only) throw new Error(`${rows.length} rows for ${source}`);
+      return expand({ type: ReadRow, props: only });
+    };
+    expect(propsOf(row("routine"), HostSwitch).map((p) => p.checked)).toEqual([true]);
+    const [limit] = propsOf(row("routine"), LimitField);
+    if (!limit) throw new Error("no limit while it's on");
+    press(limit, 800);
+    minds = (await settingsAfter(rig, sent)).minds;
+    expect(minds.reads.routine).toEqual({ on: true, tokens: 800 });
+    const [toggle] = propsOf(row("routine"), HostSwitch);
+    if (!toggle) throw new Error("no switch");
+    press(toggle, false);
+    minds = (await settingsAfter(rig, sent)).minds;
+    expect(minds.reads.routine).toEqual({ on: false, tokens: 800 });
+    expect(propsOf(row("routine"), LimitField)).toEqual([]);
+    // Every source still has its one row.
+    expect(propsOf(ReadSources({ reads: minds.reads, memory: minds.memory, busy: false, patch: () => undefined }), ReadRow).map((p) => p.source).sort()).toEqual([...MIND_SOURCES].sort());
   });
 });
 
