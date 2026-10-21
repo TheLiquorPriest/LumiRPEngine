@@ -173,6 +173,12 @@ export interface AgentInstant {
   at: number;
   /** What the process does then, as it reads it back in `atInstant`. */
   key: string;
+  /**
+   * A moment at the run's own start, which no earlier run could reach: it happens when a run starts
+   * exactly there, before anything else in it, even on a slot's first minute (where moments otherwise
+   * fall to the slot step before). A run starting anywhere else passes it over.
+   */
+  opens?: true;
 }
 
 /**

@@ -40,6 +40,18 @@ const EVENING = (w: Working): SkipPlan["plans"][number]["blocks"] => [
   { label: "Bed", start: at(w, 0, "23:30"), end: w.state.clock + SPAN, place: "maya_flat", activity: "sleep" },
 ];
 
+/** Port Alder at `stamp` (the clock set, as a chat that got there): Marcus at the shop with the POV and Danny at the Anchor, both Far, their skips the model's to plan. */
+function portAlderAt(stamp: string): { w: Working; t: (stamp: string) => number; block: (label: string, start: string, end: string, place: string) => SkipPlan["plans"][number]["blocks"][number] } {
+  const world = STARTER_WORLDS.modern_slice_of_life!("w", "Port Alder");
+  const t = (s: string): number => clockOfStamp(calendarOf(world), s) ?? 0;
+  const state = startState(world, reg);
+  state.clock = t(stamp);
+  const w = new Working(reg, world, state);
+  const put = (entity: string, place: string): LedgerEvent => ({ type: "set", entity, field: "place", value: place });
+  record(w, [pin("marcus_delgado", "far"), pin("danny_okafor", "far"), put(world.pov, "alder_automotive"), put("marcus_delgado", "alder_automotive"), put("danny_okafor", "rusty_anchor")]);
+  return { w, t, block: (label, start, end, place) => ({ label, start: t(start), end: t(end), place, activity: "work" }) };
+}
+
 describe("a time skip, for someone whose routine is informative", () => {
   test("stay: they keep where the story has them, whatever was planned for them", () => {
     const w = friday("stay");
@@ -144,16 +156,8 @@ describe("a time skip, for someone whose routine is informative", () => {
   });
 
   test("model, as played live: time the plan leaves open overnight is spent asleep at home, a home the POV doesn't know included, and nothing the player sees names it", () => {
-    // Port Alder on Monday at 21:00: Marcus at the shop with the POV, Danny at the Anchor, both Far.
-    const world = STARTER_WORLDS.modern_slice_of_life!("w", "Port Alder");
-    const t = (stamp: string): number => clockOfStamp(calendarOf(world), stamp) ?? 0;
-    const state = startState(world, reg);
-    state.clock = t("2026-09-14 21:00");
-    const w = new Working(reg, world, state);
-    const put = (entity: string, place: string): LedgerEvent => ({ type: "set", entity, field: "place", value: place });
-    record(w, [pin("marcus_delgado", "far"), pin("danny_okafor", "far"), put(world.pov, "alder_automotive"), put("marcus_delgado", "alder_automotive"), put("danny_okafor", "rusty_anchor")]);
+    const { w, t, block } = portAlderAt("2026-09-14 21:00");
     // The plan leaves 02:00 to 06:30 open for Marcus and 02:00 to 10:00 for Danny.
-    const block = (label: string, start: string, end: string, place: string): SkipPlan["plans"][number]["blocks"][number] => ({ label, start: t(start), end: t(end), place, activity: "work" });
     const plans: SkipPlan["plans"] = [
       { entity: "marcus_delgado", blocks: [block("Closing up", "2026-09-14 21:00", "2026-09-15 02:00", "alder_automotive"), block("Opening up", "2026-09-15 06:30", "2026-09-15 12:00", "alder_automotive")] },
       { entity: "danny_okafor", blocks: [block("Out at the Anchor", "2026-09-14 21:00", "2026-09-15 02:00", "rusty_anchor"), block("Working on cars", "2026-09-15 10:00", "2026-09-15 12:00", "alder_automotive")] },
@@ -168,6 +172,33 @@ describe("a time skip, for someone whose routine is informative", () => {
     const morning = held(w, t("2026-09-15 12:00"));
     expect([whereabouts(w, "marcus_delgado")[0], whereabouts(w, "danny_okafor")[0]]).toEqual(["alder_automotive", "alder_automotive"]);
     expect(["Birch Lane", "birch_lane_12"].filter((s) => `${seen}${JSON.stringify(morning.montage)}`.includes(s))).toEqual([]);
+  });
+
+  test("model: a block already under way as the skip starts is taken up at its first minute, a planned one or sleep at home", () => {
+    // A skip from 00:10: Danny's plan leaves the night open while he is out at the Anchor, asleep at
+    // home by his day; Marcus's first planned block starts at 00:10.
+    const { w, t, block } = portAlderAt("2026-09-15 00:10");
+    const start = w.state.clock;
+    const plans: SkipPlan["plans"] = [
+      { entity: "marcus_delgado", blocks: [block("Late drinks", "2026-09-15 00:10", "2026-09-15 01:30", "rusty_anchor")] },
+      { entity: "danny_okafor", blocks: [block("Working on cars", "2026-09-15 10:00", "2026-09-15 12:00", "alder_automotive")] },
+    ];
+    record(w, [{ type: ROUTINE_EVENTS.skipPlan, data: JSON.parse(JSON.stringify({ from: start, to: t("2026-09-15 12:00"), plans })) }]);
+    const from = w.events.length;
+    held(w, t("2026-09-15 01:00"));
+    expect([moves(w, from, start, "marcus_delgado"), moves(w, from, start, "danny_okafor")]).toEqual([["0 rusty_anchor"], ["0 harbor_street_114"]]);
+  });
+
+  test("model: a meal their day lays at work is eaten where they are; time the plan leaves open never sends anyone to work", () => {
+    // From 08:00, Rosa, Far and left out of the plan, is at the bank; her day lays lunch at 11:00 at
+    // work (the basic need's own place, hers resolving to the hall she lives in).
+    const w = friday("model");
+    advance(reg, w, at(w, 0, "08:00"), { runSeed: "seed", mode: "turn" });
+    record(w, [pin("rosa", "far"), { type: "set", entity: "rosa", field: "place", value: "bank" }, planned(w, [{ entity: "maya", blocks: EVENING(w) }])]);
+    const from = w.events.length;
+    lapse(w, at(w, 0, "13:00"));
+    const sets = w.events.slice(from).flatMap((e) => (e.type === "set" && e.entity === "rosa" ? [`${e.field} ${String(e.value)}`] : []));
+    expect([sets.includes("activity lunch"), sets.filter((s) => s.startsWith("place "))]).toEqual([true, []]);
   });
 
   test("the GM sets one character's skip life; null returns them to their level's, both folds agree and Undo takes it back", () => {

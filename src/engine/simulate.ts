@@ -249,8 +249,8 @@ export function advance(reg: Registry, w: Working, to: number, opts: AdvanceOpti
   const infoOf = (slot: Slot): SlotInfo => ({ start: slot.start, end: slot.end, index: slot.index, ...(povRoutine ? {} : { povRoutine: false }), ...(timelapse ? { timelapse: true } : {}) });
 
   /**
-   * The agents' own moments inside a slot after the clock (and after how far the world has run) and
-   * up to `until` (`ProcessDef.instants`):
+   * The agents' own moments inside a slot after the clock (and after how far the world has run), and
+   * a run's opening ones at its start (`AgentInstant.opens`), up to `until` (`ProcessDef.instants`):
    * for every agent stepped through the slot before (in a turn the LOD1 agents caught up, in a
    * timelapse those it steps), in time order, then by agent and process.
    */
@@ -258,13 +258,18 @@ export function advance(reg: Registry, w: Working, to: number, opts: AdvanceOpti
     const timed = reg.processes.filter((d) => d.scope === "agent" && d.instants);
     if (timed.length === 0) return [];
     const after = Math.max(w.state.clock, since);
+    // A run's opening moments (`AgentInstant.opens`) only while it stands at its start, so no later slot or piece fires them again.
+    const opening = w.state.clock === since;
     const who = timelapse ? stepping() : lod1Agents(w.world, w.state).filter((a) => a !== w.world.pov);
     const out: { at: number; agent: EntityId; def: ProcessDef; instant: AgentInstant }[] = [];
     for (const agent of who) {
       if ((cursors.get(agent) ?? agentCursor(w.world, w.state, agent)) < slot.index - 1) continue;
       for (const def of timed) {
         if (w.ctx.levelOf(agent, def.domain) < def.minLevel) continue;
-        for (const instant of def.instants?.(w.ctx, agent, info) ?? []) if (instant.at > after && instant.at <= until && instant.at > slot.start && instant.at < slot.end) out.push({ at: instant.at, agent, def, instant });
+        for (const instant of def.instants?.(w.ctx, agent, info) ?? []) {
+          const due = instant.opens === true ? opening && instant.at === since : instant.at > after && instant.at > slot.start;
+          if (due && instant.at <= until && instant.at < slot.end) out.push({ at: instant.at, agent, def, instant });
+        }
       }
     }
     return out.sort((a, b) => a.at - b.at || a.agent.localeCompare(b.agent) || timed.indexOf(a.def) - timed.indexOf(b.def) || a.instant.key.localeCompare(b.instant.key));

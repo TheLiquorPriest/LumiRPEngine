@@ -534,7 +534,13 @@ function planMoments(ctx: ReadContext, who: EntityId, slot: SlotInfo): AgentInst
       if (inside(c.end)) out.push({ at: c.end, key: `end:${c.plan}` });
     }
   }
-  for (const b of skipBlocksOf(ctx, who, slot)) if (inside(b.start)) out.push({ at: b.start, key: `skip:${b.start}` });
+  const from = skipPlanOf(ctx.state)?.from;
+  for (const b of skipBlocksOf(ctx, who, slot)) {
+    // A block already under way as the skip starts is taken up at its start (`opens`), not at the slot's step.
+    if (from !== undefined && b.start <= from && from < b.end) {
+      if (from >= slot.start && from < slot.end) out.push({ at: from, key: `skip:${b.start}`, opens: true });
+    } else if (inside(b.start)) out.push({ at: b.start, key: `skip:${b.start}` });
+  }
   if (who === ctx.world.pov ? slot.povRoutine !== false : routineLived(ctx, who, slot.timelapse === true)) {
     const cal = calendarOf(ctx.world);
     const handed = new Set(out.flatMap((m) => (m.key.startsWith("end:") ? [m.at] : [])));
@@ -606,17 +612,18 @@ function livedAtMinute(ctx: ReadContext, who: EntityId, slot: SlotInfo): (block:
 /** A block someone lives in a skip the model planned for them (DESIGN §8): one of its blocks, or a basic need or rest in time none covers (`place` null: where they are). */
 type SkipLived = Pick<SkipBlock, "start" | "end" | "activity"> & { place: PlaceId | null };
 
-/** Whether a day plan's block is a basic need (`BASIC_BLOCKS`): laid as `routine:<id>`, a night's sleep past midnight as `routine:<id>:carried`. */
-function basicNeed(option: string): boolean {
+/** The basic need (`BASIC_BLOCKS`) a day plan's block is, by its id: laid as `routine:<id>`, a night's sleep past midnight as `routine:<id>:carried`; null for any other block. */
+function basicNeedOf(option: string): string | null {
   const id = option.startsWith(ROUTINE_OPTION) ? option.slice(ROUTINE_OPTION.length).replace(/:carried$/, "") : null;
-  return BASIC_BLOCKS.some((b) => b.id === id);
+  return BASIC_BLOCKS.some((b) => b.id === id) ? id : null;
 }
 
 /**
  * The blocks someone lives in this slot's skip while they spend skips as the model plans (DESIGN §8):
  * the recorded plan's blocks for them (`castlife.skip_plan`) and, in every minute of its span that no
  * planned block covers (between its blocks; all of it for someone it left out, or when its call failed),
- * their basic needs as their day lays them (sleep at home at night, their meals), at rest after one
+ * their basic needs as their day lays them (sleep at home at night, their meals; one laid at work where
+ * they are, since the floor never sends anyone to work), at rest after one
  * until the next block. Nothing else of their routine: basic needs are the floor, and they go home to
  * sleep on their own, so a plan never has to name a home the POV may not know. None outside a skip or
  * its span, or for anyone else. Laid for the slot's own days, which is all a slot looks up.
@@ -638,9 +645,11 @@ function skipBlocksOf(ctx: ReadContext, who: EntityId, slot: SlotInfo): readonly
   const cal = calendarOf(ctx.world);
   const basic: SkipLived[] = [];
   for (let day = dateAt(cal, lo).dayIndex; day <= dateAt(cal, hi).dayIndex; day++) {
+    const atWork = activeBlocks(ctx, who, day).flatMap(({ block }) => (block.place === "work" ? [block.id] : []));
     for (const b of dayPlan(ctx, who, day).blocks) {
-      if (!basicNeed(b.option)) continue;
-      for (const [start, end] of open(b.start, b.end)) basic.push({ start, end, place: b.place, activity: b.activity });
+      const need = basicNeedOf(b.option);
+      if (need === null) continue;
+      for (const [start, end] of open(b.start, b.end)) basic.push({ start, end, place: atWork.includes(need) ? null : b.place, activity: b.activity });
     }
   }
   // After a basic need, at rest where it left them until the next block (planned or basic), as after a story plan.
