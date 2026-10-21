@@ -28,8 +28,8 @@ export interface KitReport {
   core: string;
 }
 
-/** Why an MCP server doesn't follow the extension's kit; `unsafe`: the kit, or a directory it sits in, can be changed by other users. */
-export type FollowCode = "pinned" | "unsupported" | "no_kit" | "kit_api" | "refused" | "unsafe" | "elsewhere" | "unreadable" | "mismatch" | "broken";
+/** Why an MCP server doesn't follow the extension's kit; `unsafe`: the kit, or a directory it sits in, can be changed by other users; `runtime`: it runs on a Bun that can't load a kit. */
+export type FollowCode = "pinned" | "runtime" | "unsupported" | "no_kit" | "kit_api" | "refused" | "unsafe" | "elsewhere" | "unreadable" | "mismatch" | "broken";
 
 /** What an MCP server checks in with, in its hello's `client`, on connecting and after each change of what it runs. */
 export interface AgentCheckIn {

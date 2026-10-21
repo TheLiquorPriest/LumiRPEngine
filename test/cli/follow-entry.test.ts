@@ -8,6 +8,7 @@ import type { Subprocess } from "bun";
 import { chmodSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
+import { runtimeCannotFollow } from "../../src/cli/version";
 import type { KitReport } from "../../src/shared/agents";
 import { isRecord } from "../../src/shared/json";
 import { AGENT_API } from "../../src/shared/protocol";
@@ -145,8 +146,13 @@ function harness() {
   };
 }
 
+/** The Bun the entry runs under, as a harness that runs `bun …` gets it, and why it can't follow there (before 1.4), if it can't. */
+const BUN = Bun.spawnSync(["bun", "--version"], { env: { PATH: process.env.PATH ?? "" } }).stdout.toString().trim();
+const CANNOT = runtimeCannotFollow(BUN);
+
 describe("lumirpengine mcp, the real entry", () => {
-  test("refuses a kit other users can change, or one whose real path isn't an installed extension's, says why, and serves its own tools", async () => {
+  // On a Bun that can't follow at all there is nothing to refuse: the test below covers it.
+  test.skipIf(CANNOT !== null)("refuses a kit other users can change, or one whose real path isn't an installed extension's, says why, and serves its own tools", async () => {
     // repo/ writable by everyone: anyone could put another kit in its place.
     const shared = writeKit(distOf(root, "shared"), "b8", ["lre_planted"]);
     const repo = dirname(distOf(root, "shared"));
@@ -174,16 +180,29 @@ describe("lumirpengine mcp, the real entry", () => {
     }
   });
 
-  test("under Bun, follows a kit the size of the real one: one tools/list_changed, then the kit's tools and answers", async () => {
+  test("under Bun 1.4 follows a kit the size of the real one; under an older Bun says it can't before trying, with nothing large on stderr or in its check-in", async () => {
     // The real kit is about 4 MB, imported as a data URL: Bun 1.3 refuses one longer than about 2 KB, Bun 1.4 takes it.
     lre.build = "b9";
     lre.kit = writeKit(distOf(root, "big"), "b9", ["lre_followed"], 4_000_000);
+    const env = { PATH: process.env.PATH ?? "", HOME: home, XDG_CONFIG_HOME: join(home, "config") };
+    const version = Bun.spawnSync(["bun", join(ROOT, "src/cli/main.ts"), "--version"], { env }).stdout.toString();
     const s = harness();
     await s.start();
-    await s.out.next((m) => m.method === "notifications/tools/list_changed");
-    expect(await s.tools()).toEqual(["lre_followed"]);
-    expect((await s.ask("tools/call", { name: "lre_followed", arguments: {} })).content).toEqual([{ type: "text", text: "lre_followed answered by build b9" }]);
-    expect(await s.checkIns.next((c) => c.kit === "b9")).toMatchObject({ follows: true, why: null });
-    expect(await s.stop()).toContain("serving the tools of LumiRPEngine build b9");
+    if (CANNOT === null) {
+      await s.out.next((m) => m.method === "notifications/tools/list_changed");
+      expect(await s.tools()).toEqual(["lre_followed"]);
+      expect((await s.ask("tools/call", { name: "lre_followed", arguments: {} })).content).toEqual([{ type: "text", text: "lre_followed answered by build b9" }]);
+      expect(await s.checkIns.next((c) => c.kit === "b9")).toMatchObject({ follows: true, why: null });
+      expect(await s.stop()).toContain("serving the tools of LumiRPEngine build b9");
+      expect(version).not.toContain("can't follow");
+      return;
+    }
+    // Off before it is tried: its first check-in says why, it keeps its own tools, and the hello is a few hundred bytes, not the kit's URL.
+    expect(await s.checkIns.next(() => true)).toMatchObject({ kit: "dev", follows: false, why: { code: "runtime", text: CANNOT } });
+    const tools = await s.tools();
+    expect([tools.includes("lre_guide"), tools.includes("lre_followed")]).toEqual([true, false]);
+    expect(JSON.stringify(s.checkIns.got).length).toBeLessThan(4096);
+    expect((await s.stop()).length).toBeLessThan(4096);
+    expect(version).toContain(`under Bun ${BUN} it can't follow LumiRPEngine's tools: ${CANNOT}`);
   });
 });
