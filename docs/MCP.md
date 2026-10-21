@@ -97,7 +97,7 @@ Every answer is text, JSON for data, of at most about 24,000 characters; a large
 | `lre_gm {chatId, spoilers, pointer?, offset?}` | The GM view, secrets included. Needs `spoilers: true`. |
 | `lre_gm_edit {chatId, spoilers, ops}` | GM edits (set, move, link, stage, spawn…), all or none, with an Undo chip. Needs `spoilers: true`. |
 | `lre_fix {chatId, fix? \| entity?, field?, value? \| time?}` | A ✎ fix: place, weather, cash, scene type, any field the player may fix, or the clock. |
-| `lre_marker {chatId, kind, to, domain?, control?, scope?, preview?}` | Realism, a time control, player claims or the checks policy, from the latest message on; `preview` writes nothing. |
+| `lre_marker {chatId, kind, to, domain?, control?, scope?, preview?}` | Realism, a time control, player claims, the checks policy or inferred checks, from the latest message on; `preview` writes nothing. |
 | `lre_keep {chatId, choice, messageId, parentPath?, refs?}` | Keep, discard or convert after an earlier message was edited. |
 | `lre_view_open {chatId, panel, entity?}` | Open a panel, settling detail the chat hadn't decided yet. |
 | `lre_action {chatId, action, params?, text?}` / `lre_timelapse {chatId, target, overrides?, text?}` | Play a palette action or a timelapse as the player's next turn. The engine prepares it; Lumiverse starts the reply (see below). |

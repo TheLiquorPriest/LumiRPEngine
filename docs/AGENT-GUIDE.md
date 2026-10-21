@@ -442,7 +442,7 @@ A session goes like this:
  { "op": "stage", "track": "q_pontoon_weekend", "to": "diagnose" }]
 ```
 
-- `lre_marker` changes how the chat plays from its latest message on: `resolve` (a domain's realism level, for everyone, a band or one entity), `time` (a control: `tick`, `scale`, `pause`, `interrupt`, `speed_through`, `montage`, `unit_cap`), `claims` (what a typed action's thing the world doesn't have becomes) and `adjudicate` (the whole checks policy: read `/controls/adjudication`, change what you need, send it back). `preview: true` says what it would change and writes nothing; read it first, since a lower level freezes what the higher one tracked.
+- `lre_marker` changes how the chat plays from its latest message on: `resolve` (a domain's realism level, for everyone, a band or one entity), `time` (a control: `tick`, `scale`, `pause`, `interrupt`, `speed_through`, `montage`, `unit_cap`), `claims` (what a typed action's thing the world doesn't have becomes), `adjudicate` (the whole checks policy: read `/controls/adjudication`, change what you need, send it back) and `infer` (when typed attempts roll skill checks, the same way from `/controls/inferred`). `preview: true` says what it would change and writes nothing; read it first, since a lower level freezes what the higher one tracked.
 - `lre_view_open` opens a panel as the player does, which settles detail the chat hadn't decided yet (a balance first looked at); opening `core.context` checks the active preset.
 - `lre_chip` answers a chip with one of its action ids (an amount or a pick in `payload` when the action asks for one).
 - Each ✎ fix and GM edit leaves an Undo chip; tell the user it is there.

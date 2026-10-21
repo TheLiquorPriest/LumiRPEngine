@@ -7,6 +7,7 @@
 import { DOMAINS, INTERRUPT_CLASSES } from "../shared/ids";
 import type { DomainId, Level } from "../shared/ids";
 import type { ClaimsPolicy } from "../shared/claims";
+import type { InferredChecks } from "../shared/inferred";
 import type { JsonObject, JsonValue } from "../shared/json";
 import { isRecord } from "../shared/json";
 import type { EventRef, ResolveScope, TimeControl, TimeScope } from "../shared/ledger";
@@ -184,7 +185,11 @@ function gmEdit(args: Args, ctx: ToolContext, name: string, only?: readonly stri
   });
 }
 
-const MARKER_KINDS = ["resolve", "time", "claims", "adjudicate"] as const;
+const MARKER_KINDS = ["resolve", "time", "claims", "adjudicate", "infer"] as const;
+// Every marker kind the protocol takes is this tool's, but an Upgrade's (lre_upgrade): a new kind
+// fails the typecheck here until the tool sets it.
+const MARKER_KINDS_COVERED: [Exclude<RequestFields<"lre.marker">["kind"], (typeof MARKER_KINDS)[number] | "migrate">] extends [never] ? true : never = true;
+void MARKER_KINDS_COVERED;
 
 /** The marker request as the kind takes it; the backend checks the values and refuses one it can't read. */
 function markerFields(chatId: string, args: Args): RequestFields<"lre.marker"> {
@@ -206,6 +211,7 @@ function markerFields(chatId: string, args: Args): RequestFields<"lre.marker"> {
     return { chatId, kind, control: control satisfies TimeControl, scope: scope as TimeScope, to: to as JsonValue, ...preview };
   }
   if (kind === "claims") return { chatId, kind, to: to as unknown as ClaimsPolicy, ...preview };
+  if (kind === "infer") return { chatId, kind, to: to as unknown as InferredChecks, ...preview };
   return { chatId, kind, to: to as unknown as AdjudicationDef, ...preview };
 }
 
@@ -427,7 +433,7 @@ export const PLAY_TOOLS: readonly ToolModule[] = [
   {
     name: "lre_marker",
     description:
-      'Change how the chat plays from its latest message on (Settings → This chat, Play → Calendar), as a marker. kind resolve: realism, domain at level to (0–4), scope {"all": true}, {"tier": "principal"|"supporting"|"background"} or {"entity": id}. kind time: a time control (tick per scene type, scale, pause, interrupt, speed_through, montage, unit_cap) set to to, scope {"all": true}, {"sceneType": id}, {"activity": id} or {"interrupt": class}. kind claims: to is the player-claims policy {"mode": "real"|"ask"|"hold", "capped": bool}. kind adjudicate: to is the whole checks policy, as lre_chat_state shows it at /controls/adjudication, changed where you want. lre_chat_state\'s /controls has every current value. With preview, says what it would change (demotions freeze, promotions settle) and writes nothing. An Upgrade is lre_upgrade.',
+      'Change how the chat plays from its latest message on (Settings → This chat, Play → Calendar), as a marker. kind resolve: realism, domain at level to (0–4), scope {"all": true}, {"tier": "principal"|"supporting"|"background"} or {"entity": id}. kind time: a time control (tick per scene type, scale, pause, interrupt, speed_through, montage, unit_cap) set to to, scope {"all": true}, {"sceneType": id}, {"activity": id} or {"interrupt": class}. kind claims: to is the player-claims policy {"mode": "real"|"ask"|"hold", "capped": bool}. kind adjudicate: to is the whole checks policy, as lre_chat_state shows it at /controls/adjudication, changed where you want. kind infer: to is the whole inferred-checks policy (when typed attempts roll skill checks), as lre_chat_state shows it at /controls/inferred, changed where you want. lre_chat_state\'s /controls has every current value. With preview, says what it would change (demotions freeze, promotions settle) and writes nothing. An Upgrade is lre_upgrade.',
     inputSchema: object(
       {
         chatId: CHAT_ID,
@@ -445,8 +451,8 @@ export const PLAY_TOOLS: readonly ToolModule[] = [
     cli: {
       command: "marker",
       section: SECTION,
-      usage: "marker <chatId> --kind <resolve|time|claims|adjudicate> --to <json> [--domain <d>] [--control <c>] [--scope <json>] [--preview]",
-      summary: "Set realism, a time control, player claims or the checks policy",
+      usage: "marker <chatId> --kind <resolve|time|claims|adjudicate|infer> --to <json> [--domain <d>] [--control <c>] [--scope <json>] [--preview]",
+      summary: "Set realism, a time control, player claims, the checks policy or inferred checks",
       positionals: ["chatId"],
       needs: 1,
       options: { "--kind": { arg: "kind", as: "text" }, "--to": { arg: "to", as: "json" }, "--domain": { arg: "domain", as: "text" }, "--control": { arg: "control", as: "text" }, "--scope": { arg: "scope", as: "json" }, "--preview": { arg: "preview", as: "flag" } },

@@ -98,7 +98,7 @@ describe("the chat tools", () => {
     expect(await read("lre_gm", { spoilers: true, pointer: "/edits" })).toHaveLength(1);
   });
 
-  test("lre_marker previews without writing, then sets a time control and the player-claims policy", async () => {
+  test("lre_marker previews without writing, then sets a time control, the player-claims policy and inferred checks", async () => {
     const { chatId, call, read } = await portAlder();
     expect(await read("lre_chat_state", { pointer: "/controls/time/scale" })).toBe(1);
     const preview = await call("lre_marker", { chatId, kind: "time", control: "scale", to: 2, preview: true });
@@ -108,6 +108,12 @@ describe("the chat tools", () => {
     expect(await read("lre_chat_state", { pointer: "/controls/time/scale" })).toBe(2);
     await call("lre_marker", { chatId, kind: "claims", to: { mode: "ask", capped: false } });
     expect(await read("lre_chat_state", { pointer: "/controls/realism/claims" })).toEqual({ mode: "ask", capped: false });
+    // The policy in force, read back, changed and sent whole, as the guide tells an agent to.
+    const inferred = await read("lre_chat_state", { pointer: "/controls/inferred" });
+    if (!isRecord(inferred)) throw new Error("no inferred-checks policy");
+    const off = inferred.mode === "off" ? "auto" : "off";
+    await call("lre_marker", { chatId, kind: "infer", to: { ...inferred, mode: off } });
+    expect(await read("lre_chat_state", { pointer: "/controls/inferred/mode" })).toBe(off);
   });
 
   test("lre_keep settles a chat paused by an earlier edit, which the other writes refuse until then", async () => {
