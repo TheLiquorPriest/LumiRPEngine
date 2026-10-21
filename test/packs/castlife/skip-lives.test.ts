@@ -11,7 +11,9 @@ import type { WorldState } from "../../../src/engine/state";
 import type { Working } from "../../../src/engine/working";
 import { routineChanges } from "../../../src/packs/castlife/core/view";
 import { fold, startState } from "../support";
-import { at, foldBoth, gmEdit, lapse, pin, record, reg, town, whereabouts, withRoutines } from "./town";
+import { at, foldBoth, gmEdit, lapse, pin, record, reg, town, whereabouts, withRoutines, YOU } from "./town";
+import { runTimelapse } from "../../../src/engine/time";
+import { ENGINE_EVENTS } from "../../../src/engine/engine-pack";
 
 /** The skip: twenty-two hours from Friday 07:30, the POV at home on its own day. */
 const SPAN = 22 * 60;
@@ -59,6 +61,39 @@ describe("a time skip, for someone whose routine is informative", () => {
     expect([whereabouts(w, "maya"), whereabouts(w, "jordan")[0]]).toEqual([["maya_flat", "sleep"], "bank"]);
     // The fold reads the recorded plan and moves: nothing is planned again.
     expect(fold(reg, w.world, startState(w.world), w.events)).toEqual(w.state);
+  });
+
+  test("model: in a skip the story holds the POV through, someone with it leaves at their planned block and comes back for a later one, and the POV sees both", () => {
+    // Maya, Live, is round at Alex's for coffee; Alex knows her.
+    const w = town((wd) => void wd.entities[YOU]?.relations.push({ type: "knows", to: "maya" }));
+    record(w, [pin("maya", "live"), { type: "set", entity: "maya", field: "place", value: "apartment" }, { type: "set", entity: "maya", field: "activity", value: "coffee" }]);
+    const end = w.state.clock + SPAN;
+    record(w, [
+      planned(w, [
+        {
+          entity: "maya",
+          blocks: [
+            { label: "Home for the afternoon", start: at(w, 0, "12:00"), end: at(w, 0, "20:00"), place: "maya_flat", activity: "idle" },
+            { label: "Back at Alex's", start: at(w, 0, "21:00"), end, place: "apartment", activity: "visiting" },
+          ],
+        },
+      ]),
+    ]);
+    const from = w.events.length;
+    // Under the world's own interrupts, where an arrival stops a skip, with Alex held at home.
+    const out = runTimelapse(reg, w, { type: "at", at: end }, { runSeed: "seed", povRoutine: false });
+    if ("code" in out) throw new Error(out.reason);
+    const run = w.events.slice(from);
+    const moves = run.flatMap((e) => (e.type === "set" && e.entity === "maya" && e.field === "place" ? [e.value] : []));
+    expect([out.result.stop, moves, whereabouts(w, "maya")]).toEqual(["target", ["maya_flat", "apartment"], ["apartment", "visiting"]]);
+    // Alex saw her go and come back: a note and an arrival that only notes, both in the Montage.
+    const seen = run.filter((e) => "data" in e && e.data.entity === "maya" && (e.type === ENGINE_EVENTS.note || (e.type === ENGINE_EVENTS.signal && e.data.class === "arrival")));
+    expect(seen.map((e) => ("data" in e ? [e.type, e.data.stops ?? true] : []))).toEqual([
+      [ENGINE_EVENTS.note, true],
+      [ENGINE_EVENTS.signal, false],
+    ]);
+    const lines = out.montage.groups.flatMap((g) => g.lines);
+    expect(seen.every((e) => "data" in e && lines.includes(String(e.data.text)))).toBe(true);
   });
 
   test("the GM sets one character's skip life; null returns them to their level's, both folds agree and Undo takes it back", () => {
