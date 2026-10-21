@@ -249,7 +249,8 @@ export function advance(reg: Registry, w: Working, to: number, opts: AdvanceOpti
     if (timed.length === 0) return [];
     const after = Math.max(w.state.clock, since);
     const who = timelapse ? stepping() : lod1Agents(w.world, w.state).filter((a) => a !== w.world.pov);
-    const info: SlotInfo = { start: slot.start, end: slot.end, index: slot.index };
+    // The POV's moments follow its routine as its slot steps do (`AdvanceOptions.povRoutine`).
+    const info: SlotInfo = { start: slot.start, end: slot.end, index: slot.index, ...(timelapse && opts.povRoutine === false ? { povRoutine: false } : {}) };
     const out: { at: number; agent: EntityId; def: ProcessDef; instant: AgentInstant }[] = [];
     for (const agent of who) {
       if ((cursors.get(agent) ?? agentCursor(w.world, w.state, agent)) < slot.index - 1) continue;

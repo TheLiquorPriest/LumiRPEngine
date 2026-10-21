@@ -181,9 +181,10 @@ export interface ProcessDef {
   scope?: "world" | "agent";
   step(slot: SlotInfo, ctx: ReadContext, rng: (entity: EntityId) => Rng, agent?: EntityId): LedgerEvent[];
   /**
-   * An agent process's moments strictly inside a slot (DESIGN §8): a character's own plan starting
-   * or ending between slot steps (§24.8). They apply at their time among the schedule edges, in a
-   * turn and in a timelapse, to an agent stepped through the slot before; catch-up has none. Read
+   * An agent process's moments strictly inside a slot (DESIGN §8): the blocks of a character's day
+   * starting between slot steps, their own plans' starts and ends among them (§24.8). They apply at
+   * their time among the schedule edges, in a turn and in a timelapse, to an agent stepped through
+   * the slot before; catch-up has none. `slot.povRoutine` says whether the POV's routine runs. Read
    * from a state the slot's other moments may have changed already, so they must not depend on the
    * clock or on what moments change: a segment that starts mid-slot then gets the same ones.
    */
