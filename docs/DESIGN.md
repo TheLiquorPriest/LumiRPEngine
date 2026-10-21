@@ -16,7 +16,7 @@ Section numbers are stable: code comments and docs cite them as `DESIGN §9.2`. 
 | Identifier | Meaning |
 |---|---|
 | `D1`–`D35` | Design decisions (§2) |
-| `G1`–`G11` | Gaps in the host that I plan to propose fixes for (§16) |
+| `G1`–`G12` | Gaps in the host that I plan to propose fixes for (§16) |
 | `P1`–`P4` | The four principles behind the per-chat ledger (§4.3) |
 | `L1`–`L47` | The ledger's named invariants (§14); a number is never reused, so a retired one leaves a gap |
 
@@ -84,7 +84,7 @@ A few terms, in plain words:
 | D18 | **Domain packs and two dials** (depth per domain × entity tier). **The representation is uniform: levels gate processes, rendering and extraction targets, never the data shape.** |
 | D19 | **Pinned constants (retired).** User entries stored `constant:true, disabled:false` were charged to the lore budget as pins, so they never displaced engine sections. With lore handling off the engine no longer touches user entries, and native World Info decides them (§6.1). |
 | D20 | **No license yet.** It is decided after the extension has proved itself. |
-| D21 | **Upstream proposals (G1–G11) are follow-up work** after the first release, which ships with its caveats documented (§16). |
+| D21 | **Upstream proposals (G1–G12) are follow-up work** after the first release, which ships with its caveats documented (§16). |
 | D22 | **Low realism by default:** new blank worlds start on the Story preset. |
 | D23 | **A studio repository built on `japolino/warp-studio` comes next.** LumiRPEngine ships the seam for it now (§15). |
 | D24 | **LumiRPEngine registers no extension macros.** A macro would block `decisions.evaluate` during dry runs and force main-process prompt assembly. |
@@ -1034,6 +1034,7 @@ These are the places where Lumiverse itself would make LumiRPEngine simpler or s
 | G9 | Keep `spindle_metadata` out of the light message list | Small |
 | G10 | A message read without `extra` (reasoning), or by range: `getMessages` sends every message with all its reasoning, 174 MB on an 844-message chat, so the backend keeps its own copy (§9.6) | Small |
 | G11 | A Regenerate of a chosen reply from an extension's page: a validated `{messageId}` on the `action-regenerate` or `action-swipe-right` command, running `useSwipeAction`'s path (`generate` with `message_id` and `generation_type: "swipe"`, and the store's streaming hooks). Commands take no arguments today (`applyHostAction` rejects them) and the store isn't open to extensions, so the restart after an engine run can start only the last reply, and a reply for an earlier message (Edit and Send in place, a swipe of it) is refused (§5.1) | ~40–80 LOC |
+| G12 | An extension's drawer tab keeps its place through the extension's own reload. On an update the loader unloads the old frontend before the new one registers its tab again, about 50 ms later and under a new id; in between, the drawer falls back to its first tab and stores that as the selection (`ViewportDrawer.tsx`). So a page that had LumiRPEngine's tab open shows Profile after an update, with the update notice one tap away, and at phone width the re-added button lands just past the edge of the tab strip. Either the drawer stores no fallback for a tab that is only reloading, or the loader swaps the old tab for the new one instead of unloading first | Small |
 
 **Shipped caveats** (Settings and README):
 - While the extension is enabled, prompt assembly for **all users on the host** runs on the main process. On a 1,000-message chat the measured overhead was about 23 ms per prompt build (§18.5).
@@ -1191,7 +1192,7 @@ The design rests on assumptions about the host and the models, checked on the re
 | # | Item | Behavior until resolved |
 |---|---|---|
 | R4 | **The `characters` permission**, which would let the engine see where an outlet inside a character-card field puts a section (§4.2). | It is not requested; the dry-run search shows whether a section reached the prompt, not where. |
-| G1–G11 | The upstream proposals (§16). | The extension ships with the caveats documented. |
+| G1–G12 | The upstream proposals (§16). | The extension ships with the caveats documented. |
 | — | Not built: command-palette commands, replacing a data table with another region's, a per-proposal edit step in Import from lore, agenda and secret-track objectives in the starter worlds (they carry narrative to-dos only). | Documented in the user guide where a user would look for them. |
 | D20 | The license. | None yet; all rights reserved. |
 
