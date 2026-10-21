@@ -361,10 +361,13 @@ export function withPov(ctx: ReadContext, who: EntityId): boolean {
  * edges it never moves them then; at an edge it does under routine first, never under story first,
  * and under balanced only where the story's day ends (`release`: going to bed, or a schedule's first
  * slot of a day). The POV's routine runs only in a timelapse, and yields to what the player or the
- * narration set as anyone's does.
+ * narration set as anyone's does. A scene with the POV holds whoever is in it while the story holds
+ * the POV (`scene`: an ordinary turn, a span the player's words spend, a narrated skip); while time
+ * runs on its own (`scene` false: a timelapse the POV's routine runs in) there's no scene to keep
+ * them in, so a housemate still goes to work and a trip still leaves.
  */
-export function routineYields(ctx: ReadContext, who: EntityId, field: "place" | "activity", expected: JsonValue | null, opts: { edge: boolean; release?: boolean }): boolean {
-  if (withPov(ctx, who)) return true;
+export function routineYields(ctx: ReadContext, who: EntityId, field: "place" | "activity", expected: JsonValue | null, opts: { edge: boolean; release?: boolean; scene?: boolean }): boolean {
+  if (opts.scene !== false && withPov(ctx, who)) return true;
   const pov = who === ctx.world.pov;
   const awareness = followOf(ctx, who).awareness;
   if (!pov) {

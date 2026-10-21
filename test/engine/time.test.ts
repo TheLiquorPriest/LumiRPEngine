@@ -188,7 +188,7 @@ describe("speed through", () => {
 });
 
 describe("the time.advance channel", () => {
-  test("under the cap it applies whole like a timelapse with every class at note (L28)", () => {
+  test("under the cap it applies whole like a timelapse the story holds the POV through, with every class at note (L28)", () => {
     const world = timeWorld();
     const reg = registryOf([payPack]);
     world.entities.acct = { id: "acct", kind: "person", name: "Checking", tier: "background", fields: { owner: POV }, relations: [] };
@@ -196,9 +196,14 @@ describe("the time.advance channel", () => {
     const a = new Working(reg, world, s0);
     expect(applyTimeAdvance(reg, a, 600, { runSeed: "run", capMinutes: 720 }).applied).toBe(true);
     const b = new Working(reg, world, s0);
-    runTimelapse(reg, b, { type: "duration", minutes: 600 }, { runSeed: "run", overrides: ALL_NOTE });
+    runTimelapse(reg, b, { type: "duration", minutes: 600 }, { runSeed: "run", overrides: ALL_NOTE, povRoutine: false });
     const strip = (s: WorldState): string => hashJson(s);
     expect(strip(a.state)).toBe(strip(b.state));
+    // The narration told what the POV did in the skip: its shift (09:00 to 17:00) never moved it.
+    expect(a.events.some((e) => e.type === "set" && e.entity === POV && e.field === "activity")).toBe(false);
+    const lapsed = new Working(reg, world, s0);
+    runTimelapse(reg, lapsed, { type: "duration", minutes: 600 }, { runSeed: "run", overrides: ALL_NOTE });
+    expect(lapsed.events.some((e) => e.type === "set" && e.entity === POV && e.field === "activity")).toBe(true);
   });
 
   test("over the cap, or past the unit cap, nothing applies and a Timelapse chip is offered", () => {
@@ -237,7 +242,7 @@ describe("the clock's ✎ fix (DESIGN §9.2, §12)", () => {
     return fold(reg, world, state, fix.events);
   }
 
-  test("later, the time passes as a timelapse to then with every class at note does (L28), recorded as one unit", () => {
+  test("later, the time passes as a timelapse to then with every class at note does (L28), the story holding the POV, recorded as one unit", () => {
     const { world, reg, s0 } = fixWorld();
     const fix = clockFix(reg, world, s0, "2026-10-16 14:00", "run");
     if ("code" in fix) throw new Error(fix.reason);
@@ -245,7 +250,7 @@ describe("the clock's ✎ fix (DESIGN §9.2, §12)", () => {
     expect([...new Set(fix.events.map((e) => e.group))]).toEqual([expect.stringMatching(/^time:/)]);
     const after = fold(reg, world, s0, fix.events);
     const lapsed = new Working(reg, world, s0);
-    runTimelapse(reg, lapsed, { type: "at", at: 14 * 60 }, { runSeed: "run", overrides: ALL_NOTE });
+    runTimelapse(reg, lapsed, { type: "at", at: 14 * 60 }, { runSeed: "run", overrides: ALL_NOTE, povRoutine: false });
     expect([after.clock, after.accounts, after.entities]).toEqual([lapsed.state.clock, lapsed.state.accounts, lapsed.state.entities]);
     expect([after.accounts.acct, placeOfEntity(after, "dev")]).toEqual([7500, "home"]);
   });

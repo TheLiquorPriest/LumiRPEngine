@@ -1139,7 +1139,9 @@ export class Runtime implements TurnHooks {
       // A short span runs in the turn; a longer one is offered (a misread can't skip days unasked).
       const over = target?.type === "duration" && target.minutes > INTERPRETED_TIMELAPSE_CAP;
       bridge.setOffer(text, over ? target : null);
-      bridge.setIntent(text, target && !over ? timelapseIntent(target) : null, target !== null && !over);
+      // A span the player's words spend ("for the next two hours, I service the fleet") keeps the POV
+      // where the story has it until it's over (DESIGN §8); a run to a routine point follows its routine.
+      bridge.setIntent(text, target && !over ? timelapseIntent(target, undefined, 1, target.type !== "duration") : null, target !== null && !over);
       return;
     }
     const chosen = result.action ? all.find((a) => a.id === result.action) : undefined;

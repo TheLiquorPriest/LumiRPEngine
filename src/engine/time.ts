@@ -364,6 +364,12 @@ export interface TimelapseOptions {
   /** Segment number for the summary event (1 for the first). */
   segment?: number;
   unitCap?: { agentDays: number; events: number };
+  /**
+   * False for a span the player's own words spend doing something ("OOC: for the next two hours, I
+   * service the fleet"): the story holds the POV where it has it for the span, and its scene holds
+   * whoever is in it (DESIGN §8). Absent: time runs on its own, and the POV's routine runs.
+   */
+  povRoutine?: boolean;
 }
 
 export interface TimelapseOutcome {
@@ -465,9 +471,9 @@ export class TimelapseRun {
       mode: "timelapse",
       cause: "timelapse",
       includePov: true,
-      // A span the player spends doing something keeps the POV where the story has it (DESIGN §8):
-      // its routine resumes after; a run to a routine point (a shift, a day part) follows it.
-      povRoutine: this.target.type !== "duration",
+      // A span the player's words spend doing something keeps the POV where the story has it (DESIGN
+      // §8); otherwise time runs on its own and the POV follows its routine.
+      povRoutine: this.opts.povRoutine !== false,
       ...(this.opts.overrides ? { interrupts: this.opts.overrides } : {}),
       unitCap: this.cap,
       spent: { slots: this.result.slots, agentDays: this.result.agentDays, events: this.w.events.length - this.start },
