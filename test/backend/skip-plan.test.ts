@@ -157,4 +157,15 @@ describe("the skip plan's checks", () => {
     expect(event).toBeNull();
     expect(calls).toBe(0);
   });
+
+  test("someone the engine lives no day for (no agent, as Jess, Nora and Helen) is never planned, and no call is made for them alone", async () => {
+    const jess: LedgerEvent = { type: ROUTINE_EVENTS.follow, data: { entity: "jess_kowalczyk", follow: { mode: null, awareness: null, role: "informative", skips: "model" } } };
+    const { world, state, stamp } = monday([jess]);
+    const alone = await plan(world, state, { plans: [{ entity: "jess_kowalczyk", blocks: [block(stamp(10), stamp(40), "rusty_anchor", "Tends bar")] }] });
+    expect([alone.event, alone.calls]).toEqual([null, 0]);
+    // With Danny, an agent, planned too, only he is.
+    const both = monday([jess, follow("model")]);
+    const { event } = await plan(both.world, both.state, { plans: [{ entity: "jess_kowalczyk", blocks: [block(both.stamp(10), both.stamp(40), "rusty_anchor", "Tends bar")] }, { entity: "danny_okafor", blocks: [block(both.stamp(10), both.stamp(40), "alder_harbor_marina")] }] });
+    expect(plannedOf(event).map((p) => p.entity)).toEqual(["danny_okafor"]);
+  });
 });

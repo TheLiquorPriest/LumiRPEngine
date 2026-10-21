@@ -20,6 +20,7 @@ import { timelapseOptions } from "../engine/turn";
 import { Working } from "../engine/working";
 import { checkSkipPlan, skipPlanBrief, skipPlanText } from "../packs/castlife/core/skip-plan";
 import { skipLifeOf, skipPlanOf } from "../packs/castlife/core/routines";
+import { livesPlans } from "../packs/castlife/core/commitments";
 import { povSafe } from "../packs/castlife/core/usual";
 import type { Steps } from "./steps";
 
@@ -68,9 +69,11 @@ export async function planSkip(deps: SkipPlanDeps, input: SkipPlanInput): Promis
   const last = skipPlanOf(input.state);
   if (last && last.from <= from && from < last.to && to <= last.to) return null;
   const ctx = deps.registry.context(input.world, input.state);
+  // Only people the engine lives a day for (an LOD1 agent from Cast life 3, §24.8): anyone else would
+  // never take up a planned block, so planning them would only show plans nothing lives.
   const people = Object.keys(input.state.entities)
     .sort()
-    .filter((id) => kindIs(deps.registry, input.world, input.state.entities[id]?.kind ?? "", "person") && !isGone(input.state, id) && skipLifeOf(ctx, id) === "model");
+    .filter((id) => kindIs(deps.registry, input.world, input.state.entities[id]?.kind ?? "", "person") && !isGone(input.state, id) && livesPlans(ctx, id) && skipLifeOf(ctx, id) === "model");
   if (people.length === 0) return null;
   const brief = skipPlanBrief(ctx, people, from, to);
   const safe = povSafe(ctx);
