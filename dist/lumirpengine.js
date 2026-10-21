@@ -22,6 +22,20 @@ function kitPathProblem(path, identifier) {
     return `isn't where Lumiverse installs an extension's kit (…/extensions/${identifier}/repo/dist/${KIT_FILE})`;
   return null;
 }
+function shellWord(text) {
+  if (/^[\w./:\\@%+=,-]+$/.test(text))
+    return text;
+  if (!/["$`]/.test(text))
+    return `"${text}"`;
+  return `'${text.replaceAll("'", "'\\''")}'`;
+}
+var RUNTIMES = [
+  { runtime: "bun", needs: "Bun 1.4 or newer" },
+  { runtime: "node", needs: "Node 22 or newer" }
+];
+function followCommands(core) {
+  return RUNTIMES.map(({ runtime, needs }) => ({ runtime, needs, command: `${runtime} ${shellWord(core)} mcp` }));
+}
 
 // src/shared/json.ts
 function isRecord(value) {
@@ -763,8 +777,10 @@ class KitFollower {
     const report = reportOf(news.kit);
     if (report === null || !SHA256.test(report.sha256))
       return this.cannot("refused", `LumiRPEngine on ${where} described its tools in a way this lumirpengine doesn't read`);
-    if (report.api !== KIT_API)
-      return this.cannot("kit_api", report.api > KIT_API ? `LumiRPEngine's tools need a newer lumirpengine (kit API ${report.api}; this one reads ${KIT_API}): install it again (${NPM_INSTALL}) or run the extension's own copy (node ${report.core} mcp)` : `LumiRPEngine's tools are older than this lumirpengine reads (kit API ${report.api}; it reads ${KIT_API}): update LumiRPEngine in Lumiverse's Extensions tab, or run the extension's own copy (node ${report.core} mcp)`);
+    if (report.api !== KIT_API) {
+      const own = followCommands(report.core).map((c) => c.command).join(", or ");
+      return this.cannot("kit_api", report.api > KIT_API ? `LumiRPEngine's tools need a newer lumirpengine (kit API ${report.api}; this one reads ${KIT_API}): install it again (${NPM_INSTALL}) or run the extension's own copy (${own})` : `LumiRPEngine's tools are older than this lumirpengine reads (kit API ${report.api}; it reads ${KIT_API}): update LumiRPEngine in Lumiverse's Extensions tab, or run the extension's own copy (${own})`);
+    }
     const problem = kitPathProblem(report.path, this.options.identifier);
     if (problem !== null)
       return this.cannot("refused", `LumiRPEngine named ${report.path} as its tools, which ${problem}, so it wasn't loaded`);
@@ -836,6 +852,7 @@ var package_default = {
     lumirpengine: "dist/lumirpengine.js"
   },
   engines: {
+    bun: ">=1.4",
     node: ">=22"
   },
   exports: {
@@ -870,12 +887,12 @@ var package_default = {
 // src/cli/version.ts
 var CLI_NAME = "lumirpengine";
 var CLI_VERSION = package_default.version;
-var BUILD = "71fc8854";
+var BUILD = "7e3bd7d6";
 function runtimeCannotFollow(bun) {
   if (bun === undefined)
     return null;
   const [major = 0, minor = 0] = bun.split(".").map(Number);
-  return major > 1 || major === 1 && minor >= 4 ? null : "run it with Node 22 or newer (Bun before 1.4 can't load the kit)";
+  return major > 1 || major === 1 && minor >= 4 ? null : `run it with ${RUNTIMES.map((r) => r.needs).join(", or ")} (Bun before 1.4 can't load the kit)`;
 }
 function versionLine(bun) {
   const cannot = runtimeCannotFollow(bun);

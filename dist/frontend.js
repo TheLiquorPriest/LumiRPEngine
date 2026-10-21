@@ -19744,7 +19744,7 @@ function serverLine(client, view) {
   const processes = client.processes > 1 ? ` (${client.processes} processes)` : "";
   const name = `${client.host !== null ? `${client.name}${client.harness !== null ? ` for ${client.harness}` : ""} on ${client.host}` : `${client.name} ${client.version}`}${processes}`;
   const install = { label: "Copy the install", text: NPM_INSTALL };
-  const setup = view.setup === null ? [] : [{ label: "Copy the setup", text: view.setup.command }];
+  const setup = (view.setup?.commands ?? []).map((c) => ({ label: `Copy the setup for ${c.needs}`, text: c.command }));
   switch (client.state) {
     case "updated":
       if (client.harness === LUMIVERSE_HARNESS)
@@ -19756,9 +19756,22 @@ function serverLine(client, view) {
       const fix = client.why?.code === "elsewhere" || client.why?.code === "kit_api" ? [install] : client.why?.code === "pinned" || client.why?.code === "unsafe" ? [] : setup;
       return { state: client.state, text: `${name} can't follow LumiRPEngine: ${client.why?.text ?? "it didn't say why"}.`, update: false, copy: fix };
     }
-    case "old":
-      return { state: client.state, text: `${name} is from before MCP servers followed LumiRPEngine, so it keeps the tools it was installed with. Update it once (${NPM_INSTALL}), or set it up to run the extension's own copy${view.setup === null ? "" : ` (${view.setup.command})`}, which follows from then on.`, update: false, copy: [install, ...setup] };
+    case "old": {
+      const commands = view.setup === null ? "" : ` (${view.setup.commands.map((c) => `${c.command} with ${c.needs}`).join(", or ")})`;
+      return { state: client.state, text: `${name} is from before MCP servers followed LumiRPEngine, so it keeps the tools it was installed with. Update it once (${NPM_INSTALL}), or set it up to run the extension's own copy${commands}, which follows from then on.`, update: false, copy: [install, ...setup] };
+    }
   }
+}
+var OFFERED = {
+  bun: ", which Lumiverse itself runs on, so it is always on Lumiverse's machine",
+  node: ""
+};
+function setupSection(setup) {
+  const [lead] = setup.commands;
+  return {
+    choices: setup.commands.map((c) => ({ ...c, label: `For ${c.needs}${OFFERED[c.runtime]}` })),
+    help: `Give your agent's harness one of these commands for its lumirpengine server (claude mcp add lumirpengine -- ${lead.command}). It runs this extension's own copy, on the machine Lumiverse runs on, and takes each update's tools by itself. Sign in once first: ${lead.runtime} ${setup.core} login --url <your Lumiverse>. For Lumiverse itself to run it (its Settings → MCP Servers), add a Stdio server with the command ${setup.commands.map((c) => c.runtime).join(" or ")} and the arguments ${setup.core}, mcp.`
+  };
 }
 
 // src/frontend/agents.tsx
@@ -19852,33 +19865,43 @@ function McpServerPage() {
     return /* @__PURE__ */ u3(Empty, {
       children: "Loading your MCP servers…"
     }, undefined, false, undefined, this);
+  const setup = view.setup === null ? null : setupSection(view.setup);
   return /* @__PURE__ */ u3("div", {
     class: "lre-stack",
     "data-lre-settings-page": "mcp",
     children: [
       /* @__PURE__ */ u3(Section, {
         title: "Set one up that follows LumiRPEngine",
-        children: view.setup === null ? /* @__PURE__ */ u3(Empty, {
+        children: setup === null ? /* @__PURE__ */ u3(Empty, {
           icon: "info",
           children: "This LumiRPEngine was built without an agent kit, so there is nothing to follow."
         }, undefined, false, undefined, this) : /* @__PURE__ */ u3("div", {
-          class: "lre-field",
           "data-lre-mcp-setup": true,
           children: [
-            /* @__PURE__ */ u3("code", {
-              class: "lre-num",
-              children: view.setup.command
-            }, undefined, false, undefined, this),
+            setup.choices.map((choice) => /* @__PURE__ */ u3("div", {
+              class: "lre-field",
+              "data-lre-mcp-setup-runtime": choice.runtime,
+              children: [
+                /* @__PURE__ */ u3("span", {
+                  class: "label",
+                  children: choice.label
+                }, undefined, false, undefined, this),
+                /* @__PURE__ */ u3("code", {
+                  class: "lre-num",
+                  children: choice.command
+                }, undefined, false, undefined, this),
+                /* @__PURE__ */ u3(Button, {
+                  size: "sm",
+                  variant: "secondary",
+                  icon: "copy",
+                  onClick: () => copy(app, choice.command),
+                  children: "Copy"
+                }, undefined, false, undefined, this)
+              ]
+            }, choice.runtime, true, undefined, this)),
             /* @__PURE__ */ u3("span", {
               class: "lre-field-help",
-              children: `Give your agent's harness this command for its lumirpengine server (claude mcp add lumirpengine -- ${view.setup.command}). It runs this extension's own copy, on the machine Lumiverse runs on, and takes each update's tools by itself. Sign in once first: node ${view.setup.core} login --url <your Lumiverse>. For Lumiverse itself to run it (its Settings → MCP Servers), add a Stdio server with the command node and the arguments ${view.setup.core}, mcp.`
-            }, undefined, false, undefined, this),
-            /* @__PURE__ */ u3(Button, {
-              size: "sm",
-              variant: "secondary",
-              icon: "copy",
-              onClick: () => copy(app, view.setup?.command ?? ""),
-              children: "Copy"
+              children: setup.help
             }, undefined, false, undefined, this)
           ]
         }, undefined, true, undefined, this)
@@ -46301,7 +46324,8 @@ var SETTINGS_CSS = `
 [data-lre-mcp-server="cannot"] .lre-set-caveat,[data-lre-mcp-server="old"] .lre-set-caveat{color:var(--lre-muted)}
 .lre-row-actions{display:flex;flex-wrap:wrap;gap:var(--lre-s2);padding:0 var(--lre-s3) var(--lre-s2)}
 .lre-row-actions:empty{display:none}
-[data-lre-mcp-setup]{display:flex;flex-direction:column;align-items:flex-start;gap:var(--lre-s2)}
+[data-lre-mcp-setup]{display:flex;flex-direction:column;align-items:flex-start;gap:var(--lre-s3)}
+[data-lre-mcp-setup-runtime]{align-self:stretch;align-items:flex-start}
 [data-lre-mcp-setup] code{display:block;width:100%;box-sizing:border-box;padding:var(--lre-s2);border:1px solid var(--lre-hairline);background:var(--lre-accent-soft);font-size:var(--lre-fs-sm);overflow-wrap:anywhere;user-select:all}
 `;
 

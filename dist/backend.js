@@ -66025,8 +66025,12 @@ function shellWord(text) {
     return `"${text}"`;
   return `'${text.replaceAll("'", "'\\''")}'`;
 }
-function followCommand(core) {
-  return `node ${shellWord(core)} mcp`;
+var RUNTIMES = [
+  { runtime: "bun", needs: "Bun 1.4 or newer" },
+  { runtime: "node", needs: "Node 22 or newer" }
+];
+function followCommands(core) {
+  return RUNTIMES.map(({ runtime, needs }) => ({ runtime, needs, command: `${runtime} ${shellWord(core)} mcp` }));
 }
 
 // src/backend/agents.ts
@@ -66034,8 +66038,8 @@ function thisBuild(moduleUrl = import.meta.url) {
   const dir = moduleUrl.replace(/[^/]*$/, "");
   const path = pathOfFileUrl(`${dir}${KIT_FILE}`);
   const core = pathOfFileUrl(`${dir}${CORE_FILE}`);
-  const sha256 = "25689074a8327820b3787a01dee1e8abfa32dc0bb34222143ad50f00416f0eef";
-  return { id: "71fc8854", kit: sha256 !== undefined && path !== null && core !== null ? { path, core, sha256, api: KIT_API } : null };
+  const sha256 = "42a6020540c8d0c9ddf19bac3c4f8eb135273ad6c72aae537c6e49c37009ef16";
+  return { id: "7e3bd7d6", kit: sha256 !== undefined && path !== null && core !== null ? { path, core, sha256, api: KIT_API } : null };
 }
 var BUILD_FILE = "agents/build.json";
 var USER_FILE = "agents.json";
@@ -66243,7 +66247,7 @@ class Agents {
     return {
       build,
       notice: started.previous !== null && file.dismissed !== started.build ? { build: started.build, previous: started.previous, at: started.at } : null,
-      setup: kit === null ? null : { core: kit.core, command: followCommand(kit.core) },
+      setup: kit === null ? null : { core: kit.core, commands: followCommands(kit.core) },
       clients: Object.entries(file.clients).sort(([, a], [, b]) => b.seen - a.seen).map(([id, stored]) => {
         const heard = live.get(id) ?? [];
         const client = worstOf(heard, build)?.client ?? stored;
@@ -68962,7 +68966,7 @@ class Runtime {
     this.steps.onCallStart = (userId, purpose) => this.diag.callStart(userId, purpose);
     this.toolSupport = new ToolSupport(this.host);
     this.minds = { host: this.host, registry: this.registry, steps: this.steps, settings: this.settings, presets: this.presets };
-    this.ledger = new LedgerService(this.host, (chatId, userId) => this.resolveEnv(chatId, userId), new LedgerFold(this.registry, { fingerprint: "71fc8854" }), (chatId) => messages.forget(chatId));
+    this.ledger = new LedgerService(this.host, (chatId, userId) => this.resolveEnv(chatId, userId), new LedgerFold(this.registry, { fingerprint: "7e3bd7d6" }), (chatId) => messages.forget(chatId));
     this.studio = new StudioBridge(this.host, this.worlds);
     this.worlds.onChange = (worldId, userId) => this.studio.worldChanged(worldId, userId);
     this.agents = new Agents(this.host, options.build ?? thisBuild());
