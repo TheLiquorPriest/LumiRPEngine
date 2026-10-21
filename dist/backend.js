@@ -66015,8 +66015,8 @@ function thisBuild(moduleUrl = import.meta.url) {
   const dir = moduleUrl.replace(/[^/]*$/, "");
   const path = pathOfFileUrl(`${dir}${KIT_FILE}`);
   const core = pathOfFileUrl(`${dir}${CORE_FILE}`);
-  const sha256 = "9e7e2d31dc31bac81ead688195763a6a8e5aa4f6a67c84de5619933f22ad36f5";
-  return { id: "6c32c45c", kit: sha256 !== undefined && path !== null && core !== null ? { path, core, sha256, api: KIT_API } : null };
+  const sha256 = "40b296216be6fe24be3a49064cf1e66ab6ce838e15a5d74992ef675b5bcb93ab";
+  return { id: "a6c11c82", kit: sha256 !== undefined && path !== null && core !== null ? { path, core, sha256, api: KIT_API } : null };
 }
 var BUILD_FILE = "agents/build.json";
 var USER_FILE = "agents.json";
@@ -68867,7 +68867,7 @@ class Runtime {
     this.steps.onCallStart = (userId, purpose) => this.diag.callStart(userId, purpose);
     this.toolSupport = new ToolSupport(this.host);
     this.minds = { host: this.host, registry: this.registry, steps: this.steps, settings: this.settings, presets: this.presets };
-    this.ledger = new LedgerService(this.host, (chatId, userId) => this.resolveEnv(chatId, userId), new LedgerFold(this.registry, { fingerprint: "6c32c45c" }), (chatId) => messages.forget(chatId));
+    this.ledger = new LedgerService(this.host, (chatId, userId) => this.resolveEnv(chatId, userId), new LedgerFold(this.registry, { fingerprint: "a6c11c82" }), (chatId) => messages.forget(chatId));
     this.studio = new StudioBridge(this.host, this.worlds);
     this.worlds.onChange = (worldId, userId) => this.studio.worldChanged(worldId, userId);
     this.agents = new Agents(this.host, options.build ?? thisBuild());
