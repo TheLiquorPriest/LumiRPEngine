@@ -18136,7 +18136,7 @@ function RoutineSettingsEditor() {
         children: "Whatever you pick, the story comes first for anyone in a scene with the player's character: a routine never moves them out of it, contradicts what's been told or interrupts play. These settings tune what routines are to the engine, and how far everyone else's days follow the story and its lore."
       }, undefined, false, undefined, this),
       /* @__PURE__ */ u3(Issues, {
-        issues: lint.filter((issue) => !["awareness", "invitations", "sociability", "planBend", "roles", "skips", "narrator", "paletteFollowsRoutine"].some((key) => issue.path === `routineSettings.${key}` || issue.path.startsWith(`routineSettings.${key}.`)))
+        issues: lint.filter((issue) => !Object.keys(DEFAULT_ROUTINE_SETTINGS).some((key) => issue.path === `routineSettings.${key}` || issue.path.startsWith(`routineSettings.${key}.`)))
       }, undefined, false, undefined, this),
       /* @__PURE__ */ u3(RoutineRoleSettings, {
         value,

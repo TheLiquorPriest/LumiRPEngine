@@ -63429,7 +63429,7 @@ var package_default = {
 // src/cli/version.ts
 var CLI_NAME = "lumirpengine";
 var CLI_VERSION = package_default.version;
-var BUILD = "7f14c1c0";
+var BUILD = "215463be";
 function runtimeCannotFollow(bun) {
   if (bun === undefined)
     return null;
@@ -64065,6 +64065,7 @@ var object = (properties, required = []) => ({ type: "object", properties, ...re
 var WORLD_ID = { type: "string", description: "The world's id (w_…), from lre_worlds." };
 var CHAT_ID = { type: "string", description: "The chat's id (lre_chats lists the chats that play a world)." };
 var EXPECT_VERSION = { type: "integer", minimum: 0, description: "The draft version you last read: refused if the draft has moved on since, so a change you haven't seen is never overwritten." };
+var ROUTINE_SETTINGS_TAKEN = Object.entries(ROUTINE_SETTING_VALUES).map(([key, allowed]) => allowed === "switch" ? `${key} (true or false)` : ("levels" in allowed) ? `${key} ({${FIDELITIES.join(", ")}} each one of ${allowed.levels.map((v) => `"${v}"`).join(", ")})` : `${key} (${allowed.map((v) => `"${v}"`).join(", ")})`).join(", ");
 var packs2 = null;
 var worldIdOf2 = (args) => neededText(args, "worldId", "the world's id (lre_worlds lists them)");
 async function profileTool(args, ctx) {
@@ -64223,7 +64224,7 @@ var BUILD_TOOLS = [
   ...itemTools("schedules", "schedule", "lre_schedule", "lre_schedules"),
   {
     name: "lre_routine_settings",
-    description: `A world draft's routine settings (DESIGN §8): awareness ("story_first", "balanced", "routine_first": how strictly people keep to routine against the story), invitations ("off", "player", "everyone"), sociability ("reserved", "usual", "outgoing") and planBend ("must", "strong", "standard", "ordinary"). Without value it reads them; with value it sets them whole (a part left out takes its default; the defaults remove them). A setting or value the engine doesn't take is refused, naming it. Pass expectVersion so a change made since is refused.`,
+    description: `A world draft's routine settings (DESIGN §8): ${ROUTINE_SETTINGS_TAKEN}. Without value it reads them; with value it sets them whole (a part left out takes its default; the defaults remove them). A setting or value the engine doesn't take is refused, naming it. Pass expectVersion so a change made since is refused.`,
     inputSchema: object({ worldId: WORLD_ID, value: { type: "object", description: "The settings to set, whole." }, expectVersion: EXPECT_VERSION }, ["worldId"]),
     write: { destructive: true, idempotent: true },
     run: async (args, ctx) => {
@@ -64233,7 +64234,7 @@ var BUILD_TOOLS = [
       if (args.value === undefined)
         return { text: json({ worldId, version: read.version, settings: routineSettingsOf(read.draft) }) };
       if (!isRecord(args.value))
-        throw new ToolError("value is an object: {awareness?, invitations?, sociability?, planBend?, roles?: {live?, near?, far?, background?}, narrator?, paletteFollowsRoutine?}.");
+        throw new ToolError(`value is an object: {${Object.keys(ROUTINE_SETTING_VALUES).map((key) => `${key}?`).join(", ")}}.`);
       const same = routineSettingsProblems(args.value).length === 0 && JSON.stringify(routineSettingsOf({ routineSettings: args.value })) === JSON.stringify(DEFAULT_ROUTINE_SETTINGS);
       const ops = same ? read.draft.routineSettings === undefined ? [] : [{ op: "remove", path: "/routineSettings" }] : [{ op: "add", path: "/routineSettings", value: args.value }];
       return draftPatch(ctx, worldId, read, ops, intArg(args, "expectVersion", 0, Number.MAX_SAFE_INTEGER), "routineSettings");
