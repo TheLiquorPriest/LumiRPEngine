@@ -87,6 +87,7 @@ export const JOB_INFO: Readonly<Record<JobKind, { title: string; hint: string; i
   index_text: { title: "Index this text", hint: "Lore entries from text you paste; review each one", icon: "scroll" },
   refine: { title: "Build / Refine with AI", hint: "Describe changes; review every proposal", icon: "sparkle" },
   describe_map: { title: "Describe a map", hint: "Write a place's inside in your words; the AI draws it as a map to review", icon: "map" },
+  propose_routines: { title: "Propose routines from lore", hint: "Routines and schedules for people and groups, from the lore and their sheets; each block cites what it rests on", icon: "calendar" },
   playtest: { title: "Playtest", hint: "Run scripted turns on the background lane", icon: "play" },
   check_world: { title: "Check world", hint: "Simulate days on the background lane; report drops, failures and leaks", icon: "pulse" },
 };

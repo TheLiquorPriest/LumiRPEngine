@@ -84,6 +84,37 @@ describe("jobs through the tools", () => {
     expect(wrong.isError).toBe(true);
     expect(wrong.text).toContain("playtest doesn't take days");
   });
+
+  test("a routines job is started for the people named; its counts say what has problems, and an apply takes only what has none unless named", async () => {
+    const { rig, call, raw } = await cliRig({ shipped: true });
+    const worldId = String((await call("lre_world_create", { name: "Port Alder", template: "modern_slice_of_life" })).worldId);
+    const anchor = { lore: "lore_anchor", quote: "a Thursday trivia night that gets competitive" };
+    rig.host.quietReply = () =>
+      JSON.stringify({
+        routines: [
+          { owner: "danny_okafor", id: "trivia", label: "Trivia night", activity: "socialize", kind: "fixed", at: "19:00", minutes: 120, days: { weekdays: [4] }, place: "rusty_anchor", source: anchor, confidence: 0.8 },
+          { owner: "danny_okafor", id: "quiz", label: "Quiz night", activity: "socialize", kind: "fixed", at: "19:00", minutes: 120, days: { weekdays: [2] }, place: "quiz_barn", source: anchor, confidence: 0.8 },
+        ],
+        schedules: [],
+      });
+    const none = await raw("lre_job_start", { worldId, kind: "propose_routines", owners: [] });
+    expect(none.isError).toBe(true);
+    expect(none.text).toContain("owners names at least one person or group");
+    const jobId = String((await call("lre_job_start", { worldId, kind: "propose_routines", owners: ["danny_okafor"] })).jobId);
+    const jobs = (await call("lre_jobs", { worldId })).jobs as { jobId: string; input: unknown; result: unknown }[];
+    expect(jobs).toEqual([expect.objectContaining({ jobId, input: { owners: ["danny_okafor"] }, result: { proposals: 2, byCollection: { routines: 2 }, withProblems: 1 } })]);
+    const proposals = body((await raw("lre_job", { worldId, jobId, pointer: "/result/proposals" })).text) as { id: string; key: string; owner: string; problems?: string[] }[];
+    expect(proposals.map((p) => [p.key, p.owner, p.problems])).toEqual([
+      ["danny_okafor_trivia", "danny_okafor", undefined],
+      ["danny_okafor_quiz", "danny_okafor", ["Routine danny_okafor_quiz, block quiz: there's no place quiz_barn; it happens at home."]],
+    ]);
+    const applied = await call("lre_job_apply", { worldId, jobId });
+    expect(applied.applied).toEqual(["routines:danny_okafor_trivia"]);
+    const draft = await draftOf(rig, worldId);
+    expect(Object.keys(draft.routines ?? {})).toEqual(["danny_okafor_trivia"]);
+    // Named, a proposal with problems is applied all the same: the author has looked at it.
+    expect((await call("lre_job_apply", { worldId, jobId, proposals: ["routines:danny_okafor_quiz"] })).applied).toEqual(["routines:danny_okafor_quiz"]);
+  });
 });
 
 describe("the rest of Build through the tools", () => {

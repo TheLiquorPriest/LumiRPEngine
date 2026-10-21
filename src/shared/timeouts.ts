@@ -208,7 +208,7 @@ export const TIMEOUTS: Readonly<Record<TimeoutKey, TimeoutDef>> = {
   jobCallMs: {
     label: "Import and Refine calls",
     group: "work",
-    limits: "Each model call of an Import, a Refine, a lore index or a map description in Build.",
+    limits: "Each model call of an Import, a Refine, a lore index, a map description or a routine proposal in Build.",
     fires: "That call counts as failed; the job goes on with what the other calls proposed.",
     defaultMs: 10 * MIN,
     minMs: 1_000,

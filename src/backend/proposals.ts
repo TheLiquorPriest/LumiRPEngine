@@ -204,7 +204,8 @@ export function readProposals(raw: JsonValue | null, source: string): JobProposa
 
 const SNAKE = /^[a-z][a-z0-9_]{0,63}$/;
 
-function snake(key: string): string {
+/** A key as an id: lowercase snake_case, at most 64 characters, never starting with a digit. Routine proposals name their ids the same way. */
+export function snake(key: string): string {
   return key
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "_")

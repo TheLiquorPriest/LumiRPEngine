@@ -1,13 +1,14 @@
-// Background jobs (DESIGN §9.6, §9.7, §4.2): Import from lore, Build/Refine with AI and the lore
-// indexing jobs ask the helper (D10) for proposed world edits, checked and deduplicated by
-// `proposals.ts` and `lore-index.ts` (the player reviews them and applies the ones they accept with
-// `lre.editor`); Playtest and Check world run engine-only on the background lane, a child process
+// Background jobs (DESIGN §9.6, §9.7, §4.2, §13): Import from lore, Build/Refine with AI, Describe a
+// map, Propose routines from lore and the lore indexing jobs ask the helper (D10) for proposed world
+// edits, checked and deduplicated by `proposals.ts`, `map-job.ts`, `routine-proposals.ts` and
+// `lore-index.ts` (the player reviews them and applies the ones they accept with `lre.editor`);
+// Playtest and Check world run engine-only on the background lane, a child process
 // (`backendProcesses`) that heartbeats while it works and never blocks a turn. Each user's jobs are
 // kept in `userStorage/jobs.json` with their status, progress and result (a model job's proposals
 // as each chunk is read), so Build still shows them after a reload or a restart; one that was
 // running when the extension stopped shows as interrupted, with what it had proposed by then.
 
-import type { UserId, WorldId } from "../shared/ids";
+import type { EntityId, UserId, WorldId } from "../shared/ids";
 import type { JsonObject, JsonValue } from "../shared/json";
 import { hasOwn, isRecord } from "../shared/json";
 import { loreSourceOf } from "../shared/lore";
@@ -21,6 +22,8 @@ import type { HostPort, ProcessEvent, ProcessHandle } from "./host";
 import { checkIndexProposals, INDEX_TEXT_CHUNK, indexReplyProblem, indexRetry, indexSystem, readIndexProposals, textChunks, type IndexBook } from "./lore-index";
 import { checkProposals, dropSummary, entryTitle, IMPORT_CHUNK, IMPORT_MAX_CALLS, loreChunk, PROPOSAL_MAX_TOKENS, proposalRetry, proposalSystem, readProposals, replyProblem, type DropCounts, type ProposalMode } from "./proposals";
 import { MAP_PROSE_MAX, mapProposal, mapRepairText, mapRequestText, mapSystem, problemLines, readMapAnswer, readMapRequest } from "./map-job";
+import { afterRepair, checkRoutineReply, finishRoutines, readRoutineInput, ROUTINE_MAX_CALLS, ROUTINE_OWNERS_MAX, routineCallText, routinePass, routineRepairText, routineScope, routineSystem, type RoutineCandidate } from "./routine-proposals";
+import { own } from "../engine/pack-kit";
 import type { SettingsStore } from "./settings-store";
 import type { Steps } from "./steps";
 import { readStoredJson } from "./stored-json";
@@ -35,7 +38,7 @@ export const JOBS_PATH = "jobs.json";
 /** Jobs that have ended kept per user (the newest), with their results; running ones are always kept. */
 export const JOBS_KEPT = 8;
 
-const JOB_KINDS: Record<JobKind, true> = { import_lore: true, refine: true, describe_map: true, playtest: true, check_world: true, index_book: true, index_text: true };
+const JOB_KINDS: Record<JobKind, true> = { import_lore: true, refine: true, describe_map: true, propose_routines: true, playtest: true, check_world: true, index_book: true, index_text: true };
 const JOB_STATUSES: Record<JobSummary["status"], true> = { running: true, done: true, failed: true, cancelled: true, interrupted: true };
 const SEVERITIES: Record<LintIssue["severity"], true> = { error: true, warning: true, info: true };
 
@@ -65,6 +68,8 @@ function isProposal(raw: unknown): raw is JobProposal {
   if (typeof raw.source !== "string" || typeof raw.confidence !== "number") return false;
   if (raw.note !== undefined && typeof raw.note !== "string") return false;
   if (raw.pack !== undefined && typeof raw.pack !== "string") return false;
+  if (raw.owner !== undefined && typeof raw.owner !== "string") return false;
+  if (raw.problems !== undefined && !(Array.isArray(raw.problems) && raw.problems.every((p) => typeof p === "string"))) return false;
   if (raw.sourceNames !== undefined && !(isRecord(raw.sourceNames) && Object.values(raw.sourceNames).every((n) => typeof n === "string"))) return false;
   return raw.index === undefined || (isRecord(raw.index) && Array.isArray(raw.index.terms) && raw.index.terms.every((t) => typeof t === "string") && Array.isArray(raw.index.topics) && raw.index.topics.every((t) => isRecord(t) && typeof t.id === "string" && typeof t.label === "string"));
 }
@@ -72,7 +77,7 @@ function isProposal(raw: unknown): raw is JobProposal {
 /** A stored result as the review reads it: entries of the wrong shape are dropped (the file comes from storage, not from us). */
 function storedResult(raw: unknown): JobResult | undefined {
   if (!isRecord(raw)) return undefined;
-  if (Array.isArray(raw.proposals)) return { proposals: (JSON.parse(JSON.stringify(raw.proposals)) as unknown[]).filter(isProposal) };
+  if (Array.isArray(raw.proposals)) return { proposals: (JSON.parse(JSON.stringify(raw.proposals)) as unknown[]).filter(isProposal), ...(isRecord(raw.next) ? { next: JSON.parse(JSON.stringify(raw.next)) as JsonObject } : {}) };
   if (!Array.isArray(raw.turns) || !Array.isArray(raw.lint)) return undefined;
   const turns = raw.turns.flatMap((t) => (isRecord(t) && typeof t.user === "string" && typeof t.reply === "string" && Array.isArray(t.notes) ? [{ user: t.user, reply: t.reply, notes: t.notes.filter((n): n is string => typeof n === "string") }] : []));
   const lint = raw.lint.flatMap((l) => (isRecord(l) && typeof l.severity === "string" && hasOwn(SEVERITIES, l.severity) && typeof l.path === "string" && typeof l.code === "string" && typeof l.message === "string" ? [{ severity: l.severity as LintIssue["severity"], path: l.path, code: l.code, message: l.message }] : []));
@@ -95,7 +100,8 @@ function interruptedMessage(job: JobSummary): string {
 /**
  * A job's input as it is kept in `jobs.json` and run: only what its kind reads, each value cut to
  * what the job can use, so a request can't make every update rewrite more than that. An id too long
- * to be one, or more books than an import reads, is refused rather than cut.
+ * to be one, more books than an import reads or more owners than a world could name is refused
+ * rather than cut.
  */
 function boundedInput(kind: JobKind, input: JsonObject): JsonObject {
   const id = (v: JsonValue | undefined): string => {
@@ -116,6 +122,12 @@ function boundedInput(kind: JobKind, input: JsonObject): JsonObject {
     case "describe_map": {
       const mapId = id(input.mapId);
       return { scope: id(input.scope), prose: text(input.prose, MAP_PROSE_MAX), ...(mapId !== "" ? { mapId } : {}) };
+    }
+    case "propose_routines": {
+      const owners = Array.isArray(input.owners) ? [...new Set(strings(input.owners).map(id))].filter((o) => o !== "") : null;
+      if (owners && owners.length > ROUTINE_OWNERS_MAX) throw new JobError("bad_request", `name at most ${ROUTINE_OWNERS_MAX} people and groups`);
+      const after = id(input.after);
+      return { ...(owners ? { owners } : {}), ...(after !== "" ? { after } : {}) };
     }
     case "playtest":
       return { turns: strings(input.turns).slice(0, TURNS_MAX).map((t) => t.slice(0, TURN_MAX)) };
@@ -374,6 +386,90 @@ export class JobRunner {
     return { problem: (reply) => replyProblem(reply, mode), count: (reply) => readProposals(reply, "check").length, retry: proposalRetry(mode) };
   }
 
+  /**
+   * Propose routines from lore (DESIGN §13): a pass over the draft's people and groups, a few to a
+   * call, each call's answer checked against the draft and, when the helper can fix what's wrong,
+   * asked once more listing it. A call starts only while its repair still has one of the pass's
+   * `ROUTINE_MAX_CALLS`, so a pass that runs out says where the next one starts (`next`). The
+   * proposals so far are kept with the job after each call, so a restart loses none of them.
+   */
+  private async proposeRoutines(job: Job, worldId: WorldId, input: JsonObject, config: StepConfig | null, callSignal: () => AbortSignal): Promise<void> {
+    // On the draft, where the author is working: what an earlier pass proposed and was applied counts as the world's.
+    const draft = await this.worlds.working(worldId, job.userId);
+    const scope = routineScope(this.registry, draft);
+    const request = readRoutineInput(input);
+    const pass = routinePass(scope, request);
+    const unread = pass.unread.length > 0 ? `${pass.unread.length} named weren't read: they aren't people or groups the job may read (${pass.unread.slice(0, 6).join(", ")}${pass.unread.length > 6 ? "…" : ""}).` : null;
+    if (pass.owners.length === 0) throw new Error(request.owners ? `none of the named people or groups is one the job may read; secret ones and the player character aren't proposed for${unread ? `. ${unread}` : ""}` : request.after ? `no one comes after ${request.after}: the last pass read everyone` : "the world has no people or groups the job may read; secret ones and the player character aren't proposed for");
+    if (pass.batches.length === 0) throw new Error("no one has a sheet field or a lore entry to go on: write about their days in the lore or their sheets first");
+    const signal = job.controller.signal;
+    const system = routineSystem(scope);
+    const roomy: StepConfig = { ...(config ?? { enabled: true, signals: [] }), maxTokens: Math.max(config?.maxTokens ?? 0, PROPOSAL_MAX_TOKENS) };
+    // Each call has its own deadline (Settings → Timeouts), and says why when it answers nothing usable.
+    const ask = async (user: string, label: string): Promise<{ reply: JsonValue | null; failed: string | null }> => {
+      const t0 = performance.now();
+      const call = callSignal();
+      const failure = { reason: "" };
+      const reply = await this.steps.helperJson("brief", system, user, roomy, job.userId, call, { failure });
+      const fired = firedTimeout(call);
+      const failed = reply !== null ? null : (fired?.message ?? (failure.reason || "the answer was empty"));
+      this.host.log(failed ? "warn" : "info", `[LumiRPEngine] routines ${label}: ${failed ?? "answered"} in ${Math.round(performance.now() - t0)} ms`, job.userId);
+      return { reply, failed };
+    };
+    const candidates: RoutineCandidate[] = [];
+    const failures: string[] = [];
+    let calls = 0;
+    let read = 0;
+    let answered = 0;
+    let last: EntityId | null = null;
+    for (const [i, batch] of pass.batches.entries()) {
+      if (signal.aborted) return;
+      // A batch starts only while its repair still has a call.
+      if (ROUTINE_MAX_CALLS - calls < 2) break;
+      const label = `batch ${i + 1} of ${pass.batches.length}`;
+      const text = routineCallText(scope, batch);
+      const first = await ask(text, `${label} call`);
+      calls++;
+      if (signal.aborted) return;
+      let check = checkRoutineReply(scope, batch, first.reply);
+      // A call that failed or ran out of time isn't asked again; an answer with problems the helper can fix is, once, listing them.
+      if (first.failed === null && (check.problem !== null || check.fixable.length > 0)) {
+        this.update(job, { status: "running", progress: Math.min(0.99, read / pass.batches.length), message: "Fixing the proposals' problems…" }, { proposals: finishRoutines(scope, candidates) });
+        const second = await ask(routineRepairText(text, first.reply, check), `${label} repair`);
+        calls++;
+        if (signal.aborted) return;
+        const again = checkRoutineReply(scope, batch, second.reply);
+        // The repair's answer stands, with what the first had right that the repair left out.
+        if (again.problem === null) check = afterRepair(check, again);
+        else if (second.failed !== null) failures.push(`a repair call: ${second.failed}`);
+      }
+      if (first.failed !== null) failures.push(first.failed);
+      else if (check.problem !== null) failures.push(`the answer couldn't be read (${check.problem})`);
+      else answered++;
+      candidates.push(...check.candidates);
+      read++;
+      last = batch.owners.at(-1) ?? last;
+      this.update(job, { status: "running", progress: Math.min(0.99, read / pass.batches.length) }, { proposals: finishRoutines(scope, candidates) });
+    }
+    if (answered === 0 && failures.length > 0) throw new Error(`no call answered: ${[...new Set(failures)].join("; ")}`);
+    const drops: DropCounts = new Map();
+    const proposals = finishRoutines(scope, candidates, drops);
+    const dropped = [...drops.values()].reduce((a, b) => a + b, 0);
+    const rest = read < pass.batches.length && last !== null ? pass.batches.slice(read).reduce((n, b) => n + b.owners.length, 0) : 0;
+    const bare = pass.bare.length > 0 ? `${pass.bare.length} had nothing in their sheets or the lore to go on (${pass.bare.slice(0, 6).map((id) => own(draft.entities, id)?.name ?? id).join(", ")}${pass.bare.length > 6 ? "…" : ""}), so they get none.` : null;
+    const flagged = proposals.filter((p) => (p.problems?.length ?? 0) > 0).length;
+    const message = [
+      rest > 0 ? `${rest} people and groups weren't read in this pass's ${ROUTINE_MAX_CALLS} calls; continue for the rest.` : null,
+      unread,
+      bare,
+      failures.length > 0 ? `${failures.length} call(s) answered nothing: ${[...new Set(failures)].join("; ")}.` : null,
+      dropSummary(candidates.length, candidates.length - dropped, drops),
+      flagged > 0 ? `${flagged} proposal(s) have problems to look at; they start unticked.` : null,
+    ].filter((m): m is string => m !== null);
+    const next: JsonObject | null = rest > 0 && last !== null ? { ...(request.owners ? { owners: request.owners } : {}), after: last } : null;
+    this.update(job, { status: "done", progress: 1, result: { proposals, ...(next ? { next } : {}) }, ...(message.length > 0 ? { message: message.join(" ") } : {}) });
+  }
+
   private async run(job: Job, worldId: WorldId, input: JsonObject): Promise<void> {
     const { world, revision } = await this.worlds.get(worldId, job.userId);
     this.update(job, { status: "running", progress: 0 });
@@ -478,6 +574,10 @@ export class JobRunner {
       const errors = answer.problems.some((p) => p.severity === "error");
       const message = wrong ? (errors ? "The repair call left problems; the map's note lists them, and it starts unticked." : "The first map had problems; a repair call fixed them.") : undefined;
       this.update(job, { status: "done", progress: 1, result: { proposals: [mapProposal(request, { ...answer, map: answer.map })] }, ...(message ? { message } : {}) });
+      return;
+    }
+    if (job.kind === "propose_routines") {
+      await this.proposeRoutines(job, worldId, input, config, callSignal);
       return;
     }
     if (job.kind === "index_book" || job.kind === "index_text") {

@@ -671,7 +671,7 @@ Settings saved before these defaults rose keep every value you changed; a value 
 
 - **Turns**: **Engine run** (5 min: everything before the reply is generated; when it runs out the run stops, no reply is generated, and the chat says which step ran out, with a Retry), **Lore lookups before the reply** (2 min), **Reading the reply** (5 min: what changed, the contradiction check, people elsewhere, choices, memory), **Lore lookups after the reply** (2 min) and **Generation guard** (2 min: Lumiverse's wait for the engine's check, and for its writing of the turn's sections, as a generation starts; Lumiverse caps it at 2 min).
 - **This tab**: **Engine requests** (5 min: how long the tab waits for each answer) and **Preset check** (1 min: how long Caveats waits for its test prompt before saying it's still running).
-- **Jobs and background work**: **Minds run on demand** (10 min), **Import and Refine calls** (10 min each), **Token counts** (30 s; 0 always uses the engine's estimate), **Background lane start-up** and **Background lane heartbeat** (1 min each; Lumiverse caps both at 2 min, and No limit on the heartbeat asks it to check none), and **MCP server reconnect** (1 min: how long **Reconnect in Lumiverse** waits for a server Lumiverse runs to come back with the new tools before its line tells you to reconnect it by hand).
+- **Jobs and background work**: **Minds run on demand** (10 min), **Import and Refine calls** (10 min each; the lore index, map and routine proposal calls in Build take it too), **Token counts** (30 s; 0 always uses the engine's estimate), **Background lane start-up** and **Background lane heartbeat** (1 min each; Lumiverse caps both at 2 min, and No limit on the heartbeat asks it to check none), and **MCP server reconnect** (1 min: how long **Reconnect in Lumiverse** waits for a server Lumiverse runs to come back with the new tools before its line tells you to reconnect it by hand).
 
 The page ends with **Lumiverse's own limits**, which no setting changes. When a timeout runs out, [Diagnostics](#diagnostics) records it with the setting's name and how to raise it, and a request the tab gave up on says so in its error. Settings saved before Timeouts existed keep the wall clocks you set; one still at an old preset's default rises to the new default. The command line and the MCP server take `--timeout <seconds|none>` (or `LRE_TIMEOUT`), 300 seconds by default.
 
@@ -860,7 +860,7 @@ You build worlds in **Build**, which works at phone width as well as on a deskto
 - **Worlds.** Build opens on your worlds. Each row shows the world's name and how many revisions it has, with a **This chat** badge on the world the open chat plays; tap it to open the world. Its **More for** *name* button (⋯) holds **Export** and **Delete**, and Delete asks first ("Delete “*name*” and all its revisions? Chats attached to it stop simulating."). An offer from LumiRPEngine Studio and the **Review before playing** card, when there are any, sit at the top (see [Import and export](#import-and-export)).
 - **New world** opens a page of its own. Under **Start from**, pick **Blank** or one of the [templates](#templates), each with a line on what it is. The **Name** field takes the template's name until you type your own; then tap **Create world**. **Or bring one in** has **Import a file** (an lre-world-v1 file, as Export writes it) and **Import from LumiRPEngine Studio**.
 - **The world bar.** An open world has a bar that stays at the top as you scroll: the back button, the world's name, the state of its draft (**Uncommitted** or **All committed**, with its error and warning counts) and **Commit**. Its **Draft actions** button (⋯) holds **Discard changes**. See [Revisions and Upgrade](#revisions-and-upgrade).
-- **The world home** lists the world's parts, **World**, **Calendar**, **Realism defaults**, **Tiers**, **Time defaults**, **Ruleset**, **Lore lookup table** and **Minds**, each with a line on what it holds and a badge for its issues. Then come its 18 collections in five groups: **People & things** (Entities, Kinds, Classifications, Relations), **Places** (Places, Maps, Routes, Grids), **Rules** (Actions, Checks, Rules, Schedules), **Story** (Tracks, Lore) and **Engine** (Data tables, Sections, Step templates, Packs), each with a count and an issue badge. Last are its **Tools**: **Problems**, **Import from lore**, **Index a World Info book**, **Index this text**, **Build / Refine with AI**, **Describe a map**, **Playtest**, **Check world** and, when the chat you have open isn't a world chat yet, **Attach to this chat**. A tool that has run shows how its last run went (**Running**, **Done**, **Failed**, **Cancelled** or **Interrupted**).
+- **The world home** lists the world's parts, **World**, **Calendar**, **Realism defaults**, **Tiers**, **Time defaults**, **Ruleset**, **Lore lookup table** and **Minds**, each with a line on what it holds and a badge for its issues. Then come its 18 collections in five groups: **People & things** (Entities, Kinds, Classifications, Relations), **Places** (Places, Maps, Routes, Grids), **Rules** (Actions, Checks, Rules, Schedules), **Story** (Tracks, Lore) and **Engine** (Data tables, Sections, Step templates, Packs), each with a count and an issue badge. Last are its **Tools**: **Problems**, **Import from lore**, **Index a World Info book**, **Index this text**, **Build / Refine with AI**, **Describe a map**, **Propose routines from lore**, **Playtest**, **Check world** and, when the chat you have open isn't a world chat yet, **Attach to this chat**. A tool that has run shows how its last run went (**Running**, **Done**, **Failed**, **Cancelled** or **Interrupted**).
 - **Collections** list their items by name, with a search box once there are more than eight. **New** asks for the name of the new item and makes its id from the name ("Old Miller Tom" becomes `old_miller_tom`, with `_2` added if that id is taken). You can change the id under **Advanced**, or in the open with **Show ids** on. **Continue** opens the new item's page, and **Create** adds it to the draft. Data tables have no New: new tables come from packs, and you open one to edit this world's copy of it.
 - **An item's page** is headed with its name. **Save to draft** and **Revert** sit in a bar that stays at the bottom of the page, and a part's page has the same bar. Your first keystroke in a field counts as a change, so **Save to draft** lights up at once. Its **Item actions** button (⋯) holds **Delete**, which asks first and names the item ("Delete the entity “Rosie Alvarez”? References to it will show in Problems.").
 
@@ -1109,6 +1109,43 @@ Each tool remembers its last run, with its status and its proposals, so you can 
 ### Describe a map
 
 **Describe a map** draws a map from your own words. Pick the place it maps, give the map an id if you like, and describe the inside ("A small inn: the taproom at the front, the kitchen behind it through a door, and a corridor down the side to the stable yard."), then tap **Draw the map**. The AI writes an lre-map-v1 map, and the engine checks it as the map editor would; if it has problems, the AI gets one more try with the list of them. You get one proposal with a preview of the map, ticked when it came back clean and unticked, with what's still wrong, when it didn't. Applying it puts the map in your draft like any other, where the map editor can fix the rest; nothing reaches your chats until you commit. Like the other tools, it remembers its last run.
+
+### Propose routines from lore
+
+**Propose routines from lore** gives your people and groups routines and schedules from what the world already says about them: its lore entries, their sheets (role, occupation, workplace, home, traits, description), their families, households and clubs, and who they know. It proposes two kinds of thing:
+
+- **Schedules**: shifts, school and class timetables, services. A shop's opening hours become the shifts of the people who work there.
+- **Routine blocks**: habits.
+  - **Fixed** blocks happen at a set time ("dinner at six").
+  - **Flexible** blocks happen somewhere in a window, every day or a few times a week ("most mornings", "twice a week").
+  - **Optional** blocks happen only sometimes ("now and then").
+
+A household's dinner, a club's evening or worship with a congregation comes back as the group's block, with its members as company.
+
+**Sources.** Every block and schedule cites the lore entry or sheet field it rests on, with a short quote from it. The engine checks the quote against that text, and anything without a source that holds is never proposed. So someone the lore says nothing about gets no routine at all, and a habit the lore states loosely comes back flexible or optional, never fixed.
+
+**What it reads.** It reads only what may reach the player: public lore, entries whose secret is already out, public sheets and places. Secret lore and secret people never go into it, so nothing it proposes gives a secret away.
+
+**Choosing whom to propose for.** Pick the people and groups, or leave it for everyone. It reads them a few at a time, within the same twelve helper calls an import makes. In a big world, the run stops there and says how many are left; **Continue** runs the next pass from where it stopped.
+
+**What the engine checks.** Each proposal is checked against your draft:
+
+- its places, people and company exist;
+- its times can be;
+- anyone it names as company is tied to the person, belongs with them, or is named with them in the cited text;
+- its label names no one.
+
+When the AI got any of this wrong, it gets one more try with the list of what to fix.
+
+**What it points out.** A proposal can clash with something already there:
+
+- a schedule or a routine block the person already has;
+- another proposal;
+- the opening scene, by taking someone away from where the story starts them.
+
+The clash is pointed out in its problems, and it never replaces what you wrote. Something the world already has is left out.
+
+**Reviewing and applying.** You review the proposals grouped by person and group, each with its source, quote and problems. Proposals with problems start unticked. A schedule comes as two proposals, one for what they do and one for where; tick both. Applying writes them to your draft as routines and schedules, where the editors can change them, and nothing reaches your chats until you commit. Like the other tools, it remembers its last run, and **Cancel** stops it.
 
 ### Money in Build
 
