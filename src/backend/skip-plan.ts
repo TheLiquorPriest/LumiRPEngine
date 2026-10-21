@@ -1,13 +1,14 @@
-// The model's skip plan (#53, DESIGN §8 "Routine roles"): as a time skip starts, one helper call plans
-// how the people whose skip life is `model` spend it, and the checked answer is recorded as
-// `castlife.skip_plan` ahead of the timelapse, so the fold lives it and a replay never asks again.
-// A Continue inside a planned span reuses the plan. A call that fails or runs out of time plans no one:
-// the event carries a note for the GM, and the skip still runs.
+// The model's skip plan (#53, DESIGN §8 "Routine roles"): as a time skip starts, the people whose skip
+// life is `model` are planned, by one helper call for them all or, as the world's `skipPlanCalls`
+// says, one call per person at once (so no answer grows with the cast and the span), and the checked
+// answers are recorded as one `castlife.skip_plan` ahead of the timelapse, so the fold lives it and a
+// replay never asks again. A Continue inside a planned span reuses the plan. Anyone whose call fails or
+// runs out of time isn't planned: the event carries a note for the GM, and the skip still runs.
 
 import type { UserId } from "../shared/ids";
 import type { JsonObject } from "../shared/json";
 import type { LedgerEvent } from "../shared/ledger";
-import { ROUTINE_EVENTS, type SkipPlan } from "../shared/routines";
+import { ROUTINE_EVENTS, routineSettingsOf, type SkipPlan } from "../shared/routines";
 import type { Limit } from "../shared/minds";
 import { firedTimeout, within } from "../shared/timeouts";
 import type { WorldDoc } from "../shared/world";
@@ -75,22 +76,34 @@ export async function planSkip(deps: SkipPlanDeps, input: SkipPlanInput): Promis
     .sort()
     .filter((id) => kindIs(deps.registry, input.world, input.state.entities[id]?.kind ?? "", "person") && !isGone(input.state, id) && livesPlans(ctx, id) && skipLifeOf(ctx, id) === "model");
   if (people.length === 0) return null;
-  const brief = skipPlanBrief(ctx, people, from, to);
   const safe = povSafe(ctx);
   const reply = input.reply.slice(-REPLY_CAP);
-  const user = skipPlanText(ctx, brief, safe(reply) ? reply : "", input.journal.filter(safe));
+  const told = safe(reply) ? reply : "";
+  const journal = input.journal.filter(safe);
   const signal = within(input.signal, "skipPlanMs", input.limit);
-  const failure = { reason: "" };
-  // Spared: a failed plan leaves everyone where they are, and the skip runs without it.
-  const raw = signal.aborted ? null : await deps.steps.helperJson("skip", SKIP_PLAN_SYSTEM, user, null, input.userId, signal, { failure, spared: true });
+  const groups = routineSettingsOf(input.world).skipPlanCalls === "parallel" ? people.map((id) => [id]) : [people];
+  // Each call is told only its own people; the calls run at once, each inside the same limit.
+  const answers = await Promise.all(
+    groups.map(async (group) => {
+      const brief = skipPlanBrief(ctx, group, from, to);
+      const failure = { reason: "" };
+      // Spared: a failed plan leaves its people to their basic needs, and the skip runs without it.
+      const raw = signal.aborted ? null : await deps.steps.helperJson("skip", SKIP_PLAN_SYSTEM, skipPlanText(ctx, brief, told, journal), null, input.userId, signal, { failure, spared: true });
+      if (raw !== null) return { people: group.length, checked: checkSkipPlan(ctx, brief, raw), why: null };
+      const fired = firedTimeout(signal);
+      return { people: group.length, checked: null, why: fired ? fired.message : failure.reason || "the call didn't answer" };
+    }),
+  );
   const record = (plan: SkipPlan): LedgerEvent => ({ type: ROUTINE_EVENTS.skipPlan, data: JSON.parse(JSON.stringify(plan)) as JsonObject });
-  if (raw === null) {
-    const fired = firedTimeout(signal);
-    const why = fired ? fired.message : failure.reason || "the call didn't answer";
-    deps.log(`skip plan for ${people.length} people failed: ${why}`);
-    return record({ from, to, plans: [], note: `The skip plan wasn't made (${why}), so everyone it would have planned keeps to their basic needs.` });
-  }
-  const checked = checkSkipPlan(ctx, brief, raw);
-  if (checked.dropped.length > 0) deps.log(`skip plan dropped ${checked.dropped.length} block(s): ${checked.dropped.join("; ")}`);
-  return record({ from, to, plans: checked.plans });
+  const dropped = answers.flatMap((a) => a.checked?.dropped ?? []);
+  if (dropped.length > 0) deps.log(`skip plan dropped ${dropped.length} block(s): ${dropped.join("; ")}`);
+  const plans = answers.flatMap((a) => a.checked?.plans ?? []);
+  const failed = answers.filter((a) => a.why !== null);
+  if (failed.length === 0) return record({ from, to, plans });
+  const why = failed[0]?.why ?? "the call didn't answer";
+  const missed = failed.reduce((n, a) => n + a.people, 0);
+  deps.log(`skip plan for ${missed} of ${people.length} people failed: ${why}`);
+  // The note counts who wasn't planned and never names them.
+  const note = missed === people.length ? `The skip plan wasn't made (${why}), so everyone it would have planned keeps to their basic needs.` : `The skip plan wasn't made for ${missed} of ${people.length} people (${why}), so they keep to their basic needs.`;
+  return record({ from, to, plans, note });
 }

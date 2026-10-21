@@ -233,6 +233,11 @@ export type SkipLife = "stay" | "routine" | "model";
 export const SKIP_LIVES: readonly SkipLife[] = ["stay", "routine", "model"];
 export const SKIP_LIFE_LABEL: Record<SkipLife, string> = { stay: "Stay put", routine: "Follow their routine", model: "Planned by the model" };
 
+/** How the model's skip plan asks: everyone `together` in one call, or one call per person, all at once (`parallel`), whose answers stay small however large the cast or span. */
+export type SkipPlanCalls = "together" | "parallel";
+export const SKIP_PLAN_CALLS: readonly SkipPlanCalls[] = ["together", "parallel"];
+export const SKIP_PLAN_CALLS_LABEL: Record<SkipPlanCalls, string> = { together: "All in one call", parallel: "One call per person, at once" };
+
 /** `world.routineSettings` (Build → Routines → Settings; `lre.editor set part "routineSettings"`, the defaults remove it). */
 export interface RoutineSettings {
   awareness: RoutineAwareness;
@@ -243,6 +248,8 @@ export interface RoutineSettings {
   roles: Record<Fidelity, RoutineRole>;
   /** How each level spends a time skip while their routine is informative; `routine_follow`'s `skips` sets one character's in a chat. */
   skips: Record<Fidelity, SkipLife>;
+  /** How the model's skip plan asks (`SkipPlanCalls`). */
+  skipPlanCalls: SkipPlanCalls;
   /** Whether the narrator gets the usual routines of the characters present, as soft context, never as what they must do. */
   narrator: boolean;
   /** The default of the palette Timelapse's "Follow my routine" choice: false holds the POV where the story has it, as a typed span does. */
@@ -253,7 +260,7 @@ export const DEFAULT_ROUTINE_ROLES: Readonly<Record<Fidelity, RoutineRole>> = Ob
 
 export const DEFAULT_SKIP_LIVES: Readonly<Record<Fidelity, SkipLife>> = Object.freeze({ live: "model", near: "model", far: "model", background: "routine" });
 
-export const DEFAULT_ROUTINE_SETTINGS: Readonly<RoutineSettings> = Object.freeze({ awareness: "balanced", invitations: "player", sociability: "usual", planBend: "standard", roles: DEFAULT_ROUTINE_ROLES, skips: DEFAULT_SKIP_LIVES, narrator: true, paletteFollowsRoutine: false });
+export const DEFAULT_ROUTINE_SETTINGS: Readonly<RoutineSettings> = Object.freeze({ awareness: "balanced", invitations: "player", sociability: "usual", planBend: "standard", roles: DEFAULT_ROUTINE_ROLES, skips: DEFAULT_SKIP_LIVES, skipPlanCalls: "together", narrator: true, paletteFollowsRoutine: false });
 
 export const AWARENESS_LABEL: Record<RoutineAwareness, string> = { story_first: "Story first", balanced: "Balanced", routine_first: "Routine first" };
 export const INVITATIONS_LABEL: Record<RoutineInvitations, string> = { off: "Off", player: "To the player only", everyone: "Between everyone" };
@@ -276,6 +283,7 @@ export function routineSettingsOf(world: { readonly routineSettings?: unknown })
     planBend: pick(raw.planBend, ROUTINE_PLAN_BEND, DEFAULT_ROUTINE_SETTINGS.planBend),
     roles: perLevel(raw.roles, ROUTINE_ROLES, DEFAULT_ROUTINE_ROLES),
     skips: perLevel(raw.skips, SKIP_LIVES, DEFAULT_SKIP_LIVES),
+    skipPlanCalls: pick(raw.skipPlanCalls, SKIP_PLAN_CALLS, DEFAULT_ROUTINE_SETTINGS.skipPlanCalls),
     narrator: typeof raw.narrator === "boolean" ? raw.narrator : DEFAULT_ROUTINE_SETTINGS.narrator,
     paletteFollowsRoutine: typeof raw.paletteFollowsRoutine === "boolean" ? raw.paletteFollowsRoutine : DEFAULT_ROUTINE_SETTINGS.paletteFollowsRoutine,
   };
@@ -631,7 +639,7 @@ export function routineShapeProblems(v: unknown): string[] {
 }
 
 /** Each setting's allowed values: a word of its list, a switch, or one of a list for each level of closeness. A setting not named here is none the engine reads. */
-const SETTING_VALUES: Record<string, readonly string[] | "switch" | { levels: readonly string[] }> = { awareness: ROUTINE_AWARENESS, invitations: ROUTINE_INVITATIONS, sociability: ROUTINE_SOCIABILITY, planBend: ROUTINE_PLAN_BEND, roles: { levels: ROUTINE_ROLES }, skips: { levels: SKIP_LIVES }, narrator: "switch", paletteFollowsRoutine: "switch" } satisfies Record<keyof RoutineSettings, readonly string[] | "switch" | { levels: readonly string[] }>;
+const SETTING_VALUES: Record<string, readonly string[] | "switch" | { levels: readonly string[] }> = { awareness: ROUTINE_AWARENESS, invitations: ROUTINE_INVITATIONS, sociability: ROUTINE_SOCIABILITY, planBend: ROUTINE_PLAN_BEND, roles: { levels: ROUTINE_ROLES }, skips: { levels: SKIP_LIVES }, skipPlanCalls: SKIP_PLAN_CALLS, narrator: "switch", paletteFollowsRoutine: "switch" } satisfies Record<keyof RoutineSettings, readonly string[] | "switch" | { levels: readonly string[] }>;
 
 /**
  * What is wrong with routine settings as a write sends them (a Build save, an outside tool), one

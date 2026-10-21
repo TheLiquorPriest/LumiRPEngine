@@ -14,8 +14,8 @@ import type { JsonValue } from "../../shared/json";
 import type { LintIssue } from "../../shared/protocol";
 import type { Fidelity } from "../../shared/minds";
 import { FIDELITIES } from "../../shared/minds";
-import type { RoutineAwareness, RoutineInvitations, RoutinePlanBend, RoutineRole, RoutineSettings, RoutineSociability, SkipLife } from "../../shared/routines";
-import { AWARENESS_LABEL, DEFAULT_ROUTINE_SETTINGS, INVITATIONS_LABEL, PLAN_BEND_LABEL, ROUTINE_AWARENESS, ROUTINE_INVITATIONS, ROUTINE_PLAN_BEND, ROUTINE_ROLE_LABEL, ROUTINE_ROLES, ROUTINE_SOCIABILITY, routineSettingsOf, SKIP_LIFE_LABEL, SKIP_LIVES, SOCIABILITY_LABEL } from "../../shared/routines";
+import type { RoutineAwareness, RoutineInvitations, RoutinePlanBend, RoutineRole, RoutineSettings, RoutineSociability, SkipLife, SkipPlanCalls } from "../../shared/routines";
+import { AWARENESS_LABEL, DEFAULT_ROUTINE_SETTINGS, INVITATIONS_LABEL, PLAN_BEND_LABEL, ROUTINE_AWARENESS, ROUTINE_INVITATIONS, ROUTINE_PLAN_BEND, ROUTINE_ROLE_LABEL, ROUTINE_ROLES, ROUTINE_SOCIABILITY, routineSettingsOf, SKIP_LIFE_LABEL, SKIP_LIVES, SKIP_PLAN_CALLS, SKIP_PLAN_CALLS_LABEL, SOCIABILITY_LABEL } from "../../shared/routines";
 import { FIDELITY_LABEL } from "../../packs/minds/ui/ops";
 import { SKIP_NOTE } from "../../packs/castlife/ui/routines-ops";
 import { useApp } from "../app";
@@ -117,8 +117,12 @@ export function RoutineRoleSettings(props: { value: RoutineSettings; lint: reado
             <Seg<SkipLife> label={`${FIDELITY_LABEL[level]} characters in a time skip`} value={value.skips[level]} options={SKIP_LIVES.map((s) => ({ value: s, label: SKIP_LIFE_LABEL[s] }))} disabled={disabled} onChange={(skip) => props.onChange({ ...value, skips: { ...value.skips, [level]: skip } })} />
           </Field>
         ))}
-        <p class="lre-minds-note">The GM can set it apart for one character in a chat. Planned by the model makes one helper call at the skip's start for everyone it plans.</p>
+        <p class="lre-minds-note">The GM can set it apart for one character in a chat.</p>
         <Issues issues={lintAt(lint, "routineSettings.skips")} />
+        <Field label="Plan a skip" help="One call is cheaper; one call per person keeps each answer small, which suits a large cast or a long skip.">
+          <Seg<SkipPlanCalls> label="How the model plans a time skip" value={value.skipPlanCalls} options={SKIP_PLAN_CALLS.map((c) => ({ value: c, label: SKIP_PLAN_CALLS_LABEL[c] }))} disabled={disabled} onChange={(skipPlanCalls) => props.onChange({ ...value, skipPlanCalls })} />
+        </Field>
+        <Issues issues={lintAt(lint, "routineSettings.skipPlanCalls")} />
       </FormGroup>
       <FormGroup title="The narrator">
         <HostSwitch label="Tell the narrator people's usual routines" checked={value.narrator} disabled={disabled} onChange={(narrator) => props.onChange({ ...value, narrator })} />

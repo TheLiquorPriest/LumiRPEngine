@@ -14,7 +14,7 @@ import type { WorldState } from "../../src/engine/state";
 import { Working } from "../../src/engine/working";
 import type { JsonObject } from "../../src/shared/json";
 import type { LedgerEvent } from "../../src/shared/ledger";
-import { ROUTINE_EVENTS, type SkipPlan } from "../../src/shared/routines";
+import { ROUTINE_EVENTS, routineSettingsOf, type SkipPlan, type SkipPlanCalls } from "../../src/shared/routines";
 import type { WorldDoc } from "../../src/shared/world";
 import { ALL_PACKS, STARTER_WORLDS } from "../../src/packs/index";
 import { FakeHost } from "../support/fake-host";
@@ -195,5 +195,62 @@ describe("the skip plan's checks", () => {
     expect(model).toEqual(expect.arrayContaining(["danny_okafor", "marcus_delgado"]));
     held(w, clockOfStamp(cal, "2026-09-15 04:00") ?? 0);
     expect(model.map((id) => whereabouts(w, id))).toEqual(model.map((id) => [w.state.entities[id]?.fields.home, "sleep"]));
+  });
+});
+
+// ---------------------------------------------------------------- one call, or one per person
+
+/** Danny and Marcus, both agents, have their skip planned by the model; the world asks as `calls` says. */
+function pair(calls: SkipPlanCalls) {
+  const marcus: LedgerEvent = { type: ROUTINE_EVENTS.follow, data: { entity: "marcus_delgado", follow: { mode: null, awareness: null, role: "informative", skips: "model" } } };
+  const m = monday([follow("model"), marcus]);
+  const world: WorldDoc = { ...m.world, routineSettings: { ...routineSettingsOf(m.world), skipPlanCalls: calls } };
+  return { ...m, world };
+}
+
+/** `planSkip` over two hours, each call answering for the people its own input names; `fails` names whose call fails. */
+async function planEach(world: WorldDoc, state: WorldState, stamp: (minutes: number) => string, fails: readonly string[] = []): Promise<{ event: LedgerEvent | null; calls: string[][] }> {
+  const host = new FakeHost();
+  const calls: string[][] = [];
+  const places: Record<string, string> = { danny_okafor: "alder_harbor_marina", marcus_delgado: "alder_automotive" };
+  host.quietReply = (req) => {
+    if (!isPlanCall(req)) return "{}";
+    const user = req.messages[1]?.content ?? "";
+    const named = Object.keys(places).filter((id) => user.includes(`(id ${id})`));
+    calls.push(named);
+    if (named.some((id) => fails.includes(id))) throw new Error("the provider refused");
+    return JSON.stringify({ plans: named.map((id) => ({ entity: id, blocks: [block(stamp(10), stamp(40), places[id] ?? "")] })) });
+  };
+  const intent = { action: "timelapse", params: { target: { type: "duration", minutes: 120 } }, probabilities: { timelapse: 1 } };
+  const event = await planSkip({ registry: reg, steps: new Steps(host, new CallMeter()), log: () => {} }, { userId: host.userId, world, state, intent, runSeed: "seed", reply: "", journal: [], signal: new AbortController().signal, limit: 60_000 });
+  return { event, calls };
+}
+
+describe("how the skip plan asks", () => {
+  test("together asks once, for everyone", async () => {
+    const { world, state, stamp } = pair("together");
+    const { event, calls } = await planEach(world, state, stamp);
+    expect(calls).toEqual([["danny_okafor", "marcus_delgado"]]);
+    expect(plannedOf(event).map((p) => p.entity).sort()).toEqual(["danny_okafor", "marcus_delgado"]);
+  });
+
+  test("parallel asks once per person, each told only of themselves, and merges their blocks into one plan", async () => {
+    const { world, state, stamp } = pair("parallel");
+    const { event, calls } = await planEach(world, state, stamp);
+    expect(calls.map((c) => c.join()).sort()).toEqual(["danny_okafor", "marcus_delgado"]);
+    expect(plannedOf(event).map((p) => [p.entity, p.blocks.map((b) => b.place)]).sort()).toEqual([
+      ["danny_okafor", ["alder_harbor_marina"]],
+      ["marcus_delgado", ["alder_automotive"]],
+    ]);
+  });
+
+  test("a person whose call fails is left unplanned, the others keep their plans, and the note counts them", async () => {
+    const { world, state, stamp } = pair("parallel");
+    const { event } = await planEach(world, state, stamp, ["marcus_delgado"]);
+    expect(plannedOf(event).map((p) => p.entity)).toEqual(["danny_okafor"]);
+    const note = event && "data" in event ? event.data.note : undefined;
+    expect(typeof note).toBe("string");
+    expect(String(note)).toContain("1 of 2");
+    expect(String(note)).not.toContain("Marcus");
   });
 });
