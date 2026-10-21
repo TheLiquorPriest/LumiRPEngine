@@ -157,20 +157,18 @@ describe("a place the change names", () => {
   const refusals = (chat: Chat): string[] => chat.rig.host.logs.filter((l) => l.includes("dropped") && l.includes("routine"));
   const LAPS: JsonObject = { type: "routine", entity: "marcus_delgado", change: "start", days: "tuesday", start: "evening", activity: "exercise" };
 
-  test("a place the world doesn't have records nothing, by its words or as its place, and its refusal is logged", async () => {
+  test("a place the world doesn't have records nothing, and its refusal is logged", async () => {
     const chat = await alder();
-    await told(chat, [{ ...LAPS, label: "Tuesday evening laps at the community pool" }], "Swimming?", "Marcus says he's started laps at the community pool on Tuesday evenings.");
-    expect(await who(chat)).toEqual([]);
     await told(chat, [{ ...LAPS, label: "Tuesday evening laps", place: "community pool" }], "Swimming?", "Marcus says he's started laps at the community pool on Tuesday evenings.");
     expect(await who(chat)).toEqual([]);
-    expect(refusals(chat).filter((l) => l.includes("there's no such place"))).toHaveLength(2);
-    expect((await chips(chat)).some((c) => c.label.includes("pool"))).toBe(false);
+    expect(refusals(chat).filter((l) => l.includes("there's no such place"))).toHaveLength(1);
+    expect((await chips(chat)).some((c) => c.label.includes("laps"))).toBe(false);
   });
 
   test("a secret place is refused as one the world doesn't have: the same log line, and nothing else tells them apart", async () => {
     const chat = await alder();
-    await told(chat, [{ ...LAPS, label: "Tuesday evening laps at 12 Birch Lane" }], "Evenings?", "Marcus says he's at 12 Birch Lane on Tuesday evenings now.");
-    await told(chat, [{ ...LAPS, label: "Tuesday evening laps at the community pool" }], "Evenings?", "Marcus says he's at the community pool on Tuesday evenings now.");
+    await told(chat, [{ ...LAPS, label: "Tuesday evening laps", place: "12 Birch Lane" }], "Evenings?", "Marcus says he's at 12 Birch Lane on Tuesday evenings now.");
+    await told(chat, [{ ...LAPS, label: "Tuesday evening laps", place: "community pool" }], "Evenings?", "Marcus says he's at the community pool on Tuesday evenings now.");
     expect(await who(chat)).toEqual([]);
     const [secret, missing] = refusals(chat).map((l) => l.replace(/^.*\(/, "("));
     expect(secret).toBeDefined();
@@ -178,12 +176,29 @@ describe("a place the change names", () => {
     expect(JSON.stringify(await chips(chat))).not.toContain("Birch");
   });
 
-  test("a place its words name that the player knows is where it happens; a habit naming no place still applies", async () => {
+  test("a change naming no place stays placeless, whatever its words say", async () => {
     const chat = await alder();
-    await told(chat, [{ ...LAPS, label: "Tuesday evening laps at Lakefront Park" }, { type: "routine", entity: "priya_nair", change: "start", label: "Reads every evening", days: "daily", start: "evening", activity: "leisure" }], "News?", "Marcus swims laps at Lakefront Park on Tuesday evenings now; Priya reads every evening.");
-    expect(await who(chat)).toEqual(["marcus_delgado", "priya_nair"]);
-    const view = await day(chat, "marcus_delgado", 1);
-    expect(view.blocks.find((b) => "label" in b.block && b.block.label === "Tuesday evening laps at Lakefront Park")?.block).toMatchObject({ place: { place: "lakefront_park" } });
+    const habit = (entity: string, label: string): JsonObject => ({ type: "routine", entity, change: "start", label, days: "daily", start: "evening", activity: "leisure" });
+    await told(chat, [habit("priya_nair", "Reading in the evening"), habit("danny_okafor", "Coffee in the morning"), { ...LAPS, label: "Tuesday evening laps at the lake" }], "News?", "Priya reads in the evening, Danny has his coffee in the morning, and Marcus swims laps at the lake on Tuesday evenings now.");
+    expect(await who(chat)).toEqual(["danny_okafor", "marcus_delgado", "priya_nair"]);
+    const view = await day(chat, "priya_nair", 1);
+    expect(view.blocks.find((b) => "label" in b.block && b.block.label === "Reading in the evening")?.block).toMatchObject({ place: "here" });
+  });
+
+  test("the reply's read and the message's read are both asked for a place the words name, even one nothing lists, so the bound can refuse it", async () => {
+    const chat = await alder();
+    const asked: string[] = [];
+    chat.rig.host.quietReply = (req) => {
+      asked.push(req.messages.map((m) => m.content).join("\n"));
+      return "{}";
+    };
+    await chat.rig.turn(chat.chatId, "Marcus mentions he's started swimming at the community pool every Tuesday evening.", "Marcus nods.");
+    // Each prompt's routine shape says what `place` holds, and that an unlisted place keeps its own words.
+    const routineShape = (prompt: string): string => prompt.slice(prompt.indexOf("routine{"), prompt.indexOf(")", prompt.indexOf("routine{")));
+    const extract = asked.find((p) => p.includes(EXTRACT_MARK)) ?? "";
+    const interpret = asked.find((p) => p.includes("You map a player's typed input")) ?? "";
+    expect(routineShape(extract)).toMatch(/place: [^;]*nothing lists/);
+    expect(interpret).toMatch(/"place"\?: [^;\n]*nothing lists/);
   });
 });
 

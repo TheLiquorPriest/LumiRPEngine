@@ -145,33 +145,6 @@ function placeOf(ctx: ReadContext, v: JsonValue | undefined): PlaceId | null {
   return named.length === 1 ? (named[0] ?? null) : null;
 }
 
-/** The place words in a label ("laps at the community pool", "drinks at Bluebird on Fridays", "at 12 Birch Lane"): after at, in or to, led by "the", a capital or a number, so a time ("at six", "in the evening") is none. */
-const LABEL_PLACE = /\b(?:at|in|to)\s+((?:the\s+)?[\p{Lu}\p{N}][\p{L}\p{N}' -]*|the\s+[\p{L}\p{N}' -]+)$/u;
-/** Where the place words end: the when or the company that follows them ("… on Tuesdays", "… with Priya"). */
-const PLACE_END = /\s+(?:on|every|each|at|from|until|till|with|before|after|for|by)\s+/i;
-
-/**
- * The place a label names when the reply gives no place of its own: the one place the POV may know
- * whose name holds each of its words ("the marina" is Alder Harbor Marina); null when it names a
- * place that resolves to none, or to several (a place the world doesn't have and one the POV may not
- * know read alike, so nothing tells of a secret one); undefined when it names no place. "at home" and
- * "at work" are their own places.
- */
-function labelPlace(ctx: ReadContext, label: string): PlaceId | "home" | "work" | null | undefined {
-  const said = LABEL_PLACE.exec(label)?.[1]?.split(PLACE_END)[0];
-  // Words with a digit are a time or a house number ("at 10pm", "12 Birch Lane"), never what names the place.
-  const words = said === undefined ? [] : wordsOf(said).filter((w) => !/\d/.test(w));
-  if (words.length === 0) return undefined;
-  if (words.length === 1 && words[0] === "home") return "home";
-  if (words.length === 1 && words[0] === "work") return "work";
-  const known = Object.keys(ctx.world.places).filter((id) => canSeePlace(ctx.registry, ctx.world, ctx.state, ctx.world.pov, id));
-  const nameWords = (id: string): string[] => wordsOf(own(ctx.world.places, id)?.name ?? "");
-  // A name holding the very words wins over one holding them only as a start ("the lake": a Lake Road over Lakefront Park).
-  const exact = known.filter((id) => words.every((w) => nameWords(id).includes(w)));
-  const fits = exact.length > 0 ? exact : known.filter((id) => words.every((w) => sameWords([w], nameWords(id))));
-  return fits.length === 1 ? (fits[0] ?? null) : null;
-}
-
 /** The first day a block the story adds is theirs: the one after the turn's. */
 function firstDay(ctx: ReadContext): number {
   return dateAt(calendarOf(ctx.world), ctx.state.clock).dayIndex + 1;
@@ -264,15 +237,13 @@ function startBlock(ctx: ReadContext, who: EntityId, p: JsonObject): RoutineBloc
   const stated = typeof p.minutes === "number" && Number.isInteger(p.minutes) ? p.minutes : null;
   const minutes = at !== null && endHm ? (parseHHMM(`${(endHm[1] ?? "").padStart(2, "0")}:${endHm[2] ?? "00"}`) - parseHHMM(at) + MINUTES_PER_DAY) % MINUTES_PER_DAY || MINUTES_PER_DAY : (stated ?? MINUTES[activity] ?? basic?.minutes ?? DEFAULT_MINUTES);
   if (minutes < 1 || minutes > MINUTES_PER_DAY) return refuse("its length is a day at most");
-  // A place it names, or their home or work; else the place its words name; else where the reply
-  // leaves it: their work for a job, and wherever they are for anything else, so the block moves no
-  // one the reply didn't. A place named that resolves to none is refused, never laid as wherever they are.
+  // A place it names, or their home or work; else where the reply leaves it: their work for a job,
+  // and wherever they are for anything else, so the block moves no one the reply didn't. A place it
+  // names that resolves to none (the world lacks it, or the POV may not know it) is refused alike.
   const keyword = text(p.place).toLowerCase();
   const named = keyword === "home" || keyword === "work" ? null : placeOf(ctx, p.place);
   if (named === null && keyword !== "" && keyword !== "home" && keyword !== "work") return refuse("there's no such place");
-  const worded = keyword === "" ? labelPlace(ctx, label) : undefined;
-  if (worded === null) return refuse("there's no such place");
-  const place: RoutinePlace = named !== null ? { place: named } : keyword === "home" || keyword === "work" ? keyword : worded === "home" || worded === "work" ? worded : worded !== undefined ? { place: worded } : activity === "work" ? "work" : basic ? (basic.place ?? "home") : "here";
+  const place: RoutinePlace = named !== null ? { place: named } : keyword === "home" || keyword === "work" ? keyword : activity === "work" ? "work" : basic ? (basic.place ?? "home") : "here";
   const company: EntityId[] = [];
   for (const raw of Array.isArray(p.with) ? p.with : []) {
     const id = text(raw);

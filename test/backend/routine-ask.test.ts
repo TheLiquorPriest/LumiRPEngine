@@ -255,12 +255,11 @@ describe("what brings up no ask", () => {
     expect(await changed(chat)).toEqual([]);
   });
 
-  test("a place the world doesn't have, named only in its words, brings up no ask", async () => {
+  test("a place the world doesn't have brings up no ask", async () => {
     const chat = await alder();
-    // Port Alder has no pool: the read leaves the place out, and the label still names it.
+    // Port Alder has no pool: the read gives the place in the message's own words, as nothing lists it.
     const words = "Marcus mentions he's started swimming at the community pool every Tuesday evening";
-    const { place: _place, ...placeless } = SWIM;
-    await said(chat, `${words}.`, [{ ...placeless, label: "swimming at the community pool", start: "evening", said: words }]);
+    await said(chat, `${words}.`, [{ ...SWIM, label: "Swimming", place: "the community pool", start: "evening", said: words }]);
     expect(await asks(chat)).toEqual([]);
     expect(await changed(chat)).toEqual([]);
   });
