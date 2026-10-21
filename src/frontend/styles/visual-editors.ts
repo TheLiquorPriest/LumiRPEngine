@@ -45,7 +45,7 @@ export const VISUAL_EDITORS_CSS = `
 /* lint marks over the map preview (space/ui/map-preview.tsx); the stage under it keeps the taps */
 .lre-map .lre-ve-marks{pointer-events:none}
 
-/* the schedule's day bar (calendar/ui/schedule-editor.tsx): slots coloured by value, with the value in words */
+/* the schedule's day bar (build/schedule-form.tsx): slots coloured by value, with the value in words */
 .lre-ve-day{position:relative;height:64px;margin:0 var(--lre-s1);touch-action:pan-y}
 .lre-ve-day-track{position:absolute;inset:8px 0;border-radius:var(--lre-r);background:repeating-linear-gradient(90deg,transparent 0 calc(100% / 24 - 1px),var(--lre-hairline) calc(100% / 24 - 1px) calc(100% / 24)),var(--lre-well);overflow:hidden}
 .lre-ve-day-slot{position:absolute;top:0;bottom:0;min-width:2px;padding:0 4px;border:1px solid var(--slot,var(--lre-accent));border-radius:var(--lre-r-sm);background:color-mix(in srgb,var(--slot,var(--lre-accent)) 30%,var(--lre-card));color:var(--lre-fg);font-size:var(--lre-fs-xs);font-weight:600;line-height:1.2;text-align:left;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
