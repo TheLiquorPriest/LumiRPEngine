@@ -127,6 +127,15 @@ export class FakeHost implements HostPort {
   contextTimeoutMs = 0;
   /** Whether the handler registered as required: its failure or timeout stops the generation. */
   contextRequired = false;
+  /** Tests waiting for the context handler to be asked about a generation (`contextAsked`). */
+  private readonly contextWaiters: { type: HostGenerationType; resolve: () => void }[] = [];
+
+  /** Resolves once the context handler is asked about the next generation of `type` (a test seam: it fires as the handler is called). */
+  contextAsked(type: HostGenerationType): Promise<void> {
+    const { promise, resolve } = Promise.withResolvers<void>();
+    this.contextWaiters.push({ type, resolve });
+    return promise;
+  }
   /** What this host does with the handler's answer (`cancelGeneration`, `required`) and frontend pages; a test plays an older host by switching one off. */
   capabilities: HostCapabilities = { cancel: true, required: true, sessions: true };
   /** The frontend's side of `lre.generate` (DESIGN §5.1): what the engine asked to start, of which page, in order, until `start` plays it. */
@@ -660,6 +669,10 @@ export class FakeHost implements HostPort {
    */
   private async runContext(input: ContextHandlerInput, abandon: boolean): Promise<"go" | "cancelled" | "failed"> {
     if (!this.contextHandler) return "go";
+    for (const waiter of this.contextWaiters.filter((w) => w.type === input.generationType)) {
+      this.contextWaiters.splice(this.contextWaiters.indexOf(waiter), 1);
+      waiter.resolve();
+    }
     const context = new AbortController();
     if (abandon) context.abort();
     try {
@@ -691,9 +704,16 @@ export class FakeHost implements HostPort {
     return g;
   }
 
-  /** A dry run: the context handler is asked with `dryRun` (its answer can't stop it); the assembly is returned, nothing is written. */
+  /**
+   * A dry run: the context handler is asked with `dryRun`; the assembly is returned, nothing is
+   * written. `cancelGeneration` fails it, as Lumiverse's pipeline throws for any assembly the
+   * handler cancels (generate.service.ts:1050-1058 on staging 7524546f).
+   */
   async dryRun(chatId: ChatId): Promise<DryRun> {
-    if (this.contextHandler) await this.contextHandler({ chatId, userId: this.userId, generationType: "normal", dryRun: true, connectionId: null, personaId: null }, new AbortController().signal);
+    if (this.contextHandler) {
+      const verdict = await this.contextHandler({ chatId, userId: this.userId, generationType: "normal", dryRun: true, connectionId: null, personaId: null }, new AbortController().signal);
+      if (verdict === "cancel" && this.capabilities.cancel) throw new Error("Generation cancelled by an extension");
+    }
     const lore = this.worldInfo(chatId).placed.map((e) => e.content);
     const chat = this.chat(chatId).messages.filter((m) => m.isUser || (m.swipes[m.swipeId] ?? "") !== "").map((m) => ({ role: m.isUser ? "user" : "assistant", content: m.swipes[m.swipeId] ?? "" }));
     return { messages: [...lore.map((content) => ({ role: "system", content })), ...chat], blocks: structuredClone(this.preset.blocks), maxTokens: this.preset.maxTokens, model: this.preset.model };
