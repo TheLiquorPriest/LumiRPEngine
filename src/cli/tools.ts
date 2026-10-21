@@ -16,6 +16,7 @@ import { ANSWER_LIMIT, clip } from "./read";
 import type { ToolResult } from "./report";
 import { json, lintSummary } from "./report";
 import { VERSIONS } from "./version";
+import type { ToolModule } from "./tool-module";
 
 /** How a write tool changes things, for MCP's tool annotations (a client may ask the user before a destructive call). */
 export interface WriteHints {
@@ -76,6 +77,9 @@ const PATH: JsonObject = { type: "string", description: "A path to the world's J
 const WORLD: JsonObject = { type: "object", description: "Or the world inline: an lre-world-v1 document or an lre-world-export-v1 file. A whole world is large; prefer path." };
 const RUN_FROM = { path: PATH, world: WORLD, worldId: { type: "string", description: "Or a world on your Lumiverse, by id (needs lumirpengine login)." }, source: SOURCE };
 const EXPECT_VERSION: JsonObject = { type: "integer", minimum: 0, description: "The draft version you last read (lre_world, lre_draft and lre_worlds say it, stored or not): refused if the draft has moved on since, so a change you haven't seen is never overwritten, committed or thrown away." };
+
+/** The tools kept in files of their own (tool-module.ts), each with its implementation and command, after the ones below. */
+export const MODULE_TOOLS: readonly ToolModule[] = [];
 
 export const TOOLS: readonly ToolDef[] = [
   {
@@ -260,6 +264,7 @@ export const TOOLS: readonly ToolDef[] = [
     inputSchema: object({ chatId: { type: "string", description: "The chat's id (lre_chats)." }, to: { type: "string", description: "The revision to move to (default: the world's head)." }, preview: { type: "boolean", description: "Only list what would change." }, spoilers: { type: "boolean", description: "With preview, show hidden changes too." } }, ["chatId"]),
     write: { destructive: true, idempotent: true },
   },
+  ...MODULE_TOOLS,
 ];
 
 const BY_NAME: Readonly<Record<string, ToolDef>> = Object.fromEntries(TOOLS.map((t) => [t.name, t]));
@@ -374,6 +379,8 @@ async function dispatch(def: ToolDef, args: Args, ctx: ToolContext): Promise<Too
     case "lre_upgrade":
       return upgradeTool(ctx.live(), args, ctx.serialize);
   }
+  const module = MODULE_TOOLS.find((t) => t.name === def.name);
+  if (module !== undefined) return module.run(args, ctx);
   throw new ToolError(`${def.name} has no implementation.`);
 }
 
