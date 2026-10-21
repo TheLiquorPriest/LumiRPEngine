@@ -223,6 +223,8 @@ describe("engine first", () => {
   test("the restart fires once with two pages open: only the page the stopped reply ran for starts it, the other sees it already started, and no second reply or swipe comes", async () => {
     const rig = new Rig();
     const chatId = await rig.worldChat();
+    // Every page running the engine's frontend says what it shows when it loads.
+    rig.body(await rig.send({ type: "lre.hello", chatId }, "desk"));
     rig.host.sendUser(chatId, "I look around.");
     await rig.host.settle();
     expect((await rig.host.begin(chatId, { type: "normal", session: "desk" })).halted).toBe("cancelled");
@@ -242,6 +244,58 @@ describe("engine first", () => {
     await rig.host.finish(reply, "The square is quiet.");
     const replies = rig.host.chat(chatId).messages.filter((m) => !m.isUser);
     expect(replies.at(-1)?.swipes).toEqual(["The square is quiet."]);
+  });
+
+  test("a page that says it shows the chat takes the reply from a page that never said anything, starts it once, and never reads 'Already started in another window'", async () => {
+    const rig = new Rig();
+    const chatId = await rig.worldChat();
+    rig.host.sendUser(chatId, "I look around.");
+    await rig.host.settle();
+    // Lumiverse runs the generation for a page that never speaks to the engine (no engine frontend runs there).
+    expect((await rig.host.begin(chatId, { type: "normal", session: "silent" })).halted).toBe("cancelled");
+    const [first] = rig.host.restarts.splice(0);
+    // The player's page opens the chat: it is asked to start the reply, and its line never says it started elsewhere.
+    const before = rig.host.sent.length;
+    rig.body(await rig.send({ type: "lre.hello", chatId }, "desk"));
+    expect(rig.host.restarts.map((r) => r.session)).toEqual(["desk"]);
+    expect(activitiesTo(rig, "desk", before)).not.toContain("Already started in another window");
+    // The silent page's ask is refused; the desk's claim starts the one reply.
+    expect(rig.body(await rig.send({ type: "lre.restart", chatId, turn: first?.turn ?? "" }, "silent")).start).toBe(false);
+    expect(rig.body(await rig.send({ type: "lre.restart", chatId, turn: rig.host.restarts[0]?.turn ?? "" }, "desk")).start).toBe(true);
+    const reply = await rig.host.begin(chatId, { type: "regenerate", session: "desk" });
+    expect(reply.halted).toBeUndefined();
+    await rig.host.finish(reply, "The square is quiet.");
+    expect(rig.host.chat(chatId).messages.filter((m) => !m.isUser).at(-1)?.swipes).toEqual(["The square is quiet."]);
+  });
+
+  test("the reply is asked of the page that says it shows the chat, not of a page that never said anything, though the reply ran for that one", async () => {
+    const rig = new Rig();
+    const chatId = await rig.worldChat();
+    rig.body(await rig.send({ type: "lre.hello", chatId }, "desk"));
+    rig.host.sendUser(chatId, "I look around.");
+    await rig.host.settle();
+    expect((await rig.host.begin(chatId, { type: "normal", session: "silent" })).halted).toBe("cancelled");
+    expect(rig.host.restarts.map((r) => r.session)).toEqual(["desk"]);
+    expect((await rig.host.start(chatId, { type: "regenerate", session: "desk" })).halted).toBeUndefined();
+  });
+
+  test("a page resyncing or opening the chat while a reply streams leaves that turn alone: the reply is read and its record committed", async () => {
+    const rig = new Rig();
+    const chatId = await rig.worldChat();
+    rig.host.sendUser(chatId, "I look around.");
+    await rig.host.settle();
+    const reply = await rig.host.start(chatId, { type: "normal" });
+    expect(reply.halted).toBeUndefined();
+    // A page comes back into view, and another opens the chat, while the reply streams.
+    rig.body(await rig.send({ type: "lre.state.resync", chatId }, "desk"));
+    rig.body(await rig.send({ type: "lre.hello", chatId }, "phone"));
+    await rig.host.finish(reply, "The square is quiet.");
+    const records = await rig.rt.diag.records(chatId, rig.host.userId);
+    expect(records.filter((r) => r.kind === "step").map((r) => r.step)).toContain("read");
+    expect(records.some((r) => r.kind === "turn" && r.status === "ok")).toBe(true);
+    // The record keeps the turn's plan (its roll seed), not a bare one made for an unplanned reply.
+    const core = await rig.rt.ledger.core(chatId, rig.host.userId);
+    expect(core?.journal.messages[reply.messageId ?? ""]?.ledger.swipes["0"]?.seed).not.toBe("");
   });
 
   test("a page holding the restart closes: the next page to open the chat takes it, and only that one", async () => {
