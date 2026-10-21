@@ -6,6 +6,7 @@
 import { createContext } from "preact";
 import { useContext } from "preact/hooks";
 import type { SpindleComponentsHelper } from "lumiverse-spindle-types";
+import type { AgentsView } from "../shared/agents";
 import type { ChatId, MessageId, PanelId, RevisionId, WorldId } from "../shared/ids";
 import type { JobKind, LintIssue, ResultBodies, WorldCollection, WorldPart } from "../shared/protocol";
 import type { StateView } from "../shared/state-view";
@@ -50,7 +51,7 @@ export interface GmState {
   section: GmSection;
 }
 
-export type SettingsPage = "home" | "helper" | "model" | "steps" | "minds" | "timeouts" | "realism" | "checks" | "time" | "extraction" | "swipes" | "preset" | "display" | "caveats" | "diagnostics";
+export type SettingsPage = "home" | "helper" | "model" | "steps" | "minds" | "timeouts" | "realism" | "checks" | "time" | "extraction" | "swipes" | "preset" | "display" | "caveats" | "diagnostics" | "mcp";
 
 export type BuildRoute =
   | { view: "worlds" }
@@ -186,6 +187,8 @@ export interface App {
   host: HostBridge;
   overlays: Overlays;
   drafts: Store<Draft | null>;
+  /** The MCP servers this account has seen and the update notice (DESIGN §23), as last pushed or asked for; null until then. */
+  agents: Store<AgentsView | null>;
   toast(text: string, tone?: Toast["tone"]): void;
   /** Sends a request; on an error, shows it and resolves null. */
   request<K extends keyof ResultBodies>(body: Extract<RequestBody, { type: K }>): Promise<ResultBodies[K] | null>;

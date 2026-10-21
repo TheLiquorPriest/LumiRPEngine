@@ -12,6 +12,7 @@ import { IdsSurface } from "./components";
 import { Build } from "./build/build";
 import { headGutters, watchChatHeads } from "./chat-heads";
 import { ActivityBanner } from "./diagnostics";
+import { UpdateNotice } from "./agents";
 import { GmMode } from "./gm/mode";
 import type { IconName } from "./icons";
 import { Icon } from "./icons";
@@ -126,6 +127,7 @@ export function Drawer(props: { measure(el: Element): Rect }) {
         </div>
       </div>
       <ActivityBanner />
+      <UpdateNotice />
       <div class="lre-mode-body" id={bodyId} role="tabpanel" aria-labelledby={`${bodyId}-tab-${mode}`}>
         {mode === "play" ? (
           <Play />

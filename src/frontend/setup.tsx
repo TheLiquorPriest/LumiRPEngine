@@ -6,6 +6,7 @@
 import { render } from "preact";
 import type { SpindleFloatWidgetHandle, SpindleFrontendContext } from "lumiverse-spindle-types";
 import type { App, Draft, Toast, UiState } from "./app";
+import type { AgentsView } from "../shared/agents";
 import { AppContext, initialUi, makeRequest, SHOW_IDS_KEY, switchChat } from "./app";
 import { trackJobs } from "./build/jobs";
 import { recheckDraft, trackDraft } from "./build/draft";
@@ -125,6 +126,7 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     toasts,
     host,
     drafts: createStore<Draft | null>(null),
+    agents: createStore<AgentsView | null>(null),
     toast,
     request: makeRequest(client.send, toast),
     overlays: {
@@ -141,6 +143,8 @@ export function setup(ctx: SpindleFrontendContext): () => void {
   cleanups.push(() => set.destroy());
   // A draft another window or an outside agent changes is reloaded in Build (DESIGN §23).
   cleanups.push(trackDraft(app));
+  // The MCP servers and the update notice (DESIGN §23): pushed as servers check in, and to a page's hello while a notice waits.
+  cleanups.push(client.onAgents((view) => app.agents.set(view)));
   // A socket that dropped may have missed a push: Build reads its draft again once the page is back,
   // and the open chat resyncs, so a reply the engine prepared while it slept starts (DESIGN §5.1).
   const recheck = (): void => {
