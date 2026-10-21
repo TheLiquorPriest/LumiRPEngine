@@ -42,5 +42,7 @@ export const SHELL_CSS = `
 .lre-drawer .lre-bottomnav>button[aria-current=page]>.lre-icon{background:var(--lre-accent-soft)}
 .lre-drawer .lre-bottomnav[data-tone=gm]>button[aria-current=page]{background:transparent}
 .lre-drawer .lre-bottomnav[data-tone=gm]>button[aria-current=page]>.lre-icon{background:var(--lre-gm-soft)}
+/* GM mode's bar holds seven tabs: each label gets its button's whole width */
+.lre-drawer .lre-bottomnav[data-tone=gm]>button{padding-left:0;padding-right:0;letter-spacing:-0.01em}
 .lre-drawer .lre-bottomnav>button>.lre-dot{top:var(--lre-s1);left:calc(50% + 8px)}
 `;

@@ -26,6 +26,7 @@ import { macroReview, WORLD_COLLECTIONS } from "../../src/backend/worlds";
 import type { StudioCase } from "./fixtures";
 import { DECLINED_PURCHASE, extractionView, freshFixture, gmFixture, pausedFixture, portAlderMoney, settingsFixture, starterMap, stateFixture, studioOfferFixture, UPGRADE_PREVIEW, WORLDS, worldFixture } from "./fixtures";
 import { combatFixture } from "./combat-fixture";
+import { applyRoutineOp, previewRoutines, routineChangedFixture, routineGmFixture, type PreviewRoutines } from "./routines-fixture";
 import { ROUTINE_PROPOSALS, routinePlayerFixture } from "./routines-player-fixture";
 import { isWorldDoc, lintWorld, migrateWorld, previewSheet, previewSkills } from "../../src/engine/authoring";
 import { createRegistry } from "../../src/engine/registry-impl";
@@ -117,8 +118,10 @@ export class MockBackend {
   private elsewhereCount = 0;
   private jobs = 0;
   private gm: GmView = gmFixture();
-  /** The GM view as it was before each GM edit, by the edit's Undo chip. */
-  private readonly beforeEdit = new Map<string, GmView>();
+  /** This chat's routine changes (GM → Routines), as the castlife slice keeps them. */
+  private routines: PreviewRoutines = previewRoutines();
+  /** The GM view and the routine changes as they were before each GM edit, by the edit's Undo chip. */
+  private readonly beforeEdit = new Map<string, { gm: GmView; routines: PreviewRoutines }>();
   /** Kept jobs (`lre.job list`): an import a restart cut off after its first chunk. */
   private kept: JobSummary[] = [{ jobId: "job-kept", kind: "import_lore", worldId: WORLDS[0]?.id ?? "", status: "interrupted", progress: 0.5, message: "Interrupted by a restart. The 2 proposal(s) it made before it stopped are below; run it again for the rest.", result: { proposals: PROPOSALS.slice(0, 2) }, input: { bookIds: ["book-1"] }, at: Date.now() - 600_000 }];
   /** The active preset as the backend reads it: one section outlet placed, one unknown, and guidance blocks in each state. */
@@ -290,6 +293,7 @@ export class MockBackend {
   /** Applies a GM edit to the GM view and words it for the Journal; a string is why it was refused (nothing applied). */
   private applyEdit(ops: EditOp[]): string[] | string {
     const gm = structuredClone(this.gm);
+    const routines = structuredClone(this.routines);
     const find = (id: string) => gm.entities.find((e) => e.id === id);
     const name = (id: string | null) => (id === null ? "nowhere" : (find(id)?.name ?? gm.places.find((p) => p.id === id)?.name ?? id));
     const lines: string[] = [];
@@ -367,9 +371,15 @@ export class MockBackend {
           entity.gone = op.op === "despawn";
           lines.push(`${entity.name} is ${entity.gone ? "gone" : "back"}`);
           break;
+        case "routine_follow":
+        case "routine_block":
+        case "schedule_override":
+          lines.push(applyRoutineOp(routines, op, entity.name, gm.minds.now));
+          break;
       }
     }
     this.gm = gm;
+    this.routines = routines;
     return lines;
   }
 
@@ -412,7 +422,10 @@ export class MockBackend {
         const chip = this.view?.chips.find((c) => c.id === message.chip);
         if (!chip) return this.error(reqId, "not_found", "That chip has expired.");
         const undone = chip.kind === "fix" ? this.beforeEdit.get(chip.id) : undefined;
-        if (undone) this.gm = undone;
+        if (undone) {
+          this.gm = undone.gm;
+          this.routines = undone.routines;
+        }
         if (chip.kind === "decline" && message.choice === "other" && !this.payAnotherWay()) return this.error(reqId, "validation", "No other way to pay covers it.");
         this.result(reqId, "lre.chip", { applied: true, pending: false });
         this.mutate((view) => {
@@ -460,10 +473,10 @@ export class MockBackend {
       case "lre.gm":
         return this.result(reqId, "lre.gm", structuredClone(this.gm));
       case "lre.edit": {
-        const before = structuredClone(this.gm);
+        const before = { gm: structuredClone(this.gm), routines: structuredClone(this.routines) };
         const lines = this.applyEdit(message.ops);
         if (typeof lines === "string") return this.error(reqId, "validation", lines);
-        const seq = (before.edits[0]?.seq ?? 0) + 1;
+        const seq = (before.gm.edits[0]?.seq ?? 0) + 1;
         const chip = `fix:m4:0:${seq}`;
         this.gm.edits.unshift({ messageId: "m4", seq, lines });
         this.beforeEdit.set(chip, before);
@@ -711,10 +724,6 @@ export class MockBackend {
         );
         return;
       }
-      case "lre.routine":
-        // Cast's usual day: someone's day as the POV may know it.
-        if (message.op === "day" && message.view === "player") return this.result(reqId, "lre.routine", { player: routinePlayerFixture(message.entity) });
-        return this.result(reqId, "lre.routine", {});
       case "lre.lore": {
         if (message.op === "save") {
           // As the backend does: the latest reply (or the excerpt) becomes a draft entry with a chat source.
@@ -785,6 +794,15 @@ export class MockBackend {
       case "lre.diag":
         if (message.op === "dismiss") this.activity(null);
         return this.result(reqId, "lre.diag", { records: message.op === "clear" ? [] : diagnosticsFixture(), activity: null });
+      case "lre.routine": {
+        // Cast's usual day: someone's day as the POV may know it.
+        if (message.op === "day" && message.view === "player") return this.result(reqId, "lre.routine", { player: routinePlayerFixture(message.entity) });
+        // GM → Routines reads everyone this chat changed, and one character's day as the GM reads it.
+        if (message.op === "changed") return this.result(reqId, "lre.routine", { changed: routineChangedFixture(this.routines, this.gm) });
+        if (message.view !== "gm") return this.result(reqId, "lre.routine", {});
+        const gm = routineGmFixture(message.entity, this.routines, this.gm);
+        return gm ? this.result(reqId, "lre.routine", { gm }) : this.error(reqId, "not_found", `${message.entity} isn't a character.`);
+      }
     }
   }
 

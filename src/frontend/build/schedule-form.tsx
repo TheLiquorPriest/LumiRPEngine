@@ -7,6 +7,7 @@
 // field by its definition, words with the world's own as suggestions. The owner is picked by level
 // (someone, a group, a kind, a selector): the most specific one wins a field (DESIGN §8).
 
+import type { ComponentChildren } from "preact";
 import { useId, useMemo, useRef, useState } from "preact/hooks";
 import type { JsonValue } from "../../shared/json";
 import { hasOwn, isRecord } from "../../shared/json";
@@ -552,9 +553,11 @@ export function RecurrenceFields(props: { value: Recurrence; holidays: readonly 
 /**
  * A schedule's fields as one form: who and what, when it repeats, and its day with each slot's
  * sheet. The schedule's page and a proposal's review both edit through it. `doc` is the draft with
- * the packs' kinds merged in, so owners and fields of pack kinds are offered.
+ * the packs' kinds merged in, so owners and fields of pack kinds are offered. `fixed` says who and
+ * what in place of their pickers, for a form whose owner and target can't change (the GM view's
+ * version of one character's schedule in a chat).
  */
-export function ScheduleForm(props: { value: ScheduleDef; doc: WorldDoc; path: string; onChange(next: ScheduleDef): void }) {
+export function ScheduleForm(props: { value: ScheduleDef; doc: WorldDoc; path: string; fixed?: ComponentChildren; onChange(next: ScheduleDef): void }) {
   const { doc } = props;
   const schedule = props.value;
   const setSchedule = props.onChange;
@@ -576,11 +579,13 @@ export function ScheduleForm(props: { value: ScheduleDef; doc: WorldDoc; path: s
   return (
     <>
       <Section title="Who and what">
-        <div class="lre-stack">
-          <OwnerPicker label="It applies to" value={schedule.owner} doc={doc} noneLabel="No one" noneHelp="A world process (the weather, prices): it sets no one's field." onChange={(owner) => setSchedule({ ...schedule, owner })} />
-          <span class="lre-small lre-muted">When schedules set the same field of the same person, the most specific owner wins: their own, then a group's, then their kind's, then a selector's.</span>
-          <TargetPicker doc={doc} owner={schedule.owner} value={schedule.target} onChange={(target) => setSchedule({ ...schedule, target })} />
-        </div>
+        {props.fixed ?? (
+          <div class="lre-stack">
+            <OwnerPicker label="It applies to" value={schedule.owner} doc={doc} noneLabel="No one" noneHelp="A world process (the weather, prices): it sets no one's field." onChange={(owner) => setSchedule({ ...schedule, owner })} />
+            <span class="lre-small lre-muted">When schedules set the same field of the same person, the most specific owner wins: their own, then a group's, then their kind's, then a selector's.</span>
+            <TargetPicker doc={doc} owner={schedule.owner} value={schedule.target} onChange={(target) => setSchedule({ ...schedule, target })} />
+          </div>
+        )}
       </Section>
       <Section title="Repeats">
         <RecurrenceFields value={schedule.recurrence} holidays={doc.calendar.holidays} onChange={(recurrence) => setSchedule({ ...schedule, recurrence })} />
