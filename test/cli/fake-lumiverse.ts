@@ -1,13 +1,14 @@
 // A fake Lumiverse for the CLI's tests: the HTTP routes and the event socket an outside client uses
 // (sign-in, the extension list, socket tickets, CONNECTED, SPINDLE_BACKEND_MSG frames), and behind
 // them a small LumiRPEngine that keeps worlds, revisions and one versioned draft per world as the
-// agent API (AGENT_API 1) describes. Everything it receives is recorded, so a test can say exactly
+// agent API (AGENT_API) describes. Everything it receives is recorded, so a test can say exactly
 // what the client sent.
 
 import { STARTER_INFO, STARTER_WORLDS } from "../../src/packs/index";
 import type { JsonValue } from "../../src/shared/json";
 import { hasOwn, isRecord } from "../../src/shared/json";
 import type { LintIssue, MarkerPreview, WorldChatInfo } from "../../src/shared/protocol";
+import { AGENT_API } from "../../src/shared/protocol";
 import type { RevisionNote, WorldDoc, WorldIndex } from "../../src/shared/world";
 import type { Http, HttpRequest, OpenSocket, SocketEvents } from "../../src/cli/connection";
 import { lint, newWorld, revisionOf } from "../../src/studio-api";
@@ -46,7 +47,7 @@ export class FakeLre {
   /** Every request, as it arrived. */
   readonly received: Payload[] = [];
   /** What `lre.hello` answers as `agentApi`; undefined answers none, as an older build does. */
-  agentApi: number | undefined = 1;
+  agentApi: number | undefined = AGENT_API;
   preview: MarkerPreview = { lines: [] };
   /** Whether an applied Upgrade waits for the chat's turn to end. */
   upgradePending = false;

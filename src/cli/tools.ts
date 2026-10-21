@@ -21,6 +21,7 @@ import { BUILD_TOOLS } from "./tools-build";
 import { CONFIG_TOOLS } from "./tools-config";
 import { JOB_TOOLS } from "./tools-jobs";
 import { LORE_TOOLS } from "./tools-lore";
+import { PLAY_TOOLS } from "./tools-play";
 
 /** How a write tool changes things, for MCP's tool annotations (a client may ask the user before a destructive call). */
 export interface WriteHints {
@@ -83,7 +84,7 @@ const RUN_FROM = { path: PATH, world: WORLD, worldId: { type: "string", descript
 const EXPECT_VERSION: JsonObject = { type: "integer", minimum: 0, description: "The draft version you last read (lre_world, lre_draft and lre_worlds say it, stored or not): refused if the draft has moved on since, so a change you haven't seen is never overwritten, committed or thrown away." };
 
 /** The tools kept in files of their own (tool-module.ts), each with its implementation and command, after the ones below. */
-export const MODULE_TOOLS: readonly ToolModule[] = [...CONFIG_TOOLS, ...LORE_TOOLS, ...JOB_TOOLS, ...BUILD_TOOLS];
+export const MODULE_TOOLS: readonly ToolModule[] = [...CONFIG_TOOLS, ...LORE_TOOLS, ...JOB_TOOLS, ...BUILD_TOOLS, ...PLAY_TOOLS];
 
 export const TOOLS: readonly ToolDef[] = [
   {

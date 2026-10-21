@@ -8,6 +8,7 @@ import type { EntityUpgradePick, KeepLine, ResolveScope, TimeControl, TimelapseT
 import { parseMoneyInput } from "../shared/money";
 import type { EditOp, UpgradePreview } from "../shared/protocol";
 import type { Chip, FieldFixTarget, GmEntity, GmView, PaletteEntry, PaletteOption, TimelapseView } from "../shared/state-view";
+import { chipRegenerates } from "../shared/state-view";
 import type { AdjudicationDef, FacetId, FacetValueId, WorldCurrency } from "../shared/world";
 import type { RequestBody } from "./registry";
 
@@ -55,7 +56,7 @@ export function upgradeRequest(chatId: ChatId, preview: UpgradePreview, choices:
 export function chipIntent(chip: Chip, choice: string, chatId: ChatId, payload?: JsonObject): ChipIntent {
   if (choice === "regenerate") return { request: null, regenerate: true };
   const request: Req<"lre.chip"> = payload ? { type: "lre.chip", chatId, chip: chip.id, choice, payload } : { type: "lre.chip", chatId, chip: chip.id, choice };
-  return { request, regenerate: (chip.kind === "swipe_option" && (choice === "renarrate" || choice === "rerun")) || (chip.kind === "contradiction" && choice === "renarrate") || (chip.kind === "read_failed" && choice === "rerun") || (chip.kind === "claim" && (choice === "add" || choice === "drop")) };
+  return { request, regenerate: chipRegenerates(chip.kind, choice) };
 }
 
 /** Convert one Keep-report entry; markers have no event ref and cannot be converted. */

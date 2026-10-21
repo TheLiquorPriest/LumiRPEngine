@@ -7,6 +7,7 @@ import { callTool } from "../../src/cli/tools";
 import type { ToolContext } from "../../src/cli/tools";
 import { templateFile } from "../../src/cli/offline";
 import type { WorldDoc } from "../../src/shared/world";
+import { AGENT_API } from "../../src/shared/protocol";
 import { client, FakeLumiverse } from "./fake-lumiverse";
 
 async function call(ctx: ToolContext, name: string, args: Record<string, unknown> = {}): Promise<{ text: string; data: Record<string, unknown>; isError: boolean }> {
@@ -586,7 +587,7 @@ describe("live tools", () => {
     const fake = new FakeLumiverse();
     const { ctx, token } = client(fake);
     const status = await call(ctx, "lre_status");
-    expect(status.data).toMatchObject({ signedIn: true, lumiverse: fake.base, user: "tom", lumiRPEngine: { status: "running", version: "0.0.1", agentApi: 1 }, client: { agentApi: 1, worldFormat: "lre-world-v1" } });
+    expect(status.data).toMatchObject({ signedIn: true, lumiverse: fake.base, user: "tom", lumiRPEngine: { status: "running", version: "0.0.1", agentApi: AGENT_API }, client: { agentApi: AGENT_API, worldFormat: "lre-world-v1" } });
     expect(status.text).not.toContain(token);
   });
 });

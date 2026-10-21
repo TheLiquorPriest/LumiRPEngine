@@ -19,11 +19,11 @@ import type { AdjudicationDef, FacetId, FacetValueId, KindDef, LifeStateId, Lore
 export const PROTOCOL_VERSION = 1;
 
 /**
- * The level of the requests outside clients rely on (DESIGN §23): editor `version`, `patch` and
- * `restore`, commit notes and history, `templates`, `chats` and `lre.draft.changed`. `lre.hello`
- * answers with it; a build without them answers without it.
+ * The level of the requests outside clients rely on (DESIGN §23). 1: editor `version`, `patch` and
+ * `restore`, commit notes and history, `templates`, `chats` and `lre.draft.changed`; 2: `lre.state.get`.
+ * `lre.hello` answers with it; a build without them answers without it.
  */
-export const AGENT_API = 1;
+export const AGENT_API = 2;
 
 interface Envelope<T extends string> {
   lre: typeof PROTOCOL_VERSION;
@@ -169,6 +169,15 @@ export interface EditRequest extends Request<"lre.edit"> {
 
 /** The GM view's data (DESIGN §7), asked for when the GM view opens: never in a state push. */
 export interface GmRequest extends Request<"lre.gm"> {
+  chatId: ChatId;
+}
+
+/**
+ * A chat's state view, as a page's snapshot holds it, answered to an outside client (DESIGN §23),
+ * with the chat's activity line. A read only: unlike a hello or a resync it makes the session no
+ * page, claims no prepared reply and opens no ledger window.
+ */
+export interface StateGetRequest extends Request<"lre.state.get"> {
   chatId: ChatId;
 }
 
@@ -579,6 +588,7 @@ export type FrontendToBackend =
   | ActionRequest
   | ChipRequest
   | ViewOpenRequest
+  | StateGetRequest
   | FixRequest
   | EditRequest
   | GmRequest
@@ -642,6 +652,8 @@ export interface ResultBodies {
   "lre.fix": { pending: boolean };
   "lre.edit": { pending: boolean };
   "lre.gm": GmView;
+  /** The chat's state view now, and its activity line (null when idle). */
+  "lre.state.get": { view: StateView; activity: Activity | null };
   "lre.marker": { pending: boolean; preview?: MarkerPreview };
   "lre.keep": { pending: boolean };
   "lre.settings.get": SettingsResult;
