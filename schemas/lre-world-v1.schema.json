@@ -717,13 +717,26 @@
     },
     "routineSettings": {
       "type": "object",
-      "description": "How strictly people keep to routine against the story, whom routines invite, how social people are and how story plans bend routine. Absent parts take the defaults (balanced, player, usual, standard).",
+      "description": "How strictly people keep to routine against the story, whom routines invite, how social people are, how story plans bend routine, what each level of closeness's routine is to the engine, whether the narrator gets the present characters' usual routines, and the palette Timelapse's Follow my routine default. Absent parts take the defaults (balanced, player, usual, standard; live, near and far informative, background enforced; narrator on; palette off).",
       "additionalProperties": false,
       "properties": {
         "awareness": { "enum": ["story_first", "balanced", "routine_first"] },
         "invitations": { "enum": ["off", "player", "everyone"] },
         "sociability": { "enum": ["reserved", "usual", "outgoing"] },
-        "planBend": { "enum": ["must", "strong", "standard", "ordinary"] }
+        "planBend": { "enum": ["must", "strong", "standard", "ordinary"] },
+        "roles": {
+          "type": "object",
+          "description": "Each level of closeness's role: informative (context only; the engine never moves them by it), enforced (the planner and their schedules live it, the story first) or off (not even context).",
+          "additionalProperties": false,
+          "properties": {
+            "live": { "enum": ["informative", "enforced", "off"] },
+            "near": { "enum": ["informative", "enforced", "off"] },
+            "far": { "enum": ["informative", "enforced", "off"] },
+            "background": { "enum": ["informative", "enforced", "off"] }
+          }
+        },
+        "narrator": { "type": "boolean", "description": "Whether the narrator gets the present characters' usual routines as soft context." },
+        "paletteFollowsRoutine": { "type": "boolean", "description": "Whether the palette Timelapse's Follow my routine starts on." }
       }
     },
     "stage": {

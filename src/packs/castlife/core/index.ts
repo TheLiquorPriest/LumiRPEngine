@@ -36,7 +36,7 @@ import { labelOf, mutableSlice, numOf, objOf, optionalQuery, optionalService, sl
 import { planDay, tieKey, type FixedBlock, type PlanBlock, type PlanOption } from "../../../engine/plan-day";
 import type { AgentInstant, EventTypeDef, PackDef, ReadContext, Rejection, SlotInfo } from "../../../engine/registry";
 import type { PlayerBlock, RoutineEditOp, RoutineSociability } from "../../../shared/routines";
-import { blockShapeProblems, isOff, ROUTINE_AWARENESS, ROUTINE_EVENTS, ROUTINE_MODES, routineSettingsOf } from "../../../shared/routines";
+import { blockShapeProblems, isOff, ROUTINE_AWARENESS, ROUTINE_EVENTS, ROUTINE_MODES, ROUTINE_ROLES, routineSettingsOf } from "../../../shared/routines";
 import { createRng, type Rng } from "../../../engine/rng";
 import { hashParts } from "../../../shared/hash";
 import { allSchedules, routineStays, scheduleInstants, scheduleOwners } from "../../../engine/schedules";
@@ -757,10 +757,10 @@ function stepTrips(slot: SlotInfo, ctx: ReadContext): LedgerEvent[] {
 
 // ---------------------------------------------------------------- events, view, pack
 
-/** A chat's own source as an event carries it: the GM's or the story's, with its time. */
+/** A chat's own source as an event carries it: the GM's or the story's, with its time (the story's, said by the player when `by` says so). */
 function isChatSource(v: JsonValue | undefined): boolean {
   const o = objOf(v);
-  return typeof o.at === "number" && (o.type === "gm" || (o.type === "story" && (o.turn === undefined || typeof o.turn === "string")));
+  return typeof o.at === "number" && (o.type === "gm" || (o.type === "story" && (o.turn === undefined || typeof o.turn === "string") && (o.by === undefined || o.by === "player")));
 }
 
 /** A schedule change as an event carries it: off (until a time or for good), or their own slots with an optional recurrence. */
@@ -815,6 +815,7 @@ const EVENTS: EventTypeDef<PackEvent>[] = [
   },
   {
     // How someone follows their routine in this chat (`routine_follow`), set whole; null clears it.
+    // An earlier build's event has no role: it folds as it did, with none.
     type: ROUTINE_EVENTS.follow,
     validate: (e, ctx) => {
       if (!own(ctx.state.entities, strOf(e.data.entity))) return { code: "missing_entity", reason: "a routine setting names someone in the world" };
@@ -823,16 +824,17 @@ const EVENTS: EventTypeDef<PackEvent>[] = [
       const o = objOf(f);
       const mode = o.mode === null || ROUTINE_MODES.some((m) => m === o.mode);
       const awareness = o.awareness === null || ROUTINE_AWARENESS.some((a) => a === o.awareness);
-      return mode && awareness && (o.mode !== null || o.awareness !== null) ? null : { code: "bad_event", reason: "a routine setting is a mode, an awareness or both, or null to clear it" };
+      const role = o.role === undefined || o.role === null || ROUTINE_ROLES.some((r) => r === o.role);
+      return mode && awareness && role && (o.mode !== null || o.awareness !== null || (o.role !== undefined && o.role !== null)) ? null : { code: "bad_event", reason: "a routine setting is a mode, an awareness, a role or some of them, or null to clear it" };
     },
     apply: (e, state) => {
       const follow = sliceRecord(state, "castlife", "follow");
       const who = strOf(e.data.entity);
       const f = objOf(e.data.follow);
       if (e.data.follow === null) delete follow[who];
-      else follow[who] = { mode: f.mode ?? null, awareness: f.awareness ?? null };
+      else follow[who] = { mode: f.mode ?? null, awareness: f.awareness ?? null, ...(f.role !== undefined ? { role: f.role } : {}) };
     },
-    describe: (e, ctx, viewer) => changeLine(ctx, e, viewer, e.data.follow === null ? "routine setting cleared" : `routine: ${[objOf(e.data.follow).mode, objOf(e.data.follow).awareness].filter((x) => typeof x === "string").join(", ").replace(/_/g, " ")}`),
+    describe: (e, ctx, viewer) => changeLine(ctx, e, viewer, e.data.follow === null ? "routine setting cleared" : `routine: ${[objOf(e.data.follow).mode, objOf(e.data.follow).awareness, objOf(e.data.follow).role].filter((x) => typeof x === "string").join(", ").replace(/_/g, " ")}`),
   },
   {
     // One block of someone's routine in this chat (`routine_block`, or the story's): the block whole, or null to drop the chat's change.
@@ -891,7 +893,8 @@ function routineEdit(ctx: ReadContext, op: RoutineEditOp): LedgerEvent[] | Rejec
     const now = followOf(ctx, op.entity).chat;
     const mode = op.mode === undefined ? (now?.mode ?? null) : op.mode;
     const awareness = op.awareness === undefined ? (now?.awareness ?? null) : op.awareness;
-    return [{ type: ROUTINE_EVENTS.follow, data: { entity: op.entity, follow: mode === null && awareness === null ? null : { mode, awareness } } }];
+    const role = op.role === undefined ? (now?.role ?? null) : op.role;
+    return [{ type: ROUTINE_EVENTS.follow, data: { entity: op.entity, follow: mode === null && awareness === null && role === null ? null : { mode, awareness, role } } }];
   }
   if (op.op === "routine_block") {
     if (op.value === null) return [{ type: ROUTINE_EVENTS.block, data: { entity: op.entity, block: op.block, value: null, source } }];
@@ -1292,7 +1295,7 @@ export const castlifePack: PackDef = {
     // What the story changes of someone's routine (DESIGN §8, §9.4): the `routine` narration channel,
     // and the effect it records with, the chat's own blocks and schedules with source `story`.
     r.proposal(routineChannel);
-    r.effect({ type: ROUTINE_EFFECT, args: ["entity", "blocks?", "schedules?", "turn?"], resolve: storyEvents });
+    r.effect({ type: ROUTINE_EFFECT, args: ["entity", "blocks?", "schedules?", "turn?", "by?"], resolve: storyEvents });
 
     r.action({ id: "eat", label: "Eat", description: "Have a meal or a snack.", pack: "castlife", params: {}, requires: [], outcomes: { default: [{ type: "castlife.satisfy", args: { entity: "self", need: "hunger" } }, { type: "set", args: { entity: "self", field: "activity", value: "meal" } }] }, duration: "30", lexicon: ["eat", "have lunch", "have dinner", "grab a bite"], observable: "eats" });
     r.action({ id: "sleep", label: "Go to bed", description: "Go to bed and sleep until morning.", pack: "castlife", params: {}, requires: [], outcomes: { default: [{ type: "castlife.satisfy", args: { entity: "self", need: "fatigue" } }] }, duration: "5", activity: { type: "sleep", until: "next_time('07:00')" }, lexicon: ["go to bed", "sleep", "turn in", "hit the sack"], observable: "goes to bed" });

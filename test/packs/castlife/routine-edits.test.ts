@@ -41,11 +41,11 @@ describe("the GM's routine controls in a chat", () => {
     const friday = (ctx: ReadContext): string[] => dayPlan(ctx, "maya", 0).blocks.map((b) => `${b.option} ${b.place ?? "-"}`);
 
     let ctx = edit({ op: "routine_follow", entity: "maya", mode: "no_invitations" });
-    expect(routineGmView(ctx, "maya", 0).follow).toEqual({ mode: "no_invitations", awareness: "balanced", chat: { mode: "no_invitations", awareness: null } });
+    expect(routineGmView(ctx, "maya", 0).follow).toEqual({ mode: "no_invitations", awareness: "balanced", role: "enforced", chat: { mode: "no_invitations", awareness: null, role: null } });
     expect(routineGmView(ctx, "maya", 0).invitations.made).toEqual([]);
     // A part left out is kept.
     ctx = edit({ op: "routine_follow", entity: "maya", awareness: "story_first" });
-    expect(routineGmView(ctx, "maya", 0).follow.chat).toEqual({ mode: "no_invitations", awareness: "story_first" });
+    expect(routineGmView(ctx, "maya", 0).follow.chat).toEqual({ mode: "no_invitations", awareness: "story_first", role: null });
     ctx = edit({ op: "routine_block", entity: "maya", block: "evening", value: { id: "evening", label: "Settling up", activity: "errand", kind: "fixed", at: "18:00", minutes: 60, place: { place: "bank" } } });
     expect(friday(ctx)).toContain("routine:evening bank");
     ctx = edit({ op: "routine_block", entity: "maya", block: "dinner", value: { id: "dinner", off: true } });
@@ -60,7 +60,7 @@ describe("the GM's routine controls in a chat", () => {
       {
         entity: "maya",
         name: "Maya Chen",
-        follow: { mode: "no_invitations", awareness: "story_first" },
+        follow: { mode: "no_invitations", awareness: "story_first", role: null },
         blocks: [
           { block: "evening", source: { type: "gm", at: at(ctx, 0, "07:30") }, off: false },
           { block: "dinner", source: { type: "gm", at: at(ctx, 0, "07:30") }, off: true },

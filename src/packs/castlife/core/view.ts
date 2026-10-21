@@ -19,7 +19,7 @@ import { canSeeEntity } from "../../../engine/visibility";
 import { placeOfEntity } from "../../../engine/scope";
 import { livesPlans } from "./commitments";
 import { asksOf, dayPlan, invitationText, kindOfBlock, playerBlocks } from "./index";
-import { activeBlocks, chatBlocks, chatFollow, chatSchedules, followOf, ownerOf, routineCandidates, sourceView, type Applied } from "./routines";
+import { activeBlocks, chatBlocks, chatFollow, chatSchedules, followOf, ownerOf, routineCandidates, routineRole, sourceView, type Applied } from "./routines";
 
 /** A schedule's owner as the read model names it: the chat's own version, or the rank its owner has. */
 function scheduleOwner(ctx: ReadContext, id: string, rank: number | null, owner: ScheduleDef["owner"]): OwnerRef {
@@ -147,7 +147,7 @@ export function routineGmView(ctx: ReadContext, who: EntityId, day = dateAt(cale
     name: e?.name ?? who,
     tier: optionalQuery(ctx, "minds.tier")?.(ctx, who) ?? null,
     planned: livesPlans(ctx, who),
-    follow: followOf(ctx, who),
+    follow: { ...followOf(ctx, who), role: routineRole(ctx, who) },
     settings: routineSettingsOf(ctx.world),
     blocks,
     schedules,
