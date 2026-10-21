@@ -12,6 +12,7 @@ import type { JsonObject, JsonValue } from "../shared/json";
 import { isRecord } from "../shared/json";
 import type { EventRef, ResolveScope, TimeControl, TimeScope } from "../shared/ledger";
 import type { MindEditOp } from "../shared/minds";
+import type { RoutineEditOp } from "../shared/routines";
 import type { EditOp, ResultBodies } from "../shared/protocol";
 import type { Chip } from "../shared/state-view";
 import { chipRegenerates } from "../shared/state-view";
@@ -354,6 +355,9 @@ const OPS_ITEM: JsonObject = { type: "object", properties: { op: { type: "string
 /** Every minds control `lre_mind_edit` takes: a lookup over the ops, so a new one fails the typecheck until it is here. */
 const MIND_OP: Record<MindEditOp["op"], true> = { mind_pin: true, mind_refresh: true, mind_memory: true, mind_intent: true };
 const MIND_OPS = Object.keys(MIND_OP);
+/** Every routine control `lre_routine_edit` takes: a lookup over the ops, so a new one fails the typecheck until it is here. */
+const ROUTINE_OP: Record<RoutineEditOp["op"], true> = { routine_follow: true, routine_block: true, schedule_override: true };
+const ROUTINE_OPS = Object.keys(ROUTINE_OP);
 
 export const PLAY_TOOLS: readonly ToolModule[] = [
   {
@@ -518,4 +522,45 @@ export const PLAY_TOOLS: readonly ToolModule[] = [
     run: mindsCancel,
     cli: { command: "minds-cancel", section: SECTION, usage: "minds-cancel <chatId> <runId>", summary: "Stop a minds run", positionals: ["chatId", "runId"], needs: 2 },
   },
+  {
+    name: "lre_day",
+    write: false,
+    description:
+      "A character's routine and day in a chat (DESIGN §8). As the GM (spoilers: true): their effective routine, each block with the owner it comes from (this chat, their own, a group, a kind, a selector, the world, the basic needs), its source (authored, lore, a sheet, the story, the GM) and what it shadows; every schedule that applies, which wins and the chat's change; the day as laid with why each block is there; what the story holds now; and the invitations they made and received with their grounds. As the player (view: \"player\"): only what Cast shows of someone the POV may know.",
+    inputSchema: object({ chatId: CHAT_ID, entity: { type: "string", description: "The character's id (lre_gm lists them)." }, view: { type: "string", enum: ["gm", "player"], description: "gm (needs spoilers: true) or player." }, day: { type: "integer", description: "A day index; today when left out (gm only)." }, spoilers: SPOILERS }, ["chatId", "entity", "view"]),
+    run: (args, ctx) => routineDay(args, ctx),
+    cli: { command: "day", section: SECTION, usage: "day <chatId> <entity> [--view gm|player] [--day <n>] [--spoilers]", summary: "A character's routine and day, with why", positionals: ["chatId", "entity"], needs: 2, options: { "--view": { arg: "view", as: "text" }, "--day": { arg: "day", as: "int" }, "--spoilers": { arg: "spoilers", as: "flag" } } },
+  },
+  {
+    name: "lre_routine_changes",
+    write: false,
+    description: "Everyone a chat changed the routine or schedules of (GM → Routine): their follow setting, and the blocks and schedules it changed, with whether the GM or the story did. Needs spoilers: true.",
+    inputSchema: object({ chatId: CHAT_ID, spoilers: SPOILERS }, ["chatId", "spoilers"]),
+    run: async (args, ctx) => {
+      gate(args, "lre_routine_changes", "shows the GM's changes to people's routines");
+      const chatId = chatIdOf(args);
+      return { text: json(await ask(ctx, chatId, "lre.routine", { chatId, op: "changed" })) };
+    },
+    cli: { command: "routine-changes", section: SECTION, usage: "routine-changes <chatId> --spoilers", summary: "Whose routines a chat changed", positionals: ["chatId"], needs: 1, options: { "--spoilers": { arg: "spoilers", as: "flag" } } },
+  },
+  {
+    name: "lre_routine_edit",
+    description:
+      'Change characters\' routines and schedules in a chat (GM → Routine), as one GM edit with an Undo chip: routine_follow {entity, mode?: "follows", "no_invitations" or "off" (no routine: the story, the GM, commitments and basic needs only), awareness?: "story_first", "balanced" or "routine_first"} (null returns a part to the world\'s); routine_block {entity, block, value: a block, {"id", "off": true}, or null to drop the chat\'s change}; schedule_override {entity, schedule, value: {"off": true, "until": minutes or null}, {"slots": [...], "recurrence"?}, or null}. lre_day shows the blocks and schedules. Needs spoilers: true.',
+    inputSchema: object({ chatId: CHAT_ID, spoilers: SPOILERS, ops: { type: "array", minItems: 1, maxItems: 200, items: { type: "object", properties: { op: { type: "string", enum: ROUTINE_OPS } }, required: ["op", "entity"] }, description: 'The operations, in order: [{"op": "routine_follow", "entity": "danny_okafor", "mode": "no_invitations"}].' } }, ["chatId", "spoilers", "ops"]),
+    write: { destructive: true, idempotent: false },
+    run: (args, ctx) => gmEdit(args, ctx, "lre_routine_edit", ROUTINE_OPS),
+    cli: { command: "routine-edit", section: SECTION, usage: "routine-edit <chatId> --ops <file|json> --spoilers", summary: "Change characters' routines and schedules in a chat", positionals: ["chatId"], needs: 1, options: { "--ops": { arg: "ops", as: "json" }, "--spoilers": { arg: "spoilers", as: "flag" } } },
+  },
 ];
+
+/** A character's day: the GM's view behind the spoilers gate, the player's as Cast shows it. */
+async function routineDay(args: Args, ctx: ToolContext): Promise<ToolResult> {
+  const chatId = chatIdOf(args);
+  const entity = neededText(args, "entity", "the character's id (lre_gm lists them)");
+  const view = textArg(args, "view") === "player" ? "player" : "gm";
+  if (view === "gm") gate(args, "lre_day", "shows a character's whole routine, secrets and the GM's changes included");
+  const day = intArg(args, "day", Number.MIN_SAFE_INTEGER, Number.MAX_SAFE_INTEGER);
+  const body = await ask(ctx, chatId, "lre.routine", { chatId, op: "day", entity, view, ...(day !== undefined && view === "gm" ? { day } : {}) });
+  return { text: json(body) };
+}
