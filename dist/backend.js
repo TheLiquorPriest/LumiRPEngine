@@ -24074,6 +24074,9 @@ function planDay(input) {
 
 // src/shared/routines.ts
 var ROUTINE_BLOCK_KINDS = ["fixed", "flexible", "optional"];
+function storySourceLabel(source) {
+  return source.by === "player" ? "From your message" : "The story";
+}
 function isOff(entry) {
   return "off" in entry && entry.off === true;
 }
@@ -24849,7 +24852,7 @@ function sourceView(ctx, source) {
     case "builtin":
       return { ...source, label: "Basic needs" };
     case "story":
-      return { ...source, label: "The story" };
+      return { ...source, label: storySourceLabel(source) };
     case "gm":
       return { ...source, label: "The GM" };
   }
@@ -58446,7 +58449,7 @@ function routineChanges(ctx) {
     entity: id,
     name: own(ctx.state.entities, id)?.name ?? id,
     follow: chatFollow(ctx.state, id),
-    blocks: Object.entries(chatBlocks(ctx.state, id)).map(([block, c]) => ({ block, source: c.source, off: isOff(c.value) })),
+    blocks: Object.entries(chatBlocks(ctx.state, id)).map(([block, c]) => ({ block, source: c.source, off: isOff(c.value), ...isOff(c.value) ? {} : { label: c.value.label } })),
     schedules: Object.entries(chatSchedules(ctx.state, id)).map(([schedule, c]) => ({ schedule, source: c.source, off: "off" in c.value }))
   }));
 }
@@ -69147,9 +69150,9 @@ function thisBuild(moduleUrl = import.meta.url) {
   const dir = moduleUrl.replace(/[^/]*$/, "");
   const path = pathOfFileUrl(`${dir}${KIT_FILE}`);
   const core = pathOfFileUrl(`${dir}${CORE_FILE}`);
-  const sha256 = "4287974c552e1bb1c19f81caee8756a5f8bc4f11dadf44ab4646849c4c94beb5";
+  const sha256 = "5990cf9323ba9f550ca2d5c112e0a391bb37de4d6079952de07c819f076915fb";
   const tools = ["18ab4cc48319d3329b4f414f8503d74f", "9748f93066a93461e251d2677fe4f3b6"].filter((f) => f !== undefined);
-  return { id: "819b53da", kit: sha256 !== undefined && path !== null && core !== null ? { path, core, sha256, api: KIT_API } : null, tools };
+  return { id: "3b420e9d", kit: sha256 !== undefined && path !== null && core !== null ? { path, core, sha256, api: KIT_API } : null, tools };
 }
 var BUILD_FILE = "agents/build.json";
 var USER_FILE = "agents.json";
@@ -71112,8 +71115,10 @@ function plainly(p, world, state) {
   const start = str17(p.start);
   const end = str17(p.end);
   const time = start === "" ? "" : end === "" ? start : `${start}\u2013${end}`;
-  const where = str17(p.place) === "" ? "" : `at ${placeName(p.place)}`;
-  const company = (Array.isArray(p.with) ? p.with : []).flatMap((id) => typeof id === "string" && state.entities[id] ? [state.entities[id]?.name ?? id] : []);
+  const said = label.toLowerCase();
+  const place = str17(p.place) === "" ? "" : placeName(p.place);
+  const where = place === "" || said.includes(place.toLowerCase()) ? "" : `at ${place}`;
+  const company = (Array.isArray(p.with) ? p.with : []).flatMap((id) => typeof id === "string" && state.entities[id] ? [state.entities[id]?.name ?? id] : []).filter((n) => !said.includes(n.toLowerCase()));
   const parts = [label, days, time, where, company.length > 0 ? `with ${company.join(" and ")}` : ""].filter((s) => s !== "");
   return { whose, detail: `${subject}: ${parts.join(", ")}, from the next day.` };
 }
@@ -72300,7 +72305,7 @@ class Runtime {
     this.steps.onCallStart = (userId, purpose) => this.diag.callStart(userId, purpose);
     this.toolSupport = new ToolSupport(this.host);
     this.minds = { host: this.host, registry: this.registry, steps: this.steps, settings: this.settings, presets: this.presets };
-    this.ledger = new LedgerService(this.host, (chatId, userId) => this.resolveEnv(chatId, userId), new LedgerFold(this.registry, { fingerprint: "819b53da" }), (chatId) => messages.forget(chatId));
+    this.ledger = new LedgerService(this.host, (chatId, userId) => this.resolveEnv(chatId, userId), new LedgerFold(this.registry, { fingerprint: "3b420e9d" }), (chatId) => messages.forget(chatId));
     this.studio = new StudioBridge(this.host, this.worlds);
     this.worlds.onChange = (worldId, userId) => this.studio.worldChanged(worldId, userId);
     this.agents = new Agents(this.host, options.build ?? thisBuild(), async (userId) => (await this.settings.get(userId)).timeouts.mcpReconnectMs);
@@ -75135,6 +75140,7 @@ class Dispatcher {
         const result = await this.write(chatId, userId, { kind: "post", id: this.nextId(), target: "head", entry: { kind: "confirm", events } });
         const added = typeof chip.payload.added === "string" ? chip.payload.added : "Added to the routine";
         await this.rt.chips.add(chatId, userId, [{ id: id.replace(/^routine_ask:/, "routine_added:"), kind: "routine_added", messageId: chip.messageId, label: added, ...chip.detail !== undefined ? { detail: chip.detail } : {}, actions: [{ id: "undo", label: "Undo", style: "danger" }], expires: "next_send", payload: { events: JSON.parse(JSON.stringify(events)) } }]);
+        this.rt.push.changed(chatId, userId);
         return { applied: result.applied, pending: result.pending };
       }
       case "routine_added": {

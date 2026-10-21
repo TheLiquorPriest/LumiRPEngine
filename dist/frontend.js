@@ -3812,6 +3812,9 @@ var MIND_ANSWER_FORMATS = Object.freeze({
 
 // src/shared/routines.ts
 var ROUTINE_BLOCK_KINDS = ["fixed", "flexible", "optional"];
+function storySourceLabel(source) {
+  return source.by === "player" ? "From your message" : "The story";
+}
 function isOff(entry) {
   return "off" in entry && entry.off === true;
 }
@@ -28773,7 +28776,7 @@ function storyChanges(view, summary) {
   const out = [];
   for (const b of summary?.blocks ?? [])
     if (b.source.type === "story")
-      out.push({ kind: "block", id: b.block, source: b.source, off: b.off, block: view.blocks.find((x) => x.block.id === b.block) ?? null });
+      out.push({ kind: "block", id: b.block, source: b.source, off: b.off, block: view.blocks.find((x) => x.block.id === b.block) ?? null, ...b.label !== undefined ? { label: b.label } : {} });
   for (const s of summary?.schedules ?? [])
     if (s.source.type === "story")
       out.push({ kind: "schedule", id: s.schedule, source: s.source, off: s.off, schedule: view.schedules.find((x) => x.schedule === s.schedule) ?? null });
@@ -29629,7 +29632,7 @@ function StoryMade(props) {
             return /* @__PURE__ */ u3(ListRow, {
               id: c.id,
               icon: c.kind === "schedule" ? "calendar" : "clock",
-              title: shown ? shown.label : nameOfId(c.id),
+              title: shown?.label ?? (c.kind === "block" ? c.label : undefined) ?? nameOfId(c.id),
               subtitle: /* @__PURE__ */ u3("span", {
                 class: "lre-gm-routines-lines",
                 children: [
@@ -29637,7 +29640,7 @@ function StoryMade(props) {
                     children: what
                   }, undefined, false, undefined, this),
                   /* @__PURE__ */ u3("span", {
-                    children: sourceWords2({ ...c.source, label: "The story" }, props.now)
+                    children: sourceWords2({ ...c.source, label: storySourceLabel(c.source) }, props.now)
                   }, undefined, false, undefined, this),
                   c.source.turn ? /* @__PURE__ */ u3(IdText, {
                     id: c.source.turn
@@ -48651,6 +48654,9 @@ function WorldSection(props) {
 }
 
 // src/frontend/play/gm.tsx
+function gmReloadKey(state) {
+  return `${state.status}\x00${state.journal.length}\x00${state.chips.map((c) => c.id).join("\x00")}`;
+}
 function GmPanel(props) {
   const app = useApp();
   const revealed = useUi((ui) => ui.gm.revealed);
@@ -48671,7 +48677,7 @@ function GmPanel(props) {
     }
     loads.current++;
     setGm(null);
-  }, [revealed, props.chatId, props.state.status, props.state.chips.length, props.state.journal.length]);
+  }, [revealed, props.chatId, gmReloadKey(props.state)]);
   if (!revealed)
     return /* @__PURE__ */ u3(Gate, {
       onReveal: () => app.ui.update(revealTruth)
