@@ -501,6 +501,36 @@ A character at a low level can still deal with one at a high level: each side re
 
 From Money level 3, the people in the world live on their money as you do. They are paid, they pay their bills, and every Monday they pay a week of living costs that follows their wealth band (a world can set its own amounts; the Modern US data prices them from a weekly grocery basket), so their balances go down as well as up. A bill paid to someone in the world, like your rent to your landlord, lands in that person's own account. The first morning their bills run, the engine opens their accounts with the balances the world gives them. You see all of this only in [GM mode](#everyone-elses-money).
 
+## Routines and schedules
+
+People in a world have days of their own. A **routine** is what someone can be relied on to do on an ordinary day: opening the shop at seven, coffee somewhere three mornings a week, a walk by the lake on a fair weekend. Its blocks can be **fixed** (at a set time), **flexible** (somewhere in a window, or a few times a week) or **optional** (only likely, and the first thing a busy day drops), and someone can have no routine at all. A **schedule** is a commitment with set hours, such as a shift or school. A world's routines can rest on its lore or a character's sheet, and say so.
+
+Routines and schedules are defaults the world relies on, never a script the story has to follow. Where someone's day comes from, most binding first:
+
+1. **What the story established:** where the narration, your actions or the GM put them, a trip, a plan under way, and what the GM says they mean to do.
+2. **Their commitments:** schedules, appointments and trips.
+3. **Their plans** from the story.
+4. **Their routine.**
+5. **Their basic needs:** sleep and meals.
+6. **Chores, their agenda's steps and things to get back** that the world grounds.
+
+Nothing else fills a day: no outing, party or invitation that nothing in the world or the story grounds. The story always leads the people in it. A routine or a schedule never moves anyone out of a scene with you, and never moves a character close to the story (Live or Near on the [fidelity ladder](#the-fidelity-ladder)): their mind and the scene speak for them, and their routine is at most a suggestion. No routine interrupts play or stops a time skip. Background characters, off screen, keep their routines and schedules most closely, which is where routines matter most. Your own character follows its routine only when time runs on its own (a Timelapse to your next shift, say); a span you spend doing something ("for the next two hours, I sort the stock") or a skip the reply narrates leaves you where the story has you.
+
+**Tuning.** A world sets how routines and the story share the day in **Build → Routines**:
+
+- **How strictly people keep to routine** against the story: **Story first** (someone the story put somewhere stays there until the story or the GM releases them), **Balanced** (the default: until their night, with Background characters keeping their routine) or **Routine first** (their routine's next block takes them back).
+- **Invitations** from routine blocks that ask company along: **Off**, **To the player only** (the default) or **Between everyone**. Plans the story makes, and the GM, invite whatever this says.
+- **Sociability:** **Reserved**, **Usual** or **Outgoing**, how fast people want company and fun.
+- **How plans bend routine:** which plans the story makes take time from work and school.
+
+In a chat, the GM can change any of this for one character without touching the world: whether and how strictly they keep their routine, one block, or one schedule, each with its Undo.
+
+Where you meet them:
+
+- **Play → People**: someone's usual day, as far as you may know it, and why each block is there ([People](#people)).
+- **GM → Routines**: everyone's routine, schedules and day as this chat has them, with what the story changed and the GM's changes ([Routines in GM mode](#routines-in-gm-mode)).
+- **Build → Routines**: the world's routines and their settings ([Routines in Build](#routines-in-build)), and routines proposed from the world's lore ([Proposing routines from lore](#proposing-routines-from-lore)). A routine Build can't read, or a setting it doesn't take, isn't saved: the message names the field to fix. Outside agents edit them the same way, with the same checks ([MCP.md](MCP.md)).
+
 ## How checks are decided
 
 A check is the dice an action rolls (see [Checks, pools, progression and sheets](#checks-pools-progression-and-sheets)). How much those dice matter, against how you describe what your character does, is up to the world and to you. A world can set its own rules for checks in **Build → Ruleset**, under **How checks are decided**. A world that sets none rolls every check and lets the roll settle it, exactly as before.
