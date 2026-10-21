@@ -24,6 +24,8 @@ declare module "../../../engine/registry" {
     "minds.minded": (ctx: ReadContext) => EntityId[];
     /** Whether minds were on at the chat's latest round: the castlife planner's formula invitations run only while they're off. */
     "minds.on": (ctx: ReadContext) => boolean;
+    /** Whether the GM set what a character means to do now, in words (DESIGN §24.9): their routine gives way to it (§8). */
+    "minds.intent": (ctx: ReadContext, who: EntityId) => boolean;
     /** Every character's fidelity now, best score first (DESIGN §24.1); texts empty inside `advance` and at a beat. */
     "minds.fidelity": (ctx: ReadContext, texts: FidelityTexts) => FidelityScore[];
   }

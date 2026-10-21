@@ -34,6 +34,7 @@ export const mindsPack: PackDef = {
     });
     r.query("minds.minded", minded);
     r.query("minds.on", mindsOn);
+    r.query("minds.intent", (ctx, who) => (readCharacter(ctx.state, who).intent?.text ?? "") !== "");
     r.query("minds.fidelity", (ctx, texts) => fidelityOf(ctx, texts));
     r.renderer({ slot: MINDS_SLOT, render: (ctx) => mindLines(ctx).map((l) => l.line) });
     for (const rule of MINDS_LINTS) r.lint(rule);
