@@ -24,7 +24,7 @@ import { runtimeCannotFollow } from "./version";
 const nodeMajor = Number((process.versions.node ?? "0").split(".")[0]);
 // Bun reports a Node version too; only Node itself needs checking for its built-in WebSocket.
 if (process.versions.bun === undefined && nodeMajor < 22) {
-  process.stderr.write(`lumirpengine needs Node 22 or newer (this is Node ${process.versions.node}): it uses Node's built-in WebSocket and fetch.\n`);
+  process.stderr.write(`lumirpengine needs Bun 1.4 or newer, or Node 22 or newer (this is Node ${process.versions.node}, without the built-in WebSocket and fetch it uses).\n`);
   process.exit(1);
 }
 

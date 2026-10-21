@@ -37,6 +37,15 @@ bundle("src/frontend.ts", "dist/frontend.js", "browser", stamp);
 bundle("src/worker/background-lane.ts", "dist/worker/background-lane.js", "bun", stamp);
 bundle("src/cli/main.ts", "dist/lumirpengine.js", "node", stamp);
 
-const version = Bun.spawnSync(["node", "dist/lumirpengine.js", "--version"], { cwd: ROOT, stdout: "pipe", stderr: "inherit" });
-if (version.exitCode !== 0) process.exit(1);
-console.log(`${version.stdout.toString().trim()}\nagent kit sha256 ${kitSha256}`);
+// The command line runs under Bun 1.4+ or Node 22+: it must start under the Bun building it, and
+// under Node too where there is one (a machine with only Bun, as Lumiverse's own can be, has none).
+const runtimes = [process.execPath, Bun.which("node")].filter((runtime): runtime is string => runtime !== null);
+const versions = runtimes.map((runtime) => {
+  const run = Bun.spawnSync([runtime, "dist/lumirpengine.js", "--version"], { cwd: ROOT, stdout: "pipe", stderr: "inherit" });
+  if (run.exitCode !== 0) {
+    console.error(`build: dist/lumirpengine.js --version failed under ${runtime}`);
+    process.exit(1);
+  }
+  return run.stdout.toString().trim();
+});
+console.log(`${versions[0]}\nagent kit sha256 ${kitSha256}`);
