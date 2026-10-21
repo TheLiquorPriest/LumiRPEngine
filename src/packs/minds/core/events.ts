@@ -8,8 +8,8 @@ import type { EntityId } from "../../../shared/ids";
 import type { JsonObject, JsonValue } from "../../../shared/json";
 import { isRecord } from "../../../shared/json";
 import type { PackEvent } from "../../../shared/ledger";
-import type { CommitmentStatus, Fidelity, MindCommitment, MindNote, MindPlan, MindRecord, MindsCharacter, PlanStatus, WitnessEntry } from "../../../shared/minds";
-import { COMMITMENT_KINDS, COMMITMENT_STATUSES, FIDELITIES, MINDS_EVENTS, MINDS_KEEP, PLAN_KINDS, PLAN_PRIORITY } from "../../../shared/minds";
+import type { CommitmentStatus, Fidelity, MindCommitment, MindIntent, MindNote, MindPlan, MindRecord, MindsCharacter, PlanStatus, WitnessEntry } from "../../../shared/minds";
+import { COMMITMENT_KINDS, COMMITMENT_STATUSES, FIDELITIES, MIND_APPROACHES, MINDS_EVENTS, MINDS_KEEP, PLAN_KINDS, PLAN_PRIORITY } from "../../../shared/minds";
 import { own } from "../../../engine/pack-kit";
 import type { EventTypeDef, ReadContext, Rejection } from "../../../engine/registry";
 import type { WorldState } from "../../../engine/state";
@@ -365,6 +365,27 @@ const refresh: EventTypeDef<PackEvent> = {
   describe: (e, ctx, viewer) => (viewer !== undefined ? "" : `${nameOf(ctx, String(e.data.entity))}: a fresh mind next turn`),
 };
 
+/** An intent as the GM sets it: its text, or its approach, or both; one with neither is a clear, written as null. */
+function isIntent(v: JsonValue | undefined): v is MindIntent & JsonObject {
+  if (!isRecord(v) || !str(v.text)) return false;
+  const approach = v.approach === null || (typeof v.approach === "string" && (MIND_APPROACHES as readonly string[]).includes(v.approach));
+  return approach && (v.text !== "" || v.approach !== null);
+}
+
+/** `minds.intent`: the GM's intent for a character, set whole, or cleared with null. */
+const intent: EventTypeDef<PackEvent> = {
+  type: MINDS_EVENTS.intent,
+  validate: (e, ctx) => person(ctx, e.data) ?? (e.data.intent === null || isIntent(e.data.intent) ? null : bad("an intent is its text, its approach or both, or null to clear it")),
+  apply: (e, state) => {
+    const c = writeCharacter(state, String(e.data.entity));
+    const v = e.data.intent;
+    // A copy, so the event's own object is never aliased into the state.
+    if (isIntent(v)) c.intent = { text: v.text, approach: v.approach };
+    else delete c.intent;
+  },
+  describe: (e, ctx, viewer) => (viewer !== undefined ? "" : `${nameOf(ctx, String(e.data.entity))}: intent ${e.data.intent === null ? "cleared" : "set"}`),
+};
+
 /** `minds.skip`: a time skip's beats, as recorded for the GM; the skip itself is its own events. */
 const skip: EventTypeDef<PackEvent> = {
   type: MINDS_EVENTS.skip,
@@ -374,7 +395,7 @@ const skip: EventTypeDef<PackEvent> = {
   describe: (e, _ctx, viewer) => (viewer !== undefined ? "" : `Time skip beats: ${Array.isArray(e.data.beats) ? e.data.beats.length : 0}`),
 };
 
-export const MINDS_EVENT_DEFS: readonly EventTypeDef<PackEvent>[] = [round, mind, memory, presence, planStatus, planEdit, noteEdit, commitmentStatus, commitmentEdit, consolidated, pin, refresh, skip];
+export const MINDS_EVENT_DEFS: readonly EventTypeDef<PackEvent>[] = [round, mind, memory, presence, planStatus, planEdit, noteEdit, commitmentStatus, commitmentEdit, consolidated, pin, refresh, intent, skip];
 
 /** Whether minds are on at the chat's latest round. */
 export function mindsOn(ctx: Pick<ReadContext, "state">): boolean {

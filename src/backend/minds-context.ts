@@ -1,10 +1,10 @@
 // What one character's mind is given (DESIGN §24.5): only what that character knows. Their own
-// entity, their summary, notes, commitments, plans, witness log and last mind; the scene as
-// they perceive it and the occasion; their own life (money in plain words, the day, their agendas,
-// their own secrets included); lore read as them, the lore pinned to them and to where they are
-// first; and recall by presence: the chat turns they were there for, read through the host's chat,
-// the latest and the ones that best match the moment. Never the GM view, never another mind, never a
-// turn they weren't present for.
+// entity, the intent the GM set for them, their summary, notes, commitments, plans, witness log and
+// last mind; the scene as they perceive it and the occasion; their own life (money in plain words,
+// the day, their agendas, their own secrets included); lore read as them, the lore pinned to them and
+// to where they are first; and recall by presence: the chat turns they were there for, read through
+// the host's chat, the latest and the ones that best match the moment. Never the GM view, never
+// another mind, never a turn they weren't present for.
 
 import type { EntityId, MessageId, PlaceId } from "../shared/ids";
 import type { Limit, MindMoment, MindsCharacter, MindsMemoryConfig } from "../shared/minds";
@@ -22,6 +22,7 @@ import type { WorldState } from "../engine/state";
 import { agendaFor } from "../engine/tracks";
 import { canSeeEntity, knows, loreGateReader } from "../engine/visibility";
 import { dayPlan } from "../packs/castlife/core/index";
+import { intentLines, intentOf } from "../packs/minds/core/intent";
 import { faded, openCommitments, openPlans, readCharacter, readSlice, salienceNow } from "../packs/minds/core/state";
 import { CHARS_PER_TOKEN, sectionTokens } from "./book";
 import type { HostMessage } from "./host";
@@ -93,7 +94,8 @@ function sentence(text: string): string {
  * just written) kept whole at the end: each block in turn is cut at a word to the room left, line
  * breaks kept. `room` tells a block made to fit (lore, recall) how much is left before it. The
  * latest reply in `last` (`reply`, its length) comes on top of the budget: it is as long as the user
- * lets it be, and a long one must not squeeze out what they know, their lore and their recall.
+ * lets it be, and a long one must not squeeze out what they know, their lore and their recall. A
+ * block given with `keep` comes on top of the budget too, whole.
  */
 class ContextFit {
   private readonly parts: string[] = [];
@@ -112,6 +114,10 @@ class ContextFit {
     const kept = clip(text, this.room);
     this.parts.push(kept);
     this.left -= kept.length + 2;
+  }
+  /** A block given whole, on top of the budget as the latest reply is: the GM's own words for them, which nothing may cut and which crowd out nothing they know. */
+  keep(text: string): void {
+    if (text !== "") this.parts.push(text);
   }
   text(): string {
     return [...this.parts, this.last].filter((p) => p !== "").join("\n\n");
@@ -375,6 +381,7 @@ export function mindContext(scope: MindScope, report?: MindContextReport): strin
   const fit = new ContextFit(block("Now", now.length > 0 && withPov && moment.kind !== "beat" ? [storyVoice(scope), ...now] : now), ended.length);
   fit.add(`You are ${e?.name ?? who}. ${occasion(scope, place)}`);
   fit.add(block("Who you are", sheetLines(scope)));
+  fit.keep(block("What you mean to do", intentLines(intentOf(state, who))));
   fit.add(c.summary !== "" ? block("Your story so far", [c.summary]) : "");
   fit.add(block("Where you are", sceneLines(scope, place)));
   fit.add(block("Your own life", lifeLines(scope, c)));

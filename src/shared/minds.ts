@@ -517,6 +517,23 @@ export type MindRecord = {
   withheld: boolean;
 };
 
+/**
+ * How a character goes about things, as the GM sets it (DESIGN §24.9): `reactive` answers the scene
+ * and starts nothing of their own; `proactive` pursues their own aims unprompted.
+ */
+export type MindApproach = "reactive" | "proactive";
+export const MIND_APPROACHES: readonly MindApproach[] = ["reactive", "proactive"];
+
+/**
+ * What the GM says a character means to do now, in the GM's own words, and how they go about it
+ * (`minds.intent`). Their own mind reads it first and works from it; nothing else does. Either part
+ * may be empty, never both: an intent with neither is cleared.
+ */
+export type MindIntent = {
+  text: string;
+  approach: MindApproach | null;
+};
+
 /** Everything the minds pack keeps about one character (`state.packs.minds.chars[id]`). */
 export type MindsCharacter = {
   mind: MindRecord | null;
@@ -533,6 +550,8 @@ export type MindsCharacter = {
   lastPresent: number | null;
   /** When their notes were last folded into their summary (`minds.consolidated`). */
   consolidated: number | null;
+  /** The GM's intent for them in this chat (`minds.intent`); absent until one is set, and gone once cleared. */
+  intent?: MindIntent;
 };
 
 /** The minds pack's state slice (`state.packs.minds`). */
@@ -554,6 +573,8 @@ export const MIND_TEXT_CAPS = {
   monologue: 1200,
   depiction: 600,
   intent: 300,
+  /** The GM's intent for a character, in the GM's own words. */
+  gmIntent: 600,
   reaction: 200,
   reactions: 4,
   plans: 4,
@@ -632,6 +653,7 @@ export const MINDS_EVENTS = {
   consolidated: "minds.consolidated",
   pin: "minds.pin",
   refresh: "minds.refresh",
+  intent: "minds.intent",
   skip: "minds.skip",
 } as const;
 
@@ -697,6 +719,8 @@ export type ConsolidatedEventData = { entity: EntityId; at: number; notes: strin
 export type PinEventData = { entity: EntityId; level: Fidelity | null };
 /** `minds.refresh`: the GM wants a fresh mind for them next turn. */
 export type RefreshEventData = { entity: EntityId };
+/** `minds.intent`: the GM's intent for a character, whole, or null to clear it. */
+export type IntentEventData = { entity: EntityId; intent: MindIntent | null };
 /** `minds.skip`: a time skip's beats, as scanned and as the `skip` step proposed them. */
 export type SkipEventData = { from: number; to: number; beats: { at: number; reason: string; source: "scan" | "model" }[] };
 
@@ -719,6 +743,8 @@ export interface MindsGmCharacter {
   fidelity: FidelityScore;
   /** The GM asked for a fresh mind next turn. */
   refreshQueued: boolean;
+  /** The intent the GM set for them, or null. */
+  intent: MindIntent | null;
   /** The latest mind, with its clock in words. */
   mind: (Omit<MindRecord, "plans"> & { clock: string; plans: MindPlan[] }) | null;
   /** Open plans first, then the latest closed; each with its times in words. */
@@ -744,14 +770,17 @@ export interface MindsGmView {
 
 /**
  * The GM's minds controls, as `lre.edit` operations (one `fix` entry, with its Undo): pin a
- * character's fidelity (null unpins), ask for a fresh mind next turn, and edit, add (`id` null) or
- * delete (`value` null) a note, commitment or plan. A `value` is the item's fields to change; an added
- * one needs its text (and for a plan its `what` and `when`).
+ * character's fidelity (null unpins), ask for a fresh mind next turn, edit, add (`id` null) or
+ * delete (`value` null) a note, commitment or plan, and set what they mean to do now. A `value` is
+ * the item's fields to change; an added one needs its text (and for a plan its `what` and `when`).
+ * An intent names only what changes, at least one part: `text` "" empties it and `approach` null
+ * leaves it to their mind; with both empty the intent is cleared.
  */
 export type MindEditOp =
   | { op: "mind_pin"; entity: EntityId; level: Fidelity | null }
   | { op: "mind_refresh"; entity: EntityId }
-  | { op: "mind_memory"; entity: EntityId; part: "note" | "commitment" | "plan"; id: string | null; value: JsonObject | null };
+  | { op: "mind_memory"; entity: EntityId; part: "note" | "commitment" | "plan"; id: string | null; value: JsonObject | null }
+  | { op: "mind_intent"; entity: EntityId; text?: string; approach?: MindApproach | null };
 
 /**
  * A pinned lore entry a call was given (DESIGN §24.5), as a player surface may show it: its title

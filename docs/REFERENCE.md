@@ -798,7 +798,7 @@ Version 1 · realism domain none · requires none.
 
 ### Events
 
-Its own: `minds.commitment`, `minds.commitment_edit`, `minds.consolidated`, `minds.memory`, `minds.mind`, `minds.note_edit`, `minds.pin`, `minds.plan`, `minds.plan_edit`, `minds.presence`, `minds.refresh`, `minds.round`, `minds.skip`.
+Its own: `minds.commitment`, `minds.commitment_edit`, `minds.consolidated`, `minds.intent`, `minds.memory`, `minds.mind`, `minds.note_edit`, `minds.pin`, `minds.plan`, `minds.plan_edit`, `minds.presence`, `minds.refresh`, `minds.round`, `minds.skip`.
 
 ### Panels and slots
 

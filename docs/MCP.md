@@ -120,10 +120,10 @@ Every answer is text, JSON for data, of at most about 24,000 characters; a large
 | `lre_keep {chatId, choice, messageId, parentPath?, refs?}` | Keep, discard or convert after an earlier message was edited. |
 | `lre_view_open {chatId, panel, entity?}` | Open a panel, settling detail the chat hadn't decided yet. |
 | `lre_action {chatId, action, params?, text?}` / `lre_timelapse {chatId, target, overrides?, text?}` | Play a palette action or a timelapse as the player's next turn. The engine prepares it; Lumiverse starts the reply (see below). |
-| `lre_minds {chatId, spoilers, pointer?, offset?}` / `lre_mind_edit {chatId, spoilers, ops}` | Characters' minds and the latest Run minds now; pin, refresh or edit them. Need `spoilers: true`. |
+| `lre_minds {chatId, spoilers, pointer?, offset?}` / `lre_mind_edit {chatId, spoilers, ops}` | Characters' minds and the latest Run minds now; pin, refresh or edit them, or set what one means to do now and how they go about it (`mind_intent`). Need `spoilers: true`. |
 | `lre_minds_run {chatId, spoilers, who?}` / `lre_minds_cancel {chatId, runId}` | Run minds now, with model calls on your connection, or stop the run. |
 
-Every request LumiRPEngine's protocol accepts, and every op of one, is mapped in `src/cli/coverage.ts` to the tools that send it, or to why none does (the page's handshake and visibility, its claim on a prepared reply, the active Loom preset only the page can see, closing the drawer, and Build's one-item saves that `lre_edit`'s patch covers). The typecheck fails when a new request has neither, so a new surface can't ship without tools.
+Every request LumiRPEngine's protocol accepts, and every op of one (a GM edit's ops included), is mapped in `src/cli/coverage.ts` to the tools that send it, or to why none does (the page's handshake and visibility, its claim on a prepared reply, the active Loom preset only the page can see, closing the drawer, and Build's one-item saves that `lre_edit`'s patch covers). The typecheck fails when a new request or op has neither, so a new surface can't ship without tools.
 
 The chat tools' commands are `chat`, `chips`, `chip`, `inspector`, `gm`, `gm-edit`, `fix`, `marker`, `keep`, `view-open`, `act`, `timelapse`, `minds`, `mind-edit`, `minds-run` and `minds-cancel`; `--spoilers` is `spoilers: true`, and a JSON argument (`--ops`, `--value`, `--to`, `--target`…) is inline or a file holding it.
 

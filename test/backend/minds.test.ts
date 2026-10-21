@@ -20,6 +20,7 @@ import { playtestStart, playtestTurn } from "../../src/engine/authoring";
 import type { WorldState } from "../../src/engine/state";
 import { planTurn, postTurn } from "../../src/engine/turn";
 import { unrevealedSecrets } from "../../src/engine/visibility";
+import { intentLines } from "../../src/packs/minds/core/intent";
 import { readCharacter, readSlice } from "../../src/packs/minds/core/state";
 import { STARTER_WORLDS } from "../../src/packs/index";
 import { placeOfEntity } from "../../src/engine/scope";
@@ -544,6 +545,65 @@ describe("a mind's context", () => {
     await rig.turn(chatId, "Hello.", "They look up.");
     const danny = mindCalls(rig).find((c) => MIND.exec(c.messages[0]?.content ?? "")?.[1] === "Danny Okafor")?.messages[1]?.content ?? "";
     expect(danny).toMatch(/\n- Traits: funny, competitive, loyal\n/i);
+  });
+
+  test("the intent the GM sets for them comes first after who they are, in their own mind only: no other mind, step, narrator's section or player surface gets it", async () => {
+    const rig = new Rig({ shipped: true, minds: true });
+    fakeModels(rig);
+    const chatId = await alderChat(rig);
+    const AIM = "AIM-MARK: talk Priya into selling him the boat before the auction";
+    rig.body(await rig.send({ type: "lre.edit", chatId, ops: [{ op: "mind_intent", entity: "danny_okafor", text: AIM, approach: "proactive" }] }));
+    await rig.turn(chatId, "Hello.", "They look up.");
+    const isMind = (c: QuietRequest, name: string) => MIND.exec(c.messages[0]?.content ?? "")?.[1] === name;
+    const danny = mindCalls(rig).find((c) => isMind(c, "Danny Okafor"))?.messages[1]?.content ?? "";
+    // Their aim in the GM's words, and how they go about it, in a block right after who they are.
+    const who = danny.indexOf("## Who you are\n");
+    const aim = danny.indexOf("## What you mean to do\n");
+    expect(who).toBeGreaterThan(-1);
+    expect(aim).toBeGreaterThan(who);
+    expect(danny.slice(who + 1, aim)).not.toContain("## ");
+    // The block is their intent as rendered for them, whole.
+    expect(danny.slice(aim).split("\n")[1]).toBe(AIM);
+    expect(danny).toContain(["## What you mean to do", ...intentLines({ text: AIM, approach: "proactive" })].join("\n"));
+    // Ahead of everything else they know, and of the moment.
+    for (const title of ["## Your story so far", "## Where you are", "## Your own life", "## What you remember", "## What you know of the world", "## Turns you were there for", "## Now"]) {
+      const at = danny.indexOf(title);
+      if (at >= 0) expect([title, at > aim]).toEqual([title, true]);
+    }
+    // Nobody else's mind, no memory or helper step, no narrator's section, no player surface.
+    const others = rig.host.quietCalls.filter((c) => !isMind(c, "Danny Okafor"));
+    expect(others.some((c) => isMind(c, "Priya Nair"))).toBe(true);
+    expect(others.some((c) => MEMORY.test(c.messages[0]?.content ?? ""))).toBe(true);
+    expect(JSON.stringify(others)).not.toContain("AIM-MARK");
+    expect(rig.host.assembled.length).toBeGreaterThan(0);
+    expect(JSON.stringify(rig.host.assembled)).not.toContain("AIM-MARK");
+    expect(JSON.stringify(rig.latestView(chatId))).not.toContain("AIM-MARK");
+    expect(JSON.stringify(rig.host.sent.filter((m) => m.type !== "lre.result"))).not.toContain("AIM-MARK");
+    // Their next mind still works from it.
+    await rig.turn(chatId, "Anything new?", "They shrug.");
+    expect(mindCalls(rig).filter((c) => isMind(c, "Danny Okafor")).at(-1)?.messages[1]?.content).toContain(AIM);
+  });
+
+  test("their intent is never cut: when who they are fills the room, it still comes whole, on top of the budget", async () => {
+    const rig = new Rig({ shipped: true, minds: true });
+    fakeModels(rig);
+    const contexts: string[] = [];
+    const minds = rig.host.quietReply;
+    rig.host.quietReply = (req) => {
+      if (MIND.exec(req.messages[0]?.content ?? "")?.[1] === "Danny Okafor") contexts.push(req.messages[1]?.content ?? "");
+      return minds?.(req) ?? "{}";
+    };
+    const chatId = await alderChat(rig);
+    const AIM = `AIM-MARK ${"keep the shop open through the winter whatever it takes ".repeat(10).trim()} AIM-END`;
+    rig.body(await rig.send({ type: "lre.edit", chatId, ops: [{ op: "set", entity: "danny_okafor", field: "description", value: `${"He has fixed every engine on Harbor Street twice. ".repeat(400).trim()}` }, { op: "mind_intent", entity: "danny_okafor", text: AIM }] }));
+    await rig.turn(chatId, "Hello.", "They look up.");
+    const context = contexts.at(-1) ?? "";
+    const ended = /The story so far ended: (.*)\n/.exec(context)?.[1] ?? "";
+    const block = ["## What you mean to do", ...intentLines({ text: AIM, approach: null })].join("\n");
+    expect(context).toContain(block);
+    // Who they are was cut to the room; their intent (and the blank line before it) wasn't, and comes on top of it.
+    expect(context.length - ended.length - (block.length + 2)).toBeLessThanOrEqual(16_000);
+    expect(context.length - ended.length).toBeGreaterThan(16_000);
   });
 
   test("by default the latest reply is read whole, however long, by the next mind and by the memory step; only who was there for it reads it", async () => {

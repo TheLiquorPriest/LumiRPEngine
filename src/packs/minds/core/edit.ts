@@ -1,6 +1,7 @@
 // The GM's minds controls (DESIGN §24.9) as events of one `fix` entry: pin a character's fidelity,
-// ask for a fresh mind next turn, and edit, add or delete a note, commitment or plan. A value names
-// only the fields that change; what it names is checked here, and the event then checks the whole.
+// ask for a fresh mind next turn, edit, add or delete a note, commitment or plan, and set what they
+// mean to do now. A value names only the fields that change; what it names is checked here, and the
+// event then checks the whole.
 
 import { hashParts } from "../../../shared/hash";
 import type { EntityId } from "../../../shared/ids";
@@ -112,6 +113,13 @@ export function mindEdit(ctx: ReadContext, op: MindEditOp): LedgerEvent[] | Reje
   if (op.op === "mind_pin") return [{ type: MINDS_EVENTS.pin, data: { entity: op.entity, level: op.level } }];
   if (op.op === "mind_refresh") return [{ type: MINDS_EVENTS.refresh, data: { entity: op.entity } }];
   const c = readCharacter(state, op.entity);
+  if (op.op === "mind_intent") {
+    if (op.text === undefined && op.approach === undefined) return reject("bad_value", "say what they mean to do, or how they go about it");
+    // The event carries the intent whole, so a fold reads it without the state it was made on.
+    const text = op.text === undefined ? (c.intent?.text ?? "") : capText(op.text, MIND_TEXT_CAPS.gmIntent);
+    const approach = op.approach === undefined ? (c.intent?.approach ?? null) : op.approach;
+    return [{ type: MINDS_EVENTS.intent, data: { entity: op.entity, intent: text === "" && approach === null ? null : { text, approach } } }];
+  }
   const value = op.value;
   if (op.part === "note") {
     const before = op.id === null ? undefined : c.notes.find((n) => n.id === op.id);

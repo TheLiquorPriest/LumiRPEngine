@@ -662,6 +662,7 @@ function gmMinds(): MindsGmView {
           pin: { gm: null, author: null },
         },
         refreshQueued: false,
+        intent: { text: "Get Jordan to cover Friday's shift without letting on why he needs the night off.", approach: "proactive" },
         mind: {
           at: 1890,
           round: 6,
@@ -723,6 +724,7 @@ function gmMinds(): MindsGmView {
           pin: { gm: null, author: "live" },
         },
         refreshQueued: false,
+        intent: null,
         mind: {
           at: 1890,
           round: 6,
@@ -767,6 +769,7 @@ function gmMinds(): MindsGmView {
           pin: { gm: "live", author: null },
         },
         refreshQueued: false,
+        intent: null,
         mind: {
           at: 1890,
           round: 6,
@@ -804,6 +807,7 @@ function gmMinds(): MindsGmView {
           pin: { gm: null, author: null },
         },
         refreshQueued: true,
+        intent: { text: "", approach: "reactive" },
         mind: null,
         plans: [],
         notes: [],
@@ -826,6 +830,7 @@ function gmMinds(): MindsGmView {
           pin: { gm: null, author: null },
         },
         refreshQueued: false,
+        intent: null,
         mind: {
           at: 960,
           round: 3,
@@ -854,6 +859,7 @@ function gmMinds(): MindsGmView {
         name: "Vic Moreau",
         fidelity: { entity: "npc_vic", level: "background", score: 0, reasons: [{ label: "Removed", points: 0 }], pin: { gm: null, author: null } },
         refreshQueued: false,
+        intent: null,
         mind: null,
         plans: [],
         notes: [],

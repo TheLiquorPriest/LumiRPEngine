@@ -143,8 +143,9 @@ export type FixRequest = Request<"lre.fix"> & { chatId: ChatId } & ({ entity: En
  *    tags, both whole; the chat holds them from then on over the world's definition.
  *  - `spawn` adds an entity; `despawn` takes one out of the world (`gone`, its relations unlinked)
  *    and `restore` brings it back.
- *  - `mind_pin`, `mind_refresh`, `mind_memory`: a character's mind (DESIGN §24.9): pin their fidelity,
- *    ask for a fresh mind next turn, edit or delete a note, commitment or plan (`MindEditOp`).
+ *  - `mind_pin`, `mind_refresh`, `mind_memory`, `mind_intent`: a character's mind (DESIGN §24.9): pin
+ *    their fidelity, ask for a fresh mind next turn, edit or delete a note, commitment or plan, and
+ *    set what they mean to do now and how they go about it (`MindEditOp`).
  *  - `effect` runs a pack effect registered for GM edits (`EffectDef.gm`) with literal arguments:
  *    what no entity field holds, such as an asset's price.
  */
