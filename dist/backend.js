@@ -66034,8 +66034,8 @@ function thisBuild(moduleUrl = import.meta.url) {
   const dir = moduleUrl.replace(/[^/]*$/, "");
   const path = pathOfFileUrl(`${dir}${KIT_FILE}`);
   const core = pathOfFileUrl(`${dir}${CORE_FILE}`);
-  const sha256 = "b8707fd3c24adcee3b176be208d5c124bdcda43884a0bb62e65b90ee78200059";
-  return { id: "237cf60d", kit: sha256 !== undefined && path !== null && core !== null ? { path, core, sha256, api: KIT_API } : null };
+  const sha256 = "634c574ca5c174c38379b41c4bbe097b2365f38728d996d3c05d9b1a99ee35d4";
+  return { id: "4adfc6be", kit: sha256 !== undefined && path !== null && core !== null ? { path, core, sha256, api: KIT_API } : null };
 }
 var BUILD_FILE = "agents/build.json";
 var USER_FILE = "agents.json";
@@ -66087,6 +66087,7 @@ class Agents {
   writes = new Map;
   working = new Set;
   sessions = new Map;
+  restored = new Map;
   started;
   constructor(host, build, now = Date.now) {
     this.host = host;
@@ -66097,9 +66098,15 @@ class Agents {
   start() {
     this.started = this.compare();
     this.host.on("FRONTEND_SESSION_CLOSED", (e, userId) => {
-      if (userId === null || !this.sessions.delete(`${userId}\x00${e.frontendSessionId}`))
+      if (userId === null)
         return;
-      this.track(this.tell(userId), "the MCP servers' view wasn't sent");
+      const key = `${userId}\x00${e.frontendSessionId}`;
+      const heard = this.sessions.delete(key);
+      if (!this.restored.delete(key) && !heard)
+        return;
+      this.track(this.change(userId, () => {
+        return;
+      }), "the MCP servers' view wasn't sent");
     });
   }
   async settle() {
@@ -66141,6 +66148,7 @@ class Agents {
     const id = idOf(checkIn);
     if (session !== undefined) {
       const key = `${userId}\x00${session}`;
+      this.restored.delete(key);
       this.sessions.delete(key);
       this.sessions.set(key, { id, client: checkIn, seen: checkIn.seen });
       for (const oldest of this.sessions.keys()) {
@@ -66179,6 +66187,7 @@ class Agents {
         const now = this.now();
         const quiet = now - heard.seen > LIVE_MS;
         heard.seen = now;
+        this.track(this.file(userId).then((file) => this.save(userId, file)), "an MCP server's look wasn't kept");
         if (quiet)
           this.track(this.tell(userId), "the MCP servers' view wasn't sent");
       }
@@ -66220,6 +66229,15 @@ class Agents {
       else
         live.set(heard.id, [heard]);
     }
+    for (const [key, heard] of this.restored) {
+      if (!key.startsWith(prefix) || this.sessions.has(key) || now - heard.seen > LIVE_MS)
+        continue;
+      const same = live.get(heard.id);
+      if (same)
+        same.push(heard);
+      else
+        live.set(heard.id, [heard]);
+    }
     const build = this.build.id;
     const kit = this.build.kit;
     return {
@@ -66248,8 +66266,19 @@ class Agents {
     await this.tell(userId);
   }
   save(userId, file) {
-    const write = (this.writes.get(userId) ?? Promise.resolve()).then(() => this.host.storage.write(USER_FILE, JSON.stringify(file), userId)).catch((error) => this.host.log("warn", `[LumiRPEngine] the MCP servers' file wasn't written (${errorText(error)})`, userId));
+    const write = (this.writes.get(userId) ?? Promise.resolve()).then(() => this.host.storage.write(USER_FILE, JSON.stringify({ ...file, processes: this.recent(userId) }), userId)).catch((error) => this.host.log("warn", `[LumiRPEngine] the MCP servers' file wasn't written (${errorText(error)})`, userId));
     this.writes.set(userId, write);
+  }
+  recent(userId) {
+    const prefix = `${userId}\x00`;
+    const now = this.now();
+    const out = new Map;
+    for (const map of [this.restored, this.sessions]) {
+      for (const [key, heard] of map)
+        if (key.startsWith(prefix) && now - heard.seen <= LIVE_MS)
+          out.set(key.slice(prefix.length), heard);
+    }
+    return Object.fromEntries(out);
   }
   file(userId) {
     const cached = this.users.get(userId);
@@ -66265,6 +66294,16 @@ class Agents {
         const id = idOf(client);
         if ((clients[id]?.seen ?? Number.NEGATIVE_INFINITY) < client.seen)
           clients[id] = client;
+      }
+      const now = this.now();
+      for (const [session, entry] of Object.entries(isRecord(stored.processes) ? stored.processes : {})) {
+        if (!isRecord(entry) || typeof entry.seen !== "number" || now - entry.seen > LIVE_MS || !isRecord(entry.client) || typeof entry.client.seen !== "number")
+          continue;
+        const client = checkInOf(entry.client, entry.client.seen);
+        const key = `${userId}\x00${session}`;
+        if (client === null || this.sessions.has(key) || this.restored.size >= SESSIONS_KEPT)
+          continue;
+        this.restored.set(key, { id: idOf(client), client, seen: entry.seen });
       }
       return { v: 1, clients, toasted: typeof stored.toasted === "string" ? stored.toasted : null, dismissed: typeof stored.dismissed === "string" ? stored.dismissed : null };
     });
@@ -68923,7 +68962,7 @@ class Runtime {
     this.steps.onCallStart = (userId, purpose) => this.diag.callStart(userId, purpose);
     this.toolSupport = new ToolSupport(this.host);
     this.minds = { host: this.host, registry: this.registry, steps: this.steps, settings: this.settings, presets: this.presets };
-    this.ledger = new LedgerService(this.host, (chatId, userId) => this.resolveEnv(chatId, userId), new LedgerFold(this.registry, { fingerprint: "237cf60d" }), (chatId) => messages.forget(chatId));
+    this.ledger = new LedgerService(this.host, (chatId, userId) => this.resolveEnv(chatId, userId), new LedgerFold(this.registry, { fingerprint: "4adfc6be" }), (chatId) => messages.forget(chatId));
     this.studio = new StudioBridge(this.host, this.worlds);
     this.worlds.onChange = (worldId, userId) => this.studio.worldChanged(worldId, userId);
     this.agents = new Agents(this.host, options.build ?? thisBuild());
