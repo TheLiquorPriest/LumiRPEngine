@@ -175,6 +175,8 @@ export class TurnBridge implements TurnModel {
   private readonly offers = new Map<string, TimelapseTarget>();
   /** A timelapse turn's time skip as its pre phase ran it (DESIGN §24.7), keyed like `intents`: the plan replays it. */
   private readonly skips = new Map<string, SkipRecord>();
+  /** A timelapse turn's `castlife.skip_plan` (#53), keyed like `intents`: recorded ahead of the timelapse it plans, so a Re-run or Retry asks no model again. */
+  private readonly skipPlans = new Map<string, LedgerEvent>();
   /** Typed messages whose read waits on the player's answer to a claim (Ask first, DESIGN §9.4), keyed like `intents`; none of it plays until each is answered. */
   private readonly held = new Map<string, HeldRead>();
   /** Routine changes a typed message states, keyed like `intents`: asked about once, when it is read (`takeRoutineAsks`). */
@@ -198,7 +200,7 @@ export class TurnBridge implements TurnModel {
    */
   begin(userText: string, at: PathHash): void {
     if (this.readAt.get(userText) === at) return;
-    for (const kept of [this.intents, this.unfit, this.nexts, this.decisions, this.minds, this.offers, this.skips, this.held, this.routineAsks]) kept.delete(userText);
+    for (const kept of [this.intents, this.unfit, this.nexts, this.decisions, this.minds, this.offers, this.skips, this.skipPlans, this.held, this.routineAsks]) kept.delete(userText);
     this.interpreted.delete(userText);
     this.unread.delete(userText);
     this.readAt.set(userText, at);
@@ -344,9 +346,21 @@ export class TurnBridge implements TurnModel {
     trim(this.minds);
   }
 
-  /** What the plan applies before the pipeline, in order: the decisions, then the minds. */
+  /** What the plan applies before the pipeline, in order: the decisions, the minds, then the skip plan, so the timelapse that follows lives it. */
   prePlan(userText: string): LedgerEvent[] {
-    return [...(this.decisions.get(userText) ?? []), ...(this.minds.get(userText) ?? [])];
+    const plan = this.skipPlans.get(userText);
+    return [...(this.decisions.get(userText) ?? []), ...(this.minds.get(userText) ?? []), ...(plan ? [plan] : [])];
+  }
+
+  /** The skip plan this text's timelapse turn records (null: none), and whether one was made for it. */
+  setSkipPlan(userText: string, event: LedgerEvent | null): void {
+    if (event) this.skipPlans.set(userText, event);
+    else this.skipPlans.delete(userText);
+    trim(this.skipPlans);
+  }
+
+  hasSkipPlan(userText: string): boolean {
+    return this.skipPlans.has(userText);
   }
 
   /** The time skip for the turn whose last user text is `userText` (null clears it): the plan replays its beats. */

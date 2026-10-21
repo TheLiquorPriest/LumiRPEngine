@@ -174,22 +174,36 @@ function presentUsual(ctx: ReadContext, place: (id: PlaceId, name: string) => st
     const e = own(state.entities, id);
     if (!e || id === pov || placeOfEntity(state, id) !== here || !kindIs(reg, world, e.kind, "person") || isGone(state, id) || !canSeeEntity(reg, world, state, pov, id) || povLife(world, state, id)?.acts === false) continue;
     if (routineRole(ctx, id) === "off") continue;
-    const named = (p: string): string | null => {
-      const def = own(world.places, p);
-      return def && canSeePlace(reg, world, state, pov, p) ? place(p, def.name) : null;
-    };
-    const clauses = usualRoutine(ctx, id, { place: named, activity: canSeeField(reg, world, state, pov, id, "activity") }).filter((c) => !c.private && c.text !== "");
-    if (clauses.length === 0) continue;
     // The leak test is built on its first use, so a scene with no routine to tell never pays for it.
-    if (!safe) {
-      const secrets = unrevealedSecrets(reg, world, state);
-      const namesHidden = hiddenNameCheck(reg, world, state, pov);
-      safe = (t) => findLeaks(t, secrets).length === 0 && !namesHidden(t);
-    }
-    const told = clauses.map((c) => c.text).filter(safe).slice(0, 3);
+    const told = knownUsual(ctx, id, place, (t) => (safe ??= povSafe(ctx))(t)).slice(0, 3);
     if (told.length > 0) out.push({ id, name: e.name, told });
   }
   return out;
+}
+
+/** Whether text may reach a player surface or a helper: it holds no unrevealed secret and names nothing the POV can't see. */
+export function povSafe(ctx: ReadContext): (text: string) => boolean {
+  const { registry: reg, world, state } = ctx;
+  const secrets = unrevealedSecrets(reg, world, state);
+  const namesHidden = hiddenNameCheck(reg, world, state, world.pov);
+  return (t) => findLeaks(t, secrets).length === 0 && !namesHidden(t);
+}
+
+/**
+ * Someone's usual routine as the POV may know it, around now first: never a private block, a place
+ * the POV can't see, an activity it may not see them do, a secret or a hidden name. `place` words a
+ * place the POV can see.
+ */
+export function knownUsual(ctx: ReadContext, who: EntityId, place: (id: PlaceId, name: string) => string, safe?: (text: string) => boolean): string[] {
+  const { registry: reg, world, state } = ctx;
+  const pov = world.pov;
+  const named = (p: string): string | null => {
+    const def = own(world.places, p);
+    return def && canSeePlace(reg, world, state, pov, p) ? place(p, def.name) : null;
+  };
+  const clauses = usualRoutine(ctx, who, { place: named, activity: canSeeField(reg, world, state, pov, who, "activity") }).filter((c) => !c.private && c.text !== "");
+  if (clauses.length === 0) return [];
+  return clauses.map((c) => c.text).filter(safe ?? povSafe(ctx));
 }
 
 /**

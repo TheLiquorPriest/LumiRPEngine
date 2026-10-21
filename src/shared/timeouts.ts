@@ -88,7 +88,7 @@ export function hostBound(host: HostLimit, limit: Limit): number {
 
 // ---------------------------------------------------------------- the settings
 
-export const TIMEOUT_KEYS = ["engineRunMs", "preLookupMs", "postReplyMs", "postLookupMs", "guardMs", "requestMs", "caveatsMs", "mindsRunMs", "jobCallMs", "tokenCountMs", "laneStartupMs", "laneHeartbeatMs", "mcpReconnectMs"] as const;
+export const TIMEOUT_KEYS = ["engineRunMs", "preLookupMs", "postReplyMs", "postLookupMs", "guardMs", "skipPlanMs", "requestMs", "caveatsMs", "mindsRunMs", "jobCallMs", "tokenCountMs", "laneStartupMs", "laneHeartbeatMs", "mcpReconnectMs"] as const;
 
 export type TimeoutKey = (typeof TIMEOUT_KEYS)[number];
 
@@ -167,6 +167,15 @@ export const TIMEOUTS: Readonly<Record<TimeoutKey, TimeoutDef>> = {
     minMs: 1_000,
     none: "as long as Lumiverse waits",
     host: "contextHandler",
+  },
+  skipPlanMs: {
+    label: "Time skip plan",
+    group: "turn",
+    limits: "The one call, as a time skip starts, that plans how the people whose skip is planned by the model spend it.",
+    fires: "Nobody is planned: they stay where they are, the GM gets a note, and the skip still runs.",
+    defaultMs: 2 * MIN,
+    minMs: 1_000,
+    none: "the call takes as long as the engine run allows",
   },
   requestMs: {
     label: "Engine requests",

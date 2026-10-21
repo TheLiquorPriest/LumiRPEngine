@@ -78,7 +78,8 @@ export function messageOf(error: unknown): string {
 
 /** Why a step whose last call went wrong failed, or null when its last call was fine. */
 function callFailure(calls: readonly DiagCall[]): { reason: string; fix?: string } | null {
-  const last = calls.at(-1);
+  // A spared call's failure is shown on its step's line, but the run goes on without it.
+  const last = calls.findLast((c) => c.spared !== true);
   if (!last) return null;
   let reason: string | null = null;
   if (!last.ok) reason = `${last.purpose} call failed: ${last.error ?? "no reason given"}`;

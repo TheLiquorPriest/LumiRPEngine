@@ -36,6 +36,8 @@ export interface DiagCall {
   retried?: boolean;
   /** How many attempts of the call came before this one. */
   retries?: number;
+  /** A call the engine run goes on without (the skip plan, #53): its failure is shown, never the turn's. */
+  spared?: boolean;
 }
 
 export interface DiagSection {
