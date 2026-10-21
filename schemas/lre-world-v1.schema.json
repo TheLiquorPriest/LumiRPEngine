@@ -196,7 +196,7 @@
               "properties": {
                 "recent": { "type": "integer", "minimum": 0, "maximum": 64, "description": "The latest turns they were there for. Default 4." },
                 "relevant": { "type": "integer", "minimum": 0, "maximum": 64, "description": "The turns they were there for that best match the moment. Default 4." },
-                "tokens": { "type": "integer", "minimum": 0, "maximum": 8000, "description": "Tokens recall may take. Default 1200." }
+                "tokens": { "anyOf": [{ "type": "integer", "minimum": 0 }, { "enum": ["none"] }], "description": "Tokens recall may take, or \"none\" for no limit. Default 4000." }
               }
             },
             "notes": {
