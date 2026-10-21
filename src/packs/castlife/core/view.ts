@@ -19,7 +19,7 @@ import { canSeeEntity } from "../../../engine/visibility";
 import { placeOfEntity } from "../../../engine/scope";
 import { livesPlans } from "./commitments";
 import { asksOf, dayPlan, invitationText, kindOfBlock, playerBlocks } from "./index";
-import { activeBlocks, chatBlocks, chatFollow, chatSchedules, followOf, ownerOf, routineCandidates, sourceView, type Applied } from "./routines";
+import { activeBlocks, chatBlocks, chatFollow, chatSchedules, followOf, ownerOf, routineCandidates, routineRole, sourceView, type Applied } from "./routines";
 
 /** A schedule's owner as the read model names it: the chat's own version, or the rank its owner has. */
 function scheduleOwner(ctx: ReadContext, id: string, rank: number | null, owner: ScheduleDef["owner"]): OwnerRef {
@@ -104,7 +104,8 @@ function originOf(ctx: ReadContext, who: EntityId, option: string, reason: strin
 export function routineGmView(ctx: ReadContext, who: EntityId, day = dateAt(calendarOf(ctx.world), ctx.state.clock).dayIndex): RoutineGmView {
   const cal = calendarOf(ctx.world);
   const e = own(ctx.state.entities, who);
-  const blocks: EffectiveBlock[] = [...routineCandidates(ctx, who).values()].flatMap((list) => {
+  // The routine as `day` has it, as the planner lays it: a block the story added is theirs from the day after its turn.
+  const blocks: EffectiveBlock[] = [...routineCandidates(ctx, who, day).values()].flatMap((list) => {
     const [top, ...rest] = list;
     if (!top) return [];
     return [{ block: top.entry, routine: top.routine?.id ?? null, owner: ownerOf(ctx, top.level, top.routine?.owner), source: sourceView(ctx, top.source), off: isOff(top.entry), shadowed: rest.map((a) => ({ routine: a.routine?.id ?? null, owner: ownerOf(ctx, a.level, a.routine?.owner), source: sourceView(ctx, a.source), block: a.entry })) }];
@@ -147,7 +148,7 @@ export function routineGmView(ctx: ReadContext, who: EntityId, day = dateAt(cale
     name: e?.name ?? who,
     tier: optionalQuery(ctx, "minds.tier")?.(ctx, who) ?? null,
     planned: livesPlans(ctx, who),
-    follow: followOf(ctx, who),
+    follow: { ...followOf(ctx, who), role: routineRole(ctx, who) },
     settings: routineSettingsOf(ctx.world),
     blocks,
     schedules,

@@ -15,6 +15,9 @@ import type { Working } from "../../../src/engine/working";
 import { dayPlan } from "../../../src/packs/castlife/core/index";
 import { routineChanges, routineGmView, routinePlayerView } from "../../../src/packs/castlife/core/view";
 import { at, fixed, foldBoth, gmEdit, record, reg, routine, town, townWorld, withRoutines, YOU } from "./town";
+import { applyEffects } from "../../../src/engine/effects";
+import { createRng } from "../../../src/engine/rng";
+import { calendarOf, dateAt } from "../../../src/engine/calendar";
 
 /** Maya's own evening at the Anchor, asking Alex along; she is fond of Alex. */
 function mayaWorld(): WorldDoc {
@@ -41,11 +44,11 @@ describe("the GM's routine controls in a chat", () => {
     const friday = (ctx: ReadContext): string[] => dayPlan(ctx, "maya", 0).blocks.map((b) => `${b.option} ${b.place ?? "-"}`);
 
     let ctx = edit({ op: "routine_follow", entity: "maya", mode: "no_invitations" });
-    expect(routineGmView(ctx, "maya", 0).follow).toEqual({ mode: "no_invitations", awareness: "balanced", chat: { mode: "no_invitations", awareness: null } });
+    expect(routineGmView(ctx, "maya", 0).follow).toEqual({ mode: "no_invitations", awareness: "balanced", role: "enforced", chat: { mode: "no_invitations", awareness: null, role: null } });
     expect(routineGmView(ctx, "maya", 0).invitations.made).toEqual([]);
     // A part left out is kept.
     ctx = edit({ op: "routine_follow", entity: "maya", awareness: "story_first" });
-    expect(routineGmView(ctx, "maya", 0).follow.chat).toEqual({ mode: "no_invitations", awareness: "story_first" });
+    expect(routineGmView(ctx, "maya", 0).follow.chat).toEqual({ mode: "no_invitations", awareness: "story_first", role: null });
     ctx = edit({ op: "routine_block", entity: "maya", block: "evening", value: { id: "evening", label: "Settling up", activity: "errand", kind: "fixed", at: "18:00", minutes: 60, place: { place: "bank" } } });
     expect(friday(ctx)).toContain("routine:evening bank");
     ctx = edit({ op: "routine_block", entity: "maya", block: "dinner", value: { id: "dinner", off: true } });
@@ -60,7 +63,7 @@ describe("the GM's routine controls in a chat", () => {
       {
         entity: "maya",
         name: "Maya Chen",
-        follow: { mode: "no_invitations", awareness: "story_first" },
+        follow: { mode: "no_invitations", awareness: "story_first", role: null },
         blocks: [
           { block: "evening", source: { type: "gm", at: at(ctx, 0, "07:30") }, off: false },
           { block: "dinner", source: { type: "gm", at: at(ctx, 0, "07:30") }, off: true },
@@ -169,5 +172,22 @@ describe("the routine read model", () => {
     expect(routinePlayerView(w.ctx, "maya")).toEqual({ entity: "maya", name: "Maya Chen", day: null });
     // Vik, whom Alex has never met, is nowhere in Alex's knowledge.
     expect(routinePlayerView(w.ctx, "vik")).toBeNull();
+  });
+});
+
+describe("a change the story made today", () => {
+  test("the GM reads it as in force from the next day, as the planner lays it, and one the player stated says so in both folds", () => {
+    const w = town();
+    const swim = { id: "swim", label: "A late swim", activity: "exercise", kind: "fixed", at: "21:00", minutes: 30, place: { place: "pub" } };
+    const from = w.events.length;
+    // The reply's read of a change the player's own message stated and the player said yes to.
+    applyEffects(reg, w, [{ type: "castlife.routine", args: { entity: "maya", blocks: [{ block: "swim", value: swim }], turn: "a3", by: "player" } }], { bindings: {}, rng: createRng("story") });
+    const today = dateAt(calendarOf(w.world), w.state.clock).dayIndex;
+    const swimOn = (day?: number) => (day === undefined ? routineGmView(w.ctx, "maya") : routineGmView(w.ctx, "maya", day)).blocks.find((b) => b.block.id === "swim");
+    // Today was laid as the story had it: the block is theirs from tomorrow, in the planner and in the GM's read alike.
+    expect([swimOn()?.owner.level, swimOn(today)?.owner.level, swimOn(today + 1)?.owner.level]).toEqual([undefined, undefined, "chat"]);
+    expect(swimOn(today + 1)?.source).toMatchObject({ type: "story", turn: "a3", by: "player" });
+    const folded = foldBoth(w.world, w.events.slice(from)).state;
+    expect(routineChanges(reg.context(w.world, folded))).toEqual([expect.objectContaining({ entity: "maya", blocks: [{ block: "swim", source: { type: "story", at: w.state.clock, turn: "a3", by: "player" }, off: false }] })]);
   });
 });

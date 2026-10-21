@@ -19,7 +19,7 @@
 import type { EntityId, KindId, MessageId, PlaceId, ScheduleId, SceneTypeId } from "./ids";
 import type { JsonValue } from "./json";
 import { hasOwn, isRecord } from "./json";
-import type { Fidelity } from "./minds";
+import { FIDELITIES, type Fidelity } from "./minds";
 import type { Recurrence, ScheduleSlot, Selector } from "./world";
 
 // ---------------------------------------------------------------- world data
@@ -46,14 +46,15 @@ export const ROUTINE_BLOCK_KINDS: readonly RoutineBlockKind[] = ["fixed", "flexi
 /**
  * Where a block or a schedule rests. In world data: `authored` (absent means it), a `lore` entry or a
  * `sheet` field, each with the short quote it rests on. In a chat: the `story` (the turn whose reply
- * established it, at its clock time) or the `gm`. `builtin` is the basic needs'.
+ * established it, at its clock time; `by: "player"` when the player's own message stated it and the
+ * player said yes to adding it) or the `gm`. `builtin` is the basic needs'.
  */
 export type RoutineSource =
   | { type: "authored" }
   | { type: "lore"; entry: string; quote?: string }
   | { type: "sheet"; entity: EntityId; field: string; quote?: string }
   | { type: "builtin" }
-  | { type: "story"; at: number; turn?: MessageId }
+  | { type: "story"; at: number; turn?: MessageId; by?: "player" }
   | { type: "gm"; at: number };
 /** The sources world data may carry. */
 export type WorldRoutineSource = Extract<RoutineSource, { type: "authored" | "lore" | "sheet" }>;
@@ -169,16 +170,16 @@ export const BASIC_BLOCKS: readonly RoutineBlock[] = Object.freeze([
 // ---------------------------------------------------------------- the world's settings
 
 /**
- * How strictly people keep to routine against the story (DESIGN §8). In every setting what the story
- * established holds, nobody is moved out of a scene with the POV, Near and Live characters are never
- * moved by a routine or schedule, and no routine interrupts play. On top of that:
- *  - `story_first`: Background and Far characters bend for story plans and the GM's intent; what the
- *    story set holds until the story or the GM releases it; Near and Live get no routine suggestions.
+ * How strictly people keep to routine against the story (DESIGN §8), for whom their routine is
+ * enforced (`RoutineRole`). In every setting what the story established holds, nobody is moved out
+ * of a scene with the POV, and no routine interrupts play. On top of that:
+ *  - `story_first`: they bend for story plans and the GM's intent; what the story set holds until
+ *    the story or the GM releases it;
  *  - `balanced` (the default, the precedence by fidelity): Background characters keep their routine
- *    and schedules; Far characters bend for story plans and intent; what the story set holds for the
- *    rest of that day; Near and Live get their routine only as a soft suggestion.
- *  - `routine_first`: Background and Far characters keep to routine, bending only as the plan
- *    priority rule says (`planBend`); what the story set holds until the routine's next block.
+ *    and schedules, the rest bend for story plans and intent; what the story set holds for the rest
+ *    of that day;
+ *  - `routine_first`: they keep to routine, bending only as the plan priority rule says
+ *    (`planBend`); what the story set holds until the routine's next block.
  */
 export type RoutineAwareness = "story_first" | "balanced" | "routine_first";
 export const ROUTINE_AWARENESS: readonly RoutineAwareness[] = ["story_first", "balanced", "routine_first"];
@@ -200,15 +201,38 @@ export const ROUTINE_SOCIABILITY: readonly RoutineSociability[] = ["reserved", "
 export type RoutinePlanBend = "must" | "strong" | "standard" | "ordinary";
 export const ROUTINE_PLAN_BEND: readonly RoutinePlanBend[] = ["must", "strong", "standard", "ordinary"];
 
+/**
+ * What someone's routine and their own place and activity schedules are to the engine (DESIGN §8):
+ *  - `informative`: context only, what their mind and the narrator may consider. The planner and their
+ *    schedules never move or occupy them by it; narration and context-aware planning (their story
+ *    plans, the GM's intent) decide what they do;
+ *  - `enforced`: the planner lives it and their schedules run, the story still first (`awareness`);
+ *  - `off`: not even context.
+ * World schedules (weather, prices, bills, paydays, business hours) and money flows run whatever the
+ * role: a job still pays on its schedule when the worker's place isn't enforced. The POV has none: a
+ * timelapse says whether its routine runs (`followRoutine`, `paletteFollowsRoutine`).
+ */
+export type RoutineRole = "informative" | "enforced" | "off";
+export const ROUTINE_ROLES: readonly RoutineRole[] = ["informative", "enforced", "off"];
+export const ROUTINE_ROLE_LABEL: Record<RoutineRole, string> = { informative: "Informative", enforced: "Enforced", off: "Off" };
+
 /** `world.routineSettings` (Build → Routines → Settings; `lre.editor set part "routineSettings"`, the defaults remove it). */
 export interface RoutineSettings {
   awareness: RoutineAwareness;
   invitations: RoutineInvitations;
   sociability: RoutineSociability;
   planBend: RoutinePlanBend;
+  /** Each level of closeness's role (DESIGN §24.1 levels, as recomputed); `routine_follow`'s `role` sets one character's in a chat. */
+  roles: Record<Fidelity, RoutineRole>;
+  /** Whether the narrator gets the usual routines of the characters present, as soft context, never as what they must do. */
+  narrator: boolean;
+  /** The default of the palette Timelapse's "Follow my routine" choice: false holds the POV where the story has it, as a typed span does. */
+  paletteFollowsRoutine: boolean;
 }
 
-export const DEFAULT_ROUTINE_SETTINGS: Readonly<RoutineSettings> = Object.freeze({ awareness: "balanced", invitations: "player", sociability: "usual", planBend: "standard" });
+export const DEFAULT_ROUTINE_ROLES: Readonly<Record<Fidelity, RoutineRole>> = Object.freeze({ live: "informative", near: "informative", far: "informative", background: "enforced" });
+
+export const DEFAULT_ROUTINE_SETTINGS: Readonly<RoutineSettings> = Object.freeze({ awareness: "balanced", invitations: "player", sociability: "usual", planBend: "standard", roles: DEFAULT_ROUTINE_ROLES, narrator: true, paletteFollowsRoutine: false });
 
 export const AWARENESS_LABEL: Record<RoutineAwareness, string> = { story_first: "Story first", balanced: "Balanced", routine_first: "Routine first" };
 export const INVITATIONS_LABEL: Record<RoutineInvitations, string> = { off: "Off", player: "To the player only", everyone: "Between everyone" };
@@ -216,15 +240,19 @@ export const SOCIABILITY_LABEL: Record<RoutineSociability, string> = { reserved:
 export const PLAN_BEND_LABEL: Record<RoutinePlanBend, string> = { must: "Only plans that must happen", strong: "Strong plans", standard: "Strong plans, and set-time plans for the cast", ordinary: "Strong plans, and set-time plans for anyone" };
 export const BLOCK_KIND_LABEL: Record<RoutineBlockKind, string> = { fixed: "Fixed", flexible: "Flexible", optional: "Optional" };
 
-/** The world's routine settings, each part the world sets well, the defaults for the rest. */
+/** The world's routine settings, each part the world sets well, the defaults for the rest (a role per level). */
 export function routineSettingsOf(world: { readonly routineSettings?: unknown }): RoutineSettings {
   const raw = isRecord(world.routineSettings) ? world.routineSettings : {};
   const pick = <T extends string>(v: unknown, allowed: readonly T[], fallback: T): T => allowed.find((a) => a === v) ?? fallback;
+  const roles = isRecord(raw.roles) ? raw.roles : {};
   return {
     awareness: pick(raw.awareness, ROUTINE_AWARENESS, DEFAULT_ROUTINE_SETTINGS.awareness),
     invitations: pick(raw.invitations, ROUTINE_INVITATIONS, DEFAULT_ROUTINE_SETTINGS.invitations),
     sociability: pick(raw.sociability, ROUTINE_SOCIABILITY, DEFAULT_ROUTINE_SETTINGS.sociability),
     planBend: pick(raw.planBend, ROUTINE_PLAN_BEND, DEFAULT_ROUTINE_SETTINGS.planBend),
+    roles: { live: pick(roles.live, ROUTINE_ROLES, DEFAULT_ROUTINE_ROLES.live), near: pick(roles.near, ROUTINE_ROLES, DEFAULT_ROUTINE_ROLES.near), far: pick(roles.far, ROUTINE_ROLES, DEFAULT_ROUTINE_ROLES.far), background: pick(roles.background, ROUTINE_ROLES, DEFAULT_ROUTINE_ROLES.background) },
+    narrator: typeof raw.narrator === "boolean" ? raw.narrator : DEFAULT_ROUTINE_SETTINGS.narrator,
+    paletteFollowsRoutine: typeof raw.paletteFollowsRoutine === "boolean" ? raw.paletteFollowsRoutine : DEFAULT_ROUTINE_SETTINGS.paletteFollowsRoutine,
   };
 }
 
@@ -239,10 +267,11 @@ export type RoutineMode = "follows" | "no_invitations" | "off";
 export const ROUTINE_MODES: readonly RoutineMode[] = ["follows", "no_invitations", "off"];
 export const ROUTINE_MODE_LABEL: Record<RoutineMode, string> = { follows: "Follows their routine", no_invitations: "Follows it, no invitations", off: "No routine" };
 
-/** A character's follow setting in a chat; null parts follow the world (`follows`, the world's awareness). */
+/** A character's follow setting in a chat; null parts follow the world (`follows`, the world's awareness, their level's role). */
 export interface RoutineFollow {
   mode: RoutineMode | null;
   awareness: RoutineAwareness | null;
+  role: RoutineRole | null;
 }
 
 /**
@@ -255,15 +284,15 @@ export type ChatScheduleChange = { off: true; until: number | null } | { slots: 
 /**
  * The GM's routine controls (GM → a character → Routine), each an `lre.edit` op, so a submit is one
  * `fix` entry with its Undo:
- *  - `routine_follow`: their mode and awareness in this chat; a part left out is kept, null returns
- *    it to the world's, and both null clear the setting;
+ *  - `routine_follow`: their mode, awareness and role in this chat; a part left out is kept, null
+ *    returns it to the world's (the role to their level's), and all null clear the setting;
  *  - `routine_block`: one block of their routine in this chat, by id: a block (`off: true` turns the
  *    block off for them), or null to drop the chat's change and go back to the world's;
  *  - `schedule_override`: one of their schedules in this chat, by id (`ChatScheduleChange`), or null
  *    to drop the chat's change.
  */
 export type RoutineEditOp =
-  | { op: "routine_follow"; entity: EntityId; mode?: RoutineMode | null; awareness?: RoutineAwareness | null }
+  | { op: "routine_follow"; entity: EntityId; mode?: RoutineMode | null; awareness?: RoutineAwareness | null; role?: RoutineRole | null }
   | { op: "routine_block"; entity: EntityId; block: RoutineBlockId; value: RoutineEntry | null }
   | { op: "schedule_override"; entity: EntityId; schedule: ScheduleId; value: ChatScheduleChange | null };
 
@@ -378,7 +407,8 @@ export interface RoutineGmView {
   tier: Fidelity | null;
   /** Whether the planner lays their day (an agent, Cast life 3 and up) and lives it. */
   planned: boolean;
-  follow: { mode: RoutineMode; awareness: RoutineAwareness; chat: RoutineFollow | null };
+  /** How they follow it now: the chat's setting, else the world's (their role: their level's in `settings.roles`). */
+  follow: { mode: RoutineMode; awareness: RoutineAwareness; role: RoutineRole; chat: RoutineFollow | null };
   settings: RoutineSettings;
   blocks: EffectiveBlock[];
   schedules: EffectiveSchedule[];
@@ -466,7 +496,7 @@ function sourceProblem(v: unknown, world: boolean): string | null {
   if (t === "sheet") return typeof v.entity === "string" && typeof v.field === "string" && quote ? null : "a sheet source names its entity and field";
   if (world) return "world data rests on what's authored, a lore entry or a sheet field";
   if (t === "builtin") return null;
-  if (t === "story") return typeof v.at === "number" && (v.turn === undefined || typeof v.turn === "string") ? null : "a story source has its time";
+  if (t === "story") return typeof v.at === "number" && (v.turn === undefined || typeof v.turn === "string") && (v.by === undefined || v.by === "player") ? null : "a story source has its time";
   if (t === "gm") return typeof v.at === "number" ? null : "a GM source has its time";
   return "its source isn't one";
 }
@@ -541,19 +571,25 @@ export function routineShapeProblems(v: unknown): string[] {
   return out;
 }
 
-/** Each setting's allowed values: a setting not named here is none the engine reads. */
-const SETTING_VALUES: Record<string, readonly string[]> = { awareness: ROUTINE_AWARENESS, invitations: ROUTINE_INVITATIONS, sociability: ROUTINE_SOCIABILITY, planBend: ROUTINE_PLAN_BEND } satisfies Record<keyof RoutineSettings, readonly string[]>;
+/** Each setting's allowed values: a word of its list, a switch, or a role for each level of closeness. A setting not named here is none the engine reads. */
+const SETTING_VALUES: Record<string, readonly string[] | "switch" | "roles"> = { awareness: ROUTINE_AWARENESS, invitations: ROUTINE_INVITATIONS, sociability: ROUTINE_SOCIABILITY, planBend: ROUTINE_PLAN_BEND, roles: "roles", narrator: "switch", paletteFollowsRoutine: "switch" } satisfies Record<keyof RoutineSettings, readonly string[] | "switch" | "roles">;
 
 /**
  * What is wrong with routine settings as a write sends them (a Build save, an outside tool), one
- * phrase per field at fault; none when they read. A part left out keeps its default, so `{}` reads.
- * Stored settings are read leniently (`routineSettingsOf`); a write is held to this.
+ * phrase per field at fault; none when they read. A part left out keeps its default, so `{}` reads,
+ * and so does a level `roles` leaves out. Stored settings are read leniently (`routineSettingsOf`); a
+ * write is held to this.
  */
 export function routineSettingsProblems(v: unknown): string[] {
   if (!isRecord(v)) return ["routine settings are an object"];
   return Object.entries(v).flatMap(([key, value]) => {
     const allowed = hasOwn(SETTING_VALUES, key) ? SETTING_VALUES[key] : undefined;
     if (!allowed) return [`there's no setting ${key} (${Object.keys(SETTING_VALUES).join(", ")})`];
+    if (allowed === "switch") return typeof value === "boolean" ? [] : [`${key} is true or false`];
+    if (allowed === "roles") {
+      if (!isRecord(value)) return [`roles give ${FIDELITIES.join(", ")} each a role`];
+      return Object.entries(value).flatMap(([level, role]) => (!FIDELITIES.some((f) => f === level) ? [`roles have no level ${level} (${FIDELITIES.join(", ")})`] : typeof role === "string" && ROUTINE_ROLES.some((r) => r === role) ? [] : [`roles.${level} is ${ROUTINE_ROLES.join(", ")}`]));
+    }
     return typeof value === "string" && allowed.includes(value) ? [] : [`${key} is ${allowed.join(", ")}`];
   });
 }

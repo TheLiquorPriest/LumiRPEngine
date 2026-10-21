@@ -236,7 +236,11 @@ export interface PaletteEntry {
   number?: { param: string; label: string; min: number; max: number | null; default: number };
 }
 
-/** The Timelapse sheet. Its request is `lre.action {action, params: {target, overrides}}`. */
+/**
+ * The Timelapse sheet. Its request is `lre.action {action, params: {target, overrides, followRoutine?}}`:
+ * `followRoutine` true lets the POV live its routine through the skip; false holds it where the story
+ * has it, as a typed span does (DESIGN §8, §9.2). Absent, the world's `paletteFollowsRoutine` decides.
+ */
 export interface TimelapseView {
   action: ActionId;
   /** Why a timelapse can't start now (e.g. "Resume the clock first"); null when it can. */
@@ -246,6 +250,8 @@ export interface TimelapseView {
   interrupts: Record<InterruptClass, InterruptPolicy>;
   /** Calendar level 1 rounds to day parts. */
   dayParts: boolean;
+  /** "Follow my routine" as the sheet opens: the world's `routineSettings.paletteFollowsRoutine`. */
+  followRoutine: boolean;
 }
 
 /** A fight under way, as the palette heads its Combat tab (DESIGN §11): the round, whose turn it is and what the POV has left. */

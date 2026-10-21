@@ -1062,7 +1062,7 @@ export interface WorldDoc {
   schedules: Record<ScheduleId, ScheduleDef>;
   /** Routines by id (DESIGN §8, `shared/routines`): the soft shape of people's days, owner by owner; absent, none (everyone has the basic needs only). */
   routines?: Record<RoutineId, RoutineDef>;
-  /** How strictly people keep to routine against the story, whom routines invite, how social people are and how plans bend routine; absent, the defaults (`routineSettingsOf`). */
+  /** How strictly people keep to routine against the story, whom routines invite, how social people are, how plans bend routine, each level's routine role, the narrator's soft routine context and the palette Timelapse's Follow my routine default; absent, the defaults (`routineSettingsOf`). */
   routineSettings?: RoutineSettings;
   tracks: Record<TrackId, TrackDef>;
   tables: Record<TableId, DataTable>;

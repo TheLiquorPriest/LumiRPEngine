@@ -67,9 +67,10 @@ function outcomes(w: Working): LedgerEvent[] {
 describe("castlife: characters' own plans", () => {
   test("a recorded plan takes the NPC to the bank at its time, off screen, and is marked done once it has passed", () => {
     const w = riverton();
-    // Off screen: a Far character, whose routine bends for a strong plan and takes him back after it
-    // (a Live or Near one's routine never moves them: the story is theirs).
-    record(w, [pin("jordan", "far"), planEdit("jordan", plan(w, "p1", { priority: 4 }))]);
+    // Off screen: a Far character, whose routine bends for a strong plan and takes him back after it.
+    // Decision (issue #48, routine roles): a Far routine is informative by default, so the chat
+    // enforces his here, as the GM would, for his routine to take him back.
+    record(w, [pin("jordan", "far"), { type: "castlife.follow", data: { entity: "jordan", follow: { mode: null, awareness: null, role: "enforced" } } }, planEdit("jordan", plan(w, "p1", { priority: 4 }))]);
     lapse(w, at(w, 0, "10:30"));
     expect([w.state.entities.jordan?.fields.place, w.state.entities.jordan?.fields.activity]).toEqual(["bank", "errand"]);
     // Every player surface shows the plan's kind, never its own words.
@@ -227,7 +228,9 @@ describe("castlife: characters' own plans", () => {
   test("a plan's block holds its place and activity for its span: a routine edge inside it doesn't take the NPC back", () => {
     const w = riverton();
     // Jordan's work starts at 08:00; the errand that must happen takes the time up to 08:30 from it.
-    record(w, [pin("jordan", "live"), planEdit("jordan", plan(w, "early", { kind: "errand", where: "bank", priority: 5, when: { from: at(w, 0, "07:45"), to: at(w, 0, "08:30") } }))]);
+    // Decision (issue #48, routine roles): a Live routine is informative by default and moves no one,
+    // so the chat enforces his here, as the GM would, to show the plan's hold against his routine.
+    record(w, [pin("jordan", "live"), { type: "castlife.follow", data: { entity: "jordan", follow: { mode: null, awareness: null, role: "enforced" } } }, planEdit("jordan", plan(w, "early", { kind: "errand", where: "bank", priority: 5, when: { from: at(w, 0, "07:45"), to: at(w, 0, "08:30") } }))]);
     const seen: string[] = [];
     for (const t of ["07:50", "08:10", "08:25", "08:40"]) {
       lapse(w, at(w, 0, t));

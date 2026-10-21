@@ -59,9 +59,13 @@ async function corrections(rig: Rig, chatId: string): Promise<Chip[]> {
   return (await rig.rt.view(chatId, rig.host.userId)).chips.filter((c) => c.kind === "fix");
 }
 
-/** A Timelapse turn of `minutes`, run as the palette sends it. */
+/**
+ * A Timelapse turn of `minutes`, run as the palette sends it with Follow my routine on. Decision
+ * (issue #48): following the POV's routine is the palette's choice now, off by default; these tests
+ * are about what the clock's ✎ lets run again, the POV's own schedules included, so they choose it.
+ */
 async function timelapse(rig: Rig, chatId: string, minutes: number): Promise<void> {
-  rig.body(await rig.send({ type: "lre.action", chatId, action: "timelapse", params: { target: { type: "duration", minutes } }, source: "palette" }));
+  rig.body(await rig.send({ type: "lre.action", chatId, action: "timelapse", params: { target: { type: "duration", minutes }, followRoutine: true }, source: "palette" }));
   const g = await rig.host.start(chatId, { type: "normal" });
   await rig.host.finish(g, "Time passes.");
 }
