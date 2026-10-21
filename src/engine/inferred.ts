@@ -19,10 +19,11 @@
 //              as `engine.check` events no player view shows
 
 import type { EntityId } from "../shared/ids";
-import { clampBand, inferredDefaults, readInferred, type DifficultyBand, type InferDetail, type InferOthers, type InferredChecks, type InferredGuidance, type SheetSkill } from "../shared/inferred";
+import { clampBand, DIFFICULTY_BANDS, INFER_DETAILS, INFER_OTHERS, INFER_WHENS, INFER_WHOS, INFERRED_BOUNDS, INFERRED_PRESETS, inferredDefaults, readInferred, type DifficultyBand, type InferDetail, type InferOthers, type InferredChecks, type InferredGuidance, type SheetSkill } from "../shared/inferred";
 import type { JsonObject, JsonValue } from "../shared/json";
 import { hasOwn, isRecord } from "../shared/json";
 import { tableChoices } from "../shared/tables";
+import type { LintIssue } from "../shared/protocol";
 import type { ActionDef, WorldDoc } from "../shared/world";
 import { offersAction } from "../shared/world";
 import { passOutcomes, policyOf } from "./adjudication";
@@ -42,6 +43,7 @@ import type { Rng } from "./rng";
 import { evalExpr, isGone, kindIs, placeOfEntity, scopeEnv, truthy } from "./scope";
 import type { WorldState } from "./state";
 import { canSeeEntity } from "./visibility";
+import { initialState } from "./world-state";
 import type { Working } from "./working";
 
 /** The built-in action an inferred check plays as (DESIGN §11): Try something, carrying the check. */
@@ -80,12 +82,13 @@ function skillParam(reg: Registry, world: WorldDoc, state: Readonly<WorldState>,
  * The skills the world's sheet has, in sheet order, each with what rolls it: an offered action with
  * a check, a skill param and a difficulty, whose requirements the POV meets now (a world's own
  * actions before the packs'). One without requirements rolls a skill before one with them (Use a
- * skill before Push a skill), and a skill two actions name is the first's.
+ * skill before Push a skill), and a skill two actions name is the first's. Ungated, every such
+ * action counts whatever its requirements: a skill rolled once a requirement is met is still the sheet's.
  */
-export function skillSources(reg: Registry, world: WorldDoc, state: Readonly<WorldState>): SkillSource[] {
+export function skillSources(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, gated = true): SkillSource[] {
   const env = scopeEnv({ reg, ctx: reg.context(world, state), bindings: { self: world.pov, actor: world.pov } });
   const actions = [...Object.values(world.actions), ...[...reg.actions.values()].filter((a) => !own(world.actions, a.id))];
-  const ready = actions.filter((a) => offersAction(world, a) && a.combat === undefined && checkOf(world, a.check) !== null && a.requires.every((r) => truthy(evalExpr(r, env, false))));
+  const ready = actions.filter((a) => offersAction(world, a) && a.combat === undefined && checkOf(world, a.check) !== null && (!gated || a.requires.every((r) => truthy(evalExpr(r, env, false)))));
   const ordered = [...ready.filter((a) => a.requires.length === 0), ...ready.filter((a) => a.requires.length > 0)];
   const out: SkillSource[] = [];
   const seen = new Set<string>();
@@ -103,6 +106,68 @@ export function skillSources(reg: Registry, world: WorldDoc, state: Readonly<Wor
 /** The skills the world's sheet has, as the Checks screens list them. */
 export function worldSkills(reg: Registry, world: WorldDoc, state: Readonly<WorldState>): SheetSkill[] {
   return skillSources(reg, world, state).map(({ id, label }) => ({ id, label }));
+}
+
+const GUIDANCE_PLACEHOLDERS = new Set(["who", "skill", "attempt", "against"]);
+
+/**
+ * Lint for the world's inferred-checks default (DESIGN §13): one the engine can't read (no mode, or
+ * none it knows) plays as unset, so each chat's realism preset decides; a value it can't hold plays
+ * as the value read for it; a listed skill the world's sheet doesn't have never rolls; difficulty
+ * bounds the wrong way round play swapped; and a guidance line is cut to its length, a placeholder
+ * it doesn't know reaching the narrator as written.
+ */
+export function lintInferred(world: WorldDoc, reg: Registry): LintIssue[] {
+  const raw: unknown = isRecord(world.ruleset) ? world.ruleset.inferred : undefined;
+  if (raw === undefined) return [];
+  const at = "ruleset.inferred";
+  const unset = "Until it does, inferred checks play as unset, by each chat's realism preset.";
+  if (!isRecord(raw)) return [{ severity: "error", path: at, code: "inferred", message: `Inferred checks must be an object with a mode. ${unset}` }];
+  const policy = readInferred(raw);
+  if (!policy) return [{ severity: "error", path: `${at}.mode`, code: "inferred", message: `${raw.mode === undefined ? "It names no mode" : `"${String(raw.mode)}" isn't a mode`}: use off, suggest or auto. ${unset}` }];
+  const issues: LintIssue[] = [];
+  const warn = (path: string, code: string, message: string): void => void issues.push({ severity: "warning", path: `${at}${path}`, code, message });
+  const plays = (key: string, given: unknown, value: unknown): void => warn(`.${key}`, "inferred_value", `${key} can't be ${JSON.stringify(given)}; it plays as ${JSON.stringify(value)}.`);
+  const choices: [string, unknown, readonly string[], string][] = [["when", raw.when, INFER_WHENS, policy.when], ["who", raw.who, INFER_WHOS, policy.who], ["detail", raw.detail, INFER_DETAILS, policy.detail], ["others", raw.others, INFER_OTHERS, policy.others]];
+  for (const [key, given, values, value] of choices) if (given !== undefined && !values.includes(String(given))) plays(key, given, value);
+  const [lo, hi] = INFERRED_BOUNDS.most;
+  if (raw.most !== undefined && raw.most !== policy.most) warn(".most", "inferred_value", `Rolls a turn are a whole number from ${lo} to ${hi}: ${JSON.stringify(raw.most)} plays as ${policy.most}.`);
+  // Bands: each bound read alone first (an unknown one takes Grounded's), then the pair, which plays swapped.
+  const ids = DIFFICULTY_BANDS.map((b) => b.id);
+  const d = isRecord(raw.difficulty) ? raw.difficulty : {};
+  if (raw.difficulty !== undefined && !isRecord(raw.difficulty)) plays("difficulty", raw.difficulty, policy.difficulty);
+  const bound = (key: "lowest" | "highest"): number => {
+    const given = d[key];
+    const index = ids.findIndex((id) => id === given);
+    if (given !== undefined && index < 0) plays(`difficulty.${key}`, given, INFERRED_PRESETS.grounded.difficulty[key]);
+    return index < 0 ? ids.indexOf(INFERRED_PRESETS.grounded.difficulty[key]) : index;
+  };
+  const lowest = bound("lowest");
+  const highest = bound("highest");
+  if (lowest > highest) warn(".difficulty", "inferred_difficulty", `The easiest band, ${DIFFICULTY_BANDS[lowest]?.label}, is above the hardest, ${DIFFICULTY_BANDS[highest]?.label}: they play swapped, from ${DIFFICULTY_BANDS[highest]?.label} to ${DIFFICULTY_BANDS[lowest]?.label}.`);
+  // Skills: a list that isn't one plays as Grounded's; an entry that isn't an id is left out; and one
+  // the sheet lacks (read with every skill action, whatever its requirements) is never rolled.
+  if (raw.skills !== undefined && raw.skills !== null && !Array.isArray(raw.skills)) plays("skills", raw.skills, policy.skills);
+  if (Array.isArray(raw.skills)) {
+    for (const s of raw.skills) if (typeof s !== "string" || s.trim() === "" || s.trim().length > INFERRED_BOUNDS.skillId) warn(".skills", "inferred_value", `${JSON.stringify(s)} isn't a skill's id, so it's left out.`);
+    const sheet = new Set(skillSources(reg, world, initialState(world, "lint", reg), false).map((s) => s.id));
+    for (const id of policy.skills ?? []) if (!sheet.has(id)) warn(".skills", "inferred_skill", `"${id}" isn't a skill the world's sheet has, so no attempt rolls it.`);
+  }
+  // Guidance: what the narrator is told after a result, filled by `inferredOutcome`'s placeholders.
+  if (raw.guidance !== undefined && !isRecord(raw.guidance)) plays("guidance", raw.guidance, policy.guidance);
+  const guidance = isRecord(raw.guidance) ? raw.guidance : {};
+  for (const key of ["pass", "fail"] as const) {
+    const given = guidance[key];
+    if (given === undefined) continue;
+    if (typeof given !== "string") {
+      plays(`guidance.${key}`, given, policy.guidance[key]);
+      continue;
+    }
+    const text = given.replace(/\s+/g, " ").trim();
+    if (text.length > INFERRED_BOUNDS.guidance) warn(`.guidance.${key}`, "inferred_value", `A guidance line holds at most ${INFERRED_BOUNDS.guidance} characters; this one's ${text.length} are cut there.`);
+    for (const [, name] of text.matchAll(/\{([^{}]*)\}/g)) if (!GUIDANCE_PLACEHOLDERS.has(name ?? "")) warn(`.guidance.${key}`, "inferred_guidance", `{${name}} isn't a placeholder ({who}, {skill}, {attempt} or {against}), so the narrator is told it as written.`);
+  }
+  return issues;
 }
 
 /** Whether Try something stands in for this action in `interpret`'s catalog: one the world's skills roll through, or the Sheets pack's Attempt, whose stats a designed sheet replaces. */
