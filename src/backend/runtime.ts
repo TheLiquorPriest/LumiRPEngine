@@ -1072,16 +1072,18 @@ export class Runtime implements TurnHooks {
       return;
     }
     // The actions the POV can take now, as the palette offers them, and letting time pass, which is
-    // always there, so a world without actions still interprets. Try something stands in for the
-    // world's own skill actions (DESIGN §11 inferred checks): it rolls their checks under the chat's
-    // policy, so a typed attempt is never read as both; with the policy off, a typed attempt is no
-    // skill check at all, while the palette still offers those actions for a tap.
+    // always there, so a world without actions still interprets. While the chat's policy suggests or
+    // rolls inferred checks, Try something stands in for the world's own skill actions (DESIGN §11):
+    // it rolls their checks under that policy, so a typed attempt is never read as both. With the
+    // policy off (or no skill it allows), those actions stay, so typed text reads them as it did
+    // before inferred checks existed.
     const mayKnow = (id: EntityId): boolean => povMayKnow(this.registry, render.world, render.state, id);
     const inferred = inferredOf(render.world, render.state);
     const sources = skillSources(this.registry, render.world, render.state);
     const skills = allowedSkills(inferred, sources);
-    const offered = interpretCatalog(this.registry, render.world, render.state, all.filter((a) => !rolledByTry(a, sources)), mayKnow);
-    const catalog = [...offered.entries.map((o) => o.entry), ...(inferred.mode !== "off" && skills.length > 0 ? [tryEntry(inferred, skills)] : []), timelapseEntry(render.world, render.state)];
+    const trying = inferred.mode !== "off" && skills.length > 0;
+    const offered = interpretCatalog(this.registry, render.world, render.state, trying ? all.filter((a) => !rolledByTry(a, sources)) : all, mayKnow);
+    const catalog = [...offered.entries.map((o) => o.entry), ...(trying ? [tryEntry(inferred, skills)] : []), timelapseEntry(render.world, render.state)];
     const context: InterpretContext = {
       world: render.world,
       pov: { id: render.world.pov, name: render.state.entities[render.world.pov]?.name ?? render.world.pov },

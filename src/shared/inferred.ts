@@ -91,15 +91,17 @@ export const INFERRED_BOUNDS = {
 export const DEFAULT_GUIDANCE: Readonly<InferredGuidance> = { pass: "Narrate it succeeding.", fail: "Narrate it failing." };
 
 /**
- * What each realism preset plays inferred checks by. Story keeps the story the player's: it only
- * offers a roll, and only for an attempt the message says it tries, the player character alone.
- * Grounded rolls risky attempts on its own, with companions each rolling theirs, and tells the
- * narrator the result. Simulation rolls every uncertain attempt for everyone involved, the people
- * it opposes rolling against it, and tells the narrator the margin too. Others' numbers stay hidden
- * in all three: a hidden stat is the world's to keep.
+ * What each realism preset plays inferred checks by. Story keeps the story the player's: it rolls
+ * only an attempt the message says it tries, the player character alone, once, and tells the
+ * narrator the result alone. It rolls rather than offers, so a Story chat that played before the
+ * policy existed (no `infer` marker) never starts pausing a turn on a Roll chip; suggest stays a
+ * mode to choose. Grounded rolls risky attempts on its own, with companions each rolling theirs,
+ * and tells the narrator the result. Simulation rolls every uncertain attempt for everyone
+ * involved, the people it opposes rolling against it, and tells the narrator the margin too.
+ * Others' numbers stay hidden in all three: a hidden stat is the world's to keep.
  */
 export const INFERRED_PRESETS: Readonly<Record<Exclude<RealismPresetId, "custom">, Readonly<InferredChecks>>> = {
-  story: { mode: "suggest", when: "tries", who: "pov", skills: null, difficulty: { lowest: "easy", highest: "hard" }, detail: "result", others: "hidden", guidance: { ...DEFAULT_GUIDANCE }, most: 1 },
+  story: { mode: "auto", when: "tries", who: "pov", skills: null, difficulty: { lowest: "easy", highest: "hard" }, detail: "result", others: "hidden", guidance: { ...DEFAULT_GUIDANCE }, most: 1 },
   grounded: { mode: "auto", when: "risky", who: "companions", skills: null, difficulty: { lowest: "easy", highest: "very_hard" }, detail: "result", others: "hidden", guidance: { ...DEFAULT_GUIDANCE }, most: 3 },
   simulation: { mode: "auto", when: "uncertain", who: "everyone", skills: null, difficulty: { lowest: "easy", highest: "heroic" }, detail: "margin", others: "hidden", guidance: { ...DEFAULT_GUIDANCE }, most: 6 },
 };

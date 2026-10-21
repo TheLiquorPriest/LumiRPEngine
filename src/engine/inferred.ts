@@ -7,8 +7,9 @@
 //              at its Sheets level (`inferredDefaults`)
 //   skills     the rows of each table a skill action names (Use a skill, Make a save: a check, a text
 //              param from a table and a difficulty), rolled by that action's check; and, on the Sheets
-//              pack's own sheet, its stats, rolled by Attempt's. Try something stands in for those
-//              actions in `interpret`'s catalog, so a typed attempt is never read as both
+//              pack's own sheet, its stats, rolled by Attempt's. While the policy suggests or rolls,
+//              Try something stands in for those actions in `interpret`'s catalog, so a typed attempt
+//              is never read as both; with it off they stay, as they were before inferred checks
 //   the read   a skill the sheet has and the policy allows, a band within its bounds, companions and
 //              opponents the POV may know; under `tries` the read must say the input tries, under
 //              `risky` it must be risky against how hard it looks (the band, never anyone's numbers)
@@ -170,7 +171,7 @@ export function lintInferred(world: WorldDoc, reg: Registry): LintIssue[] {
   return issues;
 }
 
-/** Whether Try something stands in for this action in `interpret`'s catalog: one the world's skills roll through, or the Sheets pack's Attempt, whose stats a designed sheet replaces. */
+/** Whether Try something stands in for this action in `interpret`'s catalog while the policy is on: one the world's skills roll through, or the Sheets pack's Attempt, whose stats a designed sheet replaces. */
 export function rolledByTry(action: Pick<ActionDef, "id" | "pack">, sources: readonly SkillSource[]): boolean {
   return (action.pack === "sheets" && action.id === "attempt") || sources.some((s) => s.action.id === action.id);
 }
