@@ -32,10 +32,13 @@ import type {
   QuietToolCall,
 } from "../../src/backend/host";
 import { ENGINE_EXTENSION, STUDIO_EXTENSION } from "../../src/shared/studio-bridge";
+import { decodeEvent } from "../../src/backend/spindle-host";
 import { FakeRpcPool } from "./fake-rpc";
 
 export interface FakeMessage {
   id: MessageId;
+  /** The host's `index_in_chat`: one past the chat's highest when the message is made, never renumbered after a deletion. */
+  index: number;
   isUser: boolean;
   name: string;
   swipes: string[];
@@ -127,6 +130,15 @@ export class FakeHost implements HostPort {
   contextTimeoutMs = 0;
   /** Whether the handler registered as required: its failure or timeout stops the generation. */
   contextRequired = false;
+  /** Tests waiting for the context handler to be asked about a generation (`contextAsked`). */
+  private readonly contextWaiters: { type: HostGenerationType; resolve: () => void }[] = [];
+
+  /** Resolves once the context handler is asked about the next generation of `type` (a test seam: it fires as the handler is called). */
+  contextAsked(type: HostGenerationType): Promise<void> {
+    const { promise, resolve } = Promise.withResolvers<void>();
+    this.contextWaiters.push({ type, resolve });
+    return promise;
+  }
   /** What this host does with the handler's answer (`cancelGeneration`, `required`) and frontend pages; a test plays an older host by switching one off. */
   capabilities: HostCapabilities = { cancel: true, required: true, sessions: true };
   /** The frontend's side of `lre.generate` (DESIGN §5.1): what the engine asked to start, of which page, in order, until `start` plays it. */
@@ -150,7 +162,7 @@ export class FakeHost implements HostPort {
   rpc: HostPort["rpc"] = this.rpcPool.port(ENGINE_EXTENSION);
 
   chats: HostPort["chats"] = {
-    messages: async (chatId) => this.chat(chatId).messages.map((m, index) => this.toHost(chatId, m, index)),
+    messages: async (chatId) => this.chat(chatId).messages.map((m) => this.toHost(chatId, m)),
     writeMetadata: async (chatId, messageId, bag) => {
       const m = this.message(chatId, messageId);
       m.bag = structuredClone(bag);
@@ -189,10 +201,11 @@ export class FakeHost implements HostPort {
   blockReads = 0;
   /** Presets besides the default one, "preset-1" (whose name is `preset.name`). */
   readonly otherPresets = new Map<string, { name: string; revision: number; blocks: HostPresetBlock[] }>();
-  /** The preset each connection links. */
-  readonly connectionPresets = new Map<string, string>();
-  /** The preset the chat's last reply was assembled with, as its breakdown says. */
-  lastUsedPreset: string | null = "preset-1";
+  /** The preset the host generates every chat with (`presets.getActive`), and the block states its profile bindings set, by block id. */
+  activePreset: string | null = "preset-1";
+  blockStates: Record<string, boolean> = {};
+  /** Set: the host can't say which preset a chat generates with (`presets.getActive` throws this). */
+  presetUnknown: string | null = null;
   /** The connection the context handler is given (`connectionId`). */
   contextConnectionId: string | null = null;
 
@@ -205,8 +218,10 @@ export class FakeHost implements HostPort {
       const other = this.otherPresets.get(presetId);
       return other ? { id: presetId, name: other.name, revision: other.revision } : null;
     },
-    ofConnection: async (connectionId) => this.connectionPresets.get(connectionId) ?? null,
-    lastUsed: async () => this.lastUsedPreset,
+    active: async () => {
+      if (this.presetUnknown !== null) throw new Error(this.presetUnknown);
+      return { presetId: this.activePreset, blockStates: structuredClone(this.blockStates) };
+    },
     blocks: async (presetId) => {
       this.blockReads++;
       return structuredClone(presetId === "preset-1" ? this.presetBlocks : (this.otherPresets.get(presetId)?.blocks ?? []));
@@ -419,7 +434,7 @@ export class FakeHost implements HostPort {
     const id = `chat-${++this.nextId}`;
     const chat: FakeChat = { id, name: `Chat ${this.nextId}`, metadata: {}, messages: [] };
     this.chatsById.set(id, chat);
-    if (greeting !== undefined) chat.messages.push({ id: this.newId("m"), isUser: false, name: "Narrator", swipes: [greeting], swipeId: 0, bag: {} });
+    if (greeting !== undefined) this.append(chat, { id: this.newId("m"), isUser: false, name: "Narrator", swipes: [greeting], swipeId: 0, bag: {} });
     return id;
   }
 
@@ -443,23 +458,25 @@ export class FakeHost implements HostPort {
     return `${prefix}${++this.nextId}`;
   }
 
-  private toHost(chatId: ChatId, m: FakeMessage, index: number): HostMessage {
-    return { id: m.id, chatId, index, isUser: m.isUser, name: m.name, content: m.swipes[m.swipeId] ?? "", swipeId: m.swipeId, swipes: [...m.swipes], metadata: structuredClone(m.bag) };
+  /** A new message at the chat's end, numbered as the host numbers it (`createMessage`: one past the highest `index_in_chat`). */
+  append(chat: FakeChat, message: Omit<FakeMessage, "index">): FakeMessage {
+    const m: FakeMessage = { ...message, index: chat.messages.reduce((top, x) => Math.max(top, x.index), -1) + 1 };
+    chat.messages.push(m);
+    return m;
+  }
+
+  private toHost(chatId: ChatId, m: FakeMessage): HostMessage {
+    return { id: m.id, chatId, index: m.index, isUser: m.isUser, name: m.name, content: m.swipes[m.swipeId] ?? "", swipeId: m.swipeId, swipes: [...m.swipes], metadata: structuredClone(m.bag) };
   }
 
   private hostMessage(chatId: ChatId, messageId: MessageId): HostMessage {
-    const c = this.chat(chatId);
-    const index = c.messages.findIndex((m) => m.id === messageId);
-    const m = c.messages[index];
-    if (!m) throw new Error(`no message ${messageId}`);
-    return this.toHost(chatId, m, index);
+    return this.toHost(chatId, this.message(chatId, messageId));
   }
 
   // ------------------------------------------------------------------ user operations
 
   sendUser(chatId: ChatId, text: string, metadata: JsonObject = {}): MessageId {
-    const m: FakeMessage = { id: this.newId("u"), isUser: true, name: "User", swipes: [text], swipeId: 0, bag: structuredClone(metadata) };
-    this.chat(chatId).messages.push(m);
+    const m = this.append(this.chat(chatId), { id: this.newId("u"), isUser: true, name: "User", swipes: [text], swipeId: 0, bag: structuredClone(metadata) });
     this.emit("MESSAGE_SENT", { chatId, message: this.hostMessage(chatId, m.id) });
     return m.id;
   }
@@ -550,6 +567,12 @@ export class FakeHost implements HostPort {
     this.emit("FRONTEND_SESSION_CLOSED", { frontendSessionId: session });
   }
 
+  /** The user's settings are written (`SETTINGS_UPDATED`): a Lumiverse page saves its settings as one batch naming every key (`settings.putMany`), read as the engine reads the host's payload. */
+  settingsSaved(keys: string[]): void {
+    const event = decodeEvent("SETTINGS_UPDATED", { keys });
+    if (event) this.emit("SETTINGS_UPDATED", event);
+  }
+
   /** Host restart: in-flight generations vanish and their staged empty replies are removed; the extension's handlers go with it. */
   restart(): void {
     for (const g of this.inFlight.values()) {
@@ -611,8 +634,7 @@ export class FakeHost implements HostPort {
     let targetSwipeId: number | null = 0;
     if (type === "normal") {
       if (!opts.createAtEnd) {
-        const m: FakeMessage = { id: this.newId("m"), isUser: false, name: "Narrator", swipes: [""], swipeId: 0, bag: {} };
-        c.messages.push(m);
+        const m = this.append(c, { id: this.newId("m"), isUser: false, name: "Narrator", swipes: [""], swipeId: 0, bag: {} });
         this.emit("MESSAGE_SENT", { chatId, message: this.hostMessage(chatId, m.id) });
         g.messageId = m.id;
         targetMessageId = m.id;
@@ -660,6 +682,10 @@ export class FakeHost implements HostPort {
    */
   private async runContext(input: ContextHandlerInput, abandon: boolean): Promise<"go" | "cancelled" | "failed"> {
     if (!this.contextHandler) return "go";
+    for (const waiter of this.contextWaiters.filter((w) => w.type === input.generationType)) {
+      this.contextWaiters.splice(this.contextWaiters.indexOf(waiter), 1);
+      waiter.resolve();
+    }
     const context = new AbortController();
     if (abandon) context.abort();
     try {
@@ -691,9 +717,16 @@ export class FakeHost implements HostPort {
     return g;
   }
 
-  /** A dry run: the context handler is asked with `dryRun` (its answer can't stop it); the assembly is returned, nothing is written. */
+  /**
+   * A dry run: the context handler is asked with `dryRun`; the assembly is returned, nothing is
+   * written. `cancelGeneration` fails it, as Lumiverse's pipeline throws for any assembly the
+   * handler cancels (generate.service.ts:1050-1058 on staging 7524546f).
+   */
   async dryRun(chatId: ChatId): Promise<DryRun> {
-    if (this.contextHandler) await this.contextHandler({ chatId, userId: this.userId, generationType: "normal", dryRun: true, connectionId: null, personaId: null }, new AbortController().signal);
+    if (this.contextHandler) {
+      const verdict = await this.contextHandler({ chatId, userId: this.userId, generationType: "normal", dryRun: true, connectionId: null, personaId: null }, new AbortController().signal);
+      if (verdict === "cancel" && this.capabilities.cancel) throw new Error("Generation cancelled by an extension");
+    }
     const lore = this.worldInfo(chatId).placed.map((e) => e.content);
     const chat = this.chat(chatId).messages.filter((m) => m.isUser || (m.swipes[m.swipeId] ?? "") !== "").map((m) => ({ role: m.isUser ? "user" : "assistant", content: m.swipes[m.swipeId] ?? "" }));
     return { messages: [...lore.map((content) => ({ role: "system", content })), ...chat], blocks: structuredClone(this.preset.blocks), maxTokens: this.preset.maxTokens, model: this.preset.model };
@@ -714,9 +747,21 @@ export class FakeHost implements HostPort {
       if (typeof bookId !== "string") continue;
       for (const e of this.bookStore.get(bookId)?.entries.values() ?? []) if (!e.disabled && e.constant && e.content !== "") activated.push(structuredClone(e));
     }
-    const placed = activated.filter((e) => e.position !== 8 || this.assembledOutlets === null || this.assembledOutlets.has(e.outlet ?? "")).map((e) => ({ id: e.id, content: e.content, position: e.position, depth: e.depth, role: e.role, outlet: e.outlet }));
+    // An outlet-only entry reaches the prompt where an enabled block of the preset the host assembles with (its block states applied) holds its outlet.
+    const blocks = this.activePreset === null ? [] : this.activePreset === "preset-1" ? this.presetBlocks : (this.otherPresets.get(this.activePreset)?.blocks ?? []);
+    const held = new Set(blocks.filter((b) => this.blockStates[b.id] ?? b.enabled).flatMap((b) => [...b.content.matchAll(/\{\{outlet::([^}]*)\}\}/gi)].map((m) => (m[1] ?? "").trim().toLowerCase())));
+    const outlets = this.assembledOutlets ?? (this.presetPlacesOutlets ? held : null);
+    const placed = activated.filter((e) => e.position !== 8 || outlets === null || outlets.has(e.outlet ?? "")).map((e) => ({ id: e.id, content: e.content, position: e.position, depth: e.depth, role: e.role, outlet: e.outlet }));
     return { activated, placed };
   }
+
+  /** A preset saved, as Lumiverse reports any preset write (`PRESET_CHANGED`, `{ id }`). */
+  emitPresetChanged(presetId: string): void {
+    this.emit("PRESET_CHANGED", { presetId });
+  }
+
+  /** Whether an outlet-only entry reaches the prompt only where the active preset's enabled blocks hold its outlet, as Lumiverse assembles (`assembledOutlets` null and this off: every outlet an entry names). */
+  presetPlacesOutlets = false;
 
   /** The World Info the last generation's prompt held (tests read the sections it carried). */
   assembled: AssembledEntry[] = [];
@@ -847,8 +892,7 @@ export class FakeHost implements HostPort {
       return;
     }
     if (g.type === "normal" && !g.messageId) {
-      const m: FakeMessage = { id: this.newId("m"), isUser: false, name: "Narrator", swipes: [text], swipeId: 0, bag: {} };
-      this.chat(chatId).messages.push(m);
+      const m = this.append(this.chat(chatId), { id: this.newId("m"), isUser: false, name: "Narrator", swipes: [text], swipeId: 0, bag: {} });
       g.messageId = m.id;
       this.emit("MESSAGE_SENT", { chatId, message: this.hostMessage(chatId, m.id) });
     } else {

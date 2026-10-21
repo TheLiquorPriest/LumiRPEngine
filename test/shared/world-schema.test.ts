@@ -90,4 +90,9 @@ describe("world schema", () => {
     // A cue standing for two secrets, or for none, is reported where it sits.
     expect(problems(withValue(world, ["entities", "pov", "cues"], [{ text: "hums", flag: "seen", track: "t" }, { text: "hums" }])).map((p) => p.split(": ")[0])).toEqual(["entities.pov.cues[0]", "entities.pov.cues[1]"]);
   });
+
+  test("a world's recall for minds may take any whole number of tokens, or have no limit", () => {
+    for (const tokens of [20_000, 0, "none"]) expect(problems(withValue(world, ["minds"], { memory: { recall: { tokens } } }))).toEqual([]);
+    for (const tokens of [-1, 2.5, "lots"]) expect(problems(withValue(world, ["minds"], { memory: { recall: { tokens } } })).map((p) => p.split(": ")[0])).toEqual(["minds.memory.recall.tokens"]);
+  });
 });

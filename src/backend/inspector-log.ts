@@ -12,7 +12,7 @@ import { hasOwn, isRecord } from "../shared/json";
 import { LORE_AUDIENCE } from "../shared/lore";
 import { LORE_POLICIES } from "../shared/settings";
 import type { ContextGeneration, LoreStepTrace } from "../shared/state-view";
-import type { MindCallTrace } from "../shared/minds";
+import type { MindCallTrace, PinnedTrace } from "../shared/minds";
 import { FIDELITIES, MIND_PURPOSES } from "../shared/minds";
 import type { HostPort } from "./host";
 import { readStoredJson } from "./stored-json";
@@ -106,10 +106,12 @@ export function mindTracesOf(raw: unknown): MindCallTrace[] | undefined {
     const outcome = t.outcome === "leak_blocked" ? "recorded" : MIND_OUTCOMES.find((o) => o === t.outcome);
     const prompt = MIND_PROMPTS.find((p) => p === t.prompt);
     if (!purpose || !phase || level === undefined || !outcome || !prompt) return [];
-    // Pinned lore as the call listed it (DESIGN §24.5): titles and costs only, never an entry's text.
-    const pinned = Array.isArray(t.pinned) ? t.pinned.flatMap((p) => (isRecord(p) && typeof p.title === "string" && typeof p.tokens === "number" && typeof p.cut === "boolean" ? [{ title: p.title, tokens: p.tokens, cut: p.cut }] : [])) : [];
+    // The lore as the call listed it (DESIGN §24.5), pinned and activated: titles and costs only, never an entry's text.
+    const lore = (v: unknown): PinnedTrace[] => (Array.isArray(v) ? v.flatMap((p) => (isRecord(p) && typeof p.title === "string" && typeof p.tokens === "number" && typeof p.cut === "boolean" ? [{ title: p.title, tokens: p.tokens, cut: p.cut }] : [])) : []);
+    const pinned = lore(t.pinned);
+    const activated = lore(t.activated);
     const notes = strings(t.notes) ? [...t.notes] : [];
-    return [{ purpose, phase, who: t.who, level, outcome, ms: t.ms, tokens: t.tokens, prompt, ...(pinned.length > 0 ? { pinned } : {}), ...(notes.length > 0 ? { notes } : {}) }];
+    return [{ purpose, phase, who: t.who, level, outcome, ms: t.ms, tokens: t.tokens, prompt, ...(pinned.length > 0 ? { pinned } : {}), ...(activated.length > 0 ? { activated } : {}), ...(notes.length > 0 ? { notes } : {}) }];
   });
 }
 
