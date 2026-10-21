@@ -180,16 +180,13 @@ export class ProtocolClient {
     return () => this.agentsListeners.delete(listener);
   }
 
-  /** The active Loom preset the frontend's state reports (`loom.activePresetId`), sent with each hello; undefined when it can't say. */
-  presetId: string | null | undefined = undefined;
-
   /** Whether this page's document is on screen (setup reads `document.visibilityState`); sent with each hello, resync and `page`. */
   visible: () => boolean = () => true;
 
   /** Switches to a chat (or none) and asks for its snapshot. Pushes for any other chat are ignored. */
   open(chatId: ChatId | null): Promise<ResultMessage | ErrorMessage> {
     this.update({ chatId, rev: null, view: null, status: chatId === null ? "closed" : "syncing", resyncs: 0, activity: null, canStop: this.state.canStop });
-    const reply = this.request({ type: "lre.hello", chatId, viewing: chatId !== null && this.visible(), ...(this.presetId !== undefined ? { presetId: this.presetId } : {}) });
+    const reply = this.request({ type: "lre.hello", chatId, viewing: chatId !== null && this.visible() });
     void reply.then((message) => {
       if (message.type === "lre.error" && this.state.chatId === chatId) {
         this.update({ ...this.state, status: "closed" });

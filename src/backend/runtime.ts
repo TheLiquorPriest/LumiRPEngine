@@ -594,8 +594,6 @@ export class Runtime implements TurnHooks {
   private readonly caveatRuns = new Map<string, Promise<PresetCaveat[]>>();
   /** Preset checks running after their request's reply (`checkPresetLater`). */
   private readonly presetChecks = new Set<Promise<void>>();
-  /** Presets written and active presets switched, counted per user (`PRESET_CHANGED`, `SETTINGS_UPDATED`): a freshness input (DESIGN §5.1). */
-  private readonly presetWrites = new Map<UserId, number>();
   /** Each open chat's pinned world revisions, by `user \0 chat`. */
   private readonly pins = new Map<string, Map<RevisionId, WorldDoc>>();
   /** The pre-phase call budget per generation, shared by `beforePlan` and `afterPlan`. */
@@ -682,19 +680,6 @@ export class Runtime implements TurnHooks {
       if (e.action === "deleted" && userId) this.swipeDeleted(e.chatId, userId, e.message.id, e.swipeId).catch((error: unknown) => this.host.log("warn", `[LumiRPEngine] chat ${e.chatId}: chips didn't follow a deleted swipe (${error instanceof Error ? error.message : String(error)})`, userId));
     });
     this.host.on("WORLD_INFO_ACTIVATED", (e) => this.onActivated(e.chatId, e.entries.map((x) => x.id)));
-    // A preset written, or the active one switched, may place other outlets: a waiting turn is stale (DESIGN §5.1).
-    const presetWritten = (userId: UserId | null): void => {
-      if (!userId) return;
-      lruSet(this.presetWrites, userId, (this.presetWrites.get(userId) ?? 0) + 1, 1024);
-      this.ledger.inputsChanged(userId);
-    };
-    this.host.on("PRESET_CHANGED", (_e, userId) => presetWritten(userId));
-    // Only a write that names a preset key can switch the preset. Lumiverse's pages save every setting
-    // in batches (a drawer, a dock, a one-shot guide), and one landing while the engine runs must not
-    // throw away the turn it prepared; a write that names no key still counts.
-    this.host.on("SETTINGS_UPDATED", (e, userId) => {
-      if (e.keys === null || e.keys.some((key) => /preset/i.test(key))) presetWritten(userId);
-    });
     // The host keeps a deleted chat's chat-scoped regex scripts, so the engine removes its own (DESIGN §6.7).
     this.host.on("CHAT_DELETED", (e, userId) => {
       if (userId) this.jsonHiding.removeChat(e.chatId, userId).catch((error: unknown) => this.host.log("warn", `[LumiRPEngine] chat ${e.chatId}: its JSON regex scripts weren't removed (${error instanceof Error ? error.message : String(error)})`, userId));
@@ -811,7 +796,7 @@ export class Runtime implements TurnHooks {
     const settings = await this.settings.get(input.userId);
     lruSet(this.settingsCache, input.userId, settings, 256);
     // The preset the reply assembles with, read once for the engine run's phases and its sections.
-    const preset = await this.presets.current(input.chatId, input.userId, input.connectionId);
+    const preset = await this.presets.current(input.chatId, input.userId);
     const target = p.messageId ? input.observed.findIndex((m) => m.id === p.messageId) : input.observed.length;
     const before = input.observed.slice(0, target < 0 ? input.observed.length : target);
     const lastUser = before.findLast((m) => m.isUser);
@@ -1978,15 +1963,13 @@ export class Runtime implements TurnHooks {
   /**
    * What a chat's sections are made from besides its messages and journal, read from memory for the
    * guard (DESIGN §5.1): the chat's world revision, the user's settings revision (section budgets,
-   * secrecy, minds), the active Loom preset and the presets written since start (which outlets it
-   * places), and the chat's Outcome notes (a decline reworded or dismissed on its chip).
+   * secrecy, minds) and the chat's Outcome notes (a decline reworded or dismissed on its chip). The
+   * preset isn't one: the reply's guard checks the one that reply is assembled with (`fill`).
    */
   inputs(chatId: ChatId, userId: UserId): TurnInputs {
     return {
       revision: this.runs.get(`${userId}\u0000${chatId}`)?.revision ?? "",
       settings: String(this.settings.revision(userId)),
-      preset: this.presets.loomOf(userId) ?? "",
-      presetWrites: String(this.presetWrites.get(userId) ?? 0),
       notes: String(this.outcomeNotes.revision(chatId, userId)),
     };
   }
@@ -2135,20 +2118,32 @@ export class Runtime implements TurnHooks {
       h.fill.content = content;
     }
     this.countLater(input.userId, uncounted);
-    // Only the turn's entries are on in the book; the rest of the world's engine entries are off.
-    await this.book.write(bookId, new Map(fills.map((f) => [f.id, f.content])), input.userId);
     record.forced = fills.map((f) => f.id);
     await this.inspector.add(input.chatId, input.userId, record);
     this.push.changed(input.chatId, input.userId);
     // Diagnostics: each section, the outlet the preset gives it, and whether it went out with text.
     const sent = new Set(record.sections.filter((s) => !s.clipped).map((s) => s.slot));
     this.diag.sections({ chatId: input.chatId, userId: input.userId, turn: input.generationId }, `${pending?.kind ?? "continue"} turn, ${preset.preset ? `preset ${preset.preset.id}` : "no preset"}`, sectionsOf(world).map((s) => ({ slot: s.id, outlet: preset.outlets.has(outletOf(s.id)) ? outletOf(s.id) : null, filled: sent.has(s.id) })), started);
-    return { bookId, entries: record.forced };
+    // Nothing goes into the book yet: the guard of the generation that takes the turn writes it (`fill`).
+    return { bookId, fills: new Map(fills.map((f) => [f.id, f.content])), placed: `${preset.placed}\u0000${this.book.placedAs(bookId)}` };
   }
 
-  /** After the reply that took them (DESIGN §5.1): the turn's entries emptied and off, so no later prompt holds them. */
+  /**
+   * The guard's write of a turn's sections, for the generation that takes it (DESIGN §6.4): only the
+   * turn's entries are on in the book, the rest of the world's engine entries off. `moved`, writing
+   * nothing, when what the turn's sections depend on changed since its engine run: the preset the
+   * host generates the chat with (its outlets, guidance and narrator rules), or the book's Positions.
+   */
+  async fill(chatId: ChatId, userId: UserId, delivered: Delivered): Promise<"filled" | "moved"> {
+    const now = (await this.presets.current(chatId, userId)).placed;
+    if (`${now}\u0000${this.book.placedAs(delivered.bookId)}` !== delivered.placed) return "moved";
+    await this.book.write(delivered.bookId, delivered.fills, userId);
+    return "filled";
+  }
+
+  /** Once the prompt that took them is assembled (DESIGN §6.4): the turn's entries emptied and off, so no later prompt holds them. */
   async clear(_chatId: ChatId, userId: UserId, delivered: Delivered): Promise<void> {
-    await this.book.clear(delivered.bookId, delivered.entries, userId);
+    await this.book.clear(delivered.bookId, [...delivered.fills.keys()], userId);
   }
 
   /**

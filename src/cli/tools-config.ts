@@ -142,7 +142,7 @@ async function presetCard(live: Live, op: "get" | "add"): Promise<ResultBodies["
     return (await live.conn.request("lre.preset", { op })).card;
   } catch (error) {
     if (error instanceof LreError && error.code === "not_found")
-      throw new ToolError(`LumiRPEngine can't tell which preset is active (${error.message}). It learns it from Lumiverse's page, or from the chat you last played: open Lumiverse in the browser, or play a world chat, and ask again.`);
+      throw new ToolError(`LumiRPEngine can't add the blocks (${error.message}). Lumiverse has no preset selected for prompts: select one in Lumiverse and ask again.`);
     throw error;
   }
 }

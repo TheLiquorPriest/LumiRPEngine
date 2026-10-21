@@ -104,6 +104,8 @@ export class EngineBook {
   private readonly known = new Map<string, BookEntries>();
   /** The engine entries that may be on in each book: one turn's (DESIGN §5.1), and any found on when the book is read. */
   private readonly on = new Map<string, Set<string>>();
+  /** Where each book's slot entries were last placed, as one signature (`placedAs`). */
+  private readonly placements = new Map<string, string>();
 
   constructor(
     private readonly host: HostPort,
@@ -130,11 +132,13 @@ export class EngineBook {
     // restart cut short, or an entry switched on in the host's UI.
     this.note(bookId, all);
     const blank = { content: "", keys: [] as string[], disabled: true, constant: false };
+    const signature: string[] = [];
     for (const section of sectionsOf(world)) {
       const p = section.position;
       // The Position the entry was placed for, so a later change of it is seen (the host's own entry
       // fields can't tell: the outlet isn't read back, and a move in its editor changes them too).
       const placed = p.type === "chat_depth" ? `chat_depth:${p.role}:${p.depth}:${p.direction}` : p.type === "outlet" ? `outlet:${p.name.trim()}` : "native";
+      signature.push(`${section.id}=${placed}`);
       const known = slots.get(section.id);
       const extensions: JsonObject = { ...(known?.extensions ?? {}), [LEDGER_NAMESPACE]: { slot: section.id, placed } };
       if (!known) found.slots.set(section.id, await this.host.books.createEntry(bookId, { ...blank, comment: `LRE · ${section.label}`, ...entryPlacement(p), order: 100 + section.rank, extensions }, userId));
@@ -148,8 +152,18 @@ export class EngineBook {
     found.narrator ??= await this.host.books.createEntry(bookId, { ...blank, comment: "LRE · Narrator rules", position: 0, depth: 4, role: "system", order: 99, extensions: { [LEDGER_NAMESPACE]: { narrator: "rules" } } }, userId);
     found.narratorOutlet ??= await this.host.books.createEntry(bookId, { ...blank, comment: "LRE · Narrator rules (preset outlet)", position: 8, depth: 4, role: "system", outlet: NARRATOR_OUTLET, order: 99, extensions: { [LEDGER_NAMESPACE]: { narrator: "outlet" } } }, userId);
     this.known.set(bookId, found);
+    this.placements.set(bookId, signature.join("\u0000"));
     for (const id of leftoverLore) await this.host.books.deleteEntry(id, userId);
     return bookId;
+  }
+
+  /**
+   * Where the book's slot entries were last placed, as one signature: a turn's sections are written
+   * only while it is what their engine run placed them for, since another chat of the world on another
+   * revision moves them (DESIGN §6.4).
+   */
+  placedAs(bookId: string): string {
+    return this.placements.get(bookId) ?? "";
   }
 
   /** The engine's entries in the book, read once and kept until the next ensure. */

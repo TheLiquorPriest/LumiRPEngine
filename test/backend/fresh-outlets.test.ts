@@ -1,19 +1,22 @@
 // No stale outlets (DESIGN §5.1, §6.4, §6.8): every engine section a prompt holds comes from the
-// engine run that prepared the generation being assembled. The world's book holds one owner's
-// sections at a time; a generation with no turn of its own (Impersonate, a dry run) is assembled
-// from an empty book; and sections that can't be emptied stop the generation, with a flag that
-// says why, rather than going out stale.
+// engine run that prepared the generation being assembled, at the place the preset that generation
+// is assembled with gives it. The world's book holds a turn's sections only from its reply's guard
+// until that prompt is assembled; a generation with no turn of its own (Impersonate, a dry run) is
+// assembled from an empty book; and what can't be emptied, or a preset the host can't name, stops
+// the generation with a flag that says why.
 
 import { describe, expect, test } from "bun:test";
-import type { QuietRequest } from "../../src/backend/host";
+import type { HostPresetBlock, QuietRequest } from "../../src/backend/host";
 import { isRecord, type JsonObject } from "../../src/shared/json";
 import { LEDGER_NAMESPACE } from "../../src/shared/ledger";
-import type { AssembledEntry } from "../support/fake-host";
+import { FakeHost, type AssembledEntry } from "../support/fake-host";
 import { Rig } from "../support/rig";
 import { POV } from "../support/test-pack";
 
 const EXTRACT_MARK = "propose concrete state changes";
 const OUTLINE_MARK = "You outline a roleplay narrator's next reply";
+
+const block = (name: string, content: string, enabled = true): HostPresetBlock => ({ id: `b_${name}`, name, content, enabled, marker: null, injectionTrigger: [], characterTagTrigger: [], categoryMode: null });
 
 /** The world's engine entries that hold text or are on, as the host stores them. */
 async function liveEntries(rig: Rig, chatId: string) {
@@ -27,18 +30,16 @@ function sectionsIn(entries: readonly AssembledEntry[]): string[] {
   return entries.filter((e) => /^\[[A-Z][a-z]+\]\n/.test(e.content)).map((e) => e.content);
 }
 
-/**
- * Holds the host's entry writes that `match` picks until `release`, as a host under load is slow
- * to make them; `once` holds only the first. `held` resolves when the first is held.
- */
-function holdFills(rig: Rig, match: (content: string | null) => boolean, once = false): { release: () => void; held: Promise<void> } {
+/** The text a prompt holds at a preset's outlet. */
+const atOutlet = (rig: Rig, outlet: string): string => rig.host.assembled.find((e) => e.position === 8 && e.outlet === outlet)?.content ?? "";
+
+/** Holds the host's entry writes that `match` picks until `release`, as a host under load is slow to make them. `held` resolves when the first is held. */
+function holdFills(rig: Rig, match: (content: string | null) => boolean): { release: () => void; held: Promise<void> } {
   const fill = rig.host.books.fill;
   const gate = Promise.withResolvers<void>();
   const held = Promise.withResolvers<void>();
-  let holding = 0;
   rig.host.books.fill = async (entryId, content, userId) => {
-    if (match(content) && !(once && holding > 0)) {
-      holding++;
+    if (match(content)) {
       held.resolve();
       await gate.promise;
     }
@@ -83,92 +84,77 @@ async function outlinedCoins(rig: Rig): Promise<{ chatId: string; beats: () => n
 }
 
 describe("no stale outlets", () => {
-  test("a restart while a reply streams leaves its sections in the book; the next dry run and Impersonate get none of them", async () => {
-    const rig = new Rig();
-    const chatId = await rig.worldChat();
-    rig.host.sendUser(chatId, "I look around.");
-    await rig.host.settle();
-    expect((await rig.host.start(chatId, { type: "normal" })).halted).toBeUndefined();
-    expect(rig.host.section("Scene")).toMatch(/^\[Scene\]\n/);
-    // The server restarts mid-reply: nothing hears the reply end, so nothing empties its entries.
-    const after = rig.restart();
-    expect((await liveEntries(after, chatId)).length).toBeGreaterThan(0);
-    const dry = await after.host.dryRun(chatId);
-    expect(dry.messages.filter((m) => m.role === "system" && /^\[[A-Z][a-z]+\]\n/.test(m.content))).toEqual([]);
-    after.host.assembled = [];
-    const own = await after.host.begin(chatId, { type: "impersonate" });
-    expect(own.halted).toBeUndefined();
-    expect(sectionsIn(after.host.assembled)).toEqual([]);
-    await after.host.finish(own, "I stretch.");
-    expect(await liveEntries(after, chatId)).toEqual([]);
-  });
-
-  test("an Impersonate pressed as the reply ends waits for the reply's sections to be emptied, and its prompt holds none", async () => {
+  test("a reply's sections leave the book once its prompt is assembled: a generation the extension isn't there to guard finds none of them", async () => {
     const rig = new Rig();
     const chatId = await rig.worldChat();
     rig.host.sendUser(chatId, "I look around.");
     await rig.host.settle();
     const reply = await rig.host.start(chatId, { type: "normal" });
     expect(rig.host.section("Scene")).toMatch(/^\[Scene\]\n/);
-    // The host is slow to empty the entries, and the player presses Impersonate the moment the reply ends.
-    const clears = holdFills(rig, (content) => content === null);
-    const idle = rig.host.idle;
-    rig.host.idle = async () => undefined;
-    await rig.host.finish(reply, "The square is quiet.");
-    rig.host.assembled = [];
-    const impersonating = rig.host.begin(chatId, { type: "impersonate" });
-    await clears.held;
-    clears.release();
-    rig.host.idle = idle;
-    const own = await impersonating;
-    await rig.host.settle();
-    expect(own.halted).toBeUndefined();
-    expect(sectionsIn(rig.host.assembled)).toEqual([]);
-    await rig.host.finish(own, "I stretch.");
+    // The prompt is assembled and the reply streams: nothing of it is left in the book.
     expect(await liveEntries(rig, chatId)).toEqual([]);
+    // The extension restarts mid-reply (an update): while it is down nothing guards a generation,
+    // and the reply's end is never heard. A generation then holds no engine section.
+    rig.host.restart();
+    rig.host.assembled = [];
+    const unguarded = await rig.host.begin(chatId, { type: "impersonate" });
+    expect(unguarded.halted).toBeUndefined();
+    expect(sectionsIn(rig.host.assembled)).toEqual([]);
+    expect(rig.host.isOpen(reply)).toBe(false);
   });
 
-  test("an Impersonate pressed while the engine writes the reply's sections gets none of them, and that reply runs the engine again", async () => {
+  test("a turn waiting for its page holds nothing in the book: with the extension down, another chat's generation gets none of it", async () => {
     const rig = new Rig();
-    const chatId = await rig.worldChat();
-    rig.host.sendUser(chatId, "I look around.");
+    const worldId = await rig.newWorld();
+    const waiting = await attached(rig, worldId);
+    const other = await attached(rig, worldId);
+    rig.host.sendUser(waiting, "I look around.");
     await rig.host.settle();
-    // The host is slow with one of the run's writes; the others land.
-    const fills = holdFills(rig, (content) => content !== null, true);
-    const idle = rig.host.idle;
-    rig.host.idle = async () => undefined;
-    expect((await rig.host.begin(chatId, { type: "normal" })).halted).toBe("cancelled");
-    await fills.held;
+    expect((await rig.host.begin(waiting, { type: "normal" })).halted).toBe("cancelled");
+    expect(await liveEntries(rig, waiting)).toEqual([]);
+    rig.host.restart();
     rig.host.assembled = [];
-    const asked = rig.host.contextAsked("impersonate");
-    const impersonating = rig.host.begin(chatId, { type: "impersonate" });
-    await asked;
-    fills.release();
-    rig.host.idle = idle;
-    const own = await impersonating;
+    expect((await rig.host.begin(other, { type: "impersonate" })).halted).toBeUndefined();
+    expect(sectionsIn(rig.host.assembled)).toEqual([]);
+    // Back up, the waiting reply runs the engine again and holds its own sections.
+    const after = new Rig({ host: rig.host });
+    const reply = await after.host.start(waiting, { type: "regenerate" });
+    expect(reply.halted).toBeUndefined();
+    expect(after.host.section("Scene")).toMatch(/^\[Scene\]\n/);
+  });
+
+  test("on a Lumiverse without required guards, an Impersonate whose guard it stopped waiting for goes ahead with none of another chat's sections", async () => {
+    // The guard registers with what the host supports, so the host is an older one from the start.
+    const host = new FakeHost();
+    host.capabilities = { ...host.capabilities, required: false };
+    const rig = new Rig({ host });
+    const worldId = await rig.newWorld();
+    const replying = await attached(rig, worldId);
+    const other = await attached(rig, worldId);
+    rig.host.sendUser(replying, "I look around.");
     await rig.host.settle();
+    const reply = await rig.host.start(replying, { type: "normal" });
+    expect(rig.host.section("Scene")).toMatch(/^\[Scene\]\n/);
+    // While that reply streams, the other chat's Impersonate: the host gives up on the guard at once.
+    rig.host.assembled = [];
+    const own = await rig.host.begin(other, { type: "impersonate", abandonContext: true });
     expect(own.halted).toBeUndefined();
     expect(sectionsIn(rig.host.assembled)).toEqual([]);
-    await rig.host.finish(own, "I stretch.");
-    // The turn the run prepared gave way: its reply is stopped, runs the engine again and holds its sections.
-    rig.host.restarts.length = 0;
-    const reply = await rig.host.start(chatId, { type: "regenerate" });
-    expect(reply.halted).toBeUndefined();
-    expect(rig.host.section("Scene")).toMatch(/^\[Scene\]\n/);
+    await rig.host.finish(reply, "The square is quiet.");
   });
 
-  test("a reply whose sections the host wouldn't empty: the next Impersonate and dry run stop and the chat says why; once the host writes again they go out with none", async () => {
+  test("a reply's sections the host wouldn't empty: the next Impersonate and dry run stop and the chat says why; once the host writes again they go out with none", async () => {
     const rig = new Rig();
     const chatId = await rig.worldChat();
     rig.host.sendUser(chatId, "I look around.");
     await rig.host.settle();
-    const reply = await rig.host.start(chatId, { type: "normal" });
     const fill = rig.host.books.fill;
     let failing = true;
     rig.host.books.fill = async (entryId, content, userId) => {
       if (content === null && failing) throw new Error("database is locked");
       return fill(entryId, content, userId);
     };
+    const reply = await rig.host.start(chatId, { type: "normal" });
     await rig.host.finish(reply, "The square is quiet.");
     expect((await liveEntries(rig, chatId)).length).toBeGreaterThan(0);
     rig.host.assembled = [];
@@ -180,7 +166,6 @@ describe("no stale outlets", () => {
     expect(flag?.detail).toMatch(/^Clearing an earlier turn's sections: database is locked\. .*try again/);
     expect(flag?.actions).toEqual([{ id: "diagnostics", label: "Diagnostics" }]);
     await expect(rig.host.dryRun(chatId)).rejects.toThrow();
-    // The host writes again: the next Impersonate empties them and goes out with no section.
     failing = false;
     const own = await rig.host.begin(chatId, { type: "impersonate" });
     expect(own.halted).toBeUndefined();
@@ -188,42 +173,143 @@ describe("no stale outlets", () => {
     expect(await liveEntries(rig, chatId)).toEqual([]);
   });
 
-  test("two chats of one world: a turn the other chat runs while this one's is being written never mixes into either reply", async () => {
+  test("another chat's Impersonate while a reply's sections are being written waits for that prompt, then holds none of them; the reply holds its own", async () => {
+    const rig = new Rig();
+    const worldId = await rig.newWorld();
+    const replying = await attached(rig, worldId);
+    const other = await attached(rig, worldId);
+    rig.host.sendUser(replying, "I look around.");
+    await rig.host.settle();
+    expect((await rig.host.begin(replying, { type: "normal" })).halted).toBe("cancelled");
+    const fills = holdFills(rig, (content) => content !== null);
+    const idle = rig.host.idle;
+    rig.host.idle = async () => undefined;
+    rig.host.restarts.length = 0;
+    const replyStarting = rig.host.begin(replying, { type: "regenerate" });
+    await fills.held;
+    const asked = rig.host.contextAsked("impersonate");
+    const impersonating = rig.host.begin(other, { type: "impersonate" });
+    await asked;
+    fills.release();
+    const reply = await replyStarting;
+    expect(reply.halted).toBeUndefined();
+    expect(rig.host.section("Scene")).toMatch(/^\[Scene\]\n/);
+    rig.host.assembled = [];
+    const own = await impersonating;
+    rig.host.idle = idle;
+    await rig.host.settle();
+    expect(own.halted).toBeUndefined();
+    expect(sectionsIn(rig.host.assembled)).toEqual([]);
+  });
+
+  test("two chats of one world prepare their replies side by side: each reply holds its own chat's sections and nothing of the other's", async () => {
     const rig = new Rig();
     const worldId = await coinWorld(rig);
     const flipper = await attached(rig, worldId);
     const looker = await attached(rig, worldId);
-    // The first chat flips a coin (an Outcome, and a minute passes); the other only looks around.
     rig.body(await rig.send({ type: "lre.action", chatId: flipper, action: "flip_coin", params: {}, source: "palette" }));
     rig.host.sendUser(looker, "I look around.");
     await rig.host.settle();
-    const fills = holdFills(rig, (content) => content !== null, true);
-    const idle = rig.host.idle;
-    rig.host.idle = async () => undefined;
     expect((await rig.host.begin(flipper, { type: "normal" })).halted).toBe("cancelled");
-    await fills.held;
-    // The other chat's engine run reaches the book: it either waits for this one or writes over it.
-    const reached = Promise.race([rig.host.sentWhere((m) => m.type === "lre.generate" && m.chatId === looker), rig.host.sentWhere((m) => m.type === "lre.activity" && m.chatId === looker && m.activity?.label === "Waiting for another chat of this world…")]);
     expect((await rig.host.begin(looker, { type: "normal" })).halted).toBe("cancelled");
-    await reached;
-    fills.release();
-    rig.host.idle = idle;
-    await rig.host.settle();
-    // Each reply, whichever starts first, holds its own chat's sections and nothing of the other's.
-    const looked = await rig.host.start(looker, { type: "regenerate" });
+    rig.host.restarts.length = 0;
+    const looked = await rig.host.begin(looker, { type: "regenerate" });
     expect(looked.halted).toBeUndefined();
     expect(rig.host.section("Outcome")).not.toContain("Flip a coin");
     const lookerScene = rig.host.section("Scene");
     expect(lookerScene).toMatch(/^\[Scene\]\n/);
     await rig.host.finish(looked, "The square is quiet.");
-    // Any ask its page still holds for a turn that gave way is refused; the reply runs the engine again.
-    rig.host.restarts.length = 0;
-    const flipped = await rig.host.start(flipper, { type: "regenerate" });
+    const flipped = await rig.host.begin(flipper, { type: "regenerate" });
     expect(flipped.halted).toBeUndefined();
     expect(rig.host.section("Outcome")).toMatch(/^\[Outcome\]\n- Flip a coin: (success|fail)/);
     expect(rig.host.section("Scene")).not.toBe(lookerScene);
     await rig.host.finish(flipped, "Heads.");
     expect(await liveEntries(rig, flipper)).toEqual([]);
+  });
+
+  test("the preset the host generates the chat with, its profile's block states included, decides where each section goes", async () => {
+    const rig = new Rig();
+    const chatId = await rig.worldChat();
+    // The preset holds {{outlet::lre_scene}}, but this chat's profile binding switches that block off.
+    rig.host.presetPlacesOutlets = true;
+    rig.host.presetBlocks = [block("Story", "{{outlet::lre_scene}}")];
+    rig.host.blockStates = { b_Story: false };
+    await rig.turn(chatId, "I look around.", "Quiet.");
+    expect(rig.host.section("Scene")).toMatch(/^\[Scene\]\n/);
+    // Another preset is the selected one: it places Scene at its outlet, whatever the last reply used.
+    rig.host.otherPresets.set("loom", { name: "Loom", revision: 1, blocks: [block("Story", "{{outlet::lre_scene}}")] });
+    rig.host.activePreset = "loom";
+    rig.host.blockStates = {};
+    await rig.turn(chatId, "I wait.", "Quiet.");
+    expect(atOutlet(rig, "lre_scene")).toMatch(/^\[Scene\]\n/);
+    expect(rig.host.assembled.filter((e) => e.content.startsWith("[Scene]"))).toHaveLength(1);
+  });
+
+  test("a preset change after the engine ran that nobody reported: the reply's guard sees it, the engine runs again and the reply is placed by the preset it is assembled with", async () => {
+    const rig = new Rig();
+    const chatId = await rig.worldChat();
+    rig.host.sendUser(chatId, "I look around.");
+    await rig.host.settle();
+    expect((await rig.host.begin(chatId, { type: "normal" })).halted).toBe("cancelled");
+    rig.host.presetPlacesOutlets = true;
+    rig.host.restarts.length = 0;
+    rig.host.otherPresets.set("loom", { name: "Loom", revision: 1, blocks: [block("Story", "{{outlet::lre_scene}}")] });
+    rig.host.activePreset = "loom";
+    const reply = await rig.host.start(chatId, { type: "regenerate" });
+    expect(reply.halted).toBeUndefined();
+    expect(atOutlet(rig, "lre_scene")).toMatch(/^\[Scene\]\n/);
+  });
+
+  test("only the generation's own preset counts: another preset saved, the same one saved with nothing the sections use changed, or old pages still reporting presets drop nothing", async () => {
+    const rig = new Rig();
+    rig.host.presetPlacesOutlets = true;
+    rig.host.presetBlocks = [block("Story", "{{outlet::lre_scene}}"), block("Style", "Write tersely.")];
+    const chatId = await rig.worldChat();
+    rig.host.sendUser(chatId, "I look around.");
+    await rig.host.settle();
+    expect((await rig.host.begin(chatId, { type: "normal" })).halted).toBe("cancelled");
+    const calls = rig.host.quietCalls.length;
+    // Workshop saves another preset; the chat's own preset is saved with a new style line; three pages report three presets.
+    rig.host.otherPresets.set("workshop", { name: "Workshop", revision: 2, blocks: [] });
+    rig.host.presetRevision++;
+    rig.host.presetBlocks = [block("Story", "{{outlet::lre_scene}}"), block("Style", "Write tersely, in past tense.")];
+    rig.host.emitPresetChanged("workshop");
+    rig.host.emitPresetChanged("preset-1");
+    for (const [page, presetId] of [["desk", "preset-1"], ["phone", "workshop"], ["tablet", null]] as const) rig.body(await rig.send({ type: "lre.hello", chatId, presetId }, page));
+    // A page from before the backend stopped reading reports still sends one with its preset change: it reads as a card request.
+    expect(rig.body(await rig.send({ type: "lre.preset", op: "active", presetId: "workshop" }, "phone")).card).toMatchObject({ preset: { name: expect.any(String) } });
+    await rig.host.settle();
+    rig.host.restarts.length = 0;
+    const reply = await rig.host.begin(chatId, { type: "regenerate" });
+    expect(reply.halted).toBeUndefined();
+    expect(rig.host.quietCalls.length).toBe(calls);
+    expect(atOutlet(rig, "lre_scene")).toMatch(/^\[Scene\]\n/);
+    // A save that moves the outlet off this preset makes the engine run again, and places Scene by it.
+    await rig.host.finish(reply, "Quiet.");
+    rig.host.sendUser(chatId, "I wait.");
+    await rig.host.settle();
+    expect((await rig.host.begin(chatId, { type: "normal" })).halted).toBe("cancelled");
+    rig.host.presetRevision++;
+    rig.host.presetBlocks = [block("Style", "Write tersely, in past tense.")];
+    rig.host.restarts.length = 0;
+    const again = await rig.host.start(chatId, { type: "regenerate" });
+    expect(again.halted).toBeUndefined();
+    expect(atOutlet(rig, "lre_scene")).toBe("");
+    expect(rig.host.section("Scene")).toMatch(/^\[Scene\]\n/);
+  });
+
+  test("when Lumiverse can't say which preset the chat generates with, the engine run stops and the chat says why", async () => {
+    const rig = new Rig();
+    const chatId = await rig.worldChat();
+    rig.host.presetUnknown = "presets.getActive failed";
+    rig.host.sendUser(chatId, "I look around.");
+    await rig.host.settle();
+    const g = await rig.host.start(chatId, { type: "normal" });
+    expect(g.halted).toBe("cancelled");
+    expect(rig.host.assembled).toEqual([]);
+    const flag = (await rig.rt.view(chatId, rig.host.userId)).chips.find((c) => c.kind === "engine_failed");
+    expect(flag?.label).toBe("The engine didn't finish, so nothing was generated");
+    expect(flag?.detail).toContain("presets.getActive failed");
   });
 
   test("an Outcome note reworded after the engine prepared the reply: the reply holds the note as it now reads", async () => {
@@ -234,11 +320,8 @@ describe("no stale outlets", () => {
     rig.host.quietReply = () => "{}";
     const decline = (await rig.rt.view(chatId, rig.host.userId)).chips.find((c) => c.kind === "decline");
     expect(decline).toBeDefined();
-    // The player presses Send with nothing typed (a new reply after the reply); the engine prepares it
-    // with the note as it reads now, and the chat says to press Send.
     expect((await rig.host.begin(chatId, { type: "normal" })).halted).toBe("cancelled");
     expect(rig.host.restarts).toMatchObject([{ chatId, as: "send" }]);
-    // Before they do, they choose Remove it on the decline: the note is reworded.
     expect(rig.body(await rig.send({ type: "lre.chip", chatId, chip: decline?.id, choice: "remove" })).applied).toBe(true);
     const reply = await rig.host.start(chatId, { type: "normal" });
     expect(reply.halted).toBeUndefined();
@@ -250,7 +333,6 @@ describe("no stale outlets", () => {
   test("same-roll Re-runs: a Re-run whose outline step is switched off holds no outline line an earlier run wrote", async () => {
     const rig = new Rig();
     const { chatId } = await outlinedCoins(rig);
-    // The outline and brief steps are switched off; a Re-run of the same turn rolls the same and writes no outline of its own.
     rig.body(await rig.send({ type: "lre.settings.set", patch: { modelUse: { steps: { outline: { enabled: false }, brief: { enabled: false } } } } }));
     const again = await rig.host.start(chatId, { type: "regenerate" });
     expect(again.halted).toBeUndefined();
@@ -261,12 +343,10 @@ describe("no stale outlets", () => {
   test("same-roll Re-runs: a Re-narrate tells its source swipe's outline, never one from a Re-run dropped before its reply", async () => {
     const rig = new Rig();
     const { chatId, beats } = await outlinedCoins(rig);
-    // A Re-run is prepared (its outline is Beat 2), then dropped before its reply: a setting changed.
     expect((await rig.host.begin(chatId, { type: "regenerate" })).halted).toBe("cancelled");
     expect(beats()).toBe(2);
     rig.body(await rig.send({ type: "lre.settings.set", patch: { modelUse: { tokens: { sections: 3900 } } } }));
     rig.host.restarts.length = 0;
-    // The player swipes as Re-narrate: its source is the first reply, whose outline was Beat 1.
     rig.body(await rig.send({ type: "lre.settings.set", patch: { swipeDefault: "renarrate" } }));
     const retold = await rig.host.start(chatId, { type: "swipe" });
     expect(retold.halted).toBeUndefined();

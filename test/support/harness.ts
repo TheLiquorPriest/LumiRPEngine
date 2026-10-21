@@ -108,7 +108,8 @@ export class Harness {
       beforePlan: async () => undefined,
       afterPlan: noop,
       // No sections here: the engine run plans, and its reply starts again (DESIGN §5.1).
-      deliver: async () => ({ bookId: "", entries: [] }),
+      deliver: async () => ({ bookId: "", fills: new Map(), placed: "" }),
+      fill: async () => "filled" as const,
       clear: noop,
       vacate: noop,
       adopted: noop,

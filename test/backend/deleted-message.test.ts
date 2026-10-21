@@ -85,12 +85,12 @@ describe("a turn the engine finished", () => {
   test("a reply that can't start any more says so on the chat, with a Retry that runs the engine again and then the reply", async () => {
     const rig = new Rig();
     const chatId = await playedChat(rig);
-    // The active preset switched while the engine ran: the sections it wrote may sit at outlets the
-    // reply's prompt no longer has, so the prepared reply goes.
-    let switched = false;
+    // The player's RPEngine settings changed while the engine ran: the sections it wrote follow the
+    // old ones, so the prepared reply goes.
+    let changed = false;
     rig.host.quietReply = () => {
-      if (!switched) rig.host.settingsSaved(["activeLoomPresetId"]);
-      switched = true;
+      if (!changed) void rig.send({ type: "lre.settings.set", patch: { modelUse: { tokens: { sections: 3900 } } } });
+      changed = true;
       return "{}";
     };
     const said = rig.host.sendUser(chatId, "I wave.");
@@ -99,7 +99,7 @@ describe("a turn the engine finished", () => {
     expect(stopped.halted).toBe("cancelled");
     expect(await flagOf(rig, chatId)).toMatchObject({ messageId: said, label: "The reply didn't start, so nothing was generated", actions: [{ id: "regenerate", label: "Retry" }, { id: "diagnostics", label: "Diagnostics" }] });
     // The flag names what changed, so the player knows why and the next report says which input moved.
-    expect(String((await flagOf(rig, chatId))?.detail)).toBe("A preset was saved or switched after the engine ran and before the reply started");
+    expect(String((await flagOf(rig, chatId))?.detail)).toBe("Your RPEngine settings changed after the engine ran and before the reply started");
     const records = await rig.rt.diag.records(chatId, rig.host.userId);
     expect(records.some((r) => r.kind === "turn" && r.status === "failed" && /before the reply started/.test(r.reason ?? ""))).toBe(true);
     // Retry: the flag's Regenerate, which the host plays as a new reply after the player's message.

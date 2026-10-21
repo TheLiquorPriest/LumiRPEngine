@@ -572,12 +572,17 @@ export function createSpindleHost(): HostPort {
         const preset = await spindle.presets.get(presetId, userId);
         return preset ? { id: preset.id, name: preset.name, revision: preset.cache_revision } : null;
       },
-      async ofConnection(connectionId, userId) {
-        return (await spindle.connections.list(userId)).find((c) => c.id === connectionId)?.preset_id ?? null;
-      },
-      async lastUsed(chatId, userId) {
-        const reply = (await spindle.chat.getMessages(chatId)).findLast((row) => !row.is_user);
-        return reply ? ((await spindle.generate.getBreakdown(reply.id, userId))?.presetId ?? null) : null;
+      async active(chatId, userId) {
+        // `presets.getActive` (staging 7524546f, worker-runtime.ts:2940) is newer than the published types.
+        const presets: unknown = spindle.presets;
+        const getActive = isRecord(presets) ? presets.getActive : undefined;
+        if (typeof getActive !== "function") throw new Error("this Lumiverse can't say which preset a chat generates with");
+        const call = getActive as unknown as (this: unknown, chatId?: string, userId?: string) => Promise<unknown>;
+        const raw = await call.call(presets, chatId ?? undefined, userId);
+        const states = isRecord(raw) && isRecord(raw.block_states) ? raw.block_states : {};
+        const blockStates: Record<string, boolean> = {};
+        for (const [id, on] of Object.entries(states)) if (typeof on === "boolean") blockStates[id] = on;
+        return { presetId: str(raw, "preset_id") ?? null, blockStates };
       },
       async blocks(presetId, userId) {
         return (await spindle.presets.blocks.list(presetId, userId)).map((b) => ({

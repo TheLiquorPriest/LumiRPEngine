@@ -201,10 +201,11 @@ export class FakeHost implements HostPort {
   blockReads = 0;
   /** Presets besides the default one, "preset-1" (whose name is `preset.name`). */
   readonly otherPresets = new Map<string, { name: string; revision: number; blocks: HostPresetBlock[] }>();
-  /** The preset each connection links. */
-  readonly connectionPresets = new Map<string, string>();
-  /** The preset the chat's last reply was assembled with, as its breakdown says. */
-  lastUsedPreset: string | null = "preset-1";
+  /** The preset the host generates every chat with (`presets.getActive`), and the block states its profile bindings set, by block id. */
+  activePreset: string | null = "preset-1";
+  blockStates: Record<string, boolean> = {};
+  /** Set: the host can't say which preset a chat generates with (`presets.getActive` throws this). */
+  presetUnknown: string | null = null;
   /** The connection the context handler is given (`connectionId`). */
   contextConnectionId: string | null = null;
 
@@ -217,8 +218,10 @@ export class FakeHost implements HostPort {
       const other = this.otherPresets.get(presetId);
       return other ? { id: presetId, name: other.name, revision: other.revision } : null;
     },
-    ofConnection: async (connectionId) => this.connectionPresets.get(connectionId) ?? null,
-    lastUsed: async () => this.lastUsedPreset,
+    active: async () => {
+      if (this.presetUnknown !== null) throw new Error(this.presetUnknown);
+      return { presetId: this.activePreset, blockStates: structuredClone(this.blockStates) };
+    },
     blocks: async (presetId) => {
       this.blockReads++;
       return structuredClone(presetId === "preset-1" ? this.presetBlocks : (this.otherPresets.get(presetId)?.blocks ?? []));
@@ -744,9 +747,21 @@ export class FakeHost implements HostPort {
       if (typeof bookId !== "string") continue;
       for (const e of this.bookStore.get(bookId)?.entries.values() ?? []) if (!e.disabled && e.constant && e.content !== "") activated.push(structuredClone(e));
     }
-    const placed = activated.filter((e) => e.position !== 8 || this.assembledOutlets === null || this.assembledOutlets.has(e.outlet ?? "")).map((e) => ({ id: e.id, content: e.content, position: e.position, depth: e.depth, role: e.role, outlet: e.outlet }));
+    // An outlet-only entry reaches the prompt where an enabled block of the preset the host assembles with (its block states applied) holds its outlet.
+    const blocks = this.activePreset === null ? [] : this.activePreset === "preset-1" ? this.presetBlocks : (this.otherPresets.get(this.activePreset)?.blocks ?? []);
+    const held = new Set(blocks.filter((b) => this.blockStates[b.id] ?? b.enabled).flatMap((b) => [...b.content.matchAll(/\{\{outlet::([^}]*)\}\}/gi)].map((m) => (m[1] ?? "").trim().toLowerCase())));
+    const outlets = this.assembledOutlets ?? (this.presetPlacesOutlets ? held : null);
+    const placed = activated.filter((e) => e.position !== 8 || outlets === null || outlets.has(e.outlet ?? "")).map((e) => ({ id: e.id, content: e.content, position: e.position, depth: e.depth, role: e.role, outlet: e.outlet }));
     return { activated, placed };
   }
+
+  /** A preset saved, as Lumiverse reports any preset write (`PRESET_CHANGED`, `{ id }`). */
+  emitPresetChanged(presetId: string): void {
+    this.emit("PRESET_CHANGED", { presetId });
+  }
+
+  /** Whether an outlet-only entry reaches the prompt only where the active preset's enabled blocks hold its outlet, as Lumiverse assembles (`assembledOutlets` null and this off: every outlet an entry names). */
+  presetPlacesOutlets = false;
 
   /** The World Info the last generation's prompt held (tests read the sections it carried). */
   assembled: AssembledEntry[] = [];
