@@ -67,7 +67,9 @@ function outcomes(w: Working): LedgerEvent[] {
 describe("castlife: characters' own plans", () => {
   test("a recorded plan takes the NPC to the bank at its time, off screen, and is marked done once it has passed", () => {
     const w = riverton();
-    record(w, [pin("jordan", "live"), planEdit("jordan", plan(w, "p1", {}))]);
+    // Off screen: a Far character, whose routine bends for a strong plan and takes him back after it
+    // (a Live or Near one's routine never moves them: the story is theirs).
+    record(w, [pin("jordan", "far"), planEdit("jordan", plan(w, "p1", { priority: 4 }))]);
     lapse(w, at(w, 0, "10:30"));
     expect([w.state.entities.jordan?.fields.place, w.state.entities.jordan?.fields.activity]).toEqual(["bank", "errand"]);
     // Every player surface shows the plan's kind, never its own words.
@@ -84,9 +86,11 @@ describe("castlife: characters' own plans", () => {
   });
 
   test("a plan a mind made in an older chat takes them nowhere, asks no one and is never settled; the GM's still takes them", () => {
-    const run = (events: (w: Working) => LedgerEvent[]): { at: unknown; outcomes: LedgerEvent[]; invited: boolean; laid: number; held: string[] } => {
-      const w = riverton();
-      record(w, [pin("jordan", "live"), ...events(w)]);
+    // Off screen (a Far character), where a plan with the POV asks them along; an invitation passes
+    // only between people who know each other, so Jordan knows the POV.
+    const run = (events: (w: Working) => LedgerEvent[], level: Fidelity = "far"): { at: unknown; outcomes: LedgerEvent[]; invited: boolean; laid: number; held: string[] } => {
+      const w = riverton((wd) => void wd.entities.jordan?.relations.push({ type: "knows", to: "you" }));
+      record(w, [pin("jordan", level), ...events(w)]);
       lapse(w, at(w, 0, "10:30"));
       const place = w.state.entities.jordan?.fields.place;
       lapse(w, at(w, 0, "13:00"));
@@ -104,6 +108,8 @@ describe("castlife: characters' own plans", () => {
     expect(mind).toEqual({ at: "office", outcomes: [], invited: false, laid: 0, held: ["p1:mind:open"] });
     const gm = run((w) => [planEdit("jordan", meet(w, "gm"))]);
     expect(gm).toMatchObject({ at: "bank", invited: true, laid: 1, held: ["p1:gm:done"] });
+    // A Live character's still takes him, but asks no one along: his mind and the scene speak for him.
+    expect(run((w) => [planEdit("jordan", meet(w, "gm"))], "live")).toMatchObject({ at: "bank", invited: false, laid: 1, held: ["p1:gm:done"] });
   });
 
   test("a plan's moves don't depend on how the time is cut", () => {
@@ -178,22 +184,30 @@ describe("castlife: characters' own plans", () => {
     expect(hunger(true) - hunger(false)).toBeGreaterThanOrEqual(10);
   });
 
-  test("with minds on, invitations come from plans with the POV and the formula is silent", () => {
-    const w = riverton((wd) => {
-      wd.entities.maya?.relations.push({ type: "regard", to: "you", fields: { warmth: 60, trust: 50, respect: 40, t: 0 } });
-    });
-    record(w, [{ type: "minds.round", data: { at: w.state.clock, on: true } }, pin("maya", "live"), planEdit("maya", plan(w, "p4", { what: "Ask Alex about the letter", kind: "meet", where: "cafe", with: ["you"], when: { from: at(w, 0, "18:00"), to: at(w, 0, "19:30") } }))]);
-    lapse(w, at(w, 0, "20:00"));
-    const invites = w.events.flatMap((e) => (e.type === "castlife.invitation" && "data" in e ? [e.data] : []));
-    expect(invites).toEqual([{ agent: "maya", place: "cafe", at: at(w, 0, "18:00"), text: "Maya Chen invites you to Daybreak Café at 18:00.", key: "maya:plan:p4" }]);
+  test("with minds on, invitations come from plans with the POV, none from the cast the story is about, and the formula is silent", () => {
+    const invites = (level: Fidelity): unknown[] => {
+      const w = riverton((wd) => {
+        wd.entities.maya?.relations.push({ type: "regard", to: "you", fields: { warmth: 60, trust: 50, respect: 40, t: 0 } });
+      });
+      record(w, [{ type: "minds.round", data: { at: w.state.clock, on: true } }, pin("maya", level), planEdit("maya", plan(w, "p4", { what: "Ask Alex about the letter", kind: "meet", where: "cafe", with: ["you"], when: { from: at(w, 0, "18:00"), to: at(w, 0, "19:30") } }))]);
+      lapse(w, at(w, 0, "20:00"));
+      return w.events.flatMap((e) => (e.type === "castlife.invitation" && "data" in e ? [e.data] : []));
+    };
+    // Off screen (Far), her plan asks the POV along, its ground recorded with it.
+    const w = riverton();
+    expect(invites("far")).toEqual([{ agent: "maya", place: "cafe", at: at(w, 0, "18:00"), text: "Maya Chen invites you to Daybreak Café at 18:00.", key: "maya:plan:p4", origin: "plan:p4" }]);
+    // A Live or Near character's asks no one: their mind and the scene speak for them.
+    expect(invites("live")).toEqual([]);
+    expect(invites("near")).toEqual([]);
   });
 
   test("an invitation is asked at most 6 hours ahead, never before the day it's on, and names no place the POV can't see", () => {
-    const w = riverton();
+    // Maya knows the POV: an invitation passes only between people who know each other.
+    const w = riverton((wd) => void wd.entities.maya?.relations.push({ type: "regard", to: "you", fields: { warmth: 60, trust: 50, respect: 40, t: 0 } }));
     // Made on Friday morning, for Saturday (day 1): drinks at the café at 20:00, and a late one at Maya's flat, which the POV doesn't know, at 02:00.
     record(w, [
       { type: "minds.round", data: { at: w.state.clock, on: true } },
-      pin("maya", "live"),
+      pin("maya", "far"),
       planEdit("maya", plan(w, "drinks", { kind: "meet", where: "cafe", with: ["you"], priority: 4, when: { from: at(w, 1, "20:00"), to: at(w, 1, "21:30") } })),
       planEdit("maya", plan(w, "late", { kind: "meet", where: "maya_flat", with: ["you"], priority: 4, when: { from: at(w, 1, "02:00"), to: at(w, 1, "03:30") } })),
     ]);
@@ -275,11 +289,12 @@ describe("castlife: characters' own plans", () => {
       wd.entities.maya?.relations.push({ type: "regard", to: "you", fields: { warmth: 60, trust: 50, respect: 40, t: 0 } });
     });
     const now = w.state.clock;
-    record(w, [{ type: "minds.round", data: { at: now, on: true } }, pin("maya", "live"), pin("jordan", "live"), planEdit("jordan", plan(w, "now", { kind: "errand", where: "bank", priority: 4, when: { from: now, to: now + 45 } })), planEdit("maya", plan(w, "coffee", { kind: "meet", where: "cafe", with: ["you"], priority: 4, when: { from: now - 15, to: now + 90 } }))]);
+    // Maya is off screen (Far): a Live or Near character's plans ask no one along.
+    record(w, [{ type: "minds.round", data: { at: now, on: true } }, pin("maya", "far"), pin("jordan", "live"), planEdit("jordan", plan(w, "now", { kind: "errand", where: "bank", priority: 4, when: { from: now, to: now + 45 } })), planEdit("maya", plan(w, "coffee", { kind: "meet", where: "cafe", with: ["you"], priority: 4, when: { from: now - 15, to: now + 90 } }))]);
     lapse(w, now + 10);
     expect([w.state.entities.jordan?.fields.place, w.state.entities.jordan?.fields.activity]).toEqual(["bank", "errand"]);
     const invites = w.events.flatMap((e) => (e.type === "castlife.invitation" && "data" in e ? [e.data] : []));
-    expect(invites).toEqual([{ agent: "maya", place: "cafe", at: now + 1, text: `Maya Chen invites you to Daybreak Café at ${formatHHMM(dateAt(calendarOf(w.world), now + 1).minuteOfDay)}.`, key: "maya:plan:coffee" }]);
+    expect(invites).toEqual([{ agent: "maya", place: "cafe", at: now + 1, text: `Maya Chen invites you to Daybreak Café at ${formatHHMM(dateAt(calendarOf(w.world), now + 1).minuteOfDay)}.`, key: "maya:plan:coffee", origin: "plan:coffee" }]);
   });
 
   test("a minded character who isn't an LOD1 agent follows routine only: their plan isn't laid or lived, and it is dropped once its window has passed", () => {
@@ -297,21 +312,39 @@ describe("castlife: characters' own plans", () => {
 });
 
 describe("castlife: occasions", () => {
-  test("a birthday or a holiday changes the day's options", () => {
-    const w = riverton((wd) => {
-      wd.calendar.holidays.push({ id: "harvest_fair", label: "Harvest Fair", rule: { type: "fixed", month: 10, day: 19 }, dayOff: true });
-    });
+  test("a birthday or a holiday changes the day's options of the template older chats fold against; a day lays one only from a routine block that's on then", () => {
+    const fair = (wd: WorldDoc): void => void wd.calendar.holidays.push({ id: "harvest_fair", label: "Harvest Fair", rule: { type: "fixed", month: 10, day: 19 }, dayOff: true });
+    const w = riverton(fair);
     const ids = (day: number): string[] => dayOptions(w.ctx, "rosa", at(w, day, "00:00")).map((o) => o.id);
     expect(ids(1)).not.toContain("birthday");
     w.apply({ type: "set", entity: "rosa", field: "birthday", value: "10-17" });
     expect(ids(1)).toContain("birthday");
-    expect(dayPlan(w.ctx, "rosa", 1).blocks.some((b) => b.label === "Birthday")).toBe(true);
+    // A day's plan lays neither on its own: nothing in the world or the story grounds a party or an outing.
+    expect(dayPlan(w.ctx, "rosa", 1).blocks.some((b) => b.label === "Birthday")).toBe(false);
     // A holiday that's a day off brings its own option and a slow morning; Tuesday is ordinary.
     const monday = dayOptions(w.ctx, "rosa", at(w, 3, "00:00"));
     expect(monday.find((o) => o.id === "holiday:harvest_fair")?.label).toBe("Harvest Fair");
     expect(monday.find((o) => o.id === "breakfast")?.window).toEqual({ from: at(w, 3, "07:00"), to: at(w, 3, "11:00") });
     expect(dayOptions(w.ctx, "rosa", at(w, 4, "00:00")).find((o) => o.id === "breakfast")?.window).toEqual({ from: at(w, 4, "06:00"), to: at(w, 4, "10:00") });
-    expect(dayPlan(w.ctx, "rosa", 3).blocks.some((b) => b.label === "Harvest Fair")).toBe(true);
+    expect(dayPlan(w.ctx, "rosa", 3).blocks.some((b) => b.label === "Harvest Fair")).toBe(false);
+    // Her routine's blocks for her birthday and the fair are laid on exactly those days.
+    const grounded = riverton((wd) => {
+      fair(wd);
+      wd.entities.rosa!.fields.birthday = "10-17";
+      wd.routines = {
+        rosa_days: {
+          id: "rosa_days",
+          owner: "rosa",
+          blocks: [
+            { id: "birthday", label: "Birthday", activity: "socialize", kind: "fixed", at: "18:00", minutes: 150, days: { birthday: "own" } },
+            { id: "fair", label: "Harvest Fair", activity: "leisure", kind: "fixed", at: "13:00", minutes: 180, days: { holidays: ["harvest_fair"] } },
+          ],
+        },
+      };
+    });
+    const laid = (day: number, label: string): boolean => dayPlan(grounded.ctx, "rosa", day).blocks.some((b) => b.label === label);
+    expect([laid(1, "Birthday"), laid(2, "Birthday")]).toEqual([true, false]);
+    expect([laid(3, "Harvest Fair"), laid(4, "Harvest Fair")]).toEqual([true, false]);
   });
 
   test("the weekend makes a slow morning and more time out and with friends; an observance brings an evening of its own, but no day off", () => {

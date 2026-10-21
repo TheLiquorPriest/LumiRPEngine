@@ -42,9 +42,14 @@ function setup(patch: (w: WorldDoc) => void = () => undefined): Working {
   return w;
 }
 
+/** Lets `days` pass as the player would: a Timelapse to then, continued past each stop at the unit cap. */
 function lapse(w: Working, days: number): void {
-  const out = runTimelapse(reg, w, { type: "duration", minutes: days * DAY }, { runSeed: "run", overrides: { invitation: "note", decline: "note", incident: "note", quest: "note", arrival: "note" } });
-  if ("code" in out) throw new Error(out.reason);
+  const to = w.state.clock + days * DAY;
+  for (;;) {
+    const out = runTimelapse(reg, w, { type: "duration", minutes: to - w.state.clock }, { runSeed: "run", overrides: { invitation: "note", decline: "note", incident: "note", quest: "note", arrival: "note" } });
+    if ("code" in out) throw new Error(out.reason);
+    if (out.result.stop !== "cap" || w.state.clock >= to) return;
+  }
 }
 
 /** One of the POV's accounts as the Money view shows it. */

@@ -154,9 +154,10 @@ export interface SlotInfo {
   end: number;
   index: number;
   /**
-   * False when the POV's own routine doesn't run in this step (DESIGN §8, §9.2): a timelapse the
-   * player spends doing something for a span of time, or a narrated time skip, keeps the POV where
-   * the story has it. Absent: it runs (a timelapse's agent steps take the POV as an LOD1 agent).
+   * False while the story holds the POV in this step (DESIGN §8, §9.2): an ordinary turn and its
+   * catch-up, a span the player's words spend doing something, or a narrated time skip. The POV's own
+   * routine doesn't move it then, and a scene with it holds whoever is in it. Absent: time runs on its
+   * own (a timelapse): the POV follows its routine and no scene holds anyone.
    */
   povRoutine?: boolean;
 }
@@ -189,8 +190,8 @@ export interface ProcessDef {
    * clock or on what moments change: a segment that starts mid-slot then gets the same ones.
    */
   instants?(ctx: ReadContext, agent: EntityId, slot: SlotInfo): AgentInstant[];
-  /** What the process does at one of its instants, at that instant's clock. */
-  atInstant?(ctx: ReadContext, agent: EntityId, instant: AgentInstant): LedgerEvent[];
+  /** What the process does at one of its instants, at that instant's clock, in the slot it falls in (`slot.povRoutine`: whether the story holds the POV). */
+  atInstant?(ctx: ReadContext, agent: EntityId, instant: AgentInstant, slot: SlotInfo): LedgerEvent[];
 }
 
 /** A pack's default table and its column contract (ARCHITECTURE §6). */

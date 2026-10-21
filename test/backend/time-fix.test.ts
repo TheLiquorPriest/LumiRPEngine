@@ -12,13 +12,15 @@ import { ranTo } from "../../src/engine/simulate";
 import { Rig } from "../support/rig";
 
 const DANNY = "danny_okafor";
+const MARCUS = "marcus_delgado";
 const HOME = "harbor_street_114";
 
 /**
  * Port Alder after one turn: Monday 14 September 2026 at 06:45, the player character and Danny at
  * home. Danny works at Alder Automotive from 07:00, fuels up at Shoreline Fuel from 12:00 and is back
- * at 12:30; the phone bill on the player character's card falls due at 09:00, paid as the slot it
- * falls in ends (11:30).
+ * at 12:30; Marcus, off screen at the garage since 06:30, lunches at the Rusty Anchor from 12:00 to
+ * 12:45; the phone bill on the player character's card falls due at 09:00, paid as the slot it falls
+ * in ends (11:30).
  */
 async function alder(): Promise<{ rig: Rig; chatId: string }> {
   const rig = new Rig({ shipped: true });
@@ -42,11 +44,11 @@ function phoneBills(state: Readonly<WorldState>): number {
   return (Array.isArray(card) ? card : []).filter((line) => isRecord(line) && line.flow === "bill_phone").length;
 }
 
-/** The clock as the pill reads it, with where Danny and the player character are and the phone bills paid. */
-async function world(rig: Rig, chatId: string): Promise<{ clock: string | undefined; danny: string | null; you: string | null; bills: number }> {
+/** The clock as the pill reads it, with where Danny, Marcus and the player character are and the phone bills paid. */
+async function world(rig: Rig, chatId: string): Promise<{ clock: string | undefined; danny: string | null; marcus: string | null; you: string | null; bills: number }> {
   const state = await folded(rig, chatId);
   const view = await rig.rt.view(chatId, rig.host.userId);
-  return { clock: view.hud?.clock.label, danny: placeOfEntity(state, DANNY), you: placeOfEntity(state, "pov"), bills: phoneBills(state) };
+  return { clock: view.hud?.clock.label, danny: placeOfEntity(state, DANNY), marcus: placeOfEntity(state, MARCUS), you: placeOfEntity(state, "pov"), bills: phoneBills(state) };
 }
 
 async function setTime(rig: Rig, chatId: string, time: string): Promise<void> {
@@ -78,12 +80,13 @@ describe("the clock's ✎ fix", () => {
     expect((await rig.rt.view(chatId, rig.host.userId)).hud?.fixes.time).toBeUndefined();
   });
 
-  test("later: the clock reads the new time, Danny is where his schedule puts him, the bill due between is paid once, and the next reply's Scene has the time", async () => {
+  test("later: the clock reads the new time, the story keeps the player character and Danny with it at home, Marcus off screen is where his schedule puts him, the bill due between is paid once, and the next reply's Scene has the time", async () => {
     const { rig, chatId } = await alder();
-    expect(await world(rig, chatId)).toEqual({ clock: "Mon 14 Sep 2026, 06:45", danny: HOME, you: HOME, bills: 0 });
+    expect(await world(rig, chatId)).toEqual({ clock: "Mon 14 Sep 2026, 06:45", danny: HOME, marcus: "alder_automotive", you: HOME, bills: 0 });
     await setTime(rig, chatId, "2026-09-14 12:00");
-    // The player character's own routine runs too, as in a timelapse: the coffee break at noon.
-    expect(await world(rig, chatId)).toEqual({ clock: "Mon 14 Sep 2026, 12:00", danny: "shoreline_fuel", you: "bluebird_coffee", bills: 1 });
+    // The time passes as a narrated skip does: the player character stays where the story has it, and
+    // Danny, in the scene with it, isn't taken out of it by his schedule; Marcus goes to lunch at noon.
+    expect(await world(rig, chatId)).toEqual({ clock: "Mon 14 Sep 2026, 12:00", danny: HOME, marcus: "rusty_anchor", you: HOME, bills: 1 });
     const [chip] = await corrections(rig, chatId);
     expect(chip?.detail).toStartWith("Clock moved on 5 h 15 min");
     await rig.turn(chatId, "I look around.", "The cafe is busy.");
@@ -95,21 +98,20 @@ describe("the clock's ✎ fix", () => {
     const { rig, chatId } = await alder();
     await setTime(rig, chatId, "2026-09-14 12:00");
     await setTime(rig, chatId, "2026-09-14 06:50");
-    expect(await world(rig, chatId)).toEqual({ clock: "Mon 14 Sep 2026, 06:50", danny: "shoreline_fuel", you: "bluebird_coffee", bills: 1 });
+    expect(await world(rig, chatId)).toEqual({ clock: "Mon 14 Sep 2026, 06:50", danny: HOME, marcus: "rusty_anchor", you: HOME, bills: 1 });
     expect((await corrections(rig, chatId)).map((c) => c.detail?.split(" · ")[0])).toEqual(["Clock moved on 5 h 15 min", "Clock set back 5 h 10 min"]);
-    // Danny and the player character are put back home; a Timelapse past 07:00, 09:00 and 11:30
-    // moves neither of them again and charges no second bill.
-    rig.body(await rig.send({ type: "lre.edit", chatId, ops: [{ op: "move", entity: DANNY, to: HOME }] }));
-    rig.body(await rig.send({ type: "lre.fix", chatId, entity: "pov", field: "place", value: HOME }));
+    // A Timelapse past 07:00, 09:00 and 11:30, whose routines would take the player character and
+    // Danny to the garage, moves neither of them and charges no second bill.
     await timelapse(rig, chatId, 295);
-    expect(await world(rig, chatId)).toEqual({ clock: "Mon 14 Sep 2026, 11:45", danny: HOME, you: HOME, bills: 1 });
+    expect(await world(rig, chatId)).toEqual({ clock: "Mon 14 Sep 2026, 11:45", danny: HOME, marcus: "rusty_anchor", you: HOME, bills: 1 });
     // Plain turns and the ✎ again up to where the clock had stood: still nothing.
     await rig.turn(chatId, "I wait.", "You wait.");
     await setTime(rig, chatId, "2026-09-14 12:00");
-    expect(await world(rig, chatId)).toEqual({ clock: "Mon 14 Sep 2026, 12:00", danny: HOME, you: HOME, bills: 1 });
-    // Past 12:00 the schedules run again: at 12:30 both go back to the garage.
+    expect(await world(rig, chatId)).toEqual({ clock: "Mon 14 Sep 2026, 12:00", danny: HOME, marcus: "rusty_anchor", you: HOME, bills: 1 });
+    // Past 12:00 the schedules run again: at 12:30 the player character and Danny go back to the
+    // garage (home is where their routine's rest has them), and at 12:45 Marcus does.
     await timelapse(rig, chatId, 45);
-    expect(await world(rig, chatId)).toEqual({ clock: "Mon 14 Sep 2026, 12:45", danny: "alder_automotive", you: "alder_automotive", bills: 1 });
+    expect(await world(rig, chatId)).toEqual({ clock: "Mon 14 Sep 2026, 12:45", danny: "alder_automotive", marcus: "alder_automotive", you: "alder_automotive", bills: 1 });
   });
 
   test("Undo takes a fix of the time back: the clock and the state from before it", async () => {
