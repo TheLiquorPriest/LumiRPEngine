@@ -1,11 +1,13 @@
 // Outside MCP servers (DESIGN §23): this build and where its agent kit is, what each server checks
 // in with, and the notice after an update. A server's latest check-in (it is known by its name, its
-// machine and the harness that runs it) is kept in the user's storage with when it was seen. Since
-// the extension started, each of a server's processes (a session of its own) is kept apart as well,
-// and a server stands as the one furthest behind of those heard from lately: one process that
-// reloaded doesn't make another that lags "updated". The build the extension last started as is
-// kept in extension storage, so starting as another one is an update: each user's next page hello
-// gets a notice for the top of the drawer, shown until dismissed, and a toast once.
+// machine and the harness that runs it) is kept in the user's storage with when it was seen. Each of
+// a server's processes (a session of its own) is kept apart as well, and a server stands as the one
+// furthest behind of those heard from lately: one process that reloaded doesn't make another that
+// lags "updated". The processes heard lately are kept in the user's storage too, so a restart (an
+// update is one) still counts each until it says hello again, closes or goes quiet. The build the
+// extension last started as is kept in extension storage, so starting as another one is an update:
+// each user's next page hello gets a notice for the top of the drawer, shown until dismissed, and a
+// toast once.
 
 import type { AgentClientView, AgentState, AgentsView, FollowCode, KitReport } from "../shared/agents";
 import { CORE_FILE, followCommand, KIT_API, KIT_FILE, pathOfFileUrl } from "../shared/agents";
@@ -70,7 +72,7 @@ interface StoredClient {
   seen: number;
 }
 
-/** One server process, as its own session last told the extension since it started. */
+/** One server process, as its own session last told the extension (this run, or the one before a restart). */
 interface Heard {
   /** The server it checked in as. */
   id: string;
@@ -147,6 +149,12 @@ export class Agents {
   private readonly working = new Set<Promise<void>>();
   /** Each open session's process, by `user \0 session`: the server it checked in as, what it said and when it was last heard. */
   private readonly sessions = new Map<string, Heard>();
+  /**
+   * The processes heard lately before the extension (re)started, from the user's file, by the same
+   * key: each still counts toward its server's line, but isn't connected or known, until its session
+   * says hello again (and is heard in `sessions`), closes, or goes unheard for LIVE_MS.
+   */
+  private readonly restored = new Map<string, Heard>();
   private started: Promise<StartedAs>;
 
   constructor(
@@ -160,9 +168,15 @@ export class Agents {
   start(): void {
     this.started = this.compare();
     this.host.on("FRONTEND_SESSION_CLOSED", (e, userId) => {
+      if (userId === null) return;
       // A closed session's process is gone: it no longer counts toward its server's line, and Settings → MCP server says which servers are connected.
-      if (userId === null || !this.sessions.delete(`${userId}\u0000${e.frontendSessionId}`)) return;
-      this.track(this.tell(userId), "the MCP servers' view wasn't sent");
+      const key = `${userId}\u0000${e.frontendSessionId}`;
+      const heard = this.sessions.delete(key);
+      if (!this.restored.delete(key) && !heard) return;
+      this.track(
+        this.change(userId, () => undefined),
+        "the MCP servers' view wasn't sent",
+      );
     });
   }
 
@@ -215,6 +229,7 @@ export class Agents {
     if (session !== undefined) {
       // Each process says hello on a session of its own: its state is kept apart from its server's others.
       const key = `${userId}\u0000${session}`;
+      this.restored.delete(key);
       this.sessions.delete(key);
       this.sessions.set(key, { id, client: checkIn, seen: checkIn.seen });
       for (const oldest of this.sessions.keys()) {
@@ -254,10 +269,14 @@ export class Agents {
     if (r.op === "kit") {
       const heard = session === undefined ? undefined : this.sessions.get(`${userId}\u0000${session}`);
       if (heard !== undefined) {
-        // A server's look is its process heard from. One that had gone quiet counts toward its line again, so its pages are told.
+        // A server's look is its process heard from: kept, so a restart still counts it. One that had gone quiet counts toward its line again, so its pages are told.
         const now = this.now();
         const quiet = now - heard.seen > LIVE_MS;
         heard.seen = now;
+        this.track(
+          this.file(userId).then((file) => this.save(userId, file)),
+          "an MCP server's look wasn't kept",
+        );
         if (quiet) this.track(this.tell(userId), "the MCP servers' view wasn't sent");
       }
       return { build: this.build.id, kit: this.build.kit, known: heard !== undefined };
@@ -292,6 +311,13 @@ export class Agents {
       if (!key.startsWith(prefix)) continue;
       connected.add(heard.id);
       if (now - heard.seen > LIVE_MS) continue;
+      const same = live.get(heard.id);
+      if (same) same.push(heard);
+      else live.set(heard.id, [heard]);
+    }
+    // A process from before the restart counts as it was, while it is recent; it isn't known to be connected.
+    for (const [key, heard] of this.restored) {
+      if (!key.startsWith(prefix) || this.sessions.has(key) || now - heard.seen > LIVE_MS) continue;
       const same = live.get(heard.id);
       if (same) same.push(heard);
       else live.set(heard.id, [heard]);
@@ -333,9 +359,20 @@ export class Agents {
   }
 
   private save(userId: UserId, file: UserAgents): void {
-    // The file as it is when its turn comes: a burst of changes writes the latest.
-    const write = (this.writes.get(userId) ?? Promise.resolve()).then(() => this.host.storage.write(USER_FILE, JSON.stringify(file), userId)).catch((error: unknown) => this.host.log("warn", `[LumiRPEngine] the MCP servers' file wasn't written (${errorText(error)})`, userId));
+    // The file as it is when its turn comes: a burst of changes writes the latest, with the processes heard lately.
+    const write = (this.writes.get(userId) ?? Promise.resolve()).then(() => this.host.storage.write(USER_FILE, JSON.stringify({ ...file, processes: this.recent(userId) }), userId)).catch((error: unknown) => this.host.log("warn", `[LumiRPEngine] the MCP servers' file wasn't written (${errorText(error)})`, userId));
     this.writes.set(userId, write);
+  }
+
+  /** The user's processes heard in the last LIVE_MS, by session: those from before the restart, then this run's over them. */
+  private recent(userId: UserId): Record<string, Heard> {
+    const prefix = `${userId}\u0000`;
+    const now = this.now();
+    const out = new Map<string, Heard>();
+    for (const map of [this.restored, this.sessions]) {
+      for (const [key, heard] of map) if (key.startsWith(prefix) && now - heard.seen <= LIVE_MS) out.set(key.slice(prefix.length), heard);
+    }
+    return Object.fromEntries(out);
   }
 
   private file(userId: UserId): Promise<UserAgents> {
@@ -350,6 +387,15 @@ export class Agents {
         // Keyed again as `meet` keys it, so an id kept under an earlier rule is this one's, and the latest of any two that meet wins.
         const id = idOf(client);
         if ((clients[id]?.seen ?? Number.NEGATIVE_INFINITY) < client.seen) clients[id] = client;
+      }
+      // The processes heard lately before this start: each counts until it says hello again, closes or goes quiet.
+      const now = this.now();
+      for (const [session, entry] of Object.entries(isRecord(stored.processes) ? stored.processes : {})) {
+        if (!isRecord(entry) || typeof entry.seen !== "number" || now - entry.seen > LIVE_MS || !isRecord(entry.client) || typeof entry.client.seen !== "number") continue;
+        const client = checkInOf(entry.client, entry.client.seen);
+        const key = `${userId}\u0000${session}`;
+        if (client === null || this.sessions.has(key) || this.restored.size >= SESSIONS_KEPT) continue;
+        this.restored.set(key, { id: idOf(client), client, seen: entry.seen });
       }
       return { v: 1, clients, toasted: typeof stored.toasted === "string" ? stored.toasted : null, dismissed: typeof stored.dismissed === "string" ? stored.dismissed : null };
     });

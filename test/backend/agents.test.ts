@@ -182,6 +182,89 @@ describe("a server's processes", () => {
       setSystemTime();
     }
   });
+
+  /** Two processes of one harness checked in on build a1, then the extension restarted as b2 (an update): the processes are what the user's file kept. */
+  async function updated(later: (ms: number) => void) {
+    const before = new Rig({ build: build("a1") });
+    const hello = async (rig: Rig, session: string, kit: string): Promise<string> => String(rig.body(await rig.send({ type: "lre.hello", chatId: null, client: server("studio", kit, { harness: "claude-code" }) }, session)).client);
+    const id = await hello(before, "srv-a", "a1");
+    await hello(before, "srv-b", "a1");
+    later(30_000);
+    await before.send({ type: "lre.agents", op: "kit" }, "srv-a");
+    await before.send({ type: "lre.agents", op: "kit" }, "srv-b");
+    await before.host.settle();
+    const kept = (): Record<string, { seen: number }> => JSON.parse(before.host.files.get(`${before.host.userId}/agents.json`) ?? "{}").processes ?? {};
+    expect(Object.keys(kept()).sort()).toEqual(["srv-a", "srv-b"]);
+    later(5_000);
+    const rig = before.restart({ build: build("b2") });
+    const lines = async () => (rig.body(await rig.send({ type: "lre.agents", op: "get" }, "page-1")).view as AgentsView).clients.map((c) => ({ id: c.id, state: c.state, processes: c.processes, connected: c.connected }));
+    return { rig, id, kept, lines, hello: (session: string, kit: string) => hello(rig, session, kit) };
+  }
+
+  const clock = () => {
+    let now = Date.UTC(2026, 9, 20, 12);
+    const later = (ms: number): void => {
+      now += ms;
+      setSystemTime(new Date(now));
+    };
+    later(0);
+    return later;
+  };
+
+  test("after a restart, a server's processes from before it still count: not yet (2 processes) until both have said hello on the new build, and neither is connected or known until it does", async () => {
+    const later = clock();
+    try {
+      const { rig, id, lines, hello } = await updated(later);
+      expect(await lines()).toEqual([{ id, state: "behind", processes: 2, connected: false }]);
+      // Restored is not known: the process's look says hello again.
+      expect(rig.body(await rig.send({ type: "lre.agents", op: "kit" }, "srv-a")).known).toBe(false);
+      // One reloads: the other, from before the restart, still lags.
+      await hello("srv-b", "b2");
+      expect(await lines()).toEqual([{ id, state: "behind", processes: 2, connected: true }]);
+      // It says hello on the old build first, then reloads: only then is the server updated.
+      await hello("srv-a", "a1");
+      expect(await lines()).toEqual([{ id, state: "behind", processes: 2, connected: true }]);
+      await hello("srv-a", "b2");
+      expect(await lines()).toEqual([{ id, state: "updated", processes: 2, connected: true }]);
+    } finally {
+      setSystemTime();
+    }
+  });
+
+  test("a process from before a restart that never comes back ages out after two minutes, from the line and from the file", async () => {
+    const later = clock();
+    try {
+      const { rig, id, kept, lines, hello } = await updated(later);
+      await hello("srv-b", "b2");
+      expect(await lines()).toEqual([{ id, state: "behind", processes: 2, connected: true }]);
+      // srv-b looks every minute; srv-a was last heard 35 s before the restart and never again.
+      later(61_000);
+      await rig.send({ type: "lre.agents", op: "kit" }, "srv-b");
+      expect(await lines()).toEqual([{ id, state: "behind", processes: 2, connected: true }]);
+      later(60_000);
+      await rig.send({ type: "lre.agents", op: "kit" }, "srv-b");
+      await rig.host.settle();
+      expect(await lines()).toEqual([{ id, state: "updated", processes: 1, connected: true }]);
+      expect(Object.keys(kept())).toEqual(["srv-b"]);
+    } finally {
+      setSystemTime();
+    }
+  });
+
+  test("a process from before a restart whose session closes drops out at once", async () => {
+    const later = clock();
+    try {
+      const { rig, id, kept, lines, hello } = await updated(later);
+      await hello("srv-b", "b2");
+      expect(await lines()).toEqual([{ id, state: "behind", processes: 2, connected: true }]);
+      rig.host.closeSession("srv-a");
+      await rig.host.settle();
+      expect(await lines()).toEqual([{ id, state: "updated", processes: 1, connected: true }]);
+      expect(Object.keys(kept())).toEqual(["srv-b"]);
+    } finally {
+      setSystemTime();
+    }
+  });
 });
 
 describe("the update notice", () => {
