@@ -303,14 +303,27 @@ export type MapRequest = Request<"lre.map"> & { chatId: ChatId } & ({ op?: "disp
 
 /**
  * Background-lane jobs (DESIGN §13, §15): Import from lore, Build/Refine with AI, Describe a map,
- * Playtest, Check world, and the lore indexing jobs (§4.2). Input: `import_lore` `{bookIds}`;
- * `refine` `{instructions}`; `describe_map` `{scope, prose, mapId?}` (the place drawn, the author's
- * description, and the map's id, by default `<scope>_map`; its one proposal is the map); `playtest`
- * `{turns: string[]}`; `check_world` `{days?: number}` (1–14 simulated days, default 3);
- * `index_book` `{bookId}`; `index_text` `{text}`. Playtest and Check world results share the
- * `turns`/`lint` shape (Check world: one entry per day, with drops, failures and leaks as notes).
+ * Propose routines from lore, Playtest, Check world, and the lore indexing jobs (§4.2). Input:
+ * `import_lore` `{bookIds}`; `refine` `{instructions}`; `describe_map` `{scope, prose, mapId?}`
+ * (the place drawn, the author's description, and the map's id, by default `<scope>_map`; its one
+ * proposal is the map); `propose_routines` `RoutineJobInput`; `playtest` `{turns: string[]}`;
+ * `check_world` `{days?: number}` (1–14 simulated days, default 3); `index_book` `{bookId}`;
+ * `index_text` `{text}`. Playtest and Check world results share the `turns`/`lint` shape (Check
+ * world: one entry per day, with drops, failures and leaks as notes).
  */
-export type JobKind = "import_lore" | "refine" | "describe_map" | "playtest" | "check_world" | "index_book" | "index_text";
+export type JobKind = "import_lore" | "refine" | "describe_map" | "propose_routines" | "playtest" | "check_world" | "index_book" | "index_text";
+
+/**
+ * Propose routines from lore (DESIGN §13): whom it proposes routines and schedules for, and where a
+ * second pass starts. People and groups are read in id order; a pass that stops before the last
+ * returns the input that continues it (`JobResult.next`).
+ */
+export interface RoutineJobInput {
+  /** The people and groups to propose for; absent, every one the job may read. */
+  owners?: EntityId[];
+  /** A second pass: start after this owner. */
+  after?: EntityId;
+}
 
 /**
  * `list`: the user's kept jobs for a world (running ones, and the last few that ended), oldest
@@ -330,13 +343,28 @@ export interface JobProposal {
   note?: string;
   /** The pack the proposal belongs to (an entity's kind's pack; `space` for places and routes), for grouping the review. */
   pack?: string;
-  /** Import: the title of each lore entry the value's `sources` cite, by back-link (`bookId/entryId`), for the review; a book index job: the book entry its lore entry comes from. */
+  /**
+   * Import: the title of each lore entry the value's `sources` cite, by back-link (`bookId/entryId`), for the review; a book index job: the book entry its lore entry comes from;
+   * Propose routines: each source it cites, by key (a lore entry's id, or `<entity>.<field>` for a sheet's field), named as the review shows it.
+   */
   sourceNames?: Record<string, string>;
   /** A lore indexing proposal: the terms and topics its entry joins in the lookup table when it is applied. */
   index?: LoreIndexAddition;
+  /** Propose routines: the person or group it is for, for grouping the review by character and group. */
+  owner?: EntityId;
+  /**
+   * What checking it against the draft found wrong, in the author's words: a place, owner or person
+   * that isn't there, a window that can't be, company with no ground, a clash with what the owner's
+   * schedules or routine already hold. The review starts it unticked.
+   */
+  problems?: string[];
 }
 
-export type JobResult = { proposals: JobProposal[] } | { turns: { user: string; reply: string; notes: string[] }[]; lint: LintIssue[] };
+/**
+ * A job's result: proposals, with `next`, the input that continues a pass that stopped before the
+ * end (Propose routines), or a run's turns and lint.
+ */
+export type JobResult = { proposals: JobProposal[]; next?: JsonObject } | { turns: { user: string; reply: string; notes: string[] }[]; lint: LintIssue[] };
 
 /** Pushed while a job runs and once when it ends. */
 export interface JobUpdate extends Envelope<"lre.job.update"> {
