@@ -36,7 +36,7 @@ import { labelOf, mutableSlice, numOf, objOf, optionalQuery, optionalService, sl
 import { planDay, tieKey, type FixedBlock, type PlanBlock, type PlanOption } from "../../../engine/plan-day";
 import type { AgentInstant, EventTypeDef, PackDef, ReadContext, Rejection, SlotInfo } from "../../../engine/registry";
 import type { PlayerBlock, RoutineEditOp, RoutineSociability } from "../../../shared/routines";
-import { blockShapeProblems, isOff, ROUTINE_AWARENESS, ROUTINE_EVENTS, ROUTINE_MODES, ROUTINE_ROLES, routineSettingsOf } from "../../../shared/routines";
+import { blockShapeProblems, isOff, ROUTINE_AWARENESS, ROUTINE_EVENTS, ROUTINE_MODES, ROUTINE_ROLES, routineSettingsOf, SKIP_LIVES } from "../../../shared/routines";
 import { createRng, type Rng } from "../../../engine/rng";
 import { hashParts } from "../../../shared/hash";
 import { allSchedules, routineStays, scheduleInstants, scheduleOwners } from "../../../engine/schedules";
@@ -828,7 +828,7 @@ const EVENTS: EventTypeDef<PackEvent>[] = [
   },
   {
     // How someone follows their routine in this chat (`routine_follow`), set whole; null clears it.
-    // An earlier build's event has no role: it folds as it did, with none.
+    // An earlier build's event has no role or skip life: it folds as it did, with none.
     type: ROUTINE_EVENTS.follow,
     validate: (e, ctx) => {
       if (!own(ctx.state.entities, strOf(e.data.entity))) return { code: "missing_entity", reason: "a routine setting names someone in the world" };
@@ -838,16 +838,39 @@ const EVENTS: EventTypeDef<PackEvent>[] = [
       const mode = o.mode === null || ROUTINE_MODES.some((m) => m === o.mode);
       const awareness = o.awareness === null || ROUTINE_AWARENESS.some((a) => a === o.awareness);
       const role = o.role === undefined || o.role === null || ROUTINE_ROLES.some((r) => r === o.role);
-      return mode && awareness && role && (o.mode !== null || o.awareness !== null || (o.role !== undefined && o.role !== null)) ? null : { code: "bad_event", reason: "a routine setting is a mode, an awareness, a role or some of them, or null to clear it" };
+      const skips = o.skips === undefined || o.skips === null || SKIP_LIVES.some((s) => s === o.skips);
+      const some = o.mode !== null || o.awareness !== null || (o.role !== undefined && o.role !== null) || (o.skips !== undefined && o.skips !== null);
+      return mode && awareness && role && skips && some ? null : { code: "bad_event", reason: "a routine setting is a mode, an awareness, a role, a skip life or some of them, or null to clear it" };
     },
     apply: (e, state) => {
       const follow = sliceRecord(state, "castlife", "follow");
       const who = strOf(e.data.entity);
       const f = objOf(e.data.follow);
       if (e.data.follow === null) delete follow[who];
-      else follow[who] = { mode: f.mode ?? null, awareness: f.awareness ?? null, ...(f.role !== undefined ? { role: f.role } : {}) };
+      else follow[who] = { mode: f.mode ?? null, awareness: f.awareness ?? null, ...(f.role !== undefined ? { role: f.role } : {}), ...(f.skips !== undefined ? { skips: f.skips } : {}) };
     },
-    describe: (e, ctx, viewer) => changeLine(ctx, e, viewer, e.data.follow === null ? "routine setting cleared" : `routine: ${[objOf(e.data.follow).mode, objOf(e.data.follow).awareness, objOf(e.data.follow).role].filter((x) => typeof x === "string").join(", ").replace(/_/g, " ")}`),
+    describe: (e, ctx, viewer) => changeLine(ctx, e, viewer, e.data.follow === null ? "routine setting cleared" : `routine: ${[objOf(e.data.follow).mode, objOf(e.data.follow).awareness, objOf(e.data.follow).role, objOf(e.data.follow).skips].filter((x) => typeof x === "string").join(", ").replace(/_/g, " ")}`),
+  },
+  {
+    // The model's plan for a time skip (DESIGN §8), recorded in the turn ahead of the timelapse it
+    // plans and kept whole, so a replay, or a Continue inside its span, reads it and never asks again.
+    // Only a well-formed plan is kept: people in the world, each block inside its span at a place the world has.
+    type: ROUTINE_EVENTS.skipPlan,
+    validate: (e, ctx) => {
+      const { from, to, plans, note } = e.data;
+      if (typeof from !== "number" || typeof to !== "number" || from >= to || !Array.isArray(plans) || (note !== undefined && typeof note !== "string")) return { code: "bad_event", reason: "a skip plan has its span, its plans and an optional note" };
+      const block = (raw: JsonValue): boolean => {
+        const b = objOf(raw);
+        return typeof b.label === "string" && typeof b.start === "number" && typeof b.end === "number" && from <= b.start && b.start < b.end && b.end <= to && own(ctx.world.places, strOf(b.place)) !== undefined && strOf(b.activity) !== "" && (b.days === undefined || typeof b.days === "string");
+      };
+      const planned = plans.every((raw) => own(ctx.state.entities, strOf(objOf(raw).entity)) !== undefined && Array.isArray(objOf(raw).blocks) && (objOf(raw).blocks as JsonValue[]).every(block));
+      return planned ? null : { code: "bad_value", reason: "a skip plan names people in the world, each block inside its span at a place the world has" };
+    },
+    apply: (e, state) => {
+      mutableSlice(state, "castlife").skipPlan = structuredClone(e.data);
+    },
+    // The GM's line only: what someone did in a skip is no player's news.
+    describe: (e, _ctx, viewer) => (viewer !== undefined ? "" : `skip planned for ${Array.isArray(e.data.plans) ? e.data.plans.length : 0}${typeof e.data.note === "string" ? ` (${e.data.note})` : ""}`),
   },
   {
     // One block of someone's routine in this chat (`routine_block`, or the story's): the block whole, or null to drop the chat's change.
@@ -907,7 +930,8 @@ function routineEdit(ctx: ReadContext, op: RoutineEditOp): LedgerEvent[] | Rejec
     const mode = op.mode === undefined ? (now?.mode ?? null) : op.mode;
     const awareness = op.awareness === undefined ? (now?.awareness ?? null) : op.awareness;
     const role = op.role === undefined ? (now?.role ?? null) : op.role;
-    return [{ type: ROUTINE_EVENTS.follow, data: { entity: op.entity, follow: mode === null && awareness === null && role === null ? null : { mode, awareness, role } } }];
+    const skips = op.skips === undefined ? (now?.skips ?? null) : op.skips;
+    return [{ type: ROUTINE_EVENTS.follow, data: { entity: op.entity, follow: mode === null && awareness === null && role === null && skips === null ? null : { mode, awareness, role, skips } } }];
   }
   if (op.op === "routine_block") {
     if (op.value === null) return [{ type: ROUTINE_EVENTS.block, data: { entity: op.entity, block: op.block, value: null, source } }];

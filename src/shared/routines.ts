@@ -221,6 +221,18 @@ export type RoutineRole = "informative" | "enforced" | "off";
 export const ROUTINE_ROLES: readonly RoutineRole[] = ["informative", "enforced", "off"];
 export const ROUTINE_ROLE_LABEL: Record<RoutineRole, string> = { informative: "Informative", enforced: "Enforced", off: "Off" };
 
+/**
+ * How someone whose routine is informative spends a time skip (a palette Timelapse, a typed span, a
+ * narrated skip; DESIGN §8): `stay` where the story has them; their `routine`, lived for the skip as an
+ * enforced one is, except while a story plan, a trip, the GM's intent or an appointment covers them;
+ * or what the `model` planned for them at the skip's start (`castlife.skip_plan`). The story still comes
+ * first in each: no one is moved into or out of the scene the story holds with the POV, and their
+ * arrivals where the POV is only note. An enforced routine is always lived, and an off one never.
+ */
+export type SkipLife = "stay" | "routine" | "model";
+export const SKIP_LIVES: readonly SkipLife[] = ["stay", "routine", "model"];
+export const SKIP_LIFE_LABEL: Record<SkipLife, string> = { stay: "Stay put", routine: "Follow their routine", model: "Planned by the model" };
+
 /** `world.routineSettings` (Build → Routines → Settings; `lre.editor set part "routineSettings"`, the defaults remove it). */
 export interface RoutineSettings {
   awareness: RoutineAwareness;
@@ -229,6 +241,8 @@ export interface RoutineSettings {
   planBend: RoutinePlanBend;
   /** Each level of closeness's role (DESIGN §24.1 levels, as recomputed); `routine_follow`'s `role` sets one character's in a chat. */
   roles: Record<Fidelity, RoutineRole>;
+  /** How each level spends a time skip while their routine is informative; `routine_follow`'s `skips` sets one character's in a chat. */
+  skips: Record<Fidelity, SkipLife>;
   /** Whether the narrator gets the usual routines of the characters present, as soft context, never as what they must do. */
   narrator: boolean;
   /** The default of the palette Timelapse's "Follow my routine" choice: false holds the POV where the story has it, as a typed span does. */
@@ -237,7 +251,9 @@ export interface RoutineSettings {
 
 export const DEFAULT_ROUTINE_ROLES: Readonly<Record<Fidelity, RoutineRole>> = Object.freeze({ live: "informative", near: "informative", far: "informative", background: "enforced" });
 
-export const DEFAULT_ROUTINE_SETTINGS: Readonly<RoutineSettings> = Object.freeze({ awareness: "balanced", invitations: "player", sociability: "usual", planBend: "standard", roles: DEFAULT_ROUTINE_ROLES, narrator: true, paletteFollowsRoutine: false });
+export const DEFAULT_SKIP_LIVES: Readonly<Record<Fidelity, SkipLife>> = Object.freeze({ live: "model", near: "model", far: "model", background: "routine" });
+
+export const DEFAULT_ROUTINE_SETTINGS: Readonly<RoutineSettings> = Object.freeze({ awareness: "balanced", invitations: "player", sociability: "usual", planBend: "standard", roles: DEFAULT_ROUTINE_ROLES, skips: DEFAULT_SKIP_LIVES, narrator: true, paletteFollowsRoutine: false });
 
 export const AWARENESS_LABEL: Record<RoutineAwareness, string> = { story_first: "Story first", balanced: "Balanced", routine_first: "Routine first" };
 export const INVITATIONS_LABEL: Record<RoutineInvitations, string> = { off: "Off", player: "To the player only", everyone: "Between everyone" };
@@ -245,17 +261,21 @@ export const SOCIABILITY_LABEL: Record<RoutineSociability, string> = { reserved:
 export const PLAN_BEND_LABEL: Record<RoutinePlanBend, string> = { must: "Only plans that must happen", strong: "Strong plans", standard: "Strong plans, and set-time plans for the cast", ordinary: "Strong plans, and set-time plans for anyone" };
 export const BLOCK_KIND_LABEL: Record<RoutineBlockKind, string> = { fixed: "Fixed", flexible: "Flexible", optional: "Optional" };
 
-/** The world's routine settings, each part the world sets well, the defaults for the rest (a role per level). */
+/** The world's routine settings, each part the world sets well, the defaults for the rest (a role and a skip life per level). */
 export function routineSettingsOf(world: { readonly routineSettings?: unknown }): RoutineSettings {
   const raw = isRecord(world.routineSettings) ? world.routineSettings : {};
   const pick = <T extends string>(v: unknown, allowed: readonly T[], fallback: T): T => allowed.find((a) => a === v) ?? fallback;
-  const roles = isRecord(raw.roles) ? raw.roles : {};
+  const perLevel = <T extends string>(v: unknown, allowed: readonly T[], fallback: Readonly<Record<Fidelity, T>>): Record<Fidelity, T> => {
+    const set = isRecord(v) ? v : {};
+    return { live: pick(set.live, allowed, fallback.live), near: pick(set.near, allowed, fallback.near), far: pick(set.far, allowed, fallback.far), background: pick(set.background, allowed, fallback.background) };
+  };
   return {
     awareness: pick(raw.awareness, ROUTINE_AWARENESS, DEFAULT_ROUTINE_SETTINGS.awareness),
     invitations: pick(raw.invitations, ROUTINE_INVITATIONS, DEFAULT_ROUTINE_SETTINGS.invitations),
     sociability: pick(raw.sociability, ROUTINE_SOCIABILITY, DEFAULT_ROUTINE_SETTINGS.sociability),
     planBend: pick(raw.planBend, ROUTINE_PLAN_BEND, DEFAULT_ROUTINE_SETTINGS.planBend),
-    roles: { live: pick(roles.live, ROUTINE_ROLES, DEFAULT_ROUTINE_ROLES.live), near: pick(roles.near, ROUTINE_ROLES, DEFAULT_ROUTINE_ROLES.near), far: pick(roles.far, ROUTINE_ROLES, DEFAULT_ROUTINE_ROLES.far), background: pick(roles.background, ROUTINE_ROLES, DEFAULT_ROUTINE_ROLES.background) },
+    roles: perLevel(raw.roles, ROUTINE_ROLES, DEFAULT_ROUTINE_ROLES),
+    skips: perLevel(raw.skips, SKIP_LIVES, DEFAULT_SKIP_LIVES),
     narrator: typeof raw.narrator === "boolean" ? raw.narrator : DEFAULT_ROUTINE_SETTINGS.narrator,
     paletteFollowsRoutine: typeof raw.paletteFollowsRoutine === "boolean" ? raw.paletteFollowsRoutine : DEFAULT_ROUTINE_SETTINGS.paletteFollowsRoutine,
   };
@@ -272,11 +292,12 @@ export type RoutineMode = "follows" | "no_invitations" | "off";
 export const ROUTINE_MODES: readonly RoutineMode[] = ["follows", "no_invitations", "off"];
 export const ROUTINE_MODE_LABEL: Record<RoutineMode, string> = { follows: "Follows their routine", no_invitations: "Follows it, no invitations", off: "No routine" };
 
-/** A character's follow setting in a chat; null parts follow the world (`follows`, the world's awareness, their level's role). */
+/** A character's follow setting in a chat; null parts follow the world (`follows`, the world's awareness, their level's role and skip life). */
 export interface RoutineFollow {
   mode: RoutineMode | null;
   awareness: RoutineAwareness | null;
   role: RoutineRole | null;
+  skips: SkipLife | null;
 }
 
 /**
@@ -289,15 +310,16 @@ export type ChatScheduleChange = { off: true; until: number | null } | { slots: 
 /**
  * The GM's routine controls (GM → a character → Routine), each an `lre.edit` op, so a submit is one
  * `fix` entry with its Undo:
- *  - `routine_follow`: their mode, awareness and role in this chat; a part left out is kept, null
- *    returns it to the world's (the role to their level's), and all null clear the setting;
+ *  - `routine_follow`: their mode, awareness, role and skip life in this chat; a part left out is
+ *    kept, null returns it to the world's (the role and the skip life to their level's), and all null
+ *    clear the setting;
  *  - `routine_block`: one block of their routine in this chat, by id: a block (`off: true` turns the
  *    block off for them), or null to drop the chat's change and go back to the world's;
  *  - `schedule_override`: one of their schedules in this chat, by id (`ChatScheduleChange`), or null
  *    to drop the chat's change.
  */
 export type RoutineEditOp =
-  | { op: "routine_follow"; entity: EntityId; mode?: RoutineMode | null; awareness?: RoutineAwareness | null; role?: RoutineRole | null }
+  | { op: "routine_follow"; entity: EntityId; mode?: RoutineMode | null; awareness?: RoutineAwareness | null; role?: RoutineRole | null; skips?: SkipLife | null }
   | { op: "routine_block"; entity: EntityId; block: RoutineBlockId; value: RoutineEntry | null }
   | { op: "schedule_override"; entity: EntityId; schedule: ScheduleId; value: ChatScheduleChange | null };
 
@@ -305,9 +327,37 @@ export type RoutineEditOp =
  * The events a chat's routine changes are recorded as (the castlife slice), each carrying the change
  * whole, so both folds and an Undo agree: `follow` `{entity, follow: RoutineFollow | null}`; `block`
  * `{entity, block, value: RoutineEntry | null, source: ChatRoutineSource}` (the GM's, or the story's
- * read from a reply); `schedule` `{entity, schedule, value: ChatScheduleChange | null, source}`.
+ * read from a reply); `schedule` `{entity, schedule, value: ChatScheduleChange | null, source}`; and
+ * `skipPlan`, the model's plan for a time skip (`SkipPlan`), recorded in the turn ahead of the
+ * timelapse it plans. The fold keeps the latest plan whole (`skipPlanOf`), so a replay never asks again.
  */
-export const ROUTINE_EVENTS = { follow: "castlife.follow", block: "castlife.routine", schedule: "castlife.schedule" } as const;
+export const ROUTINE_EVENTS = { follow: "castlife.follow", block: "castlife.routine", schedule: "castlife.schedule", skipPlan: "castlife.skip_plan" } as const;
+
+/**
+ * One block of a skip plan: a fixed block of someone's time in the skip, `start` to `end` in world
+ * clock minutes (as a laid day's blocks), at a place by id doing an activity the world has; `days`,
+ * for a span over a day, names its day in the calendar's own words.
+ */
+export interface SkipBlock {
+  label: string;
+  start: number;
+  end: number;
+  days?: string;
+  place: PlaceId;
+  activity: string;
+}
+
+/**
+ * The model's plan for a time skip (`castlife.skip_plan`): its span `[from, to)` and, for each
+ * character it planned, their blocks in it. `note` is a line for the GM when the call failed or was
+ * skipped (then no one is planned, and everyone it would have planned stays).
+ */
+export interface SkipPlan {
+  from: number;
+  to: number;
+  plans: { entity: EntityId; blocks: SkipBlock[] }[];
+  note?: string;
+}
 
 // ---------------------------------------------------------------- the read model
 
@@ -412,8 +462,10 @@ export interface RoutineGmView {
   tier: Fidelity | null;
   /** Whether the planner lays their day (an agent, Cast life 3 and up) and lives it. */
   planned: boolean;
-  /** How they follow it now: the chat's setting, else the world's (their role: their level's in `settings.roles`). */
-  follow: { mode: RoutineMode; awareness: RoutineAwareness; role: RoutineRole; chat: RoutineFollow | null };
+  /** How they follow it now: the chat's setting, else the world's (their role and skip life: their level's in `settings`). */
+  follow: { mode: RoutineMode; awareness: RoutineAwareness; role: RoutineRole; skips: SkipLife; chat: RoutineFollow | null };
+  /** The latest skip plan's part for them (the current or last time skip's): its span, their blocks (none when it didn't plan them), and its note for the GM. Null before any. */
+  skip: { from: number; to: number; blocks: SkipBlock[]; note: string | null } | null;
   settings: RoutineSettings;
   blocks: EffectiveBlock[];
   schedules: EffectiveSchedule[];
@@ -577,14 +629,14 @@ export function routineShapeProblems(v: unknown): string[] {
   return out;
 }
 
-/** Each setting's allowed values: a word of its list, a switch, or a role for each level of closeness. A setting not named here is none the engine reads. */
-const SETTING_VALUES: Record<string, readonly string[] | "switch" | "roles"> = { awareness: ROUTINE_AWARENESS, invitations: ROUTINE_INVITATIONS, sociability: ROUTINE_SOCIABILITY, planBend: ROUTINE_PLAN_BEND, roles: "roles", narrator: "switch", paletteFollowsRoutine: "switch" } satisfies Record<keyof RoutineSettings, readonly string[] | "switch" | "roles">;
+/** Each setting's allowed values: a word of its list, a switch, or one of a list for each level of closeness. A setting not named here is none the engine reads. */
+const SETTING_VALUES: Record<string, readonly string[] | "switch" | { levels: readonly string[] }> = { awareness: ROUTINE_AWARENESS, invitations: ROUTINE_INVITATIONS, sociability: ROUTINE_SOCIABILITY, planBend: ROUTINE_PLAN_BEND, roles: { levels: ROUTINE_ROLES }, skips: { levels: SKIP_LIVES }, narrator: "switch", paletteFollowsRoutine: "switch" } satisfies Record<keyof RoutineSettings, readonly string[] | "switch" | { levels: readonly string[] }>;
 
 /**
  * What is wrong with routine settings as a write sends them (a Build save, an outside tool), one
  * phrase per field at fault; none when they read. A part left out keeps its default, so `{}` reads,
- * and so does a level `roles` leaves out. Stored settings are read leniently (`routineSettingsOf`); a
- * write is held to this.
+ * and so does a level `roles` or `skips` leaves out. Stored settings are read leniently
+ * (`routineSettingsOf`); a write is held to this.
  */
 export function routineSettingsProblems(v: unknown): string[] {
   if (!isRecord(v)) return ["routine settings are an object"];
@@ -592,9 +644,9 @@ export function routineSettingsProblems(v: unknown): string[] {
     const allowed = hasOwn(SETTING_VALUES, key) ? SETTING_VALUES[key] : undefined;
     if (!allowed) return [`there's no setting ${key} (${Object.keys(SETTING_VALUES).join(", ")})`];
     if (allowed === "switch") return typeof value === "boolean" ? [] : [`${key} is true or false`];
-    if (allowed === "roles") {
-      if (!isRecord(value)) return [`roles give ${FIDELITIES.join(", ")} each a role`];
-      return Object.entries(value).flatMap(([level, role]) => (!FIDELITIES.some((f) => f === level) ? [`roles have no level ${level} (${FIDELITIES.join(", ")})`] : typeof role === "string" && ROUTINE_ROLES.some((r) => r === role) ? [] : [`roles.${level} is ${ROUTINE_ROLES.join(", ")}`]));
+    if ("levels" in allowed) {
+      if (!isRecord(value)) return [`${key} give ${FIDELITIES.join(", ")} each one of ${allowed.levels.join(", ")}`];
+      return Object.entries(value).flatMap(([level, one]) => (!FIDELITIES.some((f) => f === level) ? [`${key} have no level ${level} (${FIDELITIES.join(", ")})`] : typeof one === "string" && allowed.levels.includes(one) ? [] : [`${key}.${level} is ${allowed.levels.join(", ")}`]));
     }
     return typeof value === "string" && allowed.includes(value) ? [] : [`${key} is ${allowed.join(", ")}`];
   });

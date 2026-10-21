@@ -125,7 +125,7 @@ describe("Build → Routines", () => {
 describe("Build → World → Routines and the story", () => {
   test("the tuning round-trips, each setting alone, and the defaults leave the world none", async () => {
     const { worldId, send } = await portAlder();
-    const settings: RoutineSettings = { awareness: "story_first", invitations: "off", sociability: "outgoing", planBend: "must", roles: { live: "enforced", near: "off", far: "informative", background: "informative" }, narrator: false, paletteFollowsRoutine: true };
+    const settings: RoutineSettings = { awareness: "story_first", invitations: "off", sociability: "outgoing", planBend: "must", roles: { live: "enforced", near: "off", far: "informative", background: "informative" }, skips: { live: "stay", near: "routine", far: "model", background: "stay" }, narrator: false, paletteFollowsRoutine: true };
     let draft = await send(routineSettingsWrite(worldId, settings));
     expect(draft.routineSettings).toEqual(settings);
     expect(routineSettingsOf(draft)).toEqual(settings);

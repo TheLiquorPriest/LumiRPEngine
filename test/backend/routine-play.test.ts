@@ -97,7 +97,7 @@ describe("the GM's routine controls in play", () => {
     const fleet: JsonObject = { id: "fleet", label: "Works on the township boats", activity: "work", kind: "fixed", at: "16:00", minutes: 90, place: { place: "alder_harbor_marina" } };
     rig.body(await rig.send({ type: "lre.edit", chatId, ops: [{ op: "routine_block", entity: "danny_okafor", block: "fleet", value: fleet }, { op: "routine_follow", entity: "danny_okafor", mode: "no_invitations" }] }));
     const changed = rig.body(await rig.send({ type: "lre.routine", chatId, op: "changed" })).changed;
-    expect(changed).toEqual([expect.objectContaining({ entity: "danny_okafor", follow: { mode: "no_invitations", awareness: null, role: null }, blocks: [expect.objectContaining({ block: "fleet", off: false })] })]);
+    expect(changed).toEqual([expect.objectContaining({ entity: "danny_okafor", follow: { mode: "no_invitations", awareness: null, role: null, skips: null }, blocks: [expect.objectContaining({ block: "fleet", off: false })] })]);
     const gm = rig.body(await rig.send({ type: "lre.routine", chatId, op: "day", entity: "danny_okafor", view: "gm" })).gm as JsonObject;
     expect(gm.blocks).toContainEqual(expect.objectContaining({ block: fleet, owner: expect.objectContaining({ level: "chat" }), source: expect.objectContaining({ type: "gm" }) }));
     expect(gm.day).toMatchObject({ blocks: expect.arrayContaining([expect.objectContaining({ from: "16:00", to: "17:30", place: "alder_harbor_marina" })]) });

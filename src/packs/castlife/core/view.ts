@@ -19,7 +19,7 @@ import { canSeeEntity } from "../../../engine/visibility";
 import { placeOfEntity } from "../../../engine/scope";
 import { livesPlans } from "./commitments";
 import { asksOf, dayPlan, invitationText, kindOfBlock, playerBlocks } from "./index";
-import { activeBlocks, chatBlocks, chatFollow, chatSchedules, followOf, ownerOf, routineCandidates, routineRole, sourceView, type Applied } from "./routines";
+import { activeBlocks, chatBlocks, chatFollow, chatSchedules, followOf, ownerOf, routineCandidates, routineRole, skipPlanOf, sourceView, type Applied } from "./routines";
 
 /** A schedule's owner as the read model names it: the chat's own version, or the rank its owner has. */
 function scheduleOwner(ctx: ReadContext, id: string, rank: number | null, owner: ScheduleDef["owner"]): OwnerRef {
@@ -143,13 +143,18 @@ export function routineGmView(ctx: ReadContext, who: EntityId, day = dateAt(cale
     const bed = plan.blocks.find((b) => b.start > ctx.state.clock && b.activity === "sleep")?.start ?? null;
     story.push({ field: "place", value: e?.fields.place ?? null, label: own(ctx.world.places, strOf(e?.fields.place))?.name ?? strOf(e?.fields.place), since: null, until: awareness === "story_first" ? null : awareness === "balanced" ? bed : now.end, by: "story" });
   }
+  const follow = followOf(ctx, who);
+  const settings = routineSettingsOf(ctx.world);
+  // The latest skip plan's part for them: its span, their blocks (none when it didn't plan them) and its note.
+  const skip = skipPlanOf(ctx.state);
   return {
     entity: who,
     name: e?.name ?? who,
     tier: optionalQuery(ctx, "minds.tier")?.(ctx, who) ?? null,
     planned: livesPlans(ctx, who),
-    follow: { ...followOf(ctx, who), role: routineRole(ctx, who) },
-    settings: routineSettingsOf(ctx.world),
+    follow: { ...follow, role: routineRole(ctx, who), skips: follow.chat?.skips ?? settings.skips[optionalQuery(ctx, "minds.tier")?.(ctx, who) ?? "background"] },
+    skip: skip ? { from: skip.from, to: skip.to, blocks: skip.plans.find((p) => p.entity === who)?.blocks ?? [], note: skip.note ?? null } : null,
+    settings,
     blocks,
     schedules,
     day: { index: day, label: formatClock(cal, plan.blocks[0]?.start ?? ctx.state.clock).split(" ")[0] ?? "", blocks: laid },

@@ -82,7 +82,7 @@ describe("the cast's routine informs; it doesn't move them", () => {
     // Their mode and awareness stay as they were set.
     const w = town();
     gmEdit(w, [{ op: "routine_follow", entity: "maya", mode: "no_invitations" }, follow("informative")]);
-    expect(routineChanges(reg.context(w.world, w.state)).map((c) => c.follow)).toEqual([{ mode: "no_invitations", awareness: null, role: "informative" }]);
+    expect(routineChanges(reg.context(w.world, w.state)).map((c) => c.follow)).toEqual([{ mode: "no_invitations", awareness: null, role: "informative", skips: null }]);
   });
 
   test("the GM's role folds the same both ways, and Undo takes it back", () => {
@@ -95,7 +95,7 @@ describe("the cast's routine informs; it doesn't move them", () => {
       fixes.push(out.events);
       states.push(foldBoth(world, [], fixes).state);
     }
-    expect(states.map((s) => routineChanges(reg.context(world, s)).map((c) => c.follow))).toEqual([[], [{ mode: null, awareness: null, role: "informative" }], [{ mode: null, awareness: "story_first", role: "informative" }], [{ mode: null, awareness: "story_first", role: null }]]);
+    expect(states.map((s) => routineChanges(reg.context(world, s)).map((c) => c.follow))).toEqual([[], [{ mode: null, awareness: null, role: "informative", skips: null }], [{ mode: null, awareness: "story_first", role: "informative", skips: null }], [{ mode: null, awareness: "story_first", role: null, skips: null }]]);
     const undo = (count: number): EventRef[] => Array.from({ length: count }, (_, i) => ({ in: "post" as const, seq: fixes.length - i, index: 0 }));
     for (let k = 1; k <= fixes.length; k++) expect(hashJson(foldBoth(world, [], fixes, undo(k)).state)).toBe(hashJson(states[fixes.length - k]));
   });

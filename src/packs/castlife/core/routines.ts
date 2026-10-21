@@ -18,6 +18,7 @@ import {
   ROUTINE_LINT,
   ROUTINE_MODES,
   ROUTINE_ROLES,
+  SKIP_LIVES,
   routineSettingsOf,
   routineShapeProblems,
   storySourceLabel,
@@ -32,6 +33,8 @@ import {
   type RoutineFollow,
   type RoutineMode,
   type RoutineRole,
+  type SkipLife,
+  type SkipPlan,
   type RoutineSource,
   type SourceView,
 } from "../../../shared/routines";
@@ -82,7 +85,8 @@ export function chatFollow(state: Readonly<WorldState>, who: EntityId): RoutineF
   const mode = ROUTINE_MODES.find((m) => m === raw.mode) ?? null;
   const awareness = ROUTINE_AWARENESS.find((a) => a === raw.awareness) ?? null;
   const role = ROUTINE_ROLES.find((r) => r === raw.role) ?? null;
-  return mode === null && awareness === null && role === null ? null : { mode, awareness, role };
+  const skips = SKIP_LIVES.find((s) => s === raw.skips) ?? null;
+  return mode === null && awareness === null && role === null && skips === null ? null : { mode, awareness, role, skips };
 }
 
 /** The blocks a chat changed for someone (`castlife.routine`), by block id. */
@@ -124,6 +128,23 @@ export function followOf(ctx: Pick<ReadContext, "world" | "state">, who: EntityI
  */
 export function routineRole(ctx: ReadContext, who: EntityId): RoutineRole {
   return chatFollow(ctx.state, who)?.role ?? routineSettingsOf(ctx.world).roles[optionalQuery(ctx, "minds.tier")?.(ctx, who) ?? "background"];
+}
+
+/**
+ * How someone spends a time skip (DESIGN §8, `SkipLife`): the chat's choice for them (`routine_follow`),
+ * else their level's in the world's settings, read as their level is now. Null for the POV and while
+ * their routine isn't informative: an enforced routine is always lived, and an off one never.
+ */
+export function skipLifeOf(ctx: ReadContext, who: EntityId): SkipLife | null {
+  if (who === ctx.world.pov || routineRole(ctx, who) !== "informative") return null;
+  return chatFollow(ctx.state, who)?.skips ?? routineSettingsOf(ctx.world).skips[optionalQuery(ctx, "minds.tier")?.(ctx, who) ?? "background"];
+}
+
+/** The latest skip plan the chat recorded (`castlife.skip_plan`, kept whole as the castlife slice's `skipPlan`), null before any. */
+export function skipPlanOf(state: Readonly<WorldState>): SkipPlan | null {
+  const raw = sliceOf(state, "castlife").skipPlan;
+  // The event's own check let only a well-formed plan in, so the fold keeps one as recorded.
+  return isRecord(raw) && typeof raw.from === "number" && typeof raw.to === "number" && Array.isArray(raw.plans) ? (raw as unknown as SkipPlan) : null;
 }
 
 // ---------------------------------------------------------------- whose blocks apply
@@ -517,20 +538,20 @@ export function routinesLint(world: WorldDoc, reg: Registry, state: Readonly<Wor
   const raw = world.routines ?? {};
   for (const id of Object.keys(raw).sort()) issues.push(...routineIssues(world, reg, id, own(raw, id), state));
   const settings = isRecord(world.routineSettings) ? world.routineSettings : {};
-  // Each part a world may set: a word of its list, a switch, or a role for each level of closeness.
-  const known: Record<string, readonly string[] | "switch" | "roles"> = { awareness: ROUTINE_AWARENESS, invitations: ["off", "player", "everyone"], sociability: ["reserved", "usual", "outgoing"], planBend: ["must", "strong", "standard", "ordinary"], roles: "roles", narrator: "switch", paletteFollowsRoutine: "switch" };
+  // Each part a world may set: a word of its list, a switch, or one of a list for each level of closeness.
+  const known: Record<string, readonly string[] | "switch" | { levels: readonly string[] }> = { awareness: ROUTINE_AWARENESS, invitations: ["off", "player", "everyone"], sociability: ["reserved", "usual", "outgoing"], planBend: ["must", "strong", "standard", "ordinary"], roles: { levels: ROUTINE_ROLES }, skips: { levels: SKIP_LIVES }, narrator: "switch", paletteFollowsRoutine: "switch" };
   const warn = (path: string, message: string): void => void issues.push({ severity: "warning", code: ROUTINE_LINT.settings, path: `routineSettings.${path}`, message });
   for (const [key, v] of Object.entries(settings)) {
     const allowed = own(known, key);
     if (!allowed) warn(key, `Routine settings have no ${key}; it does nothing.`);
     else if (allowed === "switch") {
       if (typeof v !== "boolean") warn(key, `Routine settings: ${key} is true or false; the default stands.`);
-    } else if (allowed === "roles") {
-      if (!isRecord(v)) warn(key, "Routine settings: roles give live, near, far and background each a role; the defaults stand.");
+    } else if ("levels" in allowed) {
+      if (!isRecord(v)) warn(key, `Routine settings: ${key} give live, near, far and background each one of ${allowed.levels.join(", ")}; the defaults stand.`);
       else
-        for (const [level, role] of Object.entries(v)) {
-          if (!FIDELITIES.some((f) => f === level)) warn(`roles.${level}`, `Routine settings: roles have no ${level}; it does nothing.`);
-          else if (!ROUTINE_ROLES.some((r) => r === role)) warn(`roles.${level}`, `Routine settings: a role is ${ROUTINE_ROLES.join(", ")}; the default stands.`);
+        for (const [level, one] of Object.entries(v)) {
+          if (!FIDELITIES.some((f) => f === level)) warn(`${key}.${level}`, `Routine settings: ${key} have no ${level}; it does nothing.`);
+          else if (typeof one !== "string" || !allowed.levels.includes(one)) warn(`${key}.${level}`, `Routine settings: ${key}.${level} is ${allowed.levels.join(", ")}; the default stands.`);
         }
     } else if (typeof v !== "string" || !allowed.includes(v)) warn(key, `Routine settings: ${key} is ${allowed.join(", ")}; the default stands.`);
   }

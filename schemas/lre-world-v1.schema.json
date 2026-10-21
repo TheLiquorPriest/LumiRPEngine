@@ -735,6 +735,17 @@
             "background": { "enum": ["informative", "enforced", "off"] }
           }
         },
+        "skips": {
+          "type": "object",
+          "description": "How each level spends a time skip while its routine is informative: stay (where the story has them), routine (lived for the skip as an enforced one) or model (planned by the model at the skip's start). Absent: live, near and far model, background routine.",
+          "additionalProperties": false,
+          "properties": {
+            "live": { "enum": ["stay", "routine", "model"] },
+            "near": { "enum": ["stay", "routine", "model"] },
+            "far": { "enum": ["stay", "routine", "model"] },
+            "background": { "enum": ["stay", "routine", "model"] }
+          }
+        },
         "narrator": { "type": "boolean", "description": "Whether the narrator gets the present characters' usual routines as soft context." },
         "paletteFollowsRoutine": { "type": "boolean", "description": "Whether the palette Timelapse's Follow my routine starts on." }
       }

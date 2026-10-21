@@ -15,7 +15,7 @@ import { isRecord, safeKey } from "../shared/json";
 import type { LedgerEvent } from "../shared/ledger";
 import type { EditOp } from "../shared/protocol";
 import type { ChatScheduleChange, RoutineEntry } from "../shared/routines";
-import { ROUTINE_AWARENESS, ROUTINE_MODES, ROUTINE_ROLES } from "../shared/routines";
+import { ROUTINE_AWARENESS, ROUTINE_MODES, ROUTINE_ROLES, SKIP_LIVES } from "../shared/routines";
 import { isBand, tierOf } from "../shared/tiers";
 import type { EffectSpec, FieldDef, FieldType, WorldDoc } from "../shared/world";
 import { BUILTIN_RELATIONS, formatMoney } from "../shared/world";
@@ -497,12 +497,13 @@ export function parseEditOps(raw: unknown): EditOp[] | null {
           if (!str(o.entity) || (o.text !== undefined && !str(o.text)) || (o.approach !== undefined && o.approach !== null && o.approach !== "reactive" && o.approach !== "proactive") || (o.text === undefined && o.approach === undefined)) return null;
           return { op: "mind_intent", entity: o.entity, ...(str(o.text) ? { text: o.text } : {}), ...(o.approach !== undefined ? { approach: o.approach } : {}) };
         case "routine_follow": {
-          // Each part is optional (absent keeps it), but one of them must be there; null returns it to the world's (the role to their level's).
+          // Each part is optional (absent keeps it), but one of them must be there; null returns it to the world's (the role and the skip life to their level's).
           const mode = o.mode === undefined || o.mode === null || ROUTINE_MODES.some((m) => m === o.mode);
           const awareness = o.awareness === undefined || o.awareness === null || ROUTINE_AWARENESS.some((a) => a === o.awareness);
           const role = o.role === undefined || o.role === null || ROUTINE_ROLES.some((r) => r === o.role);
-          if (!str(o.entity) || !mode || !awareness || !role || (o.mode === undefined && o.awareness === undefined && o.role === undefined)) return null;
-          return { op: "routine_follow", entity: o.entity, ...(o.mode !== undefined ? { mode: ROUTINE_MODES.find((m) => m === o.mode) ?? null } : {}), ...(o.awareness !== undefined ? { awareness: ROUTINE_AWARENESS.find((a) => a === o.awareness) ?? null } : {}), ...(o.role !== undefined ? { role: ROUTINE_ROLES.find((r) => r === o.role) ?? null } : {}) };
+          const skips = o.skips === undefined || o.skips === null || SKIP_LIVES.some((s) => s === o.skips);
+          if (!str(o.entity) || !mode || !awareness || !role || !skips || (o.mode === undefined && o.awareness === undefined && o.role === undefined && o.skips === undefined)) return null;
+          return { op: "routine_follow", entity: o.entity, ...(o.mode !== undefined ? { mode: ROUTINE_MODES.find((m) => m === o.mode) ?? null } : {}), ...(o.awareness !== undefined ? { awareness: ROUTINE_AWARENESS.find((a) => a === o.awareness) ?? null } : {}), ...(o.role !== undefined ? { role: ROUTINE_ROLES.find((r) => r === o.role) ?? null } : {}), ...(o.skips !== undefined ? { skips: SKIP_LIVES.find((s) => s === o.skips) ?? null } : {}) };
         }
         case "routine_block":
           // The block's shape is checked when it resolves, against the chat's own sources.
