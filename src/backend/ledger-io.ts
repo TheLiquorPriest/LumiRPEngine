@@ -308,6 +308,23 @@ export interface TurnContext {
 export type PreOutcome = { waiting: string };
 
 /**
+ * What a prepared turn is made from besides its chain and the journal (`TurnHooks.inputs`), and what
+ * the chat says when one changes before its reply starts (DESIGN §5.1).
+ */
+const TURN_INPUTS = {
+  revision: "the chat's world revision changed",
+  settings: "your RPEngine settings changed",
+  preset: "the active preset was switched",
+  presetWrites: "a preset was saved or switched",
+  notes: "a note for the next reply was reworded or dismissed",
+} as const satisfies Record<string, string>;
+
+/** Each of a turn's other inputs (`TURN_INPUTS`), as one comparable value. */
+export type TurnInputs = Record<keyof typeof TURN_INPUTS, string>;
+
+const TURN_INPUT_NAMES = Object.keys(TURN_INPUTS) as (keyof typeof TURN_INPUTS)[];
+
+/**
  * Async work around the core's synchronous steps (DESIGN §5.1): the engine run's pre phase, plan
  * phase and sections, and `extract` before the commit, run here inside the chat's queue, so the
  * core then folds their results as plain data. `afterCommit` collects chips; `changed` fires after
@@ -339,10 +356,11 @@ export interface TurnHooks {
   /** The chat's world, read from its metadata alone (the guard's check); null when it isn't a world chat. */
   worldOf(chatId: ChatId, userId: UserId): Promise<WorldId | null>;
   /**
-   * What else the chat's sections are made from, as one key read from memory (DESIGN §5.1): the
-   * chat's world revision, the user's settings revision, and the active preset and its writes.
+   * What else the chat's sections are made from, each read from memory (DESIGN §5.1): the chat's
+   * world revision, the user's settings revision, the active preset and the presets written, and the
+   * chat's Outcome notes. Each is named, so a turn dropped for it says which changed.
    */
-  inputs(chatId: ChatId, userId: UserId): string;
+  inputs(chatId: ChatId, userId: UserId): TurnInputs;
   beforeCommit(input: TurnContext): Promise<void>;
   afterCommit(input: TurnContext): Promise<void>;
   changed(chatId: ChatId, userId: UserId): void;
@@ -410,7 +428,7 @@ interface Prepared {
   /** The chain it was planned on (`chainStamp`), the journal's epoch then, and the other inputs (`TurnHooks.inputs`). */
   stamp: string;
   epoch: number;
-  inputs: string;
+  inputs: TurnInputs;
   worldId: WorldId;
   delivered: Delivered;
   /** How the frontend starts the generation again (asked again when a frontend comes back to the chat). */
@@ -681,12 +699,19 @@ export class LedgerService {
   private fresh(chatId: ChatId, gate: Gate, p: Prepared, type: HostGenerationType, started: GenerationStartedEvent): boolean {
     if (p.generationId !== null || !(p.type === type || (isSwipe(p.type) && isSwipe(type)))) return false;
     if (isSwipe(type) && started.targetMessageId !== p.target) return false;
-    return this.unchanged(chatId, gate, p);
+    return this.changedSince(chatId, gate, p) === null;
   }
 
-  /** Whether nothing a prepared turn was made from changed: its chain, the journal, and the other inputs (DESIGN §5.1). */
-  private unchanged(chatId: ChatId, gate: Gate, p: Prepared): boolean {
-    return gate.mirror !== null && p.epoch === gate.epoch && p.inputs === (this.hooks?.inputs(chatId, gate.userId) ?? p.inputs) && chainStamp(gate.mirror, p.type, p.target) === p.stamp;
+  /**
+   * What changed since a prepared turn was made (DESIGN §5.1), in the chat's words: its chain, the
+   * journal, or one of the other inputs; null when nothing did.
+   */
+  private changedSince(chatId: ChatId, gate: Gate, p: Prepared): string | null {
+    if (gate.mirror === null || chainStamp(gate.mirror, p.type, p.target) !== p.stamp) return "a message of the chat was sent, edited, swiped or deleted";
+    if (p.epoch !== gate.epoch) return "a change was made to the chat's world (a fix, a confirmed change, detail opened)";
+    const now = this.hooks?.inputs(chatId, gate.userId) ?? p.inputs;
+    const input = TURN_INPUT_NAMES.find((name) => now[name] !== p.inputs[name]);
+    return input ? TURN_INPUTS[input] : null;
   }
 
   /**
@@ -697,9 +722,10 @@ export class LedgerService {
   private dropIfStale(chatId: ChatId): void {
     const gate = this.gates.get(chatId);
     const p = gate?.prepared;
-    if (!gate || !p || p.generationId !== null || this.unchanged(chatId, gate, p)) return;
+    const changed = gate && p && p.generationId === null ? this.changedSince(chatId, gate, p) : null;
+    if (!gate || !p || changed === null) return;
     gate.prepared = null;
-    this.notStarted(chatId, gate.userId, p, "the chat, its settings or its preset changed after the engine ran and before the reply started");
+    this.notStarted(chatId, gate.userId, p, `${changed} after the engine ran and before the reply started`);
     this.drop(chatId, gate.userId, p);
   }
 

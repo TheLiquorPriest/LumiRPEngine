@@ -58,7 +58,7 @@ import { DEFAULT_SECTIONS, EngineBook, renderSection, sectionsOf, sectionTokens 
 import { ChatPrefs } from "./chat-prefs";
 import { ChipStore, idAfterSwipeDelete, type StoredChip } from "./chips";
 import type { DryRun, HostPort } from "./host";
-import { LedgerService, toChain, type Delivered, type PreOutcome, type TurnContext, type TurnHooks } from "./ledger-io";
+import { LedgerService, toChain, type Delivered, type PreOutcome, type TurnContext, type TurnHooks, type TurnInputs } from "./ledger-io";
 import { MessageCache } from "./message-cache";
 import { StatePush } from "./push";
 import { effectiveMode, recordOutcome, SettingsStore } from "./settings-store";
@@ -1976,8 +1976,14 @@ export class Runtime implements TurnHooks {
    * secrecy, minds), the active Loom preset and the presets written since start (which outlets it
    * places), and the chat's Outcome notes (a decline reworded or dismissed on its chip).
    */
-  inputs(chatId: ChatId, userId: UserId): string {
-    return [this.runs.get(`${userId}\u0000${chatId}`)?.revision ?? "", this.settings.revision(userId), this.presets.loomOf(userId) ?? "", this.presetWrites.get(userId) ?? 0, this.outcomeNotes.revision(chatId, userId)].join("\u0000");
+  inputs(chatId: ChatId, userId: UserId): TurnInputs {
+    return {
+      revision: this.runs.get(`${userId}\u0000${chatId}`)?.revision ?? "",
+      settings: String(this.settings.revision(userId)),
+      preset: this.presets.loomOf(userId) ?? "",
+      presetWrites: String(this.presetWrites.get(userId) ?? 0),
+      notes: String(this.outcomeNotes.revision(chatId, userId)),
+    };
   }
 
   /**

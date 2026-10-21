@@ -98,7 +98,8 @@ describe("a turn the engine finished", () => {
     const stopped = await rig.host.start(chatId, { type: "normal" });
     expect(stopped.halted).toBe("cancelled");
     expect(await flagOf(rig, chatId)).toMatchObject({ messageId: said, label: "The reply didn't start, so nothing was generated", actions: [{ id: "regenerate", label: "Retry" }, { id: "diagnostics", label: "Diagnostics" }] });
-    expect(String((await flagOf(rig, chatId))?.detail)).toMatch(/preset changed after the engine ran and before the reply started/);
+    // The flag names what changed, so the player knows why and the next report says which input moved.
+    expect(String((await flagOf(rig, chatId))?.detail)).toBe("A preset was saved or switched after the engine ran and before the reply started");
     const records = await rig.rt.diag.records(chatId, rig.host.userId);
     expect(records.some((r) => r.kind === "turn" && r.status === "failed" && /before the reply started/.test(r.reason ?? ""))).toBe(true);
     // Retry: the flag's Regenerate, which the host plays as a new reply after the player's message.

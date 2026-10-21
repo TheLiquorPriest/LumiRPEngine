@@ -119,7 +119,7 @@ export class Harness {
         const raw = (await this.host.chats.chatMetadata(chatId, this.host.userId))[LEDGER_NAMESPACE];
         return isRecord(raw) && typeof raw.worldId === "string" ? raw.worldId : null;
       },
-      inputs: () => "",
+      inputs: () => ({ revision: "", settings: "", preset: "", presetWrites: "", notes: "" }),
       beforeCommit: noop,
       afterCommit: noop,
       changed: () => undefined,
