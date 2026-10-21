@@ -841,7 +841,7 @@ var package_default = {
 // src/cli/version.ts
 var CLI_NAME = "lumirpengine";
 var CLI_VERSION = package_default.version;
-var BUILD = "49567a69";
+var BUILD = "6c32c45c";
 var VERSION_LINE = `${CLI_NAME} ${CLI_VERSION} (build ${BUILD}, engine ${ENGINE_VERSION}, world format ${WORLD_FORMAT}, agent API ${AGENT_API})`;
 
 // src/cli/mcp.ts
@@ -889,6 +889,7 @@ class McpServer {
       switch (message.method) {
         case "initialize": {
           const protocolVersion = PROTOCOL_VERSIONS.find((v) => v === params.protocolVersion) ?? PROTOCOL_VERSIONS[0];
+          this.host.initialized?.(isRecord(params.clientInfo) && typeof params.clientInfo.name === "string" ? params.clientInfo.name : null);
           return reply({ protocolVersion, capabilities: { tools: { listChanged: true } }, serverInfo: { name: CLI_NAME, version: CLI_VERSION }, instructions: instructions(this.host.readOnly) });
         }
         case "ping":
@@ -1008,6 +1009,8 @@ class McpSession {
   clock;
   agent = null;
   followable = false;
+  harness = null;
+  initializedOnce = false;
   looked = Number.NEGATIVE_INFINITY;
   work = Promise.resolve();
   starting = Promise.resolve();
@@ -1029,18 +1032,24 @@ class McpSession {
   }
   checkIn() {
     const { follows, why } = this.follower.state;
-    return { serves: "mcp", core: BUILD, kit: this.follower.kit.build, follows, why, host: this.options.host };
+    return { serves: "mcp", core: BUILD, kit: this.follower.kit.build, follows, why, host: this.options.host, harness: this.harness };
   }
   start() {
+    this.stopTimer = this.clock.every(EVERY_MS, () => {
+      if (this.followable && this.conn?.isOpen())
+        this.look();
+    });
+  }
+  initialized(harness) {
+    if (this.initializedOnce)
+      return;
+    this.initializedOnce = true;
+    this.harness = harness;
     this.starting = (async () => {
       try {
         await this.connection().ensureOpen();
       } catch {}
     })();
-    this.stopTimer = this.clock.every(EVERY_MS, () => {
-      if (this.followable && this.conn?.isOpen())
-        this.look();
-    });
   }
   async ready() {
     if (this.followable && this.conn?.isOpen() && this.clock.now() - this.looked > STALE_MS)

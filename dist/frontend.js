@@ -19740,7 +19740,7 @@ var NPM_INSTALL = "npm i -g github:TheLiquorPriest/LumiRPEngine";
 
 // src/frontend/agents-view.ts
 function serverLine(client, view) {
-  const name = client.host !== null ? `${client.name} on ${client.host}` : `${client.name} ${client.version}`;
+  const name = client.host !== null ? `${client.name}${client.harness !== null ? ` for ${client.harness}` : ""} on ${client.host}` : `${client.name} ${client.version}`;
   const install = { label: "Copy the install", text: NPM_INSTALL };
   const setup = view.setup === null ? [] : [{ label: "Copy the setup", text: view.setup.command }];
   switch (client.state) {

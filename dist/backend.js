@@ -66015,8 +66015,8 @@ function thisBuild(moduleUrl = import.meta.url) {
   const dir = moduleUrl.replace(/[^/]*$/, "");
   const path = pathOfFileUrl(`${dir}${KIT_FILE}`);
   const core = pathOfFileUrl(`${dir}${CORE_FILE}`);
-  const sha256 = "4b089f0c273856028d4f44ce56334b97a136cec847188fd624056256dd83247d";
-  return { id: "49567a69", kit: sha256 !== undefined && path !== null && core !== null ? { path, core, sha256, api: KIT_API } : null };
+  const sha256 = "9e7e2d31dc31bac81ead688195763a6a8e5aa4f6a67c84de5619933f22ad36f5";
+  return { id: "6c32c45c", kit: sha256 !== undefined && path !== null && core !== null ? { path, core, sha256, api: KIT_API } : null };
 }
 var BUILD_FILE = "agents/build.json";
 var USER_FILE = "agents.json";
@@ -66033,7 +66033,13 @@ function checkInOf(client, seen) {
   const text = (value, max) => typeof value === "string" && shown3(value, max) !== "" ? shown3(value, max) : null;
   const follows = client.follows === true;
   const why = !follows && isRecord(client.why) && typeof client.why.text === "string" ? { code: typeof client.why.code === "string" && hasOwn(FOLLOW_CODES, client.why.code) ? client.why.code : "other", text: shown3(client.why.text, 400) } : null;
-  return { name: shown3(client.name, 80), version: shown3(client.version, 40), host: text(client.host, 80), core: text(client.core, 40), kit: text(client.kit, 40), follows, why, seen };
+  return { name: shown3(client.name, 80), version: shown3(client.version, 40), host: text(client.host, 80), harness: text(client.harness, 80), core: text(client.core, 40), kit: text(client.kit, 40), follows, why, seen };
+}
+function idOf(client) {
+  if (client.kit === null)
+    return hashParts("lre.agent.old", client.name).slice(0, 16);
+  const machine = client.host ?? "";
+  return (client.harness === null ? hashParts("lre.agent", client.name, machine) : hashParts("lre.agent", client.name, machine, client.harness)).slice(0, 16);
 }
 function stateOf(client, build) {
   if (client.kit === build)
@@ -66102,7 +66108,7 @@ class Agents {
     const checkIn = checkInOf(client, this.now());
     if (checkIn === null)
       return answer;
-    const id = hashParts("lre.agent", checkIn.name, checkIn.host ?? "").slice(0, 16);
+    const id = idOf(checkIn);
     if (session !== undefined) {
       this.sessions.delete(`${userId}\x00${session}`);
       this.sessions.set(`${userId}\x00${session}`, id);
@@ -66196,9 +66202,12 @@ class Agents {
     const read = readStoredJson(this.host, USER_FILE, userId, "MCP servers", (raw) => isRecord(raw) && raw.v === 1 && isRecord(raw.clients)).then((raw) => {
       const stored = isRecord(raw) ? raw : {};
       const clients = {};
-      for (const [id, entry] of Object.entries(isRecord(stored.clients) ? stored.clients : {})) {
+      for (const entry of Object.values(isRecord(stored.clients) ? stored.clients : {})) {
         const client = isRecord(entry) && typeof entry.seen === "number" ? checkInOf(entry, entry.seen) : null;
-        if (client !== null && /^[0-9a-f]{16}$/.test(id))
+        if (client === null)
+          continue;
+        const id = idOf(client);
+        if ((clients[id]?.seen ?? Number.NEGATIVE_INFINITY) < client.seen)
           clients[id] = client;
       }
       return { v: 1, clients, toasted: typeof stored.toasted === "string" ? stored.toasted : null, dismissed: typeof stored.dismissed === "string" ? stored.dismissed : null };
@@ -68858,7 +68867,7 @@ class Runtime {
     this.steps.onCallStart = (userId, purpose) => this.diag.callStart(userId, purpose);
     this.toolSupport = new ToolSupport(this.host);
     this.minds = { host: this.host, registry: this.registry, steps: this.steps, settings: this.settings, presets: this.presets };
-    this.ledger = new LedgerService(this.host, (chatId, userId) => this.resolveEnv(chatId, userId), new LedgerFold(this.registry, { fingerprint: "49567a69" }), (chatId) => messages.forget(chatId));
+    this.ledger = new LedgerService(this.host, (chatId, userId) => this.resolveEnv(chatId, userId), new LedgerFold(this.registry, { fingerprint: "6c32c45c" }), (chatId) => messages.forget(chatId));
     this.studio = new StudioBridge(this.host, this.worlds);
     this.worlds.onChange = (worldId, userId) => this.studio.worldChanged(worldId, userId);
     this.agents = new Agents(this.host, options.build ?? thisBuild());
