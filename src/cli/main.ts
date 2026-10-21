@@ -19,6 +19,7 @@ import type { CredentialFiles } from "./credentials";
 import type { KitFiles } from "./follow";
 import { bundledKitOf } from "./kit-api";
 import { McpSession, serveMcp } from "./serve";
+import { runtimeCannotFollow } from "./version";
 
 const nodeMajor = Number((process.versions.node ?? "0").split(".")[0]);
 // Bun reports a Node version too; only Node itself needs checking for its built-in WebSocket.
@@ -147,7 +148,7 @@ if (typeof kit === "string") {
 
 const result = await kit.run(process.argv.slice(2), io);
 if ("mcp" in result) {
-  const session = new McpSession({ bundled: kit, mcp: result.mcp, io, files: kitFiles, host: hostname(), log: (text) => process.stderr.write(`${text}\n`) });
+  const session = new McpSession({ bundled: kit, mcp: result.mcp, io, files: kitFiles, host: hostname(), log: (text) => process.stderr.write(`${text}\n`), cannotLoad: runtimeCannotFollow(process.versions.bun) });
   const server = serveMcp(session, (line) => {
     // Resolves once Node has taken the line, so the next waits its turn instead of piling up in memory.
     const { promise, resolve } = Promise.withResolvers<void>();

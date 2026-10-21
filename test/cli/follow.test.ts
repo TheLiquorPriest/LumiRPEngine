@@ -15,6 +15,7 @@ import { CredentialStore } from "../../src/cli/credentials";
 import type { KitFiles } from "../../src/cli/follow";
 import type { Clock } from "../../src/cli/serve";
 import { McpSession, serveMcp } from "../../src/cli/serve";
+import { runtimeCannotFollow, versionLine } from "../../src/cli/version";
 import type { KitReport } from "../../src/shared/agents";
 import { isRecord } from "../../src/shared/json";
 import { disk, distOf as distIn, writeKit } from "../support/kits";
@@ -29,8 +30,8 @@ const distOf = (name: string): string => distIn(root, name);
 /** Someone else: never this user, never root. */
 const OTHER_UID = (process.getuid?.() ?? 0) + 4242;
 
-/** A server as the core runs one, signed in to `fake`, on a clock the test moves; following's disk is the real one unless `files` says otherwise. */
-function serve(fake: FakeLumiverse, options: { pin?: boolean; files?: KitFiles } = {}) {
+/** A server as the core runs one, signed in to `fake`, on a clock the test moves; following's disk is the real one unless `files` says otherwise, and `cannotLoad` is the runtime's word that it can't load a kit. */
+function serve(fake: FakeLumiverse, options: { pin?: boolean; files?: KitFiles; cannotLoad?: string } = {}) {
   let now = 1_000_000;
   const ticks: (() => void)[] = [];
   const clock: Clock = { now: () => now, every: (_ms, tick) => (ticks.push(tick), () => undefined) };
@@ -38,7 +39,7 @@ function serve(fake: FakeLumiverse, options: { pin?: boolean; files?: KitFiles }
   const credentials = new CredentialStore({ read: () => saved, write: (_path, text) => void (saved = text) }, "credentials.json");
   credentials.put(fake.base, { username: USER.username, token: fake.session(), savedAt: 1 });
   const logs: string[] = [];
-  const session = new McpSession({ bundled, mcp: { readOnly: false, pin: options.pin ?? false, base: () => fake.base, timeoutMs: 3000 }, io: { credentials, http: fake.http, openSocket: fake.openSocket, readFile: () => "" }, files: options.files ?? disk, host: "test-host", log: (text) => void logs.push(text), clock });
+  const session = new McpSession({ bundled, mcp: { readOnly: false, pin: options.pin ?? false, base: () => fake.base, timeoutMs: 3000 }, io: { credentials, http: fake.http, openSocket: fake.openSocket, readFile: () => "" }, files: options.files ?? disk, host: "test-host", log: (text) => void logs.push(text), cannotLoad: options.cannotLoad ?? null, clock });
   const lines: Record<string, unknown>[] = [];
   const server = serveMcp(session, (line) => void lines.push(JSON.parse(line) as Record<string, unknown>));
   let id = 0;
@@ -216,5 +217,32 @@ describe("following the extension's kit", () => {
     s.tick();
     await s.settle();
     expect([looks(), checkIns(fake).length]).toEqual([4, 2]);
+  });
+});
+
+describe("on a Bun that can't load a kit", () => {
+  const CANNOT = "run it with Node 22 or newer (Bun before 1.4 can't load the kit)";
+
+  test("Bun before 1.4 can't follow, and --version says so; Bun 1.4 and Node can", () => {
+    for (const bun of ["1.3.14", "1.0.0", "0.9.9"]) expect([bun, runtimeCannotFollow(bun)]).toEqual([bun, CANNOT]);
+    for (const bun of ["1.4.0", "1.4.3", "2.0.0", undefined]) expect([bun, runtimeCannotFollow(bun)]).toEqual([bun, null]);
+    expect(versionLine("1.3.14")).toEndWith(`; under Bun 1.3.14 it can't follow LumiRPEngine's tools: ${CANNOT}`);
+    expect(versionLine("1.4.3")).toMatch(/^lumirpengine \d+\.\d+\.\d+ \(build [\w.-]+, engine \d+\.\d+\.\d+, world format lre-world-v1, agent API \d+\)$/);
+  });
+
+  test("its server doesn't try: its one check-in and lre_status say why, it never looks, and the tools it has stay", async () => {
+    const fake = new FakeLumiverse();
+    fake.lre.build = "b10";
+    fake.lre.kit = writeKit(distOf("k"), "b10", ["lre_never"]);
+    const s = serve(fake, { cannotLoad: CANNOT });
+    await s.start();
+    s.tick();
+    await s.settle();
+    expect(await s.tools()).toEqual(own);
+    expect(s.changed()).toBe(0);
+    expect(checkIns(fake)).toEqual([expect.objectContaining({ kit: bundled.build, follows: false, why: { code: "runtime", text: CANNOT } })]);
+    expect(fake.lre.sent("lre.agents", "kit")).toEqual([]);
+    const status = (await s.ask("tools/call", { name: "lre_status", arguments: {} })).content as { text: string }[];
+    expect(JSON.parse(status[0]?.text ?? "{}").client).toMatchObject({ follows: false, whyNot: CANNOT });
   });
 });

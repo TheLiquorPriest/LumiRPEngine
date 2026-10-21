@@ -18,6 +18,8 @@ describe("each server's line", () => {
     const elsewhere = serverLine(client({ state: "cannot", kit: "a1", follows: false, why: { code: "elsewhere", text: "LumiRPEngine's tools aren't on this machine" } }), view);
     expect(elsewhere).toMatchObject({ update: false, text: "lumirpengine on studio can't follow LumiRPEngine: LumiRPEngine's tools aren't on this machine.", copy: [{ label: "Copy the install", text: NPM_INSTALL }] });
     expect(serverLine(client({ state: "cannot", kit: "a1", follows: false, why: { code: "unreadable", text: "can't be read here" } }), view).copy).toEqual([{ label: "Copy the setup", text: `node ${CORE} mcp` }]);
+    // On a Bun that can't load a kit, the setup that follows is the fix: it runs the core with Node.
+    expect(serverLine(client({ state: "cannot", kit: "a1", follows: false, why: { code: "runtime", text: "run it with Node 22 or newer (Bun before 1.4 can't load the kit)" } }), view)).toEqual({ state: "cannot", text: "lumirpengine on studio can't follow LumiRPEngine: run it with Node 22 or newer (Bun before 1.4 can't load the kit).", update: false, copy: [{ label: "Copy the setup", text: `node ${CORE} mcp` }] });
   });
 
   test("a server from before following gets the one-time install and the setup that follows, each to copy", () => {

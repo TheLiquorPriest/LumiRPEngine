@@ -48,6 +48,8 @@ export interface SessionOptions {
   host: string;
   /** Where the server says what it did: its stderr, which harnesses keep. */
   log(text: string): void;
+  /** Why this runtime can't load a kit (Bun before 1.4); none when it can. */
+  cannotLoad?: string | null;
   clock?: Clock;
 }
 
@@ -99,7 +101,7 @@ export class McpSession implements ToolHost {
   constructor(private readonly options: SessionOptions) {
     this.readOnly = options.mcp.readOnly;
     this.clock = options.clock ?? REAL_CLOCK;
-    this.follower = new KitFollower(options.bundled, { pin: options.mcp.pin, identifier: ENGINE_EXTENSION, files: options.files, where: () => this.conn?.base ?? "your Lumiverse" });
+    this.follower = new KitFollower(options.bundled, { pin: options.mcp.pin, cannotLoad: options.cannotLoad ?? null, identifier: ENGINE_EXTENSION, files: options.files, where: () => this.conn?.base ?? "your Lumiverse" });
     const queue = new Queue();
     this.context = { readFile: (path) => options.io.readFile(path), readOnly: this.readOnly, connection: () => this.connection(), serialize: (key, work) => queue.run(key, work) };
     this.said = this.stance();
@@ -211,7 +213,7 @@ export class McpSession implements ToolHost {
 
   /** Follows what LumiRPEngine said, then tells the client, the log and LumiRPEngine what changed. */
   private async take(news: KitNews): Promise<void> {
-    this.followable = !this.options.mcp.pin && "kit" in news && isRecord(news.kit);
+    this.followable = this.follower.able && "kit" in news && isRecord(news.kit);
     const was = this.follower.kit.build;
     const changed = await this.follower.follow(news);
     if (changed) {

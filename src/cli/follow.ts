@@ -43,6 +43,8 @@ export interface KitNews {
 
 export interface FollowOptions {
   pin: boolean;
+  /** Why this runtime can't load a kit at all (Bun before 1.4), or null: then following is off before it is tried. */
+  cannotLoad: string | null;
   /** The extension's identifier: its kit sits in `…/extensions/<identifier>/repo/dist/`. */
   identifier: string;
   files: KitFiles;
@@ -97,13 +99,18 @@ export class KitFollower {
     private readonly options: FollowOptions,
   ) {
     this.kit = bundled;
-    // Until LumiRPEngine says otherwise, a server that isn't pinned means to follow.
-    this.state = options.pin ? { follows: false, why: { code: "pinned", text: "--pin (or LRE_PIN_KIT) keeps the tools this lumirpengine was installed with: run it without to follow LumiRPEngine's" } } : { follows: true, why: null };
+    // Until LumiRPEngine says otherwise, a server that isn't pinned, on a runtime that can load a kit, means to follow.
+    this.state = options.pin ? { follows: false, why: { code: "pinned", text: "--pin (or LRE_PIN_KIT) keeps the tools this lumirpengine was installed with: run it without to follow LumiRPEngine's" } } : options.cannotLoad !== null ? { follows: false, why: { code: "runtime", text: options.cannotLoad } } : { follows: true, why: null };
+  }
+
+  /** It follows at all: not pinned, and on a runtime that can load a kit. */
+  get able(): boolean {
+    return !this.options.pin && this.options.cannotLoad === null;
   }
 
   /** Takes what LumiRPEngine said; true when the loaded kit changed. */
   async follow(news: KitNews): Promise<boolean> {
-    if (this.options.pin) return false;
+    if (!this.able) return false;
     const where = this.options.where();
     if (!("kit" in news) || typeof news.build !== "string") return this.cannot("unsupported", `LumiRPEngine on ${where} doesn't say where its tools are: update it in Lumiverse's Extensions tab`);
     if (news.kit === null) return this.cannot("no_kit", `LumiRPEngine on ${where} runs without an agent kit (it was built without one), so there is nothing to follow`);
