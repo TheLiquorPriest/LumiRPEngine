@@ -145,6 +145,10 @@ export type ChipKind =
   | "claimed"
   /** A typed attempt the chat reads as a check only suggests it ("Roll Persuasion?"): the turn waits, nothing generated, on Roll or No roll; either resumes it (DESIGN §11 inferred checks). */
   | "check"
+  /** A routine change the player's own message states ("Would you like to add this to your routine?"): Yes records it, No drops it; the turn doesn't wait on it (DESIGN §9.4). */
+  | "routine_ask"
+  /** A routine change the player said Yes to, with Undo (DESIGN §9.4). */
+  | "routine_added"
   /** A ✎ fix or GM edit on the head ("Corrected …"), with Undo (DESIGN §12). */
   | "fix"
   /** A write held during a reply that no longer applied when the reply finished (P2), with Dismiss. */

@@ -52,6 +52,8 @@ const CHIP_ICON: Record<ChipKind, IconName> = {
   claim: "help",
   check: "dice",
   claimed: "sparkle",
+  routine_ask: "calendar",
+  routine_added: "calendar",
   fix: "edit",
   refused: "alert",
 };
