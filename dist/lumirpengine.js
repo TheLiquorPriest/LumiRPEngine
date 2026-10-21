@@ -341,7 +341,7 @@ var TIMEOUTS = {
   jobCallMs: {
     label: "Import and Refine calls",
     group: "work",
-    limits: "Each model call of an Import, a Refine, a lore index or a map description in Build.",
+    limits: "Each model call of an Import, a Refine, a lore index, a map description or a routine proposal in Build.",
     fires: "That call counts as failed; the job goes on with what the other calls proposed.",
     defaultMs: 10 * MIN,
     minMs: 1000,
@@ -909,7 +909,7 @@ var package_default = {
 // src/cli/version.ts
 var CLI_NAME = "lumirpengine";
 var CLI_VERSION = package_default.version;
-var BUILD = "c61c17bb";
+var BUILD = "61b2130a";
 function runtimeCannotFollow(bun) {
   if (bun === undefined)
     return null;

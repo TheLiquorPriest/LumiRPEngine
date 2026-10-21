@@ -689,7 +689,7 @@ var TIMEOUTS = {
   jobCallMs: {
     label: "Import and Refine calls",
     group: "work",
-    limits: "Each model call of an Import, a Refine, a lore index or a map description in Build.",
+    limits: "Each model call of an Import, a Refine, a lore index, a map description or a routine proposal in Build.",
     fires: "That call counts as failed; the job goes on with what the other calls proposed.",
     defaultMs: 10 * MIN,
     minMs: 1000,
@@ -1179,6 +1179,8 @@ var lre_world_v1_schema_default = {
     checks: { type: "object", propertyNames: { minLength: 1 }, additionalProperties: { $ref: "#/$defs/check" } },
     calendar: { $ref: "#/$defs/calendar" },
     schedules: { type: "object", propertyNames: { minLength: 1 }, additionalProperties: { $ref: "#/$defs/schedule" } },
+    routines: { type: "object", description: "Routines by id: the soft shape of people's days, owner by owner (absent: none; everyone keeps the basic needs).", propertyNames: { minLength: 1 }, additionalProperties: { $ref: "#/$defs/routine" } },
+    routineSettings: { $ref: "#/$defs/routineSettings" },
     tracks: { type: "object", propertyNames: { minLength: 1 }, additionalProperties: { $ref: "#/$defs/track" } },
     tables: { type: "object", propertyNames: { minLength: 1 }, additionalProperties: { $ref: "#/$defs/table" } },
     realism: { $ref: "#/$defs/realism" },
@@ -1767,11 +1769,89 @@ var lre_world_v1_schema_default = {
               end: { type: "string", description: "HH:MM" },
               value: {},
               weighted: { $ref: "#/$defs/weighted" },
-              given: { type: "object", description: "the previous slot's value → its distribution", additionalProperties: { $ref: "#/$defs/weighted" } }
+              given: { type: "object", description: "the previous slot's value → its distribution", additionalProperties: { $ref: "#/$defs/weighted" } },
+              source: { $ref: "#/$defs/worldRoutineSource" }
             }
           }
         },
-        pack: { type: "string" }
+        pack: { type: "string" },
+        source: { $ref: "#/$defs/worldRoutineSource" }
+      }
+    },
+    worldRoutineSource: {
+      title: "what it rests on",
+      anyOf: [
+        { title: "authored", type: "object", required: ["type"], additionalProperties: false, properties: { type: { const: "authored" } } },
+        { title: "a lore entry", type: "object", required: ["type", "entry"], additionalProperties: false, properties: { type: { const: "lore" }, entry: { type: "string", minLength: 1 }, quote: { type: "string" } } },
+        { title: "a sheet field", type: "object", required: ["type", "entity", "field"], additionalProperties: false, properties: { type: { const: "sheet" }, entity: { type: "string", minLength: 1 }, field: { type: "string", minLength: 1 }, quote: { type: "string" } } }
+      ]
+    },
+    hhmm: { type: "string", pattern: "^([01][0-9]|2[0-3]):[0-5][0-9]$", description: "HH:MM" },
+    routineBlock: {
+      type: "object",
+      description: "One block of a routine. A more specific owner's block with the same id replaces this one; off turns an inherited block (or a basic need) off.",
+      required: ["id"],
+      additionalProperties: false,
+      properties: {
+        id: { type: "string", minLength: 1 },
+        label: { type: "string" },
+        activity: { type: "string" },
+        kind: { enum: ["fixed", "flexible", "optional"] },
+        at: { $ref: "#/$defs/hhmm" },
+        window: { type: "object", required: ["from", "to"], additionalProperties: false, properties: { from: { $ref: "#/$defs/hhmm" }, to: { $ref: "#/$defs/hhmm" } } },
+        minutes: { type: "integer", minimum: 1, maximum: 1440 },
+        perWeek: { type: "integer", minimum: 1, maximum: 7 },
+        chance: { type: "number", exclusiveMinimum: 0, maximum: 1 },
+        priority: { type: "integer", minimum: 1, maximum: 5 },
+        days: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            weekdays: { type: "array", items: { type: "integer", minimum: 0, maximum: 6 } },
+            off: { enum: ["only", "never"] },
+            holidays: { $ref: "#/$defs/ids" },
+            except: { $ref: "#/$defs/ids" },
+            birthday: { enum: ["own", "friend"] },
+            seasons: { type: "array", items: { enum: ["spring", "summer", "autumn", "winter"] } },
+            weather: { enum: ["fair", "foul"] }
+          }
+        },
+        place: {
+          anyOf: [
+            { enum: ["home", "work", "here", "with"] },
+            { title: "a place", type: "object", required: ["place"], additionalProperties: false, properties: { place: { type: "string", minLength: 1 } } },
+            { title: "the nearest place of a scene type", type: "object", required: ["nearest"], additionalProperties: false, properties: { nearest: { type: "string", minLength: 1 } } }
+          ]
+        },
+        company: { type: "object", required: ["who"], additionalProperties: false, properties: { who: { $ref: "#/$defs/selector" }, invite: { type: "boolean" } } },
+        needs: { $ref: "#/$defs/strings" },
+        private: { type: "boolean" },
+        off: { type: "boolean" },
+        source: { $ref: "#/$defs/worldRoutineSource" }
+      }
+    },
+    routine: {
+      type: "object",
+      required: ["id", "blocks"],
+      additionalProperties: false,
+      properties: {
+        id: { $ref: "#/$defs/id" },
+        label: { type: "string" },
+        owner: { anyOf: [{ title: "an entity, group or kind id", type: "string", minLength: 1 }, { $ref: "#/$defs/selector" }] },
+        inherit: { type: "boolean" },
+        blocks: { type: "array", items: { $ref: "#/$defs/routineBlock" } },
+        source: { $ref: "#/$defs/worldRoutineSource" }
+      }
+    },
+    routineSettings: {
+      type: "object",
+      description: "How strictly people keep to routine against the story, whom routines invite, how social people are and how story plans bend routine. Absent parts take the defaults (balanced, player, usual, standard).",
+      additionalProperties: false,
+      properties: {
+        awareness: { enum: ["story_first", "balanced", "routine_first"] },
+        invitations: { enum: ["off", "player", "everyone"] },
+        sociability: { enum: ["reserved", "usual", "outgoing"] },
+        planBend: { enum: ["must", "strong", "standard", "ordinary"] }
       }
     },
     stage: {
@@ -2486,6 +2566,7 @@ var EXTRACTION_DEFAULTS = Object.freeze({
   time_advance: "auto",
   location: "auto",
   condition: "auto",
+  routine: "auto",
   regard: "confirm",
   transfer: "confirm",
   spawn: "confirm",
@@ -2500,6 +2581,7 @@ var EXTRACTION_LEARNING = Object.freeze({
   window: 30,
   demoteUndoRate: 0.1
 });
+var JOB_SETTINGS_DEFAULTS = Object.freeze({ routineLoreTokens: 8000 });
 
 // src/engine/read-pass.ts
 var kept = null;
@@ -7415,7 +7497,8 @@ function signalOf(e) {
     class: cls,
     text: typeof e.data.text === "string" ? e.data.text : "",
     ...typeof e.data.entity === "string" ? { entity: e.data.entity } : {},
-    visibility: vis === undefined || vis === null || vis === "public" ? "public" : vis === "known_by" ? "known_by" : "secret"
+    visibility: vis === undefined || vis === null || vis === "public" ? "public" : vis === "known_by" ? "known_by" : "secret",
+    ...e.data.stops === false ? { stops: false } : {}
   };
 }
 var noop = () => {
@@ -8330,6 +8413,10 @@ function allSchedules(reg, world) {
       out.push(s);
   return out;
 }
+function chatSchedulesIn(ctx) {
+  const mine = optionalQuery(ctx, "castlife.chat_schedules")?.(ctx) ?? [];
+  return mine.length === 0 ? allSchedules(ctx.registry, ctx.world) : [...allSchedules(ctx.registry, ctx.world), ...mine];
+}
 function slotSpan(slot) {
   const start = parseHHMM(slot.start);
   let end = parseHHMM(slot.end);
@@ -8453,7 +8540,7 @@ function restValue(reg, world, state, entity, target) {
 }
 function runningRivals(reg, ctx, schedule, rank, at) {
   const out = [];
-  for (const s of allSchedules(reg, ctx.world)) {
+  for (const s of chatSchedulesIn(ctx)) {
     if (s.id === schedule.id || s.target !== schedule.target)
       continue;
     const r = ownerRank(reg, ctx.world, ctx.state, s);
@@ -8474,6 +8561,25 @@ function overriddenAt(reg, ctx, schedule, entity, at) {
     return false;
   return runningRivals(reg, ctx, schedule, rank, at).some((r) => r.rank < rank && runsFor(ctx, r, entity));
 }
+function valueBefore(reg, ctx, instant, entity) {
+  const cal = calendarOf(ctx.world);
+  const s = instant.schedule;
+  for (const [i, slot] of s.slots.entries()) {
+    if (i === instant.slot)
+      continue;
+    const span = slotSpan(slot);
+    for (const d of [instant.day - 1, instant.day])
+      if (recursOn(cal, s.recurrence, d) && clockAt(cal, d, span.start) + span.length === instant.at)
+        return slot.value === undefined ? null : slot.value;
+  }
+  return restValue(reg, ctx.world, ctx.state, entity, s.target) ?? null;
+}
+function firstOfDay(instant) {
+  if (instant.edge !== "start")
+    return false;
+  const starts = instant.schedule.slots.map((slot) => slotSpan(slot).start);
+  return starts[instant.slot] === Math.min(...starts);
+}
 function instantEvents(reg, ctx, instant, runSeed, opts = {}) {
   const { schedule } = instant;
   const out = [];
@@ -8484,14 +8590,19 @@ function instantEvents(reg, ctx, instant, runSeed, opts = {}) {
   const startsHere = instant.edge === "end" && handedOver(ctx.world, instant);
   const rank = ownerRank(reg, ctx.world, ctx.state, schedule);
   const rivals = rank === null ? [] : runningRivals(reg, ctx, schedule, rank, instant.at);
+  const yields = optionalQuery(ctx, "castlife.yields");
+  const off = optionalQuery(ctx, "castlife.schedule_off");
+  const routine = schedule.target === "place" || schedule.target === "activity";
   for (const entity of scheduleOwners(reg, ctx.world, ctx.state, schedule)) {
     if (domain && ctx.levelOf(entity, domain) < 1)
       continue;
     if (held(ctx.state, entity, schedule.target, instant.at))
       continue;
-    if (opts.povRoutine === false && entity === ctx.world.pov && (schedule.target === "place" || schedule.target === "activity"))
+    if (opts.povRoutine === false && entity === ctx.world.pov && routine)
       continue;
-    if ((schedule.target === "place" || schedule.target === "activity") && optionalQuery(ctx, "combat.engaged")?.(ctx, entity) === true)
+    if (off?.(ctx, entity, schedule.id, instant.at) === true)
+      continue;
+    if (routine && optionalQuery(ctx, "combat.engaged")?.(ctx, entity) === true)
       continue;
     const mine = rivals.filter((r) => runsFor(ctx, r, entity));
     if (rank !== null && mine.some((r) => r.rank < rank))
@@ -8510,8 +8621,14 @@ function instantEvents(reg, ctx, instant, runSeed, opts = {}) {
       continue;
     if (schedule.target === "place" && typeof value === "string" && !own(ctx.world.places, value))
       continue;
-    if ((schedule.target === "place" || schedule.target === "activity") && routineStays(ctx, entity, schedule.target === "place" ? value : null))
+    if (routine && routineStays(ctx, entity, schedule.target === "place" ? value : null))
       continue;
+    if (routine && yields) {
+      const lower = mine.filter((r) => rank !== null && r.rank > rank).sort((a, b) => a.rank - b.rank)[0];
+      const expected = instant.edge === "end" ? slot.value ?? null : lower ? lower.slot.value ?? null : valueBefore(reg, ctx, instant, entity);
+      if (yields(ctx, entity, schedule.target === "place" ? "place" : "activity", expected, firstOfDay(instant), opts.povRoutine === false, opts.timelapse === true))
+        continue;
+    }
     out.push({ type: "set", entity, field: schedule.target, value });
   }
   return out;
@@ -9631,14 +9748,14 @@ var ALL_NOTE = Object.fromEntries(INTERRUPT_CLASSES.map((c) => [c, "note"]));
 function rngFactory(runSeed, process2, slot) {
   return (entity) => createRng(processSeed(runSeed, process2, entity, slot));
 }
-function stepAgent(reg, w, agent, slot, runSeed) {
+function stepAgent(reg, w, agent, slot, runSeed, povRoutine, timelapse) {
   const applied = [];
   for (const def of reg.processes) {
     if (def.scope !== "agent")
       continue;
     if (w.ctx.levelOf(agent, def.domain) < def.minLevel)
       continue;
-    applied.push(...w.applyAll(def.step({ start: slot.start, end: slot.end, index: slot.index }, w.ctx, rngFactory(runSeed, def.id, slot.index), agent)));
+    applied.push(...w.applyAll(def.step({ start: slot.start, end: slot.end, index: slot.index, ...povRoutine ? {} : { povRoutine: false }, ...timelapse ? { timelapse: true } : {} }, w.ctx, rngFactory(runSeed, def.id, slot.index), agent)));
   }
   return applied;
 }
@@ -9671,11 +9788,12 @@ function advance(reg, w, to, opts) {
     return result;
   const cal = calendarOf(w.world);
   const since = ranTo(w.state);
-  const schedules = allSchedules(reg, w.world);
+  const schedules = chatSchedulesIn(w.ctx);
   const instants = scheduleInstants(w.world, schedules, since, to);
   const slots = slotsEnding(cal, since, to);
   const e = emitter(reg, w, opts.runSeed, result.rules);
   const timelapse = opts.mode === "timelapse";
+  const povRoutine = timelapse && opts.povRoutine !== false;
   const stepping = () => {
     if (!timelapse)
       return [];
@@ -9690,13 +9808,13 @@ function advance(reg, w, to, opts) {
   };
   let cursors = new Map;
   let next = 0;
-  const agentInstants = (slot, until) => {
+  const infoOf = (slot) => ({ start: slot.start, end: slot.end, index: slot.index, ...povRoutine ? {} : { povRoutine: false }, ...timelapse ? { timelapse: true } : {} });
+  const agentInstants = (slot, info, until) => {
     const timed = reg.processes.filter((d) => d.scope === "agent" && d.instants);
     if (timed.length === 0)
       return [];
     const after = Math.max(w.state.clock, since);
     const who = timelapse ? stepping() : lod1Agents(w.world, w.state).filter((a) => a !== w.world.pov);
-    const info = { start: slot.start, end: slot.end, index: slot.index };
     const out = [];
     for (const agent of who) {
       if ((cursors.get(agent) ?? agentCursor(w.world, w.state, agent)) < slot.index - 1)
@@ -9712,7 +9830,8 @@ function advance(reg, w, to, opts) {
     return out.sort((a, b) => a.at - b.at || a.agent.localeCompare(b.agent) || timed.indexOf(a.def) - timed.indexOf(b.def) || a.instant.key.localeCompare(b.instant.key));
   };
   const applyInstants = (until, slot) => {
-    const timed = agentInstants(slot, until);
+    const info = infoOf(slot);
+    const timed = agentInstants(slot, info, until);
     let t = 0;
     for (;; ) {
       const edge = instants[next];
@@ -9723,12 +9842,12 @@ function advance(reg, w, to, opts) {
       if (edge && edgeAt <= (moment?.at ?? Infinity)) {
         next++;
         clockTo(w, edgeAt, cause, e);
-        e.emit(instantEvents(reg, w.ctx, edge, opts.runSeed, { povRoutine: timelapse }));
+        e.emit(instantEvents(reg, w.ctx, edge, opts.runSeed, { povRoutine, timelapse }));
       } else if (moment) {
         t++;
         clockTo(w, moment.at, cause, e);
         if (stillActs(w, moment.agent))
-          e.emit(moment.def.atInstant?.(w.ctx, moment.agent, moment.instant) ?? []);
+          e.emit(moment.def.atInstant?.(w.ctx, moment.agent, moment.instant, info) ?? []);
       }
     }
   };
@@ -9764,7 +9883,7 @@ function advance(reg, w, to, opts) {
     const tracksBefore = result.tracks.length;
     applyInstants(slot.end, slot);
     clockTo(w, slot.end, cause, e);
-    const info = { start: slot.start, end: slot.end, index: slot.index };
+    const info = infoOf(slot);
     for (const def of reg.processes) {
       if (def.scope === "agent" || rulesetFloor(w.world, def.domain, w.state.realism.levels[def.domain] ?? 0) < def.minLevel)
         continue;
@@ -9774,7 +9893,7 @@ function advance(reg, w, to, opts) {
       let k = cursors.get(agent) ?? agentCursor(w.world, w.state, agent);
       while (k < slot.index && stillActs(w, agent)) {
         k++;
-        const applied = stepAgent(reg, w, agent, k === slot.index ? slot : slotOf(cal, k), opts.runSeed);
+        const applied = stepAgent(reg, w, agent, k === slot.index ? slot : slotOf(cal, k), opts.runSeed, povRoutine, timelapse);
         if (applied.length > 0)
           result.rules.push(...runRulesOnEvents(reg, w, applied, { seed: hashParts(opts.runSeed, "agent", agent, k) }));
       }
@@ -9798,7 +9917,7 @@ function advance(reg, w, to, opts) {
     result.agentDays += slotDays;
     for (const s of signalsSince(before)) {
       const p = own(policy, s.class);
-      if (p === "stop" && timelapse && signalVisible(reg, w.world, w.state, w.world.pov, s))
+      if (p === "stop" && timelapse && s.stops !== false && signalVisible(reg, w.world, w.state, w.world.pov, s))
         result.stops.push(s);
       else if (p === "note" || p === "stop")
         result.notes.push(s);
@@ -9871,7 +9990,7 @@ function catchUp(reg, w, opts) {
     let k = cursor;
     while (k < done && budget > 0 && stillActs(w, agent)) {
       k++;
-      const applied = stepAgent(reg, w, agent, slotOf(cal, k), opts.runSeed);
+      const applied = stepAgent(reg, w, agent, slotOf(cal, k), opts.runSeed, false, false);
       if (applied.length > 0)
         runRulesOnEvents(reg, w, applied, { seed: hashParts(opts.runSeed, "agent", agent, k) });
       budget -= slotLen;
@@ -10299,6 +10418,7 @@ class TimelapseRun {
       mode: "timelapse",
       cause: "timelapse",
       includePov: true,
+      povRoutine: this.opts.povRoutine !== false,
       ...this.opts.overrides ? { interrupts: this.opts.overrides } : {},
       unitCap: this.cap,
       spent: { slots: this.result.slots, agentDays: this.result.agentDays, events: this.w.events.length - this.start },
@@ -24517,6 +24637,238 @@ function planDay(input) {
   return { agent: input.agent, start: input.start, end: input.end, blocks, ties, tieZone };
 }
 
+// src/shared/routines.ts
+var ROUTINE_BLOCK_KINDS = ["fixed", "flexible", "optional"];
+function isOff(entry) {
+  return "off" in entry && entry.off === true;
+}
+var BASIC_BLOCKS = Object.freeze([
+  { id: "sleep", label: "Sleep", activity: "sleep", kind: "flexible", window: { from: "21:30", to: "01:00" }, minutes: 480, priority: 5, place: "home", needs: ["fatigue"], source: { type: "builtin" } },
+  { id: "breakfast", label: "Breakfast", activity: "breakfast", kind: "flexible", window: { from: "06:00", to: "10:00" }, minutes: 30, priority: 4, place: "home", needs: ["hunger"], source: { type: "builtin" } },
+  { id: "lunch", label: "Lunch", activity: "lunch", kind: "flexible", window: { from: "11:00", to: "14:00" }, minutes: 45, priority: 4, place: "work", needs: ["hunger"], source: { type: "builtin" } },
+  { id: "dinner", label: "Dinner", activity: "dinner", kind: "flexible", window: { from: "17:00", to: "21:00" }, minutes: 60, priority: 4, place: "home", needs: ["hunger"], source: { type: "builtin" } }
+]);
+var ROUTINE_AWARENESS = ["story_first", "balanced", "routine_first"];
+var ROUTINE_INVITATIONS = ["off", "player", "everyone"];
+var ROUTINE_SOCIABILITY = ["reserved", "usual", "outgoing"];
+var ROUTINE_PLAN_BEND = ["must", "strong", "standard", "ordinary"];
+var DEFAULT_ROUTINE_SETTINGS = Object.freeze({ awareness: "balanced", invitations: "player", sociability: "usual", planBend: "standard" });
+function routineSettingsOf(world) {
+  const raw = isRecord(world.routineSettings) ? world.routineSettings : {};
+  const pick = (v, allowed, fallback) => allowed.find((a) => a === v) ?? fallback;
+  return {
+    awareness: pick(raw.awareness, ROUTINE_AWARENESS, DEFAULT_ROUTINE_SETTINGS.awareness),
+    invitations: pick(raw.invitations, ROUTINE_INVITATIONS, DEFAULT_ROUTINE_SETTINGS.invitations),
+    sociability: pick(raw.sociability, ROUTINE_SOCIABILITY, DEFAULT_ROUTINE_SETTINGS.sociability),
+    planBend: pick(raw.planBend, ROUTINE_PLAN_BEND, DEFAULT_ROUTINE_SETTINGS.planBend)
+  };
+}
+var ROUTINE_MODES = ["follows", "no_invitations", "off"];
+var ROUTINE_EVENTS = { follow: "castlife.follow", block: "castlife.routine", schedule: "castlife.schedule" };
+var ROUTINE_LINT = {
+  shape: "routine.shape",
+  window: "routine.window",
+  place: "routine.place",
+  owner: "routine.owner",
+  company: "routine.company",
+  need: "routine.need",
+  days: "routine.days",
+  source: "routine.source",
+  overlap: "routine.overlap",
+  pack: "routine.pack",
+  settings: "routine.settings",
+  scheduleOwner: "schedule.owner",
+  scheduleSlot: "schedule.slot",
+  scheduleSource: "schedule.source"
+};
+var HHMM2 = /^([01]\d|2[0-3]):[0-5]\d$/;
+var SEASONS = ["spring", "summer", "autumn", "winter"];
+function isTime(v) {
+  return typeof v === "string" && HHMM2.test(v);
+}
+function sourceProblem(v, world) {
+  if (v === undefined)
+    return null;
+  if (!isRecord(v))
+    return "its source isn't one";
+  const t = v.type;
+  const quote = v.quote === undefined || typeof v.quote === "string";
+  if (t === "authored")
+    return null;
+  if (t === "lore")
+    return typeof v.entry === "string" && v.entry !== "" && quote ? null : "a lore source names its entry";
+  if (t === "sheet")
+    return typeof v.entity === "string" && typeof v.field === "string" && quote ? null : "a sheet source names its entity and field";
+  if (world)
+    return "world data rests on what's authored, a lore entry or a sheet field";
+  if (t === "builtin")
+    return null;
+  if (t === "story")
+    return typeof v.at === "number" && (v.turn === undefined || typeof v.turn === "string") ? null : "a story source has its time";
+  if (t === "gm")
+    return typeof v.at === "number" ? null : "a GM source has its time";
+  return "its source isn't one";
+}
+function placeProblem(v) {
+  if (v === undefined || v === "home" || v === "work" || v === "here" || v === "with")
+    return null;
+  if (isRecord(v) && typeof v.place === "string" && v.place !== "")
+    return null;
+  if (isRecord(v) && typeof v.nearest === "string" && v.nearest !== "")
+    return null;
+  return "its place is home, work, here, with, {place} or {nearest}";
+}
+function daysProblem(v) {
+  if (v === undefined)
+    return null;
+  if (!isRecord(v))
+    return "its days aren't a set of constraints";
+  const ints = (x, lo, hi) => Array.isArray(x) && x.every((n) => Number.isInteger(n) && n >= lo && n <= hi);
+  const strs = (x) => Array.isArray(x) && x.every((s) => typeof s === "string");
+  if (v.weekdays !== undefined && !ints(v.weekdays, 0, 6))
+    return "weekdays are 0 (Sunday) to 6";
+  if (v.off !== undefined && v.off !== "only" && v.off !== "never")
+    return "days off are only or never";
+  if (v.holidays !== undefined && !strs(v.holidays))
+    return "holidays are calendar ids";
+  if (v.except !== undefined && !strs(v.except))
+    return "except lists calendar ids";
+  if (v.birthday !== undefined && v.birthday !== "own" && v.birthday !== "friend")
+    return "a birthday is own or friend";
+  if (v.seasons !== undefined && !(Array.isArray(v.seasons) && v.seasons.every((s) => SEASONS.some((x) => x === s))))
+    return "seasons are spring, summer, autumn and winter";
+  if (v.weather !== undefined && v.weather !== "fair" && v.weather !== "foul")
+    return "weather is fair or foul";
+  return null;
+}
+function blockShapeProblems(v, world = true) {
+  if (!isRecord(v))
+    return ["a block is an object"];
+  const out = [];
+  if (typeof v.id !== "string" || v.id === "")
+    out.push("a block has an id");
+  if (v.off === true)
+    return out;
+  if (typeof v.label !== "string" || v.label.trim() === "")
+    out.push("a block has a label");
+  if (typeof v.activity !== "string" || v.activity.trim() === "")
+    out.push("a block has an activity");
+  if (!ROUTINE_BLOCK_KINDS.some((k) => k === v.kind))
+    out.push("its kind is fixed, flexible or optional");
+  if (typeof v.minutes !== "number" || !Number.isInteger(v.minutes) || v.minutes < 1 || v.minutes > 1440)
+    out.push("its length (minutes) is 1 to 1,440 minutes");
+  if (v.kind === "fixed" && !isTime(v.at))
+    out.push("a fixed block starts at an HH:MM time (at)");
+  if (v.kind !== "fixed" && v.at !== undefined)
+    out.push("only a fixed block has a start time (at)");
+  if (v.kind !== "fixed" && !(isRecord(v.window) && isTime(v.window.from) && isTime(v.window.to)))
+    out.push("its window is HH:MM to HH:MM");
+  if (v.perWeek !== undefined && !(v.kind !== "fixed" && Number.isInteger(v.perWeek) && typeof v.perWeek === "number" && v.perWeek >= 1 && v.perWeek <= 7))
+    out.push("times a week (perWeek) is 1 to 7, for a flexible or optional block");
+  if (v.chance !== undefined && !(v.kind === "optional" && typeof v.chance === "number" && v.chance > 0 && v.chance <= 1))
+    out.push("a chance is above 0 and at most 1, for an optional block");
+  if (v.priority !== undefined && !(typeof v.priority === "number" && Number.isInteger(v.priority) && v.priority >= 1 && v.priority <= 5))
+    out.push("its priority is 1 to 5");
+  if (v.needs !== undefined && !(Array.isArray(v.needs) && v.needs.every((n) => typeof n === "string")))
+    out.push("its needs are names");
+  if (v.private !== undefined && typeof v.private !== "boolean")
+    out.push("private is true or false");
+  if (v.company !== undefined && !(isRecord(v.company) && isRecord(v.company.who) && (v.company.invite === undefined || typeof v.company.invite === "boolean")))
+    out.push("its company is {who: a selector, invite?}");
+  for (const p of [placeProblem(v.place), daysProblem(v.days), sourceProblem(v.source, world)])
+    if (p)
+      out.push(p);
+  return out;
+}
+function routineShapeProblems(v) {
+  if (!isRecord(v))
+    return ["a routine is an object"];
+  const out = [];
+  if (typeof v.id !== "string" || v.id === "")
+    out.push("a routine has an id");
+  if (v.label !== undefined && typeof v.label !== "string")
+    out.push("its label is text");
+  if (v.owner !== undefined && !(typeof v.owner === "string" ? v.owner !== "" : isRecord(v.owner)))
+    out.push("its owner is an entity, a group, a kind or a selector");
+  if (v.inherit !== undefined && typeof v.inherit !== "boolean")
+    out.push("inherit is true or false");
+  const src = sourceProblem(v.source, true);
+  if (src)
+    out.push(src);
+  if (!Array.isArray(v.blocks))
+    return [...out, "a routine has a list of blocks"];
+  const ids = new Set;
+  v.blocks.forEach((b, i) => {
+    for (const p of blockShapeProblems(b, true))
+      out.push(`block ${i + 1}: ${p}`);
+    const id = isRecord(b) && typeof b.id === "string" ? b.id : "";
+    if (id !== "" && ids.has(id))
+      out.push(`block ${i + 1}: another block of this routine is ${id}`);
+    ids.add(id);
+  });
+  return out;
+}
+var SETTING_VALUES = { awareness: ROUTINE_AWARENESS, invitations: ROUTINE_INVITATIONS, sociability: ROUTINE_SOCIABILITY, planBend: ROUTINE_PLAN_BEND };
+function routineSettingsProblems(v) {
+  if (!isRecord(v))
+    return ["routine settings are an object"];
+  return Object.entries(v).flatMap(([key, value]) => {
+    const allowed = hasOwn(SETTING_VALUES, key) ? SETTING_VALUES[key] : undefined;
+    if (!allowed)
+      return [`there's no setting ${key} (${Object.keys(SETTING_VALUES).join(", ")})`];
+    return typeof value === "string" && allowed.includes(value) ? [] : [`${key} is ${allowed.join(", ")}`];
+  });
+}
+
+// src/engine/cues.ts
+var SECRET_KINDS = ["lore", "track", "flag"];
+function readCue(raw) {
+  if (!isRecord(raw) || typeof raw.text !== "string" || raw.text.trim() === "")
+    return null;
+  const keyed = SECRET_KINDS.filter((kind) => raw[kind] !== undefined);
+  const kind = keyed[0];
+  const id = kind === undefined ? undefined : raw[kind];
+  return keyed.length === 1 && kind !== undefined && typeof id === "string" && id !== "" ? { text: raw.text.trim(), secret: { kind, id } } : null;
+}
+function cuesOf(world, who) {
+  const cues = own(world.entities, who)?.cues;
+  return (Array.isArray(cues) ? cues : []).flatMap((raw) => readCue(raw) ?? []);
+}
+
+// src/engine/lore.ts
+var MIN_TERM = 3;
+var STOP_WORDS = Object.fromEntries("the and for with that this from into onto have has had was were are you your yours my mine our ours his her hers their theirs them they she him its not but all any can will would could should about then than there here what when where which who whom how why just very some more most other out over under again also like get got one two too off own same such only each both few nor yet".split(" ").map((w) => [w, true]));
+function plain(text) {
+  const words = text.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim();
+  return words === "" ? "" : ` ${words} `;
+}
+function wordsOf2(text) {
+  return plain(text).trim().split(" ").filter((w) => w.length >= MIN_TERM && !hasOwn(STOP_WORDS, w)).map((w) => w.length > 4 && w.endsWith("s") && !w.endsWith("ss") ? w.slice(0, -1) : w);
+}
+var listOf = (v) => Array.isArray(v) ? v.filter((x) => typeof x === "string") : [];
+function loreHeldBy(world, entry, who) {
+  return listOf(entry.holders).includes(who) || cuesOf(world, who).some((c) => c.secret.kind === "lore" && c.secret.id === entry.id);
+}
+function loreReadable(reg, world, state, entry, purpose, effects = false, open = loreGateReader(reg, world, state), as) {
+  if (purpose === "gm")
+    return true;
+  const source = loreSourceOf(entry.source);
+  if (source.kind === "ai" && source.status === "pending")
+    return false;
+  if (as !== undefined && loreIsSecret(entry))
+    return loreHeldBy(world, entry, as);
+  if (loreIsSecret(entry) && !open(entry))
+    return !effects && !PROSE_STEPS.includes(purpose) && listOf(entry.audience).includes(purpose);
+  const v = entry.visibility;
+  if (v === undefined || v === "public")
+    return true;
+  if (v !== "known_by")
+    return false;
+  const reader = as ?? world.pov;
+  const links = listOf(entry.links);
+  return links.length > 0 && links.every((id) => hasOwn(state.entities, id) ? playerKnows(reg, world, state, reader, id) : hasOwn(world.places, id) && canSeePlace(reg, world, state, reader, id));
+}
+
 // src/packs/castlife/core/places.ts
 function homeOf(ctx, who) {
   const h = own(ctx.state.entities, who)?.fields.home;
@@ -24534,6 +24886,484 @@ function placeOfType(ctx, sceneType, near) {
   const ids = Object.keys(ctx.world.places).sort();
   const parent = near ? own(ctx.world.places, near)?.parent : undefined;
   return ids.find((id) => own(ctx.world.places, id)?.sceneType === sceneType && own(ctx.world.places, id)?.parent === parent) ?? ids.find((id) => own(ctx.world.places, id)?.sceneType === sceneType && own(ctx.world.places, id)?.visibility !== "secret") ?? null;
+}
+
+// src/packs/castlife/core/occasions.ts
+var FOND = 30;
+function birthdayOf(cal, v) {
+  const m = typeof v === "string" ? /^\s*(?:(-?\d{1,6})-)?(\d{1,2})-(\d{1,2})\s*$/.exec(v) : null;
+  if (!m)
+    return null;
+  const month = Number(m[2]);
+  const day = Number(m[3]);
+  const year = m[1] === undefined ? null : Number(m[1]);
+  if (month < 1 || month > cal.system.months || day < 1)
+    return null;
+  const longest = year !== null ? cal.system.monthLength(year, month) : Math.max(...[0, 1, 2, 3].map((y) => cal.system.monthLength(y, month)));
+  return day <= longest ? { month, day, year } : null;
+}
+function birthdayOn(cal, v, date) {
+  const b = birthdayOf(cal, v);
+  if (!b || b.month !== date.month)
+    return false;
+  const last = cal.system.monthLength(date.year, date.month);
+  return b.day === date.day || b.day > last && date.day === last;
+}
+function occasionOf(ctx, who, day) {
+  const cal = calendarOf(ctx.world);
+  const date = dateAt(cal, clockAt(cal, day, 0));
+  const weekend = date.weekday === 0 || date.weekday === 6;
+  const holidays = ctx.levelOf(ctx.world.pov, "calendar") >= 4 ? holidaysOn(cal, day).map((h) => ({ id: h.id, label: h.label, dayOff: h.dayOff })) : [];
+  const regard = optionalQuery(ctx, "regard");
+  const friends = regard ? Object.keys(ctx.state.entities).sort().filter((other) => {
+    const e = own(ctx.state.entities, other);
+    return other !== who && !!e && kindIs(ctx.registry, ctx.world, e.kind, "person") && !isGone(ctx.state, other) && acts(ctx.world, ctx.state, other) && birthdayOn(cal, e.fields.birthday, date) && regard(ctx, who, other) >= FOND;
+  }) : [];
+  const home = own(ctx.state.entities, who)?.fields.home;
+  const place = typeof home === "string" && own(ctx.world.places, home) ? home : null;
+  return {
+    weekend,
+    dayOff: weekend || holidays.some((h) => h.dayOff),
+    holidays,
+    birthday: birthdayOn(cal, own(ctx.state.entities, who)?.fields.birthday, date),
+    friends,
+    season: optionalQuery(ctx, "weather.season")?.(ctx, clockAt(cal, day, 12 * 60)) ?? null,
+    foul: place ? optionalQuery(ctx, "weather.foul")?.(ctx, place) ?? null : null
+  };
+}
+
+// src/packs/castlife/core/routines.ts
+var ROUTINE_OPTION = "routine:";
+function chatSource(v) {
+  const o = objOf(v);
+  if (o.type === "gm" && typeof o.at === "number")
+    return { type: "gm", at: o.at };
+  if (o.type === "story" && typeof o.at === "number")
+    return { type: "story", at: o.at, ...typeof o.turn === "string" ? { turn: o.turn } : {} };
+  return null;
+}
+function chatFollow(state, who) {
+  const raw = own(objOf(sliceOf(state, "castlife").follow), who);
+  if (!isRecord(raw))
+    return null;
+  const mode = ROUTINE_MODES.find((m) => m === raw.mode) ?? null;
+  const awareness = ROUTINE_AWARENESS.find((a) => a === raw.awareness) ?? null;
+  return mode === null && awareness === null ? null : { mode, awareness };
+}
+function chatBlocks(state, who) {
+  const out = {};
+  for (const [id, raw] of Object.entries(objOf(own(objOf(sliceOf(state, "castlife").routines), who)))) {
+    const c = objOf(raw);
+    const source = chatSource(c.source);
+    if (source && isRecord(c.value) && blockShapeProblems(c.value, false).length === 0)
+      out[id] = { value: c.value, source };
+  }
+  return out;
+}
+function chatSchedules(state, who) {
+  const out = {};
+  for (const [id, raw] of Object.entries(objOf(own(objOf(sliceOf(state, "castlife").schedules), who)))) {
+    const c = objOf(raw);
+    const source = chatSource(c.source);
+    const v = objOf(c.value);
+    if (!source)
+      continue;
+    if (v.off === true)
+      out[id] = { value: { off: true, until: typeof v.until === "number" ? v.until : null }, source };
+    else if (Array.isArray(v.slots))
+      out[id] = { value: c.value, source };
+  }
+  return out;
+}
+function followOf(ctx, who) {
+  const chat = chatFollow(ctx.state, who);
+  return { mode: chat?.mode ?? "follows", awareness: chat?.awareness ?? routineSettingsOf(ctx.world).awareness, chat };
+}
+function routineRank(reg, world, state, def) {
+  const rank = ownerRank(reg, world, state, def);
+  return rank === null ? 5 : rank + 1;
+}
+function covers2(reg, world, state, def, who) {
+  if (def.owner === undefined) {
+    const e = own(state.entities, who);
+    return !!e && kindIs(reg, world, e.kind, "person") && !isGone(state, who) && acts(world, state, who);
+  }
+  return scheduleOwners(reg, world, state, def).includes(who);
+}
+function worldRoutines(world) {
+  const raw = world.routines ?? {};
+  return Object.keys(raw).sort().flatMap((id) => {
+    const r = own(raw, id);
+    return r && routineShapeProblems(r).length === 0 ? [r] : [];
+  });
+}
+function routineCandidates(ctx, who, day) {
+  const { registry: reg, world, state } = ctx;
+  const out = new Map;
+  const add = (a) => {
+    const list = out.get(a.entry.id) ?? [];
+    list.push(a);
+    out.set(a.entry.id, list);
+  };
+  const off = followOf(ctx, who).mode === "off";
+  const ranked = off ? [] : worldRoutines(world).flatMap((def) => covers2(reg, world, state, def, who) ? [{ def, rank: routineRank(reg, world, state, def) }] : []);
+  const cut = Math.min(6, ...ranked.filter((r) => r.def.inherit === false).map((r) => r.rank));
+  for (const { def, rank } of ranked) {
+    if (rank > cut)
+      continue;
+    const level = ["own", "own", "group", "kind", "selector", "world"][rank] ?? "world";
+    for (const entry of def.blocks)
+      add({ entry, routine: def, level, rank, source: entry.source ?? def.source ?? { type: "authored" } });
+  }
+  for (const entry of BASIC_BLOCKS)
+    add({ entry, routine: null, level: "builtin", rank: 6, source: { type: "builtin" } });
+  const cal = calendarOf(world);
+  for (const [id, c] of Object.entries(chatBlocks(state, who))) {
+    if (day !== undefined && c.source.type === "story" && !isOff(c.value) && day <= dateAt(cal, c.source.at).dayIndex)
+      continue;
+    add({ entry: { ...c.value, id }, routine: null, level: "chat", rank: 0, source: c.source });
+  }
+  for (const list of out.values())
+    list.sort((a, b) => a.rank - b.rank || (a.routine?.id ?? "").localeCompare(b.routine?.id ?? ""));
+  return out;
+}
+function activeBlocks(ctx, who, day) {
+  const out = [];
+  for (const list of routineCandidates(ctx, who, day).values()) {
+    const top = list[0];
+    if (top && !isOff(top.entry))
+      out.push({ block: top.entry, from: top });
+  }
+  return out;
+}
+function daysHold(ctx, block, day, occasion) {
+  const d = block.days;
+  if (!d)
+    return true;
+  const cal = calendarOf(ctx.world);
+  const date = dateAt(cal, clockAt(cal, day, 0));
+  if (d.weekdays && !d.weekdays.includes(date.weekday))
+    return false;
+  if (d.off === "only" && !occasion.dayOff)
+    return false;
+  if (d.off === "never" && occasion.dayOff)
+    return false;
+  const holidays = d.holidays || d.except ? holidaysOn(cal, day).map((h) => h.id) : [];
+  if (d.holidays && !d.holidays.some((h) => holidays.includes(h)))
+    return false;
+  if (d.except?.some((h) => holidays.includes(h)))
+    return false;
+  if (d.birthday === "own" && !occasion.birthday)
+    return false;
+  if (d.birthday === "friend" && occasion.friends.length === 0)
+    return false;
+  if (d.seasons && occasion.season !== null && !d.seasons.some((s) => s === occasion.season))
+    return false;
+  if (d.weather === "foul" && occasion.foul === false)
+    return false;
+  if (d.weather === "fair" && occasion.foul === true)
+    return false;
+  return true;
+}
+function blockOnDay(ctx, who, block, day, occasion = occasionOf(ctx, who, day)) {
+  if (!daysHold(ctx, block, day, occasion))
+    return false;
+  if (block.perWeek !== undefined && block.kind !== "fixed") {
+    const cal = calendarOf(ctx.world);
+    const weekStart = day - dateAt(cal, clockAt(cal, day, 0)).weekday;
+    const eligible = [];
+    for (let d = weekStart;d < weekStart + 7; d++)
+      if (d === day || daysHold(ctx, block, d, occasionOf(ctx, who, d)))
+        eligible.push(d);
+    const rng = createRng(hashParts("castlife.routine.week", ctx.world.id, who, block.id, String(weekStart)));
+    const picked = [...eligible].sort((a, b) => a - b);
+    for (let i = picked.length - 1;i > 0; i--) {
+      const j = Math.floor(rng.next() * (i + 1));
+      [picked[i], picked[j]] = [picked[j], picked[i]];
+    }
+    if (!picked.slice(0, block.perWeek).includes(day))
+      return false;
+  }
+  if (block.kind === "optional")
+    return createRng(hashParts("castlife.routine.day", ctx.world.id, who, block.id, String(day))).next() < (block.chance ?? 0.5);
+  return true;
+}
+function companyOf(ctx, who, block) {
+  return block.company ? selectEntities(ctx.registry, ctx.world, ctx.state, block.company.who).filter((id) => id !== who) : [];
+}
+function blockPlace(ctx, who, block, occasion) {
+  const home = homeOf(ctx, who);
+  const p = block.place ?? "home";
+  if (p === "here")
+    return null;
+  if (p === "home")
+    return home;
+  if (p === "work")
+    return workPlace(ctx, who) ?? home;
+  if (p === "with") {
+    const host = companyOf(ctx, who, block)[0] ?? occasion?.friends[0];
+    const theirs = host ? homeOf(ctx, host) : null;
+    return theirs !== null && own(ctx.world.places, theirs) ? theirs : home;
+  }
+  if ("place" in p)
+    return own(ctx.world.places, p.place) ? p.place : home;
+  return placeOfType(ctx, p.nearest, home) ?? home;
+}
+function windowSpan(window) {
+  const from = parseHHMM(window.from);
+  const to = parseHHMM(window.to);
+  return { from, to: to > from ? to : to + MINUTES_PER_DAY };
+}
+function blockReason(block, from) {
+  if (from.level === "builtin")
+    return "basic need";
+  return block.kind === "optional" ? "a habit" : "routine";
+}
+function routineDay(ctx, who, day, commitments, needs) {
+  const cal = calendarOf(ctx.world);
+  const start = clockAt(cal, day, 0);
+  const blocks = activeBlocks(ctx, who, day);
+  const before = new Map(activeBlocks(ctx, who, day - 1).map((a) => [a.block.id, a]));
+  const occasions = new Map;
+  const occasion = (d) => {
+    const cached = occasions.get(d);
+    if (cached)
+      return cached;
+    const o = occasionOf(ctx, who, d);
+    occasions.set(d, o);
+    return o;
+  };
+  const fixed = [];
+  const options = [];
+  const pressed = (block) => (t, laid) => {
+    const met = block.needs ?? needs.meets(block.activity);
+    return met.flatMap((n) => {
+      const v = needs.need(n, t, laid);
+      return v >= 50 ? [`${n === "hunger" ? "hungry" : n === "fatigue" ? "tired" : n === "social" ? "lonely" : "bored"} (${n} ${Math.round(v)})`] : [];
+    });
+  };
+  const worth = (block) => (t, laid) => (block.priority ?? 3) + Math.max(0, ...(block.needs ?? needs.meets(block.activity)).map((n) => needs.need(n, t, laid) / 20));
+  const firm = blocks.filter((b) => b.block.kind === "fixed").sort((a, b) => (b.block.priority ?? 3) - (a.block.priority ?? 3) || a.block.id.localeCompare(b.block.id));
+  const taken = commitments.map((c) => ({ start: c.start, end: c.end }));
+  for (const today of firm) {
+    for (const d of [day - 1, day]) {
+      const had = d === day ? today : before.get(today.block.id);
+      if (!had || had.block.kind !== "fixed" || !blockOnDay(ctx, who, had.block, d, occasion(d)))
+        continue;
+      const { block, from } = had;
+      const s = clockAt(cal, d, parseHHMM(block.at ?? "00:00"));
+      const e = s + block.minutes;
+      if (e <= start || s >= start + MINUTES_PER_DAY)
+        continue;
+      let pieces = [{ start: s, end: e }];
+      for (const t of taken)
+        pieces = pieces.flatMap((p) => p.end <= t.start || p.start >= t.end ? [p] : [...p.start < t.start ? [{ start: p.start, end: t.start }] : [], ...p.end > t.end ? [{ start: t.end, end: p.end }] : []]);
+      for (const p of pieces) {
+        fixed.push({ start: p.start, end: p.end, label: block.label, activity: block.activity, place: blockPlace(ctx, who, block, occasion(d)), reason: blockReason(block, from), option: `${ROUTINE_OPTION}${block.id}` });
+        taken.push(p);
+      }
+    }
+  }
+  for (const { block, from } of blocks) {
+    if (block.kind === "fixed" || !block.window)
+      continue;
+    const span = windowSpan(block.window);
+    const prior = before.get(block.id);
+    const night = prior && prior.block.kind !== "fixed" && prior.block.window ? { block: prior.block, from: prior.from, span: windowSpan(prior.block.window) } : null;
+    const reasons = [blockReason(block, from)];
+    if (blockOnDay(ctx, who, block, day, occasion(day))) {
+      options.push({ id: `${ROUTINE_OPTION}${block.id}`, label: block.label, activity: block.activity, place: blockPlace(ctx, who, block, occasion(day)), duration: block.minutes, window: { from: start + span.from, to: start + span.to }, utility: worth(block), reasons, because: pressed(block) });
+    }
+    if (night && night.span.to > MINUTES_PER_DAY && blockOnDay(ctx, who, night.block, day - 1, occasion(day - 1))) {
+      const left = Math.round((night.span.from + night.span.to) / 2) + night.block.minutes - MINUTES_PER_DAY;
+      if (left > 0)
+        options.push({ id: `${ROUTINE_OPTION}${block.id}:carried`, label: night.block.label, activity: night.block.activity, place: blockPlace(ctx, who, night.block, occasion(day - 1)), duration: left, window: { from: start, to: start + 1 }, utility: (night.block.priority ?? 3) + 5, reasons: [blockReason(night.block, night.from)], because: pressed(night.block) });
+    }
+  }
+  return { fixed, options };
+}
+function withPov(ctx, who) {
+  const pov = ctx.world.pov;
+  if (who === pov)
+    return false;
+  const here = placeOfEntity(ctx.state, pov);
+  return here !== null && placeOfEntity(ctx.state, who) === here && canSeeEntity(ctx.registry, ctx.world, ctx.state, pov, who);
+}
+function routineYields(ctx, who, field, expected, opts) {
+  if (opts.scene !== false && withPov(ctx, who))
+    return true;
+  const pov = who === ctx.world.pov;
+  const awareness = followOf(ctx, who).awareness;
+  if (!pov) {
+    const tier = optionalQuery(ctx, "minds.tier")?.(ctx, who) ?? "background";
+    const cast = tier === "live" || tier === "near";
+    if (cast && (opts.skip !== true || withPov(ctx, who)))
+      return true;
+    if ((tier === "far" || cast || awareness === "story_first") && optionalQuery(ctx, "minds.intent")?.(ctx, who) === true)
+      return true;
+  }
+  const current = own(ctx.state.entities, who)?.fields[field];
+  const diverged = expected === null || expected === undefined ? !opts.edge : current !== undefined && current !== expected;
+  if (!opts.edge)
+    return diverged;
+  if (!diverged || awareness === "routine_first")
+    return false;
+  return awareness === "story_first" || !opts.release;
+}
+function routineIssues(world, reg, id, value, state) {
+  const at = `routines.${id}`;
+  if (routineShapeProblems(value).length > 0 || !isRecord(value)) {
+    const blocks = isRecord(value) && Array.isArray(value.blocks) ? value.blocks : [];
+    const top = routineShapeProblems(isRecord(value) && Array.isArray(value.blocks) ? { ...value, blocks: [] } : value).map((message) => ({ severity: "error", code: ROUTINE_LINT.shape, message: `Routine ${id}: ${message}.`, path: at }));
+    const seen = new Set;
+    const each = blocks.flatMap((b, i) => {
+      const blockId = isRecord(b) && typeof b.id === "string" ? b.id : "";
+      const twice = blockId !== "" && seen.has(blockId) ? [`another block of this routine is ${blockId}`] : [];
+      seen.add(blockId);
+      return [...blockShapeProblems(b, true), ...twice].map((message) => ({ severity: "error", code: ROUTINE_LINT.shape, message: `Routine ${id}, block ${i + 1}: ${message}.`, path: `${at}.blocks.${i}` }));
+    });
+    return [...top, ...each];
+  }
+  const def = value;
+  const issues = [];
+  const warn = (code, path, message) => {
+    issues.push({ severity: "warning", code, path, message });
+  };
+  if (def.id !== id)
+    warn(ROUTINE_LINT.shape, `${at}.id`, `Routine ${id} is saved under another id (${def.id}).`);
+  if (typeof def.owner === "string" && !own(world.entities, def.owner) && !kindDef(reg, world, def.owner))
+    warn(ROUTINE_LINT.owner, `${at}.owner`, `Routine ${id}'s owner ${def.owner} is no entity, group or kind of the world.`);
+  else if (isRecord(def.owner))
+    for (const p of selectorProblems(reg, world, def.owner))
+      warn(ROUTINE_LINT.owner, `${at}.owner`, `Routine ${id}'s owner ${p}.`);
+  if (def.owner !== undefined && scheduleOwners(reg, world, state, def).length === 0)
+    warn(ROUTINE_LINT.owner, `${at}.owner`, `Routine ${id}'s owner matches nobody as a chat starts, so it applies to no one.`);
+  const holidays = new Set(world.calendar.holidays.map((h) => h.id));
+  const scenes = new Set(Object.values(world.places).flatMap((p) => p.sceneType ? [p.sceneType] : []));
+  def.blocks.forEach((entry, i) => {
+    const path = `${at}.blocks.${i}`;
+    const source = entry.source ?? def.source;
+    if (source?.type === "lore" && !own(world.lore, source.entry))
+      warn(ROUTINE_LINT.source, `${path}.source`, `Routine ${id}, block ${entry.id}: rests on lore entry ${source.entry}, which the world doesn't have.`);
+    if (source?.type === "sheet" && !own(world.entities, source.entity))
+      warn(ROUTINE_LINT.source, `${path}.source`, `Routine ${id}, block ${entry.id}: rests on ${source.entity}'s sheet, who isn't in the world.`);
+    if (isOff(entry))
+      return;
+    const b = entry;
+    const name = `Routine ${id}, block ${b.id}`;
+    if (b.place !== undefined && typeof b.place === "object" && "place" in b.place && !own(world.places, b.place.place))
+      warn(ROUTINE_LINT.place, `${path}.place`, `${name}: there's no place ${b.place.place}; it happens at home.`);
+    if (b.place !== undefined && typeof b.place === "object" && "nearest" in b.place && !scenes.has(b.place.nearest))
+      warn(ROUTINE_LINT.place, `${path}.place`, `${name}: no place has the scene type ${b.place.nearest}; it happens at home.`);
+    if (b.place === "with" && !b.company && b.days?.birthday !== "friend")
+      warn(ROUTINE_LINT.place, `${path}.place`, `${name}: happens with its company, but names none; it happens at home.`);
+    if (b.company && isRecord(b.company.who)) {
+      for (const p of selectorProblems(reg, world, b.company.who))
+        warn(ROUTINE_LINT.company, `${path}.company`, `${name}: its company ${p}.`);
+      if (selectEntities(reg, world, state, b.company.who).length === 0)
+        warn(ROUTINE_LINT.company, `${path}.company`, `${name}: its company matches nobody as a chat starts.`);
+    }
+    for (const n of b.needs ?? [])
+      if (!["hunger", "fatigue", "social", "fun"].includes(n))
+        warn(ROUTINE_LINT.need, `${path}.needs`, `${name}: there's no need ${n} (hunger, fatigue, social, fun).`);
+    for (const h of [...b.days?.holidays ?? [], ...b.days?.except ?? []])
+      if (!holidays.has(h))
+        warn(ROUTINE_LINT.days, `${path}.days`, `${name}: the calendar has no holiday ${h}.`);
+    if (b.days?.weekdays?.length === 0)
+      warn(ROUTINE_LINT.days, `${path}.days`, `${name}: lists no weekdays, so it's never on.`);
+    if (b.window) {
+      const span = windowSpan(b.window);
+      if (span.to - span.from + b.minutes > MINUTES_PER_DAY * 2)
+        warn(ROUTINE_LINT.window, `${path}.window`, `${name}: its window and length run past the next day.`);
+      if (b.window.from === b.window.to)
+        warn(ROUTINE_LINT.window, `${path}.window`, `${name}: its window opens and closes at ${b.window.from}, which reads as a whole day; give it a span.`);
+    }
+    if (b.perWeek !== undefined && b.days?.weekdays && b.perWeek > b.days.weekdays.length)
+      warn(ROUTINE_LINT.days, `${path}.perWeek`, `${name}: ${b.perWeek} times a week, but it's on only ${b.days.weekdays.length} weekdays.`);
+  });
+  return issues;
+}
+function routinesLint(world, reg, state) {
+  const issues = [];
+  const raw = world.routines ?? {};
+  for (const id of Object.keys(raw).sort())
+    issues.push(...routineIssues(world, reg, id, own(raw, id), state));
+  const settings = isRecord(world.routineSettings) ? world.routineSettings : {};
+  const known = { awareness: ROUTINE_AWARENESS, invitations: ["off", "player", "everyone"], sociability: ["reserved", "usual", "outgoing"], planBend: ["must", "strong", "standard", "ordinary"] };
+  for (const [key, v] of Object.entries(settings)) {
+    const allowed = own(known, key);
+    if (!allowed)
+      issues.push({ severity: "warning", code: ROUTINE_LINT.settings, path: `routineSettings.${key}`, message: `Routine settings have no ${key}; it does nothing.` });
+    else if (typeof v !== "string" || !allowed.includes(v))
+      issues.push({ severity: "warning", code: ROUTINE_LINT.settings, path: `routineSettings.${key}`, message: `Routine settings: ${key} is ${allowed.join(", ")}; the default stands.` });
+  }
+  if (Object.keys(raw).length > 0 && !world.packs.castlife)
+    issues.push({ severity: "warning", code: ROUTINE_LINT.pack, path: "routines", message: "The world has routines but not the Cast life pack, which lives them." });
+  const routines = worldRoutines(world);
+  const people = Object.keys(state.entities).sort();
+  const told = new Set;
+  for (const who of people) {
+    const seen = new Map;
+    for (const def of routines) {
+      if (!covers2(reg, world, state, def, who))
+        continue;
+      const rank = routineRank(reg, world, state, def);
+      for (const b of def.blocks) {
+        const key = `${rank}:${b.id}`;
+        const first = seen.get(key);
+        if (first === undefined)
+          seen.set(key, def.id);
+        else if (first !== def.id && !told.has(`${first}:${def.id}:${b.id}`)) {
+          told.add(`${first}:${def.id}:${b.id}`);
+          issues.push({ severity: "warning", code: ROUTINE_LINT.overlap, path: `routines.${def.id}`, message: `Routines ${first} and ${def.id} both set ${b.id} for ${own(state.entities, who)?.name ?? who} at the same precedence; ${first} wins.` });
+        }
+      }
+    }
+  }
+  return issues;
+}
+function schedulesLint(world, reg, state) {
+  const issues = [];
+  const time = /^([01]\d|2[0-4]):[0-5]\d$/;
+  const sourceIssue = (source, path, name) => {
+    if (source?.type === "lore" && !own(world.lore, source.entry))
+      issues.push({ severity: "warning", code: ROUTINE_LINT.scheduleSource, path, message: `${name} rests on lore entry ${source.entry}, which the world doesn't have.` });
+    if (source?.type === "sheet" && !own(world.entities, source.entity))
+      issues.push({ severity: "warning", code: ROUTINE_LINT.scheduleSource, path, message: `${name} rests on ${source.entity}'s sheet, who isn't in the world.` });
+  };
+  for (const s of allSchedules(reg, world)) {
+    if (!own(world.schedules, s.id))
+      continue;
+    const at = `schedules.${s.id}`;
+    if (s.owner !== undefined && scheduleOwners(reg, world, state, s).length === 0)
+      issues.push({ severity: "warning", code: ROUTINE_LINT.scheduleOwner, path: `${at}.owner`, message: `Schedule ${s.id}'s owner matches nobody as a chat starts, so it moves no one.` });
+    sourceIssue(s.source, `${at}.source`, `Schedule ${s.id}`);
+    s.slots.forEach((slot, i) => {
+      if (!time.test(String(slot.start)) || !time.test(String(slot.end)))
+        issues.push({ severity: "error", code: ROUTINE_LINT.scheduleSlot, path: `${at}.slots.${i}`, message: `Schedule ${s.id}, slot ${i + 1}: its times are HH:MM.` });
+      sourceIssue(slot.source, `${at}.slots.${i}.source`, `Schedule ${s.id}, slot ${i + 1}`);
+    });
+  }
+  return issues;
+}
+function chatScheduleDefs(ctx) {
+  const out = [];
+  const all = new Map(allSchedules(ctx.registry, ctx.world).map((s) => [s.id, s]));
+  for (const who of Object.keys(objOf(sliceOf(ctx.state, "castlife").schedules)).sort()) {
+    for (const [id, c] of Object.entries(chatSchedules(ctx.state, who))) {
+      const base = all.get(id);
+      if (!base || "off" in c.value)
+        continue;
+      out.push({ id: `${id}@${who}`, owner: who, target: base.target, recurrence: c.value.recurrence ?? base.recurrence, slots: c.value.slots, ...base.pack ? { pack: base.pack } : {} });
+    }
+  }
+  return out;
+}
+function scheduleOff(state, who, schedule, at) {
+  const c = own(chatSchedules(state, who), schedule);
+  if (!c)
+    return false;
+  return "off" in c.value ? c.value.until === null || c.value.until > at : true;
 }
 
 // src/packs/castlife/core/commitments.ts
@@ -24564,8 +25394,8 @@ function cutAround(blocks, cutters) {
 }
 function personPlaceFor(ctx, who, at) {
   let best = null;
-  for (const s of allSchedules(ctx.registry, ctx.world)) {
-    if (s.target !== "place" || !scheduleOwners(ctx.registry, ctx.world, ctx.state, s).includes(who))
+  for (const s of chatSchedulesIn(ctx)) {
+    if (s.target !== "place" || !scheduleOwners(ctx.registry, ctx.world, ctx.state, s).includes(who) || scheduleOff(ctx.state, who, s.id, at))
       continue;
     const rank = ownerRank(ctx.registry, ctx.world, ctx.state, s) ?? Number.MAX_SAFE_INTEGER;
     const a = activeSlot(ctx.world, s, at);
@@ -24576,13 +25406,13 @@ function personPlaceFor(ctx, who, at) {
 }
 function authored(ctx, who, start, end) {
   const ranked = [];
-  for (const s of allSchedules(ctx.registry, ctx.world)) {
+  for (const s of chatSchedulesIn(ctx)) {
     if (s.target !== "activity" || !scheduleOwners(ctx.registry, ctx.world, ctx.state, s).includes(who))
       continue;
     const rank = ownerRank(ctx.registry, ctx.world, ctx.state, s) ?? Number.MAX_SAFE_INTEGER;
     const edges = scheduleInstants(ctx.world, [s], start - MINUTES_PER_DAY, end + MINUTES_PER_DAY);
     for (const e of edges) {
-      if (e.edge !== "start")
+      if (e.edge !== "start" || scheduleOff(ctx.state, who, s.id, e.at))
         continue;
       const close = edges.find((x) => x.edge === "end" && x.occurrence === e.occurrence);
       const value = s.slots[e.slot]?.value;
@@ -24590,7 +25420,7 @@ function authored(ctx, who, start, end) {
         continue;
       const kind = /school|class/.test(value) ? "school" : /work|shift/.test(value) ? "work" : "other";
       const place = personPlaceFor(ctx, who, e.at) ?? (kind === "work" ? workPlace(ctx, who) : null) ?? homeOf(ctx, who);
-      ranked.push({ block: { start: e.at, end: close.at, label: value.replace(/_/g, " "), activity: value, place, reason: kind === "other" ? "commitment" : kind, kind }, rank });
+      ranked.push({ block: { start: e.at, end: close.at, label: value.replace(/_/g, " "), activity: value, place, reason: kind === "other" ? "commitment" : kind, kind, option: `schedule:${s.id}` }, rank });
     }
   }
   const routine = ranked.flatMap(({ block, rank }) => cutAround([block], ranked.filter((r) => r.rank < rank).map((r) => r.block)));
@@ -24622,7 +25452,7 @@ function livesPlans(ctx, who) {
   return who !== ctx.world.pov && own(ctx.state.entities, who)?.agent === true && ctx.levelOf(who, "castlife") >= 3;
 }
 function layable(ctx, who, tier) {
-  if (tier === "background" || !livesPlans(ctx, who))
+  if (tier === "background" && followOf(ctx, who).awareness !== "story_first" || !livesPlans(ctx, who))
     return [];
   return (optionalQuery(ctx, "minds.plans")?.(ctx, who) ?? []).flatMap((p) => {
     const played = PLAYED[p.kind];
@@ -24640,8 +25470,17 @@ function tight(l) {
 function searchEnd(l) {
   return Math.min(l.p.when.to, l.from + SEARCH_DAYS * MINUTES_PER_DAY);
 }
-function cutsRoutine(l, tier) {
-  return l.p.priority >= 4 || tier !== "far" && l.p.priority >= 3 && tight(l);
+function cutsRoutine(ctx, l, tier) {
+  switch (routineSettingsOf(ctx.world).planBend) {
+    case "must":
+      return l.p.priority >= 5;
+    case "strong":
+      return l.p.priority >= 4;
+    case "standard":
+      return l.p.priority >= 4 || tier !== "far" && l.p.priority >= 3 && tight(l);
+    case "ordinary":
+      return l.p.priority >= 4 || l.p.priority >= 3 && tight(l);
+  }
 }
 function precedence(a, b) {
   return b.priority - a.priority || a.made - b.made || a.id.localeCompare(b.id);
@@ -24656,7 +25495,7 @@ function placed(ctx, who, l, tier, a, stronger) {
   const cal = calendarOf(ctx.world);
   const { minutes, hours } = l.played;
   const to = searchEnd(l);
-  const blockers = [...a.trips, ...l.p.priority >= 5 ? [] : a.appointments, ...cutsRoutine(l, tier) ? [] : a.routine, ...stronger];
+  const blockers = [...a.trips, ...l.p.priority >= 5 ? [] : a.appointments, ...cutsRoutine(ctx, l, tier) ? [] : a.routine, ...stronger];
   const candidates = new Set([l.from]);
   for (const b of blockers)
     if (b.end > l.from && b.end < to)
@@ -24715,10 +25554,10 @@ function commitments(ctx, who, start, end) {
   }
   const pieces = [];
   laid.forEach(({ l, block }, i) => {
-    const cutters = [...blocks.slice(0, i), ...l.p.priority >= 5 ? [] : a.appointments, ...cutsRoutine(l, tier) ? [] : a.routine];
+    const cutters = [...blocks.slice(0, i), ...l.p.priority >= 5 ? [] : a.appointments, ...cutsRoutine(ctx, l, tier) ? [] : a.routine];
     pieces.push(...cutAround([block], cutters));
   });
-  const routine = cutAround(a.routine, laid.filter((x) => cutsRoutine(x.l, tier)).map((x) => x.block));
+  const routine = cutAround(a.routine, laid.filter((x) => cutsRoutine(ctx, x.l, tier)).map((x) => x.block));
   const appointments = cutAround(a.appointments, laid.filter((x) => x.l.p.priority >= 5).map((x) => x.block));
   return [...cutAround([...routine, ...appointments, ...pieces], a.trips), ...a.trips].filter((c) => c.end > start && c.start < end).sort((x, y) => x.start - y.start);
 }
@@ -24732,21 +25571,6 @@ function laidPlans(ctx, who, plans) {
     if (c.plan !== undefined)
       out.get(c.plan)?.push(c);
   return out;
-}
-
-// src/engine/cues.ts
-var SECRET_KINDS = ["lore", "track", "flag"];
-function readCue(raw) {
-  if (!isRecord(raw) || typeof raw.text !== "string" || raw.text.trim() === "")
-    return null;
-  const keyed = SECRET_KINDS.filter((kind) => raw[kind] !== undefined);
-  const kind = keyed[0];
-  const id = kind === undefined ? undefined : raw[kind];
-  return keyed.length === 1 && kind !== undefined && typeof id === "string" && id !== "" ? { text: raw.text.trim(), secret: { kind, id } } : null;
-}
-function cuesOf(world, who) {
-  const cues = own(world.entities, who)?.cues;
-  return (Array.isArray(cues) ? cues : []).flatMap((raw) => readCue(raw) ?? []);
 }
 
 // src/packs/castlife/core/cues.ts
@@ -24891,48 +25715,342 @@ function cueIssues(world) {
   return issues;
 }
 
-// src/packs/castlife/core/occasions.ts
-var FOND = 30;
-function birthdayOf(cal, v) {
-  const m = typeof v === "string" ? /^\s*(?:(-?\d{1,6})-)?(\d{1,2})-(\d{1,2})\s*$/.exec(v) : null;
-  if (!m)
-    return null;
-  const month = Number(m[2]);
-  const day = Number(m[3]);
-  const year = m[1] === undefined ? null : Number(m[1]);
-  if (month < 1 || month > cal.system.months || day < 1)
-    return null;
-  const longest = year !== null ? cal.system.monthLength(year, month) : Math.max(...[0, 1, 2, 3].map((y) => cal.system.monthLength(y, month)));
-  return day <= longest ? { month, day, year } : null;
+// src/packs/castlife/core/story.ts
+var ROUTINE_CHANNEL = "routine";
+var ROUTINE_EFFECT = "castlife.routine";
+var STORY_PRIORITY = 4;
+var WAKING = { from: "08:00", to: "20:00" };
+var DAY_PARTS = { morning: { from: "06:00", to: "11:00" }, afternoon: { from: "12:00", to: "16:00" }, evening: { from: "17:00", to: "21:00" }, night: { from: "21:00", to: "02:00" } };
+var MINUTES = { work: 480, school: 360, exercise: 60, leisure: 90, socialize: 120, errand: 45 };
+var DEFAULT_MINUTES = 60;
+var LABEL_MAX = 60;
+var ACTIVITY_MAX = 40;
+var HHMM3 = /^([01]?\d|2[0-3]):([0-5]\d)$/;
+var FILLER2 = { the: true, and: true, for: true, with: true, his: true, her: true, their: true, its: true, our: true, your: true, from: true, new: true, now: true, every: true, each: true, day: true, days: true, daily: true, week: true, weeks: true, weekly: true, weekday: true, weekdays: true, weekend: true, weekends: true, morning: true, mornings: true, afternoon: true, afternoons: true, evening: true, evenings: true, night: true, nights: true, usual: true };
+var CHANGES = { start: true, stop: true, move: true };
+function refuse(reason) {
+  return { code: "routine", reason, unseen: true };
 }
-function birthdayOn(cal, v, date) {
-  const b = birthdayOf(cal, v);
-  if (!b || b.month !== date.month)
-    return false;
-  const last = cal.system.monthLength(date.year, date.month);
-  return b.day === date.day || b.day > last && date.day === last;
+function text3(v) {
+  return typeof v === "string" ? v.trim() : "";
 }
-function occasionOf(ctx, who, day) {
-  const cal = calendarOf(ctx.world);
-  const date = dateAt(cal, clockAt(cal, day, 0));
-  const weekend = date.weekday === 0 || date.weekday === 6;
-  const holidays = ctx.levelOf(ctx.world.pov, "calendar") >= 4 ? holidaysOn(cal, day).map((h) => ({ id: h.id, label: h.label, dayOff: h.dayOff })) : [];
-  const regard = optionalQuery(ctx, "regard");
-  const friends = regard ? Object.keys(ctx.state.entities).sort().filter((other) => {
-    const e = own(ctx.state.entities, other);
-    return other !== who && !!e && kindIs(ctx.registry, ctx.world, e.kind, "person") && !isGone(ctx.state, other) && acts(ctx.world, ctx.state, other) && birthdayOn(cal, e.fields.birthday, date) && regard(ctx, who, other) >= FOND;
-  }) : [];
-  const home = own(ctx.state.entities, who)?.fields.home;
-  const place = typeof home === "string" && own(ctx.world.places, home) ? home : null;
-  return {
-    weekend,
-    dayOff: weekend || holidays.some((h) => h.dayOff),
-    holidays,
-    birthday: birthdayOn(cal, own(ctx.state.entities, who)?.fields.birthday, date),
-    friends,
-    season: optionalQuery(ctx, "weather.season")?.(ctx, clockAt(cal, day, 12 * 60)) ?? null,
-    foul: place ? optionalQuery(ctx, "weather.foul")?.(ctx, place) ?? null : null
+function cleanLabel(v) {
+  return text3(v).replace(/[^\p{L}\p{N} .,'’&()/:-]/gu, " ").replace(/\s+/g, " ").trim().slice(0, LABEL_MAX).trim();
+}
+function wordsOf3(s) {
+  return (s.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? []).filter((w) => w.length >= 3 && !FILLER2[w]);
+}
+function sameWords(a, b) {
+  return a.some((x) => b.some((y) => x === y || Math.min(x.length, y.length) >= 4 && (x.startsWith(y) || y.startsWith(x))));
+}
+function daysOf(ctx, v) {
+  const said = (Array.isArray(v) ? v : [v]).filter((x) => typeof x === "string" || typeof x === "number");
+  const whole = said.map(String).join(" ").toLowerCase().replace(/\b(?:every|each|on)\b/g, " ").replace(/\s+/g, " ").trim();
+  if (/^(daily|everyday|days?|nights?|nightly)$/.test(whole))
+    return {};
+  if (/^(weekdays?|working days?|workdays?)$/.test(whole))
+    return { off: "never" };
+  if (/^(weekends?|days? off)$/.test(whole))
+    return { off: "only" };
+  if (whole === "")
+    return null;
+  const names = calendarOf(ctx.world).system.weekdayNames.map((n) => n.toLowerCase());
+  const dayOf = (w) => {
+    const one = w.replace(/s$/, "");
+    return names.findIndex((n) => n === w || n === one || n.length >= 3 && one.startsWith(n) && (one.endsWith("day") || one.length - n.length <= 2) || one.length >= 3 && n.startsWith(one));
   };
+  const weekdays = new Set;
+  for (const raw of said) {
+    if (typeof raw === "number") {
+      if (!Number.isInteger(raw) || raw < 0 || raw >= names.length)
+        return null;
+      weekdays.add(raw);
+      continue;
+    }
+    for (const item of raw.toLowerCase().split(/\s*(?:,|;|&|\band\b)\s*/).map((x) => x.replace(/\b(?:every|each|on)\b/g, " ").replace(/\s+/g, " ").trim()).filter((x) => x !== "")) {
+      const range = /^(.+?)\s*(?:-|–|\s(?:to|through|thru)\s)\s*(.+)$/.exec(item);
+      const span = dayOf(item) < 0 && range ? [dayOf((range[1] ?? "").trim()), dayOf((range[2] ?? "").trim())] : null;
+      if (span && span[0] !== undefined && span[1] !== undefined && span[0] >= 0 && span[1] >= 0) {
+        for (let i = span[0];; i = (i + 1) % names.length) {
+          weekdays.add(i);
+          if (i === span[1])
+            break;
+        }
+        continue;
+      }
+      const each = dayOf(item) >= 0 ? [dayOf(item)] : item.split(/\s+/).map(dayOf);
+      if (each.some((i) => i < 0))
+        return null;
+      for (const i of each)
+        weekdays.add(i);
+    }
+  }
+  return { weekdays: [...weekdays].sort((a, b) => a - b) };
+}
+function placeOf2(ctx, v) {
+  const said = text3(v);
+  if (said === "")
+    return null;
+  const mayKnow = (id) => own(ctx.world.places, id) !== undefined && canSeePlace(ctx.registry, ctx.world, ctx.state, ctx.world.pov, id);
+  if (mayKnow(said))
+    return said;
+  const named = Object.keys(ctx.world.places).filter((id) => own(ctx.world.places, id)?.name.toLowerCase() === said.toLowerCase() && mayKnow(id));
+  return named.length === 1 ? named[0] ?? null : null;
+}
+function firstDay(ctx) {
+  return dateAt(calendarOf(ctx.world), ctx.state.clock).dayIndex + 1;
+}
+function weekOf(ctx, who, block, from) {
+  const out = [];
+  for (let d = from;d < from + 7; d++)
+    if (blockOnDay(ctx, who, block, d))
+      out.push(d);
+  return out;
+}
+function blockSpans(ctx, block, days) {
+  if (block.kind !== "fixed" || !block.at)
+    return [];
+  const cal = calendarOf(ctx.world);
+  const at = parseHHMM(block.at);
+  return days.map((d) => ({ start: clockAt(cal, d, at), end: clockAt(cal, d, at) + block.minutes }));
+}
+function slotSpans(ctx, schedule, days) {
+  const cal = calendarOf(ctx.world);
+  const out = [];
+  for (const d of new Set(days.flatMap((x) => [x - 1, x, x + 1]))) {
+    if (!recursOn(cal, schedule.recurrence, d))
+      continue;
+    for (const slot of schedule.slots) {
+      if (!HHMM3.test(slot.start) || !(HHMM3.test(slot.end) || slot.end === "24:00"))
+        continue;
+      const s = clockAt(cal, d, parseHHMM(slot.start));
+      let e = clockAt(cal, d, parseHHMM(slot.end));
+      if (e <= s)
+        e += MINUTES_PER_DAY;
+      out.push({ span: { start: s, end: e }, slot });
+    }
+  }
+  return out;
+}
+function overlaps(a, b) {
+  return a.some((x) => b.some((y) => x.start < y.end && y.start < x.end));
+}
+function theirSchedules(ctx, who) {
+  const out = [];
+  for (const def of chatSchedulesIn(ctx)) {
+    if (def.target !== "place" && def.target !== "activity" || !scheduleOwners(ctx.registry, ctx.world, ctx.state, def).includes(who))
+      continue;
+    const at = def.id.indexOf("@");
+    if (at >= 0)
+      out.push({ id: def.id.slice(0, at), def });
+    else if (!scheduleOff(ctx.state, who, def.id, ctx.state.clock))
+      out.push({ id: def.id, def });
+  }
+  return out;
+}
+function personOf(ctx, p) {
+  const who = text3(p.entity);
+  const e = own(ctx.state.entities, who);
+  if (!e || isGone(ctx.state, who) || !povMayKnow(ctx.registry, ctx.world, ctx.state, who))
+    return refuse("there's no one by that name");
+  if (!kindIs(ctx.registry, ctx.world, e.kind, "person"))
+    return refuse(`${e.name} has no routine: only people do`);
+  if (!acts(ctx.world, ctx.state, who))
+    return refuse(`${e.name} keeps no routine now`);
+  return who;
+}
+function startBlock(ctx, who, p) {
+  const label = cleanLabel(p.label);
+  if (label === "")
+    return refuse("a new routine needs what it is");
+  const days = daysOf(ctx, p.days);
+  if (!days)
+    return refuse("the reply doesn't say which days");
+  const said = text3(p.activity).toLowerCase().replace(/[^a-z0-9 _-]/g, "").slice(0, ACTIVITY_MAX).trim();
+  const activity = said !== "" ? said : /\b(job|shift|work|works|working)\b/i.test(label) ? "work" : /\b(school|class|classes|course)\b/i.test(label) ? "school" : label.toLowerCase().slice(0, ACTIVITY_MAX);
+  const basic = BASIC_BLOCKS.find((b) => b.activity === activity);
+  const id = basic?.id ?? `story_${wordsOf3(label).join("_").slice(0, ACTIVITY_MAX) || "block"}`;
+  const start = text3(p.start).toLowerCase();
+  const end = text3(p.end);
+  const hm = HHMM3.exec(start);
+  const at = hm ? `${(hm[1] ?? "").padStart(2, "0")}:${hm[2] ?? "00"}` : null;
+  const part = at === null && start !== "" ? DAY_PARTS[start] : undefined;
+  if (at === null && start !== "" && !part)
+    return refuse("its time doesn't read");
+  const endHm = HHMM3.exec(end);
+  const stated = typeof p.minutes === "number" && Number.isInteger(p.minutes) ? p.minutes : null;
+  const minutes = at !== null && endHm ? (parseHHMM(`${(endHm[1] ?? "").padStart(2, "0")}:${endHm[2] ?? "00"}`) - parseHHMM(at) + MINUTES_PER_DAY) % MINUTES_PER_DAY || MINUTES_PER_DAY : stated ?? MINUTES[activity] ?? basic?.minutes ?? DEFAULT_MINUTES;
+  if (minutes < 1 || minutes > MINUTES_PER_DAY)
+    return refuse("its length is a day at most");
+  const keyword = text3(p.place).toLowerCase();
+  const named = keyword === "home" || keyword === "work" ? null : placeOf2(ctx, p.place);
+  if (named === null && keyword !== "" && keyword !== "home" && keyword !== "work")
+    return refuse("there's no such place");
+  const place = named !== null ? { place: named } : keyword === "home" || keyword === "work" ? keyword : activity === "work" ? "work" : basic ? basic.place ?? "home" : "here";
+  const company = [];
+  for (const raw of Array.isArray(p.with) ? p.with : []) {
+    const id = text3(raw);
+    const e = own(ctx.state.entities, id);
+    if (!e || isGone(ctx.state, id) || !kindIs(ctx.registry, ctx.world, e.kind, "person") || !povMayKnow(ctx.registry, ctx.world, ctx.state, id))
+      return refuse("there's no one by that name");
+    if (id !== who && !company.includes(id))
+      company.push(id);
+  }
+  return {
+    id,
+    label,
+    activity,
+    kind: at !== null ? "fixed" : "flexible",
+    ...at !== null ? { at } : { window: part ?? WAKING },
+    minutes,
+    priority: STORY_PRIORITY,
+    ...Object.keys(days).length > 0 ? { days } : {},
+    place,
+    ...company.length > 0 ? { company: { who: { ids: company } } } : {}
+  };
+}
+function already(ctx, who, block, days) {
+  const held = own(chatBlocks(ctx.state, who), block.id);
+  if (held && JSON.stringify(held.value) === JSON.stringify(block))
+    return true;
+  const mine = blockSpans(ctx, block, days);
+  const words = wordsOf3(block.label);
+  for (const { block: b, from } of activeBlocks(ctx, who, days[0])) {
+    if (b.id === block.id || from.level === "builtin")
+      continue;
+    if (!sameWords(words, wordsOf3(b.label)) || !days.every((d) => blockOnDay(ctx, who, b, d)))
+      continue;
+    if (mine.length === 0 || b.kind !== "fixed" || overlaps(mine, blockSpans(ctx, b, days)))
+      return true;
+  }
+  if (block.kind === "fixed" || !block.place || typeof block.place !== "object" || !("place" in block.place))
+    return false;
+  const where = block.place.place;
+  return theirSchedules(ctx, who).some(({ def }) => def.target === "place" && days.every((d) => slotSpans(ctx, def, [d]).some((s) => s.slot.value === where && dateAt(calendarOf(ctx.world), s.span.start).dayIndex === d)));
+}
+function startChange(ctx, who, p) {
+  const block = startBlock(ctx, who, p);
+  if ("code" in block)
+    return block;
+  const days = weekOf(ctx, who, block, firstDay(ctx));
+  if (days.length === 0)
+    return refuse("it falls on no day of the week");
+  if (already(ctx, who, block, days))
+    return refuse("it's already their routine");
+  const mine = blockSpans(ctx, block, days);
+  const clashing = theirSchedules(ctx, who).filter(({ def }) => overlaps(mine, slotSpans(ctx, def, days).map((s) => s.span)));
+  const replaces = p.replaces === true;
+  if (clashing.length > 0 && !replaces)
+    return refuse("it clashes with their schedule, and the reply doesn't say it takes its place");
+  const schedules = [...new Set(clashing.map((c) => c.id))].map((schedule) => ({ schedule, value: { off: true, until: null } }));
+  const blocks = [];
+  if (replaces) {
+    const candidates = routineCandidates(ctx, who);
+    for (const { block: b, from } of activeBlocks(ctx, who, days[0])) {
+      if (b.id === block.id || from.level === "builtin" || b.private === true || !overlaps(mine, blockSpans(ctx, b, days)))
+        continue;
+      blocks.push({ block: b.id, value: (candidates.get(b.id) ?? []).every((a) => a.level === "chat") ? null : { id: b.id, off: true } });
+    }
+  }
+  blocks.push({ block: block.id, value: block });
+  return { entity: who, blocks, schedules };
+}
+function stopChange(ctx, who, p) {
+  const cal = calendarOf(ctx.world);
+  const words = wordsOf3(cleanLabel(p.label));
+  const where = placeOf2(ctx, p.place);
+  if (where === null && text3(p.place) !== "")
+    return refuse("there's no such place");
+  if (words.length === 0 && where === null)
+    return refuse("the reply doesn't say what they gave up");
+  const stated = p.days === undefined || p.days === null ? {} : daysOf(ctx, p.days);
+  if (!stated)
+    return refuse("the reply doesn't say which days");
+  const from = dateAt(cal, ctx.state.clock).dayIndex;
+  const week = [0, 1, 2, 3, 4, 5, 6].map((i) => from + i);
+  const probe = { id: "", label: "", activity: "", kind: "flexible", window: WAKING, minutes: 1, ...Object.keys(stated).length > 0 ? { days: stated } : {} };
+  const allowed = new Set(weekOf(ctx, who, probe, from));
+  const within = (on) => on.length > 0 && on.every((d) => allowed.has(d));
+  const blocks = [];
+  for (const [id, list] of routineCandidates(ctx, who)) {
+    const top = list[0];
+    if (!top || isOff(top.entry) || top.entry.private === true)
+      continue;
+    const b = top.entry;
+    const named = where !== null && blockPlace(ctx, who, b) === where || words.length > 0 && sameWords(words, wordsOf3(b.label));
+    if (!named || !within(weekOf(ctx, who, b, from)))
+      continue;
+    blocks.push({ block: id, value: list.every((a) => a.level === "chat") ? null : { id, off: true } });
+  }
+  const cut = (s, drop) => {
+    const left = s.slots.filter((slot) => !drop(slot));
+    return left.length === 0 ? { off: true, until: null } : { slots: left, recurrence: s.recurrence };
+  };
+  const schedules = [];
+  const mine = where === null ? [] : theirSchedules(ctx, who);
+  for (const { id, def } of mine) {
+    const gone = def.slots.filter((s) => s.value === where);
+    if (def.target !== "place" || gone.length === 0 || !within(week.filter((d) => recursOn(cal, def.recurrence, d))))
+      continue;
+    schedules.push({ schedule: id, value: cut(def, (slot) => slot.value === where) });
+    const paired = (slot) => gone.some((g) => g.start === slot.start && g.end === slot.end);
+    for (const other of mine) {
+      if (other.def.target !== "activity" || JSON.stringify(other.def.recurrence) !== JSON.stringify(def.recurrence) || !other.def.slots.some(paired) || schedules.some((s) => s.schedule === other.id))
+        continue;
+      schedules.push({ schedule: other.id, value: cut(other.def, paired) });
+    }
+  }
+  if (blocks.length === 0 && schedules.length === 0)
+    return refuse("nothing of their routine is what the reply says they gave up");
+  return { entity: who, blocks, schedules };
+}
+function storyChange(p, ctx) {
+  const who = personOf(ctx, p);
+  if (typeof who !== "string")
+    return who;
+  const change = text3(p.change).toLowerCase();
+  if (!(change in CHANGES))
+    return refuse("a routine change starts, stops or moves house");
+  if (change === "start")
+    return startChange(ctx, who, p);
+  if (change === "stop")
+    return stopChange(ctx, who, p);
+  const home = placeOf2(ctx, p.place);
+  if (home === null)
+    return refuse("there's no such place");
+  if (own(ctx.state.entities, who)?.fields.home === home)
+    return refuse("it's already their home");
+  return { entity: who, home };
+}
+var routineChannel = {
+  type: ROUTINE_CHANNEL,
+  boundField: "routine",
+  validate(p, ctx) {
+    const change = storyChange(p, ctx);
+    return "code" in change ? change : null;
+  },
+  toEffects(p, ctx) {
+    const change = storyChange(p, ctx);
+    if ("code" in change)
+      return [];
+    if ("home" in change)
+      return [{ type: "set", args: { entity: change.entity, field: "home", value: change.home } }];
+    const turn = text3(p.turn);
+    return [{ type: ROUTINE_EFFECT, args: { entity: change.entity, blocks: change.blocks, schedules: change.schedules, ...turn !== "" ? { turn } : {} } }];
+  }
+};
+function storyEvents(args, ctx) {
+  const who = text3(args.entity);
+  const e = own(ctx.state.entities, who);
+  if (!e || !kindIs(ctx.registry, ctx.world, e.kind, "person"))
+    return { code: "not_person", reason: "only people have a routine" };
+  const turn = text3(args.turn);
+  const source = { type: "story", at: ctx.state.clock, ...turn !== "" ? { turn } : {} };
+  const list = (v) => Array.isArray(v) ? v.filter(isRecord).map(objOf) : [];
+  return [
+    ...list(args.schedules).map((s) => ({ type: ROUTINE_EVENTS.schedule, data: { entity: who, schedule: text3(s.schedule), value: s.value ?? null, source } })),
+    ...list(args.blocks).map((b) => ({ type: ROUTINE_EVENTS.block, data: { entity: who, block: text3(b.block), value: b.value ?? null, source } }))
+  ];
 }
 
 // src/packs/castlife/core/index.ts
@@ -24946,15 +26064,20 @@ var NEED_ALERT = 80;
 function satisfies(activity, need) {
   return own(NEEDS, need)?.satisfiedBy.some((w) => activity.includes(w)) ?? false;
 }
+var SOCIABILITY_RATE = { reserved: 0.5, usual: 1, outgoing: 1.5 };
+function rateOf(ctx, who, need, rate) {
+  return who === ctx.world.pov || need !== "social" && need !== "fun" ? rate : rate * SOCIABILITY_RATE[routineSettingsOf(ctx.world).sociability];
+}
 function needIn(ctx, who, need, at, blocks) {
   const def = own(NEEDS, need);
   if (!def)
     return 0;
+  const rate = rateOf(ctx, who, need, def.rate);
   const n = objOf(own(objOf(own(ctx.state.entities, who)?.fields.needs), need));
   if (typeof n.t === "number" || who === ctx.world.pov) {
     const v = numOf(n.v, 20);
     const t = numOf(n.t, minutesBetween(ctx.world.calendar.epoch, ctx.world.start.at));
-    return Math.max(0, Math.min(100, v + def.rate * Math.max(0, at - t) / 60));
+    return Math.max(0, Math.min(100, v + rate * Math.max(0, at - t) / 60));
   }
   let met = -Infinity;
   for (const b of blocks)
@@ -24964,28 +26087,51 @@ function needIn(ctx, who, need, at, blocks) {
     const minute = dateAt(calendarOf(ctx.world), at).minuteOfDay;
     met = at - Math.min(...def.daily.map((t) => (minute - t + MINUTES_PER_DAY) % MINUTES_PER_DAY));
   }
-  return Math.min(100, def.rate * (at - met) / 60);
+  return Math.min(100, rate * (at - met) / 60);
 }
-function needValue(ctx, who, need, at = ctx.state.clock) {
+function needValue(ctx, who, need, at = ctx.state.clock, legacy = false) {
   const recorded = typeof objOf(own(objOf(own(ctx.state.entities, who)?.fields.needs), need)).t === "number";
   const planned = !recorded && livesPlans(ctx, who);
-  return needIn(ctx, who, need, at, planned ? dayPlan(ctx, who, dateAt(calendarOf(ctx.world), at).dayIndex).blocks : []);
+  const day = dateAt(calendarOf(ctx.world), at).dayIndex;
+  return needIn(ctx, who, need, at, planned ? (legacy ? legacyDayPlan(ctx, who, day) : dayPlan(ctx, who, day)).blocks : []);
 }
 function within3(dayStart, fromH, toH) {
   return { from: dayStart + fromH * 60, to: dayStart + toH * 60 };
 }
 var AGENDA_OPTION = "agenda:";
 var AGENDA_ACTIVITY = "agenda";
+var INVITED_OPTION = "invited:";
 function publicTrack(world, track) {
   return visibilityOf(own(world.tracks, track)?.visibility) === "public";
 }
 function shownActivity(ctx, who, activity) {
   if (activity !== AGENDA_ACTIVITY)
-    return activity;
+    return activeBlocks(ctx, who).some((a) => a.block.private === true && a.block.activity === activity) ? "busy" : activity;
   const agendas = agendaFor(ctx.world, ctx.state, who);
   return agendas.length > 0 && agendas.every((a) => publicTrack(ctx.world, a.track)) ? activity : "busy";
 }
-function dayOptions(ctx, who, dayStart) {
+function groundedOptions(ctx, who, dayStart) {
+  const home = homeOf(ctx, who);
+  const options = [];
+  const chores = own(ctx.state.entities, who)?.fields.chores;
+  if (Array.isArray(chores)) {
+    chores.forEach((raw, i) => {
+      const c = objOf(raw);
+      options.push({ id: `chore:${i}`, label: strOf(c.label, "Chores"), activity: "chores", place: strOf(c.place) || home, duration: numOf(c.minutes, 45), window: within3(dayStart, 8, 20), utility: numOf(c.utility, 2), reasons: ["chore"] });
+    });
+  }
+  for (const a of agendaFor(ctx.world, ctx.state, who))
+    options.push({ id: `${AGENDA_OPTION}${a.track}`, label: a.stageLabel, activity: AGENDA_ACTIVITY, place: home, duration: 60, window: within3(dayStart, 9, 20), utility: 1 + a.priority, reasons: [`agenda: ${a.label}`] });
+  const overdue = optionalQuery(ctx, "gear.overdue");
+  if (overdue) {
+    for (const g of overdue(ctx, who)) {
+      const where = placeOfEntity(ctx.state, g.borrower) ?? placeOfEntity(ctx.state, g.thing);
+      options.push({ id: `retrieve:${g.thing}`, label: `Get ${own(ctx.state.entities, g.thing)?.name ?? g.thing} back from ${own(ctx.state.entities, g.borrower)?.name ?? g.borrower}`, activity: `retrieve:${g.thing}`, place: where, duration: 45, window: within3(dayStart, 8, 20), utility: 7, reasons: ["overdue loan"] });
+    }
+  }
+  return options;
+}
+function legacyDayOptions(ctx, who, dayStart) {
   const level = ctx.levelOf(who, "castlife");
   const home = homeOf(ctx, who);
   const cal = calendarOf(ctx.world);
@@ -25016,22 +26162,7 @@ function dayOptions(ctx, who, dayStart) {
         fondness = Math.max(fondness, social(ctx, who, other));
   }
   options.push({ id: "socialize", label: "See friends", activity: "socialize", place: company, duration: 90, window: off ? within3(dayStart, 12, 23) : within3(dayStart, 17, 22), utility: (t, laid) => 2.5 + (off ? 1 : 0) - (occasion.foul ? 0.5 : 0) + fondness / 50 + need("social", t, laid) / 25, reasons: ["company", ...fondness >= FOND ? ["a close friend"] : [], ...off ? ["a day off"] : []], because: pressed("social", "lonely") });
-  const chores = own(ctx.state.entities, who)?.fields.chores;
-  if (Array.isArray(chores)) {
-    chores.forEach((raw, i) => {
-      const c = objOf(raw);
-      options.push({ id: `chore:${i}`, label: strOf(c.label, "Chores"), activity: "chores", place: strOf(c.place) || home, duration: numOf(c.minutes, 45), window: within3(dayStart, 8, 20), utility: numOf(c.utility, 2), reasons: ["chore"] });
-    });
-  }
-  for (const a of agendaFor(ctx.world, ctx.state, who))
-    options.push({ id: `${AGENDA_OPTION}${a.track}`, label: a.stageLabel, activity: AGENDA_ACTIVITY, place: home, duration: 60, window: within3(dayStart, 9, 20), utility: 1 + a.priority, reasons: [`agenda: ${a.label}`] });
-  const overdue = optionalQuery(ctx, "gear.overdue");
-  if (overdue) {
-    for (const g of overdue(ctx, who)) {
-      const where = placeOfEntity(ctx.state, g.borrower) ?? placeOfEntity(ctx.state, g.thing);
-      options.push({ id: `retrieve:${g.thing}`, label: `Get ${own(ctx.state.entities, g.thing)?.name ?? g.thing} back from ${own(ctx.state.entities, g.borrower)?.name ?? g.borrower}`, activity: `retrieve:${g.thing}`, place: where, duration: 45, window: within3(dayStart, 8, 20), utility: 7, reasons: ["overdue loan"] });
-    }
-  }
+  options.push(...groundedOptions(ctx, who, dayStart));
   for (const h of occasion.holidays) {
     options.push(h.dayOff ? { id: `holiday:${h.id}`, label: h.label, activity: "socialize", place: home, duration: 180, window: within3(dayStart, 12, 20), utility: 5.5, reasons: [h.label] } : { id: `holiday:${h.id}`, label: h.label, activity: "leisure", place: company, duration: 90, window: within3(dayStart, 17, 22), utility: 3, reasons: [h.label] });
   }
@@ -25043,6 +26174,32 @@ function dayOptions(ctx, who, dayStart) {
   }
   return options;
 }
+function invitedBlocks(ctx, guest, day, commitments) {
+  if (routineSettingsOf(ctx.world).invitations !== "everyone" || followOf(ctx, guest).mode !== "follows" || guest === ctx.world.pov)
+    return [];
+  const cal = calendarOf(ctx.world);
+  const start = clockAt(cal, day, 0);
+  const hosts = new Set;
+  for (const def of worldRoutines(ctx.world))
+    if (def.blocks.some((b) => !isOff(b) && b.company?.invite === true))
+      for (const who of Object.keys(ctx.state.entities).sort())
+        hosts.add(who);
+  const out = [];
+  for (const host of [...hosts].sort()) {
+    if (host === guest || !acquainted(ctx.state, host, guest) || followOf(ctx, host).mode !== "follows")
+      continue;
+    for (const { block } of activeBlocks(ctx, host, day)) {
+      if (block.kind !== "fixed" || block.company?.invite !== true || !selectEntities(ctx.registry, ctx.world, ctx.state, block.company.who).includes(guest) || !blockOnDay(ctx, host, block, day))
+        continue;
+      const s = start + parseHHMM(block.at ?? "00:00");
+      const e = s + block.minutes;
+      if (commitments.some((c) => c.start < e && c.end > s))
+        continue;
+      out.push({ start: s, end: e, label: block.label, activity: block.activity, place: blockPlace(ctx, host, block), reason: "invited", option: `${INVITED_OPTION}${host}:${block.id}` });
+    }
+  }
+  return out;
+}
 function decisions(state) {
   const out = {};
   for (const [k, v] of Object.entries(objOf(sliceOf(state, "castlife").decisions)))
@@ -25050,11 +26207,17 @@ function decisions(state) {
       out[k] = v;
   return out;
 }
-function planFor(ctx, who, day, rng) {
+function planFor(ctx, who, day, rng, legacy = false) {
   const cal = calendarOf(ctx.world);
   const start = clockAt(cal, day, 0);
   const end = start + MINUTES_PER_DAY;
-  const plan = planDay({ agent: who, start, end, fixed: commitments(ctx, who, start, end), options: dayOptions(ctx, who, start), rng, recorded: decisions(ctx.state) });
+  const fixed = commitments(ctx, who, start, end);
+  const person = kindIs(ctx.registry, ctx.world, own(ctx.state.entities, who)?.kind ?? "", "person");
+  const level = ctx.levelOf(who, "castlife");
+  const routine = !legacy && person ? routineDay(ctx, who, day, fixed, { need: (n, t, laid) => level >= 4 ? needIn(ctx, who, n, t, laid) : 0, meets: (activity) => Object.keys(NEEDS).filter((n) => satisfies(activity, n)) }) : { fixed: [], options: [] };
+  const invited = legacy || !person ? [] : invitedBlocks(ctx, who, day, [...fixed, ...routine.fixed]);
+  const options = legacy ? legacyDayOptions(ctx, who, start) : [...routine.options, ...groundedOptions(ctx, who, start)];
+  const plan = planDay({ agent: who, start, end, fixed: [...fixed, ...routine.fixed, ...invited], options, rng, recorded: decisions(ctx.state) });
   return {
     day,
     blocks: plan.blocks.map((b) => {
@@ -25069,6 +26232,9 @@ function planFor(ctx, who, day, rng) {
 function dayPlan(ctx, who, day = dateAt(calendarOf(ctx.world), ctx.state.clock).dayIndex) {
   return planFor(ctx, who, day, createRng(hashParts("castlife.plan", ctx.world.id, who, String(day))));
 }
+function legacyDayPlan(ctx, who, day) {
+  return planFor(ctx, who, day, createRng(hashParts("castlife.plan", ctx.world.id, who, String(day))), true);
+}
 function held2(state, who, target, at) {
   const until = own(objOf(own(state.entities, who)?.fields.holds), target);
   return typeof until === "number" && until > at;
@@ -25078,7 +26244,7 @@ var ACQUAINT_CHANCE = 0.15;
 function acquainted(state, a, b) {
   return !!own(state.entities, a)?.relations.some((r) => r.type === "regard" && r.to === b) || !!own(state.entities, b)?.relations.some((r) => r.type === "regard" && r.to === a);
 }
-function takeUp(ctx, who, place, activity, at, holdUntil) {
+function takeUp(ctx, who, place, activity, at, holdUntil, quiet = false) {
   const out = [];
   const e = own(ctx.state.entities, who);
   if (!e || routineStays(ctx, who, place) || optionalQuery(ctx, "combat.engaged")?.(ctx, who) === true)
@@ -25086,9 +26252,9 @@ function takeUp(ctx, who, place, activity, at, holdUntil) {
   if (!held2(ctx.state, who, "place", at) && place && own(ctx.world.places, place) && placeOfEntity(ctx.state, who) !== place) {
     out.push({ type: "set", entity: who, field: "place", value: place });
     if (who !== ctx.world.pov && place === placeOfEntity(ctx.state, ctx.world.pov))
-      out.push({ type: ENGINE_EVENTS.signal, data: { class: "arrival", text: `${e.name} arrives.`, entity: who } });
+      out.push({ type: ENGINE_EVENTS.signal, data: { class: "arrival", text: `${e.name} arrives.`, entity: who, ...quiet ? { stops: false } : {} } });
   }
-  if (!held2(ctx.state, who, "activity", at) && e.fields.activity !== activity)
+  if (activity !== null && !held2(ctx.state, who, "activity", at) && e.fields.activity !== activity)
     out.push({ type: "set", entity: who, field: "activity", value: activity });
   if (holdUntil !== undefined && holdUntil > at) {
     const holds = objOf(e.fields.holds);
@@ -25098,6 +26264,32 @@ function takeUp(ctx, who, place, activity, at, holdUntil) {
   }
   return out;
 }
+function blockActivity(activity) {
+  return activity.startsWith("retrieve:") ? "errand" : activity;
+}
+function liveBlock(ctx, who, plan, block, from, at, scene, skip) {
+  const activity = blockActivity(block.activity);
+  if (block.option.startsWith("plan:"))
+    return scene && withPov(ctx, who) ? [] : takeUp(ctx, who, block.place, activity, at, block.end);
+  const edge = block.start > from && block.start <= at;
+  const index = plan.blocks.indexOf(block);
+  const earlier = from < clockAt(calendarOf(ctx.world), plan.day, 0) ? [...dayPlan(ctx, who, plan.day - 1).blocks, ...plan.blocks.slice(0, index)] : plan.blocks.slice(0, index);
+  const had = (edge ? earlier.filter((b) => b.end > from) : [...earlier.slice(-1), block]).reverse();
+  const e = own(ctx.state.entities, who);
+  const home = homeOf(ctx, who);
+  const rests = had.some((b) => b.option.startsWith("schedule:"));
+  const places = [...had.flatMap((b) => b.place !== null ? [b.place] : []), ...home !== null && (rests || had.some((b) => b.place === null)) ? [home] : []];
+  const resting = rests && e ? fieldDef(ctx.registry, ctx.world, e.kind, "activity")?.default : undefined;
+  const doings = [...had.map((b) => blockActivity(b.activity)), ...typeof resting === "string" ? [resting] : []];
+  const wasPlace = places.find((p) => p === e?.fields.place) ?? places[0] ?? [...earlier].reverse().find((b) => b.place !== null)?.place ?? home;
+  const wasDoing = doings.find((d) => d === e?.fields.activity) ?? doings[0] ?? null;
+  const opts = { edge, release: block.activity === "sleep", scene, skip };
+  const target = block.place ?? (edge && earlier.at(-1)?.place ? home : null);
+  const place = target !== null && !routineYields(ctx, who, "place", wasPlace, opts) ? target : null;
+  const doing = routineYields(ctx, who, "activity", wasDoing, opts) ? null : activity;
+  const tier = skip && place !== null ? optionalQuery(ctx, "minds.tier")?.(ctx, who) ?? "background" : "background";
+  return takeUp(ctx, who, place, doing, at, undefined, tier === "live" || tier === "near");
+}
 function planOutcomes(ctx, who, slot) {
   if (who === ctx.world.pov)
     return [];
@@ -25105,7 +26297,8 @@ function planOutcomes(ctx, who, slot) {
   if (due.length === 0)
     return [];
   const tier = planTier(ctx, who);
-  const laid = laidPlans(ctx, who, tier === "background" ? [] : due);
+  const routineOnly = tier === "background" && followOf(ctx, who).awareness !== "story_first";
+  const laid = laidPlans(ctx, who, routineOnly ? [] : due);
   const out = [];
   for (const p of due) {
     const blocks = laid.get(p.id) ?? [];
@@ -25113,60 +26306,157 @@ function planOutcomes(ctx, who, slot) {
     if (blocks.length > 0 && last <= slot.end)
       out.push({ type: MINDS_EVENTS.plan, data: { entity: who, plan: p.id, status: "done", at: last, reason: null } });
     else if (blocks.length === 0 && p.when.to <= slot.end)
-      out.push({ type: MINDS_EVENTS.plan, data: { entity: who, plan: p.id, status: "dropped", at: p.when.to, reason: tier === "background" ? "routine only" : "no time for it" } });
+      out.push({ type: MINDS_EVENTS.plan, data: { entity: who, plan: p.id, status: "dropped", at: p.when.to, reason: routineOnly ? "routine only" : "no time for it" } });
   }
   return out;
 }
 var INVITE_LEAD = 6 * 60;
-function planAsks(ctx, who) {
+function mayInvite(ctx, host, place) {
   const pov = ctx.world.pov;
-  const plans = plansOf(ctx, who).filter((p) => p.with.includes(pov));
-  if (plans.length === 0)
-    return [];
+  if (followOf(ctx, host).mode !== "follows" || withPov(ctx, host) || !acts2(ctx, pov))
+    return false;
+  const tier = optionalQuery(ctx, "minds.tier")?.(ctx, host) ?? "background";
+  if (tier === "live" || tier === "near")
+    return false;
+  if (held2(ctx.state, pov, "place", ctx.state.clock) || place !== null && placeOfEntity(ctx.state, pov) === place)
+    return false;
+  if (!acquainted(ctx.state, host, pov) && !knows(ctx.state, host, pov))
+    return false;
+  return (optionalQuery(ctx, "regard")?.(ctx, host, pov) ?? 0) >= 0;
+}
+function asksOf(ctx, who, days) {
+  const pov = ctx.world.pov;
   const cal = calendarOf(ctx.world);
-  const laid = laidPlans(ctx, who, plans);
-  return plans.flatMap((p) => {
-    const first = laid.get(p.id)?.[0];
-    return first ? [{ plan: p.id, ask: Math.max(first.start - INVITE_LEAD, p.made + 1, clockAt(cal, dateAt(cal, first.start).dayIndex, 0)), at: first.start, place: first.place ?? null }] : [];
-  });
-}
-function planInvitation(ctx, who, ask) {
-  const key = `${who}:plan:${ask.plan}`;
-  const given = sliceOf(ctx.state, "castlife").invitations;
-  if (!acts2(ctx, ctx.world.pov) || Array.isArray(given) && given.some((i) => objOf(i).key === key))
-    return [];
-  const text = invitationText(ctx, who, ask.place, ask.at, ctx.world.pov);
-  return [{ type: "castlife.invitation", data: { agent: who, place: ask.place, at: ask.at, text, key } }, { type: ENGINE_EVENTS.signal, data: { class: "invitation", text, entity: who } }];
-}
-function planMoments(ctx, who, slot) {
-  if (plansOf(ctx, who).length === 0)
-    return [];
-  const inside = (at) => at > slot.start && at < slot.end;
   const out = [];
-  for (const c of commitments(ctx, who, slot.start, slot.end)) {
-    if (c.plan === undefined)
-      continue;
-    if (inside(c.start))
-      out.push({ at: c.start, key: `start:${c.plan}` });
-    if (inside(c.end))
-      out.push({ at: c.end, key: `end:${c.plan}` });
+  const plans = plansOf(ctx, who).filter((p) => p.with.includes(pov));
+  if (plans.length > 0) {
+    const laid = laidPlans(ctx, who, plans);
+    for (const p of plans) {
+      const first = laid.get(p.id)?.[0];
+      if (first)
+        out.push({ key: `${who}:plan:${p.id}`, ask: Math.max(first.start - INVITE_LEAD, p.made + 1, clockAt(cal, dateAt(cal, first.start).dayIndex, 0)), at: first.start, place: first.place ?? null, origin: { type: "plan", plan: p.id } });
+    }
   }
-  if (ctx.levelOf(who, "castlife") >= 4) {
-    for (const a of planAsks(ctx, who))
-      if (inside(a.ask))
-        out.push({ at: a.ask, key: `invite:${a.plan}` });
+  if (routineSettingsOf(ctx.world).invitations === "off" || followOf(ctx, who).mode !== "follows")
+    return out;
+  const asking = activeBlocks(ctx, who).filter(({ block }) => block.company?.invite === true && selectEntities(ctx.registry, ctx.world, ctx.state, block.company.who).includes(pov));
+  if (asking.length === 0)
+    return out;
+  for (const day of days) {
+    for (const b of dayPlan(ctx, who, day).blocks) {
+      const id = b.option.startsWith(ROUTINE_OPTION) ? b.option.slice(ROUTINE_OPTION.length) : null;
+      if (id === null || !asking.some((a) => a.block.id === id))
+        continue;
+      out.push({ key: `${who}:routine:${id}:${day}`, ask: Math.max(b.start - INVITE_LEAD, clockAt(cal, day, 0)), at: b.start, place: b.place, origin: { type: "routine", block: id } });
+    }
   }
   return out;
 }
-function atPlanMoment(ctx, who, moment) {
-  if (moment.key.startsWith("invite:")) {
-    const ask = planAsks(ctx, who).find((a) => `invite:${a.plan}` === moment.key);
-    return ask ? planInvitation(ctx, who, ask) : [];
-  }
-  const block = dayPlan(ctx, who, dateAt(calendarOf(ctx.world), moment.at).dayIndex).blocks.find((b) => b.start <= moment.at && moment.at < b.end);
-  if (!block)
+function slotDays(ctx, slot) {
+  const cal = calendarOf(ctx.world);
+  const first = dateAt(cal, slot.start).dayIndex;
+  const last = dateAt(cal, slot.end).dayIndex;
+  return first === last ? [first] : [first, last];
+}
+function invitation(ctx, who, ask) {
+  const given = sliceOf(ctx.state, "castlife").invitations;
+  if (!mayInvite(ctx, who, ask.place) || Array.isArray(given) && given.some((i) => objOf(i).key === ask.key))
     return [];
-  return takeUp(ctx, who, block.place ?? (moment.key.startsWith("end:") ? homeOf(ctx, who) : null), block.activity.startsWith("retrieve:") ? "errand" : block.activity, moment.at, block.option.startsWith("plan:") ? block.end : undefined);
+  const text = invitationText(ctx, who, ask.place, ask.at, ctx.world.pov);
+  return [{ type: "castlife.invitation", data: { agent: who, place: ask.place, at: ask.at, text, key: ask.key, origin: ask.origin.type === "plan" ? `plan:${ask.origin.plan}` : `routine:${ask.origin.block}` } }, { type: ENGINE_EVENTS.signal, data: { class: "invitation", text, entity: who } }];
+}
+function planMoments(ctx, who, slot) {
+  const inside = (at) => at > slot.start && at < slot.end;
+  const out = [];
+  if (plansOf(ctx, who).length > 0) {
+    for (const c of commitments(ctx, who, slot.start, slot.end)) {
+      if (c.plan === undefined)
+        continue;
+      if (inside(c.start))
+        out.push({ at: c.start, key: `start:${c.plan}` });
+      if (inside(c.end))
+        out.push({ at: c.end, key: `end:${c.plan}` });
+    }
+  }
+  if (who !== ctx.world.pov || slot.povRoutine !== false) {
+    const cal = calendarOf(ctx.world);
+    const handed = new Set(out.flatMap((m) => m.key.startsWith("end:") ? [m.at] : []));
+    const lived = livedAtMinute(ctx, who, slot);
+    const home = homeOf(ctx, who);
+    let before = placeOfEntity(ctx.state, who);
+    let placed = false;
+    for (let day = dateAt(cal, slot.start).dayIndex;day <= dateAt(cal, slot.end - 1).dayIndex; day++) {
+      for (const b of dayPlan(ctx, who, day).blocks) {
+        if (!inside(b.start))
+          continue;
+        if (!b.option.startsWith("plan:") && b.activity !== "trip" && !handed.has(b.start) && lived(b, before))
+          out.push({ at: b.start, key: `block:${b.option}` });
+        before = b.place ?? (placed ? home : before);
+        placed = b.place !== null;
+      }
+    }
+  }
+  if (ctx.levelOf(who, "castlife") >= 4) {
+    for (const a of asksOf(ctx, who, slotDays(ctx, slot)))
+      if (inside(a.ask))
+        out.push({ at: a.ask, key: `invite:${a.key}` });
+  }
+  return out;
+}
+function livesEveryBlock(ctx, who, slot) {
+  return slot.timelapse !== true || who === ctx.world.pov || (optionalQuery(ctx, "minds.tier")?.(ctx, who) ?? "background") !== "background";
+}
+function livedAtMinute(ctx, who, slot) {
+  if (livesEveryBlock(ctx, who, slot))
+    return () => true;
+  const pov = ctx.world.pov;
+  const here = placeOfEntity(ctx.state, pov);
+  const home = homeOf(ctx, pov) ?? here;
+  const cal = calendarOf(ctx.world);
+  const plans = new Map;
+  const planOf = (day) => {
+    const plan = plans.get(day) ?? dayPlan(ctx, pov, day);
+    plans.set(day, plan);
+    return plan;
+  };
+  const povAt = (from, to) => {
+    const out = new Set;
+    if (slot.povRoutine === false) {
+      if (here !== null)
+        out.add(here);
+      return out;
+    }
+    for (let day = dateAt(cal, from).dayIndex;day <= dateAt(cal, to - 1).dayIndex; day++) {
+      const blocks = planOf(day).blocks;
+      blocks.forEach((b, i) => {
+        if (b.end <= from || b.start >= to)
+          return;
+        const place = b.place ?? (blocks.slice(0, i).some((x) => x.place !== null) ? home : here);
+        if (place !== null)
+          out.add(place);
+      });
+    }
+    return out;
+  };
+  return (block, before) => block.place !== null && povAt(block.start, block.end).has(block.place) || before !== null && povAt(block.start, block.start + 1).has(before);
+}
+function atPlanMoment(ctx, who, moment, slot) {
+  const cal = calendarOf(ctx.world);
+  if (moment.key.startsWith("invite:")) {
+    const ask = asksOf(ctx, who, [dateAt(cal, moment.at).dayIndex, dateAt(cal, moment.at).dayIndex + 1]).find((a) => `invite:${a.key}` === moment.key);
+    return ask ? invitation(ctx, who, ask) : [];
+  }
+  const scene = slot.povRoutine === false;
+  const plan = dayPlan(ctx, who, dateAt(cal, moment.at).dayIndex);
+  if (moment.key.startsWith("block:")) {
+    const starting = plan.blocks.find((b) => b.start === moment.at);
+    const from = livesEveryBlock(ctx, who, slot) ? moment.at - 1 : slot.start;
+    return starting ? liveBlock(ctx, who, plan, starting, from, moment.at, scene, slot.timelapse === true) : [];
+  }
+  const block = plan.blocks.find((b) => b.start <= moment.at && moment.at < b.end);
+  if (!block || scene && withPov(ctx, who))
+    return [];
+  return takeUp(ctx, who, block.place ?? (moment.key.startsWith("end:") ? homeOf(ctx, who) : null), blockActivity(block.activity), moment.at, block.option.startsWith("plan:") ? block.end : undefined);
 }
 function stepAgent2(slot, ctx, rngFor, who) {
   const out = [];
@@ -25192,7 +26482,9 @@ function stepAgent2(slot, ctx, rngFor, who) {
         out.push(...got, { type: ENGINE_EVENTS.note, data: { text: `${e.name} got ${own(ctx.state.entities, thing)?.name ?? thing} back.`, entity: who, visibility: "known_by" } });
     }
   }
-  out.push(...takeUp(ctx, who, block.place, block.activity.startsWith("retrieve:") ? "errand" : block.activity, slot.end, block.option.startsWith("plan:") ? block.end : undefined), ...planOutcomes(ctx, who, slot));
+  if (who !== pov || slot.povRoutine !== false)
+    out.push(...liveBlock(ctx, who, plan, block, slot.start, slot.end, slot.povRoutine === false, slot.timelapse === true));
+  out.push(...planOutcomes(ctx, who, slot));
   if (level < 4)
     return out;
   if (who === pov) {
@@ -25214,28 +26506,9 @@ function stepAgent2(slot, ctx, rngFor, who) {
         out.push(...appraise(ctx, who, other, kind, `${kind} at ${own(ctx.world.places, block.place)?.name ?? block.place}`, true));
     }
   }
-  for (const a of planAsks(ctx, who))
+  for (const a of asksOf(ctx, who, slotDays(ctx, slot)))
     if (a.ask > slot.start && a.ask <= slot.end)
-      out.push(...planInvitation(ctx, who, a));
-  if (optionalQuery(ctx, "minds.on")?.(ctx) === true)
-    return out;
-  const regard = optionalQuery(ctx, "regard");
-  const hour = dateAt(cal, slot.start).minuteOfDay / 60;
-  if (regard && acts2(ctx, pov) && !block.fixed && hour >= 12 && hour < 20 && regard(ctx, who, pov) >= 20) {
-    const key = `${who}:invite:${slot.index}`;
-    const invite = 1 + needValue(ctx, who, "social", slot.start) / 50 + regard(ctx, who, pov) / 50;
-    const stay = 2;
-    const recorded = own(decisions(ctx.state), key);
-    const tie = Math.abs(invite - stay) <= 0.5;
-    const choice = recorded ?? (tie ? rng.fork(key).next() < 0.5 ? "invite" : "stay" : invite > stay ? "invite" : "stay");
-    if (tie || recorded)
-      out.push({ type: ENGINE_EVENTS.choice, data: { key, choice, via: recorded ? "recorded" : "seed", agent: who, options: "invite,stay" } });
-    if (choice === "invite") {
-      const where = block.place ?? placeOfType(ctx, "conversation", homeOf(ctx, who));
-      const text = invitationText(ctx, who, where, slot.end, pov);
-      out.push({ type: "castlife.invitation", data: { agent: who, place: where, at: slot.end, text, key } }, { type: ENGINE_EVENTS.signal, data: { class: "invitation", text, entity: who } });
-    }
-  }
+      out.push(...invitation(ctx, who, a));
   return out;
 }
 function invitationText(ctx, agent, place, at, viewer) {
@@ -25272,11 +26545,13 @@ function stepTrips(slot, ctx) {
       const place = strOf(t.place);
       const holding = objOf(e.fields.holds).place === until;
       const away = holding && e.fields.place === place;
-      if (from <= slot.end && slot.end < until && !away && own(ctx.world.places, place)) {
+      if (from <= slot.end && slot.end < until && !away && own(ctx.world.places, place) && !(slot.povRoutine === false && withPov(ctx, who))) {
         holds = { ...holds, place: until, activity: until };
         out.push({ type: "set", entity: who, field: "holds", value: holds }, { type: "set", entity: who, field: "place", value: place }, { type: "set", entity: who, field: "activity", value: "trip" });
       }
       if (!(until <= slot.end && (until > slot.start || holding)))
+        continue;
+      if (slot.povRoutine === false && withPov(ctx, who))
         continue;
       const home = homeOf(ctx, who);
       if ((until > slot.start || away) && home)
@@ -25290,6 +26565,20 @@ function stepTrips(slot, ctx) {
   }
   return out;
 }
+function isChatSource(v) {
+  const o = objOf(v);
+  return typeof o.at === "number" && (o.type === "gm" || o.type === "story" && (o.turn === undefined || typeof o.turn === "string"));
+}
+function isScheduleChange(v) {
+  const o = objOf(v);
+  if (o.off === true)
+    return o.until === null || typeof o.until === "number";
+  const time = /^([01]\d|2[0-4]):[0-5]\d$/;
+  return Array.isArray(o.slots) && o.slots.length > 0 && o.slots.every((s) => typeof objOf(s).start === "string" && time.test(strOf(objOf(s).start)) && time.test(strOf(objOf(s).end))) && (o.recurrence === undefined || typeof objOf(o.recurrence).every === "string");
+}
+function changeLine(ctx, e, viewer, what) {
+  return viewer !== undefined ? "" : `${own(ctx.state.entities, strOf(e.data.entity))?.name ?? strOf(e.data.entity)}: ${what} (${objOf(e.data.source).type === "story" ? "the story" : "GM"})`;
+}
 var EVENTS3 = [
   {
     type: "castlife.need",
@@ -25300,7 +26589,8 @@ var EVENTS3 = [
         return;
       const at = numOf(e.data.at, state.clock);
       const need = strOf(e.data.need);
-      const v = Math.max(0, Math.min(100, needValue(ctx, strOf(e.data.entity), need, at) + numOf(e.data.delta)));
+      const from = typeof e.data.from === "number" ? e.data.from : needValue(ctx, strOf(e.data.entity), need, at, true);
+      const v = Math.max(0, Math.min(100, from + numOf(e.data.delta)));
       who.fields.needs = { ...objOf(who.fields.needs), [need]: { v, t: at } };
     },
     touches: (e) => [{ entity: strOf(e.data.entity), field: "needs" }],
@@ -25320,12 +26610,120 @@ var EVENTS3 = [
     apply: (e, state) => {
       const s = mutableSlice(state, "castlife");
       const list = Array.isArray(s.invitations) ? s.invitations.slice(-9) : [];
-      list.push({ agent: strOf(e.data.agent), place: e.data.place ?? null, at: numOf(e.data.at), text: strOf(e.data.text), ...typeof e.data.key === "string" ? { key: e.data.key } : {} });
+      list.push({ agent: strOf(e.data.agent), place: e.data.place ?? null, at: numOf(e.data.at), text: strOf(e.data.text), ...typeof e.data.key === "string" ? { key: e.data.key } : {}, ...typeof e.data.origin === "string" ? { origin: e.data.origin } : {} });
       s.invitations = list;
     },
     describe: (e, ctx, viewer) => invitationText(ctx, strOf(e.data.agent), typeof e.data.place === "string" ? e.data.place : null, numOf(e.data.at), viewer)
+  },
+  {
+    type: ROUTINE_EVENTS.follow,
+    validate: (e, ctx) => {
+      if (!own(ctx.state.entities, strOf(e.data.entity)))
+        return { code: "missing_entity", reason: "a routine setting names someone in the world" };
+      const f = e.data.follow;
+      if (f === null)
+        return null;
+      const o = objOf(f);
+      const mode = o.mode === null || ROUTINE_MODES.some((m) => m === o.mode);
+      const awareness = o.awareness === null || ROUTINE_AWARENESS.some((a) => a === o.awareness);
+      return mode && awareness && (o.mode !== null || o.awareness !== null) ? null : { code: "bad_event", reason: "a routine setting is a mode, an awareness or both, or null to clear it" };
+    },
+    apply: (e, state) => {
+      const follow = sliceRecord(state, "castlife", "follow");
+      const who = strOf(e.data.entity);
+      const f = objOf(e.data.follow);
+      if (e.data.follow === null)
+        delete follow[who];
+      else
+        follow[who] = { mode: f.mode ?? null, awareness: f.awareness ?? null };
+    },
+    describe: (e, ctx, viewer) => changeLine(ctx, e, viewer, e.data.follow === null ? "routine setting cleared" : `routine: ${[objOf(e.data.follow).mode, objOf(e.data.follow).awareness].filter((x) => typeof x === "string").join(", ").replace(/_/g, " ")}`)
+  },
+  {
+    type: ROUTINE_EVENTS.block,
+    validate: (e, ctx) => {
+      if (!own(ctx.state.entities, strOf(e.data.entity)))
+        return { code: "missing_entity", reason: "a routine change names someone in the world" };
+      if (strOf(e.data.block) === "" || !isChatSource(e.data.source))
+        return { code: "bad_event", reason: "a routine change names its block and where it came from" };
+      const v = e.data.value;
+      if (v === null)
+        return null;
+      const problems = blockShapeProblems(v, false);
+      return problems.length === 0 && objOf(v).id === e.data.block ? null : { code: "bad_value", reason: problems[0] ?? "the block's id is the one it changes" };
+    },
+    apply: (e, state) => {
+      const routines = sliceRecord(state, "castlife", "routines");
+      const who = strOf(e.data.entity);
+      const mine = { ...objOf(routines[who]) };
+      if (e.data.value === null)
+        delete mine[strOf(e.data.block)];
+      else
+        mine[strOf(e.data.block)] = { value: structuredClone(e.data.value ?? null), source: structuredClone(e.data.source ?? null) };
+      if (Object.keys(mine).length === 0)
+        delete routines[who];
+      else
+        routines[who] = mine;
+    },
+    describe: (e, ctx, viewer) => changeLine(ctx, e, viewer, `routine block ${strOf(e.data.block)} ${e.data.value === null ? "back to the world's" : objOf(e.data.value).off === true ? "off" : "changed"}`)
+  },
+  {
+    type: ROUTINE_EVENTS.schedule,
+    validate: (e, ctx) => {
+      if (!own(ctx.state.entities, strOf(e.data.entity)))
+        return { code: "missing_entity", reason: "a schedule change names someone in the world" };
+      if (!allSchedules(ctx.registry, ctx.world).some((s) => s.id === strOf(e.data.schedule)) || !isChatSource(e.data.source))
+        return { code: "bad_event", reason: "a schedule change names one of the world's schedules and where it came from" };
+      return e.data.value === null || isScheduleChange(e.data.value) ? null : { code: "bad_value", reason: "a schedule change is off (until a time or for good) or their own slots" };
+    },
+    apply: (e, state) => {
+      const schedules = sliceRecord(state, "castlife", "schedules");
+      const who = strOf(e.data.entity);
+      const mine = { ...objOf(schedules[who]) };
+      if (e.data.value === null)
+        delete mine[strOf(e.data.schedule)];
+      else
+        mine[strOf(e.data.schedule)] = { value: structuredClone(e.data.value ?? null), source: structuredClone(e.data.source ?? null) };
+      if (Object.keys(mine).length === 0)
+        delete schedules[who];
+      else
+        schedules[who] = mine;
+    },
+    describe: (e, ctx, viewer) => changeLine(ctx, e, viewer, `schedule ${strOf(e.data.schedule)} ${e.data.value === null ? "back to the world's" : objOf(e.data.value).off === true ? "off" : "changed"}`)
   }
 ];
+function routineEdit(ctx, op) {
+  const e = own(ctx.state.entities, op.entity);
+  if (!e)
+    return { code: "missing_entity", reason: `no ${labelOf(ctx, op.entity)}` };
+  if (!kindIs(ctx.registry, ctx.world, e.kind, "person"))
+    return { code: "not_person", reason: `${e.name} has no routine: only people do` };
+  const source = { type: "gm", at: ctx.state.clock };
+  if (op.op === "routine_follow") {
+    const now = followOf(ctx, op.entity).chat;
+    const mode = op.mode === undefined ? now?.mode ?? null : op.mode;
+    const awareness = op.awareness === undefined ? now?.awareness ?? null : op.awareness;
+    return [{ type: ROUTINE_EVENTS.follow, data: { entity: op.entity, follow: mode === null && awareness === null ? null : { mode, awareness } } }];
+  }
+  if (op.op === "routine_block") {
+    if (op.value === null)
+      return [{ type: ROUTINE_EVENTS.block, data: { entity: op.entity, block: op.block, value: null, source } }];
+    const value = { ...op.value, id: op.block };
+    const problems = blockShapeProblems(value, false);
+    if (problems.length > 0)
+      return { code: "bad_value", reason: problems.join("; ") };
+    return [{ type: ROUTINE_EVENTS.block, data: { entity: op.entity, block: op.block, value, source } }];
+  }
+  const schedule = allSchedules(ctx.registry, ctx.world).find((s) => s.id === op.schedule);
+  if (!schedule)
+    return { code: "missing_schedule", reason: `there's no schedule ${op.schedule}` };
+  if (op.value !== null && "off" in op.value && !scheduleOwners(ctx.registry, ctx.world, ctx.state, schedule).includes(op.entity))
+    return { code: "not_owner", reason: `${e.name} doesn't follow ${op.schedule}` };
+  const value = op.value === null ? null : structuredClone(op.value);
+  if (value !== null && !isScheduleChange(value))
+    return { code: "bad_value", reason: "a schedule change is off (until a time or for good) or their own slots (HH:MM to HH:MM)" };
+  return [{ type: ROUTINE_EVENTS.schedule, data: { entity: op.entity, schedule: op.schedule, value, source } }];
+}
 function kindOfBlock(activity) {
   if (/work|shift|school/.test(activity))
     return "work";
@@ -25336,6 +26734,32 @@ function kindOfBlock(activity) {
   if (/leisure|socialize|idle|breakfast|lunch|dinner/.test(activity))
     return "free";
   return "other";
+}
+function playerBlocks(ctx, who, plan) {
+  const cal = calendarOf(ctx.world);
+  const applied = new Map(activeBlocks(ctx, who, plan.day).map((a) => [a.block.id, a]));
+  const open = loreGateReader(ctx.registry, ctx.world, ctx.state);
+  return plan.blocks.map((b) => {
+    const from = formatHHMM(dateAt(cal, b.start).minuteOfDay);
+    const to = formatHHMM(dateAt(cal, b.end).minuteOfDay);
+    const routineId = b.option.startsWith(ROUTINE_OPTION) ? b.option.slice(ROUTINE_OPTION.length).replace(/:carried$/, "") : null;
+    const a = routineId !== null ? applied.get(routineId) : undefined;
+    if (b.option.startsWith(AGENDA_OPTION) && !publicTrack(ctx.world, b.option.slice(AGENDA_OPTION.length)) || a?.block.private === true)
+      return { start: b.start, from, to, label: "Busy", kind: "other", reasons: ["their own business"], source: { type: "routine" } };
+    let source;
+    if (a) {
+      const entry = a.from.source.type === "lore" ? own(ctx.world.lore, a.from.source.entry) : undefined;
+      source = entry && loreReadable(ctx.registry, ctx.world, ctx.state, entry, "brief", false, open) ? { type: "lore", entry: entry.id, title: entry.title } : a.from.source.type === "story" ? { type: "story" } : { type: "routine" };
+    } else if (b.option.startsWith("plan:"))
+      source = { type: "plan" };
+    else if (b.fixed && !b.option.startsWith(INVITED_OPTION))
+      source = { type: "commitment" };
+    else if (b.option === "idle" || b.option.startsWith("retrieve:"))
+      source = { type: "free" };
+    else
+      source = { type: "routine" };
+    return { start: b.start, from, to, label: b.label, kind: kindOfBlock(b.activity), reasons: b.reasons, source };
+  });
 }
 function buildCastView(ctx) {
   const pov = ctx.world.pov;
@@ -25394,9 +26818,9 @@ function buildCastView(ctx) {
     if (regard.length > 0)
       p.regard = regard;
     const plan = present && e.agent && !still ? dayPlan(ctx, id) : null;
-    const blocks = plan?.blocks.map((b) => b.option.startsWith(AGENDA_OPTION) && !publicTrack(ctx.world, b.option.slice(AGENDA_OPTION.length)) ? { ...b, label: "Busy", reasons: ["their own business"] } : b);
+    const blocks = plan ? playerBlocks(ctx, id, plan) : null;
     if (blocks && level >= 3)
-      p.timeline = blocks.map((b) => ({ start: formatHHMM(dateAt(cal, b.start).minuteOfDay), end: formatHHMM(dateAt(cal, b.end).minuteOfDay), label: b.label, kind: kindOfBlock(b.activity), reasons: b.reasons }));
+      p.timeline = blocks.map((b) => ({ start: b.from, end: b.to, label: b.label, kind: b.kind, reasons: b.reasons, source: b.source }));
     const agenda = agendaFor(ctx.world, ctx.state, id).filter((a) => publicTrack(ctx.world, a.track));
     if (agenda.length > 0)
       p.agenda = agenda.map((a) => ({ label: a.label, stage: a.stageLabel }));
@@ -25436,11 +26860,10 @@ function decidedBlock(ctx, who) {
   const plan = dayPlan(ctx, who);
   const dayStart = clockAt(cal, plan.day, 0);
   const chosen = new Set(plan.ties.filter((t) => t.via === "recorded").map((t) => t.key));
-  const block = plan.blocks.find((b) => b.end > ctx.state.clock && chosen.has(tieKey(who, dayStart, b.start)));
+  const block = playerBlocks(ctx, who, plan).find((b, i) => (plan.blocks[i]?.end ?? 0) > ctx.state.clock && chosen.has(tieKey(who, dayStart, b.start)));
   if (!block)
     return null;
-  const label = block.option.startsWith(AGENDA_OPTION) && !publicTrack(ctx.world, block.option.slice(AGENDA_OPTION.length)) ? "Busy" : block.label;
-  return block.start <= ctx.state.clock ? label : `${label} at ${formatHHMM(dateAt(cal, block.start).minuteOfDay)}`;
+  return block.start <= ctx.state.clock ? block.label : `${block.label} at ${block.from}`;
 }
 function stanceCast(ctx) {
   const { registry: reg, world, state } = ctx;
@@ -25506,6 +26929,10 @@ var castlifePack = {
   register(r) {
     for (const def of EVENTS3)
       r.event(def);
+    r.service("castlife.edit", routineEdit);
+    r.query("castlife.yields", (ctx, who, field, expected, release, scene, skip) => routineYields(ctx, who, field, expected, { edge: true, release, scene, skip }));
+    r.query("castlife.schedule_off", (ctx, who, schedule, at) => scheduleOff(ctx.state, who, schedule, at));
+    r.query("castlife.chat_schedules", chatScheduleDefs);
     r.process({ id: "castlife.agents", domain: "castlife", minLevel: 3, scope: "agent", step: (slot, ctx, rng, agent) => agent ? stepAgent2(slot, ctx, rng, agent) : [], instants: planMoments, atInstant: atPlanMoment });
     r.process({ id: "castlife.trips", domain: "castlife", minLevel: 1, step: (slot, ctx) => stepTrips(slot, ctx) });
     r.process({ id: "castlife.plans", domain: "castlife", minLevel: 0, step: (slot, ctx) => dropUnlived(slot, ctx) });
@@ -25541,7 +26968,7 @@ var castlifePack = {
       const who = strOf(a.entity) || ctx.world.pov;
       const need = strOf(a.need);
       const v = needValue(ctx, who, need);
-      return own(NEEDS, need) && v > 0 ? [{ type: "castlife.need", data: { entity: who, need, delta: -v, at: ctx.state.clock } }] : [];
+      return own(NEEDS, need) && v > 0 ? [{ type: "castlife.need", data: { entity: who, need, delta: -v, at: ctx.state.clock, from: v } }] : [];
     } });
     r.effect({ type: "castlife.decide", args: ["key", "choice"], resolve: (a) => [{ type: "castlife.decision", data: { key: strOf(a.key), choice: strOf(a.choice) } }] });
     r.effect({
@@ -25566,6 +26993,8 @@ var castlifePack = {
         return [{ type: "set", entity: who, field: "holds", value: holds }, ...out];
       }
     });
+    r.proposal(routineChannel);
+    r.effect({ type: ROUTINE_EFFECT, args: ["entity", "blocks?", "schedules?", "turn?"], resolve: storyEvents });
     r.action({ id: "eat", label: "Eat", description: "Have a meal or a snack.", pack: "castlife", params: {}, requires: [], outcomes: { default: [{ type: "castlife.satisfy", args: { entity: "self", need: "hunger" } }, { type: "set", args: { entity: "self", field: "activity", value: "meal" } }] }, duration: "30", lexicon: ["eat", "have lunch", "have dinner", "grab a bite"], observable: "eats" });
     r.action({ id: "sleep", label: "Go to bed", description: "Go to bed and sleep until morning.", pack: "castlife", params: {}, requires: [], outcomes: { default: [{ type: "castlife.satisfy", args: { entity: "self", need: "fatigue" } }] }, duration: "5", activity: { type: "sleep", until: "next_time('07:00')" }, lexicon: ["go to bed", "sleep", "turn in", "hit the sack"], observable: "goes to bed" });
     r.action({ id: "rest", label: "Rest", description: "Rest or relax for a while.", pack: "castlife", params: {}, requires: [], outcomes: { default: [{ type: "castlife.satisfy", args: { entity: "self", need: "fun" } }] }, duration: "30", activity: { type: "waiting", until: "clock + 30" }, lexicon: ["rest", "relax", "take a break"], observable: "rests" });
@@ -25633,6 +27062,15 @@ var castlifePack = {
           }
         }
         return issues;
+      }
+    });
+    r.lint({
+      code: "castlife.routines",
+      check(world, registry) {
+        if (!registry)
+          return [];
+        const state = initialState(world, "", registry);
+        return [...routinesLint(world, registry, state), ...schedulesLint(world, registry, state)];
       }
     });
   }
@@ -25895,21 +27333,6 @@ var sheetsPack = {
   }
 };
 var core_default9 = sheetsPack;
-
-// src/engine/lore.ts
-var MIN_TERM = 3;
-var STOP_WORDS = Object.fromEntries("the and for with that this from into onto have has had was were are you your yours my mine our ours his her hers their theirs them they she him its not but all any can will would could should about then than there here what when where which who whom how why just very some more most other out over under again also like get got one two too off own same such only each both few nor yet".split(" ").map((w) => [w, true]));
-function plain(text) {
-  const words = text.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim();
-  return words === "" ? "" : ` ${words} `;
-}
-function wordsOf2(text) {
-  return plain(text).trim().split(" ").filter((w) => w.length >= MIN_TERM && !hasOwn(STOP_WORDS, w)).map((w) => w.length > 4 && w.endsWith("s") && !w.endsWith("ss") ? w.slice(0, -1) : w);
-}
-var listOf = (v) => Array.isArray(v) ? v.filter((x) => typeof x === "string") : [];
-function loreHeldBy(world, entry, who) {
-  return listOf(entry.holders).includes(who) || cuesOf(world, who).some((c) => c.secret.kind === "lore" && c.secret.id === entry.id);
-}
 
 // src/engine/adjudication.ts
 var PARENT_DEPTH2 = 32;
@@ -29003,7 +30426,7 @@ function capText(text, max) {
   const at = cut.lastIndexOf(" ");
   return `${(at > max * 0.6 ? cut.slice(0, at) : t.slice(0, max)).replace(/[\s,;:.]+$/, "")}…`;
 }
-var text3 = (v, max) => typeof v === "string" && v.trim() !== "" ? capText(v, max) : null;
+var text4 = (v, max) => typeof v === "string" && v.trim() !== "" ? capText(v, max) : null;
 var minutes = (v) => typeof v === "number" && Number.isFinite(v) ? Math.round(v) : null;
 function peopleIn(ctx, v) {
   if (v === undefined)
@@ -29021,7 +30444,7 @@ function peopleIn(ctx, v) {
   return [...new Set(ids)];
 }
 function noteFrom(ctx, who, id, v, before) {
-  const body = text3(v.text, MIND_TEXT_CAPS.note) ?? before?.text ?? null;
+  const body = text4(v.text, MIND_TEXT_CAPS.note) ?? before?.text ?? null;
   if (body === null)
     return reject16("bad_value", "a note needs its text");
   const salience = v.salience === undefined ? before?.salience ?? 3 : typeof v.salience === "number" && v.salience >= 1 && v.salience <= 5 ? v.salience : null;
@@ -29030,7 +30453,7 @@ function noteFrom(ctx, who, id, v, before) {
   return { id: id ?? `n_${hashParts("minds.gm.note", who, String(ctx.state.clock), body).slice(0, 10)}`, text: body, salience, at: before?.at ?? ctx.state.clock };
 }
 function commitmentFrom(ctx, who, id, v, before) {
-  const body = text3(v.text, MIND_TEXT_CAPS.commitment) ?? before?.text ?? null;
+  const body = text4(v.text, MIND_TEXT_CAPS.commitment) ?? before?.text ?? null;
   if (body === null)
     return reject16("bad_value", "a commitment needs its text");
   const kind = v.kind === undefined ? before?.kind ?? "other" : COMMITMENT_KINDS.includes(v.kind) ? v.kind : null;
@@ -29049,7 +30472,7 @@ function commitmentFrom(ctx, who, id, v, before) {
   return { id: id ?? `c_${hashParts("minds.gm.commitment", who, String(ctx.state.clock), body).slice(0, 10)}`, kind, with: withList, text: body, due, status, made: before?.made ?? ctx.state.clock, closed };
 }
 function planFrom(ctx, who, id, v, before) {
-  const what = text3(v.what, MIND_TEXT_CAPS.planWhat) ?? before?.what ?? null;
+  const what = text4(v.what, MIND_TEXT_CAPS.planWhat) ?? before?.what ?? null;
   if (what === null)
     return reject16("bad_value", "a plan needs what it is");
   const when = v.when === undefined ? before?.when ?? null : typeof v.when === "object" && v.when !== null && !Array.isArray(v.when) ? { from: minutes(v.when.from), to: minutes(v.when.to) } : null;
@@ -29525,6 +30948,7 @@ var mindsPack = {
     });
     r.query("minds.minded", minded);
     r.query("minds.on", mindsOn);
+    r.query("minds.intent", (ctx, who) => (readCharacter(ctx.state, who).intent?.text ?? "") !== "");
     r.query("minds.fidelity", (ctx, texts) => fidelityOf(ctx, texts));
     r.renderer({ slot: MINDS_SLOT, render: (ctx) => mindLines(ctx).map((l) => l.line) });
     for (const rule of MINDS_LINTS)
@@ -56023,7 +57447,7 @@ function lintStructure(world, reg) {
 
 // src/engine/typed-intent.ts
 var STOP = new Set(["the", "a", "an", "to", "of", "at", "my", "your", "and", "with", "about", "for", "in", "on", "some", "over", "up", "down"]);
-var FILLER2 = new Set(["down", "up", "over", "back", "out", "across", "along", "around", "right", "straight", "on", "off", "just"]);
+var FILLER3 = new Set(["down", "up", "over", "back", "out", "across", "along", "around", "right", "straight", "on", "off", "just"]);
 var CLAUSE_WORDS = new Set(["but", "so", "because", "though", "although", "however", "instead"]);
 var NEGATION = new Set(["not", "no", "never", "cannot", "nothing", "nobody", "neither", "nor", "refuse", "refuses", "refused", "avoid", "avoiding"]);
 var HYPOTHETICAL = new Set(["might", "maybe", "perhaps", "whether", "wonder", "wonders", "wondering", "wondered", "consider", "considering", "imagine", "imagining", "suppose", "supposing", "wish", "debating"]);
@@ -56200,7 +57624,7 @@ function phraseAt(tokens, phrase, acts) {
     let skipped = 0;
     let k = 1;
     for (;k < phrase.length; k++) {
-      while (at < tokens.length && tokens[at] !== phrase[k] && FILLER2.has(tokens[at] ?? "")) {
+      while (at < tokens.length && tokens[at] !== phrase[k] && FILLER3.has(tokens[at] ?? "")) {
         at++;
         skipped++;
       }
@@ -56478,9 +57902,9 @@ function isWorldDoc(v) {
   return isRecord(v) && v.format === WORLD_FORMAT && typeof v.id === "string" && isRecord(v.entities) && isRecord(v.places) && typeof v.pov === "string";
 }
 var COLLECTIONS = ["packs", "kinds", "relations", "entities", "places", "routes", "grids", "rules", "actions", "checks", "schedules", "tracks", "tables", "sections", "steps"];
-var LATER_COLLECTIONS = ["maps", "lore", "classifications", "tiers"];
+var LATER_COLLECTIONS = ["maps", "lore", "classifications", "tiers", "routines"];
 var PARTS2 = ["pins", "calendar", "realism", "time", "start"];
-var OPTIONAL_PARTS = ["currency", "loreIndex", "ruleset", "mapSettings", "minds", "lorePins"];
+var OPTIONAL_PARTS = ["currency", "loreIndex", "ruleset", "mapSettings", "minds", "lorePins", "routineSettings"];
 function shapeIssues(doc) {
   const issues = [];
   const err = (path, message) => {
@@ -56820,7 +58244,7 @@ function queueStop(w, res, since, scene, speeding) {
   const policy = interruptPolicy(w.state);
   const signalled = w.events.slice(since).some((e) => {
     const s = "data" in e ? signalOf(e) : null;
-    return s !== null && policy[s.class] === "stop" && signalVisible(w.reg, w.world, w.state, w.world.pov, s);
+    return s !== null && s.stops !== false && policy[s.class] === "stop" && signalVisible(w.reg, w.world, w.state, w.world.pov, s);
   });
   return signalled ? "interruption" : null;
 }
@@ -56830,7 +58254,7 @@ function turnStart(reg, w, runSeed) {
 }
 function timelapseOptions(intent, runSeed) {
   const seg = intent.params.segment;
-  return { target: parseTarget(intent.params.target), opts: { runSeed, overrides: parseOverrides(intent.params.overrides), segment: typeof seg === "number" ? seg : 1 } };
+  return { target: parseTarget(intent.params.target), opts: { runSeed, overrides: parseOverrides(intent.params.overrides), segment: typeof seg === "number" ? seg : 1, ...intent.params.povRoutine === false ? { povRoutine: false } : {} } };
 }
 function claimThing(w, claim, salt) {
   const made = optionalService(w.ctx, "gear.claim")?.(w.ctx, { ...claim, by: w.world.pov, salt });
@@ -56961,8 +58385,8 @@ function postTurn(input) {
   stepTracks(reg, w, input.seed);
   return coarsen(reg, input.world, input.state, w.events);
 }
-function timelapseIntent(target, overrides, segment = 1) {
-  return { action: TIMELAPSE_ACTION, params: { target, ...overrides ? { overrides } : {}, segment }, probabilities: {} };
+function timelapseIntent(target, overrides, segment = 1, povRoutine = true) {
+  return { action: TIMELAPSE_ACTION, params: { target, ...overrides ? { overrides } : {}, segment, ...povRoutine ? {} : { povRoutine: false } }, probabilities: {} };
 }
 
 // src/studio-api.ts
@@ -57071,7 +58495,7 @@ function json(value) {
 }
 
 // docs/AGENT-GUIDE.md
-var AGENT_GUIDE_default = "# Writing LumiRPEngine worlds: a guide for agents\n\nRead this before you touch a LumiRPEngine world through the `lumirpengine` MCP server or command line ([MCP.md](MCP.md)): the world model, how to work on a user's worlds, and the mistakes that are easy to make and hard to see. Every kind, field, effect and formula function is in the reference (`lre_docs`); complete worlds to learn from are the starters (`lre_template`). How outside agents reach LumiRPEngine is DESIGN §23.\n\n## The world model\n\nA world is one JSON document in the `lre-world-v1` format, with a published JSON Schema (`lre_schema`). Each commit makes an immutable **revision**, named by its content hash; the newest is the world's **head**, and a chat plays the revision it was started on until the player upgrades it. Changes go to a **draft** first: a working copy that a commit turns into the next revision.\n\n- **Collections** are objects keyed by id: `kinds`, `relations`, `entities`, `places`, `routes`, `grids`, `maps`, `rules`, `actions`, `checks`, `schedules`, `tracks`, `tables`, `sections`, `steps`, `packs`, `lore`, `classifications`, `tiers`, and `lifeStates` when the world has its own.\n- **Parts** are single values: `calendar`, `realism`, `time`, `start` (`{place, at}`), `pov` (the entity the player plays), `currency`, `loreIndex`, `pins`, and the optional `ruleset`, `mapSettings`, `spawnTier` and `spawnCap`.\n- **Checks:** `ruleset.adjudication` decides how checks are decided, and `ruleset.inferred` how a typed attempt no action with its own check covers is read as a check of the world's sheet (`mode`, `when`, `who`, `skills`, `difficulty`, `detail`, `others`, `guidance`, `most`; it must name its `mode`). A world without one leaves inferred checks to each chat's realism preset. The skills it rolls are the world's own: the rows of a skill action's table (Use a skill, Make a save) or the Sheets pack's stats, so give an attempt that matters to the story its own action with its own check, which keeps it.\n- **Kinds** are types with fields and single inheritance (`extends`). The packs define the common ones: `thing` (with `owner` and `place`), `person`, `item`, `container`, `kit`, `vehicle`, `region`, the money kinds (`account`, `card`, `flow`, `job`, `holding`, `property`, `business`, `trust`, `invoice`), and `group` with its `faction`, `family`, `household` and `company`. A world kind with a pack kind's id replaces it whole, so extend a pack kind rather than redefine it.\n- **Entities** are the people and things: `{id, kind, name, tier, fields, relations}`, plus `life`, `lifeKnownBy`, `agent`, `cues`, `class`, `tags`, `visibility` and `knownBy` as needed. Fields hold values; relations are `{type, to, fields?}` links to other entities.\n- **Actions** need a one-line `description`: typed messages are read against each action's label and description.\n- **Formulas** are strings in a small, safe expression language (`lre_docs` with `doc: \"expressions\"`): `at(pov, 'archive')`, `stage.hale_debt == 'revealed'`, `hour >= 18`. Dice are notation strings (`1d20`).\n- **Money** is always a whole number of the currency's minor units: 4250 is $42.50 in a dollar world. **Times** are local ISO date-times (`2026-09-14T18:30`).\n\n## How to work on a user's world\n\n1. **Read before you write.** `lre_worlds` lists the worlds and whether each has a draft stored. A draft that is already there when you start is the user's work in progress: ask them before you edit, commit or discard it. `lre_world` reads one at a JSON Pointer: `\"\"` gives an outline of the whole world (collections with their ids), `/entities/mara` one item. `lre_search` finds an item by what it says.\n2. **Edit the draft.** `lre_edit` takes JSON Patch (RFC 6902) operations whose paths point into the whole world: `add` creates an item or a field, `replace` changes one that exists, `remove` deletes, `test` guards a value. All the operations of one call apply, or none do. Pass `expectVersion`, the draft version from your last read (`lre_world`, `lre_draft` and `lre_worlds` give it even with no draft stored; each `lre_edit` answers the new one): if the draft has changed since, the edit is refused.\n3. **Check.** Every `lre_edit` answers the lint the draft has now and any macro hazard the edit brought in. `lre_draft` sums up the draft against the head; `lre_diff` shows field by field what changed. `lre_playtest` plays typed turns and `lre_check_world` simulates whole days, both with the bundled engine and no model.\n4. **Commit, or discard.** `lre_commit` with a short note makes the draft the head; the note goes into the world's history (`lre_history`). It is refused while the draft has lint errors, which it lists. `lre_discard` throws the draft away. Pass both the `expectVersion` you last saw, as for `lre_edit`.\n\n**The draft is the user's Build draft.** Build edits the same single draft: the user sees your changes as you make them, and you see theirs. Don't leave a draft behind: commit what you finished, discard what you didn't, and say which you did. If an edit is refused because the version moved, read the draft again: the user may be editing it.\n\n**A commit takes the whole draft.** When the user presses Commit in Build, your unfinished changes go into that revision with theirs; when you commit, their changes go in with yours. So finish one change before you start the next, and tell the user what you are in the middle of. With `expectVersion`, `lre_commit`, `lre_discard` and `lre_restore` are refused if the draft moved since you read it. A commit is refused, too, when the head is no longer the revision the draft began from: compare with `lre_diff`, discard, and redo the change on the new head.\n\n**Chats keep their revision.** Committing changes no running chat. `lre_chats` says which chats are behind; `lre_upgrade` with `preview` shows what an Upgrade would bring in; without it, it applies the default picks: what play never touched takes the new revision, what play changed stays. So keep every id a chat uses: a renamed id is a new thing, and the old one stays in the chat.\n\n**Offline work.** Without a Lumiverse, write the world as a file: start from a starter (`lumirpengine template <id> --out world.json`), check it with `lre_check` after each change, run it with `lre_playtest` and `lre_check_world`, and bring it in with `lre_world_import` (or Build's Import) once it is clean.\n\n## JSON Patch on a world\n\n- An item is added whole: `{\"op\": \"add\", \"path\": \"/entities/mara\", \"value\": {\"id\": \"mara\", \"kind\": \"person\", …}}`. Adding to a key that exists replaces it, so to change one field, point at the field: `/entities/mara/fields/place`.\n- `replace` and `remove` need something there; `add` needs the parent to exist (`/entities/mara/fields` must be an object before `/entities/mara/fields/place` can be added).\n- In a list, a number is the index and `-` is the end: `{\"op\": \"add\", \"path\": \"/entities/mara/relations/-\", \"value\": {\"type\": \"knows\", \"to\": \"pov\"}}`.\n- In a key, `~1` stands for `/` and `~0` for `~`: the table `economy.catalog` is `/tables/economy.catalog`, and a key `a/b` is `/x/a~1b`.\n- `test` makes an edit conditional on what you read: `{\"op\": \"test\", \"path\": \"/entities/mara/name\", \"value\": \"Mara\"}` first, and the whole patch is refused if Mara was renamed meanwhile.\n- `/id`, `/format`, `/engineVersion`, `/suppressed` and `/pins` are the engine's: a patch may not change them.\n- One patch carries at most 500 operations and brings in at most 4 MiB of JSON (what it adds, replaces and copies), and the world may nest at most 64 levels deep. An item the engine can't read (`/lore/x` set to `{}`) is refused before anything is written, so add items whole.\n\n## Ids and keys\n\n- Every item's `id` repeats its key. Lint refuses a mismatch for entities, lore entries, step templates and classifications; keep them equal everywhere.\n- Ids are lower snake_case by convention (`old_bram`, `quay_to_market`) and are what everything else refers to: `fields.place`, `fields.owner`, relation targets, track ids in formulas, lore `links`. Look them up rather than guess them; every reference to an id the world doesn't have is a lint error or a dead link.\n- An item's key must be 1 to 200 characters and never `__proto__`, `constructor` or `prototype`; the engine refuses any other.\n- A world's own id (`w_…`) is the host's: `lre_world_create` and import assign it.\n\n## People\n\n- **The POV** (`pov`) is the entity the player plays, a `person` on a lead tier, never capped by realism. `start` is where and when play begins, and the POV stands there unless its `fields.place` says otherwise.\n- **Tiers** say how deeply someone is simulated: by default `principal` (Leads), `supporting` and `background`. `\"agent\": true` makes someone pursue their own agenda off-screen, and live the plans the story gives them. Anyone else only follows their schedules: their plans are never lived and lapse, so mark `agent` on whoever should act on their own plans.\n- **Who knows the POV.** Everyone who has met the POV holds a `knows` relation toward the POV, or a `regard`. The narrator learns from exactly that whether Mara knows you, so a friend without either greets the player as a stranger.\n- **Regard** is one directed relation with `warmth`, `trust` and `respect` from −100 to 100; write each direction that matters. Kinship (`parent_of` and `child_of`, `sibling_of`, `spouse_of`, `partner_of`) is kept two-sided: write both sides.\n- **Life and death.** `life` is the state someone starts in: `alive` when unset, `dying`, `dead`, or one of the world's own `lifeStates`. The dead keep their place: give a body a `fields.place` where it lies, and no schedule (someone who doesn't act follows none).\n\n### lifeKnownBy: who knows how someone starts\n\nWhen someone starts dead or dying, `lifeKnownBy` lists the ids of the people who know it; everyone else, the POV included, takes them for alive until they see the body or are told. **Left out or empty, everyone knows**, which tells the player at once. So:\n\n- a death the player hasn't learned of lists who does know, including everyone who starts in the same place as the body;\n- when nobody else knows yet, list the person themself (the list is then not empty, and no one else learns it);\n- on someone who starts alive it changes nothing (lint warns), and every id in it must be an entity of the world.\n\n```json\n{ \"id\": \"old_bram\", \"kind\": \"person\", \"name\": \"Old Bram\", \"tier\": \"supporting\", \"life\": \"dead\", \"lifeKnownBy\": [\"silas\"], \"fields\": { \"place\": \"net_loft\" }, \"relations\": [] }\n```\n\n## Character minds\n\nA character can have a **mind**: a model call made as that character alone, on what they know (their entity's fields, never a Lumiverse character card; the lore they may read, the turns they were there for, their notes and commitments, their money and their day). It answers with their private read of the moment and what they intend; the narrator then depicts it. Minds are blind to each other; Playtest and Check world call no model, so they play a world without minds. So write who someone is into their fields (`description`, `traits` and the rest): no character card fills it in. A mind knows the truths of the tracks its character owns, of a secret their cue stands for, and of secret lore whose `holders` name them; a secret held from the start goes on the agenda's start stage (entering a stage tells the player its truth).\n\nWho gets a mind is decided each turn by a **focus score**: points for being in the POV's scene or close by, being named, a relation with the POV, a stake in tracks and rules under way, plans with the POV, and their tier. The score puts each character on a ladder: **Live** (a mind every turn), **Near** and **Far** (a mind on their refresh), **Background** (routine only). The world tunes the ladder and what minds remember in its `minds` part:\n\n```json\n[{ \"op\": \"add\", \"path\": \"/minds\", \"value\": {\n  \"secrecy\": \"brief\",\n  \"weights\": { \"mentioned\": 50 },\n  \"thresholds\": { \"live\": 60, \"near\": 35, \"far\": 15 },\n  \"always\": { \"ids\": [\"marcus_delgado\"] },\n  \"never\": { \"tag\": [\"crowd\"] },\n  \"memory\": { \"notes\": { \"show\": 10, \"keep\": 30 }, \"salience\": { \"halfLifeDays\": 14 } } } }]\n```\n\n- **`secrecy`** decides what the narrator gets. `brief` (the default): only a depiction, written as behaviour anyone present could see and withheld when it would give away a secret or a name the POV can't know, while the monologue stays in the GM view. `full`: the monologue, intent, reactions and mood too, to depict and never state. A mind knows its own character's secrets, so keep `brief` where a private thought reaching the narrator would give one away.\n- **`weights`** are the points each input adds, from −100 to 200: `here` 45, `nearby` 20, `mentioned` 40, `regard` 10, `knows` 10, `owner` (owns a track under way) 15, `track` (named in one) 8, `rule` 5, `pending` (an invitation, appointment or plan with the POV) 15, `recent` 10, `band` 15, 5 and 0 for principal, supporting and background, and `roles` by classification value id (`antagonist` 20). A role weight counts only where one of the world's classifications has that value (lint warns about one that none has), and a world's `roles` replaces the default map whole.\n- **`thresholds`** are the lowest scores for Live, Near and Far (60, 35 and 15); below Far is Background. Live is only for someone at hand: in the POV's scene or named this turn. Being close by adds points but never makes someone Live; anyone not at hand is Near at most, whatever their score.\n- **`always`** and **`never`** are selectors (`ids`, `kind`, `tier`, `memberOf`, `tag`, `class`): `always` keeps people Live wherever they are; `never` keeps them Background, mindless, and wins over `always`. A GM's pin in a chat wins over both. An id, kind, tier, group or classification the world doesn't have is a lint error.\n- **`memory`** is what a mind is shown and how long a note lasts, in entries unless named: `witness.show` (what they saw lately, 8), `recall.recent` and `recall.relevant` (their latest turns and those best matching the moment, 4 each) within `recall.tokens` (1200), `notes.show` (8) and `notes.keep` (24 before the oldest are folded into their summary), `commitments.show` (8; open ones are kept until resolved), `salience.halfLifeDays` (a note's weight halves every 7 game days) and `salience.floor` (below 0.5 it has faded), and `consolidate.enabled` (true: faded and surplus notes fold into the summary, not lost). The user's own settings win over the world's.\n- Every part is optional; one left out or out of range reads as its default, and lint says so. The user decides in their settings whether minds run at all, and how many Live minds a turn may have.\n\n**Prompts.** The four minds steps, `mind`, `memory`, `skip` (a time skip's turning points) and `consolidate` (folding old notes into a summary), take world step templates as the other steps do, with `\"output\": \"text\"` and `\"signals\": []`: minds run on their own cadence, so signals are ignored (lint notes any as info). The template is the step's instructions only, with `{{character}}` the character's name and `{{world}}` the world's: the engine appends the answer's format itself, which no template replaces, so write how to think, never the JSON. The player's own prompt wins over the world's template, which wins over the built-in; give each purpose one at most (lint warns of a second, and a blank one is skipped).\n\n```json\n[{ \"op\": \"add\", \"path\": \"/steps/mind_port_alder\", \"value\": { \"id\": \"mind_port_alder\", \"purpose\": \"mind\", \"output\": \"text\", \"signals\": [],\n  \"template\": \"You are the private mind of {{character}} in {{world}}, a lake town where everyone knows everyone's business and says less than they mean. Think as {{character}}, from only what they know below. Decide how they read this moment and what they intend; never script anyone else, and keep to what a neighbour would notice.\" } }]\n```\n\n## Things and who owns them\n\n- Where a thing is: `fields.place` for something lying in a place, a relation `{\"type\": \"in\", \"to\": \"rhea\"}` for something carried or inside a container.\n- **Whose a thing is lives in `fields.owner`**, the owner's id. That puts it on their gear, a vehicle in their garage and at their levels, and lets them drive it. The `owns` relation only changes how the Journal words a change: an item with an `owns` link and no `fields.owner` belongs to no one. Set `fields.owner` on everything someone owns. Money is owned differently: see Money.\n\n## Money\n\nMoney is entities, a few fields and the economy pack's config. Amounts are whole minor units (4250 is $42.50 in a dollar world) and percentages are percent units (22 is 22 %). What runs for someone depends on their Money level: the world's `realism.levels.money`, capped by their tier's band (the POV is never capped). At 0 money is off; at 1 a person's `wealth` band is all there is; at 2 their cash and one everyday account are real, and a payment they can't cover is declined; from 3 all their accounts, and more as below.\n\n| From | What runs | Its feature ids |\n|---|---|---|\n| Money 3 | flows (so bills, pay and a business's takings), cards, payment preferences, household shares, living costs, property, withholding at a flat rate | `flows`, `cards`, `payment_prefs`, `households`, `living_costs`, `property`, `withholding` |\n| Money 4 | statements and minimum payments, interest (on the average daily balance where an account asks for it), fees, late payments and collections, credit scores, cash only at a machine or a branch, holds, daily card limits, overdraft policies, withholding through the tax brackets, sales tax, business taxes, investments, options, capital gains | `statements`, `interest`, `average_daily`, `fees`, `delinquency`, `credit`, `atm`, `holds`, `daily_limits`, `overdraft`, `tax_brackets`, `sales_tax`, `business_tax`, `investments`, `options`, `capital_gains` |\n\nA world switches a feature on or off for itself in `packs.economy.config.features` by its id (`{\"sales_tax\": true}`), down to its floor: Money 2 for `flows`, `cards`, `payment_prefs`, `households`, `living_costs`, `atm`, `daily_limits` and `overdraft`, Money 3 for the rest. Lint warns about an id it doesn't know.\n\n### Who owns money\n\nA **party** is a person, or an entity of kind `business`, `trust` or `household`. An account, a business, a holding or a property names its holders in `owners`, each with a role: `[{\"party\": \"pov\", \"role\": \"owner\"}]`.\n\n| Role | Spends from it | Counts toward their net worth | Manages it |\n|---|---|---|---|\n| `owner`, `joint` | yes | yes | yes |\n| `custodian`, `trustee` | yes | no | yes |\n| `beneficiary` | no | yes | no |\n| `authorized_user` | yes | no | no |\n\n`share` divides the worth between the holders whose role counts it, in percent; given by none, they share equally. A **household** is the relationships pack's `household` group: its members hold a `member_of` relation to it, and it shares flows between them (below).\n\n### Accounts and products\n\nAn `account` entity is one purse, wallet, bank account, card account, loan or investment account: `owners`, `product`, `opening` (the balance at the start, from the holder's side: a debt is negative) and `institution`. `product` is an account class, each a built-in product with the finance tables' terms (`cash`, `checking`, `business_checking`, `savings`, `money_market`, `cd`, `trust`, `escrow`, `credit_card`, `charge_card`, `line_of_credit`, `loan`, `mortgage`, `brokerage`, `retirement`), or one of the world's own products, `packs.economy.config.products` by id. An account's own `limit`, `apr_pct`, `apy_pct`, `statement_day`, `due_day`, `payment`, `months_left`, `overdraft` and the rest win over its product's; `autopay` (`minimum`, `statement`, `full` or `fixed`) with `autopay_from` pays a credit account by itself.\n\nRead `/packs/economy/config` before adding to it; the modern starter's has no `products` map yet. Where the world has none, add the map whole with the first product in it, as below (JSON Patch adds into a map only once it exists); where it has one, add each product by its own path, `/packs/economy/config/products/<id>`, since adding the whole map replaces it and drops every product already in it. `assets` works the same, and in the modern starter it is added to by id, as further down. The same goes for entities: `add` on an id that is taken replaces that item whole, so look an id up before you use it.\n\n```json\n[\n  { \"op\": \"add\", \"path\": \"/packs/economy/config/products\", \"value\": { \"lakeshore_rewards\": { \"label\": \"Lakeshore Rewards Visa\", \"class\": \"credit_card\", \"institution\": \"Lakeshore Credit Union\", \"limit\": 300000, \"apr_pct\": 21.9, \"rewards_pct\": 1.5 } } },\n  { \"op\": \"add\", \"path\": \"/entities/acct_pov_rewards\", \"value\": { \"id\": \"acct_pov_rewards\", \"kind\": \"account\", \"name\": \"Rewards Visa\", \"tier\": \"background\", \"fields\": { \"owners\": [{ \"party\": \"pov\", \"role\": \"owner\" }], \"product\": \"lakeshore_rewards\", \"opening\": -12500, \"autopay\": \"statement\", \"autopay_from\": \"acct_pov_checking\" }, \"relations\": [] } }\n]\n```\n\nA **card** is its own entity, kind `card`: the `account` it draws on, its `holder`, its `network` (`debit`, `credit` or `charge`), its `state` (`active`, `frozen`, `lost` or `cancelled`) and `item`, the physical card in the holder's gear. An authorized user holds a card on someone else's account.\n\n### Flows: money that moves on its own\n\nA **flow** is every scheduled or one-off movement of money: rent, bills, a transfer to savings, an allowance, a loan payment. It is an entity of kind `flow`:\n\n- **`flow_kind`**: `transfer`, `bill`, `rent`, `utility`, `subscription`, `premium`, `loan_payment`, `card_payment`, `savings`, `income`, `payroll`, `allowance`, `living`, `tax`, `distribution`, `invoice`, `draw` or `other`.\n- **`from` and `to`**: an account; a party, paying as their preferences choose, or paid into their deposit account; or an outside payer or payee by name, in words (`\"Harbor Mutual\"`). A name shaped like an id (`acct_pov_chequing`) that names no entity draws a lint warning: it would be read as an outside party, so money would come from or go to nowhere.\n- **The amount**, the first of: `amount_cents`; `amount_formula`; `amount_table` (`table.row`, or `table.row.column`); `amount_min` and `amount_max`, a seeded draw between them; `amount_pct` of `amount_of`'s balance; `amount_due` (`minimum`, `statement` or `balance`, of the credit account it pays).\n- **When**: `every` (`day`, `week`, `month` or `year`) with `interval` (biweekly is `week` with 2), `weekdays` (0 is Sunday), `days` of the month (31 is the last day of a short month, −1 always the last), `months`, `except` (holiday ids), `roll` (`before` or `after`, for a day that isn't a business day) and `at` (`HH:MM`, 09:00 by default); or `once`, a local date-time. `start`, `end` and `count` bound it.\n- **When the money isn't there**, `shortfall`: `skip` this time, pay what there is (`partial`), `retry` after `retry_days` up to `retries` times, pay from `fallback`, let the account `overdraft` as its policy allows, or `defer` the amount to the next time.\n- `splits` sends parts elsewhere (fixed `cents` first, then `pct` of the rest); `shares` splits a household's flow between its members by `pct`; `link` ties it to what it belongs to (a property, a job, a loan); `status` is `active`, `paused` or `ended`.\n\n```json\n[{ \"op\": \"add\", \"path\": \"/entities/flow_pov_boat_fund\", \"value\": { \"id\": \"flow_pov_boat_fund\", \"kind\": \"flow\", \"name\": \"Boat fund\", \"tier\": \"background\", \"fields\": { \"flow_kind\": \"savings\", \"from\": \"acct_pov_checking\", \"to\": \"acct_pov_savings\", \"amount_cents\": 4000, \"every\": \"week\", \"interval\": 2, \"weekdays\": [5], \"start\": \"2026-09-18\", \"shortfall\": \"skip\", \"category\": \"savings\" }, \"relations\": [] } }]\n```\n\n### Businesses and invoices\n\nA **business** is an entity of kind `business`, a party with `owners` (and their `share`s) and a `structure`: `sole_proprietorship`, `partnership`, `llc` (the default), `s_corp` or `c_corp`.\n\n- **Where it sells:** a purchase at one of its `places` (else where it stands) pays it. `daily_sales` is what walk-in customers from outside the world spend there on each of its `trading_days` (0 is Sunday; Monday to Friday when left out), give or take `sales_spread_pct` (30 when left out), paid at closing and never on a day-off holiday.\n- **Its money** is in the accounts it owns. `operating_account`, one of them, is where takings land and payroll comes from (else its best deposit account). It keeps `margin_pct` of a sale (all of it when left out) and owes the rest to its suppliers, paid on the 10th; the sales tax it collects is paid on the 20th. Its rent, bills and loan payments are flows from its accounts.\n- **Its owners** take draws in play, except from a `c_corp`. `distribution_pct` pays that share of each period's profit out to the owners by share, every `distribution_every` (`month`, `quarter` (the default) or `year`), on the 10th after the period closes.\n- **Its books**, month by month, are kept by the engine from all of that: there is nothing to write.\n\nA business's own Money level is its tier's cap, as a person's is: it decides whether the business collects sales tax and pays business taxes (Money 4) and whether its invoices go late (Money 3). Its payroll, takings and other flows go through its accounts, and an account runs at the highest level of those who may spend from it (the business and its authorized users), whatever the account's own tier. So give a business the `principal` tier, as the modern starter does, for all of it to run.\n\nDale's marina has run on his own account so far, its takings flowing into it and its bills out. Making it a business moves the account to the business, with Dale still able to spend from it as an authorized user, and a purchase at the marina then pays it. The account was all Dale had, so he gets a checking account of his own as well: without one, his own spending and bills would come out of the business's.\n\n```json\n[\n  { \"op\": \"add\", \"path\": \"/entities/alder_harbor_marina_co\", \"value\": { \"id\": \"alder_harbor_marina_co\", \"kind\": \"business\", \"name\": \"Alder Harbor Marina\", \"tier\": \"principal\", \"fields\": { \"owners\": [{ \"party\": \"dale_whitcomb\", \"role\": \"owner\" }], \"structure\": \"sole_proprietorship\", \"places\": [\"alder_harbor_marina\"], \"operating_account\": \"acct_dale_marina\", \"industry\": \"marina\", \"margin_pct\": 70, \"late_fee_pct\": 1.5 }, \"relations\": [] } },\n  { \"op\": \"replace\", \"path\": \"/entities/acct_dale_marina/fields/owners\", \"value\": [{ \"party\": \"alder_harbor_marina_co\", \"role\": \"owner\" }, { \"party\": \"dale_whitcomb\", \"role\": \"authorized_user\" }] },\n  { \"op\": \"add\", \"path\": \"/entities/acct_dale_checking\", \"value\": { \"id\": \"acct_dale_checking\", \"kind\": \"account\", \"name\": \"Dale's checking account\", \"tier\": \"background\", \"fields\": { \"owners\": [{ \"party\": \"dale_whitcomb\", \"role\": \"owner\" }], \"product\": \"checking\", \"opening\": 640000, \"institution\": \"Great Lakes Bank\" }, \"relations\": [] } }\n]\n```\n\nAn **invoice** is an entity of kind `invoice`: the `business` that issued it, the `customer` (a party's id, or an outside customer by name), `cents`, `memo`, `issued`, `due` (30 days after `issued` when left out), `state` (`open` when left out, `paid`, `late` or `void`) and `paid`, what is paid of it so far. Lint requires the business, the customer and an amount above zero. An open invoice is paid as a bill from the customer's accounts on its due date and every week after until it is paid; an outside customer pays on the due date. Unpaid when its due day ends, it goes `late` and takes the business's `late_fee_pct` of the amount, and the fee again every 30 days. A business's `invoice_days` (30 when left out) are the terms of the invoices it issues in play.\n\n```json\n[{ \"op\": \"add\", \"path\": \"/entities/inv_pov_winter_storage\", \"value\": { \"id\": \"inv_pov_winter_storage\", \"kind\": \"invoice\", \"name\": \"Winter storage\", \"tier\": \"background\", \"fields\": { \"business\": \"alder_harbor_marina_co\", \"customer\": \"pov\", \"cents\": 48000, \"memo\": \"Winter storage for the fishing boat\", \"issued\": \"2026-09-14\", \"due\": \"2026-10-14\", \"state\": \"open\" }, \"relations\": [] } }]\n```\n\n### Work and pay\n\nA **job** is an entity of kind `job`, one worker's employment:\n\n- **Who and where:** `worker`; `employer`, a business entity (paying from its operating account), a place (the business trading there, else an outside employer) or an outside employer named in words, an id-shaped one that names no one and no place drawing a lint warning; `workplace`, the place the work is (else the business's `places`); `title`; and `occupation`, a row of the occupations table (else the worker's own `occupation`).\n- **Pay:** `basis`, which is `salary` (a year), `hourly`, `per_shift`, `commission`, `tips` or `stipend` (a period), and `rate`, both from the occupation's row when left out; `commission_pct` of the sales credited to the worker; `tips_per_hour` on top of hourly pay.\n- **When it pays:** `pay_every`, the occupation's when left out: `weekly` or `biweekly` on the weekday of `pay_anchor` (the first payday), else of `pay_weekday` (Friday); `semimonthly` on `pay_days` (the 15th and the last); `monthly` on one day (the last); `per_job`, each evening at 21:00 for that day's work; or `custom`, a flow's schedule with `pay_` before each part (`pay_unit`, `pay_interval`, `pay_weekdays`, `pay_days`, `pay_months`, `pay_except`). A payday on a weekend or a day-off holiday moves to the business day before it (`pay_roll`: `before`, `after` or `none`).\n- **What it pays for:** the days from `start` to `end`, and inside the season (`season_from` to `season_to`, `MM-DD`, which may wrap the new year). Hourly and per-shift pay count what `hours` names: the worker's scheduled commitments at the workplace (`scheduled`, laid out by `shift_pattern`, a row of the `calendar.shifts` table), the shifts the POV turns up for (`attended`), or `hours_per_week` and `shifts_per_week` over `weeks_per_year` (`contract`). Left out, it is `attended` for the POV and `scheduled` for anyone else while they have a routine at the job, and `contract` without one. `status` is `active`, `leave` (paid nothing) or `ended`.\n- **The paycheck:** `deductions` come off the gross first, each `{label, cents or pct, pretax, kind, to, match_pct}`. A `pretax` one comes off income-tax wages (a `retirement` one still counts as wages for Social Security and Medicare; any other doesn't). `to` is an account of the worker's, else an outside payee by name, and a business employer adds `match_pct` of the gross, up to the deduction, to that account. Withholding follows (Taxes, below), and none for a `contractor` (the occupation's `self_employed` when left out). `splits` route the net among the worker's own accounts, each `{to, cents}` or `{to, pct}`: fixed amounts first, then percentages of the rest, and what's left to their deposit account.\n\nEach job pays through a flow from its employer to the worker. A paycheck covers the work since the last one paid, so a payday the employer can't cover is paid with the next. In play, a business's owner hires, ends jobs and raises pay; a GM edit of the job's fields does the same.\n\nA second job beside the POV's work at the garage: one shift a week on the marina's fall haul-out crew, paid on Fridays with half of each check into savings, and nothing outside the season:\n\n```json\n[{ \"op\": \"add\", \"path\": \"/entities/job_pov_haulout\", \"value\": { \"id\": \"job_pov_haulout\", \"kind\": \"job\", \"name\": \"Haul-out crew at Alder Harbor Marina\", \"tier\": \"background\", \"fields\": { \"worker\": \"pov\", \"employer\": \"alder_harbor_marina_co\", \"workplace\": \"alder_harbor_marina\", \"title\": \"Haul-out crew\", \"basis\": \"per_shift\", \"rate\": 11000, \"hours\": \"contract\", \"shifts_per_week\": 1, \"season_from\": \"09-15\", \"season_to\": \"11-15\", \"pay_every\": \"weekly\", \"pay_anchor\": \"2026-09-18\", \"splits\": [{ \"to\": \"acct_pov_savings\", \"pct\": 50 }] }, \"relations\": [] } }]\n```\n\nAnd a 401(k) at the garage: 5 % of the POV's pay before income tax into a retirement account of theirs, which the shop matches up to 3 % of pay:\n\n```json\n[\n  { \"op\": \"add\", \"path\": \"/entities/acct_pov_401k\", \"value\": { \"id\": \"acct_pov_401k\", \"kind\": \"account\", \"name\": \"Your 401(k)\", \"tier\": \"background\", \"fields\": { \"owners\": [{ \"party\": \"pov\", \"role\": \"owner\" }], \"product\": \"retirement\", \"opening\": 0, \"institution\": \"Great Lakes Bank\" }, \"relations\": [] } },\n  { \"op\": \"add\", \"path\": \"/entities/job_pov_mechanic/fields/deductions\", \"value\": [{ \"label\": \"401(k)\", \"kind\": \"retirement\", \"pretax\": true, \"pct\": 5, \"match_pct\": 3, \"to\": \"acct_pov_401k\" }] }\n]\n```\n\n### Taxes\n\n- **On pay**, withholding runs from Money 3 at a flat rate: the occupation's withholding rate (federal tax, Social Security and Medicare together) and the worker's state rate, plus their region's local rate when they have `local_tax: true`. At Money 4 it goes through the federal brackets and standard deduction for their `filing_status` (`single` when left out, `married_filing_jointly` or `head_of_household`), with Social Security and Medicare, then the state and local rates.\n- **Regions** are rows of the regions table (`mi`, `il`…), with their state, local and sales tax rates. The economy config's `region` is the world's own (the modern starter's is `mi`); without one, what it would cover runs at the national row's rates. A party's income tax follows its own `region` field, else the config's.\n- **Income nobody withholds from** is paid as estimated tax on 15 April, June and September and 15 January: a contractor's pay, and an owner's share of the profit of any business but a `c_corp` where that business pays business taxes. A `c_corp` pays corporate tax on its own profit, at the config's `taxes.corporatePct` (21 when left out) plus the state rate.\n- **Sales tax** runs only at the top level, Money 4 (or from 3 where the world switches `sales_tax` on), and at the buyer's level: below it a price is as listed, and a business below it neither collects nor remits. The rate at a place is its `sales_tax_pct` (or an enclosing place's), else that of its tax region: a `tax_region` on it or an enclosing place, else the config's `region`. Nothing is charged on a category in the config's `taxes.exempt` (the modern starter's holds `groceries_staples`, `groceries_baskets` and `medical`) or in a place's `tax_exempt`, nor on what a business with `collects_sales_tax: false` sells.\n\nThe modern starter's economy is in Michigan, so a purchase in Chicago is taxed at Michigan's rate. To tax it for Illinois at Chicago's own combined rate, and the POV's pay at Michigan's typical local rate:\n\n```json\n[\n  { \"op\": \"add\", \"path\": \"/places/chicago_il/fields/tax_region\", \"value\": \"il\" },\n  { \"op\": \"add\", \"path\": \"/places/chicago_il/fields/sales_tax_pct\", \"value\": 10.25 },\n  { \"op\": \"add\", \"path\": \"/entities/pov/fields/local_tax\", \"value\": true }\n]\n```\n\n### Paying: preferences, cash machines and credit\n\n- **`pay_prefs`**, a person field, orders how they pay: tiers of `use` (`cash`, `debit`, `credit`, `charge`, `checking`, `savings`, or a card or account id), each for an amount from `min` to `max` and `categories`, but not those in `except`. A payment tries the tiers that fit it in order, then cash, debit, credit and charge; the first that covers it pays, and with none it is declined. Left out, the tiers follow their wealth band and their `traits`: a frugal or careful person keeps to cash and debit longer, an impulsive or flashy one reaches for credit first, a business pays by debit, then credit.\n- **Cash machines and branches** are place fields: `atm`, `{\"bank\", \"fee\", \"limit\", \"deposits\"}` (`fee` is the machine's own surcharge, `limit` the most one withdrawal takes), and `branch`, `{\"bank\"}`, a counter where that bank's customers withdraw and deposit. Where cash machines run (Money 4), cash comes out and goes in only at one of the two; at another bank's machine the product's `fees.atm` comes on top of the surcharge, a card's `daily_atm_limit` caps a day's withdrawals, and a deposit at a machine stays on hold for the account's `hold_days`. This applies only once the world places at least one `atm` or `branch`; place none and cash moves freely at every level.\n- **Credit** is played, not written: each person's report and monthly score (300 to 850) come from how their credit accounts are used and paid, and set the rates they are offered. An account's `opened` date counts toward its age.\n\n**Player claims.** A typed action on a thing the player says they have that the world doesn't may make it (the chat's Player claims setting): an item with `fields.claimed: true`, the POV's, priced against `economy.catalog`. It is never money and never an authored thing: a requirement or gate on an id (`carries(self, 'shop_office_key')`) never passes on a claimed key, while `has_item` by name counts one, so test ids for what must be earned. Keys, weapons and documents always ask the player first; `packs.economy.config.claimCap` (minor units; unset, twice `meals_out`'s typical price) caps what a capped policy makes without asking.\n\n## Holdings and property\n\nEverything a party owns besides the money in its accounts: positions in assets, real estate and stakes in businesses, each counted in its net worth. Prices, payouts, trades and gains run where the `investments` feature does (Money 4), options where `options` does (Money 4), and property from Money 3 (`property`). The examples here build on the marina business of Money.\n\n### Assets\n\nAn **asset** is defined once, in `packs.economy.config.assets` by id (the modern starter lists `broad_us_equity_index`, `glbd`, `lkfr`, `tnote_2030` and `btc`): a `label`, a `class` (`security`, `fund`, `bond`, `option`, `property`, `business_stake`, `crypto` or `other`), a `symbol` to show, and its `price` per unit at the start (100.00 when left out).\n\n- **How its price moves:** each class follows a recipe row of the finance table's `investing` section: securities and funds the stock index (`broad_us_equity_index`), bonds `bonds_aggregate`, crypto `crypto`. `model` names another row (`cash` holds its price), and an asset's own `annual_return_pct` (its total return), `annual_volatility_pct` and `correlation` (0 to 1, how closely it moves with its market) override the recipe. Prices are marked at 16:00 on each business day, every day for crypto.\n- **What it pays:** `yield_pct` of its value a year, paid `pays_per_year` times (4 for securities and funds, 12 for a bond fund, none for crypto). A payout comes out of the total return, so it is never counted twice. A single bond has a `face`, a `coupon_pct` and a `maturity`: it pays its coupon twice a year and is redeemed at its face on its maturity date.\n- **An option** names its `underlying` (an asset the world lists), `strike` (per unit), `expiry` (`YYYY-MM-DD`), `right` (`call` or `put`), `multiplier` (100 units a contract) and `settlement` (`physical`, the default, or `cash`). It is priced from its underlying, so it takes no `price`.\n\nLint (`economy.assets`) requires a class, an option's terms, a bond's maturity with its face and a price above zero, and warns about a `model` the table doesn't list. A regional fund with its own return and twice-yearly payouts, and a December call on Lakefront Freight:\n\n```json\n[\n  { \"op\": \"add\", \"path\": \"/packs/economy/config/assets/glix\", \"value\": { \"label\": \"Great Lakes Index Fund\", \"class\": \"fund\", \"symbol\": \"GLIX\", \"price\": 11240, \"annual_return_pct\": 8, \"annual_volatility_pct\": 18, \"yield_pct\": 2.2, \"pays_per_year\": 2 } },\n  { \"op\": \"add\", \"path\": \"/packs/economy/config/assets/lkfr_c4500_dec26\", \"value\": { \"label\": \"LKFR December 2026 45 call\", \"class\": \"option\", \"underlying\": \"lkfr\", \"strike\": 4500, \"expiry\": \"2026-12-18\", \"right\": \"call\" } }\n]\n```\n\n### Holdings, trades and payouts\n\nA **holding** is an entity of kind `holding`, a position in one asset: in an `account` (a brokerage or retirement account, its owners the holding's by their shares) or held directly by its `owners`. Its `lots` are its purchases, oldest first, each `qty`, its whole `cost` and when it was bought (`at`); for an option, `qty` counts contracts. Lint (`economy.holdings`) requires an asset the world lists, an account that is one, owners for a holding in none, and lots as a list.\n\n- **Trades are played** (the `trade` action): buy or sell an asset or a holding, in units or for an amount (a sale with neither sells it all), held in an `account` (else directly), paid `from` an account (else the investment account's own cash, else the buyer's deposit account), with the proceeds `to` an account (else the holding's account, else the seller's deposit account). Units go first in, first out, and each sale realises its gain, short term on lots held under a year. A retirement account keeps a sale's proceeds.\n- **Options** trade whole contracts. Before expiry, a holder exercises in play (`exercise_option`): a call pays the strike for 100 units of the underlying, which land in the same account. At the close on its expiry date a contract in the money settles in cash at what it is worth, and one out of the money expires worthless.\n- **Payouts** are flows: dividends mid-month in evenly spaced months ending in December (quarterly: March, June, September and December), a bond fund's monthly, a bond's on its coupon dates, each the units held then times what a unit pays. One lands where the holding's `route` says: `reinvest` buys more units at that day's price, as a new lot; an account id pays it there; left out, it goes to the holding's account, else each owner's deposit account by share. A retirement account keeps what its holdings pay unless they reinvest. In play, `route_distributions` changes a holding's route.\n\nTwenty units of the fund, its payouts reinvested, and two of the calls, in the POV's brokerage account:\n\n```json\n[\n  { \"op\": \"add\", \"path\": \"/entities/hold_pov_glix\", \"value\": { \"id\": \"hold_pov_glix\", \"kind\": \"holding\", \"name\": \"Great Lakes Index Fund\", \"tier\": \"background\", \"fields\": { \"account\": \"acct_pov_brokerage\", \"asset\": \"glix\", \"lots\": [{ \"qty\": 20, \"cost\": 196000, \"at\": \"2025-03-02\" }], \"route\": \"reinvest\" }, \"relations\": [] } },\n  { \"op\": \"add\", \"path\": \"/entities/hold_pov_lkfr_calls\", \"value\": { \"id\": \"hold_pov_lkfr_calls\", \"kind\": \"holding\", \"name\": \"LKFR December calls\", \"tier\": \"background\", \"fields\": { \"account\": \"acct_pov_brokerage\", \"asset\": \"lkfr_c4500_dec26\", \"lots\": [{ \"qty\": 2, \"cost\": 37000, \"at\": \"2026-08-20\" }] }, \"relations\": [] } }\n]\n```\n\n### Property\n\nA **property** is an entity of kind `property`, real estate tied to a `place`, with `owners` (and their `share`s):\n\n- **Its value** is `value` now. It moves on the 1st of each month at its `appreciation_pct` a year with its `volatility_pct` swings (else the finance table's home prices); `purchase_price` and `purchased` are what it cost and when, for the gain on a sale.\n- **Its costs** are flows its owners pay by share: property tax at `tax_pct` of its value a year (else the regions table's rate for its `region`, else its first owner's, else the economy's), in `tax_installments` bills (2 a year); `insurance` a month (else the table's typical, scaled to its value); and upkeep, `upkeep_pct` of its value a year (1 when left out), each month.\n- **A mortgage** is an account of the `mortgage` product, with its own `apr_pct`, `payment`, `months_left` and the rest as any loan has, whose `secured_by` names the property; the property's `mortgage` names it back, and lint warns when the two don't. Equity is the value less what it secures.\n- **A lease** is a `rent` flow from the tenant to an owner (or into an account of theirs), `link`ed to the property, with `start` and `end` for its term. Each lease covers one of its `units` (1 when left out). With `managed: true`, each unit no lease covers is let to outside tenants at `market_rent`, lease after lease of `lease_months` (12) with about `vacancy_months` (1) empty between, from `let_from` (else the world's start), their rent into `rent_to` (else the owners' deposit accounts by share).\n- In play, `property_buy` buys one with an `asking_price` or nobody's, `property_sell` sells a share, and `lease_start` and `lease_end` let a unit and end a lease.\n\nThe marina's grounds, owned by the marina business, with a mortgage it pays from its operating account and its bait shop let to an outside tenant:\n\n```json\n[\n  { \"op\": \"add\", \"path\": \"/entities/prop_alder_harbor_marina\", \"value\": { \"id\": \"prop_alder_harbor_marina\", \"kind\": \"property\", \"name\": \"Alder Harbor Marina grounds\", \"tier\": \"background\", \"fields\": { \"place\": \"alder_harbor_marina\", \"owners\": [{ \"party\": \"alder_harbor_marina_co\", \"role\": \"owner\" }], \"value\": 65000000, \"appreciation_pct\": 2.5, \"purchase_price\": 41000000, \"purchased\": \"2001-03-15\", \"mortgage\": \"acct_marina_mortgage\", \"insurance\": 42000, \"upkeep_pct\": 1.2 }, \"relations\": [] } },\n  { \"op\": \"add\", \"path\": \"/entities/acct_marina_mortgage\", \"value\": { \"id\": \"acct_marina_mortgage\", \"kind\": \"account\", \"name\": \"Marina mortgage\", \"tier\": \"background\", \"fields\": { \"owners\": [{ \"party\": \"alder_harbor_marina_co\", \"role\": \"owner\" }], \"product\": \"mortgage\", \"institution\": \"Great Lakes Bank\", \"opening\": -18000000, \"apr_pct\": 5.1, \"payment\": 191800, \"months_left\": 120, \"due_day\": 1, \"autopay\": \"minimum\", \"autopay_from\": \"acct_dale_marina\", \"secured_by\": \"prop_alder_harbor_marina\" }, \"relations\": [] } },\n  { \"op\": \"add\", \"path\": \"/entities/lease_marina_bait_shop\", \"value\": { \"id\": \"lease_marina_bait_shop\", \"kind\": \"flow\", \"name\": \"Rent, bait shop\", \"tier\": \"background\", \"fields\": { \"flow_kind\": \"rent\", \"from\": \"Gull Point Bait & Tackle\", \"to\": \"alder_harbor_marina_co\", \"amount_cents\": 65000, \"every\": \"month\", \"days\": [1], \"start\": \"2026-05-01\", \"end\": \"2027-04-30\", \"shortfall\": \"skip\", \"link\": \"prop_alder_harbor_marina\" }, \"relations\": [] } }\n]\n```\n\n### Business stakes and net worth\n\n**A stake** is an owner's share of a business: of its `value` when one is set, else of its book value (its own net worth from its accounts, holdings, property and stakes, plus what its customers owe it less what it owes) plus its last twelve months' profit times its `valuation_multiple` (3 when left out). Each owner's share of a profit distribution lands where they route it in play (`route_distributions`; `reinvest` keeps it in the business, adding to the stake), and `stake_sell` sells part of a stake.\n\n**Net worth** is a party's share of the accounts it holds with a role that counts worth, plus its share of every holding at market, of every property's value and of every stake. A mortgage is one of its accounts, so a property's debt counts once. A party with accounts has the wealth band of its net worth; one without keeps its `wealth` field.\n\nThe marina, with a waiting list for its slips, is worth four years' profit over its books:\n\n```json\n[{ \"op\": \"add\", \"path\": \"/entities/alder_harbor_marina_co/fields/valuation_multiple\", \"value\": 4 }]\n```\n\n## Places, routes and maps\n\n- Places form a tree through `parent` (a town holds streets, a building its rooms). A place the player hasn't heard of yet is `\"visibility\": \"discoverable\"`.\n- Routes join places with minutes per travel mode (`walk`, `road`, `offroad`, `water`), both ways unless `bidirectional` is false.\n- **A map owns what it draws.** A map (`/maps/<id>`, format `lre-map-v1`) draws one place's inside, as a grid of characters or as linked places, and compiles into places, a grid and routes that carry `\"map\": \"<map id>\"`. Those are the map's: **edit the map, never them**. A write to a place, grid or route a map draws is refused (\"drawn by the map …; edit it there\"), and so is setting `map` on anything else. After a change to the map, the engine draws its places, grid and routes again; delete the map and they go with it. A place, grid or route you write yourself with the same id as one a map would make wins over the map's.\n\n## Tracks: quests and secrets\n\nA track is a small state machine: `start` names its first stage, and each stage's `next` lists `{\"to\": stage, \"when\": formula}`, taken in order when the formula holds. A stage may carry a `cue` (what the player can know now), `objectives`, `effects` on entering, `rewards` on leaving, a `gate` and a `fail`. A stage with no `next` ends the track. Secrets advance only by their formulas, never by a model.\n\n- **Quests** start at the stage the story has reached, not at the beginning: `start` is today's stage.\n- **Secrets** keep a `truth` (what is really so, kept from the player) on the stage that reveals it, and a `cue` (what the player can notice) on the stages before. A cue never states the truth.\n- **Puzzles** an action of yours answers take `story.answer`'s `track`: the puzzle's own id, written out, never a formula.\n\n### A revealed secret starts one stage earlier\n\nThe engine records a reveal only when a track **enters** a stage with a `truth`. A track that starts on its truth stage never enters it, so the truth is never revealed: the Journal never shows it and the narrator is kept from saying it. **Never start a secret track on a stage that has a `truth`.** For a secret the player has already learned, start one stage earlier on a stage that moves on at once, so the first turn reveals it:\n\n```json\n{ \"id\": \"silas_debt\", \"kind\": \"secret\", \"label\": \"What Silas owes\", \"visibility\": \"secret\", \"owner\": \"silas\", \"start\": \"rumor\", \"stages\": {\n  \"rumor\": { \"label\": \"Something is off\", \"next\": [{ \"to\": \"known\", \"when\": \"true\" }] },\n  \"known\": { \"label\": \"Silas owes the guild\", \"truth\": \"Silas borrowed the guild's harbor dues to pay a gambling debt.\", \"next\": [] } } }\n```\n\n### Cues never name the secret\n\nA person's `cues` are what the narrator sees them do while a secret of theirs stays hidden: `{\"text\": \"Changes the subject whenever the guild comes up.\", \"track\": \"silas_debt\"}`.\n\n- Each cue stands for exactly one secret: a `track` (while it keeps something hidden), a secret `lore` entry (until its gate holds) or a story `flag` (until it is set). A cue keyed to none, or to several, never shows.\n- Write behaviour, never the secret: a cue that holds a track's truth or a phrase of secret lore is a lint error, because it gives the secret away.\n- Name no one the player may not know: such a cue is left out while they don't (lint warns).\n- Only people have cues that show; the stage cues of the tracks a person owns reach the narrator the same way.\n\n## Lore\n\nLore entries (`/lore/<id>`) are what the world knows, read by the engine's own helpers: `{id, title, content, keys, links, aliases?, topics?}`, where `links` are the ids of the people and places an entry is about.\n\n- `\"visibility\": \"known_by\"` keeps an entry back until the player knows every person and place it links.\n- **A secret entry** holds a secret itself: `\"secret\": true`, a `gate` formula that reveals it (lint refuses a secret without one), and an `audience` of the helpers that may read it before then (`npc.choose`, `contradiction`, `puzzle.answer`, `judge`, `interpret`). The helpers that write for the narrator or the player (`brief`, `outline`, `choices`, `extract`) never read it early, even when listed. A mind reads a secret entry only when its `holders` name the character or a cue of theirs stands for it; `links` and an opened gate never do.\n- A public entry must never repeat a track's truth: lint refuses it (`secret_truth`).\n- `loreIndex` routes the helpers' lookups: `terms` maps a lowercase term to entry ids, `topics` gathers entries under a label.\n\n## Data tables\n\nPrices, pay, taxes, occupations, regions, gear and the calendar's holiday rules come from data tables (`/tables/<id>`): typed `columns` and `rows` keyed by row id, read by the packs and by `table(id, key, column)` in formulas.\n\n- Every new world, blank or a starter, carries the seventeen default tables; edit them in place. A new table comes whole, with `id`, `pack`, `schema`, `label`, `columns` and `rows`: adapt one (`lre_template` at `/world/tables/<id>`).\n- Cells follow their column: a `band` is `{\"min\", \"typical\", \"max\"}`, money columns are in the currency's minor units, and a `ref` names a row of another table.\n- A table's `revision` and its pin in `pins.tables` are the engine's: every write that changes a table computes both again (`hashJson` of its schema, columns and rows). Don't write either, and don't patch `/pins`.\n- Each revision of the world keeps its own copy of its tables, so a running chat sees a table change only through an Upgrade.\n\n## Host macros\n\nLumiverse runs macros (`{{…}}`) in its prompt and acts on its control characters and `<user>`, `<char>` and `<bot>`. LumiRPEngine keeps authored text as written, so in lore and in section and step templates these are hazards:\n\n- A section template may use only `{{lines}}`; anything else in one is a lint error (`section_macro`).\n- Step templates use the engine's own placeholders (`{{world}}`, `{{pov}}`, `{{place}}`…); lint warns about one it doesn't know.\n- Keep `{{user}}` and `{{char}}` out of lore unless the user put them there on purpose. `lre_edit` and `lre_commit` list every hazard a change brings in; say which ones you added.\n\n## Setup, lore and jobs\n\nBeyond a world's document, the tools reach what the user sets up once and what Build runs for them. Settings and the preset are the user's own, for every chat: change them only when asked, and say what you changed.\n\n### Settings and presets\n\n`lre_settings` reads the settings as Settings shows them; a `section` narrows it to one page's part: `helper` (Helper model), `modelUse` (Model use, and Steps and connections under `steps`), `minds`, `timeouts`, `realism` (Realism, and Player claims under `claims`), `adjudication` (Checks), `time`, `extraction` (Changes from the reply), `swipeDefault` (Swipes), `hideJsonBlocks` (Preset), and the two switches that make new chats use these over a world's own (`overrideWorldDefaults`, `overrideWorldAdjudication`). `extractionModes` is read-only: each change type's mode now and where it comes from (pinned, learned on the connection, or the default).\n\n`lre_settings_set` takes a JSON merge patch, as the pages send: objects merge, a list or a value replaces, `null` deletes (unpin a change type with `{\"extraction\": {\"purchase\": null}}`).\n\n- A named preset expands: `{\"realism\": {\"preset\": \"grounded\"}}` sets every level and band cap, `{\"modelUse\": {\"preset\": \"standard\"}}` every step, budget and the minds' policy. A change to what a named preset sets makes it `custom`, as Settings does; the answer's `presets` says so.\n- LumiRPEngine keeps every value within what it takes. `adjusted` lists what came out other than sent (a value out of range, a key it doesn't know, a preset's own values): read it, don't assume the patch landed as written.\n- A step's route names a Lumiverse connection by id (`route.connectionId`, null for the helper model's); its template (`template`) is the step's prompt. A world's own step templates are its document's `/steps`, written with `lre_edit`.\n- Realism, checks and time seed new chats only. A running chat changes through its own markers (GM → This chat).\n- The answer carries the caveats as they read now; `lre_settings_caveats` reads them alone. They dry-run the chat the user plays, which takes a while on a long chat: \"still checking\" means ask again in a moment.\n\n`lre_preset` reads the active Lumiverse preset as the engine does: the section outlets its enabled blocks hold (`{{outlet::lre_<section>}}`) and each guidance block (\"RPEngine · <step>\"): missing, empty (notes only), read (switched off but written: its text goes to that helper) or enabled (switched on, so it also lands in the main prompt; it should be off). `lre_preset_add_blocks` adds the missing ones, switched off, under an RPEngine category, and touches none already there. The engine learns which preset is active from the user's open page or the chat they last played: with neither, it can't tell, and says so.\n\n### Diagnostics\n\n`lre_diag {chatId}` reads a chat's activity line (what the engine is doing now, or the step that failed last) and counts its records. The records themselves (each turn's steps, model calls with connection, model, tokens and finish reason, failures with what to do, the sections each run wrote, slow requests) come only with `spoilers: true`: a step's reason can name someone the player hasn't met. Keep them out of anything the player reads. `failures: true` keeps the failed steps, warnings and errors; `last` the newest n. A failing step's `fix` says what the user can do, often a timeout or a step's model in Settings. `lre_diag_clear` forgets the records; `lre_activity_dismiss` clears a failure from the activity line.\n\n### Lore books, pins and drift\n\nA world's lore is its document's (`/lore`, and pins at `/lorePins`), written with `lre_edit`. A pin makes a character's mind calls, or every call at a place, always read an entry: `{\"lore\": \"<id>\"}` for the world's own, `{\"book\": \"<bookId>\", \"entry\": \"<entryId>\"}` for an entry of one of the user's World Info books. `lre_lore_books` lists the books a pin may name (with `chatId`, that chat's own first), `lre_lore_entries {bookId}` a book's entries.\n\n`lre_lore_pins {worldId}` reads every pin of the draft now: its entry's title, its source, and its status (`ok`, `missing`, `pending`: an AI-written entry not reviewed yet, which nothing reads; `off`: switched off in its book, which a pin still reads). With `chatId` it reads the revision the chat plays, as GM → Minds does, and needs `spoilers: true`.\n\n`lre_lore_drift {worldId}` lists the entries indexed from a book whose book entry changed since (with its text now) or is gone. To take the new text, write it into the entry's `content` with `lre_edit`. `lre_lore_save {chatId}` makes the chat's latest reply (or `text`, an excerpt of a message) a new lore entry in the draft of the chat's world, sourced to its message.\n\n### Build's jobs\n\n`lre_job_start {worldId, kind, …}` runs one of Build's jobs on the user's Lumiverse and answers its id at once:\n\n- `import_lore {bookIds}`: entities, places and facts from World Info books;\n- `index_book {bookId}`: a lore entry per book entry, keeping the book's text, with aliases, topics, links and lookup terms;\n- `index_text {text}`: lore entries in the text's own words, marked as written by the AI;\n- `refine {instructions}`: world edits for a request in words;\n- `describe_map {scope, prose, mapId?}`: a map of a place from its description;\n- `playtest {turns}` and `check_world {days?}`: the engine alone on the draft, as `lre_playtest` and `lre_check_world`, but on the host.\n\nModel jobs spend the user's helper model calls: start one when the user asked for it. `lre_jobs {worldId}` shows each job's status and progress and what it found in counts; `lre_job {worldId, jobId, pointer}` reads it whole (`/result/proposals/0` is one proposal: collection, key, the value it writes, source, confidence, note). A job proposes; nothing changes until `lre_job_apply {worldId, jobId, proposals?, expectVersion}` writes the ones you accept into the draft in one write, as Build's review does (an AI-written entry then counts as reviewed, and accepted lore joins the lookup table). Read each proposal before you apply it, then check the draft with `lre_draft`. A proposal's key replaces an item there by that key. `lre_job_cancel` stops a job; `lre_job_dismiss` forgets one that ended, with its proposals.\n\n### Profiles, the sheet, lint and the Studio\n\n- `lre_profile {worldId, profile, preview: true}` says what a ruleset profile (`modern`, `classic`, `fifth`, `custom`) would add, what is the same already, and where it conflicts with the draft; without `preview` it applies in one write. Each conflict keeps the draft's own unless `take` names its path; `values` are people's stored values a taken field can't hold, and what they become.\n- `lre_sheet {worldId}` previews the character sheet a new chat would start with, from the draft's ruleset or one you pass as `ruleset`, on the point of view or `entity`. Nothing is saved.\n- `lre_lint {worldId}` lints the head on the host; `lre_draft` lints the draft.\n- `lre_studio_offer` reviews what LumiRPEngine Studio offers (a new world, or the next revision of one), with its lint, macros and what blocks it; `lre_studio_install {offerId, hash}` installs the one reviewed. When the target's head moved since the Studio took it, installing drops what was committed since: ask the user before passing `acceptMovedHead`.\n\n### A chat's map\n\n`lre_map_walk {chatId, x, y}` says what Walk here would take to a cell of the grid the point of view stands on, judged on the real ground; nothing moves. `lre_map_display {chatId, display}` shows the map as what the point of view knows (`knowledge`) or under fog (`fog`): presentation only, kept beside the chat.\n\n## Playing a chat\n\nThe chat tools reach a chat that plays a world as the user's Play does; `lre_chats` gives the chat ids. They see what the player sees, unless you pass `spoilers: true`, and change the chat the way Play's own controls do. The chat is the user's game: change it when they ask, and say what you changed.\n\nA session goes like this:\n1. `lre_chats` for the chat's id, then `lre_chat_state` with pointer `\"\"` for an outline of what Play shows, and the parts you need from there.\n2. Before a turn, read what it can be: `/palette/entries/<i>` for an action's options and their `params`, `/palette/timelapse` for the skips on offer and what interrupts them.\n3. Make the change or post the turn, then read the state again for what it did: the HUD, the journal, the chips.\n4. Tell the user what you did, what is waiting on them (a reply to start, a chip to answer), and the Undo chip that can take a correction back.\n\n**Reading.** `lre_chat_state` reads the chat's state view at a JSON Pointer, the view the chat's page is sent: `/hud` (the clock, place, weather, cash and, at `/hud/fixes`, the ✎ fixes it offers), `/scene` (who is present), `/chips`, `/journal`, `/keepReport`, `/palette` (the actions at `/palette/entries`, the timelapse at `/palette/timelapse`), `/controls` (the realism, time controls, player-claims policy and checks policy the chat plays by), `/panels` (each pack's panel: Money, Gear, Calendar, the map…) and `activity`, what the engine is doing for the chat now (null when idle). It holds only what the player can know. `lre_chips` lists the chips under the messages with their actions; `lre_inspector` reads the context inspector: what the engine put in each of the last ten prompts, what its steps read of the lore, and its warnings.\n\n**Behind the curtain.** `lre_gm` (the GM view: every entity, secrets, hidden places, track truths, everyone's money, the edits in force) and `lre_minds` (each character's fidelity, latest mind, plans, notes and commitments) need `spoilers: true`, and so do the tools that edit them and Run minds now. Pass it only when the user asked to look behind the curtain, and keep what it shows out of anything the player reads: the chat, a message you post, a fix.\n\n**Changing the chat.** A write lands on the chat's latest message, as Play's do. During a reply it is held (`pending: true`) and lands when the reply finishes. A chat whose status is `paused` (the player edited an earlier message of theirs) refuses every write until `lre_keep` settles it, naming the edited message: `keep` re-checks the later turns against the edit and lists what no longer holds in `/keepReport`; `discard` removes the later turns' records for good (their messages stay as plain text, and the world forgets them), so ask the user first; `convert` brings chosen dropped lines of the keep report back.\n- `lre_fix` is the player's ✎: `fix` names a HUD fix (`place`, `weather`, `cash`, `scene`; each at `/hud/fixes` with its type and options), or give `entity` and `field`, with the `value` in the field's type; `time` (`\"2026-09-14 18:30\"`) sets the clock, running the time between when it is later. A locked field is refused.\n- `lre_gm_edit` is the GM editor: operations in order, all or none, on any entity, locked fields included. They are the engine's own edits, not JSON Patch: each names its `op` and what it touches (the tool lists them all), with ids from `lre_gm`:\n\n```json\n[{ \"op\": \"move\", \"entity\": \"pov\", \"to\": \"bluebird_coffee\" },\n { \"op\": \"adjust\", \"account\": \"acct_pov_checking\", \"cents\": 5000 },\n { \"op\": \"stage\", \"track\": \"q_pontoon_weekend\", \"to\": \"diagnose\" }]\n```\n\n- `lre_marker` changes how the chat plays from its latest message on: `resolve` (a domain's realism level, for everyone, a band or one entity), `time` (a control: `tick`, `scale`, `pause`, `interrupt`, `speed_through`, `montage`, `unit_cap`), `claims` (what a typed action's thing the world doesn't have becomes), `adjudicate` (the whole checks policy: read `/controls/adjudication`, change what you need, send it back) and `infer` (when typed attempts roll skill checks, the same way from `/controls/inferred`). `preview: true` says what it would change and writes nothing; read it first, since a lower level freezes what the higher one tracked.\n- `lre_view_open` opens a panel as the player does, which settles detail the chat hadn't decided yet (a balance first looked at); opening `core.context` checks the active preset.\n- `lre_chip` answers a chip with one of its action ids (an amount or a pick in `payload` when the action asks for one).\n- Each ✎ fix and GM edit leaves an Undo chip; tell the user it is there.\n\n**Playing a turn.** `lre_action` plays a palette entry (its `action`, and the picked option's `params`) and `lre_timelapse` a skip (`target` as `/palette/timelapse/until` lists them, or `{\"type\": \"duration\", \"minutes\": 120}`); `text` is the player's words for how they do it. Each posts the player's message, and the engine prepares the turn at once. **The reply is Lumiverse's to start, not yours:** a page that shows the chat starts it on its own; with none, it waits until the user opens the chat in Lumiverse. So ask the user to open the chat, then read `activity` and the state for what the turn did. The same goes for a chip's Send (a suggested move) and for the actions `lre_chips` marks `regenerates` (Re-narrate, Re-run, Retry read, a claim's Add): those take effect on the reply's next swipe, which the user makes with Regenerate or a swipe, and a plain Regenerate is only that.\n\n**Minds.** `lre_minds` reads them; `lre_mind_edit` pins a character's fidelity (`mind_pin`, `level` null to unpin), asks for a fresh mind next turn (`mind_refresh`), edits, adds (`id` null) or deletes (`value` null) a note, commitment or plan (`mind_memory`), or sets what they mean to do now, in words their own mind reads first and works from, and how they go about it (`mind_intent {entity, text?, approach?}`: `approach` `\"reactive\"`, `\"proactive\"` or null for their mind to decide; a part left out is kept, and `\"\"` with null clears it); `lre_minds_run` runs Run minds now for `who` (default everyone Live and Near), in the background, with model calls on the user's connection, so ask before you run it; `lre_minds_cancel` stops it, and a cancelled run records nothing. A run, like a GM edit, is one edit with an Undo chip.\n\n**What they can't do.** A chat tool never starts a generation, regenerates or swipes, and never writes a message but the player's turn: those are the user's, in Lumiverse. An Upgrade is `lre_upgrade`.\n\n## Before you commit\n\n- `lre_draft` shows no lint errors, and you know what each warning means.\n- The POV exists and stands at the start place; the start time is the story's present.\n- Every id an item names (a place, an owner, a relation target, a track in a formula, a lore link) exists.\n- Everyone who has met the POV holds a `knows` or a `regard` toward them.\n- A death or dying the player hasn't learned of sets `lifeKnownBy`; the dead lie at a `fields.place`.\n- Everything someone owns names them in `fields.owner`; every account, business, holding and property names its holders in `fields.owners`.\n- Every flow pays from and to something that exists, with an amount and a schedule (or `once`); every job names its worker and an existing or worded employer.\n- A business is on a tier whose Money level runs what it does (4 for sales tax and business taxes), and its `operating_account` is one of its own accounts.\n- Every holding names an asset the world lists, and every mortgage and its property name each other.\n- With `\"secrecy\": \"full\"`, no character would think a secret openly.\n- No secret track starts on a stage with a `truth`, no cue states its secret, and no public text gives one away.\n- Nothing a map draws was edited outside its map; no `revision` or pin was written by hand.\n- `lre_playtest` and `lre_check_world` run without failures or leaks in their notes.\n- Commit with a note that says what changed, and tell the user what you changed and what you left for them.\n";
+var AGENT_GUIDE_default = "# Writing LumiRPEngine worlds: a guide for agents\n\nRead this before you touch a LumiRPEngine world through the `lumirpengine` MCP server or command line ([MCP.md](MCP.md)): the world model, how to work on a user's worlds, and the mistakes that are easy to make and hard to see. Every kind, field, effect and formula function is in the reference (`lre_docs`); complete worlds to learn from are the starters (`lre_template`). How outside agents reach LumiRPEngine is DESIGN §23.\n\n## The world model\n\nA world is one JSON document in the `lre-world-v1` format, with a published JSON Schema (`lre_schema`). Each commit makes an immutable **revision**, named by its content hash; the newest is the world's **head**, and a chat plays the revision it was started on until the player upgrades it. Changes go to a **draft** first: a working copy that a commit turns into the next revision.\n\n- **Collections** are objects keyed by id: `kinds`, `relations`, `entities`, `places`, `routes`, `grids`, `maps`, `rules`, `actions`, `checks`, `schedules`, `tracks`, `tables`, `sections`, `steps`, `packs`, `lore`, `classifications`, `tiers`, and `lifeStates` and `routines` when the world has them.\n- **Parts** are single values: `calendar`, `realism`, `time`, `start` (`{place, at}`), `pov` (the entity the player plays), `currency`, `loreIndex`, `pins`, and the optional `ruleset`, `mapSettings`, `spawnTier`, `spawnCap` and `routineSettings`.\n- **Checks:** `ruleset.adjudication` decides how checks are decided, and `ruleset.inferred` how a typed attempt no action with its own check covers is read as a check of the world's sheet (`mode`, `when`, `who`, `skills`, `difficulty`, `detail`, `others`, `guidance`, `most`; it must name its `mode`). A world without one leaves inferred checks to each chat's realism preset. The skills it rolls are the world's own: the rows of a skill action's table (Use a skill, Make a save) or the Sheets pack's stats, so give an attempt that matters to the story its own action with its own check, which keeps it.\n- **Kinds** are types with fields and single inheritance (`extends`). The packs define the common ones: `thing` (with `owner` and `place`), `person`, `item`, `container`, `kit`, `vehicle`, `region`, the money kinds (`account`, `card`, `flow`, `job`, `holding`, `property`, `business`, `trust`, `invoice`), and `group` with its `faction`, `family`, `household` and `company`. A world kind with a pack kind's id replaces it whole, so extend a pack kind rather than redefine it.\n- **Entities** are the people and things: `{id, kind, name, tier, fields, relations}`, plus `life`, `lifeKnownBy`, `agent`, `cues`, `class`, `tags`, `visibility` and `knownBy` as needed. Fields hold values; relations are `{type, to, fields?}` links to other entities.\n- **Actions** need a one-line `description`: typed messages are read against each action's label and description.\n- **Formulas** are strings in a small, safe expression language (`lre_docs` with `doc: \"expressions\"`): `at(pov, 'archive')`, `stage.hale_debt == 'revealed'`, `hour >= 18`. Dice are notation strings (`1d20`).\n- **Money** is always a whole number of the currency's minor units: 4250 is $42.50 in a dollar world. **Times** are local ISO date-times (`2026-09-14T18:30`).\n\n## How to work on a user's world\n\n1. **Read before you write.** `lre_worlds` lists the worlds and whether each has a draft stored. A draft that is already there when you start is the user's work in progress: ask them before you edit, commit or discard it. `lre_world` reads one at a JSON Pointer: `\"\"` gives an outline of the whole world (collections with their ids), `/entities/mara` one item. `lre_search` finds an item by what it says.\n2. **Edit the draft.** `lre_edit` takes JSON Patch (RFC 6902) operations whose paths point into the whole world: `add` creates an item or a field, `replace` changes one that exists, `remove` deletes, `test` guards a value. All the operations of one call apply, or none do. Pass `expectVersion`, the draft version from your last read (`lre_world`, `lre_draft` and `lre_worlds` give it even with no draft stored; each `lre_edit` answers the new one): if the draft has changed since, the edit is refused.\n3. **Check.** Every `lre_edit` answers the lint the draft has now and any macro hazard the edit brought in. `lre_draft` sums up the draft against the head; `lre_diff` shows field by field what changed. `lre_playtest` plays typed turns and `lre_check_world` simulates whole days, both with the bundled engine and no model.\n4. **Commit, or discard.** `lre_commit` with a short note makes the draft the head; the note goes into the world's history (`lre_history`). It is refused while the draft has lint errors, which it lists. `lre_discard` throws the draft away. Pass both the `expectVersion` you last saw, as for `lre_edit`.\n\n**The draft is the user's Build draft.** Build edits the same single draft: the user sees your changes as you make them, and you see theirs. Don't leave a draft behind: commit what you finished, discard what you didn't, and say which you did. If an edit is refused because the version moved, read the draft again: the user may be editing it.\n\n**A commit takes the whole draft.** When the user presses Commit in Build, your unfinished changes go into that revision with theirs; when you commit, their changes go in with yours. So finish one change before you start the next, and tell the user what you are in the middle of. With `expectVersion`, `lre_commit`, `lre_discard` and `lre_restore` are refused if the draft moved since you read it. A commit is refused, too, when the head is no longer the revision the draft began from: compare with `lre_diff`, discard, and redo the change on the new head.\n\n**Chats keep their revision.** Committing changes no running chat. `lre_chats` says which chats are behind; `lre_upgrade` with `preview` shows what an Upgrade would bring in; without it, it applies the default picks: what play never touched takes the new revision, what play changed stays. So keep every id a chat uses: a renamed id is a new thing, and the old one stays in the chat.\n\n**Offline work.** Without a Lumiverse, write the world as a file: start from a starter (`lumirpengine template <id> --out world.json`), check it with `lre_check` after each change, run it with `lre_playtest` and `lre_check_world`, and bring it in with `lre_world_import` (or Build's Import) once it is clean.\n\n## JSON Patch on a world\n\n- An item is added whole: `{\"op\": \"add\", \"path\": \"/entities/mara\", \"value\": {\"id\": \"mara\", \"kind\": \"person\", …}}`. Adding to a key that exists replaces it, so to change one field, point at the field: `/entities/mara/fields/place`.\n- `replace` and `remove` need something there; `add` needs the parent to exist (`/entities/mara/fields` must be an object before `/entities/mara/fields/place` can be added).\n- In a list, a number is the index and `-` is the end: `{\"op\": \"add\", \"path\": \"/entities/mara/relations/-\", \"value\": {\"type\": \"knows\", \"to\": \"pov\"}}`.\n- In a key, `~1` stands for `/` and `~0` for `~`: the table `economy.catalog` is `/tables/economy.catalog`, and a key `a/b` is `/x/a~1b`.\n- `test` makes an edit conditional on what you read: `{\"op\": \"test\", \"path\": \"/entities/mara/name\", \"value\": \"Mara\"}` first, and the whole patch is refused if Mara was renamed meanwhile.\n- `/id`, `/format`, `/engineVersion`, `/suppressed` and `/pins` are the engine's: a patch may not change them.\n- One patch carries at most 500 operations and brings in at most 4 MiB of JSON (what it adds, replaces and copies), and the world may nest at most 64 levels deep. An item the engine can't read (`/lore/x` set to `{}`) is refused before anything is written, so add items whole.\n\n## Ids and keys\n\n- Every item's `id` repeats its key. Lint refuses a mismatch for entities, lore entries, step templates and classifications; keep them equal everywhere.\n- Ids are lower snake_case by convention (`old_bram`, `quay_to_market`) and are what everything else refers to: `fields.place`, `fields.owner`, relation targets, track ids in formulas, lore `links`. Look them up rather than guess them; every reference to an id the world doesn't have is a lint error or a dead link.\n- An item's key must be 1 to 200 characters and never `__proto__`, `constructor` or `prototype`; the engine refuses any other.\n- A world's own id (`w_…`) is the host's: `lre_world_create` and import assign it.\n\n## People\n\n- **The POV** (`pov`) is the entity the player plays, a `person` on a lead tier, never capped by realism. `start` is where and when play begins, and the POV stands there unless its `fields.place` says otherwise.\n- **Tiers** say how deeply someone is simulated: by default `principal` (Leads), `supporting` and `background`. `\"agent\": true` makes someone pursue their own agenda off-screen, and live the plans the story gives them. Anyone else only follows their schedules: their plans are never lived and lapse, so mark `agent` on whoever should act on their own plans. An agent's ordinary day comes from their routine (see Routines and schedules).\n- **Who knows the POV.** Everyone who has met the POV holds a `knows` relation toward the POV, or a `regard`. The narrator learns from exactly that whether Mara knows you, so a friend without either greets the player as a stranger.\n- **Regard** is one directed relation with `warmth`, `trust` and `respect` from −100 to 100; write each direction that matters. Kinship (`parent_of` and `child_of`, `sibling_of`, `spouse_of`, `partner_of`) is kept two-sided: write both sides.\n- **Life and death.** `life` is the state someone starts in: `alive` when unset, `dying`, `dead`, or one of the world's own `lifeStates`. The dead keep their place: give a body a `fields.place` where it lies, and no schedule (someone who doesn't act follows none).\n\n### lifeKnownBy: who knows how someone starts\n\nWhen someone starts dead or dying, `lifeKnownBy` lists the ids of the people who know it; everyone else, the POV included, takes them for alive until they see the body or are told. **Left out or empty, everyone knows**, which tells the player at once. So:\n\n- a death the player hasn't learned of lists who does know, including everyone who starts in the same place as the body;\n- when nobody else knows yet, list the person themself (the list is then not empty, and no one else learns it);\n- on someone who starts alive it changes nothing (lint warns), and every id in it must be an entity of the world.\n\n```json\n{ \"id\": \"old_bram\", \"kind\": \"person\", \"name\": \"Old Bram\", \"tier\": \"supporting\", \"life\": \"dead\", \"lifeKnownBy\": [\"silas\"], \"fields\": { \"place\": \"net_loft\" }, \"relations\": [] }\n```\n\n## Character minds\n\nA character can have a **mind**: a model call made as that character alone, on what they know (their entity's fields, never a Lumiverse character card; the lore they may read, the turns they were there for, their notes and commitments, their money and their day). It answers with their private read of the moment and what they intend; the narrator then depicts it. Minds are blind to each other; Playtest and Check world call no model, so they play a world without minds. So write who someone is into their fields (`description`, `traits` and the rest): no character card fills it in. A mind knows the truths of the tracks its character owns, of a secret their cue stands for, and of secret lore whose `holders` name them; a secret held from the start goes on the agenda's start stage (entering a stage tells the player its truth).\n\nWho gets a mind is decided each turn by a **focus score**: points for being in the POV's scene or close by, being named, a relation with the POV, a stake in tracks and rules under way, plans with the POV, and their tier. The score puts each character on a ladder: **Live** (a mind every turn), **Near** and **Far** (a mind on their refresh), **Background** (routine only). The world tunes the ladder and what minds remember in its `minds` part:\n\n```json\n[{ \"op\": \"add\", \"path\": \"/minds\", \"value\": {\n  \"secrecy\": \"brief\",\n  \"weights\": { \"mentioned\": 50 },\n  \"thresholds\": { \"live\": 60, \"near\": 35, \"far\": 15 },\n  \"always\": { \"ids\": [\"marcus_delgado\"] },\n  \"never\": { \"tag\": [\"crowd\"] },\n  \"memory\": { \"notes\": { \"show\": 10, \"keep\": 30 }, \"salience\": { \"halfLifeDays\": 14 } } } }]\n```\n\n- **`secrecy`** decides what the narrator gets. `brief` (the default): only a depiction, written as behaviour anyone present could see and withheld when it would give away a secret or a name the POV can't know, while the monologue stays in the GM view. `full`: the monologue, intent, reactions and mood too, to depict and never state. A mind knows its own character's secrets, so keep `brief` where a private thought reaching the narrator would give one away.\n- **`weights`** are the points each input adds, from −100 to 200: `here` 45, `nearby` 20, `mentioned` 40, `regard` 10, `knows` 10, `owner` (owns a track under way) 15, `track` (named in one) 8, `rule` 5, `pending` (an invitation, appointment or plan with the POV) 15, `recent` 10, `band` 15, 5 and 0 for principal, supporting and background, and `roles` by classification value id (`antagonist` 20). A role weight counts only where one of the world's classifications has that value (lint warns about one that none has), and a world's `roles` replaces the default map whole.\n- **`thresholds`** are the lowest scores for Live, Near and Far (60, 35 and 15); below Far is Background. Live is only for someone at hand: in the POV's scene or named this turn. Being close by adds points but never makes someone Live; anyone not at hand is Near at most, whatever their score.\n- **`always`** and **`never`** are selectors (`ids`, `kind`, `tier`, `memberOf`, `tag`, `class`): `always` keeps people Live wherever they are; `never` keeps them Background, mindless, and wins over `always`. A GM's pin in a chat wins over both. An id, kind, tier, group or classification the world doesn't have is a lint error.\n- **`memory`** is what a mind is shown and how long a note lasts, in entries unless named: `witness.show` (what they saw lately, 8), `recall.recent` and `recall.relevant` (their latest turns and those best matching the moment, 4 each) within `recall.tokens` (1200), `notes.show` (8) and `notes.keep` (24 before the oldest are folded into their summary), `commitments.show` (8; open ones are kept until resolved), `salience.halfLifeDays` (a note's weight halves every 7 game days) and `salience.floor` (below 0.5 it has faded), and `consolidate.enabled` (true: faded and surplus notes fold into the summary, not lost). The user's own settings win over the world's.\n- Every part is optional; one left out or out of range reads as its default, and lint says so. The user decides in their settings whether minds run at all, and how many Live minds a turn may have.\n\n**Prompts.** The four minds steps, `mind`, `memory`, `skip` (a time skip's turning points) and `consolidate` (folding old notes into a summary), take world step templates as the other steps do, with `\"output\": \"text\"` and `\"signals\": []`: minds run on their own cadence, so signals are ignored (lint notes any as info). The template is the step's instructions only, with `{{character}}` the character's name and `{{world}}` the world's: the engine appends the answer's format itself, which no template replaces, so write how to think, never the JSON. The player's own prompt wins over the world's template, which wins over the built-in; give each purpose one at most (lint warns of a second, and a blank one is skipped).\n\n```json\n[{ \"op\": \"add\", \"path\": \"/steps/mind_port_alder\", \"value\": { \"id\": \"mind_port_alder\", \"purpose\": \"mind\", \"output\": \"text\", \"signals\": [],\n  \"template\": \"You are the private mind of {{character}} in {{world}}, a lake town where everyone knows everyone's business and says less than they mean. Think as {{character}}, from only what they know below. Decide how they read this moment and what they intend; never script anyone else, and keep to what a neighbour would notice.\" } }]\n```\n\n## Routines and schedules\n\nA **routine** is what someone can be relied on to do on an ordinary day; a **schedule** is a commitment with set hours (a shift, school). Both are defaults the world leans on, never authority over the story: what the story established (a place or activity an action, the narration or the GM set, a trip, the GM's intent) always comes first, then schedules and appointments, then story plans, then the routine, then the basic needs (sleep, breakfast, lunch, dinner), then chores and agenda steps. Nothing else fills a day. A routine never moves anyone out of a scene with the POV and never moves a Live or Near character; it matters most for the Background cast off screen. So write a routine as a person's habits, not a timetable they must keep: leave people with no routine at all when the world says nothing about their days, and they live on the story, their commitments and their basic needs.\n\nA routine is one item of `routines`: `{id, label?, owner?, inherit?, blocks, source?}`. Its **owner** is read as a schedule's is: an entity, a group (its members), a kind, a selector, or none for the world's default for everyone. For each block id the most specific owner wins (their own, a group's, a kind's, a selector's, the world's, then the basic needs), and `inherit: false` drops the less specific routines' blocks for whom it covers. Each block has an `id`, a `label`, an `activity` (`work`, `socialize`, `leisure`, a meal, `sleep` or the world's own), `minutes`, and a `kind`:\n\n- **`fixed`** starts at `at` (`HH:MM`);\n- **`flexible`** takes its minutes somewhere in its `window` (`{from, to}`, `HH:MM`; a `to` at or before `from` runs past midnight), and `perWeek` makes it a floating block (\"the gym three times a week\");\n- **`optional`** is flexible by `chance` (above 0, at most 1): the first thing a busy day leaves out.\n\nThe rest is optional: `days` (`weekdays` with 0 for Sunday, `off: \"only\"` or `\"never\"` for days off, `holidays` and `except` by the calendar's ids, `birthday`, `seasons`, `weather`), `place` (`home`, the default, `work`, `here`, `with` its company's home, `{place}` or `{nearest: sceneType}`), `company` (`{who: selector, invite?}`), `priority` (1 to 5), `needs`, `private` (the player reads it as \"Busy\") and `source`. Give a block its ground when the world has one: `{\"type\": \"lore\", \"entry\": …, \"quote\": …}` or `{\"type\": \"sheet\", \"entity\": …, \"field\": …, \"quote\": …}`, with the short quote it rests on, so the GM sees why it's there. `{\"id\": \"lunch\", \"off\": true}` turns off a less specific block or a basic need.\n\n```json\n[{ \"op\": \"add\", \"path\": \"/routines\", \"value\": { \"dale_mornings\": {\n  \"id\": \"dale_mornings\", \"label\": \"Dale at the marina\", \"owner\": \"dale_whitcomb\",\n  \"blocks\": [\n    { \"id\": \"open_marina\", \"label\": \"Opens the marina\", \"activity\": \"work\", \"kind\": \"fixed\", \"at\": \"06:30\", \"minutes\": 90, \"place\": { \"place\": \"alder_harbor_marina\" }, \"days\": { \"weekdays\": [1, 2, 3, 4, 5, 6] },\n      \"source\": { \"type\": \"lore\", \"entry\": \"lore_marina\", \"quote\": \"Dale Whitcomb has run it for twenty-five years.\" } },\n    { \"id\": \"coffee\", \"label\": \"Coffee at the Bluebird\", \"activity\": \"socialize\", \"kind\": \"flexible\", \"window\": { \"from\": \"09:00\", \"to\": \"11:00\" }, \"minutes\": 30, \"perWeek\": 3, \"place\": { \"place\": \"bluebird_coffee\" } }\n  ] } } }]\n```\n\nA block that asks someone along makes an invitation only when the world's settings allow it: here the POV, on Thursday evenings, from the Rusty Anchor's trivia night the lore tells of.\n\n```json\n[{ \"op\": \"add\", \"path\": \"/routines/marcus_trivia\", \"value\": {\n  \"id\": \"marcus_trivia\", \"owner\": \"marcus_delgado\",\n  \"blocks\": [{ \"id\": \"trivia\", \"label\": \"Trivia night at the Anchor\", \"activity\": \"socialize\", \"kind\": \"fixed\", \"at\": \"19:30\", \"minutes\": 120, \"days\": { \"weekdays\": [4] }, \"place\": { \"place\": \"rusty_anchor\" },\n    \"company\": { \"who\": { \"ids\": [\"pov\"] }, \"invite\": true },\n    \"source\": { \"type\": \"lore\", \"entry\": \"lore_anchor\", \"quote\": \"a Thursday trivia night that gets competitive\" } }] } }]\n```\n\n**Tuning** is the `routineSettings` part; each part left out keeps its default, and the defaults are no part at all:\n\n- **`awareness`**: how long someone the story put somewhere stays there against their routine. `story_first` keeps them until the story or the GM releases them; `balanced` (the default) until their night, with Background characters keeping their routine and Far ones bending for story plans and the GM's intent; `routine_first` lets the routine's next edge take them back.\n- **`invitations`**: `off`, `player` (the default: routine blocks may invite the POV) or `everyone` (people's days take each other's invitations too). Story plans and the GM invite under any setting.\n- **`sociability`**: `reserved`, `usual` or `outgoing`, how fast NPCs' social and fun needs grow.\n- **`planBend`**: which story plans take their time from work and school: `must`, `strong`, `standard` (the default) or `ordinary`.\n\n```json\n[{ \"op\": \"add\", \"path\": \"/routineSettings\", \"value\": { \"awareness\": \"story_first\" } }]\n```\n\n**Editing.** `lre_routine_put` and `lre_routine_delete` write one routine whole, and `lre_routine_settings` the settings, each at the version you read; `lre_edit` works on `/routines` and `/routineSettings` as above. A routine whose shape the engine can't read, or a setting or value it doesn't take, is refused before anything is written, with a message naming the field (`window`, `kind`, `minutes`, `awareness`…), exactly as Build's save is: fix that field and send it again. What a routine names that the world lacks (a place, an owner who matches nobody, a lore entry) is a lint warning after the write. `lre_schedules`, `lre_schedule`, `lre_schedule_put` and `lre_schedule_delete` do the same for schedules.\n\n**In a chat** the world's routines are only where it starts. Change someone's routine in one chat with `lre_routine_edit` (`routine_follow` for whether and how strictly they keep it, `routine_block` for one block, `schedule_override` for a schedule; each is one Undo-able fix), read their day and why each block is there with `lre_day`, and what the chat changed with `lre_routine_changes`. Change the world's routine only for what is true of the world; what happened in one story belongs to that chat.\n\n## Things and who owns them\n\n- Where a thing is: `fields.place` for something lying in a place, a relation `{\"type\": \"in\", \"to\": \"rhea\"}` for something carried or inside a container.\n- **Whose a thing is lives in `fields.owner`**, the owner's id. That puts it on their gear, a vehicle in their garage and at their levels, and lets them drive it. The `owns` relation only changes how the Journal words a change: an item with an `owns` link and no `fields.owner` belongs to no one. Set `fields.owner` on everything someone owns. Money is owned differently: see Money.\n\n## Money\n\nMoney is entities, a few fields and the economy pack's config. Amounts are whole minor units (4250 is $42.50 in a dollar world) and percentages are percent units (22 is 22 %). What runs for someone depends on their Money level: the world's `realism.levels.money`, capped by their tier's band (the POV is never capped). At 0 money is off; at 1 a person's `wealth` band is all there is; at 2 their cash and one everyday account are real, and a payment they can't cover is declined; from 3 all their accounts, and more as below.\n\n| From | What runs | Its feature ids |\n|---|---|---|\n| Money 3 | flows (so bills, pay and a business's takings), cards, payment preferences, household shares, living costs, property, withholding at a flat rate | `flows`, `cards`, `payment_prefs`, `households`, `living_costs`, `property`, `withholding` |\n| Money 4 | statements and minimum payments, interest (on the average daily balance where an account asks for it), fees, late payments and collections, credit scores, cash only at a machine or a branch, holds, daily card limits, overdraft policies, withholding through the tax brackets, sales tax, business taxes, investments, options, capital gains | `statements`, `interest`, `average_daily`, `fees`, `delinquency`, `credit`, `atm`, `holds`, `daily_limits`, `overdraft`, `tax_brackets`, `sales_tax`, `business_tax`, `investments`, `options`, `capital_gains` |\n\nA world switches a feature on or off for itself in `packs.economy.config.features` by its id (`{\"sales_tax\": true}`), down to its floor: Money 2 for `flows`, `cards`, `payment_prefs`, `households`, `living_costs`, `atm`, `daily_limits` and `overdraft`, Money 3 for the rest. Lint warns about an id it doesn't know.\n\n### Who owns money\n\nA **party** is a person, or an entity of kind `business`, `trust` or `household`. An account, a business, a holding or a property names its holders in `owners`, each with a role: `[{\"party\": \"pov\", \"role\": \"owner\"}]`.\n\n| Role | Spends from it | Counts toward their net worth | Manages it |\n|---|---|---|---|\n| `owner`, `joint` | yes | yes | yes |\n| `custodian`, `trustee` | yes | no | yes |\n| `beneficiary` | no | yes | no |\n| `authorized_user` | yes | no | no |\n\n`share` divides the worth between the holders whose role counts it, in percent; given by none, they share equally. A **household** is the relationships pack's `household` group: its members hold a `member_of` relation to it, and it shares flows between them (below).\n\n### Accounts and products\n\nAn `account` entity is one purse, wallet, bank account, card account, loan or investment account: `owners`, `product`, `opening` (the balance at the start, from the holder's side: a debt is negative) and `institution`. `product` is an account class, each a built-in product with the finance tables' terms (`cash`, `checking`, `business_checking`, `savings`, `money_market`, `cd`, `trust`, `escrow`, `credit_card`, `charge_card`, `line_of_credit`, `loan`, `mortgage`, `brokerage`, `retirement`), or one of the world's own products, `packs.economy.config.products` by id. An account's own `limit`, `apr_pct`, `apy_pct`, `statement_day`, `due_day`, `payment`, `months_left`, `overdraft` and the rest win over its product's; `autopay` (`minimum`, `statement`, `full` or `fixed`) with `autopay_from` pays a credit account by itself.\n\nRead `/packs/economy/config` before adding to it; the modern starter's has no `products` map yet. Where the world has none, add the map whole with the first product in it, as below (JSON Patch adds into a map only once it exists); where it has one, add each product by its own path, `/packs/economy/config/products/<id>`, since adding the whole map replaces it and drops every product already in it. `assets` works the same, and in the modern starter it is added to by id, as further down. The same goes for entities: `add` on an id that is taken replaces that item whole, so look an id up before you use it.\n\n```json\n[\n  { \"op\": \"add\", \"path\": \"/packs/economy/config/products\", \"value\": { \"lakeshore_rewards\": { \"label\": \"Lakeshore Rewards Visa\", \"class\": \"credit_card\", \"institution\": \"Lakeshore Credit Union\", \"limit\": 300000, \"apr_pct\": 21.9, \"rewards_pct\": 1.5 } } },\n  { \"op\": \"add\", \"path\": \"/entities/acct_pov_rewards\", \"value\": { \"id\": \"acct_pov_rewards\", \"kind\": \"account\", \"name\": \"Rewards Visa\", \"tier\": \"background\", \"fields\": { \"owners\": [{ \"party\": \"pov\", \"role\": \"owner\" }], \"product\": \"lakeshore_rewards\", \"opening\": -12500, \"autopay\": \"statement\", \"autopay_from\": \"acct_pov_checking\" }, \"relations\": [] } }\n]\n```\n\nA **card** is its own entity, kind `card`: the `account` it draws on, its `holder`, its `network` (`debit`, `credit` or `charge`), its `state` (`active`, `frozen`, `lost` or `cancelled`) and `item`, the physical card in the holder's gear. An authorized user holds a card on someone else's account.\n\n### Flows: money that moves on its own\n\nA **flow** is every scheduled or one-off movement of money: rent, bills, a transfer to savings, an allowance, a loan payment. It is an entity of kind `flow`:\n\n- **`flow_kind`**: `transfer`, `bill`, `rent`, `utility`, `subscription`, `premium`, `loan_payment`, `card_payment`, `savings`, `income`, `payroll`, `allowance`, `living`, `tax`, `distribution`, `invoice`, `draw` or `other`.\n- **`from` and `to`**: an account; a party, paying as their preferences choose, or paid into their deposit account; or an outside payer or payee by name, in words (`\"Harbor Mutual\"`). A name shaped like an id (`acct_pov_chequing`) that names no entity draws a lint warning: it would be read as an outside party, so money would come from or go to nowhere.\n- **The amount**, the first of: `amount_cents`; `amount_formula`; `amount_table` (`table.row`, or `table.row.column`); `amount_min` and `amount_max`, a seeded draw between them; `amount_pct` of `amount_of`'s balance; `amount_due` (`minimum`, `statement` or `balance`, of the credit account it pays).\n- **When**: `every` (`day`, `week`, `month` or `year`) with `interval` (biweekly is `week` with 2), `weekdays` (0 is Sunday), `days` of the month (31 is the last day of a short month, −1 always the last), `months`, `except` (holiday ids), `roll` (`before` or `after`, for a day that isn't a business day) and `at` (`HH:MM`, 09:00 by default); or `once`, a local date-time. `start`, `end` and `count` bound it.\n- **When the money isn't there**, `shortfall`: `skip` this time, pay what there is (`partial`), `retry` after `retry_days` up to `retries` times, pay from `fallback`, let the account `overdraft` as its policy allows, or `defer` the amount to the next time.\n- `splits` sends parts elsewhere (fixed `cents` first, then `pct` of the rest); `shares` splits a household's flow between its members by `pct`; `link` ties it to what it belongs to (a property, a job, a loan); `status` is `active`, `paused` or `ended`.\n\n```json\n[{ \"op\": \"add\", \"path\": \"/entities/flow_pov_boat_fund\", \"value\": { \"id\": \"flow_pov_boat_fund\", \"kind\": \"flow\", \"name\": \"Boat fund\", \"tier\": \"background\", \"fields\": { \"flow_kind\": \"savings\", \"from\": \"acct_pov_checking\", \"to\": \"acct_pov_savings\", \"amount_cents\": 4000, \"every\": \"week\", \"interval\": 2, \"weekdays\": [5], \"start\": \"2026-09-18\", \"shortfall\": \"skip\", \"category\": \"savings\" }, \"relations\": [] } }]\n```\n\n### Businesses and invoices\n\nA **business** is an entity of kind `business`, a party with `owners` (and their `share`s) and a `structure`: `sole_proprietorship`, `partnership`, `llc` (the default), `s_corp` or `c_corp`.\n\n- **Where it sells:** a purchase at one of its `places` (else where it stands) pays it. `daily_sales` is what walk-in customers from outside the world spend there on each of its `trading_days` (0 is Sunday; Monday to Friday when left out), give or take `sales_spread_pct` (30 when left out), paid at closing and never on a day-off holiday.\n- **Its money** is in the accounts it owns. `operating_account`, one of them, is where takings land and payroll comes from (else its best deposit account). It keeps `margin_pct` of a sale (all of it when left out) and owes the rest to its suppliers, paid on the 10th; the sales tax it collects is paid on the 20th. Its rent, bills and loan payments are flows from its accounts.\n- **Its owners** take draws in play, except from a `c_corp`. `distribution_pct` pays that share of each period's profit out to the owners by share, every `distribution_every` (`month`, `quarter` (the default) or `year`), on the 10th after the period closes.\n- **Its books**, month by month, are kept by the engine from all of that: there is nothing to write.\n\nA business's own Money level is its tier's cap, as a person's is: it decides whether the business collects sales tax and pays business taxes (Money 4) and whether its invoices go late (Money 3). Its payroll, takings and other flows go through its accounts, and an account runs at the highest level of those who may spend from it (the business and its authorized users), whatever the account's own tier. So give a business the `principal` tier, as the modern starter does, for all of it to run.\n\nDale's marina has run on his own account so far, its takings flowing into it and its bills out. Making it a business moves the account to the business, with Dale still able to spend from it as an authorized user, and a purchase at the marina then pays it. The account was all Dale had, so he gets a checking account of his own as well: without one, his own spending and bills would come out of the business's.\n\n```json\n[\n  { \"op\": \"add\", \"path\": \"/entities/alder_harbor_marina_co\", \"value\": { \"id\": \"alder_harbor_marina_co\", \"kind\": \"business\", \"name\": \"Alder Harbor Marina\", \"tier\": \"principal\", \"fields\": { \"owners\": [{ \"party\": \"dale_whitcomb\", \"role\": \"owner\" }], \"structure\": \"sole_proprietorship\", \"places\": [\"alder_harbor_marina\"], \"operating_account\": \"acct_dale_marina\", \"industry\": \"marina\", \"margin_pct\": 70, \"late_fee_pct\": 1.5 }, \"relations\": [] } },\n  { \"op\": \"replace\", \"path\": \"/entities/acct_dale_marina/fields/owners\", \"value\": [{ \"party\": \"alder_harbor_marina_co\", \"role\": \"owner\" }, { \"party\": \"dale_whitcomb\", \"role\": \"authorized_user\" }] },\n  { \"op\": \"add\", \"path\": \"/entities/acct_dale_checking\", \"value\": { \"id\": \"acct_dale_checking\", \"kind\": \"account\", \"name\": \"Dale's checking account\", \"tier\": \"background\", \"fields\": { \"owners\": [{ \"party\": \"dale_whitcomb\", \"role\": \"owner\" }], \"product\": \"checking\", \"opening\": 640000, \"institution\": \"Great Lakes Bank\" }, \"relations\": [] } }\n]\n```\n\nAn **invoice** is an entity of kind `invoice`: the `business` that issued it, the `customer` (a party's id, or an outside customer by name), `cents`, `memo`, `issued`, `due` (30 days after `issued` when left out), `state` (`open` when left out, `paid`, `late` or `void`) and `paid`, what is paid of it so far. Lint requires the business, the customer and an amount above zero. An open invoice is paid as a bill from the customer's accounts on its due date and every week after until it is paid; an outside customer pays on the due date. Unpaid when its due day ends, it goes `late` and takes the business's `late_fee_pct` of the amount, and the fee again every 30 days. A business's `invoice_days` (30 when left out) are the terms of the invoices it issues in play.\n\n```json\n[{ \"op\": \"add\", \"path\": \"/entities/inv_pov_winter_storage\", \"value\": { \"id\": \"inv_pov_winter_storage\", \"kind\": \"invoice\", \"name\": \"Winter storage\", \"tier\": \"background\", \"fields\": { \"business\": \"alder_harbor_marina_co\", \"customer\": \"pov\", \"cents\": 48000, \"memo\": \"Winter storage for the fishing boat\", \"issued\": \"2026-09-14\", \"due\": \"2026-10-14\", \"state\": \"open\" }, \"relations\": [] } }]\n```\n\n### Work and pay\n\nA **job** is an entity of kind `job`, one worker's employment:\n\n- **Who and where:** `worker`; `employer`, a business entity (paying from its operating account), a place (the business trading there, else an outside employer) or an outside employer named in words, an id-shaped one that names no one and no place drawing a lint warning; `workplace`, the place the work is (else the business's `places`); `title`; and `occupation`, a row of the occupations table (else the worker's own `occupation`).\n- **Pay:** `basis`, which is `salary` (a year), `hourly`, `per_shift`, `commission`, `tips` or `stipend` (a period), and `rate`, both from the occupation's row when left out; `commission_pct` of the sales credited to the worker; `tips_per_hour` on top of hourly pay.\n- **When it pays:** `pay_every`, the occupation's when left out: `weekly` or `biweekly` on the weekday of `pay_anchor` (the first payday), else of `pay_weekday` (Friday); `semimonthly` on `pay_days` (the 15th and the last); `monthly` on one day (the last); `per_job`, each evening at 21:00 for that day's work; or `custom`, a flow's schedule with `pay_` before each part (`pay_unit`, `pay_interval`, `pay_weekdays`, `pay_days`, `pay_months`, `pay_except`). A payday on a weekend or a day-off holiday moves to the business day before it (`pay_roll`: `before`, `after` or `none`).\n- **What it pays for:** the days from `start` to `end`, and inside the season (`season_from` to `season_to`, `MM-DD`, which may wrap the new year). Hourly and per-shift pay count what `hours` names: the worker's scheduled commitments at the workplace (`scheduled`, laid out by `shift_pattern`, a row of the `calendar.shifts` table), the shifts the POV turns up for (`attended`), or `hours_per_week` and `shifts_per_week` over `weeks_per_year` (`contract`). Left out, it is `attended` for the POV and `scheduled` for anyone else while they have a routine at the job, and `contract` without one. `status` is `active`, `leave` (paid nothing) or `ended`.\n- **The paycheck:** `deductions` come off the gross first, each `{label, cents or pct, pretax, kind, to, match_pct}`. A `pretax` one comes off income-tax wages (a `retirement` one still counts as wages for Social Security and Medicare; any other doesn't). `to` is an account of the worker's, else an outside payee by name, and a business employer adds `match_pct` of the gross, up to the deduction, to that account. Withholding follows (Taxes, below), and none for a `contractor` (the occupation's `self_employed` when left out). `splits` route the net among the worker's own accounts, each `{to, cents}` or `{to, pct}`: fixed amounts first, then percentages of the rest, and what's left to their deposit account.\n\nEach job pays through a flow from its employer to the worker. A paycheck covers the work since the last one paid, so a payday the employer can't cover is paid with the next. In play, a business's owner hires, ends jobs and raises pay; a GM edit of the job's fields does the same.\n\nA second job beside the POV's work at the garage: one shift a week on the marina's fall haul-out crew, paid on Fridays with half of each check into savings, and nothing outside the season:\n\n```json\n[{ \"op\": \"add\", \"path\": \"/entities/job_pov_haulout\", \"value\": { \"id\": \"job_pov_haulout\", \"kind\": \"job\", \"name\": \"Haul-out crew at Alder Harbor Marina\", \"tier\": \"background\", \"fields\": { \"worker\": \"pov\", \"employer\": \"alder_harbor_marina_co\", \"workplace\": \"alder_harbor_marina\", \"title\": \"Haul-out crew\", \"basis\": \"per_shift\", \"rate\": 11000, \"hours\": \"contract\", \"shifts_per_week\": 1, \"season_from\": \"09-15\", \"season_to\": \"11-15\", \"pay_every\": \"weekly\", \"pay_anchor\": \"2026-09-18\", \"splits\": [{ \"to\": \"acct_pov_savings\", \"pct\": 50 }] }, \"relations\": [] } }]\n```\n\nAnd a 401(k) at the garage: 5 % of the POV's pay before income tax into a retirement account of theirs, which the shop matches up to 3 % of pay:\n\n```json\n[\n  { \"op\": \"add\", \"path\": \"/entities/acct_pov_401k\", \"value\": { \"id\": \"acct_pov_401k\", \"kind\": \"account\", \"name\": \"Your 401(k)\", \"tier\": \"background\", \"fields\": { \"owners\": [{ \"party\": \"pov\", \"role\": \"owner\" }], \"product\": \"retirement\", \"opening\": 0, \"institution\": \"Great Lakes Bank\" }, \"relations\": [] } },\n  { \"op\": \"add\", \"path\": \"/entities/job_pov_mechanic/fields/deductions\", \"value\": [{ \"label\": \"401(k)\", \"kind\": \"retirement\", \"pretax\": true, \"pct\": 5, \"match_pct\": 3, \"to\": \"acct_pov_401k\" }] }\n]\n```\n\n### Taxes\n\n- **On pay**, withholding runs from Money 3 at a flat rate: the occupation's withholding rate (federal tax, Social Security and Medicare together) and the worker's state rate, plus their region's local rate when they have `local_tax: true`. At Money 4 it goes through the federal brackets and standard deduction for their `filing_status` (`single` when left out, `married_filing_jointly` or `head_of_household`), with Social Security and Medicare, then the state and local rates.\n- **Regions** are rows of the regions table (`mi`, `il`…), with their state, local and sales tax rates. The economy config's `region` is the world's own (the modern starter's is `mi`); without one, what it would cover runs at the national row's rates. A party's income tax follows its own `region` field, else the config's.\n- **Income nobody withholds from** is paid as estimated tax on 15 April, June and September and 15 January: a contractor's pay, and an owner's share of the profit of any business but a `c_corp` where that business pays business taxes. A `c_corp` pays corporate tax on its own profit, at the config's `taxes.corporatePct` (21 when left out) plus the state rate.\n- **Sales tax** runs only at the top level, Money 4 (or from 3 where the world switches `sales_tax` on), and at the buyer's level: below it a price is as listed, and a business below it neither collects nor remits. The rate at a place is its `sales_tax_pct` (or an enclosing place's), else that of its tax region: a `tax_region` on it or an enclosing place, else the config's `region`. Nothing is charged on a category in the config's `taxes.exempt` (the modern starter's holds `groceries_staples`, `groceries_baskets` and `medical`) or in a place's `tax_exempt`, nor on what a business with `collects_sales_tax: false` sells.\n\nThe modern starter's economy is in Michigan, so a purchase in Chicago is taxed at Michigan's rate. To tax it for Illinois at Chicago's own combined rate, and the POV's pay at Michigan's typical local rate:\n\n```json\n[\n  { \"op\": \"add\", \"path\": \"/places/chicago_il/fields/tax_region\", \"value\": \"il\" },\n  { \"op\": \"add\", \"path\": \"/places/chicago_il/fields/sales_tax_pct\", \"value\": 10.25 },\n  { \"op\": \"add\", \"path\": \"/entities/pov/fields/local_tax\", \"value\": true }\n]\n```\n\n### Paying: preferences, cash machines and credit\n\n- **`pay_prefs`**, a person field, orders how they pay: tiers of `use` (`cash`, `debit`, `credit`, `charge`, `checking`, `savings`, or a card or account id), each for an amount from `min` to `max` and `categories`, but not those in `except`. A payment tries the tiers that fit it in order, then cash, debit, credit and charge; the first that covers it pays, and with none it is declined. Left out, the tiers follow their wealth band and their `traits`: a frugal or careful person keeps to cash and debit longer, an impulsive or flashy one reaches for credit first, a business pays by debit, then credit.\n- **Cash machines and branches** are place fields: `atm`, `{\"bank\", \"fee\", \"limit\", \"deposits\"}` (`fee` is the machine's own surcharge, `limit` the most one withdrawal takes), and `branch`, `{\"bank\"}`, a counter where that bank's customers withdraw and deposit. Where cash machines run (Money 4), cash comes out and goes in only at one of the two; at another bank's machine the product's `fees.atm` comes on top of the surcharge, a card's `daily_atm_limit` caps a day's withdrawals, and a deposit at a machine stays on hold for the account's `hold_days`. This applies only once the world places at least one `atm` or `branch`; place none and cash moves freely at every level.\n- **Credit** is played, not written: each person's report and monthly score (300 to 850) come from how their credit accounts are used and paid, and set the rates they are offered. An account's `opened` date counts toward its age.\n\n**Player claims.** A typed action on a thing the player says they have that the world doesn't may make it (the chat's Player claims setting): an item with `fields.claimed: true`, the POV's, priced against `economy.catalog`. It is never money and never an authored thing: a requirement or gate on an id (`carries(self, 'shop_office_key')`) never passes on a claimed key, while `has_item` by name counts one, so test ids for what must be earned. Keys, weapons and documents always ask the player first; `packs.economy.config.claimCap` (minor units; unset, twice `meals_out`'s typical price) caps what a capped policy makes without asking.\n\n## Holdings and property\n\nEverything a party owns besides the money in its accounts: positions in assets, real estate and stakes in businesses, each counted in its net worth. Prices, payouts, trades and gains run where the `investments` feature does (Money 4), options where `options` does (Money 4), and property from Money 3 (`property`). The examples here build on the marina business of Money.\n\n### Assets\n\nAn **asset** is defined once, in `packs.economy.config.assets` by id (the modern starter lists `broad_us_equity_index`, `glbd`, `lkfr`, `tnote_2030` and `btc`): a `label`, a `class` (`security`, `fund`, `bond`, `option`, `property`, `business_stake`, `crypto` or `other`), a `symbol` to show, and its `price` per unit at the start (100.00 when left out).\n\n- **How its price moves:** each class follows a recipe row of the finance table's `investing` section: securities and funds the stock index (`broad_us_equity_index`), bonds `bonds_aggregate`, crypto `crypto`. `model` names another row (`cash` holds its price), and an asset's own `annual_return_pct` (its total return), `annual_volatility_pct` and `correlation` (0 to 1, how closely it moves with its market) override the recipe. Prices are marked at 16:00 on each business day, every day for crypto.\n- **What it pays:** `yield_pct` of its value a year, paid `pays_per_year` times (4 for securities and funds, 12 for a bond fund, none for crypto). A payout comes out of the total return, so it is never counted twice. A single bond has a `face`, a `coupon_pct` and a `maturity`: it pays its coupon twice a year and is redeemed at its face on its maturity date.\n- **An option** names its `underlying` (an asset the world lists), `strike` (per unit), `expiry` (`YYYY-MM-DD`), `right` (`call` or `put`), `multiplier` (100 units a contract) and `settlement` (`physical`, the default, or `cash`). It is priced from its underlying, so it takes no `price`.\n\nLint (`economy.assets`) requires a class, an option's terms, a bond's maturity with its face and a price above zero, and warns about a `model` the table doesn't list. A regional fund with its own return and twice-yearly payouts, and a December call on Lakefront Freight:\n\n```json\n[\n  { \"op\": \"add\", \"path\": \"/packs/economy/config/assets/glix\", \"value\": { \"label\": \"Great Lakes Index Fund\", \"class\": \"fund\", \"symbol\": \"GLIX\", \"price\": 11240, \"annual_return_pct\": 8, \"annual_volatility_pct\": 18, \"yield_pct\": 2.2, \"pays_per_year\": 2 } },\n  { \"op\": \"add\", \"path\": \"/packs/economy/config/assets/lkfr_c4500_dec26\", \"value\": { \"label\": \"LKFR December 2026 45 call\", \"class\": \"option\", \"underlying\": \"lkfr\", \"strike\": 4500, \"expiry\": \"2026-12-18\", \"right\": \"call\" } }\n]\n```\n\n### Holdings, trades and payouts\n\nA **holding** is an entity of kind `holding`, a position in one asset: in an `account` (a brokerage or retirement account, its owners the holding's by their shares) or held directly by its `owners`. Its `lots` are its purchases, oldest first, each `qty`, its whole `cost` and when it was bought (`at`); for an option, `qty` counts contracts. Lint (`economy.holdings`) requires an asset the world lists, an account that is one, owners for a holding in none, and lots as a list.\n\n- **Trades are played** (the `trade` action): buy or sell an asset or a holding, in units or for an amount (a sale with neither sells it all), held in an `account` (else directly), paid `from` an account (else the investment account's own cash, else the buyer's deposit account), with the proceeds `to` an account (else the holding's account, else the seller's deposit account). Units go first in, first out, and each sale realises its gain, short term on lots held under a year. A retirement account keeps a sale's proceeds.\n- **Options** trade whole contracts. Before expiry, a holder exercises in play (`exercise_option`): a call pays the strike for 100 units of the underlying, which land in the same account. At the close on its expiry date a contract in the money settles in cash at what it is worth, and one out of the money expires worthless.\n- **Payouts** are flows: dividends mid-month in evenly spaced months ending in December (quarterly: March, June, September and December), a bond fund's monthly, a bond's on its coupon dates, each the units held then times what a unit pays. One lands where the holding's `route` says: `reinvest` buys more units at that day's price, as a new lot; an account id pays it there; left out, it goes to the holding's account, else each owner's deposit account by share. A retirement account keeps what its holdings pay unless they reinvest. In play, `route_distributions` changes a holding's route.\n\nTwenty units of the fund, its payouts reinvested, and two of the calls, in the POV's brokerage account:\n\n```json\n[\n  { \"op\": \"add\", \"path\": \"/entities/hold_pov_glix\", \"value\": { \"id\": \"hold_pov_glix\", \"kind\": \"holding\", \"name\": \"Great Lakes Index Fund\", \"tier\": \"background\", \"fields\": { \"account\": \"acct_pov_brokerage\", \"asset\": \"glix\", \"lots\": [{ \"qty\": 20, \"cost\": 196000, \"at\": \"2025-03-02\" }], \"route\": \"reinvest\" }, \"relations\": [] } },\n  { \"op\": \"add\", \"path\": \"/entities/hold_pov_lkfr_calls\", \"value\": { \"id\": \"hold_pov_lkfr_calls\", \"kind\": \"holding\", \"name\": \"LKFR December calls\", \"tier\": \"background\", \"fields\": { \"account\": \"acct_pov_brokerage\", \"asset\": \"lkfr_c4500_dec26\", \"lots\": [{ \"qty\": 2, \"cost\": 37000, \"at\": \"2026-08-20\" }] }, \"relations\": [] } }\n]\n```\n\n### Property\n\nA **property** is an entity of kind `property`, real estate tied to a `place`, with `owners` (and their `share`s):\n\n- **Its value** is `value` now. It moves on the 1st of each month at its `appreciation_pct` a year with its `volatility_pct` swings (else the finance table's home prices); `purchase_price` and `purchased` are what it cost and when, for the gain on a sale.\n- **Its costs** are flows its owners pay by share: property tax at `tax_pct` of its value a year (else the regions table's rate for its `region`, else its first owner's, else the economy's), in `tax_installments` bills (2 a year); `insurance` a month (else the table's typical, scaled to its value); and upkeep, `upkeep_pct` of its value a year (1 when left out), each month.\n- **A mortgage** is an account of the `mortgage` product, with its own `apr_pct`, `payment`, `months_left` and the rest as any loan has, whose `secured_by` names the property; the property's `mortgage` names it back, and lint warns when the two don't. Equity is the value less what it secures.\n- **A lease** is a `rent` flow from the tenant to an owner (or into an account of theirs), `link`ed to the property, with `start` and `end` for its term. Each lease covers one of its `units` (1 when left out). With `managed: true`, each unit no lease covers is let to outside tenants at `market_rent`, lease after lease of `lease_months` (12) with about `vacancy_months` (1) empty between, from `let_from` (else the world's start), their rent into `rent_to` (else the owners' deposit accounts by share).\n- In play, `property_buy` buys one with an `asking_price` or nobody's, `property_sell` sells a share, and `lease_start` and `lease_end` let a unit and end a lease.\n\nThe marina's grounds, owned by the marina business, with a mortgage it pays from its operating account and its bait shop let to an outside tenant:\n\n```json\n[\n  { \"op\": \"add\", \"path\": \"/entities/prop_alder_harbor_marina\", \"value\": { \"id\": \"prop_alder_harbor_marina\", \"kind\": \"property\", \"name\": \"Alder Harbor Marina grounds\", \"tier\": \"background\", \"fields\": { \"place\": \"alder_harbor_marina\", \"owners\": [{ \"party\": \"alder_harbor_marina_co\", \"role\": \"owner\" }], \"value\": 65000000, \"appreciation_pct\": 2.5, \"purchase_price\": 41000000, \"purchased\": \"2001-03-15\", \"mortgage\": \"acct_marina_mortgage\", \"insurance\": 42000, \"upkeep_pct\": 1.2 }, \"relations\": [] } },\n  { \"op\": \"add\", \"path\": \"/entities/acct_marina_mortgage\", \"value\": { \"id\": \"acct_marina_mortgage\", \"kind\": \"account\", \"name\": \"Marina mortgage\", \"tier\": \"background\", \"fields\": { \"owners\": [{ \"party\": \"alder_harbor_marina_co\", \"role\": \"owner\" }], \"product\": \"mortgage\", \"institution\": \"Great Lakes Bank\", \"opening\": -18000000, \"apr_pct\": 5.1, \"payment\": 191800, \"months_left\": 120, \"due_day\": 1, \"autopay\": \"minimum\", \"autopay_from\": \"acct_dale_marina\", \"secured_by\": \"prop_alder_harbor_marina\" }, \"relations\": [] } },\n  { \"op\": \"add\", \"path\": \"/entities/lease_marina_bait_shop\", \"value\": { \"id\": \"lease_marina_bait_shop\", \"kind\": \"flow\", \"name\": \"Rent, bait shop\", \"tier\": \"background\", \"fields\": { \"flow_kind\": \"rent\", \"from\": \"Gull Point Bait & Tackle\", \"to\": \"alder_harbor_marina_co\", \"amount_cents\": 65000, \"every\": \"month\", \"days\": [1], \"start\": \"2026-05-01\", \"end\": \"2027-04-30\", \"shortfall\": \"skip\", \"link\": \"prop_alder_harbor_marina\" }, \"relations\": [] } }\n]\n```\n\n### Business stakes and net worth\n\n**A stake** is an owner's share of a business: of its `value` when one is set, else of its book value (its own net worth from its accounts, holdings, property and stakes, plus what its customers owe it less what it owes) plus its last twelve months' profit times its `valuation_multiple` (3 when left out). Each owner's share of a profit distribution lands where they route it in play (`route_distributions`; `reinvest` keeps it in the business, adding to the stake), and `stake_sell` sells part of a stake.\n\n**Net worth** is a party's share of the accounts it holds with a role that counts worth, plus its share of every holding at market, of every property's value and of every stake. A mortgage is one of its accounts, so a property's debt counts once. A party with accounts has the wealth band of its net worth; one without keeps its `wealth` field.\n\nThe marina, with a waiting list for its slips, is worth four years' profit over its books:\n\n```json\n[{ \"op\": \"add\", \"path\": \"/entities/alder_harbor_marina_co/fields/valuation_multiple\", \"value\": 4 }]\n```\n\n## Places, routes and maps\n\n- Places form a tree through `parent` (a town holds streets, a building its rooms). A place the player hasn't heard of yet is `\"visibility\": \"discoverable\"`.\n- Routes join places with minutes per travel mode (`walk`, `road`, `offroad`, `water`), both ways unless `bidirectional` is false.\n- **A map owns what it draws.** A map (`/maps/<id>`, format `lre-map-v1`) draws one place's inside, as a grid of characters or as linked places, and compiles into places, a grid and routes that carry `\"map\": \"<map id>\"`. Those are the map's: **edit the map, never them**. A write to a place, grid or route a map draws is refused (\"drawn by the map …; edit it there\"), and so is setting `map` on anything else. After a change to the map, the engine draws its places, grid and routes again; delete the map and they go with it. A place, grid or route you write yourself with the same id as one a map would make wins over the map's.\n\n## Tracks: quests and secrets\n\nA track is a small state machine: `start` names its first stage, and each stage's `next` lists `{\"to\": stage, \"when\": formula}`, taken in order when the formula holds. A stage may carry a `cue` (what the player can know now), `objectives`, `effects` on entering, `rewards` on leaving, a `gate` and a `fail`. A stage with no `next` ends the track. Secrets advance only by their formulas, never by a model.\n\n- **Quests** start at the stage the story has reached, not at the beginning: `start` is today's stage.\n- **Secrets** keep a `truth` (what is really so, kept from the player) on the stage that reveals it, and a `cue` (what the player can notice) on the stages before. A cue never states the truth.\n- **Puzzles** an action of yours answers take `story.answer`'s `track`: the puzzle's own id, written out, never a formula.\n\n### A revealed secret starts one stage earlier\n\nThe engine records a reveal only when a track **enters** a stage with a `truth`. A track that starts on its truth stage never enters it, so the truth is never revealed: the Journal never shows it and the narrator is kept from saying it. **Never start a secret track on a stage that has a `truth`.** For a secret the player has already learned, start one stage earlier on a stage that moves on at once, so the first turn reveals it:\n\n```json\n{ \"id\": \"silas_debt\", \"kind\": \"secret\", \"label\": \"What Silas owes\", \"visibility\": \"secret\", \"owner\": \"silas\", \"start\": \"rumor\", \"stages\": {\n  \"rumor\": { \"label\": \"Something is off\", \"next\": [{ \"to\": \"known\", \"when\": \"true\" }] },\n  \"known\": { \"label\": \"Silas owes the guild\", \"truth\": \"Silas borrowed the guild's harbor dues to pay a gambling debt.\", \"next\": [] } } }\n```\n\n### Cues never name the secret\n\nA person's `cues` are what the narrator sees them do while a secret of theirs stays hidden: `{\"text\": \"Changes the subject whenever the guild comes up.\", \"track\": \"silas_debt\"}`.\n\n- Each cue stands for exactly one secret: a `track` (while it keeps something hidden), a secret `lore` entry (until its gate holds) or a story `flag` (until it is set). A cue keyed to none, or to several, never shows.\n- Write behaviour, never the secret: a cue that holds a track's truth or a phrase of secret lore is a lint error, because it gives the secret away.\n- Name no one the player may not know: such a cue is left out while they don't (lint warns).\n- Only people have cues that show; the stage cues of the tracks a person owns reach the narrator the same way.\n\n## Lore\n\nLore entries (`/lore/<id>`) are what the world knows, read by the engine's own helpers: `{id, title, content, keys, links, aliases?, topics?}`, where `links` are the ids of the people and places an entry is about.\n\n- `\"visibility\": \"known_by\"` keeps an entry back until the player knows every person and place it links.\n- **A secret entry** holds a secret itself: `\"secret\": true`, a `gate` formula that reveals it (lint refuses a secret without one), and an `audience` of the helpers that may read it before then (`npc.choose`, `contradiction`, `puzzle.answer`, `judge`, `interpret`). The helpers that write for the narrator or the player (`brief`, `outline`, `choices`, `extract`) never read it early, even when listed. A mind reads a secret entry only when its `holders` name the character or a cue of theirs stands for it; `links` and an opened gate never do.\n- A public entry must never repeat a track's truth: lint refuses it (`secret_truth`).\n- `loreIndex` routes the helpers' lookups: `terms` maps a lowercase term to entry ids, `topics` gathers entries under a label.\n\n## Data tables\n\nPrices, pay, taxes, occupations, regions, gear and the calendar's holiday rules come from data tables (`/tables/<id>`): typed `columns` and `rows` keyed by row id, read by the packs and by `table(id, key, column)` in formulas.\n\n- Every new world, blank or a starter, carries the seventeen default tables; edit them in place. A new table comes whole, with `id`, `pack`, `schema`, `label`, `columns` and `rows`: adapt one (`lre_template` at `/world/tables/<id>`).\n- Cells follow their column: a `band` is `{\"min\", \"typical\", \"max\"}`, money columns are in the currency's minor units, and a `ref` names a row of another table.\n- A table's `revision` and its pin in `pins.tables` are the engine's: every write that changes a table computes both again (`hashJson` of its schema, columns and rows). Don't write either, and don't patch `/pins`.\n- Each revision of the world keeps its own copy of its tables, so a running chat sees a table change only through an Upgrade.\n\n## Host macros\n\nLumiverse runs macros (`{{…}}`) in its prompt and acts on its control characters and `<user>`, `<char>` and `<bot>`. LumiRPEngine keeps authored text as written, so in lore and in section and step templates these are hazards:\n\n- A section template may use only `{{lines}}`; anything else in one is a lint error (`section_macro`).\n- Step templates use the engine's own placeholders (`{{world}}`, `{{pov}}`, `{{place}}`…); lint warns about one it doesn't know.\n- Keep `{{user}}` and `{{char}}` out of lore unless the user put them there on purpose. `lre_edit` and `lre_commit` list every hazard a change brings in; say which ones you added.\n\n## Setup, lore and jobs\n\nBeyond a world's document, the tools reach what the user sets up once and what Build runs for them. Settings and the preset are the user's own, for every chat: change them only when asked, and say what you changed.\n\n### Settings and presets\n\n`lre_settings` reads the settings as Settings shows them; a `section` narrows it to one page's part: `helper` (Helper model), `modelUse` (Model use, and Steps and connections under `steps`), `minds`, `timeouts`, `realism` (Realism, and Player claims under `claims`), `adjudication` (Checks), `time`, `extraction` (Changes from the reply), `swipeDefault` (Swipes), `hideJsonBlocks` (Preset), and the two switches that make new chats use these over a world's own (`overrideWorldDefaults`, `overrideWorldAdjudication`). `extractionModes` is read-only: each change type's mode now and where it comes from (pinned, learned on the connection, or the default).\n\n`lre_settings_set` takes a JSON merge patch, as the pages send: objects merge, a list or a value replaces, `null` deletes (unpin a change type with `{\"extraction\": {\"purchase\": null}}`).\n\n- A named preset expands: `{\"realism\": {\"preset\": \"grounded\"}}` sets every level and band cap, `{\"modelUse\": {\"preset\": \"standard\"}}` every step, budget and the minds' policy. A change to what a named preset sets makes it `custom`, as Settings does; the answer's `presets` says so.\n- LumiRPEngine keeps every value within what it takes. `adjusted` lists what came out other than sent (a value out of range, a key it doesn't know, a preset's own values): read it, don't assume the patch landed as written.\n- A step's route names a Lumiverse connection by id (`route.connectionId`, null for the helper model's); its template (`template`) is the step's prompt. A world's own step templates are its document's `/steps`, written with `lre_edit`.\n- Realism, checks and time seed new chats only. A running chat changes through its own markers (GM → This chat).\n- The answer carries the caveats as they read now; `lre_settings_caveats` reads them alone. They dry-run the chat the user plays, which takes a while on a long chat: \"still checking\" means ask again in a moment.\n\n`lre_preset` reads the active Lumiverse preset as the engine does: the section outlets its enabled blocks hold (`{{outlet::lre_<section>}}`) and each guidance block (\"RPEngine · <step>\"): missing, empty (notes only), read (switched off but written: its text goes to that helper) or enabled (switched on, so it also lands in the main prompt; it should be off). `lre_preset_add_blocks` adds the missing ones, switched off, under an RPEngine category, and touches none already there. The engine learns which preset is active from the user's open page or the chat they last played: with neither, it can't tell, and says so.\n\n### Diagnostics\n\n`lre_diag {chatId}` reads a chat's activity line (what the engine is doing now, or the step that failed last) and counts its records. The records themselves (each turn's steps, model calls with connection, model, tokens and finish reason, failures with what to do, the sections each run wrote, slow requests) come only with `spoilers: true`: a step's reason can name someone the player hasn't met. Keep them out of anything the player reads. `failures: true` keeps the failed steps, warnings and errors; `last` the newest n. A failing step's `fix` says what the user can do, often a timeout or a step's model in Settings. `lre_diag_clear` forgets the records; `lre_activity_dismiss` clears a failure from the activity line.\n\n### Lore books, pins and drift\n\nA world's lore is its document's (`/lore`, and pins at `/lorePins`), written with `lre_edit`. A pin makes a character's mind calls, or every call at a place, always read an entry: `{\"lore\": \"<id>\"}` for the world's own, `{\"book\": \"<bookId>\", \"entry\": \"<entryId>\"}` for an entry of one of the user's World Info books. `lre_lore_books` lists the books a pin may name (with `chatId`, that chat's own first), `lre_lore_entries {bookId}` a book's entries.\n\n`lre_lore_pins {worldId}` reads every pin of the draft now: its entry's title, its source, and its status (`ok`, `missing`, `pending`: an AI-written entry not reviewed yet, which nothing reads; `off`: switched off in its book, which a pin still reads). With `chatId` it reads the revision the chat plays, as GM → Minds does, and needs `spoilers: true`.\n\n`lre_lore_drift {worldId}` lists the entries indexed from a book whose book entry changed since (with its text now) or is gone. To take the new text, write it into the entry's `content` with `lre_edit`. `lre_lore_save {chatId}` makes the chat's latest reply (or `text`, an excerpt of a message) a new lore entry in the draft of the chat's world, sourced to its message.\n\n### Build's jobs\n\n`lre_job_start {worldId, kind, …}` runs one of Build's jobs on the user's Lumiverse and answers its id at once:\n\n- `import_lore {bookIds}`: entities, places and facts from World Info books;\n- `index_book {bookId}`: a lore entry per book entry, keeping the book's text, with aliases, topics, links and lookup terms;\n- `index_text {text}`: lore entries in the text's own words, marked as written by the AI;\n- `refine {instructions}`: world edits for a request in words;\n- `describe_map {scope, prose, mapId?}`: a map of a place from its description;\n- `propose_routines {owners?, after?}`: routines and schedules for people and groups from the lore and their sheets. Each block or schedule cites the entry or field it rests on, with a quote, and is checked against the draft. It reads people and groups in id order within twelve calls; when `lre_jobs` shows `next`, start the job again with those inputs for the rest;\n- `playtest {turns}` and `check_world {days?}`: the engine alone on the draft, as `lre_playtest` and `lre_check_world`, but on the host.\n\nModel jobs spend the user's helper model calls: start one when the user asked for it. `lre_jobs {worldId}` shows each job's status and progress and what it found in counts (with how many proposals have problems); `lre_job {worldId, jobId, pointer}` reads it whole. `/result/proposals/0` is one proposal: collection, key, the value it writes, source, confidence and note, and for routines and schedules the `owner` it is for and the `problems` the draft check found (a clash with their schedules or routine, a place or person that isn't there, company with no ground). A job proposes; nothing changes until `lre_job_apply {worldId, jobId, proposals?, expectVersion}` writes the ones you accept into the draft in one write, as Build's review does (an AI-written entry then counts as reviewed, and accepted lore joins the lookup table). Without `proposals` it applies every proposal but those with problems. Read each proposal before you apply it, then check the draft with `lre_draft`. A proposal's key replaces an item there by that key, and a schedule's `_activity` and `_place` proposals go together. `lre_job_cancel` stops a job; `lre_job_dismiss` forgets one that ended, with its proposals.\n\n### Profiles, the sheet, lint and the Studio\n\n- `lre_profile {worldId, profile, preview: true}` says what a ruleset profile (`modern`, `classic`, `fifth`, `custom`) would add, what is the same already, and where it conflicts with the draft; without `preview` it applies in one write. Each conflict keeps the draft's own unless `take` names its path; `values` are people's stored values a taken field can't hold, and what they become.\n- `lre_sheet {worldId}` previews the character sheet a new chat would start with, from the draft's ruleset or one you pass as `ruleset`, on the point of view or `entity`. Nothing is saved.\n- `lre_lint {worldId}` lints the head on the host; `lre_draft` lints the draft.\n- `lre_studio_offer` reviews what LumiRPEngine Studio offers (a new world, or the next revision of one), with its lint, macros and what blocks it; `lre_studio_install {offerId, hash}` installs the one reviewed. When the target's head moved since the Studio took it, installing drops what was committed since: ask the user before passing `acceptMovedHead`.\n\n### A chat's map\n\n`lre_map_walk {chatId, x, y}` says what Walk here would take to a cell of the grid the point of view stands on, judged on the real ground; nothing moves. `lre_map_display {chatId, display}` shows the map as what the point of view knows (`knowledge`) or under fog (`fog`): presentation only, kept beside the chat.\n\n## Playing a chat\n\nThe chat tools reach a chat that plays a world as the user's Play does; `lre_chats` gives the chat ids. They see what the player sees, unless you pass `spoilers: true`, and change the chat the way Play's own controls do. The chat is the user's game: change it when they ask, and say what you changed.\n\nA session goes like this:\n1. `lre_chats` for the chat's id, then `lre_chat_state` with pointer `\"\"` for an outline of what Play shows, and the parts you need from there.\n2. Before a turn, read what it can be: `/palette/entries/<i>` for an action's options and their `params`, `/palette/timelapse` for the skips on offer and what interrupts them.\n3. Make the change or post the turn, then read the state again for what it did: the HUD, the journal, the chips.\n4. Tell the user what you did, what is waiting on them (a reply to start, a chip to answer), and the Undo chip that can take a correction back.\n\n**Reading.** `lre_chat_state` reads the chat's state view at a JSON Pointer, the view the chat's page is sent: `/hud` (the clock, place, weather, cash and, at `/hud/fixes`, the ✎ fixes it offers), `/scene` (who is present), `/chips`, `/journal`, `/keepReport`, `/palette` (the actions at `/palette/entries`, the timelapse at `/palette/timelapse`), `/controls` (the realism, time controls, player-claims policy and checks policy the chat plays by), `/panels` (each pack's panel: Money, Gear, Calendar, the map…) and `activity`, what the engine is doing for the chat now (null when idle). It holds only what the player can know. `lre_chips` lists the chips under the messages with their actions; `lre_inspector` reads the context inspector: what the engine put in each of the last ten prompts, what its steps read of the lore, and its warnings.\n\n**Behind the curtain.** `lre_gm` (the GM view: every entity, secrets, hidden places, track truths, everyone's money, the edits in force) and `lre_minds` (each character's fidelity, latest mind, plans, notes and commitments) need `spoilers: true`, and so do the tools that edit them and Run minds now. Pass it only when the user asked to look behind the curtain, and keep what it shows out of anything the player reads: the chat, a message you post, a fix.\n\n**Changing the chat.** A write lands on the chat's latest message, as Play's do. During a reply it is held (`pending: true`) and lands when the reply finishes. A chat whose status is `paused` (the player edited an earlier message of theirs) refuses every write until `lre_keep` settles it, naming the edited message: `keep` re-checks the later turns against the edit and lists what no longer holds in `/keepReport`; `discard` removes the later turns' records for good (their messages stay as plain text, and the world forgets them), so ask the user first; `convert` brings chosen dropped lines of the keep report back.\n- `lre_fix` is the player's ✎: `fix` names a HUD fix (`place`, `weather`, `cash`, `scene`; each at `/hud/fixes` with its type and options), or give `entity` and `field`, with the `value` in the field's type; `time` (`\"2026-09-14 18:30\"`) sets the clock, running the time between when it is later. A locked field is refused.\n- `lre_gm_edit` is the GM editor: operations in order, all or none, on any entity, locked fields included. They are the engine's own edits, not JSON Patch: each names its `op` and what it touches (the tool lists them all), with ids from `lre_gm`:\n\n```json\n[{ \"op\": \"move\", \"entity\": \"pov\", \"to\": \"bluebird_coffee\" },\n { \"op\": \"adjust\", \"account\": \"acct_pov_checking\", \"cents\": 5000 },\n { \"op\": \"stage\", \"track\": \"q_pontoon_weekend\", \"to\": \"diagnose\" }]\n```\n\n- `lre_marker` changes how the chat plays from its latest message on: `resolve` (a domain's realism level, for everyone, a band or one entity), `time` (a control: `tick`, `scale`, `pause`, `interrupt`, `speed_through`, `montage`, `unit_cap`), `claims` (what a typed action's thing the world doesn't have becomes), `adjudicate` (the whole checks policy: read `/controls/adjudication`, change what you need, send it back) and `infer` (when typed attempts roll skill checks, the same way from `/controls/inferred`). `preview: true` says what it would change and writes nothing; read it first, since a lower level freezes what the higher one tracked.\n- `lre_view_open` opens a panel as the player does, which settles detail the chat hadn't decided yet (a balance first looked at); opening `core.context` checks the active preset.\n- `lre_chip` answers a chip with one of its action ids (an amount or a pick in `payload` when the action asks for one).\n- Each ✎ fix and GM edit leaves an Undo chip; tell the user it is there.\n\n**Playing a turn.** `lre_action` plays a palette entry (its `action`, and the picked option's `params`) and `lre_timelapse` a skip (`target` as `/palette/timelapse/until` lists them, or `{\"type\": \"duration\", \"minutes\": 120}`); `text` is the player's words for how they do it. Each posts the player's message, and the engine prepares the turn at once. **The reply is Lumiverse's to start, not yours:** a page that shows the chat starts it on its own; with none, it waits until the user opens the chat in Lumiverse. So ask the user to open the chat, then read `activity` and the state for what the turn did. The same goes for a chip's Send (a suggested move) and for the actions `lre_chips` marks `regenerates` (Re-narrate, Re-run, Retry read, a claim's Add): those take effect on the reply's next swipe, which the user makes with Regenerate or a swipe, and a plain Regenerate is only that.\n\n**Minds.** `lre_minds` reads them; `lre_mind_edit` pins a character's fidelity (`mind_pin`, `level` null to unpin), asks for a fresh mind next turn (`mind_refresh`), edits, adds (`id` null) or deletes (`value` null) a note, commitment or plan (`mind_memory`), or sets what they mean to do now, in words their own mind reads first and works from, and how they go about it (`mind_intent {entity, text?, approach?}`: `approach` `\"reactive\"`, `\"proactive\"` or null for their mind to decide; a part left out is kept, and `\"\"` with null clears it); `lre_minds_run` runs Run minds now for `who` (default everyone Live and Near), in the background, with model calls on the user's connection, so ask before you run it; `lre_minds_cancel` stops it, and a cancelled run records nothing. A run, like a GM edit, is one edit with an Undo chip.\n\n**What they can't do.** A chat tool never starts a generation, regenerates or swipes, and never writes a message but the player's turn: those are the user's, in Lumiverse. An Upgrade is `lre_upgrade`.\n\n## Before you commit\n\n- `lre_draft` shows no lint errors, and you know what each warning means.\n- The POV exists and stands at the start place; the start time is the story's present.\n- Every id an item names (a place, an owner, a relation target, a track in a formula, a lore link) exists.\n- Everyone who has met the POV holds a `knows` or a `regard` toward them.\n- A death or dying the player hasn't learned of sets `lifeKnownBy`; the dead lie at a `fields.place`.\n- Everything someone owns names them in `fields.owner`; every account, business, holding and property names its holders in `fields.owners`.\n- Every flow pays from and to something that exists, with an amount and a schedule (or `once`); every job names its worker and an existing or worded employer.\n- A business is on a tier whose Money level runs what it does (4 for sales tax and business taxes), and its `operating_account` is one of its own accounts.\n- Every holding names an asset the world lists, and every mortgage and its property name each other.\n- With `\"secrecy\": \"full\"`, no character would think a secret openly.\n- No secret track starts on a stage with a `truth`, no cue states its secret, and no public text gives one away.\n- Nothing a map draws was edited outside its map; no `revision` or pin was written by hand.\n- `lre_playtest` and `lre_check_world` run without failures or leaks in their notes.\n- Commit with a note that says what changed, and tell the user what you changed and what you left for them.\n";
 
 // docs/DESIGN.md
 var DESIGN_default = `# LumiRPEngine: design
@@ -57143,7 +58567,7 @@ A few terms, in plain words:
 | D1 | **Warp reuse is permitted** (by japolino). Adapted modules carry a \`NOTICE\` crediting him (§15). |
 | D2 | **World definitions live in extension storage.** Lore stays in World Books. |
 | D3 | **Users can scale from lean to whatever ceiling they want** (model use, §5.3; realism, §9.1). |
-| D4 | **Narration-implied changes are applied automatically after validation, with an undo chip, or ask first, per change type.** Cold-start modes: \`auto\` for \`time_advance\`, \`location\` and \`condition\`; \`confirm\` for \`knows\`, \`give\`, \`purchase\`, \`transfer\`, \`regard\`, \`spawn\` and \`life\`; \`quantity\` has no cold-start mode and starts at \`confirm\` (Settings shows "From the field's bound"). As for every type, a stricter field bound wins. These modes are only the starting point: **promotion learns on the player's own connection** (D31; §11). A type flips to \`auto\` at ≥ 0.90 acceptance over at least 30 confirm/undo chip outcomes on that connection, with a notification chip and undo, and flips back to \`confirm\` when its rolling undo rate rises past 0.10. Each mode is a setting. |
+| D4 | **Narration-implied changes are applied automatically after validation, with an undo chip, or ask first, per change type.** Cold-start modes: \`auto\` for \`time_advance\`, \`location\`, \`condition\` and \`routine\` (a routine is a default that never moves anyone the story has, so a wrong one costs little); \`confirm\` for \`knows\`, \`give\`, \`purchase\`, \`transfer\`, \`regard\`, \`spawn\` and \`life\`; \`quantity\` has no cold-start mode and starts at \`confirm\` (Settings shows "From the field's bound"). As for every type, a stricter field bound wins. These modes are only the starting point: **promotion learns on the player's own connection** (D31; §11). A type flips to \`auto\` at ≥ 0.90 acceptance over at least 30 confirm/undo chip outcomes on that connection, with a notification chip and undo, and flips back to \`confirm\` when its rolling undo rate rises past 0.10. Each mode is a setting. |
 | D5 | **The engine decides inside its own namespace.** Models only propose, as probabilities or bounded structured proposals. |
 | D6 | **Per-chat state is a per-swipe ledger** in message metadata, plus message-level intent markers. Both are journaled to a durable shadow in \`userStorage\` and re-asserted. It is the only store that follows swipe, branch, export, import and delete. |
 | D7 | **Rules are data-only:** predicates, effects and a safe formula language, so imported worlds cannot run code. |
@@ -57233,7 +58657,7 @@ Six concepts plus one pipeline.
 
 ### 4.1 World document and storage (D2)
 - **Format:** a world is one JSON document, **\`lre-world-v1\`**, with a published JSON Schema (\`schemas/lre-world-v1.schema.json\`, its maps referring to the map schema by \`$id\`) and per-pack format versions.
-- **Contents:** schema, entities, places, routes, grids, maps, rules, actions, checks, calendar, schedules, tracks, lore and its lookup table, classifications, enabled packs and their data tables, **pinned generator and data-table versions** (§9.2), realism defaults, tiers, the spawn cap (§9.4), the currency (code, symbol, minor unit, decimals, display format; Modern US by default), section templates, world-authored step templates, suppressed sources.
+- **Contents:** schema, entities, places, routes, grids, maps, rules, actions, checks, calendar, schedules (each schedule and slot with what it rests on: authored, a lore entry or a sheet field), routines and their settings (§8; optional, absent: none and the defaults; an older document needs no migration), tracks, lore and its lookup table, classifications, enabled packs and their data tables, **pinned generator and data-table versions** (§9.2), realism defaults, tiers, the spawn cap (§9.4), the currency (code, symbol, minor unit, decimals, display format; Modern US by default), section templates, world-authored step templates, suppressed sources.
 - **Taxonomy:**
   - **Classifications** are world-defined facets (\`classifications\`: label, one or several values per entity, order, description, \`shown\`), each a tree of values with optional parents. Entities hold values per facet in \`class\`, and free-form \`tags\`. Both are definitional: read live from the world for the entities it defines, so an Upgrade reclassifies a running chat, and kept in state for spawned ones, for those an Upgrade's \`keep\` pick held on to, for those a revision no longer defines (§4.3, \`migrate\`) and for those a GM edit classified (§7). Held in state, they win over the world's definition. A facet is hidden from the player unless \`shown\`, so its values fail closed; tags never reach Play.
   - **Groups** are entities of kind \`group\` or a kind extending it (the Relationships pack adds faction, family, household and company). \`member_of\` carries \`role\`, \`rank\` and \`since\`; membership is relations in state, so play can change it, and it follows member groups up to eight deep.
@@ -57373,7 +58797,7 @@ Lore pins (§24.5) can name an entry of any of the user's World Info books, but 
 ### 5.1 Hooks and lifecycle
 
 1. **\`GENERATION_STARTED\`.**
-   - Journal a \`pending\` entry \`{generationId, kind, messageId, swipeId}\` from the event's \`targetMessageId\` and \`targetSwipeId\`. The event gives the target swipe for every type; for Continue its target message is null (G1), so the head swipe's content is captured instead (length and hash). A swipe or regenerate the player asked to Re-narrate (the swipe default, or the **Swipe as…** chip) names its source: the nearest earlier swipe of the target that holds a live record.
+   - Journal a \`pending\` entry \`{generationId, kind, messageId, swipeId}\` from the event's \`targetMessageId\` and \`targetSwipeId\`. The event gives the target swipe for every type; for Continue its target message is null (G1), so the head swipe's content is captured instead (length and hash). A swipe or regenerate the player asked to Re-narrate (the **Swipe as…** chip, or every swipe when Settings makes Re-narrate the swipe default; Re-run is the default) names its source: the nearest earlier swipe of the target that holds a live record.
    - Open the turn's in-flight window (P2, §4.3).
 
 2. **The guard** (the one context handler, \`backend/ledger-io.ts\`). Registered \`required\` where Lumiverse supports it (\`required-context-handlers-v1\`), so a guard that fails or isn't answered in time stops the generation rather than letting it go out without the engine. Lumiverse waits for it as long as the user's **Generation guard** timeout says (Settings → Timeouts), within its own 1–120 s; one registration serves every user, at the longest any of them set, the full 120 s before any user's settings are read. It is registered again only when that value changes, and never while a generation or a call of the guard is under way, since the host replaces it inside the handler list its chain walks. The guard only looks, in memory:
@@ -57612,7 +59036,27 @@ What the engine did for a chat, step by step, and what it is doing now (\`backen
   - **On screen:** intents come from public labels; the narrator reads them in the Stance section (§6.6).
   - **Off screen:** catch-up on every \`slot_crossed\` up to K agents per turn from a round-robin queue, in process (D9). It runs before the reply when the player's action advances time, otherwise after it.
   - **During a timelapse,** and in the catch-up for an applied \`time.advance\` (§9.2): every LOD1 agent steps through the interval inside the unit cap; tie-zone choices are utility-only by default (§9.2).
-- **The player's character** follows its own routine (place and activity schedules) only when time runs on its own (a timelapse or catch-up). An ordinary turn leaves it where the player took it. A narrated move across a gap that no single-mode route spans is declined ("There's no way from … to …"), and a POV that is stranded, or whose routine's place cannot be reached, stays where it is.
+  - **Living the day:** in play every block of an LOD1 agent's day is taken up at its own start, as a plan's is (an agent process's moment between slot steps, §24.8), not only the block holding at each day part's end: dinner at dinner time, a fixed block at its time, a trip by its own process. When a block with a place ends and free time follows, they go home, as after a plan. The story still comes first (\`routineYields\`, below): a step reads where their routine had them as every block since the step before could have put them, so a block a catch-up passed over is never taken for the story moving them. A catch-up steps by slot; a turn takes the moments of an agent it has caught up.
+  - **Observable fidelity in a Timelapse:** what the POV could see or meet happens at its minute, and nothing else spends events. The POV and the Live, Near and Far cast live every block at its start; a Background agent lives a block at its start only where the POV could meet them there while it lasts, or sees them leave (the POV's place read from its own day, or where the story holds it). Otherwise an off-screen Background agent lives the day at slot steps, as net state: at each step exactly where their routine has them then, so a block that starts and ends inside a slot leaves no trace, by design. Both folds replay the run as recorded.
+- **The player's character** follows its own routine (place and activity schedules, and its day plan when it is an agent) only when time runs on its own (a timelapse: the palette's, whatever its target, a run to a routine point, a stated time, an activity's Speed through), and never against what the player or the narration set: a span the player's own words spend doing something (a typed out-of-character span, "OOC: for the next two hours, I service the fleet", \`TimelapseOptions.povRoutine\` false), a narrated skip (an applied \`time.advance\`) and the clock's ✎ fix keep it where the story has it until the span is over (\`AdvanceOptions.povRoutine\`). An ordinary turn leaves it where the player took it. A narrated move across a gap that no single-mode route spans is declined ("There's no way from … to …"), and a POV that is stranded, or whose routine's place cannot be reached, stays where it is.
+  - **Its Continue:** the stop or cap chip of a span the story held keeps the hold (\`povRoutine\` false on the chip's action), so the rest runs as the span did.
+- **Where a character's day comes from** (\`shared/routines.ts\`, \`packs/castlife/core/routines.ts\`), most binding first:
+  1. **What the story established:** a place or activity an action, the narration's read or a GM edit set; holds (a trip, \`castlife.override\`, a story plan's block under way); the GM's intent (\`mind_intent\`, §24.9).
+  2. **Commitments:** schedules (shifts, school, the world's and the chat's own versions), appointments and trips (\`commitments.ts\`).
+  3. **Story plans** (the memory step's and the GM's), laid into their windows (§24.8).
+  4. **Their routine:** the world's routines (\`world.routines\`, one item per routine; Build → Routines) that cover them, owned as a schedule is (an entity, a group, a kind, a selector, or none: the world's default), the most specific owner's block winning by block id (their own, a group's, a kind's, a selector's, the world's; equal precedence linted, the lower routine id winning), and a routine with \`inherit: false\` cutting the less specific ones; on top, the chat's own changes (\`routine_block\`, the GM's or the story's). A block is **fixed** (at a time), **flexible** (a length somewhere in a window, or \`perWeek\` times a week, a floating block) or **optional** (as flexible, by its \`chance\`, the first thing a busy day leaves out), with its days (weekdays, days off, holidays, birthdays, seasons, weather), place (home, work, here, with its company, a place, the nearest place of a scene type), company (and whether it asks them along), priority, needs and source (authored, a lore entry or a sheet field with its quote; in a chat, the story with its turn or the GM).
+  5. **Basic needs:** sleep, breakfast, lunch (at work, else home) and dinner (\`BASIC_BLOCKS\`), each replaceable or turned off by a routine. A character with no routine at all (\`routine_follow\` mode \`off\`) plans from the story, their commitments and these only.
+  6. **What the world grounds otherwise:** their chores (authored), their agendas' steps (story tracks) and getting back what an overdue loan keeps.
+
+  Nothing else fills a day: no outing, gathering, holiday or birthday party, and no invitation, that nothing in the world or the story grounds. The occasion-shaped template earlier builds planned every day from (sleep, meals, seeing friends, time out, holidays, birthdays) plans no new day; it is kept only for folding what those builds recorded (below).
+- **Routines are defaults, never authority.** A routine or a schedule never moves anyone out of a scene with the POV, never moves a Live or Near character (their mind and the scene speak for them: a routine is only a soft suggestion), never makes an invitation that interrupts for them, and never stops a time skip for them. The scene with the POV is the one the story holds: an ordinary turn and its catch-up, a typed span, a narrated skip or a ✎ fix (\`SlotInfo.povRoutine\` false) keep whoever is in it there; while time runs on its own the POV follows its routine and no scene holds anyone, so in a Timelapse a housemate still goes to work and a trip still leaves. Otherwise it yields to what the story set (\`routineYields\`): someone the story put elsewhere than their routine last had them stays there, between the routine's own edges always, and at an edge as the world's **awareness** (\`routineSettings.awareness\`, per character in a chat with \`routine_follow\`) says: \`story_first\` keeps it until the story or the GM releases it, and Background and Far characters bend for story plans and the GM's intent; \`balanced\` (the default, the precedence by fidelity) keeps it until their night (the edge into their sleep block, or a schedule's first slot of a day), Background characters keep their routine and schedules, Far ones bend for story plans and the GM's intent; \`routine_first\` lets the routine's next edge take them back. A trip waits until they're out of the POV's scene. Schedules ask Cast life the same (\`castlife.yields\`).
+- **The cast in a skip.** A level is read again at every step of a skip (§24.1): a Live or Near character the POV is no longer with follows their routine off screen, as a Far character does; one still with the POV, or held by the story, stays held. Reading a level asks no mind; it only decides whom the routine may move. Their routine still never stops the skip for them: their arrival where the POV is only notes (the signal's \`stops: false\`). A trip's end, like its start, takes no one out of the scene the story holds with the POV: the trip still holds them, and they go home once the scene lets them go.
+- **Tuning** (\`world.routineSettings\`, Build → Routines → Settings; absent, the defaults): \`awareness\`; \`invitations\` (\`off\`, \`player\`, the default, or \`everyone\`: a fixed block that asks its company along lays the block in their days too, when they know the host and follow their routine with invitations); \`sociability\` (\`reserved\`, \`usual\`, \`outgoing\`: how fast an NPC's social and fun needs grow, half, as they are, half again); and \`planBend\` (\`must\`, \`strong\`, \`standard\`, the default and the rule of §24.8, \`ordinary\`: which story plans take their time from work and school).
+- **Writes are shape-checked** (\`backend/worlds.ts\`): a routine whose shape the planner can't read (\`routineShapeProblems\`: a block's kind, \`at\`, window, minutes, \`perWeek\`, chance, priority, days, place, company, needs or source) and routine settings with a setting or value the engine doesn't take (\`routineSettingsProblems\`) are refused before anything is written, by Build's put and set and by a patch alike (the outside tools' too), with a message naming each field at fault. The planner skips a malformed routine and reads a bad setting as its default, so a save the check let through would change nothing unseen. What a routine names that the world lacks (a place, an owner who matches nobody, a lore entry) stays a lint warning after the write.
+- **A chat's own changes** are GM edits (§24.9), each one \`fix\` entry with its Undo: \`routine_follow {entity, mode?, awareness?}\` (mode \`follows\`, \`no_invitations\` or \`off\`; null returns a part to the world's), \`routine_block {entity, block, value}\` (a block, \`{id, off: true}\`, or null to drop the change) and \`schedule_override {entity, schedule, value}\` (\`{off: true, until}\` or their own \`{slots, recurrence?}\`, ranked as their own; null drops it). They record as \`castlife.follow\`, \`castlife.routine\` and \`castlife.schedule\`, each carrying the change whole. The world's routine data is only where a chat starts.
+- **The story's own changes** come from the reply's read (the \`routine\` channel, §9.4, \`packs/castlife/core/story.ts\`): a reply that states a lasting change to someone's week records it as the same \`castlife.routine\` and \`castlife.schedule\` events, with source \`story\`, its turn and its clock, through the \`castlife.routine\` effect (which a rule or an action may use too, as what its story establishes). A new job, shift or habit is a block of theirs (\`story_<its words>\`, or a basic need's own id when it moves one, priority 4, so it outranks the world's defaults where they overlap but never a block that must happen), at the place the reply names (else their work for a job, else wherever they are, so it moves no one the reply didn't); a habit they gave up turns off their blocks it names (by name or place) and drops their schedules' slots at the place it names, with their activity schedules' slots at the same times; a move to a new home sets \`home\`, which every block at home and every schedule's rest place follow. A block the story adds is theirs from the day after its turn, since that day was already laid as the story had it (and its night brings no morning before it); what the story ends ends at once. The GM view lists them among the changes the story made, with their turns; the chip's Undo, or a GM edit of the same block or schedule, takes one back; and as every post-reply record, a Re-narrate keeps only what its own reply's read gives, and a Re-run reads again (§5.1, §4.3).
+- **The read model** (\`lre.routine\`, \`packs/castlife/core/view.ts\`): for the GM, a character's effective routine (each block with its owner, source and what it shadows), every schedule that applies (which wins, which are shadowed, the chat's change), their day as laid with why each block is there (\`BlockOrigin\`), what the story holds now, and the invitations they made and received with their grounds; for the player, only what Cast shows of someone the POV may know (present, an agent, Cast life 3), each block with why as the POV may know it (a lore entry only when the POV may read it; a private block or a secret agenda "Busy"; never a GM change, a place or company). Cast's timeline carries the same \`source\`.
+- **Replay.** A turn's events are recorded, so a fold never re-runs the planner: what an earlier build's planner laid stays as recorded, and the new defaults reach a running chat from its next turn, with no Upgrade. The one exception was \`castlife.need\`, whose apply read an NPC's day plan for the need's base; new need events carry that base (\`from\`), and one recorded without it folds against the earlier template (\`legacyDayOptions\`), so older chats fold as they did.
 - **Life states.** Every entity has one: the built-in \`alive\`, \`dying\` and \`dead\`, or one the world defines (\`lifeStates\`: a label, whether someone in it still acts, and how the narrator reads it, "lies dead"). An entity starts in its own \`life\` (alive when unset) and play changes it only through \`engine.life\`, which the \`life\` effect writes (\`{entity, to?, tell?}\`, for rules and actions), as do a GM edit, the \`life\` narration channel and combat's down rule (\`ruleset.combat.down.life\`: falling into it, alive again once back up from it). \`engine.life\` declares the state touched, so an Upgrade keeps it (§4.3).
   - **Stillness.** Someone whose state doesn't act follows no schedule and no day plan, takes no trip, meets no one, is asked no \`npc.choose\` (day-plan ties and fight turns alike), steps no more as an agent, on screen or off, and rolls no initiative and takes no turn in a fight. An agent who acts again comes back caught up, as a restored one does.
   - **The body stays.** Unlike Remove from the world, the entity keeps its place and relations: Scene lists it, the palette offers it, selectors match it, and the narrator reads it where it lies ("Sir Alaric lies dead.").
@@ -57717,7 +59161,7 @@ Level 0 turns a domain off. Story systems (tracks) do not depend on realism. Tim
     - **The target** is the first of: the read's \`span\`; its \`at\`; its \`until\`, in the player's words ("later that evening") or as a day part, shift or commitment; its \`minutes\` (a number written as text counts). A read that chose the skip keeps it however it gave the span: one split off into \`then\` is read the same way, and with none in the read, the message's own span when it states exactly one. With none at all the turn plays as roleplay, and the log says the read let time pass but stated no span it could read. A message the read gives no skip is never made one by the time words it holds ("I'll be back in an hour," I tell Danny).
     - Its description tells \`interpret\` the day and time as the HUD shows them, in the POV's place's time zone ("it is now Mon 2026-09-14 06:45"), so "skip ahead to Friday at 6 PM" can be read as \`at: "2026-09-18 18:00"\`, and \`then\` may carry an \`at\` too. The engine reads it with the world's calendar, as local time at the POV's place, into an \`at\` target. Only \`YYYY-MM-DD HH:MM\` (or with \`T\`) naming a day the calendar has, at a time from 00:00 to 23:59, is a stated time; anything else is none, and the other parameters are read instead. A stated time that has passed, or lies beyond the 366-day timelapse reach, is refused like any target the timelapse can't reach: the turn runs none and records the note ("Timelapse not run: that time has passed"). A duration up to 24 hours runs as the turn's own timelapse; a longer one is offered as a Timelapse chip and never run unasked, so a misread number can't skip days. An *until* or a stated time isn't capped: "until my next shift" runs as the turn's timelapse however far off the shift is, inside the unit cap. A span typed in character after other actions ("…then wait until morning") is offered, not run, once they have all played; a stated time is offered as "Timelapse to Fri 18:00?". A chip names its time as the HUD does, local to where the POV is, so in Chicago a typed 18:00 reads 18:00.
   - **Extraction** may propose a bounded \`time.advance\` only for narrated time **beyond** what the swipe has already applied: it is given the clock from its fold prefix (P2, §4.3) and the time already applied for this swipe (the turn's elapsed time plus any earlier advance, \`cont\` or \`narr\` reading). It proposes none on timelapse or Speed-through turns.
-    - **Under the cap** (240 minutes a proposal, §9.4) the advance applies together with its **catch-up**: the interval runs whole, like a timelapse segment (every LOD1 agent and the POV's routine, inside the unit cap, every interrupt class at \`note\`), so it equals a timelapse to that time. Under \`auto\` it is computed at once in the post pass and stored with it; under \`confirm\` the post pass checks it the same way and offers a confirm chip, and Apply runs it from the head's clock and stores it in the confirm entry, paused clock or not, as \`auto\` does. It is all or nothing: if the interval exceeds the unit cap or the catch-up cannot finish within the post-pass bound, the advance is not applied and becomes the Timelapse chip below. **During a fight** (\`fightHoldsClock\`) none applies in either mode and none is offered: the post pass declines it with a decline chip, and the next reply is told so; Apply on an earlier chip is refused while one is under way (§11).
+    - **Under the cap** (240 minutes a proposal, §9.4) the advance applies together with its **catch-up**: the interval runs whole, like a timelapse segment (every LOD1 agent inside the unit cap, every interrupt class at \`note\`; the narration told the span, so the story holds the POV and its scene, §8), so it equals a timelapse to that time the story holds the POV through. Under \`auto\` it is computed at once in the post pass and stored with it; under \`confirm\` the post pass checks it the same way and offers a confirm chip, and Apply runs it from the head's clock and stores it in the confirm entry, paused clock or not, as \`auto\` does. It is all or nothing: if the interval exceeds the unit cap or the catch-up cannot finish within the post-pass bound, the advance is not applied and becomes the Timelapse chip below. **During a fight** (\`fightHoldsClock\`) none applies in either mode and none is offered: the post pass declines it with a decline chip, and the next reply is told so; Apply on an earlier chip is refused while one is under way (§11).
     - **Over the cap,** up to the 366-day timelapse reach, or when its catch-up cannot apply whole, it becomes a **Timelapse** action chip to that time, with every interrupt class at \`note\` (§9.4). A skip beyond 366 days is dropped, with no chip.
   - Recurring processes step per slot with process seeds. Closed form is used only where it is exact.
   - **The clock's ✎ fix** (§12) sets a date and a time of day, read in the world's calendar as local time at the POV's place (as typed time is), never before the story starts, with Calendar ≥1. It is one \`fix\` entry, so Undo, Keep, swipes, Re-narrate and Re-run treat it as any fix (§4.3), and the next plan starts from it.
@@ -57750,6 +59194,7 @@ Each pack ships a pure \`core\` (kinds, relations, level contract, services, que
 | \`extract\` → spawns | At most the world's spawn cap a chat (\`spawnCap\`, set in Build's World part: a whole number from 0 to 500, 24 when absent; 0 lets no reply introduce anyone), deduplicated by name against the people the POV may know; a name only someone it may not know has is dropped unseen (§7). The kind and place are validated. A newcomer's id is its name's slug and a digest of the name and how many replies introduced someone before it (\`npc_vex_morrow_1f3a9c2e\`), never the name alone, so it can't be an authored id; the \`spawn\` event stores it, so replays and swipes fold alike. |
 | \`extract\` → \`knows\` | Public facts only: a public entity, or a \`known_by\` or \`discoverable\` place the POV can't see yet (by id or name); never a secret one. Anything the POV may not know of is refused as a fact no world has (§7). |
 | \`extract\` → \`life\` | Someone died, is dying, collapsed or came round, named by a person the POV may know and a life state by id or label. Judged by what the POV knows: what it already takes to be so is refused (\`already\`), and a state it hadn't heard of is no refusal, so nothing is given away. Applying it tells the POV: the change, or, when it was already so, only that. |
+| \`extract\` → \`routine\` | A lasting change to someone's week the reply states (§8): \`start\` a new job, shift or habit, \`stop\` one, or \`move\` to a new home. Read from the reply alone, as every channel, so never from a mind (no mind reaches a helper, §24.3) nor from the player's own wishes. Its person is one the POV may know who acts and whom the reply speaks of: the POV, or someone it names (the read checks the reply's words); its places and people are ones the world has and the POV may know (one it may not reads as none). It needs the days the reply gives (weekday names in the calendar's own words, weekdays, days off or daily) and takes only the times it gives (a time, or a part of the day; none: a floating block in the waking day). A habit only mentioned, already their routine (a block by that name on those days at that time) or their schedule, changes nothing; a fixed block that clashes with one of their schedules applies only when the reply says it takes the place of what they did then (\`replaces\`), and then takes them off each such schedule in the same change, so an authored schedule is never contradicted unsaid. What it ends is only what the reply can know: never a private block. Every refusal is unseen (logged, no chip, no Outcome note): a routine is a soft default, so the next reply is never told something didn't happen. The change is the chat's own on top of the world's, with source \`story\` and its turn; a block it adds is theirs from the next day. |
 | \`extract\` → NPC presence or location | Validated against routes: a move no route reaches is declined. Schedules aren't consulted. The read also says where the reply leaves the POV (\`where\`, asked while \`location\` is a channel), since a reply can take a move as given without telling it ("at the counter with Marcus" while the engine has the POV at the market) and no change would say so: a place the engine doesn't have them at, nor one around it, is offered as their move there, unless the turn's own events moved them (the engine's outcome wins) or a narrated move of theirs already says where. A place the reply only implies is weaker evidence than a told move (a flashback, a phone call, a look across the street, a misread), so it is a guess: whatever the location mode, it waits on a confirm chip whose Apply plays the move, never applies by itself, and is no outcome for the type's learning (§11), so guesses never move told moves toward \`confirm\`. Under \`never\` (the player's pin, or a locked place field) it is ignored, as any move is. |
 | \`extract\` → purchases and transfers | Priced from catalog or category bands; bounds per field; declines (§9.5). A transfer's two sides are people or their own cash, checking, savings or card accounts (§9.5). |
 | \`extract\` → regard | A reply moves each axis of a pair by at most 10 in all, net (a proposal without an axis moves every axis). In the reply's order, a later proposal for the pair is cut down to what is left; one with nothing left is refused like any change past its bound (an automatic one gets a *Didn't apply* chip and its Outcome note). |
@@ -57891,7 +59336,7 @@ I then re-measured with the engine's own \`extract\` step as shipped (strict rul
 
 **One bounds mechanism (D4)**
 - Every field has \`{max_delta, mode: auto | confirm | never}\`, with defaults per domain and per realism preset. **The most restrictive applies.**
-- **Extraction defaults per proposal type (D4):** \`auto\` for \`time_advance\`, \`location\` and \`condition\`; \`confirm\` for \`knows\`, \`give\`, \`purchase\`, \`transfer\`, \`regard\`, \`spawn\` and \`life\`; \`quantity\` has no cold-start mode and starts at \`confirm\` ("From the field's bound"). Each mode is a setting, one tap to change (D31). These modes are only the **cold start**; promotion then **learns on the player's own connection** (D31), with no new surface and no extra model calls:
+- **Extraction defaults per proposal type (D4):** \`auto\` for \`time_advance\`, \`location\`, \`condition\` and \`routine\`; \`confirm\` for \`knows\`, \`give\`, \`purchase\`, \`transfer\`, \`regard\`, \`spawn\` and \`life\`; \`quantity\` has no cold-start mode and starts at \`confirm\` ("From the field's bound"). Each mode is a setting, one tap to change (D31). These modes are only the **cold start**; promotion then **learns on the player's own connection** (D31), with no new surface and no extra model calls:
   - **Counting:** per extraction type and per connection (the one the \`extract\` step ran on), from the confirm and undo chips only. A proposal counts once: accepted when confirmed, or applied automatically and not undone by the next turn's commit; rejected when rejected or undone. An ignored confirm chip counts nothing, and neither does the chip for where a reply leaves the POV when no move says so (§9.4), which is a guess. A read with no pre phase (Re-read edit, Retry read, Continue) counts against the user's real default connection.
   - **Promotion:** at ≥ 0.90 acceptance over at least 30 outcomes, both read from a rolling window of the latest 30, a \`confirm\` type flips to \`auto\` on that connection, with a notification chip and undo ("Purchases now apply automatically: undo").
   - **Demotion:** an \`auto\` type flips back to \`confirm\` when the window's undo rate rises past 0.10, with the same chip. Undo on either chip restores the previous mode and holds the type there for another 30 outcomes.
@@ -57934,6 +59379,7 @@ Touch targets are at least 40 px (including a number stepper of our own with nam
 ## 13. Authoring and validation
 - **Schema-driven editors** for every pack. Four special widgets: **map/grid, schedule/timeline, track graph, expression**; and the **map editor**, a map's \`lre-map-v1\` JSON checked on every keystroke against the schema and the map lint (each problem marked on its line), with a preview drawn as Play's map draws it, and grid and node templates. The expression editor's functions are the registry's (\`formulaFunctions\`, sent with \`lre.world get\`), never a list kept in the frontend; an effect's arguments are edited one at a time, as a value or a \`=\` formula, and only those formulas run the editor in effect mode, which adds \`roll(\`.
 - **Describe a map:** a background job like Refine. The author's prose about a place goes to one helper JSON call whose prompt carries the schema and a short example; the answer, with the requested id and place, is checked against the schema and the map lint on the draft, and errors get one repair call that lists them. The map comes back as one proposal with its preview, ticked when it has no errors; applied, it goes into the draft like any map. An answer that is no map fails the job and says why.
+- **Propose routines from lore:** a background job like Import that proposes people's and groups' routine blocks and schedules from the world's lore and sheets, each resting on what it quotes (§13.1).
 - **Lint** (live, plain language):
   - refs, types, cycles, unreachable stages;
   - oversized sections;
@@ -57954,6 +59400,58 @@ Touch targets are at least 40 px (including a number stepper of our own with nam
 - **World import/export:** \`lre-world-v1\`, one document with the world's lore inside; World Books are not exported.
 - **The authors' reference and recipes:** \`bun run reference\` writes \`docs/REFERENCE.md\` from what the engine and each pack register (kinds and fields, effects with the arguments they declare, formula functions, actions, events, proposals, panels, slots, tables and lint codes), and a test keeps it current; every recipe in \`docs/RECIPES.md\` is a world fragment a test loads, lints and plays.
 
+### 13.1 Propose routines from lore
+Build's job for a world's routines and schedules (\`propose_routines\`, \`backend/routine-proposals.ts\`, run like Import and Refine). It writes the routine data people's days rest on (§8, \`shared/routines\`) only where the world's own text says so. A character the text gives no routine gets none.
+- **What it reads:** the draft, as a chat starts from it (\`initialState\`).
+  - **People and groups:** people in a life state that acts, and groups (families, households and clubs: the \`group\` kinds), the secret ones and the POV aside.
+  - **Sheets:** their public sheet fields, whole, not the engine's own state (place, activity, needs, holds). A value naming a secret person or a hidden place keeps that field out.
+  - **Who they're with:** each group's members, each person's groups, and their ties: a relation either way, but not placement, gear, enmity or membership.
+  - **What they already have:** their schedules and routine blocks.
+  - **Places:** public places inside public places.
+  - **Lore:** read by the lore readers' rules for a step whose output reaches the player (\`extract\`, as an effects template, §5.4), on the start state. So it reads no secret entry whose gate doesn't hold, no entry waiting for review, and a \`known_by\` one only once the POV knows everything it links. The engine's search finds it person by person, with no cap on its hits: entries linked to them, their home, workplace and groups (a group: its members' homes), entries titled or keyed by those names, and entries whose text says their name, best first.
+  - **Why so little:** what the job proposes reaches the player as a block's label and source in Cast's day and in the narrator's sections, so it reads nothing the player may not.
+- **Calls:**
+  - **Each owner's lore, whole:** their entries go in whole, best first, until the next would pass the user's allowance (\`UserSettings.jobs.routineLoreTokens\`, Settings → Steps and connections → Build jobs: 8,000 tokens by default, any number from 1, or all of it with no ceiling; no preset sets it). No entry is ever cut, and no count of entries caps it. When the allowance leaves someone's entries out, the job's message names them, how many of their entries were read, and where to raise it; when it leaves out all of someone's lore and they have no sheet either, the job fails and says so.
+  - **Batches:** people and groups go in id order, up to three to a call while their lore together fits one allowance (an entry two of them share counts once), so someone whose lore fills it has a call of their own. With all of it, they go three to a call whatever their lore. Each call also gets the places they use, then the rest the job may name, 80 in all.
+  - **Bare owners:** someone with no sheet field and no entry about them gets no call.
+  - **The pass:** a pass makes at most Import's 12 calls, repairs included, and starts a call only while its repair still has one. A pass that stops early returns \`next\` (\`{after, owners?}\`), the input that continues it.
+  - **Settings:** the \`brief\` step's connection and max tokens (else \`interpret\`'s), with room for 16,384 tokens as Import's; each call has its own deadline (Settings → Timeouts → Import and Refine calls, No limit allowed). Cancel stops the job.
+- **The prompt** asks for two kinds of item:
+  - \`schedules\`: shifts, school and class timetables, services. A business's opening hours are its staff's shifts, since nothing reads a business's own schedule.
+  - \`routines\`: habits as blocks. A block is fixed, at a set time; flexible, somewhere in a window, on all its days or \`perWeek\` of them; or optional, only sometimes.
+
+  Its rules:
+  - only what an entry or a sheet states;
+  - a habit stated loosely is flexible or optional, never fixed;
+  - a household's or club's shared habit is the group's, once;
+  - a label says what, never who;
+  - a meal had every day takes the meal's id;
+  - nothing takes someone from where the text places them, or from where the story starts them;
+  - nothing contradicts or repeats what they already have.
+- **Sources:** every item cites one lore entry or sheet field it may read, with a quote. The check compares the quote with the whole entry or field, letters and digits alone, and an item whose source doesn't hold is dropped. The block's or schedule's \`source\` is the first that holds; its quote is cut to 240 characters and is never a macro.
+- **Checks against the draft** (\`checkRoutineReply\`):
+  - the owner is one of the call's;
+  - the block's shape reads (\`blockShapeProblems\`), or the schedule's recurrence and times do;
+  - a place the world has is one the job may name;
+  - a routine block says nothing Build's lint would flag, which the job reads with the lint's own function (\`routineIssues\`: a place, holiday or company the world doesn't have, a window it can't keep), word for word;
+  - company is people it reads, with a tie to the owner, a group they share or the cited text naming them;
+  - a label names no one but its owner (and a group's members) and no place the POV can't see yet.
+
+  Problems the helper can fix go to one repair call that lists them with its answer, under a fresh deadline. A call that failed or ran out of time isn't asked again. The repair's answer stands, together with whatever the first answer had right and the repair left out. A proposal carrying an unrevealed secret's words (\`unrevealedSecrets\`) is dropped.
+- **Clashes and dedupe** (\`finishRoutines\`), over the story's first 14 days, on the days the planner lays each block (\`blockOnDay\`: its days, weekly count and chance, read against each day's occasion):
+  - the same item twice keeps the more confident;
+  - what the world already has is dropped: its activity, or its place, over all its fixed times, or a flexible block meeting a run of its activity;
+  - a fixed run at the time of another activity or place in the owner's own schedules, routine blocks or an earlier proposal clashes;
+  - so does a flexible block that never finds room, and a fixed run that would take someone, or a group's members, from where the story starts them as it starts.
+
+  A clash is pointed out, never resolved by overriding what the world holds.
+- **Proposals:**
+  - **Routine blocks:** each is a routine of its own (\`routines/<owner>_<block>\`), so each one applies alone. A block takes a basic need's id only when it is on every day (no days, perWeek or chance); otherwise it takes its own.
+  - **Schedules:** each is an activity schedule and, at a place, a place schedule (\`<owner>_<id>_activity\` and \`_place\`), each with the source, and each one's note names the other.
+  - **Review:** each proposal names its \`owner\`, which the review groups by, and its \`problems\`. One with problems keeps a confidence under 70%, so the review starts it unticked, and \`lre_job_apply\` applies it only when named.
+  - **Applying** is the editor's \`put\`, as for every job.
+- **Failure and the awareness setting:** a job with no one to read, or with no call that answered, fails and says why. The awareness setting (§8) bears on the runtime only: the job proposes the same under every setting.
+
 ## 14. Quality gates and acceptance (D15)
 
 **Unit tests**
@@ -57963,7 +59461,7 @@ Touch targets are at least 40 px (including a number stepper of our own with nam
 - **rebased views:** re-validation with the Keep-report defaults writes nothing to later records; a \`keep\` conversion applies only under its parent path; **switch away, then make a materialization, ✎ fix, chip confirm, Continue, realism, time and Upgrade marker and a new turn on the switched path, then switch back: the fold equals the original exactly**, each of those entries is inert there and listed "made on another branch", and switching to that path again makes them live; a marker made during a regenerate of an earlier message is inert after navigating that message back to its old swipe; re-convergence skips re-validation once the state matches; a Discard is tombstoned, so re-assert and restart recovery never restore it, even after a lower swipe's deletion shifts indexes;
 - Re-run independence (a 50% check across trials) and Re-narrate (P3), including **Upgrade, then Re-narrate**: the new swipe folds exactly as the source up to the reply, its narration renders from the same prefix, its post steps run once and its \`narr\` entry folds after the Upgrade; a copied entry that depends on the source's post-step results is dropped with a Journal note;
 - **in-flight window (P2):** a chip confirm, ✎ fix, materialization, Keep or marker made while a turn streams or during its post pass shows "pending", takes its \`seq\` after the commit and folds after the turn's events (after the \`cont\` entry for a Continue); one made while two windows are open waits for both; post-step events validate against exactly the fold prefix, so re-folding equals validation; \`seq\` keeps increasing across restarts;
-- skip N days equals N one-day steps and any segmentation of the same timelapse; an applied \`time.advance\` to T equals a timelapse to T with every interrupt class at \`note\`; an over-cap advance, or one whose catch-up exceeds the unit cap or the post-pass bound, applies nothing and becomes a Timelapse chip;
+- skip N days equals N one-day steps and any segmentation of the same timelapse; an applied \`time.advance\` to T equals a timelapse to T the story holds the POV through, with every interrupt class at \`note\`; an over-cap advance, or one whose catch-up exceeds the unit cap or the post-pass bound, applies nothing and becomes a Timelapse chip;
 - timelapse interrupts: the same state and policy stop at the same slot; switching a class from \`stop\` to \`note\` leaves the events before the stop unchanged; unit-cap segments end on slot boundaries and always advance at least one slot;
 - time controls as markers: a tick, scale or pause change folds by \`seq\`, and a swipe planned before it keeps its old tick; changing Settings → Time or the world's default ticks after the first record leaves a running chat unchanged; a Continue on the greeting before the first turn is accepted unread, the starting markers land on the first record that holds events, and a Discard of that record or a greeting-swipe switch leaves them in force;
 - \`time.advance\` extraction: narrating the turn's own elapsed time ("after the three-hour drive", a Montage's "three days later") adds no time, a timelapse turn proposes none, and a Continue that refers back to time the reply already advanced adds none;
@@ -58040,7 +59538,7 @@ The ledger is accepted by this executable suite, not by review on paper.
 | **L24 Materialization** | A first promotion from a band lands inside the band. With unchanged pins, detail is identical across extension updates; new tables or generators arrive only through a \`migrate\` marker. |
 | **L26 Elapsed time** | Every unpaused turn advances the clock by its elapsed time; a time-control change applies by \`seq\`, never to a swipe planned before it. |
 | **L27 No double time** | A swipe's clock advance equals its elapsed time plus advances for narrated time beyond what it had already applied; timelapse and Speed-through turns propose none. |
-| **L28 Advance equals timelapse** | An applied \`time.advance\` to T folds like a timelapse to T with every interrupt class at \`note\`; an advance whose catch-up cannot run whole applies nothing. |
+| **L28 Advance equals timelapse** | An applied \`time.advance\` to T folds like a timelapse to T the story holds the POV through (\`povRoutine\` false, as a typed span is), with every interrupt class at \`note\`; an advance whose catch-up cannot run whole applies nothing. |
 | **L29 Segmentation** | Skipping N days = N one-day steps = any segmentation of the same timelapse; every segment advances at least one slot. |
 | **L30 Interpret re-simulates** | After \`interpret\` changes the action, its duration or its activity, the recorded elapsed time and simulation equal those of a turn planned with that action directly. |
 | **L31 Determinism** | The same operations and seeds give the same fold, whatever the wall clock, lane scheduling or chunking. |
@@ -58400,6 +59898,7 @@ Four layers, each tunable (the world's defaults, then the user's overrides):
 - **Recall by presence:** the chat turns a character was there for, built here from the presence records, since the host's memory can't filter by who was present. It reads the turns' messages through the host's chat (the player's message and the reply as displayed, hidden JSON blocks left out). It takes the latest \`recall.recent\`, plus the \`recall.relevant\` that share the most words with the moment as it is to them, oldest first, within \`recall.tokens\`: what the POV says and how the last reply ended when they are there to hear it, else only where they are. Their lore is looked up the same way, so nothing the POV says elsewhere chooses what a character remembers or reads. A character never recalls a turn they weren't present for.
 - **Model-written notes:** after each reply, the \`memory\` step runs once for each character who heard the player's message, at the level the user chose for memory (Standard: Live; Full: Live and Near) as it was where the message was said. Someone the POV left behind is told so, and that what the story tells after it left happened without them. It is written from their perspective and based only on what was written: up to three notes with a salience from 1 to 5, the commitments the turn made and resolved, the plans with times the turn states (said aloud, agreed with someone, or scheduled in the story as written; never a guess at what they might do), what they told whom, and their summary when the turn changed it. Its answer format shows the plans as an empty list, with their fields in the line about them, so an example doesn't prime the model to fill it.
 - **Commitments:** promises, debts, grudges, favours and plans with someone. They stay until kept, broken or released.
+- **Routines aren't memory's:** a lasting change to someone's week the turn states (a new job or shift, a habit, giving one up, a move) is no plan and no note of theirs. The reply's read records it, as a change to their routine with its turn (§8, §9.4), for anyone the reply names, whether or not they heard the turn and with minds on or off; the memory step, which reads a character's own view, never writes one, so nothing of a mind or of a character's own guess reaches their routine.
 - **Salience and consolidation:**
   - A note's salience halves every half-life. One under the floor has faded and is no longer shown.
   - Notes past the number kept, and faded ones, are folded into the character's summary by the \`consolidate\` step, at most once per period per character and for at most two characters a turn.
@@ -58496,19 +59995,15 @@ The Cast life planner (§8) lays each character's own plans into their days and 
 
   Laying is a pure function of the plans and the authored commitments, never of the clock or of where anyone stands. Every plan that can bear on the span asked about is laid with it (those whose windows reach it, and those whose windows reach theirs), so a plan lands at the same time however often, and from whatever timelapse segment, its day is planned.
 - **Living it:**
-  - A plan's block starts and ends at its own minute, between slot steps: an agent process's moments (\`ProcessDef.instants\`), applied among the schedule edges in a turn and a timelapse, for an agent stepped through the slot before. Catch-up steps by slot.
+  - A plan's block starts and ends at its own minute, between slot steps, as every block of their day starts at its own (§8): an agent process's moments (\`ProcessDef.instants\`), applied among the schedule edges in a turn and a timelapse, for an agent stepped through the slot before. Catch-up steps by slot.
   - At the start the character goes to the plan's place (home for rest), and holds its place and activity for the block's span, as a trip does: a routine's schedule edge inside it (work starting at 08:00 under an errand until 08:30) doesn't take them back.
   - After the end they take up whatever follows, going home when that names no place.
 - **Settling it:** at each slot step a \`minds.plan\` event marks a plan done once every block laid for it has passed. It marks one dropped once its window has passed with nothing laid: "no time for it" (routine, appointments, a stronger plan or a trip left no room), or "routine only" for a Background character. A plan cut away entirely is dropped, never done. Each records its own time, so a late catch-up settles it alike.
 - **Money plans:** a \`pay\` or \`lend\` plan is no block of anyone's day; the economy carries it out (§25.5). Its amount (\`cents\`; the memory step writes \`amount\` in the world's major units) goes to the first person the plan is with, and a plan with no positive amount or no one to hand it to is left out. It's paid as a one-off at its window's start, never before the minute after it was made, from the planner's own money as their preferences choose, at the planner's Money level: in the money step's time order from Money 2, and from a world process (\`economy.plans\`) below it, so no plan is left open for want of an engine. It's done once paid, and dropped with the decline's reason when the money isn't there. Its journal lines say only "Payment" or "Loan", never the plan's words. The POV's plans are the player's, so none of theirs is carried out.
 - **What the player sees:** a plan's block shows its kind ("Errand", "Meeting someone", "A visit", "Work", "Rest", "Time out", "Busy") and "their own plan", never the plan's words, which are the character's private intent. The GM view shows the plan whole (§24.9).
-- **Occasions.** A day's occasion shapes its options:
-  - **A day off** (the weekend, or a holiday that gives one) makes a slow morning (breakfast 7 to 11) and more time for leisure and friends.
-  - **Holidays and observances** (Calendar 4) each bring an option of their own.
-  - **Birthdays:** a person's own birthday and a close friend's (regard 30 and up) bring theirs. The \`birthday\` field is \`MM-DD\`, or \`YYYY-MM-DD\` with the year they were born. 29 February falls on the 28th in a common year. A birthday that isn't a date of the world's calendar (\`02-30\`, \`13-05\`, or \`1994-02-29\`, a common year) is no occasion, and lint flags it.
-  - **Season and weather:** summer draws people out to their time out and winter holds them back from it, though where they go for it stays the same. Bad weather keeps them in: their time out is at home, and they see friends less.
+- **Occasions** shape a day only through its routine's blocks (§8): a block's \`days\` say whether it's on (weekdays, days off, holidays and observances, their own birthday or a close friend's at regard 30 and up, seasons from Weather 1, fair or foul weather from Weather 2), and a block \`with\` its company happens at the first of them's home (a friend's birthday at the friend's). The \`birthday\` field is \`MM-DD\`, or \`YYYY-MM-DD\` with the year they were born. 29 February falls on the 28th in a common year. A birthday that isn't a date of the world's calendar (\`02-30\`, \`13-05\`, or \`1994-02-29\`, a common year) is no occasion, and lint flags it. No occasion brings an option on its own any more: the occasion-shaped template of earlier builds only folds what they recorded (§8).
 - **Needs** (Cast life 4) follow the plan. An NPC's need is met at the end of the latest block that meets it, or now while they're in it, and the routine's times stand in before the day has met it. Options weigh needs as the day so far leaves them, so a plan through the lunch hour leaves them hungry for dinner.
-- **Invitations** (Cast life 4) come from plans with the POV. One is asked at most 6 hours before the meeting, never before the meeting's day, and at the earliest the moment after the plan was made, so one for "now" is asked in time; and only once (it is keyed by the plan). Its text never names a place the POV can't see. The old formula invitations run only while minds are off.
+- **Invitations** (Cast life 4) come only on a ground: a plan with the POV (the memory step's or the GM's), or a routine block that asks its company along with the POV among it (while \`routineSettings.invitations\` reaches the player). One is asked at most 6 hours before the meeting, never before the meeting's day, and a plan's at the earliest the moment after it was made, so one for "now" is asked in time; and only once (it is keyed by the plan or the block and day), with its ground recorded (\`origin\`). None comes from a Live or Near character, from someone with the POV, or from someone the chat set to make none; none goes to a POV that doesn't act, is held away, or is already where they'd meet; and none passes between people who don't know each other or where the host regards the POV badly. Its text never names a place the POV can't see. Nothing asks the POV along for company's sake alone: the formula invitations of earlier builds are gone.
 - **Stance** leaves out whoever the Minds section tells of (§6.6, §24.3).
 
 ### 24.9 The GM view
@@ -58979,7 +60474,7 @@ Don't name a price the sections don't give.
 var RECIPES_default = "# LumiRPEngine recipes\n\nSmall worlds that each show one thing working end to end. Every recipe here is a fragment of a world document: the parts it adds to a new world (Build's **Blank** template, or `newWorld` in the [studio API](STUDIO.md)). Merge it object by object: a collection gains the items shown, an item gains the fields shown, and a list replaces the one already there. In Build, enter each item in its editor; a studio merges the JSON. A new world carries every default data table, pinned as a template's are, so a recipe that needs a table of its own carries the whole table, rows and all, and it replaces the world's copy rather than merging into it; in Build, edit that copy in the **Data tables** editor. `test/docs/recipes.test.ts` builds every fragment on this page and plays it through the engine, so what each recipe says happens does happen.\n\nThe formulas are explained in [EXPRESSIONS.md](EXPRESSIONS.md), and every effect, function and pack kind used here is listed in the [reference](REFERENCE.md). Fights are set up in the user guide's [Combat and encounters](USER-GUIDE.md#combat-and-encounters).\n\n## XP and levels\n\nA progression keeps experience in one field and the level in another. After any effect changes an entity's XP (an award, a quest reward, a ✎ fix), the engine raises its level to the last threshold reached, one level at a time, and runs `onLevel` for each level gained. Here sparring earns 150 XP, Level 2 starts at 300, and every level adds a point of Grit. The maximum hit points are derived from the level, so the pool grows with it, and the sheet shows the level, the XP to the next one, and the pool as a bar.\n\n```json\n{\n  \"kinds\": {\n    \"person\": {\n      \"fields\": {\n        \"xp\": { \"type\": \"number\", \"label\": \"XP\", \"min\": 0, \"default\": 0 },\n        \"level\": { \"type\": \"number\", \"label\": \"Level\", \"min\": 1, \"default\": 1 },\n        \"grit\": { \"type\": \"number\", \"label\": \"Grit\", \"default\": 10 },\n        \"hp_max\": { \"type\": \"number\", \"label\": \"Max HP\", \"derived\": \"8 + self.level * 4\" },\n        \"hp\": { \"type\": \"number\", \"label\": \"Hit points\", \"pool\": { \"max\": \"hp_max\" } }\n      }\n    }\n  },\n  \"actions\": {\n    \"spar\": {\n      \"id\": \"spar\",\n      \"label\": \"Spar at the yard\",\n      \"params\": {},\n      \"requires\": [],\n      \"outcomes\": { \"default\": [{ \"type\": \"award\", \"args\": { \"entity\": \"self\", \"progression\": \"adventurer\", \"amount\": 150 } }] },\n      \"duration\": \"60\",\n      \"lexicon\": [\"spar\"]\n    }\n  },\n  \"ruleset\": {\n    \"progression\": {\n      \"adventurer\": {\n        \"label\": \"Level\",\n        \"xpField\": \"xp\",\n        \"levelField\": \"level\",\n        \"thresholds\": [0, 300, 900, 2700],\n        \"maxLevel\": 4,\n        \"kind\": \"person\",\n        \"onLevel\": [{ \"type\": \"add\", \"args\": { \"entity\": \"self\", \"field\": \"grit\", \"delta\": 1 } }]\n      }\n    },\n    \"sheet\": {\n      \"sections\": [{ \"id\": \"growth\", \"label\": \"Growth\", \"rows\": [{ \"progression\": \"adventurer\" }, { \"pool\": \"hp\" }, { \"field\": \"grit\" }] }]\n    }\n  }\n}\n```\n\n**Try it.** In Playtest, type *I spar* three times. The second spar reaches 300 XP: you reach Level 2, Grit goes from 10 to 11, the Journal says \"You reached Level 2.\", and your hit points can now reach 16. The third leaves you at 450 XP, still Level 2.\n\nThe thresholds can come from a data table instead (`\"thresholds\": { \"table\": \"xp_levels\", \"column\": \"xp\" }`, read in row order). `onLevel` sees `level` and `from` in its formulas, so `\"delta\": \"=level % 2 == 0 ? 1 : 0\"` adds a point only on even levels.\n\n## A skill challenge\n\nA puzzle track that opens after three successful checks, under the **Balanced** adjudication policy. Each lock is a little harder than the last (the DC is 12, then 14, then 16). Balanced rolls every check between two limits: a check with a 95 % chance or better passes without a roll (\"No roll needed\"), one with 5 % or worse fails without one (\"Too hard to try\"), and a close roll is told to the narrator as a close call. A failed attempt stands until something changes: an hour passes, the odds change, or you leave and come back.\n\n```json\n{\n  \"kinds\": {\n    \"person\": {\n      \"fields\": {\n        \"finesse\": { \"type\": \"number\", \"label\": \"Finesse\", \"default\": 0 },\n        \"locks_open\": { \"type\": \"number\", \"label\": \"Locks open\", \"min\": 0, \"default\": 0 }\n      }\n    }\n  },\n  \"entities\": { \"you\": { \"fields\": { \"finesse\": 4 } } },\n  \"checks\": {\n    \"tumbler\": { \"id\": \"tumbler\", \"dice\": \"1d20\", \"modifier\": \"self.finesse\", \"dc\": \"12 + self.locks_open * 2\" }\n  },\n  \"actions\": {\n    \"work_lock\": {\n      \"id\": \"work_lock\",\n      \"label\": \"Work a lock\",\n      \"params\": {},\n      \"requires\": [\"stage.vault_door == 'locked'\"],\n      \"check\": \"tumbler\",\n      \"outcomes\": {\n        \"success\": [{ \"type\": \"add\", \"args\": { \"entity\": \"self\", \"field\": \"locks_open\", \"delta\": 1 } }],\n        \"failure\": [{ \"type\": \"note\", \"args\": { \"text\": \"A tumbler slips back into place.\" } }]\n      },\n      \"duration\": \"10\",\n      \"lexicon\": [\"work the lock\", \"pick the lock\"]\n    }\n  },\n  \"tracks\": {\n    \"vault_door\": {\n      \"id\": \"vault_door\",\n      \"kind\": \"puzzle\",\n      \"label\": \"The vault door\",\n      \"start\": \"locked\",\n      \"visibility\": \"public\",\n      \"stages\": {\n        \"locked\": {\n          \"label\": \"Three locks hold the door\",\n          \"objectives\": [{ \"label\": \"Open all three locks\", \"when\": \"pov.locks_open >= 3\" }],\n          \"next\": [{ \"to\": \"open\", \"when\": \"pov.locks_open >= 3\" }],\n          \"hints\": [\"Each lock gives a little under steady hands.\"]\n        },\n        \"open\": { \"label\": \"The door swings open\", \"next\": [] }\n      }\n    }\n  },\n  \"ruleset\": {\n    \"adjudication\": {\n      \"preset\": \"balanced\",\n      \"checks\": \"every\",\n      \"riskyAt\": 0.75,\n      \"trivialAt\": 0.95,\n      \"impossibleAt\": 0.05,\n      \"description\": { \"weight\": \"bonus\", \"max\": 2, \"advantageAt\": 2 },\n      \"authority\": \"hybrid\",\n      \"closeBy\": 2,\n      \"retry\": \"changed\",\n      \"retryAfter\": 60\n    }\n  }\n}\n```\n\n**Try it.** Type *I work the lock* until the door opens. With Finesse 4 each lock rolls (a 65 %, then 55 %, then 45 % chance), and the palette shows the odds before you choose. Raise Finesse to 15 and every lock is a sure thing: three tries, no rolls, and the door is open. Lower it to −30 and no lock can be picked: each try fails without a roll.\n\nA named preset always plays as its own values, so to change one, set `\"preset\": \"custom\"`. The policy here is the world's default; a player can pick another for a chat in **Settings → Checks**. The check names no `pass`, so `success` counts as passing, the outcome a DC check reads when it isn't failed. To have the player's described approach count, keep `description.weight` at `bonus`: the judge step rates it, and the rating adds to the roll.\n\n## A shop with a priced catalog\n\nThe Buy action prices what you ask for from the world's `economy.catalog` table, finding the row by its id or by its name (with an `economy.categories` table, naming a whole category prices from its band instead). A row's `price_cents` is a band in minor units of the world's currency; a price drawn from it varies a little around `typical`, so a fixed price sets `min`, `typical` and `max` alike. At Money 2 the shop takes cash from the buyer's cash account and declines what they can't cover, and at Gear 1 or more a physical thing you buy (the categories `tools_hardware`, `groceries_staples`, `clothing` and the like) comes into being in your hands.\n\n```json\n{\n  \"realism\": { \"levels\": { \"money\": 2 } },\n  \"places\": { \"store\": { \"id\": \"store\", \"name\": \"Hollow Creek General Store\", \"fields\": {} } },\n  \"start\": { \"place\": \"store\" },\n  \"entities\": {\n    \"you\": { \"fields\": { \"place\": \"store\" } },\n    \"purse\": { \"id\": \"purse\", \"kind\": \"account\", \"name\": \"Your purse\", \"tier\": \"background\", \"fields\": { \"owner\": \"you\", \"type\": \"cash\", \"opening\": 2000 }, \"relations\": [] }\n  },\n  \"tables\": {\n    \"economy.catalog\": {\n      \"id\": \"economy.catalog\",\n      \"pack\": \"economy\",\n      \"schema\": \"lre-table/economy.catalog/v1\",\n      \"revision\": \"05c9407d21cade2a99c5351d90b8e57d\",\n      \"label\": \"Hollow Creek General Store\",\n      \"columns\": {\n        \"name\": { \"type\": \"text\" },\n        \"category\": { \"type\": \"text\" },\n        \"unit\": { \"type\": \"text\" },\n        \"price_cents\": { \"type\": \"band\", \"unit\": \"cents\" }\n      },\n      \"rows\": {\n        \"lantern\": { \"name\": \"Brass lantern\", \"category\": \"tools_hardware\", \"unit\": \"each\", \"price_cents\": { \"min\": 1250, \"typical\": 1250, \"max\": 1250 } },\n        \"rope\": { \"name\": \"Hemp rope\", \"category\": \"tools_hardware\", \"unit\": \"50 ft\", \"price_cents\": { \"min\": 600, \"typical\": 800, \"max\": 1000 } },\n        \"jerky\": { \"name\": \"Beef jerky\", \"category\": \"groceries_staples\", \"unit\": \"bag\", \"price_cents\": { \"min\": 350, \"typical\": 350, \"max\": 350 } }\n      }\n    }\n  }\n}\n```\n\n**Try it.** With $20.00 in your purse, *I buy a brass lantern* costs $12.50 and puts the lantern in your hands; *I buy beef jerky* costs $3.50. A second lantern is declined: $4.00 doesn't cover it. Rope costs between $6.00 and $10.00, close to $8.00.\n\nThe `revision` is computed from the table's schema, columns and rows, never written by hand: whenever a table is saved to a draft (by Build's table editor, or by an agent's patch), the engine computes it and pins it in `pins.tables`, and a studio computes the same hash. For a store that charges more than the world's usual prices, the `economy.price_modifier` effect raises a category, or everything, at one place (`\"percent\": 25` is a quarter dearer).\n\n## Secret lore behind a track\n\nA secret track reveals the mayor's debt once you reach the mill office, and a lore entry holds the secret itself. The entry is `secret`, so its `gate` keeps it shut until the track reaches `revealed`, and its `audience` names the one helper that may read it before then: `npc.choose`, the step that decides what NPCs do. No helper that writes prose for the narrator is in the audience, so nothing it reads can reach the story early.\n\n```json\n{\n  \"places\": {\n    \"mill\": { \"id\": \"mill\", \"name\": \"The mill\", \"fields\": {} },\n    \"mill_office\": { \"id\": \"mill_office\", \"name\": \"The mill office\", \"parent\": \"mill\", \"fields\": {} }\n  },\n  \"start\": { \"place\": \"mill\" },\n  \"entities\": {\n    \"you\": { \"fields\": { \"place\": \"mill\" } },\n    \"hale\": { \"id\": \"hale\", \"kind\": \"person\", \"name\": \"Mayor Hale\", \"tier\": \"supporting\", \"fields\": { \"place\": \"mill\" }, \"relations\": [] }\n  },\n  \"tracks\": {\n    \"hale_debt\": {\n      \"id\": \"hale_debt\",\n      \"kind\": \"secret\",\n      \"label\": \"The mayor's debt\",\n      \"owner\": \"hale\",\n      \"start\": \"hidden\",\n      \"visibility\": \"secret\",\n      \"stages\": {\n        \"hidden\": {\n          \"label\": \"The mill's books don't add up\",\n          \"cue\": \"The miller won't meet your eye when the mayor's name comes up.\",\n          \"next\": [{ \"to\": \"revealed\", \"when\": \"at(pov, 'mill_office')\" }]\n        },\n        \"revealed\": {\n          \"label\": \"The mayor owes the mill\",\n          \"truth\": \"Mayor Hale borrowed the mill's grain money to cover his gambling debts.\",\n          \"next\": []\n        }\n      }\n    }\n  },\n  \"lore\": {\n    \"hale_debt\": {\n      \"id\": \"hale_debt\",\n      \"title\": \"Hale's debt\",\n      \"content\": \"Mayor Hale borrowed the mill's grain money to cover his gambling debts. He means to repay it before the harvest audit.\",\n      \"keys\": [\"mayor\", \"debt\", \"grain money\"],\n      \"links\": [\"hale\", \"mill\"],\n      \"secret\": true,\n      \"gate\": \"stage.hale_debt == 'revealed'\",\n      \"audience\": [\"npc.choose\"]\n    }\n  }\n}\n```\n\n**Try it.** Check world runs a day without a leak: the truth never shows in a section. In Playtest, *I go to the mill office* reveals the track, and from then on the gate holds.\n\nLint guards the secret. The entry repeats the track's truth, so without `\"secret\": true` it is an error (`secret_truth`); a secret entry needs a gate (`no_gate`); and putting a prose step such as `brief` in the audience is a warning (`prose_audience`). The GM view shows every track with its truth whatever the player knows.\n\n## A room on the grid\n\nA walled garden drawn as a grid map, with the optional grid system on: walls and doors steer you, things lie in cells, and stepping into a zone fires a rule. The potting shed is a room behind a door, an iron key lies on the path, and the fountain is a zone. Cells outside every room (the paths here) count as the map's own place, the garden.\n\n```json\n{\n  \"mapSettings\": { \"display\": \"knowledge\", \"grid\": { \"movement\": true, \"sightRadius\": 3 } },\n  \"places\": { \"garden\": { \"id\": \"garden\", \"name\": \"The walled garden\", \"fields\": {} } },\n  \"start\": { \"place\": \"garden\" },\n  \"entities\": {\n    \"you\": { \"fields\": { \"place\": \"garden\" } },\n    \"key\": { \"id\": \"key\", \"kind\": \"item\", \"name\": \"Iron key\", \"tier\": \"background\", \"fields\": {}, \"relations\": [] }\n  },\n  \"maps\": {\n    \"garden\": {\n      \"id\": \"garden\",\n      \"scope\": \"garden\",\n      \"title\": \"The walled garden\",\n      \"cellMeters\": 2,\n      \"layout\": [\"#########\", \"#sss#...#\", \"#sss+.F.#\", \"#sss#.K.#\", \"######+##\"],\n      \"legend\": { \"s\": { \"place\": \"shed\" }, \"F\": { \"zone\": \"fountain\" }, \"K\": { \"item\": \"key\" } },\n      \"places\": [{ \"id\": \"shed\", \"name\": \"Potting shed\" }]\n    }\n  },\n  \"rules\": {\n    \"fountain_coins\": {\n      \"id\": \"fountain_coins\",\n      \"on\": { \"zone\": \"fountain\", \"in\": \"garden\" },\n      \"do\": [{ \"type\": \"note\", \"args\": { \"text\": \"Coins glint under the water.\" } }]\n    }\n  }\n}\n```\n\n**Try it.** You start at the gate in the bottom wall, x 6 and y 4 (x counts from the left, y from the top, both from 0). On the map, tap the fountain two squares up and **Walk here**: the rule fires and the Journal notes the coins. Standing there doesn't fire it again; stepping off and back on does. The key lies on the square below the fountain, close enough to **Take** from where you stand. Walk to the shed and you're in the potting shed: its door is the only way in.\n\nA zone trigger without `who` counts only the POV; `\"who\": { \"kind\": [\"person\"] }` counts anyone. Each room's area is also a zone named by the room, so `{ \"zone\": \"shed\", \"in\": \"garden\" }` fires on stepping into the shed. Lint checks the zone and cell triggers against the map.\n\n## A family\n\nA family is a group (the Relationships pack's `family` kind) whose members hold `member_of`, with kinship between them. `parent_of` and `child_of` are each other's inverse and `spouse_of` is symmetric, so the engine keeps both sides: the `link` and `unlink` effects write and remove the other side with them, and a chat starts with any side the world left out. Write both sides, as here, and lint has nothing to say. A schedule owned by the group applies to every member who isn't a group, so one schedule brings the whole family home for supper.\n\n```json\n{\n  \"places\": {\n    \"okafor_house\": { \"id\": \"okafor_house\", \"name\": \"The Okafor house\", \"fields\": {} },\n    \"bakery\": { \"id\": \"bakery\", \"name\": \"Okafor's Bakery\", \"fields\": {} }\n  },\n  \"start\": { \"at\": \"2026-01-01T17:00\" },\n  \"entities\": {\n    \"okafors\": { \"id\": \"okafors\", \"kind\": \"family\", \"name\": \"The Okafors\", \"tier\": \"background\", \"fields\": {}, \"relations\": [] },\n    \"ada\": {\n      \"id\": \"ada\",\n      \"kind\": \"person\",\n      \"name\": \"Ada Okafor\",\n      \"tier\": \"supporting\",\n      \"fields\": { \"place\": \"bakery\" },\n      \"relations\": [\n        { \"type\": \"member_of\", \"to\": \"okafors\", \"fields\": { \"role\": \"Mother\" } },\n        { \"type\": \"spouse_of\", \"to\": \"emeka\" },\n        { \"type\": \"parent_of\", \"to\": \"tobi\" }\n      ]\n    },\n    \"emeka\": {\n      \"id\": \"emeka\",\n      \"kind\": \"person\",\n      \"name\": \"Emeka Okafor\",\n      \"tier\": \"supporting\",\n      \"fields\": { \"place\": \"bakery\" },\n      \"relations\": [\n        { \"type\": \"member_of\", \"to\": \"okafors\", \"fields\": { \"role\": \"Father\" } },\n        { \"type\": \"spouse_of\", \"to\": \"ada\" },\n        { \"type\": \"parent_of\", \"to\": \"tobi\" }\n      ]\n    },\n    \"tobi\": {\n      \"id\": \"tobi\",\n      \"kind\": \"person\",\n      \"name\": \"Tobi Okafor\",\n      \"tier\": \"background\",\n      \"fields\": { \"place\": \"bakery\" },\n      \"relations\": [\n        { \"type\": \"member_of\", \"to\": \"okafors\", \"fields\": { \"role\": \"Son\" } },\n        { \"type\": \"child_of\", \"to\": \"ada\" },\n        { \"type\": \"child_of\", \"to\": \"emeka\" }\n      ]\n    }\n  },\n  \"schedules\": {\n    \"okafor_supper\": {\n      \"id\": \"okafor_supper\",\n      \"owner\": \"okafors\",\n      \"target\": \"place\",\n      \"recurrence\": { \"every\": \"day\" },\n      \"slots\": [{ \"start\": \"18:00\", \"end\": \"20:00\", \"value\": \"okafor_house\" }]\n    }\n  }\n}\n```\n\n**Try it.** The day starts at five in the afternoon with the family at the bakery. Timelapse an hour and a half: at six they all go home for supper. Formulas can ask about them: `member_of(tobi, 'okafors')` is true, and so is `has_rel(ada, 'parent_of', 'tobi')`.\n\nA selector picks the family wherever one is asked for: `{ \"memberOf\": [\"okafors\"] }` matches the three of them, for a schedule's owner, a rule's `who`, an action parameter's candidates or who knows a secret (`knownBy`). The person's own schedule wins over the group's for the same field, so Tobi can keep his own Saturday plans.\n";
 
 // docs/REFERENCE.md
-var REFERENCE_default = "# LumiRPEngine reference\n\n<!-- Generated by `bun run reference` (scripts/reference/build.ts). Edit the packs, then run it again. -->\n\nWhat the engine and its packs register, as the registry has it: kinds and their fields, effects and the arguments they read, formula functions, actions, events, proposal channels, panels, slots, data tables and lint codes. Arguments and parameters marked `?` may be left out. The formula language is in [EXPRESSIONS.md](EXPRESSIONS.md), worked examples are in [RECIPES.md](RECIPES.md), and the [user guide](USER-GUIDE.md#authoring) shows the editors.\n\nEngine `0.1.0` · world format `lre-world-v1` · packs `engine` 1, `calendar` 1, `space` 1, `economy` 1, `gear` 1, `vehicles` 1, `weather` 1, `relationships` 1, `castlife` 1, `sheets` 1, `story` 1, `combat` 1, `minds` 1.\n\n## Contents\n\n- [Engine built-ins](#engine-built-ins)\n- [Calendar & time pack](#calendar--time-pack-calendar)\n- [Cast life pack](#cast-life-pack-castlife)\n- [Combat pack](#combat-pack-combat)\n- [Economy pack](#economy-pack-economy)\n- [Gear & containers pack](#gear--containers-pack-gear)\n- [Minds pack](#minds-pack-minds)\n- [Relationships pack](#relationships-pack-relationships)\n- [Character sheets pack](#character-sheets-pack-sheets)\n- [Space & travel pack](#space--travel-pack-space)\n- [Story pack](#story-pack-story)\n- [Vehicles pack](#vehicles-pack-vehicles)\n- [Weather pack](#weather-pack-weather)\n\n## Engine built-ins\n\n### Core effects\n\n| Effect | Arguments |\n|---|---|\n| `add` | `entity`, `field`, `delta` |\n| `award` | `entity`, `progression`, `amount` |\n| `beat` | `hint` |\n| `check` | `check`, `actor?`, `target?`, `outcomes` |\n| `life` | `entity`, `to?`, `tell?` |\n| `link` | `rel`, `from`, `to`, `until?`, `fields?` |\n| `move` | `entity`, `to` |\n| `note` | `text`, `visibility?` |\n| `post` | `lines`, `memo?` |\n| `recover` | `entity`, `field`, `amount?`, `full?` |\n| `set` | `entity`, `field`, `value` |\n| `signal` | `class`, `text`, `entity?`, `visibility?` |\n| `spawn` | `kind`, `name`, `id?`, `tier?`, `fields?`, `relations?`, `agent?`, `place?`, `class?`, `tags?` |\n| `stage` | `track`, `to` |\n| `unlink` | `rel`, `from`, `to` |\n\n### Formula functions\n\nMath: `abs`, `ceil`, `clamp`, `floor`, `max`, `min`, `round`. `min` and `max` take any number of arguments.\n\nThe engine's own:\n\n- `at(entity, place)`\n- `attempts(track)`\n- `band(entity, field)`\n- `count_at(place, kind?)`\n- `days(n)`\n- `field(entity, field)`\n- `fired(rule)`\n- `has_rel(entity, type, to?)`\n- `holiday()`\n- `hours(n)`\n- `knows(entity, subject)`\n- `level(entity, domain)`\n- `next_time(time)`\n- `place(entity)`\n- `rel(entity, type, to?)`\n- `rel_count(entity, type)`\n- `rel_field(from, type, to, field)`\n- `revealed(track, stage?)`\n- `roll(notation)`: effect arguments only\n- `since(track)`\n- `stage(track)`\n- `table(table, key, column)`\n- `table_step(table, value, column)`\n- `today_at(time)`\n\nTaxonomy and life states:\n\n- `band_of(entity)`\n- `has_tag(entity, tag)`\n- `in_class(entity, facet, value)`\n- `kind_is(entity, kind)`\n- `life_of(entity)`\n- `member_of(entity, group)`\n- `tier_of(entity)`\n\n### Events\n\nCore: `add`, `clock`, `link`, `materialize`, `post`, `set`, `spawn`, `stage`, `timelapse`, `unlink`.\n\nEngine bookkeeping: `engine.adjudged`, `engine.attempt`, `engine.beat`, `engine.caught`, `engine.check`, `engine.choice`, `engine.class`, `engine.cursor`, `engine.entity`, `engine.fired`, `engine.life`, `engine.note`, `engine.observed`, `engine.pause`, `engine.revealed`, `engine.rewind`, `engine.signal`, `engine.told`.\n\n### Relation types\n\nBuilt in: `in`, `owns`, `uses`, `worn_by`, `equipped`, `knows`, `member_of`, `regard`, `route`. Packs add the typed ones below.\n\n### Proposals\n\n| Proposal | Bound by |\n|---|---|\n| `knows` | `knows` |\n| `life` | `life` |\n| `spawn` | `spawn` |\n\n### Step purposes\n\n| Purpose | Outputs a world template may declare |\n|---|---|\n| `brief` | `text` |\n| `choices` | `text`, `effects` |\n| `consolidate` | `text` |\n| `contradiction` | `decision`, `text`, `effects` |\n| `extract` | `text`, `effects` |\n| `interpret` | `decision`, `text` |\n| `judge` | `decision`, `text` |\n| `memory` | `text` |\n| `mind` | `text` |\n| `npc.choose` | `decision`, `text` |\n| `outline` | `text` |\n| `puzzle.answer` | `decision`, `text` |\n| `skip` | `text` |\n\nSignals: `agents_present`, `always`, `beat`, `conflict`, `day_start`, `invitation`, `never`, `offscreen`, `present`, `reply`, `scene_change`, `slot_crossed`, `tie_zone`, `timelapse`, `typed_input`, and `every_n:<k>`.\n\nTemplate placeholders: `beats`, `brief`, `character`, `clock`, `facts`, `outcome`, `place`, `pov`, `present`, `recent`, `reply`, `scene`, `user`, `world`.\n\n### Sections\n\nThe slots a world gets when it defines none, kept in rank order on the section budget.\n\n| Slot | Label | Rank |\n|---|---|---|\n| `outcome` | Outcome | 0 |\n| `montage` | Montage | 1 |\n| `scene` | Scene | 2 |\n| `people` | People | 3 |\n| `money` | Money | 4 |\n| `gear` | Gear | 5 |\n| `vehicles` | Vehicles | 6 |\n| `quest` | Quest | 7 |\n| `outline` | Outline | 8 |\n| `stance` | Stance | 9 |\n| `minds` | Minds | 10 |\n\n### Realism\n\nDomains: `money`, `gear`, `vehicles`, `castlife`, `relationships`, `space`, `calendar`, `weather`, `sheets`; each at a level from 0 to 4.\n\nDetail bands: `principal` (Leads), `supporting` (Supporting), `background` (Background).\n\nInterrupt classes: `invitation`, `bill`, `decline`, `incident`, `quest`, `rule`, `arrival`, `overdue`, `needs`, `weather`.\n\n### Lore pins\n\nThe world's `lorePins` part: `characters` and `places`, each a map from an id to a list of pins, where a pin is `{\"lore\": id}` (one of the world's lore entries) or `{\"book\": id, \"entry\": id}` (an entry of one of the user's World Info books). A character's pins reach only their own mind's calls; a place's reach every helper and mind call there or in a place inside it, nearest place first. Pinned text comes first within a helper call's lore tokens, or within the pinned lore a mind reads (Settings → Minds → What a mind reads), and a pin that doesn't fit is cut, with a note in the Context panel.\n\n| Lint | Means |\n|---|---|\n| `pin_duplicate` | the same entry pinned twice to one character or place |\n| `pin_missing` | a pin naming a lore entry the world doesn't have |\n| `pin_pending` | an AI-written entry still waiting for review: no call reads it until it is accepted |\n| `pin_shape` | a pin that is neither {\"lore\": id} nor {\"book\": id, \"entry\": id}: it is ignored |\n| `pin_target` | pins under a character or place the world doesn't have: no call reads them |\n| `pin_unread` | a secret entry pinned to someone whose own it isn't: their mind never reads it |\n\n### Adjudication presets\n\n| Value | `narrative` | `balanced` | `crunchy` |\n|---|---|---|---|\n| `checks` | `\"risky\"` | `\"every\"` | `\"every\"` |\n| `riskyAt` | `0.75` | `0.75` | `0.75` |\n| `trivialAt` | `null` | `0.95` | `null` |\n| `impossibleAt` | `null` | `0.05` | `null` |\n| `description` | `{\"weight\":\"none\",\"max\":3,\"advantageAt\":2}` | `{\"weight\":\"bonus\",\"max\":2,\"advantageAt\":2}` | `{\"weight\":\"none\",\"max\":2,\"advantageAt\":2}` |\n| `authority` | `\"narrative\"` | `\"hybrid\"` | `\"mechanics\"` |\n| `closeBy` | `2` | `2` | `2` |\n| `retry` | `\"changed\"` | `\"changed\"` | `\"free\"` |\n| `retryAfter` | `60` | `60` | `60` |\n\n## Calendar & time pack (`calendar`)\n\nVersion 1 · realism domain `calendar` · requires none.\n\n### Formula functions\n\n- `days_until(date)`\n- `is_day_off()`\n- `is_weekend()`\n- `minutes_until(at)`\n- `weekday_name()`\n\n### Proposals\n\n| Proposal | Bound by |\n|---|---|\n| `time_advance` | `duration` |\n\n### Panels and slots\n\nPanels: `calendar.calendar`. Slots it writes: `scene`.\n\n### Data tables\n\n| Table | Label | Schema | Columns | Default rows |\n|---|---|---|---|---|\n| `calendar.dst` | Daylight saving time, time zones and daylight hours | `lre-table/calendar.dst/v1` | start (json), end (json), duration_weeks_approx (int), exceptions (list), standard_offsets_h (json), note (text), daylight_hours (json) | 1 |\n| `calendar.holidays` | Federal holidays | `lre-table/calendar.holidays/v1` | name (text), rule_type (enum), month (int), day (int, optional), weekday (enum, optional), n (int, optional), federal_paid_day_off (bool), private_sector_paid_day_off (enum), observed_if_weekend (text, optional) | 11 |\n| `calendar.observances` | Common observances | `lre-table/calendar.observances/v1` | name (text), rule_type (enum), month (int, optional), day (int, optional), weekday (enum, optional), n (int, optional), base (ref, optional), offset_days (int, optional), algorithm (text, optional), window (text, optional), start (text, optional), end (text, optional), rule_text (text, optional), rule_note (text, optional) | 30 |\n| `calendar.school` | School year | `lre-table/calendar.school/v1` | title (text), values (json) | 2 |\n| `calendar.shifts` | Work shift patterns | `lre-table/calendar.shifts/v1` | name (text), description (text), days_per_week (number), typical_start (text), typical_shift_h (number), typical_hours_per_week (int), weekend_work (enum), notes (text) | 24 |\n| `calendar.work` | Work norms | `lre-table/calendar.work/v1` | full_time_hours_per_week (number), standard_work_year_h (int), overtime (text), vacation_days_after_1_year (int), vacation_days_after_5_years (int), vacation_days_after_10_years (int), sick_days_per_year (int), paid_time_off_note (text), paid_holidays_per_year (int), meal_break (text) | 1 |\n\n### Lint codes\n\n`calendar.epoch`, `calendar.schedule_times`, `calendar.unit_cap`.\n\n## Cast life pack (`castlife`)\n\nVersion 1 · realism domain `castlife` · requires `gear`, `relationships`, `space`.\n\n### Effects\n\n| Effect | Arguments |\n|---|---|\n| `castlife.decide` | `key`, `choice` |\n| `castlife.override` | `who`, `minutes?`, `place?`, `activity?` |\n| `castlife.satisfy` | `need`, `entity?` |\n\n### Formula functions\n\n- `busy(who)`\n- `invited(host)`\n- `need(who, need)`\n\n### Actions\n\n| Action | Label | Description | Parameters | Check | Outcomes | Minutes | Lexicon |\n|---|---|---|---|---|---|---|---|\n| `accept_invitation` | Accept invitation | Say yes to an invitation someone made you. | `host: ref → person` |  | `default` | `1` | accept, sure, let's, count me in |\n| `eat` | Eat | Have a meal or a snack. |  |  | `default` | `30` | eat, have lunch, have dinner, grab a bite |\n| `rest` | Rest | Rest or relax for a while. |  |  | `default` | `30` | rest, relax, take a break |\n| `sleep` | Go to bed | Go to bed and sleep until morning. |  |  | `default` | `5` | go to bed, sleep, turn in, hit the sack |\n\n### Events\n\nIts own: `castlife.decision`, `castlife.invitation`, `castlife.need`.\n\n### Panels and slots\n\nPanels: `castlife.cast`. Slots it writes: `people`, `stance`.\n\n### Simulation\n\n| Process | Domain | From level | Steps |\n|---|---|---|---|\n| `castlife.agents` | `castlife` | 3 | each agent |\n| `castlife.plans` | `castlife` | 0 | the world |\n| `castlife.trips` | `castlife` | 1 | the world |\n\n### Lint codes\n\n`castlife.birthday`, `castlife.cues`, `castlife.double_booking`.\n\n## Combat pack (`combat`)\n\nVersion 1 · realism domain none · requires none.\n\n### Relation types\n\n| Relation | Label | From | To | Cardinality | Symmetric | Inverse | Fields |\n|---|---|---|---|---|---|---|---|\n| `hostile` | Hostile to | `*` | `*` | many_many | yes |  | none |\n\n### Effects\n\n| Effect | Arguments |\n|---|---|\n| `combat.end` | `winner?` |\n| `combat.end_turn` | `who?` |\n| `combat.spend` | `who?`, `cost` |\n| `combat.start` | `foes?` |\n\n### Formula functions\n\n- `budget_left(e, budget)`\n- `can_fight(e)`\n- `encounter_round()`\n- `has_turn(e)`\n- `in_encounter(e)`\n- `is_ally(a, b)`\n- `is_down(e)`\n- `is_foe(a, b)`\n- `standing(side)`\n\n### Actions\n\n| Action | Label | Description | Parameters | Check | Outcomes | Minutes | Lexicon |\n|---|---|---|---|---|---|---|---|\n| `end_turn` | End turn | End your turn in a fight. |  |  | `default` | `0` | end my turn, end turn |\n| `fight` | Fight | Start a fight with someone. | `target: ref` |  | `default` | `0` | start a fight, pick a fight, draw my weapon |\n\n### Events\n\nIts own: `combat.act`, `combat.decision`, `combat.down`, `combat.end`, `combat.spend`, `combat.start`, `combat.turn`.\n\n### Panels and slots\n\nPanels: `combat.encounter`. Slots it writes: none.\n\n## Economy pack (`economy`)\n\nVersion 1 · realism domain `money` · requires `space`.\n\n### Kinds\n\n#### `account`: Account\n\n| Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |\n|---|---|---|---|---|---|---|---|\n| `apr_pct` | APR % | number | ≥ 0 |  |  |  | live from money 4 |\n| `apy_pct` | APY % | number | ≥ 0 |  |  |  | live from money 4 |\n| `autopay` | Autopay | enum: none, minimum, statement, full, fixed |  | `\"none\"` |  |  | live from money 3 |\n| `autopay_cents` | Autopay amount (fixed) | money | ≥ 0 |  |  |  | live from money 3 |\n| `autopay_from` | Autopay from | ref → account |  |  |  |  | live from money 3 |\n| `due_day` | Due day of month | number | 1 … 31 |  |  |  | live from money 3 |\n| `institution` | Institution | text |  |  |  |  | live from money 3 |\n| `limit` | Credit limit | money | ≥ 0 |  |  |  | live from money 3 |\n| `min_floor` | Minimum payment floor | money | ≥ 0 |  |  |  | live from money 4 |\n| `min_pct` | Minimum payment % of balance | number | 0 … 100 |  |  |  | live from money 4 |\n| `months_left` | Months left (loans) | number | ≥ 0 |  |  |  | live from money 3 |\n| `opened` | Opened | date |  |  |  |  | live from money 4 |\n| `opening` | Opening balance | money |  |  |  |  | locked |\n| `overdraft` | Overdraft policy | enum: decline, fee, linked |  |  |  |  | live from money 2 |\n| `overdraft_limit` | Overdraft limit | money | ≥ 0 |  |  |  | live from money 2 |\n| `overdraft_link` | Overdraft from | ref → account |  |  |  |  | live from money 2 |\n| `owners` | Owners ({party, role, share?}) | list |  |  |  |  | live from money 1 |\n| `payment` | Monthly payment (loans) | money | ≥ 0 |  |  |  | live from money 3 |\n| `product` | Product (a world product, or a class: cash, checking, business_checking, savings, money_market, cd, trust, escrow, credit_card, charge_card, line_of_credit, loan, mortgage, brokerage, retirement) | text |  |  |  |  | live from money 2 |\n| `secured_by` | Secured by | ref |  |  |  |  | live from money 3 |\n| `statement_day` | Statement day | number | 1 … 28 |  |  |  | live from money 3 |\n| `status` | Status | enum: open, frozen, collections, charged_off, closed, paid_off, matured |  | `\"open\"` |  |  | live from money 2 |\n| `term_months` | Term in months | number | ≥ 0 |  |  |  | live from money 3 |\n\n#### `business`: Business\n\nExtends `thing`.\n\n| Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |\n|---|---|---|---|---|---|---|---|\n| `collects_sales_tax` | Collects sales tax | bool |  |  |  |  | live from money 4 |\n| `daily_sales` | Walk-in takings a trading day | money | ≥ 0 |  |  |  | live from money 3 |\n| `distribution_every` | Paid out every | enum: month, quarter, year |  |  |  |  | live from money 4 |\n| `distribution_pct` | Profit paid out % | number | 0 … 100 |  |  |  | live from money 4 |\n| `industry` | Industry | text |  |  |  |  | live from money 3 |\n| `invoice_days` | Invoice terms (days) | number | ≥ 0 |  |  |  | live from money 3 |\n| `late_fee_pct` | Late fee % | number | ≥ 0 |  |  |  | live from money 4 |\n| `margin_pct` | Margin % | number | 0 … 100 |  |  |  | live from money 4 |\n| `operating_account` | Operating account | ref → account |  |  |  |  | live from money 3 |\n| `owners` | Owners ({party, role, share?}) | list |  |  |  |  | live from money 1 |\n| `places` | Places it trades at | list of ref |  |  |  |  | live from money 3 |\n| `sales_spread_pct` | Takings vary by up to ± % | number | 0 … 100 | `30` |  |  | live from money 3 |\n| `structure` | Structure | enum: sole_proprietorship, partnership, llc, s_corp, c_corp |  |  |  |  | live from money 4 |\n| `trading_days` | Trading days (0 is Sunday) | list of number |  |  |  |  | live from money 3 |\n| `valuation_multiple` | Valued at this many years of profit, over its books | number | ≥ 0 | `3` |  |  | live from money 4 |\n| `value` | Value (set: overrides the books) | money | ≥ 0 |  |  |  | live from money 3 |\n\n#### `card`: Payment card\n\n| Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |\n|---|---|---|---|---|---|---|---|\n| `account` | Account | ref → account |  |  |  |  | live from money 2 |\n| `daily_atm_limit` | Daily cash machine limit | money | ≥ 0 |  |  |  | live from money 4 |\n| `daily_purchase_limit` | Daily purchase limit | money | ≥ 0 |  |  |  | live from money 4 |\n| `holder` | Holder | ref |  |  |  |  | live from money 2 |\n| `item` | The card in gear | ref |  |  |  |  | live from money 2 |\n| `last4` | Last four digits | text |  |  |  |  | live from money 3 |\n| `network` | Card type | enum: debit, credit, charge |  |  |  |  | live from money 2 |\n| `replaced_by` | Replaced by | ref → card |  |  |  |  | live from money 2 |\n| `replaces` | Replaces | ref → card |  |  |  |  | live from money 2 |\n| `state` | State | enum: active, frozen, lost, cancelled |  | `\"active\"` |  |  | live from money 2 |\n\n#### `flow`: Money flow\n\n| Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |\n|---|---|---|---|---|---|---|---|\n| `amount_cents` | Amount | money | ≥ 0 |  |  |  | live from money 2 |\n| `amount_due` | What's due on the credit account it pays | enum: minimum, statement, balance |  |  |  |  | live from money 3 |\n| `amount_formula` | Amount formula | text |  |  |  |  | live from money 3 |\n| `amount_max` | Amount at most | money | ≥ 0 |  |  |  | live from money 3 |\n| `amount_min` | Amount at least | money | ≥ 0 |  |  |  | live from money 3 |\n| `amount_of` | Percent of this account's balance | ref → account |  |  |  |  | live from money 3 |\n| `amount_pct` | Percent of a balance | number | 0 … 100 |  |  |  | live from money 3 |\n| `amount_table` | Amount from a table (table.row.column) | text |  |  |  |  | live from money 3 |\n| `at` | Time of day (HH:MM) | text |  |  |  |  | live from money 2 |\n| `category` | Category | text |  |  |  |  | live from money 2 |\n| `count` | Times at most | number | ≥ 1 |  |  |  | live from money 2 |\n| `days` | Days of the month (-1 = the last) | list of number |  |  |  |  | live from money 2 |\n| `end` | Ends | date |  |  |  |  | live from money 2 |\n| `every` | Every | enum: day, week, month, year |  |  |  |  | live from money 2 |\n| `except` | Except holidays | list of text |  |  |  |  | live from money 3 |\n| `fallback` | Fallback (an account or a party) | text |  |  |  |  | live from money 3 |\n| `flow_kind` | Kind | enum: transfer, bill, rent, utility, subscription, premium, loan_payment, card_payment, savings, income, payroll, allowance, living, tax, distribution, invoice, draw, other |  | `\"bill\"` |  |  | live from money 2 |\n| `from` | From (an account, a party, or an outside payer) | text |  |  |  |  | live from money 2 |\n| `interval` | Every Nth period | number | ≥ 1 |  |  |  | live from money 2 |\n| `link` | Belongs to | ref |  |  |  |  | live from money 2 |\n| `method` | Paid by (cash, card, checking, savings) | text |  |  |  |  | live from money 3 |\n| `months` | Months (yearly) | list of number |  |  |  |  | live from money 2 |\n| `once` | Once, at (YYYY-MM-DDTHH:MM) | text |  |  |  |  | live from money 2 |\n| `retries` | Retries | number | ≥ 0 |  |  |  | live from money 3 |\n| `retry_days` | Retry after days | number | ≥ 1 |  |  |  | live from money 3 |\n| `roll` | Off a business day | enum: none, before, after |  | `\"none\"` |  |  | live from money 3 |\n| `shares` | Shares ({party, pct, from?}) | list |  |  |  |  | live from money 3 |\n| `shortfall` | When the money isn't there | enum: skip, partial, retry, fallback, overdraft, defer |  | `\"skip\"` |  |  | live from money 3 |\n| `splits` | Splits ({to, cents?, pct?}) | list |  |  |  |  | live from money 3 |\n| `start` | Starts | date |  |  |  |  | live from money 2 |\n| `status` | Status | enum: active, paused, ended |  | `\"active\"` |  |  | live from money 2 |\n| `to` | To (an account, a party, or an outside payee) | text |  |  |  |  | live from money 2 |\n| `weekdays` | Weekdays (0 = Sunday) | list of number |  |  |  |  | live from money 2 |\n\n#### `holding`: Holding\n\n| Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |\n|---|---|---|---|---|---|---|---|\n| `account` | Account | ref → account |  |  |  |  | live from money 4 |\n| `asset` | Asset | text |  |  |  |  | live from money 4 |\n| `lots` | Lots ({qty, cost, at}) | list |  |  |  |  | live from money 4 |\n| `owners` | Owners ({party, role, share?}) | list |  |  |  |  | live from money 1 |\n| `route` | Distributions go to (an account, or reinvest) | text |  |  |  |  | live from money 4 |\n\n#### `invoice`: Invoice\n\n| Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |\n|---|---|---|---|---|---|---|---|\n| `business` | Business | ref → business |  |  |  |  | live from money 3 |\n| `cents` | Amount | money | ≥ 0 |  |  |  | live from money 3 |\n| `customer` | Customer (a party, or an outside customer) | text |  |  |  |  | live from money 3 |\n| `days_late` | Days late | number | ≥ 0 |  |  |  | live from money 4 |\n| `due` | Due | date |  |  |  |  | live from money 3 |\n| `fees` | Late fees charged | number | ≥ 0 |  |  |  | live from money 4; locked |\n| `flow` | Paid by flow | text |  |  |  |  | live from money 3 |\n| `issued` | Issued | date |  |  |  |  | live from money 3 |\n| `late_fee` | Late fee charged | money | ≥ 0 |  |  |  | live from money 4 |\n| `memo` | For | text |  |  |  |  | live from money 3 |\n| `paid` | Paid | money | ≥ 0 |  |  |  | live from money 3 |\n| `state` | State | enum: open, paid, late, void |  | `\"open\"` |  |  | live from money 3 |\n\n#### `job`: Job\n\n| Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |\n|---|---|---|---|---|---|---|---|\n| `basis` | Paid by | enum: salary, hourly, per_shift, commission, tips, stipend |  | `\"hourly\"` |  |  | live from money 3 |\n| `commission_pct` | Commission % | number | ≥ 0 |  |  |  | live from money 3 |\n| `contractor` | Contractor (nothing withheld) | bool |  |  |  |  | live from money 4 |\n| `deductions` | Deductions ({label, pretax, cents?, pct?, kind?, match_pct?, to?}) | list |  |  |  |  | live from money 4 |\n| `employer` | Employer (a business, or an outside employer) | text |  |  |  |  | live from money 3 |\n| `end` | Ends | date |  |  |  |  | live from money 3 |\n| `hours` | Hours counted | enum: scheduled, attended, contract |  |  |  |  | live from money 3 |\n| `hours_per_week` | Hours a week | number | ≥ 0 |  |  |  | live from money 3 |\n| `occupation` | Occupation | text (row of economy.occupations) |  |  |  |  | live from money 3 |\n| `pay_anchor` | First payday | date |  |  |  |  | live from money 3 |\n| `pay_days` | Paydays of the month | list of number |  |  |  |  | live from money 3 |\n| `pay_every` | Paid | enum: weekly, biweekly, semimonthly, monthly, per_job, custom |  | `\"monthly\"` |  |  | live from money 3 |\n| `pay_except` | Custom pay: except holidays | list of text |  |  |  |  | live from money 3 |\n| `pay_interval` | Custom pay: every Nth | number | ≥ 1 |  |  |  | live from money 3 |\n| `pay_months` | Custom pay: months | list of number |  |  |  |  | live from money 3 |\n| `pay_roll` | Payday off a business day | enum: none, before, after |  | `\"before\"` |  |  | live from money 3 |\n| `pay_unit` | Custom pay: every | enum: day, week, month, year |  |  |  |  | live from money 3 |\n| `pay_weekday` | Payday weekday (0 = Sunday) | number | 0 … 6 |  |  |  | live from money 3 |\n| `pay_weekdays` | Custom pay: weekdays | list of number |  |  |  |  | live from money 3 |\n| `rate` | Rate (a year, an hour or a shift) | money | ≥ 0 |  |  |  | live from money 3 |\n| `season_from` | Season from (MM-DD) | text |  |  |  |  | live from money 3 |\n| `season_to` | Season to (MM-DD) | text |  |  |  |  | live from money 3 |\n| `shift_pattern` | Shift pattern | text (row of calendar.shifts) |  |  |  |  | live from money 3 |\n| `shifts_per_week` | Shifts a week | number | ≥ 0 |  |  |  | live from money 3 |\n| `splits` | Pay goes to ({to, cents?, pct?}) | list |  |  |  |  | live from money 3 |\n| `start` | Started | date |  |  |  |  | live from money 3 |\n| `status` | Status | enum: active, leave, ended |  | `\"active\"` |  |  | live from money 3 |\n| `tips_per_hour` | Tips an hour | money | ≥ 0 |  |  |  | live from money 3 |\n| `title` | Title | text |  |  |  |  | live from money 3 |\n| `weeks_per_year` | Weeks a year | number | 0 … 53 |  |  |  | live from money 3 |\n| `worker` | Worker | ref → person |  |  |  |  | live from money 3 |\n| `workplace` | Workplace | ref |  |  |  |  | live from money 3 |\n\n#### `property`: Property\n\nExtends `thing`.\n\n| Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |\n|---|---|---|---|---|---|---|---|\n| `appreciation_pct` | Appreciation % a year | number |  |  |  |  | live from money 4 |\n| `asking_price` | Asking price (for sale) | money | ≥ 0 |  |  |  | live from money 3 |\n| `insurance` | Insurance a month | money | ≥ 0 |  |  |  | live from money 4 |\n| `lease_months` | Lease term, months | number | ≥ 1 | `12` |  |  | live from money 3 |\n| `let_from` | Let since | date |  |  |  |  | live from money 3 |\n| `managed` | Let to outside tenants | bool |  | `false` |  |  | live from money 3 |\n| `market_rent` | Market rent, a unit a month | money | ≥ 0 |  |  |  | live from money 3 |\n| `mortgage` | Mortgage | ref → account |  |  |  |  | live from money 3 |\n| `owners` | Owners ({party, role, share?}) | list |  |  |  |  | live from money 1 |\n| `place` | Place | ref |  |  |  |  | live from money 3 |\n| `purchase_price` | Purchase price | money | ≥ 0 |  |  |  | live from money 4 |\n| `purchased` | Purchased | date |  |  |  |  | live from money 4 |\n| `region` | Region (for its property tax) | text (row of economy.regions) |  |  |  |  | live from money 3 |\n| `rent_to` | Rent paid into | ref → account |  |  |  |  | live from money 3 |\n| `tax_installments` | Property tax bills a year | number | 1 … 12 | `2` |  |  | live from money 3 |\n| `tax_pct` | Property tax % a year | number | ≥ 0 |  |  |  | live from money 4 |\n| `units` | Units to let | number | ≥ 1 | `1` |  |  | live from money 3 |\n| `upkeep_pct` | Upkeep % a year | number | ≥ 0 |  |  |  | live from money 4 |\n| `vacancy_months` | Months empty between tenants, on average | number | ≥ 0 | `1` |  |  | live from money 3 |\n| `value` | Value | money | ≥ 0 |  |  |  | live from money 3 |\n| `volatility_pct` | Value swings, % a year | number | ≥ 0 |  |  |  | live from money 4 |\n\n#### `trust`: Trust\n\nExtends `thing`.\n\n| Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |\n|---|---|---|---|---|---|---|---|\n| `owners` | Owners ({party, role, share?}) | list |  |  |  |  | live from money 1 |\n\n### Effects\n\n| Effect | Arguments |\n|---|---|\n| `economy.apply_credit` | `product`, `cents?`, `term?`, `secured_by?`, `who?` |\n| `economy.buy` | `item?`, `category?`, `qty?`, `price?`, `exact?`, `stated?`, `name?`, `payer?`, `method?`, `from?`, `payee?`, `keep?`, `cashback?` |\n| `economy.card_replace` | `card`, `who?` |\n| `economy.card_state` | `card`, `state`, `who?` |\n| `economy.close_account` | `account` |\n| `economy.deposit` | `account`, `cents`, `who?` |\n| `economy.distribute` | `business`, `cents?`, `by?` |\n| `economy.exercise` | `holding`, `qty?`, `from?`, `to?`, `party?` |\n| `economy.flow_create` | `label?`, `kind?`, `from?`, `to?`, `amount?`, `every?`, `interval?`, `weekday?`, `day?`, `month?`, `at?`, `once?`, `start?`, `end?`, `count?`, `shortfall?`, `retry_days?`, `retries?`, `fallback?`, `roll?`, `category?`, `who?` |\n| `economy.flow_edit` | `flow`, `name?`, `clear?` |\n| `economy.flow_status` | `flow`, `status`, `who?` |\n| `economy.flow_update` | `flow`, `label?`, `kind?`, `from?`, `to?`, `amount?`, `every?`, `interval?`, `weekday?`, `day?`, `month?`, `at?`, `once?`, `start?`, `end?`, `count?`, `shortfall?`, `retry_days?`, `retries?`, `fallback?`, `roll?`, `category?`, `who?`, `clear?` |\n| `economy.hire` | `business`, `worker`, `title?`, `occupation?`, `basis?`, `rate?`, `hours?`, `hours_per_week?`, `pay_every?`, `start?`, `by?` |\n| `economy.invoice_issue` | `business`, `customer?`, `customer_name?`, `cents`, `memo?`, `days?`, `by?` |\n| `economy.invoice_pay` | `invoice`, `by?` |\n| `economy.invoice_void` | `invoice`, `by?` |\n| `economy.job_end` | `job`, `end?`, `by?` |\n| `economy.job_raise` | `job`, `rate?`, `pct?`, `by?` |\n| `economy.lease_end` | `lease`, `on?`, `party?` |\n| `economy.lease_start` | `property`, `tenant`, `rent`, `months?`, `day?`, `unit?`, `from?`, `party?` |\n| `economy.lose` | `item`, `thief?` |\n| `economy.move` | `from`, `to`, `cents`, `memo?` |\n| `economy.owner_draw` | `business`, `cents`, `owner?`, `by?` |\n| `economy.pay_card` | `card`, `from?`, `cents?`, `who?` |\n| `economy.price_modifier` | `percent`, `scope?`, `place?`, `minutes?`, `id?`, `clear?` |\n| `economy.property_buy` | `property`, `price?`, `from?`, `down?`, `term_months?`, `party?` |\n| `economy.property_sell` | `property`, `price`, `buyer?`, `to?`, `party?` |\n| `economy.release_hold` | `account`, `hold` |\n| `economy.route` | `holding?`, `property?`, `business?`, `to?`, `party?` |\n| `economy.set_autopay` | `account`, `mode`, `from?`, `cents?`, `who?` |\n| `economy.set_pay_prefs` | `tiers`, `who?` |\n| `economy.set_price` | `asset`, `price` |\n| `economy.set_status` | `account`, `status` |\n| `economy.stake_sell` | `business`, `share`, `price`, `buyer?`, `to?`, `party?` |\n| `economy.trade` | `side?`, `party?`, `holding?`, `asset?`, `account?`, `qty?`, `amount?`, `from?`, `to?`, `right?`, `strike?`, `expiry?` |\n| `economy.transfer` | `to`, `cents`, `from?`, `memo?`, `method?` |\n| `economy.withdraw` | `account`, `cents`, `who?` |\n\n### Formula functions\n\n- `asset_price(id)`\n- `balance(account)`\n- `business_value(id)`\n- `can_afford(who, cents)`\n- `credit_score(who)`\n- `employs(business, who)`\n- `holding_units(id)`\n- `holding_value(id)`\n- `holds(who, thing)`\n- `is_credit(account)`\n- `manages(who, thing)`\n- `may_draw(who, business)`\n- `money_feature(feature, who)`\n- `net_worth(who)`\n- `price(item)`\n- `property_value(id)`\n- `spends(who, account)`\n- `wealth(who)`\n\n### Actions\n\n| Action | Label | Description | Parameters | Check | Outcomes | Minutes | Lexicon |\n|---|---|---|---|---|---|---|---|\n| `apply_credit` | Apply for credit | Apply for a credit card, a credit line or a loan. | `product: text`, `amount?: money`, `term?: number` |  | `default` | `15` | apply for a credit card, apply for a loan, take out a loan |\n| `buy` | Buy | Buy something: food, drinks, goods or a service, here or delivered. | `item: text`, `qty?: number`, `price?: money`, `method?: text`, `cashback?: money` |  | `default` | `5` | buy, purchase, order, pick up a |\n| `card_freeze` | Freeze card | Freeze a card so it can't be used. | `card: ref → card` |  | `default` | `2` | freeze my card, lock my card |\n| `card_replace` | Replace card | Order a replacement card. | `card: ref → card` |  | `default` | `2` | replace my card, order a new card |\n| `card_report_lost` | Report card lost | Report a card lost or stolen. | `card: ref → card` |  | `default` | `2` | report my card lost, my card was stolen, cancel my card |\n| `card_unfreeze` | Unfreeze card | Unfreeze a frozen card. | `card: ref → card` |  | `default` | `2` | unfreeze my card, unlock my card |\n| `deposit_cash` | Deposit cash | Put cash into a bank account. | `account: ref → account`, `amount: money` |  | `default` | `3` | deposit, pay in cash, bank the cash |\n| `distribute_profit` | Distribute profit | Pay a business's profit out to its owners. | `business: ref → business`, `amount?: money` |  | `default` | `10` | distribute profit, pay dividends, pay out the owners |\n| `exercise_option` | Exercise an option | Exercise an option contract you hold. | `holding: ref → holding`, `qty?: number`, `from?: ref → account`, `to?: ref → account` |  | `default` | `2` | exercise the option, exercise my calls, exercise my puts |\n| `flow_create` | Set up a standing payment | Set up a standing payment: a bill, a regular transfer, an allowance. | `label?: text`, `kind?: text`, `from?: ref → account`, `to?: text`, `amount?: money`, `every?: text`, `interval?: number`, `weekday?: number`, `day?: number`, `month?: number`, `at?: text`, `once?: text`, `start?: text`, `end?: text`, `count?: number`, `shortfall?: text`, `retry_days?: number`, `retries?: number`, `fallback?: text`, `roll?: text`, `category?: text` |  | `default` | `2` | set up a standing order, schedule a payment, set up a recurring transfer |\n| `flow_delete` | Cancel a standing payment | Cancel a standing payment. | `flow: ref → flow` |  | `default` | `2` | cancel the standing order, stop the recurring payment |\n| `flow_pause` | Pause a standing payment | Pause a standing payment. | `flow: ref → flow` |  | `default` | `2` | pause the standing order |\n| `flow_resume` | Resume a standing payment | Resume a paused standing payment. | `flow: ref → flow` |  | `default` | `2` | resume the standing order |\n| `flow_update` | Change a standing payment | Change a standing payment: its amount, its schedule or its accounts. | `flow: ref → flow`, `label?: text`, `kind?: text`, `from?: ref → account`, `to?: text`, `amount?: money`, `every?: text`, `interval?: number`, `weekday?: number`, `day?: number`, `month?: number`, `at?: text`, `once?: text`, `start?: text`, `end?: text`, `count?: number`, `shortfall?: text`, `retry_days?: number`, `retries?: number`, `fallback?: text`, `roll?: text`, `category?: text`, `clear?: text` |  | `default` | `2` | change the standing order, change the recurring payment |\n| `invoice_issue` | Send an invoice | Bill a customer from a business you run. | `business: ref → business`, `customer?: ref`, `customer_name?: text`, `amount: money`, `memo?: text`, `days?: number` |  | `default` | `10` | send an invoice, invoice, bill them |\n| `invoice_pay` | Pay an invoice | Pay an invoice billed to you or to a business you run. | `invoice: ref → invoice` |  | `default` | `5` | pay the invoice, settle the bill |\n| `invoice_void` | Void an invoice | Cancel an invoice that a business you run sent. | `invoice: ref → invoice` |  | `default` | `5` | void the invoice, cancel the invoice, write it off |\n| `job_end` | End a job | End a job: quit your own, or let someone go from a business you run. | `job: ref → job` |  | `default` | `10` | fire, let go, quit, resign, hand in my notice |\n| `job_hire` | Hire | Hire someone into a business you run, with a title and pay. | `business: ref → business`, `worker: ref → person`, `title?: text`, `basis?: text`, `rate?: money`, `hours_per_week?: number`, `pay_every?: text` |  | `default` | `15` | hire, take on, give a job to |\n| `job_raise` | Give a raise | Change the pay of someone who works for a business you run. | `job: ref → job`, `rate: money` |  | `default` | `5` | give a raise, raise the pay, pay more |\n| `lease_end` | End a lease | End a tenant's lease. | `lease: ref → flow`, `on?: text` |  | `default` | `10` | end the lease, give notice, move out |\n| `lease_start` | Let a unit | Let a unit of a property you own to a tenant, for rent each month. | `property: ref → property`, `tenant: ref → person`, `rent: money`, `months?: number`, `day?: number`, `unit?: text` |  | `default` | `20` | rent out, sign a lease, let the apartment |\n| `move_money` | Transfer between accounts | Move money between your own accounts: checking, savings, cash. | `from: ref → account`, `to: ref → account`, `amount: money` |  | `default` | `2` | transfer, move money, put into savings |\n| `owner_draw` | Take an owner's draw | Take money out of a business you own, for yourself. | `business: ref → business`, `amount: money` |  | `default` | `5` | take a draw, pay myself, take money out of the business |\n| `pay` | Pay | Give someone money: settle up, pay them back, tip them. | `to: ref → person`, `amount: money` |  | `default` | `1` | pay, give money, send money, venmo |\n| `pay_card` | Pay card or loan | Pay off some or all of a card or loan balance. | `card: ref → account`, `from?: ref → account`, `amount?: money` |  | `default` | `2` | pay off the card, pay the card, pay my credit card, make a loan payment |\n| `property_buy` | Buy a property | Buy a property, outright or with a mortgage. | `property: ref → property`, `price?: money`, `from?: ref → account`, `down?: money`, `term_months?: number` |  | `default` | `60` | buy the house, buy the property, make an offer on |\n| `property_sell` | Sell a property | Sell a property you own. | `property: ref → property`, `price: money`, `buyer?: ref → person`, `to?: ref → account` |  | `default` | `60` | sell the house, sell the property |\n| `route_distributions` | Route dividends, rent or profits | Choose where dividends, rent or profits are paid: reinvested, or into an account. | `holding?: ref → holding`, `property?: ref → property`, `business?: ref → business`, `to?: text` |  | `default` | `1` | reinvest dividends, send dividends to, send the rent to |\n| `set_autopay` | Set autopay | Set how a card or loan pays itself each month. | `account: ref → account`, `mode: text`, `from?: ref → account`, `amount?: money` |  | `default` | `2` | set up autopay, turn on autopay, turn off autopay |\n| `set_pay_prefs` | Set how I pay | Set the order in which you prefer to pay: cash, debit, credit. | `tiers: text` |  | `default` | `2` | i'd rather pay with |\n| `stake_sell` | Sell a share of a business | Sell part of your share of a business. | `business: ref → business`, `share: number`, `price: money`, `buyer?: ref → person`, `to?: ref → account` |  | `default` | `60` | sell my share of the business, sell the shop |\n| `trade` | Buy or sell investments | Buy or sell investments: stocks, funds, bonds, crypto. | `side?: text`, `holding?: ref → holding`, `asset?: text`, `account?: ref → account`, `qty?: number`, `amount?: money`, `from?: ref → account`, `to?: ref → account`, `right?: text`, `strike?: money`, `expiry?: text` |  | `default` | `2` | invest, buy stocks, buy shares, sell stocks, sell shares, cash out, buy an option |\n| `withdraw_cash` | Withdraw cash | Take cash out of a bank account. | `account: ref → account`, `amount: money` |  | `default` | `3` | withdraw, take out cash, hit the atm, get cash |\n\n### Events\n\nIts own: `economy.accrue`, `economy.acquire`, `economy.anchor`, `economy.card_paid`, `economy.commission`, `economy.credit`, `economy.decline`, `economy.delinquency`, `economy.dispose`, `economy.estimated_tax`, `economy.exercise`, `economy.flow_renamed`, `economy.flow_run`, `economy.hold`, `economy.income`, `economy.invoice_paid`, `economy.lots`, `economy.mint`, `economy.modifier`, `economy.note`, `economy.open`, `economy.payout`, `economy.payslip`, `economy.price`, `economy.quote`, `economy.remit`, `economy.sale`, `economy.score`, `economy.settle`, `economy.spend`, `economy.stake_route`, `economy.statement`, `economy.status`, `economy.timesheet`, `economy.txn`.\n\nChecks it adds to: `post`.\n\n### Proposals\n\n| Proposal | Bound by |\n|---|---|\n| `purchase` | `money` |\n| `transfer` | `money` |\n\n### Panels and slots\n\nPanels: `economy.money`. Slots it writes: `money`.\n\n### Simulation\n\n| Process | Domain | From level | Steps |\n|---|---|---|---|\n| `economy.accounts` | `money` | 3 | the world |\n| `economy.invoices` | `money` | 3 | the world |\n| `economy.markets` | `money` | 3 | the world |\n| `economy.money` | `money` | 2 | the world |\n| `economy.plans` | `money` | 0 | the world |\n| `economy.property_values` | `money` | 3 | the world |\n| `economy.settlements` | `money` | 3 | the world |\n| `economy.timesheet` | `money` | 3 | the world |\n\nDetail on demand: `money` (version 2).\n\n### Data tables\n\n| Table | Label | Schema | Columns | Default rows |\n|---|---|---|---|---|\n| `economy.catalog` | Price catalog | `lre-table/economy.catalog/v1` | name (text), category (ref), unit (text), price_cents (band), notes (text, optional) | 340 |\n| `economy.categories` | Price categories | `lre-table/economy.categories/v1` | name (text), basis (text), notes (text, optional), price_unit_note (text, optional), item_count (int), price_cents (band) | 19 |\n| `economy.finance` | Finance parameters | `lre-table/economy.finance/v1` | title (text), values (json) | 7 |\n| `economy.occupations` | Occupations and pay | `lre-table/economy.occupations/v1` | title (text), category (enum), median_cents_per_h (int), median_cents_per_year (int), typical_earnings_cents_per_year (int), schedule_pattern (ref), typical_hours_per_week (number), weeks_per_year (number), weekend_work (enum), shifts (list), pay_frequency (enum), benefits (enum), benefits_note (text), withholding_rate_pct (number), description (text), wage_basis (text), tipped (bool, optional), tipped_cash_wage_cents_per_h (int, optional), self_employed (bool, optional), fica_exempt (bool, optional), estimated_tax_set_aside_pct (number, optional), withholding_note (text, optional) | 56 |\n| `economy.regions` | Regions (US states, DC and the national baseline) | `lre-table/economy.regions/v1` | name (text), abbr (text), scope (enum), census_region (enum, optional), census_division (enum, optional), time_zones (list, optional), observes_dst (bool, optional), state_income_tax_effective_pct (number, optional), local_income_tax_pct_typical (number, optional), sales_tax_combined_avg_pct (number), property_tax_effective_pct (number, optional), cost_of_living_multiplier (number), median_rent_1br_cents_per_month (int), median_rent_2br_cents_per_month (int), residential_electricity_cents_per_kwh (number), minimum_wage_cents_per_h (int), tipped_minimum_wage_cents_per_h (int, optional), notes (text, optional) | 52 |\n\n### Lint codes\n\n`economy.accounts`, `economy.assets`, `economy.business`, `economy.claim_cap`, `economy.holdings`, `economy.property`, `economy.unpriced_cap`.\n\n## Gear & containers pack (`gear`)\n\nVersion 1 · realism domain `gear` · requires `space`.\n\n### Kinds\n\n#### `container`: Container\n\nExtends `item`.\n\n| Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |\n|---|---|---|---|---|---|---|---|\n| `capacity_l` | Capacity (l) | number | ≥ 0 |  |  |  | live from gear 2 |\n| `max_load_kg` | Max load (kg) | number | ≥ 0 |  |  |  | live from gear 2 |\n| `stock` | Contents category (sampled when first opened) | text |  |  |  |  |  |\n\n#### `item`: Item\n\nExtends `thing`.\n\n| Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |\n|---|---|---|---|---|---|---|---|\n| `catalog` | Catalog item | text (row of economy.catalog) |  |  |  |  |  |\n| `category` | Category | text |  |  |  |  |  |\n| `condition` | Condition | number | 0 … 100 | `100` |  |  | live from gear 3; bound auto, ±25 a turn; bands: broken, worn, good, like new |\n| `consumable` | Consumable | bool |  |  |  |  | live from gear 4 |\n| `from_kit` | From kit | ref |  |  |  |  | locked |\n| `notable` | Notable | bool |  |  |  |  | live from gear 1 |\n| `overdue` | Overdue | bool |  |  |  |  | locked |\n| `piece` | Kit piece | text |  |  |  |  | locked |\n| `qty` | Quantity | number | ≥ 0 | `1` |  |  | live from gear 2; bound confirm, ±10 a turn |\n| `slot` | Equip slot | text |  |  |  |  | live from gear 3 |\n| `uses` | Uses left | number | ≥ 0 |  |  |  | live from gear 4 |\n| `volume_l` | Volume (l) | number | ≥ 0 |  |  |  | live from gear 2 |\n| `weight_g` | Weight (g) | number | ≥ 0 |  |  |  | live from gear 2 |\n\n#### `kit`: Kit\n\nExtends `container`.\n\n| Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |\n|---|---|---|---|---|---|---|---|\n| `kit` | Kit template | text |  |  |  |  | live from gear 3 |\n| `piece_count` | Piece count | number |  |  |  |  | live from gear 3 |\n| `pieces` | Pieces | list |  |  |  |  | live from gear 3 |\n\n### Relation types\n\n| Relation | Label | From | To | Cardinality | Symmetric | Inverse | Fields |\n|---|---|---|---|---|---|---|---|\n| `equipped` | Equipped by | `item` | `*` | many_one |  |  | `slot` |\n| `uses` | Uses (granted until) | `*` | `*` | many_many |  |  | none |\n| `worn_by` | Worn by | `item` | `*` | many_one |  |  | `slot` |\n\n### Effects\n\n| Effect | Arguments |\n|---|---|\n| `gear.drop` | `item`, `place?` |\n| `gear.give` | `item`, `from`, `to` |\n| `gear.lend` | `item`, `to`, `until?`, `said?` |\n| `gear.lose` | `item`, `thief?` |\n| `gear.receive` | `name`, `to`, `from?` |\n| `gear.remove` | `item` |\n| `gear.retrieve` | `item` |\n| `gear.take_piece` | `kit`, `piece`, `to` |\n| `gear.transfer` | `item`, `to` |\n| `gear.use` | `item`, `user?` |\n| `gear.wear` | `item`, `wearer`, `slot?` |\n\n### Formula functions\n\n- `carried_kg(holder)`\n- `carries(holder, item)`\n- `has_item(holder, what)`\n- `kit_complete(kit)`\n- `kit_present(kit)`\n- `lent_out(thing)`\n\n### Actions\n\n| Action | Label | Description | Parameters | Check | Outcomes | Minutes | Lexicon |\n|---|---|---|---|---|---|---|---|\n| `drop` | Drop | Put down something you carry, here. | `item: ref → item, claim: held` |  | `default` | `1` | drop, put down, leave |\n| `give` | Give | Hand something you carry to someone here, for keeps. | `item: ref → item, claim: held`, `to: ref → person` |  | `default` | `1` | give, hand, pass |\n| `lend` | Lend | Lend something of yours to someone, for some days or until a time. | `item: ref → item`, `to: ref → person`, `days?: number`, `until?: text` |  | `default` | `2` | lend, loan, let borrow |\n| `lose` | Lose something | Something you own or carry is lost or gone, whereabouts unknown. | `item: ref → item` |  | `default` | `1` | lost my, lose, can't find my, is gone, is missing |\n| `reclaim` | Take back | Take back something of yours that you lent out. | `item: ref → item` |  | `default` | `5` | take back, get back, reclaim |\n| `remove` | Take off | Take off something you wear or have equipped. | `item: ref → item` |  | `default` | `2` | take off, remove, unequip |\n| `take` | Take | Pick up something that is here. | `item: ref → item, claim: here` |  | `default` | `1` | take, pick up, grab |\n| `take_piece` | Take from a kit | Take one piece, such as a tool or a part, out of a kit. | `kit: ref → kit`, `piece: text` |  | `default` | `1` | take the, grab a, get a |\n| `use` | Use | Use an item you carry or can reach. | `item: ref → item, claim: held` |  | `default` | `5` | use, apply |\n| `wear` | Wear or equip | Put on or equip clothing, armor or gear. | `item: ref → item, claim: held` |  | `default` | `2` | wear, put on, equip |\n\n### Proposals\n\n| Proposal | Bound by |\n|---|---|\n| `give` | `ref` |\n| `quantity` | `number` |\n\n### Panels and slots\n\nPanels: `gear.gear`. Slots it writes: `gear`.\n\n### Simulation\n\n| Process | Domain | From level | Steps |\n|---|---|---|---|\n| `gear.grants` | `gear` | 1 | the world |\n\nDetail on demand: `gear` (version 1).\n\n### Data tables\n\n| Table | Label | Schema | Columns | Default rows |\n|---|---|---|---|---|\n| `gear.containers` | Containers | `lre-table/gear.containers/v1` | name (text), capacity_l (number), max_load_kg (number), empty_weight_g (int), location (enum), equip_slot (ref), price_cents (band), notes (text, optional) | 34 |\n| `gear.items` | Gear items | `lre-table/gear.items/v1` | name (text), category (enum), equip_slot (ref), weight_g (int), volume_l (number), price_cents (band), notes (text, optional) | 90 |\n| `gear.kits` | Kits | `lre-table/gear.kits/v1` | name (text), recommended_container (ref), description (text), piece_count (int), pieces_total_weight_g (number), packed_volume_l (number), price_cents (band), pieces (list), notes (text, optional) | 5 |\n| `gear.slots` | Equip slots | `lre-table/gear.slots/v1` | description (text) | 20 |\n\n### Lint codes\n\n`gear.kits`.\n\n## Minds pack (`minds`)\n\nVersion 1 · realism domain none · requires none.\n\n### Events\n\nIts own: `minds.commitment`, `minds.commitment_edit`, `minds.consolidated`, `minds.intent`, `minds.memory`, `minds.mind`, `minds.note_edit`, `minds.pin`, `minds.plan`, `minds.plan_edit`, `minds.presence`, `minds.refresh`, `minds.round`, `minds.skip`.\n\n### Panels and slots\n\nPanels: none. Slots it writes: `minds`.\n\n### Lint codes\n\n`minds.config`, `minds.steps`.\n\n## Relationships pack (`relationships`)\n\nVersion 1 · realism domain `relationships` · requires `space`.\n\n### Kinds\n\n#### `company`: Company\n\nExtends `group`.\n\nNo fields of its own.\n\n#### `faction`: Faction\n\nExtends `group`.\n\nNo fields of its own.\n\n#### `family`: Family\n\nExtends `group`.\n\nNo fields of its own.\n\n#### `group`: Group\n\nExtends `thing`.\n\nNo fields of its own.\n\n#### `household`: Household\n\nExtends `group`.\n\nNo fields of its own.\n\n### Relation types\n\n| Relation | Label | From | To | Cardinality | Symmetric | Inverse | Fields |\n|---|---|---|---|---|---|---|---|\n| `child_of` | Child of | `person` | `person` | many_many |  | `parent_of` | none |\n| `knows` | Knows | `*` | `*` | many_many |  |  | none |\n| `member_of` | Member of | `*` | `group` | many_many |  |  | `rank`, `role`, `since` |\n| `parent_of` | Parent of | `person` | `person` | many_many |  | `child_of` | none |\n| `partner_of` | Partner of | `person` | `person` | many_many | yes |  | `since` |\n| `regard` | Regard | `*` | `*` | many_many |  |  | `respect`, `trust`, `warmth` |\n| `sibling_of` | Sibling of | `person` | `person` | many_many | yes |  | none |\n| `spouse_of` | Spouse of | `person` | `person` | many_many | yes |  | `since` |\n\n### Effects\n\n| Effect | Arguments |\n|---|---|\n| `relationships.adjust` | `from`, `to`, `delta`, `axis?`, `why?` |\n| `relationships.appraise` | `from`, `to`, `appraisal`, `why?`, `mutual?` |\n\n### Formula functions\n\n- `faction_regard(group, to)`\n- `regard(from, to, axis)`\n- `regard_band(from, to)`\n\n### Actions\n\n| Action | Label | Description | Parameters | Check | Outcomes | Minutes | Lexicon |\n|---|---|---|---|---|---|---|---|\n| `chat_with` | Chat with | Spend a while talking with someone here. | `target: ref → person` |  | `default` | `15` | chat with, talk to, catch up with |\n| `give_gift` | Give a gift | Give someone here a present. | `target: ref → person` |  | `default` | `5` | give a gift, surprise |\n\n### Events\n\nIts own: `relationships.regard`.\n\n### Proposals\n\n| Proposal | Bound by |\n|---|---|\n| `regard` | `number` |\n\n### Panels and slots\n\nPanels: none. Slots it writes: `people`.\n\n### Lint codes\n\n`relationships.axes`.\n\n## Character sheets pack (`sheets`)\n\nVersion 1 · realism domain `sheets` · requires `space`.\n\n### Effects\n\n| Effect | Arguments |\n|---|---|\n| `sheets.condition` | `condition`, `who?`, `label?`, `mod?`, `minutes?`, `clear?` |\n\n### Formula functions\n\n- `condition_mod(who)`\n- `derived(who, id)`\n- `difficulty_of(v)`\n- `has_condition(who, id)`\n- `stat(who, stat)`\n- `stat_mod(who, stat)`\n- `stat_word(who, stat)`\n\n### Actions\n\n| Action | Label | Description | Parameters | Check | Outcomes | Minutes | Lexicon |\n|---|---|---|---|---|---|---|---|\n| `attempt` | Attempt | Try something hard that one of your stats decides: climb, force, persuade, notice. | `stat: text`, `difficulty?: text` | `1d20` | `failure`, `great`, `success` | `5` | try to, attempt, check |\n\n### Proposals\n\n| Proposal | Bound by |\n|---|---|\n| `condition` | `list` |\n\n### Panels and slots\n\nPanels: `sheets.you`. Slots it writes: `outcome`.\n\n### Lint codes\n\n`sheets.stat_range`.\n\n## Space & travel pack (`space`)\n\nVersion 1 · realism domain `space` · requires `calendar`.\n\n### Kinds\n\n#### `person`: Person\n\nExtends `thing`.\n\n| Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |\n|---|---|---|---|---|---|---|---|\n| `activity` | Activity | text |  | `\"idle\"` |  |  | live from castlife 1 |\n| `activity_until` | Activity ends | number |  |  |  |  | live from castlife 1; locked |\n| `agility` | Agility | number | 3 … 18 |  |  |  | live from sheets 1 |\n| `appointments` | Appointments | list |  |  |  |  | live from castlife 2 |\n| `birthday` | Birthday (MM-DD or YYYY-MM-DD) | date |  |  |  |  | live from castlife 3 |\n| `charm` | Charm | number | 3 … 18 |  |  |  | live from sheets 1 |\n| `chores` | Chores | list |  |  |  |  | live from castlife 3 |\n| `conditions` | Conditions | list |  |  |  |  | live from sheets 4 |\n| `employer` | Employer | ref |  |  |  |  | live from money 3 |\n| `filing_status` | Tax filing status | enum: single, married_filing_jointly, head_of_household |  |  |  |  | live from money 4 |\n| `grit` | Grit | number | 3 … 18 |  |  |  | live from sheets 1 |\n| `home` | Home | ref |  |  |  |  | live from space 1 |\n| `local_tax` | Pays local income tax | bool |  |  |  |  | live from money 4 |\n| `might` | Might | number | 3 … 18 |  |  |  | live from sheets 1 |\n| `needs` | Needs | list |  |  |  |  | live from castlife 4; locked |\n| `occupation` | Occupation | text (row of economy.occupations) |  |  |  |  | live from money 3 |\n| `pay_prefs` | Pays with, in order ({use, min?, max?, categories?, except?}) | list |  |  |  |  | live from money 3 |\n| `region` | Region | text (row of economy.regions) |  |  |  |  | live from money 3 |\n| `scene` | Scene type | text |  |  |  |  |  |\n| `trips` | Trips | list |  |  |  |  | live from castlife 1 |\n| `wealth` | Wealth | text |  |  |  |  | live from money 1 |\n| `wits` | Wits | number | 3 … 18 |  |  |  | live from sheets 1 |\n\n#### `thing`: Thing\n\n| Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |\n|---|---|---|---|---|---|---|---|\n| `owner` | Owner | ref |  |  |  |  |  |\n| `place` | Place | ref |  |  |  |  | live from space 1 |\n| `x` | Grid x | number |  |  |  |  | live from space 3 |\n| `y` | Grid y | number |  |  |  |  | live from space 3 |\n\n### Relation types\n\n| Relation | Label | From | To | Cardinality | Symmetric | Inverse | Fields |\n|---|---|---|---|---|---|---|---|\n| `in` | In | `*` | `*` | many_one |  |  | none |\n\n### Effects\n\n| Effect | Arguments |\n|---|---|\n| `space.set_route` | `route`, `open?` |\n| `space.step` | `x`, `y`, `entity?` |\n\n### Formula functions\n\n- `distance_km(from, to, mode)`\n- `grid_minutes(place, x, y)`\n- `grid_reachable(place, x, y)`\n- `on_grid(thing)`\n- `reach(a, b)`\n- `route_exists(from, to, mode)`\n- `route_open(route)`\n- `travel_minutes(from, to, mode)`\n- `within(place, ancestor)`\n\n### Actions\n\n| Action | Label | Description | Parameters | Check | Outcomes | Minutes | Lexicon |\n|---|---|---|---|---|---|---|---|\n| `go` | Go to | Walk to another place: a room, a building, a street, another part of town. | `to: ref → place` |  | `default` | `level.space < 2 ? (level.space < 1 ? 0 : 15) : travel_minutes(here, to, 'walk')` | go to, walk to, head to, head over to, leave for |\n| `step` | Move on the map | Walk to a square of the grid you stand on. | `x: number`, `y: number` |  | `default` | `grid_minutes(here, x, y)` | walk over to, cross to, move to |\n\n### Events\n\nIts own: `space.pos`, `space.route`.\n\n### Proposals\n\n| Proposal | Bound by |\n|---|---|\n| `location` | `ref` |\n\n### Panels and slots\n\nPanels: `space.map`. Slots it writes: `scene`.\n\n### Lint codes\n\n`space.grid`, `space.maps`, `space.references`.\n\n## Story pack (`story`)\n\nVersion 1 · realism domain none · requires none.\n\n### Effects\n\n| Effect | Arguments |\n|---|---|\n| `story.answer` | `track?`, `puzzle?`, `answer`, `decision?` |\n| `story.flag` | `name`, `value?` |\n\n### Formula functions\n\n- `flag(name)`\n\n### Actions\n\n| Action | Label | Description | Parameters | Check | Outcomes | Minutes | Lexicon |\n|---|---|---|---|---|---|---|---|\n| `answer` | Answer | Give your answer to a puzzle: a riddle, a code, a combination. | `puzzle?: text`, `answer: text`, `decision?: number` |  | `default` | `1` | the answer is, i think it's, solve, answer, the code is, the combination is, try the combination, dial, enter the code |\n\n### Events\n\nIts own: `story.flag`.\n\n### Panels and slots\n\nPanels: `story.quests`. Slots it writes: `quest`.\n\n### Lint codes\n\n`story.answer_track`, `story.leaky_id`, `story.leaky_label`.\n\n## Vehicles pack (`vehicles`)\n\nVersion 1 · realism domain `vehicles` · requires `economy`, `gear`, `space`.\n\n### Kinds\n\n#### `vehicle`: Vehicle\n\nExtends `container`.\n\n| Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |\n|---|---|---|---|---|---|---|---|\n| `class` | Vehicle class | text |  |  |  |  |  |\n| `engine_hours` | Engine hours | number | ≥ 0 |  |  |  | live from vehicles 3; locked |\n| `fuel_pct` | Fuel % | number | 0 … 100 |  |  |  | live from vehicles 2; bound auto, ±30 a turn |\n| `home` | Home base | ref |  |  |  |  | live from vehicles 3 |\n| `last_service` | Last service (mi or h) | number | ≥ 0 |  |  |  | live from vehicles 4 |\n| `odometer_mi` | Odometer (mi) | number | ≥ 0 |  |  |  | live from vehicles 3; locked |\n| `status` | Status | enum: ok, needs_service, broken |  | `\"ok\"` |  |  | live from vehicles 1; bound confirm |\n| `value` | Value | money | ≥ 0 |  |  |  | live from money 3 |\n\n### Effects\n\n| Effect | Arguments |\n|---|---|\n| `vehicles.drive` | `vehicle`, `to`, `driver?`, `riders?` |\n| `vehicles.refuel` | `vehicle`, `payer?`, `pct?` |\n| `vehicles.service` | `vehicle`, `payer?`, `repair?` |\n\n### Formula functions\n\n- `drive_minutes(vehicle, to)`\n- `fuel_ok(vehicle, to)`\n- `fuel_pct(vehicle)`\n\n### Actions\n\n| Action | Label | Description | Parameters | Check | Outcomes | Minutes | Lexicon |\n|---|---|---|---|---|---|---|---|\n| `drive` | Drive | Drive, ride or sail a vehicle you own or may use to another place. | `vehicle: ref → vehicle`, `to: ref → place` |  | `default` | `drive_minutes(vehicle, to)` | drive to, drive over to, take the truck, take the car, sail to, ride to |\n| `refuel` | Refuel | Fill up a vehicle's tank, or charge it. | `vehicle: ref → vehicle` |  | `default` | `10` | refuel, fill up, gas up, charge the car |\n| `repair_vehicle` | Repair | Have a damaged or broken-down vehicle repaired. | `vehicle: ref → vehicle` |  | `default` | `180` | repair, fix the truck, fix the car, get it towed |\n| `service_vehicle` | Service | Have a vehicle serviced: an oil change, a tune-up. | `vehicle: ref → vehicle` |  | `default` | `60` | service, oil change, tune up |\n\n### Panels and slots\n\nPanels: `vehicles.garage`. Slots it writes: `vehicles`.\n\n### Simulation\n\n| Process | Domain | From level | Steps |\n|---|---|---|---|\n| `vehicles.upkeep` | `vehicles` | 4 | the world |\n\nDetail on demand: `vehicles` (version 1).\n\n### Data tables\n\n| Table | Label | Schema | Columns | Default rows |\n|---|---|---|---|---|\n| `vehicles.classes` | Vehicle classes | `lre-table/vehicles.classes/v1` | name (text), domain (enum), fuel_type (enum), factor_guide (ref), tank_capacity_gal (number, optional), tank_capacity_l (number, optional), usable_battery_kwh (number, optional), consumption_unit (enum), consumption (json), range_mi (int, optional), range_h (number, optional), price_new_cents (band), price_used_cents (band), insurance_liability_cents_per_month (int), insurance_full_cents_per_month (int), registration_cents_per_year (band), annual_maintenance_cents_per_year (int), maintenance (json), passengers (int), cargo_l (number), payload_kg (number), towing_kg (number, optional), charging (json, optional), notes (text) | 19 |\n| `vehicles.factors` | Consumption factor guides | `lre-table/vehicles.factors/v1` | basis (text), factors (json), note (text, optional) | 3 |\n\n### Lint codes\n\n`vehicles.classes`.\n\n## Weather pack (`weather`)\n\nVersion 1 · realism domain `weather` · requires `space`.\n\n### Kinds\n\n#### `region`: Weather region\n\n| Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |\n|---|---|---|---|---|---|---|---|\n| `climate` | Climate | text |  | `\"temperate\"` |  |  |  |\n| `temp_c` | Temperature (°C) | number |  |  |  |  | live from weather 3; bound never |\n| `weather` | Weather | text |  | `\"clear\"` |  |  | live from weather 2; bound never |\n| `weather_hold` | Weather held until | number |  |  |  |  | live from weather 2; locked |\n| `weather_hold_until` | Weather held until (condition) | text |  |  |  |  | live from weather 2; locked |\n\n### Effects\n\n| Effect | Arguments |\n|---|---|\n| `weather.clear` | `region`, `state?` |\n| `weather.set` | `region`, `state`, `minutes?`, `until?` |\n\n### Formula functions\n\n- `season()`\n- `weather(place)`\n\n### Panels and slots\n\nPanels: `weather.now`. Slots it writes: `scene`.\n\n### Simulation\n\n| Process | Domain | From level | Steps |\n|---|---|---|---|\n| `weather.climate` | `weather` | 2 | the world |\n\n### Lint codes\n\n`weather.climates`.\n";
+var REFERENCE_default = "# LumiRPEngine reference\n\n<!-- Generated by `bun run reference` (scripts/reference/build.ts). Edit the packs, then run it again. -->\n\nWhat the engine and its packs register, as the registry has it: kinds and their fields, effects and the arguments they read, formula functions, actions, events, proposal channels, panels, slots, data tables and lint codes. Arguments and parameters marked `?` may be left out. The formula language is in [EXPRESSIONS.md](EXPRESSIONS.md), worked examples are in [RECIPES.md](RECIPES.md), and the [user guide](USER-GUIDE.md#authoring) shows the editors.\n\nEngine `0.1.0` · world format `lre-world-v1` · packs `engine` 1, `calendar` 1, `space` 1, `economy` 1, `gear` 1, `vehicles` 1, `weather` 1, `relationships` 1, `castlife` 1, `sheets` 1, `story` 1, `combat` 1, `minds` 1.\n\n## Contents\n\n- [Engine built-ins](#engine-built-ins)\n- [Calendar & time pack](#calendar--time-pack-calendar)\n- [Cast life pack](#cast-life-pack-castlife)\n- [Combat pack](#combat-pack-combat)\n- [Economy pack](#economy-pack-economy)\n- [Gear & containers pack](#gear--containers-pack-gear)\n- [Minds pack](#minds-pack-minds)\n- [Relationships pack](#relationships-pack-relationships)\n- [Character sheets pack](#character-sheets-pack-sheets)\n- [Space & travel pack](#space--travel-pack-space)\n- [Story pack](#story-pack-story)\n- [Vehicles pack](#vehicles-pack-vehicles)\n- [Weather pack](#weather-pack-weather)\n\n## Engine built-ins\n\n### Core effects\n\n| Effect | Arguments |\n|---|---|\n| `add` | `entity`, `field`, `delta` |\n| `award` | `entity`, `progression`, `amount` |\n| `beat` | `hint` |\n| `check` | `check`, `actor?`, `target?`, `outcomes` |\n| `life` | `entity`, `to?`, `tell?` |\n| `link` | `rel`, `from`, `to`, `until?`, `fields?` |\n| `move` | `entity`, `to` |\n| `note` | `text`, `visibility?` |\n| `post` | `lines`, `memo?` |\n| `recover` | `entity`, `field`, `amount?`, `full?` |\n| `set` | `entity`, `field`, `value` |\n| `signal` | `class`, `text`, `entity?`, `visibility?` |\n| `spawn` | `kind`, `name`, `id?`, `tier?`, `fields?`, `relations?`, `agent?`, `place?`, `class?`, `tags?` |\n| `stage` | `track`, `to` |\n| `unlink` | `rel`, `from`, `to` |\n\n### Formula functions\n\nMath: `abs`, `ceil`, `clamp`, `floor`, `max`, `min`, `round`. `min` and `max` take any number of arguments.\n\nThe engine's own:\n\n- `at(entity, place)`\n- `attempts(track)`\n- `band(entity, field)`\n- `count_at(place, kind?)`\n- `days(n)`\n- `field(entity, field)`\n- `fired(rule)`\n- `has_rel(entity, type, to?)`\n- `holiday()`\n- `hours(n)`\n- `knows(entity, subject)`\n- `level(entity, domain)`\n- `next_time(time)`\n- `place(entity)`\n- `rel(entity, type, to?)`\n- `rel_count(entity, type)`\n- `rel_field(from, type, to, field)`\n- `revealed(track, stage?)`\n- `roll(notation)`: effect arguments only\n- `since(track)`\n- `stage(track)`\n- `table(table, key, column)`\n- `table_step(table, value, column)`\n- `today_at(time)`\n\nTaxonomy and life states:\n\n- `band_of(entity)`\n- `has_tag(entity, tag)`\n- `in_class(entity, facet, value)`\n- `kind_is(entity, kind)`\n- `life_of(entity)`\n- `member_of(entity, group)`\n- `tier_of(entity)`\n\n### Events\n\nCore: `add`, `clock`, `link`, `materialize`, `post`, `set`, `spawn`, `stage`, `timelapse`, `unlink`.\n\nEngine bookkeeping: `engine.adjudged`, `engine.attempt`, `engine.beat`, `engine.caught`, `engine.check`, `engine.choice`, `engine.class`, `engine.cursor`, `engine.entity`, `engine.fired`, `engine.life`, `engine.note`, `engine.observed`, `engine.pause`, `engine.revealed`, `engine.rewind`, `engine.signal`, `engine.told`.\n\n### Relation types\n\nBuilt in: `in`, `owns`, `uses`, `worn_by`, `equipped`, `knows`, `member_of`, `regard`, `route`. Packs add the typed ones below.\n\n### Proposals\n\n| Proposal | Bound by |\n|---|---|\n| `knows` | `knows` |\n| `life` | `life` |\n| `spawn` | `spawn` |\n\n### Step purposes\n\n| Purpose | Outputs a world template may declare |\n|---|---|\n| `brief` | `text` |\n| `choices` | `text`, `effects` |\n| `consolidate` | `text` |\n| `contradiction` | `decision`, `text`, `effects` |\n| `extract` | `text`, `effects` |\n| `interpret` | `decision`, `text` |\n| `judge` | `decision`, `text` |\n| `memory` | `text` |\n| `mind` | `text` |\n| `npc.choose` | `decision`, `text` |\n| `outline` | `text` |\n| `puzzle.answer` | `decision`, `text` |\n| `skip` | `text` |\n\nSignals: `agents_present`, `always`, `beat`, `conflict`, `day_start`, `invitation`, `never`, `offscreen`, `present`, `reply`, `scene_change`, `slot_crossed`, `tie_zone`, `timelapse`, `typed_input`, and `every_n:<k>`.\n\nTemplate placeholders: `beats`, `brief`, `character`, `clock`, `facts`, `outcome`, `place`, `pov`, `present`, `recent`, `reply`, `scene`, `user`, `world`.\n\n### Sections\n\nThe slots a world gets when it defines none, kept in rank order on the section budget.\n\n| Slot | Label | Rank |\n|---|---|---|\n| `outcome` | Outcome | 0 |\n| `montage` | Montage | 1 |\n| `scene` | Scene | 2 |\n| `people` | People | 3 |\n| `money` | Money | 4 |\n| `gear` | Gear | 5 |\n| `vehicles` | Vehicles | 6 |\n| `quest` | Quest | 7 |\n| `outline` | Outline | 8 |\n| `stance` | Stance | 9 |\n| `minds` | Minds | 10 |\n\n### Realism\n\nDomains: `money`, `gear`, `vehicles`, `castlife`, `relationships`, `space`, `calendar`, `weather`, `sheets`; each at a level from 0 to 4.\n\nDetail bands: `principal` (Leads), `supporting` (Supporting), `background` (Background).\n\nInterrupt classes: `invitation`, `bill`, `decline`, `incident`, `quest`, `rule`, `arrival`, `overdue`, `needs`, `weather`.\n\n### Lore pins\n\nThe world's `lorePins` part: `characters` and `places`, each a map from an id to a list of pins, where a pin is `{\"lore\": id}` (one of the world's lore entries) or `{\"book\": id, \"entry\": id}` (an entry of one of the user's World Info books). A character's pins reach only their own mind's calls; a place's reach every helper and mind call there or in a place inside it, nearest place first. Pinned text comes first within a helper call's lore tokens, or within the pinned lore a mind reads (Settings → Minds → What a mind reads), and a pin that doesn't fit is cut, with a note in the Context panel.\n\n| Lint | Means |\n|---|---|\n| `pin_duplicate` | the same entry pinned twice to one character or place |\n| `pin_missing` | a pin naming a lore entry the world doesn't have |\n| `pin_pending` | an AI-written entry still waiting for review: no call reads it until it is accepted |\n| `pin_shape` | a pin that is neither {\"lore\": id} nor {\"book\": id, \"entry\": id}: it is ignored |\n| `pin_target` | pins under a character or place the world doesn't have: no call reads them |\n| `pin_unread` | a secret entry pinned to someone whose own it isn't: their mind never reads it |\n\n### Adjudication presets\n\n| Value | `narrative` | `balanced` | `crunchy` |\n|---|---|---|---|\n| `checks` | `\"risky\"` | `\"every\"` | `\"every\"` |\n| `riskyAt` | `0.75` | `0.75` | `0.75` |\n| `trivialAt` | `null` | `0.95` | `null` |\n| `impossibleAt` | `null` | `0.05` | `null` |\n| `description` | `{\"weight\":\"none\",\"max\":3,\"advantageAt\":2}` | `{\"weight\":\"bonus\",\"max\":2,\"advantageAt\":2}` | `{\"weight\":\"none\",\"max\":2,\"advantageAt\":2}` |\n| `authority` | `\"narrative\"` | `\"hybrid\"` | `\"mechanics\"` |\n| `closeBy` | `2` | `2` | `2` |\n| `retry` | `\"changed\"` | `\"changed\"` | `\"free\"` |\n| `retryAfter` | `60` | `60` | `60` |\n\n## Calendar & time pack (`calendar`)\n\nVersion 1 · realism domain `calendar` · requires none.\n\n### Formula functions\n\n- `days_until(date)`\n- `is_day_off()`\n- `is_weekend()`\n- `minutes_until(at)`\n- `weekday_name()`\n\n### Proposals\n\n| Proposal | Bound by |\n|---|---|\n| `time_advance` | `duration` |\n\n### Panels and slots\n\nPanels: `calendar.calendar`. Slots it writes: `scene`.\n\n### Data tables\n\n| Table | Label | Schema | Columns | Default rows |\n|---|---|---|---|---|\n| `calendar.dst` | Daylight saving time, time zones and daylight hours | `lre-table/calendar.dst/v1` | start (json), end (json), duration_weeks_approx (int), exceptions (list), standard_offsets_h (json), note (text), daylight_hours (json) | 1 |\n| `calendar.holidays` | Federal holidays | `lre-table/calendar.holidays/v1` | name (text), rule_type (enum), month (int), day (int, optional), weekday (enum, optional), n (int, optional), federal_paid_day_off (bool), private_sector_paid_day_off (enum), observed_if_weekend (text, optional) | 11 |\n| `calendar.observances` | Common observances | `lre-table/calendar.observances/v1` | name (text), rule_type (enum), month (int, optional), day (int, optional), weekday (enum, optional), n (int, optional), base (ref, optional), offset_days (int, optional), algorithm (text, optional), window (text, optional), start (text, optional), end (text, optional), rule_text (text, optional), rule_note (text, optional) | 30 |\n| `calendar.school` | School year | `lre-table/calendar.school/v1` | title (text), values (json) | 2 |\n| `calendar.shifts` | Work shift patterns | `lre-table/calendar.shifts/v1` | name (text), description (text), days_per_week (number), typical_start (text), typical_shift_h (number), typical_hours_per_week (int), weekend_work (enum), notes (text) | 24 |\n| `calendar.work` | Work norms | `lre-table/calendar.work/v1` | full_time_hours_per_week (number), standard_work_year_h (int), overtime (text), vacation_days_after_1_year (int), vacation_days_after_5_years (int), vacation_days_after_10_years (int), sick_days_per_year (int), paid_time_off_note (text), paid_holidays_per_year (int), meal_break (text) | 1 |\n\n### Lint codes\n\n`calendar.epoch`, `calendar.schedule_times`, `calendar.unit_cap`.\n\n## Cast life pack (`castlife`)\n\nVersion 1 · realism domain `castlife` · requires `gear`, `relationships`, `space`.\n\n### Effects\n\n| Effect | Arguments |\n|---|---|\n| `castlife.decide` | `key`, `choice` |\n| `castlife.override` | `who`, `minutes?`, `place?`, `activity?` |\n| `castlife.routine` | `entity`, `blocks?`, `schedules?`, `turn?` |\n| `castlife.satisfy` | `need`, `entity?` |\n\n### Formula functions\n\n- `busy(who)`\n- `invited(host)`\n- `need(who, need)`\n\n### Actions\n\n| Action | Label | Description | Parameters | Check | Outcomes | Minutes | Lexicon |\n|---|---|---|---|---|---|---|---|\n| `accept_invitation` | Accept invitation | Say yes to an invitation someone made you. | `host: ref → person` |  | `default` | `1` | accept, sure, let's, count me in |\n| `eat` | Eat | Have a meal or a snack. |  |  | `default` | `30` | eat, have lunch, have dinner, grab a bite |\n| `rest` | Rest | Rest or relax for a while. |  |  | `default` | `30` | rest, relax, take a break |\n| `sleep` | Go to bed | Go to bed and sleep until morning. |  |  | `default` | `5` | go to bed, sleep, turn in, hit the sack |\n\n### Events\n\nIts own: `castlife.decision`, `castlife.follow`, `castlife.invitation`, `castlife.need`, `castlife.routine`, `castlife.schedule`.\n\n### Proposals\n\n| Proposal | Bound by |\n|---|---|\n| `routine` | `routine` |\n\n### Panels and slots\n\nPanels: `castlife.cast`. Slots it writes: `people`, `stance`.\n\n### Simulation\n\n| Process | Domain | From level | Steps |\n|---|---|---|---|\n| `castlife.agents` | `castlife` | 3 | each agent |\n| `castlife.plans` | `castlife` | 0 | the world |\n| `castlife.trips` | `castlife` | 1 | the world |\n\n### Lint codes\n\n`castlife.birthday`, `castlife.cues`, `castlife.double_booking`, `castlife.routines`.\n\n## Combat pack (`combat`)\n\nVersion 1 · realism domain none · requires none.\n\n### Relation types\n\n| Relation | Label | From | To | Cardinality | Symmetric | Inverse | Fields |\n|---|---|---|---|---|---|---|---|\n| `hostile` | Hostile to | `*` | `*` | many_many | yes |  | none |\n\n### Effects\n\n| Effect | Arguments |\n|---|---|\n| `combat.end` | `winner?` |\n| `combat.end_turn` | `who?` |\n| `combat.spend` | `who?`, `cost` |\n| `combat.start` | `foes?` |\n\n### Formula functions\n\n- `budget_left(e, budget)`\n- `can_fight(e)`\n- `encounter_round()`\n- `has_turn(e)`\n- `in_encounter(e)`\n- `is_ally(a, b)`\n- `is_down(e)`\n- `is_foe(a, b)`\n- `standing(side)`\n\n### Actions\n\n| Action | Label | Description | Parameters | Check | Outcomes | Minutes | Lexicon |\n|---|---|---|---|---|---|---|---|\n| `end_turn` | End turn | End your turn in a fight. |  |  | `default` | `0` | end my turn, end turn |\n| `fight` | Fight | Start a fight with someone. | `target: ref` |  | `default` | `0` | start a fight, pick a fight, draw my weapon |\n\n### Events\n\nIts own: `combat.act`, `combat.decision`, `combat.down`, `combat.end`, `combat.spend`, `combat.start`, `combat.turn`.\n\n### Panels and slots\n\nPanels: `combat.encounter`. Slots it writes: none.\n\n## Economy pack (`economy`)\n\nVersion 1 · realism domain `money` · requires `space`.\n\n### Kinds\n\n#### `account`: Account\n\n| Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |\n|---|---|---|---|---|---|---|---|\n| `apr_pct` | APR % | number | ≥ 0 |  |  |  | live from money 4 |\n| `apy_pct` | APY % | number | ≥ 0 |  |  |  | live from money 4 |\n| `autopay` | Autopay | enum: none, minimum, statement, full, fixed |  | `\"none\"` |  |  | live from money 3 |\n| `autopay_cents` | Autopay amount (fixed) | money | ≥ 0 |  |  |  | live from money 3 |\n| `autopay_from` | Autopay from | ref → account |  |  |  |  | live from money 3 |\n| `due_day` | Due day of month | number | 1 … 31 |  |  |  | live from money 3 |\n| `institution` | Institution | text |  |  |  |  | live from money 3 |\n| `limit` | Credit limit | money | ≥ 0 |  |  |  | live from money 3 |\n| `min_floor` | Minimum payment floor | money | ≥ 0 |  |  |  | live from money 4 |\n| `min_pct` | Minimum payment % of balance | number | 0 … 100 |  |  |  | live from money 4 |\n| `months_left` | Months left (loans) | number | ≥ 0 |  |  |  | live from money 3 |\n| `opened` | Opened | date |  |  |  |  | live from money 4 |\n| `opening` | Opening balance | money |  |  |  |  | locked |\n| `overdraft` | Overdraft policy | enum: decline, fee, linked |  |  |  |  | live from money 2 |\n| `overdraft_limit` | Overdraft limit | money | ≥ 0 |  |  |  | live from money 2 |\n| `overdraft_link` | Overdraft from | ref → account |  |  |  |  | live from money 2 |\n| `owners` | Owners ({party, role, share?}) | list |  |  |  |  | live from money 1 |\n| `payment` | Monthly payment (loans) | money | ≥ 0 |  |  |  | live from money 3 |\n| `product` | Product (a world product, or a class: cash, checking, business_checking, savings, money_market, cd, trust, escrow, credit_card, charge_card, line_of_credit, loan, mortgage, brokerage, retirement) | text |  |  |  |  | live from money 2 |\n| `secured_by` | Secured by | ref |  |  |  |  | live from money 3 |\n| `statement_day` | Statement day | number | 1 … 28 |  |  |  | live from money 3 |\n| `status` | Status | enum: open, frozen, collections, charged_off, closed, paid_off, matured |  | `\"open\"` |  |  | live from money 2 |\n| `term_months` | Term in months | number | ≥ 0 |  |  |  | live from money 3 |\n\n#### `business`: Business\n\nExtends `thing`.\n\n| Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |\n|---|---|---|---|---|---|---|---|\n| `collects_sales_tax` | Collects sales tax | bool |  |  |  |  | live from money 4 |\n| `daily_sales` | Walk-in takings a trading day | money | ≥ 0 |  |  |  | live from money 3 |\n| `distribution_every` | Paid out every | enum: month, quarter, year |  |  |  |  | live from money 4 |\n| `distribution_pct` | Profit paid out % | number | 0 … 100 |  |  |  | live from money 4 |\n| `industry` | Industry | text |  |  |  |  | live from money 3 |\n| `invoice_days` | Invoice terms (days) | number | ≥ 0 |  |  |  | live from money 3 |\n| `late_fee_pct` | Late fee % | number | ≥ 0 |  |  |  | live from money 4 |\n| `margin_pct` | Margin % | number | 0 … 100 |  |  |  | live from money 4 |\n| `operating_account` | Operating account | ref → account |  |  |  |  | live from money 3 |\n| `owners` | Owners ({party, role, share?}) | list |  |  |  |  | live from money 1 |\n| `places` | Places it trades at | list of ref |  |  |  |  | live from money 3 |\n| `sales_spread_pct` | Takings vary by up to ± % | number | 0 … 100 | `30` |  |  | live from money 3 |\n| `structure` | Structure | enum: sole_proprietorship, partnership, llc, s_corp, c_corp |  |  |  |  | live from money 4 |\n| `trading_days` | Trading days (0 is Sunday) | list of number |  |  |  |  | live from money 3 |\n| `valuation_multiple` | Valued at this many years of profit, over its books | number | ≥ 0 | `3` |  |  | live from money 4 |\n| `value` | Value (set: overrides the books) | money | ≥ 0 |  |  |  | live from money 3 |\n\n#### `card`: Payment card\n\n| Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |\n|---|---|---|---|---|---|---|---|\n| `account` | Account | ref → account |  |  |  |  | live from money 2 |\n| `daily_atm_limit` | Daily cash machine limit | money | ≥ 0 |  |  |  | live from money 4 |\n| `daily_purchase_limit` | Daily purchase limit | money | ≥ 0 |  |  |  | live from money 4 |\n| `holder` | Holder | ref |  |  |  |  | live from money 2 |\n| `item` | The card in gear | ref |  |  |  |  | live from money 2 |\n| `last4` | Last four digits | text |  |  |  |  | live from money 3 |\n| `network` | Card type | enum: debit, credit, charge |  |  |  |  | live from money 2 |\n| `replaced_by` | Replaced by | ref → card |  |  |  |  | live from money 2 |\n| `replaces` | Replaces | ref → card |  |  |  |  | live from money 2 |\n| `state` | State | enum: active, frozen, lost, cancelled |  | `\"active\"` |  |  | live from money 2 |\n\n#### `flow`: Money flow\n\n| Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |\n|---|---|---|---|---|---|---|---|\n| `amount_cents` | Amount | money | ≥ 0 |  |  |  | live from money 2 |\n| `amount_due` | What's due on the credit account it pays | enum: minimum, statement, balance |  |  |  |  | live from money 3 |\n| `amount_formula` | Amount formula | text |  |  |  |  | live from money 3 |\n| `amount_max` | Amount at most | money | ≥ 0 |  |  |  | live from money 3 |\n| `amount_min` | Amount at least | money | ≥ 0 |  |  |  | live from money 3 |\n| `amount_of` | Percent of this account's balance | ref → account |  |  |  |  | live from money 3 |\n| `amount_pct` | Percent of a balance | number | 0 … 100 |  |  |  | live from money 3 |\n| `amount_table` | Amount from a table (table.row.column) | text |  |  |  |  | live from money 3 |\n| `at` | Time of day (HH:MM) | text |  |  |  |  | live from money 2 |\n| `category` | Category | text |  |  |  |  | live from money 2 |\n| `count` | Times at most | number | ≥ 1 |  |  |  | live from money 2 |\n| `days` | Days of the month (-1 = the last) | list of number |  |  |  |  | live from money 2 |\n| `end` | Ends | date |  |  |  |  | live from money 2 |\n| `every` | Every | enum: day, week, month, year |  |  |  |  | live from money 2 |\n| `except` | Except holidays | list of text |  |  |  |  | live from money 3 |\n| `fallback` | Fallback (an account or a party) | text |  |  |  |  | live from money 3 |\n| `flow_kind` | Kind | enum: transfer, bill, rent, utility, subscription, premium, loan_payment, card_payment, savings, income, payroll, allowance, living, tax, distribution, invoice, draw, other |  | `\"bill\"` |  |  | live from money 2 |\n| `from` | From (an account, a party, or an outside payer) | text |  |  |  |  | live from money 2 |\n| `interval` | Every Nth period | number | ≥ 1 |  |  |  | live from money 2 |\n| `link` | Belongs to | ref |  |  |  |  | live from money 2 |\n| `method` | Paid by (cash, card, checking, savings) | text |  |  |  |  | live from money 3 |\n| `months` | Months (yearly) | list of number |  |  |  |  | live from money 2 |\n| `once` | Once, at (YYYY-MM-DDTHH:MM) | text |  |  |  |  | live from money 2 |\n| `retries` | Retries | number | ≥ 0 |  |  |  | live from money 3 |\n| `retry_days` | Retry after days | number | ≥ 1 |  |  |  | live from money 3 |\n| `roll` | Off a business day | enum: none, before, after |  | `\"none\"` |  |  | live from money 3 |\n| `shares` | Shares ({party, pct, from?}) | list |  |  |  |  | live from money 3 |\n| `shortfall` | When the money isn't there | enum: skip, partial, retry, fallback, overdraft, defer |  | `\"skip\"` |  |  | live from money 3 |\n| `splits` | Splits ({to, cents?, pct?}) | list |  |  |  |  | live from money 3 |\n| `start` | Starts | date |  |  |  |  | live from money 2 |\n| `status` | Status | enum: active, paused, ended |  | `\"active\"` |  |  | live from money 2 |\n| `to` | To (an account, a party, or an outside payee) | text |  |  |  |  | live from money 2 |\n| `weekdays` | Weekdays (0 = Sunday) | list of number |  |  |  |  | live from money 2 |\n\n#### `holding`: Holding\n\n| Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |\n|---|---|---|---|---|---|---|---|\n| `account` | Account | ref → account |  |  |  |  | live from money 4 |\n| `asset` | Asset | text |  |  |  |  | live from money 4 |\n| `lots` | Lots ({qty, cost, at}) | list |  |  |  |  | live from money 4 |\n| `owners` | Owners ({party, role, share?}) | list |  |  |  |  | live from money 1 |\n| `route` | Distributions go to (an account, or reinvest) | text |  |  |  |  | live from money 4 |\n\n#### `invoice`: Invoice\n\n| Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |\n|---|---|---|---|---|---|---|---|\n| `business` | Business | ref → business |  |  |  |  | live from money 3 |\n| `cents` | Amount | money | ≥ 0 |  |  |  | live from money 3 |\n| `customer` | Customer (a party, or an outside customer) | text |  |  |  |  | live from money 3 |\n| `days_late` | Days late | number | ≥ 0 |  |  |  | live from money 4 |\n| `due` | Due | date |  |  |  |  | live from money 3 |\n| `fees` | Late fees charged | number | ≥ 0 |  |  |  | live from money 4; locked |\n| `flow` | Paid by flow | text |  |  |  |  | live from money 3 |\n| `issued` | Issued | date |  |  |  |  | live from money 3 |\n| `late_fee` | Late fee charged | money | ≥ 0 |  |  |  | live from money 4 |\n| `memo` | For | text |  |  |  |  | live from money 3 |\n| `paid` | Paid | money | ≥ 0 |  |  |  | live from money 3 |\n| `state` | State | enum: open, paid, late, void |  | `\"open\"` |  |  | live from money 3 |\n\n#### `job`: Job\n\n| Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |\n|---|---|---|---|---|---|---|---|\n| `basis` | Paid by | enum: salary, hourly, per_shift, commission, tips, stipend |  | `\"hourly\"` |  |  | live from money 3 |\n| `commission_pct` | Commission % | number | ≥ 0 |  |  |  | live from money 3 |\n| `contractor` | Contractor (nothing withheld) | bool |  |  |  |  | live from money 4 |\n| `deductions` | Deductions ({label, pretax, cents?, pct?, kind?, match_pct?, to?}) | list |  |  |  |  | live from money 4 |\n| `employer` | Employer (a business, or an outside employer) | text |  |  |  |  | live from money 3 |\n| `end` | Ends | date |  |  |  |  | live from money 3 |\n| `hours` | Hours counted | enum: scheduled, attended, contract |  |  |  |  | live from money 3 |\n| `hours_per_week` | Hours a week | number | ≥ 0 |  |  |  | live from money 3 |\n| `occupation` | Occupation | text (row of economy.occupations) |  |  |  |  | live from money 3 |\n| `pay_anchor` | First payday | date |  |  |  |  | live from money 3 |\n| `pay_days` | Paydays of the month | list of number |  |  |  |  | live from money 3 |\n| `pay_every` | Paid | enum: weekly, biweekly, semimonthly, monthly, per_job, custom |  | `\"monthly\"` |  |  | live from money 3 |\n| `pay_except` | Custom pay: except holidays | list of text |  |  |  |  | live from money 3 |\n| `pay_interval` | Custom pay: every Nth | number | ≥ 1 |  |  |  | live from money 3 |\n| `pay_months` | Custom pay: months | list of number |  |  |  |  | live from money 3 |\n| `pay_roll` | Payday off a business day | enum: none, before, after |  | `\"before\"` |  |  | live from money 3 |\n| `pay_unit` | Custom pay: every | enum: day, week, month, year |  |  |  |  | live from money 3 |\n| `pay_weekday` | Payday weekday (0 = Sunday) | number | 0 … 6 |  |  |  | live from money 3 |\n| `pay_weekdays` | Custom pay: weekdays | list of number |  |  |  |  | live from money 3 |\n| `rate` | Rate (a year, an hour or a shift) | money | ≥ 0 |  |  |  | live from money 3 |\n| `season_from` | Season from (MM-DD) | text |  |  |  |  | live from money 3 |\n| `season_to` | Season to (MM-DD) | text |  |  |  |  | live from money 3 |\n| `shift_pattern` | Shift pattern | text (row of calendar.shifts) |  |  |  |  | live from money 3 |\n| `shifts_per_week` | Shifts a week | number | ≥ 0 |  |  |  | live from money 3 |\n| `splits` | Pay goes to ({to, cents?, pct?}) | list |  |  |  |  | live from money 3 |\n| `start` | Started | date |  |  |  |  | live from money 3 |\n| `status` | Status | enum: active, leave, ended |  | `\"active\"` |  |  | live from money 3 |\n| `tips_per_hour` | Tips an hour | money | ≥ 0 |  |  |  | live from money 3 |\n| `title` | Title | text |  |  |  |  | live from money 3 |\n| `weeks_per_year` | Weeks a year | number | 0 … 53 |  |  |  | live from money 3 |\n| `worker` | Worker | ref → person |  |  |  |  | live from money 3 |\n| `workplace` | Workplace | ref |  |  |  |  | live from money 3 |\n\n#### `property`: Property\n\nExtends `thing`.\n\n| Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |\n|---|---|---|---|---|---|---|---|\n| `appreciation_pct` | Appreciation % a year | number |  |  |  |  | live from money 4 |\n| `asking_price` | Asking price (for sale) | money | ≥ 0 |  |  |  | live from money 3 |\n| `insurance` | Insurance a month | money | ≥ 0 |  |  |  | live from money 4 |\n| `lease_months` | Lease term, months | number | ≥ 1 | `12` |  |  | live from money 3 |\n| `let_from` | Let since | date |  |  |  |  | live from money 3 |\n| `managed` | Let to outside tenants | bool |  | `false` |  |  | live from money 3 |\n| `market_rent` | Market rent, a unit a month | money | ≥ 0 |  |  |  | live from money 3 |\n| `mortgage` | Mortgage | ref → account |  |  |  |  | live from money 3 |\n| `owners` | Owners ({party, role, share?}) | list |  |  |  |  | live from money 1 |\n| `place` | Place | ref |  |  |  |  | live from money 3 |\n| `purchase_price` | Purchase price | money | ≥ 0 |  |  |  | live from money 4 |\n| `purchased` | Purchased | date |  |  |  |  | live from money 4 |\n| `region` | Region (for its property tax) | text (row of economy.regions) |  |  |  |  | live from money 3 |\n| `rent_to` | Rent paid into | ref → account |  |  |  |  | live from money 3 |\n| `tax_installments` | Property tax bills a year | number | 1 … 12 | `2` |  |  | live from money 3 |\n| `tax_pct` | Property tax % a year | number | ≥ 0 |  |  |  | live from money 4 |\n| `units` | Units to let | number | ≥ 1 | `1` |  |  | live from money 3 |\n| `upkeep_pct` | Upkeep % a year | number | ≥ 0 |  |  |  | live from money 4 |\n| `vacancy_months` | Months empty between tenants, on average | number | ≥ 0 | `1` |  |  | live from money 3 |\n| `value` | Value | money | ≥ 0 |  |  |  | live from money 3 |\n| `volatility_pct` | Value swings, % a year | number | ≥ 0 |  |  |  | live from money 4 |\n\n#### `trust`: Trust\n\nExtends `thing`.\n\n| Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |\n|---|---|---|---|---|---|---|---|\n| `owners` | Owners ({party, role, share?}) | list |  |  |  |  | live from money 1 |\n\n### Effects\n\n| Effect | Arguments |\n|---|---|\n| `economy.apply_credit` | `product`, `cents?`, `term?`, `secured_by?`, `who?` |\n| `economy.buy` | `item?`, `category?`, `qty?`, `price?`, `exact?`, `stated?`, `name?`, `payer?`, `method?`, `from?`, `payee?`, `keep?`, `cashback?` |\n| `economy.card_replace` | `card`, `who?` |\n| `economy.card_state` | `card`, `state`, `who?` |\n| `economy.close_account` | `account` |\n| `economy.deposit` | `account`, `cents`, `who?` |\n| `economy.distribute` | `business`, `cents?`, `by?` |\n| `economy.exercise` | `holding`, `qty?`, `from?`, `to?`, `party?` |\n| `economy.flow_create` | `label?`, `kind?`, `from?`, `to?`, `amount?`, `every?`, `interval?`, `weekday?`, `day?`, `month?`, `at?`, `once?`, `start?`, `end?`, `count?`, `shortfall?`, `retry_days?`, `retries?`, `fallback?`, `roll?`, `category?`, `who?` |\n| `economy.flow_edit` | `flow`, `name?`, `clear?` |\n| `economy.flow_status` | `flow`, `status`, `who?` |\n| `economy.flow_update` | `flow`, `label?`, `kind?`, `from?`, `to?`, `amount?`, `every?`, `interval?`, `weekday?`, `day?`, `month?`, `at?`, `once?`, `start?`, `end?`, `count?`, `shortfall?`, `retry_days?`, `retries?`, `fallback?`, `roll?`, `category?`, `who?`, `clear?` |\n| `economy.hire` | `business`, `worker`, `title?`, `occupation?`, `basis?`, `rate?`, `hours?`, `hours_per_week?`, `pay_every?`, `start?`, `by?` |\n| `economy.invoice_issue` | `business`, `customer?`, `customer_name?`, `cents`, `memo?`, `days?`, `by?` |\n| `economy.invoice_pay` | `invoice`, `by?` |\n| `economy.invoice_void` | `invoice`, `by?` |\n| `economy.job_end` | `job`, `end?`, `by?` |\n| `economy.job_raise` | `job`, `rate?`, `pct?`, `by?` |\n| `economy.lease_end` | `lease`, `on?`, `party?` |\n| `economy.lease_start` | `property`, `tenant`, `rent`, `months?`, `day?`, `unit?`, `from?`, `party?` |\n| `economy.lose` | `item`, `thief?` |\n| `economy.move` | `from`, `to`, `cents`, `memo?` |\n| `economy.owner_draw` | `business`, `cents`, `owner?`, `by?` |\n| `economy.pay_card` | `card`, `from?`, `cents?`, `who?` |\n| `economy.price_modifier` | `percent`, `scope?`, `place?`, `minutes?`, `id?`, `clear?` |\n| `economy.property_buy` | `property`, `price?`, `from?`, `down?`, `term_months?`, `party?` |\n| `economy.property_sell` | `property`, `price`, `buyer?`, `to?`, `party?` |\n| `economy.release_hold` | `account`, `hold` |\n| `economy.route` | `holding?`, `property?`, `business?`, `to?`, `party?` |\n| `economy.set_autopay` | `account`, `mode`, `from?`, `cents?`, `who?` |\n| `economy.set_pay_prefs` | `tiers`, `who?` |\n| `economy.set_price` | `asset`, `price` |\n| `economy.set_status` | `account`, `status` |\n| `economy.stake_sell` | `business`, `share`, `price`, `buyer?`, `to?`, `party?` |\n| `economy.trade` | `side?`, `party?`, `holding?`, `asset?`, `account?`, `qty?`, `amount?`, `from?`, `to?`, `right?`, `strike?`, `expiry?` |\n| `economy.transfer` | `to`, `cents`, `from?`, `memo?`, `method?` |\n| `economy.withdraw` | `account`, `cents`, `who?` |\n\n### Formula functions\n\n- `asset_price(id)`\n- `balance(account)`\n- `business_value(id)`\n- `can_afford(who, cents)`\n- `credit_score(who)`\n- `employs(business, who)`\n- `holding_units(id)`\n- `holding_value(id)`\n- `holds(who, thing)`\n- `is_credit(account)`\n- `manages(who, thing)`\n- `may_draw(who, business)`\n- `money_feature(feature, who)`\n- `net_worth(who)`\n- `price(item)`\n- `property_value(id)`\n- `spends(who, account)`\n- `wealth(who)`\n\n### Actions\n\n| Action | Label | Description | Parameters | Check | Outcomes | Minutes | Lexicon |\n|---|---|---|---|---|---|---|---|\n| `apply_credit` | Apply for credit | Apply for a credit card, a credit line or a loan. | `product: text`, `amount?: money`, `term?: number` |  | `default` | `15` | apply for a credit card, apply for a loan, take out a loan |\n| `buy` | Buy | Buy something: food, drinks, goods or a service, here or delivered. | `item: text`, `qty?: number`, `price?: money`, `method?: text`, `cashback?: money` |  | `default` | `5` | buy, purchase, order, pick up a |\n| `card_freeze` | Freeze card | Freeze a card so it can't be used. | `card: ref → card` |  | `default` | `2` | freeze my card, lock my card |\n| `card_replace` | Replace card | Order a replacement card. | `card: ref → card` |  | `default` | `2` | replace my card, order a new card |\n| `card_report_lost` | Report card lost | Report a card lost or stolen. | `card: ref → card` |  | `default` | `2` | report my card lost, my card was stolen, cancel my card |\n| `card_unfreeze` | Unfreeze card | Unfreeze a frozen card. | `card: ref → card` |  | `default` | `2` | unfreeze my card, unlock my card |\n| `deposit_cash` | Deposit cash | Put cash into a bank account. | `account: ref → account`, `amount: money` |  | `default` | `3` | deposit, pay in cash, bank the cash |\n| `distribute_profit` | Distribute profit | Pay a business's profit out to its owners. | `business: ref → business`, `amount?: money` |  | `default` | `10` | distribute profit, pay dividends, pay out the owners |\n| `exercise_option` | Exercise an option | Exercise an option contract you hold. | `holding: ref → holding`, `qty?: number`, `from?: ref → account`, `to?: ref → account` |  | `default` | `2` | exercise the option, exercise my calls, exercise my puts |\n| `flow_create` | Set up a standing payment | Set up a standing payment: a bill, a regular transfer, an allowance. | `label?: text`, `kind?: text`, `from?: ref → account`, `to?: text`, `amount?: money`, `every?: text`, `interval?: number`, `weekday?: number`, `day?: number`, `month?: number`, `at?: text`, `once?: text`, `start?: text`, `end?: text`, `count?: number`, `shortfall?: text`, `retry_days?: number`, `retries?: number`, `fallback?: text`, `roll?: text`, `category?: text` |  | `default` | `2` | set up a standing order, schedule a payment, set up a recurring transfer |\n| `flow_delete` | Cancel a standing payment | Cancel a standing payment. | `flow: ref → flow` |  | `default` | `2` | cancel the standing order, stop the recurring payment |\n| `flow_pause` | Pause a standing payment | Pause a standing payment. | `flow: ref → flow` |  | `default` | `2` | pause the standing order |\n| `flow_resume` | Resume a standing payment | Resume a paused standing payment. | `flow: ref → flow` |  | `default` | `2` | resume the standing order |\n| `flow_update` | Change a standing payment | Change a standing payment: its amount, its schedule or its accounts. | `flow: ref → flow`, `label?: text`, `kind?: text`, `from?: ref → account`, `to?: text`, `amount?: money`, `every?: text`, `interval?: number`, `weekday?: number`, `day?: number`, `month?: number`, `at?: text`, `once?: text`, `start?: text`, `end?: text`, `count?: number`, `shortfall?: text`, `retry_days?: number`, `retries?: number`, `fallback?: text`, `roll?: text`, `category?: text`, `clear?: text` |  | `default` | `2` | change the standing order, change the recurring payment |\n| `invoice_issue` | Send an invoice | Bill a customer from a business you run. | `business: ref → business`, `customer?: ref`, `customer_name?: text`, `amount: money`, `memo?: text`, `days?: number` |  | `default` | `10` | send an invoice, invoice, bill them |\n| `invoice_pay` | Pay an invoice | Pay an invoice billed to you or to a business you run. | `invoice: ref → invoice` |  | `default` | `5` | pay the invoice, settle the bill |\n| `invoice_void` | Void an invoice | Cancel an invoice that a business you run sent. | `invoice: ref → invoice` |  | `default` | `5` | void the invoice, cancel the invoice, write it off |\n| `job_end` | End a job | End a job: quit your own, or let someone go from a business you run. | `job: ref → job` |  | `default` | `10` | fire, let go, quit, resign, hand in my notice |\n| `job_hire` | Hire | Hire someone into a business you run, with a title and pay. | `business: ref → business`, `worker: ref → person`, `title?: text`, `basis?: text`, `rate?: money`, `hours_per_week?: number`, `pay_every?: text` |  | `default` | `15` | hire, take on, give a job to |\n| `job_raise` | Give a raise | Change the pay of someone who works for a business you run. | `job: ref → job`, `rate: money` |  | `default` | `5` | give a raise, raise the pay, pay more |\n| `lease_end` | End a lease | End a tenant's lease. | `lease: ref → flow`, `on?: text` |  | `default` | `10` | end the lease, give notice, move out |\n| `lease_start` | Let a unit | Let a unit of a property you own to a tenant, for rent each month. | `property: ref → property`, `tenant: ref → person`, `rent: money`, `months?: number`, `day?: number`, `unit?: text` |  | `default` | `20` | rent out, sign a lease, let the apartment |\n| `move_money` | Transfer between accounts | Move money between your own accounts: checking, savings, cash. | `from: ref → account`, `to: ref → account`, `amount: money` |  | `default` | `2` | transfer, move money, put into savings |\n| `owner_draw` | Take an owner's draw | Take money out of a business you own, for yourself. | `business: ref → business`, `amount: money` |  | `default` | `5` | take a draw, pay myself, take money out of the business |\n| `pay` | Pay | Give someone money: settle up, pay them back, tip them. | `to: ref → person`, `amount: money` |  | `default` | `1` | pay, give money, send money, venmo |\n| `pay_card` | Pay card or loan | Pay off some or all of a card or loan balance. | `card: ref → account`, `from?: ref → account`, `amount?: money` |  | `default` | `2` | pay off the card, pay the card, pay my credit card, make a loan payment |\n| `property_buy` | Buy a property | Buy a property, outright or with a mortgage. | `property: ref → property`, `price?: money`, `from?: ref → account`, `down?: money`, `term_months?: number` |  | `default` | `60` | buy the house, buy the property, make an offer on |\n| `property_sell` | Sell a property | Sell a property you own. | `property: ref → property`, `price: money`, `buyer?: ref → person`, `to?: ref → account` |  | `default` | `60` | sell the house, sell the property |\n| `route_distributions` | Route dividends, rent or profits | Choose where dividends, rent or profits are paid: reinvested, or into an account. | `holding?: ref → holding`, `property?: ref → property`, `business?: ref → business`, `to?: text` |  | `default` | `1` | reinvest dividends, send dividends to, send the rent to |\n| `set_autopay` | Set autopay | Set how a card or loan pays itself each month. | `account: ref → account`, `mode: text`, `from?: ref → account`, `amount?: money` |  | `default` | `2` | set up autopay, turn on autopay, turn off autopay |\n| `set_pay_prefs` | Set how I pay | Set the order in which you prefer to pay: cash, debit, credit. | `tiers: text` |  | `default` | `2` | i'd rather pay with |\n| `stake_sell` | Sell a share of a business | Sell part of your share of a business. | `business: ref → business`, `share: number`, `price: money`, `buyer?: ref → person`, `to?: ref → account` |  | `default` | `60` | sell my share of the business, sell the shop |\n| `trade` | Buy or sell investments | Buy or sell investments: stocks, funds, bonds, crypto. | `side?: text`, `holding?: ref → holding`, `asset?: text`, `account?: ref → account`, `qty?: number`, `amount?: money`, `from?: ref → account`, `to?: ref → account`, `right?: text`, `strike?: money`, `expiry?: text` |  | `default` | `2` | invest, buy stocks, buy shares, sell stocks, sell shares, cash out, buy an option |\n| `withdraw_cash` | Withdraw cash | Take cash out of a bank account. | `account: ref → account`, `amount: money` |  | `default` | `3` | withdraw, take out cash, hit the atm, get cash |\n\n### Events\n\nIts own: `economy.accrue`, `economy.acquire`, `economy.anchor`, `economy.card_paid`, `economy.commission`, `economy.credit`, `economy.decline`, `economy.delinquency`, `economy.dispose`, `economy.estimated_tax`, `economy.exercise`, `economy.flow_renamed`, `economy.flow_run`, `economy.hold`, `economy.income`, `economy.invoice_paid`, `economy.lots`, `economy.mint`, `economy.modifier`, `economy.note`, `economy.open`, `economy.payout`, `economy.payslip`, `economy.price`, `economy.quote`, `economy.remit`, `economy.sale`, `economy.score`, `economy.settle`, `economy.spend`, `economy.stake_route`, `economy.statement`, `economy.status`, `economy.timesheet`, `economy.txn`.\n\nChecks it adds to: `post`.\n\n### Proposals\n\n| Proposal | Bound by |\n|---|---|\n| `purchase` | `money` |\n| `transfer` | `money` |\n\n### Panels and slots\n\nPanels: `economy.money`. Slots it writes: `money`.\n\n### Simulation\n\n| Process | Domain | From level | Steps |\n|---|---|---|---|\n| `economy.accounts` | `money` | 3 | the world |\n| `economy.invoices` | `money` | 3 | the world |\n| `economy.markets` | `money` | 3 | the world |\n| `economy.money` | `money` | 2 | the world |\n| `economy.plans` | `money` | 0 | the world |\n| `economy.property_values` | `money` | 3 | the world |\n| `economy.settlements` | `money` | 3 | the world |\n| `economy.timesheet` | `money` | 3 | the world |\n\nDetail on demand: `money` (version 2).\n\n### Data tables\n\n| Table | Label | Schema | Columns | Default rows |\n|---|---|---|---|---|\n| `economy.catalog` | Price catalog | `lre-table/economy.catalog/v1` | name (text), category (ref), unit (text), price_cents (band), notes (text, optional) | 340 |\n| `economy.categories` | Price categories | `lre-table/economy.categories/v1` | name (text), basis (text), notes (text, optional), price_unit_note (text, optional), item_count (int), price_cents (band) | 19 |\n| `economy.finance` | Finance parameters | `lre-table/economy.finance/v1` | title (text), values (json) | 7 |\n| `economy.occupations` | Occupations and pay | `lre-table/economy.occupations/v1` | title (text), category (enum), median_cents_per_h (int), median_cents_per_year (int), typical_earnings_cents_per_year (int), schedule_pattern (ref), typical_hours_per_week (number), weeks_per_year (number), weekend_work (enum), shifts (list), pay_frequency (enum), benefits (enum), benefits_note (text), withholding_rate_pct (number), description (text), wage_basis (text), tipped (bool, optional), tipped_cash_wage_cents_per_h (int, optional), self_employed (bool, optional), fica_exempt (bool, optional), estimated_tax_set_aside_pct (number, optional), withholding_note (text, optional) | 56 |\n| `economy.regions` | Regions (US states, DC and the national baseline) | `lre-table/economy.regions/v1` | name (text), abbr (text), scope (enum), census_region (enum, optional), census_division (enum, optional), time_zones (list, optional), observes_dst (bool, optional), state_income_tax_effective_pct (number, optional), local_income_tax_pct_typical (number, optional), sales_tax_combined_avg_pct (number), property_tax_effective_pct (number, optional), cost_of_living_multiplier (number), median_rent_1br_cents_per_month (int), median_rent_2br_cents_per_month (int), residential_electricity_cents_per_kwh (number), minimum_wage_cents_per_h (int), tipped_minimum_wage_cents_per_h (int, optional), notes (text, optional) | 52 |\n\n### Lint codes\n\n`economy.accounts`, `economy.assets`, `economy.business`, `economy.claim_cap`, `economy.holdings`, `economy.property`, `economy.unpriced_cap`.\n\n## Gear & containers pack (`gear`)\n\nVersion 1 · realism domain `gear` · requires `space`.\n\n### Kinds\n\n#### `container`: Container\n\nExtends `item`.\n\n| Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |\n|---|---|---|---|---|---|---|---|\n| `capacity_l` | Capacity (l) | number | ≥ 0 |  |  |  | live from gear 2 |\n| `max_load_kg` | Max load (kg) | number | ≥ 0 |  |  |  | live from gear 2 |\n| `stock` | Contents category (sampled when first opened) | text |  |  |  |  |  |\n\n#### `item`: Item\n\nExtends `thing`.\n\n| Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |\n|---|---|---|---|---|---|---|---|\n| `catalog` | Catalog item | text (row of economy.catalog) |  |  |  |  |  |\n| `category` | Category | text |  |  |  |  |  |\n| `condition` | Condition | number | 0 … 100 | `100` |  |  | live from gear 3; bound auto, ±25 a turn; bands: broken, worn, good, like new |\n| `consumable` | Consumable | bool |  |  |  |  | live from gear 4 |\n| `from_kit` | From kit | ref |  |  |  |  | locked |\n| `notable` | Notable | bool |  |  |  |  | live from gear 1 |\n| `overdue` | Overdue | bool |  |  |  |  | locked |\n| `piece` | Kit piece | text |  |  |  |  | locked |\n| `qty` | Quantity | number | ≥ 0 | `1` |  |  | live from gear 2; bound confirm, ±10 a turn |\n| `slot` | Equip slot | text |  |  |  |  | live from gear 3 |\n| `uses` | Uses left | number | ≥ 0 |  |  |  | live from gear 4 |\n| `volume_l` | Volume (l) | number | ≥ 0 |  |  |  | live from gear 2 |\n| `weight_g` | Weight (g) | number | ≥ 0 |  |  |  | live from gear 2 |\n\n#### `kit`: Kit\n\nExtends `container`.\n\n| Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |\n|---|---|---|---|---|---|---|---|\n| `kit` | Kit template | text |  |  |  |  | live from gear 3 |\n| `piece_count` | Piece count | number |  |  |  |  | live from gear 3 |\n| `pieces` | Pieces | list |  |  |  |  | live from gear 3 |\n\n### Relation types\n\n| Relation | Label | From | To | Cardinality | Symmetric | Inverse | Fields |\n|---|---|---|---|---|---|---|---|\n| `equipped` | Equipped by | `item` | `*` | many_one |  |  | `slot` |\n| `uses` | Uses (granted until) | `*` | `*` | many_many |  |  | none |\n| `worn_by` | Worn by | `item` | `*` | many_one |  |  | `slot` |\n\n### Effects\n\n| Effect | Arguments |\n|---|---|\n| `gear.drop` | `item`, `place?` |\n| `gear.give` | `item`, `from`, `to` |\n| `gear.lend` | `item`, `to`, `until?`, `said?` |\n| `gear.lose` | `item`, `thief?` |\n| `gear.receive` | `name`, `to`, `from?` |\n| `gear.remove` | `item` |\n| `gear.retrieve` | `item` |\n| `gear.take_piece` | `kit`, `piece`, `to` |\n| `gear.transfer` | `item`, `to` |\n| `gear.use` | `item`, `user?` |\n| `gear.wear` | `item`, `wearer`, `slot?` |\n\n### Formula functions\n\n- `carried_kg(holder)`\n- `carries(holder, item)`\n- `has_item(holder, what)`\n- `kit_complete(kit)`\n- `kit_present(kit)`\n- `lent_out(thing)`\n\n### Actions\n\n| Action | Label | Description | Parameters | Check | Outcomes | Minutes | Lexicon |\n|---|---|---|---|---|---|---|---|\n| `drop` | Drop | Put down something you carry, here. | `item: ref → item, claim: held` |  | `default` | `1` | drop, put down, leave |\n| `give` | Give | Hand something you carry to someone here, for keeps. | `item: ref → item, claim: held`, `to: ref → person` |  | `default` | `1` | give, hand, pass |\n| `lend` | Lend | Lend something of yours to someone, for some days or until a time. | `item: ref → item`, `to: ref → person`, `days?: number`, `until?: text` |  | `default` | `2` | lend, loan, let borrow |\n| `lose` | Lose something | Something you own or carry is lost or gone, whereabouts unknown. | `item: ref → item` |  | `default` | `1` | lost my, lose, can't find my, is gone, is missing |\n| `reclaim` | Take back | Take back something of yours that you lent out. | `item: ref → item` |  | `default` | `5` | take back, get back, reclaim |\n| `remove` | Take off | Take off something you wear or have equipped. | `item: ref → item` |  | `default` | `2` | take off, remove, unequip |\n| `take` | Take | Pick up something that is here. | `item: ref → item, claim: here` |  | `default` | `1` | take, pick up, grab |\n| `take_piece` | Take from a kit | Take one piece, such as a tool or a part, out of a kit. | `kit: ref → kit`, `piece: text` |  | `default` | `1` | take the, grab a, get a |\n| `use` | Use | Use an item you carry or can reach. | `item: ref → item, claim: held` |  | `default` | `5` | use, apply |\n| `wear` | Wear or equip | Put on or equip clothing, armor or gear. | `item: ref → item, claim: held` |  | `default` | `2` | wear, put on, equip |\n\n### Proposals\n\n| Proposal | Bound by |\n|---|---|\n| `give` | `ref` |\n| `quantity` | `number` |\n\n### Panels and slots\n\nPanels: `gear.gear`. Slots it writes: `gear`.\n\n### Simulation\n\n| Process | Domain | From level | Steps |\n|---|---|---|---|\n| `gear.grants` | `gear` | 1 | the world |\n\nDetail on demand: `gear` (version 1).\n\n### Data tables\n\n| Table | Label | Schema | Columns | Default rows |\n|---|---|---|---|---|\n| `gear.containers` | Containers | `lre-table/gear.containers/v1` | name (text), capacity_l (number), max_load_kg (number), empty_weight_g (int), location (enum), equip_slot (ref), price_cents (band), notes (text, optional) | 34 |\n| `gear.items` | Gear items | `lre-table/gear.items/v1` | name (text), category (enum), equip_slot (ref), weight_g (int), volume_l (number), price_cents (band), notes (text, optional) | 90 |\n| `gear.kits` | Kits | `lre-table/gear.kits/v1` | name (text), recommended_container (ref), description (text), piece_count (int), pieces_total_weight_g (number), packed_volume_l (number), price_cents (band), pieces (list), notes (text, optional) | 5 |\n| `gear.slots` | Equip slots | `lre-table/gear.slots/v1` | description (text) | 20 |\n\n### Lint codes\n\n`gear.kits`.\n\n## Minds pack (`minds`)\n\nVersion 1 · realism domain none · requires none.\n\n### Events\n\nIts own: `minds.commitment`, `minds.commitment_edit`, `minds.consolidated`, `minds.intent`, `minds.memory`, `minds.mind`, `minds.note_edit`, `minds.pin`, `minds.plan`, `minds.plan_edit`, `minds.presence`, `minds.refresh`, `minds.round`, `minds.skip`.\n\n### Panels and slots\n\nPanels: none. Slots it writes: `minds`.\n\n### Lint codes\n\n`minds.config`, `minds.steps`.\n\n## Relationships pack (`relationships`)\n\nVersion 1 · realism domain `relationships` · requires `space`.\n\n### Kinds\n\n#### `company`: Company\n\nExtends `group`.\n\nNo fields of its own.\n\n#### `faction`: Faction\n\nExtends `group`.\n\nNo fields of its own.\n\n#### `family`: Family\n\nExtends `group`.\n\nNo fields of its own.\n\n#### `group`: Group\n\nExtends `thing`.\n\nNo fields of its own.\n\n#### `household`: Household\n\nExtends `group`.\n\nNo fields of its own.\n\n### Relation types\n\n| Relation | Label | From | To | Cardinality | Symmetric | Inverse | Fields |\n|---|---|---|---|---|---|---|---|\n| `child_of` | Child of | `person` | `person` | many_many |  | `parent_of` | none |\n| `knows` | Knows | `*` | `*` | many_many |  |  | none |\n| `member_of` | Member of | `*` | `group` | many_many |  |  | `rank`, `role`, `since` |\n| `parent_of` | Parent of | `person` | `person` | many_many |  | `child_of` | none |\n| `partner_of` | Partner of | `person` | `person` | many_many | yes |  | `since` |\n| `regard` | Regard | `*` | `*` | many_many |  |  | `respect`, `trust`, `warmth` |\n| `sibling_of` | Sibling of | `person` | `person` | many_many | yes |  | none |\n| `spouse_of` | Spouse of | `person` | `person` | many_many | yes |  | `since` |\n\n### Effects\n\n| Effect | Arguments |\n|---|---|\n| `relationships.adjust` | `from`, `to`, `delta`, `axis?`, `why?` |\n| `relationships.appraise` | `from`, `to`, `appraisal`, `why?`, `mutual?` |\n\n### Formula functions\n\n- `faction_regard(group, to)`\n- `regard(from, to, axis)`\n- `regard_band(from, to)`\n\n### Actions\n\n| Action | Label | Description | Parameters | Check | Outcomes | Minutes | Lexicon |\n|---|---|---|---|---|---|---|---|\n| `chat_with` | Chat with | Spend a while talking with someone here. | `target: ref → person` |  | `default` | `15` | chat with, talk to, catch up with |\n| `give_gift` | Give a gift | Give someone here a present. | `target: ref → person` |  | `default` | `5` | give a gift, surprise |\n\n### Events\n\nIts own: `relationships.regard`.\n\n### Proposals\n\n| Proposal | Bound by |\n|---|---|\n| `regard` | `number` |\n\n### Panels and slots\n\nPanels: none. Slots it writes: `people`.\n\n### Lint codes\n\n`relationships.axes`.\n\n## Character sheets pack (`sheets`)\n\nVersion 1 · realism domain `sheets` · requires `space`.\n\n### Effects\n\n| Effect | Arguments |\n|---|---|\n| `sheets.condition` | `condition`, `who?`, `label?`, `mod?`, `minutes?`, `clear?` |\n\n### Formula functions\n\n- `condition_mod(who)`\n- `derived(who, id)`\n- `difficulty_of(v)`\n- `has_condition(who, id)`\n- `stat(who, stat)`\n- `stat_mod(who, stat)`\n- `stat_word(who, stat)`\n\n### Actions\n\n| Action | Label | Description | Parameters | Check | Outcomes | Minutes | Lexicon |\n|---|---|---|---|---|---|---|---|\n| `attempt` | Attempt | Try something hard that one of your stats decides: climb, force, persuade, notice. | `stat: text`, `difficulty?: text` | `1d20` | `failure`, `great`, `success` | `5` | try to, attempt, check |\n\n### Proposals\n\n| Proposal | Bound by |\n|---|---|\n| `condition` | `list` |\n\n### Panels and slots\n\nPanels: `sheets.you`. Slots it writes: `outcome`.\n\n### Lint codes\n\n`sheets.stat_range`.\n\n## Space & travel pack (`space`)\n\nVersion 1 · realism domain `space` · requires `calendar`.\n\n### Kinds\n\n#### `person`: Person\n\nExtends `thing`.\n\n| Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |\n|---|---|---|---|---|---|---|---|\n| `activity` | Activity | text |  | `\"idle\"` |  |  | live from castlife 1 |\n| `activity_until` | Activity ends | number |  |  |  |  | live from castlife 1; locked |\n| `agility` | Agility | number | 3 … 18 |  |  |  | live from sheets 1 |\n| `appointments` | Appointments | list |  |  |  |  | live from castlife 2 |\n| `birthday` | Birthday (MM-DD or YYYY-MM-DD) | date |  |  |  |  | live from castlife 3 |\n| `charm` | Charm | number | 3 … 18 |  |  |  | live from sheets 1 |\n| `chores` | Chores | list |  |  |  |  | live from castlife 3 |\n| `conditions` | Conditions | list |  |  |  |  | live from sheets 4 |\n| `employer` | Employer | ref |  |  |  |  | live from money 3 |\n| `filing_status` | Tax filing status | enum: single, married_filing_jointly, head_of_household |  |  |  |  | live from money 4 |\n| `grit` | Grit | number | 3 … 18 |  |  |  | live from sheets 1 |\n| `home` | Home | ref |  |  |  |  | live from space 1 |\n| `local_tax` | Pays local income tax | bool |  |  |  |  | live from money 4 |\n| `might` | Might | number | 3 … 18 |  |  |  | live from sheets 1 |\n| `needs` | Needs | list |  |  |  |  | live from castlife 4; locked |\n| `occupation` | Occupation | text (row of economy.occupations) |  |  |  |  | live from money 3 |\n| `pay_prefs` | Pays with, in order ({use, min?, max?, categories?, except?}) | list |  |  |  |  | live from money 3 |\n| `region` | Region | text (row of economy.regions) |  |  |  |  | live from money 3 |\n| `scene` | Scene type | text |  |  |  |  |  |\n| `trips` | Trips | list |  |  |  |  | live from castlife 1 |\n| `wealth` | Wealth | text |  |  |  |  | live from money 1 |\n| `wits` | Wits | number | 3 … 18 |  |  |  | live from sheets 1 |\n\n#### `thing`: Thing\n\n| Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |\n|---|---|---|---|---|---|---|---|\n| `owner` | Owner | ref |  |  |  |  |  |\n| `place` | Place | ref |  |  |  |  | live from space 1 |\n| `x` | Grid x | number |  |  |  |  | live from space 3 |\n| `y` | Grid y | number |  |  |  |  | live from space 3 |\n\n### Relation types\n\n| Relation | Label | From | To | Cardinality | Symmetric | Inverse | Fields |\n|---|---|---|---|---|---|---|---|\n| `in` | In | `*` | `*` | many_one |  |  | none |\n\n### Effects\n\n| Effect | Arguments |\n|---|---|\n| `space.set_route` | `route`, `open?` |\n| `space.step` | `x`, `y`, `entity?` |\n\n### Formula functions\n\n- `distance_km(from, to, mode)`\n- `grid_minutes(place, x, y)`\n- `grid_reachable(place, x, y)`\n- `on_grid(thing)`\n- `reach(a, b)`\n- `route_exists(from, to, mode)`\n- `route_open(route)`\n- `travel_minutes(from, to, mode)`\n- `within(place, ancestor)`\n\n### Actions\n\n| Action | Label | Description | Parameters | Check | Outcomes | Minutes | Lexicon |\n|---|---|---|---|---|---|---|---|\n| `go` | Go to | Walk to another place: a room, a building, a street, another part of town. | `to: ref → place` |  | `default` | `level.space < 2 ? (level.space < 1 ? 0 : 15) : travel_minutes(here, to, 'walk')` | go to, walk to, head to, head over to, leave for |\n| `step` | Move on the map | Walk to a square of the grid you stand on. | `x: number`, `y: number` |  | `default` | `grid_minutes(here, x, y)` | walk over to, cross to, move to |\n\n### Events\n\nIts own: `space.pos`, `space.route`.\n\n### Proposals\n\n| Proposal | Bound by |\n|---|---|\n| `location` | `ref` |\n\n### Panels and slots\n\nPanels: `space.map`. Slots it writes: `scene`.\n\n### Lint codes\n\n`space.grid`, `space.maps`, `space.references`.\n\n## Story pack (`story`)\n\nVersion 1 · realism domain none · requires none.\n\n### Effects\n\n| Effect | Arguments |\n|---|---|\n| `story.answer` | `track?`, `puzzle?`, `answer`, `decision?` |\n| `story.flag` | `name`, `value?` |\n\n### Formula functions\n\n- `flag(name)`\n\n### Actions\n\n| Action | Label | Description | Parameters | Check | Outcomes | Minutes | Lexicon |\n|---|---|---|---|---|---|---|---|\n| `answer` | Answer | Give your answer to a puzzle: a riddle, a code, a combination. | `puzzle?: text`, `answer: text`, `decision?: number` |  | `default` | `1` | the answer is, i think it's, solve, answer, the code is, the combination is, try the combination, dial, enter the code |\n\n### Events\n\nIts own: `story.flag`.\n\n### Panels and slots\n\nPanels: `story.quests`. Slots it writes: `quest`.\n\n### Lint codes\n\n`story.answer_track`, `story.leaky_id`, `story.leaky_label`.\n\n## Vehicles pack (`vehicles`)\n\nVersion 1 · realism domain `vehicles` · requires `economy`, `gear`, `space`.\n\n### Kinds\n\n#### `vehicle`: Vehicle\n\nExtends `container`.\n\n| Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |\n|---|---|---|---|---|---|---|---|\n| `class` | Vehicle class | text |  |  |  |  |  |\n| `engine_hours` | Engine hours | number | ≥ 0 |  |  |  | live from vehicles 3; locked |\n| `fuel_pct` | Fuel % | number | 0 … 100 |  |  |  | live from vehicles 2; bound auto, ±30 a turn |\n| `home` | Home base | ref |  |  |  |  | live from vehicles 3 |\n| `last_service` | Last service (mi or h) | number | ≥ 0 |  |  |  | live from vehicles 4 |\n| `odometer_mi` | Odometer (mi) | number | ≥ 0 |  |  |  | live from vehicles 3; locked |\n| `status` | Status | enum: ok, needs_service, broken |  | `\"ok\"` |  |  | live from vehicles 1; bound confirm |\n| `value` | Value | money | ≥ 0 |  |  |  | live from money 3 |\n\n### Effects\n\n| Effect | Arguments |\n|---|---|\n| `vehicles.drive` | `vehicle`, `to`, `driver?`, `riders?` |\n| `vehicles.refuel` | `vehicle`, `payer?`, `pct?` |\n| `vehicles.service` | `vehicle`, `payer?`, `repair?` |\n\n### Formula functions\n\n- `drive_minutes(vehicle, to)`\n- `fuel_ok(vehicle, to)`\n- `fuel_pct(vehicle)`\n\n### Actions\n\n| Action | Label | Description | Parameters | Check | Outcomes | Minutes | Lexicon |\n|---|---|---|---|---|---|---|---|\n| `drive` | Drive | Drive, ride or sail a vehicle you own or may use to another place. | `vehicle: ref → vehicle`, `to: ref → place` |  | `default` | `drive_minutes(vehicle, to)` | drive to, drive over to, take the truck, take the car, sail to, ride to |\n| `refuel` | Refuel | Fill up a vehicle's tank, or charge it. | `vehicle: ref → vehicle` |  | `default` | `10` | refuel, fill up, gas up, charge the car |\n| `repair_vehicle` | Repair | Have a damaged or broken-down vehicle repaired. | `vehicle: ref → vehicle` |  | `default` | `180` | repair, fix the truck, fix the car, get it towed |\n| `service_vehicle` | Service | Have a vehicle serviced: an oil change, a tune-up. | `vehicle: ref → vehicle` |  | `default` | `60` | service, oil change, tune up |\n\n### Panels and slots\n\nPanels: `vehicles.garage`. Slots it writes: `vehicles`.\n\n### Simulation\n\n| Process | Domain | From level | Steps |\n|---|---|---|---|\n| `vehicles.upkeep` | `vehicles` | 4 | the world |\n\nDetail on demand: `vehicles` (version 1).\n\n### Data tables\n\n| Table | Label | Schema | Columns | Default rows |\n|---|---|---|---|---|\n| `vehicles.classes` | Vehicle classes | `lre-table/vehicles.classes/v1` | name (text), domain (enum), fuel_type (enum), factor_guide (ref), tank_capacity_gal (number, optional), tank_capacity_l (number, optional), usable_battery_kwh (number, optional), consumption_unit (enum), consumption (json), range_mi (int, optional), range_h (number, optional), price_new_cents (band), price_used_cents (band), insurance_liability_cents_per_month (int), insurance_full_cents_per_month (int), registration_cents_per_year (band), annual_maintenance_cents_per_year (int), maintenance (json), passengers (int), cargo_l (number), payload_kg (number), towing_kg (number, optional), charging (json, optional), notes (text) | 19 |\n| `vehicles.factors` | Consumption factor guides | `lre-table/vehicles.factors/v1` | basis (text), factors (json), note (text, optional) | 3 |\n\n### Lint codes\n\n`vehicles.classes`.\n\n## Weather pack (`weather`)\n\nVersion 1 · realism domain `weather` · requires `space`.\n\n### Kinds\n\n#### `region`: Weather region\n\n| Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |\n|---|---|---|---|---|---|---|---|\n| `climate` | Climate | text |  | `\"temperate\"` |  |  |  |\n| `temp_c` | Temperature (°C) | number |  |  |  |  | live from weather 3; bound never |\n| `weather` | Weather | text |  | `\"clear\"` |  |  | live from weather 2; bound never |\n| `weather_hold` | Weather held until | number |  |  |  |  | live from weather 2; locked |\n| `weather_hold_until` | Weather held until (condition) | text |  |  |  |  | live from weather 2; locked |\n\n### Effects\n\n| Effect | Arguments |\n|---|---|\n| `weather.clear` | `region`, `state?` |\n| `weather.set` | `region`, `state`, `minutes?`, `until?` |\n\n### Formula functions\n\n- `season()`\n- `weather(place)`\n\n### Panels and slots\n\nPanels: `weather.now`. Slots it writes: `scene`.\n\n### Simulation\n\n| Process | Domain | From level | Steps |\n|---|---|---|---|\n| `weather.climate` | `weather` | 2 | the world |\n\n### Lint codes\n\n`weather.climates`.\n";
 
 // docs/STUDIO.md
 var STUDIO_default = `# LumiRPEngine studio contract
@@ -59281,6 +60776,8 @@ Every control here is something your character does: it plays as your next turn,
 
 Tap someone for their person sheet: where they are, or **Last seen** (from Cast life 2) with where and when you last saw them; their **Next** commitment; **Today**, a 24-hour timeline of where they will be, for someone who lives their own day, where **Why this plan?** gives the reasons for each block: a fixed commitment, the need pressing them ("hungry (hunger 62)"), a close call ("close call, Maddie chose"), or "a close friend"; **How they see you**, each axis in words; **What they're after**, their public agendas; their **Groups**; and **Known as**, the classifications you can see. Agendas show only when they're public, each on its own: time someone spends on an agenda that isn't public shows in their day as **Busy**, for "their own business", and someone working on one of their agendas is doing "agenda" only when all their agendas are public, else they are "busy" (here, in the Journal and to the narrator).
 
+**Their usual day**, folded under **Today**, says where each block of that day comes from, as far as you may know: **Usually · their routine**, **Usually · from lore:** with the lore entry's title (only an entry you may read; a block resting on any other reads as their routine), **A commitment** (a shift, an appointment, a trip), **As the story has it**, **A plan of theirs** or **Free time**, with **Why?** for the reasons. It shows only for someone whose day Cast already shows, and never more than Cast does: a private block, or one spent on an agenda that isn't public, reads **Busy**, and no place or company shows. It's what they'd usually do, not a fact about what they're doing now: what happens in the story always comes first.
+
 ### Story
 
 **Story** has three tabs.
@@ -59442,12 +60939,13 @@ The truth sits behind a spoiler gate, **Spoilers ahead**: tap **Show the truth**
 
 ### The GM bar
 
-A gold bar along the bottom of the drawer holds the GM's places: **World**, **Places** and **Story**, then a place for each pack that adds one (**Minds** and **Money**), then **This chat**. All but **This chat** are behind the gate.
+A gold bar along the bottom of the drawer holds the GM's places: **World**, **Places** and **Story**, then a place for each pack that adds one (**Minds**, **Routines** and **Money**), then **This chat**. All but **This chat** are behind the gate.
 
 - **World**: every person, item, vehicle, group and account in the world, including the ones spawned during this chat and the removed ones, with **Search by name** and a kind filter. Badges mark **You**, **Removed**, a life state other than alive, anything that isn't public (**Known by**, **Secret**) and **Claimed**, a thing you said you had that the engine made real (see [Player claims](#player-claims)), and a row says when someone lives their own day or was spawned here. Tap one to open its page (see below). **Spawn** opens a page that adds someone or something new to this chat: a name, a kind, a place and a tier. While a fight is under way, a **Fight under way** card leads the list; tap it for the **Fight** page, with everyone in the fight, seen or not, in initiative order, with HP exact and the round's acts. While there are claimed things, **Claimed by the player** comes next: each one still in the world, by name, with who holds it or where it lies ("held by Sam Rivera", "at Rosie's Diner"). Tap one to open its page, where **Remove from the world** takes it out of the story; one removed, or a drink or a meal used up, leaves that list. Kinds and the world's places are the world's own definitions: the button at the bottom of the list, **Kinds and places are the world's: edit them in Build**, takes you to Build.
 - **Places**: every place, under the place it's in, with its visibility (public, discoverable, secret and so on).
 - **Story**: every quest, secret and agenda, with its stage and the stages that carry a truth (the one it's at is marked **Now**). Pick a stage under **Stage** to move the track there at once.
 - **Minds**: every character's place on the fidelity ladder and why, their latest mind, plans, commitments, notes and summary, with pins and edits (see [Minds in GM mode](#minds-in-gm-mode)).
+- **Routines**: every character's routine and schedules as this chat has them, how much their routine binds them now, today as laid, their invitations and what the story changed, with per-chat changes (see [Routines in GM mode](#routines-in-gm-mode)).
 - **Money**: anyone's money, as their own money hub with the GM's controls (see [Everyone else's money](#everyone-elses-money)).
 - **This chat**: this chat's rules, its edits and the inspector (see [This chat](#this-chat)).
 
@@ -59672,6 +61170,36 @@ A character at a low level can still deal with one at a high level: each side re
 
 From Money level 3, the people in the world live on their money as you do. They are paid, they pay their bills, and every Monday they pay a week of living costs that follows their wealth band (a world can set its own amounts; the Modern US data prices them from a weekly grocery basket), so their balances go down as well as up. A bill paid to someone in the world, like your rent to your landlord, lands in that person's own account. The first morning their bills run, the engine opens their accounts with the balances the world gives them. You see all of this only in [GM mode](#everyone-elses-money).
 
+## Routines and schedules
+
+People in a world have days of their own. A **routine** is what someone can be relied on to do on an ordinary day: opening the shop at seven, coffee somewhere three mornings a week, a walk by the lake on a fair weekend. Its blocks can be **fixed** (at a set time), **flexible** (somewhere in a window, or a few times a week) or **optional** (only likely, and the first thing a busy day drops), and someone can have no routine at all. A **schedule** is a commitment with set hours, such as a shift or school. A world's routines can rest on its lore or a character's sheet, and say so.
+
+Routines and schedules are defaults the world relies on, never a script the story has to follow. Where someone's day comes from, most binding first:
+
+1. **What the story established:** where the narration, your actions or the GM put them, a trip, a plan under way, and what the GM says they mean to do.
+2. **Their commitments:** schedules, appointments and trips.
+3. **Their plans** from the story.
+4. **Their routine.**
+5. **Their basic needs:** sleep and meals.
+6. **Chores, their agenda's steps and things to get back** that the world grounds.
+
+Nothing else fills a day: no outing, party or invitation that nothing in the world or the story grounds. The story always leads the people in it. A routine or a schedule never moves anyone out of a scene with you, and never moves a character close to the story (Live or Near on the [fidelity ladder](#the-fidelity-ladder)): their mind and the scene speak for them, and their routine is at most a suggestion. No routine interrupts play or stops a time skip. Background characters, off screen, keep their routines and schedules most closely, which is where routines matter most. Your own character follows its routine only when time runs on its own (a Timelapse to your next shift, say); a span you spend doing something ("for the next two hours, I sort the stock") or a skip the reply narrates leaves you where the story has you.
+
+**Tuning.** A world sets how routines and the story share the day in **Build → Routines**:
+
+- **How strictly people keep to routine** against the story: **Story first** (someone the story put somewhere stays there until the story or the GM releases them), **Balanced** (the default: until their night, with Background characters keeping their routine) or **Routine first** (their routine's next block takes them back).
+- **Invitations** from routine blocks that ask company along: **Off**, **To the player only** (the default) or **Between everyone**. Plans the story makes, and the GM, invite whatever this says.
+- **Sociability:** **Reserved**, **Usual** or **Outgoing**, how fast people want company and fun.
+- **How plans bend routine:** which plans the story makes take time from work and school.
+
+In a chat, the GM can change any of this for one character without touching the world: whether and how strictly they keep their routine, one block, or one schedule, each with its Undo.
+
+Where you meet them:
+
+- **Play → People**: someone's usual day, as far as you may know it, and why each block is there ([People](#people)).
+- **GM → Routines**: everyone's routine, schedules and day as this chat has them, with what the story changed and the GM's changes ([Routines in GM mode](#routines-in-gm-mode)).
+- **Build → Routines**: the world's routines and their settings ([Routines in Build](#routines-in-build)), and routines proposed from the world's lore ([Proposing routines from lore](#proposing-routines-from-lore)). A routine Build can't read, or a setting it doesn't take, isn't saved: the message names the field to fix. Outside agents edit them the same way, with the same checks ([MCP.md](MCP.md)).
+
 ## How checks are decided
 
 A check is the dice an action rolls (see [Checks, pools, progression and sheets](#checks-pools-progression-and-sheets)). How much those dice matter, against how you describe what your character does, is up to the world and to you. A world can set its own rules for checks in **Build → Ruleset**, under **How checks are decided**. A world that sets none rolls every check and lets the roll settle it, exactly as before.
@@ -59812,7 +61340,7 @@ Settings saved before these defaults rose keep every value you changed; a value 
 
 - **Turns**: **Engine run** (5 min: everything before the reply is generated; when it runs out the run stops, no reply is generated, and the chat says which step ran out, with a Retry), **Lore lookups before the reply** (2 min), **Reading the reply** (5 min: what changed, the contradiction check, people elsewhere, choices, memory), **Lore lookups after the reply** (2 min) and **Generation guard** (2 min: Lumiverse's wait for the engine's check, and for its writing of the turn's sections, as a generation starts; Lumiverse caps it at 2 min).
 - **This tab**: **Engine requests** (5 min: how long the tab waits for each answer) and **Preset check** (1 min: how long Caveats waits for its test prompt before saying it's still running).
-- **Jobs and background work**: **Minds run on demand** (10 min), **Import and Refine calls** (10 min each), **Token counts** (30 s; 0 always uses the engine's estimate), **Background lane start-up** and **Background lane heartbeat** (1 min each; Lumiverse caps both at 2 min, and No limit on the heartbeat asks it to check none), and **MCP server reconnect** (1 min: how long **Reconnect in Lumiverse** waits for a server Lumiverse runs to come back with the new tools before its line tells you to reconnect it by hand).
+- **Jobs and background work**: **Minds run on demand** (10 min), **Import and Refine calls** (10 min each; the lore index, map and routine proposal calls in Build take it too), **Token counts** (30 s; 0 always uses the engine's estimate), **Background lane start-up** and **Background lane heartbeat** (1 min each; Lumiverse caps both at 2 min, and No limit on the heartbeat asks it to check none), and **MCP server reconnect** (1 min: how long **Reconnect in Lumiverse** waits for a server Lumiverse runs to come back with the new tools before its line tells you to reconnect it by hand).
 
 The page ends with **Lumiverse's own limits**, which no setting changes. When a timeout runs out, [Diagnostics](#diagnostics) records it with the setting's name and how to raise it, and a request the tab gave up on says so in its error. Settings saved before Timeouts existed keep the wall clocks you set; one still at an old preset's default rises to the new default. The command line and the MCP server take \`--timeout <seconds|none>\` (or \`LRE_TIMEOUT\`), 300 seconds by default.
 
@@ -59909,6 +61437,22 @@ Above the list, **Run minds now** has **Run everyone Live and Near** and **Choos
 
 Each change is a GM edit like any other: one correction with its own **Undo**. Minds stay in GM mode: nothing a mind thinks reaches Play, the Journal, People or chips. **GM → This chat → Context** lists each mind call with the pinned lore it read and whether any was cut.
 
+### Routines in GM mode
+
+**GM → Routines** shows the routines and schedules everyone follows in this chat. A routine or a schedule is a default the world relies on, never a script: the story leads whoever shares a scene with you, and no routine interrupts play. The world's routines and schedules are edited in Build (**The world's routines are in Build** goes there); what you change here is this chat's alone.
+
+The list has everyone but you, closest on the minds ladder first, with **Search by name** and a filter (everyone, **Changed in this chat**, **Routine leads**, **Story leads**, **No routine**). Each row shows their fidelity and how much their routine binds them, and a gold badge when this chat changed their routine or schedules: **Changed by you**, **Changed by the story**, or both. Tap someone for their page:
+
+- **How much their routine binds them**: **Routine leads** for Background and Far characters, **Story leads** for Near and Live ones (their routine is at most a soft suggestion, and no routine or schedule moves them), and **No routine** when their routine is off in this chat or the planner doesn't lay their day (it needs an agent who acts, at Cast life 3 or higher). The lines under it say what the world's awareness setting does for them. **In this chat** and **Story and lore awareness** open a page with both: **Follows their routine**, **Follows it, no invitations** or **No routine**, and **As the world has it**, **Story first**, **Balanced** or **Routine first**. **Use the world's settings** clears what you set.
+- **What the story holds now**: a place or activity the story established, which their routine yields to, and for how long.
+- **Their routine**: each block with when and where it happens, whose it is (their own, a group's, a kind's, a selector's, the world's default, the basic needs, or **Changed in this chat**), what it rests on (authored, a lore entry, a sheet field, the story or you, with how long ago) and what it replaces. Tap a block to change it for this chat with the same form as Build's, **Switch it off for them**, or, for a change this chat made, **Use the world's block** (or **Remove the block** when only this chat has it). The block's page shows the lore entry's quote, with **Open the entry** in Build. **Add a block for this chat** adds one only this chat has.
+- **Their schedules**: each schedule that applies to them, the most specific owner first for each thing schedules set, with what it rests on, and **In force**, **Shadowed** (a more specific schedule wins where both run) or this chat's change. Tap one to give them **Their own version** in this chat, with Build's schedule form, or put it **Off for them** until you clear it or for some hours; **Use the world's schedule** drops the change.
+- **Today**: their day as the planner laid it, each block with where, why it is there (their routine, a schedule, a plan, an appointment, a trip, an invitation, free time) and the reasons it gave.
+- **Invitations**: the ones they made and received, each with where it came from: a plan the story made, a block of their routine (with its source), you, or one recorded before invitations needed a ground.
+- **Changes the story made**: each block or schedule the story changed in this chat, with the turn it came from (its id shows under **Show ids**) and how long ago. A block the story adds is in force from the next day, and its row says so until then. Tap one in force to keep it, change it or go back to the world's.
+
+Each change is a GM edit like any other: one correction with its own **Undo**, and the list's badge follows it.
+
 ## Extraction modes
 
 After the narrator writes, the engine reads the reply for changes the story implies. Each kind of change is a **type**, and each type has a **mode**.
@@ -59932,10 +61476,11 @@ After the narrator writes, the engine reads the reply for changes the story impl
 | **Quantities** · \`quantity\` | A count changes (ammunition, supplies) | confirm (no starting mode of its own; Settings shows *From the field's bound*) |
 | **New people** (New characters) · \`spawn\` | A new character appears (up to the world's limit, 24 by default). A name someone you know already has is a duplicate and isn't added (under Auto, a chip says so); a name only someone you don't know has is left out without a word, so it never tells you such a person exists | confirm |
 | **Life and death (dying, dead, collapsed…)** (Life and death) · \`life\` | Someone dies, is dying, collapses or comes round (what you already knew is left out) | confirm |
+| **Routines (a new job, a habit, a move…)** (Routine changes) · \`routine\` | The reply says someone's week has changed for good: a new job or shift, a new habit, one they gave up, or a move to a new home. It changes their routine in this chat from the next day (what they gave up, and a move, at once), and GM → Routine lists it among the changes the story made, with its turn. Only someone the reply names (or you), at places and with people you know of; a habit only mentioned, or what is already their routine or schedule, changes nothing, and so does a new shift that clashes with their schedule unless the reply says it takes its place. A character's thoughts never count | auto |
 
 Beyond the mode, every field has a limit on how much a single change may be, and **the strictest rule always wins**. Fields a world marks as locked are never offered to the model. If a narrated change contradicts the engine's own outcome, the engine's outcome wins. A purchase takes in the seller's handover and the payment, so one sale is not applied three times, and a payer has to be an account.
 
-The strict reading rules are: time jumps only for an explicit jump or stated duration; knowledge only for public facts you newly learn; feelings only when the prose states a change; handovers only between two characters.
+The strict reading rules are: time jumps only for an explicit jump or stated duration; knowledge only for public facts you newly learn; feelings only when the prose states a change; handovers only between two characters; routines only for a lasting change the prose states, never a one-off, a plan, a wish or a habit only mentioned.
 
 ### Learning on your own model
 
@@ -60001,7 +61546,7 @@ You build worlds in **Build**, which works at phone width as well as on a deskto
 - **Worlds.** Build opens on your worlds. Each row shows the world's name and how many revisions it has, with a **This chat** badge on the world the open chat plays; tap it to open the world. Its **More for** *name* button (⋯) holds **Export** and **Delete**, and Delete asks first ("Delete “*name*” and all its revisions? Chats attached to it stop simulating."). An offer from LumiRPEngine Studio and the **Review before playing** card, when there are any, sit at the top (see [Import and export](#import-and-export)).
 - **New world** opens a page of its own. Under **Start from**, pick **Blank** or one of the [templates](#templates), each with a line on what it is. The **Name** field takes the template's name until you type your own; then tap **Create world**. **Or bring one in** has **Import a file** (an lre-world-v1 file, as Export writes it) and **Import from LumiRPEngine Studio**.
 - **The world bar.** An open world has a bar that stays at the top as you scroll: the back button, the world's name, the state of its draft (**Uncommitted** or **All committed**, with its error and warning counts) and **Commit**. Its **Draft actions** button (⋯) holds **Discard changes**. See [Revisions and Upgrade](#revisions-and-upgrade).
-- **The world home** lists the world's parts, **World**, **Calendar**, **Realism defaults**, **Tiers**, **Time defaults**, **Ruleset**, **Lore lookup table** and **Minds**, each with a line on what it holds and a badge for its issues. Then come its 18 collections in five groups: **People & things** (Entities, Kinds, Classifications, Relations), **Places** (Places, Maps, Routes, Grids), **Rules** (Actions, Checks, Rules, Schedules), **Story** (Tracks, Lore) and **Engine** (Data tables, Sections, Step templates, Packs), each with a count and an issue badge. Last are its **Tools**: **Problems**, **Import from lore**, **Index a World Info book**, **Index this text**, **Build / Refine with AI**, **Describe a map**, **Playtest**, **Check world** and, when the chat you have open isn't a world chat yet, **Attach to this chat**. A tool that has run shows how its last run went (**Running**, **Done**, **Failed**, **Cancelled** or **Interrupted**).
+- **The world home** lists the world's parts, **World**, **Calendar**, **Realism defaults**, **Tiers**, **Time defaults**, **Ruleset**, **Lore lookup table**, **Minds** and **Routines and the story**, each with a line on what it holds and a badge for its issues. Then come its 19 collections in six groups: **People & things** (Entities, Kinds, Classifications, Relations), **Places** (Places, Maps, Routes, Grids), **Daily life** (Routines, Schedules), **Rules** (Actions, Checks, Rules), **Story** (Tracks, Lore) and **Engine** (Data tables, Sections, Step templates, Packs), each with a count and an issue badge. Last are its **Tools**: **Problems**, **Import from lore**, **Index a World Info book**, **Index this text**, **Build / Refine with AI**, **Describe a map**, **Propose routines from lore**, **Playtest**, **Check world** and, when the chat you have open isn't a world chat yet, **Attach to this chat**. A tool that has run shows how its last run went (**Running**, **Done**, **Failed**, **Cancelled** or **Interrupted**).
 - **Collections** list their items by name, with a search box once there are more than eight. **New** asks for the name of the new item and makes its id from the name ("Old Miller Tom" becomes \`old_miller_tom\`, with \`_2\` added if that id is taken). You can change the id under **Advanced**, or in the open with **Show ids** on. **Continue** opens the new item's page, and **Create** adds it to the draft. Data tables have no New: new tables come from packs, and you open one to edit this world's copy of it.
 - **An item's page** is headed with its name. **Save to draft** and **Revert** sit in a bar that stays at the bottom of the page, and a part's page has the same bar. Your first keystroke in a field counts as a change, so **Save to draft** lights up at once. Its **Item actions** button (⋯) holds **Delete**, which asks first and names the item ("Delete the entity “Rosie Alvarez”? References to it will show in Problems.").
 
@@ -60011,7 +61556,7 @@ For the formulas you write in requirements, checks, derived fields and rules, se
 
 ### Editors and lint
 
-Every part of the world has an editor built from its definition: a page of sections, each field with its label over it, then its help, then any problem with it. A reference to something in the world is picked by name; the line under a choice names its pack, or its id when two share a name. Money is typed as the currency writes it ("$12.50"), a length of time like "1 h 30 min" (a rule's cooldown, a route's time, a scene's tick), and a moment of the world's clock with a date picker (a day number and a time on a calendar of your own). A list of things (effects, a relation's fields, appointments, trips, chores, conditions, bills, a kit's pieces) shows a row for each, which opens as a sheet, with buttons to add, reorder and remove; a list the editor knows no shape for stays JSON. A new entry in a keyed list asks for a name and takes its id from it. An optional field says "· optional". Some parts get visual editors: maps are drawn and grids painted (see [Maps](#maps)), a schedule's day is a bar of slots and a track's stages a graph (see [Schedules and tracks](#schedules-and-tracks)), and formulas have an **expression** editor.
+Every part of the world has an editor built from its definition: a page of sections, each field with its label over it, then its help, then any problem with it. A reference to something in the world is picked by name; the line under a choice names its pack, or its id when two share a name. Money is typed as the currency writes it ("$12.50"), a length of time like "1 h 30 min" (a rule's cooldown, a route's time, a scene's tick), and a moment of the world's clock with a date picker (a day number and a time on a calendar of your own). A list of things (effects, a relation's fields, appointments, trips, chores, conditions, bills, a kit's pieces) shows a row for each, which opens as a sheet, with buttons to add, reorder and remove; a list the editor knows no shape for stays JSON. A new entry in a keyed list asks for a name and takes its id from it. An optional field says "· optional". Some parts get visual editors: maps are drawn and grids painted (see [Maps](#maps)), a schedule's day is a bar of slots and a track's stages a graph (see [Schedules and tracks](#schedules-and-tracks)), a routine block's time is a bar across the day (see [Routines in Build](#routines-in-build)), and formulas have an **expression** editor.
 
 What you can define:
 
@@ -60023,7 +61568,8 @@ What you can define:
 - **Actions**: a label and a **Description** (a line on what the action does: the helper that reads typed messages is told it, so it knows when your words mean this action), parameters, requirements, an optional dice **check** with outcome bands (the odds shown to players are computed exactly from it), effects per outcome, a duration, and the activity it starts. A ref parameter can say **Only candidates matching** a [selector](#selectors): the Actions sheet offers only those, and typed text or a request naming anyone else is refused.
 - **Rules**: "when this happens and that is true, do this", with run-once and cooldowns. A cascade stops at eight steps.
 - **Tracks**: quests, secrets (revealed by conditions only), puzzles with attempts and a hint ladder, and NPC agendas.
-- **Schedules**: calendar recurrence plus tables of fixed values or weighted choices, for shifts, timetables, routines, weather, bills, paydays and price paths. A schedule's owner is an entity, a group (its members), a kind, or a [selector](#selectors). When several set the same field of the same person, the most specific owner wins while its slot runs: their own schedule, then a group's, then their kind's, then a selector's; when the more specific slot ends, the field returns to the less specific one still running.
+- **Routines**: how people's days usually go, owner by owner (everyone's, a group's, a kind's, a selector's or someone's own), as blocks at a set time, within a window or optional, each resting on what you wrote, a lore entry or a sheet field (see [Routines in Build](#routines-in-build)).
+- **Schedules**: calendar recurrence plus tables of fixed values or weighted choices, for shifts, timetables, opening hours, weather, bills, paydays and price paths. A schedule's owner is an entity, a group (its members), a kind, or a [selector](#selectors). When several set the same field of the same person, the most specific owner wins while its slot runs: their own schedule, then a group's, then their kind's, then a selector's; when the more specific slot ends, the field returns to the less specific one still running.
 - **Lore**: what the world knows, as entries with a title, text, keywords, aliases, topics and links, where each came from, and secrets with a gate and the helpers that may read them, plus a lookup table of terms and topics (see [World lore](#world-lore)). It is kept in the world and the engine's helpers read it; the narrator gets no lore section.
 - The **calendar** (Gregorian or your own) and **realism** defaults, with the band caps under the band labels.
 - **Tiers**: the world's own ranks of importance, on the **Tiers** part. Each has a **Label**, a **Band** (Leads, Supporting or Background), a place in the order (its move up and move down buttons), an optional description, and whether its people live their own day (agendas and plans) by default. Type a name under **New tier's name** and tap **Add tier** to make a new one (its id comes from the name, under **Advanced**); a tier still in use can't be removed. **New people join** picks the tier for people the story introduces (by default the first Background tier). An entity's editor picks its tier from these, and its **Lives their own day** choice can follow the tier ("As its tier"); lint flags an entity whose tier the world doesn't have.
@@ -60050,6 +61596,46 @@ In the **expression editor**, the **Operators and functions** button (ƒx) opens
 The **Stage** button asks for the new stage's **Name** and what it **Comes after** (it is added there as a next stage, with "true" as its condition until you change it), then **Add the stage**.
 
 On both pages the **Item actions** button (⋯) holds **Delete**, **JSON (Advanced)** shows the whole schedule or track as the world file keeps it, and **Save to draft** and **Revert** sit in the bar at the bottom.
+
+### Routines in Build
+
+A **routine** is how someone's days usually go: when they open the shop, eat with the family or go to the gym. It is something the world can rely on, never a rule, and it never outranks the story. For anyone in a scene with your character, and for the cast close to you (Near and Live), a routine is at most a soft suggestion: it never moves them out of a scene, contradicts what's been told or interrupts play. People off screen keep to their routines as far as **Routines and the story** says (below), and a chat changes anyone's routine as it goes, through the story or the GM.
+
+**Where a character's day comes from**, most binding first: what the story has established (where they are, what they're doing, a trip, a plan under way); their commitments (schedules such as shifts and school, appointments, trips); the plans the story or the GM gave them; their routine; and their basic needs, sleep and meals. A character with no routine has the rest of that list, and nothing more: no outings, visits or invitations are made up for them.
+
+**Build → Daily life → Routines** lists the routines by whom they're for, the most specific first: **Someone's own**, **A group's** (a family, a household, a crew), **A kind's**, **By selector** and **Everyone's** (the world's default). Where routines set the same block for someone, the most specific wins: their own, then a group's, a kind's, a selector's, then everyone's. **Routines and the story**, at the top, opens the settings. **New** names a new routine, as in any collection; a routine without a name goes by whom it's for.
+
+A routine's page has:
+
+- **Whose routine**: **It's for** picks the level (**Someone**, **Group**, **Kind**, **Selector** or **Everyone**), then who, and an optional **Name**.
+- **Their days**, for anyone but everyone: **Have a routine** or **No routine**. With no routine, their days come only from the story, the GM, their commitments and their basic needs, and no broader routine applies to them. With a routine, **Keeps the blocks of broader routines** says whether a group's, a kind's and everyone's blocks still apply where this one doesn't set the same block.
+- **Blocks**, in the order of the day, each with its kind, its time, its place and where it comes from. The **Block** button adds one, and **Change a basic need or a broader block…** copies sleep, a meal or another routine's block in, to change it for whom this routine covers. Tap a block to open its sheet.
+- **Turned off here**: blocks that don't apply to whom this routine covers, such as breakfast for a night owl. **Turn off a block…** adds one, and its undo button puts it back.
+- **Where this routine comes from**: what its blocks rest on unless a block names its own.
+
+A block's sheet has:
+
+- **What it reads as** ("Opens the shop") and **What they're doing**: sleep, a meal, work, socialize, leisure or the world's own activity.
+- **When it happens**: **At a set time** (the same time on each day it's on), **Within a window** (somewhere in its window, wherever the day has room; **How often** can make it **A few times a week**, with **Times a week**) or **Optional** (only likely, with **How likely**: **Rarely**, **Sometimes**, **Often** or **Usually**, and the first thing a busier day leaves out). The bar across the day shows when it runs, or for a window when it may start: drag either end, or type the times. **How long** takes a length such as "1 h 30 min".
+- **How much it matters**, **Least** to **Most**: when blocks want the same free time, the one that matters more goes first.
+- **Where**: **At home**, **At work**, **Wherever they are**, **At the home of whoever they're with**, **A chosen place**, or **The nearest place of a type**.
+- **Who with**: a [selector](#selectors) that names people or groups, and **Asks them along**, which makes the block an invitation, made only as **Routines and the story** allows.
+- **Which days**: weekdays, days off, holidays, birthdays (their own or a friend's), seasons and weather; with none set, every day.
+- **Needs and privacy**: the needs it meets, and **Private**, which shows it to the player only as "Busy".
+- **Where it comes from**: **Written here**, **From lore** (an entry picked by its title, with **The words it rests on**; the entry's row opens it) or **From a sheet** (whose sheet, and which field). The list shows each block's source too.
+- **Its id (Advanced)**: a block with the id of a basic need (\`sleep\`, \`breakfast\`, \`lunch\`, \`dinner\`) or of a broader routine's block replaces it. A block added on the page takes its id from what it reads as.
+- **Remove block**.
+
+**Save to draft** (**Create routine** for a new one) and **Revert** sit in the bar at the bottom, and the **Item actions** button (⋯) holds **Delete**. A routine's problems show on its page, and **Problems** opens a block's problem on that block's sheet.
+
+**Routines and the story** (in **World**, and at the top of Routines) tunes how aware people's routines are of the story and its lore:
+
+- **Story and lore awareness**: **Story first** (people off screen bend their routine for the story's plans and the GM's, what the story sets holds until it's released, and characters close to your character get no routine nudges at all), **Balanced**, the default (Background characters keep their routine, distant ones bend it for the story's plans, what the story sets holds for the rest of that day, and characters close to your character get it only as a soft suggestion), or **Routine first** (Background and distant characters keep to their routine, bending only as **How plans bend routine** allows, and what the story sets holds until their next block). The GM can set it apart for one character in a chat.
+- **Invitations**: whom routine blocks may invite: **Off**, **To the player only** (the default) or **Between everyone**. A block invites only when it names its company and asks them along, so nobody is invited out of nowhere; plans from the story and the GM's invitations need no setting.
+- **Sociability**: **Reserved**, **Usual** or **Outgoing**, how fast the wish for company and fun grows.
+- **How plans bend routine**: which plans made in the story may move work or school: **Only plans that must happen**, **Strong plans**, **Strong plans, and set-time plans for the cast** (the default) or **Strong plans, and set-time plans for anyone**.
+
+**Save to draft** saves all four, and **Use the defaults** takes the world's own settings out again: a world never tuned keeps none.
 
 ### Maps
 
@@ -60250,6 +61836,50 @@ Each tool remembers its last run, with its status and its proposals, so you can 
 ### Describe a map
 
 **Describe a map** draws a map from your own words. Pick the place it maps, give the map an id if you like, and describe the inside ("A small inn: the taproom at the front, the kitchen behind it through a door, and a corridor down the side to the stable yard."), then tap **Draw the map**. The AI writes an lre-map-v1 map, and the engine checks it as the map editor would; if it has problems, the AI gets one more try with the list of them. You get one proposal with a preview of the map, ticked when it came back clean and unticked, with what's still wrong, when it didn't. Applying it puts the map in your draft like any other, where the map editor can fix the rest; nothing reaches your chats until you commit. Like the other tools, it remembers its last run.
+
+### Proposing routines from lore
+
+**Propose routines from lore**, a tool inside a world, gives your people and groups [routines](#routines-in-build) and schedules from what the world already says about them: its lore entries, their sheets (role, occupation, workplace, home, traits, description), their families, households and clubs, and who they know. It proposes two kinds of thing:
+
+- **Schedules**: shifts, school and class timetables, services. A shop's opening hours become the shifts of the people who work there.
+- **Routine blocks**: habits.
+  - **Fixed** blocks happen at a set time ("dinner at six").
+  - **Flexible** blocks happen somewhere in a window, every day or a few times a week ("most mornings", "twice a week").
+  - **Optional** blocks happen only sometimes ("now and then").
+
+A household's dinner, a club's evening or worship with a congregation comes back as the group's block, with its members as company.
+
+**Sources.** Every block and schedule cites the lore entry or sheet field it rests on, with a short quote from it. The engine checks the quote against that text, and anything without a source that holds is never proposed. So someone the lore says nothing about gets no routine at all, and a habit the lore states loosely comes back flexible or optional, never fixed.
+
+**What it reads.** It reads only what may reach the player: public lore, entries whose secret is already out, public sheets and places. Secret lore and secret people never go into it, so nothing it proposes gives a secret away.
+
+**How much lore each one gets.** Each person and group gets their lore in whole entries, the most about them first, up to **Lore each person or group reads** in **Settings → Steps and connections → Build jobs** (8,000 tokens to start; turn on **all of it** for everything, however long). No entry is ever cut short. When the limit leaves entries out, the job says whose and how many of theirs it read. People whose lore fills the limit get a helper call of their own.
+**What the engine checks.** Each proposal is checked against your draft:
+
+- its places, people and company exist;
+- its times can be;
+- anyone it names as company is tied to the person, belongs with them, or is named with them in the cited text;
+- its label names no one.
+
+When the AI got any of this wrong, it gets one more try with the list of what to fix.
+
+**What it points out.** A proposal can clash with something already there:
+
+- a schedule or a routine block the person already has;
+- another proposal;
+- the opening scene, by taking someone away from where the story starts them.
+
+The clash is pointed out in its problems, and it never replaces what you wrote. Something the world already has is left out.
+
+**Using it:**
+
+1. Choose whom for: **Everyone** (every person and group the job may read, never a secret one or your own character), or **Choose** and tick people and groups.
+2. It runs in the background, with its progress and **Cancel**. It reads a few people and groups at a time, within the same twelve helper calls an import makes; a pass that stops before everyone was read says so and offers **Continue**, which starts the next pass where this one stopped. Apply what you want from a pass first: the next pass's proposals replace it.
+3. The review groups the proposals by the person or group they're for. Each says what it sets (a block's kind, time, length, days, place and company; a schedule's field, how it repeats and its slots) and what it rests on, **From lore:** *entry* or **From a sheet:** *name · field*, with the quote; tap a lore entry's title to read it in place. Under it is what checking it against the draft found: a clash with their schedules or routine, a place or company it can't have, pulling someone away from where the story starts them, or a routine or schedule of the same id already in the draft. A proposal with any of these starts unticked; the rest start ticked at 70% or more. A proposal that doesn't rest on a lore entry or a sheet field is never offered, and the review says how many were left out.
+4. **Edit** opens a proposal in Build's own routine or schedule form. **Done** keeps the edit and ticks it, and **As proposed** drops it. The edit is what's applied, and anything wrong with its shape shows before you apply.
+5. **Apply n to the draft** writes the ticked proposals into the draft, each as a routine or schedule of its own, where the editors can change them; nothing reaches your chats until you **Commit**. A schedule comes as a pair, where they are and what they're doing: apply both.
+
+Like the other tools, it remembers its last run, and your ticks and edits stay while you open a lore entry or another page and come back, until you reload.
 
 ### Money in Build
 
@@ -61391,7 +63021,7 @@ var package_default = {
 // src/cli/version.ts
 var CLI_NAME = "lumirpengine";
 var CLI_VERSION = package_default.version;
-var BUILD = "c61c17bb";
+var BUILD = "61b2130a";
 function runtimeCannotFollow(bun) {
   if (bun === undefined)
     return null;
@@ -62180,8 +63810,128 @@ var BUILD_TOOLS = [
       return { text: json({ chatId, x, y, ...body.walk ?? { minutes: 0, disabled: "LumiRPEngine didn't say." } }) };
     },
     cli: { command: "map-walk", section: "Play", usage: "map-walk <chatId> --x <n> --y <n>", summary: "What Walk here takes to a cell", positionals: ["chatId"], needs: 1, options: { "--x": { arg: "x", as: "int" }, "--y": { arg: "y", as: "int" } } }
+  },
+  ...itemTools("routines", "routine", "lre_routine", "lre_routines"),
+  ...itemTools("schedules", "schedule", "lre_schedule", "lre_schedules"),
+  {
+    name: "lre_routine_settings",
+    description: `A world draft's routine settings (DESIGN §8): awareness ("story_first", "balanced", "routine_first": how strictly people keep to routine against the story), invitations ("off", "player", "everyone"), sociability ("reserved", "usual", "outgoing") and planBend ("must", "strong", "standard", "ordinary"). Without value it reads them; with value it sets them whole (a part left out takes its default; the defaults remove them). A setting or value the engine doesn't take is refused, naming it. Pass expectVersion so a change made since is refused.`,
+    inputSchema: object({ worldId: WORLD_ID, value: { type: "object", description: "The settings to set, whole." }, expectVersion: EXPECT_VERSION }, ["worldId"]),
+    write: { destructive: true, idempotent: true },
+    run: async (args, ctx) => {
+      const worldId = worldIdOf2(args);
+      const live = ctx.live();
+      const read = await live.draft(worldId);
+      if (args.value === undefined)
+        return { text: json({ worldId, version: read.version, settings: routineSettingsOf(read.draft) }) };
+      if (!isRecord(args.value))
+        throw new ToolError("value is an object: {awareness?, invitations?, sociability?, planBend?}.");
+      const same = routineSettingsProblems(args.value).length === 0 && JSON.stringify(routineSettingsOf({ routineSettings: args.value })) === JSON.stringify(DEFAULT_ROUTINE_SETTINGS);
+      const ops = same ? read.draft.routineSettings === undefined ? [] : [{ op: "remove", path: "/routineSettings" }] : [{ op: "add", path: "/routineSettings", value: args.value }];
+      return draftPatch(ctx, worldId, read, ops, intArg(args, "expectVersion", 0, Number.MAX_SAFE_INTEGER), "routineSettings");
+    },
+    cli: { command: "routine-settings", section: "Build", usage: "routine-settings <worldId> [--value <json>] [--expect-version <n>]", summary: "Read or set a world's routine settings", positionals: ["worldId"], needs: 1, options: { "--value": { arg: "value", as: "json" }, "--expect-version": { arg: "expectVersion", as: "int" } } }
   }
 ];
+function token(id) {
+  return id.replace(/~/g, "~0").replace(/\//g, "~1");
+}
+async function draftPatch(ctx, worldId, read, ops, expected, path) {
+  if (expected !== undefined && read.version !== expected)
+    throw new ToolError(`Nothing applied: the draft of ${worldId} is at version ${read.version}, not ${expected}. Read it again, then apply against version ${read.version}.`);
+  if (ops.length === 0)
+    return { text: json({ worldId, version: read.version, note: "Nothing to change." }) };
+  return ctx.serialize(`world:${worldId}`, async () => {
+    let after;
+    try {
+      after = await ctx.live().conn.request("lre.editor", { op: "patch", worldId, base: read.base, version: read.version, ops });
+    } catch (error) {
+      if (error instanceof LreError && error.code === "conflict")
+        throw new ToolError(`Nothing applied: the draft of ${worldId} was written since it was read (version ${read.version}). Read it again and apply against its version.`);
+      if (error instanceof LreError && (error.code === "bad_request" || error.code === "validation"))
+        throw new ToolError(`Nothing applied: LumiRPEngine refused it. ${error.message}`);
+      throw error;
+    }
+    return { text: json({ worldId, version: after.version, lint: lintSummary(after.lint.filter((i) => i.path === path || i.path.startsWith(`${path}.`)), 20), next: "It is in the draft (Build's too): lre_commit makes it the head." }) };
+  });
+}
+function itemTools(collection, noun, one, many) {
+  const ID = { type: "string", description: `The ${noun}'s id.` };
+  const shape = (value) => collection === "routines" || isRecord(value) && typeof value.target === "string" && isRecord(value.recurrence) && Array.isArray(value.slots) ? [] : ["a schedule has a target, a recurrence and slots"];
+  const items = (read) => {
+    const raw = read.draft[collection];
+    return isRecord(raw) ? raw : {};
+  };
+  return [
+    {
+      name: many,
+      description: `A world draft's ${collection} (DESIGN §8): each ${noun}'s id, label or target, owner and size. ${one} reads one whole.`,
+      inputSchema: object({ worldId: WORLD_ID }, ["worldId"]),
+      write: false,
+      run: async (args, ctx) => {
+        const worldId = worldIdOf2(args);
+        const read = await ctx.live().draft(worldId);
+        const list = Object.entries(items(read)).map(([id, v]) => {
+          const o = isRecord(v) ? v : {};
+          return { id, ...typeof o.label === "string" ? { label: o.label } : {}, ...typeof o.target === "string" ? { target: o.target } : {}, owner: o.owner ?? null, size: Array.isArray(o.blocks) ? o.blocks.length : Array.isArray(o.slots) ? o.slots.length : 0 };
+        });
+        return { text: json({ worldId, version: read.version, [collection]: list }) };
+      },
+      cli: { command: many.replace(/^lre_/, ""), section: "Build", usage: `${many.replace(/^lre_/, "")} <worldId>`, summary: `List a world's ${collection}`, positionals: ["worldId"], needs: 1 }
+    },
+    {
+      name: one,
+      description: `One ${noun} of a world draft, whole, with its lint.`,
+      write: false,
+      inputSchema: object({ worldId: WORLD_ID, id: ID }, ["worldId", "id"]),
+      run: async (args, ctx) => {
+        const worldId = worldIdOf2(args);
+        const id = neededText(args, "id", `the ${noun}'s id (${many} lists them)`);
+        const read = await ctx.live().draft(worldId);
+        const value = items(read)[id];
+        if (value === undefined || !hasOwn(items(read), id))
+          throw new ToolError(`The draft of ${worldId} has no ${noun} ${id}.`);
+        return { text: json({ worldId, version: read.version, id, [noun]: value }) };
+      },
+      cli: { command: one.replace(/^lre_/, ""), section: "Build", usage: `${one.replace(/^lre_/, "")} <worldId> <id>`, summary: `Read one of a world's ${collection}`, positionals: ["worldId", "id"], needs: 2 }
+    },
+    {
+      name: `${one}_put`,
+      description: `Create or replace one ${noun} of a world draft, whole (${collection === "routines" ? "{id, label?, owner?, inherit?, blocks: [{id, label, activity, kind: fixed|flexible|optional, at|window, minutes, perWeek?, chance?, priority?, days?, place?, company?, needs?, private?, source?}] or {id, off: true}}, source?}" : "{id, owner?, target, recurrence, slots: [{start, end, value?, source?}], source?}"}). A malformed one is refused, naming the field, and nothing is written; the answer has the new version and its lint. Pass expectVersion so a change made since is refused.`,
+      inputSchema: object({ worldId: WORLD_ID, id: ID, value: { type: "object", description: `The ${noun}, whole; its id is the one given.` }, expectVersion: EXPECT_VERSION }, ["worldId", "id", "value"]),
+      write: { destructive: true, idempotent: true },
+      run: async (args, ctx) => {
+        const worldId = worldIdOf2(args);
+        const id = neededText(args, "id", `the ${noun}'s id`);
+        if (!isRecord(args.value))
+          throw new ToolError(`value is the ${noun}, an object.`);
+        const value = { ...args.value, id };
+        const problems = shape(value);
+        if (problems.length > 0)
+          throw new ToolError(`Nothing applied: ${problems.join("; ")}.`);
+        const read = await ctx.live().draft(worldId);
+        const ops = [...isRecord(read.draft[collection]) ? [] : [{ op: "add", path: `/${collection}`, value: {} }], { op: "add", path: `/${collection}/${token(id)}`, value }];
+        return draftPatch(ctx, worldId, read, ops, intArg(args, "expectVersion", 0, Number.MAX_SAFE_INTEGER), `${collection}.${id}`);
+      },
+      cli: { command: `${one.replace(/^lre_/, "")}-put`, section: "Build", usage: `${one.replace(/^lre_/, "")}-put <worldId> <id> --value <file|json> [--expect-version <n>]`, summary: `Create or replace one of a world's ${collection}`, positionals: ["worldId", "id"], needs: 2, options: { "--value": { arg: "value", as: "json" }, "--expect-version": { arg: "expectVersion", as: "int" } } }
+    },
+    {
+      name: `${one}_delete`,
+      description: `Delete one ${noun} of a world draft. Pass expectVersion so a change made since is refused.`,
+      inputSchema: object({ worldId: WORLD_ID, id: ID, expectVersion: EXPECT_VERSION }, ["worldId", "id"]),
+      write: { destructive: true, idempotent: true },
+      run: async (args, ctx) => {
+        const worldId = worldIdOf2(args);
+        const id = neededText(args, "id", `the ${noun}'s id`);
+        const read = await ctx.live().draft(worldId);
+        if (!hasOwn(items(read), id))
+          throw new ToolError(`The draft of ${worldId} has no ${noun} ${id}.`);
+        return draftPatch(ctx, worldId, read, [{ op: "remove", path: `/${collection}/${token(id)}` }], intArg(args, "expectVersion", 0, Number.MAX_SAFE_INTEGER), `${collection}.${id}`);
+      },
+      cli: { command: `${one.replace(/^lre_/, "")}-delete`, section: "Build", usage: `${one.replace(/^lre_/, "")}-delete <worldId> <id> [--expect-version <n>]`, summary: `Delete one of a world's ${collection}`, positionals: ["worldId", "id"], needs: 2, options: { "--expect-version": { arg: "expectVersion", as: "int" } } }
+    }
+  ];
+}
 
 // src/cli/tools-config.ts
 var SECTIONS = {
@@ -62412,11 +64162,16 @@ var KINDS = {
   index_text: { needs: ["text"], takes: ["text"], about: "Index this text: lore entries in the text's own words, marked written by the AI (text)" },
   refine: { needs: ["instructions"], takes: ["instructions"], about: "Build / Refine with AI: world edits for a request in words (instructions, at most 4,000 characters)" },
   describe_map: { needs: ["scope", "prose"], takes: ["scope", "prose", "mapId"], about: "Describe a map: a map of a place drawn from a description (scope: the place's id; prose; mapId, by default <scope>_map)" },
+  propose_routines: {
+    needs: [],
+    takes: ["owners", "after"],
+    about: "Propose routines from lore: routines and schedules for people and groups (their work, school, worship, meals with their household, clubs, regular company), each block citing the lore entry or sheet field it rests on with a quote, checked against the draft; it reads people and groups in id order, so a pass that stops early answers next, the input that continues it (owners: whom to propose for, default everyone; after: start after this one)"
+  },
   playtest: { needs: ["turns"], takes: ["turns"], about: "Playtest: typed turns through the engine from the world's start, no narrator (turns, at most 50)" },
   check_world: { needs: [], takes: ["days"], about: "Check world: whole days simulated from the start (days 1–14, default 3)" }
 };
 var KIND_NAMES = Object.keys(KINDS);
-var INPUTS = ["bookIds", "bookId", "text", "instructions", "scope", "prose", "mapId", "turns", "days"];
+var INPUTS = ["bookIds", "bookId", "text", "instructions", "scope", "prose", "mapId", "owners", "after", "turns", "days"];
 var WORLD_ID2 = { type: "string", description: "The world's id (w_…), from lre_worlds." };
 var JOB_ID = { type: "string", description: "The job's id (lre_job_start answers it; lre_jobs lists them)." };
 var EXPECT_VERSION2 = { type: "integer", minimum: 0, description: "The draft version you last read: refused if the draft has moved on since, so a change you haven't seen is never overwritten." };
@@ -62442,7 +64197,13 @@ function jobInput(kind, args) {
       throw new ToolError('turns is 1 to 50 things the player types ("look around", "walk to the market").');
     input.turns = turns;
   }
-  for (const key of ["bookId", "text", "instructions", "scope", "prose", "mapId"]) {
+  const owners = textsArg(args, "owners");
+  if (owners !== undefined) {
+    if (owners.length === 0)
+      throw new ToolError("owners names at least one person or group (lre_draft lists the world's entities); leave it out for everyone.");
+    input.owners = owners;
+  }
+  for (const key of ["bookId", "text", "instructions", "scope", "prose", "mapId", "after"]) {
     const value = textArg(args, key);
     if (value !== undefined)
       input[key] = value;
@@ -62459,7 +64220,8 @@ function summaryOf(job) {
     const byCollection = {};
     for (const p of result.proposals)
       byCollection[p.collection] = (byCollection[p.collection] ?? 0) + 1;
-    found = { proposals: result.proposals.length, byCollection };
+    const flagged = result.proposals.filter((p) => (p.problems?.length ?? 0) > 0).length;
+    found = { proposals: result.proposals.length, byCollection, ...flagged > 0 ? { withProblems: flagged } : {}, ...result.next !== undefined ? { next: result.next } : {} };
   } else if (result !== undefined)
     found = { turns: result.turns.length, lint: JSON.parse(JSON.stringify(lintSummary(result.lint, 5))) };
   const input = JSON.parse(JSON.stringify(job.input, (_key, value) => typeof value === "string" ? clip(value, 200) : value));
@@ -62490,9 +64252,9 @@ async function applyTool(args, ctx) {
   const unknown = (picked ?? []).filter((id) => !proposals.some((p) => p.id === id));
   if (unknown.length > 0)
     throw new ToolError(`Job ${jobId} has no proposal ${unknown.join(", ")}. Its proposals: ${clip(proposals.map((p) => p.id).join(", "), 2000)}.`);
-  const chosen = picked === undefined ? proposals : proposals.filter((p) => picked.includes(p.id));
+  const chosen = picked === undefined ? proposals.filter((p) => (p.problems?.length ?? 0) === 0) : proposals.filter((p) => picked.includes(p.id));
   if (chosen.length === 0)
-    throw new ToolError(`Job ${jobId} has no proposals left to apply.`);
+    throw new ToolError(picked === undefined && proposals.length > 0 ? `Every proposal of job ${jobId} has problems (lre_job lists them): name the ones you accept anyway with proposals.` : `Job ${jobId} has no proposals left to apply.`);
   if (chosen.length > 450)
     throw new ToolError(`That is ${chosen.length} proposals; apply at most 450 at once (name them with proposals).`);
   const draft = await ctx.live().draft(worldId);
@@ -62519,7 +64281,7 @@ async function applyTool(args, ctx) {
 var JOB_TOOLS = [
   {
     name: "lre_job_start",
-    description: `Start one of Build's background jobs on a world, on your Lumiverse; it answers the job's id at once and runs on. Kinds: ${KIND_NAMES.map((k) => `${k}: ${KINDS[k].about}`).join("; ")}. A model job asks your helper model (Settings → Helper model) and costs its calls; playtest and check_world run the engine alone, on the world's draft, like lre_playtest and lre_check_world but on the host. Follow it with lre_jobs; read what it found with lre_job; apply proposals with lre_job_apply. Nothing changes until you apply.`,
+    description: `Start one of Build's background jobs on a world, on your Lumiverse; it answers the job's id at once and runs on. Kinds: ${KIND_NAMES.map((k) => `${k}: ${KINDS[k].about}`).join("; ")}. A model job asks your helper model (Settings → Helper model) and costs its calls; playtest and check_world run the engine alone, on the world's draft, like lre_playtest and lre_check_world but on the host. Follow it with lre_jobs; read what it found with lre_job; apply proposals with lre_job_apply. Nothing changes until you apply. A pass that stopped early says next in lre_jobs: start the same kind with those inputs to continue.`,
     inputSchema: object({
       worldId: WORLD_ID2,
       kind: { type: "string", enum: KIND_NAMES, description: "Which job." },
@@ -62530,6 +64292,8 @@ var JOB_TOOLS = [
       scope: { type: "string", description: "describe_map: the id of the place the map draws." },
       prose: { type: "string", description: "describe_map: the place's description, to draw from." },
       mapId: { type: "string", description: "describe_map: the map's id (default <scope>_map)." },
+      owners: { type: "array", items: { type: "string" }, minItems: 1, description: "propose_routines: the people and groups to propose routines and schedules for, by entity id (default: every person and group it may read)." },
+      after: { type: "string", description: "propose_routines: continue a pass, starting after this person or group (the next an earlier pass answered)." },
       turns: { type: "array", items: { type: "string" }, minItems: 1, maxItems: 50, description: "playtest: what the player types, one entry per turn." },
       days: { type: "integer", minimum: 1, maximum: 14, description: "check_world: days to simulate (default 3)." }
     }, ["worldId", "kind"]),
@@ -62547,15 +64311,15 @@ var JOB_TOOLS = [
       command: "job-start",
       section: "Jobs",
       usage: "job-start <worldId> <kind> [<input options>]",
-      summary: "Start a Build job: import_lore --book <id> …, index_book --book-id <id>, index_text --text <t>, refine --instructions <t>, describe_map --scope <place> --prose <t> [--map-id <id>], playtest --turn <t> …, check_world [--days <n>]",
+      summary: "Start a Build job: import_lore --book <id> …, index_book --book-id <id>, index_text --text <t>, refine --instructions <t>, describe_map --scope <place> --prose <t> [--map-id <id>], propose_routines [--owner <id> …] [--after <id>], playtest --turn <t> …, check_world [--days <n>]",
       positionals: ["worldId", "kind"],
       needs: 2,
-      options: { "--book": { arg: "bookIds", as: "many" }, "--book-id": { arg: "bookId", as: "text" }, "--text": { arg: "text", as: "text" }, "--instructions": { arg: "instructions", as: "text" }, "--scope": { arg: "scope", as: "text" }, "--prose": { arg: "prose", as: "text" }, "--map-id": { arg: "mapId", as: "text" }, "--turn": { arg: "turns", as: "many" }, "--days": { arg: "days", as: "int" } }
+      options: { "--book": { arg: "bookIds", as: "many" }, "--book-id": { arg: "bookId", as: "text" }, "--text": { arg: "text", as: "text" }, "--instructions": { arg: "instructions", as: "text" }, "--scope": { arg: "scope", as: "text" }, "--prose": { arg: "prose", as: "text" }, "--map-id": { arg: "mapId", as: "text" }, "--owner": { arg: "owners", as: "many" }, "--after": { arg: "after", as: "text" }, "--turn": { arg: "turns", as: "many" }, "--days": { arg: "days", as: "int" } }
     }
   },
   {
     name: "lre_jobs",
-    description: "A world's kept jobs, oldest first: the running ones and the last few that ended, each with its kind, status (running, done, failed, cancelled, or interrupted: it was running when the extension stopped, and holds what it had proposed by then), progress (0 to 1), message, input, and what it found in counts (proposals by collection, or a run's turns and lint).",
+    description: "A world's kept jobs, oldest first: the running ones and the last few that ended, each with its kind, status (running, done, failed, cancelled, or interrupted: it was running when the extension stopped, and holds what it had proposed by then), progress (0 to 1), message, input, and what it found in counts (proposals by collection and how many have problems, with next when a pass stopped early, or a run's turns and lint).",
     inputSchema: object({ worldId: WORLD_ID2 }, ["worldId"]),
     write: false,
     run: async (args, ctx) => {
@@ -62567,7 +64331,7 @@ var JOB_TOOLS = [
   },
   {
     name: "lre_job",
-    description: `One job whole at a JSON Pointer: its input and its result, the proposals (each with its id, collection, key, the value it writes, its source, confidence and note, and for lore its lookup terms and topics) or a run's turns (what the player typed, the engine's reply and notes) and lint. Large parts come back as an outline: "/result/proposals/0" reads one proposal.`,
+    description: `One job whole at a JSON Pointer: its input and its result, the proposals (each with its id, collection, key, the value it writes, its source, confidence and note; for lore its lookup terms and topics; for routines and schedules the person or group it is for and the problems the check against the draft found) or a run's turns (what the player typed, the engine's reply and notes) and lint. Large parts come back as an outline: "/result/proposals/0" reads one proposal.`,
     inputSchema: object({ worldId: WORLD_ID2, jobId: JOB_ID, pointer: { type: "string", description: 'A JSON Pointer into the job: "/result/proposals", "/result/turns/2".' }, offset: { type: "integer", minimum: 0, description: "Read the value's JSON text from this character instead of outlining it." } }, ["worldId", "jobId"]),
     write: false,
     run: async (args, ctx) => {
@@ -62581,8 +64345,8 @@ var JOB_TOOLS = [
   },
   {
     name: "lre_job_apply",
-    description: "Apply a job's proposals to the world's draft, as Build's review does when you Apply what you accepted: each one's value goes into its collection under its key (replacing an item there by that key), an AI-written lore entry counts as reviewed, and accepted lore entries' lookup terms and topics join the draft's lookup table. All of them land in one write or none do. proposals names the ones you accept (default: all of them). The draft is the user's Build draft too: pass expectVersion. Answers what changed, as lre_edit does; commit it with lre_commit.",
-    inputSchema: object({ worldId: WORLD_ID2, jobId: JOB_ID, proposals: { type: "array", items: { type: "string" }, minItems: 1, description: "The ids of the proposals you accept (lre_job lists them); default all." }, expectVersion: EXPECT_VERSION2 }, ["worldId", "jobId"]),
+    description: "Apply a job's proposals to the world's draft, as Build's review does when you Apply what you accepted: each one's value goes into its collection under its key (replacing an item there by that key), an AI-written lore entry counts as reviewed, and accepted lore entries' lookup terms and topics join the draft's lookup table. All of them land in one write or none do. proposals names the ones you accept (default: all of them but those with problems, which Build's review leaves unticked). The draft is the user's Build draft too: pass expectVersion. Answers what changed, as lre_edit does; commit it with lre_commit.",
+    inputSchema: object({ worldId: WORLD_ID2, jobId: JOB_ID, proposals: { type: "array", items: { type: "string" }, minItems: 1, description: "The ids of the proposals you accept (lre_job lists them); default all but those with problems." }, expectVersion: EXPECT_VERSION2 }, ["worldId", "jobId"]),
     write: { destructive: true, idempotent: true },
     run: applyTool,
     cli: { command: "job-apply", section: "Jobs", usage: "job-apply <worldId> <jobId> [--proposal <id> …] [--expect-version <n>]", summary: "Apply a job's proposals to the draft", positionals: ["worldId", "jobId"], needs: 2, options: { "--proposal": { arg: "proposals", as: "many" }, "--expect-version": { arg: "expectVersion", as: "int" } } }
@@ -63000,6 +64764,8 @@ function mindsCancel(args, ctx) {
 var OPS_ITEM = { type: "object", properties: { op: { type: "string" } }, required: ["op"] };
 var MIND_OP = { mind_pin: true, mind_refresh: true, mind_memory: true, mind_intent: true };
 var MIND_OPS = Object.keys(MIND_OP);
+var ROUTINE_OP = { routine_follow: true, routine_block: true, schedule_override: true };
+var ROUTINE_OPS = Object.keys(ROUTINE_OP);
 var PLAY_TOOLS = [
   {
     name: "lre_chat_state",
@@ -63152,8 +64918,46 @@ var PLAY_TOOLS = [
     write: { destructive: false, idempotent: true },
     run: mindsCancel,
     cli: { command: "minds-cancel", section: SECTION, usage: "minds-cancel <chatId> <runId>", summary: "Stop a minds run", positionals: ["chatId", "runId"], needs: 2 }
+  },
+  {
+    name: "lre_day",
+    write: false,
+    description: `A character's routine and day in a chat (DESIGN §8). As the GM (spoilers: true): their effective routine, each block with the owner it comes from (this chat, their own, a group, a kind, a selector, the world, the basic needs), its source (authored, lore, a sheet, the story, the GM) and what it shadows; every schedule that applies, which wins and the chat's change; the day as laid with why each block is there; what the story holds now; and the invitations they made and received with their grounds. As the player (view: "player"): only what Cast shows of someone the POV may know.`,
+    inputSchema: object({ chatId: CHAT_ID3, entity: { type: "string", description: "The character's id (lre_gm lists them)." }, view: { type: "string", enum: ["gm", "player"], description: "gm (needs spoilers: true) or player." }, day: { type: "integer", description: "A day index; today when left out (gm only)." }, spoilers: SPOILERS }, ["chatId", "entity", "view"]),
+    run: (args, ctx) => routineDay2(args, ctx),
+    cli: { command: "day", section: SECTION, usage: "day <chatId> <entity> [--view gm|player] [--day <n>] [--spoilers]", summary: "A character's routine and day, with why", positionals: ["chatId", "entity"], needs: 2, options: { "--view": { arg: "view", as: "text" }, "--day": { arg: "day", as: "int" }, "--spoilers": { arg: "spoilers", as: "flag" } } }
+  },
+  {
+    name: "lre_routine_changes",
+    write: false,
+    description: "Everyone a chat changed the routine or schedules of (GM → Routine): their follow setting, and the blocks and schedules it changed, with whether the GM or the story did. Needs spoilers: true.",
+    inputSchema: object({ chatId: CHAT_ID3, spoilers: SPOILERS }, ["chatId", "spoilers"]),
+    run: async (args, ctx) => {
+      gate(args, "lre_routine_changes", "shows the GM's changes to people's routines");
+      const chatId = chatIdOf(args);
+      return { text: json(await ask(ctx, chatId, "lre.routine", { chatId, op: "changed" })) };
+    },
+    cli: { command: "routine-changes", section: SECTION, usage: "routine-changes <chatId> --spoilers", summary: "Whose routines a chat changed", positionals: ["chatId"], needs: 1, options: { "--spoilers": { arg: "spoilers", as: "flag" } } }
+  },
+  {
+    name: "lre_routine_edit",
+    description: `Change characters' routines and schedules in a chat (GM → Routine), as one GM edit with an Undo chip: routine_follow {entity, mode?: "follows", "no_invitations" or "off" (no routine: the story, the GM, commitments and basic needs only), awareness?: "story_first", "balanced" or "routine_first"} (null returns a part to the world's); routine_block {entity, block, value: a block, {"id", "off": true}, or null to drop the chat's change}; schedule_override {entity, schedule, value: {"off": true, "until": minutes or null}, {"slots": [...], "recurrence"?}, or null}. lre_day shows the blocks and schedules. Needs spoilers: true.`,
+    inputSchema: object({ chatId: CHAT_ID3, spoilers: SPOILERS, ops: { type: "array", minItems: 1, maxItems: 200, items: { type: "object", properties: { op: { type: "string", enum: ROUTINE_OPS } }, required: ["op", "entity"] }, description: 'The operations, in order: [{"op": "routine_follow", "entity": "danny_okafor", "mode": "no_invitations"}].' } }, ["chatId", "spoilers", "ops"]),
+    write: { destructive: true, idempotent: false },
+    run: (args, ctx) => gmEdit(args, ctx, "lre_routine_edit", ROUTINE_OPS),
+    cli: { command: "routine-edit", section: SECTION, usage: "routine-edit <chatId> --ops <file|json> --spoilers", summary: "Change characters' routines and schedules in a chat", positionals: ["chatId"], needs: 1, options: { "--ops": { arg: "ops", as: "json" }, "--spoilers": { arg: "spoilers", as: "flag" } } }
   }
 ];
+async function routineDay2(args, ctx) {
+  const chatId = chatIdOf(args);
+  const entity = neededText(args, "entity", "the character's id (lre_gm lists them)");
+  const view = textArg(args, "view") === "player" ? "player" : "gm";
+  if (view === "gm")
+    gate(args, "lre_day", "shows a character's whole routine, secrets and the GM's changes included");
+  const day = intArg(args, "day", Number.MIN_SAFE_INTEGER, Number.MAX_SAFE_INTEGER);
+  const body = await ask(ctx, chatId, "lre.routine", { chatId, op: "day", entity, view, ...day !== undefined && view === "gm" ? { day } : {} });
+  return { text: json(body) };
+}
 
 // src/cli/tools.ts
 function annotationsOf(def) {

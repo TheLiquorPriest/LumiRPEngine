@@ -2696,6 +2696,10 @@ var COLLECTION_SPECS = {
     { kind: "number", key: "order", label: "Order (lowest first)", optional: true, step: 1 },
     { kind: "text", key: "description", label: "Description", multiline: true, optional: true },
     { kind: "facetValues", key: "values", label: "Values" }
+  ],
+  routines: [
+    { kind: "text", key: "label", label: "Label", optional: true },
+    { kind: "bool", key: "inherit", label: "Keeps the blocks of less specific routines", reads: (inherit) => inherit !== false }
   ]
 };
 var PART_SPECS = {
@@ -2872,6 +2876,8 @@ function newItem(collection, id, world, name) {
       return { id, title: shown, content: "", keys: [], links: [] };
     case "classifications":
       return { id, label: name?.trim() || id.replace(/_/g, " "), multiple: false, values: {} };
+    case "routines":
+      return { id, label: shown, blocks: [] };
   }
 }
 
@@ -2888,7 +2894,8 @@ var COLLECTION_INFO = {
   actions: { label: "Actions", hint: "What the player can do", noun: "action", icon: "bolt" },
   checks: { label: "Checks", hint: "Dice and outcome bands", noun: "check", icon: "dice" },
   rules: { label: "Rules", hint: "When this, do that", noun: "rule", icon: "branch" },
-  schedules: { label: "Schedules", hint: "Routines, shifts, weather", noun: "schedule", icon: "calendar" },
+  routines: { label: "Routines", hint: "How people's days usually go: the world's, a group's, a kind's or someone's own", noun: "routine", icon: "clock" },
+  schedules: { label: "Schedules", hint: "Shifts, opening hours, weather: one field slot by slot", noun: "schedule", icon: "calendar" },
   tracks: { label: "Tracks", hint: "Quests, secrets, puzzles, agendas", noun: "track", icon: "flag" },
   lore: { label: "Lore", hint: "Entries, lookup table, indexing", noun: "lore entry", icon: "book" },
   tables: { label: "Data tables", hint: "Prices, jobs, regions…", noun: "data table", icon: "table" },
@@ -2905,7 +2912,8 @@ var PART_INFO = {
   ruleset: { label: "Ruleset", hint: "Character fields, checks, levels, the sheet and combat", icon: "shield" },
   loreIndex: { label: "Lore lookup table", hint: "Terms and topics that lead to lore entries", icon: "search" },
   minds: { label: "Minds", hint: "How closely characters think, what they remember, and their prompts", icon: "sparkle" },
-  lorePins: { label: "Pinned lore", hint: "Lore every call for a character, or at a place, always reads", icon: "pin" }
+  lorePins: { label: "Pinned lore", hint: "Lore every call for a character, or at a place, always reads", icon: "pin" },
+  routineSettings: { label: "Routines and the story", hint: "How firmly routines hold against the story, and who invites whom", icon: "route" }
 };
 function go(app, build) {
   app.ui.update((ui) => ({ ...ui, build }));
@@ -3161,8 +3169,8 @@ function NewItem(props) {
 }
 
 // src/frontend/build/check.tsx
-var COLLECTIONS = ["kinds", "relations", "entities", "places", "maps", "routes", "grids", "rules", "actions", "checks", "schedules", "tracks", "tables", "sections", "steps", "packs", "lore", "classifications"];
-var PARTS = ["calendar", "realism", "tiers", "time", "ruleset", "loreIndex"];
+var COLLECTIONS = ["kinds", "relations", "entities", "places", "maps", "routes", "grids", "rules", "actions", "checks", "routines", "schedules", "tracks", "tables", "sections", "steps", "packs", "lore", "classifications"];
+var PARTS = ["calendar", "realism", "tiers", "time", "ruleset", "loreIndex", "routineSettings"];
 var META_FIELDS = ["name", "pov", "start", "seedMode", "lenientPricing", "spawnCap", "lifeStates", "currency", "mapSettings"];
 function issueTarget(path) {
   const [head, id, pinned] = path.split(".");
@@ -3170,6 +3178,13 @@ function issueTarget(path) {
     return id === "characters" ? { collection: "entities", id: pinned } : id === "places" ? { collection: "places", id: pinned } : null;
   const collection = COLLECTIONS.find((c) => c === head);
   return collection && id ? { collection, id } : null;
+}
+function issueRoute(worldId, path) {
+  const target = issueTarget(path);
+  if (target)
+    return { view: "item", worldId, collection: target.collection, id: target.id, at: path };
+  const part = issuePart(path);
+  return part ? { view: "part", worldId, part } : null;
 }
 function issuePart(path) {
   const head = path.split(".")[0] ?? "";
@@ -3200,11 +3215,12 @@ function IssueRow(props) {
   const part = target ? null : issuePart(issue.path);
   let where = issue.path;
   if (target) {
-    const items = doc ? doc[target.collection] : {};
+    const items = doc ? doc[target.collection] ?? {} : {};
     where = `${COLLECTION_INFO[target.collection].label} › ${itemLabel(target.collection, target.id, hasOwn(items, target.id) ? items[target.id] : undefined, doc?.places)}`;
   } else if (part)
     where = PART_INFO[part].label;
-  const open = worldId === undefined ? null : target ? () => go(app, { view: "item", worldId, collection: target.collection, id: target.id }) : part ? () => go(app, { view: "part", worldId, part }) : null;
+  const route = worldId === undefined ? null : issueRoute(worldId, issue.path);
+  const open = route ? () => go(app, route) : null;
   return /* @__PURE__ */ u3("div", {
     class: "lre-lint",
     role: "listitem",
@@ -3561,3438 +3577,165 @@ async function discardDraft(app) {
     app.drafts.set({ ...draft, base: message.body.base, doc: message.body.draft, lint: message.body.lint, version: message.body.version, dirty: message.body.stored, reloaded: false });
 }
 
-// src/frontend/build/jobs.tsx
-var jobStore = createStore({});
-function trackJobs(client) {
-  return client.onJob((update) => {
-    jobStore.update((all) => {
-      const entry = Object.entries(all).find(([, job]) => job.jobId === update.jobId);
-      if (!entry)
-        return all;
-      const [key, job] = entry;
-      return { ...all, [key]: { ...job, status: update.status, progress: update.progress, message: update.message, result: update.result ?? job.result } };
-    });
-  });
+// src/shared/routines.ts
+var ROUTINE_BLOCK_KINDS = ["fixed", "flexible", "optional"];
+function isOff(entry) {
+  return "off" in entry && entry.off === true;
 }
-function keptJobs(all, worldId, jobs) {
-  const next = { ...all };
-  for (const job of jobs)
-    if (job.worldId === worldId)
-      next[`${worldId}:${job.kind}`] = { jobId: job.jobId, kind: job.kind, worldId: job.worldId, status: job.status, progress: job.progress, message: job.message, result: job.result, input: job.input };
-  return next;
-}
-function proposalWrites(worldId, proposals, accepted, index) {
-  const chosen = proposals.filter((p) => accepted.has(p.id));
-  const puts = chosen.map((p) => {
-    const value = p.value;
-    const reviewed = p.collection === "lore" && typeof value === "object" && value !== null && !Array.isArray(value) && loreSourceOf(value.source).kind === "ai" ? { ...value, source: { kind: "ai", status: "accepted" } } : value;
-    return { type: "lre.editor", worldId, base: null, op: "put", collection: p.collection, id: p.key, value: reviewed };
-  });
-  const filed = chosen.filter((p) => p.collection === "lore" && p.index !== undefined && (p.index.terms.length > 0 || p.index.topics.length > 0));
-  if (!index || filed.length === 0)
-    return puts;
-  const merged = filed.reduce((acc, p) => p.index ? addToLoreIndex(acc, p.key, p.index) : acc, index);
-  return [...puts, { type: "lre.editor", worldId, base: null, op: "set", part: "loreIndex", value: loreIndexJson(merged) }];
-}
-var JOB_INFO = {
-  import_lore: { title: "Import from lore", hint: "Turn lore-book entries into entities, places and facts", icon: "download" },
-  index_book: { title: "Index a World Info book", hint: "Lore entries, aliases, topics and lookup terms from one of your books", icon: "book" },
-  index_text: { title: "Index this text", hint: "Lore entries from text you paste; review each one", icon: "scroll" },
-  refine: { title: "Build / Refine with AI", hint: "Describe changes; review every proposal", icon: "sparkle" },
-  describe_map: { title: "Describe a map", hint: "Write a place's inside in your words; the AI draws it as a map to review", icon: "map" },
-  playtest: { title: "Playtest", hint: "Run scripted turns on the background lane", icon: "play" },
-  check_world: { title: "Check world", hint: "Simulate days on the background lane; report drops, failures and leaks", icon: "pulse" }
-};
-var CHECK_DAYS = [1, 3, 7].map((days) => ({ value: days, label: `${days} day${days === 1 ? "" : "s"}` }));
-var STATUS = {
-  running: { label: "Running", tone: "accent" },
-  done: { label: "Done", tone: "pos" },
-  failed: { label: "Failed", tone: "neg" },
-  cancelled: { label: "Cancelled", tone: "neutral" },
-  interrupted: { label: "Interrupted", tone: "warn" }
-};
-function JobStatusBadge(props) {
-  const status = STATUS[props.status];
-  return /* @__PURE__ */ u3(Badge, {
-    tone: status.tone,
-    children: status.label
-  }, undefined, false, undefined, this);
-}
-function JobInput(props) {
-  const app = useApp();
-  const showIds = useShowIds();
-  const [books, setBooks] = d2(null);
-  const [picked, setPicked] = d2([]);
-  const [text, setText] = d2("");
-  const [days, setDays] = d2(3);
-  const draft = useSelect(app.drafts, (d) => d);
-  const [scope, setScope] = d2("");
-  const [mapId, setMapId] = d2("");
-  const textId = P2();
-  const placeId = P2();
-  const mapIdId = P2();
-  A(() => {
-    if (props.kind === "import_lore" || props.kind === "index_book")
-      app.host.worldBooks().then(setBooks, () => setBooks([]));
-  }, [props.kind]);
-  if (props.kind === "index_book") {
-    return /* @__PURE__ */ u3("div", {
-      class: "lre-stack",
-      children: [
-        /* @__PURE__ */ u3("p", {
-          class: "lre-build-note",
-          children: "Pick one of your World Info books. Each entry with text becomes a lore entry to review, with aliases, topics, links and lookup terms, and keeps the book's own text; entries already in the world's lore are skipped. Nothing changes until you apply."
-        }, undefined, false, undefined, this),
-        books === null ? /* @__PURE__ */ u3(Empty, {
-          icon: "hourglass",
-          children: "Loading books…"
-        }, undefined, false, undefined, this) : books.length === 0 ? /* @__PURE__ */ u3(Empty, {
-          icon: "book",
-          children: "No World Info books."
-        }, undefined, false, undefined, this) : /* @__PURE__ */ u3("div", {
-          class: "lre-build-picks",
-          role: "radiogroup",
-          "aria-label": "World Info book",
-          children: books.map((book) => /* @__PURE__ */ u3("label", {
-            class: "lre-build-pick",
-            children: [
-              /* @__PURE__ */ u3("input", {
-                type: "radio",
-                name: "lre-index-book",
-                checked: picked[0] === book.id,
-                onChange: () => setPicked([book.id])
-              }, undefined, false, undefined, this),
-              /* @__PURE__ */ u3("span", {
-                children: book.name
-              }, undefined, false, undefined, this)
-            ]
-          }, book.id, true, undefined, this))
-        }, undefined, false, undefined, this),
-        /* @__PURE__ */ u3(Button, {
-          variant: "primary",
-          block: true,
-          disabled: picked.length === 0 || props.busy,
-          onClick: () => props.onStart({ bookId: picked[0] ?? "" }),
-          children: "Index the book"
-        }, undefined, false, undefined, this)
-      ]
-    }, undefined, true, undefined, this);
-  }
-  if (props.kind === "index_text") {
-    return /* @__PURE__ */ u3("div", {
-      class: "lre-stack",
-      children: [
-        /* @__PURE__ */ u3(Field, {
-          label: "Text to index",
-          for: textId,
-          help: "The helper splits it into lore entries in the text's own words, with aliases, topics, links and lookup terms. Each is marked as written by the AI, and counts as reviewed once you apply it. Nothing changes until you apply.",
-          children: /* @__PURE__ */ u3("textarea", {
-            id: textId,
-            class: "lre-input lre-build-prose",
-            rows: 8,
-            placeholder: "Paste a setting document, a town history, character notes…",
-            value: text,
-            onInput: (event) => setText(event.currentTarget.value)
-          }, undefined, false, undefined, this)
-        }, undefined, false, undefined, this),
-        /* @__PURE__ */ u3(Button, {
-          variant: "primary",
-          block: true,
-          disabled: !text.trim() || props.busy,
-          onClick: () => props.onStart({ text: text.trim() }),
-          children: "Index the text"
-        }, undefined, false, undefined, this)
-      ]
-    }, undefined, true, undefined, this);
-  }
-  if (props.kind === "import_lore") {
-    return /* @__PURE__ */ u3("div", {
-      class: "lre-stack",
-      children: [
-        /* @__PURE__ */ u3("p", {
-          class: "lre-build-note",
-          children: "Choose lore books. Every entry becomes a reviewable proposal; nothing changes until you apply it."
-        }, undefined, false, undefined, this),
-        books === null ? /* @__PURE__ */ u3(Empty, {
-          icon: "hourglass",
-          children: "Loading lore books…"
-        }, undefined, false, undefined, this) : books.length === 0 ? /* @__PURE__ */ u3(Empty, {
-          icon: "book",
-          children: "No lore books."
-        }, undefined, false, undefined, this) : /* @__PURE__ */ u3("div", {
-          class: "lre-build-picks",
-          role: "group",
-          "aria-label": "Lore books",
-          children: books.map((book) => /* @__PURE__ */ u3("label", {
-            class: "lre-build-pick",
-            children: [
-              /* @__PURE__ */ u3("input", {
-                type: "checkbox",
-                checked: picked.includes(book.id),
-                onChange: () => setPicked(picked.includes(book.id) ? picked.filter((id) => id !== book.id) : [...picked, book.id])
-              }, undefined, false, undefined, this),
-              /* @__PURE__ */ u3("span", {
-                children: book.name
-              }, undefined, false, undefined, this)
-            ]
-          }, book.id, true, undefined, this))
-        }, undefined, false, undefined, this),
-        /* @__PURE__ */ u3(Button, {
-          variant: "primary",
-          block: true,
-          disabled: picked.length === 0 || props.busy,
-          onClick: () => props.onStart({ bookIds: picked }),
-          children: [
-            "Import ",
-            picked.length > 0 ? `${picked.length} book${picked.length === 1 ? "" : "s"}` : ""
-          ]
-        }, undefined, true, undefined, this)
-      ]
-    }, undefined, true, undefined, this);
-  }
-  if (props.kind === "describe_map") {
-    const places = draft ? Object.values(draft.doc.places).sort((a, b) => a.name.localeCompare(b.name)) : [];
-    const chosen = scope || draft?.doc.start.place || "";
-    const mapIdField = /* @__PURE__ */ u3(Field, {
-      label: "Map id",
-      for: mapIdId,
-      help: `Left empty, it's ${chosen}_map.`,
-      children: /* @__PURE__ */ u3("input", {
-        id: mapIdId,
-        class: "lre-input lre-build-mono",
-        placeholder: `${chosen}_map`,
-        value: mapId,
-        autoComplete: "off",
-        spellcheck: false,
-        onInput: (event) => setMapId(event.currentTarget.value.replace(/[^\w-]/g, "_"))
-      }, undefined, false, undefined, this)
-    }, undefined, false, undefined, this);
-    return /* @__PURE__ */ u3("div", {
-      class: "lre-stack",
-      children: [
-        /* @__PURE__ */ u3("p", {
-          class: "lre-build-note",
-          children: "Describe a place's inside in your own words: rooms and how they connect, or a town's places and the walks between them. The AI draws it as an lre-map-v1 map; you see it as a proposal with its preview before it goes into the draft."
-        }, undefined, false, undefined, this),
-        /* @__PURE__ */ u3(Field, {
-          label: "The place to draw",
-          for: placeId,
-          children: /* @__PURE__ */ u3("select", {
-            id: placeId,
-            class: "lre-input",
-            value: chosen,
-            onChange: (event) => setScope(event.currentTarget.value),
-            children: places.map((p) => /* @__PURE__ */ u3("option", {
-              value: p.id,
-              children: showIds ? `${p.name} (${p.id})` : p.name
-            }, p.id, false, undefined, this))
-          }, undefined, false, undefined, this)
-        }, undefined, false, undefined, this),
-        /* @__PURE__ */ u3(Field, {
-          label: "Describe it",
-          for: textId,
-          children: /* @__PURE__ */ u3("textarea", {
-            id: textId,
-            class: "lre-input lre-build-prose",
-            rows: 6,
-            placeholder: "A narrow farmhouse: the front door opens into a hall, with the parlour on the left and the kitchen at the back; a door from the kitchen to the scullery…",
-            value: text,
-            onInput: (event) => setText(event.currentTarget.value)
-          }, undefined, false, undefined, this)
-        }, undefined, false, undefined, this),
-        showIds ? mapIdField : /* @__PURE__ */ u3(Disclosure, {
-          summary: "Advanced",
-          children: mapIdField
-        }, undefined, false, undefined, this),
-        /* @__PURE__ */ u3(Button, {
-          variant: "primary",
-          block: true,
-          disabled: !text.trim() || !chosen || props.busy,
-          onClick: () => props.onStart({ scope: chosen, prose: text.trim(), ...mapId.trim() ? { mapId: mapId.trim() } : {} }),
-          children: "Draw the map"
-        }, undefined, false, undefined, this)
-      ]
-    }, undefined, true, undefined, this);
-  }
-  if (props.kind === "refine") {
-    return /* @__PURE__ */ u3("div", {
-      class: "lre-stack",
-      children: [
-        /* @__PURE__ */ u3(Field, {
-          label: "What should change?",
-          for: textId,
-          children: /* @__PURE__ */ u3("textarea", {
-            id: textId,
-            class: "lre-input lre-build-prose",
-            rows: 4,
-            placeholder: "Add a night-shift nurse who knows Dev; give the diner a weekly schedule…",
-            value: text,
-            onInput: (event) => setText(event.currentTarget.value)
-          }, undefined, false, undefined, this)
-        }, undefined, false, undefined, this),
-        /* @__PURE__ */ u3(Button, {
-          variant: "primary",
-          block: true,
-          disabled: !text.trim() || props.busy,
-          onClick: () => props.onStart({ instructions: text.trim() }),
-          children: "Propose changes"
-        }, undefined, false, undefined, this)
-      ]
-    }, undefined, true, undefined, this);
-  }
-  if (props.kind === "check_world") {
-    return /* @__PURE__ */ u3("div", {
-      class: "lre-stack",
-      children: [
-        /* @__PURE__ */ u3("p", {
-          class: "lre-build-note",
-          children: "Runs the world forward one day per turn with no player input and reports what happened, dropped events, failures and leaks. Nothing is saved."
-        }, undefined, false, undefined, this),
-        /* @__PURE__ */ u3(Field, {
-          label: "Days",
-          children: /* @__PURE__ */ u3(Seg, {
-            label: "Days",
-            value: days,
-            options: CHECK_DAYS,
-            onChange: (next) => setDays(next)
-          }, undefined, false, undefined, this)
-        }, undefined, false, undefined, this),
-        /* @__PURE__ */ u3(Button, {
-          variant: "primary",
-          block: true,
-          disabled: props.busy,
-          onClick: () => props.onStart({ days }),
-          children: "Run check"
-        }, undefined, false, undefined, this)
-      ]
-    }, undefined, true, undefined, this);
-  }
-  const script = text.split(`
-`).map((line) => line.trim()).filter((line) => line.length > 0).slice(0, 50);
-  return /* @__PURE__ */ u3("div", {
-    class: "lre-stack",
-    children: [
-      /* @__PURE__ */ u3(Field, {
-        label: "Player turns (one per line, up to 50)",
-        for: textId,
-        children: /* @__PURE__ */ u3("textarea", {
-          id: textId,
-          class: "lre-input lre-build-prose",
-          rows: 5,
-          placeholder: `I walk to the diner.
-I order a coffee.
-I ask Rosie about the night shift.`,
-          value: text,
-          onInput: (event) => setText(event.currentTarget.value)
-        }, undefined, false, undefined, this)
-      }, undefined, false, undefined, this),
-      /* @__PURE__ */ u3(Button, {
-        variant: "primary",
-        block: true,
-        disabled: script.length === 0 || props.busy,
-        onClick: () => props.onStart({ turns: script }),
-        children: [
-          "Run playtest",
-          script.length > 0 ? ` (${script.length} turn${script.length === 1 ? "" : "s"})` : ""
-        ]
-      }, undefined, true, undefined, this)
-    ]
-  }, undefined, true, undefined, this);
-}
-function proposalGroups(proposals) {
-  const groups = new Map;
-  for (const p of proposals) {
-    const pack = p.pack ?? "other";
-    groups.set(pack, [...groups.get(pack) ?? [], p]);
-  }
-  return [...groups].map(([pack, list]) => ({ pack, proposals: list }));
-}
-function shownValue(p, bookNames) {
-  if (!isRecord(p.value) || !Array.isArray(p.value.sources))
-    return p.value;
-  const sources = p.value.sources.map((link) => {
-    if (typeof link !== "string")
-      return link;
-    const [bookId = link, entryId = ""] = link.split("/");
-    const title = p.sourceNames && hasOwn(p.sourceNames, link) ? p.sourceNames[link] : undefined;
-    const book = hasOwn(bookNames, bookId) ? bookNames[bookId] : undefined;
-    return title || book ? [title || entryId, book || bookId].filter((part) => part).join(" · ") : link;
-  });
-  return { ...p.value, sources };
-}
-function startTicked(proposals) {
-  return new Set(proposals.filter((p) => p.confidence >= 0.7 && !strings(isRecord(p.value) ? p.value.assumed : undefined).includes("kind")).map((p) => p.id));
-}
-function LoreProposalLines(props) {
-  const value = isRecord(props.p.value) ? props.p.value : {};
-  const source = loreSourceOf(value.source);
-  const link = source.kind === "book" ? `${source.bookId}/${source.entryId}` : "";
-  const entry = source.kind === "book" ? (props.p.sourceNames && hasOwn(props.p.sourceNames, link) ? props.p.sourceNames[link] : undefined) ?? source.entryId : "";
-  const lists = [
-    ["Aliases", strings(value.aliases)],
-    ["Topics", strings(value.topics)],
-    ["Links", strings(value.links).map((id) => hasOwn(props.names, id) ? props.names[id] ?? id : id)],
-    ["Lookup terms", props.p.index?.terms ?? []]
-  ];
-  return /* @__PURE__ */ u3(M, {
-    children: [
-      /* @__PURE__ */ u3("span", {
-        class: "lre-build-proposal-line",
-        "data-lre-proposal-from": true,
-        children: source.kind === "book" ? `From ${hasOwn(props.bookNames, source.bookId) ? props.bookNames[source.bookId] : source.bookId}: ${entry}` : "From the pasted text, in the AI's words"
-      }, undefined, false, undefined, this),
-      lists.filter(([, items]) => items.length > 0).map(([label, items]) => /* @__PURE__ */ u3("span", {
-        class: "lre-build-proposal-line lre-muted",
-        children: [
-          label,
-          ": ",
-          items.join(", ")
-        ]
-      }, label, true, undefined, this)),
-      props.p.note ? /* @__PURE__ */ u3("span", {
-        class: "lre-build-proposal-line lre-warn",
-        children: props.p.note
-      }, undefined, false, undefined, this) : null
-    ]
-  }, undefined, true, undefined, this);
-}
-function ProposalReview(props) {
-  const [accepted, setAccepted] = d2(() => startTicked(props.proposals));
-  const [open, setOpen] = d2(null);
-  const [applied, setApplied] = d2(false);
-  const [busy, run] = useBusy();
-  const send = b2(() => draftSend(props.app), [props.app]);
-  const draft = useSelect(props.app.drafts, (d) => d);
-  const doc = draft?.doc;
-  const names = b2(() => Object.fromEntries([...Object.values(doc?.entities ?? {}), ...Object.values(doc?.places ?? {})].map((e) => [e.id, e.name])), [doc]);
-  const [bookNames, setBookNames] = d2({});
-  A(() => {
-    props.app.host.worldBooks().then((books) => setBookNames(Object.fromEntries(books.map((book) => [book.id, book.name]))), () => setBookNames({}));
-  }, [props.app]);
-  const toggle = (id) => {
-    const next = new Set(accepted);
-    if (next.has(id))
-      next.delete(id);
-    else
-      next.add(id);
-    setAccepted(next);
+var BASIC_BLOCKS = Object.freeze([
+  { id: "sleep", label: "Sleep", activity: "sleep", kind: "flexible", window: { from: "21:30", to: "01:00" }, minutes: 480, priority: 5, place: "home", needs: ["fatigue"], source: { type: "builtin" } },
+  { id: "breakfast", label: "Breakfast", activity: "breakfast", kind: "flexible", window: { from: "06:00", to: "10:00" }, minutes: 30, priority: 4, place: "home", needs: ["hunger"], source: { type: "builtin" } },
+  { id: "lunch", label: "Lunch", activity: "lunch", kind: "flexible", window: { from: "11:00", to: "14:00" }, minutes: 45, priority: 4, place: "work", needs: ["hunger"], source: { type: "builtin" } },
+  { id: "dinner", label: "Dinner", activity: "dinner", kind: "flexible", window: { from: "17:00", to: "21:00" }, minutes: 60, priority: 4, place: "home", needs: ["hunger"], source: { type: "builtin" } }
+]);
+var ROUTINE_AWARENESS = ["story_first", "balanced", "routine_first"];
+var ROUTINE_INVITATIONS = ["off", "player", "everyone"];
+var ROUTINE_SOCIABILITY = ["reserved", "usual", "outgoing"];
+var ROUTINE_PLAN_BEND = ["must", "strong", "standard", "ordinary"];
+var DEFAULT_ROUTINE_SETTINGS = Object.freeze({ awareness: "balanced", invitations: "player", sociability: "usual", planBend: "standard" });
+var AWARENESS_LABEL = { story_first: "Story first", balanced: "Balanced", routine_first: "Routine first" };
+var INVITATIONS_LABEL = { off: "Off", player: "To the player only", everyone: "Between everyone" };
+var SOCIABILITY_LABEL = { reserved: "Reserved", usual: "Usual", outgoing: "Outgoing" };
+var PLAN_BEND_LABEL = { must: "Only plans that must happen", strong: "Strong plans", standard: "Strong plans, and set-time plans for the cast", ordinary: "Strong plans, and set-time plans for anyone" };
+var BLOCK_KIND_LABEL = { fixed: "Fixed", flexible: "Flexible", optional: "Optional" };
+function routineSettingsOf(world) {
+  const raw = isRecord(world.routineSettings) ? world.routineSettings : {};
+  const pick = (v, allowed, fallback) => allowed.find((a) => a === v) ?? fallback;
+  return {
+    awareness: pick(raw.awareness, ROUTINE_AWARENESS, DEFAULT_ROUTINE_SETTINGS.awareness),
+    invitations: pick(raw.invitations, ROUTINE_INVITATIONS, DEFAULT_ROUTINE_SETTINGS.invitations),
+    sociability: pick(raw.sociability, ROUTINE_SOCIABILITY, DEFAULT_ROUTINE_SETTINGS.sociability),
+    planBend: pick(raw.planBend, ROUTINE_PLAN_BEND, DEFAULT_ROUTINE_SETTINGS.planBend)
   };
-  const groups = proposalGroups(props.proposals);
-  return /* @__PURE__ */ u3(M, {
-    children: [
-      /* @__PURE__ */ u3(Section, {
-        title: "Proposals",
-        aside: /* @__PURE__ */ u3("span", {
-          class: "lre-build-count",
-          children: [
-            accepted.size,
-            " of ",
-            props.proposals.length,
-            " ticked"
-          ]
-        }, undefined, true, undefined, this),
-        children: [
-          /* @__PURE__ */ u3("div", {
-            class: "lre-build-actions",
-            children: [
-              /* @__PURE__ */ u3(Button, {
-                size: "sm",
-                icon: "check",
-                onClick: () => setAccepted(new Set(props.proposals.map((p) => p.id))),
-                children: "Select all"
-              }, undefined, false, undefined, this),
-              /* @__PURE__ */ u3(Button, {
-                size: "sm",
-                variant: "ghost",
-                onClick: () => setAccepted(new Set),
-                children: "None"
-              }, undefined, false, undefined, this)
-            ]
-          }, undefined, true, undefined, this),
-          groups.map((group) => /* @__PURE__ */ u3("div", {
-            class: "lre-build-group",
-            "data-lre-proposal-pack": group.pack,
-            children: [
-              groups.length > 1 ? /* @__PURE__ */ u3("div", {
-                class: "lre-build-group-head",
-                children: [
-                  /* @__PURE__ */ u3("span", {
-                    children: humanize(group.pack)
-                  }, undefined, false, undefined, this),
-                  /* @__PURE__ */ u3("span", {
-                    class: "lre-build-count",
-                    children: [
-                      group.proposals.filter((p) => accepted.has(p.id)).length,
-                      " of ",
-                      group.proposals.length
-                    ]
-                  }, undefined, true, undefined, this)
-                ]
-              }, undefined, true, undefined, this) : null,
-              /* @__PURE__ */ u3("div", {
-                role: "list",
-                children: group.proposals.map((p) => {
-                  const value = isRecord(p.value) ? p.value : {};
-                  const from = [...new Set(strings(value.sources).map((link) => link.split("/")[0] ?? link))].map((id) => bookNames[id] ?? id);
-                  const assumed = strings(value.assumed);
-                  const tableFields = assumed.filter((f) => f !== "kind");
-                  const noun = COLLECTION_INFO[p.collection].noun;
-                  const title = itemLabel(p.collection, p.key, p.value);
-                  const sure = Math.round(p.confidence * 100);
-                  const Preview = props.app.catalog.previews.get(p.collection);
-                  return /* @__PURE__ */ u3("div", {
-                    class: "lre-build-proposal",
-                    role: "listitem",
-                    "data-lre-proposal": p.id,
-                    children: [
-                      /* @__PURE__ */ u3("label", {
-                        class: "lre-check",
-                        children: /* @__PURE__ */ u3("input", {
-                          type: "checkbox",
-                          "aria-label": `Accept ${noun} “${title}”`,
-                          checked: accepted.has(p.id),
-                          onChange: () => toggle(p.id)
-                        }, undefined, false, undefined, this)
-                      }, undefined, false, undefined, this),
-                      /* @__PURE__ */ u3("div", {
-                        class: "lre-build-proposal-body",
-                        children: [
-                          /* @__PURE__ */ u3("div", {
-                            class: "lre-build-proposal-head",
-                            children: [
-                              /* @__PURE__ */ u3("span", {
-                                class: "lre-build-proposal-title",
-                                children: title
-                              }, undefined, false, undefined, this),
-                              /* @__PURE__ */ u3(Badge, {
-                                tone: p.confidence >= 0.8 ? "pos" : p.confidence >= 0.5 ? "warn" : "neg",
-                                children: [
-                                  sure,
-                                  "%",
-                                  /* @__PURE__ */ u3("span", {
-                                    class: "lre-sr",
-                                    children: " sure"
-                                  }, undefined, false, undefined, this)
-                                ]
-                              }, undefined, true, undefined, this)
-                            ]
-                          }, undefined, true, undefined, this),
-                          /* @__PURE__ */ u3("span", {
-                            class: "lre-build-proposal-line lre-muted",
-                            children: humanize(noun)
-                          }, undefined, false, undefined, this),
-                          /* @__PURE__ */ u3(IdText, {
-                            id: `${p.collection}.${p.key}`
-                          }, undefined, false, undefined, this),
-                          p.collection === "lore" ? /* @__PURE__ */ u3(LoreProposalLines, {
-                            p,
-                            bookNames,
-                            names
-                          }, undefined, false, undefined, this) : /* @__PURE__ */ u3(M, {
-                            children: [
-                              from.length === 0 || p.note ? /* @__PURE__ */ u3("span", {
-                                class: "lre-build-proposal-line lre-muted",
-                                children: [from.length === 0 ? p.source : null, p.note].filter((part) => part).join(" — ")
-                              }, undefined, false, undefined, this) : null,
-                              from.length > 0 ? /* @__PURE__ */ u3("span", {
-                                class: "lre-build-proposal-line",
-                                "data-lre-proposal-from": true,
-                                children: [
-                                  "From lore: ",
-                                  from.join(", ")
-                                ]
-                              }, undefined, true, undefined, this) : null,
-                              assumed.includes("kind") ? /* @__PURE__ */ u3("span", {
-                                class: "lre-build-proposal-line lre-warn",
-                                "data-lre-proposal-assumed-kind": true,
-                                children: [
-                                  /* @__PURE__ */ u3(Icon, {
-                                    name: "alert",
-                                    size: 16
-                                  }, undefined, false, undefined, this),
-                                  "Assumed kind: ",
-                                  String(value.kind),
-                                  " (the lore named none)"
-                                ]
-                              }, undefined, true, undefined, this) : null,
-                              tableFields.length > 0 ? /* @__PURE__ */ u3("span", {
-                                class: "lre-build-proposal-line lre-warn",
-                                "data-lre-proposal-assumed": true,
-                                children: [
-                                  /* @__PURE__ */ u3(Icon, {
-                                    name: "alert",
-                                    size: 16
-                                  }, undefined, false, undefined, this),
-                                  "Assumed from a table: ",
-                                  tableFields.join(", ")
-                                ]
-                              }, undefined, true, undefined, this) : null
-                            ]
-                          }, undefined, true, undefined, this),
-                          /* @__PURE__ */ u3("button", {
-                            type: "button",
-                            class: "lre-btn small ghost lre-build-reveal",
-                            "aria-expanded": open === p.id,
-                            onClick: () => setOpen(open === p.id ? null : p.id),
-                            children: [
-                              /* @__PURE__ */ u3(Icon, {
-                                name: open === p.id ? "chevron-up" : "chevron-down",
-                                size: 16
-                              }, undefined, false, undefined, this),
-                              open === p.id ? "Hide value" : "Show value"
-                            ]
-                          }, undefined, true, undefined, this),
-                          open === p.id ? /* @__PURE__ */ u3("div", {
-                            class: "lre-build-json",
-                            children: /* @__PURE__ */ u3(JsonView, {
-                              value: shownValue(p, bookNames)
-                            }, undefined, false, undefined, this)
-                          }, undefined, false, undefined, this) : null,
-                          Preview && draft ? /* @__PURE__ */ u3(Preview, {
-                            world: draft.doc,
-                            collection: p.collection,
-                            id: p.key,
-                            value: p.value
-                          }, undefined, false, undefined, this) : null
-                        ]
-                      }, undefined, true, undefined, this)
-                    ]
-                  }, p.id, true, undefined, this);
-                })
-              }, undefined, false, undefined, this)
-            ]
-          }, group.pack, true, undefined, this))
-        ]
-      }, undefined, true, undefined, this),
-      /* @__PURE__ */ u3(SaveBar, {
-        children: /* @__PURE__ */ u3(Button, {
-          variant: "primary",
-          block: true,
-          icon: applied ? "check" : undefined,
-          disabled: accepted.size === 0 || applied,
-          busy,
-          onClick: () => run(async () => {
-            let ok = 0;
-            for (const write of proposalWrites(props.worldId, props.proposals, accepted, props.app.drafts.get()?.doc.loreIndex)) {
-              const message = await send(write);
-              if (message.type === "lre.result" && write.op === "put")
-                ok += 1;
-            }
-            props.app.toast(`Applied ${ok} of ${accepted.size} to the draft. Commit when ready.`, ok === accepted.size ? "info" : "error");
-            setApplied(true);
-          }),
-          children: applied ? "Applied to the draft" : `Apply ${accepted.size} to the draft`
-        }, undefined, false, undefined, this)
-      }, undefined, false, undefined, this)
-    ]
-  }, undefined, true, undefined, this);
 }
-function RunReport(props) {
-  const app = useApp();
-  const doc = useSelect(app.drafts, (d) => d?.worldId === props.worldId ? d.doc : undefined);
-  const lint = props.report.lint;
-  return /* @__PURE__ */ u3(M, {
-    children: [
-      /* @__PURE__ */ u3(Section, {
-        title: props.kind === "playtest" ? "Transcript" : "Day by day",
-        children: /* @__PURE__ */ u3("ol", {
-          class: "lre-build-turns",
-          children: props.report.turns.map((turn, i) => /* @__PURE__ */ u3("li", {
-            class: "lre-build-turn",
-            children: [
-              props.kind === "playtest" ? /* @__PURE__ */ u3("span", {
-                class: "lre-build-turn-you",
-                children: [
-                  /* @__PURE__ */ u3("span", {
-                    class: "lre-build-turn-who",
-                    children: "You"
-                  }, undefined, false, undefined, this),
-                  " ",
-                  turn.user
-                ]
-              }, undefined, true, undefined, this) : /* @__PURE__ */ u3("strong", {
-                class: "lre-build-turn-label",
-                children: turn.user
-              }, undefined, false, undefined, this),
-              /* @__PURE__ */ u3("span", {
-                class: "lre-build-turn-reply",
-                children: turn.reply
-              }, undefined, false, undefined, this),
-              turn.notes.length > 0 ? /* @__PURE__ */ u3("ul", {
-                class: "lre-build-notes",
-                children: turn.notes.map((note) => /* @__PURE__ */ u3("li", {
-                  children: note
-                }, note, false, undefined, this))
-              }, undefined, false, undefined, this) : null
-            ]
-          }, i, true, undefined, this))
-        }, undefined, false, undefined, this)
-      }, undefined, false, undefined, this),
-      /* @__PURE__ */ u3(Section, {
-        title: "Issues found",
-        aside: /* @__PURE__ */ u3(Badge, {
-          tone: lint.length > 0 ? "warn" : "neutral",
-          children: lint.length
-        }, undefined, false, undefined, this),
-        flush: true,
-        children: lint.length === 0 ? /* @__PURE__ */ u3(Empty, {
-          icon: "check",
-          children: "None."
-        }, undefined, false, undefined, this) : /* @__PURE__ */ u3("div", {
-          class: "lre-build-issues",
-          role: "list",
-          children: lint.map((issue, i) => /* @__PURE__ */ u3(IssueRow, {
-            issue,
-            worldId: props.worldId,
-            doc
-          }, i, false, undefined, this))
-        }, undefined, false, undefined, this)
-      }, undefined, false, undefined, this)
-    ]
-  }, undefined, true, undefined, this);
+var ROUTINE_MODES = ["follows", "no_invitations", "off"];
+var ROUTINE_MODE_LABEL = { follows: "Follows their routine", no_invitations: "Follows it, no invitations", off: "No routine" };
+var HHMM = /^([01]\d|2[0-3]):[0-5]\d$/;
+var SEASONS = ["spring", "summer", "autumn", "winter"];
+function isTime(v) {
+  return typeof v === "string" && HHMM.test(v);
 }
-function JobView(props) {
-  const app = useApp();
-  const key = `${props.worldId}:${props.kind}`;
-  const job = useSelect(jobStore, (all) => all[key] ?? null);
-  const [busy, run] = useBusy();
-  A(() => {
-    app.request({ type: "lre.job", op: "list", worldId: props.worldId }).then((body) => {
-      if (body?.jobs) {
-        const jobs = body.jobs;
-        jobStore.update((all) => keptJobs(all, props.worldId, jobs));
-      }
-    });
-  }, [props.worldId]);
-  const start = (input) => run(async () => {
-    const result = await app.request({ type: "lre.job", op: "start", kind: props.kind, worldId: props.worldId, input });
-    const jobId = result?.jobId;
-    if (jobId)
-      jobStore.update((all) => ({ ...all, [key]: { jobId, kind: props.kind, worldId: props.worldId, status: "running", progress: 0, input } }));
-  });
-  const result = job?.status === "running" ? undefined : job?.result;
-  const info = JOB_INFO[props.kind];
-  const input = /* @__PURE__ */ u3(JobInput, {
-    kind: props.kind,
-    onStart: start,
-    busy
-  }, undefined, false, undefined, this);
-  return /* @__PURE__ */ u3("div", {
-    class: "lre-build-page",
-    "data-lre-job": props.kind,
-    children: [
-      /* @__PURE__ */ u3(PageHeader, {
-        title: info.title,
-        subtitle: info.hint
-      }, undefined, false, undefined, this),
-      !job ? /* @__PURE__ */ u3(Section, {
-        title: "Start",
-        children: input
-      }, undefined, false, undefined, this) : null,
-      job ? /* @__PURE__ */ u3(Section, {
-        title: "Status",
-        aside: /* @__PURE__ */ u3(JobStatusBadge, {
-          status: job.status
-        }, undefined, false, undefined, this),
-        children: [
-          /* @__PURE__ */ u3("div", {
-            class: "lre-progress",
-            role: "progressbar",
-            "aria-label": `${info.title} progress`,
-            "aria-valuemin": 0,
-            "aria-valuemax": 100,
-            "aria-valuenow": Math.round(job.progress * 100),
-            children: /* @__PURE__ */ u3("span", {
-              style: { width: `${Math.round(job.progress * 100)}%` }
-            }, undefined, false, undefined, this)
-          }, undefined, false, undefined, this),
-          job.message ? /* @__PURE__ */ u3("p", {
-            class: "lre-build-note",
-            children: job.message
-          }, undefined, false, undefined, this) : null,
-          /* @__PURE__ */ u3("div", {
-            class: "lre-build-actions",
-            children: job.status === "running" ? /* @__PURE__ */ u3(Button, {
-              size: "sm",
-              busy,
-              onClick: () => run(async () => {
-                await app.request({ type: "lre.job", op: "cancel", jobId: job.jobId });
-              }),
-              children: "Cancel"
-            }, undefined, false, undefined, this) : /* @__PURE__ */ u3(M, {
-              children: [
-                job.status === "interrupted" && job.input ? /* @__PURE__ */ u3(Button, {
-                  size: "sm",
-                  variant: "primary",
-                  icon: "refresh",
-                  disabled: busy,
-                  onClick: () => job.input && start(job.input),
-                  children: "Run it again"
-                }, undefined, false, undefined, this) : null,
-                /* @__PURE__ */ u3(Button, {
-                  size: "sm",
-                  variant: "ghost",
-                  disabled: busy,
-                  onClick: () => run(async () => {
-                    if (!await app.request({ type: "lre.job", op: "dismiss", jobId: job.jobId }))
-                      return;
-                    jobStore.update((all) => Object.fromEntries(Object.entries(all).filter(([k]) => k !== key)));
-                  }),
-                  children: "Dismiss"
-                }, undefined, false, undefined, this)
-              ]
-            }, undefined, true, undefined, this)
-          }, undefined, false, undefined, this),
-          job.status !== "running" ? /* @__PURE__ */ u3(Disclosure, {
-            summary: "Run again with new input",
-            children: input
-          }, undefined, false, undefined, this) : null
-        ]
-      }, undefined, true, undefined, this) : null,
-      result && "proposals" in result ? result.proposals.length === 0 ? /* @__PURE__ */ u3(Empty, {
-        icon: "checklist",
-        children: "No proposals."
-      }, undefined, false, undefined, this) : /* @__PURE__ */ u3(ProposalReview, {
-        app,
-        worldId: props.worldId,
-        proposals: result.proposals
-      }, job?.jobId, false, undefined, this) : null,
-      result && "turns" in result ? /* @__PURE__ */ u3(RunReport, {
-        kind: props.kind,
-        worldId: props.worldId,
-        report: result
-      }, undefined, false, undefined, this) : null
-    ]
-  }, undefined, true, undefined, this);
-}
-
-// src/shared/money.ts
-function places(currency, unit) {
-  return unit === "minor" ? 0 : Math.max(0, Math.min(6, Math.trunc(currency.decimals)));
-}
-function moneyAffixes(currency) {
-  const at = "\x00";
-  const shown = currency.format.replace(/\{(sign|symbol|code|amount)\}/g, (_, key) => key === "amount" ? at : key === "symbol" ? currency.symbol : key === "code" ? currency.code : "");
-  const index = shown.indexOf(at);
-  if (index < 0 || /\{(major|minor)\}/.test(currency.format))
-    return { prefix: "", suffix: currency.code };
-  return { prefix: shown.slice(0, index).trim(), suffix: shown.slice(index + 1).trim() };
-}
-var AMOUNT = /^(\d{1,3}(?:,\d{3})+|\d+)?(?:\.(\d*))?$/;
-function parseMoneyInput(text, currency, unit = "major") {
-  let t = text.trim().replace(/\u2212/g, "-");
-  const negative = t.startsWith("-");
-  if (negative)
-    t = t.slice(1).trim();
-  if (unit === "major") {
-    const { prefix, suffix } = moneyAffixes(currency);
-    const words = [...new Set([currency.symbol, currency.code, prefix, suffix].map((w) => w.trim().toLowerCase()).filter((w) => w !== ""))].sort((a, b) => b.length - a.length);
-    const lower = t.toLowerCase();
-    const word = words.find((w) => lower.startsWith(w) || lower.endsWith(w));
-    if (word)
-      t = (lower.startsWith(word) ? t.slice(word.length) : t.slice(0, t.length - word.length)).trim();
-  }
-  const m = AMOUNT.exec(t);
-  const whole = m?.[1];
-  const fraction = m?.[2];
-  if (!m || whole === undefined && (fraction === undefined || fraction === ""))
+function sourceProblem(v, world) {
+  if (v === undefined)
     return null;
-  const decimals = places(currency, unit);
-  if (fraction !== undefined && (decimals === 0 || fraction.length > decimals))
-    return null;
-  const minor = Number((whole ?? "0").replace(/,/g, "")) * 10 ** decimals + Number((fraction ?? "").padEnd(decimals, "0") || "0");
-  if (!Number.isSafeInteger(minor))
-    return null;
-  return negative && minor !== 0 ? -minor : minor;
-}
-function formatMoneyInput(minor, currency, unit = "major") {
-  const decimals = places(currency, unit);
-  const units = Math.abs(Math.trunc(minor));
-  const scale = 10 ** decimals;
-  const fraction = decimals > 0 ? `.${String(units % scale).padStart(decimals, "0")}` : "";
-  return `${minor < 0 && units !== 0 ? "-" : ""}${Math.floor(units / scale)}${fraction}`;
-}
-
-// src/frontend/chip-roles.ts
-var ROLE = {
-  confirm: "decision",
-  keep_report: "decision",
-  contradiction: "decision",
-  read_failed: "decision",
-  engine_failed: "decision",
-  claim: "decision",
-  check: "decision",
-  retry: "decision",
-  retry_read: "decision",
-  reread: "decision",
-  overdue: "decision",
-  refused: "decision",
-  timelapse_offer: "offer",
-  continue_timelapse: "offer",
-  choice: "offer",
-  swipe_option: "offer",
-  change: "done",
-  elapsed: "done",
-  roll: "done",
-  price: "done",
-  undo: "done",
-  claimed: "done",
-  not_action: "done",
-  mode_change: "done",
-  fix: "done",
-  pending: "done",
-  degraded: "done",
-  decline: "done"
-};
-var TONE = {
-  decline: "neg",
-  read_failed: "neg",
-  engine_failed: "neg",
-  claim: "neutral",
-  check: "neutral",
-  refused: "neg",
-  degraded: "warn",
-  pending: "warn",
-  overdue: "warn",
-  confirm: "warn",
-  keep_report: "neutral",
-  contradiction: "neutral",
-  retry: "neutral",
-  retry_read: "neutral",
-  reread: "neutral",
-  timelapse_offer: "neutral",
-  continue_timelapse: "neutral",
-  choice: "neutral",
-  swipe_option: "neutral",
-  change: "neutral",
-  elapsed: "neutral",
-  roll: "neutral",
-  price: "neutral",
-  undo: "neutral",
-  claimed: "neutral",
-  not_action: "neutral",
-  mode_change: "neutral",
-  fix: "neutral"
-};
-function chipRole(chip) {
-  return chip.kind === "decline" && chip.actions.length > 0 ? "decision" : ROLE[chip.kind];
-}
-function chipTone(chip) {
-  return TONE[chip.kind];
-}
-
-// src/shared/minds.ts
-var FIDELITIES = ["live", "near", "far", "background"];
-var DEFAULT_FIDELITY_WEIGHTS = Object.freeze({
-  here: 45,
-  nearby: 20,
-  mentioned: 40,
-  regard: 10,
-  knows: 10,
-  owner: 15,
-  track: 8,
-  roles: { antagonist: 20 },
-  rule: 5,
-  pending: 15,
-  band: { principal: 15, supporting: 5, background: 0 },
-  recent: 10
-});
-var DEFAULT_FIDELITY_THRESHOLDS = Object.freeze({ live: 60, near: 35, far: 15 });
-var DEFAULT_MINDS_MEMORY = Object.freeze({
-  witness: { show: 8 },
-  recall: { recent: 4, relevant: 4, tokens: 4000 },
-  notes: { show: 8, keep: 24 },
-  commitments: { show: 8 },
-  salience: { halfLifeDays: 7, floor: 0.5 },
-  consolidate: { enabled: true, periodDays: 1 }
-});
-var DEFAULT_WORLD_MINDS = Object.freeze({
-  secrecy: "brief",
-  weights: DEFAULT_FIDELITY_WEIGHTS,
-  thresholds: DEFAULT_FIDELITY_THRESHOLDS,
-  always: null,
-  never: null,
-  memory: DEFAULT_MINDS_MEMORY
-});
-var MINDS_RANGES = {
-  weight: [-100, 200],
-  threshold: [0, 1000],
-  show: [0, 64],
-  keep: [1, 64],
-  recallTokens: [0, Number.MAX_SAFE_INTEGER],
-  halfLifeDays: [0.1, 3650],
-  floor: [0, 5],
-  periodDays: [0.1, 365]
-};
-var num2 = (v, [lo, hi], fallback) => typeof v === "number" && Number.isFinite(v) && v >= lo && v <= hi ? v : fallback;
-var whole = (v, range, fallback) => Math.round(num2(v, range, fallback));
-var wholeOrNone = (v, range, fallback) => v === "none" ? "none" : typeof v === "number" && Number.isFinite(v) && v >= range[0] && v <= range[1] ? Math.round(v) : fallback;
-var obj2 = (v) => isRecord(v) ? v : {};
-function selectorOrNull(v) {
   if (!isRecord(v))
+    return "its source isn't one";
+  const t = v.type;
+  const quote = v.quote === undefined || typeof v.quote === "string";
+  if (t === "authored")
     return null;
-  const out = {};
-  const list = (x) => Array.isArray(x) && x.every((s) => typeof s === "string") ? x.slice(0, 200) : undefined;
-  const ids = list(v.ids);
-  const kind = list(v.kind);
-  const tier = list(v.tier);
-  const memberOf = list(v.memberOf);
-  const tag = list(v.tag);
-  if (ids)
-    out.ids = ids;
-  if (kind)
-    out.kind = kind;
-  if (tier)
-    out.tier = tier;
-  if (memberOf)
-    out.memberOf = memberOf;
-  if (tag)
-    out.tag = tag;
-  if (isRecord(v.class)) {
-    const classes = {};
-    for (const [facet, values] of Object.entries(v.class)) {
-      const vs = list(values);
-      if (safeKey(facet) && vs)
-        classes[facet] = vs;
-    }
-    out.class = classes;
-  }
-  return Object.keys(out).length > 0 ? out : null;
-}
-function memoryConfigOf(raw, base = DEFAULT_MINDS_MEMORY) {
-  const m = obj2(raw);
-  const witness = obj2(m.witness);
-  const recall = obj2(m.recall);
-  const notes = obj2(m.notes);
-  const commitments = obj2(m.commitments);
-  const salience = obj2(m.salience);
-  const consolidate = obj2(m.consolidate);
-  return {
-    witness: { show: whole(witness.show, MINDS_RANGES.show, base.witness.show) },
-    recall: { recent: whole(recall.recent, MINDS_RANGES.show, base.recall.recent), relevant: whole(recall.relevant, MINDS_RANGES.show, base.recall.relevant), tokens: wholeOrNone(recall.tokens, MINDS_RANGES.recallTokens, base.recall.tokens) },
-    notes: { show: whole(notes.show, MINDS_RANGES.show, base.notes.show), keep: whole(notes.keep, MINDS_RANGES.keep, base.notes.keep) },
-    commitments: { show: whole(commitments.show, MINDS_RANGES.show, base.commitments.show) },
-    salience: { halfLifeDays: num2(salience.halfLifeDays, MINDS_RANGES.halfLifeDays, base.salience.halfLifeDays), floor: num2(salience.floor, MINDS_RANGES.floor, base.salience.floor) },
-    consolidate: { enabled: typeof consolidate.enabled === "boolean" ? consolidate.enabled : base.consolidate.enabled, periodDays: num2(consolidate.periodDays, MINDS_RANGES.periodDays, base.consolidate.periodDays) }
-  };
-}
-function worldMindsOf(world) {
-  const raw = obj2(world.minds);
-  const w = obj2(raw.weights);
-  const band = obj2(w.band);
-  const d = DEFAULT_FIDELITY_WEIGHTS;
-  const weight = (v, fallback) => num2(v, MINDS_RANGES.weight, fallback);
-  const roles = {};
-  const rawRoles = isRecord(w.roles) ? w.roles : d.roles;
-  for (const [value, points] of Object.entries(rawRoles))
-    if (safeKey(value) && typeof points === "number" && Number.isFinite(points))
-      roles[value] = weight(points, 0);
-  const t = obj2(raw.thresholds);
-  const far = num2(t.far, MINDS_RANGES.threshold, DEFAULT_FIDELITY_THRESHOLDS.far);
-  const near = Math.max(far, num2(t.near, MINDS_RANGES.threshold, DEFAULT_FIDELITY_THRESHOLDS.near));
-  const live = Math.max(near, num2(t.live, MINDS_RANGES.threshold, DEFAULT_FIDELITY_THRESHOLDS.live));
-  return {
-    secrecy: raw.secrecy === "full" ? "full" : "brief",
-    weights: {
-      here: weight(w.here, d.here),
-      nearby: weight(w.nearby, d.nearby),
-      mentioned: weight(w.mentioned, d.mentioned),
-      regard: weight(w.regard, d.regard),
-      knows: weight(w.knows, d.knows),
-      owner: weight(w.owner, d.owner),
-      track: weight(w.track, d.track),
-      roles,
-      rule: weight(w.rule, d.rule),
-      pending: weight(w.pending, d.pending),
-      band: { principal: weight(band.principal, d.band.principal), supporting: weight(band.supporting, d.band.supporting), background: weight(band.background, d.band.background) },
-      recent: weight(w.recent, d.recent)
-    },
-    thresholds: { live, near, far },
-    always: selectorOrNull(raw.always),
-    never: selectorOrNull(raw.never),
-    memory: memoryConfigOf(raw.memory)
-  };
-}
-function limitOf(limit) {
-  return limit === "none" ? Number.POSITIVE_INFINITY : limit;
-}
-var MIND_PURPOSES = ["mind", "memory", "skip", "consolidate"];
-function isMindPurpose(purpose) {
-  return MIND_PURPOSES.includes(purpose);
-}
-function worldMindTemplate(world, purpose) {
-  return Object.values(world.steps).filter((t) => t.purpose === purpose && t.template.trim() !== "").sort((a, b) => a.id.localeCompare(b.id))[0];
-}
-var MIND_SOURCES = ["pinned", "activated", "reply", "message", "summary", "memory", "thoughts", "recall", "life"];
-var DEFAULT_MIND_READS = Object.freeze({
-  pinned: { on: true, tokens: "none" },
-  activated: { on: true, tokens: 1600 },
-  reply: { on: true, tokens: "none" },
-  message: { on: true, tokens: "none" },
-  summary: { on: false, tokens: "none" },
-  memory: { on: false, tokens: "none" },
-  thoughts: { on: false, tokens: "none" },
-  recall: { on: false },
-  life: { on: false, tokens: "none" }
-});
-var MINDS_PRESETS = Object.freeze({
-  lean: { enabled: false, liveLimit: 3, nearRefresh: { scene: true, mention: true, turns: 6, minutes: 120 }, farRefreshMinutes: 1440, refreshLimit: 1, memoryLevels: [], tokens: 1200, skip: { maxBeats: 4, maxMindsPerBeat: 2 } },
-  standard: { enabled: true, liveLimit: 3, nearRefresh: { scene: true, mention: true, turns: 6, minutes: 120 }, farRefreshMinutes: 1440, refreshLimit: 2, memoryLevels: ["live"], tokens: 2400, skip: { maxBeats: 6, maxMindsPerBeat: 3 } },
-  full: { enabled: true, liveLimit: "none", nearRefresh: { scene: true, mention: true, turns: 4, minutes: 60 }, farRefreshMinutes: 720, refreshLimit: "none", memoryLevels: ["live", "near"], tokens: 4000, skip: { maxBeats: "none", maxMindsPerBeat: "none" } }
-});
-function defaultMindsSettings(preset = "standard") {
-  return { ...structuredClone(MINDS_PRESETS[preset]), reads: structuredClone(DEFAULT_MIND_READS), memory: {}, prompts: {} };
-}
-var MINDS_DEFAULTS = Object.freeze(defaultMindsSettings());
-var MIND_PROMPT_MAX = 20000;
-var PLAN_KINDS = ["errand", "meet", "visit", "work", "rest", "leisure", "pay", "lend", "other"];
-var PLAN_PRIORITY = { min: 1, max: 5, normal: 3 };
-function planInForce(p) {
-  return p.source !== "mind";
-}
-var COMMITMENT_KINDS = ["promise", "debt", "grudge", "favour", "plan", "other"];
-var COMMITMENT_STATUSES = ["open", "kept", "broken", "released"];
-var MIND_APPROACHES = ["reactive", "proactive"];
-var MIND_TEXT_CAPS = {
-  monologue: 1200,
-  depiction: 600,
-  intent: 300,
-  gmIntent: 600,
-  reaction: 200,
-  reactions: 4,
-  plans: 4,
-  planWhat: 160,
-  mood: 40,
-  interrupt: 200,
-  note: 300,
-  notes: 4,
-  commitment: 240,
-  commitments: 3,
-  summary: 900,
-  told: 240,
-  tolds: 3,
-  reason: 160
-};
-var MIND_PROMPT_DEFAULTS = Object.freeze({
-  mind: [
-    "You are the private mind of {{character}} in the roleplay world {{world}}. Think as {{character}}, from only what {{character}} knows: the context below is everything they perceive and remember. Other people's private thoughts are closed to you; ignore any narration of them in the recalled turns.",
-    "Decide how {{character}} reads this moment and what they intend. Everyone else decides for themselves: never script their actions or replies, and never plan around what they will do. Intend broadly, so the intent holds whatever they do. Write no narration and no dialogue."
-  ].join(`
-`),
-  memory: "You keep the memory of {{character}} in the roleplay world {{world}}. Below is what {{character}} knows, then the turn that just happened, as it was written. Only what was written happened, and only what {{character}} could see or hear of it counts; ignore narration of other people's private thoughts.",
-  skip: [
-    "The player character in the roleplay world {{world}} is skipping ahead in time. Below are the skip's span, the moments the engine already found in it, and what the people involved intend.",
-    "Propose further moments inside the span where something worth stopping for may happen: someone acting on a plan that involves the player character, a deadline, an occasion. Only moments the context supports; never invent people or places."
-  ].join(`
-`),
-  consolidate: "You keep the long-term memory of {{character}} in the roleplay world {{world}}. Fold the older notes below into their summary: keep what still matters to them, let the rest go, and keep everything the summary already holds that is still true."
-});
-var MIND_ANSWER_FORMATS = Object.freeze({
-  mind: [
-    'Answer with JSON only: {"monologue": "...", "depiction": "...", "intent": "...", "reactions": ["..."], "mood": "...", "interrupt": {"reason": "..."}}',
-    "- monologue: their private reasoning in the first person, at most six sentences.",
-    "- depiction: how they come across right now, as behaviour anyone present could see (posture, tone, what they do). Never a secret, an unspoken reason or a thought.",
-    "- intent: what they mean to do next, in one sentence.",
-    '- reactions: up to three short conditional reactions ("if pressed about the cellar, changes the subject").',
-    "- mood: one or two words.",
-    "- interrupt: only when the moment is a beat inside a time skip and what they'd do now would interrupt the player character's skipped time (seeking them out, calling them). Leave it out otherwise."
-  ].join(`
-`),
-  memory: [
-    'Answer with JSON only: {"notes": [{"text": "...", "salience": 3}], "commitments": [{"kind": "promise|debt|grudge|favour|plan|other", "with": ["a name"], "text": "...", "due": "YYYY-MM-DD HH:MM"}], "resolved": [{"id": "...", "status": "kept|broken|released"}], "plans": [], "told": [{"to": ["a name"], "what": "..."}], "summary": "..."}',
-    "- notes: at most three things they will remember, in their own perspective; salience 1 (passing) to 5 (unforgettable).",
-    "- commitments: promises, debts, grudges, favours and plans with someone that this turn made; due only when a time was set.",
-    "- resolved: their open commitments (listed with ids) that this turn kept, broke or released.",
-    '- plans: only what this turn states they will do later: said aloud, agreed with someone, or scheduled in the story as written; never a guess at what they might do. Each {"what": "...", "kind": "errand|meet|visit|work|rest|leisure|pay|lend|other", "when": {"from": "YYYY-MM-DD HH:MM", "to": "YYYY-MM-DD HH:MM"}, "where": "a place", "with": ["a name"], "priority": 3, "amount": 20}, with local times; priority 1 (whenever it fits) to 5 (it must happen); kind pay or lend, with amount, when they mean to hand someone money, and no amount otherwise.',
-    "- told: what they told whom in this turn, in a few words each.",
-    "- summary: their one-paragraph summary rewritten, only when this turn changed who they are or what they're about; leave it out otherwise.",
-    "Use empty lists for anything the turn didn't give."
-  ].join(`
-`),
-  skip: 'Answer with JSON only: {"beats": [{"at": "YYYY-MM-DD HH:MM", "reason": "..."}]}, at most five, in time order; an empty list when there are none.',
-  consolidate: 'Answer with JSON only: {"summary": "..."}: at most 900 characters of plain prose, in their own perspective.'
-});
-
-// src/shared/timeouts.ts
-var TIMER_MAX_MS = 2147483647;
-var HOST_LIMITS = {
-  contextHandler: {
-    what: "A context handler, per call",
-    minMs: 1000,
-    maxMs: 120000,
-    source: "src/spindle/worker-host.ts:4498-4500 (the clamp), src/spindle/context-handler.ts:64-78 (the timer)",
-    effect: "Lumiverse aborts the handler; a required one stops the generation, any other is skipped and the generation goes on without it."
-  },
-  decision: {
-    what: "A Decision call (decisions.evaluate)",
-    maxMs: 30000,
-    source: "src/services/decisions.service.ts:47",
-    effect: "The call fails with “Decision evaluation timed out after 30 seconds”; the step falls back to the helper."
-  },
-  processStartup: {
-    what: "A background process's start-up",
-    minMs: 1000,
-    maxMs: 120000,
-    source: "src/spindle/worker-host-process-api.ts:768",
-    effect: "Lumiverse stops the process as timed out; its job fails."
-  },
-  processHeartbeat: {
-    what: "The gap between a background process's heartbeats",
-    minMs: 1000,
-    maxMs: 120000,
-    noneMs: 0,
-    source: "src/spindle/worker-host-process-api.ts:769 (the clamp), 273-286 (the watchdog; 0 checks nothing)",
-    effect: "Lumiverse terminates the process (“Backend process heartbeat timed out”); its job fails."
-  },
-  sharedRpc: {
-    what: "Another extension's read of LumiRPEngine's shared endpoint (LumiRPEngine Studio)",
-    maxMs: 1e4,
-    source: "src/spindle/worker-host.ts:971, 1715-1719",
-    effect: "The reader's request fails as timed out."
-  },
-  socketIdle: {
-    what: "An idle event socket (the command line and MCP server)",
-    maxMs: 120000,
-    source: "Bun's WebSocket idle timeout: src/app.ts:7 takes hono/bun's `websocket`, and src/main.ts:293-309 sets only the HTTP idleTimeout",
-    effect: "Lumiverse closes the socket; the client pings every 45 s to keep it open."
-  }
-};
-var TIMEOUT_KEYS = ["engineRunMs", "preLookupMs", "postReplyMs", "postLookupMs", "guardMs", "requestMs", "caveatsMs", "mindsRunMs", "jobCallMs", "tokenCountMs", "laneStartupMs", "laneHeartbeatMs", "mcpReconnectMs"];
-var MIN = 60000;
-var TIMEOUTS = {
-  engineRunMs: {
-    label: "Engine run",
-    group: "turn",
-    limits: "Everything the engine does before the reply is generated: reading your action, people's choices, judging your approach, puzzle answers, the minds, the plan, the brief and the outline.",
-    fires: "The engine run stops: no reply is generated, and the chat says which step ran out, with a Retry.",
-    defaultMs: 5 * MIN,
-    minMs: 1000,
-    none: "the run takes as long as it needs"
-  },
-  preLookupMs: {
-    label: "Lore lookups before the reply",
-    group: "turn",
-    limits: "How long after the engine run starts a helper may still ask for lore; a lookup also starts only while a third of the run's time is left.",
-    fires: "Helpers answer with the lore they already have.",
-    defaultMs: 2 * MIN,
-    minMs: 0,
-    zero: "no lookups",
-    none: "lookups may start until the run's last third"
-  },
-  postReplyMs: {
-    label: "Reading the reply",
-    group: "turn",
-    limits: "Everything the engine asks a model after the reply: what changed, the contradiction check, people elsewhere, suggested choices, memory.",
-    fires: "The reads still waiting are skipped; the reply stands, and Re-read tries again.",
-    defaultMs: 5 * MIN,
-    minMs: 0,
-    zero: "no model calls after the reply",
-    none: "the reads take as long as they need"
-  },
-  postLookupMs: {
-    label: "Lore lookups after the reply",
-    group: "turn",
-    limits: "How long after the reply's reading starts a helper may still ask for lore; a lookup also starts only while a third of the reading's time is left.",
-    fires: "Helpers answer with the lore they already have.",
-    defaultMs: 2 * MIN,
-    minMs: 0,
-    zero: "no lookups",
-    none: "lookups may start until the reading's last third"
-  },
-  guardMs: {
-    label: "Generation guard",
-    group: "turn",
-    limits: "Lumiverse's wait for the engine's check, as a generation starts, that the engine's lore entries are fresh. The check itself is instant; this matters only while the engine is busy.",
-    fires: "Lumiverse stops the generation, so nothing goes out with stale entries.",
-    defaultMs: 2 * MIN,
-    minMs: 1000,
-    none: "as long as Lumiverse waits",
-    host: "contextHandler"
-  },
-  requestMs: {
-    label: "Engine requests",
-    group: "app",
-    limits: "How long this tab waits for the engine to answer a request: a view, an edit, a setting.",
-    fires: "The tab says the engine didn't answer; the engine may still finish the request.",
-    defaultMs: 5 * MIN,
-    minMs: 1000,
-    none: "the tab waits as long as it takes"
-  },
-  caveatsMs: {
-    label: "Preset check",
-    group: "app",
-    limits: "How long Settings → Caveats waits for its test prompt of the chat before saying the check is still running.",
-    fires: "Caveats says the check is still running; it finishes in the background for the next look.",
-    defaultMs: MIN,
-    minMs: 0,
-    zero: "always answer at once",
-    none: "wait for the check (Engine requests still bounds the tab's wait)"
-  },
-  mcpReconnectMs: {
-    label: "MCP server reconnect",
-    group: "work",
-    limits: "How long Reconnect in Lumiverse waits for a server Lumiverse runs to come back with this build's tools, after it is asked to exit.",
-    fires: "The server's line says it isn't back, with how to disconnect and connect it in Lumiverse's Settings → MCP Servers.",
-    defaultMs: MIN,
-    minMs: 1000,
-    none: "the line waits until the server is back"
-  },
-  mindsRunMs: {
-    label: "Minds run on demand",
-    group: "work",
-    limits: "A minds run started from GM → Minds, from start to end.",
-    fires: "The run stops; the minds it finished are kept.",
-    defaultMs: 10 * MIN,
-    minMs: 1000,
-    none: "the run goes on until it ends or you cancel it"
-  },
-  jobCallMs: {
-    label: "Import and Refine calls",
-    group: "work",
-    limits: "Each model call of an Import, a Refine, a lore index or a map description in Build.",
-    fires: "That call counts as failed; the job goes on with what the other calls proposed.",
-    defaultMs: 10 * MIN,
-    minMs: 1000,
-    none: "a call takes as long as it needs (Cancel still stops the job)"
-  },
-  tokenCountMs: {
-    label: "Token counts",
-    group: "work",
-    limits: "How long Lumiverse's tokenizer may take to count a section before the engine's estimate stands in for it.",
-    fires: "The section is priced by the engine's estimate, which stays above the real count.",
-    defaultMs: 30000,
-    minMs: 0,
-    zero: "always the estimate",
-    none: "wait for every count"
-  },
-  laneStartupMs: {
-    label: "Background lane start-up",
-    group: "work",
-    limits: "How long Playtest and Check world's background process may take to start.",
-    fires: "Lumiverse stops the process and the job fails.",
-    defaultMs: MIN,
-    minMs: 1000,
-    none: "as long as Lumiverse waits",
-    host: "processStartup"
-  },
-  laneHeartbeatMs: {
-    label: "Background lane heartbeat",
-    group: "work",
-    limits: "The longest gap between the background process's heartbeats; it beats after each simulated day or turn.",
-    fires: "Lumiverse terminates the process and the job fails.",
-    defaultMs: MIN,
-    minMs: 1000,
-    none: "Lumiverse checks no heartbeat",
-    host: "processHeartbeat"
-  }
-};
-function formatMs(ms) {
-  if (!Number.isFinite(ms))
-    return "no limit";
-  if (ms < 1000)
-    return `${Math.round(ms)} ms`;
-  if (ms < MIN)
-    return `${Number((ms / 1000).toFixed(1))} s`;
-  const totalSeconds = Math.round(ms / 1000);
-  const h = Math.floor(totalSeconds / 3600);
-  const m = Math.floor(totalSeconds % 3600 / 60);
-  const s = totalSeconds % 60;
-  return [h > 0 ? `${h} h` : "", m > 0 ? `${m} min` : "", s > 0 && h === 0 ? `${s} s` : ""].filter((p) => p !== "").join(" ");
-}
-function timerMs(limit) {
-  const ms = limitOf(limit);
-  return ms >= TIMER_MAX_MS ? null : Math.max(0, ms);
-}
-
-// src/shared/diagnostics.ts
-var CANNOT_STOP = "This Lumiverse can't stop generation; engine state may be missing.";
-
-// src/frontend/diagnostics.tsx
-var OPEN_DIAGNOSTICS_EVENT = "lre:open-diagnostics";
-function openDiagnostics() {
-  window.dispatchEvent(new CustomEvent(OPEN_DIAGNOSTICS_EVENT));
-}
-function elapsedText(ms) {
-  const s = Math.max(0, Math.floor(ms / 1000));
-  return s < 60 ? `${s} s` : `${Math.floor(s / 60)} m ${String(s % 60).padStart(2, "0")} s`;
-}
-function useActivity() {
-  const app = useApp();
-  const activity = useSelect(app.sync, (state) => state.activity);
-  const [now, setNow] = d2(() => Date.now());
-  const running = activity?.state === "running";
-  A(() => {
-    if (!running)
-      return;
-    setNow(Date.now());
-    const timer = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(timer);
-  }, [running]);
-  return { activity, now };
-}
-function ActivityLine(props) {
-  const { activity, now } = useActivity();
-  if (!activity)
+  if (t === "lore")
+    return typeof v.entry === "string" && v.entry !== "" && quote ? null : "a lore source names its entry";
+  if (t === "sheet")
+    return typeof v.entity === "string" && typeof v.field === "string" && quote ? null : "a sheet source names its entity and field";
+  if (world)
+    return "world data rests on what's authored, a lore entry or a sheet field";
+  if (t === "builtin")
     return null;
-  if (activity.state === "failed")
-    return /* @__PURE__ */ u3("button", {
-      type: "button",
-      class: "lre-activity failed",
-      "data-lre-activity": "failed",
-      onClick: openDiagnostics,
-      "aria-label": `${activity.label}. Open Diagnostics`,
-      title: "Open Diagnostics",
-      children: [
-        /* @__PURE__ */ u3(Icon, {
-          name: "alert",
-          size: 16
-        }, undefined, false, undefined, this),
-        props.compact ? null : /* @__PURE__ */ u3("span", {
-          class: "lre-activity-label",
-          children: activity.label
-        }, undefined, false, undefined, this)
-      ]
-    }, undefined, true, undefined, this);
-  const elapsed = elapsedText(now - activity.since);
-  return /* @__PURE__ */ u3("span", {
-    class: "lre-activity",
-    "data-lre-activity": "running",
-    role: "status",
-    "aria-live": "polite",
-    "aria-label": `${activity.label} ${elapsed}`,
-    children: [
-      /* @__PURE__ */ u3("span", {
-        class: "lre-chat-pulse",
-        "aria-hidden": "true"
-      }, undefined, false, undefined, this),
-      props.compact ? null : /* @__PURE__ */ u3("span", {
-        class: "lre-activity-label",
-        children: activity.label
-      }, undefined, false, undefined, this),
-      /* @__PURE__ */ u3("span", {
-        class: "lre-num lre-activity-time",
-        children: elapsed
-      }, undefined, false, undefined, this)
-    ]
-  }, undefined, true, undefined, this);
+  if (t === "story")
+    return typeof v.at === "number" && (v.turn === undefined || typeof v.turn === "string") ? null : "a story source has its time";
+  if (t === "gm")
+    return typeof v.at === "number" ? null : "a GM source has its time";
+  return "its source isn't one";
 }
-function ActivityBanner() {
-  const app = useApp();
-  const chatId = useSelect(app.sync, (state) => state.chatId);
-  const onPage = useSelect(app.ui, (ui) => ui.mode === "settings" && ui.settings.page === "diagnostics");
-  const { activity, now } = useActivity();
-  if (onPage && activity?.state === "failed")
+function placeProblem(v) {
+  if (v === undefined || v === "home" || v === "work" || v === "here" || v === "with")
     return null;
-  if (!activity || !chatId)
+  if (isRecord(v) && typeof v.place === "string" && v.place !== "")
     return null;
-  if (activity.state === "running")
-    return /* @__PURE__ */ u3("div", {
-      class: "lre-activity-bar",
-      "data-lre-activity-bar": "running",
-      role: "status",
-      "aria-live": "polite",
-      children: [
-        /* @__PURE__ */ u3("span", {
-          class: "lre-chat-pulse",
-          "aria-hidden": "true"
-        }, undefined, false, undefined, this),
-        /* @__PURE__ */ u3("span", {
-          class: "lre-activity-label",
-          children: activity.label
-        }, undefined, false, undefined, this),
-        /* @__PURE__ */ u3("span", {
-          class: "lre-num lre-activity-time",
-          children: elapsedText(now - activity.since)
-        }, undefined, false, undefined, this)
-      ]
-    }, undefined, true, undefined, this);
-  return /* @__PURE__ */ u3("div", {
-    class: "lre-activity-banner",
-    "data-lre-activity-bar": "failed",
-    children: /* @__PURE__ */ u3(Banner, {
-      tone: "neg",
-      title: activity.label,
-      actions: /* @__PURE__ */ u3(M, {
-        children: [
-          /* @__PURE__ */ u3(Button, {
-            size: "sm",
-            variant: "secondary",
-            icon: "list",
-            onClick: openDiagnostics,
-            children: "Diagnostics"
-          }, undefined, false, undefined, this),
-          /* @__PURE__ */ u3(Button, {
-            size: "sm",
-            variant: "ghost",
-            onClick: () => void app.request({ type: "lre.diag", chatId, op: "dismiss" }),
-            children: "Dismiss"
-          }, undefined, false, undefined, this)
-        ]
-      }, undefined, true, undefined, this),
-      children: "The engine didn't finish its work for the last reply. Diagnostics says which step failed and what to change."
-    }, undefined, false, undefined, this)
-  }, undefined, false, undefined, this);
-}
-function CannotStopNotice(props) {
-  const app = useApp();
-  const canStop = useSelect(app.sync, (state) => state.canStop);
-  const world = useSelect(app.sync, (state) => state.view !== null && state.view.status !== "not_world");
-  if (canStop !== false || props.inChat && !world)
+  if (isRecord(v) && typeof v.nearest === "string" && v.nearest !== "")
     return null;
-  return /* @__PURE__ */ u3(Banner, {
-    tone: "warn",
-    title: "The engine can't run before replies here",
-    children: [
-      CANNOT_STOP,
-      " Update Lumiverse to one that lets extensions stop a generation."
-    ]
-  }, undefined, true, undefined, this);
+  return "its place is home, work, here, with, {place} or {nearest}";
 }
-var FILTERS = [
-  { value: "all", label: "All" },
-  { value: "problems", label: "Problems" },
-  { value: "calls", label: "Model calls" },
-  { value: "slow", label: "Slow" }
-];
-function filterRecords(records, filter) {
-  if (filter === "problems")
-    return records.filter((r) => r.status === "failed" || r.level === "warn" || r.level === "error");
-  if (filter === "calls")
-    return records.filter((r) => (r.calls?.length ?? 0) > 0);
-  if (filter === "slow")
-    return records.filter((r) => r.kind === "slow");
-  return [...records];
-}
-function groupByTurn(records) {
-  const groups = [];
-  const byTurn = new Map;
-  for (const r of records) {
-    const known = r.turn !== null ? byTurn.get(r.turn) : undefined;
-    if (known) {
-      known.records.push(r);
-      known.start = Math.min(known.start, r.start);
-      continue;
-    }
-    const group = { turn: r.turn, records: [r], start: r.start };
-    groups.push(group);
-    if (r.turn !== null)
-      byTurn.set(r.turn, group);
-  }
-  for (const g of groups)
-    g.records.sort((a, b) => Number(a.kind === "turn") - Number(b.kind === "turn") || a.start - b.start || a.seq - b.seq);
-  return groups.sort((a, b) => b.start - a.start);
-}
-function callText(r) {
-  return (r.calls ?? []).map((c) => `    call ${c.purpose} via ${c.via} on ${c.connection} / ${c.model}: ${c.ok ? "ok" : "failed"}, ${c.tokensIn ?? "?"} in, ${c.tokensOut ?? "?"} out${c.maxTokens !== null ? ` of ${c.maxTokens}` : ""}, finish ${c.finishReason || "-"}, ${Math.round(c.ms)} ms${c.error ? `: ${c.error}` : ""}`);
-}
-function diagText(records) {
-  return records.flatMap((r) => [
-    `${new Date(r.start).toISOString()} ${r.level.toUpperCase().padEnd(5)} ${r.turn ? `[turn ${r.turn.slice(0, 8)}] ` : ""}${r.kind} ${r.phase ? `${r.phase}/` : ""}${r.step} ${r.status} ${Math.round(r.ms)} ms${r.reason ? `: ${r.reason}` : ""}`,
-    ...r.fix ? [`    fix: ${r.fix}`] : [],
-    ...r.path ? [`    path: ${r.path}`] : [],
-    ...(r.sections ?? []).map((s) => `    section ${s.slot}${s.outlet ? ` → ${s.outlet}` : ""}: ${s.filled ? "filled" : "empty"}`),
-    ...callText(r)
-  ]).join(`
-`);
-}
-var STATUS_TONE = { ok: "pos", failed: "neg", skipped: "neutral" };
-function msText(ms) {
-  return ms >= 1000 ? `${(ms / 1000).toFixed(1)} s` : `${Math.round(ms)} ms`;
-}
-function titleOf(r) {
-  if (r.kind === "turn")
-    return "The turn";
-  return r.phase && r.phase !== r.step && r.phase !== "request" ? `${r.phase} · ${r.step}` : r.step;
-}
-function RecordRow(props) {
-  const r = props.record;
-  const calls = r.calls ?? [];
-  const tokens = calls.reduce((n, c) => n + (c.tokensOut ?? 0), 0);
-  const subtitle = [r.reason, calls.length > 0 ? `${calls.length} call${calls.length === 1 ? "" : "s"}, ${tokens} tokens out` : null].filter((s) => s).join(" · ");
-  return /* @__PURE__ */ u3("div", {
-    class: "lre-diag-row",
-    "data-lre-diag-status": r.status,
-    "data-lre-diag-kind": r.kind,
-    children: [
-      /* @__PURE__ */ u3(ListRow, {
-        icon: r.status === "failed" ? "alert" : r.status === "skipped" ? "minus" : r.kind === "slow" ? "hourglass" : "check",
-        title: titleOf(r),
-        subtitle: subtitle || undefined,
-        value: msText(r.ms),
-        valueTone: r.status === "failed" ? "neg" : "muted",
-        badge: r.kind === "slow" ? /* @__PURE__ */ u3(Badge, {
-          tone: "warn",
-          children: "slow"
-        }, undefined, false, undefined, this) : /* @__PURE__ */ u3(Badge, {
-          tone: STATUS_TONE[r.status],
-          children: r.status
-        }, undefined, false, undefined, this)
-      }, undefined, false, undefined, this),
-      r.fix ? /* @__PURE__ */ u3("p", {
-        class: "lre-diag-fix",
-        children: [
-          "Fix: ",
-          r.fix
-        ]
-      }, undefined, true, undefined, this) : null,
-      calls.length > 0 || (r.sections?.length ?? 0) > 0 ? /* @__PURE__ */ u3("ul", {
-        class: "lre-diag-calls",
-        children: [
-          calls.map((c, i) => /* @__PURE__ */ u3("li", {
-            "data-lre-diag-call": c.ok && c.finishReason !== "length" ? "ok" : "bad",
-            children: [
-              /* @__PURE__ */ u3("span", {
-                class: "lre-num",
-                children: c.purpose
-              }, undefined, false, undefined, this),
-              " · ",
-              c.model,
-              " on ",
-              c.connection,
-              " · ",
-              c.tokensIn ?? "?",
-              " in / ",
-              c.tokensOut ?? "?",
-              " out",
-              c.maxTokens !== null ? ` of ${c.maxTokens}` : "",
-              " · ",
-              c.finishReason || "no finish reason",
-              " · ",
-              msText(c.ms),
-              c.error ? ` · ${c.error}` : ""
-            ]
-          }, i, true, undefined, this)),
-          (r.sections ?? []).map((s) => /* @__PURE__ */ u3("li", {
-            "data-lre-diag-call": s.filled ? "ok" : "bad",
-            children: [
-              s.slot,
-              s.outlet ? ` → ${s.outlet}` : " (world placement)",
-              ": ",
-              s.filled ? "filled" : "empty"
-            ]
-          }, s.slot, true, undefined, this))
-        ]
-      }, undefined, true, undefined, this) : null
-    ]
-  }, undefined, true, undefined, this);
-}
-function DiagnosticsPage() {
-  const app = useApp();
-  const chatId = useSelect(app.sync, (state) => state.chatId);
-  const [revealed, setRevealed] = d2(false);
-  const [records, setRecords] = d2(null);
-  const [filter, setFilter] = d2("all");
-  const [busy, run] = useBusy();
-  const load = () => run(async () => {
-    if (!chatId)
-      return;
-    const result = await app.request({ type: "lre.diag", chatId, op: "get" });
-    setRecords(result ? result.records : []);
-  });
-  A(() => {
-    setRevealed(false);
-    setRecords(null);
-  }, [chatId]);
-  A(() => {
-    if (revealed)
-      load();
-  }, [revealed]);
-  if (!chatId)
-    return /* @__PURE__ */ u3(Empty, {
-      icon: "list",
-      children: "Open a chat to see what the engine did in it."
-    }, undefined, false, undefined, this);
-  if (!revealed)
-    return /* @__PURE__ */ u3("div", {
-      class: "lre-stack",
-      "data-lre-settings-page": "diagnostics",
-      children: [
-        /* @__PURE__ */ u3(CannotStopNotice, {}, undefined, false, undefined, this),
-        /* @__PURE__ */ u3(Banner, {
-          tone: "gm",
-          title: "GM detail",
-          actions: /* @__PURE__ */ u3(Button, {
-            icon: "eye",
-            onClick: () => setRevealed(true),
-            children: "Show diagnostics"
-          }, undefined, false, undefined, this),
-          children: "Diagnostics show each step the engine ran for this chat, its model calls and why one failed. A reason can name someone or something your character hasn't met yet."
-        }, undefined, false, undefined, this)
-      ]
-    }, undefined, true, undefined, this);
-  const shown = records ? filterRecords(records, filter) : [];
-  const problems = (records ?? []).filter((r) => r.status === "failed" && (r.kind !== "turn" || !(records ?? []).some((s) => s !== r && s.turn === r.turn && s.status === "failed"))).slice(-20).reverse();
-  return /* @__PURE__ */ u3("div", {
-    class: "lre-stack lre-diag",
-    "data-lre-settings-page": "diagnostics",
-    children: [
-      /* @__PURE__ */ u3(CannotStopNotice, {}, undefined, false, undefined, this),
-      /* @__PURE__ */ u3("div", {
-        class: "lre-diag-tools",
-        children: [
-          /* @__PURE__ */ u3(Seg, {
-            label: "Show",
-            value: filter,
-            options: FILTERS,
-            onChange: setFilter
-          }, undefined, false, undefined, this),
-          /* @__PURE__ */ u3("div", {
-            class: "lre-diag-actions",
-            children: [
-              /* @__PURE__ */ u3(Button, {
-                size: "sm",
-                variant: "secondary",
-                icon: "refresh",
-                busy,
-                onClick: load,
-                children: "Refresh"
-              }, undefined, false, undefined, this),
-              /* @__PURE__ */ u3(Button, {
-                size: "sm",
-                variant: "secondary",
-                icon: "copy",
-                disabled: !records || records.length === 0,
-                onClick: () => void navigator.clipboard.writeText(diagText(shown)).then(() => app.toast("Diagnostics copied"), () => app.toast("The clipboard refused the copy; use Download", "error")),
-                children: "Copy"
-              }, undefined, false, undefined, this),
-              /* @__PURE__ */ u3(Button, {
-                size: "sm",
-                variant: "secondary",
-                icon: "download",
-                disabled: !records || records.length === 0,
-                onClick: () => app.host.download(`lre-diagnostics-${chatId}.json`, JSON.stringify({ chatId, at: new Date().toISOString(), records }, null, 2)),
-                children: "Download"
-              }, undefined, false, undefined, this),
-              /* @__PURE__ */ u3(Button, {
-                size: "sm",
-                variant: "ghost",
-                icon: "trash",
-                disabled: !records || records.length === 0,
-                onClick: () => run(async () => {
-                  await app.request({ type: "lre.diag", chatId, op: "clear" });
-                  setRecords([]);
-                }),
-                children: "Clear"
-              }, undefined, false, undefined, this)
-            ]
-          }, undefined, true, undefined, this)
-        ]
-      }, undefined, true, undefined, this),
-      problems.length > 0 ? /* @__PURE__ */ u3(Section, {
-        title: "Errors",
-        flush: true,
-        children: /* @__PURE__ */ u3("div", {
-          class: "lre-stack lre-diag-errors",
-          children: problems.map((r) => /* @__PURE__ */ u3(Banner, {
-            tone: "neg",
-            title: `${titleOf(r)}${r.turn ? ` · turn ${r.turn.slice(0, 8)}` : ""}`,
-            children: [
-              /* @__PURE__ */ u3("p", {
-                class: "lre-diag-fix",
-                children: r.reason ?? "failed"
-              }, undefined, false, undefined, this),
-              r.fix ? /* @__PURE__ */ u3("p", {
-                class: "lre-diag-fix",
-                children: [
-                  "Fix: ",
-                  r.fix
-                ]
-              }, undefined, true, undefined, this) : null
-            ]
-          }, r.seq, true, undefined, this))
-        }, undefined, false, undefined, this)
-      }, undefined, false, undefined, this) : null,
-      records === null ? /* @__PURE__ */ u3(Empty, {
-        icon: "hourglass",
-        children: "Reading diagnostics…"
-      }, undefined, false, undefined, this) : shown.length === 0 ? /* @__PURE__ */ u3(Empty, {
-        icon: "check",
-        children: records.length === 0 ? "Nothing recorded for this chat yet: the next turn's steps show here." : "Nothing matches this filter."
-      }, undefined, false, undefined, this) : groupByTurn(shown).map((group) => {
-        const failed = group.records.some((r) => r.status === "failed");
-        const slow = group.records.some((r) => r.kind === "slow");
-        return /* @__PURE__ */ u3(Section, {
-          title: group.turn ? `Turn ${group.turn.slice(0, 8)} · ${new Date(group.start).toLocaleTimeString()}` : `Outside a turn · ${new Date(group.start).toLocaleTimeString()}`,
-          aside: /* @__PURE__ */ u3(Badge, {
-            tone: failed ? "neg" : slow ? "warn" : "pos",
-            children: failed ? "failed" : slow ? "slow" : "ok"
-          }, undefined, false, undefined, this),
-          flush: true,
-          children: /* @__PURE__ */ u3(List, {
-            children: group.records.map((r) => /* @__PURE__ */ u3(RecordRow, {
-              record: r
-            }, r.seq, false, undefined, this))
-          }, undefined, false, undefined, this)
-        }, `${group.turn ?? "none"}-${group.start}`, false, undefined, this);
-      })
-    ]
-  }, undefined, true, undefined, this);
-}
-
-// src/frontend/money-input.tsx
-function MoneyInput(props) {
-  const unit = props.unit ?? "major";
-  const { prefix, suffix } = unit === "major" ? moneyAffixes(props.currency) : { prefix: "", suffix: "" };
-  return /* @__PURE__ */ u3("span", {
-    class: props.invalid ? "lre-money invalid" : "lre-money",
-    "data-lre-money": true,
-    children: [
-      prefix ? /* @__PURE__ */ u3("span", {
-        class: "lre-money-affix",
-        "aria-hidden": "true",
-        children: prefix
-      }, undefined, false, undefined, this) : null,
-      /* @__PURE__ */ u3("input", {
-        class: props.invalid ? "lre-input invalid" : "lre-input",
-        inputMode: unit === "minor" || props.currency.decimals <= 0 ? "numeric" : "decimal",
-        "aria-label": props.label,
-        "aria-invalid": props.invalid ? true : undefined,
-        placeholder: props.placeholder,
-        autoFocus: props.autoFocus,
-        value: props.value,
-        onInput: (event) => props.onInput(event.currentTarget.value),
-        onBlur: props.onBlur
-      }, undefined, false, undefined, this),
-      suffix ? /* @__PURE__ */ u3("span", {
-        class: "lre-money-affix",
-        "aria-hidden": "true",
-        children: suffix
-      }, undefined, false, undefined, this) : null
-    ]
-  }, undefined, true, undefined, this);
-}
-
-// src/shared/state-view.ts
-function chipRegenerates(kind, choice) {
-  return choice === "regenerate" || kind === "swipe_option" && (choice === "renarrate" || choice === "rerun") || kind === "contradiction" && choice === "renarrate" || kind === "read_failed" && choice === "rerun" || kind === "claim" && (choice === "add" || choice === "drop") || kind === "check" && (choice === "roll" || choice === "drop");
-}
-
-// src/frontend/requests.ts
-function upgradeRequest(chatId, preview, choices) {
-  const merge = {};
-  for (const row of preview.entities) {
-    for (const change of row.changes) {
-      const choice = choices[change.id] ?? change.pick;
-      if (choice === change.pick)
-        continue;
-      for (const t of change.targets) {
-        const picks = merge[t.entity] ??= {};
-        if (t.part === "entity")
-          picks.entity = choice;
-        else if (choice === "remove")
-          continue;
-        else if (t.part === "field")
-          (picks.fields ??= {})[t.field] = choice;
-        else if (t.part === "relation")
-          ((picks.relations ??= {})[t.rel] ??= {})[t.to] = choice;
-        else
-          picks[t.part] = choice;
-      }
-    }
-  }
-  return { type: "lre.world", op: "upgrade", chatId, to: preview.to, merge };
-}
-function chipIntent(chip, choice, chatId, payload) {
-  if (choice === "regenerate")
-    return { request: null, regenerate: true };
-  const request = payload ? { type: "lre.chip", chatId, chip: chip.id, choice, payload } : { type: "lre.chip", chatId, chip: chip.id, choice };
-  return { request, regenerate: chipRegenerates(chip.kind, choice) };
-}
-function convertRequest(line, chatId) {
-  if ("marker" in line.ref)
+function daysProblem(v) {
+  if (v === undefined)
     return null;
-  return { type: "lre.keep", chatId, choice: "convert", messageId: line.messageId, parentPath: line.parentPath, refs: [line.ref] };
-}
-function paletteRequest(entry, picks, chatId, amountCents, count) {
-  const params = Object.assign({}, ...picks.map((pick) => pick.params));
-  if (entry.amount && amountCents !== undefined)
-    params[entry.amount.param] = Math.round(amountCents);
-  if (entry.number && count !== undefined)
-    params[entry.number.param] = count;
-  return { type: "lre.action", chatId, action: entry.action, params, source: "palette" };
-}
-function timelapseRequest(view, target, overrides, chatId, source = "palette") {
-  const changed = {};
-  for (const [cls, policy] of Object.entries(overrides)) {
-    if (policy !== undefined && view.interrupts[cls] !== policy)
-      changed[cls] = policy;
-  }
-  return { type: "lre.action", chatId, action: view.action, params: { target: { ...target }, overrides: changed }, source };
-}
-function travelRequest(action, params, chatId) {
-  return { type: "lre.action", chatId, action, params: { ...params }, source: "map" };
-}
-function fixRequest(target, value, chatId) {
-  return { type: "lre.fix", chatId, entity: target.entity, field: target.field, value };
-}
-function timeFixRequest(time, chatId) {
-  return { type: "lre.fix", chatId, time };
-}
-function editRequest(chatId, ops) {
-  return { type: "lre.edit", chatId, ops };
-}
-function entityStateOp(entity, tier, agent, levels) {
-  const changed = {};
-  for (const l of entity.levels) {
-    const to = levels[l.domain];
-    if (to !== undefined && to !== l.override)
-      changed[l.domain] = to;
-  }
-  const levelsChanged = Object.keys(changed).length > 0;
-  if (tier === entity.tier && agent === entity.agent && !levelsChanged)
-    return null;
-  return { op: "entity", entity: entity.id, ...tier !== entity.tier ? { tier } : {}, ...agent !== entity.agent ? { agent } : {}, ...levelsChanged ? { levels: changed } : {} };
-}
-function classifyOp(entity, classes, tags) {
-  const same = (a, b) => a.length === b.length && a.every((x) => b.includes(x));
-  const facets = new Set([...Object.keys(classes), ...Object.keys(entity.class)]);
-  const unchanged = [...facets].every((f) => same(classes[f] ?? [], entity.class[f] ?? [])) && same(tags, entity.tags);
-  return unchanged ? null : { op: "classify", entity: entity.id, class: Object.fromEntries(Object.entries(classes).filter(([, v]) => v.length > 0)), tags: [...tags] };
-}
-function lifeEditOp(entity, to, tell) {
-  const changes = to !== entity.life.state;
-  if (!changes && tell.length === 0)
-    return null;
-  return { op: "life", entity: entity.id, ...changes ? { to } : {}, ...tell.length > 0 ? { tell: [...tell] } : {} };
-}
-function relationFields(defs, inputs, held = {}) {
-  const fields = Object.fromEntries(Object.entries(held).filter(([id]) => !defs.some((d) => d.id === id)));
-  for (const def of defs) {
-    const text = (inputs[def.id] ?? "").trim();
-    if (text === "")
-      continue;
-    if (def.type === "number") {
-      const n = Number(text);
-      if (!Number.isFinite(n) || n < (def.min ?? -Infinity) || n > (def.max ?? Infinity))
-        return null;
-      fields[def.id] = n;
-    } else if (def.type === "bool")
-      fields[def.id] = text === "true";
-    else if (def.values && !def.values.includes(text))
-      return null;
-    else
-      fields[def.id] = text;
-  }
-  return fields;
-}
-function adjustOp(account, text, currency, take) {
-  const cents = parseMoneyInput(text, currency);
-  return cents !== null && cents > 0 ? { op: "adjust", account, cents: take ? -cents : cents } : null;
-}
-function timeMarker(chatId, control, scope, to, preview = false) {
-  return preview ? { type: "lre.marker", chatId, kind: "time", control, scope, to, preview: true } : { type: "lre.marker", chatId, kind: "time", control, scope, to };
-}
-function resolveMarker(chatId, domain, scope, to, preview = false) {
-  return preview ? { type: "lre.marker", chatId, kind: "resolve", domain, scope, to, preview: true } : { type: "lre.marker", chatId, kind: "resolve", domain, scope, to };
-}
-function adjudicateMarker(chatId, to) {
-  return { type: "lre.marker", chatId, kind: "adjudicate", to };
-}
-function claimsMarker(chatId, to) {
-  return { type: "lre.marker", chatId, kind: "claims", to };
-}
-function inferMarker(chatId, to) {
-  return { type: "lre.marker", chatId, kind: "infer", to };
-}
-function sheetPreviewRequest(worldId, ruleset, entity) {
-  return entity === undefined ? { type: "lre.world", op: "sheet", worldId, ruleset } : { type: "lre.world", op: "sheet", worldId, ruleset, entity };
-}
-
-// src/frontend/chips.tsx
-var CHIP_ICON = {
-  change: "check",
-  elapsed: "clock",
-  roll: "dice",
-  price: "card",
-  confirm: "help",
-  decline: "alert",
-  undo: "undo",
-  retry_read: "refresh",
-  not_action: "message",
-  swipe_option: "refresh",
-  overdue: "calendar",
-  timelapse_offer: "fast-forward",
-  continue_timelapse: "fast-forward",
-  keep_report: "flag",
-  reread: "eye",
-  retry: "refresh",
-  degraded: "alert",
-  pending: "hourglass",
-  mode_change: "gear",
-  choice: "send",
-  contradiction: "info",
-  read_failed: "alert",
-  engine_failed: "alert",
-  claim: "help",
-  check: "dice",
-  claimed: "sparkle",
-  fix: "edit",
-  refused: "alert"
-};
-var ACTION_ICON = { undo: "undo", regenerate: "refresh", rerun: "refresh", send: "send", timelapse: "fast-forward" };
-var RECEIPT_ORDER = ["decline", "degraded", "pending", "elapsed", "price", "undo", "roll", "change", "not_action", "fix", "mode_change"];
-var RECEIPT_SEGMENTS = 3;
-function receiptLine(done) {
-  const rank = (chip) => {
-    const at = RECEIPT_ORDER.indexOf(chip.kind);
-    return at < 0 ? RECEIPT_ORDER.length : at;
-  };
-  const sorted = [...done].sort((a, b) => rank(a) - rank(b));
-  return { sorted, shown: sorted.slice(0, RECEIPT_SEGMENTS), more: Math.max(0, sorted.length - RECEIPT_SEGMENTS) };
-}
-function messageIdFromScope(scope) {
-  const match = /^message:([^:]+):/.exec(scope);
-  return match?.[1] ?? null;
-}
-function MessageChips(props) {
-  const app = useApp();
-  const view = useView();
-  if (!view || view.status === "not_world")
-    return null;
-  const chips = view.chips.filter((chip) => chip.messageId === props.messageId);
-  if (chips.length === 0)
-    return null;
-  const show = (chip, fallback) => {
-    const Chosen = app.catalog.chips.get(chip.kind) ?? fallback;
-    return /* @__PURE__ */ u3(Chosen, {
-      chip,
-      chatId: view.chatId,
-      send: app.send
-    }, chip.id, false, undefined, this);
-  };
-  const done = chips.filter((chip) => chipRole(chip) === "done");
-  const offers = chips.filter((chip) => chipRole(chip) === "offer");
-  return /* @__PURE__ */ u3("div", {
-    class: "lre-chips",
-    "data-lre-chips": props.messageId,
-    children: [
-      done.length > 0 ? /* @__PURE__ */ u3(Receipt, {
-        chips: done,
-        show: (chip) => show(chip, DefaultChip)
-      }, undefined, false, undefined, this) : null,
-      chips.filter((chip) => chipRole(chip) === "decision").map((chip) => show(chip, chip.kind === "keep_report" ? KeepReportChip : DecisionCard)),
-      offers.length > 0 ? /* @__PURE__ */ u3("div", {
-        class: "lre-chat-offers",
-        children: offers.map((chip) => show(chip, OfferChip))
-      }, undefined, false, undefined, this) : null
-    ]
-  }, undefined, true, undefined, this);
-}
-function Receipt(props) {
-  const [open, setOpen] = d2(false);
-  const listId = P2();
-  const { sorted, shown, more } = receiptLine(props.chips);
-  return /* @__PURE__ */ u3("div", {
-    class: "lre-chat-receipt",
-    children: [
-      /* @__PURE__ */ u3("button", {
-        type: "button",
-        class: "lre-chat-receipt-line",
-        "aria-expanded": open,
-        "aria-controls": open ? listId : undefined,
-        onClick: () => setOpen(!open),
-        children: [
-          /* @__PURE__ */ u3("span", {
-            class: "lre-sr",
-            children: "What this turn did: "
-          }, undefined, false, undefined, this),
-          /* @__PURE__ */ u3("span", {
-            class: "lre-chat-segs",
-            children: [
-              shown.map((chip, index) => {
-                const tone = chipTone(chip);
-                return /* @__PURE__ */ u3(M, {
-                  children: [
-                    index > 0 ? /* @__PURE__ */ u3("span", {
-                      class: "lre-chat-dot",
-                      "aria-hidden": "true",
-                      children: "·"
-                    }, undefined, false, undefined, this) : null,
-                    /* @__PURE__ */ u3("span", {
-                      class: "lre-chat-seg",
-                      "data-tone": tone,
-                      children: [
-                        tone === "neutral" ? null : /* @__PURE__ */ u3(Icon, {
-                          name: "alert",
-                          size: 14
-                        }, undefined, false, undefined, this),
-                        /* @__PURE__ */ u3("span", {
-                          class: "lre-chat-seg-text",
-                          children: chip.kind === "not_action" ? "Read as an action" : chip.label
-                        }, undefined, false, undefined, this)
-                      ]
-                    }, undefined, true, undefined, this)
-                  ]
-                }, chip.id, true, undefined, this);
-              }),
-              more > 0 ? /* @__PURE__ */ u3(M, {
-                children: [
-                  /* @__PURE__ */ u3("span", {
-                    class: "lre-chat-dot",
-                    "aria-hidden": "true",
-                    children: "·"
-                  }, undefined, false, undefined, this),
-                  /* @__PURE__ */ u3("span", {
-                    class: "lre-chat-seg more",
-                    children: [
-                      more,
-                      " more"
-                    ]
-                  }, undefined, true, undefined, this)
-                ]
-              }, undefined, true, undefined, this) : null
-            ]
-          }, undefined, true, undefined, this),
-          /* @__PURE__ */ u3(Icon, {
-            name: open ? "chevron-up" : "chevron-down",
-            size: 16,
-            class: "lre-chat-chev"
-          }, undefined, false, undefined, this)
-        ]
-      }, undefined, true, undefined, this),
-      open ? /* @__PURE__ */ u3("div", {
-        id: listId,
-        class: "lre-chat-receipt-list",
-        children: sorted.map((chip) => props.show(chip))
-      }, undefined, false, undefined, this) : null
-    ]
-  }, undefined, true, undefined, this);
-}
-function useChipAction(chip, chatId) {
-  const app = useApp();
-  const [busy, run] = useBusy();
-  return [
-    busy,
-    (choice, payload) => run(async () => {
-      if (choice === "diagnostics")
-        return openDiagnostics();
-      const intent = chipIntent(chip, choice, chatId, payload);
-      if (intent.request) {
-        const message = await app.send(intent.request);
-        if (message.type === "lre.error") {
-          app.toast(message.message, "error");
-          return;
-        }
-        if (message.request === "lre.chip" && message.body.pending && !intent.regenerate)
-          app.toast("Saved — it applies when the reply finishes.", "info");
-      }
-      if (intent.regenerate && !await app.host.generate("regenerate"))
-        app.toast("Couldn't start Regenerate here; use the message's Regenerate button.", "error");
-    })
-  ];
-}
-function useChipControls(chip, chatId) {
-  const view = useView();
-  const [busy, choose] = useChipAction(chip, chatId);
-  const [asking, setAsking] = d2(null);
-  const open = chip.actions.find((action) => action.id === asking);
-  return {
-    busy,
-    asking,
-    press: (action) => action.input ? setAsking(asking === action.id ? null : action.id) : choose(action.id),
-    form: open?.input ? /* @__PURE__ */ u3(ChipInputForm, {
-      action: open,
-      input: open.input,
-      currency: view?.currency ?? DEFAULT_CURRENCY,
-      busy,
-      onSend: (payload) => choose(open.id, payload),
-      onCancel: () => setAsking(null)
-    }, open.id, false, undefined, this) : null
-  };
-}
-function ActionButton(props) {
-  const { action, controls } = props;
-  const icon = ACTION_ICON[action.id];
-  const style = action.style === "primary" ? " primary" : action.style === "danger" ? " danger" : "";
-  return /* @__PURE__ */ u3("button", {
-    type: "button",
-    class: props.pill ? `lre-chat-pill${style}` : `lre-btn small${style}`,
-    disabled: controls.busy,
-    "aria-expanded": action.input ? controls.asking === action.id : undefined,
-    onClick: () => controls.press(action),
-    children: [
-      icon ? /* @__PURE__ */ u3(Icon, {
-        name: icon,
-        size: 16
-      }, undefined, false, undefined, this) : null,
-      action.label
-    ]
-  }, undefined, true, undefined, this);
-}
-function ChipInputForm(props) {
-  const { input } = props;
-  const [text, setText] = d2(() => input.type === "money" && input.value !== undefined ? formatMoneyInput(input.value, props.currency) : "");
-  const [picked, setPicked] = d2(() => input.type === "choice" ? input.options[0]?.value ?? "" : "");
-  const cents = input.type === "money" ? parseMoneyInput(text, props.currency) : null;
-  const ok = input.type === "money" ? cents !== null && cents > 0 : picked !== "";
-  return /* @__PURE__ */ u3("form", {
-    class: "lre-chat-form",
-    "data-lre-chip-input": props.action.id,
-    onSubmit: (event) => {
-      event.preventDefault();
-      if (ok)
-        props.onSend(input.type === "money" ? { cents } : { value: picked });
-    },
-    onKeyDown: (event) => {
-      if (event.key === "Escape")
-        props.onCancel();
-    },
-    children: [
-      /* @__PURE__ */ u3(Field, {
-        label: input.label,
-        children: input.type === "money" ? /* @__PURE__ */ u3(MoneyInput, {
-          currency: props.currency,
-          value: text,
-          onInput: setText,
-          label: input.label,
-          invalid: text.trim() !== "" && !ok,
-          autoFocus: true
-        }, undefined, false, undefined, this) : /* @__PURE__ */ u3("select", {
-          class: "lre-input",
-          "aria-label": input.label,
-          value: picked,
-          onChange: (event) => setPicked(event.currentTarget.value),
-          children: input.options.map((option) => /* @__PURE__ */ u3("option", {
-            value: option.value,
-            children: option.label
-          }, option.value, false, undefined, this))
-        }, undefined, false, undefined, this)
-      }, undefined, false, undefined, this),
-      /* @__PURE__ */ u3("div", {
-        class: "lre-chat-actions",
-        children: [
-          /* @__PURE__ */ u3(Button, {
-            type: "submit",
-            variant: "primary",
-            size: "sm",
-            icon: "check",
-            disabled: props.busy || !ok,
-            children: "Apply"
-          }, undefined, false, undefined, this),
-          /* @__PURE__ */ u3(Button, {
-            variant: "ghost",
-            size: "sm",
-            disabled: props.busy,
-            onClick: props.onCancel,
-            children: "Cancel"
-          }, undefined, false, undefined, this)
-        ]
-      }, undefined, true, undefined, this)
-    ]
-  }, undefined, true, undefined, this);
-}
-function DefaultChip(props) {
-  const { chip } = props;
-  const controls = useChipControls(chip, props.chatId);
-  return /* @__PURE__ */ u3("div", {
-    class: controls.busy ? "lre-chip busy" : "lre-chip",
-    "data-kind": chip.kind,
-    "data-tone": chipTone(chip),
-    children: [
-      /* @__PURE__ */ u3("div", {
-        class: "lre-chip-row",
-        children: [
-          /* @__PURE__ */ u3(Icon, {
-            name: CHIP_ICON[chip.kind],
-            size: 16,
-            class: "lre-chip-icon"
-          }, undefined, false, undefined, this),
-          /* @__PURE__ */ u3("div", {
-            class: "lre-chip-text",
-            children: [
-              /* @__PURE__ */ u3("span", {
-                class: "lre-chip-label",
-                children: chip.label
-              }, undefined, false, undefined, this),
-              chip.detail ? /* @__PURE__ */ u3("span", {
-                class: "lre-chip-detail",
-                children: chip.detail
-              }, undefined, false, undefined, this) : null
-            ]
-          }, undefined, true, undefined, this),
-          chip.actions.length > 0 ? /* @__PURE__ */ u3("div", {
-            class: "lre-chat-actions",
-            children: chip.actions.map((action) => /* @__PURE__ */ u3(ActionButton, {
-              action,
-              controls
-            }, action.id, false, undefined, this))
-          }, undefined, false, undefined, this) : null
-        ]
-      }, undefined, true, undefined, this),
-      controls.form
-    ]
-  }, undefined, true, undefined, this);
-}
-function DecisionCard(props) {
-  const { chip } = props;
-  const controls = useChipControls(chip, props.chatId);
-  return /* @__PURE__ */ u3("div", {
-    class: controls.busy ? "lre-chat-decision busy" : "lre-chat-decision",
-    "data-kind": chip.kind,
-    "data-tone": chipTone(chip) === "neg" ? "neg" : "warn",
-    role: "group",
-    "aria-label": chip.label,
-    children: [
-      chip.expires === "next_send" ? /* @__PURE__ */ u3("span", {
-        class: "lre-chat-due",
-        children: [
-          /* @__PURE__ */ u3(Icon, {
-            name: "send",
-            size: 14
-          }, undefined, false, undefined, this),
-          "Answer before you send"
-        ]
-      }, undefined, true, undefined, this) : null,
-      /* @__PURE__ */ u3("div", {
-        class: "lre-chat-decision-head",
-        children: [
-          /* @__PURE__ */ u3(Icon, {
-            name: CHIP_ICON[chip.kind],
-            class: "lre-chat-decision-icon"
-          }, undefined, false, undefined, this),
-          /* @__PURE__ */ u3("div", {
-            class: "lre-chat-decision-text",
-            children: [
-              /* @__PURE__ */ u3("strong", {
-                class: "lre-chat-decision-label",
-                children: chip.label
-              }, undefined, false, undefined, this),
-              chip.detail ? /* @__PURE__ */ u3("span", {
-                class: "lre-chat-decision-detail",
-                children: chip.detail
-              }, undefined, false, undefined, this) : null
-            ]
-          }, undefined, true, undefined, this)
-        ]
-      }, undefined, true, undefined, this),
-      chip.actions.length > 0 ? /* @__PURE__ */ u3("div", {
-        class: "lre-chat-actions",
-        children: chip.actions.map((action) => /* @__PURE__ */ u3(ActionButton, {
-          action,
-          controls
-        }, action.id, false, undefined, this))
-      }, undefined, false, undefined, this) : null,
-      controls.form
-    ]
-  }, undefined, true, undefined, this);
-}
-function OfferChip(props) {
-  const { chip } = props;
-  const controls = useChipControls(chip, props.chatId);
-  const detailId = P2();
-  const only = chip.actions.length === 1 ? chip.actions[0] : undefined;
-  const detail = chip.detail ? /* @__PURE__ */ u3("span", {
-    id: detailId,
-    class: "lre-chat-offer-detail",
-    children: chip.detail
-  }, undefined, false, undefined, this) : null;
-  if (only)
-    return /* @__PURE__ */ u3("div", {
-      class: controls.busy ? "lre-chat-offer busy" : "lre-chat-offer",
-      "data-kind": chip.kind,
-      children: [
-        /* @__PURE__ */ u3("button", {
-          type: "button",
-          class: only.style === "primary" ? "lre-chat-pill primary" : "lre-chat-pill",
-          "aria-describedby": detail ? detailId : undefined,
-          "aria-expanded": only.input ? controls.asking === only.id : undefined,
-          disabled: controls.busy,
-          onClick: () => controls.press(only),
-          children: [
-            /* @__PURE__ */ u3(Icon, {
-              name: CHIP_ICON[chip.kind],
-              size: 16
-            }, undefined, false, undefined, this),
-            /* @__PURE__ */ u3("strong", {
-              children: [
-                only.label,
-                ":"
-              ]
-            }, undefined, true, undefined, this),
-            /* @__PURE__ */ u3("span", {
-              class: "lre-chat-pill-text",
-              children: chip.label
-            }, undefined, false, undefined, this)
-          ]
-        }, undefined, true, undefined, this),
-        detail,
-        controls.form
-      ]
-    }, undefined, true, undefined, this);
-  return /* @__PURE__ */ u3("div", {
-    class: controls.busy ? "lre-chat-offer busy" : "lre-chat-offer",
-    "data-kind": chip.kind,
-    role: "group",
-    "aria-label": chip.label,
-    "aria-describedby": detail ? detailId : undefined,
-    children: [
-      /* @__PURE__ */ u3("span", {
-        class: "lre-chat-offer-lead",
-        children: [
-          /* @__PURE__ */ u3(Icon, {
-            name: CHIP_ICON[chip.kind],
-            size: 16
-          }, undefined, false, undefined, this),
-          chip.label
-        ]
-      }, undefined, true, undefined, this),
-      chip.actions.map((action) => /* @__PURE__ */ u3(ActionButton, {
-        action,
-        controls,
-        pill: true
-      }, action.id, false, undefined, this)),
-      detail,
-      controls.form
-    ]
-  }, undefined, true, undefined, this);
-}
-var KEEP_STATUS = {
-  dropped: "no longer valid here",
-  inert: "made on another branch",
-  converted: "kept"
-};
-function keepRows(lines) {
-  const rows = [];
-  for (const line of lines) {
-    const key = `${line.messageId}\x00${line.status}\x00${line.group !== undefined ? `g:${line.group}` : `t:${line.text}`}`;
-    const row = rows.find((r) => r.key === key);
-    if (row)
-      row.count += 1;
-    else
-      rows.push({ key, line, count: 1 });
-  }
-  return rows.map(({ line, count }) => ({ line, count }));
-}
-function KeepReportChip(props) {
-  const app = useApp();
-  const view = useView();
-  const { chip } = props;
-  const [busy, choose] = useChipAction(chip, props.chatId);
-  const [converting, runConvert] = useBusy();
-  const lines = keepRows(view?.keepReport ?? []);
-  return /* @__PURE__ */ u3("div", {
-    class: "lre-chat-decision lre-chat-keep",
-    "data-kind": "keep_report",
-    "data-tone": "warn",
-    role: "group",
-    "aria-label": chip.label,
-    children: [
-      /* @__PURE__ */ u3("div", {
-        class: "lre-chat-decision-head",
-        children: [
-          /* @__PURE__ */ u3(Icon, {
-            name: CHIP_ICON.keep_report,
-            class: "lre-chat-decision-icon"
-          }, undefined, false, undefined, this),
-          /* @__PURE__ */ u3("div", {
-            class: "lre-chat-decision-text",
-            children: [
-              /* @__PURE__ */ u3("strong", {
-                class: "lre-chat-decision-label",
-                children: chip.label
-              }, undefined, false, undefined, this),
-              chip.detail ? /* @__PURE__ */ u3("span", {
-                class: "lre-chat-decision-detail",
-                children: chip.detail
-              }, undefined, false, undefined, this) : null
-            ]
-          }, undefined, true, undefined, this),
-          /* @__PURE__ */ u3(Badge, {
-            tone: "warn",
-            children: [
-              lines.length,
-              " entr",
-              lines.length === 1 ? "y" : "ies"
-            ]
-          }, undefined, true, undefined, this)
-        ]
-      }, undefined, true, undefined, this),
-      lines.length > 0 ? /* @__PURE__ */ u3("div", {
-        class: "lre-chat-keep-rows",
-        children: lines.map(({ line, count }) => {
-          const convert = convertRequest(line, props.chatId);
-          const key = "marker" in line.ref ? `${line.messageId}:m${line.ref.marker}` : `${line.messageId}:${line.ref.in}:${"seq" in line.ref ? line.ref.seq : 0}:${line.ref.index}`;
-          return /* @__PURE__ */ u3("div", {
-            class: "lre-chat-keep-row",
-            children: [
-              /* @__PURE__ */ u3("span", {
-                class: "lre-chat-keep-text",
-                children: [
-                  line.text,
-                  /* @__PURE__ */ u3("span", {
-                    class: "lre-chat-keep-sub",
-                    children: [
-                      line.status === "converted" ? /* @__PURE__ */ u3(Icon, {
-                        name: "check",
-                        size: 14
-                      }, undefined, false, undefined, this) : null,
-                      KEEP_STATUS[line.status],
-                      count > 1 ? ` · ${count} linked changes` : ""
-                    ]
-                  }, undefined, true, undefined, this)
-                ]
-              }, undefined, true, undefined, this),
-              convert && line.status !== "converted" ? /* @__PURE__ */ u3(Button, {
-                size: "sm",
-                disabled: converting,
-                onClick: () => runConvert(async () => {
-                  await app.request(convert);
-                }),
-                children: "Convert"
-              }, undefined, false, undefined, this) : null
-            ]
-          }, key, true, undefined, this);
-        })
-      }, undefined, false, undefined, this) : null,
-      /* @__PURE__ */ u3("div", {
-        class: "lre-chat-actions",
-        children: chip.actions.map((action) => /* @__PURE__ */ u3(Button, {
-          size: "sm",
-          variant: action.id === "discard" ? "danger" : action.style === "primary" ? "primary" : "secondary",
-          disabled: busy,
-          onClick: () => choose(action.id),
-          children: action.label
-        }, action.id, false, undefined, this))
-      }, undefined, false, undefined, this)
-    ]
-  }, undefined, true, undefined, this);
-}
-// src/shared/lre-map-v1.schema.json
-var lre_map_v1_schema_default = {
-  $schema: "https://json-schema.org/draft/2020-12/schema",
-  $id: "https://github.com/TheLiquorPriest/LumiRPEngine/blob/main/src/shared/lre-map-v1.schema.json",
-  title: "lre-map-v1",
-  description: "A map of one place in a LumiRPEngine world (WorldDoc.maps). A grid map (layout plus legend) draws an interior cell by cell; a node map (places plus links) draws a town or a region. When the world is read, the map compiles into the places inside its scope, a grid and routes, which it owns.",
-  type: "object",
-  required: ["id", "scope"],
-  additionalProperties: false,
-  properties: {
-    $schema: { type: "string" },
-    id: { $ref: "#/$defs/id", description: "The map's id: its key in the world's maps." },
-    scope: { type: "string", minLength: 1, maxLength: 200, description: "The id of the place the map draws; the map's places go inside it." },
-    title: { type: "string", maxLength: 80 },
-    size: { $ref: "#/$defs/pair", description: "[width, height]: the layout's size on a grid map; the frame `at` positions use on a node map." },
-    layout: {
-      type: "array",
-      description: "A grid map's rows, top first, one character per cell; every row the same length.",
-      minItems: 1,
-      maxItems: 64,
-      items: { type: "string", minLength: 1, maxLength: 64 }
-    },
-    cellMeters: { type: "number", exclusiveMinimum: 0, maximum: 1e5, description: "A grid map's cell size in metres, for walking times on it: 80 unless given (1 or 2 suits a room)." },
-    legend: {
-      type: "object",
-      description: "What each layout character stands for. Characters not listed: # wall, . floor, + door, a space nothing (blocked).",
-      propertyNames: { minLength: 1, maxLength: 1 },
-      additionalProperties: { $ref: "#/$defs/cell" }
-    },
-    places: {
-      type: "array",
-      description: "The places the map creates inside its scope.",
-      maxItems: 64,
-      items: { $ref: "#/$defs/place" }
-    },
-    links: {
-      type: "array",
-      description: "Ways between places, as routes. Link every place in the scope or none: with links, places without one can't be walked to from the others.",
-      maxItems: 256,
-      items: { $ref: "#/$defs/link" }
-    }
-  },
-  $defs: {
-    id: {
-      type: "string",
-      pattern: "^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$",
-      description: "letters, digits, _ and -, starting with a letter or digit"
-    },
-    pair: {
-      type: "array",
-      description: "two whole numbers, [x, y] or [width, height]",
-      items: { type: "integer", minimum: 0, maximum: 1e4 },
-      minItems: 2,
-      maxItems: 2
-    },
-    cell: {
-      anyOf: [
-        { title: '"wall", "floor" or "door"', enum: ["wall", "floor", "door"] },
-        {
-          title: '{"item": …}',
-          description: "A thing the world already has, lying on the floor here: in `place`'s area, else the area of the place most of the cells beside it belong to.",
-          type: "object",
-          required: ["item"],
-          additionalProperties: false,
-          properties: { item: { type: "string", minLength: 1, maxLength: 200 }, place: { $ref: "#/$defs/id" } }
-        },
-        {
-          title: '{"terrain": …}',
-          type: "object",
-          required: ["terrain"],
-          additionalProperties: false,
-          properties: { terrain: { type: "string", minLength: 1, maxLength: 40 }, blocked: { type: "boolean" } }
-        },
-        {
-          title: '{"place": …}',
-          type: "object",
-          required: ["place"],
-          additionalProperties: false,
-          properties: { place: { $ref: "#/$defs/id" } }
-        },
-        {
-          title: '{"zone": …}',
-          type: "object",
-          required: ["zone"],
-          additionalProperties: false,
-          properties: { zone: { $ref: "#/$defs/id" } }
-        }
-      ]
-    },
-    place: {
-      type: "object",
-      required: ["id"],
-      additionalProperties: false,
-      properties: {
-        id: { $ref: "#/$defs/id" },
-        name: { type: "string", minLength: 1, maxLength: 80 },
-        at: { $ref: "#/$defs/pair", description: "[x, y]: the place's cell on a grid map (else the middle of its area in the legend), its position on a node map (else laid out for it)." },
-        opens: { $ref: "#/$defs/id", description: "The map that draws this place's inside; its scope is this place." }
-      }
-    },
-    link: {
-      type: "object",
-      required: ["from", "to", "minutes"],
-      additionalProperties: false,
-      properties: {
-        from: { type: "string", minLength: 1, maxLength: 200, description: "A place of this map, or any other place in the world." },
-        to: { type: "string", minLength: 1, maxLength: 200 },
-        mode: { enum: ["walk", "road", "offroad", "water"], description: "walk unless given" },
-        minutes: { type: "number", exclusiveMinimum: 0, maximum: 1e5 },
-        bidirectional: { type: "boolean", description: "true unless given" }
-      }
-    }
-  }
-};
-
-// src/shared/grid.ts
-var GRID_TERRAIN_COST = Object.freeze({ "": 1, ".": 1, floor: 1, road: 1, grass: 1.2, sand: 1.8, mud: 2, water: 4, rough: 1.6, "~": 4, "^": 3 });
-var SIGHT_MAX = 32;
-function cellCost(grid, index) {
-  const terrain = grid.terrain[index] ?? "";
-  return Math.max(1, (hasOwn(GRID_TERRAIN_COST, terrain) ? GRID_TERRAIN_COST[terrain] : undefined) ?? 1);
-}
-function cellIndex(grid, c) {
-  return Number.isInteger(c.x) && Number.isInteger(c.y) && c.x >= 0 && c.y >= 0 && c.x < grid.width && c.y < grid.height ? c.y * grid.width + c.x : null;
-}
-function cellAt(grid, index) {
-  return { x: index % grid.width, y: Math.floor(index / grid.width) };
-}
-function costMinutes(grid, cost) {
-  return Math.round((grid.cellMeters ?? 80) * cost / 80);
-}
-function gridCosts(grid, from, enters) {
-  const size = grid.width * grid.height;
-  const cost = new Float64Array(size).fill(Infinity);
-  if (from < 0 || from >= size)
-    return cost;
-  const blocked = new Set(grid.blocked);
-  const heap = [];
-  const before = (a, b) => a[0] < b[0] || a[0] === b[0] && a[1] < b[1];
-  const push = (item) => {
-    let i = heap.length;
-    heap.push(item);
-    for (let parent = heap[i - 1 >> 1];i > 0 && parent && before(item, parent); parent = heap[i - 1 >> 1]) {
-      heap[i] = parent;
-      i = i - 1 >> 1;
-    }
-    heap[i] = item;
-  };
-  const pop = () => {
-    const top = heap[0];
-    const last = heap.pop();
-    if (!last || heap.length === 0)
-      return top;
-    for (let i = 0;; ) {
-      const left = heap[2 * i + 1];
-      const right = heap[2 * i + 2];
-      const child = left && right && before(right, left) ? 2 * i + 2 : 2 * i + 1;
-      const next = heap[child];
-      if (!next || !before(next, last)) {
-        heap[i] = last;
-        break;
-      }
-      heap[i] = next;
-      i = child;
-    }
-    return top;
-  };
-  cost[from] = 0;
-  push([0, from]);
-  for (let item = pop();item; item = pop()) {
-    const [c, cur] = item;
-    if (c > (cost[cur] ?? Infinity))
-      continue;
-    const cx = cur % grid.width;
-    const cy = Math.floor(cur / grid.width);
-    for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
-      const next = cellIndex(grid, { x: cx + dx, y: cy + dy });
-      if (next === null || blocked.has(next) || !enters(cur, next))
-        continue;
-      const nc = c + cellCost(grid, next);
-      if (nc < (cost[next] ?? Infinity)) {
-        cost[next] = nc;
-        push([nc, next]);
-      }
-    }
-  }
-  return cost;
-}
-function hasCell(set, cell) {
-  if (!Number.isInteger(cell) || cell < 0)
-    return false;
-  const digit = Number.parseInt(set.charAt(cell >> 2) || "0", 16);
-  return Number.isFinite(digit) && (digit & 1 << (cell & 3)) !== 0;
-}
-function nearestMiddle(cells, width) {
-  if (cells.length === 0 || width === 0)
-    return null;
-  const cx = cells.reduce((a, i) => a + i % width, 0) / cells.length;
-  const cy = cells.reduce((a, i) => a + Math.floor(i / width), 0) / cells.length;
-  let best = cells[0] ?? 0;
-  let bestDistance = Infinity;
-  for (const i of cells) {
-    const d = (i % width - cx) ** 2 + (Math.floor(i / width) - cy) ** 2;
-    if (d < bestDistance) {
-      best = i;
-      bestDistance = d;
-    }
-  }
-  return { x: best % width, y: Math.floor(best / width) };
-}
-function placeOf(world, id) {
-  return hasOwn(world.places, id) ? world.places[id] : undefined;
-}
-function gridOf(world, place) {
-  const id = placeOf(world, place)?.grid;
-  return id !== undefined && hasOwn(world.grids, id) ? world.grids[id] : undefined;
-}
-function areaOf(grid, place) {
-  return (hasOwn(grid.zones, place) ? grid.zones[place] : undefined) ?? [];
-}
-
-// src/shared/schema-check.ts
-var TYPE_WORDS = { object: "an object", array: "a list", string: "text", number: "a number", integer: "a whole number", boolean: "true or false", null: "null" };
-function hasType(value, type) {
-  switch (type) {
-    case "object":
-      return isRecord(value);
-    case "array":
-      return Array.isArray(value);
-    case "string":
-      return typeof value === "string";
-    case "number":
-      return typeof value === "number" && Number.isFinite(value);
-    case "integer":
-      return typeof value === "number" && Number.isInteger(value);
-    case "boolean":
-      return typeof value === "boolean";
-    default:
-      return value === null;
-  }
-}
-function pathText(path) {
-  return path.map((part, i) => typeof part === "number" ? `[${part}]` : i === 0 ? part : /^[A-Za-z_$][\w$]*$/.test(part) ? `.${part}` : `[${JSON.stringify(part)}]`).join("");
-}
-function quoted(value) {
-  return typeof value === "string" ? `"${value}"` : JSON.stringify(value);
-}
-function checkSchema(root, value, others = []) {
-  const out = [];
-  const documents = [root, ...others];
-  const resolve = (schema, base) => {
-    let s = schema;
-    let doc = base;
-    for (let guard = 0;s.$ref && guard < 16; guard++) {
-      const hash = s.$ref.indexOf("#");
-      const uri = hash < 0 ? s.$ref : s.$ref.slice(0, hash);
-      const name = hash < 0 ? "" : s.$ref.slice(hash);
-      if (uri !== "") {
-        const target = documents.find((d) => d.$id === uri);
-        if (!target)
-          return [{}, doc];
-        doc = target;
-      }
-      if (name === "" || name === "#") {
-        s = doc;
-        continue;
-      }
-      const def = name.startsWith("#/$defs/") ? name.slice("#/$defs/".length) : "";
-      const target = doc.$defs && hasOwn(doc.$defs, def) ? doc.$defs[def] : undefined;
-      if (!target)
-        return [{}, doc];
-      s = target;
-    }
-    return [s, doc];
-  };
-  const text = (schema, value, path, subject, into) => {
-    const length = [...value].length;
-    if (schema.minLength !== undefined && length < schema.minLength)
-      into.push({ path, message: schema.minLength === 1 ? `${subject}can't be empty` : `${subject}should be at least ${schema.minLength} characters` });
-    if (schema.maxLength !== undefined && length > schema.maxLength)
-      into.push({ path, message: schema.maxLength === 1 ? `${subject}should be one character` : `${subject}should be at most ${schema.maxLength} characters` });
-    if (schema.pattern !== undefined && !new RegExp(schema.pattern, "u").test(value))
-      into.push({ path, message: `${subject}should be ${schema.description ?? `like ${schema.pattern}`}` });
-  };
-  const visit = (raw, value, path, into, base) => {
-    const [schema, doc] = resolve(raw, base);
-    const push = (message, at = path) => void into.push({ path: at, message });
-    if (schema.type !== undefined && !hasType(value, schema.type))
-      return push(`should be ${TYPE_WORDS[schema.type] ?? schema.type}`);
-    if (schema.enum && !schema.enum.some((e) => e === value))
-      return push(`should be ${schema.enum.map(quoted).join(", ").replace(/, ([^,]*)$/, " or $1")}`);
-    if (schema.anyOf) {
-      const tries = schema.anyOf.map((branch) => {
-        const found = [];
-        visit(branch, value, path, found, doc);
-        return { branch: resolve(branch, doc)[0], found };
-      });
-      if (tries.some((t) => t.found.length === 0))
-        return;
-      const objects = isRecord(value) ? tries.filter((t) => t.branch.type === "object") : [];
-      const tagged = objects.filter((t) => {
-        const tags = Object.entries(t.branch.properties ?? {}).flatMap(([key, s]) => {
-          const allowed = resolve(s, doc)[0].enum;
-          return allowed?.length === 1 ? [[key, allowed[0]]] : [];
-        });
-        return tags.length > 0 && isRecord(value) && tags.every(([key, tag]) => hasOwn(value, key) && value[key] === tag);
-      });
-      const named = tagged.length > 0 ? tagged : objects.filter((t) => isRecord(value) && (t.branch.required ?? []).every((k) => hasOwn(value, k)));
-      if (named.length === 1 && named[0])
-        return void into.push(...named[0].found);
-      return push(`should be ${tries.map((t) => t.branch.title ?? TYPE_WORDS[t.branch.type ?? ""] ?? "something else").join(", ").replace(/, ([^,]*)$/, " or $1")}`);
-    }
-    if (typeof value === "string")
-      text(schema, value, path, "", into);
-    if (typeof value === "number") {
-      if (schema.minimum !== undefined && value < schema.minimum)
-        push(`should be at least ${schema.minimum}`);
-      if (schema.maximum !== undefined && value > schema.maximum)
-        push(`should be at most ${schema.maximum}`);
-      if (schema.exclusiveMinimum !== undefined && value <= schema.exclusiveMinimum)
-        push(`should be more than ${schema.exclusiveMinimum}`);
-    }
-    if (Array.isArray(value)) {
-      if (schema.minItems !== undefined && value.length < schema.minItems)
-        push(schema.minItems === schema.maxItems ? `should have ${schema.minItems} items` : `should have at least ${schema.minItems} item${schema.minItems === 1 ? "" : "s"}`);
-      else if (schema.maxItems !== undefined && value.length > schema.maxItems)
-        push(schema.minItems === schema.maxItems ? `should have ${schema.maxItems} items` : `should have at most ${schema.maxItems} items`);
-      if (schema.items)
-        value.forEach((item, i) => visit(schema.items ?? {}, item, [...path, i], into, doc));
-    }
-    if (isRecord(value)) {
-      for (const key of schema.required ?? [])
-        if (!hasOwn(value, key))
-          push(`needs "${key}"`);
-      for (const [key, item] of Object.entries(value)) {
-        const own = schema.properties && hasOwn(schema.properties, key) ? schema.properties[key] : undefined;
-        if (schema.propertyNames)
-          text(resolve(schema.propertyNames, doc)[0], key, [...path, key], `the key ${quoted(key)} `, into);
-        if (own)
-          visit(own, item, [...path, key], into, doc);
-        else if (schema.additionalProperties === false)
-          push(`${quoted(key)} isn't a field here`, [...path, key]);
-        else if (isRecord(schema.additionalProperties))
-          visit(schema.additionalProperties, item, [...path, key], into, doc);
-      }
-    }
-  };
-  visit(root, value, [], out, root);
-  return out;
-}
-
-// src/shared/maps.ts
-var MAP_SCHEMA = lre_map_v1_schema_default;
-var VOID_TERRAIN = "void";
-var DEFAULT_LEGEND = { "#": "wall", ".": "floor", "+": "door", " ": { terrain: VOID_TERRAIN, blocked: true } };
-function readMap(value) {
-  const problems = checkSchema(MAP_SCHEMA, value).map((p) => ({ severity: "error", path: p.path, code: "map_shape", message: p.message }));
-  return { map: problems.length === 0 ? value : null, problems };
-}
-function nameOfId(id) {
-  const words = id.replace(/[_-]+/g, " ").trim();
-  return words ? `${words.charAt(0).toUpperCase()}${words.slice(1)}` : id;
-}
-function cellOf(map, ch) {
-  const legend = map.legend ?? {};
-  return hasOwn(legend, ch) ? legend[ch] : hasOwn(DEFAULT_LEGEND, ch) ? DEFAULT_LEGEND[ch] : undefined;
-}
-function layoutOf(map) {
-  const rows = (map.layout ?? []).map((row) => [...row]);
-  return { rows, width: Math.max(0, ...rows.map((r) => r.length)), height: rows.length };
-}
-function owned(item) {
-  return isRecord(item) && typeof item.map === "string";
-}
-function linkRouteId(map, from, to) {
-  return `${map}:${from}:${to}`;
-}
-function plan(maps, authored) {
-  const taken = new Set(Object.keys(authored));
-  const candidates = [];
-  for (const key of Object.keys(maps).sort()) {
-    const { map } = readMap(maps[key]);
-    if (!map || !safeKey(key))
-      continue;
-    const places = [];
-    for (const p of map.places ?? []) {
-      if (taken.has(p.id))
-        continue;
-      taken.add(p.id);
-      places.push(p);
-    }
-    candidates.push({ key, map, places });
-  }
-  let live = candidates;
-  for (let guard = 0;guard <= candidates.length; guard++) {
-    const ids = new Set([...Object.keys(authored), ...live.flatMap((c) => c.places.map((p) => p.id))]);
-    const next = live.filter((c) => ids.has(c.map.scope) && !c.places.some((p) => p.id === c.map.scope));
-    if (next.length === live.length)
-      break;
-    live = next;
-  }
-  return live;
-}
-var DEFAULT_SIGHT_RADIUS = 3;
-function mapSettingsOf(world) {
-  const raw = isRecord(world.mapSettings) ? world.mapSettings : {};
-  const grid = isRecord(raw.grid) ? raw.grid : {};
-  const radius = grid.sightRadius;
-  return {
-    display: raw.display === "fog" ? "fog" : "knowledge",
-    grid: { movement: grid.movement === true, sightRadius: typeof radius === "number" && Number.isFinite(radius) ? Math.min(SIGHT_MAX, Math.max(0, Math.round(radius))) : DEFAULT_SIGHT_RADIUS }
-  };
-}
-function compileGrid(key, map, mine, places, grids) {
-  const scope = places[map.scope];
-  if (!scope || scope.grid !== undefined || hasOwn(grids, key))
-    return;
-  const { rows, width, height } = layoutOf(map);
-  const ids = new Set(mine.map((p) => p.id));
-  const terrain = [];
-  const blocked = [];
-  const zones = new Map;
-  const rooms = new Map;
-  const things = [];
-  for (let y = 0;y < height; y += 1) {
-    for (let x = 0;x < width; x += 1) {
-      const index = y * width + x;
-      const cell = cellOf(map, rows[y]?.[x] ?? " ") ?? "floor";
-      if (cell === "wall") {
-        terrain.push("wall");
-        blocked.push(index);
-      } else if (cell === "floor" || cell === "door")
-        terrain.push(cell);
-      else if ("terrain" in cell) {
-        terrain.push(cell.terrain);
-        if (cell.blocked === true)
-          blocked.push(index);
-      } else if ("item" in cell) {
-        terrain.push("floor");
-        things.push({ id: cell.item, index, place: cell.place !== undefined && ids.has(cell.place) ? cell.place : null });
-      } else {
-        terrain.push("floor");
-        const zone = "place" in cell ? ids.has(cell.place) ? cell.place : null : cell.zone;
-        if (zone !== null)
-          zones.set(zone, [...zones.get(zone) ?? [], index]);
-        if ("place" in cell && zone !== null)
-          rooms.set(index, zone);
-      }
-    }
-  }
-  const items = {};
-  for (const t of things) {
-    if (hasOwn(items, t.id))
-      continue;
-    items[t.id] = t.index;
-    const votes = new Map;
-    const x = t.index % width;
-    for (const n of [t.index - width, t.index + width, x > 0 ? t.index - 1 : -1, x < width - 1 ? t.index + 1 : -1]) {
-      const room = rooms.get(n);
-      if (room !== undefined)
-        votes.set(room, (votes.get(room) ?? 0) + 1);
-    }
-    const room = t.place ?? [...votes].sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1))[0]?.[0];
-    if (room !== undefined)
-      zones.set(room, [...zones.get(room) ?? [], t.index].sort((a, b) => a - b));
-  }
-  grids[key] = { id: key, width, height, ...map.cellMeters !== undefined ? { cellMeters: map.cellMeters } : {}, terrain, blocked, zones: Object.fromEntries(zones), ...things.length > 0 ? { items } : {}, map: key };
-  places[map.scope] = { ...scope, grid: key };
-  for (const p of mine) {
-    const def = places[p.id];
-    if (!def)
-      continue;
-    const cell = p.at ? p.at[0] < width && p.at[1] < height ? { x: p.at[0], y: p.at[1] } : null : nearestMiddle(zones.get(p.id) ?? [], width);
-    if (cell)
-      places[p.id] = { ...def, cell };
-  }
-}
-function compileFloorRoutes(key, mine, places, grids, routes) {
-  const grid = hasOwn(grids, key) ? grids[key] : undefined;
-  if (!grid || grid.map !== key)
-    return;
-  const ids = mine.map((p) => p.id).filter((id) => places[id]?.map === key).sort();
-  const rooms = new Map;
-  for (const id of ids)
-    for (const cell of areaOf(grid, id))
-      rooms.set(cell, id);
-  const cells = new Map;
-  for (const id of ids) {
-    const at = places[id]?.cell;
-    const index = at ? cellIndex(grid, at) : null;
-    if (index !== null)
-      cells.set(id, index);
-  }
-  for (const [a, from] of cells) {
-    const cost = gridCosts(grid, from, (step, next) => {
-      const room = rooms.get(step);
-      return room === undefined || room === a || rooms.get(next) === room;
-    });
-    for (const [b, to] of cells) {
-      const walk = cost[to] ?? Infinity;
-      const id = linkRouteId(key, a, b);
-      if (b <= a || !Number.isFinite(walk) || hasOwn(routes, id))
-        continue;
-      routes[id] = { id, from: a, to: b, modes: { walk: { minutes: Math.max(1, costMinutes(grid, walk)) } }, bidirectional: true, map: key };
-    }
-  }
-}
-function compileLinks(key, map, places, routes) {
-  const made = new Map;
-  for (const link of map.links ?? []) {
-    if (link.from === link.to || !hasOwn(places, link.from) || !hasOwn(places, link.to))
-      continue;
-    const id = linkRouteId(key, link.from, link.to);
-    const route = made.get(id) ?? { id, from: link.from, to: link.to, modes: {}, bidirectional: true, map: key };
-    const mode = link.mode ?? "walk";
-    const had = route.modes[mode];
-    if (!had || link.minutes < had.minutes)
-      route.modes[mode] = { minutes: link.minutes };
-    route.bidirectional = route.bidirectional && link.bidirectional !== false;
-    made.set(id, route);
-  }
-  for (const [id, route] of made)
-    if (!hasOwn(routes, id))
-      routes[id] = route;
-}
-function compileMaps(doc) {
-  const maps = isRecord(doc.maps) ? doc.maps : {};
-  if (Object.keys(maps).length === 0 && ![doc.places, doc.routes, doc.grids].some((items) => Object.values(items).some(owned)))
-    return doc;
-  const madeGrids = new Set(Object.keys(doc.grids).filter((id) => owned(doc.grids[id])));
-  const places = {};
-  for (const [id, p] of Object.entries(doc.places)) {
-    if (owned(p))
-      continue;
-    if (p.grid !== undefined && madeGrids.has(p.grid)) {
-      const authored = { ...p };
-      delete authored.grid;
-      places[id] = authored;
-    } else
-      places[id] = p;
-  }
-  const routes = Object.fromEntries(Object.entries(doc.routes).filter(([, r]) => !owned(r)));
-  const grids = Object.fromEntries(Object.entries(doc.grids).filter(([, g]) => !owned(g)));
-  const plans = plan(maps, places);
-  for (const { key, map, places: mine } of plans)
-    for (const p of mine)
-      places[p.id] = { id: p.id, name: p.name ?? nameOfId(p.id), parent: map.scope, fields: {}, map: key };
-  const movement = mapSettingsOf(doc).grid.movement;
-  for (const { key, map, places: mine } of plans) {
-    if (map.layout)
-      compileGrid(key, map, mine, places, grids);
-    else {
-      for (const p of mine) {
-        const def = places[p.id];
-        if (def && p.at)
-          places[p.id] = { ...def, layoutPos: { x: p.at[0], y: p.at[1] } };
-      }
-    }
-    compileLinks(key, map, places, routes);
-    if (map.layout && movement && (map.links ?? []).length === 0)
-      compileFloorRoutes(key, mine, places, grids, routes);
-  }
-  return { ...doc, places, routes, grids };
-}
-function childIn(places, scope, place) {
-  let cur = place;
-  for (let guard = 0;cur !== undefined && guard < 64; guard++) {
-    const parent = hasOwn(places, cur) ? places[cur]?.parent : undefined;
-    if (parent === scope)
-      return cur;
-    cur = parent;
-  }
+  if (!isRecord(v))
+    return "its days aren't a set of constraints";
+  const ints = (x, lo, hi) => Array.isArray(x) && x.every((n) => Number.isInteger(n) && n >= lo && n <= hi);
+  const strs = (x) => Array.isArray(x) && x.every((s) => typeof s === "string");
+  if (v.weekdays !== undefined && !ints(v.weekdays, 0, 6))
+    return "weekdays are 0 (Sunday) to 6";
+  if (v.off !== undefined && v.off !== "only" && v.off !== "never")
+    return "days off are only or never";
+  if (v.holidays !== undefined && !strs(v.holidays))
+    return "holidays are calendar ids";
+  if (v.except !== undefined && !strs(v.except))
+    return "except lists calendar ids";
+  if (v.birthday !== undefined && v.birthday !== "own" && v.birthday !== "friend")
+    return "a birthday is own or friend";
+  if (v.seasons !== undefined && !(Array.isArray(v.seasons) && v.seasons.every((s) => SEASONS.some((x) => x === s))))
+    return "seasons are spring, summer, autumn and winter";
+  if (v.weather !== undefined && v.weather !== "fair" && v.weather !== "foul")
+    return "weather is fair or foul";
   return null;
 }
-function cutOff(doc, map) {
-  const kids = Object.values(doc.places).filter((p) => p.parent === map.scope).map((p) => p.id).sort();
-  const linked = (map.links ?? []).find((l) => childIn(doc.places, map.scope, l.from) !== null && childIn(doc.places, map.scope, l.to) !== null);
-  const start = linked ? childIn(doc.places, map.scope, linked.from) : null;
-  if (start === null || kids.length < 2)
-    return [];
-  const root = new Map(kids.map((id) => [id, id]));
-  const find = (id) => {
-    let cur = id;
-    for (let guard = 0;root.get(cur) !== cur && guard < kids.length; guard++)
-      cur = root.get(cur) ?? cur;
-    return cur;
-  };
-  for (const route of Object.values(doc.routes)) {
-    const a = childIn(doc.places, map.scope, route.from);
-    const b = childIn(doc.places, map.scope, route.to);
-    if (a !== null && b !== null && a !== b)
-      root.set(find(a), find(b));
-  }
-  return kids.filter((id) => find(id) !== find(start));
-}
-function apartOnFloor(doc, key) {
-  const grid = hasOwn(doc.grids, key) ? doc.grids[key] : undefined;
-  if (!grid || grid.map !== key)
-    return [];
-  const ids = Object.values(doc.places).filter((p) => p.map === key && p.cell !== undefined && cellIndex(grid, p.cell) !== null).map((p) => p.id).sort();
-  const reached = new Set(ids.slice(0, 1));
-  for (let grew = true;grew; ) {
-    grew = false;
-    for (const r of Object.values(doc.routes)) {
-      if (r.map !== key || reached.has(r.from) === reached.has(r.to))
-        continue;
-      reached.add(r.from);
-      reached.add(r.to);
-      grew = true;
-    }
-  }
-  return ids.filter((id) => !reached.has(id));
-}
-function mapProblems(world) {
-  const doc = compileMaps(world);
-  const maps = isRecord(world.maps) ? world.maps : {};
-  const out = new Map;
-  const placeName = (id) => hasOwn(doc.places, id) ? doc.places[id]?.name ?? id : id;
-  for (const key of Object.keys(maps).sort()) {
-    const { map, problems } = readMap(maps[key]);
-    out.set(key, problems);
-    if (!map)
-      continue;
-    const err = (path, code, message) => void problems.push({ severity: "error", path, code, message });
-    if (map.id !== key)
-      err(["id"], "map_id", `the id should be "${key}", the map's key in the world`);
-    const ids = (map.places ?? []).map((p) => p.id);
-    const scope = hasOwn(doc.places, map.scope) ? doc.places[map.scope] : undefined;
-    if (!scope)
-      err(["scope"], "map_scope", `there's no place "${map.scope}" for the map to draw`);
-    else if (ids.includes(map.scope))
-      err(["scope"], "map_scope", `"${map.scope}" is one of this map's own places; a map draws the inside of another place`);
-    const placed = scope !== undefined && !ids.includes(map.scope);
-    const seen = new Set;
-    (map.places ?? []).forEach((p, i) => {
-      if (seen.has(p.id))
-        err(["places", i, "id"], "map_place", `"${p.id}" is listed twice`);
-      else {
-        const made = hasOwn(doc.places, p.id) ? doc.places[p.id] : undefined;
-        if (placed && made && made.map !== key)
-          err(["places", i, "id"], "map_place", made.map ? `the map "${made.map}" already has a place "${p.id}"` : `the world already has a place "${p.id}" (${made.name}); give this one another id`);
-      }
-      seen.add(p.id);
-      if (p.opens !== undefined) {
-        const inner = hasOwn(maps, p.opens) ? maps[p.opens] : undefined;
-        if (!isRecord(inner))
-          err(["places", i, "opens"], "map_opens", `there's no map "${p.opens}"`);
-        else if (inner.scope !== p.id)
-          err(["places", i, "opens"], "map_opens", `the map "${p.opens}" draws "${String(inner.scope)}", not "${p.id}"`);
-      }
-    });
-    if (map.layout) {
-      const { rows, width, height } = layoutOf(map);
-      rows.forEach((row, y) => {
-        if (row.length !== width)
-          err(["layout", y], "map_layout", `row ${y + 1} is ${row.length} wide; every row needs the widest's width, ${width}`);
-      });
-      if (map.size && (map.size[0] !== width || map.size[1] !== height))
-        err(["size"], "map_layout", `the layout is ${width} × ${height}, not ${map.size[0]} × ${map.size[1]}`);
-      const unknown = new Map;
-      rows.forEach((row, y) => row.forEach((ch) => cellOf(map, ch) || unknown.has(ch) ? undefined : unknown.set(ch, y)));
-      for (const [ch, y] of unknown)
-        err(["layout", y], "map_legend", `"${ch}" isn't in the legend: add it, or use # (wall), . (floor), + (door) or a space`);
-      const lying = new Map;
-      rows.forEach((row) => row.forEach((ch) => {
-        const cell = cellOf(map, ch);
-        if (typeof cell === "object" && "item" in cell)
-          lying.set(cell.item, (lying.get(cell.item) ?? 0) + 1);
-      }));
-      for (const [ch, cell] of Object.entries(map.legend ?? {})) {
-        if (typeof cell !== "object")
-          continue;
-        if ("place" in cell && cell.place !== undefined && !ids.includes(cell.place))
-          err(["legend", ch], "map_legend", `"${cell.place}" isn't one of this map's places`);
-        if (!("item" in cell))
-          continue;
-        const thing = hasOwn(world.entities, cell.item) ? world.entities[cell.item] : undefined;
-        const drawn = lying.get(cell.item) ?? 0;
-        const other = Object.values(doc.grids).find((g) => g.map !== key && g.items !== undefined && hasOwn(g.items, cell.item));
-        if (!thing)
-          err(["legend", ch, "item"], "map_item", `there's no "${cell.item}" in the world to lie here`);
-        else if (thing.relations.some((r) => r.type === "in"))
-          problems.push({ severity: "warning", path: ["legend", ch, "item"], code: "map_item", message: `${thing.name} starts inside something, so it won't lie on the map` });
-        else if (drawn > 1)
-          err(["legend", ch, "item"], "map_item", `${thing.name} is drawn on ${drawn} cells; a thing lies on one`);
-        else if (drawn > 0 && other)
-          problems.push({ severity: "warning", path: ["legend", ch, "item"], code: "map_item", message: `${thing.name} already lies on the map "${other.map ?? other.id}"` });
-      }
-      (map.places ?? []).forEach((p, i) => {
-        if (p.at && (p.at[0] >= width || p.at[1] >= height))
-          err(["places", i, "at"], "map_place", `[${p.at[0]}, ${p.at[1]}] is outside the ${width} × ${height} layout`);
-      });
-      if (placed && scope) {
-        const grid = hasOwn(doc.grids, key) ? doc.grids[key] : undefined;
-        if (grid && grid.map !== key)
-          err(["id"], "map_grid", `the world already has a grid "${key}"; give the map another id`);
-        else if (scope.grid !== key) {
-          const other = scope.grid !== undefined && hasOwn(doc.grids, scope.grid) ? doc.grids[scope.grid]?.map : undefined;
-          err(["scope"], "map_grid", other ? `the map "${other}" already draws ${scope.name}'s grid` : `${scope.name} already has the grid "${scope.grid ?? ""}"; take it off the place for this map to draw its grid`);
-        }
-        const apart = mapSettingsOf(world).grid.movement && (map.links ?? []).length === 0 ? apartOnFloor(doc, key).map(placeName) : [];
-        const listed = apart.length <= 1 ? apart.join("") : `${apart.slice(0, -1).join(", ")} and ${apart.at(-1) ?? ""}`;
-        if (apart.length > 0)
-          problems.push({ severity: "warning", path: ["layout"], code: "map_floor_apart", message: `With the grid system on, people walk ${scope.name}'s floor plan, and no door or open floor joins ${listed} to the rest: add a door (+), or give the map links.` });
-      }
-    } else if (map.size) {
-      const [w, h] = map.size;
-      (map.places ?? []).forEach((p, i) => {
-        if (p.at && (p.at[0] > w || p.at[1] > h))
-          err(["places", i, "at"], "map_place", `[${p.at[0]}, ${p.at[1]}] is outside the ${w} × ${h} map`);
-      });
-    }
-    (map.links ?? []).forEach((l, i) => {
-      if (l.from === l.to)
-        err(["links", i], "map_link", "a link joins two different places");
-      for (const end of ["from", "to"])
-        if (!hasOwn(doc.places, l[end]))
-          err(["links", i, end], "map_link", `there's no place "${l[end]}"`);
-      const route = hasOwn(doc.routes, linkRouteId(key, l.from, l.to)) ? doc.routes[linkRouteId(key, l.from, l.to)] : undefined;
-      if (route && route.map !== key)
-        err(["links", i], "map_link", `the world already has a route "${route.id}"`);
-    });
-    if (placed && scope) {
-      const cut = cutOff(doc, map).map(placeName);
-      const listed = cut.length <= 1 ? cut.join("") : `${cut.slice(0, -1).join(", ")} and ${cut.at(-1) ?? ""}`;
-      if (cut.length > 0)
-        problems.push({ severity: "warning", path: ["links"], code: "map_partial_links", message: `With links, ${scope.name}'s places join only where they're linked, and nothing links ${listed} to the rest: link ${cut.length === 1 ? "it" : "them"} too, or take the links out.` });
-    }
-  }
+function blockShapeProblems(v, world = true) {
+  if (!isRecord(v))
+    return ["a block is an object"];
+  const out = [];
+  if (typeof v.id !== "string" || v.id === "")
+    out.push("a block has an id");
+  if (v.off === true)
+    return out;
+  if (typeof v.label !== "string" || v.label.trim() === "")
+    out.push("a block has a label");
+  if (typeof v.activity !== "string" || v.activity.trim() === "")
+    out.push("a block has an activity");
+  if (!ROUTINE_BLOCK_KINDS.some((k) => k === v.kind))
+    out.push("its kind is fixed, flexible or optional");
+  if (typeof v.minutes !== "number" || !Number.isInteger(v.minutes) || v.minutes < 1 || v.minutes > 1440)
+    out.push("its length (minutes) is 1 to 1,440 minutes");
+  if (v.kind === "fixed" && !isTime(v.at))
+    out.push("a fixed block starts at an HH:MM time (at)");
+  if (v.kind !== "fixed" && v.at !== undefined)
+    out.push("only a fixed block has a start time (at)");
+  if (v.kind !== "fixed" && !(isRecord(v.window) && isTime(v.window.from) && isTime(v.window.to)))
+    out.push("its window is HH:MM to HH:MM");
+  if (v.perWeek !== undefined && !(v.kind !== "fixed" && Number.isInteger(v.perWeek) && typeof v.perWeek === "number" && v.perWeek >= 1 && v.perWeek <= 7))
+    out.push("times a week (perWeek) is 1 to 7, for a flexible or optional block");
+  if (v.chance !== undefined && !(v.kind === "optional" && typeof v.chance === "number" && v.chance > 0 && v.chance <= 1))
+    out.push("a chance is above 0 and at most 1, for an optional block");
+  if (v.priority !== undefined && !(typeof v.priority === "number" && Number.isInteger(v.priority) && v.priority >= 1 && v.priority <= 5))
+    out.push("its priority is 1 to 5");
+  if (v.needs !== undefined && !(Array.isArray(v.needs) && v.needs.every((n) => typeof n === "string")))
+    out.push("its needs are names");
+  if (v.private !== undefined && typeof v.private !== "boolean")
+    out.push("private is true or false");
+  if (v.company !== undefined && !(isRecord(v.company) && isRecord(v.company.who) && (v.company.invite === undefined || typeof v.company.invite === "boolean")))
+    out.push("its company is {who: a selector, invite?}");
+  for (const p of [placeProblem(v.place), daysProblem(v.days), sourceProblem(v.source, world)])
+    if (p)
+      out.push(p);
   return out;
 }
-function compact(value) {
-  if (Array.isArray(value))
-    return `[${value.map(compact).join(", ")}]`;
-  if (isRecord(value)) {
-    const entries = Object.entries(value);
-    return entries.length === 0 ? "{}" : `{ ${entries.map(([k, v]) => `${JSON.stringify(k)}: ${compact(v)}`).join(", ")} }`;
-  }
-  return JSON.stringify(value) ?? "null";
-}
-function pretty(value, indent, expand) {
-  const one = compact(value);
-  if (!(Array.isArray(value) || isRecord(value)) || !expand && indent.length + one.length <= 96)
-    return one;
-  const next = `${indent}  `;
-  if (Array.isArray(value))
-    return value.length === 0 ? "[]" : `[
-${value.map((v) => `${next}${pretty(v, next, false)}`).join(`,
-`)}
-${indent}]`;
-  const entries = Object.entries(value);
-  return entries.length === 0 ? "{}" : `{
-${entries.map(([k, v]) => `${next}${JSON.stringify(k)}: ${pretty(v, next, k === "layout")}`).join(`,
-`)}
-${indent}}`;
-}
-function formatMap(value) {
-  return pretty(value, "", true);
-}
-function mapTemplate(kind, id, scope) {
-  const place = (name) => `${id}_${name}`;
-  if (kind === "grid") {
-    return {
-      id,
-      scope,
-      title: "Ground floor",
-      layout: ["#############", "#ppppp#kkkkk#", "#ppppp+kkkkk#", "#ppppp#kkkkk#", "###+#####+###", "#hhhhhhhhhhh#", "#####+#######"],
-      legend: { p: { place: place("parlour") }, k: { place: place("kitchen") }, h: { place: place("hallway") } },
-      places: [
-        { id: place("parlour"), name: "Parlour" },
-        { id: place("kitchen"), name: "Kitchen" },
-        { id: place("hallway"), name: "Hallway" }
-      ]
-    };
-  }
-  return {
-    id,
-    scope,
-    title: "Town",
-    size: [100, 100],
-    places: [
-      { id: place("square"), name: "Square", at: [50, 50] },
-      { id: place("inn"), name: "Inn", at: [25, 30] },
-      { id: place("docks"), name: "Docks", at: [80, 75] }
-    ],
-    links: [
-      { from: place("square"), to: place("inn"), minutes: 3 },
-      { from: place("square"), to: place("docks"), minutes: 6 }
-    ]
-  };
-}
-
-// src/frontend/gm/ui.tsx
-function usePages() {
-  const [page, setPage] = d2(null);
-  const ref = T2(null);
-  const opener = T2(null);
-  const open = page !== null;
-  const shown = T2(open);
-  A(() => {
-    if (open === shown.current)
-      return;
-    shown.current = open;
-    if (open) {
-      ref.current?.querySelector(":scope > .lre-gm-page .lre-page-header button")?.focus();
-      return;
-    }
-    const back = opener.current;
-    opener.current = null;
-    if (back?.isConnected)
-      back.focus();
-  }, [open]);
-  return {
-    page,
-    open: (next) => {
-      if (page === null)
-        opener.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-      setPage(next);
-    },
-    back: () => setPage(null),
-    host: {
-      ref,
-      onKeyDown: (event) => {
-        if (event.key !== "Escape" || page === null || event.defaultPrevented)
-          return;
-        event.preventDefault();
-        event.stopPropagation();
-        setPage(null);
-      }
-    }
-  };
-}
-function GmPage(props) {
-  return /* @__PURE__ */ u3("div", {
-    class: "lre-gm-page",
-    "data-lre-gm-page": props.name,
-    children: [
-      /* @__PURE__ */ u3(PageHeader, {
-        title: props.title,
-        subtitle: props.subtitle,
-        onBack: props.onBack,
-        backLabel: props.backLabel,
-        actions: props.actions
-      }, undefined, false, undefined, this),
-      props.children
-    ]
-  }, undefined, true, undefined, this);
-}
-function ActionRows(props) {
-  return /* @__PURE__ */ u3("div", {
-    class: "lre-gm-rows",
-    role: "list",
-    "aria-label": props.label,
-    children: props.children
-  }, undefined, false, undefined, this);
-}
-function ActionRow(props) {
-  return /* @__PURE__ */ u3("div", {
-    class: "lre-gm-row",
-    role: "listitem",
-    children: [
-      /* @__PURE__ */ u3("div", {
-        class: "lre-gm-row-main",
-        children: [
-          /* @__PURE__ */ u3("span", {
-            class: "lre-gm-row-text",
-            children: [
-              /* @__PURE__ */ u3("span", {
-                class: "lre-gm-row-title",
-                children: props.title
-              }, undefined, false, undefined, this),
-              props.subtitle !== undefined ? /* @__PURE__ */ u3("span", {
-                class: "lre-gm-row-sub",
-                children: props.subtitle
-              }, undefined, false, undefined, this) : null,
-              props.id !== undefined ? /* @__PURE__ */ u3(IdText, {
-                id: props.id
-              }, undefined, false, undefined, this) : null
-            ]
-          }, undefined, true, undefined, this),
-          props.value !== undefined ? /* @__PURE__ */ u3("span", {
-            class: props.tone ? `lre-gm-row-value lre-${props.tone}` : "lre-gm-row-value",
-            children: props.value
-          }, undefined, false, undefined, this) : null,
-          props.actions !== undefined ? /* @__PURE__ */ u3("span", {
-            class: "lre-gm-row-actions",
-            children: props.actions
-          }, undefined, false, undefined, this) : null
-        ]
-      }, undefined, true, undefined, this),
-      props.children
-    ]
-  }, undefined, true, undefined, this);
-}
-function GmCard(props) {
-  return /* @__PURE__ */ u3("section", {
-    class: "lre-card lre-gm-card",
-    "data-lre-gm-card": props.name,
-    children: [
-      /* @__PURE__ */ u3("div", {
-        class: "lre-gm-card-head",
-        children: [
-          /* @__PURE__ */ u3("div", {
-            class: "lre-gm-card-titles",
-            children: [
-              /* @__PURE__ */ u3("h3", {
-                class: "lre-gm-card-title",
-                children: props.title
-              }, undefined, false, undefined, this),
-              props.subtitle !== undefined ? /* @__PURE__ */ u3("span", {
-                class: "lre-gm-card-sub",
-                children: props.subtitle
-              }, undefined, false, undefined, this) : null,
-              props.id !== undefined ? /* @__PURE__ */ u3(IdText, {
-                id: props.id
-              }, undefined, false, undefined, this) : null
-            ]
-          }, undefined, true, undefined, this),
-          props.badges !== undefined ? /* @__PURE__ */ u3("span", {
-            class: "lre-gm-badges",
-            children: props.badges
-          }, undefined, false, undefined, this) : null
-        ]
-      }, undefined, true, undefined, this),
-      props.children
-    ]
-  }, undefined, true, undefined, this);
-}
-function BuildLink() {
-  const app = useApp();
-  return /* @__PURE__ */ u3(Button, {
-    variant: "ghost",
-    icon: "hammer",
-    onClick: () => app.ui.update((ui) => ({ ...ui, mode: "build" })),
-    children: "Kinds and places are the world's: edit them in Build"
-  }, undefined, false, undefined, this);
+function routineShapeProblems(v) {
+  if (!isRecord(v))
+    return ["a routine is an object"];
+  const out = [];
+  if (typeof v.id !== "string" || v.id === "")
+    out.push("a routine has an id");
+  if (v.label !== undefined && typeof v.label !== "string")
+    out.push("its label is text");
+  if (v.owner !== undefined && !(typeof v.owner === "string" ? v.owner !== "" : isRecord(v.owner)))
+    out.push("its owner is an entity, a group, a kind or a selector");
+  if (v.inherit !== undefined && typeof v.inherit !== "boolean")
+    out.push("inherit is true or false");
+  const src = sourceProblem(v.source, true);
+  if (src)
+    out.push(src);
+  if (!Array.isArray(v.blocks))
+    return [...out, "a routine has a list of blocks"];
+  const ids = new Set;
+  v.blocks.forEach((b, i) => {
+    for (const p of blockShapeProblems(b, true))
+      out.push(`block ${i + 1}: ${p}`);
+    const id = isRecord(b) && typeof b.id === "string" ? b.id : "";
+    if (id !== "" && ids.has(id))
+      out.push(`block ${i + 1}: another block of this routine is ${id}`);
+    ids.add(id);
+  });
+  return out;
 }
 
 // src/frontend/scroll.ts
@@ -7304,6 +4047,817 @@ function Chip(props) {
   }, undefined, false, undefined, this);
 }
 
+// src/shared/classes.ts
+var NESTING_DEPTH = 16;
+function withinValue(values, value, ancestor) {
+  let current = value;
+  for (let depth = 0;current !== undefined && depth < NESTING_DEPTH; depth++) {
+    if (current === ancestor)
+      return true;
+    current = hasOwn(values, current) ? values[current]?.parent : undefined;
+  }
+  return false;
+}
+function facetsInOrder(world) {
+  if (!isRecord(world.classifications))
+    return [];
+  const rank = (f) => typeof f.order === "number" && Number.isFinite(f.order) ? f.order : Number.MAX_SAFE_INTEGER;
+  const name = (id, f) => typeof f.label === "string" ? f.label : id;
+  return Object.entries(world.classifications).filter(([, f]) => isRecord(f) && isRecord(f.values)).sort(([a, fa], [b, fb]) => rank(fa) - rank(fb) || name(a, fa).localeCompare(name(b, fb)) || a.localeCompare(b));
+}
+function facetTree(values) {
+  const ids = Object.keys(values);
+  const out = [];
+  const seen = new Set;
+  const visit = (id, depth) => {
+    const value = values[id];
+    if (!value || seen.has(id))
+      return;
+    seen.add(id);
+    out.push({ id, value, depth });
+    for (const child of ids)
+      if (values[child]?.parent === id)
+        visit(child, depth + 1);
+  };
+  for (const id of ids) {
+    const parent = values[id]?.parent;
+    if (parent === undefined || !hasOwn(values, parent))
+      visit(id, 0);
+  }
+  for (const id of ids)
+    visit(id, 0);
+  return out;
+}
+
+// src/frontend/build/facet-editor.tsx
+var CHIP_CHOICE_MAX = 6;
+function classesOf(v) {
+  if (!isRecord(v))
+    return;
+  return Object.fromEntries(Object.entries(v).map(([facet, values]) => [facet, Array.isArray(values) ? values.filter((x) => typeof x === "string") : []]));
+}
+function facetValuesOf(v) {
+  const out = {};
+  for (const [id, raw] of Object.entries(isRecord(v) ? v : {})) {
+    if (!isRecord(raw))
+      continue;
+    out[id] = { label: typeof raw.label === "string" ? raw.label : id, ...typeof raw.parent === "string" ? { parent: raw.parent } : {}, ...typeof raw.description === "string" ? { description: raw.description } : {} };
+  }
+  return out;
+}
+function removeValue(values, id) {
+  const parent = values[id]?.parent;
+  const out = {};
+  for (const [vid, v] of Object.entries(values)) {
+    if (vid === id)
+      continue;
+    if (v.parent !== id)
+      out[vid] = v;
+    else {
+      const { parent: _gone, ...rest } = v;
+      out[vid] = parent === undefined ? rest : { ...rest, parent };
+    }
+  }
+  return out;
+}
+function subtree(values, id) {
+  const out = new Set([id]);
+  for (let grew = true;grew; ) {
+    grew = false;
+    for (const [vid, v] of Object.entries(values)) {
+      if (v.parent !== undefined && out.has(v.parent) && !out.has(vid)) {
+        out.add(vid);
+        grew = true;
+      }
+    }
+  }
+  return out;
+}
+function parentLabel(values, v) {
+  return v.parent !== undefined && hasOwn(values, v.parent) ? values[v.parent]?.label : undefined;
+}
+function facetOptions(values) {
+  return facetTree(values).map(({ id, value }) => {
+    const parent = parentLabel(values, value);
+    return { value: id, label: value.label, ...parent !== undefined ? { sublabel: `in ${parent}` } : {} };
+  });
+}
+function ChipLines(props) {
+  if (props.option.sublabel === undefined)
+    return /* @__PURE__ */ u3(M, {
+      children: props.option.label
+    }, undefined, false, undefined, this);
+  return /* @__PURE__ */ u3("span", {
+    class: "lre-form-facet-lines",
+    children: [
+      /* @__PURE__ */ u3("span", {
+        children: props.option.label
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3("span", {
+        class: "lre-form-facet-in",
+        children: props.option.sublabel
+      }, undefined, false, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+}
+function idProblem2(id, taken) {
+  if (!id)
+    return "Give it an id.";
+  if (taken.has(id))
+    return "There's already a value with this id.";
+  return safeKey(id) ? null : "This id is reserved. Choose another.";
+}
+function FacetValuesInput(props) {
+  const values = props.value ?? {};
+  const showIds = useShowIds();
+  const idId = P2();
+  const [open, setOpen] = d2(null);
+  const [name, setName] = d2("");
+  const [typed, setTyped] = d2(null);
+  const edit = (id, patch) => {
+    const next = { ...values[id] ?? { label: id }, ...patch };
+    if (patch.parent === undefined && "parent" in patch)
+      delete next.parent;
+    if (patch.description === undefined && "description" in patch)
+      delete next.description;
+    props.onChange({ ...values, [id]: next });
+  };
+  const remove = (id) => {
+    if (open === id)
+      setOpen(null);
+    props.onChange(removeValue(values, id));
+  };
+  const taken = new Set(Object.keys(values));
+  const newId = typed ?? (name.trim() ? deriveId(name.trim(), taken) : "");
+  const problem = typed === null ? null : idProblem2(typed, taken);
+  const ready = name.trim() !== "" && newId !== "" && problem === null;
+  const add = () => {
+    if (!ready)
+      return;
+    props.onChange({ ...values, [newId]: { label: name.trim() } });
+    setName("");
+    setTyped(null);
+  };
+  const tree = facetTree(values);
+  const current = open !== null && hasOwn(values, open) ? values[open] : undefined;
+  const blocked = open !== null ? subtree(values, open) : null;
+  const idField = /* @__PURE__ */ u3(Field, {
+    label: "Id",
+    for: idId,
+    help: "How rules and entities refer to it. It follows the label until you change it.",
+    error: problem,
+    children: /* @__PURE__ */ u3("input", {
+      id: idId,
+      class: "lre-input lre-build-mono",
+      value: newId,
+      autoComplete: "off",
+      spellcheck: false,
+      "aria-invalid": problem !== null || undefined,
+      onInput: (event) => setTyped(event.currentTarget.value.replace(/[^\w-]/g, "_"))
+    }, undefined, false, undefined, this)
+  }, undefined, false, undefined, this);
+  return /* @__PURE__ */ u3("div", {
+    class: "lre-field",
+    "data-lre-facet-values": true,
+    children: [
+      /* @__PURE__ */ u3("span", {
+        class: "label",
+        children: props.label
+      }, undefined, false, undefined, this),
+      tree.length === 0 ? /* @__PURE__ */ u3("span", {
+        class: "lre-field-help",
+        children: "No values yet."
+      }, undefined, false, undefined, this) : /* @__PURE__ */ u3("div", {
+        class: "lre-form-items",
+        children: tree.map(({ id, value, depth }) => {
+          const parent = parentLabel(values, value);
+          const title = value.label || id;
+          const subtitle = parent !== undefined ? `in ${parent}` : value.parent !== undefined ? `in ${value.parent} (not a value)` : value.description;
+          return /* @__PURE__ */ u3("div", {
+            class: "lre-form-facet-row",
+            "data-depth": Math.min(depth, 4),
+            "data-lre-facet-value": id,
+            children: [
+              /* @__PURE__ */ u3(ItemRow, {
+                title,
+                subtitle,
+                onOpen: () => setOpen(id),
+                openLabel: `Edit ${title}`,
+                actions: /* @__PURE__ */ u3(IconButton, {
+                  icon: "trash",
+                  label: `Remove ${title}`,
+                  onClick: () => remove(id)
+                }, undefined, false, undefined, this)
+              }, undefined, false, undefined, this),
+              /* @__PURE__ */ u3("div", {
+                class: "lre-form-facet-row-issues",
+                children: props.issues(`${props.path}.${id}`)
+              }, undefined, false, undefined, this)
+            ]
+          }, id, true, undefined, this);
+        })
+      }, undefined, false, undefined, this),
+      open !== null && current ? /* @__PURE__ */ u3(FormSheet, {
+        title: current.label || open,
+        subtitle: props.label,
+        onClose: () => setOpen(null),
+        children: [
+          /* @__PURE__ */ u3("label", {
+            class: "lre-field",
+            children: [
+              /* @__PURE__ */ u3("span", {
+                class: "label",
+                children: "Label"
+              }, undefined, false, undefined, this),
+              /* @__PURE__ */ u3("input", {
+                class: "lre-input",
+                value: current.label,
+                onInput: (event) => edit(open, { label: event.currentTarget.value })
+              }, undefined, false, undefined, this)
+            ]
+          }, undefined, true, undefined, this),
+          /* @__PURE__ */ u3(RefPicker, {
+            label: "Nested under",
+            value: current.parent ?? "",
+            options: facetOptions(values).filter((o) => !blocked?.has(o.value)),
+            none: "Nothing: a top-level value",
+            onChange: (parent) => edit(open, { parent: parent === "" ? undefined : parent })
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3("label", {
+            class: "lre-field",
+            children: [
+              /* @__PURE__ */ u3("span", {
+                class: "label",
+                children: [
+                  "Description",
+                  /* @__PURE__ */ u3("span", {
+                    class: "lre-form-optional",
+                    children: " · optional"
+                  }, undefined, false, undefined, this)
+                ]
+              }, undefined, true, undefined, this),
+              /* @__PURE__ */ u3("input", {
+                class: "lre-input",
+                value: current.description ?? "",
+                onInput: (event) => edit(open, { description: event.currentTarget.value === "" ? undefined : event.currentTarget.value })
+              }, undefined, false, undefined, this)
+            ]
+          }, undefined, true, undefined, this),
+          props.issues(`${props.path}.${open}`),
+          /* @__PURE__ */ u3(IdText, {
+            id: open
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3("div", {
+            class: "lre-form-facet-actions",
+            children: /* @__PURE__ */ u3(Button, {
+              variant: "danger",
+              icon: "trash",
+              onClick: () => remove(open),
+              children: "Remove value"
+            }, undefined, false, undefined, this)
+          }, undefined, false, undefined, this)
+        ]
+      }, undefined, true, undefined, this) : null,
+      /* @__PURE__ */ u3("div", {
+        class: "lre-form-facet-new",
+        children: [
+          /* @__PURE__ */ u3("div", {
+            class: "lre-form-add",
+            children: [
+              /* @__PURE__ */ u3("input", {
+                class: "lre-input",
+                placeholder: "New value's label",
+                "aria-label": "New value's label",
+                value: name,
+                onInput: (event) => setName(event.currentTarget.value),
+                onKeyDown: (event) => {
+                  if (event.key !== "Enter")
+                    return;
+                  event.preventDefault();
+                  add();
+                }
+              }, undefined, false, undefined, this),
+              /* @__PURE__ */ u3(Button, {
+                size: "sm",
+                icon: "plus",
+                disabled: !ready,
+                onClick: add,
+                children: "Add value"
+              }, undefined, false, undefined, this)
+            ]
+          }, undefined, true, undefined, this),
+          name.trim() !== "" || typed !== null ? showIds ? idField : /* @__PURE__ */ u3(Disclosure, {
+            summary: "Advanced",
+            children: idField
+          }, undefined, false, undefined, this) : null
+        ]
+      }, undefined, true, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+}
+function ClassesInput(props) {
+  const value = props.value ?? {};
+  const facets = facetsInOrder(props.doc);
+  const set = (facet, values) => {
+    const next = { ...value };
+    if (values.length > 0)
+      next[facet] = values;
+    else
+      delete next[facet];
+    props.onChange(Object.keys(next).length > 0 ? next : undefined);
+  };
+  const stale = Object.keys(value).filter((facet) => !facets.some(([id]) => id === facet));
+  return /* @__PURE__ */ u3("div", {
+    class: "lre-field lre-form-facet-classes",
+    "data-lre-classes": true,
+    children: [
+      /* @__PURE__ */ u3("span", {
+        class: "label",
+        children: props.label
+      }, undefined, false, undefined, this),
+      facets.length === 0 ? /* @__PURE__ */ u3("span", {
+        class: "lre-field-help",
+        children: "No classifications yet: add facets in Build → Classifications."
+      }, undefined, false, undefined, this) : null,
+      facets.map(([facet, f]) => {
+        const held = value[facet] ?? [];
+        const options = facetOptions(f.values);
+        const known = (v) => options.some((o) => o.value === v);
+        const picker = !f.multiple && options.length > CHIP_CHOICE_MAX;
+        const extra = picker ? held.filter(known).slice(1) : [];
+        const odd = [...held.filter((v) => !known(v)).map((v) => ({ v, text: `${v} (not a value)` })), ...extra.map((v) => ({ v, text: `${options.find((o) => o.value === v)?.label ?? v} (only one allowed)` }))];
+        const warn = odd.length > 0 ? /* @__PURE__ */ u3("div", {
+          class: "lre-form-chips",
+          children: odd.map(({ v, text }) => /* @__PURE__ */ u3(Chip, {
+            tone: "warn",
+            removeLabel: `Remove ${v}`,
+            onRemove: () => set(facet, held.filter((x) => x !== v)),
+            children: text
+          }, v, false, undefined, this))
+        }, undefined, false, undefined, this) : null;
+        if (picker) {
+          return /* @__PURE__ */ u3("div", {
+            class: "lre-form-facet-class",
+            "data-lre-class-facet": facet,
+            children: [
+              /* @__PURE__ */ u3(RefPicker, {
+                label: f.label,
+                value: held.find(known) ?? "",
+                options,
+                none: "None",
+                onChange: (v) => set(facet, v === "" ? [] : [v])
+              }, undefined, false, undefined, this),
+              warn
+            ]
+          }, facet, true, undefined, this);
+        }
+        return /* @__PURE__ */ u3("div", {
+          class: "lre-form-facet-class",
+          "data-lre-class-facet": facet,
+          children: [
+            /* @__PURE__ */ u3("span", {
+              class: "lre-form-facet-label",
+              children: f.label
+            }, undefined, false, undefined, this),
+            f.multiple ? /* @__PURE__ */ u3("span", {
+              class: "lre-field-help",
+              children: "Any number of these."
+            }, undefined, false, undefined, this) : null,
+            options.length === 0 ? /* @__PURE__ */ u3("span", {
+              class: "lre-field-help",
+              children: "This classification has no values yet."
+            }, undefined, false, undefined, this) : null,
+            /* @__PURE__ */ u3("div", {
+              class: "lre-form-chips",
+              role: "group",
+              "aria-label": f.label,
+              children: options.map((o) => {
+                const on = held.includes(o.value);
+                const next = on ? held.filter((v) => v !== o.value) : f.multiple ? [...held, o.value] : [o.value];
+                return /* @__PURE__ */ u3(Chip, {
+                  pressed: on,
+                  onToggle: () => set(facet, next),
+                  children: /* @__PURE__ */ u3(ChipLines, {
+                    option: o
+                  }, undefined, false, undefined, this)
+                }, o.value, false, undefined, this);
+              })
+            }, undefined, false, undefined, this),
+            warn
+          ]
+        }, facet, true, undefined, this);
+      }),
+      stale.map((facet) => /* @__PURE__ */ u3("div", {
+        class: "lre-form-facet-stale",
+        children: [
+          /* @__PURE__ */ u3("span", {
+            class: "lre-form-facet-stale-text",
+            children: [
+              /* @__PURE__ */ u3(Icon, {
+                name: "alert",
+                size: 16
+              }, undefined, false, undefined, this),
+              /* @__PURE__ */ u3("span", {
+                children: `${facet}: ${(value[facet] ?? []).join(", ")} (no longer a classification)`
+              }, undefined, false, undefined, this)
+            ]
+          }, undefined, true, undefined, this),
+          /* @__PURE__ */ u3(Button, {
+            variant: "ghost",
+            size: "sm",
+            label: `Remove ${facet}`,
+            onClick: () => set(facet, []),
+            children: "Remove"
+          }, undefined, false, undefined, this)
+        ]
+      }, facet, true, undefined, this))
+    ]
+  }, undefined, true, undefined, this);
+}
+
+// src/frontend/build/selector-editor.tsx
+function selectorOf(v) {
+  if (!isRecord(v))
+    return;
+  const out = {};
+  for (const key of ["ids", "kind", "tier", "memberOf", "tag"]) {
+    const list = v[key];
+    if (Array.isArray(list))
+      out[key] = list.filter((x) => typeof x === "string");
+  }
+  if (isRecord(v.class))
+    out.class = Object.fromEntries(Object.entries(v.class).map(([facet, values]) => [facet, Array.isArray(values) ? values.filter((x) => typeof x === "string") : []]));
+  return out;
+}
+var GROUP_KIND = "group";
+function worldTags(doc) {
+  const out = new Set;
+  for (const e of Object.values(doc.entities))
+    for (const t of Array.isArray(e.tags) ? e.tags : [])
+      if (typeof t === "string")
+        out.add(t);
+  return [...out].sort((a, b) => a.localeCompare(b));
+}
+function kindIs(doc, kind, ancestor) {
+  const seen = new Set;
+  for (let id = kind;id !== undefined && !seen.has(id); id = doc.kinds[id]?.extends) {
+    if (id === ancestor)
+      return true;
+    seen.add(id);
+  }
+  return false;
+}
+function groupOptions(doc) {
+  return Object.values(doc.entities).filter((e) => kindIs(doc, e.kind, GROUP_KIND)).map((e) => ({ value: e.id, label: e.name || e.id })).sort((a, b) => a.label.localeCompare(b.label));
+}
+function TagListInput(props) {
+  const noun = props.noun ?? "tag";
+  const [text, setText] = d2("");
+  const list = P2();
+  const commit = (raw) => {
+    const more = raw.split(",").map((t) => t.trim()).filter((t) => t !== "" && !props.value.includes(t));
+    if (more.length > 0)
+      props.onChange([...props.value, ...new Set(more)]);
+  };
+  const add = () => {
+    commit(text);
+    setText("");
+  };
+  return /* @__PURE__ */ u3("div", {
+    class: "lre-field",
+    "data-lre-tags": true,
+    children: [
+      /* @__PURE__ */ u3("span", {
+        class: "label",
+        children: props.label
+      }, undefined, false, undefined, this),
+      props.value.length > 0 ? /* @__PURE__ */ u3("div", {
+        class: "lre-form-chips",
+        children: props.value.map((tag) => /* @__PURE__ */ u3(Chip, {
+          removeLabel: `Remove ${noun} ${tag}`,
+          onRemove: () => props.onChange(props.value.filter((t) => t !== tag)),
+          children: tag
+        }, tag, false, undefined, this))
+      }, undefined, false, undefined, this) : null,
+      /* @__PURE__ */ u3("div", {
+        class: "lre-form-add",
+        children: [
+          /* @__PURE__ */ u3("input", {
+            class: "lre-input",
+            list,
+            placeholder: `Add ${/^[aeiou]/i.test(noun) ? "an" : "a"} ${noun}`,
+            "aria-label": `Add to ${props.label}`,
+            value: text,
+            onInput: (event) => {
+              const typed = event.currentTarget.value;
+              const cut = typed.lastIndexOf(",");
+              if (cut < 0) {
+                setText(typed);
+                return;
+              }
+              commit(typed.slice(0, cut));
+              setText(typed.slice(cut + 1).trimStart());
+            },
+            onPaste: (event) => {
+              const pasted = event.clipboardData?.getData("text") ?? "";
+              if (!pasted.includes(","))
+                return;
+              event.preventDefault();
+              commit(`${text},${pasted}`);
+              setText("");
+            },
+            onKeyDown: (event) => {
+              if (event.key !== "Enter")
+                return;
+              event.preventDefault();
+              add();
+            }
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3(Button, {
+            size: "sm",
+            icon: "plus",
+            disabled: text.trim() === "",
+            onClick: add,
+            children: "Add"
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3("datalist", {
+            id: list,
+            children: props.suggestions.filter((t) => !props.value.includes(t)).map((t) => /* @__PURE__ */ u3("option", {
+              value: t
+            }, t, false, undefined, this))
+          }, undefined, false, undefined, this)
+        ]
+      }, undefined, true, undefined, this),
+      props.children
+    ]
+  }, undefined, true, undefined, this);
+}
+function PickList(props) {
+  const left = props.options.filter((o) => !props.value.includes(o.value));
+  return /* @__PURE__ */ u3("div", {
+    class: "lre-field",
+    children: [
+      /* @__PURE__ */ u3("span", {
+        class: "label",
+        children: props.label
+      }, undefined, false, undefined, this),
+      props.help !== undefined ? /* @__PURE__ */ u3("span", {
+        class: "lre-field-help",
+        children: props.help
+      }, undefined, false, undefined, this) : null,
+      props.value.length > 0 ? /* @__PURE__ */ u3("div", {
+        class: "lre-form-chips",
+        children: props.value.map((id) => {
+          const name = props.options.find((o) => o.value === id)?.label;
+          return /* @__PURE__ */ u3(Chip, {
+            tone: name === undefined ? "warn" : undefined,
+            removeLabel: `Remove ${name ?? id}`,
+            onRemove: () => props.onChange(props.value.filter((other) => other !== id)),
+            children: [
+              name ?? `${id} (missing)`,
+              " ",
+              /* @__PURE__ */ u3(IdText, {
+                id
+              }, undefined, false, undefined, this)
+            ]
+          }, id, true, undefined, this);
+        })
+      }, undefined, false, undefined, this) : null,
+      left.length > 0 ? /* @__PURE__ */ u3(AddPicker, {
+        label: `Add to ${props.label}`,
+        options: left,
+        placeholder: props.placeholder,
+        onAdd: (id) => props.onChange([...props.value, id])
+      }, undefined, false, undefined, this) : null
+    ]
+  }, undefined, true, undefined, this);
+}
+function Toggles(props) {
+  const unknown = props.value.filter((v) => !props.options.some((o) => o.value === v));
+  return /* @__PURE__ */ u3("div", {
+    class: "lre-field",
+    children: [
+      /* @__PURE__ */ u3("span", {
+        class: "label",
+        children: props.label
+      }, undefined, false, undefined, this),
+      props.help !== undefined ? /* @__PURE__ */ u3("span", {
+        class: "lre-field-help",
+        children: props.help
+      }, undefined, false, undefined, this) : null,
+      /* @__PURE__ */ u3("div", {
+        class: "lre-form-chips",
+        role: "group",
+        "aria-label": props.label,
+        children: [
+          props.options.map((o) => {
+            const on = props.value.includes(o.value);
+            return /* @__PURE__ */ u3(Chip, {
+              pressed: on,
+              onToggle: () => props.onChange(on ? props.value.filter((v) => v !== o.value) : [...props.value, o.value]),
+              children: /* @__PURE__ */ u3(ChipLines, {
+                option: o
+              }, undefined, false, undefined, this)
+            }, o.value, false, undefined, this);
+          }),
+          unknown.map((v) => /* @__PURE__ */ u3(Chip, {
+            tone: "warn",
+            removeLabel: `Remove ${v}`,
+            onRemove: () => props.onChange(props.value.filter((x) => x !== v)),
+            children: `${v} (missing)`
+          }, v, false, undefined, this))
+        ]
+      }, undefined, true, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+}
+function tidy(selector) {
+  const out = {};
+  if (selector.ids?.length)
+    out.ids = selector.ids;
+  if (selector.kind?.length)
+    out.kind = selector.kind;
+  if (selector.tier?.length)
+    out.tier = selector.tier;
+  if (selector.tag?.length)
+    out.tag = selector.tag;
+  if (selector.memberOf?.length)
+    out.memberOf = selector.memberOf;
+  const classes = Object.entries(selector.class ?? {}).filter(([, values]) => values.length > 0);
+  if (classes.length > 0)
+    out.class = Object.fromEntries(classes);
+  return out;
+}
+function SelectorEditor(props) {
+  const { doc } = props;
+  if (props.value === undefined) {
+    return /* @__PURE__ */ u3("div", {
+      class: "lre-form-sel-absent",
+      "data-lre-selector": true,
+      children: [
+        /* @__PURE__ */ u3("span", {
+          class: "lre-form-sel-absent-label",
+          children: props.label
+        }, undefined, false, undefined, this),
+        /* @__PURE__ */ u3(Button, {
+          size: "sm",
+          icon: "plus",
+          onClick: () => props.onChange({}),
+          children: "Add a selector"
+        }, undefined, false, undefined, this)
+      ]
+    }, undefined, true, undefined, this);
+  }
+  const value = props.value;
+  const set = (patch) => props.onChange(tidy({ ...value, ...patch }));
+  const kinds = Object.entries(doc.kinds).map(([id, k]) => ({ value: id, label: k.label || id })).sort((a, b) => a.label.localeCompare(b.label));
+  const entities = Object.values(doc.entities).map((e) => ({ value: e.id, label: e.name || e.id })).sort((a, b) => a.label.localeCompare(b.label));
+  const empty = Object.keys(tidy(value)).length === 0;
+  return /* @__PURE__ */ u3("div", {
+    class: "lre-form-sel",
+    "data-lre-selector": true,
+    children: /* @__PURE__ */ u3(FormGroup, {
+      title: props.label,
+      aside: props.optional ? /* @__PURE__ */ u3(Button, {
+        variant: "ghost",
+        size: "sm",
+        label: `Remove ${props.label}`,
+        onClick: () => props.onChange(undefined),
+        children: "Remove"
+      }, undefined, false, undefined, this) : undefined,
+      children: [
+        /* @__PURE__ */ u3("p", {
+          class: "lre-form-sel-lead",
+          children: empty ? "Matches every entity." : "An entity must pass every constraint below; within one, any value will do."
+        }, undefined, false, undefined, this),
+        /* @__PURE__ */ u3(PickList, {
+          label: "Kind",
+          help: "Or a kind that inherits from it.",
+          value: value.kind ?? [],
+          options: kinds,
+          placeholder: "Add a kind…",
+          onChange: (kind) => set({ kind })
+        }, undefined, false, undefined, this),
+        /* @__PURE__ */ u3(Toggles, {
+          label: "Tier",
+          value: value.tier ?? [],
+          options: tiersInOrder(doc).map(([id, t]) => ({ value: id, label: t.label })),
+          onChange: (tier) => set({ tier })
+        }, undefined, false, undefined, this),
+        facetsInOrder(doc).map(([facet, f]) => /* @__PURE__ */ u3(Toggles, {
+          label: f.label,
+          help: "A value, or one nested under it.",
+          value: value.class?.[facet] ?? [],
+          options: facetOptions(f.values),
+          onChange: (values) => set({ class: { ...value.class, [facet]: values } })
+        }, facet, false, undefined, this)),
+        /* @__PURE__ */ u3(TagListInput, {
+          label: "Tag",
+          value: value.tag ?? [],
+          suggestions: worldTags(doc),
+          onChange: (tag) => set({ tag })
+        }, undefined, false, undefined, this),
+        /* @__PURE__ */ u3(PickList, {
+          label: "Member of",
+          help: "Directly, or through a member group.",
+          value: value.memberOf ?? [],
+          options: groupOptions(doc),
+          placeholder: "Add a group…",
+          onChange: (memberOf) => set({ memberOf })
+        }, undefined, false, undefined, this),
+        /* @__PURE__ */ u3(PickList, {
+          label: "Only these entities",
+          value: value.ids ?? [],
+          options: entities,
+          placeholder: "Add an entity…",
+          onChange: (ids) => set({ ids })
+        }, undefined, false, undefined, this)
+      ]
+    }, undefined, true, undefined, this)
+  }, undefined, false, undefined, this);
+}
+
+// src/frontend/build/owner-picker.tsx
+var GROUP_KIND2 = "group";
+var LEVELS = ["entity", "group", "kind", "selector", "none"];
+function ownerLevel(doc, owner) {
+  if (isRecord(owner))
+    return "selector";
+  if (typeof owner !== "string" || owner === "")
+    return "none";
+  const entity = hasOwn(doc.entities, owner) ? doc.entities[owner] : undefined;
+  if (entity)
+    return kindIs(doc, entity.kind, GROUP_KIND2) ? "group" : "entity";
+  return "kind";
+}
+function ownerOptions(doc, level) {
+  const kindLabel = (id) => hasOwn(doc.kinds, id) ? doc.kinds[id]?.label || id : id;
+  const byName = (a, b) => a.label.localeCompare(b.label) || a.value.localeCompare(b.value);
+  switch (level) {
+    case "entity":
+    case "group":
+      return Object.values(doc.entities).filter((e) => kindIs(doc, e.kind, GROUP_KIND2) === (level === "group")).map((e) => ({ value: e.id, label: e.name || e.id, sublabel: kindLabel(e.kind) })).sort(byName);
+    case "kind":
+      return Object.keys(doc.kinds).map((id) => ({ value: id, label: kindLabel(id) })).sort(byName);
+    default:
+      return [];
+  }
+}
+function ownerWords(doc, owner, none) {
+  const level = ownerLevel(doc, owner);
+  if (level === "none")
+    return none;
+  if (level === "selector" || typeof owner !== "string")
+    return "People a selector picks";
+  if (level === "kind")
+    return `Every ${hasOwn(doc.kinds, owner) ? doc.kinds[owner]?.label || owner : owner}`;
+  const name = hasOwn(doc.entities, owner) ? doc.entities[owner]?.name || owner : owner;
+  return level === "group" ? `${name} (a group)` : name;
+}
+function OwnerPicker(props) {
+  const stored = ownerLevel(props.doc, props.value);
+  const [pending, setPending] = d2(null);
+  const level = stored !== "none" ? stored : pending ?? "none";
+  const names = { entity: "Someone", group: "Group", kind: "Kind", selector: "Selector", none: props.noneLabel };
+  const help = {
+    entity: "Someone or something of their own: it wins over every level after it.",
+    group: "Every member of a group (a family, a household, a crew), through member groups too.",
+    kind: "Everyone of a kind, or of a kind that inherits from it.",
+    selector: "Everyone a rule picks: by kind, tier, class, tag or group.",
+    none: props.noneHelp
+  };
+  return /* @__PURE__ */ u3("div", {
+    class: "lre-stack",
+    "data-lre-owner": level,
+    children: [
+      /* @__PURE__ */ u3(Field, {
+        label: props.label,
+        help: help[level],
+        children: /* @__PURE__ */ u3(Seg, {
+          label: props.label,
+          value: level,
+          options: LEVELS.map((l) => ({ value: l, label: names[l] })),
+          onChange: (next) => {
+            setPending(next === "none" || next === "selector" ? null : next);
+            props.onChange(next === "selector" ? {} : undefined);
+          }
+        }, undefined, false, undefined, this)
+      }, undefined, false, undefined, this),
+      level === "selector" ? /* @__PURE__ */ u3(SelectorEditor, {
+        label: "Picks",
+        value: selectorOf(props.value) ?? {},
+        doc: props.doc,
+        onChange: (next) => props.onChange(next ?? {})
+      }, undefined, false, undefined, this) : level === "none" ? null : /* @__PURE__ */ u3(RefPicker, {
+        label: level === "entity" ? "Who or what" : level === "group" ? "Which group" : "Which kind",
+        value: typeof props.value === "string" ? props.value : "",
+        options: ownerOptions(props.doc, level),
+        onChange: (next) => props.onChange(next || undefined)
+      }, undefined, false, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+}
+
 // src/shared/claims.ts
 var CLAIM_MODES = ["real", "ask", "hold"];
 var CLAIM_MODE_LABEL = { real: "Make it real", ask: "Ask first", hold: "Hold me to the world" };
@@ -7320,6 +4874,53 @@ function readClaims(raw) {
   return mode ? { mode, capped: raw.capped === true } : null;
 }
 
+// src/shared/money.ts
+function places(currency, unit) {
+  return unit === "minor" ? 0 : Math.max(0, Math.min(6, Math.trunc(currency.decimals)));
+}
+function moneyAffixes(currency) {
+  const at = "\x00";
+  const shown = currency.format.replace(/\{(sign|symbol|code|amount)\}/g, (_, key) => key === "amount" ? at : key === "symbol" ? currency.symbol : key === "code" ? currency.code : "");
+  const index = shown.indexOf(at);
+  if (index < 0 || /\{(major|minor)\}/.test(currency.format))
+    return { prefix: "", suffix: currency.code };
+  return { prefix: shown.slice(0, index).trim(), suffix: shown.slice(index + 1).trim() };
+}
+var AMOUNT = /^(\d{1,3}(?:,\d{3})+|\d+)?(?:\.(\d*))?$/;
+function parseMoneyInput(text, currency, unit = "major") {
+  let t = text.trim().replace(/\u2212/g, "-");
+  const negative = t.startsWith("-");
+  if (negative)
+    t = t.slice(1).trim();
+  if (unit === "major") {
+    const { prefix, suffix } = moneyAffixes(currency);
+    const words = [...new Set([currency.symbol, currency.code, prefix, suffix].map((w) => w.trim().toLowerCase()).filter((w) => w !== ""))].sort((a, b) => b.length - a.length);
+    const lower = t.toLowerCase();
+    const word = words.find((w) => lower.startsWith(w) || lower.endsWith(w));
+    if (word)
+      t = (lower.startsWith(word) ? t.slice(word.length) : t.slice(0, t.length - word.length)).trim();
+  }
+  const m = AMOUNT.exec(t);
+  const whole = m?.[1];
+  const fraction = m?.[2];
+  if (!m || whole === undefined && (fraction === undefined || fraction === ""))
+    return null;
+  const decimals = places(currency, unit);
+  if (fraction !== undefined && (decimals === 0 || fraction.length > decimals))
+    return null;
+  const minor = Number((whole ?? "0").replace(/,/g, "")) * 10 ** decimals + Number((fraction ?? "").padEnd(decimals, "0") || "0");
+  if (!Number.isSafeInteger(minor))
+    return null;
+  return negative && minor !== 0 ? -minor : minor;
+}
+function formatMoneyInput(minor, currency, unit = "major") {
+  const decimals = places(currency, unit);
+  const units = Math.abs(Math.trunc(minor));
+  const scale = 10 ** decimals;
+  const fraction = decimals > 0 ? `.${String(units % scale).padStart(decimals, "0")}` : "";
+  return `${minor < 0 && units !== 0 ? "-" : ""}${Math.floor(units / scale)}${fraction}`;
+}
+
 // src/shared/tables.ts
 function tableChoices(table) {
   if (!table || typeof table.rows !== "object" || table.rows === null)
@@ -7328,6 +4929,175 @@ function tableChoices(table) {
     const label = typeof row === "object" && row !== null && !Array.isArray(row) ? row.label : undefined;
     return { key, label: typeof label === "string" && label.trim() !== "" ? label : key.replace(/_/g, " ") };
   });
+}
+
+// src/frontend/money-input.tsx
+function MoneyInput(props) {
+  const unit = props.unit ?? "major";
+  const { prefix, suffix } = unit === "major" ? moneyAffixes(props.currency) : { prefix: "", suffix: "" };
+  return /* @__PURE__ */ u3("span", {
+    class: props.invalid ? "lre-money invalid" : "lre-money",
+    "data-lre-money": true,
+    children: [
+      prefix ? /* @__PURE__ */ u3("span", {
+        class: "lre-money-affix",
+        "aria-hidden": "true",
+        children: prefix
+      }, undefined, false, undefined, this) : null,
+      /* @__PURE__ */ u3("input", {
+        class: props.invalid ? "lre-input invalid" : "lre-input",
+        inputMode: unit === "minor" || props.currency.decimals <= 0 ? "numeric" : "decimal",
+        "aria-label": props.label,
+        "aria-invalid": props.invalid ? true : undefined,
+        placeholder: props.placeholder,
+        autoFocus: props.autoFocus,
+        value: props.value,
+        onInput: (event) => props.onInput(event.currentTarget.value),
+        onBlur: props.onBlur
+      }, undefined, false, undefined, this),
+      suffix ? /* @__PURE__ */ u3("span", {
+        class: "lre-money-affix",
+        "aria-hidden": "true",
+        children: suffix
+      }, undefined, false, undefined, this) : null
+    ]
+  }, undefined, true, undefined, this);
+}
+
+// src/shared/state-view.ts
+function chipRegenerates(kind, choice) {
+  return choice === "regenerate" || kind === "swipe_option" && (choice === "renarrate" || choice === "rerun") || kind === "contradiction" && choice === "renarrate" || kind === "read_failed" && choice === "rerun" || kind === "claim" && (choice === "add" || choice === "drop") || kind === "check" && (choice === "roll" || choice === "drop");
+}
+
+// src/frontend/requests.ts
+function upgradeRequest(chatId, preview, choices) {
+  const merge = {};
+  for (const row of preview.entities) {
+    for (const change of row.changes) {
+      const choice = choices[change.id] ?? change.pick;
+      if (choice === change.pick)
+        continue;
+      for (const t of change.targets) {
+        const picks = merge[t.entity] ??= {};
+        if (t.part === "entity")
+          picks.entity = choice;
+        else if (choice === "remove")
+          continue;
+        else if (t.part === "field")
+          (picks.fields ??= {})[t.field] = choice;
+        else if (t.part === "relation")
+          ((picks.relations ??= {})[t.rel] ??= {})[t.to] = choice;
+        else
+          picks[t.part] = choice;
+      }
+    }
+  }
+  return { type: "lre.world", op: "upgrade", chatId, to: preview.to, merge };
+}
+function chipIntent(chip, choice, chatId, payload) {
+  if (choice === "regenerate")
+    return { request: null, regenerate: true };
+  const request = payload ? { type: "lre.chip", chatId, chip: chip.id, choice, payload } : { type: "lre.chip", chatId, chip: chip.id, choice };
+  return { request, regenerate: chipRegenerates(chip.kind, choice) };
+}
+function convertRequest(line, chatId) {
+  if ("marker" in line.ref)
+    return null;
+  return { type: "lre.keep", chatId, choice: "convert", messageId: line.messageId, parentPath: line.parentPath, refs: [line.ref] };
+}
+function paletteRequest(entry, picks, chatId, amountCents, count) {
+  const params = Object.assign({}, ...picks.map((pick) => pick.params));
+  if (entry.amount && amountCents !== undefined)
+    params[entry.amount.param] = Math.round(amountCents);
+  if (entry.number && count !== undefined)
+    params[entry.number.param] = count;
+  return { type: "lre.action", chatId, action: entry.action, params, source: "palette" };
+}
+function timelapseRequest(view, target, overrides, chatId, source = "palette") {
+  const changed = {};
+  for (const [cls, policy] of Object.entries(overrides)) {
+    if (policy !== undefined && view.interrupts[cls] !== policy)
+      changed[cls] = policy;
+  }
+  return { type: "lre.action", chatId, action: view.action, params: { target: { ...target }, overrides: changed }, source };
+}
+function travelRequest(action, params, chatId) {
+  return { type: "lre.action", chatId, action, params: { ...params }, source: "map" };
+}
+function fixRequest(target, value, chatId) {
+  return { type: "lre.fix", chatId, entity: target.entity, field: target.field, value };
+}
+function timeFixRequest(time, chatId) {
+  return { type: "lre.fix", chatId, time };
+}
+function editRequest(chatId, ops) {
+  return { type: "lre.edit", chatId, ops };
+}
+function entityStateOp(entity, tier, agent, levels) {
+  const changed = {};
+  for (const l of entity.levels) {
+    const to = levels[l.domain];
+    if (to !== undefined && to !== l.override)
+      changed[l.domain] = to;
+  }
+  const levelsChanged = Object.keys(changed).length > 0;
+  if (tier === entity.tier && agent === entity.agent && !levelsChanged)
+    return null;
+  return { op: "entity", entity: entity.id, ...tier !== entity.tier ? { tier } : {}, ...agent !== entity.agent ? { agent } : {}, ...levelsChanged ? { levels: changed } : {} };
+}
+function classifyOp(entity, classes, tags) {
+  const same = (a, b) => a.length === b.length && a.every((x) => b.includes(x));
+  const facets = new Set([...Object.keys(classes), ...Object.keys(entity.class)]);
+  const unchanged = [...facets].every((f) => same(classes[f] ?? [], entity.class[f] ?? [])) && same(tags, entity.tags);
+  return unchanged ? null : { op: "classify", entity: entity.id, class: Object.fromEntries(Object.entries(classes).filter(([, v]) => v.length > 0)), tags: [...tags] };
+}
+function lifeEditOp(entity, to, tell) {
+  const changes = to !== entity.life.state;
+  if (!changes && tell.length === 0)
+    return null;
+  return { op: "life", entity: entity.id, ...changes ? { to } : {}, ...tell.length > 0 ? { tell: [...tell] } : {} };
+}
+function relationFields(defs, inputs, held = {}) {
+  const fields = Object.fromEntries(Object.entries(held).filter(([id]) => !defs.some((d) => d.id === id)));
+  for (const def of defs) {
+    const text = (inputs[def.id] ?? "").trim();
+    if (text === "")
+      continue;
+    if (def.type === "number") {
+      const n = Number(text);
+      if (!Number.isFinite(n) || n < (def.min ?? -Infinity) || n > (def.max ?? Infinity))
+        return null;
+      fields[def.id] = n;
+    } else if (def.type === "bool")
+      fields[def.id] = text === "true";
+    else if (def.values && !def.values.includes(text))
+      return null;
+    else
+      fields[def.id] = text;
+  }
+  return fields;
+}
+function adjustOp(account, text, currency, take) {
+  const cents = parseMoneyInput(text, currency);
+  return cents !== null && cents > 0 ? { op: "adjust", account, cents: take ? -cents : cents } : null;
+}
+function timeMarker(chatId, control, scope, to, preview = false) {
+  return preview ? { type: "lre.marker", chatId, kind: "time", control, scope, to, preview: true } : { type: "lre.marker", chatId, kind: "time", control, scope, to };
+}
+function resolveMarker(chatId, domain, scope, to, preview = false) {
+  return preview ? { type: "lre.marker", chatId, kind: "resolve", domain, scope, to, preview: true } : { type: "lre.marker", chatId, kind: "resolve", domain, scope, to };
+}
+function adjudicateMarker(chatId, to) {
+  return { type: "lre.marker", chatId, kind: "adjudicate", to };
+}
+function claimsMarker(chatId, to) {
+  return { type: "lre.marker", chatId, kind: "claims", to };
+}
+function inferMarker(chatId, to) {
+  return { type: "lre.marker", chatId, kind: "infer", to };
+}
+function sheetPreviewRequest(worldId, ruleset, entity) {
+  return entity === undefined ? { type: "lre.world", op: "sheet", worldId, ruleset } : { type: "lre.world", op: "sheet", worldId, ruleset, entity };
 }
 
 // src/frontend/settings/realism.tsx
@@ -8513,736 +6283,6 @@ function EffectArgsInput(props) {
       }, undefined, true, undefined, this)
     ]
   }, undefined, true, undefined, this);
-}
-
-// src/shared/classes.ts
-var NESTING_DEPTH = 16;
-function withinValue(values, value, ancestor) {
-  let current = value;
-  for (let depth = 0;current !== undefined && depth < NESTING_DEPTH; depth++) {
-    if (current === ancestor)
-      return true;
-    current = hasOwn(values, current) ? values[current]?.parent : undefined;
-  }
-  return false;
-}
-function facetsInOrder(world) {
-  if (!isRecord(world.classifications))
-    return [];
-  const rank = (f) => typeof f.order === "number" && Number.isFinite(f.order) ? f.order : Number.MAX_SAFE_INTEGER;
-  const name = (id, f) => typeof f.label === "string" ? f.label : id;
-  return Object.entries(world.classifications).filter(([, f]) => isRecord(f) && isRecord(f.values)).sort(([a, fa], [b, fb]) => rank(fa) - rank(fb) || name(a, fa).localeCompare(name(b, fb)) || a.localeCompare(b));
-}
-function facetTree(values) {
-  const ids = Object.keys(values);
-  const out = [];
-  const seen = new Set;
-  const visit = (id, depth) => {
-    const value = values[id];
-    if (!value || seen.has(id))
-      return;
-    seen.add(id);
-    out.push({ id, value, depth });
-    for (const child of ids)
-      if (values[child]?.parent === id)
-        visit(child, depth + 1);
-  };
-  for (const id of ids) {
-    const parent = values[id]?.parent;
-    if (parent === undefined || !hasOwn(values, parent))
-      visit(id, 0);
-  }
-  for (const id of ids)
-    visit(id, 0);
-  return out;
-}
-
-// src/frontend/build/facet-editor.tsx
-var CHIP_CHOICE_MAX = 6;
-function classesOf(v) {
-  if (!isRecord(v))
-    return;
-  return Object.fromEntries(Object.entries(v).map(([facet, values]) => [facet, Array.isArray(values) ? values.filter((x) => typeof x === "string") : []]));
-}
-function facetValuesOf(v) {
-  const out = {};
-  for (const [id, raw] of Object.entries(isRecord(v) ? v : {})) {
-    if (!isRecord(raw))
-      continue;
-    out[id] = { label: typeof raw.label === "string" ? raw.label : id, ...typeof raw.parent === "string" ? { parent: raw.parent } : {}, ...typeof raw.description === "string" ? { description: raw.description } : {} };
-  }
-  return out;
-}
-function removeValue(values, id) {
-  const parent = values[id]?.parent;
-  const out = {};
-  for (const [vid, v] of Object.entries(values)) {
-    if (vid === id)
-      continue;
-    if (v.parent !== id)
-      out[vid] = v;
-    else {
-      const { parent: _gone, ...rest } = v;
-      out[vid] = parent === undefined ? rest : { ...rest, parent };
-    }
-  }
-  return out;
-}
-function subtree(values, id) {
-  const out = new Set([id]);
-  for (let grew = true;grew; ) {
-    grew = false;
-    for (const [vid, v] of Object.entries(values)) {
-      if (v.parent !== undefined && out.has(v.parent) && !out.has(vid)) {
-        out.add(vid);
-        grew = true;
-      }
-    }
-  }
-  return out;
-}
-function parentLabel(values, v) {
-  return v.parent !== undefined && hasOwn(values, v.parent) ? values[v.parent]?.label : undefined;
-}
-function facetOptions(values) {
-  return facetTree(values).map(({ id, value }) => {
-    const parent = parentLabel(values, value);
-    return { value: id, label: value.label, ...parent !== undefined ? { sublabel: `in ${parent}` } : {} };
-  });
-}
-function ChipLines(props) {
-  if (props.option.sublabel === undefined)
-    return /* @__PURE__ */ u3(M, {
-      children: props.option.label
-    }, undefined, false, undefined, this);
-  return /* @__PURE__ */ u3("span", {
-    class: "lre-form-facet-lines",
-    children: [
-      /* @__PURE__ */ u3("span", {
-        children: props.option.label
-      }, undefined, false, undefined, this),
-      /* @__PURE__ */ u3("span", {
-        class: "lre-form-facet-in",
-        children: props.option.sublabel
-      }, undefined, false, undefined, this)
-    ]
-  }, undefined, true, undefined, this);
-}
-function idProblem2(id, taken) {
-  if (!id)
-    return "Give it an id.";
-  if (taken.has(id))
-    return "There's already a value with this id.";
-  return safeKey(id) ? null : "This id is reserved. Choose another.";
-}
-function FacetValuesInput(props) {
-  const values = props.value ?? {};
-  const showIds = useShowIds();
-  const idId = P2();
-  const [open, setOpen] = d2(null);
-  const [name, setName] = d2("");
-  const [typed, setTyped] = d2(null);
-  const edit = (id, patch) => {
-    const next = { ...values[id] ?? { label: id }, ...patch };
-    if (patch.parent === undefined && "parent" in patch)
-      delete next.parent;
-    if (patch.description === undefined && "description" in patch)
-      delete next.description;
-    props.onChange({ ...values, [id]: next });
-  };
-  const remove = (id) => {
-    if (open === id)
-      setOpen(null);
-    props.onChange(removeValue(values, id));
-  };
-  const taken = new Set(Object.keys(values));
-  const newId = typed ?? (name.trim() ? deriveId(name.trim(), taken) : "");
-  const problem = typed === null ? null : idProblem2(typed, taken);
-  const ready = name.trim() !== "" && newId !== "" && problem === null;
-  const add = () => {
-    if (!ready)
-      return;
-    props.onChange({ ...values, [newId]: { label: name.trim() } });
-    setName("");
-    setTyped(null);
-  };
-  const tree = facetTree(values);
-  const current = open !== null && hasOwn(values, open) ? values[open] : undefined;
-  const blocked = open !== null ? subtree(values, open) : null;
-  const idField = /* @__PURE__ */ u3(Field, {
-    label: "Id",
-    for: idId,
-    help: "How rules and entities refer to it. It follows the label until you change it.",
-    error: problem,
-    children: /* @__PURE__ */ u3("input", {
-      id: idId,
-      class: "lre-input lre-build-mono",
-      value: newId,
-      autoComplete: "off",
-      spellcheck: false,
-      "aria-invalid": problem !== null || undefined,
-      onInput: (event) => setTyped(event.currentTarget.value.replace(/[^\w-]/g, "_"))
-    }, undefined, false, undefined, this)
-  }, undefined, false, undefined, this);
-  return /* @__PURE__ */ u3("div", {
-    class: "lre-field",
-    "data-lre-facet-values": true,
-    children: [
-      /* @__PURE__ */ u3("span", {
-        class: "label",
-        children: props.label
-      }, undefined, false, undefined, this),
-      tree.length === 0 ? /* @__PURE__ */ u3("span", {
-        class: "lre-field-help",
-        children: "No values yet."
-      }, undefined, false, undefined, this) : /* @__PURE__ */ u3("div", {
-        class: "lre-form-items",
-        children: tree.map(({ id, value, depth }) => {
-          const parent = parentLabel(values, value);
-          const title = value.label || id;
-          const subtitle = parent !== undefined ? `in ${parent}` : value.parent !== undefined ? `in ${value.parent} (not a value)` : value.description;
-          return /* @__PURE__ */ u3("div", {
-            class: "lre-form-facet-row",
-            "data-depth": Math.min(depth, 4),
-            "data-lre-facet-value": id,
-            children: [
-              /* @__PURE__ */ u3(ItemRow, {
-                title,
-                subtitle,
-                onOpen: () => setOpen(id),
-                openLabel: `Edit ${title}`,
-                actions: /* @__PURE__ */ u3(IconButton, {
-                  icon: "trash",
-                  label: `Remove ${title}`,
-                  onClick: () => remove(id)
-                }, undefined, false, undefined, this)
-              }, undefined, false, undefined, this),
-              /* @__PURE__ */ u3("div", {
-                class: "lre-form-facet-row-issues",
-                children: props.issues(`${props.path}.${id}`)
-              }, undefined, false, undefined, this)
-            ]
-          }, id, true, undefined, this);
-        })
-      }, undefined, false, undefined, this),
-      open !== null && current ? /* @__PURE__ */ u3(FormSheet, {
-        title: current.label || open,
-        subtitle: props.label,
-        onClose: () => setOpen(null),
-        children: [
-          /* @__PURE__ */ u3("label", {
-            class: "lre-field",
-            children: [
-              /* @__PURE__ */ u3("span", {
-                class: "label",
-                children: "Label"
-              }, undefined, false, undefined, this),
-              /* @__PURE__ */ u3("input", {
-                class: "lre-input",
-                value: current.label,
-                onInput: (event) => edit(open, { label: event.currentTarget.value })
-              }, undefined, false, undefined, this)
-            ]
-          }, undefined, true, undefined, this),
-          /* @__PURE__ */ u3(RefPicker, {
-            label: "Nested under",
-            value: current.parent ?? "",
-            options: facetOptions(values).filter((o) => !blocked?.has(o.value)),
-            none: "Nothing: a top-level value",
-            onChange: (parent) => edit(open, { parent: parent === "" ? undefined : parent })
-          }, undefined, false, undefined, this),
-          /* @__PURE__ */ u3("label", {
-            class: "lre-field",
-            children: [
-              /* @__PURE__ */ u3("span", {
-                class: "label",
-                children: [
-                  "Description",
-                  /* @__PURE__ */ u3("span", {
-                    class: "lre-form-optional",
-                    children: " · optional"
-                  }, undefined, false, undefined, this)
-                ]
-              }, undefined, true, undefined, this),
-              /* @__PURE__ */ u3("input", {
-                class: "lre-input",
-                value: current.description ?? "",
-                onInput: (event) => edit(open, { description: event.currentTarget.value === "" ? undefined : event.currentTarget.value })
-              }, undefined, false, undefined, this)
-            ]
-          }, undefined, true, undefined, this),
-          props.issues(`${props.path}.${open}`),
-          /* @__PURE__ */ u3(IdText, {
-            id: open
-          }, undefined, false, undefined, this),
-          /* @__PURE__ */ u3("div", {
-            class: "lre-form-facet-actions",
-            children: /* @__PURE__ */ u3(Button, {
-              variant: "danger",
-              icon: "trash",
-              onClick: () => remove(open),
-              children: "Remove value"
-            }, undefined, false, undefined, this)
-          }, undefined, false, undefined, this)
-        ]
-      }, undefined, true, undefined, this) : null,
-      /* @__PURE__ */ u3("div", {
-        class: "lre-form-facet-new",
-        children: [
-          /* @__PURE__ */ u3("div", {
-            class: "lre-form-add",
-            children: [
-              /* @__PURE__ */ u3("input", {
-                class: "lre-input",
-                placeholder: "New value's label",
-                "aria-label": "New value's label",
-                value: name,
-                onInput: (event) => setName(event.currentTarget.value),
-                onKeyDown: (event) => {
-                  if (event.key !== "Enter")
-                    return;
-                  event.preventDefault();
-                  add();
-                }
-              }, undefined, false, undefined, this),
-              /* @__PURE__ */ u3(Button, {
-                size: "sm",
-                icon: "plus",
-                disabled: !ready,
-                onClick: add,
-                children: "Add value"
-              }, undefined, false, undefined, this)
-            ]
-          }, undefined, true, undefined, this),
-          name.trim() !== "" || typed !== null ? showIds ? idField : /* @__PURE__ */ u3(Disclosure, {
-            summary: "Advanced",
-            children: idField
-          }, undefined, false, undefined, this) : null
-        ]
-      }, undefined, true, undefined, this)
-    ]
-  }, undefined, true, undefined, this);
-}
-function ClassesInput(props) {
-  const value = props.value ?? {};
-  const facets = facetsInOrder(props.doc);
-  const set = (facet, values) => {
-    const next = { ...value };
-    if (values.length > 0)
-      next[facet] = values;
-    else
-      delete next[facet];
-    props.onChange(Object.keys(next).length > 0 ? next : undefined);
-  };
-  const stale = Object.keys(value).filter((facet) => !facets.some(([id]) => id === facet));
-  return /* @__PURE__ */ u3("div", {
-    class: "lre-field lre-form-facet-classes",
-    "data-lre-classes": true,
-    children: [
-      /* @__PURE__ */ u3("span", {
-        class: "label",
-        children: props.label
-      }, undefined, false, undefined, this),
-      facets.length === 0 ? /* @__PURE__ */ u3("span", {
-        class: "lre-field-help",
-        children: "No classifications yet: add facets in Build → Classifications."
-      }, undefined, false, undefined, this) : null,
-      facets.map(([facet, f]) => {
-        const held = value[facet] ?? [];
-        const options = facetOptions(f.values);
-        const known = (v) => options.some((o) => o.value === v);
-        const picker = !f.multiple && options.length > CHIP_CHOICE_MAX;
-        const extra = picker ? held.filter(known).slice(1) : [];
-        const odd = [...held.filter((v) => !known(v)).map((v) => ({ v, text: `${v} (not a value)` })), ...extra.map((v) => ({ v, text: `${options.find((o) => o.value === v)?.label ?? v} (only one allowed)` }))];
-        const warn = odd.length > 0 ? /* @__PURE__ */ u3("div", {
-          class: "lre-form-chips",
-          children: odd.map(({ v, text }) => /* @__PURE__ */ u3(Chip, {
-            tone: "warn",
-            removeLabel: `Remove ${v}`,
-            onRemove: () => set(facet, held.filter((x) => x !== v)),
-            children: text
-          }, v, false, undefined, this))
-        }, undefined, false, undefined, this) : null;
-        if (picker) {
-          return /* @__PURE__ */ u3("div", {
-            class: "lre-form-facet-class",
-            "data-lre-class-facet": facet,
-            children: [
-              /* @__PURE__ */ u3(RefPicker, {
-                label: f.label,
-                value: held.find(known) ?? "",
-                options,
-                none: "None",
-                onChange: (v) => set(facet, v === "" ? [] : [v])
-              }, undefined, false, undefined, this),
-              warn
-            ]
-          }, facet, true, undefined, this);
-        }
-        return /* @__PURE__ */ u3("div", {
-          class: "lre-form-facet-class",
-          "data-lre-class-facet": facet,
-          children: [
-            /* @__PURE__ */ u3("span", {
-              class: "lre-form-facet-label",
-              children: f.label
-            }, undefined, false, undefined, this),
-            f.multiple ? /* @__PURE__ */ u3("span", {
-              class: "lre-field-help",
-              children: "Any number of these."
-            }, undefined, false, undefined, this) : null,
-            options.length === 0 ? /* @__PURE__ */ u3("span", {
-              class: "lre-field-help",
-              children: "This classification has no values yet."
-            }, undefined, false, undefined, this) : null,
-            /* @__PURE__ */ u3("div", {
-              class: "lre-form-chips",
-              role: "group",
-              "aria-label": f.label,
-              children: options.map((o) => {
-                const on = held.includes(o.value);
-                const next = on ? held.filter((v) => v !== o.value) : f.multiple ? [...held, o.value] : [o.value];
-                return /* @__PURE__ */ u3(Chip, {
-                  pressed: on,
-                  onToggle: () => set(facet, next),
-                  children: /* @__PURE__ */ u3(ChipLines, {
-                    option: o
-                  }, undefined, false, undefined, this)
-                }, o.value, false, undefined, this);
-              })
-            }, undefined, false, undefined, this),
-            warn
-          ]
-        }, facet, true, undefined, this);
-      }),
-      stale.map((facet) => /* @__PURE__ */ u3("div", {
-        class: "lre-form-facet-stale",
-        children: [
-          /* @__PURE__ */ u3("span", {
-            class: "lre-form-facet-stale-text",
-            children: [
-              /* @__PURE__ */ u3(Icon, {
-                name: "alert",
-                size: 16
-              }, undefined, false, undefined, this),
-              /* @__PURE__ */ u3("span", {
-                children: `${facet}: ${(value[facet] ?? []).join(", ")} (no longer a classification)`
-              }, undefined, false, undefined, this)
-            ]
-          }, undefined, true, undefined, this),
-          /* @__PURE__ */ u3(Button, {
-            variant: "ghost",
-            size: "sm",
-            label: `Remove ${facet}`,
-            onClick: () => set(facet, []),
-            children: "Remove"
-          }, undefined, false, undefined, this)
-        ]
-      }, facet, true, undefined, this))
-    ]
-  }, undefined, true, undefined, this);
-}
-
-// src/frontend/build/selector-editor.tsx
-function selectorOf(v) {
-  if (!isRecord(v))
-    return;
-  const out = {};
-  for (const key of ["ids", "kind", "tier", "memberOf", "tag"]) {
-    const list = v[key];
-    if (Array.isArray(list))
-      out[key] = list.filter((x) => typeof x === "string");
-  }
-  if (isRecord(v.class))
-    out.class = Object.fromEntries(Object.entries(v.class).map(([facet, values]) => [facet, Array.isArray(values) ? values.filter((x) => typeof x === "string") : []]));
-  return out;
-}
-var GROUP_KIND = "group";
-function worldTags(doc) {
-  const out = new Set;
-  for (const e of Object.values(doc.entities))
-    for (const t of Array.isArray(e.tags) ? e.tags : [])
-      if (typeof t === "string")
-        out.add(t);
-  return [...out].sort((a, b) => a.localeCompare(b));
-}
-function kindIs(doc, kind, ancestor) {
-  const seen = new Set;
-  for (let id = kind;id !== undefined && !seen.has(id); id = doc.kinds[id]?.extends) {
-    if (id === ancestor)
-      return true;
-    seen.add(id);
-  }
-  return false;
-}
-function groupOptions(doc) {
-  return Object.values(doc.entities).filter((e) => kindIs(doc, e.kind, GROUP_KIND)).map((e) => ({ value: e.id, label: e.name || e.id })).sort((a, b) => a.label.localeCompare(b.label));
-}
-function TagListInput(props) {
-  const noun = props.noun ?? "tag";
-  const [text, setText] = d2("");
-  const list = P2();
-  const commit = (raw) => {
-    const more = raw.split(",").map((t) => t.trim()).filter((t) => t !== "" && !props.value.includes(t));
-    if (more.length > 0)
-      props.onChange([...props.value, ...new Set(more)]);
-  };
-  const add = () => {
-    commit(text);
-    setText("");
-  };
-  return /* @__PURE__ */ u3("div", {
-    class: "lre-field",
-    "data-lre-tags": true,
-    children: [
-      /* @__PURE__ */ u3("span", {
-        class: "label",
-        children: props.label
-      }, undefined, false, undefined, this),
-      props.value.length > 0 ? /* @__PURE__ */ u3("div", {
-        class: "lre-form-chips",
-        children: props.value.map((tag) => /* @__PURE__ */ u3(Chip, {
-          removeLabel: `Remove ${noun} ${tag}`,
-          onRemove: () => props.onChange(props.value.filter((t) => t !== tag)),
-          children: tag
-        }, tag, false, undefined, this))
-      }, undefined, false, undefined, this) : null,
-      /* @__PURE__ */ u3("div", {
-        class: "lre-form-add",
-        children: [
-          /* @__PURE__ */ u3("input", {
-            class: "lre-input",
-            list,
-            placeholder: `Add ${/^[aeiou]/i.test(noun) ? "an" : "a"} ${noun}`,
-            "aria-label": `Add to ${props.label}`,
-            value: text,
-            onInput: (event) => {
-              const typed = event.currentTarget.value;
-              const cut = typed.lastIndexOf(",");
-              if (cut < 0) {
-                setText(typed);
-                return;
-              }
-              commit(typed.slice(0, cut));
-              setText(typed.slice(cut + 1).trimStart());
-            },
-            onPaste: (event) => {
-              const pasted = event.clipboardData?.getData("text") ?? "";
-              if (!pasted.includes(","))
-                return;
-              event.preventDefault();
-              commit(`${text},${pasted}`);
-              setText("");
-            },
-            onKeyDown: (event) => {
-              if (event.key !== "Enter")
-                return;
-              event.preventDefault();
-              add();
-            }
-          }, undefined, false, undefined, this),
-          /* @__PURE__ */ u3(Button, {
-            size: "sm",
-            icon: "plus",
-            disabled: text.trim() === "",
-            onClick: add,
-            children: "Add"
-          }, undefined, false, undefined, this),
-          /* @__PURE__ */ u3("datalist", {
-            id: list,
-            children: props.suggestions.filter((t) => !props.value.includes(t)).map((t) => /* @__PURE__ */ u3("option", {
-              value: t
-            }, t, false, undefined, this))
-          }, undefined, false, undefined, this)
-        ]
-      }, undefined, true, undefined, this),
-      props.children
-    ]
-  }, undefined, true, undefined, this);
-}
-function PickList(props) {
-  const left = props.options.filter((o) => !props.value.includes(o.value));
-  return /* @__PURE__ */ u3("div", {
-    class: "lre-field",
-    children: [
-      /* @__PURE__ */ u3("span", {
-        class: "label",
-        children: props.label
-      }, undefined, false, undefined, this),
-      props.help !== undefined ? /* @__PURE__ */ u3("span", {
-        class: "lre-field-help",
-        children: props.help
-      }, undefined, false, undefined, this) : null,
-      props.value.length > 0 ? /* @__PURE__ */ u3("div", {
-        class: "lre-form-chips",
-        children: props.value.map((id) => {
-          const name = props.options.find((o) => o.value === id)?.label;
-          return /* @__PURE__ */ u3(Chip, {
-            tone: name === undefined ? "warn" : undefined,
-            removeLabel: `Remove ${name ?? id}`,
-            onRemove: () => props.onChange(props.value.filter((other) => other !== id)),
-            children: [
-              name ?? `${id} (missing)`,
-              " ",
-              /* @__PURE__ */ u3(IdText, {
-                id
-              }, undefined, false, undefined, this)
-            ]
-          }, id, true, undefined, this);
-        })
-      }, undefined, false, undefined, this) : null,
-      left.length > 0 ? /* @__PURE__ */ u3(AddPicker, {
-        label: `Add to ${props.label}`,
-        options: left,
-        placeholder: props.placeholder,
-        onAdd: (id) => props.onChange([...props.value, id])
-      }, undefined, false, undefined, this) : null
-    ]
-  }, undefined, true, undefined, this);
-}
-function Toggles(props) {
-  const unknown = props.value.filter((v) => !props.options.some((o) => o.value === v));
-  return /* @__PURE__ */ u3("div", {
-    class: "lre-field",
-    children: [
-      /* @__PURE__ */ u3("span", {
-        class: "label",
-        children: props.label
-      }, undefined, false, undefined, this),
-      props.help !== undefined ? /* @__PURE__ */ u3("span", {
-        class: "lre-field-help",
-        children: props.help
-      }, undefined, false, undefined, this) : null,
-      /* @__PURE__ */ u3("div", {
-        class: "lre-form-chips",
-        role: "group",
-        "aria-label": props.label,
-        children: [
-          props.options.map((o) => {
-            const on = props.value.includes(o.value);
-            return /* @__PURE__ */ u3(Chip, {
-              pressed: on,
-              onToggle: () => props.onChange(on ? props.value.filter((v) => v !== o.value) : [...props.value, o.value]),
-              children: /* @__PURE__ */ u3(ChipLines, {
-                option: o
-              }, undefined, false, undefined, this)
-            }, o.value, false, undefined, this);
-          }),
-          unknown.map((v) => /* @__PURE__ */ u3(Chip, {
-            tone: "warn",
-            removeLabel: `Remove ${v}`,
-            onRemove: () => props.onChange(props.value.filter((x) => x !== v)),
-            children: `${v} (missing)`
-          }, v, false, undefined, this))
-        ]
-      }, undefined, true, undefined, this)
-    ]
-  }, undefined, true, undefined, this);
-}
-function tidy(selector) {
-  const out = {};
-  if (selector.ids?.length)
-    out.ids = selector.ids;
-  if (selector.kind?.length)
-    out.kind = selector.kind;
-  if (selector.tier?.length)
-    out.tier = selector.tier;
-  if (selector.tag?.length)
-    out.tag = selector.tag;
-  if (selector.memberOf?.length)
-    out.memberOf = selector.memberOf;
-  const classes = Object.entries(selector.class ?? {}).filter(([, values]) => values.length > 0);
-  if (classes.length > 0)
-    out.class = Object.fromEntries(classes);
-  return out;
-}
-function SelectorEditor(props) {
-  const { doc } = props;
-  if (props.value === undefined) {
-    return /* @__PURE__ */ u3("div", {
-      class: "lre-form-sel-absent",
-      "data-lre-selector": true,
-      children: [
-        /* @__PURE__ */ u3("span", {
-          class: "lre-form-sel-absent-label",
-          children: props.label
-        }, undefined, false, undefined, this),
-        /* @__PURE__ */ u3(Button, {
-          size: "sm",
-          icon: "plus",
-          onClick: () => props.onChange({}),
-          children: "Add a selector"
-        }, undefined, false, undefined, this)
-      ]
-    }, undefined, true, undefined, this);
-  }
-  const value = props.value;
-  const set = (patch) => props.onChange(tidy({ ...value, ...patch }));
-  const kinds = Object.entries(doc.kinds).map(([id, k]) => ({ value: id, label: k.label || id })).sort((a, b) => a.label.localeCompare(b.label));
-  const entities = Object.values(doc.entities).map((e) => ({ value: e.id, label: e.name || e.id })).sort((a, b) => a.label.localeCompare(b.label));
-  const empty = Object.keys(tidy(value)).length === 0;
-  return /* @__PURE__ */ u3("div", {
-    class: "lre-form-sel",
-    "data-lre-selector": true,
-    children: /* @__PURE__ */ u3(FormGroup, {
-      title: props.label,
-      aside: props.optional ? /* @__PURE__ */ u3(Button, {
-        variant: "ghost",
-        size: "sm",
-        label: `Remove ${props.label}`,
-        onClick: () => props.onChange(undefined),
-        children: "Remove"
-      }, undefined, false, undefined, this) : undefined,
-      children: [
-        /* @__PURE__ */ u3("p", {
-          class: "lre-form-sel-lead",
-          children: empty ? "Matches every entity." : "An entity must pass every constraint below; within one, any value will do."
-        }, undefined, false, undefined, this),
-        /* @__PURE__ */ u3(PickList, {
-          label: "Kind",
-          help: "Or a kind that inherits from it.",
-          value: value.kind ?? [],
-          options: kinds,
-          placeholder: "Add a kind…",
-          onChange: (kind) => set({ kind })
-        }, undefined, false, undefined, this),
-        /* @__PURE__ */ u3(Toggles, {
-          label: "Tier",
-          value: value.tier ?? [],
-          options: tiersInOrder(doc).map(([id, t]) => ({ value: id, label: t.label })),
-          onChange: (tier) => set({ tier })
-        }, undefined, false, undefined, this),
-        facetsInOrder(doc).map(([facet, f]) => /* @__PURE__ */ u3(Toggles, {
-          label: f.label,
-          help: "A value, or one nested under it.",
-          value: value.class?.[facet] ?? [],
-          options: facetOptions(f.values),
-          onChange: (values) => set({ class: { ...value.class, [facet]: values } })
-        }, facet, false, undefined, this)),
-        /* @__PURE__ */ u3(TagListInput, {
-          label: "Tag",
-          value: value.tag ?? [],
-          suggestions: worldTags(doc),
-          onChange: (tag) => set({ tag })
-        }, undefined, false, undefined, this),
-        /* @__PURE__ */ u3(PickList, {
-          label: "Member of",
-          help: "Directly, or through a member group.",
-          value: value.memberOf ?? [],
-          options: groupOptions(doc),
-          placeholder: "Add a group…",
-          onChange: (memberOf) => set({ memberOf })
-        }, undefined, false, undefined, this),
-        /* @__PURE__ */ u3(PickList, {
-          label: "Only these entities",
-          value: value.ids ?? [],
-          options: entities,
-          placeholder: "Add an entity…",
-          onChange: (ids) => set({ ids })
-        }, undefined, false, undefined, this)
-      ]
-    }, undefined, true, undefined, this)
-  }, undefined, false, undefined, this);
 }
 
 // src/frontend/build/schema-form.tsx
@@ -11444,6 +8484,5823 @@ function worldIdentifiers(doc) {
   return [...out].sort();
 }
 
+// src/frontend/build/schedule-form.tsx
+var WEEKDAYS = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"];
+var TIME = /^([01]\d|2[0-3]):[0-5]\d$/;
+var DAY = 1440;
+var STEP = 15;
+var EVERY = { day: "Daily", week: "Weekly", month: "Monthly", year: "Yearly" };
+function minutesOf(time) {
+  return Number(time.slice(0, 2)) * 60 + Number(time.slice(3, 5));
+}
+function timeOf(minutes) {
+  const m = (minutes % DAY + DAY) % DAY;
+  return `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
+}
+function slotIssues(slots) {
+  const out = [];
+  const spans = [];
+  slots.forEach((slot, index) => {
+    if (!TIME.test(slot.start) || !TIME.test(slot.end)) {
+      out.push({ slots: [index], message: `Slot ${index + 1}: times must be HH:MM` });
+      return;
+    }
+    const start = minutesOf(slot.start);
+    const end = minutesOf(slot.end);
+    if (end > start)
+      spans.push({ start, end, index });
+    else {
+      spans.push({ start, end: DAY, index });
+      if (end > 0)
+        spans.push({ start: 0, end, index });
+    }
+    if (slot.value === undefined && !slot.weighted && !slot.given)
+      out.push({ slots: [index], message: `Slot ${index + 1}: no value` });
+    if (slot.weighted && slot.weighted.reduce((sum, w) => sum + w.weight, 0) <= 0)
+      out.push({ slots: [index], message: `Slot ${index + 1}: weights must add up to more than 0` });
+  });
+  spans.sort((a, b) => a.start - b.start);
+  for (let i = 1;i < spans.length; i += 1) {
+    const prev = spans[i - 1];
+    const cur = spans[i];
+    if (prev && cur && cur.start < prev.end && prev.index !== cur.index)
+      out.push({ slots: [prev.index, cur.index], message: `Slots ${prev.index + 1} and ${cur.index + 1} overlap` });
+  }
+  return out;
+}
+function slotProblems(slots) {
+  return [...new Set(slotIssues(slots).map((issue) => issue.message))];
+}
+function slotSpans(slots) {
+  return slots.flatMap((slot, index) => {
+    if (!TIME.test(slot.start) || !TIME.test(slot.end))
+      return [];
+    const start = minutesOf(slot.start);
+    const end = minutesOf(slot.end);
+    if (end > start)
+      return [{ index, start, end }];
+    return end > 0 ? [{ index, start, end: DAY }, { index, start: 0, end }] : [{ index, start, end: DAY }];
+  });
+}
+function dayHandles(slots) {
+  const byAt = new Map;
+  slots.forEach((slot, index) => {
+    if (!TIME.test(slot.start) || !TIME.test(slot.end))
+      return;
+    const start = minutesOf(slot.start);
+    const end = minutesOf(slot.end);
+    byAt.set(start, [...byAt.get(start) ?? [], { index, side: "start" }]);
+    const endAt = end === 0 ? DAY : end;
+    byAt.set(endAt, [...byAt.get(endAt) ?? [], { index, side: "end" }]);
+  });
+  return [...byAt].map(([at, edges]) => ({ at, edges })).sort((a, b) => a.at - b.at);
+}
+function handleRange(handles, i) {
+  const h = handles[i];
+  if (!h || h.at === 0 || h.at === DAY)
+    return [h?.at ?? 0, h?.at ?? 0];
+  return [(handles[i - 1]?.at ?? 0) + STEP, (handles[i + 1]?.at ?? DAY) - STEP];
+}
+function moveHandle(slots, edges, to) {
+  const time = timeOf(to);
+  return slots.map((slot, index) => {
+    const mine = edges.filter((e) => e.index === index);
+    if (mine.length === 0)
+      return slot;
+    return { ...slot, ...mine.some((e) => e.side === "start") ? { start: time } : {}, ...mine.some((e) => e.side === "end") ? { end: time } : {} };
+  });
+}
+function ownerKinds(doc, owner) {
+  if (isRecord(owner))
+    return selectorOf(owner)?.kind ?? [];
+  if (typeof owner !== "string" || owner === "")
+    return [];
+  const entity = hasOwn(doc.entities, owner) ? doc.entities[owner] : undefined;
+  return entity ? [entity.kind] : [owner];
+}
+function slotValueType(doc, owner, target) {
+  if (target === "place")
+    return { kind: "place" };
+  for (const kind of [...ownerKinds(doc, owner), ...Object.keys(doc.kinds)]) {
+    const fields = kindFields(doc, kind);
+    const def = hasOwn(fields, target) ? fields[target] : undefined;
+    if (def && !def.derived)
+      return { kind: "field", def };
+  }
+  return { kind: "words" };
+}
+function targetOptions(doc, owner) {
+  const out = [];
+  const seen = new Set(["place", "activity"]);
+  for (const kind of [...ownerKinds(doc, owner), ...Object.keys(doc.kinds)]) {
+    for (const [field, def] of Object.entries(kindFields(doc, kind))) {
+      if (seen.has(field) || def.derived || def.locked)
+        continue;
+      seen.add(field);
+      out.push({ value: field, label: def.label ?? humanize(field), sublabel: hasOwn(doc.kinds, kind) ? doc.kinds[kind]?.label ?? kind : kind });
+    }
+  }
+  return out.sort((a, b) => a.label.localeCompare(b.label));
+}
+function givenKey(value) {
+  return value === undefined || value === null ? "null" : typeof value === "string" ? value : JSON.stringify(value);
+}
+function givenValue(type, key) {
+  if (key === "null")
+    return;
+  if (type.kind === "field" && (type.def.type === "number" || type.def.type === "bool")) {
+    try {
+      return JSON.parse(key);
+    } catch {
+      return key;
+    }
+  }
+  return key;
+}
+function valueWords2(doc, value) {
+  if (value === undefined || value === null)
+    return "nothing";
+  if (typeof value === "string") {
+    if (hasOwn(doc.places, value))
+      return doc.places[value]?.name ?? value;
+    if (hasOwn(doc.entities, value))
+      return doc.entities[value]?.name ?? value;
+    return value === "" ? "(empty)" : value.replace(/_/g, " ");
+  }
+  return JSON.stringify(value);
+}
+function slotLabel(doc, slot) {
+  if (slot.value !== undefined)
+    return valueWords2(doc, slot.value);
+  if (slot.weighted)
+    return slot.weighted.map((w) => valueWords2(doc, w.value)).join(" / ");
+  return "by what it was before";
+}
+function wordsInUse(doc, target) {
+  const out = new Set;
+  const add = (v) => {
+    if (typeof v === "string" && v !== "")
+      out.add(v);
+  };
+  for (const s of Object.values(doc.schedules)) {
+    if (s.target !== target)
+      continue;
+    for (const slot of s.slots) {
+      add(slot.value);
+      for (const w of slot.weighted ?? [])
+        add(w.value);
+      for (const row of Object.values(slot.given ?? {}))
+        for (const w of row)
+          add(w.value);
+    }
+  }
+  return [...out].sort((a, b) => a.localeCompare(b));
+}
+function WordsInput(props) {
+  const id = P2();
+  const list = P2();
+  const shown = typeof props.value === "string" ? props.value : props.value === undefined ? "" : JSON.stringify(props.value);
+  return /* @__PURE__ */ u3(Field, {
+    label: props.label,
+    help: props.help,
+    for: id,
+    children: [
+      /* @__PURE__ */ u3("input", {
+        id,
+        class: "lre-input",
+        list: props.suggestions.length > 0 ? list : undefined,
+        value: shown,
+        onChange: (event) => props.onChange(event.currentTarget.value.trim() === "" ? undefined : event.currentTarget.value.trim())
+      }, undefined, false, undefined, this),
+      props.suggestions.length > 0 ? /* @__PURE__ */ u3("datalist", {
+        id: list,
+        children: props.suggestions.map((s) => /* @__PURE__ */ u3("option", {
+          value: s
+        }, s, false, undefined, this))
+      }, undefined, false, undefined, this) : null
+    ]
+  }, undefined, true, undefined, this);
+}
+function SlotValueInput(props) {
+  const { type, doc } = props;
+  if (type.kind === "place")
+    return /* @__PURE__ */ u3(RefPicker, {
+      label: props.label,
+      value: typeof props.value === "string" ? props.value : "",
+      options: refOptions(doc, "places"),
+      onChange: (next) => props.onChange(next === "" ? undefined : next)
+    }, undefined, false, undefined, this);
+  if (type.kind === "field") {
+    const def = type.def;
+    switch (def.type) {
+      case "number":
+        return /* @__PURE__ */ u3(NumberInput, {
+          label: props.label,
+          value: props.value,
+          min: def.min,
+          max: def.max,
+          issues: [],
+          onChange: props.onChange
+        }, undefined, false, undefined, this);
+      case "bool":
+        return /* @__PURE__ */ u3(CheckField, {
+          label: props.label,
+          checked: props.value === true,
+          onChange: (checked) => props.onChange(checked)
+        }, undefined, false, undefined, this);
+      case "enum":
+        return /* @__PURE__ */ u3(ChoiceInput, {
+          label: props.label,
+          value: props.value,
+          options: (def.values ?? []).map((v) => ({ value: v, label: humanize(v) })),
+          issues: [],
+          onChange: props.onChange
+        }, undefined, false, undefined, this);
+      case "ref": {
+        const options = def.ref ? refOptions(doc, "entities").filter((o) => kindIs(doc, doc.entities[o.value]?.kind ?? "", def.ref ?? "")) : [...refOptions(doc, "places").map((o) => ({ ...o, sublabel: "Place" })), ...refOptions(doc, "entities")];
+        return /* @__PURE__ */ u3(RefPicker, {
+          label: props.label,
+          value: typeof props.value === "string" ? props.value : "",
+          options,
+          onChange: (next) => props.onChange(next === "" ? undefined : next)
+        }, undefined, false, undefined, this);
+      }
+    }
+  }
+  return /* @__PURE__ */ u3(WordsInput, {
+    label: props.label,
+    help: type.kind === "words" ? "A word, as the field takes it" : undefined,
+    value: props.value,
+    suggestions: props.suggestions,
+    onChange: props.onChange
+  }, undefined, false, undefined, this);
+}
+function Choices(props) {
+  const total = props.items.reduce((sum, w) => sum + Math.max(0, w.weight), 0);
+  return /* @__PURE__ */ u3(FormGroup, {
+    title: props.title,
+    aside: /* @__PURE__ */ u3(Button, {
+      size: "sm",
+      icon: "plus",
+      onClick: () => props.onChange([...props.items, { value: "", weight: 1 }]),
+      children: "Choice"
+    }, undefined, false, undefined, this),
+    children: [
+      props.items.length === 0 ? /* @__PURE__ */ u3("span", {
+        class: "lre-small lre-muted",
+        children: "No choices yet."
+      }, undefined, false, undefined, this) : null,
+      props.items.map((w, i) => /* @__PURE__ */ u3("div", {
+        class: "lre-ve-weight",
+        children: [
+          /* @__PURE__ */ u3(SlotValueInput, {
+            label: `Choice ${i + 1}`,
+            type: props.type,
+            value: w.value,
+            doc: props.doc,
+            suggestions: props.suggestions,
+            onChange: (value) => props.onChange(props.items.map((x, j) => j === i ? { ...x, value: value ?? "" } : x))
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3(IconButton, {
+            icon: "trash",
+            label: `Remove choice ${i + 1}`,
+            onClick: () => props.onChange(props.items.filter((_, j) => j !== i))
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3(NumberStepper, {
+            label: `Weight${total > 0 ? ` (${Math.round(Math.max(0, w.weight) / total * 100)}%)` : ""}`,
+            value: w.weight,
+            min: 0,
+            onChange: (weight) => props.onChange(props.items.map((x, j) => j === i ? { ...x, weight } : x))
+          }, undefined, false, undefined, this)
+        ]
+      }, i, true, undefined, this))
+    ]
+  }, undefined, true, undefined, this);
+}
+function GivenCases(props) {
+  const cases = Object.entries(props.given ?? {});
+  const write = (next) => props.onChange(next.length === 0 ? undefined : Object.fromEntries(next));
+  const fresh = ["null", ...props.suggestions].find((key) => !cases.some(([k]) => k === key)) ?? "";
+  return /* @__PURE__ */ u3("div", {
+    class: "lre-stack",
+    "data-lre-given": true,
+    children: [
+      /* @__PURE__ */ u3("span", {
+        class: "lre-small lre-muted",
+        children: "Choices that depend on what this was just before the slot starts. When a case matches, its choices stand in for the value above."
+      }, undefined, false, undefined, this),
+      cases.map(([key, items], i) => /* @__PURE__ */ u3(FormGroup, {
+        title: `If it was ${key === "null" ? "nothing" : valueWords2(props.doc, givenValue(props.type, key))} before`,
+        aside: /* @__PURE__ */ u3(IconButton, {
+          icon: "trash",
+          label: `Remove case ${i + 1}`,
+          onClick: () => write(cases.filter((_, j) => j !== i))
+        }, undefined, false, undefined, this),
+        children: [
+          /* @__PURE__ */ u3(CheckField, {
+            label: "It was nothing before",
+            checked: key === "null",
+            onChange: (none) => write(cases.map((c, j) => j === i ? [none ? "null" : "", c[1]] : c))
+          }, undefined, false, undefined, this),
+          key === "null" ? null : /* @__PURE__ */ u3(SlotValueInput, {
+            label: "What it was",
+            type: props.type,
+            value: givenValue(props.type, key),
+            doc: props.doc,
+            suggestions: props.suggestions,
+            onChange: (value) => write(cases.map((c, j) => j === i ? [givenKey(value), c[1]] : c))
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3(Choices, {
+            title: "Then choose",
+            items,
+            type: props.type,
+            doc: props.doc,
+            suggestions: props.suggestions,
+            onChange: (next) => write(cases.map((c, j) => j === i ? [c[0], next] : c))
+          }, undefined, false, undefined, this)
+        ]
+      }, i, true, undefined, this)),
+      /* @__PURE__ */ u3("div", {
+        children: /* @__PURE__ */ u3(Button, {
+          size: "sm",
+          icon: "plus",
+          onClick: () => write([...cases, [fresh, [{ value: "", weight: 1 }]]]),
+          children: "Case"
+        }, undefined, false, undefined, this)
+      }, undefined, false, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+}
+function DayBar(props) {
+  const bar = T2(null);
+  const [dragging, setDragging] = d2(null);
+  const handles = dayHandles(props.slots);
+  const minuteAt = (clientX) => {
+    const rect = bar.current?.getBoundingClientRect();
+    if (!rect || rect.width === 0)
+      return null;
+    return Math.round((clientX - rect.left) / rect.width * DAY / STEP) * STEP;
+  };
+  const moveTo = (i, to) => {
+    const h = handles[i];
+    if (!h)
+      return;
+    const [min, max] = handleRange(handles, i);
+    const at = Math.min(max, Math.max(min, to));
+    if (at !== h.at)
+      props.onMove(moveHandle(props.slots, h.edges, at));
+  };
+  const name = (h) => {
+    const ends = h.edges.filter((e) => e.side === "end").map((e) => e.index + 1);
+    const starts = h.edges.filter((e) => e.side === "start").map((e) => e.index + 1);
+    return ends.length > 0 && starts.length > 0 ? `Slot ${ends.join(", ")} ends and slot ${starts.join(", ")} starts` : ends.length > 0 ? `End of slot ${ends.join(", ")}` : `Start of slot ${starts.join(", ")}`;
+  };
+  return /* @__PURE__ */ u3(M, {
+    children: [
+      /* @__PURE__ */ u3("div", {
+        ref: bar,
+        class: "lre-ve-day",
+        "data-lre-day-bar": true,
+        children: [
+          /* @__PURE__ */ u3("div", {
+            class: "lre-ve-day-track",
+            children: slotSpans(props.slots).map((span, i) => {
+              const slot = props.slots[span.index];
+              if (!slot)
+                return null;
+              return /* @__PURE__ */ u3("button", {
+                type: "button",
+                tabIndex: -1,
+                "aria-hidden": "true",
+                class: "lre-ve-day-slot",
+                "aria-current": span.index === props.current,
+                style: { left: `${span.start / DAY * 100}%`, width: `${(span.end - span.start) / DAY * 100}%`, "--slot": props.colour(slot) },
+                title: `${slot.start}–${slot.end} ${props.label(slot)}`,
+                onClick: () => props.onOpen(span.index),
+                children: props.label(slot)
+              }, `${span.index}:${i}`, false, undefined, this);
+            })
+          }, undefined, false, undefined, this),
+          handles.map((h, i) => {
+            const [min, max] = handleRange(handles, i);
+            if (min === max)
+              return null;
+            return /* @__PURE__ */ u3("div", {
+              class: "lre-ve-handle",
+              role: "slider",
+              tabIndex: 0,
+              "aria-label": name(h),
+              "aria-valuemin": min,
+              "aria-valuemax": max,
+              "aria-valuenow": h.at,
+              "aria-valuetext": timeOf(h.at),
+              "data-dragging": dragging === i ? "" : undefined,
+              style: { left: `${h.at / DAY * 100}%` },
+              onPointerDown: (event) => {
+                event.currentTarget.setPointerCapture(event.pointerId);
+                event.preventDefault();
+                setDragging(i);
+              },
+              onPointerMove: (event) => {
+                if (dragging !== i)
+                  return;
+                const to = minuteAt(event.clientX);
+                if (to !== null)
+                  moveTo(i, to);
+              },
+              onPointerUp: () => setDragging(null),
+              onPointerCancel: () => setDragging(null),
+              onKeyDown: (event) => {
+                const delta = event.key === "ArrowLeft" || event.key === "ArrowDown" ? -STEP : event.key === "ArrowRight" || event.key === "ArrowUp" ? STEP : event.key === "PageDown" ? -60 : event.key === "PageUp" ? 60 : 0;
+                const to = event.key === "Home" ? min : event.key === "End" ? max : delta !== 0 ? h.at + delta : null;
+                if (to === null)
+                  return;
+                event.preventDefault();
+                moveTo(i, to);
+              },
+              children: /* @__PURE__ */ u3("span", {}, undefined, false, undefined, this)
+            }, h.edges.map((e) => `${e.index}${e.side}`).join(), false, undefined, this);
+          })
+        ]
+      }, undefined, true, undefined, this),
+      /* @__PURE__ */ u3("div", {
+        class: "lre-ve-day-axis",
+        "aria-hidden": "true",
+        children: [
+          /* @__PURE__ */ u3("span", {
+            children: "00"
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3("span", {
+            children: "06"
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3("span", {
+            children: "12"
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3("span", {
+            children: "18"
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3("span", {
+            children: "24"
+          }, undefined, false, undefined, this)
+        ]
+      }, undefined, true, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+}
+function SlotSheet(props) {
+  const { slot } = props;
+  const weighted = slot.weighted !== undefined;
+  const lint = props.issues.map((message) => ({ severity: "error", path: `slots.${props.index}`, code: "slot", message }));
+  const typed = { type: props.type, doc: props.doc, suggestions: props.suggestions };
+  return /* @__PURE__ */ u3(FormSheet, {
+    title: `Slot ${props.index + 1}`,
+    subtitle: `${slot.start}–${slot.end} · ${slotLabel(props.doc, slot)}`,
+    backLabel: "Schedule",
+    onClose: props.onClose,
+    children: [
+      /* @__PURE__ */ u3(Issues, {
+        issues: lint
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3("div", {
+        class: "lre-ve-times",
+        children: [
+          /* @__PURE__ */ u3(Field, {
+            label: "Starts",
+            children: /* @__PURE__ */ u3("input", {
+              class: "lre-input",
+              type: "time",
+              step: 900,
+              value: slot.start,
+              onChange: (event) => props.onChange({ ...slot, start: event.currentTarget.value })
+            }, undefined, false, undefined, this)
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3(Field, {
+            label: "Ends",
+            help: "At or before the start: it runs past midnight.",
+            children: /* @__PURE__ */ u3("input", {
+              class: "lre-input",
+              type: "time",
+              step: 900,
+              value: slot.end,
+              onChange: (event) => props.onChange({ ...slot, end: event.currentTarget.value })
+            }, undefined, false, undefined, this)
+          }, undefined, false, undefined, this)
+        ]
+      }, undefined, true, undefined, this),
+      /* @__PURE__ */ u3(Field, {
+        label: "Its value",
+        children: /* @__PURE__ */ u3(Seg, {
+          label: "Its value",
+          value: weighted ? "weighted" : "value",
+          options: [
+            { value: "value", label: "Fixed" },
+            { value: "weighted", label: "Weighted choice" }
+          ],
+          onChange: (mode) => props.onChange(mode === "value" ? { start: slot.start, end: slot.end, value: slot.weighted?.[0]?.value ?? "", ...slot.given ? { given: slot.given } : {} } : { start: slot.start, end: slot.end, weighted: [{ value: slot.value ?? "", weight: 1 }], ...slot.given ? { given: slot.given } : {} })
+        }, undefined, false, undefined, this)
+      }, undefined, false, undefined, this),
+      weighted ? /* @__PURE__ */ u3(Choices, {
+        title: "Choices",
+        items: slot.weighted ?? [],
+        ...typed,
+        onChange: (next) => props.onChange({ ...slot, weighted: next })
+      }, undefined, false, undefined, this) : /* @__PURE__ */ u3(SlotValueInput, {
+        label: "Value",
+        value: slot.value,
+        ...typed,
+        onChange: (value) => props.onChange({ ...slot, value })
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(Disclosure, {
+        summary: "By what it was before",
+        defaultOpen: slot.given !== undefined,
+        children: /* @__PURE__ */ u3(GivenCases, {
+          given: slot.given,
+          ...typed,
+          onChange: (given) => props.onChange({ ...slot, given })
+        }, undefined, false, undefined, this)
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3("div", {
+        class: "lre-inline",
+        children: /* @__PURE__ */ u3(Button, {
+          variant: "danger",
+          icon: "trash",
+          onClick: props.onRemove,
+          children: "Remove slot"
+        }, undefined, false, undefined, this)
+      }, undefined, false, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+}
+var TARGET_WORDS = { place: "Where they are", activity: "What they're doing" };
+function targetWords(doc, owner, target) {
+  if (target === "place" || target === "activity")
+    return TARGET_WORDS[target].toLowerCase();
+  if (target === "")
+    return "nothing yet";
+  return targetOptions(doc, owner).find((o) => o.value === target)?.label ?? humanize(target);
+}
+function TargetPicker(props) {
+  const id = P2();
+  const mode = props.value === "place" || props.value === "activity" ? props.value : "other";
+  return /* @__PURE__ */ u3("div", {
+    class: "lre-stack",
+    "data-lre-target": mode,
+    children: [
+      /* @__PURE__ */ u3(Field, {
+        label: "It sets",
+        children: /* @__PURE__ */ u3(Seg, {
+          label: "It sets",
+          value: mode,
+          options: [
+            { value: "place", label: TARGET_WORDS.place },
+            { value: "activity", label: TARGET_WORDS.activity },
+            { value: "other", label: "Another field" }
+          ],
+          onChange: (next) => props.onChange(next === "other" ? "" : next)
+        }, undefined, false, undefined, this)
+      }, undefined, false, undefined, this),
+      mode === "other" ? /* @__PURE__ */ u3(M, {
+        children: [
+          /* @__PURE__ */ u3(RefPicker, {
+            label: "Which field",
+            value: props.value,
+            options: targetOptions(props.doc, props.owner),
+            onChange: props.onChange
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3(Field, {
+            label: "Or its id",
+            help: "A field or relation no kind declares, as the world's rules name it.",
+            for: id,
+            children: /* @__PURE__ */ u3("input", {
+              id,
+              class: "lre-input",
+              value: props.value,
+              onChange: (event) => props.onChange(event.currentTarget.value.trim())
+            }, undefined, false, undefined, this)
+          }, undefined, false, undefined, this)
+        ]
+      }, undefined, true, undefined, this) : null
+    ]
+  }, undefined, true, undefined, this);
+}
+function RecurrenceFields(props) {
+  const rec = props.value;
+  const setRec = props.onChange;
+  return /* @__PURE__ */ u3("div", {
+    class: "lre-stack",
+    "data-lre-recurrence": rec.every,
+    children: [
+      /* @__PURE__ */ u3(Seg, {
+        label: "Repeats",
+        value: rec.every,
+        options: Object.keys(EVERY).map((every) => ({ value: every, label: EVERY[every] })),
+        onChange: (every) => setRec({ ...rec, every })
+      }, undefined, false, undefined, this),
+      rec.every === "week" ? /* @__PURE__ */ u3(Field, {
+        label: "On",
+        children: /* @__PURE__ */ u3("div", {
+          class: "lre-ve-days",
+          role: "group",
+          "aria-label": "Weekdays",
+          children: WEEKDAYS.map((day, i) => {
+            const on = rec.weekdays?.includes(i) ?? false;
+            return /* @__PURE__ */ u3("button", {
+              type: "button",
+              "aria-pressed": on,
+              onClick: () => setRec({ ...rec, weekdays: on ? (rec.weekdays ?? []).filter((d) => d !== i) : [...rec.weekdays ?? [], i].sort() }),
+              children: day
+            }, day, false, undefined, this);
+          })
+        }, undefined, false, undefined, this)
+      }, undefined, false, undefined, this) : null,
+      rec.every === "month" ? /* @__PURE__ */ u3(Field, {
+        label: "On these days of the month",
+        children: /* @__PURE__ */ u3("div", {
+          class: "lre-ve-days",
+          role: "group",
+          "aria-label": "Days of the month",
+          children: Array.from({ length: 31 }, (_, i) => i + 1).map((day) => {
+            const on = rec.days?.includes(day) ?? false;
+            return /* @__PURE__ */ u3("button", {
+              type: "button",
+              "aria-pressed": on,
+              onClick: () => setRec({ ...rec, days: on ? (rec.days ?? []).filter((d) => d !== day) : [...rec.days ?? [], day].sort((a, b) => a - b) }),
+              children: day
+            }, day, false, undefined, this);
+          })
+        }, undefined, false, undefined, this)
+      }, undefined, false, undefined, this) : null,
+      props.holidays.length > 0 ? /* @__PURE__ */ u3(Field, {
+        label: "Not on",
+        children: /* @__PURE__ */ u3("div", {
+          class: "lre-form-chips",
+          role: "group",
+          "aria-label": "Not on these holidays",
+          children: props.holidays.map((h) => {
+            const on = rec.except?.includes(h.id) ?? false;
+            return /* @__PURE__ */ u3(Chip, {
+              pressed: on,
+              onToggle: () => setRec({ ...rec, except: on ? (rec.except ?? []).filter((e) => e !== h.id) : [...rec.except ?? [], h.id] }),
+              children: h.label
+            }, h.id, false, undefined, this);
+          })
+        }, undefined, false, undefined, this)
+      }, undefined, false, undefined, this) : null,
+      /* @__PURE__ */ u3("div", {
+        class: "lre-ve-times",
+        children: [
+          /* @__PURE__ */ u3(Field, {
+            label: "From",
+            children: /* @__PURE__ */ u3("input", {
+              class: "lre-input",
+              type: "date",
+              value: rec.from ?? "",
+              onChange: (event) => setRec({ ...rec, from: event.currentTarget.value || undefined })
+            }, undefined, false, undefined, this)
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3(Field, {
+            label: "Until",
+            children: /* @__PURE__ */ u3("input", {
+              class: "lre-input",
+              type: "date",
+              value: rec.until ?? "",
+              onChange: (event) => setRec({ ...rec, until: event.currentTarget.value || undefined })
+            }, undefined, false, undefined, this)
+          }, undefined, false, undefined, this)
+        ]
+      }, undefined, true, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+}
+function ScheduleForm(props) {
+  const { doc } = props;
+  const schedule = props.value;
+  const setSchedule = props.onChange;
+  const [open, setOpen] = d2(null);
+  const issues = b2(() => slotIssues(schedule.slots), [schedule.slots]);
+  const type = slotValueType(doc, schedule.owner, schedule.target);
+  const suggestions = wordsInUse(doc, schedule.target);
+  const label = (slot) => slotLabel(doc, slot);
+  const values = [...new Set(schedule.slots.map(label))];
+  const colour = (slot) => `var(--lre-series-${values.indexOf(label(slot)) % 5 + 1})`;
+  const slot = open !== null ? schedule.slots[open] : undefined;
+  const addSlot = () => {
+    const last = schedule.slots.at(-1);
+    const start = last && TIME.test(last.end) ? last.end : "00:00";
+    const end = timeOf(Math.min(DAY - 1, minutesOf(start) + 60));
+    setSchedule({ ...schedule, slots: [...schedule.slots, { start, end, value: "" }] });
+    setOpen(schedule.slots.length);
+  };
+  return /* @__PURE__ */ u3(M, {
+    children: [
+      /* @__PURE__ */ u3(Section, {
+        title: "Who and what",
+        children: props.fixed ?? /* @__PURE__ */ u3("div", {
+          class: "lre-stack",
+          children: [
+            /* @__PURE__ */ u3(OwnerPicker, {
+              label: "It applies to",
+              value: schedule.owner,
+              doc,
+              noneLabel: "No one",
+              noneHelp: "A world process (the weather, prices): it sets no one's field.",
+              onChange: (owner) => setSchedule({ ...schedule, owner })
+            }, undefined, false, undefined, this),
+            /* @__PURE__ */ u3("span", {
+              class: "lre-small lre-muted",
+              children: "When schedules set the same field of the same person, the most specific owner wins: their own, then a group's, then their kind's, then a selector's."
+            }, undefined, false, undefined, this),
+            /* @__PURE__ */ u3(TargetPicker, {
+              doc,
+              owner: schedule.owner,
+              value: schedule.target,
+              onChange: (target) => setSchedule({ ...schedule, target })
+            }, undefined, false, undefined, this)
+          ]
+        }, undefined, true, undefined, this)
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(Section, {
+        title: "Repeats",
+        children: /* @__PURE__ */ u3(RecurrenceFields, {
+          value: schedule.recurrence,
+          holidays: doc.calendar.holidays,
+          onChange: (recurrence) => setSchedule({ ...schedule, recurrence })
+        }, undefined, false, undefined, this)
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(Section, {
+        title: "The day",
+        aside: /* @__PURE__ */ u3(Button, {
+          size: "sm",
+          icon: "plus",
+          onClick: addSlot,
+          children: "Slot"
+        }, undefined, false, undefined, this),
+        children: /* @__PURE__ */ u3("div", {
+          class: "lre-stack",
+          children: [
+            /* @__PURE__ */ u3(DayBar, {
+              slots: schedule.slots,
+              current: open,
+              label,
+              colour,
+              onOpen: setOpen,
+              onMove: (slots) => setSchedule({ ...schedule, slots })
+            }, undefined, false, undefined, this),
+            /* @__PURE__ */ u3("span", {
+              class: "lre-small lre-muted",
+              children: "Tap a slot to edit it. Drag a handle to move where one slot ends or the next starts."
+            }, undefined, false, undefined, this),
+            /* @__PURE__ */ u3(Issues, {
+              issues: [...new Set(issues.map((issue) => issue.message))].map((message) => ({ severity: "error", path: `${props.path}.slots`, code: "slot", message }))
+            }, undefined, false, undefined, this),
+            schedule.slots.length === 0 ? /* @__PURE__ */ u3("span", {
+              class: "lre-small lre-muted",
+              children: "No slots: the schedule sets nothing."
+            }, undefined, false, undefined, this) : /* @__PURE__ */ u3("div", {
+              class: "lre-form-items",
+              "data-lre-slots": true,
+              children: schedule.slots.map((s, i) => {
+                const flagged = issues.some((issue) => issue.slots.includes(i));
+                return /* @__PURE__ */ u3(ItemRow, {
+                  title: /* @__PURE__ */ u3("span", {
+                    class: "lre-ve-brush",
+                    children: [
+                      /* @__PURE__ */ u3("span", {
+                        class: "lre-ve-dot",
+                        style: { "--slot": colour(s) },
+                        "aria-hidden": "true"
+                      }, undefined, false, undefined, this),
+                      s.start,
+                      "–",
+                      s.end
+                    ]
+                  }, undefined, true, undefined, this),
+                  subtitle: label(s),
+                  badge: flagged ? /* @__PURE__ */ u3("span", {
+                    class: "lre-badge neg",
+                    children: "Fix"
+                  }, undefined, false, undefined, this) : undefined,
+                  openLabel: `Edit slot ${i + 1}, ${s.start} to ${s.end}`,
+                  onOpen: () => setOpen(i)
+                }, i, false, undefined, this);
+              })
+            }, undefined, false, undefined, this)
+          ]
+        }, undefined, true, undefined, this)
+      }, undefined, false, undefined, this),
+      slot && open !== null ? /* @__PURE__ */ u3(SlotSheet, {
+        slot,
+        index: open,
+        issues: issues.filter((issue) => issue.slots.includes(open)).map((issue) => issue.message),
+        type,
+        doc,
+        suggestions,
+        onChange: (next) => setSchedule({ ...schedule, slots: schedule.slots.map((s, i) => i === open ? next : s) }),
+        onRemove: () => {
+          setSchedule({ ...schedule, slots: schedule.slots.filter((_, i) => i !== open) });
+          setOpen(null);
+        },
+        onClose: () => setOpen(null)
+      }, undefined, false, undefined, this) : null
+    ]
+  }, undefined, true, undefined, this);
+}
+function scheduleWrite(worldId, id, schedule) {
+  return { type: "lre.editor", worldId, base: null, op: "put", collection: "schedules", id, value: { ...schedule, id } };
+}
+
+// src/frontend/build/routine-editor.tsx
+var TIME2 = /^([01]\d|2[0-3]):[0-5]\d$/;
+var WEEKDAYS2 = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"];
+var SEASONS2 = ["spring", "summer", "autumn", "winter"];
+var NEEDS = { hunger: "Hunger", fatigue: "Rest", social: "Company", fun: "Fun" };
+var ACTIVITIES = ["sleep", "breakfast", "lunch", "dinner", "work", "socialize", "leisure"];
+var KIND_WORDS = {
+  fixed: { label: "At a set time", help: "At the same time on each day it's on." },
+  flexible: { label: "Within a window", help: "Somewhere in its window, wherever the day has room; or only a few times a week." },
+  optional: { label: "Optional", help: "Only likely on a day it's on, and the first thing a busier day leaves out." }
+};
+var MATTERS = [
+  { value: 1, label: "Least" },
+  { value: 2, label: "Less" },
+  { value: 3, label: "Usual" },
+  { value: 4, label: "More" },
+  { value: 5, label: "Most" }
+];
+var CHANCES = [
+  { value: 0.25, label: "Rarely" },
+  { value: 0.5, label: "Sometimes" },
+  { value: 0.75, label: "Often" },
+  { value: 0.9, label: "Usually" }
+];
+var PLACE_ROLE = { home: "At home", work: "At work", here: "Wherever they are", with: "At the home of whoever they're with", place: "A chosen place", nearest: "The nearest place of a type" };
+var LEVELS2 = ["entity", "group", "kind", "selector", "none"];
+var LEVEL_TITLE = { entity: "Someone's own", group: "A group's", kind: "A kind's", selector: "By selector", none: "Everyone's" };
+function routineWrite(worldId, id, routine) {
+  return { type: "lre.editor", worldId, base: null, op: "put", collection: "routines", id, value: JSON.parse(JSON.stringify({ ...routine, id })) };
+}
+function blankBlock(id, label) {
+  return { id, label, activity: "leisure", kind: "flexible", window: { from: "18:00", to: "21:00" }, minutes: 60 };
+}
+function blockKindChange(block, kind) {
+  const { at, window: window2, perWeek, chance, ...rest } = block;
+  const from = window2 && TIME2.test(window2.from) ? window2.from : at && TIME2.test(at) ? at : "09:00";
+  if (kind === "fixed")
+    return { ...rest, kind, at: at && TIME2.test(at) ? at : from };
+  const next = { ...rest, kind, window: window2 ?? { from, to: timeOf(minutesOf(from) + 60) }, ...perWeek !== undefined ? { perWeek } : {} };
+  return kind === "optional" && chance !== undefined ? { ...next, chance } : next;
+}
+function blockSlot(block) {
+  if (block.kind !== "fixed")
+    return { start: block.window?.from ?? "", end: block.window?.to ?? "", value: block.label };
+  const at = block.at ?? "";
+  return { start: at, end: TIME2.test(at) ? timeOf(minutesOf(at) + block.minutes) : "", value: block.label };
+}
+function blockFromSlot(block, slot) {
+  if (block.kind !== "fixed")
+    return { ...block, window: { from: slot.start, to: slot.end } };
+  const span = (minutesOf(slot.end) - minutesOf(slot.start) + 1440) % 1440;
+  return { ...block, at: slot.start, minutes: span === 0 ? 1440 : span };
+}
+function isNoRoutine(routine) {
+  return routine.inherit === false && routine.blocks.length === 0;
+}
+function blockAt(path, prefix) {
+  if (!path?.startsWith(`${prefix}.blocks.`))
+    return null;
+  const n = path.slice(prefix.length + ".blocks.".length).split(".")[0] ?? "";
+  return /^\d+$/.test(n) ? Number(n) : null;
+}
+function timeWords(block) {
+  const length = durationText(block.minutes);
+  if (block.kind === "fixed")
+    return `${block.at ?? "no time"} for ${length}`;
+  const often = block.perWeek !== undefined ? `${block.perWeek} time${block.perWeek === 1 ? "" : "s"} a week, ` : "";
+  const chance = block.kind === "optional" ? `${(CHANCES.find((c) => c.value === (block.chance ?? 0.5))?.label ?? `${Math.round((block.chance ?? 0.5) * 100)}%`).toLowerCase()}, ` : "";
+  return `${chance}${often}${length}, starting ${block.window ? `${block.window.from}–${block.window.to}` : "anywhen"}`;
+}
+function placeWords(doc, place) {
+  if (place === undefined || place === "home")
+    return "at home";
+  if (place === "work")
+    return "at work";
+  if (place === "here")
+    return "wherever they are";
+  if (place === "with")
+    return "at their company's home";
+  if ("place" in place)
+    return `at ${hasOwn(doc.places, place.place) ? doc.places[place.place]?.name || place.place : place.place}`;
+  return `at the nearest ${humanize(place.nearest).toLowerCase()}`;
+}
+function sourceWords(doc, source) {
+  if (!source || source.type === "authored")
+    return null;
+  if (source.type === "builtin")
+    return "A basic need";
+  if (source.type === "story")
+    return "From the story";
+  if (source.type === "gm")
+    return "Set by the GM";
+  if (source.type === "lore")
+    return `From lore: ${hasOwn(doc.lore, source.entry) ? doc.lore[source.entry]?.title || source.entry : source.entry}`;
+  const who = hasOwn(doc.entities, source.entity) ? doc.entities[source.entity]?.name || source.entity : source.entity;
+  return `From ${who}'s sheet${source.field ? `: ${humanize(source.field)}` : ""}`;
+}
+function startOf(entry) {
+  if (isOff(entry))
+    return Infinity;
+  const t = entry.kind === "fixed" ? entry.at : entry.window?.from;
+  return t && TIME2.test(t) ? minutesOf(t) : Infinity;
+}
+function routineSummary(routine) {
+  if (isNoRoutine(routine))
+    return "No routine";
+  const on = routine.blocks.filter((b) => !isOff(b)).length;
+  const off = routine.blocks.length - on;
+  const parts = [`${on} block${on === 1 ? "" : "s"}`, off > 0 ? `${off} turned off` : "", routine.inherit === false ? "only its own" : ""];
+  return parts.filter((p) => p !== "").join(", ");
+}
+function routineName(doc, routine) {
+  return routine.label || ownerWords(doc, routine.owner, "Everyone");
+}
+function blockName(doc, id) {
+  const basic = BASIC_BLOCKS.find((b) => b.id === id);
+  if (basic)
+    return basic.label;
+  for (const r of Object.values(doc.routines ?? {}))
+    for (const b of r.blocks)
+      if (b.id === id && !isOff(b))
+        return b.label;
+  return humanize(id);
+}
+function DaysFields(props) {
+  const days = props.value ?? {};
+  const set = (patch) => {
+    const next = { ...days, ...patch };
+    for (const key of Object.keys(next)) {
+      const v = next[key];
+      if (v === undefined || Array.isArray(v) && v.length === 0)
+        delete next[key];
+    }
+    props.onChange(Object.keys(next).length > 0 ? next : undefined);
+  };
+  const toggle = (list, item) => (list ?? []).includes(item) ? (list ?? []).filter((x) => x !== item) : [...list ?? [], item];
+  const holidays = props.doc.calendar.holidays;
+  return /* @__PURE__ */ u3("div", {
+    class: "lre-stack",
+    "data-lre-block-days": true,
+    children: [
+      /* @__PURE__ */ u3(Field, {
+        label: "On these weekdays",
+        help: "None picked: every day.",
+        children: /* @__PURE__ */ u3("div", {
+          class: "lre-ve-days",
+          role: "group",
+          "aria-label": "Weekdays",
+          children: WEEKDAYS2.map((day, i) => /* @__PURE__ */ u3("button", {
+            type: "button",
+            "aria-pressed": days.weekdays?.includes(i) ?? false,
+            onClick: () => set({ weekdays: toggle(days.weekdays, i).sort() }),
+            children: day
+          }, day, false, undefined, this))
+        }, undefined, false, undefined, this)
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(Field, {
+        label: "Days off",
+        children: /* @__PURE__ */ u3(Seg, {
+          label: "Days off",
+          value: days.off ?? "any",
+          options: [
+            { value: "any", label: "Either way" },
+            { value: "only", label: "Only days off" },
+            { value: "never", label: "Never on days off" }
+          ],
+          onChange: (off) => set({ off: off === "any" ? undefined : off })
+        }, undefined, false, undefined, this)
+      }, undefined, false, undefined, this),
+      holidays.length > 0 ? /* @__PURE__ */ u3(M, {
+        children: [
+          /* @__PURE__ */ u3(Field, {
+            label: "Only on these holidays",
+            children: /* @__PURE__ */ u3("div", {
+              class: "lre-form-chips",
+              role: "group",
+              "aria-label": "Only on these holidays",
+              children: holidays.map((h) => /* @__PURE__ */ u3(Chip, {
+                pressed: days.holidays?.includes(h.id) ?? false,
+                onToggle: () => set({ holidays: toggle(days.holidays, h.id) }),
+                children: h.label
+              }, h.id, false, undefined, this))
+            }, undefined, false, undefined, this)
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3(Field, {
+            label: "Never on these",
+            children: /* @__PURE__ */ u3("div", {
+              class: "lre-form-chips",
+              role: "group",
+              "aria-label": "Never on these holidays",
+              children: holidays.map((h) => /* @__PURE__ */ u3(Chip, {
+                pressed: days.except?.includes(h.id) ?? false,
+                onToggle: () => set({ except: toggle(days.except, h.id) }),
+                children: h.label
+              }, h.id, false, undefined, this))
+            }, undefined, false, undefined, this)
+          }, undefined, false, undefined, this)
+        ]
+      }, undefined, true, undefined, this) : null,
+      /* @__PURE__ */ u3(Field, {
+        label: "Birthdays",
+        children: /* @__PURE__ */ u3(Seg, {
+          label: "Birthdays",
+          value: days.birthday ?? "any",
+          options: [
+            { value: "any", label: "Any day" },
+            { value: "own", label: "Their birthday" },
+            { value: "friend", label: "A friend's birthday" }
+          ],
+          onChange: (birthday) => set({ birthday: birthday === "any" ? undefined : birthday })
+        }, undefined, false, undefined, this)
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(Field, {
+        label: "Seasons",
+        help: "None picked: all year. Needs the weather's seasons.",
+        children: /* @__PURE__ */ u3("div", {
+          class: "lre-form-chips",
+          role: "group",
+          "aria-label": "Seasons",
+          children: SEASONS2.map((s) => /* @__PURE__ */ u3(Chip, {
+            pressed: days.seasons?.includes(s) ?? false,
+            onToggle: () => set({ seasons: toggle(days.seasons, s) }),
+            children: humanize(s)
+          }, s, false, undefined, this))
+        }, undefined, false, undefined, this)
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(Field, {
+        label: "Weather",
+        children: /* @__PURE__ */ u3(Seg, {
+          label: "Weather",
+          value: days.weather ?? "any",
+          options: [
+            { value: "any", label: "Any weather" },
+            { value: "fair", label: "Fair" },
+            { value: "foul", label: "Foul" }
+          ],
+          onChange: (weather) => set({ weather: weather === "any" ? undefined : weather })
+        }, undefined, false, undefined, this)
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(Issues, {
+        issues: props.issues
+      }, undefined, false, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+}
+function PlaceFields(props) {
+  const { doc } = props;
+  const stored = props.value === undefined ? "home" : typeof props.value === "string" ? props.value : ("place" in props.value) ? "place" : "nearest";
+  const [pending, setPending] = d2(null);
+  const role = stored === "place" || stored === "nearest" ? stored : pending ?? stored;
+  const scenes = [...new Set(Object.values(doc.places).flatMap((p) => p.sceneType ? [p.sceneType] : []))].sort().map((s) => ({ value: s, label: humanize(s) }));
+  const roles = Object.keys(PLACE_ROLE).filter((r) => r !== "nearest" || scenes.length > 0 || stored === "nearest");
+  return /* @__PURE__ */ u3("div", {
+    class: "lre-stack",
+    "data-lre-block-place": role,
+    children: [
+      /* @__PURE__ */ u3(HostSelect, {
+        label: "Where",
+        value: role,
+        options: roles.map((r) => ({ value: r, label: PLACE_ROLE[r] })),
+        onChange: (next) => {
+          const r = roles.find((x) => x === next);
+          if (!r)
+            return;
+          if (r === "place" || r === "nearest") {
+            setPending(r);
+            return;
+          }
+          setPending(null);
+          props.onChange(r === "home" ? undefined : r);
+        }
+      }, undefined, false, undefined, this),
+      role === "place" ? /* @__PURE__ */ u3(RefPicker, {
+        label: "Which place",
+        value: typeof props.value === "object" && "place" in props.value ? props.value.place : "",
+        options: refOptions(doc, "places"),
+        onChange: (place) => props.onChange(place ? { place } : undefined)
+      }, undefined, false, undefined, this) : role === "nearest" ? /* @__PURE__ */ u3(RefPicker, {
+        label: "The nearest place of type",
+        value: typeof props.value === "object" && "nearest" in props.value ? props.value.nearest : "",
+        options: scenes,
+        onChange: (nearest) => props.onChange(nearest ? { nearest } : undefined)
+      }, undefined, false, undefined, this) : role === "with" ? /* @__PURE__ */ u3("span", {
+        class: "lre-small lre-muted",
+        children: "The home of the first person it's with, as Who with picks them."
+      }, undefined, false, undefined, this) : null,
+      /* @__PURE__ */ u3(Issues, {
+        issues: props.issues
+      }, undefined, false, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+}
+function activityOptions(doc) {
+  const inRoutines = Object.values(doc.routines ?? {}).flatMap((r) => r.blocks.flatMap((b) => isOff(b) ? [] : [b.activity]));
+  return [...new Set([...ACTIVITIES, ...wordsInUse(doc, "activity"), ...inRoutines].filter((a) => a.trim() !== ""))];
+}
+function RoutineBlockForm(props) {
+  const { doc } = props;
+  const block = props.value;
+  const set = props.onChange;
+  const lint = props.lint ?? [];
+  const at = (key) => lintAt(lint, `${props.path}.${key}`);
+  const ctx = { doc, lint, path: props.path, identifiers: [], functions: [] };
+  const activityId = P2();
+  const activityList = P2();
+  const activities = b2(() => activityOptions(doc), [doc]);
+  const slot = blockSlot(block);
+  const time = (label, value, onChange) => /* @__PURE__ */ u3(Field, {
+    label,
+    children: /* @__PURE__ */ u3("input", {
+      class: "lre-input",
+      type: "time",
+      step: 900,
+      value: value ?? "",
+      onChange: (event) => TIME2.test(event.currentTarget.value) ? onChange(event.currentTarget.value) : undefined
+    }, undefined, false, undefined, this)
+  }, undefined, false, undefined, this);
+  return /* @__PURE__ */ u3("div", {
+    class: "lre-stack",
+    "data-lre-block-form": block.kind,
+    children: [
+      /* @__PURE__ */ u3(TextInput, {
+        label: "What it reads as",
+        hint: "As their day shows it: “Opens the shop”, “Dinner with the family”.",
+        value: block.label,
+        issues: at("label"),
+        onChange: (label) => set({ ...block, label: typeof label === "string" ? label : "" })
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(Field, {
+        label: "What they're doing",
+        help: "An activity the world knows: sleep, a meal, work, socialize, leisure, or the world's own.",
+        for: activityId,
+        children: [
+          /* @__PURE__ */ u3("input", {
+            id: activityId,
+            class: "lre-input",
+            list: activityList,
+            autoComplete: "off",
+            value: block.activity,
+            onInput: (event) => set({ ...block, activity: event.currentTarget.value })
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3("datalist", {
+            id: activityList,
+            children: activities.map((a) => /* @__PURE__ */ u3("option", {
+              value: a
+            }, a, false, undefined, this))
+          }, undefined, false, undefined, this)
+        ]
+      }, undefined, true, undefined, this),
+      /* @__PURE__ */ u3(Issues, {
+        issues: at("activity")
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(Field, {
+        label: "When it happens",
+        help: KIND_WORDS[block.kind].help,
+        children: /* @__PURE__ */ u3(Seg, {
+          label: "When it happens",
+          value: block.kind,
+          options: ROUTINE_BLOCK_KINDS.map((k) => ({ value: k, label: KIND_WORDS[k].label })),
+          onChange: (kind) => set(blockKindChange(block, kind))
+        }, undefined, false, undefined, this)
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(DayBar, {
+        slots: [slot],
+        current: 0,
+        label: () => block.label || "This block",
+        colour: () => "var(--lre-series-1)",
+        onOpen: () => {
+          return;
+        },
+        onMove: (slots) => {
+          const moved = slots[0];
+          if (moved)
+            set(blockFromSlot(block, moved));
+        }
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3("span", {
+        class: "lre-small lre-muted",
+        children: block.kind === "fixed" ? "The bar is when it runs. Drag either end to move when it starts or ends." : "The bar is when it may start. Drag either end to widen or narrow it."
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3("div", {
+        class: "lre-ve-times",
+        children: [
+          block.kind === "fixed" ? time("Starts at", block.at, (at) => set({ ...block, at })) : null,
+          block.kind !== "fixed" ? time("May start from", block.window?.from, (from) => set({ ...block, window: { from, to: block.window?.to ?? from } })) : null,
+          block.kind !== "fixed" ? time("Until", block.window?.to, (to) => set({ ...block, window: { from: block.window?.from ?? to, to } })) : null,
+          /* @__PURE__ */ u3(FieldInput, {
+            spec: { kind: "duration", key: "minutes", label: "How long" },
+            value: block.minutes,
+            ctx,
+            path: props.path,
+            parent: block,
+            onChange: (minutes) => typeof minutes === "number" ? set({ ...block, minutes: Math.min(1440, Math.max(1, Math.round(minutes))) }) : undefined
+          }, undefined, false, undefined, this)
+        ]
+      }, undefined, true, undefined, this),
+      /* @__PURE__ */ u3(Issues, {
+        issues: [...at("at"), ...at("window")]
+      }, undefined, false, undefined, this),
+      block.kind !== "fixed" ? /* @__PURE__ */ u3(M, {
+        children: [
+          /* @__PURE__ */ u3(Field, {
+            label: "How often",
+            help: block.perWeek !== undefined ? "On that many of the days it's on, each week; the planner picks which." : "On every day it's on.",
+            children: /* @__PURE__ */ u3(Seg, {
+              label: "How often",
+              value: block.perWeek !== undefined ? "some" : "each",
+              options: [
+                { value: "each", label: "Every day it's on" },
+                { value: "some", label: "A few times a week" }
+              ],
+              onChange: (often) => {
+                const { perWeek, ...rest } = block;
+                set(often === "some" ? { ...rest, perWeek: perWeek ?? 3 } : rest);
+              }
+            }, undefined, false, undefined, this)
+          }, undefined, false, undefined, this),
+          block.perWeek !== undefined ? /* @__PURE__ */ u3(NumberStepper, {
+            label: "Times a week",
+            value: block.perWeek,
+            min: 1,
+            max: 7,
+            integer: true,
+            onChange: (perWeek) => set({ ...block, perWeek })
+          }, undefined, false, undefined, this) : null,
+          /* @__PURE__ */ u3(Issues, {
+            issues: at("perWeek")
+          }, undefined, false, undefined, this)
+        ]
+      }, undefined, true, undefined, this) : null,
+      block.kind === "optional" ? /* @__PURE__ */ u3(Field, {
+        label: "How likely",
+        help: "On a day it's on.",
+        children: /* @__PURE__ */ u3(Seg, {
+          label: "How likely",
+          value: CHANCES.some((c) => c.value === (block.chance ?? 0.5)) ? block.chance ?? 0.5 : null,
+          options: CHANCES,
+          onChange: (chance) => set({ ...block, chance })
+        }, undefined, false, undefined, this)
+      }, undefined, false, undefined, this) : null,
+      /* @__PURE__ */ u3(Field, {
+        label: "How much it matters",
+        help: "When blocks want the same free time, the one that matters more goes first.",
+        children: /* @__PURE__ */ u3(Seg, {
+          label: "How much it matters",
+          value: block.priority ?? 3,
+          options: MATTERS,
+          onChange: (priority) => set({ ...block, priority })
+        }, undefined, false, undefined, this)
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(Issues, {
+        issues: at("priority")
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(PlaceFields, {
+        value: block.place,
+        doc,
+        issues: at("place"),
+        onChange: (place) => {
+          const { place: _, ...rest } = block;
+          set(place === undefined ? rest : { ...rest, place });
+        }
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(SelectorEditor, {
+        label: "Who with",
+        value: block.company ? selectorOf(block.company.who) ?? {} : undefined,
+        doc,
+        optional: true,
+        onChange: (who) => {
+          const { company, ...rest } = block;
+          set(who === undefined ? rest : { ...rest, company: { who, ...company?.invite ? { invite: true } : {} } });
+        }
+      }, undefined, false, undefined, this),
+      block.company ? /* @__PURE__ */ u3(CheckField, {
+        label: "Asks them along",
+        help: "An invitation, made as their day is planned, and only as Routines and the story allows it.",
+        checked: block.company.invite === true,
+        onChange: (invite) => set({ ...block, company: { who: block.company?.who ?? {}, ...invite ? { invite: true } : {} } })
+      }, undefined, false, undefined, this) : null,
+      /* @__PURE__ */ u3(Issues, {
+        issues: at("company")
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(Disclosure, {
+        summary: "Which days",
+        defaultOpen: block.days !== undefined,
+        children: /* @__PURE__ */ u3(DaysFields, {
+          value: block.days,
+          doc,
+          issues: at("days"),
+          onChange: (days) => {
+            const { days: _, ...rest } = block;
+            set(days === undefined ? rest : { ...rest, days });
+          }
+        }, undefined, false, undefined, this)
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(Disclosure, {
+        summary: "Needs and privacy",
+        defaultOpen: block.needs !== undefined || block.private === true,
+        children: /* @__PURE__ */ u3("div", {
+          class: "lre-stack",
+          children: [
+            /* @__PURE__ */ u3(Field, {
+              label: "The needs it meets",
+              help: "None picked: the ones its activity meets.",
+              children: /* @__PURE__ */ u3("div", {
+                class: "lre-form-chips",
+                role: "group",
+                "aria-label": "The needs it meets",
+                children: Object.entries(NEEDS).map(([need, label]) => {
+                  const on = block.needs?.includes(need) ?? false;
+                  return /* @__PURE__ */ u3(Chip, {
+                    pressed: on,
+                    onToggle: () => {
+                      const next = on ? (block.needs ?? []).filter((n) => n !== need) : [...block.needs ?? [], need];
+                      const { needs: _, ...rest } = block;
+                      set(next.length === 0 ? rest : { ...rest, needs: next });
+                    },
+                    children: label
+                  }, need, false, undefined, this);
+                })
+              }, undefined, false, undefined, this)
+            }, undefined, false, undefined, this),
+            /* @__PURE__ */ u3(Issues, {
+              issues: at("needs")
+            }, undefined, false, undefined, this),
+            /* @__PURE__ */ u3(CheckField, {
+              label: "Private",
+              help: "The player reads it as Busy, never what it is.",
+              checked: block.private === true,
+              onChange: (on) => {
+                const { private: _, ...rest } = block;
+                set(on ? { ...rest, private: true } : rest);
+              }
+            }, undefined, false, undefined, this)
+          ]
+        }, undefined, true, undefined, this)
+      }, undefined, false, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+}
+function SourceFields(props) {
+  const app = useApp();
+  const { doc } = props;
+  const value = props.value;
+  const [pending, setPending] = d2(false);
+  const type = value?.type ?? (pending ? "lore" : "authored");
+  const quote = value && value.type !== "authored" ? value.quote ?? "" : "";
+  const withQuote = (text) => typeof text === "string" && text.trim() !== "" ? { quote: text } : {};
+  const lore = Object.values(doc.lore).map((l) => ({ value: l.id, label: l.title || l.id })).sort((a, b) => a.label.localeCompare(b.label));
+  const entity = value?.type === "sheet" ? value.entity : "";
+  const kind = hasOwn(doc.entities, entity) ? doc.entities[entity]?.kind ?? "" : "";
+  const fields = Object.entries(kind ? kindFields(doc, kind) : {}).map(([id, f]) => ({ value: id, label: f.label || humanize(id) }));
+  return /* @__PURE__ */ u3("div", {
+    class: "lre-stack",
+    "data-lre-source": type,
+    children: [
+      /* @__PURE__ */ u3(Seg, {
+        label: "Where it comes from",
+        value: type,
+        options: [
+          { value: "authored", label: "Written here" },
+          { value: "lore", label: "From lore" },
+          { value: "sheet", label: "From a sheet" }
+        ],
+        onChange: (next) => {
+          setPending(next === "lore");
+          if (next === "authored")
+            props.onChange(undefined);
+          else if (next === "sheet" && value?.type !== "sheet")
+            props.onChange({ type: "sheet", entity: "", field: "" });
+          else if (next === "lore" && value?.type !== "lore")
+            props.onChange(undefined);
+        }
+      }, undefined, false, undefined, this),
+      type === "authored" ? /* @__PURE__ */ u3("span", {
+        class: "lre-small lre-muted",
+        children: props.inherited ? `It rests on the routine's source: ${props.inherited}.` : "Written by the world's author."
+      }, undefined, false, undefined, this) : null,
+      type === "lore" ? /* @__PURE__ */ u3(M, {
+        children: [
+          /* @__PURE__ */ u3(RefPicker, {
+            label: "Lore entry",
+            value: value?.type === "lore" ? value.entry : "",
+            options: lore,
+            onChange: (entry) => props.onChange(entry ? { type: "lore", entry, ...withQuote(quote) } : undefined)
+          }, undefined, false, undefined, this),
+          value?.type === "lore" && hasOwn(doc.lore, value.entry) ? /* @__PURE__ */ u3("div", {
+            "data-lre-open-lore": value.entry,
+            children: /* @__PURE__ */ u3(List, {
+              children: /* @__PURE__ */ u3(ListRow, {
+                icon: "book",
+                title: doc.lore[value.entry]?.title || value.entry,
+                subtitle: value.quote ? `“${value.quote}”` : "No words quoted yet",
+                chevron: true,
+                onClick: () => go(app, { view: "item", worldId: doc.id, collection: "lore", id: value.entry })
+              }, undefined, false, undefined, this)
+            }, undefined, false, undefined, this)
+          }, undefined, false, undefined, this) : null
+        ]
+      }, undefined, true, undefined, this) : null,
+      type === "sheet" ? /* @__PURE__ */ u3(M, {
+        children: [
+          /* @__PURE__ */ u3(RefPicker, {
+            label: "Whose sheet",
+            value: entity,
+            options: refOptions(doc, "entities"),
+            onChange: (next) => props.onChange({ type: "sheet", entity: next, field: "", ...withQuote(quote) })
+          }, undefined, false, undefined, this),
+          entity !== "" ? /* @__PURE__ */ u3(RefPicker, {
+            label: "Which field",
+            value: value?.type === "sheet" ? value.field : "",
+            options: fields,
+            onChange: (field) => props.onChange({ type: "sheet", entity, field, ...withQuote(quote) })
+          }, undefined, false, undefined, this) : null
+        ]
+      }, undefined, true, undefined, this) : null,
+      value && value.type !== "authored" ? /* @__PURE__ */ u3(TextInput, {
+        label: "The words it rests on",
+        optional: true,
+        multiline: true,
+        hint: "A short quote, so anyone reading the block sees why.",
+        value: quote,
+        issues: [],
+        onChange: (text) => props.onChange({ ...value, quote: undefined, ...withQuote(text) })
+      }, undefined, false, undefined, this) : null,
+      /* @__PURE__ */ u3(Issues, {
+        issues: props.issues
+      }, undefined, false, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+}
+function BlockSheet(props) {
+  const { block, doc } = props;
+  const path = `${props.path}.blocks.${props.index}`;
+  const idField = P2();
+  const idList = P2();
+  const taken = props.routine.blocks.filter((_, i) => i !== props.index).map((b) => b.id);
+  const known = [...new Set([...BASIC_BLOCKS.map((b) => b.id), ...Object.values(doc.routines ?? {}).flatMap((r) => r.blocks.map((b) => b.id))])].filter((id) => !taken.includes(id));
+  const clash = taken.includes(block.id);
+  const change = (next) => props.onChange(props.fresh && next.label !== block.label ? { ...next, id: deriveId(next.label.trim() || "Block", new Set(taken)) } : next);
+  return /* @__PURE__ */ u3(FormSheet, {
+    title: block.label || "New block",
+    subtitle: `${KIND_WORDS[block.kind].label} · ${timeWords(block)}`,
+    backLabel: "Routine",
+    onClose: props.onClose,
+    children: [
+      /* @__PURE__ */ u3(Issues, {
+        issues: props.lint.filter((issue) => issue.path === path || issue.path === `${path}.id`)
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(RoutineBlockForm, {
+        value: block,
+        doc,
+        path,
+        lint: props.lint,
+        onChange: change
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(FormGroup, {
+        title: "Where it comes from",
+        children: /* @__PURE__ */ u3(SourceFields, {
+          value: block.source?.type === "lore" || block.source?.type === "sheet" || block.source?.type === "authored" ? block.source : undefined,
+          doc,
+          issues: lintAt(props.lint, `${path}.source`),
+          inherited: sourceWords(doc, props.routine.source),
+          onChange: (source) => {
+            const { source: _, ...rest } = block;
+            props.onChange(source === undefined ? rest : { ...rest, source });
+          }
+        }, undefined, false, undefined, this)
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(Disclosure, {
+        summary: "Its id (Advanced)",
+        defaultOpen: clash,
+        children: /* @__PURE__ */ u3(Field, {
+          label: "Id",
+          for: idField,
+          help: "A block replaces a broader routine's block, or a basic need (sleep, breakfast, lunch, dinner), with the same id.",
+          error: clash ? "Another block of this routine has this id." : null,
+          children: [
+            /* @__PURE__ */ u3("input", {
+              id: idField,
+              class: "lre-input lre-build-mono",
+              list: idList,
+              autoComplete: "off",
+              spellcheck: false,
+              value: block.id,
+              onChange: (event) => props.onChange({ ...block, id: event.currentTarget.value.trim().replace(/[^\w.-]/g, "_") })
+            }, undefined, false, undefined, this),
+            /* @__PURE__ */ u3("datalist", {
+              id: idList,
+              children: known.map((id) => /* @__PURE__ */ u3("option", {
+                value: id,
+                children: blockName(doc, id)
+              }, id, false, undefined, this))
+            }, undefined, false, undefined, this)
+          ]
+        }, undefined, true, undefined, this)
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3("div", {
+        class: "lre-inline",
+        children: /* @__PURE__ */ u3(Button, {
+          variant: "danger",
+          icon: "trash",
+          onClick: props.onRemove,
+          children: "Remove block"
+        }, undefined, false, undefined, this)
+      }, undefined, false, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+}
+function RoutineForm(props) {
+  const { doc } = props;
+  const routine = props.value;
+  const set = props.onChange;
+  const lint = props.lint ?? [];
+  const [open, setOpen] = d2(() => {
+    const n = blockAt(props.at, props.path);
+    return n !== null && n < routine.blocks.length && !isOff(routine.blocks[n]) ? n : null;
+  });
+  const [stash, setStash] = d2([]);
+  const [fresh, setFresh] = d2([]);
+  const level = ownerLevel(doc, routine.owner);
+  const none = level !== "none" && isNoRoutine(routine);
+  const whom = ownerWords(doc, routine.owner, "everyone");
+  const covered = level === "kind" || level === "selector" ? `${whom.charAt(0).toLowerCase()}${whom.slice(1)}` : whom;
+  const indexed = routine.blocks.map((entry, index) => ({ entry, index }));
+  const blocks = indexed.filter((b) => !isOff(b.entry)).sort((a, b) => startOf(a.entry) - startOf(b.entry));
+  const offs = indexed.filter((b) => isOff(b.entry));
+  const ids = new Set(routine.blocks.map((b) => b.id));
+  const basics = BASIC_BLOCKS.filter((b) => !ids.has(b.id)).map((b) => ({ value: b.id, label: b.label, sublabel: `Everyone's · ${timeWords(b)}` }));
+  const broader = [];
+  for (const r of Object.values(doc.routines ?? {})) {
+    if (r.id === routine.id)
+      continue;
+    for (const b of r.blocks)
+      if (!isOff(b) && !ids.has(b.id) && !BASIC_BLOCKS.some((x) => x.id === b.id) && !broader.some((o) => o.value === b.id))
+        broader.push({ value: b.id, label: b.label, sublabel: routineName(doc, r) });
+  }
+  const add = (block) => {
+    set({ ...routine, blocks: [...routine.blocks, block] });
+    setOpen(routine.blocks.length);
+  };
+  const copy = (id) => {
+    const basic = BASIC_BLOCKS.find((b) => b.id === id);
+    const from = basic ?? Object.values(doc.routines ?? {}).flatMap((r) => r.id === routine.id ? [] : r.blocks).find((b) => !isOff(b) && b.id === id);
+    if (!from)
+      return;
+    const block = structuredClone(from);
+    if (basic)
+      delete block.source;
+    add(block);
+  };
+  const remove = (index) => {
+    set({ ...routine, blocks: routine.blocks.filter((_, i) => i !== index) });
+    setOpen(null);
+  };
+  const current = open !== null ? routine.blocks[open] : undefined;
+  return /* @__PURE__ */ u3(M, {
+    children: [
+      /* @__PURE__ */ u3(Section, {
+        title: "Whose routine",
+        children: /* @__PURE__ */ u3("div", {
+          class: "lre-stack",
+          children: [
+            /* @__PURE__ */ u3(OwnerPicker, {
+              label: "It's for",
+              value: routine.owner,
+              doc,
+              noneLabel: "Everyone",
+              noneHelp: "The world's default: everyone whose day is planned, wherever a more specific routine doesn't set the same block.",
+              onChange: (owner) => {
+                const { owner: _, ...rest } = routine;
+                set(owner === undefined ? rest : { ...rest, owner });
+              }
+            }, undefined, false, undefined, this),
+            /* @__PURE__ */ u3("span", {
+              class: "lre-small lre-muted",
+              children: "Where routines set the same block for someone, the most specific wins: their own, then a group's, a kind's, a selector's, then everyone's."
+            }, undefined, false, undefined, this),
+            /* @__PURE__ */ u3(TextInput, {
+              label: "Name",
+              optional: true,
+              value: routine.label,
+              issues: lintAt(lint, `${props.path}.label`),
+              onChange: (label) => {
+                const { label: _, ...rest } = routine;
+                set(typeof label === "string" && label !== "" ? { ...rest, label } : rest);
+              }
+            }, undefined, false, undefined, this),
+            /* @__PURE__ */ u3(Issues, {
+              issues: lint.filter((issue) => issue.path === props.path || issue.path === `${props.path}.owner` || issue.path === `${props.path}.id`)
+            }, undefined, false, undefined, this)
+          ]
+        }, undefined, true, undefined, this)
+      }, undefined, false, undefined, this),
+      level !== "none" ? /* @__PURE__ */ u3(Section, {
+        title: "Their days",
+        children: /* @__PURE__ */ u3("div", {
+          class: "lre-stack",
+          children: [
+            /* @__PURE__ */ u3(Seg, {
+              label: "Their days",
+              value: none ? "none" : "routine",
+              options: [
+                { value: "routine", label: "Have a routine" },
+                { value: "none", label: "No routine" }
+              ],
+              onChange: (next) => {
+                if (next === "none") {
+                  setStash(routine.blocks);
+                  setOpen(null);
+                  set({ ...routine, inherit: false, blocks: [] });
+                } else {
+                  const { inherit: _, ...rest } = routine;
+                  set({ ...rest, blocks: stash });
+                }
+              }
+            }, undefined, false, undefined, this),
+            none ? /* @__PURE__ */ u3("span", {
+              class: "lre-small lre-muted",
+              "data-lre-no-routine": true,
+              children: "No routine: their days come from the story, the GM, their commitments (shifts, appointments, trips) and their basic needs (sleep and meals), and no broader routine applies to them."
+            }, undefined, false, undefined, this) : /* @__PURE__ */ u3(CheckField, {
+              label: "Keeps the blocks of broader routines",
+              help: "A group's, a kind's and everyone's, wherever this routine doesn't set the same block.",
+              checked: routine.inherit !== false,
+              onChange: (keep) => {
+                const { inherit: _, ...rest } = routine;
+                set(keep ? rest : { ...rest, inherit: false });
+              }
+            }, undefined, false, undefined, this)
+          ]
+        }, undefined, true, undefined, this)
+      }, undefined, false, undefined, this) : null,
+      none ? null : /* @__PURE__ */ u3(M, {
+        children: [
+          /* @__PURE__ */ u3(Section, {
+            title: "Blocks",
+            aside: /* @__PURE__ */ u3(Button, {
+              size: "sm",
+              icon: "plus",
+              onClick: () => {
+                const block = blankBlock(deriveId("Block", ids), "");
+                setFresh([...fresh, block.id]);
+                add(block);
+              },
+              children: "Block"
+            }, undefined, false, undefined, this),
+            children: /* @__PURE__ */ u3("div", {
+              class: "lre-stack",
+              children: [
+                blocks.length === 0 ? /* @__PURE__ */ u3("span", {
+                  class: "lre-small lre-muted",
+                  children: "No blocks yet. Add one, or change a basic need or a broader routine's block below."
+                }, undefined, false, undefined, this) : /* @__PURE__ */ u3("div", {
+                  class: "lre-form-items",
+                  "data-lre-blocks": true,
+                  children: blocks.map(({ entry, index }) => {
+                    if (isOff(entry))
+                      return null;
+                    const source = sourceWords(doc, entry.source ?? routine.source);
+                    const issues = lintAt(lint, `${props.path}.blocks.${index}`);
+                    return /* @__PURE__ */ u3("div", {
+                      "data-lre-block": entry.id,
+                      children: /* @__PURE__ */ u3(ItemRow, {
+                        title: entry.label || humanize(entry.id),
+                        subtitle: [`${KIND_WORDS[entry.kind].label} · ${timeWords(entry)} · ${placeWords(doc, entry.place)}`, source].filter((s) => s !== null).join(" · "),
+                        badge: /* @__PURE__ */ u3(LintBadge, {
+                          issues
+                        }, undefined, false, undefined, this),
+                        openLabel: `Edit ${entry.label || entry.id}`,
+                        onOpen: () => setOpen(index)
+                      }, undefined, false, undefined, this)
+                    }, index, false, undefined, this);
+                  })
+                }, undefined, false, undefined, this),
+                basics.length + broader.length > 0 ? /* @__PURE__ */ u3(AddPicker, {
+                  label: "Change a basic need or a broader block",
+                  placeholder: "Change a basic need or a broader block…",
+                  options: [...basics, ...broader],
+                  onAdd: copy
+                }, undefined, false, undefined, this) : null,
+                /* @__PURE__ */ u3("span", {
+                  class: "lre-small lre-muted",
+                  children: [
+                    "Everyone sleeps and eats (",
+                    BASIC_BLOCKS.map((b) => b.label).join(", "),
+                    ") unless a block with the same id changes it or turns it off; a block here changes a broader routine's block with the same id the same way."
+                  ]
+                }, undefined, true, undefined, this)
+              ]
+            }, undefined, true, undefined, this)
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3(Section, {
+            title: "Turned off here",
+            children: /* @__PURE__ */ u3("div", {
+              class: "lre-stack",
+              children: [
+                offs.length === 0 ? /* @__PURE__ */ u3("span", {
+                  class: "lre-small lre-muted",
+                  children: "Nothing: the basic needs and broader routines' blocks apply as they are."
+                }, undefined, false, undefined, this) : /* @__PURE__ */ u3("div", {
+                  class: "lre-form-items",
+                  "data-lre-offs": true,
+                  children: offs.map(({ entry, index }) => /* @__PURE__ */ u3(ItemRow, {
+                    title: blockName(doc, entry.id),
+                    subtitle: `Off for ${covered}`,
+                    badge: /* @__PURE__ */ u3(LintBadge, {
+                      issues: lintAt(lint, `${props.path}.blocks.${index}`)
+                    }, undefined, false, undefined, this),
+                    actions: /* @__PURE__ */ u3(IconButton, {
+                      icon: "undo",
+                      label: `Turn ${blockName(doc, entry.id)} back on`,
+                      onClick: () => remove(index)
+                    }, undefined, false, undefined, this)
+                  }, index, false, undefined, this))
+                }, undefined, false, undefined, this),
+                basics.length + broader.length > 0 ? /* @__PURE__ */ u3(AddPicker, {
+                  label: "Turn off a block",
+                  placeholder: "Turn off a block…",
+                  options: [...basics, ...broader],
+                  onAdd: (id) => set({ ...routine, blocks: [...routine.blocks, { id, off: true }] })
+                }, undefined, false, undefined, this) : null
+              ]
+            }, undefined, true, undefined, this)
+          }, undefined, false, undefined, this)
+        ]
+      }, undefined, true, undefined, this),
+      /* @__PURE__ */ u3(Disclosure, {
+        summary: "Where this routine comes from",
+        defaultOpen: routine.source !== undefined,
+        children: [
+          /* @__PURE__ */ u3(SourceFields, {
+            value: routine.source,
+            doc,
+            issues: lintAt(lint, `${props.path}.source`),
+            onChange: (source) => {
+              const { source: _, ...rest } = routine;
+              set(source === undefined ? rest : { ...rest, source });
+            }
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3("span", {
+            class: "lre-small lre-muted",
+            children: "Its blocks rest on this unless a block names its own."
+          }, undefined, false, undefined, this)
+        ]
+      }, undefined, true, undefined, this),
+      current && open !== null && !isOff(current) ? /* @__PURE__ */ u3(BlockSheet, {
+        block: current,
+        index: open,
+        routine,
+        doc,
+        path: props.path,
+        lint,
+        fresh: fresh.includes(current.id),
+        onChange: (next) => {
+          if (next.id !== current.id && fresh.includes(current.id))
+            setFresh(next.label !== current.label ? fresh.map((f) => f === current.id ? next.id : f) : fresh.filter((f) => f !== current.id));
+          set({ ...routine, blocks: routine.blocks.map((b, i) => i === open ? next : b) });
+        },
+        onRemove: () => remove(open),
+        onClose: () => setOpen(null)
+      }, undefined, false, undefined, this) : null
+    ]
+  }, undefined, true, undefined, this);
+}
+function RoutineEditor(props) {
+  const app = useApp();
+  const draft = useSelect(app.drafts, (d) => d);
+  const at = useUi((ui) => ui.build.view === "item" ? ui.build.at : undefined);
+  const isNew = props.id?.startsWith("new:") ?? false;
+  const id = isNew ? (props.id ?? "").slice(4) : props.id ?? "";
+  const routines = props.world.routines ?? {};
+  const stored = hasOwn(routines, id) ? routines[id] : undefined;
+  const blank = newItem("routines", id, props.world, newItemName(props.world.id, "routines", id));
+  const [routine, setRoutine] = d2(stored ? structuredClone(stored) : blank);
+  const [busy, run] = useBusy();
+  const [reverts, setReverts] = d2(0);
+  useHeld(routine, setRoutine, stored ?? blank, `${props.world.id}/routines/${props.id ?? ""}`, JSON.stringify(stored ?? null));
+  const doc = b2(() => ({ ...props.world, kinds: { ...draft?.packKinds, ...props.world.kinds } }), [props.world, draft?.packKinds]);
+  if (!id)
+    return /* @__PURE__ */ u3("span", {
+      class: "lre-muted",
+      children: "Choose a routine."
+    }, undefined, false, undefined, this);
+  const changed = JSON.stringify(routine) !== JSON.stringify(stored ?? null);
+  const path = `routines.${id}`;
+  const name = routineName(doc, routine);
+  const save = () => run(async () => {
+    const message = await props.send(routineWrite(props.world.id, id, routine));
+    if (message.type === "lre.result" && isNew)
+      go(app, { view: "item", worldId: props.world.id, collection: "routines", id });
+  });
+  return /* @__PURE__ */ u3("div", {
+    class: "lre-build-page",
+    "data-lre-editor": "routines",
+    children: [
+      /* @__PURE__ */ u3(ItemHeader, {
+        title: name,
+        id,
+        subtitle: isNew ? "New routine, not in the draft until you create it" : `${ownerWords(doc, routine.owner, "Everyone")} · ${routineSummary(routine)}`,
+        onDelete: isNew ? undefined : () => run(() => deleteItem(app, props.send, { worldId: props.world.id, collection: "routines", id, name })),
+        busy
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(RoutineForm, {
+        value: routine,
+        doc,
+        path,
+        lint: lintAt(draft?.lint ?? [], path),
+        at: reverts === 0 ? at : undefined,
+        onChange: setRoutine
+      }, reverts, false, undefined, this),
+      /* @__PURE__ */ u3(SaveBar, {
+        children: [
+          /* @__PURE__ */ u3(Button, {
+            variant: "primary",
+            disabled: !changed && !isNew || busy,
+            busy,
+            onClick: save,
+            children: isNew ? "Create routine" : "Save to draft"
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3(Button, {
+            variant: "ghost",
+            disabled: !changed || busy,
+            onClick: () => {
+              setRoutine(stored ? structuredClone(stored) : blank);
+              setReverts(reverts + 1);
+            },
+            children: "Revert"
+          }, undefined, false, undefined, this)
+        ]
+      }, undefined, true, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+}
+function RoutineList(props) {
+  const app = useApp();
+  const draft = useSelect(app.drafts, (d) => d);
+  const [query, setQuery] = d2("");
+  const [adding, setAdding] = d2(false);
+  if (!draft)
+    return null;
+  const doc = { ...draft.doc, kinds: { ...draft.packKinds, ...draft.doc.kinds } };
+  const info = COLLECTION_INFO.routines;
+  const all = Object.values(draft.doc.routines ?? {});
+  const q = query.trim().toLowerCase();
+  const shown = all.filter((r) => q === "" || [r.id, r.label ?? "", ownerWords(doc, r.owner, "Everyone")].join(`
+`).toLowerCase().includes(q));
+  const settings = routineSettingsOf(draft.doc);
+  const add = /* @__PURE__ */ u3(Button, {
+    size: "sm",
+    variant: "primary",
+    icon: "plus",
+    label: "New routine",
+    onClick: () => setAdding(true),
+    children: "New"
+  }, undefined, false, undefined, this);
+  return /* @__PURE__ */ u3("div", {
+    class: "lre-build-page",
+    "data-lre-collection": "routines",
+    children: [
+      /* @__PURE__ */ u3(PageHeader, {
+        title: info.label,
+        subtitle: info.hint,
+        actions: adding ? undefined : add
+      }, undefined, false, undefined, this),
+      adding ? /* @__PURE__ */ u3(NewItem, {
+        worldId: draft.worldId,
+        collection: "routines",
+        taken: new Set(Object.keys(draft.doc.routines ?? {})),
+        onDone: () => setAdding(false)
+      }, undefined, false, undefined, this) : null,
+      /* @__PURE__ */ u3("p", {
+        class: "lre-build-note",
+        children: "A routine is what someone usually does, never what they must. For anyone in a scene with you the story leads: a routine never moves them out of it or contradicts what's been told."
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(Issues, {
+        issues: draft.lint.filter((issue) => issue.path === "routines")
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(Section, {
+        title: "Settings",
+        flush: true,
+        children: /* @__PURE__ */ u3(List, {
+          children: /* @__PURE__ */ u3(ListRow, {
+            icon: PART_INFO.routineSettings.icon,
+            title: PART_INFO.routineSettings.label,
+            subtitle: `${AWARENESS_LABEL[settings.awareness]} · Invitations: ${INVITATIONS_LABEL[settings.invitations].toLowerCase()}`,
+            badge: /* @__PURE__ */ u3(LintBadge, {
+              issues: lintAt(draft.lint, "routineSettings")
+            }, undefined, false, undefined, this),
+            chevron: true,
+            onClick: () => go(app, { view: "part", worldId: draft.worldId, part: "routineSettings" })
+          }, undefined, false, undefined, this)
+        }, undefined, false, undefined, this)
+      }, undefined, false, undefined, this),
+      all.length > 8 ? /* @__PURE__ */ u3("div", {
+        class: "lre-build-search",
+        children: [
+          /* @__PURE__ */ u3(Icon, {
+            name: "search",
+            size: 16
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3("input", {
+            class: "lre-input",
+            type: "search",
+            placeholder: "Search routines",
+            "aria-label": "Search routines",
+            value: query,
+            onInput: (event) => setQuery(event.currentTarget.value)
+          }, undefined, false, undefined, this)
+        ]
+      }, undefined, true, undefined, this) : null,
+      all.length === 0 ? /* @__PURE__ */ u3(Empty, {
+        icon: info.icon,
+        title: "No routines yet",
+        children: "Without one, a person's day is their schedules, their commitments, the plans the story gives them, and sleep and meals."
+      }, undefined, false, undefined, this) : shown.length === 0 ? /* @__PURE__ */ u3(Empty, {
+        icon: "search",
+        title: "No matches",
+        children: [
+          "Nothing here matches “",
+          query.trim(),
+          "”."
+        ]
+      }, undefined, true, undefined, this) : LEVELS2.map((level) => {
+        const here = shown.filter((r) => ownerLevel(doc, r.owner) === level).sort((a, b) => routineName(doc, a).localeCompare(routineName(doc, b)));
+        if (here.length === 0)
+          return null;
+        return /* @__PURE__ */ u3(Section, {
+          title: LEVEL_TITLE[level],
+          flush: true,
+          children: /* @__PURE__ */ u3(List, {
+            children: here.map((r) => /* @__PURE__ */ u3(ListRow, {
+              title: routineName(doc, r),
+              subtitle: r.label ? `${ownerWords(doc, r.owner, "Everyone")} · ${routineSummary(r)}` : routineSummary(r),
+              id: r.id,
+              badge: /* @__PURE__ */ u3(LintBadge, {
+                issues: lintAt(draft.lint, `routines.${r.id}`)
+              }, undefined, false, undefined, this),
+              chevron: true,
+              onClick: () => go(app, { view: "item", worldId: draft.worldId, collection: "routines", id: r.id })
+            }, r.id, false, undefined, this))
+          }, undefined, false, undefined, this)
+        }, level, false, undefined, this);
+      })
+    ]
+  }, undefined, true, undefined, this);
+}
+
+// src/frontend/build/propose-routines.tsx
+var WEEKDAYS3 = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+function nameOf2(doc, id) {
+  return hasOwn(doc.entities, id) ? doc.entities[id]?.name || id : id;
+}
+function proposeOwners(doc) {
+  const open = (id) => id !== doc.pov && doc.entities[id]?.visibility !== "secret";
+  return {
+    people: ownerOptions(doc, "entity").filter((o) => open(o.value) && kindIs(doc, doc.entities[o.value]?.kind ?? "", "person")),
+    groups: ownerOptions(doc, "group").filter((o) => open(o.value))
+  };
+}
+var WHO = [
+  { value: "all", label: "Everyone" },
+  { value: "some", label: "Choose" }
+];
+function RoutineJobStart(props) {
+  const app = useApp();
+  const draft = useSelect(app.drafts, (d) => d);
+  const doc = b2(() => draft ? { ...draft.doc, kinds: { ...draft.packKinds, ...draft.doc.kinds } } : null, [draft]);
+  const [who, setWho] = d2("all");
+  const [picked, setPicked] = d2([]);
+  const [find, setFind] = d2("");
+  const owners = b2(() => doc ? proposeOwners(doc) : { people: [], groups: [] }, [doc]);
+  const needle = find.trim().toLowerCase();
+  const toggle = (id) => setPicked(picked.includes(id) ? picked.filter((x) => x !== id) : [...picked, id]);
+  const picks = (title, options) => {
+    const shown = options.filter((o) => needle === "" || o.label.toLowerCase().includes(needle) || picked.includes(o.value));
+    return shown.length === 0 ? null : /* @__PURE__ */ u3(Field, {
+      label: title,
+      children: /* @__PURE__ */ u3("div", {
+        class: "lre-build-picks",
+        role: "group",
+        "aria-label": title,
+        children: shown.map((o) => /* @__PURE__ */ u3("label", {
+          class: "lre-build-pick",
+          children: [
+            /* @__PURE__ */ u3("input", {
+              type: "checkbox",
+              checked: picked.includes(o.value),
+              onChange: () => toggle(o.value)
+            }, undefined, false, undefined, this),
+            /* @__PURE__ */ u3("span", {
+              children: [
+                o.label,
+                o.sublabel ? /* @__PURE__ */ u3("span", {
+                  class: "lre-muted",
+                  children: [
+                    " · ",
+                    o.sublabel
+                  ]
+                }, undefined, true, undefined, this) : null
+              ]
+            }, undefined, true, undefined, this)
+          ]
+        }, o.value, true, undefined, this))
+      }, undefined, false, undefined, this)
+    }, undefined, false, undefined, this);
+  };
+  return /* @__PURE__ */ u3("div", {
+    class: "lre-stack",
+    children: [
+      /* @__PURE__ */ u3("p", {
+        class: "lre-build-note",
+        children: "The AI reads the world's lore and each person's and group's sheet, and proposes their routines and schedules: shifts, opening hours, meals with the household, a weekly club night. Each rests on the lore entry or sheet field it quotes, and someone the lore gives no routine gets none. Nothing changes until you apply."
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(Field, {
+        label: "Propose for",
+        children: /* @__PURE__ */ u3(Seg, {
+          label: "Propose for",
+          value: who,
+          options: WHO,
+          onChange: (next) => setWho(next)
+        }, undefined, false, undefined, this)
+      }, undefined, false, undefined, this),
+      who === "some" ? owners.people.length + owners.groups.length === 0 ? /* @__PURE__ */ u3(Empty, {
+        icon: "users",
+        children: "No people or groups to propose for."
+      }, undefined, false, undefined, this) : /* @__PURE__ */ u3(M, {
+        children: [
+          owners.people.length + owners.groups.length > 12 ? /* @__PURE__ */ u3("input", {
+            class: "lre-input",
+            type: "search",
+            placeholder: "Find by name",
+            "aria-label": "Find by name",
+            value: find,
+            onInput: (event) => setFind(event.currentTarget.value)
+          }, undefined, false, undefined, this) : null,
+          picks("People", owners.people),
+          picks("Groups", owners.groups)
+        ]
+      }, undefined, true, undefined, this) : null,
+      /* @__PURE__ */ u3(Button, {
+        variant: "primary",
+        block: true,
+        disabled: props.busy || who === "some" && picked.length === 0,
+        onClick: () => props.onStart(who === "all" ? {} : { owners: picked }),
+        children: who === "all" ? "Propose for everyone" : picked.length === 0 ? "Pick whom to propose for" : picked.length === 1 ? "Propose for the one chosen" : `Propose for the ${picked.length} chosen`
+      }, undefined, false, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+}
+function grounded(source) {
+  if (!isRecord(source))
+    return false;
+  if (source.type === "lore")
+    return typeof source.entry === "string" && source.entry !== "";
+  return source.type === "sheet" && typeof source.entity === "string" && source.entity !== "" && typeof source.field === "string" && source.field !== "";
+}
+function citesSource(p) {
+  const value = p.value;
+  if (!isRecord(value))
+    return false;
+  if (p.collection === "routines") {
+    const blocks = Array.isArray(value.blocks) ? value.blocks : [];
+    return blocks.length > 0 && blocks.every((b) => isRecord(b) && grounded(b.source !== undefined ? b.source : value.source));
+  }
+  if (p.collection === "schedules") {
+    const slots = Array.isArray(value.slots) ? value.slots : [];
+    return slots.length > 0 ? slots.every((s) => isRecord(s) && grounded(s.source !== undefined ? s.source : value.source)) : grounded(value.source);
+  }
+  return false;
+}
+function offeredProposals(proposals) {
+  return proposals.filter((p) => (p.collection === "routines" || p.collection === "schedules") && citesSource(p));
+}
+function citedSources(p, doc) {
+  const value = isRecord(p.value) ? p.value : {};
+  const items = p.collection === "routines" ? value.blocks : value.slots;
+  const raw = [value.source, ...Array.isArray(items) ? items.map((item) => isRecord(item) ? item.source : undefined) : []];
+  const named = (key, fallback) => p.sourceNames && hasOwn(p.sourceNames, key) ? p.sourceNames[key] || fallback : fallback;
+  const out = [];
+  for (const s of raw) {
+    if (!isRecord(s) || !grounded(s))
+      continue;
+    const quote = typeof s.quote === "string" && s.quote.trim() !== "" ? s.quote.trim() : undefined;
+    const cited = s.type === "lore" ? { key: String(s.entry), type: "lore", entry: String(s.entry), name: named(String(s.entry), hasOwn(doc.lore, String(s.entry)) ? doc.lore[String(s.entry)]?.title || String(s.entry) : String(s.entry)) } : { key: `${String(s.entity)}.${String(s.field)}`, type: "sheet", name: named(`${String(s.entity)}.${String(s.field)}`, `${nameOf2(doc, String(s.entity))} · ${humanize(String(s.field))}`) };
+    if (!out.some((c) => c.key === cited.key && c.quote === quote))
+      out.push(quote ? { ...cited, quote } : cited);
+  }
+  for (const [key, name] of Object.entries(p.sourceNames ?? {})) {
+    if (out.some((c) => c.key === key))
+      continue;
+    out.push(hasOwn(doc.lore, key) ? { key, type: "lore", entry: key, name } : { key, type: "sheet", name });
+  }
+  return out;
+}
+function draftClash(p, doc) {
+  const held = p.collection === "routines" ? doc.routines ?? {} : p.collection === "schedules" ? doc.schedules : {};
+  return hasOwn(held, p.key) ? `It would replace the ${COLLECTION_INFO[p.collection].noun} “${itemLabel(p.collection, p.key, held[p.key])}” already in the draft` : null;
+}
+function reviewProblems(p, doc) {
+  const clash = draftClash(p, doc);
+  return [...p.problems ?? [], ...clash ? [clash] : []];
+}
+function reviewTicked(proposals, doc) {
+  const ticked = startTicked(proposals);
+  return new Set(proposals.filter((p) => ticked.has(p.id) && reviewProblems(p, doc).length === 0).map((p) => p.id));
+}
+function reviewGroups(proposals, doc) {
+  const groups = new Map;
+  for (const p of proposals) {
+    const owner = p.owner ?? "";
+    groups.set(owner, [...groups.get(owner) ?? [], p]);
+  }
+  return [...groups].map(([owner, list]) => ({ owner, name: owner === "" ? "Others" : nameOf2(doc, owner), group: owner !== "" && kindIs(doc, doc.entities[owner]?.kind ?? "", "group"), proposals: list }));
+}
+function editedProposals(proposals, edits) {
+  return proposals.map((p) => hasOwn(edits, p.id) ? { ...p, value: edits[p.id] ?? p.value } : p);
+}
+function asRoutine(value) {
+  return routineShapeProblems(value).length === 0 ? value : null;
+}
+function asSchedule(value) {
+  return isRecord(value) && typeof value.id === "string" && typeof value.target === "string" && isRecord(value.recurrence) && typeof value.recurrence.every === "string" && Array.isArray(value.slots) && value.slots.every((s) => isRecord(s) && typeof s.start === "string" && typeof s.end === "string") ? value : null;
+}
+function editProblems(p) {
+  if (p.collection === "routines")
+    return routineShapeProblems(p.value);
+  const schedule = asSchedule(p.value);
+  return schedule ? slotProblems(schedule.slots) : ["it isn't a schedule"];
+}
+function lengthWords(minutes) {
+  const h = Math.floor(minutes / 60);
+  const m = minutes % 60;
+  return [h > 0 ? `${h} h` : "", m > 0 ? `${m} min` : ""].filter((part) => part !== "").join(" ") || "no time";
+}
+function blockWords(doc, entry) {
+  if (isOff(entry))
+    return `Turns ${humanize(entry.id).toLowerCase()} off`;
+  const parts = [entry.kind === "fixed" ? `${BLOCK_KIND_LABEL.fixed} at ${entry.at ?? "?"}` : `${BLOCK_KIND_LABEL[entry.kind]}, ${entry.window?.from ?? "?"}–${entry.window?.to ?? "?"}`, lengthWords(entry.minutes)];
+  if (entry.perWeek !== undefined)
+    parts.push(`${entry.perWeek} time${entry.perWeek === 1 ? "" : "s"} a week`);
+  if (entry.kind === "optional")
+    parts.push(`${Math.round((entry.chance ?? 0.5) * 100)}% likely`);
+  const weekdays = entry.days?.weekdays ?? [];
+  if (weekdays.length > 0)
+    parts.push(weekdays.map((d) => WEEKDAYS3[d] ?? String(d)).join(", "));
+  if (entry.days?.off === "only")
+    parts.push("on days off");
+  if (entry.days?.off === "never")
+    parts.push("on working days");
+  const place = entry.place;
+  parts.push(place === undefined || place === "home" ? "at home" : place === "work" ? "at work" : place === "here" ? "wherever they are" : place === "with" ? "at their company's" : ("place" in place) ? `at ${hasOwn(doc.places, place.place) ? doc.places[place.place]?.name || place.place : place.place}` : `at the nearest ${humanize(place.nearest).toLowerCase()}`);
+  const who = entry.company?.who;
+  const company = [...who?.ids ?? [], ...who?.memberOf ?? []].map((id) => nameOf2(doc, id));
+  if (company.length > 0)
+    parts.push(`with ${company.join(", ")}${entry.company?.invite ? ", invited" : ""}`);
+  return parts.join(" · ");
+}
+function scheduleWords(doc, s) {
+  const weekdays = s.recurrence.every === "week" ? s.recurrence.weekdays ?? [] : [];
+  const days = weekdays.length > 0 ? ` (${weekdays.map((d) => WEEKDAYS3[d] ?? String(d)).join(", ")})` : "";
+  const slots = s.slots.map((slot) => `${slot.start}–${slot.end} ${valueWords2(doc, slot.value)}`).join(", ");
+  return [`Sets ${targetWords(doc, s.owner, s.target)}`, `${EVERY[s.recurrence.every]}${days}`, slots].filter((part) => part !== "").join(" · ");
+}
+function valueSummary(p, doc) {
+  if (p.collection === "routines") {
+    const routine = asRoutine(p.value);
+    return routine ? routine.blocks.map((b) => blockWords(doc, b)) : [];
+  }
+  const schedule = asSchedule(p.value);
+  return schedule ? [scheduleWords(doc, schedule)] : [];
+}
+var reviews = createStore({});
+function SourceLines(props) {
+  const [open, setOpen] = d2(null);
+  return /* @__PURE__ */ u3(M, {
+    children: props.sources.map((s) => {
+      const id = `${s.key}
+${s.quote ?? ""}`;
+      const entry = s.entry !== undefined && hasOwn(props.doc.lore, s.entry) ? props.doc.lore[s.entry] : undefined;
+      return /* @__PURE__ */ u3("div", {
+        class: "lre-build-source",
+        "data-lre-proposal-source": s.key,
+        children: [
+          /* @__PURE__ */ u3("span", {
+            class: "lre-build-proposal-line",
+            children: [
+              /* @__PURE__ */ u3(Icon, {
+                name: s.type === "lore" ? "book" : "user",
+                size: 16
+              }, undefined, false, undefined, this),
+              /* @__PURE__ */ u3("span", {
+                children: [
+                  s.type === "lore" ? "From lore: " : "From a sheet: ",
+                  entry ? /* @__PURE__ */ u3("button", {
+                    type: "button",
+                    class: "lre-build-source-name",
+                    "aria-expanded": open === id,
+                    onClick: () => setOpen(open === id ? null : id),
+                    children: s.name
+                  }, undefined, false, undefined, this) : s.name
+                ]
+              }, undefined, true, undefined, this)
+            ]
+          }, undefined, true, undefined, this),
+          s.quote ? /* @__PURE__ */ u3("q", {
+            class: "lre-build-quote",
+            children: s.quote
+          }, undefined, false, undefined, this) : null,
+          open === id && entry ? /* @__PURE__ */ u3("p", {
+            class: "lre-build-entry",
+            children: entry.content
+          }, undefined, false, undefined, this) : null
+        ]
+      }, id, true, undefined, this);
+    })
+  }, undefined, false, undefined, this);
+}
+function ProposalEditor(props) {
+  const [routine, setRoutine] = d2(() => props.p.collection === "routines" ? asRoutine(props.p.value) : null);
+  const [schedule, setSchedule] = d2(() => props.p.collection === "schedules" ? asSchedule(props.p.value) : null);
+  const edited = routine ?? schedule;
+  const noun = COLLECTION_INFO[props.p.collection].noun;
+  return /* @__PURE__ */ u3(FormSheet, {
+    title: `Edit the ${noun}`,
+    subtitle: `${itemLabel(props.p.collection, props.p.key, props.p.value)} · ${props.owner}`,
+    backLabel: "Proposals",
+    onClose: props.onClose,
+    actions: /* @__PURE__ */ u3(Button, {
+      size: "sm",
+      variant: "primary",
+      icon: "check",
+      disabled: !edited,
+      onClick: () => edited && props.onDone(edited),
+      children: "Done"
+    }, undefined, false, undefined, this),
+    children: [
+      routine ? /* @__PURE__ */ u3(RoutineForm, {
+        value: routine,
+        doc: props.doc,
+        path: `routines.${props.p.key}`,
+        onChange: setRoutine
+      }, undefined, false, undefined, this) : null,
+      schedule ? /* @__PURE__ */ u3(ScheduleForm, {
+        value: schedule,
+        doc: props.doc,
+        path: `schedules.${props.p.key}`,
+        onChange: setSchedule
+      }, undefined, false, undefined, this) : null,
+      !edited ? /* @__PURE__ */ u3(Empty, {
+        icon: "alert",
+        children: [
+          "This proposal doesn't read as a ",
+          noun,
+          ", so it can't be edited here."
+        ]
+      }, undefined, true, undefined, this) : null
+    ]
+  }, undefined, true, undefined, this);
+}
+function RoutineProposalReview(props) {
+  const draft = useSelect(props.app.drafts, (d) => d?.worldId === props.worldId ? d : null);
+  const doc = b2(() => draft ? { ...draft.doc, kinds: { ...draft.packKinds, ...draft.doc.kinds } } : null, [draft]);
+  const offered = b2(() => offeredProposals(props.proposals), [props.proposals]);
+  const kept = useSelect(reviews, (all) => all[props.jobId]);
+  const state = kept ?? { accepted: doc ? [...reviewTicked(offered, doc)] : [], edits: {}, applied: false };
+  const save = (next) => reviews.update((all) => ({ ...all, [props.jobId]: next }));
+  const [editing, setEditing] = d2(null);
+  const [open, setOpen] = d2(null);
+  const [busy, run] = useBusy();
+  const send = b2(() => draftSend(props.app), [props.app]);
+  if (!doc)
+    return /* @__PURE__ */ u3(Empty, {
+      icon: "hourglass",
+      children: "Loading the draft…"
+    }, undefined, false, undefined, this);
+  const accepted = new Set(state.accepted);
+  const chosen = editedProposals(offered, state.edits);
+  const withheld = props.proposals.length - offered.length;
+  const toggle = (id) => save({ ...state, accepted: accepted.has(id) ? state.accepted.filter((x) => x !== id) : [...state.accepted, id] });
+  const groups = reviewGroups(chosen, doc);
+  const edit = editing !== null ? chosen.find((p) => p.id === editing) : undefined;
+  return /* @__PURE__ */ u3(M, {
+    children: [
+      /* @__PURE__ */ u3(Section, {
+        title: "Proposals",
+        aside: /* @__PURE__ */ u3("span", {
+          class: "lre-build-count",
+          children: [
+            accepted.size,
+            " of ",
+            offered.length,
+            " ticked"
+          ]
+        }, undefined, true, undefined, this),
+        children: [
+          /* @__PURE__ */ u3("div", {
+            class: "lre-stack",
+            children: [
+              /* @__PURE__ */ u3("p", {
+                class: "lre-build-note",
+                children: "Each rests on the lore entry or sheet field it quotes. Only one with nothing found against it starts ticked; edit any before you apply it."
+              }, undefined, false, undefined, this),
+              withheld > 0 ? /* @__PURE__ */ u3("p", {
+                class: "lre-build-note",
+                "data-lre-proposals-withheld": withheld,
+                children: [
+                  withheld,
+                  " proposal",
+                  withheld === 1 ? "" : "s",
+                  " cited no lore entry or sheet field, so ",
+                  withheld === 1 ? "it isn't" : "they aren't",
+                  " offered."
+                ]
+              }, undefined, true, undefined, this) : null,
+              /* @__PURE__ */ u3("div", {
+                class: "lre-build-actions",
+                children: [
+                  /* @__PURE__ */ u3(Button, {
+                    size: "sm",
+                    icon: "check",
+                    disabled: state.applied,
+                    onClick: () => save({ ...state, accepted: offered.map((p) => p.id) }),
+                    children: "Select all"
+                  }, undefined, false, undefined, this),
+                  /* @__PURE__ */ u3(Button, {
+                    size: "sm",
+                    variant: "ghost",
+                    disabled: state.applied,
+                    onClick: () => save({ ...state, accepted: [] }),
+                    children: "None"
+                  }, undefined, false, undefined, this)
+                ]
+              }, undefined, true, undefined, this)
+            ]
+          }, undefined, true, undefined, this),
+          groups.map((group) => /* @__PURE__ */ u3("div", {
+            class: "lre-build-group",
+            "data-lre-proposal-owner": group.owner,
+            children: [
+              /* @__PURE__ */ u3("div", {
+                class: "lre-build-group-head",
+                children: [
+                  /* @__PURE__ */ u3("span", {
+                    children: [
+                      group.name,
+                      group.group ? " · group" : ""
+                    ]
+                  }, undefined, true, undefined, this),
+                  /* @__PURE__ */ u3("span", {
+                    class: "lre-build-count",
+                    children: [
+                      group.proposals.filter((p) => accepted.has(p.id)).length,
+                      " of ",
+                      group.proposals.length
+                    ]
+                  }, undefined, true, undefined, this)
+                ]
+              }, undefined, true, undefined, this),
+              /* @__PURE__ */ u3("div", {
+                role: "list",
+                children: group.proposals.map((p) => {
+                  const noun = COLLECTION_INFO[p.collection].noun;
+                  const title = itemLabel(p.collection, p.key, p.value);
+                  const sure = Math.round(p.confidence * 100);
+                  const edited = hasOwn(state.edits, p.id);
+                  const clash = state.applied ? null : draftClash(p, doc);
+                  const shape = edited ? editProblems(p) : [];
+                  return /* @__PURE__ */ u3("div", {
+                    class: "lre-build-proposal",
+                    role: "listitem",
+                    "data-lre-proposal": p.id,
+                    children: [
+                      /* @__PURE__ */ u3("label", {
+                        class: "lre-check",
+                        children: /* @__PURE__ */ u3("input", {
+                          type: "checkbox",
+                          "aria-label": `Accept ${noun} “${title}”`,
+                          checked: accepted.has(p.id),
+                          disabled: state.applied,
+                          onChange: () => toggle(p.id)
+                        }, undefined, false, undefined, this)
+                      }, undefined, false, undefined, this),
+                      /* @__PURE__ */ u3("div", {
+                        class: "lre-build-proposal-body",
+                        children: [
+                          /* @__PURE__ */ u3("div", {
+                            class: "lre-build-proposal-head",
+                            children: [
+                              /* @__PURE__ */ u3("span", {
+                                class: "lre-build-proposal-title",
+                                children: title
+                              }, undefined, false, undefined, this),
+                              /* @__PURE__ */ u3("span", {
+                                class: "lre-build-badges",
+                                children: [
+                                  edited ? /* @__PURE__ */ u3(Badge, {
+                                    tone: "accent",
+                                    children: "Edited"
+                                  }, undefined, false, undefined, this) : null,
+                                  /* @__PURE__ */ u3(Badge, {
+                                    tone: p.confidence >= 0.8 ? "pos" : p.confidence >= 0.5 ? "warn" : "neg",
+                                    children: [
+                                      sure,
+                                      "%",
+                                      /* @__PURE__ */ u3("span", {
+                                        class: "lre-sr",
+                                        children: " sure"
+                                      }, undefined, false, undefined, this)
+                                    ]
+                                  }, undefined, true, undefined, this)
+                                ]
+                              }, undefined, true, undefined, this)
+                            ]
+                          }, undefined, true, undefined, this),
+                          /* @__PURE__ */ u3("span", {
+                            class: "lre-build-proposal-line lre-muted",
+                            children: humanize(noun)
+                          }, undefined, false, undefined, this),
+                          valueSummary(p, doc).map((line, i) => /* @__PURE__ */ u3("span", {
+                            class: "lre-build-proposal-line",
+                            children: line
+                          }, i, false, undefined, this)),
+                          /* @__PURE__ */ u3(IdText, {
+                            id: `${p.collection}.${p.key}`
+                          }, undefined, false, undefined, this),
+                          /* @__PURE__ */ u3(SourceLines, {
+                            sources: citedSources(p, doc),
+                            doc
+                          }, undefined, false, undefined, this),
+                          (p.problems ?? []).map((problem, i) => /* @__PURE__ */ u3("span", {
+                            class: edited ? "lre-build-proposal-line lre-muted" : "lre-build-proposal-line lre-warn",
+                            "data-lre-proposal-problem": true,
+                            children: [
+                              /* @__PURE__ */ u3(Icon, {
+                                name: "alert",
+                                size: 16
+                              }, undefined, false, undefined, this),
+                              edited ? `Before your edit: ${problem}` : problem
+                            ]
+                          }, i, true, undefined, this)),
+                          clash ? /* @__PURE__ */ u3("span", {
+                            class: "lre-build-proposal-line lre-warn",
+                            "data-lre-proposal-problem": true,
+                            children: [
+                              /* @__PURE__ */ u3(Icon, {
+                                name: "alert",
+                                size: 16
+                              }, undefined, false, undefined, this),
+                              clash
+                            ]
+                          }, undefined, true, undefined, this) : null,
+                          shape.map((problem, i) => /* @__PURE__ */ u3("span", {
+                            class: "lre-build-proposal-line lre-neg",
+                            "data-lre-proposal-edit-problem": true,
+                            children: [
+                              /* @__PURE__ */ u3(Icon, {
+                                name: "alert",
+                                size: 16
+                              }, undefined, false, undefined, this),
+                              "After your edit: ",
+                              problem
+                            ]
+                          }, i, true, undefined, this)),
+                          p.note ? /* @__PURE__ */ u3("span", {
+                            class: "lre-build-proposal-line lre-muted",
+                            children: p.note
+                          }, undefined, false, undefined, this) : null,
+                          /* @__PURE__ */ u3("div", {
+                            class: "lre-build-actions",
+                            children: [
+                              /* @__PURE__ */ u3(Button, {
+                                size: "sm",
+                                variant: "ghost",
+                                icon: "edit",
+                                disabled: state.applied,
+                                onClick: () => setEditing(p.id),
+                                children: "Edit"
+                              }, undefined, false, undefined, this),
+                              edited && !state.applied ? /* @__PURE__ */ u3(Button, {
+                                size: "sm",
+                                variant: "ghost",
+                                icon: "undo",
+                                onClick: () => save({ ...state, edits: Object.fromEntries(Object.entries(state.edits).filter(([id]) => id !== p.id)) }),
+                                children: "As proposed"
+                              }, undefined, false, undefined, this) : null,
+                              /* @__PURE__ */ u3("button", {
+                                type: "button",
+                                class: "lre-btn small ghost",
+                                "aria-expanded": open === p.id,
+                                onClick: () => setOpen(open === p.id ? null : p.id),
+                                children: [
+                                  /* @__PURE__ */ u3(Icon, {
+                                    name: open === p.id ? "chevron-up" : "chevron-down",
+                                    size: 16
+                                  }, undefined, false, undefined, this),
+                                  open === p.id ? "Hide value" : "Show value"
+                                ]
+                              }, undefined, true, undefined, this)
+                            ]
+                          }, undefined, true, undefined, this),
+                          open === p.id ? /* @__PURE__ */ u3("div", {
+                            class: "lre-build-json",
+                            children: /* @__PURE__ */ u3(JsonView, {
+                              value: p.value
+                            }, undefined, false, undefined, this)
+                          }, undefined, false, undefined, this) : null
+                        ]
+                      }, undefined, true, undefined, this)
+                    ]
+                  }, p.id, true, undefined, this);
+                })
+              }, undefined, false, undefined, this)
+            ]
+          }, group.owner, true, undefined, this))
+        ]
+      }, undefined, true, undefined, this),
+      /* @__PURE__ */ u3(SaveBar, {
+        children: /* @__PURE__ */ u3(Button, {
+          variant: "primary",
+          block: true,
+          icon: state.applied ? "check" : undefined,
+          disabled: accepted.size === 0 || state.applied,
+          busy,
+          onClick: () => run(async () => {
+            let ok = 0;
+            for (const write of proposalWrites(props.worldId, chosen, accepted)) {
+              const message = await send(write);
+              if (message.type === "lre.result")
+                ok += 1;
+            }
+            props.app.toast(`Applied ${ok} of ${accepted.size} to the draft. Commit when ready.`, ok === accepted.size ? "info" : "error");
+            save({ ...state, applied: true });
+          }),
+          children: state.applied ? "Applied to the draft" : `Apply ${accepted.size} to the draft`
+        }, undefined, false, undefined, this)
+      }, undefined, false, undefined, this),
+      edit ? /* @__PURE__ */ u3(ProposalEditor, {
+        p: edit,
+        doc,
+        owner: edit.owner ? nameOf2(doc, edit.owner) : "Others",
+        onClose: () => setEditing(null),
+        onDone: (value) => {
+          save({ ...state, edits: { ...state.edits, [edit.id]: value }, accepted: accepted.has(edit.id) ? state.accepted : [...state.accepted, edit.id] });
+          setEditing(null);
+        }
+      }, edit.id, false, undefined, this) : null
+    ]
+  }, undefined, true, undefined, this);
+}
+
+// src/frontend/build/jobs.tsx
+var jobStore = createStore({});
+function trackJobs(client) {
+  return client.onJob((update) => {
+    jobStore.update((all) => {
+      const entry = Object.entries(all).find(([, job]) => job.jobId === update.jobId);
+      if (!entry)
+        return all;
+      const [key, job] = entry;
+      return { ...all, [key]: { ...job, status: update.status, progress: update.progress, message: update.message, result: update.result ?? job.result } };
+    });
+  });
+}
+function keptJobs(all, worldId, jobs) {
+  const next = { ...all };
+  for (const job of jobs)
+    if (job.worldId === worldId)
+      next[`${worldId}:${job.kind}`] = { jobId: job.jobId, kind: job.kind, worldId: job.worldId, status: job.status, progress: job.progress, message: job.message, result: job.result, input: job.input };
+  return next;
+}
+function proposalWrites(worldId, proposals, accepted, index) {
+  const chosen = proposals.filter((p) => accepted.has(p.id));
+  const puts = chosen.map((p) => {
+    const value = p.value;
+    const reviewed = p.collection === "lore" && typeof value === "object" && value !== null && !Array.isArray(value) && loreSourceOf(value.source).kind === "ai" ? { ...value, source: { kind: "ai", status: "accepted" } } : value;
+    return { type: "lre.editor", worldId, base: null, op: "put", collection: p.collection, id: p.key, value: reviewed };
+  });
+  const filed = chosen.filter((p) => p.collection === "lore" && p.index !== undefined && (p.index.terms.length > 0 || p.index.topics.length > 0));
+  if (!index || filed.length === 0)
+    return puts;
+  const merged = filed.reduce((acc, p) => p.index ? addToLoreIndex(acc, p.key, p.index) : acc, index);
+  return [...puts, { type: "lre.editor", worldId, base: null, op: "set", part: "loreIndex", value: loreIndexJson(merged) }];
+}
+var JOB_INFO = {
+  import_lore: { title: "Import from lore", hint: "Turn lore-book entries into entities, places and facts", icon: "download" },
+  index_book: { title: "Index a World Info book", hint: "Lore entries, aliases, topics and lookup terms from one of your books", icon: "book" },
+  index_text: { title: "Index this text", hint: "Lore entries from text you paste; review each one", icon: "scroll" },
+  refine: { title: "Build / Refine with AI", hint: "Describe changes; review every proposal", icon: "sparkle" },
+  describe_map: { title: "Describe a map", hint: "Write a place's inside in your words; the AI draws it as a map to review", icon: "map" },
+  propose_routines: { title: "Propose routines from lore", hint: "Routines and schedules for people and groups, from the lore and their sheets; each block cites what it rests on", icon: "calendar" },
+  playtest: { title: "Playtest", hint: "Run scripted turns on the background lane", icon: "play" },
+  check_world: { title: "Check world", hint: "Simulate days on the background lane; report drops, failures and leaks", icon: "pulse" }
+};
+var CHECK_DAYS = [1, 3, 7].map((days) => ({ value: days, label: `${days} day${days === 1 ? "" : "s"}` }));
+var STATUS = {
+  running: { label: "Running", tone: "accent" },
+  done: { label: "Done", tone: "pos" },
+  failed: { label: "Failed", tone: "neg" },
+  cancelled: { label: "Cancelled", tone: "neutral" },
+  interrupted: { label: "Interrupted", tone: "warn" }
+};
+function JobStatusBadge(props) {
+  const status = STATUS[props.status];
+  return /* @__PURE__ */ u3(Badge, {
+    tone: status.tone,
+    children: status.label
+  }, undefined, false, undefined, this);
+}
+function JobInput(props) {
+  const app = useApp();
+  const showIds = useShowIds();
+  const [books, setBooks] = d2(null);
+  const [picked, setPicked] = d2([]);
+  const [text, setText] = d2("");
+  const [days, setDays] = d2(3);
+  const draft = useSelect(app.drafts, (d) => d);
+  const [scope, setScope] = d2("");
+  const [mapId, setMapId] = d2("");
+  const textId = P2();
+  const placeId = P2();
+  const mapIdId = P2();
+  A(() => {
+    if (props.kind === "import_lore" || props.kind === "index_book")
+      app.host.worldBooks().then(setBooks, () => setBooks([]));
+  }, [props.kind]);
+  if (props.kind === "propose_routines")
+    return /* @__PURE__ */ u3(RoutineJobStart, {
+      busy: props.busy,
+      onStart: (start) => props.onStart(start.owners ? { owners: start.owners } : {})
+    }, undefined, false, undefined, this);
+  if (props.kind === "index_book") {
+    return /* @__PURE__ */ u3("div", {
+      class: "lre-stack",
+      children: [
+        /* @__PURE__ */ u3("p", {
+          class: "lre-build-note",
+          children: "Pick one of your World Info books. Each entry with text becomes a lore entry to review, with aliases, topics, links and lookup terms, and keeps the book's own text; entries already in the world's lore are skipped. Nothing changes until you apply."
+        }, undefined, false, undefined, this),
+        books === null ? /* @__PURE__ */ u3(Empty, {
+          icon: "hourglass",
+          children: "Loading books…"
+        }, undefined, false, undefined, this) : books.length === 0 ? /* @__PURE__ */ u3(Empty, {
+          icon: "book",
+          children: "No World Info books."
+        }, undefined, false, undefined, this) : /* @__PURE__ */ u3("div", {
+          class: "lre-build-picks",
+          role: "radiogroup",
+          "aria-label": "World Info book",
+          children: books.map((book) => /* @__PURE__ */ u3("label", {
+            class: "lre-build-pick",
+            children: [
+              /* @__PURE__ */ u3("input", {
+                type: "radio",
+                name: "lre-index-book",
+                checked: picked[0] === book.id,
+                onChange: () => setPicked([book.id])
+              }, undefined, false, undefined, this),
+              /* @__PURE__ */ u3("span", {
+                children: book.name
+              }, undefined, false, undefined, this)
+            ]
+          }, book.id, true, undefined, this))
+        }, undefined, false, undefined, this),
+        /* @__PURE__ */ u3(Button, {
+          variant: "primary",
+          block: true,
+          disabled: picked.length === 0 || props.busy,
+          onClick: () => props.onStart({ bookId: picked[0] ?? "" }),
+          children: "Index the book"
+        }, undefined, false, undefined, this)
+      ]
+    }, undefined, true, undefined, this);
+  }
+  if (props.kind === "index_text") {
+    return /* @__PURE__ */ u3("div", {
+      class: "lre-stack",
+      children: [
+        /* @__PURE__ */ u3(Field, {
+          label: "Text to index",
+          for: textId,
+          help: "The helper splits it into lore entries in the text's own words, with aliases, topics, links and lookup terms. Each is marked as written by the AI, and counts as reviewed once you apply it. Nothing changes until you apply.",
+          children: /* @__PURE__ */ u3("textarea", {
+            id: textId,
+            class: "lre-input lre-build-prose",
+            rows: 8,
+            placeholder: "Paste a setting document, a town history, character notes…",
+            value: text,
+            onInput: (event) => setText(event.currentTarget.value)
+          }, undefined, false, undefined, this)
+        }, undefined, false, undefined, this),
+        /* @__PURE__ */ u3(Button, {
+          variant: "primary",
+          block: true,
+          disabled: !text.trim() || props.busy,
+          onClick: () => props.onStart({ text: text.trim() }),
+          children: "Index the text"
+        }, undefined, false, undefined, this)
+      ]
+    }, undefined, true, undefined, this);
+  }
+  if (props.kind === "import_lore") {
+    return /* @__PURE__ */ u3("div", {
+      class: "lre-stack",
+      children: [
+        /* @__PURE__ */ u3("p", {
+          class: "lre-build-note",
+          children: "Choose lore books. Every entry becomes a reviewable proposal; nothing changes until you apply it."
+        }, undefined, false, undefined, this),
+        books === null ? /* @__PURE__ */ u3(Empty, {
+          icon: "hourglass",
+          children: "Loading lore books…"
+        }, undefined, false, undefined, this) : books.length === 0 ? /* @__PURE__ */ u3(Empty, {
+          icon: "book",
+          children: "No lore books."
+        }, undefined, false, undefined, this) : /* @__PURE__ */ u3("div", {
+          class: "lre-build-picks",
+          role: "group",
+          "aria-label": "Lore books",
+          children: books.map((book) => /* @__PURE__ */ u3("label", {
+            class: "lre-build-pick",
+            children: [
+              /* @__PURE__ */ u3("input", {
+                type: "checkbox",
+                checked: picked.includes(book.id),
+                onChange: () => setPicked(picked.includes(book.id) ? picked.filter((id) => id !== book.id) : [...picked, book.id])
+              }, undefined, false, undefined, this),
+              /* @__PURE__ */ u3("span", {
+                children: book.name
+              }, undefined, false, undefined, this)
+            ]
+          }, book.id, true, undefined, this))
+        }, undefined, false, undefined, this),
+        /* @__PURE__ */ u3(Button, {
+          variant: "primary",
+          block: true,
+          disabled: picked.length === 0 || props.busy,
+          onClick: () => props.onStart({ bookIds: picked }),
+          children: [
+            "Import ",
+            picked.length > 0 ? `${picked.length} book${picked.length === 1 ? "" : "s"}` : ""
+          ]
+        }, undefined, true, undefined, this)
+      ]
+    }, undefined, true, undefined, this);
+  }
+  if (props.kind === "describe_map") {
+    const places = draft ? Object.values(draft.doc.places).sort((a, b) => a.name.localeCompare(b.name)) : [];
+    const chosen = scope || draft?.doc.start.place || "";
+    const mapIdField = /* @__PURE__ */ u3(Field, {
+      label: "Map id",
+      for: mapIdId,
+      help: `Left empty, it's ${chosen}_map.`,
+      children: /* @__PURE__ */ u3("input", {
+        id: mapIdId,
+        class: "lre-input lre-build-mono",
+        placeholder: `${chosen}_map`,
+        value: mapId,
+        autoComplete: "off",
+        spellcheck: false,
+        onInput: (event) => setMapId(event.currentTarget.value.replace(/[^\w-]/g, "_"))
+      }, undefined, false, undefined, this)
+    }, undefined, false, undefined, this);
+    return /* @__PURE__ */ u3("div", {
+      class: "lre-stack",
+      children: [
+        /* @__PURE__ */ u3("p", {
+          class: "lre-build-note",
+          children: "Describe a place's inside in your own words: rooms and how they connect, or a town's places and the walks between them. The AI draws it as an lre-map-v1 map; you see it as a proposal with its preview before it goes into the draft."
+        }, undefined, false, undefined, this),
+        /* @__PURE__ */ u3(Field, {
+          label: "The place to draw",
+          for: placeId,
+          children: /* @__PURE__ */ u3("select", {
+            id: placeId,
+            class: "lre-input",
+            value: chosen,
+            onChange: (event) => setScope(event.currentTarget.value),
+            children: places.map((p) => /* @__PURE__ */ u3("option", {
+              value: p.id,
+              children: showIds ? `${p.name} (${p.id})` : p.name
+            }, p.id, false, undefined, this))
+          }, undefined, false, undefined, this)
+        }, undefined, false, undefined, this),
+        /* @__PURE__ */ u3(Field, {
+          label: "Describe it",
+          for: textId,
+          children: /* @__PURE__ */ u3("textarea", {
+            id: textId,
+            class: "lre-input lre-build-prose",
+            rows: 6,
+            placeholder: "A narrow farmhouse: the front door opens into a hall, with the parlour on the left and the kitchen at the back; a door from the kitchen to the scullery…",
+            value: text,
+            onInput: (event) => setText(event.currentTarget.value)
+          }, undefined, false, undefined, this)
+        }, undefined, false, undefined, this),
+        showIds ? mapIdField : /* @__PURE__ */ u3(Disclosure, {
+          summary: "Advanced",
+          children: mapIdField
+        }, undefined, false, undefined, this),
+        /* @__PURE__ */ u3(Button, {
+          variant: "primary",
+          block: true,
+          disabled: !text.trim() || !chosen || props.busy,
+          onClick: () => props.onStart({ scope: chosen, prose: text.trim(), ...mapId.trim() ? { mapId: mapId.trim() } : {} }),
+          children: "Draw the map"
+        }, undefined, false, undefined, this)
+      ]
+    }, undefined, true, undefined, this);
+  }
+  if (props.kind === "refine") {
+    return /* @__PURE__ */ u3("div", {
+      class: "lre-stack",
+      children: [
+        /* @__PURE__ */ u3(Field, {
+          label: "What should change?",
+          for: textId,
+          children: /* @__PURE__ */ u3("textarea", {
+            id: textId,
+            class: "lre-input lre-build-prose",
+            rows: 4,
+            placeholder: "Add a night-shift nurse who knows Dev; give the diner a weekly schedule…",
+            value: text,
+            onInput: (event) => setText(event.currentTarget.value)
+          }, undefined, false, undefined, this)
+        }, undefined, false, undefined, this),
+        /* @__PURE__ */ u3(Button, {
+          variant: "primary",
+          block: true,
+          disabled: !text.trim() || props.busy,
+          onClick: () => props.onStart({ instructions: text.trim() }),
+          children: "Propose changes"
+        }, undefined, false, undefined, this)
+      ]
+    }, undefined, true, undefined, this);
+  }
+  if (props.kind === "check_world") {
+    return /* @__PURE__ */ u3("div", {
+      class: "lre-stack",
+      children: [
+        /* @__PURE__ */ u3("p", {
+          class: "lre-build-note",
+          children: "Runs the world forward one day per turn with no player input and reports what happened, dropped events, failures and leaks. Nothing is saved."
+        }, undefined, false, undefined, this),
+        /* @__PURE__ */ u3(Field, {
+          label: "Days",
+          children: /* @__PURE__ */ u3(Seg, {
+            label: "Days",
+            value: days,
+            options: CHECK_DAYS,
+            onChange: (next) => setDays(next)
+          }, undefined, false, undefined, this)
+        }, undefined, false, undefined, this),
+        /* @__PURE__ */ u3(Button, {
+          variant: "primary",
+          block: true,
+          disabled: props.busy,
+          onClick: () => props.onStart({ days }),
+          children: "Run check"
+        }, undefined, false, undefined, this)
+      ]
+    }, undefined, true, undefined, this);
+  }
+  const script = text.split(`
+`).map((line) => line.trim()).filter((line) => line.length > 0).slice(0, 50);
+  return /* @__PURE__ */ u3("div", {
+    class: "lre-stack",
+    children: [
+      /* @__PURE__ */ u3(Field, {
+        label: "Player turns (one per line, up to 50)",
+        for: textId,
+        children: /* @__PURE__ */ u3("textarea", {
+          id: textId,
+          class: "lre-input lre-build-prose",
+          rows: 5,
+          placeholder: `I walk to the diner.
+I order a coffee.
+I ask Rosie about the night shift.`,
+          value: text,
+          onInput: (event) => setText(event.currentTarget.value)
+        }, undefined, false, undefined, this)
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(Button, {
+        variant: "primary",
+        block: true,
+        disabled: script.length === 0 || props.busy,
+        onClick: () => props.onStart({ turns: script }),
+        children: [
+          "Run playtest",
+          script.length > 0 ? ` (${script.length} turn${script.length === 1 ? "" : "s"})` : ""
+        ]
+      }, undefined, true, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+}
+function proposalGroups(proposals) {
+  const groups = new Map;
+  for (const p of proposals) {
+    const pack = p.pack ?? "other";
+    groups.set(pack, [...groups.get(pack) ?? [], p]);
+  }
+  return [...groups].map(([pack, list]) => ({ pack, proposals: list }));
+}
+function shownValue(p, bookNames) {
+  if (!isRecord(p.value) || !Array.isArray(p.value.sources))
+    return p.value;
+  const sources = p.value.sources.map((link) => {
+    if (typeof link !== "string")
+      return link;
+    const [bookId = link, entryId = ""] = link.split("/");
+    const title = p.sourceNames && hasOwn(p.sourceNames, link) ? p.sourceNames[link] : undefined;
+    const book = hasOwn(bookNames, bookId) ? bookNames[bookId] : undefined;
+    return title || book ? [title || entryId, book || bookId].filter((part) => part).join(" · ") : link;
+  });
+  return { ...p.value, sources };
+}
+function startTicked(proposals) {
+  return new Set(proposals.filter((p) => p.confidence >= 0.7 && !strings(isRecord(p.value) ? p.value.assumed : undefined).includes("kind")).map((p) => p.id));
+}
+function LoreProposalLines(props) {
+  const value = isRecord(props.p.value) ? props.p.value : {};
+  const source = loreSourceOf(value.source);
+  const link = source.kind === "book" ? `${source.bookId}/${source.entryId}` : "";
+  const entry = source.kind === "book" ? (props.p.sourceNames && hasOwn(props.p.sourceNames, link) ? props.p.sourceNames[link] : undefined) ?? source.entryId : "";
+  const lists = [
+    ["Aliases", strings(value.aliases)],
+    ["Topics", strings(value.topics)],
+    ["Links", strings(value.links).map((id) => hasOwn(props.names, id) ? props.names[id] ?? id : id)],
+    ["Lookup terms", props.p.index?.terms ?? []]
+  ];
+  return /* @__PURE__ */ u3(M, {
+    children: [
+      /* @__PURE__ */ u3("span", {
+        class: "lre-build-proposal-line",
+        "data-lre-proposal-from": true,
+        children: source.kind === "book" ? `From ${hasOwn(props.bookNames, source.bookId) ? props.bookNames[source.bookId] : source.bookId}: ${entry}` : "From the pasted text, in the AI's words"
+      }, undefined, false, undefined, this),
+      lists.filter(([, items]) => items.length > 0).map(([label, items]) => /* @__PURE__ */ u3("span", {
+        class: "lre-build-proposal-line lre-muted",
+        children: [
+          label,
+          ": ",
+          items.join(", ")
+        ]
+      }, label, true, undefined, this)),
+      props.p.note ? /* @__PURE__ */ u3("span", {
+        class: "lre-build-proposal-line lre-warn",
+        children: props.p.note
+      }, undefined, false, undefined, this) : null
+    ]
+  }, undefined, true, undefined, this);
+}
+function ProposalReview(props) {
+  const [accepted, setAccepted] = d2(() => startTicked(props.proposals));
+  const [open, setOpen] = d2(null);
+  const [applied, setApplied] = d2(false);
+  const [busy, run] = useBusy();
+  const send = b2(() => draftSend(props.app), [props.app]);
+  const draft = useSelect(props.app.drafts, (d) => d);
+  const doc = draft?.doc;
+  const names = b2(() => Object.fromEntries([...Object.values(doc?.entities ?? {}), ...Object.values(doc?.places ?? {})].map((e) => [e.id, e.name])), [doc]);
+  const [bookNames, setBookNames] = d2({});
+  A(() => {
+    props.app.host.worldBooks().then((books) => setBookNames(Object.fromEntries(books.map((book) => [book.id, book.name]))), () => setBookNames({}));
+  }, [props.app]);
+  const toggle = (id) => {
+    const next = new Set(accepted);
+    if (next.has(id))
+      next.delete(id);
+    else
+      next.add(id);
+    setAccepted(next);
+  };
+  const groups = proposalGroups(props.proposals);
+  return /* @__PURE__ */ u3(M, {
+    children: [
+      /* @__PURE__ */ u3(Section, {
+        title: "Proposals",
+        aside: /* @__PURE__ */ u3("span", {
+          class: "lre-build-count",
+          children: [
+            accepted.size,
+            " of ",
+            props.proposals.length,
+            " ticked"
+          ]
+        }, undefined, true, undefined, this),
+        children: [
+          /* @__PURE__ */ u3("div", {
+            class: "lre-build-actions",
+            children: [
+              /* @__PURE__ */ u3(Button, {
+                size: "sm",
+                icon: "check",
+                onClick: () => setAccepted(new Set(props.proposals.map((p) => p.id))),
+                children: "Select all"
+              }, undefined, false, undefined, this),
+              /* @__PURE__ */ u3(Button, {
+                size: "sm",
+                variant: "ghost",
+                onClick: () => setAccepted(new Set),
+                children: "None"
+              }, undefined, false, undefined, this)
+            ]
+          }, undefined, true, undefined, this),
+          groups.map((group) => /* @__PURE__ */ u3("div", {
+            class: "lre-build-group",
+            "data-lre-proposal-pack": group.pack,
+            children: [
+              groups.length > 1 ? /* @__PURE__ */ u3("div", {
+                class: "lre-build-group-head",
+                children: [
+                  /* @__PURE__ */ u3("span", {
+                    children: humanize(group.pack)
+                  }, undefined, false, undefined, this),
+                  /* @__PURE__ */ u3("span", {
+                    class: "lre-build-count",
+                    children: [
+                      group.proposals.filter((p) => accepted.has(p.id)).length,
+                      " of ",
+                      group.proposals.length
+                    ]
+                  }, undefined, true, undefined, this)
+                ]
+              }, undefined, true, undefined, this) : null,
+              /* @__PURE__ */ u3("div", {
+                role: "list",
+                children: group.proposals.map((p) => {
+                  const value = isRecord(p.value) ? p.value : {};
+                  const from = [...new Set(strings(value.sources).map((link) => link.split("/")[0] ?? link))].map((id) => bookNames[id] ?? id);
+                  const assumed = strings(value.assumed);
+                  const tableFields = assumed.filter((f) => f !== "kind");
+                  const noun = COLLECTION_INFO[p.collection].noun;
+                  const title = itemLabel(p.collection, p.key, p.value);
+                  const sure = Math.round(p.confidence * 100);
+                  const Preview = props.app.catalog.previews.get(p.collection);
+                  return /* @__PURE__ */ u3("div", {
+                    class: "lre-build-proposal",
+                    role: "listitem",
+                    "data-lre-proposal": p.id,
+                    children: [
+                      /* @__PURE__ */ u3("label", {
+                        class: "lre-check",
+                        children: /* @__PURE__ */ u3("input", {
+                          type: "checkbox",
+                          "aria-label": `Accept ${noun} “${title}”`,
+                          checked: accepted.has(p.id),
+                          onChange: () => toggle(p.id)
+                        }, undefined, false, undefined, this)
+                      }, undefined, false, undefined, this),
+                      /* @__PURE__ */ u3("div", {
+                        class: "lre-build-proposal-body",
+                        children: [
+                          /* @__PURE__ */ u3("div", {
+                            class: "lre-build-proposal-head",
+                            children: [
+                              /* @__PURE__ */ u3("span", {
+                                class: "lre-build-proposal-title",
+                                children: title
+                              }, undefined, false, undefined, this),
+                              /* @__PURE__ */ u3(Badge, {
+                                tone: p.confidence >= 0.8 ? "pos" : p.confidence >= 0.5 ? "warn" : "neg",
+                                children: [
+                                  sure,
+                                  "%",
+                                  /* @__PURE__ */ u3("span", {
+                                    class: "lre-sr",
+                                    children: " sure"
+                                  }, undefined, false, undefined, this)
+                                ]
+                              }, undefined, true, undefined, this)
+                            ]
+                          }, undefined, true, undefined, this),
+                          /* @__PURE__ */ u3("span", {
+                            class: "lre-build-proposal-line lre-muted",
+                            children: humanize(noun)
+                          }, undefined, false, undefined, this),
+                          /* @__PURE__ */ u3(IdText, {
+                            id: `${p.collection}.${p.key}`
+                          }, undefined, false, undefined, this),
+                          p.collection === "lore" ? /* @__PURE__ */ u3(LoreProposalLines, {
+                            p,
+                            bookNames,
+                            names
+                          }, undefined, false, undefined, this) : /* @__PURE__ */ u3(M, {
+                            children: [
+                              from.length === 0 || p.note ? /* @__PURE__ */ u3("span", {
+                                class: "lre-build-proposal-line lre-muted",
+                                children: [from.length === 0 ? p.source : null, p.note].filter((part) => part).join(" — ")
+                              }, undefined, false, undefined, this) : null,
+                              from.length > 0 ? /* @__PURE__ */ u3("span", {
+                                class: "lre-build-proposal-line",
+                                "data-lre-proposal-from": true,
+                                children: [
+                                  "From lore: ",
+                                  from.join(", ")
+                                ]
+                              }, undefined, true, undefined, this) : null,
+                              assumed.includes("kind") ? /* @__PURE__ */ u3("span", {
+                                class: "lre-build-proposal-line lre-warn",
+                                "data-lre-proposal-assumed-kind": true,
+                                children: [
+                                  /* @__PURE__ */ u3(Icon, {
+                                    name: "alert",
+                                    size: 16
+                                  }, undefined, false, undefined, this),
+                                  "Assumed kind: ",
+                                  String(value.kind),
+                                  " (the lore named none)"
+                                ]
+                              }, undefined, true, undefined, this) : null,
+                              tableFields.length > 0 ? /* @__PURE__ */ u3("span", {
+                                class: "lre-build-proposal-line lre-warn",
+                                "data-lre-proposal-assumed": true,
+                                children: [
+                                  /* @__PURE__ */ u3(Icon, {
+                                    name: "alert",
+                                    size: 16
+                                  }, undefined, false, undefined, this),
+                                  "Assumed from a table: ",
+                                  tableFields.join(", ")
+                                ]
+                              }, undefined, true, undefined, this) : null
+                            ]
+                          }, undefined, true, undefined, this),
+                          /* @__PURE__ */ u3("button", {
+                            type: "button",
+                            class: "lre-btn small ghost lre-build-reveal",
+                            "aria-expanded": open === p.id,
+                            onClick: () => setOpen(open === p.id ? null : p.id),
+                            children: [
+                              /* @__PURE__ */ u3(Icon, {
+                                name: open === p.id ? "chevron-up" : "chevron-down",
+                                size: 16
+                              }, undefined, false, undefined, this),
+                              open === p.id ? "Hide value" : "Show value"
+                            ]
+                          }, undefined, true, undefined, this),
+                          open === p.id ? /* @__PURE__ */ u3("div", {
+                            class: "lre-build-json",
+                            children: /* @__PURE__ */ u3(JsonView, {
+                              value: shownValue(p, bookNames)
+                            }, undefined, false, undefined, this)
+                          }, undefined, false, undefined, this) : null,
+                          Preview && draft ? /* @__PURE__ */ u3(Preview, {
+                            world: draft.doc,
+                            collection: p.collection,
+                            id: p.key,
+                            value: p.value
+                          }, undefined, false, undefined, this) : null
+                        ]
+                      }, undefined, true, undefined, this)
+                    ]
+                  }, p.id, true, undefined, this);
+                })
+              }, undefined, false, undefined, this)
+            ]
+          }, group.pack, true, undefined, this))
+        ]
+      }, undefined, true, undefined, this),
+      /* @__PURE__ */ u3(SaveBar, {
+        children: /* @__PURE__ */ u3(Button, {
+          variant: "primary",
+          block: true,
+          icon: applied ? "check" : undefined,
+          disabled: accepted.size === 0 || applied,
+          busy,
+          onClick: () => run(async () => {
+            let ok = 0;
+            for (const write of proposalWrites(props.worldId, props.proposals, accepted, props.app.drafts.get()?.doc.loreIndex)) {
+              const message = await send(write);
+              if (message.type === "lre.result" && write.op === "put")
+                ok += 1;
+            }
+            props.app.toast(`Applied ${ok} of ${accepted.size} to the draft. Commit when ready.`, ok === accepted.size ? "info" : "error");
+            setApplied(true);
+          }),
+          children: applied ? "Applied to the draft" : `Apply ${accepted.size} to the draft`
+        }, undefined, false, undefined, this)
+      }, undefined, false, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+}
+function RunReport(props) {
+  const app = useApp();
+  const doc = useSelect(app.drafts, (d) => d?.worldId === props.worldId ? d.doc : undefined);
+  const lint = props.report.lint;
+  return /* @__PURE__ */ u3(M, {
+    children: [
+      /* @__PURE__ */ u3(Section, {
+        title: props.kind === "playtest" ? "Transcript" : "Day by day",
+        children: /* @__PURE__ */ u3("ol", {
+          class: "lre-build-turns",
+          children: props.report.turns.map((turn, i) => /* @__PURE__ */ u3("li", {
+            class: "lre-build-turn",
+            children: [
+              props.kind === "playtest" ? /* @__PURE__ */ u3("span", {
+                class: "lre-build-turn-you",
+                children: [
+                  /* @__PURE__ */ u3("span", {
+                    class: "lre-build-turn-who",
+                    children: "You"
+                  }, undefined, false, undefined, this),
+                  " ",
+                  turn.user
+                ]
+              }, undefined, true, undefined, this) : /* @__PURE__ */ u3("strong", {
+                class: "lre-build-turn-label",
+                children: turn.user
+              }, undefined, false, undefined, this),
+              /* @__PURE__ */ u3("span", {
+                class: "lre-build-turn-reply",
+                children: turn.reply
+              }, undefined, false, undefined, this),
+              turn.notes.length > 0 ? /* @__PURE__ */ u3("ul", {
+                class: "lre-build-notes",
+                children: turn.notes.map((note) => /* @__PURE__ */ u3("li", {
+                  children: note
+                }, note, false, undefined, this))
+              }, undefined, false, undefined, this) : null
+            ]
+          }, i, true, undefined, this))
+        }, undefined, false, undefined, this)
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(Section, {
+        title: "Issues found",
+        aside: /* @__PURE__ */ u3(Badge, {
+          tone: lint.length > 0 ? "warn" : "neutral",
+          children: lint.length
+        }, undefined, false, undefined, this),
+        flush: true,
+        children: lint.length === 0 ? /* @__PURE__ */ u3(Empty, {
+          icon: "check",
+          children: "None."
+        }, undefined, false, undefined, this) : /* @__PURE__ */ u3("div", {
+          class: "lre-build-issues",
+          role: "list",
+          children: lint.map((issue, i) => /* @__PURE__ */ u3(IssueRow, {
+            issue,
+            worldId: props.worldId,
+            doc
+          }, i, false, undefined, this))
+        }, undefined, false, undefined, this)
+      }, undefined, false, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+}
+function JobView(props) {
+  const app = useApp();
+  const key = `${props.worldId}:${props.kind}`;
+  const job = useSelect(jobStore, (all) => all[key] ?? null);
+  const [busy, run] = useBusy();
+  A(() => {
+    app.request({ type: "lre.job", op: "list", worldId: props.worldId }).then((body) => {
+      if (body?.jobs) {
+        const jobs = body.jobs;
+        jobStore.update((all) => keptJobs(all, props.worldId, jobs));
+      }
+    });
+  }, [props.worldId]);
+  const start = (input) => run(async () => {
+    const result = await app.request({ type: "lre.job", op: "start", kind: props.kind, worldId: props.worldId, input });
+    const jobId = result?.jobId;
+    if (jobId)
+      jobStore.update((all) => ({ ...all, [key]: { jobId, kind: props.kind, worldId: props.worldId, status: "running", progress: 0, input } }));
+  });
+  const result = job?.status === "running" ? undefined : job?.result;
+  const next = result && "proposals" in result ? result.next : undefined;
+  const info = JOB_INFO[props.kind];
+  const input = /* @__PURE__ */ u3(JobInput, {
+    kind: props.kind,
+    onStart: start,
+    busy
+  }, undefined, false, undefined, this);
+  return /* @__PURE__ */ u3("div", {
+    class: "lre-build-page",
+    "data-lre-job": props.kind,
+    children: [
+      /* @__PURE__ */ u3(PageHeader, {
+        title: info.title,
+        subtitle: info.hint
+      }, undefined, false, undefined, this),
+      !job ? /* @__PURE__ */ u3(Section, {
+        title: "Start",
+        children: input
+      }, undefined, false, undefined, this) : null,
+      job ? /* @__PURE__ */ u3(Section, {
+        title: "Status",
+        aside: /* @__PURE__ */ u3(JobStatusBadge, {
+          status: job.status
+        }, undefined, false, undefined, this),
+        children: [
+          /* @__PURE__ */ u3("div", {
+            class: "lre-progress",
+            role: "progressbar",
+            "aria-label": `${info.title} progress`,
+            "aria-valuemin": 0,
+            "aria-valuemax": 100,
+            "aria-valuenow": Math.round(job.progress * 100),
+            children: /* @__PURE__ */ u3("span", {
+              style: { width: `${Math.round(job.progress * 100)}%` }
+            }, undefined, false, undefined, this)
+          }, undefined, false, undefined, this),
+          job.message ? /* @__PURE__ */ u3("p", {
+            class: "lre-build-note",
+            children: job.message
+          }, undefined, false, undefined, this) : null,
+          next ? /* @__PURE__ */ u3("p", {
+            class: "lre-build-note",
+            children: "This pass stopped before everyone was read. Apply what you want from it first: Continue starts the next pass, whose proposals replace these."
+          }, undefined, false, undefined, this) : null,
+          /* @__PURE__ */ u3("div", {
+            class: "lre-build-actions",
+            children: job.status === "running" ? /* @__PURE__ */ u3(Button, {
+              size: "sm",
+              busy,
+              onClick: () => run(async () => {
+                await app.request({ type: "lre.job", op: "cancel", jobId: job.jobId });
+              }),
+              children: "Cancel"
+            }, undefined, false, undefined, this) : /* @__PURE__ */ u3(M, {
+              children: [
+                job.status === "interrupted" && job.input ? /* @__PURE__ */ u3(Button, {
+                  size: "sm",
+                  variant: "primary",
+                  icon: "refresh",
+                  disabled: busy,
+                  onClick: () => job.input && start(job.input),
+                  children: "Run it again"
+                }, undefined, false, undefined, this) : null,
+                next ? /* @__PURE__ */ u3(Button, {
+                  size: "sm",
+                  variant: "primary",
+                  iconAfter: "chevron-right",
+                  disabled: busy,
+                  onClick: () => start(next),
+                  children: "Continue"
+                }, undefined, false, undefined, this) : null,
+                /* @__PURE__ */ u3(Button, {
+                  size: "sm",
+                  variant: "ghost",
+                  disabled: busy,
+                  onClick: () => run(async () => {
+                    if (!await app.request({ type: "lre.job", op: "dismiss", jobId: job.jobId }))
+                      return;
+                    jobStore.update((all) => Object.fromEntries(Object.entries(all).filter(([k]) => k !== key)));
+                  }),
+                  children: "Dismiss"
+                }, undefined, false, undefined, this)
+              ]
+            }, undefined, true, undefined, this)
+          }, undefined, false, undefined, this),
+          job.status !== "running" ? /* @__PURE__ */ u3(Disclosure, {
+            summary: "Run again with new input",
+            children: input
+          }, undefined, false, undefined, this) : null
+        ]
+      }, undefined, true, undefined, this) : null,
+      result && "proposals" in result ? result.proposals.length === 0 ? /* @__PURE__ */ u3(Empty, {
+        icon: "checklist",
+        children: "No proposals."
+      }, undefined, false, undefined, this) : props.kind === "propose_routines" && job ? /* @__PURE__ */ u3(RoutineProposalReview, {
+        app,
+        worldId: props.worldId,
+        jobId: job.jobId,
+        proposals: result.proposals
+      }, job.jobId, false, undefined, this) : /* @__PURE__ */ u3(ProposalReview, {
+        app,
+        worldId: props.worldId,
+        proposals: result.proposals
+      }, job?.jobId, false, undefined, this) : null,
+      result && "turns" in result ? /* @__PURE__ */ u3(RunReport, {
+        kind: props.kind,
+        worldId: props.worldId,
+        report: result
+      }, undefined, false, undefined, this) : null
+    ]
+  }, undefined, true, undefined, this);
+}
+
+// src/frontend/chip-roles.ts
+var ROLE = {
+  confirm: "decision",
+  keep_report: "decision",
+  contradiction: "decision",
+  read_failed: "decision",
+  engine_failed: "decision",
+  claim: "decision",
+  check: "decision",
+  retry: "decision",
+  retry_read: "decision",
+  reread: "decision",
+  overdue: "decision",
+  refused: "decision",
+  timelapse_offer: "offer",
+  continue_timelapse: "offer",
+  choice: "offer",
+  swipe_option: "offer",
+  change: "done",
+  elapsed: "done",
+  roll: "done",
+  price: "done",
+  undo: "done",
+  claimed: "done",
+  not_action: "done",
+  mode_change: "done",
+  fix: "done",
+  pending: "done",
+  degraded: "done",
+  decline: "done"
+};
+var TONE = {
+  decline: "neg",
+  read_failed: "neg",
+  engine_failed: "neg",
+  claim: "neutral",
+  check: "neutral",
+  refused: "neg",
+  degraded: "warn",
+  pending: "warn",
+  overdue: "warn",
+  confirm: "warn",
+  keep_report: "neutral",
+  contradiction: "neutral",
+  retry: "neutral",
+  retry_read: "neutral",
+  reread: "neutral",
+  timelapse_offer: "neutral",
+  continue_timelapse: "neutral",
+  choice: "neutral",
+  swipe_option: "neutral",
+  change: "neutral",
+  elapsed: "neutral",
+  roll: "neutral",
+  price: "neutral",
+  undo: "neutral",
+  claimed: "neutral",
+  not_action: "neutral",
+  mode_change: "neutral",
+  fix: "neutral"
+};
+function chipRole(chip) {
+  return chip.kind === "decline" && chip.actions.length > 0 ? "decision" : ROLE[chip.kind];
+}
+function chipTone(chip) {
+  return TONE[chip.kind];
+}
+
+// src/shared/minds.ts
+var FIDELITIES = ["live", "near", "far", "background"];
+var DEFAULT_FIDELITY_WEIGHTS = Object.freeze({
+  here: 45,
+  nearby: 20,
+  mentioned: 40,
+  regard: 10,
+  knows: 10,
+  owner: 15,
+  track: 8,
+  roles: { antagonist: 20 },
+  rule: 5,
+  pending: 15,
+  band: { principal: 15, supporting: 5, background: 0 },
+  recent: 10
+});
+var DEFAULT_FIDELITY_THRESHOLDS = Object.freeze({ live: 60, near: 35, far: 15 });
+var DEFAULT_MINDS_MEMORY = Object.freeze({
+  witness: { show: 8 },
+  recall: { recent: 4, relevant: 4, tokens: 4000 },
+  notes: { show: 8, keep: 24 },
+  commitments: { show: 8 },
+  salience: { halfLifeDays: 7, floor: 0.5 },
+  consolidate: { enabled: true, periodDays: 1 }
+});
+var DEFAULT_WORLD_MINDS = Object.freeze({
+  secrecy: "brief",
+  weights: DEFAULT_FIDELITY_WEIGHTS,
+  thresholds: DEFAULT_FIDELITY_THRESHOLDS,
+  always: null,
+  never: null,
+  memory: DEFAULT_MINDS_MEMORY
+});
+var MINDS_RANGES = {
+  weight: [-100, 200],
+  threshold: [0, 1000],
+  show: [0, 64],
+  keep: [1, 64],
+  recallTokens: [0, Number.MAX_SAFE_INTEGER],
+  halfLifeDays: [0.1, 3650],
+  floor: [0, 5],
+  periodDays: [0.1, 365]
+};
+var num2 = (v, [lo, hi], fallback) => typeof v === "number" && Number.isFinite(v) && v >= lo && v <= hi ? v : fallback;
+var whole = (v, range, fallback) => Math.round(num2(v, range, fallback));
+var wholeOrNone = (v, range, fallback) => v === "none" ? "none" : typeof v === "number" && Number.isFinite(v) && v >= range[0] && v <= range[1] ? Math.round(v) : fallback;
+var obj2 = (v) => isRecord(v) ? v : {};
+function selectorOrNull(v) {
+  if (!isRecord(v))
+    return null;
+  const out = {};
+  const list = (x) => Array.isArray(x) && x.every((s) => typeof s === "string") ? x.slice(0, 200) : undefined;
+  const ids = list(v.ids);
+  const kind = list(v.kind);
+  const tier = list(v.tier);
+  const memberOf = list(v.memberOf);
+  const tag = list(v.tag);
+  if (ids)
+    out.ids = ids;
+  if (kind)
+    out.kind = kind;
+  if (tier)
+    out.tier = tier;
+  if (memberOf)
+    out.memberOf = memberOf;
+  if (tag)
+    out.tag = tag;
+  if (isRecord(v.class)) {
+    const classes = {};
+    for (const [facet, values] of Object.entries(v.class)) {
+      const vs = list(values);
+      if (safeKey(facet) && vs)
+        classes[facet] = vs;
+    }
+    out.class = classes;
+  }
+  return Object.keys(out).length > 0 ? out : null;
+}
+function memoryConfigOf(raw, base = DEFAULT_MINDS_MEMORY) {
+  const m = obj2(raw);
+  const witness = obj2(m.witness);
+  const recall = obj2(m.recall);
+  const notes = obj2(m.notes);
+  const commitments = obj2(m.commitments);
+  const salience = obj2(m.salience);
+  const consolidate = obj2(m.consolidate);
+  return {
+    witness: { show: whole(witness.show, MINDS_RANGES.show, base.witness.show) },
+    recall: { recent: whole(recall.recent, MINDS_RANGES.show, base.recall.recent), relevant: whole(recall.relevant, MINDS_RANGES.show, base.recall.relevant), tokens: wholeOrNone(recall.tokens, MINDS_RANGES.recallTokens, base.recall.tokens) },
+    notes: { show: whole(notes.show, MINDS_RANGES.show, base.notes.show), keep: whole(notes.keep, MINDS_RANGES.keep, base.notes.keep) },
+    commitments: { show: whole(commitments.show, MINDS_RANGES.show, base.commitments.show) },
+    salience: { halfLifeDays: num2(salience.halfLifeDays, MINDS_RANGES.halfLifeDays, base.salience.halfLifeDays), floor: num2(salience.floor, MINDS_RANGES.floor, base.salience.floor) },
+    consolidate: { enabled: typeof consolidate.enabled === "boolean" ? consolidate.enabled : base.consolidate.enabled, periodDays: num2(consolidate.periodDays, MINDS_RANGES.periodDays, base.consolidate.periodDays) }
+  };
+}
+function worldMindsOf(world) {
+  const raw = obj2(world.minds);
+  const w = obj2(raw.weights);
+  const band = obj2(w.band);
+  const d = DEFAULT_FIDELITY_WEIGHTS;
+  const weight = (v, fallback) => num2(v, MINDS_RANGES.weight, fallback);
+  const roles = {};
+  const rawRoles = isRecord(w.roles) ? w.roles : d.roles;
+  for (const [value, points] of Object.entries(rawRoles))
+    if (safeKey(value) && typeof points === "number" && Number.isFinite(points))
+      roles[value] = weight(points, 0);
+  const t = obj2(raw.thresholds);
+  const far = num2(t.far, MINDS_RANGES.threshold, DEFAULT_FIDELITY_THRESHOLDS.far);
+  const near = Math.max(far, num2(t.near, MINDS_RANGES.threshold, DEFAULT_FIDELITY_THRESHOLDS.near));
+  const live = Math.max(near, num2(t.live, MINDS_RANGES.threshold, DEFAULT_FIDELITY_THRESHOLDS.live));
+  return {
+    secrecy: raw.secrecy === "full" ? "full" : "brief",
+    weights: {
+      here: weight(w.here, d.here),
+      nearby: weight(w.nearby, d.nearby),
+      mentioned: weight(w.mentioned, d.mentioned),
+      regard: weight(w.regard, d.regard),
+      knows: weight(w.knows, d.knows),
+      owner: weight(w.owner, d.owner),
+      track: weight(w.track, d.track),
+      roles,
+      rule: weight(w.rule, d.rule),
+      pending: weight(w.pending, d.pending),
+      band: { principal: weight(band.principal, d.band.principal), supporting: weight(band.supporting, d.band.supporting), background: weight(band.background, d.band.background) },
+      recent: weight(w.recent, d.recent)
+    },
+    thresholds: { live, near, far },
+    always: selectorOrNull(raw.always),
+    never: selectorOrNull(raw.never),
+    memory: memoryConfigOf(raw.memory)
+  };
+}
+function limitOf(limit) {
+  return limit === "none" ? Number.POSITIVE_INFINITY : limit;
+}
+var MIND_PURPOSES = ["mind", "memory", "skip", "consolidate"];
+function isMindPurpose(purpose) {
+  return MIND_PURPOSES.includes(purpose);
+}
+function worldMindTemplate(world, purpose) {
+  return Object.values(world.steps).filter((t) => t.purpose === purpose && t.template.trim() !== "").sort((a, b) => a.id.localeCompare(b.id))[0];
+}
+var MIND_SOURCES = ["pinned", "activated", "reply", "message", "summary", "memory", "thoughts", "recall", "life"];
+var DEFAULT_MIND_READS = Object.freeze({
+  pinned: { on: true, tokens: "none" },
+  activated: { on: true, tokens: 1600 },
+  reply: { on: true, tokens: "none" },
+  message: { on: true, tokens: "none" },
+  summary: { on: false, tokens: "none" },
+  memory: { on: false, tokens: "none" },
+  thoughts: { on: false, tokens: "none" },
+  recall: { on: false },
+  life: { on: false, tokens: "none" }
+});
+var MINDS_PRESETS = Object.freeze({
+  lean: { enabled: false, liveLimit: 3, nearRefresh: { scene: true, mention: true, turns: 6, minutes: 120 }, farRefreshMinutes: 1440, refreshLimit: 1, memoryLevels: [], tokens: 1200, skip: { maxBeats: 4, maxMindsPerBeat: 2 } },
+  standard: { enabled: true, liveLimit: 3, nearRefresh: { scene: true, mention: true, turns: 6, minutes: 120 }, farRefreshMinutes: 1440, refreshLimit: 2, memoryLevels: ["live"], tokens: 2400, skip: { maxBeats: 6, maxMindsPerBeat: 3 } },
+  full: { enabled: true, liveLimit: "none", nearRefresh: { scene: true, mention: true, turns: 4, minutes: 60 }, farRefreshMinutes: 720, refreshLimit: "none", memoryLevels: ["live", "near"], tokens: 4000, skip: { maxBeats: "none", maxMindsPerBeat: "none" } }
+});
+function defaultMindsSettings(preset = "standard") {
+  return { ...structuredClone(MINDS_PRESETS[preset]), reads: structuredClone(DEFAULT_MIND_READS), memory: {}, prompts: {} };
+}
+var MINDS_DEFAULTS = Object.freeze(defaultMindsSettings());
+var MIND_PROMPT_MAX = 20000;
+var PLAN_KINDS = ["errand", "meet", "visit", "work", "rest", "leisure", "pay", "lend", "other"];
+var PLAN_PRIORITY = { min: 1, max: 5, normal: 3 };
+function planInForce(p) {
+  return p.source !== "mind";
+}
+var COMMITMENT_KINDS = ["promise", "debt", "grudge", "favour", "plan", "other"];
+var COMMITMENT_STATUSES = ["open", "kept", "broken", "released"];
+var MIND_APPROACHES = ["reactive", "proactive"];
+var MIND_TEXT_CAPS = {
+  monologue: 1200,
+  depiction: 600,
+  intent: 300,
+  gmIntent: 600,
+  reaction: 200,
+  reactions: 4,
+  plans: 4,
+  planWhat: 160,
+  mood: 40,
+  interrupt: 200,
+  note: 300,
+  notes: 4,
+  commitment: 240,
+  commitments: 3,
+  summary: 900,
+  told: 240,
+  tolds: 3,
+  reason: 160
+};
+var MIND_PROMPT_DEFAULTS = Object.freeze({
+  mind: [
+    "You are the private mind of {{character}} in the roleplay world {{world}}. Think as {{character}}, from only what {{character}} knows: the context below is everything they perceive and remember. Other people's private thoughts are closed to you; ignore any narration of them in the recalled turns.",
+    "Decide how {{character}} reads this moment and what they intend. Everyone else decides for themselves: never script their actions or replies, and never plan around what they will do. Intend broadly, so the intent holds whatever they do. Write no narration and no dialogue."
+  ].join(`
+`),
+  memory: "You keep the memory of {{character}} in the roleplay world {{world}}. Below is what {{character}} knows, then the turn that just happened, as it was written. Only what was written happened, and only what {{character}} could see or hear of it counts; ignore narration of other people's private thoughts.",
+  skip: [
+    "The player character in the roleplay world {{world}} is skipping ahead in time. Below are the skip's span, the moments the engine already found in it, and what the people involved intend.",
+    "Propose further moments inside the span where something worth stopping for may happen: someone acting on a plan that involves the player character, a deadline, an occasion. Only moments the context supports; never invent people or places."
+  ].join(`
+`),
+  consolidate: "You keep the long-term memory of {{character}} in the roleplay world {{world}}. Fold the older notes below into their summary: keep what still matters to them, let the rest go, and keep everything the summary already holds that is still true."
+});
+var MIND_ANSWER_FORMATS = Object.freeze({
+  mind: [
+    'Answer with JSON only: {"monologue": "...", "depiction": "...", "intent": "...", "reactions": ["..."], "mood": "...", "interrupt": {"reason": "..."}}',
+    "- monologue: their private reasoning in the first person, at most six sentences.",
+    "- depiction: how they come across right now, as behaviour anyone present could see (posture, tone, what they do). Never a secret, an unspoken reason or a thought.",
+    "- intent: what they mean to do next, in one sentence.",
+    '- reactions: up to three short conditional reactions ("if pressed about the cellar, changes the subject").',
+    "- mood: one or two words.",
+    "- interrupt: only when the moment is a beat inside a time skip and what they'd do now would interrupt the player character's skipped time (seeking them out, calling them). Leave it out otherwise."
+  ].join(`
+`),
+  memory: [
+    'Answer with JSON only: {"notes": [{"text": "...", "salience": 3}], "commitments": [{"kind": "promise|debt|grudge|favour|plan|other", "with": ["a name"], "text": "...", "due": "YYYY-MM-DD HH:MM"}], "resolved": [{"id": "...", "status": "kept|broken|released"}], "plans": [], "told": [{"to": ["a name"], "what": "..."}], "summary": "..."}',
+    "- notes: at most three things they will remember, in their own perspective; salience 1 (passing) to 5 (unforgettable).",
+    "- commitments: promises, debts, grudges, favours and plans with someone that this turn made; due only when a time was set.",
+    "- resolved: their open commitments (listed with ids) that this turn kept, broke or released.",
+    '- plans: only what this turn states they will do later: said aloud, agreed with someone, or scheduled in the story as written; never a guess at what they might do. Each {"what": "...", "kind": "errand|meet|visit|work|rest|leisure|pay|lend|other", "when": {"from": "YYYY-MM-DD HH:MM", "to": "YYYY-MM-DD HH:MM"}, "where": "a place", "with": ["a name"], "priority": 3, "amount": 20}, with local times; priority 1 (whenever it fits) to 5 (it must happen); kind pay or lend, with amount, when they mean to hand someone money, and no amount otherwise.',
+    "- told: what they told whom in this turn, in a few words each.",
+    "- summary: their one-paragraph summary rewritten, only when this turn changed who they are or what they're about; leave it out otherwise.",
+    "Use empty lists for anything the turn didn't give."
+  ].join(`
+`),
+  skip: 'Answer with JSON only: {"beats": [{"at": "YYYY-MM-DD HH:MM", "reason": "..."}]}, at most five, in time order; an empty list when there are none.',
+  consolidate: 'Answer with JSON only: {"summary": "..."}: at most 900 characters of plain prose, in their own perspective.'
+});
+
+// src/shared/timeouts.ts
+var TIMER_MAX_MS = 2147483647;
+var HOST_LIMITS = {
+  contextHandler: {
+    what: "A context handler, per call",
+    minMs: 1000,
+    maxMs: 120000,
+    source: "src/spindle/worker-host.ts:4498-4500 (the clamp), src/spindle/context-handler.ts:64-78 (the timer)",
+    effect: "Lumiverse aborts the handler; a required one stops the generation, any other is skipped and the generation goes on without it."
+  },
+  decision: {
+    what: "A Decision call (decisions.evaluate)",
+    maxMs: 30000,
+    source: "src/services/decisions.service.ts:47",
+    effect: "The call fails with “Decision evaluation timed out after 30 seconds”; the step falls back to the helper."
+  },
+  processStartup: {
+    what: "A background process's start-up",
+    minMs: 1000,
+    maxMs: 120000,
+    source: "src/spindle/worker-host-process-api.ts:768",
+    effect: "Lumiverse stops the process as timed out; its job fails."
+  },
+  processHeartbeat: {
+    what: "The gap between a background process's heartbeats",
+    minMs: 1000,
+    maxMs: 120000,
+    noneMs: 0,
+    source: "src/spindle/worker-host-process-api.ts:769 (the clamp), 273-286 (the watchdog; 0 checks nothing)",
+    effect: "Lumiverse terminates the process (“Backend process heartbeat timed out”); its job fails."
+  },
+  sharedRpc: {
+    what: "Another extension's read of LumiRPEngine's shared endpoint (LumiRPEngine Studio)",
+    maxMs: 1e4,
+    source: "src/spindle/worker-host.ts:971, 1715-1719",
+    effect: "The reader's request fails as timed out."
+  },
+  socketIdle: {
+    what: "An idle event socket (the command line and MCP server)",
+    maxMs: 120000,
+    source: "Bun's WebSocket idle timeout: src/app.ts:7 takes hono/bun's `websocket`, and src/main.ts:293-309 sets only the HTTP idleTimeout",
+    effect: "Lumiverse closes the socket; the client pings every 45 s to keep it open."
+  }
+};
+var TIMEOUT_KEYS = ["engineRunMs", "preLookupMs", "postReplyMs", "postLookupMs", "guardMs", "requestMs", "caveatsMs", "mindsRunMs", "jobCallMs", "tokenCountMs", "laneStartupMs", "laneHeartbeatMs", "mcpReconnectMs"];
+var MIN = 60000;
+var TIMEOUTS = {
+  engineRunMs: {
+    label: "Engine run",
+    group: "turn",
+    limits: "Everything the engine does before the reply is generated: reading your action, people's choices, judging your approach, puzzle answers, the minds, the plan, the brief and the outline.",
+    fires: "The engine run stops: no reply is generated, and the chat says which step ran out, with a Retry.",
+    defaultMs: 5 * MIN,
+    minMs: 1000,
+    none: "the run takes as long as it needs"
+  },
+  preLookupMs: {
+    label: "Lore lookups before the reply",
+    group: "turn",
+    limits: "How long after the engine run starts a helper may still ask for lore; a lookup also starts only while a third of the run's time is left.",
+    fires: "Helpers answer with the lore they already have.",
+    defaultMs: 2 * MIN,
+    minMs: 0,
+    zero: "no lookups",
+    none: "lookups may start until the run's last third"
+  },
+  postReplyMs: {
+    label: "Reading the reply",
+    group: "turn",
+    limits: "Everything the engine asks a model after the reply: what changed, the contradiction check, people elsewhere, suggested choices, memory.",
+    fires: "The reads still waiting are skipped; the reply stands, and Re-read tries again.",
+    defaultMs: 5 * MIN,
+    minMs: 0,
+    zero: "no model calls after the reply",
+    none: "the reads take as long as they need"
+  },
+  postLookupMs: {
+    label: "Lore lookups after the reply",
+    group: "turn",
+    limits: "How long after the reply's reading starts a helper may still ask for lore; a lookup also starts only while a third of the reading's time is left.",
+    fires: "Helpers answer with the lore they already have.",
+    defaultMs: 2 * MIN,
+    minMs: 0,
+    zero: "no lookups",
+    none: "lookups may start until the reading's last third"
+  },
+  guardMs: {
+    label: "Generation guard",
+    group: "turn",
+    limits: "Lumiverse's wait for the engine's check, as a generation starts, that the engine's lore entries are fresh. The check itself is instant; this matters only while the engine is busy.",
+    fires: "Lumiverse stops the generation, so nothing goes out with stale entries.",
+    defaultMs: 2 * MIN,
+    minMs: 1000,
+    none: "as long as Lumiverse waits",
+    host: "contextHandler"
+  },
+  requestMs: {
+    label: "Engine requests",
+    group: "app",
+    limits: "How long this tab waits for the engine to answer a request: a view, an edit, a setting.",
+    fires: "The tab says the engine didn't answer; the engine may still finish the request.",
+    defaultMs: 5 * MIN,
+    minMs: 1000,
+    none: "the tab waits as long as it takes"
+  },
+  caveatsMs: {
+    label: "Preset check",
+    group: "app",
+    limits: "How long Settings → Caveats waits for its test prompt of the chat before saying the check is still running.",
+    fires: "Caveats says the check is still running; it finishes in the background for the next look.",
+    defaultMs: MIN,
+    minMs: 0,
+    zero: "always answer at once",
+    none: "wait for the check (Engine requests still bounds the tab's wait)"
+  },
+  mcpReconnectMs: {
+    label: "MCP server reconnect",
+    group: "work",
+    limits: "How long Reconnect in Lumiverse waits for a server Lumiverse runs to come back with this build's tools, after it is asked to exit.",
+    fires: "The server's line says it isn't back, with how to disconnect and connect it in Lumiverse's Settings → MCP Servers.",
+    defaultMs: MIN,
+    minMs: 1000,
+    none: "the line waits until the server is back"
+  },
+  mindsRunMs: {
+    label: "Minds run on demand",
+    group: "work",
+    limits: "A minds run started from GM → Minds, from start to end.",
+    fires: "The run stops; the minds it finished are kept.",
+    defaultMs: 10 * MIN,
+    minMs: 1000,
+    none: "the run goes on until it ends or you cancel it"
+  },
+  jobCallMs: {
+    label: "Import and Refine calls",
+    group: "work",
+    limits: "Each model call of an Import, a Refine, a lore index, a map description or a routine proposal in Build.",
+    fires: "That call counts as failed; the job goes on with what the other calls proposed.",
+    defaultMs: 10 * MIN,
+    minMs: 1000,
+    none: "a call takes as long as it needs (Cancel still stops the job)"
+  },
+  tokenCountMs: {
+    label: "Token counts",
+    group: "work",
+    limits: "How long Lumiverse's tokenizer may take to count a section before the engine's estimate stands in for it.",
+    fires: "The section is priced by the engine's estimate, which stays above the real count.",
+    defaultMs: 30000,
+    minMs: 0,
+    zero: "always the estimate",
+    none: "wait for every count"
+  },
+  laneStartupMs: {
+    label: "Background lane start-up",
+    group: "work",
+    limits: "How long Playtest and Check world's background process may take to start.",
+    fires: "Lumiverse stops the process and the job fails.",
+    defaultMs: MIN,
+    minMs: 1000,
+    none: "as long as Lumiverse waits",
+    host: "processStartup"
+  },
+  laneHeartbeatMs: {
+    label: "Background lane heartbeat",
+    group: "work",
+    limits: "The longest gap between the background process's heartbeats; it beats after each simulated day or turn.",
+    fires: "Lumiverse terminates the process and the job fails.",
+    defaultMs: MIN,
+    minMs: 1000,
+    none: "Lumiverse checks no heartbeat",
+    host: "processHeartbeat"
+  }
+};
+function formatMs(ms) {
+  if (!Number.isFinite(ms))
+    return "no limit";
+  if (ms < 1000)
+    return `${Math.round(ms)} ms`;
+  if (ms < MIN)
+    return `${Number((ms / 1000).toFixed(1))} s`;
+  const totalSeconds = Math.round(ms / 1000);
+  const h = Math.floor(totalSeconds / 3600);
+  const m = Math.floor(totalSeconds % 3600 / 60);
+  const s = totalSeconds % 60;
+  return [h > 0 ? `${h} h` : "", m > 0 ? `${m} min` : "", s > 0 && h === 0 ? `${s} s` : ""].filter((p) => p !== "").join(" ");
+}
+function timerMs(limit) {
+  const ms = limitOf(limit);
+  return ms >= TIMER_MAX_MS ? null : Math.max(0, ms);
+}
+
+// src/shared/diagnostics.ts
+var CANNOT_STOP = "This Lumiverse can't stop generation; engine state may be missing.";
+
+// src/frontend/diagnostics.tsx
+var OPEN_DIAGNOSTICS_EVENT = "lre:open-diagnostics";
+function openDiagnostics() {
+  window.dispatchEvent(new CustomEvent(OPEN_DIAGNOSTICS_EVENT));
+}
+function elapsedText(ms) {
+  const s = Math.max(0, Math.floor(ms / 1000));
+  return s < 60 ? `${s} s` : `${Math.floor(s / 60)} m ${String(s % 60).padStart(2, "0")} s`;
+}
+function useActivity() {
+  const app = useApp();
+  const activity = useSelect(app.sync, (state) => state.activity);
+  const [now, setNow] = d2(() => Date.now());
+  const running = activity?.state === "running";
+  A(() => {
+    if (!running)
+      return;
+    setNow(Date.now());
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, [running]);
+  return { activity, now };
+}
+function ActivityLine(props) {
+  const { activity, now } = useActivity();
+  if (!activity)
+    return null;
+  if (activity.state === "failed")
+    return /* @__PURE__ */ u3("button", {
+      type: "button",
+      class: "lre-activity failed",
+      "data-lre-activity": "failed",
+      onClick: openDiagnostics,
+      "aria-label": `${activity.label}. Open Diagnostics`,
+      title: "Open Diagnostics",
+      children: [
+        /* @__PURE__ */ u3(Icon, {
+          name: "alert",
+          size: 16
+        }, undefined, false, undefined, this),
+        props.compact ? null : /* @__PURE__ */ u3("span", {
+          class: "lre-activity-label",
+          children: activity.label
+        }, undefined, false, undefined, this)
+      ]
+    }, undefined, true, undefined, this);
+  const elapsed = elapsedText(now - activity.since);
+  return /* @__PURE__ */ u3("span", {
+    class: "lre-activity",
+    "data-lre-activity": "running",
+    role: "status",
+    "aria-live": "polite",
+    "aria-label": `${activity.label} ${elapsed}`,
+    children: [
+      /* @__PURE__ */ u3("span", {
+        class: "lre-chat-pulse",
+        "aria-hidden": "true"
+      }, undefined, false, undefined, this),
+      props.compact ? null : /* @__PURE__ */ u3("span", {
+        class: "lre-activity-label",
+        children: activity.label
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3("span", {
+        class: "lre-num lre-activity-time",
+        children: elapsed
+      }, undefined, false, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+}
+function ActivityBanner() {
+  const app = useApp();
+  const chatId = useSelect(app.sync, (state) => state.chatId);
+  const onPage = useSelect(app.ui, (ui) => ui.mode === "settings" && ui.settings.page === "diagnostics");
+  const { activity, now } = useActivity();
+  if (onPage && activity?.state === "failed")
+    return null;
+  if (!activity || !chatId)
+    return null;
+  if (activity.state === "running")
+    return /* @__PURE__ */ u3("div", {
+      class: "lre-activity-bar",
+      "data-lre-activity-bar": "running",
+      role: "status",
+      "aria-live": "polite",
+      children: [
+        /* @__PURE__ */ u3("span", {
+          class: "lre-chat-pulse",
+          "aria-hidden": "true"
+        }, undefined, false, undefined, this),
+        /* @__PURE__ */ u3("span", {
+          class: "lre-activity-label",
+          children: activity.label
+        }, undefined, false, undefined, this),
+        /* @__PURE__ */ u3("span", {
+          class: "lre-num lre-activity-time",
+          children: elapsedText(now - activity.since)
+        }, undefined, false, undefined, this)
+      ]
+    }, undefined, true, undefined, this);
+  return /* @__PURE__ */ u3("div", {
+    class: "lre-activity-banner",
+    "data-lre-activity-bar": "failed",
+    children: /* @__PURE__ */ u3(Banner, {
+      tone: "neg",
+      title: activity.label,
+      actions: /* @__PURE__ */ u3(M, {
+        children: [
+          /* @__PURE__ */ u3(Button, {
+            size: "sm",
+            variant: "secondary",
+            icon: "list",
+            onClick: openDiagnostics,
+            children: "Diagnostics"
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3(Button, {
+            size: "sm",
+            variant: "ghost",
+            onClick: () => void app.request({ type: "lre.diag", chatId, op: "dismiss" }),
+            children: "Dismiss"
+          }, undefined, false, undefined, this)
+        ]
+      }, undefined, true, undefined, this),
+      children: "The engine didn't finish its work for the last reply. Diagnostics says which step failed and what to change."
+    }, undefined, false, undefined, this)
+  }, undefined, false, undefined, this);
+}
+function CannotStopNotice(props) {
+  const app = useApp();
+  const canStop = useSelect(app.sync, (state) => state.canStop);
+  const world = useSelect(app.sync, (state) => state.view !== null && state.view.status !== "not_world");
+  if (canStop !== false || props.inChat && !world)
+    return null;
+  return /* @__PURE__ */ u3(Banner, {
+    tone: "warn",
+    title: "The engine can't run before replies here",
+    children: [
+      CANNOT_STOP,
+      " Update Lumiverse to one that lets extensions stop a generation."
+    ]
+  }, undefined, true, undefined, this);
+}
+var FILTERS = [
+  { value: "all", label: "All" },
+  { value: "problems", label: "Problems" },
+  { value: "calls", label: "Model calls" },
+  { value: "slow", label: "Slow" }
+];
+function filterRecords(records, filter) {
+  if (filter === "problems")
+    return records.filter((r) => r.status === "failed" || r.level === "warn" || r.level === "error");
+  if (filter === "calls")
+    return records.filter((r) => (r.calls?.length ?? 0) > 0);
+  if (filter === "slow")
+    return records.filter((r) => r.kind === "slow");
+  return [...records];
+}
+function groupByTurn(records) {
+  const groups = [];
+  const byTurn = new Map;
+  for (const r of records) {
+    const known = r.turn !== null ? byTurn.get(r.turn) : undefined;
+    if (known) {
+      known.records.push(r);
+      known.start = Math.min(known.start, r.start);
+      continue;
+    }
+    const group = { turn: r.turn, records: [r], start: r.start };
+    groups.push(group);
+    if (r.turn !== null)
+      byTurn.set(r.turn, group);
+  }
+  for (const g of groups)
+    g.records.sort((a, b) => Number(a.kind === "turn") - Number(b.kind === "turn") || a.start - b.start || a.seq - b.seq);
+  return groups.sort((a, b) => b.start - a.start);
+}
+function callText(r) {
+  return (r.calls ?? []).map((c) => `    call ${c.purpose} via ${c.via} on ${c.connection} / ${c.model}: ${c.ok ? "ok" : "failed"}, ${c.tokensIn ?? "?"} in, ${c.tokensOut ?? "?"} out${c.maxTokens !== null ? ` of ${c.maxTokens}` : ""}, finish ${c.finishReason || "-"}, ${Math.round(c.ms)} ms${c.error ? `: ${c.error}` : ""}`);
+}
+function diagText(records) {
+  return records.flatMap((r) => [
+    `${new Date(r.start).toISOString()} ${r.level.toUpperCase().padEnd(5)} ${r.turn ? `[turn ${r.turn.slice(0, 8)}] ` : ""}${r.kind} ${r.phase ? `${r.phase}/` : ""}${r.step} ${r.status} ${Math.round(r.ms)} ms${r.reason ? `: ${r.reason}` : ""}`,
+    ...r.fix ? [`    fix: ${r.fix}`] : [],
+    ...r.path ? [`    path: ${r.path}`] : [],
+    ...(r.sections ?? []).map((s) => `    section ${s.slot}${s.outlet ? ` → ${s.outlet}` : ""}: ${s.filled ? "filled" : "empty"}`),
+    ...callText(r)
+  ]).join(`
+`);
+}
+var STATUS_TONE = { ok: "pos", failed: "neg", skipped: "neutral" };
+function msText(ms) {
+  return ms >= 1000 ? `${(ms / 1000).toFixed(1)} s` : `${Math.round(ms)} ms`;
+}
+function titleOf(r) {
+  if (r.kind === "turn")
+    return "The turn";
+  return r.phase && r.phase !== r.step && r.phase !== "request" ? `${r.phase} · ${r.step}` : r.step;
+}
+function RecordRow(props) {
+  const r = props.record;
+  const calls = r.calls ?? [];
+  const tokens = calls.reduce((n, c) => n + (c.tokensOut ?? 0), 0);
+  const subtitle = [r.reason, calls.length > 0 ? `${calls.length} call${calls.length === 1 ? "" : "s"}, ${tokens} tokens out` : null].filter((s) => s).join(" · ");
+  return /* @__PURE__ */ u3("div", {
+    class: "lre-diag-row",
+    "data-lre-diag-status": r.status,
+    "data-lre-diag-kind": r.kind,
+    children: [
+      /* @__PURE__ */ u3(ListRow, {
+        icon: r.status === "failed" ? "alert" : r.status === "skipped" ? "minus" : r.kind === "slow" ? "hourglass" : "check",
+        title: titleOf(r),
+        subtitle: subtitle || undefined,
+        value: msText(r.ms),
+        valueTone: r.status === "failed" ? "neg" : "muted",
+        badge: r.kind === "slow" ? /* @__PURE__ */ u3(Badge, {
+          tone: "warn",
+          children: "slow"
+        }, undefined, false, undefined, this) : /* @__PURE__ */ u3(Badge, {
+          tone: STATUS_TONE[r.status],
+          children: r.status
+        }, undefined, false, undefined, this)
+      }, undefined, false, undefined, this),
+      r.fix ? /* @__PURE__ */ u3("p", {
+        class: "lre-diag-fix",
+        children: [
+          "Fix: ",
+          r.fix
+        ]
+      }, undefined, true, undefined, this) : null,
+      calls.length > 0 || (r.sections?.length ?? 0) > 0 ? /* @__PURE__ */ u3("ul", {
+        class: "lre-diag-calls",
+        children: [
+          calls.map((c, i) => /* @__PURE__ */ u3("li", {
+            "data-lre-diag-call": c.ok && c.finishReason !== "length" ? "ok" : "bad",
+            children: [
+              /* @__PURE__ */ u3("span", {
+                class: "lre-num",
+                children: c.purpose
+              }, undefined, false, undefined, this),
+              " · ",
+              c.model,
+              " on ",
+              c.connection,
+              " · ",
+              c.tokensIn ?? "?",
+              " in / ",
+              c.tokensOut ?? "?",
+              " out",
+              c.maxTokens !== null ? ` of ${c.maxTokens}` : "",
+              " · ",
+              c.finishReason || "no finish reason",
+              " · ",
+              msText(c.ms),
+              c.error ? ` · ${c.error}` : ""
+            ]
+          }, i, true, undefined, this)),
+          (r.sections ?? []).map((s) => /* @__PURE__ */ u3("li", {
+            "data-lre-diag-call": s.filled ? "ok" : "bad",
+            children: [
+              s.slot,
+              s.outlet ? ` → ${s.outlet}` : " (world placement)",
+              ": ",
+              s.filled ? "filled" : "empty"
+            ]
+          }, s.slot, true, undefined, this))
+        ]
+      }, undefined, true, undefined, this) : null
+    ]
+  }, undefined, true, undefined, this);
+}
+function DiagnosticsPage() {
+  const app = useApp();
+  const chatId = useSelect(app.sync, (state) => state.chatId);
+  const [revealed, setRevealed] = d2(false);
+  const [records, setRecords] = d2(null);
+  const [filter, setFilter] = d2("all");
+  const [busy, run] = useBusy();
+  const load = () => run(async () => {
+    if (!chatId)
+      return;
+    const result = await app.request({ type: "lre.diag", chatId, op: "get" });
+    setRecords(result ? result.records : []);
+  });
+  A(() => {
+    setRevealed(false);
+    setRecords(null);
+  }, [chatId]);
+  A(() => {
+    if (revealed)
+      load();
+  }, [revealed]);
+  if (!chatId)
+    return /* @__PURE__ */ u3(Empty, {
+      icon: "list",
+      children: "Open a chat to see what the engine did in it."
+    }, undefined, false, undefined, this);
+  if (!revealed)
+    return /* @__PURE__ */ u3("div", {
+      class: "lre-stack",
+      "data-lre-settings-page": "diagnostics",
+      children: [
+        /* @__PURE__ */ u3(CannotStopNotice, {}, undefined, false, undefined, this),
+        /* @__PURE__ */ u3(Banner, {
+          tone: "gm",
+          title: "GM detail",
+          actions: /* @__PURE__ */ u3(Button, {
+            icon: "eye",
+            onClick: () => setRevealed(true),
+            children: "Show diagnostics"
+          }, undefined, false, undefined, this),
+          children: "Diagnostics show each step the engine ran for this chat, its model calls and why one failed. A reason can name someone or something your character hasn't met yet."
+        }, undefined, false, undefined, this)
+      ]
+    }, undefined, true, undefined, this);
+  const shown = records ? filterRecords(records, filter) : [];
+  const problems = (records ?? []).filter((r) => r.status === "failed" && (r.kind !== "turn" || !(records ?? []).some((s) => s !== r && s.turn === r.turn && s.status === "failed"))).slice(-20).reverse();
+  return /* @__PURE__ */ u3("div", {
+    class: "lre-stack lre-diag",
+    "data-lre-settings-page": "diagnostics",
+    children: [
+      /* @__PURE__ */ u3(CannotStopNotice, {}, undefined, false, undefined, this),
+      /* @__PURE__ */ u3("div", {
+        class: "lre-diag-tools",
+        children: [
+          /* @__PURE__ */ u3(Seg, {
+            label: "Show",
+            value: filter,
+            options: FILTERS,
+            onChange: setFilter
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3("div", {
+            class: "lre-diag-actions",
+            children: [
+              /* @__PURE__ */ u3(Button, {
+                size: "sm",
+                variant: "secondary",
+                icon: "refresh",
+                busy,
+                onClick: load,
+                children: "Refresh"
+              }, undefined, false, undefined, this),
+              /* @__PURE__ */ u3(Button, {
+                size: "sm",
+                variant: "secondary",
+                icon: "copy",
+                disabled: !records || records.length === 0,
+                onClick: () => void navigator.clipboard.writeText(diagText(shown)).then(() => app.toast("Diagnostics copied"), () => app.toast("The clipboard refused the copy; use Download", "error")),
+                children: "Copy"
+              }, undefined, false, undefined, this),
+              /* @__PURE__ */ u3(Button, {
+                size: "sm",
+                variant: "secondary",
+                icon: "download",
+                disabled: !records || records.length === 0,
+                onClick: () => app.host.download(`lre-diagnostics-${chatId}.json`, JSON.stringify({ chatId, at: new Date().toISOString(), records }, null, 2)),
+                children: "Download"
+              }, undefined, false, undefined, this),
+              /* @__PURE__ */ u3(Button, {
+                size: "sm",
+                variant: "ghost",
+                icon: "trash",
+                disabled: !records || records.length === 0,
+                onClick: () => run(async () => {
+                  await app.request({ type: "lre.diag", chatId, op: "clear" });
+                  setRecords([]);
+                }),
+                children: "Clear"
+              }, undefined, false, undefined, this)
+            ]
+          }, undefined, true, undefined, this)
+        ]
+      }, undefined, true, undefined, this),
+      problems.length > 0 ? /* @__PURE__ */ u3(Section, {
+        title: "Errors",
+        flush: true,
+        children: /* @__PURE__ */ u3("div", {
+          class: "lre-stack lre-diag-errors",
+          children: problems.map((r) => /* @__PURE__ */ u3(Banner, {
+            tone: "neg",
+            title: `${titleOf(r)}${r.turn ? ` · turn ${r.turn.slice(0, 8)}` : ""}`,
+            children: [
+              /* @__PURE__ */ u3("p", {
+                class: "lre-diag-fix",
+                children: r.reason ?? "failed"
+              }, undefined, false, undefined, this),
+              r.fix ? /* @__PURE__ */ u3("p", {
+                class: "lre-diag-fix",
+                children: [
+                  "Fix: ",
+                  r.fix
+                ]
+              }, undefined, true, undefined, this) : null
+            ]
+          }, r.seq, true, undefined, this))
+        }, undefined, false, undefined, this)
+      }, undefined, false, undefined, this) : null,
+      records === null ? /* @__PURE__ */ u3(Empty, {
+        icon: "hourglass",
+        children: "Reading diagnostics…"
+      }, undefined, false, undefined, this) : shown.length === 0 ? /* @__PURE__ */ u3(Empty, {
+        icon: "check",
+        children: records.length === 0 ? "Nothing recorded for this chat yet: the next turn's steps show here." : "Nothing matches this filter."
+      }, undefined, false, undefined, this) : groupByTurn(shown).map((group) => {
+        const failed = group.records.some((r) => r.status === "failed");
+        const slow = group.records.some((r) => r.kind === "slow");
+        return /* @__PURE__ */ u3(Section, {
+          title: group.turn ? `Turn ${group.turn.slice(0, 8)} · ${new Date(group.start).toLocaleTimeString()}` : `Outside a turn · ${new Date(group.start).toLocaleTimeString()}`,
+          aside: /* @__PURE__ */ u3(Badge, {
+            tone: failed ? "neg" : slow ? "warn" : "pos",
+            children: failed ? "failed" : slow ? "slow" : "ok"
+          }, undefined, false, undefined, this),
+          flush: true,
+          children: /* @__PURE__ */ u3(List, {
+            children: group.records.map((r) => /* @__PURE__ */ u3(RecordRow, {
+              record: r
+            }, r.seq, false, undefined, this))
+          }, undefined, false, undefined, this)
+        }, `${group.turn ?? "none"}-${group.start}`, false, undefined, this);
+      })
+    ]
+  }, undefined, true, undefined, this);
+}
+
+// src/frontend/chips.tsx
+var CHIP_ICON = {
+  change: "check",
+  elapsed: "clock",
+  roll: "dice",
+  price: "card",
+  confirm: "help",
+  decline: "alert",
+  undo: "undo",
+  retry_read: "refresh",
+  not_action: "message",
+  swipe_option: "refresh",
+  overdue: "calendar",
+  timelapse_offer: "fast-forward",
+  continue_timelapse: "fast-forward",
+  keep_report: "flag",
+  reread: "eye",
+  retry: "refresh",
+  degraded: "alert",
+  pending: "hourglass",
+  mode_change: "gear",
+  choice: "send",
+  contradiction: "info",
+  read_failed: "alert",
+  engine_failed: "alert",
+  claim: "help",
+  check: "dice",
+  claimed: "sparkle",
+  fix: "edit",
+  refused: "alert"
+};
+var ACTION_ICON = { undo: "undo", regenerate: "refresh", rerun: "refresh", send: "send", timelapse: "fast-forward" };
+var RECEIPT_ORDER = ["decline", "degraded", "pending", "elapsed", "price", "undo", "roll", "change", "not_action", "fix", "mode_change"];
+var RECEIPT_SEGMENTS = 3;
+function receiptLine(done) {
+  const rank = (chip) => {
+    const at = RECEIPT_ORDER.indexOf(chip.kind);
+    return at < 0 ? RECEIPT_ORDER.length : at;
+  };
+  const sorted = [...done].sort((a, b) => rank(a) - rank(b));
+  return { sorted, shown: sorted.slice(0, RECEIPT_SEGMENTS), more: Math.max(0, sorted.length - RECEIPT_SEGMENTS) };
+}
+function messageIdFromScope(scope) {
+  const match = /^message:([^:]+):/.exec(scope);
+  return match?.[1] ?? null;
+}
+function MessageChips(props) {
+  const app = useApp();
+  const view = useView();
+  if (!view || view.status === "not_world")
+    return null;
+  const chips = view.chips.filter((chip) => chip.messageId === props.messageId);
+  if (chips.length === 0)
+    return null;
+  const show = (chip, fallback) => {
+    const Chosen = app.catalog.chips.get(chip.kind) ?? fallback;
+    return /* @__PURE__ */ u3(Chosen, {
+      chip,
+      chatId: view.chatId,
+      send: app.send
+    }, chip.id, false, undefined, this);
+  };
+  const done = chips.filter((chip) => chipRole(chip) === "done");
+  const offers = chips.filter((chip) => chipRole(chip) === "offer");
+  return /* @__PURE__ */ u3("div", {
+    class: "lre-chips",
+    "data-lre-chips": props.messageId,
+    children: [
+      done.length > 0 ? /* @__PURE__ */ u3(Receipt, {
+        chips: done,
+        show: (chip) => show(chip, DefaultChip)
+      }, undefined, false, undefined, this) : null,
+      chips.filter((chip) => chipRole(chip) === "decision").map((chip) => show(chip, chip.kind === "keep_report" ? KeepReportChip : DecisionCard)),
+      offers.length > 0 ? /* @__PURE__ */ u3("div", {
+        class: "lre-chat-offers",
+        children: offers.map((chip) => show(chip, OfferChip))
+      }, undefined, false, undefined, this) : null
+    ]
+  }, undefined, true, undefined, this);
+}
+function Receipt(props) {
+  const [open, setOpen] = d2(false);
+  const listId = P2();
+  const { sorted, shown, more } = receiptLine(props.chips);
+  return /* @__PURE__ */ u3("div", {
+    class: "lre-chat-receipt",
+    children: [
+      /* @__PURE__ */ u3("button", {
+        type: "button",
+        class: "lre-chat-receipt-line",
+        "aria-expanded": open,
+        "aria-controls": open ? listId : undefined,
+        onClick: () => setOpen(!open),
+        children: [
+          /* @__PURE__ */ u3("span", {
+            class: "lre-sr",
+            children: "What this turn did: "
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3("span", {
+            class: "lre-chat-segs",
+            children: [
+              shown.map((chip, index) => {
+                const tone = chipTone(chip);
+                return /* @__PURE__ */ u3(M, {
+                  children: [
+                    index > 0 ? /* @__PURE__ */ u3("span", {
+                      class: "lre-chat-dot",
+                      "aria-hidden": "true",
+                      children: "·"
+                    }, undefined, false, undefined, this) : null,
+                    /* @__PURE__ */ u3("span", {
+                      class: "lre-chat-seg",
+                      "data-tone": tone,
+                      children: [
+                        tone === "neutral" ? null : /* @__PURE__ */ u3(Icon, {
+                          name: "alert",
+                          size: 14
+                        }, undefined, false, undefined, this),
+                        /* @__PURE__ */ u3("span", {
+                          class: "lre-chat-seg-text",
+                          children: chip.kind === "not_action" ? "Read as an action" : chip.label
+                        }, undefined, false, undefined, this)
+                      ]
+                    }, undefined, true, undefined, this)
+                  ]
+                }, chip.id, true, undefined, this);
+              }),
+              more > 0 ? /* @__PURE__ */ u3(M, {
+                children: [
+                  /* @__PURE__ */ u3("span", {
+                    class: "lre-chat-dot",
+                    "aria-hidden": "true",
+                    children: "·"
+                  }, undefined, false, undefined, this),
+                  /* @__PURE__ */ u3("span", {
+                    class: "lre-chat-seg more",
+                    children: [
+                      more,
+                      " more"
+                    ]
+                  }, undefined, true, undefined, this)
+                ]
+              }, undefined, true, undefined, this) : null
+            ]
+          }, undefined, true, undefined, this),
+          /* @__PURE__ */ u3(Icon, {
+            name: open ? "chevron-up" : "chevron-down",
+            size: 16,
+            class: "lre-chat-chev"
+          }, undefined, false, undefined, this)
+        ]
+      }, undefined, true, undefined, this),
+      open ? /* @__PURE__ */ u3("div", {
+        id: listId,
+        class: "lre-chat-receipt-list",
+        children: sorted.map((chip) => props.show(chip))
+      }, undefined, false, undefined, this) : null
+    ]
+  }, undefined, true, undefined, this);
+}
+function useChipAction(chip, chatId) {
+  const app = useApp();
+  const [busy, run] = useBusy();
+  return [
+    busy,
+    (choice, payload) => run(async () => {
+      if (choice === "diagnostics")
+        return openDiagnostics();
+      const intent = chipIntent(chip, choice, chatId, payload);
+      if (intent.request) {
+        const message = await app.send(intent.request);
+        if (message.type === "lre.error") {
+          app.toast(message.message, "error");
+          return;
+        }
+        if (message.request === "lre.chip" && message.body.pending && !intent.regenerate)
+          app.toast("Saved — it applies when the reply finishes.", "info");
+      }
+      if (intent.regenerate && !await app.host.generate("regenerate"))
+        app.toast("Couldn't start Regenerate here; use the message's Regenerate button.", "error");
+    })
+  ];
+}
+function useChipControls(chip, chatId) {
+  const view = useView();
+  const [busy, choose] = useChipAction(chip, chatId);
+  const [asking, setAsking] = d2(null);
+  const open = chip.actions.find((action) => action.id === asking);
+  return {
+    busy,
+    asking,
+    press: (action) => action.input ? setAsking(asking === action.id ? null : action.id) : choose(action.id),
+    form: open?.input ? /* @__PURE__ */ u3(ChipInputForm, {
+      action: open,
+      input: open.input,
+      currency: view?.currency ?? DEFAULT_CURRENCY,
+      busy,
+      onSend: (payload) => choose(open.id, payload),
+      onCancel: () => setAsking(null)
+    }, open.id, false, undefined, this) : null
+  };
+}
+function ActionButton(props) {
+  const { action, controls } = props;
+  const icon = ACTION_ICON[action.id];
+  const style = action.style === "primary" ? " primary" : action.style === "danger" ? " danger" : "";
+  return /* @__PURE__ */ u3("button", {
+    type: "button",
+    class: props.pill ? `lre-chat-pill${style}` : `lre-btn small${style}`,
+    disabled: controls.busy,
+    "aria-expanded": action.input ? controls.asking === action.id : undefined,
+    onClick: () => controls.press(action),
+    children: [
+      icon ? /* @__PURE__ */ u3(Icon, {
+        name: icon,
+        size: 16
+      }, undefined, false, undefined, this) : null,
+      action.label
+    ]
+  }, undefined, true, undefined, this);
+}
+function ChipInputForm(props) {
+  const { input } = props;
+  const [text, setText] = d2(() => input.type === "money" && input.value !== undefined ? formatMoneyInput(input.value, props.currency) : "");
+  const [picked, setPicked] = d2(() => input.type === "choice" ? input.options[0]?.value ?? "" : "");
+  const cents = input.type === "money" ? parseMoneyInput(text, props.currency) : null;
+  const ok = input.type === "money" ? cents !== null && cents > 0 : picked !== "";
+  return /* @__PURE__ */ u3("form", {
+    class: "lre-chat-form",
+    "data-lre-chip-input": props.action.id,
+    onSubmit: (event) => {
+      event.preventDefault();
+      if (ok)
+        props.onSend(input.type === "money" ? { cents } : { value: picked });
+    },
+    onKeyDown: (event) => {
+      if (event.key === "Escape")
+        props.onCancel();
+    },
+    children: [
+      /* @__PURE__ */ u3(Field, {
+        label: input.label,
+        children: input.type === "money" ? /* @__PURE__ */ u3(MoneyInput, {
+          currency: props.currency,
+          value: text,
+          onInput: setText,
+          label: input.label,
+          invalid: text.trim() !== "" && !ok,
+          autoFocus: true
+        }, undefined, false, undefined, this) : /* @__PURE__ */ u3("select", {
+          class: "lre-input",
+          "aria-label": input.label,
+          value: picked,
+          onChange: (event) => setPicked(event.currentTarget.value),
+          children: input.options.map((option) => /* @__PURE__ */ u3("option", {
+            value: option.value,
+            children: option.label
+          }, option.value, false, undefined, this))
+        }, undefined, false, undefined, this)
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3("div", {
+        class: "lre-chat-actions",
+        children: [
+          /* @__PURE__ */ u3(Button, {
+            type: "submit",
+            variant: "primary",
+            size: "sm",
+            icon: "check",
+            disabled: props.busy || !ok,
+            children: "Apply"
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3(Button, {
+            variant: "ghost",
+            size: "sm",
+            disabled: props.busy,
+            onClick: props.onCancel,
+            children: "Cancel"
+          }, undefined, false, undefined, this)
+        ]
+      }, undefined, true, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+}
+function DefaultChip(props) {
+  const { chip } = props;
+  const controls = useChipControls(chip, props.chatId);
+  return /* @__PURE__ */ u3("div", {
+    class: controls.busy ? "lre-chip busy" : "lre-chip",
+    "data-kind": chip.kind,
+    "data-tone": chipTone(chip),
+    children: [
+      /* @__PURE__ */ u3("div", {
+        class: "lre-chip-row",
+        children: [
+          /* @__PURE__ */ u3(Icon, {
+            name: CHIP_ICON[chip.kind],
+            size: 16,
+            class: "lre-chip-icon"
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3("div", {
+            class: "lre-chip-text",
+            children: [
+              /* @__PURE__ */ u3("span", {
+                class: "lre-chip-label",
+                children: chip.label
+              }, undefined, false, undefined, this),
+              chip.detail ? /* @__PURE__ */ u3("span", {
+                class: "lre-chip-detail",
+                children: chip.detail
+              }, undefined, false, undefined, this) : null
+            ]
+          }, undefined, true, undefined, this),
+          chip.actions.length > 0 ? /* @__PURE__ */ u3("div", {
+            class: "lre-chat-actions",
+            children: chip.actions.map((action) => /* @__PURE__ */ u3(ActionButton, {
+              action,
+              controls
+            }, action.id, false, undefined, this))
+          }, undefined, false, undefined, this) : null
+        ]
+      }, undefined, true, undefined, this),
+      controls.form
+    ]
+  }, undefined, true, undefined, this);
+}
+function DecisionCard(props) {
+  const { chip } = props;
+  const controls = useChipControls(chip, props.chatId);
+  return /* @__PURE__ */ u3("div", {
+    class: controls.busy ? "lre-chat-decision busy" : "lre-chat-decision",
+    "data-kind": chip.kind,
+    "data-tone": chipTone(chip) === "neg" ? "neg" : "warn",
+    role: "group",
+    "aria-label": chip.label,
+    children: [
+      chip.expires === "next_send" ? /* @__PURE__ */ u3("span", {
+        class: "lre-chat-due",
+        children: [
+          /* @__PURE__ */ u3(Icon, {
+            name: "send",
+            size: 14
+          }, undefined, false, undefined, this),
+          "Answer before you send"
+        ]
+      }, undefined, true, undefined, this) : null,
+      /* @__PURE__ */ u3("div", {
+        class: "lre-chat-decision-head",
+        children: [
+          /* @__PURE__ */ u3(Icon, {
+            name: CHIP_ICON[chip.kind],
+            class: "lre-chat-decision-icon"
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3("div", {
+            class: "lre-chat-decision-text",
+            children: [
+              /* @__PURE__ */ u3("strong", {
+                class: "lre-chat-decision-label",
+                children: chip.label
+              }, undefined, false, undefined, this),
+              chip.detail ? /* @__PURE__ */ u3("span", {
+                class: "lre-chat-decision-detail",
+                children: chip.detail
+              }, undefined, false, undefined, this) : null
+            ]
+          }, undefined, true, undefined, this)
+        ]
+      }, undefined, true, undefined, this),
+      chip.actions.length > 0 ? /* @__PURE__ */ u3("div", {
+        class: "lre-chat-actions",
+        children: chip.actions.map((action) => /* @__PURE__ */ u3(ActionButton, {
+          action,
+          controls
+        }, action.id, false, undefined, this))
+      }, undefined, false, undefined, this) : null,
+      controls.form
+    ]
+  }, undefined, true, undefined, this);
+}
+function OfferChip(props) {
+  const { chip } = props;
+  const controls = useChipControls(chip, props.chatId);
+  const detailId = P2();
+  const only = chip.actions.length === 1 ? chip.actions[0] : undefined;
+  const detail = chip.detail ? /* @__PURE__ */ u3("span", {
+    id: detailId,
+    class: "lre-chat-offer-detail",
+    children: chip.detail
+  }, undefined, false, undefined, this) : null;
+  if (only)
+    return /* @__PURE__ */ u3("div", {
+      class: controls.busy ? "lre-chat-offer busy" : "lre-chat-offer",
+      "data-kind": chip.kind,
+      children: [
+        /* @__PURE__ */ u3("button", {
+          type: "button",
+          class: only.style === "primary" ? "lre-chat-pill primary" : "lre-chat-pill",
+          "aria-describedby": detail ? detailId : undefined,
+          "aria-expanded": only.input ? controls.asking === only.id : undefined,
+          disabled: controls.busy,
+          onClick: () => controls.press(only),
+          children: [
+            /* @__PURE__ */ u3(Icon, {
+              name: CHIP_ICON[chip.kind],
+              size: 16
+            }, undefined, false, undefined, this),
+            /* @__PURE__ */ u3("strong", {
+              children: [
+                only.label,
+                ":"
+              ]
+            }, undefined, true, undefined, this),
+            /* @__PURE__ */ u3("span", {
+              class: "lre-chat-pill-text",
+              children: chip.label
+            }, undefined, false, undefined, this)
+          ]
+        }, undefined, true, undefined, this),
+        detail,
+        controls.form
+      ]
+    }, undefined, true, undefined, this);
+  return /* @__PURE__ */ u3("div", {
+    class: controls.busy ? "lre-chat-offer busy" : "lre-chat-offer",
+    "data-kind": chip.kind,
+    role: "group",
+    "aria-label": chip.label,
+    "aria-describedby": detail ? detailId : undefined,
+    children: [
+      /* @__PURE__ */ u3("span", {
+        class: "lre-chat-offer-lead",
+        children: [
+          /* @__PURE__ */ u3(Icon, {
+            name: CHIP_ICON[chip.kind],
+            size: 16
+          }, undefined, false, undefined, this),
+          chip.label
+        ]
+      }, undefined, true, undefined, this),
+      chip.actions.map((action) => /* @__PURE__ */ u3(ActionButton, {
+        action,
+        controls,
+        pill: true
+      }, action.id, false, undefined, this)),
+      detail,
+      controls.form
+    ]
+  }, undefined, true, undefined, this);
+}
+var KEEP_STATUS = {
+  dropped: "no longer valid here",
+  inert: "made on another branch",
+  converted: "kept"
+};
+function keepRows(lines) {
+  const rows = [];
+  for (const line of lines) {
+    const key = `${line.messageId}\x00${line.status}\x00${line.group !== undefined ? `g:${line.group}` : `t:${line.text}`}`;
+    const row = rows.find((r) => r.key === key);
+    if (row)
+      row.count += 1;
+    else
+      rows.push({ key, line, count: 1 });
+  }
+  return rows.map(({ line, count }) => ({ line, count }));
+}
+function KeepReportChip(props) {
+  const app = useApp();
+  const view = useView();
+  const { chip } = props;
+  const [busy, choose] = useChipAction(chip, props.chatId);
+  const [converting, runConvert] = useBusy();
+  const lines = keepRows(view?.keepReport ?? []);
+  return /* @__PURE__ */ u3("div", {
+    class: "lre-chat-decision lre-chat-keep",
+    "data-kind": "keep_report",
+    "data-tone": "warn",
+    role: "group",
+    "aria-label": chip.label,
+    children: [
+      /* @__PURE__ */ u3("div", {
+        class: "lre-chat-decision-head",
+        children: [
+          /* @__PURE__ */ u3(Icon, {
+            name: CHIP_ICON.keep_report,
+            class: "lre-chat-decision-icon"
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3("div", {
+            class: "lre-chat-decision-text",
+            children: [
+              /* @__PURE__ */ u3("strong", {
+                class: "lre-chat-decision-label",
+                children: chip.label
+              }, undefined, false, undefined, this),
+              chip.detail ? /* @__PURE__ */ u3("span", {
+                class: "lre-chat-decision-detail",
+                children: chip.detail
+              }, undefined, false, undefined, this) : null
+            ]
+          }, undefined, true, undefined, this),
+          /* @__PURE__ */ u3(Badge, {
+            tone: "warn",
+            children: [
+              lines.length,
+              " entr",
+              lines.length === 1 ? "y" : "ies"
+            ]
+          }, undefined, true, undefined, this)
+        ]
+      }, undefined, true, undefined, this),
+      lines.length > 0 ? /* @__PURE__ */ u3("div", {
+        class: "lre-chat-keep-rows",
+        children: lines.map(({ line, count }) => {
+          const convert = convertRequest(line, props.chatId);
+          const key = "marker" in line.ref ? `${line.messageId}:m${line.ref.marker}` : `${line.messageId}:${line.ref.in}:${"seq" in line.ref ? line.ref.seq : 0}:${line.ref.index}`;
+          return /* @__PURE__ */ u3("div", {
+            class: "lre-chat-keep-row",
+            children: [
+              /* @__PURE__ */ u3("span", {
+                class: "lre-chat-keep-text",
+                children: [
+                  line.text,
+                  /* @__PURE__ */ u3("span", {
+                    class: "lre-chat-keep-sub",
+                    children: [
+                      line.status === "converted" ? /* @__PURE__ */ u3(Icon, {
+                        name: "check",
+                        size: 14
+                      }, undefined, false, undefined, this) : null,
+                      KEEP_STATUS[line.status],
+                      count > 1 ? ` · ${count} linked changes` : ""
+                    ]
+                  }, undefined, true, undefined, this)
+                ]
+              }, undefined, true, undefined, this),
+              convert && line.status !== "converted" ? /* @__PURE__ */ u3(Button, {
+                size: "sm",
+                disabled: converting,
+                onClick: () => runConvert(async () => {
+                  await app.request(convert);
+                }),
+                children: "Convert"
+              }, undefined, false, undefined, this) : null
+            ]
+          }, key, true, undefined, this);
+        })
+      }, undefined, false, undefined, this) : null,
+      /* @__PURE__ */ u3("div", {
+        class: "lre-chat-actions",
+        children: chip.actions.map((action) => /* @__PURE__ */ u3(Button, {
+          size: "sm",
+          variant: action.id === "discard" ? "danger" : action.style === "primary" ? "primary" : "secondary",
+          disabled: busy,
+          onClick: () => choose(action.id),
+          children: action.label
+        }, action.id, false, undefined, this))
+      }, undefined, false, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+}
+// src/shared/lre-map-v1.schema.json
+var lre_map_v1_schema_default = {
+  $schema: "https://json-schema.org/draft/2020-12/schema",
+  $id: "https://github.com/TheLiquorPriest/LumiRPEngine/blob/main/src/shared/lre-map-v1.schema.json",
+  title: "lre-map-v1",
+  description: "A map of one place in a LumiRPEngine world (WorldDoc.maps). A grid map (layout plus legend) draws an interior cell by cell; a node map (places plus links) draws a town or a region. When the world is read, the map compiles into the places inside its scope, a grid and routes, which it owns.",
+  type: "object",
+  required: ["id", "scope"],
+  additionalProperties: false,
+  properties: {
+    $schema: { type: "string" },
+    id: { $ref: "#/$defs/id", description: "The map's id: its key in the world's maps." },
+    scope: { type: "string", minLength: 1, maxLength: 200, description: "The id of the place the map draws; the map's places go inside it." },
+    title: { type: "string", maxLength: 80 },
+    size: { $ref: "#/$defs/pair", description: "[width, height]: the layout's size on a grid map; the frame `at` positions use on a node map." },
+    layout: {
+      type: "array",
+      description: "A grid map's rows, top first, one character per cell; every row the same length.",
+      minItems: 1,
+      maxItems: 64,
+      items: { type: "string", minLength: 1, maxLength: 64 }
+    },
+    cellMeters: { type: "number", exclusiveMinimum: 0, maximum: 1e5, description: "A grid map's cell size in metres, for walking times on it: 80 unless given (1 or 2 suits a room)." },
+    legend: {
+      type: "object",
+      description: "What each layout character stands for. Characters not listed: # wall, . floor, + door, a space nothing (blocked).",
+      propertyNames: { minLength: 1, maxLength: 1 },
+      additionalProperties: { $ref: "#/$defs/cell" }
+    },
+    places: {
+      type: "array",
+      description: "The places the map creates inside its scope.",
+      maxItems: 64,
+      items: { $ref: "#/$defs/place" }
+    },
+    links: {
+      type: "array",
+      description: "Ways between places, as routes. Link every place in the scope or none: with links, places without one can't be walked to from the others.",
+      maxItems: 256,
+      items: { $ref: "#/$defs/link" }
+    }
+  },
+  $defs: {
+    id: {
+      type: "string",
+      pattern: "^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$",
+      description: "letters, digits, _ and -, starting with a letter or digit"
+    },
+    pair: {
+      type: "array",
+      description: "two whole numbers, [x, y] or [width, height]",
+      items: { type: "integer", minimum: 0, maximum: 1e4 },
+      minItems: 2,
+      maxItems: 2
+    },
+    cell: {
+      anyOf: [
+        { title: '"wall", "floor" or "door"', enum: ["wall", "floor", "door"] },
+        {
+          title: '{"item": …}',
+          description: "A thing the world already has, lying on the floor here: in `place`'s area, else the area of the place most of the cells beside it belong to.",
+          type: "object",
+          required: ["item"],
+          additionalProperties: false,
+          properties: { item: { type: "string", minLength: 1, maxLength: 200 }, place: { $ref: "#/$defs/id" } }
+        },
+        {
+          title: '{"terrain": …}',
+          type: "object",
+          required: ["terrain"],
+          additionalProperties: false,
+          properties: { terrain: { type: "string", minLength: 1, maxLength: 40 }, blocked: { type: "boolean" } }
+        },
+        {
+          title: '{"place": …}',
+          type: "object",
+          required: ["place"],
+          additionalProperties: false,
+          properties: { place: { $ref: "#/$defs/id" } }
+        },
+        {
+          title: '{"zone": …}',
+          type: "object",
+          required: ["zone"],
+          additionalProperties: false,
+          properties: { zone: { $ref: "#/$defs/id" } }
+        }
+      ]
+    },
+    place: {
+      type: "object",
+      required: ["id"],
+      additionalProperties: false,
+      properties: {
+        id: { $ref: "#/$defs/id" },
+        name: { type: "string", minLength: 1, maxLength: 80 },
+        at: { $ref: "#/$defs/pair", description: "[x, y]: the place's cell on a grid map (else the middle of its area in the legend), its position on a node map (else laid out for it)." },
+        opens: { $ref: "#/$defs/id", description: "The map that draws this place's inside; its scope is this place." }
+      }
+    },
+    link: {
+      type: "object",
+      required: ["from", "to", "minutes"],
+      additionalProperties: false,
+      properties: {
+        from: { type: "string", minLength: 1, maxLength: 200, description: "A place of this map, or any other place in the world." },
+        to: { type: "string", minLength: 1, maxLength: 200 },
+        mode: { enum: ["walk", "road", "offroad", "water"], description: "walk unless given" },
+        minutes: { type: "number", exclusiveMinimum: 0, maximum: 1e5 },
+        bidirectional: { type: "boolean", description: "true unless given" }
+      }
+    }
+  }
+};
+
+// src/shared/grid.ts
+var GRID_TERRAIN_COST = Object.freeze({ "": 1, ".": 1, floor: 1, road: 1, grass: 1.2, sand: 1.8, mud: 2, water: 4, rough: 1.6, "~": 4, "^": 3 });
+var SIGHT_MAX = 32;
+function cellCost(grid, index) {
+  const terrain = grid.terrain[index] ?? "";
+  return Math.max(1, (hasOwn(GRID_TERRAIN_COST, terrain) ? GRID_TERRAIN_COST[terrain] : undefined) ?? 1);
+}
+function cellIndex(grid, c) {
+  return Number.isInteger(c.x) && Number.isInteger(c.y) && c.x >= 0 && c.y >= 0 && c.x < grid.width && c.y < grid.height ? c.y * grid.width + c.x : null;
+}
+function cellAt(grid, index) {
+  return { x: index % grid.width, y: Math.floor(index / grid.width) };
+}
+function costMinutes(grid, cost) {
+  return Math.round((grid.cellMeters ?? 80) * cost / 80);
+}
+function gridCosts(grid, from, enters) {
+  const size = grid.width * grid.height;
+  const cost = new Float64Array(size).fill(Infinity);
+  if (from < 0 || from >= size)
+    return cost;
+  const blocked = new Set(grid.blocked);
+  const heap = [];
+  const before = (a, b) => a[0] < b[0] || a[0] === b[0] && a[1] < b[1];
+  const push = (item) => {
+    let i = heap.length;
+    heap.push(item);
+    for (let parent = heap[i - 1 >> 1];i > 0 && parent && before(item, parent); parent = heap[i - 1 >> 1]) {
+      heap[i] = parent;
+      i = i - 1 >> 1;
+    }
+    heap[i] = item;
+  };
+  const pop = () => {
+    const top = heap[0];
+    const last = heap.pop();
+    if (!last || heap.length === 0)
+      return top;
+    for (let i = 0;; ) {
+      const left = heap[2 * i + 1];
+      const right = heap[2 * i + 2];
+      const child = left && right && before(right, left) ? 2 * i + 2 : 2 * i + 1;
+      const next = heap[child];
+      if (!next || !before(next, last)) {
+        heap[i] = last;
+        break;
+      }
+      heap[i] = next;
+      i = child;
+    }
+    return top;
+  };
+  cost[from] = 0;
+  push([0, from]);
+  for (let item = pop();item; item = pop()) {
+    const [c, cur] = item;
+    if (c > (cost[cur] ?? Infinity))
+      continue;
+    const cx = cur % grid.width;
+    const cy = Math.floor(cur / grid.width);
+    for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+      const next = cellIndex(grid, { x: cx + dx, y: cy + dy });
+      if (next === null || blocked.has(next) || !enters(cur, next))
+        continue;
+      const nc = c + cellCost(grid, next);
+      if (nc < (cost[next] ?? Infinity)) {
+        cost[next] = nc;
+        push([nc, next]);
+      }
+    }
+  }
+  return cost;
+}
+function hasCell(set, cell) {
+  if (!Number.isInteger(cell) || cell < 0)
+    return false;
+  const digit = Number.parseInt(set.charAt(cell >> 2) || "0", 16);
+  return Number.isFinite(digit) && (digit & 1 << (cell & 3)) !== 0;
+}
+function nearestMiddle(cells, width) {
+  if (cells.length === 0 || width === 0)
+    return null;
+  const cx = cells.reduce((a, i) => a + i % width, 0) / cells.length;
+  const cy = cells.reduce((a, i) => a + Math.floor(i / width), 0) / cells.length;
+  let best = cells[0] ?? 0;
+  let bestDistance = Infinity;
+  for (const i of cells) {
+    const d = (i % width - cx) ** 2 + (Math.floor(i / width) - cy) ** 2;
+    if (d < bestDistance) {
+      best = i;
+      bestDistance = d;
+    }
+  }
+  return { x: best % width, y: Math.floor(best / width) };
+}
+function placeOf(world, id) {
+  return hasOwn(world.places, id) ? world.places[id] : undefined;
+}
+function gridOf(world, place) {
+  const id = placeOf(world, place)?.grid;
+  return id !== undefined && hasOwn(world.grids, id) ? world.grids[id] : undefined;
+}
+function areaOf(grid, place) {
+  return (hasOwn(grid.zones, place) ? grid.zones[place] : undefined) ?? [];
+}
+
+// src/shared/schema-check.ts
+var TYPE_WORDS = { object: "an object", array: "a list", string: "text", number: "a number", integer: "a whole number", boolean: "true or false", null: "null" };
+function hasType(value, type) {
+  switch (type) {
+    case "object":
+      return isRecord(value);
+    case "array":
+      return Array.isArray(value);
+    case "string":
+      return typeof value === "string";
+    case "number":
+      return typeof value === "number" && Number.isFinite(value);
+    case "integer":
+      return typeof value === "number" && Number.isInteger(value);
+    case "boolean":
+      return typeof value === "boolean";
+    default:
+      return value === null;
+  }
+}
+function pathText(path) {
+  return path.map((part, i) => typeof part === "number" ? `[${part}]` : i === 0 ? part : /^[A-Za-z_$][\w$]*$/.test(part) ? `.${part}` : `[${JSON.stringify(part)}]`).join("");
+}
+function quoted(value) {
+  return typeof value === "string" ? `"${value}"` : JSON.stringify(value);
+}
+function checkSchema(root, value, others = []) {
+  const out = [];
+  const documents = [root, ...others];
+  const resolve = (schema, base) => {
+    let s = schema;
+    let doc = base;
+    for (let guard = 0;s.$ref && guard < 16; guard++) {
+      const hash = s.$ref.indexOf("#");
+      const uri = hash < 0 ? s.$ref : s.$ref.slice(0, hash);
+      const name = hash < 0 ? "" : s.$ref.slice(hash);
+      if (uri !== "") {
+        const target = documents.find((d) => d.$id === uri);
+        if (!target)
+          return [{}, doc];
+        doc = target;
+      }
+      if (name === "" || name === "#") {
+        s = doc;
+        continue;
+      }
+      const def = name.startsWith("#/$defs/") ? name.slice("#/$defs/".length) : "";
+      const target = doc.$defs && hasOwn(doc.$defs, def) ? doc.$defs[def] : undefined;
+      if (!target)
+        return [{}, doc];
+      s = target;
+    }
+    return [s, doc];
+  };
+  const text = (schema, value, path, subject, into) => {
+    const length = [...value].length;
+    if (schema.minLength !== undefined && length < schema.minLength)
+      into.push({ path, message: schema.minLength === 1 ? `${subject}can't be empty` : `${subject}should be at least ${schema.minLength} characters` });
+    if (schema.maxLength !== undefined && length > schema.maxLength)
+      into.push({ path, message: schema.maxLength === 1 ? `${subject}should be one character` : `${subject}should be at most ${schema.maxLength} characters` });
+    if (schema.pattern !== undefined && !new RegExp(schema.pattern, "u").test(value))
+      into.push({ path, message: `${subject}should be ${schema.description ?? `like ${schema.pattern}`}` });
+  };
+  const visit = (raw, value, path, into, base) => {
+    const [schema, doc] = resolve(raw, base);
+    const push = (message, at = path) => void into.push({ path: at, message });
+    if (schema.type !== undefined && !hasType(value, schema.type))
+      return push(`should be ${TYPE_WORDS[schema.type] ?? schema.type}`);
+    if (schema.enum && !schema.enum.some((e) => e === value))
+      return push(`should be ${schema.enum.map(quoted).join(", ").replace(/, ([^,]*)$/, " or $1")}`);
+    if (schema.anyOf) {
+      const tries = schema.anyOf.map((branch) => {
+        const found = [];
+        visit(branch, value, path, found, doc);
+        return { branch: resolve(branch, doc)[0], found };
+      });
+      if (tries.some((t) => t.found.length === 0))
+        return;
+      const objects = isRecord(value) ? tries.filter((t) => t.branch.type === "object") : [];
+      const tagged = objects.filter((t) => {
+        const tags = Object.entries(t.branch.properties ?? {}).flatMap(([key, s]) => {
+          const allowed = resolve(s, doc)[0].enum;
+          return allowed?.length === 1 ? [[key, allowed[0]]] : [];
+        });
+        return tags.length > 0 && isRecord(value) && tags.every(([key, tag]) => hasOwn(value, key) && value[key] === tag);
+      });
+      const named = tagged.length > 0 ? tagged : objects.filter((t) => isRecord(value) && (t.branch.required ?? []).every((k) => hasOwn(value, k)));
+      if (named.length === 1 && named[0])
+        return void into.push(...named[0].found);
+      return push(`should be ${tries.map((t) => t.branch.title ?? TYPE_WORDS[t.branch.type ?? ""] ?? "something else").join(", ").replace(/, ([^,]*)$/, " or $1")}`);
+    }
+    if (typeof value === "string")
+      text(schema, value, path, "", into);
+    if (typeof value === "number") {
+      if (schema.minimum !== undefined && value < schema.minimum)
+        push(`should be at least ${schema.minimum}`);
+      if (schema.maximum !== undefined && value > schema.maximum)
+        push(`should be at most ${schema.maximum}`);
+      if (schema.exclusiveMinimum !== undefined && value <= schema.exclusiveMinimum)
+        push(`should be more than ${schema.exclusiveMinimum}`);
+    }
+    if (Array.isArray(value)) {
+      if (schema.minItems !== undefined && value.length < schema.minItems)
+        push(schema.minItems === schema.maxItems ? `should have ${schema.minItems} items` : `should have at least ${schema.minItems} item${schema.minItems === 1 ? "" : "s"}`);
+      else if (schema.maxItems !== undefined && value.length > schema.maxItems)
+        push(schema.minItems === schema.maxItems ? `should have ${schema.maxItems} items` : `should have at most ${schema.maxItems} items`);
+      if (schema.items)
+        value.forEach((item, i) => visit(schema.items ?? {}, item, [...path, i], into, doc));
+    }
+    if (isRecord(value)) {
+      for (const key of schema.required ?? [])
+        if (!hasOwn(value, key))
+          push(`needs "${key}"`);
+      for (const [key, item] of Object.entries(value)) {
+        const own = schema.properties && hasOwn(schema.properties, key) ? schema.properties[key] : undefined;
+        if (schema.propertyNames)
+          text(resolve(schema.propertyNames, doc)[0], key, [...path, key], `the key ${quoted(key)} `, into);
+        if (own)
+          visit(own, item, [...path, key], into, doc);
+        else if (schema.additionalProperties === false)
+          push(`${quoted(key)} isn't a field here`, [...path, key]);
+        else if (isRecord(schema.additionalProperties))
+          visit(schema.additionalProperties, item, [...path, key], into, doc);
+      }
+    }
+  };
+  visit(root, value, [], out, root);
+  return out;
+}
+
+// src/shared/maps.ts
+var MAP_SCHEMA = lre_map_v1_schema_default;
+var VOID_TERRAIN = "void";
+var DEFAULT_LEGEND = { "#": "wall", ".": "floor", "+": "door", " ": { terrain: VOID_TERRAIN, blocked: true } };
+function readMap(value) {
+  const problems = checkSchema(MAP_SCHEMA, value).map((p) => ({ severity: "error", path: p.path, code: "map_shape", message: p.message }));
+  return { map: problems.length === 0 ? value : null, problems };
+}
+function nameOfId(id) {
+  const words = id.replace(/[_-]+/g, " ").trim();
+  return words ? `${words.charAt(0).toUpperCase()}${words.slice(1)}` : id;
+}
+function cellOf(map, ch) {
+  const legend = map.legend ?? {};
+  return hasOwn(legend, ch) ? legend[ch] : hasOwn(DEFAULT_LEGEND, ch) ? DEFAULT_LEGEND[ch] : undefined;
+}
+function layoutOf(map) {
+  const rows = (map.layout ?? []).map((row) => [...row]);
+  return { rows, width: Math.max(0, ...rows.map((r) => r.length)), height: rows.length };
+}
+function owned(item) {
+  return isRecord(item) && typeof item.map === "string";
+}
+function linkRouteId(map, from, to) {
+  return `${map}:${from}:${to}`;
+}
+function plan(maps, authored) {
+  const taken = new Set(Object.keys(authored));
+  const candidates = [];
+  for (const key of Object.keys(maps).sort()) {
+    const { map } = readMap(maps[key]);
+    if (!map || !safeKey(key))
+      continue;
+    const places = [];
+    for (const p of map.places ?? []) {
+      if (taken.has(p.id))
+        continue;
+      taken.add(p.id);
+      places.push(p);
+    }
+    candidates.push({ key, map, places });
+  }
+  let live = candidates;
+  for (let guard = 0;guard <= candidates.length; guard++) {
+    const ids = new Set([...Object.keys(authored), ...live.flatMap((c) => c.places.map((p) => p.id))]);
+    const next = live.filter((c) => ids.has(c.map.scope) && !c.places.some((p) => p.id === c.map.scope));
+    if (next.length === live.length)
+      break;
+    live = next;
+  }
+  return live;
+}
+var DEFAULT_SIGHT_RADIUS = 3;
+function mapSettingsOf(world) {
+  const raw = isRecord(world.mapSettings) ? world.mapSettings : {};
+  const grid = isRecord(raw.grid) ? raw.grid : {};
+  const radius = grid.sightRadius;
+  return {
+    display: raw.display === "fog" ? "fog" : "knowledge",
+    grid: { movement: grid.movement === true, sightRadius: typeof radius === "number" && Number.isFinite(radius) ? Math.min(SIGHT_MAX, Math.max(0, Math.round(radius))) : DEFAULT_SIGHT_RADIUS }
+  };
+}
+function compileGrid(key, map, mine, places, grids) {
+  const scope = places[map.scope];
+  if (!scope || scope.grid !== undefined || hasOwn(grids, key))
+    return;
+  const { rows, width, height } = layoutOf(map);
+  const ids = new Set(mine.map((p) => p.id));
+  const terrain = [];
+  const blocked = [];
+  const zones = new Map;
+  const rooms = new Map;
+  const things = [];
+  for (let y = 0;y < height; y += 1) {
+    for (let x = 0;x < width; x += 1) {
+      const index = y * width + x;
+      const cell = cellOf(map, rows[y]?.[x] ?? " ") ?? "floor";
+      if (cell === "wall") {
+        terrain.push("wall");
+        blocked.push(index);
+      } else if (cell === "floor" || cell === "door")
+        terrain.push(cell);
+      else if ("terrain" in cell) {
+        terrain.push(cell.terrain);
+        if (cell.blocked === true)
+          blocked.push(index);
+      } else if ("item" in cell) {
+        terrain.push("floor");
+        things.push({ id: cell.item, index, place: cell.place !== undefined && ids.has(cell.place) ? cell.place : null });
+      } else {
+        terrain.push("floor");
+        const zone = "place" in cell ? ids.has(cell.place) ? cell.place : null : cell.zone;
+        if (zone !== null)
+          zones.set(zone, [...zones.get(zone) ?? [], index]);
+        if ("place" in cell && zone !== null)
+          rooms.set(index, zone);
+      }
+    }
+  }
+  const items = {};
+  for (const t of things) {
+    if (hasOwn(items, t.id))
+      continue;
+    items[t.id] = t.index;
+    const votes = new Map;
+    const x = t.index % width;
+    for (const n of [t.index - width, t.index + width, x > 0 ? t.index - 1 : -1, x < width - 1 ? t.index + 1 : -1]) {
+      const room = rooms.get(n);
+      if (room !== undefined)
+        votes.set(room, (votes.get(room) ?? 0) + 1);
+    }
+    const room = t.place ?? [...votes].sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1))[0]?.[0];
+    if (room !== undefined)
+      zones.set(room, [...zones.get(room) ?? [], t.index].sort((a, b) => a - b));
+  }
+  grids[key] = { id: key, width, height, ...map.cellMeters !== undefined ? { cellMeters: map.cellMeters } : {}, terrain, blocked, zones: Object.fromEntries(zones), ...things.length > 0 ? { items } : {}, map: key };
+  places[map.scope] = { ...scope, grid: key };
+  for (const p of mine) {
+    const def = places[p.id];
+    if (!def)
+      continue;
+    const cell = p.at ? p.at[0] < width && p.at[1] < height ? { x: p.at[0], y: p.at[1] } : null : nearestMiddle(zones.get(p.id) ?? [], width);
+    if (cell)
+      places[p.id] = { ...def, cell };
+  }
+}
+function compileFloorRoutes(key, mine, places, grids, routes) {
+  const grid = hasOwn(grids, key) ? grids[key] : undefined;
+  if (!grid || grid.map !== key)
+    return;
+  const ids = mine.map((p) => p.id).filter((id) => places[id]?.map === key).sort();
+  const rooms = new Map;
+  for (const id of ids)
+    for (const cell of areaOf(grid, id))
+      rooms.set(cell, id);
+  const cells = new Map;
+  for (const id of ids) {
+    const at = places[id]?.cell;
+    const index = at ? cellIndex(grid, at) : null;
+    if (index !== null)
+      cells.set(id, index);
+  }
+  for (const [a, from] of cells) {
+    const cost = gridCosts(grid, from, (step, next) => {
+      const room = rooms.get(step);
+      return room === undefined || room === a || rooms.get(next) === room;
+    });
+    for (const [b, to] of cells) {
+      const walk = cost[to] ?? Infinity;
+      const id = linkRouteId(key, a, b);
+      if (b <= a || !Number.isFinite(walk) || hasOwn(routes, id))
+        continue;
+      routes[id] = { id, from: a, to: b, modes: { walk: { minutes: Math.max(1, costMinutes(grid, walk)) } }, bidirectional: true, map: key };
+    }
+  }
+}
+function compileLinks(key, map, places, routes) {
+  const made = new Map;
+  for (const link of map.links ?? []) {
+    if (link.from === link.to || !hasOwn(places, link.from) || !hasOwn(places, link.to))
+      continue;
+    const id = linkRouteId(key, link.from, link.to);
+    const route = made.get(id) ?? { id, from: link.from, to: link.to, modes: {}, bidirectional: true, map: key };
+    const mode = link.mode ?? "walk";
+    const had = route.modes[mode];
+    if (!had || link.minutes < had.minutes)
+      route.modes[mode] = { minutes: link.minutes };
+    route.bidirectional = route.bidirectional && link.bidirectional !== false;
+    made.set(id, route);
+  }
+  for (const [id, route] of made)
+    if (!hasOwn(routes, id))
+      routes[id] = route;
+}
+function compileMaps(doc) {
+  const maps = isRecord(doc.maps) ? doc.maps : {};
+  if (Object.keys(maps).length === 0 && ![doc.places, doc.routes, doc.grids].some((items) => Object.values(items).some(owned)))
+    return doc;
+  const madeGrids = new Set(Object.keys(doc.grids).filter((id) => owned(doc.grids[id])));
+  const places = {};
+  for (const [id, p] of Object.entries(doc.places)) {
+    if (owned(p))
+      continue;
+    if (p.grid !== undefined && madeGrids.has(p.grid)) {
+      const authored = { ...p };
+      delete authored.grid;
+      places[id] = authored;
+    } else
+      places[id] = p;
+  }
+  const routes = Object.fromEntries(Object.entries(doc.routes).filter(([, r]) => !owned(r)));
+  const grids = Object.fromEntries(Object.entries(doc.grids).filter(([, g]) => !owned(g)));
+  const plans = plan(maps, places);
+  for (const { key, map, places: mine } of plans)
+    for (const p of mine)
+      places[p.id] = { id: p.id, name: p.name ?? nameOfId(p.id), parent: map.scope, fields: {}, map: key };
+  const movement = mapSettingsOf(doc).grid.movement;
+  for (const { key, map, places: mine } of plans) {
+    if (map.layout)
+      compileGrid(key, map, mine, places, grids);
+    else {
+      for (const p of mine) {
+        const def = places[p.id];
+        if (def && p.at)
+          places[p.id] = { ...def, layoutPos: { x: p.at[0], y: p.at[1] } };
+      }
+    }
+    compileLinks(key, map, places, routes);
+    if (map.layout && movement && (map.links ?? []).length === 0)
+      compileFloorRoutes(key, mine, places, grids, routes);
+  }
+  return { ...doc, places, routes, grids };
+}
+function childIn(places, scope, place) {
+  let cur = place;
+  for (let guard = 0;cur !== undefined && guard < 64; guard++) {
+    const parent = hasOwn(places, cur) ? places[cur]?.parent : undefined;
+    if (parent === scope)
+      return cur;
+    cur = parent;
+  }
+  return null;
+}
+function cutOff(doc, map) {
+  const kids = Object.values(doc.places).filter((p) => p.parent === map.scope).map((p) => p.id).sort();
+  const linked = (map.links ?? []).find((l) => childIn(doc.places, map.scope, l.from) !== null && childIn(doc.places, map.scope, l.to) !== null);
+  const start = linked ? childIn(doc.places, map.scope, linked.from) : null;
+  if (start === null || kids.length < 2)
+    return [];
+  const root = new Map(kids.map((id) => [id, id]));
+  const find = (id) => {
+    let cur = id;
+    for (let guard = 0;root.get(cur) !== cur && guard < kids.length; guard++)
+      cur = root.get(cur) ?? cur;
+    return cur;
+  };
+  for (const route of Object.values(doc.routes)) {
+    const a = childIn(doc.places, map.scope, route.from);
+    const b = childIn(doc.places, map.scope, route.to);
+    if (a !== null && b !== null && a !== b)
+      root.set(find(a), find(b));
+  }
+  return kids.filter((id) => find(id) !== find(start));
+}
+function apartOnFloor(doc, key) {
+  const grid = hasOwn(doc.grids, key) ? doc.grids[key] : undefined;
+  if (!grid || grid.map !== key)
+    return [];
+  const ids = Object.values(doc.places).filter((p) => p.map === key && p.cell !== undefined && cellIndex(grid, p.cell) !== null).map((p) => p.id).sort();
+  const reached = new Set(ids.slice(0, 1));
+  for (let grew = true;grew; ) {
+    grew = false;
+    for (const r of Object.values(doc.routes)) {
+      if (r.map !== key || reached.has(r.from) === reached.has(r.to))
+        continue;
+      reached.add(r.from);
+      reached.add(r.to);
+      grew = true;
+    }
+  }
+  return ids.filter((id) => !reached.has(id));
+}
+function mapProblems(world) {
+  const doc = compileMaps(world);
+  const maps = isRecord(world.maps) ? world.maps : {};
+  const out = new Map;
+  const placeName = (id) => hasOwn(doc.places, id) ? doc.places[id]?.name ?? id : id;
+  for (const key of Object.keys(maps).sort()) {
+    const { map, problems } = readMap(maps[key]);
+    out.set(key, problems);
+    if (!map)
+      continue;
+    const err = (path, code, message) => void problems.push({ severity: "error", path, code, message });
+    if (map.id !== key)
+      err(["id"], "map_id", `the id should be "${key}", the map's key in the world`);
+    const ids = (map.places ?? []).map((p) => p.id);
+    const scope = hasOwn(doc.places, map.scope) ? doc.places[map.scope] : undefined;
+    if (!scope)
+      err(["scope"], "map_scope", `there's no place "${map.scope}" for the map to draw`);
+    else if (ids.includes(map.scope))
+      err(["scope"], "map_scope", `"${map.scope}" is one of this map's own places; a map draws the inside of another place`);
+    const placed = scope !== undefined && !ids.includes(map.scope);
+    const seen = new Set;
+    (map.places ?? []).forEach((p, i) => {
+      if (seen.has(p.id))
+        err(["places", i, "id"], "map_place", `"${p.id}" is listed twice`);
+      else {
+        const made = hasOwn(doc.places, p.id) ? doc.places[p.id] : undefined;
+        if (placed && made && made.map !== key)
+          err(["places", i, "id"], "map_place", made.map ? `the map "${made.map}" already has a place "${p.id}"` : `the world already has a place "${p.id}" (${made.name}); give this one another id`);
+      }
+      seen.add(p.id);
+      if (p.opens !== undefined) {
+        const inner = hasOwn(maps, p.opens) ? maps[p.opens] : undefined;
+        if (!isRecord(inner))
+          err(["places", i, "opens"], "map_opens", `there's no map "${p.opens}"`);
+        else if (inner.scope !== p.id)
+          err(["places", i, "opens"], "map_opens", `the map "${p.opens}" draws "${String(inner.scope)}", not "${p.id}"`);
+      }
+    });
+    if (map.layout) {
+      const { rows, width, height } = layoutOf(map);
+      rows.forEach((row, y) => {
+        if (row.length !== width)
+          err(["layout", y], "map_layout", `row ${y + 1} is ${row.length} wide; every row needs the widest's width, ${width}`);
+      });
+      if (map.size && (map.size[0] !== width || map.size[1] !== height))
+        err(["size"], "map_layout", `the layout is ${width} × ${height}, not ${map.size[0]} × ${map.size[1]}`);
+      const unknown = new Map;
+      rows.forEach((row, y) => row.forEach((ch) => cellOf(map, ch) || unknown.has(ch) ? undefined : unknown.set(ch, y)));
+      for (const [ch, y] of unknown)
+        err(["layout", y], "map_legend", `"${ch}" isn't in the legend: add it, or use # (wall), . (floor), + (door) or a space`);
+      const lying = new Map;
+      rows.forEach((row) => row.forEach((ch) => {
+        const cell = cellOf(map, ch);
+        if (typeof cell === "object" && "item" in cell)
+          lying.set(cell.item, (lying.get(cell.item) ?? 0) + 1);
+      }));
+      for (const [ch, cell] of Object.entries(map.legend ?? {})) {
+        if (typeof cell !== "object")
+          continue;
+        if ("place" in cell && cell.place !== undefined && !ids.includes(cell.place))
+          err(["legend", ch], "map_legend", `"${cell.place}" isn't one of this map's places`);
+        if (!("item" in cell))
+          continue;
+        const thing = hasOwn(world.entities, cell.item) ? world.entities[cell.item] : undefined;
+        const drawn = lying.get(cell.item) ?? 0;
+        const other = Object.values(doc.grids).find((g) => g.map !== key && g.items !== undefined && hasOwn(g.items, cell.item));
+        if (!thing)
+          err(["legend", ch, "item"], "map_item", `there's no "${cell.item}" in the world to lie here`);
+        else if (thing.relations.some((r) => r.type === "in"))
+          problems.push({ severity: "warning", path: ["legend", ch, "item"], code: "map_item", message: `${thing.name} starts inside something, so it won't lie on the map` });
+        else if (drawn > 1)
+          err(["legend", ch, "item"], "map_item", `${thing.name} is drawn on ${drawn} cells; a thing lies on one`);
+        else if (drawn > 0 && other)
+          problems.push({ severity: "warning", path: ["legend", ch, "item"], code: "map_item", message: `${thing.name} already lies on the map "${other.map ?? other.id}"` });
+      }
+      (map.places ?? []).forEach((p, i) => {
+        if (p.at && (p.at[0] >= width || p.at[1] >= height))
+          err(["places", i, "at"], "map_place", `[${p.at[0]}, ${p.at[1]}] is outside the ${width} × ${height} layout`);
+      });
+      if (placed && scope) {
+        const grid = hasOwn(doc.grids, key) ? doc.grids[key] : undefined;
+        if (grid && grid.map !== key)
+          err(["id"], "map_grid", `the world already has a grid "${key}"; give the map another id`);
+        else if (scope.grid !== key) {
+          const other = scope.grid !== undefined && hasOwn(doc.grids, scope.grid) ? doc.grids[scope.grid]?.map : undefined;
+          err(["scope"], "map_grid", other ? `the map "${other}" already draws ${scope.name}'s grid` : `${scope.name} already has the grid "${scope.grid ?? ""}"; take it off the place for this map to draw its grid`);
+        }
+        const apart = mapSettingsOf(world).grid.movement && (map.links ?? []).length === 0 ? apartOnFloor(doc, key).map(placeName) : [];
+        const listed = apart.length <= 1 ? apart.join("") : `${apart.slice(0, -1).join(", ")} and ${apart.at(-1) ?? ""}`;
+        if (apart.length > 0)
+          problems.push({ severity: "warning", path: ["layout"], code: "map_floor_apart", message: `With the grid system on, people walk ${scope.name}'s floor plan, and no door or open floor joins ${listed} to the rest: add a door (+), or give the map links.` });
+      }
+    } else if (map.size) {
+      const [w, h] = map.size;
+      (map.places ?? []).forEach((p, i) => {
+        if (p.at && (p.at[0] > w || p.at[1] > h))
+          err(["places", i, "at"], "map_place", `[${p.at[0]}, ${p.at[1]}] is outside the ${w} × ${h} map`);
+      });
+    }
+    (map.links ?? []).forEach((l, i) => {
+      if (l.from === l.to)
+        err(["links", i], "map_link", "a link joins two different places");
+      for (const end of ["from", "to"])
+        if (!hasOwn(doc.places, l[end]))
+          err(["links", i, end], "map_link", `there's no place "${l[end]}"`);
+      const route = hasOwn(doc.routes, linkRouteId(key, l.from, l.to)) ? doc.routes[linkRouteId(key, l.from, l.to)] : undefined;
+      if (route && route.map !== key)
+        err(["links", i], "map_link", `the world already has a route "${route.id}"`);
+    });
+    if (placed && scope) {
+      const cut = cutOff(doc, map).map(placeName);
+      const listed = cut.length <= 1 ? cut.join("") : `${cut.slice(0, -1).join(", ")} and ${cut.at(-1) ?? ""}`;
+      if (cut.length > 0)
+        problems.push({ severity: "warning", path: ["links"], code: "map_partial_links", message: `With links, ${scope.name}'s places join only where they're linked, and nothing links ${listed} to the rest: link ${cut.length === 1 ? "it" : "them"} too, or take the links out.` });
+    }
+  }
+  return out;
+}
+function compact(value) {
+  if (Array.isArray(value))
+    return `[${value.map(compact).join(", ")}]`;
+  if (isRecord(value)) {
+    const entries = Object.entries(value);
+    return entries.length === 0 ? "{}" : `{ ${entries.map(([k, v]) => `${JSON.stringify(k)}: ${compact(v)}`).join(", ")} }`;
+  }
+  return JSON.stringify(value) ?? "null";
+}
+function pretty(value, indent, expand) {
+  const one = compact(value);
+  if (!(Array.isArray(value) || isRecord(value)) || !expand && indent.length + one.length <= 96)
+    return one;
+  const next = `${indent}  `;
+  if (Array.isArray(value))
+    return value.length === 0 ? "[]" : `[
+${value.map((v) => `${next}${pretty(v, next, false)}`).join(`,
+`)}
+${indent}]`;
+  const entries = Object.entries(value);
+  return entries.length === 0 ? "{}" : `{
+${entries.map(([k, v]) => `${next}${JSON.stringify(k)}: ${pretty(v, next, k === "layout")}`).join(`,
+`)}
+${indent}}`;
+}
+function formatMap(value) {
+  return pretty(value, "", true);
+}
+function mapTemplate(kind, id, scope) {
+  const place = (name) => `${id}_${name}`;
+  if (kind === "grid") {
+    return {
+      id,
+      scope,
+      title: "Ground floor",
+      layout: ["#############", "#ppppp#kkkkk#", "#ppppp+kkkkk#", "#ppppp#kkkkk#", "###+#####+###", "#hhhhhhhhhhh#", "#####+#######"],
+      legend: { p: { place: place("parlour") }, k: { place: place("kitchen") }, h: { place: place("hallway") } },
+      places: [
+        { id: place("parlour"), name: "Parlour" },
+        { id: place("kitchen"), name: "Kitchen" },
+        { id: place("hallway"), name: "Hallway" }
+      ]
+    };
+  }
+  return {
+    id,
+    scope,
+    title: "Town",
+    size: [100, 100],
+    places: [
+      { id: place("square"), name: "Square", at: [50, 50] },
+      { id: place("inn"), name: "Inn", at: [25, 30] },
+      { id: place("docks"), name: "Docks", at: [80, 75] }
+    ],
+    links: [
+      { from: place("square"), to: place("inn"), minutes: 3 },
+      { from: place("square"), to: place("docks"), minutes: 6 }
+    ]
+  };
+}
+
+// src/frontend/gm/ui.tsx
+function usePages() {
+  const [page, setPage] = d2(null);
+  const ref = T2(null);
+  const opener = T2(null);
+  const open = page !== null;
+  const shown = T2(open);
+  A(() => {
+    if (open === shown.current)
+      return;
+    shown.current = open;
+    if (open) {
+      ref.current?.querySelector(":scope > .lre-gm-page .lre-page-header button")?.focus();
+      return;
+    }
+    const back = opener.current;
+    opener.current = null;
+    if (back?.isConnected)
+      back.focus();
+  }, [open]);
+  return {
+    page,
+    open: (next) => {
+      if (page === null)
+        opener.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+      setPage(next);
+    },
+    back: () => setPage(null),
+    host: {
+      ref,
+      onKeyDown: (event) => {
+        if (event.key !== "Escape" || page === null || event.defaultPrevented)
+          return;
+        event.preventDefault();
+        event.stopPropagation();
+        setPage(null);
+      }
+    }
+  };
+}
+function GmPage(props) {
+  return /* @__PURE__ */ u3("div", {
+    class: "lre-gm-page",
+    "data-lre-gm-page": props.name,
+    children: [
+      /* @__PURE__ */ u3(PageHeader, {
+        title: props.title,
+        subtitle: props.subtitle,
+        onBack: props.onBack,
+        backLabel: props.backLabel,
+        actions: props.actions
+      }, undefined, false, undefined, this),
+      props.children
+    ]
+  }, undefined, true, undefined, this);
+}
+function ActionRows(props) {
+  return /* @__PURE__ */ u3("div", {
+    class: "lre-gm-rows",
+    role: "list",
+    "aria-label": props.label,
+    children: props.children
+  }, undefined, false, undefined, this);
+}
+function ActionRow(props) {
+  return /* @__PURE__ */ u3("div", {
+    class: "lre-gm-row",
+    role: "listitem",
+    children: [
+      /* @__PURE__ */ u3("div", {
+        class: "lre-gm-row-main",
+        children: [
+          /* @__PURE__ */ u3("span", {
+            class: "lre-gm-row-text",
+            children: [
+              /* @__PURE__ */ u3("span", {
+                class: "lre-gm-row-title",
+                children: props.title
+              }, undefined, false, undefined, this),
+              props.subtitle !== undefined ? /* @__PURE__ */ u3("span", {
+                class: "lre-gm-row-sub",
+                children: props.subtitle
+              }, undefined, false, undefined, this) : null,
+              props.id !== undefined ? /* @__PURE__ */ u3(IdText, {
+                id: props.id
+              }, undefined, false, undefined, this) : null
+            ]
+          }, undefined, true, undefined, this),
+          props.value !== undefined ? /* @__PURE__ */ u3("span", {
+            class: props.tone ? `lre-gm-row-value lre-${props.tone}` : "lre-gm-row-value",
+            children: props.value
+          }, undefined, false, undefined, this) : null,
+          props.actions !== undefined ? /* @__PURE__ */ u3("span", {
+            class: "lre-gm-row-actions",
+            children: props.actions
+          }, undefined, false, undefined, this) : null
+        ]
+      }, undefined, true, undefined, this),
+      props.children
+    ]
+  }, undefined, true, undefined, this);
+}
+function GmCard(props) {
+  return /* @__PURE__ */ u3("section", {
+    class: "lre-card lre-gm-card",
+    "data-lre-gm-card": props.name,
+    children: [
+      /* @__PURE__ */ u3("div", {
+        class: "lre-gm-card-head",
+        children: [
+          /* @__PURE__ */ u3("div", {
+            class: "lre-gm-card-titles",
+            children: [
+              /* @__PURE__ */ u3("h3", {
+                class: "lre-gm-card-title",
+                children: props.title
+              }, undefined, false, undefined, this),
+              props.subtitle !== undefined ? /* @__PURE__ */ u3("span", {
+                class: "lre-gm-card-sub",
+                children: props.subtitle
+              }, undefined, false, undefined, this) : null,
+              props.id !== undefined ? /* @__PURE__ */ u3(IdText, {
+                id: props.id
+              }, undefined, false, undefined, this) : null
+            ]
+          }, undefined, true, undefined, this),
+          props.badges !== undefined ? /* @__PURE__ */ u3("span", {
+            class: "lre-gm-badges",
+            children: props.badges
+          }, undefined, false, undefined, this) : null
+        ]
+      }, undefined, true, undefined, this),
+      props.children
+    ]
+  }, undefined, true, undefined, this);
+}
+function BuildLink() {
+  const app = useApp();
+  return /* @__PURE__ */ u3(Button, {
+    variant: "ghost",
+    icon: "hammer",
+    onClick: () => app.ui.update((ui) => ({ ...ui, mode: "build" })),
+    children: "Kinds and places are the world's: edit them in Build"
+  }, undefined, false, undefined, this);
+}
+
 // src/frontend/build/lore-pins.tsx
 var HINT = {
   characters: "Their mind reads these first, every time they think, within the mind step's lore tokens.",
@@ -12203,11 +15060,12 @@ function recentOf(config) {
 var SPEED_ACTIVITIES = ["sleep", "work_shift", "travel", "waiting"];
 var SPEED_DEFAULT = Object.freeze({ mode: "offer", thresholdMinutes: 30 });
 var SPEED_THRESHOLD_MINUTES = [1, 7 * 1440];
-var EXTRACTION_TYPES = ["time_advance", "location", "condition", "knows", "give", "purchase", "transfer", "regard", "quantity", "spawn", "life"];
+var EXTRACTION_TYPES = ["time_advance", "location", "condition", "knows", "give", "purchase", "transfer", "regard", "quantity", "spawn", "life", "routine"];
 var EXTRACTION_DEFAULTS = Object.freeze({
   time_advance: "auto",
   location: "auto",
   condition: "auto",
+  routine: "auto",
   regard: "confirm",
   transfer: "confirm",
   spawn: "confirm",
@@ -12222,6 +15080,732 @@ var EXTRACTION_LEARNING = Object.freeze({
   window: 30,
   demoteUndoRate: 0.1
 });
+var JOB_SETTINGS_DEFAULTS = Object.freeze({ routineLoreTokens: 8000 });
+
+// src/frontend/settings/minds-patch.ts
+function mindsPolicyPatch(change) {
+  const minds = {};
+  if (change.enabled !== undefined)
+    minds.enabled = change.enabled;
+  if (change.liveLimit !== undefined)
+    minds.liveLimit = change.liveLimit;
+  if (change.farRefreshMinutes !== undefined)
+    minds.farRefreshMinutes = change.farRefreshMinutes;
+  if (change.refreshLimit !== undefined)
+    minds.refreshLimit = change.refreshLimit;
+  if (change.tokens !== undefined)
+    minds.tokens = change.tokens;
+  if (change.memoryLevels !== undefined)
+    minds.memoryLevels = FIDELITIES.filter((f) => f !== "background" && change.memoryLevels?.includes(f));
+  if (change.nearRefresh)
+    minds.nearRefresh = { ...change.nearRefresh };
+  if (change.skip)
+    minds.skip = { ...change.skip };
+  return { modelUse: { preset: "custom" }, minds };
+}
+function withMemoryLevel(levels, level, on) {
+  return FIDELITIES.filter((f) => f !== "background" && (f === level ? on : levels.includes(f)));
+}
+function mindsReadPatch(source, change) {
+  return { minds: { reads: { [source]: { ...change } } } };
+}
+function mindsPromptPatch(purpose, text) {
+  if (text !== null && text.length > MIND_PROMPT_MAX)
+    return null;
+  const own = text === null || text.trim() === "" || text.trim() === MIND_PROMPT_DEFAULTS[purpose].trim() ? null : text;
+  return { minds: { prompts: { [purpose]: own } } };
+}
+var MEMORY_FIELDS = [
+  { part: "witness", key: "show", label: "Witness log lines a mind sees", range: MINDS_RANGES.show, integer: true },
+  { part: "recall", key: "recent", label: "Recall: latest turns they were there for", range: MINDS_RANGES.show, integer: true },
+  { part: "recall", key: "relevant", label: "Recall: turns that best match the moment", range: MINDS_RANGES.show, integer: true },
+  { part: "recall", key: "tokens", label: "Recall: tokens it may take", range: MINDS_RANGES.recallTokens, integer: true, step: 100, none: "no limit" },
+  { part: "notes", key: "show", label: "Notes a mind sees", range: MINDS_RANGES.show, integer: true },
+  { part: "notes", key: "keep", label: "Notes kept before the oldest are folded", range: MINDS_RANGES.keep, integer: true },
+  { part: "commitments", key: "show", label: "Open commitments a mind sees", range: MINDS_RANGES.show, integer: true },
+  { part: "salience", key: "halfLifeDays", label: "A note's salience halves every (days)", range: MINDS_RANGES.halfLifeDays, step: 1 },
+  { part: "salience", key: "floor", label: "Under this salience a note has faded", range: MINDS_RANGES.floor, step: 0.1 },
+  { part: "consolidate", key: "enabled", label: "Fold faded and surplus notes into the summary" },
+  { part: "consolidate", key: "periodDays", label: "Fold a character's notes at most every (days)", range: MINDS_RANGES.periodDays, step: 0.5 }
+];
+function memoryValue(config, field) {
+  const part = config[field.part];
+  return part[field.key] ?? 0;
+}
+function memoryOverride(memory, field) {
+  const part = memory[field.part];
+  return part?.[field.key];
+}
+function memoryOverridePatch(field, value) {
+  if (value === "none" && !field.none)
+    return null;
+  if (typeof value === "number") {
+    const [lo, hi] = field.range ?? [Number.NEGATIVE_INFINITY, Number.POSITIVE_INFINITY];
+    if (!field.range || !Number.isFinite(value) || value < lo || value > hi || field.integer && !Number.isInteger(value))
+      return null;
+  } else if (typeof value === "boolean" && field.range)
+    return null;
+  return { minds: { memory: { [field.part]: { [field.key]: value } } } };
+}
+
+// src/packs/minds/ui/ops.ts
+var FIDELITY_LABEL = { live: "Live", near: "Near", far: "Far", background: "Background" };
+var PLAN_KIND_LABEL = { errand: "Errand", meet: "Meet", visit: "Visit", work: "Work", rest: "Rest", leisure: "Leisure", pay: "Pay someone", lend: "Lend money", other: "Other" };
+var PLAN_STATUS_LABEL = { open: "Open", done: "Done", dropped: "Dropped" };
+var COMMITMENT_KIND_LABEL = { promise: "Promise", debt: "Debt", grudge: "Grudge", favour: "Favour", plan: "Plan together", other: "Other" };
+var COMMITMENT_STATUS_LABEL = { open: "Open", kept: "Kept", broken: "Broken", released: "Released" };
+var APPROACH_LABEL = { reactive: "Reactive", proactive: "Proactive" };
+function narratorGets(secrecy, mind) {
+  const full = secrecy === "full";
+  const shown = full || !mind.withheld;
+  return { mood: full, monologue: full, depiction: shown, intent: full, reactions: full, interrupt: shown };
+}
+function pinOp(entity, level) {
+  return { op: "mind_pin", entity, level };
+}
+function refreshOp(entity) {
+  return { op: "mind_refresh", entity };
+}
+function deleteOp(entity, part, id) {
+  return { op: "mind_memory", entity, part, id, value: null };
+}
+function intentOp(entity, draft) {
+  const text = draft.text.trim().replace(/\s+/g, " ");
+  return text.length > MIND_TEXT_CAPS.gmIntent ? null : { op: "mind_intent", entity, text, approach: draft.approach };
+}
+function textIn(text, cap) {
+  const t = text.trim().replace(/\s+/g, " ");
+  return t === "" || t.length > cap ? null : t;
+}
+function wholeIn(text, lo, hi) {
+  if (text.trim() === "")
+    return null;
+  const n = Number(text);
+  return Number.isInteger(n) && n >= lo && n <= hi ? n : null;
+}
+function noteDraft(note) {
+  return { text: note?.text ?? "", salience: String(note?.salience ?? 3) };
+}
+function noteOp(entity, id, draft) {
+  const text = textIn(draft.text, MIND_TEXT_CAPS.note);
+  const salience = wholeIn(draft.salience, 1, 5);
+  if (text === null || salience === null)
+    return null;
+  return { op: "mind_memory", entity, part: "note", id, value: { text, salience } };
+}
+function commitmentDraft(c) {
+  return { kind: c?.kind ?? "promise", with: [...c?.with ?? []], text: c?.text ?? "", due: c?.due ?? null, status: c?.status ?? "open" };
+}
+function commitmentOp(entity, id, draft) {
+  const text = textIn(draft.text, MIND_TEXT_CAPS.commitment);
+  const withIds = [...new Set(draft.with.filter((w) => w !== "" && w !== entity))];
+  if (text === null || withIds.length === 0 || draft.due !== null && !Number.isFinite(draft.due))
+    return null;
+  const value = { kind: draft.kind, with: withIds, text, due: draft.due === null ? null : Math.round(draft.due), status: draft.status };
+  return { op: "mind_memory", entity, part: "commitment", id, value };
+}
+function isMoneyPlan(kind) {
+  return kind === "pay" || kind === "lend";
+}
+function planDraft(now, plan) {
+  if (plan)
+    return { what: plan.what, kind: plan.kind, from: plan.when.from, to: plan.when.to, where: plan.where, with: [...plan.with], priority: plan.priority, status: plan.status, cents: plan.cents ?? null };
+  return { what: "", kind: "errand", from: now + 60, to: now + 120, where: null, with: [], priority: PLAN_PRIORITY.normal, status: "open", cents: null };
+}
+function startPlanIn(draft, now, hours) {
+  const from = Math.round(now + hours * 60);
+  return { ...draft, from, to: from + (draft.to - draft.from) };
+}
+function planLasts(draft, minutes) {
+  return { ...draft, to: draft.from + Math.round(minutes) };
+}
+function planOp(entity, id, draft) {
+  const what = textIn(draft.what, MIND_TEXT_CAPS.planWhat);
+  const ok = Number.isInteger(draft.from) && Number.isInteger(draft.to) && draft.from < draft.to && Number.isInteger(draft.priority) && draft.priority >= PLAN_PRIORITY.min && draft.priority <= PLAN_PRIORITY.max;
+  const withIds = [...new Set(draft.with.filter((w) => w !== "" && w !== entity))];
+  const money = isMoneyPlan(draft.kind);
+  if (what === null || !ok || money && (draft.cents === null || !Number.isSafeInteger(draft.cents) || draft.cents <= 0 || withIds.length === 0))
+    return null;
+  const value = { what, kind: draft.kind, when: { from: draft.from, to: draft.to }, where: draft.where, with: withIds, priority: draft.priority, status: draft.status, ...money && draft.cents !== null ? { cents: draft.cents } : {} };
+  return { op: "mind_memory", entity, part: "plan", id, value };
+}
+
+// src/frontend/settings/minds.tsx
+var PROMPT_NOTE = {
+  mind: "One call per character, as that character: what they think, how they come across, what they mean to do.",
+  memory: "After the reply, per character who heard your message, at the levels you pick: the notes, commitments and plans they take from it.",
+  skip: "Before a time skip: further moments in it worth stopping at.",
+  consolidate: "Folds a character's faded and surplus notes into their summary."
+};
+function Note(props) {
+  return /* @__PURE__ */ u3("p", {
+    class: "lre-minds-note",
+    children: props.children
+  }, undefined, false, undefined, this);
+}
+var TOKENS_START = 1000;
+var READ_LABEL = {
+  pinned: "Lore pinned to them and to where they are",
+  activated: "Lore the turn activates",
+  reply: "The latest reply",
+  message: "Your message",
+  summary: "Their summary",
+  memory: "Their notes and what they saw",
+  thoughts: "Their last thoughts",
+  recall: "Turns they were there for",
+  life: "Their life: money, the day, commitments and plans"
+};
+var READ_NOTE = {
+  pinned: "What Build pins to the character, then to their place and each place around it, nearest first. Within the limit every entry comes whole; the Context panel says what didn't fit.",
+  activated: "The world's lore entries the turn names, by a key, an alias, a title or a lookup-table term, as World Info activates them, read as the character: by your message and the latest reply when they were there for them, else by where they are.",
+  reply: "How the latest reply ended, for those who were there for it; cut to a number, they read its end. The memory step reads the reply within this limit too.",
+  message: "What you say and do, for those with you. The memory step reads it within this limit too.",
+  summary: "The summary their memory keeps and folds their old notes into.",
+  memory: "Their memory notes, most salient first, and what they saw happen. Never what someone's memory says they were told: that came from another mind.",
+  thoughts: "Their own latest mind: what they thought, what they meant to do and how they felt.",
+  recall: "Earlier turns they were there for: the latest, and those that best match the moment. Its limit is the memory setting's, which the world sets and you can override.",
+  life: "Their money, the rest of today as the planner lays it (with what it fills free time with: meals, friends, outings), their commitments and their plans. None of it is the story as it stands."
+};
+var STORY_SOURCES = { pinned: true, activated: true, reply: true, message: true, summary: false, memory: false, thoughts: false, recall: false, life: false };
+function LimitField(props) {
+  const fallback = props.fallback === "none" ? props.min : props.fallback;
+  return /* @__PURE__ */ u3("div", {
+    class: "lre-minds-limit",
+    children: [
+      /* @__PURE__ */ u3(HostSwitch, {
+        label: `${props.label}: ${props.noneLabel}`,
+        checked: props.value === "none",
+        disabled: props.disabled,
+        onChange: (none) => props.onChange(none ? "none" : fallback)
+      }, undefined, false, undefined, this),
+      props.value === "none" ? null : /* @__PURE__ */ u3(NumberStepper, {
+        label: props.label,
+        value: props.value,
+        min: props.min,
+        max: props.max,
+        step: props.step ?? 1,
+        integer: true,
+        disabled: props.disabled,
+        onChange: props.onChange
+      }, undefined, false, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+}
+function MemoryOverride(props) {
+  const { field, busy } = props;
+  const own = memoryOverride(props.memory, field);
+  const builtIn = memoryValue(DEFAULT_MINDS_MEMORY, field);
+  const id = `${field.part}.${field.key}`;
+  const set = (value) => {
+    const p = memoryOverridePatch(field, value);
+    if (p)
+      props.patch(p);
+  };
+  return /* @__PURE__ */ u3("div", {
+    class: "lre-minds-override",
+    "data-lre-minds-memory": id,
+    children: [
+      field.none ? /* @__PURE__ */ u3(HostSwitch, {
+        label: `${field.label}: ${field.none}`,
+        checked: own === "none" || own === undefined && builtIn === "none",
+        disabled: busy,
+        onChange: (none) => set(none ? "none" : typeof builtIn === "number" ? builtIn : field.range?.[0] ?? 0)
+      }, undefined, false, undefined, this) : null,
+      field.range && own !== "none" ? /* @__PURE__ */ u3(NumberStepper, {
+        label: field.label,
+        value: typeof own === "number" ? own : null,
+        min: field.range[0],
+        max: field.range[1],
+        step: field.step ?? 1,
+        integer: field.integer === true,
+        disabled: busy,
+        onChange: set
+      }, undefined, false, undefined, this) : field.range ? null : /* @__PURE__ */ u3(HostSwitch, {
+        label: field.label,
+        checked: typeof own === "boolean" ? own : builtIn === true,
+        disabled: busy,
+        onChange: set
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3("div", {
+        class: "lre-minds-override-foot",
+        children: own === undefined ? /* @__PURE__ */ u3("span", {
+          class: "lre-minds-note",
+          children: [
+            "The world's applies (built in: ",
+            typeof builtIn === "boolean" ? builtIn ? "on" : "off" : builtIn === "none" ? field.none ?? "none" : builtIn,
+            ")"
+          ]
+        }, undefined, true, undefined, this) : /* @__PURE__ */ u3(M, {
+          children: [
+            /* @__PURE__ */ u3(Badge, {
+              tone: "accent",
+              children: "Yours"
+            }, undefined, false, undefined, this),
+            /* @__PURE__ */ u3(Button, {
+              size: "sm",
+              variant: "ghost",
+              icon: "undo",
+              label: `Use the world's ${field.label.toLowerCase()}`,
+              disabled: busy,
+              onClick: () => set(null),
+              children: "Use the world's"
+            }, undefined, false, undefined, this)
+          ]
+        }, undefined, true, undefined, this)
+      }, undefined, false, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+}
+function ReadRow(props) {
+  const { source, reads, busy } = props;
+  const on = reads[source].on;
+  const recall = MEMORY_FIELDS.find((f) => f.part === "recall" && f.key === "tokens");
+  return /* @__PURE__ */ u3("div", {
+    class: "lre-minds-override",
+    "data-lre-minds-read": source,
+    children: [
+      /* @__PURE__ */ u3(HostSwitch, {
+        label: READ_LABEL[source],
+        checked: on,
+        disabled: busy,
+        onChange: (next) => props.patch(mindsReadPatch(source, { on: next }))
+      }, undefined, false, undefined, this),
+      !on ? null : source === "recall" ? recall ? /* @__PURE__ */ u3(MemoryOverride, {
+        field: recall,
+        memory: props.memory,
+        busy,
+        patch: props.patch
+      }, undefined, false, undefined, this) : null : /* @__PURE__ */ u3(LimitField, {
+        label: `${READ_LABEL[source]} (tokens)`,
+        noneLabel: "no limit",
+        value: reads[source].tokens,
+        min: 1,
+        step: 100,
+        fallback: DEFAULT_MIND_READS[source].tokens === "none" ? TOKENS_START : DEFAULT_MIND_READS[source].tokens,
+        disabled: busy,
+        onChange: (tokens) => props.patch(mindsReadPatch(source, { tokens }))
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(Note, {
+        children: READ_NOTE[source]
+      }, undefined, false, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+}
+function PromptEditor(props) {
+  const builtIn = MIND_PROMPT_DEFAULTS[props.purpose];
+  const saved = props.value ?? builtIn;
+  const [text, setText] = d2(saved);
+  A(() => setText(saved), [saved]);
+  const save = mindsPromptPatch(props.purpose, text);
+  const label = STEP_LABEL[props.purpose];
+  return /* @__PURE__ */ u3("div", {
+    class: "lre-minds-prompt",
+    "data-lre-minds-prompt": props.purpose,
+    children: /* @__PURE__ */ u3(Disclosure, {
+      summary: /* @__PURE__ */ u3("span", {
+        class: "lre-minds-prompt-head",
+        children: [
+          /* @__PURE__ */ u3("span", {
+            class: "lre-minds-prompt-text",
+            children: [
+              /* @__PURE__ */ u3("span", {
+                class: "lre-minds-prompt-title",
+                children: label
+              }, undefined, false, undefined, this),
+              /* @__PURE__ */ u3("span", {
+                class: "lre-minds-prompt-sub",
+                children: PROMPT_NOTE[props.purpose]
+              }, undefined, false, undefined, this)
+            ]
+          }, undefined, true, undefined, this),
+          props.value === undefined ? /* @__PURE__ */ u3(Badge, {
+            children: "Built-in"
+          }, undefined, false, undefined, this) : /* @__PURE__ */ u3(Badge, {
+            tone: "accent",
+            children: "Your own"
+          }, undefined, false, undefined, this)
+        ]
+      }, undefined, true, undefined, this),
+      children: [
+        /* @__PURE__ */ u3("textarea", {
+          class: "lre-input lre-minds-prompt-input",
+          rows: 10,
+          "aria-label": `${label} prompt`,
+          value: text,
+          disabled: props.busy,
+          onInput: (event) => setText(event.currentTarget.value)
+        }, undefined, false, undefined, this),
+        text.length > MIND_PROMPT_MAX ? /* @__PURE__ */ u3("div", {
+          class: "lre-set-warn",
+          role: "note",
+          children: [
+            /* @__PURE__ */ u3(Icon, {
+              name: "alert",
+              size: 16
+            }, undefined, false, undefined, this),
+            /* @__PURE__ */ u3("span", {
+              children: [
+                "Too long: at most ",
+                MIND_PROMPT_MAX.toLocaleString(),
+                " characters."
+              ]
+            }, undefined, true, undefined, this)
+          ]
+        }, undefined, true, undefined, this) : null,
+        /* @__PURE__ */ u3("div", {
+          class: "lre-minds-actions",
+          children: [
+            /* @__PURE__ */ u3(Button, {
+              size: "sm",
+              variant: "primary",
+              disabled: props.busy || save === null || text === saved,
+              onClick: () => save && props.patch(save),
+              children: "Save"
+            }, undefined, false, undefined, this),
+            /* @__PURE__ */ u3(Button, {
+              size: "sm",
+              variant: "ghost",
+              disabled: props.busy || text === saved,
+              onClick: () => setText(saved),
+              children: "Revert"
+            }, undefined, false, undefined, this),
+            /* @__PURE__ */ u3(Button, {
+              size: "sm",
+              icon: "undo",
+              disabled: props.busy || props.value === undefined,
+              onClick: () => props.patch(mindsPromptPatch(props.purpose, null) ?? {}),
+              children: "Reset to the default"
+            }, undefined, false, undefined, this)
+          ]
+        }, undefined, true, undefined, this),
+        /* @__PURE__ */ u3("div", {
+          class: "lre-minds-default",
+          children: /* @__PURE__ */ u3(Disclosure, {
+            summary: "The built-in default",
+            children: /* @__PURE__ */ u3("pre", {
+              class: "lre-minds-code",
+              children: builtIn
+            }, undefined, false, undefined, this)
+          }, undefined, false, undefined, this)
+        }, undefined, false, undefined, this)
+      ]
+    }, undefined, true, undefined, this)
+  }, undefined, false, undefined, this);
+}
+function MindsSection(props) {
+  const { minds, busy } = props;
+  const policy = (change) => props.patch(mindsPolicyPatch(change));
+  const memoryFields = MEMORY_FIELDS.filter((field) => !(field.part === "recall" && field.key === "tokens"));
+  const overrides = memoryFields.filter((field) => memoryOverride(minds.memory, field) !== undefined).length;
+  return /* @__PURE__ */ u3("div", {
+    class: "lre-stack lre-minds-set",
+    "data-lre-settings-page": "minds",
+    children: [
+      /* @__PURE__ */ u3("p", {
+        class: "lre-set-lead",
+        children: "Each character near the story thinks for themselves in their own model call, scoped to what they know."
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(Section, {
+        children: /* @__PURE__ */ u3("div", {
+          class: "lre-minds-body",
+          children: [
+            /* @__PURE__ */ u3(HostSwitch, {
+              label: "Character minds",
+              checked: minds.enabled,
+              disabled: busy,
+              onChange: (enabled) => policy({ enabled })
+            }, undefined, false, undefined, this),
+            /* @__PURE__ */ u3(Note, {
+              children: "Picking a Model use preset sets everything here but what a mind reads, your prompts and memory overrides; changing any of the rest makes it Custom."
+            }, undefined, false, undefined, this)
+          ]
+        }, undefined, true, undefined, this)
+      }, undefined, false, undefined, this),
+      minds.enabled ? /* @__PURE__ */ u3(M, {
+        children: [
+          /* @__PURE__ */ u3(Section, {
+            title: "How many think",
+            children: /* @__PURE__ */ u3("div", {
+              class: "lre-minds-body",
+              children: [
+                /* @__PURE__ */ u3(LimitField, {
+                  label: "Live minds a turn",
+                  noneLabel: "no limit",
+                  value: minds.liveLimit,
+                  min: 0,
+                  max: 64,
+                  fallback: MINDS_DEFAULTS.liveLimit,
+                  disabled: busy,
+                  onChange: (liveLimit) => policy({ liveLimit })
+                }, undefined, false, undefined, this),
+                /* @__PURE__ */ u3(Note, {
+                  children: "Live characters think every turn, best score first; past the limit they wait for a Near refresh."
+                }, undefined, false, undefined, this),
+                /* @__PURE__ */ u3(LimitField, {
+                  label: "Near and Far refreshes a turn",
+                  noneLabel: "no limit",
+                  value: minds.refreshLimit,
+                  min: 0,
+                  max: 64,
+                  fallback: MINDS_DEFAULTS.refreshLimit,
+                  disabled: busy,
+                  onChange: (refreshLimit) => policy({ refreshLimit })
+                }, undefined, false, undefined, this),
+                /* @__PURE__ */ u3(Note, {
+                  children: "Besides the Live minds, the most pressing first. A refresh you ask for in GM mode always runs."
+                }, undefined, false, undefined, this),
+                /* @__PURE__ */ u3(Note, {
+                  children: "Background characters never get a mind; they follow their routine."
+                }, undefined, false, undefined, this)
+              ]
+            }, undefined, true, undefined, this)
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3(Section, {
+            title: "Near refresh",
+            children: /* @__PURE__ */ u3("div", {
+              class: "lre-minds-body",
+              children: [
+                /* @__PURE__ */ u3(Note, {
+                  children: "A Near character thinks again when one of these calls for it."
+                }, undefined, false, undefined, this),
+                /* @__PURE__ */ u3(HostSwitch, {
+                  label: "When they come into the scene, or it changes",
+                  checked: minds.nearRefresh.scene,
+                  disabled: busy,
+                  onChange: (scene) => policy({ nearRefresh: { scene } })
+                }, undefined, false, undefined, this),
+                /* @__PURE__ */ u3(HostSwitch, {
+                  label: "When the latest message or reply names them",
+                  checked: minds.nearRefresh.mention,
+                  disabled: busy,
+                  onChange: (mention) => policy({ nearRefresh: { mention } })
+                }, undefined, false, undefined, this),
+                /* @__PURE__ */ u3(LimitField, {
+                  label: "Every so many turns",
+                  noneLabel: "never by turns",
+                  value: minds.nearRefresh.turns,
+                  min: 1,
+                  max: 1000,
+                  fallback: MINDS_DEFAULTS.nearRefresh.turns,
+                  disabled: busy,
+                  onChange: (turns) => policy({ nearRefresh: { turns } })
+                }, undefined, false, undefined, this),
+                /* @__PURE__ */ u3(LimitField, {
+                  label: "When their mind is this old (game minutes)",
+                  noneLabel: "never by age",
+                  value: minds.nearRefresh.minutes,
+                  min: 1,
+                  max: 525600,
+                  step: 30,
+                  fallback: MINDS_DEFAULTS.nearRefresh.minutes,
+                  disabled: busy,
+                  onChange: (minutes) => policy({ nearRefresh: { minutes } })
+                }, undefined, false, undefined, this)
+              ]
+            }, undefined, true, undefined, this)
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3(Section, {
+            title: "Far refresh",
+            children: /* @__PURE__ */ u3("div", {
+              class: "lre-minds-body",
+              children: [
+                /* @__PURE__ */ u3(Note, {
+                  children: "A Far character thinks now and then, on game time."
+                }, undefined, false, undefined, this),
+                /* @__PURE__ */ u3(LimitField, {
+                  label: "Every (game minutes)",
+                  noneLabel: "never",
+                  value: minds.farRefreshMinutes,
+                  min: 1,
+                  max: 525600,
+                  step: 60,
+                  fallback: MINDS_DEFAULTS.farRefreshMinutes,
+                  disabled: busy,
+                  onChange: (farRefreshMinutes) => policy({ farRefreshMinutes })
+                }, undefined, false, undefined, this)
+              ]
+            }, undefined, true, undefined, this)
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3(Section, {
+            title: "Memory notes after the reply",
+            children: /* @__PURE__ */ u3("div", {
+              class: "lre-minds-body",
+              children: [
+                /* @__PURE__ */ u3(Note, {
+                  children: "Which of the characters who heard your message take notes, commitments and plans from the reply."
+                }, undefined, false, undefined, this),
+                FIDELITIES.filter((f) => f !== "background").map((level) => /* @__PURE__ */ u3(HostSwitch, {
+                  label: `${FIDELITY_LABEL[level]} characters who heard you`,
+                  checked: minds.memoryLevels.includes(level),
+                  disabled: busy,
+                  onChange: (on) => policy({ memoryLevels: withMemoryLevel(minds.memoryLevels, level, on) })
+                }, level, false, undefined, this))
+              ]
+            }, undefined, true, undefined, this)
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3(Section, {
+            title: "What a mind reads",
+            children: /* @__PURE__ */ u3("div", {
+              class: "lre-minds-body",
+              children: [
+                /* @__PURE__ */ u3(Note, {
+                  children: "Who they are (their own sheet, aims and secrets), where they are and whom they see there, and what they mean to do are always in it. Each source below is yours to switch on or off and to limit; within its limit it comes whole, and nothing else cuts it."
+                }, undefined, false, undefined, this),
+                /* @__PURE__ */ u3("div", {
+                  class: "lre-minds-group",
+                  children: [
+                    /* @__PURE__ */ u3("span", {
+                      class: "lre-minds-group-title",
+                      children: "The story as it stands"
+                    }, undefined, false, undefined, this),
+                    MIND_SOURCES.filter((s) => STORY_SOURCES[s]).map((source) => /* @__PURE__ */ u3(ReadRow, {
+                      source,
+                      reads: minds.reads,
+                      memory: minds.memory,
+                      busy,
+                      patch: props.patch
+                    }, source, false, undefined, this))
+                  ]
+                }, undefined, true, undefined, this),
+                /* @__PURE__ */ u3("div", {
+                  class: "lre-minds-group",
+                  children: [
+                    /* @__PURE__ */ u3("span", {
+                      class: "lre-minds-group-title",
+                      children: "Their own memory and life"
+                    }, undefined, false, undefined, this),
+                    /* @__PURE__ */ u3(Note, {
+                      children: "Off unless you turn them on: each can carry what the story never set up, like a day the planner filled with meals and friends, or a plan their memory took from narration that showed another character's mind."
+                    }, undefined, false, undefined, this),
+                    MIND_SOURCES.filter((s) => !STORY_SOURCES[s]).map((source) => /* @__PURE__ */ u3(ReadRow, {
+                      source,
+                      reads: minds.reads,
+                      memory: minds.memory,
+                      busy,
+                      patch: props.patch
+                    }, source, false, undefined, this))
+                  ]
+                }, undefined, true, undefined, this)
+              ]
+            }, undefined, true, undefined, this)
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3(Section, {
+            children: /* @__PURE__ */ u3(Disclosure, {
+              summary: "Advanced: the Minds section budget and time skips",
+              children: [
+                /* @__PURE__ */ u3("div", {
+                  class: "lre-minds-group",
+                  children: [
+                    /* @__PURE__ */ u3("span", {
+                      class: "lre-minds-group-title",
+                      children: "The narrator's Minds section"
+                    }, undefined, false, undefined, this),
+                    /* @__PURE__ */ u3(NumberStepper, {
+                      label: "Minds section budget (tokens)",
+                      value: minds.tokens,
+                      min: 0,
+                      step: 100,
+                      integer: true,
+                      disabled: busy,
+                      onChange: (tokens) => policy({ tokens })
+                    }, undefined, false, undefined, this),
+                    /* @__PURE__ */ u3(Note, {
+                      children: "The narrator's Minds section has its own budget, apart from the engine's section budget, so minds never crowd out Scene or People."
+                    }, undefined, false, undefined, this)
+                  ]
+                }, undefined, true, undefined, this),
+                /* @__PURE__ */ u3("div", {
+                  class: "lre-minds-group",
+                  children: [
+                    /* @__PURE__ */ u3("span", {
+                      class: "lre-minds-group-title",
+                      children: "Time skips"
+                    }, undefined, false, undefined, this),
+                    /* @__PURE__ */ u3(LimitField, {
+                      label: "Beats a skip may stop at",
+                      noneLabel: "no limit",
+                      value: minds.skip.maxBeats,
+                      min: 0,
+                      max: 200,
+                      fallback: MINDS_DEFAULTS.skip.maxBeats,
+                      disabled: busy,
+                      onChange: (maxBeats) => policy({ skip: { maxBeats } })
+                    }, undefined, false, undefined, this),
+                    /* @__PURE__ */ u3(LimitField, {
+                      label: "Minds at each beat",
+                      noneLabel: "no limit",
+                      value: minds.skip.maxMindsPerBeat,
+                      min: 0,
+                      max: 64,
+                      fallback: MINDS_DEFAULTS.skip.maxMindsPerBeat,
+                      disabled: busy,
+                      onChange: (maxMindsPerBeat) => policy({ skip: { maxMindsPerBeat } })
+                    }, undefined, false, undefined, this)
+                  ]
+                }, undefined, true, undefined, this)
+              ]
+            }, undefined, true, undefined, this)
+          }, undefined, false, undefined, this)
+        ]
+      }, undefined, true, undefined, this) : null,
+      /* @__PURE__ */ u3(Section, {
+        title: "Memory",
+        children: /* @__PURE__ */ u3("div", {
+          class: "lre-minds-body",
+          children: [
+            /* @__PURE__ */ u3(Note, {
+              children: "Each world sets how its characters remember (Build → World → Minds); what you set here wins in every world."
+            }, undefined, false, undefined, this),
+            /* @__PURE__ */ u3(Disclosure, {
+              summary: /* @__PURE__ */ u3("span", {
+                class: "lre-minds-summary",
+                children: [
+                  /* @__PURE__ */ u3("span", {
+                    children: "Your overrides"
+                  }, undefined, false, undefined, this),
+                  overrides > 0 ? /* @__PURE__ */ u3(Badge, {
+                    tone: "accent",
+                    children: overrides === 1 ? "1 set" : `${overrides} set`
+                  }, undefined, false, undefined, this) : /* @__PURE__ */ u3(Badge, {
+                    children: "None"
+                  }, undefined, false, undefined, this)
+                ]
+              }, undefined, true, undefined, this),
+              children: /* @__PURE__ */ u3("div", {
+                class: "lre-minds-overrides",
+                children: memoryFields.map((field) => /* @__PURE__ */ u3(MemoryOverride, {
+                  field,
+                  memory: minds.memory,
+                  busy,
+                  patch: props.patch
+                }, `${field.part}.${field.key}`, false, undefined, this))
+              }, undefined, false, undefined, this)
+            }, undefined, false, undefined, this)
+          ]
+        }, undefined, true, undefined, this)
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(Section, {
+        title: "Prompts",
+        flush: true,
+        children: /* @__PURE__ */ u3("div", {
+          class: "lre-minds-prompts",
+          children: [
+            /* @__PURE__ */ u3("p", {
+              class: "lre-minds-note lre-minds-prompts-lead",
+              children: "Your prompt wins over the world's own step template for a purpose (Build → Step templates), and that over the built-in."
+            }, undefined, false, undefined, this),
+            MIND_PURPOSES.map((purpose) => /* @__PURE__ */ u3(PromptEditor, {
+              purpose,
+              value: minds.prompts[purpose],
+              busy,
+              patch: props.patch
+            }, purpose, false, undefined, this))
+          ]
+        }, undefined, true, undefined, this)
+      }, undefined, false, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+}
 
 // src/frontend/settings/steps.tsx
 var PRESETS2 = [
@@ -12773,7 +16357,27 @@ function StepsSection(props) {
         connections,
         busy: props.busy,
         update: (next) => update(purpose, next)
-      }, purpose, false, undefined, this))
+      }, purpose, false, undefined, this)),
+      /* @__PURE__ */ u3(Section, {
+        title: "Build jobs",
+        children: [
+          /* @__PURE__ */ u3(LimitField, {
+            label: "Lore each person or group reads (tokens)",
+            noneLabel: "all of it",
+            value: props.jobs.routineLoreTokens,
+            min: 1,
+            step: 500,
+            fallback: JOB_SETTINGS_DEFAULTS.routineLoreTokens,
+            disabled: props.busy,
+            onChange: (routineLoreTokens) => props.patch({ jobs: { routineLoreTokens } })
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3("p", {
+            class: "lre-small lre-muted",
+            style: { margin: 0 },
+            children: "Propose routines from lore gives the AI each person's and group's lore in whole entries, the most about them first, up to this many tokens. What doesn't fit is left out, and the job says whose. People whose lore fills it get a call of their own."
+          }, undefined, false, undefined, this)
+        ]
+      }, undefined, true, undefined, this)
     ]
   }, undefined, true, undefined, this);
 }
@@ -13016,154 +16620,6 @@ function StepCard(props) {
       ]
     }, undefined, true, undefined, this)
   }, undefined, false, undefined, this);
-}
-
-// src/frontend/settings/minds-patch.ts
-function mindsPolicyPatch(change) {
-  const minds = {};
-  if (change.enabled !== undefined)
-    minds.enabled = change.enabled;
-  if (change.liveLimit !== undefined)
-    minds.liveLimit = change.liveLimit;
-  if (change.farRefreshMinutes !== undefined)
-    minds.farRefreshMinutes = change.farRefreshMinutes;
-  if (change.refreshLimit !== undefined)
-    minds.refreshLimit = change.refreshLimit;
-  if (change.tokens !== undefined)
-    minds.tokens = change.tokens;
-  if (change.memoryLevels !== undefined)
-    minds.memoryLevels = FIDELITIES.filter((f) => f !== "background" && change.memoryLevels?.includes(f));
-  if (change.nearRefresh)
-    minds.nearRefresh = { ...change.nearRefresh };
-  if (change.skip)
-    minds.skip = { ...change.skip };
-  return { modelUse: { preset: "custom" }, minds };
-}
-function withMemoryLevel(levels, level, on) {
-  return FIDELITIES.filter((f) => f !== "background" && (f === level ? on : levels.includes(f)));
-}
-function mindsReadPatch(source, change) {
-  return { minds: { reads: { [source]: { ...change } } } };
-}
-function mindsPromptPatch(purpose, text) {
-  if (text !== null && text.length > MIND_PROMPT_MAX)
-    return null;
-  const own = text === null || text.trim() === "" || text.trim() === MIND_PROMPT_DEFAULTS[purpose].trim() ? null : text;
-  return { minds: { prompts: { [purpose]: own } } };
-}
-var MEMORY_FIELDS = [
-  { part: "witness", key: "show", label: "Witness log lines a mind sees", range: MINDS_RANGES.show, integer: true },
-  { part: "recall", key: "recent", label: "Recall: latest turns they were there for", range: MINDS_RANGES.show, integer: true },
-  { part: "recall", key: "relevant", label: "Recall: turns that best match the moment", range: MINDS_RANGES.show, integer: true },
-  { part: "recall", key: "tokens", label: "Recall: tokens it may take", range: MINDS_RANGES.recallTokens, integer: true, step: 100, none: "no limit" },
-  { part: "notes", key: "show", label: "Notes a mind sees", range: MINDS_RANGES.show, integer: true },
-  { part: "notes", key: "keep", label: "Notes kept before the oldest are folded", range: MINDS_RANGES.keep, integer: true },
-  { part: "commitments", key: "show", label: "Open commitments a mind sees", range: MINDS_RANGES.show, integer: true },
-  { part: "salience", key: "halfLifeDays", label: "A note's salience halves every (days)", range: MINDS_RANGES.halfLifeDays, step: 1 },
-  { part: "salience", key: "floor", label: "Under this salience a note has faded", range: MINDS_RANGES.floor, step: 0.1 },
-  { part: "consolidate", key: "enabled", label: "Fold faded and surplus notes into the summary" },
-  { part: "consolidate", key: "periodDays", label: "Fold a character's notes at most every (days)", range: MINDS_RANGES.periodDays, step: 0.5 }
-];
-function memoryValue(config, field) {
-  const part = config[field.part];
-  return part[field.key] ?? 0;
-}
-function memoryOverride(memory, field) {
-  const part = memory[field.part];
-  return part?.[field.key];
-}
-function memoryOverridePatch(field, value) {
-  if (value === "none" && !field.none)
-    return null;
-  if (typeof value === "number") {
-    const [lo, hi] = field.range ?? [Number.NEGATIVE_INFINITY, Number.POSITIVE_INFINITY];
-    if (!field.range || !Number.isFinite(value) || value < lo || value > hi || field.integer && !Number.isInteger(value))
-      return null;
-  } else if (typeof value === "boolean" && field.range)
-    return null;
-  return { minds: { memory: { [field.part]: { [field.key]: value } } } };
-}
-
-// src/packs/minds/ui/ops.ts
-var FIDELITY_LABEL = { live: "Live", near: "Near", far: "Far", background: "Background" };
-var PLAN_KIND_LABEL = { errand: "Errand", meet: "Meet", visit: "Visit", work: "Work", rest: "Rest", leisure: "Leisure", pay: "Pay someone", lend: "Lend money", other: "Other" };
-var PLAN_STATUS_LABEL = { open: "Open", done: "Done", dropped: "Dropped" };
-var COMMITMENT_KIND_LABEL = { promise: "Promise", debt: "Debt", grudge: "Grudge", favour: "Favour", plan: "Plan together", other: "Other" };
-var COMMITMENT_STATUS_LABEL = { open: "Open", kept: "Kept", broken: "Broken", released: "Released" };
-var APPROACH_LABEL = { reactive: "Reactive", proactive: "Proactive" };
-function narratorGets(secrecy, mind) {
-  const full = secrecy === "full";
-  const shown = full || !mind.withheld;
-  return { mood: full, monologue: full, depiction: shown, intent: full, reactions: full, interrupt: shown };
-}
-function pinOp(entity, level) {
-  return { op: "mind_pin", entity, level };
-}
-function refreshOp(entity) {
-  return { op: "mind_refresh", entity };
-}
-function deleteOp(entity, part, id) {
-  return { op: "mind_memory", entity, part, id, value: null };
-}
-function intentOp(entity, draft) {
-  const text = draft.text.trim().replace(/\s+/g, " ");
-  return text.length > MIND_TEXT_CAPS.gmIntent ? null : { op: "mind_intent", entity, text, approach: draft.approach };
-}
-function textIn(text, cap) {
-  const t = text.trim().replace(/\s+/g, " ");
-  return t === "" || t.length > cap ? null : t;
-}
-function wholeIn(text, lo, hi) {
-  if (text.trim() === "")
-    return null;
-  const n = Number(text);
-  return Number.isInteger(n) && n >= lo && n <= hi ? n : null;
-}
-function noteDraft(note) {
-  return { text: note?.text ?? "", salience: String(note?.salience ?? 3) };
-}
-function noteOp(entity, id, draft) {
-  const text = textIn(draft.text, MIND_TEXT_CAPS.note);
-  const salience = wholeIn(draft.salience, 1, 5);
-  if (text === null || salience === null)
-    return null;
-  return { op: "mind_memory", entity, part: "note", id, value: { text, salience } };
-}
-function commitmentDraft(c) {
-  return { kind: c?.kind ?? "promise", with: [...c?.with ?? []], text: c?.text ?? "", due: c?.due ?? null, status: c?.status ?? "open" };
-}
-function commitmentOp(entity, id, draft) {
-  const text = textIn(draft.text, MIND_TEXT_CAPS.commitment);
-  const withIds = [...new Set(draft.with.filter((w) => w !== "" && w !== entity))];
-  if (text === null || withIds.length === 0 || draft.due !== null && !Number.isFinite(draft.due))
-    return null;
-  const value = { kind: draft.kind, with: withIds, text, due: draft.due === null ? null : Math.round(draft.due), status: draft.status };
-  return { op: "mind_memory", entity, part: "commitment", id, value };
-}
-function isMoneyPlan(kind) {
-  return kind === "pay" || kind === "lend";
-}
-function planDraft(now, plan) {
-  if (plan)
-    return { what: plan.what, kind: plan.kind, from: plan.when.from, to: plan.when.to, where: plan.where, with: [...plan.with], priority: plan.priority, status: plan.status, cents: plan.cents ?? null };
-  return { what: "", kind: "errand", from: now + 60, to: now + 120, where: null, with: [], priority: PLAN_PRIORITY.normal, status: "open", cents: null };
-}
-function startPlanIn(draft, now, hours) {
-  const from = Math.round(now + hours * 60);
-  return { ...draft, from, to: from + (draft.to - draft.from) };
-}
-function planLasts(draft, minutes) {
-  return { ...draft, to: draft.from + Math.round(minutes) };
-}
-function planOp(entity, id, draft) {
-  const what = textIn(draft.what, MIND_TEXT_CAPS.planWhat);
-  const ok = Number.isInteger(draft.from) && Number.isInteger(draft.to) && draft.from < draft.to && Number.isInteger(draft.priority) && draft.priority >= PLAN_PRIORITY.min && draft.priority <= PLAN_PRIORITY.max;
-  const withIds = [...new Set(draft.with.filter((w) => w !== "" && w !== entity))];
-  const money = isMoneyPlan(draft.kind);
-  if (what === null || !ok || money && (draft.cents === null || !Number.isSafeInteger(draft.cents) || draft.cents <= 0 || withIds.length === 0))
-    return null;
-  const value = { what, kind: draft.kind, when: { from: draft.from, to: draft.to }, where: draft.where, with: withIds, priority: draft.priority, status: draft.status, ...money && draft.cents !== null ? { cents: draft.cents } : {} };
-  return { op: "mind_memory", entity, part: "plan", id, value };
 }
 
 // src/frontend/build/minds-editor.tsx
@@ -14137,6 +17593,207 @@ function LoreEditor(props) {
             disabled: busy || !changed,
             onClick: () => setValue(initial),
             children: "Revert"
+          }, undefined, false, undefined, this)
+        ]
+      }, undefined, true, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+}
+
+// src/frontend/build/routine-settings.tsx
+var AWARENESS_EXPLAINED = {
+  story_first: "People off screen bend their routine for the story's plans and the GM's, what the story sets holds until it's released, and characters close to the player get no routine nudges at all.",
+  balanced: "Background characters keep their routine, distant ones bend it for the story's plans, what the story sets holds for the rest of that day, and characters close to the player get it only as a soft suggestion.",
+  routine_first: "Background and distant characters keep to their routine, bending only as the plans setting below allows, and what the story sets holds until their next block."
+};
+var INVITATIONS_EXPLAINED = {
+  off: "Routine blocks never invite anyone. Plans from the story and the GM still can.",
+  player: "A routine block that asks its company along may invite the player's character, and no one else.",
+  everyone: "Routine blocks may invite anyone, and people take each other's invitations."
+};
+var SOCIABILITY_EXPLAINED = {
+  reserved: "The wish for company and fun grows half as fast.",
+  usual: "The wish for company and fun grows as it usually does.",
+  outgoing: "The wish for company and fun grows half again as fast."
+};
+function routineSettingsWrite(worldId, settings) {
+  return { type: "lre.editor", worldId, base: null, op: "set", part: "routineSettings", value: { ...settings } };
+}
+function Choices2(props) {
+  return /* @__PURE__ */ u3("div", {
+    class: "lre-minds-choices",
+    role: "radiogroup",
+    "aria-label": props.label,
+    children: props.options.map((option) => {
+      const checked = props.value === option;
+      return /* @__PURE__ */ u3("button", {
+        type: "button",
+        role: "radio",
+        "aria-checked": checked,
+        class: "lre-minds-choice",
+        "data-lre-choice": option,
+        disabled: props.disabled,
+        onClick: () => checked ? undefined : props.onChange(option),
+        children: [
+          /* @__PURE__ */ u3("span", {
+            class: "lre-minds-choice-head",
+            children: [
+              /* @__PURE__ */ u3("span", {
+                class: "lre-minds-choice-name",
+                children: props.names[option]
+              }, undefined, false, undefined, this),
+              checked ? /* @__PURE__ */ u3("span", {
+                class: "lre-minds-choice-mark",
+                children: [
+                  /* @__PURE__ */ u3(Icon, {
+                    name: "check",
+                    size: 16
+                  }, undefined, false, undefined, this),
+                  "In use"
+                ]
+              }, undefined, true, undefined, this) : null
+            ]
+          }, undefined, true, undefined, this),
+          props.lines ? /* @__PURE__ */ u3("span", {
+            class: "lre-minds-choice-text",
+            children: props.lines[option]
+          }, undefined, false, undefined, this) : null
+        ]
+      }, option, true, undefined, this);
+    })
+  }, undefined, false, undefined, this);
+}
+function RoutineSettingsEditor() {
+  const app = useApp();
+  const draft = useSelect(app.drafts, (d) => d);
+  const send = b2(() => draftSend(app), [app]);
+  const initial = draft ? routineSettingsOf(draft.doc) : DEFAULT_ROUTINE_SETTINGS;
+  const [value, setValue] = d2(initial);
+  const [busy, run] = useBusy();
+  useHeld(value, setValue, initial, `${draft?.worldId ?? ""}/routineSettings`);
+  if (!draft)
+    return null;
+  const changed = JSON.stringify(value) !== JSON.stringify(initial);
+  const save = (next) => run(() => send(routineSettingsWrite(draft.worldId, next)));
+  const lint = lintAt(draft.lint, "routineSettings");
+  return /* @__PURE__ */ u3("div", {
+    class: "lre-build-page",
+    "data-lre-editor": "part:routineSettings",
+    children: [
+      /* @__PURE__ */ u3(PageHeader, {
+        title: PART_INFO.routineSettings.label,
+        subtitle: PART_INFO.routineSettings.hint
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3("p", {
+        class: "lre-build-note",
+        children: "Whatever you pick, the story comes first for anyone in a scene with the player's character: a routine never moves them out of it, contradicts what's been told or interrupts play. These settings tune how far everyone else's days follow the story and its lore, and how far they keep to routine."
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(Issues, {
+        issues: lint.filter((issue) => !["awareness", "invitations", "sociability", "planBend"].some((key) => issue.path === `routineSettings.${key}`))
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(FormGroup, {
+        title: "Story and lore awareness",
+        children: [
+          /* @__PURE__ */ u3(Choices2, {
+            label: "Story and lore awareness",
+            value: value.awareness,
+            options: ROUTINE_AWARENESS,
+            names: AWARENESS_LABEL,
+            lines: AWARENESS_EXPLAINED,
+            disabled: busy,
+            onChange: (awareness) => setValue({ ...value, awareness })
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3("p", {
+            class: "lre-minds-note",
+            children: "The GM can set it apart for one character in a chat."
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3(Issues, {
+            issues: lintAt(lint, "routineSettings.awareness")
+          }, undefined, false, undefined, this)
+        ]
+      }, undefined, true, undefined, this),
+      /* @__PURE__ */ u3(FormGroup, {
+        title: "Invitations",
+        children: [
+          /* @__PURE__ */ u3(Field, {
+            label: "Routine blocks may invite",
+            help: INVITATIONS_EXPLAINED[value.invitations],
+            children: /* @__PURE__ */ u3(Seg, {
+              label: "Routine blocks may invite",
+              value: value.invitations,
+              options: ROUTINE_INVITATIONS.map((v) => ({ value: v, label: INVITATIONS_LABEL[v] })),
+              disabled: busy,
+              onChange: (invitations) => setValue({ ...value, invitations })
+            }, undefined, false, undefined, this)
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3("p", {
+            class: "lre-minds-note",
+            children: "A block invites only when it names its company and asks them along, so nobody is invited out of nowhere."
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3(Issues, {
+            issues: lintAt(lint, "routineSettings.invitations")
+          }, undefined, false, undefined, this)
+        ]
+      }, undefined, true, undefined, this),
+      /* @__PURE__ */ u3(FormGroup, {
+        title: "Sociability",
+        children: [
+          /* @__PURE__ */ u3(Field, {
+            label: "How social people are",
+            help: SOCIABILITY_EXPLAINED[value.sociability],
+            children: /* @__PURE__ */ u3(Seg, {
+              label: "How social people are",
+              value: value.sociability,
+              options: ROUTINE_SOCIABILITY.map((v) => ({ value: v, label: SOCIABILITY_LABEL[v] })),
+              disabled: busy,
+              onChange: (sociability) => setValue({ ...value, sociability })
+            }, undefined, false, undefined, this)
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3(Issues, {
+            issues: lintAt(lint, "routineSettings.sociability")
+          }, undefined, false, undefined, this)
+        ]
+      }, undefined, true, undefined, this),
+      /* @__PURE__ */ u3(FormGroup, {
+        title: "How plans bend routine",
+        children: [
+          /* @__PURE__ */ u3("p", {
+            class: "lre-minds-note",
+            children: "Which plans a character makes in the story may move their work or school."
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3(Choices2, {
+            label: "How plans bend routine",
+            value: value.planBend,
+            options: ROUTINE_PLAN_BEND,
+            names: PLAN_BEND_LABEL,
+            disabled: busy,
+            onChange: (planBend) => setValue({ ...value, planBend })
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3(Issues, {
+            issues: lintAt(lint, "routineSettings.planBend")
+          }, undefined, false, undefined, this)
+        ]
+      }, undefined, true, undefined, this),
+      /* @__PURE__ */ u3(SaveBar, {
+        children: [
+          /* @__PURE__ */ u3(Button, {
+            variant: "primary",
+            disabled: !changed,
+            busy,
+            onClick: () => save(value),
+            children: "Save to draft"
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3(Button, {
+            variant: "ghost",
+            disabled: !changed || busy,
+            onClick: () => setValue(initial),
+            children: "Revert"
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3(Button, {
+            variant: "ghost",
+            disabled: busy || draft.doc.routineSettings === undefined,
+            onClick: () => save(DEFAULT_ROUTINE_SETTINGS),
+            children: "Use the defaults"
           }, undefined, false, undefined, this)
         ]
       }, undefined, true, undefined, this)
@@ -18757,12 +22414,13 @@ function TiersEditor(props) {
 var GROUPS2 = [
   { title: "People & things", collections: ["entities", "kinds", "classifications", "relations"] },
   { title: "Places", collections: ["places", "maps", "routes", "grids"] },
-  { title: "Rules", collections: ["actions", "checks", "rules", "schedules"] },
+  { title: "Daily life", collections: ["routines", "schedules"] },
+  { title: "Rules", collections: ["actions", "checks", "rules"] },
   { title: "Story", collections: ["tracks", "lore"] },
   { title: "Engine", collections: ["tables", "sections", "steps", "packs"] }
 ];
-var PARTS2 = ["meta", "calendar", "realism", "tiers", "time", "ruleset", "loreIndex", "minds"];
-var TOOLS = ["import_lore", "index_book", "index_text", "refine", "describe_map", "playtest", "check_world"];
+var PARTS2 = ["meta", "calendar", "realism", "tiers", "time", "ruleset", "loreIndex", "minds", "routineSettings"];
+var TOOLS = ["import_lore", "index_book", "index_text", "refine", "describe_map", "propose_routines", "playtest", "check_world"];
 function Build() {
   const route = useUi((ui) => ui.build);
   const root = T2(null);
@@ -18809,6 +22467,8 @@ function BuildPage(props) {
       return /* @__PURE__ */ u3(WithDraft, {
         worldId: route.worldId,
         children: route.collection === "lore" ? /* @__PURE__ */ u3(LoreList, {
+          worldId: route.worldId
+        }, undefined, false, undefined, this) : route.collection === "routines" ? /* @__PURE__ */ u3(RoutineList, {
           worldId: route.worldId
         }, undefined, false, undefined, this) : /* @__PURE__ */ u3(CollectionView, {
           collection: route.collection
@@ -19355,7 +23015,7 @@ function WorldHome() {
             icon: COLLECTION_INFO[collection].icon,
             title: COLLECTION_INFO[collection].label,
             subtitle: COLLECTION_INFO[collection].hint,
-            value: Object.keys(doc[collection]).length,
+            value: Object.keys(doc[collection] ?? {}).length,
             valueTone: "muted",
             badge: /* @__PURE__ */ u3(IssueBadge, {
               issues: lintAt(draft.lint, collection)
@@ -19676,7 +23336,7 @@ function ItemView(props) {
   if (!draft)
     return null;
   const registered = app.catalog.editors.get(props.collection);
-  const Editor = registered ? registered.component : props.collection === "tables" ? TableEditor : props.collection === "lore" ? LoreEditor : SchemaEditor;
+  const Editor = registered ? registered.component : props.collection === "tables" ? TableEditor : props.collection === "lore" ? LoreEditor : props.collection === "routines" ? RoutineEditor : SchemaEditor;
   return /* @__PURE__ */ u3(Editor, {
     world: draft.doc,
     collection: props.collection,
@@ -19736,6 +23396,8 @@ function PartView(props) {
       ]
     }, undefined, true, undefined, this);
   }
+  if (props.part === "routineSettings")
+    return /* @__PURE__ */ u3(RoutineSettingsEditor, {}, undefined, false, undefined, this);
   return /* @__PURE__ */ u3(SchemaPartView, {
     part: props.part
   }, undefined, false, undefined, this);
@@ -21303,583 +24965,6 @@ function TimePage(props) {
   }, undefined, true, undefined, this);
 }
 
-// src/frontend/settings/minds.tsx
-var PROMPT_NOTE = {
-  mind: "One call per character, as that character: what they think, how they come across, what they mean to do.",
-  memory: "After the reply, per character who heard your message, at the levels you pick: the notes, commitments and plans they take from it.",
-  skip: "Before a time skip: further moments in it worth stopping at.",
-  consolidate: "Folds a character's faded and surplus notes into their summary."
-};
-function Note(props) {
-  return /* @__PURE__ */ u3("p", {
-    class: "lre-minds-note",
-    children: props.children
-  }, undefined, false, undefined, this);
-}
-var TOKENS_START = 1000;
-var READ_LABEL = {
-  pinned: "Lore pinned to them and to where they are",
-  activated: "Lore the turn activates",
-  reply: "The latest reply",
-  message: "Your message",
-  summary: "Their summary",
-  memory: "Their notes and what they saw",
-  thoughts: "Their last thoughts",
-  recall: "Turns they were there for",
-  life: "Their life: money, the day, commitments and plans"
-};
-var READ_NOTE = {
-  pinned: "What Build pins to the character, then to their place and each place around it, nearest first. Within the limit every entry comes whole; the Context panel says what didn't fit.",
-  activated: "The world's lore entries the turn names, by a key, an alias, a title or a lookup-table term, as World Info activates them, read as the character: by your message and the latest reply when they were there for them, else by where they are.",
-  reply: "How the latest reply ended, for those who were there for it; cut to a number, they read its end. The memory step reads the reply within this limit too.",
-  message: "What you say and do, for those with you. The memory step reads it within this limit too.",
-  summary: "The summary their memory keeps and folds their old notes into.",
-  memory: "Their memory notes, most salient first, and what they saw happen. Never what someone's memory says they were told: that came from another mind.",
-  thoughts: "Their own latest mind: what they thought, what they meant to do and how they felt.",
-  recall: "Earlier turns they were there for: the latest, and those that best match the moment. Its limit is the memory setting's, which the world sets and you can override.",
-  life: "Their money, the rest of today as the planner lays it (with what it fills free time with: meals, friends, outings), their commitments and their plans. None of it is the story as it stands."
-};
-var STORY_SOURCES = { pinned: true, activated: true, reply: true, message: true, summary: false, memory: false, thoughts: false, recall: false, life: false };
-function LimitField(props) {
-  const fallback = props.fallback === "none" ? props.min : props.fallback;
-  return /* @__PURE__ */ u3("div", {
-    class: "lre-minds-limit",
-    children: [
-      /* @__PURE__ */ u3(HostSwitch, {
-        label: `${props.label}: ${props.noneLabel}`,
-        checked: props.value === "none",
-        disabled: props.disabled,
-        onChange: (none) => props.onChange(none ? "none" : fallback)
-      }, undefined, false, undefined, this),
-      props.value === "none" ? null : /* @__PURE__ */ u3(NumberStepper, {
-        label: props.label,
-        value: props.value,
-        min: props.min,
-        max: props.max,
-        step: props.step ?? 1,
-        integer: true,
-        disabled: props.disabled,
-        onChange: props.onChange
-      }, undefined, false, undefined, this)
-    ]
-  }, undefined, true, undefined, this);
-}
-function MemoryOverride(props) {
-  const { field, busy } = props;
-  const own = memoryOverride(props.memory, field);
-  const builtIn = memoryValue(DEFAULT_MINDS_MEMORY, field);
-  const id = `${field.part}.${field.key}`;
-  const set = (value) => {
-    const p = memoryOverridePatch(field, value);
-    if (p)
-      props.patch(p);
-  };
-  return /* @__PURE__ */ u3("div", {
-    class: "lre-minds-override",
-    "data-lre-minds-memory": id,
-    children: [
-      field.none ? /* @__PURE__ */ u3(HostSwitch, {
-        label: `${field.label}: ${field.none}`,
-        checked: own === "none" || own === undefined && builtIn === "none",
-        disabled: busy,
-        onChange: (none) => set(none ? "none" : typeof builtIn === "number" ? builtIn : field.range?.[0] ?? 0)
-      }, undefined, false, undefined, this) : null,
-      field.range && own !== "none" ? /* @__PURE__ */ u3(NumberStepper, {
-        label: field.label,
-        value: typeof own === "number" ? own : null,
-        min: field.range[0],
-        max: field.range[1],
-        step: field.step ?? 1,
-        integer: field.integer === true,
-        disabled: busy,
-        onChange: set
-      }, undefined, false, undefined, this) : field.range ? null : /* @__PURE__ */ u3(HostSwitch, {
-        label: field.label,
-        checked: typeof own === "boolean" ? own : builtIn === true,
-        disabled: busy,
-        onChange: set
-      }, undefined, false, undefined, this),
-      /* @__PURE__ */ u3("div", {
-        class: "lre-minds-override-foot",
-        children: own === undefined ? /* @__PURE__ */ u3("span", {
-          class: "lre-minds-note",
-          children: [
-            "The world's applies (built in: ",
-            typeof builtIn === "boolean" ? builtIn ? "on" : "off" : builtIn === "none" ? field.none ?? "none" : builtIn,
-            ")"
-          ]
-        }, undefined, true, undefined, this) : /* @__PURE__ */ u3(M, {
-          children: [
-            /* @__PURE__ */ u3(Badge, {
-              tone: "accent",
-              children: "Yours"
-            }, undefined, false, undefined, this),
-            /* @__PURE__ */ u3(Button, {
-              size: "sm",
-              variant: "ghost",
-              icon: "undo",
-              label: `Use the world's ${field.label.toLowerCase()}`,
-              disabled: busy,
-              onClick: () => set(null),
-              children: "Use the world's"
-            }, undefined, false, undefined, this)
-          ]
-        }, undefined, true, undefined, this)
-      }, undefined, false, undefined, this)
-    ]
-  }, undefined, true, undefined, this);
-}
-function ReadRow(props) {
-  const { source, reads, busy } = props;
-  const on = reads[source].on;
-  const recall = MEMORY_FIELDS.find((f) => f.part === "recall" && f.key === "tokens");
-  return /* @__PURE__ */ u3("div", {
-    class: "lre-minds-override",
-    "data-lre-minds-read": source,
-    children: [
-      /* @__PURE__ */ u3(HostSwitch, {
-        label: READ_LABEL[source],
-        checked: on,
-        disabled: busy,
-        onChange: (next) => props.patch(mindsReadPatch(source, { on: next }))
-      }, undefined, false, undefined, this),
-      !on ? null : source === "recall" ? recall ? /* @__PURE__ */ u3(MemoryOverride, {
-        field: recall,
-        memory: props.memory,
-        busy,
-        patch: props.patch
-      }, undefined, false, undefined, this) : null : /* @__PURE__ */ u3(LimitField, {
-        label: `${READ_LABEL[source]} (tokens)`,
-        noneLabel: "no limit",
-        value: reads[source].tokens,
-        min: 1,
-        step: 100,
-        fallback: DEFAULT_MIND_READS[source].tokens === "none" ? TOKENS_START : DEFAULT_MIND_READS[source].tokens,
-        disabled: busy,
-        onChange: (tokens) => props.patch(mindsReadPatch(source, { tokens }))
-      }, undefined, false, undefined, this),
-      /* @__PURE__ */ u3(Note, {
-        children: READ_NOTE[source]
-      }, undefined, false, undefined, this)
-    ]
-  }, undefined, true, undefined, this);
-}
-function PromptEditor(props) {
-  const builtIn = MIND_PROMPT_DEFAULTS[props.purpose];
-  const saved = props.value ?? builtIn;
-  const [text, setText] = d2(saved);
-  A(() => setText(saved), [saved]);
-  const save = mindsPromptPatch(props.purpose, text);
-  const label = STEP_LABEL[props.purpose];
-  return /* @__PURE__ */ u3("div", {
-    class: "lre-minds-prompt",
-    "data-lre-minds-prompt": props.purpose,
-    children: /* @__PURE__ */ u3(Disclosure, {
-      summary: /* @__PURE__ */ u3("span", {
-        class: "lre-minds-prompt-head",
-        children: [
-          /* @__PURE__ */ u3("span", {
-            class: "lre-minds-prompt-text",
-            children: [
-              /* @__PURE__ */ u3("span", {
-                class: "lre-minds-prompt-title",
-                children: label
-              }, undefined, false, undefined, this),
-              /* @__PURE__ */ u3("span", {
-                class: "lre-minds-prompt-sub",
-                children: PROMPT_NOTE[props.purpose]
-              }, undefined, false, undefined, this)
-            ]
-          }, undefined, true, undefined, this),
-          props.value === undefined ? /* @__PURE__ */ u3(Badge, {
-            children: "Built-in"
-          }, undefined, false, undefined, this) : /* @__PURE__ */ u3(Badge, {
-            tone: "accent",
-            children: "Your own"
-          }, undefined, false, undefined, this)
-        ]
-      }, undefined, true, undefined, this),
-      children: [
-        /* @__PURE__ */ u3("textarea", {
-          class: "lre-input lre-minds-prompt-input",
-          rows: 10,
-          "aria-label": `${label} prompt`,
-          value: text,
-          disabled: props.busy,
-          onInput: (event) => setText(event.currentTarget.value)
-        }, undefined, false, undefined, this),
-        text.length > MIND_PROMPT_MAX ? /* @__PURE__ */ u3("div", {
-          class: "lre-set-warn",
-          role: "note",
-          children: [
-            /* @__PURE__ */ u3(Icon, {
-              name: "alert",
-              size: 16
-            }, undefined, false, undefined, this),
-            /* @__PURE__ */ u3("span", {
-              children: [
-                "Too long: at most ",
-                MIND_PROMPT_MAX.toLocaleString(),
-                " characters."
-              ]
-            }, undefined, true, undefined, this)
-          ]
-        }, undefined, true, undefined, this) : null,
-        /* @__PURE__ */ u3("div", {
-          class: "lre-minds-actions",
-          children: [
-            /* @__PURE__ */ u3(Button, {
-              size: "sm",
-              variant: "primary",
-              disabled: props.busy || save === null || text === saved,
-              onClick: () => save && props.patch(save),
-              children: "Save"
-            }, undefined, false, undefined, this),
-            /* @__PURE__ */ u3(Button, {
-              size: "sm",
-              variant: "ghost",
-              disabled: props.busy || text === saved,
-              onClick: () => setText(saved),
-              children: "Revert"
-            }, undefined, false, undefined, this),
-            /* @__PURE__ */ u3(Button, {
-              size: "sm",
-              icon: "undo",
-              disabled: props.busy || props.value === undefined,
-              onClick: () => props.patch(mindsPromptPatch(props.purpose, null) ?? {}),
-              children: "Reset to the default"
-            }, undefined, false, undefined, this)
-          ]
-        }, undefined, true, undefined, this),
-        /* @__PURE__ */ u3("div", {
-          class: "lre-minds-default",
-          children: /* @__PURE__ */ u3(Disclosure, {
-            summary: "The built-in default",
-            children: /* @__PURE__ */ u3("pre", {
-              class: "lre-minds-code",
-              children: builtIn
-            }, undefined, false, undefined, this)
-          }, undefined, false, undefined, this)
-        }, undefined, false, undefined, this)
-      ]
-    }, undefined, true, undefined, this)
-  }, undefined, false, undefined, this);
-}
-function MindsSection(props) {
-  const { minds, busy } = props;
-  const policy = (change) => props.patch(mindsPolicyPatch(change));
-  const memoryFields = MEMORY_FIELDS.filter((field) => !(field.part === "recall" && field.key === "tokens"));
-  const overrides = memoryFields.filter((field) => memoryOverride(minds.memory, field) !== undefined).length;
-  return /* @__PURE__ */ u3("div", {
-    class: "lre-stack lre-minds-set",
-    "data-lre-settings-page": "minds",
-    children: [
-      /* @__PURE__ */ u3("p", {
-        class: "lre-set-lead",
-        children: "Each character near the story thinks for themselves in their own model call, scoped to what they know."
-      }, undefined, false, undefined, this),
-      /* @__PURE__ */ u3(Section, {
-        children: /* @__PURE__ */ u3("div", {
-          class: "lre-minds-body",
-          children: [
-            /* @__PURE__ */ u3(HostSwitch, {
-              label: "Character minds",
-              checked: minds.enabled,
-              disabled: busy,
-              onChange: (enabled) => policy({ enabled })
-            }, undefined, false, undefined, this),
-            /* @__PURE__ */ u3(Note, {
-              children: "Picking a Model use preset sets everything here but what a mind reads, your prompts and memory overrides; changing any of the rest makes it Custom."
-            }, undefined, false, undefined, this)
-          ]
-        }, undefined, true, undefined, this)
-      }, undefined, false, undefined, this),
-      minds.enabled ? /* @__PURE__ */ u3(M, {
-        children: [
-          /* @__PURE__ */ u3(Section, {
-            title: "How many think",
-            children: /* @__PURE__ */ u3("div", {
-              class: "lre-minds-body",
-              children: [
-                /* @__PURE__ */ u3(LimitField, {
-                  label: "Live minds a turn",
-                  noneLabel: "no limit",
-                  value: minds.liveLimit,
-                  min: 0,
-                  max: 64,
-                  fallback: MINDS_DEFAULTS.liveLimit,
-                  disabled: busy,
-                  onChange: (liveLimit) => policy({ liveLimit })
-                }, undefined, false, undefined, this),
-                /* @__PURE__ */ u3(Note, {
-                  children: "Live characters think every turn, best score first; past the limit they wait for a Near refresh."
-                }, undefined, false, undefined, this),
-                /* @__PURE__ */ u3(LimitField, {
-                  label: "Near and Far refreshes a turn",
-                  noneLabel: "no limit",
-                  value: minds.refreshLimit,
-                  min: 0,
-                  max: 64,
-                  fallback: MINDS_DEFAULTS.refreshLimit,
-                  disabled: busy,
-                  onChange: (refreshLimit) => policy({ refreshLimit })
-                }, undefined, false, undefined, this),
-                /* @__PURE__ */ u3(Note, {
-                  children: "Besides the Live minds, the most pressing first. A refresh you ask for in GM mode always runs."
-                }, undefined, false, undefined, this),
-                /* @__PURE__ */ u3(Note, {
-                  children: "Background characters never get a mind; they follow their routine."
-                }, undefined, false, undefined, this)
-              ]
-            }, undefined, true, undefined, this)
-          }, undefined, false, undefined, this),
-          /* @__PURE__ */ u3(Section, {
-            title: "Near refresh",
-            children: /* @__PURE__ */ u3("div", {
-              class: "lre-minds-body",
-              children: [
-                /* @__PURE__ */ u3(Note, {
-                  children: "A Near character thinks again when one of these calls for it."
-                }, undefined, false, undefined, this),
-                /* @__PURE__ */ u3(HostSwitch, {
-                  label: "When they come into the scene, or it changes",
-                  checked: minds.nearRefresh.scene,
-                  disabled: busy,
-                  onChange: (scene) => policy({ nearRefresh: { scene } })
-                }, undefined, false, undefined, this),
-                /* @__PURE__ */ u3(HostSwitch, {
-                  label: "When the latest message or reply names them",
-                  checked: minds.nearRefresh.mention,
-                  disabled: busy,
-                  onChange: (mention) => policy({ nearRefresh: { mention } })
-                }, undefined, false, undefined, this),
-                /* @__PURE__ */ u3(LimitField, {
-                  label: "Every so many turns",
-                  noneLabel: "never by turns",
-                  value: minds.nearRefresh.turns,
-                  min: 1,
-                  max: 1000,
-                  fallback: MINDS_DEFAULTS.nearRefresh.turns,
-                  disabled: busy,
-                  onChange: (turns) => policy({ nearRefresh: { turns } })
-                }, undefined, false, undefined, this),
-                /* @__PURE__ */ u3(LimitField, {
-                  label: "When their mind is this old (game minutes)",
-                  noneLabel: "never by age",
-                  value: minds.nearRefresh.minutes,
-                  min: 1,
-                  max: 525600,
-                  step: 30,
-                  fallback: MINDS_DEFAULTS.nearRefresh.minutes,
-                  disabled: busy,
-                  onChange: (minutes) => policy({ nearRefresh: { minutes } })
-                }, undefined, false, undefined, this)
-              ]
-            }, undefined, true, undefined, this)
-          }, undefined, false, undefined, this),
-          /* @__PURE__ */ u3(Section, {
-            title: "Far refresh",
-            children: /* @__PURE__ */ u3("div", {
-              class: "lre-minds-body",
-              children: [
-                /* @__PURE__ */ u3(Note, {
-                  children: "A Far character thinks now and then, on game time."
-                }, undefined, false, undefined, this),
-                /* @__PURE__ */ u3(LimitField, {
-                  label: "Every (game minutes)",
-                  noneLabel: "never",
-                  value: minds.farRefreshMinutes,
-                  min: 1,
-                  max: 525600,
-                  step: 60,
-                  fallback: MINDS_DEFAULTS.farRefreshMinutes,
-                  disabled: busy,
-                  onChange: (farRefreshMinutes) => policy({ farRefreshMinutes })
-                }, undefined, false, undefined, this)
-              ]
-            }, undefined, true, undefined, this)
-          }, undefined, false, undefined, this),
-          /* @__PURE__ */ u3(Section, {
-            title: "Memory notes after the reply",
-            children: /* @__PURE__ */ u3("div", {
-              class: "lre-minds-body",
-              children: [
-                /* @__PURE__ */ u3(Note, {
-                  children: "Which of the characters who heard your message take notes, commitments and plans from the reply."
-                }, undefined, false, undefined, this),
-                FIDELITIES.filter((f) => f !== "background").map((level) => /* @__PURE__ */ u3(HostSwitch, {
-                  label: `${FIDELITY_LABEL[level]} characters who heard you`,
-                  checked: minds.memoryLevels.includes(level),
-                  disabled: busy,
-                  onChange: (on) => policy({ memoryLevels: withMemoryLevel(minds.memoryLevels, level, on) })
-                }, level, false, undefined, this))
-              ]
-            }, undefined, true, undefined, this)
-          }, undefined, false, undefined, this),
-          /* @__PURE__ */ u3(Section, {
-            title: "What a mind reads",
-            children: /* @__PURE__ */ u3("div", {
-              class: "lre-minds-body",
-              children: [
-                /* @__PURE__ */ u3(Note, {
-                  children: "Who they are (their own sheet, aims and secrets), where they are and whom they see there, and what they mean to do are always in it. Each source below is yours to switch on or off and to limit; within its limit it comes whole, and nothing else cuts it."
-                }, undefined, false, undefined, this),
-                /* @__PURE__ */ u3("div", {
-                  class: "lre-minds-group",
-                  children: [
-                    /* @__PURE__ */ u3("span", {
-                      class: "lre-minds-group-title",
-                      children: "The story as it stands"
-                    }, undefined, false, undefined, this),
-                    MIND_SOURCES.filter((s) => STORY_SOURCES[s]).map((source) => /* @__PURE__ */ u3(ReadRow, {
-                      source,
-                      reads: minds.reads,
-                      memory: minds.memory,
-                      busy,
-                      patch: props.patch
-                    }, source, false, undefined, this))
-                  ]
-                }, undefined, true, undefined, this),
-                /* @__PURE__ */ u3("div", {
-                  class: "lre-minds-group",
-                  children: [
-                    /* @__PURE__ */ u3("span", {
-                      class: "lre-minds-group-title",
-                      children: "Their own memory and life"
-                    }, undefined, false, undefined, this),
-                    /* @__PURE__ */ u3(Note, {
-                      children: "Off unless you turn them on: each can carry what the story never set up, like a day the planner filled with meals and friends, or a plan their memory took from narration that showed another character's mind."
-                    }, undefined, false, undefined, this),
-                    MIND_SOURCES.filter((s) => !STORY_SOURCES[s]).map((source) => /* @__PURE__ */ u3(ReadRow, {
-                      source,
-                      reads: minds.reads,
-                      memory: minds.memory,
-                      busy,
-                      patch: props.patch
-                    }, source, false, undefined, this))
-                  ]
-                }, undefined, true, undefined, this)
-              ]
-            }, undefined, true, undefined, this)
-          }, undefined, false, undefined, this),
-          /* @__PURE__ */ u3(Section, {
-            children: /* @__PURE__ */ u3(Disclosure, {
-              summary: "Advanced: the Minds section budget and time skips",
-              children: [
-                /* @__PURE__ */ u3("div", {
-                  class: "lre-minds-group",
-                  children: [
-                    /* @__PURE__ */ u3("span", {
-                      class: "lre-minds-group-title",
-                      children: "The narrator's Minds section"
-                    }, undefined, false, undefined, this),
-                    /* @__PURE__ */ u3(NumberStepper, {
-                      label: "Minds section budget (tokens)",
-                      value: minds.tokens,
-                      min: 0,
-                      step: 100,
-                      integer: true,
-                      disabled: busy,
-                      onChange: (tokens) => policy({ tokens })
-                    }, undefined, false, undefined, this),
-                    /* @__PURE__ */ u3(Note, {
-                      children: "The narrator's Minds section has its own budget, apart from the engine's section budget, so minds never crowd out Scene or People."
-                    }, undefined, false, undefined, this)
-                  ]
-                }, undefined, true, undefined, this),
-                /* @__PURE__ */ u3("div", {
-                  class: "lre-minds-group",
-                  children: [
-                    /* @__PURE__ */ u3("span", {
-                      class: "lre-minds-group-title",
-                      children: "Time skips"
-                    }, undefined, false, undefined, this),
-                    /* @__PURE__ */ u3(LimitField, {
-                      label: "Beats a skip may stop at",
-                      noneLabel: "no limit",
-                      value: minds.skip.maxBeats,
-                      min: 0,
-                      max: 200,
-                      fallback: MINDS_DEFAULTS.skip.maxBeats,
-                      disabled: busy,
-                      onChange: (maxBeats) => policy({ skip: { maxBeats } })
-                    }, undefined, false, undefined, this),
-                    /* @__PURE__ */ u3(LimitField, {
-                      label: "Minds at each beat",
-                      noneLabel: "no limit",
-                      value: minds.skip.maxMindsPerBeat,
-                      min: 0,
-                      max: 64,
-                      fallback: MINDS_DEFAULTS.skip.maxMindsPerBeat,
-                      disabled: busy,
-                      onChange: (maxMindsPerBeat) => policy({ skip: { maxMindsPerBeat } })
-                    }, undefined, false, undefined, this)
-                  ]
-                }, undefined, true, undefined, this)
-              ]
-            }, undefined, true, undefined, this)
-          }, undefined, false, undefined, this)
-        ]
-      }, undefined, true, undefined, this) : null,
-      /* @__PURE__ */ u3(Section, {
-        title: "Memory",
-        children: /* @__PURE__ */ u3("div", {
-          class: "lre-minds-body",
-          children: [
-            /* @__PURE__ */ u3(Note, {
-              children: "Each world sets how its characters remember (Build → World → Minds); what you set here wins in every world."
-            }, undefined, false, undefined, this),
-            /* @__PURE__ */ u3(Disclosure, {
-              summary: /* @__PURE__ */ u3("span", {
-                class: "lre-minds-summary",
-                children: [
-                  /* @__PURE__ */ u3("span", {
-                    children: "Your overrides"
-                  }, undefined, false, undefined, this),
-                  overrides > 0 ? /* @__PURE__ */ u3(Badge, {
-                    tone: "accent",
-                    children: overrides === 1 ? "1 set" : `${overrides} set`
-                  }, undefined, false, undefined, this) : /* @__PURE__ */ u3(Badge, {
-                    children: "None"
-                  }, undefined, false, undefined, this)
-                ]
-              }, undefined, true, undefined, this),
-              children: /* @__PURE__ */ u3("div", {
-                class: "lre-minds-overrides",
-                children: memoryFields.map((field) => /* @__PURE__ */ u3(MemoryOverride, {
-                  field,
-                  memory: minds.memory,
-                  busy,
-                  patch: props.patch
-                }, `${field.part}.${field.key}`, false, undefined, this))
-              }, undefined, false, undefined, this)
-            }, undefined, false, undefined, this)
-          ]
-        }, undefined, true, undefined, this)
-      }, undefined, false, undefined, this),
-      /* @__PURE__ */ u3(Section, {
-        title: "Prompts",
-        flush: true,
-        children: /* @__PURE__ */ u3("div", {
-          class: "lre-minds-prompts",
-          children: [
-            /* @__PURE__ */ u3("p", {
-              class: "lre-minds-note lre-minds-prompts-lead",
-              children: "Your prompt wins over the world's own step template for a purpose (Build → Step templates), and that over the built-in."
-            }, undefined, false, undefined, this),
-            MIND_PURPOSES.map((purpose) => /* @__PURE__ */ u3(PromptEditor, {
-              purpose,
-              value: minds.prompts[purpose],
-              busy,
-              patch: props.patch
-            }, purpose, false, undefined, this))
-          ]
-        }, undefined, true, undefined, this)
-      }, undefined, false, undefined, this)
-    ]
-  }, undefined, true, undefined, this);
-}
-
 // src/frontend/settings/preset.tsx
 var BLOCK_STATE = {
   missing: { text: "Not in this preset", tone: "neutral" },
@@ -22024,7 +25109,8 @@ var EXTRACTION_LABEL = {
   regard: "Feelings toward others",
   quantity: "Quantities",
   spawn: "New people",
-  life: "Life and death (dying, dead, collapsed…)"
+  life: "Life and death (dying, dead, collapsed…)",
+  routine: "Routines (a new job, a habit, a move…)"
 };
 var MODE_OPTIONS = [
   { value: "auto", label: "Auto" },
@@ -22565,6 +25651,7 @@ function Settings() {
   }, undefined, false, undefined, this) : page === "steps" ? /* @__PURE__ */ u3(StepsSection, {
     modelUse: settings.modelUse,
     helper: settings.helper,
+    jobs: settings.jobs,
     patch,
     openHelper: () => go("helper"),
     busy
@@ -24295,385 +27382,29 @@ class HudFloat {
 }
 
 // src/packs/calendar/ui/schedule-editor.tsx
-var WEEKDAYS = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"];
-var TIME = /^([01]\d|2[0-3]):[0-5]\d$/;
-var DAY = 1440;
-var STEP = 15;
-var EVERY = { day: "Daily", week: "Weekly", month: "Monthly", year: "Yearly" };
-function minutesOf(time) {
-  return Number(time.slice(0, 2)) * 60 + Number(time.slice(3, 5));
-}
-function timeOf(minutes) {
-  const m = (minutes % DAY + DAY) % DAY;
-  return `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
-}
-function slotIssues(slots) {
-  const out = [];
-  const spans = [];
-  slots.forEach((slot, index) => {
-    if (!TIME.test(slot.start) || !TIME.test(slot.end)) {
-      out.push({ slots: [index], message: `Slot ${index + 1}: times must be HH:MM` });
-      return;
-    }
-    const start = minutesOf(slot.start);
-    const end = minutesOf(slot.end);
-    if (end > start)
-      spans.push({ start, end, index });
-    else {
-      spans.push({ start, end: DAY, index });
-      if (end > 0)
-        spans.push({ start: 0, end, index });
-    }
-    if (slot.value === undefined && !slot.weighted && !slot.given)
-      out.push({ slots: [index], message: `Slot ${index + 1}: no value` });
-    if (slot.weighted && slot.weighted.reduce((sum, w) => sum + w.weight, 0) <= 0)
-      out.push({ slots: [index], message: `Slot ${index + 1}: weights must add up to more than 0` });
-  });
-  spans.sort((a, b) => a.start - b.start);
-  for (let i = 1;i < spans.length; i += 1) {
-    const prev = spans[i - 1];
-    const cur = spans[i];
-    if (prev && cur && cur.start < prev.end && prev.index !== cur.index)
-      out.push({ slots: [prev.index, cur.index], message: `Slots ${prev.index + 1} and ${cur.index + 1} overlap` });
-  }
-  return out;
-}
-function slotSpans(slots) {
-  return slots.flatMap((slot, index) => {
-    if (!TIME.test(slot.start) || !TIME.test(slot.end))
-      return [];
-    const start = minutesOf(slot.start);
-    const end = minutesOf(slot.end);
-    if (end > start)
-      return [{ index, start, end }];
-    return end > 0 ? [{ index, start, end: DAY }, { index, start: 0, end }] : [{ index, start, end: DAY }];
-  });
-}
-function dayHandles(slots) {
-  const byAt = new Map;
-  slots.forEach((slot, index) => {
-    if (!TIME.test(slot.start) || !TIME.test(slot.end))
-      return;
-    const start = minutesOf(slot.start);
-    const end = minutesOf(slot.end);
-    byAt.set(start, [...byAt.get(start) ?? [], { index, side: "start" }]);
-    const endAt = end === 0 ? DAY : end;
-    byAt.set(endAt, [...byAt.get(endAt) ?? [], { index, side: "end" }]);
-  });
-  return [...byAt].map(([at, edges]) => ({ at, edges })).sort((a, b) => a.at - b.at);
-}
-function handleRange(handles, i) {
-  const h = handles[i];
-  if (!h || h.at === 0 || h.at === DAY)
-    return [h?.at ?? 0, h?.at ?? 0];
-  return [(handles[i - 1]?.at ?? 0) + STEP, (handles[i + 1]?.at ?? DAY) - STEP];
-}
-function moveHandle(slots, edges, to) {
-  const time = timeOf(to);
-  return slots.map((slot, index) => {
-    const mine = edges.filter((e) => e.index === index);
-    if (mine.length === 0)
-      return slot;
-    return { ...slot, ...mine.some((e) => e.side === "start") ? { start: time } : {}, ...mine.some((e) => e.side === "end") ? { end: time } : {} };
-  });
-}
-function valueText(value) {
-  return value === undefined ? "" : typeof value === "string" ? value : JSON.stringify(value);
-}
-function slotLabel(slot) {
-  if (slot.value !== undefined)
-    return valueText(slot.value) || "(empty)";
-  if (slot.weighted)
-    return slot.weighted.map((w) => valueText(w.value)).join(" / ");
-  return "given the slot before";
-}
-function JsonField2(props) {
-  const [text, setText] = d2(props.value === undefined ? "" : valueText(props.value));
-  A(() => setText(props.value === undefined ? "" : valueText(props.value)), [JSON.stringify(props.value)]);
-  return /* @__PURE__ */ u3(Field, {
-    label: props.label,
-    help: props.help,
-    children: /* @__PURE__ */ u3("input", {
-      class: "lre-input",
-      value: text,
-      onInput: (event) => setText(event.currentTarget.value),
-      onBlur: () => {
-        if (text.trim() === "")
-          return props.onChange(undefined);
-        try {
-          props.onChange(JSON.parse(text));
-        } catch {
-          props.onChange(text.trim());
-        }
-      }
-    }, undefined, false, undefined, this)
-  }, undefined, false, undefined, this);
-}
-function DayBar(props) {
-  const bar = T2(null);
-  const [dragging, setDragging] = d2(null);
-  const handles = dayHandles(props.slots);
-  const minuteAt = (clientX) => {
-    const rect = bar.current?.getBoundingClientRect();
-    if (!rect || rect.width === 0)
-      return null;
-    return Math.round((clientX - rect.left) / rect.width * DAY / STEP) * STEP;
-  };
-  const moveTo = (i, to) => {
-    const h = handles[i];
-    if (!h)
-      return;
-    const [min, max] = handleRange(handles, i);
-    const at = Math.min(max, Math.max(min, to));
-    if (at !== h.at)
-      props.onMove(moveHandle(props.slots, h.edges, at));
-  };
-  const name = (h) => {
-    const ends = h.edges.filter((e) => e.side === "end").map((e) => e.index + 1);
-    const starts = h.edges.filter((e) => e.side === "start").map((e) => e.index + 1);
-    return ends.length > 0 && starts.length > 0 ? `Slot ${ends.join(", ")} ends and slot ${starts.join(", ")} starts` : ends.length > 0 ? `End of slot ${ends.join(", ")}` : `Start of slot ${starts.join(", ")}`;
-  };
-  return /* @__PURE__ */ u3(M, {
-    children: [
-      /* @__PURE__ */ u3("div", {
-        ref: bar,
-        class: "lre-ve-day",
-        "data-lre-day-bar": true,
-        children: [
-          /* @__PURE__ */ u3("div", {
-            class: "lre-ve-day-track",
-            children: slotSpans(props.slots).map((span, i) => {
-              const slot = props.slots[span.index];
-              if (!slot)
-                return null;
-              return /* @__PURE__ */ u3("button", {
-                type: "button",
-                tabIndex: -1,
-                "aria-hidden": "true",
-                class: "lre-ve-day-slot",
-                "aria-current": span.index === props.current,
-                style: { left: `${span.start / DAY * 100}%`, width: `${(span.end - span.start) / DAY * 100}%`, "--slot": props.colour(slot) },
-                title: `${slot.start}–${slot.end} ${slotLabel(slot)}`,
-                onClick: () => props.onOpen(span.index),
-                children: slotLabel(slot)
-              }, `${span.index}:${i}`, false, undefined, this);
-            })
-          }, undefined, false, undefined, this),
-          handles.map((h, i) => {
-            const [min, max] = handleRange(handles, i);
-            if (min === max)
-              return null;
-            return /* @__PURE__ */ u3("div", {
-              class: "lre-ve-handle",
-              role: "slider",
-              tabIndex: 0,
-              "aria-label": name(h),
-              "aria-valuemin": min,
-              "aria-valuemax": max,
-              "aria-valuenow": h.at,
-              "aria-valuetext": timeOf(h.at),
-              "data-dragging": dragging === i ? "" : undefined,
-              style: { left: `${h.at / DAY * 100}%` },
-              onPointerDown: (event) => {
-                event.currentTarget.setPointerCapture(event.pointerId);
-                event.preventDefault();
-                setDragging(i);
-              },
-              onPointerMove: (event) => {
-                if (dragging !== i)
-                  return;
-                const to = minuteAt(event.clientX);
-                if (to !== null)
-                  moveTo(i, to);
-              },
-              onPointerUp: () => setDragging(null),
-              onPointerCancel: () => setDragging(null),
-              onKeyDown: (event) => {
-                const delta = event.key === "ArrowLeft" || event.key === "ArrowDown" ? -STEP : event.key === "ArrowRight" || event.key === "ArrowUp" ? STEP : event.key === "PageDown" ? -60 : event.key === "PageUp" ? 60 : 0;
-                const to = event.key === "Home" ? min : event.key === "End" ? max : delta !== 0 ? h.at + delta : null;
-                if (to === null)
-                  return;
-                event.preventDefault();
-                moveTo(i, to);
-              },
-              children: /* @__PURE__ */ u3("span", {}, undefined, false, undefined, this)
-            }, h.edges.map((e) => `${e.index}${e.side}`).join(), false, undefined, this);
-          })
-        ]
-      }, undefined, true, undefined, this),
-      /* @__PURE__ */ u3("div", {
-        class: "lre-ve-day-axis",
-        "aria-hidden": "true",
-        children: [
-          /* @__PURE__ */ u3("span", {
-            children: "00"
-          }, undefined, false, undefined, this),
-          /* @__PURE__ */ u3("span", {
-            children: "06"
-          }, undefined, false, undefined, this),
-          /* @__PURE__ */ u3("span", {
-            children: "12"
-          }, undefined, false, undefined, this),
-          /* @__PURE__ */ u3("span", {
-            children: "18"
-          }, undefined, false, undefined, this),
-          /* @__PURE__ */ u3("span", {
-            children: "24"
-          }, undefined, false, undefined, this)
-        ]
-      }, undefined, true, undefined, this)
-    ]
-  }, undefined, true, undefined, this);
-}
-function SlotSheet(props) {
-  const { slot } = props;
-  const weighted = slot.weighted !== undefined;
-  const total = (slot.weighted ?? []).reduce((sum, w) => sum + Math.max(0, w.weight), 0);
-  const lint = props.issues.map((message) => ({ severity: "error", path: `slots.${props.index}`, code: "slot", message }));
-  return /* @__PURE__ */ u3(FormSheet, {
-    title: `Slot ${props.index + 1}`,
-    subtitle: `${slot.start}–${slot.end} · ${slotLabel(slot)}`,
-    backLabel: "Schedule",
-    onClose: props.onClose,
-    children: [
-      /* @__PURE__ */ u3(Issues, {
-        issues: lint
-      }, undefined, false, undefined, this),
-      /* @__PURE__ */ u3("div", {
-        class: "lre-ve-times",
-        children: [
-          /* @__PURE__ */ u3(Field, {
-            label: "Starts",
-            children: /* @__PURE__ */ u3("input", {
-              class: "lre-input",
-              type: "time",
-              step: 900,
-              value: slot.start,
-              onChange: (event) => props.onChange({ ...slot, start: event.currentTarget.value })
-            }, undefined, false, undefined, this)
-          }, undefined, false, undefined, this),
-          /* @__PURE__ */ u3(Field, {
-            label: "Ends",
-            help: "At or before the start: it runs past midnight.",
-            children: /* @__PURE__ */ u3("input", {
-              class: "lre-input",
-              type: "time",
-              step: 900,
-              value: slot.end,
-              onChange: (event) => props.onChange({ ...slot, end: event.currentTarget.value })
-            }, undefined, false, undefined, this)
-          }, undefined, false, undefined, this)
-        ]
-      }, undefined, true, undefined, this),
-      /* @__PURE__ */ u3(Field, {
-        label: "Its value",
-        children: /* @__PURE__ */ u3(Seg, {
-          label: "Its value",
-          value: weighted ? "weighted" : "value",
-          options: [
-            { value: "value", label: "Fixed" },
-            { value: "weighted", label: "Weighted choice" }
-          ],
-          onChange: (mode) => props.onChange(mode === "value" ? { start: slot.start, end: slot.end, value: slot.weighted?.[0]?.value ?? "", ...slot.given ? { given: slot.given } : {} } : { start: slot.start, end: slot.end, weighted: [{ value: slot.value ?? "", weight: 1 }], ...slot.given ? { given: slot.given } : {} })
-        }, undefined, false, undefined, this)
-      }, undefined, false, undefined, this),
-      weighted ? /* @__PURE__ */ u3(FormGroup, {
-        title: "Choices",
-        aside: /* @__PURE__ */ u3(Button, {
-          size: "sm",
-          icon: "plus",
-          onClick: () => props.onChange({ ...slot, weighted: [...slot.weighted ?? [], { value: "", weight: 1 }] }),
-          children: "Choice"
-        }, undefined, false, undefined, this),
-        children: (slot.weighted ?? []).map((w, i) => /* @__PURE__ */ u3("div", {
-          class: "lre-ve-weight",
-          children: [
-            /* @__PURE__ */ u3(JsonField2, {
-              label: `Choice ${i + 1}`,
-              value: w.value,
-              onChange: (value) => props.onChange({ ...slot, weighted: slot.weighted?.map((x, j) => j === i ? { ...x, value: value ?? "" } : x) })
-            }, undefined, false, undefined, this),
-            /* @__PURE__ */ u3(IconButton, {
-              icon: "trash",
-              label: `Remove choice ${i + 1}`,
-              onClick: () => props.onChange({ ...slot, weighted: slot.weighted?.filter((_, j) => j !== i) })
-            }, undefined, false, undefined, this),
-            /* @__PURE__ */ u3(NumberStepper, {
-              label: `Weight${total > 0 ? ` (${Math.round(Math.max(0, w.weight) / total * 100)}%)` : ""}`,
-              value: w.weight,
-              min: 0,
-              onChange: (weight) => props.onChange({ ...slot, weighted: slot.weighted?.map((x, j) => j === i ? { ...x, weight } : x) })
-            }, undefined, false, undefined, this)
-          ]
-        }, i, true, undefined, this))
-      }, undefined, false, undefined, this) : /* @__PURE__ */ u3(JsonField2, {
-        label: "Value",
-        help: "A word (diner, clear) or JSON (a number, a list).",
-        value: slot.value,
-        onChange: (value) => props.onChange({ ...slot, value })
-      }, undefined, false, undefined, this),
-      /* @__PURE__ */ u3(Disclosure, {
-        summary: "Given the slot before (Advanced)",
-        defaultOpen: slot.given !== undefined,
-        children: /* @__PURE__ */ u3(JsonField2, {
-          label: "Choices by the value of the slot before, as JSON",
-          help: '{"clear": [{"value": "clear", "weight": 4}]}',
-          value: slot.given,
-          onChange: (value) => props.onChange({ ...slot, given: isRecord(value) ? value : undefined })
-        }, undefined, false, undefined, this)
-      }, undefined, false, undefined, this),
-      /* @__PURE__ */ u3("div", {
-        class: "lre-inline",
-        children: /* @__PURE__ */ u3(Button, {
-          variant: "danger",
-          icon: "trash",
-          onClick: props.onRemove,
-          children: "Remove slot"
-        }, undefined, false, undefined, this)
-      }, undefined, false, undefined, this)
-    ]
-  }, undefined, true, undefined, this);
-}
 function ScheduleEditor(props) {
   const app = useApp();
   const draft = useSelect(app.drafts, (d) => d);
   const isNew = props.id?.startsWith("new:") ?? false;
   const id = isNew ? (props.id ?? "").slice(4) : props.id;
   const stored = id ? props.world.schedules[id] : undefined;
-  const blank = { id: id ?? "", target: "place", recurrence: { every: "day" }, slots: [{ start: "09:00", end: "17:00", value: "work" }] };
+  const blank = { id: id ?? "", target: "activity", recurrence: { every: "day" }, slots: [{ start: "09:00", end: "17:00", value: "work" }] };
   const [schedule, setSchedule] = d2(stored ? structuredClone(stored) : blank);
-  const [open, setOpen] = d2(null);
   const [busy, run] = useBusy();
   const [jsonProblem, setJsonProblem] = d2(null);
+  const [reverts, setReverts] = d2(0);
   useHeld(schedule, setSchedule, stored ?? blank, `${props.world.id}/schedules/${props.id ?? ""}`, JSON.stringify(stored ?? null));
-  const issues = b2(() => slotIssues(schedule.slots), [schedule.slots]);
   const doc = b2(() => ({ ...props.world, kinds: { ...draft?.packKinds, ...props.world.kinds } }), [props.world, draft?.packKinds]);
   if (!id)
     return /* @__PURE__ */ u3("span", {
       class: "lre-muted",
       children: "Choose a schedule."
     }, undefined, false, undefined, this);
-  const rec = schedule.recurrence;
-  const setRec = (next) => setSchedule({ ...schedule, recurrence: next });
   const changed = JSON.stringify(schedule) !== JSON.stringify(stored ?? null);
-  const owners = [
-    ...Object.values(doc.entities).map((e) => ({ value: e.id, label: e.name, ...kindIs(doc, e.kind, "group") ? { sublabel: "a group: its members" } : {} })),
-    ...Object.entries(doc.kinds).map(([kid, k]) => ({ value: kid, label: `Every ${k.label}`, sublabel: "a kind" }))
-  ];
-  const bySelector = isRecord(schedule.owner);
-  const values = [...new Set(schedule.slots.map(slotLabel))];
-  const colour = (slot) => `var(--lre-series-${values.indexOf(slotLabel(slot)) % 5 + 1})`;
+  const problems = slotIssues(schedule.slots).length;
   const lint = lintAt(draft?.lint ?? [], `schedules.${id}`);
-  const slot = open !== null ? schedule.slots[open] : undefined;
-  const addSlot = () => {
-    const last = schedule.slots.at(-1);
-    const start = last && TIME.test(last.end) ? last.end : "00:00";
-    const end = timeOf(Math.min(DAY - 1, minutesOf(start) + 60));
-    setSchedule({ ...schedule, slots: [...schedule.slots, { start, end, value: "" }] });
-    setOpen(schedule.slots.length);
-  };
   const save = () => run(async () => {
-    const message = await props.send({ type: "lre.editor", worldId: props.world.id, base: null, op: "put", collection: "schedules", id, value: { ...schedule, id } });
+    const message = await props.send(scheduleWrite(props.world.id, id, schedule));
     if (message.type === "lre.result" && isNew)
       go(app, { view: "item", worldId: props.world.id, collection: "schedules", id });
   });
@@ -24687,205 +27418,19 @@ function ScheduleEditor(props) {
       /* @__PURE__ */ u3(ItemHeader, {
         title: nameOfId(id),
         id,
-        subtitle: `Sets ${schedule.target || "nothing yet"} · ${EVERY[rec.every]}`,
+        subtitle: `Sets ${targetWords(doc, schedule.owner, schedule.target)} · ${EVERY[schedule.recurrence.every]}`,
         onDelete: isNew ? undefined : remove,
         busy
       }, undefined, false, undefined, this),
       /* @__PURE__ */ u3(Issues, {
         issues: lint.filter((issue) => !issue.path.includes(".slots"))
       }, undefined, false, undefined, this),
-      /* @__PURE__ */ u3(Section, {
-        title: "Who and what",
-        children: /* @__PURE__ */ u3("div", {
-          class: "lre-stack",
-          children: [
-            /* @__PURE__ */ u3(Field, {
-              label: "It applies to",
-              children: /* @__PURE__ */ u3(Seg, {
-                label: "It applies to",
-                value: bySelector ? "selector" : "id",
-                options: [
-                  { value: "id", label: "Someone, a group or a kind" },
-                  { value: "selector", label: "A selector" }
-                ],
-                onChange: (mode) => setSchedule({ ...schedule, owner: mode === "selector" ? {} : undefined })
-              }, undefined, false, undefined, this)
-            }, undefined, false, undefined, this),
-            bySelector ? /* @__PURE__ */ u3(SelectorEditor, {
-              label: "Applies to",
-              value: selectorOf(schedule.owner),
-              doc,
-              onChange: (owner) => setSchedule({ ...schedule, owner: owner ?? {} })
-            }, undefined, false, undefined, this) : /* @__PURE__ */ u3(RefPicker, {
-              label: "Owner",
-              value: typeof schedule.owner === "string" ? schedule.owner : "",
-              options: owners,
-              none: "No one: a world process (weather, prices)",
-              onChange: (owner) => setSchedule({ ...schedule, owner: owner || undefined })
-            }, undefined, false, undefined, this),
-            /* @__PURE__ */ u3("span", {
-              class: "lre-small lre-muted",
-              children: "When schedules set the same field of the same person, the most specific owner wins: their own, then a group's, then their kind's, then a selector's."
-            }, undefined, false, undefined, this),
-            /* @__PURE__ */ u3(Field, {
-              label: "It sets",
-              help: "The field or relation each slot's value sets: place, activity, weather, price…",
-              children: /* @__PURE__ */ u3("input", {
-                class: "lre-input",
-                value: schedule.target,
-                onChange: (event) => setSchedule({ ...schedule, target: event.currentTarget.value })
-              }, undefined, false, undefined, this)
-            }, undefined, false, undefined, this)
-          ]
-        }, undefined, true, undefined, this)
-      }, undefined, false, undefined, this),
-      /* @__PURE__ */ u3(Section, {
-        title: "Repeats",
-        children: /* @__PURE__ */ u3("div", {
-          class: "lre-stack",
-          children: [
-            /* @__PURE__ */ u3(Seg, {
-              label: "Repeats",
-              value: rec.every,
-              options: Object.keys(EVERY).map((every) => ({ value: every, label: EVERY[every] })),
-              onChange: (every) => setRec({ ...rec, every })
-            }, undefined, false, undefined, this),
-            rec.every === "week" ? /* @__PURE__ */ u3(Field, {
-              label: "On",
-              children: /* @__PURE__ */ u3("div", {
-                class: "lre-ve-days",
-                role: "group",
-                "aria-label": "Weekdays",
-                children: WEEKDAYS.map((day, i) => {
-                  const on = rec.weekdays?.includes(i) ?? false;
-                  return /* @__PURE__ */ u3("button", {
-                    type: "button",
-                    "aria-pressed": on,
-                    onClick: () => setRec({ ...rec, weekdays: on ? (rec.weekdays ?? []).filter((d) => d !== i) : [...rec.weekdays ?? [], i].sort() }),
-                    children: day
-                  }, day, false, undefined, this);
-                })
-              }, undefined, false, undefined, this)
-            }, undefined, false, undefined, this) : null,
-            rec.every === "month" ? /* @__PURE__ */ u3(Field, {
-              label: "On these days of the month",
-              children: /* @__PURE__ */ u3("div", {
-                class: "lre-ve-days",
-                role: "group",
-                "aria-label": "Days of the month",
-                children: Array.from({ length: 31 }, (_, i) => i + 1).map((day) => {
-                  const on = rec.days?.includes(day) ?? false;
-                  return /* @__PURE__ */ u3("button", {
-                    type: "button",
-                    "aria-pressed": on,
-                    onClick: () => setRec({ ...rec, days: on ? (rec.days ?? []).filter((d) => d !== day) : [...rec.days ?? [], day].sort((a, b) => a - b) }),
-                    children: day
-                  }, day, false, undefined, this);
-                })
-              }, undefined, false, undefined, this)
-            }, undefined, false, undefined, this) : null,
-            props.world.calendar.holidays.length > 0 ? /* @__PURE__ */ u3(Field, {
-              label: "Not on",
-              children: /* @__PURE__ */ u3("div", {
-                class: "lre-form-chips",
-                role: "group",
-                "aria-label": "Not on these holidays",
-                children: props.world.calendar.holidays.map((h) => {
-                  const on = rec.except?.includes(h.id) ?? false;
-                  return /* @__PURE__ */ u3(Chip, {
-                    pressed: on,
-                    onToggle: () => setRec({ ...rec, except: on ? (rec.except ?? []).filter((e) => e !== h.id) : [...rec.except ?? [], h.id] }),
-                    children: h.label
-                  }, h.id, false, undefined, this);
-                })
-              }, undefined, false, undefined, this)
-            }, undefined, false, undefined, this) : null,
-            /* @__PURE__ */ u3("div", {
-              class: "lre-ve-times",
-              children: [
-                /* @__PURE__ */ u3(Field, {
-                  label: "From",
-                  children: /* @__PURE__ */ u3("input", {
-                    class: "lre-input",
-                    type: "date",
-                    value: rec.from ?? "",
-                    onChange: (event) => setRec({ ...rec, from: event.currentTarget.value || undefined })
-                  }, undefined, false, undefined, this)
-                }, undefined, false, undefined, this),
-                /* @__PURE__ */ u3(Field, {
-                  label: "Until",
-                  children: /* @__PURE__ */ u3("input", {
-                    class: "lre-input",
-                    type: "date",
-                    value: rec.until ?? "",
-                    onChange: (event) => setRec({ ...rec, until: event.currentTarget.value || undefined })
-                  }, undefined, false, undefined, this)
-                }, undefined, false, undefined, this)
-              ]
-            }, undefined, true, undefined, this)
-          ]
-        }, undefined, true, undefined, this)
-      }, undefined, false, undefined, this),
-      /* @__PURE__ */ u3(Section, {
-        title: "The day",
-        aside: /* @__PURE__ */ u3(Button, {
-          size: "sm",
-          icon: "plus",
-          onClick: addSlot,
-          children: "Slot"
-        }, undefined, false, undefined, this),
-        children: /* @__PURE__ */ u3("div", {
-          class: "lre-stack",
-          children: [
-            /* @__PURE__ */ u3(DayBar, {
-              slots: schedule.slots,
-              current: open,
-              colour,
-              onOpen: setOpen,
-              onMove: (slots) => setSchedule({ ...schedule, slots })
-            }, undefined, false, undefined, this),
-            /* @__PURE__ */ u3("span", {
-              class: "lre-small lre-muted",
-              children: "Tap a slot to edit it. Drag a handle to move where one slot ends or the next starts."
-            }, undefined, false, undefined, this),
-            /* @__PURE__ */ u3(Issues, {
-              issues: [...new Set(issues.map((issue) => issue.message))].map((message) => ({ severity: "error", path: `schedules.${id}.slots`, code: "slot", message }))
-            }, undefined, false, undefined, this),
-            schedule.slots.length === 0 ? /* @__PURE__ */ u3("span", {
-              class: "lre-small lre-muted",
-              children: "No slots: the schedule sets nothing."
-            }, undefined, false, undefined, this) : /* @__PURE__ */ u3("div", {
-              class: "lre-form-items",
-              "data-lre-slots": true,
-              children: schedule.slots.map((s, i) => {
-                const flagged = issues.some((issue) => issue.slots.includes(i));
-                return /* @__PURE__ */ u3(ItemRow, {
-                  title: /* @__PURE__ */ u3("span", {
-                    class: "lre-ve-brush",
-                    children: [
-                      /* @__PURE__ */ u3("span", {
-                        class: "lre-ve-dot",
-                        style: { "--slot": colour(s) },
-                        "aria-hidden": "true"
-                      }, undefined, false, undefined, this),
-                      s.start,
-                      "–",
-                      s.end
-                    ]
-                  }, undefined, true, undefined, this),
-                  subtitle: slotLabel(s),
-                  badge: flagged ? /* @__PURE__ */ u3("span", {
-                    class: "lre-badge neg",
-                    children: "Fix"
-                  }, undefined, false, undefined, this) : undefined,
-                  openLabel: `Edit slot ${i + 1}, ${s.start} to ${s.end}`,
-                  onOpen: () => setOpen(i)
-                }, i, false, undefined, this);
-              })
-            }, undefined, false, undefined, this)
-          ]
-        }, undefined, true, undefined, this)
-      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(ScheduleForm, {
+        value: schedule,
+        doc,
+        path: `schedules.${id}`,
+        onChange: setSchedule
+      }, reverts, false, undefined, this),
       /* @__PURE__ */ u3(Disclosure, {
         summary: "JSON (Advanced)",
         children: [
@@ -24907,17 +27452,6 @@ function ScheduleEditor(props) {
           }, undefined, false, undefined, this) : null
         ]
       }, undefined, true, undefined, this),
-      slot && open !== null ? /* @__PURE__ */ u3(SlotSheet, {
-        slot,
-        index: open,
-        issues: issues.filter((issue) => issue.slots.includes(open)).map((issue) => issue.message),
-        onChange: (next) => setSchedule({ ...schedule, slots: schedule.slots.map((s, i) => i === open ? next : s) }),
-        onRemove: () => {
-          setSchedule({ ...schedule, slots: schedule.slots.filter((_, i) => i !== open) });
-          setOpen(null);
-        },
-        onClose: () => setOpen(null)
-      }, undefined, false, undefined, this) : null,
       /* @__PURE__ */ u3(SaveBar, {
         children: [
           /* @__PURE__ */ u3(Button, {
@@ -24926,13 +27460,16 @@ function ScheduleEditor(props) {
             onClick: save,
             children: [
               isNew ? "Create schedule" : "Save to draft",
-              issues.length > 0 ? ` · ${issues.length} to fix` : ""
+              problems > 0 ? ` · ${problems} to fix` : ""
             ]
           }, undefined, true, undefined, this),
           /* @__PURE__ */ u3(Button, {
             variant: "ghost",
             disabled: !changed || busy,
-            onClick: () => setSchedule(stored ? structuredClone(stored) : blank),
+            onClick: () => {
+              setSchedule(stored ? structuredClone(stored) : blank);
+              setReverts(reverts + 1);
+            },
             children: "Revert"
           }, undefined, false, undefined, this)
         ]
@@ -25747,6 +28284,71 @@ function Timeline(props) {
     ]
   }, undefined, true, undefined, this);
 }
+var SOURCE_WORDS = {
+  routine: "Usually · their routine",
+  lore: "Usually · from lore",
+  commitment: "A commitment",
+  story: "As the story has it",
+  plan: "A plan of theirs",
+  free: "Free time"
+};
+function usualDay(view) {
+  const day = view?.day;
+  if (!day || day.blocks.length === 0)
+    return null;
+  return {
+    label: day.label,
+    rows: day.blocks.map((b) => ({ from: b.from, to: b.to, label: b.label, source: b.source.type === "lore" ? `${SOURCE_WORDS.lore}: ${b.source.title}` : SOURCE_WORDS[b.source.type], reasons: b.reasons }))
+  };
+}
+function UsualDay(props) {
+  const app = useApp();
+  const [view, setView] = d2(null);
+  const [why, setWhy] = d2(false);
+  A(() => {
+    let current = true;
+    app.request({ type: "lre.routine", chatId: props.chatId, op: "day", entity: props.entity, view: "player" }).then((result) => {
+      if (current)
+        setView(result?.player ?? null);
+    });
+    return () => {
+      current = false;
+    };
+  }, [props.chatId, props.entity, props.dayKey]);
+  const day = usualDay(view);
+  if (!day)
+    return null;
+  return /* @__PURE__ */ u3(Disclosure, {
+    summary: "Their usual day",
+    children: /* @__PURE__ */ u3("div", {
+      class: "lre-stack",
+      "data-lre-usual-day": props.entity,
+      children: [
+        /* @__PURE__ */ u3("span", {
+          class: "lre-small lre-muted",
+          children: "What they'd usually do on a day like this, as far as you know. What happens in the story always comes first."
+        }, undefined, false, undefined, this),
+        /* @__PURE__ */ u3(List, {
+          children: day.rows.map((r, i) => /* @__PURE__ */ u3(ListRow, {
+            title: r.label,
+            subtitle: why && r.reasons.length > 0 ? `${r.source} · ${r.reasons.join(", ")}` : r.source,
+            value: `${r.from}–${r.to}`,
+            valueTone: "muted"
+          }, i, false, undefined, this))
+        }, undefined, false, undefined, this),
+        day.rows.some((r) => r.reasons.length > 0) ? /* @__PURE__ */ u3("div", {
+          children: /* @__PURE__ */ u3(Button, {
+            variant: "ghost",
+            size: "sm",
+            icon: "help",
+            onClick: () => setWhy(!why),
+            children: why ? "Hide reasons" : "Why?"
+          }, undefined, false, undefined, this)
+        }, undefined, false, undefined, this) : null
+      ]
+    }, undefined, true, undefined, this)
+  }, undefined, false, undefined, this);
+}
 function classLabel(view, facetId, valueId) {
   const facet = view.facets.find((f) => f.id === facetId);
   if (!facet)
@@ -25859,9 +28461,19 @@ function PersonSheet(props) {
       }, undefined, false, undefined, this) : null,
       person.timeline.length > 0 ? /* @__PURE__ */ u3(Section, {
         title: "Today",
-        children: /* @__PURE__ */ u3(Timeline, {
-          slots: person.timeline
-        }, undefined, false, undefined, this)
+        children: /* @__PURE__ */ u3("div", {
+          class: "lre-stack",
+          children: [
+            /* @__PURE__ */ u3(Timeline, {
+              slots: person.timeline
+            }, undefined, false, undefined, this),
+            /* @__PURE__ */ u3(UsualDay, {
+              chatId: props.chatId,
+              entity: person.id,
+              dayKey: JSON.stringify(person.timeline)
+            }, undefined, false, undefined, this)
+          ]
+        }, undefined, true, undefined, this)
       }, undefined, false, undefined, this) : null,
       person.regard.length > 0 ? /* @__PURE__ */ u3(Section, {
         title: "How they see you",
@@ -25915,12 +28527,1451 @@ function PersonSheet(props) {
   }, undefined, true, undefined, this);
 }
 
+// src/frontend/gm/editor.ts
+function nameOf3(gm, id) {
+  if (id === null)
+    return "—";
+  return gm.entities.find((e) => e.id === id)?.name ?? gm.places.find((p) => p.id === id)?.name ?? id;
+}
+function findEntities(entities, query, kind) {
+  const q = query.trim().toLowerCase();
+  return entities.filter((e) => (kind === "" || e.kind === kind) && (q === "" || e.name.toLowerCase().includes(q) || e.id.toLowerCase().includes(q))).sort((a, b) => Number(a.gone) - Number(b.gone) || a.name.localeCompare(b.name));
+}
+function claimedThings(gm) {
+  return gm.entities.filter((e) => e.claimed && !e.gone).sort((a, b) => a.name.localeCompare(b.name)).map((entity) => ({ entity, where: entity.holder !== null ? `held by ${nameOf3(gm, entity.holder)}` : entity.place !== null ? `at ${nameOf3(gm, entity.place)}` : "nowhere" }));
+}
+
+// src/packs/castlife/ui/routines-ops.ts
+var BINDING_LABEL = { routine: "Routine leads", story: "Story leads", none: "No routine" };
+function bindingOf(tier, mode, planned) {
+  if (mode === "off" || !planned)
+    return "none";
+  return tier === "near" || tier === "live" ? "story" : "routine";
+}
+function plannedHint(entity) {
+  if (!entity || entity.gone || !entity.agent || !entity.life.acts)
+    return false;
+  return (entity.levels.find((l) => l.domain === "castlife")?.level ?? 0) >= 3;
+}
+var TIER_LABEL = { live: "Live", near: "Near", far: "Far", background: "Background" };
+function routineRows(characters, entities, changed) {
+  return characters.map((c) => {
+    const summary = changed.find((s) => s.entity === c.entity);
+    const binding = bindingOf(c.fidelity.level, summary?.follow?.mode ?? "follows", plannedHint(entities.find((e) => e.id === c.entity)));
+    return { entity: c.entity, name: c.name, tier: c.fidelity.level, binding, changed: changedBy(summary) };
+  });
+}
+var MODE_NOTE = {
+  follows: "Their routine and schedules shape their day, as far as the story lets them.",
+  no_invitations: "As they follow it, but their routine makes and accepts no invitations.",
+  off: "No routine at all in this chat: only the story, your edits, their commitments and their basic needs."
+};
+var AWARENESS_NOTE = {
+  story_first: "Background and Far characters bend for story plans and your intent, and what the story set holds until the story or you release it. Near and Live get no routine suggestions.",
+  balanced: "Background characters keep their routine; Far ones bend for story plans and intent. What the story set holds for the rest of that day. Near and Live get their routine only as a soft suggestion.",
+  routine_first: "Background and Far characters keep to routine, bending only as the world lets story plans bend it. What the story set holds until the routine's next block."
+};
+var BINDING_NOTE = {
+  story_first: {
+    background: "Off screen they keep to their routine, but bend for story plans and your intent. What the story set holds until the story or you release it.",
+    far: "Their routine leads, but they bend for story plans and your intent. What the story set holds until the story or you release it.",
+    cast: "The story leads: their routine makes no suggestions for them, and no routine or schedule moves them."
+  },
+  balanced: {
+    background: "Off screen they keep their routine and schedules. What the story set holds for the rest of that day.",
+    far: "Their routine leads, but they bend for story plans and intent. What the story set holds for the rest of that day.",
+    cast: "The story leads: their routine is only a soft suggestion, and no routine or schedule moves them."
+  },
+  routine_first: {
+    background: "They keep to their routine. What the story set holds until their routine's next block.",
+    far: "They keep to their routine. What the story set holds until their routine's next block.",
+    cast: "The story leads: their routine is only a soft suggestion, and no routine or schedule moves them."
+  }
+};
+function bindingNote(view) {
+  const binding = bindingOf(view.tier, view.follow.mode, view.planned);
+  const always = "Nobody is moved out of a scene with you, and no routine interrupts play.";
+  if (view.follow.mode === "off")
+    return ["No routine in this chat: their day is the story, your edits, their commitments and their basic needs.", always];
+  if (!view.planned)
+    return ["The planner doesn't lay their day (it needs an agent who acts, at Cast life 3 or higher), so no routine moves them.", always];
+  const awareness = view.follow.awareness;
+  const lines = [BINDING_NOTE[awareness][binding === "story" ? "cast" : view.tier === "far" ? "far" : "background"]];
+  if (binding === "routine" && awareness === "routine_first")
+    lines.push(`Story plans bend it only as the world allows: ${PLAN_BEND_LABEL[view.settings.planBend].toLowerCase()}.`);
+  if (view.tier === null)
+    lines.push("Without minds there is no fidelity: the story leads whenever they share a scene with you.");
+  if (view.follow.mode === "no_invitations")
+    lines.push("They make and accept no invitations.");
+  lines.push(always);
+  return lines;
+}
+function changedBy(summary) {
+  if (!summary)
+    return null;
+  const sources = [...summary.blocks.map((b) => b.source), ...summary.schedules.map((s) => s.source)];
+  const gm = summary.follow !== null || sources.some((s) => s.type === "gm");
+  const story = sources.some((s) => s.type === "story");
+  return gm && story ? "both" : gm ? "gm" : story ? "story" : null;
+}
+var CHANGED_LABEL = { gm: "Changed by you", story: "Changed by the story", both: "Changed by you and the story" };
+function sourceWords2(source, now) {
+  if (source.type !== "story" && source.type !== "gm")
+    return source.label;
+  return `${source.label}, ${source.at >= now ? "just now" : `${formatMinutes(now - source.at)} ago`}`;
+}
+function storyChanges(view, summary) {
+  const out = [];
+  for (const b of summary?.blocks ?? [])
+    if (b.source.type === "story")
+      out.push({ kind: "block", id: b.block, source: b.source, off: b.off, block: view.blocks.find((x) => x.block.id === b.block) ?? null });
+  for (const s of summary?.schedules ?? [])
+    if (s.source.type === "story")
+      out.push({ kind: "schedule", id: s.schedule, source: s.source, off: s.off, schedule: view.schedules.find((x) => x.schedule === s.schedule) ?? null });
+  return out.sort((a, b) => a.source.at - b.source.at);
+}
+function ownerWords2(owner) {
+  switch (owner.level) {
+    case "chat":
+      return "Changed in this chat";
+    case "own":
+      return "Their own";
+    case "group":
+      return `Group: ${owner.name}`;
+    case "kind":
+      return `Kind: ${owner.name}`;
+    case "selector":
+      return `Selector: ${owner.name}`;
+    case "world":
+      return "The world's default";
+    case "builtin":
+      return "Basic needs";
+  }
+}
+var WEEKDAY = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+function blockWhen(block) {
+  const length = formatMinutes(block.minutes);
+  if (block.kind === "fixed")
+    return `${block.at ?? "—"} for ${length}`;
+  const parts = [`${length} between ${block.window?.from ?? "—"} and ${block.window?.to ?? "—"}`];
+  if (block.perWeek !== undefined)
+    parts.push(`${block.perWeek}× a week`);
+  if (block.kind === "optional")
+    parts.push(`${Math.round((block.chance ?? 0.5) * 100)}% likely`);
+  return parts.join(", ");
+}
+function daysWords(block) {
+  const d = block.days;
+  if (!d)
+    return null;
+  const parts = [];
+  if (d.weekdays && d.weekdays.length > 0 && d.weekdays.length < 7)
+    parts.push([...d.weekdays].sort((a, b) => a - b).map((w) => WEEKDAY[w] ?? String(w)).join(" "));
+  if (d.off === "only")
+    parts.push("days off only");
+  if (d.off === "never")
+    parts.push("not on days off");
+  if (d.holidays && d.holidays.length > 0)
+    parts.push(`on ${d.holidays.map(humanize).join(", ")}`);
+  if (d.except && d.except.length > 0)
+    parts.push(`not on ${d.except.map(humanize).join(", ")}`);
+  if (d.birthday === "own")
+    parts.push("on their birthday");
+  if (d.birthday === "friend")
+    parts.push("on a friend's birthday");
+  if (d.seasons && d.seasons.length > 0)
+    parts.push(`in ${d.seasons.join(", ")}`);
+  if (d.weather)
+    parts.push(`in ${d.weather} weather`);
+  return parts.length > 0 ? parts.join(" · ") : null;
+}
+function placeWords2(place, placeName) {
+  if (place === undefined || place === "home")
+    return "At home";
+  if (place === "work")
+    return "At work";
+  if (place === "here")
+    return "Wherever they are";
+  if (place === "with")
+    return "At their company's home";
+  return "place" in place ? `At ${placeName(place.place)}` : `At the nearest ${humanize(place.nearest).toLowerCase()}`;
+}
+function originWords(origin, name) {
+  switch (origin.type) {
+    case "routine":
+      return origin.owner.level === "builtin" ? "Routine · Basic needs" : `Routine · ${ownerWords2(origin.owner)} · ${origin.source.label}`;
+    case "schedule":
+      return origin.owner.level === "chat" ? `Their own schedule in this chat · ${origin.source.label}` : `Schedule ${nameOfId(origin.schedule)} · ${ownerWords2(origin.owner)} · ${origin.source.label}`;
+    case "appointment":
+      return "An appointment";
+    case "trip":
+      return "A trip";
+    case "plan":
+      return origin.source === "gm" ? "Your plan for them" : origin.source === "memory" ? "A plan from the story" : "A plan from their mind";
+    case "agenda":
+      return `Their agenda: ${name(origin.track)}`;
+    case "invitation":
+      return `${name(origin.host)}'s invitation`;
+    case "free":
+      return "Free time";
+  }
+}
+function invitationGround(origin) {
+  switch (origin.type) {
+    case "plan":
+      return "From a plan the story made";
+    case "routine":
+      return `From their routine's ${nameOfId(origin.block)} · ${origin.source.label}`;
+    case "gm":
+      return "From you";
+    case "legacy":
+      return "Recorded before invitations needed a ground";
+  }
+}
+function untilWords(until, now) {
+  if (until === null)
+    return "until the story or you release it";
+  return until <= now ? "ending now" : `for ${formatMinutes(until - now)} more`;
+}
+var HOLD_BY = { story: "The story set it", trip: "A trip", override: "An override", plan: "A plan under way" };
+function followOp(entity, mode, awareness) {
+  return { op: "routine_follow", entity, mode: mode === "follows" ? null : mode, awareness };
+}
+function blockOp(entity, block) {
+  const value = { ...block };
+  delete value.source;
+  const problems = blockShapeProblems(value, false);
+  return problems.length > 0 ? { problems } : { op: { op: "routine_block", entity, block: value.id, value } };
+}
+function blockOffOp(entity, block) {
+  return { op: "routine_block", entity, block, value: { id: block, off: true } };
+}
+function dropBlockOp(entity, block) {
+  return { op: "routine_block", entity, block, value: null };
+}
+function scheduleOwnOp(entity, schedule, slots, recurrence, was) {
+  const problems = slots.length === 0 ? ["Give it at least one slot."] : slotProblems(slots);
+  if (problems.length > 0)
+    return { problems };
+  const same = JSON.stringify(recurrence) === JSON.stringify(was);
+  return { op: { op: "schedule_override", entity, schedule, value: same ? { slots } : { slots, recurrence } } };
+}
+function scheduleOffOp(entity, schedule, until) {
+  return { op: "schedule_override", entity, schedule, value: { off: true, until } };
+}
+function dropScheduleOp(entity, schedule) {
+  return { op: "schedule_override", entity, schedule, value: null };
+}
+function scheduleDraft(effective, entity) {
+  const own = effective.chat && "slots" in effective.chat ? effective.chat : null;
+  const slots = (own?.slots ?? effective.slots).map((slot) => {
+    const plain = { start: slot.start, end: slot.end };
+    if (slot.value !== undefined)
+      plain.value = structuredClone(slot.value);
+    if (slot.weighted)
+      plain.weighted = structuredClone(slot.weighted);
+    if (slot.given)
+      plain.given = structuredClone(slot.given);
+    return plain;
+  });
+  return { id: effective.schedule, owner: entity, target: effective.target, recurrence: structuredClone(own?.recurrence ?? effective.recurrence), slots };
+}
+function targetWords2(target) {
+  return target === "place" ? "where they are" : target === "activity" ? "what they're doing" : humanize(target).toLowerCase();
+}
+function scheduleRows(view) {
+  const versions = view.schedules.filter((s) => s.owner.level === "chat").map((s) => s.schedule);
+  return view.schedules.filter((s) => s.owner.level !== "chat").sort((a, b) => a.target.localeCompare(b.target) || a.owner.rank - b.owner.rank || a.schedule.localeCompare(b.schedule)).map((schedule) => ({ schedule, over: schedule.shadowedBy.filter((id) => !versions.includes(id)) }));
+}
+function blockDraft(effective, fresh) {
+  if (!effective)
+    return fresh;
+  if (!isOff(effective.block))
+    return structuredClone(effective.block);
+  const under = effective.shadowed.map((s) => s.block).find((b) => !isOff(b));
+  return under ? { ...structuredClone(under), id: effective.block.id } : { ...fresh, id: effective.block.id };
+}
+function shadowWords(block) {
+  if (block.shadowed.length === 0)
+    return null;
+  return `Over ${block.shadowed.map((s) => s.owner.level === "builtin" ? "the basic need" : ownerWords2(s.owner).toLowerCase()).join(", ")}`;
+}
+
+// src/packs/castlife/ui/routines-gm.tsx
+var BINDING_TONE = { routine: "neutral", story: "accent", none: "warn" };
+function sendOp(ctx, op, onDone) {
+  ctx.edit([op]).then((ok) => {
+    if (ok)
+      onDone();
+  });
+}
+function None(props) {
+  return /* @__PURE__ */ u3("p", {
+    class: "lre-gm-routines-none",
+    children: props.children
+  }, undefined, false, undefined, this);
+}
+function GmRoutinesSection(props) {
+  const app = useApp();
+  const worldId = useView()?.worldId ?? null;
+  const pages = usePages();
+  const [query, setQuery] = d2("");
+  const [filter, setFilter] = d2("");
+  const [changed, setChanged] = d2(null);
+  A(() => {
+    let live = true;
+    props.send({ type: "lre.routine", chatId: props.chatId, op: "changed" }).then((m) => {
+      if (live && m.type === "lre.result" && m.request === "lre.routine")
+        setChanged(m.body.changed ?? []);
+    });
+    return () => {
+      live = false;
+    };
+  }, [props.chatId, props.gm]);
+  const ctx = { chatId: props.chatId, gm: props.gm, busy: props.busy, send: props.send, edit: props.edit };
+  const rows = routineRows(props.gm.minds.characters, props.gm.entities, changed ?? []);
+  const page = pages.page;
+  const selected = page === null ? undefined : rows.find((r) => r.entity === page);
+  A(() => {
+    if (page !== null && selected === undefined)
+      pages.back();
+  });
+  const q = query.trim().toLowerCase();
+  const list = rows.filter((r) => (filter === "" || (filter === "changed" ? r.changed !== null : r.binding === filter)) && (q === "" || r.name.toLowerCase().includes(q)));
+  const changedCount = rows.filter((r) => r.changed !== null).length;
+  return /* @__PURE__ */ u3("div", {
+    ref: pages.host.ref,
+    class: "lre-gm-pages",
+    onKeyDown: pages.host.onKeyDown,
+    "data-lre-gm-section": "routines",
+    children: [
+      /* @__PURE__ */ u3("div", {
+        class: "lre-stack lre-gm-list",
+        hidden: selected !== undefined,
+        children: [
+          /* @__PURE__ */ u3(Section, {
+            flush: true,
+            children: [
+              /* @__PURE__ */ u3(List, {
+                children: [
+                  /* @__PURE__ */ u3(ListRow, {
+                    icon: "clock",
+                    title: "Now",
+                    value: props.gm.minds.nowText
+                  }, undefined, false, undefined, this),
+                  /* @__PURE__ */ u3(ListRow, {
+                    icon: "edit",
+                    title: "Changed in this chat",
+                    subtitle: "By you or by the story",
+                    value: changed === null ? "…" : String(changedCount)
+                  }, undefined, false, undefined, this)
+                ]
+              }, undefined, true, undefined, this),
+              /* @__PURE__ */ u3("p", {
+                class: "lre-gm-routines-intro",
+                children: "A routine or a schedule is a default the world relies on, never a script: the story leads whoever shares a scene with you, and no routine interrupts play. What you change here is this chat's alone; each change has its own Undo."
+              }, undefined, false, undefined, this),
+              worldId ? /* @__PURE__ */ u3("div", {
+                class: "lre-gm-routines-build",
+                children: /* @__PURE__ */ u3(Button, {
+                  size: "sm",
+                  variant: "ghost",
+                  icon: "hammer",
+                  onClick: () => app.ui.update((ui) => ({ ...ui, mode: "build", build: { view: "collection", worldId, collection: "routines" } })),
+                  children: "The world's routines are in Build"
+                }, undefined, false, undefined, this)
+              }, undefined, false, undefined, this) : null
+            ]
+          }, undefined, true, undefined, this),
+          /* @__PURE__ */ u3("div", {
+            class: "lre-gm-tools",
+            children: [
+              /* @__PURE__ */ u3("label", {
+                class: "lre-gm-search",
+                children: [
+                  /* @__PURE__ */ u3(Icon, {
+                    name: "search",
+                    size: 16
+                  }, undefined, false, undefined, this),
+                  /* @__PURE__ */ u3("input", {
+                    class: "lre-input",
+                    type: "search",
+                    "aria-label": "Search by name",
+                    placeholder: "Search by name",
+                    value: query,
+                    onInput: (event) => setQuery(event.currentTarget.value)
+                  }, undefined, false, undefined, this)
+                ]
+              }, undefined, true, undefined, this),
+              /* @__PURE__ */ u3("select", {
+                class: "lre-input",
+                "aria-label": "Show",
+                value: filter,
+                onChange: (event) => setFilter(event.currentTarget.value),
+                children: [
+                  /* @__PURE__ */ u3("option", {
+                    value: "",
+                    children: "Everyone"
+                  }, undefined, false, undefined, this),
+                  /* @__PURE__ */ u3("option", {
+                    value: "changed",
+                    children: "Changed in this chat"
+                  }, undefined, false, undefined, this),
+                  /* @__PURE__ */ u3("option", {
+                    value: "routine",
+                    children: BINDING_LABEL.routine
+                  }, undefined, false, undefined, this),
+                  /* @__PURE__ */ u3("option", {
+                    value: "story",
+                    children: BINDING_LABEL.story
+                  }, undefined, false, undefined, this),
+                  /* @__PURE__ */ u3("option", {
+                    value: "none",
+                    children: BINDING_LABEL.none
+                  }, undefined, false, undefined, this)
+                ]
+              }, undefined, true, undefined, this)
+            ]
+          }, undefined, true, undefined, this),
+          /* @__PURE__ */ u3(Section, {
+            title: `${list.length} of ${rows.length}`,
+            flush: true,
+            children: rows.length === 0 ? /* @__PURE__ */ u3(Empty, {
+              icon: "users",
+              children: "No characters yet."
+            }, undefined, false, undefined, this) : list.length === 0 ? /* @__PURE__ */ u3(Empty, {
+              icon: "search",
+              children: "No one matches."
+            }, undefined, false, undefined, this) : /* @__PURE__ */ u3(CharacterRows, {
+              rows: list,
+              onOpen: pages.open
+            }, undefined, false, undefined, this)
+          }, undefined, false, undefined, this)
+        ]
+      }, undefined, true, undefined, this),
+      selected ? /* @__PURE__ */ u3(CharacterPages, {
+        ctx,
+        row: selected,
+        summary: changed?.find((s) => s.entity === selected.entity),
+        onBack: pages.back
+      }, selected.entity, false, undefined, this) : null
+    ]
+  }, undefined, true, undefined, this);
+}
+function CharacterRows(props) {
+  return /* @__PURE__ */ u3("div", {
+    "data-lre-gm-list": "routines",
+    children: /* @__PURE__ */ u3(List, {
+      children: props.rows.map((r) => /* @__PURE__ */ u3(ListRow, {
+        id: r.entity,
+        title: r.name,
+        subtitle: /* @__PURE__ */ u3("span", {
+          class: "lre-gm-routines-sub",
+          children: [
+            /* @__PURE__ */ u3("span", {
+              children: BINDING_LABEL[r.binding]
+            }, undefined, false, undefined, this),
+            r.changed ? /* @__PURE__ */ u3(Badge, {
+              tone: "gm",
+              children: CHANGED_LABEL[r.changed]
+            }, undefined, false, undefined, this) : null
+          ]
+        }, undefined, true, undefined, this),
+        badge: /* @__PURE__ */ u3(Badge, {
+          tone: r.tier === "live" ? "accent" : "neutral",
+          children: TIER_LABEL[r.tier]
+        }, undefined, false, undefined, this),
+        chevron: true,
+        onClick: () => props.onOpen(r.entity)
+      }, r.entity, false, undefined, this))
+    }, undefined, false, undefined, this)
+  }, undefined, false, undefined, this);
+}
+function CharacterPages(props) {
+  const { ctx, row } = props;
+  const changes = usePages();
+  const [view, setView] = d2(null);
+  const [error, setError] = d2(null);
+  A(() => {
+    let live = true;
+    ctx.send({ type: "lre.routine", chatId: ctx.chatId, op: "day", entity: row.entity, view: "gm" }).then((m) => {
+      if (!live)
+        return;
+      if (m.type === "lre.error")
+        return setError(m.message);
+      if (m.request !== "lre.routine")
+        return;
+      setError(null);
+      setView(m.body.gm ?? null);
+    });
+    return () => {
+      live = false;
+    };
+  }, [ctx.chatId, row.entity, ctx.gm]);
+  const change = changes.page;
+  const block = change?.kind === "block" && change.id !== null ? view?.blocks.find((b) => b.block.id === change.id) : undefined;
+  const schedule = change?.kind === "schedule" ? view?.schedules.find((s) => s.schedule === change.id) : undefined;
+  const gone = view !== null && change !== null && (change.kind === "block" && change.id !== null && block === undefined || change.kind === "schedule" && schedule === undefined);
+  A(() => {
+    if (gone)
+      changes.back();
+  });
+  const was = T2(change);
+  A(() => {
+    const before = was.current;
+    was.current = change;
+    const root = changes.host.ref.current;
+    if (before === null || change !== null || !root || root.contains(document.activeElement))
+      return;
+    root.querySelector(".lre-page-header button")?.focus();
+  }, [change]);
+  const binding = view ? bindingOf(view.tier, view.follow.mode, view.planned) : row.binding;
+  return /* @__PURE__ */ u3("div", {
+    ref: changes.host.ref,
+    class: "lre-gm-page lre-gm-pages lre-gm-routines-pages",
+    onKeyDown: changes.host.onKeyDown,
+    children: [
+      /* @__PURE__ */ u3("div", {
+        class: "lre-gm-list",
+        hidden: change !== null,
+        children: /* @__PURE__ */ u3(GmPage, {
+          name: "routine",
+          title: row.name,
+          subtitle: /* @__PURE__ */ u3(M, {
+            children: [
+              TIER_LABEL[row.tier],
+              " · ",
+              BINDING_LABEL[binding],
+              /* @__PURE__ */ u3(IdText, {
+                id: row.entity
+              }, undefined, false, undefined, this)
+            ]
+          }, undefined, true, undefined, this),
+          backLabel: "Routines",
+          onBack: props.onBack,
+          children: [
+            error ? /* @__PURE__ */ u3(Banner, {
+              tone: "neg",
+              title: "Their routine couldn't be read",
+              children: error
+            }, undefined, false, undefined, this) : null,
+            view ? /* @__PURE__ */ u3(RoutineSections, {
+              view,
+              gm: ctx.gm,
+              summary: props.summary,
+              busy: ctx.busy,
+              open: changes.open
+            }, undefined, false, undefined, this) : error ? null : /* @__PURE__ */ u3(None, {
+              children: "Reading their routine…"
+            }, undefined, false, undefined, this)
+          ]
+        }, undefined, true, undefined, this)
+      }, undefined, false, undefined, this),
+      view && change?.kind === "follow" ? /* @__PURE__ */ u3(FollowPage, {
+        ctx,
+        view,
+        onBack: changes.back
+      }, undefined, false, undefined, this) : null,
+      view && change?.kind === "block" && (change.id === null || block) ? /* @__PURE__ */ u3(BlockPage, {
+        ctx,
+        view,
+        block: block ?? null,
+        onBack: changes.back
+      }, change.id ?? "", false, undefined, this) : null,
+      view && change?.kind === "schedule" && schedule ? /* @__PURE__ */ u3(SchedulePage, {
+        ctx,
+        view,
+        schedule,
+        onBack: changes.back
+      }, change.id, false, undefined, this) : null
+    ]
+  }, undefined, true, undefined, this);
+}
+function RoutineSections(props) {
+  const { view, gm, busy, open } = props;
+  return /* @__PURE__ */ u3("div", {
+    class: "lre-gm-routines",
+    "data-lre-gm-routine": view.entity,
+    children: [
+      /* @__PURE__ */ u3(BindingSection, {
+        view,
+        busy,
+        open
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(StoryHolds, {
+        view,
+        now: gm.minds.now
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(Blocks, {
+        view,
+        gm,
+        busy,
+        open
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(Schedules, {
+        view,
+        now: gm.minds.now,
+        busy,
+        open
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(Today, {
+        view,
+        gm
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(Invitations, {
+        view
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(StoryMade, {
+        changes: storyChanges(view, props.summary),
+        now: gm.minds.now,
+        busy,
+        open
+      }, undefined, false, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+}
+function BindingSection(props) {
+  const { view } = props;
+  const binding = bindingOf(view.tier, view.follow.mode, view.planned);
+  const chat = view.follow.chat;
+  return /* @__PURE__ */ u3(Section, {
+    title: "How much their routine binds them",
+    aside: /* @__PURE__ */ u3(Badge, {
+      tone: BINDING_TONE[binding],
+      children: BINDING_LABEL[binding]
+    }, undefined, false, undefined, this),
+    flush: true,
+    children: [
+      /* @__PURE__ */ u3("div", {
+        class: "lre-gm-routines-binding",
+        "data-lre-binding": binding,
+        children: bindingNote(view).map((line) => /* @__PURE__ */ u3("p", {
+          class: "lre-gm-note",
+          children: line
+        }, line, false, undefined, this))
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(List, {
+        children: [
+          /* @__PURE__ */ u3(ListRow, {
+            icon: "users",
+            title: "Fidelity now",
+            subtitle: "From the minds ladder: Near and Live are the cast on screen",
+            value: view.tier ? TIER_LABEL[view.tier] : "No minds"
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3(ListRow, {
+            icon: "sliders",
+            title: "In this chat",
+            subtitle: chat?.mode ? "Set for them in this chat" : "As the world has it",
+            value: ROUTINE_MODE_LABEL[view.follow.mode],
+            chevron: true,
+            disabled: props.busy,
+            onClick: () => props.open({ kind: "follow" })
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3(ListRow, {
+            icon: "book",
+            title: "Story and lore awareness",
+            subtitle: chat?.awareness ? "Set for them in this chat" : "The world's setting",
+            value: AWARENESS_LABEL[view.follow.awareness],
+            chevron: true,
+            disabled: props.busy,
+            onClick: () => props.open({ kind: "follow" })
+          }, undefined, false, undefined, this)
+        ]
+      }, undefined, true, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+}
+function StoryHolds(props) {
+  const { story } = props.view;
+  return /* @__PURE__ */ u3(Section, {
+    title: "What the story holds now",
+    flush: true,
+    children: [
+      story.length === 0 ? /* @__PURE__ */ u3(None, {
+        children: "Nothing the story set holds them now."
+      }, undefined, false, undefined, this) : null,
+      /* @__PURE__ */ u3(List, {
+        children: story.map((h, i) => /* @__PURE__ */ u3(ListRow, {
+          icon: "flag",
+          title: h.label,
+          subtitle: `${HOLD_BY[h.by]} · ${untilWords(h.until, props.now)}`
+        }, `${h.field}:${i}`, false, undefined, this))
+      }, undefined, false, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+}
+function Blocks(props) {
+  const { view, gm } = props;
+  return /* @__PURE__ */ u3(Section, {
+    title: "Their routine",
+    aside: /* @__PURE__ */ u3(Badge, {
+      children: [
+        view.blocks.filter((b) => !b.off).length,
+        " blocks"
+      ]
+    }, undefined, true, undefined, this),
+    flush: true,
+    children: [
+      view.blocks.length === 0 ? /* @__PURE__ */ u3(None, {
+        children: "No routine blocks: their day is the story, their commitments and their basic needs."
+      }, undefined, false, undefined, this) : null,
+      /* @__PURE__ */ u3("div", {
+        "data-lre-gm-list": "routine-blocks",
+        children: /* @__PURE__ */ u3(List, {
+          children: [
+            view.blocks.map((b) => /* @__PURE__ */ u3(ListRow, {
+              id: b.block.id,
+              title: isOff(b.block) || b.off ? nameOfId(b.block.id) : b.block.label,
+              subtitle: /* @__PURE__ */ u3("span", {
+                class: "lre-gm-routines-lines",
+                children: [
+                  isOff(b.block) || b.off ? /* @__PURE__ */ u3("span", {
+                    children: "Off for them"
+                  }, undefined, false, undefined, this) : /* @__PURE__ */ u3("span", {
+                    children: [blockWhen(b.block), daysWords(b.block), placeWords2(b.block.place, (id) => nameOf3(gm, id))].filter((part) => part !== null).join(" · ")
+                  }, undefined, false, undefined, this),
+                  /* @__PURE__ */ u3("span", {
+                    children: b.owner.level === "builtin" ? ownerWords2(b.owner) : `${ownerWords2(b.owner)} · ${sourceWords2(b.source, gm.minds.now)}`
+                  }, undefined, false, undefined, this),
+                  shadowWords(b) ? /* @__PURE__ */ u3("span", {
+                    children: shadowWords(b)
+                  }, undefined, false, undefined, this) : null
+                ]
+              }, undefined, true, undefined, this),
+              badge: isOff(b.block) || b.off ? /* @__PURE__ */ u3(Badge, {
+                tone: "warn",
+                children: "Off"
+              }, undefined, false, undefined, this) : /* @__PURE__ */ u3(Badge, {
+                tone: b.owner.level === "chat" ? "gm" : "neutral",
+                children: BLOCK_KIND_LABEL[b.block.kind]
+              }, undefined, false, undefined, this),
+              chevron: true,
+              disabled: props.busy,
+              onClick: () => props.open({ kind: "block", id: b.block.id })
+            }, b.block.id, false, undefined, this)),
+            /* @__PURE__ */ u3(ListRow, {
+              icon: "plus",
+              title: "Add a block for this chat",
+              disabled: props.busy,
+              onClick: () => props.open({ kind: "block", id: null })
+            }, undefined, false, undefined, this)
+          ]
+        }, undefined, true, undefined, this)
+      }, undefined, false, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+}
+function chatScheduleWords(chat, now) {
+  return "off" in chat ? `Off for them ${untilWords(chat.until, now)}` : "Their own version in this chat";
+}
+function Schedules(props) {
+  const rows = scheduleRows(props.view);
+  return /* @__PURE__ */ u3(Section, {
+    title: "Their schedules",
+    flush: true,
+    children: [
+      rows.length === 0 ? /* @__PURE__ */ u3(None, {
+        children: "No schedules apply to them."
+      }, undefined, false, undefined, this) : /* @__PURE__ */ u3(None, {
+        children: "For each thing schedules set, the most specific owner wins where both run: a change in this chat, their own, a group's, a kind's, then a selector's."
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3("div", {
+        "data-lre-gm-list": "routine-schedules",
+        children: /* @__PURE__ */ u3(List, {
+          children: rows.map(({ schedule: s, over }) => /* @__PURE__ */ u3(ListRow, {
+            id: s.schedule,
+            icon: "calendar",
+            title: nameOfId(s.schedule),
+            subtitle: /* @__PURE__ */ u3("span", {
+              class: "lre-gm-routines-lines",
+              children: [
+                /* @__PURE__ */ u3("span", {
+                  children: [
+                    "Sets ",
+                    targetWords2(s.target),
+                    " · ",
+                    EVERY[s.recurrence.every]
+                  ]
+                }, undefined, true, undefined, this),
+                /* @__PURE__ */ u3("span", {
+                  children: [
+                    ownerWords2(s.owner),
+                    " · ",
+                    sourceWords2(s.source, props.now)
+                  ]
+                }, undefined, true, undefined, this),
+                over.length > 0 ? /* @__PURE__ */ u3("span", {
+                  children: [
+                    "Shadowed where ",
+                    over.map(nameOfId).join(", "),
+                    " also run"
+                  ]
+                }, undefined, true, undefined, this) : null,
+                s.chat ? /* @__PURE__ */ u3("span", {
+                  children: [
+                    chatScheduleWords(s.chat, props.now),
+                    " · ",
+                    sourceWords2(s.chat.source, props.now)
+                  ]
+                }, undefined, true, undefined, this) : null
+              ]
+            }, undefined, true, undefined, this),
+            badge: s.chat ? /* @__PURE__ */ u3(Badge, {
+              tone: "gm",
+              children: "off" in s.chat ? "Off here" : "Changed here"
+            }, undefined, false, undefined, this) : over.length > 0 ? /* @__PURE__ */ u3(Badge, {
+              children: "Shadowed"
+            }, undefined, false, undefined, this) : /* @__PURE__ */ u3(Badge, {
+              tone: "pos",
+              children: "In force"
+            }, undefined, false, undefined, this),
+            chevron: true,
+            disabled: props.busy,
+            onClick: () => props.open({ kind: "schedule", id: s.schedule })
+          }, s.schedule, false, undefined, this))
+        }, undefined, false, undefined, this)
+      }, undefined, false, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+}
+function Today(props) {
+  const { view, gm } = props;
+  const name = (id) => gm.tracks.find((t) => t.id === id)?.label ?? nameOf3(gm, id);
+  return /* @__PURE__ */ u3(Section, {
+    title: `Today, ${view.day.label}`,
+    flush: true,
+    children: [
+      !view.planned ? /* @__PURE__ */ u3(None, {
+        children: "The planner doesn't lay their day."
+      }, undefined, false, undefined, this) : view.day.blocks.length === 0 ? /* @__PURE__ */ u3(None, {
+        children: "Nothing laid for today yet."
+      }, undefined, false, undefined, this) : null,
+      /* @__PURE__ */ u3("div", {
+        "data-lre-gm-list": "routine-day",
+        children: /* @__PURE__ */ u3(List, {
+          children: view.day.blocks.map((b, i) => /* @__PURE__ */ u3(ListRow, {
+            title: /* @__PURE__ */ u3("span", {
+              class: "lre-gm-routines-slot",
+              children: [
+                /* @__PURE__ */ u3("span", {
+                  class: "lre-gm-routines-time",
+                  children: [
+                    b.from,
+                    "–",
+                    b.to
+                  ]
+                }, undefined, true, undefined, this),
+                /* @__PURE__ */ u3("span", {
+                  children: b.label
+                }, undefined, false, undefined, this)
+              ]
+            }, undefined, true, undefined, this),
+            subtitle: /* @__PURE__ */ u3("span", {
+              class: "lre-gm-routines-lines",
+              children: [
+                b.placeName ? /* @__PURE__ */ u3("span", {
+                  children: [
+                    "At ",
+                    b.placeName
+                  ]
+                }, undefined, true, undefined, this) : null,
+                /* @__PURE__ */ u3("span", {
+                  children: originWords(b.origin, name)
+                }, undefined, false, undefined, this),
+                b.reasons.length > 0 ? /* @__PURE__ */ u3("span", {
+                  children: b.reasons.join(" · ")
+                }, undefined, false, undefined, this) : null
+              ]
+            }, undefined, true, undefined, this)
+          }, `${b.start}:${i}`, false, undefined, this))
+        }, undefined, false, undefined, this)
+      }, undefined, false, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+}
+function InvitationRow(props) {
+  const { inv } = props;
+  return /* @__PURE__ */ u3(ListRow, {
+    icon: "message",
+    title: inv.text,
+    subtitle: /* @__PURE__ */ u3("span", {
+      class: "lre-gm-routines-lines",
+      children: [
+        /* @__PURE__ */ u3("span", {
+          children: [inv.when, inv.placeName, props.made ? null : `From ${inv.hostName}`].filter((part) => part !== null).join(" · ")
+        }, undefined, false, undefined, this),
+        /* @__PURE__ */ u3("span", {
+          children: invitationGround(inv.origin)
+        }, undefined, false, undefined, this)
+      ]
+    }, undefined, true, undefined, this),
+    badge: /* @__PURE__ */ u3(Badge, {
+      tone: inv.status === "sent" ? "pos" : "neutral",
+      children: inv.status === "sent" ? "Sent" : "Planned"
+    }, undefined, false, undefined, this)
+  }, undefined, false, undefined, this);
+}
+function Invitations(props) {
+  const { made, received } = props.view.invitations;
+  return /* @__PURE__ */ u3(Section, {
+    title: "Invitations",
+    flush: true,
+    children: [
+      made.length + received.length === 0 ? /* @__PURE__ */ u3(None, {
+        children: "None made or received."
+      }, undefined, false, undefined, this) : null,
+      made.length > 0 ? /* @__PURE__ */ u3(M, {
+        children: [
+          /* @__PURE__ */ u3("div", {
+            class: "lre-gm-routines-head",
+            children: "Made"
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3(List, {
+            children: made.map((inv) => /* @__PURE__ */ u3(InvitationRow, {
+              inv,
+              made: true
+            }, inv.key, false, undefined, this))
+          }, undefined, false, undefined, this)
+        ]
+      }, undefined, true, undefined, this) : null,
+      received.length > 0 ? /* @__PURE__ */ u3(M, {
+        children: [
+          /* @__PURE__ */ u3("div", {
+            class: "lre-gm-routines-head",
+            children: "Received"
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3(List, {
+            children: received.map((inv) => /* @__PURE__ */ u3(InvitationRow, {
+              inv,
+              made: false
+            }, inv.key, false, undefined, this))
+          }, undefined, false, undefined, this)
+        ]
+      }, undefined, true, undefined, this) : null
+    ]
+  }, undefined, true, undefined, this);
+}
+function StoryMade(props) {
+  return /* @__PURE__ */ u3(Section, {
+    title: "Changes the story made",
+    flush: true,
+    children: [
+      props.changes.length === 0 ? /* @__PURE__ */ u3(None, {
+        children: "The story hasn't changed their routine or schedules in this chat."
+      }, undefined, false, undefined, this) : null,
+      /* @__PURE__ */ u3("div", {
+        "data-lre-gm-list": "routine-story",
+        children: /* @__PURE__ */ u3(List, {
+          children: props.changes.map((c) => {
+            const block = c.kind === "block" ? c.block : null;
+            const shown = block && !isOff(block.block) && !c.off ? block.block : null;
+            const live = c.kind === "block" ? block?.owner.level === "chat" : c.schedule !== null;
+            const what = c.kind === "schedule" ? c.schedule?.chat ? chatScheduleWords(c.schedule.chat, props.now) : c.off ? "Off for them" : "Their own version in this chat" : c.off ? "Switched off for them" : live && shown ? blockWhen(shown) : "In force from the day after the story made it";
+            return /* @__PURE__ */ u3(ListRow, {
+              id: c.id,
+              icon: c.kind === "schedule" ? "calendar" : "clock",
+              title: shown ? shown.label : nameOfId(c.id),
+              subtitle: /* @__PURE__ */ u3("span", {
+                class: "lre-gm-routines-lines",
+                children: [
+                  /* @__PURE__ */ u3("span", {
+                    children: what
+                  }, undefined, false, undefined, this),
+                  /* @__PURE__ */ u3("span", {
+                    children: sourceWords2({ ...c.source, label: "The story" }, props.now)
+                  }, undefined, false, undefined, this),
+                  c.source.turn ? /* @__PURE__ */ u3(IdText, {
+                    id: c.source.turn
+                  }, undefined, false, undefined, this) : null
+                ]
+              }, undefined, true, undefined, this),
+              chevron: live,
+              disabled: props.busy,
+              onClick: live ? () => props.open(c.kind === "schedule" ? { kind: "schedule", id: c.id } : { kind: "block", id: c.id }) : undefined
+            }, `${c.kind}:${c.id}`, false, undefined, this);
+          })
+        }, undefined, false, undefined, this)
+      }, undefined, false, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+}
+function ChangePage(props) {
+  return /* @__PURE__ */ u3(GmPage, {
+    name: props.name,
+    title: props.title,
+    subtitle: props.view.name,
+    backLabel: props.view.name,
+    onBack: props.onBack,
+    children: props.children
+  }, undefined, false, undefined, this);
+}
+function Submit(props) {
+  return /* @__PURE__ */ u3("div", {
+    class: "lre-gm-routines-submit",
+    children: [
+      /* @__PURE__ */ u3(Button, {
+        type: "submit",
+        variant: "primary",
+        icon: "check",
+        block: true,
+        disabled: props.busy || !props.ready,
+        children: props.children
+      }, undefined, false, undefined, this),
+      (props.problems ?? []).map((p) => /* @__PURE__ */ u3("p", {
+        class: "lre-gm-note",
+        children: p
+      }, p, false, undefined, this))
+    ]
+  }, undefined, true, undefined, this);
+}
+function Choices3(props) {
+  const group = P2();
+  return /* @__PURE__ */ u3("fieldset", {
+    class: "lre-gm-routines-choices",
+    children: [
+      /* @__PURE__ */ u3("legend", {
+        class: "lre-sr",
+        children: props.legend
+      }, undefined, false, undefined, this),
+      props.choices.map((c) => /* @__PURE__ */ u3("label", {
+        class: "lre-gm-routines-choice",
+        children: [
+          /* @__PURE__ */ u3("input", {
+            type: "radio",
+            name: group,
+            value: c.value ?? "",
+            checked: props.value === c.value,
+            disabled: props.disabled,
+            onChange: () => props.onChange(c.value)
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3("span", {
+            class: "lre-gm-routines-choice-text",
+            children: [
+              /* @__PURE__ */ u3("span", {
+                class: "lre-gm-routines-choice-name",
+                children: [
+                  c.label,
+                  c.now ? /* @__PURE__ */ u3(Badge, {
+                    children: "Now"
+                  }, undefined, false, undefined, this) : null
+                ]
+              }, undefined, true, undefined, this),
+              /* @__PURE__ */ u3("span", {
+                class: "lre-gm-routines-choice-help",
+                children: c.help
+              }, undefined, false, undefined, this)
+            ]
+          }, undefined, true, undefined, this)
+        ]
+      }, c.value ?? "", true, undefined, this))
+    ]
+  }, undefined, true, undefined, this);
+}
+function FollowPage(props) {
+  const { ctx, view } = props;
+  const chat = view.follow.chat;
+  const [mode, setMode] = d2(chat?.mode ?? "follows");
+  const [awareness, setAwareness] = d2(chat?.awareness ?? null);
+  const changed = mode !== (chat?.mode ?? "follows") || awareness !== (chat?.awareness ?? null);
+  return /* @__PURE__ */ u3(ChangePage, {
+    name: "routine-follow",
+    title: "How they follow their routine",
+    view,
+    onBack: props.onBack,
+    children: [
+      /* @__PURE__ */ u3("form", {
+        class: "lre-stack",
+        "data-lre-routine-form": "follow",
+        onSubmit: (event) => {
+          event.preventDefault();
+          if (changed)
+            sendOp(ctx, followOp(view.entity, mode, awareness), props.onBack);
+        },
+        children: [
+          /* @__PURE__ */ u3(Section, {
+            title: "In this chat",
+            children: /* @__PURE__ */ u3(Choices3, {
+              legend: "In this chat",
+              value: mode,
+              choices: ROUTINE_MODES.map((m) => ({ value: m, label: ROUTINE_MODE_LABEL[m], help: MODE_NOTE[m], now: m === view.follow.mode })),
+              disabled: ctx.busy,
+              onChange: setMode
+            }, undefined, false, undefined, this)
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3(Section, {
+            title: "Story and lore awareness",
+            children: [
+              /* @__PURE__ */ u3("p", {
+                class: "lre-gm-note",
+                children: "How strictly they keep to their routine against what the story and its lore establish. Whatever you pick, nobody is moved out of a scene with you, and Near and Live characters are never moved by a routine."
+              }, undefined, false, undefined, this),
+              /* @__PURE__ */ u3(Choices3, {
+                legend: "Story and lore awareness",
+                value: awareness,
+                choices: [{ value: null, label: `As the world has it: ${AWARENESS_LABEL[view.settings.awareness]}`, help: AWARENESS_NOTE[view.settings.awareness], now: chat?.awareness == null }, ...ROUTINE_AWARENESS.map((a) => ({ value: a, label: AWARENESS_LABEL[a], help: AWARENESS_NOTE[a], now: chat?.awareness === a }))],
+                disabled: ctx.busy,
+                onChange: setAwareness
+              }, undefined, false, undefined, this)
+            ]
+          }, undefined, true, undefined, this),
+          /* @__PURE__ */ u3(Submit, {
+            busy: ctx.busy,
+            ready: changed,
+            children: "Save for this chat"
+          }, undefined, false, undefined, this)
+        ]
+      }, undefined, true, undefined, this),
+      chat ? /* @__PURE__ */ u3(Section, {
+        title: "Back to the world's",
+        children: [
+          /* @__PURE__ */ u3("p", {
+            class: "lre-gm-note",
+            children: "They follow their routine as the world has it again. The edit's Undo brings your setting back."
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3(Button, {
+            icon: "undo",
+            disabled: ctx.busy,
+            onClick: () => sendOp(ctx, followOp(view.entity, "follows", null), props.onBack),
+            children: "Use the world's settings"
+          }, undefined, false, undefined, this)
+        ]
+      }, undefined, true, undefined, this) : null
+    ]
+  }, undefined, true, undefined, this);
+}
+function useChatWorld(send) {
+  const view = useView();
+  const worldId = view?.worldId ?? null;
+  const revision = view?.revision ?? null;
+  const [doc, setDoc] = d2(null);
+  A(() => {
+    if (worldId === null)
+      return;
+    let live = true;
+    send({ type: "lre.world", op: "get", worldId, ...revision ? { revision } : {} }).then((m) => {
+      if (!live || m.type !== "lre.result" || m.request !== "lre.world" || !m.body.world)
+        return;
+      const world = m.body.world;
+      setDoc({ ...world, kinds: { ...m.body.packKinds, ...world.kinds } });
+    });
+    return () => {
+      live = false;
+    };
+  }, [worldId, revision]);
+  return doc;
+}
+function SourceRow(props) {
+  const app = useApp();
+  const worldId = useView()?.worldId ?? null;
+  const s = props.source;
+  const target = s.type === "lore" ? { collection: "lore", id: s.entry } : s.type === "sheet" ? { collection: "entities", id: s.entity } : null;
+  return /* @__PURE__ */ u3("div", {
+    class: "lre-gm-routines-source",
+    "data-lre-source": s.type,
+    children: [
+      /* @__PURE__ */ u3("span", {
+        class: "lre-gm-routines-lines",
+        children: [
+          /* @__PURE__ */ u3("span", {
+            class: "lre-gm-routines-source-label",
+            children: sourceWords2(s, props.now)
+          }, undefined, false, undefined, this),
+          s.type === "story" && s.turn ? /* @__PURE__ */ u3(IdText, {
+            id: s.turn
+          }, undefined, false, undefined, this) : null,
+          (s.type === "lore" || s.type === "sheet") && s.quote ? /* @__PURE__ */ u3("q", {
+            class: "lre-gm-routines-quote",
+            children: s.quote
+          }, undefined, false, undefined, this) : null
+        ]
+      }, undefined, true, undefined, this),
+      target && worldId ? /* @__PURE__ */ u3(Button, {
+        size: "sm",
+        variant: "ghost",
+        icon: "external",
+        onClick: () => app.ui.update((ui) => ({ ...ui, mode: "build", build: { view: "item", worldId, collection: target.collection, id: target.id } })),
+        children: s.type === "lore" ? "Open the entry" : "Open their sheet"
+      }, undefined, false, undefined, this) : null
+    ]
+  }, undefined, true, undefined, this);
+}
+function BlockPage(props) {
+  const { ctx, view, block } = props;
+  const doc = useChatWorld(ctx.send);
+  const taken = new Set(view.blocks.map((b) => b.block.id));
+  const [draft, setDraft] = d2(() => blockDraft(block ?? undefined, blankBlock(deriveId("New block", taken), "New block")));
+  const value = block ? draft : { ...draft, id: deriveId(draft.label.trim() || "block", taken) };
+  const result = blockOp(view.entity, value);
+  const off = block !== null && (isOff(block.block) || block.off);
+  const chatOwned = block?.owner.level === "chat";
+  const changed = block === null || off || JSON.stringify(value) !== JSON.stringify(block.block);
+  const title = block === null ? "Add a block for this chat" : isOff(block.block) ? `${nameOfId(block.block.id)}: off` : off ? `${block.block.label}: off` : block.block.label;
+  return /* @__PURE__ */ u3(ChangePage, {
+    name: "routine-block",
+    title,
+    view,
+    onBack: props.onBack,
+    children: [
+      block ? /* @__PURE__ */ u3(Section, {
+        title: "Whose it is and what it rests on",
+        children: /* @__PURE__ */ u3("div", {
+          class: "lre-stack",
+          children: [
+            /* @__PURE__ */ u3("span", {
+              children: ownerWords2(block.owner)
+            }, undefined, false, undefined, this),
+            /* @__PURE__ */ u3(SourceRow, {
+              source: block.source,
+              now: ctx.gm.minds.now
+            }, undefined, false, undefined, this),
+            block.shadowed.map((s) => /* @__PURE__ */ u3("div", {
+              class: "lre-gm-routines-shadow",
+              children: [
+                /* @__PURE__ */ u3("span", {
+                  class: "lre-gm-note",
+                  children: [
+                    "Replaces ",
+                    s.owner.level === "builtin" ? "the basic need" : ownerWords2(s.owner).toLowerCase(),
+                    ":"
+                  ]
+                }, undefined, true, undefined, this),
+                /* @__PURE__ */ u3(SourceRow, {
+                  source: s.source,
+                  now: ctx.gm.minds.now
+                }, undefined, false, undefined, this)
+              ]
+            }, `${s.owner.level}:${s.owner.id ?? ""}`, true, undefined, this))
+          ]
+        }, undefined, true, undefined, this)
+      }, undefined, false, undefined, this) : /* @__PURE__ */ u3(Section, {
+        children: /* @__PURE__ */ u3("p", {
+          class: "lre-gm-note",
+          children: "A block only this chat has, yours: their routine leads it as far as the story lets them, and it never moves them out of a scene with you."
+        }, undefined, false, undefined, this)
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3("form", {
+        class: "lre-stack",
+        "data-lre-routine-form": "block",
+        onSubmit: (event) => {
+          event.preventDefault();
+          if ("op" in result && changed)
+            sendOp(ctx, result.op, props.onBack);
+        },
+        children: [
+          doc ? /* @__PURE__ */ u3(RoutineBlockForm, {
+            value,
+            doc,
+            path: `routine.${value.id}`,
+            onChange: setDraft
+          }, undefined, false, undefined, this) : /* @__PURE__ */ u3(None, {
+            children: "Reading the world…"
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3(Submit, {
+            busy: ctx.busy,
+            ready: doc !== null && "op" in result && changed,
+            problems: "problems" in result ? result.problems : undefined,
+            children: block ? off ? "Switch it back on, as here" : "Save for this chat" : "Add for this chat"
+          }, undefined, false, undefined, this)
+        ]
+      }, undefined, true, undefined, this),
+      block && !off ? /* @__PURE__ */ u3(Section, {
+        title: "Switch it off",
+        children: [
+          /* @__PURE__ */ u3("p", {
+            class: "lre-gm-note",
+            children: [
+              "They don't keep this block in this chat",
+              block.owner.level === "builtin" ? ": it's a basic need, so their day makes no room for it" : "",
+              ". The edit's Undo brings it back."
+            ]
+          }, undefined, true, undefined, this),
+          /* @__PURE__ */ u3(Button, {
+            variant: "danger",
+            icon: "close",
+            disabled: ctx.busy,
+            onClick: () => sendOp(ctx, blockOffOp(view.entity, block.block.id), props.onBack),
+            children: "Switch it off for them"
+          }, undefined, false, undefined, this)
+        ]
+      }, undefined, true, undefined, this) : null,
+      block && chatOwned ? /* @__PURE__ */ u3(Section, {
+        title: block.shadowed.length === 0 ? "Remove it" : "Back to the world's",
+        children: [
+          /* @__PURE__ */ u3("p", {
+            class: "lre-gm-note",
+            children: [
+              block.shadowed.length === 0 ? "Only this chat has this block: removing it takes it out of their routine." : "Drops this chat's change: the block is the world's again.",
+              " The edit's Undo brings it back."
+            ]
+          }, undefined, true, undefined, this),
+          /* @__PURE__ */ u3(Button, {
+            variant: block.shadowed.length === 0 ? "danger" : "secondary",
+            icon: block.shadowed.length === 0 ? "trash" : "undo",
+            disabled: ctx.busy,
+            onClick: () => sendOp(ctx, dropBlockOp(view.entity, block.block.id), props.onBack),
+            children: block.shadowed.length === 0 ? "Remove the block" : "Use the world's block"
+          }, undefined, false, undefined, this)
+        ]
+      }, undefined, true, undefined, this) : null
+    ]
+  }, undefined, true, undefined, this);
+}
+function SchedulePage(props) {
+  const { ctx, view, schedule: s } = props;
+  const doc = useChatWorld(ctx.send);
+  const now = ctx.gm.minds.now;
+  const [how, setHow] = d2(s.chat && "off" in s.chat ? "off" : "own");
+  const [draft, setDraft] = d2(() => scheduleDraft(s, view.entity));
+  const [hours, setHours] = d2(s.chat && "off" in s.chat && s.chat.until !== null ? Math.max(1, Math.round((s.chat.until - now) / 60)) : null);
+  const own = scheduleOwnOp(view.entity, s.schedule, draft.slots, draft.recurrence, s.recurrence);
+  const op = how === "own" ? "op" in own ? own.op : null : scheduleOffOp(view.entity, s.schedule, hours === null ? null : now + hours * 60);
+  const over = scheduleRows(view).find((r) => r.schedule.schedule === s.schedule)?.over ?? [];
+  return /* @__PURE__ */ u3(ChangePage, {
+    name: "routine-schedule",
+    title: nameOfId(s.schedule),
+    view,
+    onBack: props.onBack,
+    children: [
+      /* @__PURE__ */ u3(Section, {
+        title: "Whose it is and what it rests on",
+        children: /* @__PURE__ */ u3("div", {
+          class: "lre-stack",
+          children: [
+            /* @__PURE__ */ u3("span", {
+              children: [
+                ownerWords2(s.owner),
+                " · sets ",
+                targetWords2(s.target),
+                " · ",
+                EVERY[s.recurrence.every]
+              ]
+            }, undefined, true, undefined, this),
+            /* @__PURE__ */ u3(SourceRow, {
+              source: s.source,
+              now
+            }, undefined, false, undefined, this),
+            over.length > 0 ? /* @__PURE__ */ u3("span", {
+              class: "lre-gm-note",
+              children: [
+                "Where ",
+                over.map(nameOfId).join(", "),
+                " also run, they win: they're more specific."
+              ]
+            }, undefined, true, undefined, this) : /* @__PURE__ */ u3("span", {
+              class: "lre-gm-note",
+              children: "No more specific schedule of the world's runs over it."
+            }, undefined, false, undefined, this),
+            s.chat ? /* @__PURE__ */ u3("span", {
+              class: "lre-gm-note",
+              children: [
+                "In this chat: ",
+                chatScheduleWords(s.chat, now).toLowerCase(),
+                " · ",
+                sourceWords2(s.chat.source, now)
+              ]
+            }, undefined, true, undefined, this) : null
+          ]
+        }, undefined, true, undefined, this)
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3("form", {
+        class: "lre-stack",
+        "data-lre-routine-form": "schedule",
+        onSubmit: (event) => {
+          event.preventDefault();
+          if (op)
+            sendOp(ctx, op, props.onBack);
+        },
+        children: [
+          /* @__PURE__ */ u3(Section, {
+            title: "Change it for this chat",
+            children: /* @__PURE__ */ u3(Seg, {
+              label: "Change it for this chat",
+              value: how,
+              options: [
+                { value: "own", label: "Their own version" },
+                { value: "off", label: "Off for them" }
+              ],
+              disabled: ctx.busy,
+              onChange: setHow
+            }, undefined, false, undefined, this)
+          }, undefined, false, undefined, this),
+          how === "own" ? doc ? /* @__PURE__ */ u3(ScheduleForm, {
+            value: draft,
+            doc,
+            path: `schedules.${s.schedule}`,
+            fixed: /* @__PURE__ */ u3("span", {
+              class: "lre-gm-note",
+              children: [
+                view.name,
+                "'s own in this chat, ranked as their own: it sets ",
+                targetWords2(s.target),
+                "."
+              ]
+            }, undefined, true, undefined, this),
+            onChange: setDraft
+          }, undefined, false, undefined, this) : /* @__PURE__ */ u3(None, {
+            children: "Reading the world…"
+          }, undefined, false, undefined, this) : /* @__PURE__ */ u3(Section, {
+            title: "For how long",
+            children: /* @__PURE__ */ u3("div", {
+              class: "lre-stack",
+              children: [
+                /* @__PURE__ */ u3(Seg, {
+                  label: "For how long",
+                  value: hours === null ? "cleared" : "hours",
+                  options: [
+                    { value: "cleared", label: "Until you clear it" },
+                    { value: "hours", label: "For some hours" }
+                  ],
+                  disabled: ctx.busy,
+                  onChange: (v) => setHours(v === "cleared" ? null : hours ?? 24)
+                }, undefined, false, undefined, this),
+                hours !== null ? /* @__PURE__ */ u3(NumberStepper, {
+                  label: "Hours",
+                  value: hours,
+                  min: 1,
+                  max: 24 * 60,
+                  integer: true,
+                  disabled: ctx.busy,
+                  onChange: setHours
+                }, undefined, false, undefined, this) : null
+              ]
+            }, undefined, true, undefined, this)
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3(Submit, {
+            busy: ctx.busy || how === "own" && doc === null,
+            ready: op !== null,
+            problems: how === "own" && "problems" in own ? own.problems : undefined,
+            children: "Save for this chat"
+          }, undefined, false, undefined, this)
+        ]
+      }, undefined, true, undefined, this),
+      s.chat ? /* @__PURE__ */ u3(Section, {
+        title: "Back to the world's",
+        children: [
+          /* @__PURE__ */ u3("p", {
+            class: "lre-gm-note",
+            children: "Drops this chat's change: they follow the world's schedule again. The edit's Undo brings it back."
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3(Button, {
+            icon: "undo",
+            disabled: ctx.busy,
+            onClick: () => sendOp(ctx, dropScheduleOp(view.entity, s.schedule), props.onBack),
+            children: "Use the world's schedule"
+          }, undefined, false, undefined, this)
+        ]
+      }, undefined, true, undefined, this) : null
+    ]
+  }, undefined, true, undefined, this);
+}
+
 // src/packs/castlife/ui/index.ts
 var castlife = {
   id: "castlife",
   register(r) {
     r.panel({ id: "castlife.cast", label: "Cast", order: 60, home: "people", component: CastPanel });
     r.sheet("person", PersonSheet);
+    r.gm({ id: "castlife.routines", label: "Routines", icon: "calendar", order: 25, component: GmRoutinesSection });
   }
 };
 var ui_default3 = castlife;
@@ -26117,7 +30168,7 @@ var DEFAULT_DAY_PARTS = [
 ];
 var GREGORIAN_MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 var GREGORIAN_WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-var HHMM = /^(\d{1,2}):(\d{2})$/;
+var HHMM2 = /^(\d{1,2}):(\d{2})$/;
 var ISO_LOCAL = /^(-?\d{1,6})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/;
 function floorDiv(a, b) {
   return Math.floor(a / b);
@@ -26126,7 +30177,7 @@ function mod(a, b) {
   return (a % b + b) % b;
 }
 function parseHHMM(text) {
-  const m = HHMM.exec(text.trim());
+  const m = HHMM2.exec(text.trim());
   if (!m)
     throw new RangeError(`expected HH:MM, got ${text}`);
   const h = Number(m[1]);
@@ -26628,7 +30679,8 @@ function signalOf(e) {
     class: cls,
     text: typeof e.data.text === "string" ? e.data.text : "",
     ...typeof e.data.entity === "string" ? { entity: e.data.entity } : {},
-    visibility: vis === undefined || vis === null || vis === "public" ? "public" : vis === "known_by" ? "known_by" : "secret"
+    visibility: vis === undefined || vis === null || vis === "public" ? "public" : vis === "known_by" ? "known_by" : "secret",
+    ...e.data.stops === false ? { stops: false } : {}
   };
 }
 var noop = () => {
@@ -28590,7 +32642,7 @@ function monthDays(text) {
 }
 var textOf = (v) => typeof v === "string" ? v : "";
 var isObject2 = (v) => isRecord(v);
-function nameOf2(doc, id) {
+function nameOf4(doc, id) {
   return (hasOwn(doc.entities, id) ? doc.entities[id]?.name : undefined) || id;
 }
 function line2(...parts) {
@@ -28794,7 +32846,7 @@ function OwnersField(p) {
     noun: "owner",
     blank: { party: "", role: "owner" },
     keys: ["party", "role", "share"],
-    title: (o, i) => textOf(o.party) ? nameOf2(p.doc, textOf(o.party)) : `Owner ${i + 1}`,
+    title: (o, i) => textOf(o.party) ? nameOf4(p.doc, textOf(o.party)) : `Owner ${i + 1}`,
     summary: (o) => line2(humanize(textOf(o.role) || "owner"), typeof o.share === "number" ? `${o.share}% of its worth` : null),
     sheet: (o, set, path) => /* @__PURE__ */ u3(M, {
       children: [
@@ -28857,7 +32909,7 @@ function SplitsField(p) {
     blank: { to: "", pct: 10 },
     keys: ["to", "cents", "pct"],
     help: "Fixed amounts go first, then percentages of what's left; the rest goes to the main account",
-    title: (s, i) => textOf(s.to) ? nameOf2(p.doc, textOf(s.to)) : `Split ${i + 1}`,
+    title: (s, i) => textOf(s.to) ? nameOf4(p.doc, textOf(s.to)) : `Split ${i + 1}`,
     summary: (s) => typeof s.cents === "number" ? formatMoney(s.cents, currency) : typeof s.pct === "number" ? `${s.pct}% of what's left` : "",
     sheet: (s, set, path) => /* @__PURE__ */ u3(M, {
       children: [
@@ -28928,8 +32980,8 @@ function SharesField(p) {
     foot: entries.length > 0 ? /* @__PURE__ */ u3(SharesTotal, {
       total
     }, undefined, false, undefined, this) : null,
-    title: (s, i) => textOf(s.party) ? nameOf2(p.doc, textOf(s.party)) : `Share ${i + 1}`,
-    summary: (s) => line2(`${typeof s.pct === "number" ? s.pct : 0}%`, textOf(s.from) ? `paid from ${nameOf2(p.doc, textOf(s.from))}` : null),
+    title: (s, i) => textOf(s.party) ? nameOf4(p.doc, textOf(s.party)) : `Share ${i + 1}`,
+    summary: (s) => line2(`${typeof s.pct === "number" ? s.pct : 0}%`, textOf(s.from) ? `paid from ${nameOf4(p.doc, textOf(s.from))}` : null),
     sheet: (s, set, path) => /* @__PURE__ */ u3(M, {
       children: [
         /* @__PURE__ */ u3(PickField, {
@@ -29144,7 +33196,7 @@ function DeductionsField(p) {
     blank: { label: "401(k)", kind: "retirement", pretax: true, pct: 5 },
     keys: ["label", "kind", "pretax", "cents", "pct", "match_pct", "to"],
     title: (d, i) => textOf(d.label) || `Deduction ${i + 1}`,
-    summary: (d) => line2(humanize(textOf(d.kind) || "other"), typeof d.cents === "number" ? `${formatMoney(d.cents, currency)} a payday` : typeof d.pct === "number" ? `${d.pct}% of pay` : null, d.pretax === true ? "before income tax" : null, typeof d.match_pct === "number" ? `matched ${d.match_pct}%` : null, textOf(d.to) ? `to ${nameOf2(p.doc, textOf(d.to))}` : null),
+    summary: (d) => line2(humanize(textOf(d.kind) || "other"), typeof d.cents === "number" ? `${formatMoney(d.cents, currency)} a payday` : typeof d.pct === "number" ? `${d.pct}% of pay` : null, d.pretax === true ? "before income tax" : null, typeof d.match_pct === "number" ? `matched ${d.match_pct}%` : null, textOf(d.to) ? `to ${nameOf4(p.doc, textOf(d.to))}` : null),
     sheet: (d, set, path) => /* @__PURE__ */ u3(M, {
       children: [
         /* @__PURE__ */ u3(TextInput, {
@@ -30233,22 +34285,8 @@ function glanceLines(view, now) {
   return [...alerts, ...soon];
 }
 
-// src/frontend/gm/editor.ts
-function nameOf3(gm, id) {
-  if (id === null)
-    return "—";
-  return gm.entities.find((e) => e.id === id)?.name ?? gm.places.find((p) => p.id === id)?.name ?? id;
-}
-function findEntities(entities, query, kind) {
-  const q = query.trim().toLowerCase();
-  return entities.filter((e) => (kind === "" || e.kind === kind) && (q === "" || e.name.toLowerCase().includes(q) || e.id.toLowerCase().includes(q))).sort((a, b) => Number(a.gone) - Number(b.gone) || a.name.localeCompare(b.name));
-}
-function claimedThings(gm) {
-  return gm.entities.filter((e) => e.claimed && !e.gone).sort((a, b) => a.name.localeCompare(b.name)).map((entity) => ({ entity, where: entity.holder !== null ? `held by ${nameOf3(gm, entity.holder)}` : entity.place !== null ? `at ${nameOf3(gm, entity.place)}` : "nowhere" }));
-}
-
 // src/frontend/gm/entity.tsx
-var LEVELS = [0, 1, 2, 3, 4];
+var LEVELS3 = [0, 1, 2, 3, 4];
 function EntityBadges(props) {
   const { entity, full } = props;
   const badges = [
@@ -30859,7 +34897,7 @@ function Simulation(props) {
                     value: "",
                     children: "From the tier"
                   }, undefined, false, undefined, this),
-                  LEVELS.map((n) => /* @__PURE__ */ u3("option", {
+                  LEVELS3.map((n) => /* @__PURE__ */ u3("option", {
                     value: String(n),
                     children: [
                       n,
@@ -36520,7 +40558,7 @@ function GmMindsSection(props) {
           }, undefined, true, undefined, this) : null
         ]
       }, undefined, true, undefined, this),
-      selected ? /* @__PURE__ */ u3(CharacterPages, {
+      selected ? /* @__PURE__ */ u3(CharacterPages2, {
         ctx,
         c: selected,
         onBack: pages.back
@@ -36528,7 +40566,7 @@ function GmMindsSection(props) {
     ]
   }, undefined, true, undefined, this);
 }
-function CharacterPages(props) {
+function CharacterPages2(props) {
   const { ctx, c } = props;
   const changes = usePages();
   const change = changes.page;
@@ -36890,7 +40928,7 @@ function LatestMind(props) {
     ]
   }, undefined, true, undefined, this);
 }
-function None(props) {
+function None2(props) {
   return /* @__PURE__ */ u3("p", {
     class: "lre-gm-minds-none",
     children: props.children
@@ -36908,7 +40946,7 @@ function Plans(props) {
     }, undefined, true, undefined, this),
     flush: true,
     children: [
-      c.plans.length === 0 ? /* @__PURE__ */ u3(None, {
+      c.plans.length === 0 ? /* @__PURE__ */ u3(None2, {
         children: "No plans."
       }, undefined, false, undefined, this) : null,
       /* @__PURE__ */ u3(List, {
@@ -36975,7 +41013,7 @@ function Commitments(props) {
     }, undefined, true, undefined, this),
     flush: true,
     children: [
-      c.commitments.length === 0 ? /* @__PURE__ */ u3(None, {
+      c.commitments.length === 0 ? /* @__PURE__ */ u3(None2, {
         children: "No commitments."
       }, undefined, false, undefined, this) : null,
       /* @__PURE__ */ u3(List, {
@@ -37032,7 +41070,7 @@ function Notes(props) {
     }, undefined, true, undefined, this),
     flush: true,
     children: [
-      c.notes.length === 0 ? /* @__PURE__ */ u3(None, {
+      c.notes.length === 0 ? /* @__PURE__ */ u3(None2, {
         children: "No notes."
       }, undefined, false, undefined, this) : null,
       /* @__PURE__ */ u3(List, {
@@ -37064,7 +41102,7 @@ function Witnessed(props) {
   return /* @__PURE__ */ u3(Section, {
     title: "Witnessed",
     flush: true,
-    children: c.witness.length === 0 ? /* @__PURE__ */ u3(None, {
+    children: c.witness.length === 0 ? /* @__PURE__ */ u3(None2, {
       children: "Nothing recorded."
     }, undefined, false, undefined, this) : /* @__PURE__ */ u3(List, {
       children: c.witness.map((w, i) => /* @__PURE__ */ u3(ListRow, {
@@ -37075,7 +41113,7 @@ function Witnessed(props) {
     }, undefined, false, undefined, this)
   }, undefined, false, undefined, this);
 }
-function ChangePage(props) {
+function ChangePage2(props) {
   return /* @__PURE__ */ u3(GmPage, {
     name: props.name,
     title: props.title,
@@ -37085,7 +41123,7 @@ function ChangePage(props) {
     children: props.children
   }, undefined, false, undefined, this);
 }
-function Submit(props) {
+function Submit2(props) {
   return /* @__PURE__ */ u3("div", {
     class: "lre-gm-minds-submit",
     children: [
@@ -37176,7 +41214,7 @@ function PinPage(props) {
   const group = P2();
   const choices = ["score", ...FIDELITIES];
   const unpinned = f.pin.author ? `The author's pin decides: ${FIDELITY_LABEL[f.pin.author]}.` : `Their score decides: ${Math.round(f.score)} now.`;
-  return /* @__PURE__ */ u3(ChangePage, {
+  return /* @__PURE__ */ u3(ChangePage2, {
     name: "mind-pin",
     title: "Pin their fidelity",
     c,
@@ -37241,7 +41279,7 @@ function PinPage(props) {
             }, undefined, true, undefined, this)
           ]
         }, undefined, true, undefined, this),
-        /* @__PURE__ */ u3(Submit, {
+        /* @__PURE__ */ u3(Submit2, {
           ctx,
           ready: pick !== current,
           icon: "pin",
@@ -37253,7 +41291,7 @@ function PinPage(props) {
 }
 function RefreshPage(props) {
   const { ctx, c } = props;
-  return /* @__PURE__ */ u3(ChangePage, {
+  return /* @__PURE__ */ u3(ChangePage2, {
     name: "mind-refresh",
     title: "Refresh their mind",
     c,
@@ -37296,7 +41334,7 @@ function IntentPage(props) {
   const clear = intentOp(c.entity, NO_INTENT);
   const changed = draft.text.trim().replace(/\s+/g, " ") !== current.text || draft.approach !== current.approach;
   const choices = [null, ...MIND_APPROACHES];
-  return /* @__PURE__ */ u3(ChangePage, {
+  return /* @__PURE__ */ u3(ChangePage2, {
     name: "mind-intent",
     title: "Your intent for them",
     c,
@@ -37379,7 +41417,7 @@ function IntentPage(props) {
               }, undefined, false, undefined, this)
             ]
           }, undefined, true, undefined, this),
-          /* @__PURE__ */ u3(Submit, {
+          /* @__PURE__ */ u3(Submit2, {
             ctx,
             ready: op !== null && changed,
             icon: "check",
@@ -37412,7 +41450,7 @@ function NotePage(props) {
   const [draft, setDraft] = d2(() => noteDraft(note ?? undefined));
   const textId = P2();
   const op = noteOp(c.entity, note?.id ?? null, draft);
-  return /* @__PURE__ */ u3(ChangePage, {
+  return /* @__PURE__ */ u3(ChangePage2, {
     name: "mind-note",
     title: note ? "Edit note" : "Add a note",
     c,
@@ -37454,7 +41492,7 @@ function NotePage(props) {
               }, undefined, false, undefined, this)
             ]
           }, undefined, true, undefined, this),
-          /* @__PURE__ */ u3(Submit, {
+          /* @__PURE__ */ u3(Submit2, {
             ctx,
             ready: op !== null,
             icon: note ? "check" : "plus",
@@ -37485,7 +41523,7 @@ function CommitmentPage(props) {
   };
   const op = commitmentOp(c.entity, commitment?.id ?? null, draft);
   const dueText = commitment?.dueText ?? null;
-  return /* @__PURE__ */ u3(ChangePage, {
+  return /* @__PURE__ */ u3(ChangePage2, {
     name: "mind-commitment",
     title: commitment ? "Edit commitment" : "Add a commitment",
     c,
@@ -37580,7 +41618,7 @@ function CommitmentPage(props) {
               }, undefined, false, undefined, this)
             ]
           }, undefined, true, undefined, this),
-          /* @__PURE__ */ u3(Submit, {
+          /* @__PURE__ */ u3(Submit2, {
             ctx,
             ready: op !== null,
             icon: commitment ? "check" : "plus",
@@ -37612,7 +41650,7 @@ function PlanPage(props) {
   const startOff = startIn.trim() !== "" && !Number.isFinite(Number(startIn));
   const minutes = Number(lasts);
   const lastsOff = !(Number.isInteger(minutes) && minutes > 0);
-  return /* @__PURE__ */ u3(ChangePage, {
+  return /* @__PURE__ */ u3(ChangePage2, {
     name: "mind-plan",
     title: plan ? "Edit plan" : "Add a plan",
     c,
@@ -37763,7 +41801,7 @@ function PlanPage(props) {
               }, undefined, false, undefined, this)
             ]
           }, undefined, true, undefined, this),
-          /* @__PURE__ */ u3(Submit, {
+          /* @__PURE__ */ u3(Submit2, {
             ctx,
             ready: op !== null,
             icon: plan ? "check" : "plus",
@@ -45195,6 +49233,7 @@ var REQUEST_TYPES = {
   "lre.preset": true,
   "lre.diag": true,
   "lre.minds": true,
+  "lre.routine": true,
   "lre.agents": true
 };
 function isRequestType(value) {
@@ -45554,6 +49593,11 @@ textarea.lre-input.lre-build-prose{font-family:inherit;font-size:var(--lre-fs-md
 .lre-build-proposal-line>.lre-icon{flex:none;margin-top:1px}
 .lre-build-reveal{margin:var(--lre-s1) 0 0 -10px}
 .lre-build-json{width:100%;padding:var(--lre-s2) var(--lre-s3);overflow-x:auto;border-radius:var(--lre-r);background:var(--lre-well);font-size:var(--lre-fs-sm)}
+.lre-build-badges{display:flex;flex:none;align-items:center;gap:var(--lre-s1)}
+.lre-build-source{display:flex;flex-direction:column;gap:2px;width:100%;min-width:0}
+.lre-build-source-name{padding:0;border:0;background:none;color:var(--lre-accent-text);font:inherit;text-align:left;text-decoration:underline;text-underline-offset:2px;cursor:pointer;overflow-wrap:anywhere}
+.lre-build-quote{display:block;margin-left:calc(16px + var(--lre-s1));padding-left:var(--lre-s2);border-left:2px solid var(--lre-hairline);font-size:var(--lre-fs-sm);font-style:italic;color:var(--lre-muted);overflow-wrap:anywhere}
+.lre-build-entry{margin:var(--lre-s1) 0 0;padding:var(--lre-s2) var(--lre-s3);border-radius:var(--lre-r);background:var(--lre-well);font-size:var(--lre-fs-sm);white-space:pre-wrap;overflow-wrap:anywhere}
 .lre-build-turns{display:flex;flex-direction:column;margin:0;padding:0;list-style:none}
 .lre-build-turn{display:flex;flex-direction:column;gap:var(--lre-s1);padding:var(--lre-s3) 0;border-top:1px solid var(--lre-hairline)}
 .lre-build-turn:first-child{padding-top:0;border-top:0}
@@ -46610,6 +50654,38 @@ var PLAY_CSS = `
 .lre-play-notworld>.lre-empty{padding-top:var(--lre-s5)}
 `;
 
+// src/frontend/styles/routines-gm.ts
+var ROUTINES_GM_CSS = `
+.lre-gm-routines-pages{animation:none}
+.lre-gm-routines{display:flex;flex-direction:column;gap:var(--lre-s3);min-width:0}
+.lre-gm-routines-intro{margin:0;padding:var(--lre-s2) var(--lre-s3) 0;font-size:var(--lre-fs-sm);color:var(--lre-muted);overflow-wrap:anywhere}
+.lre-gm-routines-build{padding:var(--lre-s1) var(--lre-s2) var(--lre-s2)}
+.lre-gm-routines-sub{display:flex;flex-wrap:wrap;align-items:center;gap:2px var(--lre-s1);min-width:0}
+.lre-gm-routines-lines{display:flex;flex-direction:column;gap:1px;min-width:0;overflow-wrap:anywhere}
+.lre-gm-routines-none{margin:0;padding:var(--lre-s3) var(--lre-s3) 0;font-size:var(--lre-fs-sm);color:var(--lre-muted);overflow-wrap:anywhere}
+.lre-gm-routines-none:last-child{padding-bottom:var(--lre-s3)}
+.lre-gm-routines-binding{display:flex;flex-direction:column;gap:var(--lre-s1);padding:var(--lre-s3) var(--lre-s3) var(--lre-s1);min-width:0}
+.lre-gm-routines-binding>.lre-gm-note{overflow-wrap:anywhere}
+.lre-gm-routines-binding>.lre-gm-note:first-child{color:var(--lre-fg);font-size:var(--lre-fs-md)}
+.lre-gm-routines-head{padding:var(--lre-s3) var(--lre-s3) var(--lre-s1);font-size:var(--lre-fs-sm);font-weight:600;color:var(--lre-muted)}
+.lre-gm-routines-slot{display:flex;flex-wrap:wrap;align-items:baseline;gap:2px var(--lre-s2);min-width:0}
+.lre-gm-routines-time{flex:none;font-variant-numeric:tabular-nums;font-weight:600}
+.lre-gm-routines-source{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:var(--lre-s1) var(--lre-s2);min-width:0}
+.lre-gm-routines-source>.lre-gm-routines-lines{flex:1 1 12rem}
+.lre-gm-routines-source>.lre-btn{flex:none}
+.lre-gm-routines-source-label{font-weight:500}
+.lre-gm-routines-quote{font-size:var(--lre-fs-sm);font-style:italic;color:var(--lre-muted)}
+.lre-gm-routines-shadow{display:flex;flex-direction:column;gap:2px;min-width:0;padding-top:var(--lre-s2);border-top:1px solid var(--lre-hairline)}
+.lre-gm-routines-choices{margin:0;padding:0;border:0;min-width:0;display:flex;flex-direction:column}
+.lre-gm-routines-choice{display:flex;align-items:flex-start;gap:var(--lre-s3);min-height:var(--lre-tap-lg);padding:var(--lre-s2) 0;cursor:pointer}
+.lre-gm-routines-choice+.lre-gm-routines-choice{border-top:1px solid var(--lre-hairline)}
+.lre-gm-routines-choice>input{flex:none;width:22px;height:22px;margin:1px 0 0;accent-color:var(--lre-accent);cursor:pointer}
+.lre-gm-routines-choice-text{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
+.lre-gm-routines-choice-name{display:flex;flex-wrap:wrap;align-items:center;gap:var(--lre-s2);font-weight:500}
+.lre-gm-routines-choice-help{font-size:var(--lre-fs-sm);color:var(--lre-muted);overflow-wrap:anywhere}
+.lre-gm-routines-submit{display:flex;flex-direction:column;gap:var(--lre-s1);min-width:0}
+`;
+
 // src/frontend/styles/settings.ts
 var SETTINGS_CSS = `
 .lre-set{display:flex;flex-direction:column;gap:var(--lre-s3);min-width:0}
@@ -46706,6 +50782,8 @@ var SHELL_CSS = `
 .lre-drawer .lre-bottomnav>button[aria-current=page]>.lre-icon{background:var(--lre-accent-soft)}
 .lre-drawer .lre-bottomnav[data-tone=gm]>button[aria-current=page]{background:transparent}
 .lre-drawer .lre-bottomnav[data-tone=gm]>button[aria-current=page]>.lre-icon{background:var(--lre-gm-soft)}
+/* GM mode's bar holds seven tabs: each label gets its button's whole width */
+.lre-drawer .lre-bottomnav[data-tone=gm]>button{padding-left:0;padding-right:0;letter-spacing:-0.01em}
 .lre-drawer .lre-bottomnav>button>.lre-dot{top:var(--lre-s1);left:calc(50% + 8px)}
 `;
 
@@ -46783,7 +50861,7 @@ var VISUAL_EDITORS_CSS = `
 /* lint marks over the map preview (space/ui/map-preview.tsx); the stage under it keeps the taps */
 .lre-map .lre-ve-marks{pointer-events:none}
 
-/* the schedule's day bar (calendar/ui/schedule-editor.tsx): slots coloured by value, with the value in words */
+/* the schedule's day bar (build/schedule-form.tsx): slots coloured by value, with the value in words */
 .lre-ve-day{position:relative;height:64px;margin:0 var(--lre-s1);touch-action:pan-y}
 .lre-ve-day-track{position:absolute;inset:8px 0;border-radius:var(--lre-r);background:repeating-linear-gradient(90deg,transparent 0 calc(100% / 24 - 1px),var(--lre-hairline) calc(100% / 24 - 1px) calc(100% / 24)),var(--lre-well);overflow:hidden}
 .lre-ve-day-slot{position:absolute;top:0;bottom:0;min-width:2px;padding:0 4px;border:1px solid var(--slot,var(--lre-accent));border-radius:var(--lre-r-sm);background:color-mix(in srgb,var(--slot,var(--lre-accent)) 30%,var(--lre-card));color:var(--lre-fg);font-size:var(--lre-fs-xs);font-weight:600;line-height:1.2;text-align:left;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
@@ -46832,7 +50910,7 @@ var VISUAL_EDITORS_CSS = `
 `;
 
 // src/frontend/styles.ts
-var CSS = [TOKENS_CSS, COMPONENTS_CSS, SHELL_CSS, CHAT_CSS, PLAY_CSS, PACKS_ME_CSS, PACKS_MONEY_CSS, PACKS_WORLD_CSS, GM_CSS, MINDS_CSS, SETTINGS_CSS, BUILD_CSS, FORMS_CSS, VISUAL_EDITORS_CSS, DIAGNOSTICS_CSS].join(`
+var CSS = [TOKENS_CSS, COMPONENTS_CSS, SHELL_CSS, CHAT_CSS, PLAY_CSS, PACKS_ME_CSS, PACKS_MONEY_CSS, PACKS_WORLD_CSS, GM_CSS, MINDS_CSS, ROUTINES_GM_CSS, SETTINGS_CSS, BUILD_CSS, FORMS_CSS, VISUAL_EDITORS_CSS, DIAGNOSTICS_CSS].join(`
 `);
 
 // src/frontend/ui-registry.ts

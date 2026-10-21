@@ -1540,6 +1540,7 @@ var EXTRACTION_DEFAULTS = Object.freeze({
   time_advance: "auto",
   location: "auto",
   condition: "auto",
+  routine: "auto",
   regard: "confirm",
   transfer: "confirm",
   spawn: "confirm",
@@ -1554,6 +1555,7 @@ var EXTRACTION_LEARNING = Object.freeze({
   window: 30,
   demoteUndoRate: 0.1
 });
+var JOB_SETTINGS_DEFAULTS = Object.freeze({ routineLoreTokens: 8000 });
 
 // src/engine/read-pass.ts
 var kept = null;
@@ -5721,7 +5723,8 @@ function signalOf(e) {
     class: cls,
     text: typeof e.data.text === "string" ? e.data.text : "",
     ...typeof e.data.entity === "string" ? { entity: e.data.entity } : {},
-    visibility: vis === undefined || vis === null || vis === "public" ? "public" : vis === "known_by" ? "known_by" : "secret"
+    visibility: vis === undefined || vis === null || vis === "public" ? "public" : vis === "known_by" ? "known_by" : "secret",
+    ...e.data.stops === false ? { stops: false } : {}
   };
 }
 var noop = () => {
@@ -8164,6 +8167,25 @@ var listOf = (v) => Array.isArray(v) ? v.filter((x) => typeof x === "string") : 
 function loreHeldBy(world, entry, who) {
   return listOf(entry.holders).includes(who) || cuesOf(world, who).some((c) => c.secret.kind === "lore" && c.secret.id === entry.id);
 }
+function loreReadable(reg, world, state, entry, purpose, effects = false, open = loreGateReader(reg, world, state), as) {
+  if (purpose === "gm")
+    return true;
+  const source = loreSourceOf(entry.source);
+  if (source.kind === "ai" && source.status === "pending")
+    return false;
+  if (as !== undefined && loreIsSecret(entry))
+    return loreHeldBy(world, entry, as);
+  if (loreIsSecret(entry) && !open(entry))
+    return !effects && !PROSE_STEPS.includes(purpose) && listOf(entry.audience).includes(purpose);
+  const v = entry.visibility;
+  if (v === undefined || v === "public")
+    return true;
+  if (v !== "known_by")
+    return false;
+  const reader = as ?? world.pov;
+  const links = listOf(entry.links);
+  return links.length > 0 && links.every((id) => hasOwn(state.entities, id) ? playerKnows(reg, world, state, reader, id) : hasOwn(world.places, id) && canSeePlace(reg, world, state, reader, id));
+}
 
 // src/engine/lore-lint.ts
 function lintLore(world) {
@@ -8812,6 +8834,10 @@ function allSchedules(reg, world) {
       out.push(s);
   return out;
 }
+function chatSchedulesIn(ctx) {
+  const mine = optionalQuery(ctx, "castlife.chat_schedules")?.(ctx) ?? [];
+  return mine.length === 0 ? allSchedules(ctx.registry, ctx.world) : [...allSchedules(ctx.registry, ctx.world), ...mine];
+}
 function slotSpan(slot) {
   const start = parseHHMM(slot.start);
   let end = parseHHMM(slot.end);
@@ -8935,7 +8961,7 @@ function restValue(reg, world, state, entity, target) {
 }
 function runningRivals(reg, ctx, schedule, rank, at) {
   const out = [];
-  for (const s of allSchedules(reg, ctx.world)) {
+  for (const s of chatSchedulesIn(ctx)) {
     if (s.id === schedule.id || s.target !== schedule.target)
       continue;
     const r = ownerRank(reg, ctx.world, ctx.state, s);
@@ -8956,6 +8982,25 @@ function overriddenAt(reg, ctx, schedule, entity, at) {
     return false;
   return runningRivals(reg, ctx, schedule, rank, at).some((r) => r.rank < rank && runsFor(ctx, r, entity));
 }
+function valueBefore(reg, ctx, instant, entity) {
+  const cal = calendarOf(ctx.world);
+  const s = instant.schedule;
+  for (const [i, slot] of s.slots.entries()) {
+    if (i === instant.slot)
+      continue;
+    const span = slotSpan(slot);
+    for (const d of [instant.day - 1, instant.day])
+      if (recursOn(cal, s.recurrence, d) && clockAt(cal, d, span.start) + span.length === instant.at)
+        return slot.value === undefined ? null : slot.value;
+  }
+  return restValue(reg, ctx.world, ctx.state, entity, s.target) ?? null;
+}
+function firstOfDay(instant) {
+  if (instant.edge !== "start")
+    return false;
+  const starts = instant.schedule.slots.map((slot) => slotSpan(slot).start);
+  return starts[instant.slot] === Math.min(...starts);
+}
 function instantEvents(reg, ctx, instant, runSeed, opts = {}) {
   const { schedule } = instant;
   const out = [];
@@ -8966,14 +9011,19 @@ function instantEvents(reg, ctx, instant, runSeed, opts = {}) {
   const startsHere = instant.edge === "end" && handedOver(ctx.world, instant);
   const rank = ownerRank(reg, ctx.world, ctx.state, schedule);
   const rivals = rank === null ? [] : runningRivals(reg, ctx, schedule, rank, instant.at);
+  const yields = optionalQuery(ctx, "castlife.yields");
+  const off = optionalQuery(ctx, "castlife.schedule_off");
+  const routine = schedule.target === "place" || schedule.target === "activity";
   for (const entity of scheduleOwners(reg, ctx.world, ctx.state, schedule)) {
     if (domain && ctx.levelOf(entity, domain) < 1)
       continue;
     if (held(ctx.state, entity, schedule.target, instant.at))
       continue;
-    if (opts.povRoutine === false && entity === ctx.world.pov && (schedule.target === "place" || schedule.target === "activity"))
+    if (opts.povRoutine === false && entity === ctx.world.pov && routine)
       continue;
-    if ((schedule.target === "place" || schedule.target === "activity") && optionalQuery(ctx, "combat.engaged")?.(ctx, entity) === true)
+    if (off?.(ctx, entity, schedule.id, instant.at) === true)
+      continue;
+    if (routine && optionalQuery(ctx, "combat.engaged")?.(ctx, entity) === true)
       continue;
     const mine = rivals.filter((r) => runsFor(ctx, r, entity));
     if (rank !== null && mine.some((r) => r.rank < rank))
@@ -8992,8 +9042,14 @@ function instantEvents(reg, ctx, instant, runSeed, opts = {}) {
       continue;
     if (schedule.target === "place" && typeof value === "string" && !own(ctx.world.places, value))
       continue;
-    if ((schedule.target === "place" || schedule.target === "activity") && routineStays(ctx, entity, schedule.target === "place" ? value : null))
+    if (routine && routineStays(ctx, entity, schedule.target === "place" ? value : null))
       continue;
+    if (routine && yields) {
+      const lower = mine.filter((r) => rank !== null && r.rank > rank).sort((a, b) => a.rank - b.rank)[0];
+      const expected = instant.edge === "end" ? slot.value ?? null : lower ? lower.slot.value ?? null : valueBefore(reg, ctx, instant, entity);
+      if (yields(ctx, entity, schedule.target === "place" ? "place" : "activity", expected, firstOfDay(instant), opts.povRoutine === false, opts.timelapse === true))
+        continue;
+    }
     out.push({ type: "set", entity, field: schedule.target, value });
   }
   return out;
@@ -10202,14 +10258,14 @@ var ALL_NOTE = Object.fromEntries(INTERRUPT_CLASSES.map((c) => [c, "note"]));
 function rngFactory(runSeed, process, slot) {
   return (entity) => createRng(processSeed(runSeed, process, entity, slot));
 }
-function stepAgent(reg, w, agent, slot, runSeed) {
+function stepAgent(reg, w, agent, slot, runSeed, povRoutine, timelapse) {
   const applied = [];
   for (const def of reg.processes) {
     if (def.scope !== "agent")
       continue;
     if (w.ctx.levelOf(agent, def.domain) < def.minLevel)
       continue;
-    applied.push(...w.applyAll(def.step({ start: slot.start, end: slot.end, index: slot.index }, w.ctx, rngFactory(runSeed, def.id, slot.index), agent)));
+    applied.push(...w.applyAll(def.step({ start: slot.start, end: slot.end, index: slot.index, ...povRoutine ? {} : { povRoutine: false }, ...timelapse ? { timelapse: true } : {} }, w.ctx, rngFactory(runSeed, def.id, slot.index), agent)));
   }
   return applied;
 }
@@ -10242,11 +10298,12 @@ function advance(reg, w, to, opts) {
     return result;
   const cal = calendarOf(w.world);
   const since = ranTo(w.state);
-  const schedules = allSchedules(reg, w.world);
+  const schedules = chatSchedulesIn(w.ctx);
   const instants = scheduleInstants(w.world, schedules, since, to);
   const slots = slotsEnding(cal, since, to);
   const e = emitter(reg, w, opts.runSeed, result.rules);
   const timelapse = opts.mode === "timelapse";
+  const povRoutine = timelapse && opts.povRoutine !== false;
   const stepping = () => {
     if (!timelapse)
       return [];
@@ -10261,13 +10318,13 @@ function advance(reg, w, to, opts) {
   };
   let cursors = new Map;
   let next = 0;
-  const agentInstants = (slot, until) => {
+  const infoOf = (slot) => ({ start: slot.start, end: slot.end, index: slot.index, ...povRoutine ? {} : { povRoutine: false }, ...timelapse ? { timelapse: true } : {} });
+  const agentInstants = (slot, info, until) => {
     const timed = reg.processes.filter((d) => d.scope === "agent" && d.instants);
     if (timed.length === 0)
       return [];
     const after = Math.max(w.state.clock, since);
     const who = timelapse ? stepping() : lod1Agents(w.world, w.state).filter((a) => a !== w.world.pov);
-    const info = { start: slot.start, end: slot.end, index: slot.index };
     const out = [];
     for (const agent of who) {
       if ((cursors.get(agent) ?? agentCursor(w.world, w.state, agent)) < slot.index - 1)
@@ -10283,7 +10340,8 @@ function advance(reg, w, to, opts) {
     return out.sort((a, b) => a.at - b.at || a.agent.localeCompare(b.agent) || timed.indexOf(a.def) - timed.indexOf(b.def) || a.instant.key.localeCompare(b.instant.key));
   };
   const applyInstants = (until, slot) => {
-    const timed = agentInstants(slot, until);
+    const info = infoOf(slot);
+    const timed = agentInstants(slot, info, until);
     let t = 0;
     for (;; ) {
       const edge = instants[next];
@@ -10294,12 +10352,12 @@ function advance(reg, w, to, opts) {
       if (edge && edgeAt <= (moment?.at ?? Infinity)) {
         next++;
         clockTo(w, edgeAt, cause, e);
-        e.emit(instantEvents(reg, w.ctx, edge, opts.runSeed, { povRoutine: timelapse }));
+        e.emit(instantEvents(reg, w.ctx, edge, opts.runSeed, { povRoutine, timelapse }));
       } else if (moment) {
         t++;
         clockTo(w, moment.at, cause, e);
         if (stillActs(w, moment.agent))
-          e.emit(moment.def.atInstant?.(w.ctx, moment.agent, moment.instant) ?? []);
+          e.emit(moment.def.atInstant?.(w.ctx, moment.agent, moment.instant, info) ?? []);
       }
     }
   };
@@ -10335,7 +10393,7 @@ function advance(reg, w, to, opts) {
     const tracksBefore = result.tracks.length;
     applyInstants(slot.end, slot);
     clockTo(w, slot.end, cause, e);
-    const info = { start: slot.start, end: slot.end, index: slot.index };
+    const info = infoOf(slot);
     for (const def of reg.processes) {
       if (def.scope === "agent" || rulesetFloor(w.world, def.domain, w.state.realism.levels[def.domain] ?? 0) < def.minLevel)
         continue;
@@ -10345,7 +10403,7 @@ function advance(reg, w, to, opts) {
       let k = cursors.get(agent) ?? agentCursor(w.world, w.state, agent);
       while (k < slot.index && stillActs(w, agent)) {
         k++;
-        const applied = stepAgent(reg, w, agent, k === slot.index ? slot : slotOf(cal, k), opts.runSeed);
+        const applied = stepAgent(reg, w, agent, k === slot.index ? slot : slotOf(cal, k), opts.runSeed, povRoutine, timelapse);
         if (applied.length > 0)
           result.rules.push(...runRulesOnEvents(reg, w, applied, { seed: hashParts(opts.runSeed, "agent", agent, k) }));
       }
@@ -10369,7 +10427,7 @@ function advance(reg, w, to, opts) {
     result.agentDays += slotDays;
     for (const s of signalsSince(before)) {
       const p = own(policy, s.class);
-      if (p === "stop" && timelapse && signalVisible(reg, w.world, w.state, w.world.pov, s))
+      if (p === "stop" && timelapse && s.stops !== false && signalVisible(reg, w.world, w.state, w.world.pov, s))
         result.stops.push(s);
       else if (p === "note" || p === "stop")
         result.notes.push(s);
@@ -10442,7 +10500,7 @@ function catchUp(reg, w, opts) {
     let k = cursor;
     while (k < done && budget > 0 && stillActs(w, agent)) {
       k++;
-      const applied = stepAgent(reg, w, agent, slotOf(cal, k), opts.runSeed);
+      const applied = stepAgent(reg, w, agent, slotOf(cal, k), opts.runSeed, false, false);
       if (applied.length > 0)
         runRulesOnEvents(reg, w, applied, { seed: hashParts(opts.runSeed, "agent", agent, k) });
       budget -= slotLen;
@@ -10870,6 +10928,7 @@ class TimelapseRun {
       mode: "timelapse",
       cause: "timelapse",
       includePov: true,
+      povRoutine: this.opts.povRoutine !== false,
       ...this.opts.overrides ? { interrupts: this.opts.overrides } : {},
       unitCap: this.cap,
       spent: { slots: this.result.slots, agentDays: this.result.agentDays, events: this.w.events.length - this.start },
@@ -11047,7 +11106,7 @@ function queueStop(w, res, since, scene, speeding) {
   const policy = interruptPolicy(w.state);
   const signalled = w.events.slice(since).some((e) => {
     const s = "data" in e ? signalOf(e) : null;
-    return s !== null && policy[s.class] === "stop" && signalVisible(w.reg, w.world, w.state, w.world.pov, s);
+    return s !== null && s.stops !== false && policy[s.class] === "stop" && signalVisible(w.reg, w.world, w.state, w.world.pov, s);
   });
   return signalled ? "interruption" : null;
 }
@@ -11057,7 +11116,7 @@ function turnStart(reg, w, runSeed) {
 }
 function timelapseOptions(intent, runSeed) {
   const seg = intent.params.segment;
-  return { target: parseTarget(intent.params.target), opts: { runSeed, overrides: parseOverrides(intent.params.overrides), segment: typeof seg === "number" ? seg : 1 } };
+  return { target: parseTarget(intent.params.target), opts: { runSeed, overrides: parseOverrides(intent.params.overrides), segment: typeof seg === "number" ? seg : 1, ...intent.params.povRoutine === false ? { povRoutine: false } : {} } };
 }
 function claimThing(w, claim, salt) {
   const made = optionalService(w.ctx, "gear.claim")?.(w.ctx, { ...claim, by: w.world.pov, salt });
@@ -11188,8 +11247,8 @@ function postTurn(input) {
   stepTracks(reg, w, input.seed);
   return coarsen(reg, input.world, input.state, w.events);
 }
-function timelapseIntent(target, overrides, segment = 1) {
-  return { action: TIMELAPSE_ACTION, params: { target, ...overrides ? { overrides } : {}, segment }, probabilities: {} };
+function timelapseIntent(target, overrides, segment = 1, povRoutine = true) {
+  return { action: TIMELAPSE_ACTION, params: { target, ...overrides ? { overrides } : {}, segment, ...povRoutine ? {} : { povRoutine: false } }, probabilities: {} };
 }
 
 // src/packs/calendar/core/view.ts
@@ -25203,6 +25262,178 @@ function planDay(input) {
   return { agent: input.agent, start: input.start, end: input.end, blocks, ties, tieZone };
 }
 
+// src/shared/routines.ts
+var ROUTINE_BLOCK_KINDS = ["fixed", "flexible", "optional"];
+function isOff(entry) {
+  return "off" in entry && entry.off === true;
+}
+var BASIC_BLOCKS = Object.freeze([
+  { id: "sleep", label: "Sleep", activity: "sleep", kind: "flexible", window: { from: "21:30", to: "01:00" }, minutes: 480, priority: 5, place: "home", needs: ["fatigue"], source: { type: "builtin" } },
+  { id: "breakfast", label: "Breakfast", activity: "breakfast", kind: "flexible", window: { from: "06:00", to: "10:00" }, minutes: 30, priority: 4, place: "home", needs: ["hunger"], source: { type: "builtin" } },
+  { id: "lunch", label: "Lunch", activity: "lunch", kind: "flexible", window: { from: "11:00", to: "14:00" }, minutes: 45, priority: 4, place: "work", needs: ["hunger"], source: { type: "builtin" } },
+  { id: "dinner", label: "Dinner", activity: "dinner", kind: "flexible", window: { from: "17:00", to: "21:00" }, minutes: 60, priority: 4, place: "home", needs: ["hunger"], source: { type: "builtin" } }
+]);
+var ROUTINE_AWARENESS = ["story_first", "balanced", "routine_first"];
+var ROUTINE_INVITATIONS = ["off", "player", "everyone"];
+var ROUTINE_SOCIABILITY = ["reserved", "usual", "outgoing"];
+var ROUTINE_PLAN_BEND = ["must", "strong", "standard", "ordinary"];
+var DEFAULT_ROUTINE_SETTINGS = Object.freeze({ awareness: "balanced", invitations: "player", sociability: "usual", planBend: "standard" });
+function routineSettingsOf(world) {
+  const raw = isRecord(world.routineSettings) ? world.routineSettings : {};
+  const pick = (v, allowed, fallback) => allowed.find((a) => a === v) ?? fallback;
+  return {
+    awareness: pick(raw.awareness, ROUTINE_AWARENESS, DEFAULT_ROUTINE_SETTINGS.awareness),
+    invitations: pick(raw.invitations, ROUTINE_INVITATIONS, DEFAULT_ROUTINE_SETTINGS.invitations),
+    sociability: pick(raw.sociability, ROUTINE_SOCIABILITY, DEFAULT_ROUTINE_SETTINGS.sociability),
+    planBend: pick(raw.planBend, ROUTINE_PLAN_BEND, DEFAULT_ROUTINE_SETTINGS.planBend)
+  };
+}
+var ROUTINE_MODES = ["follows", "no_invitations", "off"];
+var ROUTINE_EVENTS = { follow: "castlife.follow", block: "castlife.routine", schedule: "castlife.schedule" };
+var ROUTINE_LINT = {
+  shape: "routine.shape",
+  window: "routine.window",
+  place: "routine.place",
+  owner: "routine.owner",
+  company: "routine.company",
+  need: "routine.need",
+  days: "routine.days",
+  source: "routine.source",
+  overlap: "routine.overlap",
+  pack: "routine.pack",
+  settings: "routine.settings",
+  scheduleOwner: "schedule.owner",
+  scheduleSlot: "schedule.slot",
+  scheduleSource: "schedule.source"
+};
+var HHMM2 = /^([01]\d|2[0-3]):[0-5]\d$/;
+var SEASONS = ["spring", "summer", "autumn", "winter"];
+function isTime(v) {
+  return typeof v === "string" && HHMM2.test(v);
+}
+function sourceProblem(v, world) {
+  if (v === undefined)
+    return null;
+  if (!isRecord(v))
+    return "its source isn't one";
+  const t = v.type;
+  const quote = v.quote === undefined || typeof v.quote === "string";
+  if (t === "authored")
+    return null;
+  if (t === "lore")
+    return typeof v.entry === "string" && v.entry !== "" && quote ? null : "a lore source names its entry";
+  if (t === "sheet")
+    return typeof v.entity === "string" && typeof v.field === "string" && quote ? null : "a sheet source names its entity and field";
+  if (world)
+    return "world data rests on what's authored, a lore entry or a sheet field";
+  if (t === "builtin")
+    return null;
+  if (t === "story")
+    return typeof v.at === "number" && (v.turn === undefined || typeof v.turn === "string") ? null : "a story source has its time";
+  if (t === "gm")
+    return typeof v.at === "number" ? null : "a GM source has its time";
+  return "its source isn't one";
+}
+function placeProblem(v) {
+  if (v === undefined || v === "home" || v === "work" || v === "here" || v === "with")
+    return null;
+  if (isRecord(v) && typeof v.place === "string" && v.place !== "")
+    return null;
+  if (isRecord(v) && typeof v.nearest === "string" && v.nearest !== "")
+    return null;
+  return "its place is home, work, here, with, {place} or {nearest}";
+}
+function daysProblem(v) {
+  if (v === undefined)
+    return null;
+  if (!isRecord(v))
+    return "its days aren't a set of constraints";
+  const ints = (x, lo, hi) => Array.isArray(x) && x.every((n) => Number.isInteger(n) && n >= lo && n <= hi);
+  const strs = (x) => Array.isArray(x) && x.every((s) => typeof s === "string");
+  if (v.weekdays !== undefined && !ints(v.weekdays, 0, 6))
+    return "weekdays are 0 (Sunday) to 6";
+  if (v.off !== undefined && v.off !== "only" && v.off !== "never")
+    return "days off are only or never";
+  if (v.holidays !== undefined && !strs(v.holidays))
+    return "holidays are calendar ids";
+  if (v.except !== undefined && !strs(v.except))
+    return "except lists calendar ids";
+  if (v.birthday !== undefined && v.birthday !== "own" && v.birthday !== "friend")
+    return "a birthday is own or friend";
+  if (v.seasons !== undefined && !(Array.isArray(v.seasons) && v.seasons.every((s) => SEASONS.some((x) => x === s))))
+    return "seasons are spring, summer, autumn and winter";
+  if (v.weather !== undefined && v.weather !== "fair" && v.weather !== "foul")
+    return "weather is fair or foul";
+  return null;
+}
+function blockShapeProblems(v, world = true) {
+  if (!isRecord(v))
+    return ["a block is an object"];
+  const out = [];
+  if (typeof v.id !== "string" || v.id === "")
+    out.push("a block has an id");
+  if (v.off === true)
+    return out;
+  if (typeof v.label !== "string" || v.label.trim() === "")
+    out.push("a block has a label");
+  if (typeof v.activity !== "string" || v.activity.trim() === "")
+    out.push("a block has an activity");
+  if (!ROUTINE_BLOCK_KINDS.some((k) => k === v.kind))
+    out.push("its kind is fixed, flexible or optional");
+  if (typeof v.minutes !== "number" || !Number.isInteger(v.minutes) || v.minutes < 1 || v.minutes > 1440)
+    out.push("its length (minutes) is 1 to 1,440 minutes");
+  if (v.kind === "fixed" && !isTime(v.at))
+    out.push("a fixed block starts at an HH:MM time (at)");
+  if (v.kind !== "fixed" && v.at !== undefined)
+    out.push("only a fixed block has a start time (at)");
+  if (v.kind !== "fixed" && !(isRecord(v.window) && isTime(v.window.from) && isTime(v.window.to)))
+    out.push("its window is HH:MM to HH:MM");
+  if (v.perWeek !== undefined && !(v.kind !== "fixed" && Number.isInteger(v.perWeek) && typeof v.perWeek === "number" && v.perWeek >= 1 && v.perWeek <= 7))
+    out.push("times a week (perWeek) is 1 to 7, for a flexible or optional block");
+  if (v.chance !== undefined && !(v.kind === "optional" && typeof v.chance === "number" && v.chance > 0 && v.chance <= 1))
+    out.push("a chance is above 0 and at most 1, for an optional block");
+  if (v.priority !== undefined && !(typeof v.priority === "number" && Number.isInteger(v.priority) && v.priority >= 1 && v.priority <= 5))
+    out.push("its priority is 1 to 5");
+  if (v.needs !== undefined && !(Array.isArray(v.needs) && v.needs.every((n) => typeof n === "string")))
+    out.push("its needs are names");
+  if (v.private !== undefined && typeof v.private !== "boolean")
+    out.push("private is true or false");
+  if (v.company !== undefined && !(isRecord(v.company) && isRecord(v.company.who) && (v.company.invite === undefined || typeof v.company.invite === "boolean")))
+    out.push("its company is {who: a selector, invite?}");
+  for (const p of [placeProblem(v.place), daysProblem(v.days), sourceProblem(v.source, world)])
+    if (p)
+      out.push(p);
+  return out;
+}
+function routineShapeProblems(v) {
+  if (!isRecord(v))
+    return ["a routine is an object"];
+  const out = [];
+  if (typeof v.id !== "string" || v.id === "")
+    out.push("a routine has an id");
+  if (v.label !== undefined && typeof v.label !== "string")
+    out.push("its label is text");
+  if (v.owner !== undefined && !(typeof v.owner === "string" ? v.owner !== "" : isRecord(v.owner)))
+    out.push("its owner is an entity, a group, a kind or a selector");
+  if (v.inherit !== undefined && typeof v.inherit !== "boolean")
+    out.push("inherit is true or false");
+  const src = sourceProblem(v.source, true);
+  if (src)
+    out.push(src);
+  if (!Array.isArray(v.blocks))
+    return [...out, "a routine has a list of blocks"];
+  const ids = new Set;
+  v.blocks.forEach((b, i) => {
+    for (const p of blockShapeProblems(b, true))
+      out.push(`block ${i + 1}: ${p}`);
+    const id = isRecord(b) && typeof b.id === "string" ? b.id : "";
+    if (id !== "" && ids.has(id))
+      out.push(`block ${i + 1}: another block of this routine is ${id}`);
+    ids.add(id);
+  });
+  return out;
+}
+
 // src/packs/castlife/core/places.ts
 function homeOf(ctx, who) {
   const h = own(ctx.state.entities, who)?.fields.home;
@@ -25220,6 +25451,484 @@ function placeOfType(ctx, sceneType, near) {
   const ids = Object.keys(ctx.world.places).sort();
   const parent = near ? own(ctx.world.places, near)?.parent : undefined;
   return ids.find((id) => own(ctx.world.places, id)?.sceneType === sceneType && own(ctx.world.places, id)?.parent === parent) ?? ids.find((id) => own(ctx.world.places, id)?.sceneType === sceneType && own(ctx.world.places, id)?.visibility !== "secret") ?? null;
+}
+
+// src/packs/castlife/core/occasions.ts
+var FOND = 30;
+function birthdayOf(cal, v) {
+  const m = typeof v === "string" ? /^\s*(?:(-?\d{1,6})-)?(\d{1,2})-(\d{1,2})\s*$/.exec(v) : null;
+  if (!m)
+    return null;
+  const month = Number(m[2]);
+  const day = Number(m[3]);
+  const year = m[1] === undefined ? null : Number(m[1]);
+  if (month < 1 || month > cal.system.months || day < 1)
+    return null;
+  const longest = year !== null ? cal.system.monthLength(year, month) : Math.max(...[0, 1, 2, 3].map((y) => cal.system.monthLength(y, month)));
+  return day <= longest ? { month, day, year } : null;
+}
+function birthdayOn(cal, v, date) {
+  const b = birthdayOf(cal, v);
+  if (!b || b.month !== date.month)
+    return false;
+  const last = cal.system.monthLength(date.year, date.month);
+  return b.day === date.day || b.day > last && date.day === last;
+}
+function occasionOf(ctx, who, day) {
+  const cal = calendarOf(ctx.world);
+  const date = dateAt(cal, clockAt(cal, day, 0));
+  const weekend = date.weekday === 0 || date.weekday === 6;
+  const holidays = ctx.levelOf(ctx.world.pov, "calendar") >= 4 ? holidaysOn(cal, day).map((h) => ({ id: h.id, label: h.label, dayOff: h.dayOff })) : [];
+  const regard = optionalQuery(ctx, "regard");
+  const friends = regard ? Object.keys(ctx.state.entities).sort().filter((other) => {
+    const e = own(ctx.state.entities, other);
+    return other !== who && !!e && kindIs(ctx.registry, ctx.world, e.kind, "person") && !isGone(ctx.state, other) && acts(ctx.world, ctx.state, other) && birthdayOn(cal, e.fields.birthday, date) && regard(ctx, who, other) >= FOND;
+  }) : [];
+  const home = own(ctx.state.entities, who)?.fields.home;
+  const place = typeof home === "string" && own(ctx.world.places, home) ? home : null;
+  return {
+    weekend,
+    dayOff: weekend || holidays.some((h) => h.dayOff),
+    holidays,
+    birthday: birthdayOn(cal, own(ctx.state.entities, who)?.fields.birthday, date),
+    friends,
+    season: optionalQuery(ctx, "weather.season")?.(ctx, clockAt(cal, day, 12 * 60)) ?? null,
+    foul: place ? optionalQuery(ctx, "weather.foul")?.(ctx, place) ?? null : null
+  };
+}
+
+// src/packs/castlife/core/routines.ts
+var ROUTINE_OPTION = "routine:";
+function chatSource(v) {
+  const o = objOf(v);
+  if (o.type === "gm" && typeof o.at === "number")
+    return { type: "gm", at: o.at };
+  if (o.type === "story" && typeof o.at === "number")
+    return { type: "story", at: o.at, ...typeof o.turn === "string" ? { turn: o.turn } : {} };
+  return null;
+}
+function chatFollow(state, who) {
+  const raw = own(objOf(sliceOf(state, "castlife").follow), who);
+  if (!isRecord(raw))
+    return null;
+  const mode = ROUTINE_MODES.find((m) => m === raw.mode) ?? null;
+  const awareness = ROUTINE_AWARENESS.find((a) => a === raw.awareness) ?? null;
+  return mode === null && awareness === null ? null : { mode, awareness };
+}
+function chatBlocks(state, who) {
+  const out = {};
+  for (const [id, raw] of Object.entries(objOf(own(objOf(sliceOf(state, "castlife").routines), who)))) {
+    const c = objOf(raw);
+    const source = chatSource(c.source);
+    if (source && isRecord(c.value) && blockShapeProblems(c.value, false).length === 0)
+      out[id] = { value: c.value, source };
+  }
+  return out;
+}
+function chatSchedules(state, who) {
+  const out = {};
+  for (const [id, raw] of Object.entries(objOf(own(objOf(sliceOf(state, "castlife").schedules), who)))) {
+    const c = objOf(raw);
+    const source = chatSource(c.source);
+    const v = objOf(c.value);
+    if (!source)
+      continue;
+    if (v.off === true)
+      out[id] = { value: { off: true, until: typeof v.until === "number" ? v.until : null }, source };
+    else if (Array.isArray(v.slots))
+      out[id] = { value: c.value, source };
+  }
+  return out;
+}
+function followOf(ctx, who) {
+  const chat = chatFollow(ctx.state, who);
+  return { mode: chat?.mode ?? "follows", awareness: chat?.awareness ?? routineSettingsOf(ctx.world).awareness, chat };
+}
+function routineRank(reg, world, state, def) {
+  const rank = ownerRank(reg, world, state, def);
+  return rank === null ? 5 : rank + 1;
+}
+function covers2(reg, world, state, def, who) {
+  if (def.owner === undefined) {
+    const e = own(state.entities, who);
+    return !!e && kindIs(reg, world, e.kind, "person") && !isGone(state, who) && acts(world, state, who);
+  }
+  return scheduleOwners(reg, world, state, def).includes(who);
+}
+function worldRoutines(world) {
+  const raw = world.routines ?? {};
+  return Object.keys(raw).sort().flatMap((id) => {
+    const r = own(raw, id);
+    return r && routineShapeProblems(r).length === 0 ? [r] : [];
+  });
+}
+function routineCandidates(ctx, who, day) {
+  const { registry: reg, world, state } = ctx;
+  const out = new Map;
+  const add = (a) => {
+    const list = out.get(a.entry.id) ?? [];
+    list.push(a);
+    out.set(a.entry.id, list);
+  };
+  const off = followOf(ctx, who).mode === "off";
+  const ranked = off ? [] : worldRoutines(world).flatMap((def) => covers2(reg, world, state, def, who) ? [{ def, rank: routineRank(reg, world, state, def) }] : []);
+  const cut = Math.min(6, ...ranked.filter((r) => r.def.inherit === false).map((r) => r.rank));
+  for (const { def, rank } of ranked) {
+    if (rank > cut)
+      continue;
+    const level = ["own", "own", "group", "kind", "selector", "world"][rank] ?? "world";
+    for (const entry of def.blocks)
+      add({ entry, routine: def, level, rank, source: entry.source ?? def.source ?? { type: "authored" } });
+  }
+  for (const entry of BASIC_BLOCKS)
+    add({ entry, routine: null, level: "builtin", rank: 6, source: { type: "builtin" } });
+  const cal = calendarOf(world);
+  for (const [id, c] of Object.entries(chatBlocks(state, who))) {
+    if (day !== undefined && c.source.type === "story" && !isOff(c.value) && day <= dateAt(cal, c.source.at).dayIndex)
+      continue;
+    add({ entry: { ...c.value, id }, routine: null, level: "chat", rank: 0, source: c.source });
+  }
+  for (const list of out.values())
+    list.sort((a, b) => a.rank - b.rank || (a.routine?.id ?? "").localeCompare(b.routine?.id ?? ""));
+  return out;
+}
+function activeBlocks(ctx, who, day) {
+  const out = [];
+  for (const list of routineCandidates(ctx, who, day).values()) {
+    const top = list[0];
+    if (top && !isOff(top.entry))
+      out.push({ block: top.entry, from: top });
+  }
+  return out;
+}
+function daysHold(ctx, block, day, occasion) {
+  const d = block.days;
+  if (!d)
+    return true;
+  const cal = calendarOf(ctx.world);
+  const date = dateAt(cal, clockAt(cal, day, 0));
+  if (d.weekdays && !d.weekdays.includes(date.weekday))
+    return false;
+  if (d.off === "only" && !occasion.dayOff)
+    return false;
+  if (d.off === "never" && occasion.dayOff)
+    return false;
+  const holidays = d.holidays || d.except ? holidaysOn(cal, day).map((h) => h.id) : [];
+  if (d.holidays && !d.holidays.some((h) => holidays.includes(h)))
+    return false;
+  if (d.except?.some((h) => holidays.includes(h)))
+    return false;
+  if (d.birthday === "own" && !occasion.birthday)
+    return false;
+  if (d.birthday === "friend" && occasion.friends.length === 0)
+    return false;
+  if (d.seasons && occasion.season !== null && !d.seasons.some((s) => s === occasion.season))
+    return false;
+  if (d.weather === "foul" && occasion.foul === false)
+    return false;
+  if (d.weather === "fair" && occasion.foul === true)
+    return false;
+  return true;
+}
+function blockOnDay(ctx, who, block, day, occasion = occasionOf(ctx, who, day)) {
+  if (!daysHold(ctx, block, day, occasion))
+    return false;
+  if (block.perWeek !== undefined && block.kind !== "fixed") {
+    const cal = calendarOf(ctx.world);
+    const weekStart = day - dateAt(cal, clockAt(cal, day, 0)).weekday;
+    const eligible = [];
+    for (let d = weekStart;d < weekStart + 7; d++)
+      if (d === day || daysHold(ctx, block, d, occasionOf(ctx, who, d)))
+        eligible.push(d);
+    const rng = createRng(hashParts("castlife.routine.week", ctx.world.id, who, block.id, String(weekStart)));
+    const picked = [...eligible].sort((a, b) => a - b);
+    for (let i = picked.length - 1;i > 0; i--) {
+      const j = Math.floor(rng.next() * (i + 1));
+      [picked[i], picked[j]] = [picked[j], picked[i]];
+    }
+    if (!picked.slice(0, block.perWeek).includes(day))
+      return false;
+  }
+  if (block.kind === "optional")
+    return createRng(hashParts("castlife.routine.day", ctx.world.id, who, block.id, String(day))).next() < (block.chance ?? 0.5);
+  return true;
+}
+function companyOf(ctx, who, block) {
+  return block.company ? selectEntities(ctx.registry, ctx.world, ctx.state, block.company.who).filter((id) => id !== who) : [];
+}
+function blockPlace(ctx, who, block, occasion) {
+  const home = homeOf(ctx, who);
+  const p = block.place ?? "home";
+  if (p === "here")
+    return null;
+  if (p === "home")
+    return home;
+  if (p === "work")
+    return workPlace(ctx, who) ?? home;
+  if (p === "with") {
+    const host = companyOf(ctx, who, block)[0] ?? occasion?.friends[0];
+    const theirs = host ? homeOf(ctx, host) : null;
+    return theirs !== null && own(ctx.world.places, theirs) ? theirs : home;
+  }
+  if ("place" in p)
+    return own(ctx.world.places, p.place) ? p.place : home;
+  return placeOfType(ctx, p.nearest, home) ?? home;
+}
+function windowSpan(window) {
+  const from = parseHHMM(window.from);
+  const to = parseHHMM(window.to);
+  return { from, to: to > from ? to : to + MINUTES_PER_DAY };
+}
+function blockReason(block, from) {
+  if (from.level === "builtin")
+    return "basic need";
+  return block.kind === "optional" ? "a habit" : "routine";
+}
+function routineDay(ctx, who, day, commitments, needs) {
+  const cal = calendarOf(ctx.world);
+  const start = clockAt(cal, day, 0);
+  const blocks = activeBlocks(ctx, who, day);
+  const before = new Map(activeBlocks(ctx, who, day - 1).map((a) => [a.block.id, a]));
+  const occasions = new Map;
+  const occasion = (d) => {
+    const cached = occasions.get(d);
+    if (cached)
+      return cached;
+    const o = occasionOf(ctx, who, d);
+    occasions.set(d, o);
+    return o;
+  };
+  const fixed = [];
+  const options = [];
+  const pressed = (block) => (t, laid) => {
+    const met = block.needs ?? needs.meets(block.activity);
+    return met.flatMap((n) => {
+      const v = needs.need(n, t, laid);
+      return v >= 50 ? [`${n === "hunger" ? "hungry" : n === "fatigue" ? "tired" : n === "social" ? "lonely" : "bored"} (${n} ${Math.round(v)})`] : [];
+    });
+  };
+  const worth = (block) => (t, laid) => (block.priority ?? 3) + Math.max(0, ...(block.needs ?? needs.meets(block.activity)).map((n) => needs.need(n, t, laid) / 20));
+  const firm = blocks.filter((b) => b.block.kind === "fixed").sort((a, b) => (b.block.priority ?? 3) - (a.block.priority ?? 3) || a.block.id.localeCompare(b.block.id));
+  const taken = commitments.map((c) => ({ start: c.start, end: c.end }));
+  for (const today of firm) {
+    for (const d of [day - 1, day]) {
+      const had = d === day ? today : before.get(today.block.id);
+      if (!had || had.block.kind !== "fixed" || !blockOnDay(ctx, who, had.block, d, occasion(d)))
+        continue;
+      const { block, from } = had;
+      const s = clockAt(cal, d, parseHHMM(block.at ?? "00:00"));
+      const e = s + block.minutes;
+      if (e <= start || s >= start + MINUTES_PER_DAY)
+        continue;
+      let pieces = [{ start: s, end: e }];
+      for (const t of taken)
+        pieces = pieces.flatMap((p) => p.end <= t.start || p.start >= t.end ? [p] : [...p.start < t.start ? [{ start: p.start, end: t.start }] : [], ...p.end > t.end ? [{ start: t.end, end: p.end }] : []]);
+      for (const p of pieces) {
+        fixed.push({ start: p.start, end: p.end, label: block.label, activity: block.activity, place: blockPlace(ctx, who, block, occasion(d)), reason: blockReason(block, from), option: `${ROUTINE_OPTION}${block.id}` });
+        taken.push(p);
+      }
+    }
+  }
+  for (const { block, from } of blocks) {
+    if (block.kind === "fixed" || !block.window)
+      continue;
+    const span = windowSpan(block.window);
+    const prior = before.get(block.id);
+    const night = prior && prior.block.kind !== "fixed" && prior.block.window ? { block: prior.block, from: prior.from, span: windowSpan(prior.block.window) } : null;
+    const reasons = [blockReason(block, from)];
+    if (blockOnDay(ctx, who, block, day, occasion(day))) {
+      options.push({ id: `${ROUTINE_OPTION}${block.id}`, label: block.label, activity: block.activity, place: blockPlace(ctx, who, block, occasion(day)), duration: block.minutes, window: { from: start + span.from, to: start + span.to }, utility: worth(block), reasons, because: pressed(block) });
+    }
+    if (night && night.span.to > MINUTES_PER_DAY && blockOnDay(ctx, who, night.block, day - 1, occasion(day - 1))) {
+      const left = Math.round((night.span.from + night.span.to) / 2) + night.block.minutes - MINUTES_PER_DAY;
+      if (left > 0)
+        options.push({ id: `${ROUTINE_OPTION}${block.id}:carried`, label: night.block.label, activity: night.block.activity, place: blockPlace(ctx, who, night.block, occasion(day - 1)), duration: left, window: { from: start, to: start + 1 }, utility: (night.block.priority ?? 3) + 5, reasons: [blockReason(night.block, night.from)], because: pressed(night.block) });
+    }
+  }
+  return { fixed, options };
+}
+function withPov(ctx, who) {
+  const pov = ctx.world.pov;
+  if (who === pov)
+    return false;
+  const here = placeOfEntity(ctx.state, pov);
+  return here !== null && placeOfEntity(ctx.state, who) === here && canSeeEntity(ctx.registry, ctx.world, ctx.state, pov, who);
+}
+function routineYields(ctx, who, field, expected, opts) {
+  if (opts.scene !== false && withPov(ctx, who))
+    return true;
+  const pov = who === ctx.world.pov;
+  const awareness = followOf(ctx, who).awareness;
+  if (!pov) {
+    const tier = optionalQuery(ctx, "minds.tier")?.(ctx, who) ?? "background";
+    const cast = tier === "live" || tier === "near";
+    if (cast && (opts.skip !== true || withPov(ctx, who)))
+      return true;
+    if ((tier === "far" || cast || awareness === "story_first") && optionalQuery(ctx, "minds.intent")?.(ctx, who) === true)
+      return true;
+  }
+  const current = own(ctx.state.entities, who)?.fields[field];
+  const diverged = expected === null || expected === undefined ? !opts.edge : current !== undefined && current !== expected;
+  if (!opts.edge)
+    return diverged;
+  if (!diverged || awareness === "routine_first")
+    return false;
+  return awareness === "story_first" || !opts.release;
+}
+function routineIssues(world, reg, id, value, state) {
+  const at = `routines.${id}`;
+  if (routineShapeProblems(value).length > 0 || !isRecord(value)) {
+    const blocks = isRecord(value) && Array.isArray(value.blocks) ? value.blocks : [];
+    const top = routineShapeProblems(isRecord(value) && Array.isArray(value.blocks) ? { ...value, blocks: [] } : value).map((message) => ({ severity: "error", code: ROUTINE_LINT.shape, message: `Routine ${id}: ${message}.`, path: at }));
+    const seen = new Set;
+    const each = blocks.flatMap((b, i) => {
+      const blockId = isRecord(b) && typeof b.id === "string" ? b.id : "";
+      const twice = blockId !== "" && seen.has(blockId) ? [`another block of this routine is ${blockId}`] : [];
+      seen.add(blockId);
+      return [...blockShapeProblems(b, true), ...twice].map((message) => ({ severity: "error", code: ROUTINE_LINT.shape, message: `Routine ${id}, block ${i + 1}: ${message}.`, path: `${at}.blocks.${i}` }));
+    });
+    return [...top, ...each];
+  }
+  const def = value;
+  const issues = [];
+  const warn = (code, path, message) => {
+    issues.push({ severity: "warning", code, path, message });
+  };
+  if (def.id !== id)
+    warn(ROUTINE_LINT.shape, `${at}.id`, `Routine ${id} is saved under another id (${def.id}).`);
+  if (typeof def.owner === "string" && !own(world.entities, def.owner) && !kindDef(reg, world, def.owner))
+    warn(ROUTINE_LINT.owner, `${at}.owner`, `Routine ${id}'s owner ${def.owner} is no entity, group or kind of the world.`);
+  else if (isRecord(def.owner))
+    for (const p of selectorProblems(reg, world, def.owner))
+      warn(ROUTINE_LINT.owner, `${at}.owner`, `Routine ${id}'s owner ${p}.`);
+  if (def.owner !== undefined && scheduleOwners(reg, world, state, def).length === 0)
+    warn(ROUTINE_LINT.owner, `${at}.owner`, `Routine ${id}'s owner matches nobody as a chat starts, so it applies to no one.`);
+  const holidays = new Set(world.calendar.holidays.map((h) => h.id));
+  const scenes = new Set(Object.values(world.places).flatMap((p) => p.sceneType ? [p.sceneType] : []));
+  def.blocks.forEach((entry, i) => {
+    const path = `${at}.blocks.${i}`;
+    const source = entry.source ?? def.source;
+    if (source?.type === "lore" && !own(world.lore, source.entry))
+      warn(ROUTINE_LINT.source, `${path}.source`, `Routine ${id}, block ${entry.id}: rests on lore entry ${source.entry}, which the world doesn't have.`);
+    if (source?.type === "sheet" && !own(world.entities, source.entity))
+      warn(ROUTINE_LINT.source, `${path}.source`, `Routine ${id}, block ${entry.id}: rests on ${source.entity}'s sheet, who isn't in the world.`);
+    if (isOff(entry))
+      return;
+    const b = entry;
+    const name = `Routine ${id}, block ${b.id}`;
+    if (b.place !== undefined && typeof b.place === "object" && "place" in b.place && !own(world.places, b.place.place))
+      warn(ROUTINE_LINT.place, `${path}.place`, `${name}: there's no place ${b.place.place}; it happens at home.`);
+    if (b.place !== undefined && typeof b.place === "object" && "nearest" in b.place && !scenes.has(b.place.nearest))
+      warn(ROUTINE_LINT.place, `${path}.place`, `${name}: no place has the scene type ${b.place.nearest}; it happens at home.`);
+    if (b.place === "with" && !b.company && b.days?.birthday !== "friend")
+      warn(ROUTINE_LINT.place, `${path}.place`, `${name}: happens with its company, but names none; it happens at home.`);
+    if (b.company && isRecord(b.company.who)) {
+      for (const p of selectorProblems(reg, world, b.company.who))
+        warn(ROUTINE_LINT.company, `${path}.company`, `${name}: its company ${p}.`);
+      if (selectEntities(reg, world, state, b.company.who).length === 0)
+        warn(ROUTINE_LINT.company, `${path}.company`, `${name}: its company matches nobody as a chat starts.`);
+    }
+    for (const n of b.needs ?? [])
+      if (!["hunger", "fatigue", "social", "fun"].includes(n))
+        warn(ROUTINE_LINT.need, `${path}.needs`, `${name}: there's no need ${n} (hunger, fatigue, social, fun).`);
+    for (const h of [...b.days?.holidays ?? [], ...b.days?.except ?? []])
+      if (!holidays.has(h))
+        warn(ROUTINE_LINT.days, `${path}.days`, `${name}: the calendar has no holiday ${h}.`);
+    if (b.days?.weekdays?.length === 0)
+      warn(ROUTINE_LINT.days, `${path}.days`, `${name}: lists no weekdays, so it's never on.`);
+    if (b.window) {
+      const span = windowSpan(b.window);
+      if (span.to - span.from + b.minutes > MINUTES_PER_DAY * 2)
+        warn(ROUTINE_LINT.window, `${path}.window`, `${name}: its window and length run past the next day.`);
+      if (b.window.from === b.window.to)
+        warn(ROUTINE_LINT.window, `${path}.window`, `${name}: its window opens and closes at ${b.window.from}, which reads as a whole day; give it a span.`);
+    }
+    if (b.perWeek !== undefined && b.days?.weekdays && b.perWeek > b.days.weekdays.length)
+      warn(ROUTINE_LINT.days, `${path}.perWeek`, `${name}: ${b.perWeek} times a week, but it's on only ${b.days.weekdays.length} weekdays.`);
+  });
+  return issues;
+}
+function routinesLint(world, reg, state) {
+  const issues = [];
+  const raw = world.routines ?? {};
+  for (const id of Object.keys(raw).sort())
+    issues.push(...routineIssues(world, reg, id, own(raw, id), state));
+  const settings = isRecord(world.routineSettings) ? world.routineSettings : {};
+  const known = { awareness: ROUTINE_AWARENESS, invitations: ["off", "player", "everyone"], sociability: ["reserved", "usual", "outgoing"], planBend: ["must", "strong", "standard", "ordinary"] };
+  for (const [key, v] of Object.entries(settings)) {
+    const allowed = own(known, key);
+    if (!allowed)
+      issues.push({ severity: "warning", code: ROUTINE_LINT.settings, path: `routineSettings.${key}`, message: `Routine settings have no ${key}; it does nothing.` });
+    else if (typeof v !== "string" || !allowed.includes(v))
+      issues.push({ severity: "warning", code: ROUTINE_LINT.settings, path: `routineSettings.${key}`, message: `Routine settings: ${key} is ${allowed.join(", ")}; the default stands.` });
+  }
+  if (Object.keys(raw).length > 0 && !world.packs.castlife)
+    issues.push({ severity: "warning", code: ROUTINE_LINT.pack, path: "routines", message: "The world has routines but not the Cast life pack, which lives them." });
+  const routines = worldRoutines(world);
+  const people = Object.keys(state.entities).sort();
+  const told = new Set;
+  for (const who of people) {
+    const seen = new Map;
+    for (const def of routines) {
+      if (!covers2(reg, world, state, def, who))
+        continue;
+      const rank = routineRank(reg, world, state, def);
+      for (const b of def.blocks) {
+        const key = `${rank}:${b.id}`;
+        const first = seen.get(key);
+        if (first === undefined)
+          seen.set(key, def.id);
+        else if (first !== def.id && !told.has(`${first}:${def.id}:${b.id}`)) {
+          told.add(`${first}:${def.id}:${b.id}`);
+          issues.push({ severity: "warning", code: ROUTINE_LINT.overlap, path: `routines.${def.id}`, message: `Routines ${first} and ${def.id} both set ${b.id} for ${own(state.entities, who)?.name ?? who} at the same precedence; ${first} wins.` });
+        }
+      }
+    }
+  }
+  return issues;
+}
+function schedulesLint(world, reg, state) {
+  const issues = [];
+  const time = /^([01]\d|2[0-4]):[0-5]\d$/;
+  const sourceIssue = (source, path, name) => {
+    if (source?.type === "lore" && !own(world.lore, source.entry))
+      issues.push({ severity: "warning", code: ROUTINE_LINT.scheduleSource, path, message: `${name} rests on lore entry ${source.entry}, which the world doesn't have.` });
+    if (source?.type === "sheet" && !own(world.entities, source.entity))
+      issues.push({ severity: "warning", code: ROUTINE_LINT.scheduleSource, path, message: `${name} rests on ${source.entity}'s sheet, who isn't in the world.` });
+  };
+  for (const s of allSchedules(reg, world)) {
+    if (!own(world.schedules, s.id))
+      continue;
+    const at = `schedules.${s.id}`;
+    if (s.owner !== undefined && scheduleOwners(reg, world, state, s).length === 0)
+      issues.push({ severity: "warning", code: ROUTINE_LINT.scheduleOwner, path: `${at}.owner`, message: `Schedule ${s.id}'s owner matches nobody as a chat starts, so it moves no one.` });
+    sourceIssue(s.source, `${at}.source`, `Schedule ${s.id}`);
+    s.slots.forEach((slot, i) => {
+      if (!time.test(String(slot.start)) || !time.test(String(slot.end)))
+        issues.push({ severity: "error", code: ROUTINE_LINT.scheduleSlot, path: `${at}.slots.${i}`, message: `Schedule ${s.id}, slot ${i + 1}: its times are HH:MM.` });
+      sourceIssue(slot.source, `${at}.slots.${i}.source`, `Schedule ${s.id}, slot ${i + 1}`);
+    });
+  }
+  return issues;
+}
+function chatScheduleDefs(ctx) {
+  const out = [];
+  const all = new Map(allSchedules(ctx.registry, ctx.world).map((s) => [s.id, s]));
+  for (const who of Object.keys(objOf(sliceOf(ctx.state, "castlife").schedules)).sort()) {
+    for (const [id, c] of Object.entries(chatSchedules(ctx.state, who))) {
+      const base = all.get(id);
+      if (!base || "off" in c.value)
+        continue;
+      out.push({ id: `${id}@${who}`, owner: who, target: base.target, recurrence: c.value.recurrence ?? base.recurrence, slots: c.value.slots, ...base.pack ? { pack: base.pack } : {} });
+    }
+  }
+  return out;
+}
+function scheduleOff(state, who, schedule, at) {
+  const c = own(chatSchedules(state, who), schedule);
+  if (!c)
+    return false;
+  return "off" in c.value ? c.value.until === null || c.value.until > at : true;
 }
 
 // src/packs/castlife/core/commitments.ts
@@ -25250,8 +25959,8 @@ function cutAround(blocks, cutters) {
 }
 function personPlaceFor(ctx, who, at) {
   let best = null;
-  for (const s of allSchedules(ctx.registry, ctx.world)) {
-    if (s.target !== "place" || !scheduleOwners(ctx.registry, ctx.world, ctx.state, s).includes(who))
+  for (const s of chatSchedulesIn(ctx)) {
+    if (s.target !== "place" || !scheduleOwners(ctx.registry, ctx.world, ctx.state, s).includes(who) || scheduleOff(ctx.state, who, s.id, at))
       continue;
     const rank = ownerRank(ctx.registry, ctx.world, ctx.state, s) ?? Number.MAX_SAFE_INTEGER;
     const a = activeSlot(ctx.world, s, at);
@@ -25262,13 +25971,13 @@ function personPlaceFor(ctx, who, at) {
 }
 function authored(ctx, who, start, end) {
   const ranked = [];
-  for (const s of allSchedules(ctx.registry, ctx.world)) {
+  for (const s of chatSchedulesIn(ctx)) {
     if (s.target !== "activity" || !scheduleOwners(ctx.registry, ctx.world, ctx.state, s).includes(who))
       continue;
     const rank = ownerRank(ctx.registry, ctx.world, ctx.state, s) ?? Number.MAX_SAFE_INTEGER;
     const edges = scheduleInstants(ctx.world, [s], start - MINUTES_PER_DAY, end + MINUTES_PER_DAY);
     for (const e of edges) {
-      if (e.edge !== "start")
+      if (e.edge !== "start" || scheduleOff(ctx.state, who, s.id, e.at))
         continue;
       const close = edges.find((x) => x.edge === "end" && x.occurrence === e.occurrence);
       const value = s.slots[e.slot]?.value;
@@ -25276,7 +25985,7 @@ function authored(ctx, who, start, end) {
         continue;
       const kind = /school|class/.test(value) ? "school" : /work|shift/.test(value) ? "work" : "other";
       const place = personPlaceFor(ctx, who, e.at) ?? (kind === "work" ? workPlace(ctx, who) : null) ?? homeOf(ctx, who);
-      ranked.push({ block: { start: e.at, end: close.at, label: value.replace(/_/g, " "), activity: value, place, reason: kind === "other" ? "commitment" : kind, kind }, rank });
+      ranked.push({ block: { start: e.at, end: close.at, label: value.replace(/_/g, " "), activity: value, place, reason: kind === "other" ? "commitment" : kind, kind, option: `schedule:${s.id}` }, rank });
     }
   }
   const routine = ranked.flatMap(({ block, rank }) => cutAround([block], ranked.filter((r) => r.rank < rank).map((r) => r.block)));
@@ -25308,7 +26017,7 @@ function livesPlans(ctx, who) {
   return who !== ctx.world.pov && own(ctx.state.entities, who)?.agent === true && ctx.levelOf(who, "castlife") >= 3;
 }
 function layable(ctx, who, tier) {
-  if (tier === "background" || !livesPlans(ctx, who))
+  if (tier === "background" && followOf(ctx, who).awareness !== "story_first" || !livesPlans(ctx, who))
     return [];
   return (optionalQuery(ctx, "minds.plans")?.(ctx, who) ?? []).flatMap((p) => {
     const played = PLAYED[p.kind];
@@ -25326,8 +26035,17 @@ function tight(l) {
 function searchEnd(l) {
   return Math.min(l.p.when.to, l.from + SEARCH_DAYS * MINUTES_PER_DAY);
 }
-function cutsRoutine(l, tier) {
-  return l.p.priority >= 4 || tier !== "far" && l.p.priority >= 3 && tight(l);
+function cutsRoutine(ctx, l, tier) {
+  switch (routineSettingsOf(ctx.world).planBend) {
+    case "must":
+      return l.p.priority >= 5;
+    case "strong":
+      return l.p.priority >= 4;
+    case "standard":
+      return l.p.priority >= 4 || tier !== "far" && l.p.priority >= 3 && tight(l);
+    case "ordinary":
+      return l.p.priority >= 4 || l.p.priority >= 3 && tight(l);
+  }
 }
 function precedence(a, b) {
   return b.priority - a.priority || a.made - b.made || a.id.localeCompare(b.id);
@@ -25342,7 +26060,7 @@ function placed(ctx, who, l, tier, a, stronger) {
   const cal = calendarOf(ctx.world);
   const { minutes, hours } = l.played;
   const to = searchEnd(l);
-  const blockers = [...a.trips, ...l.p.priority >= 5 ? [] : a.appointments, ...cutsRoutine(l, tier) ? [] : a.routine, ...stronger];
+  const blockers = [...a.trips, ...l.p.priority >= 5 ? [] : a.appointments, ...cutsRoutine(ctx, l, tier) ? [] : a.routine, ...stronger];
   const candidates = new Set([l.from]);
   for (const b of blockers)
     if (b.end > l.from && b.end < to)
@@ -25401,10 +26119,10 @@ function commitments(ctx, who, start, end) {
   }
   const pieces = [];
   laid.forEach(({ l, block }, i) => {
-    const cutters = [...blocks.slice(0, i), ...l.p.priority >= 5 ? [] : a.appointments, ...cutsRoutine(l, tier) ? [] : a.routine];
+    const cutters = [...blocks.slice(0, i), ...l.p.priority >= 5 ? [] : a.appointments, ...cutsRoutine(ctx, l, tier) ? [] : a.routine];
     pieces.push(...cutAround([block], cutters));
   });
-  const routine = cutAround(a.routine, laid.filter((x) => cutsRoutine(x.l, tier)).map((x) => x.block));
+  const routine = cutAround(a.routine, laid.filter((x) => cutsRoutine(ctx, x.l, tier)).map((x) => x.block));
   const appointments = cutAround(a.appointments, laid.filter((x) => x.l.p.priority >= 5).map((x) => x.block));
   return [...cutAround([...routine, ...appointments, ...pieces], a.trips), ...a.trips].filter((c) => c.end > start && c.start < end).sort((x, y) => x.start - y.start);
 }
@@ -25562,48 +26280,342 @@ function cueIssues(world) {
   return issues;
 }
 
-// src/packs/castlife/core/occasions.ts
-var FOND = 30;
-function birthdayOf(cal, v) {
-  const m = typeof v === "string" ? /^\s*(?:(-?\d{1,6})-)?(\d{1,2})-(\d{1,2})\s*$/.exec(v) : null;
-  if (!m)
-    return null;
-  const month = Number(m[2]);
-  const day = Number(m[3]);
-  const year = m[1] === undefined ? null : Number(m[1]);
-  if (month < 1 || month > cal.system.months || day < 1)
-    return null;
-  const longest = year !== null ? cal.system.monthLength(year, month) : Math.max(...[0, 1, 2, 3].map((y) => cal.system.monthLength(y, month)));
-  return day <= longest ? { month, day, year } : null;
+// src/packs/castlife/core/story.ts
+var ROUTINE_CHANNEL = "routine";
+var ROUTINE_EFFECT = "castlife.routine";
+var STORY_PRIORITY = 4;
+var WAKING = { from: "08:00", to: "20:00" };
+var DAY_PARTS = { morning: { from: "06:00", to: "11:00" }, afternoon: { from: "12:00", to: "16:00" }, evening: { from: "17:00", to: "21:00" }, night: { from: "21:00", to: "02:00" } };
+var MINUTES = { work: 480, school: 360, exercise: 60, leisure: 90, socialize: 120, errand: 45 };
+var DEFAULT_MINUTES = 60;
+var LABEL_MAX = 60;
+var ACTIVITY_MAX = 40;
+var HHMM3 = /^([01]?\d|2[0-3]):([0-5]\d)$/;
+var FILLER3 = { the: true, and: true, for: true, with: true, his: true, her: true, their: true, its: true, our: true, your: true, from: true, new: true, now: true, every: true, each: true, day: true, days: true, daily: true, week: true, weeks: true, weekly: true, weekday: true, weekdays: true, weekend: true, weekends: true, morning: true, mornings: true, afternoon: true, afternoons: true, evening: true, evenings: true, night: true, nights: true, usual: true };
+var CHANGES = { start: true, stop: true, move: true };
+function refuse(reason) {
+  return { code: "routine", reason, unseen: true };
 }
-function birthdayOn(cal, v, date) {
-  const b = birthdayOf(cal, v);
-  if (!b || b.month !== date.month)
-    return false;
-  const last = cal.system.monthLength(date.year, date.month);
-  return b.day === date.day || b.day > last && date.day === last;
+function text3(v) {
+  return typeof v === "string" ? v.trim() : "";
 }
-function occasionOf(ctx, who, day) {
-  const cal = calendarOf(ctx.world);
-  const date = dateAt(cal, clockAt(cal, day, 0));
-  const weekend = date.weekday === 0 || date.weekday === 6;
-  const holidays = ctx.levelOf(ctx.world.pov, "calendar") >= 4 ? holidaysOn(cal, day).map((h) => ({ id: h.id, label: h.label, dayOff: h.dayOff })) : [];
-  const regard = optionalQuery(ctx, "regard");
-  const friends = regard ? Object.keys(ctx.state.entities).sort().filter((other) => {
-    const e = own(ctx.state.entities, other);
-    return other !== who && !!e && kindIs(ctx.registry, ctx.world, e.kind, "person") && !isGone(ctx.state, other) && acts(ctx.world, ctx.state, other) && birthdayOn(cal, e.fields.birthday, date) && regard(ctx, who, other) >= FOND;
-  }) : [];
-  const home = own(ctx.state.entities, who)?.fields.home;
-  const place = typeof home === "string" && own(ctx.world.places, home) ? home : null;
-  return {
-    weekend,
-    dayOff: weekend || holidays.some((h) => h.dayOff),
-    holidays,
-    birthday: birthdayOn(cal, own(ctx.state.entities, who)?.fields.birthday, date),
-    friends,
-    season: optionalQuery(ctx, "weather.season")?.(ctx, clockAt(cal, day, 12 * 60)) ?? null,
-    foul: place ? optionalQuery(ctx, "weather.foul")?.(ctx, place) ?? null : null
+function cleanLabel(v) {
+  return text3(v).replace(/[^\p{L}\p{N} .,'\u2019&()/:-]/gu, " ").replace(/\s+/g, " ").trim().slice(0, LABEL_MAX).trim();
+}
+function wordsOf3(s) {
+  return (s.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? []).filter((w) => w.length >= 3 && !FILLER3[w]);
+}
+function sameWords(a, b) {
+  return a.some((x) => b.some((y) => x === y || Math.min(x.length, y.length) >= 4 && (x.startsWith(y) || y.startsWith(x))));
+}
+function daysOf(ctx, v) {
+  const said = (Array.isArray(v) ? v : [v]).filter((x) => typeof x === "string" || typeof x === "number");
+  const whole = said.map(String).join(" ").toLowerCase().replace(/\b(?:every|each|on)\b/g, " ").replace(/\s+/g, " ").trim();
+  if (/^(daily|everyday|days?|nights?|nightly)$/.test(whole))
+    return {};
+  if (/^(weekdays?|working days?|workdays?)$/.test(whole))
+    return { off: "never" };
+  if (/^(weekends?|days? off)$/.test(whole))
+    return { off: "only" };
+  if (whole === "")
+    return null;
+  const names = calendarOf(ctx.world).system.weekdayNames.map((n) => n.toLowerCase());
+  const dayOf = (w) => {
+    const one = w.replace(/s$/, "");
+    return names.findIndex((n) => n === w || n === one || n.length >= 3 && one.startsWith(n) && (one.endsWith("day") || one.length - n.length <= 2) || one.length >= 3 && n.startsWith(one));
   };
+  const weekdays = new Set;
+  for (const raw of said) {
+    if (typeof raw === "number") {
+      if (!Number.isInteger(raw) || raw < 0 || raw >= names.length)
+        return null;
+      weekdays.add(raw);
+      continue;
+    }
+    for (const item of raw.toLowerCase().split(/\s*(?:,|;|&|\band\b)\s*/).map((x) => x.replace(/\b(?:every|each|on)\b/g, " ").replace(/\s+/g, " ").trim()).filter((x) => x !== "")) {
+      const range = /^(.+?)\s*(?:-|\u2013|\s(?:to|through|thru)\s)\s*(.+)$/.exec(item);
+      const span = dayOf(item) < 0 && range ? [dayOf((range[1] ?? "").trim()), dayOf((range[2] ?? "").trim())] : null;
+      if (span && span[0] !== undefined && span[1] !== undefined && span[0] >= 0 && span[1] >= 0) {
+        for (let i = span[0];; i = (i + 1) % names.length) {
+          weekdays.add(i);
+          if (i === span[1])
+            break;
+        }
+        continue;
+      }
+      const each = dayOf(item) >= 0 ? [dayOf(item)] : item.split(/\s+/).map(dayOf);
+      if (each.some((i) => i < 0))
+        return null;
+      for (const i of each)
+        weekdays.add(i);
+    }
+  }
+  return { weekdays: [...weekdays].sort((a, b) => a - b) };
+}
+function placeOf2(ctx, v) {
+  const said = text3(v);
+  if (said === "")
+    return null;
+  const mayKnow = (id) => own(ctx.world.places, id) !== undefined && canSeePlace(ctx.registry, ctx.world, ctx.state, ctx.world.pov, id);
+  if (mayKnow(said))
+    return said;
+  const named = Object.keys(ctx.world.places).filter((id) => own(ctx.world.places, id)?.name.toLowerCase() === said.toLowerCase() && mayKnow(id));
+  return named.length === 1 ? named[0] ?? null : null;
+}
+function firstDay(ctx) {
+  return dateAt(calendarOf(ctx.world), ctx.state.clock).dayIndex + 1;
+}
+function weekOf(ctx, who, block, from) {
+  const out = [];
+  for (let d = from;d < from + 7; d++)
+    if (blockOnDay(ctx, who, block, d))
+      out.push(d);
+  return out;
+}
+function blockSpans(ctx, block, days) {
+  if (block.kind !== "fixed" || !block.at)
+    return [];
+  const cal = calendarOf(ctx.world);
+  const at = parseHHMM(block.at);
+  return days.map((d) => ({ start: clockAt(cal, d, at), end: clockAt(cal, d, at) + block.minutes }));
+}
+function slotSpans(ctx, schedule, days) {
+  const cal = calendarOf(ctx.world);
+  const out = [];
+  for (const d of new Set(days.flatMap((x) => [x - 1, x, x + 1]))) {
+    if (!recursOn(cal, schedule.recurrence, d))
+      continue;
+    for (const slot of schedule.slots) {
+      if (!HHMM3.test(slot.start) || !(HHMM3.test(slot.end) || slot.end === "24:00"))
+        continue;
+      const s = clockAt(cal, d, parseHHMM(slot.start));
+      let e = clockAt(cal, d, parseHHMM(slot.end));
+      if (e <= s)
+        e += MINUTES_PER_DAY;
+      out.push({ span: { start: s, end: e }, slot });
+    }
+  }
+  return out;
+}
+function overlaps(a, b) {
+  return a.some((x) => b.some((y) => x.start < y.end && y.start < x.end));
+}
+function theirSchedules(ctx, who) {
+  const out = [];
+  for (const def of chatSchedulesIn(ctx)) {
+    if (def.target !== "place" && def.target !== "activity" || !scheduleOwners(ctx.registry, ctx.world, ctx.state, def).includes(who))
+      continue;
+    const at = def.id.indexOf("@");
+    if (at >= 0)
+      out.push({ id: def.id.slice(0, at), def });
+    else if (!scheduleOff(ctx.state, who, def.id, ctx.state.clock))
+      out.push({ id: def.id, def });
+  }
+  return out;
+}
+function personOf(ctx, p) {
+  const who = text3(p.entity);
+  const e = own(ctx.state.entities, who);
+  if (!e || isGone(ctx.state, who) || !povMayKnow(ctx.registry, ctx.world, ctx.state, who))
+    return refuse("there's no one by that name");
+  if (!kindIs(ctx.registry, ctx.world, e.kind, "person"))
+    return refuse(`${e.name} has no routine: only people do`);
+  if (!acts(ctx.world, ctx.state, who))
+    return refuse(`${e.name} keeps no routine now`);
+  return who;
+}
+function startBlock(ctx, who, p) {
+  const label = cleanLabel(p.label);
+  if (label === "")
+    return refuse("a new routine needs what it is");
+  const days = daysOf(ctx, p.days);
+  if (!days)
+    return refuse("the reply doesn't say which days");
+  const said = text3(p.activity).toLowerCase().replace(/[^a-z0-9 _-]/g, "").slice(0, ACTIVITY_MAX).trim();
+  const activity = said !== "" ? said : /\b(job|shift|work|works|working)\b/i.test(label) ? "work" : /\b(school|class|classes|course)\b/i.test(label) ? "school" : label.toLowerCase().slice(0, ACTIVITY_MAX);
+  const basic = BASIC_BLOCKS.find((b) => b.activity === activity);
+  const id = basic?.id ?? `story_${wordsOf3(label).join("_").slice(0, ACTIVITY_MAX) || "block"}`;
+  const start = text3(p.start).toLowerCase();
+  const end = text3(p.end);
+  const hm = HHMM3.exec(start);
+  const at = hm ? `${(hm[1] ?? "").padStart(2, "0")}:${hm[2] ?? "00"}` : null;
+  const part = at === null && start !== "" ? DAY_PARTS[start] : undefined;
+  if (at === null && start !== "" && !part)
+    return refuse("its time doesn't read");
+  const endHm = HHMM3.exec(end);
+  const stated = typeof p.minutes === "number" && Number.isInteger(p.minutes) ? p.minutes : null;
+  const minutes = at !== null && endHm ? (parseHHMM(`${(endHm[1] ?? "").padStart(2, "0")}:${endHm[2] ?? "00"}`) - parseHHMM(at) + MINUTES_PER_DAY) % MINUTES_PER_DAY || MINUTES_PER_DAY : stated ?? MINUTES[activity] ?? basic?.minutes ?? DEFAULT_MINUTES;
+  if (minutes < 1 || minutes > MINUTES_PER_DAY)
+    return refuse("its length is a day at most");
+  const keyword = text3(p.place).toLowerCase();
+  const named = keyword === "home" || keyword === "work" ? null : placeOf2(ctx, p.place);
+  if (named === null && keyword !== "" && keyword !== "home" && keyword !== "work")
+    return refuse("there's no such place");
+  const place = named !== null ? { place: named } : keyword === "home" || keyword === "work" ? keyword : activity === "work" ? "work" : basic ? basic.place ?? "home" : "here";
+  const company = [];
+  for (const raw of Array.isArray(p.with) ? p.with : []) {
+    const id = text3(raw);
+    const e = own(ctx.state.entities, id);
+    if (!e || isGone(ctx.state, id) || !kindIs(ctx.registry, ctx.world, e.kind, "person") || !povMayKnow(ctx.registry, ctx.world, ctx.state, id))
+      return refuse("there's no one by that name");
+    if (id !== who && !company.includes(id))
+      company.push(id);
+  }
+  return {
+    id,
+    label,
+    activity,
+    kind: at !== null ? "fixed" : "flexible",
+    ...at !== null ? { at } : { window: part ?? WAKING },
+    minutes,
+    priority: STORY_PRIORITY,
+    ...Object.keys(days).length > 0 ? { days } : {},
+    place,
+    ...company.length > 0 ? { company: { who: { ids: company } } } : {}
+  };
+}
+function already(ctx, who, block, days) {
+  const held = own(chatBlocks(ctx.state, who), block.id);
+  if (held && JSON.stringify(held.value) === JSON.stringify(block))
+    return true;
+  const mine = blockSpans(ctx, block, days);
+  const words = wordsOf3(block.label);
+  for (const { block: b, from } of activeBlocks(ctx, who, days[0])) {
+    if (b.id === block.id || from.level === "builtin")
+      continue;
+    if (!sameWords(words, wordsOf3(b.label)) || !days.every((d) => blockOnDay(ctx, who, b, d)))
+      continue;
+    if (mine.length === 0 || b.kind !== "fixed" || overlaps(mine, blockSpans(ctx, b, days)))
+      return true;
+  }
+  if (block.kind === "fixed" || !block.place || typeof block.place !== "object" || !("place" in block.place))
+    return false;
+  const where = block.place.place;
+  return theirSchedules(ctx, who).some(({ def }) => def.target === "place" && days.every((d) => slotSpans(ctx, def, [d]).some((s) => s.slot.value === where && dateAt(calendarOf(ctx.world), s.span.start).dayIndex === d)));
+}
+function startChange(ctx, who, p) {
+  const block = startBlock(ctx, who, p);
+  if ("code" in block)
+    return block;
+  const days = weekOf(ctx, who, block, firstDay(ctx));
+  if (days.length === 0)
+    return refuse("it falls on no day of the week");
+  if (already(ctx, who, block, days))
+    return refuse("it's already their routine");
+  const mine = blockSpans(ctx, block, days);
+  const clashing = theirSchedules(ctx, who).filter(({ def }) => overlaps(mine, slotSpans(ctx, def, days).map((s) => s.span)));
+  const replaces = p.replaces === true;
+  if (clashing.length > 0 && !replaces)
+    return refuse("it clashes with their schedule, and the reply doesn't say it takes its place");
+  const schedules = [...new Set(clashing.map((c) => c.id))].map((schedule) => ({ schedule, value: { off: true, until: null } }));
+  const blocks = [];
+  if (replaces) {
+    const candidates = routineCandidates(ctx, who);
+    for (const { block: b, from } of activeBlocks(ctx, who, days[0])) {
+      if (b.id === block.id || from.level === "builtin" || b.private === true || !overlaps(mine, blockSpans(ctx, b, days)))
+        continue;
+      blocks.push({ block: b.id, value: (candidates.get(b.id) ?? []).every((a) => a.level === "chat") ? null : { id: b.id, off: true } });
+    }
+  }
+  blocks.push({ block: block.id, value: block });
+  return { entity: who, blocks, schedules };
+}
+function stopChange(ctx, who, p) {
+  const cal = calendarOf(ctx.world);
+  const words = wordsOf3(cleanLabel(p.label));
+  const where = placeOf2(ctx, p.place);
+  if (where === null && text3(p.place) !== "")
+    return refuse("there's no such place");
+  if (words.length === 0 && where === null)
+    return refuse("the reply doesn't say what they gave up");
+  const stated = p.days === undefined || p.days === null ? {} : daysOf(ctx, p.days);
+  if (!stated)
+    return refuse("the reply doesn't say which days");
+  const from = dateAt(cal, ctx.state.clock).dayIndex;
+  const week = [0, 1, 2, 3, 4, 5, 6].map((i) => from + i);
+  const probe = { id: "", label: "", activity: "", kind: "flexible", window: WAKING, minutes: 1, ...Object.keys(stated).length > 0 ? { days: stated } : {} };
+  const allowed = new Set(weekOf(ctx, who, probe, from));
+  const within = (on) => on.length > 0 && on.every((d) => allowed.has(d));
+  const blocks = [];
+  for (const [id, list] of routineCandidates(ctx, who)) {
+    const top = list[0];
+    if (!top || isOff(top.entry) || top.entry.private === true)
+      continue;
+    const b = top.entry;
+    const named = where !== null && blockPlace(ctx, who, b) === where || words.length > 0 && sameWords(words, wordsOf3(b.label));
+    if (!named || !within(weekOf(ctx, who, b, from)))
+      continue;
+    blocks.push({ block: id, value: list.every((a) => a.level === "chat") ? null : { id, off: true } });
+  }
+  const cut = (s, drop) => {
+    const left = s.slots.filter((slot) => !drop(slot));
+    return left.length === 0 ? { off: true, until: null } : { slots: left, recurrence: s.recurrence };
+  };
+  const schedules = [];
+  const mine = where === null ? [] : theirSchedules(ctx, who);
+  for (const { id, def } of mine) {
+    const gone = def.slots.filter((s) => s.value === where);
+    if (def.target !== "place" || gone.length === 0 || !within(week.filter((d) => recursOn(cal, def.recurrence, d))))
+      continue;
+    schedules.push({ schedule: id, value: cut(def, (slot) => slot.value === where) });
+    const paired = (slot) => gone.some((g) => g.start === slot.start && g.end === slot.end);
+    for (const other of mine) {
+      if (other.def.target !== "activity" || JSON.stringify(other.def.recurrence) !== JSON.stringify(def.recurrence) || !other.def.slots.some(paired) || schedules.some((s) => s.schedule === other.id))
+        continue;
+      schedules.push({ schedule: other.id, value: cut(other.def, paired) });
+    }
+  }
+  if (blocks.length === 0 && schedules.length === 0)
+    return refuse("nothing of their routine is what the reply says they gave up");
+  return { entity: who, blocks, schedules };
+}
+function storyChange(p, ctx) {
+  const who = personOf(ctx, p);
+  if (typeof who !== "string")
+    return who;
+  const change = text3(p.change).toLowerCase();
+  if (!(change in CHANGES))
+    return refuse("a routine change starts, stops or moves house");
+  if (change === "start")
+    return startChange(ctx, who, p);
+  if (change === "stop")
+    return stopChange(ctx, who, p);
+  const home = placeOf2(ctx, p.place);
+  if (home === null)
+    return refuse("there's no such place");
+  if (own(ctx.state.entities, who)?.fields.home === home)
+    return refuse("it's already their home");
+  return { entity: who, home };
+}
+var routineChannel = {
+  type: ROUTINE_CHANNEL,
+  boundField: "routine",
+  validate(p, ctx) {
+    const change = storyChange(p, ctx);
+    return "code" in change ? change : null;
+  },
+  toEffects(p, ctx) {
+    const change = storyChange(p, ctx);
+    if ("code" in change)
+      return [];
+    if ("home" in change)
+      return [{ type: "set", args: { entity: change.entity, field: "home", value: change.home } }];
+    const turn = text3(p.turn);
+    return [{ type: ROUTINE_EFFECT, args: { entity: change.entity, blocks: change.blocks, schedules: change.schedules, ...turn !== "" ? { turn } : {} } }];
+  }
+};
+function storyEvents(args, ctx) {
+  const who = text3(args.entity);
+  const e = own(ctx.state.entities, who);
+  if (!e || !kindIs(ctx.registry, ctx.world, e.kind, "person"))
+    return { code: "not_person", reason: "only people have a routine" };
+  const turn = text3(args.turn);
+  const source = { type: "story", at: ctx.state.clock, ...turn !== "" ? { turn } : {} };
+  const list = (v) => Array.isArray(v) ? v.filter(isRecord).map(objOf) : [];
+  return [
+    ...list(args.schedules).map((s) => ({ type: ROUTINE_EVENTS.schedule, data: { entity: who, schedule: text3(s.schedule), value: s.value ?? null, source } })),
+    ...list(args.blocks).map((b) => ({ type: ROUTINE_EVENTS.block, data: { entity: who, block: text3(b.block), value: b.value ?? null, source } }))
+  ];
 }
 
 // src/packs/castlife/core/index.ts
@@ -25617,15 +26629,20 @@ var NEED_ALERT = 80;
 function satisfies(activity, need) {
   return own(NEEDS, need)?.satisfiedBy.some((w) => activity.includes(w)) ?? false;
 }
+var SOCIABILITY_RATE = { reserved: 0.5, usual: 1, outgoing: 1.5 };
+function rateOf(ctx, who, need, rate) {
+  return who === ctx.world.pov || need !== "social" && need !== "fun" ? rate : rate * SOCIABILITY_RATE[routineSettingsOf(ctx.world).sociability];
+}
 function needIn(ctx, who, need, at, blocks) {
   const def = own(NEEDS, need);
   if (!def)
     return 0;
+  const rate = rateOf(ctx, who, need, def.rate);
   const n = objOf(own(objOf(own(ctx.state.entities, who)?.fields.needs), need));
   if (typeof n.t === "number" || who === ctx.world.pov) {
     const v = numOf(n.v, 20);
     const t = numOf(n.t, minutesBetween(ctx.world.calendar.epoch, ctx.world.start.at));
-    return Math.max(0, Math.min(100, v + def.rate * Math.max(0, at - t) / 60));
+    return Math.max(0, Math.min(100, v + rate * Math.max(0, at - t) / 60));
   }
   let met = -Infinity;
   for (const b of blocks)
@@ -25635,28 +26652,51 @@ function needIn(ctx, who, need, at, blocks) {
     const minute = dateAt(calendarOf(ctx.world), at).minuteOfDay;
     met = at - Math.min(...def.daily.map((t) => (minute - t + MINUTES_PER_DAY) % MINUTES_PER_DAY));
   }
-  return Math.min(100, def.rate * (at - met) / 60);
+  return Math.min(100, rate * (at - met) / 60);
 }
-function needValue(ctx, who, need, at = ctx.state.clock) {
+function needValue(ctx, who, need, at = ctx.state.clock, legacy = false) {
   const recorded = typeof objOf(own(objOf(own(ctx.state.entities, who)?.fields.needs), need)).t === "number";
   const planned = !recorded && livesPlans(ctx, who);
-  return needIn(ctx, who, need, at, planned ? dayPlan(ctx, who, dateAt(calendarOf(ctx.world), at).dayIndex).blocks : []);
+  const day = dateAt(calendarOf(ctx.world), at).dayIndex;
+  return needIn(ctx, who, need, at, planned ? (legacy ? legacyDayPlan(ctx, who, day) : dayPlan(ctx, who, day)).blocks : []);
 }
 function within3(dayStart, fromH, toH) {
   return { from: dayStart + fromH * 60, to: dayStart + toH * 60 };
 }
 var AGENDA_OPTION = "agenda:";
 var AGENDA_ACTIVITY = "agenda";
+var INVITED_OPTION = "invited:";
 function publicTrack(world, track) {
   return visibilityOf(own(world.tracks, track)?.visibility) === "public";
 }
 function shownActivity(ctx, who, activity) {
   if (activity !== AGENDA_ACTIVITY)
-    return activity;
+    return activeBlocks(ctx, who).some((a) => a.block.private === true && a.block.activity === activity) ? "busy" : activity;
   const agendas = agendaFor(ctx.world, ctx.state, who);
   return agendas.length > 0 && agendas.every((a) => publicTrack(ctx.world, a.track)) ? activity : "busy";
 }
-function dayOptions(ctx, who, dayStart) {
+function groundedOptions(ctx, who, dayStart) {
+  const home = homeOf(ctx, who);
+  const options = [];
+  const chores = own(ctx.state.entities, who)?.fields.chores;
+  if (Array.isArray(chores)) {
+    chores.forEach((raw, i) => {
+      const c = objOf(raw);
+      options.push({ id: `chore:${i}`, label: strOf(c.label, "Chores"), activity: "chores", place: strOf(c.place) || home, duration: numOf(c.minutes, 45), window: within3(dayStart, 8, 20), utility: numOf(c.utility, 2), reasons: ["chore"] });
+    });
+  }
+  for (const a of agendaFor(ctx.world, ctx.state, who))
+    options.push({ id: `${AGENDA_OPTION}${a.track}`, label: a.stageLabel, activity: AGENDA_ACTIVITY, place: home, duration: 60, window: within3(dayStart, 9, 20), utility: 1 + a.priority, reasons: [`agenda: ${a.label}`] });
+  const overdue = optionalQuery(ctx, "gear.overdue");
+  if (overdue) {
+    for (const g of overdue(ctx, who)) {
+      const where = placeOfEntity(ctx.state, g.borrower) ?? placeOfEntity(ctx.state, g.thing);
+      options.push({ id: `retrieve:${g.thing}`, label: `Get ${own(ctx.state.entities, g.thing)?.name ?? g.thing} back from ${own(ctx.state.entities, g.borrower)?.name ?? g.borrower}`, activity: `retrieve:${g.thing}`, place: where, duration: 45, window: within3(dayStart, 8, 20), utility: 7, reasons: ["overdue loan"] });
+    }
+  }
+  return options;
+}
+function legacyDayOptions(ctx, who, dayStart) {
   const level = ctx.levelOf(who, "castlife");
   const home = homeOf(ctx, who);
   const cal = calendarOf(ctx.world);
@@ -25687,22 +26727,7 @@ function dayOptions(ctx, who, dayStart) {
         fondness = Math.max(fondness, social(ctx, who, other));
   }
   options.push({ id: "socialize", label: "See friends", activity: "socialize", place: company, duration: 90, window: off ? within3(dayStart, 12, 23) : within3(dayStart, 17, 22), utility: (t, laid) => 2.5 + (off ? 1 : 0) - (occasion.foul ? 0.5 : 0) + fondness / 50 + need("social", t, laid) / 25, reasons: ["company", ...fondness >= FOND ? ["a close friend"] : [], ...off ? ["a day off"] : []], because: pressed("social", "lonely") });
-  const chores = own(ctx.state.entities, who)?.fields.chores;
-  if (Array.isArray(chores)) {
-    chores.forEach((raw, i) => {
-      const c = objOf(raw);
-      options.push({ id: `chore:${i}`, label: strOf(c.label, "Chores"), activity: "chores", place: strOf(c.place) || home, duration: numOf(c.minutes, 45), window: within3(dayStart, 8, 20), utility: numOf(c.utility, 2), reasons: ["chore"] });
-    });
-  }
-  for (const a of agendaFor(ctx.world, ctx.state, who))
-    options.push({ id: `${AGENDA_OPTION}${a.track}`, label: a.stageLabel, activity: AGENDA_ACTIVITY, place: home, duration: 60, window: within3(dayStart, 9, 20), utility: 1 + a.priority, reasons: [`agenda: ${a.label}`] });
-  const overdue = optionalQuery(ctx, "gear.overdue");
-  if (overdue) {
-    for (const g of overdue(ctx, who)) {
-      const where = placeOfEntity(ctx.state, g.borrower) ?? placeOfEntity(ctx.state, g.thing);
-      options.push({ id: `retrieve:${g.thing}`, label: `Get ${own(ctx.state.entities, g.thing)?.name ?? g.thing} back from ${own(ctx.state.entities, g.borrower)?.name ?? g.borrower}`, activity: `retrieve:${g.thing}`, place: where, duration: 45, window: within3(dayStart, 8, 20), utility: 7, reasons: ["overdue loan"] });
-    }
-  }
+  options.push(...groundedOptions(ctx, who, dayStart));
   for (const h of occasion.holidays) {
     options.push(h.dayOff ? { id: `holiday:${h.id}`, label: h.label, activity: "socialize", place: home, duration: 180, window: within3(dayStart, 12, 20), utility: 5.5, reasons: [h.label] } : { id: `holiday:${h.id}`, label: h.label, activity: "leisure", place: company, duration: 90, window: within3(dayStart, 17, 22), utility: 3, reasons: [h.label] });
   }
@@ -25714,6 +26739,32 @@ function dayOptions(ctx, who, dayStart) {
   }
   return options;
 }
+function invitedBlocks(ctx, guest, day, commitments) {
+  if (routineSettingsOf(ctx.world).invitations !== "everyone" || followOf(ctx, guest).mode !== "follows" || guest === ctx.world.pov)
+    return [];
+  const cal = calendarOf(ctx.world);
+  const start = clockAt(cal, day, 0);
+  const hosts = new Set;
+  for (const def of worldRoutines(ctx.world))
+    if (def.blocks.some((b) => !isOff(b) && b.company?.invite === true))
+      for (const who of Object.keys(ctx.state.entities).sort())
+        hosts.add(who);
+  const out = [];
+  for (const host of [...hosts].sort()) {
+    if (host === guest || !acquainted(ctx.state, host, guest) || followOf(ctx, host).mode !== "follows")
+      continue;
+    for (const { block } of activeBlocks(ctx, host, day)) {
+      if (block.kind !== "fixed" || block.company?.invite !== true || !selectEntities(ctx.registry, ctx.world, ctx.state, block.company.who).includes(guest) || !blockOnDay(ctx, host, block, day))
+        continue;
+      const s = start + parseHHMM(block.at ?? "00:00");
+      const e = s + block.minutes;
+      if (commitments.some((c) => c.start < e && c.end > s))
+        continue;
+      out.push({ start: s, end: e, label: block.label, activity: block.activity, place: blockPlace(ctx, host, block), reason: "invited", option: `${INVITED_OPTION}${host}:${block.id}` });
+    }
+  }
+  return out;
+}
 function decisions(state) {
   const out = {};
   for (const [k, v] of Object.entries(objOf(sliceOf(state, "castlife").decisions)))
@@ -25721,11 +26772,17 @@ function decisions(state) {
       out[k] = v;
   return out;
 }
-function planFor(ctx, who, day, rng) {
+function planFor(ctx, who, day, rng, legacy = false) {
   const cal = calendarOf(ctx.world);
   const start = clockAt(cal, day, 0);
   const end = start + MINUTES_PER_DAY;
-  const plan = planDay({ agent: who, start, end, fixed: commitments(ctx, who, start, end), options: dayOptions(ctx, who, start), rng, recorded: decisions(ctx.state) });
+  const fixed = commitments(ctx, who, start, end);
+  const person = kindIs(ctx.registry, ctx.world, own(ctx.state.entities, who)?.kind ?? "", "person");
+  const level = ctx.levelOf(who, "castlife");
+  const routine = !legacy && person ? routineDay(ctx, who, day, fixed, { need: (n, t, laid) => level >= 4 ? needIn(ctx, who, n, t, laid) : 0, meets: (activity) => Object.keys(NEEDS).filter((n) => satisfies(activity, n)) }) : { fixed: [], options: [] };
+  const invited = legacy || !person ? [] : invitedBlocks(ctx, who, day, [...fixed, ...routine.fixed]);
+  const options = legacy ? legacyDayOptions(ctx, who, start) : [...routine.options, ...groundedOptions(ctx, who, start)];
+  const plan = planDay({ agent: who, start, end, fixed: [...fixed, ...routine.fixed, ...invited], options, rng, recorded: decisions(ctx.state) });
   return {
     day,
     blocks: plan.blocks.map((b) => {
@@ -25740,6 +26797,9 @@ function planFor(ctx, who, day, rng) {
 function dayPlan(ctx, who, day = dateAt(calendarOf(ctx.world), ctx.state.clock).dayIndex) {
   return planFor(ctx, who, day, createRng(hashParts("castlife.plan", ctx.world.id, who, String(day))));
 }
+function legacyDayPlan(ctx, who, day) {
+  return planFor(ctx, who, day, createRng(hashParts("castlife.plan", ctx.world.id, who, String(day))), true);
+}
 function held2(state, who, target, at) {
   const until = own(objOf(own(state.entities, who)?.fields.holds), target);
   return typeof until === "number" && until > at;
@@ -25749,7 +26809,7 @@ var ACQUAINT_CHANCE = 0.15;
 function acquainted(state, a, b) {
   return !!own(state.entities, a)?.relations.some((r) => r.type === "regard" && r.to === b) || !!own(state.entities, b)?.relations.some((r) => r.type === "regard" && r.to === a);
 }
-function takeUp(ctx, who, place, activity, at, holdUntil) {
+function takeUp(ctx, who, place, activity, at, holdUntil, quiet = false) {
   const out = [];
   const e = own(ctx.state.entities, who);
   if (!e || routineStays(ctx, who, place) || optionalQuery(ctx, "combat.engaged")?.(ctx, who) === true)
@@ -25757,9 +26817,9 @@ function takeUp(ctx, who, place, activity, at, holdUntil) {
   if (!held2(ctx.state, who, "place", at) && place && own(ctx.world.places, place) && placeOfEntity(ctx.state, who) !== place) {
     out.push({ type: "set", entity: who, field: "place", value: place });
     if (who !== ctx.world.pov && place === placeOfEntity(ctx.state, ctx.world.pov))
-      out.push({ type: ENGINE_EVENTS.signal, data: { class: "arrival", text: `${e.name} arrives.`, entity: who } });
+      out.push({ type: ENGINE_EVENTS.signal, data: { class: "arrival", text: `${e.name} arrives.`, entity: who, ...quiet ? { stops: false } : {} } });
   }
-  if (!held2(ctx.state, who, "activity", at) && e.fields.activity !== activity)
+  if (activity !== null && !held2(ctx.state, who, "activity", at) && e.fields.activity !== activity)
     out.push({ type: "set", entity: who, field: "activity", value: activity });
   if (holdUntil !== undefined && holdUntil > at) {
     const holds = objOf(e.fields.holds);
@@ -25769,6 +26829,32 @@ function takeUp(ctx, who, place, activity, at, holdUntil) {
   }
   return out;
 }
+function blockActivity(activity) {
+  return activity.startsWith("retrieve:") ? "errand" : activity;
+}
+function liveBlock(ctx, who, plan, block, from, at, scene, skip) {
+  const activity = blockActivity(block.activity);
+  if (block.option.startsWith("plan:"))
+    return scene && withPov(ctx, who) ? [] : takeUp(ctx, who, block.place, activity, at, block.end);
+  const edge = block.start > from && block.start <= at;
+  const index = plan.blocks.indexOf(block);
+  const earlier = from < clockAt(calendarOf(ctx.world), plan.day, 0) ? [...dayPlan(ctx, who, plan.day - 1).blocks, ...plan.blocks.slice(0, index)] : plan.blocks.slice(0, index);
+  const had = (edge ? earlier.filter((b) => b.end > from) : [...earlier.slice(-1), block]).reverse();
+  const e = own(ctx.state.entities, who);
+  const home = homeOf(ctx, who);
+  const rests = had.some((b) => b.option.startsWith("schedule:"));
+  const places = [...had.flatMap((b) => b.place !== null ? [b.place] : []), ...home !== null && (rests || had.some((b) => b.place === null)) ? [home] : []];
+  const resting = rests && e ? fieldDef(ctx.registry, ctx.world, e.kind, "activity")?.default : undefined;
+  const doings = [...had.map((b) => blockActivity(b.activity)), ...typeof resting === "string" ? [resting] : []];
+  const wasPlace = places.find((p) => p === e?.fields.place) ?? places[0] ?? [...earlier].reverse().find((b) => b.place !== null)?.place ?? home;
+  const wasDoing = doings.find((d) => d === e?.fields.activity) ?? doings[0] ?? null;
+  const opts = { edge, release: block.activity === "sleep", scene, skip };
+  const target = block.place ?? (edge && earlier.at(-1)?.place ? home : null);
+  const place = target !== null && !routineYields(ctx, who, "place", wasPlace, opts) ? target : null;
+  const doing = routineYields(ctx, who, "activity", wasDoing, opts) ? null : activity;
+  const tier = skip && place !== null ? optionalQuery(ctx, "minds.tier")?.(ctx, who) ?? "background" : "background";
+  return takeUp(ctx, who, place, doing, at, undefined, tier === "live" || tier === "near");
+}
 function planOutcomes(ctx, who, slot) {
   if (who === ctx.world.pov)
     return [];
@@ -25776,7 +26862,8 @@ function planOutcomes(ctx, who, slot) {
   if (due.length === 0)
     return [];
   const tier = planTier(ctx, who);
-  const laid = laidPlans(ctx, who, tier === "background" ? [] : due);
+  const routineOnly = tier === "background" && followOf(ctx, who).awareness !== "story_first";
+  const laid = laidPlans(ctx, who, routineOnly ? [] : due);
   const out = [];
   for (const p of due) {
     const blocks = laid.get(p.id) ?? [];
@@ -25784,60 +26871,157 @@ function planOutcomes(ctx, who, slot) {
     if (blocks.length > 0 && last <= slot.end)
       out.push({ type: MINDS_EVENTS.plan, data: { entity: who, plan: p.id, status: "done", at: last, reason: null } });
     else if (blocks.length === 0 && p.when.to <= slot.end)
-      out.push({ type: MINDS_EVENTS.plan, data: { entity: who, plan: p.id, status: "dropped", at: p.when.to, reason: tier === "background" ? "routine only" : "no time for it" } });
+      out.push({ type: MINDS_EVENTS.plan, data: { entity: who, plan: p.id, status: "dropped", at: p.when.to, reason: routineOnly ? "routine only" : "no time for it" } });
   }
   return out;
 }
 var INVITE_LEAD = 6 * 60;
-function planAsks(ctx, who) {
+function mayInvite(ctx, host, place) {
   const pov = ctx.world.pov;
-  const plans = plansOf(ctx, who).filter((p) => p.with.includes(pov));
-  if (plans.length === 0)
-    return [];
+  if (followOf(ctx, host).mode !== "follows" || withPov(ctx, host) || !acts2(ctx, pov))
+    return false;
+  const tier = optionalQuery(ctx, "minds.tier")?.(ctx, host) ?? "background";
+  if (tier === "live" || tier === "near")
+    return false;
+  if (held2(ctx.state, pov, "place", ctx.state.clock) || place !== null && placeOfEntity(ctx.state, pov) === place)
+    return false;
+  if (!acquainted(ctx.state, host, pov) && !knows(ctx.state, host, pov))
+    return false;
+  return (optionalQuery(ctx, "regard")?.(ctx, host, pov) ?? 0) >= 0;
+}
+function asksOf(ctx, who, days) {
+  const pov = ctx.world.pov;
   const cal = calendarOf(ctx.world);
-  const laid = laidPlans(ctx, who, plans);
-  return plans.flatMap((p) => {
-    const first = laid.get(p.id)?.[0];
-    return first ? [{ plan: p.id, ask: Math.max(first.start - INVITE_LEAD, p.made + 1, clockAt(cal, dateAt(cal, first.start).dayIndex, 0)), at: first.start, place: first.place ?? null }] : [];
-  });
-}
-function planInvitation(ctx, who, ask) {
-  const key = `${who}:plan:${ask.plan}`;
-  const given = sliceOf(ctx.state, "castlife").invitations;
-  if (!acts2(ctx, ctx.world.pov) || Array.isArray(given) && given.some((i) => objOf(i).key === key))
-    return [];
-  const text = invitationText(ctx, who, ask.place, ask.at, ctx.world.pov);
-  return [{ type: "castlife.invitation", data: { agent: who, place: ask.place, at: ask.at, text, key } }, { type: ENGINE_EVENTS.signal, data: { class: "invitation", text, entity: who } }];
-}
-function planMoments(ctx, who, slot) {
-  if (plansOf(ctx, who).length === 0)
-    return [];
-  const inside = (at) => at > slot.start && at < slot.end;
   const out = [];
-  for (const c of commitments(ctx, who, slot.start, slot.end)) {
-    if (c.plan === undefined)
-      continue;
-    if (inside(c.start))
-      out.push({ at: c.start, key: `start:${c.plan}` });
-    if (inside(c.end))
-      out.push({ at: c.end, key: `end:${c.plan}` });
+  const plans = plansOf(ctx, who).filter((p) => p.with.includes(pov));
+  if (plans.length > 0) {
+    const laid = laidPlans(ctx, who, plans);
+    for (const p of plans) {
+      const first = laid.get(p.id)?.[0];
+      if (first)
+        out.push({ key: `${who}:plan:${p.id}`, ask: Math.max(first.start - INVITE_LEAD, p.made + 1, clockAt(cal, dateAt(cal, first.start).dayIndex, 0)), at: first.start, place: first.place ?? null, origin: { type: "plan", plan: p.id } });
+    }
   }
-  if (ctx.levelOf(who, "castlife") >= 4) {
-    for (const a of planAsks(ctx, who))
-      if (inside(a.ask))
-        out.push({ at: a.ask, key: `invite:${a.plan}` });
+  if (routineSettingsOf(ctx.world).invitations === "off" || followOf(ctx, who).mode !== "follows")
+    return out;
+  const asking = activeBlocks(ctx, who).filter(({ block }) => block.company?.invite === true && selectEntities(ctx.registry, ctx.world, ctx.state, block.company.who).includes(pov));
+  if (asking.length === 0)
+    return out;
+  for (const day of days) {
+    for (const b of dayPlan(ctx, who, day).blocks) {
+      const id = b.option.startsWith(ROUTINE_OPTION) ? b.option.slice(ROUTINE_OPTION.length) : null;
+      if (id === null || !asking.some((a) => a.block.id === id))
+        continue;
+      out.push({ key: `${who}:routine:${id}:${day}`, ask: Math.max(b.start - INVITE_LEAD, clockAt(cal, day, 0)), at: b.start, place: b.place, origin: { type: "routine", block: id } });
+    }
   }
   return out;
 }
-function atPlanMoment(ctx, who, moment) {
-  if (moment.key.startsWith("invite:")) {
-    const ask = planAsks(ctx, who).find((a) => `invite:${a.plan}` === moment.key);
-    return ask ? planInvitation(ctx, who, ask) : [];
-  }
-  const block = dayPlan(ctx, who, dateAt(calendarOf(ctx.world), moment.at).dayIndex).blocks.find((b) => b.start <= moment.at && moment.at < b.end);
-  if (!block)
+function slotDays(ctx, slot) {
+  const cal = calendarOf(ctx.world);
+  const first = dateAt(cal, slot.start).dayIndex;
+  const last = dateAt(cal, slot.end).dayIndex;
+  return first === last ? [first] : [first, last];
+}
+function invitation(ctx, who, ask) {
+  const given = sliceOf(ctx.state, "castlife").invitations;
+  if (!mayInvite(ctx, who, ask.place) || Array.isArray(given) && given.some((i) => objOf(i).key === ask.key))
     return [];
-  return takeUp(ctx, who, block.place ?? (moment.key.startsWith("end:") ? homeOf(ctx, who) : null), block.activity.startsWith("retrieve:") ? "errand" : block.activity, moment.at, block.option.startsWith("plan:") ? block.end : undefined);
+  const text = invitationText(ctx, who, ask.place, ask.at, ctx.world.pov);
+  return [{ type: "castlife.invitation", data: { agent: who, place: ask.place, at: ask.at, text, key: ask.key, origin: ask.origin.type === "plan" ? `plan:${ask.origin.plan}` : `routine:${ask.origin.block}` } }, { type: ENGINE_EVENTS.signal, data: { class: "invitation", text, entity: who } }];
+}
+function planMoments(ctx, who, slot) {
+  const inside = (at) => at > slot.start && at < slot.end;
+  const out = [];
+  if (plansOf(ctx, who).length > 0) {
+    for (const c of commitments(ctx, who, slot.start, slot.end)) {
+      if (c.plan === undefined)
+        continue;
+      if (inside(c.start))
+        out.push({ at: c.start, key: `start:${c.plan}` });
+      if (inside(c.end))
+        out.push({ at: c.end, key: `end:${c.plan}` });
+    }
+  }
+  if (who !== ctx.world.pov || slot.povRoutine !== false) {
+    const cal = calendarOf(ctx.world);
+    const handed = new Set(out.flatMap((m) => m.key.startsWith("end:") ? [m.at] : []));
+    const lived = livedAtMinute(ctx, who, slot);
+    const home = homeOf(ctx, who);
+    let before = placeOfEntity(ctx.state, who);
+    let placed = false;
+    for (let day = dateAt(cal, slot.start).dayIndex;day <= dateAt(cal, slot.end - 1).dayIndex; day++) {
+      for (const b of dayPlan(ctx, who, day).blocks) {
+        if (!inside(b.start))
+          continue;
+        if (!b.option.startsWith("plan:") && b.activity !== "trip" && !handed.has(b.start) && lived(b, before))
+          out.push({ at: b.start, key: `block:${b.option}` });
+        before = b.place ?? (placed ? home : before);
+        placed = b.place !== null;
+      }
+    }
+  }
+  if (ctx.levelOf(who, "castlife") >= 4) {
+    for (const a of asksOf(ctx, who, slotDays(ctx, slot)))
+      if (inside(a.ask))
+        out.push({ at: a.ask, key: `invite:${a.key}` });
+  }
+  return out;
+}
+function livesEveryBlock(ctx, who, slot) {
+  return slot.timelapse !== true || who === ctx.world.pov || (optionalQuery(ctx, "minds.tier")?.(ctx, who) ?? "background") !== "background";
+}
+function livedAtMinute(ctx, who, slot) {
+  if (livesEveryBlock(ctx, who, slot))
+    return () => true;
+  const pov = ctx.world.pov;
+  const here = placeOfEntity(ctx.state, pov);
+  const home = homeOf(ctx, pov) ?? here;
+  const cal = calendarOf(ctx.world);
+  const plans = new Map;
+  const planOf = (day) => {
+    const plan = plans.get(day) ?? dayPlan(ctx, pov, day);
+    plans.set(day, plan);
+    return plan;
+  };
+  const povAt = (from, to) => {
+    const out = new Set;
+    if (slot.povRoutine === false) {
+      if (here !== null)
+        out.add(here);
+      return out;
+    }
+    for (let day = dateAt(cal, from).dayIndex;day <= dateAt(cal, to - 1).dayIndex; day++) {
+      const blocks = planOf(day).blocks;
+      blocks.forEach((b, i) => {
+        if (b.end <= from || b.start >= to)
+          return;
+        const place = b.place ?? (blocks.slice(0, i).some((x) => x.place !== null) ? home : here);
+        if (place !== null)
+          out.add(place);
+      });
+    }
+    return out;
+  };
+  return (block, before) => block.place !== null && povAt(block.start, block.end).has(block.place) || before !== null && povAt(block.start, block.start + 1).has(before);
+}
+function atPlanMoment(ctx, who, moment, slot) {
+  const cal = calendarOf(ctx.world);
+  if (moment.key.startsWith("invite:")) {
+    const ask = asksOf(ctx, who, [dateAt(cal, moment.at).dayIndex, dateAt(cal, moment.at).dayIndex + 1]).find((a) => `invite:${a.key}` === moment.key);
+    return ask ? invitation(ctx, who, ask) : [];
+  }
+  const scene = slot.povRoutine === false;
+  const plan = dayPlan(ctx, who, dateAt(cal, moment.at).dayIndex);
+  if (moment.key.startsWith("block:")) {
+    const starting = plan.blocks.find((b) => b.start === moment.at);
+    const from = livesEveryBlock(ctx, who, slot) ? moment.at - 1 : slot.start;
+    return starting ? liveBlock(ctx, who, plan, starting, from, moment.at, scene, slot.timelapse === true) : [];
+  }
+  const block = plan.blocks.find((b) => b.start <= moment.at && moment.at < b.end);
+  if (!block || scene && withPov(ctx, who))
+    return [];
+  return takeUp(ctx, who, block.place ?? (moment.key.startsWith("end:") ? homeOf(ctx, who) : null), blockActivity(block.activity), moment.at, block.option.startsWith("plan:") ? block.end : undefined);
 }
 function stepAgent2(slot, ctx, rngFor, who) {
   const out = [];
@@ -25863,7 +27047,9 @@ function stepAgent2(slot, ctx, rngFor, who) {
         out.push(...got, { type: ENGINE_EVENTS.note, data: { text: `${e.name} got ${own(ctx.state.entities, thing)?.name ?? thing} back.`, entity: who, visibility: "known_by" } });
     }
   }
-  out.push(...takeUp(ctx, who, block.place, block.activity.startsWith("retrieve:") ? "errand" : block.activity, slot.end, block.option.startsWith("plan:") ? block.end : undefined), ...planOutcomes(ctx, who, slot));
+  if (who !== pov || slot.povRoutine !== false)
+    out.push(...liveBlock(ctx, who, plan, block, slot.start, slot.end, slot.povRoutine === false, slot.timelapse === true));
+  out.push(...planOutcomes(ctx, who, slot));
   if (level < 4)
     return out;
   if (who === pov) {
@@ -25885,28 +27071,9 @@ function stepAgent2(slot, ctx, rngFor, who) {
         out.push(...appraise(ctx, who, other, kind, `${kind} at ${own(ctx.world.places, block.place)?.name ?? block.place}`, true));
     }
   }
-  for (const a of planAsks(ctx, who))
+  for (const a of asksOf(ctx, who, slotDays(ctx, slot)))
     if (a.ask > slot.start && a.ask <= slot.end)
-      out.push(...planInvitation(ctx, who, a));
-  if (optionalQuery(ctx, "minds.on")?.(ctx) === true)
-    return out;
-  const regard = optionalQuery(ctx, "regard");
-  const hour = dateAt(cal, slot.start).minuteOfDay / 60;
-  if (regard && acts2(ctx, pov) && !block.fixed && hour >= 12 && hour < 20 && regard(ctx, who, pov) >= 20) {
-    const key = `${who}:invite:${slot.index}`;
-    const invite = 1 + needValue(ctx, who, "social", slot.start) / 50 + regard(ctx, who, pov) / 50;
-    const stay = 2;
-    const recorded = own(decisions(ctx.state), key);
-    const tie = Math.abs(invite - stay) <= 0.5;
-    const choice = recorded ?? (tie ? rng.fork(key).next() < 0.5 ? "invite" : "stay" : invite > stay ? "invite" : "stay");
-    if (tie || recorded)
-      out.push({ type: ENGINE_EVENTS.choice, data: { key, choice, via: recorded ? "recorded" : "seed", agent: who, options: "invite,stay" } });
-    if (choice === "invite") {
-      const where = block.place ?? placeOfType(ctx, "conversation", homeOf(ctx, who));
-      const text = invitationText(ctx, who, where, slot.end, pov);
-      out.push({ type: "castlife.invitation", data: { agent: who, place: where, at: slot.end, text, key } }, { type: ENGINE_EVENTS.signal, data: { class: "invitation", text, entity: who } });
-    }
-  }
+      out.push(...invitation(ctx, who, a));
   return out;
 }
 function invitationText(ctx, agent, place, at, viewer) {
@@ -25943,11 +27110,13 @@ function stepTrips(slot, ctx) {
       const place = strOf(t.place);
       const holding = objOf(e.fields.holds).place === until;
       const away = holding && e.fields.place === place;
-      if (from <= slot.end && slot.end < until && !away && own(ctx.world.places, place)) {
+      if (from <= slot.end && slot.end < until && !away && own(ctx.world.places, place) && !(slot.povRoutine === false && withPov(ctx, who))) {
         holds = { ...holds, place: until, activity: until };
         out.push({ type: "set", entity: who, field: "holds", value: holds }, { type: "set", entity: who, field: "place", value: place }, { type: "set", entity: who, field: "activity", value: "trip" });
       }
       if (!(until <= slot.end && (until > slot.start || holding)))
+        continue;
+      if (slot.povRoutine === false && withPov(ctx, who))
         continue;
       const home = homeOf(ctx, who);
       if ((until > slot.start || away) && home)
@@ -25961,6 +27130,20 @@ function stepTrips(slot, ctx) {
   }
   return out;
 }
+function isChatSource(v) {
+  const o = objOf(v);
+  return typeof o.at === "number" && (o.type === "gm" || o.type === "story" && (o.turn === undefined || typeof o.turn === "string"));
+}
+function isScheduleChange(v) {
+  const o = objOf(v);
+  if (o.off === true)
+    return o.until === null || typeof o.until === "number";
+  const time = /^([01]\d|2[0-4]):[0-5]\d$/;
+  return Array.isArray(o.slots) && o.slots.length > 0 && o.slots.every((s) => typeof objOf(s).start === "string" && time.test(strOf(objOf(s).start)) && time.test(strOf(objOf(s).end))) && (o.recurrence === undefined || typeof objOf(o.recurrence).every === "string");
+}
+function changeLine(ctx, e, viewer, what) {
+  return viewer !== undefined ? "" : `${own(ctx.state.entities, strOf(e.data.entity))?.name ?? strOf(e.data.entity)}: ${what} (${objOf(e.data.source).type === "story" ? "the story" : "GM"})`;
+}
 var EVENTS3 = [
   {
     type: "castlife.need",
@@ -25971,7 +27154,8 @@ var EVENTS3 = [
         return;
       const at = numOf(e.data.at, state.clock);
       const need = strOf(e.data.need);
-      const v = Math.max(0, Math.min(100, needValue(ctx, strOf(e.data.entity), need, at) + numOf(e.data.delta)));
+      const from = typeof e.data.from === "number" ? e.data.from : needValue(ctx, strOf(e.data.entity), need, at, true);
+      const v = Math.max(0, Math.min(100, from + numOf(e.data.delta)));
       who.fields.needs = { ...objOf(who.fields.needs), [need]: { v, t: at } };
     },
     touches: (e) => [{ entity: strOf(e.data.entity), field: "needs" }],
@@ -25991,12 +27175,120 @@ var EVENTS3 = [
     apply: (e, state) => {
       const s = mutableSlice(state, "castlife");
       const list = Array.isArray(s.invitations) ? s.invitations.slice(-9) : [];
-      list.push({ agent: strOf(e.data.agent), place: e.data.place ?? null, at: numOf(e.data.at), text: strOf(e.data.text), ...typeof e.data.key === "string" ? { key: e.data.key } : {} });
+      list.push({ agent: strOf(e.data.agent), place: e.data.place ?? null, at: numOf(e.data.at), text: strOf(e.data.text), ...typeof e.data.key === "string" ? { key: e.data.key } : {}, ...typeof e.data.origin === "string" ? { origin: e.data.origin } : {} });
       s.invitations = list;
     },
     describe: (e, ctx, viewer) => invitationText(ctx, strOf(e.data.agent), typeof e.data.place === "string" ? e.data.place : null, numOf(e.data.at), viewer)
+  },
+  {
+    type: ROUTINE_EVENTS.follow,
+    validate: (e, ctx) => {
+      if (!own(ctx.state.entities, strOf(e.data.entity)))
+        return { code: "missing_entity", reason: "a routine setting names someone in the world" };
+      const f = e.data.follow;
+      if (f === null)
+        return null;
+      const o = objOf(f);
+      const mode = o.mode === null || ROUTINE_MODES.some((m) => m === o.mode);
+      const awareness = o.awareness === null || ROUTINE_AWARENESS.some((a) => a === o.awareness);
+      return mode && awareness && (o.mode !== null || o.awareness !== null) ? null : { code: "bad_event", reason: "a routine setting is a mode, an awareness or both, or null to clear it" };
+    },
+    apply: (e, state) => {
+      const follow = sliceRecord(state, "castlife", "follow");
+      const who = strOf(e.data.entity);
+      const f = objOf(e.data.follow);
+      if (e.data.follow === null)
+        delete follow[who];
+      else
+        follow[who] = { mode: f.mode ?? null, awareness: f.awareness ?? null };
+    },
+    describe: (e, ctx, viewer) => changeLine(ctx, e, viewer, e.data.follow === null ? "routine setting cleared" : `routine: ${[objOf(e.data.follow).mode, objOf(e.data.follow).awareness].filter((x) => typeof x === "string").join(", ").replace(/_/g, " ")}`)
+  },
+  {
+    type: ROUTINE_EVENTS.block,
+    validate: (e, ctx) => {
+      if (!own(ctx.state.entities, strOf(e.data.entity)))
+        return { code: "missing_entity", reason: "a routine change names someone in the world" };
+      if (strOf(e.data.block) === "" || !isChatSource(e.data.source))
+        return { code: "bad_event", reason: "a routine change names its block and where it came from" };
+      const v = e.data.value;
+      if (v === null)
+        return null;
+      const problems = blockShapeProblems(v, false);
+      return problems.length === 0 && objOf(v).id === e.data.block ? null : { code: "bad_value", reason: problems[0] ?? "the block's id is the one it changes" };
+    },
+    apply: (e, state) => {
+      const routines = sliceRecord(state, "castlife", "routines");
+      const who = strOf(e.data.entity);
+      const mine = { ...objOf(routines[who]) };
+      if (e.data.value === null)
+        delete mine[strOf(e.data.block)];
+      else
+        mine[strOf(e.data.block)] = { value: structuredClone(e.data.value ?? null), source: structuredClone(e.data.source ?? null) };
+      if (Object.keys(mine).length === 0)
+        delete routines[who];
+      else
+        routines[who] = mine;
+    },
+    describe: (e, ctx, viewer) => changeLine(ctx, e, viewer, `routine block ${strOf(e.data.block)} ${e.data.value === null ? "back to the world's" : objOf(e.data.value).off === true ? "off" : "changed"}`)
+  },
+  {
+    type: ROUTINE_EVENTS.schedule,
+    validate: (e, ctx) => {
+      if (!own(ctx.state.entities, strOf(e.data.entity)))
+        return { code: "missing_entity", reason: "a schedule change names someone in the world" };
+      if (!allSchedules(ctx.registry, ctx.world).some((s) => s.id === strOf(e.data.schedule)) || !isChatSource(e.data.source))
+        return { code: "bad_event", reason: "a schedule change names one of the world's schedules and where it came from" };
+      return e.data.value === null || isScheduleChange(e.data.value) ? null : { code: "bad_value", reason: "a schedule change is off (until a time or for good) or their own slots" };
+    },
+    apply: (e, state) => {
+      const schedules = sliceRecord(state, "castlife", "schedules");
+      const who = strOf(e.data.entity);
+      const mine = { ...objOf(schedules[who]) };
+      if (e.data.value === null)
+        delete mine[strOf(e.data.schedule)];
+      else
+        mine[strOf(e.data.schedule)] = { value: structuredClone(e.data.value ?? null), source: structuredClone(e.data.source ?? null) };
+      if (Object.keys(mine).length === 0)
+        delete schedules[who];
+      else
+        schedules[who] = mine;
+    },
+    describe: (e, ctx, viewer) => changeLine(ctx, e, viewer, `schedule ${strOf(e.data.schedule)} ${e.data.value === null ? "back to the world's" : objOf(e.data.value).off === true ? "off" : "changed"}`)
   }
 ];
+function routineEdit(ctx, op) {
+  const e = own(ctx.state.entities, op.entity);
+  if (!e)
+    return { code: "missing_entity", reason: `no ${labelOf(ctx, op.entity)}` };
+  if (!kindIs(ctx.registry, ctx.world, e.kind, "person"))
+    return { code: "not_person", reason: `${e.name} has no routine: only people do` };
+  const source = { type: "gm", at: ctx.state.clock };
+  if (op.op === "routine_follow") {
+    const now = followOf(ctx, op.entity).chat;
+    const mode = op.mode === undefined ? now?.mode ?? null : op.mode;
+    const awareness = op.awareness === undefined ? now?.awareness ?? null : op.awareness;
+    return [{ type: ROUTINE_EVENTS.follow, data: { entity: op.entity, follow: mode === null && awareness === null ? null : { mode, awareness } } }];
+  }
+  if (op.op === "routine_block") {
+    if (op.value === null)
+      return [{ type: ROUTINE_EVENTS.block, data: { entity: op.entity, block: op.block, value: null, source } }];
+    const value = { ...op.value, id: op.block };
+    const problems = blockShapeProblems(value, false);
+    if (problems.length > 0)
+      return { code: "bad_value", reason: problems.join("; ") };
+    return [{ type: ROUTINE_EVENTS.block, data: { entity: op.entity, block: op.block, value, source } }];
+  }
+  const schedule = allSchedules(ctx.registry, ctx.world).find((s) => s.id === op.schedule);
+  if (!schedule)
+    return { code: "missing_schedule", reason: `there's no schedule ${op.schedule}` };
+  if (op.value !== null && "off" in op.value && !scheduleOwners(ctx.registry, ctx.world, ctx.state, schedule).includes(op.entity))
+    return { code: "not_owner", reason: `${e.name} doesn't follow ${op.schedule}` };
+  const value = op.value === null ? null : structuredClone(op.value);
+  if (value !== null && !isScheduleChange(value))
+    return { code: "bad_value", reason: "a schedule change is off (until a time or for good) or their own slots (HH:MM to HH:MM)" };
+  return [{ type: ROUTINE_EVENTS.schedule, data: { entity: op.entity, schedule: op.schedule, value, source } }];
+}
 function kindOfBlock(activity) {
   if (/work|shift|school/.test(activity))
     return "work";
@@ -26007,6 +27299,32 @@ function kindOfBlock(activity) {
   if (/leisure|socialize|idle|breakfast|lunch|dinner/.test(activity))
     return "free";
   return "other";
+}
+function playerBlocks(ctx, who, plan) {
+  const cal = calendarOf(ctx.world);
+  const applied = new Map(activeBlocks(ctx, who, plan.day).map((a) => [a.block.id, a]));
+  const open = loreGateReader(ctx.registry, ctx.world, ctx.state);
+  return plan.blocks.map((b) => {
+    const from = formatHHMM(dateAt(cal, b.start).minuteOfDay);
+    const to = formatHHMM(dateAt(cal, b.end).minuteOfDay);
+    const routineId = b.option.startsWith(ROUTINE_OPTION) ? b.option.slice(ROUTINE_OPTION.length).replace(/:carried$/, "") : null;
+    const a = routineId !== null ? applied.get(routineId) : undefined;
+    if (b.option.startsWith(AGENDA_OPTION) && !publicTrack(ctx.world, b.option.slice(AGENDA_OPTION.length)) || a?.block.private === true)
+      return { start: b.start, from, to, label: "Busy", kind: "other", reasons: ["their own business"], source: { type: "routine" } };
+    let source;
+    if (a) {
+      const entry = a.from.source.type === "lore" ? own(ctx.world.lore, a.from.source.entry) : undefined;
+      source = entry && loreReadable(ctx.registry, ctx.world, ctx.state, entry, "brief", false, open) ? { type: "lore", entry: entry.id, title: entry.title } : a.from.source.type === "story" ? { type: "story" } : { type: "routine" };
+    } else if (b.option.startsWith("plan:"))
+      source = { type: "plan" };
+    else if (b.fixed && !b.option.startsWith(INVITED_OPTION))
+      source = { type: "commitment" };
+    else if (b.option === "idle" || b.option.startsWith("retrieve:"))
+      source = { type: "free" };
+    else
+      source = { type: "routine" };
+    return { start: b.start, from, to, label: b.label, kind: kindOfBlock(b.activity), reasons: b.reasons, source };
+  });
 }
 function buildCastView(ctx) {
   const pov = ctx.world.pov;
@@ -26065,9 +27383,9 @@ function buildCastView(ctx) {
     if (regard.length > 0)
       p.regard = regard;
     const plan = present && e.agent && !still ? dayPlan(ctx, id) : null;
-    const blocks = plan?.blocks.map((b) => b.option.startsWith(AGENDA_OPTION) && !publicTrack(ctx.world, b.option.slice(AGENDA_OPTION.length)) ? { ...b, label: "Busy", reasons: ["their own business"] } : b);
+    const blocks = plan ? playerBlocks(ctx, id, plan) : null;
     if (blocks && level >= 3)
-      p.timeline = blocks.map((b) => ({ start: formatHHMM(dateAt(cal, b.start).minuteOfDay), end: formatHHMM(dateAt(cal, b.end).minuteOfDay), label: b.label, kind: kindOfBlock(b.activity), reasons: b.reasons }));
+      p.timeline = blocks.map((b) => ({ start: b.from, end: b.to, label: b.label, kind: b.kind, reasons: b.reasons, source: b.source }));
     const agenda = agendaFor(ctx.world, ctx.state, id).filter((a) => publicTrack(ctx.world, a.track));
     if (agenda.length > 0)
       p.agenda = agenda.map((a) => ({ label: a.label, stage: a.stageLabel }));
@@ -26107,11 +27425,10 @@ function decidedBlock(ctx, who) {
   const plan = dayPlan(ctx, who);
   const dayStart = clockAt(cal, plan.day, 0);
   const chosen = new Set(plan.ties.filter((t) => t.via === "recorded").map((t) => t.key));
-  const block = plan.blocks.find((b) => b.end > ctx.state.clock && chosen.has(tieKey(who, dayStart, b.start)));
+  const block = playerBlocks(ctx, who, plan).find((b, i) => (plan.blocks[i]?.end ?? 0) > ctx.state.clock && chosen.has(tieKey(who, dayStart, b.start)));
   if (!block)
     return null;
-  const label = block.option.startsWith(AGENDA_OPTION) && !publicTrack(ctx.world, block.option.slice(AGENDA_OPTION.length)) ? "Busy" : block.label;
-  return block.start <= ctx.state.clock ? label : `${label} at ${formatHHMM(dateAt(cal, block.start).minuteOfDay)}`;
+  return block.start <= ctx.state.clock ? block.label : `${block.label} at ${block.from}`;
 }
 function stanceCast(ctx) {
   const { registry: reg, world, state } = ctx;
@@ -26177,6 +27494,10 @@ var castlifePack = {
   register(r) {
     for (const def of EVENTS3)
       r.event(def);
+    r.service("castlife.edit", routineEdit);
+    r.query("castlife.yields", (ctx, who, field, expected, release, scene, skip) => routineYields(ctx, who, field, expected, { edge: true, release, scene, skip }));
+    r.query("castlife.schedule_off", (ctx, who, schedule, at) => scheduleOff(ctx.state, who, schedule, at));
+    r.query("castlife.chat_schedules", chatScheduleDefs);
     r.process({ id: "castlife.agents", domain: "castlife", minLevel: 3, scope: "agent", step: (slot, ctx, rng, agent) => agent ? stepAgent2(slot, ctx, rng, agent) : [], instants: planMoments, atInstant: atPlanMoment });
     r.process({ id: "castlife.trips", domain: "castlife", minLevel: 1, step: (slot, ctx) => stepTrips(slot, ctx) });
     r.process({ id: "castlife.plans", domain: "castlife", minLevel: 0, step: (slot, ctx) => dropUnlived(slot, ctx) });
@@ -26212,7 +27533,7 @@ var castlifePack = {
       const who = strOf(a.entity) || ctx.world.pov;
       const need = strOf(a.need);
       const v = needValue(ctx, who, need);
-      return own(NEEDS, need) && v > 0 ? [{ type: "castlife.need", data: { entity: who, need, delta: -v, at: ctx.state.clock } }] : [];
+      return own(NEEDS, need) && v > 0 ? [{ type: "castlife.need", data: { entity: who, need, delta: -v, at: ctx.state.clock, from: v } }] : [];
     } });
     r.effect({ type: "castlife.decide", args: ["key", "choice"], resolve: (a) => [{ type: "castlife.decision", data: { key: strOf(a.key), choice: strOf(a.choice) } }] });
     r.effect({
@@ -26237,6 +27558,8 @@ var castlifePack = {
         return [{ type: "set", entity: who, field: "holds", value: holds }, ...out];
       }
     });
+    r.proposal(routineChannel);
+    r.effect({ type: ROUTINE_EFFECT, args: ["entity", "blocks?", "schedules?", "turn?"], resolve: storyEvents });
     r.action({ id: "eat", label: "Eat", description: "Have a meal or a snack.", pack: "castlife", params: {}, requires: [], outcomes: { default: [{ type: "castlife.satisfy", args: { entity: "self", need: "hunger" } }, { type: "set", args: { entity: "self", field: "activity", value: "meal" } }] }, duration: "30", lexicon: ["eat", "have lunch", "have dinner", "grab a bite"], observable: "eats" });
     r.action({ id: "sleep", label: "Go to bed", description: "Go to bed and sleep until morning.", pack: "castlife", params: {}, requires: [], outcomes: { default: [{ type: "castlife.satisfy", args: { entity: "self", need: "fatigue" } }] }, duration: "5", activity: { type: "sleep", until: "next_time('07:00')" }, lexicon: ["go to bed", "sleep", "turn in", "hit the sack"], observable: "goes to bed" });
     r.action({ id: "rest", label: "Rest", description: "Rest or relax for a while.", pack: "castlife", params: {}, requires: [], outcomes: { default: [{ type: "castlife.satisfy", args: { entity: "self", need: "fun" } }] }, duration: "30", activity: { type: "waiting", until: "clock + 30" }, lexicon: ["rest", "relax", "take a break"], observable: "rests" });
@@ -26304,6 +27627,15 @@ var castlifePack = {
           }
         }
         return issues;
+      }
+    });
+    r.lint({
+      code: "castlife.routines",
+      check(world, registry) {
+        if (!registry)
+          return [];
+        const state = initialState(world, "", registry);
+        return [...routinesLint(world, registry, state), ...schedulesLint(world, registry, state)];
       }
     });
   }
@@ -28366,7 +29698,7 @@ function capText(text, max) {
   const at = cut.lastIndexOf(" ");
   return `${(at > max * 0.6 ? cut.slice(0, at) : t.slice(0, max)).replace(/[\s,;:.]+$/, "")}\u2026`;
 }
-var text3 = (v, max) => typeof v === "string" && v.trim() !== "" ? capText(v, max) : null;
+var text4 = (v, max) => typeof v === "string" && v.trim() !== "" ? capText(v, max) : null;
 var minutes = (v) => typeof v === "number" && Number.isFinite(v) ? Math.round(v) : null;
 function peopleIn(ctx, v) {
   if (v === undefined)
@@ -28384,7 +29716,7 @@ function peopleIn(ctx, v) {
   return [...new Set(ids)];
 }
 function noteFrom(ctx, who, id, v, before) {
-  const body = text3(v.text, MIND_TEXT_CAPS.note) ?? before?.text ?? null;
+  const body = text4(v.text, MIND_TEXT_CAPS.note) ?? before?.text ?? null;
   if (body === null)
     return reject16("bad_value", "a note needs its text");
   const salience = v.salience === undefined ? before?.salience ?? 3 : typeof v.salience === "number" && v.salience >= 1 && v.salience <= 5 ? v.salience : null;
@@ -28393,7 +29725,7 @@ function noteFrom(ctx, who, id, v, before) {
   return { id: id ?? `n_${hashParts("minds.gm.note", who, String(ctx.state.clock), body).slice(0, 10)}`, text: body, salience, at: before?.at ?? ctx.state.clock };
 }
 function commitmentFrom(ctx, who, id, v, before) {
-  const body = text3(v.text, MIND_TEXT_CAPS.commitment) ?? before?.text ?? null;
+  const body = text4(v.text, MIND_TEXT_CAPS.commitment) ?? before?.text ?? null;
   if (body === null)
     return reject16("bad_value", "a commitment needs its text");
   const kind = v.kind === undefined ? before?.kind ?? "other" : COMMITMENT_KINDS.includes(v.kind) ? v.kind : null;
@@ -28412,7 +29744,7 @@ function commitmentFrom(ctx, who, id, v, before) {
   return { id: id ?? `c_${hashParts("minds.gm.commitment", who, String(ctx.state.clock), body).slice(0, 10)}`, kind, with: withList, text: body, due, status, made: before?.made ?? ctx.state.clock, closed };
 }
 function planFrom(ctx, who, id, v, before) {
-  const what = text3(v.what, MIND_TEXT_CAPS.planWhat) ?? before?.what ?? null;
+  const what = text4(v.what, MIND_TEXT_CAPS.planWhat) ?? before?.what ?? null;
   if (what === null)
     return reject16("bad_value", "a plan needs what it is");
   const when = v.when === undefined ? before?.when ?? null : typeof v.when === "object" && v.when !== null && !Array.isArray(v.when) ? { from: minutes(v.when.from), to: minutes(v.when.to) } : null;
@@ -28888,6 +30220,7 @@ var mindsPack = {
     });
     r.query("minds.minded", minded);
     r.query("minds.on", mindsOn);
+    r.query("minds.intent", (ctx, who) => (readCharacter(ctx.state, who).intent?.text ?? "") !== "");
     r.query("minds.fidelity", (ctx, texts) => fidelityOf(ctx, texts));
     r.renderer({ slot: MINDS_SLOT, render: (ctx) => mindLines(ctx).map((l) => l.line) });
     for (const rule of MINDS_LINTS)
