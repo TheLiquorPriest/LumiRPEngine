@@ -33,6 +33,7 @@ import { JOB_INFO, jobStore, JobStatusBadge, JobView, keptJobs } from "./jobs";
 import { LookupTableEditor } from "./lookup-editor";
 import { MindsEditor } from "./minds-editor";
 import { LoreEditor, LoreList } from "./lore-editor";
+import { RoutineEditor, RoutineList } from "./routine-editor";
 import { RulesetEditor } from "./ruleset-editor";
 import { COLLECTION_SPECS, newItem, PART_SPECS } from "./schema";
 import { lintAt, SchemaFields, worldIdentifiers } from "./schema-form";
@@ -45,7 +46,8 @@ import { TiersEditor } from "./tiers-editor";
 const GROUPS: readonly { title: string; collections: readonly WorldCollection[] }[] = [
   { title: "People & things", collections: ["entities", "kinds", "classifications", "relations"] },
   { title: "Places", collections: ["places", "maps", "routes", "grids"] },
-  { title: "Rules", collections: ["actions", "checks", "rules", "schedules"] },
+  { title: "Daily life", collections: ["routines", "schedules"] },
+  { title: "Rules", collections: ["actions", "checks", "rules"] },
   { title: "Story", collections: ["tracks", "lore"] },
   { title: "Engine", collections: ["tables", "sections", "steps", "packs"] },
 ];
@@ -96,7 +98,7 @@ function BuildPage(props: { route: BuildRoute }) {
     case "collection":
       return (
         <WithDraft worldId={route.worldId}>
-          {route.collection === "lore" ? <LoreList worldId={route.worldId} /> : <CollectionView collection={route.collection} />}
+          {route.collection === "lore" ? <LoreList worldId={route.worldId} /> : route.collection === "routines" ? <RoutineList worldId={route.worldId} /> : <CollectionView collection={route.collection} />}
         </WithDraft>
       );
     case "item":
@@ -719,7 +721,7 @@ function ItemView(props: { collection: WorldCollection; id: string | null }) {
   const send = useMemo(() => draftSend(app), [app]);
   if (!draft) return null;
   const registered = app.catalog.editors.get(props.collection);
-  const Editor = registered ? registered.component : props.collection === "tables" ? TableEditor : props.collection === "lore" ? LoreEditor : SchemaEditor;
+  const Editor = registered ? registered.component : props.collection === "tables" ? TableEditor : props.collection === "lore" ? LoreEditor : props.collection === "routines" ? RoutineEditor : SchemaEditor;
   return <Editor world={draft.doc} collection={props.collection} id={props.id} send={send} />;
 }
 

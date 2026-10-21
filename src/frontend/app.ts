@@ -57,7 +57,8 @@ export type BuildRoute =
   | { view: "worlds" }
   | { view: "world"; worldId: WorldId }
   | { view: "collection"; worldId: WorldId; collection: WorldCollection }
-  | { view: "item"; worldId: WorldId; collection: WorldCollection; id: string | null }
+  /** `at`: the lint path the page opens at (Problems' Open), for an editor with sheets of its own; a routine opens the block it names. */
+  | { view: "item"; worldId: WorldId; collection: WorldCollection; id: string | null; at?: string }
   | { view: "part"; worldId: WorldId; part: WorldPart }
   | { view: "check"; worldId: WorldId }
   | { view: "job"; worldId: WorldId; kind: JobKind };

@@ -8,7 +8,7 @@ import type { WorldId } from "../../shared/ids";
 import { hasOwn } from "../../shared/json";
 import type { LintIssue, WorldCollection, WorldPart } from "../../shared/protocol";
 import type { WorldDoc } from "../../shared/world";
-import { useApp } from "../app";
+import { useApp, type BuildRoute } from "../app";
 import { Badge, Banner, Button, Empty, IdText, PageHeader, Section, Seg, useBusy } from "../components";
 import { Icon } from "../icons";
 import { useSelect } from "../store";
@@ -26,6 +26,14 @@ export function issueTarget(path: string): { collection: WorldCollection; id: st
   if (head === "lorePins" && pinned) return id === "characters" ? { collection: "entities", id: pinned } : id === "places" ? { collection: "places", id: pinned } : null;
   const collection = COLLECTIONS.find((c) => c === head);
   return collection && id ? { collection, id } : null;
+}
+
+/** Where an issue's Open goes in `worldId`'s world: its item, opened at the issue's path (a routine's block opens its sheet), or the world part it's in; null without a page. */
+export function issueRoute(worldId: WorldId, path: string): BuildRoute | null {
+  const target = issueTarget(path);
+  if (target) return { view: "item", worldId, collection: target.collection, id: target.id, at: path };
+  const part = issuePart(path);
+  return part ? { view: "part", worldId, part } : null;
 }
 
 /** The world part an issue path opens, when it isn't an item's: `tiers.crowd.band` → Tiers; `spawnTier` sits at the top level, but the Tiers part edits it, and the World part edits the world's own fields (`spawnCap`, `start.place`, `currency.code`…). */
@@ -67,7 +75,8 @@ export function IssueRow(props: { issue: LintIssue; worldId?: WorldId; doc?: Wor
     const items = doc ? ((doc[target.collection] ?? {}) as Record<string, unknown>) : {};
     where = `${COLLECTION_INFO[target.collection].label} › ${itemLabel(target.collection, target.id, hasOwn(items, target.id) ? items[target.id] : undefined, doc?.places)}`;
   } else if (part) where = PART_INFO[part].label;
-  const open = worldId === undefined ? null : target ? () => go(app, { view: "item", worldId, collection: target.collection, id: target.id }) : part ? () => go(app, { view: "part", worldId, part }) : null;
+  const route = worldId === undefined ? null : issueRoute(worldId, issue.path);
+  const open = route ? () => go(app, route) : null;
   return (
     <div class="lre-lint" role="listitem" data-lre-issue={issue.code}>
       <span class="lre-lint-text">
