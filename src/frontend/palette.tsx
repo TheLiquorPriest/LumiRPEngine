@@ -14,7 +14,7 @@ import type { OutcomeOdds, PaletteEncounter, PaletteEntry, PaletteOption, Palett
 import { DEFAULT_CURRENCY, formatMoney } from "../shared/world";
 import type { PaletteTab } from "./app";
 import { useApp, useView } from "./app";
-import { Badge, Banner, Button, Disclosure, Empty, IconButton, oddsSeries, Section, Seg, Tabs, tabPanel, useBusy } from "./components";
+import { Badge, Banner, Button, Disclosure, Empty, HostSwitch, IconButton, oddsSeries, Section, Seg, Tabs, tabPanel, useBusy } from "./components";
 import type { TabPanelProps } from "./components";
 import { formatCents, formatMinutes, formatOdds, humanize } from "./format";
 import { Icon } from "./icons";
@@ -346,6 +346,25 @@ const POLICY_OPTIONS = [
   { value: "ignore", label: "Ignore" },
 ] as const;
 
+/**
+ * "Follow my routine" for one Timelapse (DESIGN §8, §9.2): on, the POV lives its routine through the
+ * skip; off, it stays where the story has it while the world moves on. The sheet opens it at the
+ * world's default (`TimelapseView.followRoutine`), so a routine only ever runs when asked for.
+ */
+export function FollowRoutineChoice(props: { value: boolean; disabled: boolean; onChange(next: boolean): void }) {
+  return (
+    <Section>
+      <div data-lre-follow-routine={props.value}>
+        <HostSwitch label="Follow my routine" checked={props.value} disabled={props.disabled} onChange={props.onChange} />
+        <span class="lre-chat-hint">
+          <Icon name="info" size={14} />
+          On, you go about your usual day through the skip; off, you stay where the story left you while the world goes on.
+        </span>
+      </div>
+    </Section>
+  );
+}
+
 function TimelapsePanel(props: { view: StateView; timelapse: TimelapseView; panel: TabPanelProps; onSent(): void }) {
   const app = useApp();
   const { timelapse } = props;
@@ -353,6 +372,7 @@ function TimelapsePanel(props: { view: StateView; timelapse: TimelapseView; pane
   const [custom, setCustom] = useState("");
   const [unit, setUnit] = useState<"min" | "h" | "d" | "w">("h");
   const [overrides, setOverrides] = useState<Partial<Record<InterruptClass, InterruptPolicy>>>({});
+  const [follow, setFollow] = useState(timelapse.followRoutine);
   const [busy, run] = useBusy();
   const customMinutes = /^\d+(\.\d+)?$/.test(custom.trim()) ? Number(custom) * UNIT_MINUTES[unit] : null;
   const chosen: TimelapseTarget | null = customMinutes !== null && customMinutes > 0 ? { type: "duration", minutes: customMinutes } : target;
@@ -431,6 +451,7 @@ function TimelapsePanel(props: { view: StateView; timelapse: TimelapseView; pane
             </div>
           </Section>
         ) : null}
+        <FollowRoutineChoice value={follow} disabled={busy} onChange={setFollow} />
         <Section>
           <Disclosure summary={`Interrupts for this run${changed > 0 ? ` · ${changed} changed` : ""}`}>
             {INTERRUPT_CLASSES.map((cls) => (
@@ -452,7 +473,7 @@ function TimelapsePanel(props: { view: StateView; timelapse: TimelapseView; pane
           onClick={() => {
             if (!chosen) return;
             run(async () => {
-              const result = await app.request(timelapseRequest(timelapse, chosen, overrides, props.view.chatId));
+              const result = await app.request(timelapseRequest(timelapse, chosen, overrides, props.view.chatId, follow));
               if (result) props.onSent();
             });
           }}

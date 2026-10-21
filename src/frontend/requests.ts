@@ -74,13 +74,17 @@ export function paletteRequest(entry: PaletteEntry, picks: readonly PaletteOptio
   return { type: "lre.action", chatId, action: entry.action, params, source: "palette" };
 }
 
-/** A timelapse: only the overrides that differ from the current policy travel in the intent. */
-export function timelapseRequest(view: TimelapseView, target: TimelapseTarget, overrides: Partial<Record<InterruptClass, InterruptPolicy>>, chatId: ChatId, source: "palette" | "command" = "palette"): Req<"lre.action"> {
+/**
+ * A timelapse: only the overrides that differ from the current policy travel in the intent.
+ * `followRoutine` travels only when given (the palette always gives it): true lets the POV live its
+ * routine through the skip, false holds it where the story has it; absent, the world's default decides.
+ */
+export function timelapseRequest(view: TimelapseView, target: TimelapseTarget, overrides: Partial<Record<InterruptClass, InterruptPolicy>>, chatId: ChatId, followRoutine?: boolean, source: "palette" | "command" = "palette"): Req<"lre.action"> {
   const changed: JsonObject = {};
   for (const [cls, policy] of Object.entries(overrides)) {
     if (policy !== undefined && view.interrupts[cls as InterruptClass] !== policy) changed[cls] = policy;
   }
-  return { type: "lre.action", chatId, action: view.action, params: { target: { ...target }, overrides: changed }, source };
+  return { type: "lre.action", chatId, action: view.action, params: { target: { ...target }, overrides: changed, ...(followRoutine === undefined ? {} : { followRoutine }) }, source };
 }
 
 /** A map tap on a travel option (move or drive). */

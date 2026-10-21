@@ -116,6 +116,15 @@ describe("palette and map actions", () => {
       source: "palette",
     });
   });
+
+  test("a timelapse's Follow my routine travels as followRoutine when given, either way, and is left to the world's default when not", () => {
+    const interrupts = Object.fromEntries(INTERRUPT_CLASSES.map((cls) => [cls, "ignore"])) as Record<InterruptClass, InterruptPolicy>;
+    const view: TimelapseView = { action: "calendar.timelapse", blocked: null, durations: [60], until: [], interrupts, dayParts: false, followRoutine: true };
+    const target = { type: "duration", minutes: 60 } as const;
+    expect(timelapseRequest(view, target, {}, "c1", false).params).toEqual({ target, overrides: {}, followRoutine: false });
+    expect(timelapseRequest(view, target, {}, "c1", true).params).toEqual({ target, overrides: {}, followRoutine: true });
+    expect(timelapseRequest(view, target, {}, "c1").params).toEqual({ target, overrides: {} });
+  });
 });
 
 describe("fixes and markers", () => {
