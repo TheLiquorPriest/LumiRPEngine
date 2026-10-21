@@ -174,6 +174,15 @@ export interface Chip {
   expires: "next_send" | "never";
 }
 
+/**
+ * Whether a chip's action is finished by Lumiverse regenerating the reply (a new swipe), which only
+ * a page can start: `regenerate` is nothing but that, and the others set up what the next swipe
+ * does. The frontend regenerates after them; an outside client tells the user to.
+ */
+export function chipRegenerates(kind: ChipKind, choice: string): boolean {
+  return choice === "regenerate" || (kind === "swipe_option" && (choice === "renarrate" || choice === "rerun")) || (kind === "contradiction" && choice === "renarrate") || (kind === "read_failed" && choice === "rerun") || (kind === "claim" && (choice === "add" || choice === "drop"));
+}
+
 /** Detail opened during an in-flight window shows "pending" until it closes (DESIGN §9.2). */
 export interface PendingMark {
   panel: PanelId;
