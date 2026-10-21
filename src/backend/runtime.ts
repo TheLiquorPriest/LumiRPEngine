@@ -26,10 +26,10 @@ import { needsJudge, outcomeChoices, policyFor, policyOf, type Verdict } from ".
 import type { EngineTurnPlan, QueueStop } from "../engine/turn";
 import { timelapseIntent } from "../engine/turn";
 import { checkOf } from "../engine/checks";
-import { applyTimeAdvance, fightHoldsClock, IN_FIGHT, parseOverrides, parseTarget } from "../engine/time";
+import { applyTimeAdvance, fightHoldsClock, IN_FIGHT, nextDayPart, parseOverrides, parseTarget, typedSpan } from "../engine/time";
 import { EXTERNAL_ACCOUNT_PREFIX } from "../engine/events";
 import { boundProposal } from "../engine/bounds";
-import { calendarOf, clockOfStamp, dateAt, formatClock, formatHHMM, nextTimeOfDay, placeOffset, weekdayName } from "../engine/calendar";
+import { calendarOf, clockOfStamp, dateAt, formatClock, formatHHMM, placeOffset, weekdayName } from "../engine/calendar";
 import type { ChainMessage } from "../engine/ledger/chain";
 import { LedgerFold } from "../engine/ledger/fold";
 import type { LedgerCore, LedgerEnv } from "../engine/ledger/journal";
@@ -1093,7 +1093,7 @@ export class Runtime implements TurnHooks {
     const lore = this.stepLore(run, at, { text: `${text}\n${this.trackWords(render.world, render.state)}`, links: this.sceneLinks(render.world, render.state) });
     if (run.config.route?.provider === "decision") {
       // A Decision route answers which action (or none); a helper call fills its params when it has any.
-      const criteria: Record<string, string> = { none: "Not an action: speech, out-of-character text, a request, a feeling or a recap." };
+      const criteria: Record<string, string> = { none: "Not an action: speech, a request, a feeling, a recap, or out-of-character text that doesn't say time passes." };
       for (const c of catalog) criteria[c.id] = c.description ? `${c.label}: ${c.description}` : c.label;
       const answer = await this.steps.decide("interpret", { text, scene: context.scene.lines, recent: context.scene.recent }, { action: { type: "choice", instructions: run.template?.template ?? "Which engine action does the player character deliberately take in this typed input?", criteria } }, run.config, userId, budget.signal, lore, run.guidance);
       const a = answer?.answers.action;
@@ -1133,13 +1133,15 @@ export class Runtime implements TurnHooks {
     // §5.2), each piece only when it may be (`offeredNext`); "" when it may not.
     const chipText = (piece: string): string => offeredNext(this.registry, render.world, render.state, piece, text, secrets) ?? "";
     let next = (result.next ?? []).map(chipText);
-    // A bare time span reads as the timelapse itself, which plays alone: anything after it is offered
-    // in words once it has run. One after another action ("I head home and sleep until the next
-    // morning") is offered once the actions have run.
-    const timeOnly = result.action === TIMELAPSE_ACTION ? result.params : !result.action && result.then ? result.then : null;
-    if (timeOnly) {
+    // A time skip, the timelapse itself or time with no action before it (DESIGN §9.2), plays alone:
+    // anything after it is offered in words once it has run. Time after another action ("I head home
+    // and sleep until the next morning") is offered once the actions have run. The read names the
+    // skip; its span is the read's own (its params, else a `then` it split off), else the one the
+    // message states when it states exactly one, so a chosen skip isn't lost to a half-filled answer.
+    if (result.action === TIMELAPSE_ACTION || (!result.action && result.then !== undefined)) {
       bridge.setNext(text, joinActions([...(result.queue ?? []).map((q) => chipText(q.text)), ...next]) || null);
-      const target = interpretedTarget(timeOnly, render.world, render.state, text);
+      const target = (result.action === TIMELAPSE_ACTION ? interpretedTarget(result.params, render.world, render.state, text) : null) ?? (result.then ? interpretedTarget(result.then, render.world, render.state, text) : null) ?? typedSpan(calendarOf(render.world), render.state.clock, text);
+      if (!target) this.host.log("info", `[LumiRPEngine] interpret: lets time pass but states no span it can read; the turn plays as roleplay`, userId);
       // A short span runs in the turn; a longer one is offered (a misread can't skip days unasked).
       const over = target?.type === "duration" && target.minutes > INTERPRETED_TIMELAPSE_CAP;
       bridge.setOffer(text, over ? target : null);
@@ -2377,22 +2379,25 @@ export const TYPE_LABELS: Record<ExtractionType, string> = {
 /** The longest typed timelapse a turn runs on its own (minutes); longer ones are offered as a chip. */
 export const INTERPRETED_TIMELAPSE_CAP = 1440;
 
-/** A "next" day part closer than this is the one after it: "sleep until the next morning" at 07:14 means tomorrow's. */
-const NEXT_DAY_PART_GAP = 180;
-
 /**
- * A typed timelapse's target from `interpret` params (DESIGN §9.2): `at` a stated day and time
- * ("YYYY-MM-DD HH:MM", local to where the POV is, as the HUD shows it), else `until` a day part (or
- * the next one), shift or commitment, else `minutes`. A stated time that has passed or lies beyond a
- * timelapse's reach is still the target, so the turn refuses it with its note as it does any target
- * it can't reach; text that isn't a day and time the calendar has is no stated time.
+ * A typed timelapse's target from `interpret`'s read of it (DESIGN §9.2): its `span`, the player's
+ * own words for how long or until when, read the same way every time (`typedSpan`); else `at` a
+ * stated day and time ("YYYY-MM-DD HH:MM", local to where the POV is, as the HUD shows it); else
+ * `until`, in the player's words ("later that evening", "tomorrow morning") or as a day part (or
+ * the next one), shift or commitment; else `minutes`. A stated time that has passed or lies beyond
+ * a timelapse's reach is still the target, so the turn refuses it with its note as it does any
+ * target it can't reach; text that isn't a day and time the calendar has is no stated time.
  */
 export function interpretedTarget(params: JsonObject, world: WorldDoc, state: Readonly<WorldState>, text: string): TimelapseTarget | null {
   const cal = calendarOf(world);
   const now = state.clock;
+  const said = typeof params.span === "string" ? typedSpan(cal, now, params.span) : null;
+  if (said) return said;
   const local = typeof params.at === "string" ? clockOfStamp(cal, params.at) : null;
   if (local !== null) return { type: "at", at: local - placeOffset(world, local, placeOfEntity(state, world.pov)) };
   const raw = typeof params.until === "string" ? params.until.trim().toLowerCase() : "";
+  const spoken = raw === "" ? null : typedSpan(cal, now, raw);
+  if (spoken) return spoken;
   const next = /^(the\s+)?(next|tomorrow)\b/.test(raw);
   const until = raw.replace(/^(the\s+)?(next|tomorrow)\s*/, "");
   const idx = cal.dayParts.findIndex((d) => d.id.toLowerCase() === until || d.label.toLowerCase() === until);
@@ -2400,15 +2405,13 @@ export function interpretedTarget(params: JsonObject, world: WorldDoc, state: Re
   if (part) {
     // The model may drop the "next" the player typed ("…sleep until the next morning" → until "morning").
     const words = [until, part.label.toLowerCase()].map((w) => w.replace(/[^a-z0-9 ]/g, "")).filter((w) => w !== "");
-    if (next || /\btomorrow\b/i.test(text) || new RegExp(`\\bnext\\s+(${words.join("|")})\\b`, "i").test(text)) {
-      const start = cal.partStarts[idx] ?? 0;
-      const at = nextTimeOfDay(cal, now, start);
-      return { type: "at", at: at - now < NEXT_DAY_PART_GAP ? nextTimeOfDay(cal, at, start) : at };
-    }
+    if (next || /\btomorrow\b/i.test(text) || new RegExp(`\\bnext\\s+(${words.join("|")})\\b`, "i").test(text)) return nextDayPart(cal, now, idx);
     return { type: "day_part", dayPart: part.id };
   }
   if (until === "shift" || until === "commitment") return { type: until };
-  const minutes = typeof params.minutes === "number" && Number.isFinite(params.minutes) ? Math.round(params.minutes) : 0;
+  // A number, or one written as text ("90").
+  const given = typeof params.minutes === "string" && /^\s*\d+(?:\.\d+)?\s*$/.test(params.minutes) ? Number(params.minutes) : params.minutes;
+  const minutes = typeof given === "number" && Number.isFinite(given) ? Math.round(given) : 0;
   return minutes > 0 ? { type: "duration", minutes } : null;
 }
 
