@@ -104,7 +104,8 @@ function originOf(ctx: ReadContext, who: EntityId, option: string, reason: strin
 export function routineGmView(ctx: ReadContext, who: EntityId, day = dateAt(calendarOf(ctx.world), ctx.state.clock).dayIndex): RoutineGmView {
   const cal = calendarOf(ctx.world);
   const e = own(ctx.state.entities, who);
-  const blocks: EffectiveBlock[] = [...routineCandidates(ctx, who).values()].flatMap((list) => {
+  // The routine as `day` has it, as the planner lays it: a block the story added is theirs from the day after its turn.
+  const blocks: EffectiveBlock[] = [...routineCandidates(ctx, who, day).values()].flatMap((list) => {
     const [top, ...rest] = list;
     if (!top) return [];
     return [{ block: top.entry, routine: top.routine?.id ?? null, owner: ownerOf(ctx, top.level, top.routine?.owner), source: sourceView(ctx, top.source), off: isOff(top.entry), shadowed: rest.map((a) => ({ routine: a.routine?.id ?? null, owner: ownerOf(ctx, a.level, a.routine?.owner), source: sourceView(ctx, a.source), block: a.entry })) }];
