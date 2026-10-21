@@ -5333,6 +5333,7 @@ var DEFAULT_MIND_READS = Object.freeze({
   memory: { on: false, tokens: "none" },
   thoughts: { on: false, tokens: "none" },
   recall: { on: false },
+  routine: { on: true, tokens: 400 },
   life: { on: false, tokens: "none" }
 });
 var MINDS_PRESETS = Object.freeze({
@@ -5382,6 +5383,7 @@ function readsOf(raw, base) {
     memory: readOf(r.memory, base.memory),
     thoughts: readOf(r.thoughts, base.thoughts),
     recall: { on: typeof recall.on === "boolean" ? recall.on : base.recall.on },
+    routine: readOf(r.routine, base.routine),
     life: readOf(r.life, base.life)
   };
 }
@@ -6484,7 +6486,7 @@ function instantEvents(reg, ctx, instant, runSeed, opts = {}) {
     if (routine && yields) {
       const lower = mine.filter((r) => rank !== null && r.rank > rank).sort((a, b) => a.rank - b.rank)[0];
       const expected = instant.edge === "end" ? slot.value ?? null : lower ? lower.slot.value ?? null : valueBefore(reg, ctx, instant, entity);
-      if (yields(ctx, entity, schedule.target === "place" ? "place" : "activity", expected, firstOfDay(instant), opts.povRoutine === false, opts.timelapse === true))
+      if (yields(ctx, entity, schedule.target === "place" ? "place" : "activity", expected, firstOfDay(instant), opts.povRoutine === false))
         continue;
     }
     out.push({ type: "set", entity, field: schedule.target, value });
@@ -9116,7 +9118,7 @@ function advance(reg, w, to, opts) {
       if (edge && edgeAt <= (moment?.at ?? Infinity)) {
         next++;
         clockTo(w, edgeAt, cause, e);
-        e.emit(instantEvents(reg, w.ctx, edge, opts.runSeed, { povRoutine, timelapse }));
+        e.emit(instantEvents(reg, w.ctx, edge, opts.runSeed, { povRoutine }));
       } else if (moment) {
         t++;
         clockTo(w, moment.at, cause, e);
@@ -24085,15 +24087,21 @@ var ROUTINE_AWARENESS = ["story_first", "balanced", "routine_first"];
 var ROUTINE_INVITATIONS = ["off", "player", "everyone"];
 var ROUTINE_SOCIABILITY = ["reserved", "usual", "outgoing"];
 var ROUTINE_PLAN_BEND = ["must", "strong", "standard", "ordinary"];
-var DEFAULT_ROUTINE_SETTINGS = Object.freeze({ awareness: "balanced", invitations: "player", sociability: "usual", planBend: "standard" });
+var ROUTINE_ROLES = ["informative", "enforced", "off"];
+var DEFAULT_ROUTINE_ROLES = Object.freeze({ live: "informative", near: "informative", far: "informative", background: "enforced" });
+var DEFAULT_ROUTINE_SETTINGS = Object.freeze({ awareness: "balanced", invitations: "player", sociability: "usual", planBend: "standard", roles: DEFAULT_ROUTINE_ROLES, narrator: true, paletteFollowsRoutine: false });
 function routineSettingsOf(world) {
   const raw = isRecord(world.routineSettings) ? world.routineSettings : {};
   const pick = (v, allowed, fallback) => allowed.find((a) => a === v) ?? fallback;
+  const roles = isRecord(raw.roles) ? raw.roles : {};
   return {
     awareness: pick(raw.awareness, ROUTINE_AWARENESS, DEFAULT_ROUTINE_SETTINGS.awareness),
     invitations: pick(raw.invitations, ROUTINE_INVITATIONS, DEFAULT_ROUTINE_SETTINGS.invitations),
     sociability: pick(raw.sociability, ROUTINE_SOCIABILITY, DEFAULT_ROUTINE_SETTINGS.sociability),
-    planBend: pick(raw.planBend, ROUTINE_PLAN_BEND, DEFAULT_ROUTINE_SETTINGS.planBend)
+    planBend: pick(raw.planBend, ROUTINE_PLAN_BEND, DEFAULT_ROUTINE_SETTINGS.planBend),
+    roles: { live: pick(roles.live, ROUTINE_ROLES, DEFAULT_ROUTINE_ROLES.live), near: pick(roles.near, ROUTINE_ROLES, DEFAULT_ROUTINE_ROLES.near), far: pick(roles.far, ROUTINE_ROLES, DEFAULT_ROUTINE_ROLES.far), background: pick(roles.background, ROUTINE_ROLES, DEFAULT_ROUTINE_ROLES.background) },
+    narrator: typeof raw.narrator === "boolean" ? raw.narrator : DEFAULT_ROUTINE_SETTINGS.narrator,
+    paletteFollowsRoutine: typeof raw.paletteFollowsRoutine === "boolean" ? raw.paletteFollowsRoutine : DEFAULT_ROUTINE_SETTINGS.paletteFollowsRoutine
   };
 }
 var ROUTINE_MODES = ["follows", "no_invitations", "off"];
@@ -24137,7 +24145,7 @@ function sourceProblem(v, world) {
   if (t === "builtin")
     return null;
   if (t === "story")
-    return typeof v.at === "number" && (v.turn === undefined || typeof v.turn === "string") ? null : "a story source has its time";
+    return typeof v.at === "number" && (v.turn === undefined || typeof v.turn === "string") && (v.by === undefined || v.by === "player") ? null : "a story source has its time";
   if (t === "gm")
     return typeof v.at === "number" ? null : "a GM source has its time";
   return "its source isn't one";
@@ -24241,7 +24249,7 @@ function routineShapeProblems(v) {
   });
   return out;
 }
-var SETTING_VALUES = { awareness: ROUTINE_AWARENESS, invitations: ROUTINE_INVITATIONS, sociability: ROUTINE_SOCIABILITY, planBend: ROUTINE_PLAN_BEND };
+var SETTING_VALUES = { awareness: ROUTINE_AWARENESS, invitations: ROUTINE_INVITATIONS, sociability: ROUTINE_SOCIABILITY, planBend: ROUTINE_PLAN_BEND, roles: "roles", narrator: "switch", paletteFollowsRoutine: "switch" };
 function routineSettingsProblems(v) {
   if (!isRecord(v))
     return ["routine settings are an object"];
@@ -24249,6 +24257,13 @@ function routineSettingsProblems(v) {
     const allowed = hasOwn(SETTING_VALUES, key) ? SETTING_VALUES[key] : undefined;
     if (!allowed)
       return [`there's no setting ${key} (${Object.keys(SETTING_VALUES).join(", ")})`];
+    if (allowed === "switch")
+      return typeof value === "boolean" ? [] : [`${key} is true or false`];
+    if (allowed === "roles") {
+      if (!isRecord(value))
+        return [`roles give ${FIDELITIES.join(", ")} each a role`];
+      return Object.entries(value).flatMap(([level, role]) => !FIDELITIES.some((f) => f === level) ? [`roles have no level ${level} (${FIDELITIES.join(", ")})`] : typeof role === "string" && ROUTINE_ROLES.some((r) => r === role) ? [] : [`roles.${level} is ${ROUTINE_ROLES.join(", ")}`]);
+    }
     return typeof value === "string" && allowed.includes(value) ? [] : [`${key} is ${allowed.join(", ")}`];
   });
 }
@@ -24547,7 +24562,7 @@ function chatSource(v) {
   if (o.type === "gm" && typeof o.at === "number")
     return { type: "gm", at: o.at };
   if (o.type === "story" && typeof o.at === "number")
-    return { type: "story", at: o.at, ...typeof o.turn === "string" ? { turn: o.turn } : {} };
+    return { type: "story", at: o.at, ...typeof o.turn === "string" ? { turn: o.turn } : {}, ...o.by === "player" ? { by: "player" } : {} };
   return null;
 }
 function chatFollow(state, who) {
@@ -24556,7 +24571,8 @@ function chatFollow(state, who) {
     return null;
   const mode = ROUTINE_MODES.find((m) => m === raw.mode) ?? null;
   const awareness = ROUTINE_AWARENESS.find((a) => a === raw.awareness) ?? null;
-  return mode === null && awareness === null ? null : { mode, awareness };
+  const role = ROUTINE_ROLES.find((r) => r === raw.role) ?? null;
+  return mode === null && awareness === null && role === null ? null : { mode, awareness, role };
 }
 function chatBlocks(state, who) {
   const out = {};
@@ -24586,6 +24602,9 @@ function chatSchedules(state, who) {
 function followOf(ctx, who) {
   const chat = chatFollow(ctx.state, who);
   return { mode: chat?.mode ?? "follows", awareness: chat?.awareness ?? routineSettingsOf(ctx.world).awareness, chat };
+}
+function routineRole(ctx, who) {
+  return chatFollow(ctx.state, who)?.role ?? routineSettingsOf(ctx.world).roles[optionalQuery(ctx, "minds.tier")?.(ctx, who) ?? "background"];
 }
 function routineRank(reg, world, state, def) {
   const rank = ownerRank(reg, world, state, def);
@@ -24803,11 +24822,10 @@ function routineYields(ctx, who, field, expected, opts) {
   const pov = who === ctx.world.pov;
   const awareness = followOf(ctx, who).awareness;
   if (!pov) {
-    const tier = optionalQuery(ctx, "minds.tier")?.(ctx, who) ?? "background";
-    const cast = tier === "live" || tier === "near";
-    if (cast && (opts.skip !== true || withPov(ctx, who)))
+    if (routineRole(ctx, who) !== "enforced")
       return true;
-    if ((tier === "far" || cast || awareness === "story_first") && optionalQuery(ctx, "minds.intent")?.(ctx, who) === true)
+    const tier = optionalQuery(ctx, "minds.tier")?.(ctx, who) ?? "background";
+    if ((tier !== "background" || awareness === "story_first") && optionalQuery(ctx, "minds.intent")?.(ctx, who) === true)
       return true;
   }
   const current = own(ctx.state.entities, who)?.fields[field];
@@ -24929,13 +24947,27 @@ function routinesLint(world, reg, state) {
   for (const id of Object.keys(raw).sort())
     issues.push(...routineIssues(world, reg, id, own(raw, id), state));
   const settings = isRecord(world.routineSettings) ? world.routineSettings : {};
-  const known = { awareness: ROUTINE_AWARENESS, invitations: ["off", "player", "everyone"], sociability: ["reserved", "usual", "outgoing"], planBend: ["must", "strong", "standard", "ordinary"] };
+  const known = { awareness: ROUTINE_AWARENESS, invitations: ["off", "player", "everyone"], sociability: ["reserved", "usual", "outgoing"], planBend: ["must", "strong", "standard", "ordinary"], roles: "roles", narrator: "switch", paletteFollowsRoutine: "switch" };
+  const warn = (path, message) => void issues.push({ severity: "warning", code: ROUTINE_LINT.settings, path: `routineSettings.${path}`, message });
   for (const [key, v] of Object.entries(settings)) {
     const allowed = own(known, key);
     if (!allowed)
-      issues.push({ severity: "warning", code: ROUTINE_LINT.settings, path: `routineSettings.${key}`, message: `Routine settings have no ${key}; it does nothing.` });
-    else if (typeof v !== "string" || !allowed.includes(v))
-      issues.push({ severity: "warning", code: ROUTINE_LINT.settings, path: `routineSettings.${key}`, message: `Routine settings: ${key} is ${allowed.join(", ")}; the default stands.` });
+      warn(key, `Routine settings have no ${key}; it does nothing.`);
+    else if (allowed === "switch") {
+      if (typeof v !== "boolean")
+        warn(key, `Routine settings: ${key} is true or false; the default stands.`);
+    } else if (allowed === "roles") {
+      if (!isRecord(v))
+        warn(key, "Routine settings: roles give live, near, far and background each a role; the defaults stand.");
+      else
+        for (const [level, role] of Object.entries(v)) {
+          if (!FIDELITIES.some((f) => f === level))
+            warn(`roles.${level}`, `Routine settings: roles have no ${level}; it does nothing.`);
+          else if (!ROUTINE_ROLES.some((r) => r === role))
+            warn(`roles.${level}`, `Routine settings: a role is ${ROUTINE_ROLES.join(", ")}; the default stands.`);
+        }
+    } else if (typeof v !== "string" || !allowed.includes(v))
+      warn(key, `Routine settings: ${key} is ${allowed.join(", ")}; the default stands.`);
   }
   if (Object.keys(raw).length > 0 && !world.packs.castlife)
     issues.push({ severity: "warning", code: ROUTINE_LINT.pack, path: "routines", message: "The world has routines but not the Cast life pack, which lives them." });
@@ -25676,7 +25708,7 @@ var routineChannel = {
     if ("home" in change)
       return [{ type: "set", args: { entity: change.entity, field: "home", value: change.home } }];
     const turn = text3(p.turn);
-    return [{ type: ROUTINE_EFFECT, args: { entity: change.entity, blocks: change.blocks, schedules: change.schedules, ...turn !== "" ? { turn } : {} } }];
+    return [{ type: ROUTINE_EFFECT, args: { entity: change.entity, blocks: change.blocks, schedules: change.schedules, ...turn !== "" ? { turn } : {}, ...p.by === "player" ? { by: "player" } : {} } }];
   }
 };
 function storyEvents(args, ctx) {
@@ -25685,12 +25717,149 @@ function storyEvents(args, ctx) {
   if (!e || !kindIs(ctx.registry, ctx.world, e.kind, "person"))
     return { code: "not_person", reason: "only people have a routine" };
   const turn = text3(args.turn);
-  const source = { type: "story", at: ctx.state.clock, ...turn !== "" ? { turn } : {} };
+  const source = { type: "story", at: ctx.state.clock, ...turn !== "" ? { turn } : {}, ...args.by === "player" ? { by: "player" } : {} };
   const list = (v) => Array.isArray(v) ? v.filter(isRecord).map(objOf) : [];
   return [
     ...list(args.schedules).map((s) => ({ type: ROUTINE_EVENTS.schedule, data: { entity: who, schedule: text3(s.schedule), value: s.value ?? null, source } })),
     ...list(args.blocks).map((b) => ({ type: ROUTINE_EVENTS.block, data: { entity: who, block: text3(b.block), value: b.value ?? null, source } }))
   ];
+}
+
+// src/packs/castlife/core/usual.ts
+function joined(words) {
+  return words.length <= 1 ? words[0] ?? "" : `${words.slice(0, -1).join(", ")} and ${words[words.length - 1] ?? ""}`;
+}
+function weekdaysPhrase(cal, days) {
+  const set = [...new Set(days)].sort((a, b) => a - b);
+  if (set.length === 0 || set.length >= 7)
+    return "";
+  if (set.join() === "1,2,3,4,5")
+    return "weekdays";
+  if (set.join() === "0,6")
+    return "weekends";
+  return `on ${joined(set.map((d) => weekdayName(cal, d)))}`;
+}
+function blockDays(cal, d) {
+  if (!d)
+    return "";
+  const parts = [];
+  if (d.weekdays)
+    parts.push(weekdaysPhrase(cal, d.weekdays));
+  if (d.off === "only")
+    parts.push("on days off");
+  if (d.off === "never")
+    parts.push("on working days");
+  if (d.holidays)
+    parts.push("on holidays");
+  if (d.birthday === "own")
+    parts.push("on their birthday");
+  if (d.birthday === "friend")
+    parts.push("on a friend's birthday");
+  if (d.seasons)
+    parts.push(`in ${joined(d.seasons)}`);
+  if (d.weather)
+    parts.push(`in ${d.weather} weather`);
+  return parts.filter((p) => p !== "").join(", ");
+}
+function recurrenceDays(cal, r) {
+  if (r.every === "week")
+    return weekdaysPhrase(cal, r.weekdays ?? []);
+  if (r.every === "month")
+    return "monthly";
+  if (r.every === "year")
+    return "yearly";
+  return "";
+}
+function blockClause(cal, day, block) {
+  const fixed = block.kind === "fixed" && block.at !== undefined;
+  const start = fixed && block.at ? parseHHMM(block.at) : block.window ? parseHHMM(block.window.from) : 0;
+  const time = fixed ? ` at ${block.at}` : block.window ? ` in the ${dayPartAt(cal, clockAt(cal, day, start)).label.toLowerCase()}` : "";
+  const often = block.kind === "optional" ? "sometimes" : block.perWeek !== undefined && block.perWeek < 7 ? `${block.perWeek} day${block.perWeek === 1 ? "" : "s"} a week` : "";
+  const days = [blockDays(cal, block.days), often].filter((p) => p !== "").join(", ");
+  return { text: `${days !== "" ? `${days}, ` : ""}${block.label.trim().replace(/[.;]+$/, "")}${time}`, start };
+}
+function usualRoutine(ctx, who, read) {
+  const { registry: reg, world, state } = ctx;
+  const cal = calendarOf(world);
+  const now = dateAt(cal, state.clock);
+  const day = now.dayIndex;
+  const out = [];
+  for (const { block, from } of activeBlocks(ctx, who)) {
+    if (from.level === "builtin")
+      continue;
+    const { text, start } = blockClause(cal, day, block);
+    let today = false;
+    try {
+      today = blockOnDay(ctx, who, block, day);
+    } catch {}
+    out.push({ text, start, minutes: block.minutes, today, private: block.private === true, own: from.level === "own" || from.level === "chat" });
+  }
+  const spans = new Map;
+  for (const s of chatSchedulesIn(ctx)) {
+    if (!(s.target === "activity" && read.activity || s.target === "place") || scheduleOff(state, who, s.id, state.clock) || !scheduleOwners(reg, world, state, s).includes(who))
+      continue;
+    const days = recurrenceDays(cal, s.recurrence);
+    const today = recursOn(cal, s.recurrence, day);
+    const runs = [];
+    for (const slot of s.slots) {
+      const raw = typeof slot.value === "string" ? slot.value.trim() : "";
+      const value = raw === "" ? null : s.target === "place" ? read.place(raw) : raw.replace(/_/g, " ");
+      if (value === null)
+        continue;
+      const start = parseHHMM(slot.start);
+      const end = parseHHMM(slot.end);
+      const last = runs[runs.length - 1];
+      if (last && last.value === value && last.end === start)
+        last.end = end;
+      else
+        runs.push({ value, start, end });
+    }
+    for (const run of runs) {
+      const key = `${days}\x00${run.start}\x00${run.end}`;
+      const span = spans.get(key) ?? { days, start: run.start, end: run.end, today, own: s.owner === who };
+      if (s.target === "place")
+        span.place ??= run.value;
+      else
+        span.activity ??= run.value;
+      spans.set(key, span);
+    }
+  }
+  for (const span of spans.values()) {
+    const what = span.activity !== undefined ? `${span.activity}${span.place !== undefined ? ` at ${span.place}` : ""}` : `at ${span.place ?? ""}`;
+    const minutes = (span.end - span.start + MINUTES_PER_DAY) % MINUTES_PER_DAY || MINUTES_PER_DAY;
+    out.push({ text: `${span.days !== "" ? `${span.days}, ` : ""}${what} ${formatHHMM(span.start)}\u2013${formatHHMM(span.end)}`, start: span.start, minutes, today: span.today, private: false, own: span.own });
+  }
+  const minute = now.minuteOfDay;
+  const rank = (c) => c.today && c.start + c.minutes > minute ? 0 : 1;
+  return out.sort((a, b) => rank(a) - rank(b) || a.start - b.start || a.text.localeCompare(b.text));
+}
+function usualRoutineHints(ctx) {
+  const { registry: reg, world, state } = ctx;
+  const pov = world.pov;
+  const here = placeOfEntity(state, pov);
+  if (here === null || !routineSettingsOf(world).narrator)
+    return [];
+  let safe = null;
+  const lines = [];
+  for (const id of Object.keys(state.entities).sort()) {
+    const e = own(state.entities, id);
+    if (!e || id === pov || placeOfEntity(state, id) !== here || !kindIs(reg, world, e.kind, "person") || isGone(state, id) || !canSeeEntity(reg, world, state, pov, id) || povLife(world, state, id)?.acts === false)
+      continue;
+    if (routineRole(ctx, id) === "off")
+      continue;
+    const clauses = usualRoutine(ctx, id, { place: (place) => canSeePlace(reg, world, state, pov, place) ? own(world.places, place)?.name ?? null : null, activity: canSeeField(reg, world, state, pov, id, "activity") }).filter((c) => !c.private);
+    if (clauses.length === 0)
+      continue;
+    if (!safe) {
+      const secrets = unrevealedSecrets(reg, world, state);
+      const namesHidden = hiddenNameCheck(reg, world, state, pov);
+      safe = (t) => findLeaks(t, secrets).length === 0 && !namesHidden(t);
+    }
+    const told = clauses.map((c) => c.text).filter(safe).slice(0, 3);
+    if (told.length > 0)
+      lines.push(`${e.name} usually: ${told.join("; ")}.`);
+  }
+  return lines.length === 0 ? [] : ["Usual routines (background you may use or ignore, never a fact to state; what the story establishes always comes first):", ...lines];
 }
 
 // src/packs/castlife/core/index.ts
@@ -25826,7 +25995,7 @@ function invitedBlocks(ctx, guest, day, commitments) {
         hosts.add(who);
   const out = [];
   for (const host of [...hosts].sort()) {
-    if (host === guest || !acquainted(ctx.state, host, guest) || followOf(ctx, host).mode !== "follows")
+    if (host === guest || !acquainted(ctx.state, host, guest) || followOf(ctx, host).mode !== "follows" || routineRole(ctx, host) !== "enforced")
       continue;
     for (const { block } of activeBlocks(ctx, host, day)) {
       if (block.kind !== "fixed" || block.company?.invite !== true || !selectEntities(ctx.registry, ctx.world, ctx.state, block.company.who).includes(guest) || !blockOnDay(ctx, host, block, day))
@@ -25911,6 +26080,8 @@ function liveBlock(ctx, who, plan, block, from, at, scene, skip) {
   const activity = blockActivity(block.activity);
   if (block.option.startsWith("plan:"))
     return scene && withPov(ctx, who) ? [] : takeUp(ctx, who, block.place, activity, at, block.end);
+  if (who !== ctx.world.pov && routineRole(ctx, who) !== "enforced")
+    return [];
   const edge = block.start > from && block.start <= at;
   const index = plan.blocks.indexOf(block);
   const earlier = from < clockAt(calendarOf(ctx.world), plan.day, 0) ? [...dayPlan(ctx, who, plan.day - 1).blocks, ...plan.blocks.slice(0, index)] : plan.blocks.slice(0, index);
@@ -25923,7 +26094,7 @@ function liveBlock(ctx, who, plan, block, from, at, scene, skip) {
   const doings = [...had.map((b) => blockActivity(b.activity)), ...typeof resting === "string" ? [resting] : []];
   const wasPlace = places.find((p) => p === e?.fields.place) ?? places[0] ?? [...earlier].reverse().find((b) => b.place !== null)?.place ?? home;
   const wasDoing = doings.find((d) => d === e?.fields.activity) ?? doings[0] ?? null;
-  const opts = { edge, release: block.activity === "sleep", scene, skip };
+  const opts = { edge, release: block.activity === "sleep", scene };
   const target = block.place ?? (edge && earlier.at(-1)?.place ? home : null);
   const place = target !== null && !routineYields(ctx, who, "place", wasPlace, opts) ? target : null;
   const doing = routineYields(ctx, who, "activity", wasDoing, opts) ? null : activity;
@@ -25977,7 +26148,7 @@ function asksOf(ctx, who, days) {
         out.push({ key: `${who}:plan:${p.id}`, ask: Math.max(first.start - INVITE_LEAD, p.made + 1, clockAt(cal, dateAt(cal, first.start).dayIndex, 0)), at: first.start, place: first.place ?? null, origin: { type: "plan", plan: p.id } });
     }
   }
-  if (routineSettingsOf(ctx.world).invitations === "off" || followOf(ctx, who).mode !== "follows")
+  if (routineSettingsOf(ctx.world).invitations === "off" || followOf(ctx, who).mode !== "follows" || routineRole(ctx, who) !== "enforced")
     return out;
   const asking = activeBlocks(ctx, who).filter(({ block }) => block.company?.invite === true && selectEntities(ctx.registry, ctx.world, ctx.state, block.company.who).includes(pov));
   if (asking.length === 0)
@@ -26018,7 +26189,7 @@ function planMoments(ctx, who, slot) {
         out.push({ at: c.end, key: `end:${c.plan}` });
     }
   }
-  if (who !== ctx.world.pov || slot.povRoutine !== false) {
+  if (who === ctx.world.pov ? slot.povRoutine !== false : routineRole(ctx, who) === "enforced") {
     const cal = calendarOf(ctx.world);
     const handed = new Set(out.flatMap((m) => m.key.startsWith("end:") ? [m.at] : []));
     const lived = livedAtMinute(ctx, who, slot);
@@ -26096,6 +26267,10 @@ function atPlanMoment(ctx, who, moment, slot) {
   const block = plan.blocks.find((b) => b.start <= moment.at && moment.at < b.end);
   if (!block || scene && withPov(ctx, who))
     return [];
+  if (who !== ctx.world.pov && !block.option.startsWith("plan:") && routineRole(ctx, who) !== "enforced") {
+    const rest = fieldDef(ctx.registry, ctx.world, own(ctx.state.entities, who)?.kind ?? "", "activity")?.default;
+    return takeUp(ctx, who, null, typeof rest === "string" ? rest : null, moment.at);
+  }
   return takeUp(ctx, who, block.place ?? (moment.key.startsWith("end:") ? homeOf(ctx, who) : null), blockActivity(block.activity), moment.at, block.option.startsWith("plan:") ? block.end : undefined);
 }
 function stepAgent2(slot, ctx, rngFor, who) {
@@ -26207,7 +26382,7 @@ function stepTrips(slot, ctx) {
 }
 function isChatSource(v) {
   const o = objOf(v);
-  return typeof o.at === "number" && (o.type === "gm" || o.type === "story" && (o.turn === undefined || typeof o.turn === "string"));
+  return typeof o.at === "number" && (o.type === "gm" || o.type === "story" && (o.turn === undefined || typeof o.turn === "string") && (o.by === undefined || o.by === "player"));
 }
 function isScheduleChange(v) {
   const o = objOf(v);
@@ -26266,7 +26441,8 @@ var EVENTS3 = [
       const o = objOf(f);
       const mode = o.mode === null || ROUTINE_MODES.some((m) => m === o.mode);
       const awareness = o.awareness === null || ROUTINE_AWARENESS.some((a) => a === o.awareness);
-      return mode && awareness && (o.mode !== null || o.awareness !== null) ? null : { code: "bad_event", reason: "a routine setting is a mode, an awareness or both, or null to clear it" };
+      const role = o.role === undefined || o.role === null || ROUTINE_ROLES.some((r) => r === o.role);
+      return mode && awareness && role && (o.mode !== null || o.awareness !== null || o.role !== undefined && o.role !== null) ? null : { code: "bad_event", reason: "a routine setting is a mode, an awareness, a role or some of them, or null to clear it" };
     },
     apply: (e, state) => {
       const follow = sliceRecord(state, "castlife", "follow");
@@ -26275,9 +26451,9 @@ var EVENTS3 = [
       if (e.data.follow === null)
         delete follow[who];
       else
-        follow[who] = { mode: f.mode ?? null, awareness: f.awareness ?? null };
+        follow[who] = { mode: f.mode ?? null, awareness: f.awareness ?? null, ...f.role !== undefined ? { role: f.role } : {} };
     },
-    describe: (e, ctx, viewer) => changeLine(ctx, e, viewer, e.data.follow === null ? "routine setting cleared" : `routine: ${[objOf(e.data.follow).mode, objOf(e.data.follow).awareness].filter((x) => typeof x === "string").join(", ").replace(/_/g, " ")}`)
+    describe: (e, ctx, viewer) => changeLine(ctx, e, viewer, e.data.follow === null ? "routine setting cleared" : `routine: ${[objOf(e.data.follow).mode, objOf(e.data.follow).awareness, objOf(e.data.follow).role].filter((x) => typeof x === "string").join(", ").replace(/_/g, " ")}`)
   },
   {
     type: ROUTINE_EVENTS.block,
@@ -26343,7 +26519,8 @@ function routineEdit(ctx, op) {
     const now = followOf(ctx, op.entity).chat;
     const mode = op.mode === undefined ? now?.mode ?? null : op.mode;
     const awareness = op.awareness === undefined ? now?.awareness ?? null : op.awareness;
-    return [{ type: ROUTINE_EVENTS.follow, data: { entity: op.entity, follow: mode === null && awareness === null ? null : { mode, awareness } } }];
+    const role = op.role === undefined ? now?.role ?? null : op.role;
+    return [{ type: ROUTINE_EVENTS.follow, data: { entity: op.entity, follow: mode === null && awareness === null && role === null ? null : { mode, awareness, role } } }];
   }
   if (op.op === "routine_block") {
     if (op.value === null)
@@ -26570,7 +26747,7 @@ var castlifePack = {
     for (const def of EVENTS3)
       r.event(def);
     r.service("castlife.edit", routineEdit);
-    r.query("castlife.yields", (ctx, who, field, expected, release, scene, skip) => routineYields(ctx, who, field, expected, { edge: true, release, scene, skip }));
+    r.query("castlife.yields", (ctx, who, field, expected, release, scene) => routineYields(ctx, who, field, expected, { edge: true, release, scene }));
     r.query("castlife.schedule_off", (ctx, who, schedule, at) => scheduleOff(ctx.state, who, schedule, at));
     r.query("castlife.chat_schedules", chatScheduleDefs);
     r.process({ id: "castlife.agents", domain: "castlife", minLevel: 3, scope: "agent", step: (slot, ctx, rng, agent) => agent ? stepAgent2(slot, ctx, rng, agent) : [], instants: planMoments, atInstant: atPlanMoment });
@@ -26634,7 +26811,7 @@ var castlifePack = {
       }
     });
     r.proposal(routineChannel);
-    r.effect({ type: ROUTINE_EFFECT, args: ["entity", "blocks?", "schedules?", "turn?"], resolve: storyEvents });
+    r.effect({ type: ROUTINE_EFFECT, args: ["entity", "blocks?", "schedules?", "turn?", "by?"], resolve: storyEvents });
     r.action({ id: "eat", label: "Eat", description: "Have a meal or a snack.", pack: "castlife", params: {}, requires: [], outcomes: { default: [{ type: "castlife.satisfy", args: { entity: "self", need: "hunger" } }, { type: "set", args: { entity: "self", field: "activity", value: "meal" } }] }, duration: "30", lexicon: ["eat", "have lunch", "have dinner", "grab a bite"], observable: "eats" });
     r.action({ id: "sleep", label: "Go to bed", description: "Go to bed and sleep until morning.", pack: "castlife", params: {}, requires: [], outcomes: { default: [{ type: "castlife.satisfy", args: { entity: "self", need: "fatigue" } }] }, duration: "5", activity: { type: "sleep", until: "next_time('07:00')" }, lexicon: ["go to bed", "sleep", "turn in", "hit the sack"], observable: "goes to bed" });
     r.action({ id: "rest", label: "Rest", description: "Rest or relax for a while.", pack: "castlife", params: {}, requires: [], outcomes: { default: [{ type: "castlife.satisfy", args: { entity: "self", need: "fun" } }] }, duration: "30", activity: { type: "waiting", until: "clock + 30" }, lexicon: ["rest", "relax", "take a break"], observable: "rests" });
@@ -26663,6 +26840,7 @@ var castlifePack = {
         return lines;
       }
     });
+    r.renderer({ slot: "people", hint: true, render: usualRoutineHints });
     r.view({ panel: "castlife.cast", build: (ctx) => buildCastView(ctx) });
     r.renderer({ slot: "stance", render: stanceLines });
     r.renderer({ slot: "stance", hint: true, render: stanceCues });
@@ -58090,9 +58268,10 @@ function parseEditOps(raw) {
         case "routine_follow": {
           const mode = o.mode === undefined || o.mode === null || ROUTINE_MODES.some((m) => m === o.mode);
           const awareness = o.awareness === undefined || o.awareness === null || ROUTINE_AWARENESS.some((a) => a === o.awareness);
-          if (!str14(o.entity) || !mode || !awareness || o.mode === undefined && o.awareness === undefined)
+          const role = o.role === undefined || o.role === null || ROUTINE_ROLES.some((r) => r === o.role);
+          if (!str14(o.entity) || !mode || !awareness || !role || o.mode === undefined && o.awareness === undefined && o.role === undefined)
             return null;
-          return { op: "routine_follow", entity: o.entity, ...o.mode !== undefined ? { mode: ROUTINE_MODES.find((m) => m === o.mode) ?? null } : {}, ...o.awareness !== undefined ? { awareness: ROUTINE_AWARENESS.find((a) => a === o.awareness) ?? null } : {} };
+          return { op: "routine_follow", entity: o.entity, ...o.mode !== undefined ? { mode: ROUTINE_MODES.find((m) => m === o.mode) ?? null } : {}, ...o.awareness !== undefined ? { awareness: ROUTINE_AWARENESS.find((a) => a === o.awareness) ?? null } : {}, ...o.role !== undefined ? { role: ROUTINE_ROLES.find((r) => r === o.role) ?? null } : {} };
         }
         case "routine_block":
           if (!str14(o.entity) || !str14(o.block) || !(o.value === null || isRecord(o.value)))
@@ -58195,7 +58374,7 @@ function originOf(ctx, who, option, reason, day) {
 function routineGmView(ctx, who, day = dateAt(calendarOf(ctx.world), ctx.state.clock).dayIndex) {
   const cal = calendarOf(ctx.world);
   const e = own(ctx.state.entities, who);
-  const blocks = [...routineCandidates(ctx, who).values()].flatMap((list) => {
+  const blocks = [...routineCandidates(ctx, who, day).values()].flatMap((list) => {
     const [top, ...rest] = list;
     if (!top)
       return [];
@@ -58238,7 +58417,7 @@ function routineGmView(ctx, who, day = dateAt(calendarOf(ctx.world), ctx.state.c
     name: e?.name ?? who,
     tier: optionalQuery(ctx, "minds.tier")?.(ctx, who) ?? null,
     planned: livesPlans(ctx, who),
-    follow: followOf(ctx, who),
+    follow: { ...followOf(ctx, who), role: routineRole(ctx, who) },
     settings: routineSettingsOf(ctx.world),
     blocks,
     schedules,
@@ -65823,7 +66002,8 @@ function palette(world, state, registry) {
       { label: "Next interruption", target: { type: "interrupt" } }
     ],
     interrupts: { ...state.time.interrupts },
-    dayParts: calendar === 1
+    dayParts: calendar === 1,
+    followRoutine: routineSettingsOf(world).paletteFollowsRoutine
   };
   const encounter = paletteEncounter(ctx);
   return { entries, timelapse, ...encounter ? { encounter } : {} };
@@ -66367,6 +66547,17 @@ function lifeLines(scope, c) {
     out.push(`- Plan (${p.kind}): ${p.what}${p.cents !== undefined ? `, ${formatMoney(p.cents, world.currency)}` : ""}, ${formatClock(cal, p.when.from)} to ${formatHHMM(dateAt(cal, p.when.to).minuteOfDay)}${p.where ? ` at ${nameOf6(scope, p.where)}` : ""}${p.with.length > 0 ? ` with ${p.with.map((id) => nameOf6(scope, id)).join(", ")}` : ""}`);
   return out;
 }
+function routineLines(scope) {
+  const { reg, world, state, who } = scope;
+  const ctx = reg.context(world, state);
+  if (routineRole(ctx, who) === "off")
+    return [];
+  try {
+    return usualRoutine(ctx, who, { place: (place) => own(world.places, place)?.name ?? null, activity: true }).filter((c) => !c.private || c.own).map((c) => `- ${sentence(c.text)}`);
+  } catch {
+    return [];
+  }
+}
 function sceneLines(scope, place) {
   const { reg, world, state, who } = scope;
   if (place === null)
@@ -66457,12 +66648,17 @@ function mindContext(scope, report) {
   const about = withPov && moment.kind === "turn" ? `${moment.user}
 ${heardLast ? readableReply(moment.reply, scope.hideJson) : ""}` : place ? nameOf6(scope, place) : "";
   const recall = reads.recall.on ? recallFor(scope, about) : [];
+  const usual = reads.routine.on ? routineLines(scope) : [];
+  const routine = linesWithin(usual, reads.routine.tokens);
+  if (report && usual.length > 0)
+    report.routine = { given: routine.length, left: usual.length - routine.length };
   return [
     `You are ${e?.name ?? who}. ${occasion(scope, place)}`,
     block("Who you are", identityLines(scope)),
     block("What you mean to do", intentLines(intentOf(state, who))),
     block("Where you are", sceneLines(scope, place)),
     reads.summary.on && c.summary !== "" ? block("Your story so far", [clip(c.summary, charsOf(reads.summary.tokens))]) : "",
+    block("Your usual routine (habits you may weigh, never orders: what is happening now comes first)", routine),
     reads.life.on ? block("Your own life", linesWithin(lifeLines(scope, c), reads.life.tokens)) : "",
     reads.memory.on ? block("What you remember, and what you saw", linesWithin(memoryLines(scope, c), reads.memory.tokens)) : "",
     reads.thoughts.on ? thoughtsBlock(scope, c) : "",
@@ -66916,6 +67112,7 @@ function worldBrief(world, extra) {
   return `World: ${world.name}. The player character is ${pov?.name ?? world.pov} (id ${world.pov}). Entities: ${people || "none"}. Places: ${places || "none"}. ${extra}`;
 }
 var THING_SORTS = ["food", "drink", "weapon", "key", "document", "money", "other"];
+var SAID_ROUTINES_MAX = 3;
 function catalogLine(e) {
   const parts = [`${e.id} \u2014 ${e.label}${e.description ? `: ${e.description.replace(/[\s.]+$/, "")}` : ""}`];
   if (e.params.length > 0)
@@ -66942,7 +67139,8 @@ async function interpret(steps, text, context, actions, config, userId, signal, 
     `When the input and its context still leave it unclear which action or which target is meant, give "action": null and a short "reason"; never guess.`,
     `Params are world ids, from the scene, Places and the catalog's lists, except a thing nothing lists, which keeps the input's own words. A text param that names an item keeps its qualifiers as written ("large pizza, delivered", not "pizza"). Money params are plain amounts in ${world.currency.code} as written (200 for ${world.currency.symbol}200).`,
     `Read every action in the input, in order, not only the first. Return the first as "action" with its "params". If the input has more actions after it, list them in order in "more" (at most ${ACTION_QUEUE_LIMIT - 1}), each {"action": a catalog id, "params": {...}, "text": that action written as the player would type it}: "I walk to the market and buy bread" \u2192 "action" for the walk, and "more": [{"action": <the buy's id>, "params": {"item": "bread"}, "text": "I buy bread"}]. An action after them that no catalog action fits goes in "next", written as the player would type it.`,
-    `If, in character, the input lets time pass after its last action ("\u2026and sleep until the next morning", "\u2026then wait two hours", "\u2026then skip ahead to Friday at 6 PM"), add "then": {"span": its words for how long or until when, with "minutes", "until" (a day part, "shift" or "commitment") or "at" ("YYYY-MM-DD HH:MM" for a stated day and time)}; time passing is never in "more" or "next", nor is anything else that isn't an action.`
+    `If, in character, the input lets time pass after its last action ("\u2026and sleep until the next morning", "\u2026then wait two hours", "\u2026then skip ahead to Friday at 6 PM"), add "then": {"span": its words for how long or until when, with "minutes", "until" (a day part, "shift" or "commitment") or "at" ("YYYY-MM-DD HH:MM" for a stated day and time)}; time passing is never in "more" or "next", nor is anything else that isn't an action.`,
+    `If the input itself plainly states, as settled fact, a lasting change to someone's week (the player character's own, "I start nights at the marina Monday", or one the input says someone told of, "Marcus says he's started swimming on Tuesdays"), add it to "routine": [{"entity": their id, "change": "start" for a new job, shift or habit, "stop" for one given up, "move" for a new home, "label": what it is in the input's words, "days": the days the input states (weekday names, "weekdays", "weekends" or "daily"; leave it out when the input states none, never guess), "start"?/"end"?: "HH:MM" as stated (or "start": morning|afternoon|evening|night), "activity"?: work|school|exercise|leisure|socialize|errand, "place"?: a place id (the new home for "move"), "with"?: people's ids, "replaces"?: true only when the input says it takes the place of what they did then, "said": the input's own words that state it, copied exactly}]. Never for a question ("do you still swim on Tuesdays?"), a one-off, a plan, a wish, a hypothetical, someone's thoughts, or a habit only mentioned in passing ("I walk past the pool where I swim on Tuesdays"). It is never an action, and changes nothing about "action", "more", "then" or "next".`
   ];
   if (actions.some((a) => a.id === TRY_ACTION)) {
     rules.push(`An attempt whose outcome is uncertain that no other catalog action covers is "${TRY_ACTION}" (Try something), even asked as a question ("I watch him as he answers: is he lying?" is the player character's reading of him against his deceit). Never read an attempt a catalog action covers as "${TRY_ACTION}", nor both: that action alone. "attempt" is what is attempted, in the input's words; "skill" and "difficulty" come from its lists; "with" lists the companions the input has join in ("we sneak past"); "against" lists the people here it opposes or targets, each with the skill they resist with.`);
@@ -66972,7 +67170,7 @@ ${rules.map((r) => `- ${r}`).join(`
 `)}`,
     presumed.map((r) => `- ${r}`).join(`
 `),
-    `Output JSON only, exactly this shape: {"action": string|null, "params": {...}, "thing"?: string, "confidence": number, "reason"?: string, "more"?: [{"action": string, "params": {...}, "text": string, "thing"?: string}], "then"?: {"span": string, "minutes"?: number, "until"?: string, "at"?: string}, "next"?: string}.`
+    `Output JSON only, exactly this shape: {"action": string|null, "params": {...}, "thing"?: string, "confidence": number, "reason"?: string, "more"?: [{"action": string, "params": {...}, "text": string, "thing"?: string}], "then"?: {"span": string, "minutes"?: number, "until"?: string, "at"?: string}, "next"?: string, "routine"?: [{"entity": string, "change": string, "label": string, "days"?: string|string[], "start"?: string, "end"?: string, "activity"?: string, "place"?: string, "with"?: string[], "replaces"?: boolean, "said": string}]}.`
   ].filter((part) => part !== "").join(`
 `);
   const raw = await steps.helperJson("interpret", system, text, config, userId, signal, { lore, guidance });
@@ -67007,7 +67205,13 @@ ${rules.map((r) => `- ${r}`).join(`
   const next = [...rest, words(raw.next)].filter((s) => s !== "");
   const reason = !action && typeof raw.reason === "string" ? raw.reason.replace(/\s+/g, " ").trim().slice(0, 200) : "";
   const thing = action ? THING_SORTS.find((s) => s === raw.thing) : undefined;
-  return { action, params: action ? params : {}, probabilities: action ? { [action]: confidence, none: 1 - confidence } : { none: 1 }, ...thing ? { thing } : {}, ...then ? { then } : {}, ...queue.length > 0 ? { queue } : {}, ...next.length > 0 ? { next } : {}, ...reason !== "" ? { reason } : {} };
+  const routine = (Array.isArray(raw.routine) ? raw.routine : []).flatMap((r) => {
+    if (!isRecord(r) || typeof r.said !== "string" || r.said.trim() === "")
+      return [];
+    const copy = JSON.parse(JSON.stringify(r));
+    return [{ ...copy, said: r.said.replace(/\s+/g, " ").trim() }];
+  }).slice(0, SAID_ROUTINES_MAX);
+  return { action, params: action ? params : {}, probabilities: action ? { [action]: confidence, none: 1 - confidence } : { none: 1 }, ...thing ? { thing } : {}, ...then ? { then } : {}, ...queue.length > 0 ? { queue } : {}, ...next.length > 0 ? { next } : {}, ...reason !== "" ? { reason } : {}, ...routine.length > 0 ? { routine } : {} };
 }
 var SAID_METHOD = /\b(?:with|on|using|use|used|by|from|in)\s+(?:(?:my|the|his|her|their|our|a)\s+)?(credit card|debit card|cash|savings)\b(?![ -](?:holder|register|machine|drawer|box|reader|terminal|slot|case|sleeve|wallet))/gi;
 var NEGATED = /(?:\bnot|\bno|\bnever|n't|\binstead of|\brather than|\bthan)(?:\s+(?:pay|paying|paid))?\s*$/i;
@@ -67435,7 +67639,7 @@ function factLines(registry, world, state, secrets) {
     const place = povPlace(registry, world, state);
     out.push(`${pov?.name ?? world.pov} is ${place === null ? "at an unknown place" : place.id === null ? "somewhere" : `at ${place.name}`}; it is ${formatClock(calendarOf(world), state.clock)}.`);
     for (const r of registry.renderers) {
-      if (r.slot === "outcome" || r.slot === "montage" || r.slot === "outline" || r.slot === "stance" || r.slot === MINDS_SLOT)
+      if (r.hint || r.slot === "outcome" || r.slot === "montage" || r.slot === "outline" || r.slot === "stance" || r.slot === MINDS_SLOT)
         continue;
       try {
         for (const line of r.render(ctx))
@@ -67938,8 +68142,14 @@ async function runMinds(deps, input) {
     const data = raw === null ? null : mindData(reg, world, state, who, raw, input.moment, level, input.reasons?.[who] ?? input.moment.reason);
     const given = shownLore(report.pinned);
     const activated = shownLore(report.activated);
-    const notes = [...fitNote("Pinned lore", report.pinned, reads.pinned.tokens), ...fitNote("The lore the turn activated", report.activated, reads.activated.tokens)];
-    const trace = { ...base, outcome: data === null ? "failed" : "recorded", ms, tokens: usage.tokens, prompt: prompt.source, ...given.length > 0 ? { pinned: given } : {}, ...activated.length > 0 ? { activated } : {}, ...notes.length > 0 ? { notes } : {} };
+    const routineLeft = report.routine?.left ?? 0;
+    const notes = [
+      ...fitNote("Pinned lore", report.pinned, reads.pinned.tokens),
+      ...fitNote("The lore the turn activated", report.activated, reads.activated.tokens),
+      ...routineLeft > 0 ? [`Their usual routine didn't all fit: ${routineLeft} line${routineLeft === 1 ? "" : "s"} left out, over the ${reads.routine.tokens} tokens a mind reads of it; raise that in Settings \u2192 Minds \u2192 What a mind reads.`] : []
+    ];
+    const routine = report.routine?.given ?? 0;
+    const trace = { ...base, outcome: data === null ? "failed" : "recorded", ms, tokens: usage.tokens, prompt: prompt.source, ...given.length > 0 ? { pinned: given } : {}, ...activated.length > 0 ? { activated } : {}, ...routine > 0 ? { routine } : {}, ...notes.length > 0 ? { notes } : {} };
     const why = data !== null ? null : raw !== null ? "the answer said nothing: no thoughts, intent or depiction" : failure.reason !== "" ? failure.reason : "the call failed";
     if (why !== null)
       deps.host.log("warn", `[LumiRPEngine] mind for ${who}: ${why}`, userId);
@@ -68937,9 +69147,9 @@ function thisBuild(moduleUrl = import.meta.url) {
   const dir = moduleUrl.replace(/[^/]*$/, "");
   const path = pathOfFileUrl(`${dir}${KIT_FILE}`);
   const core = pathOfFileUrl(`${dir}${CORE_FILE}`);
-  const sha256 = "e0ec91ae4607899590dbe16130cffb867b8360c1f0e9f88b0717bec30b77017a";
-  const tools = ["a8046eb1dc745bb328105aae85cff4bd", "9748f93066a93461e251d2677fe4f3b6"].filter((f) => f !== undefined);
-  return { id: "61b2130a", kit: sha256 !== undefined && path !== null && core !== null ? { path, core, sha256, api: KIT_API } : null, tools };
+  const sha256 = "4287974c552e1bb1c19f81caee8756a5f8bc4f11dadf44ab4646849c4c94beb5";
+  const tools = ["18ab4cc48319d3329b4f414f8503d74f", "9748f93066a93461e251d2677fe4f3b6"].filter((f) => f !== undefined);
+  return { id: "819b53da", kit: sha256 !== undefined && path !== null && core !== null ? { path, core, sha256, api: KIT_API } : null, tools };
 }
 var BUILD_FILE = "agents/build.json";
 var USER_FILE = "agents.json";
@@ -70868,6 +71078,72 @@ function withoutMissing(lines, missing) {
   return out;
 }
 
+// src/backend/routine-ask.ts
+var SAID_BY_PLAYER = "player";
+function statedIn(text, said) {
+  const all = text.replace(/[^\S\n]+/g, " ").toLowerCase();
+  const words = said.replace(/\s+/g, " ").trim().toLowerCase().replace(/[.!?\u2026]+$/, "");
+  const at = words === "" ? -1 : all.indexOf(words);
+  if (at < 0)
+    return false;
+  const end = all.slice(at + words.length).search(/[.!?\n]/);
+  return end < 0 || all.charAt(at + words.length + end) !== "?";
+}
+function str17(v) {
+  return typeof v === "string" ? v.trim() : "";
+}
+function plainly(p, world, state) {
+  const who = str17(p.entity);
+  const you = who === world.pov;
+  const name = state.entities[who]?.name ?? who;
+  const placeName = (v) => {
+    const id = str17(v);
+    return hasOwn(world.places, id) ? world.places[id]?.name ?? id : id;
+  };
+  const whose = you ? "your routine" : `${name}'s routine`;
+  const subject = you ? "You" : name;
+  const change = str17(p.change).toLowerCase();
+  if (change === "move")
+    return { whose, detail: `${subject}: a new home at ${placeName(p.place)}.` };
+  const label = str17(p.label) || placeName(p.place);
+  if (change === "stop")
+    return { whose, detail: `${subject}: no more ${label}.` };
+  const days = Array.isArray(p.days) ? p.days.filter((d) => typeof d === "string").join(", ") : str17(p.days);
+  const start = str17(p.start);
+  const end = str17(p.end);
+  const time = start === "" ? "" : end === "" ? start : `${start}\u2013${end}`;
+  const where = str17(p.place) === "" ? "" : `at ${placeName(p.place)}`;
+  const company = (Array.isArray(p.with) ? p.with : []).flatMap((id) => typeof id === "string" && state.entities[id] ? [state.entities[id]?.name ?? id] : []);
+  const parts = [label, days, time, where, company.length > 0 ? `with ${company.join(" and ")}` : ""].filter((s) => s !== "");
+  return { whose, detail: `${subject}: ${parts.join(", ")}, from the next day.` };
+}
+var FIELDS = ["entity", "change", "label", "days", "start", "end", "minutes", "activity", "place", "with", "replaces"];
+function routineAsks(registry, world, state, said, text, secrets, known) {
+  const ctx = registry.context(world, state);
+  const asks = [];
+  for (const r of said) {
+    if (!statedIn(text, r.said))
+      continue;
+    const proposal = { type: ROUTINE_CHANNEL };
+    for (const k of FIELDS)
+      if (r[k] !== undefined)
+        proposal[k] = r[k];
+    proposal.by = SAID_BY_PLAYER;
+    const who = str17(proposal.entity);
+    if (who !== world.pov && !namedInText(state.entities[who]?.name ?? "", text))
+      continue;
+    if (!known(proposal) || findLeaks(proposal, secrets).length > 0)
+      continue;
+    if ("code" in storyChange(proposal, ctx))
+      continue;
+    if (asks.some((a) => JSON.stringify(a.proposal) === JSON.stringify(proposal)))
+      continue;
+    const { whose, detail } = plainly(proposal, world, state);
+    asks.push({ proposal, question: `Would you like to add this to ${whose}?`, detail, added: `Added to ${whose}` });
+  }
+  return asks;
+}
+
 // src/backend/plan-notes.ts
 var PLAN_NOTES_CAP = 128;
 function lines(v) {
@@ -71038,7 +71314,8 @@ function mindTracesOf(raw) {
     const pinned = lore(t.pinned);
     const activated = lore(t.activated);
     const notes = strings3(t.notes) ? [...t.notes] : [];
-    return [{ purpose, phase, who: t.who, level, outcome, ms: t.ms, tokens: t.tokens, prompt, ...pinned.length > 0 ? { pinned } : {}, ...activated.length > 0 ? { activated } : {}, ...notes.length > 0 ? { notes } : {} }];
+    const routine = typeof t.routine === "number" && Number.isSafeInteger(t.routine) && t.routine > 0 ? t.routine : 0;
+    return [{ purpose, phase, who: t.who, level, outcome, ms: t.ms, tokens: t.tokens, prompt, ...pinned.length > 0 ? { pinned } : {}, ...activated.length > 0 ? { activated } : {}, ...routine > 0 ? { routine } : {}, ...notes.length > 0 ? { notes } : {} }];
   });
 }
 
@@ -71190,6 +71467,7 @@ class TurnBridge {
   offers = new Map;
   skips = new Map;
   held = new Map;
+  routineAsks = new Map;
   readAt = new Map;
   constructor(registry, pipeline, runSeed) {
     this.registry = registry;
@@ -71199,7 +71477,7 @@ class TurnBridge {
   begin(userText, at) {
     if (this.readAt.get(userText) === at)
       return;
-    for (const kept of [this.intents, this.unfit, this.nexts, this.decisions, this.minds, this.offers, this.skips, this.held])
+    for (const kept of [this.intents, this.unfit, this.nexts, this.decisions, this.minds, this.offers, this.skips, this.held, this.routineAsks])
       kept.delete(userText);
     this.interpreted.delete(userText);
     this.unread.delete(userText);
@@ -71279,6 +71557,18 @@ class TurnBridge {
     const steps = keep ? read.steps.map((s, i) => i === index ? { action: s.action, params: s.params, text: s.text, ...s.claim ? { claim: s.claim } : {} } : s) : read.steps.filter((_, i) => i !== index);
     this.setRead(userText, { ...read, steps });
     return true;
+  }
+  setRoutineAsks(userText, asks) {
+    if (asks.length === 0)
+      this.routineAsks.delete(userText);
+    else
+      this.routineAsks.set(userText, asks);
+    trim(this.routineAsks);
+  }
+  takeRoutineAsks(userText) {
+    const asks = this.routineAsks.get(userText) ?? [];
+    this.routineAsks.delete(userText);
+    return asks;
   }
   wasInterpreted(userText) {
     return this.interpreted.has(userText);
@@ -72010,7 +72300,7 @@ class Runtime {
     this.steps.onCallStart = (userId, purpose) => this.diag.callStart(userId, purpose);
     this.toolSupport = new ToolSupport(this.host);
     this.minds = { host: this.host, registry: this.registry, steps: this.steps, settings: this.settings, presets: this.presets };
-    this.ledger = new LedgerService(this.host, (chatId, userId) => this.resolveEnv(chatId, userId), new LedgerFold(this.registry, { fingerprint: "61b2130a" }), (chatId) => messages.forget(chatId));
+    this.ledger = new LedgerService(this.host, (chatId, userId) => this.resolveEnv(chatId, userId), new LedgerFold(this.registry, { fingerprint: "819b53da" }), (chatId) => messages.forget(chatId));
     this.studio = new StudioBridge(this.host, this.worlds);
     this.worlds.onChange = (worldId, userId) => this.studio.worldChanged(worldId, userId);
     this.agents = new Agents(this.host, options.build ?? thisBuild(), async (userId) => (await this.settings.get(userId)).timeouts.mcpReconnectMs);
@@ -72162,6 +72452,11 @@ class Runtime {
     const npcRun = runsOf(settings.modelUse, render.world, "npc.choose", facts, { guidance: at.guidance })[0];
     const choose = npcRun && ties.present.length > 0 ? () => npcChoose(this.steps, npcRun, ties.present, (t) => this.describeTie(t, render.world, render.state), createRng(hashParts("lre.npc.pre", bridge.runSeed, p.generationId)), input.userId, budget.signal, this.stepLore(npcRun, at, this.tieInputs(ties.present, render.world, render.state))) : null;
     const [, early] = await Promise.all([intentTask, choose && budget.take(judging ? 1 : 0) ? choose() : null]);
+    const routine = lastUser ? bridge.takeRoutineAsks(text) : [];
+    if (lastUser && routine.length > 0) {
+      await this.chips.add(input.chatId, input.userId, routine.map((ask, i) => ({ id: `routine_ask:${lastUser.id}:${i}`, kind: "routine_ask", messageId: lastUser.id, label: ask.question, detail: ask.detail, actions: [{ id: "yes", label: "Yes", style: "primary" }, { id: "no", label: "No" }], expires: "next_send", payload: { proposal: { ...ask.proposal, turn: lastUser.id }, added: ask.added } })));
+      this.push.changed(input.chatId, input.userId);
+    }
     const asked = bridge.askOf(text);
     if (asked && lastUser) {
       const actions = asked.kind === "check" ? [{ id: "roll", label: "Roll", style: "primary" }, { id: "drop", label: "No roll" }] : [{ id: "add", label: "Add", style: "primary" }, { id: "drop", label: "Not an action" }];
@@ -72384,6 +72679,10 @@ ${this.trackWords(render.world, render.state)}`, links: this.sceneLinks(render.w
       this.host.log("info", `[LumiRPEngine] interpret: no action (${result.reason})`, userId);
     const typedText = text.toLowerCase();
     const secrets = unrevealedSecrets(this.registry, render.world, render.state).filter((s) => !typedText.includes(s.toLowerCase()));
+    const asks = routineAsks(this.registry, render.world, render.state, result.routine ?? [], text, secrets, (p) => proposalKnown(p, this.registry, render.world, render.state));
+    if ((result.routine ?? []).length > asks.length)
+      this.host.log("info", `[LumiRPEngine] interpret: ${(result.routine ?? []).length - asks.length} routine change(s) the message doesn't state as its own or that don't hold; not asked`, userId);
+    bridge.setRoutineAsks(text, asks);
     if (findLeaks({ params: result.params, ...result.then ? { then: result.then } : {} }, secrets).length > 0) {
       this.host.log("info", `[LumiRPEngine] interpret: ${result.action ?? "no action"} carried an unrevealed secret; played as roleplay`, userId);
       bridge.setOffer(text, null);
@@ -74044,11 +74343,14 @@ class Dispatcher {
         await this.requireWorldChat(r.chatId, userId);
         const said = r.text?.trim() ?? "";
         let text = said;
+        let params = r.params;
         if (r.action === TIMELAPSE_ACTION2) {
           const target = parseTarget(r.params.target);
           if (!target)
             throw new RequestError("bad_request", "a timelapse needs a target");
           text ||= `(Timelapse: ${neutralizeMacros(targetLabel(target))})`;
+          const follows = typeof r.params.followRoutine === "boolean" ? r.params.followRoutine : routineSettingsOf((await this.head(r.chatId, userId)).world).paletteFollowsRoutine;
+          params = { ...Object.fromEntries(Object.entries(r.params).filter(([k]) => k !== "followRoutine" && k !== "povRoutine")), ...follows ? {} : { povRoutine: false } };
         } else {
           const { world } = await this.head(r.chatId, userId);
           const action = (hasOwn(world.actions, r.action) ? world.actions[r.action] : undefined) ?? this.rt.registry.actions.get(r.action);
@@ -74056,7 +74358,7 @@ class Dispatcher {
             throw new RequestError("not_found", `unknown action ${r.action}`);
           text ||= `(${neutralizeMacros(action.label)})`;
         }
-        const messageId = await this.rt.host.chats.appendUserMessage(r.chatId, text, { [LEDGER_NAMESPACE]: { action: r.action, params: r.params, source: r.source, ...said !== "" ? { described: true } : {} } }, true, userId);
+        const messageId = await this.rt.host.chats.appendUserMessage(r.chatId, text, { [LEDGER_NAMESPACE]: { action: r.action, params, source: r.source, ...said !== "" ? { described: true } : {} } }, true, userId);
         reply("lre.action", { messageId });
         return;
       }
@@ -74813,6 +75115,46 @@ class Dispatcher {
         const result = await this.write(chatId, userId, { kind: "undo", id: this.nextId(), messageId: m.id, swipeId: m.swipeId, refs });
         return { applied: result.applied, pending: result.pending };
       }
+      case "routine_ask": {
+        if (choice === "no") {
+          this.rt.push.changed(chatId, userId);
+          return { applied: false, pending: false };
+        }
+        if (choice !== "yes")
+          throw new RequestError("bad_request", `unknown choice ${choice}`);
+        const proposal = isRecord(chip.payload.proposal) ? JSON.parse(JSON.stringify(chip.payload.proposal)) : null;
+        if (!proposal || proposal.type !== ROUTINE_CHANNEL)
+          throw new RequestError("bad_request", "the chip has no routine change");
+        const { state, world } = await this.head(chatId, userId);
+        const [outcome] = applyProposals(this.rt.registry, new Working(this.rt.registry, world, state), [proposal], `${id}:yes`, this.runSeedOf(chatId));
+        if (!outcome || outcome.rejection || outcome.events.length === 0) {
+          this.rt.host.log("info", `[LumiRPEngine] ${id}: the routine change no longer applies (${outcome?.rejection?.code ?? outcome?.dropped ?? "no change"})`, userId);
+          throw new RequestError("validation", "That changes nothing in the routine now.");
+        }
+        const events = [...outcome.materialized, ...outcome.events];
+        const result = await this.write(chatId, userId, { kind: "post", id: this.nextId(), target: "head", entry: { kind: "confirm", events } });
+        const added = typeof chip.payload.added === "string" ? chip.payload.added : "Added to the routine";
+        await this.rt.chips.add(chatId, userId, [{ id: id.replace(/^routine_ask:/, "routine_added:"), kind: "routine_added", messageId: chip.messageId, label: added, ...chip.detail !== undefined ? { detail: chip.detail } : {}, actions: [{ id: "undo", label: "Undo", style: "danger" }], expires: "next_send", payload: { events: JSON.parse(JSON.stringify(events)) } }]);
+        return { applied: result.applied, pending: result.pending };
+      }
+      case "routine_added": {
+        if (choice !== "undo")
+          throw new RequestError("bad_request", `unknown choice ${choice}`);
+        const core = await this.rt.ledger.core(chatId, userId);
+        const wanted = JSON.stringify(chip.payload.events);
+        for (const m of [...core?.chain(observed) ?? []].reverse()) {
+          const rec = core ? activeRecord(m, core.journal.tombstones) : null;
+          const entry = rec?.post.findLast((p) => p.kind === "confirm" && JSON.stringify(p.events) === wanted);
+          if (!rec || !entry)
+            continue;
+          const refs = entry.events.flatMap((_, index) => rec.undone.some((u) => u.in === "post" && u.seq === entry.seq && u.index === index) ? [] : [{ in: "post", seq: entry.seq, index }]);
+          if (refs.length === 0)
+            return { applied: false, pending: false };
+          const result = await this.write(chatId, userId, { kind: "undo", id: this.nextId(), messageId: m.id, swipeId: m.swipeId, refs });
+          return { applied: result.applied, pending: result.pending };
+        }
+        throw new RequestError("not_found", "the routine change is gone");
+      }
       case "decline": {
         const proposal = isRecord(chip.payload.proposal) ? JSON.parse(JSON.stringify(chip.payload.proposal)) : null;
         const reason = typeof chip.payload.reason === "string" ? chip.payload.reason : "declined";
@@ -74932,7 +75274,7 @@ function toJsonObject(value) {
       out[k] = toJson(v);
   return out;
 }
-function str17(o, key) {
+function str18(o, key) {
   if (!isRecord(o))
     return;
   const v = o[key];
@@ -74946,10 +75288,10 @@ function num6(o, key) {
 }
 var GENERATION_TYPES = { normal: "normal", regenerate: "regenerate", swipe: "swipe", continue: "continue", impersonate: "impersonate" };
 function generationType(o) {
-  return GENERATION_TYPES[str17(o, "generationType") ?? "normal"] ?? "normal";
+  return GENERATION_TYPES[str18(o, "generationType") ?? "normal"] ?? "normal";
 }
 function contextType(o) {
-  const type = str17(o, "generationType");
+  const type = str18(o, "generationType");
   return type === undefined ? "normal" : GENERATION_TYPES[type] ?? "other";
 }
 function hostCapabilities() {
@@ -74963,23 +75305,23 @@ function bookEntryOf(e) {
 function decodeMessage(raw, chatId) {
   if (!isRecord(raw))
     return null;
-  const id = str17(raw, "id");
+  const id = str18(raw, "id");
   if (!id)
     return null;
   const swipes = Array.isArray(raw.swipes) ? raw.swipes.map((s) => typeof s === "string" ? s : "") : [];
-  const content = str17(raw, "content") ?? "";
+  const content = str18(raw, "content") ?? "";
   const swipeId = num6(raw, "swipe_id") ?? 0;
   if (swipes.length === 0)
     swipes.push(content);
   const extra = isRecord(raw.extra) ? raw.extra : {};
   const metadata = isRecord(raw.metadata) ? raw.metadata : isRecord(extra.spindle_metadata) ? extra.spindle_metadata : {};
-  const role = str17(raw, "role");
+  const role = str18(raw, "role");
   return {
     id,
-    chatId: str17(raw, "chat_id") ?? chatId,
+    chatId: str18(raw, "chat_id") ?? chatId,
     index: num6(raw, "index_in_chat") ?? 0,
     isUser: raw.is_user === true || role === "user",
-    name: str17(raw, "name") ?? "",
+    name: str18(raw, "name") ?? "",
     content,
     swipeId,
     swipes,
@@ -74989,51 +75331,51 @@ function decodeMessage(raw, chatId) {
 var SWIPE_ACTIONS = { added: "added", navigated: "navigated", updated: "updated", deleted: "deleted" };
 function decodeEvent(event, p) {
   if (event === "PRESET_CHANGED")
-    return { presetId: str17(p, "id") ?? null };
+    return { presetId: str18(p, "id") ?? null };
   if (event === "SETTINGS_UPDATED") {
-    const key = str17(p, "key");
+    const key = str18(p, "key");
     const keys = isRecord(p) && Array.isArray(p.keys) ? p.keys.filter((k) => typeof k === "string") : null;
     return { keys: key !== undefined ? [key] : keys };
   }
   if (event === "FRONTEND_SESSION_CLOSED") {
-    const frontendSessionId = str17(p, "frontendSessionId");
+    const frontendSessionId = str18(p, "frontendSessionId");
     return frontendSessionId ? { frontendSessionId } : null;
   }
-  const chatId = str17(p, event === "CHAT_DELETED" ? "id" : "chatId");
+  const chatId = str18(p, event === "CHAT_DELETED" ? "id" : "chatId");
   if (!chatId)
     return null;
   switch (event) {
     case "GENERATION_STARTED":
     case "GENERATION_IN_PROGRESS": {
-      const generationId = str17(p, "generationId");
+      const generationId = str18(p, "generationId");
       if (!generationId)
         return null;
       const base = {
         generationId,
         chatId,
-        model: str17(p, "model") ?? "",
-        targetMessageId: str17(p, "targetMessageId") ?? null,
+        model: str18(p, "model") ?? "",
+        targetMessageId: str18(p, "targetMessageId") ?? null,
         targetSwipeId: num6(p, "targetSwipeId") ?? null,
-        characterId: str17(p, "characterId") ?? null,
-        characterName: str17(p, "characterName") ?? null
+        characterId: str18(p, "characterId") ?? null,
+        characterName: str18(p, "characterName") ?? null
       };
       if (event === "GENERATION_IN_PROGRESS")
         return base;
-      const frontendSessionId = str17(p, "frontendSessionId");
+      const frontendSessionId = str18(p, "frontendSessionId");
       return { ...base, generationType: generationType(p), ...frontendSessionId ? { frontendSessionId } : {} };
     }
     case "GENERATION_ENDED": {
-      const generationId = str17(p, "generationId");
+      const generationId = str18(p, "generationId");
       if (!generationId)
         return null;
-      const messageId = str17(p, "messageId");
-      const error = str17(p, "error");
-      const finish = str17(p, "finish_reason");
-      const draft = str17(p, "impersonateDraft");
+      const messageId = str18(p, "messageId");
+      const error = str18(p, "error");
+      const finish = str18(p, "finish_reason");
+      const draft = str18(p, "impersonateDraft");
       return {
         generationId,
         chatId,
-        content: str17(p, "content") ?? "",
+        content: str18(p, "content") ?? "",
         generationType: generationType(p),
         ...messageId ? { messageId } : {},
         ...error ? { error } : {},
@@ -75043,8 +75385,8 @@ function decodeEvent(event, p) {
       };
     }
     case "GENERATION_STOPPED": {
-      const generationId = str17(p, "generationId");
-      return generationId ? { generationId, chatId, content: str17(p, "content") ?? "" } : null;
+      const generationId = str18(p, "generationId");
+      return generationId ? { generationId, chatId, content: str18(p, "content") ?? "" } : null;
     }
     case "MESSAGE_SENT":
     case "MESSAGE_EDITED": {
@@ -75053,7 +75395,7 @@ function decodeEvent(event, p) {
     }
     case "MESSAGE_SWIPED": {
       const message = decodeMessage(isRecord(p) ? p.message : null, chatId);
-      const action = SWIPE_ACTIONS[str17(p, "action") ?? ""];
+      const action = SWIPE_ACTIONS[str18(p, "action") ?? ""];
       if (!message || !action)
         return null;
       const previousSwipeId = num6(p, "previousSwipeId");
@@ -75062,16 +75404,16 @@ function decodeEvent(event, p) {
     case "CHAT_DELETED":
       return { chatId };
     case "MESSAGE_DELETED": {
-      const messageId = str17(p, "messageId");
+      const messageId = str18(p, "messageId");
       return messageId ? { chatId, messageId } : null;
     }
     case "WORLD_INFO_ACTIVATED": {
       const entries = [];
       if (isRecord(p) && Array.isArray(p.entries)) {
         for (const e of p.entries) {
-          const id = str17(e, "id");
+          const id = str18(e, "id");
           if (id)
-            entries.push({ id, comment: str17(e, "comment") ?? "", source: str17(e, "source") ?? "", bookId: str17(e, "bookId") ?? "" });
+            entries.push({ id, comment: str18(e, "comment") ?? "", source: str18(e, "source") ?? "", bookId: str18(e, "bookId") ?? "" });
         }
       }
       return { chatId, entries, stats: isRecord(p) && isRecord(p.stats) ? toJsonObject(p.stats) : {} };
@@ -75079,7 +75421,7 @@ function decodeEvent(event, p) {
   }
 }
 function decodeAnswer(raw) {
-  const type = str17(raw, "type");
+  const type = str18(raw, "type");
   if (!isRecord(raw))
     return null;
   const probabilities = {};
@@ -75089,7 +75431,7 @@ function decodeAnswer(raw) {
         probabilities[k] = v;
   }
   if (type === "choice")
-    return { type, choice: str17(raw, "choice") ?? "", probabilities, confidence: num6(raw, "confidence") ?? 0 };
+    return { type, choice: str18(raw, "choice") ?? "", probabilities, confidence: num6(raw, "confidence") ?? 0 };
   if (type === "score")
     return { type, score: num6(raw, "score") ?? 0, probabilities, confidence: num6(raw, "confidence") ?? 0 };
   if (type === "noul")
@@ -75282,8 +75624,8 @@ function createSpindleHost() {
     capabilities: hostCapabilities(),
     registerContextHandler(handler, options) {
       spindle.registerContextHandler(async (context, signal) => {
-        const chatId = str17(context, "chatId");
-        const userId = str17(context, "userId");
+        const chatId = str18(context, "chatId");
+        const userId = str18(context, "userId");
         if (!chatId || !userId)
           return context;
         const input = {
@@ -75291,10 +75633,10 @@ function createSpindleHost() {
           userId,
           generationType: contextType(context),
           dryRun: isRecord(context) && context.dryRun === true,
-          connectionId: str17(context, "connectionId") ?? null,
-          personaId: str17(context, "personaId") ?? null
+          connectionId: str18(context, "connectionId") ?? null,
+          personaId: str18(context, "personaId") ?? null
         };
-        const session = str17(context, "frontendSessionId");
+        const session = str18(context, "frontendSessionId");
         if (session)
           input.frontendSessionId = session;
         const verdict = await handler(input, signal ?? new AbortController().signal);
@@ -75320,12 +75662,12 @@ function createSpindleHost() {
           signal
         });
         const calls = isRecord(raw) && Array.isArray(raw.tool_calls) ? raw.tool_calls : [];
-        const toolCalls = calls.flatMap((c, i) => isRecord(c) && typeof c.name === "string" ? [{ name: c.name, args: toJsonObject(c.args), callId: str17(c, "call_id") ?? `call_${i}` }] : []);
+        const toolCalls = calls.flatMap((c, i) => isRecord(c) && typeof c.name === "string" ? [{ name: c.name, args: toJsonObject(c.args), callId: str18(c, "call_id") ?? `call_${i}` }] : []);
         const usage = isRecord(raw) && isRecord(raw.usage) ? raw.usage : null;
         const tokensIn = usage ? num6(usage, "input_tokens") ?? num6(usage, "prompt_tokens") : undefined;
         const tokensOut = usage ? num6(usage, "output_tokens") ?? num6(usage, "completion_tokens") : undefined;
-        const model = str17(raw, "model");
-        return { content: str17(raw, "content") ?? "", finishReason: str17(raw, "finish_reason") ?? "", tokens: usageTokens(raw), ...tokensIn !== undefined ? { tokensIn } : {}, ...tokensOut !== undefined ? { tokensOut } : {}, ...model ? { model } : {}, ...toolCalls.length > 0 ? { toolCalls } : {} };
+        const model = str18(raw, "model");
+        return { content: str18(raw, "content") ?? "", finishReason: str18(raw, "finish_reason") ?? "", tokens: usageTokens(raw), ...tokensIn !== undefined ? { tokensIn } : {}, ...tokensOut !== undefined ? { tokensOut } : {}, ...model ? { model } : {}, ...toolCalls.length > 0 ? { toolCalls } : {} };
       },
       async decide(request, userId, signal) {
         const s = request.state;
@@ -75449,7 +75791,7 @@ function createSpindleHost() {
         for (const [id, on] of Object.entries(states))
           if (typeof on === "boolean")
             blockStates[id] = on;
-        return { presetId: str17(raw, "preset_id") ?? null, blockStates };
+        return { presetId: str18(raw, "preset_id") ?? null, blockStates };
       },
       async blocks(presetId, userId) {
         return (await spindle.presets.blocks.list(presetId, userId)).map((b) => ({

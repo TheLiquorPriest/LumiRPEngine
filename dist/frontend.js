@@ -2913,7 +2913,7 @@ var PART_INFO = {
   loreIndex: { label: "Lore lookup table", hint: "Terms and topics that lead to lore entries", icon: "search" },
   minds: { label: "Minds", hint: "How closely characters think, what they remember, and their prompts", icon: "sparkle" },
   lorePins: { label: "Pinned lore", hint: "Lore every call for a character, or at a place, always reads", icon: "pin" },
-  routineSettings: { label: "Routines and the story", hint: "How firmly routines hold against the story, and who invites whom", icon: "route" }
+  routineSettings: { label: "Routines and the story", hint: "What routines are at each level, how firmly they hold against the story, and who invites whom", icon: "route" }
 };
 function go(app, build) {
   app.ui.update((ui) => ({ ...ui, build }));
@@ -3577,6 +3577,239 @@ async function discardDraft(app) {
     app.drafts.set({ ...draft, base: message.body.base, doc: message.body.draft, lint: message.body.lint, version: message.body.version, dirty: message.body.stored, reloaded: false });
 }
 
+// src/shared/minds.ts
+var FIDELITIES = ["live", "near", "far", "background"];
+var DEFAULT_FIDELITY_WEIGHTS = Object.freeze({
+  here: 45,
+  nearby: 20,
+  mentioned: 40,
+  regard: 10,
+  knows: 10,
+  owner: 15,
+  track: 8,
+  roles: { antagonist: 20 },
+  rule: 5,
+  pending: 15,
+  band: { principal: 15, supporting: 5, background: 0 },
+  recent: 10
+});
+var DEFAULT_FIDELITY_THRESHOLDS = Object.freeze({ live: 60, near: 35, far: 15 });
+var DEFAULT_MINDS_MEMORY = Object.freeze({
+  witness: { show: 8 },
+  recall: { recent: 4, relevant: 4, tokens: 4000 },
+  notes: { show: 8, keep: 24 },
+  commitments: { show: 8 },
+  salience: { halfLifeDays: 7, floor: 0.5 },
+  consolidate: { enabled: true, periodDays: 1 }
+});
+var DEFAULT_WORLD_MINDS = Object.freeze({
+  secrecy: "brief",
+  weights: DEFAULT_FIDELITY_WEIGHTS,
+  thresholds: DEFAULT_FIDELITY_THRESHOLDS,
+  always: null,
+  never: null,
+  memory: DEFAULT_MINDS_MEMORY
+});
+var MINDS_RANGES = {
+  weight: [-100, 200],
+  threshold: [0, 1000],
+  show: [0, 64],
+  keep: [1, 64],
+  recallTokens: [0, Number.MAX_SAFE_INTEGER],
+  halfLifeDays: [0.1, 3650],
+  floor: [0, 5],
+  periodDays: [0.1, 365]
+};
+var num2 = (v, [lo, hi], fallback) => typeof v === "number" && Number.isFinite(v) && v >= lo && v <= hi ? v : fallback;
+var whole = (v, range, fallback) => Math.round(num2(v, range, fallback));
+var wholeOrNone = (v, range, fallback) => v === "none" ? "none" : typeof v === "number" && Number.isFinite(v) && v >= range[0] && v <= range[1] ? Math.round(v) : fallback;
+var obj2 = (v) => isRecord(v) ? v : {};
+function selectorOrNull(v) {
+  if (!isRecord(v))
+    return null;
+  const out = {};
+  const list = (x) => Array.isArray(x) && x.every((s) => typeof s === "string") ? x.slice(0, 200) : undefined;
+  const ids = list(v.ids);
+  const kind = list(v.kind);
+  const tier = list(v.tier);
+  const memberOf = list(v.memberOf);
+  const tag = list(v.tag);
+  if (ids)
+    out.ids = ids;
+  if (kind)
+    out.kind = kind;
+  if (tier)
+    out.tier = tier;
+  if (memberOf)
+    out.memberOf = memberOf;
+  if (tag)
+    out.tag = tag;
+  if (isRecord(v.class)) {
+    const classes = {};
+    for (const [facet, values] of Object.entries(v.class)) {
+      const vs = list(values);
+      if (safeKey(facet) && vs)
+        classes[facet] = vs;
+    }
+    out.class = classes;
+  }
+  return Object.keys(out).length > 0 ? out : null;
+}
+function memoryConfigOf(raw, base = DEFAULT_MINDS_MEMORY) {
+  const m = obj2(raw);
+  const witness = obj2(m.witness);
+  const recall = obj2(m.recall);
+  const notes = obj2(m.notes);
+  const commitments = obj2(m.commitments);
+  const salience = obj2(m.salience);
+  const consolidate = obj2(m.consolidate);
+  return {
+    witness: { show: whole(witness.show, MINDS_RANGES.show, base.witness.show) },
+    recall: { recent: whole(recall.recent, MINDS_RANGES.show, base.recall.recent), relevant: whole(recall.relevant, MINDS_RANGES.show, base.recall.relevant), tokens: wholeOrNone(recall.tokens, MINDS_RANGES.recallTokens, base.recall.tokens) },
+    notes: { show: whole(notes.show, MINDS_RANGES.show, base.notes.show), keep: whole(notes.keep, MINDS_RANGES.keep, base.notes.keep) },
+    commitments: { show: whole(commitments.show, MINDS_RANGES.show, base.commitments.show) },
+    salience: { halfLifeDays: num2(salience.halfLifeDays, MINDS_RANGES.halfLifeDays, base.salience.halfLifeDays), floor: num2(salience.floor, MINDS_RANGES.floor, base.salience.floor) },
+    consolidate: { enabled: typeof consolidate.enabled === "boolean" ? consolidate.enabled : base.consolidate.enabled, periodDays: num2(consolidate.periodDays, MINDS_RANGES.periodDays, base.consolidate.periodDays) }
+  };
+}
+function worldMindsOf(world) {
+  const raw = obj2(world.minds);
+  const w = obj2(raw.weights);
+  const band = obj2(w.band);
+  const d = DEFAULT_FIDELITY_WEIGHTS;
+  const weight = (v, fallback) => num2(v, MINDS_RANGES.weight, fallback);
+  const roles = {};
+  const rawRoles = isRecord(w.roles) ? w.roles : d.roles;
+  for (const [value, points] of Object.entries(rawRoles))
+    if (safeKey(value) && typeof points === "number" && Number.isFinite(points))
+      roles[value] = weight(points, 0);
+  const t = obj2(raw.thresholds);
+  const far = num2(t.far, MINDS_RANGES.threshold, DEFAULT_FIDELITY_THRESHOLDS.far);
+  const near = Math.max(far, num2(t.near, MINDS_RANGES.threshold, DEFAULT_FIDELITY_THRESHOLDS.near));
+  const live = Math.max(near, num2(t.live, MINDS_RANGES.threshold, DEFAULT_FIDELITY_THRESHOLDS.live));
+  return {
+    secrecy: raw.secrecy === "full" ? "full" : "brief",
+    weights: {
+      here: weight(w.here, d.here),
+      nearby: weight(w.nearby, d.nearby),
+      mentioned: weight(w.mentioned, d.mentioned),
+      regard: weight(w.regard, d.regard),
+      knows: weight(w.knows, d.knows),
+      owner: weight(w.owner, d.owner),
+      track: weight(w.track, d.track),
+      roles,
+      rule: weight(w.rule, d.rule),
+      pending: weight(w.pending, d.pending),
+      band: { principal: weight(band.principal, d.band.principal), supporting: weight(band.supporting, d.band.supporting), background: weight(band.background, d.band.background) },
+      recent: weight(w.recent, d.recent)
+    },
+    thresholds: { live, near, far },
+    always: selectorOrNull(raw.always),
+    never: selectorOrNull(raw.never),
+    memory: memoryConfigOf(raw.memory)
+  };
+}
+function limitOf(limit) {
+  return limit === "none" ? Number.POSITIVE_INFINITY : limit;
+}
+var MIND_PURPOSES = ["mind", "memory", "skip", "consolidate"];
+function isMindPurpose(purpose) {
+  return MIND_PURPOSES.includes(purpose);
+}
+function worldMindTemplate(world, purpose) {
+  return Object.values(world.steps).filter((t) => t.purpose === purpose && t.template.trim() !== "").sort((a, b) => a.id.localeCompare(b.id))[0];
+}
+var MIND_SOURCES = ["pinned", "activated", "reply", "message", "summary", "memory", "thoughts", "recall", "routine", "life"];
+var DEFAULT_MIND_READS = Object.freeze({
+  pinned: { on: true, tokens: "none" },
+  activated: { on: true, tokens: 1600 },
+  reply: { on: true, tokens: "none" },
+  message: { on: true, tokens: "none" },
+  summary: { on: false, tokens: "none" },
+  memory: { on: false, tokens: "none" },
+  thoughts: { on: false, tokens: "none" },
+  recall: { on: false },
+  routine: { on: true, tokens: 400 },
+  life: { on: false, tokens: "none" }
+});
+var MINDS_PRESETS = Object.freeze({
+  lean: { enabled: false, liveLimit: 3, nearRefresh: { scene: true, mention: true, turns: 6, minutes: 120 }, farRefreshMinutes: 1440, refreshLimit: 1, memoryLevels: [], tokens: 1200, skip: { maxBeats: 4, maxMindsPerBeat: 2 } },
+  standard: { enabled: true, liveLimit: 3, nearRefresh: { scene: true, mention: true, turns: 6, minutes: 120 }, farRefreshMinutes: 1440, refreshLimit: 2, memoryLevels: ["live"], tokens: 2400, skip: { maxBeats: 6, maxMindsPerBeat: 3 } },
+  full: { enabled: true, liveLimit: "none", nearRefresh: { scene: true, mention: true, turns: 4, minutes: 60 }, farRefreshMinutes: 720, refreshLimit: "none", memoryLevels: ["live", "near"], tokens: 4000, skip: { maxBeats: "none", maxMindsPerBeat: "none" } }
+});
+function defaultMindsSettings(preset = "standard") {
+  return { ...structuredClone(MINDS_PRESETS[preset]), reads: structuredClone(DEFAULT_MIND_READS), memory: {}, prompts: {} };
+}
+var MINDS_DEFAULTS = Object.freeze(defaultMindsSettings());
+var MIND_PROMPT_MAX = 20000;
+var PLAN_KINDS = ["errand", "meet", "visit", "work", "rest", "leisure", "pay", "lend", "other"];
+var PLAN_PRIORITY = { min: 1, max: 5, normal: 3 };
+function planInForce(p) {
+  return p.source !== "mind";
+}
+var COMMITMENT_KINDS = ["promise", "debt", "grudge", "favour", "plan", "other"];
+var COMMITMENT_STATUSES = ["open", "kept", "broken", "released"];
+var MIND_APPROACHES = ["reactive", "proactive"];
+var MIND_TEXT_CAPS = {
+  monologue: 1200,
+  depiction: 600,
+  intent: 300,
+  gmIntent: 600,
+  reaction: 200,
+  reactions: 4,
+  plans: 4,
+  planWhat: 160,
+  mood: 40,
+  interrupt: 200,
+  note: 300,
+  notes: 4,
+  commitment: 240,
+  commitments: 3,
+  summary: 900,
+  told: 240,
+  tolds: 3,
+  reason: 160
+};
+var MIND_PROMPT_DEFAULTS = Object.freeze({
+  mind: [
+    "You are the private mind of {{character}} in the roleplay world {{world}}. Think as {{character}}, from only what {{character}} knows: the context below is everything they perceive and remember. Other people's private thoughts are closed to you; ignore any narration of them in the recalled turns.",
+    "Decide how {{character}} reads this moment and what they intend. Everyone else decides for themselves: never script their actions or replies, and never plan around what they will do. Intend broadly, so the intent holds whatever they do. Write no narration and no dialogue."
+  ].join(`
+`),
+  memory: "You keep the memory of {{character}} in the roleplay world {{world}}. Below is what {{character}} knows, then the turn that just happened, as it was written. Only what was written happened, and only what {{character}} could see or hear of it counts; ignore narration of other people's private thoughts.",
+  skip: [
+    "The player character in the roleplay world {{world}} is skipping ahead in time. Below are the skip's span, the moments the engine already found in it, and what the people involved intend.",
+    "Propose further moments inside the span where something worth stopping for may happen: someone acting on a plan that involves the player character, a deadline, an occasion. Only moments the context supports; never invent people or places."
+  ].join(`
+`),
+  consolidate: "You keep the long-term memory of {{character}} in the roleplay world {{world}}. Fold the older notes below into their summary: keep what still matters to them, let the rest go, and keep everything the summary already holds that is still true."
+});
+var MIND_ANSWER_FORMATS = Object.freeze({
+  mind: [
+    'Answer with JSON only: {"monologue": "...", "depiction": "...", "intent": "...", "reactions": ["..."], "mood": "...", "interrupt": {"reason": "..."}}',
+    "- monologue: their private reasoning in the first person, at most six sentences.",
+    "- depiction: how they come across right now, as behaviour anyone present could see (posture, tone, what they do). Never a secret, an unspoken reason or a thought.",
+    "- intent: what they mean to do next, in one sentence.",
+    '- reactions: up to three short conditional reactions ("if pressed about the cellar, changes the subject").',
+    "- mood: one or two words.",
+    "- interrupt: only when the moment is a beat inside a time skip and what they'd do now would interrupt the player character's skipped time (seeking them out, calling them). Leave it out otherwise."
+  ].join(`
+`),
+  memory: [
+    'Answer with JSON only: {"notes": [{"text": "...", "salience": 3}], "commitments": [{"kind": "promise|debt|grudge|favour|plan|other", "with": ["a name"], "text": "...", "due": "YYYY-MM-DD HH:MM"}], "resolved": [{"id": "...", "status": "kept|broken|released"}], "plans": [], "told": [{"to": ["a name"], "what": "..."}], "summary": "..."}',
+    "- notes: at most three things they will remember, in their own perspective; salience 1 (passing) to 5 (unforgettable).",
+    "- commitments: promises, debts, grudges, favours and plans with someone that this turn made; due only when a time was set.",
+    "- resolved: their open commitments (listed with ids) that this turn kept, broke or released.",
+    '- plans: only what this turn states they will do later: said aloud, agreed with someone, or scheduled in the story as written; never a guess at what they might do. Each {"what": "...", "kind": "errand|meet|visit|work|rest|leisure|pay|lend|other", "when": {"from": "YYYY-MM-DD HH:MM", "to": "YYYY-MM-DD HH:MM"}, "where": "a place", "with": ["a name"], "priority": 3, "amount": 20}, with local times; priority 1 (whenever it fits) to 5 (it must happen); kind pay or lend, with amount, when they mean to hand someone money, and no amount otherwise.',
+    "- told: what they told whom in this turn, in a few words each.",
+    "- summary: their one-paragraph summary rewritten, only when this turn changed who they are or what they're about; leave it out otherwise.",
+    "Use empty lists for anything the turn didn't give."
+  ].join(`
+`),
+  skip: 'Answer with JSON only: {"beats": [{"at": "YYYY-MM-DD HH:MM", "reason": "..."}]}, at most five, in time order; an empty list when there are none.',
+  consolidate: 'Answer with JSON only: {"summary": "..."}: at most 900 characters of plain prose, in their own perspective.'
+});
+
 // src/shared/routines.ts
 var ROUTINE_BLOCK_KINDS = ["fixed", "flexible", "optional"];
 function isOff(entry) {
@@ -3592,7 +3825,10 @@ var ROUTINE_AWARENESS = ["story_first", "balanced", "routine_first"];
 var ROUTINE_INVITATIONS = ["off", "player", "everyone"];
 var ROUTINE_SOCIABILITY = ["reserved", "usual", "outgoing"];
 var ROUTINE_PLAN_BEND = ["must", "strong", "standard", "ordinary"];
-var DEFAULT_ROUTINE_SETTINGS = Object.freeze({ awareness: "balanced", invitations: "player", sociability: "usual", planBend: "standard" });
+var ROUTINE_ROLES = ["informative", "enforced", "off"];
+var ROUTINE_ROLE_LABEL = { informative: "Informative", enforced: "Enforced", off: "Off" };
+var DEFAULT_ROUTINE_ROLES = Object.freeze({ live: "informative", near: "informative", far: "informative", background: "enforced" });
+var DEFAULT_ROUTINE_SETTINGS = Object.freeze({ awareness: "balanced", invitations: "player", sociability: "usual", planBend: "standard", roles: DEFAULT_ROUTINE_ROLES, narrator: true, paletteFollowsRoutine: false });
 var AWARENESS_LABEL = { story_first: "Story first", balanced: "Balanced", routine_first: "Routine first" };
 var INVITATIONS_LABEL = { off: "Off", player: "To the player only", everyone: "Between everyone" };
 var SOCIABILITY_LABEL = { reserved: "Reserved", usual: "Usual", outgoing: "Outgoing" };
@@ -3601,11 +3837,15 @@ var BLOCK_KIND_LABEL = { fixed: "Fixed", flexible: "Flexible", optional: "Option
 function routineSettingsOf(world) {
   const raw = isRecord(world.routineSettings) ? world.routineSettings : {};
   const pick = (v, allowed, fallback) => allowed.find((a) => a === v) ?? fallback;
+  const roles = isRecord(raw.roles) ? raw.roles : {};
   return {
     awareness: pick(raw.awareness, ROUTINE_AWARENESS, DEFAULT_ROUTINE_SETTINGS.awareness),
     invitations: pick(raw.invitations, ROUTINE_INVITATIONS, DEFAULT_ROUTINE_SETTINGS.invitations),
     sociability: pick(raw.sociability, ROUTINE_SOCIABILITY, DEFAULT_ROUTINE_SETTINGS.sociability),
-    planBend: pick(raw.planBend, ROUTINE_PLAN_BEND, DEFAULT_ROUTINE_SETTINGS.planBend)
+    planBend: pick(raw.planBend, ROUTINE_PLAN_BEND, DEFAULT_ROUTINE_SETTINGS.planBend),
+    roles: { live: pick(roles.live, ROUTINE_ROLES, DEFAULT_ROUTINE_ROLES.live), near: pick(roles.near, ROUTINE_ROLES, DEFAULT_ROUTINE_ROLES.near), far: pick(roles.far, ROUTINE_ROLES, DEFAULT_ROUTINE_ROLES.far), background: pick(roles.background, ROUTINE_ROLES, DEFAULT_ROUTINE_ROLES.background) },
+    narrator: typeof raw.narrator === "boolean" ? raw.narrator : DEFAULT_ROUTINE_SETTINGS.narrator,
+    paletteFollowsRoutine: typeof raw.paletteFollowsRoutine === "boolean" ? raw.paletteFollowsRoutine : DEFAULT_ROUTINE_SETTINGS.paletteFollowsRoutine
   };
 }
 var ROUTINE_MODES = ["follows", "no_invitations", "off"];
@@ -3633,7 +3873,7 @@ function sourceProblem(v, world) {
   if (t === "builtin")
     return null;
   if (t === "story")
-    return typeof v.at === "number" && (v.turn === undefined || typeof v.turn === "string") ? null : "a story source has its time";
+    return typeof v.at === "number" && (v.turn === undefined || typeof v.turn === "string") && (v.by === undefined || v.by === "player") ? null : "a story source has its time";
   if (t === "gm")
     return typeof v.at === "number" ? null : "a GM source has its time";
   return "its source isn't one";
@@ -5013,13 +5253,13 @@ function paletteRequest(entry, picks, chatId, amountCents, count) {
     params[entry.number.param] = count;
   return { type: "lre.action", chatId, action: entry.action, params, source: "palette" };
 }
-function timelapseRequest(view, target, overrides, chatId, source = "palette") {
+function timelapseRequest(view, target, overrides, chatId, followRoutine, source = "palette") {
   const changed = {};
   for (const [cls, policy] of Object.entries(overrides)) {
     if (policy !== undefined && view.interrupts[cls] !== policy)
       changed[cls] = policy;
   }
-  return { type: "lre.action", chatId, action: view.action, params: { target: { ...target }, overrides: changed }, source };
+  return { type: "lre.action", chatId, action: view.action, params: { target: { ...target }, overrides: changed, ...followRoutine === undefined ? {} : { followRoutine } }, source };
 }
 function travelRequest(action, params, chatId) {
   return { type: "lre.action", chatId, action, params: { ...params }, source: "map" };
@@ -11897,6 +12137,7 @@ var ROLE = {
   engine_failed: "decision",
   claim: "decision",
   check: "decision",
+  routine_ask: "decision",
   retry: "decision",
   retry_read: "decision",
   reread: "decision",
@@ -11912,6 +12153,7 @@ var ROLE = {
   price: "done",
   undo: "done",
   claimed: "done",
+  routine_added: "done",
   not_action: "done",
   mode_change: "done",
   fix: "done",
@@ -11925,6 +12167,7 @@ var TONE = {
   engine_failed: "neg",
   claim: "neutral",
   check: "neutral",
+  routine_ask: "neutral",
   refused: "neg",
   degraded: "warn",
   pending: "warn",
@@ -11945,6 +12188,7 @@ var TONE = {
   price: "neutral",
   undo: "neutral",
   claimed: "neutral",
+  routine_added: "neutral",
   not_action: "neutral",
   mode_change: "neutral",
   fix: "neutral"
@@ -11955,238 +12199,6 @@ function chipRole(chip) {
 function chipTone(chip) {
   return TONE[chip.kind];
 }
-
-// src/shared/minds.ts
-var FIDELITIES = ["live", "near", "far", "background"];
-var DEFAULT_FIDELITY_WEIGHTS = Object.freeze({
-  here: 45,
-  nearby: 20,
-  mentioned: 40,
-  regard: 10,
-  knows: 10,
-  owner: 15,
-  track: 8,
-  roles: { antagonist: 20 },
-  rule: 5,
-  pending: 15,
-  band: { principal: 15, supporting: 5, background: 0 },
-  recent: 10
-});
-var DEFAULT_FIDELITY_THRESHOLDS = Object.freeze({ live: 60, near: 35, far: 15 });
-var DEFAULT_MINDS_MEMORY = Object.freeze({
-  witness: { show: 8 },
-  recall: { recent: 4, relevant: 4, tokens: 4000 },
-  notes: { show: 8, keep: 24 },
-  commitments: { show: 8 },
-  salience: { halfLifeDays: 7, floor: 0.5 },
-  consolidate: { enabled: true, periodDays: 1 }
-});
-var DEFAULT_WORLD_MINDS = Object.freeze({
-  secrecy: "brief",
-  weights: DEFAULT_FIDELITY_WEIGHTS,
-  thresholds: DEFAULT_FIDELITY_THRESHOLDS,
-  always: null,
-  never: null,
-  memory: DEFAULT_MINDS_MEMORY
-});
-var MINDS_RANGES = {
-  weight: [-100, 200],
-  threshold: [0, 1000],
-  show: [0, 64],
-  keep: [1, 64],
-  recallTokens: [0, Number.MAX_SAFE_INTEGER],
-  halfLifeDays: [0.1, 3650],
-  floor: [0, 5],
-  periodDays: [0.1, 365]
-};
-var num2 = (v, [lo, hi], fallback) => typeof v === "number" && Number.isFinite(v) && v >= lo && v <= hi ? v : fallback;
-var whole = (v, range, fallback) => Math.round(num2(v, range, fallback));
-var wholeOrNone = (v, range, fallback) => v === "none" ? "none" : typeof v === "number" && Number.isFinite(v) && v >= range[0] && v <= range[1] ? Math.round(v) : fallback;
-var obj2 = (v) => isRecord(v) ? v : {};
-function selectorOrNull(v) {
-  if (!isRecord(v))
-    return null;
-  const out = {};
-  const list = (x) => Array.isArray(x) && x.every((s) => typeof s === "string") ? x.slice(0, 200) : undefined;
-  const ids = list(v.ids);
-  const kind = list(v.kind);
-  const tier = list(v.tier);
-  const memberOf = list(v.memberOf);
-  const tag = list(v.tag);
-  if (ids)
-    out.ids = ids;
-  if (kind)
-    out.kind = kind;
-  if (tier)
-    out.tier = tier;
-  if (memberOf)
-    out.memberOf = memberOf;
-  if (tag)
-    out.tag = tag;
-  if (isRecord(v.class)) {
-    const classes = {};
-    for (const [facet, values] of Object.entries(v.class)) {
-      const vs = list(values);
-      if (safeKey(facet) && vs)
-        classes[facet] = vs;
-    }
-    out.class = classes;
-  }
-  return Object.keys(out).length > 0 ? out : null;
-}
-function memoryConfigOf(raw, base = DEFAULT_MINDS_MEMORY) {
-  const m = obj2(raw);
-  const witness = obj2(m.witness);
-  const recall = obj2(m.recall);
-  const notes = obj2(m.notes);
-  const commitments = obj2(m.commitments);
-  const salience = obj2(m.salience);
-  const consolidate = obj2(m.consolidate);
-  return {
-    witness: { show: whole(witness.show, MINDS_RANGES.show, base.witness.show) },
-    recall: { recent: whole(recall.recent, MINDS_RANGES.show, base.recall.recent), relevant: whole(recall.relevant, MINDS_RANGES.show, base.recall.relevant), tokens: wholeOrNone(recall.tokens, MINDS_RANGES.recallTokens, base.recall.tokens) },
-    notes: { show: whole(notes.show, MINDS_RANGES.show, base.notes.show), keep: whole(notes.keep, MINDS_RANGES.keep, base.notes.keep) },
-    commitments: { show: whole(commitments.show, MINDS_RANGES.show, base.commitments.show) },
-    salience: { halfLifeDays: num2(salience.halfLifeDays, MINDS_RANGES.halfLifeDays, base.salience.halfLifeDays), floor: num2(salience.floor, MINDS_RANGES.floor, base.salience.floor) },
-    consolidate: { enabled: typeof consolidate.enabled === "boolean" ? consolidate.enabled : base.consolidate.enabled, periodDays: num2(consolidate.periodDays, MINDS_RANGES.periodDays, base.consolidate.periodDays) }
-  };
-}
-function worldMindsOf(world) {
-  const raw = obj2(world.minds);
-  const w = obj2(raw.weights);
-  const band = obj2(w.band);
-  const d = DEFAULT_FIDELITY_WEIGHTS;
-  const weight = (v, fallback) => num2(v, MINDS_RANGES.weight, fallback);
-  const roles = {};
-  const rawRoles = isRecord(w.roles) ? w.roles : d.roles;
-  for (const [value, points] of Object.entries(rawRoles))
-    if (safeKey(value) && typeof points === "number" && Number.isFinite(points))
-      roles[value] = weight(points, 0);
-  const t = obj2(raw.thresholds);
-  const far = num2(t.far, MINDS_RANGES.threshold, DEFAULT_FIDELITY_THRESHOLDS.far);
-  const near = Math.max(far, num2(t.near, MINDS_RANGES.threshold, DEFAULT_FIDELITY_THRESHOLDS.near));
-  const live = Math.max(near, num2(t.live, MINDS_RANGES.threshold, DEFAULT_FIDELITY_THRESHOLDS.live));
-  return {
-    secrecy: raw.secrecy === "full" ? "full" : "brief",
-    weights: {
-      here: weight(w.here, d.here),
-      nearby: weight(w.nearby, d.nearby),
-      mentioned: weight(w.mentioned, d.mentioned),
-      regard: weight(w.regard, d.regard),
-      knows: weight(w.knows, d.knows),
-      owner: weight(w.owner, d.owner),
-      track: weight(w.track, d.track),
-      roles,
-      rule: weight(w.rule, d.rule),
-      pending: weight(w.pending, d.pending),
-      band: { principal: weight(band.principal, d.band.principal), supporting: weight(band.supporting, d.band.supporting), background: weight(band.background, d.band.background) },
-      recent: weight(w.recent, d.recent)
-    },
-    thresholds: { live, near, far },
-    always: selectorOrNull(raw.always),
-    never: selectorOrNull(raw.never),
-    memory: memoryConfigOf(raw.memory)
-  };
-}
-function limitOf(limit) {
-  return limit === "none" ? Number.POSITIVE_INFINITY : limit;
-}
-var MIND_PURPOSES = ["mind", "memory", "skip", "consolidate"];
-function isMindPurpose(purpose) {
-  return MIND_PURPOSES.includes(purpose);
-}
-function worldMindTemplate(world, purpose) {
-  return Object.values(world.steps).filter((t) => t.purpose === purpose && t.template.trim() !== "").sort((a, b) => a.id.localeCompare(b.id))[0];
-}
-var MIND_SOURCES = ["pinned", "activated", "reply", "message", "summary", "memory", "thoughts", "recall", "life"];
-var DEFAULT_MIND_READS = Object.freeze({
-  pinned: { on: true, tokens: "none" },
-  activated: { on: true, tokens: 1600 },
-  reply: { on: true, tokens: "none" },
-  message: { on: true, tokens: "none" },
-  summary: { on: false, tokens: "none" },
-  memory: { on: false, tokens: "none" },
-  thoughts: { on: false, tokens: "none" },
-  recall: { on: false },
-  life: { on: false, tokens: "none" }
-});
-var MINDS_PRESETS = Object.freeze({
-  lean: { enabled: false, liveLimit: 3, nearRefresh: { scene: true, mention: true, turns: 6, minutes: 120 }, farRefreshMinutes: 1440, refreshLimit: 1, memoryLevels: [], tokens: 1200, skip: { maxBeats: 4, maxMindsPerBeat: 2 } },
-  standard: { enabled: true, liveLimit: 3, nearRefresh: { scene: true, mention: true, turns: 6, minutes: 120 }, farRefreshMinutes: 1440, refreshLimit: 2, memoryLevels: ["live"], tokens: 2400, skip: { maxBeats: 6, maxMindsPerBeat: 3 } },
-  full: { enabled: true, liveLimit: "none", nearRefresh: { scene: true, mention: true, turns: 4, minutes: 60 }, farRefreshMinutes: 720, refreshLimit: "none", memoryLevels: ["live", "near"], tokens: 4000, skip: { maxBeats: "none", maxMindsPerBeat: "none" } }
-});
-function defaultMindsSettings(preset = "standard") {
-  return { ...structuredClone(MINDS_PRESETS[preset]), reads: structuredClone(DEFAULT_MIND_READS), memory: {}, prompts: {} };
-}
-var MINDS_DEFAULTS = Object.freeze(defaultMindsSettings());
-var MIND_PROMPT_MAX = 20000;
-var PLAN_KINDS = ["errand", "meet", "visit", "work", "rest", "leisure", "pay", "lend", "other"];
-var PLAN_PRIORITY = { min: 1, max: 5, normal: 3 };
-function planInForce(p) {
-  return p.source !== "mind";
-}
-var COMMITMENT_KINDS = ["promise", "debt", "grudge", "favour", "plan", "other"];
-var COMMITMENT_STATUSES = ["open", "kept", "broken", "released"];
-var MIND_APPROACHES = ["reactive", "proactive"];
-var MIND_TEXT_CAPS = {
-  monologue: 1200,
-  depiction: 600,
-  intent: 300,
-  gmIntent: 600,
-  reaction: 200,
-  reactions: 4,
-  plans: 4,
-  planWhat: 160,
-  mood: 40,
-  interrupt: 200,
-  note: 300,
-  notes: 4,
-  commitment: 240,
-  commitments: 3,
-  summary: 900,
-  told: 240,
-  tolds: 3,
-  reason: 160
-};
-var MIND_PROMPT_DEFAULTS = Object.freeze({
-  mind: [
-    "You are the private mind of {{character}} in the roleplay world {{world}}. Think as {{character}}, from only what {{character}} knows: the context below is everything they perceive and remember. Other people's private thoughts are closed to you; ignore any narration of them in the recalled turns.",
-    "Decide how {{character}} reads this moment and what they intend. Everyone else decides for themselves: never script their actions or replies, and never plan around what they will do. Intend broadly, so the intent holds whatever they do. Write no narration and no dialogue."
-  ].join(`
-`),
-  memory: "You keep the memory of {{character}} in the roleplay world {{world}}. Below is what {{character}} knows, then the turn that just happened, as it was written. Only what was written happened, and only what {{character}} could see or hear of it counts; ignore narration of other people's private thoughts.",
-  skip: [
-    "The player character in the roleplay world {{world}} is skipping ahead in time. Below are the skip's span, the moments the engine already found in it, and what the people involved intend.",
-    "Propose further moments inside the span where something worth stopping for may happen: someone acting on a plan that involves the player character, a deadline, an occasion. Only moments the context supports; never invent people or places."
-  ].join(`
-`),
-  consolidate: "You keep the long-term memory of {{character}} in the roleplay world {{world}}. Fold the older notes below into their summary: keep what still matters to them, let the rest go, and keep everything the summary already holds that is still true."
-});
-var MIND_ANSWER_FORMATS = Object.freeze({
-  mind: [
-    'Answer with JSON only: {"monologue": "...", "depiction": "...", "intent": "...", "reactions": ["..."], "mood": "...", "interrupt": {"reason": "..."}}',
-    "- monologue: their private reasoning in the first person, at most six sentences.",
-    "- depiction: how they come across right now, as behaviour anyone present could see (posture, tone, what they do). Never a secret, an unspoken reason or a thought.",
-    "- intent: what they mean to do next, in one sentence.",
-    '- reactions: up to three short conditional reactions ("if pressed about the cellar, changes the subject").',
-    "- mood: one or two words.",
-    "- interrupt: only when the moment is a beat inside a time skip and what they'd do now would interrupt the player character's skipped time (seeking them out, calling them). Leave it out otherwise."
-  ].join(`
-`),
-  memory: [
-    'Answer with JSON only: {"notes": [{"text": "...", "salience": 3}], "commitments": [{"kind": "promise|debt|grudge|favour|plan|other", "with": ["a name"], "text": "...", "due": "YYYY-MM-DD HH:MM"}], "resolved": [{"id": "...", "status": "kept|broken|released"}], "plans": [], "told": [{"to": ["a name"], "what": "..."}], "summary": "..."}',
-    "- notes: at most three things they will remember, in their own perspective; salience 1 (passing) to 5 (unforgettable).",
-    "- commitments: promises, debts, grudges, favours and plans with someone that this turn made; due only when a time was set.",
-    "- resolved: their open commitments (listed with ids) that this turn kept, broke or released.",
-    '- plans: only what this turn states they will do later: said aloud, agreed with someone, or scheduled in the story as written; never a guess at what they might do. Each {"what": "...", "kind": "errand|meet|visit|work|rest|leisure|pay|lend|other", "when": {"from": "YYYY-MM-DD HH:MM", "to": "YYYY-MM-DD HH:MM"}, "where": "a place", "with": ["a name"], "priority": 3, "amount": 20}, with local times; priority 1 (whenever it fits) to 5 (it must happen); kind pay or lend, with amount, when they mean to hand someone money, and no amount otherwise.',
-    "- told: what they told whom in this turn, in a few words each.",
-    "- summary: their one-paragraph summary rewritten, only when this turn changed who they are or what they're about; leave it out otherwise.",
-    "Use empty lists for anything the turn didn't give."
-  ].join(`
-`),
-  skip: 'Answer with JSON only: {"beats": [{"at": "YYYY-MM-DD HH:MM", "reason": "..."}]}, at most five, in time order; an empty list when there are none.',
-  consolidate: 'Answer with JSON only: {"summary": "..."}: at most 900 characters of plain prose, in their own perspective.'
-});
 
 // src/shared/timeouts.ts
 var TIMER_MAX_MS = 2147483647;
@@ -12832,6 +12844,8 @@ var CHIP_ICON = {
   claim: "help",
   check: "dice",
   claimed: "sparkle",
+  routine_ask: "calendar",
+  routine_added: "calendar",
   fix: "edit",
   refused: "alert"
 };
@@ -15253,6 +15267,7 @@ var READ_LABEL = {
   memory: "Their notes and what they saw",
   thoughts: "Their last thoughts",
   recall: "Turns they were there for",
+  routine: "Their usual routine",
   life: "Their life: money, the day, commitments and plans"
 };
 var READ_NOTE = {
@@ -15264,9 +15279,42 @@ var READ_NOTE = {
   memory: "Their memory notes, most salient first, and what they saw happen. Never what someone's memory says they were told: that came from another mind.",
   thoughts: "Their own latest mind: what they thought, what they meant to do and how they felt.",
   recall: "Earlier turns they were there for: the latest, and those that best match the moment. Its limit is the memory setting's, which the world sets and you can override.",
+  routine: "What they usually do, from their routine and schedules as the world and the story set them, while their routine isn't off: theirs to weigh, never what they must do. A private block only when it's their own, and never social life the planner made up.",
   life: "Their money, the rest of today as the planner lays it (with what it fills free time with: meals, friends, outings), their commitments and their plans. None of it is the story as it stands."
 };
-var STORY_SOURCES = { pinned: true, activated: true, reply: true, message: true, summary: false, memory: false, thoughts: false, recall: false, life: false };
+var READ_GROUP = { pinned: "story", activated: "story", reply: "story", message: "story", summary: "own", memory: "own", thoughts: "own", recall: "own", routine: "usual", life: "own" };
+var GROUP_TITLE = { story: "The story as it stands", usual: "What they usually do", own: "Their own memory and life" };
+var GROUP_NOTE = {
+  story: null,
+  usual: "On unless you turn it off: their routine as context, so they can keep to their days without the planner deciding for them.",
+  own: "Off unless you turn them on: each can carry what the story never set up, like a day the planner filled with meals and friends, or a plan their memory took from narration that showed another character's mind."
+};
+function ReadSources(props) {
+  return /* @__PURE__ */ u3(M, {
+    children: ["story", "usual", "own"].map((group) => {
+      const note = GROUP_NOTE[group];
+      return /* @__PURE__ */ u3("div", {
+        class: "lre-minds-group",
+        children: [
+          /* @__PURE__ */ u3("span", {
+            class: "lre-minds-group-title",
+            children: GROUP_TITLE[group]
+          }, undefined, false, undefined, this),
+          note ? /* @__PURE__ */ u3(Note, {
+            children: note
+          }, undefined, false, undefined, this) : null,
+          MIND_SOURCES.filter((s) => READ_GROUP[s] === group).map((source) => /* @__PURE__ */ u3(ReadRow, {
+            source,
+            reads: props.reads,
+            memory: props.memory,
+            busy: props.busy,
+            patch: props.patch
+          }, source, false, undefined, this))
+        ]
+      }, group, true, undefined, this);
+    })
+  }, undefined, false, undefined, this);
+}
 function LimitField(props) {
   const fallback = props.fallback === "none" ? props.min : props.fallback;
   return /* @__PURE__ */ u3("div", {
@@ -15651,41 +15699,12 @@ function MindsSection(props) {
                 /* @__PURE__ */ u3(Note, {
                   children: "Who they are (their own sheet, aims and secrets), where they are and whom they see there, and what they mean to do are always in it. Each source below is yours to switch on or off and to limit; within its limit it comes whole, and nothing else cuts it."
                 }, undefined, false, undefined, this),
-                /* @__PURE__ */ u3("div", {
-                  class: "lre-minds-group",
-                  children: [
-                    /* @__PURE__ */ u3("span", {
-                      class: "lre-minds-group-title",
-                      children: "The story as it stands"
-                    }, undefined, false, undefined, this),
-                    MIND_SOURCES.filter((s) => STORY_SOURCES[s]).map((source) => /* @__PURE__ */ u3(ReadRow, {
-                      source,
-                      reads: minds.reads,
-                      memory: minds.memory,
-                      busy,
-                      patch: props.patch
-                    }, source, false, undefined, this))
-                  ]
-                }, undefined, true, undefined, this),
-                /* @__PURE__ */ u3("div", {
-                  class: "lre-minds-group",
-                  children: [
-                    /* @__PURE__ */ u3("span", {
-                      class: "lre-minds-group-title",
-                      children: "Their own memory and life"
-                    }, undefined, false, undefined, this),
-                    /* @__PURE__ */ u3(Note, {
-                      children: "Off unless you turn them on: each can carry what the story never set up, like a day the planner filled with meals and friends, or a plan their memory took from narration that showed another character's mind."
-                    }, undefined, false, undefined, this),
-                    MIND_SOURCES.filter((s) => !STORY_SOURCES[s]).map((source) => /* @__PURE__ */ u3(ReadRow, {
-                      source,
-                      reads: minds.reads,
-                      memory: minds.memory,
-                      busy,
-                      patch: props.patch
-                    }, source, false, undefined, this))
-                  ]
-                }, undefined, true, undefined, this)
+                /* @__PURE__ */ u3(ReadSources, {
+                  reads: minds.reads,
+                  memory: minds.memory,
+                  busy,
+                  patch: props.patch
+                }, undefined, false, undefined, this)
               ]
             }, undefined, true, undefined, this)
           }, undefined, false, undefined, this),
@@ -17601,10 +17620,21 @@ function LoreEditor(props) {
 }
 
 // src/frontend/build/routine-settings.tsx
+var ROLE_EXPLAINED = {
+  informative: "The story and planning decide what they do; their routine is only context their mind and the narrator may weigh.",
+  enforced: "Their routine and schedules run their day when the story doesn't, and never pull them out of a scene with you.",
+  off: "Their routine isn't used at all, not even as context."
+};
+var LEVEL_NAME = {
+  live: `${FIDELITY_LABEL.live}: in the scene with you`,
+  near: `${FIDELITY_LABEL.near}: close to the story`,
+  far: `${FIDELITY_LABEL.far}: off screen, still followed`,
+  background: `${FIDELITY_LABEL.background}: everyone else`
+};
 var AWARENESS_EXPLAINED = {
-  story_first: "People off screen bend their routine for the story's plans and the GM's, what the story sets holds until it's released, and characters close to the player get no routine nudges at all.",
-  balanced: "Background characters keep their routine, distant ones bend it for the story's plans, what the story sets holds for the rest of that day, and characters close to the player get it only as a soft suggestion.",
-  routine_first: "Background and distant characters keep to their routine, bending only as the plans setting below allows, and what the story sets holds until their next block."
+  story_first: "Enforced routines bend for the story's plans and the GM's, and what the story sets holds until it's released.",
+  balanced: "Background characters keep their enforced routine, others bend it for the story's plans, and what the story sets holds for the rest of that day.",
+  routine_first: "Enforced routines hold, bending only as the plans setting below allows, and what the story sets holds until their next block."
 };
 var INVITATIONS_EXPLAINED = {
   off: "Routine blocks never invite anyone. Plans from the story and the GM still can.",
@@ -17663,6 +17693,76 @@ function Choices2(props) {
     })
   }, undefined, false, undefined, this);
 }
+function RoutineRoleSettings(props) {
+  const { value, lint, disabled } = props;
+  return /* @__PURE__ */ u3(M, {
+    children: [
+      /* @__PURE__ */ u3(FormGroup, {
+        title: "What a routine is, by closeness",
+        children: [
+          /* @__PURE__ */ u3("p", {
+            class: "lre-minds-note",
+            children: "For each level of closeness on the minds ladder. Informative is the default for everyone but Background: routines and schedules tell, they don't dictate."
+          }, undefined, false, undefined, this),
+          FIDELITIES.map((level) => /* @__PURE__ */ u3(Field, {
+            label: LEVEL_NAME[level],
+            help: ROLE_EXPLAINED[value.roles[level]],
+            children: /* @__PURE__ */ u3(Seg, {
+              label: `${FIDELITY_LABEL[level]} characters' routine`,
+              value: value.roles[level],
+              options: ROUTINE_ROLES.map((r) => ({ value: r, label: ROUTINE_ROLE_LABEL[r] })),
+              disabled,
+              onChange: (role) => props.onChange({ ...value, roles: { ...value.roles, [level]: role } })
+            }, undefined, false, undefined, this)
+          }, level, false, undefined, this)),
+          /* @__PURE__ */ u3("p", {
+            class: "lre-minds-note",
+            children: "The GM can set it apart for one character in a chat. A world's schedules (weather, prices, bills, paydays, opening hours) and pay run whatever you pick."
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3(Issues, {
+            issues: lintAt(lint, "routineSettings.roles")
+          }, undefined, false, undefined, this)
+        ]
+      }, undefined, true, undefined, this),
+      /* @__PURE__ */ u3(FormGroup, {
+        title: "The narrator",
+        children: [
+          /* @__PURE__ */ u3(HostSwitch, {
+            label: "Tell the narrator people's usual routines",
+            checked: value.narrator,
+            disabled,
+            onChange: (narrator) => props.onChange({ ...value, narrator })
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3("p", {
+            class: "lre-minds-note",
+            children: "For the characters in the scene whose routine isn't off: what they usually do, as context the narrator may use, never what they must do."
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3(Issues, {
+            issues: lintAt(lint, "routineSettings.narrator")
+          }, undefined, false, undefined, this)
+        ]
+      }, undefined, true, undefined, this),
+      /* @__PURE__ */ u3(FormGroup, {
+        title: "Timelapse from the Actions sheet",
+        children: [
+          /* @__PURE__ */ u3(HostSwitch, {
+            label: "Follow my routine by default",
+            checked: value.paletteFollowsRoutine,
+            disabled,
+            onChange: (paletteFollowsRoutine) => props.onChange({ ...value, paletteFollowsRoutine })
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3("p", {
+            class: "lre-minds-note",
+            children: "Where the sheet's Follow my routine starts. On, your character goes about their usual day through a Timelapse; off, they stay where the story left them. Each Timelapse can change it."
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3(Issues, {
+            issues: lintAt(lint, "routineSettings.paletteFollowsRoutine")
+          }, undefined, false, undefined, this)
+        ]
+      }, undefined, true, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+}
 function RoutineSettingsEditor() {
   const app = useApp();
   const draft = useSelect(app.drafts, (d) => d);
@@ -17686,14 +17786,24 @@ function RoutineSettingsEditor() {
       }, undefined, false, undefined, this),
       /* @__PURE__ */ u3("p", {
         class: "lre-build-note",
-        children: "Whatever you pick, the story comes first for anyone in a scene with the player's character: a routine never moves them out of it, contradicts what's been told or interrupts play. These settings tune how far everyone else's days follow the story and its lore, and how far they keep to routine."
+        children: "Whatever you pick, the story comes first for anyone in a scene with the player's character: a routine never moves them out of it, contradicts what's been told or interrupts play. These settings tune what routines are to the engine, and how far everyone else's days follow the story and its lore."
       }, undefined, false, undefined, this),
       /* @__PURE__ */ u3(Issues, {
-        issues: lint.filter((issue) => !["awareness", "invitations", "sociability", "planBend"].some((key) => issue.path === `routineSettings.${key}`))
+        issues: lint.filter((issue) => !["awareness", "invitations", "sociability", "planBend", "roles", "narrator", "paletteFollowsRoutine"].some((key) => issue.path === `routineSettings.${key}` || issue.path.startsWith(`routineSettings.${key}.`)))
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(RoutineRoleSettings, {
+        value,
+        lint,
+        disabled: busy,
+        onChange: setValue
       }, undefined, false, undefined, this),
       /* @__PURE__ */ u3(FormGroup, {
         title: "Story and lore awareness",
         children: [
+          /* @__PURE__ */ u3("p", {
+            class: "lre-minds-note",
+            children: "How strictly an enforced routine keeps to itself against what the story and its lore establish."
+          }, undefined, false, undefined, this),
           /* @__PURE__ */ u3(Choices2, {
             label: "Story and lore awareness",
             value: value.awareness,
@@ -26907,6 +27017,31 @@ var POLICY_OPTIONS2 = [
   { value: "note", label: "Note" },
   { value: "ignore", label: "Ignore" }
 ];
+function FollowRoutineChoice(props) {
+  return /* @__PURE__ */ u3(Section, {
+    children: /* @__PURE__ */ u3("div", {
+      "data-lre-follow-routine": props.value,
+      children: [
+        /* @__PURE__ */ u3(HostSwitch, {
+          label: "Follow my routine",
+          checked: props.value,
+          disabled: props.disabled,
+          onChange: props.onChange
+        }, undefined, false, undefined, this),
+        /* @__PURE__ */ u3("span", {
+          class: "lre-chat-hint",
+          children: [
+            /* @__PURE__ */ u3(Icon, {
+              name: "info",
+              size: 14
+            }, undefined, false, undefined, this),
+            "On, you go about your usual day through the skip; off, you stay where the story left you while the world goes on."
+          ]
+        }, undefined, true, undefined, this)
+      ]
+    }, undefined, true, undefined, this)
+  }, undefined, false, undefined, this);
+}
 function TimelapsePanel(props) {
   const app = useApp();
   const { timelapse } = props;
@@ -26914,6 +27049,7 @@ function TimelapsePanel(props) {
   const [custom, setCustom] = d2("");
   const [unit, setUnit] = d2("h");
   const [overrides, setOverrides] = d2({});
+  const [follow, setFollow] = d2(timelapse.followRoutine);
   const [busy, run] = useBusy();
   const customMinutes = /^\d+(\.\d+)?$/.test(custom.trim()) ? Number(custom) * UNIT_MINUTES2[unit] : null;
   const chosen = customMinutes !== null && customMinutes > 0 ? { type: "duration", minutes: customMinutes } : target;
@@ -27023,6 +27159,11 @@ function TimelapsePanel(props) {
               }, JSON.stringify(entry.target), true, undefined, this))
             }, undefined, false, undefined, this)
           }, undefined, false, undefined, this) : null,
+          /* @__PURE__ */ u3(FollowRoutineChoice, {
+            value: follow,
+            disabled: busy,
+            onChange: setFollow
+          }, undefined, false, undefined, this),
           /* @__PURE__ */ u3(Section, {
             children: /* @__PURE__ */ u3(Disclosure, {
               summary: `Interrupts for this run${changed > 0 ? ` · ${changed} changed` : ""}`,
@@ -27056,7 +27197,7 @@ function TimelapsePanel(props) {
             if (!chosen)
               return;
             run(async () => {
-              const result = await app.request(timelapseRequest(timelapse, chosen, overrides, props.view.chatId));
+              const result = await app.request(timelapseRequest(timelapse, chosen, overrides, props.view.chatId, follow));
               if (result)
                 props.onSent();
             });
@@ -28542,11 +28683,14 @@ function claimedThings(gm) {
 }
 
 // src/packs/castlife/ui/routines-ops.ts
-var BINDING_LABEL = { routine: "Routine leads", story: "Story leads", none: "No routine" };
-function bindingOf(tier, mode, planned) {
-  if (mode === "off" || !planned)
+var BINDING_LABEL = { routine: "Routine leads", story: "Story leads; routine informs", none: "No routine" };
+function bindingOf(role, mode, planned) {
+  if (mode === "off" || role === "off")
     return "none";
-  return tier === "near" || tier === "live" ? "story" : "routine";
+  return role === "enforced" && planned ? "routine" : "story";
+}
+function effectiveRole(tier, roles, chat) {
+  return chat ?? roles[tier ?? "background"];
 }
 function plannedHint(entity) {
   if (!entity || entity.gone || !entity.agent || !entity.life.acts)
@@ -28554,54 +28698,59 @@ function plannedHint(entity) {
   return (entity.levels.find((l) => l.domain === "castlife")?.level ?? 0) >= 3;
 }
 var TIER_LABEL = { live: "Live", near: "Near", far: "Far", background: "Background" };
-function routineRows(characters, entities, changed) {
+function routineRows(characters, entities, changed, roles) {
   return characters.map((c) => {
     const summary = changed.find((s) => s.entity === c.entity);
-    const binding = bindingOf(c.fidelity.level, summary?.follow?.mode ?? "follows", plannedHint(entities.find((e) => e.id === c.entity)));
+    const role = effectiveRole(c.fidelity.level, roles, summary?.follow?.role);
+    const binding = bindingOf(role, summary?.follow?.mode ?? "follows", plannedHint(entities.find((e) => e.id === c.entity)));
     return { entity: c.entity, name: c.name, tier: c.fidelity.level, binding, changed: changedBy(summary) };
   });
 }
 var MODE_NOTE = {
-  follows: "Their routine and schedules shape their day, as far as the story lets them.",
+  follows: "Their routine and schedules count as their role says.",
   no_invitations: "As they follow it, but their routine makes and accepts no invitations.",
-  off: "No routine at all in this chat: only the story, your edits, their commitments and their basic needs."
+  off: "No routine at all in this chat, not even as context: only the story, your edits, their commitments and their basic needs."
+};
+var ROLE_NOTE = {
+  informative: "The story and planning decide what they do; their routine and schedules are only context their mind and the narrator may weigh.",
+  enforced: "The planner lives their routine and their schedules run whenever the story doesn't hold them, never in a scene with you.",
+  off: "Their routine isn't used at all, not even as context."
 };
 var AWARENESS_NOTE = {
-  story_first: "Background and Far characters bend for story plans and your intent, and what the story set holds until the story or you release it. Near and Live get no routine suggestions.",
-  balanced: "Background characters keep their routine; Far ones bend for story plans and intent. What the story set holds for the rest of that day. Near and Live get their routine only as a soft suggestion.",
-  routine_first: "Background and Far characters keep to routine, bending only as the world lets story plans bend it. What the story set holds until the routine's next block."
+  story_first: "An enforced routine bends for story plans and your intent, and what the story set holds until the story or you release it.",
+  balanced: "Background characters keep an enforced routine; others bend it for story plans and intent. What the story set holds for the rest of that day.",
+  routine_first: "An enforced routine holds, bending only as the world lets story plans bend it. What the story set holds until the routine's next block."
 };
-var BINDING_NOTE = {
+var ENFORCED_NOTE = {
   story_first: {
     background: "Off screen they keep to their routine, but bend for story plans and your intent. What the story set holds until the story or you release it.",
-    far: "Their routine leads, but they bend for story plans and your intent. What the story set holds until the story or you release it.",
-    cast: "The story leads: their routine makes no suggestions for them, and no routine or schedule moves them."
+    closer: "Their routine leads, but they bend for story plans and your intent. What the story set holds until the story or you release it."
   },
   balanced: {
     background: "Off screen they keep their routine and schedules. What the story set holds for the rest of that day.",
-    far: "Their routine leads, but they bend for story plans and intent. What the story set holds for the rest of that day.",
-    cast: "The story leads: their routine is only a soft suggestion, and no routine or schedule moves them."
+    closer: "Their routine leads, but they bend for story plans and intent. What the story set holds for the rest of that day."
   },
   routine_first: {
     background: "They keep to their routine. What the story set holds until their routine's next block.",
-    far: "They keep to their routine. What the story set holds until their routine's next block.",
-    cast: "The story leads: their routine is only a soft suggestion, and no routine or schedule moves them."
+    closer: "They keep to their routine. What the story set holds until their routine's next block."
   }
 };
 function bindingNote(view) {
-  const binding = bindingOf(view.tier, view.follow.mode, view.planned);
   const always = "Nobody is moved out of a scene with you, and no routine interrupts play.";
   if (view.follow.mode === "off")
     return ["No routine in this chat: their day is the story, your edits, their commitments and their basic needs.", always];
-  if (!view.planned)
-    return ["The planner doesn't lay their day (it needs an agent who acts, at Cast life 3 or higher), so no routine moves them.", always];
-  const awareness = view.follow.awareness;
-  const lines = [BINDING_NOTE[awareness][binding === "story" ? "cast" : view.tier === "far" ? "far" : "background"]];
-  if (binding === "routine" && awareness === "routine_first")
-    lines.push(`Story plans bend it only as the world allows: ${PLAN_BEND_LABEL[view.settings.planBend].toLowerCase()}.`);
-  if (view.tier === null)
-    lines.push("Without minds there is no fidelity: the story leads whenever they share a scene with you.");
-  if (view.follow.mode === "no_invitations")
+  const role = view.follow.role;
+  const lines = [`${ROUTINE_ROLE_LABEL[role]}: ${ROLE_NOTE[role]}`];
+  lines.push(view.follow.chat?.role ? "You set their role in this chat." : view.tier ? `The role of their level, ${TIER_LABEL[view.tier]}, as the world sets it.` : "Without minds there is no level of closeness: they take Background's role.");
+  if (role === "enforced" && !view.planned)
+    lines.push("The planner doesn't lay their day (it needs an agent who acts, at Cast life 3 or higher), so their routine only informs.");
+  if (role === "enforced" && view.planned) {
+    const awareness = view.follow.awareness;
+    lines.push(ENFORCED_NOTE[awareness][view.tier === null || view.tier === "background" ? "background" : "closer"]);
+    if (awareness === "routine_first")
+      lines.push(`Story plans bend it only as the world allows: ${PLAN_BEND_LABEL[view.settings.planBend].toLowerCase()}.`);
+  }
+  if (role !== "off" && view.follow.mode === "no_invitations")
     lines.push("They make and accept no invitations.");
   lines.push(always);
   return lines;
@@ -28734,8 +28883,8 @@ function untilWords(until, now) {
   return until <= now ? "ending now" : `for ${formatMinutes(until - now)} more`;
 }
 var HOLD_BY = { story: "The story set it", trip: "A trip", override: "An override", plan: "A plan under way" };
-function followOp(entity, mode, awareness) {
-  return { op: "routine_follow", entity, mode: mode === "follows" ? null : mode, awareness };
+function followOp(entity, mode, awareness, role) {
+  return { op: "routine_follow", entity, mode: mode === "follows" ? null : mode, awareness, role };
 }
 function blockOp(entity, block) {
   const value = { ...block };
@@ -28829,7 +28978,8 @@ function GmRoutinesSection(props) {
     };
   }, [props.chatId, props.gm]);
   const ctx = { chatId: props.chatId, gm: props.gm, busy: props.busy, send: props.send, edit: props.edit };
-  const rows = routineRows(props.gm.minds.characters, props.gm.entities, changed ?? []);
+  const roles = routineSettingsOf(useChatWorld(props.send) ?? {}).roles;
+  const rows = routineRows(props.gm.minds.characters, props.gm.entities, changed ?? [], roles);
   const page = pages.page;
   const selected = page === null ? undefined : rows.find((r) => r.entity === page);
   A(() => {
@@ -28869,7 +29019,7 @@ function GmRoutinesSection(props) {
               }, undefined, true, undefined, this),
               /* @__PURE__ */ u3("p", {
                 class: "lre-gm-routines-intro",
-                children: "A routine or a schedule is a default the world relies on, never a script: the story leads whoever shares a scene with you, and no routine interrupts play. What you change here is this chat's alone; each change has its own Undo."
+                children: "A routine or a schedule is never a script. By default it only informs: the story and planning decide what people do, and only Background characters keep an enforced routine. Even then the story leads whoever shares a scene with you, and no routine interrupts play. What you change here is this chat's alone; each change has its own Undo."
               }, undefined, false, undefined, this),
               worldId ? /* @__PURE__ */ u3("div", {
                 class: "lre-gm-routines-build",
@@ -29025,7 +29175,7 @@ function CharacterPages(props) {
       return;
     root.querySelector(".lre-page-header button")?.focus();
   }, [change]);
-  const binding = view ? bindingOf(view.tier, view.follow.mode, view.planned) : row.binding;
+  const binding = view ? bindingOf(view.follow.role, view.follow.mode, view.planned) : row.binding;
   return /* @__PURE__ */ u3("div", {
     ref: changes.host.ref,
     class: "lre-gm-page lre-gm-pages lre-gm-routines-pages",
@@ -29132,7 +29282,7 @@ function RoutineSections(props) {
 }
 function BindingSection(props) {
   const { view } = props;
-  const binding = bindingOf(view.tier, view.follow.mode, view.planned);
+  const binding = bindingOf(view.follow.role, view.follow.mode, view.planned);
   const chat = view.follow.chat;
   return /* @__PURE__ */ u3(Section, {
     title: "How much their routine binds them",
@@ -29163,6 +29313,15 @@ function BindingSection(props) {
             title: "In this chat",
             subtitle: chat?.mode ? "Set for them in this chat" : "As the world has it",
             value: ROUTINE_MODE_LABEL[view.follow.mode],
+            chevron: true,
+            disabled: props.busy,
+            onClick: () => props.open({ kind: "follow" })
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3(ListRow, {
+            icon: "route",
+            title: "Their routine's role",
+            subtitle: chat?.role ? "Set for them in this chat" : "Their level's default",
+            value: ROUTINE_ROLE_LABEL[view.follow.role],
             chevron: true,
             disabled: props.busy,
             onClick: () => props.open({ kind: "follow" })
@@ -29571,8 +29730,10 @@ function FollowPage(props) {
   const { ctx, view } = props;
   const chat = view.follow.chat;
   const [mode, setMode] = d2(chat?.mode ?? "follows");
+  const [role, setRole] = d2(chat?.role ?? null);
   const [awareness, setAwareness] = d2(chat?.awareness ?? null);
-  const changed = mode !== (chat?.mode ?? "follows") || awareness !== (chat?.awareness ?? null);
+  const changed = mode !== (chat?.mode ?? "follows") || role !== (chat?.role ?? null) || awareness !== (chat?.awareness ?? null);
+  const levelRole = effectiveRole(view.tier, view.settings.roles, null);
   return /* @__PURE__ */ u3(ChangePage, {
     name: "routine-follow",
     title: "How they follow their routine",
@@ -29585,7 +29746,7 @@ function FollowPage(props) {
         onSubmit: (event) => {
           event.preventDefault();
           if (changed)
-            sendOp(ctx, followOp(view.entity, mode, awareness), props.onBack);
+            sendOp(ctx, followOp(view.entity, mode, awareness, role), props.onBack);
         },
         children: [
           /* @__PURE__ */ u3(Section, {
@@ -29599,11 +29760,27 @@ function FollowPage(props) {
             }, undefined, false, undefined, this)
           }, undefined, false, undefined, this),
           /* @__PURE__ */ u3(Section, {
+            title: "Their routine's role",
+            children: [
+              /* @__PURE__ */ u3("p", {
+                class: "lre-gm-note",
+                children: "What their routine and their own schedules are to the engine. Routines inform by default; the world's schedules and pay run whatever you pick."
+              }, undefined, false, undefined, this),
+              /* @__PURE__ */ u3(Choices3, {
+                legend: "Their routine's role",
+                value: role,
+                choices: [{ value: null, label: `Their level's default: ${ROUTINE_ROLE_LABEL[levelRole]}`, help: ROLE_NOTE[levelRole], now: chat?.role == null }, ...ROUTINE_ROLES.map((r) => ({ value: r, label: ROUTINE_ROLE_LABEL[r], help: ROLE_NOTE[r], now: chat?.role === r }))],
+                disabled: ctx.busy,
+                onChange: setRole
+              }, undefined, false, undefined, this)
+            ]
+          }, undefined, true, undefined, this),
+          /* @__PURE__ */ u3(Section, {
             title: "Story and lore awareness",
             children: [
               /* @__PURE__ */ u3("p", {
                 class: "lre-gm-note",
-                children: "How strictly they keep to their routine against what the story and its lore establish. Whatever you pick, nobody is moved out of a scene with you, and Near and Live characters are never moved by a routine."
+                children: "How strictly an enforced routine keeps to itself against what the story and its lore establish. Whatever you pick, nobody is moved out of a scene with you."
               }, undefined, false, undefined, this),
               /* @__PURE__ */ u3(Choices3, {
                 legend: "Story and lore awareness",
@@ -29631,7 +29808,7 @@ function FollowPage(props) {
           /* @__PURE__ */ u3(Button, {
             icon: "undo",
             disabled: ctx.busy,
-            onClick: () => sendOp(ctx, followOp(view.entity, "follows", null), props.onBack),
+            onClick: () => sendOp(ctx, followOp(view.entity, "follows", null, null), props.onBack),
             children: "Use the world's settings"
           }, undefined, false, undefined, this)
         ]
@@ -47700,6 +47877,7 @@ function decodeMinds(value) {
     prompt: oneOf(t.prompt, ["world", "override", "default"], "default"),
     pinned: list(t.pinned, (p) => ({ title: str(p.title), tokens: num(p.tokens), cut: p.cut === true })),
     activated: list(t.activated, (p) => ({ title: str(p.title), tokens: num(p.tokens), cut: p.cut === true })),
+    ...num(t.routine) > 0 ? { routine: num(t.routine) } : {},
     notes: strings(t.notes)
   }));
 }
@@ -47934,7 +48112,7 @@ function ContextPanel(props) {
                   tone: MIND_OUTCOME[m.outcome].tone,
                   children: MIND_OUTCOME[m.outcome].text
                 }, undefined, false, undefined, this),
-                children: (m.pinned ?? []).length > 0 || (m.activated ?? []).length > 0 || (m.notes ?? []).length > 0 ? /* @__PURE__ */ u3("div", {
+                children: (m.pinned ?? []).length > 0 || (m.activated ?? []).length > 0 || (m.routine ?? 0) > 0 || (m.notes ?? []).length > 0 ? /* @__PURE__ */ u3("div", {
                   class: "lre-gm-minds-pinned",
                   "data-lre-mind-pins": true,
                   children: [
@@ -47948,6 +48126,15 @@ function ContextPanel(props) {
                       children: [
                         "Lore the turn activated: ",
                         (m.activated ?? []).map((p) => `${p.title} (${p.tokens} tok${p.cut ? ", cut" : ""})`).join(", ")
+                      ]
+                    }, undefined, true, undefined, this) : null,
+                    (m.routine ?? 0) > 0 ? /* @__PURE__ */ u3("span", {
+                      "data-lre-mind-routine": true,
+                      children: [
+                        "Their usual routine: ",
+                        m.routine,
+                        " line",
+                        m.routine === 1 ? "" : "s"
                       ]
                     }, undefined, true, undefined, this) : null,
                     (m.notes ?? []).map((n) => /* @__PURE__ */ u3("p", {
