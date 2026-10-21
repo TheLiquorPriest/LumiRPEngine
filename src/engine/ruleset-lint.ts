@@ -13,6 +13,7 @@ import { EFFECT_ONLY_FUNCTIONS, objectiveWhen } from "../shared/world";
 import { lintAdjudication } from "./adjudication";
 import { diceDistribution, naturalDie, parseDice } from "./dice";
 import { callsIn, compile, type FormulaCall } from "./expr";
+import { lintInferred } from "./inferred";
 import { rulesetFloor, type Registry } from "./registry-impl";
 import { thresholdsOf } from "./ruleset";
 import { fieldDef, kindFields, objects } from "./scope";
@@ -336,7 +337,7 @@ export function lintRuleset(world: WorldDoc, reg: Registry): LintIssue[] {
   // The ruleset container (DESIGN §11), its adjudication policy first: the sheet's checks below may end early.
   const rs: unknown = world.ruleset;
   if (rs === undefined) return issues;
-  issues.push(...lintAdjudication(world));
+  issues.push(...lintAdjudication(world), ...lintInferred(world, reg));
   if (!isRecord(rs)) {
     err("ruleset", "ruleset", "The ruleset must be an object.");
     return issues;
