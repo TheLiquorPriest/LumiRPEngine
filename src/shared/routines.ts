@@ -638,8 +638,8 @@ export function routineShapeProblems(v: unknown): string[] {
   return out;
 }
 
-/** Each setting's allowed values: a word of its list, a switch, or one of a list for each level of closeness. A setting not named here is none the engine reads. */
-const SETTING_VALUES: Record<string, readonly string[] | "switch" | { levels: readonly string[] }> = { awareness: ROUTINE_AWARENESS, invitations: ROUTINE_INVITATIONS, sociability: ROUTINE_SOCIABILITY, planBend: ROUTINE_PLAN_BEND, roles: { levels: ROUTINE_ROLES }, skips: { levels: SKIP_LIVES }, skipPlanCalls: SKIP_PLAN_CALLS, narrator: "switch", paletteFollowsRoutine: "switch" } satisfies Record<keyof RoutineSettings, readonly string[] | "switch" | { levels: readonly string[] }>;
+/** Each setting's allowed values: a word of its list, a switch, or one of a list for each level of closeness. A setting not named here is none the engine reads. The world's lint reads the same table, so a setting a write accepts is never linted as doing nothing. */
+export const ROUTINE_SETTING_VALUES: Record<string, readonly string[] | "switch" | { levels: readonly string[] }> = { awareness: ROUTINE_AWARENESS, invitations: ROUTINE_INVITATIONS, sociability: ROUTINE_SOCIABILITY, planBend: ROUTINE_PLAN_BEND, roles: { levels: ROUTINE_ROLES }, skips: { levels: SKIP_LIVES }, skipPlanCalls: SKIP_PLAN_CALLS, narrator: "switch", paletteFollowsRoutine: "switch" } satisfies Record<keyof RoutineSettings, readonly string[] | "switch" | { levels: readonly string[] }>;
 
 /**
  * What is wrong with routine settings as a write sends them (a Build save, an outside tool), one
@@ -650,8 +650,8 @@ const SETTING_VALUES: Record<string, readonly string[] | "switch" | { levels: re
 export function routineSettingsProblems(v: unknown): string[] {
   if (!isRecord(v)) return ["routine settings are an object"];
   return Object.entries(v).flatMap(([key, value]) => {
-    const allowed = hasOwn(SETTING_VALUES, key) ? SETTING_VALUES[key] : undefined;
-    if (!allowed) return [`there's no setting ${key} (${Object.keys(SETTING_VALUES).join(", ")})`];
+    const allowed = hasOwn(ROUTINE_SETTING_VALUES, key) ? ROUTINE_SETTING_VALUES[key] : undefined;
+    if (!allowed) return [`there's no setting ${key} (${Object.keys(ROUTINE_SETTING_VALUES).join(", ")})`];
     if (allowed === "switch") return typeof value === "boolean" ? [] : [`${key} is true or false`];
     if ("levels" in allowed) {
       if (!isRecord(value)) return [`${key} give ${FIDELITIES.join(", ")} each one of ${allowed.levels.join(", ")}`];

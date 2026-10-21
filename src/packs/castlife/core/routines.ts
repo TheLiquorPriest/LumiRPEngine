@@ -19,6 +19,7 @@ import {
   ROUTINE_MODES,
   ROUTINE_ROLES,
   SKIP_LIVES,
+  ROUTINE_SETTING_VALUES,
   routineSettingsOf,
   routineShapeProblems,
   storySourceLabel,
@@ -551,8 +552,8 @@ export function routinesLint(world: WorldDoc, reg: Registry, state: Readonly<Wor
   const raw = world.routines ?? {};
   for (const id of Object.keys(raw).sort()) issues.push(...routineIssues(world, reg, id, own(raw, id), state));
   const settings = isRecord(world.routineSettings) ? world.routineSettings : {};
-  // Each part a world may set: a word of its list, a switch, or one of a list for each level of closeness.
-  const known: Record<string, readonly string[] | "switch" | { levels: readonly string[] }> = { awareness: ROUTINE_AWARENESS, invitations: ["off", "player", "everyone"], sociability: ["reserved", "usual", "outgoing"], planBend: ["must", "strong", "standard", "ordinary"], roles: { levels: ROUTINE_ROLES }, skips: { levels: SKIP_LIVES }, narrator: "switch", paletteFollowsRoutine: "switch" };
+  // Each part a world may set, from the table a write is held to, so the two never disagree.
+  const known = ROUTINE_SETTING_VALUES;
   const warn = (path: string, message: string): void => void issues.push({ severity: "warning", code: ROUTINE_LINT.settings, path: `routineSettings.${path}`, message });
   for (const [key, v] of Object.entries(settings)) {
     const allowed = own(known, key);

@@ -6,11 +6,13 @@
 
 import { describe, expect, test } from "bun:test";
 import type { Fidelity } from "../../../src/shared/minds";
-import type { RoutineBlock, RoutineDef, RoutineSettings } from "../../../src/shared/routines";
+import { DEFAULT_ROUTINE_SETTINGS, ROUTINE_LINT, type RoutineBlock, type RoutineDef, type RoutineSettings } from "../../../src/shared/routines";
 import type { Working } from "../../../src/engine/working";
 import { dayPlan } from "../../../src/packs/castlife/core/index";
+import { routinesLint } from "../../../src/packs/castlife/core/routines";
 import { routineGmView } from "../../../src/packs/castlife/core/view";
-import { at, fixed, gmEdit, gmPlan, invitations, lapse, pin, record, routine, town, whereabouts, withRoutines, YOU } from "./town";
+import { at, fixed, gmEdit, gmPlan, invitations, lapse, pin, record, reg, routine, town, townWorld, whereabouts, withRoutines, YOU } from "./town";
+import { startState } from "../support";
 
 const evening = (place: string): RoutineBlock => fixed("evening", "18:00", 180, { place }, { label: `Evening at ${place}` });
 const OWNERS: RoutineDef[] = [
@@ -139,5 +141,16 @@ describe("sociability and how plans bend routine", () => {
     expect([during("strong", "near", 3), during("strong", "far", 4)]).toEqual(["office", "bank"]);
     expect([during("standard", "far", 3), during("standard", "near", 3)]).toEqual(["office", "bank"]);
     expect(during("ordinary", "far", 3)).toBe("bank");
+  });
+});
+
+describe("the world's settings, as the lint reads them", () => {
+  test("every setting Build saves is one the lint knows; a setting the engine doesn't read still warns", () => {
+    const warnings = (settings: Record<string, unknown>): string[] => {
+      const world = townWorld((wd) => void (wd.routineSettings = settings as unknown as RoutineSettings));
+      return routinesLint(world, reg, startState(world, reg)).filter((i) => i.code === ROUTINE_LINT.settings).map((i) => i.path);
+    };
+    expect(warnings({ ...DEFAULT_ROUTINE_SETTINGS, skipPlanCalls: "parallel" })).toEqual([]);
+    expect(warnings({ skipPlanCalls: "sometimes", mood: "sunny" })).toEqual(["routineSettings.skipPlanCalls", "routineSettings.mood"]);
   });
 });
