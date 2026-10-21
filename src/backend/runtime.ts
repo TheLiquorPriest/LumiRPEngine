@@ -1057,7 +1057,8 @@ export class Runtime implements TurnHooks {
       const target = recorded.action === TIMELAPSE_ACTION ? parseTarget(params.target) : null;
       const overrides: Record<string, string> = {};
       for (const [k, v] of Object.entries(parseOverrides(params.overrides))) if (typeof v === "string") overrides[k] = v;
-      bridge.setIntent(text, recorded.action === TIMELAPSE_ACTION ? (target ? timelapseIntent(target, overrides) : null) : { action: recorded.action, params, probabilities: { [recorded.action]: 1 } });
+      // A Continue of a span the player's words spent keeps the POV where the story has it, as the span did.
+      bridge.setIntent(text, recorded.action === TIMELAPSE_ACTION ? (target ? timelapseIntent(target, overrides, 1, params.povRoutine !== false) : null) : { action: recorded.action, params, probabilities: { [recorded.action]: 1 } });
       return;
     }
     const run = runsOf(settings.modelUse, render.world, "interpret", facts, { guidance: at.guidance })[0];
@@ -1828,11 +1829,13 @@ export class Runtime implements TurnHooks {
     await this.ageNotes(input.chatId, input.userId, input.messageId);
     const headState = input.core.fold(input.observed).state;
     const chipWorld = input.core.worldAt(headState.revision) ?? input.core.worldAt(rec?.defHash ?? "");
+    // A span the player's words spent held the POV where the story has it; its Continue keeps that (DESIGN §8).
+    const hold: JsonObject = bridge.intentOf(userText)?.params.povRoutine === false ? { povRoutine: false } : {};
     for (const [i, chip] of (plan?.chips ?? []).entries()) {
       // DESIGN §9.2 wording: "Timelapse to 07:00 (8 h 55 min)?"
       const to = chip.target.type === "at" && chipWorld ? ` to ${shortClock(chipWorld, headState, chip.target.at)}` : "";
       const label = chip.kind === "timelapse_offer" ? `Timelapse${to} (${compactSpan(chip.remaining)})?` : `Continue timelapse (${compactSpan(chip.remaining)} left)`;
-      stored.push({ id: `tl:${at}:${i}`, kind: chip.kind, ...base, label, actions: [{ id: "timelapse", label: chip.kind === "timelapse_offer" ? "Timelapse" : "Continue", style: "primary" }], expires: "next_send", payload: { target: JSON.parse(JSON.stringify(chip.target)) as JsonValue } });
+      stored.push({ id: `tl:${at}:${i}`, kind: chip.kind, ...base, label, actions: [{ id: "timelapse", label: chip.kind === "timelapse_offer" ? "Timelapse" : "Continue", style: "primary" }], expires: "next_send", payload: { target: JSON.parse(JSON.stringify(chip.target)) as JsonValue, ...(chip.kind === "continue_timelapse" ? hold : {}) } });
     }
     // A typed timelapse longer than a turn runs on its own: offered, never run unasked. Time the
     // message lets pass after its actions isn't offered while some of them are left to play.
@@ -1855,7 +1858,7 @@ export class Runtime implements TurnHooks {
       const elapsed = summary.to - summary.from;
       const rest = summary.target.type === "duration" ? { type: "duration" as const, minutes: Math.max(1, summary.target.minutes - elapsed) } : summary.target;
       const left = rest.type === "duration" ? ` (${compactSpan(rest.minutes)} left)` : "";
-      stored.push({ id: `tl:${at}:stop`, kind: "continue_timelapse", ...base, label: `Timelapse stopped: ${summary.stoppedBy === "mind" ? (plan?.timelapse?.mindName ?? "someone") : STOP_LABEL[summary.stoppedBy]}`, detail: `Continue to the original target${left}?`, actions: [{ id: "timelapse", label: "Continue", style: "primary" }], expires: "next_send", payload: { target: JSON.parse(JSON.stringify(rest)) as JsonValue } });
+      stored.push({ id: `tl:${at}:stop`, kind: "continue_timelapse", ...base, label: `Timelapse stopped: ${summary.stoppedBy === "mind" ? (plan?.timelapse?.mindName ?? "someone") : STOP_LABEL[summary.stoppedBy]}`, detail: `Continue to the original target${left}?`, actions: [{ id: "timelapse", label: "Continue", style: "primary" }], expires: "next_send", payload: { target: JSON.parse(JSON.stringify(rest)) as JsonValue, ...hold } });
     }
     for (const [i, chip] of bridge.chipsFor(input.content).entries()) stored.push(skipAheadChip(`adv:${at}:${i}`, base, chip.target, chip.reason));
     await this.chips.add(input.chatId, input.userId, stored);
