@@ -19,6 +19,7 @@ import { MINDS_EVENTS, MINDS_SLOT, worldMindsOf, type MindCallTrace, type MindEv
 import { firedTimeout, TimeoutFired, TIMEOUTS } from "../shared/timeouts";
 import { mindsOn, mindsStepConfig, postMinds, preMinds, runMinds, type MindsDeps, type RunMindsResult } from "./minds";
 import { runSkip, type BeatMinds, type SkipRun } from "./skip";
+import { planSkip } from "./skip-plan";
 import { fitMindLines, mindLines } from "../packs/minds/core/section";
 import { namedInText } from "../packs/minds/core/fidelity";
 import { matchCatalog, transferCents } from "../packs/economy/core/index";
@@ -888,9 +889,22 @@ export class Runtime implements TurnHooks {
     lruSet(this.answeredMinds, p.generationId, { key: mindsKey, minds: mindsAnswered(minds.events) }, 64);
     this.mindsMissed(runAt, "pre", minds);
     if (text.trim() !== "") this.host.log("info", `[LumiRPEngine] plan ${String(input.generationId).slice(0, 8)}: intent ${bridge.intentOf(text)?.action ?? "none"} ${JSON.stringify(bridge.intentOf(text)?.params ?? {}).slice(0, 240)}, ${decisions.length} npc decision(s), ${minds.traces.length} mind(s), ${budget.spent} pre call(s)`, input.userId);
+    const intent = bridge.intentOf(text);
+    // A timelapse's informative people whose skip the model plans (#53) are planned once, as the span
+    // starts, from the state the plan starts from; the plan records it ahead of the timelapse. A Re-run
+    // or Retry keeps the plan this turn made.
+    if (intent?.action === TIMELAPSE_ACTION && !bridge.hasSkipPlan(text)) {
+      const from = input.core.planState(p.generationId, input.observed);
+      if (from) {
+        const start = new Working(this.registry, from.world, from.state);
+        start.applyAll(bridge.prePlan(text));
+        const journal = recentLines(input.core, input.observed, target < 0 ? input.observed.length : target, this.registry);
+        const log = (message: string): void => this.host.log("info", `[LumiRPEngine] plan ${p.generationId.slice(0, 8)}: ${message}`, input.userId);
+        bridge.setSkipPlan(text, await planSkip({ registry: this.registry, steps: this.steps, log }, { userId: input.userId, world: from.world, state: start.state, intent, runSeed: bridge.runSeed, reply: lastReply ? (lastReply.swipes[lastReply.swipeId] ?? "") : "", journal, signal: budget.signal, limit: settings.timeouts.skipPlanMs }));
+      }
+    }
     // A timelapse with minds on is a time skip (DESIGN §24.7): its beats and the minds at them are
     // found and recorded now, from exactly the state the plan starts from, and the plan replays them.
-    const intent = bridge.intentOf(text);
     const base = intent?.action === TIMELAPSE_ACTION && mindsOn(settings) ? input.core.planState(p.generationId, input.observed) : null;
     let skip: SkipRun | null = null;
     if (intent && base) {
