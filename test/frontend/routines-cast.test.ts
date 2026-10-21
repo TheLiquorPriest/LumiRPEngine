@@ -4,13 +4,20 @@
 import { describe, expect, test } from "bun:test";
 import type { QuietRequest } from "../../src/backend/host";
 import { createRegistry } from "../../src/engine/registry-impl";
+import { placeOfEntity } from "../../src/engine/scope";
+import { Working } from "../../src/engine/working";
 import { proposalWrites } from "../../src/frontend/build/jobs";
 import { citedSources, citesSource, editedProposals, editProblems, offeredProposals, proposeOwners, reviewGroups, reviewProblems, reviewTicked } from "../../src/frontend/build/propose-routines";
+import { dayPlan } from "../../src/packs/castlife/core/index";
+import { routinePlayerView } from "../../src/packs/castlife/core/view";
+import { usualDay } from "../../src/packs/castlife/ui/person";
 import { ALL_PACKS } from "../../src/packs/index";
 import type { JsonValue } from "../../src/shared/json";
 import type { JobProposal } from "../../src/shared/protocol";
 import { routineShapeProblems, type RoutineDef } from "../../src/shared/routines";
 import type { WorldDoc } from "../../src/shared/world";
+import { modernUsWorld } from "../packs/riverton";
+import { startState } from "../packs/support";
 import { Rig } from "../support/rig";
 
 /** The draft as Build's forms read it: the packs' kinds merged in, the world's own winning. */
@@ -156,5 +163,56 @@ describe("Build → Propose routines from lore", () => {
     expect(people).not.toContain("household_kowalczyk");
     expect(owners.groups.map((o) => o.value)).toContain("household_kowalczyk");
     expect(owners.groups.map((o) => o.value)).not.toContain("jess_kowalczyk");
+  });
+});
+
+describe("Cast → their usual day", () => {
+  test("it shows only what the player's projection gives: a secret's block is absent, a secret entry is never named, and someone with no day in Cast shows none", () => {
+    const reg = createRegistry(ALL_PACKS);
+    const world = modernUsWorld("w", "Riverton");
+    world.realism.levels.castlife = 3;
+    world.tracks.b_secret = { id: "b_secret", kind: "agenda", label: "Poison the mayor", owner: "maya", start: "buy", visibility: "secret", stages: { buy: { label: "Buy arsenic", priority: 9, next: [] } } };
+    world.lore.cafe_hours = { id: "cafe_hours", title: "Daybreak's hours", content: "Maya locks up the Daybreak Café every evening.", keys: [], links: [] };
+    world.lore.maya_debts = { id: "maya_debts", title: "Maya's debts", content: "Maya pawns something every week to cover what she owes.", keys: [], links: [], secret: true, gate: "self.cash > 100000000" };
+    // Maya's routine: a private block, one resting on the secret entry, and one on the public one.
+    world.routines = {
+      maya_days: {
+        id: "maya_days",
+        owner: "maya",
+        blocks: [
+          { id: "pawn", label: "Pawns her watch", activity: "errand", kind: "fixed", at: "16:00", minutes: 60, private: true, source: { type: "lore", entry: "maya_debts", quote: "pawns something every week" } },
+          { id: "tally", label: "Tallies the week", activity: "leisure", kind: "fixed", at: "21:00", minutes: 45, source: { type: "lore", entry: "maya_debts", quote: "to cover what she owes" } },
+          { id: "lock_up", label: "Locks up the café", activity: "work", kind: "fixed", at: "20:15", minutes: 30, source: { type: "lore", entry: "cafe_hours", quote: "locks up the Daybreak Café" } },
+        ],
+      },
+    };
+    const state = startState(world);
+    const here = placeOfEntity(state, world.pov);
+    const maya = state.entities.maya;
+    if (!here || !maya) throw new Error("no POV place, or no Maya");
+    maya.fields.place = here;
+    const ctx = new Working(reg, world, state).ctx;
+    // The planner, which isn't the player's, lays all of it.
+    const laid = dayPlan(ctx, "maya").blocks.map((b) => b.label);
+    for (const label of ["Pawns her watch", "Tallies the week", "Locks up the café", "Buy arsenic"]) expect(laid).toContain(label);
+
+    const day = usualDay(routinePlayerView(ctx, "maya"));
+    if (!day) throw new Error("Cast shows Maya a day, so her usual day shows");
+    const shown = JSON.stringify(day);
+    for (const secret of ["Pawns her watch", "Buy arsenic", "Poison the mayor", "Maya's debts", "maya_debts", "pawns something", "what she owes"]) expect(shown).not.toContain(secret);
+    expect(day.rows.filter((r) => r.label === "Busy").length).toBeGreaterThanOrEqual(2);
+    // The block resting on the secret entry still shows, as their routine; the public entry is named.
+    const tally = day.rows.find((r) => r.label === "Tallies the week");
+    const open = day.rows.find((r) => r.label === "Locks up the café");
+    expect(tally?.source).toBeDefined();
+    expect(open?.source).toContain("Daybreak's hours");
+    expect(tally?.source).toBe(day.rows.find((r) => r.label === "Busy")?.source);
+    // No place or company reaches it.
+    for (const place of Object.values(world.places)) expect(shown).not.toContain(place.name);
+
+    // Away from the POV, Cast shows Maya no day, and so no usual day.
+    maya.fields.place = "office";
+    expect(usualDay(routinePlayerView(new Working(reg, world, state).ctx, "maya"))).toBeNull();
+    expect(usualDay(null)).toBeNull();
   });
 });
