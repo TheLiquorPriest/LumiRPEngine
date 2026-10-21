@@ -153,7 +153,7 @@ Interrupt classes: `invitation`, `bill`, `decline`, `incident`, `quest`, `rule`,
 
 ### Lore pins
 
-The world's `lorePins` part: `characters` and `places`, each a map from an id to a list of pins, where a pin is `{"lore": id}` (one of the world's lore entries) or `{"book": id, "entry": id}` (an entry of one of the user's World Info books). A character's pins reach only their own mind's calls; a place's reach every helper and mind call there or in a place inside it, nearest place first. Pinned text comes first within a call's lore tokens, and a pin that doesn't fit is cut, with a note in the Context panel.
+The world's `lorePins` part: `characters` and `places`, each a map from an id to a list of pins, where a pin is `{"lore": id}` (one of the world's lore entries) or `{"book": id, "entry": id}` (an entry of one of the user's World Info books). A character's pins reach only their own mind's calls; a place's reach every helper and mind call there or in a place inside it, nearest place first. Pinned text comes first within a helper call's lore tokens, or within the pinned lore a mind reads (Settings → Minds → What a mind reads), and a pin that doesn't fit is cut, with a note in the Context panel.
 
 | Lint | Means |
 |---|---|

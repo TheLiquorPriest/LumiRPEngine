@@ -12,6 +12,7 @@ import { useEffect, useState } from "preact/hooks";
 import type { JsonObject } from "../../shared/json";
 import type { ModelUsePresetId } from "../../shared/ids";
 import { PROSE_STEPS } from "../../shared/lore";
+import { isMindPurpose } from "../../shared/minds";
 import type { HelperDefault, LorePolicy, LoreTransport, ModelUseSettings, ReasoningChoice, SamplingParams, StepConfig, StepRoute } from "../../shared/settings";
 import { helperCallOf, REASONING_CHOICES, recentOf, SAMPLING_PARAMS, stepConfigOf, stepLoreOf } from "../../shared/settings";
 import type { CallMeterView } from "../../shared/state-view";
@@ -439,16 +440,23 @@ function StepCard(props: { purpose: StepPurpose; config: StepConfig; helper: Hel
             />
             <span class="lre-field-help">The step runs when one of these fires. “always” fires every turn; “never” turns the step off and wins over the rest.</span>
           </label>
-          <Field label="Lore">
-            <Seg<LorePolicy> label="Lore" value={lore.policy} options={LORE_POLICY} disabled={busy} onChange={(policy) => update({ ...config, lore: { ...lore, policy } })} />
-          </Field>
-          {lore.policy !== "none" ? <NumberStepper label="Lore tokens" value={lore.tokens} min={0} step={100} integer disabled={busy} onChange={(tokens) => update({ ...config, lore: { ...lore, tokens } })} /> : null}
-          {lore.policy === "lookup" || lore.policy === "prefetch+lookup" ? (
-            <Field label="Lookups by">
-              <Seg<LoreTransport> label="Lookups by" value={lore.transport ?? "auto"} options={LORE_TRANSPORT} disabled={busy} onChange={(transport) => update({ ...config, lore: { ...lore, transport } })} />
-            </Field>
-          ) : null}
-          {lore.policy !== "none" && PROSE_STEPS.includes(purpose) ? <div class="lre-small lre-muted">Reads no secret lore: what it writes reaches the narrator or the player.</div> : null}
+          {isMindPurpose(purpose) ? (
+            // A minds step has no lore of its own: what a mind reads, its lore included, is Settings → Minds' (DESIGN §24.6).
+            <div class="lre-small lre-muted">{purpose === "mind" ? "What a mind reads, its lore included, is set in Settings → Minds → What a mind reads." : "Reads no world lore."}</div>
+          ) : (
+            <>
+              <Field label="Lore">
+                <Seg<LorePolicy> label="Lore" value={lore.policy} options={LORE_POLICY} disabled={busy} onChange={(policy) => update({ ...config, lore: { ...lore, policy } })} />
+              </Field>
+              {lore.policy !== "none" ? <NumberStepper label="Lore tokens" value={lore.tokens} min={0} step={100} integer disabled={busy} onChange={(tokens) => update({ ...config, lore: { ...lore, tokens } })} /> : null}
+              {lore.policy === "lookup" || lore.policy === "prefetch+lookup" ? (
+                <Field label="Lookups by">
+                  <Seg<LoreTransport> label="Lookups by" value={lore.transport ?? "auto"} options={LORE_TRANSPORT} disabled={busy} onChange={(transport) => update({ ...config, lore: { ...lore, transport } })} />
+                </Field>
+              ) : null}
+              {lore.policy !== "none" && PROSE_STEPS.includes(purpose) ? <div class="lre-small lre-muted">Reads no secret lore: what it writes reaches the narrator or the player.</div> : null}
+            </>
+          )}
         </Disclosure>
       </Disclosure>
     </div>

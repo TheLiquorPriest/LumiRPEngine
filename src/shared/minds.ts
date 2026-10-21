@@ -85,8 +85,8 @@ export type MindsSecrecy = "full" | "brief";
 export interface MindsMemoryConfig {
   /** Witness log entries shown to a mind (the state keeps the latest `WITNESS_KEEP`). */
   witness: { show: number };
-  /** Recall by presence: the latest turns the character was there for, the ones that best match the moment, and the tokens they may take. */
-  recall: { recent: number; relevant: number; tokens: number };
+  /** Recall by presence: the latest turns the character was there for, the ones that best match the moment, and the most tokens they may take ("none": no limit). */
+  recall: { recent: number; relevant: number; tokens: Limit };
   /** Notes shown to a mind, and how many a character keeps before consolidation folds the oldest into their summary. */
   notes: { show: number; keep: number };
   /** Open commitments shown to a mind; they are kept until resolved, whatever this says. */
@@ -161,6 +161,8 @@ export const MINDS_RANGES = {
 
 const num = (v: unknown, [lo, hi]: readonly [number, number], fallback: number): number => (typeof v === "number" && Number.isFinite(v) && v >= lo && v <= hi ? v : fallback);
 const whole = (v: unknown, range: readonly [number, number], fallback: number): number => Math.round(num(v, range, fallback));
+/** A whole number within its range, or "none" (no limit); anything else is `fallback`. */
+const wholeOrNone = (v: unknown, range: readonly [number, number], fallback: Limit): Limit => (v === "none" ? "none" : typeof v === "number" && Number.isFinite(v) && v >= range[0] && v <= range[1] ? Math.round(v) : fallback);
 const obj = (v: unknown): Record<string, unknown> => (isRecord(v) ? v : {});
 
 function selectorOrNull(v: unknown): Selector | null {
@@ -200,7 +202,7 @@ export function memoryConfigOf(raw: unknown, base: Readonly<MindsMemoryConfig> =
   const consolidate = obj(m.consolidate);
   return {
     witness: { show: whole(witness.show, MINDS_RANGES.show, base.witness.show) },
-    recall: { recent: whole(recall.recent, MINDS_RANGES.show, base.recall.recent), relevant: whole(recall.relevant, MINDS_RANGES.show, base.recall.relevant), tokens: whole(recall.tokens, MINDS_RANGES.recallTokens, base.recall.tokens) },
+    recall: { recent: whole(recall.recent, MINDS_RANGES.show, base.recall.recent), relevant: whole(recall.relevant, MINDS_RANGES.show, base.recall.relevant), tokens: wholeOrNone(recall.tokens, MINDS_RANGES.recallTokens, base.recall.tokens) },
     notes: { show: whole(notes.show, MINDS_RANGES.show, base.notes.show), keep: whole(notes.keep, MINDS_RANGES.keep, base.notes.keep) },
     commitments: { show: whole(commitments.show, MINDS_RANGES.show, base.commitments.show) },
     salience: { halfLifeDays: num(salience.halfLifeDays, MINDS_RANGES.halfLifeDays, base.salience.halfLifeDays), floor: num(salience.floor, MINDS_RANGES.floor, base.salience.floor) },
@@ -299,7 +301,48 @@ export function worldMindTemplate(world: Pick<WorldDoc, "steps">, purpose: MindP
 /** The user's overrides of a world's memory config: whatever they set wins, part by part. */
 export type MindsMemoryOverrides = { [K in keyof MindsMemoryConfig]?: Partial<MindsMemoryConfig[K]> };
 
-/** `UserSettings.minds` (DESIGN §24.6). A named Model use preset sets everything here but `prompts`, `memory` and `replyTokens`. */
+/**
+ * The sources a mind's context is read from (DESIGN §24.5, Settings → Minds → What a mind reads), in
+ * the order Settings lists them: the story as it stands (the lore pinned to them and to where they
+ * are, the lore the turn activates, the latest reply and the player's message), then their own
+ * summary, notes and what they saw, last thoughts, recall of the turns they were there for, and their
+ * life (money, the day, commitments and plans). Who they are, where they are and what they mean to do
+ * are in every context, outside these.
+ */
+export type MindSource = "pinned" | "activated" | "reply" | "message" | "summary" | "memory" | "thoughts" | "recall" | "life";
+export const MIND_SOURCES: readonly MindSource[] = ["pinned", "activated", "reply", "message", "summary", "memory", "thoughts", "recall", "life"];
+
+/** One source as the user sets it: whether a mind reads it, and the most it may take, in tokens ("none": no limit). */
+export interface MindRead {
+  on: boolean;
+  tokens: Limit;
+}
+
+/**
+ * What a mind reads: each source on or off with its own limit. Recall's limit is the memory setting
+ * it always had (`recall.tokens`: the world's, or the user's override), so its entry is the switch.
+ */
+export type MindsReads = Record<Exclude<MindSource, "recall">, MindRead> & { recall: Pick<MindRead, "on"> };
+
+/**
+ * What a mind reads unless the user says otherwise: the story as it stands, and nothing of its own
+ * memory or life. Each of those can carry what no story set up: the day the Cast life planner lays
+ * (meals, friends, outings), plans and commitments the memory step took from narration that
+ * depicted another mind, and older replies and thoughts that acted on them (DESIGN §24.5).
+ */
+export const DEFAULT_MIND_READS: Readonly<MindsReads> = Object.freeze({
+  pinned: { on: true, tokens: "none" },
+  activated: { on: true, tokens: 1600 },
+  reply: { on: true, tokens: "none" },
+  message: { on: true, tokens: "none" },
+  summary: { on: false, tokens: "none" },
+  memory: { on: false, tokens: "none" },
+  thoughts: { on: false, tokens: "none" },
+  recall: { on: false },
+  life: { on: false, tokens: "none" },
+});
+
+/** `UserSettings.minds` (DESIGN §24.6). A named Model use preset sets everything here but `reads`, `memory` and `prompts`. */
 export interface MindsSettings {
   enabled: boolean;
   /** How many Live minds run a turn, best score first; the rest wait for Near's triggers. */
@@ -313,8 +356,8 @@ export interface MindsSettings {
   memoryLevels: Fidelity[];
   /** The Minds section's own token budget, apart from the shared section budget (DESIGN §24.3). */
   tokens: number;
-  /** How much of the latest reply a mind and the memory step read, by its end, in tokens; "none" reads it whole (DESIGN §24.5). The user's own: no preset sets it. */
-  replyTokens: Limit;
+  /** What a mind reads (DESIGN §24.5): the user's own, so no preset sets it. The memory step reads the turn within the reply's and the message's limits too. */
+  reads: MindsReads;
   memory: MindsMemoryOverrides;
   /** The user's own prompt for a purpose, which wins over a world template; absent, the world's (`worldMindTemplate`), else the built-in (`MIND_PROMPT_DEFAULTS`). */
   prompts: Partial<Record<MindPurpose, string>>;
@@ -322,7 +365,7 @@ export interface MindsSettings {
   skip: { maxBeats: Limit; maxMindsPerBeat: Limit };
 }
 
-type PresetMinds = Omit<MindsSettings, "prompts" | "memory" | "replyTokens">;
+type PresetMinds = Omit<MindsSettings, "prompts" | "memory" | "reads">;
 
 /** The minds part of each Model use preset (D25): Lean off; Standard 3 Live with notes for Live; Full no limit with notes for Live and Near. */
 export const MINDS_PRESETS: Readonly<Record<"lean" | "standard" | "full", Readonly<PresetMinds>>> = Object.freeze({
@@ -331,9 +374,9 @@ export const MINDS_PRESETS: Readonly<Record<"lean" | "standard" | "full", Readon
   full: { enabled: true, liveLimit: "none", nearRefresh: { scene: true, mention: true, turns: 4, minutes: 60 }, farRefreshMinutes: 720, refreshLimit: "none", memoryLevels: ["live", "near"], tokens: 4000, skip: { maxBeats: "none", maxMindsPerBeat: "none" } },
 });
 
-/** A new user's minds settings: Standard's, reading the whole latest reply. */
+/** A new user's minds settings: Standard's, reading what minds read by default. */
 export function defaultMindsSettings(preset: keyof typeof MINDS_PRESETS = "standard"): MindsSettings {
-  return { ...structuredClone(MINDS_PRESETS[preset]) as PresetMinds, replyTokens: "none", memory: {}, prompts: {} };
+  return { ...structuredClone(MINDS_PRESETS[preset]) as PresetMinds, reads: structuredClone(DEFAULT_MIND_READS), memory: {}, prompts: {} };
 }
 
 /** Kept equal to `defaultMindsSettings()`: what Settings shows as the defaults. */
@@ -362,6 +405,55 @@ function memoryOverridesOf(raw: unknown): MindsMemoryOverrides {
   return out;
 }
 
+/** One source as stored, checked: a switch, and a whole number of tokens from 1 or "none"; what doesn't read is `base`'s. */
+function readOf(raw: unknown, base: Readonly<MindRead>): MindRead {
+  const r = obj(raw);
+  return { on: typeof r.on === "boolean" ? r.on : base.on, tokens: limitIn(r.tokens, 1, Number.MAX_SAFE_INTEGER, base.tokens) };
+}
+
+/** What a mind reads as stored, each source checked, else `base`'s. */
+function readsOf(raw: unknown, base: Readonly<MindsReads>): MindsReads {
+  const r = obj(raw);
+  const recall = obj(r.recall);
+  return {
+    pinned: readOf(r.pinned, base.pinned),
+    activated: readOf(r.activated, base.activated),
+    reply: readOf(r.reply, base.reply),
+    message: readOf(r.message, base.message),
+    summary: readOf(r.summary, base.summary),
+    memory: readOf(r.memory, base.memory),
+    thoughts: readOf(r.thoughts, base.thoughts),
+    recall: { on: typeof recall.on === "boolean" ? recall.on : base.recall.on },
+    life: readOf(r.life, base.life),
+  };
+}
+
+/**
+ * A settings file saved before minds had what they read (`minds.reads`), read as before where the
+ * user had a say: the reply allowance it replaces (`minds.replyTokens`) is the latest reply's limit,
+ * and the lore setting of Settings → Steps' Character minds card, which no longer has one, gives each
+ * lore source its tokens (or turns both off where that lore was off), so neither reads less than the
+ * card allowed. The switches take the new defaults: what minds read before let the planner's day and
+ * plans made from other minds into them. A file that has `reads`, or no minds settings, comes back as it is.
+ */
+export function migrateMindReads(raw: JsonObject): JsonObject {
+  const minds = raw.minds;
+  if (!isRecord(minds) || minds.reads !== undefined) return raw;
+  const { replyTokens, ...rest } = minds;
+  const reads: JsonObject = { reply: { tokens: limitIn(replyTokens, 1, Number.MAX_SAFE_INTEGER, DEFAULT_MIND_READS.reply.tokens) } };
+  const steps: JsonObject = isRecord(raw.modelUse) && isRecord(raw.modelUse.steps) ? raw.modelUse.steps : {};
+  const lore = isRecord(steps.mind) && isRecord(steps.mind.lore) ? steps.mind.lore : null;
+  const tokens = lore && typeof lore.tokens === "number" && Number.isSafeInteger(lore.tokens) && lore.tokens >= 0 ? lore.tokens : null;
+  if (lore && (lore.policy === "none" || tokens === 0)) {
+    reads.pinned = { on: false };
+    reads.activated = { on: false };
+  } else if (tokens !== null) {
+    reads.pinned = { tokens };
+    reads.activated = { tokens };
+  }
+  return { ...raw, minds: { ...rest, reads } };
+}
+
 /** `UserSettings.minds` as the engine reads it: each field checked, else `base`'s (the preset's). */
 export function mindsSettingsOf(raw: unknown, base: Readonly<MindsSettings> = MINDS_DEFAULTS): MindsSettings {
   const m = obj(raw);
@@ -387,7 +479,7 @@ export function mindsSettingsOf(raw: unknown, base: Readonly<MindsSettings> = MI
     refreshLimit: limitIn(m.refreshLimit, 0, 64, base.refreshLimit),
     memoryLevels: levels,
     tokens: typeof m.tokens === "number" && Number.isSafeInteger(m.tokens) && m.tokens >= 0 ? m.tokens : base.tokens,
-    replyTokens: limitIn(m.replyTokens, 1, Number.MAX_SAFE_INTEGER, base.replyTokens),
+    reads: readsOf(m.reads, base.reads),
     memory: isRecord(m.memory) ? memoryOverridesOf(m.memory) : structuredClone(base.memory),
     prompts: isRecord(m.prompts) ? prompts : { ...base.prompts },
     skip: { maxBeats: limitIn(skip.maxBeats, 0, 200, base.skip.maxBeats), maxMindsPerBeat: limitIn(skip.maxMindsPerBeat, 0, 64, base.skip.maxMindsPerBeat) },
@@ -754,9 +846,9 @@ export type MindEditOp =
   | { op: "mind_memory"; entity: EntityId; part: "note" | "commitment" | "plan"; id: string | null; value: JsonObject | null };
 
 /**
- * A pinned lore entry a call was given (DESIGN §24.5), as a player surface may show it: its title
- * (or "A hidden entry" when the title would say what the player doesn't know), its token cost, and
- * whether it was cut to fit the call's lore tokens.
+ * A lore entry a call was given (DESIGN §24.5), as a player surface may show it: its title (or "A
+ * hidden entry" when the title would say what the player doesn't know), its token cost, and whether
+ * it was cut to fit its limit.
  */
 export interface PinnedTrace {
   title: string;
@@ -781,7 +873,9 @@ export interface MindCallTrace {
   prompt: "world" | "override" | "default";
   /** The pinned lore it was given (DESIGN §24.5) that the player may know of; absent: none. */
   pinned?: PinnedTrace[];
-  /** What the player should know of how it went: pinned lore cut or left out over the lore tokens. */
+  /** The lore the turn activated that it was given, the player may know of; absent: none. */
+  activated?: PinnedTrace[];
+  /** What the player should know of how it went: lore cut or left out over what a mind reads of it, and why. */
   notes?: string[];
 }
 

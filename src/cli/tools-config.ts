@@ -29,7 +29,7 @@ interface SettingsRoot {
 const SECTIONS: Readonly<Record<string, string>> = {
   helper: "Helper model: the connection (connectionId, null for Lumiverse's default), model, effort, maxTokens and sampling params every helper call runs on unless its step chooses otherwise.",
   modelUse: 'Model use (preset "lean", "standard", "full" or "custom"; budgets.pre and budgets.post: calls and lookup.calls; tokens.sections) and Steps and connections (steps.<purpose>: enabled, signals, route {provider, connectionId, model, effort, params}, template, maxTokens, lore, recent).',
-  minds: "Minds: on or off, the Live limit, refresh, memory levels and overrides, the Minds section's tokens, how much of the reply minds read, their prompts, time-skip caps.",
+  minds: 'Minds: on or off, the Live limit, refresh, memory levels and overrides, the Minds section\'s tokens, what a mind reads (reads.<source>: on and tokens, "none" for no limit; recall\'s tokens are memory.recall.tokens), their prompts, time-skip caps.',
   timeouts: "Timeouts: every wall clock the engine keeps (milliseconds, or \"none\").",
   realism: 'Realism for new chats (preset "story", "grounded", "simulation" or "custom"; levels per domain; tierCaps per band) and Player claims (claims: mode and capped).',
   overrideWorldDefaults: "Realism and Time: new chats use these settings over a world's own defaults.",
