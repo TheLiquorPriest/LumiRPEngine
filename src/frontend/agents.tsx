@@ -1,7 +1,8 @@
 // The MCP servers that follow LumiRPEngine (DESIGN §23): the update notice at the top of the drawer
 // and Settings → MCP server. Each server's line comes from its check-ins (pushed as servers check
 // in, so a line turns as soon as one reloads); Update now asks one to reload. A server Lumiverse
-// runs itself checks in like any other: this page calls none of Lumiverse's own routes, which are
+// runs itself checks in like any other, and Reconnect in Lumiverse asks its processes to exit so
+// Lumiverse connects them again: this page calls none of Lumiverse's own routes, which are
 // Lumiverse's rather than Spindle's, and a command set through them would run outside Spindle's sandbox.
 
 import { useEffect } from "preact/hooks";
@@ -19,7 +20,7 @@ function copy(app: App, text: string): void {
   );
 }
 
-/** Each server's line, with Update now, the commands that fix it, and (in Settings) Forget. */
+/** Each server's line, with Update now or Reconnect in Lumiverse, the commands that fix it, and (in Settings) Forget. */
 function Servers(props: { view: AgentsView; forget?: boolean }) {
   const app = useApp();
   if (props.view.clients.length === 0) return <Empty icon="info">No MCP server has checked in from this account yet.</Empty>;
@@ -34,6 +35,11 @@ function Servers(props: { view: AgentsView; forget?: boolean }) {
               {line.update ? (
                 <Button size="sm" variant="primary" onClick={() => void app.request({ type: "lre.agents", op: "update", client: client.id }).then((r) => r && app.toast("Asked it to reload: its line turns once it has"))}>
                   Update now
+                </Button>
+              ) : null}
+              {line.reconnect ? (
+                <Button size="sm" variant="primary" onClick={() => void app.request({ type: "lre.agents", op: "reconnect", client: client.id }).then((r) => r?.view && app.agents.set(r.view))}>
+                  Reconnect in Lumiverse
                 </Button>
               ) : null}
               {line.copy.map((c) => (

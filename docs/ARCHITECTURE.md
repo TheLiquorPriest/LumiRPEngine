@@ -335,6 +335,7 @@ Raw sources in `data-src/us/*.json` are never imported. `scripts/tables/build.ts
 - token counts from the host tokenizer;
 - the world's lore book (create, check, list, add and delete entries) and a dry-run assembly of a chat's next prompt;
 - the active preset and the default connection;
+- Lumiverse's MCP server profiles, read only: whether `mcp_servers` is granted, the stdio profiles by id and name, and each one's connection and the tools Lumiverse's client holds for it (`backend/lumiverse-mcp.ts` matches lumirpengine's; DESIGN §23);
 - the background lane's child process (spawn, messages, lifecycle);
 - frontend messaging, closing the drawer, and logging;
 - the shared RPC pool: serving this extension's endpoints (with the reader's id and a read policy) and reading another extension's.

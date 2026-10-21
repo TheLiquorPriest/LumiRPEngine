@@ -2,11 +2,15 @@
 // commit's short SHA, marked when the sources have uncommitted changes (their code isn't the
 // commit's, and the ledger's snapshots and the MCP servers' follow check key on the id), or the
 // time when there is no git to ask. The agent kit is built first: its sha256 goes into the backend,
-// which tells outside clients where the kit is and what it hashes to.
+// which tells outside clients where the kit is and what it hashes to, and so do the fingerprints of
+// its two tool lists (read-only and full), by which the backend knows whether Lumiverse's own MCP
+// client holds this build's tools for a profile (Reconnect in Lumiverse).
 
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
+import { kitOf } from "../src/cli/kit-api";
+import { toolsFingerprint } from "../src/shared/agents";
 
 const ROOT = resolve(import.meta.dir, "..");
 const seconds = Math.floor(Date.now() / 1000);
@@ -32,7 +36,15 @@ function bundle(entry: string, out: string, target: "bun" | "node" | "browser", 
 const stamp = { "process.env.LRE_BUILD_ID": id };
 bundle("src/cli/agent-kit.ts", "dist/agent-kit.js", "node", stamp);
 const kitSha256 = createHash("sha256").update(readFileSync(join(ROOT, "dist/agent-kit.js"))).digest("hex");
-bundle("src/backend.ts", "dist/backend.js", "bun", { ...stamp, "process.env.LRE_KIT_SHA256": kitSha256 });
+// The bundle just built, not the sources: its lists are what a server answers tools/list with.
+const built = kitOf(await import(join(ROOT, "dist/agent-kit.js")));
+if (typeof built === "string") {
+  console.error(`build: dist/agent-kit.js can't be loaded: ${built}`);
+  process.exit(1);
+}
+// As Lumiverse's client keeps a listed tool (an absent description is "", an absent schema {}).
+const listFingerprint = (readOnly: boolean): string => toolsFingerprint(built.tools(readOnly).map((t) => ({ name: t.name, description: t.description || "", input_schema: t.inputSchema || {} })));
+bundle("src/backend.ts", "dist/backend.js", "bun", { ...stamp, "process.env.LRE_KIT_SHA256": kitSha256, "process.env.LRE_TOOLS_FULL": listFingerprint(false), "process.env.LRE_TOOLS_READ_ONLY": listFingerprint(true) });
 bundle("src/frontend.ts", "dist/frontend.js", "browser", stamp);
 bundle("src/worker/background-lane.ts", "dist/worker/background-lane.js", "bun", stamp);
 bundle("src/cli/main.ts", "dist/lumirpengine.js", "node", stamp);

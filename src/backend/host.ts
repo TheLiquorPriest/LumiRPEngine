@@ -6,6 +6,7 @@
 // Shapes mirror the observed payloads: event payloads carry no userId, which the host passes
 // as the handler's second argument.
 
+import type { ListedTool } from "../shared/agents";
 import type { JsonObject, JsonValue } from "../shared/json";
 import type { ReasoningChoice, SamplingParams } from "../shared/settings";
 import type { Limit } from "../shared/minds";
@@ -445,6 +446,18 @@ export interface HostPort {
   connections: {
     /** The user's default connection: the one a generation without its own route uses. */
     active(userId: UserId): Promise<{ id: string; name: string } | null>;
+  };
+  /**
+   * Lumiverse's MCP server profiles (`spindle.mcp.servers`, the `mcp_servers` permission; DESIGN §23,
+   * G13), read to find the ones that run lumirpengine. Nothing here creates, changes or connects one.
+   */
+  mcp: {
+    /** Whether `mcp_servers` is granted now. */
+    granted(): boolean;
+    /** The user's stdio profiles, each by its id and name: nothing else of a profile is kept. */
+    stdioProfiles(userId: UserId): Promise<{ id: string; name: string }[]>;
+    /** Whether Lumiverse's client is connected to the profile, and the tools it holds for it, as the server listed them. */
+    status(profileId: string, userId: UserId): Promise<{ connected: boolean; tools: ListedTool[] }>;
   };
   regex: {
     /** Chat-scoped scripts: one chat's, or with null every chat's. */

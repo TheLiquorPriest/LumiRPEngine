@@ -2,12 +2,12 @@
 
 import { describe, expect, test } from "bun:test";
 import { serverLine, setupSection } from "../../src/frontend/agents-view";
-import type { AgentClientView, AgentsView } from "../../src/shared/agents";
+import type { AgentClientView, AgentsView, LumiverseRunView } from "../../src/shared/agents";
 import { followCommands, NPM_INSTALL } from "../../src/shared/agents";
 
 const CORE = "/srv/lumiverse/data/extensions/lumi_rp_engine/repo/dist/lumirpengine.js";
 const view: AgentsView = { build: "b2", notice: { build: "b2", previous: "a1", at: 1 }, setup: { core: CORE, commands: followCommands(CORE) }, clients: [] };
-const client = (over: Partial<AgentClientView>): AgentClientView => ({ id: "c1", name: "lumirpengine", version: "0.0.1", host: "studio", harness: null, core: "c0", kit: "b2", follows: true, why: null, seen: 1, connected: true, processes: 1, state: "updated", ...over });
+const client = (over: Partial<AgentClientView>): AgentClientView => ({ id: "c1", name: "lumirpengine", version: "0.0.1", host: "studio", harness: null, core: "c0", kit: "b2", follows: true, why: null, seen: 1, connected: true, processes: 1, state: "updated", lumiverse: null, ...over });
 /** The setup to copy, as every line that offers it does: Bun first, which Lumiverse's machine always has, then Node. */
 const SETUP = [
   { label: "Copy the setup for Bun 1.4 or newer", text: `bun ${CORE} mcp` },
@@ -16,7 +16,7 @@ const SETUP = [
 
 describe("each server's line", () => {
   test("reloaded, not yet with Update now, and can't follow with why and what fixes it", () => {
-    expect(serverLine(client({}), view)).toEqual({ state: "updated", text: "lumirpengine on studio reloaded this build's tools.", update: false, copy: [] });
+    expect(serverLine(client({}), view)).toEqual({ state: "updated", text: "lumirpengine on studio reloaded this build's tools.", update: false, reconnect: false, copy: [] });
     expect(serverLine(client({ harness: "claude-code" }), view).text).toBe("lumirpengine for claude-code on studio reloaded this build's tools.");
     expect(serverLine(client({ state: "behind", kit: "a1" }), view)).toMatchObject({ update: true, text: "lumirpengine on studio hasn't reloaded this build's tools yet." });
     expect(serverLine(client({ state: "behind", kit: "a1", connected: false }), view).text).toContain("hasn't checked in since LumiRPEngine restarted");
@@ -25,7 +25,7 @@ describe("each server's line", () => {
     expect(serverLine(client({ state: "cannot", kit: "a1", follows: false, why: { code: "unreadable", text: "can't be read here" } }), view).copy).toEqual(SETUP);
     // On a Bun that can't load a kit, the setup that follows is the fix, under a Bun that can or under Node.
     const cannot = "run it with Bun 1.4 or newer, or Node 22 or newer (Bun before 1.4 can't load the kit)";
-    expect(serverLine(client({ state: "cannot", kit: "a1", follows: false, why: { code: "runtime", text: cannot } }), view)).toEqual({ state: "cannot", text: `lumirpengine on studio can't follow LumiRPEngine: ${cannot}.`, update: false, copy: SETUP });
+    expect(serverLine(client({ state: "cannot", kit: "a1", follows: false, why: { code: "runtime", text: cannot } }), view)).toEqual({ state: "cannot", text: `lumirpengine on studio can't follow LumiRPEngine: ${cannot}.`, update: false, reconnect: false, copy: SETUP });
   });
 
   test("a server from before following gets the one-time install and the setup that follows, Bun first, each to copy", () => {
@@ -42,14 +42,51 @@ describe("each server's line", () => {
     // One, or none heard from lately: nothing to count.
     for (const processes of [0, 1]) expect(serverLine(client({ harness: "claude-code", processes }), view).text).toBe("lumirpengine for claude-code on studio reloaded this build's tools.");
   });
+});
 
-  test("a server Lumiverse runs itself is a line like any other; once it reloads, the line says Lumiverse's MCP client keeps its old tool list until the server restarts, and where to restart it", () => {
-    const updated = serverLine(client({ harness: "lumiverse" }), view);
-    expect(updated).toMatchObject({ state: "updated", update: false, copy: [] });
-    expect(updated.text).toStartWith("lumirpengine for lumiverse on studio reloaded this build's tools, but Lumiverse's MCP client keeps its old tool list until the server restarts");
-    expect(updated.text).toContain("Lumiverse's Settings → MCP Servers, Disconnect it and Connect it again");
+describe("a server Lumiverse runs", () => {
+  const run = (over: Partial<LumiverseRunView>): AgentClientView => client({ harness: "lumiverse", lumiverse: { stale: 0, unknown: 0, profiles: null, reconnect: null, ...over } });
+  const BY_HAND = "Lumiverse's Settings → MCP Servers, Disconnect it and Connect it again";
+
+  test("once it reloads while Lumiverse's client holds the old list, the line offers Reconnect in Lumiverse; without mcp_servers it says Lumiverse's own list can't be checked, and how to grant it", () => {
+    const without = serverLine(run({ stale: 1 }), view);
+    expect(without).toMatchObject({ state: "updated", update: false, reconnect: true, copy: [] });
+    // Says the client holds the old list, that Lumiverse's own list can't be checked, and where the permission is granted.
+    expect(without.text).toContain("keeps the list it got when it connected");
+    expect(without.text).toContain("can't check Lumiverse's own tool list");
+    expect(without.text).toContain("Mcp Servers permission");
+    const granted = serverLine(run({ stale: 1, profiles: [{ name: "LumiRPEngine", current: false }] }), view);
+    expect(granted.reconnect).toBe(true);
+    expect(granted.text).not.toContain("permission");
     // Not yet: Update now reaches it as it does any other server.
-    expect(serverLine(client({ harness: "lumiverse", state: "behind", kit: "a1" }), view)).toMatchObject({ update: true, text: "lumirpengine for lumiverse on studio hasn't reloaded this build's tools yet." });
+    expect(serverLine(client({ harness: "lumiverse", state: "behind", kit: "a1", lumiverse: { stale: 0, unknown: 0, profiles: null, reconnect: null } }), view)).toMatchObject({ update: true, reconnect: false, text: "lumirpengine for lumiverse on studio hasn't reloaded this build's tools yet." });
+  });
+
+  test("a process from before Reconnect in Lumiverse, or an old list Spindle shows with no process to ask, keeps today's instruction", () => {
+    for (const line of [serverLine(run({ unknown: 1 }), view), serverLine(run({ profiles: [{ name: "LumiRPEngine", current: false }] }), view)]) {
+      expect(line).toMatchObject({ reconnect: false, update: false });
+      expect(line.text).toStartWith("lumirpengine for lumiverse on studio reloaded this build's tools, but Lumiverse's MCP client keeps its old tool list until the server restarts");
+      expect(line.text).toContain(BY_HAND);
+    }
+  });
+
+  test("while it waits nothing is offered; back, the line reads updated (by Lumiverse's own list with mcp_servers); not back in time, it gives the wait, today's instruction and Reconnect again", () => {
+    const waiting = serverLine(run({ stale: 1, reconnect: { state: "waiting", waitMs: 60_000, through: "server" } }), view);
+    expect(waiting).toMatchObject({ reconnect: false, update: false, copy: [] });
+    expect(waiting.text).toContain("Waiting for it back");
+    const current = serverLine(run({ profiles: [{ name: "LumiRPEngine", current: true }] }), view);
+    expect(current).toMatchObject({ state: "updated", update: false, reconnect: false, copy: [] });
+    expect(current.text).toContain("Lumiverse's MCP client has them");
+    const unchecked = serverLine(run({}), view);
+    expect(unchecked).toMatchObject({ reconnect: false, update: false });
+    expect(unchecked.text).toContain("gave them to Lumiverse's MCP client when it connected");
+    expect(unchecked.text).toContain("can't check Lumiverse's own tool list");
+    const late = serverLine(run({ stale: 1, reconnect: { state: "late", waitMs: 60_000, through: "lumiverse" } }), view);
+    expect(late.reconnect).toBe(true);
+    // The wait it was given, and where it is set; then by hand.
+    expect(late.text).toContain("within 1 min (Settings → Timeouts → MCP server reconnect)");
+    expect(late.text).toContain(BY_HAND);
+    expect(serverLine(run({ reconnect: { state: "late", waitMs: null, through: "server" } }), view).text).not.toContain("within");
   });
 });
 
