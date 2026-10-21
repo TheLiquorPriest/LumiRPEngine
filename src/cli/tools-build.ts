@@ -8,7 +8,7 @@ import type { JsonObject, JsonValue } from "../shared/json";
 import { hasOwn, isRecord } from "../shared/json";
 import { planProfile, PROFILE_IDS, PROFILES, type ProfileChoice, type ProfileId } from "../shared/profiles/index";
 import type { JsonPatchOp, ResultBodies } from "../shared/protocol";
-import { DEFAULT_ROUTINE_SETTINGS, routineSettingsOf, routineShapeProblems } from "../shared/routines";
+import { DEFAULT_ROUTINE_SETTINGS, routineSettingsOf, routineSettingsProblems } from "../shared/routines";
 import type { EditorBody as DraftRead } from "./live";
 import type { Args } from "./args";
 import { boolArg, intArg, neededText, textArg, textsArg, ToolError } from "./args";
@@ -184,7 +184,7 @@ export const BUILD_TOOLS: readonly ToolModule[] = [
   ...itemTools("schedules", "schedule", "lre_schedule", "lre_schedules"),
   {
     name: "lre_routine_settings",
-    description: 'A world draft\'s routine settings (DESIGN §8): awareness ("story_first", "balanced", "routine_first": how strictly people keep to routine against the story), invitations ("off", "player", "everyone"), sociability ("reserved", "usual", "outgoing") and planBend ("must", "strong", "standard", "ordinary"). Without value it reads them; with value it sets them whole (the defaults remove them). Pass expectVersion so a change made since is refused.',
+    description: 'A world draft\'s routine settings (DESIGN §8): awareness ("story_first", "balanced", "routine_first": how strictly people keep to routine against the story), invitations ("off", "player", "everyone"), sociability ("reserved", "usual", "outgoing") and planBend ("must", "strong", "standard", "ordinary"). Without value it reads them; with value it sets them whole (a part left out takes its default; the defaults remove them). A setting or value the engine doesn\'t take is refused, naming it. Pass expectVersion so a change made since is refused.',
     inputSchema: object({ worldId: WORLD_ID, value: { type: "object", description: "The settings to set, whole." }, expectVersion: EXPECT_VERSION }, ["worldId"]),
     write: { destructive: true, idempotent: true },
     run: async (args, ctx) => {
@@ -193,9 +193,9 @@ export const BUILD_TOOLS: readonly ToolModule[] = [
       const read = await live.draft(worldId);
       if (args.value === undefined) return { text: json({ worldId, version: read.version, settings: routineSettingsOf(read.draft) }) };
       if (!isRecord(args.value)) throw new ToolError("value is an object: {awareness?, invitations?, sociability?, planBend?}.");
-      const settings = routineSettingsOf({ routineSettings: args.value });
-      const same = JSON.stringify(settings) === JSON.stringify(DEFAULT_ROUTINE_SETTINGS);
-      const ops = same ? (read.draft.routineSettings === undefined ? [] : [{ op: "remove" as const, path: "/routineSettings" }]) : [{ op: "add" as const, path: "/routineSettings", value: { ...settings } }];
+      // The defaults are no settings; anything else goes as sent, so LumiRPEngine refuses a bad one as it refuses Build's.
+      const same = routineSettingsProblems(args.value).length === 0 && JSON.stringify(routineSettingsOf({ routineSettings: args.value })) === JSON.stringify(DEFAULT_ROUTINE_SETTINGS);
+      const ops = same ? (read.draft.routineSettings === undefined ? [] : [{ op: "remove" as const, path: "/routineSettings" }]) : [{ op: "add" as const, path: "/routineSettings", value: args.value as JsonObject }];
       return draftPatch(ctx, worldId, read, ops, intArg(args, "expectVersion", 0, Number.MAX_SAFE_INTEGER), "routineSettings");
     },
     cli: { command: "routine-settings", section: "Build", usage: "routine-settings <worldId> [--value <json>] [--expect-version <n>]", summary: "Read or set a world's routine settings", positionals: ["worldId"], needs: 1, options: { "--value": { arg: "value", as: "json" }, "--expect-version": { arg: "expectVersion", as: "int" } } },
@@ -217,6 +217,8 @@ async function draftPatch(ctx: ToolContext, worldId: string, read: DraftRead, op
       after = await ctx.live().conn.request("lre.editor", { op: "patch", worldId, base: read.base, version: read.version, ops });
     } catch (error) {
       if (error instanceof LreError && error.code === "conflict") throw new ToolError(`Nothing applied: the draft of ${worldId} was written since it was read (version ${read.version}). Read it again and apply against its version.`);
+      // A write LumiRPEngine refuses (a malformed routine, a setting it doesn't take) says why, as Build's save does.
+      if (error instanceof LreError && (error.code === "bad_request" || error.code === "validation")) throw new ToolError(`Nothing applied: LumiRPEngine refused it. ${error.message}`);
       throw error;
     }
     return { text: json({ worldId, version: after.version, lint: lintSummary(after.lint.filter((i) => i.path === path || i.path.startsWith(`${path}.`)), 20), next: "It is in the draft (Build's too): lre_commit makes it the head." }) };
@@ -225,11 +227,12 @@ async function draftPatch(ctx: ToolContext, worldId: string, read: DraftRead, op
 
 /**
  * List, get, put and delete tools for one world collection (routines or schedules) of a draft, each
- * through the draft's patch at the version read, the item's shape checked before it is sent.
+ * through the draft's patch at the version read. LumiRPEngine checks a routine's shape as it checks
+ * Build's put; a schedule's outline is checked here before it is sent.
  */
 function itemTools(collection: "routines" | "schedules", noun: string, one: string, many: string): ToolModule[] {
   const ID: JsonObject = { type: "string", description: `The ${noun}'s id.` };
-  const shape = (value: unknown): string[] => (collection === "routines" ? routineShapeProblems(value) : isRecord(value) && typeof value.target === "string" && isRecord(value.recurrence) && Array.isArray(value.slots) ? [] : ["a schedule has a target, a recurrence and slots"]);
+  const shape = (value: unknown): string[] => (collection === "routines" || (isRecord(value) && typeof value.target === "string" && isRecord(value.recurrence) && Array.isArray(value.slots)) ? [] : ["a schedule has a target, a recurrence and slots"]);
   // The draft's collection as plain JSON: what the tools read and answer.
   const items = (read: DraftRead): Record<string, JsonValue> => {
     const raw: unknown = read.draft[collection];
@@ -269,7 +272,7 @@ function itemTools(collection: "routines" | "schedules", noun: string, one: stri
     },
     {
       name: `${one}_put`,
-      description: `Create or replace one ${noun} of a world draft, whole (${collection === "routines" ? "{id, label?, owner?, inherit?, blocks: [{id, label, activity, kind: fixed|flexible|optional, at|window, minutes, perWeek?, chance?, priority?, days?, place?, company?, needs?, private?, source?}] or {id, off: true}}, source?}" : "{id, owner?, target, recurrence, slots: [{start, end, value?, source?}], source?}"}). Its shape is checked before it is sent; the answer has the new version and its lint. Pass expectVersion so a change made since is refused.`,
+      description: `Create or replace one ${noun} of a world draft, whole (${collection === "routines" ? "{id, label?, owner?, inherit?, blocks: [{id, label, activity, kind: fixed|flexible|optional, at|window, minutes, perWeek?, chance?, priority?, days?, place?, company?, needs?, private?, source?}] or {id, off: true}}, source?}" : "{id, owner?, target, recurrence, slots: [{start, end, value?, source?}], source?}"}). A malformed one is refused, naming the field, and nothing is written; the answer has the new version and its lint. Pass expectVersion so a change made since is refused.`,
       inputSchema: object({ worldId: WORLD_ID, id: ID, value: { type: "object", description: `The ${noun}, whole; its id is the one given.` }, expectVersion: EXPECT_VERSION }, ["worldId", "id", "value"]),
       write: { destructive: true, idempotent: true },
       run: async (args, ctx) => {
