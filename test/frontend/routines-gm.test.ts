@@ -1,8 +1,8 @@
 // GM → Routines (DESIGN §8) against a real backend: each per-chat control, built by the tab's own op
 // helpers, goes through `lre.edit` and reads back from `lre.routine`, and the edit's Undo takes it
-// back; the character's page shows each block's and schedule's source and the binding the read model
-// gives; the list's badge follows `lre.routine {op: "changed"}`. The pages are walked as rendered
-// trees (no DOM), as the other controls' tests do.
+// back; the character's page shows each block's and schedule's source and the binding their effective
+// role gives, as the list does; the list's badge follows `lre.routine {op: "changed"}`. The pages are
+// walked as rendered trees (no DOM), as the other controls' tests do.
 
 import { describe, expect, test } from "bun:test";
 import type { VNode } from "preact";
@@ -10,11 +10,11 @@ import { editRequest } from "../../src/frontend/requests";
 import { Badge, IdText, ListRow } from "../../src/frontend/components";
 import { pinOp } from "../../src/packs/minds/ui/ops";
 import { CharacterRows, RoutineSections } from "../../src/packs/castlife/ui/routines-gm";
-import { bindingOf, blockOffOp, blockOp, changedBy, dropBlockOp, dropScheduleOp, followOp, routineRows, scheduleDraft, scheduleOffOp, scheduleOwnOp, scheduleRows, storyChanges } from "../../src/packs/castlife/ui/routines-ops";
+import { BINDING_LABEL, bindingOf, blockOffOp, blockOp, changedBy, dropBlockOp, dropScheduleOp, followOp, routineRows, scheduleDraft, scheduleOffOp, scheduleOwnOp, scheduleRows, storyChanges, type RoutineBinding } from "../../src/packs/castlife/ui/routines-ops";
 import { blankBlock } from "../../src/frontend/build/routine-editor";
 import type { EditOp } from "../../src/shared/protocol";
-import type { RoutineBlock, RoutineChangeSummary, RoutineGmView } from "../../src/shared/routines";
-import { isOff } from "../../src/shared/routines";
+import type { RoutineBlock, RoutineChangeSummary, RoutineGmView, RoutineRole } from "../../src/shared/routines";
+import { DEFAULT_ROUTINE_ROLES, isOff, ROUTINE_ROLES } from "../../src/shared/routines";
 import type { GmView } from "../../src/shared/state-view";
 import { Rig } from "../support/rig";
 import { expand, propsOf, type Props } from "../support/tree";
@@ -80,10 +80,17 @@ function shownBinding(tree: unknown[]): unknown {
 
 /** The ids of the list's rows that carry a badge under their name. */
 function badged(gm: GmView, summary: RoutineChangeSummary[]): unknown[] {
-  const tree = CharacterRows({ rows: routineRows(gm.minds.characters, gm.entities, summary), onOpen: () => undefined });
+  const tree = CharacterRows({ rows: routineRows(gm.minds.characters, gm.entities, summary, DEFAULT_ROUTINE_ROLES), onOpen: () => undefined });
   return propsOf(tree, ListRow)
     .filter((row) => propsOf(row.subtitle, Badge).length > 0)
     .map((row) => row.id);
+}
+
+/** The binding the list's row for `who` reads out, by its words. */
+function listedBinding(gm: GmView, summary: RoutineChangeSummary[], roles: RoutineGmView["settings"]["roles"], who = WHO): RoutineBinding | undefined {
+  const tree = CharacterRows({ rows: routineRows(gm.minds.characters, gm.entities, summary, roles), onOpen: () => undefined });
+  const words = textOf(propsOf(tree, ListRow).find((row) => row.id === who)?.subtitle);
+  return (Object.keys(BINDING_LABEL) as RoutineBinding[]).find((b) => words.startsWith(BINDING_LABEL[b]));
 }
 
 describe("GM view → Routines round trip", () => {
@@ -94,10 +101,10 @@ describe("GM view → Routines round trip", () => {
     expect(await changed(rig, chatId)).toEqual([]);
     expect(badged(await gmView(rig, chatId), [])).toEqual([]);
 
-    await edit(rig, chatId, followOp(WHO, "off", null));
+    await edit(rig, chatId, followOp(WHO, "off", null, null));
     let v = await day(rig, chatId);
     expect([v.follow.mode, v.follow.chat]).toEqual(["off", { mode: "off", awareness: null, role: null }]);
-    expect(bindingOf(v.tier, v.follow.mode, v.planned)).toBe("none");
+    expect(bindingOf(v.follow.role, v.follow.mode, v.planned)).toBe("none");
     expect(shownBinding(page(v, await gmView(rig, chatId)))).toBe("none");
     let summary = await changed(rig, chatId);
     expect(summary.map((s) => [s.entity, changedBy(s)])).toEqual([[WHO, "gm"]]);
@@ -111,17 +118,45 @@ describe("GM view → Routines round trip", () => {
     expect(badged(await gmView(rig, chatId), summary)).toEqual([]);
 
     // Awareness for them alone; following is the world's way, so it sends no mode of its own.
-    expect(followOp(WHO, "follows", "story_first")).toEqual({ op: "routine_follow", entity: WHO, mode: null, awareness: "story_first" });
-    await edit(rig, chatId, followOp(WHO, "follows", "story_first"));
+    expect(followOp(WHO, "follows", "story_first", null)).toEqual({ op: "routine_follow", entity: WHO, mode: null, awareness: "story_first", role: null });
+    await edit(rig, chatId, followOp(WHO, "follows", "story_first", null));
     v = await day(rig, chatId);
     expect([v.follow.awareness, v.follow.chat]).toEqual(["story_first", { mode: null, awareness: "story_first", role: null }]);
-    await edit(rig, chatId, followOp(WHO, "no_invitations", "story_first"));
+    await edit(rig, chatId, followOp(WHO, "no_invitations", "story_first", null));
     expect((await day(rig, chatId)).follow.mode).toBe("no_invitations");
     await undoLatest(rig, chatId);
     expect((await day(rig, chatId)).follow).toEqual({ mode: "follows", awareness: "story_first", role: before.follow.role, chat: { mode: null, awareness: "story_first", role: null } });
     // Back to the world's clears the setting.
-    await edit(rig, chatId, followOp(WHO, "follows", null));
+    await edit(rig, chatId, followOp(WHO, "follows", null, null));
     expect((await day(rig, chatId)).follow).toEqual({ mode: "follows", awareness: before.follow.awareness, role: before.follow.role, chat: null });
+    expect(await changed(rig, chatId)).toEqual([]);
+    expect(rig.rt.ledger.errors).toEqual([]);
+  });
+
+  test("their routine's role: each override sends its op, leads the binding on the page and the list, and Undo restores their level's", async () => {
+    const { rig, chatId } = await chat();
+    await edit(rig, chatId, pinOp(WHO, "far"));
+    const before = await day(rig, chatId);
+    expect([before.tier, before.planned, before.follow.role, before.follow.chat]).toEqual(["far", true, before.settings.roles.far, null]);
+    const expected: Record<RoutineRole, RoutineBinding> = { informative: "story", enforced: "routine", off: "none" };
+    for (const role of ROUTINE_ROLES) {
+      await edit(rig, chatId, followOp(WHO, "follows", null, role));
+      const v = await day(rig, chatId);
+      const summary = await changed(rig, chatId);
+      const gm = await gmView(rig, chatId);
+      expect([role, v.follow.role, v.follow.chat]).toEqual([role, role, { mode: null, awareness: null, role }]);
+      expect([role, shownBinding(page(v, gm)), listedBinding(gm, summary, v.settings.roles)]).toEqual([role, expected[role], expected[role]]);
+      expect(summary.map((s) => [s.entity, changedBy(s)])).toEqual([[WHO, "gm"]]);
+      await undoLatest(rig, chatId);
+      const undone = await day(rig, chatId);
+      expect([role, undone.follow.role, undone.follow.chat]).toEqual([role, before.follow.role, null]);
+    }
+    // A role kept while the mode changes, then everything back to the world's.
+    await edit(rig, chatId, followOp(WHO, "follows", null, "enforced"));
+    await edit(rig, chatId, followOp(WHO, "no_invitations", null, "enforced"));
+    expect((await day(rig, chatId)).follow.chat).toEqual({ mode: "no_invitations", awareness: null, role: "enforced" });
+    await edit(rig, chatId, followOp(WHO, "follows", null, null));
+    expect((await day(rig, chatId)).follow).toEqual(before.follow);
     expect(await changed(rig, chatId)).toEqual([]);
     expect(rig.rt.ledger.errors).toEqual([]);
   });
@@ -257,21 +292,33 @@ describe("GM view → Routines: what the page shows", () => {
     expect(storyChanges(view, { ...summary, blocks: [{ block: "lunch", source: { type: "gm", at: told.at }, off: false }] })).toEqual([]);
   });
 
-  test("the binding shown is the read model's: routine leads for Far and Background, story leads for Near and Live, none with no routine", async () => {
+  test("the binding shown follows the effective role: the world's for their level unless this chat sets theirs, none with no routine", async () => {
     const { rig, chatId } = await chat();
-    const shown = async (): Promise<[unknown, unknown]> => {
+    const shown = async (): Promise<[unknown, unknown, unknown]> => {
       const v = await day(rig, chatId);
-      return [v.tier, shownBinding(page(v, await gmView(rig, chatId)))];
+      const gm = await gmView(rig, chatId);
+      const page_ = shownBinding(page(v, gm));
+      // The list reads the same binding from the world's roles and what this chat changed.
+      const listed: unknown = listedBinding(gm, await changed(rig, chatId), v.settings.roles);
+      expect([v.tier, listed]).toEqual([v.tier, page_]);
+      return [v.tier, v.follow.role, page_];
     };
+    // The starter world keeps the default roles: informative for all but Background.
+    expect((await day(rig, chatId)).settings.roles).toEqual(DEFAULT_ROUTINE_ROLES);
     await edit(rig, chatId, pinOp(WHO, "far"));
-    expect(await shown()).toEqual(["far", "routine"]);
+    expect(await shown()).toEqual(["far", "informative", "story"]);
     await edit(rig, chatId, pinOp(WHO, "background"));
-    expect(await shown()).toEqual(["background", "routine"]);
+    expect(await shown()).toEqual(["background", "enforced", "routine"]);
     await edit(rig, chatId, pinOp(WHO, "near"));
-    expect(await shown()).toEqual(["near", "story"]);
+    expect(await shown()).toEqual(["near", "informative", "story"]);
     await edit(rig, chatId, pinOp(WHO, "live"));
-    expect(await shown()).toEqual(["live", "story"]);
-    await edit(rig, chatId, followOp(WHO, "off", null));
-    expect(await shown()).toEqual(["live", "none"]);
+    expect(await shown()).toEqual(["live", "informative", "story"]);
+    // This chat's role for them leads: enforced lets their routine lead, even for Live; off leaves none.
+    await edit(rig, chatId, followOp(WHO, "follows", null, "off"));
+    expect(await shown()).toEqual(["live", "off", "none"]);
+    await edit(rig, chatId, followOp(WHO, "follows", null, "enforced"));
+    expect(await shown()).toEqual(["live", "enforced", "routine"]);
+    await edit(rig, chatId, followOp(WHO, "off", null, "enforced"));
+    expect(await shown()).toEqual(["live", "enforced", "none"]);
   });
 });

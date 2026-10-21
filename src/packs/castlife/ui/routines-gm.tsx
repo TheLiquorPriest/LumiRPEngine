@@ -1,11 +1,11 @@
 // GM → Routines (DESIGN §8): every character's routine and schedules as this chat has them, behind
 // the GM gate. The list marks whom this chat changed, by you or by the story (`lre.routine {op:
-// "changed"}`); a character's page reads their day (`lre.routine {op: "day", view: "gm"}`): how much
-// their routine binds them now, from their fidelity and the awareness in force; their routine block
+// "changed"}`); a character's page reads their day (`lre.routine {op: "day", view: "gm"}`): their
+// routine's role and how much it binds them now, from their level's role or this chat's; their routine block
 // by block, each with its source and whose it is; their schedules, with which owner wins; today as
 // the planner laid it, with reasons; the invitations they made and received, with their grounds;
-// and the changes the story made, with their turns. Each control (how they follow their routine, one
-// block, one schedule) is one `lre.edit`, so one Corrected chip with its Undo. A routine or a
+// and the changes the story made, with their turns. Each control (how they follow their routine and
+// its role, one block, one schedule) is one `lre.edit`, so one Corrected chip with its Undo. A routine or a
 // schedule is only ever a default: the story leads whoever shares a scene with the player. The
 // world's own routines and schedules are Build's.
 
@@ -14,8 +14,8 @@ import { useEffect, useId, useRef, useState } from "preact/hooks";
 import type { EntityId, ScheduleId } from "../../../shared/ids";
 import { nameOfId } from "../../../shared/maps";
 import type { EditOp } from "../../../shared/protocol";
-import type { EffectiveBlock, EffectiveSchedule, InvitationView, RoutineAwareness, RoutineBlock, RoutineBlockId, RoutineChangeSummary, RoutineGmView, RoutineMode, SourceView } from "../../../shared/routines";
-import { AWARENESS_LABEL, BLOCK_KIND_LABEL, isOff, ROUTINE_AWARENESS, ROUTINE_MODE_LABEL, ROUTINE_MODES } from "../../../shared/routines";
+import type { EffectiveBlock, EffectiveSchedule, InvitationView, RoutineAwareness, RoutineBlock, RoutineBlockId, RoutineChangeSummary, RoutineGmView, RoutineMode, RoutineRole, SourceView } from "../../../shared/routines";
+import { AWARENESS_LABEL, BLOCK_KIND_LABEL, isOff, ROUTINE_AWARENESS, ROUTINE_MODE_LABEL, ROUTINE_MODES, ROUTINE_ROLE_LABEL, ROUTINE_ROLES, routineSettingsOf } from "../../../shared/routines";
 import type { GmView } from "../../../shared/state-view";
 import type { ScheduleDef, WorldDoc } from "../../../shared/world";
 import { useApp, useView } from "../../../frontend/app";
@@ -41,6 +41,7 @@ import {
   daysWords,
   dropBlockOp,
   dropScheduleOp,
+  effectiveRole,
   followOp,
   HOLD_BY,
   invitationGround,
@@ -48,6 +49,7 @@ import {
   originWords,
   ownerWords,
   placeWords,
+  ROLE_NOTE,
   routineRows,
   scheduleDraft,
   scheduleOffOp,
@@ -110,7 +112,9 @@ export function GmRoutinesSection(props: GmSectionProps) {
     };
   }, [props.chatId, props.gm]);
   const ctx: Ctx = { chatId: props.chatId, gm: props.gm, busy: props.busy, send: props.send, edit: props.edit };
-  const rows = routineRows(props.gm.minds.characters, props.gm.entities, changed ?? []);
+  // The world's roles for each level; until the world is read, the defaults stand in.
+  const roles = routineSettingsOf(useChatWorld(props.send) ?? {}).roles;
+  const rows = routineRows(props.gm.minds.characters, props.gm.entities, changed ?? [], roles);
   const page = pages.page;
   const selected = page === null ? undefined : rows.find((r) => r.entity === page);
   // Someone no longer among the characters (an Undo took back a spawn) gives way to the list.
@@ -128,7 +132,7 @@ export function GmRoutinesSection(props: GmSectionProps) {
             <ListRow icon="clock" title="Now" value={props.gm.minds.nowText} />
             <ListRow icon="edit" title="Changed in this chat" subtitle="By you or by the story" value={changed === null ? "…" : String(changedCount)} />
           </List>
-          <p class="lre-gm-routines-intro">A routine or a schedule is a default the world relies on, never a script: the story leads whoever shares a scene with you, and no routine interrupts play. What you change here is this chat's alone; each change has its own Undo.</p>
+          <p class="lre-gm-routines-intro">A routine or a schedule is never a script. By default it only informs: the story and planning decide what people do, and only Background characters keep an enforced routine. Even then the story leads whoever shares a scene with you, and no routine interrupts play. What you change here is this chat's alone; each change has its own Undo.</p>
           {worldId ? (
             <div class="lre-gm-routines-build">
               <Button size="sm" variant="ghost" icon="hammer" onClick={() => app.ui.update((ui) => ({ ...ui, mode: "build", build: { view: "collection", worldId, collection: "routines" } }))}>
@@ -228,7 +232,7 @@ function CharacterPages(props: { ctx: Ctx; row: RoutineRow; summary: RoutineChan
     if (before === null || change !== null || !root || root.contains(document.activeElement)) return;
     root.querySelector<HTMLElement>(".lre-page-header button")?.focus();
   }, [change]);
-  const binding = view ? bindingOf(view.tier, view.follow.mode, view.planned) : row.binding;
+  const binding = view ? bindingOf(view.follow.role, view.follow.mode, view.planned) : row.binding;
   return (
     <div ref={changes.host.ref} class="lre-gm-page lre-gm-pages lre-gm-routines-pages" onKeyDown={changes.host.onKeyDown}>
       <div class="lre-gm-list" hidden={change !== null}>
@@ -275,10 +279,10 @@ export function RoutineSections(props: { view: RoutineGmView; gm: GmView; summar
   );
 }
 
-/** How much their routine binds them now, why, and how they follow it in this chat. */
+/** What their routine is to the engine now and how much it binds them, why, and how they follow it in this chat. */
 function BindingSection(props: { view: RoutineGmView; busy: boolean; open(change: RoutineChange): void }) {
   const { view } = props;
-  const binding = bindingOf(view.tier, view.follow.mode, view.planned);
+  const binding = bindingOf(view.follow.role, view.follow.mode, view.planned);
   const chat = view.follow.chat;
   return (
     <Section title="How much their routine binds them" aside={<Badge tone={BINDING_TONE[binding]}>{BINDING_LABEL[binding]}</Badge>} flush>
@@ -292,6 +296,7 @@ function BindingSection(props: { view: RoutineGmView; busy: boolean; open(change
       <List>
         <ListRow icon="users" title="Fidelity now" subtitle="From the minds ladder: Near and Live are the cast on screen" value={view.tier ? TIER_LABEL[view.tier] : "No minds"} />
         <ListRow icon="sliders" title="In this chat" subtitle={chat?.mode ? "Set for them in this chat" : "As the world has it"} value={ROUTINE_MODE_LABEL[view.follow.mode]} chevron disabled={props.busy} onClick={() => props.open({ kind: "follow" })} />
+        <ListRow icon="route" title="Their routine's role" subtitle={chat?.role ? "Set for them in this chat" : "Their level's default"} value={ROUTINE_ROLE_LABEL[view.follow.role]} chevron disabled={props.busy} onClick={() => props.open({ kind: "follow" })} />
         <ListRow icon="book" title="Story and lore awareness" subtitle={chat?.awareness ? "Set for them in this chat" : "The world's setting"} value={AWARENESS_LABEL[view.follow.awareness]} chevron disabled={props.busy} onClick={() => props.open({ kind: "follow" })} />
       </List>
     </Section>
@@ -575,13 +580,15 @@ function Choices<T extends string | null>(props: { legend: string; value: T; cho
   );
 }
 
-/** How they follow their routine in this chat, and how aware of the story they are: each part the world's unless set here. */
+/** How they follow their routine in this chat, its role, and how aware of the story they are: each part the world's unless set here. */
 function FollowPage(props: { ctx: Ctx; view: RoutineGmView; onBack(): void }) {
   const { ctx, view } = props;
   const chat = view.follow.chat;
   const [mode, setMode] = useState<RoutineMode>(chat?.mode ?? "follows");
+  const [role, setRole] = useState<RoutineRole | null>(chat?.role ?? null);
   const [awareness, setAwareness] = useState<RoutineAwareness | null>(chat?.awareness ?? null);
-  const changed = mode !== (chat?.mode ?? "follows") || awareness !== (chat?.awareness ?? null);
+  const changed = mode !== (chat?.mode ?? "follows") || role !== (chat?.role ?? null) || awareness !== (chat?.awareness ?? null);
+  const levelRole = effectiveRole(view.tier, view.settings.roles, null);
   return (
     <ChangePage name="routine-follow" title="How they follow their routine" view={view} onBack={props.onBack}>
       <form
@@ -589,14 +596,24 @@ function FollowPage(props: { ctx: Ctx; view: RoutineGmView; onBack(): void }) {
         data-lre-routine-form="follow"
         onSubmit={(event) => {
           event.preventDefault();
-          if (changed) sendOp(ctx, followOp(view.entity, mode, awareness), props.onBack);
+          if (changed) sendOp(ctx, followOp(view.entity, mode, awareness, role), props.onBack);
         }}
       >
         <Section title="In this chat">
           <Choices<RoutineMode> legend="In this chat" value={mode} choices={ROUTINE_MODES.map((m) => ({ value: m, label: ROUTINE_MODE_LABEL[m], help: MODE_NOTE[m], now: m === view.follow.mode }))} disabled={ctx.busy} onChange={setMode} />
         </Section>
+        <Section title="Their routine's role">
+          <p class="lre-gm-note">What their routine and their own schedules are to the engine. Routines inform by default; the world's schedules and pay run whatever you pick.</p>
+          <Choices<RoutineRole | null>
+            legend="Their routine's role"
+            value={role}
+            choices={[{ value: null, label: `Their level's default: ${ROUTINE_ROLE_LABEL[levelRole]}`, help: ROLE_NOTE[levelRole], now: chat?.role == null }, ...ROUTINE_ROLES.map((r) => ({ value: r, label: ROUTINE_ROLE_LABEL[r], help: ROLE_NOTE[r], now: chat?.role === r }))]}
+            disabled={ctx.busy}
+            onChange={setRole}
+          />
+        </Section>
         <Section title="Story and lore awareness">
-          <p class="lre-gm-note">How strictly they keep to their routine against what the story and its lore establish. Whatever you pick, nobody is moved out of a scene with you, and Near and Live characters are never moved by a routine.</p>
+          <p class="lre-gm-note">How strictly an enforced routine keeps to itself against what the story and its lore establish. Whatever you pick, nobody is moved out of a scene with you.</p>
           <Choices<RoutineAwareness | null>
             legend="Story and lore awareness"
             value={awareness}
@@ -612,7 +629,7 @@ function FollowPage(props: { ctx: Ctx; view: RoutineGmView; onBack(): void }) {
       {chat ? (
         <Section title="Back to the world's">
           <p class="lre-gm-note">They follow their routine as the world has it again. The edit's Undo brings your setting back.</p>
-          <Button icon="undo" disabled={ctx.busy} onClick={() => sendOp(ctx, followOp(view.entity, "follows", null), props.onBack)}>
+          <Button icon="undo" disabled={ctx.busy} onClick={() => sendOp(ctx, followOp(view.entity, "follows", null, null), props.onBack)}>
             Use the world's settings
           </Button>
         </Section>

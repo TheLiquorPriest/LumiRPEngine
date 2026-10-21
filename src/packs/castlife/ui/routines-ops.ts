@@ -8,8 +8,8 @@ import type { EntityId, ScheduleId } from "../../../shared/ids";
 import { nameOfId } from "../../../shared/maps";
 import type { Fidelity } from "../../../shared/minds";
 import type { EditOp } from "../../../shared/protocol";
-import type { BlockOrigin, ChatRoutineSource, EffectiveBlock, EffectiveSchedule, InvitationView, OwnerRef, RoutineAwareness, RoutineBlock, RoutineBlockId, RoutineChangeSummary, RoutineGmView, RoutineMode, RoutinePlace, SourceView, StoryHoldView } from "../../../shared/routines";
-import { blockShapeProblems, isOff, PLAN_BEND_LABEL } from "../../../shared/routines";
+import type { BlockOrigin, ChatRoutineSource, EffectiveBlock, EffectiveSchedule, InvitationView, OwnerRef, RoutineAwareness, RoutineBlock, RoutineBlockId, RoutineChangeSummary, RoutineGmView, RoutineMode, RoutinePlace, RoutineRole, SourceView, StoryHoldView } from "../../../shared/routines";
+import { blockShapeProblems, isOff, PLAN_BEND_LABEL, ROUTINE_ROLE_LABEL } from "../../../shared/routines";
 import type { GmEntity } from "../../../shared/state-view";
 import type { Recurrence, ScheduleDef, ScheduleSlot } from "../../../shared/world";
 import { slotProblems } from "../../../frontend/build/schedule-form";
@@ -17,19 +17,24 @@ import { formatMinutes, humanize } from "../../../frontend/format";
 
 // ---------------------------------------------------------------- how much the routine binds them
 
-/** How much a character's routine binds them now: it leads (Background, Far), the story leads (Near, Live), or they have none (off in this chat, or a day the planner doesn't lay). */
+/**
+ * How much a character's routine binds them now, from their effective role (`RoutineRole`): it leads
+ * (enforced, and the planner lays their day), the story leads and it only informs (informative, or
+ * enforced with no day laid), or they have none (their role is off, or their routine is off in this chat).
+ */
 export type RoutineBinding = "routine" | "story" | "none";
 
-export const BINDING_LABEL: Record<RoutineBinding, string> = { routine: "Routine leads", story: "Story leads", none: "No routine" };
+export const BINDING_LABEL: Record<RoutineBinding, string> = { routine: "Routine leads", story: "Story leads; routine informs", none: "No routine" };
 
-/**
- * The binding from their fidelity now and how they follow their routine in this chat: none while
- * their routine is off or the planner doesn't lay their day; the story leads for Near and Live;
- * their routine leads for Far and Background, and without minds (no fidelity), off screen.
- */
-export function bindingOf(tier: Fidelity | null, mode: RoutineMode, planned: boolean): RoutineBinding {
-  if (mode === "off" || !planned) return "none";
-  return tier === "near" || tier === "live" ? "story" : "routine";
+/** The binding from their effective role, how they follow their routine in this chat, and whether the planner lays their day. */
+export function bindingOf(role: RoutineRole, mode: RoutineMode, planned: boolean): RoutineBinding {
+  if (mode === "off" || role === "off") return "none";
+  return role === "enforced" && planned ? "routine" : "story";
+}
+
+/** Their effective role as the engine reads it: this chat's for them, else their level's; without minds, Background's. */
+export function effectiveRole(tier: Fidelity | null, roles: Readonly<Record<Fidelity, RoutineRole>>, chat: RoutineRole | null | undefined): RoutineRole {
+  return chat ?? roles[tier ?? "background"];
 }
 
 /** Whether the planner lays their day, as the GM view's entity shows it: an agent who acts, at Cast life 3 or higher, not removed. The character's page reads it from the read model. */
@@ -49,59 +54,67 @@ export interface RoutineRow {
   changed: "gm" | "story" | "both" | null;
 }
 
-/** The list's rows: every person but the POV, as the minds ladder orders them, each marked as this chat changed them (`lre.routine {op: "changed"}`). */
-export function routineRows(characters: readonly { entity: EntityId; name: string; fidelity: { level: Fidelity } }[], entities: readonly GmEntity[], changed: readonly RoutineChangeSummary[]): RoutineRow[] {
+/** The list's rows: every person but the POV, as the minds ladder orders them, each bound by their effective role (`roles`, the world's) and marked as this chat changed them (`lre.routine {op: "changed"}`). */
+export function routineRows(characters: readonly { entity: EntityId; name: string; fidelity: { level: Fidelity } }[], entities: readonly GmEntity[], changed: readonly RoutineChangeSummary[], roles: Readonly<Record<Fidelity, RoutineRole>>): RoutineRow[] {
   return characters.map((c) => {
     const summary = changed.find((s) => s.entity === c.entity);
-    const binding = bindingOf(c.fidelity.level, summary?.follow?.mode ?? "follows", plannedHint(entities.find((e) => e.id === c.entity)));
+    const role = effectiveRole(c.fidelity.level, roles, summary?.follow?.role);
+    const binding = bindingOf(role, summary?.follow?.mode ?? "follows", plannedHint(entities.find((e) => e.id === c.entity)));
     return { entity: c.entity, name: c.name, tier: c.fidelity.level, binding, changed: changedBy(summary) };
   });
 }
 
 /** What each way of following their routine means in this chat. */
 export const MODE_NOTE: Record<RoutineMode, string> = {
-  follows: "Their routine and schedules shape their day, as far as the story lets them.",
+  follows: "Their routine and schedules count as their role says.",
   no_invitations: "As they follow it, but their routine makes and accepts no invitations.",
-  off: "No routine at all in this chat: only the story, your edits, their commitments and their basic needs.",
+  off: "No routine at all in this chat, not even as context: only the story, your edits, their commitments and their basic needs.",
 };
 
-/** What each awareness does (DESIGN §8), for choosing one. */
+/** What each role means for one character, for choosing one. */
+export const ROLE_NOTE: Record<RoutineRole, string> = {
+  informative: "The story and planning decide what they do; their routine and schedules are only context their mind and the narrator may weigh.",
+  enforced: "The planner lives their routine and their schedules run whenever the story doesn't hold them, never in a scene with you.",
+  off: "Their routine isn't used at all, not even as context.",
+};
+
+/** What each awareness does (DESIGN §8), for choosing one: it shapes only an enforced routine. */
 export const AWARENESS_NOTE: Record<RoutineAwareness, string> = {
-  story_first: "Background and Far characters bend for story plans and your intent, and what the story set holds until the story or you release it. Near and Live get no routine suggestions.",
-  balanced: "Background characters keep their routine; Far ones bend for story plans and intent. What the story set holds for the rest of that day. Near and Live get their routine only as a soft suggestion.",
-  routine_first: "Background and Far characters keep to routine, bending only as the world lets story plans bend it. What the story set holds until the routine's next block.",
+  story_first: "An enforced routine bends for story plans and your intent, and what the story set holds until the story or you release it.",
+  balanced: "Background characters keep an enforced routine; others bend it for story plans and intent. What the story set holds for the rest of that day.",
+  routine_first: "An enforced routine holds, bending only as the world lets story plans bend it. What the story set holds until the routine's next block.",
 };
 
-/** What the routine does for each fidelity under each awareness (DESIGN §8, `RoutineAwareness`). */
-const BINDING_NOTE: Record<RoutineAwareness, Record<"background" | "far" | "cast", string>> = {
+/** What an enforced routine does under each awareness, for Background (and those without minds) and for anyone closer (DESIGN §8, `RoutineAwareness`). */
+const ENFORCED_NOTE: Record<RoutineAwareness, Record<"background" | "closer", string>> = {
   story_first: {
     background: "Off screen they keep to their routine, but bend for story plans and your intent. What the story set holds until the story or you release it.",
-    far: "Their routine leads, but they bend for story plans and your intent. What the story set holds until the story or you release it.",
-    cast: "The story leads: their routine makes no suggestions for them, and no routine or schedule moves them.",
+    closer: "Their routine leads, but they bend for story plans and your intent. What the story set holds until the story or you release it.",
   },
   balanced: {
     background: "Off screen they keep their routine and schedules. What the story set holds for the rest of that day.",
-    far: "Their routine leads, but they bend for story plans and intent. What the story set holds for the rest of that day.",
-    cast: "The story leads: their routine is only a soft suggestion, and no routine or schedule moves them.",
+    closer: "Their routine leads, but they bend for story plans and intent. What the story set holds for the rest of that day.",
   },
   routine_first: {
     background: "They keep to their routine. What the story set holds until their routine's next block.",
-    far: "They keep to their routine. What the story set holds until their routine's next block.",
-    cast: "The story leads: their routine is only a soft suggestion, and no routine or schedule moves them.",
+    closer: "They keep to their routine. What the story set holds until their routine's next block.",
   },
 };
 
 /** Why they're bound as they are, in sentences, from their read model. */
 export function bindingNote(view: Pick<RoutineGmView, "tier" | "planned" | "follow" | "settings">): string[] {
-  const binding = bindingOf(view.tier, view.follow.mode, view.planned);
   const always = "Nobody is moved out of a scene with you, and no routine interrupts play.";
   if (view.follow.mode === "off") return ["No routine in this chat: their day is the story, your edits, their commitments and their basic needs.", always];
-  if (!view.planned) return ["The planner doesn't lay their day (it needs an agent who acts, at Cast life 3 or higher), so no routine moves them.", always];
-  const awareness = view.follow.awareness;
-  const lines = [BINDING_NOTE[awareness][binding === "story" ? "cast" : view.tier === "far" ? "far" : "background"]];
-  if (binding === "routine" && awareness === "routine_first") lines.push(`Story plans bend it only as the world allows: ${PLAN_BEND_LABEL[view.settings.planBend].toLowerCase()}.`);
-  if (view.tier === null) lines.push("Without minds there is no fidelity: the story leads whenever they share a scene with you.");
-  if (view.follow.mode === "no_invitations") lines.push("They make and accept no invitations.");
+  const role = view.follow.role;
+  const lines = [`${ROUTINE_ROLE_LABEL[role]}: ${ROLE_NOTE[role]}`];
+  lines.push(view.follow.chat?.role ? "You set their role in this chat." : view.tier ? `The role of their level, ${TIER_LABEL[view.tier]}, as the world sets it.` : "Without minds there is no level of closeness: they take Background's role.");
+  if (role === "enforced" && !view.planned) lines.push("The planner doesn't lay their day (it needs an agent who acts, at Cast life 3 or higher), so their routine only informs.");
+  if (role === "enforced" && view.planned) {
+    const awareness = view.follow.awareness;
+    lines.push(ENFORCED_NOTE[awareness][view.tier === null || view.tier === "background" ? "background" : "closer"]);
+    if (awareness === "routine_first") lines.push(`Story plans bend it only as the world allows: ${PLAN_BEND_LABEL[view.settings.planBend].toLowerCase()}.`);
+  }
+  if (role !== "off" && view.follow.mode === "no_invitations") lines.push("They make and accept no invitations.");
   lines.push(always);
   return lines;
 }
@@ -249,9 +262,12 @@ export const HOLD_BY: Record<StoryHoldView["by"], string> = { story: "The story 
 
 // ---------------------------------------------------------------- the controls
 
-/** How they follow their routine in this chat: following it is the world's way, so it clears the chat's mode; a null awareness is the world's. Both cleared clear the setting. */
-export function followOp(entity: EntityId, mode: RoutineMode, awareness: RoutineAwareness | null): EditOp {
-  return { op: "routine_follow", entity, mode: mode === "follows" ? null : mode, awareness };
+/**
+ * How they follow their routine in this chat: following it is the world's way, so it clears the
+ * chat's mode; a null awareness is the world's, a null role their level's. All cleared clear the setting.
+ */
+export function followOp(entity: EntityId, mode: RoutineMode, awareness: RoutineAwareness | null, role: RoutineRole | null): EditOp {
+  return { op: "routine_follow", entity, mode: mode === "follows" ? null : mode, awareness, role };
 }
 
 /** A block of their routine for this chat, added or changed: its shape must read (the backend stamps it as yours). Refused, with the problems, when it doesn't. */
