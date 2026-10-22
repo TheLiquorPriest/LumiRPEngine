@@ -171,7 +171,9 @@ export class LedgerFold {
         p = f.result.path;
         if ((i + 1) % this.every !== 0) continue;
         const found = input.snapshots.get(hashParts(context, p));
-        if (found) {
+        // A snapshot that lacks the clock of a step it would restore (saved before steps kept their
+        // clocks, or on top of one) is passed over, so every reply keeps the time it ended at.
+        if (found && clocksCover(found, base, i)) {
           best = i;
           snapshot = found;
         }
@@ -422,4 +424,11 @@ export class LedgerFold {
     const path = stepPath(parent, false, content, recordHash(rec, livePost, parent), markersHash(liveMarkers));
     return { result: { id: m.id, fold, parentPath: parent, path }, notes, keep, rec, recPath, liveMarkers, livePost, paused };
   }
+}
+
+/** Whether a snapshot holds the clock of every step after `base` up to its own, `at`. */
+function clocksCover(snapshot: FoldSnapshot, base: number, at: number): boolean {
+  const have = new Set((snapshot.clocks ?? []).map(([i]) => i));
+  for (let i = base + 1; i <= at; i++) if (!have.has(i)) return false;
+  return true;
 }
