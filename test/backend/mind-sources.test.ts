@@ -9,6 +9,7 @@ import { sectionTokens } from "../../src/backend/book";
 import { mindContext, type MindContextReport } from "../../src/backend/minds-context";
 import { MEMORY_FIELDS, memoryOverridePatch, mindsReadPatch } from "../../src/frontend/settings/minds-patch";
 import type { JsonObject } from "../../src/shared/json";
+import type { ModelUseSettings } from "../../src/shared/settings";
 import type { MindMoment, MindSource, MindsReads, MindsSettings } from "../../src/shared/minds";
 import { DEFAULT_MIND_READS, effectiveMemory, MIND_SOURCES } from "../../src/shared/minds";
 import { pinsFor, worldPinText } from "../../src/engine/lore-pins";
@@ -82,7 +83,8 @@ describe("each source of what a mind reads, on or off, within its own limit", ()
     const chatId = await alderChat(rig, async () => undefined);
     for (let k = 1; k <= 4; k++) await rig.turn(chatId, `U${k}-MARK ${PAD}`, `R${k}-MARK ${PAD} <json>{"hidden":"JSON-MARK"}</json>`);
     expect(lastFor(seen.minds, "Danny Okafor")).not.toContain("## Recent chat");
-    rig.body(await rig.send({ type: "lre.settings.set", patch: { minds: { reads: { history: { on: true, messages: 3 } } } } }));
+    // The latest reply off, so Recent chat is the only place it can come from.
+    rig.body(await rig.send({ type: "lre.settings.set", patch: { minds: { reads: { history: { on: true, messages: 3 }, reply: { on: false } } } } }));
     await rig.turn(chatId, `U5-MARK ${PAD}`, `R5-MARK ${PAD}`);
     const danny = lastFor(seen.minds, "Danny Okafor");
     expect(recentLines(danny)).toEqual([`Story: R3-MARK ${PAD}`, `Player: U4-MARK ${PAD}`, `Story: R4-MARK ${PAD}`]);
@@ -96,13 +98,25 @@ describe("each source of what a mind reads, on or off, within its own limit", ()
     const seen = fakeModels(rig);
     const chatId = await alderChat(rig, async () => undefined);
     for (let k = 1; k <= 4; k++) await rig.turn(chatId, `U${k}-MARK ${PAD}`, `R${k}-MARK ${PAD}`);
-    rig.body(await rig.send({ type: "lre.settings.set", patch: { minds: { reads: { history: { on: true, messages: "none", tokens: 60 } } } } }));
+    rig.body(await rig.send({ type: "lre.settings.set", patch: { minds: { reads: { history: { on: true, messages: "none", tokens: 60 }, reply: { on: false } } } } }));
     await rig.turn(chatId, `U5-MARK ${PAD}`, `R5-MARK ${PAD}`);
     const lines = recentLines(lastFor(seen.minds, "Danny Okafor"));
     expect(lines.length).toBe(2);
     expect(lines[1]).toBe(`Story: R4-MARK ${PAD}`);
     expect(lines[0]).toMatch(/^Player: …/);
     expect(lines.join("\n")).not.toMatch(/U[1-4]-MARK|R[1-3]-MARK/);
+  });
+
+  test("with The latest reply on, Recent chat leaves out that reply, which the mind reads as how the story so far ended, and gives the messages before it", async () => {
+    const rig = new Rig({ shipped: true, minds: true });
+    const seen = fakeModels(rig);
+    const chatId = await alderChat(rig, async () => undefined);
+    for (let k = 1; k <= 4; k++) await rig.turn(chatId, `U${k}-MARK ${PAD}`, `R${k}-MARK ${PAD}`);
+    rig.body(await rig.send({ type: "lre.settings.set", patch: { minds: { reads: { history: { on: true, messages: 3 } } } } }));
+    await rig.turn(chatId, `U5-MARK ${PAD}`, `R5-MARK ${PAD}`);
+    const danny = lastFor(seen.minds, "Danny Okafor");
+    expect(danny).toContain(`The story so far ended: R4-MARK ${PAD}`);
+    expect(recentLines(danny)).toEqual([`Player: U3-MARK ${PAD}`, `Story: R3-MARK ${PAD}`, `Player: U4-MARK ${PAD}`]);
   });
 
   test("Settings → Minds saves each source's switch and limit, recall's as its memory override with no limit allowed, and none of it touches the preset", async () => {
@@ -138,5 +152,14 @@ describe("each source of what a mind reads, on or off, within its own limit", ()
     // A restart reads the switches and limits back.
     const back = rig.body(await rig.restart().send({ type: "lre.settings.get" })).settings as { minds: MindsSettings };
     expect({ life: back.minds.reads.life, pinned: back.minds.reads.pinned, recall: back.minds.reads.recall, recallTokens: back.minds.memory.recall?.tokens }).toEqual({ life: { on: true, tokens: 900 }, pinned: { on: true, tokens: 250_000 }, recall: { on: true }, recallTokens: 25_000 });
+  });
+
+  test("a minds step card keeps no recent chat of its own, as it keeps no lore: what minds read of the chat is Recent chat's; a helper's card keeps its own", async () => {
+    const rig = new Rig();
+    const recent = { on: true, messages: 5, tokens: 900 };
+    const patch: JsonObject = { modelUse: { preset: "custom", steps: { memory: { enabled: true, signals: [], recent }, interpret: { enabled: true, signals: ["always"], recent } } } };
+    const s = rig.body(await rig.send({ type: "lre.settings.set", patch })).settings as { modelUse: ModelUseSettings };
+    expect(s.modelUse.steps.memory?.recent).toBeUndefined();
+    expect(s.modelUse.steps.interpret?.recent).toEqual(recent);
   });
 });

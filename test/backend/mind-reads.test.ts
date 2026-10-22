@@ -106,7 +106,7 @@ describe("the lore pinned for a mind: the user's cap is its only limit", () => {
     const cal = calendarOf(world);
     const meet = clockAt(cal, dateAt(cal, state.clock).dayIndex + 1, 19 * 60);
     rig.body(await rig.send({ type: "lre.edit", chatId, ops: [{ op: "mind_pin", entity: MARCUS, level: "live" }, { op: "mind_memory", entity: MARCUS, part: "plan", id: null, value: { what: "Talk to Jordan about the books", kind: "meet", when: { from: meet, to: meet + 60 }, with: ["pov"], priority: 4 } }] }));
-    rig.body(await rig.send({ type: "lre.action", chatId, action: "timelapse", params: { target: { type: "duration", minutes: 3 * 1440 }, overrides: { invitation: "note" } }, source: "palette" }));
+    rig.body(await rig.send({ type: "lre.action", chatId, action: "timelapse", params: { target: { type: "duration", minutes: 3 * 1440 }, overrides: { invitation: "note" } }, source: "palette", now: true }));
     await rig.host.finish(await rig.host.start(chatId, { type: "normal" }), "Days pass.");
     const atBeat = seen.minds.filter((c) => c.name === "Marcus Delgado" && /## Now\nIt is .*Time skips ahead/.test(c.context));
     expect(atBeat.length).toBeGreaterThan(0);

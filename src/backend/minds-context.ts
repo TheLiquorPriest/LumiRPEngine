@@ -413,10 +413,8 @@ function thoughtsBlock(scope: MindScope, c: MindsCharacter): string {
 export function recentChat(scope: Pick<MindScope, "reads" | "hideJson" | "history">): string[] {
   const { history } = scope.reads;
   if (!history.on || !scope.history) return [];
-  // "No limit" reads as more than any chat holds.
-  const most = (limit: Limit): number => (limit === "none" ? Number.MAX_SAFE_INTEGER : limit);
   const chain = scope.history.map((m) => ({ id: m.id, isUser: m.isUser, swipeId: m.swipeId, swipes: m.swipes, ledger: null }));
-  return recentMessages(chain, { messages: most(history.messages), tokens: most(history.tokens) }, scope.hideJson);
+  return recentMessages(chain, { messages: history.messages, tokens: history.tokens }, scope.hideJson);
 }
 
 /** Recent chat as a block: the story's "you" is the POV, and it tells of more than they were there for. */
@@ -453,7 +451,9 @@ export function mindContext(scope: MindScope, report?: MindContextReport): strin
   const usual = reads.routine.on ? routineLines(scope) : [];
   const routine = linesWithin(usual, reads.routine.tokens);
   if (report && usual.length > 0) report.routine = { given: routine.length, left: usual.length - routine.length };
-  const chat = recentChat(scope);
+  // The latest reply, when they read how it ended, is the newest message before the turn: Recent
+  // chat gives the messages before it rather than the same reply twice.
+  const chat = recentChat(ended !== "" && scope.history?.at(-1)?.isUser === false ? { ...scope, history: scope.history.slice(0, -1) } : scope);
   if (report && chat.length > 0) report.history = chat.length;
   return [
     `You are ${e?.name ?? who}. ${occasion(scope, place)}`,

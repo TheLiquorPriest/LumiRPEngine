@@ -321,15 +321,16 @@ function loreOf(v: unknown): StepLore | undefined {
 /**
  * A step's settings, checked; a signal an earlier build had reads as the one that stands for it now
  * (`currentSignals`), so a step on `classifier` runs on every typed message and anything else the
- * user chose stays. A minds step keeps no lore of its own: what a mind reads is Settings → Minds'
- * (`minds.reads`, which an older mind card's lore moved into), and the other minds steps read none.
+ * user chose stays. A minds step keeps no lore and no recent history of its own: what a mind reads is
+ * Settings → Minds' (`minds.reads`, which an older mind card's lore moved into), the lore pinned to
+ * the other minds steps aside, and the recent chat they read is its Recent chat.
  */
 function stepOf(v: unknown, base: StepConfig | undefined, purpose: StepPurpose): StepConfig | undefined {
   if (!isRecord(v)) return base;
   const route = routeOf(v.route);
   const maxTokens = atLeast(v.maxTokens, 1);
   const lore = isMindPurpose(purpose) ? undefined : (loreOf(v.lore) ?? base?.lore);
-  const recent = recentHistoryOf(v.recent) ?? base?.recent;
+  const recent = isMindPurpose(purpose) ? undefined : (recentHistoryOf(v.recent) ?? base?.recent);
   return {
     enabled: typeof v.enabled === "boolean" ? v.enabled : (base?.enabled ?? false),
     signals: currentSignals(Array.isArray(v.signals) ? v.signals.filter((s): s is string => typeof s === "string").slice(0, 32).map((s) => s.slice(0, 64)) : (base?.signals ?? [])),
