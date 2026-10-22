@@ -304,16 +304,16 @@ export type MindsMemoryOverrides = { [K in keyof MindsMemoryConfig]?: Partial<Mi
 /**
  * The sources a mind's context is read from (DESIGN §24.5, Settings → Minds → What a mind reads), in
  * the order Settings lists them: the story as it stands (the lore pinned to them and to where they
- * are, the lore the turn activates, the latest reply and the player's message), then their own
- * summary, notes and what they saw, last thoughts, recall of the turns they were there for, their
- * usual routine (their routine blocks and schedules while their routine is informative or enforced,
- * a private block only when it is their own, never social life the planner made up: `RoutineRole`),
- * and their life (money,
+ * are, the lore the turn activates, the latest reply and the player's message), the recent chat as
+ * the player sees it (turns they weren't there for included), then their own summary, notes and what
+ * they saw, last thoughts, recall of the turns they were there for, their usual routine (their
+ * routine blocks and schedules while their routine is informative or enforced, a private block only
+ * when it is their own, never social life the planner made up: `RoutineRole`), and their life (money,
  * the day, commitments and plans). Who they are, where they are and what they mean to do are in every
  * context, outside these.
  */
-export type MindSource = "pinned" | "activated" | "reply" | "message" | "summary" | "memory" | "thoughts" | "recall" | "routine" | "life";
-export const MIND_SOURCES: readonly MindSource[] = ["pinned", "activated", "reply", "message", "summary", "memory", "thoughts", "recall", "routine", "life"];
+export type MindSource = "pinned" | "activated" | "reply" | "message" | "history" | "summary" | "memory" | "thoughts" | "recall" | "routine" | "life";
+export const MIND_SOURCES: readonly MindSource[] = ["pinned", "activated", "reply", "message", "history", "summary", "memory", "thoughts", "recall", "routine", "life"];
 
 /** One source as the user sets it: whether a mind reads it, and the most it may take, in tokens ("none": no limit). */
 export interface MindRead {
@@ -321,11 +321,15 @@ export interface MindRead {
   tokens: Limit;
 }
 
+/** The recent chat as the user sets it: on or off, and at most so many of the latest messages and about so many tokens in all, whichever runs out first ("none": no limit). */
+export type MindHistoryRead = MindRead & { messages: Limit };
+
 /**
  * What a mind reads: each source on or off with its own limit. Recall's limit is the memory setting
- * it always had (`recall.tokens`: the world's, or the user's override), so its entry is the switch.
+ * it always had (`recall.tokens`: the world's, or the user's override), so its entry is the switch;
+ * the recent chat has a messages limit beside its tokens.
  */
-export type MindsReads = Record<Exclude<MindSource, "recall">, MindRead> & { recall: Pick<MindRead, "on"> };
+export type MindsReads = Record<Exclude<MindSource, "recall" | "history">, MindRead> & { recall: Pick<MindRead, "on">; history: MindHistoryRead };
 
 /**
  * What a mind reads unless the user says otherwise: the story as it stands, their usual routine as
@@ -339,6 +343,8 @@ export const DEFAULT_MIND_READS: Readonly<MindsReads> = Object.freeze({
   activated: { on: true, tokens: 1600 },
   reply: { on: true, tokens: "none" },
   message: { on: true, tokens: "none" },
+  // Off: it tells of turns they weren't there for. Once on, what a helper reads before a typed message.
+  history: { on: false, messages: 8, tokens: 3000 },
   summary: { on: false, tokens: "none" },
   memory: { on: false, tokens: "none" },
   thoughts: { on: false, tokens: "none" },
@@ -426,6 +432,7 @@ function readsOf(raw: unknown, base: Readonly<MindsReads>): MindsReads {
     activated: readOf(r.activated, base.activated),
     reply: readOf(r.reply, base.reply),
     message: readOf(r.message, base.message),
+    history: { ...readOf(r.history, base.history), messages: limitIn(obj(r.history).messages, 1, Number.MAX_SAFE_INTEGER, base.history.messages) },
     summary: readOf(r.summary, base.summary),
     memory: readOf(r.memory, base.memory),
     thoughts: readOf(r.thoughts, base.thoughts),
@@ -916,6 +923,8 @@ export interface MindCallTrace {
   activated?: PinnedTrace[];
   /** How many lines of their usual routine it was given (DESIGN §24.5); absent: none. A count, never the lines: a routine can hold a private block. */
   routine?: number;
+  /** How many of the chat's latest messages it was given (Recent chat, DESIGN §24.5); absent: none. */
+  history?: number;
   /** What the player should know of how it went: lore or routine cut or left out over what a mind reads of it, and why. */
   notes?: string[];
 }

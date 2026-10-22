@@ -111,8 +111,10 @@ export function mindTracesOf(raw: unknown): MindCallTrace[] | undefined {
     const pinned = lore(t.pinned);
     const activated = lore(t.activated);
     const notes = strings(t.notes) ? [...t.notes] : [];
-    const routine = typeof t.routine === "number" && Number.isSafeInteger(t.routine) && t.routine > 0 ? t.routine : 0;
-    return [{ purpose, phase, who: t.who, level, outcome, ms: t.ms, tokens: t.tokens, prompt, ...(pinned.length > 0 ? { pinned } : {}), ...(activated.length > 0 ? { activated } : {}), ...(routine > 0 ? { routine } : {}), ...(notes.length > 0 ? { notes } : {}) }];
+    const count = (v: unknown): number => (typeof v === "number" && Number.isSafeInteger(v) && v > 0 ? v : 0);
+    const routine = count(t.routine);
+    const history = count(t.history);
+    return [{ purpose, phase, who: t.who, level, outcome, ms: t.ms, tokens: t.tokens, prompt, ...(pinned.length > 0 ? { pinned } : {}), ...(activated.length > 0 ? { activated } : {}), ...(routine > 0 ? { routine } : {}), ...(history > 0 ? { history } : {}), ...(notes.length > 0 ? { notes } : {}) }];
   });
 }
 

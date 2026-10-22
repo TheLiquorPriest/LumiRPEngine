@@ -36,6 +36,7 @@ const READ_LABEL: Record<MindSource, string> = {
   activated: "Lore the turn activates",
   reply: "The latest reply",
   message: "Your message",
+  history: "Recent chat",
   summary: "Their summary",
   memory: "Their notes and what they saw",
   thoughts: "Their last thoughts",
@@ -49,6 +50,7 @@ const READ_NOTE: Record<MindSource, string> = {
   activated: "The world's lore entries the turn names, by a key, an alias, a title or a lookup-table term, as World Info activates them, read as the character: by your message and the latest reply when they were there for them, else by where they are.",
   reply: "How the latest reply ended, for those who were there for it; cut to a number, they read its end. The memory step reads the reply within this limit too.",
   message: "What you say and do, for those with you. The memory step reads it within this limit too.",
+  history: "The latest messages before the turn as you see them in the chat (hidden JSON blocks left out), oldest first, up to both limits, whichever comes first. It includes turns they weren't there for: the chat as the player sees it, not what they know. The memory step, consolidation and the time-skip step read it too while it's on.",
   summary: "The summary their memory keeps and folds their old notes into.",
   memory: "Their memory notes, most salient first, and what they saw happen. Never what someone's memory says they were told: that came from another mind.",
   thoughts: "Their own latest mind: what they thought, what they meant to do and how they felt.",
@@ -57,15 +59,16 @@ const READ_NOTE: Record<MindSource, string> = {
   life: "Their money, the rest of today as the planner lays it (with what it fills free time with: meals, friends, outings), their commitments and their plans. None of it is the story as it stands.",
 };
 
-/** Where each source is listed: the story as it stands, what they usually do, or their own memory and life. */
-type ReadGroup = "story" | "usual" | "own";
-const READ_GROUP: Readonly<Record<MindSource, ReadGroup>> = { pinned: "story", activated: "story", reply: "story", message: "story", summary: "own", memory: "own", thoughts: "own", recall: "own", routine: "usual", life: "own" };
+/** Where each source is listed: the story as it stands, the chat as the player sees it, what they usually do, or their own memory and life. */
+type ReadGroup = "story" | "chat" | "usual" | "own";
+const READ_GROUP: Readonly<Record<MindSource, ReadGroup>> = { pinned: "story", activated: "story", reply: "story", message: "story", history: "chat", summary: "own", memory: "own", thoughts: "own", recall: "own", routine: "usual", life: "own" };
 
-const GROUP_TITLE: Record<ReadGroup, string> = { story: "The story as it stands", usual: "What they usually do", own: "Their own memory and life" };
+const GROUP_TITLE: Record<ReadGroup, string> = { story: "The story as it stands", chat: "The chat as you see it", usual: "What they usually do", own: "Their own memory and life" };
 
 /** Each group's note; the story as it stands needs none. */
 const GROUP_NOTE: Record<ReadGroup, string | null> = {
   story: null,
+  chat: "Off unless you turn it on: it tells a mind of turns its character wasn't there for.",
   usual: "On unless you turn it off: their routine as context, so they can keep to their days without the planner deciding for them.",
   own: "Off unless you turn them on: each can carry what the story never set up, like a day the planner filled with meals and friends, or a plan their memory took from narration that showed another character's mind.",
 };
@@ -74,7 +77,7 @@ const GROUP_NOTE: Record<ReadGroup, string | null> = {
 export function ReadSources(props: { reads: MindsReads; memory: MindsSettings["memory"]; busy: boolean; patch(patch: JsonObject): void }) {
   return (
     <>
-      {(["story", "usual", "own"] as const).map((group) => {
+      {(["story", "chat", "usual", "own"] as const).map((group) => {
         const note = GROUP_NOTE[group];
         return (
           <div key={group} class="lre-minds-group">
@@ -135,7 +138,7 @@ function MemoryOverride(props: { field: MemoryField; memory: MindsSettings["memo
   );
 }
 
-/** One source of what a mind reads: its switch and, while it's on, its limit (recall's is its memory override). */
+/** One source of what a mind reads: its switch and, while it's on, its limit (recall's is its memory override; the recent chat has a messages limit too). */
 export function ReadRow(props: { source: MindSource; reads: MindsReads; memory: MindsSettings["memory"]; busy: boolean; patch(patch: JsonObject): void }) {
   const { source, reads, busy } = props;
   const on = reads[source].on;
@@ -146,7 +149,10 @@ export function ReadRow(props: { source: MindSource; reads: MindsReads; memory: 
       {!on ? null : source === "recall" ? (
         recall ? <MemoryOverride field={recall} memory={props.memory} busy={busy} patch={props.patch} /> : null
       ) : (
-        <LimitField label={`${READ_LABEL[source]} (tokens)`} noneLabel="no limit" value={reads[source].tokens} min={1} step={100} fallback={DEFAULT_MIND_READS[source].tokens === "none" ? TOKENS_START : DEFAULT_MIND_READS[source].tokens} disabled={busy} onChange={(tokens) => props.patch(mindsReadPatch(source, { tokens }))} />
+        <>
+          {source === "history" ? <LimitField label={`${READ_LABEL.history} (messages)`} noneLabel="no limit" value={reads.history.messages} min={1} fallback={DEFAULT_MIND_READS.history.messages} disabled={busy} onChange={(messages) => props.patch(mindsReadPatch("history", { messages }))} /> : null}
+          <LimitField label={`${READ_LABEL[source]} (tokens)`} noneLabel="no limit" value={reads[source].tokens} min={1} step={100} fallback={DEFAULT_MIND_READS[source].tokens === "none" ? TOKENS_START : DEFAULT_MIND_READS[source].tokens} disabled={busy} onChange={(tokens) => props.patch(mindsReadPatch(source, { tokens }))} />
+        </>
       )}
       <Note>{READ_NOTE[source]}</Note>
     </div>

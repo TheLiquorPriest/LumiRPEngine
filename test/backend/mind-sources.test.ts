@@ -1,7 +1,8 @@
 // Settings → Minds → What a mind reads (DESIGN §24.5–24.6): each source a mind may read is the
 // user's to switch on or off and to limit, "no limit" allowed. Off, a source is not in the context;
 // on, it comes within its own limit, a text cut at a word, lines kept whole, lore cut where it runs
-// out; and each control reaches the settings store without touching the Model use preset.
+// out, the recent chat within its messages and its tokens; and each control reaches the settings
+// store without touching the Model use preset.
 
 import { describe, expect, test } from "bun:test";
 import { sectionTokens } from "../../src/backend/book";
@@ -12,7 +13,7 @@ import type { MindMoment, MindSource, MindsReads, MindsSettings } from "../../sr
 import { DEFAULT_MIND_READS, effectiveMemory, MIND_SOURCES } from "../../src/shared/minds";
 import { pinsFor, worldPinText } from "../../src/engine/lore-pins";
 import { placeOfEntity } from "../../src/engine/scope";
-import { ASK, DANNY, stateOf, storyChat } from "../support/mind-chat";
+import { ASK, DANNY, fakeModels, lastFor, stateOf, storyChat, alderChat } from "../support/mind-chat";
 import { Rig } from "../support/rig";
 
 /** What shows each source is in Danny's context on the story's second turn. */
@@ -21,10 +22,11 @@ const MARKS: Record<MindSource, string> = {
   activated: "ACTIVE-MARK",
   reply: "The story so far ended: SECOND-REPLY-MARK",
   message: `says or does: ${ASK}`,
+  history: "## Recent chat",
   summary: "SUMMARY-MARK",
   memory: "NOTE-MARK",
   thoughts: "THOUGHT-MARK",
-  recall: "FIRST-REPLY-MARK",
+  recall: "## Turns you were there for",
   routine: "ROUTINE-MARK",
   life: "COMMIT-MARK",
 };
@@ -41,8 +43,8 @@ describe("each source of what a mind reads, on or off, within its own limit", ()
     const settings = await rig.rt.settings.get(rig.host.userId);
     const pinned = pinsFor(world, placeOfEntity(state, DANNY), DANNY).flatMap((r) => worldPinText(world, r) ?? []);
     const moment: MindMoment = { kind: "turn", at: state.clock, reason: "", user: ASK, reply: messages.findLast((m) => !m.isUser)?.content ?? "" };
-    const every = Object.fromEntries(MIND_SOURCES.map((s) => [s, s === "recall" ? { on: true } : { on: true, tokens: "none" }])) as unknown as MindsReads;
-    const contextWith = (reads: MindsReads, report?: MindContextReport): string => mindContext({ reg: rig.rt.registry, world, state, who: DANNY, memory: effectiveMemory(world, settings.minds), messages, hideJson: true, moment, reads, pinned }, report);
+    const every = Object.fromEntries(MIND_SOURCES.map((s) => [s, s === "recall" ? { on: true } : s === "history" ? { on: true, messages: "none", tokens: "none" } : { on: true, tokens: "none" }])) as unknown as MindsReads;
+    const contextWith = (reads: MindsReads, report?: MindContextReport): string => mindContext({ reg: rig.rt.registry, world, state, who: DANNY, memory: effectiveMemory(world, settings.minds), messages, hideJson: true, moment, reads, pinned, history: messages }, report);
     for (const source of MIND_SOURCES) {
       expect({ source, on: contextWith(every).includes(MARKS[source]) }).toEqual({ source, on: true });
       expect({ source, off: contextWith({ ...every, [source]: { ...every[source], on: false } }).includes(MARKS[source]) }).toEqual({ source, off: false });
@@ -68,6 +70,39 @@ describe("each source of what a mind reads, on or off, within its own limit", ()
       const context = contextWith({ ...every, [source]: { on: true, tokens: 10 } }, report);
       expect({ source, given: context.includes(MARKS[source]), listed: report[source].length > 0, left: report[source].every((g) => g.left === true && g.tokens === 0) }).toEqual({ source, given: false, listed: true, left: true });
     }
+  });
+
+  /** The lines of the Recent chat block in a mind's context: each message, oldest first. */
+  const recentLines = (context: string): string[] => (/## Recent chat[^\n]*\n([\s\S]*?)(?=\n\n## |$)/.exec(context)?.[1] ?? "").split("\n").filter((l) => l.startsWith("Player: ") || l.startsWith("Story: "));
+  const PAD = "the harbor wind keeps the gulls low over the water all morning ".repeat(2).trim();
+
+  test("Recent chat: off by default a mind reads none of it; on, the latest messages before the turn as the player sees them, oldest first, at most its messages limit, and the trace counts them", async () => {
+    const rig = new Rig({ shipped: true, minds: true });
+    const seen = fakeModels(rig);
+    const chatId = await alderChat(rig, async () => undefined);
+    for (let k = 1; k <= 4; k++) await rig.turn(chatId, `U${k}-MARK ${PAD}`, `R${k}-MARK ${PAD} <json>{"hidden":"JSON-MARK"}</json>`);
+    expect(lastFor(seen.minds, "Danny Okafor")).not.toContain("## Recent chat");
+    rig.body(await rig.send({ type: "lre.settings.set", patch: { minds: { reads: { history: { on: true, messages: 3 } } } } }));
+    await rig.turn(chatId, `U5-MARK ${PAD}`, `R5-MARK ${PAD}`);
+    const danny = lastFor(seen.minds, "Danny Okafor");
+    expect(recentLines(danny)).toEqual([`Story: R3-MARK ${PAD}`, `Player: U4-MARK ${PAD}`, `Story: R4-MARK ${PAD}`]);
+    expect(danny).not.toContain("JSON-MARK");
+    const trace = rig.rt.inspectorRecords(chatId)?.at(-1)?.minds?.find((t) => t.who === "Danny Okafor" && t.purpose === "mind");
+    expect(trace?.history).toBe(3);
+  });
+
+  test("Recent chat with no limit on messages stops at its tokens, the oldest it reaches keeping its end", async () => {
+    const rig = new Rig({ shipped: true, minds: true });
+    const seen = fakeModels(rig);
+    const chatId = await alderChat(rig, async () => undefined);
+    for (let k = 1; k <= 4; k++) await rig.turn(chatId, `U${k}-MARK ${PAD}`, `R${k}-MARK ${PAD}`);
+    rig.body(await rig.send({ type: "lre.settings.set", patch: { minds: { reads: { history: { on: true, messages: "none", tokens: 60 } } } } }));
+    await rig.turn(chatId, `U5-MARK ${PAD}`, `R5-MARK ${PAD}`);
+    const lines = recentLines(lastFor(seen.minds, "Danny Okafor"));
+    expect(lines.length).toBe(2);
+    expect(lines[1]).toBe(`Story: R4-MARK ${PAD}`);
+    expect(lines[0]).toMatch(/^Player: …/);
+    expect(lines.join("\n")).not.toMatch(/U[1-4]-MARK|R[1-3]-MARK/);
   });
 
   test("Settings → Minds saves each source's switch and limit, recall's as its memory override with no limit allowed, and none of it touches the preset", async () => {

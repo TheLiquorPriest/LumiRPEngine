@@ -34,6 +34,7 @@ import { intentLines, intentOf } from "../packs/minds/core/intent";
 import { faded, openCommitments, openPlans, readCharacter, readSlice, salienceNow } from "../packs/minds/core/state";
 import { CHARS_PER_TOKEN, sectionTokens } from "./book";
 import type { HostMessage } from "./host";
+import { recentMessages } from "./interpret-context";
 import { readableReply } from "./json-hiding";
 
 /** Everything a mind's context is read from. */
@@ -56,6 +57,8 @@ export interface MindScope {
    * consolidation call's, to its step.
    */
   pinned?: readonly PinnedText[];
+  /** The chat before the moment's turn (`chatBefore`), which Recent chat reads while it is on; absent, none. */
+  history?: readonly HostMessage[];
 }
 
 /** A lore entry as a mind's context gave it: whole, or cut to its source's limit, or left out over it (`left`). A `secret` one stays off every player surface. */
@@ -68,11 +71,12 @@ export interface GivenLore {
   secret: boolean;
 }
 
-/** What a mind's context gave of its lore (DESIGN §24.5): what is pinned for them, and what the turn activated; and how many lines of their usual routine it gave and left out over its limit. */
+/** What a mind's context gave of its lore (DESIGN §24.5): what is pinned for them, and what the turn activated; how many lines of their usual routine it gave and left out over its limit; and how many of the chat's latest messages it gave. */
 export interface MindContextReport {
   pinned: GivenLore[];
   activated: GivenLore[];
   routine?: { given: number; left: number };
+  history?: number;
 }
 
 /** Fields a person's sheet holds that the context says elsewhere or that are the engine's own bookkeeping. */
@@ -400,6 +404,26 @@ function thoughtsBlock(scope: MindScope, c: MindsCharacter): string {
   return last && text !== "" ? block(`Your last thoughts (${formatClock(calendarOf(scope.world), last.at)})`, [text]) : "";
 }
 
+/**
+ * Recent chat (DESIGN §24.5), while it is on: the latest messages before the turn as the player sees
+ * them (hidden JSON blocks left out), oldest first, at most so many and about so many tokens in all,
+ * whichever runs out first, the oldest that doesn't fit whole keeping its end (`recentMessages`). It
+ * tells of turns they weren't there for: the chat, not what they know.
+ */
+export function recentChat(scope: Pick<MindScope, "reads" | "hideJson" | "history">): string[] {
+  const { history } = scope.reads;
+  if (!history.on || !scope.history) return [];
+  // "No limit" reads as more than any chat holds.
+  const most = (limit: Limit): number => (limit === "none" ? Number.MAX_SAFE_INTEGER : limit);
+  const chain = scope.history.map((m) => ({ id: m.id, isUser: m.isUser, swipeId: m.swipeId, swipes: m.swipes, ledger: null }));
+  return recentMessages(chain, { messages: most(history.messages), tokens: most(history.tokens) }, scope.hideJson);
+}
+
+/** Recent chat as a block: the story's "you" is the POV, and it tells of more than they were there for. */
+function recentBlock(scope: Pick<MindScope, "state" | "world" | "who">, lines: readonly string[]): string {
+  return block("Recent chat (as the player sees it: it tells of turns you weren't there for too)", lines.length > 0 ? [storyVoice(scope), ...lines] : []);
+}
+
 /** The user message of a `mind` call: who they are, where they are, and each source they read; `report` hears what became of their lore. */
 export function mindContext(scope: MindScope, report?: MindContextReport): string {
   const { world, state, who, moment, reads } = scope;
@@ -429,6 +453,8 @@ export function mindContext(scope: MindScope, report?: MindContextReport): strin
   const usual = reads.routine.on ? routineLines(scope) : [];
   const routine = linesWithin(usual, reads.routine.tokens);
   if (report && usual.length > 0) report.routine = { given: routine.length, left: usual.length - routine.length };
+  const chat = recentChat(scope);
+  if (report && chat.length > 0) report.history = chat.length;
   return [
     `You are ${e?.name ?? who}. ${occasion(scope, place)}`,
     block("Who you are", identityLines(scope)),
@@ -441,6 +467,7 @@ export function mindContext(scope: MindScope, report?: MindContextReport): strin
     reads.thoughts.on ? thoughtsBlock(scope, c) : "",
     loreBlock(scope, about, report),
     block("Turns you were there for (ignore any narration of other people's private thoughts)", recall.length > 0 ? [storyVoice(scope), ...recall.map((t) => t.text)] : []),
+    recentBlock(scope, chat),
     block("Now", now.filter((l) => l !== "")),
   ]
     .filter((p) => p !== "")
@@ -462,9 +489,9 @@ export function pinnedLines(scope: Pick<MindScope, "reg" | "world" | "state" | "
 
 /**
  * The user message of a `memory` call: who they are, what they hold, the lore pinned to the memory
- * step, and the turn as it was written, the reply and the player's message within what minds read
- * of them. With `left`, the POV left them partway through: what the story tells after that happened
- * without them.
+ * step, the recent chat while minds read it, and the turn as it was written, the reply and the
+ * player's message within what minds read of them. With `left`, the POV left them partway through:
+ * what the story tells after that happened without them.
  */
 export function memoryContext(scope: MindScope, turn: { user: string; reply: string; left?: boolean }): string {
   const { state, who, world } = scope;
@@ -481,15 +508,16 @@ export function memoryContext(scope: MindScope, turn: { user: string; reply: str
     block("Your plans", plans),
     block("What you remember", memoryLines(scope, c)),
     block("Pinned lore", pinnedLines(scope, "memory")),
+    recentBlock(scope, recentChat(scope)),
     block("The turn just written", written.filter((l) => l !== "")),
   ]
     .filter((p) => p !== "")
     .join("\n\n");
 }
 
-/** The user message of a `consolidate` call: the summary, the lore pinned to the consolidation step, and the notes to fold into it. */
-export function consolidateContext(scope: Pick<MindScope, "reg" | "state" | "world" | "who" | "reads" | "pinned">, notes: readonly { text: string; at: number }[]): string {
+/** The user message of a `consolidate` call: the summary, the lore pinned to the consolidation step, the recent chat while minds read it, and the notes to fold into it. */
+export function consolidateContext(scope: Pick<MindScope, "reg" | "state" | "world" | "who" | "reads" | "pinned" | "hideJson" | "history">, notes: readonly { text: string; at: number }[]): string {
   const c = readCharacter(scope.state, scope.who);
   const cal = calendarOf(scope.world);
-  return [`You are ${nameOf(scope, scope.who)}.`, block("Your summary", [c.summary !== "" ? c.summary : "(none yet)"]), block("Pinned lore", pinnedLines(scope, "consolidate")), block("Older notes to fold in", notes.map((n) => `- ${formatClock(cal, n.at)}: ${n.text}`))].filter((p) => p !== "").join("\n\n");
+  return [`You are ${nameOf(scope, scope.who)}.`, block("Your summary", [c.summary !== "" ? c.summary : "(none yet)"]), block("Pinned lore", pinnedLines(scope, "consolidate")), recentBlock(scope, recentChat(scope)), block("Older notes to fold in", notes.map((n) => `- ${formatClock(cal, n.at)}: ${n.text}`))].filter((p) => p !== "").join("\n\n");
 }

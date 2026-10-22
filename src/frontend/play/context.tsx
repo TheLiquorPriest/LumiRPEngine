@@ -64,6 +64,7 @@ function decodeMinds(value: unknown): MindCallTrace[] {
     pinned: list(t.pinned, (p) => ({ title: str(p.title), tokens: num(p.tokens), cut: p.cut === true })),
     activated: list(t.activated, (p) => ({ title: str(p.title), tokens: num(p.tokens), cut: p.cut === true })),
     ...(num(t.routine) > 0 ? { routine: num(t.routine) } : {}),
+    ...(num(t.history) > 0 ? { history: num(t.history) } : {}),
     notes: strings(t.notes),
   }));
 }
@@ -241,11 +242,12 @@ export function ContextPanel(props: PanelProps) {
                     value={`${(m.ms / 1000).toFixed(1)} s · ${m.tokens} tok`}
                     actions={<Badge tone={MIND_OUTCOME[m.outcome].tone}>{MIND_OUTCOME[m.outcome].text}</Badge>}
                   >
-                    {(m.pinned ?? []).length > 0 || (m.activated ?? []).length > 0 || (m.routine ?? 0) > 0 || (m.notes ?? []).length > 0 ? (
+                    {(m.pinned ?? []).length > 0 || (m.activated ?? []).length > 0 || (m.routine ?? 0) > 0 || (m.history ?? 0) > 0 || (m.notes ?? []).length > 0 ? (
                       <div class="lre-gm-minds-pinned" data-lre-mind-pins>
                         {(m.pinned ?? []).length > 0 ? <span>Pinned lore: {(m.pinned ?? []).map((p) => `${p.title} (${p.tokens} tok${p.cut ? ", cut" : ""})`).join(", ")}</span> : null}
                         {(m.activated ?? []).length > 0 ? <span>Lore the turn activated: {(m.activated ?? []).map((p) => `${p.title} (${p.tokens} tok${p.cut ? ", cut" : ""})`).join(", ")}</span> : null}
                         {(m.routine ?? 0) > 0 ? <span data-lre-mind-routine>Their usual routine: {m.routine} line{m.routine === 1 ? "" : "s"}</span> : null}
+                        {(m.history ?? 0) > 0 ? <span data-lre-mind-history>Recent chat: {m.history} message{m.history === 1 ? "" : "s"}</span> : null}
                         {(m.notes ?? []).map((n) => (
                           <p key={n} class="lre-gm-warnline">
                             <Icon name="alert" size={16} />

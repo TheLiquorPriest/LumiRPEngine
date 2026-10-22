@@ -6,7 +6,7 @@
 // setting, again.
 
 import type { JsonObject } from "../../shared/json";
-import type { Fidelity, Limit, MindPurpose, MindRead, MindSource, MindsMemoryConfig, MindsSettings } from "../../shared/minds";
+import type { Fidelity, Limit, MindHistoryRead, MindPurpose, MindSource, MindsMemoryConfig, MindsSettings } from "../../shared/minds";
 import { FIDELITIES, MIND_PROMPT_DEFAULTS, MIND_PROMPT_MAX, MINDS_RANGES } from "../../shared/minds";
 
 /** The fields a Model use preset sets; changing one makes the preset Custom. */
@@ -33,8 +33,8 @@ export function withMemoryLevel(levels: readonly Fidelity[], level: Fidelity, on
   return FIDELITIES.filter((f) => f !== "background" && (f === level ? on : levels.includes(f)));
 }
 
-/** One source of what a mind reads switched on or off, or given a limit: the user's own, so the preset stays. Recall's limit is its memory override (`recall.tokens`). */
-export function mindsReadPatch(source: MindSource, change: Partial<MindRead>): JsonObject {
+/** One source of what a mind reads switched on or off, or given a limit (`messages`: the recent chat's only): the user's own, so the preset stays. Recall's limit is its memory override (`recall.tokens`). */
+export function mindsReadPatch(source: MindSource, change: Partial<MindHistoryRead>): JsonObject {
   return { minds: { reads: { [source]: { ...change } } } };
 }
 
