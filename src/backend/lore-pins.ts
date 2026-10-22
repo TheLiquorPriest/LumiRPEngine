@@ -105,6 +105,11 @@ export async function pinReader(host: Pick<HostPort, "books" | "log">, world: Wo
   };
 }
 
+/** The text of the pins in `refs`, read now, in order (`pinReader`, for one set of pins). */
+export async function readPins(host: Pick<HostPort, "books" | "log">, world: WorldDoc, refs: readonly PinRef[], userId: UserId): Promise<PinnedText[]> {
+  return refs.length === 0 ? [] : (await pinReader(host, world, refs, userId))(refs);
+}
+
 /**
  * Every pin of `world`, read now (`lre.lore pins`), by character, by place and by step: each entry's
  * or book's title, where it comes from (the world's lore, or its book by name) and whether it reads.

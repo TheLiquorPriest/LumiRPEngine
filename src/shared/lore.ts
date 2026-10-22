@@ -73,18 +73,12 @@ function pinJson(pin: LorePin): LorePin & JsonObject {
   return "lore" in pin ? { lore: pin.lore } : "entry" in pin ? { book: pin.book, entry: pin.entry } : { book: pin.book };
 }
 
-/**
- * The steps a step pin reaches (DESIGN §24.5): every helper with a lore block, and each mind. The
- * memory, time-skip and consolidation steps read no lore, so nothing pinned to them is read.
- */
-export const PIN_STEPS: readonly StepPurpose[] = LORE_AUDIENCE.filter((p) => p !== "memory" && p !== "skip" && p !== "consolidate");
-
 const pinsRead = new WeakMap<object, LorePins>();
 
 /**
  * The world's lore pins as the engine reads them (DESIGN §24.5): each character's, place's and
- * step's well-formed pins, each entry once, in order; a malformed one (linted), a step no pin
- * reaches, or a key that could reach a prototype is left out. Read once per world revision.
+ * step's well-formed pins, each entry once, in order; a malformed one (linted), a step that isn't
+ * one, or a key that could reach a prototype is left out. Read once per world revision.
  */
 export function lorePinsOf(world: { readonly lorePins?: unknown }): LorePins {
   const raw = world.lorePins;
@@ -108,7 +102,7 @@ export function lorePinsOf(world: { readonly lorePins?: unknown }): LorePins {
     return out;
   };
   const steps = part(raw.steps);
-  const read: LorePins = { characters: part(raw.characters), places: part(raw.places), steps: Object.fromEntries(PIN_STEPS.flatMap((p): [StepPurpose, LorePin[]][] => (hasOwn(steps, p) ? [[p, steps[p] ?? []]] : []))) };
+  const read: LorePins = { characters: part(raw.characters), places: part(raw.places), steps: Object.fromEntries(LORE_AUDIENCE.flatMap((p): [StepPurpose, LorePin[]][] => (hasOwn(steps, p) ? [[p, steps[p] ?? []]] : []))) };
   pinsRead.set(raw, read);
   return read;
 }
@@ -123,7 +117,7 @@ export function lorePinsJson(pins: LorePins): JsonObject {
 export const LORE_PIN_LINTS: Readonly<Record<string, string>> = {
   pin_shape: 'a pin that is none of {"lore": id}, {"book": id, "entry": id} and {"book": id}: it is ignored',
   pin_missing: "a pin naming a lore entry the world doesn't have",
-  pin_target: "pins under a character, place or step the world doesn't have, or a step that reads no lore: no call reads them",
+  pin_target: "pins under a character, place or step the world doesn't have: no call reads them",
   pin_duplicate: "the same entry or book pinned twice to one character, place or step",
   pin_unread: "a secret entry pinned to someone whose own it isn't: their mind never reads it",
   pin_pending: "an AI-written entry still waiting for review: no call reads it until it is accepted",

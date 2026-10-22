@@ -10,6 +10,7 @@
 
 import { useEffect, useId, useMemo, useState } from "preact/hooks";
 import { lorePinKey, lorePinsJson, lorePinsOf } from "../../shared/lore";
+import { isMindPurpose, type MindPurpose } from "../../shared/minds";
 import type { LoreBookEntryView, LoreBookView, LorePinView } from "../../shared/protocol";
 import type { LorePin, LorePins, StepPurpose } from "../../shared/world";
 import { useApp } from "../app";
@@ -26,8 +27,15 @@ const HINT = {
   characters: "Their mind reads these first, every time they think, within the pinned lore a mind reads (Settings → Minds → What a mind reads).",
   places: "Every helper and mind call here, or in a place inside it, reads these first, within its lore tokens.",
   steps: "Every call of this step reads these first, whatever its lore setting, within its lore tokens (Settings → Steps).",
-  mind: "Every character's mind reads these, after what is pinned to them, within the pinned lore a mind reads (Settings → Minds → What a mind reads).",
 } as const;
+
+/** The minds steps have no lore setting: their pins read within the pinned lore a mind reads. */
+const MIND_STEP_HINT: Record<MindPurpose, string> = {
+  mind: "Every character's mind reads these, after what is pinned to them, within the pinned lore a mind reads (Settings → Minds → What a mind reads).",
+  memory: "Each character's memory after the reply reads these, and no other lore, within the pinned lore a mind reads (Settings → Minds → What a mind reads).",
+  skip: "The call that looks for a time skip's beats reads these, and so does every mind at a beat, after what is pinned to them and to every mind; within the pinned lore a mind reads (Settings → Minds → What a mind reads).",
+  consolidate: "Each memory consolidation reads these, and no other lore, within the pinned lore a mind reads (Settings → Minds → What a mind reads).",
+};
 
 /** The picker's choice of a whole book rather than one of its entries; no host entry id looks like it. */
 const WHOLE_BOOK = "lre:whole-book";
@@ -89,7 +97,7 @@ export function LorePinsSection(props: PinTarget) {
   };
   const taken = new Set(list.map(lorePinKey));
   const lore = Object.values(draft.doc.lore).filter((l) => !taken.has(`lore:${l.id}`)).sort((a, b) => a.title.localeCompare(b.title));
-  const hint = props.target === "steps" ? (props.id === "mind" ? HINT.mind : HINT.steps) : HINT[props.target];
+  const hint = props.target === "steps" ? (isMindPurpose(props.id) ? MIND_STEP_HINT[props.id] : HINT.steps) : HINT[props.target];
   return (
     <div data-lre-lore-pins={`${props.target}:${props.id}`}>
       <Section title={props.target === "steps" ? STEP_LABEL[props.id] : "Pinned lore"} aside={list.length > 0 ? <Badge>{list.length}</Badge> : undefined}>

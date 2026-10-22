@@ -15,7 +15,7 @@ import type { EntityId, MessageId, PlaceId } from "../shared/ids";
 import type { Limit, MindMoment, MindsCharacter, MindsMemoryConfig, MindsReads } from "../shared/minds";
 import { limitOf } from "../shared/minds";
 import { loreIsSecret } from "../shared/lore";
-import type { LoreEntryDef, WorldDoc } from "../shared/world";
+import type { LoreEntryDef, StepPurpose, WorldDoc } from "../shared/world";
 import { formatMoney } from "../shared/world";
 import { calendarOf, dateAt, dayPartAt, formatClock, formatHHMM, holidaysOn } from "../engine/calendar";
 import { cuesOf } from "../engine/cues";
@@ -50,7 +50,11 @@ export interface MindScope {
   moment: MindMoment;
   /** What a mind reads (Settings → Minds): each source on or off, within its own limit. The memory step reads the turn within the reply's and the message's limits. */
   reads: MindsReads;
-  /** The lore pinned to them, then to where they are and the places holding it, nearest first (DESIGN §24.5), read now. */
+  /**
+   * The lore pinned for the call (DESIGN §24.5), read now: a mind's, to them, to every mind (at a
+   * time skip's beat, to its beats too) and to where they are, nearest first; a memory or
+   * consolidation call's, to its step.
+   */
   pinned?: readonly PinnedText[];
 }
 
@@ -444,9 +448,23 @@ export function mindContext(scope: MindScope, report?: MindContextReport): strin
 }
 
 /**
- * The user message of a `memory` call: who they are, what they hold, and the turn as it was written,
- * the reply and the player's message within what minds read of them. With `left`, the POV left them
- * partway through: what the story tells after that happened without them.
+ * The lore pinned to a minds step that reads no other lore (DESIGN §24.5: memory, consolidation, a
+ * time skip's beats), as lines: each entry whole within the pinned lore a mind reads, the entry it
+ * runs out on cut at a word, or left out once not even its title and a few words fit; read as the
+ * character when the call is someone's, so a secret that isn't theirs stays out.
+ */
+export function pinnedLines(scope: Pick<MindScope, "reg" | "world" | "state" | "reads" | "pinned"> & { who?: EntityId }, purpose: StepPurpose): string[] {
+  const { reg, world, state, who } = scope;
+  const open = loreGateReader(reg, world, state);
+  const given = fitPins({ reg, world, state, tokens: sectionTokens }, scope.pinned ?? [], limitOf(scope.reads.pinned.tokens), (entry) => loreReadable(reg, world, state, entry, purpose, false, open, who));
+  return given.flatMap((g) => (g.snippet === null ? [] : [`- ${g.snippet}`]));
+}
+
+/**
+ * The user message of a `memory` call: who they are, what they hold, the lore pinned to the memory
+ * step, and the turn as it was written, the reply and the player's message within what minds read
+ * of them. With `left`, the POV left them partway through: what the story tells after that happened
+ * without them.
  */
 export function memoryContext(scope: MindScope, turn: { user: string; reply: string; left?: boolean }): string {
   const { state, who, world } = scope;
@@ -462,15 +480,16 @@ export function memoryContext(scope: MindScope, turn: { user: string; reply: str
     block("Your open commitments (by id)", commitments),
     block("Your plans", plans),
     block("What you remember", memoryLines(scope, c)),
+    block("Pinned lore", pinnedLines(scope, "memory")),
     block("The turn just written", written.filter((l) => l !== "")),
   ]
     .filter((p) => p !== "")
     .join("\n\n");
 }
 
-/** The user message of a `consolidate` call: the summary and the notes to fold into it. */
-export function consolidateContext(scope: Pick<MindScope, "state" | "world" | "who">, notes: readonly { text: string; at: number }[]): string {
+/** The user message of a `consolidate` call: the summary, the lore pinned to the consolidation step, and the notes to fold into it. */
+export function consolidateContext(scope: Pick<MindScope, "reg" | "state" | "world" | "who" | "reads" | "pinned">, notes: readonly { text: string; at: number }[]): string {
   const c = readCharacter(scope.state, scope.who);
   const cal = calendarOf(scope.world);
-  return [`You are ${nameOf(scope, scope.who)}.`, block("Your summary", [c.summary !== "" ? c.summary : "(none yet)"]), block("Older notes to fold in", notes.map((n) => `- ${formatClock(cal, n.at)}: ${n.text}`))].filter((p) => p !== "").join("\n\n");
+  return [`You are ${nameOf(scope, scope.who)}.`, block("Your summary", [c.summary !== "" ? c.summary : "(none yet)"]), block("Pinned lore", pinnedLines(scope, "consolidate")), block("Older notes to fold in", notes.map((n) => `- ${formatClock(cal, n.at)}: ${n.text}`))].filter((p) => p !== "").join("\n\n");
 }

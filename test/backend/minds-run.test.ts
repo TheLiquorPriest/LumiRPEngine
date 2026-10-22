@@ -216,6 +216,21 @@ describe("lore pins", () => {
     for (const c of helpers) expect(JSON.stringify(c.messages)).not.toContain("EVERY-MIND-PIN");
   });
 
+  test("the memory step's pins reach each memory written after the reply, as its only lore, and no mind or helper", async () => {
+    const rig = new Rig({ shipped: true, minds: true });
+    fakeModels(rig, { text: "TURN-MARK" });
+    const chatId = await alderChat(rig, async (worldId) => {
+      rig.body(await rig.send({ type: "lre.editor", op: "put", worldId, base: null, collection: "lore", id: "memory_note", value: { id: "memory_note", title: "What to remember", content: "MEMORY-PIN: remember who owes whom.", keys: [], links: [] } }));
+      rig.body(await rig.send({ type: "lre.editor", op: "set", worldId, base: null, part: "lorePins", value: { characters: {}, places: {}, steps: { memory: [{ lore: "memory_note" }] } } }));
+    });
+    await rig.turn(chatId, "I walk to the window and wait.", "The kettle clicks off.");
+    const MEMORY = /You keep the memory of (.+?) in the roleplay world/;
+    const memories = rig.host.quietCalls.filter((c) => MEMORY.test(c.messages[0]?.content ?? ""));
+    expect(memories.map((c) => MEMORY.exec(c.messages[0]?.content ?? "")?.[1]).sort()).toEqual(["Danny Okafor", "Priya Nair"]);
+    for (const c of memories) expect(c.messages[1]?.content).toContain("## Pinned lore\n- What to remember: MEMORY-PIN: remember who owes whom.");
+    for (const c of rig.host.quietCalls.filter((c) => !MEMORY.test(c.messages[0]?.content ?? ""))) expect(JSON.stringify(c.messages)).not.toContain("MEMORY-PIN");
+  });
+
   test("a pin to an entry the world doesn't have is linted where it is", () => {
     const world = newWorld("w_pins", "Pins");
     const issues = lint({ ...world, lorePins: { characters: { [world.pov]: [{ lore: "no_such_entry" }] }, places: {}, steps: {} } });

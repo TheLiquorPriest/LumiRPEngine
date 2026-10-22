@@ -30,11 +30,11 @@ export interface PinRef {
 }
 
 /**
- * The pins a call reads (DESIGN §24.5): `who`'s own first (a mind's), then `step`'s (every call of
- * it), then those of `place` and of each place holding it, nearest first; an entry or book pinned
- * twice is read once, where it comes first.
+ * The pins a call reads (DESIGN §24.5): `who`'s own first (a mind's), then each of `steps`' in
+ * order (every call of that step), then those of `place` and of each place holding it, nearest
+ * first; an entry or book pinned twice is read once, where it comes first.
  */
-export function pinsFor(world: WorldDoc, place: PlaceId | null, who?: EntityId, step?: StepPurpose): PinRef[] {
+export function pinsFor(world: WorldDoc, place: PlaceId | null, who?: EntityId, steps: readonly StepPurpose[] = []): PinRef[] {
   const pins = lorePinsOf(world);
   const out: PinRef[] = [];
   const seen = new Set<string>();
@@ -47,7 +47,7 @@ export function pinsFor(world: WorldDoc, place: PlaceId | null, who?: EntityId, 
     }
   };
   if (who !== undefined) add(own(pins.characters, who), { character: who });
-  if (step !== undefined) add(pins.steps[step], { step });
+  for (const step of steps) add(pins.steps[step], { step });
   for (const at of placeChain(world, place)) add(own(pins.places, at), { place: at });
   return out;
 }

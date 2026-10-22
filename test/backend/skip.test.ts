@@ -289,7 +289,7 @@ describe("time skips", () => {
     const settings = await rig.rt.settings.get(rig.host.userId);
     const target = { type: "duration" as const, minutes: 3 * 1440 };
     const asked: number[] = [];
-    const skip = await runSkip({ registry: rig.rt.registry, steps: rig.rt.steps, minds: async (input) => (asked.push(input.moment.at), { events: [], traces: [] }) }, { chatId, userId: rig.host.userId, world, state, intent: { ...timelapseIntent(target, { invitation: "note" }) }, runSeed: "seed", settings, signal: AbortSignal.abort() });
+    const skip = await runSkip({ registry: rig.rt.registry, steps: rig.rt.steps, minds: async (input) => (asked.push(input.moment.at), { events: [], traces: [] }), host: rig.host }, { chatId, userId: rig.host.userId, world, state, intent: { ...timelapseIntent(target, { invitation: "note" }) }, runSeed: "seed", settings, signal: AbortSignal.abort() });
     if (!skip) throw new Error("no skip");
     const beats = skip.record.beats.map((b) => b.at);
     expect(skip.record.stop).toEqual({ by: "clock", at: beats[1] ?? NaN });

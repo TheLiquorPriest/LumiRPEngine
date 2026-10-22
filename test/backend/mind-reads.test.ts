@@ -84,6 +84,39 @@ describe("the lore pinned for a mind: the user's cap is its only limit", () => {
     for (const c of atBeat) allPinsWhole(c.context);
   });
 
+  test("a time skip's beat: the mind that thinks there reads what is pinned to them, to every mind and to the beats step, in that order; a turn's mind reads no beats pins", async () => {
+    const rig = new Rig({ shipped: true, minds: true });
+    const seen = fakeModels(rig);
+    const chatId = await alderChat(
+      rig,
+      async (put, worldId) => {
+        await put("lore", "marcus_pin", { id: "marcus_pin", title: "Marcus's books", content: "MARCUS-PIN: the shop's books are two months behind.", keys: [], links: [] });
+        await put("lore", "every_mind", { id: "every_mind", title: "Town talk", content: "EVERY-MIND-PIN: the harbor festival is Saturday.", keys: [], links: [] });
+        await put("lore", "beats_pin", { id: "beats_pin", title: "Skip notes", content: "BEATS-PIN: the week runs slow after the storm.", keys: [], links: [] });
+        rig.body(await rig.send({ type: "lre.editor", op: "set", worldId, base: null, part: "lorePins", value: { characters: { [MARCUS]: [{ lore: "marcus_pin" }] }, places: {}, steps: { mind: [{ lore: "every_mind" }], skip: [{ lore: "beats_pin" }] } } }));
+      },
+      [MARCUS],
+    );
+    await rig.turn(chatId, "I look around the shop.", "The shop is quiet.");
+    const onTurn = lastFor(seen.minds, "Marcus Delgado");
+    expect(onTurn).toContain("EVERY-MIND-PIN");
+    expect(onTurn).not.toContain("BEATS-PIN");
+    // Marcus means to meet the player character tomorrow evening: a beat of a three-day skip.
+    const { state, world } = await stateOf(rig, chatId);
+    const cal = calendarOf(world);
+    const meet = clockAt(cal, dateAt(cal, state.clock).dayIndex + 1, 19 * 60);
+    rig.body(await rig.send({ type: "lre.edit", chatId, ops: [{ op: "mind_pin", entity: MARCUS, level: "live" }, { op: "mind_memory", entity: MARCUS, part: "plan", id: null, value: { what: "Talk to Jordan about the books", kind: "meet", when: { from: meet, to: meet + 60 }, with: ["pov"], priority: 4 } }] }));
+    rig.body(await rig.send({ type: "lre.action", chatId, action: "timelapse", params: { target: { type: "duration", minutes: 3 * 1440 }, overrides: { invitation: "note" } }, source: "palette" }));
+    await rig.host.finish(await rig.host.start(chatId, { type: "normal" }), "Days pass.");
+    const atBeat = seen.minds.filter((c) => c.name === "Marcus Delgado" && /## Now\nIt is .*Time skips ahead/.test(c.context));
+    expect(atBeat.length).toBeGreaterThan(0);
+    for (const c of atBeat) {
+      const at = ["MARCUS-PIN", "EVERY-MIND-PIN", "BEATS-PIN"].map((mark) => c.context.indexOf(mark));
+      expect(at.every((i) => i >= 0)).toBe(true);
+      expect([...at].sort((a, b) => a - b)).toEqual(at);
+    }
+  });
+
   test("under a lower cap the entry it runs out on is cut at a word and the rest left out, and the trace says so and why", async () => {
     const rig = new Rig({ shipped: true, minds: true });
     const seen = fakeModels(rig);

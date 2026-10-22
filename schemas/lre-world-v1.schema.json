@@ -1029,7 +1029,7 @@
       "properties": {
         "characters": { "type": "object", "description": "entity id → the entries pinned to that character", "additionalProperties": { "type": "array", "items": { "$ref": "#/$defs/lorePin" } } },
         "places": { "type": "object", "description": "place id → the entries pinned to that place", "additionalProperties": { "type": "array", "items": { "$ref": "#/$defs/lorePin" } } },
-        "steps": { "type": "object", "description": "step (interpret, npc.choose, contradiction, puzzle.answer, brief, outline, extract, choices, judge or mind) → the entries every call of that step reads first, whatever its lore policy; the mind step's, every mind", "additionalProperties": { "type": "array", "items": { "$ref": "#/$defs/lorePin" } } }
+        "steps": { "type": "object", "description": "step purpose → the entries every call of that step reads first, whatever its lore policy; the mind step's, every mind; the skip step's, every mind at a time skip's beat too", "additionalProperties": { "type": "array", "items": { "$ref": "#/$defs/lorePin" } } }
       }
     },
     "facet": {

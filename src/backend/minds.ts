@@ -18,7 +18,7 @@ import type { CommitmentKind, Fidelity, Limit, MindCallTrace, MindCommitment, Mi
 import { COMMITMENT_KINDS, effectiveMemory, MIND_ANSWER_FORMATS, MIND_PROMPT_DEFAULTS, MIND_TEXT_CAPS, MINDS_EVENTS, PLAN_KINDS, PLAN_PRIORITY, worldMindsOf, worldMindTemplate } from "../shared/minds";
 import type { ModelUseSettings, StepConfig } from "../shared/settings";
 import { stepConfigOf } from "../shared/settings";
-import type { WorldDoc } from "../shared/world";
+import type { StepPurpose, WorldDoc } from "../shared/world";
 import { parseMoneyInput } from "../shared/money";
 import { calendarOf, clockOfStamp, formatClock, nextTimeOfDay } from "../engine/calendar";
 import { loreReadable } from "../engine/lore";
@@ -35,7 +35,7 @@ import { capText } from "../packs/minds/core/edit";
 import { fidelityOf, pickMinds } from "../packs/minds/core/fidelity";
 import { faded, readCharacter, readSlice, salienceNow } from "../packs/minds/core/state";
 import type { HostMessage, HostPort } from "./host";
-import { pinReader } from "./lore-pins";
+import { pinReader, readPins } from "./lore-pins";
 import { consolidateContext, memoryContext, mindContext, povLabel, type GivenLore, type MindContextReport, type MindScope } from "./minds-context";
 import type { PresetBinding } from "./preset-binding";
 import type { SettingsStore } from "./settings-store";
@@ -263,9 +263,11 @@ export async function runMinds(deps: MindsDeps, input: RunMindsInput): Promise<R
   const messages = input.messages ?? (await chatMessages(deps, input.chatId, userId));
   const reads = settings.minds.reads;
   const phase = input.phase ?? (input.moment.kind === "beat" ? "skip" : "pre");
-  // The lore pinned to each of them, to every mind (the mind step's) and to where they are (DESIGN
-  // §24.5), each book entry and whole book read once, when minds read it.
-  const refs = new Map(input.who.map((who) => [who, reads.pinned.on ? pinsFor(world, placeOfEntity(state, who), who, "mind") : []]));
+  // The lore pinned to each of them, to every mind (the mind step's; at a time skip's beat, the beats
+  // step's too) and to where they are (DESIGN §24.5), each book entry and whole book read once, when
+  // minds read it.
+  const steps: StepPurpose[] = phase === "skip" ? ["mind", "skip"] : ["mind"];
+  const refs = new Map(input.who.map((who) => [who, reads.pinned.on ? pinsFor(world, placeOfEntity(state, who), who, steps) : []]));
   const pinsOf = await pinReader(deps.host, world, [...refs.values()].flat(), userId);
   // What the inspector may name of a pin (§6.5): an entry the player may read, by a title that says
   // nothing the player doesn't know; a secret, or anything only the character may read, isn't listed.
@@ -536,10 +538,12 @@ export async function postMinds(deps: MindsDeps, input: PostMindsInput): Promise
   const remembering = memoryConfig ? said.who.filter((id) => settings.minds.memoryLevels.includes(levels.get(id) ?? "background")) : [];
   const messages = remembering.length > 0 ? await chatMessages(deps, input.chatId, userId) : [];
   const moment: MindMoment = { kind: "turn", at: state.clock, reason: "after the reply", user: input.user, reply: input.reply };
+  // The lore pinned to the memory step (DESIGN §24.5), its only lore, read once for everyone it remembers for.
+  const memoryPins = remembering.length > 0 ? await readPins(deps.host, world, pinsFor(world, null, undefined, ["memory"]), userId) : [];
   const remembered = await Promise.all(
     remembering.map(async (id) => {
       const prompt = mindPrompt("memory", world, settings.minds, varsFor(world, w.state, id));
-      const scope: MindScope = { reg, world, state: w.state, who: id, memory, messages, hideJson: settings.hideJsonBlocks, reads: settings.minds.reads, moment };
+      const scope: MindScope = { reg, world, state: w.state, who: id, memory, messages, hideJson: settings.hideJsonBlocks, reads: settings.minds.reads, moment, pinned: memoryPins };
       const usage = { tokens: 0 };
       const t0 = performance.now();
       const raw = input.signal.aborted ? null : await deps.steps.helperJson("memory", prompt.text, memoryContext(scope, { user: input.user, reply: input.reply, left: left.includes(id) }), memoryConfig, userId, input.signal, { guidance: input.guidance?.memory ?? deps.presets.last(userId).guidance.memory ?? "", usage });
@@ -571,12 +575,13 @@ export async function postMinds(deps: MindsDeps, input: PostMindsInput): Promise
         return fold.length > 0 ? [{ id, fold }] : [];
       })
       .slice(0, CONSOLIDATIONS_PER_TURN);
+    const consolidatePins = due.length > 0 ? await readPins(deps.host, world, pinsFor(world, null, undefined, ["consolidate"]), userId) : [];
     const folded = await Promise.all(
       due.map(async ({ id, fold }) => {
         const prompt = mindPrompt("consolidate", world, settings.minds, varsFor(world, w.state, id));
         const usage = { tokens: 0 };
         const t0 = performance.now();
-        const raw = input.signal.aborted ? null : await deps.steps.helperJson("consolidate", prompt.text, consolidateContext({ state: w.state, world, who: id }, fold), consolidateConfig, userId, input.signal, { guidance: input.guidance?.consolidate ?? deps.presets.last(userId).guidance.consolidate ?? "", usage });
+        const raw = input.signal.aborted ? null : await deps.steps.helperJson("consolidate", prompt.text, consolidateContext({ reg, state: w.state, world, who: id, reads: settings.minds.reads, pinned: consolidatePins }, fold), consolidateConfig, userId, input.signal, { guidance: input.guidance?.consolidate ?? deps.presets.last(userId).guidance.consolidate ?? "", usage });
         const summary = isRecord(raw) ? capText(str(raw.summary), MIND_TEXT_CAPS.summary) : "";
         if (traced(reg, world, state, id)) traces.push({ purpose: "consolidate", phase: "post", who: own(state.entities, id)?.name ?? id, level: levels.get(id) ?? "background", outcome: summary === "" ? "failed" : "recorded", ms: Math.round(performance.now() - t0), tokens: usage.tokens, prompt: prompt.source });
         return summary === "" ? null : ({ type: MINDS_EVENTS.consolidated, data: { entity: id, at: now, notes: fold.map((n) => n.id), summary } } satisfies LedgerEvent);

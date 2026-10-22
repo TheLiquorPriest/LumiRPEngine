@@ -15,7 +15,7 @@ import { EXTRACTION_TYPES, helperCallOf, recentOf, stepLoreOf } from "../shared/
 import type { ChipAction, ContextGeneration, ContextView, LoreStepTrace, StateView } from "../shared/state-view";
 import type { ActionDef, AdjudicationDef, SectionTemplate, StepPurpose, WorldDoc } from "../shared/world";
 import { formatMoney, offersAction } from "../shared/world";
-import { PIN_STEPS } from "../shared/lore";
+import { LORE_AUDIENCE } from "../shared/lore";
 import { isMindPurpose, MINDS_EVENTS, MINDS_SLOT, worldMindsOf, type MindCallTrace, type MindEventData } from "../shared/minds";
 import { firedTimeout, TimeoutFired, TIMEOUTS } from "../shared/timeouts";
 import { mindsOn, mindsStepConfig, postMinds, preMinds, runMinds, type MindsDeps, type RunMindsResult } from "./minds";
@@ -923,7 +923,7 @@ export class Runtime implements TurnHooks {
         return ran;
       };
       try {
-        skip = await runSkip({ registry: this.registry, steps: this.steps, minds: beatMinds }, { chatId: input.chatId, userId: input.userId, world: base.world, state: start.state, intent, runSeed: bridge.runSeed, settings, guidance: preset.guidance, signal: budget.signal });
+        skip = await runSkip({ registry: this.registry, steps: this.steps, minds: beatMinds, host: this.host }, { chatId: input.chatId, userId: input.userId, world: base.world, state: start.state, intent, runSeed: bridge.runSeed, settings, guidance: preset.guidance, signal: budget.signal });
       } catch (error) {
         this.diag.failed(runAt, "skip", "skip", `the time skip didn't run: ${error instanceof Error ? error.message : String(error)}`);
       }
@@ -1351,8 +1351,8 @@ export class Runtime implements TurnHooks {
    */
   private async lorePhase(phase: "pre" | "post", key: string, userId: UserId, world: WorldDoc, state: WorldState, budget: StepBudget, said: string, guidance: Guidance): Promise<LorePhase> {
     const here = pinsFor(world, placeOfEntity(state, world.pov));
-    // A mind reads its step's pins with its own (`runMinds`).
-    const own = PIN_STEPS.filter((step) => !isMindPurpose(step)).map((step) => [step, pinsFor(world, null, undefined, step)] as const);
+    // The minds steps read their pins with their own calls (`runMinds`, `postMinds`, the skip's beats).
+    const own = LORE_AUDIENCE.filter((step) => !isMindPurpose(step)).map((step) => [step, pinsFor(world, null, undefined, [step])] as const);
     const textsOf = await pinReader(this.host, world, [...here, ...own.flatMap(([, refs]) => refs)], userId);
     const at: LorePhase = { phase, key, userId, world, state, budget, active: ACTIVE_CONNECTION, said, guidance, pinned: textsOf(here), steps: Object.fromEntries(own.map(([step, refs]) => [step, textsOf(refs)])) };
     if (Object.keys(world.lore).length === 0) return at;

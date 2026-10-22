@@ -8,7 +8,7 @@
 // places and steps (DESIGN §24.5, `LORE_PIN_LINTS`).
 
 import { hasOwn, isRecord } from "../shared/json";
-import { isLorePin, LORE_AUDIENCE, loreIsSecret, lorePinKey, loreSourceOf, loreTerm, PIN_STEPS, PROSE_STEPS } from "../shared/lore";
+import { isLorePin, LORE_AUDIENCE, loreIsSecret, lorePinKey, loreSourceOf, loreTerm, PROSE_STEPS } from "../shared/lore";
 import { STEP_OUTPUTS } from "../shared/steps";
 import type { LintIssue } from "../shared/protocol";
 import type { WorldDoc } from "../shared/world";
@@ -76,8 +76,8 @@ export function lintLore(world: WorldDoc): LintIssue[] {
 
 /**
  * The lore pinned to characters, places and steps (DESIGN §24.5): each pin is `{lore}`,
- * `{book, entry}` or `{book}`, under a character, place or step the world has (a step whose calls
- * read lore); a world entry it names exists, isn't pinned twice to the same one, and is one their
+ * `{book, entry}` or `{book}`, under a character, place or step the world has; a world entry it
+ * names exists, isn't pinned twice to the same one, and is one their
  * mind may read: a secret pinned to someone it doesn't belong to never reaches them, and an
  * AI-written entry waiting for review reaches nobody. A book and its entries are read from the host
  * when they are used, so only their shape is checked here.
@@ -100,8 +100,8 @@ function lintLorePins(world: WorldDoc): LintIssue[] {
     }
     for (const [id, list] of Object.entries(targets)) {
       const path = `lorePins.${part}.${id}`;
-      const name = part === "characters" ? (hasOwn(world.entities, id) ? world.entities[id]?.name : undefined) : part === "places" ? (hasOwn(world.places, id) ? world.places[id]?.name : undefined) : (PIN_STEPS as readonly string[]).includes(id) ? id : undefined;
-      if (name === undefined) push("warning", path, "pin_target", part === "steps" ? (hasOwn(STEP_OUTPUTS, id) ? `The ${id} step reads no lore, so nothing pinned to it is read.` : `"${id}" is not a step, so no call reads what is pinned to it.`) : `"${id}" is not ${part === "characters" ? "an entity" : "a place"} in the world, so no call reads what is pinned to it.`);
+      const name = part === "characters" ? (hasOwn(world.entities, id) ? world.entities[id]?.name : undefined) : part === "places" ? (hasOwn(world.places, id) ? world.places[id]?.name : undefined) : hasOwn(STEP_OUTPUTS, id) ? id : undefined;
+      if (name === undefined) push("warning", path, "pin_target", part === "steps" ? `"${id}" is not a step, so no call reads what is pinned to it.` : `"${id}" is not ${part === "characters" ? "an entity" : "a place"} in the world, so no call reads what is pinned to it.`);
       if (!Array.isArray(list)) {
         push("error", path, "pin_shape", "The pins are a list; none are read.");
         continue;

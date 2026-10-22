@@ -161,7 +161,7 @@ The world's `lorePins` part: `characters`, `places` and `steps`, each a map from
 | `pin_missing` | a pin naming a lore entry the world doesn't have |
 | `pin_pending` | an AI-written entry still waiting for review: no call reads it until it is accepted |
 | `pin_shape` | a pin that is none of {"lore": id}, {"book": id, "entry": id} and {"book": id}: it is ignored |
-| `pin_target` | pins under a character, place or step the world doesn't have, or a step that reads no lore: no call reads them |
+| `pin_target` | pins under a character, place or step the world doesn't have: no call reads them |
 | `pin_unread` | a secret entry pinned to someone whose own it isn't: their mind never reads it |
 
 ### Adjudication presets

@@ -20,12 +20,16 @@ import type { Registry } from "../engine/registry-impl";
 import { allRules } from "../engine/rules";
 import { isGone, kindIs, placeOfEntity } from "../engine/scope";
 import { ranTo } from "../engine/simulate";
+import { pinsFor } from "../engine/lore-pins";
 import type { WorldState } from "../engine/state";
 import type { InterpretOutput } from "../engine/steps";
 import { fightHoldsClock, TimelapseRun, type SkipRecord } from "../engine/time";
 import { timelapseOptions, turnStart } from "../engine/turn";
 import { Working } from "../engine/working";
+import type { HostPort } from "./host";
+import { readPins } from "./lore-pins";
 import { localTime, mindPrompt, mindsStepConfig, type RunMindsInput, type RunMindsResult } from "./minds";
+import { pinnedLines } from "./minds-context";
 import type { Guidance } from "./preset-binding";
 import type { Steps } from "./steps";
 
@@ -147,6 +151,8 @@ export interface SkipDeps {
   registry: Registry;
   steps: Steps;
   minds: BeatMinds;
+  /** Where the lore pinned to the `skip` step is read from (DESIGN §24.5). */
+  host: Pick<HostPort, "books" | "log">;
 }
 
 /** A skip as its pre phase ran it: its record for the plan, and the minds' traces for the inspector. */
@@ -157,10 +163,10 @@ export interface SkipRun {
 
 /**
  * The `skip` step (DESIGN §24.7), when the user turned it on: further beats the model proposes inside
- * the span, from the beats found and what the people involved plan. Its prompt is the user's own,
- * else the world's template, else the built-in. Its reasons are the GM's to read only: no mind and
- * no player surface is given them, since they may come of someone's private intent. Its call joins
- * the inspector's minds calls, with no text and as no one.
+ * the span, from the beats found, what the people involved plan and the lore pinned to the step (its
+ * only lore, §24.5). Its prompt is the user's own, else the world's template, else the built-in. Its
+ * reasons are the GM's to read only: no mind and no player surface is given them, since they may come
+ * of someone's private intent. Its call joins the inspector's minds calls, with no text and as no one.
  */
 async function proposedBeats(deps: SkipDeps, input: SkipInput, state: Readonly<WorldState>, scanned: ScannedSkip, traces: MindCallTrace[]): Promise<Beat[]> {
   const config = mindsStepConfig(input.settings.modelUse, "skip");
@@ -172,7 +178,8 @@ async function proposedBeats(deps: SkipDeps, input: SkipInput, state: Readonly<W
     const theirs = (plans?.(ctx, id) ?? []).filter((p) => p.status === "open");
     return theirs.length > 0 ? [`${own(state.entities, id)?.name ?? id}: ${theirs.map((p) => `${p.what} (${formatStamp(cal, p.when.from)})`).join("; ")}`] : [];
   });
-  const user = [`The skip runs from ${formatStamp(cal, scanned.from)} to ${formatStamp(cal, scanned.to)}.`, scanned.beats.length > 0 ? `Moments found:\n${scanned.beats.map((b) => `- ${formatStamp(cal, b.at)}: ${b.reason}`).join("\n")}` : "No moments found.", intents.length > 0 ? `What the people involved plan:\n${intents.join("\n")}` : ""].filter((part) => part !== "").join("\n\n");
+  const pinned = pinnedLines({ reg: deps.registry, world: input.world, state, reads: input.settings.minds.reads, pinned: await readPins(deps.host, input.world, pinsFor(input.world, null, undefined, ["skip"]), input.userId) }, "skip");
+  const user = [`The skip runs from ${formatStamp(cal, scanned.from)} to ${formatStamp(cal, scanned.to)}.`, scanned.beats.length > 0 ? `Moments found:\n${scanned.beats.map((b) => `- ${formatStamp(cal, b.at)}: ${b.reason}`).join("\n")}` : "No moments found.", intents.length > 0 ? `What the people involved plan:\n${intents.join("\n")}` : "", pinned.length > 0 ? `Pinned lore:\n${pinned.join("\n")}` : ""].filter((part) => part !== "").join("\n\n");
   const prompt = mindPrompt("skip", input.world, input.settings.minds, { world: input.world.name });
   const usage = { tokens: 0 };
   const t0 = performance.now();

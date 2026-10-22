@@ -152,7 +152,7 @@ function placesOf(gm: GmView, place: PlaceId | null): PlaceId[] {
   return out;
 }
 
-/** What is pinned to a character, then to where they are (DESIGN §24.5), as the chat's world revision has it; edited in Build. */
+/** What is pinned to a character, then to every mind (the mind step's), then to where they are (DESIGN §24.5), in the order their mind reads it, as the chat's world revision has it; edited in Build. */
 export function PinnedLore(props: { gm: GmView; chatId: string; who: EntityId; send: Send }) {
   const app = useApp();
   const worldId = useView()?.worldId ?? null;
@@ -163,6 +163,7 @@ export function PinnedLore(props: { gm: GmView; chatId: string; who: EntityId; s
     });
   }, [props.chatId]);
   const own = pins?.characters[props.who] ?? [];
+  const everyMind = (pins?.steps.mind ?? []).map((p) => ({ ...p, at: "every mind" }));
   const place = props.gm.entities.find((e) => e.id === props.who)?.place ?? null;
   const there = placesOf(props.gm, place).flatMap((id) => (pins?.places[id] ?? []).map((p) => ({ ...p, at: props.gm.places.find((x) => x.id === id)?.name ?? id })));
   const row = (p: LorePinView & { at?: string }) => (
@@ -188,10 +189,10 @@ export function PinnedLore(props: { gm: GmView; chatId: string; who: EntityId; s
     >
       {pins === null ? (
         <p class="lre-gm-minds-none">Reading the pins…</p>
-      ) : own.length + there.length === 0 ? (
-        <p class="lre-gm-minds-none">Nothing is pinned to them or to where they are. Pins are the world's: Build → Entities or Places, Pinned lore. Commit, then Upgrade this chat, to use them here.</p>
+      ) : own.length + everyMind.length + there.length === 0 ? (
+        <p class="lre-gm-minds-none">Nothing is pinned to them, to every mind or to where they are. Pins are the world's: Build → Entities or Places, Pinned lore, or the Pinned lore page's Character minds. Commit, then Upgrade this chat, to use them here.</p>
       ) : (
-        <List>{[...own.map((p) => row(p)), ...there.map((p) => row(p))]}</List>
+        <List>{[...own.map((p) => row(p)), ...everyMind.map((p) => row(p)), ...there.map((p) => row(p))]}</List>
       )}
     </Section>
   );
