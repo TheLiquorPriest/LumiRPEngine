@@ -221,6 +221,9 @@ function questionLines(questions: Questions): string[] {
   });
 }
 
+/** Leads the recent chat a step's card lets it read, after its input. */
+const RECENT_CHAT_LEAD = "Recent chat, oldest first (the messages before this turn's):";
+
 /** What leads a preset's guidance in a helper's prompt: it styles the answer, never its contract. */
 const GUIDANCE_LEAD = "Style and rules from the player's preset. Follow them where they fit the instructions above; they never change what to output or its format:";
 export class Steps {
@@ -282,15 +285,19 @@ export class Steps {
    * budget), the model is offered the lore tools or the need form; each time it asks, the engine
    * answers in a follow-up message and the call is made again, once per round held. A connection
    * that refuses the tools is asked again in the need form, and the refusal is kept once that works.
+   *
+   * `recent`, the chat before the turn's that the step's card lets it read (oldest first), follows
+   * the input as its "Recent chat" block.
    */
-  async helperJson(purpose: StepPurpose, system: string, user: string, config: StepConfig | null, userId: UserId, signal: AbortSignal, options: { lore?: StepLore | null; guidance?: string; usage?: { tokens: number }; failure?: { reason: string }; spared?: boolean } = {}): Promise<JsonValue | null> {
+  async helperJson(purpose: StepPurpose, system: string, user: string, config: StepConfig | null, userId: UserId, signal: AbortSignal, options: { lore?: StepLore | null; guidance?: string; usage?: { tokens: number }; failure?: { reason: string }; spared?: boolean; recent?: readonly string[] } = {}): Promise<JsonValue | null> {
     const lore = options.lore ?? null;
     const guidance = options.guidance ? `${GUIDANCE_LEAD}\n${options.guidance}` : "";
     // The lookup round is held before anything is awaited, so steps beside this one see it taken.
     let offer = lore?.offer() ?? null;
     const call = helperCallOf(config, await this.helperOf(userId));
     const base = { ...call, maxTokens: Math.max(call.maxTokens, 1500) };
-    const opening = (): QuietMessage[] => [{ role: "system", content: [system, guidance, lore?.block() ?? "", offer && lore ? lore.instructions(offer) : ""].filter((s) => s !== "").join("\n\n") }, { role: "user", content: user }];
+    const asked = options.recent && options.recent.length > 0 ? `${user}\n\n${RECENT_CHAT_LEAD}\n${options.recent.join("\n")}` : user;
+    const opening = (): QuietMessage[] => [{ role: "system", content: [system, guidance, lore?.block() ?? "", offer && lore ? lore.instructions(offer) : ""].filter((s) => s !== "").join("\n\n") }, { role: "user", content: asked }];
     // JSON mode stays off while tools are offered: some providers refuse the two together.
     const ask = async (messages: QuietMessage[], tools: boolean, o: { lookup: boolean }): Promise<QuietResult | Error> => {
       const r = await this.quiet(purpose, { ...base, messages, json: !tools, ...(tools && lore ? { tools: [...lore.tools] } : {}) }, userId, signal, { ...o, spared: options.spared === true });
@@ -384,16 +391,17 @@ export class Steps {
 
   /**
    * A decision call (D10): the Decision connection, then the helper, then null (engine-only). A
-   * `helper` route asks the helper on that route directly. The step's lore and the preset's guidance
-   * for it (`rules`) ride in the state the Decision connection reads, after its lookup pre-pass, or in
-   * the helper's prompt, which may look lore up itself.
+   * `helper` route asks the helper on that route directly. The step's lore, the preset's guidance
+   * for it (`rules`) and the recent chat its card lets it read (`recent`) ride in the state the
+   * Decision connection reads, after its lookup pre-pass, or in the helper's prompt, which may look
+   * lore up itself.
    */
-  async decide(purpose: StepPurpose, state: JsonValue, questions: Questions, config: StepConfig | null, userId: UserId, signal: AbortSignal, lore: StepLore | null = null, guidance = ""): Promise<{ answers: Answers; via: "decision" | "helper" } | null> {
+  async decide(purpose: StepPurpose, state: JsonValue, questions: Questions, config: StepConfig | null, userId: UserId, signal: AbortSignal, lore: StepLore | null = null, guidance = "", recent: readonly string[] = []): Promise<{ answers: Answers; via: "decision" | "helper" } | null> {
     const viaHelper = config?.route?.provider === "helper";
     if (!viaHelper) {
       if (lore) await this.lookupFirst(purpose, state, questions, lore, userId, signal);
       const notes = lore?.lines() ?? [];
-      const extra: JsonObject = { ...(notes.length > 0 ? { lore: notes } : {}), ...(guidance !== "" ? { rules: guidance } : {}) };
+      const extra: JsonObject = { ...(notes.length > 0 ? { lore: notes } : {}), ...(guidance !== "" ? { rules: guidance } : {}), ...(recent.length > 0 ? { recent: [...recent] } : {}) };
       const asked: JsonValue = Object.keys(extra).length === 0 ? state : isRecord(state) ? { ...state, ...extra } : { state, ...extra };
       const t0 = performance.now();
       const route = { purpose, via: "decision" as const, connection: config?.route?.connectionId ?? "active", maxTokens: null, finishReason: "", tokensIn: null };
@@ -416,7 +424,7 @@ export class Steps {
     if (signal.aborted) return null;
     const system = `Answer each question about the state with probabilities. Output JSON only: {"<key>": {"probabilities": {"<option>": number}}} for choice and score questions, and {"<key>": {"p": number}} for yes/no questions.`;
     // A decision falling back to the helper runs on the helper model, with the step's max tokens if it set its own.
-    const raw = await this.helperJson(purpose, system, `State: ${JSON.stringify(state)}\nQuestions:\n${questionLines(questions).join("\n")}`, viaHelper && config ? config : { enabled: true, signals: [], ...(config?.maxTokens !== undefined ? { maxTokens: config.maxTokens } : {}) }, userId, signal, { lore, guidance });
+    const raw = await this.helperJson(purpose, system, `State: ${JSON.stringify(state)}\nQuestions:\n${questionLines(questions).join("\n")}`, viaHelper && config ? config : { enabled: true, signals: [], ...(config?.maxTokens !== undefined ? { maxTokens: config.maxTokens } : {}) }, userId, signal, { lore, guidance, recent });
     if (!isRecord(raw)) return null;
     const answers: Answers = {};
     for (const [key, q] of Object.entries(questions)) {
@@ -661,6 +669,7 @@ export async function extract(
   lore: StepLore | null = null,
   guidance = "",
   usual: readonly string[] = [],
+  recent: readonly string[] = [],
 ): Promise<ExtractRead> {
   const types =
     `time_advance{minutes} · location{entity,place} · purchase{item,category,payer?,qty?,price?,method?} (payer: the person who pays, an entity id, never an account or a card; method: how the prose says they paid, in its words, e.g. "cash", "debit card", "credit card" or "savings"; leave it out when not said) · transfer{from,to,amount,method?} (from and to: people, entity ids, or a person's own cash, checking, savings or card account, never things; method: "cash" when bills or coins change hands in person, as in "hands me $20" or "slips her a twenty"; leave it out for a bank transfer, an app payment or a card) · give{item,from,to,amount?} (amount: for cash or money handed over, the amount) · quantity{entity,item,delta} · condition{who,condition,minutes?,clear?} (a named condition such as tired or injured; clear:true when it ends) · regard{from,to,axis,delta} (axis trust|affection|respect; delta -3..3) · knows{who,fact} (public facts only) · spawn{kind,name,place?,role?} · life{entity,state} (state: ${lifeStatesOf(world)
@@ -671,7 +680,7 @@ export async function extract(
   const moves = channels.length === 0 || channels.includes("location");
   const routines = moves && usual.length > 0;
   const asked = `${moves ? `${system}\n${EXTRACT_WHERE}` : system}${routines ? `\n${EXTRACT_USUAL}` : ""}`;
-  const raw = await steps.helperJson("extract", asked, `State before: ${JSON.stringify(prefix)}\n${routines ? `Usual routines (where a described move goes; never a move by itself):\n${usual.join("\n")}\n` : ""}Narration:\n${narration}`, config, userId, signal, { lore, guidance });
+  const raw = await steps.helperJson("extract", asked, `State before: ${JSON.stringify(prefix)}\n${routines ? `Usual routines (where a described move goes; never a move by itself):\n${usual.join("\n")}\n` : ""}Narration:\n${narration}`, config, userId, signal, { lore, guidance, recent });
   const list = isRecord(raw) && Array.isArray(raw.proposals) ? raw.proposals : Array.isArray(raw) ? raw : [];
   const proposals: JsonObject[] = [];
   for (const p of list) {

@@ -17,7 +17,7 @@ import { Working } from "../../src/engine/working";
 import { initialState } from "../../src/engine/world-state";
 import { ALL_PACKS, STARTER_WORLDS } from "../../src/packs/index";
 import type { JsonObject } from "../../src/shared/json";
-import { DEFAULT_RECENT, stepConfigOf } from "../../src/shared/settings";
+import { DEFAULT_RECENT, recentOf, stepConfigOf } from "../../src/shared/settings";
 import type { WorldDoc } from "../../src/shared/world";
 import { FakeHost } from "../support/fake-host";
 import { Rig } from "../support/rig";
@@ -94,19 +94,19 @@ describe("interpret reads the messages before the typed one", () => {
     // By default it reads every message so far.
     expect(block(prompts[1] ?? "", "Recent messages")).toEqual(["Story: Morning.", "Player: Hi Danny.", `Story: ${reply}`]);
     // One message: the reply just before.
-    rig.body(await rig.send({ type: "lre.settings.set", patch: stepUpdatePatch("interpret", { ...card, recent: { messages: 1, tokens: 3000 } }) }));
+    rig.body(await rig.send({ type: "lre.settings.set", patch: stepUpdatePatch("interpret", { ...card, recent: { on: true, messages: 1, tokens: 3000 } }) }));
     await rig.turn(chatId, "I check my phone.", "No new messages.");
     expect(block(prompts[2] ?? "", "Recent messages")).toEqual(["Story: He nods back."]);
     // Few tokens: the reply is cut to its end, where it leaves off.
-    rig.body(await rig.send({ type: "lre.settings.set", patch: stepUpdatePatch("interpret", { ...card, recent: { messages: 8, tokens: 10 } }) }));
+    rig.body(await rig.send({ type: "lre.settings.set", patch: stepUpdatePatch("interpret", { ...card, recent: { on: true, messages: 8, tokens: 10 } }) }));
     await rig.turn(chatId, "Hmm.", reply);
     await rig.turn(chatId, "Okay.", "Fine.");
     const cut = block(prompts[4] ?? "", "Recent messages");
     expect(cut).toHaveLength(1);
     expect(cut[0]).toMatch(/^Story: ….+came in late again\.$/);
     expect(cut[0]?.length).toBeLessThan(`Story: ${reply}`.length);
-    // None: no messages block at all.
-    rig.body(await rig.send({ type: "lre.settings.set", patch: stepUpdatePatch("interpret", { ...card, recent: { messages: 0, tokens: 3000 } }) }));
+    // Off: no messages block at all.
+    rig.body(await rig.send({ type: "lre.settings.set", patch: stepUpdatePatch("interpret", { ...card, recent: { on: false, messages: 8, tokens: 3000 } }) }));
     await rig.turn(chatId, "Right.", "Right.");
     expect(prompts[5]).not.toContain("Recent messages");
     expect(rig.rt.ledger.errors).toEqual([]);
@@ -209,11 +209,15 @@ describe("the interpret card's recent messages", () => {
       await host.storage.write("settings.json", JSON.stringify({ ...base, modelUse: { ...base.modelUse, preset: "custom", steps: { ...base.modelUse.steps, interpret: { ...base.modelUse.steps.interpret, recent } } } }), host.userId);
       return stepConfigOf((await new SettingsStore(host).get(host.userId)).modelUse.steps, "interpret").recent;
     };
-    expect(await save({ messages: 3, tokens: 500 })).toEqual({ messages: 3, tokens: 500 });
-    expect(await save({ messages: 0, tokens: 100_000 })).toEqual({ messages: 0, tokens: 100_000 });
+    // Saved before the switch, a limit reads as on.
+    expect(await save({ messages: 3, tokens: 500 })).toEqual({ on: true, messages: 3, tokens: 500 });
+    expect(await save({ on: false, messages: 0, tokens: 100_000 })).toEqual({ on: false, messages: 0, tokens: 100_000 });
+    expect(await save({ on: true, messages: "none", tokens: "none" })).toEqual({ on: true, messages: "none", tokens: "none" });
     expect(await save({ messages: -1, tokens: 500 })).toBeUndefined();
     expect(await save({ messages: 2.5, tokens: 500 })).toBeUndefined();
     expect(await save("lots")).toBeUndefined();
-    expect(DEFAULT_RECENT).toEqual({ messages: 8, tokens: 3000 });
+    // Interpret's default is unchanged: on, the last 8 messages, about 3,000 tokens.
+    expect(DEFAULT_RECENT).toEqual({ on: true, messages: 8, tokens: 3000 });
+    expect(recentOf("interpret", stepConfigOf(base.modelUse.steps, "interpret"))).toEqual(DEFAULT_RECENT);
   });
 });

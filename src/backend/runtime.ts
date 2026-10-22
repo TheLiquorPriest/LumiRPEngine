@@ -825,6 +825,8 @@ export class Runtime implements TurnHooks {
     // A palette or chip tap writes the action's label as the message: only words the player typed
     // with it describe an approach, so only those are worth a judge call.
     const described = typed || (text.trim() !== "" && isRecord(recorded) && recorded.described === true);
+    // The messages before the typed one: what `interpret` reads to tell what it refers to (DESIGN §5.2), and what any step's Recent chat takes from.
+    const earlier = lastUser ? before.slice(0, before.indexOf(lastUser)) : before;
     const facts: SignalFacts = {
       ...noFacts(before.filter((m) => !m.isUser).length + 1),
       typed,
@@ -835,10 +837,9 @@ export class Runtime implements TurnHooks {
       tieZone: ties.present.length > 0,
       invitation: (before.findLast((m) => !m.isUser)?.ledger?.swipes[String(before.findLast((m) => !m.isUser)?.swipeId ?? 0)]?.events ?? []).some((e) => e.type === "castlife.invitation"),
       timelapse: isRecord(recorded) && recorded.action === TIMELAPSE_ACTION,
+      earlier: { messages: earlier, hideJson: settings.hideJsonBlocks },
     };
     const at = await this.lorePhase("pre", p.generationId, input.userId, render.world, render.state, budget, text, preset.guidance);
-    // `interpret` reads the messages before the typed one too, to tell what it refers to (DESIGN §5.2).
-    const earlier = lastUser ? before.slice(0, before.indexOf(lastUser)) : before;
     // What the reply before it left unplayed of the last message, which this one may take as done (DESIGN §5.2).
     const left = text.trim() === "" ? "" : await this.leftUnplayed(input.chatId, input.userId, earlier, text);
     const intentTask = text.trim() === "" || bridge.hasIntent(text) || bridge.isHeld(text) ? Promise.resolve() : this.readIntent(bridge, text, recorded, render, all, earlier, settings, facts, budget, at, left);
@@ -1111,7 +1112,7 @@ export class Runtime implements TurnHooks {
     const context: InterpretContext = {
       world: render.world,
       pov: { id: render.world.pov, name: render.state.entities[render.world.pov]?.name ?? render.world.pov },
-      scene: interpretScene(this.registry, render.world, render.state, { mayKnow, named: offered.named, earlier, recent: recentOf(run.config), hideJson: settings.hideJsonBlocks, said: text, left }),
+      scene: interpretScene(this.registry, render.world, render.state, { mayKnow, named: offered.named, earlier, recent: recentOf("interpret", run.config), hideJson: settings.hideJsonBlocks, said: text, left }),
     };
     let result: InterpretRead | null;
     const lore = this.stepLore(run, at, { text: `${text}\n${this.trackWords(render.world, render.state)}`, links: this.sceneLinks(render.world, render.state) });
@@ -1556,7 +1557,7 @@ export class Runtime implements TurnHooks {
     // L27: a timelapse or speed-through turn's time passed as its timelapse, so its reply proposes no skip.
     const skipped = facts.timelapse || !!plan?.timelapse;
     const extractTask = extractRun && budget.take()
-      ? extract(this.steps, text, povWorld(this.registry, context.world, context.state), prefixSummary(this.registry, context.world, context.state), clockMinutes(context.pre), EXTRACTION_TYPES.filter((t) => (t === "time_advance" ? !skipped : this.registry.proposals.has(t))), extractRun.config, userId, budget.signal, extractRun.template ? renderTemplate(extractRun.template.template, vars) : undefined, lore(extractRun), extractRun.guidance, usual)
+      ? extract(this.steps, text, povWorld(this.registry, context.world, context.state), prefixSummary(this.registry, context.world, context.state), clockMinutes(context.pre), EXTRACTION_TYPES.filter((t) => (t === "time_advance" ? !skipped : this.registry.proposals.has(t))), extractRun.config, userId, budget.signal, extractRun.template ? renderTemplate(extractRun.template.template, vars) : undefined, lore(extractRun), extractRun.guidance, usual, extractRun.recent)
       : Promise.resolve({ proposals: [], where: null });
     const effectsTasks = (["extract", "contradiction", "choices"] as const).flatMap((purpose) => runsOf(modelUse, context.world, purpose, facts, { output: "effects", guidance })).map((r) => (budget.take() ? promptedEffects(this.steps, r, vars, context.world.currency, userId, budget.signal, lore(r, true)) : Promise.resolve([])));
     const npcRun = runsOf(modelUse, context.world, "npc.choose", facts, { guidance })[0];

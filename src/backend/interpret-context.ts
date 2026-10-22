@@ -8,6 +8,7 @@ import type { ActionId, EntityId } from "../shared/ids";
 import { bandsWithin, type InferredChecks, type SheetSkill } from "../shared/inferred";
 import { TRY_ACTION } from "../engine/inferred";
 import type { RecentHistory } from "../shared/settings";
+import { limitOf } from "../shared/minds";
 import { tableChoices } from "../shared/tables";
 import type { ActionDef, ParamDef, WorldDoc } from "../shared/world";
 import { calendarOf, dateAt, formatStamp, placeOffset, weekdayName } from "../engine/calendar";
@@ -271,15 +272,18 @@ export function interpretScene(reg: Registry, world: WorldDoc, state: Readonly<W
 }
 
 /**
- * The messages before the typed one as `interpret` reads them (DESIGN §5.2): from the newest back,
- * at most `recent.messages` of them and about `recent.tokens` in all, each on one line, a reply as
- * the engine reads it (`readableReply`); the oldest that doesn't fit whole keeps its end, where a
- * reply leaves off. Oldest first.
+ * The messages before the turn's as a step reads them (DESIGN §5.2): from the newest back, at most
+ * `recent.messages` of them and about `recent.tokens` in all (either `"none"`: no limit), stopping
+ * at whichever comes first, each on one line, a reply as the engine reads it (`readableReply`); the
+ * oldest that doesn't fit whole keeps its end, where a reply leaves off. Oldest first; none while
+ * `on` is false.
  */
-export function recentMessages(messages: readonly ChainMessage[], recent: Readonly<RecentHistory>, hideJson: boolean): string[] {
+export function recentMessages(messages: readonly ChainMessage[], recent: Readonly<Omit<RecentHistory, "on"> & { on?: boolean }>, hideJson: boolean): string[] {
   const out: string[] = [];
-  let left = recent.tokens;
-  for (let i = messages.length - 1; i >= 0 && out.length < recent.messages && left > 0; i--) {
+  if (recent.on === false) return out;
+  const most = limitOf(recent.messages);
+  let left = limitOf(recent.tokens);
+  for (let i = messages.length - 1; i >= 0 && out.length < most && left > 0; i--) {
     const m = messages[i];
     if (!m) continue;
     const raw = m.swipes[m.swipeId] ?? "";
