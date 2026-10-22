@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { checkBalance } from "../../src/frontend/build/expr-editor";
-import { issuePart, issueTarget } from "../../src/frontend/build/check";
+import { issuePart, issueRoute, issueTarget } from "../../src/frontend/build/check";
 import { proposalGroups, proposalWrites, shownValue, startTicked } from "../../src/frontend/build/jobs";
 import { kindFields, refOptions } from "../../src/frontend/build/schema-form";
 import { cellProblem } from "../../src/frontend/build/table-editor";
@@ -223,6 +223,9 @@ describe("small parsers", () => {
     expect(issuePart("tiers.crowd.label")).toBe("tiers");
     expect(issuePart("spawnTier")).toBe("tiers");
     expect(issuePart("spawnCap")).toBe("meta");
+    // A step's pins have no page of their own: they open the Pinned lore page; a character's open the character.
+    expect(issueRoute("w", "lorePins.steps.mind")).toEqual({ view: "part", worldId: "w", part: "lorePins" });
+    expect(issueRoute("w", "lorePins.characters.npc_dev")).toEqual({ view: "item", worldId: "w", collection: "entities", id: "npc_dev", at: "lorePins.characters.npc_dev" });
     expect(issuePart("entities.npc_dev.fields.cash")).toBeNull();
   });
 });

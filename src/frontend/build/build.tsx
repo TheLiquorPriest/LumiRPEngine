@@ -52,7 +52,7 @@ const GROUPS: readonly { title: string; collections: readonly WorldCollection[] 
   { title: "Engine", collections: ["tables", "sections", "steps", "packs"] },
 ];
 
-const PARTS: readonly WorldPart[] = ["meta", "calendar", "realism", "tiers", "time", "ruleset", "loreIndex", "minds", "routineSettings"];
+const PARTS: readonly WorldPart[] = ["meta", "calendar", "realism", "tiers", "time", "ruleset", "loreIndex", "minds", "lorePins", "routineSettings"];
 
 const TOOLS: readonly JobKind[] = ["import_lore", "index_book", "index_text", "refine", "describe_map", "propose_routines", "playtest", "check_world"];
 

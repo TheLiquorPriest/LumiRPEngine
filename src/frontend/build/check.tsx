@@ -15,8 +15,8 @@ import { useSelect } from "../store";
 import { COLLECTION_INFO, go, itemLabel, PART_INFO } from "./chrome";
 
 const COLLECTIONS: readonly WorldCollection[] = ["kinds", "relations", "entities", "places", "maps", "routes", "grids", "rules", "actions", "checks", "routines", "schedules", "tracks", "tables", "sections", "steps", "packs", "lore", "classifications"];
-/** World parts whose issues open the part: `ruleset.progression.level.thresholds` → the Ruleset part; `loreIndex.terms.ferry` → the lookup table. */
-const PARTS: readonly WorldPart[] = ["calendar", "realism", "tiers", "time", "ruleset", "loreIndex", "routineSettings"];
+/** World parts whose issues open the part: `ruleset.progression.level.thresholds` → the Ruleset part; `loreIndex.terms.ferry` → the lookup table; a step's pins (`lorePins.steps.mind`) → Pinned lore. */
+const PARTS: readonly WorldPart[] = ["calendar", "realism", "tiers", "time", "ruleset", "loreIndex", "lorePins", "routineSettings"];
 /** The world's own top-level fields, which the World part edits. */
 const META_FIELDS: readonly string[] = ["name", "pov", "start", "seedMode", "lenientPricing", "spawnCap", "lifeStates", "currency", "mapSettings"];
 
