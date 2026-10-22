@@ -67450,7 +67450,7 @@ function questionLines(questions) {
     return `"${key}": probability 0..1 that it is true. ${q.instructions}`;
   });
 }
-var RECENT_CHAT_LEAD = "Recent chat, oldest first (the messages before this turn's):";
+var RECENT_CHAT_LEAD = "Recent chat, oldest first (the messages before this turn's; context only: what they tell already happened and is recorded, so nothing in them is a change to report or act on again):";
 var GUIDANCE_LEAD = "Style and rules from the player's preset. Follow them where they fit the instructions above; they never change what to output or its format:";
 
 class Steps {
@@ -69579,7 +69579,7 @@ class LedgerFold {
         if ((i + 1) % this.every !== 0)
           continue;
         const found = input.snapshots.get(hashParts(context, p));
-        if (found) {
+        if (found && clocksCover(found, base, i)) {
           best = i;
           snapshot = found;
         }
@@ -69842,6 +69842,13 @@ class LedgerFold {
     return { result: { id: m.id, fold, parentPath: parent, path }, notes, keep, rec, recPath, liveMarkers, livePost, paused };
   }
 }
+function clocksCover(snapshot, base, at) {
+  const have = new Set((snapshot.clocks ?? []).map(([i]) => i));
+  for (let i = base + 1;i <= at; i++)
+    if (!have.has(i))
+      return false;
+  return true;
+}
 
 // src/shared/agents.ts
 var KIT_API = 1;
@@ -69905,9 +69912,9 @@ function thisBuild(moduleUrl = import.meta.url) {
   const dir = moduleUrl.replace(/[^/]*$/, "");
   const path = pathOfFileUrl(`${dir}${KIT_FILE}`);
   const core = pathOfFileUrl(`${dir}${CORE_FILE}`);
-  const sha256 = "0c1d3243b0cc0c992c44ac00477c4471d9075bbdb5036570709c92fc7de7bee8";
+  const sha256 = "8c09670d78596363e78a04ee5807bf2b34fdd88f8dbaeba93c73bb20fba2047e";
   const tools = ["31de155b25748e794c9fe560150797f2", "d7e9a2e583dc5481df9d8ed8a432a934"].filter((f) => f !== undefined);
-  return { id: "5cddf594", kit: sha256 !== undefined && path !== null && core !== null ? { path, core, sha256, api: KIT_API } : null, tools };
+  return { id: "0fbd3d93", kit: sha256 !== undefined && path !== null && core !== null ? { path, core, sha256, api: KIT_API } : null, tools };
 }
 var BUILD_FILE = "agents/build.json";
 var USER_FILE = "agents.json";
@@ -72893,7 +72900,7 @@ class Runtime {
     this.steps.onCallStart = (userId, purpose) => this.diag.callStart(userId, purpose);
     this.toolSupport = new ToolSupport(this.host);
     this.minds = { host: this.host, registry: this.registry, steps: this.steps, settings: this.settings, presets: this.presets };
-    this.ledger = new LedgerService(this.host, (chatId, userId) => this.resolveEnv(chatId, userId), new LedgerFold(this.registry, { fingerprint: "5cddf594" }), (chatId) => messages.forget(chatId));
+    this.ledger = new LedgerService(this.host, (chatId, userId) => this.resolveEnv(chatId, userId), new LedgerFold(this.registry, { fingerprint: "0fbd3d93" }), (chatId) => messages.forget(chatId));
     this.studio = new StudioBridge(this.host, this.worlds);
     this.worlds.onChange = (worldId, userId) => this.studio.worldChanged(worldId, userId);
     this.agents = new Agents(this.host, options.build ?? thisBuild(), async (userId) => (await this.settings.get(userId)).timeouts.mcpReconnectMs);
