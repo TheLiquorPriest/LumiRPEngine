@@ -32,7 +32,9 @@ import { optionalService } from "../engine/pack-kit";
 import { rulesetFloor } from "../engine/registry-impl";
 import { applyTimeAdvance, clockFix, IN_FIGHT, parseTarget } from "../engine/time";
 import { definitionsLag, planUpgrade } from "../engine/upgrade";
-import { actionOdds } from "../engine/resolve";
+import { actionOdds, resolveAction } from "../engine/resolve";
+import { createRng } from "../engine/rng";
+import { hashParts } from "../shared/hash";
 import { Working } from "../engine/working";
 import type { ChainMessage } from "../engine/ledger/chain";
 import { activeRecord } from "../engine/ledger/path";
@@ -42,7 +44,7 @@ import { JobError, type JobRunner } from "./jobs";
 import { bookDrift, saveFromChat } from "./lore";
 import { pinBooks, pinEntries, pinViews } from "./lore-pins";
 import { MindsRuns, RunError } from "./minds-run";
-import { ACTIVE_CONNECTION, declineNote, readRun, Runtime } from "./runtime";
+import { ACTIVE_CONNECTION, declineNote, playerReason, readRun, Runtime } from "./runtime";
 import { recordOutcome, undoModeChange, type ModeChange } from "./settings-store";
 import { applyProposals, TIME_ADVANCE_CAP } from "./turn-model";
 import { upgradePreview } from "./upgrade-preview";
@@ -232,9 +234,23 @@ export class Dispatcher {
           const follows = typeof r.params.followRoutine === "boolean" ? r.params.followRoutine : routineSettingsOf((await this.head(r.chatId, userId)).world).paletteFollowsRoutine;
           params = { ...Object.fromEntries(Object.entries(r.params).filter(([k]) => k !== "followRoutine" && k !== "povRoutine")), ...(follows ? {} : { povRoutine: false }) };
         } else {
-          const { world } = await this.head(r.chatId, userId);
+          const { world, state } = await this.head(r.chatId, userId);
           const action = (hasOwn(world.actions, r.action) ? world.actions[r.action] : undefined) ?? this.rt.registry.actions.get(r.action);
           if (!action) throw new RequestError("not_found", `unknown action ${r.action}`);
+          // Bookkeeping the player does alone, tapped with no words, is no turn: nothing in it needs
+          // telling, so it is recorded on the head as a ✎ fix is, with its Undo, and no message, reply or clock time.
+          if (action.mechanical === true && said === "") {
+            const runSeed = this.runSeedOf(r.chatId);
+            const w = new Working(this.rt.registry, world, state);
+            const res = resolveAction(this.rt.registry, w, { action, actor: world.pov, params: r.params }, createRng(hashParts("lre.mechanical", runSeed, r.action, JSON.stringify(r.params), String(state.clock))), { runSeed });
+            if (!res.ok && res.failed) throw new RequestError("validation", playerReason(res.failed));
+            const refused = res.rejected[0];
+            if (refused) throw new RequestError("validation", refused.rejection.reason);
+            if (res.events.length === 0) throw new RequestError("validation", "That changes nothing.");
+            const written = await this.write(r.chatId, userId, { kind: "post", id: this.nextId(), target: "head", entry: { kind: "fix", events: res.events } });
+            reply("lre.action", { applied: true, pending: written.pending });
+            return;
+          }
           text ||= `(${neutralizeMacros(action.label)})`;
         }
         const messageId = await this.rt.host.chats.appendUserMessage(r.chatId, text, { [LEDGER_NAMESPACE]: { action: r.action, params, source: r.source, ...(said !== "" ? { described: true } : {}) } }, true, userId);

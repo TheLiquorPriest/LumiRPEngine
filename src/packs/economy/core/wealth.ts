@@ -144,6 +144,7 @@ export function registerAssets(r: FinanceRegistry): void {
     label: "Route dividends, rent or profits",
     description: "Choose where dividends, rent or profits are paid: reinvested, or into an account.",
     pack: "economy",
+    mechanical: true,
     params: {
       holding: { type: "ref", ref: "holding", optional: true },
       property: { type: "ref", ref: "property", optional: true },

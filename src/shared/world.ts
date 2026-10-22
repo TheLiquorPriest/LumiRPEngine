@@ -543,6 +543,8 @@ export interface ActionDef {
   pack?: PackId;
   /** Marked for the adjudication policy's `marked` timing: its check rolls wherever it is taken (DESIGN §11). */
   adjudicate?: boolean;
+  /** Pure bookkeeping the player does alone (a trade, a transfer between their own accounts): a panel tap with no words records it at once, with no message, no reply and no clock time, since nothing in it needs telling (DESIGN §11). */
+  mechanical?: boolean;
 }
 
 /** Whether a world offers an action: a combat action only where the ruleset defines combat (DESIGN §11). */

@@ -545,7 +545,7 @@ describe("a world's money switches open their controls below Money 3", () => {
     expect([two.flows, two.cards, two.payPrefs]).toEqual([[], [], []]);
     const entities = [...(await plain.gm()).fields.keys()];
     // Each is declined as something the world leaves out, not as a matter of where or when.
-    for (const body of [flowCreateAction(gymForm(CHECKING), plain.currency), payPrefsAction(tiers), cardAction(DEBIT, "freeze")]) expect(await plain.play(body)).toContain("didn't happen (Not possible here and now: this world doesn't keep track of that)");
+    for (const body of [flowCreateAction(gymForm(CHECKING), plain.currency), payPrefsAction(tiers), cardAction(DEBIT, "freeze")]) expect(await plain.play(body)).toContain("didn't: Not possible here and now: this world doesn't keep track of that");
     const gm = await plain.gm();
     expect([...gm.fields.keys()]).toEqual(entities);
     expect(gm.values.get(DEBIT)?.state ?? "active").toBe("active");
@@ -668,7 +668,7 @@ describe("a business's owner manages its accounts by their role on the business"
     const employee = await MoneyChat.start();
     expect((await employee.hub()).flows.some((f) => f.id === "flow_shop_lease")).toBe(false);
     expect(await employee.play({ action: "flow_update", params: { flow: "flow_shop_lease", amount: 10000 } })).toContain("Shop lease isn't Jordan Ellis's to change");
-    expect(await employee.play(autopayAction(LIFT_LOAN, "none", null, null))).toContain("Set autopay: it didn't happen");
+    expect(await employee.play(autopayAction(LIFT_LOAN, "none", null, null))).toContain("didn't: Not possible here and now");
     const shop = await employee.party(BUSINESS);
     expect(shop.flows.find((f) => f.id === "flow_shop_lease")?.amount).toBe("$3,200.00");
     expect(account(shop, LIFT_LOAN).autopay?.mode).toBe("fixed");

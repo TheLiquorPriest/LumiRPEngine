@@ -798,7 +798,7 @@ I then re-measured with the engine's own `extract` step as shipped (strict rules
 5. **Timelapse and Pause/Resume clock** through the palette's Timelapse sheet and the Calendar panel. No command-palette commands are registered.
 
 **Execution.**
-- Palette, action-chip and map actions append a user message (text plus `intent`) with `triggerGeneration`.
+- Palette, action-chip and map actions append a user message (text plus `intent`) with `triggerGeneration`. An action marked `mechanical` (bookkeeping the player does alone: trades, option exercises, routing payouts, moves between their own accounts, paying a card, autopay, card states, standing payments, how they pay) sent with no words is no turn: `lre.action` resolves it against the head (requirements, then effects; no rules fire, no clock time), records it as a `fix` entry on the head, so it is deferred in a reply's window and has the ✎ fix's Undo, and answers `{applied, pending}` with no message; a failed requirement or a refused effect records nothing and comes back as the request's error. With words, it plays as a turn like any action.
 - Resolution runs requirements, then the check, then effects, then the duration.
 - The Outcome slot says the result is decided, worded for how the adjudication policy decided it (below).
 - An unmet requirement reads as a plain decline ("Not possible here and now: you need to have it with you"; "You're already there."), never as its expression, on its chip and in the Outcome alike: an expression may name a secret track or someone the player doesn't know. The shapes a decline names are the ones `interpret`'s catalog words an action's needs with (`backend/requirement-words.ts`, §5.2).
