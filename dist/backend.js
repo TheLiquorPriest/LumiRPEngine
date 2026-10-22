@@ -69398,12 +69398,22 @@ async function planSkip(deps, input) {
   const reply = input.reply.slice(-REPLY_CAP);
   const told = safe(reply) ? reply : "";
   const journal = input.journal.filter(safe);
+  const pinned = pinnedLines({ reg: deps.registry, world: input.world, state: input.state, reads: input.reads, pinned: await readPins(deps.host, input.world, pinsFor(input.world, null, undefined, ["skip"]), input.userId) }, "skip");
+  const before = input.reads.history.on ? chatBefore(await deps.host.chats.messages(input.chatId, input.userId).catch(() => []), true) : [];
+  const chat = recentChat({ reads: input.reads, hideJson: input.hideJson, history: told !== "" && before.at(-1)?.isUser === false ? before.slice(0, -1) : before }).filter(safe);
+  const extra = [pinned.length > 0 ? `Pinned lore:
+${pinned.join(`
+`)}` : "", chat.length > 0 ? `Recent chat (as the player sees it):
+${chat.join(`
+`)}` : ""].filter((part) => part !== "");
   const signal2 = within4(input.signal, "skipPlanMs", input.limit);
   const groups = routineSettingsOf(input.world).skipPlanCalls === "parallel" ? people.map((id) => [id]) : [people];
   const answers = await Promise.all(groups.map(async (group) => {
     const brief = skipPlanBrief(ctx, group, from, to);
     const failure = { reason: "" };
-    const raw = signal2.aborted ? null : await deps.steps.helperJson("skip", SKIP_PLAN_SYSTEM, skipPlanText(ctx, brief, told, journal), null, input.userId, signal2, { failure, spared: true });
+    const raw = signal2.aborted ? null : await deps.steps.helperJson("skip", SKIP_PLAN_SYSTEM, [skipPlanText(ctx, brief, told, journal), ...extra].join(`
+
+`), null, input.userId, signal2, { failure, spared: true });
     if (raw !== null)
       return { people: group.length, checked: checkSkipPlan(ctx, brief, raw), why: null };
     const fired = firedTimeout(signal2);
@@ -69912,9 +69922,9 @@ function thisBuild(moduleUrl = import.meta.url) {
   const dir = moduleUrl.replace(/[^/]*$/, "");
   const path = pathOfFileUrl(`${dir}${KIT_FILE}`);
   const core = pathOfFileUrl(`${dir}${CORE_FILE}`);
-  const sha256 = "8c09670d78596363e78a04ee5807bf2b34fdd88f8dbaeba93c73bb20fba2047e";
+  const sha256 = "1d9e0772b04cd0d22146dd040e126caec7a8608d847dcd125ae531d829e9d586";
   const tools = ["31de155b25748e794c9fe560150797f2", "d7e9a2e583dc5481df9d8ed8a432a934"].filter((f) => f !== undefined);
-  return { id: "0fbd3d93", kit: sha256 !== undefined && path !== null && core !== null ? { path, core, sha256, api: KIT_API } : null, tools };
+  return { id: "ccdac825", kit: sha256 !== undefined && path !== null && core !== null ? { path, core, sha256, api: KIT_API } : null, tools };
 }
 var BUILD_FILE = "agents/build.json";
 var USER_FILE = "agents.json";
@@ -72900,7 +72910,7 @@ class Runtime {
     this.steps.onCallStart = (userId, purpose) => this.diag.callStart(userId, purpose);
     this.toolSupport = new ToolSupport(this.host);
     this.minds = { host: this.host, registry: this.registry, steps: this.steps, settings: this.settings, presets: this.presets };
-    this.ledger = new LedgerService(this.host, (chatId, userId) => this.resolveEnv(chatId, userId), new LedgerFold(this.registry, { fingerprint: "0fbd3d93" }), (chatId) => messages.forget(chatId));
+    this.ledger = new LedgerService(this.host, (chatId, userId) => this.resolveEnv(chatId, userId), new LedgerFold(this.registry, { fingerprint: "ccdac825" }), (chatId) => messages.forget(chatId));
     this.studio = new StudioBridge(this.host, this.worlds);
     this.worlds.onChange = (worldId, userId) => this.studio.worldChanged(worldId, userId);
     this.agents = new Agents(this.host, options.build ?? thisBuild(), async (userId) => (await this.settings.get(userId)).timeouts.mcpReconnectMs);
@@ -73098,7 +73108,7 @@ class Runtime {
         start.applyAll(bridge.prePlan(text6));
         const journal = recentLines(input.core, input.observed, target < 0 ? input.observed.length : target, this.registry);
         const log = (message) => this.host.log("info", `[LumiRPEngine] plan ${p.generationId.slice(0, 8)}: ${message}`, input.userId);
-        bridge.setSkipPlan(text6, await planSkip({ registry: this.registry, steps: this.steps, log }, { userId: input.userId, world: from.world, state: start.state, intent: intent2, runSeed: bridge.runSeed, reply: lastReply ? lastReply.swipes[lastReply.swipeId] ?? "" : "", journal, signal: budget.signal, limit: settings.timeouts.skipPlanMs }));
+        bridge.setSkipPlan(text6, await planSkip({ registry: this.registry, steps: this.steps, log, host: this.host }, { chatId: input.chatId, userId: input.userId, world: from.world, state: start.state, intent: intent2, runSeed: bridge.runSeed, reply: lastReply ? lastReply.swipes[lastReply.swipeId] ?? "" : "", journal, reads: settings.minds.reads, hideJson: settings.hideJsonBlocks, signal: budget.signal, limit: settings.timeouts.skipPlanMs }));
       }
     }
     const base = intent2?.action === TIMELAPSE_ACTION2 && mindsOn2(settings) ? input.core.planState(p.generationId, input.observed) : null;
