@@ -52,7 +52,9 @@ const GROUPS: readonly { title: string; collections: readonly WorldCollection[] 
   { title: "Engine", collections: ["tables", "sections", "steps", "packs"] },
 ];
 
-const PARTS: readonly WorldPart[] = ["meta", "calendar", "realism", "tiers", "time", "ruleset", "loreIndex", "minds", "lorePins", "routineSettings"];
+// Every world part, in the order Build lists them: `PART_INFO` names each one (a Record over WorldPart),
+// so a part with a page can never be left off the list, as Pinned lore once was.
+const PARTS = Object.keys(PART_INFO) as WorldPart[];
 
 const TOOLS: readonly JobKind[] = ["import_lore", "index_book", "index_text", "refine", "describe_map", "propose_routines", "playtest", "check_world"];
 
