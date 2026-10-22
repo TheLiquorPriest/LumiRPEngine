@@ -305,9 +305,10 @@ function action(args: Args, ctx: ToolContext): Promise<ToolResult> {
   if (!isRecord(params)) throw new ToolError("params is an object: the picked option's params, as /palette/entries/<i>/options/<j>/params shows them.");
   const text = textArg(args, "text");
   return ctx.serialize(`chat:${chatId}`, async () => {
-    const body = await ask(ctx, chatId, "lre.action", { chatId, action: id, params: params as JsonObject, source: "palette", ...(text !== undefined && text.trim() !== "" ? { text } : {}) });
+    // An outside agent's action plays at once (`now`): there is no next message for it to wait for.
+    const body = await ask(ctx, chatId, "lre.action", { chatId, action: id, params: params as JsonObject, source: "palette", now: true, ...(text !== undefined && text.trim() !== "" ? { text } : {}) });
     // A mechanical action with no words is recorded at once, with no message and no reply to wait for.
-    return { text: json("messageId" in body ? { chatId, action: id, messageId: body.messageId, reply: REPLY } : { chatId, action: id, applied: true, pending: body.pending }) };
+    return { text: json("messageId" in body ? { chatId, action: id, messageId: body.messageId, reply: REPLY } : { chatId, action: id, applied: true, pending: "pending" in body ? body.pending : false }) };
   });
 }
 
@@ -323,7 +324,7 @@ function timelapse(args: Args, ctx: ToolContext): Promise<ToolResult> {
     if (offered === null) throw new ToolError(`Chat ${chatId} offers no timelapse now (lre_chat_state's /palette/timelapse is null).`);
     if (offered.blocked !== null) throw new ToolError(`Chat ${chatId} can't timelapse now: ${offered.blocked}`);
     const params: JsonObject = { target: target as JsonObject, overrides: overrides as JsonObject };
-    const body = await ask(ctx, chatId, "lre.action", { chatId, action: offered.action, params, source: "palette", ...(text !== undefined && text.trim() !== "" ? { text } : {}) });
+    const body = await ask(ctx, chatId, "lre.action", { chatId, action: offered.action, params, source: "palette", now: true, ...(text !== undefined && text.trim() !== "" ? { text } : {}) });
     return { text: json({ chatId, action: offered.action, target: target as JsonObject, messageId: "messageId" in body ? body.messageId : null, reply: REPLY }) };
   });
 }

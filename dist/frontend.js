@@ -5284,6 +5284,9 @@ function timelapseRequest(view, target, overrides, chatId, followRoutine, source
 function travelRequest(action, params, chatId) {
   return { type: "lre.action", chatId, action, params: { ...params }, source: "map" };
 }
+function stagedRequest(chatId, staged, now) {
+  return { type: "lre.action", chatId, action: staged.action, params: { ...staged.params }, source: staged.source, ...now ? { now: true } : {} };
+}
 function fixRequest(target, value, chatId) {
   return { type: "lre.fix", chatId, entity: target.entity, field: target.field, value };
 }
@@ -12899,7 +12902,8 @@ function MessageChips(props) {
   if (!view || view.status === "not_world")
     return null;
   const chips = view.chips.filter((chip) => chip.messageId === props.messageId);
-  if (chips.length === 0)
+  const when = view.replyClocks[props.messageId];
+  if (chips.length === 0 && when === undefined)
     return null;
   const show = (chip, fallback) => {
     const Chosen = app.catalog.chips.get(chip.kind) ?? fallback;
@@ -12915,6 +12919,17 @@ function MessageChips(props) {
     class: "lre-chips",
     "data-lre-chips": props.messageId,
     children: [
+      when !== undefined ? /* @__PURE__ */ u3("span", {
+        class: "lre-chat-when lre-small lre-muted",
+        "data-lre-reply-clock": true,
+        children: [
+          /* @__PURE__ */ u3("span", {
+            class: "lre-sr",
+            children: "World time after this turn: "
+          }, undefined, false, undefined, this),
+          when
+        ]
+      }, undefined, true, undefined, this) : null,
       done.length > 0 ? /* @__PURE__ */ u3(Receipt, {
         chips: done,
         show: (chip) => show(chip, DefaultChip)
@@ -26448,7 +26463,7 @@ function Hud(props) {
     const observer = new ResizeObserver(measure);
     observer.observe(target);
     return () => observer.disconnect();
-  }, [open, mode, viewport.width, viewport.height, hud, activity?.state, activity?.label]);
+  }, [open, mode, viewport.width, viewport.height, hud, activity?.state, activity?.label, view?.staged?.label]);
   A(() => {
     if (open || !(refocus.current || then.current))
       return;
@@ -26595,7 +26610,49 @@ function Hud(props) {
       view.status === "paused" ? /* @__PURE__ */ u3(Badge, {
         tone: "warn",
         children: "Paused"
-      }, undefined, false, undefined, this) : null
+      }, undefined, false, undefined, this) : null,
+      /* @__PURE__ */ u3(StagedAction, {
+        view
+      }, undefined, false, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+}
+function StagedAction(props) {
+  const app = useApp();
+  const [busy, run] = useBusy();
+  const staged = props.view.staged;
+  if (!staged)
+    return null;
+  const send = (now) => run(async () => {
+    await app.request(stagedRequest(props.view.chatId, staged, now));
+  });
+  return /* @__PURE__ */ u3("span", {
+    class: "lre-chat-staged",
+    "data-lre-staged": true,
+    role: "group",
+    "aria-label": "Staged action",
+    children: [
+      /* @__PURE__ */ u3("span", {
+        class: "lre-chat-staged-text",
+        children: [
+          "With your next message: ",
+          staged.label
+        ]
+      }, undefined, true, undefined, this),
+      /* @__PURE__ */ u3(Button, {
+        variant: "secondary",
+        size: "sm",
+        icon: "send",
+        busy,
+        onClick: () => send(true),
+        children: "Send now"
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(IconButton, {
+        icon: "close",
+        label: "Clear the staged action",
+        disabled: busy,
+        onClick: () => send(false)
+      }, undefined, false, undefined, this)
     ]
   }, undefined, true, undefined, this);
 }
@@ -26898,6 +26955,9 @@ function StatusLine() {
       activity?.state === "failed" ? /* @__PURE__ */ u3(ActivityLine, {
         compact: true
       }, undefined, false, undefined, this) : null,
+      /* @__PURE__ */ u3(StagedAction, {
+        view
+      }, undefined, false, undefined, this),
       /* @__PURE__ */ u3(Button, {
         variant: "primary",
         size: "sm",
@@ -30535,9 +30595,10 @@ function parseHHMM(text) {
     throw new RangeError(`bad time ${text}`);
   return h3 * 60 + min;
 }
-function formatHHMM(minuteOfDay) {
+function formatTimeOfDay(minuteOfDay) {
   const m2 = mod(minuteOfDay, MINUTES_PER_DAY);
-  return `${String(Math.floor(m2 / 60)).padStart(2, "0")}:${String(m2 % 60).padStart(2, "0")}`;
+  const h3 = Math.floor(m2 / 60);
+  return `${h3 % 12 === 0 ? 12 : h3 % 12}:${String(m2 % 60).padStart(2, "0")} ${h3 < 12 ? "AM" : "PM"}`;
 }
 function daysFromCivil(y3, m2, d3) {
   const yy = m2 <= 2 ? y3 - 1 : y3;
@@ -30641,7 +30702,7 @@ function weekdayName(cal, weekday) {
 }
 function formatClock(cal, clock, offsetMinutes = 0) {
   const d3 = dateAt(cal, clock + offsetMinutes);
-  return `${weekdayName(cal, d3.weekday)} ${d3.day} ${monthName(cal, d3.month)} ${d3.year}, ${formatHHMM(d3.minuteOfDay)}`;
+  return `${weekdayName(cal, d3.weekday)} ${d3.day} ${monthName(cal, d3.month)} ${d3.year}, ${formatTimeOfDay(d3.minuteOfDay)}`;
 }
 var ZONES = {
   UTC: { standard: 0, dst: null },
@@ -50067,6 +50128,8 @@ var CHAT_CSS = `
 .lre .lre-chat-status>.lre-btn{flex:none;border-radius:var(--lre-r-pill);padding:0 var(--lre-s4)}
 .lre .lre-chat-pulse{flex:none;width:10px;height:10px;border-radius:50%;background:var(--lre-accent);animation:lre-chat-pulse 1.4s ease-in-out infinite}
 @keyframes lre-chat-pulse{50%{opacity:.3;transform:scale(.7)}}
+.lre .lre-chat-staged{flex:0 1 auto;display:flex;align-items:center;gap:var(--lre-s1);min-width:0;padding-left:var(--lre-s2);border-left:1px solid var(--lre-hairline)}
+.lre .lre-chat-staged-text{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:var(--lre-fs-sm);color:var(--lre-accent-text)}
 
 .lre .lre-hud{display:flex;align-items:center;gap:2px;height:100%;padding:0 var(--lre-s1);border:1px solid var(--lre-border);border-radius:var(--lre-r-pill);background:var(--lre-bar-bg);box-shadow:var(--lre-shadow-lg);overflow:hidden;font-size:var(--lre-fs-sm)}
 .lre .lre-hud>button{display:inline-flex;align-items:center;justify-content:center;gap:6px;min-width:var(--lre-tap);min-height:var(--lre-tap);padding:0 var(--lre-s2);border:0;border-radius:var(--lre-r-pill);background:transparent;white-space:nowrap;transition:background-color var(--lre-fast)}

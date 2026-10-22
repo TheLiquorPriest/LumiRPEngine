@@ -66,7 +66,7 @@ async function folded(rig: Rig, chatId: string) {
 
 /** Two hours from the palette's Timelapse. */
 async function lapse(rig: Rig, chatId: string): Promise<void> {
-  rig.body(await rig.send({ type: "lre.action", chatId, action: "timelapse", params: { target: { type: "duration", minutes: 120 } }, source: "palette" }));
+  rig.body(await rig.send({ type: "lre.action", chatId, action: "timelapse", params: { target: { type: "duration", minutes: 120 } }, source: "palette", now: true }));
   const g = await rig.host.start(chatId, { type: "normal" });
   await rig.host.finish(g, "Two hours go by.");
 }

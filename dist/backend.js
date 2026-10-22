@@ -105,6 +105,9 @@ function lifeStateOf(world, id) {
 function grouped(n) {
   return n.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",");
 }
+function formatTemperature(celsius) {
+  return `${Math.round(celsius * 9 / 5 + 32)} \xB0F`;
+}
 function formatMoney(minorUnits, currency) {
   const units = BigInt(Math.trunc(minorUnits));
   const negative = units < 0n;
@@ -284,6 +287,11 @@ function parseHHMM(text) {
 function formatHHMM(minuteOfDay) {
   const m = mod(minuteOfDay, MINUTES_PER_DAY);
   return `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
+}
+function formatTimeOfDay(minuteOfDay) {
+  const m = mod(minuteOfDay, MINUTES_PER_DAY);
+  const h = Math.floor(m / 60);
+  return `${h % 12 === 0 ? 12 : h % 12}:${String(m % 60).padStart(2, "0")} ${h < 12 ? "AM" : "PM"}`;
 }
 function daysFromCivil(y, m, d) {
   const yy = m <= 2 ? y - 1 : y;
@@ -500,7 +508,7 @@ function weekdayName(cal, weekday) {
 }
 function formatClock(cal, clock, offsetMinutes = 0) {
   const d = dateAt(cal, clock + offsetMinutes);
-  return `${weekdayName(cal, d.weekday)} ${d.day} ${monthName(cal, d.month)} ${d.year}, ${formatHHMM(d.minuteOfDay)}`;
+  return `${weekdayName(cal, d.weekday)} ${d.day} ${monthName(cal, d.month)} ${d.year}, ${formatTimeOfDay(d.minuteOfDay)}`;
 }
 function dayPartAt(cal, clock) {
   const m = dateAt(cal, clock).minuteOfDay;
@@ -4742,6 +4750,8 @@ function rawLine(reg, world, state, pov, e, player, you) {
       const kind = own(state.entities, e.entity)?.kind ?? "";
       if (e.field === "place" && typeof e.value === "string")
         return `${name(e.entity)} \u2192 ${name(e.value)}`;
+      if (e.field === "temp_c" && typeof e.value === "number")
+        return `${name(e.entity)}: Temperature ${formatTemperature(e.value)}`;
       const ctx = player && e.field === "activity" && typeof e.value === "string" ? reg.context(world, state) : null;
       const shownActivity = ctx ? optionalQuery(ctx, "castlife.activity") : null;
       const value = ctx && shownActivity && typeof e.value === "string" ? shownActivity(ctx, e.entity, e.value) : e.value;
@@ -23520,9 +23530,10 @@ function buildWeatherView(ctx) {
     return { level, label: level === 0 ? "" : MOOD[season], region: e?.name ?? null, season, sky: null, tempC: null, closed: [] };
   const st = stateAt(ctx, here);
   const sky = strOf(e.fields.weather, "clear");
-  const temp = level >= 3 && typeof e.fields.temp_c === "number" ? Math.round(e.fields.temp_c) : null;
+  const raw = level >= 3 && typeof e.fields.temp_c === "number" ? e.fields.temp_c : null;
+  const temp = raw === null ? null : Math.round(raw);
   const word = st?.label ?? sky;
-  return { level, label: `${word.charAt(0).toUpperCase()}${word.slice(1)}${temp !== null ? `, ${temp} \xB0C` : ""}`, region: e.name, season, sky, tempC: temp, closed: level >= 4 ? st?.closes ?? [] : [] };
+  return { level, label: `${word.charAt(0).toUpperCase()}${word.slice(1)}${raw !== null ? `, ${formatTemperature(raw)}` : ""}`, region: e.name, season, sky, tempC: temp, closed: level >= 4 ? st?.closes ?? [] : [] };
 }
 function stepRegions(slot, ctx, rng) {
   const level = ctx.levelOf(ctx.world.pov, "weather");
@@ -26503,7 +26514,7 @@ function stepAgent2(slot, ctx, rngFor, who) {
 }
 function invitationText(ctx, agent, place, at, viewer) {
   const named = place !== null && (viewer === undefined || canSeePlace(ctx.registry, ctx.world, ctx.state, viewer, place)) ? own(ctx.world.places, place)?.name ?? place : null;
-  return `${own(ctx.state.entities, agent)?.name ?? agent} invites you to ${named ?? "meet up"} at ${formatHHMM(dateAt(calendarOf(ctx.world), at).minuteOfDay)}.`;
+  return `${own(ctx.state.entities, agent)?.name ?? agent} invites you to ${named ?? "meet up"} at ${formatTimeOfDay(dateAt(calendarOf(ctx.world), at).minuteOfDay)}.`;
 }
 function dropUnlived(slot, ctx) {
   const plans = optionalQuery(ctx, "minds.plans");
@@ -26753,8 +26764,8 @@ function playerBlocks(ctx, who, plan2) {
   const applied = new Map(activeBlocks(ctx, who, plan2.day).map((a) => [a.block.id, a]));
   const open = loreGateReader(ctx.registry, ctx.world, ctx.state);
   return plan2.blocks.map((b) => {
-    const from = formatHHMM(dateAt(cal, b.start).minuteOfDay);
-    const to = formatHHMM(dateAt(cal, b.end).minuteOfDay);
+    const from = formatTimeOfDay(dateAt(cal, b.start).minuteOfDay);
+    const to = formatTimeOfDay(dateAt(cal, b.end).minuteOfDay);
     const routineId = b.option.startsWith(ROUTINE_OPTION) ? b.option.slice(ROUTINE_OPTION.length).replace(/:carried$/, "") : null;
     const a = routineId !== null ? applied.get(routineId) : undefined;
     if (b.option.startsWith(AGENDA_OPTION) && !publicTrack(ctx.world, b.option.slice(AGENDA_OPTION.length)) || a?.block.private === true)
@@ -58594,7 +58605,7 @@ function routineGmView(ctx, who, day2 = dateAt(calendarOf(ctx.world), ctx.state.
     };
   });
   const plan2 = dayPlan(ctx, who, day2);
-  const laid = plan2.blocks.map((b) => ({ start: b.start, end: b.end, from: formatHHMM(dateAt(cal, b.start).minuteOfDay), to: formatHHMM(dateAt(cal, b.end).minuteOfDay), label: b.label, activity: b.activity, place: b.place, placeName: b.place ? own(ctx.world.places, b.place)?.name ?? b.place : null, kind: kindOfBlock(b.activity), reasons: b.reasons, origin: originOf(ctx, who, b.option, b.reasons[0] ?? "", b.option.endsWith(":carried") ? day2 - 1 : day2) }));
+  const laid = plan2.blocks.map((b) => ({ start: b.start, end: b.end, from: formatTimeOfDay(dateAt(cal, b.start).minuteOfDay), to: formatTimeOfDay(dateAt(cal, b.end).minuteOfDay), label: b.label, activity: b.activity, place: b.place, placeName: b.place ? own(ctx.world.places, b.place)?.name ?? b.place : null, kind: kindOfBlock(b.activity), reasons: b.reasons, origin: originOf(ctx, who, b.option, b.reasons[0] ?? "", b.option.endsWith(":carried") ? day2 - 1 : day2) }));
   const story = [];
   const holds = objOf(e?.fields.holds);
   for (const field of ["place", "activity"]) {
@@ -66033,7 +66044,7 @@ function buildMindsGm(ctx, texts2, enabled, memory2) {
 // src/backend/view.ts
 var TIMELAPSE_ACTION2 = "timelapse";
 function notWorldView(chatId) {
-  return { v: 1, chatId, worldId: null, revision: null, status: "not_world", hud: null, scene: null, chips: [], journal: [], keepReport: [], pending: [], panels: {}, palette: null, controls: null, meter: null, packs: {}, currency: null };
+  return { v: 1, chatId, worldId: null, revision: null, status: "not_world", hud: null, scene: null, chips: [], replyClocks: {}, journal: [], keepReport: [], pending: [], panels: {}, palette: null, controls: null, meter: null, packs: {}, currency: null };
 }
 var GROUPS2 = { buy: "buy", purchase: "buy", pay: "pay", transfer: "transfer", drive: "drive", lend: "lend" };
 function groupOf(action) {
@@ -66569,6 +66580,7 @@ function buildView(input) {
       hud: hud(world, state2, panels, ctx),
       scene: sceneView,
       chips,
+      replyClocks: replyClocks(chain, fold, core, world, state2),
       journal: [...turnNotes(chain, fold, core, registry, world, state2), ...drops.notes],
       keepReport: drops.keep,
       pending,
@@ -66580,6 +66592,18 @@ function buildView(input) {
       currency: world.currency
     };
   });
+}
+function replyClocks(chain, fold, core, world, state2) {
+  const cal = calendarOf(world);
+  const place = placeOfEntity(state2, world.pov);
+  const out = {};
+  chain.forEach((m, i) => {
+    const clock = fold.messages[i]?.clock ?? null;
+    if (m.isUser || clock === null || !activeRecord(m, core.journal.tombstones))
+      return;
+    out[m.id] = formatClock(cal, clock, placeOffset(world, clock, place));
+  });
+  return out;
 }
 function povEntity(world) {
   return world.pov;
@@ -69264,10 +69288,11 @@ class LedgerFold {
           keep.set(i, [...keep.get(i) ?? [], x]);
         for (const [i, x] of snapshot.violations)
           violations.set(i, [...violations.get(i) ?? [], x]);
+        const clocks = new Map(snapshot.clocks ?? []);
         for (let i = base + 1;i <= best; i++) {
           const f = frames[i - base - 1];
           const k2 = frameKeys[i - base - 1];
-          const step = { state: null, result: f.result, notes: [...f.notes, ...notes.get(i) ?? []], keep: [...f.keep, ...keep.get(i) ?? []], violations: violations.get(i) ?? [], paused: false };
+          const step = { state: null, result: { ...f.result, clock: clocks.get(i) ?? null }, notes: [...f.notes, ...notes.get(i) ?? []], keep: [...f.keep, ...keep.get(i) ?? []], violations: violations.get(i) ?? [], paused: false };
           this.remember(k2, i === best ? { ...step, state: snapshot.state } : step, i === best, false);
           steps.push(step);
           keys.push(k2);
@@ -69308,7 +69333,8 @@ class LedgerFold {
     return out;
   }
   snapshotOf(key, steps, state2) {
-    const snap = { key, state: structuredClone(state2), notes: [], keep: [], violations: [] };
+    const clocks = [];
+    const snap = { key, state: structuredClone(state2), notes: [], keep: [], violations: [], clocks };
     steps.forEach((s, i) => {
       for (const x of s.notes)
         if (dependentNote(x))
@@ -69318,6 +69344,8 @@ class LedgerFold {
           snap.keep.push([i, x]);
       for (const x of s.violations)
         snap.violations.push([i, x]);
+      if (s.result.clock !== null)
+        clocks.push([i, s.result.clock]);
     });
     return snap;
   }
@@ -69467,7 +69495,7 @@ class LedgerFold {
       if (before !== null && violations.length === 0)
         this.digest(this.settled, settledKey, () => before);
     }
-    return { state: state2, result: f.result, notes, keep, violations, paused: f.paused };
+    return { state: state2, result: { ...f.result, clock: state2.clock }, notes, keep, violations, paused: f.paused };
   }
   frame(input, m, parent, paused, pausesHere) {
     const notes = [];
@@ -69571,9 +69599,9 @@ function thisBuild(moduleUrl = import.meta.url) {
   const dir = moduleUrl.replace(/[^/]*$/, "");
   const path = pathOfFileUrl(`${dir}${KIT_FILE}`);
   const core = pathOfFileUrl(`${dir}${CORE_FILE}`);
-  const sha256 = "83880cbc244d4643475ef0b862d64c73b1abcb9bdeb6554567e42322d3f69421";
+  const sha256 = "1b55c5a4ce62dde50d4bdb0c21cca6ebf133b74ed3b25f8d07ab3b96af863559";
   const tools = ["31de155b25748e794c9fe560150797f2", "d7e9a2e583dc5481df9d8ed8a432a934"].filter((f) => f !== undefined);
-  return { id: "ce78f09b", kit: sha256 !== undefined && path !== null && core !== null ? { path, core, sha256, api: KIT_API } : null, tools };
+  return { id: "e1d4867f", kit: sha256 !== undefined && path !== null && core !== null ? { path, core, sha256, api: KIT_API } : null, tools };
 }
 var BUILD_FILE = "agents/build.json";
 var USER_FILE = "agents.json";
@@ -71704,6 +71732,38 @@ class OutcomeNotes {
   }
 }
 
+// src/backend/staged.ts
+function isStaged(raw) {
+  return isRecord(raw) && typeof raw.action === "string" && isRecord(raw.request) && isRecord(raw.params) && typeof raw.source === "string" && typeof raw.label === "string" && (raw.after === null || typeof raw.after === "string");
+}
+
+class StagedActions {
+  host;
+  staged = new Map;
+  constructor(host) {
+    this.host = host;
+  }
+  path(chatId) {
+    return `${runDir(chatId)}staged.json`;
+  }
+  async get(chatId, userId) {
+    const key = `${userId}\x00${chatId}`;
+    if (!this.staged.has(key)) {
+      const raw = await readStoredJson(this.host, this.path(chatId), userId, "Staged action", (v) => v === null || isStaged(v));
+      this.staged.set(key, isStaged(raw) ? raw : null);
+      if (this.staged.size > 256)
+        this.staged.delete(this.staged.keys().next().value ?? "");
+    }
+    return this.staged.get(key) ?? null;
+  }
+  async set(chatId, userId, staged) {
+    this.staged.set(`${userId}\x00${chatId}`, staged);
+    const path = this.path(chatId);
+    await this.host.storage.write(`${path}.tmp`, JSON.stringify(staged), userId);
+    await this.host.storage.move(`${path}.tmp`, path, userId);
+  }
+}
+
 // src/backend/inspector-log.ts
 var INSPECTOR_RUNS = 10;
 var FORMAT2 = 2;
@@ -72709,6 +72769,8 @@ class Runtime {
   book;
   meter;
   outcomeNotes;
+  staged;
+  taking = new Map;
   inspector;
   chatPrefs;
   steps;
@@ -72758,6 +72820,7 @@ class Runtime {
     this.chips = new ChipStore(this.host);
     this.planNotes = new PlanNotes(this.host);
     this.outcomeNotes = new OutcomeNotes(this.host);
+    this.staged = new StagedActions(this.host);
     this.inspector = new InspectorLog(this.host);
     this.chatPrefs = new ChatPrefs(this.host);
     this.book = new EngineBook(this.host, this.worlds);
@@ -72770,7 +72833,7 @@ class Runtime {
     this.steps.onCallStart = (userId, purpose) => this.diag.callStart(userId, purpose);
     this.toolSupport = new ToolSupport(this.host);
     this.minds = { host: this.host, registry: this.registry, steps: this.steps, settings: this.settings, presets: this.presets };
-    this.ledger = new LedgerService(this.host, (chatId, userId) => this.resolveEnv(chatId, userId), new LedgerFold(this.registry, { fingerprint: "ce78f09b" }), (chatId) => messages.forget(chatId));
+    this.ledger = new LedgerService(this.host, (chatId, userId) => this.resolveEnv(chatId, userId), new LedgerFold(this.registry, { fingerprint: "e1d4867f" }), (chatId) => messages.forget(chatId));
     this.studio = new StudioBridge(this.host, this.worlds);
     this.worlds.onChange = (worldId, userId) => this.studio.worldChanged(worldId, userId);
     this.agents = new Agents(this.host, options.build ?? thisBuild(), async (userId) => (await this.settings.get(userId)).timeouts.mcpReconnectMs);
@@ -72786,8 +72849,10 @@ class Runtime {
     this.ledger.attach();
     this.agents.start();
     this.host.on("MESSAGE_SENT", (e, userId) => {
-      if (e.message.isUser && userId)
-        this.lapse(e.chatId, userId);
+      if (!e.message.isUser || !userId)
+        return;
+      this.lapse(e.chatId, userId);
+      this.takeStaged(e.chatId, userId, e.message.id);
     });
     this.host.on("MESSAGE_SWIPED", (e, userId) => {
       if (e.action === "deleted" && userId)
@@ -72898,6 +72963,8 @@ class Runtime {
     trimMap(this.preBudgets);
     const ctx = this.registry.context(render.world, render.state);
     const ties = tiesOf2(ctx, render.world, render.state);
+    if (lastUser)
+      await this.takeStaged(input.chatId, input.userId, lastUser.id);
     const recorded = lastUser ? (await this.host.chats.messages(input.chatId, input.userId)).find((m) => m.id === lastUser.id)?.metadata[LEDGER_NAMESPACE] : undefined;
     const all2 = [...this.registry.actions.values(), ...Object.values(render.world.actions)].filter((a) => offersAction(render.world, a));
     const typed = text6.trim() !== "" && !(isRecord(recorded) && typeof recorded.action === "string");
@@ -74185,7 +74252,33 @@ ${rules}` });
     await this.meter.ready(userId);
     const view = buildView({ chatId, run: run2, core, observed, registry: this.registry, world: (r) => core.worldAt(r), stored, meter: this.meter.view(userId), mapDisplay: await this.chatPrefs.mapDisplay(chatId, userId) });
     view.panels["core.context"] = this.inspectorView(chatId, userId);
+    const staged = await this.staged.get(chatId, userId);
+    view.staged = staged ? { action: staged.action, params: staged.request, source: staged.source, label: staged.label } : null;
     return view;
+  }
+  takeStaged(chatId, userId, messageId) {
+    const key = `${userId}\x00${chatId}`;
+    const next = (this.taking.get(key) ?? Promise.resolve()).then(async () => {
+      const staged = await this.staged.get(chatId, userId);
+      if (!staged)
+        return;
+      const messages = await this.host.chats.messages(chatId, userId);
+      const at2 = messages.findIndex((m2) => m2.id === messageId);
+      const after = staged.after === null ? -1 : messages.findIndex((m2) => m2.id === staged.after);
+      const m = messages[at2];
+      if (!m?.isUser || staged.after !== null && after < 0 || at2 <= after)
+        return;
+      const own2 = m.metadata[LEDGER_NAMESPACE];
+      if (isRecord(own2) && typeof own2.action === "string")
+        return;
+      const words5 = (m.swipes[m.swipeId] ?? m.content).trim() !== "";
+      const intent2 = { action: staged.action, params: staged.params, source: staged.source, ...words5 ? { described: true } : {} };
+      await this.host.chats.writeMetadata(chatId, messageId, { ...m.metadata, [LEDGER_NAMESPACE]: { ...isRecord(own2) ? own2 : {}, ...intent2 } }, userId);
+      await this.staged.set(chatId, userId, null);
+      this.push.changed(chatId, userId);
+    }).catch((error) => this.host.log("warn", `[LumiRPEngine] chat ${chatId}: the staged action wasn't recorded on the message (${error instanceof Error ? error.message : String(error)})`, userId));
+    this.taking.set(key, next);
+    return next;
   }
   takeChip(chatId, userId, id) {
     return this.chips.take(chatId, userId, id);
@@ -74339,7 +74432,7 @@ function shortClock(world, state2, at2) {
   const place = placeOfEntity(state2, world.pov);
   const d = dateAt(cal, at2 + placeOffset(world, at2, place));
   const today2 = dateAt(cal, state2.clock + placeOffset(world, state2.clock, place)).dayIndex;
-  return d.dayIndex === today2 ? formatHHMM(d.minuteOfDay) : `${weekdayName(cal, d.weekday)} ${formatHHMM(d.minuteOfDay)}`;
+  return d.dayIndex === today2 ? formatTimeOfDay(d.minuteOfDay) : `${weekdayName(cal, d.weekday)} ${formatTimeOfDay(d.minuteOfDay)}`;
 }
 function planOutline(plan2, prose) {
   return [...prose?.brief ? [`Brief: ${prose.brief}`] : [], ...plan2.outline, ...prose?.outline ?? []];
@@ -74832,10 +74925,12 @@ class Dispatcher {
         const said2 = r.text?.trim() ?? "";
         let text6 = said2;
         let params = r.params;
+        let label = "";
         if (r.action === TIMELAPSE_ACTION2) {
           const target = parseTarget(r.params.target);
           if (!target)
             throw new RequestError("bad_request", "a timelapse needs a target");
+          label = `Timelapse: ${targetLabel(target)}`;
           text6 ||= `(Timelapse: ${neutralizeMacros(targetLabel(target))})`;
           const follows = typeof r.params.followRoutine === "boolean" ? r.params.followRoutine : routineSettingsOf((await this.head(r.chatId, userId)).world).paletteFollowsRoutine;
           params = { ...Object.fromEntries(Object.entries(r.params).filter(([k]) => k !== "followRoutine" && k !== "povRoutine")), ...follows ? {} : { povRoutine: false } };
@@ -74844,6 +74939,14 @@ class Dispatcher {
           const action = (hasOwn(world.actions, r.action) ? world.actions[r.action] : undefined) ?? this.rt.registry.actions.get(r.action);
           if (!action)
             throw new RequestError("not_found", `unknown action ${r.action}`);
+          const picked = Object.entries(r.params).flatMap(([k, v]) => {
+            if (typeof v === "number")
+              return [action.params[k]?.type === "money" ? formatMoney(v, world.currency) : String(v)];
+            if (typeof v !== "string" || v === "")
+              return [];
+            return [state2.entities[v]?.name ?? (hasOwn(world.places, v) ? world.places[v]?.name : undefined) ?? v];
+          });
+          label = picked.length > 0 ? `${action.label}: ${picked.join(", ")}` : action.label;
           if (action.mechanical === true && said2 === "") {
             const runSeed = this.runSeedOf(r.chatId);
             const w = new Working(this.rt.registry, world, state2);
@@ -74860,6 +74963,19 @@ class Dispatcher {
             return;
           }
           text6 ||= `(${neutralizeMacros(action.label)})`;
+        }
+        const staged = await this.rt.staged.get(r.chatId, userId);
+        const same3 = staged !== null && staged.action === r.action && JSON.stringify(staged.request) === JSON.stringify(r.params);
+        if ((r.source === "palette" || r.source === "map") && said2 === "" && r.now !== true) {
+          const after = toChain(await this.rt.host.chats.messages(r.chatId, userId)).at(-1)?.id ?? null;
+          await this.rt.staged.set(r.chatId, userId, same3 ? null : { action: r.action, request: r.params, params, source: r.source, label: neutralizeMacros(label), after });
+          this.rt.push.changed(r.chatId, userId);
+          reply("lre.action", { staged: !same3 });
+          return;
+        }
+        if (same3) {
+          await this.rt.staged.set(r.chatId, userId, null);
+          this.rt.push.changed(r.chatId, userId);
         }
         const messageId = await this.rt.host.chats.appendUserMessage(r.chatId, text6, { [LEDGER_NAMESPACE]: { action: r.action, params, source: r.source, ...said2 !== "" ? { described: true } : {} } }, true, userId);
         reply("lre.action", { messageId });

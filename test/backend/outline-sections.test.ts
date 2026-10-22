@@ -22,7 +22,7 @@ async function alder(settings: JsonObject[] = []): Promise<{ rig: Rig; chatId: s
 
 /** A Timelapse from the palette, `minutes` long, and its reply. */
 async function timelapse(rig: Rig, chatId: string, minutes: number): Promise<void> {
-  rig.body(await rig.send({ type: "lre.action", chatId, action: "timelapse", params: { target: { type: "duration", minutes } }, source: "palette" }));
+  rig.body(await rig.send({ type: "lre.action", chatId, action: "timelapse", params: { target: { type: "duration", minutes } }, source: "palette", now: true }));
   const g = await rig.host.start(chatId, { type: "normal" });
   await rig.host.finish(g, "Time passes.");
 }

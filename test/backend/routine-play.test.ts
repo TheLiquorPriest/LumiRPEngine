@@ -54,7 +54,7 @@ async function lapseTo(rig: Rig, chatId: string, stamp: string): Promise<void> {
     const at = clockOfStamp(calendarOf(world), stamp);
     if (at === null) throw new Error(`not a stamp: ${stamp}`);
     if (state.clock >= at) return;
-    rig.body(await rig.send({ type: "lre.action", chatId, action: "timelapse", params: { target: { type: "at", at } }, source: "palette" }));
+    rig.body(await rig.send({ type: "lre.action", chatId, action: "timelapse", params: { target: { type: "at", at } }, source: "palette", now: true }));
     const g = await rig.host.start(chatId, { type: "normal" });
     await rig.host.finish(g, "Time passes.");
   }

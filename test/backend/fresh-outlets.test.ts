@@ -76,7 +76,7 @@ async function outlinedCoins(rig: Rig): Promise<{ chatId: string; beats: () => n
   rig.host.quietReply = (req: QuietRequest) => ((req.messages[0]?.content ?? "").startsWith(OUTLINE_MARK) ? JSON.stringify({ beats: [`Beat ${++beat}: the coin spins.`] }) : "{}");
   rig.body(await rig.send({ type: "lre.settings.set", patch: { modelUse: { preset: "full" } } }));
   const chatId = await attached(rig, await coinWorld(rig, { seedMode: "same_roll" }));
-  rig.body(await rig.send({ type: "lre.action", chatId, action: "flip_coin", params: {}, source: "palette" }));
+  rig.body(await rig.send({ type: "lre.action", chatId, action: "flip_coin", params: {}, source: "palette", now: true }));
   const first = await rig.host.start(chatId, { type: "normal" });
   expect(rig.host.section("Outline")).toContain("Beat 1: the coin spins.");
   await rig.host.finish(first, "Heads.");
@@ -207,7 +207,7 @@ describe("no stale outlets", () => {
     const worldId = await coinWorld(rig);
     const flipper = await attached(rig, worldId);
     const looker = await attached(rig, worldId);
-    rig.body(await rig.send({ type: "lre.action", chatId: flipper, action: "flip_coin", params: {}, source: "palette" }));
+    rig.body(await rig.send({ type: "lre.action", chatId: flipper, action: "flip_coin", params: {}, source: "palette", now: true }));
     rig.host.sendUser(looker, "I look around.");
     await rig.host.settle();
     expect((await rig.host.begin(flipper, { type: "normal" })).halted).toBe("cancelled");

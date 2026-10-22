@@ -65,7 +65,7 @@ async function corrections(rig: Rig, chatId: string): Promise<Chip[]> {
  * are about what the clock's ✎ lets run again, the POV's own schedules included, so they choose it.
  */
 async function timelapse(rig: Rig, chatId: string, minutes: number): Promise<void> {
-  rig.body(await rig.send({ type: "lre.action", chatId, action: "timelapse", params: { target: { type: "duration", minutes }, followRoutine: true }, source: "palette" }));
+  rig.body(await rig.send({ type: "lre.action", chatId, action: "timelapse", params: { target: { type: "duration", minutes }, followRoutine: true }, source: "palette", now: true }));
   const g = await rig.host.start(chatId, { type: "normal" });
   await rig.host.finish(g, "Time passes.");
 }

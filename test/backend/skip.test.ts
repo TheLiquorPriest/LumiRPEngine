@@ -89,7 +89,7 @@ function fakeMinds(calls: { at: number; who: string[]; reason: string }[], inter
 
 /** A timelapse of `days` under `overrides`: by default invitations only note (the plan's own invitation would end it first otherwise). */
 async function skipDays(rig: Rig, chatId: string, days: number, overrides: JsonObject = { invitation: "note" }): Promise<void> {
-  rig.body(await rig.send({ type: "lre.action", chatId, action: "timelapse", params: { target: { type: "duration", minutes: days * 1440 }, overrides }, source: "palette" }));
+  rig.body(await rig.send({ type: "lre.action", chatId, action: "timelapse", params: { target: { type: "duration", minutes: days * 1440 }, overrides }, source: "palette", now: true }));
   const g = await rig.host.start(chatId, { type: "normal" });
   await rig.host.finish(g, "Days pass.");
 }
@@ -271,7 +271,7 @@ describe("time skips", () => {
     await marcusPlans(rig, chatId, [at(day + 1, "19:00"), at(day + 2, "19:00")]);
     rig.rt.beatMinds = fakeMinds([], () => false, true);
     const before = (await folded(rig, chatId)).state.clock;
-    rig.body(await rig.send({ type: "lre.action", chatId, action: "timelapse", params: { target: { type: "duration", minutes: 3 * 1440 }, overrides: { invitation: "note" } }, source: "palette" }));
+    rig.body(await rig.send({ type: "lre.action", chatId, action: "timelapse", params: { target: { type: "duration", minutes: 3 * 1440 }, overrides: { invitation: "note" } }, source: "palette", now: true }));
     const g = await rig.host.start(chatId, { type: "normal" });
     expect(g.halted).toBe("cancelled");
     expect(rig.host.restarts).toEqual([]);
@@ -319,7 +319,7 @@ describe("time skips", () => {
     await marcusPlans(rig, chatId, [clockAt(cal, dateAt(cal, state.clock).dayIndex + 1, 19 * 60)]);
     // The player character is made too tough for one round of Danny's blows to put down.
     rig.body(await rig.send({ type: "lre.edit", chatId, ops: [{ op: "set", entity: "pov", field: "con", value: 30 }] }));
-    rig.body(await rig.send({ type: "lre.action", chatId, action: "fight", params: { target: "danny_okafor" }, source: "palette" }));
+    rig.body(await rig.send({ type: "lre.action", chatId, action: "fight", params: { target: "danny_okafor" }, source: "palette", now: true }));
     const g = await rig.host.start(chatId, { type: "normal" });
     await rig.host.finish(g, "Danny squares up to you.");
     const before = (await folded(rig, chatId)).state.clock;

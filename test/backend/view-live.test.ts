@@ -94,7 +94,7 @@ describe("change chip and Journal list what applied", () => {
     const chatId = rig.host.createChat("Morning, Sam.");
     rig.body(await rig.send({ type: "lre.world", op: "attach", worldId, chatId }));
     const act = async (action: string, reply: string): Promise<string> => {
-      rig.body(await rig.send({ type: "lre.action", chatId, action, params: {}, source: "palette" }));
+      rig.body(await rig.send({ type: "lre.action", chatId, action, params: {}, source: "palette", now: true }));
       const g = await rig.host.start(chatId, { type: "normal" });
       await rig.host.finish(g, reply);
       const head = rig.host.head(chatId);
@@ -192,7 +192,7 @@ describe("palette: Take from a kit", () => {
     const piece = kit?.next?.options.find((p) => p.disabled === undefined);
     if (!entry || !kit || !piece) throw new Error("no piece on offer at the garage");
     const request = paletteRequest(entry, [kit, piece], chatId);
-    rig.body(await rig.send({ ...request }));
+    rig.body(await rig.send({ ...request, now: true }));
     await rig.host.settle();
     const g = await rig.host.start(chatId, { type: "normal" });
     await rig.host.finish(g, "You pull it from the drawer.");
