@@ -66,14 +66,14 @@ async function pause(rig: Rig, chatId: string): Promise<void> {
 /** Starts a fight with Danny from the palette; the POV is made too tough for one round of his blows to put down. */
 async function fight(rig: Rig, chatId: string): Promise<void> {
   rig.body(await rig.send({ type: "lre.edit", chatId, ops: [{ op: "set", entity: "pov", field: "con", value: 30 }] }));
-  rig.body(await rig.send({ type: "lre.action", chatId, action: "fight", params: { target: "danny_okafor" }, source: "palette" }));
+  rig.body(await rig.send({ type: "lre.action", chatId, action: "fight", params: { target: "danny_okafor" }, source: "palette", now: true }));
   const g = await rig.host.start(chatId, { type: "normal" });
   await rig.host.finish(g, "Danny squares up to you.");
 }
 
 /** Plays a 30-minute timelapse from the palette, whose reply tells of more time passing. */
 async function timelapse(rig: Rig, chatId: string): Promise<void> {
-  rig.body(await rig.send({ type: "lre.action", chatId, action: "timelapse", params: { target: { type: "duration", minutes: 30 } }, source: "palette" }));
+  rig.body(await rig.send({ type: "lre.action", chatId, action: "timelapse", params: { target: { type: "duration", minutes: 30 } }, source: "palette", now: true }));
   const g = await rig.host.start(chatId, { type: "normal" });
   await rig.host.finish(g, "The yards work for another quarter of an hour.");
 }

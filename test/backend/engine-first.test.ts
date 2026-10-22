@@ -73,7 +73,7 @@ describe("engine first", () => {
     const rig = new Rig();
     const chatId = await coinChat(rig);
     rig.host.presetBlocks = [block("Story", "{{outlet::lre_scene}}\n{{outlet::lre_outcome}}")];
-    rig.body(await rig.send({ type: "lre.action", chatId, action: "flip_coin", params: {}, source: "palette" }));
+    rig.body(await rig.send({ type: "lre.action", chatId, action: "flip_coin", params: {}, source: "palette", now: true }));
     const first = await rig.host.begin(chatId, { type: "normal" });
     // Stopped before its prompt; the engine ran and asked the frontend to start the reply again.
     expect(first.halted).toBe("cancelled");

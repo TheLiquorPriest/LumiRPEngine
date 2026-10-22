@@ -176,7 +176,7 @@ describe("GM view → Minds round trip", () => {
 
     const palette = (await rig.rt.view(chatId, rig.host.userId)).palette?.timelapse;
     if (!palette) throw new Error("no Timelapse");
-    rig.body(await rig.send(timelapseRequest(palette, { type: "duration", minutes: 3 * 60 }, {}, chatId)));
+    rig.body(await rig.send({ ...timelapseRequest(palette, { type: "duration", minutes: 3 * 60 }, {}, chatId), now: true }));
     await rig.host.settle();
     await rig.host.finish(await rig.host.start(chatId, { type: "normal" }), "Time passes.");
     const core = await rig.rt.ledger.core(chatId, rig.host.userId);

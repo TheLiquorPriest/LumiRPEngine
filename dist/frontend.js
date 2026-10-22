@@ -5284,6 +5284,9 @@ function timelapseRequest(view, target, overrides, chatId, followRoutine, source
 function travelRequest(action, params, chatId) {
   return { type: "lre.action", chatId, action, params: { ...params }, source: "map" };
 }
+function stagedRequest(chatId, staged, now) {
+  return { type: "lre.action", chatId, action: staged.action, params: { ...staged.params }, source: staged.source, ...now ? { now: true } : {} };
+}
 function fixRequest(target, value, chatId) {
   return { type: "lre.fix", chatId, entity: target.entity, field: target.field, value };
 }
@@ -12899,7 +12902,8 @@ function MessageChips(props) {
   if (!view || view.status === "not_world")
     return null;
   const chips = view.chips.filter((chip) => chip.messageId === props.messageId);
-  if (chips.length === 0)
+  const when = view.replyClocks[props.messageId];
+  if (chips.length === 0 && when === undefined)
     return null;
   const show = (chip, fallback) => {
     const Chosen = app.catalog.chips.get(chip.kind) ?? fallback;
@@ -12915,6 +12919,17 @@ function MessageChips(props) {
     class: "lre-chips",
     "data-lre-chips": props.messageId,
     children: [
+      when !== undefined ? /* @__PURE__ */ u3("span", {
+        class: "lre-chat-when lre-small lre-muted",
+        "data-lre-reply-clock": true,
+        children: [
+          /* @__PURE__ */ u3("span", {
+            class: "lre-sr",
+            children: "World time after this turn: "
+          }, undefined, false, undefined, this),
+          when
+        ]
+      }, undefined, true, undefined, this) : null,
       done.length > 0 ? /* @__PURE__ */ u3(Receipt, {
         chips: done,
         show: (chip) => show(chip, DefaultChip)
@@ -14380,9 +14395,10 @@ function stepConfigOf(steps, purpose) {
   const signals = ["always"];
   return saved ? saved.signals.length > 0 ? saved : { ...saved, signals } : { enabled: true, signals };
 }
-var DEFAULT_RECENT = Object.freeze({ messages: 8, tokens: 3000 });
-function recentOf(config) {
-  return config?.recent ?? DEFAULT_RECENT;
+var DEFAULT_RECENT = Object.freeze({ on: true, messages: 8, tokens: 3000 });
+var RECENT_OFF = Object.freeze({ ...DEFAULT_RECENT, on: false });
+function recentOf(purpose, config) {
+  return config?.recent ?? (purpose === "interpret" ? DEFAULT_RECENT : RECENT_OFF);
 }
 var SPEED_ACTIVITIES = ["sleep", "work_shift", "travel", "waiting"];
 var SPEED_DEFAULT = Object.freeze({ mode: "offer", thresholdMinutes: 30 });
@@ -15454,7 +15470,7 @@ function stepUpdatePatch(purpose, config) {
   if (config.lore)
     out.lore = { policy: config.lore.policy, tokens: config.lore.tokens, ...config.lore.transport ? { transport: config.lore.transport } : {} };
   if (config.recent)
-    out.recent = { messages: config.recent.messages, tokens: config.recent.tokens };
+    out.recent = { on: config.recent.on, messages: config.recent.messages, tokens: config.recent.tokens };
   return { modelUse: { preset: "custom", steps: { [purpose]: out } } };
 }
 function useConnections() {
@@ -15719,7 +15735,7 @@ function StepCard(props) {
   const call = helperCallOf({ ...config, route }, props.helper);
   const lowTokens = route.provider === "helper" && call.maxTokens < LOW_TOKENS;
   const lore = stepLoreOf(config);
-  const recent = recentOf(config);
+  const recent = recentOf(purpose, config);
   const where = route.provider === "decision" ? `Decision · ${route.connectionId ? placeOf2(route, props.connections) : "the Decisions API's default"}` : `Helper · ${placeOf2(call, props.connections)} · ${paramsSummary(call)}`;
   const summary = config.enabled ? where : "Off";
   const setParam = (key, value) => {
@@ -15858,30 +15874,42 @@ function StepCard(props) {
             }, undefined, false, undefined, this)
           ]
         }, undefined, true, undefined, this) : null,
-        purpose === "interpret" ? /* @__PURE__ */ u3(Field, {
-          label: "Recent messages",
-          help: "The messages before yours it reads to work out what you mean (what she offered, there, him), newest first, up to both limits.",
+        isMindPurpose(purpose) ? null : /* @__PURE__ */ u3(Field, {
+          label: "Recent chat",
+          help: purpose === "interpret" ? "The messages before yours it reads to work out what you mean (what she offered, there, him), newest first, stopping at whichever limit comes first." : "The messages before this turn's it reads with its own input, newest first, stopping at whichever limit comes first.",
           children: [
-            /* @__PURE__ */ u3(NumberStepper, {
-              label: "Messages",
-              value: recent.messages,
-              min: 0,
-              step: 1,
-              integer: true,
+            /* @__PURE__ */ u3(HostSwitch, {
+              label: "Reads recent chat",
+              checked: recent.on,
               disabled: busy,
-              onChange: (messages) => update({ ...config, recent: { ...recent, messages } })
+              onChange: (on) => update({ ...config, recent: { ...recent, on } })
             }, undefined, false, undefined, this),
-            /* @__PURE__ */ u3(NumberStepper, {
-              label: "Tokens",
-              value: recent.tokens,
-              min: 0,
-              step: 500,
-              integer: true,
-              disabled: busy,
-              onChange: (tokens) => update({ ...config, recent: { ...recent, tokens } })
-            }, undefined, false, undefined, this)
+            recent.on ? /* @__PURE__ */ u3(M, {
+              children: [
+                /* @__PURE__ */ u3(LimitField, {
+                  label: "Messages",
+                  noneLabel: "no limit",
+                  value: recent.messages,
+                  min: 0,
+                  step: 1,
+                  fallback: DEFAULT_RECENT.messages,
+                  disabled: busy,
+                  onChange: (messages) => update({ ...config, recent: { ...recent, messages } })
+                }, undefined, false, undefined, this),
+                /* @__PURE__ */ u3(LimitField, {
+                  label: "Tokens",
+                  noneLabel: "no limit",
+                  value: recent.tokens,
+                  min: 0,
+                  step: 500,
+                  fallback: DEFAULT_RECENT.tokens,
+                  disabled: busy,
+                  onChange: (tokens) => update({ ...config, recent: { ...recent, tokens } })
+                }, undefined, false, undefined, this)
+              ]
+            }, undefined, true, undefined, this) : null
           ]
-        }, undefined, true, undefined, this) : null,
+        }, undefined, true, undefined, this),
         /* @__PURE__ */ u3(Disclosure, {
           summary: "Advanced: signals and lore",
           children: [
@@ -15909,7 +15937,7 @@ function StepCard(props) {
             }, undefined, true, undefined, this),
             isMindPurpose(purpose) ? /* @__PURE__ */ u3("div", {
               class: "lre-small lre-muted",
-              children: purpose === "mind" ? "What a mind reads, its lore included, is set in Settings → Minds → What a mind reads." : "Reads no world lore."
+              children: purpose === "mind" ? "What a mind reads, its lore included, is set in Settings → Minds → What a mind reads." : "Reads only the lore pinned to it in Build → Pinned lore."
             }, undefined, false, undefined, this) : /* @__PURE__ */ u3(M, {
               children: [
                 /* @__PURE__ */ u3(Field, {
@@ -26448,7 +26476,7 @@ function Hud(props) {
     const observer = new ResizeObserver(measure);
     observer.observe(target);
     return () => observer.disconnect();
-  }, [open, mode, viewport.width, viewport.height, hud, activity?.state, activity?.label]);
+  }, [open, mode, viewport.width, viewport.height, hud, activity?.state, activity?.label, view?.staged?.label]);
   A(() => {
     if (open || !(refocus.current || then.current))
       return;
@@ -26595,7 +26623,49 @@ function Hud(props) {
       view.status === "paused" ? /* @__PURE__ */ u3(Badge, {
         tone: "warn",
         children: "Paused"
-      }, undefined, false, undefined, this) : null
+      }, undefined, false, undefined, this) : null,
+      /* @__PURE__ */ u3(StagedAction, {
+        view
+      }, undefined, false, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+}
+function StagedAction(props) {
+  const app = useApp();
+  const [busy, run] = useBusy();
+  const staged = props.view.staged;
+  if (!staged)
+    return null;
+  const send = (now) => run(async () => {
+    await app.request(stagedRequest(props.view.chatId, staged, now));
+  });
+  return /* @__PURE__ */ u3("span", {
+    class: "lre-chat-staged",
+    "data-lre-staged": true,
+    role: "group",
+    "aria-label": "Staged action",
+    children: [
+      /* @__PURE__ */ u3("span", {
+        class: "lre-chat-staged-text",
+        children: [
+          "With your next message: ",
+          staged.label
+        ]
+      }, undefined, true, undefined, this),
+      /* @__PURE__ */ u3(Button, {
+        variant: "secondary",
+        size: "sm",
+        icon: "send",
+        busy,
+        onClick: () => send(true),
+        children: "Send now"
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(IconButton, {
+        icon: "close",
+        label: "Clear the staged action",
+        disabled: busy,
+        onClick: () => send(false)
+      }, undefined, false, undefined, this)
     ]
   }, undefined, true, undefined, this);
 }
@@ -26898,6 +26968,9 @@ function StatusLine() {
       activity?.state === "failed" ? /* @__PURE__ */ u3(ActivityLine, {
         compact: true
       }, undefined, false, undefined, this) : null,
+      /* @__PURE__ */ u3(StagedAction, {
+        view
+      }, undefined, false, undefined, this),
       /* @__PURE__ */ u3(Button, {
         variant: "primary",
         size: "sm",
@@ -30535,9 +30608,10 @@ function parseHHMM(text) {
     throw new RangeError(`bad time ${text}`);
   return h3 * 60 + min;
 }
-function formatHHMM(minuteOfDay) {
+function formatTimeOfDay(minuteOfDay) {
   const m2 = mod(minuteOfDay, MINUTES_PER_DAY);
-  return `${String(Math.floor(m2 / 60)).padStart(2, "0")}:${String(m2 % 60).padStart(2, "0")}`;
+  const h3 = Math.floor(m2 / 60);
+  return `${h3 % 12 === 0 ? 12 : h3 % 12}:${String(m2 % 60).padStart(2, "0")} ${h3 < 12 ? "AM" : "PM"}`;
 }
 function daysFromCivil(y3, m2, d3) {
   const yy = m2 <= 2 ? y3 - 1 : y3;
@@ -30641,7 +30715,7 @@ function weekdayName(cal, weekday) {
 }
 function formatClock(cal, clock, offsetMinutes = 0) {
   const d3 = dateAt(cal, clock + offsetMinutes);
-  return `${weekdayName(cal, d3.weekday)} ${d3.day} ${monthName(cal, d3.month)} ${d3.year}, ${formatHHMM(d3.minuteOfDay)}`;
+  return `${weekdayName(cal, d3.weekday)} ${d3.day} ${monthName(cal, d3.month)} ${d3.year}, ${formatTimeOfDay(d3.minuteOfDay)}`;
 }
 var ZONES = {
   UTC: { standard: 0, dst: null },
@@ -50067,6 +50141,8 @@ var CHAT_CSS = `
 .lre .lre-chat-status>.lre-btn{flex:none;border-radius:var(--lre-r-pill);padding:0 var(--lre-s4)}
 .lre .lre-chat-pulse{flex:none;width:10px;height:10px;border-radius:50%;background:var(--lre-accent);animation:lre-chat-pulse 1.4s ease-in-out infinite}
 @keyframes lre-chat-pulse{50%{opacity:.3;transform:scale(.7)}}
+.lre .lre-chat-staged{flex:0 1 auto;display:flex;align-items:center;gap:var(--lre-s1);min-width:0;padding-left:var(--lre-s2);border-left:1px solid var(--lre-hairline)}
+.lre .lre-chat-staged-text{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:var(--lre-fs-sm);color:var(--lre-accent-text)}
 
 .lre .lre-hud{display:flex;align-items:center;gap:2px;height:100%;padding:0 var(--lre-s1);border:1px solid var(--lre-border);border-radius:var(--lre-r-pill);background:var(--lre-bar-bg);box-shadow:var(--lre-shadow-lg);overflow:hidden;font-size:var(--lre-fs-sm)}
 .lre .lre-hud>button{display:inline-flex;align-items:center;justify-content:center;gap:6px;min-width:var(--lre-tap);min-height:var(--lre-tap);padding:0 var(--lre-s2);border:0;border-radius:var(--lre-r-pill);background:transparent;white-space:nowrap;transition:background-color var(--lre-fast)}

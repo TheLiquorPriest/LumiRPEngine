@@ -14,7 +14,9 @@ import type { JsonObject, JsonValue } from "../shared/json";
 import { hasOwn, isRecord, safeKey } from "../shared/json";
 import type { LedgerEvent } from "../shared/ledger";
 import type { LookupLimits, ModelUseSettings, StepConfig, UserSettings } from "../shared/settings";
-import { stepConfigOf } from "../shared/settings";
+import { recentOf, stepConfigOf } from "../shared/settings";
+import type { ChainMessage } from "../engine/ledger/chain";
+import { recentMessages } from "./interpret-context";
 import type { StepSignal } from "../shared/steps";
 import { limitOf, MINDS_SLOT } from "../shared/minds";
 import type { Timeout } from "../shared/timeouts";
@@ -194,10 +196,12 @@ export interface SignalFacts {
   conflict: boolean;
   /** Assistant turns so far, counting this one. */
   turn: number;
+  /** Not a signal: the messages before the turn's, which a step that reads recent chat takes its own share of (`StepRun.recent`), and whether the display hides their JSON blocks. */
+  earlier: { messages: readonly ChainMessage[]; hideJson: boolean };
 }
 
 export function noFacts(turn = 0): SignalFacts {
-  return { typed: false, reply: false, sceneChange: false, slotCrossed: false, dayStart: false, beat: false, agentsPresent: false, present: false, offscreen: false, tieZone: false, invitation: false, timelapse: false, conflict: false, turn };
+  return { typed: false, reply: false, sceneChange: false, slotCrossed: false, dayStart: false, beat: false, agentsPresent: false, present: false, offscreen: false, tieZone: false, invitation: false, timelapse: false, conflict: false, turn, earlier: { messages: [], hideJson: true } };
 }
 
 const FACT_OF: Record<Exclude<StepSignal, "always" | "never">, keyof SignalFacts> = {
@@ -292,6 +296,8 @@ export interface StepRun {
   template: StepTemplateDef | null;
   /** The active preset's style and rules for the step, appended after the prompt (DESIGN §6.8); "" for none. */
   guidance: string;
+  /** The recent chat the step reads (its card's Recent chat), oldest first; none while it's off. `interpret` reads its own in its scene. */
+  recent: string[];
 }
 
 /** The world's step templates for a purpose, in id order (DESIGN §5.2 "templates with engine placeholders"). */
@@ -311,9 +317,10 @@ export function runsOf(modelUse: ModelUseSettings, world: WorldDoc, purpose: Ste
   const config = stepConfigOf(modelUse.steps, purpose);
   if (!config.enabled) return [];
   const guidance = options.guidance?.[purpose] ?? "";
+  const recent = purpose === "interpret" ? [] : recentMessages(facts.earlier.messages, recentOf(purpose, config), facts.earlier.hideJson);
   const templates = templatesFor(world, purpose).filter((t) => options.output === undefined || t.output === options.output);
-  if (templates.length === 0) return options.output === "effects" ? [] : fires(config.signals, facts) ? [{ purpose, config, template: null, guidance }] : [];
-  return templates.filter((t) => fires(t.signals.length > 0 ? t.signals : config.signals, facts)).map((template) => ({ purpose, config, template, guidance }));
+  if (templates.length === 0) return options.output === "effects" ? [] : fires(config.signals, facts) ? [{ purpose, config, template: null, guidance, recent }] : [];
+  return templates.filter((t) => fires(t.signals.length > 0 ? t.signals : config.signals, facts)).map((template) => ({ purpose, config, template, guidance, recent }));
 }
 
 // ---------------------------------------------------------------- prompts
@@ -384,7 +391,7 @@ function proseLines(v: JsonValue | undefined, max: number, secrets: readonly str
  */
 export async function promptedText(steps: Steps, run: StepRun, kind: "brief" | "outline" | "choices", vars: Readonly<Record<string, string>>, secrets: readonly string[], userId: UserId, signal: AbortSignal, lore: StepLore | null = null): Promise<string[] | null> {
   const instructions = renderTemplate(run.template?.template ?? BUILTIN[kind], vars);
-  const raw = await steps.helperJson(run.purpose, `${instructions}\n${CONTRACT[kind]}`, dataBlock(vars), run.config, userId, signal, { lore, guidance: run.guidance });
+  const raw = await steps.helperJson(run.purpose, `${instructions}\n${CONTRACT[kind]}`, dataBlock(vars), run.config, userId, signal, { lore, guidance: run.guidance, recent: run.recent });
   if (!isRecord(raw)) return null;
   // A brief or an outline beat may run long and is cut, once checked whole. A suggestion is a chip's
   // text and the player's next message: one too long for a chip is dropped rather than cut.
@@ -395,7 +402,7 @@ export async function promptedText(steps: Steps, run: StepRun, kind: "brief" | "
 export async function promptedEffects(steps: Steps, run: StepRun, vars: Readonly<Record<string, string>>, currency: WorldCurrency, userId: UserId, signal: AbortSignal, lore: StepLore | null = null): Promise<JsonObject[]> {
   if (!run.template) return [];
   const money = `Money amounts are plain amounts in ${currency.code} as written (8 for ${currency.symbol}8).`;
-  const raw = await steps.helperJson(run.purpose, `${renderTemplate(run.template.template, vars)}\n${CONTRACT.effects} ${money}`, dataBlock(vars), run.config, userId, signal, { lore, guidance: run.guidance });
+  const raw = await steps.helperJson(run.purpose, `${renderTemplate(run.template.template, vars)}\n${CONTRACT.effects} ${money}`, dataBlock(vars), run.config, userId, signal, { lore, guidance: run.guidance, recent: run.recent });
   const list = isRecord(raw) && Array.isArray(raw.proposals) ? raw.proposals : [];
   const out: JsonObject[] = [];
   for (const p of list.slice(0, 15)) if (isRecord(p) && typeof p.type === "string") out.push(inMinorUnits(JSON.parse(JSON.stringify(p)) as JsonObject, currency));
@@ -433,7 +440,7 @@ export async function npcChoose(steps: Steps, run: StepRun, ties: readonly Tie[]
     questions[`t${i}`] = { type: "choice", instructions: run.template?.template ?? "What does this character choose to do, given their needs, plans and relationships? Pick what they would most plausibly do.", criteria };
     state[`t${i}`] = describe(t);
   });
-  const answer = await steps.decide("npc.choose", state, questions, run.config, userId, signal, lore, run.guidance);
+  const answer = await steps.decide("npc.choose", state, questions, run.config, userId, signal, lore, run.guidance, run.recent);
   if (!answer) return [];
   return decisionEvents(asked, answer.answers, rng);
 }
@@ -464,7 +471,7 @@ export async function contradiction(steps: Steps, run: StepRun, facts: readonly 
     criteria[`f${i}`] = f;
   });
   const questions: Questions = { contradicts: { type: "choice", instructions: run.template?.template ?? "Does the narrator's reply contradict one of these engine facts? Pick the fact it contradicts, or none.", criteria } };
-  const answer = await steps.decide("contradiction", { reply: reply.slice(0, 4000) }, questions, run.config, userId, signal, lore, run.guidance);
+  const answer = await steps.decide("contradiction", { reply: reply.slice(0, 4000) }, questions, run.config, userId, signal, lore, run.guidance, run.recent);
   const a = answer?.answers.contradicts;
   if (!a || a.type !== "choice" || a.choice === "none" || a.confidence < 0.5) return null;
   const index = Number(a.choice.slice(1));
@@ -477,7 +484,7 @@ export async function contradiction(steps: Steps, run: StepRun, facts: readonly 
  */
 export async function puzzleAnswer(steps: Steps, run: StepRun, question: string, accepted: readonly string[], answer: string, userId: UserId, signal: AbortSignal, lore: StepLore | null = null): Promise<number | null> {
   const questions: Questions = { correct: { type: "noul", instructions: run.template?.template ?? "Is the player's answer correct: the same as one of the accepted answers, allowing for wording and spelling?" } };
-  const result = await steps.decide("puzzle.answer", { question, accepted: [...accepted], answer }, questions, run.config, userId, signal, lore, run.guidance);
+  const result = await steps.decide("puzzle.answer", { question, accepted: [...accepted], answer }, questions, run.config, userId, signal, lore, run.guidance, run.recent);
   const a = result?.answers.correct;
   return a && a.type === "noul" ? a.noul : null;
 }
@@ -513,7 +520,7 @@ export async function judge(steps: Steps, run: StepRun, ask: JudgeAsk, userId: U
   if (run.config.route?.provider === "decision") {
     const questions: Questions = { rating: { type: "score", instructions: `${lead} Rate it from ${scale}.`, criteria: Array.from({ length: ask.max + 1 }, (_, i) => String(i)) } };
     if (guidance) questions.outcome = { type: "choice", instructions: "How does it turn out? The dice's exact odds are guidance: a strong approach moves them toward success, a weak one away.", criteria: guidance };
-    const answer = await steps.decide("judge", { action: ask.action, player: ask.text.slice(0, 2000), scene: ask.scene }, questions, run.config, userId, signal, lore, run.guidance);
+    const answer = await steps.decide("judge", { action: ask.action, player: ask.text.slice(0, 2000), scene: ask.scene }, questions, run.config, userId, signal, lore, run.guidance, run.recent);
     const rating = answer?.answers.rating;
     if (!rating || rating.type !== "score") return null;
     const outcome = answer?.answers.outcome;
@@ -528,7 +535,7 @@ export async function judge(steps: Steps, run: StepRun, ask: JudgeAsk, userId: U
     .filter((line) => line !== "")
     .join("\n");
   const user = `Action: ${ask.action}\nThe player wrote: ${ask.text.slice(0, 2000)}\nScene: ${JSON.stringify(ask.scene)}${guidance ? `\nOutcomes with the dice's exact odds: ${JSON.stringify(guidance)}` : ""}`;
-  const raw = await steps.helperJson("judge", system, user, run.config, userId, signal, { lore, guidance: run.guidance });
+  const raw = await steps.helperJson("judge", system, user, run.config, userId, signal, { lore, guidance: run.guidance, recent: run.recent });
   // A reply without a rating is no answer: a made-up middle rating would read as the model's.
   if (!isRecord(raw) || typeof raw.rating !== "number" || !Number.isFinite(raw.rating)) return null;
   const reason = typeof raw.reason === "string" ? raw.reason.replace(/\s+/g, " ").trim().slice(0, 240) : "";

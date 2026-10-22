@@ -105,6 +105,9 @@ function lifeStateOf(world, id) {
 function grouped(n) {
   return n.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",");
 }
+function formatTemperature(celsius) {
+  return `${Math.round(celsius * 9 / 5 + 32)} \xB0F`;
+}
 function formatMoney(minorUnits, currency) {
   const units = BigInt(Math.trunc(minorUnits));
   const negative = units < 0n;
@@ -284,6 +287,11 @@ function parseHHMM(text) {
 function formatHHMM(minuteOfDay) {
   const m = mod(minuteOfDay, MINUTES_PER_DAY);
   return `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
+}
+function formatTimeOfDay(minuteOfDay) {
+  const m = mod(minuteOfDay, MINUTES_PER_DAY);
+  const h = Math.floor(m / 60);
+  return `${h % 12 === 0 ? 12 : h % 12}:${String(m % 60).padStart(2, "0")} ${h < 12 ? "AM" : "PM"}`;
 }
 function daysFromCivil(y, m, d) {
   const yy = m <= 2 ? y - 1 : y;
@@ -500,7 +508,7 @@ function weekdayName(cal, weekday) {
 }
 function formatClock(cal, clock, offsetMinutes = 0) {
   const d = dateAt(cal, clock + offsetMinutes);
-  return `${weekdayName(cal, d.weekday)} ${d.day} ${monthName(cal, d.month)} ${d.year}, ${formatHHMM(d.minuteOfDay)}`;
+  return `${weekdayName(cal, d.weekday)} ${d.day} ${monthName(cal, d.month)} ${d.year}, ${formatTimeOfDay(d.minuteOfDay)}`;
 }
 function dayPartAt(cal, clock) {
   const m = dateAt(cal, clock).minuteOfDay;
@@ -4742,6 +4750,8 @@ function rawLine(reg, world, state, pov, e, player, you) {
       const kind = own(state.entities, e.entity)?.kind ?? "";
       if (e.field === "place" && typeof e.value === "string")
         return `${name(e.entity)} \u2192 ${name(e.value)}`;
+      if (e.field === "temp_c" && typeof e.value === "number")
+        return `${name(e.entity)}: Temperature ${formatTemperature(e.value)}`;
       const ctx = player && e.field === "activity" && typeof e.value === "string" ? reg.context(world, state) : null;
       const shownActivity = ctx ? optionalQuery(ctx, "castlife.activity") : null;
       const value = ctx && shownActivity && typeof e.value === "string" ? shownActivity(ctx, e.entity, e.value) : e.value;
@@ -5576,9 +5586,10 @@ function stepConfigOf(steps, purpose) {
   const signals = ["always"];
   return saved ? saved.signals.length > 0 ? saved : { ...saved, signals } : { enabled: true, signals };
 }
-var DEFAULT_RECENT = Object.freeze({ messages: 8, tokens: 3000 });
-function recentOf(config) {
-  return config?.recent ?? DEFAULT_RECENT;
+var DEFAULT_RECENT = Object.freeze({ on: true, messages: 8, tokens: 3000 });
+var RECENT_OFF = Object.freeze({ ...DEFAULT_RECENT, on: false });
+function recentOf(purpose, config) {
+  return config?.recent ?? (purpose === "interpret" ? DEFAULT_RECENT : RECENT_OFF);
 }
 var SPEED_ACTIVITIES = ["sleep", "work_shift", "travel", "waiting"];
 var SPEED_DEFAULT = Object.freeze({ mode: "offer", thresholdMinutes: 30 });
@@ -23520,9 +23531,10 @@ function buildWeatherView(ctx) {
     return { level, label: level === 0 ? "" : MOOD[season], region: e?.name ?? null, season, sky: null, tempC: null, closed: [] };
   const st = stateAt(ctx, here);
   const sky = strOf(e.fields.weather, "clear");
-  const temp = level >= 3 && typeof e.fields.temp_c === "number" ? Math.round(e.fields.temp_c) : null;
+  const raw = level >= 3 && typeof e.fields.temp_c === "number" ? e.fields.temp_c : null;
+  const temp = raw === null ? null : Math.round(raw);
   const word = st?.label ?? sky;
-  return { level, label: `${word.charAt(0).toUpperCase()}${word.slice(1)}${temp !== null ? `, ${temp} \xB0C` : ""}`, region: e.name, season, sky, tempC: temp, closed: level >= 4 ? st?.closes ?? [] : [] };
+  return { level, label: `${word.charAt(0).toUpperCase()}${word.slice(1)}${raw !== null ? `, ${formatTemperature(raw)}` : ""}`, region: e.name, season, sky, tempC: temp, closed: level >= 4 ? st?.closes ?? [] : [] };
 }
 function stepRegions(slot, ctx, rng) {
   const level = ctx.levelOf(ctx.world.pov, "weather");
@@ -26503,7 +26515,7 @@ function stepAgent2(slot, ctx, rngFor, who) {
 }
 function invitationText(ctx, agent, place, at, viewer) {
   const named = place !== null && (viewer === undefined || canSeePlace(ctx.registry, ctx.world, ctx.state, viewer, place)) ? own(ctx.world.places, place)?.name ?? place : null;
-  return `${own(ctx.state.entities, agent)?.name ?? agent} invites you to ${named ?? "meet up"} at ${formatHHMM(dateAt(calendarOf(ctx.world), at).minuteOfDay)}.`;
+  return `${own(ctx.state.entities, agent)?.name ?? agent} invites you to ${named ?? "meet up"} at ${formatTimeOfDay(dateAt(calendarOf(ctx.world), at).minuteOfDay)}.`;
 }
 function dropUnlived(slot, ctx) {
   const plans = optionalQuery(ctx, "minds.plans");
@@ -26753,8 +26765,8 @@ function playerBlocks(ctx, who, plan2) {
   const applied = new Map(activeBlocks(ctx, who, plan2.day).map((a) => [a.block.id, a]));
   const open = loreGateReader(ctx.registry, ctx.world, ctx.state);
   return plan2.blocks.map((b) => {
-    const from = formatHHMM(dateAt(cal, b.start).minuteOfDay);
-    const to = formatHHMM(dateAt(cal, b.end).minuteOfDay);
+    const from = formatTimeOfDay(dateAt(cal, b.start).minuteOfDay);
+    const to = formatTimeOfDay(dateAt(cal, b.end).minuteOfDay);
     const routineId = b.option.startsWith(ROUTINE_OPTION) ? b.option.slice(ROUTINE_OPTION.length).replace(/:carried$/, "") : null;
     const a = routineId !== null ? applied.get(routineId) : undefined;
     if (b.option.startsWith(AGENDA_OPTION) && !publicTrack(ctx.world, b.option.slice(AGENDA_OPTION.length)) || a?.block.private === true)
@@ -58594,7 +58606,7 @@ function routineGmView(ctx, who, day2 = dateAt(calendarOf(ctx.world), ctx.state.
     };
   });
   const plan2 = dayPlan(ctx, who, day2);
-  const laid = plan2.blocks.map((b) => ({ start: b.start, end: b.end, from: formatHHMM(dateAt(cal, b.start).minuteOfDay), to: formatHHMM(dateAt(cal, b.end).minuteOfDay), label: b.label, activity: b.activity, place: b.place, placeName: b.place ? own(ctx.world.places, b.place)?.name ?? b.place : null, kind: kindOfBlock(b.activity), reasons: b.reasons, origin: originOf(ctx, who, b.option, b.reasons[0] ?? "", b.option.endsWith(":carried") ? day2 - 1 : day2) }));
+  const laid = plan2.blocks.map((b) => ({ start: b.start, end: b.end, from: formatTimeOfDay(dateAt(cal, b.start).minuteOfDay), to: formatTimeOfDay(dateAt(cal, b.end).minuteOfDay), label: b.label, activity: b.activity, place: b.place, placeName: b.place ? own(ctx.world.places, b.place)?.name ?? b.place : null, kind: kindOfBlock(b.activity), reasons: b.reasons, origin: originOf(ctx, who, b.option, b.reasons[0] ?? "", b.option.endsWith(":carried") ? day2 - 1 : day2) }));
   const story = [];
   const holds = objOf(e?.fields.holds);
   for (const field of ["place", "activity"]) {
@@ -66033,7 +66045,7 @@ function buildMindsGm(ctx, texts2, enabled, memory2) {
 // src/backend/view.ts
 var TIMELAPSE_ACTION2 = "timelapse";
 function notWorldView(chatId) {
-  return { v: 1, chatId, worldId: null, revision: null, status: "not_world", hud: null, scene: null, chips: [], journal: [], keepReport: [], pending: [], panels: {}, palette: null, controls: null, meter: null, packs: {}, currency: null };
+  return { v: 1, chatId, worldId: null, revision: null, status: "not_world", hud: null, scene: null, chips: [], replyClocks: {}, journal: [], keepReport: [], pending: [], panels: {}, palette: null, controls: null, meter: null, packs: {}, currency: null };
 }
 var GROUPS2 = { buy: "buy", purchase: "buy", pay: "pay", transfer: "transfer", drive: "drive", lend: "lend" };
 function groupOf(action) {
@@ -66569,6 +66581,7 @@ function buildView(input) {
       hud: hud(world, state2, panels, ctx),
       scene: sceneView,
       chips,
+      replyClocks: replyClocks(chain, fold, core, world, state2),
       journal: [...turnNotes(chain, fold, core, registry, world, state2), ...drops.notes],
       keepReport: drops.keep,
       pending,
@@ -66580,6 +66593,18 @@ function buildView(input) {
       currency: world.currency
     };
   });
+}
+function replyClocks(chain, fold, core, world, state2) {
+  const cal = calendarOf(world);
+  const place = placeOfEntity(state2, world.pov);
+  const out = {};
+  chain.forEach((m, i) => {
+    const clock = fold.messages[i]?.clock ?? null;
+    if (m.isUser || clock === null || !activeRecord(m, core.journal.tombstones))
+      return;
+    out[m.id] = formatClock(cal, clock, placeOffset(world, clock, place));
+  });
+  return out;
 }
 function povEntity(world) {
   return world.pov;
@@ -66947,6 +66972,258 @@ function consolidateContext(scope, notes) {
 `);
 }
 
+// src/backend/requirement-words.ts
+var SHAPES = [
+  { shape: /\bto\s*!=\s*here\b/, needs: "{p} isn't where you are" },
+  { shape: /\broute_exists\(/, needs: "a way from here to {p}" },
+  { shape: /\bgrid_reachable\(/, needs: "a square of this grid you can walk to" },
+  { shape: /\blevel\.(\w+)\s*>=/, needs: "this world simulates it in enough detail", fails: "this world doesn't simulate that in enough detail" },
+  { shape: /\bmoney_feature\(/, needs: "this world keeps track of it", fails: "this world doesn't keep track of that" },
+  { shape: /\bcan_afford\(/, needs: "you can afford {p}", fails: "you can't afford it" },
+  { shape: /\bholds\(self[^)]*\)\s+or\s+manages\(self/, needs: "{p} is yours, or its account is one you run" },
+  { shape: /\b(?:spends|holds)\(self\b/, needs: "{p} is one of your own accounts", fails: "that account isn't yours to use" },
+  { shape: /\bmay_draw\(/, needs: "you may take a draw from {p}", fails: "you can't take a draw from it" },
+  { shape: /\.worker\s*==\s*self\s+or\s+manages\(self/, needs: "{p} is your own, or you run its employer" },
+  { shape: /\.customer\s*==\s*self\s+or\s+manages\(self/, needs: "{p} is billed to you, or to what you run" },
+  { shape: /\bmanages\(self,\s*\w+\.\w+/, needs: "you run the business behind {p}" },
+  { shape: /\bmanages\(self\b/, needs: "you run {p}", fails: "you don't run it" },
+  { shape: /\bis_credit\(/, needs: "{p} is a card, a credit line or a loan", fails: "that isn't a card, a credit line or a loan" },
+  { shape: /\bemploys\(/, needs: "{q} doesn't already work there", fails: "they already work there" },
+  { shape: /\bowner\s*==\s*self\s+or\s+has_rel\(self,\s*'uses'/, needs: "{p} is yours, or yours to use" },
+  { shape: /\bowner\s*==\s*self\s+or\s+carries\(self/, needs: "{p} is yours, or you have it with you" },
+  { shape: /\bowner\s*==\s*self\b/, needs: "{p} is yours", fails: "it isn't yours" },
+  { shape: /^\s*not\s+carries\(self/, needs: "you don't have {p} already" },
+  { shape: /\bcarries\(self[^)]*\)\s+or\s+\(/, needs: "you have {p} with you, or it is within your reach" },
+  { shape: /\breach\(self[^)]*\)\)\s+or\s+carries\(self/, needs: "{p} is within your reach, or you have it with you" },
+  { shape: /\bcarries\(self/, needs: "you have {p} with you", fails: "you need to have it with you" },
+  { shape: /\blent_out\(/, needs: "{p} is lent out", fails: "it isn't lent out" },
+  { shape: /\binvited\(/, needs: "{p} invited you" },
+  { shape: /\bcan_fight\(/, needs: "{p} is someone you can fight" },
+  { shape: /\breach\(self/, needs: "{p} is within your reach" },
+  { shape: /\bdrive_minutes\(/, needs: "a road there from here" },
+  { shape: /\bfuel_ok\(/, needs: "enough fuel to get there" },
+  { shape: /\bfuel_pct\([^)]*\)\s*<\s*100\b/, needs: "{p} isn't full" },
+  { shape: /\.status\s*!=\s*'broken'/, needs: "{p} isn't broken down" },
+  { shape: /\.status\s*!=\s*'ok'/, needs: "{p} needs a repair" },
+  { shape: /\.status\s*!=\s*'ended'/, needs: "{p} hasn't ended" },
+  { shape: /\.state\s*==\s*'open'/, needs: "{p} is still open" },
+  { shape: /\.lost\s*!=\s*true\b/, needs: "{p} isn't lost already" },
+  { shape: /\bdays\s*>\s*0\s+or\s+params\.until\b/, needs: "a number of days, or until when" },
+  { shape: /\bat\([^)]*\)\s+or\s+at\(/, needs: "{p} or {q} is here" },
+  { shape: /\bat\(|\bplace\([^)]*\)\s*==\s*here|==\s*here\b/, needs: "{p} is here", fails: "it has to be here" },
+  { shape: />\s*0\b/, needs: "{p} above zero", fails: "it needs an amount" }
+];
+var GATE = /\blevel\.\w+\s*>=|\bmoney_feature\(/;
+function paramsRead(action, req) {
+  return identifiers(req).filter((name) => Object.prototype.hasOwnProperty.call(action.params, name));
+}
+function gatesOf(action) {
+  return action.requires.filter((req) => GATE.test(req) && paramsRead(action, req).length === 0);
+}
+function needsOf(action, nameOf7) {
+  const out = [];
+  for (const req of action.requires) {
+    const read = paramsRead(action, req);
+    if (read.length === 0)
+      continue;
+    const shape = SHAPES.find((s) => s.shape.test(req));
+    if (!shape)
+      continue;
+    const words5 = shape.needs.replace("{p}", nameOf7(read[0] ?? "")).replace("{q}", nameOf7(read[1] ?? read[0] ?? ""));
+    if (!out.includes(words5))
+      out.push(words5);
+  }
+  return out;
+}
+function failureWords(req) {
+  return SHAPES.find((s) => s.fails !== undefined && s.shape.test(req))?.fails ?? null;
+}
+
+// src/backend/interpret-context.ts
+var TIMELAPSE_LEXICON = ["skip ahead", "time skip", "over the next hour", "later that evening", "wait until", "sleep until", "next morning", "skip to", "pass the time", "sleep through", "hours later", "days later", "wait for"];
+function localNow(world, state2) {
+  const cal = calendarOf(world);
+  const offset = placeOffset(world, state2.clock, placeOfEntity(state2, world.pov));
+  return `${weekdayName(cal, dateAt(cal, state2.clock + offset).weekday)} ${formatStamp(cal, state2.clock, offset)}`;
+}
+function openPuzzleTitles(ctx) {
+  return openPuzzles(ctx).slice(0, 6).map(({ shown: shown3 }) => {
+    const where = shown3.stage || shown3.cue;
+    return `${shown3.id}: ${where ? `${shown3.label} \u2014 ${where}` : shown3.label}`;
+  });
+}
+function kindWords(reg, world, def) {
+  if (def.ref === undefined)
+    return "anyone or anything";
+  return (own(world.kinds, def.ref)?.label ?? reg.kinds.get(def.ref)?.label ?? def.ref).toLowerCase();
+}
+function paramWords(ctx, action, name, def, mayKnow, places2, named) {
+  const { registry: reg, world, state: state2 } = ctx;
+  const head = `${name}${def.optional ? "?" : ""}`;
+  const label = def.label ? `: ${def.label}` : "";
+  if (def.type === "ref") {
+    if (def.ref === "place")
+      return places2 > 0 ? `${head} (a place id from Places)` : def.optional ? `${head} (no place you know of)` : null;
+    if (def.optional)
+      return `${head} (${kindWords(reg, world, def)}: an id named above${label})`;
+    const ids2 = paramCandidates(reg, world, state2, action, name).filter(mayKnow);
+    const claimed = def.claim ? "one nothing lists, in the input's own words" : null;
+    if (ids2.length === 0)
+      return claimed ? `${head} (${kindWords(reg, world, def)}: ${claimed})` : null;
+    for (const id of ids2)
+      named.add(id);
+    return `${head} (${kindWords(reg, world, def)}: ${ids2.join(" | ")}${claimed ? `, or ${claimed}` : ""})`;
+  }
+  if (def.table !== undefined)
+    return `${head} (one of: ${tableChoices(own(world.tables, def.table)).map((c) => c.key).join(" | ")})`;
+  if (action.id === "attempt" && name === "stat" && def.type === "text") {
+    const stats = optionalQuery(ctx, "sheets.stats")?.(ctx) ?? [];
+    if (stats.length > 0)
+      return `${head} (one of: ${stats.map((s) => s.id).join(" | ")})`;
+  }
+  if ((action.id.split(".").at(-1) ?? action.id).startsWith("buy") && name === "item" && def.type === "text") {
+    const sold = (optionalQuery(ctx, "economy.offers")?.(ctx, world.pov) ?? []).map((o) => o.name);
+    if (sold.length > 0)
+      return `${head} (text${label}; sold here: ${sold.join(" | ")})`;
+  }
+  if (def.type === "money")
+    return `${head} (an amount in ${world.currency.code} as written${label})`;
+  return `${head} (${def.type}${label})`;
+}
+function interpretCatalog(reg, world, state2, actions, mayKnow) {
+  const ctx = reg.context(world, state2);
+  const env = scopeEnv({ reg, ctx, bindings: { self: world.pov, actor: world.pov } });
+  const puzzles = openPuzzleTitles(ctx);
+  const places2 = placeCandidates(reg, world, state2).length;
+  const named = new Set;
+  const entries2 = [];
+  for (const action of actions) {
+    if (!fightOffers(world, state2, action) || gatesOf(action).some((req) => !truthy2(evalExpr(req, env, false))))
+      continue;
+    const params = [];
+    const ids2 = new Set;
+    for (const [name, def] of Object.entries(action.params)) {
+      const words5 = paramWords(ctx, action, name, def, mayKnow, places2, ids2);
+      if (words5 === null)
+        break;
+      params.push(words5);
+    }
+    if (params.length < Object.keys(action.params).length)
+      continue;
+    for (const id of ids2)
+      named.add(id);
+    const label = action.pack === "story" && action.id === "answer" && puzzles.length > 0 ? `${action.label} (open: ${puzzles.join("; ")})` : action.label;
+    entries2.push({ action, entry: { id: action.id, label, ...action.description ? { description: action.description } : {}, params, needs: needsOf(action, (param) => `\`${param}\``), ...action.lexicon ? { lexicon: action.lexicon } : {} } });
+  }
+  return { entries: entries2, named: [...named] };
+}
+function timelapseEntry(world, state2) {
+  const parts = [...world.calendar.dayParts.map((d) => d.id), "shift", "commitment"];
+  return {
+    id: TIMELAPSE_ACTION2,
+    label: "Let time pass",
+    description: `a time skip: wait, sleep, skip ahead, or spend a stated span on something no other action covers; an out-of-character instruction that time passes is always this, whatever else the input says ("OOC: over the next hour, I sort the stock" is a skip of an hour, the sorting what fills it). span: the input's own words for how long or until when ("over the next hour", "later that evening"); with it, minutes for a stated duration; until one of ${parts.join(", ")} ("next <day part>" for the following day's); or at a stated day and time, as "YYYY-MM-DD HH:MM" (it is now ${localNow(world, state2)})`,
+    params: ["span (text: the input's words for how long or until when)", "minutes? (number)", "until? (text)", "at? (text)"],
+    needs: [],
+    lexicon: TIMELAPSE_LEXICON
+  };
+}
+function tryEntry(policy, skills) {
+  const which = policy.when === "tries" ? "only one the input says the player character tries or attempts" : policy.when === "risky" ? "one that could go wrong" : "any whose outcome is uncertain";
+  const named = skills.map((s) => s.label.toLowerCase() === s.id.replace(/_/g, " ").toLowerCase() ? s.id : `${s.id} (${s.label})`);
+  return {
+    id: TRY_ACTION,
+    label: "Try something",
+    description: `an attempt no other action covers, ${which}, rolled with a skill: talking someone round, sneaking, noticing, deceiving, forcing something; a reaction the input asks for counts too ("I watch him as he answers: is he lying?" reads him against his deceit)`,
+    params: [
+      "attempt (text: what is attempted, in the input's words)",
+      `skill (one of: ${named.join(" | ")})`,
+      `difficulty (one of: ${bandsWithin(policy).map((b) => b.id).join(" | ")}: how hard it looks in context)`,
+      ...policy.who !== "pov" ? ['with? (a list of ids of people here who join in: "we sneak past" names each companion)'] : [],
+      'against? (a list of {"who": an id of someone here, "skill": the skill they resist with}: the people it opposes or targets)',
+      ...policy.when === "tries" ? ["tried (true when the input itself says the player character tries or attempts it)"] : []
+    ],
+    needs: [],
+    lexicon: ["try to", "attempt", "manage to", "talk into", "sneak past"]
+  };
+}
+function atWords(reg, world, state2, id) {
+  const place = placeOfEntity(state2, id);
+  return place !== null && canSeePlace(reg, world, state2, world.pov, place) ? `, at ${own(world.places, place)?.name ?? place}` : "";
+}
+var AWAY_LIMIT = 6;
+function lastSeenWords(reg, world, state2, id) {
+  const last = lastSighting(state2, id);
+  if (!last || !canSeePlace(reg, world, state2, world.pov, last.place))
+    return "";
+  return `, last seen at ${own(world.places, last.place)?.name ?? last.place} (${last.place}) ${spanText(Math.max(1, state2.clock - last.at))} ago`;
+}
+function interpretScene(reg, world, state2, opts) {
+  const ctx = reg.context(world, state2);
+  const pov = own(state2.entities, world.pov);
+  const here = placeOfEntity(state2, world.pov);
+  const place = povPlace(reg, world, state2);
+  const parentId = place?.id ? own(world.places, place.id)?.parent : undefined;
+  const parent = parentId && canSeePlace(reg, world, state2, world.pov, parentId) ? `, in ${own(world.places, parentId)?.name ?? parentId} (${parentId})` : "";
+  const where = place === null ? "" : place.id === null ? ", somewhere you can't name" : `, at ${place.name} (${place.id})${parent}`;
+  const seen = (id) => id !== world.pov && !isGone(state2, id) && canSeeEntity(reg, world, state2, world.pov, id) && opts.mayKnow(id);
+  const people = here === null ? [] : Object.keys(state2.entities).filter((id) => seen(id) && kindIs(reg, world, own(state2.entities, id)?.kind ?? "", "person") && placeOfEntity(state2, id) === here);
+  const carried = carriedBy(state2, world.pov).filter(seen);
+  const vehicles = Object.keys(state2.entities).filter((id) => seen(id) && kindIs(reg, world, own(state2.entities, id)?.kind ?? "", "vehicle") && (own(state2.entities, id)?.fields.owner === world.pov || (pov?.relations.some((r) => r.type === "uses" && r.to === id) ?? false)));
+  const waiting = (optionalQuery(ctx, "castlife.invitations")?.(ctx, world.pov) ?? []).filter((inv) => opts.mayKnow(inv.host)).map((inv) => `${inv.text} (host ${inv.host})`);
+  const said2 = opts.said ?? "";
+  const away = here === null || said2.trim() === "" ? [] : Object.keys(state2.entities).filter((id) => seen(id) && !people.includes(id) && kindIs(reg, world, own(state2.entities, id)?.kind ?? "", "person") && namesAny(said2, [own(state2.entities, id)?.name ?? id])).slice(0, AWAY_LIMIT);
+  const shown3 = new Set([...people, ...away, ...carried, ...vehicles]);
+  const others = opts.named.filter((id) => !shown3.has(id) && seen(id));
+  const nameOf7 = (id) => own(state2.entities, id)?.name ?? id;
+  const lifeWords = (id) => {
+    const life = povLife(world, state2, id);
+    return life ? `, ${life.reads}` : "";
+  };
+  const lines = [
+    `Now: ${localNow(world, state2)}${where}.`,
+    `Here with you: ${people.length > 0 ? people.map((id) => `${nameOf7(id)} (${id}${lifeWords(id)})`).join("; ") : "no one"}.`,
+    ...away.length > 0 ? [`Named in the input but not here: ${away.map((id) => `${nameOf7(id)} (${id}${lifeWords(id)})${lastSeenWords(reg, world, state2, id)}`).join("; ")}.`] : [],
+    `You carry: ${carried.length > 0 ? carried.map((id) => `${nameOf7(id)} (${id})`).join("; ") : "nothing"}.`,
+    ...vehicles.length > 0 ? [`Your vehicles: ${vehicles.map((id) => `${nameOf7(id)} (${id}${atWords(reg, world, state2, id)})`).join("; ")}.`] : [],
+    ...others.length > 0 ? [`Others you can name: ${others.map((id) => `${nameOf7(id)} (${id})`).join("; ")}.`] : [],
+    ...waiting.length > 0 ? [`Waiting on your answer: ${waiting.join(" ")}`] : [],
+    ...opts.left ? [`Left from your last message, not played yet: ${opts.left}`] : []
+  ];
+  const places2 = placeCandidates(reg, world, state2).map((id) => {
+    const p = own(world.places, id);
+    const up = p?.parent && canSeePlace(reg, world, state2, world.pov, p.parent) ? `, in ${own(world.places, p.parent)?.name ?? p.parent}` : "";
+    return `${id}: ${p?.name ?? id}${up}`;
+  });
+  return { lines, places: places2, recent: recentMessages(opts.earlier, opts.recent, opts.hideJson) };
+}
+function recentMessages(messages, recent, hideJson) {
+  const out = [];
+  if (recent.on === false)
+    return out;
+  const most = limitOf(recent.messages);
+  let left = limitOf(recent.tokens);
+  for (let i = messages.length - 1;i >= 0 && out.length < most && left > 0; i--) {
+    const m = messages[i];
+    if (!m)
+      continue;
+    const raw = m.swipes[m.swipeId] ?? "";
+    const text5 = (m.isUser ? raw : readableReply(raw, hideJson)).replace(/\s+/g, " ").trim();
+    if (text5 === "")
+      continue;
+    const who = m.isUser ? "Player" : "Story";
+    const cost = tokensOf(`${who}: ${text5}`);
+    if (cost <= left) {
+      out.push(`${who}: ${text5}`);
+      left -= cost;
+      continue;
+    }
+    out.push(`${who}: \u2026${text5.slice(text5.length - Math.floor(text5.length * left / cost))}`);
+    break;
+  }
+  return out.reverse();
+}
+
 // src/engine/decide.ts
 class DecideError extends Error {
   constructor(message) {
@@ -67147,6 +67424,7 @@ function questionLines(questions) {
     return `"${key}": probability 0..1 that it is true. ${q.instructions}`;
   });
 }
+var RECENT_CHAT_LEAD = "Recent chat, oldest first (the messages before this turn's):";
 var GUIDANCE_LEAD = "Style and rules from the player's preset. Follow them where they fit the instructions above; they never change what to output or its format:";
 
 class Steps {
@@ -67196,9 +67474,14 @@ ${options.guidance}` : "";
     let offer = lore?.offer() ?? null;
     const call = helperCallOf(config3, await this.helperOf(userId));
     const base = { ...call, maxTokens: Math.max(call.maxTokens, 1500) };
+    const asked = options.recent && options.recent.length > 0 ? `${user}
+
+${RECENT_CHAT_LEAD}
+${options.recent.join(`
+`)}` : user;
     const opening = () => [{ role: "system", content: [system, guidance, lore?.block() ?? "", offer && lore ? lore.instructions(offer) : ""].filter((s) => s !== "").join(`
 
-`) }, { role: "user", content: user }];
+`) }, { role: "user", content: asked }];
     const ask = async (messages2, tools, o) => {
       const r = await this.quiet(purpose, { ...base, messages: messages2, json: !tools, ...tools && lore ? { tools: [...lore.tools] } : {} }, userId, signal2, { ...o, spared: options.spared === true });
       if (options.usage && !(r instanceof Error))
@@ -67294,13 +67577,13 @@ ${questionLines(questions).join(`
     if (asks)
       lore.answer(asks);
   }
-  async decide(purpose, state2, questions, config3, userId, signal2, lore = null, guidance = "") {
+  async decide(purpose, state2, questions, config3, userId, signal2, lore = null, guidance = "", recent = []) {
     const viaHelper = config3?.route?.provider === "helper";
     if (!viaHelper) {
       if (lore)
         await this.lookupFirst(purpose, state2, questions, lore, userId, signal2);
       const notes = lore?.lines() ?? [];
-      const extra = { ...notes.length > 0 ? { lore: notes } : {}, ...guidance !== "" ? { rules: guidance } : {} };
+      const extra = { ...notes.length > 0 ? { lore: notes } : {}, ...guidance !== "" ? { rules: guidance } : {}, ...recent.length > 0 ? { recent: [...recent] } : {} };
       const asked = Object.keys(extra).length === 0 ? state2 : isRecord(state2) ? { ...state2, ...extra } : { state: state2, ...extra };
       const t0 = performance.now();
       const route = { purpose, via: "decision", connection: config3?.route?.connectionId ?? "active", maxTokens: null, finishReason: "", tokensIn: null };
@@ -67326,7 +67609,7 @@ ${questionLines(questions).join(`
     const raw = await this.helperJson(purpose, system, `State: ${JSON.stringify(state2)}
 Questions:
 ${questionLines(questions).join(`
-`)}`, viaHelper && config3 ? config3 : { enabled: true, signals: [], ...config3?.maxTokens !== undefined ? { maxTokens: config3.maxTokens } : {} }, userId, signal2, { lore, guidance });
+`)}`, viaHelper && config3 ? config3 : { enabled: true, signals: [], ...config3?.maxTokens !== undefined ? { maxTokens: config3.maxTokens } : {} }, userId, signal2, { lore, guidance, recent });
     if (!isRecord(raw))
       return null;
     const answers = {};
@@ -67483,7 +67766,7 @@ var EXTRACT_STRICT_RULES = [
 ];
 var EXTRACT_WHERE = `Beside "proposals", give "where": the id of the place where the reply leaves the player character at its end, whether it tells how they got there or takes it as given; null when it doesn't say.`;
 var EXTRACT_USUAL = `Usual routines are given below the state, only to tell where a move the reply describes is going: someone who heads out to their usual spot ("his usual lunch place", "off to her regular bar") moves to that place; give its id from their usual routine, or place "usual" when the reply doesn't say which. A usual routine is never a move by itself: no location for someone the reply doesn't describe leaving or arriving.`;
-async function extract(steps, narration, world, prefix, appliedMinutes, channels, config3, userId, signal2, instructions, lore = null, guidance = "", usual = []) {
+async function extract(steps, narration, world, prefix, appliedMinutes, channels, config3, userId, signal2, instructions, lore = null, guidance = "", usual = [], recent = []) {
   const types = `time_advance{minutes} \xB7 location{entity,place} \xB7 purchase{item,category,payer?,qty?,price?,method?} (payer: the person who pays, an entity id, never an account or a card; method: how the prose says they paid, in its words, e.g. "cash", "debit card", "credit card" or "savings"; leave it out when not said) \xB7 transfer{from,to,amount,method?} (from and to: people, entity ids, or a person's own cash, checking, savings or card account, never things; method: "cash" when bills or coins change hands in person, as in "hands me $20" or "slips her a twenty"; leave it out for a bank transfer, an app payment or a card) \xB7 give{item,from,to,amount?} (amount: for cash or money handed over, the amount) \xB7 quantity{entity,item,delta} \xB7 condition{who,condition,minutes?,clear?} (a named condition such as tired or injured; clear:true when it ends) \xB7 regard{from,to,axis,delta} (axis trust|affection|respect; delta -3..3) \xB7 knows{who,fact} (public facts only) \xB7 spawn{kind,name,place?,role?} \xB7 life{entity,state} (state: ${lifeStatesOf(world).map(([id]) => id).join("|")}) \xB7 routine{entity,change,label,days,start?,end?,minutes?,activity?,place?,with?,replaces?} (change: start for a new job, shift or habit, stop for one given up, move for a new home, its place the home; days: weekday names, weekdays, weekends or daily; start and end: HH:MM, or start morning|afternoon|evening|night; activity: work|school|exercise|leisure|socialize|errand; place: any place the prose names for it, as a place id, or in the prose's own words when nothing lists it ("the community pool"), left out only when the prose names none; with: people's ids; replaces: true only when the prose says it takes the place of what they did then)`;
   const allowed = channels.length > 0 ? `Only these types are enabled: ${channels.join(", ")}.` : "";
   const system = `${instructions ? `${instructions}
@@ -67505,7 +67788,7 @@ ${routines ? `Usual routines (where a described move goes; never a move by itsel
 ${usual.join(`
 `)}
 ` : ""}Narration:
-${narration}`, config3, userId, signal2, { lore, guidance });
+${narration}`, config3, userId, signal2, { lore, guidance, recent });
   const list = isRecord(raw) && Array.isArray(raw.proposals) ? raw.proposals : Array.isArray(raw) ? raw : [];
   const proposals = [];
   for (const p of list) {
@@ -67973,7 +68256,7 @@ function unfitRef(registry, action, params, world, state2, mayKnow, skip2) {
   return null;
 }
 function noFacts(turn = 0) {
-  return { typed: false, reply: false, sceneChange: false, slotCrossed: false, dayStart: false, beat: false, agentsPresent: false, present: false, offscreen: false, tieZone: false, invitation: false, timelapse: false, conflict: false, turn };
+  return { typed: false, reply: false, sceneChange: false, slotCrossed: false, dayStart: false, beat: false, agentsPresent: false, present: false, offscreen: false, tieZone: false, invitation: false, timelapse: false, conflict: false, turn, earlier: { messages: [], hideJson: true } };
 }
 var FACT_OF = {
   typed_input: "typed",
@@ -68047,10 +68330,11 @@ function runsOf(modelUse, world, purpose, facts, options = {}) {
   if (!config3.enabled)
     return [];
   const guidance = options.guidance?.[purpose] ?? "";
+  const recent = purpose === "interpret" ? [] : recentMessages(facts.earlier.messages, recentOf(purpose, config3), facts.earlier.hideJson);
   const templates = templatesFor(world, purpose).filter((t) => options.output === undefined || t.output === options.output);
   if (templates.length === 0)
-    return options.output === "effects" ? [] : fires(config3.signals, facts) ? [{ purpose, config: config3, template: null, guidance }] : [];
-  return templates.filter((t) => fires(t.signals.length > 0 ? t.signals : config3.signals, facts)).map((template) => ({ purpose, config: config3, template, guidance }));
+    return options.output === "effects" ? [] : fires(config3.signals, facts) ? [{ purpose, config: config3, template: null, guidance, recent }] : [];
+  return templates.filter((t) => fires(t.signals.length > 0 ? t.signals : config3.signals, facts)).map((template) => ({ purpose, config: config3, template, guidance, recent }));
 }
 function renderTemplate(template, vars) {
   return template.replace(/\{\{\s*([a-zA-Z_]+)\s*\}\}/g, (_m, name) => vars[name.toLowerCase()] ?? "");
@@ -68102,7 +68386,7 @@ function proseLines(v, max, secrets, chars = 300, long = "cut") {
 async function promptedText(steps, run2, kind, vars, secrets, userId, signal2, lore = null) {
   const instructions = renderTemplate(run2.template?.template ?? BUILTIN[kind], vars);
   const raw = await steps.helperJson(run2.purpose, `${instructions}
-${CONTRACT[kind]}`, dataBlock(vars), run2.config, userId, signal2, { lore, guidance: run2.guidance });
+${CONTRACT[kind]}`, dataBlock(vars), run2.config, userId, signal2, { lore, guidance: run2.guidance, recent: run2.recent });
   if (!isRecord(raw))
     return null;
   return kind === "brief" ? proseLines(raw.text, 1, secrets, 600) : kind === "outline" ? proseLines(raw.beats, 4, secrets) : proseLines(raw.choices, 4, secrets, 120, "drop");
@@ -68112,7 +68396,7 @@ async function promptedEffects(steps, run2, vars, currency, userId, signal2, lor
     return [];
   const money4 = `Money amounts are plain amounts in ${currency.code} as written (8 for ${currency.symbol}8).`;
   const raw = await steps.helperJson(run2.purpose, `${renderTemplate(run2.template.template, vars)}
-${CONTRACT.effects} ${money4}`, dataBlock(vars), run2.config, userId, signal2, { lore, guidance: run2.guidance });
+${CONTRACT.effects} ${money4}`, dataBlock(vars), run2.config, userId, signal2, { lore, guidance: run2.guidance, recent: run2.recent });
   const list = isRecord(raw) && Array.isArray(raw.proposals) ? raw.proposals : [];
   const out = [];
   for (const p of list.slice(0, 15))
@@ -68134,7 +68418,7 @@ async function npcChoose(steps, run2, ties, describe, rng, userId, signal2, lore
     questions[`t${i}`] = { type: "choice", instructions: run2.template?.template ?? "What does this character choose to do, given their needs, plans and relationships? Pick what they would most plausibly do.", criteria };
     state2[`t${i}`] = describe(t);
   });
-  const answer = await steps.decide("npc.choose", state2, questions, run2.config, userId, signal2, lore, run2.guidance);
+  const answer = await steps.decide("npc.choose", state2, questions, run2.config, userId, signal2, lore, run2.guidance, run2.recent);
   if (!answer)
     return [];
   return decisionEvents(asked, answer.answers, rng);
@@ -68164,7 +68448,7 @@ async function contradiction(steps, run2, facts, reply, userId, signal2, lore = 
     criteria[`f${i}`] = f;
   });
   const questions = { contradicts: { type: "choice", instructions: run2.template?.template ?? "Does the narrator's reply contradict one of these engine facts? Pick the fact it contradicts, or none.", criteria } };
-  const answer = await steps.decide("contradiction", { reply: reply.slice(0, 4000) }, questions, run2.config, userId, signal2, lore, run2.guidance);
+  const answer = await steps.decide("contradiction", { reply: reply.slice(0, 4000) }, questions, run2.config, userId, signal2, lore, run2.guidance, run2.recent);
   const a = answer?.answers.contradicts;
   if (!a || a.type !== "choice" || a.choice === "none" || a.confidence < 0.5)
     return null;
@@ -68173,7 +68457,7 @@ async function contradiction(steps, run2, facts, reply, userId, signal2, lore = 
 }
 async function puzzleAnswer(steps, run2, question, accepted, answer, userId, signal2, lore = null) {
   const questions = { correct: { type: "noul", instructions: run2.template?.template ?? "Is the player's answer correct: the same as one of the accepted answers, allowing for wording and spelling?" } };
-  const result = await steps.decide("puzzle.answer", { question, accepted: [...accepted], answer }, questions, run2.config, userId, signal2, lore, run2.guidance);
+  const result = await steps.decide("puzzle.answer", { question, accepted: [...accepted], answer }, questions, run2.config, userId, signal2, lore, run2.guidance, run2.recent);
   const a = result?.answers.correct;
   return a && a.type === "noul" ? a.noul : null;
 }
@@ -68195,7 +68479,7 @@ async function judge(steps, run2, ask, userId, signal2, lore = null) {
     const questions = { rating: { type: "score", instructions: `${lead} Rate it from ${scale}.`, criteria: Array.from({ length: ask.max + 1 }, (_, i) => String(i)) } };
     if (guidance)
       questions.outcome = { type: "choice", instructions: "How does it turn out? The dice's exact odds are guidance: a strong approach moves them toward success, a weak one away.", criteria: guidance };
-    const answer = await steps.decide("judge", { action: ask.action, player: ask.text.slice(0, 2000), scene: ask.scene }, questions, run2.config, userId, signal2, lore, run2.guidance);
+    const answer = await steps.decide("judge", { action: ask.action, player: ask.text.slice(0, 2000), scene: ask.scene }, questions, run2.config, userId, signal2, lore, run2.guidance, run2.recent);
     const rating = answer?.answers.rating;
     if (!rating || rating.type !== "score")
       return null;
@@ -68213,7 +68497,7 @@ async function judge(steps, run2, ask, userId, signal2, lore = null) {
 The player wrote: ${ask.text.slice(0, 2000)}
 Scene: ${JSON.stringify(ask.scene)}${guidance ? `
 Outcomes with the dice's exact odds: ${JSON.stringify(guidance)}` : ""}`;
-  const raw = await steps.helperJson("judge", system, user, run2.config, userId, signal2, { lore, guidance: run2.guidance });
+  const raw = await steps.helperJson("judge", system, user, run2.config, userId, signal2, { lore, guidance: run2.guidance, recent: run2.recent });
   if (!isRecord(raw) || typeof raw.rating !== "number" || !Number.isFinite(raw.rating))
     return null;
   const reason2 = typeof raw.reason === "string" ? raw.reason.replace(/\s+/g, " ").trim().slice(0, 240) : "";
@@ -69264,10 +69548,11 @@ class LedgerFold {
           keep.set(i, [...keep.get(i) ?? [], x]);
         for (const [i, x] of snapshot.violations)
           violations.set(i, [...violations.get(i) ?? [], x]);
+        const clocks = new Map(snapshot.clocks ?? []);
         for (let i = base + 1;i <= best; i++) {
           const f = frames[i - base - 1];
           const k2 = frameKeys[i - base - 1];
-          const step = { state: null, result: f.result, notes: [...f.notes, ...notes.get(i) ?? []], keep: [...f.keep, ...keep.get(i) ?? []], violations: violations.get(i) ?? [], paused: false };
+          const step = { state: null, result: { ...f.result, clock: clocks.get(i) ?? null }, notes: [...f.notes, ...notes.get(i) ?? []], keep: [...f.keep, ...keep.get(i) ?? []], violations: violations.get(i) ?? [], paused: false };
           this.remember(k2, i === best ? { ...step, state: snapshot.state } : step, i === best, false);
           steps.push(step);
           keys.push(k2);
@@ -69308,7 +69593,8 @@ class LedgerFold {
     return out;
   }
   snapshotOf(key, steps, state2) {
-    const snap = { key, state: structuredClone(state2), notes: [], keep: [], violations: [] };
+    const clocks = [];
+    const snap = { key, state: structuredClone(state2), notes: [], keep: [], violations: [], clocks };
     steps.forEach((s, i) => {
       for (const x of s.notes)
         if (dependentNote(x))
@@ -69318,6 +69604,8 @@ class LedgerFold {
           snap.keep.push([i, x]);
       for (const x of s.violations)
         snap.violations.push([i, x]);
+      if (s.result.clock !== null)
+        clocks.push([i, s.result.clock]);
     });
     return snap;
   }
@@ -69467,7 +69755,7 @@ class LedgerFold {
       if (before !== null && violations.length === 0)
         this.digest(this.settled, settledKey, () => before);
     }
-    return { state: state2, result: f.result, notes, keep, violations, paused: f.paused };
+    return { state: state2, result: { ...f.result, clock: state2.clock }, notes, keep, violations, paused: f.paused };
   }
   frame(input, m, parent, paused, pausesHere) {
     const notes = [];
@@ -69571,9 +69859,9 @@ function thisBuild(moduleUrl = import.meta.url) {
   const dir = moduleUrl.replace(/[^/]*$/, "");
   const path = pathOfFileUrl(`${dir}${KIT_FILE}`);
   const core = pathOfFileUrl(`${dir}${CORE_FILE}`);
-  const sha256 = "83880cbc244d4643475ef0b862d64c73b1abcb9bdeb6554567e42322d3f69421";
+  const sha256 = "8c9c117ec7d16bd1b293e3af404ea9b16d266f0bf044b761fa5e4b0dbc0e78f5";
   const tools = ["31de155b25748e794c9fe560150797f2", "d7e9a2e583dc5481df9d8ed8a432a934"].filter((f) => f !== undefined);
-  return { id: "ce78f09b", kit: sha256 !== undefined && path !== null && core !== null ? { path, core, sha256, api: KIT_API } : null, tools };
+  return { id: "abaffcd0", kit: sha256 !== undefined && path !== null && core !== null ? { path, core, sha256, api: KIT_API } : null, tools };
 }
 var BUILD_FILE = "agents/build.json";
 var USER_FILE = "agents.json";
@@ -70661,9 +70949,10 @@ function stepOf(v, base, purpose) {
 function recentHistoryOf(v) {
   if (!isRecord(v))
     return;
-  const messages = atLeast(v.messages, 0);
-  const tokens2 = atLeast(v.tokens, 0);
-  return messages !== undefined && tokens2 !== undefined ? { messages, tokens: tokens2 } : undefined;
+  const limit = (x) => x === "none" ? "none" : atLeast(x, 0);
+  const messages = limit(v.messages);
+  const tokens2 = limit(v.tokens);
+  return messages !== undefined && tokens2 !== undefined ? { on: typeof v.on === "boolean" ? v.on : true, messages, tokens: tokens2 } : undefined;
 }
 function conform(v, d) {
   const mu = isRecord(v.modelUse) ? v.modelUse : {};
@@ -71089,255 +71378,6 @@ function claimFor(input) {
   return { kind: "ask", claim: claim2, question: `${name.charAt(0).toUpperCase()}${name.slice(1)} isn't in this world yet. Add it and ${verb} it?`, detail };
 }
 
-// src/backend/requirement-words.ts
-var SHAPES = [
-  { shape: /\bto\s*!=\s*here\b/, needs: "{p} isn't where you are" },
-  { shape: /\broute_exists\(/, needs: "a way from here to {p}" },
-  { shape: /\bgrid_reachable\(/, needs: "a square of this grid you can walk to" },
-  { shape: /\blevel\.(\w+)\s*>=/, needs: "this world simulates it in enough detail", fails: "this world doesn't simulate that in enough detail" },
-  { shape: /\bmoney_feature\(/, needs: "this world keeps track of it", fails: "this world doesn't keep track of that" },
-  { shape: /\bcan_afford\(/, needs: "you can afford {p}", fails: "you can't afford it" },
-  { shape: /\bholds\(self[^)]*\)\s+or\s+manages\(self/, needs: "{p} is yours, or its account is one you run" },
-  { shape: /\b(?:spends|holds)\(self\b/, needs: "{p} is one of your own accounts", fails: "that account isn't yours to use" },
-  { shape: /\bmay_draw\(/, needs: "you may take a draw from {p}", fails: "you can't take a draw from it" },
-  { shape: /\.worker\s*==\s*self\s+or\s+manages\(self/, needs: "{p} is your own, or you run its employer" },
-  { shape: /\.customer\s*==\s*self\s+or\s+manages\(self/, needs: "{p} is billed to you, or to what you run" },
-  { shape: /\bmanages\(self,\s*\w+\.\w+/, needs: "you run the business behind {p}" },
-  { shape: /\bmanages\(self\b/, needs: "you run {p}", fails: "you don't run it" },
-  { shape: /\bis_credit\(/, needs: "{p} is a card, a credit line or a loan", fails: "that isn't a card, a credit line or a loan" },
-  { shape: /\bemploys\(/, needs: "{q} doesn't already work there", fails: "they already work there" },
-  { shape: /\bowner\s*==\s*self\s+or\s+has_rel\(self,\s*'uses'/, needs: "{p} is yours, or yours to use" },
-  { shape: /\bowner\s*==\s*self\s+or\s+carries\(self/, needs: "{p} is yours, or you have it with you" },
-  { shape: /\bowner\s*==\s*self\b/, needs: "{p} is yours", fails: "it isn't yours" },
-  { shape: /^\s*not\s+carries\(self/, needs: "you don't have {p} already" },
-  { shape: /\bcarries\(self[^)]*\)\s+or\s+\(/, needs: "you have {p} with you, or it is within your reach" },
-  { shape: /\breach\(self[^)]*\)\)\s+or\s+carries\(self/, needs: "{p} is within your reach, or you have it with you" },
-  { shape: /\bcarries\(self/, needs: "you have {p} with you", fails: "you need to have it with you" },
-  { shape: /\blent_out\(/, needs: "{p} is lent out", fails: "it isn't lent out" },
-  { shape: /\binvited\(/, needs: "{p} invited you" },
-  { shape: /\bcan_fight\(/, needs: "{p} is someone you can fight" },
-  { shape: /\breach\(self/, needs: "{p} is within your reach" },
-  { shape: /\bdrive_minutes\(/, needs: "a road there from here" },
-  { shape: /\bfuel_ok\(/, needs: "enough fuel to get there" },
-  { shape: /\bfuel_pct\([^)]*\)\s*<\s*100\b/, needs: "{p} isn't full" },
-  { shape: /\.status\s*!=\s*'broken'/, needs: "{p} isn't broken down" },
-  { shape: /\.status\s*!=\s*'ok'/, needs: "{p} needs a repair" },
-  { shape: /\.status\s*!=\s*'ended'/, needs: "{p} hasn't ended" },
-  { shape: /\.state\s*==\s*'open'/, needs: "{p} is still open" },
-  { shape: /\.lost\s*!=\s*true\b/, needs: "{p} isn't lost already" },
-  { shape: /\bdays\s*>\s*0\s+or\s+params\.until\b/, needs: "a number of days, or until when" },
-  { shape: /\bat\([^)]*\)\s+or\s+at\(/, needs: "{p} or {q} is here" },
-  { shape: /\bat\(|\bplace\([^)]*\)\s*==\s*here|==\s*here\b/, needs: "{p} is here", fails: "it has to be here" },
-  { shape: />\s*0\b/, needs: "{p} above zero", fails: "it needs an amount" }
-];
-var GATE = /\blevel\.\w+\s*>=|\bmoney_feature\(/;
-function paramsRead(action, req) {
-  return identifiers(req).filter((name) => Object.prototype.hasOwnProperty.call(action.params, name));
-}
-function gatesOf(action) {
-  return action.requires.filter((req) => GATE.test(req) && paramsRead(action, req).length === 0);
-}
-function needsOf(action, nameOf7) {
-  const out = [];
-  for (const req of action.requires) {
-    const read = paramsRead(action, req);
-    if (read.length === 0)
-      continue;
-    const shape = SHAPES.find((s) => s.shape.test(req));
-    if (!shape)
-      continue;
-    const words5 = shape.needs.replace("{p}", nameOf7(read[0] ?? "")).replace("{q}", nameOf7(read[1] ?? read[0] ?? ""));
-    if (!out.includes(words5))
-      out.push(words5);
-  }
-  return out;
-}
-function failureWords(req) {
-  return SHAPES.find((s) => s.fails !== undefined && s.shape.test(req))?.fails ?? null;
-}
-
-// src/backend/interpret-context.ts
-var TIMELAPSE_LEXICON = ["skip ahead", "time skip", "over the next hour", "later that evening", "wait until", "sleep until", "next morning", "skip to", "pass the time", "sleep through", "hours later", "days later", "wait for"];
-function localNow(world, state2) {
-  const cal = calendarOf(world);
-  const offset = placeOffset(world, state2.clock, placeOfEntity(state2, world.pov));
-  return `${weekdayName(cal, dateAt(cal, state2.clock + offset).weekday)} ${formatStamp(cal, state2.clock, offset)}`;
-}
-function openPuzzleTitles(ctx) {
-  return openPuzzles(ctx).slice(0, 6).map(({ shown: shown4 }) => {
-    const where = shown4.stage || shown4.cue;
-    return `${shown4.id}: ${where ? `${shown4.label} \u2014 ${where}` : shown4.label}`;
-  });
-}
-function kindWords(reg, world, def) {
-  if (def.ref === undefined)
-    return "anyone or anything";
-  return (own(world.kinds, def.ref)?.label ?? reg.kinds.get(def.ref)?.label ?? def.ref).toLowerCase();
-}
-function paramWords(ctx, action, name, def, mayKnow, places2, named) {
-  const { registry: reg, world, state: state2 } = ctx;
-  const head = `${name}${def.optional ? "?" : ""}`;
-  const label = def.label ? `: ${def.label}` : "";
-  if (def.type === "ref") {
-    if (def.ref === "place")
-      return places2 > 0 ? `${head} (a place id from Places)` : def.optional ? `${head} (no place you know of)` : null;
-    if (def.optional)
-      return `${head} (${kindWords(reg, world, def)}: an id named above${label})`;
-    const ids2 = paramCandidates(reg, world, state2, action, name).filter(mayKnow);
-    const claimed = def.claim ? "one nothing lists, in the input's own words" : null;
-    if (ids2.length === 0)
-      return claimed ? `${head} (${kindWords(reg, world, def)}: ${claimed})` : null;
-    for (const id of ids2)
-      named.add(id);
-    return `${head} (${kindWords(reg, world, def)}: ${ids2.join(" | ")}${claimed ? `, or ${claimed}` : ""})`;
-  }
-  if (def.table !== undefined)
-    return `${head} (one of: ${tableChoices(own(world.tables, def.table)).map((c) => c.key).join(" | ")})`;
-  if (action.id === "attempt" && name === "stat" && def.type === "text") {
-    const stats = optionalQuery(ctx, "sheets.stats")?.(ctx) ?? [];
-    if (stats.length > 0)
-      return `${head} (one of: ${stats.map((s) => s.id).join(" | ")})`;
-  }
-  if ((action.id.split(".").at(-1) ?? action.id).startsWith("buy") && name === "item" && def.type === "text") {
-    const sold = (optionalQuery(ctx, "economy.offers")?.(ctx, world.pov) ?? []).map((o) => o.name);
-    if (sold.length > 0)
-      return `${head} (text${label}; sold here: ${sold.join(" | ")})`;
-  }
-  if (def.type === "money")
-    return `${head} (an amount in ${world.currency.code} as written${label})`;
-  return `${head} (${def.type}${label})`;
-}
-function interpretCatalog(reg, world, state2, actions, mayKnow) {
-  const ctx = reg.context(world, state2);
-  const env = scopeEnv({ reg, ctx, bindings: { self: world.pov, actor: world.pov } });
-  const puzzles = openPuzzleTitles(ctx);
-  const places2 = placeCandidates(reg, world, state2).length;
-  const named = new Set;
-  const entries3 = [];
-  for (const action of actions) {
-    if (!fightOffers(world, state2, action) || gatesOf(action).some((req) => !truthy2(evalExpr(req, env, false))))
-      continue;
-    const params = [];
-    const ids2 = new Set;
-    for (const [name, def] of Object.entries(action.params)) {
-      const words5 = paramWords(ctx, action, name, def, mayKnow, places2, ids2);
-      if (words5 === null)
-        break;
-      params.push(words5);
-    }
-    if (params.length < Object.keys(action.params).length)
-      continue;
-    for (const id of ids2)
-      named.add(id);
-    const label = action.pack === "story" && action.id === "answer" && puzzles.length > 0 ? `${action.label} (open: ${puzzles.join("; ")})` : action.label;
-    entries3.push({ action, entry: { id: action.id, label, ...action.description ? { description: action.description } : {}, params, needs: needsOf(action, (param) => `\`${param}\``), ...action.lexicon ? { lexicon: action.lexicon } : {} } });
-  }
-  return { entries: entries3, named: [...named] };
-}
-function timelapseEntry(world, state2) {
-  const parts = [...world.calendar.dayParts.map((d) => d.id), "shift", "commitment"];
-  return {
-    id: TIMELAPSE_ACTION2,
-    label: "Let time pass",
-    description: `a time skip: wait, sleep, skip ahead, or spend a stated span on something no other action covers; an out-of-character instruction that time passes is always this, whatever else the input says ("OOC: over the next hour, I sort the stock" is a skip of an hour, the sorting what fills it). span: the input's own words for how long or until when ("over the next hour", "later that evening"); with it, minutes for a stated duration; until one of ${parts.join(", ")} ("next <day part>" for the following day's); or at a stated day and time, as "YYYY-MM-DD HH:MM" (it is now ${localNow(world, state2)})`,
-    params: ["span (text: the input's words for how long or until when)", "minutes? (number)", "until? (text)", "at? (text)"],
-    needs: [],
-    lexicon: TIMELAPSE_LEXICON
-  };
-}
-function tryEntry(policy, skills) {
-  const which = policy.when === "tries" ? "only one the input says the player character tries or attempts" : policy.when === "risky" ? "one that could go wrong" : "any whose outcome is uncertain";
-  const named = skills.map((s) => s.label.toLowerCase() === s.id.replace(/_/g, " ").toLowerCase() ? s.id : `${s.id} (${s.label})`);
-  return {
-    id: TRY_ACTION,
-    label: "Try something",
-    description: `an attempt no other action covers, ${which}, rolled with a skill: talking someone round, sneaking, noticing, deceiving, forcing something; a reaction the input asks for counts too ("I watch him as he answers: is he lying?" reads him against his deceit)`,
-    params: [
-      "attempt (text: what is attempted, in the input's words)",
-      `skill (one of: ${named.join(" | ")})`,
-      `difficulty (one of: ${bandsWithin(policy).map((b) => b.id).join(" | ")}: how hard it looks in context)`,
-      ...policy.who !== "pov" ? ['with? (a list of ids of people here who join in: "we sneak past" names each companion)'] : [],
-      'against? (a list of {"who": an id of someone here, "skill": the skill they resist with}: the people it opposes or targets)',
-      ...policy.when === "tries" ? ["tried (true when the input itself says the player character tries or attempts it)"] : []
-    ],
-    needs: [],
-    lexicon: ["try to", "attempt", "manage to", "talk into", "sneak past"]
-  };
-}
-function atWords(reg, world, state2, id) {
-  const place = placeOfEntity(state2, id);
-  return place !== null && canSeePlace(reg, world, state2, world.pov, place) ? `, at ${own(world.places, place)?.name ?? place}` : "";
-}
-var AWAY_LIMIT = 6;
-function lastSeenWords(reg, world, state2, id) {
-  const last = lastSighting(state2, id);
-  if (!last || !canSeePlace(reg, world, state2, world.pov, last.place))
-    return "";
-  return `, last seen at ${own(world.places, last.place)?.name ?? last.place} (${last.place}) ${spanText(Math.max(1, state2.clock - last.at))} ago`;
-}
-function interpretScene(reg, world, state2, opts) {
-  const ctx = reg.context(world, state2);
-  const pov = own(state2.entities, world.pov);
-  const here = placeOfEntity(state2, world.pov);
-  const place = povPlace(reg, world, state2);
-  const parentId = place?.id ? own(world.places, place.id)?.parent : undefined;
-  const parent = parentId && canSeePlace(reg, world, state2, world.pov, parentId) ? `, in ${own(world.places, parentId)?.name ?? parentId} (${parentId})` : "";
-  const where = place === null ? "" : place.id === null ? ", somewhere you can't name" : `, at ${place.name} (${place.id})${parent}`;
-  const seen = (id) => id !== world.pov && !isGone(state2, id) && canSeeEntity(reg, world, state2, world.pov, id) && opts.mayKnow(id);
-  const people = here === null ? [] : Object.keys(state2.entities).filter((id) => seen(id) && kindIs(reg, world, own(state2.entities, id)?.kind ?? "", "person") && placeOfEntity(state2, id) === here);
-  const carried = carriedBy(state2, world.pov).filter(seen);
-  const vehicles = Object.keys(state2.entities).filter((id) => seen(id) && kindIs(reg, world, own(state2.entities, id)?.kind ?? "", "vehicle") && (own(state2.entities, id)?.fields.owner === world.pov || (pov?.relations.some((r) => r.type === "uses" && r.to === id) ?? false)));
-  const waiting = (optionalQuery(ctx, "castlife.invitations")?.(ctx, world.pov) ?? []).filter((inv) => opts.mayKnow(inv.host)).map((inv) => `${inv.text} (host ${inv.host})`);
-  const said2 = opts.said ?? "";
-  const away = here === null || said2.trim() === "" ? [] : Object.keys(state2.entities).filter((id) => seen(id) && !people.includes(id) && kindIs(reg, world, own(state2.entities, id)?.kind ?? "", "person") && namesAny(said2, [own(state2.entities, id)?.name ?? id])).slice(0, AWAY_LIMIT);
-  const shown4 = new Set([...people, ...away, ...carried, ...vehicles]);
-  const others = opts.named.filter((id) => !shown4.has(id) && seen(id));
-  const nameOf7 = (id) => own(state2.entities, id)?.name ?? id;
-  const lifeWords = (id) => {
-    const life = povLife(world, state2, id);
-    return life ? `, ${life.reads}` : "";
-  };
-  const lines = [
-    `Now: ${localNow(world, state2)}${where}.`,
-    `Here with you: ${people.length > 0 ? people.map((id) => `${nameOf7(id)} (${id}${lifeWords(id)})`).join("; ") : "no one"}.`,
-    ...away.length > 0 ? [`Named in the input but not here: ${away.map((id) => `${nameOf7(id)} (${id}${lifeWords(id)})${lastSeenWords(reg, world, state2, id)}`).join("; ")}.`] : [],
-    `You carry: ${carried.length > 0 ? carried.map((id) => `${nameOf7(id)} (${id})`).join("; ") : "nothing"}.`,
-    ...vehicles.length > 0 ? [`Your vehicles: ${vehicles.map((id) => `${nameOf7(id)} (${id}${atWords(reg, world, state2, id)})`).join("; ")}.`] : [],
-    ...others.length > 0 ? [`Others you can name: ${others.map((id) => `${nameOf7(id)} (${id})`).join("; ")}.`] : [],
-    ...waiting.length > 0 ? [`Waiting on your answer: ${waiting.join(" ")}`] : [],
-    ...opts.left ? [`Left from your last message, not played yet: ${opts.left}`] : []
-  ];
-  const places2 = placeCandidates(reg, world, state2).map((id) => {
-    const p = own(world.places, id);
-    const up = p?.parent && canSeePlace(reg, world, state2, world.pov, p.parent) ? `, in ${own(world.places, p.parent)?.name ?? p.parent}` : "";
-    return `${id}: ${p?.name ?? id}${up}`;
-  });
-  return { lines, places: places2, recent: recentMessages(opts.earlier, opts.recent, opts.hideJson) };
-}
-function recentMessages(messages, recent, hideJson) {
-  const out = [];
-  let left = recent.tokens;
-  for (let i = messages.length - 1;i >= 0 && out.length < recent.messages && left > 0; i--) {
-    const m = messages[i];
-    if (!m)
-      continue;
-    const raw = m.swipes[m.swipeId] ?? "";
-    const text6 = (m.isUser ? raw : readableReply(raw, hideJson)).replace(/\s+/g, " ").trim();
-    if (text6 === "")
-      continue;
-    const who = m.isUser ? "Player" : "Story";
-    const cost = tokensOf(`${who}: ${text6}`);
-    if (cost <= left) {
-      out.push(`${who}: ${text6}`);
-      left -= cost;
-      continue;
-    }
-    out.push(`${who}: \u2026${text6.slice(text6.length - Math.floor(text6.length * left / cost))}`);
-    break;
-  }
-  return out.reverse();
-}
-
 // src/backend/inferred-words.ts
 function listed2(names2) {
   return names2.length <= 1 ? names2[0] ?? "" : `${names2.slice(0, -1).join(", ")} and ${names2.at(-1) ?? ""}`;
@@ -71700,6 +71740,38 @@ class OutcomeNotes {
       this.changes.delete(this.changes.keys().next().value ?? "");
     const path = this.path(chatId);
     await this.host.storage.write(`${path}.tmp`, JSON.stringify(notes), userId);
+    await this.host.storage.move(`${path}.tmp`, path, userId);
+  }
+}
+
+// src/backend/staged.ts
+function isStaged(raw) {
+  return isRecord(raw) && typeof raw.action === "string" && isRecord(raw.request) && isRecord(raw.params) && typeof raw.source === "string" && typeof raw.label === "string" && (raw.after === null || typeof raw.after === "string");
+}
+
+class StagedActions {
+  host;
+  staged = new Map;
+  constructor(host) {
+    this.host = host;
+  }
+  path(chatId) {
+    return `${runDir(chatId)}staged.json`;
+  }
+  async get(chatId, userId) {
+    const key = `${userId}\x00${chatId}`;
+    if (!this.staged.has(key)) {
+      const raw = await readStoredJson(this.host, this.path(chatId), userId, "Staged action", (v) => v === null || isStaged(v));
+      this.staged.set(key, isStaged(raw) ? raw : null);
+      if (this.staged.size > 256)
+        this.staged.delete(this.staged.keys().next().value ?? "");
+    }
+    return this.staged.get(key) ?? null;
+  }
+  async set(chatId, userId, staged) {
+    this.staged.set(`${userId}\x00${chatId}`, staged);
+    const path = this.path(chatId);
+    await this.host.storage.write(`${path}.tmp`, JSON.stringify(staged), userId);
     await this.host.storage.move(`${path}.tmp`, path, userId);
   }
 }
@@ -72709,6 +72781,8 @@ class Runtime {
   book;
   meter;
   outcomeNotes;
+  staged;
+  taking = new Map;
   inspector;
   chatPrefs;
   steps;
@@ -72758,6 +72832,7 @@ class Runtime {
     this.chips = new ChipStore(this.host);
     this.planNotes = new PlanNotes(this.host);
     this.outcomeNotes = new OutcomeNotes(this.host);
+    this.staged = new StagedActions(this.host);
     this.inspector = new InspectorLog(this.host);
     this.chatPrefs = new ChatPrefs(this.host);
     this.book = new EngineBook(this.host, this.worlds);
@@ -72770,7 +72845,7 @@ class Runtime {
     this.steps.onCallStart = (userId, purpose) => this.diag.callStart(userId, purpose);
     this.toolSupport = new ToolSupport(this.host);
     this.minds = { host: this.host, registry: this.registry, steps: this.steps, settings: this.settings, presets: this.presets };
-    this.ledger = new LedgerService(this.host, (chatId, userId) => this.resolveEnv(chatId, userId), new LedgerFold(this.registry, { fingerprint: "ce78f09b" }), (chatId) => messages.forget(chatId));
+    this.ledger = new LedgerService(this.host, (chatId, userId) => this.resolveEnv(chatId, userId), new LedgerFold(this.registry, { fingerprint: "abaffcd0" }), (chatId) => messages.forget(chatId));
     this.studio = new StudioBridge(this.host, this.worlds);
     this.worlds.onChange = (worldId, userId) => this.studio.worldChanged(worldId, userId);
     this.agents = new Agents(this.host, options.build ?? thisBuild(), async (userId) => (await this.settings.get(userId)).timeouts.mcpReconnectMs);
@@ -72786,8 +72861,10 @@ class Runtime {
     this.ledger.attach();
     this.agents.start();
     this.host.on("MESSAGE_SENT", (e, userId) => {
-      if (e.message.isUser && userId)
-        this.lapse(e.chatId, userId);
+      if (!e.message.isUser || !userId)
+        return;
+      this.lapse(e.chatId, userId);
+      this.takeStaged(e.chatId, userId, e.message.id);
     });
     this.host.on("MESSAGE_SWIPED", (e, userId) => {
       if (e.action === "deleted" && userId)
@@ -72898,10 +72975,13 @@ class Runtime {
     trimMap(this.preBudgets);
     const ctx = this.registry.context(render.world, render.state);
     const ties = tiesOf2(ctx, render.world, render.state);
+    if (lastUser)
+      await this.takeStaged(input.chatId, input.userId, lastUser.id);
     const recorded = lastUser ? (await this.host.chats.messages(input.chatId, input.userId)).find((m) => m.id === lastUser.id)?.metadata[LEDGER_NAMESPACE] : undefined;
     const all2 = [...this.registry.actions.values(), ...Object.values(render.world.actions)].filter((a) => offersAction(render.world, a));
     const typed = text6.trim() !== "" && !(isRecord(recorded) && typeof recorded.action === "string");
     const described = typed || text6.trim() !== "" && isRecord(recorded) && recorded.described === true;
+    const earlier = lastUser ? before.slice(0, before.indexOf(lastUser)) : before;
     const facts = {
       ...noFacts(before.filter((m) => !m.isUser).length + 1),
       typed,
@@ -72911,10 +72991,10 @@ class Runtime {
       offscreen: ties.offscreen.length > 0,
       tieZone: ties.present.length > 0,
       invitation: (before.findLast((m) => !m.isUser)?.ledger?.swipes[String(before.findLast((m) => !m.isUser)?.swipeId ?? 0)]?.events ?? []).some((e) => e.type === "castlife.invitation"),
-      timelapse: isRecord(recorded) && recorded.action === TIMELAPSE_ACTION2
+      timelapse: isRecord(recorded) && recorded.action === TIMELAPSE_ACTION2,
+      earlier: { messages: earlier, hideJson: settings.hideJsonBlocks }
     };
     const at2 = await this.lorePhase("pre", p.generationId, input.userId, render.world, render.state, budget, text6, preset.guidance);
-    const earlier = lastUser ? before.slice(0, before.indexOf(lastUser)) : before;
     const left = text6.trim() === "" ? "" : await this.leftUnplayed(input.chatId, input.userId, earlier, text6);
     const intentTask = text6.trim() === "" || bridge.hasIntent(text6) || bridge.isHeld(text6) ? Promise.resolve() : this.readIntent(bridge, text6, recorded, render, all2, earlier, settings, facts, budget, at2, left);
     const policy = policyOf(render.world, render.state);
@@ -73126,7 +73206,7 @@ class Runtime {
     const context = {
       world: render.world,
       pov: { id: render.world.pov, name: render.state.entities[render.world.pov]?.name ?? render.world.pov },
-      scene: interpretScene(this.registry, render.world, render.state, { mayKnow, named: offered.named, earlier, recent: recentOf(run2.config), hideJson: settings.hideJsonBlocks, said: text6, left })
+      scene: interpretScene(this.registry, render.world, render.state, { mayKnow, named: offered.named, earlier, recent: recentOf("interpret", run2.config), hideJson: settings.hideJsonBlocks, said: text6, left })
     };
     let result;
     const lore2 = this.stepLore(run2, at2, { text: `${text6}
@@ -73469,7 +73549,7 @@ ${pre?.text ?? ""}`, links: this.sceneLinks(context.world, context.state) };
     const lore2 = (r, effects2 = false) => this.stepLore(r, at2, read, effects2);
     const extractRun = runsOf(modelUse, context.world, "extract", facts, { guidance }).find((r) => r.template === null || r.template.output !== "effects");
     const skipped = facts.timelapse || !!plan2?.timelapse;
-    const extractTask = extractRun && budget.take() ? extract(this.steps, text6, povWorld(this.registry, context.world, context.state), prefixSummary(this.registry, context.world, context.state), clockMinutes(context.pre), EXTRACTION_TYPES.filter((t) => t === "time_advance" ? !skipped : this.registry.proposals.has(t)), extractRun.config, userId, budget.signal, extractRun.template ? renderTemplate(extractRun.template.template, vars) : undefined, lore2(extractRun), extractRun.guidance, usual) : Promise.resolve({ proposals: [], where: null });
+    const extractTask = extractRun && budget.take() ? extract(this.steps, text6, povWorld(this.registry, context.world, context.state), prefixSummary(this.registry, context.world, context.state), clockMinutes(context.pre), EXTRACTION_TYPES.filter((t) => t === "time_advance" ? !skipped : this.registry.proposals.has(t)), extractRun.config, userId, budget.signal, extractRun.template ? renderTemplate(extractRun.template.template, vars) : undefined, lore2(extractRun), extractRun.guidance, usual, extractRun.recent) : Promise.resolve({ proposals: [], where: null });
     const effectsTasks = ["extract", "contradiction", "choices"].flatMap((purpose) => runsOf(modelUse, context.world, purpose, facts, { output: "effects", guidance })).map((r) => budget.take() ? promptedEffects(this.steps, r, vars, context.world.currency, userId, budget.signal, lore2(r, true)) : Promise.resolve([]));
     const npcRun = runsOf(modelUse, context.world, "npc.choose", facts, { guidance })[0];
     const npcTask = npcRun && ties.offscreen.length > 0 && budget.take() ? npcChoose(this.steps, npcRun, ties.offscreen, (t) => this.describeTie(t, context.world, context.state), createRng(hashParts("lre.npc.post", bridge.runSeed, key)), userId, budget.signal, this.stepLore(npcRun, at2, this.tieInputs(ties.offscreen, context.world, context.state))) : Promise.resolve([]);
@@ -74185,7 +74265,33 @@ ${rules}` });
     await this.meter.ready(userId);
     const view = buildView({ chatId, run: run2, core, observed, registry: this.registry, world: (r) => core.worldAt(r), stored, meter: this.meter.view(userId), mapDisplay: await this.chatPrefs.mapDisplay(chatId, userId) });
     view.panels["core.context"] = this.inspectorView(chatId, userId);
+    const staged = await this.staged.get(chatId, userId);
+    view.staged = staged ? { action: staged.action, params: staged.request, source: staged.source, label: staged.label } : null;
     return view;
+  }
+  takeStaged(chatId, userId, messageId) {
+    const key = `${userId}\x00${chatId}`;
+    const next = (this.taking.get(key) ?? Promise.resolve()).then(async () => {
+      const staged = await this.staged.get(chatId, userId);
+      if (!staged)
+        return;
+      const messages = await this.host.chats.messages(chatId, userId);
+      const at2 = messages.findIndex((m2) => m2.id === messageId);
+      const after = staged.after === null ? -1 : messages.findIndex((m2) => m2.id === staged.after);
+      const m = messages[at2];
+      if (!m?.isUser || staged.after !== null && after < 0 || at2 <= after)
+        return;
+      const own2 = m.metadata[LEDGER_NAMESPACE];
+      if (isRecord(own2) && typeof own2.action === "string")
+        return;
+      const words5 = (m.swipes[m.swipeId] ?? m.content).trim() !== "";
+      const intent2 = { action: staged.action, params: staged.params, source: staged.source, ...words5 ? { described: true } : {} };
+      await this.host.chats.writeMetadata(chatId, messageId, { ...m.metadata, [LEDGER_NAMESPACE]: { ...isRecord(own2) ? own2 : {}, ...intent2 } }, userId);
+      await this.staged.set(chatId, userId, null);
+      this.push.changed(chatId, userId);
+    }).catch((error) => this.host.log("warn", `[LumiRPEngine] chat ${chatId}: the staged action wasn't recorded on the message (${error instanceof Error ? error.message : String(error)})`, userId));
+    this.taking.set(key, next);
+    return next;
   }
   takeChip(chatId, userId, id) {
     return this.chips.take(chatId, userId, id);
@@ -74339,7 +74445,7 @@ function shortClock(world, state2, at2) {
   const place = placeOfEntity(state2, world.pov);
   const d = dateAt(cal, at2 + placeOffset(world, at2, place));
   const today2 = dateAt(cal, state2.clock + placeOffset(world, state2.clock, place)).dayIndex;
-  return d.dayIndex === today2 ? formatHHMM(d.minuteOfDay) : `${weekdayName(cal, d.weekday)} ${formatHHMM(d.minuteOfDay)}`;
+  return d.dayIndex === today2 ? formatTimeOfDay(d.minuteOfDay) : `${weekdayName(cal, d.weekday)} ${formatTimeOfDay(d.minuteOfDay)}`;
 }
 function planOutline(plan2, prose) {
   return [...prose?.brief ? [`Brief: ${prose.brief}`] : [], ...plan2.outline, ...prose?.outline ?? []];
@@ -74832,10 +74938,12 @@ class Dispatcher {
         const said2 = r.text?.trim() ?? "";
         let text6 = said2;
         let params = r.params;
+        let label = "";
         if (r.action === TIMELAPSE_ACTION2) {
           const target = parseTarget(r.params.target);
           if (!target)
             throw new RequestError("bad_request", "a timelapse needs a target");
+          label = `Timelapse: ${targetLabel(target)}`;
           text6 ||= `(Timelapse: ${neutralizeMacros(targetLabel(target))})`;
           const follows = typeof r.params.followRoutine === "boolean" ? r.params.followRoutine : routineSettingsOf((await this.head(r.chatId, userId)).world).paletteFollowsRoutine;
           params = { ...Object.fromEntries(Object.entries(r.params).filter(([k]) => k !== "followRoutine" && k !== "povRoutine")), ...follows ? {} : { povRoutine: false } };
@@ -74844,6 +74952,14 @@ class Dispatcher {
           const action = (hasOwn(world.actions, r.action) ? world.actions[r.action] : undefined) ?? this.rt.registry.actions.get(r.action);
           if (!action)
             throw new RequestError("not_found", `unknown action ${r.action}`);
+          const picked = Object.entries(r.params).flatMap(([k, v]) => {
+            if (typeof v === "number")
+              return [action.params[k]?.type === "money" ? formatMoney(v, world.currency) : String(v)];
+            if (typeof v !== "string" || v === "")
+              return [];
+            return [state2.entities[v]?.name ?? (hasOwn(world.places, v) ? world.places[v]?.name : undefined) ?? v];
+          });
+          label = picked.length > 0 ? `${action.label}: ${picked.join(", ")}` : action.label;
           if (action.mechanical === true && said2 === "") {
             const runSeed = this.runSeedOf(r.chatId);
             const w = new Working(this.rt.registry, world, state2);
@@ -74860,6 +74976,19 @@ class Dispatcher {
             return;
           }
           text6 ||= `(${neutralizeMacros(action.label)})`;
+        }
+        const staged = await this.rt.staged.get(r.chatId, userId);
+        const same3 = staged !== null && staged.action === r.action && JSON.stringify(staged.request) === JSON.stringify(r.params);
+        if ((r.source === "palette" || r.source === "map") && said2 === "" && r.now !== true) {
+          const after = toChain(await this.rt.host.chats.messages(r.chatId, userId)).at(-1)?.id ?? null;
+          await this.rt.staged.set(r.chatId, userId, same3 ? null : { action: r.action, request: r.params, params, source: r.source, label: neutralizeMacros(label), after });
+          this.rt.push.changed(r.chatId, userId);
+          reply("lre.action", { staged: !same3 });
+          return;
+        }
+        if (same3) {
+          await this.rt.staged.set(r.chatId, userId, null);
+          this.rt.push.changed(r.chatId, userId);
         }
         const messageId = await this.rt.host.chats.appendUserMessage(r.chatId, text6, { [LEDGER_NAMESPACE]: { action: r.action, params, source: r.source, ...said2 !== "" ? { described: true } : {} } }, true, userId);
         reply("lre.action", { messageId });

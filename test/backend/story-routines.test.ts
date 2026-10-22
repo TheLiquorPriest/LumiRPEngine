@@ -80,10 +80,10 @@ describe("a reply that states a change to someone's week", () => {
     // Today was laid as the story had it; tomorrow night he works at the marina, and no morning before it is his shift's.
     expect(changedBlocks(await day(chat, "marcus_delgado"))).toEqual([]);
     const tomorrow = changedBlocks(await day(chat, "marcus_delgado", 1));
-    expect(tomorrow.map((b) => [b.from, b.place, b.activity])).toEqual([["22:00", "alder_harbor_marina", "work"]]);
+    expect(tomorrow.map((b) => [b.from, b.place, b.activity])).toEqual([["10:00 PM", "alder_harbor_marina", "work"]]);
     expect(tomorrow[0]?.origin).toMatchObject({ type: "routine", owner: { level: "chat" }, source: { type: "story", turn } });
     // The night after, the shift he started the night before runs into the morning.
-    expect(changedBlocks(await day(chat, "marcus_delgado", 2)).map((b) => b.from)).toEqual(["00:00", "22:00"]);
+    expect(changedBlocks(await day(chat, "marcus_delgado", 2)).map((b) => b.from)).toEqual(["12:00 AM", "10:00 PM"]);
     // The GM's list has it among the changes the story made, for him alone; the player has its chip.
     const list = await changed(chat);
     expect(list.map((c) => c.entity)).toEqual(["marcus_delgado"]);
@@ -130,7 +130,7 @@ describe("a reply that states a change to someone's week", () => {
     ]);
     // Tomorrow: the marina from eight, and no weekday at the garage.
     const tomorrow = await day(chat, "marcus_delgado", 1);
-    expect(changedBlocks(tomorrow).map((b) => [b.from, b.place])).toEqual([["08:00", "alder_harbor_marina"]]);
+    expect(changedBlocks(tomorrow).map((b) => [b.from, b.place])).toEqual([["8:00 AM", "alder_harbor_marina"]]);
     expect(tomorrow.day.blocks.some((b) => b.place === "alder_automotive")).toBe(false);
     expect(chat.rig.rt.ledger.errors).toEqual([]);
   });

@@ -32,7 +32,7 @@ import { checkOf } from "../engine/checks";
 import { applyTimeAdvance, fightHoldsClock, IN_FIGHT, nextDayPart, parseOverrides, parseTarget, typedSpan } from "../engine/time";
 import { EXTERNAL_ACCOUNT_PREFIX } from "../engine/events";
 import { boundProposal } from "../engine/bounds";
-import { calendarOf, clockOfStamp, dateAt, formatClock, formatHHMM, placeOffset, weekdayName } from "../engine/calendar";
+import { calendarOf, clockOfStamp, dateAt, formatClock, formatHHMM, formatTimeOfDay, placeOffset, weekdayName } from "../engine/calendar";
 import type { ChainMessage } from "../engine/ledger/chain";
 import { LedgerFold } from "../engine/ledger/fold";
 import type { LedgerCore, LedgerEnv } from "../engine/ledger/journal";
@@ -78,6 +78,7 @@ import { routineAsks } from "./routine-ask";
 import { CallMeter, dedupeProposals, extract, interpret, saidPayMethod, Steps, type InterpretContext, type InterpretRead, type ThingSort } from "./steps";
 import { PlanNotes, type PlanLines } from "./plan-notes";
 import { OutcomeNotes } from "./outcome-notes";
+import { StagedActions } from "./staged";
 import { InspectorLog, type InspectorRecord } from "./inspector-log";
 import { JsonHiding, readableReply } from "./json-hiding";
 import { GUIDANCE_PREFIX, GUIDANCE_TARGETS, NARRATOR_OUTLET, outletOf, PresetBinding, type Guidance, type PresetConfig } from "./preset-binding";
@@ -556,6 +557,10 @@ export class Runtime implements TurnHooks {
    * reply that produced them; dropped once a later message has committed and another follows.
    */
   readonly outcomeNotes: OutcomeNotes;
+  /** The action each chat has staged for the player's next message (DESIGN §11). */
+  readonly staged: StagedActions;
+  /** Staged actions being recorded on the message that takes them, by `user \0 chat`: a turn reads its message's action once it has landed. */
+  private readonly taking = new Map<string, Promise<void>>();
   /** The inspector's history and delivery badges per chat. */
   readonly inspector: InspectorLog;
   /** How the player chose to see each chat (the map's display mode): presentation, beside the chat. */
@@ -648,6 +653,7 @@ export class Runtime implements TurnHooks {
     this.chips = new ChipStore(this.host);
     this.planNotes = new PlanNotes(this.host);
     this.outcomeNotes = new OutcomeNotes(this.host);
+    this.staged = new StagedActions(this.host);
     this.inspector = new InspectorLog(this.host);
     this.chatPrefs = new ChatPrefs(this.host);
     this.book = new EngineBook(this.host, this.worlds);
@@ -680,7 +686,9 @@ export class Runtime implements TurnHooks {
     this.ledger.attach();
     this.agents.start();
     this.host.on("MESSAGE_SENT", (e, userId) => {
-      if (e.message.isUser && userId) void this.lapse(e.chatId, userId);
+      if (!e.message.isUser || !userId) return;
+      void this.lapse(e.chatId, userId);
+      void this.takeStaged(e.chatId, userId, e.message.id);
     });
     // The host shifts a message's swipes down when one is deleted; the chips shown by swipe follow.
     this.host.on("MESSAGE_SWIPED", (e, userId) => {
@@ -818,6 +826,8 @@ export class Runtime implements TurnHooks {
     trimMap(this.preBudgets);
     const ctx = this.registry.context(render.world, render.state);
     const ties = tiesOf(ctx, render.world, render.state);
+    // The player's message takes the action staged for it, if it hasn't yet (the host's event may come after the turn starts).
+    if (lastUser) await this.takeStaged(input.chatId, input.userId, lastUser.id);
     const recorded = lastUser ? (await this.host.chats.messages(input.chatId, input.userId)).find((m) => m.id === lastUser.id)?.metadata[LEDGER_NAMESPACE] : undefined;
     // A combat action only where the ruleset has combat (DESIGN §11), so a world without it reads typed text as before.
     const all = [...this.registry.actions.values(), ...Object.values(render.world.actions)].filter((a) => offersAction(render.world, a));
@@ -825,6 +835,8 @@ export class Runtime implements TurnHooks {
     // A palette or chip tap writes the action's label as the message: only words the player typed
     // with it describe an approach, so only those are worth a judge call.
     const described = typed || (text.trim() !== "" && isRecord(recorded) && recorded.described === true);
+    // The messages before the typed one: what `interpret` reads to tell what it refers to (DESIGN §5.2), and what any step's Recent chat takes from.
+    const earlier = lastUser ? before.slice(0, before.indexOf(lastUser)) : before;
     const facts: SignalFacts = {
       ...noFacts(before.filter((m) => !m.isUser).length + 1),
       typed,
@@ -835,10 +847,9 @@ export class Runtime implements TurnHooks {
       tieZone: ties.present.length > 0,
       invitation: (before.findLast((m) => !m.isUser)?.ledger?.swipes[String(before.findLast((m) => !m.isUser)?.swipeId ?? 0)]?.events ?? []).some((e) => e.type === "castlife.invitation"),
       timelapse: isRecord(recorded) && recorded.action === TIMELAPSE_ACTION,
+      earlier: { messages: earlier, hideJson: settings.hideJsonBlocks },
     };
     const at = await this.lorePhase("pre", p.generationId, input.userId, render.world, render.state, budget, text, preset.guidance);
-    // `interpret` reads the messages before the typed one too, to tell what it refers to (DESIGN §5.2).
-    const earlier = lastUser ? before.slice(0, before.indexOf(lastUser)) : before;
     // What the reply before it left unplayed of the last message, which this one may take as done (DESIGN §5.2).
     const left = text.trim() === "" ? "" : await this.leftUnplayed(input.chatId, input.userId, earlier, text);
     const intentTask = text.trim() === "" || bridge.hasIntent(text) || bridge.isHeld(text) ? Promise.resolve() : this.readIntent(bridge, text, recorded, render, all, earlier, settings, facts, budget, at, left);
@@ -1111,7 +1122,7 @@ export class Runtime implements TurnHooks {
     const context: InterpretContext = {
       world: render.world,
       pov: { id: render.world.pov, name: render.state.entities[render.world.pov]?.name ?? render.world.pov },
-      scene: interpretScene(this.registry, render.world, render.state, { mayKnow, named: offered.named, earlier, recent: recentOf(run.config), hideJson: settings.hideJsonBlocks, said: text, left }),
+      scene: interpretScene(this.registry, render.world, render.state, { mayKnow, named: offered.named, earlier, recent: recentOf("interpret", run.config), hideJson: settings.hideJsonBlocks, said: text, left }),
     };
     let result: InterpretRead | null;
     const lore = this.stepLore(run, at, { text: `${text}\n${this.trackWords(render.world, render.state)}`, links: this.sceneLinks(render.world, render.state) });
@@ -1556,7 +1567,7 @@ export class Runtime implements TurnHooks {
     // L27: a timelapse or speed-through turn's time passed as its timelapse, so its reply proposes no skip.
     const skipped = facts.timelapse || !!plan?.timelapse;
     const extractTask = extractRun && budget.take()
-      ? extract(this.steps, text, povWorld(this.registry, context.world, context.state), prefixSummary(this.registry, context.world, context.state), clockMinutes(context.pre), EXTRACTION_TYPES.filter((t) => (t === "time_advance" ? !skipped : this.registry.proposals.has(t))), extractRun.config, userId, budget.signal, extractRun.template ? renderTemplate(extractRun.template.template, vars) : undefined, lore(extractRun), extractRun.guidance, usual)
+      ? extract(this.steps, text, povWorld(this.registry, context.world, context.state), prefixSummary(this.registry, context.world, context.state), clockMinutes(context.pre), EXTRACTION_TYPES.filter((t) => (t === "time_advance" ? !skipped : this.registry.proposals.has(t))), extractRun.config, userId, budget.signal, extractRun.template ? renderTemplate(extractRun.template.template, vars) : undefined, lore(extractRun), extractRun.guidance, usual, extractRun.recent)
       : Promise.resolve({ proposals: [], where: null });
     const effectsTasks = (["extract", "contradiction", "choices"] as const).flatMap((purpose) => runsOf(modelUse, context.world, purpose, facts, { output: "effects", guidance })).map((r) => (budget.take() ? promptedEffects(this.steps, r, vars, context.world.currency, userId, budget.signal, lore(r, true)) : Promise.resolve([])));
     const npcRun = runsOf(modelUse, context.world, "npc.choose", facts, { guidance })[0];
@@ -2432,7 +2443,39 @@ export class Runtime implements TurnHooks {
     await this.meter.ready(userId);
     const view = buildView({ chatId, run, core, observed, registry: this.registry, world: (r) => core.worldAt(r), stored, meter: this.meter.view(userId), mapDisplay: await this.chatPrefs.mapDisplay(chatId, userId) });
     view.panels["core.context"] = this.inspectorView(chatId, userId);
+    const staged = await this.staged.get(chatId, userId);
+    view.staged = staged ? { action: staged.action, params: staged.request, source: staged.source, label: staged.label } : null;
     return view;
+  }
+
+  /**
+   * The player's next message takes the chat's staged action (DESIGN §11): it is recorded on that
+   * message as an action message's is, its words the described approach, so a swipe, a Re-run or a
+   * Continue plays it alike, and the stage clears. A message from before it was staged, or one that
+   * already carries an action (a chip's, a Send now), takes nothing.
+   */
+  takeStaged(chatId: ChatId, userId: UserId, messageId: MessageId): Promise<void> {
+    const key = `${userId}\u0000${chatId}`;
+    const next = (this.taking.get(key) ?? Promise.resolve())
+      .then(async () => {
+        const staged = await this.staged.get(chatId, userId);
+        if (!staged) return;
+        const messages = await this.host.chats.messages(chatId, userId);
+        const at = messages.findIndex((m) => m.id === messageId);
+        const after = staged.after === null ? -1 : messages.findIndex((m) => m.id === staged.after);
+        const m = messages[at];
+        if (!m?.isUser || (staged.after !== null && after < 0) || at <= after) return;
+        const own = m.metadata[LEDGER_NAMESPACE];
+        if (isRecord(own) && typeof own.action === "string") return;
+        const words = (m.swipes[m.swipeId] ?? m.content).trim() !== "";
+        const intent: JsonObject = { action: staged.action, params: staged.params, source: staged.source, ...(words ? { described: true } : {}) };
+        await this.host.chats.writeMetadata(chatId, messageId, { ...m.metadata, [LEDGER_NAMESPACE]: { ...(isRecord(own) ? own : {}), ...intent } }, userId);
+        await this.staged.set(chatId, userId, null);
+        this.push.changed(chatId, userId);
+      })
+      .catch((error: unknown) => this.host.log("warn", `[LumiRPEngine] chat ${chatId}: the staged action wasn't recorded on the message (${error instanceof Error ? error.message : String(error)})`, userId));
+    this.taking.set(key, next);
+    return next;
   }
 
   /** A stored chip, removed (it was acted on). */
@@ -2650,15 +2693,15 @@ function unfitReason(reg: Registry, world: WorldDoc, state: Readonly<WorldState>
 }
 
 /**
- * A clock time for a chip, local to where the POV is, as the HUD shows it: "07:00" later the same
- * day, else with its weekday ("Sat 07:00").
+ * A clock time for a chip, local to where the POV is, as the HUD shows it: "7:00 AM" later the same
+ * day, else with its weekday ("Sat 7:00 AM").
  */
 function shortClock(world: WorldDoc, state: Readonly<WorldState>, at: number): string {
   const cal = calendarOf(world);
   const place = placeOfEntity(state, world.pov);
   const d = dateAt(cal, at + placeOffset(world, at, place));
   const today = dateAt(cal, state.clock + placeOffset(world, state.clock, place)).dayIndex;
-  return d.dayIndex === today ? formatHHMM(d.minuteOfDay) : `${weekdayName(cal, d.weekday)} ${formatHHMM(d.minuteOfDay)}`;
+  return d.dayIndex === today ? formatTimeOfDay(d.minuteOfDay) : `${weekdayName(cal, d.weekday)} ${formatTimeOfDay(d.minuteOfDay)}`;
 }
 
 /** The Outline slot's lines: the brief, the engine's beats, then the outline step's prose. */

@@ -58,11 +58,13 @@ describe("a mechanical action from a panel", () => {
     expect((await chat.state()).chips.some((c) => c.kind === "fix")).toBe(false);
   });
 
-  test("an action that isn't mechanical, or one sent with words, still appends the player's message", async () => {
+  test("an action that isn't mechanical, or one sent with words, is a turn: staged for the next message, or its own message", async () => {
     const chat = await MoneyChat.start();
     const count = messages(chat);
     const withdraw: ActionBody = { action: "withdraw_cash", params: { account: CHECKING, amount: 2000 } };
-    expect(chat.rig.body(await send(chat, withdraw)).messageId).toEqual(expect.any(String));
+    expect(chat.rig.body(await send(chat, withdraw))).toEqual({ staged: true });
+    expect(messages(chat)).toBe(count);
+    expect(chat.rig.body(await send(chat, withdraw, "I hit the cash machine."))).toHaveProperty("messageId");
     expect(messages(chat)).toBe(count + 1);
     expect(chat.rig.body(await send(chat, transferAction(CHECKING, SAVINGS, 1000), "I move ten bucks to savings."))).toHaveProperty("messageId");
     expect(messages(chat)).toBe(count + 2);

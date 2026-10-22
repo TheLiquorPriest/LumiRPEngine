@@ -489,7 +489,7 @@ describe("Re-narrate after a restart", () => {
     rig.body(await rig.send({ type: "lre.world", op: "commit", worldId, base: null }));
     const chatId = rig.host.createChat("Morning, Sam.");
     rig.body(await rig.send({ type: "lre.world", op: "attach", worldId, chatId }));
-    rig.body(await rig.send({ type: "lre.action", chatId, action: "flip_coin", params: {}, source: "palette" }));
+    rig.body(await rig.send({ type: "lre.action", chatId, action: "flip_coin", params: {}, source: "palette", now: true }));
     const g = await rig.host.start(chatId, { type: "normal" });
     const first = rig.host.section("Outcome");
     expect(first).toMatch(/Flip a coin: (success|fail)/);

@@ -154,7 +154,7 @@ describe("a routine the player's message states", () => {
     expect(list[0]?.blocks).toEqual([{ block: expect.any(String), label: "Swimming", source: expect.objectContaining({ type: "story", turn, by: "player" }), off: false }]);
     // Today (Monday) was laid already; tomorrow, Tuesday, he swims at six.
     expect(await changedOn(chat, "marcus_delgado", 0)).toEqual([]);
-    expect((await changedOn(chat, "marcus_delgado", 1)).map((b) => [b.from, b.place, b.activity])).toEqual([["06:00", "lakefront_park", "exercise"]]);
+    expect((await changedOn(chat, "marcus_delgado", 1)).map((b) => [b.from, b.place, b.activity])).toEqual([["6:00 AM", "lakefront_park", "exercise"]]);
     expect(await asks(chat)).toEqual([]);
 
     const added = (await chips(chat)).find((c) => c.kind === "routine_added");
@@ -272,7 +272,7 @@ describe("a place the player names that doesn't settle on one", () => {
     const park = offered.find((a) => a.label === "At Lakefront Park");
     if (!park) throw new Error("no Lakefront Park");
     chat.rig.body(await chat.rig.send({ type: "lre.chip", chatId: chat.chatId, chip: ask.id, choice: park.id }));
-    expect((await changedOn(chat, "marcus_delgado", 1)).map((b) => [b.from, b.place])).toEqual([["06:00", "lakefront_park"]]);
+    expect((await changedOn(chat, "marcus_delgado", 1)).map((b) => [b.from, b.place])).toEqual([["6:00 AM", "lakefront_park"]]);
     expect((await chips(chat)).some((c) => c.kind === "routine_added")).toBe(true);
   });
 
@@ -286,7 +286,7 @@ describe("a place the player names that doesn't settle on one", () => {
     expect(ask.actions.map((a) => a.id)).toEqual(["yes", "no"]);
     await answer(chat, ask, "yes");
     const [block] = await changedOn(chat, "marcus_delgado", 1);
-    expect(block?.from).toBe("06:00");
+    expect(block?.from).toBe("6:00 AM");
     expect(block?.place).not.toBe("lakefront_park");
     expect((await changed(chat))[0]?.blocks.map((b) => b.source)).toEqual([expect.objectContaining({ by: "player" })]);
   });

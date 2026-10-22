@@ -1199,6 +1199,11 @@ function grouped(n: bigint): string {
   return n.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",");
 }
 
+/** A temperature as the player and narrator read it, in whole °F, from the °C the world stores (`formatTemperature(12)` → `"54 °F"`). */
+export function formatTemperature(celsius: number): string {
+  return `${Math.round((celsius * 9) / 5 + 32)} °F`;
+}
+
 /** Formats integer minor units with a world's currency (`formatMoney(123456, DEFAULT_CURRENCY)` → `"$1,234.56"`). */
 export function formatMoney(minorUnits: number, currency: WorldCurrency): string {
   const units = BigInt(Math.trunc(minorUnits));

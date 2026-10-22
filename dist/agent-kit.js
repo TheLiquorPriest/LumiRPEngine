@@ -332,6 +332,9 @@ function lifeStateOf(world, id) {
 function grouped(n) {
   return n.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",");
 }
+function formatTemperature(celsius) {
+  return `${Math.round(celsius * 9 / 5 + 32)} °F`;
+}
 function formatMoney(minorUnits, currency) {
   const units = BigInt(Math.trunc(minorUnits));
   const negative = units < 0n;
@@ -2595,7 +2598,8 @@ function clampBand(policy, said2) {
 var HELPER_MAX_TOKENS = 8192;
 var DEFAULT_HELPER = Object.freeze({ connectionId: null, model: null, effort: "inherit", maxTokens: HELPER_MAX_TOKENS, params: Object.freeze({}) });
 var DEFAULT_STEP_LORE = Object.freeze({ policy: "prefetch", tokens: 1200 });
-var DEFAULT_RECENT = Object.freeze({ messages: 8, tokens: 3000 });
+var DEFAULT_RECENT = Object.freeze({ on: true, messages: 8, tokens: 3000 });
+var RECENT_OFF = Object.freeze({ ...DEFAULT_RECENT, on: false });
 var SPEED_DEFAULT = Object.freeze({ mode: "offer", thresholdMinutes: 30 });
 var SPEED_THRESHOLD_MINUTES = [1, 7 * 1440];
 var EXTRACTION_DEFAULTS = Object.freeze({
@@ -2781,6 +2785,11 @@ function parseHHMM(text) {
 function formatHHMM(minuteOfDay) {
   const m = mod(minuteOfDay, MINUTES_PER_DAY);
   return `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
+}
+function formatTimeOfDay(minuteOfDay) {
+  const m = mod(minuteOfDay, MINUTES_PER_DAY);
+  const h = Math.floor(m / 60);
+  return `${h % 12 === 0 ? 12 : h % 12}:${String(m % 60).padStart(2, "0")} ${h < 12 ? "AM" : "PM"}`;
 }
 function daysFromCivil(y, m, d) {
   const yy = m <= 2 ? y - 1 : y;
@@ -2977,7 +2986,7 @@ function weekdayName(cal, weekday) {
 }
 function formatClock(cal, clock, offsetMinutes = 0) {
   const d = dateAt(cal, clock + offsetMinutes);
-  return `${weekdayName(cal, d.weekday)} ${d.day} ${monthName(cal, d.month)} ${d.year}, ${formatHHMM(d.minuteOfDay)}`;
+  return `${weekdayName(cal, d.weekday)} ${d.day} ${monthName(cal, d.month)} ${d.year}, ${formatTimeOfDay(d.minuteOfDay)}`;
 }
 function dayPartAt(cal, clock) {
   const m = dateAt(cal, clock).minuteOfDay;
@@ -6875,6 +6884,8 @@ function rawLine(reg, world, state, pov, e, player, you) {
       const kind = own(state.entities, e.entity)?.kind ?? "";
       if (e.field === "place" && typeof e.value === "string")
         return `${name(e.entity)} → ${name(e.value)}`;
+      if (e.field === "temp_c" && typeof e.value === "number")
+        return `${name(e.entity)}: Temperature ${formatTemperature(e.value)}`;
       const ctx = player && e.field === "activity" && typeof e.value === "string" ? reg.context(world, state) : null;
       const shownActivity = ctx ? optionalQuery(ctx, "castlife.activity") : null;
       const value = ctx && shownActivity && typeof e.value === "string" ? shownActivity(ctx, e.entity, e.value) : e.value;
@@ -24117,9 +24128,10 @@ function buildWeatherView(ctx) {
     return { level, label: level === 0 ? "" : MOOD[season], region: e?.name ?? null, season, sky: null, tempC: null, closed: [] };
   const st = stateAt(ctx, here);
   const sky = strOf(e.fields.weather, "clear");
-  const temp = level >= 3 && typeof e.fields.temp_c === "number" ? Math.round(e.fields.temp_c) : null;
+  const raw = level >= 3 && typeof e.fields.temp_c === "number" ? e.fields.temp_c : null;
+  const temp = raw === null ? null : Math.round(raw);
   const word = st?.label ?? sky;
-  return { level, label: `${word.charAt(0).toUpperCase()}${word.slice(1)}${temp !== null ? `, ${temp} °C` : ""}`, region: e.name, season, sky, tempC: temp, closed: level >= 4 ? st?.closes ?? [] : [] };
+  return { level, label: `${word.charAt(0).toUpperCase()}${word.slice(1)}${raw !== null ? `, ${formatTemperature(raw)}` : ""}`, region: e.name, season, sky, tempC: temp, closed: level >= 4 ? st?.closes ?? [] : [] };
 }
 function stepRegions(slot, ctx, rng) {
   const level = ctx.levelOf(ctx.world.pov, "weather");
@@ -26862,7 +26874,7 @@ function stepAgent2(slot, ctx, rngFor, who) {
 }
 function invitationText(ctx, agent, place, at, viewer) {
   const named = place !== null && (viewer === undefined || canSeePlace(ctx.registry, ctx.world, ctx.state, viewer, place)) ? own(ctx.world.places, place)?.name ?? place : null;
-  return `${own(ctx.state.entities, agent)?.name ?? agent} invites you to ${named ?? "meet up"} at ${formatHHMM(dateAt(calendarOf(ctx.world), at).minuteOfDay)}.`;
+  return `${own(ctx.state.entities, agent)?.name ?? agent} invites you to ${named ?? "meet up"} at ${formatTimeOfDay(dateAt(calendarOf(ctx.world), at).minuteOfDay)}.`;
 }
 function dropUnlived(slot, ctx) {
   const plans = optionalQuery(ctx, "minds.plans");
@@ -27112,8 +27124,8 @@ function playerBlocks(ctx, who, plan2) {
   const applied = new Map(activeBlocks(ctx, who, plan2.day).map((a) => [a.block.id, a]));
   const open = loreGateReader(ctx.registry, ctx.world, ctx.state);
   return plan2.blocks.map((b) => {
-    const from = formatHHMM(dateAt(cal, b.start).minuteOfDay);
-    const to = formatHHMM(dateAt(cal, b.end).minuteOfDay);
+    const from = formatTimeOfDay(dateAt(cal, b.start).minuteOfDay);
+    const to = formatTimeOfDay(dateAt(cal, b.end).minuteOfDay);
     const routineId = b.option.startsWith(ROUTINE_OPTION) ? b.option.slice(ROUTINE_OPTION.length).replace(/:carried$/, "") : null;
     const a = routineId !== null ? applied.get(routineId) : undefined;
     if (b.option.startsWith(AGENDA_OPTION) && !publicTrack(ctx.world, b.option.slice(AGENDA_OPTION.length)) || a?.block.private === true)
@@ -59671,7 +59683,7 @@ I then re-measured with the engine's own \`extract\` step as shipped (strict rul
 5. **Timelapse and Pause/Resume clock** through the palette's Timelapse sheet and the Calendar panel. No command-palette commands are registered.
 
 **Execution.**
-- Palette, action-chip and map actions append a user message (text plus \`intent\`) with \`triggerGeneration\`. An action marked \`mechanical\` (bookkeeping the player does alone: trades, option exercises, routing payouts, moves between their own accounts, paying a card, autopay, card states, standing payments, how they pay) sent with no words is no turn: \`lre.action\` resolves it against the head (requirements, then effects; no rules fire, no clock time), records it as a \`fix\` entry on the head, so it is deferred in a reply's window and has the ✎ fix's Undo, and answers \`{applied, pending}\` with no message; a failed requirement or a refused effect records nothing and comes back as the request's error. With words, it plays as a turn like any action.
+- Chip and command actions, and any \`lre.action\` sent with words or with \`now\`, append a user message (text plus \`intent\`) with \`triggerGeneration\`. A palette, panel or map tap with no words never plays blind: it is **staged** for the chat (\`backend/staged.ts\`, \`runs/<chat>/staged.json\`, one per chat, in the view as \`staged\`), answered \`{staged}\` with no message: another tap replaces it, the same tap (action and params) clears it. The status line and the pill show "With your next message: …" with Send now (\`now\`) and ✕. The player's next message takes it (\`takeStaged\`, on the host's message event and again before the turn reads its intent, whichever comes first; only a message after the one that was last when it was staged): its action, params and source are written onto that message's metadata with \`described\`, as an action sent with words is, so the judge rates the words and a swipe, Re-run or Continue plays it alike; then the stage clears. An action marked \`mechanical\` (bookkeeping the player does alone: trades, option exercises, routing payouts, moves between their own accounts, paying a card, autopay, card states, standing payments, how they pay) sent with no words is no turn: \`lre.action\` resolves it against the head (requirements, then effects; no rules fire, no clock time), records it as a \`fix\` entry on the head, so it is deferred in a reply's window and has the ✎ fix's Undo, and answers \`{applied, pending}\` with no message; a failed requirement or a refused effect records nothing and comes back as the request's error. With words, it plays as a turn like any action. An outside agent's \`lre_action\` and \`lre_timelapse\` send \`now\`.
 - Resolution runs requirements, then the check, then effects, then the duration.
 - The Outcome slot says the result is decided, worded for how the adjudication policy decided it (below).
 - An unmet requirement reads as a plain decline ("Not possible here and now: you need to have it with you"; "You're already there."), never as its expression, on its chip and in the Outcome alike: an expression may name a secret track or someone the player doesn't know. The shapes a decline names are the ones \`interpret\`'s catalog words an action's needs with (\`backend/requirement-words.ts\`, §5.2).
@@ -61201,7 +61213,7 @@ Every ✎ fix is checked before it is saved: a value outside the field's range (
 
 ### Under each reply
 
-Under each reply the engine tells you what it did and asks what it needs to ask. Each thing it says is a **chip**, and a chip shows in one of three ways:
+Under each reply the engine ran, a quiet line gives the world's date and time once that turn ended, for the swipe you're looking at, as the clock reads where your character is ("Tue 15 Sep 2026, 12:25 PM"). Times you see read on a 12-hour clock, and temperatures in °F. Under it the engine tells you what it did and asks what it needs to ask. Each thing it says is a **chip**, and a chip shows in one of three ways:
 
 - **The receipt**: one quiet line for what the turn did, at most three parts long (anything that went wrong first, then the time, money, the roll and the changes), then "n more". Tap it for the full list, where every chip shows with its own buttons (**Undo**, **Edit amount** and so on).
 - **Decision cards**: a card for each thing that needs your answer, with its buttons. A card marked **Answer before you send** lapses when you send your next message. The Keep report is a card of its own.
@@ -61263,7 +61275,7 @@ The **Actions** sheet opens from the input bar's **World actions…** button, fr
 - **Timelapse**: duration buttons, *until* targets and interrupt overrides. See [Timelapse](#timelapse).
 - **Combat**: in a world with combat, the actions that start a fight (**Fight**, and any ambush the world has) against whoever they may target; during a fight, your combat actions against each standing fighter you can see, with their exact odds, and **End turn**, under the round, whose turn it is and what you have left. While it's your turn in a fight, the sheet opens on this tab. See [Combat and encounters](#combat-and-encounters).
 
-Actions that need a second pick show a second list, indented under the pick it follows; choosing again at any step replaces that pick and the ones after it. Only the tabs that have entries appear. The header holds **Pause clock** / **Resume clock** and a close button; the button at the foot of the sheet names your choice (for example "Drive: *vehicle* → *destination*"). Picking something adds a message to the chat with the action attached, and triggers the reply. The engine settles it first, then the narrator describes a result that is already decided.
+Actions that need a second pick show a second list, indented under the pick it follows; choosing again at any step replaces that pick and the ones after it. Only the tabs that have entries appear. The header holds **Pause clock** / **Resume clock** and a close button; the button at the foot of the sheet names your choice (for example "Drive: *vehicle* → *destination*"). Picking something, here, in a panel such as Money or on the map, doesn't play it yet: it waits for your next message, and the status line (on a desktop, the pill) says **With your next message:** and the action. Send your message and it plays that action, with your words as how you go about it, and the engine settles it first, then the narrator describes a result that is already decided. Picking the same thing again, or ✕, clears it; picking another replaces it; **Send now** plays it at once with no words. Bookkeeping you do alone, such as moving money between your own accounts, still happens at once (see [Your money](#your-money)).
 
 The input bar has four buttons for the world: **World actions…**, **Timelapse…**, **Pause clock** / **Resume clock** and **World map**. They work only in a world chat.
 
@@ -61279,7 +61291,7 @@ You don't have to use the Actions sheet. Every message you type is read by a sma
 
 A message can also take a move for granted. "I sit down next to Marcus" while your character is at the market has you somewhere you aren't, so it is read as going first to where you last saw Marcus, as if you had said so; the same goes for something that belongs to another place ("at the shop's counter"). And when the last reply's chip held the rest of your message, a message that takes those actions as done ("I set my chips and soda on the counter") plays them first, in order. If the reading misses a move anyway and the reply has you somewhere the engine doesn't, the reply gets an **Apply** chip for that move: see **Moving somewhere** in [Extraction modes](#extraction-modes).
 
-What the helper reads besides your message: what your character can do now (the world's own actions and the built-in ones, each with a line on what it does, what it takes, such as the people and things it can name, and what it needs, in words), where and when you are, who is there, the people your message names who aren't with you (with where and how long ago you last saw them), what you carry, your vehicles, the invitations waiting on your answer, what your last message left unplayed and the places you know, all as your character knows them, and the messages before yours, so a line that hangs on the last reply ("I take what she offered", "I follow him out") is read from it. A stage direction ("[Tommy heads to the roof]") or the story told about your character counts as what you do; a line that is only speech, or out of character ("((OOC: …))"), plays as roleplay, unless it tells time to pass (below). When it can't tell what you mean, it reads no action rather than guess. How far back it reads is the **Recent messages** setting on the *Interpret typed input* card in **Settings → Steps and connections**: the last 8 messages and about 3,000 tokens unless you change it (0 messages reads none); a long reply that doesn't fit whole is read from its end.
+What the helper reads besides your message: what your character can do now (the world's own actions and the built-in ones, each with a line on what it does, what it takes, such as the people and things it can name, and what it needs, in words), where and when you are, who is there, the people your message names who aren't with you (with where and how long ago you last saw them), what you carry, your vehicles, the invitations waiting on your answer, what your last message left unplayed and the places you know, all as your character knows them, and the messages before yours, so a line that hangs on the last reply ("I take what she offered", "I follow him out") is read from it. A stage direction ("[Tommy heads to the roof]") or the story told about your character counts as what you do; a line that is only speech, or out of character ("((OOC: …))"), plays as roleplay, unless it tells time to pass (below). When it can't tell what you mean, it reads no action rather than guess. How far back it reads is the **Recent chat** setting on the *Interpret typed input* card in **Settings → Steps and connections**: the last 8 messages and about 3,000 tokens unless you change it (either can be **no limit**, and switching it off reads none); a long reply that doesn't fit whole is read from its end.
 
 Typed text can also let time pass ("wait until noon", "sleep until the next morning", "skip ahead to Friday at 6 PM"). An out-of-character time skip is always read as one, whatever else your message says: "OOC: over the next hour, I sort the stock", "(OOC: skip ahead two hours)", "[OOC] later that evening". So is time your character spends on something no action covers ("I spend the next hour sorting the stock"). What you say happens in that time is what fills it, and the reply tells it: the turn is a Timelapse of that span, run just as one from the **Timelapse** tab is (with character minds on, a [time skip](#character-minds)), never the activity you describe at its usual length. The span is read from your own words, the same way every time: a length ("over the next hour", "for the next two hours", "half an hour", "an hour and a half"), a part of the day ("skip ahead to evening", "later that night", "tomorrow morning"), your next shift or commitment ("until my next shift"), or a day and time you name. A message that doesn't ask for time to pass is never made a Timelapse by the time words in it: "“I'll be back in an hour,” I tell Danny" is only speech. Time you let pass in character after your actions ("…then wait two hours") is offered as a chip once they have all played, as described above.
 
@@ -61736,7 +61748,7 @@ Every model call the engine makes for itself (reading your actions and the reply
 
 Picking a preset never changes the helper model. The Decisions API takes no effort, max tokens or sampling parameters, so steps on it run with their connection's own settings.
 
-Each step can set its own, in **Settings → Steps and connections**, which opens with a **Helper model** row that leads to the page above. Each step is a card that shows what it runs on: *Helper*, the connection, the model, the effort, the max tokens and any parameter set; or *Decision* and its connection; or **Off**. Open it for a line on what the step does, **Enabled**, a **Provider** (*Decision* or *Helper*), a **Connection** and, for a connection you picked, a **Model**; then for a helper step **Reasoning effort**, **Max tokens** and, under **Sampling parameters**, each parameter. Each starts at **Use helper default**, and the card shows the helper model's value beside it; whatever the step sets wins over the helper model's, one by one. *Interpret typed input* also has **Recent messages**: how many of the messages before yours it reads (**Messages**, 8 unless you change it) and about how many tokens of them (**Tokens**, 3,000), the newest first; neither has a ceiling. Under **Advanced: signals and lore** are its **Signals** and lore. Nothing is cut or simplified because a model is small; each default is a tap to change. Picking **Lean**, **Standard** or **Full** in **Settings → Model use** replaces every step's settings with the preset's, connections and models included, so pick the preset first; changing a step afterwards makes it **Custom** and keeps the rest.
+Each step can set its own, in **Settings → Steps and connections**, which opens with a **Helper model** row that leads to the page above. Each step is a card that shows what it runs on: *Helper*, the connection, the model, the effort, the max tokens and any parameter set; or *Decision* and its connection; or **Off**. Open it for a line on what the step does, **Enabled**, a **Provider** (*Decision* or *Helper*), a **Connection** and, for a connection you picked, a **Model**; then for a helper step **Reasoning effort**, **Max tokens** and, under **Sampling parameters**, each parameter. Each starts at **Use helper default**, and the card shows the helper model's value beside it; whatever the step sets wins over the helper model's, one by one. Every step but the minds steps has **Recent chat**: **Reads recent chat**, and while it's on how many of the messages before this turn's it reads (**Messages**) and about how many tokens of them (**Tokens**), each a number or **no limit**, the newest first, stopping at whichever limit comes first; the step gets them, oldest first, as a "Recent chat" block after its own input. *Interpret typed input* reads 8 messages and 3,000 tokens unless you change it; every other step reads none until you switch it on. Under **Advanced: signals and lore** are its **Signals** and lore. Nothing is cut or simplified because a model is small; each default is a tap to change. Picking **Lean**, **Standard** or **Full** in **Settings → Model use** replaces every step's settings with the preset's, connections and models included, so pick the preset first; changing a step afterwards makes it **Custom** and keeps the rest.
 
 By default, the helper model handles \`interpret\`, \`extract\`, \`contradiction\`, the prose steps and the minds, and your **Decision connection** (Lumiverse's Decisions API) handles \`npc.choose\`. The Decisions API takes no reasoning effort or max tokens, so a Decision step runs with its connection's own settings. If a decision call fails, the step falls back to the helper model, and then to the engine alone. A failed call is never blindly retried, and neither a repair of malformed JSON nor a decision falling back to the helper is charged against a budget. The model and connection you pick for a step are the ones its call uses.
 
@@ -63439,7 +63451,7 @@ var package_default = {
 // src/cli/version.ts
 var CLI_NAME = "lumirpengine";
 var CLI_VERSION = package_default.version;
-var BUILD = "ce78f09b";
+var BUILD = "abaffcd0";
 function runtimeCannotFollow(bun) {
   if (bun === undefined)
     return null;
@@ -65135,8 +65147,8 @@ function action(args, ctx) {
     throw new ToolError("params is an object: the picked option's params, as /palette/entries/<i>/options/<j>/params shows them.");
   const text5 = textArg(args, "text");
   return ctx.serialize(`chat:${chatId}`, async () => {
-    const body = await ask(ctx, chatId, "lre.action", { chatId, action: id, params, source: "palette", ...text5 !== undefined && text5.trim() !== "" ? { text: text5 } : {} });
-    return { text: json("messageId" in body ? { chatId, action: id, messageId: body.messageId, reply: REPLY } : { chatId, action: id, applied: true, pending: body.pending }) };
+    const body = await ask(ctx, chatId, "lre.action", { chatId, action: id, params, source: "palette", now: true, ...text5 !== undefined && text5.trim() !== "" ? { text: text5 } : {} });
+    return { text: json("messageId" in body ? { chatId, action: id, messageId: body.messageId, reply: REPLY } : { chatId, action: id, applied: true, pending: "pending" in body ? body.pending : false }) };
   });
 }
 function timelapse(args, ctx) {
@@ -65155,7 +65167,7 @@ function timelapse(args, ctx) {
     if (offered.blocked !== null)
       throw new ToolError(`Chat ${chatId} can't timelapse now: ${offered.blocked}`);
     const params = { target, overrides };
-    const body = await ask(ctx, chatId, "lre.action", { chatId, action: offered.action, params, source: "palette", ...text5 !== undefined && text5.trim() !== "" ? { text: text5 } : {} });
+    const body = await ask(ctx, chatId, "lre.action", { chatId, action: offered.action, params, source: "palette", now: true, ...text5 !== undefined && text5.trim() !== "" ? { text: text5 } : {} });
     return { text: json({ chatId, action: offered.action, target, messageId: "messageId" in body ? body.messageId : null, reply: REPLY }) };
   });
 }

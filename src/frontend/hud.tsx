@@ -15,7 +15,7 @@ import { FixEditor } from "./fix-editor";
 import { formatCents, formatMinutes, humanize } from "./format";
 import { Icon } from "./icons";
 import { hudMode, isMobile } from "./layout";
-import { timeMarker } from "./requests";
+import { stagedRequest, timeMarker } from "./requests";
 import { useSelect } from "./store";
 
 type FixKey = "time" | "place" | "weather" | "cash" | "scene";
@@ -63,7 +63,7 @@ export function Hud(props: { resize(size: HudSize): void }) {
     const observer = new ResizeObserver(measure);
     observer.observe(target);
     return () => observer.disconnect();
-  }, [open, mode, viewport.width, viewport.height, hud, activity?.state, activity?.label]);
+  }, [open, mode, viewport.width, viewport.height, hud, activity?.state, activity?.label, view?.staged?.label]);
 
   // Closing the details hands focus back to the pill instead of dropping it on the page. When they
   // closed for Map or Actions, that opens now, from the pill, so closing it returns focus there.
@@ -143,7 +143,32 @@ export function Hud(props: { resize(size: HudSize): void }) {
       )}
       {activity ? <ActivityLine compact={mode !== "full"} /> : view.status === "in_flight" ? <span class="lre-chat-pulse" role="img" aria-label="A turn is in progress" title="A turn is in progress" /> : null}
       {view.status === "paused" ? <Badge tone="warn">Paused</Badge> : null}
+      <StagedAction view={view} />
     </div>
+  );
+}
+
+/**
+ * The action staged for the player's next message (DESIGN §11): "With your next message: …", with
+ * Send now, which plays it with no words, and ✕, which clears it. Nothing when none is staged.
+ */
+function StagedAction(props: { view: StateView }) {
+  const app = useApp();
+  const [busy, run] = useBusy();
+  const staged = props.view.staged;
+  if (!staged) return null;
+  const send = (now: boolean) =>
+    run(async () => {
+      await app.request(stagedRequest(props.view.chatId, staged, now));
+    });
+  return (
+    <span class="lre-chat-staged" data-lre-staged role="group" aria-label="Staged action">
+      <span class="lre-chat-staged-text">With your next message: {staged.label}</span>
+      <Button variant="secondary" size="sm" icon="send" busy={busy} onClick={() => send(true)}>
+        Send now
+      </Button>
+      <IconButton icon="close" label="Clear the staged action" disabled={busy} onClick={() => send(false)} />
+    </span>
   );
 }
 
@@ -353,6 +378,7 @@ export function StatusLine() {
         {view.status === "paused" ? <Badge tone="warn">Paused</Badge> : null}
       </button>
       {activity?.state === "failed" ? <ActivityLine compact /> : null}
+      <StagedAction view={view} />
       <Button variant="primary" size="sm" icon="bolt" title="Actions" onClick={() => void app.overlays.openPalette("actions")}>
         Act
       </Button>

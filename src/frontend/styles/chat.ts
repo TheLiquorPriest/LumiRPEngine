@@ -88,6 +88,8 @@ export const CHAT_CSS = `
 .lre .lre-chat-status>.lre-btn{flex:none;border-radius:var(--lre-r-pill);padding:0 var(--lre-s4)}
 .lre .lre-chat-pulse{flex:none;width:10px;height:10px;border-radius:50%;background:var(--lre-accent);animation:lre-chat-pulse 1.4s ease-in-out infinite}
 @keyframes lre-chat-pulse{50%{opacity:.3;transform:scale(.7)}}
+.lre .lre-chat-staged{flex:0 1 auto;display:flex;align-items:center;gap:var(--lre-s1);min-width:0;padding-left:var(--lre-s2);border-left:1px solid var(--lre-hairline)}
+.lre .lre-chat-staged-text{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:var(--lre-fs-sm);color:var(--lre-accent-text)}
 
 .lre .lre-hud{display:flex;align-items:center;gap:2px;height:100%;padding:0 var(--lre-s1);border:1px solid var(--lre-border);border-radius:var(--lre-r-pill);background:var(--lre-bar-bg);box-shadow:var(--lre-shadow-lg);overflow:hidden;font-size:var(--lre-fs-sm)}
 .lre .lre-hud>button{display:inline-flex;align-items:center;justify-content:center;gap:6px;min-width:var(--lre-tap);min-height:var(--lre-tap);padding:0 var(--lre-s2);border:0;border-radius:var(--lre-r-pill);background:transparent;white-space:nowrap;transition:background-color var(--lre-fast)}

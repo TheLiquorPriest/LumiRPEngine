@@ -317,12 +317,16 @@ export interface StateView {
   hud: HudView | null;
   scene: SceneView | null;
   chips: Chip[];
+  /** Under each reply the engine ran, the world's date and time once its turn ended, for the swipe shown, local to where the POV is (as the HUD reads it): `formatClock`'s "Tue 15 Sep 2026, 12:25 PM". */
+  replyClocks: Record<MessageId, string>;
   journal: JournalNote[];
   keepReport: KeepLine[];
   pending: PendingMark[];
   /** Pack panel views keyed by `<packId>.<panel>`; each pack's `core/view.ts` owns the shape. */
   panels: Record<PanelId, JsonValue>;
   palette: PaletteView | null;
+  /** The action staged for the player's next message (DESIGN §11): its request as tapped, so ✕ and Send now resend it, and its words. Absent or null: none. */
+  staged?: { action: string; params: JsonObject; source: "palette" | "map" | "command" | "chip"; label: string } | null;
   controls: ControlsView | null;
   meter: CallMeterView | null;
   packs: Record<PackId, number>;

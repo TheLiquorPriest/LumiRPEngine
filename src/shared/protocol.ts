@@ -94,7 +94,11 @@ export interface RestartRequest extends Request<"lre.restart"> {
   turn: string;
 }
 
-/** A palette, map, command or chip action; the backend appends a user message with `intent` and triggers a generation. */
+/**
+ * A palette, map, command or chip action. From the palette, a panel or the map with no words it is
+ * staged for the player's next message (DESIGN §11), and the same tap again clears it; `now` plays it
+ * at once, as a chip or a command does: the backend appends a user message with `intent` and triggers a generation.
+ */
 export interface ActionRequest extends Request<"lre.action"> {
   chatId: ChatId;
   action: ActionId;
@@ -102,6 +106,8 @@ export interface ActionRequest extends Request<"lre.action"> {
   source: "palette" | "map" | "command" | "chip";
   /** Optional user-visible text for the appended message. */
   text?: string;
+  /** Play it at once rather than stage it (the staged action's Send now). */
+  now?: boolean;
 }
 
 export interface ChipRequest extends Request<"lre.chip"> {
@@ -707,8 +713,8 @@ export interface ResultBodies {
   "lre.state.resync": { accepted: true };
   "lre.restart": { start: boolean };
   "lre.page": { accepted: true };
-  /** The player's message the action plays as; or, for a mechanical action sent with no words (`ActionDef.mechanical`), its bookkeeping recorded on the head with no message and no reply (`pending` while a reply is in flight). */
-  "lre.action": { messageId: MessageId } | { applied: true; pending: boolean };
+  /** The player's message the action plays as; for a mechanical action sent with no words (`ActionDef.mechanical`), its bookkeeping recorded on the head with no message and no reply (`pending` while a reply is in flight); or, staged for the next message, whether it is staged now (false: the same tap cleared it). */
+  "lre.action": { messageId: MessageId } | { applied: true; pending: boolean } | { staged: boolean };
   "lre.chip": { applied: boolean; pending: boolean };
   "lre.view.open": { materialized: boolean; pending: boolean };
   "lre.fix": { pending: boolean };

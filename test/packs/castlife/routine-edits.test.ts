@@ -145,25 +145,25 @@ describe("the routine read model", () => {
     expect(block("sleep")).toMatchObject({ owner: { level: "builtin" }, source: { type: "builtin" } });
     // Her day as laid says why each block is there.
     const laid = (from: string) => view.day.blocks.find((b) => b.from === from)?.origin;
-    expect(laid("18:00")).toMatchObject({ type: "routine", block: "evening", owner: { level: "own" }, source: { type: "lore", entry: "anchor_nights" } });
-    expect(laid("06:00")).toMatchObject({ type: "schedule", schedule: "maya_shift" });
-    expect(laid("14:30")).toMatchObject({ type: "routine", block: "tea", owner: { level: "chat" }, source: { type: "gm" } });
+    expect(laid("6:00 PM")).toMatchObject({ type: "routine", block: "evening", owner: { level: "own" }, source: { type: "lore", entry: "anchor_nights" } });
+    expect(laid("6:00 AM")).toMatchObject({ type: "schedule", schedule: "maya_shift" });
+    expect(laid("2:30 PM")).toMatchObject({ type: "routine", block: "tea", owner: { level: "chat" }, source: { type: "gm" } });
   });
 
   test("the player reads only what Cast may: no secret, no GM change, no place or company, lore named only when the POV may read it", () => {
     const w = sourced();
     const view = routinePlayerView(w.ctx, "maya");
     const block = (from: string) => view?.day?.blocks.find((b) => b.from === from);
-    expect(block("18:00")).toMatchObject({ from: "18:00", to: "21:00", label: "Pours pints", kind: "work", source: { type: "lore", entry: "anchor_nights", title: "Friday nights at the Anchor" } });
-    expect(Object.keys(block("18:00") ?? {}).sort()).toEqual(["from", "kind", "label", "reasons", "source", "to"]);
+    expect(block("6:00 PM")).toMatchObject({ from: "6:00 PM", to: "9:00 PM", label: "Pours pints", kind: "work", source: { type: "lore", entry: "anchor_nights", title: "Friday nights at the Anchor" } });
+    expect(Object.keys(block("6:00 PM") ?? {}).sort()).toEqual(["from", "kind", "label", "reasons", "source", "to"]);
     // A secret entry is never named: the block reads as her routine.
-    expect(block("15:00")?.source).toEqual({ type: "routine" });
+    expect(block("3:00 PM")?.source).toEqual({ type: "routine" });
     // A private block is her own business: neither its label nor what it rests on.
-    expect(block("16:00")?.source).toEqual({ type: "routine" });
-    expect(block("16:00")?.label).not.toBe("Sketches");
+    expect(block("4:00 PM")?.source).toEqual({ type: "routine" });
+    expect(block("4:00 PM")?.label).not.toBe("Sketches");
     // The GM's change reads as her routine; the story's as the story.
-    expect(block("14:30")?.source).toEqual({ type: "routine" });
-    expect(block("21:00")?.source).toEqual({ type: "story" });
+    expect(block("2:30 PM")?.source).toEqual({ type: "routine" });
+    expect(block("9:00 PM")?.source).toEqual({ type: "story" });
     const text = JSON.stringify(view);
     for (const hidden of ["chen_debts", "The Chens' debts", "Sketches", "notebook", "hobbies", "gm", "rosa", "Rosa", "pub", "The Anchor", "lake", "cafe", "Daybreak", "maya_flat", "market"]) expect(text).not.toContain(hidden);
   });

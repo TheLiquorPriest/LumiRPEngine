@@ -14,6 +14,7 @@ import { DEFAULT_HELPER, EXTRACTION_DEFAULTS, EXTRACTION_LEARNING, EXTRACTION_TY
 import type { BoundMode } from "../shared/ids";
 import type { StepPurpose } from "../shared/world";
 import { currentSignals } from "../shared/steps";
+import type { Limit } from "../shared/minds";
 import { defaultMindsSettings, isMindPurpose, migrateMindReads, MINDS_PRESETS, mindsSettingsOf } from "../shared/minds";
 import { defaultTimeouts, migrateTimeouts, timeoutsOf } from "../shared/timeouts";
 import { JOB_SETTINGS_DEFAULTS, jobSettingsOf } from "../shared/settings";
@@ -340,12 +341,16 @@ function stepOf(v: unknown, base: StepConfig | undefined, purpose: StepPurpose):
   };
 }
 
-/** How much history a step reads: whole numbers from 0, with no ceiling; one that isn't reads as unset. */
+/**
+ * How much history a step reads: whole numbers from 0 or `"none"` (no limit), with no ceiling; one
+ * that isn't reads as unset. Saved before the switch, only `interpret` had it, so a missing `on` reads on.
+ */
 function recentHistoryOf(v: unknown): RecentHistory | undefined {
   if (!isRecord(v)) return undefined;
-  const messages = atLeast(v.messages, 0);
-  const tokens = atLeast(v.tokens, 0);
-  return messages !== undefined && tokens !== undefined ? { messages, tokens } : undefined;
+  const limit = (x: unknown): Limit | undefined => (x === "none" ? "none" : atLeast(x, 0));
+  const messages = limit(v.messages);
+  const tokens = limit(v.tokens);
+  return messages !== undefined && tokens !== undefined ? { on: typeof v.on === "boolean" ? v.on : true, messages, tokens } : undefined;
 }
 
 /**

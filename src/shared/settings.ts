@@ -149,22 +149,30 @@ export interface StepConfig {
   maxTokens?: number;
   /** The step's lore policy; a settings file without one reads with its preset's. */
   lore?: StepLore;
-  /** The messages before the turn's that the step reads (`interpret` only); absent: `DEFAULT_RECENT`. */
+  /** The messages before the turn's that the step reads; absent: `interpret` reads `DEFAULT_RECENT`, every other step none (`recentOf`). */
   recent?: RecentHistory;
 }
 
-/** How much of the chat before the turn's message a step reads: the latest messages, at most `messages` of them and about `tokens` in all. */
+/**
+ * How much of the chat before the turn's message a step reads: whether it reads any, and the latest
+ * messages, newest first, at most `messages` of them and about `tokens` in all, either one `"none"`
+ * for no limit; it stops at whichever limit comes first.
+ */
 export interface RecentHistory {
-  messages: number;
-  tokens: number;
+  on: boolean;
+  messages: Limit;
+  tokens: Limit;
 }
 
 /** What `interpret` reads before the typed message unless its card says otherwise: the last 8 messages, about 3,000 tokens. */
-export const DEFAULT_RECENT: Readonly<RecentHistory> = Object.freeze({ messages: 8, tokens: 3000 });
+export const DEFAULT_RECENT: Readonly<RecentHistory> = Object.freeze({ on: true, messages: 8, tokens: 3000 });
 
-/** The step's recent-history setting: its own, else `DEFAULT_RECENT`. */
-export function recentOf(config: StepConfig | null | undefined): Readonly<RecentHistory> {
-  return config?.recent ?? DEFAULT_RECENT;
+/** What every other step reads unless its card turns it on: nothing, with interpret's limits ready for when it is. */
+export const RECENT_OFF: Readonly<RecentHistory> = Object.freeze({ ...DEFAULT_RECENT, on: false });
+
+/** The step's recent-history setting: its own, else `interpret`'s default or, for every other step, off. */
+export function recentOf(purpose: StepPurpose, config: StepConfig | null | undefined): Readonly<RecentHistory> {
+  return config?.recent ?? (purpose === "interpret" ? DEFAULT_RECENT : RECENT_OFF);
 }
 
 /** Lore lookups a phase may make besides its calls: rounds. When one may still begin is a timeout (`TimeoutSettings`). */
