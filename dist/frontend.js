@@ -22945,7 +22945,7 @@ var GROUPS2 = [
   { title: "Story", collections: ["tracks", "lore"] },
   { title: "Engine", collections: ["tables", "sections", "steps", "packs"] }
 ];
-var PARTS2 = ["meta", "calendar", "realism", "tiers", "time", "ruleset", "loreIndex", "minds", "lorePins", "routineSettings"];
+var PARTS2 = Object.keys(PART_INFO);
 var TOOLS = ["import_lore", "index_book", "index_text", "refine", "describe_map", "propose_routines", "playtest", "check_world"];
 function Build() {
   const route = useUi((ui) => ui.build);
