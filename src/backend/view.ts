@@ -40,7 +40,7 @@ import type { StoredChip } from "./chips";
 export const TIMELAPSE_ACTION = "timelapse";
 
 export function notWorldView(chatId: ChatId): StateView {
-  return { v: 1, chatId, worldId: null, revision: null, status: "not_world", hud: null, scene: null, chips: [], journal: [], keepReport: [], pending: [], panels: {}, palette: null, controls: null, meter: null, packs: {}, currency: null };
+  return { v: 1, chatId, worldId: null, revision: null, status: "not_world", hud: null, scene: null, chips: [], replyClocks: {}, journal: [], keepReport: [], pending: [], panels: {}, palette: null, controls: null, meter: null, packs: {}, currency: null };
 }
 
 const GROUPS: Record<string, PaletteEntry["group"]> = { buy: "buy", purchase: "buy", pay: "pay", transfer: "transfer", drive: "drive", lend: "lend" };
@@ -663,6 +663,7 @@ export function buildView(input: ViewInput): StateView {
       hud: hud(world, state, panels, ctx),
       scene: sceneView,
       chips,
+      replyClocks: replyClocks(chain, fold, core, world, state),
       journal: [...turnNotes(chain, fold, core, registry, world, state), ...drops.notes],
       keepReport: drops.keep,
       pending,
@@ -674,6 +675,19 @@ export function buildView(input: ViewInput): StateView {
       currency: world.currency,
     };
   });
+}
+
+/** Each reply the engine ran, by its shown swipe, with the world's date and time once its turn folded, local to where the POV is now (as the HUD reads it). */
+function replyClocks(chain: readonly ChainMessage[], fold: FoldOutput, core: LedgerCore, world: WorldDoc, state: Readonly<WorldState>): Record<string, string> {
+  const cal = calendarOf(world);
+  const place = placeOfEntity(state, world.pov);
+  const out: Record<string, string> = {};
+  chain.forEach((m, i) => {
+    const clock = fold.messages[i]?.clock ?? null;
+    if (m.isUser || clock === null || !activeRecord(m, core.journal.tombstones)) return;
+    out[m.id] = formatClock(cal, clock, placeOffset(world, clock, place));
+  });
+  return out;
 }
 
 function povEntity(world: WorldDoc): EntityId {

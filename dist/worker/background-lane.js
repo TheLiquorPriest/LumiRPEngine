@@ -1074,6 +1074,9 @@ function lifeStateOf(world, id) {
 function grouped(n) {
   return n.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",");
 }
+function formatTemperature(celsius) {
+  return `${Math.round(celsius * 9 / 5 + 32)} \xB0F`;
+}
 function formatMoney(minorUnits, currency) {
   const units = BigInt(Math.trunc(minorUnits));
   const negative = units < 0n;
@@ -1721,6 +1724,11 @@ function formatHHMM(minuteOfDay) {
   const m = mod(minuteOfDay, MINUTES_PER_DAY);
   return `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
 }
+function formatTimeOfDay(minuteOfDay) {
+  const m = mod(minuteOfDay, MINUTES_PER_DAY);
+  const h = Math.floor(m / 60);
+  return `${h % 12 === 0 ? 12 : h % 12}:${String(m % 60).padStart(2, "0")} ${h < 12 ? "AM" : "PM"}`;
+}
 function daysFromCivil(y, m, d) {
   const yy = m <= 2 ? y - 1 : y;
   const era = floorDiv(yy, 400);
@@ -1916,7 +1924,7 @@ function weekdayName(cal, weekday) {
 }
 function formatClock(cal, clock, offsetMinutes = 0) {
   const d = dateAt(cal, clock + offsetMinutes);
-  return `${weekdayName(cal, d.weekday)} ${d.day} ${monthName(cal, d.month)} ${d.year}, ${formatHHMM(d.minuteOfDay)}`;
+  return `${weekdayName(cal, d.weekday)} ${d.day} ${monthName(cal, d.month)} ${d.year}, ${formatTimeOfDay(d.minuteOfDay)}`;
 }
 function dayPartAt(cal, clock) {
   const m = dateAt(cal, clock).minuteOfDay;
@@ -4209,11 +4217,14 @@ function isLorePin(v) {
   const keys = Object.keys(v).length;
   if (v.lore !== undefined)
     return typeof v.lore === "string" && v.lore !== "" && keys === 1;
-  return typeof v.book === "string" && v.book !== "" && typeof v.entry === "string" && v.entry !== "" && keys === 2;
+  if (typeof v.book !== "string" || v.book === "")
+    return false;
+  return v.entry === undefined ? keys === 1 : typeof v.entry === "string" && v.entry !== "" && keys === 2;
 }
 function lorePinKey(pin) {
-  return "lore" in pin ? `lore:${pin.lore}` : `book:${pin.book}/${pin.entry}`;
+  return "lore" in pin ? `lore:${pin.lore}` : ("entry" in pin) ? `book:${pin.book}/${pin.entry}` : `book:${pin.book}`;
 }
+var PIN_STEPS = LORE_AUDIENCE.filter((p) => p !== "memory" && p !== "skip" && p !== "consolidate");
 var pinsRead = new WeakMap;
 function loreTerm(text) {
   return text.trim().replace(/\s+/g, " ").toLowerCase();
@@ -5063,6 +5074,8 @@ function rawLine(reg, world, state, pov, e, player, you) {
       const kind = own(state.entities, e.entity)?.kind ?? "";
       if (e.field === "place" && typeof e.value === "string")
         return `${name(e.entity)} \u2192 ${name(e.value)}`;
+      if (e.field === "temp_c" && typeof e.value === "number")
+        return `${name(e.entity)}: Temperature ${formatTemperature(e.value)}`;
       const ctx = player && e.field === "activity" && typeof e.value === "string" ? reg.context(world, state) : null;
       const shownActivity = ctx ? optionalQuery(ctx, "castlife.activity") : null;
       const value = ctx && shownActivity && typeof e.value === "string" ? shownActivity(ctx, e.entity, e.value) : e.value;
@@ -8280,11 +8293,11 @@ function lintLorePins(world) {
     issues.push({ severity, path, code, message });
   };
   if (!isRecord(raw))
-    return [{ severity: "error", path: "lorePins", code: "pin_shape", message: "Lore pins are an object of characters and places; none are read." }];
+    return [{ severity: "error", path: "lorePins", code: "pin_shape", message: "Lore pins are an object of characters, places and steps; none are read." }];
   for (const key of Object.keys(raw))
-    if (key !== "characters" && key !== "places")
+    if (key !== "characters" && key !== "places" && key !== "steps")
       push("warning", `lorePins.${key}`, "pin_shape", `"${key}" isn't part of the lore pins; nothing reads it.`);
-  for (const part of ["characters", "places"]) {
+  for (const part of ["characters", "places", "steps"]) {
     const targets = raw[part];
     if (targets === undefined)
       continue;
@@ -8294,9 +8307,9 @@ function lintLorePins(world) {
     }
     for (const [id, list] of Object.entries(targets)) {
       const path = `lorePins.${part}.${id}`;
-      const name = part === "characters" ? hasOwn(world.entities, id) ? world.entities[id]?.name : undefined : hasOwn(world.places, id) ? world.places[id]?.name : undefined;
+      const name = part === "characters" ? hasOwn(world.entities, id) ? world.entities[id]?.name : undefined : part === "places" ? hasOwn(world.places, id) ? world.places[id]?.name : undefined : PIN_STEPS.includes(id) ? id : undefined;
       if (name === undefined)
-        push("warning", path, "pin_target", `"${id}" is not ${part === "characters" ? "an entity" : "a place"} in the world, so no call reads what is pinned to it.`);
+        push("warning", path, "pin_target", part === "steps" ? hasOwn(STEP_OUTPUTS, id) ? `The ${id} step reads no lore, so nothing pinned to it is read.` : `"${id}" is not a step, so no call reads what is pinned to it.` : `"${id}" is not ${part === "characters" ? "an entity" : "a place"} in the world, so no call reads what is pinned to it.`);
       if (!Array.isArray(list)) {
         push("error", path, "pin_shape", "The pins are a list; none are read.");
         continue;
@@ -8304,12 +8317,12 @@ function lintLorePins(world) {
       const seen = new Set;
       for (const [i, pin] of list.entries()) {
         if (!isLorePin(pin)) {
-          push("error", path, "pin_shape", `Pin ${i + 1} is neither {"lore": id} nor {"book": id, "entry": id}, so it is ignored.`);
+          push("error", path, "pin_shape", `Pin ${i + 1} is none of {"lore": id}, {"book": id, "entry": id} and {"book": id}, so it is ignored.`);
           continue;
         }
         const key = lorePinKey(pin);
         if (seen.has(key))
-          push("warning", path, "pin_duplicate", `${"lore" in pin ? `"${pin.lore}"` : "A book entry"} is pinned here twice; it is read once.`);
+          push("warning", path, "pin_duplicate", `${"lore" in pin ? `"${pin.lore}"` : ("entry" in pin) ? "A book entry" : "A book"} is pinned here twice; it is read once.`);
         seen.add(key);
         if (!("lore" in pin))
           continue;
@@ -24704,9 +24717,10 @@ function buildWeatherView(ctx) {
     return { level, label: level === 0 ? "" : MOOD[season], region: e?.name ?? null, season, sky: null, tempC: null, closed: [] };
   const st = stateAt(ctx, here);
   const sky = strOf(e.fields.weather, "clear");
-  const temp = level >= 3 && typeof e.fields.temp_c === "number" ? Math.round(e.fields.temp_c) : null;
+  const raw = level >= 3 && typeof e.fields.temp_c === "number" ? e.fields.temp_c : null;
+  const temp = raw === null ? null : Math.round(raw);
   const word = st?.label ?? sky;
-  return { level, label: `${word.charAt(0).toUpperCase()}${word.slice(1)}${temp !== null ? `, ${temp} \xB0C` : ""}`, region: e.name, season, sky, tempC: temp, closed: level >= 4 ? st?.closes ?? [] : [] };
+  return { level, label: `${word.charAt(0).toUpperCase()}${word.slice(1)}${raw !== null ? `, ${formatTemperature(raw)}` : ""}`, region: e.name, season, sky, tempC: temp, closed: level >= 4 ? st?.closes ?? [] : [] };
 }
 function stepRegions(slot, ctx, rng) {
   const level = ctx.levelOf(ctx.world.pov, "weather");
@@ -27383,7 +27397,7 @@ function stepAgent2(slot, ctx, rngFor, who) {
 }
 function invitationText(ctx, agent, place, at, viewer) {
   const named = place !== null && (viewer === undefined || canSeePlace(ctx.registry, ctx.world, ctx.state, viewer, place)) ? own(ctx.world.places, place)?.name ?? place : null;
-  return `${own(ctx.state.entities, agent)?.name ?? agent} invites you to ${named ?? "meet up"} at ${formatHHMM(dateAt(calendarOf(ctx.world), at).minuteOfDay)}.`;
+  return `${own(ctx.state.entities, agent)?.name ?? agent} invites you to ${named ?? "meet up"} at ${formatTimeOfDay(dateAt(calendarOf(ctx.world), at).minuteOfDay)}.`;
 }
 function dropUnlived(slot, ctx) {
   const plans = optionalQuery(ctx, "minds.plans");
@@ -27633,8 +27647,8 @@ function playerBlocks(ctx, who, plan2) {
   const applied = new Map(activeBlocks(ctx, who, plan2.day).map((a) => [a.block.id, a]));
   const open = loreGateReader(ctx.registry, ctx.world, ctx.state);
   return plan2.blocks.map((b) => {
-    const from = formatHHMM(dateAt(cal, b.start).minuteOfDay);
-    const to = formatHHMM(dateAt(cal, b.end).minuteOfDay);
+    const from = formatTimeOfDay(dateAt(cal, b.start).minuteOfDay);
+    const to = formatTimeOfDay(dateAt(cal, b.end).minuteOfDay);
     const routineId = b.option.startsWith(ROUTINE_OPTION) ? b.option.slice(ROUTINE_OPTION.length).replace(/:carried$/, "") : null;
     const a = routineId !== null ? applied.get(routineId) : undefined;
     if (b.option.startsWith(AGENDA_OPTION) && !publicTrack(ctx.world, b.option.slice(AGENDA_OPTION.length)) || a?.block.private === true)
@@ -56260,6 +56274,6 @@ function run(proc) {
   next(0);
 }
 export {
-  run as default,
-  CHECK_MAX_DAYS
+  CHECK_MAX_DAYS,
+  run as default
 };

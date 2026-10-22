@@ -167,7 +167,7 @@ describe("gear: containment, slots and use grants", () => {
     const tonight = resolveAction(reg, w, { action: "lend", params: { item: "phone", to: "rosa", days: 1, until: "7 tonight" } }, createRng("l7"));
     expect([tonight.ok, tonight.rejected]).toEqual([true, []]);
     const at = untilOf("phone") ?? 0;
-    expect(formatClock(cal, at)).toEndWith(", 19:00");
+    expect(formatClock(cal, at)).toEndWith(", 7:00 PM");
     expect(at - w.state.clock).toBeLessThanOrEqual(1440);
     const span = resolveAction(reg, w, { action: "lend", params: { item: "wallet", to: "rosa", days: 0, until: "for 3 hours" } }, createRng("l3"));
     expect([span.ok, span.rejected]).toEqual([true, []]);
@@ -184,7 +184,7 @@ describe("gear: containment, slots and use grants", () => {
     // ... but either one is enough: an end alone (what interpret fills from "until 7 tonight").
     const said = resolveAction(reg, w, { action: "lend", params: { item: "truck", to: "rosa", until: "19:00" } }, createRng("lu"));
     expect([said.ok, said.failed, said.rejected]).toEqual([true, null, []]);
-    expect(formatClock(cal, untilOf("truck") ?? 0)).toEndWith(", 19:00");
+    expect(formatClock(cal, untilOf("truck") ?? 0)).toEndWith(", 7:00 PM");
   });
 
   test("gear level 0 makes transfers no-ops; level 1 renders notable items only", () => {

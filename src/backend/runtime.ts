@@ -15,7 +15,8 @@ import { EXTRACTION_TYPES, helperCallOf, recentOf, stepLoreOf } from "../shared/
 import type { ChipAction, ContextGeneration, ContextView, LoreStepTrace, StateView } from "../shared/state-view";
 import type { ActionDef, AdjudicationDef, SectionTemplate, StepPurpose, WorldDoc } from "../shared/world";
 import { formatMoney, offersAction } from "../shared/world";
-import { MINDS_EVENTS, MINDS_SLOT, worldMindsOf, type MindCallTrace, type MindEventData } from "../shared/minds";
+import { PIN_STEPS } from "../shared/lore";
+import { isMindPurpose, MINDS_EVENTS, MINDS_SLOT, worldMindsOf, type MindCallTrace, type MindEventData } from "../shared/minds";
 import { firedTimeout, TimeoutFired, TIMEOUTS } from "../shared/timeouts";
 import { mindsOn, mindsStepConfig, postMinds, preMinds, runMinds, type MindsDeps, type RunMindsResult } from "./minds";
 import { runSkip, type BeatMinds, type SkipRun } from "./skip";
@@ -31,7 +32,7 @@ import { checkOf } from "../engine/checks";
 import { applyTimeAdvance, fightHoldsClock, IN_FIGHT, nextDayPart, parseOverrides, parseTarget, typedSpan } from "../engine/time";
 import { EXTERNAL_ACCOUNT_PREFIX } from "../engine/events";
 import { boundProposal } from "../engine/bounds";
-import { calendarOf, clockOfStamp, dateAt, formatClock, formatHHMM, placeOffset, weekdayName } from "../engine/calendar";
+import { calendarOf, clockOfStamp, dateAt, formatClock, formatHHMM, formatTimeOfDay, placeOffset, weekdayName } from "../engine/calendar";
 import type { ChainMessage } from "../engine/ledger/chain";
 import { LedgerFold } from "../engine/ledger/fold";
 import type { LedgerCore, LedgerEnv } from "../engine/ledger/journal";
@@ -68,7 +69,7 @@ import { effectiveMode, recordOutcome, SettingsStore } from "./settings-store";
 import { startMarkersFrom } from "./start-markers";
 import { claimFor } from "./claims";
 import { StepLore, ToolSupport, type LoreInputs, type LookupTransport } from "./lore-steps";
-import { readPins } from "./lore-pins";
+import { pinReader } from "./lore-pins";
 import { interpretCatalog, interpretScene, timelapseEntry, tryEntry } from "./interpret-context";
 import { checkQuestion, inferredChip, inferredOutcome } from "./inferred-words";
 import { failureWords } from "./requirement-words";
@@ -122,6 +123,8 @@ interface LorePhase {
   guidance: Guidance;
   /** The lore pinned where the POV is and the places holding it (DESIGN §24.5), read once for the phase's steps. */
   pinned: PinnedText[];
+  /** The lore pinned to each helper step (§24.5), read once for the phase: each of its calls reads it first, whatever its lore policy. */
+  steps: Partial<Record<StepPurpose, PinnedText[]>>;
 }
 
 /** Chips a read stores for its swipe; a read that replaces it (Re-read edit, Retry read) drops them. */
@@ -1353,11 +1356,15 @@ export class Runtime implements TurnHooks {
    * What a phase's step lore shares (DESIGN §5.4): its budget, the user's default connection (whose
    * tool support a step on it uses) with the user's record of connections refusing tools loaded,
    * where its traces go, what the player has seen said this turn, and the lore pinned where the POV
-   * is (§24.5), read once. Nothing else is read from the host for a world without lore.
+   * is and to each helper step (§24.5), read once. Nothing else is read from the host for a world
+   * without lore.
    */
   private async lorePhase(phase: "pre" | "post", key: string, userId: UserId, world: WorldDoc, state: WorldState, budget: StepBudget, said: string, guidance: Guidance): Promise<LorePhase> {
-    const pinned = await readPins(this.host, world, pinsFor(world, placeOfEntity(state, world.pov)), userId);
-    const at: LorePhase = { phase, key, userId, world, state, budget, active: ACTIVE_CONNECTION, said, guidance, pinned };
+    const here = pinsFor(world, placeOfEntity(state, world.pov));
+    // A mind reads its step's pins with its own (`runMinds`).
+    const own = PIN_STEPS.filter((step) => !isMindPurpose(step)).map((step) => [step, pinsFor(world, null, undefined, step)] as const);
+    const textsOf = await pinReader(this.host, world, [...here, ...own.flatMap(([, refs]) => refs)], userId);
+    const at: LorePhase = { phase, key, userId, world, state, budget, active: ACTIVE_CONNECTION, said, guidance, pinned: textsOf(here), steps: Object.fromEntries(own.map(([step, refs]) => [step, textsOf(refs)])) };
     if (Object.keys(world.lore).length === 0) return at;
     await this.toolSupport.ready(userId);
     return { ...at, active: await this.activeConnectionId(userId) };
@@ -1365,19 +1372,22 @@ export class Runtime implements TurnHooks {
 
   /**
    * A step run's lore (DESIGN §5.4): null when the world has none and nothing is pinned where the
-   * POV is, or the step's policy is off. The pinned lore goes first (§24.5); then its prefetch
-   * searches the step's own inputs now, at no call; its lookups go to the connection the step's
-   * helper calls use (a helper route's, else the default), as tools unless the step says otherwise or
-   * that connection was seen refusing them. Its trace is kept under the phase's key for the
-   * inspector, unless the step is about no one the POV may know (`LoreInputs.shown` null). Snippets
+   * POV is or to the step, or the step's policy is off and nothing is pinned to it. The step's own
+   * pins go first, whatever its policy: the user chose them for it (§24.5); then, unless its policy
+   * is off, the lore pinned where the POV is, and its prefetch searches the step's own inputs now,
+   * at no call; its lookups go to the connection the step's helper calls use (a helper route's, else
+   * the default), as tools unless the step says otherwise or that connection was seen refusing them.
+   * Its trace is kept under the phase's key for the inspector, unless the step is about no one the
+   * POV may know (`LoreInputs.shown` null). Snippets
    * cost the host's count of their text once it has one for this user, else the estimate, and are
    * counted in the background.
    */
   private stepLore(run: { purpose: StepPurpose; config: StepConfig }, at: LorePhase, inputs: LoreInputs, effects = false): StepLore | null {
     const { world, state, userId } = at;
-    if (Object.keys(world.lore).length === 0 && at.pinned.length === 0) return null;
+    const chosen = at.steps[run.purpose] ?? [];
+    if (Object.keys(world.lore).length === 0 && at.pinned.length === 0 && chosen.length === 0) return null;
     const setting = stepLoreOf(run.config);
-    if (setting.policy === "none") return null;
+    if (setting.policy === "none" && chosen.length === 0) return null;
     const route = run.config.route;
     const connection = route?.provider === "helper" && route.connectionId ? route.connectionId : at.active;
     const transport: LookupTransport = setting.transport === "tools" || setting.transport === "need" ? setting.transport : this.toolSupport.refuses(userId, connection) ? "need" : "tools";
@@ -1396,7 +1406,8 @@ export class Runtime implements TurnHooks {
     for (const [id, e] of Object.entries(state.entities)) if (!povMayKnow(this.registry, world, state, id)) (kindIs(this.registry, world, e.kind, "person") ? people : labels).push(e.name);
     const withheld = { text: unrevealedSecrets(this.registry, world, state).filter(unsaid), people, labels, said: at.said, names: secretLoreNames(this.registry, world, state).filter(unsaid) };
     const lore = new StepLore(run.purpose, setting, reader, at.phase, withheld, { effects, counted: (texts) => this.countLater(userId, texts), lookups: { budget: at.budget.lookup, transport, refused }, privateInputs: inputs.shown !== undefined });
-    lore.pin(at.pinned);
+    lore.pin(chosen);
+    if (setting.policy !== "none") lore.pin(at.pinned);
     lore.prefetch(inputs);
     if (inputs.shown !== null) lruSet(this.loreTraces, at.key, [...(this.loreTraces.get(at.key) ?? []), lore.trace], 64);
     return lore;
@@ -2681,15 +2692,15 @@ function unfitReason(reg: Registry, world: WorldDoc, state: Readonly<WorldState>
 }
 
 /**
- * A clock time for a chip, local to where the POV is, as the HUD shows it: "07:00" later the same
- * day, else with its weekday ("Sat 07:00").
+ * A clock time for a chip, local to where the POV is, as the HUD shows it: "7:00 AM" later the same
+ * day, else with its weekday ("Sat 7:00 AM").
  */
 function shortClock(world: WorldDoc, state: Readonly<WorldState>, at: number): string {
   const cal = calendarOf(world);
   const place = placeOfEntity(state, world.pov);
   const d = dateAt(cal, at + placeOffset(world, at, place));
   const today = dateAt(cal, state.clock + placeOffset(world, state.clock, place)).dayIndex;
-  return d.dayIndex === today ? formatHHMM(d.minuteOfDay) : `${weekdayName(cal, d.weekday)} ${formatHHMM(d.minuteOfDay)}`;
+  return d.dayIndex === today ? formatTimeOfDay(d.minuteOfDay) : `${weekdayName(cal, d.weekday)} ${formatTimeOfDay(d.minuteOfDay)}`;
 }
 
 /** The Outline slot's lines: the brief, the engine's beats, then the outline step's prose. */

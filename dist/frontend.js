@@ -899,16 +899,22 @@ function isLorePin(v3) {
   const keys = Object.keys(v3).length;
   if (v3.lore !== undefined)
     return typeof v3.lore === "string" && v3.lore !== "" && keys === 1;
-  return typeof v3.book === "string" && v3.book !== "" && typeof v3.entry === "string" && v3.entry !== "" && keys === 2;
+  if (typeof v3.book !== "string" || v3.book === "")
+    return false;
+  return v3.entry === undefined ? keys === 1 : typeof v3.entry === "string" && v3.entry !== "" && keys === 2;
 }
 function lorePinKey(pin) {
-  return "lore" in pin ? `lore:${pin.lore}` : `book:${pin.book}/${pin.entry}`;
+  return "lore" in pin ? `lore:${pin.lore}` : ("entry" in pin) ? `book:${pin.book}/${pin.entry}` : `book:${pin.book}`;
 }
+function pinJson(pin) {
+  return "lore" in pin ? { lore: pin.lore } : ("entry" in pin) ? { book: pin.book, entry: pin.entry } : { book: pin.book };
+}
+var PIN_STEPS = LORE_AUDIENCE.filter((p3) => p3 !== "memory" && p3 !== "skip" && p3 !== "consolidate");
 var pinsRead = new WeakMap;
 function lorePinsOf(world) {
   const raw = world.lorePins;
   if (!isRecord(raw))
-    return { characters: {}, places: {} };
+    return { characters: {}, places: {}, steps: {} };
   const known = pinsRead.get(raw);
   if (known)
     return known;
@@ -925,20 +931,21 @@ function lorePinsOf(world) {
         if (!isLorePin(pin) || seen.has(lorePinKey(pin)))
           continue;
         seen.add(lorePinKey(pin));
-        pins.push("lore" in pin ? { lore: pin.lore } : { book: pin.book, entry: pin.entry });
+        pins.push(pinJson(pin));
       }
       if (pins.length > 0)
         out[id] = pins;
     }
     return out;
   };
-  const read = { characters: part(raw.characters), places: part(raw.places) };
+  const steps = part(raw.steps);
+  const read = { characters: part(raw.characters), places: part(raw.places), steps: Object.fromEntries(PIN_STEPS.flatMap((p3) => hasOwn(steps, p3) ? [[p3, steps[p3] ?? []]] : [])) };
   pinsRead.set(raw, read);
   return read;
 }
 function lorePinsJson(pins) {
-  const part = (record) => Object.fromEntries(Object.entries(record).flatMap(([id, list]) => list.length > 0 ? [[id, list.map((p3) => ("lore" in p3) ? { lore: p3.lore } : { book: p3.book, entry: p3.entry })]] : []));
-  return { characters: part(pins.characters), places: part(pins.places) };
+  const part = (record) => Object.fromEntries(Object.entries(record).flatMap(([id, list]) => list && list.length > 0 ? [[id, list.map(pinJson)]] : []));
+  return { characters: part(pins.characters), places: part(pins.places), steps: part(pins.steps) };
 }
 function loreIndexJson(index) {
   return { terms: Object.fromEntries(Object.entries(index.terms).map(([term, ids]) => [term, [...ids]])), topics: Object.fromEntries(Object.entries(index.topics).map(([id, t3]) => [id, { label: t3.label, entries: [...t3.entries] }])) };
@@ -2912,7 +2919,7 @@ var PART_INFO = {
   ruleset: { label: "Ruleset", hint: "Character fields, checks, levels, the sheet and combat", icon: "shield" },
   loreIndex: { label: "Lore lookup table", hint: "Terms and topics that lead to lore entries", icon: "search" },
   minds: { label: "Minds", hint: "How closely characters think, what they remember, and their prompts", icon: "sparkle" },
-  lorePins: { label: "Pinned lore", hint: "Lore every call for a character, or at a place, always reads", icon: "pin" },
+  lorePins: { label: "Pinned lore", hint: "Lore every call for a character, at a place, or of a step always reads", icon: "pin" },
   routineSettings: { label: "Routines and the story", hint: "What routines are at each level, how firmly they hold against the story, and who invites whom", icon: "route" }
 };
 function go(app, build) {
@@ -12892,7 +12899,8 @@ function MessageChips(props) {
   if (!view || view.status === "not_world")
     return null;
   const chips = view.chips.filter((chip) => chip.messageId === props.messageId);
-  if (chips.length === 0)
+  const when = view.replyClocks[props.messageId];
+  if (chips.length === 0 && when === undefined)
     return null;
   const show = (chip, fallback) => {
     const Chosen = app.catalog.chips.get(chip.kind) ?? fallback;
@@ -12908,6 +12916,17 @@ function MessageChips(props) {
     class: "lre-chips",
     "data-lre-chips": props.messageId,
     children: [
+      when !== undefined ? /* @__PURE__ */ u3("span", {
+        class: "lre-chat-when lre-small lre-muted",
+        "data-lre-reply-clock": true,
+        children: [
+          /* @__PURE__ */ u3("span", {
+            class: "lre-sr",
+            children: "World time after this turn: "
+          }, undefined, false, undefined, this),
+          when
+        ]
+      }, undefined, true, undefined, this) : null,
       done.length > 0 ? /* @__PURE__ */ u3(Receipt, {
         chips: done,
         show: (chip) => show(chip, DefaultChip)
@@ -14337,722 +14356,6 @@ function BuildLink() {
   }, undefined, false, undefined, this);
 }
 
-// src/frontend/build/lore-pins.tsx
-var HINT = {
-  characters: "Their mind reads these first, every time they think, within the mind step's lore tokens.",
-  places: "Every helper and mind call here, or in a place inside it, reads these first, within its lore tokens."
-};
-function LorePinsSection(props) {
-  const app = useApp();
-  const draft = useSelect(app.drafts, (d3) => d3);
-  const send = b2(() => draftSend(app), [app]);
-  const [busy, run] = useBusy();
-  const [views, setViews] = d2({});
-  const [adding, setAdding] = d2(null);
-  const [books, setBooks] = d2(null);
-  const [book, setBook] = d2("");
-  const [entries, setEntries] = d2(null);
-  const [choice, setChoice] = d2("");
-  const loreId = P2();
-  const bookId = P2();
-  const entryId = P2();
-  const pins = draft ? lorePinsOf(draft.doc) : { characters: {}, places: {} };
-  const list2 = pins[props.target][props.id] ?? [];
-  const keys = list2.map(lorePinKey).join(`
-`);
-  A(() => {
-    if (!draft || !list2.some((p3) => !("lore" in p3)))
-      return;
-    app.request({ type: "lre.lore", op: "pins", worldId: draft.worldId }).then((body) => {
-      const part = body?.pins?.[props.target][props.id] ?? [];
-      setViews(Object.fromEntries(part.map((v3) => [v3.key, v3])));
-    });
-  }, [draft?.worldId, keys]);
-  A(() => {
-    if (adding !== "book" || books !== null)
-      return;
-    app.request({ type: "lre.lore", op: "books", ...app.client.getState().chatId ? { chatId: app.client.getState().chatId ?? "" } : {} }).then((body) => setBooks(body?.books ?? []));
-  }, [adding]);
-  A(() => {
-    setEntries(null);
-    setChoice("");
-    if (book === "")
-      return;
-    app.request({ type: "lre.lore", op: "entries", bookId: book }).then((body) => setEntries(body?.entries ?? []));
-  }, [book]);
-  if (!draft)
-    return null;
-  const save = (next) => run(async () => {
-    const all = { ...pins, [props.target]: { ...pins[props.target], [props.id]: next } };
-    await send({ type: "lre.editor", worldId: draft.worldId, base: draft.base, op: "set", part: "lorePins", value: lorePinsJson(all) });
-    setAdding(null);
-    setChoice("");
-  });
-  const titleOf2 = (pin) => {
-    if ("lore" in pin) {
-      const entry = draft.doc.lore[pin.lore];
-      return entry ? { title: entry.title || pin.lore, source: "World lore", badge: entry.secret === true ? "Secret" : null } : { title: pin.lore, source: "World lore", badge: "Missing" };
-    }
-    const v3 = views[lorePinKey(pin)];
-    return { title: v3?.title ?? "A World Info entry", source: v3?.source ?? "World Info", badge: v3?.status === "missing" ? "Missing" : v3?.status === "off" ? "Off in its book" : null };
-  };
-  const taken = new Set(list2.map(lorePinKey));
-  const lore = Object.values(draft.doc.lore).filter((l3) => !taken.has(`lore:${l3.id}`)).sort((a3, b3) => a3.title.localeCompare(b3.title));
-  return /* @__PURE__ */ u3("div", {
-    "data-lre-lore-pins": `${props.target}:${props.id}`,
-    children: /* @__PURE__ */ u3(Section, {
-      title: "Pinned lore",
-      aside: list2.length > 0 ? /* @__PURE__ */ u3(Badge, {
-        children: list2.length
-      }, undefined, false, undefined, this) : undefined,
-      children: /* @__PURE__ */ u3("div", {
-        class: "lre-stack",
-        children: [
-          /* @__PURE__ */ u3("p", {
-            class: "lre-build-note",
-            children: [
-              HINT[props.target],
-              " Pins go to the draft as you change them; a chat uses them once you commit and Upgrade it."
-            ]
-          }, undefined, true, undefined, this),
-          list2.length > 0 ? /* @__PURE__ */ u3(ActionRows, {
-            label: "Pinned lore",
-            children: list2.map((pin, i3) => {
-              const t3 = titleOf2(pin);
-              return /* @__PURE__ */ u3(ActionRow, {
-                title: t3.title,
-                subtitle: t3.source,
-                value: t3.badge ? /* @__PURE__ */ u3(Badge, {
-                  tone: t3.badge === "Missing" ? "neg" : t3.badge === "Secret" ? "gm" : "neutral",
-                  children: t3.badge
-                }, undefined, false, undefined, this) : undefined,
-                actions: /* @__PURE__ */ u3(IconButton, {
-                  icon: "close",
-                  label: `Unpin ${t3.title}`,
-                  disabled: busy,
-                  onClick: () => save(list2.filter((_3, j3) => j3 !== i3))
-                }, undefined, false, undefined, this)
-              }, lorePinKey(pin), false, undefined, this);
-            })
-          }, undefined, false, undefined, this) : null,
-          /* @__PURE__ */ u3(Issues, {
-            issues: lintAt(draft.lint, `lorePins.${props.target}.${props.id}`)
-          }, undefined, false, undefined, this),
-          adding === "lore" ? /* @__PURE__ */ u3("div", {
-            class: "lre-form-pins-add",
-            children: [
-              /* @__PURE__ */ u3("label", {
-                for: loreId,
-                children: "World lore entry"
-              }, undefined, false, undefined, this),
-              /* @__PURE__ */ u3("select", {
-                id: loreId,
-                class: "lre-input",
-                value: choice,
-                onChange: (event) => setChoice(event.currentTarget.value),
-                children: [
-                  /* @__PURE__ */ u3("option", {
-                    value: "",
-                    children: "Choose an entry"
-                  }, undefined, false, undefined, this),
-                  lore.map((l3) => /* @__PURE__ */ u3("option", {
-                    value: l3.id,
-                    children: l3.title || l3.id
-                  }, l3.id, false, undefined, this))
-                ]
-              }, undefined, true, undefined, this),
-              /* @__PURE__ */ u3("div", {
-                class: "lre-form-pins-actions",
-                children: [
-                  /* @__PURE__ */ u3(Button, {
-                    variant: "primary",
-                    icon: "pin",
-                    disabled: choice === "" || busy,
-                    onClick: () => save([...list2, { lore: choice }]),
-                    children: "Pin it"
-                  }, undefined, false, undefined, this),
-                  /* @__PURE__ */ u3(Button, {
-                    variant: "ghost",
-                    onClick: () => setAdding(null),
-                    children: "Cancel"
-                  }, undefined, false, undefined, this)
-                ]
-              }, undefined, true, undefined, this)
-            ]
-          }, undefined, true, undefined, this) : adding === "book" ? /* @__PURE__ */ u3("div", {
-            class: "lre-form-pins-add",
-            children: [
-              /* @__PURE__ */ u3("label", {
-                for: bookId,
-                children: "World Info book"
-              }, undefined, false, undefined, this),
-              /* @__PURE__ */ u3("select", {
-                id: bookId,
-                class: "lre-input",
-                value: book,
-                onChange: (event) => setBook(event.currentTarget.value),
-                children: [
-                  /* @__PURE__ */ u3("option", {
-                    value: "",
-                    children: books === null ? "Loading books…" : books.length === 0 ? "No World Info books" : "Choose a book"
-                  }, undefined, false, undefined, this),
-                  (books ?? []).map((b3) => /* @__PURE__ */ u3("option", {
-                    value: b3.id,
-                    children: b3.attached ? `${b3.name} (in this chat)` : b3.name
-                  }, b3.id, false, undefined, this))
-                ]
-              }, undefined, true, undefined, this),
-              book !== "" ? /* @__PURE__ */ u3(M, {
-                children: [
-                  /* @__PURE__ */ u3("label", {
-                    for: entryId,
-                    children: "Entry"
-                  }, undefined, false, undefined, this),
-                  /* @__PURE__ */ u3("select", {
-                    id: entryId,
-                    class: "lre-input",
-                    value: choice,
-                    onChange: (event) => setChoice(event.currentTarget.value),
-                    children: [
-                      /* @__PURE__ */ u3("option", {
-                        value: "",
-                        children: entries === null ? "Loading entries…" : entries.length === 0 ? "The book has no entries" : "Choose an entry"
-                      }, undefined, false, undefined, this),
-                      (entries ?? []).filter((e3) => !taken.has(`book:${book}/${e3.id}`)).map((e3) => /* @__PURE__ */ u3("option", {
-                        value: e3.id,
-                        children: e3.disabled ? `${e3.title} (off in the book)` : e3.title
-                      }, e3.id, false, undefined, this))
-                    ]
-                  }, undefined, true, undefined, this)
-                ]
-              }, undefined, true, undefined, this) : null,
-              /* @__PURE__ */ u3("div", {
-                class: "lre-form-pins-actions",
-                children: [
-                  /* @__PURE__ */ u3(Button, {
-                    variant: "primary",
-                    icon: "pin",
-                    disabled: book === "" || choice === "" || busy,
-                    onClick: () => save([...list2, { book, entry: choice }]),
-                    children: "Pin it"
-                  }, undefined, false, undefined, this),
-                  /* @__PURE__ */ u3(Button, {
-                    variant: "ghost",
-                    onClick: () => setAdding(null),
-                    children: "Cancel"
-                  }, undefined, false, undefined, this)
-                ]
-              }, undefined, true, undefined, this)
-            ]
-          }, undefined, true, undefined, this) : /* @__PURE__ */ u3("div", {
-            class: "lre-form-pins-actions",
-            children: [
-              /* @__PURE__ */ u3(Button, {
-                icon: "pin",
-                disabled: busy || lore.length === 0,
-                onClick: () => setAdding("lore"),
-                children: "Pin world lore"
-              }, undefined, false, undefined, this),
-              /* @__PURE__ */ u3(Button, {
-                icon: "book",
-                disabled: busy,
-                onClick: () => setAdding("book"),
-                children: "Pin a World Info entry"
-              }, undefined, false, undefined, this)
-            ]
-          }, undefined, true, undefined, this)
-        ]
-      }, undefined, true, undefined, this)
-    }, undefined, false, undefined, this)
-  }, undefined, false, undefined, this);
-}
-
-// src/frontend/build/lookup-editor.tsx
-var SUGGESTIONS_SHOWN = 12;
-function EntryChips(props) {
-  const titleOf2 = (id) => hasOwn(props.doc.lore, id) ? props.doc.lore[id]?.title || id : `${id} (missing)`;
-  const rest = props.options.filter((o4) => !props.ids.includes(o4.value));
-  return /* @__PURE__ */ u3(M, {
-    children: [
-      props.ids.length > 0 ? /* @__PURE__ */ u3("div", {
-        class: "lre-form-chips",
-        children: props.ids.map((id) => /* @__PURE__ */ u3(Chip, {
-          tone: hasOwn(props.doc.lore, id) ? undefined : "neg",
-          removeLabel: `Remove ${titleOf2(id)} from ${props.label}`,
-          onRemove: () => props.onChange(props.ids.filter((other) => other !== id)),
-          children: titleOf2(id)
-        }, id, false, undefined, this))
-      }, undefined, false, undefined, this) : null,
-      rest.length > 0 ? /* @__PURE__ */ u3(AddPicker, {
-        label: `Add an entry to ${props.label}`,
-        options: rest,
-        placeholder: "Add an entry…",
-        onAdd: (id) => props.onChange([...props.ids, id])
-      }, undefined, false, undefined, this) : null
-    ]
-  }, undefined, true, undefined, this);
-}
-function ListHead(props) {
-  return /* @__PURE__ */ u3("div", {
-    class: "lre-section-head",
-    children: [
-      /* @__PURE__ */ u3("h3", {
-        class: "lre-section-title",
-        children: props.title
-      }, undefined, false, undefined, this),
-      props.count !== undefined ? /* @__PURE__ */ u3(Badge, {
-        children: props.count
-      }, undefined, false, undefined, this) : null
-    ]
-  }, undefined, true, undefined, this);
-}
-function TermsPanel(props) {
-  const [query, setQuery] = d2("");
-  const [term, setTerm] = d2("");
-  const [entry, setEntry] = d2("");
-  const [all, setAll] = d2(false);
-  const termId = P2();
-  const { value } = props;
-  const options = b2(() => refOptions(props.doc, "lore"), [props.doc]);
-  const titleOf2 = (id) => hasOwn(props.doc.lore, id) ? props.doc.lore[id]?.title || id : id;
-  const q2 = loreTerm(query);
-  const count = Object.keys(value.terms).length;
-  const terms = Object.entries(value.terms).filter(([t3, ids]) => q2 === "" || t3.includes(q2) || ids.some((id) => titleOf2(id).toLowerCase().includes(q2)));
-  const suggestions = termSuggestions({ lore: props.doc.lore, loreIndex: value });
-  const aliases = suggestions.filter((s3) => s3.from === "alias");
-  const setTerms = (terms2) => props.onChange({ ...value, terms: terms2 });
-  const adopt = (picked) => props.onChange(picked.reduce((index, s3) => addToLoreIndex(index, s3.entry, { terms: [s3.term], topics: [] }), value));
-  const added = loreTerm(term);
-  return /* @__PURE__ */ u3(M, {
-    children: [
-      /* @__PURE__ */ u3("div", {
-        class: "lre-form-lore-fields",
-        children: [
-          /* @__PURE__ */ u3(ListHead, {
-            title: "Terms"
-          }, undefined, false, undefined, this),
-          count > 8 ? /* @__PURE__ */ u3("div", {
-            class: "lre-build-search",
-            children: [
-              /* @__PURE__ */ u3(Icon, {
-                name: "search",
-                size: 16
-              }, undefined, false, undefined, this),
-              /* @__PURE__ */ u3("input", {
-                class: "lre-input",
-                type: "search",
-                placeholder: "Search terms and entries",
-                "aria-label": "Search terms",
-                value: query,
-                onInput: (event) => setQuery(event.currentTarget.value)
-              }, undefined, false, undefined, this)
-            ]
-          }, undefined, true, undefined, this) : null,
-          terms.length === 0 ? count === 0 ? /* @__PURE__ */ u3(Empty, {
-            icon: "search",
-            title: "No terms yet",
-            children: "Add one below, or take a suggestion."
-          }, undefined, false, undefined, this) : /* @__PURE__ */ u3(Empty, {
-            icon: "search",
-            title: "No matches",
-            children: [
-              "No term or entry matches “",
-              query.trim(),
-              "”."
-            ]
-          }, undefined, true, undefined, this) : null,
-          terms.map(([t3, ids]) => /* @__PURE__ */ u3("div", {
-            class: "lre-form-lore-wrap",
-            "data-lre-term": t3,
-            children: /* @__PURE__ */ u3(FormGroup, {
-              title: t3,
-              aside: /* @__PURE__ */ u3(IconButton, {
-                icon: "trash",
-                label: `Remove the term “${t3}”`,
-                onClick: () => {
-                  const next = { ...value.terms };
-                  delete next[t3];
-                  setTerms(next);
-                }
-              }, undefined, false, undefined, this),
-              children: [
-                /* @__PURE__ */ u3("div", {
-                  class: "lre-field",
-                  children: [
-                    /* @__PURE__ */ u3("span", {
-                      class: "label",
-                      children: "Leads to"
-                    }, undefined, false, undefined, this),
-                    /* @__PURE__ */ u3(EntryChips, {
-                      ids,
-                      doc: props.doc,
-                      options,
-                      label: `“${t3}”`,
-                      onChange: (next) => setTerms({ ...value.terms, [t3]: next })
-                    }, undefined, false, undefined, this)
-                  ]
-                }, undefined, true, undefined, this),
-                /* @__PURE__ */ u3(Issues, {
-                  issues: props.lint.filter((issue) => issue.path === `loreIndex.terms.${t3}`)
-                }, undefined, false, undefined, this)
-              ]
-            }, undefined, true, undefined, this)
-          }, t3, false, undefined, this)),
-          /* @__PURE__ */ u3(FormGroup, {
-            title: "Add a term",
-            children: /* @__PURE__ */ u3("form", {
-              class: "lre-form-lore-fields",
-              onSubmit: (event) => {
-                event.preventDefault();
-                if (added === "" || entry === "")
-                  return;
-                adopt([{ term: added, entry }]);
-                setTerm("");
-              },
-              children: [
-                /* @__PURE__ */ u3(Field, {
-                  label: "Term",
-                  for: termId,
-                  help: "What a lookup matches: lowercase, single spaces",
-                  children: /* @__PURE__ */ u3("input", {
-                    id: termId,
-                    class: "lre-input",
-                    placeholder: "e.g. the old lighthouse",
-                    autoComplete: "off",
-                    value: term,
-                    onInput: (event) => setTerm(event.currentTarget.value)
-                  }, undefined, false, undefined, this)
-                }, undefined, false, undefined, this),
-                /* @__PURE__ */ u3("div", {
-                  class: "lre-form-add",
-                  children: [
-                    /* @__PURE__ */ u3(RefPicker, {
-                      label: "Leads to",
-                      value: entry,
-                      options,
-                      placeholder: "Choose an entry…",
-                      disabled: options.length === 0,
-                      onChange: setEntry
-                    }, undefined, false, undefined, this),
-                    /* @__PURE__ */ u3(Button, {
-                      type: "submit",
-                      variant: "primary",
-                      icon: "plus",
-                      disabled: added === "" || entry === "",
-                      children: "Add"
-                    }, undefined, false, undefined, this)
-                  ]
-                }, undefined, true, undefined, this)
-              ]
-            }, undefined, true, undefined, this)
-          }, undefined, false, undefined, this)
-        ]
-      }, undefined, true, undefined, this),
-      /* @__PURE__ */ u3("div", {
-        class: "lre-form-lore-fields",
-        "data-lre-term-suggestions": true,
-        children: [
-          /* @__PURE__ */ u3(ListHead, {
-            title: "Suggestions",
-            count: suggestions.length
-          }, undefined, false, undefined, this),
-          suggestions.length === 0 ? /* @__PURE__ */ u3(Empty, {
-            icon: "check",
-            children: "Every title, alias and keyword already leads to its entry."
-          }, undefined, false, undefined, this) : /* @__PURE__ */ u3(M, {
-            children: [
-              /* @__PURE__ */ u3("span", {
-                class: "lre-form-lore-note",
-                children: "From the entries' titles, aliases and keywords."
-              }, undefined, false, undefined, this),
-              aliases.length > 0 ? /* @__PURE__ */ u3("span", {
-                class: "lre-form-lore-actions",
-                children: /* @__PURE__ */ u3(Button, {
-                  size: "sm",
-                  icon: "plus",
-                  onClick: () => adopt(aliases),
-                  children: [
-                    "Add all aliases as terms (",
-                    aliases.length,
-                    ")"
-                  ]
-                }, undefined, true, undefined, this)
-              }, undefined, false, undefined, this) : null,
-              /* @__PURE__ */ u3("div", {
-                class: "lre-form-items",
-                children: (all ? suggestions : suggestions.slice(0, SUGGESTIONS_SHOWN)).map((s3) => /* @__PURE__ */ u3(ItemRow, {
-                  title: /* @__PURE__ */ u3(M, {
-                    children: [
-                      s3.term,
-                      " → ",
-                      titleOf2(s3.entry),
-                      " ",
-                      /* @__PURE__ */ u3("span", {
-                        class: "lre-form-lore-from",
-                        children: [
-                          "· ",
-                          s3.from
-                        ]
-                      }, undefined, true, undefined, this)
-                    ]
-                  }, undefined, true, undefined, this),
-                  actions: /* @__PURE__ */ u3(Button, {
-                    size: "sm",
-                    label: `Add ${s3.term} for ${titleOf2(s3.entry)}`,
-                    onClick: () => adopt([s3]),
-                    children: "Add"
-                  }, undefined, false, undefined, this)
-                }, `${s3.term}:${s3.entry}`, false, undefined, this))
-              }, undefined, false, undefined, this),
-              !all && suggestions.length > SUGGESTIONS_SHOWN ? /* @__PURE__ */ u3("span", {
-                class: "lre-form-lore-actions",
-                children: /* @__PURE__ */ u3(Button, {
-                  size: "sm",
-                  variant: "ghost",
-                  icon: "chevron-down",
-                  onClick: () => setAll(true),
-                  children: [
-                    "Show all ",
-                    suggestions.length
-                  ]
-                }, undefined, true, undefined, this)
-              }, undefined, false, undefined, this) : null
-            ]
-          }, undefined, true, undefined, this)
-        ]
-      }, undefined, true, undefined, this)
-    ]
-  }, undefined, true, undefined, this);
-}
-function TopicsPanel(props) {
-  const [label, setLabel] = d2("");
-  const labelId = P2();
-  const { value } = props;
-  const options = b2(() => refOptions(props.doc, "lore"), [props.doc]);
-  const suggestions = topicSuggestions({ lore: props.doc.lore, loreIndex: value });
-  const setTopics = (topics) => props.onChange({ ...value, topics });
-  const adopt = (picked) => props.onChange(picked.reduce((index, s3) => s3.entries.reduce((acc, entry) => addToLoreIndex(acc, entry, { terms: [], topics: [{ id: s3.id, label: s3.label }] }), index), value));
-  const base = topicIdOf(label);
-  let id = base;
-  for (let n2 = 2;id !== "" && hasOwn(value.topics, id); n2++)
-    id = `${base}_${n2}`;
-  return /* @__PURE__ */ u3(M, {
-    children: [
-      /* @__PURE__ */ u3("div", {
-        class: "lre-form-lore-fields",
-        children: [
-          /* @__PURE__ */ u3(ListHead, {
-            title: "Topics"
-          }, undefined, false, undefined, this),
-          Object.keys(value.topics).length === 0 ? /* @__PURE__ */ u3(Empty, {
-            icon: "list",
-            title: "No topics yet",
-            children: "Add one below, or take a suggestion."
-          }, undefined, false, undefined, this) : null,
-          Object.entries(value.topics).map(([topicId, topic]) => /* @__PURE__ */ u3("div", {
-            class: "lre-form-lore-wrap",
-            "data-lre-topic": topicId,
-            children: /* @__PURE__ */ u3(FormGroup, {
-              children: [
-                /* @__PURE__ */ u3("div", {
-                  class: "lre-form-add",
-                  children: [
-                    /* @__PURE__ */ u3(Field, {
-                      label: "Topic",
-                      children: /* @__PURE__ */ u3("input", {
-                        class: "lre-input",
-                        "aria-label": `Label of topic ${topic.label || topicId}`,
-                        value: topic.label,
-                        onInput: (event) => setTopics({ ...value.topics, [topicId]: { ...topic, label: event.currentTarget.value } })
-                      }, undefined, false, undefined, this)
-                    }, undefined, false, undefined, this),
-                    /* @__PURE__ */ u3(IconButton, {
-                      icon: "trash",
-                      label: `Remove the topic ${topic.label || topicId}`,
-                      onClick: () => {
-                        const next = { ...value.topics };
-                        delete next[topicId];
-                        setTopics(next);
-                      }
-                    }, undefined, false, undefined, this)
-                  ]
-                }, undefined, true, undefined, this),
-                /* @__PURE__ */ u3(IdText, {
-                  id: topicId
-                }, undefined, false, undefined, this),
-                /* @__PURE__ */ u3("div", {
-                  class: "lre-field",
-                  children: [
-                    /* @__PURE__ */ u3("span", {
-                      class: "label",
-                      children: "Entries"
-                    }, undefined, false, undefined, this),
-                    /* @__PURE__ */ u3(EntryChips, {
-                      ids: topic.entries,
-                      doc: props.doc,
-                      options,
-                      label: topic.label || topicId,
-                      onChange: (next) => setTopics({ ...value.topics, [topicId]: { ...topic, entries: next } })
-                    }, undefined, false, undefined, this)
-                  ]
-                }, undefined, true, undefined, this),
-                /* @__PURE__ */ u3(Issues, {
-                  issues: props.lint.filter((issue) => issue.path === `loreIndex.topics.${topicId}`)
-                }, undefined, false, undefined, this)
-              ]
-            }, undefined, true, undefined, this)
-          }, topicId, false, undefined, this)),
-          /* @__PURE__ */ u3(FormGroup, {
-            title: "Add a topic",
-            children: [
-              /* @__PURE__ */ u3("form", {
-                class: "lre-form-add",
-                onSubmit: (event) => {
-                  event.preventDefault();
-                  if (id === "")
-                    return;
-                  setTopics({ ...value.topics, [id]: { label: label.trim(), entries: [] } });
-                  setLabel("");
-                },
-                children: [
-                  /* @__PURE__ */ u3(Field, {
-                    label: "Topic",
-                    for: labelId,
-                    children: /* @__PURE__ */ u3("input", {
-                      id: labelId,
-                      class: "lre-input",
-                      placeholder: "e.g. Harbor law",
-                      autoComplete: "off",
-                      value: label,
-                      onInput: (event) => setLabel(event.currentTarget.value)
-                    }, undefined, false, undefined, this)
-                  }, undefined, false, undefined, this),
-                  /* @__PURE__ */ u3(Button, {
-                    type: "submit",
-                    variant: "primary",
-                    icon: "plus",
-                    disabled: id === "",
-                    children: "Add"
-                  }, undefined, false, undefined, this)
-                ]
-              }, undefined, true, undefined, this),
-              id !== "" ? /* @__PURE__ */ u3(IdText, {
-                id
-              }, undefined, false, undefined, this) : null
-            ]
-          }, undefined, true, undefined, this)
-        ]
-      }, undefined, true, undefined, this),
-      /* @__PURE__ */ u3("div", {
-        class: "lre-form-lore-fields",
-        "data-lre-topic-suggestions": true,
-        children: [
-          /* @__PURE__ */ u3(ListHead, {
-            title: "Suggestions",
-            count: suggestions.length
-          }, undefined, false, undefined, this),
-          suggestions.length === 0 ? /* @__PURE__ */ u3(Empty, {
-            icon: "check",
-            children: "Every topic an entry names already lists it."
-          }, undefined, false, undefined, this) : /* @__PURE__ */ u3(M, {
-            children: [
-              /* @__PURE__ */ u3("span", {
-                class: "lre-form-lore-note",
-                children: "Topics the entries name."
-              }, undefined, false, undefined, this),
-              suggestions.length > 1 ? /* @__PURE__ */ u3("span", {
-                class: "lre-form-lore-actions",
-                children: /* @__PURE__ */ u3(Button, {
-                  size: "sm",
-                  icon: "plus",
-                  onClick: () => adopt(suggestions),
-                  children: [
-                    "File them all (",
-                    suggestions.length,
-                    ")"
-                  ]
-                }, undefined, true, undefined, this)
-              }, undefined, false, undefined, this) : null,
-              /* @__PURE__ */ u3("div", {
-                class: "lre-form-items",
-                children: suggestions.map((s3) => /* @__PURE__ */ u3(ItemRow, {
-                  title: s3.label,
-                  subtitle: `${s3.entries.length} entr${s3.entries.length === 1 ? "y" : "ies"}`,
-                  actions: /* @__PURE__ */ u3(Button, {
-                    size: "sm",
-                    label: `File entries under ${s3.label}`,
-                    onClick: () => adopt([s3]),
-                    children: "Add"
-                  }, undefined, false, undefined, this)
-                }, s3.id, false, undefined, this))
-              }, undefined, false, undefined, this)
-            ]
-          }, undefined, true, undefined, this)
-        ]
-      }, undefined, true, undefined, this)
-    ]
-  }, undefined, true, undefined, this);
-}
-function LookupTableEditor(props) {
-  const initial = props.doc.loreIndex;
-  const [value, setValue] = d2(initial);
-  const [tab, setTab] = d2("terms");
-  const [busy, run] = useBusy();
-  useHeld(value, setValue, initial, `${props.doc.id}/loreIndex`);
-  const changed = JSON.stringify(value) !== JSON.stringify(initial);
-  return /* @__PURE__ */ u3("div", {
-    class: "lre-build-page",
-    "data-lre-editor": "part:loreIndex",
-    children: [
-      /* @__PURE__ */ u3(PageHeader, {
-        title: "Lore lookup table",
-        subtitle: "Terms lead the engine's lore lookups to entries; topics are its table of contents. It steers the helpers' searches, including the brief's and the outline's, which draw on public entries for the narrator's Outline."
-      }, undefined, false, undefined, this),
-      /* @__PURE__ */ u3(Seg, {
-        label: "Show",
-        value: tab,
-        options: [
-          { value: "terms", label: `Terms (${Object.keys(value.terms).length})` },
-          { value: "topics", label: `Topics (${Object.keys(value.topics).length})` }
-        ],
-        onChange: (next) => setTab(next)
-      }, undefined, false, undefined, this),
-      Object.keys(props.doc.lore).length === 0 ? /* @__PURE__ */ u3(Banner, {
-        tone: "info",
-        children: "The world has no lore entries yet; terms and topics lead to entries."
-      }, undefined, false, undefined, this) : null,
-      tab === "terms" ? /* @__PURE__ */ u3(TermsPanel, {
-        doc: props.doc,
-        lint: props.lint,
-        value,
-        onChange: setValue
-      }, undefined, false, undefined, this) : /* @__PURE__ */ u3(TopicsPanel, {
-        doc: props.doc,
-        lint: props.lint,
-        value,
-        onChange: setValue
-      }, undefined, false, undefined, this),
-      /* @__PURE__ */ u3(SaveBar, {
-        children: [
-          /* @__PURE__ */ u3(Button, {
-            variant: "primary",
-            disabled: !changed,
-            busy,
-            onClick: () => run(() => props.save(loreIndexJson(value))),
-            children: "Save to draft"
-          }, undefined, false, undefined, this),
-          /* @__PURE__ */ u3(Button, {
-            variant: "ghost",
-            disabled: !changed || busy,
-            onClick: () => setValue(initial),
-            children: "Revert"
-          }, undefined, false, undefined, this)
-        ]
-      }, undefined, true, undefined, this)
-    ]
-  }, undefined, true, undefined, this);
-}
-
 // src/shared/settings.ts
 var REASONING_CHOICES = ["inherit", "off", "auto", "minimal", "low", "medium", "high", "max", "xhigh"];
 var HELPER_MAX_TOKENS = 8192;
@@ -15293,7 +14596,7 @@ var READ_LABEL = {
   life: "Their life: money, the day, commitments and plans"
 };
 var READ_NOTE = {
-  pinned: "What Build pins to the character, then to their place and each place around it, nearest first. Within the limit every entry comes whole; the Context panel says what didn't fit.",
+  pinned: "What Build pins to the character, then to every mind (Build → Pinned lore, Character minds), then to their place and each place around it, nearest first; a pinned World Info book or entry is read from the book each time. Within the limit every entry comes whole; the Context panel says what didn't fit.",
   activated: "The world's lore entries the turn names, by a key, an alias, a title or a lookup-table term, as World Info activates them, read as the character: by your message and the latest reply when they were there for them, else by where they are.",
   reply: "How the latest reply ended, for those who were there for it; cut to a number, they read its end. The memory step reads the reply within this limit too.",
   message: "What you say and do, for those with you. The memory step reads it within this limit too.",
@@ -16631,7 +15934,7 @@ function StepCard(props) {
                     onChange: (policy) => update({ ...config, lore: { ...lore, policy } })
                   }, undefined, false, undefined, this)
                 }, undefined, false, undefined, this),
-                lore.policy !== "none" ? /* @__PURE__ */ u3(NumberStepper, {
+                /* @__PURE__ */ u3(NumberStepper, {
                   label: "Lore tokens",
                   value: lore.tokens,
                   min: 0,
@@ -16639,6 +15942,10 @@ function StepCard(props) {
                   integer: true,
                   disabled: busy,
                   onChange: (tokens) => update({ ...config, lore: { ...lore, tokens } })
+                }, undefined, false, undefined, this),
+                lore.policy === "none" ? /* @__PURE__ */ u3("div", {
+                  class: "lre-small lre-muted",
+                  children: "With lore off it reads only what is pinned to it in Build → Pinned lore, within these tokens."
                 }, undefined, false, undefined, this) : null,
                 lore.policy === "lookup" || lore.policy === "prefetch+lookup" ? /* @__PURE__ */ u3(Field, {
                   label: "Lookups by",
@@ -16661,6 +15968,731 @@ function StepCard(props) {
       ]
     }, undefined, true, undefined, this)
   }, undefined, false, undefined, this);
+}
+
+// src/frontend/build/lore-pins.tsx
+var HINT = {
+  characters: "Their mind reads these first, every time they think, within the pinned lore a mind reads (Settings → Minds → What a mind reads).",
+  places: "Every helper and mind call here, or in a place inside it, reads these first, within its lore tokens.",
+  steps: "Every call of this step reads these first, whatever its lore setting, within its lore tokens (Settings → Steps).",
+  mind: "Every character's mind reads these, after what is pinned to them, within the pinned lore a mind reads (Settings → Minds → What a mind reads)."
+};
+var WHOLE_BOOK = "lre:whole-book";
+function LorePinsSection(props) {
+  const app = useApp();
+  const draft = useSelect(app.drafts, (d3) => d3);
+  const send = b2(() => draftSend(app), [app]);
+  const [busy, run] = useBusy();
+  const [views, setViews] = d2({});
+  const [adding, setAdding] = d2(null);
+  const [books, setBooks] = d2(null);
+  const [book, setBook] = d2("");
+  const [entries, setEntries] = d2(null);
+  const [choice, setChoice] = d2("");
+  const loreId = P2();
+  const bookId = P2();
+  const entryId = P2();
+  const pins = draft ? lorePinsOf(draft.doc) : { characters: {}, places: {}, steps: {} };
+  const list2 = (props.target === "steps" ? pins.steps[props.id] : pins[props.target][props.id]) ?? [];
+  const keys = list2.map(lorePinKey).join(`
+`);
+  A(() => {
+    if (!draft || !list2.some((p3) => !("lore" in p3)))
+      return;
+    app.request({ type: "lre.lore", op: "pins", worldId: draft.worldId }).then((body) => {
+      const part = (props.target === "steps" ? body?.pins?.steps[props.id] : body?.pins?.[props.target][props.id]) ?? [];
+      setViews(Object.fromEntries(part.map((v3) => [v3.key, v3])));
+    });
+  }, [draft?.worldId, keys]);
+  A(() => {
+    if (adding !== "book" || books !== null)
+      return;
+    app.request({ type: "lre.lore", op: "books", ...app.client.getState().chatId ? { chatId: app.client.getState().chatId ?? "" } : {} }).then((body) => setBooks(body?.books ?? []));
+  }, [adding]);
+  A(() => {
+    setEntries(null);
+    setChoice("");
+    if (book === "")
+      return;
+    app.request({ type: "lre.lore", op: "entries", bookId: book }).then((body) => setEntries(body?.entries ?? []));
+  }, [book]);
+  if (!draft)
+    return null;
+  const save = (next) => run(async () => {
+    const all = props.target === "steps" ? { ...pins, steps: { ...pins.steps, [props.id]: next } } : { ...pins, [props.target]: { ...pins[props.target], [props.id]: next } };
+    await send({ type: "lre.editor", worldId: draft.worldId, base: draft.base, op: "set", part: "lorePins", value: lorePinsJson(all) });
+    setAdding(null);
+    setChoice("");
+  });
+  const titleOf2 = (pin) => {
+    if ("lore" in pin) {
+      const entry = draft.doc.lore[pin.lore];
+      return entry ? { title: entry.title || pin.lore, source: "World lore", badge: entry.secret === true ? "Secret" : null } : { title: pin.lore, source: "World lore", badge: "Missing" };
+    }
+    const v3 = views[lorePinKey(pin)];
+    const whole2 = !("entry" in pin);
+    return { title: v3?.title ?? (whole2 ? "A World Info book" : "A World Info entry"), source: v3?.source ?? (whole2 ? "The whole book" : "World Info"), badge: v3?.status === "missing" ? "Missing" : v3?.status === "off" ? "Off in its book" : null };
+  };
+  const taken = new Set(list2.map(lorePinKey));
+  const lore = Object.values(draft.doc.lore).filter((l3) => !taken.has(`lore:${l3.id}`)).sort((a3, b3) => a3.title.localeCompare(b3.title));
+  const hint = props.target === "steps" ? props.id === "mind" ? HINT.mind : HINT.steps : HINT[props.target];
+  return /* @__PURE__ */ u3("div", {
+    "data-lre-lore-pins": `${props.target}:${props.id}`,
+    children: /* @__PURE__ */ u3(Section, {
+      title: props.target === "steps" ? STEP_LABEL[props.id] : "Pinned lore",
+      aside: list2.length > 0 ? /* @__PURE__ */ u3(Badge, {
+        children: list2.length
+      }, undefined, false, undefined, this) : undefined,
+      children: /* @__PURE__ */ u3("div", {
+        class: "lre-stack",
+        children: [
+          /* @__PURE__ */ u3("p", {
+            class: "lre-build-note",
+            children: [
+              hint,
+              " Pins go to the draft as you change them; a chat uses them once you commit and Upgrade it."
+            ]
+          }, undefined, true, undefined, this),
+          list2.length > 0 ? /* @__PURE__ */ u3(ActionRows, {
+            label: "Pinned lore",
+            children: list2.map((pin, i3) => {
+              const t3 = titleOf2(pin);
+              return /* @__PURE__ */ u3(ActionRow, {
+                title: t3.title,
+                subtitle: t3.source,
+                value: t3.badge ? /* @__PURE__ */ u3(Badge, {
+                  tone: t3.badge === "Missing" ? "neg" : t3.badge === "Secret" ? "gm" : "neutral",
+                  children: t3.badge
+                }, undefined, false, undefined, this) : undefined,
+                actions: /* @__PURE__ */ u3(IconButton, {
+                  icon: "close",
+                  label: `Unpin ${t3.title}`,
+                  disabled: busy,
+                  onClick: () => save(list2.filter((_3, j3) => j3 !== i3))
+                }, undefined, false, undefined, this)
+              }, lorePinKey(pin), false, undefined, this);
+            })
+          }, undefined, false, undefined, this) : null,
+          /* @__PURE__ */ u3(Issues, {
+            issues: lintAt(draft.lint, `lorePins.${props.target}.${props.id}`)
+          }, undefined, false, undefined, this),
+          adding === "lore" ? /* @__PURE__ */ u3("div", {
+            class: "lre-form-pins-add",
+            children: [
+              /* @__PURE__ */ u3("label", {
+                for: loreId,
+                children: "World lore entry"
+              }, undefined, false, undefined, this),
+              /* @__PURE__ */ u3("select", {
+                id: loreId,
+                class: "lre-input",
+                value: choice,
+                onChange: (event) => setChoice(event.currentTarget.value),
+                children: [
+                  /* @__PURE__ */ u3("option", {
+                    value: "",
+                    children: "Choose an entry"
+                  }, undefined, false, undefined, this),
+                  lore.map((l3) => /* @__PURE__ */ u3("option", {
+                    value: l3.id,
+                    children: l3.title || l3.id
+                  }, l3.id, false, undefined, this))
+                ]
+              }, undefined, true, undefined, this),
+              /* @__PURE__ */ u3("div", {
+                class: "lre-form-pins-actions",
+                children: [
+                  /* @__PURE__ */ u3(Button, {
+                    variant: "primary",
+                    icon: "pin",
+                    disabled: choice === "" || busy,
+                    onClick: () => save([...list2, { lore: choice }]),
+                    children: "Pin it"
+                  }, undefined, false, undefined, this),
+                  /* @__PURE__ */ u3(Button, {
+                    variant: "ghost",
+                    onClick: () => setAdding(null),
+                    children: "Cancel"
+                  }, undefined, false, undefined, this)
+                ]
+              }, undefined, true, undefined, this)
+            ]
+          }, undefined, true, undefined, this) : adding === "book" ? /* @__PURE__ */ u3("div", {
+            class: "lre-form-pins-add",
+            children: [
+              /* @__PURE__ */ u3("label", {
+                for: bookId,
+                children: "World Info book"
+              }, undefined, false, undefined, this),
+              /* @__PURE__ */ u3("select", {
+                id: bookId,
+                class: "lre-input",
+                value: book,
+                onChange: (event) => setBook(event.currentTarget.value),
+                children: [
+                  /* @__PURE__ */ u3("option", {
+                    value: "",
+                    children: books === null ? "Loading books…" : books.length === 0 ? "No World Info books" : "Choose a book"
+                  }, undefined, false, undefined, this),
+                  (books ?? []).map((b3) => /* @__PURE__ */ u3("option", {
+                    value: b3.id,
+                    children: b3.attached ? `${b3.name} (in this chat)` : b3.name
+                  }, b3.id, false, undefined, this))
+                ]
+              }, undefined, true, undefined, this),
+              book !== "" ? /* @__PURE__ */ u3(M, {
+                children: [
+                  /* @__PURE__ */ u3("label", {
+                    for: entryId,
+                    children: "What to pin"
+                  }, undefined, false, undefined, this),
+                  /* @__PURE__ */ u3("select", {
+                    id: entryId,
+                    class: "lre-input",
+                    value: choice,
+                    onChange: (event) => setChoice(event.currentTarget.value),
+                    children: [
+                      /* @__PURE__ */ u3("option", {
+                        value: "",
+                        children: entries === null ? "Loading entries…" : "Choose the whole book or one entry"
+                      }, undefined, false, undefined, this),
+                      taken.has(`book:${book}`) ? null : /* @__PURE__ */ u3("option", {
+                        value: WHOLE_BOOK,
+                        children: "The whole book (its switched-on entries, new ones too)"
+                      }, undefined, false, undefined, this),
+                      (entries ?? []).filter((e3) => !taken.has(`book:${book}/${e3.id}`)).map((e3) => /* @__PURE__ */ u3("option", {
+                        value: e3.id,
+                        children: e3.disabled ? `${e3.title} (off in the book)` : e3.title
+                      }, e3.id, false, undefined, this))
+                    ]
+                  }, undefined, true, undefined, this)
+                ]
+              }, undefined, true, undefined, this) : null,
+              /* @__PURE__ */ u3("div", {
+                class: "lre-form-pins-actions",
+                children: [
+                  /* @__PURE__ */ u3(Button, {
+                    variant: "primary",
+                    icon: "pin",
+                    disabled: book === "" || choice === "" || busy,
+                    onClick: () => save([...list2, choice === WHOLE_BOOK ? { book } : { book, entry: choice }]),
+                    children: "Pin it"
+                  }, undefined, false, undefined, this),
+                  /* @__PURE__ */ u3(Button, {
+                    variant: "ghost",
+                    onClick: () => setAdding(null),
+                    children: "Cancel"
+                  }, undefined, false, undefined, this)
+                ]
+              }, undefined, true, undefined, this)
+            ]
+          }, undefined, true, undefined, this) : /* @__PURE__ */ u3("div", {
+            class: "lre-form-pins-actions",
+            children: [
+              /* @__PURE__ */ u3(Button, {
+                icon: "pin",
+                disabled: busy || lore.length === 0,
+                onClick: () => setAdding("lore"),
+                children: "Pin world lore"
+              }, undefined, false, undefined, this),
+              /* @__PURE__ */ u3(Button, {
+                icon: "book",
+                disabled: busy,
+                onClick: () => setAdding("book"),
+                children: "Pin from World Info"
+              }, undefined, false, undefined, this)
+            ]
+          }, undefined, true, undefined, this)
+        ]
+      }, undefined, true, undefined, this)
+    }, undefined, false, undefined, this)
+  }, undefined, false, undefined, this);
+}
+
+// src/frontend/build/lookup-editor.tsx
+var SUGGESTIONS_SHOWN = 12;
+function EntryChips(props) {
+  const titleOf2 = (id) => hasOwn(props.doc.lore, id) ? props.doc.lore[id]?.title || id : `${id} (missing)`;
+  const rest = props.options.filter((o4) => !props.ids.includes(o4.value));
+  return /* @__PURE__ */ u3(M, {
+    children: [
+      props.ids.length > 0 ? /* @__PURE__ */ u3("div", {
+        class: "lre-form-chips",
+        children: props.ids.map((id) => /* @__PURE__ */ u3(Chip, {
+          tone: hasOwn(props.doc.lore, id) ? undefined : "neg",
+          removeLabel: `Remove ${titleOf2(id)} from ${props.label}`,
+          onRemove: () => props.onChange(props.ids.filter((other) => other !== id)),
+          children: titleOf2(id)
+        }, id, false, undefined, this))
+      }, undefined, false, undefined, this) : null,
+      rest.length > 0 ? /* @__PURE__ */ u3(AddPicker, {
+        label: `Add an entry to ${props.label}`,
+        options: rest,
+        placeholder: "Add an entry…",
+        onAdd: (id) => props.onChange([...props.ids, id])
+      }, undefined, false, undefined, this) : null
+    ]
+  }, undefined, true, undefined, this);
+}
+function ListHead(props) {
+  return /* @__PURE__ */ u3("div", {
+    class: "lre-section-head",
+    children: [
+      /* @__PURE__ */ u3("h3", {
+        class: "lre-section-title",
+        children: props.title
+      }, undefined, false, undefined, this),
+      props.count !== undefined ? /* @__PURE__ */ u3(Badge, {
+        children: props.count
+      }, undefined, false, undefined, this) : null
+    ]
+  }, undefined, true, undefined, this);
+}
+function TermsPanel(props) {
+  const [query, setQuery] = d2("");
+  const [term, setTerm] = d2("");
+  const [entry, setEntry] = d2("");
+  const [all, setAll] = d2(false);
+  const termId = P2();
+  const { value } = props;
+  const options = b2(() => refOptions(props.doc, "lore"), [props.doc]);
+  const titleOf2 = (id) => hasOwn(props.doc.lore, id) ? props.doc.lore[id]?.title || id : id;
+  const q2 = loreTerm(query);
+  const count = Object.keys(value.terms).length;
+  const terms = Object.entries(value.terms).filter(([t3, ids]) => q2 === "" || t3.includes(q2) || ids.some((id) => titleOf2(id).toLowerCase().includes(q2)));
+  const suggestions = termSuggestions({ lore: props.doc.lore, loreIndex: value });
+  const aliases = suggestions.filter((s3) => s3.from === "alias");
+  const setTerms = (terms2) => props.onChange({ ...value, terms: terms2 });
+  const adopt = (picked) => props.onChange(picked.reduce((index, s3) => addToLoreIndex(index, s3.entry, { terms: [s3.term], topics: [] }), value));
+  const added = loreTerm(term);
+  return /* @__PURE__ */ u3(M, {
+    children: [
+      /* @__PURE__ */ u3("div", {
+        class: "lre-form-lore-fields",
+        children: [
+          /* @__PURE__ */ u3(ListHead, {
+            title: "Terms"
+          }, undefined, false, undefined, this),
+          count > 8 ? /* @__PURE__ */ u3("div", {
+            class: "lre-build-search",
+            children: [
+              /* @__PURE__ */ u3(Icon, {
+                name: "search",
+                size: 16
+              }, undefined, false, undefined, this),
+              /* @__PURE__ */ u3("input", {
+                class: "lre-input",
+                type: "search",
+                placeholder: "Search terms and entries",
+                "aria-label": "Search terms",
+                value: query,
+                onInput: (event) => setQuery(event.currentTarget.value)
+              }, undefined, false, undefined, this)
+            ]
+          }, undefined, true, undefined, this) : null,
+          terms.length === 0 ? count === 0 ? /* @__PURE__ */ u3(Empty, {
+            icon: "search",
+            title: "No terms yet",
+            children: "Add one below, or take a suggestion."
+          }, undefined, false, undefined, this) : /* @__PURE__ */ u3(Empty, {
+            icon: "search",
+            title: "No matches",
+            children: [
+              "No term or entry matches “",
+              query.trim(),
+              "”."
+            ]
+          }, undefined, true, undefined, this) : null,
+          terms.map(([t3, ids]) => /* @__PURE__ */ u3("div", {
+            class: "lre-form-lore-wrap",
+            "data-lre-term": t3,
+            children: /* @__PURE__ */ u3(FormGroup, {
+              title: t3,
+              aside: /* @__PURE__ */ u3(IconButton, {
+                icon: "trash",
+                label: `Remove the term “${t3}”`,
+                onClick: () => {
+                  const next = { ...value.terms };
+                  delete next[t3];
+                  setTerms(next);
+                }
+              }, undefined, false, undefined, this),
+              children: [
+                /* @__PURE__ */ u3("div", {
+                  class: "lre-field",
+                  children: [
+                    /* @__PURE__ */ u3("span", {
+                      class: "label",
+                      children: "Leads to"
+                    }, undefined, false, undefined, this),
+                    /* @__PURE__ */ u3(EntryChips, {
+                      ids,
+                      doc: props.doc,
+                      options,
+                      label: `“${t3}”`,
+                      onChange: (next) => setTerms({ ...value.terms, [t3]: next })
+                    }, undefined, false, undefined, this)
+                  ]
+                }, undefined, true, undefined, this),
+                /* @__PURE__ */ u3(Issues, {
+                  issues: props.lint.filter((issue) => issue.path === `loreIndex.terms.${t3}`)
+                }, undefined, false, undefined, this)
+              ]
+            }, undefined, true, undefined, this)
+          }, t3, false, undefined, this)),
+          /* @__PURE__ */ u3(FormGroup, {
+            title: "Add a term",
+            children: /* @__PURE__ */ u3("form", {
+              class: "lre-form-lore-fields",
+              onSubmit: (event) => {
+                event.preventDefault();
+                if (added === "" || entry === "")
+                  return;
+                adopt([{ term: added, entry }]);
+                setTerm("");
+              },
+              children: [
+                /* @__PURE__ */ u3(Field, {
+                  label: "Term",
+                  for: termId,
+                  help: "What a lookup matches: lowercase, single spaces",
+                  children: /* @__PURE__ */ u3("input", {
+                    id: termId,
+                    class: "lre-input",
+                    placeholder: "e.g. the old lighthouse",
+                    autoComplete: "off",
+                    value: term,
+                    onInput: (event) => setTerm(event.currentTarget.value)
+                  }, undefined, false, undefined, this)
+                }, undefined, false, undefined, this),
+                /* @__PURE__ */ u3("div", {
+                  class: "lre-form-add",
+                  children: [
+                    /* @__PURE__ */ u3(RefPicker, {
+                      label: "Leads to",
+                      value: entry,
+                      options,
+                      placeholder: "Choose an entry…",
+                      disabled: options.length === 0,
+                      onChange: setEntry
+                    }, undefined, false, undefined, this),
+                    /* @__PURE__ */ u3(Button, {
+                      type: "submit",
+                      variant: "primary",
+                      icon: "plus",
+                      disabled: added === "" || entry === "",
+                      children: "Add"
+                    }, undefined, false, undefined, this)
+                  ]
+                }, undefined, true, undefined, this)
+              ]
+            }, undefined, true, undefined, this)
+          }, undefined, false, undefined, this)
+        ]
+      }, undefined, true, undefined, this),
+      /* @__PURE__ */ u3("div", {
+        class: "lre-form-lore-fields",
+        "data-lre-term-suggestions": true,
+        children: [
+          /* @__PURE__ */ u3(ListHead, {
+            title: "Suggestions",
+            count: suggestions.length
+          }, undefined, false, undefined, this),
+          suggestions.length === 0 ? /* @__PURE__ */ u3(Empty, {
+            icon: "check",
+            children: "Every title, alias and keyword already leads to its entry."
+          }, undefined, false, undefined, this) : /* @__PURE__ */ u3(M, {
+            children: [
+              /* @__PURE__ */ u3("span", {
+                class: "lre-form-lore-note",
+                children: "From the entries' titles, aliases and keywords."
+              }, undefined, false, undefined, this),
+              aliases.length > 0 ? /* @__PURE__ */ u3("span", {
+                class: "lre-form-lore-actions",
+                children: /* @__PURE__ */ u3(Button, {
+                  size: "sm",
+                  icon: "plus",
+                  onClick: () => adopt(aliases),
+                  children: [
+                    "Add all aliases as terms (",
+                    aliases.length,
+                    ")"
+                  ]
+                }, undefined, true, undefined, this)
+              }, undefined, false, undefined, this) : null,
+              /* @__PURE__ */ u3("div", {
+                class: "lre-form-items",
+                children: (all ? suggestions : suggestions.slice(0, SUGGESTIONS_SHOWN)).map((s3) => /* @__PURE__ */ u3(ItemRow, {
+                  title: /* @__PURE__ */ u3(M, {
+                    children: [
+                      s3.term,
+                      " → ",
+                      titleOf2(s3.entry),
+                      " ",
+                      /* @__PURE__ */ u3("span", {
+                        class: "lre-form-lore-from",
+                        children: [
+                          "· ",
+                          s3.from
+                        ]
+                      }, undefined, true, undefined, this)
+                    ]
+                  }, undefined, true, undefined, this),
+                  actions: /* @__PURE__ */ u3(Button, {
+                    size: "sm",
+                    label: `Add ${s3.term} for ${titleOf2(s3.entry)}`,
+                    onClick: () => adopt([s3]),
+                    children: "Add"
+                  }, undefined, false, undefined, this)
+                }, `${s3.term}:${s3.entry}`, false, undefined, this))
+              }, undefined, false, undefined, this),
+              !all && suggestions.length > SUGGESTIONS_SHOWN ? /* @__PURE__ */ u3("span", {
+                class: "lre-form-lore-actions",
+                children: /* @__PURE__ */ u3(Button, {
+                  size: "sm",
+                  variant: "ghost",
+                  icon: "chevron-down",
+                  onClick: () => setAll(true),
+                  children: [
+                    "Show all ",
+                    suggestions.length
+                  ]
+                }, undefined, true, undefined, this)
+              }, undefined, false, undefined, this) : null
+            ]
+          }, undefined, true, undefined, this)
+        ]
+      }, undefined, true, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+}
+function TopicsPanel(props) {
+  const [label, setLabel] = d2("");
+  const labelId = P2();
+  const { value } = props;
+  const options = b2(() => refOptions(props.doc, "lore"), [props.doc]);
+  const suggestions = topicSuggestions({ lore: props.doc.lore, loreIndex: value });
+  const setTopics = (topics) => props.onChange({ ...value, topics });
+  const adopt = (picked) => props.onChange(picked.reduce((index, s3) => s3.entries.reduce((acc, entry) => addToLoreIndex(acc, entry, { terms: [], topics: [{ id: s3.id, label: s3.label }] }), index), value));
+  const base = topicIdOf(label);
+  let id = base;
+  for (let n2 = 2;id !== "" && hasOwn(value.topics, id); n2++)
+    id = `${base}_${n2}`;
+  return /* @__PURE__ */ u3(M, {
+    children: [
+      /* @__PURE__ */ u3("div", {
+        class: "lre-form-lore-fields",
+        children: [
+          /* @__PURE__ */ u3(ListHead, {
+            title: "Topics"
+          }, undefined, false, undefined, this),
+          Object.keys(value.topics).length === 0 ? /* @__PURE__ */ u3(Empty, {
+            icon: "list",
+            title: "No topics yet",
+            children: "Add one below, or take a suggestion."
+          }, undefined, false, undefined, this) : null,
+          Object.entries(value.topics).map(([topicId, topic]) => /* @__PURE__ */ u3("div", {
+            class: "lre-form-lore-wrap",
+            "data-lre-topic": topicId,
+            children: /* @__PURE__ */ u3(FormGroup, {
+              children: [
+                /* @__PURE__ */ u3("div", {
+                  class: "lre-form-add",
+                  children: [
+                    /* @__PURE__ */ u3(Field, {
+                      label: "Topic",
+                      children: /* @__PURE__ */ u3("input", {
+                        class: "lre-input",
+                        "aria-label": `Label of topic ${topic.label || topicId}`,
+                        value: topic.label,
+                        onInput: (event) => setTopics({ ...value.topics, [topicId]: { ...topic, label: event.currentTarget.value } })
+                      }, undefined, false, undefined, this)
+                    }, undefined, false, undefined, this),
+                    /* @__PURE__ */ u3(IconButton, {
+                      icon: "trash",
+                      label: `Remove the topic ${topic.label || topicId}`,
+                      onClick: () => {
+                        const next = { ...value.topics };
+                        delete next[topicId];
+                        setTopics(next);
+                      }
+                    }, undefined, false, undefined, this)
+                  ]
+                }, undefined, true, undefined, this),
+                /* @__PURE__ */ u3(IdText, {
+                  id: topicId
+                }, undefined, false, undefined, this),
+                /* @__PURE__ */ u3("div", {
+                  class: "lre-field",
+                  children: [
+                    /* @__PURE__ */ u3("span", {
+                      class: "label",
+                      children: "Entries"
+                    }, undefined, false, undefined, this),
+                    /* @__PURE__ */ u3(EntryChips, {
+                      ids: topic.entries,
+                      doc: props.doc,
+                      options,
+                      label: topic.label || topicId,
+                      onChange: (next) => setTopics({ ...value.topics, [topicId]: { ...topic, entries: next } })
+                    }, undefined, false, undefined, this)
+                  ]
+                }, undefined, true, undefined, this),
+                /* @__PURE__ */ u3(Issues, {
+                  issues: props.lint.filter((issue) => issue.path === `loreIndex.topics.${topicId}`)
+                }, undefined, false, undefined, this)
+              ]
+            }, undefined, true, undefined, this)
+          }, topicId, false, undefined, this)),
+          /* @__PURE__ */ u3(FormGroup, {
+            title: "Add a topic",
+            children: [
+              /* @__PURE__ */ u3("form", {
+                class: "lre-form-add",
+                onSubmit: (event) => {
+                  event.preventDefault();
+                  if (id === "")
+                    return;
+                  setTopics({ ...value.topics, [id]: { label: label.trim(), entries: [] } });
+                  setLabel("");
+                },
+                children: [
+                  /* @__PURE__ */ u3(Field, {
+                    label: "Topic",
+                    for: labelId,
+                    children: /* @__PURE__ */ u3("input", {
+                      id: labelId,
+                      class: "lre-input",
+                      placeholder: "e.g. Harbor law",
+                      autoComplete: "off",
+                      value: label,
+                      onInput: (event) => setLabel(event.currentTarget.value)
+                    }, undefined, false, undefined, this)
+                  }, undefined, false, undefined, this),
+                  /* @__PURE__ */ u3(Button, {
+                    type: "submit",
+                    variant: "primary",
+                    icon: "plus",
+                    disabled: id === "",
+                    children: "Add"
+                  }, undefined, false, undefined, this)
+                ]
+              }, undefined, true, undefined, this),
+              id !== "" ? /* @__PURE__ */ u3(IdText, {
+                id
+              }, undefined, false, undefined, this) : null
+            ]
+          }, undefined, true, undefined, this)
+        ]
+      }, undefined, true, undefined, this),
+      /* @__PURE__ */ u3("div", {
+        class: "lre-form-lore-fields",
+        "data-lre-topic-suggestions": true,
+        children: [
+          /* @__PURE__ */ u3(ListHead, {
+            title: "Suggestions",
+            count: suggestions.length
+          }, undefined, false, undefined, this),
+          suggestions.length === 0 ? /* @__PURE__ */ u3(Empty, {
+            icon: "check",
+            children: "Every topic an entry names already lists it."
+          }, undefined, false, undefined, this) : /* @__PURE__ */ u3(M, {
+            children: [
+              /* @__PURE__ */ u3("span", {
+                class: "lre-form-lore-note",
+                children: "Topics the entries name."
+              }, undefined, false, undefined, this),
+              suggestions.length > 1 ? /* @__PURE__ */ u3("span", {
+                class: "lre-form-lore-actions",
+                children: /* @__PURE__ */ u3(Button, {
+                  size: "sm",
+                  icon: "plus",
+                  onClick: () => adopt(suggestions),
+                  children: [
+                    "File them all (",
+                    suggestions.length,
+                    ")"
+                  ]
+                }, undefined, true, undefined, this)
+              }, undefined, false, undefined, this) : null,
+              /* @__PURE__ */ u3("div", {
+                class: "lre-form-items",
+                children: suggestions.map((s3) => /* @__PURE__ */ u3(ItemRow, {
+                  title: s3.label,
+                  subtitle: `${s3.entries.length} entr${s3.entries.length === 1 ? "y" : "ies"}`,
+                  actions: /* @__PURE__ */ u3(Button, {
+                    size: "sm",
+                    label: `File entries under ${s3.label}`,
+                    onClick: () => adopt([s3]),
+                    children: "Add"
+                  }, undefined, false, undefined, this)
+                }, s3.id, false, undefined, this))
+              }, undefined, false, undefined, this)
+            ]
+          }, undefined, true, undefined, this)
+        ]
+      }, undefined, true, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+}
+function LookupTableEditor(props) {
+  const initial = props.doc.loreIndex;
+  const [value, setValue] = d2(initial);
+  const [tab, setTab] = d2("terms");
+  const [busy, run] = useBusy();
+  useHeld(value, setValue, initial, `${props.doc.id}/loreIndex`);
+  const changed = JSON.stringify(value) !== JSON.stringify(initial);
+  return /* @__PURE__ */ u3("div", {
+    class: "lre-build-page",
+    "data-lre-editor": "part:loreIndex",
+    children: [
+      /* @__PURE__ */ u3(PageHeader, {
+        title: "Lore lookup table",
+        subtitle: "Terms lead the engine's lore lookups to entries; topics are its table of contents. It steers the helpers' searches, including the brief's and the outline's, which draw on public entries for the narrator's Outline."
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(Seg, {
+        label: "Show",
+        value: tab,
+        options: [
+          { value: "terms", label: `Terms (${Object.keys(value.terms).length})` },
+          { value: "topics", label: `Topics (${Object.keys(value.topics).length})` }
+        ],
+        onChange: (next) => setTab(next)
+      }, undefined, false, undefined, this),
+      Object.keys(props.doc.lore).length === 0 ? /* @__PURE__ */ u3(Banner, {
+        tone: "info",
+        children: "The world has no lore entries yet; terms and topics lead to entries."
+      }, undefined, false, undefined, this) : null,
+      tab === "terms" ? /* @__PURE__ */ u3(TermsPanel, {
+        doc: props.doc,
+        lint: props.lint,
+        value,
+        onChange: setValue
+      }, undefined, false, undefined, this) : /* @__PURE__ */ u3(TopicsPanel, {
+        doc: props.doc,
+        lint: props.lint,
+        value,
+        onChange: setValue
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(SaveBar, {
+        children: [
+          /* @__PURE__ */ u3(Button, {
+            variant: "primary",
+            disabled: !changed,
+            busy,
+            onClick: () => run(() => props.save(loreIndexJson(value))),
+            children: "Save to draft"
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3(Button, {
+            variant: "ghost",
+            disabled: !changed || busy,
+            onClick: () => setValue(initial),
+            children: "Revert"
+          }, undefined, false, undefined, this)
+        ]
+      }, undefined, true, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
 }
 
 // src/frontend/build/minds-editor.tsx
@@ -23844,6 +23876,14 @@ function PartView(props) {
           title: PART_INFO.lorePins.label,
           subtitle: PART_INFO.lorePins.hint
         }, undefined, false, undefined, this),
+        /* @__PURE__ */ u3("p", {
+          class: "lre-build-note",
+          children: "Lore pinned to a character or a place is on its page. Lore pinned to a step below is read by every call of that step."
+        }, undefined, false, undefined, this),
+        PIN_STEPS.map((step) => /* @__PURE__ */ u3(LorePinsSection, {
+          target: "steps",
+          id: step
+        }, step, false, undefined, this)),
         /* @__PURE__ */ u3(Section, {
           title: "As stored",
           children: /* @__PURE__ */ u3(JsonView, {
@@ -30507,9 +30547,10 @@ function parseHHMM(text) {
     throw new RangeError(`bad time ${text}`);
   return h3 * 60 + min;
 }
-function formatHHMM(minuteOfDay) {
+function formatTimeOfDay(minuteOfDay) {
   const m2 = mod(minuteOfDay, MINUTES_PER_DAY);
-  return `${String(Math.floor(m2 / 60)).padStart(2, "0")}:${String(m2 % 60).padStart(2, "0")}`;
+  const h3 = Math.floor(m2 / 60);
+  return `${h3 % 12 === 0 ? 12 : h3 % 12}:${String(m2 % 60).padStart(2, "0")} ${h3 < 12 ? "AM" : "PM"}`;
 }
 function daysFromCivil(y3, m2, d3) {
   const yy = m2 <= 2 ? y3 - 1 : y3;
@@ -30613,7 +30654,7 @@ function weekdayName(cal, weekday) {
 }
 function formatClock(cal, clock, offsetMinutes = 0) {
   const d3 = dateAt(cal, clock + offsetMinutes);
-  return `${weekdayName(cal, d3.weekday)} ${d3.day} ${monthName(cal, d3.month)} ${d3.year}, ${formatHHMM(d3.minuteOfDay)}`;
+  return `${weekdayName(cal, d3.weekday)} ${d3.day} ${monthName(cal, d3.month)} ${d3.year}, ${formatTimeOfDay(d3.minuteOfDay)}`;
 }
 var ZONES = {
   UTC: { standard: 0, dst: null },
@@ -40576,7 +40617,7 @@ function PinnedLore(props) {
   A(() => {
     props.send({ type: "lre.lore", op: "pins", chatId: props.chatId }).then((m2) => {
       if (m2.type === "lre.result" && m2.request === "lre.lore")
-        setPins(m2.body.pins ?? { characters: {}, places: {} });
+        setPins(m2.body.pins ?? { characters: {}, places: {}, steps: {} });
     });
   }, [props.chatId]);
   const own2 = pins?.characters[props.who] ?? [];

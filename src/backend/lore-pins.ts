@@ -1,11 +1,13 @@
-// Lore pinned to characters and places, read on the host (DESIGN §24.5, §5.4). A world entry's text
-// comes from the world document, a World Info book entry's from the host each time a call reads it,
+// Lore pinned to characters, places and steps, read on the host (DESIGN §24.5, §5.4). A world entry's
+// text comes from the world document, a World Info book's from the host each time a call reads it,
 // so a pinned book entry always reads as its book has it now (switched off in the book or not: the
-// pin is the author's choice). Also what Build and the GM view show of the pins (each entry's title,
-// where it comes from and whether it reads), and the books and entries a pin may name.
+// pin is the author's choice), and a pinned whole book as its switched-on entries are now, a new one
+// included. Also what Build and the GM view show of the pins (each entry's title, where it comes
+// from and whether it reads), and the books and entries a pin may name.
 
 import type { ChatId, UserId } from "../shared/ids";
-import { hasOwn } from "../shared/json";
+import { hasOwn, isRecord } from "../shared/json";
+import { LEDGER_NAMESPACE } from "../shared/ledger";
 import { loreIsSecret, lorePinKey, lorePinsOf, loreSourceOf } from "../shared/lore";
 import type { LoreBookEntryView, LoreBookView, LorePinView, LorePinsView } from "../shared/protocol";
 import type { LorePin, WorldDoc } from "../shared/world";
@@ -23,54 +25,97 @@ export function bookEntryTitle(e: Pick<HostBookEntry, "comment" | "content">): s
   return words.length === 0 ? "Untitled entry" : words.length > TITLE_WORDS ? `${words.slice(0, TITLE_WORDS).join(" ")}…` : words.join(" ");
 }
 
-/** Reads each book entry a set of pins names once, by key; one that is gone, or in another book, reads as null. */
-async function bookEntries(host: Pick<HostPort, "books" | "log">, pins: readonly LorePin[], userId: UserId): Promise<Map<string, HostBookEntry | null>> {
-  const out = new Map<string, HostBookEntry | null>();
+/**
+ * An entry the engine wrote (its own books' sections, the Minds section among them, which holds
+ * other minds): never read through a pin, whatever names it.
+ */
+function engineWrote(e: HostBookEntry): boolean {
+  return isRecord(e.extensions[LEDGER_NAMESPACE]);
+}
+
+/**
+ * What a set of pins names on the host, each read once: a book entry by its pin's key (null: gone,
+ * or in another book), and a whole book's entries by its id, as the host lists them, in the book's
+ * own order (its entries' Order, then id), switched-off ones too for the pin views (null: unread).
+ */
+interface BookReads {
+  entries: Map<string, HostBookEntry | null>;
+  books: Map<string, HostBookEntry[] | null>;
+}
+
+async function bookReads(host: Pick<HostPort, "books" | "log">, pins: readonly LorePin[], userId: UserId): Promise<BookReads> {
+  const out: BookReads = { entries: new Map(), books: new Map() };
+  const unread = (what: string, error: unknown): void => host.log("warn", `[LumiRPEngine] ${what} wasn't read: ${error instanceof Error ? error.message : String(error)}`, userId);
   await Promise.all(
     pins.map(async (pin) => {
       if ("lore" in pin) return;
+      if (!("entry" in pin)) {
+        if (out.books.has(pin.book)) return;
+        out.books.set(pin.book, null);
+        try {
+          out.books.set(pin.book, (await host.books.entries(pin.book, userId)).filter((e) => !engineWrote(e)));
+        } catch (error) {
+          unread(`a pinned World Info book (${pin.book})`, error);
+        }
+        return;
+      }
       const key = lorePinKey(pin);
-      if (out.has(key)) return;
-      out.set(key, null);
+      if (out.entries.has(key)) return;
+      out.entries.set(key, null);
       try {
         const e = await host.books.entry(pin.entry, userId);
-        out.set(key, e && e.bookId === pin.book ? e : null);
+        out.entries.set(key, e && e.bookId === pin.book && !engineWrote(e) ? e : null);
       } catch (error) {
-        host.log("warn", `[LumiRPEngine] a pinned World Info entry (${pin.book}/${pin.entry}) wasn't read: ${error instanceof Error ? error.message : String(error)}`, userId);
+        unread(`a pinned World Info entry (${pin.book}/${pin.entry})`, error);
       }
     }),
   );
   return out;
 }
 
-/**
- * The text of each pin in `refs`, in order (DESIGN §24.5): a world entry from the world, a book's
- * from the host, each book entry read once. A pin whose entry is gone, or whose book can't be read,
- * is left out; lint and the pin views name it.
- */
-export async function readPins(host: Pick<HostPort, "books" | "log">, world: WorldDoc, refs: readonly PinRef[], userId: UserId): Promise<PinnedText[]> {
-  if (refs.length === 0) return [];
-  const books = await bookEntries(host, refs.map((r) => r.pin), userId);
-  return refs.flatMap((ref): PinnedText[] => {
-    if ("lore" in ref.pin) {
-      const text = worldPinText(world, ref);
-      return text ? [text] : [];
-    }
-    const e = books.get(ref.key);
-    return e ? [{ key: ref.key, on: ref.on, title: bookEntryTitle(e), content: e.content, entry: null }] : [];
-  });
+/** A book entry as pinned text, under the key a pin of that one entry has, so a call reads it once however it is pinned. */
+function bookText(e: HostBookEntry, on: PinRef["on"]): PinnedText {
+  return { key: lorePinKey({ book: e.bookId, entry: e.id }), on, title: bookEntryTitle(e), content: e.content, entry: null };
 }
 
 /**
- * Every pin of `world`, read now (`lre.lore pins`), by character and by place: each entry's title,
- * where it comes from (the world's lore, or its book by name) and whether it reads. GM and author
- * data: secret entries are named here.
+ * Reads, once, every book entry and whole book `refs` name, and gives the text of any of those refs
+ * in order (DESIGN §24.5): a world entry from the world, a book entry from its book, a whole book's
+ * switched-on entries in the book's order; each entry once, where it first comes. A pin whose entry
+ * or book is gone, or can't be read, gives nothing; lint and the pin views name it.
+ */
+export async function pinReader(host: Pick<HostPort, "books" | "log">, world: WorldDoc, refs: readonly PinRef[], userId: UserId): Promise<(refs: readonly PinRef[]) => PinnedText[]> {
+  const read = await bookReads(host, refs.map((r) => r.pin), userId);
+  return (some) => {
+    const out: PinnedText[] = [];
+    const seen = new Set<string>();
+    const give = (t: PinnedText | null): void => {
+      if (!t || seen.has(t.key)) return;
+      seen.add(t.key);
+      out.push(t);
+    };
+    for (const ref of some) {
+      if ("lore" in ref.pin) give(worldPinText(world, ref));
+      else if ("entry" in ref.pin) {
+        const e = read.entries.get(ref.key);
+        give(e ? bookText(e, ref.on) : null);
+      } else for (const e of read.books.get(ref.pin.book) ?? []) if (!e.disabled) give(bookText(e, ref.on));
+    }
+    return out;
+  };
+}
+
+/**
+ * Every pin of `world`, read now (`lre.lore pins`), by character, by place and by step: each entry's
+ * or book's title, where it comes from (the world's lore, or its book by name) and whether it reads.
+ * GM and author data: secret entries are named here.
  */
 export async function pinViews(host: Pick<HostPort, "books" | "log">, world: WorldDoc, userId: UserId): Promise<LorePinsView> {
   const pins = lorePinsOf(world);
-  const all = [...Object.values(pins.characters), ...Object.values(pins.places)].flat();
-  const books = await bookEntries(host, all, userId);
-  const names = all.some((p) => !("lore" in p)) ? new Map((await host.books.list(userId).catch(() => [])).map((b) => [b.id, b.name])) : new Map<string, string>();
+  const all = [...Object.values(pins.characters), ...Object.values(pins.places), ...Object.values(pins.steps)].flatMap((list) => list ?? []);
+  const read = await bookReads(host, all, userId);
+  const books = all.some((p) => !("lore" in p)) ? await host.books.list(userId).catch(() => []) : [];
+  const names = new Map(books.map((b) => [b.id, b.name]));
   const view = (pin: LorePin): LorePinView => {
     const key = lorePinKey(pin);
     if ("lore" in pin) {
@@ -79,12 +124,20 @@ export async function pinViews(host: Pick<HostPort, "books" | "log">, world: Wor
       const source = loreSourceOf(entry.source);
       return { key, pin, title: entry.title || pin.lore, source: "World lore", status: source.kind === "ai" && source.status === "pending" ? "pending" : "ok", secret: loreIsSecret(entry) };
     }
-    const e = books.get(key) ?? null;
+    if (!("entry" in pin)) {
+      // A whole book reads whatever it holds switched on; one that is gone, or the engine's own, reads nothing.
+      const book = books.find((b) => b.id === pin.book);
+      const entries = read.books.get(pin.book);
+      if (!book || book.engine || !entries) return { key, pin, title: "A World Info book", source: "The whole book", status: "missing", secret: false };
+      const on = entries.filter((e) => !e.disabled).length;
+      return { key, pin, title: book.name, source: `The whole book: ${on} ${on === 1 ? "entry" : "entries"} switched on`, status: "ok", secret: false };
+    }
+    const e = read.entries.get(key) ?? null;
     const source = names.get(pin.book) ?? "A World Info book";
     return e ? { key, pin, title: bookEntryTitle(e), source, status: e.disabled ? "off" : "ok", secret: false } : { key, pin, title: "A book entry", source, status: "missing", secret: false };
   };
-  const part = (record: Readonly<Record<string, readonly LorePin[]>>): Record<string, LorePinView[]> => Object.fromEntries(Object.entries(record).map(([id, list]) => [id, list.map(view)]));
-  return { characters: part(pins.characters), places: part(pins.places) };
+  const part = (record: Readonly<Record<string, readonly LorePin[] | undefined>>): Record<string, LorePinView[]> => Object.fromEntries(Object.entries(record).map(([id, list]) => [id, (list ?? []).map(view)]));
+  return { characters: part(pins.characters), places: part(pins.places), steps: part(pins.steps) };
 }
 
 /** The World Info books a pin may name an entry of (`lre.lore books`): the engine's own left out, those attached to the chat first, then by name. */

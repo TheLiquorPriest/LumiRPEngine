@@ -63,6 +63,7 @@ export function stateFixture(chatId: string): StateView {
       ],
       elapsed: 12,
     },
+    replyClocks: { m2: "Tue 15 Sep 2026, 7:42 AM" },
     chips: [
       { id: "c-retry", kind: "retry", messageId: "m1", label: "The reply came back empty", actions: [{ id: "regenerate", label: "Retry", style: "primary" }], expires: "next_send" },
       { id: "c-elapsed", kind: "elapsed", messageId: "m2", label: "+12 min", detail: "07:30 → 07:42", actions: [], expires: "never" },

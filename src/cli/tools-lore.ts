@@ -28,7 +28,7 @@ async function pinsRead(args: Args, ctx: ToolContext): Promise<ToolResult> {
   // A chat's pins are the GM view's: a pin's entry can be a secret one, or one about someone the player hasn't met.
   if (chatId !== undefined && !boolArg(args, "spoilers")) throw new ToolError("A chat's pins are GM-level (an entry can be secret, or about someone the player hasn't met): pass spoilers: true to read them. A world's pins (worldId) are its author's.");
   const body = await ctx.live().conn.request("lre.lore", worldId !== undefined ? { op: "pins", worldId } : { op: "pins", chatId: chatId ?? "" });
-  return answer(body.pins ?? { characters: {}, places: {} }, worldId !== undefined ? `the lore pins of the draft of ${worldId}` : `the lore pins of chat ${chatId ?? ""}`, args);
+  return answer(body.pins ?? { characters: {}, places: {}, steps: {} }, worldId !== undefined ? `the lore pins of the draft of ${worldId}` : `the lore pins of chat ${chatId ?? ""}`, args);
 }
 
 async function saveTool(args: Args, ctx: ToolContext): Promise<ToolResult> {
@@ -44,7 +44,7 @@ async function saveTool(args: Args, ctx: ToolContext): Promise<ToolResult> {
 export const LORE_TOOLS: readonly ToolModule[] = [
   {
     name: "lre_lore_books",
-    description: "Your Lumiverse World Info books a lore pin may name an entry of (DESIGN §24.5), with chatId those attached to that chat first and marked attached. The engine's own books (\"LumiRPEngine · <world>\") are left out: a world's lore is its document's.",
+    description: "Your Lumiverse World Info books a lore pin may name, whole or by an entry (DESIGN §24.5), with chatId those attached to that chat first and marked attached. The engine's own books (\"LumiRPEngine · <world>\") are left out: a world's lore is its document's.",
     inputSchema: object({ chatId: { type: "string", description: "Mark and list first the books attached to this chat." } }),
     write: false,
     run: async (args, ctx) => {
@@ -55,7 +55,7 @@ export const LORE_TOOLS: readonly ToolModule[] = [
   },
   {
     name: "lre_lore_entries",
-    description: 'One World Info book\'s entries (lre_lore_books lists the books): id, title, whether it is switched off in its book (a pin still reads it), and its length. A pin names one as {"book": "<bookId>", "entry": "<entryId>"} in a world\'s /lorePins.',
+    description: 'One World Info book\'s entries (lre_lore_books lists the books): id, title, whether it is switched off in its book (a pin of that entry still reads it), and its length. A pin names one as {"book": "<bookId>", "entry": "<entryId>"} in a world\'s /lorePins, and the whole book as {"book": "<bookId>"}: its switched-on entries, read in the book\'s order whenever a call reads it, so entries added later are read too.',
     inputSchema: object({ bookId: { type: "string", description: "The book's id." }, offset: OFFSET }, ["bookId"]),
     write: false,
     run: async (args, ctx) => {
@@ -67,7 +67,7 @@ export const LORE_TOOLS: readonly ToolModule[] = [
   {
     name: "lre_lore_pins",
     description:
-      "Every lore pin of a world's draft (worldId, as Build shows them) or of the revision a chat plays (chatId, as GM → Minds shows them, behind spoilers: true), by character and by place, each read now: its entry's title, where it comes from (the world's lore, or a book by name), and its status: ok, missing (no such entry, or gone from its book), pending (an AI-written entry not reviewed yet, which nothing reads) or off (switched off in its book, which a pin still reads); secret marks a secret world entry. Pins themselves are written with lre_edit at /lorePins.",
+      "Every lore pin of a world's draft (worldId, as Build shows them) or of the revision a chat plays (chatId, as GM → Minds shows them, behind spoilers: true), by character, by place and by step (/lorePins/steps/<step>: every call of that step reads them first, whatever its lore policy; the mind step's, every mind), each read now: its entry's or whole book's title, where it comes from (the world's lore, or a book by name; a whole book says how many entries it has switched on), and its status: ok, missing (no such entry or book, or gone from its book), pending (an AI-written entry not reviewed yet, which nothing reads) or off (switched off in its book, which a pin of that entry still reads); secret marks a secret world entry. Pins themselves are written with lre_edit at /lorePins.",
     inputSchema: object({ worldId: { type: "string", description: "The world whose draft's pins to read." }, chatId: { type: "string", description: "Or the chat whose revision's pins to read." }, spoilers: { type: "boolean", description: "Needed with chatId: a chat's pins are GM-level." }, offset: OFFSET }),
     write: false,
     run: pinsRead,

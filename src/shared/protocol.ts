@@ -17,7 +17,7 @@ import type { EntityUpgradePick, EventRef, PathHash, ResolveScope, TimeControl, 
 import type { ExtractionType, UserSettings } from "./settings";
 import type { Activity, DiagRecord } from "./diagnostics";
 import type { GmView, SheetSectionView, StateView } from "./state-view";
-import type { AdjudicationDef, FacetId, FacetValueId, KindDef, LifeStateId, LorePin, MapDisplay, RelationTypeDef, RevisionNote, WorldDoc, WorldIndex } from "./world";
+import type { AdjudicationDef, FacetId, FacetValueId, KindDef, LifeStateId, LorePin, MapDisplay, RelationTypeDef, RevisionNote, StepPurpose, WorldDoc, WorldIndex } from "./world";
 
 export const PROTOCOL_VERSION = 1;
 
@@ -556,10 +556,11 @@ export interface LorePinView {
   secret: boolean;
 }
 
-/** Every pin of a world, read now (`lre.lore pins`), by character and by place, in order. */
+/** Every pin of a world, read now (`lre.lore pins`), by character, by place and by step, in order. */
 export interface LorePinsView {
   characters: Record<EntityId, LorePinView[]>;
   places: Record<PlaceId, LorePinView[]>;
+  steps: Partial<Record<StepPurpose, LorePinView[]>>;
 }
 
 /**

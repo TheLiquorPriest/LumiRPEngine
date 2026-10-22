@@ -100,7 +100,7 @@ describe("the GM's routine controls in play", () => {
     expect(changed).toEqual([expect.objectContaining({ entity: "danny_okafor", follow: { mode: "no_invitations", awareness: null, role: null, skips: null }, blocks: [expect.objectContaining({ block: "fleet", off: false })] })]);
     const gm = rig.body(await rig.send({ type: "lre.routine", chatId, op: "day", entity: "danny_okafor", view: "gm" })).gm as JsonObject;
     expect(gm.blocks).toContainEqual(expect.objectContaining({ block: fleet, owner: expect.objectContaining({ level: "chat" }), source: expect.objectContaining({ type: "gm" }) }));
-    expect(gm.day).toMatchObject({ blocks: expect.arrayContaining([expect.objectContaining({ from: "16:00", to: "17:30", place: "alder_harbor_marina" })]) });
+    expect(gm.day).toMatchObject({ blocks: expect.arrayContaining([expect.objectContaining({ from: "4:00 PM", to: "5:30 PM", place: "alder_harbor_marina" })]) });
     // One submit is one Undo.
     const undo = (await rig.rt.view(chatId, rig.host.userId)).chips.filter((c) => c.kind === "fix").at(-1);
     if (!undo) throw new Error("no Undo chip");

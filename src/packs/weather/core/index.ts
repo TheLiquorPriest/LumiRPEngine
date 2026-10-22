@@ -19,6 +19,7 @@ import type { EntityId, PlaceId } from "../../../shared/ids";
 import type { FieldFixTarget } from "../../../shared/state-view";
 import type { LedgerEvent } from "../../../shared/ledger";
 import type { KindDef } from "../../../shared/world";
+import { formatTemperature } from "../../../shared/world";
 import { calendarOf, dateAt, dayPartAt } from "../../../engine/calendar";
 import { ENGINE_EVENTS } from "../../../engine/engine-pack";
 import { labelOf, numOf, objOf, strOf, own } from "../../../engine/pack-kit";
@@ -111,7 +112,7 @@ export const REGION: KindDef = {
 
 export interface WeatherView {
   level: number;
-  /** "Light rain, 12 °C" (level 1: the season's mood). */
+  /** "Light rain, 54 °F" (level 1: the season's mood); the world keeps °C, the player reads °F. */
   label: string;
   region: string | null;
   season: Season;
@@ -209,9 +210,10 @@ export function buildWeatherView(ctx: ReadContext): WeatherView {
   if (level <= 1 || !e) return { level, label: level === 0 ? "" : MOOD[season], region: e?.name ?? null, season, sky: null, tempC: null, closed: [] };
   const st = stateAt(ctx, here);
   const sky = strOf(e.fields.weather, "clear");
-  const temp = level >= 3 && typeof e.fields.temp_c === "number" ? Math.round(e.fields.temp_c) : null;
+  const raw = level >= 3 && typeof e.fields.temp_c === "number" ? e.fields.temp_c : null;
+  const temp = raw === null ? null : Math.round(raw);
   const word = st?.label ?? sky;
-  return { level, label: `${word.charAt(0).toUpperCase()}${word.slice(1)}${temp !== null ? `, ${temp} °C` : ""}`, region: e.name, season, sky, tempC: temp, closed: level >= 4 ? (st?.closes ?? []) : [] };
+  return { level, label: `${word.charAt(0).toUpperCase()}${word.slice(1)}${raw !== null ? `, ${formatTemperature(raw)}` : ""}`, region: e.name, season, sky, tempC: temp, closed: level >= 4 ? (st?.closes ?? []) : [] };
 }
 
 function stepRegions(slot: { start: number }, ctx: ReadContext, rng: (entity: EntityId) => Rng): LedgerEvent[] {

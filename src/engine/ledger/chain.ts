@@ -37,6 +37,8 @@ export interface FoldSnapshot {
   notes: [number, JournalNote][];
   keep: [number, KeepLine][];
   violations: [number, string][];
+  /** Each step's clock at its end (`MessageResult.clock`); absent in a snapshot saved before clocks were kept. */
+  clocks?: [number, number][];
 }
 
 export interface SnapshotStore {
@@ -51,6 +53,8 @@ export interface MessageResult {
   parentPath: PathHash;
   /** The path after this message. */
   path: PathHash;
+  /** The world clock once this message folded, the end of its turn (what a reply shows under it); null for a step restored from a snapshot saved before clocks were kept. */
+  clock: number | null;
 }
 
 export interface FoldOutput {

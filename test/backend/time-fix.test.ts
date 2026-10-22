@@ -86,11 +86,11 @@ describe("the clock's ✎ fix", () => {
 
   test("later: the clock reads the new time, the story keeps the player character and Danny with it at home, Marcus off screen is where his schedule puts him, the bill due between is paid once, and the next reply's Scene has the time", async () => {
     const { rig, chatId } = await alder();
-    expect(await world(rig, chatId)).toEqual({ clock: "Mon 14 Sep 2026, 06:45", danny: HOME, marcus: "alder_automotive", you: HOME, bills: 0 });
+    expect(await world(rig, chatId)).toEqual({ clock: "Mon 14 Sep 2026, 6:45 AM", danny: HOME, marcus: "alder_automotive", you: HOME, bills: 0 });
     await setTime(rig, chatId, "2026-09-14 12:00");
     // The time passes as a narrated skip does: the player character stays where the story has it, and
     // Danny, in the scene with it, isn't taken out of it by his schedule; Marcus goes to lunch at noon.
-    expect(await world(rig, chatId)).toEqual({ clock: "Mon 14 Sep 2026, 12:00", danny: HOME, marcus: "rusty_anchor", you: HOME, bills: 1 });
+    expect(await world(rig, chatId)).toEqual({ clock: "Mon 14 Sep 2026, 12:00 PM", danny: HOME, marcus: "rusty_anchor", you: HOME, bills: 1 });
     const [chip] = await corrections(rig, chatId);
     expect(chip?.detail).toStartWith("Clock moved on 5 h 15 min");
     await rig.turn(chatId, "I look around.", "The cafe is busy.");
@@ -102,20 +102,20 @@ describe("the clock's ✎ fix", () => {
     const { rig, chatId } = await alder();
     await setTime(rig, chatId, "2026-09-14 12:00");
     await setTime(rig, chatId, "2026-09-14 06:50");
-    expect(await world(rig, chatId)).toEqual({ clock: "Mon 14 Sep 2026, 06:50", danny: HOME, marcus: "rusty_anchor", you: HOME, bills: 1 });
+    expect(await world(rig, chatId)).toEqual({ clock: "Mon 14 Sep 2026, 6:50 AM", danny: HOME, marcus: "rusty_anchor", you: HOME, bills: 1 });
     expect((await corrections(rig, chatId)).map((c) => c.detail?.split(" · ")[0])).toEqual(["Clock moved on 5 h 15 min", "Clock set back 5 h 10 min"]);
     // A Timelapse past 07:00, 09:00 and 11:30, whose routines would take the player character and
     // Danny to the garage, moves neither of them and charges no second bill.
     await timelapse(rig, chatId, 295);
-    expect(await world(rig, chatId)).toEqual({ clock: "Mon 14 Sep 2026, 11:45", danny: HOME, marcus: "rusty_anchor", you: HOME, bills: 1 });
+    expect(await world(rig, chatId)).toEqual({ clock: "Mon 14 Sep 2026, 11:45 AM", danny: HOME, marcus: "rusty_anchor", you: HOME, bills: 1 });
     // Plain turns and the ✎ again up to where the clock had stood: still nothing.
     await rig.turn(chatId, "I wait.", "You wait.");
     await setTime(rig, chatId, "2026-09-14 12:00");
-    expect(await world(rig, chatId)).toEqual({ clock: "Mon 14 Sep 2026, 12:00", danny: HOME, marcus: "rusty_anchor", you: HOME, bills: 1 });
+    expect(await world(rig, chatId)).toEqual({ clock: "Mon 14 Sep 2026, 12:00 PM", danny: HOME, marcus: "rusty_anchor", you: HOME, bills: 1 });
     // Past 12:00 the schedules run again: at 12:30 the player character and Danny go back to the
     // garage (home is where their routine's rest has them), and at 12:45 Marcus does.
     await timelapse(rig, chatId, 45);
-    expect(await world(rig, chatId)).toEqual({ clock: "Mon 14 Sep 2026, 12:45", danny: "alder_automotive", marcus: "alder_automotive", you: "alder_automotive", bills: 1 });
+    expect(await world(rig, chatId)).toEqual({ clock: "Mon 14 Sep 2026, 12:45 PM", danny: "alder_automotive", marcus: "alder_automotive", you: "alder_automotive", bills: 1 });
   });
 
   test("Undo takes a fix of the time back: the clock and the state from before it", async () => {

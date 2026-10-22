@@ -249,21 +249,21 @@ describe("Play → Money: each control plays as the player's turn", () => {
     if (!change) throw new Error("no change");
     await chat.play(change);
     view = await chat.hub();
-    expect(view.flows.find((f) => f.id === gym.id)).toMatchObject({ amount: "$45.00", schedule: "every Fri", next: "Fri 18 Sep 2026, 09:00" });
+    expect(view.flows.find((f) => f.id === gym.id)).toMatchObject({ amount: "$45.00", schedule: "every Fri", next: "Fri 18 Sep 2026, 9:00 AM" });
 
     await chat.play(flowStatusAction(gym.id, "pause"));
     view = await chat.hub();
     expect(view.flows.find((f) => f.id === gym.id)).toMatchObject({ status: "paused", next: null });
     expect(view.overview?.upcoming.some((u) => u.flow === gym.id)).toBe(false);
     await chat.play(flowStatusAction(gym.id, "resume"));
-    expect((await chat.hub()).flows.find((f) => f.id === gym.id)).toMatchObject({ status: "active", next: "Fri 18 Sep 2026, 09:00" });
+    expect((await chat.hub()).flows.find((f) => f.id === gym.id)).toMatchObject({ status: "active", next: "Fri 18 Sep 2026, 9:00 AM" });
     await chat.play(flowStatusAction(gym.id, "delete"));
     expect((await chat.hub()).flows.some((f) => f.id === gym.id)).toBe(false);
 
     const dentist: FlowForm = { ...blankFlowForm(CHECKING), label: "Dentist", kind: "bill", to: "Lakeshore Dental", amount: "120", every: "once", start: "2026-09-14", at: "07:30" };
     await chat.play(flowCreateAction(dentist, chat.currency));
     const due = await chat.hub();
-    expect(due.flows.find((f) => f.label === "Dentist")).toMatchObject({ schedule: "once, 2026-09-14 07:30", next: "Mon 14 Sep 2026, 07:30" });
+    expect(due.flows.find((f) => f.label === "Dentist")).toMatchObject({ schedule: "once, 2026-09-14 07:30", next: "Mon 14 Sep 2026, 7:30 AM" });
     await chat.timelapse(120);
     const paid = await chat.hub();
     expect(account(paid, CHECKING).transactions).toContainEqual(expect.objectContaining({ memo: "Dentist", cents: -12000 }));

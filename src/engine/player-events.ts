@@ -11,7 +11,7 @@ import type { EntityId } from "../shared/ids";
 import { heldBy } from "../shared/finance";
 import type { LedgerEvent } from "../shared/ledger";
 import type { WorldDoc } from "../shared/world";
-import { formatMoney } from "../shared/world";
+import { formatMoney, formatTemperature } from "../shared/world";
 import { ENGINE_EVENTS, readEngineSlice } from "./engine-pack";
 import { passMemo } from "./read-pass";
 import type { Registry } from "./registry-impl";
@@ -366,6 +366,8 @@ function rawLine(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, po
       if (e.field === GONE_FIELD) return `${name(e.entity)} ${e.value === true ? "is gone" : "is back"}`;
       const kind = own(state.entities, e.entity)?.kind ?? "";
       if (e.field === "place" && typeof e.value === "string") return `${name(e.entity)} → ${name(e.value)}`;
+      // The weather's temperature is kept in °C; the Journal and the Montage read it in °F, as its label does.
+      if (e.field === "temp_c" && typeof e.value === "number") return `${name(e.entity)}: Temperature ${formatTemperature(e.value)}`;
       // A player's line words an activity as the castlife pack does for the player (an agenda's step
       // the player may not know of reads "busy", `castlife.activity`).
       const ctx = player && e.field === "activity" && typeof e.value === "string" ? reg.context(world, state) : null;

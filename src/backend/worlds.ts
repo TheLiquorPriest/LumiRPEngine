@@ -757,7 +757,7 @@ function setPart(doc: WorldDoc, part: WorldPart, value: JsonValue): void {
   // pins nothing is dropped, and pins that pin nothing remove the part.
   if (part === "lorePins") {
     const pins = lorePinsOf({ lorePins: value });
-    if (Object.keys(pins.characters).length === 0 && Object.keys(pins.places).length === 0) delete doc.lorePins;
+    if (Object.keys(pins.characters).length === 0 && Object.keys(pins.places).length === 0 && Object.keys(pins.steps).length === 0) delete doc.lorePins;
     else doc.lorePins = structuredClone(pins);
     return;
   }

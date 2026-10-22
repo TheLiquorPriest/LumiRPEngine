@@ -272,7 +272,7 @@ describe("Propose routines from lore", () => {
     const trivia = (view: RoutineGmView) => view.day.blocks.find((b) => b.origin.type === "routine" && b.origin.block === "trivia");
     // The story starts on a Monday, day 0: Thursday is day 3, and the block is laid there, from its routine, resting on the entry it quotes.
     const thursday = await dayOf(3);
-    expect(trivia(thursday)).toMatchObject({ from: "19:00", to: "21:00", label: "Trivia night", activity: "socialize", place: "rusty_anchor", origin: { type: "routine", block: "trivia", source: { type: "lore", entry: "lore_anchor", quote: "a Thursday trivia night that gets competitive" } } });
+    expect(trivia(thursday)).toMatchObject({ from: "7:00 PM", to: "9:00 PM", label: "Trivia night", activity: "socialize", place: "rusty_anchor", origin: { type: "routine", block: "trivia", source: { type: "lore", entry: "lore_anchor", quote: "a Thursday trivia night that gets competitive" } } });
     // Wednesday has no trivia night.
     expect(trivia(await dayOf(2))).toBeUndefined();
   });

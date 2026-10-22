@@ -9,7 +9,7 @@ import type { EntityId } from "../../../shared/ids";
 import type { JsonObject } from "../../../shared/json";
 import type { ScheduleDef } from "../../../shared/world";
 import { isOff, routineSettingsOf, type BlockOrigin, type EffectiveBlock, type EffectiveSchedule, type InvitationView, type LaidBlock, type OwnerRef, type RoutineChangeSummary, type RoutineGmView, type RoutinePlayerView, type StoryHoldView } from "../../../shared/routines";
-import { calendarOf, dateAt, formatClock, formatHHMM } from "../../../engine/calendar";
+import { calendarOf, dateAt, formatClock, formatHHMM, formatTimeOfDay } from "../../../engine/calendar";
 import { objOf, optionalQuery, own, sliceOf, strOf } from "../../../engine/pack-kit";
 import type { ReadContext } from "../../../engine/registry";
 import { chatSchedulesIn, ownerRank, scheduleOwners } from "../../../engine/schedules";
@@ -128,7 +128,7 @@ export function routineGmView(ctx: ReadContext, who: EntityId, day = dateAt(cale
   });
   const plan = dayPlan(ctx, who, day);
   // A morning carried over from the night before is that night's block, as its day had it.
-  const laid: LaidBlock[] = plan.blocks.map((b) => ({ start: b.start, end: b.end, from: formatHHMM(dateAt(cal, b.start).minuteOfDay), to: formatHHMM(dateAt(cal, b.end).minuteOfDay), label: b.label, activity: b.activity, place: b.place, placeName: b.place ? (own(ctx.world.places, b.place)?.name ?? b.place) : null, kind: kindOfBlock(b.activity), reasons: b.reasons, origin: originOf(ctx, who, b.option, b.reasons[0] ?? "", b.option.endsWith(":carried") ? day - 1 : day) }));
+  const laid: LaidBlock[] = plan.blocks.map((b) => ({ start: b.start, end: b.end, from: formatTimeOfDay(dateAt(cal, b.start).minuteOfDay), to: formatTimeOfDay(dateAt(cal, b.end).minuteOfDay), label: b.label, activity: b.activity, place: b.place, placeName: b.place ? (own(ctx.world.places, b.place)?.name ?? b.place) : null, kind: kindOfBlock(b.activity), reasons: b.reasons, origin: originOf(ctx, who, b.option, b.reasons[0] ?? "", b.option.endsWith(":carried") ? day - 1 : day) }));
   // What the story holds now: holds (a plan under way, a trip, an override), and a place the routine would have them elsewhere than.
   const story: StoryHoldView[] = [];
   const holds = objOf(e?.fields.holds);

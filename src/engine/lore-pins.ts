@@ -1,5 +1,5 @@
-// Lore pinned to characters and places (DESIGN §24.5, §5.4): which pins a call reads, nearest first,
-// and how pinned text is given within the call's lore tokens. Pure: the backend reads a book entry's
+// Lore pinned to characters, places and steps (DESIGN §24.5, §5.4): which pins a call reads, nearest
+// first, and how pinned text is given within the call's lore tokens. Pure: the backend reads a book's
 // text from the host and hands it in. Who may read a world entry is the lore search's rule
 // (`loreReadable`), so a pin never widens it: a secret or Known by entry reaches a call only when its
 // reader may read it, and an AI-written entry still waiting for review reaches none.
@@ -7,7 +7,7 @@
 import type { EntityId, PlaceId } from "../shared/ids";
 import { hasOwn } from "../shared/json";
 import { loreIsSecret, lorePinKey, lorePinsOf } from "../shared/lore";
-import type { LoreEntryDef, LorePin, WorldDoc } from "../shared/world";
+import type { LoreEntryDef, LorePin, StepPurpose, WorldDoc } from "../shared/world";
 import { loreSnippet, type LoreReader } from "./lore";
 import { own } from "./pack-kit";
 import { loreGateReader } from "./visibility";
@@ -22,18 +22,19 @@ export function placeChain(world: Pick<WorldDoc, "places">, place: PlaceId | nul
   return out;
 }
 
-/** A pin and where it is pinned: to a character, or to a place a call is at or inside. */
+/** A pin and where it is pinned: to a character, to a place a call is at or inside, or to the call's step. */
 export interface PinRef {
   key: string;
   pin: LorePin;
-  on: { character: EntityId } | { place: PlaceId };
+  on: { character: EntityId } | { place: PlaceId } | { step: StepPurpose };
 }
 
 /**
- * The pins a call reads (DESIGN §24.5): `who`'s own first (a mind's), then those of `place` and of
- * each place holding it, nearest first; an entry pinned twice is read once, where it comes first.
+ * The pins a call reads (DESIGN §24.5): `who`'s own first (a mind's), then `step`'s (every call of
+ * it), then those of `place` and of each place holding it, nearest first; an entry or book pinned
+ * twice is read once, where it comes first.
  */
-export function pinsFor(world: WorldDoc, place: PlaceId | null, who?: EntityId): PinRef[] {
+export function pinsFor(world: WorldDoc, place: PlaceId | null, who?: EntityId, step?: StepPurpose): PinRef[] {
   const pins = lorePinsOf(world);
   const out: PinRef[] = [];
   const seen = new Set<string>();
@@ -46,6 +47,7 @@ export function pinsFor(world: WorldDoc, place: PlaceId | null, who?: EntityId):
     }
   };
   if (who !== undefined) add(own(pins.characters, who), { character: who });
+  if (step !== undefined) add(pins.steps[step], { step });
   for (const at of placeChain(world, place)) add(own(pins.places, at), { place: at });
   return out;
 }

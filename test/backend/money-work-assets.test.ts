@@ -137,9 +137,9 @@ describe("Play → Money → Jobs and Businesses: each control plays as the play
     const shop = find(view.businesses, SHOP);
     const danny = shop.invoices.find((i) => i.customer === DANNY && i.memo === "Brake job");
     const mutual = shop.invoices.find((i) => i.customer === "Harbor Mutual");
-    expect(danny).toMatchObject({ customerName: "Danny Okafor", cents: 42000, state: "open", dueAt: "Mon 28 Sep 2026, 00:00" });
+    expect(danny).toMatchObject({ customerName: "Danny Okafor", cents: 42000, state: "open", dueAt: "Mon 28 Sep 2026, 12:00 AM" });
     // Without a term the shop's own (30 days) applies.
-    expect(mutual).toMatchObject({ customerName: "Harbor Mutual", memo: "Claim", cents: 9900, state: "open", dueAt: "Wed 14 Oct 2026, 00:00" });
+    expect(mutual).toMatchObject({ customerName: "Harbor Mutual", memo: "Claim", cents: 9900, state: "open", dueAt: "Wed 14 Oct 2026, 12:00 AM" });
     if (!mutual) throw new Error("no invoice to Harbor Mutual");
     expect(invoiceControls(view, shop, mutual)).toEqual(["void"]);
     expect(await chat.play(invoiceAction(mutual.id, "void"))).toContain("done");
@@ -219,7 +219,7 @@ describe("Play → Money → Jobs and Businesses: each control plays as the play
     const view = await chat.hub();
     const flow = view.flows.find((f) => f.source === "invoice" && f.link?.id === invoice);
     if (!flow) throw new Error("the invoice isn't among the POV's flows");
-    expect(flow.next).toBe("Mon 28 Sep 2026, 09:00");
+    expect(flow.next).toBe("Mon 28 Sep 2026, 9:00 AM");
     expect(flowControls(view, flow)).toEqual(["pay_now"]);
     // A partner sees it in the shop's books too, theirs to pay and to void.
     await partner(chat);
@@ -436,7 +436,7 @@ describe("Play → Money → Properties: each control plays as the player's turn
     expect(endableLeases(view, find(view.properties, HOUSE))).toEqual([lease]);
     expect(find(view.flows, lease)).toMatchObject({ to: "Your savings account", amount: "$1,500.00" });
     // Danny pays it from his checking, his deposit account.
-    expect(find((await chat.party(DANNY)).flows, lease)).toMatchObject({ from: "Danny's checking", next: "Thu 1 Oct 2026, 09:00" });
+    expect(find((await chat.party(DANNY)).flows, lease)).toMatchObject({ from: "Danny's checking", next: "Thu 1 Oct 2026, 9:00 AM" });
     expect(await chat.play(leaseEndAction(lease))).toContain("done");
     expect(find((await chat.hub()).properties, HOUSE).leases.find((l) => l.flow === lease)?.end).toBe(TODAY);
     // The GM's routing puts the rent back in checking.
