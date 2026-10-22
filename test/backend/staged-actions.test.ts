@@ -87,3 +87,18 @@ describe("a tap with no words waits for the player's next message", () => {
     expect((await chat.state()).staged ?? null).toBeNull();
   });
 });
+
+describe("a staged action's message is read for all else its words say", () => {
+  test("a staged Walk plays, and the routine the message states brings up its ask", async () => {
+    const chat = await MoneyChat.start();
+    const said = "I tell Dale I start nights at the marina Monday";
+    const routine = { entity: "pov", change: "start", label: "Nights at the marina", days: ["monday"], start: "22:00", end: "06:00", activity: "work", place: "alder_harbor_marina", said };
+    const other = chat.rig.host.quietReply;
+    // Interpret reads no action of its own in the words, only the routine they state.
+    chat.rig.host.quietReply = (req) => ((req.messages[0]?.content ?? "").includes("You map a player's typed input") ? JSON.stringify({ action: null, params: {}, confidence: 0.9, routine: [routine] }) : (other?.(req) ?? "{}"));
+    expect(await tap(chat, { action: "go", params: { to: "alder_harbor_marina" } })).toEqual({ staged: true });
+    const outcome = await say(chat, `${said}.`);
+    expect(outcome).toContain("Go to");
+    expect((await chat.state()).chips.some((c) => c.kind === "routine_ask")).toBe(true);
+  });
+});

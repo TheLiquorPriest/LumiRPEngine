@@ -831,7 +831,8 @@ export class Runtime implements TurnHooks {
     const recorded = lastUser ? (await this.host.chats.messages(input.chatId, input.userId)).find((m) => m.id === lastUser.id)?.metadata[LEDGER_NAMESPACE] : undefined;
     // A combat action only where the ruleset has combat (DESIGN §11), so a world without it reads typed text as before.
     const all = [...this.registry.actions.values(), ...Object.values(render.world.actions)].filter((a) => offersAction(render.world, a));
-    const typed = text.trim() !== "" && !(isRecord(recorded) && typeof recorded.action === "string");
+    // A staged action's message is typed text too (DESIGN §11): interpret reads its words for all else they say.
+    const typed = text.trim() !== "" && !(isRecord(recorded) && typeof recorded.action === "string" && !(recorded.staged === true && recorded.action !== TIMELAPSE_ACTION));
     // A palette or chip tap writes the action's label as the message: only words the player typed
     // with it describe an approach, so only those are worth a judge call.
     const described = typed || (text.trim() !== "" && isRecord(recorded) && recorded.described === true);
@@ -1091,8 +1092,11 @@ export class Runtime implements TurnHooks {
   private async readIntent(bridge: TurnBridge, text: string, recorded: JsonValue | undefined, render: { world: WorldDoc; state: WorldState }, all: ActionDef[], earlier: readonly ChainMessage[], settings: UserSettings, facts: SignalFacts, budget: StepBudget, at: LorePhase, left: string): Promise<void> {
     const userId = at.userId;
     // A palette or chip action records its intent on the user message (dispatch `lre.action`); it
-    // survives restarts and a bridge that never saw the request.
-    if (isRecord(recorded) && typeof recorded.action === "string") {
+    // survives restarts and a bridge that never saw the request. One staged for a message the player
+    // wrote (DESIGN §11) leads its turn, but the words are read too, for all else they say.
+    const staged = isRecord(recorded) && recorded.staged === true && typeof recorded.action === "string" && recorded.action !== TIMELAPSE_ACTION && text.trim() !== "" ? { action: recorded.action, params: isRecord(recorded.params) ? (JSON.parse(JSON.stringify(recorded.params)) as JsonObject) : {} } : null;
+    const playStaged = (): void => bridge.setIntent(text, staged ? { action: staged.action, params: staged.params, probabilities: { [staged.action]: 1 } } : null);
+    if (isRecord(recorded) && typeof recorded.action === "string" && !staged) {
       const params = isRecord(recorded.params) ? (JSON.parse(JSON.stringify(recorded.params)) as JsonObject) : {};
       const target = recorded.action === TIMELAPSE_ACTION ? parseTarget(params.target) : null;
       const overrides: Record<string, string> = {};
@@ -1103,7 +1107,7 @@ export class Runtime implements TurnHooks {
     }
     const run = runsOf(settings.modelUse, render.world, "interpret", facts, { guidance: at.guidance })[0];
     if (!run || !budget.take()) {
-      bridge.setIntent(text, null);
+      playStaged();
       return;
     }
     // The actions the POV can take now, as the palette offers them, and letting time pass, which is
@@ -1145,11 +1149,26 @@ export class Runtime implements TurnHooks {
     // The call failed (a transient failure already had its second try): the turn runs as plain
     // roleplay, and a chip says the action went unread, with a Retry that runs the turn again.
     if (result === null) {
+      // A staged action still plays: only the rest of the words go unread.
+      if (staged) {
+        playStaged();
+        return;
+      }
       this.host.log("warn", `[LumiRPEngine] interpret: couldn't read the player's action; the turn runs as plain roleplay`, userId);
       bridge.setOffer(text, null);
       bridge.setNext(text, null);
       bridge.setUnread(text);
       return;
+    }
+    // The staged action leads, with its own params: the player picked it, and their words say how
+    // they go about it. All else the words read as stays (routine asks, claims, the queue, `then`).
+    // Interpret's own main action is dropped when it is the staged one, and otherwise queued after
+    // it; a time skip it read becomes the time the message lets pass once the actions have played.
+    if (staged) {
+      const { thing: _thing, ...read } = result;
+      const then = result.then ?? (result.action === TIMELAPSE_ACTION ? result.params : undefined);
+      const own = result.action && result.action !== TIMELAPSE_ACTION && result.action !== staged.action ? [{ action: result.action, params: result.params, text: "", ...(result.thing ? { thing: result.thing } : {}) }] : [];
+      result = { ...read, action: staged.action, params: staged.params, probabilities: { [staged.action]: 1 }, ...(then ? { then } : {}), queue: [...own, ...(result.queue ?? [])] };
     }
     if (result.reason) this.host.log("info", `[LumiRPEngine] interpret: no action (${result.reason})`, userId);
     // `interpret` may read secret lore its audience allows (DESIGN §7): what it returns becomes chips,
@@ -1166,7 +1185,7 @@ export class Runtime implements TurnHooks {
       this.host.log("info", `[LumiRPEngine] interpret: ${result.action ?? "no action"} carried an unrevealed secret; played as roleplay`, userId);
       bridge.setOffer(text, null);
       bridge.setNext(text, null);
-      bridge.setIntent(text, null);
+      playStaged();
       return;
     }
     // Words the turn won't play are offered on a chip that sends them as the next message (DESIGN
@@ -2468,7 +2487,8 @@ export class Runtime implements TurnHooks {
         const own = m.metadata[LEDGER_NAMESPACE];
         if (isRecord(own) && typeof own.action === "string") return;
         const words = (m.swipes[m.swipeId] ?? m.content).trim() !== "";
-        const intent: JsonObject = { action: staged.action, params: staged.params, source: staged.source, ...(words ? { described: true } : {}) };
+        // `staged`: the player wrote this message, so its words are read too, for all else they say.
+        const intent: JsonObject = { action: staged.action, params: staged.params, source: staged.source, staged: true, ...(words ? { described: true } : {}) };
         await this.host.chats.writeMetadata(chatId, messageId, { ...m.metadata, [LEDGER_NAMESPACE]: { ...(isRecord(own) ? own : {}), ...intent } }, userId);
         await this.staged.set(chatId, userId, null);
         this.push.changed(chatId, userId);

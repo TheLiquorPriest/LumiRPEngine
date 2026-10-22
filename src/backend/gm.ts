@@ -32,7 +32,7 @@ export function buildGmView(core: LedgerCore, observed: readonly ChainMessage[],
       // A fix of the time leads with how it moved the clock, which no event line words.
       for (const fix of appliedEvents(rec, fold, i).fixes) {
         const clock = clockFixLine(fix.events);
-        edits.push({ messageId: m.id, seq: fix.seq, lines: [...(clock ? [clock] : []), ...authorLines(registry, render.world, render.state, fix.events, 12)] });
+        edits.push({ messageId: m.id, seq: fix.seq, lines: [...(clock ? [clock] : []), ...authorLines(registry, render.world, render.state, fix.events, 12)], ...(fix.by ? { by: fix.by.label } : {}) });
       }
     });
     return {

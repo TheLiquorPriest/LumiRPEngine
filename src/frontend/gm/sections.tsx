@@ -130,7 +130,8 @@ export function EditsLog(props: { gm: GmView }) {
         <Section title={`${gm.edits.length} in force, newest first`} flush>
           <List>
             {gm.edits.map((e) => (
-              <ListRow key={`${e.messageId}:${e.seq}`} icon="edit" title={e.lines.join(" · ") || "Bookkeeping"} id={`${e.messageId} · ${e.seq}`} />
+              // The player's own bookkeeping (a trade, a transfer) is their action, not a correction.
+              <ListRow key={`${e.messageId}:${e.seq}`} icon={e.by ? "user" : "edit"} title={e.by ?? (e.lines.join(" · ") || "Bookkeeping")} subtitle={e.by ? `The player's action: ${e.lines.join(" · ")}` : undefined} id={`${e.messageId} · ${e.seq}`} />
             ))}
           </List>
         </Section>

@@ -358,7 +358,7 @@ function refKey(ref: EventRef): string {
  * line and Undo chip. The change chip and the Journal list these, so an undone purchase, or one an
  * earlier switch dropped, isn't shown as made.
  */
-export function appliedEvents(rec: Rec, fold: FoldOutput, index: number): { events: LedgerEvent[]; post: LedgerEvent[]; fixes: { seq: number; events: LedgerEvent[] }[] } {
+export function appliedEvents(rec: Rec, fold: FoldOutput, index: number): { events: LedgerEvent[]; post: LedgerEvent[]; fixes: { seq: number; events: LedgerEvent[]; by?: { action: string; label: string } }[] } {
   const result = fold.messages[index];
   // A bare record folds as a plain message, and its live entries apply all the same.
   if (!result || (result.fold !== "on_path" && result.fold !== "view" && result.fold !== "plain")) return { events: [], post: [], fixes: [] };
@@ -368,11 +368,11 @@ export function appliedEvents(rec: Rec, fold: FoldOutput, index: number): { even
   const live = rec.post
     .filter((p) => isLive(p.at, result.parentPath, recPath))
     .sort((a, b) => a.seq - b.seq)
-    .map((p) => ({ seq: p.seq, kind: p.kind, events: p.events.filter((_, i) => !skipped.has(refKey({ in: "post", seq: p.seq, index: i }))) }));
+    .map((p) => ({ seq: p.seq, kind: p.kind, events: p.events.filter((_, i) => !skipped.has(refKey({ in: "post", seq: p.seq, index: i }))), ...(p.by ? { by: p.by } : {}) }));
   return {
     events: rec.events.filter((_, i) => !skipped.has(refKey({ in: "events", index: i }))),
     post: live.filter((p) => p.kind !== "fix").flatMap((p) => p.events),
-    fixes: live.filter((p) => p.kind === "fix" && p.events.length > 0).map((p) => ({ seq: p.seq, events: p.events })),
+    fixes: live.filter((p) => p.kind === "fix" && p.events.length > 0).map((p) => ({ seq: p.seq, events: p.events, ...(p.by ? { by: p.by } : {}) })),
   };
 }
 
@@ -553,7 +553,8 @@ function derivedChips(chain: readonly ChainMessage[], fold: FoldOutput, keepRepo
     // Each ✎ fix or GM edit on the head: "Corrected …" with Undo, worded for the player (DESIGN §12).
     for (const fix of applied.fixes) {
       const fixed = fixLines(registry, world, state, fix.events);
-      chips.push({ id: `fix:${m.id}:${m.swipeId}:${fix.seq}`, kind: "fix", messageId: m.id, label: "Corrected", detail: fixed.length > 0 ? fixed.join(" · ") : "something you haven't come across", actions: [{ id: "undo", label: "Undo", style: "danger" }], expires: "next_send" });
+      // A mechanical action of the player's (DESIGN §11) is named as theirs, never as a correction.
+      chips.push({ id: `fix:${m.id}:${m.swipeId}:${fix.seq}`, kind: "fix", messageId: m.id, label: fix.by?.label ?? "Corrected", detail: fixed.length > 0 ? fixed.join(" · ") : "something you haven't come across", actions: [{ id: "undo", label: "Undo", style: "danger" }], expires: "next_send" });
     }
     chips.push(...overdueChips(m.id, ctx, state, world));
   });

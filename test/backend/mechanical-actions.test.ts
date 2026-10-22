@@ -39,9 +39,13 @@ describe("a mechanical action from a panel", () => {
     expect(after.investments?.holdings.find((h) => h.id === LKFR)?.qty).toBe((held ?? 0) + 5);
     expect(account(after, CHECKING).cents).toBe(account(before, CHECKING).cents - 5 * 4200);
     expect((await chat.state()).hud?.clock).toEqual(clock);
-    // Its Undo comes as a correction's does, and takes it back.
+    // Its Undo comes as a correction's does, and takes it back; its chip names the trade, never a correction.
     const undo = (await chat.state()).chips.find((c) => c.kind === "fix");
     if (!undo) throw new Error("no Undo");
+    expect(undo.label).toContain("Buy or sell investments");
+    expect(undo.label).not.toContain("Corrected");
+    const edits = chat.rig.body(await chat.rig.send({ type: "lre.gm", chatId: chat.chatId })).edits;
+    expect(edits).toEqual([expect.objectContaining({ by: expect.stringContaining("Buy or sell investments") })]);
     chat.rig.body(await chat.rig.send({ type: "lre.chip", chatId: chat.chatId, chip: undo.id, choice: "undo" }));
     expect(account(await chat.hub(), CHECKING).cents).toBe(account(before, CHECKING).cents);
   });

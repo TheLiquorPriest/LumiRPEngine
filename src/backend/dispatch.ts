@@ -256,7 +256,8 @@ export class Dispatcher {
             const refused = res.rejected[0];
             if (refused) throw new RequestError("validation", refused.rejection.reason);
             if (res.events.length === 0) throw new RequestError("validation", "That changes nothing.");
-            const written = await this.write(r.chatId, userId, { kind: "post", id: this.nextId(), target: "head", entry: { kind: "fix", events: res.events } });
+            // Recorded as a fix (its Undo, its carry to a new swipe), but as the player's own action, not a correction.
+            const written = await this.write(r.chatId, userId, { kind: "post", id: this.nextId(), target: "head", entry: { kind: "fix", events: res.events, by: { action: r.action, label: neutralizeMacros(label) } } });
             reply("lre.action", { applied: true, pending: written.pending });
             return;
           }
