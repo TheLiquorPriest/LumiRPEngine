@@ -249,4 +249,21 @@ describe("reference fold", () => {
     expect(again).toEqual(first);
     expect(hashJson(again.state)).toBe(hashJson(referenceFold(input, registry).state));
   });
+
+  test("a snapshot saved before steps kept their clocks is passed over, so every reply still shows the time its turn ended", () => {
+    const stored = new Map<string, FoldSnapshot>();
+    const snapshots: SnapshotStore = { get: (key) => stored.get(key), put: (snapshot) => void stored.set(snapshot.key, snapshot) };
+    const chain: ChainMessage[] = [reply("a0", "Morning.")];
+    for (let t = 1; t <= 8; t++) {
+      chain.push(user(`u${t}`, "walk"), reply(`a${t}`, `Walked ${t}.`));
+      record(chain, chain.length - 1, [{ type: "clock", minutes: 2, cause: "tick" }]);
+    }
+    const input: FoldInput = { worlds: (r) => worlds.get(r), revision, pauses: [], tombstones: [], chain, snapshots };
+    const full = new LedgerFold(registry, { snapshotEvery: 3 }).fold(input);
+    // As an earlier build stored them: everything but the clocks.
+    for (const [key, s] of stored) stored.set(key, { key: s.key, state: s.state, notes: s.notes, keep: s.keep, violations: s.violations });
+    const restarted = new LedgerFold(registry, { snapshotEvery: 3 }).fold(input);
+    expect(restarted.messages.map((m) => m.clock)).toEqual(full.messages.map((m) => m.clock));
+    expect(restarted.messages.every((m) => m.clock !== null)).toBe(true);
+  });
 });
