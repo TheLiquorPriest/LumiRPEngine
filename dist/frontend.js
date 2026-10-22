@@ -12899,7 +12899,8 @@ function MessageChips(props) {
   if (!view || view.status === "not_world")
     return null;
   const chips = view.chips.filter((chip) => chip.messageId === props.messageId);
-  if (chips.length === 0)
+  const when = view.replyClocks[props.messageId];
+  if (chips.length === 0 && when === undefined)
     return null;
   const show = (chip, fallback) => {
     const Chosen = app.catalog.chips.get(chip.kind) ?? fallback;
@@ -12915,6 +12916,17 @@ function MessageChips(props) {
     class: "lre-chips",
     "data-lre-chips": props.messageId,
     children: [
+      when !== undefined ? /* @__PURE__ */ u3("span", {
+        class: "lre-chat-when lre-small lre-muted",
+        "data-lre-reply-clock": true,
+        children: [
+          /* @__PURE__ */ u3("span", {
+            class: "lre-sr",
+            children: "World time after this turn: "
+          }, undefined, false, undefined, this),
+          when
+        ]
+      }, undefined, true, undefined, this) : null,
       done.length > 0 ? /* @__PURE__ */ u3(Receipt, {
         chips: done,
         show: (chip) => show(chip, DefaultChip)
@@ -30535,9 +30547,10 @@ function parseHHMM(text) {
     throw new RangeError(`bad time ${text}`);
   return h3 * 60 + min;
 }
-function formatHHMM(minuteOfDay) {
+function formatTimeOfDay(minuteOfDay) {
   const m2 = mod(minuteOfDay, MINUTES_PER_DAY);
-  return `${String(Math.floor(m2 / 60)).padStart(2, "0")}:${String(m2 % 60).padStart(2, "0")}`;
+  const h3 = Math.floor(m2 / 60);
+  return `${h3 % 12 === 0 ? 12 : h3 % 12}:${String(m2 % 60).padStart(2, "0")} ${h3 < 12 ? "AM" : "PM"}`;
 }
 function daysFromCivil(y3, m2, d3) {
   const yy = m2 <= 2 ? y3 - 1 : y3;
@@ -30641,7 +30654,7 @@ function weekdayName(cal, weekday) {
 }
 function formatClock(cal, clock, offsetMinutes = 0) {
   const d3 = dateAt(cal, clock + offsetMinutes);
-  return `${weekdayName(cal, d3.weekday)} ${d3.day} ${monthName(cal, d3.month)} ${d3.year}, ${formatHHMM(d3.minuteOfDay)}`;
+  return `${weekdayName(cal, d3.weekday)} ${d3.day} ${monthName(cal, d3.month)} ${d3.year}, ${formatTimeOfDay(d3.minuteOfDay)}`;
 }
 var ZONES = {
   UTC: { standard: 0, dst: null },

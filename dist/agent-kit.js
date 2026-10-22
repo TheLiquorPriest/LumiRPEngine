@@ -332,6 +332,9 @@ function lifeStateOf(world, id) {
 function grouped(n) {
   return n.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",");
 }
+function formatTemperature(celsius) {
+  return `${Math.round(celsius * 9 / 5 + 32)} °F`;
+}
 function formatMoney(minorUnits, currency) {
   const units = BigInt(Math.trunc(minorUnits));
   const negative = units < 0n;
@@ -2782,6 +2785,11 @@ function formatHHMM(minuteOfDay) {
   const m = mod(minuteOfDay, MINUTES_PER_DAY);
   return `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
 }
+function formatTimeOfDay(minuteOfDay) {
+  const m = mod(minuteOfDay, MINUTES_PER_DAY);
+  const h = Math.floor(m / 60);
+  return `${h % 12 === 0 ? 12 : h % 12}:${String(m % 60).padStart(2, "0")} ${h < 12 ? "AM" : "PM"}`;
+}
 function daysFromCivil(y, m, d) {
   const yy = m <= 2 ? y - 1 : y;
   const era = floorDiv(yy, 400);
@@ -2977,7 +2985,7 @@ function weekdayName(cal, weekday) {
 }
 function formatClock(cal, clock, offsetMinutes = 0) {
   const d = dateAt(cal, clock + offsetMinutes);
-  return `${weekdayName(cal, d.weekday)} ${d.day} ${monthName(cal, d.month)} ${d.year}, ${formatHHMM(d.minuteOfDay)}`;
+  return `${weekdayName(cal, d.weekday)} ${d.day} ${monthName(cal, d.month)} ${d.year}, ${formatTimeOfDay(d.minuteOfDay)}`;
 }
 function dayPartAt(cal, clock) {
   const m = dateAt(cal, clock).minuteOfDay;
@@ -6875,6 +6883,8 @@ function rawLine(reg, world, state, pov, e, player, you) {
       const kind = own(state.entities, e.entity)?.kind ?? "";
       if (e.field === "place" && typeof e.value === "string")
         return `${name(e.entity)} → ${name(e.value)}`;
+      if (e.field === "temp_c" && typeof e.value === "number")
+        return `${name(e.entity)}: Temperature ${formatTemperature(e.value)}`;
       const ctx = player && e.field === "activity" && typeof e.value === "string" ? reg.context(world, state) : null;
       const shownActivity = ctx ? optionalQuery(ctx, "castlife.activity") : null;
       const value = ctx && shownActivity && typeof e.value === "string" ? shownActivity(ctx, e.entity, e.value) : e.value;
@@ -24117,9 +24127,10 @@ function buildWeatherView(ctx) {
     return { level, label: level === 0 ? "" : MOOD[season], region: e?.name ?? null, season, sky: null, tempC: null, closed: [] };
   const st = stateAt(ctx, here);
   const sky = strOf(e.fields.weather, "clear");
-  const temp = level >= 3 && typeof e.fields.temp_c === "number" ? Math.round(e.fields.temp_c) : null;
+  const raw = level >= 3 && typeof e.fields.temp_c === "number" ? e.fields.temp_c : null;
+  const temp = raw === null ? null : Math.round(raw);
   const word = st?.label ?? sky;
-  return { level, label: `${word.charAt(0).toUpperCase()}${word.slice(1)}${temp !== null ? `, ${temp} °C` : ""}`, region: e.name, season, sky, tempC: temp, closed: level >= 4 ? st?.closes ?? [] : [] };
+  return { level, label: `${word.charAt(0).toUpperCase()}${word.slice(1)}${raw !== null ? `, ${formatTemperature(raw)}` : ""}`, region: e.name, season, sky, tempC: temp, closed: level >= 4 ? st?.closes ?? [] : [] };
 }
 function stepRegions(slot, ctx, rng) {
   const level = ctx.levelOf(ctx.world.pov, "weather");
@@ -26862,7 +26873,7 @@ function stepAgent2(slot, ctx, rngFor, who) {
 }
 function invitationText(ctx, agent, place, at, viewer) {
   const named = place !== null && (viewer === undefined || canSeePlace(ctx.registry, ctx.world, ctx.state, viewer, place)) ? own(ctx.world.places, place)?.name ?? place : null;
-  return `${own(ctx.state.entities, agent)?.name ?? agent} invites you to ${named ?? "meet up"} at ${formatHHMM(dateAt(calendarOf(ctx.world), at).minuteOfDay)}.`;
+  return `${own(ctx.state.entities, agent)?.name ?? agent} invites you to ${named ?? "meet up"} at ${formatTimeOfDay(dateAt(calendarOf(ctx.world), at).minuteOfDay)}.`;
 }
 function dropUnlived(slot, ctx) {
   const plans = optionalQuery(ctx, "minds.plans");
@@ -27112,8 +27123,8 @@ function playerBlocks(ctx, who, plan2) {
   const applied = new Map(activeBlocks(ctx, who, plan2.day).map((a) => [a.block.id, a]));
   const open = loreGateReader(ctx.registry, ctx.world, ctx.state);
   return plan2.blocks.map((b) => {
-    const from = formatHHMM(dateAt(cal, b.start).minuteOfDay);
-    const to = formatHHMM(dateAt(cal, b.end).minuteOfDay);
+    const from = formatTimeOfDay(dateAt(cal, b.start).minuteOfDay);
+    const to = formatTimeOfDay(dateAt(cal, b.end).minuteOfDay);
     const routineId = b.option.startsWith(ROUTINE_OPTION) ? b.option.slice(ROUTINE_OPTION.length).replace(/:carried$/, "") : null;
     const a = routineId !== null ? applied.get(routineId) : undefined;
     if (b.option.startsWith(AGENDA_OPTION) && !publicTrack(ctx.world, b.option.slice(AGENDA_OPTION.length)) || a?.block.private === true)
@@ -61201,7 +61212,7 @@ Every ✎ fix is checked before it is saved: a value outside the field's range (
 
 ### Under each reply
 
-Under each reply the engine tells you what it did and asks what it needs to ask. Each thing it says is a **chip**, and a chip shows in one of three ways:
+Under each reply the engine ran, a quiet line gives the world's date and time once that turn ended, for the swipe you're looking at, as the clock reads where your character is ("Tue 15 Sep 2026, 12:25 PM"). Times you see read on a 12-hour clock, and temperatures in °F. Under it the engine tells you what it did and asks what it needs to ask. Each thing it says is a **chip**, and a chip shows in one of three ways:
 
 - **The receipt**: one quiet line for what the turn did, at most three parts long (anything that went wrong first, then the time, money, the roll and the changes), then "n more". Tap it for the full list, where every chip shows with its own buttons (**Undo**, **Edit amount** and so on).
 - **Decision cards**: a card for each thing that needs your answer, with its buttons. A card marked **Answer before you send** lapses when you send your next message. The Keep report is a card of its own.
@@ -63439,7 +63450,7 @@ var package_default = {
 // src/cli/version.ts
 var CLI_NAME = "lumirpengine";
 var CLI_VERSION = package_default.version;
-var BUILD = "ce78f09b";
+var BUILD = "7fa72dfe";
 function runtimeCannotFollow(bun) {
   if (bun === undefined)
     return null;

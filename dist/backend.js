@@ -105,6 +105,9 @@ function lifeStateOf(world, id) {
 function grouped(n) {
   return n.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",");
 }
+function formatTemperature(celsius) {
+  return `${Math.round(celsius * 9 / 5 + 32)} \xB0F`;
+}
 function formatMoney(minorUnits, currency) {
   const units = BigInt(Math.trunc(minorUnits));
   const negative = units < 0n;
@@ -284,6 +287,11 @@ function parseHHMM(text) {
 function formatHHMM(minuteOfDay) {
   const m = mod(minuteOfDay, MINUTES_PER_DAY);
   return `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
+}
+function formatTimeOfDay(minuteOfDay) {
+  const m = mod(minuteOfDay, MINUTES_PER_DAY);
+  const h = Math.floor(m / 60);
+  return `${h % 12 === 0 ? 12 : h % 12}:${String(m % 60).padStart(2, "0")} ${h < 12 ? "AM" : "PM"}`;
 }
 function daysFromCivil(y, m, d) {
   const yy = m <= 2 ? y - 1 : y;
@@ -500,7 +508,7 @@ function weekdayName(cal, weekday) {
 }
 function formatClock(cal, clock, offsetMinutes = 0) {
   const d = dateAt(cal, clock + offsetMinutes);
-  return `${weekdayName(cal, d.weekday)} ${d.day} ${monthName(cal, d.month)} ${d.year}, ${formatHHMM(d.minuteOfDay)}`;
+  return `${weekdayName(cal, d.weekday)} ${d.day} ${monthName(cal, d.month)} ${d.year}, ${formatTimeOfDay(d.minuteOfDay)}`;
 }
 function dayPartAt(cal, clock) {
   const m = dateAt(cal, clock).minuteOfDay;
@@ -4742,6 +4750,8 @@ function rawLine(reg, world, state, pov, e, player, you) {
       const kind = own(state.entities, e.entity)?.kind ?? "";
       if (e.field === "place" && typeof e.value === "string")
         return `${name(e.entity)} \u2192 ${name(e.value)}`;
+      if (e.field === "temp_c" && typeof e.value === "number")
+        return `${name(e.entity)}: Temperature ${formatTemperature(e.value)}`;
       const ctx = player && e.field === "activity" && typeof e.value === "string" ? reg.context(world, state) : null;
       const shownActivity = ctx ? optionalQuery(ctx, "castlife.activity") : null;
       const value = ctx && shownActivity && typeof e.value === "string" ? shownActivity(ctx, e.entity, e.value) : e.value;
@@ -23520,9 +23530,10 @@ function buildWeatherView(ctx) {
     return { level, label: level === 0 ? "" : MOOD[season], region: e?.name ?? null, season, sky: null, tempC: null, closed: [] };
   const st = stateAt(ctx, here);
   const sky = strOf(e.fields.weather, "clear");
-  const temp = level >= 3 && typeof e.fields.temp_c === "number" ? Math.round(e.fields.temp_c) : null;
+  const raw = level >= 3 && typeof e.fields.temp_c === "number" ? e.fields.temp_c : null;
+  const temp = raw === null ? null : Math.round(raw);
   const word = st?.label ?? sky;
-  return { level, label: `${word.charAt(0).toUpperCase()}${word.slice(1)}${temp !== null ? `, ${temp} \xB0C` : ""}`, region: e.name, season, sky, tempC: temp, closed: level >= 4 ? st?.closes ?? [] : [] };
+  return { level, label: `${word.charAt(0).toUpperCase()}${word.slice(1)}${raw !== null ? `, ${formatTemperature(raw)}` : ""}`, region: e.name, season, sky, tempC: temp, closed: level >= 4 ? st?.closes ?? [] : [] };
 }
 function stepRegions(slot, ctx, rng) {
   const level = ctx.levelOf(ctx.world.pov, "weather");
@@ -26503,7 +26514,7 @@ function stepAgent2(slot, ctx, rngFor, who) {
 }
 function invitationText(ctx, agent, place, at, viewer) {
   const named = place !== null && (viewer === undefined || canSeePlace(ctx.registry, ctx.world, ctx.state, viewer, place)) ? own(ctx.world.places, place)?.name ?? place : null;
-  return `${own(ctx.state.entities, agent)?.name ?? agent} invites you to ${named ?? "meet up"} at ${formatHHMM(dateAt(calendarOf(ctx.world), at).minuteOfDay)}.`;
+  return `${own(ctx.state.entities, agent)?.name ?? agent} invites you to ${named ?? "meet up"} at ${formatTimeOfDay(dateAt(calendarOf(ctx.world), at).minuteOfDay)}.`;
 }
 function dropUnlived(slot, ctx) {
   const plans = optionalQuery(ctx, "minds.plans");
@@ -26753,8 +26764,8 @@ function playerBlocks(ctx, who, plan2) {
   const applied = new Map(activeBlocks(ctx, who, plan2.day).map((a) => [a.block.id, a]));
   const open = loreGateReader(ctx.registry, ctx.world, ctx.state);
   return plan2.blocks.map((b) => {
-    const from = formatHHMM(dateAt(cal, b.start).minuteOfDay);
-    const to = formatHHMM(dateAt(cal, b.end).minuteOfDay);
+    const from = formatTimeOfDay(dateAt(cal, b.start).minuteOfDay);
+    const to = formatTimeOfDay(dateAt(cal, b.end).minuteOfDay);
     const routineId = b.option.startsWith(ROUTINE_OPTION) ? b.option.slice(ROUTINE_OPTION.length).replace(/:carried$/, "") : null;
     const a = routineId !== null ? applied.get(routineId) : undefined;
     if (b.option.startsWith(AGENDA_OPTION) && !publicTrack(ctx.world, b.option.slice(AGENDA_OPTION.length)) || a?.block.private === true)
@@ -58594,7 +58605,7 @@ function routineGmView(ctx, who, day2 = dateAt(calendarOf(ctx.world), ctx.state.
     };
   });
   const plan2 = dayPlan(ctx, who, day2);
-  const laid = plan2.blocks.map((b) => ({ start: b.start, end: b.end, from: formatHHMM(dateAt(cal, b.start).minuteOfDay), to: formatHHMM(dateAt(cal, b.end).minuteOfDay), label: b.label, activity: b.activity, place: b.place, placeName: b.place ? own(ctx.world.places, b.place)?.name ?? b.place : null, kind: kindOfBlock(b.activity), reasons: b.reasons, origin: originOf(ctx, who, b.option, b.reasons[0] ?? "", b.option.endsWith(":carried") ? day2 - 1 : day2) }));
+  const laid = plan2.blocks.map((b) => ({ start: b.start, end: b.end, from: formatTimeOfDay(dateAt(cal, b.start).minuteOfDay), to: formatTimeOfDay(dateAt(cal, b.end).minuteOfDay), label: b.label, activity: b.activity, place: b.place, placeName: b.place ? own(ctx.world.places, b.place)?.name ?? b.place : null, kind: kindOfBlock(b.activity), reasons: b.reasons, origin: originOf(ctx, who, b.option, b.reasons[0] ?? "", b.option.endsWith(":carried") ? day2 - 1 : day2) }));
   const story = [];
   const holds = objOf(e?.fields.holds);
   for (const field of ["place", "activity"]) {
@@ -66033,7 +66044,7 @@ function buildMindsGm(ctx, texts2, enabled, memory2) {
 // src/backend/view.ts
 var TIMELAPSE_ACTION2 = "timelapse";
 function notWorldView(chatId) {
-  return { v: 1, chatId, worldId: null, revision: null, status: "not_world", hud: null, scene: null, chips: [], journal: [], keepReport: [], pending: [], panels: {}, palette: null, controls: null, meter: null, packs: {}, currency: null };
+  return { v: 1, chatId, worldId: null, revision: null, status: "not_world", hud: null, scene: null, chips: [], replyClocks: {}, journal: [], keepReport: [], pending: [], panels: {}, palette: null, controls: null, meter: null, packs: {}, currency: null };
 }
 var GROUPS2 = { buy: "buy", purchase: "buy", pay: "pay", transfer: "transfer", drive: "drive", lend: "lend" };
 function groupOf(action) {
@@ -66569,6 +66580,7 @@ function buildView(input) {
       hud: hud(world, state2, panels, ctx),
       scene: sceneView,
       chips,
+      replyClocks: replyClocks(chain, fold, core, world, state2),
       journal: [...turnNotes(chain, fold, core, registry, world, state2), ...drops.notes],
       keepReport: drops.keep,
       pending,
@@ -66580,6 +66592,18 @@ function buildView(input) {
       currency: world.currency
     };
   });
+}
+function replyClocks(chain, fold, core, world, state2) {
+  const cal = calendarOf(world);
+  const place = placeOfEntity(state2, world.pov);
+  const out = {};
+  chain.forEach((m, i) => {
+    const clock = fold.messages[i]?.clock ?? null;
+    if (m.isUser || clock === null || !activeRecord(m, core.journal.tombstones))
+      return;
+    out[m.id] = formatClock(cal, clock, placeOffset(world, clock, place));
+  });
+  return out;
 }
 function povEntity(world) {
   return world.pov;
@@ -69264,10 +69288,11 @@ class LedgerFold {
           keep.set(i, [...keep.get(i) ?? [], x]);
         for (const [i, x] of snapshot.violations)
           violations.set(i, [...violations.get(i) ?? [], x]);
+        const clocks = new Map(snapshot.clocks ?? []);
         for (let i = base + 1;i <= best; i++) {
           const f = frames[i - base - 1];
           const k2 = frameKeys[i - base - 1];
-          const step = { state: null, result: f.result, notes: [...f.notes, ...notes.get(i) ?? []], keep: [...f.keep, ...keep.get(i) ?? []], violations: violations.get(i) ?? [], paused: false };
+          const step = { state: null, result: { ...f.result, clock: clocks.get(i) ?? null }, notes: [...f.notes, ...notes.get(i) ?? []], keep: [...f.keep, ...keep.get(i) ?? []], violations: violations.get(i) ?? [], paused: false };
           this.remember(k2, i === best ? { ...step, state: snapshot.state } : step, i === best, false);
           steps.push(step);
           keys.push(k2);
@@ -69308,7 +69333,8 @@ class LedgerFold {
     return out;
   }
   snapshotOf(key, steps, state2) {
-    const snap = { key, state: structuredClone(state2), notes: [], keep: [], violations: [] };
+    const clocks = [];
+    const snap = { key, state: structuredClone(state2), notes: [], keep: [], violations: [], clocks };
     steps.forEach((s, i) => {
       for (const x of s.notes)
         if (dependentNote(x))
@@ -69318,6 +69344,8 @@ class LedgerFold {
           snap.keep.push([i, x]);
       for (const x of s.violations)
         snap.violations.push([i, x]);
+      if (s.result.clock !== null)
+        clocks.push([i, s.result.clock]);
     });
     return snap;
   }
@@ -69467,7 +69495,7 @@ class LedgerFold {
       if (before !== null && violations.length === 0)
         this.digest(this.settled, settledKey, () => before);
     }
-    return { state: state2, result: f.result, notes, keep, violations, paused: f.paused };
+    return { state: state2, result: { ...f.result, clock: state2.clock }, notes, keep, violations, paused: f.paused };
   }
   frame(input, m, parent, paused, pausesHere) {
     const notes = [];
@@ -69571,9 +69599,9 @@ function thisBuild(moduleUrl = import.meta.url) {
   const dir = moduleUrl.replace(/[^/]*$/, "");
   const path = pathOfFileUrl(`${dir}${KIT_FILE}`);
   const core = pathOfFileUrl(`${dir}${CORE_FILE}`);
-  const sha256 = "83880cbc244d4643475ef0b862d64c73b1abcb9bdeb6554567e42322d3f69421";
+  const sha256 = "a4b480d12a57479b1325dbeb1752028d2e4dd9a3d964207f5426b120d5d072f5";
   const tools = ["31de155b25748e794c9fe560150797f2", "d7e9a2e583dc5481df9d8ed8a432a934"].filter((f) => f !== undefined);
-  return { id: "ce78f09b", kit: sha256 !== undefined && path !== null && core !== null ? { path, core, sha256, api: KIT_API } : null, tools };
+  return { id: "7fa72dfe", kit: sha256 !== undefined && path !== null && core !== null ? { path, core, sha256, api: KIT_API } : null, tools };
 }
 var BUILD_FILE = "agents/build.json";
 var USER_FILE = "agents.json";
@@ -72770,7 +72798,7 @@ class Runtime {
     this.steps.onCallStart = (userId, purpose) => this.diag.callStart(userId, purpose);
     this.toolSupport = new ToolSupport(this.host);
     this.minds = { host: this.host, registry: this.registry, steps: this.steps, settings: this.settings, presets: this.presets };
-    this.ledger = new LedgerService(this.host, (chatId, userId) => this.resolveEnv(chatId, userId), new LedgerFold(this.registry, { fingerprint: "ce78f09b" }), (chatId) => messages.forget(chatId));
+    this.ledger = new LedgerService(this.host, (chatId, userId) => this.resolveEnv(chatId, userId), new LedgerFold(this.registry, { fingerprint: "7fa72dfe" }), (chatId) => messages.forget(chatId));
     this.studio = new StudioBridge(this.host, this.worlds);
     this.worlds.onChange = (worldId, userId) => this.studio.worldChanged(worldId, userId);
     this.agents = new Agents(this.host, options.build ?? thisBuild(), async (userId) => (await this.settings.get(userId)).timeouts.mcpReconnectMs);
@@ -74339,7 +74367,7 @@ function shortClock(world, state2, at2) {
   const place = placeOfEntity(state2, world.pov);
   const d = dateAt(cal, at2 + placeOffset(world, at2, place));
   const today2 = dateAt(cal, state2.clock + placeOffset(world, state2.clock, place)).dayIndex;
-  return d.dayIndex === today2 ? formatHHMM(d.minuteOfDay) : `${weekdayName(cal, d.weekday)} ${formatHHMM(d.minuteOfDay)}`;
+  return d.dayIndex === today2 ? formatTimeOfDay(d.minuteOfDay) : `${weekdayName(cal, d.weekday)} ${formatTimeOfDay(d.minuteOfDay)}`;
 }
 function planOutline(plan2, prose) {
   return [...prose?.brief ? [`Brief: ${prose.brief}`] : [], ...plan2.outline, ...prose?.outline ?? []];
