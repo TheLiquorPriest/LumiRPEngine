@@ -54,29 +54,41 @@ export function loreSourceOf(raw: unknown): LoreSource {
   return { kind: "authored" };
 }
 
-/** Whether a value is a lore pin: `{lore}` naming one of the world's entries, or `{book, entry}` naming a World Info book's (DESIGN §24.5). */
+/** Whether a value is a lore pin: `{lore}` naming one of the world's entries, `{book, entry}` naming a World Info book's, or `{book}` naming a whole book (DESIGN §24.5). */
 export function isLorePin(v: unknown): v is LorePin {
   if (!isRecord(v)) return false;
   const keys = Object.keys(v).length;
   if (v.lore !== undefined) return typeof v.lore === "string" && v.lore !== "" && keys === 1;
-  return typeof v.book === "string" && v.book !== "" && typeof v.entry === "string" && v.entry !== "" && keys === 2;
+  if (typeof v.book !== "string" || v.book === "") return false;
+  return v.entry === undefined ? keys === 1 : typeof v.entry === "string" && v.entry !== "" && keys === 2;
 }
 
-/** A pin's key, the same for the same entry wherever it is pinned: `lore:<id>` or `book:<book>/<entry>`. */
+/** A pin's key, the same for the same entry or book wherever it is pinned: `lore:<id>`, `book:<book>/<entry>` or `book:<book>`. */
 export function lorePinKey(pin: LorePin): string {
-  return "lore" in pin ? `lore:${pin.lore}` : `book:${pin.book}/${pin.entry}`;
+  return "lore" in pin ? `lore:${pin.lore}` : "entry" in pin ? `book:${pin.book}/${pin.entry}` : `book:${pin.book}`;
 }
+
+/** A pin as plain JSON, its own fields only. */
+function pinJson(pin: LorePin): LorePin & JsonObject {
+  return "lore" in pin ? { lore: pin.lore } : "entry" in pin ? { book: pin.book, entry: pin.entry } : { book: pin.book };
+}
+
+/**
+ * The steps a step pin reaches (DESIGN §24.5): every helper with a lore block, and each mind. The
+ * memory, time-skip and consolidation steps read no lore, so nothing pinned to them is read.
+ */
+export const PIN_STEPS: readonly StepPurpose[] = LORE_AUDIENCE.filter((p) => p !== "memory" && p !== "skip" && p !== "consolidate");
 
 const pinsRead = new WeakMap<object, LorePins>();
 
 /**
- * The world's lore pins as the engine reads them (DESIGN §24.5): each character's and place's
- * well-formed pins, each entry once, in order; a malformed one (linted) or a key that could reach a
- * prototype is left out. Read once per world revision.
+ * The world's lore pins as the engine reads them (DESIGN §24.5): each character's, place's and
+ * step's well-formed pins, each entry once, in order; a malformed one (linted), a step no pin
+ * reaches, or a key that could reach a prototype is left out. Read once per world revision.
  */
 export function lorePinsOf(world: { readonly lorePins?: unknown }): LorePins {
   const raw = world.lorePins;
-  if (!isRecord(raw)) return { characters: {}, places: {} };
+  if (!isRecord(raw)) return { characters: {}, places: {}, steps: {} };
   const known = pinsRead.get(raw);
   if (known) return known;
   const part = (value: unknown): Record<string, LorePin[]> => {
@@ -89,29 +101,30 @@ export function lorePinsOf(world: { readonly lorePins?: unknown }): LorePins {
       for (const pin of list) {
         if (!isLorePin(pin) || seen.has(lorePinKey(pin))) continue;
         seen.add(lorePinKey(pin));
-        pins.push("lore" in pin ? { lore: pin.lore } : { book: pin.book, entry: pin.entry });
+        pins.push(pinJson(pin));
       }
       if (pins.length > 0) out[id] = pins;
     }
     return out;
   };
-  const read: LorePins = { characters: part(raw.characters), places: part(raw.places) };
+  const steps = part(raw.steps);
+  const read: LorePins = { characters: part(raw.characters), places: part(raw.places), steps: Object.fromEntries(PIN_STEPS.flatMap((p): [StepPurpose, LorePin[]][] => (hasOwn(steps, p) ? [[p, steps[p] ?? []]] : []))) };
   pinsRead.set(raw, read);
   return read;
 }
 
 /** The pins as plain JSON: the value of a `set lorePins` edit, with no target left that pins nothing. */
 export function lorePinsJson(pins: LorePins): JsonObject {
-  const part = (record: Readonly<Record<string, readonly LorePin[]>>): JsonObject => Object.fromEntries(Object.entries(record).flatMap(([id, list]) => (list.length > 0 ? [[id, list.map((p): JsonObject => ("lore" in p ? { lore: p.lore } : { book: p.book, entry: p.entry }))]] : [])));
-  return { characters: part(pins.characters), places: part(pins.places) };
+  const part = (record: Readonly<Record<string, readonly LorePin[] | undefined>>): JsonObject => Object.fromEntries(Object.entries(record).flatMap(([id, list]) => (list && list.length > 0 ? [[id, list.map(pinJson)]] : [])));
+  return { characters: part(pins.characters), places: part(pins.places), steps: part(pins.steps) };
 }
 
 /** The lint codes lore pins raise (DESIGN §24.5), with what each means; the reference lists them. */
 export const LORE_PIN_LINTS: Readonly<Record<string, string>> = {
-  pin_shape: 'a pin that is neither {"lore": id} nor {"book": id, "entry": id}: it is ignored',
+  pin_shape: 'a pin that is none of {"lore": id}, {"book": id, "entry": id} and {"book": id}: it is ignored',
   pin_missing: "a pin naming a lore entry the world doesn't have",
-  pin_target: "pins under a character or place the world doesn't have: no call reads them",
-  pin_duplicate: "the same entry pinned twice to one character or place",
+  pin_target: "pins under a character, place or step the world doesn't have, or a step that reads no lore: no call reads them",
+  pin_duplicate: "the same entry or book pinned twice to one character, place or step",
   pin_unread: "a secret entry pinned to someone whose own it isn't: their mind never reads it",
   pin_pending: "an AI-written entry still waiting for review: no call reads it until it is accepted",
 };

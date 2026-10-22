@@ -740,7 +740,7 @@ export class MockBackend {
           const place = this.gm.entities.find((e) => e.id === who)?.place ?? this.gm.places[0]?.id;
           const ledger: LorePinView = { key: "lore:rosies_diner", pin: { lore: "rosies_diner" }, title: "Rosie's Diner", source: "World lore", status: "ok", secret: false };
           const notice: LorePinView = { key: "book:book_town/e1", pin: { book: "book_town", entry: "e1" }, title: "Town notice", source: "Town lore", status: "off", secret: false };
-          return this.result(reqId, "lre.lore", { pins: { characters: who ? { [who]: [ledger] } : {}, places: place ? { [place]: [notice] } : {} } });
+          return this.result(reqId, "lre.lore", { pins: { characters: who ? { [who]: [ledger] } : {}, places: place ? { [place]: [notice] } : {}, steps: {} } });
         }
         // The preview's "Rosie's Diner" was indexed from Town lore, whose entry has changed since.
         const content = "Rosie's opens at six and closes at two since the new lunch place opened. The booths by the window go first; the counter is for regulars.";

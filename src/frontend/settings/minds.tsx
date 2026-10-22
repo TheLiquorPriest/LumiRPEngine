@@ -45,7 +45,7 @@ const READ_LABEL: Record<MindSource, string> = {
 };
 
 const READ_NOTE: Record<MindSource, string> = {
-  pinned: "What Build pins to the character, then to their place and each place around it, nearest first. Within the limit every entry comes whole; the Context panel says what didn't fit.",
+  pinned: "What Build pins to the character, then to every mind (Build → Pinned lore, Character minds), then to their place and each place around it, nearest first; a pinned World Info book or entry is read from the book each time. Within the limit every entry comes whole; the Context panel says what didn't fit.",
   activated: "The world's lore entries the turn names, by a key, an alias, a title or a lookup-table term, as World Info activates them, read as the character: by your message and the latest reply when they were there for them, else by where they are.",
   reply: "How the latest reply ended, for those who were there for it; cut to a number, they read its end. The memory step reads the reply within this limit too.",
   message: "What you say and do, for those with you. The memory step reads it within this limit too.",

@@ -153,15 +153,15 @@ Interrupt classes: `invitation`, `bill`, `decline`, `incident`, `quest`, `rule`,
 
 ### Lore pins
 
-The world's `lorePins` part: `characters` and `places`, each a map from an id to a list of pins, where a pin is `{"lore": id}` (one of the world's lore entries) or `{"book": id, "entry": id}` (an entry of one of the user's World Info books). A character's pins reach only their own mind's calls; a place's reach every helper and mind call there or in a place inside it, nearest place first. Pinned text comes first within a helper call's lore tokens, or within the pinned lore a mind reads (Settings → Minds → What a mind reads), and a pin that doesn't fit is cut, with a note in the Context panel.
+The world's `lorePins` part: `characters`, `places` and `steps`, each a map from an id (a step's purpose, for `steps`) to a list of pins, where a pin is `{"lore": id}` (one of the world's lore entries), `{"book": id, "entry": id}` (an entry of one of the user's World Info books) or `{"book": id}` (a whole book: its switched-on entries in the book's order, read whenever a call reads it, so entries added later are read too). A character's pins reach only their own mind's calls; a step's reach every call of that step whatever its lore policy (the mind step's, every mind, after the character's own); a place's reach every helper and mind call there or in a place inside it, nearest place first. Pinned text comes first within a helper call's lore tokens, or within the pinned lore a mind reads (Settings → Minds → What a mind reads), and a pin that doesn't fit is cut, with a note in the Context panel.
 
 | Lint | Means |
 |---|---|
-| `pin_duplicate` | the same entry pinned twice to one character or place |
+| `pin_duplicate` | the same entry or book pinned twice to one character, place or step |
 | `pin_missing` | a pin naming a lore entry the world doesn't have |
 | `pin_pending` | an AI-written entry still waiting for review: no call reads it until it is accepted |
-| `pin_shape` | a pin that is neither {"lore": id} nor {"book": id, "entry": id}: it is ignored |
-| `pin_target` | pins under a character or place the world doesn't have: no call reads them |
+| `pin_shape` | a pin that is none of {"lore": id}, {"book": id, "entry": id} and {"book": id}: it is ignored |
+| `pin_target` | pins under a character, place or step the world doesn't have, or a step that reads no lore: no call reads them |
 | `pin_unread` | a secret entry pinned to someone whose own it isn't: their mind never reads it |
 
 ### Adjudication presets

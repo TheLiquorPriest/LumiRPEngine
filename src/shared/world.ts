@@ -851,23 +851,26 @@ export interface LoreIndex {
 }
 
 /**
- * A lore entry pinned to a character or a place (DESIGN §24.5, §5.4): one of the world's own
- * (`lore`, an entry id), or an entry of one of the user's Lumiverse World Info books (`book` and
- * `entry`, the host's ids), read from the book whenever it is used.
+ * A lore entry pinned to a character, a place or a step (DESIGN §24.5, §5.4): one of the world's own
+ * (`lore`, an entry id), an entry of one of the user's Lumiverse World Info books (`book` and
+ * `entry`, the host's ids), or a whole book (`book` alone), read from the book whenever it is used: a
+ * whole book's switched-on entries in the book's own order, so one added to the book is read unasked.
  */
-export type LorePin = { lore: string } | { book: string; entry: string };
+export type LorePin = { lore: string } | { book: string; entry: string } | { book: string };
 
 /**
  * Lore pinned where calls always read it (DESIGN §24.5, §5.4): `characters` by entity id, read by
  * that character's mind calls; `places` by place id, read by every helper call while the player
  * character is there and every mind call of someone there, a place's pins holding in the places
- * inside it. Pinned text counts against the call's lore tokens, nearest first, and is cut to fit.
- * Pins never widen who may read an entry: a secret or Known by entry reaches a call only when its
- * reader may read it.
+ * inside it; `steps` by step, read by every call of that step whatever its lore policy (the mind
+ * step's by every mind). Pinned text counts against the call's lore tokens, nearest first, and is cut
+ * to fit. Pins never widen who may read an entry: a secret or Known by entry reaches a call only when
+ * its reader may read it.
  */
 export interface LorePins {
   characters: Record<EntityId, LorePin[]>;
   places: Record<PlaceId, LorePin[]>;
+  steps: Partial<Record<StepPurpose, LorePin[]>>;
 }
 
 export type SuppressedSource =
