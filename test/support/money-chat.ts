@@ -120,9 +120,18 @@ export class MoneyChat {
     return view;
   }
 
-  /** A player control: its action sent as the hub sends it, then the turn it plays as. Returns the turn's outcome lines. */
+  /**
+   * A player control: its action sent as the hub sends it, then the turn it plays as. Returns the
+   * turn's outcome lines; a mechanical action is no turn, so for it "done" when it applied, else
+   * "didn't:" and the panel's error.
+   */
   async play(body: ActionBody): Promise<string> {
-    this.rig.body(await this.rig.send(actionRequest(this.chatId, body)));
+    const reply = await this.rig.send(actionRequest(this.chatId, body));
+    if (reply.type === "lre.error") return `didn't: ${reply.message}`;
+    if (this.rig.body(reply).applied === true) {
+      await this.rig.rt.push.settle();
+      return "done";
+    }
     await this.rig.host.settle();
     const generation = await this.rig.host.start(this.chatId, { type: "normal" });
     const outcome = this.rig.host.section("Outcome");

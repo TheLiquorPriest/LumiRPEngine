@@ -707,7 +707,8 @@ export interface ResultBodies {
   "lre.state.resync": { accepted: true };
   "lre.restart": { start: boolean };
   "lre.page": { accepted: true };
-  "lre.action": { messageId: MessageId };
+  /** The player's message the action plays as; or, for a mechanical action sent with no words (`ActionDef.mechanical`), its bookkeeping recorded on the head with no message and no reply (`pending` while a reply is in flight). */
+  "lre.action": { messageId: MessageId } | { applied: true; pending: boolean };
   "lre.chip": { applied: boolean; pending: boolean };
   "lre.view.open": { materialized: boolean; pending: boolean };
   "lre.fix": { pending: boolean };

@@ -213,6 +213,7 @@ export function registerOptions(r: FinanceRegistry): void {
     label: "Exercise an option",
     description: "Exercise an option contract you hold.",
     pack: "economy",
+    mechanical: true,
     params: { holding: { type: "ref", ref: "holding" }, qty: { type: "number", label: "Contracts", optional: true }, from: { type: "ref", ref: "account", label: "Pay the strike from", optional: true }, to: { type: "ref", ref: "account", label: "Strike to", optional: true } },
     requires: ["money_feature('options', self)"],
     outcomes: { default: [{ type: "economy.exercise", args: { party: "self", holding: "holding", qty: "=params.qty", from: "=params.from", to: "=params.to" } }] },
