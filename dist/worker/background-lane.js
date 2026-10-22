@@ -542,10 +542,10 @@ function checkSchema(root, value, others = []) {
       const uri = hash < 0 ? s.$ref : s.$ref.slice(0, hash);
       const name = hash < 0 ? "" : s.$ref.slice(hash);
       if (uri !== "") {
-        const target = documents.find((d) => d.$id === uri);
-        if (!target)
+        const target2 = documents.find((d) => d.$id === uri);
+        if (!target2)
           return [{}, doc];
-        doc = target;
+        doc = target2;
       }
       if (name === "" || name === "#") {
         s = doc;
@@ -559,66 +559,66 @@ function checkSchema(root, value, others = []) {
     }
     return [s, doc];
   };
-  const text = (schema, value, path, subject, into) => {
-    const length = [...value].length;
+  const text = (schema, value2, path, subject, into) => {
+    const length = [...value2].length;
     if (schema.minLength !== undefined && length < schema.minLength)
       into.push({ path, message: schema.minLength === 1 ? `${subject}can't be empty` : `${subject}should be at least ${schema.minLength} characters` });
     if (schema.maxLength !== undefined && length > schema.maxLength)
       into.push({ path, message: schema.maxLength === 1 ? `${subject}should be one character` : `${subject}should be at most ${schema.maxLength} characters` });
-    if (schema.pattern !== undefined && !new RegExp(schema.pattern, "u").test(value))
+    if (schema.pattern !== undefined && !new RegExp(schema.pattern, "u").test(value2))
       into.push({ path, message: `${subject}should be ${schema.description ?? `like ${schema.pattern}`}` });
   };
-  const visit = (raw, value, path, into, base) => {
+  const visit = (raw, value2, path, into, base) => {
     const [schema, doc] = resolve(raw, base);
     const push = (message, at = path) => void into.push({ path: at, message });
-    if (schema.type !== undefined && !hasType(value, schema.type))
+    if (schema.type !== undefined && !hasType(value2, schema.type))
       return push(`should be ${TYPE_WORDS[schema.type] ?? schema.type}`);
-    if (schema.enum && !schema.enum.some((e) => e === value))
+    if (schema.enum && !schema.enum.some((e) => e === value2))
       return push(`should be ${schema.enum.map(quoted).join(", ").replace(/, ([^,]*)$/, " or $1")}`);
     if (schema.anyOf) {
       const tries = schema.anyOf.map((branch) => {
         const found = [];
-        visit(branch, value, path, found, doc);
+        visit(branch, value2, path, found, doc);
         return { branch: resolve(branch, doc)[0], found };
       });
       if (tries.some((t) => t.found.length === 0))
         return;
-      const objects = isRecord(value) ? tries.filter((t) => t.branch.type === "object") : [];
+      const objects = isRecord(value2) ? tries.filter((t) => t.branch.type === "object") : [];
       const tagged = objects.filter((t) => {
         const tags = Object.entries(t.branch.properties ?? {}).flatMap(([key, s]) => {
           const allowed = resolve(s, doc)[0].enum;
           return allowed?.length === 1 ? [[key, allowed[0]]] : [];
         });
-        return tags.length > 0 && isRecord(value) && tags.every(([key, tag]) => hasOwn(value, key) && value[key] === tag);
+        return tags.length > 0 && isRecord(value2) && tags.every(([key, tag]) => hasOwn(value2, key) && value2[key] === tag);
       });
-      const named = tagged.length > 0 ? tagged : objects.filter((t) => isRecord(value) && (t.branch.required ?? []).every((k) => hasOwn(value, k)));
+      const named = tagged.length > 0 ? tagged : objects.filter((t) => isRecord(value2) && (t.branch.required ?? []).every((k) => hasOwn(value2, k)));
       if (named.length === 1 && named[0])
         return void into.push(...named[0].found);
       return push(`should be ${tries.map((t) => t.branch.title ?? TYPE_WORDS[t.branch.type ?? ""] ?? "something else").join(", ").replace(/, ([^,]*)$/, " or $1")}`);
     }
-    if (typeof value === "string")
-      text(schema, value, path, "", into);
-    if (typeof value === "number") {
-      if (schema.minimum !== undefined && value < schema.minimum)
+    if (typeof value2 === "string")
+      text(schema, value2, path, "", into);
+    if (typeof value2 === "number") {
+      if (schema.minimum !== undefined && value2 < schema.minimum)
         push(`should be at least ${schema.minimum}`);
-      if (schema.maximum !== undefined && value > schema.maximum)
+      if (schema.maximum !== undefined && value2 > schema.maximum)
         push(`should be at most ${schema.maximum}`);
-      if (schema.exclusiveMinimum !== undefined && value <= schema.exclusiveMinimum)
+      if (schema.exclusiveMinimum !== undefined && value2 <= schema.exclusiveMinimum)
         push(`should be more than ${schema.exclusiveMinimum}`);
     }
-    if (Array.isArray(value)) {
-      if (schema.minItems !== undefined && value.length < schema.minItems)
+    if (Array.isArray(value2)) {
+      if (schema.minItems !== undefined && value2.length < schema.minItems)
         push(schema.minItems === schema.maxItems ? `should have ${schema.minItems} items` : `should have at least ${schema.minItems} item${schema.minItems === 1 ? "" : "s"}`);
-      else if (schema.maxItems !== undefined && value.length > schema.maxItems)
+      else if (schema.maxItems !== undefined && value2.length > schema.maxItems)
         push(schema.minItems === schema.maxItems ? `should have ${schema.maxItems} items` : `should have at most ${schema.maxItems} items`);
       if (schema.items)
-        value.forEach((item, i) => visit(schema.items ?? {}, item, [...path, i], into, doc));
+        value2.forEach((item, i) => visit(schema.items ?? {}, item, [...path, i], into, doc));
     }
-    if (isRecord(value)) {
+    if (isRecord(value2)) {
       for (const key of schema.required ?? [])
-        if (!hasOwn(value, key))
+        if (!hasOwn(value2, key))
           push(`needs "${key}"`);
-      for (const [key, item] of Object.entries(value)) {
+      for (const [key, item] of Object.entries(value2)) {
         const own = schema.properties && hasOwn(schema.properties, key) ? schema.properties[key] : undefined;
         if (schema.propertyNames)
           text(resolve(schema.propertyNames, doc)[0], key, [...path, key], `the key ${quoted(key)} `, into);
@@ -742,9 +742,9 @@ function compileGrid(key, map, mine, places, grids) {
     const votes = new Map;
     const x = t.index % width;
     for (const n of [t.index - width, t.index + width, x > 0 ? t.index - 1 : -1, x < width - 1 ? t.index + 1 : -1]) {
-      const room = rooms.get(n);
-      if (room !== undefined)
-        votes.set(room, (votes.get(room) ?? 0) + 1);
+      const room2 = rooms.get(n);
+      if (room2 !== undefined)
+        votes.set(room2, (votes.get(room2) ?? 0) + 1);
     }
     const room = t.place ?? [...votes].sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1))[0]?.[0];
     if (room !== undefined)
@@ -1258,7 +1258,7 @@ function readInferred(raw) {
     return null;
   const base = INFERRED_PRESETS.grounded;
   const d = isRecord(raw.difficulty) ? raw.difficulty : {};
-  const ids = DIFFICULTY_BANDS.map((b) => b.id);
+  const ids = DIFFICULTY_BANDS.map((b2) => b2.id);
   const a = oneOf2(d.lowest, ids, base.difficulty.lowest);
   const b = oneOf2(d.highest, ids, base.difficulty.highest);
   const g = isRecord(raw.guidance) ? raw.guidance : {};
@@ -1994,8 +1994,8 @@ function ruleDay(cal, holidays, rule, year, depth) {
       if (rule.n >= 0) {
         const first = cal.system.abs(year, rule.month, 1);
         const offset = mod(rule.weekday - cal.system.weekday(first), wdCount);
-        const day = 1 + offset + (Math.max(1, rule.n) - 1) * wdCount;
-        return day <= len ? first + day - 1 : null;
+        const day2 = 1 + offset + (Math.max(1, rule.n) - 1) * wdCount;
+        return day2 <= len ? first + day2 - 1 : null;
       }
       const last = cal.system.abs(year, rule.month, len);
       const back = mod(cal.system.weekday(last) - rule.weekday, wdCount);
@@ -2340,8 +2340,8 @@ function keepSumDist(die, count, keep, mode, work) {
           continue;
         const room = Math.max(0, keep - j);
         for (let c = 0;c <= count - j; c++) {
-          const kept = Math.min(c, room);
-          next[(j + c) * width + s + v * kept] += w * binom[count - j][c] * pw[c];
+          const kept2 = Math.min(c, room);
+          next[(j + c) * width + s + v * kept2] += w * binom[count - j][c] * pw[c];
         }
       }
     }
@@ -2395,8 +2395,8 @@ function naturalDie(parsed) {
   const g = parsed.groups[0];
   if (!g || g.explode)
     return null;
-  const kept = g.keep && g.keep.n < g.count ? g.keep.n : g.count;
-  return kept === 1 ? g : null;
+  const kept2 = g.keep && g.keep.n < g.count ? g.keep.n : g.count;
+  return kept2 === 1 ? g : null;
 }
 function formatDice(parsed) {
   let out = "";
@@ -2830,16 +2830,16 @@ function walk(n, c) {
     }
     case "bin": {
       if (c.opts.all && (n.op === "and" || n.op === "or")) {
-        const a = walk(n.a, c), b = walk(n.b, c);
-        return n.op === "and" ? truthy(a) ? b : a : truthy(a) ? a : b;
+        const a2 = walk(n.a, c), b2 = walk(n.b, c);
+        return n.op === "and" ? truthy(a2) ? b2 : a2 : truthy(a2) ? a2 : b2;
       }
       if (n.op === "and") {
-        const a = walk(n.a, c);
-        return truthy(a) ? walk(n.b, c) : a;
+        const a2 = walk(n.a, c);
+        return truthy(a2) ? walk(n.b, c) : a2;
       }
       if (n.op === "or") {
-        const a = walk(n.a, c);
-        return truthy(a) ? a : walk(n.b, c);
+        const a2 = walk(n.a, c);
+        return truthy(a2) ? a2 : walk(n.b, c);
       }
       const a = walk(n.a, c);
       const b = walk(n.b, c);
@@ -4147,14 +4147,14 @@ function canonicalJson(v, depth) {
       if (depth >= MAX_JSON_DEPTH)
         throw new TypeError("hashJson: value is cyclic or nested deeper than 128");
       if (Array.isArray(v)) {
-        let s = "[";
+        let s2 = "[";
         for (let i = 0;i < v.length; i++) {
           if (i)
-            s += ",";
+            s2 += ",";
           const item = v[i];
-          s += item === undefined ? "null" : canonicalJson(item, depth + 1);
+          s2 += item === undefined ? "null" : canonicalJson(item, depth + 1);
         }
-        return s + "]";
+        return s2 + "]";
       }
       const proto = Object.getPrototypeOf(v);
       if (proto !== Object.prototype && proto !== null)
@@ -4470,18 +4470,18 @@ function unseenPlaceNames(reg, world, state, pov) {
 function findLeaks(value, secrets) {
   const needles = secrets.map((s) => s.toLowerCase()).filter((s) => s.length > 0);
   const out = [];
-  const visit = (v) => {
+  const visit2 = (v) => {
     if (typeof v === "string") {
       const lower = v.toLowerCase();
       for (const n of needles)
         if (lower.includes(n))
           out.push(v);
     } else if (Array.isArray(v))
-      v.forEach(visit);
+      v.forEach(visit2);
     else if (isRecord(v))
-      Object.values(v).forEach((x) => visit(x));
+      Object.values(v).forEach((x) => visit2(x));
   };
-  visit(value);
+  visit2(value);
   return out;
 }
 var ACCENTS = /[\u0300-\u036f]/g;
@@ -4562,9 +4562,9 @@ function namesAny(text, people, labels = [], heard = "") {
   for (const label of labels) {
     const all = spellings(label);
     const named = all.filter((w) => !hasOwn(FUNCTION_WORDS, w.plain));
-    const whole = named.length === 0;
-    const parts = whole ? all : named;
-    if (parts.length > 0 && said.says(parts, whole) && !known.says(parts, whole))
+    const whole3 = named.length === 0;
+    const parts = whole3 ? all : named;
+    if (parts.length > 0 && said.says(parts, whole3) && !known.says(parts, whole3))
       return true;
   }
   return false;
@@ -4905,20 +4905,20 @@ function refsOf(world, state, e) {
     else if (hasOwn3(world.tracks, v))
       out.push({ kind: "track", id: v });
   };
-  const visit = (v, depth) => {
+  const visit2 = (v, depth) => {
     if (depth > 4)
       return;
     if (typeof v === "string")
       add(v);
     else if (Array.isArray(v))
-      v.forEach((x) => visit(x, depth + 1));
+      v.forEach((x) => visit2(x, depth + 1));
     else if (isRecord(v))
-      Object.values(v).forEach((x) => visit(x, depth + 1));
+      Object.values(v).forEach((x) => visit2(x, depth + 1));
   };
   switch (e.type) {
     case "set":
       add(e.entity);
-      visit(e.value, 0);
+      visit2(e.value, 0);
       break;
     case "add":
       add(e.entity);
@@ -4939,7 +4939,7 @@ function refsOf(world, state, e) {
       break;
     default:
       if ("data" in e)
-        visit(e.data, 0);
+        visit2(e.data, 0);
   }
   return out;
 }
@@ -5011,8 +5011,8 @@ function relationLine(rel, from, to, linked) {
       return linked ? `${from} ${humanize(rel)} ${to}` : `${from} no longer ${humanize(rel)} ${to}`;
   }
 }
-function relabel(line, refs, world, state, pov, you) {
-  let out = line;
+function relabel(line2, refs, world, state, pov, you) {
+  let out = line2;
   const ids = [...new Set(refs.map((r) => r.id))].sort((a, b) => b.length - a.length);
   for (const id of ids) {
     const name = nameOf(world, state, pov, id, you);
@@ -5097,8 +5097,8 @@ function rawLine(reg, world, state, pov, e, player, you) {
       if (!def)
         return null;
       try {
-        const line = def.describe(e, reg.context(world, state), player ? pov : undefined);
-        return line ? relabel(line, refsOf(world, state, e), world, state, pov, you) : null;
+        const line2 = def.describe(e, reg.context(world, state), player ? pov : undefined);
+        return line2 ? relabel(line2, refsOf(world, state, e), world, state, pov, you) : null;
       } catch {
         return null;
       }
@@ -5152,8 +5152,8 @@ function wordedLines(reg, world, state, pov, events, max, player, you = "You") {
     }
     lines.push({ at: i, rank: lineRank(reg, world, state, pov, e), text });
   }
-  const kept = lines.length <= max ? lines : [...lines].sort((a, b) => a.rank - b.rank || a.at - b.at).slice(0, Math.max(0, max)).sort((a, b) => a.at - b.at);
-  return kept.map((l) => l.text);
+  const kept2 = lines.length <= max ? lines : [...lines].sort((a, b) => a.rank - b.rank || a.at - b.at).slice(0, Math.max(0, max)).sort((a, b) => a.at - b.at);
+  return kept2.map((l) => l.text);
 }
 
 // src/engine/narration-channels.ts
@@ -5270,8 +5270,8 @@ var spawnChannel = {
     if (def.visibility === "secret")
       return reject("not_public", "a reply can't place someone somewhere secret");
     const lower = name.toLowerCase();
-    const named = Object.keys(ctx.state.entities).filter((id) => own(ctx.state.entities, id)?.name.trim().toLowerCase() === lower);
-    if (named.some((id) => povMayKnow(ctx.registry, ctx.world, ctx.state, id)))
+    const named = Object.keys(ctx.state.entities).filter((id2) => own(ctx.state.entities, id2)?.name.trim().toLowerCase() === lower);
+    if (named.some((id2) => povMayKnow(ctx.registry, ctx.world, ctx.state, id2)))
       return reject("duplicate", `${name} already exists`);
     const cap = spawnCapOf(ctx.world);
     if (spawnedCount(ctx) >= cap)
@@ -5337,7 +5337,7 @@ function endOf(state, id) {
 }
 function linkProblem(reg, world, state, def, a, b) {
   const worded = (code, say) => {
-    const sentence = (text) => text.charAt(0).toUpperCase() + text.slice(1);
+    const sentence = (text2) => text2.charAt(0).toUpperCase() + text2.slice(1);
     const reason = sentence(say((end) => playerKnows(reg, world, state, world.pov, end.id) ? end.name : "someone"));
     const gm = sentence(say((end) => end.name));
     return reason === gm ? reject2(code, reason) : { code, reason, gm };
@@ -5440,7 +5440,7 @@ function relationIssues(reg, world) {
     if (def.inverse && !relationDef(reg, world, def.inverse))
       err(`relations.${id}.inverse`, "refs", `Relation ${def.label}'s inverse "${def.inverse}" isn't a relation type.`);
   }
-  const nameOf = (id) => own(world.entities, id)?.name ?? own(world.places, id)?.name ?? id;
+  const nameOf2 = (id) => own(world.entities, id)?.name ?? own(world.places, id)?.name ?? id;
   for (const [id, e] of Object.entries(world.entities)) {
     for (const r of e.relations) {
       const def = relationDef(reg, world, r.type);
@@ -5451,7 +5451,7 @@ function relationIssues(reg, world) {
       if (def.from !== "*" && !kindIs(reg, world, e.kind, def.from))
         err(path, "relation_kind", `${e.name}'s \u201C${def.label}\u201D link needs ${kindPhrase(reg, world, def.from)} on ${e.name}'s side; ${e.name} is ${kindPhrase(reg, world, e.kind)}.`);
       if (def.to !== "*" && (!target || !kindIs(reg, world, target.kind, def.to)))
-        err(path, "relation_kind", `${e.name}'s \u201C${def.label}\u201D link to ${nameOf(r.to)} needs ${kindPhrase(reg, world, def.to)} at the other end; ${nameOf(r.to)} is ${target ? kindPhrase(reg, world, target.kind) : "a place"}.`);
+        err(path, "relation_kind", `${e.name}'s \u201C${def.label}\u201D link to ${nameOf2(r.to)} needs ${kindPhrase(reg, world, def.to)} at the other end; ${nameOf2(r.to)} is ${target ? kindPhrase(reg, world, target.kind) : "a place"}.`);
       const back = counterpartOf(reg, world, r.type);
       if (!back || !target || back === r.type && r.to === id || target.relations.some((x) => x.type === back && x.to === id))
         continue;
@@ -5478,7 +5478,7 @@ function relationIssues(reg, world) {
     for (const [type, targets] of counts) {
       const def = relationDef(reg, world, type);
       if (def && targets.length > 1)
-        err(`entities.${id}.relations`, "cardinality", `${nameOf(id)} is ${inline(def)} ${targets.map(nameOf).join(" and ")}; \u201C${def.label}\u201D allows one.`);
+        err(`entities.${id}.relations`, "cardinality", `${nameOf2(id)} is ${inline(def)} ${targets.map(nameOf2).join(" and ")}; \u201C${def.label}\u201D allows one.`);
     }
   }
   for (const [key, from] of sources) {
@@ -5486,7 +5486,7 @@ function relationIssues(reg, world) {
     const def = relationDef(reg, world, type);
     const last = from.at(-1);
     if (def && last !== undefined && from.length > 1)
-      err(`entities.${last}.relations`, "cardinality", `${from.map(nameOf).join(" and ")} are each ${inline(def)} ${nameOf(to)}; \u201C${def.label}\u201D allows one.`);
+      err(`entities.${last}.relations`, "cardinality", `${from.map(nameOf2).join(" and ")} are each ${inline(def)} ${nameOf2(to)}; \u201C${def.label}\u201D allows one.`);
   }
   return issues;
 }
@@ -6081,9 +6081,9 @@ function objectAt(parent, key) {
   return fresh;
 }
 function writable2(state, id) {
-  const slice = state.packs[PACK3] ?? {};
-  state.packs[PACK3] = slice;
-  return objectAt(objectAt(slice, SLICE3), id);
+  const slice2 = state.packs[PACK3] ?? {};
+  state.packs[PACK3] = slice2;
+  return objectAt(objectAt(slice2, SLICE3), id);
 }
 function touch(state, t) {
   if (!own(state.entities, t.entity))
@@ -6138,9 +6138,9 @@ function openedAccounts(state, e) {
         out.add(id);
       continue;
     }
-    for (const line of inner.lines)
-      if (!touchedAspect(state, line.account, "posted"))
-        out.add(line.account);
+    for (const line2 of inner.lines)
+      if (!touchedAspect(state, line2.account, "posted"))
+        out.add(line2.account);
   }
   return [...out];
 }
@@ -6169,11 +6169,11 @@ function touching(def) {
   };
 }
 function dropTouches(state) {
-  const slice = state.packs[PACK3];
-  if (!slice)
+  const slice2 = state.packs[PACK3];
+  if (!slice2)
     return;
-  delete slice[SLICE3];
-  if (Object.keys(slice).length === 0)
+  delete slice2[SLICE3];
+  if (Object.keys(slice2).length === 0)
     delete state.packs[PACK3];
 }
 
@@ -6232,19 +6232,19 @@ var postDef = {
     if (e.lines.length < 2)
       return reject3("unbalanced", "a posting needs two lines");
     let sum = 0;
-    for (const line of e.lines) {
-      if (!Number.isSafeInteger(line.amount))
+    for (const line2 of e.lines) {
+      if (!Number.isSafeInteger(line2.amount))
         return reject3("bad_amount", "amounts are integer cents");
-      if (!isAccount(ctx.state, line.account))
-        return reject3("missing_account", `no account ${line.account}`);
-      sum += line.amount;
+      if (!isAccount(ctx.state, line2.account))
+        return reject3("missing_account", `no account ${line2.account}`);
+      sum += line2.amount;
     }
     return sum === 0 ? null : reject3("unbalanced", `posting sums to ${sum}`);
   },
   apply: (e, state) => {
-    for (const line of e.lines)
-      if (safeKey(line.account))
-        state.accounts[line.account] = (hasOwn(state.accounts, line.account) ? state.accounts[line.account] ?? 0 : 0) + line.amount;
+    for (const line2 of e.lines)
+      if (safeKey(line2.account))
+        state.accounts[line2.account] = (hasOwn(state.accounts, line2.account) ? state.accounts[line2.account] ?? 0 : 0) + line2.amount;
   },
   touches: (e) => e.lines.filter((l) => !l.account.startsWith(EXTERNAL_ACCOUNT_PREFIX)).map((l) => ({ entity: l.account, aspect: "posted" })),
   describe: (e) => e.memo
@@ -6370,14 +6370,14 @@ function applyEvent(types, event, state, ctx) {
     def.apply(event, state, ctx);
   dropPassMemo(state);
 }
-function eventUnits(events) {
+function eventUnits(events2) {
   const out = [];
   let i = 0;
-  while (i < events.length) {
-    const group = events[i]?.group;
+  while (i < events2.length) {
+    const group = events2[i]?.group;
     let j = i + 1;
     if (group !== undefined)
-      while (j < events.length && events[j]?.group === group)
+      while (j < events2.length && events2[j]?.group === group)
         j++;
     out.push([i, j]);
     i = j;
@@ -6395,8 +6395,8 @@ function tableChoices(table) {
     return { key, label: typeof label === "string" && label.trim() !== "" ? label : key.replace(/_/g, " ") };
   });
 }
-function tableRowKey(table, text) {
-  const said = text.trim().toLowerCase();
+function tableRowKey(table, text2) {
+  const said = text2.trim().toLowerCase();
   const hit = tableChoices(table).find((c) => c.key.toLowerCase() === said || c.label.toLowerCase() === said);
   return hit ? hit.key : null;
 }
@@ -6847,10 +6847,10 @@ function sample(reg, ctx, entity, domain, runSeed) {
   const version = pinnedVersion(ctx.world, reg, domain);
   if (typeof version !== "number")
     return null;
-  const events = def.materialize(entity, ctx, createRng(materializationSeed(runSeed, entity, domain)), version);
-  if (events.length === 0)
+  const events2 = def.materialize(entity, ctx, createRng(materializationSeed(runSeed, entity, domain)), version);
+  if (events2.length === 0)
     return null;
-  return { type: "materialize", entity, domain, generatorVersion: version, tablesRevision: tablesRevision(ctx.world), events };
+  return { type: "materialize", entity, domain, generatorVersion: version, tablesRevision: tablesRevision(ctx.world), events: events2 };
 }
 function materializeIfNeeded(reg, w, entity, domain, runSeed) {
   if (isMaterialized(w.state, entity, domain))
@@ -6896,7 +6896,7 @@ function rulesetFloor(world, domain, level) {
   return Math.max(level, grid, authored === undefined ? 0 : clampLevel(authored));
 }
 function createRegistry(packs) {
-  const events = new Map;
+  const events2 = new Map;
   const guards = new Map;
   const kinds = new Map;
   const relations = new Map;
@@ -6935,7 +6935,7 @@ function createRegistry(packs) {
     proposals,
     lints,
     views,
-    get: (type) => events.get(type),
+    get: (type) => events2.get(type),
     context(world, state, overrides) {
       return {
         registry,
@@ -6960,7 +6960,7 @@ function createRegistry(packs) {
     }
   };
   for (const def of coreEventTypes(() => registry))
-    once(events, def.type, knowing(observing(def, canSeeEntity)), "event type");
+    once(events2, def.type, knowing(observing(def, canSeeEntity)), "event type");
   const seen = new Set;
   for (const pack of packs) {
     if (seen.has(pack.id))
@@ -6975,7 +6975,7 @@ function createRegistry(packs) {
       event: (d) => {
         if (!d.type.startsWith(`${pack.id}.`))
           throw new RegistryError(`pack ${pack.id} may only register ${pack.id}.* events, not ${d.type}`);
-        once(events, d.type, d, "event type");
+        once(events2, d.type, d, "event type");
       },
       guard: (d) => {
         const list = guards.get(d.type) ?? [];
@@ -7004,15 +7004,15 @@ function createRegistry(packs) {
     pack.register(r);
   }
   for (const [type, list] of guards) {
-    const def = events.get(type);
+    const def = events2.get(type);
     if (!def)
       throw new RegistryError(`pack ${list[0]?.pack ?? "?"} guards unknown event type ${type}`);
-    events.set(type, {
+    events2.set(type, {
       ...def,
       validate: (e, ctx) => {
-        const own = def.validate(e, ctx);
-        if (own)
-          return own;
+        const own2 = def.validate(e, ctx);
+        if (own2)
+          return own2;
         for (const g of list) {
           const rejection = g.def.validate(e, ctx);
           if (rejection)
@@ -7022,8 +7022,8 @@ function createRegistry(packs) {
       }
     });
   }
-  for (const [type, def] of events)
-    events.set(type, touching(def));
+  for (const [type, def] of events2)
+    events2.set(type, touching(def));
   return Object.freeze(registry);
 }
 
@@ -7206,30 +7206,30 @@ function rowOf2(reg, ctx, entity, row, fixes) {
     return { label: row.label, ...display(ctx, undefined, v) };
   }
   if ("pool" in row) {
-    const def = fieldDef(reg, ctx.world, e.kind, row.pool);
-    if (!def?.pool)
+    const def2 = fieldDef(reg, ctx.world, e.kind, row.pool);
+    if (!def2?.pool)
       return null;
     const read = env.lookup(["self", row.pool]);
     const current = typeof read === "number" ? read : 0;
-    const max = poolMax(reg, ctx, entity, def.pool);
-    const min = def.pool.min ?? 0;
-    const fix = fixes ? fixOf(entity, row.pool, def, own(e.fields, row.pool) ?? current, { min, ...max !== null ? { max } : {} }) : undefined;
-    return { label: row.label ?? def.label ?? words(row.pool), value: `${shown(current)} / ${max === null ? "\u2014" : shown(max)}`, pool: { current, min, max }, ...fix ? { fix } : {} };
+    const max = poolMax(reg, ctx, entity, def2.pool);
+    const min = def2.pool.min ?? 0;
+    const fix2 = fixes ? fixOf(entity, row.pool, def2, own(e.fields, row.pool) ?? current, { min, ...max !== null ? { max } : {} }) : undefined;
+    return { label: row.label ?? def2.label ?? words(row.pool), value: `${shown(current)} / ${max === null ? "\u2014" : shown(max)}`, pool: { current, min, max }, ...fix2 ? { fix: fix2 } : {} };
   }
   if ("progression" in row) {
     const prog = own(ctx.world.ruleset?.progression ?? {}, row.progression);
     const p = prog ? progressOf(reg, ctx, entity, prog) : null;
     if (!prog || !p)
       return null;
-    const def = fieldDef(reg, ctx.world, e.kind, prog.xpField);
-    const xpLabel = def?.label ?? "XP";
-    const fix = fixes && def ? fixOf(entity, prog.xpField, def, own(e.fields, prog.xpField) ?? p.xp, { min: def.min, max: def.max }) : undefined;
+    const def2 = fieldDef(reg, ctx.world, e.kind, prog.xpField);
+    const xpLabel = def2?.label ?? "XP";
+    const fix2 = fixes && def2 ? fixOf(entity, prog.xpField, def2, own(e.fields, prog.xpField) ?? p.xp, { min: def2.min, max: def2.max }) : undefined;
     return {
       label: row.label ?? prog.label,
       value: shown(p.level),
       detail: p.next === null ? `${shown(p.xp)} ${xpLabel} \xB7 top level` : `${shown(p.xp)} / ${shown(p.next)} ${xpLabel}`,
       progress: { level: p.level, xp: p.xp, from: p.from, next: p.next },
-      ...fix ? { fix } : {}
+      ...fix2 ? { fix: fix2 } : {}
     };
   }
   if (typeof row.field !== "string")
@@ -7488,7 +7488,7 @@ function applyCheck(reg, w, spec, scope) {
     return ready;
   const rolled = rollCheck(ready, scope.rng.fork(`actor:${actor}`));
   const out = { applied: [], rejected: [] };
-  const record = {
+  const record2 = {
     type: ENGINE_EVENTS.check,
     data: {
       check: def.id,
@@ -7502,10 +7502,10 @@ function applyCheck(reg, w, spec, scope) {
       ...actor !== w.world.pov ? { npc: true } : {}
     }
   };
-  const failed = w.apply(record);
+  const failed = w.apply(record2);
   if (failed)
     return failed;
-  out.applied.push(record);
+  out.applied.push(record2);
   const outcomes = isRecord(a.outcomes) ? a.outcomes : {};
   const result = applyEffects(reg, w, effectList(own(outcomes, rolled.outcome)), { bindings: rolling, vars: { ...scope.vars, roll: rollVars(ready, rolled) }, params: scope.params, rng: scope.rng.fork("outcome"), depth: depth + 1 });
   out.applied.push(...result.applied);
@@ -7539,13 +7539,13 @@ function levelUp(reg, w, entity, id, prog, scope) {
     out.applied.push(note);
   return out;
 }
-function levelUps(reg, w, events, scope) {
+function levelUps(reg, w, events2, scope) {
   const out = { applied: [], rejected: [] };
   const progressions = Object.entries(w.world.ruleset?.progression ?? {});
   if (progressions.length === 0)
     return out;
   const done = new Set;
-  for (const ev of events) {
+  for (const ev of events2) {
     if (ev.type !== "set" && ev.type !== "add")
       continue;
     for (const [id, prog] of progressions) {
@@ -7580,9 +7580,9 @@ function applyEffects(reg, w, specs, scope) {
       return;
     }
     const group = result.length > 1 ? `fx:${hashParts(rng.seed).slice(0, 10)}` : undefined;
-    const events = group ? result.map((ev) => ({ ...ev, group })) : result;
+    const events2 = group ? result.map((ev) => ({ ...ev, group })) : result;
     const mark = group ? w.mark() : null;
-    for (const ev of events) {
+    for (const ev of events2) {
       const failure = w.apply(ev);
       if (failure) {
         if (mark)
@@ -7591,8 +7591,8 @@ function applyEffects(reg, w, specs, scope) {
         return;
       }
     }
-    out.applied.push(...events);
-    const ups = levelUps(reg, w, events, { ...scope, rng });
+    out.applied.push(...events2);
+    const ups = levelUps(reg, w, events2, { ...scope, rng });
     out.applied.push(...ups.applied);
     out.rejected.push(...ups.rejected);
   });
@@ -7623,9 +7623,9 @@ class Working {
     this.events.push(event);
     return null;
   }
-  applyAll(events) {
+  applyAll(events2) {
     const out = [];
-    for (const e of events)
+    for (const e of events2)
       if (!this.apply(e))
         out.push(e);
     return out;
@@ -7753,7 +7753,7 @@ function resolveAction(reg, w, req, rng, opts = {}) {
   if ("code" in p)
     return { ...base, failed: p };
   if (opts.runSeed !== undefined) {
-    const participants = [p.actor, ...Object.values(p.bindings)].filter((id, i, all) => all.indexOf(id) === i);
+    const participants = [p.actor, ...Object.values(p.bindings)].filter((id, i, all2) => all2.indexOf(id) === i);
     for (const id of participants)
       materializeAll(reg, w, id, opts.runSeed);
   }
@@ -8004,10 +8004,10 @@ function lintInferred(world, reg) {
       plays(`guidance.${key}`, given, policy.guidance[key]);
       continue;
     }
-    const text = given.replace(/\s+/g, " ").trim();
-    if (text.length > INFERRED_BOUNDS.guidance)
-      warn(`.guidance.${key}`, "inferred_value", `A guidance line holds at most ${INFERRED_BOUNDS.guidance} characters; this one's ${text.length} are cut there.`);
-    for (const [, name] of text.matchAll(/\{([^{}]*)\}/g))
+    const text3 = given.replace(/\s+/g, " ").trim();
+    if (text3.length > INFERRED_BOUNDS.guidance)
+      warn(`.guidance.${key}`, "inferred_value", `A guidance line holds at most ${INFERRED_BOUNDS.guidance} characters; this one's ${text3.length} are cut there.`);
+    for (const [, name] of text3.matchAll(/\{([^{}]*)\}/g))
       if (!GUIDANCE_PLACEHOLDERS.has(name ?? ""))
         warn(`.guidance.${key}`, "inferred_guidance", `{${name}} isn't a placeholder ({who}, {skill}, {attempt} or {against}), so the narrator is told it as written.`);
   }
@@ -8088,7 +8088,7 @@ function resolveTry(reg, w, params, rng, opts = {}) {
     const failed = ownCheck && "code" in ownCheck ? ownCheck : { code: "bad_param", reason: `${read.skill || "the attempt"} isn't a skill here` };
     return { action: TRY_ACTION, actor: pov, ok: false, failed, check: null, outcome: null, events: [], rejected: [], duration: 0, activity: null, observable: null, adjudged: null };
   }
-  const nameOf = (id) => own(w.state.entities, id)?.name ?? id;
+  const nameOf3 = (id) => own(w.state.entities, id)?.name ?? id;
   const here = placeOfEntity(w.state, pov);
   const present = (id) => here !== null && placeOfEntity(w.state, id) === here && involvable(reg, world, w.state, id) && acts(world, w.state, id) && canSeeEntity(reg, world, w.state, pov, id);
   let rolls = policy.most - 1;
@@ -8113,11 +8113,11 @@ function resolveTry(reg, w, params, rng, opts = {}) {
       continue;
     if (policy.who === "everyone" && rolls > 0) {
       rolls--;
-      const rolled = rollCheck(ready, rng.fork(`actor:${o.who}`));
-      w.apply({ type: ENGINE_EVENTS.check, data: { check: ready.check.id ?? "", skill: theirs.id, actor: o.who, target: pov, notation: ready.notation, natural: rolled.natural, total: rolled.total, dc: null, outcome: "opposed", npc: true } });
-      against.push({ who: o.who, name: nameOf(o.who), rolled: true, score: rolled.total });
+      const rolled2 = rollCheck(ready, rng.fork(`actor:${o.who}`));
+      w.apply({ type: ENGINE_EVENTS.check, data: { check: ready.check.id ?? "", skill: theirs.id, actor: o.who, target: pov, notation: ready.notation, natural: rolled2.natural, total: rolled2.total, dc: null, outcome: "opposed", npc: true } });
+      against.push({ who: o.who, name: nameOf3(o.who), rolled: true, score: rolled2.total });
     } else
-      against.push({ who: o.who, name: nameOf(o.who), rolled: false, score: passiveScore(ready) });
+      against.push({ who: o.who, name: nameOf3(o.who), rolled: false, score: passiveScore(ready) });
   }
   const dc = against.length > 0 ? Math.max(...against.map((a) => a.score)) : band.dc;
   const res = resolveAction(reg, w, tryRequest(world, skill, band, against, dc), rng, opts);
@@ -8133,9 +8133,9 @@ function resolveTry(reg, w, params, rng, opts = {}) {
       continue;
     const roll = rollCheck(ready, rng.fork(`actor:${id}`));
     w.apply({ type: ENGINE_EVENTS.check, data: { check: ready.check.id ?? "", skill: skill.id, actor: id, notation: ready.notation, natural: roll.natural, total: roll.total, dc: ready.dc, outcome: roll.outcome, npc: true } });
-    rolled.push({ who: id, name: nameOf(id), outcome: roll.outcome, pass: pass.includes(roll.outcome), notation: ready.notation, modifier: base.modifier, total: roll.roll.total + base.modifier });
+    rolled.push({ who: id, name: nameOf3(id), outcome: roll.outcome, pass: pass.includes(roll.outcome), notation: ready.notation, modifier: base.modifier, total: roll.roll.total + base.modifier });
   }
-  const inferred = { label: `${skill.label} check`, skill: skill.id, attempt: read.attempt, pov: nameOf(pov), band, dc, against, companions: rolled, share, pass, detail: policy.detail, others: policy.others, guidance: policy.guidance };
+  const inferred = { label: `${skill.label} check`, skill: skill.id, attempt: read.attempt, pov: nameOf3(pov), band, dc, against, companions: rolled, share, pass, detail: policy.detail, others: policy.others, guidance: policy.guidance };
   return { ...res, events: w.events.slice(start), inferred };
 }
 
@@ -8144,7 +8144,7 @@ var SECRET_KINDS = ["lore", "track", "flag"];
 function readCue(raw) {
   if (!isRecord(raw) || typeof raw.text !== "string" || raw.text.trim() === "")
     return null;
-  const keyed = SECRET_KINDS.filter((kind) => raw[kind] !== undefined);
+  const keyed = SECRET_KINDS.filter((kind2) => raw[kind2] !== undefined);
   const kind = keyed[0];
   const id = kind === undefined ? undefined : raw[kind];
   return keyed.length === 1 && kind !== undefined && typeof id === "string" && id !== "" ? { text: raw.text.trim(), secret: { kind, id } } : null;
@@ -8157,12 +8157,12 @@ function cuesOf(world, who) {
 // src/engine/lore.ts
 var MIN_TERM = 3;
 var STOP_WORDS = Object.fromEntries("the and for with that this from into onto have has had was were are you your yours my mine our ours his her hers their theirs them they she him its not but all any can will would could should about then than there here what when where which who whom how why just very some more most other out over under again also like get got one two too off own same such only each both few nor yet".split(" ").map((w) => [w, true]));
-function plain(text) {
-  const words = text.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim();
-  return words === "" ? "" : ` ${words} `;
+function plain(text3) {
+  const words2 = text3.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim();
+  return words2 === "" ? "" : ` ${words2} `;
 }
-function wordsOf(text) {
-  return plain(text).trim().split(" ").filter((w) => w.length >= MIN_TERM && !hasOwn(STOP_WORDS, w)).map((w) => w.length > 4 && w.endsWith("s") && !w.endsWith("ss") ? w.slice(0, -1) : w);
+function wordsOf(text3) {
+  return plain(text3).trim().split(" ").filter((w) => w.length >= MIN_TERM && !hasOwn(STOP_WORDS, w)).map((w) => w.length > 4 && w.endsWith("s") && !w.endsWith("ss") ? w.slice(0, -1) : w);
 }
 var listOf = (v) => Array.isArray(v) ? v.filter((x) => typeof x === "string") : [];
 function loreHeldBy(world, entry, who) {
@@ -8245,18 +8245,18 @@ function lintLore(world) {
   }
   for (const [term, raw] of Object.entries(world.loreIndex.terms)) {
     const path = `loreIndex.terms.${term}`;
-    const entries = ids(raw);
+    const entries2 = ids(raw);
     const matched = loreTerm(term);
     if (matched === "")
       push("warning", path, "empty_term", "a blank term matches nothing");
     else if (matched !== term)
       push("warning", path, "term_case", `lookups match this term as "${matched}"`);
-    if (entries.length === 0)
+    if (entries2.length === 0)
       push("warning", path, "empty_term", `"${term}" leads to no entry`);
-    for (const id of entries)
+    for (const id of entries2)
       if (!hasOwn(world.lore, id))
         push("warning", path, "missing_ref", `"${id}" is not a lore entry`);
-    const elsewhere = [...new Set(aliases.get(matched) ?? [])].filter((id) => !entries.includes(id));
+    const elsewhere = [...new Set(aliases.get(matched) ?? [])].filter((id) => !entries2.includes(id));
     if (elsewhere.length > 0)
       push("warning", path, "alias_elsewhere", `"${term}" is an alias of ${elsewhere.map((id) => `"${world.lore[id]?.title ?? id}"`).join(", ")}, but the term doesn't lead there`);
   }
@@ -8383,15 +8383,15 @@ function checkSites(path, check) {
 }
 function argSites(path, spec) {
   const out = [];
-  const visit = (at, v) => {
+  const visit2 = (at, v) => {
     if (typeof v === "string") {
       if (v.startsWith("="))
         out.push({ path: at, expr: v.slice(1), effectArg: true });
     } else if (Array.isArray(v))
-      v.forEach((x, i) => visit(`${at}.${i}`, x));
+      v.forEach((x, i) => visit2(`${at}.${i}`, x));
     else if (isRecord(v))
       for (const [k, x] of Object.entries(v))
-        visit(`${at}.${k}`, x);
+        visit2(`${at}.${k}`, x);
   };
   for (const [key, value] of Object.entries(spec.args ?? {})) {
     if (spec.type === "check" && key === "outcomes")
@@ -8399,7 +8399,7 @@ function argSites(path, spec) {
     if (spec.type === "check" && key === "check" && isRecord(value))
       out.push(...checkSites(`${path}.args.check`, value));
     else
-      visit(`${path}.args.${key}`, value);
+      visit2(`${path}.args.${key}`, value);
   }
   return out;
 }
@@ -8452,9 +8452,9 @@ function exprSites(world) {
   }
   const combat = world.ruleset?.combat;
   if (isRecord(combat)) {
-    for (const [key, sub] of [["tieBreak", null], ["end", null], ["down", "when"], ["sides", "hostile"], ["sides", "ally"], ["tactics", "threat"], ["tactics", "lowHp"]]) {
-      const v = sub === null ? combat[key] : isRecord(combat[key]) ? combat[key][sub] : undefined;
-      push(`ruleset.combat.${key}${sub === null ? "" : `.${sub}`}`, typeof v === "string" ? v : undefined);
+    for (const [key, sub2] of [["tieBreak", null], ["end", null], ["down", "when"], ["sides", "hostile"], ["sides", "ally"], ["tactics", "threat"], ["tactics", "lowHp"]]) {
+      const v = sub2 === null ? combat[key] : isRecord(combat[key]) ? combat[key][sub2] : undefined;
+      push(`ruleset.combat.${key}${sub2 === null ? "" : `.${sub2}`}`, typeof v === "string" ? v : undefined);
     }
     if (isRecord(combat.economy)) {
       for (const [id, b] of Object.entries(combat.economy))
@@ -9108,7 +9108,7 @@ function scheduleOverlaps(reg, world) {
   }
   const cal = calendarOf(world);
   const state = initialState(world, "", reg);
-  const entries = allSchedules(reg, world).map((schedule) => ({ schedule, rank: ownerRank(reg, world, state, schedule), owners: new Set(scheduleOwners(reg, world, state, schedule)) }));
+  const entries2 = allSchedules(reg, world).map((schedule) => ({ schedule, rank: ownerRank(reg, world, state, schedule), owners: new Set(scheduleOwners(reg, world, state, schedule)) }));
   const fromDay = (s) => {
     try {
       return s.recurrence.from ? dayIndexOfText(cal, s.recurrence.from) : -Infinity;
@@ -9146,10 +9146,10 @@ function scheduleOverlaps(reg, world) {
     }
     return false;
   };
-  for (let i = 0;i < entries.length; i++) {
-    for (let j = i + 1;j < entries.length; j++) {
-      const a = entries[i];
-      const b = entries[j];
+  for (let i = 0;i < entries2.length; i++) {
+    for (let j = i + 1;j < entries2.length; j++) {
+      const a = entries2[i];
+      const b = entries2[j];
       if (!a || !b || a.schedule.target !== b.schedule.target || a.rank === null || a.rank !== b.rank)
         continue;
       const shared = [...a.owners].filter((id) => b.owners.has(id));
@@ -9576,11 +9576,11 @@ var IDIOMS = [
   ["give", "up"],
   ["give", "it", "a", "try"]
 ];
-function tokenize2(text) {
+function tokenize2(text3) {
   const out = [];
   let clause = 0;
   let sentence = 0;
-  for (const m of text.toLowerCase().replace(/[\u2018\u2019]/g, "'").matchAll(/[a-z0-9]+(?:'[a-z]+)*|[.!?;:,]/g)) {
+  for (const m of text3.toLowerCase().replace(/[\u2018\u2019]/g, "'").matchAll(/[a-z0-9]+(?:'[a-z]+)*|[.!?;:,]/g)) {
     const word = m[0];
     if (/^[.!?;]$/.test(word)) {
       sentence++;
@@ -9638,7 +9638,7 @@ function playerActs(tokens, start, names) {
     return false;
   return playerSubject(lead, names);
 }
-function phraseAt(tokens, phrase, acts) {
+function phraseAt(tokens, phrase, acts2) {
   for (let start = 0;start < tokens.length; start++) {
     if (tokens[start] !== phrase[0])
       continue;
@@ -9654,31 +9654,31 @@ function phraseAt(tokens, phrase, acts) {
         break;
       at++;
     }
-    if (k === phrase.length && acts(start))
+    if (k === phrase.length && acts2(start))
       return { end: at, skipped };
   }
   return null;
 }
-function typedIntent(reg, world, state, text) {
-  const said = tokenize2(text);
+function typedIntent(reg, world, state, text3) {
+  const said = tokenize2(text3);
   const tokens = said.map((t) => t.word);
   const actions = new Map;
   for (const [id, a] of reg.actions)
     actions.set(id, a);
   for (const [id, a] of Object.entries(world.actions))
     actions.set(id, a);
-  const named = new Set(words2(text));
+  const named = new Set(words2(text3));
   const pov = world.pov;
   const people = new Set;
   for (const [id, e] of Object.entries(state.entities))
     if (id !== pov && kindIs(reg, world, e.kind, "person") && !isGone(state, id))
       for (const w of words2(e.name))
         people.add(w);
-  const acts = (start) => playerActs(said, start, people);
+  const acts2 = (start) => playerActs(said, start, people);
   const ctx = reg.context(world, state);
   const fits = optionalQuery(ctx, "combat.offers");
   let best = null;
-  const numbers = [...text.matchAll(/\d+(?:\.\d+)?/g)].map((m) => Number(m[0]));
+  const numbers = [...text3.matchAll(/\d+(?:\.\d+)?/g)].map((m) => Number(m[0]));
   for (const action of actions.values()) {
     if (!offersAction(world, action) || fits?.(ctx, action) === false)
       continue;
@@ -9686,7 +9686,7 @@ function typedIntent(reg, world, state, text) {
       const phrase = raw.trim().toLowerCase();
       if (phrase.length <= 2)
         continue;
-      const at = phraseAt(tokens, tokenize2(phrase).map((t) => t.word), acts);
+      const at = phraseAt(tokens, tokenize2(phrase).map((t) => t.word), acts2);
       if (!at)
         continue;
       const rest = words2(tokens.slice(at.end).join(" ")).join(" ");
@@ -9696,7 +9696,7 @@ function typedIntent(reg, world, state, text) {
       const ordered = Object.entries(action.params).sort(([, a], [, b]) => Number(a.optional === true) - Number(b.optional === true));
       for (const [name, def] of ordered) {
         if (def.type === "ref") {
-          const pool = def.ref === "place" ? Object.values(world.places).filter((p) => canSeePlace(reg, world, state, pov, p.id)) : Object.entries(state.entities).filter(([id, e]) => id !== pov && canSeeEntity(reg, world, state, pov, id) && (!def.ref || kindIs(reg, world, e.kind, def.ref)) && (!def.of || selectorMatches(reg, world, state, def.of, id))).map(([id, e]) => ({ id, name: e.name }));
+          const pool = def.ref === "place" ? Object.values(world.places).filter((p) => canSeePlace(reg, world, state, pov, p.id)) : Object.entries(state.entities).filter(([id2, e]) => id2 !== pov && canSeeEntity(reg, world, state, pov, id2) && (!def.ref || kindIs(reg, world, e.kind, def.ref)) && (!def.of || selectorMatches(reg, world, state, def.of, id2))).map(([id2, e]) => ({ id: id2, name: e.name }));
           const id = byName(named, pool);
           if (id)
             params[name] = id;
@@ -9785,9 +9785,9 @@ function lintWorld(world, registry) {
     issues.push(...rule.check(world, registry));
   return issues;
 }
-function applyAll(registry, world, state, events) {
+function applyAll(registry, world, state, events2) {
   const dropped = [];
-  for (const e of events) {
+  for (const e of events2) {
     const ctx = registry.context(world, state);
     const rejection = validateEvent(registry, e, ctx);
     if (rejection) {
@@ -9804,28 +9804,28 @@ function playtestStart(registry, world, revision) {
 function playtestTurn(registry, pipeline, world, state, user, runSeed, index) {
   const next = structuredClone(state);
   const intent = typedIntent(registry, world, next, user);
-  const plan = pipeline.plan({ registry, world, state: next, runSeed, seed: `${runSeed}:playtest:${index}`, kind: "normal", userTexts: [user], intent });
-  const notes = applyAll(registry, world, next, plan.events);
-  const post = pipeline.post({ registry, world, state: next, runSeed, seed: `${runSeed}:playtest:${index}:post`, appliedMinutes: plan.elapsedMinutes, extracted: [] });
+  const plan2 = pipeline.plan({ registry, world, state: next, runSeed, seed: `${runSeed}:playtest:${index}`, kind: "normal", userTexts: [user], intent });
+  const notes = applyAll(registry, world, next, plan2.events);
+  const post = pipeline.post({ registry, world, state: next, runSeed, seed: `${runSeed}:playtest:${index}:post`, appliedMinutes: plan2.elapsedMinutes, extracted: [] });
   notes.push(...applyAll(registry, world, next, post));
-  const lines = playerLines(registry, world, next, world.pov, [...plan.events, ...post], 40);
+  const lines = playerLines(registry, world, next, world.pov, [...plan2.events, ...post], 40);
   const action = intent?.action ? [`read as ${registry.actions.get(intent.action)?.label ?? world.actions[intent.action]?.label ?? intent.action}`] : ["not an action"];
   return { turn: { user, reply: lines.length > 0 ? lines.join(`
-`) : "(nothing changed)", notes: [`+${plan.elapsedMinutes} min`, ...action, ...notes] }, state: next };
+`) : "(nothing changed)", notes: [`+${plan2.elapsedMinutes} min`, ...action, ...notes] }, state: next };
 }
 var CHECK_DAY_MINUTES = 24 * 60;
 function checkWorldDay(registry, pipeline, world, state, runSeed, day, intent) {
   const next = structuredClone(state);
   const label = `Day ${day + 1}`;
   const notes = [];
-  let events = [];
+  let events2 = [];
   try {
-    const plan = pipeline.plan({ registry, world, state: next, runSeed, seed: `${runSeed}:check:${day}`, kind: "normal", userTexts: [`(Timelapse: ${label})`], intent });
-    notes.push(...applyAll(registry, world, next, plan.events));
-    const post = pipeline.post({ registry, world, state: next, runSeed, seed: `${runSeed}:check:${day}:post`, appliedMinutes: plan.elapsedMinutes, extracted: [] });
+    const plan2 = pipeline.plan({ registry, world, state: next, runSeed, seed: `${runSeed}:check:${day}`, kind: "normal", userTexts: [`(Timelapse: ${label})`], intent });
+    notes.push(...applyAll(registry, world, next, plan2.events));
+    const post = pipeline.post({ registry, world, state: next, runSeed, seed: `${runSeed}:check:${day}:post`, appliedMinutes: plan2.elapsedMinutes, extracted: [] });
     notes.push(...applyAll(registry, world, next, post));
-    events = [...plan.events, ...post];
-    notes.unshift(`+${plan.elapsedMinutes} min, ${events.length} events`);
+    events2 = [...plan2.events, ...post];
+    notes.unshift(`+${plan2.elapsedMinutes} min, ${events2.length} events`);
   } catch (error) {
     notes.push(`failed: ${error instanceof Error ? error.message : String(error)}`);
     return { turn: { user: label, reply: "(the simulation failed)", notes }, state };
@@ -9834,23 +9834,23 @@ function checkWorldDay(registry, pipeline, world, state, runSeed, day, intent) {
   const ctx = registry.context(world, next);
   for (const r of registry.renderers) {
     try {
-      for (const line of r.render(ctx))
-        for (const leak of findLeaks(line, secrets))
+      for (const line2 of r.render(ctx))
+        for (const leak of findLeaks(line2, secrets))
           notes.push(`leak in ${r.slot}: "${leak}"`);
     } catch (error) {
       notes.push(`section ${r.slot} failed: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
-  const lines = authorLines(registry, world, next, events, 40);
+  const lines = authorLines(registry, world, next, events2, 40);
   return { turn: { user: label, reply: lines.length > 0 ? lines.join(`
 `) : "(nothing happened)", notes }, state: next };
 }
 
 // src/engine/beats.ts
 var MAX_BEATS = 6;
-function storylets(events) {
+function storylets(events2) {
   const out = [];
-  for (const e of events) {
+  for (const e of events2) {
     if (e.type !== ENGINE_EVENTS.beat)
       continue;
     const d = asObject("data" in e ? e.data : undefined);
@@ -10069,10 +10069,10 @@ function cascade(reg, w, roots, opts) {
     w.apply({ type: ENGINE_EVENTS.note, data: { text: `Rule cascade stopped at its cap of ${cap}.`, visibility: "secret" } });
   return firings;
 }
-function runRulesOnEvents(reg, w, events, opts) {
+function runRulesOnEvents(reg, w, events2, opts) {
   const rules = allRules(reg, w.world);
   const roots = [];
-  for (const e of events)
+  for (const e of events2)
     for (const r of rules)
       if (matchesEvent(w, r, e))
         roots.push({ rule: r, depth: 0, self: eventSubject(e), vars: { event: eventVars(e) } });
@@ -10107,7 +10107,7 @@ function trackEnv(reg, w, track, trackId) {
   const env0 = scopeEnv({ reg, ctx: w.ctx, bindings: track.owner ? { self: track.owner, owner: track.owner } : {} });
   const objectives = def?.objectives ?? [];
   const done = objectives.filter((o) => truthy2(evalExpr(objectiveWhen(o), env0, false))).length;
-  const slice = readEngineSlice(w.state);
+  const slice2 = readEngineSlice(w.state);
   return scopeEnv({
     reg,
     ctx: w.ctx,
@@ -10117,7 +10117,7 @@ function trackEnv(reg, w, track, trackId) {
         id: trackId,
         stage,
         since: w.state.clock - (own(w.state.tracks, trackId)?.since ?? 0),
-        attempts: own(slice.attempts, trackId) ?? 0,
+        attempts: own(slice2.attempts, trackId) ?? 0,
         objectives: objectives.length,
         done,
         complete: done === objectives.length
@@ -10140,8 +10140,8 @@ function enter(reg, w, trackId, track, from, to, via, seed) {
   if (entering?.truth)
     w.apply({ type: ENGINE_EVENTS.revealed, data: { track: trackId, stage: to } });
   if (track.kind === "quest") {
-    const text = entering?.cue ?? `${track.label}: ${entering?.label ?? to}`;
-    w.apply({ type: ENGINE_EVENTS.signal, data: { class: "quest", text, visibility: track.visibility } });
+    const text3 = entering?.cue ?? `${track.label}: ${entering?.label ?? to}`;
+    w.apply({ type: ENGINE_EVENTS.signal, data: { class: "quest", text: text3, visibility: track.visibility } });
   }
   return { track: trackId, from, to, via, events: w.events.slice(start) };
 }
@@ -10163,31 +10163,31 @@ function stepTracks(reg, w, seed) {
       if (!def)
         break;
       const env = trackEnv(reg, w, track, trackId);
-      let change = null;
+      let change2 = null;
       const solvedHere = track.kind === "puzzle" && def.answer !== undefined && own(readEngineSlice(w.state).solved, trackId) === stage;
       if (def.fail && truthy2(evalExpr(def.fail.when, env, false)))
-        change = enter(reg, w, trackId, track, stage, def.fail.to, "fail", seed);
+        change2 = enter(reg, w, trackId, track, stage, def.fail.to, "fail", seed);
       else if (solvedHere && def.next[0] && gateOpen(reg, w, track, trackId, def.next[0].to))
-        change = enter(reg, w, trackId, track, stage, def.next[0].to, "answer", seed);
+        change2 = enter(reg, w, trackId, track, stage, def.next[0].to, "answer", seed);
       else {
         for (const n of def.next) {
           if (!truthy2(evalExpr(n.when, env, false)))
             continue;
           if (!gateOpen(reg, w, track, trackId, n.to))
             continue;
-          change = enter(reg, w, trackId, track, stage, n.to, "next", seed);
+          change2 = enter(reg, w, trackId, track, stage, n.to, "next", seed);
           break;
         }
       }
-      if (!change)
+      if (!change2)
         break;
-      changes.push(change);
+      changes.push(change2);
     }
   }
   return changes;
 }
-function normalizeAnswer(text) {
-  return text.normalize("NFKD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9\s]/g, " ").replace(/\s+/g, " ").trim().replace(/^(the|a|an) /, "");
+function normalizeAnswer(text3) {
+  return text3.normalize("NFKD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9\s]/g, " ").replace(/\s+/g, " ").trim().replace(/^(the|a|an) /, "");
 }
 function checkAnswer(world, state, trackId, answer, decision) {
   const none = { correct: false, via: null, needsDecision: false, event: null };
@@ -10272,8 +10272,8 @@ function stepAgent(reg, w, agent, slot, runSeed, povRoutine, timelapse) {
 }
 function emitter(reg, w, seed, rules) {
   return {
-    emit(events) {
-      const applied = w.applyAll(events);
+    emit(events2) {
+      const applied = w.applyAll(events2);
       if (applied.length > 0)
         rules.push(...runRulesOnEvents(reg, w, applied, { seed }));
     }
@@ -10403,7 +10403,7 @@ function advance(reg, w, to, opts) {
       break;
     }
     const mark = opened ? opened.mark : timelapse && result.slots + spent.slots > 0 ? w.mark() : null;
-    const held = mark && !opened ? new Map(cursors) : null;
+    const held2 = mark && !opened ? new Map(cursors) : null;
     const before = opened ? opened.since : w.events.length;
     const rulesBefore = result.rules.length;
     const tracksBefore = result.tracks.length;
@@ -10425,7 +10425,7 @@ function advance(reg, w, to, opts) {
     result.tracks.push(...stepTracks(reg, w, tickSeed));
     if (mark && spent.events + w.events.length - startEvents > cap.events) {
       w.restore(mark);
-      cursors = held ?? new Map;
+      cursors = held2 ?? new Map;
       result.rules.length = rulesBefore;
       result.tracks.length = tracksBefore;
       result.stop = "cap";
@@ -10485,11 +10485,11 @@ function advance(reg, w, to, opts) {
 function catchUp(reg, w, opts) {
   const cal = calendarOf(w.world);
   const done = completedSlot(w.world, w.state);
-  const all = lod1Agents(w.world, w.state).filter((a) => a !== w.world.pov);
-  const slice = readEngineSlice(w.state);
-  const onScreen = (opts.onScreen ?? []).filter((a) => all.includes(a)).sort();
-  const queue = all.filter((a) => !onScreen.includes(a));
-  const rr = queue.length > 0 ? slice.rr % queue.length : 0;
+  const all2 = lod1Agents(w.world, w.state).filter((a) => a !== w.world.pov);
+  const slice2 = readEngineSlice(w.state);
+  const onScreen = (opts.onScreen ?? []).filter((a) => all2.includes(a)).sort();
+  const queue = all2.filter((a) => !onScreen.includes(a));
+  const rr = queue.length > 0 ? slice2.rr % queue.length : 0;
   const rotated = [...queue.slice(rr), ...queue.slice(0, rr)];
   const order = [...onScreen, ...rotated];
   const slotLen = MINUTES_PER_DAY / cal.partStarts.length;
@@ -10528,11 +10528,11 @@ function catchUp(reg, w, opts) {
 var FIELD_TRANSPARENT = new Set(["clock", "post", "timelapse", ENGINE_EVENTS.signal, ENGINE_EVENTS.note, ENGINE_EVENTS.beat, ENGINE_EVENTS.cursor, ENGINE_EVENTS.choice, ENGINE_EVENTS.caught, ENGINE_EVENTS.fired]);
 var CLOCK_TRANSPARENT = new Set(["set", "add", "post", ENGINE_EVENTS.signal, ENGINE_EVENTS.note, ENGINE_EVENTS.beat, ENGINE_EVENTS.cursor, ENGINE_EVENTS.choice, ENGINE_EVENTS.caught]);
 var COLLAPSED_SIGNALS = new Set(["arrival", "needs", "weather", "overdue", "invitation"]);
-function coarsenRuns(events) {
+function coarsenRuns(events2) {
   const out = [];
   let keys = new Map;
   let lastClock = null;
-  for (const ev of events) {
+  for (const ev of events2) {
     if (ev.type === "set" || ev.type === "add") {
       const key = `${ev.entity}\x00${ev.field}`;
       const slot = keys.get(key) ?? {};
@@ -10615,8 +10615,8 @@ function collapseField(start, group) {
 function creditOnly(e) {
   return e.type === "post" && e.lines.every((l) => l.account.startsWith(EXTERNAL_ACCOUNT_PREFIX) || l.amount >= 0);
 }
-function collapse(reg, start, events) {
-  const keys = events.map((e) => groupKey(reg, e));
+function collapse(reg, start, events2) {
+  const keys = events2.map((e) => groupKey(reg, e));
   const first = new Map;
   const last = new Map;
   const members = new Map;
@@ -10627,13 +10627,13 @@ function collapse(reg, start, events) {
       first.set(k, i);
     last.set(k, i);
     const list = members.get(k) ?? [];
-    const ev = events[i];
+    const ev = events2[i];
     if (ev)
       list.push(ev);
     members.set(k, list);
   });
   const out = [];
-  events.forEach((e, i) => {
+  events2.forEach((e, i) => {
     const k = keys[i];
     if (k === null || k === undefined) {
       out.push(e);
@@ -10667,29 +10667,29 @@ function collapse(reg, start, events) {
   }
   return merged.filter((e) => !(e.type === "add" && e.delta === 0) && !(e.type === "clock" && e.minutes === 0));
 }
-function foldOf(reg, world, start, events) {
+function foldOf(reg, world, start, events2) {
   const w = new Working(reg, world, start);
-  const applied = w.applyAll(events);
-  return applied.length === events.length ? w.state : null;
+  const applied = w.applyAll(events2);
+  return applied.length === events2.length ? w.state : null;
 }
-function coarsen(reg, world, start, events) {
-  const full = foldOf(reg, world, start, events);
+function coarsen(reg, world, start, events2) {
+  const full = foldOf(reg, world, start, events2);
   if (full === null)
-    return [...events];
+    return [...events2];
   const worldOnly = (s) => {
     const copy = unobserved(s);
     dropTouches(copy);
     return hashJson(copy);
   };
   const expected = worldOnly(full);
-  for (const candidate of [collapse(reg, start, events), coarsenRuns(events)]) {
+  for (const candidate of [collapse(reg, start, events2), coarsenRuns(events2)]) {
     const coarse = foldOf(reg, world, start, candidate);
     if (coarse === null || worldOnly(coarse) !== expected)
       continue;
     const lost = lostObservations(full, coarse);
     return lost ? [...candidate, { type: ENGINE_EVENTS.observed, data: lost }] : candidate;
   }
-  return [...events];
+  return [...events2];
 }
 
 // src/engine/time.ts
@@ -10749,24 +10749,24 @@ function parseTarget(v) {
   if (!isRecord(v))
     return null;
   const t = v;
-  const str = (k) => typeof t[k] === "string" && t[k] !== "" ? t[k] : null;
-  const num = (k) => typeof t[k] === "number" && Number.isFinite(t[k]) ? t[k] : null;
+  const str3 = (k) => typeof t[k] === "string" && t[k] !== "" ? t[k] : null;
+  const num4 = (k) => typeof t[k] === "number" && Number.isFinite(t[k]) ? t[k] : null;
   switch (t.type) {
     case "duration": {
-      const minutes = num("minutes");
+      const minutes = num4("minutes");
       return minutes !== null && minutes > 0 ? { type: "duration", minutes } : null;
     }
     case "day_part": {
-      const dayPart = str("dayPart");
+      const dayPart = str3("dayPart");
       return dayPart ? { type: "day_part", dayPart } : null;
     }
     case "at": {
-      const at = num("at");
+      const at = num4("at");
       return at !== null ? { type: "at", at } : null;
     }
     case "stage": {
-      const track = str("track");
-      const stage = str("stage");
+      const track = str3("track");
+      const stage = str3("stage");
       return track && stage ? { type: "stage", track, stage } : null;
     }
     case "shift":
@@ -10877,7 +10877,7 @@ function resolveTarget(reg, world, state, target) {
 }
 var SPAN_COUNTS = { a: 1, an: 1, one: 1, next: 1, "a couple of": 2, "couple of": 2, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10, eleven: 11, twelve: 12, fifteen: 15, twenty: 20, thirty: 30, forty: 40, "forty five": 45, ninety: 90 };
 var SPAN_UNITS = { minute: 1, min: 1, hour: 60, hr: 60, day: MINUTES_PER_DAY, week: 7 * MINUTES_PER_DAY };
-var longestFirst = (words) => [...words].sort((a, b) => b.length - a.length).join("|");
+var longestFirst = (words3) => [...words3].sort((a, b) => b.length - a.length).join("|");
 var SPAN_TERM = new RegExp(` (${longestFirst(Object.keys(SPAN_COUNTS))}|\\d+(?:\\.\\d+)?)( and a half)? (${longestFirst(Object.keys(SPAN_UNITS))})s?( and a half)?(?= )`, "g");
 function parseOverrides(v) {
   const out = {};
@@ -10959,8 +10959,8 @@ class TimelapseRun {
     acc.stoppedBy = r.stoppedBy;
     return false;
   }
-  apply(events) {
-    return this.w.applyAll(events);
+  apply(events2) {
+    return this.w.applyAll(events2);
   }
   finish(stop) {
     if (stop === null)
@@ -10986,12 +10986,12 @@ function runTimelapse(reg, w, target, opts) {
   const run = TimelapseRun.start(reg, w, target, opts);
   return "code" in run ? run : run.finish(null);
 }
-function replaySkip(reg, w, target, record, opts) {
+function replaySkip(reg, w, target, record2, opts) {
   const run = TimelapseRun.start(reg, w, target, opts);
   if ("code" in run)
     return run;
-  const stopAt = record.stop?.at ?? Infinity;
-  for (const beat of record.beats) {
+  const stopAt = record2.stop?.at ?? Infinity;
+  for (const beat of record2.beats) {
     if (beat.at > stopAt)
       break;
     run.advanceTo(beat.at);
@@ -10999,10 +10999,10 @@ function replaySkip(reg, w, target, record, opts) {
       return run.finish(null);
     run.apply(beat.events);
   }
-  if (record.stop) {
-    run.advanceTo(record.stop.at);
-    if (run.clock === record.stop.at)
-      return run.finish(record.stop);
+  if (record2.stop) {
+    run.advanceTo(record2.stop.at);
+    if (run.clock === record2.stop.at)
+      return run.finish(record2.stop);
   }
   return run.finish(null);
 }
@@ -11015,14 +11015,14 @@ function speedThrough(state, activity, remainingMinutes) {
 function ownedBy(state, id, pov) {
   return id === pov || heldBy(state.entities, id, pov);
 }
-function buildMontage(reg, world, before, after, events, granularity) {
+function buildMontage(reg, world, before, after, events2, granularity) {
   const pov = world.pov;
   const cal = calendarOf(world);
   const groups = new Map;
   const money = new Map;
   const changes = new Map;
   let clock = before.clock;
-  for (const e of events) {
+  for (const e of events2) {
     if (e.type === "clock") {
       clock += e.minutes;
       continue;
@@ -11049,23 +11049,23 @@ function buildMontage(reg, world, before, after, events, granularity) {
       changes.set(key, c);
       continue;
     }
-    let line = null;
+    let line2 = null;
     const s = "data" in e ? signalOf(e) : null;
     if (s) {
       const policy = own(after.time.interrupts, s.class);
       if (policy !== "ignore" && playerEventVisible(reg, world, after, pov, e))
-        line = s.text;
+        line2 = s.text;
     } else if (e.type === ENGINE_EVENTS.note && playerEventVisible(reg, world, after, pov, e)) {
       const t = e.data.text;
-      line = typeof t === "string" ? t : null;
+      line2 = typeof t === "string" ? t : null;
     }
-    if (!line)
+    if (!line2)
       continue;
     const d = dateAt(cal, clock);
     const day = (at) => formatClock(cal, at).split(",")[0] ?? "";
     const label = granularity === "key" ? day(before.clock) === day(after.clock) ? day(before.clock) : `${day(before.clock)} \u2013 ${day(after.clock)}` : granularity === "day" ? day(clock) : `Week of ${day(clock - (d.weekday + 6) % 7 * MINUTES_PER_DAY)}`;
     const list = groups.get(label) ?? [];
-    list.push(line);
+    list.push(line2);
     groups.set(label, list);
   }
   const bands = [];
@@ -11230,12 +11230,12 @@ function planTurn(input) {
     chips.push(timelapse.chip);
   if (w.state.clock > from)
     catchUp(reg, w, { runSeed: input.runSeed, agents: AGENTS_PER_TURN, onScreen: onScreen(w), agentDays: TURN_AGENT_DAYS });
-  const events = timelapse ? coarsen(reg, w.world, input.state, w.events) : [...w.events];
-  const montage = timelapse ? buildMontage(reg, w.world, input.state, w.state, events, w.state.time.montage) : null;
+  const events2 = timelapse ? coarsen(reg, w.world, input.state, w.events) : [...w.events];
+  const montage = timelapse ? buildMontage(reg, w.world, input.state, w.state, events2, w.state.time.montage) : null;
   if (timelapse && montage)
     timelapse = { ...timelapse, montage };
   return {
-    events,
+    events: events2,
     elapsedMinutes: w.state.clock - from,
     resolutions,
     stopped,
@@ -11740,7 +11740,7 @@ function scopeView(world, scope, filter, opts) {
       routes.set(key, out);
     }
   }
-  let shown;
+  let shown2;
   if (grid && opts.level >= 2) {
     const cells = opts.cells;
     const unshown = (i) => cells !== undefined && (cells.blank.has(i) || cells.void.has(i));
@@ -11748,7 +11748,7 @@ function scopeView(world, scope, filter, opts) {
     for (const id of kids)
       if (own(grid.zones, id))
         areas[filter.shown(id)] = (own(grid.zones, id) ?? []).filter((i) => !unshown(i));
-    shown = {
+    shown2 = {
       width: grid.width,
       height: grid.height,
       ...grid.cellMeters !== undefined ? { cellMeters: grid.cellMeters } : {},
@@ -11765,7 +11765,7 @@ function scopeView(world, scope, filter, opts) {
     name: scope === null ? WORLD_SCOPE_NAME : shownName(world, filter, scope),
     trail: opts.trail,
     frame,
-    ...shown ? { grid: shown } : {},
+    ...shown2 ? { grid: shown2 } : {},
     places,
     routes: [...routes.values()]
   };
@@ -11973,13 +11973,13 @@ function buildEdges(world, mode, closed) {
   }
   const connector = mode === "walk" ? { minutes: SIBLING_WALK_MINUTES, distanceKm: 0.3 } : { minutes: 1, distanceKm: 0 };
   const ancestors = (place) => {
-    const out = new Set;
+    const out2 = new Set;
     let cur = own(world.places, place)?.parent;
     for (let guard = 0;cur && guard < 64; guard++) {
-      out.add(cur);
+      out2.add(cur);
       cur = own(world.places, cur)?.parent;
     }
-    return out;
+    return out2;
   };
   const byParent = new Map;
   for (const p of Object.values(world.places)) {
@@ -12058,13 +12058,13 @@ function findRoute(world, from, to, mode, opts = {}) {
   const end = ends[0] ?? null;
   if (end === null)
     return null;
-  const plain = (node) => node.endsWith(EXIT) ? node.slice(0, -EXIT.length) : node;
+  const plain2 = (node) => node.endsWith(EXIT) ? node.slice(0, -EXIT.length) : node;
   const legs = [];
   for (let cur = end;cur !== from; ) {
     const p = prev.get(cur);
     if (!p)
       return null;
-    legs.unshift({ from: plain(p.from), to: plain(cur), minutes: Math.round(cost(p.leg)), distanceKm: p.leg.distanceKm ?? 0, terrain: p.leg.terrain ?? null });
+    legs.unshift({ from: plain2(p.from), to: plain2(cur), minutes: Math.round(cost(p.leg)), distanceKm: p.leg.distanceKm ?? 0, terrain: p.leg.terrain ?? null });
     cur = p.from;
   }
   return { mode, legs, minutes: legs.reduce((a, l) => a + l.minutes, 0), distanceKm: legs.reduce((a, l) => a + l.distanceKm, 0) };
@@ -12096,8 +12096,8 @@ class Frontier {
       let least = i;
       for (const k of [2 * i + 1, 2 * i + 2]) {
         const child = heap[k];
-        const held = heap[least];
-        if (child && held && Frontier.before(child, held))
+        const held2 = heap[least];
+        if (child && held2 && Frontier.before(child, held2))
           least = k;
       }
       if (least === i || !this.swapIfBefore(least, i))
@@ -12170,10 +12170,10 @@ function itemsOn(ctx, scope, grid, cells, sight, here) {
   }
   return out;
 }
-function cellsShown(ctx, grid, display, seen, unvisited) {
+function cellsShown(ctx, grid, display2, seen, unvisited) {
   const voided = hiddenCells(ctx, grid);
   const blank = new Set;
-  if (display !== "fog")
+  if (display2 !== "fog")
     return { blank, void: voided };
   const size = grid.width * grid.height;
   if (seen !== undefined) {
@@ -12191,11 +12191,11 @@ function cellsShown(ctx, grid, display, seen, unvisited) {
             blank.add(cell);
       }
   }
-  const shown = [];
+  const shown2 = [];
   for (let i = 0;i < size; i++)
     if (!blank.has(i) && !voided.has(i))
-      shown.push(i);
-  return { blank, void: voided, seen: addCells("", shown) };
+      shown2.push(i);
+  return { blank, void: voided, seen: addCells("", shown2) };
 }
 function standIn(world, n) {
   let id = `~${n}`;
@@ -12207,7 +12207,7 @@ function buildMapView(ctx, chosen = null) {
   const { world, state } = ctx;
   const level = ctx.levelOf(world.pov, "space");
   const settings = mapSettingsOf(world);
-  const display = chosen ?? settings.display;
+  const display2 = chosen ?? settings.display;
   const here = placeOfEntity(state, world.pov);
   const path = placePath(world, here);
   const inside = new Set(path);
@@ -12249,7 +12249,7 @@ function buildMapView(ctx, chosen = null) {
     }
     const seen = settings.grid.movement ? cellsSeen(state, id, grid.width) ?? "" : undefined;
     const unvisited = (children.get(id) ?? []).filter((p) => filter.drawn(p) && filter.known(p) && !filter.visited(p) && !inside.has(p));
-    const cells = cellsShown(ctx, grid, display, seen, unvisited);
+    const cells = cellsShown(ctx, grid, display2, seen, unvisited);
     const inSight = settings.grid.movement ? stand?.scope === id ? sight : new Set : null;
     scopes.push(scopeView(world, id, filter, { level, trail: trail(id), children, cells, items: itemsOn(ctx, id, grid, cells, inSight, here), ...pov && stand?.scope === id ? { pov } : {}, ...cells.seen !== undefined ? { seen: cells.seen } : {} }));
   }
@@ -12261,9 +12261,9 @@ function buildMapView(ctx, chosen = null) {
     for (const id of targets) {
       if (id === here)
         continue;
-      const plan = routeAt(ctx, here, id, "walk");
+      const plan2 = routeAt(ctx, here, id, "walk");
       const name = own(world.places, id)?.name ?? id;
-      travel.push({ to: id, label: `Walk to ${name}`, mode: "walk", minutes: plan?.minutes ?? 0, action: "go", params: { to: id }, ...plan ? {} : { disabled: "no walking route" } });
+      travel.push({ to: id, label: `Walk to ${name}`, mode: "walk", minutes: plan2?.minutes ?? 0, action: "go", params: { to: id }, ...plan2 ? {} : { disabled: "no walking route" } });
     }
     const vehicles = optionalQuery(ctx, "vehicles.travel_options");
     if (vehicles) {
@@ -12272,7 +12272,7 @@ function buildMapView(ctx, chosen = null) {
           travel.push(o);
     }
   }
-  return { level, here: here === null ? null : filter.shown(here), path: path.map(filter.shown), scope: shownScope === null || scopes.some((s) => s.id === shownScope) ? shownScope : null, display, movement: settings.grid.movement, scopes, travel };
+  return { level, here: here === null ? null : filter.shown(here), path: path.map(filter.shown), scope: shownScope === null || scopes.some((s) => s.id === shownScope) ? shownScope : null, display: display2, movement: settings.grid.movement, scopes, travel };
 }
 
 // src/packs/space/core/index.ts
@@ -12389,15 +12389,15 @@ var travel = (ctx, entity, to, mode) => {
   if (!own(ctx.world.places, to))
     return { code: "missing_place", reason: `no place ${labelOf(ctx, to)}` };
   const from = placeOfEntity(ctx.state, entity);
-  const plan = from ? routeAt(ctx, from, to, mode) : nominalRoute(ctx, to, to, mode);
-  if (!plan)
+  const plan2 = from ? routeAt(ctx, from, to, mode) : nominalRoute(ctx, to, to, mode);
+  if (!plan2)
     return { code: "no_route", reason: `no ${mode} route to ${labelOf(ctx, to)}` };
-  const events = [];
+  const events2 = [];
   for (const r of e.relations)
     if (r.type === "in")
-      events.push({ type: "unlink", rel: "in", from: entity, to: r.to });
-  events.push({ type: "set", entity, field: "place", value: to });
-  return { plan, events };
+      events2.push({ type: "unlink", rel: "in", from: entity, to: r.to });
+  events2.push({ type: "set", entity, field: "place", value: to });
+  return { plan: plan2, events: events2 };
 };
 var spacePack = {
   id: "space",
@@ -12457,13 +12457,13 @@ var spacePack = {
         sliceRecord(state, "space", "routes")[strOf(e.data.route)] = e.data.open === true;
       },
       describe: (e, ctx, viewer) => {
-        const r = own(ctx.world.routes, strOf(e.data.route));
+        const r2 = own(ctx.world.routes, strOf(e.data.route));
         const verb = e.data.open === true ? "opens" : "closes";
-        if (!r)
+        if (!r2)
           return `A route ${verb}`;
-        const shown = (id) => viewer === undefined || canSeePlace(ctx.registry, ctx.world, ctx.state, viewer, id);
-        const end = (id) => shown(id) ? own(ctx.world.places, id)?.name ?? id : "somewhere";
-        return shown(r.from) || shown(r.to) ? `The way from ${end(r.from)} to ${end(r.to)} ${verb}` : `A way ${verb}`;
+        const shown2 = (id) => viewer === undefined || canSeePlace(ctx.registry, ctx.world, ctx.state, viewer, id);
+        const end = (id) => shown2(id) ? own(ctx.world.places, id)?.name ?? id : "somewhere";
+        return shown2(r2.from) || shown2(r2.to) ? `The way from ${end(r2.from)} to ${end(r2.to)} ${verb}` : `A way ${verb}`;
       }
     });
     r.effect({ type: "space.set_route", args: ["route", "open?"], resolve: (a) => [{ type: "space.route", data: { route: strOf(a.route), open: a.open !== false } }] });
@@ -12525,9 +12525,9 @@ var spacePack = {
           for (const id of Object.keys(ctx.world.places).sort()) {
             if (id === here || !canSeePlace(ctx.registry, ctx.world, ctx.state, ctx.world.pov, id))
               continue;
-            const plan = routeAt(ctx, here, id, "walk");
-            if (plan && plan.legs.length === 1)
-              exits.push(`${own(ctx.world.places, id)?.name ?? id} ${plan.minutes} min on foot`);
+            const plan2 = routeAt(ctx, here, id, "walk");
+            if (plan2 && plan2.legs.length === 1)
+              exits.push(`${own(ctx.world.places, id)?.name ?? id} ${plan2.minutes} min on foot`);
           }
           if (exits.length > 0)
             lines.push(`Nearby: ${exits.slice(0, 6).join("; ")}.`);
@@ -12642,12 +12642,12 @@ function monthOf(world, clock) {
   const d = dateAt(calendarOf(world), clock);
   return `${String(d.year).padStart(4, "0")}-${String(d.month).padStart(2, "0")}`;
 }
-function addToBooks(state, business, month, entries) {
+function addToBooks(state, business, month, entries2) {
   const books = sliceRecord(state, "economy", "books");
   const cur = objOf(own(objOf(own(books, business)), month));
   const next = { ...cur };
   for (const k of BOOK_KEYS) {
-    const v = entries[k];
+    const v = entries2[k];
     if (typeof v === "number" && v !== 0)
       next[k] = numOf(cur[k]) + v;
   }
@@ -12669,9 +12669,9 @@ function payablesOf(state, business) {
   return { sales_tax: numOf(p.sales_tax), suppliers: numOf(p.suppliers) };
 }
 function addToPayables(state, business, delta) {
-  const all = sliceRecord(state, "economy", "payables");
+  const all2 = sliceRecord(state, "economy", "payables");
   const cur = payablesOf(state, business);
-  all[business] = { sales_tax: cur.sales_tax + (delta.sales_tax ?? 0), suppliers: cur.suppliers + (delta.suppliers ?? 0) };
+  all2[business] = { sales_tax: cur.sales_tax + (delta.sales_tax ?? 0), suppliers: cur.suppliers + (delta.suppliers ?? 0) };
 }
 function monthsBetween(world, from, to) {
   const out = [];
@@ -12789,11 +12789,11 @@ function seenIn(books, viewer, id) {
     return viewer === null || canSeePlace(books.registry, books.world, books.state, viewer, id);
   return own(books.world.tracks, id) ? false : undefined;
 }
-function wordsFor(books, viewer, words, unseen) {
-  const id = words.trim().replace(/ +/g, "_");
+function wordsFor(books, viewer, words3, unseen) {
+  const id = words3.trim().replace(/ +/g, "_");
   const seen = seenIn(books, viewer, id);
   if (seen === undefined)
-    return words.replace(/_/g, " ").trim();
+    return words3.replace(/_/g, " ").trim();
   const entity = own(books.state.entities, id);
   if (!seen)
     return entity ? "someone" : unseen;
@@ -12917,10 +12917,10 @@ function classDefaults(books, cls) {
   const mortgage = objOf(loans.mortgage);
   const minimum = objOf(objOf(card.minimum_payment).default);
   const lateFees = objOf(card.late_fee_cents);
-  const advance = objOf(card.cash_advance_fee);
+  const advance2 = objOf(card.cash_advance_fee);
   const cardMinimum = { pct: numOf(minimum.principal_pct, 1), floor: numOf(minimum.floor_cents, 3500), plus_interest: minimum.includes_interest_and_fees !== false };
   const noFees = { annual: 0, late_first: 0, late_repeat: 0, overdraft: 0, nsf: 0, atm: 0, cash_advance_pct: 0, cash_advance_min: 0, maintenance: 0, maintenance_waive: 0, card_replacement: 0 };
-  const creditFees = { ...noFees, late_first: numOf(lateFees.first, 3200), late_repeat: numOf(lateFees.repeat, 4300), nsf: typical(card.returned_payment_fee_cents, 3200), cash_advance_pct: numOf(advance.pct, 5), cash_advance_min: numOf(advance.minimum_cents, 1000) };
+  const creditFees = { ...noFees, late_first: numOf(lateFees.first, 3200), late_repeat: numOf(lateFees.repeat, 4300), nsf: typical(card.returned_payment_fee_cents, 3200), cash_advance_pct: numOf(advance2.pct, 5), cash_advance_min: numOf(advance2.minimum_cents, 1000) };
   const bankFees = {
     ...noFees,
     overdraft: typical(fees.overdraft, 2700),
@@ -12964,7 +12964,7 @@ function classDefaults(books, cls) {
     case "cd":
       return { ...base, apy_pct: typical(deposits.cd_12_month_apy_pct, 4), term_months: 12 };
     case "credit_card":
-      return { ...base, limit: typical(objOf(card.credit_limit_cents), 1e6), apr_pct: typical(card.apr_pct, 22), penalty_apr_pct: numOf(card.penalty_apr_pct, 29.99), cash_advance_apr_pct: numOf(advance.apr_pct_typical, 27), fees: creditFees };
+      return { ...base, limit: typical(objOf(card.credit_limit_cents), 1e6), apr_pct: typical(card.apr_pct, 22), penalty_apr_pct: numOf(card.penalty_apr_pct, 29.99), cash_advance_apr_pct: numOf(advance2.apr_pct_typical, 27), fees: creditFees };
     case "charge_card":
       return { ...base, minimum: { pct: 100, floor: 0, plus_interest: false }, fees: { ...creditFees, annual: numOf(objOf(card.annual_fee_cents).rewards_typical, 9500) } };
     case "line_of_credit":
@@ -12986,7 +12986,7 @@ function productOf(books, id) {
   const def = own(worldProducts(books.world), productId) ?? {};
   const base = classDefaults(books, cls);
   const f = e.fields;
-  const num = (field, fallback) => numOf(f[field], fallback);
+  const num4 = (field, fallback) => numOf(f[field], fallback);
   const fees = { ...base.fees, ...objOf(def.fees) };
   const minimum = { ...base.minimum, ...def.minimum ?? {} };
   if (typeof f.min_pct === "number")
@@ -13001,13 +13001,13 @@ function productOf(books, id) {
     class: cls,
     institution: strOf(f.institution, def.institution ?? ""),
     limit,
-    apr_pct: CLASS_TRAITS[cls].asset ? 0 : num("apr_pct", def.apr_pct ?? base.apr_pct),
-    apy_pct: CLASS_TRAITS[cls].asset ? num("apy_pct", typeof f.apr_pct === "number" ? f.apr_pct : def.apy_pct ?? base.apy_pct) : 0,
+    apr_pct: CLASS_TRAITS[cls].asset ? 0 : num4("apr_pct", def.apr_pct ?? base.apr_pct),
+    apy_pct: CLASS_TRAITS[cls].asset ? num4("apy_pct", typeof f.apr_pct === "number" ? f.apr_pct : def.apy_pct ?? base.apy_pct) : 0,
     interest: def.interest ?? base.interest,
     penalty_apr_pct: def.penalty_apr_pct ?? base.penalty_apr_pct,
     cash_advance_apr_pct: def.cash_advance_apr_pct ?? base.cash_advance_apr_pct,
-    due_days: num("due_days", def.due_days ?? base.due_days),
-    statement_day: num("statement_day", def.statement_day ?? base.statement_day),
+    due_days: num4("due_days", def.due_days ?? base.due_days),
+    statement_day: num4("statement_day", def.statement_day ?? base.statement_day),
     minimum,
     fees,
     rewards_pct: def.rewards_pct ?? base.rewards_pct,
@@ -13015,7 +13015,7 @@ function productOf(books, id) {
     daily_atm_limit: def.daily_atm_limit ?? base.daily_atm_limit,
     hold_days: def.hold_days ?? base.hold_days,
     overdraft: policy === "fee" || policy === "linked" ? policy : "decline",
-    overdraft_limit: num("overdraft_limit", def.overdraft_limit ?? base.overdraft_limit),
+    overdraft_limit: num4("overdraft_limit", def.overdraft_limit ?? base.overdraft_limit),
     term_months: typeof f.term_months === "number" ? f.term_months : def.term_months ?? base.term_months,
     secured: def.secured ?? base.secured
   };
@@ -13076,15 +13076,15 @@ function accountHolds(books) {
         const rights = rightsOf(books.state, id, party);
         if (!rights)
           continue;
-        const held = out.get(party);
-        if (held)
-          held.push({ id, rights, order });
+        const held2 = out.get(party);
+        if (held2)
+          held2.push({ id, rights, order });
         else
           out.set(party, [{ id, rights, order }]);
       }
     }
-    for (const held of out.values())
-      held.sort((a, b) => a.order - b.order || a.id.localeCompare(b.id));
+    for (const held2 of out.values())
+      held2.sort((a, b) => a.order - b.order || a.id.localeCompare(b.id));
     return out;
   });
 }
@@ -13092,7 +13092,7 @@ function accountsOf(books, party, right = "sees") {
   return (accountHolds(books).get(party) ?? []).flatMap((h) => h.rights[right] ? [h.id] : []);
 }
 function ledgerHolders(books) {
-  return new Set([...accountHolds(books)].flatMap(([party, held]) => held.some((h) => h.rights.sees) ? [party] : []));
+  return new Set([...accountHolds(books)].flatMap(([party, held2]) => held2.some((h) => h.rights.sees) ? [party] : []));
 }
 function hasLedger(books, party) {
   return accountsOf(books, party).length > 0;
@@ -13149,10 +13149,10 @@ function cashOnHolder(state, account, holder) {
 function isLost(state, id) {
   return [id, ...containersOf(state, id)].some((x) => own(state.entities, x)?.fields.lost === true);
 }
-function accountsWorth(books, party, shown) {
+function accountsWorth(books, party, shown2) {
   let total = 0;
   for (const id of accountsOf(books, party, "worth"))
-    total += (shown ? shown(id) : balance(books.state, id)) * shareOf(books.state, id, party) / 100;
+    total += (shown2 ? shown2(id) : balance(books.state, id)) * shareOf(books.state, id, party) / 100;
   return Math.round(total);
 }
 function anchorOf(state, entity) {
@@ -13398,10 +13398,10 @@ function passThroughOwners(ctx, api) {
         const share = api.shareOf(ctx.state, id, person);
         if (share <= 0)
           continue;
-        const held = out.get(person);
+        const held2 = out.get(person);
         const one = { business: id, share, selfEmployed: selfEmployedProfit(structure) };
-        if (held)
-          held.push(one);
+        if (held2)
+          held2.push(one);
         else
           out.set(person, [one]);
       }
@@ -13509,8 +13509,8 @@ var ESTIMATED_TAX = {
   validate: (e, ctx) => own(ctx.state.entities, str3(e, "party")) && Array.isArray(e.data.periods) ? null : { code: "bad_event", reason: "estimated tax needs its payer and the periods it pays" },
   apply: (e, state, ctx) => {
     const party = str3(e, "party");
-    const all = sliceRecord(state, "economy", "estimated");
-    const paid = { ...objOf(own(all, party)) };
+    const all2 = sliceRecord(state, "economy", "estimated");
+    const paid = { ...objOf(own(all2, party)) };
     let total = 0;
     for (const raw of Array.isArray(e.data.periods) ? e.data.periods : []) {
       const p = objOf(raw);
@@ -13520,7 +13520,7 @@ var ESTIMATED_TAX = {
     }
     for (const old of Object.keys(paid).sort().slice(0, Math.max(0, Object.keys(paid).length - PERIODS_KEPT)))
       delete paid[old];
-    all[party] = paid;
+    all2[party] = paid;
     if (e.data.business === true)
       addToBooks(state, party, monthOf(ctx.world, state.clock), { business_tax: total });
   },
@@ -13540,9 +13540,9 @@ function contractWork(ctx) {
       const occupation = strOf(e.fields.occupation, strOf(own(ctx.state.entities, worker)?.fields.occupation));
       if (e.fields.contractor !== true && (e.fields.contractor !== undefined || rowOf(ctx, "economy.occupations", occupation)?.self_employed !== true))
         continue;
-      const held = out.get(worker);
-      if (held)
-        held.push(occupation);
+      const held2 = out.get(worker);
+      if (held2)
+        held2.push(occupation);
       else
         out.set(worker, [occupation]);
     }
@@ -13611,8 +13611,8 @@ function registerTaxes(r) {
 // src/packs/economy/core/employment.ts
 var JOB_KIND = "job";
 var HOURS_SOURCES = ["scheduled", "attended", "contract"];
-function monthDay(text) {
-  const m = /^(\d{1,2})-(\d{1,2})$/.exec(text.trim());
+function monthDay(text3) {
+  const m = /^(\d{1,2})-(\d{1,2})$/.exec(text3.trim());
   if (!m)
     return null;
   const month = Number(m[1]);
@@ -13829,8 +13829,8 @@ function anchorBefore(cal, s, anchor, fromDay) {
     return anchor;
   const interval = Math.max(1, Math.round(s.interval ?? 1));
   if (s.every === "day" || s.every === "week") {
-    const period = interval * (s.every === "week" ? 7 : 1);
-    return anchor - Math.ceil((anchor - fromDay) / period) * period;
+    const period2 = interval * (s.every === "week" ? 7 : 1);
+    return anchor - Math.ceil((anchor - fromDay) / period2) * period2;
   }
   const d = dateAt(cal, clockAt(cal, anchor, 0));
   const day = d.month === 2 && d.day === 29 ? 28 : d.day;
@@ -13966,8 +13966,8 @@ function paycheckFor(ctx, api, job, at, from) {
   const cal = calendarOf(ctx.world);
   const payDay = dateAt(cal, at).dayIndex;
   const cutoff = job.every === "per_job" ? at : clockAt(cal, payDay, 0);
-  const record = payRecord(ctx.state, job.id);
-  const paidThrough = typeof record.through === "number" ? record.through : null;
+  const record2 = payRecord(ctx.state, job.id);
+  const paidThrough = typeof record2.through === "number" ? record2.through : null;
   const periodic = job.basis === "salary" || job.basis === "stipend";
   const first = paidThrough === null ? firstPeriodDay(ctx, api, job) : null;
   const paydays = job.every === "per_job" ? [payDay - 1, payDay] : scheduledPaydays(ctx, api, job, paidThrough !== null ? dateAt(cal, paidThrough).dayIndex : first ?? payDay, payDay);
@@ -13998,7 +13998,7 @@ function paycheckFor(ctx, api, job, at, from) {
   else if (job.basis === "per_shift")
     pay = Math.round(job.rate * work.shifts);
   const tips = job.basis === "tips" ? 0 : Math.round(job.tipsPerHour * work.minutes / 60);
-  const commission = pct(numOf(record.sales), job.basis === "commission" && job.commissionPct === 0 ? job.rate : job.commissionPct);
+  const commission = pct(numOf(record2.sales), job.basis === "commission" && job.commissionPct === 0 ? job.rate : job.commissionPct);
   const gross = pay + tips + commission;
   if (gross <= 0)
     return emptyCheck(job, since, through, work);
@@ -14040,9 +14040,9 @@ function paycheckFor(ctx, api, job, at, from) {
   const add = (account, amount) => {
     if (amount === 0)
       return;
-    const line = lines.find((l) => l.account === account);
-    if (line)
-      line.amount += amount;
+    const line2 = lines.find((l) => l.account === account);
+    if (line2)
+      line2.amount += amount;
     else
       lines.push({ account, amount });
   };
@@ -14205,17 +14205,17 @@ function today(ctx) {
   return dateAt(calendarOf(ctx.world), ctx.state.clock).dayIndex;
 }
 function payrollProblem(ctx, api, by, business, worker, splits, doing) {
-  const shown = (id) => shownLabel(ctx, ctx.world.pov, id);
+  const shown2 = (id) => shownLabel(ctx, ctx.world.pov, id);
   if (api.interestsOf(ctx, by).has(worker)) {
     if (api.shareOf(ctx.state, business, by) > 0)
       return null;
-    const what = doing === "hire" ? `put ${worker === by ? "themselves" : shown(worker)} on its payroll` : `set ${worker === by ? "their own" : `${shown(worker)}'s`} pay`;
-    return `${shown(by)} runs ${shown(business)} for others, so can't ${what}`;
+    const what = doing === "hire" ? `put ${worker === by ? "themselves" : shown2(worker)} on its payroll` : `set ${worker === by ? "their own" : `${shown2(worker)}'s`} pay`;
+    return `${shown2(by)} runs ${shown2(business)} for others, so can't ${what}`;
   }
   const deposit = api.depositAccount(ctx, worker);
   const lands = [...deposit ? [deposit] : [], ...splits.filter((s) => ownsAccount(api, ctx.state, worker, s.to)).map((s) => s.to)];
   const reached = lands.find((a) => api.landsInReach(ctx, by, a, business));
-  return reached === undefined ? null : `${shown(by)} runs ${shown(business)} for others, so can't pay ${shown(worker)} into ${shown(reached)}, which ${shown(by)} may spend`;
+  return reached === undefined ? null : `${shown2(by)} runs ${shown2(business)} for others, so can't pay ${shown2(worker)} into ${shown2(reached)}, which ${shown2(by)} may spend`;
 }
 function hire(api, args, ctx) {
   const business = strOf(args.business);
@@ -14290,10 +14290,10 @@ function jobView(ctx, api, job, viewer) {
   const now = ctx.state.clock;
   const flow = api.flows(ctx).find((f) => f.source === "job" && f.link === job.id);
   const next = flow && job.status !== "ended" ? api.occurrences(ctx, flow.schedule, now, now + 62 * MINUTES_PER_DAY, flow.start)[0] ?? null : null;
-  const record = payRecord(ctx.state, job.id);
-  const last = objOf(record.last);
-  const sheet = objOf(record.sheet);
-  const since = typeof record.through === "number" ? record.through : now - 7 * MINUTES_PER_DAY;
+  const record2 = payRecord(ctx.state, job.id);
+  const last = objOf(record2.last);
+  const sheet = objOf(record2.sheet);
+  const since = typeof record2.through === "number" ? record2.through : now - 7 * MINUTES_PER_DAY;
   const scheduled = hoursSource(ctx, job, now) === "contract" ? null : jobBlocks(ctx, job, since, now).reduce((a, b) => a + (b.end - b.start), 0);
   const money = (c) => api.money(ctx, c);
   const entity = own(ctx.state.entities, job.id);
@@ -14370,12 +14370,12 @@ function reject6(code, reason) {
 function str5(e, k) {
   return typeof e.data[k] === "string" ? e.data[k] : "";
 }
-function unit(events, extra) {
-  const all = [...events, ...extra];
-  if (all.length < 2)
-    return all;
-  const group = events.find((e) => e.group)?.group ?? `work:${hashParts(JSON.stringify(all)).slice(0, 10)}`;
-  return all.map((e) => ({ ...e, group }));
+function unit(events2, extra) {
+  const all2 = [...events2, ...extra];
+  if (all2.length < 2)
+    return all2;
+  const group = events2.find((e) => e.group)?.group ?? `work:${hashParts(JSON.stringify(all2)).slice(0, 10)}`;
+  return all2.map((e) => ({ ...e, group }));
 }
 function isBusiness(ctx, id) {
   const e = own(ctx.state.entities, id);
@@ -14436,11 +14436,11 @@ function saleTerms(ctx, api, sale) {
   if (!business)
     return tax > 0 ? { tax, taxAccount: authority } : null;
   const deposit = operatingAccount(api, ctx, business);
-  const held = deposit !== null && api.feature(ctx, business, "sales_tax") ? tax : 0;
+  const held2 = deposit !== null && api.feature(ctx, business, "sales_tax") ? tax : 0;
   const cogs = Math.round(sale.cents * (100 - marginOf(ctx.state, business)) / 100);
   const here = (j) => j.workplaces.some((w) => placeWithin(ctx.world, placeOfEntity(ctx.state, j.worker), w));
-  const extra = [{ type: "economy.sale", data: { business, cents: sale.cents, tax: held, cogs, takings: deposit ? sale.cents + held : 0, payer: sale.payer, memo: sale.item, category: sale.category } }, ...commissions(ctx, business, sale.cents, here)];
-  return { seller: business, ...deposit ? { deposit } : {}, tax, taxAccount: held > 0 && deposit ? deposit : authority, extra };
+  const extra = [{ type: "economy.sale", data: { business, cents: sale.cents, tax: held2, cogs, takings: deposit ? sale.cents + held2 : 0, payer: sale.payer, memo: sale.item, category: sale.category } }, ...commissions(ctx, business, sale.cents, here)];
+  return { seller: business, ...deposit ? { deposit } : {}, tax, taxAccount: held2 > 0 && deposit ? deposit : authority, extra };
 }
 function walkInFlow(ctx, api, business) {
   const daily = numOf(own(ctx.state.entities, business)?.fields.daily_sales);
@@ -14576,19 +14576,19 @@ function invoiceFlow(ctx, api, inv) {
 function lateInvoices(slot, ctx, api) {
   const out = [];
   const cal = calendarOf(ctx.world);
-  const today = dateAt(cal, slot.end).dayIndex;
+  const today2 = dateAt(cal, slot.end).dayIndex;
   for (const inv of allInvoices(ctx)) {
     if (inv.left <= 0 || !isBusiness(ctx, inv.business) || ctx.levelOf(inv.business, "money") < 3)
       continue;
-    const daysLate = today - dateAt(cal, inv.due).dayIndex;
+    const daysLate = today2 - dateAt(cal, inv.due).dayIndex;
     if (daysLate < 1)
       continue;
     const owed = 1 + Math.floor((daysLate - 1) / LATE_FEE_EVERY);
-    const pct = numOf(own(ctx.state.entities, inv.business)?.fields.late_fee_pct);
-    const fees = pct > 0 ? owed : inv.fees;
+    const pct2 = numOf(own(ctx.state.entities, inv.business)?.fields.late_fee_pct);
+    const fees = pct2 > 0 ? owed : inv.fees;
     if (inv.state === "late" && fees <= inv.fees)
       continue;
-    const fee = pct > 0 ? Math.round(inv.cents * pct * (fees - inv.fees) / 100) : 0;
+    const fee = pct2 > 0 ? Math.round(inv.cents * pct2 * (fees - inv.fees) / 100) : 0;
     if (inv.state !== "late")
       out.push({ type: "set", entity: inv.id, field: "state", value: "late" });
     if (fees > inv.fees)
@@ -14702,14 +14702,14 @@ function ownerDraw(ctx, api, args) {
     return paid;
   return unit(paid, [{ type: "economy.payout", data: { business, what: "draw", cents } }]);
 }
-function undistributed(api, ctx, business, from, to, pct) {
+function undistributed(api, ctx, business, from, to, pct2) {
   const cal = calendarOf(ctx.world);
   const out = {};
   for (const month of monthsBetween(ctx.world, from, to)) {
     const [y = 0, m = 1] = month.split("-").map(Number);
     const start = clockAt(cal, dayIndexOf(cal, y, m, 1), 0);
     const b = businessBooks(api, ctx, business, start, start + 1);
-    const left = Math.round(Math.max(0, b.profit) * pct / 100) - b.distributions;
+    const left = Math.round(Math.max(0, b.profit) * pct2 / 100) - b.distributions;
     if (left > 0)
       out[month] = left;
   }
@@ -14739,9 +14739,9 @@ function distribution(ctx, api, business, months) {
     const reinvest = r !== null && "reinvest" in r;
     if (!reinvest) {
       const to = r !== null && "account" in r ? r.account : api.depositAccount(ctx, o.party) ?? api.outside(o.party);
-      const line = lines.find((l) => l.account === to);
-      if (line)
-        line.amount += cents;
+      const line2 = lines.find((l) => l.account === to);
+      if (line2)
+        line2.amount += cents;
       else
         lines.push({ account: to, amount: cents });
       paid += cents;
@@ -14761,8 +14761,8 @@ function distribute(ctx, api, args) {
   if (by !== "" && !managesParty(ctx.state, business, by))
     return reject6("not_owner", `${labelOf(ctx, by)} doesn't run ${labelOf(ctx, business)}`);
   const since = numOf(own(objOf(sliceOf(ctx.state, "economy").distributed), business), monthStart(ctx, ctx.state.clock));
-  const pct = numOf(own(ctx.state.entities, business)?.fields.distribution_pct, 100);
-  const months = typeof args.cents === "number" && args.cents > 0 ? { [monthOf(ctx.world, ctx.state.clock)]: Math.round(args.cents) } : undistributed(api, ctx, business, since, ctx.state.clock + 1, pct);
+  const pct2 = numOf(own(ctx.state.entities, business)?.fields.distribution_pct, 100);
+  const months = typeof args.cents === "number" && args.cents > 0 ? { [monthOf(ctx.world, ctx.state.clock)]: Math.round(args.cents) } : undistributed(api, ctx, business, since, ctx.state.clock + 1, pct2);
   if (Object.keys(months).length === 0)
     return reject6("bad_amount", `${labelOf(ctx, business)} has no profit to distribute`);
   const d = distribution(ctx, api, business, months);
@@ -14784,7 +14784,7 @@ function distributionPeriod(ctx, every, at) {
   const cal = calendarOf(ctx.world);
   const d = dateAt(cal, at);
   const months = every === "year" ? 12 : every === "quarter" ? 3 : 1;
-  const firstOfMonth = (y, m) => clockAt(cal, dayIndexOf(cal, y, m, 1), 0);
+  const firstOfMonth = (y2, m2) => clockAt(cal, dayIndexOf(cal, y2, m2, 1), 0);
   let y = d.year;
   let m = d.month - months;
   while (m < 1) {
@@ -14795,9 +14795,9 @@ function distributionPeriod(ctx, every, at) {
 }
 function distributionFlow(ctx, api, business) {
   const f = own(ctx.state.entities, business)?.fields;
-  const pct = numOf(f?.distribution_pct);
+  const pct2 = numOf(f?.distribution_pct);
   const from = operatingAccount(api, ctx, business);
-  if (!f || pct <= 0 || !from)
+  if (!f || pct2 <= 0 || !from)
     return null;
   const every = strOf(f.distribution_every, "quarter");
   const schedule = every === "month" ? { every: "month", days: [10], roll: "after" } : every === "year" ? { every: "year", months: [1], days: [10], roll: "after" } : { every: "year", months: [1, 4, 7, 10], days: [10], roll: "after" };
@@ -14933,8 +14933,8 @@ function registerBusiness(r) {
     const f = own(ctx.state.entities, business)?.fields;
     if (!f)
       return null;
-    const period = distributionPeriod(ctx, strOf(f.distribution_every, "quarter"), at);
-    const d = distribution(ctx, api, business, undistributed(api, ctx, business, period.from, period.to, numOf(f.distribution_pct)));
+    const period2 = distributionPeriod(ctx, strOf(f.distribution_every, "quarter"), at);
+    const d = distribution(ctx, api, business, undistributed(api, ctx, business, period2.from, period2.to, numOf(f.distribution_pct)));
     return d ? { cents: d.paid, lines: d.lines, memo: "Profit distribution", kind: "income", category: "distribution", extra: d.extra } : null;
   });
   core.process({ id: "economy.invoices", domain: "money", minLevel: 3, step: (slot, ctx) => lateInvoices(slot, ctx, api) });
@@ -15027,9 +15027,9 @@ function normal(rng) {
   const u2 = rng.next();
   return Math.sqrt(-2 * Math.log(u1)) * Math.cos(2 * Math.PI * u2);
 }
-function correlated(factor, own, rho) {
+function correlated(factor, own2, rho) {
   const r = Math.min(1, Math.max(0, rho));
-  return r * factor + Math.sqrt(1 - r * r) * own;
+  return r * factor + Math.sqrt(1 - r * r) * own2;
 }
 function gbmStep(price, driftPct, volPct, dt, z) {
   const mu = driftPct / 100;
@@ -15109,8 +15109,8 @@ function roundQty(qty) {
   return Math.round(qty * 1e6) / 1e6;
 }
 function takeFifo(lots, qty) {
-  const held = lots.reduce((a, l) => a + l.qty, 0);
-  if (qty > held + QTY_EPSILON)
+  const held2 = lots.reduce((a, l) => a + l.qty, 0);
+  if (qty > held2 + QTY_EPSILON)
     return null;
   const left = [];
   const taken = [];
@@ -15216,7 +15216,7 @@ function readAssetDef(v) {
   if (typeof cls !== "string" || !ASSET_CLASSES.includes(cls))
     return null;
   const def = { label: strOf(o.label), class: cls };
-  const text = (k) => {
+  const text3 = (k) => {
     if (typeof o[k] === "string" && o[k] !== "")
       def[k] = o[k];
   };
@@ -15226,7 +15226,7 @@ function readAssetDef(v) {
       def[k] = n;
   };
   for (const k of ["symbol", "model", "underlying", "expiry", "maturity", "entity"])
-    text(k);
+    text3(k);
   for (const k of ["price", "annual_return_pct", "annual_volatility_pct", "yield_pct", "strike", "multiplier", "pays_per_year", "correlation", "face", "coupon_pct"])
     number(k);
   if (o.right === "call" || o.right === "put")
@@ -15388,9 +15388,9 @@ function marketStep(ctx, api, slot, rng) {
     if (a.bond) {
       if (at.at >= a.bond.maturity)
         continue;
-      const z = correlated(factor(a.market), normal(rng(`asset:${id}`)), a.rho);
+      const z2 = correlated(factor(a.market), normal(rng(`asset:${id}`)), a.rho);
       const y = bondYield(ctx, a);
-      const next = Math.max(0, y + YIELD_REVERSION * (a.bond.baseYield - y) * dt - YIELD_SWING * Math.sqrt(dt) * z);
+      const next = Math.max(0, y + YIELD_REVERSION * (a.bond.baseYield - y) * dt - YIELD_SWING * Math.sqrt(dt) * z2);
       out.push({ type: "economy.quote", data: { asset: id, yield: mark(next) } });
       continue;
     }
@@ -15543,7 +15543,7 @@ function registerMarkets(r) {
 // src/packs/economy/core/records.ts
 var REALISED_KEPT = 24;
 function byShare(shares, cents) {
-  return Object.entries(shares).filter(([, pct]) => pct > 0).sort(([a], [b]) => a.localeCompare(b)).map(([party, pct]) => ({ party, cents: Math.round(cents * pct / 100) }));
+  return Object.entries(shares).filter(([, pct2]) => pct2 > 0).sort(([a], [b]) => a.localeCompare(b)).map(([party, pct2]) => ({ party, cents: Math.round(cents * pct2 / 100) }));
 }
 function yearOf(world, clock) {
   return String(dateAt(calendarOf(world), clock).year);
@@ -15605,13 +15605,13 @@ function basisRecord(state, entity, party) {
 function setBasisRecord(state, entity, party, value) {
   if (!safeKey(entity) || !safeKey(party))
     return;
-  const all = holdingsRecord(state, "basis");
-  const mine = objOf(own(all, entity));
+  const all2 = holdingsRecord(state, "basis");
+  const mine = objOf(own(all2, entity));
   if (value === null)
     delete mine[party];
   else
     mine[party] = { basis: value.basis, ...value.since !== null ? { since: value.since } : {} };
-  all[entity] = mine;
+  all2[entity] = mine;
 }
 
 // src/packs/economy/core/gains.ts
@@ -15624,8 +15624,8 @@ function basisOf(api, ctx, entity, party) {
   if (e?.kind !== "property")
     return { basis: 0, since: null };
   const authored = own(ctx.world.entities, entity)?.fields.value;
-  const whole = numOf(e.fields.purchase_price, typeof authored === "number" ? authored : numOf(e.fields.value));
-  return { basis: Math.round(whole * api.shareOf(ctx.state, entity, party) / 100), since: clockOfDate(ctx.world, e.fields.purchased) };
+  const whole4 = numOf(e.fields.purchase_price, typeof authored === "number" ? authored : numOf(e.fields.value));
+  return { basis: Math.round(whole4 * api.shareOf(ctx.state, entity, party) / 100), since: clockOfDate(ctx.world, e.fields.purchased) };
 }
 function isHome(state, property, party) {
   const home = own(state.entities, party)?.fields.home;
@@ -15641,23 +15641,23 @@ function disposeEvent(api) {
     validate: (e, ctx) => {
       if (!own(ctx.state.entities, str7(e, "entity")) || !own(ctx.state.entities, str7(e, "party")))
         return reject7("missing_entity", "a disposal names what was sold and who sold it");
-      const pct = e.data.pct;
+      const pct2 = e.data.pct;
       const proceeds = e.data.proceeds;
-      if (typeof pct !== "number" || !(pct > 0 && pct <= 100))
+      if (typeof pct2 !== "number" || !(pct2 > 0 && pct2 <= 100))
         return reject7("bad_event", "a disposal is of a part of a share");
       return typeof proceeds === "number" && Number.isSafeInteger(proceeds) && proceeds >= 0 ? null : reject7("bad_event", "a disposal's proceeds are a whole amount");
     },
     apply: (e, state, ctx) => {
       const entity = str7(e, "entity");
       const party = str7(e, "party");
-      const pct = numOf(e.data.pct);
+      const pct2 = numOf(e.data.pct);
       const proceeds = numOf(e.data.proceeds);
       const b = basisOf(api, { world: ctx.world, state }, entity, party);
-      const part = Math.round(b.basis * pct / 100);
-      const held = b.since === null ? Infinity : state.clock - b.since;
-      const home = own(state.entities, entity)?.kind === "property" && isHome(state, entity, party) && held >= 2 * YEAR_MINUTES;
-      recordGain(state, ctx.world, party, { term: held >= YEAR_MINUTES ? "long" : "short", gain: proceeds - part, proceeds, basis: part, label: strOf(e.data.label, `Sold ${labelOf(ctx, entity)}`), qty: pct / 100, ...home ? { home: true } : {} });
-      setBasisRecord(state, entity, party, pct >= 100 ? null : { basis: b.basis - part, since: b.since });
+      const part = Math.round(b.basis * pct2 / 100);
+      const held2 = b.since === null ? Infinity : state.clock - b.since;
+      const home = own(state.entities, entity)?.kind === "property" && isHome(state, entity, party) && held2 >= 2 * YEAR_MINUTES;
+      recordGain(state, ctx.world, party, { term: held2 >= YEAR_MINUTES ? "long" : "short", gain: proceeds - part, proceeds, basis: part, label: strOf(e.data.label, `Sold ${labelOf(ctx, entity)}`), qty: pct2 / 100, ...home ? { home: true } : {} });
+      setBasisRecord(state, entity, party, pct2 >= 100 ? null : { basis: b.basis - part, since: b.since });
     },
     describe: (e, ctx, viewer) => viewer ? "" : `${labelOf(ctx, str7(e, "party"))} sold ${numOf(e.data.pct)}% of their share of ${labelOf(ctx, str7(e, "entity"))}`
   };
@@ -15701,17 +15701,17 @@ function taxTables(ctx) {
   const brackets = byFiling(fed, "brackets_", "");
   const readBrackets = (v) => Array.isArray(v) ? v.map((raw) => objOf(raw)).filter((b) => Object.keys(b).length > 0).map((b) => ({ from: numOf(b.from_cents), to: typeof b.to_cents === "number" ? b.to_cents : null, pct: numOf(b.rate_pct) })) : [];
   const singleBrackets = readBrackets(brackets.single);
-  const record = (read) => Object.fromEntries(FILING_STATUSES.map((f) => [f, read(f)]));
+  const record2 = (read) => Object.fromEntries(FILING_STATUSES.map((f) => [f, read(f)]));
   return {
     ltcgPct: [bands[0] ?? 0, bands[1] ?? 15, bands[2] ?? 20],
-    ltcgThresholds: single ? record((f) => pair(thresholds[f]) ?? single) : null,
+    ltcgThresholds: single ? record2((f) => pair(thresholds[f]) ?? single) : null,
     niitPct: numOf(niit.pct),
-    niitThreshold: record((f) => numOf(niitBy[f], numOf(niitBy.single, Infinity))),
+    niitThreshold: record2((f) => numOf(niitBy[f], numOf(niitBy.single, Infinity))),
     lossLimit: numOf(fed.capital_loss_limit_cents, 300000),
-    homeExclusion: record((f) => numOf(own(exclusion, f), numOf(exclusion.single))),
-    brackets: record((f) => {
-      const own = readBrackets(brackets[f]);
-      return own.length > 0 ? own : singleBrackets;
+    homeExclusion: record2((f) => numOf(own(exclusion, f), numOf(exclusion.single))),
+    brackets: record2((f) => {
+      const own2 = readBrackets(brackets[f]);
+      return own2.length > 0 ? own2 : singleBrackets;
     })
   };
 }
@@ -15835,8 +15835,8 @@ function registerGains(r) {
   };
   r.amount(TAX_PROVIDER, provider);
 }
-function disposal(entity, party, pct, proceeds, label) {
-  return { type: "economy.dispose", data: { entity, party, pct: Math.min(100, Math.max(0, pct)), proceeds: Math.max(0, Math.round(proceeds)), label } };
+function disposal(entity, party, pct2, proceeds, label) {
+  return { type: "economy.dispose", data: { entity, party, pct: Math.min(100, Math.max(0, pct2)), proceeds: Math.max(0, Math.round(proceeds)), label } };
 }
 function acquisition(entity, party, cents) {
   return { type: "economy.acquire", data: { entity, party, cents: Math.max(0, Math.round(cents)) } };
@@ -15960,9 +15960,9 @@ function realise(api, state, world, holding, taken, proceeds, label) {
     if (part.qty <= 0)
       continue;
     for (const { party } of byShare(shares, 1)) {
-      const pct = shares[party] ?? 0;
-      const scale = (n) => Math.round(n * pct / 100);
-      recordGain(state, world, party, { term, gain: scale(part.proceeds - part.basis), proceeds: scale(part.proceeds), basis: scale(part.basis), label, qty: roundQty(part.qty * pct / 100) });
+      const pct2 = shares[party] ?? 0;
+      const scale = (n) => Math.round(n * pct2 / 100);
+      recordGain(state, world, party, { term, gain: scale(part.proceeds - part.basis), proceeds: scale(part.proceeds), basis: scale(part.basis), label, qty: roundQty(part.qty * pct2 / 100) });
     }
   }
 }
@@ -16007,8 +16007,8 @@ function lotsEvent(api) {
         return reject7("bad_event", "lots change by a number of units");
       if (typeof cents !== "number" || !Number.isSafeInteger(cents) || cents < 0)
         return reject7("bad_event", "lots change for a whole amount, nothing or more");
-      const held = qtyOf(lotsOf(ctx, holding));
-      return qty < 0 && held + qty < -QTY_EPSILON ? reject7("declined", `${h.name} holds ${held} units, not ${-qty}`) : null;
+      const held2 = qtyOf(lotsOf(ctx, holding));
+      return qty < 0 && held2 + qty < -QTY_EPSILON ? reject7("declined", `${h.name} holds ${held2} units, not ${-qty}`) : null;
     },
     apply: (e, state, ctx) => applyLots(api, state, ctx.world, ctx.tables, str8(e, "holding"), numOf(e.data.qty), numOf(e.data.cents), strOf(e.data.label, labelOf(ctx, str8(e, "holding")))),
     describe: (e, ctx, viewer) => viewer ? "" : `${labelOf(ctx, str8(e, "holding"))}: ${numOf(e.data.qty) > 0 ? "+" : ""}${numOf(e.data.qty)} units (${strOf(e.data.kind, "trade")}) for ${formatMoney(numOf(e.data.cents), ctx.world.currency)}`,
@@ -16020,10 +16020,10 @@ function lotsChange(state, holding, qty, cents, kind, label) {
   const legacy = account && legacyHolding(state, account) === holding ? account : null;
   return { type: "economy.lots", data: { holding, qty: roundQty(qty), cents, kind, label, ...legacy ? { legacy } : {} } };
 }
-function unit2(events) {
-  if (events.length < 2)
-    return [...events];
-  const bare = events.map(({ group: _group, ...rest }) => rest);
+function unit2(events2) {
+  if (events2.length < 2)
+    return [...events2];
+  const bare = events2.map(({ group: _group, ...rest }) => rest);
   const group = `pay:${hashParts(JSON.stringify(bare)).slice(0, 10)}`;
   return bare.map((e) => ({ ...e, group }));
 }
@@ -16059,7 +16059,7 @@ function trade(api, ctx, t) {
     return reject7("missing_entity", `no ${labelOf(ctx, party)}`);
   if (!api.feature(ctx, party, "investments"))
     return reject7("level", "investments aren't followed at this money level");
-  const events = [];
+  const events2 = [];
   let holding = t.holding && own(ctx.state.entities, t.holding)?.kind === "holding" ? t.holding : null;
   if (t.holding && !holding)
     return reject7("missing_holding", `no holding ${labelOf(ctx, t.holding)}`);
@@ -16074,7 +16074,7 @@ function trade(api, ctx, t) {
     assetId = optionId(assetId, t.option.right, t.option.strike, t.option.expiry);
     asset = assetFromDef(ctx, assetId, def);
     if (!assetDefOf(ctx, assetId))
-      events.push({ type: "economy.mint", data: { asset: assetId, def } });
+      events2.push({ type: "economy.mint", data: { asset: assetId, def } });
   }
   if (!asset)
     return reject7("missing_asset", `no asset ${assetId || "named"}`);
@@ -16101,16 +16101,16 @@ function trade(api, ctx, t) {
   const price = priceOf2(ctx, asset);
   if (!(price > 0))
     return reject7("no_price", `${asset.label} has no price to trade at`);
-  const whole = asset.option !== null;
-  const held = holding ? qtyOf(lotsOf(ctx, holding)) : 0;
+  const whole4 = asset.option !== null;
+  const held2 = holding ? qtyOf(lotsOf(ctx, holding)) : 0;
   const money = (c) => formatMoney(c, ctx.world.currency);
   if (t.side === "buy") {
     const raw = typeof t.qty === "number" && t.qty > 0 ? t.qty : typeof t.amount === "number" && t.amount > 0 ? t.amount / price : 0;
-    const qty = whole ? Math.floor(raw + 0.000000001) : roundQty(raw);
-    if (!(qty > QTY_EPSILON))
-      return reject7("bad_amount", whole ? `${money(Math.round(t.amount ?? 0))} buys no whole contract at ${money(Math.round(price))}` : "say how much to buy");
-    const cents = Math.round(qty * price);
-    if (cents <= 0)
+    const qty2 = whole4 ? Math.floor(raw + 0.000000001) : roundQty(raw);
+    if (!(qty2 > QTY_EPSILON))
+      return reject7("bad_amount", whole4 ? `${money(Math.round(t.amount ?? 0))} buys no whole contract at ${money(Math.round(price))}` : "say how much to buy");
+    const cents2 = Math.round(qty2 * price);
+    if (cents2 <= 0)
       return reject7("bad_amount", "say how much to buy");
     const source = t.from ?? account ?? api.depositAccount(ctx, party);
     if (!source)
@@ -16121,27 +16121,27 @@ function trade(api, ctx, t) {
     const spawned = !holding;
     if (!holding) {
       holding = newHoldingId(ctx.state, `${account ?? party}:${assetId}`);
-      events.push({ type: "spawn", entity: { id: holding, kind: "holding", name: asset.symbol ? `${asset.symbol}${account ? ` in ${labelOf(ctx, account)}` : ""}` : asset.label, tier: "background", fields: { asset: assetId, lots: [], ...account ? { account } : { owners: [{ party, role: "owner" }] } }, relations: [] } });
+      events2.push({ type: "spawn", entity: { id: holding, kind: "holding", name: asset.symbol ? `${asset.symbol}${account ? ` in ${labelOf(ctx, account)}` : ""}` : asset.label, tier: "background", fields: { asset: assetId, lots: [], ...account ? { account } : { owners: [{ party, role: "owner" }] } }, relations: [] } });
     }
-    const label = `Bought ${unitsText(qty)} ${asset.symbol ?? asset.label}`;
-    const lines = [
-      { account: source, amount: -cents },
-      { account: marketOf(api, assetId), amount: cents }
+    const label2 = `Bought ${unitsText(qty2)} ${asset.symbol ?? asset.label}`;
+    const lines2 = [
+      { account: source, amount: -cents2 },
+      { account: marketOf(api, assetId), amount: cents2 }
     ];
-    const posted = api.post(ctx, lines, { memo: label, kind: "purchase", category: "investment" });
-    if (isRejection2(posted))
-      return posted;
-    const lots = spawned ? { type: "economy.lots", data: { holding, qty, cents, kind: "buy", label } } : lotsChange(ctx.state, holding, qty, cents, "buy", label);
-    return unit2([...events, ...posted, lots]);
+    const posted2 = api.post(ctx, lines2, { memo: label2, kind: "purchase", category: "investment" });
+    if (isRejection2(posted2))
+      return posted2;
+    const lots = spawned ? { type: "economy.lots", data: { holding, qty: qty2, cents: cents2, kind: "buy", label: label2 } } : lotsChange(ctx.state, holding, qty2, cents2, "buy", label2);
+    return unit2([...events2, ...posted2, lots]);
   }
-  if (!holding || held <= QTY_EPSILON)
+  if (!holding || held2 <= QTY_EPSILON)
     return reject7("nothing_held", `${labelOf(ctx, party)} holds no ${asset.label}`);
-  const wanted = typeof t.qty === "number" && t.qty > 0 ? t.qty : typeof t.amount === "number" && t.amount > 0 ? t.amount / price : held;
-  const qty = whole ? Math.min(held, Math.floor(wanted + 0.000000001)) : Math.min(held, roundQty(wanted));
+  const wanted = typeof t.qty === "number" && t.qty > 0 ? t.qty : typeof t.amount === "number" && t.amount > 0 ? t.amount / price : held2;
+  const qty = whole4 ? Math.min(held2, Math.floor(wanted + 0.000000001)) : Math.min(held2, roundQty(wanted));
   if (!(qty > QTY_EPSILON))
     return reject7("bad_amount", "say how much to sell");
-  if (typeof t.qty === "number" && t.qty > held + QTY_EPSILON)
-    return reject7("declined", `${labelOf(ctx, holding)} holds ${unitsText(held)}, not ${unitsText(t.qty)}`);
+  if (typeof t.qty === "number" && t.qty > held2 + QTY_EPSILON)
+    return reject7("declined", `${labelOf(ctx, holding)} holds ${unitsText(held2)}, not ${unitsText(t.qty)}`);
   const cents = Math.round(qty * price);
   const dest = proceedsAccount(api, ctx, party, holding, t.to);
   if (typeof dest !== "string")
@@ -16256,6 +16256,7 @@ function registerHoldings(r) {
     label: "Buy or sell investments",
     description: "Buy or sell investments: stocks, funds, bonds, crypto.",
     pack: "economy",
+    mechanical: true,
     params: {
       side: { type: "text", label: "Buy or sell", optional: true },
       holding: { type: "ref", ref: "holding", optional: true },
@@ -16524,12 +16525,12 @@ function exercise(api, ctx, x) {
     return reject7("not_yours", `${h.name} isn't ${labelOf(ctx, x.party)}'s to exercise`);
   if (ctx.state.clock >= a.option.expiry)
     return reject7("expired", `${a.label} has expired`);
-  const held = qtyOf(lotsOf(ctx, x.holding));
-  const qty = typeof x.qty === "number" && x.qty > 0 ? Math.floor(x.qty + 0.000000001) : Math.floor(held + 0.000000001);
+  const held2 = qtyOf(lotsOf(ctx, x.holding));
+  const qty = typeof x.qty === "number" && x.qty > 0 ? Math.floor(x.qty + 0.000000001) : Math.floor(held2 + 0.000000001);
   if (qty < 1)
     return reject7("nothing_held", `${labelOf(ctx, x.party)} holds no whole contract of ${a.label}`);
-  if (qty > held + QTY_EPSILON)
-    return reject7("declined", `${h.name} holds ${unitsText(held)} contracts, not ${qty}`);
+  if (qty > held2 + QTY_EPSILON)
+    return reject7("declined", `${h.name} holds ${unitsText(held2)} contracts, not ${qty}`);
   const under = assetOf(ctx, a.option.underlying);
   if (!under)
     return reject7("missing_asset", `no asset ${a.option.underlying}`);
@@ -16545,11 +16546,11 @@ function exercise(api, ctx, x) {
     const to = x.to !== undefined ? proceedsAccount(api, ctx, x.party, x.holding, x.to) : undefined;
     if (to !== undefined && typeof to !== "string")
       return to;
-    const posted = settle(api, ctx, x.holding, a, qty, cash, label, to);
-    return isRejection3(posted) ? posted : unit2(posted);
+    const posted2 = settle(api, ctx, x.holding, a, qty, cash, label, to);
+    return isRejection3(posted2) ? posted2 : unit2(posted2);
   }
   const into = findHolding(ctx.state, under.id, account, x.party);
-  const events = [];
+  const events2 = [];
   const market = marketOf(api, under.id);
   let lines;
   let target = into;
@@ -16564,7 +16565,7 @@ function exercise(api, ctx, x) {
       target = `${account ?? x.party}:${under.id}`;
       for (let i = 2;own(ctx.state.entities, target); i++)
         target = `${account ?? x.party}:${under.id}:${i}`;
-      events.push({ type: "spawn", entity: { id: target, kind: "holding", name: under.symbol ?? under.label, tier: "background", fields: { asset: under.id, lots: [], ...account ? { account } : { owners: [{ party: x.party, role: "owner" }] } }, relations: [] } });
+      events2.push({ type: "spawn", entity: { id: target, kind: "holding", name: under.symbol ?? under.label, tier: "background", fields: { asset: under.id, lots: [], ...account ? { account } : { owners: [{ party: x.party, role: "owner" }] } }, relations: [] } });
     }
     lines = [
       { account: from, amount: -strike },
@@ -16584,7 +16585,7 @@ function exercise(api, ctx, x) {
   const posted = api.post(ctx, lines, { memo: `${label}: ${money(strike)} for ${unitsText(units)} ${under.symbol ?? under.label}`, kind: a.option.right === "call" ? "purchase" : "sale", category: "investment" });
   if (isRejection3(posted))
     return posted;
-  return unit2([...events, ...posted, { type: "economy.exercise", data: { option: x.holding, into: target, qty, units, cash: strike, right: a.option.right, label } }]);
+  return unit2([...events2, ...posted, { type: "economy.exercise", data: { option: x.holding, into: target, qty, units, cash: strike, right: a.option.right, label } }]);
 }
 function settle(api, ctx, holding, a, qty, cash, label, to) {
   const source = marketOf(api, a.option?.underlying ?? a.id);
@@ -16612,7 +16613,7 @@ function settlements(api, ctx, slot) {
     if (qty <= QTY_EPSILON)
       continue;
     const owners = holdingOwners(api, ctx.state, holding);
-    const notes = (text) => owners.flatMap((o) => api.note(ctx, o.party, "bill", text));
+    const notes = (text3) => owners.flatMap((o) => api.note(ctx, o.party, "bill", text3));
     if (a.bond) {
       const cash = Math.round(qty * a.bond.face);
       const label = `${a.label} matured`;
@@ -16652,6 +16653,7 @@ function registerOptions(r) {
     label: "Exercise an option",
     description: "Exercise an option contract you hold.",
     pack: "economy",
+    mechanical: true,
     params: { holding: { type: "ref", ref: "holding" }, qty: { type: "number", label: "Contracts", optional: true }, from: { type: "ref", ref: "account", label: "Pay the strike from", optional: true }, to: { type: "ref", ref: "account", label: "Strike to", optional: true } },
     requires: ["money_feature('options', self)"],
     outcomes: { default: [{ type: "economy.exercise", args: { party: "self", holding: "holding", qty: "=params.qty", from: "=params.from", to: "=params.to" } }] },
@@ -17139,9 +17141,9 @@ function insurancePerMonth(ctx, id) {
     return Math.max(0, Math.round(authored));
   const row = mortgageRow(ctx);
   const band = objOf(row.homeowners_insurance_cents_per_month);
-  const typical = numOf(band.typical, 20000);
+  const typical2 = numOf(band.typical, 20000);
   const median = numOf(row.median_existing_home_price_cents, 41000000);
-  const scaled = typical * propertyValue(ctx.state, id) / Math.max(1, median);
+  const scaled = typical2 * propertyValue(ctx.state, id) / Math.max(1, median);
   return Math.round(Math.min(numOf(band.max, Infinity), Math.max(numOf(band.min, 0), scaled)));
 }
 function costOf(ctx, id, cost) {
@@ -17366,7 +17368,7 @@ function buyProperty(api, ctx, x) {
   const unusableFrom = api.mayUse(ctx, x.party, from, "from");
   if (unusableFrom)
     return unusableFrom;
-  const events = [];
+  const events2 = [];
   let mortgage = null;
   if (financed > 0) {
     mortgage = `${x.property}:mortgage`;
@@ -17375,7 +17377,7 @@ function buyProperty(api, ctx, x) {
     const opened = api.applyCredit(ctx, x.party, { product: "mortgage", cents: financed, term_months: term, secured_by: x.property, into: api.outside(`closing:${x.property}`), id: mortgage, name: `Mortgage, ${e.name}` });
     if (isRejection4(opened))
       return opened;
-    events.push(...opened);
+    events2.push(...opened);
   }
   const lines = [{ account: from, amount: -down }];
   if (financed > 0)
@@ -17403,14 +17405,14 @@ function buyProperty(api, ctx, x) {
   const posted = api.post(ctx, lines.filter((l) => l.amount !== 0), { memo: `Bought ${e.name} for ${money(price)}`, kind: "purchase", category: "property" });
   if (isRejection4(posted))
     return posted;
-  const today = dateText3(ctx.world, ctx.state.clock);
+  const today2 = dateText3(ctx.world, ctx.state.clock);
   return unit2([
-    ...events,
+    ...events2,
     ...posted,
     ...disposals,
     { type: "set", entity: x.property, field: "owners", value: [{ party: x.party, role: "owner", share: 100 }] },
     { type: "set", entity: x.property, field: "purchase_price", value: price },
-    { type: "set", entity: x.property, field: "purchased", value: today },
+    { type: "set", entity: x.property, field: "purchased", value: today2 },
     { type: "set", entity: x.property, field: "mortgage", value: mortgage },
     ...asking !== undefined ? [{ type: "set", entity: x.property, field: "asking_price", value: null }] : [],
     ...strOf(e.fields.rent_to) !== "" ? [{ type: "set", entity: x.property, field: "rent_to", value: null }] : [],
@@ -17487,17 +17489,17 @@ function sellProperty(api, ctx, x) {
   const memo = `Sold ${share < 100 ? `a ${Math.round(share)}% share of ` : ""}${e.name} for ${money(price)}`;
   const loans = securedLoans(api, ctx.state, x.property).filter((l) => api.ownersOf(ctx.state, l.loan).some((o) => o.party === x.party) && l.owed > 0);
   const owed = loans.reduce((a, l) => a + l.owed, 0);
-  const events = [];
+  const events2 = [];
   if (x.buyer) {
     const paid = api.pay(ctx, { from: x.buyer, to: x.party, cents: price, memo, deposit: to, kind: "purchase", category: "property" });
     if (isRejection4(paid))
       return paid;
-    events.push(...paid);
+    events2.push(...paid);
     if (owed > 0) {
       const payoff = api.post(ctx, [{ account: to, amount: -owed }, ...loans.map((l) => ({ account: l.loan, amount: l.owed }))], { memo: `${e.name}: mortgage paid off`, kind: "payment", category: "property", unchecked: true });
       if (isRejection4(payoff))
         return payoff;
-      events.push(...payoff);
+      events2.push(...payoff);
     }
   } else {
     const lines = [{ account: api.outside(`buyer:${x.property}`), amount: -price }, ...loans.map((l) => ({ account: l.loan, amount: l.owed }))];
@@ -17506,7 +17508,7 @@ function sellProperty(api, ctx, x) {
     const posted = api.post(ctx, lines, { memo, kind: "sale", category: "property" });
     if (isRejection4(posted))
       return posted;
-    events.push(...posted);
+    events2.push(...posted);
   }
   const shares = worthShares(owners);
   const written = [];
@@ -17520,7 +17522,7 @@ function sellProperty(api, ctx, x) {
   const others = owners.filter((o) => o.party !== x.party);
   const sold = written.length === 0 || others.length === 0 && x.buyer !== undefined;
   return unit2([
-    ...events,
+    ...events2,
     disposal(x.property, x.party, 100, price, memo),
     { type: "set", entity: x.property, field: "owners", value: written },
     ...x.buyer ? [acquisition(x.property, x.buyer, price)] : [],
@@ -17904,21 +17906,21 @@ function sellStake(api, ctx, x) {
     return reject7("not_business", `${labelOf(ctx, x.business)} isn't a business`);
   const owners = api.ownersOf(ctx.state, x.business);
   const shares = worthShares(owners);
-  const held = shares[x.party] ?? 0;
-  if (held <= 0)
+  const held2 = shares[x.party] ?? 0;
+  if (held2 <= 0)
     return reject7("not_yours", `${labelOf(ctx, x.party)} owns no part of ${labelOf(ctx, x.business)}`);
-  const share = Math.min(held, x.share);
+  const share = Math.min(held2, x.share);
   if (!(share > 0))
     return reject7("bad_amount", "say what share to sell");
-  if (x.share > held + 0.000000001)
-    return reject7("declined", `${labelOf(ctx, x.party)} owns ${Math.round(held * 100) / 100}% of ${labelOf(ctx, x.business)}, not ${x.share}%`);
+  if (x.share > held2 + 0.000000001)
+    return reject7("declined", `${labelOf(ctx, x.party)} owns ${Math.round(held2 * 100) / 100}% of ${labelOf(ctx, x.business)}, not ${x.share}%`);
   const price = Math.round(x.price);
   if (!(price >= 0) || !Number.isSafeInteger(price))
     return reject7("bad_amount", "a price is a whole amount");
   if (x.buyer !== undefined && (!own(ctx.state.entities, x.buyer) || x.buyer === x.party || x.buyer === x.business))
     return reject7("missing_entity", `no buyer ${labelOf(ctx, x.buyer)}`);
-  const whole = Math.abs(share - held) < 0.000000001;
-  if (x.buyer === undefined && !(whole && held >= 100 - 0.000000001))
+  const whole4 = Math.abs(share - held2) < 0.000000001;
+  if (x.buyer === undefined && !(whole4 && held2 >= 100 - 0.000000001))
     return reject7("needs_buyer", `selling part of ${labelOf(ctx, x.business)} needs a buyer in the world`);
   const worth = businessValue(api, ctx, x.business);
   if (x.buyer === undefined && price > worth)
@@ -17930,25 +17932,25 @@ function sellStake(api, ctx, x) {
   if (unusable)
     return unusable;
   const memo = `Sold ${Math.round(share * 100) / 100}% of ${labelOf(ctx, x.business)} for ${formatMoney(price, ctx.world.currency)}`;
-  const events = [];
+  const events2 = [];
   if (price > 0) {
     const paid = x.buyer ? api.pay(ctx, { from: x.buyer, to: x.party, cents: price, memo, deposit: to, kind: "purchase", category: "investment" }) : api.post(ctx, [{ account: api.outside(`buyer:${x.business}`), amount: -price }, { account: to, amount: price }], { memo, kind: "sale", category: "investment" });
     if (!Array.isArray(paid))
       return paid;
-    events.push(...paid);
+    events2.push(...paid);
   }
   const next = [];
   for (const o of owners) {
-    const pct = (shares[o.party] ?? 0) - (o.party === x.party ? share : 0) + (o.party === x.buyer ? share : 0);
-    if (o.party === x.party && pct <= 0.000000001)
+    const pct2 = (shares[o.party] ?? 0) - (o.party === x.party ? share : 0) + (o.party === x.buyer ? share : 0);
+    if (o.party === x.party && pct2 <= 0.000000001)
       continue;
-    next.push({ party: o.party, role: o.role, share: Math.round(pct * 1e4) / 1e4 });
+    next.push({ party: o.party, role: o.role, share: Math.round(pct2 * 1e4) / 1e4 });
   }
   if (x.buyer && !next.some((o) => o.party === x.buyer))
     next.push({ party: x.buyer, role: "owner", share: Math.round(share * 1e4) / 1e4 });
   return unit2([
-    ...events,
-    disposal(x.business, x.party, share / held * 100, price, memo),
+    ...events2,
+    disposal(x.business, x.party, share / held2 * 100, price, memo),
     { type: "set", entity: x.business, field: "owners", value: next },
     ...x.buyer ? [acquisition(x.business, x.buyer, price)] : []
   ]);
@@ -18010,11 +18012,11 @@ function investmentsView(api, ctx, party, detail) {
   const year = dateAt(calendarOf(ctx.world), ctx.state.clock).year;
   const gains = gainsIn(ctx.state, party, year);
   const income = incomeIn(ctx.state, party, year);
-  const held = new Set(holdings.map((h) => h.asset.id));
+  const held2 = new Set(holdings.map((h) => h.asset.id));
   const market = Object.keys(configAssets(ctx.world)).sort().flatMap((id) => {
     const def = readAssetDef(own(configAssets(ctx.world), id));
     const a = def ? assetOf(ctx, id) : null;
-    if (!a || held.has(id) || a.class === "property" || a.class === "business_stake")
+    if (!a || held2.has(id) || a.class === "property" || a.class === "business_stake")
       return [];
     if (a.option && (!api.feature(ctx, party, "options") || ctx.state.clock >= a.option.expiry))
       return [];
@@ -18106,6 +18108,7 @@ function registerAssets(r) {
     label: "Route dividends, rent or profits",
     description: "Choose where dividends, rent or profits are paid: reinvested, or into an account.",
     pack: "economy",
+    mechanical: true,
     params: {
       holding: { type: "ref", ref: "holding", optional: true },
       property: { type: "ref", ref: "property", optional: true },
@@ -18168,11 +18171,11 @@ function ageMonths(ctx, account) {
 }
 function scoreFactors(ctx, person) {
   const accounts = creditAccounts(ctx, person);
-  const entries = creditEntriesOf(ctx, person);
-  if (accounts.length === 0 && entries.length === 0)
+  const entries2 = creditEntriesOf(ctx, person);
+  if (accounts.length === 0 && entries2.length === 0)
     return null;
   const now = ctx.state.clock;
-  const recent = entries.filter((e) => now - numOf(e.at) <= 24 * MONTH);
+  const recent = entries2.filter((e) => now - numOf(e.at) <= 24 * MONTH);
   let payment = 1;
   for (const e of recent) {
     if (e.kind === "late")
@@ -18204,7 +18207,7 @@ function scoreFactors(ctx, person) {
   const ages = accounts.map((id) => ageMonths(ctx, id));
   const age = ages.length > 0 ? Math.min(1, ages.reduce((a, b) => a + b, 0) / ages.length / 120) : 0;
   const mix = revolving && installment ? 1 : revolving || installment ? 0.6 : 0.3;
-  const inquiries = entries.filter((e) => e.kind === "inquiry" && now - numOf(e.at) <= 12 * MONTH).length;
+  const inquiries = entries2.filter((e) => e.kind === "inquiry" && now - numOf(e.at) <= 12 * MONTH).length;
   return { payment: Math.max(0, payment), utilisation, age, mix, recent: Math.max(0.4, 1 - 0.1 * inquiries) };
 }
 function scoreOf(f) {
@@ -18258,8 +18261,8 @@ function decide(ctx, person, app, reports) {
   if (!cls || !isCredit(cls))
     return reject8("not_credit", `${app.product.replace(/_/g, " ")} isn't a kind of credit`);
   const score = reports ? currentScore(ctx, person) : null;
-  const entries = reports ? creditEntriesOf(ctx, person) : [];
-  const chargedOff = entries.some((e) => e.kind === "charged_off" && ctx.state.clock - numOf(e.at) <= 24 * MONTH);
+  const entries2 = reports ? creditEntriesOf(ctx, person) : [];
+  const chargedOff = entries2.some((e) => e.kind === "charged_off" && ctx.state.clock - numOf(e.at) <= 24 * MONTH);
   const secured = app.secured_by !== undefined && own(ctx.state.entities, app.secured_by) !== undefined;
   const label = def?.label ?? CLASS_TRAITS[cls].label;
   const tier = creditTierOf(score ?? 650);
@@ -18269,8 +18272,8 @@ function decide(ctx, person, app, reports) {
   const productLimit = typeof def?.limit === "number" ? def.limit : null;
   const apr = reports ? def?.apr_pct ?? aprFor(ctx, cls, score) : null;
   if (CLASS_TRAITS[cls].revolving) {
-    const most = productLimit ?? limitFor(ctx, cls, score) ?? 0;
-    return { approved: true, reason: "", apr, limit: Math.min(app.cents ?? most, most), cls, label };
+    const most2 = productLimit ?? limitFor(ctx, cls, score) ?? 0;
+    return { approved: true, reason: "", apr, limit: Math.min(app.cents ?? most2, most2), cls, label };
   }
   const most = productLimit ?? loanCeiling(ctx, score, secured ? app.secured_by : undefined);
   if ((app.cents ?? 0) > most)
@@ -18283,7 +18286,7 @@ function creditReport(ctx, person) {
   const factors = scoreFactors(ctx, person);
   const score = typeof raw.score === "number" ? raw.score : factors ? scoreOf(factors) : null;
   const accounts = creditAccounts(ctx, person);
-  const entries = creditEntriesOf(ctx, person);
+  const entries2 = creditEntriesOf(ctx, person);
   let limit = 0;
   let owed = 0;
   let ontime = 0;
@@ -18318,8 +18321,8 @@ function creditReport(ctx, person) {
     ageMonths: ages.length > 0 ? Math.round(ages.reduce((a, b) => a + b, 0) / ages.length) : 0,
     onTimePct: ontime + late > 0 ? Math.round(ontime * 1000 / (ontime + late)) / 10 : 100,
     accounts: rows,
-    inquiries: entries.filter((e) => e.kind === "inquiry").map((e) => ({ at: when(numOf(e.at)), note: strOf(e.note) })),
-    marks: entries.filter((e) => e.kind === "collections" || e.kind === "charged_off" || e.kind === "late").map((e) => ({ at: when(numOf(e.at)), kind: e.kind, note: e.kind === "late" ? `${labelOf(ctx, strOf(e.account))}: ${numOf(e.days)} days late` : `${labelOf(ctx, strOf(e.account))}: ${e.kind.replace(/_/g, " ")}` })),
+    inquiries: entries2.filter((e) => e.kind === "inquiry").map((e) => ({ at: when(numOf(e.at)), note: strOf(e.note) })),
+    marks: entries2.filter((e) => e.kind === "collections" || e.kind === "charged_off" || e.kind === "late").map((e) => ({ at: when(numOf(e.at)), kind: e.kind, note: e.kind === "late" ? `${labelOf(ctx, strOf(e.account))}: ${numOf(e.days)} days late` : `${labelOf(ctx, strOf(e.account))}: ${e.kind.replace(/_/g, " ")}` })),
     offers
   };
 }
@@ -18339,8 +18342,8 @@ function scoreInstants(ctx, from, to) {
 
 // src/packs/economy/core/pay.ts
 var PAY_METHODS = ["auto", "cash", "card", "credit", "debit", "charge", "checking", "savings", "account"];
-function payMethodOf(text) {
-  const t = text.trim().toLowerCase();
+function payMethodOf(text3) {
+  const t = text3.trim().toLowerCase();
   const exact = PAY_METHODS.find((m) => m === t);
   if (exact)
     return exact === "card" ? "credit" : exact === "checking" ? "debit" : exact;
@@ -18496,9 +18499,9 @@ function covers(ctx, s, cents, overdraft) {
 function defaultTiers2(ctx, who) {
   const e = own(ctx.state.entities, who);
   const band = hasLedger(ctx, who) ? wealthBand(shownWorth(ctx, who)) : strOf(e?.fields.wealth, "modest");
-  const traits = (Array.isArray(e?.fields.traits) ? e.fields.traits : []).map((t) => String(t).toLowerCase()).join(" ");
-  const careful = /\b(frugal|thrifty|careful|cautious|old-fashioned|old fashioned|prudent|stingy|saver)\b/.test(traits);
-  const loose = /\b(impulsive|reckless|spendthrift|flashy|extravagant|generous|lavish)\b/.test(traits);
+  const traits2 = (Array.isArray(e?.fields.traits) ? e.fields.traits : []).map((t) => String(t).toLowerCase()).join(" ");
+  const careful = /\b(frugal|thrifty|careful|cautious|old-fashioned|old fashioned|prudent|stingy|saver)\b/.test(traits2);
+  const loose = /\b(impulsive|reckless|spendthrift|flashy|extravagant|generous|lavish)\b/.test(traits2);
   if (kindIs(ctx.registry, ctx.world, e?.kind ?? "", "business"))
     return [{ use: "debit" }, { use: "credit" }];
   if (loose)
@@ -18674,11 +18677,11 @@ function txn(lines, meta) {
 function posting(lines, meta) {
   return [{ type: "post", lines, memo: meta.memo }, txn(lines, meta)];
 }
-function asUnit(events) {
-  if (events.length < 2)
-    return events;
-  const group = `pay:${hashParts(JSON.stringify(events)).slice(0, 10)}`;
-  return events.map((e) => ({ ...e, group }));
+function asUnit(events2) {
+  if (events2.length < 2)
+    return events2;
+  const group = `pay:${hashParts(JSON.stringify(events2)).slice(0, 10)}`;
+  return events2.map((e) => ({ ...e, group }));
 }
 function merged(lines) {
   const out = [];
@@ -18695,8 +18698,8 @@ function merged(lines) {
 }
 function overdraftFeesToday(ctx, account) {
   const cal = calendarOf(ctx.world);
-  const today = dateAt(cal, ctx.state.clock).dayIndex;
-  return journalOf(ctx.state, account).filter((j) => j.kind === "fee" && j.category === "overdraft" && dateAt(cal, j.at).dayIndex === today).length;
+  const today2 = dateAt(cal, ctx.state.clock).dayIndex;
+  return journalOf(ctx.state, account).filter((j) => j.kind === "fee" && j.category === "overdraft" && dateAt(cal, j.at).dayIndex === today2).length;
 }
 function overdraftEvents(ctx, account, total, at) {
   const short = total - availableOf(ctx, account);
@@ -18707,11 +18710,11 @@ function overdraftEvents(ctx, account, total, at) {
     return { before: [], after: [] };
   if (p.overdraft === "linked") {
     const link = strOf(own(ctx.state.entities, account)?.fields.overdraft_link);
-    const lines = [
+    const lines2 = [
       { account: link, amount: -short },
       { account, amount: short }
     ];
-    return { before: posting(lines, { memo: `Overdraft transfer from ${labelOf(ctx, link)}`, kind: "transfer", category: "transfer", at }), after: [] };
+    return { before: posting(lines2, { memo: `Overdraft transfer from ${labelOf(ctx, link)}`, kind: "transfer", category: "transfer", at }), after: [] };
   }
   const fee = accountFeature(ctx, account, "fees") && overdraftFeesToday(ctx, account) < 3 ? p.fees.overdraft : 0;
   if (fee <= 0)
@@ -18843,8 +18846,8 @@ function move(ctx, from, to, cents, memo, opts = {}) {
       c = owed;
     }
   }
-  const advance = fromTraits.revolving && !toTraits.liability;
-  const fee = advance ? cashAdvanceFee(ctx, from, c) : 0;
+  const advance2 = fromTraits.revolving && !toTraits.liability;
+  const fee = advance2 ? cashAdvanceFee(ctx, from, c) : 0;
   if (!opts.unchecked && ctx.levelOf(party, "money") >= 2 && availableOf(ctx, from) < c + fee)
     return reject8("declined", `${labelOf(ctx, from)} doesn't have ${formatMoney(c + fee, ctx.world.currency)}`);
   const lines = [
@@ -18856,7 +18859,7 @@ function move(ctx, from, to, cents, memo, opts = {}) {
   const out = [...charged, { type: "post", lines, memo }];
   if (toTraits.liability)
     out.push({ type: FINANCE_EVENTS.cardPaid, data: { account: to, cents: c } });
-  out.push(txn(lines, { memo, kind: toTraits.liability ? "payment" : "transfer", category: advance ? "cash_advance" : "transfer", ...opts.flow ? { flow: opts.flow } : {}, ...opts.at !== undefined ? { at: opts.at } : {} }));
+  out.push(txn(lines, { memo, kind: toTraits.liability ? "payment" : "transfer", category: advance2 ? "cash_advance" : "transfer", ...opts.flow ? { flow: opts.flow } : {}, ...opts.at !== undefined ? { at: opts.at } : {} }));
   return asUnit(out);
 }
 function transferParty(ctx, id, side) {
@@ -18886,8 +18889,8 @@ function transfer(hooks, ctx, from, to, cents, memo, method = "auto") {
   const sameSide = payer.holder === payee.holder || payee.account !== undefined && canSpend(ctx.state, payee.account, payer.holder) && rightsOf(ctx.state, payee.account, payer.holder)?.worth === true;
   if (!sameSide) {
     const deposit = payee.account ?? cash;
-    const source = payer.account ?? (method === "cash" ? cashAccount(ctx, payer.holder) ?? undefined : undefined);
-    const fromCash = method === "cash" && source !== undefined && availableOf(ctx, source) >= Math.round(cents) ? source : payer.account;
+    const source2 = payer.account ?? (method === "cash" ? cashAccount(ctx, payer.holder) ?? undefined : undefined);
+    const fromCash = method === "cash" && source2 !== undefined && availableOf(ctx, source2) >= Math.round(cents) ? source2 : payer.account;
     return charge(hooks, ctx, payer.holder, cents, memo, { payee: payee.holder, method: paying, kind: "transfer", ...fromCash ? { source: fromCash } : {}, ...deposit ? { deposit } : {}, overdraft: false });
   }
   if (!payer.account && !payee.account)
@@ -18983,9 +18986,9 @@ function setCash(ctx, holder, cents) {
   lines.push({ account: CORRECTION_ACCOUNT, amount: -lines.reduce((a, l) => a + l.amount, 0) });
   return asUnit(posting(lines, { memo: "Correction", kind: "adjustment", category: "correction" }));
 }
-function reprice(ctx, events, cents) {
-  const posts = events.filter((e) => e.type === "post");
-  const purchase = events.find((e) => e.type === FINANCE_EVENTS.txn && ("data" in e) && e.data.kind === "purchase");
+function reprice(ctx, events2, cents) {
+  const posts = events2.filter((e) => e.type === "post");
+  const purchase = events2.find((e) => e.type === FINANCE_EVENTS.txn && ("data" in e) && e.data.kind === "purchase");
   const was = purchase && "data" in purchase ? purchase.data : undefined;
   const memo = was !== undefined ? strOf(was.memo) : undefined;
   const post = (memo !== undefined ? posts.find((p) => p.memo === memo) : undefined) ?? (posts.length === 1 && posts[0]?.lines.length === 2 ? posts[0] : undefined);
@@ -19008,12 +19011,12 @@ function reprice(ctx, events, cents) {
   const buyer = strOf(was?.payer);
   return asUnit(posting(lines, { memo: note, kind: diff > 0 ? "purchase" : "refund", counterparty: diff > 0 ? seller : buyer, payer: diff > 0 ? buyer : seller }));
 }
-function signal(cls, text, who, at) {
-  return { type: ENGINE_EVENTS.signal, data: { class: cls, text, entity: who, visibility: "known_by", at } };
+function signal(cls, text3, who, at) {
+  return { type: ENGINE_EVENTS.signal, data: { class: cls, text: text3, entity: who, visibility: "known_by", at } };
 }
-function noted(ctx, events) {
+function noted(ctx, events2) {
   const pov = ctx.world.pov;
-  return events.flatMap((e) => {
+  return events2.flatMap((e) => {
     if (!("data" in e))
       return [e];
     if (e.type === FINANCE_EVENTS.txn)
@@ -19050,18 +19053,18 @@ class Run {
     const dot = e.type.indexOf(".");
     const pack = dot > 0 ? e.type.slice(0, dot) : null;
     if (pack !== null && !this.copied.has(pack)) {
-      const slice = own(this.state.packs, pack);
-      if (slice)
-        this.state.packs[pack] = structuredClone(slice);
+      const slice2 = own(this.state.packs, pack);
+      if (slice2)
+        this.state.packs[pack] = structuredClone(slice2);
       this.copied.add(pack);
     }
   }
-  fits(unit) {
-    if (unit.length === 1)
-      return unit[0] !== undefined && validateEvent(this.ctx.registry, unit[0], this.ctx) === null;
+  fits(unit3) {
+    if (unit3.length === 1)
+      return unit3[0] !== undefined && validateEvent(this.ctx.registry, unit3[0], this.ctx) === null;
     const trial = { ...this.state, accounts: { ...this.state.accounts } };
     const ctx = this.ctx.registry.context(this.ctx.world, trial);
-    for (const e of unit) {
+    for (const e of unit3) {
       if (validateEvent(this.ctx.registry, e, ctx))
         return false;
       if (e.type === "post")
@@ -19070,14 +19073,14 @@ class Run {
     }
     return true;
   }
-  emit(events) {
-    const list = noted(this.ctx, [...events]);
+  emit(events2) {
+    const list = noted(this.ctx, [...events2]);
     const applied = [];
     for (const [from, to] of eventUnits(list)) {
-      const unit = list.slice(from, to);
-      if (!this.fits(unit))
+      const unit3 = list.slice(from, to);
+      if (!this.fits(unit3))
         continue;
-      for (const e of unit) {
+      for (const e of unit3) {
         this.touch(e);
         applyEvent(this.ctx.registry, e, this.state, this.ctx);
         applied.push(e);
@@ -19102,11 +19105,11 @@ function businessDay(cal, day, roll) {
     d += roll === "before" ? -1 : 1;
   return d;
 }
-function safeDay(cal, text) {
-  if (!text)
+function safeDay(cal, text3) {
+  if (!text3)
     return null;
   try {
-    return dayIndexOfText(cal, text.slice(0, 10));
+    return dayIndexOfText(cal, text3.slice(0, 10));
   } catch {
     return null;
   }
@@ -19350,9 +19353,9 @@ function foundationFlows(ctx) {
     return f && f.status !== "ended" && (f.kind === "premium" || f.category === "insurance") ? [f] : [];
   });
   const insured = new Set(cover.flatMap((f) => f.link && !isGone(s, f.link) ? [f.link] : []));
-  const payers = new Set(cover.filter((f) => !f.link).flatMap((f) => own(s.entities, f.from)?.kind === "account" ? holdersOf(s, f.from) : [f.from]));
+  const payers2 = new Set(cover.filter((f) => !f.link).flatMap((f) => own(s.entities, f.from)?.kind === "account" ? holdersOf(s, f.from) : [f.from]));
   for (const p of optionalQuery(ctx, "vehicles.insurance")?.(ctx) ?? []) {
-    if (insured.has(p.vehicle) || payers.has(p.owner) || p.cents <= 0)
+    if (insured.has(p.vehicle) || payers2.has(p.owner) || p.cents <= 0)
       continue;
     out.push({ id: `insurance:${p.vehicle}`, label: p.label, kind: "premium", from: p.owner, to: "insurer", amount: { fixed: p.cents }, schedule: { every: "month", days: [1] }, shortfall: "skip", category: "insurance", link: p.vehicle, status: "active", method: "account", source: "vehicle" });
   }
@@ -19369,13 +19372,13 @@ function planPayments(ctx) {
     const e = own(s.entities, who);
     if (!e || who === ctx.world.pov || isGone(s, who) || !kindIs(ctx.registry, ctx.world, e.kind, "person") || !isParty(ctx, who))
       continue;
-    for (const plan of plans(ctx, who)) {
-      const to = plan.with[0];
-      if (plan.status !== "open" || plan.kind !== "pay" && plan.kind !== "lend" || !plan.cents || !to || !isParty(ctx, to))
+    for (const plan2 of plans(ctx, who)) {
+      const to = plan2.with[0];
+      if (plan2.status !== "open" || plan2.kind !== "pay" && plan2.kind !== "lend" || !plan2.cents || !to || !isParty(ctx, to))
         continue;
-      const lend = plan.kind === "lend";
-      const at = Math.max(plan.when.from, plan.made + 1);
-      out.push({ entity: who, plan, at, flow: { id: `plan:${who}:${plan.id}`, label: lend ? "Loan" : "Payment", kind: "other", from: who, to, amount: { fixed: plan.cents }, schedule: { once: at }, shortfall: "skip", category: lend ? "loan" : "payment", status: "active", source: "minds" } });
+      const lend = plan2.kind === "lend";
+      const at = Math.max(plan2.when.from, plan2.made + 1);
+      out.push({ entity: who, plan: plan2, at, flow: { id: `plan:${who}:${plan2.id}`, label: lend ? "Loan" : "Payment", kind: "other", from: who, to, amount: { fixed: plan2.cents }, schedule: { once: at }, shortfall: "skip", category: lend ? "loan" : "payment", status: "active", source: "minds" } });
     }
   }
   return out;
@@ -19544,15 +19547,15 @@ function payFrom(hooks, ctx, flow, fromId, cents, at, overdraft, made) {
     if (traitsOf(ctx, land.account)?.liability)
       extra.push({ type: FINANCE_EVENTS.cardPaid, data: { account: land.account, cents: t.cents } });
   }
-  const merged = [];
+  const merged2 = [];
   for (const l of lines) {
-    const same = merged.find((x) => x.account === l.account);
+    const same = merged2.find((x) => x.account === l.account);
     if (same)
       same.amount += l.amount;
     else
-      merged.push({ ...l });
+      merged2.push({ ...l });
   }
-  const finalLines = merged.filter((l) => l.amount !== 0);
+  const finalLines = merged2.filter((l) => l.amount !== 0);
   if (finalLines.length < 2)
     return reject8("bad_flow", `${flow.label} pays itself`);
   const od = "account" in from && overdraft ? overdraftEvents(ctx, from.account, cents, at) : { before: [], after: [] };
@@ -19610,8 +19613,8 @@ function runOccurrence(hooks, run, flow, at, rng, retry) {
   const waiting = !retry && before.retry ? before.retry : undefined;
   const pending = waiting ? { retry: waiting } : {};
   if ("code" in amount) {
-    const next = { done: before.done, missed: before.missed + 1, ...pending, ...before.deferred ? { deferred: before.deferred } : {}, ended: ended(before.done, before.missed + 1) };
-    run.emit([runEvent(flow, at, "declined", 0, next)]);
+    const next2 = { done: before.done, missed: before.missed + 1, ...pending, ...before.deferred ? { deferred: before.deferred } : {}, ended: ended(before.done, before.missed + 1) };
+    run.emit([runEvent(flow, at, "declined", 0, next2)]);
     return { outcome: "declined", reason: amount.reason };
   }
   const cents = amount.cents;
@@ -19629,8 +19632,8 @@ function runOccurrence(hooks, run, flow, at, rng, retry) {
   if (!("code" in attempt)) {
     const applied = run.emit(attempt.events);
     if (applied.length > 0 || attempt.events.length === 0) {
-      const next = { done: before.done + 1, missed: before.missed, ...pending, ...own_lines && before.deferred ? { deferred: before.deferred } : {}, ended: ended(before.done + 1, before.missed) };
-      run.emit([runEvent(flow, at, "paid", attempt.paid, next)]);
+      const next2 = { done: before.done + 1, missed: before.missed, ...pending, ...own_lines && before.deferred ? { deferred: before.deferred } : {}, ended: ended(before.done + 1, before.missed) };
+      run.emit([runEvent(flow, at, "paid", attempt.paid, next2)]);
       if (who && flow.kind !== "living" && amount.posting?.quiet !== true && attempt.paid > 0)
         run.emit([signal("bill", `${flow.label}: ${money(attempt.paid)} ${flowIsIncome(ctx, flow, who) ? "received" : "paid"}.`, who, at)]);
       return { outcome: "paid", reason: null };
@@ -19645,8 +19648,8 @@ function runOccurrence(hooks, run, flow, at, rng, retry) {
       const part = Math.min(have, cents - 1);
       const paid = part > 0 && !own_lines ? computed(part) : null;
       if (paid && !("code" in paid) && run.emit(paid.events).length > 0) {
-        const next = { done: before.done + 1, missed: before.missed, ...pending, ended: ended(before.done + 1, before.missed) };
-        run.emit([runEvent(flow, at, "partial", part, next, cents - part)]);
+        const next2 = { done: before.done + 1, missed: before.missed, ...pending, ended: ended(before.done + 1, before.missed) };
+        run.emit([runEvent(flow, at, "partial", part, next2, cents - part)]);
         if (who)
           run.emit([signal("decline", `${flow.label}: only ${money(part)} of ${money(cents)} paid.`, who, at)]);
         return { outcome: "partial", reason };
@@ -19657,8 +19660,8 @@ function runOccurrence(hooks, run, flow, at, rng, retry) {
       const left = retry && before.retry ? before.retry.left : Math.max(0, Math.round(flow.retries ?? 2));
       if (left > 0) {
         const again = waiting ? { at: waiting.at, left: Math.max(waiting.left, left - 1), cents: waiting.cents + cents } : { at: at + Math.max(1, Math.round(flow.retry_days ?? 3)) * 1440, left: left - 1, cents };
-        const next = { done: before.done, missed: before.missed, retry: again, ...before.deferred ? { deferred: 0 } : {} };
-        run.emit([...nsf, runEvent(flow, at, "retry", 0, next, cents)]);
+        const next2 = { done: before.done, missed: before.missed, retry: again, ...before.deferred ? { deferred: 0 } : {} };
+        run.emit([...nsf, runEvent(flow, at, "retry", 0, next2, cents)]);
         if (who)
           run.emit([signal("decline", `${flow.label} (${money(cents)}) didn't go through; it will be tried again.`, who, at)]);
         return { outcome: "retry", reason };
@@ -19670,8 +19673,8 @@ function runOccurrence(hooks, run, flow, at, rng, retry) {
       if (fallback && !own_lines) {
         const paid = payFrom(hooks, ctx, flow, fallback, cents, at, false, amount.posting);
         if (!("code" in paid) && run.emit(paid.events).length > 0) {
-          const next = { done: before.done + 1, missed: before.missed, ...pending, ended: ended(before.done + 1, before.missed) };
-          run.emit([runEvent(flow, at, "fallback", cents, next)]);
+          const next2 = { done: before.done + 1, missed: before.missed, ...pending, ended: ended(before.done + 1, before.missed) };
+          run.emit([runEvent(flow, at, "fallback", cents, next2)]);
           if (who)
             run.emit([signal("bill", `${flow.label}: ${money(cents)} paid from ${labelOf(ctx, fallback)}.`, who, at)]);
           return { outcome: "fallback", reason: null };
@@ -19680,8 +19683,8 @@ function runOccurrence(hooks, run, flow, at, rng, retry) {
       break;
     }
     case "defer": {
-      const next = { done: before.done, missed: before.missed + 1, ...pending, deferred: cents + (own_lines ? before.deferred ?? 0 : 0), ended: ended(before.done, before.missed + 1) };
-      run.emit([runEvent(flow, at, "deferred", 0, next, cents)]);
+      const next2 = { done: before.done, missed: before.missed + 1, ...pending, deferred: cents + (own_lines ? before.deferred ?? 0 : 0), ended: ended(before.done, before.missed + 1) };
+      run.emit([runEvent(flow, at, "deferred", 0, next2, cents)]);
       if (who)
         run.emit([signal("decline", `${flow.label} (${money(cents)}) couldn't be paid; it carries to next time.`, who, at)]);
       return { outcome: "deferred", reason };
@@ -19702,10 +19705,10 @@ function flowIsIncome(ctx, flow, who) {
 }
 function fallsBackOn(ctx, from, fallback) {
   const side = sideOf(ctx, from);
-  const payers = "account" in side ? holdersOf(ctx.state, side.account).filter((h) => canSpend(ctx.state, side.account, h)) : ("party" in side) ? [side.party] : [];
-  if (payers.includes(fallback))
+  const payers2 = "account" in side ? holdersOf(ctx.state, side.account).filter((h) => canSpend(ctx.state, side.account, h)) : ("party" in side) ? [side.party] : [];
+  if (payers2.includes(fallback))
     return true;
-  return own(ctx.state.entities, fallback)?.kind === "account" && payers.some((p) => canSpend(ctx.state, fallback, p));
+  return own(ctx.state.entities, fallback)?.kind === "account" && payers2.some((p) => canSpend(ctx.state, fallback, p));
 }
 function fallbackOf(ctx, flow) {
   return flow.fallback && fallsBackOn(ctx, flow.from, flow.fallback) ? flow.fallback : null;
@@ -19731,7 +19734,7 @@ function sharedAttempt(hooks, ctx, flow, cents, at, overdraft) {
   if (total <= 0)
     return reject8("bad_flow", `${flow.label} has no shares`);
   const trial = new Run(ctx);
-  const events = [];
+  const events2 = [];
   let left = cents;
   for (const [i, s] of shares.entries()) {
     const part = i === shares.length - 1 ? left : Math.round(cents * s.pct / total);
@@ -19744,9 +19747,9 @@ function sharedAttempt(hooks, ctx, flow, cents, at, overdraft) {
       return reject8("declined", `${labelOf(ctx, s.party)}'s share: ${paid.reason}`);
     if (trial.emit(asUnit(paid.events)).length === 0)
       return reject8("declined", `${labelOf(ctx, s.party)}'s share can't be covered`);
-    events.push(...paid.events);
+    events2.push(...paid.events);
   }
-  return { events: asUnit(events), paid: cents };
+  return { events: asUnit(events2), paid: cents };
 }
 
 // src/packs/economy/core/actions.ts
@@ -19827,20 +19830,20 @@ function withdraw(ctx, who, account, raw) {
     } else
       return reject8("no_atm", `there's no cash machine or ${p.institution || "bank"} branch here`);
   }
-  const advance = cashAdvanceFee(ctx, account, cents);
-  if (advance > 0) {
-    advanceLines.push({ account: bankSide(p.institution), amount: advance });
-    fees += advance;
+  const advance2 = cashAdvanceFee(ctx, account, cents);
+  if (advance2 > 0) {
+    advanceLines.push({ account: bankSide(p.institution), amount: advance2 });
+    fees += advance2;
   }
   const total = cents + fees;
   if (availableOf(ctx, account) < total)
     return reject8("declined", `${labelOf(ctx, account)} can't cover ${money(ctx, total)}`);
-  const charge = (lines, memo, category) => {
-    const cents = lines.reduce((a, l) => a + l.amount, 0);
-    return cents > 0 ? posting([{ account, amount: -cents }, ...lines], { memo, kind: "fee", category }) : [];
+  const charge2 = (lines, memo2, category) => {
+    const cents2 = lines.reduce((a, l) => a + l.amount, 0);
+    return cents2 > 0 ? posting([{ account, amount: -cents2 }, ...lines], { memo: memo2, kind: "fee", category }) : [];
   };
   const memo = `Cash withdrawal${where ? ` ${where}` : ""}${fees > 0 ? ` (${money(ctx, fees)} in fees)` : ""}`;
-  return asUnit([...charge(machine, "Cash machine fees", "atm"), ...charge(advanceLines, "Cash advance fee", "cash_advance"), ...posting([{ account, amount: -cents }, { account: wallet, amount: cents }], { memo, kind: "withdrawal", category: t?.revolving ? "cash_advance" : "transfer", ...card ? { card } : {} }), ...extra]);
+  return asUnit([...charge2(machine, "Cash machine fees", "atm"), ...charge2(advanceLines, "Cash advance fee", "cash_advance"), ...posting([{ account, amount: -cents }, { account: wallet, amount: cents }], { memo, kind: "withdrawal", category: t?.revolving ? "cash_advance" : "transfer", ...card ? { card } : {} }), ...extra]);
 }
 function deposit(ctx, who, account, raw) {
   const cents = Math.round(raw);
@@ -19859,7 +19862,7 @@ function deposit(ctx, who, account, raw) {
     return reject8("missing_account", "no such account");
   if (traitsOf(ctx, account)?.liability && cents > -balance(ctx.state, account))
     return reject8("overpay", `${labelOf(ctx, account)} owes only ${money(ctx, Math.max(0, -balance(ctx.state, account)))}`);
-  let held = false;
+  let held2 = false;
   let where = "";
   if (cashNeedsAMachine(ctx, who)) {
     const branch = featureAt(ctx, who, "branch");
@@ -19868,7 +19871,7 @@ function deposit(ctx, who, account, raw) {
       where = ` at ${own(ctx.world.places, branch.place)?.name ?? "the branch"}`;
     else if (atm && atm.feature.deposits === true && atm.feature.bank === p.institution) {
       where = ` at ${own(ctx.world.places, atm.place)?.name ?? "a cash machine"}`;
-      held = accountFeature(ctx, account, "holds") && p.hold_days > 0;
+      held2 = accountFeature(ctx, account, "holds") && p.hold_days > 0;
     } else
       return reject8("no_atm", `there's no ${p.institution || "bank"} branch or deposit machine here`);
   }
@@ -19876,12 +19879,12 @@ function deposit(ctx, who, account, raw) {
     { account: wallet, amount: -cents },
     { account, amount: cents }
   ];
-  const events = posting(lines, { memo: `Cash deposit${where}`, kind: "deposit", category: "transfer" });
+  const events2 = posting(lines, { memo: `Cash deposit${where}`, kind: "deposit", category: "transfer" });
   if (traitsOf(ctx, account)?.liability)
-    events.push({ type: FINANCE_EVENTS.cardPaid, data: { account, cents } });
-  if (held)
-    events.push({ type: FINANCE_EVENTS.hold, data: { id: `dep:${hashParts(account, ctx.state.clock, cents).slice(0, 10)}`, account, cents, until: ctx.state.clock + p.hold_days * 1440, kind: "deposit", memo: "Cash deposit" } });
-  return asUnit(events);
+    events2.push({ type: FINANCE_EVENTS.cardPaid, data: { account, cents } });
+  if (held2)
+    events2.push({ type: FINANCE_EVENTS.hold, data: { id: `dep:${hashParts(account, ctx.state.clock, cents).slice(0, 10)}`, account, cents, until: ctx.state.clock + p.hold_days * 1440, kind: "deposit", memo: "Cash deposit" } });
+  return asUnit(events2);
 }
 function setCardState(ctx, who, card, state) {
   const e = own(ctx.state.entities, card);
@@ -20039,13 +20042,13 @@ function interestsOf(ctx, who) {
   return out;
 }
 function whoseMoney(ctx, side) {
-  const all = new Set;
+  const all2 = new Set;
   const last = new Set;
   let next = isParty(ctx, side) ? [side] : worthHolders(ctx, side);
   for (let depth = 0;depth < WORTH_DEPTH && next.length > 0; depth++) {
     const deeper = [];
-    for (const p of next.filter((q) => !all.has(q))) {
-      all.add(p);
+    for (const p of next.filter((q) => !all2.has(q))) {
+      all2.add(p);
       const holders = worthHolders(ctx, p);
       if (holders.length === 0 || depth === WORTH_DEPTH - 1)
         last.add(p);
@@ -20054,16 +20057,16 @@ function whoseMoney(ctx, side) {
     }
     next = deeper;
   }
-  return { all, last };
+  return { all: all2, last };
 }
 function personal(ctx, id) {
   const kind = own(ctx.state.entities, id)?.kind ?? "";
   return kind !== "" && (kindIs(ctx.registry, ctx.world, kind, "person") || kindIs(ctx.registry, ctx.world, kind, "household"));
 }
 function moneyOf(ctx, who, from) {
-  const { all, last } = whoseMoney(ctx, from);
+  const { all: all2, last } = whoseMoney(ctx, from);
   return {
-    forHolder: new Set([...all].filter((p) => p !== who)),
+    forHolder: new Set([...all2].filter((p) => p !== who)),
     people: new Set([...last].filter((p) => p !== who)),
     wholly: last.size > 0 && [...last].every((p) => p === who)
   };
@@ -20075,14 +20078,14 @@ function inReach(ctx, who, account, people) {
   return !(holders.length > 0 && holders.every((h) => people.has(h)));
 }
 function landsInReach(ctx, who, account, from) {
-  const money = moneyOf(ctx, who, from);
-  return !money.wholly && inReach(ctx, who, account, money.people);
+  const money2 = moneyOf(ctx, who, from);
+  return !money2.wholly && inReach(ctx, who, account, money2.people);
 }
 function paysFor(ctx, who, to, from, opts = {}) {
   const interests = opts.interests ?? interestsOf(ctx, who);
-  const money = moneyOf(ctx, who, from);
-  const mine = (party) => interests.has(party) && !money.forHolder.has(party) && (!money.wholly || personal(ctx, party));
-  const theirs = (account) => !money.wholly && inReach(ctx, who, account, money.people) || worthHolders(ctx, account).some(mine);
+  const money2 = moneyOf(ctx, who, from);
+  const mine = (party) => interests.has(party) && !money2.forHolder.has(party) && (!money2.wholly || personal(ctx, party));
+  const theirs = (account) => !money2.wholly && inReach(ctx, who, account, money2.people) || worthHolders(ctx, account).some(mine);
   const id = to.startsWith(EXTERNAL_ACCOUNT_PREFIX) ? to.slice(EXTERNAL_ACCOUNT_PREFIX.length) : to;
   const e = own(ctx.state.entities, id);
   if (e?.kind === "account")
@@ -20536,8 +20539,8 @@ function stem(word) {
   }
   return [...parts, s].join("-");
 }
-function tokens(text) {
-  return text.toLowerCase().replace(/['\u2019]/g, "").match(/[a-z0-9]+(?:-[a-z0-9]+)*/g) ?? [];
+function tokens(text3) {
+  return text3.toLowerCase().replace(/['\u2019]/g, "").match(/[a-z0-9]+(?:-[a-z0-9]+)*/g) ?? [];
 }
 function wordsOf2(list) {
   const out = [];
@@ -20553,8 +20556,8 @@ function wordsOf2(list) {
   }
   return out;
 }
-function itemName(text) {
-  const lower = text.toLowerCase();
+function itemName(text3) {
+  const lower = text3.toLowerCase();
   const cut = lower.search(/[,(]/);
   const base = tokens(cut < 0 ? lower : lower.slice(0, cut));
   const qualifier = cut < 0 ? [] : tokens(lower.slice(cut + 1));
@@ -20590,9 +20593,9 @@ function catalogName(id, name) {
     if (word.includes("-"))
       heads.add(stem(word.split("-").at(-1) ?? word));
   }
-  const words = new Set([...wordsOf2(tokens(lower)), ...wordsOf2(id.split("_"))]);
+  const words3 = new Set([...wordsOf2(tokens(lower)), ...wordsOf2(id.split("_"))]);
   const qualifiers = new Set(named.flat().filter((w) => !/^\d/.test(w)).map((w) => stem(w)).filter((w) => !heads.has(w)));
-  return { heads, main: stem(last.at(-1) ?? ""), qualifiers, words };
+  return { heads, main: stem(last.at(-1) ?? ""), qualifiers, words: words3 };
 }
 
 // src/packs/economy/core/cycle.ts
@@ -20693,9 +20696,9 @@ function cycleTasks(ctx, from, to) {
 function money2(ctx, cents) {
   return formatMoney(cents, ctx.world.currency);
 }
-function tell(run, account, cls, text, at) {
+function tell(run, account, cls, text3, at) {
   const holders = holdersOf(run.ctx.state, account).filter((h) => own(run.ctx.state.entities, h) && isParty(run.ctx, h));
-  run.emit(holders.map((h) => signal(cls, text, h, at)));
+  run.emit(holders.map((h) => signal(cls, text3, h, at)));
 }
 function bankLines(account, institution, cents) {
   return [
@@ -20732,9 +20735,9 @@ function closeRevolving(run, account, at) {
   if (interest > 0)
     run.emit(asUnit(posting(bankLines(account, p.institution, interest), { memo: `${name} interest`, kind: "interest", category: "interest", at })));
   const acc = accrualOf(ctx.state, account);
-  const held = acc ? acc.advanced * (at - acc.from) - acc.advancedAt : 0;
+  const held2 = acc ? acc.advanced * (at - acc.from) - acc.advancedAt : 0;
   const advanceApr = p.cash_advance_apr_pct - (!grace && daily && apr > 0 ? apr : 0);
-  const advanceInterest = feature(ctx, account, "interest") && advanceApr > 0 && held > 0 ? Math.round(held * advanceApr / 100 / (365 * 1440)) : 0;
+  const advanceInterest = feature(ctx, account, "interest") && advanceApr > 0 && held2 > 0 ? Math.round(held2 * advanceApr / 100 / (365 * 1440)) : 0;
   if (advanceInterest > 0 && run.emit(asUnit(posting(bankLines(account, p.institution, advanceInterest), { memo: `${name} cash advance interest`, kind: "interest", category: "interest", at }))).length > 0)
     interest += advanceInterest;
   let fees = 0;
@@ -20896,9 +20899,9 @@ function openingBalances(entity, ctx, claimed) {
   const out = [];
   if (lines.length > 0) {
     const total = lines.reduce((a, l) => a + l.amount, 0);
-    const all = total === 0 ? lines : [...lines, { account: external(entity), amount: -total }];
-    if (all.length >= 2)
-      out.push({ type: "post", lines: all, memo: "Opening balances" }, { type: FINANCE_EVENTS.txn, data: { memo: "Opening balance", kind: "opening", category: "opening", lines: lines.map((l) => ({ account: l.account, amount: l.amount })) } });
+    const all2 = total === 0 ? lines : [...lines, { account: external(entity), amount: -total }];
+    if (all2.length >= 2)
+      out.push({ type: "post", lines: all2, memo: "Opening balances" }, { type: FINANCE_EVENTS.txn, data: { memo: "Opening balance", kind: "opening", category: "opening", lines: lines.map((l) => ({ account: l.account, amount: l.amount })) } });
   }
   if (closed.length > 0)
     out.push({ type: FINANCE_EVENTS.open, data: { accounts: closed } });
@@ -20920,8 +20923,8 @@ function openingEvent(ctx, who, claimed) {
   const version = pinnedVersion(ctx.world, ctx.registry, "money");
   if (typeof version !== "number")
     return null;
-  const events = openingBalances(who, ctx, claimed);
-  return events.length > 0 ? { type: "materialize", entity: who, domain: "money", generatorVersion: version, tablesRevision: tablesRevision(ctx.world), events } : null;
+  const events2 = openingBalances(who, ctx, claimed);
+  return events2.length > 0 ? { type: "materialize", entity: who, domain: "money", generatorVersion: version, tablesRevision: tablesRevision(ctx.world), events: events2 } : null;
 }
 function moneyStep(hooks, slot, ctx, rng) {
   const tasks = [...cycleTasks(ctx, slot.start, slot.end), ...planTasks(hooks, slot, ctx, rng)];
@@ -20962,7 +20965,7 @@ function runTasks(ctx, tasks) {
   return run.out;
 }
 function planTasks(hooks, slot, ctx, rng) {
-  return planPayments(ctx).flatMap(({ entity, plan, flow, at: due }) => {
+  return planPayments(ctx).flatMap(({ entity, plan: plan2, flow, at: due }) => {
     if (due > slot.end)
       return [];
     const at = Math.max(due, slot.start + 1);
@@ -20974,7 +20977,7 @@ function planTasks(hooks, slot, ctx, rng) {
         run: (r) => {
           const ran = runOccurrence(hooks, r, flow, at, rng(`flow:${flow.id}:${at}`), false);
           const paid = ran?.outcome === "paid";
-          r.emit([{ type: MINDS_EVENTS.plan, data: { entity, plan: plan.id, status: paid ? "done" : "dropped", at, reason: paid ? null : ran?.reason ?? "the payment didn't go through" } }]);
+          r.emit([{ type: MINDS_EVENTS.plan, data: { entity, plan: plan2.id, status: paid ? "done" : "dropped", at, reason: paid ? null : ran?.reason ?? "the payment didn't go through" } }]);
         }
       }
     ];
@@ -21014,7 +21017,7 @@ function materializeMoney(entity, ctx, rng, version) {
   const limit = Math.round(Math.min(2500000, Math.max(50000, band.typical * 0.3)) / 1e4) * 1e4;
   const owed = Math.round(limit * rng.next() * 0.25);
   const statementDay = 1 + rng.int(0, 27);
-  const wallet = Object.keys(s.entities).sort().find((id) => own(s.entities, id)?.fields.owner === entity && (own(s.entities, id)?.fields.catalog === "wallet" || /wallet|purse/i.test(own(s.entities, id)?.name ?? "")));
+  const wallet = Object.keys(s.entities).sort().find((id2) => own(s.entities, id2)?.fields.owner === entity && (own(s.entities, id2)?.fields.catalog === "wallet" || /wallet|purse/i.test(own(s.entities, id2)?.name ?? "")));
   const id = (suffix) => `${entity}:${suffix}`;
   const out = [];
   if (version === 1) {
@@ -21064,8 +21067,8 @@ function netWorthParts(hooks, ctx, party) {
     const cls = classOf2(ctx, id);
     if (!cls)
       continue;
-    const held = balance(ctx.state, id) + (isOpened(ctx.state, id, openerOf(ctx.state, id)) ? 0 : Math.round(numOf(own(ctx.state.entities, id)?.fields.opening)));
-    const cents = Math.round(held * shareOf(ctx.state, id, party) / 100);
+    const held2 = balance(ctx.state, id) + (isOpened(ctx.state, id, openerOf(ctx.state, id)) ? 0 : Math.round(numOf(own(ctx.state.entities, id)?.fields.opening)));
+    const cents = Math.round(held2 * shareOf(ctx.state, id, party) / 100);
     if (cents >= 0)
       assets += cents;
     else
@@ -21104,40 +21107,40 @@ function moneySummary(hooks, ctx, who) {
   const band = level >= 1 ? wealthOf(hooks, ctx, who) : null;
   if (level < 2 || accountsOf(ctx, who).length === 0)
     return { lines: band ? [`Money: ${band}.`] : [], band, spendable: null, pressing: [] };
-  const money = (c) => formatMoney(c, ctx.world.currency);
+  const money3 = (c) => formatMoney(c, ctx.world.currency);
   const cal = calendarOf(ctx.world);
   const day = (at) => formatClock(cal, at).split(",")[0] ?? "";
-  const shown = (id) => balance(ctx.state, id) + (isOpened(ctx.state, id, openerOf(ctx.state, id)) ? 0 : Math.round(numOf(own(ctx.state.entities, id)?.fields.opening)));
+  const shown2 = (id) => balance(ctx.state, id) + (isOpened(ctx.state, id, openerOf(ctx.state, id)) ? 0 : Math.round(numOf(own(ctx.state.entities, id)?.fields.opening)));
   const lines = [];
   const mine = accountsOf(ctx, who, "worth");
-  const cash = mine.filter((id) => classOf2(ctx, id) === "cash" && rightsOf(ctx.state, id, who)?.spend).reduce((a, id) => a + shown(id), 0);
+  const cash = mine.filter((id) => classOf2(ctx, id) === "cash" && rightsOf(ctx.state, id, who)?.spend).reduce((a, id) => a + shown2(id), 0);
   const bank = mine.filter((id) => traitsOf(ctx, id)?.asset && !traitsOf(ctx, id)?.cash && rightsOf(ctx.state, id, who)?.spend && !traitsOf(ctx, id)?.locked);
-  const inBank = bank.reduce((a, id) => a + shown(id), 0);
-  lines.push(`You have ${money(cash)} in cash and ${money(inBank)} in the bank.`);
-  let spendable = cash + bank.reduce((a, id) => a + Math.max(0, availableOf(ctx, id) + overdraftRoom(ctx, id)), 0);
+  const inBank = bank.reduce((a, id) => a + shown2(id), 0);
+  lines.push(`You have ${money3(cash)} in cash and ${money3(inBank)} in the bank.`);
+  let spendable2 = cash + bank.reduce((a, id) => a + Math.max(0, availableOf(ctx, id) + overdraftRoom(ctx, id)), 0);
   const pressing = [];
   const now = ctx.state.clock;
   for (const id of mine) {
     const t = traitsOf(ctx, id);
     if (!t?.liability || !rightsOf(ctx.state, id, who)?.worth)
       continue;
-    const owed = Math.max(0, -shown(id));
+    const owed = Math.max(0, -shown2(id));
     const name = own(ctx.state.entities, id)?.name ?? id;
     if (t.revolving && statusOf(ctx.state, id) === "open")
-      spendable += Math.max(0, Math.min(availableOf(ctx, id), 1e7));
+      spendable2 += Math.max(0, Math.min(availableOf(ctx, id), 1e7));
     if (owed <= 0)
       continue;
     const cycle = cycleOf2(ctx.state, id);
     const left = cycle ? cycle.minimum - cycle.paid : 0;
-    let line = `${name} owes ${money(owed)}`;
+    let line2 = `${name} owes ${money3(owed)}`;
     if (cycle && left > 0) {
-      line += cycle.stage !== "current" ? `; ${money(left)} is past due` : `; ${money(left)} is due ${day(cycle.due)}`;
+      line2 += cycle.stage !== "current" ? `; ${money3(left)} is past due` : `; ${money3(left)} is due ${day(cycle.due)}`;
       if (cycle.due - now <= 14 * DAY || cycle.stage !== "current")
         pressing.push({ label: name, cents: left, at: day(cycle.due) });
     }
     if (statusOf(ctx.state, id) !== "open")
-      line += ` (${statusOf(ctx.state, id).replace(/_/g, " ")})`;
-    lines.push(`${line}.`);
+      line2 += ` (${statusOf(ctx.state, id).replace(/_/g, " ")})`;
+    lines.push(`${line2}.`);
   }
   if (featureFor(ctx, who, "flows")) {
     const soon = [];
@@ -21153,7 +21156,7 @@ function moneySummary(hooks, ctx, who) {
         continue;
       const amount = "provider" in f.amount ? null : occurrenceAmount(hooks, ctx, f, next.at, createRng(`summary:${f.id}`), flowRunOf(ctx.state, f.id).deferred ?? 0);
       const cents = amount && !("code" in amount) ? amount.cents : 0;
-      soon.push({ at: next.at, cents, out: fromMine, label: f.label, text: `${f.label}${cents > 0 ? ` (${money(cents)})` : ""} ${fromMine ? "is due" : "comes in"} ${day(next.at)}` });
+      soon.push({ at: next.at, cents, out: fromMine, label: f.label, text: `${f.label}${cents > 0 ? ` (${money3(cents)})` : ""} ${fromMine ? "is due" : "comes in"} ${day(next.at)}` });
     }
     soon.sort((a, b) => a.at - b.at);
     for (const s of soon.slice(0, 5))
@@ -21166,7 +21169,7 @@ function moneySummary(hooks, ctx, who) {
   }
   for (const source of hooks.summaries)
     lines.push(...source(ctx, who));
-  return { lines, band, spendable: Math.round(spendable), pressing };
+  return { lines, band, spendable: Math.round(spendable2), pressing };
 }
 
 // src/packs/economy/core/view.ts
@@ -21233,11 +21236,11 @@ function hiddenNames2(ctx, pov) {
   const sorted = [...ways].sort((a, b) => b[1].length - a[1].length);
   return sorted.length === 0 ? NO_HIDDEN : { pattern: new RegExp(sorted.map(([source]) => `(${source})`).join("|"), "giu"), reads: sorted.map(([, w]) => w.reads) };
 }
-function says(viewer, text) {
+function says(viewer, text3) {
   const { pattern, reads } = viewer.hidden;
   if (pattern === null)
-    return text;
-  return text.normalize("NFC").replace(pattern, (match, ...rest) => {
+    return text3;
+  return text3.normalize("NFC").replace(pattern, (match, ...rest) => {
     const reading = reads[rest.slice(0, reads.length).findIndex((group) => typeof group === "string")];
     if (!reading)
       return match;
@@ -21565,7 +21568,7 @@ function householdView(ctx, viewer, household, flows, viewOf) {
       const part = partOf(m);
       return { id: idFor(ctx, viewer, m), name: nameFor(ctx, viewer, m), role: strOf(rel?.fields?.role), share: total > 0 ? Math.round(part * 1000 / total) / 10 : Math.round(1000 / Math.max(1, members.length)) / 10 };
     }),
-    accounts: accountsOf(ctx, household).concat(members.length > 1 ? accountsOf(ctx, members[0] ?? household).filter((id) => members.every((m) => rightsOf(ctx.state, id, m) !== null)) : []).filter((id, i, all) => all.indexOf(id) === i),
+    accounts: accountsOf(ctx, household).concat(members.length > 1 ? accountsOf(ctx, members[0] ?? household).filter((id) => members.every((m) => rightsOf(ctx.state, id, m) !== null)) : []).filter((id, i, all2) => all2.indexOf(id) === i),
     flows: shared.map(viewOf),
     monthly: { total, parts: members.map((m) => ({ id: idFor(ctx, viewer, m), name: nameFor(ctx, viewer, m), cents: partOf(m) })) }
   };
@@ -21585,7 +21588,7 @@ function buildFinanceView(hooks, ctx, party, player) {
   };
   let every = null;
   const shownId = (id) => {
-    every ??= new Map(allFlows(hooks, ctx).map((f) => [f.id, f]));
+    every ??= new Map(allFlows(hooks, ctx).map((f2) => [f2.id, f2]));
     const f = every.get(id);
     return f ? viewOf(f).id : null;
   };
@@ -21727,14 +21730,14 @@ function buildFinanceView(hooks, ctx, party, player) {
   }
   const interests = interestsOf(ctx, party);
   const onlyManaged = (side) => side !== "" && side !== party && visible(ctx, viewer, side) && mayPayFrom(ctx, party, side) && (isParty(ctx, side) || !canSpend(ctx.state, side, party));
-  const payers = [...new Set([...listed.map((a) => a.id), ...view.flows.flatMap((f) => f.spec ? [f.spec.from, f.spec.fallback ?? ""] : [])])].filter(onlyManaged);
+  const payers2 = [...new Set([...listed.map((a) => a.id), ...view.flows.flatMap((f) => f.spec ? [f.spec.from, f.spec.fallback ?? ""] : [])])].filter(onlyManaged);
   const carried = new Set;
   stringsIn2(view, carried);
   for (const id of interests)
     if (visible(ctx, viewer, id))
       carried.add(id);
   const payees = [...carried].filter((id) => own(ctx.state.entities, id)?.kind === "account" || isParty(ctx, id));
-  view.paysFor = payers.map((from) => ({ from, to: payees.filter((to) => paysFor(ctx, party, to, from, { interests })) }));
+  view.paysFor = payers2.map((from) => ({ from, to: payees.filter((to) => paysFor(ctx, party, to, from, { interests })) }));
   const home = householdOf(ctx, party);
   const keyed = [party, ...home !== null && visible(ctx, viewer, home) ? [home] : []];
   view.ownKeys = [...new Set(keyed.flatMap((id) => [payeeKey(id), payeeKey(own(ctx.state.entities, id)?.name ?? "")]).filter((k) => k !== ""))];
@@ -22399,18 +22402,18 @@ function offersAtPlace(ctx, place) {
   }
   return out;
 }
-function matchCatalog(ctx, text, place, category = "") {
-  const item = itemName(text);
+function matchCatalog(ctx, text3, place, category = "") {
+  const item = itemName(text3);
   if (!item)
     return null;
-  const said = new Set([...item.words, ...item.trailing?.words ?? []]);
+  const said2 = new Set([...item.words, ...item.trailing?.words ?? []]);
   const rows = ctx.tables.get("economy.catalog")?.rows ?? {};
-  const trade = placeTrade(ctx, place);
-  const tags = trade.tags.map((t) => stem(t.toLowerCase()));
+  const trade2 = placeTrade(ctx, place);
+  const tags = trade2.tags.map((t) => stem(t.toLowerCase()));
   const nouns = Object.keys(rows).sort().map((id) => ({ id, name: catalogName(id, strOf(rows[id]?.name, id)) })).filter((r) => r.name.heads.has(item.head));
   const unnamed = (name) => [...item.words].filter((w) => w !== item.head && !name.words.has(w));
-  const otherKind = (name) => unnamed(name).length > 0 && [...name.qualifiers].some((q) => !said.has(q));
-  const sold = (id) => trade.categories.includes(strOf(rows[id]?.category));
+  const otherKind = (name) => unnamed(name).length > 0 && [...name.qualifiers].some((q) => !said2.has(q));
+  const sold = (id) => trade2.categories.includes(strOf(rows[id]?.category));
   const outright = nouns.filter((r) => !otherKind(r.name));
   const placeChooses = outright.length > 0 && !outright.some((r) => sold(r.id));
   const known = (w) => nouns.some((r) => r.name.words.has(w));
@@ -22419,7 +22422,7 @@ function matchCatalog(ctx, text, place, category = "") {
     if (otherKind(name) && !(placeChooses && sold(id) && unnamed(name).every((w) => !known(w))))
       continue;
     const rowCategory = strOf(rows[id]?.category);
-    const score = [[...said].filter((w) => name.words.has(w)).length, name.main === item.head ? 1 : 0, rowCategory === category ? 1 : 0, trade.categories.includes(rowCategory) ? 1 : 0, tags.some((t) => name.words.has(t)) ? 1 : 0];
+    const score = [[...said2].filter((w) => name.words.has(w)).length, name.main === item.head ? 1 : 0, rowCategory === category ? 1 : 0, trade2.categories.includes(rowCategory) ? 1 : 0, tags.some((t) => name.words.has(t)) ? 1 : 0];
     const first = best ? score.findIndex((s, i) => s !== best?.score[i]) : 0;
     if (!best || first >= 0 && (score[first] ?? 0) > (best.score[first] ?? 0))
       best = { id, score };
@@ -22427,7 +22430,7 @@ function matchCatalog(ctx, text, place, category = "") {
   return best?.id ?? null;
 }
 function boughtRef(ctx, name) {
-  const named = (table) => Object.entries(ctx.tables.get(table)?.rows ?? {}).find(([id, row]) => strOf(row?.name, id) === name)?.[0];
+  const named = (table) => Object.entries(ctx.tables.get(table)?.rows ?? {}).find(([id, row2]) => strOf(row2?.name, id) === name)?.[0];
   const row = named("economy.catalog");
   if (row)
     return { catalog: row };
@@ -22444,19 +22447,19 @@ function quote(ctx, args, payer, qty) {
   const given = strOf(args.category);
   const row = named === "" ? null : rowOf(ctx, "economy.catalog", named) ? named : matchCatalog(ctx, named, place, given);
   const category = given !== "" ? given : !row && rowOf(ctx, "economy.categories", named) ? named : "";
-  const said = typeof args.price === "number" && args.price > 0 ? Math.round(args.price) : undefined;
+  const said2 = typeof args.price === "number" && args.price > 0 ? Math.round(args.price) : undefined;
   const rowDef = row ? rowOf(ctx, "economy.catalog", row) : undefined;
   const asIs = (cents) => ({ cents, unitCents: Math.round(cents / qty), band: { min: cents, typical: cents, max: cents }, source: row ? "catalog" : "category", clamped: false, name: strOf(rowDef?.name, named || "something"), category: rowDef ? strOf(rowDef.category) : rowOf(ctx, "economy.categories", category) ? category : "misc" });
-  if (said !== undefined && args.exact === true)
-    return { price: asIs(said), row };
+  if (said2 !== undefined && args.exact === true)
+    return { price: asIs(said2), row };
   if (row) {
-    const price = priceOf(ctx, { catalog: row, qty, place, ...said !== undefined ? { narrated: said } : {} }, ctx.rng);
+    const price = priceOf(ctx, { catalog: row, qty, place, ...said2 !== undefined ? { narrated: said2 } : {} }, ctx.rng);
     if (price)
-      return { price, row, ...price.clamped && said !== undefined ? { narrated: { cents: said, limited: "band" } } : {} };
+      return { price, row, ...price.clamped && said2 !== undefined ? { narrated: { cents: said2, limited: "band" } } : {} };
   }
-  if (said !== undefined) {
-    const cents = Math.min(said, args.stated === true ? Infinity : unpricedCap(ctx.world));
-    return { price: { ...asIs(cents), clamped: cents !== said }, row: null, ...cents !== said ? { narrated: { cents: said, limited: "cap" } } : {} };
+  if (said2 !== undefined) {
+    const cents = Math.min(said2, args.stated === true ? Infinity : unpricedCap(ctx.world));
+    return { price: { ...asIs(cents), clamped: cents !== said2 }, row: null, ...cents !== said2 ? { narrated: { cents: said2, limited: "cap" } } : {} };
   }
   const banded = category !== "" ? priceOf(ctx, { category, qty, place }, ctx.rng) : null;
   return banded ? { price: banded, row: null } : null;
@@ -22480,7 +22483,7 @@ function makeApi(hooks) {
     ownersOf: (state, entity) => ownersOf(state, entity),
     shareOf: (state, entity, party) => shareOf(state, entity, party),
     interestsOf: (ctx, who) => interestsOf(ctx, who),
-    paysFor: (ctx, who, to, from, deposit) => paysFor(ctx, who, to, from, { deposit }),
+    paysFor: (ctx, who, to, from, deposit2) => paysFor(ctx, who, to, from, { deposit: deposit2 }),
     landsInReach: (ctx, who, account, from) => landsInReach(ctx, who, account, from),
     accountsOf: (books, party, right) => accountsOf(books, party, right ?? "sees"),
     balance: (state, account) => balance(state, account),
@@ -22488,16 +22491,16 @@ function makeApi(hooks) {
     product: (ctx, account) => productOf(ctx, account),
     depositAccount: (ctx, party, except) => depositAccount(ctx, party, except),
     partyKind: (ctx, id) => partyKindOf2(ctx, id),
-    feature: (ctx, party, feature) => featureFor(ctx, party, feature),
+    feature: (ctx, party, feature2) => featureFor(ctx, party, feature2),
     outside: (id) => external(id),
     mayUse: (ctx, party, account, side) => mayUse(ctx, party, account, side),
     pay: (ctx, p) => payWith(hooks, ctx, p),
     post: (ctx, lines, meta) => postWith(ctx, lines, meta),
-    note: (ctx, who, cls, text) => [signal(cls, text, who, ctx.state.clock)],
+    note: (ctx, who, cls, text3) => [signal(cls, text3, who, ctx.state.clock)],
     money: (ctx, cents) => formatMoney(cents, ctx.world.currency),
     split: (cents, splits, rest) => splitAmount(cents, splits, rest),
     occurrences: (ctx, schedule, from, to, start) => occurrences(ctx, schedule, from, to, start).map((o) => o.at),
-    businessDay: (ctx, day, roll) => businessDay(calendarOf(ctx.world), day, roll),
+    businessDay: (ctx, day2, roll) => businessDay(calendarOf(ctx.world), day2, roll),
     flows: (ctx) => allFlows(hooks, ctx),
     openAccount: (ctx, spec) => openAccount(ctx, spec),
     applyCredit: (ctx, who, app) => {
@@ -22559,22 +22562,22 @@ function spendableNow(ctx, who) {
 }
 function purchaser(p, ctx) {
   const named = strOf(p.payer);
-  const said = { ...typeof p.method === "string" ? { method: p.method } : {}, ...typeof p.from === "string" ? { from: p.from } : {} };
+  const said2 = { ...typeof p.method === "string" ? { method: p.method } : {}, ...typeof p.from === "string" ? { from: p.from } : {} };
   if (named === "")
-    return { payer: ctx.world.pov, ...said };
+    return { payer: ctx.world.pov, ...said2 };
   const e = own(ctx.state.entities, named);
   if (e?.kind === "account" || e?.kind === "card") {
     const holder = e.kind === "card" ? strOf(e.fields.holder) : holdersOf(ctx.state, named).find((h) => canSpend(ctx.state, named, h)) ?? "";
     if (holder !== "" && own(ctx.state.entities, holder))
-      return { payer: holder, method: said.method ?? "auto", from: said.from ?? named };
+      return { payer: holder, method: said2.method ?? "auto", from: said2.from ?? named };
   }
   if (!e)
-    return payMethodOf(named) !== "auto" ? { payer: ctx.world.pov, method: said.method ?? named, ...said.from ? { from: said.from } : {} } : { payer: named, ...said };
+    return payMethodOf(named) !== "auto" ? { payer: ctx.world.pov, method: said2.method ?? named, ...said2.from ? { from: said2.from } : {} } : { payer: named, ...said2 };
   const owner = strOf(e.fields.owner);
   if (!isParty(ctx, named) && owner !== "" && own(ctx.state.entities, owner)) {
-    return { payer: owner, method: said.method ?? payMethodOf(`${e.name} ${named.replace(/_/g, " ")}`), ...said.from ? { from: said.from } : {} };
+    return { payer: owner, method: said2.method ?? payMethodOf(`${e.name} ${named.replace(/_/g, " ")}`), ...said2.from ? { from: said2.from } : {} };
   }
-  return { payer: named, ...said };
+  return { payer: named, ...said2 };
 }
 var ID_SHAPED = /^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$/;
 function registerRest(r, hooks) {
@@ -22617,12 +22620,12 @@ function registerRest(r, hooks) {
     return price ? { min: price.band.min * qty, max: price.band.max * qty } : null;
   });
   r.query("economy.offers", (ctx, who) => offersAtPlace(ctx, placeOfEntity(ctx.state, who)));
-  r.query("economy.item_choices", (ctx, text, who) => {
+  r.query("economy.item_choices", (ctx, text3, who) => {
     const place = placeOfEntity(ctx.state, who);
-    const item = itemName(text);
-    const said = new Set(item ? [...item.words, ...item.trailing?.words ?? []] : []);
+    const item = itemName(text3);
+    const said2 = new Set(item ? [...item.words, ...item.trailing?.words ?? []] : []);
     const rows = ctx.tables.get("economy.catalog")?.rows ?? {};
-    const near = Object.keys(rows).sort().map((id) => ({ id, shared: [...catalogName(id, strOf(rows[id]?.name, id)).words].filter((w) => said.has(w)).length })).filter((x) => x.shared > 0).sort((a, b) => b.shared - a.shared).slice(0, 6);
+    const near = Object.keys(rows).sort().map((id) => ({ id, shared: [...catalogName(id, strOf(rows[id]?.name, id)).words].filter((w) => said2.has(w)).length })).filter((x) => x.shared > 0).sort((a, b) => b.shared - a.shared).slice(0, 6);
     const out = [];
     for (const { id } of near) {
       const price = priceOf(ctx, { catalog: id, place });
@@ -22652,7 +22655,7 @@ function registerRest(r, hooks) {
     return own(ctx.state.entities, id)?.kind === "account" ? managesAccount(ctx, id, by) : managesParty(ctx.state, id, by);
   });
   r.formula("is_credit", (ctx, account) => traitsOf(ctx, String(account ?? ""))?.liability === true);
-  r.formula("money_feature", (ctx, feature, who) => FINANCE_FEATURES.includes(String(feature)) && featureFor(ctx, String(who ?? ctx.world.pov), String(feature)));
+  r.formula("money_feature", (ctx, feature2, who) => FINANCE_FEATURES.includes(String(feature2)) && featureFor(ctx, String(who ?? ctx.world.pov), String(feature2)));
   r.formula("credit_score", (ctx, who) => currentScore(ctx, String(who ?? ctx.world.pov)) ?? 0);
   registerEffects(r, hooks);
   registerActions(r);
@@ -22671,8 +22674,8 @@ function registerRest(r, hooks) {
         return [`Money: ${wealthOf(hooks, ctx, pov)}.`];
       const mine = accountsOf(ctx, pov);
       const firstTransactional = mine.find((id) => traitsOf(ctx, id)?.transactional);
-      const shown = mine.filter((id) => level >= 3 || classOf2(ctx, id) === "cash" || id === firstTransactional);
-      const parts = shown.map((id) => {
+      const shown3 = mine.filter((id) => level >= 3 || classOf2(ctx, id) === "cash" || id === firstTransactional);
+      const parts = shown3.map((id) => {
         const b = balance(ctx.state, id);
         const name = own(ctx.state.entities, id)?.name ?? id;
         return traitsOf(ctx, id)?.liability ? `${name} owes ${formatMoney(-b, ctx.world.currency)}` : `${name} ${formatMoney(b, ctx.world.currency)}`;
@@ -22838,8 +22841,8 @@ function registerEffects(r, hooks) {
         return reject8("unpriced", `no price for ${labelOf(ctx, strOf(args.item) || strOf(args.category))}`);
       const { price, row } = priced;
       const name = strOf(args.name) || price.name;
-      const said = payMethodOf(strOf(args.method));
-      const paid = charge(hooks, ctx, payer, price.cents, `Bought ${name}${qty > 1 ? ` \xD7${qty}` : ""}`, { method: said, category: price.category, kind: "purchase", sale: { place: placeOfEntity(ctx.state, payer), item: row ?? name }, ...priced.narrated ? { narrated: priced.narrated } : {}, ...typeof args.payee === "string" ? { payee: args.payee } : {}, ...strOf(args.from) !== "" ? { source: strOf(args.from) } : {}, ...typeof args.cashback === "number" && args.cashback > 0 ? { cashback: args.cashback } : {} });
+      const said2 = payMethodOf(strOf(args.method));
+      const paid = charge(hooks, ctx, payer, price.cents, `Bought ${name}${qty > 1 ? ` \xD7${qty}` : ""}`, { method: said2, category: price.category, kind: "purchase", sale: { place: placeOfEntity(ctx.state, payer), item: row ?? name }, ...priced.narrated ? { narrated: priced.narrated } : {}, ...typeof args.payee === "string" ? { payee: args.payee } : {}, ...strOf(args.from) !== "" ? { source: strOf(args.from) } : {}, ...typeof args.cashback === "number" && args.cashback > 0 ? { cashback: args.cashback } : {} });
       if (isRejection5(paid))
         return paid;
       const out = [...paid];
@@ -22911,7 +22914,7 @@ function registerEffects(r, hooks) {
   r.effect({ type: "economy.release_hold", args: ["account", "hold"], gm: true, resolve: (a, ctx) => releaseHold(ctx, strOf(a.account), strOf(a.hold)) });
 }
 function registerActions(r) {
-  const phone = { duration: "2", observable: "checks their phone" };
+  const phone = { duration: "2", observable: "checks their phone", mechanical: true };
   r.action({ id: "buy", label: "Buy", description: "Buy something: food, drinks, goods or a service, here or delivered.", pack: "economy", params: { item: { type: "text", label: "Item or category" }, qty: { type: "number", optional: true }, price: { type: "money", optional: true, label: "Stated price" }, method: { type: "text", optional: true, label: "Paid with (cash, card, debit or savings)" }, cashback: { type: "money", optional: true, label: "Cash back" } }, requires: ["level.money >= 1"], outcomes: { default: [{ type: "economy.buy", args: { payer: "self", item: "=item", qty: "=qty", price: "=price", method: "=params.method", cashback: "=params.cashback", stated: true } }] }, duration: "5", lexicon: ["buy", "purchase", "order", "pick up a"], observable: "pays for something" });
   r.action({ id: "pay", label: "Pay", description: "Give someone money: settle up, pay them back, tip them.", pack: "economy", params: { to: { type: "ref", ref: "person" }, amount: { type: "money" } }, requires: ["amount > 0", "can_afford(self, amount)"], outcomes: { default: [{ type: "economy.transfer", args: { from: "self", to: "to", cents: "=amount", memo: "Payment" } }] }, duration: "1", lexicon: ["pay", "give money", "send money", "venmo"], observable: "pays someone" });
   r.action({ id: "move_money", label: "Transfer between accounts", description: "Move money between your own accounts: checking, savings, cash.", pack: "economy", params: { from: { type: "ref", ref: "account" }, to: { type: "ref", ref: "account" }, amount: { type: "money" } }, requires: ["spends(self, from)", "holds(self, to)", "amount > 0"], outcomes: { default: [{ type: "economy.move", args: { from: "from", to: "to", cents: "=amount", memo: "Transfer" } }] }, lexicon: ["transfer", "move money", "put into savings"], ...phone });
@@ -23020,15 +23023,15 @@ function isInside(state, inner, outer) {
 }
 function carriedBy(state, holder) {
   const out = [];
-  const visit = (h, depth) => {
+  const visit2 = (h, depth) => {
     if (depth > 32)
       return;
     for (const id of contentsOf(state, h)) {
       out.push(id);
-      visit(id, depth + 1);
+      visit2(id, depth + 1);
     }
   };
-  visit(holder, 0);
+  visit2(holder, 0);
   return out;
 }
 function weightOf(state, id) {
@@ -23099,13 +23102,13 @@ function kitStatus(ctx, kit) {
       back[item.fields.piece] = (own(back, item.fields.piece) ?? 0) + Math.max(1, numOf(item.fields.qty, 1));
   }
   const pieces = template.pieces.map((p) => ({ name: p.name, qty: p.qty, present: Math.max(0, p.qty - (own(taken, p.name) ?? 0) + (own(back, p.name) ?? 0)) }));
-  const present = template.total - template.pieces.reduce((a, p) => a + p.qty, 0) + pieces.reduce((a, p) => a + p.present, 0);
+  const present2 = template.total - template.pieces.reduce((a, p) => a + p.qty, 0) + pieces.reduce((a, p) => a + p.present, 0);
   const missing = pieces.filter((p) => p.present < p.qty).map((p) => `${p.name} \xD7${p.qty - p.present}`);
-  return { present, total: template.total, complete: missing.length === 0, missing, pieces };
+  return { present: present2, total: template.total, complete: missing.length === 0, missing, pieces };
 }
 var PIECE_FILLER = new Set(["a", "an", "the", "of", "my", "your", "some", "one", "set", "and", "with"]);
-function pieceWords(text) {
-  return (text.toLowerCase().match(/[a-z0-9]+/g) ?? []).filter((w) => !PIECE_FILLER.has(w)).map((w) => /(?:ch|sh|x|ss)es$/.test(w) ? w.slice(0, -2) : w.length > 3 && w.endsWith("s") && !w.endsWith("ss") ? w.slice(0, -1) : w);
+function pieceWords(text3) {
+  return (text3.toLowerCase().match(/[a-z0-9]+/g) ?? []).filter((w) => !PIECE_FILLER.has(w)).map((w) => /(?:ch|sh|x|ss)es$/.test(w) ? w.slice(0, -2) : w.length > 3 && w.endsWith("s") && !w.endsWith("ss") ? w.slice(0, -1) : w);
 }
 function findPiece(ctx, kit, name) {
   const template = kitTemplate(ctx, kit);
@@ -23117,17 +23120,17 @@ function findPiece(ctx, kit, name) {
   const direct = template.pieces.find((p) => p.name.toLowerCase() === lower) ?? template.pieces.find((p) => p.name.toLowerCase().includes(lower));
   if (direct)
     return direct;
-  const said = [...new Set(pieceWords(name))];
-  if (said.length === 0)
+  const said2 = [...new Set(pieceWords(name))];
+  if (said2.length === 0)
     return null;
   let best = null;
   for (const piece of template.pieces) {
-    const words = new Set(pieceWords(piece.name));
-    const hit = said.filter((w) => words.has(w));
-    if (hit.length * 2 < said.length || !hit.some((w) => /[a-z]/.test(w)))
+    const words3 = new Set(pieceWords(piece.name));
+    const hit = said2.filter((w) => words3.has(w));
+    if (hit.length * 2 < said2.length || !hit.some((w) => /[a-z]/.test(w)))
       continue;
-    if (!best || hit.length > best.hits || hit.length === best.hits && words.size < best.size)
-      best = { piece, hits: hit.length, size: words.size };
+    if (!best || hit.length > best.hits || hit.length === best.hits && words3.size < best.size)
+      best = { piece, hits: hit.length, size: words3.size };
   }
   return best?.piece ?? null;
 }
@@ -23175,7 +23178,7 @@ function buildGearView(ctx) {
   const level = ctx.levelOf(pov, "gear");
   const cal = calendarOf(ctx.world);
   const lent = new Map(grants(ctx.state).map((g) => [g.thing, g]));
-  const shown = (id) => {
+  const shown3 = (id) => {
     const e = own(ctx.state.entities, id);
     return !!e && e.kind !== "account" && canSeeEntity(ctx.registry, ctx.world, ctx.state, pov, id) && (level >= 2 || e.fields.notable === true);
   };
@@ -23201,23 +23204,23 @@ function buildGearView(ctx) {
     const g = lent.get(id);
     if (g)
       out.lent = { to: own(ctx.state.entities, g.borrower)?.name ?? g.borrower, ...g.until !== null ? { until: formatClock(cal, g.until) } : {}, overdue: g.overdue };
-    const kids = depth < 8 ? contentsOf(ctx.state, id).filter(shown) : [];
+    const kids = depth < 8 ? contentsOf(ctx.state, id).filter(shown3) : [];
     if (kids.length > 0)
       out.children = kids.map((k) => item(k, depth + 1));
     return out;
   };
   const ids = Object.keys(ctx.state.entities).sort();
-  const worn = level >= 3 ? ids.filter((id) => shown(id) && own(ctx.state.entities, id)?.relations.some((r) => (r.type === "worn_by" || r.type === "equipped") && r.to === pov)) : [];
-  const carried = contentsOf(ctx.state, pov).filter((id) => shown(id) && !worn.includes(id));
-  const owned = ids.filter((id) => shown(id) && own(ctx.state.entities, id)?.fields.owner === pov);
+  const worn = level >= 3 ? ids.filter((id) => shown3(id) && own(ctx.state.entities, id)?.relations.some((r) => (r.type === "worn_by" || r.type === "equipped") && r.to === pov)) : [];
+  const carried = contentsOf(ctx.state, pov).filter((id) => shown3(id) && !worn.includes(id));
+  const owned2 = ids.filter((id) => shown3(id) && own(ctx.state.entities, id)?.fields.owner === pov);
   const nested = (id) => {
     const holder = holderOf(ctx.state, id);
-    return !!holder && holder !== pov && own(ctx.state.entities, holder)?.fields.owner === pov && shown(holder);
+    return !!holder && holder !== pov && own(ctx.state.entities, holder)?.fields.owner === pov && shown3(holder);
   };
-  const stored = owned.filter((id) => own(ctx.state.entities, id)?.fields.lost !== true && !isInside(ctx.state, id, pov) && !(holderOf(ctx.state, id) && own(ctx.state.entities, holderOf(ctx.state, id) ?? "")?.fields.owner === pov));
+  const stored = owned2.filter((id) => own(ctx.state.entities, id)?.fields.lost !== true && !isInside(ctx.state, id, pov) && !(holderOf(ctx.state, id) && own(ctx.state.entities, holderOf(ctx.state, id) ?? "")?.fields.owner === pov));
   return {
     level,
-    owned: owned.filter((id) => !nested(id)).map((id) => item(id, 0)),
+    owned: owned2.filter((id) => !nested(id)).map((id) => item(id, 0)),
     worn: worn.map((id) => item(id, 8)),
     carried: carried.map((id) => item(id, 0)),
     stored: stored.map((id) => item(id, 0))
@@ -23500,24 +23503,24 @@ function reject9(code, reason) {
   return { code, reason };
 }
 var CASH_WORDS = { cash: null, money: null, buck: null, bucks: null, change: null, coin: null, coins: null, banknote: null, banknotes: null, twenties: null, fifties: null, fiver: 5, tenner: 10, twenty: 20, fifty: 50, hundred: 100 };
-function cashGift(text, currency) {
-  const t = text.trim().toLowerCase().replace(/\s+/g, " ").replace(/(\d),(?=\d{3}\b)/g, "$1");
+function cashGift(text3, currency) {
+  const t = text3.trim().toLowerCase().replace(/\s+/g, " ").replace(/(\d),(?=\d{3}\b)/g, "$1");
   if (t === "")
     return null;
-  const quote = (s) => s.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const quote2 = (s) => s.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const article = "(?:(?:some|the|a|an|my|his|her|their) )?";
   const tail = "(?: (?:bills?|notes?|in cash))?";
-  const unit = "(?:dollars?|bucks?|euros?|pounds?)";
+  const unit3 = "(?:dollars?|bucks?|euros?|pounds?)";
   const n = "(\\d+(?:\\.\\d+)?)";
-  const symbol = quote(currency.symbol);
-  const code = quote(currency.code);
-  const amounts = [...symbol !== "" ? [`${symbol} ?${n}`, `${n} ?${symbol}`] : [], ...code !== "" ? [`${n} ?${code}`] : [], `${n}[ -]${unit}`];
+  const symbol = quote2(currency.symbol);
+  const code = quote2(currency.code);
+  const amounts = [...symbol !== "" ? [`${symbol} ?${n}`, `${n} ?${symbol}`] : [], ...code !== "" ? [`${n} ?${code}`] : [], `${n}[ -]${unit3}`];
   for (const form of amounts) {
-    const said = new RegExp(`^${article}${form}${tail}$`).exec(t)?.[1];
-    if (said !== undefined)
-      return { amount: Number(said) };
+    const said2 = new RegExp(`^${article}${form}${tail}$`).exec(t)?.[1];
+    if (said2 !== undefined)
+      return { amount: Number(said2) };
   }
-  const word = new RegExp(`^${article}([a-z]+)(?:[ -]${unit})?${tail}$`).exec(t)?.[1];
+  const word = new RegExp(`^${article}([a-z]+)(?:[ -]${unit3})?${tail}$`).exec(t)?.[1];
   return word !== undefined && hasOwn(CASH_WORDS, word) ? { amount: CASH_WORDS[word] ?? null } : null;
 }
 function gearLevel(ctx, thing, to) {
@@ -23644,12 +23647,12 @@ var claim = (ctx, c) => {
     return reject9("missing_entity", `no claimer ${labelOf(ctx, c.by)}`);
   const name = c.name.trim();
   if (c.at === "held") {
-    const held = carriedBy(ctx.state, c.by).find((id) => {
-      const e = own(ctx.state.entities, id);
-      return e !== undefined && !isGone(ctx.state, id) && (c.catalog ? e.fields.catalog === c.catalog : e.name.trim().toLowerCase() === name.toLowerCase());
+    const held2 = carriedBy(ctx.state, c.by).find((id2) => {
+      const e = own(ctx.state.entities, id2);
+      return e !== undefined && !isGone(ctx.state, id2) && (c.catalog ? e.fields.catalog === c.catalog : e.name.trim().toLowerCase() === name.toLowerCase());
     });
-    if (held)
-      return { entity: held, events: [] };
+    if (held2)
+      return { entity: held2, events: [] };
   }
   const place = placeOfEntity(ctx.state, c.by);
   if (c.at === "here" && !place)
@@ -23690,8 +23693,8 @@ var takePiece = (ctx, kit, piece, to) => {
   const back = contentsOf(ctx.state, kit).find((id) => own(ctx.state.entities, id)?.fields.from_kit === kit && own(ctx.state.entities, id)?.fields.piece === p.name);
   if (back)
     return transfer2(ctx, back, to);
-  const present = status.pieces.find((x) => x.name === p.name)?.present ?? 0;
-  if (present <= 0)
+  const present2 = status.pieces.find((x) => x.name === p.name)?.present ?? 0;
+  if (present2 <= 0)
     return reject9("no_piece", `no ${p.name} left in ${k.name}`);
   const taken = takenOf(ctx.state, kit);
   const spawned = spawn(ctx, { name: p.name, owner: typeof k.fields.owner === "string" ? k.fields.owner : null, holder: to, salt: `${kit}:${p.name}:${own(taken, p.name) ?? 0}` });
@@ -23812,11 +23815,11 @@ var gearPack = {
     wrap("gear.receive", ["name", "to", "from?"], (a, ctx) => spawn(ctx, { name: strOf(a.name), owner: strOf(a.to), holder: strOf(a.to), salt: `give:${strOf(a.from)}:${ctx.state.clock}` }));
     wrap("gear.take_piece", ["kit", "piece", "to"], (a, ctx) => takePiece(ctx, strOf(a.kit), strOf(a.piece), strOf(a.to)));
     wrap("gear.lend", ["item", "to", "until?", "said?"], (a, ctx) => {
-      const said = strOf(a.said);
-      const at = said !== "" ? clockOfPhrase(calendarOf(ctx.world), ctx.state.clock, said) : null;
+      const said2 = strOf(a.said);
+      const at = said2 !== "" ? clockOfPhrase(calendarOf(ctx.world), ctx.state.clock, said2) : null;
       const until = at ?? numOf(a.until, NaN);
-      if (said !== "" && at === null && !(until > ctx.state.clock))
-        return reject9("bad_until", `"${said}" names no time; say how many days or until when`);
+      if (said2 !== "" && at === null && !(until > ctx.state.clock))
+        return reject9("bad_until", `"${said2}" names no time; say how many days or until when`);
       return lend(ctx, strOf(a.item), strOf(a.to), until);
     });
     wrap("gear.retrieve", ["item"], (a, ctx) => retrieve(ctx, strOf(a.item)));
@@ -23869,14 +23872,14 @@ var gearPack = {
         const out = [];
         const lose = optionalService(ctx, "economy.lose");
         if (lose) {
-          const money = lose(ctx, item, strOf(args.thief) || undefined);
-          if (!Array.isArray(money))
-            return money;
-          out.push(...money);
+          const money4 = lose(ctx, item, strOf(args.thief) || undefined);
+          if (!Array.isArray(money4))
+            return money4;
+          out.push(...money4);
         }
-        for (const r of e.relations)
-          if (r.type === "in" || r.type === "worn_by" || r.type === "equipped")
-            out.push({ type: "unlink", rel: r.type, from: item, to: r.to });
+        for (const r2 of e.relations)
+          if (r2.type === "in" || r2.type === "worn_by" || r2.type === "equipped")
+            out.push({ type: "unlink", rel: r2.type, from: item, to: r2.to });
         out.push({ type: "set", entity: item, field: "lost", value: true });
         if (typeof e.fields.place === "string")
           out.push({ type: "set", entity: item, field: "place", value: null });
@@ -23950,7 +23953,7 @@ var gearPack = {
         if (level === 0)
           return [];
         const carried = carriedBy(ctx.state, pov).filter((id) => own(ctx.state.entities, id)?.kind !== "account");
-        const shown = carried.filter((id) => level >= 2 || own(ctx.state.entities, id)?.fields.notable === true);
+        const shown3 = carried.filter((id) => level >= 2 || own(ctx.state.entities, id)?.fields.notable === true);
         const lines = [];
         const label = (id) => {
           const e = own(ctx.state.entities, id);
@@ -23960,8 +23963,8 @@ var gearPack = {
           const kit = level >= 3 ? kitStatus(ctx, id) : null;
           return `${e.name}${qty > 1 ? ` \xD7${qty}` : ""}${kit ? ` (${kit.present}/${kit.total})` : ""}`;
         };
-        if (shown.length > 0)
-          lines.push(`Carrying: ${shown.slice(0, 12).map(label).join(", ")}.`);
+        if (shown3.length > 0)
+          lines.push(`Carrying: ${shown3.slice(0, 12).map(label).join(", ")}.`);
         if (level >= 3) {
           const worn = Object.keys(ctx.state.entities).filter((id) => own(ctx.state.entities, id)?.relations.some((x) => (x.type === "worn_by" || x.type === "equipped") && x.to === pov));
           if (worn.length > 0)
@@ -24080,8 +24083,8 @@ function buildGarageView(ctx) {
       if (interval !== null) {
         const used = typeof e.fields.odometer_mi === "number" ? e.fields.odometer_mi : numOf(e.fields.engine_hours);
         const due = numOf(e.fields.last_service) + interval;
-        const unit = typeof e.fields.odometer_mi === "number" ? "mi" : "h";
-        v.service = [{ label: "Service", due: `${Math.round(due)} ${unit}`, overdue: used > due }];
+        const unit3 = typeof e.fields.odometer_mi === "number" ? "mi" : "h";
+        v.service = [{ label: "Service", due: `${Math.round(due)} ${unit3}`, overdue: used > due }];
       }
     }
     vehicles.push(v);
@@ -24228,12 +24231,12 @@ function fuelUse(ctx, vehicle, leg) {
   if (level >= 4 && payload > 0 && cargoKg > payload / 2)
     mult *= guide === "road" ? factor(ctx, "road", "loaded_to_payload") : guide === "marine" ? factor(ctx, "marine", "heavy_load_full_crew") : factor(ctx, "offroad", "two_up_or_loaded_cargo");
   const consumption = objOf(row.consumption);
-  const unit = strOf(row.consumption_unit);
-  if (unit === "mpg" || unit === "mi_per_kwh") {
+  const unit3 = strOf(row.consumption_unit);
+  if (unit3 === "mpg" || unit3 === "mi_per_kwh") {
     const rate = numOf(consumption.combined, numOf(consumption.highway, 25));
     const used = rate > 0 ? miles / rate * mult : 0;
-    const capacity = unit === "mpg" ? numOf(row.tank_capacity_gal, 15) : numOf(row.usable_battery_kwh, 60);
-    return { pct: used / capacity * 100, miles, hours };
+    const capacity2 = unit3 === "mpg" ? numOf(row.tank_capacity_gal, 15) : numOf(row.usable_battery_kwh, 60);
+    return { pct: used / capacity2 * 100, miles, hours };
   }
   const perHour = guide === "marine" ? numOf(consumption.cruise_planing, 5) : numOf(consumption.normal_trail, 1.5);
   const capacity = numOf(row.tank_capacity_gal, 10);
@@ -24286,9 +24289,9 @@ var consume = (ctx, vehicle, leg, rng) => {
 function legFor(ctx, vehicle, from, to) {
   const route = optionalQuery(ctx, "space.route");
   for (const mode of modesOf(ctx, vehicle)) {
-    const plan = route ? route(ctx, from, to, mode) : null;
-    if (plan)
-      return { minutes: plan.minutes, distanceKm: plan.distanceKm, terrain: plan.legs.find((l) => l.terrain)?.terrain ?? null, mode };
+    const plan2 = route ? route(ctx, from, to, mode) : null;
+    if (plan2)
+      return { minutes: plan2.minutes, distanceKm: plan2.distanceKm, terrain: plan2.legs.find((l) => l.terrain)?.terrain ?? null, mode };
   }
   return null;
 }
@@ -24588,7 +24591,7 @@ var core_default5 = vehiclesPack;
 
 // src/packs/weather/core/index.ts
 var DEFAULT_PERSIST = 0.7;
-var state = (id, label, factor, closes = []) => ({ id, label, travel: factor === 1 ? {} : { walk: factor, road: factor, offroad: factor, water: factor }, closes });
+var state = (id, label, factor2, closes = []) => ({ id, label, travel: factor2 === 1 ? {} : { walk: factor2, road: factor2, offroad: factor2, water: factor2 }, closes });
 var BASE_STATES = [state("clear", "Clear", 1), state("cloudy", "Overcast", 1), state("rain", "Rain", 1.15), state("storm", "A storm", 1.6, ["water"]), state("fog", "Fog", 1.2), state("snow", "Snow", 1.5)];
 var CLIMATES = {
   temperate: {
@@ -24647,12 +24650,12 @@ function parseClimate(raw) {
   const states = (Array.isArray(raw.states) ? raw.states : []).map((s) => {
     const o = objOf(s);
     const effects = objOf(o.effects);
-    const travel = {};
+    const travel2 = {};
     for (const [mode, x] of Object.entries(objOf(effects.travelTimeMultiplier)))
       if (typeof x === "number")
-        travel[mode] = x;
+        travel2[mode] = x;
     const closes = Array.isArray(effects.closes) ? effects.closes.filter((m) => typeof m === "string") : [];
-    return { id: strOf(o.id), label: strOf(o.label, strOf(o.id)), travel, closes };
+    return { id: strOf(o.id), label: strOf(o.label, strOf(o.id)), travel: travel2, closes };
   });
   const seasons = (Array.isArray(raw.seasons) ? raw.seasons : []).map((s) => {
     const o = objOf(s);
@@ -24728,17 +24731,17 @@ function stepRegions(slot, ctx, rng) {
     const ends = until !== "" && truthy2(evalExpr(until, scopeEnv({ reg: ctx.registry, ctx, bindings: {} }), false));
     if (ends)
       out.push({ type: "set", entity: id, field: "weather_hold_until", value: "" }, { type: "set", entity: id, field: "weather_hold", value: 0 });
-    const held = !ends && (numOf(e.fields.weather_hold, -Infinity) > slot.start || until !== "");
+    const held2 = !ends && (numOf(e.fields.weather_hold, -Infinity) > slot.start || until !== "");
     const keep = g.next() < climate.persist && (own(season.weights, cur) ?? 0) > 0;
     const options = Object.entries(season.weights).map(([value, weight]) => ({ value, weight }));
-    const next = held || keep || options.length === 0 ? cur : g.weighted(options);
+    const next = held2 || keep || options.length === 0 ? cur : g.weighted(options);
     if (next !== cur)
       out.push({ type: "set", entity: id, field: "weather", value: next });
     if (level >= 3) {
       const [lo, hi] = season.temp;
       const warm = part === "afternoon" ? 1 : part === "morning" || part === "evening" ? 0.55 : 0.1;
-      const st = climate.states.find((s) => s.id === next);
-      const wet = st && (st.closes.length > 0 || Object.keys(st.travel).length > 0) ? -2 : 0;
+      const st2 = climate.states.find((s) => s.id === next);
+      const wet = st2 && (st2.closes.length > 0 || Object.keys(st2.travel).length > 0) ? -2 : 0;
       const t = Math.round((lo + (hi - lo) * warm + wet + (g.next() * 4 - 2)) * 10) / 10;
       if (t !== numOf(e.fields.temp_c, NaN))
         out.push({ type: "set", entity: id, field: "temp_c", value: t });
@@ -24914,8 +24917,8 @@ function bandsOf(ctx) {
 function halfLife(ctx) {
   return numOf(config(ctx).halfLifeDays, DEFAULT_HALF_LIFE_DAYS) * 1440;
 }
-function relationOf(state, from, to) {
-  const r = own(state.entities, from)?.relations.find((x) => x.type === "regard" && x.to === to);
+function relationOf(state2, from, to) {
+  const r = own(state2.entities, from)?.relations.find((x) => x.type === "regard" && x.to === to);
   return r ? r.fields ?? {} : null;
 }
 function decayed(ctx, from, value, since, at) {
@@ -24981,11 +24984,11 @@ function anchorAfter(ctx, from, to, deltas, at) {
   out.t = at;
   return out;
 }
-function writeRegard(state, from, to, anchor, entry) {
-  const entity = own(state.entities, from);
+function writeRegard(state2, from, to, anchor, entry) {
+  const entity = own(state2.entities, from);
   if (!entity)
     return;
-  const prev = relationOf(state, from, to) ?? {};
+  const prev = relationOf(state2, from, to) ?? {};
   const fields = { ...prev, ...anchor };
   if (entry)
     fields.history = [...Array.isArray(prev.history) ? prev.history.slice(-(HISTORY - 1)) : [], entry];
@@ -24999,30 +25002,30 @@ var regardEvent = {
     const to = strOf(e.data.to);
     if (!own(ctx.state.entities, from) || !own(ctx.state.entities, to))
       return { code: "missing_entity", reason: "regard needs two entities" };
-    const numbers = [...Object.values(objOf(e.data.deltas)), ...Object.values(objOf(e.data.anchor))];
+    const numbers2 = [...Object.values(objOf(e.data.deltas)), ...Object.values(objOf(e.data.anchor))];
     if (e.data.deltas === undefined && e.data.anchor === undefined)
       return { code: "bad_delta", reason: "regard needs deltas or an anchor" };
-    return numbers.every((v) => typeof v === "number" && Number.isFinite(v)) ? null : { code: "bad_delta", reason: "regard values must be numbers" };
+    return numbers2.every((v) => typeof v === "number" && Number.isFinite(v)) ? null : { code: "bad_delta", reason: "regard values must be numbers" };
   },
-  apply: (e, state, ctx) => {
+  apply: (e, state2, ctx) => {
     const from = strOf(e.data.from);
     const to = strOf(e.data.to);
     const mutual = e.data.mutual === true;
     if (e.data.deltas !== undefined) {
-      const rctx = { ...ctx, state };
+      const rctx = { ...ctx, state: state2 };
       const deltas = objOf(e.data.deltas);
-      const entry = e.data.npc === true ? null : { at: state.clock, why: strOf(e.data.why), deltas };
-      const fwd = anchorAfter(rctx, from, to, deltas, state.clock);
-      const rev = mutual ? anchorAfter(rctx, to, from, deltas, state.clock) : null;
-      writeRegard(state, from, to, fwd, entry);
+      const entry = e.data.npc === true ? null : { at: state2.clock, why: strOf(e.data.why), deltas };
+      const fwd = anchorAfter(rctx, from, to, deltas, state2.clock);
+      const rev = mutual ? anchorAfter(rctx, to, from, deltas, state2.clock) : null;
+      writeRegard(state2, from, to, fwd, entry);
       if (rev)
-        writeRegard(state, to, from, rev, entry);
+        writeRegard(state2, to, from, rev, entry);
       return;
     }
     const anchor = objOf(e.data.anchor);
-    writeRegard(state, from, to, anchor, null);
+    writeRegard(state2, from, to, anchor, null);
     if (mutual)
-      writeRegard(state, to, from, e.data.back === undefined ? anchor : objOf(e.data.back), null);
+      writeRegard(state2, to, from, e.data.back === undefined ? anchor : objOf(e.data.back), null);
   },
   touches: (e) => {
     const from = strOf(e.data.from);
@@ -25150,9 +25153,9 @@ var relationshipsPack = {
           const life = povLife(ctx.world, ctx.state, id);
           if (life && !life.acts)
             continue;
-          const line = voiceLine(ctx, id);
-          if (line)
-            lines.push(line);
+          const line2 = voiceLine(ctx, id);
+          if (line2)
+            lines.push(line2);
         }
         return lines;
       }
@@ -25349,13 +25352,13 @@ function sourceProblem(v, world) {
   if (!isRecord(v))
     return "its source isn't one";
   const t = v.type;
-  const quote = v.quote === undefined || typeof v.quote === "string";
+  const quote2 = v.quote === undefined || typeof v.quote === "string";
   if (t === "authored")
     return null;
   if (t === "lore")
-    return typeof v.entry === "string" && v.entry !== "" && quote ? null : "a lore source names its entry";
+    return typeof v.entry === "string" && v.entry !== "" && quote2 ? null : "a lore source names its entry";
   if (t === "sheet")
-    return typeof v.entity === "string" && typeof v.field === "string" && quote ? null : "a sheet source names its entity and field";
+    return typeof v.entity === "string" && typeof v.field === "string" && quote2 ? null : "a sheet source names its entity and field";
   if (world)
     return "world data rests on what's authored, a lore entry or a sheet field";
   if (t === "builtin")
@@ -25381,14 +25384,14 @@ function daysProblem(v) {
   if (!isRecord(v))
     return "its days aren't a set of constraints";
   const ints = (x, lo, hi) => Array.isArray(x) && x.every((n) => Number.isInteger(n) && n >= lo && n <= hi);
-  const strs = (x) => Array.isArray(x) && x.every((s) => typeof s === "string");
+  const strs2 = (x) => Array.isArray(x) && x.every((s) => typeof s === "string");
   if (v.weekdays !== undefined && !ints(v.weekdays, 0, 6))
     return "weekdays are 0 (Sunday) to 6";
   if (v.off !== undefined && v.off !== "only" && v.off !== "never")
     return "days off are only or never";
-  if (v.holidays !== undefined && !strs(v.holidays))
+  if (v.holidays !== undefined && !strs2(v.holidays))
     return "holidays are calendar ids";
-  if (v.except !== undefined && !strs(v.except))
+  if (v.except !== undefined && !strs2(v.except))
     return "except lists calendar ids";
   if (v.birthday !== undefined && v.birthday !== "own" && v.birthday !== "friend")
     return "a birthday is own or friend";
@@ -25480,10 +25483,10 @@ function workPlace(ctx, who) {
     return employer;
   return placeOfEntity(ctx.state, employer);
 }
-function placeOfType(ctx, sceneType, near) {
+function placeOfType(ctx, sceneType2, near) {
   const ids = Object.keys(ctx.world.places).sort();
   const parent = near ? own(ctx.world.places, near)?.parent : undefined;
-  return ids.find((id) => own(ctx.world.places, id)?.sceneType === sceneType && own(ctx.world.places, id)?.parent === parent) ?? ids.find((id) => own(ctx.world.places, id)?.sceneType === sceneType && own(ctx.world.places, id)?.visibility !== "secret") ?? null;
+  return ids.find((id) => own(ctx.world.places, id)?.sceneType === sceneType2 && own(ctx.world.places, id)?.parent === parent) ?? ids.find((id) => own(ctx.world.places, id)?.sceneType === sceneType2 && own(ctx.world.places, id)?.visibility !== "secret") ?? null;
 }
 
 // src/packs/castlife/core/occasions.ts
@@ -25493,12 +25496,12 @@ function birthdayOf(cal, v) {
   if (!m)
     return null;
   const month = Number(m[2]);
-  const day = Number(m[3]);
+  const day2 = Number(m[3]);
   const year = m[1] === undefined ? null : Number(m[1]);
-  if (month < 1 || month > cal.system.months || day < 1)
+  if (month < 1 || month > cal.system.months || day2 < 1)
     return null;
   const longest = year !== null ? cal.system.monthLength(year, month) : Math.max(...[0, 1, 2, 3].map((y) => cal.system.monthLength(y, month)));
-  return day <= longest ? { month, day, year } : null;
+  return day2 <= longest ? { month, day: day2, year } : null;
 }
 function birthdayOn(cal, v, date) {
   const b = birthdayOf(cal, v);
@@ -25507,11 +25510,11 @@ function birthdayOn(cal, v, date) {
   const last = cal.system.monthLength(date.year, date.month);
   return b.day === date.day || b.day > last && date.day === last;
 }
-function occasionOf(ctx, who, day) {
+function occasionOf(ctx, who, day2) {
   const cal = calendarOf(ctx.world);
-  const date = dateAt(cal, clockAt(cal, day, 0));
+  const date = dateAt(cal, clockAt(cal, day2, 0));
   const weekend = date.weekday === 0 || date.weekday === 6;
-  const holidays = ctx.levelOf(ctx.world.pov, "calendar") >= 4 ? holidaysOn(cal, day).map((h) => ({ id: h.id, label: h.label, dayOff: h.dayOff })) : [];
+  const holidays = ctx.levelOf(ctx.world.pov, "calendar") >= 4 ? holidaysOn(cal, day2).map((h) => ({ id: h.id, label: h.label, dayOff: h.dayOff })) : [];
   const regard = optionalQuery(ctx, "regard");
   const friends = regard ? Object.keys(ctx.state.entities).sort().filter((other) => {
     const e = own(ctx.state.entities, other);
@@ -25525,7 +25528,7 @@ function occasionOf(ctx, who, day) {
     holidays,
     birthday: birthdayOn(cal, own(ctx.state.entities, who)?.fields.birthday, date),
     friends,
-    season: optionalQuery(ctx, "weather.season")?.(ctx, clockAt(cal, day, 12 * 60)) ?? null,
+    season: optionalQuery(ctx, "weather.season")?.(ctx, clockAt(cal, day2, 12 * 60)) ?? null,
     foul: place ? optionalQuery(ctx, "weather.foul")?.(ctx, place) ?? null : null
   };
 }
@@ -25540,8 +25543,8 @@ function chatSource(v) {
     return { type: "story", at: o.at, ...typeof o.turn === "string" ? { turn: o.turn } : {}, ...o.by === "player" ? { by: "player" } : {} };
   return null;
 }
-function chatFollow(state, who) {
-  const raw = own(objOf(sliceOf(state, "castlife").follow), who);
+function chatFollow(state2, who) {
+  const raw = own(objOf(sliceOf(state2, "castlife").follow), who);
   if (!isRecord(raw))
     return null;
   const mode = ROUTINE_MODES.find((m) => m === raw.mode) ?? null;
@@ -25550,9 +25553,9 @@ function chatFollow(state, who) {
   const skips = SKIP_LIVES.find((s) => s === raw.skips) ?? null;
   return mode === null && awareness === null && role === null && skips === null ? null : { mode, awareness, role, skips };
 }
-function chatBlocks(state, who) {
+function chatBlocks(state2, who) {
   const out = {};
-  for (const [id, raw] of Object.entries(objOf(own(objOf(sliceOf(state, "castlife").routines), who)))) {
+  for (const [id, raw] of Object.entries(objOf(own(objOf(sliceOf(state2, "castlife").routines), who)))) {
     const c = objOf(raw);
     const source = chatSource(c.source);
     if (source && isRecord(c.value) && blockShapeProblems(c.value, false).length === 0)
@@ -25560,9 +25563,9 @@ function chatBlocks(state, who) {
   }
   return out;
 }
-function chatSchedules(state, who) {
+function chatSchedules(state2, who) {
   const out = {};
-  for (const [id, raw] of Object.entries(objOf(own(objOf(sliceOf(state, "castlife").schedules), who)))) {
+  for (const [id, raw] of Object.entries(objOf(own(objOf(sliceOf(state2, "castlife").schedules), who)))) {
     const c = objOf(raw);
     const source = chatSource(c.source);
     const v = objOf(c.value);
@@ -25587,20 +25590,20 @@ function skipLifeOf(ctx, who) {
     return null;
   return chatFollow(ctx.state, who)?.skips ?? routineSettingsOf(ctx.world).skips[optionalQuery(ctx, "minds.tier")?.(ctx, who) ?? "background"];
 }
-function skipPlanOf(state) {
-  const raw = sliceOf(state, "castlife").skipPlan;
+function skipPlanOf(state2) {
+  const raw = sliceOf(state2, "castlife").skipPlan;
   return isRecord(raw) && typeof raw.from === "number" && typeof raw.to === "number" && Array.isArray(raw.plans) ? raw : null;
 }
-function routineRank(reg, world, state, def) {
-  const rank = ownerRank(reg, world, state, def);
+function routineRank(reg, world, state2, def) {
+  const rank = ownerRank(reg, world, state2, def);
   return rank === null ? 5 : rank + 1;
 }
-function covers2(reg, world, state, def, who) {
+function covers2(reg, world, state2, def, who) {
   if (def.owner === undefined) {
-    const e = own(state.entities, who);
-    return !!e && kindIs(reg, world, e.kind, "person") && !isGone(state, who) && acts(world, state, who);
+    const e = own(state2.entities, who);
+    return !!e && kindIs(reg, world, e.kind, "person") && !isGone(state2, who) && acts(world, state2, who);
   }
-  return scheduleOwners(reg, world, state, def).includes(who);
+  return scheduleOwners(reg, world, state2, def).includes(who);
 }
 function worldRoutines(world) {
   const raw = world.routines ?? {};
@@ -25609,8 +25612,8 @@ function worldRoutines(world) {
     return r && routineShapeProblems(r).length === 0 ? [r] : [];
   });
 }
-function routineCandidates(ctx, who, day) {
-  const { registry: reg, world, state } = ctx;
+function routineCandidates(ctx, who, day2) {
+  const { registry: reg, world, state: state2 } = ctx;
   const out = new Map;
   const add = (a) => {
     const list = out.get(a.entry.id) ?? [];
@@ -25618,7 +25621,7 @@ function routineCandidates(ctx, who, day) {
     out.set(a.entry.id, list);
   };
   const off = followOf(ctx, who).mode === "off";
-  const ranked = off ? [] : worldRoutines(world).flatMap((def) => covers2(reg, world, state, def, who) ? [{ def, rank: routineRank(reg, world, state, def) }] : []);
+  const ranked = off ? [] : worldRoutines(world).flatMap((def) => covers2(reg, world, state2, def, who) ? [{ def, rank: routineRank(reg, world, state2, def) }] : []);
   const cut = Math.min(6, ...ranked.filter((r) => r.def.inherit === false).map((r) => r.rank));
   for (const { def, rank } of ranked) {
     if (rank > cut)
@@ -25630,8 +25633,8 @@ function routineCandidates(ctx, who, day) {
   for (const entry of BASIC_BLOCKS)
     add({ entry, routine: null, level: "builtin", rank: 6, source: { type: "builtin" } });
   const cal = calendarOf(world);
-  for (const [id, c] of Object.entries(chatBlocks(state, who))) {
-    if (day !== undefined && c.source.type === "story" && !isOff(c.value) && day <= dateAt(cal, c.source.at).dayIndex)
+  for (const [id, c] of Object.entries(chatBlocks(state2, who))) {
+    if (day2 !== undefined && c.source.type === "story" && !isOff(c.value) && day2 <= dateAt(cal, c.source.at).dayIndex)
       continue;
     add({ entry: { ...c.value, id }, routine: null, level: "chat", rank: 0, source: c.source });
   }
@@ -25639,28 +25642,28 @@ function routineCandidates(ctx, who, day) {
     list.sort((a, b) => a.rank - b.rank || (a.routine?.id ?? "").localeCompare(b.routine?.id ?? ""));
   return out;
 }
-function activeBlocks(ctx, who, day) {
+function activeBlocks(ctx, who, day2) {
   const out = [];
-  for (const list of routineCandidates(ctx, who, day).values()) {
+  for (const list of routineCandidates(ctx, who, day2).values()) {
     const top = list[0];
     if (top && !isOff(top.entry))
       out.push({ block: top.entry, from: top });
   }
   return out;
 }
-function daysHold(ctx, block, day, occasion) {
+function daysHold(ctx, block, day2, occasion) {
   const d = block.days;
   if (!d)
     return true;
   const cal = calendarOf(ctx.world);
-  const date = dateAt(cal, clockAt(cal, day, 0));
+  const date = dateAt(cal, clockAt(cal, day2, 0));
   if (d.weekdays && !d.weekdays.includes(date.weekday))
     return false;
   if (d.off === "only" && !occasion.dayOff)
     return false;
   if (d.off === "never" && occasion.dayOff)
     return false;
-  const holidays = d.holidays || d.except ? holidaysOn(cal, day).map((h) => h.id) : [];
+  const holidays = d.holidays || d.except ? holidaysOn(cal, day2).map((h) => h.id) : [];
   if (d.holidays && !d.holidays.some((h) => holidays.includes(h)))
     return false;
   if (d.except?.some((h) => holidays.includes(h)))
@@ -25677,27 +25680,27 @@ function daysHold(ctx, block, day, occasion) {
     return false;
   return true;
 }
-function blockOnDay(ctx, who, block, day, occasion = occasionOf(ctx, who, day)) {
-  if (!daysHold(ctx, block, day, occasion))
+function blockOnDay(ctx, who, block, day2, occasion = occasionOf(ctx, who, day2)) {
+  if (!daysHold(ctx, block, day2, occasion))
     return false;
   if (block.perWeek !== undefined && block.kind !== "fixed") {
     const cal = calendarOf(ctx.world);
-    const weekStart = day - dateAt(cal, clockAt(cal, day, 0)).weekday;
-    const eligible = [];
+    const weekStart = day2 - dateAt(cal, clockAt(cal, day2, 0)).weekday;
+    const eligible2 = [];
     for (let d = weekStart;d < weekStart + 7; d++)
-      if (d === day || daysHold(ctx, block, d, occasionOf(ctx, who, d)))
-        eligible.push(d);
+      if (d === day2 || daysHold(ctx, block, d, occasionOf(ctx, who, d)))
+        eligible2.push(d);
     const rng = createRng(hashParts("castlife.routine.week", ctx.world.id, who, block.id, String(weekStart)));
-    const picked = [...eligible].sort((a, b) => a - b);
+    const picked = [...eligible2].sort((a, b) => a - b);
     for (let i = picked.length - 1;i > 0; i--) {
       const j = Math.floor(rng.next() * (i + 1));
       [picked[i], picked[j]] = [picked[j], picked[i]];
     }
-    if (!picked.slice(0, block.perWeek).includes(day))
+    if (!picked.slice(0, block.perWeek).includes(day2))
       return false;
   }
   if (block.kind === "optional")
-    return createRng(hashParts("castlife.routine.day", ctx.world.id, who, block.id, String(day))).next() < (block.chance ?? 0.5);
+    return createRng(hashParts("castlife.routine.day", ctx.world.id, who, block.id, String(day2))).next() < (block.chance ?? 0.5);
   return true;
 }
 function companyOf(ctx, who, block) {
@@ -25731,11 +25734,11 @@ function blockReason(block, from) {
     return "basic need";
   return block.kind === "optional" ? "a habit" : "routine";
 }
-function routineDay(ctx, who, day, commitments, needs) {
+function routineDay(ctx, who, day2, commitments, needs) {
   const cal = calendarOf(ctx.world);
-  const start = clockAt(cal, day, 0);
-  const blocks = activeBlocks(ctx, who, day);
-  const before = new Map(activeBlocks(ctx, who, day - 1).map((a) => [a.block.id, a]));
+  const start = clockAt(cal, day2, 0);
+  const blocks = activeBlocks(ctx, who, day2);
+  const before = new Map(activeBlocks(ctx, who, day2 - 1).map((a) => [a.block.id, a]));
   const occasions = new Map;
   const occasion = (d) => {
     const cached = occasions.get(d);
@@ -25757,9 +25760,9 @@ function routineDay(ctx, who, day, commitments, needs) {
   const worth = (block) => (t, laid) => (block.priority ?? 3) + Math.max(0, ...(block.needs ?? needs.meets(block.activity)).map((n) => needs.need(n, t, laid) / 20));
   const firm = blocks.filter((b) => b.block.kind === "fixed").sort((a, b) => (b.block.priority ?? 3) - (a.block.priority ?? 3) || a.block.id.localeCompare(b.block.id));
   const taken = commitments.map((c) => ({ start: c.start, end: c.end }));
-  for (const today of firm) {
-    for (const d of [day - 1, day]) {
-      const had = d === day ? today : before.get(today.block.id);
+  for (const today2 of firm) {
+    for (const d of [day2 - 1, day2]) {
+      const had = d === day2 ? today2 : before.get(today2.block.id);
       if (!had || had.block.kind !== "fixed" || !blockOnDay(ctx, who, had.block, d, occasion(d)))
         continue;
       const { block, from } = had;
@@ -25783,13 +25786,13 @@ function routineDay(ctx, who, day, commitments, needs) {
     const prior = before.get(block.id);
     const night = prior && prior.block.kind !== "fixed" && prior.block.window ? { block: prior.block, from: prior.from, span: windowSpan(prior.block.window) } : null;
     const reasons = [blockReason(block, from)];
-    if (blockOnDay(ctx, who, block, day, occasion(day))) {
-      options.push({ id: `${ROUTINE_OPTION}${block.id}`, label: block.label, activity: block.activity, place: blockPlace(ctx, who, block, occasion(day)), duration: block.minutes, window: { from: start + span.from, to: start + span.to }, utility: worth(block), reasons, because: pressed(block) });
+    if (blockOnDay(ctx, who, block, day2, occasion(day2))) {
+      options.push({ id: `${ROUTINE_OPTION}${block.id}`, label: block.label, activity: block.activity, place: blockPlace(ctx, who, block, occasion(day2)), duration: block.minutes, window: { from: start + span.from, to: start + span.to }, utility: worth(block), reasons, because: pressed(block) });
     }
-    if (night && night.span.to > MINUTES_PER_DAY && blockOnDay(ctx, who, night.block, day - 1, occasion(day - 1))) {
+    if (night && night.span.to > MINUTES_PER_DAY && blockOnDay(ctx, who, night.block, day2 - 1, occasion(day2 - 1))) {
       const left = Math.round((night.span.from + night.span.to) / 2) + night.block.minutes - MINUTES_PER_DAY;
       if (left > 0)
-        options.push({ id: `${ROUTINE_OPTION}${block.id}:carried`, label: night.block.label, activity: night.block.activity, place: blockPlace(ctx, who, night.block, occasion(day - 1)), duration: left, window: { from: start, to: start + 1 }, utility: (night.block.priority ?? 3) + 5, reasons: [blockReason(night.block, night.from)], because: pressed(night.block) });
+        options.push({ id: `${ROUTINE_OPTION}${block.id}:carried`, label: night.block.label, activity: night.block.activity, place: blockPlace(ctx, who, night.block, occasion(day2 - 1)), duration: left, window: { from: start, to: start + 1 }, utility: (night.block.priority ?? 3) + 5, reasons: [blockReason(night.block, night.from)], because: pressed(night.block) });
     }
   }
   return { fixed, options };
@@ -25825,7 +25828,7 @@ function routineYields(ctx, who, field, expected, opts) {
     return false;
   return awareness === "story_first" || !opts.release;
 }
-function routineIssues(world, reg, id, value, state) {
+function routineIssues(world, reg, id, value, state2) {
   const at = `routines.${id}`;
   if (routineShapeProblems(value).length > 0 || !isRecord(value)) {
     const blocks = isRecord(value) && Array.isArray(value.blocks) ? value.blocks : [];
@@ -25851,7 +25854,7 @@ function routineIssues(world, reg, id, value, state) {
   else if (isRecord(def.owner))
     for (const p of selectorProblems(reg, world, def.owner))
       warn(ROUTINE_LINT.owner, `${at}.owner`, `Routine ${id}'s owner ${p}.`);
-  if (def.owner !== undefined && scheduleOwners(reg, world, state, def).length === 0)
+  if (def.owner !== undefined && scheduleOwners(reg, world, state2, def).length === 0)
     warn(ROUTINE_LINT.owner, `${at}.owner`, `Routine ${id}'s owner matches nobody as a chat starts, so it applies to no one.`);
   const holidays = new Set(world.calendar.holidays.map((h) => h.id));
   const scenes = new Set(Object.values(world.places).flatMap((p) => p.sceneType ? [p.sceneType] : []));
@@ -25875,7 +25878,7 @@ function routineIssues(world, reg, id, value, state) {
     if (b.company && isRecord(b.company.who)) {
       for (const p of selectorProblems(reg, world, b.company.who))
         warn(ROUTINE_LINT.company, `${path}.company`, `${name}: its company ${p}.`);
-      if (selectEntities(reg, world, state, b.company.who).length === 0)
+      if (selectEntities(reg, world, state2, b.company.who).length === 0)
         warn(ROUTINE_LINT.company, `${path}.company`, `${name}: its company matches nobody as a chat starts.`);
     }
     for (const n of b.needs ?? [])
@@ -25898,11 +25901,11 @@ function routineIssues(world, reg, id, value, state) {
   });
   return issues;
 }
-function routinesLint(world, reg, state) {
+function routinesLint(world, reg, state2) {
   const issues = [];
   const raw = world.routines ?? {};
   for (const id of Object.keys(raw).sort())
-    issues.push(...routineIssues(world, reg, id, own(raw, id), state));
+    issues.push(...routineIssues(world, reg, id, own(raw, id), state2));
   const settings = isRecord(world.routineSettings) ? world.routineSettings : {};
   const known = ROUTINE_SETTING_VALUES;
   const warn = (path, message) => void issues.push({ severity: "warning", code: ROUTINE_LINT.settings, path: `routineSettings.${path}`, message });
@@ -25929,14 +25932,14 @@ function routinesLint(world, reg, state) {
   if (Object.keys(raw).length > 0 && !world.packs.castlife)
     issues.push({ severity: "warning", code: ROUTINE_LINT.pack, path: "routines", message: "The world has routines but not the Cast life pack, which lives them." });
   const routines = worldRoutines(world);
-  const people = Object.keys(state.entities).sort();
+  const people = Object.keys(state2.entities).sort();
   const told = new Set;
   for (const who of people) {
     const seen = new Map;
     for (const def of routines) {
-      if (!covers2(reg, world, state, def, who))
+      if (!covers2(reg, world, state2, def, who))
         continue;
-      const rank = routineRank(reg, world, state, def);
+      const rank = routineRank(reg, world, state2, def);
       for (const b of def.blocks) {
         const key = `${rank}:${b.id}`;
         const first = seen.get(key);
@@ -25944,14 +25947,14 @@ function routinesLint(world, reg, state) {
           seen.set(key, def.id);
         else if (first !== def.id && !told.has(`${first}:${def.id}:${b.id}`)) {
           told.add(`${first}:${def.id}:${b.id}`);
-          issues.push({ severity: "warning", code: ROUTINE_LINT.overlap, path: `routines.${def.id}`, message: `Routines ${first} and ${def.id} both set ${b.id} for ${own(state.entities, who)?.name ?? who} at the same precedence; ${first} wins.` });
+          issues.push({ severity: "warning", code: ROUTINE_LINT.overlap, path: `routines.${def.id}`, message: `Routines ${first} and ${def.id} both set ${b.id} for ${own(state2.entities, who)?.name ?? who} at the same precedence; ${first} wins.` });
         }
       }
     }
   }
   return issues;
 }
-function schedulesLint(world, reg, state) {
+function schedulesLint(world, reg, state2) {
   const issues = [];
   const time = /^([01]\d|2[0-4]):[0-5]\d$/;
   const sourceIssue = (source, path, name) => {
@@ -25964,7 +25967,7 @@ function schedulesLint(world, reg, state) {
     if (!own(world.schedules, s.id))
       continue;
     const at = `schedules.${s.id}`;
-    if (s.owner !== undefined && scheduleOwners(reg, world, state, s).length === 0)
+    if (s.owner !== undefined && scheduleOwners(reg, world, state2, s).length === 0)
       issues.push({ severity: "warning", code: ROUTINE_LINT.scheduleOwner, path: `${at}.owner`, message: `Schedule ${s.id}'s owner matches nobody as a chat starts, so it moves no one.` });
     sourceIssue(s.source, `${at}.source`, `Schedule ${s.id}`);
     s.slots.forEach((slot, i) => {
@@ -25977,10 +25980,10 @@ function schedulesLint(world, reg, state) {
 }
 function chatScheduleDefs(ctx) {
   const out = [];
-  const all = new Map(allSchedules(ctx.registry, ctx.world).map((s) => [s.id, s]));
+  const all2 = new Map(allSchedules(ctx.registry, ctx.world).map((s) => [s.id, s]));
   for (const who of Object.keys(objOf(sliceOf(ctx.state, "castlife").schedules)).sort()) {
     for (const [id, c] of Object.entries(chatSchedules(ctx.state, who))) {
-      const base = all.get(id);
+      const base = all2.get(id);
       if (!base || "off" in c.value)
         continue;
       out.push({ id: `${id}@${who}`, owner: who, target: base.target, recurrence: c.value.recurrence ?? base.recurrence, slots: c.value.slots, ...base.pack ? { pack: base.pack } : {} });
@@ -25988,8 +25991,8 @@ function chatScheduleDefs(ctx) {
   }
   return out;
 }
-function scheduleOff(state, who, schedule, at) {
-  const c = own(chatSchedules(state, who), schedule);
+function scheduleOff(state2, who, schedule, at) {
+  const c = own(chatSchedules(state2, who), schedule);
   if (!c)
     return false;
   return "off" in c.value ? c.value.until === null || c.value.until > at : true;
@@ -26039,11 +26042,11 @@ function authored(ctx, who, start, end) {
     if (s.target !== "activity" || !scheduleOwners(ctx.registry, ctx.world, ctx.state, s).includes(who))
       continue;
     const rank = ownerRank(ctx.registry, ctx.world, ctx.state, s) ?? Number.MAX_SAFE_INTEGER;
-    const edges = scheduleInstants(ctx.world, [s], start - MINUTES_PER_DAY, end + MINUTES_PER_DAY);
-    for (const e of edges) {
+    const edges2 = scheduleInstants(ctx.world, [s], start - MINUTES_PER_DAY, end + MINUTES_PER_DAY);
+    for (const e of edges2) {
       if (e.edge !== "start" || scheduleOff(ctx.state, who, s.id, e.at))
         continue;
-      const close = edges.find((x) => x.edge === "end" && x.occurrence === e.occurrence);
+      const close = edges2.find((x) => x.edge === "end" && x.occurrence === e.occurrence);
       const value = s.slots[e.slot]?.value;
       if (!close || typeof value !== "string" || close.at <= start || e.at >= end)
         continue;
@@ -26129,15 +26132,15 @@ function placed(ctx, who, l, tier, a, stronger) {
   for (const b of blockers)
     if (b.end > l.from && b.end < to)
       candidates.add(b.end);
-  for (let day = dateAt(cal, l.from).dayIndex;clockAt(cal, day, 0) < to; day++)
-    candidates.add(clockAt(cal, day, hours[0] * 60));
+  for (let day2 = dateAt(cal, l.from).dayIndex;clockAt(cal, day2, 0) < to; day2++)
+    candidates.add(clockAt(cal, day2, hours[0] * 60));
   for (const c of [...candidates].sort((x, y) => x - y)) {
     if (c < l.from || c >= to)
       continue;
-    const day = dateAt(cal, c).dayIndex;
-    const start = Math.max(c, clockAt(cal, day, hours[0] * 60));
+    const day2 = dateAt(cal, c).dayIndex;
+    const start = Math.max(c, clockAt(cal, day2, hours[0] * 60));
     const end = start + minutes;
-    if (end > Math.min(to, clockAt(cal, day, hours[1] * 60)))
+    if (end > Math.min(to, clockAt(cal, day2, hours[1] * 60)))
       continue;
     if (!blockers.some((b) => b.start < end && b.end > start))
       return planBlock(ctx, who, l, start, end);
@@ -26177,9 +26180,9 @@ function commitments(ctx, who, start, end) {
     const block = placed(ctx, who, l, tier, a, blocks);
     if (!block || block.start >= l.until)
       continue;
-    const kept = block.end > l.until ? { ...block, end: l.until } : block;
-    laid.push({ l, block: kept });
-    blocks.push(kept);
+    const kept2 = block.end > l.until ? { ...block, end: l.until } : block;
+    laid.push({ l, block: kept2 });
+    blocks.push(kept2);
   }
   const pieces = [];
   laid.forEach(({ l, block }, i) => {
@@ -26204,37 +26207,37 @@ function laidPlans(ctx, who, plans) {
 
 // src/packs/castlife/core/cues.ts
 function cuesFor(ctx, who, safe) {
-  const { registry: reg, world, state } = ctx;
+  const { registry: reg, world, state: state2 } = ctx;
   const pov = world.pov;
   const out = [];
-  const add = (text) => {
-    if (safe(text) && !out.includes(text))
-      out.push(text);
+  const add = (text3) => {
+    if (safe(text3) && !out.includes(text3))
+      out.push(text3);
   };
-  const gateHolds = loreGateReader(reg, world, state);
+  const gateHolds = loreGateReader(reg, world, state2);
   const flag = optionalQuery(ctx, "story.flag");
   for (const cue of cuesOf(world, who)) {
     const { kind, id } = cue.secret;
-    let kept = false;
+    let kept2 = false;
     if (kind === "lore") {
       const entry = own(world.lore, id);
-      kept = entry !== undefined && loreIsSecret(entry) && !gateHolds(entry);
+      kept2 = entry !== undefined && loreIsSecret(entry) && !gateHolds(entry);
     } else if (kind === "track")
-      kept = trackKeepsSecret(reg, world, state, pov, id);
+      kept2 = trackKeepsSecret(reg, world, state2, pov, id);
     else if (flag) {
       const value = flag(ctx, id);
-      kept = value === null || value === false || value === 0 || value === "";
+      kept2 = value === null || value === false || value === 0 || value === "";
     }
-    if (kept)
+    if (kept2)
       add(cue.text);
   }
   for (const id of Object.keys(world.tracks).sort()) {
     const t = own(world.tracks, id);
     if (t?.owner !== who || t.kind === "agenda" && visibilityOf(t.visibility) === "public")
       continue;
-    const stage = currentStage(world, state, id);
+    const stage = currentStage(world, state2, id);
     const cue = stage === null ? undefined : own(t.stages, stage)?.cue;
-    if (typeof cue === "string" && cue.trim() !== "" && trackKeepsSecret(reg, world, state, pov, id))
+    if (typeof cue === "string" && cue.trim() !== "" && trackKeepsSecret(reg, world, state2, pov, id))
       add(cue.trim());
   }
   return out;
@@ -26250,13 +26253,13 @@ function personKind(world, kind) {
 }
 function hiddenNames3(world) {
   const out = [];
-  const label = (name, secret, entity) => void out.push({ name, secret, ...entity !== undefined ? { entity } : {}, said: (text) => namesAny(text, [], [name]) });
+  const label = (name, secret, entity) => void out.push({ name, secret, ...entity !== undefined ? { entity } : {}, said: (text3) => namesAny(text3, [], [name]) });
   for (const e of Object.values(world.entities)) {
     const v = visibilityOf(e.visibility);
     if (v === "public")
       continue;
     if (personKind(world, e.kind))
-      out.push({ name: e.name, secret: e.visibility === "secret", entity: e.id, said: (text) => namesAny(text, [e.name]) });
+      out.push({ name: e.name, secret: e.visibility === "secret", entity: e.id, said: (text3) => namesAny(text3, [e.name]) });
     else
       label(e.name, e.visibility === "secret", e.id);
   }
@@ -26293,33 +26296,33 @@ function cueIssues(world) {
       issue("warning", at, `${e.name} isn't a person, so its cues never show: the Stance section tells people.`);
     e.cues.forEach((raw, i) => {
       const path = `${at}.${i}`;
-      const text = isRecord(raw) && typeof raw.text === "string" ? raw.text.trim() : "";
-      if (text === "")
+      const text3 = isRecord(raw) && typeof raw.text === "string" ? raw.text.trim() : "";
+      if (text3 === "")
         return issue("error", `${path}.text`, `A cue of ${e.name}'s has no text: say what the narrator sees them do.`);
       const cue = readCue(raw);
       if (!cue)
-        return issue("error", path, `${e.name}'s cue "${text}" needs exactly one secret it stands for: a lore entry, a track or a story flag.`);
+        return issue("error", path, `${e.name}'s cue "${text3}" needs exactly one secret it stands for: a lore entry, a track or a story flag.`);
       const { kind, id } = cue.secret;
       if (kind === "lore") {
         const entry = own(world.lore, id);
         if (!entry)
-          issue("error", `${path}.lore`, `${e.name}'s cue "${text}" is for lore "${id}", which this world doesn't have.`);
+          issue("error", `${path}.lore`, `${e.name}'s cue "${text3}" is for lore "${id}", which this world doesn't have.`);
         else if (!loreIsSecret(entry))
-          issue("warning", `${path}.lore`, `${e.name}'s cue "${text}" is for "${entry.title}", which isn't secret lore, so it never shows.`);
+          issue("warning", `${path}.lore`, `${e.name}'s cue "${text3}" is for "${entry.title}", which isn't secret lore, so it never shows.`);
       } else if (kind === "track") {
         const track = own(world.tracks, id);
         if (!track)
-          issue("error", `${path}.track`, `${e.name}'s cue "${text}" is for track "${id}", which this world doesn't have.`);
+          issue("error", `${path}.track`, `${e.name}'s cue "${text3}" is for track "${id}", which this world doesn't have.`);
         else if (visibilityOf(track.visibility) === "public" && !Object.values(track.stages).some((s) => s.truth))
-          issue("warning", `${path}.track`, `${e.name}'s cue "${text}" is for "${track.label}", a public track with no truth to reveal, so it never shows.`);
+          issue("warning", `${path}.track`, `${e.name}'s cue "${text3}" is for "${track.label}", a public track with no truth to reveal, so it never shows.`);
       }
-      const lower = text.toLowerCase();
+      const lower = text3.toLowerCase();
       const secret = secrets.find((s) => s.trim() !== "" && lower.includes(s.toLowerCase()));
-      const named = secret === undefined ? hidden.find((h) => h.entity !== e.id && h.said(text)) : undefined;
+      const named = secret === undefined ? hidden.find((h) => h.entity !== e.id && h.said(text3)) : undefined;
       if (secret !== undefined)
-        issue("error", `${path}.text`, `${e.name}'s cue "${text}" gives away a secret ("${secret}"): a cue says how they act, never what they hide.`);
+        issue("error", `${path}.text`, `${e.name}'s cue "${text3}" gives away a secret ("${secret}"): a cue says how they act, never what they hide.`);
       else if (named)
-        issue("warning", `${path}.text`, `${e.name}'s cue "${text}" names "${named.name}", which the player may not know; it is left out while they don't.`);
+        issue("warning", `${path}.text`, `${e.name}'s cue "${text3}" names "${named.name}", which the player may not know; it is left out while they don't.`);
     });
   }
   for (const t of Object.values(world.tracks)) {
@@ -26373,15 +26376,15 @@ function sameWords(a, b) {
   return a.some((x) => b.some((y) => x === y || Math.min(x.length, y.length) >= 4 && (x.startsWith(y) || y.startsWith(x))));
 }
 function daysOf(ctx, v) {
-  const said = (Array.isArray(v) ? v : [v]).filter((x) => typeof x === "string" || typeof x === "number");
-  const whole = said.map(String).join(" ").toLowerCase().replace(/\b(?:every|each|on)\b/g, " ").replace(/\s+/g, " ").trim();
-  if (/^(daily|everyday|days?|nights?|nightly)$/.test(whole))
+  const said2 = (Array.isArray(v) ? v : [v]).filter((x) => typeof x === "string" || typeof x === "number");
+  const whole4 = said2.map(String).join(" ").toLowerCase().replace(/\b(?:every|each|on)\b/g, " ").replace(/\s+/g, " ").trim();
+  if (/^(daily|everyday|days?|nights?|nightly)$/.test(whole4))
     return {};
-  if (/^(weekdays?|working days?|workdays?)$/.test(whole))
+  if (/^(weekdays?|working days?|workdays?)$/.test(whole4))
     return { off: "never" };
-  if (/^(weekends?|days? off)$/.test(whole))
+  if (/^(weekends?|days? off)$/.test(whole4))
     return { off: "only" };
-  if (whole === "")
+  if (whole4 === "")
     return null;
   const names = calendarOf(ctx.world).system.weekdayNames.map((n) => n.toLowerCase());
   const dayOf = (w) => {
@@ -26389,7 +26392,7 @@ function daysOf(ctx, v) {
     return names.findIndex((n) => n === w || n === one || n.length >= 3 && one.startsWith(n) && (one.endsWith("day") || one.length - n.length <= 2) || one.length >= 3 && n.startsWith(one));
   };
   const weekdays = new Set;
-  for (const raw of said) {
+  for (const raw of said2) {
     if (typeof raw === "number") {
       if (!Number.isInteger(raw) || raw < 0 || raw >= names.length)
         return null;
@@ -26417,13 +26420,13 @@ function daysOf(ctx, v) {
   return { weekdays: [...weekdays].sort((a, b) => a - b) };
 }
 function placeOf2(ctx, v) {
-  const said = text3(v);
-  if (said === "")
+  const said2 = text3(v);
+  if (said2 === "")
     return null;
   const mayKnow = (id) => own(ctx.world.places, id) !== undefined && canSeePlace(ctx.registry, ctx.world, ctx.state, ctx.world.pov, id);
-  if (mayKnow(said))
-    return said;
-  const named = Object.keys(ctx.world.places).filter((id) => own(ctx.world.places, id)?.name.toLowerCase() === said.toLowerCase() && mayKnow(id));
+  if (mayKnow(said2))
+    return said2;
+  const named = Object.keys(ctx.world.places).filter((id) => own(ctx.world.places, id)?.name.toLowerCase() === said2.toLowerCase() && mayKnow(id));
   return named.length === 1 ? named[0] ?? null : null;
 }
 function firstDay(ctx) {
@@ -26495,8 +26498,8 @@ function startBlock(ctx, who, p) {
   const days = daysOf(ctx, p.days);
   if (!days)
     return refuse("the reply doesn't say which days");
-  const said = text3(p.activity).toLowerCase().replace(/[^a-z0-9 _-]/g, "").slice(0, ACTIVITY_MAX).trim();
-  const activity = said !== "" ? said : /\b(job|shift|work|works|working)\b/i.test(label) ? "work" : /\b(school|class|classes|course)\b/i.test(label) ? "school" : label.toLowerCase().slice(0, ACTIVITY_MAX);
+  const said2 = text3(p.activity).toLowerCase().replace(/[^a-z0-9 _-]/g, "").slice(0, ACTIVITY_MAX).trim();
+  const activity = said2 !== "" ? said2 : /\b(job|shift|work|works|working)\b/i.test(label) ? "work" : /\b(school|class|classes|course)\b/i.test(label) ? "school" : label.toLowerCase().slice(0, ACTIVITY_MAX);
   const basic = BASIC_BLOCKS.find((b) => b.activity === activity);
   const id = basic?.id ?? `story_${wordsOf3(label).join("_").slice(0, ACTIVITY_MAX) || "block"}`;
   const start = text3(p.start).toLowerCase();
@@ -26516,14 +26519,14 @@ function startBlock(ctx, who, p) {
   if (named === null && keyword !== "" && keyword !== "home" && keyword !== "work")
     return refuse("there's no such place");
   const place = named !== null ? { place: named } : keyword === "home" || keyword === "work" ? keyword : activity === "work" ? "work" : basic ? basic.place ?? "home" : "here";
-  const company = [];
+  const company2 = [];
   for (const raw of Array.isArray(p.with) ? p.with : []) {
-    const id = text3(raw);
-    const e = own(ctx.state.entities, id);
-    if (!e || isGone(ctx.state, id) || !kindIs(ctx.registry, ctx.world, e.kind, "person") || !povMayKnow(ctx.registry, ctx.world, ctx.state, id))
+    const id2 = text3(raw);
+    const e = own(ctx.state.entities, id2);
+    if (!e || isGone(ctx.state, id2) || !kindIs(ctx.registry, ctx.world, e.kind, "person") || !povMayKnow(ctx.registry, ctx.world, ctx.state, id2))
       return refuse("there's no one by that name");
-    if (id !== who && !company.includes(id))
-      company.push(id);
+    if (id2 !== who && !company2.includes(id2))
+      company2.push(id2);
   }
   return {
     id,
@@ -26535,19 +26538,19 @@ function startBlock(ctx, who, p) {
     priority: STORY_PRIORITY,
     ...Object.keys(days).length > 0 ? { days } : {},
     place,
-    ...company.length > 0 ? { company: { who: { ids: company } } } : {}
+    ...company2.length > 0 ? { company: { who: { ids: company2 } } } : {}
   };
 }
 function already(ctx, who, block, days) {
-  const held = own(chatBlocks(ctx.state, who), block.id);
-  if (held && JSON.stringify(held.value) === JSON.stringify(block))
+  const held2 = own(chatBlocks(ctx.state, who), block.id);
+  if (held2 && JSON.stringify(held2.value) === JSON.stringify(block))
     return true;
   const mine = blockSpans(ctx, block, days);
-  const words = wordsOf3(block.label);
+  const words3 = wordsOf3(block.label);
   for (const { block: b, from } of activeBlocks(ctx, who, days[0])) {
     if (b.id === block.id || from.level === "builtin")
       continue;
-    if (!sameWords(words, wordsOf3(b.label)) || !days.every((d) => blockOnDay(ctx, who, b, d)))
+    if (!sameWords(words3, wordsOf3(b.label)) || !days.every((d) => blockOnDay(ctx, who, b, d)))
       continue;
     if (mine.length === 0 || b.kind !== "fixed" || overlaps(mine, blockSpans(ctx, b, days)))
       return true;
@@ -26586,11 +26589,11 @@ function startChange(ctx, who, p) {
 }
 function stopChange(ctx, who, p) {
   const cal = calendarOf(ctx.world);
-  const words = wordsOf3(cleanLabel(p.label));
+  const words3 = wordsOf3(cleanLabel(p.label));
   const where = placeOf2(ctx, p.place);
   if (where === null && text3(p.place) !== "")
     return refuse("there's no such place");
-  if (words.length === 0 && where === null)
+  if (words3.length === 0 && where === null)
     return refuse("the reply doesn't say what they gave up");
   const stated = p.days === undefined || p.days === null ? {} : daysOf(ctx, p.days);
   if (!stated)
@@ -26599,27 +26602,27 @@ function stopChange(ctx, who, p) {
   const week = [0, 1, 2, 3, 4, 5, 6].map((i) => from + i);
   const probe = { id: "", label: "", activity: "", kind: "flexible", window: WAKING, minutes: 1, ...Object.keys(stated).length > 0 ? { days: stated } : {} };
   const allowed = new Set(weekOf(ctx, who, probe, from));
-  const within = (on) => on.length > 0 && on.every((d) => allowed.has(d));
+  const within3 = (on) => on.length > 0 && on.every((d) => allowed.has(d));
   const blocks = [];
   for (const [id, list] of routineCandidates(ctx, who)) {
     const top = list[0];
     if (!top || isOff(top.entry) || top.entry.private === true)
       continue;
     const b = top.entry;
-    const named = where !== null && blockPlace(ctx, who, b) === where || words.length > 0 && sameWords(words, wordsOf3(b.label));
-    if (!named || !within(weekOf(ctx, who, b, from)))
+    const named = where !== null && blockPlace(ctx, who, b) === where || words3.length > 0 && sameWords(words3, wordsOf3(b.label));
+    if (!named || !within3(weekOf(ctx, who, b, from)))
       continue;
     blocks.push({ block: id, value: list.every((a) => a.level === "chat") ? null : { id, off: true } });
   }
-  const cut = (s, drop) => {
-    const left = s.slots.filter((slot) => !drop(slot));
+  const cut = (s, drop2) => {
+    const left = s.slots.filter((slot) => !drop2(slot));
     return left.length === 0 ? { off: true, until: null } : { slots: left, recurrence: s.recurrence };
   };
   const schedules = [];
   const mine = where === null ? [] : theirSchedules(ctx, who);
   for (const { id, def } of mine) {
     const gone = def.slots.filter((s) => s.value === where);
-    if (def.target !== "place" || gone.length === 0 || !within(week.filter((d) => recursOn(cal, def.recurrence, d))))
+    if (def.target !== "place" || gone.length === 0 || !within3(week.filter((d) => recursOn(cal, def.recurrence, d))))
       continue;
     schedules.push({ schedule: id, value: cut(def, (slot) => slot.value === where) });
     const paired = (slot) => gone.some((g) => g.start === slot.start && g.end === slot.end);
@@ -26637,12 +26640,12 @@ function storyChange(p, ctx) {
   const who = personOf(ctx, p);
   if (typeof who !== "string")
     return who;
-  const change = text3(p.change).toLowerCase();
-  if (!(change in CHANGES))
+  const change2 = text3(p.change).toLowerCase();
+  if (!(change2 in CHANGES))
     return refuse("a routine change starts, stops or moves house");
-  if (change === "start")
+  if (change2 === "start")
     return startChange(ctx, who, p);
-  if (change === "stop")
+  if (change2 === "stop")
     return stopChange(ctx, who, p);
   const home = placeOf2(ctx, p.place);
   if (home === null)
@@ -26655,17 +26658,17 @@ var routineChannel = {
   type: ROUTINE_CHANNEL,
   boundField: "routine",
   validate(p, ctx) {
-    const change = storyChange(p, ctx);
-    return "code" in change ? change : null;
+    const change2 = storyChange(p, ctx);
+    return "code" in change2 ? change2 : null;
   },
   toEffects(p, ctx) {
-    const change = storyChange(p, ctx);
-    if ("code" in change)
+    const change2 = storyChange(p, ctx);
+    if ("code" in change2)
       return [];
-    if ("home" in change)
-      return [{ type: "set", args: { entity: change.entity, field: "home", value: change.home } }];
+    if ("home" in change2)
+      return [{ type: "set", args: { entity: change2.entity, field: "home", value: change2.home } }];
     const turn = text3(p.turn);
-    return [{ type: ROUTINE_EFFECT, args: { entity: change.entity, blocks: change.blocks, schedules: change.schedules, ...turn !== "" ? { turn } : {}, ...p.by === "player" ? { by: "player" } : {} } }];
+    return [{ type: ROUTINE_EFFECT, args: { entity: change2.entity, blocks: change2.blocks, schedules: change2.schedules, ...turn !== "" ? { turn } : {}, ...p.by === "player" ? { by: "player" } : {} } }];
   }
 };
 function storyEvents(args, ctx) {
@@ -26683,8 +26686,8 @@ function storyEvents(args, ctx) {
 }
 
 // src/packs/castlife/core/usual.ts
-function joined(words) {
-  return words.length <= 1 ? words[0] ?? "" : `${words.slice(0, -1).join(", ")} and ${words[words.length - 1] ?? ""}`;
+function joined(words3) {
+  return words3.length <= 1 ? words3[0] ?? "" : `${words3.slice(0, -1).join(", ")} and ${words3[words3.length - 1] ?? ""}`;
 }
 function weekdaysPhrase(cal, days) {
   const set = [...new Set(days)].sort((a, b) => a - b);
@@ -26727,38 +26730,38 @@ function recurrenceDays(cal, r) {
     return "yearly";
   return "";
 }
-function blockClause(cal, day, block) {
+function blockClause(cal, day2, block) {
   const fixed = block.kind === "fixed" && block.at !== undefined;
   const start = fixed && block.at ? parseHHMM(block.at) : block.window ? parseHHMM(block.window.from) : 0;
-  const time = fixed ? ` at ${block.at}` : block.window ? ` in the ${dayPartAt(cal, clockAt(cal, day, start)).label.toLowerCase()}` : "";
+  const time = fixed ? ` at ${block.at}` : block.window ? ` in the ${dayPartAt(cal, clockAt(cal, day2, start)).label.toLowerCase()}` : "";
   const often = block.kind === "optional" ? "sometimes" : block.perWeek !== undefined && block.perWeek < 7 ? `${block.perWeek} day${block.perWeek === 1 ? "" : "s"} a week` : "";
   const days = [blockDays(cal, block.days), often].filter((p) => p !== "").join(", ");
   return { text: `${days !== "" ? `${days}, ` : ""}${block.label.trim().replace(/[.;]+$/, "")}${time}`, start };
 }
 function usualRoutine(ctx, who, read) {
-  const { registry: reg, world, state } = ctx;
+  const { registry: reg, world, state: state2 } = ctx;
   const cal = calendarOf(world);
-  const now = dateAt(cal, state.clock);
-  const day = now.dayIndex;
+  const now = dateAt(cal, state2.clock);
+  const day2 = now.dayIndex;
   const out = [];
   for (const { block, from } of activeBlocks(ctx, who)) {
     if (from.level === "builtin")
       continue;
-    const { text, start } = blockClause(cal, day, block);
-    let today = false;
+    const { text: text4, start } = blockClause(cal, day2, block);
+    let today2 = false;
     let place = null;
     try {
-      today = blockOnDay(ctx, who, block, day);
+      today2 = blockOnDay(ctx, who, block, day2);
       place = blockPlace(ctx, who, block);
     } catch {}
-    out.push({ text, place, start, minutes: block.minutes, today, private: block.private === true, own: from.level === "own" || from.level === "chat" });
+    out.push({ text: text4, place, start, minutes: block.minutes, today: today2, private: block.private === true, own: from.level === "own" || from.level === "chat" });
   }
   const spans = new Map;
   for (const s of chatSchedulesIn(ctx)) {
-    if (!(s.target === "activity" && read.activity || s.target === "place") || scheduleOff(state, who, s.id, state.clock) || !scheduleOwners(reg, world, state, s).includes(who))
+    if (!(s.target === "activity" && read.activity || s.target === "place") || scheduleOff(state2, who, s.id, state2.clock) || !scheduleOwners(reg, world, state2, s).includes(who))
       continue;
     const days = recurrenceDays(cal, s.recurrence);
-    const today = recursOn(cal, s.recurrence, day);
+    const today2 = recursOn(cal, s.recurrence, day2);
     const runs = [];
     for (const slot of s.slots) {
       const raw = typeof slot.value === "string" ? slot.value.trim() : "";
@@ -26775,7 +26778,7 @@ function usualRoutine(ctx, who, read) {
     }
     for (const run of runs) {
       const key = `${days}\x00${run.start}\x00${run.end}`;
-      const span = spans.get(key) ?? { days, start: run.start, end: run.end, today, own: s.owner === who };
+      const span = spans.get(key) ?? { days, start: run.start, end: run.end, today: today2, own: s.owner === who };
       if (s.target === "place" && span.place === undefined) {
         span.place = run.value;
         span.placeName = read.place(run.value);
@@ -26795,16 +26798,16 @@ function usualRoutine(ctx, who, read) {
   return out.sort((a, b) => rank(a) - rank(b) || a.start - b.start || a.text.localeCompare(b.text));
 }
 function presentUsual(ctx, place) {
-  const { registry: reg, world, state } = ctx;
+  const { registry: reg, world, state: state2 } = ctx;
   const pov = world.pov;
-  const here = placeOfEntity(state, pov);
+  const here = placeOfEntity(state2, pov);
   if (here === null)
     return [];
   let safe = null;
   const out = [];
-  for (const id of Object.keys(state.entities).sort()) {
-    const e = own(state.entities, id);
-    if (!e || id === pov || placeOfEntity(state, id) !== here || !kindIs(reg, world, e.kind, "person") || isGone(state, id) || !canSeeEntity(reg, world, state, pov, id) || povLife(world, state, id)?.acts === false)
+  for (const id of Object.keys(state2.entities).sort()) {
+    const e = own(state2.entities, id);
+    if (!e || id === pov || placeOfEntity(state2, id) !== here || !kindIs(reg, world, e.kind, "person") || isGone(state2, id) || !canSeeEntity(reg, world, state2, pov, id) || povLife(world, state2, id)?.acts === false)
       continue;
     if (routineRole(ctx, id) === "off")
       continue;
@@ -26815,19 +26818,19 @@ function presentUsual(ctx, place) {
   return out;
 }
 function povSafe(ctx) {
-  const { registry: reg, world, state } = ctx;
-  const secrets = unrevealedSecrets(reg, world, state);
-  const namesHidden = hiddenNameCheck(reg, world, state, world.pov);
+  const { registry: reg, world, state: state2 } = ctx;
+  const secrets = unrevealedSecrets(reg, world, state2);
+  const namesHidden = hiddenNameCheck(reg, world, state2, world.pov);
   return (t) => findLeaks(t, secrets).length === 0 && !namesHidden(t);
 }
 function knownUsual(ctx, who, place, safe) {
-  const { registry: reg, world, state } = ctx;
+  const { registry: reg, world, state: state2 } = ctx;
   const pov = world.pov;
   const named = (p) => {
     const def = own(world.places, p);
-    return def && canSeePlace(reg, world, state, pov, p) ? place(p, def.name) : null;
+    return def && canSeePlace(reg, world, state2, pov, p) ? place(p, def.name) : null;
   };
-  const clauses = usualRoutine(ctx, who, { place: named, activity: canSeeField(reg, world, state, pov, who, "activity") }).filter((c) => !c.private && c.text !== "");
+  const clauses = usualRoutine(ctx, who, { place: named, activity: canSeeField(reg, world, state2, pov, who, "activity") }).filter((c) => !c.private && c.text !== "");
   if (clauses.length === 0)
     return [];
   return clauses.map((c) => c.text).filter(safe ?? povSafe(ctx));
@@ -26847,19 +26850,19 @@ var NEEDS = {
   fun: { rate: 1, satisfiedBy: ["leisure", "exercise", "drinks", "socialize"], label: "bored", daily: [1200] }
 };
 var NEED_ALERT = 80;
-function satisfies(activity, need) {
-  return own(NEEDS, need)?.satisfiedBy.some((w) => activity.includes(w)) ?? false;
+function satisfies(activity, need2) {
+  return own(NEEDS, need2)?.satisfiedBy.some((w) => activity.includes(w)) ?? false;
 }
 var SOCIABILITY_RATE = { reserved: 0.5, usual: 1, outgoing: 1.5 };
-function rateOf(ctx, who, need, rate) {
-  return who === ctx.world.pov || need !== "social" && need !== "fun" ? rate : rate * SOCIABILITY_RATE[routineSettingsOf(ctx.world).sociability];
+function rateOf(ctx, who, need2, rate) {
+  return who === ctx.world.pov || need2 !== "social" && need2 !== "fun" ? rate : rate * SOCIABILITY_RATE[routineSettingsOf(ctx.world).sociability];
 }
-function needIn(ctx, who, need, at, blocks) {
-  const def = own(NEEDS, need);
+function needIn(ctx, who, need2, at, blocks) {
+  const def = own(NEEDS, need2);
   if (!def)
     return 0;
-  const rate = rateOf(ctx, who, need, def.rate);
-  const n = objOf(own(objOf(own(ctx.state.entities, who)?.fields.needs), need));
+  const rate = rateOf(ctx, who, need2, def.rate);
+  const n = objOf(own(objOf(own(ctx.state.entities, who)?.fields.needs), need2));
   if (typeof n.t === "number" || who === ctx.world.pov) {
     const v = numOf(n.v, 20);
     const t = numOf(n.t, minutesBetween(ctx.world.calendar.epoch, ctx.world.start.at));
@@ -26867,7 +26870,7 @@ function needIn(ctx, who, need, at, blocks) {
   }
   let met = -Infinity;
   for (const b of blocks)
-    if (b.start <= at && satisfies(b.activity, need))
+    if (b.start <= at && satisfies(b.activity, need2))
       met = Math.max(met, Math.min(b.end, at));
   if (met === -Infinity) {
     const minute = dateAt(calendarOf(ctx.world), at).minuteOfDay;
@@ -26875,11 +26878,11 @@ function needIn(ctx, who, need, at, blocks) {
   }
   return Math.min(100, rate * (at - met) / 60);
 }
-function needValue(ctx, who, need, at = ctx.state.clock, legacy = false) {
-  const recorded = typeof objOf(own(objOf(own(ctx.state.entities, who)?.fields.needs), need)).t === "number";
+function needValue(ctx, who, need2, at = ctx.state.clock, legacy = false) {
+  const recorded = typeof objOf(own(objOf(own(ctx.state.entities, who)?.fields.needs), need2)).t === "number";
   const planned = !recorded && livesPlans(ctx, who);
-  const day = dateAt(calendarOf(ctx.world), at).dayIndex;
-  return needIn(ctx, who, need, at, planned ? (legacy ? legacyDayPlan(ctx, who, day) : dayPlan(ctx, who, day)).blocks : []);
+  const day2 = dateAt(calendarOf(ctx.world), at).dayIndex;
+  return needIn(ctx, who, need2, at, planned ? (legacy ? legacyDayPlan(ctx, who, day2) : dayPlan(ctx, who, day2)).blocks : []);
 }
 function within3(dayStart, fromH, toH) {
   return { from: dayStart + fromH * 60, to: dayStart + toH * 60 };
@@ -26922,23 +26925,23 @@ function legacyDayOptions(ctx, who, dayStart) {
   const home = homeOf(ctx, who);
   const cal = calendarOf(ctx.world);
   const hourOf = (t) => dateAt(cal, t).minuteOfDay / 60;
-  const need = (n, t, laid) => level >= 4 ? needIn(ctx, who, n, t, laid) : 0;
+  const need2 = (n, t, laid) => level >= 4 ? needIn(ctx, who, n, t, laid) : 0;
   const pressed = (n, word) => (t, laid) => {
-    const v = need(n, t, laid);
+    const v = need2(n, t, laid);
     return v >= 50 ? [`${word} (${n} ${Math.round(v)})`] : [];
   };
   const occasion = occasionOf(ctx, who, dateAt(cal, dayStart).dayIndex);
   const off = occasion.dayOff;
-  const company = placeOfType(ctx, "conversation", home) ?? home;
+  const company2 = placeOfType(ctx, "conversation", home) ?? home;
   const outdoors = occasion.foul ? home : placeOfType(ctx, "exploration", home) ?? home;
   const outside = (occasion.season === "summer" ? 0.5 : occasion.season === "winter" ? -0.5 : 0) - (occasion.foul ? 1 : 0);
   const unwind = [...off ? ["a day off"] : [], ...occasion.season === "summer" || occasion.season === "winter" ? [occasion.season] : [], ...occasion.foul ? ["bad weather"] : []];
   const options = [
     { id: "sleep", label: "Sleep", activity: "sleep", place: home, duration: 480, repeat: true, reasons: ["night"], utility: (t) => hourOf(t) >= 21.5 || hourOf(t) < 6 ? 10 : 0 },
-    { id: "breakfast", label: "Breakfast", activity: "breakfast", place: home, duration: 30, window: off ? within3(dayStart, 7, 11) : within3(dayStart, 6, 10), utility: (t, laid) => 4 + need("hunger", t, laid) / 20, reasons: off ? ["morning meal", "a slow morning"] : ["morning meal"], because: pressed("hunger", "hungry") },
-    { id: "lunch", label: "Lunch", activity: "lunch", place: company, duration: 45, window: within3(dayStart, 11, 14), utility: (t, laid) => 4 + need("hunger", t, laid) / 20, reasons: ["midday meal"], because: pressed("hunger", "hungry") },
-    { id: "dinner", label: "Dinner", activity: "dinner", place: home, duration: 60, window: within3(dayStart, 17, 21), utility: (t, laid) => 4.5 + need("hunger", t, laid) / 20, reasons: ["evening meal"], because: pressed("hunger", "hungry") },
-    { id: "leisure", label: "Time out", activity: "leisure", place: outdoors, duration: 60, window: within3(dayStart, 9, off ? 22 : 20), utility: (t, laid) => 1.5 + (off ? 1 : 0) + outside + need("fun", t, laid) / 30, reasons: ["unwind", ...unwind], because: pressed("fun", "bored") }
+    { id: "breakfast", label: "Breakfast", activity: "breakfast", place: home, duration: 30, window: off ? within3(dayStart, 7, 11) : within3(dayStart, 6, 10), utility: (t, laid) => 4 + need2("hunger", t, laid) / 20, reasons: off ? ["morning meal", "a slow morning"] : ["morning meal"], because: pressed("hunger", "hungry") },
+    { id: "lunch", label: "Lunch", activity: "lunch", place: company2, duration: 45, window: within3(dayStart, 11, 14), utility: (t, laid) => 4 + need2("hunger", t, laid) / 20, reasons: ["midday meal"], because: pressed("hunger", "hungry") },
+    { id: "dinner", label: "Dinner", activity: "dinner", place: home, duration: 60, window: within3(dayStart, 17, 21), utility: (t, laid) => 4.5 + need2("hunger", t, laid) / 20, reasons: ["evening meal"], because: pressed("hunger", "hungry") },
+    { id: "leisure", label: "Time out", activity: "leisure", place: outdoors, duration: 60, window: within3(dayStart, 9, off ? 22 : 20), utility: (t, laid) => 1.5 + (off ? 1 : 0) + outside + need2("fun", t, laid) / 30, reasons: ["unwind", ...unwind], because: pressed("fun", "bored") }
   ];
   const social = optionalQuery(ctx, "regard");
   let fondness = 0;
@@ -26947,24 +26950,24 @@ function legacyDayOptions(ctx, who, dayStart) {
       if (other !== who && kindIs(ctx.registry, ctx.world, own(ctx.state.entities, other)?.kind ?? "", "person"))
         fondness = Math.max(fondness, social(ctx, who, other));
   }
-  options.push({ id: "socialize", label: "See friends", activity: "socialize", place: company, duration: 90, window: off ? within3(dayStart, 12, 23) : within3(dayStart, 17, 22), utility: (t, laid) => 2.5 + (off ? 1 : 0) - (occasion.foul ? 0.5 : 0) + fondness / 50 + need("social", t, laid) / 25, reasons: ["company", ...fondness >= FOND ? ["a close friend"] : [], ...off ? ["a day off"] : []], because: pressed("social", "lonely") });
+  options.push({ id: "socialize", label: "See friends", activity: "socialize", place: company2, duration: 90, window: off ? within3(dayStart, 12, 23) : within3(dayStart, 17, 22), utility: (t, laid) => 2.5 + (off ? 1 : 0) - (occasion.foul ? 0.5 : 0) + fondness / 50 + need2("social", t, laid) / 25, reasons: ["company", ...fondness >= FOND ? ["a close friend"] : [], ...off ? ["a day off"] : []], because: pressed("social", "lonely") });
   options.push(...groundedOptions(ctx, who, dayStart));
   for (const h of occasion.holidays) {
-    options.push(h.dayOff ? { id: `holiday:${h.id}`, label: h.label, activity: "socialize", place: home, duration: 180, window: within3(dayStart, 12, 20), utility: 5.5, reasons: [h.label] } : { id: `holiday:${h.id}`, label: h.label, activity: "leisure", place: company, duration: 90, window: within3(dayStart, 17, 22), utility: 3, reasons: [h.label] });
+    options.push(h.dayOff ? { id: `holiday:${h.id}`, label: h.label, activity: "socialize", place: home, duration: 180, window: within3(dayStart, 12, 20), utility: 5.5, reasons: [h.label] } : { id: `holiday:${h.id}`, label: h.label, activity: "leisure", place: company2, duration: 90, window: within3(dayStart, 17, 22), utility: 3, reasons: [h.label] });
   }
   if (occasion.birthday)
-    options.push({ id: "birthday", label: "Birthday", activity: "socialize", place: company, duration: 150, window: within3(dayStart, 17, 23), utility: 6.5, reasons: ["their birthday"] });
+    options.push({ id: "birthday", label: "Birthday", activity: "socialize", place: company2, duration: 150, window: within3(dayStart, 17, 23), utility: 6.5, reasons: ["their birthday"] });
   for (const friend of occasion.friends.slice(0, 2)) {
     const theirs = homeOf(ctx, friend);
-    options.push({ id: `birthday:${friend}`, label: "A friend's birthday", activity: "socialize", place: theirs !== null && own(ctx.world.places, theirs) ? theirs : company, duration: 90, window: within3(dayStart, 17, 22), utility: 4 + (social?.(ctx, who, friend) ?? 0) / 50, reasons: ["a friend's birthday"] });
+    options.push({ id: `birthday:${friend}`, label: "A friend's birthday", activity: "socialize", place: theirs !== null && own(ctx.world.places, theirs) ? theirs : company2, duration: 90, window: within3(dayStart, 17, 22), utility: 4 + (social?.(ctx, who, friend) ?? 0) / 50, reasons: ["a friend's birthday"] });
   }
   return options;
 }
-function invitedBlocks(ctx, guest, day, commitments) {
+function invitedBlocks(ctx, guest, day2, commitments2) {
   if (routineSettingsOf(ctx.world).invitations !== "everyone" || followOf(ctx, guest).mode !== "follows" || guest === ctx.world.pov)
     return [];
   const cal = calendarOf(ctx.world);
-  const start = clockAt(cal, day, 0);
+  const start = clockAt(cal, day2, 0);
   const hosts = new Set;
   for (const def of worldRoutines(ctx.world))
     if (def.blocks.some((b) => !isOff(b) && b.company?.invite === true))
@@ -26974,61 +26977,61 @@ function invitedBlocks(ctx, guest, day, commitments) {
   for (const host of [...hosts].sort()) {
     if (host === guest || !acquainted(ctx.state, host, guest) || followOf(ctx, host).mode !== "follows" || routineRole(ctx, host) !== "enforced")
       continue;
-    for (const { block } of activeBlocks(ctx, host, day)) {
-      if (block.kind !== "fixed" || block.company?.invite !== true || !selectEntities(ctx.registry, ctx.world, ctx.state, block.company.who).includes(guest) || !blockOnDay(ctx, host, block, day))
+    for (const { block } of activeBlocks(ctx, host, day2)) {
+      if (block.kind !== "fixed" || block.company?.invite !== true || !selectEntities(ctx.registry, ctx.world, ctx.state, block.company.who).includes(guest) || !blockOnDay(ctx, host, block, day2))
         continue;
       const s = start + parseHHMM(block.at ?? "00:00");
       const e = s + block.minutes;
-      if (commitments.some((c) => c.start < e && c.end > s))
+      if (commitments2.some((c) => c.start < e && c.end > s))
         continue;
       out.push({ start: s, end: e, label: block.label, activity: block.activity, place: blockPlace(ctx, host, block), reason: "invited", option: `${INVITED_OPTION}${host}:${block.id}` });
     }
   }
   return out;
 }
-function decisions(state) {
+function decisions(state2) {
   const out = {};
-  for (const [k, v] of Object.entries(objOf(sliceOf(state, "castlife").decisions)))
+  for (const [k, v] of Object.entries(objOf(sliceOf(state2, "castlife").decisions)))
     if (typeof v === "string")
       out[k] = v;
   return out;
 }
-function planFor(ctx, who, day, rng, legacy = false) {
+function planFor(ctx, who, day2, rng, legacy = false) {
   const cal = calendarOf(ctx.world);
-  const start = clockAt(cal, day, 0);
+  const start = clockAt(cal, day2, 0);
   const end = start + MINUTES_PER_DAY;
   const fixed = commitments(ctx, who, start, end);
   const person = kindIs(ctx.registry, ctx.world, own(ctx.state.entities, who)?.kind ?? "", "person");
   const level = ctx.levelOf(who, "castlife");
-  const routine = !legacy && person ? routineDay(ctx, who, day, fixed, { need: (n, t, laid) => level >= 4 ? needIn(ctx, who, n, t, laid) : 0, meets: (activity) => Object.keys(NEEDS).filter((n) => satisfies(activity, n)) }) : { fixed: [], options: [] };
-  const invited = legacy || !person ? [] : invitedBlocks(ctx, who, day, [...fixed, ...routine.fixed]);
+  const routine = !legacy && person ? routineDay(ctx, who, day2, fixed, { need: (n, t, laid) => level >= 4 ? needIn(ctx, who, n, t, laid) : 0, meets: (activity) => Object.keys(NEEDS).filter((n) => satisfies(activity, n)) }) : { fixed: [], options: [] };
+  const invited = legacy || !person ? [] : invitedBlocks(ctx, who, day2, [...fixed, ...routine.fixed]);
   const options = legacy ? legacyDayOptions(ctx, who, start) : [...routine.options, ...groundedOptions(ctx, who, start)];
-  const plan = planDay({ agent: who, start, end, fixed: [...fixed, ...routine.fixed, ...invited], options, rng, recorded: decisions(ctx.state) });
+  const plan2 = planDay({ agent: who, start, end, fixed: [...fixed, ...routine.fixed, ...invited], options, rng, recorded: decisions(ctx.state) });
   return {
-    day,
-    blocks: plan.blocks.map((b) => {
-      const tie = plan.ties.find((t) => t.at === b.start);
+    day: day2,
+    blocks: plan2.blocks.map((b) => {
+      const tie = plan2.ties.find((t) => t.at === b.start);
       const close = tie ? [tie.via === "seed" ? "close call" : `close call, ${own(ctx.state.entities, who)?.name.split(" ")[0] ?? "they"} chose`] : [];
       return { start: b.start, end: b.end, option: b.option, label: b.label, activity: b.activity, place: b.place, reasons: b.fixed || b.utility <= 0 ? b.reasons : [...b.reasons, `utility ${Math.round(b.utility * 10) / 10}`, ...close], fixed: b.fixed };
     }),
-    ties: plan.ties.map((t) => ({ key: t.key, chosen: t.chosen, via: t.via, options: t.options.map((o) => o.id) })),
-    tieZone: plan.tieZone
+    ties: plan2.ties.map((t) => ({ key: t.key, chosen: t.chosen, via: t.via, options: t.options.map((o) => o.id) })),
+    tieZone: plan2.tieZone
   };
 }
-function dayPlan(ctx, who, day = dateAt(calendarOf(ctx.world), ctx.state.clock).dayIndex) {
-  return planFor(ctx, who, day, createRng(hashParts("castlife.plan", ctx.world.id, who, String(day))));
+function dayPlan(ctx, who, day2 = dateAt(calendarOf(ctx.world), ctx.state.clock).dayIndex) {
+  return planFor(ctx, who, day2, createRng(hashParts("castlife.plan", ctx.world.id, who, String(day2))));
 }
-function legacyDayPlan(ctx, who, day) {
-  return planFor(ctx, who, day, createRng(hashParts("castlife.plan", ctx.world.id, who, String(day))), true);
+function legacyDayPlan(ctx, who, day2) {
+  return planFor(ctx, who, day2, createRng(hashParts("castlife.plan", ctx.world.id, who, String(day2))), true);
 }
-function held2(state, who, target, at) {
-  const until = own(objOf(own(state.entities, who)?.fields.holds), target);
+function held2(state2, who, target, at) {
+  const until = own(objOf(own(state2.entities, who)?.fields.holds), target);
   return typeof until === "number" && until > at;
 }
 var ENCOUNTER_CHANCE = 0.25;
 var ACQUAINT_CHANCE = 0.15;
-function acquainted(state, a, b) {
-  return !!own(state.entities, a)?.relations.some((r) => r.type === "regard" && r.to === b) || !!own(state.entities, b)?.relations.some((r) => r.type === "regard" && r.to === a);
+function acquainted(state2, a, b) {
+  return !!own(state2.entities, a)?.relations.some((r) => r.type === "regard" && r.to === b) || !!own(state2.entities, b)?.relations.some((r) => r.type === "regard" && r.to === a);
 }
 function takeUp(ctx, who, place, activity, at, holdUntil, quiet = false, seen = false) {
   const out = [];
@@ -27046,24 +27049,24 @@ function takeUp(ctx, who, place, activity, at, holdUntil, quiet = false, seen = 
     out.push({ type: "set", entity: who, field: "activity", value: activity });
   if (holdUntil !== undefined && holdUntil > at) {
     const holds = objOf(e.fields.holds);
-    const kept = { ...holds, place: Math.max(numOf(holds.place, 0), holdUntil), activity: Math.max(numOf(holds.activity, 0), holdUntil) };
-    if (kept.place !== holds.place || kept.activity !== holds.activity)
-      out.push({ type: "set", entity: who, field: "holds", value: kept });
+    const kept2 = { ...holds, place: Math.max(numOf(holds.place, 0), holdUntil), activity: Math.max(numOf(holds.activity, 0), holdUntil) };
+    if (kept2.place !== holds.place || kept2.activity !== holds.activity)
+      out.push({ type: "set", entity: who, field: "holds", value: kept2 });
   }
   return out;
 }
 function blockActivity(activity) {
   return activity.startsWith("retrieve:") ? "errand" : activity;
 }
-function liveBlock(ctx, who, plan, block, from, at, scene, skip) {
+function liveBlock(ctx, who, plan2, block, from, at, scene, skip) {
   const activity = blockActivity(block.activity);
   if (block.option.startsWith("plan:"))
     return scene && withPov(ctx, who) ? [] : takeUp(ctx, who, block.place, activity, at, block.end);
   if (who !== ctx.world.pov && !routineLived(ctx, who, skip))
     return [];
   const edge = block.start > from && block.start <= at;
-  const index = plan.blocks.indexOf(block);
-  const earlier = from < clockAt(calendarOf(ctx.world), plan.day, 0) ? [...dayPlan(ctx, who, plan.day - 1).blocks, ...plan.blocks.slice(0, index)] : plan.blocks.slice(0, index);
+  const index = plan2.blocks.indexOf(block);
+  const earlier = from < clockAt(calendarOf(ctx.world), plan2.day, 0) ? [...dayPlan(ctx, who, plan2.day - 1).blocks, ...plan2.blocks.slice(0, index)] : plan2.blocks.slice(0, index);
   const had = (edge ? earlier.filter((b) => b.end > from) : [...earlier.slice(-1), block]).reverse();
   const e = own(ctx.state.entities, who);
   const home = homeOf(ctx, who);
@@ -27133,12 +27136,12 @@ function asksOf(ctx, who, days) {
   const asking = activeBlocks(ctx, who).filter(({ block }) => block.company?.invite === true && selectEntities(ctx.registry, ctx.world, ctx.state, block.company.who).includes(pov));
   if (asking.length === 0)
     return out;
-  for (const day of days) {
-    for (const b of dayPlan(ctx, who, day).blocks) {
+  for (const day2 of days) {
+    for (const b of dayPlan(ctx, who, day2).blocks) {
       const id = b.option.startsWith(ROUTINE_OPTION) ? b.option.slice(ROUTINE_OPTION.length) : null;
       if (id === null || !asking.some((a) => a.block.id === id))
         continue;
-      out.push({ key: `${who}:routine:${id}:${day}`, ask: Math.max(b.start - INVITE_LEAD, clockAt(cal, day, 0)), at: b.start, place: b.place, origin: { type: "routine", block: id } });
+      out.push({ key: `${who}:routine:${id}:${day2}`, ask: Math.max(b.start - INVITE_LEAD, clockAt(cal, day2, 0)), at: b.start, place: b.place, origin: { type: "routine", block: id } });
     }
   }
   return out;
@@ -27153,8 +27156,8 @@ function invitation(ctx, who, ask) {
   const given = sliceOf(ctx.state, "castlife").invitations;
   if (!mayInvite(ctx, who, ask.place) || Array.isArray(given) && given.some((i) => objOf(i).key === ask.key))
     return [];
-  const text = invitationText(ctx, who, ask.place, ask.at, ctx.world.pov);
-  return [{ type: "castlife.invitation", data: { agent: who, place: ask.place, at: ask.at, text, key: ask.key, origin: ask.origin.type === "plan" ? `plan:${ask.origin.plan}` : `routine:${ask.origin.block}` } }, { type: ENGINE_EVENTS.signal, data: { class: "invitation", text, entity: who } }];
+  const text4 = invitationText(ctx, who, ask.place, ask.at, ctx.world.pov);
+  return [{ type: "castlife.invitation", data: { agent: who, place: ask.place, at: ask.at, text: text4, key: ask.key, origin: ask.origin.type === "plan" ? `plan:${ask.origin.plan}` : `routine:${ask.origin.block}` } }, { type: ENGINE_EVENTS.signal, data: { class: "invitation", text: text4, entity: who } }];
 }
 function planMoments(ctx, who, slot) {
   const inside = (at) => at > slot.start && at < slot.end;
@@ -27183,15 +27186,15 @@ function planMoments(ctx, who, slot) {
     const lived = livedAtMinute(ctx, who, slot);
     const home = homeOf(ctx, who);
     let before = placeOfEntity(ctx.state, who);
-    let placed = false;
-    for (let day = dateAt(cal, slot.start).dayIndex;day <= dateAt(cal, slot.end - 1).dayIndex; day++) {
-      for (const b of dayPlan(ctx, who, day).blocks) {
+    let placed2 = false;
+    for (let day2 = dateAt(cal, slot.start).dayIndex;day2 <= dateAt(cal, slot.end - 1).dayIndex; day2++) {
+      for (const b of dayPlan(ctx, who, day2).blocks) {
         if (!inside(b.start))
           continue;
         if (!b.option.startsWith("plan:") && b.activity !== "trip" && !handed.has(b.start) && lived(b, before))
           out.push({ at: b.start, key: `block:${b.option}` });
-        before = b.place ?? (placed ? home : before);
-        placed = b.place !== null;
+        before = b.place ?? (placed2 ? home : before);
+        placed2 = b.place !== null;
       }
     }
   }
@@ -27213,10 +27216,10 @@ function livedAtMinute(ctx, who, slot) {
   const home = homeOf(ctx, pov) ?? here;
   const cal = calendarOf(ctx.world);
   const plans = new Map;
-  const planOf = (day) => {
-    const plan = plans.get(day) ?? dayPlan(ctx, pov, day);
-    plans.set(day, plan);
-    return plan;
+  const planOf = (day2) => {
+    const plan2 = plans.get(day2) ?? dayPlan(ctx, pov, day2);
+    plans.set(day2, plan2);
+    return plan2;
   };
   const povAt = (from, to) => {
     const out = new Set;
@@ -27225,8 +27228,8 @@ function livedAtMinute(ctx, who, slot) {
         out.add(here);
       return out;
     }
-    for (let day = dateAt(cal, from).dayIndex;day <= dateAt(cal, to - 1).dayIndex; day++) {
-      const blocks = planOf(day).blocks;
+    for (let day2 = dateAt(cal, from).dayIndex;day2 <= dateAt(cal, to - 1).dayIndex; day2++) {
+      const blocks = planOf(day2).blocks;
       blocks.forEach((b, i) => {
         if (b.end <= from || b.start >= to)
           return;
@@ -27246,36 +27249,36 @@ function basicNeedOf(option) {
 function skipBlocksOf(ctx, who, slot) {
   if (slot.timelapse !== true || skipLifeOf(ctx, who) !== "model")
     return [];
-  const plan = skipPlanOf(ctx.state);
-  if (!plan)
+  const plan2 = skipPlanOf(ctx.state);
+  if (!plan2)
     return [];
-  const planned = plan.plans.find((p) => p.entity === who)?.blocks ?? [];
-  const lo = Math.max(slot.start, plan.from);
-  const hi = Math.min(slot.end, plan.to);
+  const planned = plan2.plans.find((p) => p.entity === who)?.blocks ?? [];
+  const lo = Math.max(slot.start, plan2.from);
+  const hi = Math.min(slot.end, plan2.to);
   if (lo > hi)
     return planned;
   const open = (start, end) => {
-    let pieces = [[Math.max(start, plan.from), Math.min(end, plan.to)]];
+    let pieces = [[Math.max(start, plan2.from), Math.min(end, plan2.to)]];
     for (const b of planned)
       pieces = pieces.flatMap(([s, e]) => b.end <= s || b.start >= e ? [[s, e]] : [...s < b.start ? [[s, b.start]] : [], ...b.end < e ? [[b.end, e]] : []]);
     return pieces.filter(([s, e]) => s < e);
   };
   const cal = calendarOf(ctx.world);
   const basic = [];
-  for (let day = dateAt(cal, lo).dayIndex;day <= dateAt(cal, hi).dayIndex; day++) {
-    const atWork = activeBlocks(ctx, who, day).flatMap(({ block }) => block.place === "work" ? [block.id] : []);
-    for (const b of dayPlan(ctx, who, day).blocks) {
-      const need = basicNeedOf(b.option);
-      if (need === null)
+  for (let day2 = dateAt(cal, lo).dayIndex;day2 <= dateAt(cal, hi).dayIndex; day2++) {
+    const atWork = activeBlocks(ctx, who, day2).flatMap(({ block }) => block.place === "work" ? [block.id] : []);
+    for (const b of dayPlan(ctx, who, day2).blocks) {
+      const need2 = basicNeedOf(b.option);
+      if (need2 === null)
         continue;
       for (const [start, end] of open(b.start, b.end))
-        basic.push({ start, end, place: atWork.includes(need) ? null : b.place, activity: b.activity });
+        basic.push({ start, end, place: atWork.includes(need2) ? null : b.place, activity: b.activity });
     }
   }
   const rest = fieldDef(ctx.registry, ctx.world, own(ctx.state.entities, who)?.kind ?? "", "activity")?.default;
   const starts = [...planned, ...basic].map((b) => b.start);
   const resting = typeof rest !== "string" ? [] : basic.flatMap((b) => {
-    const next = Math.min(plan.to, ...starts.filter((s) => s >= b.end));
+    const next = Math.min(plan2.to, ...starts.filter((s) => s >= b.end));
     return next > b.end ? [{ start: b.end, end: next, place: null, activity: rest }] : [];
   });
   return [...planned, ...basic, ...resting];
@@ -27299,13 +27302,13 @@ function atPlanMoment(ctx, who, moment, slot) {
     const starting = planned.find((b) => `skip:${b.start}` === moment.key);
     return starting ? liveSkipBlock(ctx, who, starting, moment.at) : [];
   }
-  const plan = dayPlan(ctx, who, dateAt(cal, moment.at).dayIndex);
+  const plan2 = dayPlan(ctx, who, dateAt(cal, moment.at).dayIndex);
   if (moment.key.startsWith("block:")) {
-    const starting = plan.blocks.find((b) => b.start === moment.at);
+    const starting = plan2.blocks.find((b) => b.start === moment.at);
     const from = livesEveryBlock(ctx, who, slot) ? moment.at - 1 : slot.start;
-    return starting ? liveBlock(ctx, who, plan, starting, from, moment.at, scene, slot.timelapse === true) : [];
+    return starting ? liveBlock(ctx, who, plan2, starting, from, moment.at, scene, slot.timelapse === true) : [];
   }
-  const block = plan.blocks.find((b) => b.start <= moment.at && moment.at < b.end);
+  const block = plan2.blocks.find((b) => b.start <= moment.at && moment.at < b.end);
   if (!block)
     return [];
   const skipLife = slot.timelapse === true && who !== ctx.world.pov && routineRole(ctx, who) !== "enforced" && !block.option.startsWith("plan:");
@@ -27329,25 +27332,25 @@ function stepAgent2(slot, ctx, rngFor, who) {
     return out;
   const level = ctx.levelOf(who, "castlife");
   const cal = calendarOf(ctx.world);
-  const day = dateAt(cal, slot.end).dayIndex;
+  const day2 = dateAt(cal, slot.end).dayIndex;
   const rng = rngFor(who);
-  const plan = dayPlan(ctx, who, day);
-  const block = plan.blocks.find((b) => b.start <= slot.end && slot.end < b.end) ?? plan.blocks[plan.blocks.length - 1];
+  const plan2 = dayPlan(ctx, who, day2);
+  const block = plan2.blocks.find((b) => b.start <= slot.end && slot.end < b.end) ?? plan2.blocks[plan2.blocks.length - 1];
   if (!block)
     return out;
   const pov = ctx.world.pov;
   if (block.activity.startsWith("retrieve:")) {
     const thing = block.activity.slice("retrieve:".length);
     const lent = own(ctx.state.entities, thing)?.fields.owner === who && Object.values(ctx.state.entities).some((x) => x.relations.some((r) => r.type === "uses" && r.to === thing));
-    const retrieve = lent ? optionalService(ctx, "gear.retrieve") : null;
-    if (retrieve) {
-      const got = retrieve(ctx, thing);
+    const retrieve2 = lent ? optionalService(ctx, "gear.retrieve") : null;
+    if (retrieve2) {
+      const got = retrieve2(ctx, thing);
       if (Array.isArray(got))
         out.push(...got, { type: ENGINE_EVENTS.note, data: { text: `${e.name} got ${own(ctx.state.entities, thing)?.name ?? thing} back.`, entity: who, visibility: "known_by" } });
     }
   }
   if (who !== pov || slot.povRoutine !== false)
-    out.push(...liveBlock(ctx, who, plan, block, slot.start, slot.end, slot.povRoutine === false, slot.timelapse === true));
+    out.push(...liveBlock(ctx, who, plan2, block, slot.start, slot.end, slot.povRoutine === false, slot.timelapse === true));
   const planned = skipBlocksOf(ctx, who, slot).find((b) => b.start <= slot.end && slot.end < b.end);
   if (planned)
     out.push(...liveSkipBlock(ctx, who, planned, slot.end));
@@ -27355,22 +27358,22 @@ function stepAgent2(slot, ctx, rngFor, who) {
   if (level < 4)
     return out;
   if (who === pov) {
-    for (const need of Object.keys(NEEDS)) {
-      if (needValue(ctx, who, need, slot.end) >= NEED_ALERT && needValue(ctx, who, need, slot.start) < NEED_ALERT)
-        out.push({ type: ENGINE_EVENTS.signal, data: { class: "needs", text: `You're getting ${own(NEEDS, need)?.label ?? need}.`, entity: pov } });
+    for (const need2 of Object.keys(NEEDS)) {
+      if (needValue(ctx, who, need2, slot.end) >= NEED_ALERT && needValue(ctx, who, need2, slot.start) < NEED_ALERT)
+        out.push({ type: ENGINE_EVENTS.signal, data: { class: "needs", text: `You're getting ${own(NEEDS, need2)?.label ?? need2}.`, entity: pov } });
     }
     return out;
   }
-  const appraise = optionalService(ctx, "relationship.appraise");
+  const appraise2 = optionalService(ctx, "relationship.appraise");
   const g = rng.fork("encounters");
-  if (appraise && block.place && g.next() < ENCOUNTER_CHANCE) {
-    const here = Object.keys(ctx.state.entities).sort().filter((other) => other !== who && other !== pov && kindIs(ctx.registry, ctx.world, own(ctx.state.entities, other)?.kind ?? "", "person") && placeOfEntity(ctx.state, other) === block.place && acts2(ctx, other));
+  if (appraise2 && block.place && g.next() < ENCOUNTER_CHANCE) {
+    const here = Object.keys(ctx.state.entities).sort().filter((other2) => other2 !== who && other2 !== pov && kindIs(ctx.registry, ctx.world, own(ctx.state.entities, other2)?.kind ?? "", "person") && placeOfEntity(ctx.state, other2) === block.place && acts2(ctx, other2));
     const other = here[Math.floor(g.next() * here.length)];
     if (other) {
       const known = acquainted(ctx.state, who, other);
       const kind = known ? g.next() < 0.1 ? "argument" : "encounter" : g.next() < ACQUAINT_CHANCE ? "greeting" : null;
       if (kind)
-        out.push(...appraise(ctx, who, other, kind, `${kind} at ${own(ctx.world.places, block.place)?.name ?? block.place}`, true));
+        out.push(...appraise2(ctx, who, other, kind, `${kind} at ${own(ctx.world.places, block.place)?.name ?? block.place}`, true));
     }
   }
   for (const a of asksOf(ctx, who, slotDays(ctx, slot)))
@@ -27423,9 +27426,9 @@ function stepTrips(slot, ctx) {
       const home = homeOf(ctx, who);
       if ((until > slot.start || away) && home)
         out.push({ type: "set", entity: who, field: "place", value: home }, { type: "set", entity: who, field: "activity", value: "idle" });
-      const kept = Object.fromEntries(Object.entries(holds).filter(([target, at]) => !((target === "place" || target === "activity") && at === until)));
-      if (Object.keys(kept).length < Object.keys(holds).length) {
-        holds = kept;
+      const kept2 = Object.fromEntries(Object.entries(holds).filter(([target, at]) => !((target === "place" || target === "activity") && at === until)));
+      if (Object.keys(kept2).length < Object.keys(holds).length) {
+        holds = kept2;
         out.push({ type: "set", entity: who, field: "holds", value: holds });
       }
     }
@@ -27450,15 +27453,15 @@ var EVENTS3 = [
   {
     type: "castlife.need",
     validate: (e, ctx) => own(ctx.state.entities, strOf(e.data.entity)) && own(NEEDS, strOf(e.data.need)) && typeof e.data.delta === "number" ? null : { code: "bad_event", reason: "need needs an entity, a known need and a delta" },
-    apply: (e, state, ctx) => {
-      const who = own(state.entities, strOf(e.data.entity));
+    apply: (e, state2, ctx) => {
+      const who = own(state2.entities, strOf(e.data.entity));
       if (!who)
         return;
-      const at = numOf(e.data.at, state.clock);
-      const need = strOf(e.data.need);
-      const from = typeof e.data.from === "number" ? e.data.from : needValue(ctx, strOf(e.data.entity), need, at, true);
+      const at = numOf(e.data.at, state2.clock);
+      const need2 = strOf(e.data.need);
+      const from = typeof e.data.from === "number" ? e.data.from : needValue(ctx, strOf(e.data.entity), need2, at, true);
       const v = Math.max(0, Math.min(100, from + numOf(e.data.delta)));
-      who.fields.needs = { ...objOf(who.fields.needs), [need]: { v, t: at } };
+      who.fields.needs = { ...objOf(who.fields.needs), [need2]: { v, t: at } };
     },
     touches: (e) => [{ entity: strOf(e.data.entity), field: "needs" }],
     describe: (e) => `${strOf(e.data.need).replace(/_/g, " ")} ${numOf(e.data.delta) < 0 ? "eased" : "rose"}`
@@ -27466,16 +27469,16 @@ var EVENTS3 = [
   {
     type: "castlife.decision",
     validate: (e) => strOf(e.data.key) !== "" && strOf(e.data.choice) !== "" ? null : { code: "bad_event", reason: "decision needs key and choice" },
-    apply: (e, state) => {
-      sliceRecord(state, "castlife", "decisions")[strOf(e.data.key)] = strOf(e.data.choice);
+    apply: (e, state2) => {
+      sliceRecord(state2, "castlife", "decisions")[strOf(e.data.key)] = strOf(e.data.choice);
     },
     describe: (e) => `decided ${strOf(e.data.choice)}`
   },
   {
     type: "castlife.invitation",
     validate: (e, ctx) => own(ctx.state.entities, strOf(e.data.agent)) ? null : { code: "missing_entity", reason: "invitation needs an agent" },
-    apply: (e, state) => {
-      const s = mutableSlice(state, "castlife");
+    apply: (e, state2) => {
+      const s = mutableSlice(state2, "castlife");
       const list = Array.isArray(s.invitations) ? s.invitations.slice(-9) : [];
       list.push({ agent: strOf(e.data.agent), place: e.data.place ?? null, at: numOf(e.data.at), text: strOf(e.data.text), ...typeof e.data.key === "string" ? { key: e.data.key } : {}, ...typeof e.data.origin === "string" ? { origin: e.data.origin } : {} });
       s.invitations = list;
@@ -27498,8 +27501,8 @@ var EVENTS3 = [
       const some = o.mode !== null || o.awareness !== null || o.role !== undefined && o.role !== null || o.skips !== undefined && o.skips !== null;
       return mode && awareness && role && skips && some ? null : { code: "bad_event", reason: "a routine setting is a mode, an awareness, a role, a skip life or some of them, or null to clear it" };
     },
-    apply: (e, state) => {
-      const follow = sliceRecord(state, "castlife", "follow");
+    apply: (e, state2) => {
+      const follow = sliceRecord(state2, "castlife", "follow");
       const who = strOf(e.data.entity);
       const f = objOf(e.data.follow);
       if (e.data.follow === null)
@@ -27522,8 +27525,8 @@ var EVENTS3 = [
       const planned = plans.every((raw) => own(ctx.state.entities, strOf(objOf(raw).entity)) !== undefined && Array.isArray(objOf(raw).blocks) && objOf(raw).blocks.every(block));
       return planned ? null : { code: "bad_value", reason: "a skip plan names people in the world, each block inside its span at a place the world has" };
     },
-    apply: (e, state) => {
-      mutableSlice(state, "castlife").skipPlan = structuredClone(e.data);
+    apply: (e, state2) => {
+      mutableSlice(state2, "castlife").skipPlan = structuredClone(e.data);
     },
     describe: (e, _ctx, viewer) => viewer !== undefined ? "" : `skip planned for ${Array.isArray(e.data.plans) ? e.data.plans.length : 0}${typeof e.data.note === "string" ? ` (${e.data.note})` : ""}`
   },
@@ -27540,8 +27543,8 @@ var EVENTS3 = [
       const problems = blockShapeProblems(v, false);
       return problems.length === 0 && objOf(v).id === e.data.block ? null : { code: "bad_value", reason: problems[0] ?? "the block's id is the one it changes" };
     },
-    apply: (e, state) => {
-      const routines = sliceRecord(state, "castlife", "routines");
+    apply: (e, state2) => {
+      const routines = sliceRecord(state2, "castlife", "routines");
       const who = strOf(e.data.entity);
       const mine = { ...objOf(routines[who]) };
       if (e.data.value === null)
@@ -27564,8 +27567,8 @@ var EVENTS3 = [
         return { code: "bad_event", reason: "a schedule change names one of the world's schedules and where it came from" };
       return e.data.value === null || isScheduleChange(e.data.value) ? null : { code: "bad_value", reason: "a schedule change is off (until a time or for good) or their own slots" };
     },
-    apply: (e, state) => {
-      const schedules = sliceRecord(state, "castlife", "schedules");
+    apply: (e, state2) => {
+      const schedules = sliceRecord(state2, "castlife", "schedules");
       const who = strOf(e.data.entity);
       const mine = { ...objOf(schedules[who]) };
       if (e.data.value === null)
@@ -27598,11 +27601,11 @@ function routineEdit(ctx, op) {
   if (op.op === "routine_block") {
     if (op.value === null)
       return [{ type: ROUTINE_EVENTS.block, data: { entity: op.entity, block: op.block, value: null, source } }];
-    const value = { ...op.value, id: op.block };
-    const problems = blockShapeProblems(value, false);
+    const value2 = { ...op.value, id: op.block };
+    const problems = blockShapeProblems(value2, false);
     if (problems.length > 0)
       return { code: "bad_value", reason: problems.join("; ") };
-    return [{ type: ROUTINE_EVENTS.block, data: { entity: op.entity, block: op.block, value, source } }];
+    return [{ type: ROUTINE_EVENTS.block, data: { entity: op.entity, block: op.block, value: value2, source } }];
   }
   const schedule = allSchedules(ctx.registry, ctx.world).find((s) => s.id === op.schedule);
   if (!schedule)
@@ -27625,11 +27628,11 @@ function kindOfBlock(activity) {
     return "free";
   return "other";
 }
-function playerBlocks(ctx, who, plan) {
+function playerBlocks(ctx, who, plan2) {
   const cal = calendarOf(ctx.world);
-  const applied = new Map(activeBlocks(ctx, who, plan.day).map((a) => [a.block.id, a]));
+  const applied = new Map(activeBlocks(ctx, who, plan2.day).map((a) => [a.block.id, a]));
   const open = loreGateReader(ctx.registry, ctx.world, ctx.state);
-  return plan.blocks.map((b) => {
+  return plan2.blocks.map((b) => {
     const from = formatHHMM(dateAt(cal, b.start).minuteOfDay);
     const to = formatHHMM(dateAt(cal, b.end).minuteOfDay);
     const routineId = b.option.startsWith(ROUTINE_OPTION) ? b.option.slice(ROUTINE_OPTION.length).replace(/:carried$/, "") : null;
@@ -27657,8 +27660,8 @@ function buildCastView(ctx) {
   const cal = calendarOf(ctx.world);
   const here = placeOfEntity(ctx.state, pov);
   const view = optionalQuery(ctx, "relationships.view");
-  const shown = (id) => canSeeEntity(ctx.registry, ctx.world, ctx.state, pov, id);
-  const groupIds = Object.keys(ctx.state.entities).sort().filter((id) => isGroup(ctx.registry, ctx.world, ctx.state, id) && shown(id));
+  const shown3 = (id) => canSeeEntity(ctx.registry, ctx.world, ctx.state, pov, id);
+  const groupIds = Object.keys(ctx.state.entities).sort().filter((id) => isGroup(ctx.registry, ctx.world, ctx.state, id) && shown3(id));
   const membershipsOf = (who) => groupIds.filter((g) => isMemberOf(ctx.state, who, g)).map((g) => {
     const direct = objOf(own(ctx.state.entities, who)?.relations.find((r) => r.type === MEMBER_OF && r.to === g)?.fields);
     return { id: g, ...typeof direct.role === "string" && direct.role !== "" ? { role: direct.role } : {}, ...typeof direct.rank === "number" ? { rank: direct.rank } : {}, ...typeof direct.since === "string" ? { since: direct.since } : {} };
@@ -27670,8 +27673,8 @@ function buildCastView(ctx) {
     if (!e || id === pov || !kindIs(ctx.registry, ctx.world, e.kind, "person") || isGone(ctx.state, id))
       continue;
     const place = placeOfEntity(ctx.state, id);
-    const present = place !== null && place === here;
-    if (!(present ? shown(id) : playerKnows(ctx.registry, ctx.world, ctx.state, pov, id)))
+    const present2 = place !== null && place === here;
+    if (!(present2 ? shown3(id) : playerKnows(ctx.registry, ctx.world, ctx.state, pov, id)))
       continue;
     const classes = {};
     for (const [facet] of facets) {
@@ -27685,7 +27688,7 @@ function buildCastView(ctx) {
       id,
       name: e.name,
       role: role !== "" ? role : sees("occupation") ? strOf(e.fields.occupation).replace(/_/g, " ") : "",
-      here: present,
+      here: present2,
       tier: e.tier,
       classes,
       groups: membershipsOf(id).map((m) => ({ id: m.id, ...m.role !== undefined ? { role: m.role } : {} }))
@@ -27694,7 +27697,7 @@ function buildCastView(ctx) {
     if (life)
       p.life = life.label;
     const still = life !== null && !life.acts;
-    if (present) {
+    if (present2) {
       if (typeof e.fields.activity === "string" && sees("activity") && !still)
         p.activity = shownActivity(ctx, id, e.fields.activity).replace(/_/g, " ");
       if (sees("place"))
@@ -27707,8 +27710,8 @@ function buildCastView(ctx) {
     const regard = view ? view(ctx, id, pov) : [];
     if (regard.length > 0)
       p.regard = regard;
-    const plan = present && e.agent && !still ? dayPlan(ctx, id) : null;
-    const blocks = plan ? playerBlocks(ctx, id, plan) : null;
+    const plan2 = present2 && e.agent && !still ? dayPlan(ctx, id) : null;
+    const blocks = plan2 ? playerBlocks(ctx, id, plan2) : null;
     if (blocks && level >= 3)
       p.timeline = blocks.map((b) => ({ start: b.from, end: b.to, label: b.label, kind: b.kind, reasons: b.reasons, source: b.source }));
     const agenda = agendaFor(ctx.world, ctx.state, id).filter((a) => publicTrack(ctx.world, a.track));
@@ -27719,13 +27722,13 @@ function buildCastView(ctx) {
       p.next = { at: formatClock(cal, next.start), label: next.label };
     people.push(p);
   }
-  const needs = level >= 4 ? Object.entries(NEEDS).map(([need, def]) => ({ need, value: Math.round(needValue(ctx, pov, need)), label: def.label })) : [];
+  const needs = level >= 4 ? Object.entries(NEEDS).map(([need2, def]) => ({ need: need2, value: Math.round(needValue(ctx, pov, need2)), label: def.label })) : [];
   const group = (id) => {
     const g = own(ctx.state.entities, id);
     return { id, name: g?.name ?? id, kind: kindDef(ctx.registry, ctx.world, g?.kind ?? "")?.label ?? g?.kind ?? "" };
   };
   const listed = new Set(people.flatMap((p) => p.groups.map((m) => m.id)));
-  const byName = (a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id);
+  const byName2 = (a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id);
   const tierIds = new Set(people.map((p) => p.tier));
   const tiers = [...tiersInOrder(ctx.world).map(([id]) => id).filter((id) => tierIds.has(id)), ...[...tierIds].filter((id) => !tierOf(ctx.world, id)).sort()];
   return {
@@ -27734,8 +27737,8 @@ function buildCastView(ctx) {
     people,
     facets: facets.map(([id, f]) => ({ id, label: f.label, multiple: f.multiple === true, values: facetTree(f.values).map((v) => ({ id: v.id, label: v.value.label, ...v.value.parent !== undefined ? { parent: v.value.parent } : {} })) })),
     tiers: tiers.map((id) => ({ id, label: tierLabel(ctx.world, id) })),
-    groups: groupIds.filter((g) => listed.has(g)).map(group).sort(byName),
-    mine: membershipsOf(pov).map((m) => ({ ...group(m.id), ...m.role !== undefined ? { role: m.role } : {}, ...m.rank !== undefined ? { rank: m.rank } : {}, ...m.since !== undefined ? { since: m.since } : {} })).sort(byName)
+    groups: groupIds.filter((g) => listed.has(g)).map(group).sort(byName2),
+    mine: membershipsOf(pov).map((m) => ({ ...group(m.id), ...m.role !== undefined ? { role: m.role } : {}, ...m.rank !== undefined ? { rank: m.rank } : {}, ...m.since !== undefined ? { since: m.since } : {} })).sort(byName2)
   };
 }
 function acts2(ctx, who) {
@@ -27747,49 +27750,49 @@ function listed(label, clauses) {
 }
 function decidedBlock(ctx, who) {
   const cal = calendarOf(ctx.world);
-  const plan = dayPlan(ctx, who);
-  const dayStart = clockAt(cal, plan.day, 0);
-  const chosen = new Set(plan.ties.filter((t) => t.via === "recorded").map((t) => t.key));
-  const block = playerBlocks(ctx, who, plan).find((b, i) => (plan.blocks[i]?.end ?? 0) > ctx.state.clock && chosen.has(tieKey(who, dayStart, b.start)));
+  const plan2 = dayPlan(ctx, who);
+  const dayStart = clockAt(cal, plan2.day, 0);
+  const chosen = new Set(plan2.ties.filter((t) => t.via === "recorded").map((t) => t.key));
+  const block = playerBlocks(ctx, who, plan2).find((b, i) => (plan2.blocks[i]?.end ?? 0) > ctx.state.clock && chosen.has(tieKey(who, dayStart, b.start)));
   if (!block)
     return null;
   return block.start <= ctx.state.clock ? block.label : `${block.label} at ${block.from}`;
 }
 function stanceCast(ctx) {
-  const { registry: reg, world, state } = ctx;
+  const { registry: reg, world, state: state2 } = ctx;
   const pov = world.pov;
-  const here = placeOfEntity(state, pov);
+  const here = placeOfEntity(state2, pov);
   const minded = new Set(optionalQuery(ctx, "minds.minded")?.(ctx) ?? []);
-  const people = here === null ? [] : Object.keys(state.entities).sort().filter((id) => id !== pov && placeOfEntity(state, id) === here && kindIs(reg, world, own(state.entities, id)?.kind ?? "", "person") && canSeeEntity(reg, world, state, pov, id) && !isGone(state, id) && povLife(world, state, id)?.acts !== false && !minded.has(id));
+  const people = here === null ? [] : Object.keys(state2.entities).sort().filter((id) => id !== pov && placeOfEntity(state2, id) === here && kindIs(reg, world, own(state2.entities, id)?.kind ?? "", "person") && canSeeEntity(reg, world, state2, pov, id) && !isGone(state2, id) && povLife(world, state2, id)?.acts !== false && !minded.has(id));
   let check = null;
-  const safe = (text) => {
+  const safe = (text4) => {
     if (!check) {
-      const secrets = unrevealedSecrets(reg, world, state);
-      const namesHidden = hiddenNameCheck(reg, world, state, pov);
+      const secrets = unrevealedSecrets(reg, world, state2);
+      const namesHidden = hiddenNameCheck(reg, world, state2, pov);
       check = (t) => findLeaks(t, secrets).length === 0 && !namesHidden(t);
     }
-    return check(text);
+    return check(text4);
   };
   return { people, safe };
 }
 function stanceLines(ctx) {
-  const { registry: reg, world, state } = ctx;
+  const { registry: reg, world, state: state2 } = ctx;
   const pov = world.pov;
   const { people, safe } = stanceCast(ctx);
   const regard = optionalQuery(ctx, "relationships.words");
   const lines = [];
   for (const id of people) {
-    const e = own(state.entities, id);
+    const e = own(state2.entities, id);
     if (!e)
       continue;
-    const known = knows(state, id, pov) || e.relations.some((r) => r.type === "regard" && r.to === pov);
-    const words = regard?.(ctx, id, pov) ?? null;
-    const parts = [`${e.name} ${known ? "knows" : "doesn't know"} you${words ? `; regard: ${words}` : ""}.`];
-    const activity = canSeeField(reg, world, state, pov, id, "activity") ? e.fields.activity : undefined;
+    const known = knows(state2, id, pov) || e.relations.some((r) => r.type === "regard" && r.to === pov);
+    const words3 = regard?.(ctx, id, pov) ?? null;
+    const parts = [`${e.name} ${known ? "knows" : "doesn't know"} you${words3 ? `; regard: ${words3}` : ""}.`];
+    const activity = canSeeField(reg, world, state2, pov, id, "activity") ? e.fields.activity : undefined;
     const doing = typeof activity === "string" && activity !== "idle" ? shownActivity(ctx, id, activity).replace(/_/g, " ") : "";
     if (doing !== "" && safe(doing))
       parts.push(listed("Doing", [doing]));
-    const agenda = agendaFor(world, state, id).filter((a) => publicTrack(world, a.track)).map((a) => {
+    const agenda = agendaFor(world, state2, id).filter((a) => publicTrack(world, a.track)).map((a) => {
       const track = own(world.tracks, a.track);
       const cue = track ? own(track.stages, a.stage)?.cue?.trim() : undefined;
       return cue ? cue : a.stageLabel;
@@ -27832,8 +27835,8 @@ var castlifePack = {
       const out = [];
       const decided = decisions(ctx.state);
       for (const id of Object.keys(ctx.state.entities).sort()) {
-        const plan = own(ctx.state.entities, id)?.agent && acts2(ctx, id) ? dayPlan(ctx, id) : null;
-        for (const t of plan?.ties ?? [])
+        const plan2 = own(ctx.state.entities, id)?.agent && acts2(ctx, id) ? dayPlan(ctx, id) : null;
+        for (const t of plan2?.ties ?? [])
           if (t.via === "seed" && !own(decided, t.key))
             out.push({ key: t.key, agent: id, options: t.options });
       }
@@ -27849,16 +27852,16 @@ var castlifePack = {
     };
     r.formula("invited", (ctx, host) => openInvitations(ctx).some((inv) => strOf(inv.agent) === String(host ?? "")));
     r.query("castlife.invitations", (ctx, viewer) => openInvitations(ctx).map((inv) => ({ host: strOf(inv.agent), text: invitationText(ctx, strOf(inv.agent), typeof inv.place === "string" ? inv.place : null, numOf(inv.at), viewer) })));
-    r.formula("need", (ctx, who, need) => needValue(ctx, String(who ?? ctx.world.pov), String(need ?? "")));
+    r.formula("need", (ctx, who, need2) => needValue(ctx, String(who ?? ctx.world.pov), String(need2 ?? "")));
     r.formula("busy", (ctx, who) => {
       const id = String(who ?? "");
       return commitments(ctx, id, ctx.state.clock, ctx.state.clock + 1).length > 0;
     });
     r.effect({ type: "castlife.satisfy", args: ["need", "entity?"], resolve: (a, ctx) => {
       const who = strOf(a.entity) || ctx.world.pov;
-      const need = strOf(a.need);
-      const v = needValue(ctx, who, need);
-      return own(NEEDS, need) && v > 0 ? [{ type: "castlife.need", data: { entity: who, need, delta: -v, at: ctx.state.clock, from: v } }] : [];
+      const need2 = strOf(a.need);
+      const v = needValue(ctx, who, need2);
+      return own(NEEDS, need2) && v > 0 ? [{ type: "castlife.need", data: { entity: who, need: need2, delta: -v, at: ctx.state.clock, from: v } }] : [];
     } });
     r.effect({ type: "castlife.decide", args: ["key", "choice"], resolve: (a) => [{ type: "castlife.decision", data: { key: strOf(a.key), choice: strOf(a.choice) } }] });
     r.effect({
@@ -27930,7 +27933,7 @@ var castlifePack = {
       check(world) {
         const issues = [];
         for (const e of Object.values(world.entities)) {
-          const owned = Object.values(world.schedules).filter((s) => s.owner === e.id && s.target === "activity");
+          const owned2 = Object.values(world.schedules).filter((s) => s.owner === e.id && s.target === "activity");
           const dated = [
             ...(Array.isArray(e.fields.appointments) ? e.fields.appointments : []).map((raw, i) => ({ path: `entities.${e.id}.fields.appointments.${i}`, label: strOf(objOf(raw).label, "an appointment"), start: numOf(objOf(raw).at, NaN), end: numOf(objOf(raw).at, NaN) + numOf(objOf(raw).minutes, 60), trip: false })),
             ...(Array.isArray(e.fields.trips) ? e.fields.trips : []).map((raw, i) => ({ path: `entities.${e.id}.fields.trips.${i}`, label: strOf(objOf(raw).label, "a trip"), start: numOf(objOf(raw).from, NaN), end: numOf(objOf(raw).until, NaN), trip: true }))
@@ -27944,9 +27947,9 @@ var castlifePack = {
                 issues.push({ severity: "warning", code: "castlife.double_booking", message: `${e.name} is double-booked: ${a.label} and ${b.label} overlap.`, path: b.path });
             if (a.trip)
               continue;
-            for (const s of owned) {
-              const edges = scheduleInstants(world, [s], a.start - MINUTES_PER_DAY, a.end + MINUTES_PER_DAY);
-              const clash = edges.some((x) => x.edge === "start" && x.at < a.end && (edges.find((y) => y.edge === "end" && y.occurrence === x.occurrence)?.at ?? x.at) > a.start);
+            for (const s of owned2) {
+              const edges2 = scheduleInstants(world, [s], a.start - MINUTES_PER_DAY, a.end + MINUTES_PER_DAY);
+              const clash = edges2.some((x) => x.edge === "start" && x.at < a.end && (edges2.find((y) => y.edge === "end" && y.occurrence === x.occurrence)?.at ?? x.at) > a.start);
               if (clash)
                 issues.push({ severity: "warning", code: "castlife.double_booking", message: `${e.name} is double-booked: ${a.label} falls in ${s.id}.`, path: a.path });
             }
@@ -27960,8 +27963,8 @@ var castlifePack = {
       check(world, registry) {
         if (!registry)
           return [];
-        const state = initialState(world, "", registry);
-        return [...routinesLint(world, registry, state), ...schedulesLint(world, registry, state)];
+        const state2 = initialState(world, "", registry);
+        return [...routinesLint(world, registry, state2), ...schedulesLint(world, registry, state2)];
       }
     });
   }
@@ -28081,14 +28084,14 @@ var STAT_ALIASES = {
   toughness: "grit",
   willpower: "grit"
 };
-function statId(ctx, text) {
-  const t = text.trim().toLowerCase();
+function statId(ctx, text4) {
+  const t = text4.trim().toLowerCase();
   const stats = statsOf(ctx);
   const hit = stats.find((s) => s.id.toLowerCase() === t || s.label.toLowerCase() === t);
   if (hit)
     return hit.id;
   const alias = own(STAT_ALIASES, t);
-  return alias && stats.some((s) => s.id === alias) ? alias : text;
+  return alias && stats.some((s) => s.id === alias) ? alias : text4;
 }
 var DIFFICULTY_WORDS = { trivial: 5, easy: 8, routine: 8, simple: 8, moderate: 10, medium: 10, average: 10, normal: 10, tricky: 12, hard: 15, difficult: 15, tough: 15, "very hard": 20, "very difficult": 20, heroic: 25, "nearly impossible": 30 };
 var DEFAULT_DIFFICULTY = 10;
@@ -28114,10 +28117,10 @@ function buildSheetView(ctx) {
   const stats = level === 0 || designed ? [] : statsOf(ctx).map((s) => {
     const v = statValue(ctx, pov, s.id);
     const word = statWord(ctx, v);
-    const mod = statMod(v);
+    const mod2 = statMod(v);
     if (level === 1)
       return { label: s.label, value: word };
-    return { label: s.label, value: level >= 3 ? `${v} (${mod >= 0 ? "+" : ""}${mod})` : String(v), detail: word, fix: { entity: pov, field: s.id, type: "number", value: v, min: s.min, max: s.max } };
+    return { label: s.label, value: level >= 3 ? `${v} (${mod2 >= 0 ? "+" : ""}${mod2})` : String(v), detail: word, fix: { entity: pov, field: s.id, type: "number", value: v, min: s.min, max: s.max } };
   });
   const derived = level >= 3 && !designed ? Object.entries(derivedOf(ctx)).map(([id, d]) => ({ label: d.label, value: String(derivedValue(ctx, pov, id)) })) : [];
   const place = povPlace(ctx.registry, ctx.world, ctx.state);
@@ -28163,13 +28166,13 @@ var sheetsPack = {
         const id = strOf(a.condition).toLowerCase().replace(/\W+/g, "_");
         if (!id)
           return reject13("bad_condition", "a condition needs a name");
-        const kept = (Array.isArray(e.fields.conditions) ? e.fields.conditions : []).filter((c) => objOf(c).id !== id && !(typeof objOf(c).until === "number" && numOf(objOf(c).until) <= ctx.state.clock));
+        const kept2 = (Array.isArray(e.fields.conditions) ? e.fields.conditions : []).filter((c) => objOf(c).id !== id && !(typeof objOf(c).until === "number" && numOf(objOf(c).until) <= ctx.state.clock));
         if (a.clear === true)
-          return [{ type: "set", entity: who, field: "conditions", value: kept }];
+          return [{ type: "set", entity: who, field: "conditions", value: kept2 }];
         const next = { id, label: strOf(a.label, strOf(a.condition)), mod: numOf(a.mod, CONDITION_MOD) };
         if (typeof a.minutes === "number" && a.minutes > 0)
           next.until = ctx.state.clock + Math.round(a.minutes);
-        return [{ type: "set", entity: who, field: "conditions", value: [...kept, next] }];
+        return [{ type: "set", entity: who, field: "conditions", value: [...kept2, next] }];
       }
     });
     r.action({
@@ -28255,13 +28258,13 @@ function leakyLabels(world) {
     if (p.visibility === "secret" && p.name.length > 3)
       secrets.push(p.name);
   const out = [];
-  const check = (path, text) => {
-    if (!text)
+  const check = (path, text4) => {
+    if (!text4)
       return;
-    const l = text.toLowerCase();
+    const l = text4.toLowerCase();
     for (const s of secrets)
       if (l.includes(s.toLowerCase()) && l !== s.toLowerCase())
-        out.push({ path, text, secret: s });
+        out.push({ path, text: text4, secret: s });
   };
   for (const t of Object.values(world.tracks)) {
     check(`tracks.${t.id}.label`, t.label);
@@ -28325,16 +28328,16 @@ function leakyIds(world, registry) {
   for (const e of Object.values(world.entities)) {
     if (e.visibility === "secret")
       continue;
-    const words = idWords(e.id);
+    const words3 = idWords(e.id);
     const spelt = new Set;
     const gives = [];
     for (const s of secrets) {
       const at = [];
-      for (let i = 0;s.id.length > 0 && i + s.id.length <= words.length; i++)
-        if (s.id.every((w, j) => words[i + j] === w))
+      for (let i = 0;s.id.length > 0 && i + s.id.length <= words3.length; i++)
+        if (s.id.every((w, j) => words3[i + j] === w))
           for (let j = 0;j < s.id.length; j++)
             at.push(i + j);
-      words.forEach((w, i) => {
+      words3.forEach((w, i) => {
         if (s.words.some((n) => w === n || w === `${n}s`))
           at.push(i);
       });
@@ -28346,7 +28349,7 @@ function leakyIds(world, registry) {
     }
     if (gives.length === 0)
       continue;
-    out.push({ path: `entities.${e.id}.id`, id: e.id, secrets: gives, neutral: unused(words.filter((_, i) => !spelt.has(i)).join("_") || e.kind) });
+    out.push({ path: `entities.${e.id}.id`, id: e.id, secrets: gives, neutral: unused(words3.filter((_, i) => !spelt.has(i)).join("_") || e.kind) });
   }
   return out;
 }
@@ -28358,8 +28361,8 @@ function openPuzzles(ctx) {
     const t = own(ctx.world.tracks, id);
     if (t?.kind !== "puzzle" || own(t.stages, own(ctx.state.tracks, id)?.stage ?? t.start)?.answer === undefined)
       return [];
-    const shown = playerTrack(ctx.registry, ctx.world, ctx.state, ctx.world.pov, id);
-    return shown ? [{ id, shown }] : [];
+    const shown3 = playerTrack(ctx.registry, ctx.world, ctx.state, ctx.world.pov, id);
+    return shown3 ? [{ id, shown: shown3 }] : [];
   }).sort((a, b) => a.shown.id < b.shown.id ? -1 : a.shown.id > b.shown.id ? 1 : 0);
 }
 function idShaped(ref) {
@@ -28382,8 +28385,8 @@ function puzzlesFor(ctx, ref) {
   const name = idShaped(ref) ? seenName(ctx, ref.trim()) : null;
   const partsOnly = idShaped(ref) && name === null;
   const want = new Set(wordsOf(name ?? ref));
-  const scored = open.map(({ id, shown }) => {
-    const seen = new Set(wordsOf(`${shown.label} ${shown.stage} ${shown.cue ?? ""}`));
+  const scored = open.map(({ id, shown: shown3 }) => {
+    const seen = new Set(wordsOf(`${shown3.label} ${shown3.stage} ${shown3.cue ?? ""}`));
     return { id, n: [...want].filter((w) => seen.has(w)).length };
   });
   const best = Math.max(0, ...scored.map((s) => s.n));
@@ -28397,11 +28400,11 @@ function puzzlesFor(ctx, ref) {
 }
 function askedFor(ctx, ref) {
   const id = Object.keys(ctx.world.tracks).find((t) => shownTrackId(ctx.world, t) === ref);
-  const shown = id === undefined ? null : playerTrack(ctx.registry, ctx.world, ctx.state, ctx.world.pov, id);
-  if (shown)
-    return shown.label;
-  const words = ref.trim();
-  return idShaped(words) || hasOwn(ctx.world.tracks, words) || hasOwn(ctx.world.tracks, ref) ? null : words;
+  const shown3 = id === undefined ? null : playerTrack(ctx.registry, ctx.world, ctx.state, ctx.world.pov, id);
+  if (shown3)
+    return shown3.label;
+  const words3 = ref.trim();
+  return idShaped(words3) || hasOwn(ctx.world.tracks, words3) || hasOwn(ctx.world.tracks, ref) ? null : words3;
 }
 function askedForGm(ctx, ref) {
   if (ref.trim() === "")
@@ -28426,8 +28429,8 @@ var storyPack = {
     r.event({
       type: "story.flag",
       validate: (e) => strOf(e.data.name) !== "" ? null : { code: "bad_flag", reason: "a flag needs a name" },
-      apply: (e, state) => {
-        const s = mutableSlice(state, "story");
+      apply: (e, state2) => {
+        const s = mutableSlice(state2, "story");
         s.flags = { ...objOf(s.flags), [strOf(e.data.name)]: e.data.value ?? true };
       },
       describe: (e) => `flag ${strOf(e.data.name)}`
@@ -28543,8 +28546,8 @@ function numbers2(v) {
       out[k] = n;
   return out;
 }
-function encounterOf(state) {
-  const raw = sliceOf(state, PACK4).encounter;
+function encounterOf(state2) {
+  const raw = sliceOf(state2, PACK4).encounter;
   if (!isRecord(raw) || typeof raw.id !== "string" || !Array.isArray(raw.order))
     return null;
   const order = [];
@@ -28562,20 +28565,20 @@ function encounterOf(state) {
   const calm = objOf(raw.calm);
   return { id: raw.id, place: typeof raw.place === "string" ? raw.place : null, round: Math.max(1, numOf(raw.round, 1)), turn: Math.max(0, numOf(raw.turn)), order, log, calm: { hp: numbers2(calm.hp), rounds: Math.max(0, numOf(calm.rounds)), struck: calm.struck === true } };
 }
-function writeEncounter(state, enc) {
-  const slice = mutableSlice(state, PACK4);
+function writeEncounter(state2, enc) {
+  const slice2 = mutableSlice(state2, PACK4);
   if (enc)
-    slice.encounter = enc;
+    slice2.encounter = enc;
   else {
-    delete slice.encounter;
-    delete slice.decisions;
+    delete slice2.encounter;
+    delete slice2.decisions;
   }
-  if (Object.keys(slice).length === 0)
-    delete state.packs[PACK4];
+  if (Object.keys(slice2).length === 0)
+    delete state2.packs[PACK4];
 }
-function decisionsOf(state) {
+function decisionsOf(state2) {
   const out = {};
-  for (const [k, v] of Object.entries(objOf(sliceOf(state, PACK4).decisions)))
+  for (const [k, v] of Object.entries(objOf(sliceOf(state2, PACK4).decisions)))
     if (typeof v === "string")
       out[k] = v;
   return out;
@@ -28586,12 +28589,12 @@ function fighterOf(enc, id) {
 function standing(at, enc, f) {
   return !f.down && !isGone(at.state, f.id) && own(at.state.entities, f.id) !== undefined && acts(at.world, at.state, f.id) && placeOfEntity(at.state, f.id) === enc.place;
 }
-function engaged(state, world, id) {
-  const enc = encounterOf(state);
-  return enc !== null && !povLeft(state, world, enc) && fighterOf(enc, id) !== undefined && !isGone(state, id) && placeOfEntity(state, id) === enc.place;
+function engaged(state2, world, id) {
+  const enc = encounterOf(state2);
+  return enc !== null && !povLeft(state2, world, enc) && fighterOf(enc, id) !== undefined && !isGone(state2, id) && placeOfEntity(state2, id) === enc.place;
 }
-function povLeft(state, world, enc) {
-  return placeOfEntity(state, world.pov) !== enc.place;
+function povLeft(state2, world, enc) {
+  return placeOfEntity(state2, world.pov) !== enc.place;
 }
 function readFor(ctx, expr, bindings, fallback) {
   if (expr === undefined || expr === null)
@@ -28660,10 +28663,10 @@ function stalemateRounds(rules) {
   const n = rules.stalemate;
   return typeof n === "number" && Number.isFinite(n) ? Math.max(0, Math.floor(n)) : STALEMATE_ROUNDS;
 }
-function attacks(ctx, enc, actor, action, target) {
+function attacks(ctx, enc, actor2, action, target) {
   if ((own(ctx.world.actions, action) ?? ctx.registry.actions.get(action))?.combat?.role === "attack")
     return true;
-  const by = fighterOf(enc, actor);
+  const by = fighterOf(enc, actor2);
   const at = target !== null ? fighterOf(enc, target) : undefined;
   return by !== undefined && at !== undefined && by.side !== at.side;
 }
@@ -28698,7 +28701,7 @@ function targetOf(action, params) {
   const v = param ? params[param] : undefined;
   return typeof v === "string" && v !== "" ? v : null;
 }
-function spendFor(ctx, actor, action) {
+function spendFor(ctx, actor2, action) {
   if (!action.combat)
     return [];
   const rules = rulesOf(ctx.world);
@@ -28709,19 +28712,19 @@ function spendFor(ctx, actor, action) {
     return enc && !povLeft(ctx.state, ctx.world, enc) ? { code: "in_fight", reason: "a fight is already under way" } : [];
   if (!enc)
     return { code: "no_fight", reason: "no fight is under way" };
-  const you = actor === ctx.world.pov;
-  const f = fighterOf(enc, actor);
+  const you = actor2 === ctx.world.pov;
+  const f = fighterOf(enc, actor2);
   if (!f)
-    return { code: "not_fighting", reason: you ? "you aren't in this fight" : `${labelOf(ctx, actor)} isn't in this fight` };
+    return { code: "not_fighting", reason: you ? "you aren't in this fight" : `${labelOf(ctx, actor2)} isn't in this fight` };
   if (!standing(ctx, enc, f))
-    return { code: "down", reason: you ? "you are out of the fight" : `${labelOf(ctx, actor)} is out of the fight` };
+    return { code: "down", reason: you ? "you are out of the fight" : `${labelOf(ctx, actor2)} is out of the fight` };
   const cost = costOf2(action);
-  if (enc.order[enc.turn]?.id !== actor && !offTurnCost(rules, cost))
-    return { code: "not_your_turn", reason: you ? "it isn't your turn" : `it isn't ${labelOf(ctx, actor)}'s turn` };
+  if (enc.order[enc.turn]?.id !== actor2 && !offTurnCost(rules, cost))
+    return { code: "not_your_turn", reason: you ? "it isn't your turn" : `it isn't ${labelOf(ctx, actor2)}'s turn` };
   const short = Object.entries(cost).filter(([budget, n]) => (f.left[budget] ?? 0) < n).map(([budget]) => own(rules.economy, budget)?.label ?? budget);
   if (short.length > 0)
     return { code: "spent", reason: `no ${short.join(" or ")} left` };
-  return Object.keys(cost).length > 0 ? [{ type: "combat.spend", data: { encounter: enc.id, who: actor, cost } }] : [];
+  return Object.keys(cost).length > 0 ? [{ type: "combat.spend", data: { encounter: enc.id, who: actor2, cost } }] : [];
 }
 function turnRefill(ctx, rules, id) {
   const out = {};
@@ -28810,8 +28813,8 @@ class FightLines {
   constructor(rules) {
     this.rules = rules;
   }
-  push(line, happened = true) {
-    this.lines.push(line);
+  push(line2, happened = true) {
+    this.lines.push(line2);
     if (happened)
       this.happened = true;
   }
@@ -28842,9 +28845,9 @@ function asUnit2(w, from, seed) {
       w.events[i] = { ...e, group };
   }
 }
-function record2(w, events, seed) {
+function record2(w, events2, seed) {
   const from = w.events.length;
-  const applied = w.applyAll(events);
+  const applied = w.applyAll(events2);
   if (applied.length > 0)
     runRulesOnEvents(w.reg, w, applied, { seed });
   asUnit2(w, from, seed);
@@ -28897,12 +28900,12 @@ function settle2(w, rules, rng, lines) {
   lines.push(`The fight is over${winner === "party" ? ": your side won" : winner === "foes" ? ": your side lost" : ""}.`);
   return encounterOf(w.state) === null;
 }
-function actEvents(enc, actor, action, params, res) {
-  const acts = action.combat?.start !== true && (Object.keys(costOf2(action)).length > 0 || Object.values(action.outcomes).some((list) => list.some((fx) => fx.type !== "combat.end_turn")));
-  if (!acts)
+function actEvents(enc, actor2, action, params, res) {
+  const acts3 = action.combat?.start !== true && (Object.keys(costOf2(action)).length > 0 || Object.values(action.outcomes).some((list) => list.some((fx) => fx.type !== "combat.end_turn")));
+  if (!acts3)
     return [];
   const target = targetOf(action, params);
-  return [{ type: "combat.act", data: { encounter: enc.id, actor, action: action.id, label: action.label, ...target ? { target } : {}, ...res.check && res.outcome ? { outcome: res.outcome } : {} } }];
+  return [{ type: "combat.act", data: { encounter: enc.id, actor: actor2, action: action.id, label: action.label, ...target ? { target } : {}, ...res.check && res.outcome ? { outcome: res.outcome } : {} } }];
 }
 function advance2(w, rules, rng, lines) {
   const enc = encounterOf(w.state);
@@ -28920,8 +28923,8 @@ function optionKey(o) {
 function turnKey(enc, round, id) {
   return `combat:${enc.id}:${round}:${id}`;
 }
-function fightOptions(reg, world, state, actor) {
-  const enc = encounterOf(state);
+function fightOptions(reg, world, state2, actor2) {
+  const enc = encounterOf(state2);
   if (!enc)
     return [];
   const out = [];
@@ -28929,10 +28932,10 @@ function fightOptions(reg, world, state, actor) {
     const param = targetParam(action);
     if (action.combat?.start === true || param === undefined)
       continue;
-    const targets = param === null ? [null] : enc.order.filter((f) => f.id !== actor && standing({ world, state }, enc, f)).map((f) => f.id);
+    const targets = param === null ? [null] : enc.order.filter((f) => f.id !== actor2 && standing({ world, state: state2 }, enc, f)).map((f) => f.id);
     for (const target of targets) {
       const params = param !== null && target !== null ? { [param]: target } : {};
-      const odds = actionOdds(reg, world, state, { action, actor, params });
+      const odds = actionOdds(reg, world, state2, { action, actor: actor2, params });
       if (odds.available)
         out.push({ action, target, params, odds });
     }
@@ -28975,22 +28978,22 @@ function tacticFor(ctx, rules, enc, me, options) {
   }
   return best?.o ?? null;
 }
-function act(w, rules, actor, chosen, rng, lines) {
+function act(w, rules, actor2, chosen, rng, lines) {
   const enc = encounterOf(w.state);
   if (!enc)
     return false;
   const before = hpAround(w.ctx, rules);
   const from = w.events.length;
-  const res = resolveAction(w.reg, w, { action: chosen.action, actor, params: chosen.params }, rng);
+  const res = resolveAction(w.reg, w, { action: chosen.action, actor: actor2, params: chosen.params }, rng);
   if (!res.ok)
     return false;
   if (res.events.length > 0)
     runRulesOnEvents(w.reg, w, res.events, { seed: rng.seed });
-  const recorded = actEvents(enc, actor, chosen.action, chosen.params, res);
+  const recorded = actEvents(enc, actor2, chosen.action, chosen.params, res);
   record2(w, recorded, rng.seed);
   asUnit2(w, from, rng.seed);
   if (recorded.length > 0)
-    lines.push(`${capital(nameFor2(w.ctx, actor))}: ${chosen.action.label}${chosen.target ? ` \u2192 ${nameFor2(w.ctx, chosen.target)}` : ""}${res.check && res.outcome ? ` (${res.outcome.replace(/_/g, " ")})` : ""}.`);
+    lines.push(`${capital(nameFor2(w.ctx, actor2))}: ${chosen.action.label}${chosen.target ? ` \u2192 ${nameFor2(w.ctx, chosen.target)}` : ""}${res.check && res.outcome ? ` (${res.outcome.replace(/_/g, " ")})` : ""}.`);
   lines.changes(w.ctx, before);
   return true;
 }
@@ -29001,12 +29004,12 @@ function othersTurn(w, rules, rng, lines) {
     return;
   const decided = own(decisionsOf(w.state), turnKey(start, start.round, me.id));
   for (let n = 0;n < ACTS_PER_TURN; n++) {
-    const enc = encounterOf(w.state);
-    const f = enc ? fighterOf(enc, me.id) : undefined;
-    if (!enc || !f || enc.order[enc.turn]?.id !== me.id || enc.round !== start.round || !standing(w, enc, f))
+    const enc2 = encounterOf(w.state);
+    const f = enc2 ? fighterOf(enc2, me.id) : undefined;
+    if (!enc2 || !f || enc2.order[enc2.turn]?.id !== me.id || enc2.round !== start.round || !standing(w, enc2, f))
       return;
     const options = fightOptions(w.reg, w.world, w.state, me.id);
-    const chosen = (n === 0 && decided !== undefined ? options.find((o) => optionKey(o) === decided) : undefined) ?? tacticFor(w.ctx, rules, enc, f, options);
+    const chosen = (n === 0 && decided !== undefined ? options.find((o) => optionKey(o) === decided) : undefined) ?? tacticFor(w.ctx, rules, enc2, f, options);
     if (!chosen || !act(w, rules, me.id, chosen, rng.fork(`act:${n}`), lines))
       break;
     if (settle2(w, rules, rng.fork(`settle:${n}`), lines))
@@ -29119,9 +29122,9 @@ function fightChoices(ctx) {
     const key = turnKey(enc, enc.round + Math.floor((enc.turn + k) / n), f.id);
     if (!standing(ctx, enc, f) || own(decided, key) !== undefined)
       continue;
-    const state = structuredClone(ctx.state);
-    writeEncounter(state, { ...enc, turn: index, order: enc.order.map((p) => p.id === f.id ? { ...p, left: { ...p.left, ...turnRefill(ctx, rules, p.id) } } : p) });
-    const options = fightOptions(ctx.registry, ctx.world, state, f.id);
+    const state2 = structuredClone(ctx.state);
+    writeEncounter(state2, { ...enc, turn: index, order: enc.order.map((p) => p.id === f.id ? { ...p, left: { ...p.left, ...turnRefill(ctx, rules, p.id) } } : p) });
+    const options = fightOptions(ctx.registry, ctx.world, state2, f.id);
     if (options.length < 2)
       continue;
     const labels = {};
@@ -29148,17 +29151,17 @@ function optionOf(ctx, action, params, label) {
     ...odds.available ? {} : { disabled: odds.failed?.code === "requirement" ? "Not possible here and now" : odds.failed?.reason ?? "Not available" }
   };
 }
-function fightOffers(world, state, action) {
+function fightOffers(world, state2, action) {
   if (!action.combat)
     return true;
-  const enc = encounterOf(state);
-  const fighting = enc !== null && !povLeft(state, world, enc);
+  const enc = encounterOf(state2);
+  const fighting = enc !== null && !povLeft(state2, world, enc);
   return action.combat.start === true ? !fighting : fighting;
 }
 function combatEntries(ctx) {
   const found = encounterOf(ctx.state);
   const enc = found && !povLeft(ctx.state, ctx.world, found) ? found : null;
-  const entries = [];
+  const entries2 = [];
   for (const action of combatActions(ctx.registry, ctx.world)) {
     const param = targetParam(action);
     if (!fightOffers(ctx.world, ctx.state, action) || param === undefined)
@@ -29166,9 +29169,9 @@ function combatEntries(ctx) {
     const targets = param === null ? [null] : enc ? enc.order.filter((f) => f.id !== ctx.world.pov && standing(ctx, enc, f) && canSeeEntity(ctx.registry, ctx.world, ctx.state, ctx.world.pov, f.id)).map((f) => f.id) : paramCandidates(ctx.registry, ctx.world, ctx.state, action, param).slice(0, 24);
     const options = targets.map((t) => optionOf(ctx, action, param !== null && t !== null ? { [param]: t } : {}, t !== null ? labelOf(ctx, t) : action.label));
     if (options.length > 0)
-      entries.push({ action: action.id, label: action.label, group: "combat", options });
+      entries2.push({ action: action.id, label: action.label, group: "combat", options });
   }
-  return entries;
+  return entries2;
 }
 function paletteEncounter(ctx) {
   const rules = rulesOf(ctx.world);
@@ -29344,11 +29347,11 @@ var events2 = [
         return reject15("bad_event", "a fight is the POV's side against foes");
       return null;
     },
-    apply(e, state, ctx) {
-      delete mutableSlice(state, PACK4).decisions;
+    apply(e, state2, ctx) {
+      delete mutableSlice(state2, PACK4).decisions;
       const order = orderOf(e.data.order) ?? [];
       const rules = rulesOf(ctx.world);
-      writeEncounter(state, { id: strOf(e.data.encounter), place: typeof e.data.place === "string" ? e.data.place : null, round: 1, turn: 0, order, log: [], calm: { hp: rules ? hpByFighter(ctx, rules, order) : {}, rounds: 0, struck: false } });
+      writeEncounter(state2, { id: strOf(e.data.encounter), place: typeof e.data.place === "string" ? e.data.place : null, round: 1, turn: 0, order, log: [], calm: { hp: rules ? hpByFighter(ctx, rules, order) : {}, rounds: 0, struck: false } });
     },
     describe: (e) => `A fight: ${describeSide(e, "party")} against ${describeSide(e, "foes")}`
   },
@@ -29372,8 +29375,8 @@ var events2 = [
           return reject15("bad_event", "a refill names a participant and its budgets");
       return null;
     },
-    apply(e, state, ctx) {
-      const enc = encounterOf(state);
+    apply(e, state2, ctx) {
+      const enc = encounterOf(state2);
       if (!enc)
         return;
       const round = numOf(e.data.round, enc.round);
@@ -29381,7 +29384,7 @@ var events2 = [
       const rules = rulesOf(ctx.world);
       const now = round > enc.round && rules ? hpByFighter(ctx, rules, enc.order) : null;
       const calm = !now ? enc.calm : !enc.calm.struck && sameHp(now, enc.calm.hp) ? { hp: enc.calm.hp, rounds: enc.calm.rounds + (round - enc.round), struck: false } : { hp: now, rounds: 0, struck: false };
-      writeEncounter(state, {
+      writeEncounter(state2, {
         ...enc,
         round,
         turn: numOf(e.data.turn, enc.turn),
@@ -29410,11 +29413,11 @@ var events2 = [
         return reject15("not_your_turn", `it isn't ${labelOf(ctx, who)}'s turn`);
       return fits(cost, f.left) ? null : reject15("spent", `${labelOf(ctx, who)} has nothing like that left`);
     },
-    apply(e, state) {
-      const enc = encounterOf(state);
+    apply(e, state2) {
+      const enc = encounterOf(state2);
       const cost = counts(e.data.cost) ?? {};
       if (enc)
-        writeEncounter(state, { ...enc, order: enc.order.map((f) => f.id !== strOf(e.data.who) ? f : { ...f, left: Object.fromEntries(Object.entries(f.left).map(([b, n]) => [b, n - (cost[b] ?? 0)])) }) });
+        writeEncounter(state2, { ...enc, order: enc.order.map((f) => f.id !== strOf(e.data.who) ? f : { ...f, left: Object.fromEntries(Object.entries(f.left).map(([b, n]) => [b, n - (cost[b] ?? 0)])) }) });
     },
     describe: (e) => `${strOf(e.data.who)} spends ${Object.keys(objOf(e.data.cost)).join(", ")}`
   },
@@ -29426,14 +29429,14 @@ var events2 = [
         return enc;
       return fighterOf(enc, strOf(e.data.actor)) ? null : reject15("not_fighting", `${labelOf(ctx, strOf(e.data.actor))} isn't in this fight`);
     },
-    apply(e, state, ctx) {
-      const enc = encounterOf(state);
+    apply(e, state2, ctx) {
+      const enc = encounterOf(state2);
       if (!enc)
         return;
       const target = typeof e.data.target === "string" ? e.data.target : null;
       const entry = { round: enc.round, actor: strOf(e.data.actor), action: strOf(e.data.label, strOf(e.data.action)), target, outcome: typeof e.data.outcome === "string" ? e.data.outcome : null };
       const struck = enc.calm.struck || attacks(ctx, enc, entry.actor, strOf(e.data.action), target);
-      writeEncounter(state, { ...enc, log: [...enc.log, entry].slice(-LOG_CAP), calm: { ...enc.calm, struck } });
+      writeEncounter(state2, { ...enc, log: [...enc.log, entry].slice(-LOG_CAP), calm: { ...enc.calm, struck } });
     },
     describe: (e) => `${strOf(e.data.actor)}: ${strOf(e.data.label, strOf(e.data.action))}${typeof e.data.target === "string" ? ` \u2192 ${e.data.target}` : ""}${typeof e.data.outcome === "string" ? ` (${e.data.outcome.replace(/_/g, " ")})` : ""}`
   },
@@ -29449,10 +29452,10 @@ var events2 = [
         return reject15("bad_event", "a fall names a participant");
       return downHolds(ctx, rules, who) === e.data.down ? null : reject15("not_down", e.data.down ? `${labelOf(ctx, who)} isn't down` : `${labelOf(ctx, who)} is still down`);
     },
-    apply(e, state) {
-      const enc = encounterOf(state);
+    apply(e, state2) {
+      const enc = encounterOf(state2);
       if (enc)
-        writeEncounter(state, { ...enc, order: enc.order.map((f) => f.id === strOf(e.data.entity) ? { ...f, down: e.data.down === true } : f) });
+        writeEncounter(state2, { ...enc, order: enc.order.map((f) => f.id === strOf(e.data.entity) ? { ...f, down: e.data.down === true } : f) });
     },
     describe: (e) => `${strOf(e.data.entity)}: ${e.data.down === true ? "down" : "back up"}`
   },
@@ -29471,14 +29474,14 @@ var events2 = [
         return reject15("not_stalemate", rules && stalemateRounds(rules) === 0 ? "this world's fights never peter out" : "someone has attacked or been hurt since");
       return null;
     },
-    apply: (_e, state) => writeEncounter(state, null),
+    apply: (_e, state2) => writeEncounter(state2, null),
     describe: (e) => e.data.reason === "left" ? "You left the fight" : e.data.reason === "stalemate" ? "The fight petered out" : `The fight is over${e.data.winner === "party" ? ": your side won" : e.data.winner === "foes" ? ": your side lost" : ""}`
   },
   {
     type: "combat.decision",
     validate: (e) => strOf(e.data.key) !== "" && strOf(e.data.choice) !== "" ? null : reject15("bad_event", "a decision needs a key and a choice"),
-    apply: (e, state) => {
-      sliceRecord(state, PACK4, "decisions")[strOf(e.data.key)] = strOf(e.data.choice);
+    apply: (e, state2) => {
+      sliceRecord(state2, PACK4, "decisions")[strOf(e.data.key)] = strOf(e.data.choice);
     },
     describe: (e) => `decided ${strOf(e.data.choice)}`
   }
@@ -29599,38 +29602,38 @@ var EMPTY_SLICE = { round: 0, on: false, chars: {}, presence: [] };
 function emptyCharacter() {
   return { mind: null, plans: [], notes: [], commitments: [], witness: [], summary: "", pin: null, refresh: false, lastPresent: null, consolidated: null };
 }
-function readSlice(state) {
-  const raw = state.packs[PACK5];
+function readSlice(state2) {
+  const raw = state2.packs[PACK5];
   if (!raw)
     return EMPTY_SLICE;
   const s = raw;
   return { round: s.round ?? 0, on: s.on ?? false, chars: s.chars ?? {}, presence: s.presence ?? [] };
 }
-function readCharacter(state, id) {
-  return own(readSlice(state).chars, id) ?? emptyCharacter();
+function readCharacter(state2, id) {
+  return own(readSlice(state2).chars, id) ?? emptyCharacter();
 }
-function writeSlice(state) {
-  const s = state.packs[PACK5] ?? {};
+function writeSlice(state2) {
+  const s = state2.packs[PACK5] ?? {};
   s.round ??= 0;
   s.on ??= false;
   s.chars ??= {};
   s.presence ??= [];
   const full = s;
-  state.packs[PACK5] = full;
+  state2.packs[PACK5] = full;
   return full;
 }
-function writeCharacter(state, id) {
-  const s = writeSlice(state);
+function writeCharacter(state2, id) {
+  const s = writeSlice(state2);
   const c = own(s.chars, id) ?? emptyCharacter();
   s.chars[id] = c;
   return c;
 }
-function putPlan(c, plan) {
-  const i = c.plans.findIndex((p) => p.id === plan.id);
+function putPlan(c, plan2) {
+  const i = c.plans.findIndex((p) => p.id === plan2.id);
   if (i >= 0)
-    c.plans[i] = plan;
+    c.plans[i] = plan2;
   else
-    c.plans.push(plan);
+    c.plans.push(plan2);
   boundPlans(c);
 }
 function boundPlans(c) {
@@ -29662,14 +29665,14 @@ function putNote(c, note) {
   else
     c.notes.push(note);
   while (c.notes.length > MINDS_KEEP.notes) {
-    let drop = 0;
+    let drop2 = 0;
     for (let j = 1;j < c.notes.length; j++) {
       const a = c.notes[j];
-      const b = c.notes[drop];
+      const b = c.notes[drop2];
       if (a && b && (a.salience < b.salience || a.salience === b.salience && a.at < b.at))
-        drop = j;
+        drop2 = j;
     }
-    c.notes.splice(drop, 1);
+    c.notes.splice(drop2, 1);
   }
 }
 function addWitness(c, entry) {
@@ -29728,8 +29731,8 @@ var PLAN_STATUSES = ["open", "done", "dropped"];
 var round = {
   type: MINDS_EVENTS.round,
   validate: (e) => finite2(e.data.at) && typeof e.data.on === "boolean" ? null : bad("a minds round needs its clock and whether minds are on"),
-  apply: (e, state) => {
-    const s = writeSlice(state);
+  apply: (e, state2) => {
+    const s = writeSlice(state2);
     s.round += 1;
     s.on = e.data.on === true;
   },
@@ -29748,15 +29751,15 @@ function validMind(data) {
 var mind = {
   type: MINDS_EVENTS.mind,
   validate: (e, ctx) => person(ctx, e.data) ?? validMind(e.data),
-  apply: (e, state) => {
+  apply: (e, state2) => {
     const d = e.data;
     if (!str13(d.entity))
       return;
-    const s = writeSlice(state);
-    const c = writeCharacter(state, d.entity);
+    const s = writeSlice(state2);
+    const c = writeCharacter(state2, d.entity);
     const plans = Array.isArray(d.plans) ? d.plans.filter((p) => isPlan(p)).map(planOf) : [];
-    const record = {
-      at: finite2(d.at) ? d.at : state.clock,
+    const record3 = {
+      at: finite2(d.at) ? d.at : state2.clock,
       round: s.round,
       level: isFidelity(d.level) ? d.level : "background",
       place: str13(d.place) ? d.place : null,
@@ -29771,7 +29774,7 @@ var mind = {
       interrupt: isRecord(d.interrupt) && str13(d.interrupt.reason) ? d.interrupt.reason : null,
       withheld: d.withheld === true
     };
-    c.mind = record;
+    c.mind = record3;
     c.refresh = false;
     for (const p of plans)
       putPlan(c, p);
@@ -29779,8 +29782,8 @@ var mind = {
   describe: (e, ctx, viewer) => viewer !== undefined ? "" : `${nameOf4(ctx, String(e.data.entity))}'s mind (${String(e.data.level)}): ${str13(e.data.intent) && e.data.intent !== "" ? e.data.intent : "no intent"}`
 };
 function validMemory(data) {
-  const { at, notes, commitments, resolved, plans, told, summary } = data;
-  if (!finite2(at) || !Array.isArray(notes) || !notes.every((n) => isNote(n)) || !Array.isArray(commitments) || !commitments.every((c) => isCommitment(c)))
+  const { at, notes, commitments: commitments2, resolved, plans, told, summary } = data;
+  if (!finite2(at) || !Array.isArray(notes) || !notes.every((n) => isNote(n)) || !Array.isArray(commitments2) || !commitments2.every((c) => isCommitment(c)))
     return bad("a memory needs its clock, notes and commitments");
   if (!Array.isArray(resolved) || !resolved.every((r) => isRecord(r) && str13(r.id) && (r.status === "kept" || r.status === "broken" || r.status === "released")))
     return bad("a memory's resolved commitments are malformed");
@@ -29791,13 +29794,13 @@ function validMemory(data) {
 var memory = {
   type: MINDS_EVENTS.memory,
   validate: (e, ctx) => person(ctx, e.data) ?? validMemory(e.data),
-  apply: (e, state) => {
+  apply: (e, state2) => {
     const d = e.data;
     if (!str13(d.entity))
       return;
     const who = d.entity;
-    const at = finite2(d.at) ? d.at : state.clock;
-    const c = writeCharacter(state, who);
+    const at = finite2(d.at) ? d.at : state2.clock;
+    const c = writeCharacter(state2, who);
     for (const n of Array.isArray(d.notes) ? d.notes : [])
       if (isNote(n))
         putNote(c, noteOf(n));
@@ -29820,8 +29823,8 @@ var memory = {
       if (!isRecord(t) || !ids(t.to) || !str13(t.what))
         continue;
       for (const to of t.to)
-        if (to !== who && own(state.entities, to))
-          addWitness(writeCharacter(state, to), { at, what: t.what, how: "told", by: who, place: null });
+        if (to !== who && own(state2.entities, to))
+          addWitness(writeCharacter(state2, to), { at, what: t.what, how: "told", by: who, place: null });
     }
   },
   describe: (e, ctx, viewer) => {
@@ -29835,18 +29838,18 @@ var memory = {
 var presence = {
   type: MINDS_EVENTS.presence,
   validate: (e) => finite2(e.data.at) && (e.data.msg === null || str13(e.data.msg)) && (e.data.place === null || str13(e.data.place)) && ids(e.data.who) && texts(e.data.saw) ? null : bad("a presence record needs its clock, message, place, who and what they saw"),
-  apply: (e, state) => {
+  apply: (e, state2) => {
     const d = e.data;
-    const at = finite2(d.at) ? d.at : state.clock;
+    const at = finite2(d.at) ? d.at : state2.clock;
     const place = str13(d.place) ? d.place : null;
-    const who = ids(d.who) ? d.who.filter((id) => own(state.entities, id)) : [];
-    const s = writeSlice(state);
+    const who = ids(d.who) ? d.who.filter((id) => own(state2.entities, id)) : [];
+    const s = writeSlice(state2);
     s.presence.push({ msg: str13(d.msg) ? d.msg : null, at, place, who: [...who] });
     if (s.presence.length > MINDS_KEEP.presence)
       s.presence.splice(0, s.presence.length - MINDS_KEEP.presence);
     const saw = texts(d.saw) ? d.saw : [];
     for (const id of who) {
-      const c = writeCharacter(state, id);
+      const c = writeCharacter(state2, id);
       c.lastPresent = at;
       for (const what of saw)
         addWitness(c, { at, what, how: "saw", by: null, place });
@@ -29865,20 +29868,20 @@ var planStatus = {
       return missing;
     return readCharacter(ctx.state, String(d.entity)).plans.some((p) => p.id === d.plan) ? null : { code: "missing_plan", reason: "that plan isn't theirs any more" };
   },
-  apply: (e, state) => {
+  apply: (e, state2) => {
     const d = e.data;
-    const c = writeCharacter(state, String(d.entity));
+    const c = writeCharacter(state2, String(d.entity));
     const p = c.plans.find((x) => x.id === d.plan);
     if (!p || typeof d.status !== "string" || !PLAN_STATUSES.includes(d.status))
       return;
     const status = d.status;
-    putPlan(c, { ...p, status, closed: status === "open" ? null : finite2(d.at) ? d.at : state.clock, reason: str13(d.reason) ? d.reason : null });
+    putPlan(c, { ...p, status, closed: status === "open" ? null : finite2(d.at) ? d.at : state2.clock, reason: str13(d.reason) ? d.reason : null });
   },
   describe: (e, ctx, viewer) => {
     if (viewer !== undefined)
       return "";
-    const plan = readCharacter(ctx.state, String(e.data.entity)).plans.find((p) => p.id === e.data.plan);
-    return `${nameOf4(ctx, String(e.data.entity))}'s plan ${plan ? `"${plan.what}"` : String(e.data.plan)}: ${String(e.data.status)}`;
+    const plan2 = readCharacter(ctx.state, String(e.data.entity)).plans.find((p) => p.id === e.data.plan);
+    return `${nameOf4(ctx, String(e.data.entity))}'s plan ${plan2 ? `"${plan2.what}"` : String(e.data.plan)}: ${String(e.data.status)}`;
   }
 };
 function editDef(type, key, valid, list, put, remove) {
@@ -29896,36 +29899,36 @@ function editDef(type, key, valid, list, put, remove) {
         return list(readCharacter(ctx.state, String(d.entity))).some((x) => x.id === id) ? null : { code: `missing_${key}`, reason: `that ${key} isn't theirs any more` };
       return valid(d.value) && isRecord(d.value) && d.value.id === id ? null : bad(`a ${key} edit's value is malformed`);
     },
-    apply: (e, state) => {
+    apply: (e, state2) => {
       const d = e.data;
       const who = String(d.entity);
       if (d.value === null)
-        remove(state, who, String(d[key]));
+        remove(state2, who, String(d[key]));
       else if (d.value !== undefined && valid(d.value))
-        put(state, who, d.value);
+        put(state2, who, d.value);
     },
     describe: (e, ctx, viewer) => viewer !== undefined ? "" : `${nameOf4(ctx, String(e.data.entity))}'s ${key} ${e.data.value === null ? "deleted" : "edited"}`
   };
 }
-var planEdit = editDef(MINDS_EVENTS.planEdit, "plan", isPlan, (c) => c.plans, (state, who, v) => {
+var planEdit = editDef(MINDS_EVENTS.planEdit, "plan", isPlan, (c) => c.plans, (state2, who, v) => {
   if (isPlan(v))
-    putPlan(writeCharacter(state, who), planOf(v));
-}, (state, who, id) => {
-  const c = writeCharacter(state, who);
+    putPlan(writeCharacter(state2, who), planOf(v));
+}, (state2, who, id) => {
+  const c = writeCharacter(state2, who);
   c.plans = c.plans.filter((p) => p.id !== id);
 });
-var noteEdit = editDef(MINDS_EVENTS.noteEdit, "note", isNote, (c) => c.notes, (state, who, v) => {
+var noteEdit = editDef(MINDS_EVENTS.noteEdit, "note", isNote, (c) => c.notes, (state2, who, v) => {
   if (isNote(v))
-    putNote(writeCharacter(state, who), noteOf(v));
-}, (state, who, id) => {
-  const c = writeCharacter(state, who);
+    putNote(writeCharacter(state2, who), noteOf(v));
+}, (state2, who, id) => {
+  const c = writeCharacter(state2, who);
   c.notes = c.notes.filter((n) => n.id !== id);
 });
-var commitmentEdit = editDef(MINDS_EVENTS.commitmentEdit, "commitment", isCommitment, (c) => c.commitments, (state, who, v) => {
+var commitmentEdit = editDef(MINDS_EVENTS.commitmentEdit, "commitment", isCommitment, (c) => c.commitments, (state2, who, v) => {
   if (isCommitment(v))
-    putCommitment(writeCharacter(state, who), commitmentOf(v));
-}, (state, who, id) => {
-  const c = writeCharacter(state, who);
+    putCommitment(writeCharacter(state2, who), commitmentOf(v));
+}, (state2, who, id) => {
+  const c = writeCharacter(state2, who);
   c.commitments = c.commitments.filter((x) => x.id !== id);
 });
 var commitmentStatus = {
@@ -29939,44 +29942,44 @@ var commitmentStatus = {
       return missing;
     return readCharacter(ctx.state, String(d.entity)).commitments.some((x) => x.id === d.commitment) ? null : { code: "missing_commitment", reason: "that commitment isn't theirs any more" };
   },
-  apply: (e, state) => {
+  apply: (e, state2) => {
     const d = e.data;
-    const c = writeCharacter(state, String(d.entity));
+    const c = writeCharacter(state2, String(d.entity));
     const x = c.commitments.find((y) => y.id === d.commitment);
     if (!x || typeof d.status !== "string" || !COMMITMENT_STATUSES.includes(d.status))
       return;
     const status = d.status;
-    putCommitment(c, { ...x, status, closed: status === "open" ? null : finite2(d.at) ? d.at : state.clock });
+    putCommitment(c, { ...x, status, closed: status === "open" ? null : finite2(d.at) ? d.at : state2.clock });
   },
   describe: (e, ctx, viewer) => viewer !== undefined ? "" : `${nameOf4(ctx, String(e.data.entity))}'s commitment: ${String(e.data.status)}`
 };
 var consolidated = {
   type: MINDS_EVENTS.consolidated,
   validate: (e, ctx) => person(ctx, e.data) ?? (finite2(e.data.at) && ids(e.data.notes) && str13(e.data.summary) ? null : bad("a consolidation needs its clock, the notes folded and the summary")),
-  apply: (e, state) => {
+  apply: (e, state2) => {
     const d = e.data;
-    const c = writeCharacter(state, String(d.entity));
+    const c = writeCharacter(state2, String(d.entity));
     const gone = new Set(ids(d.notes) ? d.notes : []);
     c.notes = c.notes.filter((n) => !gone.has(n.id));
     if (str13(d.summary))
       c.summary = d.summary;
-    c.consolidated = finite2(d.at) ? d.at : state.clock;
+    c.consolidated = finite2(d.at) ? d.at : state2.clock;
   },
   describe: (e, ctx, viewer) => viewer !== undefined ? "" : `${nameOf4(ctx, String(e.data.entity))}'s older notes folded into their summary`
 };
 var pin = {
   type: MINDS_EVENTS.pin,
   validate: (e, ctx) => person(ctx, e.data) ?? (e.data.level === null || isFidelity(e.data.level) ? null : bad("a pin is a fidelity level or null")),
-  apply: (e, state) => {
-    writeCharacter(state, String(e.data.entity)).pin = isFidelity(e.data.level) ? e.data.level : null;
+  apply: (e, state2) => {
+    writeCharacter(state2, String(e.data.entity)).pin = isFidelity(e.data.level) ? e.data.level : null;
   },
   describe: (e, ctx, viewer) => viewer !== undefined ? "" : `${nameOf4(ctx, String(e.data.entity))}: fidelity ${e.data.level === null ? "unpinned" : `pinned at ${String(e.data.level)}`}`
 };
 var refresh = {
   type: MINDS_EVENTS.refresh,
   validate: (e, ctx) => person(ctx, e.data),
-  apply: (e, state) => {
-    writeCharacter(state, String(e.data.entity)).refresh = true;
+  apply: (e, state2) => {
+    writeCharacter(state2, String(e.data.entity)).refresh = true;
   },
   describe: (e, ctx, viewer) => viewer !== undefined ? "" : `${nameOf4(ctx, String(e.data.entity))}: a fresh mind next turn`
 };
@@ -29989,8 +29992,8 @@ function isIntent(v) {
 var intent = {
   type: MINDS_EVENTS.intent,
   validate: (e, ctx) => person(ctx, e.data) ?? (e.data.intent === null || isIntent(e.data.intent) ? null : bad("an intent is its text, its approach or both, or null to clear it")),
-  apply: (e, state) => {
-    const c = writeCharacter(state, String(e.data.entity));
+  apply: (e, state2) => {
+    const c = writeCharacter(state2, String(e.data.entity));
     const v = e.data.intent;
     if (isIntent(v))
       c.intent = { text: v.text, approach: v.approach };
@@ -30016,8 +30019,8 @@ function mindsOn(ctx) {
 function reject16(code, reason) {
   return { code, reason };
 }
-function capText(text, max) {
-  const t = text.replace(/\s+/g, " ").trim();
+function capText(text4, max) {
+  const t = text4.replace(/\s+/g, " ").trim();
   if (t.length <= max)
     return t;
   const cut = t.slice(0, max + 1);
@@ -30031,15 +30034,15 @@ function peopleIn(ctx, v) {
     return [];
   if (!Array.isArray(v) || !v.every((x) => typeof x === "string"))
     return reject16("bad_value", "who it's with is a list of people");
-  const ids = v;
-  for (const id of ids) {
+  const ids2 = v;
+  for (const id of ids2) {
     const e = own(ctx.state.entities, id);
     if (!e)
       return reject16("missing_entity", `there's no ${labelOf(ctx, id)}`);
     if (!kindIs(ctx.registry, ctx.world, e.kind, "person"))
       return reject16("bad_value", `${e.name} isn't a person`);
   }
-  return [...new Set(ids)];
+  return [...new Set(ids2)];
 }
 function noteFrom(ctx, who, id, v, before) {
   const body = text4(v.text, MIND_TEXT_CAPS.note) ?? before?.text ?? null;
@@ -30073,8 +30076,8 @@ function planFrom(ctx, who, id, v, before) {
   const what = text4(v.what, MIND_TEXT_CAPS.planWhat) ?? before?.what ?? null;
   if (what === null)
     return reject16("bad_value", "a plan needs what it is");
-  const when = v.when === undefined ? before?.when ?? null : typeof v.when === "object" && v.when !== null && !Array.isArray(v.when) ? { from: minutes(v.when.from), to: minutes(v.when.to) } : null;
-  if (!when || when.from === null || when.to === null || when.to < when.from)
+  const when2 = v.when === undefined ? before?.when ?? null : typeof v.when === "object" && v.when !== null && !Array.isArray(v.when) ? { from: minutes(v.when.from), to: minutes(v.when.to) } : null;
+  if (!when2 || when2.from === null || when2.to === null || when2.to < when2.from)
     return reject16("bad_value", "a plan needs when, from and to in game minutes, to not before from");
   const kind = v.kind === undefined ? before?.kind ?? "other" : PLAN_KINDS.includes(v.kind) ? v.kind : null;
   if (kind === null)
@@ -30093,15 +30096,15 @@ function planFrom(ctx, who, id, v, before) {
   if (status === null)
     return reject16("bad_value", "a plan's status is open, done or dropped");
   const closed = status === "open" ? null : before && before.status !== "open" ? before.closed : ctx.state.clock;
-  const money = kind === "pay" || kind === "lend";
+  const money4 = kind === "pay" || kind === "lend";
   const cents = v.cents === undefined ? before?.cents : typeof v.cents === "number" && Number.isInteger(v.cents) && v.cents > 0 ? v.cents : null;
-  if (money && (cents === null || cents === undefined || withList.length === 0))
+  if (money4 && (cents === null || cents === undefined || withList.length === 0))
     return reject16("bad_value", "a pay or lend plan needs an amount in minor units and someone to hand it to");
   return {
     id: id ?? `p_${hashParts("minds.gm.plan", who, String(ctx.state.clock), what).slice(0, 10)}`,
     what,
     kind,
-    when: { from: when.from, to: when.to },
+    when: { from: when2.from, to: when2.to },
     where,
     with: withList,
     priority,
@@ -30110,12 +30113,12 @@ function planFrom(ctx, who, id, v, before) {
     source: before?.source ?? "gm",
     closed,
     reason: status === "open" ? null : before?.reason ?? "GM edit",
-    ...money && cents ? { cents } : {}
+    ...money4 && cents ? { cents } : {}
   };
 }
 function mindEdit(ctx, op) {
-  const { world, state, registry } = ctx;
-  const e = own(state.entities, op.entity);
+  const { world, state: state2, registry } = ctx;
+  const e = own(state2.entities, op.entity);
   if (!e)
     return reject16("missing_entity", `there's no ${labelOf(ctx, op.entity)}`);
   if (op.entity === world.pov || !kindIs(registry, world, e.kind, "person"))
@@ -30124,31 +30127,31 @@ function mindEdit(ctx, op) {
     return [{ type: MINDS_EVENTS.pin, data: { entity: op.entity, level: op.level } }];
   if (op.op === "mind_refresh")
     return [{ type: MINDS_EVENTS.refresh, data: { entity: op.entity } }];
-  const c = readCharacter(state, op.entity);
+  const c = readCharacter(state2, op.entity);
   if (op.op === "mind_intent") {
     if (op.text === undefined && op.approach === undefined)
       return reject16("bad_value", "say what they mean to do, or how they go about it");
-    const text = op.text === undefined ? c.intent?.text ?? "" : capText(op.text, MIND_TEXT_CAPS.gmIntent);
+    const text5 = op.text === undefined ? c.intent?.text ?? "" : capText(op.text, MIND_TEXT_CAPS.gmIntent);
     const approach = op.approach === undefined ? c.intent?.approach ?? null : op.approach;
-    return [{ type: MINDS_EVENTS.intent, data: { entity: op.entity, intent: text === "" && approach === null ? null : { text, approach } } }];
+    return [{ type: MINDS_EVENTS.intent, data: { entity: op.entity, intent: text5 === "" && approach === null ? null : { text: text5, approach } } }];
   }
   const value = op.value;
   if (op.part === "note") {
-    const before = op.id === null ? undefined : c.notes.find((n) => n.id === op.id);
-    if (op.id !== null && !before)
+    const before2 = op.id === null ? undefined : c.notes.find((n) => n.id === op.id);
+    if (op.id !== null && !before2)
       return reject16("missing_note", `${e.name} has no such note`);
     if (value === null)
       return op.id === null ? reject16("bad_value", "say which note to delete") : [{ type: MINDS_EVENTS.noteEdit, data: { entity: op.entity, note: op.id, value: null } }];
-    const note = noteFrom(ctx, op.entity, op.id, value, before);
+    const note = noteFrom(ctx, op.entity, op.id, value, before2);
     return "code" in note ? note : [{ type: MINDS_EVENTS.noteEdit, data: { entity: op.entity, note: note.id, value: note } }];
   }
   if (op.part === "commitment") {
-    const before = op.id === null ? undefined : c.commitments.find((x) => x.id === op.id);
-    if (op.id !== null && !before)
+    const before2 = op.id === null ? undefined : c.commitments.find((x) => x.id === op.id);
+    if (op.id !== null && !before2)
       return reject16("missing_commitment", `${e.name} has no such commitment`);
     if (value === null)
       return op.id === null ? reject16("bad_value", "say which commitment to delete") : [{ type: MINDS_EVENTS.commitmentEdit, data: { entity: op.entity, commitment: op.id, value: null } }];
-    const commitment = commitmentFrom(ctx, op.entity, op.id, value, before);
+    const commitment = commitmentFrom(ctx, op.entity, op.id, value, before2);
     return "code" in commitment ? commitment : [{ type: MINDS_EVENTS.commitmentEdit, data: { entity: op.entity, commitment: commitment.id, value: commitment } }];
   }
   const before = op.id === null ? undefined : c.plans.find((p) => p.id === op.id);
@@ -30156,76 +30159,76 @@ function mindEdit(ctx, op) {
     return reject16("missing_plan", `${e.name} has no such plan`);
   if (value === null)
     return op.id === null ? reject16("bad_value", "say which plan to delete") : [{ type: MINDS_EVENTS.planEdit, data: { entity: op.entity, plan: op.id, value: null } }];
-  const plan = planFrom(ctx, op.entity, op.id, value, before);
-  return "code" in plan ? plan : [{ type: MINDS_EVENTS.planEdit, data: { entity: op.entity, plan: plan.id, value: plan } }];
+  const plan2 = planFrom(ctx, op.entity, op.id, value, before);
+  return "code" in plan2 ? plan2 : [{ type: MINDS_EVENTS.planEdit, data: { entity: op.entity, plan: plan2.id, value: plan2 } }];
 }
 
 // src/packs/minds/core/fidelity.ts
 function mindCandidates(ctx) {
-  const { registry: reg, world, state } = ctx;
-  return Object.keys(state.entities).sort().filter((id) => id !== world.pov && kindIs(reg, world, own(state.entities, id)?.kind ?? "", "person") && !isGone(state, id) && acts(world, state, id));
+  const { registry: reg, world, state: state2 } = ctx;
+  return Object.keys(state2.entities).sort().filter((id) => id !== world.pov && kindIs(reg, world, own(state2.entities, id)?.kind ?? "", "person") && !isGone(state2, id) && acts(world, state2, id));
 }
 var NAME_FILLER = { mr: true, mrs: true, ms: true, miss: true, dr: true, sir: true, lady: true, lord: true, dame: true, the: true, of: true, de: true, van: true, von: true, la: true, le: true, old: true, young: true, captain: true, constable: true, father: true, mother: true, sister: true, brother: true, aunt: true, uncle: true };
-function words3(text) {
-  return text.toLowerCase().replace(/['\u2019]s\b/g, "").match(/[\p{L}\p{N}]+/gu) ?? [];
+function words3(text5) {
+  return text5.toLowerCase().replace(/['\u2019]s\b/g, "").match(/[\p{L}\p{N}]+/gu) ?? [];
 }
-function namedIn(name, said) {
-  const own = words3(name);
-  if (own.length === 0 || said.length === 0)
+function namedIn(name, said2) {
+  const own2 = words3(name);
+  if (own2.length === 0 || said2.length === 0)
     return false;
-  const whole = own.join(" ");
-  const joined = ` ${said.join(" ")} `;
-  if (joined.includes(` ${whole} `))
+  const whole4 = own2.join(" ");
+  const joined2 = ` ${said2.join(" ")} `;
+  if (joined2.includes(` ${whole4} `))
     return true;
-  const present = new Set(said);
-  return own.some((w) => w.length >= 3 && !NAME_FILLER[w] && present.has(w));
+  const present2 = new Set(said2);
+  return own2.some((w) => w.length >= 3 && !NAME_FILLER[w] && present2.has(w));
 }
-function namesIn(value, ids, out) {
+function namesIn(value, ids2, out) {
   if (typeof value === "string") {
-    if (ids.has(value))
+    if (ids2.has(value))
       out.add(value);
     let found = [];
     try {
       found = identifiers(value);
     } catch {}
     for (const id of found)
-      if (ids.has(id))
+      if (ids2.has(id))
         out.add(id);
   } else if (Array.isArray(value))
     for (const v of value)
-      namesIn(v, ids, out);
+      namesIn(v, ids2, out);
   else if (isRecord(value))
     for (const v of Object.values(value))
-      namesIn(v, ids, out);
+      namesIn(v, ids2, out);
 }
 var refsCache = new WeakMap;
 function worldRefs(world) {
   const hit = refsCache.get(world);
   if (hit)
     return hit;
-  const ids = new Set(Object.keys(world.entities));
+  const ids2 = new Set(Object.keys(world.entities));
   const tracks = new Map;
   for (const [id, t] of Object.entries(world.tracks)) {
     const out = new Set;
-    namesIn(t.stages, ids, out);
+    namesIn(t.stages, ids2, out);
     if (t.knownBy?.ids) {
       for (const x of t.knownBy.ids)
-        if (ids.has(x))
+        if (ids2.has(x))
           out.add(x);
     }
     tracks.set(id, out);
   }
   const rules = new Set;
   for (const r of Object.values(world.rules))
-    namesIn(r, ids, rules);
+    namesIn(r, ids2, rules);
   const refs = { tracks, rules };
   refsCache.set(world, refs);
   return refs;
 }
-function liveTracks(world, state) {
+function liveTracks(world, state2) {
   return Object.keys(world.tracks).sort().filter((id) => {
     const t = own(world.tracks, id);
-    const stage = currentStage(world, state, id);
+    const stage = currentStage(world, state2, id);
     return t !== undefined && stage !== null && !isTerminal(t, stage);
   });
 }
@@ -30241,15 +30244,15 @@ function reason(out, label, points) {
   return points;
 }
 function pendingWith(ctx, id) {
-  const { world, state } = ctx;
+  const { world, state: state2 } = ctx;
   const pov = world.pov;
   let n = 0;
   const invited = ctx.registry.formulas.get("invited");
   if (invited && invited(ctx, id) === true)
     n++;
-  const now = state.clock;
+  const now = state2.clock;
   const appointments = (who, other) => {
-    const list = own(state.entities, who)?.fields.appointments;
+    const list = own(state2.entities, who)?.fields.appointments;
     return (Array.isArray(list) ? list : []).filter((raw) => {
       const a = objOf(raw);
       const withList = Array.isArray(a.with) ? a.with : [];
@@ -30257,51 +30260,51 @@ function pendingWith(ctx, id) {
     }).length;
   };
   n += appointments(id, pov) + appointments(pov, id);
-  const c = readCharacter(state, id);
+  const c = readCharacter(state2, id);
   n += openPlans(c).filter((p) => p.with.includes(pov) && p.when.to >= now).length;
   n += openCommitments(c).filter((x) => x.with.includes(pov)).length;
   return n;
 }
-function fidelityOf(ctx, texts, config = worldMindsOf(ctx.world)) {
-  const { registry: reg, world, state } = ctx;
+function fidelityOf(ctx, texts2, config3 = worldMindsOf(ctx.world)) {
+  const { registry: reg, world, state: state2 } = ctx;
   const pov = world.pov;
-  const w = config.weights;
-  const here = placeOfEntity(state, pov);
-  const said = words3(`${texts.user}
-${texts.reply}`);
+  const w = config3.weights;
+  const here = placeOfEntity(state2, pov);
+  const said2 = words3(`${texts2.user}
+${texts2.reply}`);
   const refs = worldRefs(world);
-  const tracks = liveTracks(world, state);
+  const tracks = liveTracks(world, state2);
   const regard = optionalQuery(ctx, "regard");
   const out = [];
   for (const id of mindCandidates(ctx)) {
-    const e = own(state.entities, id);
+    const e = own(state2.entities, id);
     if (!e)
       continue;
     const reasons = [];
     let score = 0;
-    const place = placeOfEntity(state, id);
+    const place = placeOfEntity(state2, id);
     if (here !== null && place === here)
       score += reason(reasons, "In the scene", w.here);
     else if (closeBy(world, place, here))
       score += reason(reasons, "Close by", w.nearby);
-    if (namedIn(e.name, said))
+    if (namedIn(e.name, said2))
       score += reason(reasons, "Named this turn", w.mentioned);
     if (regard) {
       const strongest = Math.max(Math.abs(regard(ctx, id, pov)), Math.abs(regard(ctx, pov, id)));
       score += reason(reasons, "Regard with you", w.regard * Math.min(1, strongest / 100));
     }
-    if (knows(state, id, pov) || knows(state, pov, id))
+    if (knows(state2, id, pov) || knows(state2, pov, id))
       score += reason(reasons, "Knows you", w.knows);
-    const owned = tracks.filter((t) => own(world.tracks, t)?.owner === id);
-    if (owned.length > 0)
+    const owned2 = tracks.filter((t2) => own(world.tracks, t2)?.owner === id);
+    if (owned2.length > 0)
       score += reason(reasons, "Owns a story track", w.owner);
-    const named = tracks.filter((t) => own(world.tracks, t)?.owner !== id && refs.tracks.get(t)?.has(id)).length;
+    const named = tracks.filter((t2) => own(world.tracks, t2)?.owner !== id && refs.tracks.get(t2)?.has(id)).length;
     if (named > 0)
       score += reason(reasons, `In ${Math.min(3, named)} story track${named === 1 ? "" : "s"}`, w.track * Math.min(3, named));
     let roles = 0;
     for (const [value, points] of Object.entries(w.roles)) {
-      const held = Object.keys(world.classifications).some((facet) => classValues(world, state, id, facet).some((v) => v === value || valueWithin(world, facet, v, value)));
-      if (held)
+      const held3 = Object.keys(world.classifications).some((facet) => classValues(world, state2, id, facet).some((v) => v === value || valueWithin(world, facet, v, value)));
+      if (held3)
         roles += points;
     }
     score += reason(reasons, "Story role", roles);
@@ -30313,15 +30316,15 @@ ${texts.reply}`);
     const band = tierBand(world, e.tier);
     if (band)
       score += reason(reasons, band === "principal" ? "Lead" : band === "supporting" ? "Supporting" : "Background tier", w.band[band]);
-    const last = Math.max(readCharacter(state, id).lastPresent ?? Number.NEGATIVE_INFINITY, lastSighting(state, id)?.at ?? Number.NEGATIVE_INFINITY);
+    const last = Math.max(readCharacter(state2, id).lastPresent ?? Number.NEGATIVE_INFINITY, lastSighting(state2, id)?.at ?? Number.NEGATIVE_INFINITY);
     if (Number.isFinite(last))
-      score += reason(reasons, "Seen with you lately", w.recent * Math.max(0, 1 - (state.clock - last) / 1440));
-    const gm = readCharacter(state, id).pin;
-    const never = config.never !== null && selectorMatches(reg, world, state, config.never, id);
-    const always = config.always !== null && selectorMatches(reg, world, state, config.always, id);
+      score += reason(reasons, "Seen with you lately", w.recent * Math.max(0, 1 - (state2.clock - last) / 1440));
+    const gm = readCharacter(state2, id).pin;
+    const never = config3.never !== null && selectorMatches(reg, world, state2, config3.never, id);
+    const always = config3.always !== null && selectorMatches(reg, world, state2, config3.always, id);
     const author = never ? "background" : always ? "live" : null;
-    const t = config.thresholds;
-    const atHand = here !== null && place === here || namedIn(e.name, said);
+    const t = config3.thresholds;
+    const atHand = here !== null && place === here || namedIn(e.name, said2);
     const scored = score >= t.live ? atHand ? "live" : "near" : score >= t.near ? "near" : score >= t.far ? "far" : "background";
     if (score >= t.live && !atHand)
       reasons.push({ label: "Not at hand, so Near at most", points: 0 });
@@ -30362,11 +30365,11 @@ function configIssues(world, registry) {
       warn(`minds.${key}`, `"${key}" isn't part of the minds config; nothing reads it.`);
   if (raw.secrecy !== undefined && raw.secrecy !== "full" && raw.secrecy !== "brief")
     err("minds.secrecy", 'Secrecy is "full" (the narrator gets each mind to depict) or "brief" (a leak-checked depiction only); "brief" plays instead.');
-  const number = (path, v, [lo, hi], whole) => {
+  const number = (path, v, [lo, hi], whole4) => {
     if (v === undefined)
       return;
-    if (typeof v !== "number" || !Number.isFinite(v) || v < lo || v > hi || whole && !Number.isInteger(v))
-      err(path, `${whole ? "A whole number" : "A number"} from ${lo} to ${hi}; the default plays instead.`);
+    if (typeof v !== "number" || !Number.isFinite(v) || v < lo || v > hi || whole4 && !Number.isInteger(v))
+      err(path, `${whole4 ? "A whole number" : "A number"} from ${lo} to ${hi}; the default plays instead.`);
   };
   const weights = raw.weights;
   if (weights !== undefined && !isRecord(weights))
@@ -30386,8 +30389,8 @@ function configIssues(world, registry) {
     if (isRecord(roles)) {
       for (const [value, points] of Object.entries(roles)) {
         number(`minds.weights.roles.${value}`, points, MINDS_RANGES.weight, false);
-        const held = Object.values(world.classifications).some((facet) => isRecord(facet.values) && hasOwn(facet.values, value));
-        if (!held)
+        const held3 = Object.values(world.classifications).some((facet) => isRecord(facet.values) && hasOwn(facet.values, value));
+        if (!held3)
           warn(`minds.weights.roles.${value}`, `No classification of this world has a value "${value}", so this weight never counts.`);
       }
     }
@@ -30421,11 +30424,11 @@ function configIssues(world, registry) {
       for (const problem of selectorProblems(registry, world, sel))
         err(`minds.${key}`, `The "${key}" selector ${problem}.`);
   }
-  const memory = raw.memory;
-  if (memory !== undefined && !isRecord(memory))
+  const memory2 = raw.memory;
+  if (memory2 !== undefined && !isRecord(memory2))
     err("minds.memory", "The memory defaults are an object; the built-in defaults play instead.");
-  if (isRecord(memory)) {
-    for (const [part, fields] of Object.entries(memory)) {
+  if (isRecord(memory2)) {
+    for (const [part, fields] of Object.entries(memory2)) {
       const spec = hasOwn(MEMORY_PARTS, part) ? MEMORY_PARTS[part] : undefined;
       if (!spec) {
         warn(`minds.memory.${part}`, `"${part}" isn't a memory layer; nothing reads it.`);
@@ -30470,38 +30473,38 @@ var MINDS_LINTS = [
 ];
 
 // src/packs/minds/core/section.ts
-function clause(text) {
-  return text.replace(/\s+/g, " ").trim().replace(/[.;]+$/, "");
+function clause(text5) {
+  return text5.replace(/\s+/g, " ").trim().replace(/[.;]+$/, "");
 }
 function mindLines(ctx) {
-  const { registry: reg, world, state } = ctx;
-  const slice = readSlice(state);
-  if (!slice.on)
+  const { registry: reg, world, state: state2 } = ctx;
+  const slice2 = readSlice(state2);
+  if (!slice2.on)
     return [];
   const pov = world.pov;
-  const here = placeOfEntity(state, pov);
+  const here = placeOfEntity(state2, pov);
   const secrecy = worldMindsOf(world).secrecy;
   let check = null;
-  const safe = (text) => {
+  const safe = (text5) => {
     if (!check) {
-      const secrets = unrevealedSecrets(reg, world, state);
-      const hidden = hiddenNameCheck(reg, world, state, pov);
+      const secrets = unrevealedSecrets(reg, world, state2);
+      const hidden = hiddenNameCheck(reg, world, state2, pov);
       check = (t) => findLeaks(t, secrets).length === 0 && !hidden(t);
     }
-    return check(text);
+    return check(text5);
   };
   const out = [];
-  for (const id of Object.keys(slice.chars).sort()) {
-    const m = own(slice.chars, id)?.mind;
-    const e = own(state.entities, id);
-    if (!m || !e || m.round !== slice.round || id === pov || isGone(state, id) || !acts(world, state, id))
+  for (const id of Object.keys(slice2.chars).sort()) {
+    const m = own(slice2.chars, id)?.mind;
+    const e = own(state2.entities, id);
+    if (!m || !e || m.round !== slice2.round || id === pov || isGone(state2, id) || !acts(world, state2, id))
       continue;
-    if (m.moment === "beat" && m.at !== state.clock)
+    if (m.moment === "beat" && m.at !== state2.clock)
       continue;
-    const present = here !== null && placeOfEntity(state, id) === here && canSeeEntity(reg, world, state, pov, id);
-    if (!present && m.interrupt === null)
+    const present2 = here !== null && placeOfEntity(state2, id) === here && canSeeEntity(reg, world, state2, pov, id);
+    if (!present2 && m.interrupt === null)
       continue;
-    const name = present || playerKnows(reg, world, state, pov, id) ? e.name : "Someone";
+    const name = present2 || playerKnows(reg, world, state2, pov, id) ? e.name : "Someone";
     if (secrecy === "full") {
       const parts = [`${name}'s mind: ${clause(m.monologue)}.`];
       if (m.intent !== "")
@@ -30547,7 +30550,7 @@ var mindsPack = {
     r.query("minds.minded", minded);
     r.query("minds.on", mindsOn);
     r.query("minds.intent", (ctx, who) => (readCharacter(ctx.state, who).intent?.text ?? "") !== "");
-    r.query("minds.fidelity", (ctx, texts) => fidelityOf(ctx, texts));
+    r.query("minds.fidelity", (ctx, texts2) => fidelityOf(ctx, texts2));
     r.renderer({ slot: MINDS_SLOT, render: (ctx) => mindLines(ctx).map((l) => l.line) });
     for (const rule of MINDS_LINTS)
       r.lint(rule);
@@ -56224,15 +56227,15 @@ function run(proc) {
     const overrides = {};
     for (const id of Object.keys(world.time.interrupts))
       overrides[id] = "note";
-    const intent = timelapseIntent({ type: "duration", minutes: 24 * 60 }, overrides);
+    const intent2 = timelapseIntent({ type: "duration", minutes: 24 * 60 }, overrides);
     count = Math.max(1, Math.min(CHECK_MAX_DAYS, typeof p.days === "number" ? Math.floor(p.days) : 3));
-    step = (state, i) => checkWorldDay(registry, pipeline, world, state, runSeed, i, intent);
+    step = (state3, i) => checkWorldDay(registry, pipeline, world, state3, runSeed, i, intent2);
   } else {
     const turns = Array.isArray(p.turns) ? p.turns.filter((t) => typeof t === "string") : [];
     count = turns.length;
-    step = (state, i) => playtestTurn(registry, pipeline, world, state, turns[i] ?? "", runSeed, i);
+    step = (state3, i) => playtestTurn(registry, pipeline, world, state3, turns[i] ?? "", runSeed, i);
   }
-  let state = playtestStart(registry, world, p.revision);
+  let state2 = playtestStart(registry, world, p.revision);
   const out = [];
   const next = (i) => {
     if (stopped)
@@ -56243,8 +56246,8 @@ function run(proc) {
       return;
     }
     try {
-      const result = step(state, i);
-      state = result.state;
+      const result = step(state2, i);
+      state2 = result.state;
       out.push(result.turn);
       proc.heartbeat();
       proc.send({ jobId, progress: (i + 1) / count });
@@ -56257,6 +56260,6 @@ function run(proc) {
   next(0);
 }
 export {
-  CHECK_MAX_DAYS,
-  run as default
+  run as default,
+  CHECK_MAX_DAYS
 };
