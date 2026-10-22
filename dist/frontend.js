@@ -14395,9 +14395,10 @@ function stepConfigOf(steps, purpose) {
   const signals = ["always"];
   return saved ? saved.signals.length > 0 ? saved : { ...saved, signals } : { enabled: true, signals };
 }
-var DEFAULT_RECENT = Object.freeze({ messages: 8, tokens: 3000 });
-function recentOf(config) {
-  return config?.recent ?? DEFAULT_RECENT;
+var DEFAULT_RECENT = Object.freeze({ on: true, messages: 8, tokens: 3000 });
+var RECENT_OFF = Object.freeze({ ...DEFAULT_RECENT, on: false });
+function recentOf(purpose, config) {
+  return config?.recent ?? (purpose === "interpret" ? DEFAULT_RECENT : RECENT_OFF);
 }
 var SPEED_ACTIVITIES = ["sleep", "work_shift", "travel", "waiting"];
 var SPEED_DEFAULT = Object.freeze({ mode: "offer", thresholdMinutes: 30 });
@@ -15469,7 +15470,7 @@ function stepUpdatePatch(purpose, config) {
   if (config.lore)
     out.lore = { policy: config.lore.policy, tokens: config.lore.tokens, ...config.lore.transport ? { transport: config.lore.transport } : {} };
   if (config.recent)
-    out.recent = { messages: config.recent.messages, tokens: config.recent.tokens };
+    out.recent = { on: config.recent.on, messages: config.recent.messages, tokens: config.recent.tokens };
   return { modelUse: { preset: "custom", steps: { [purpose]: out } } };
 }
 function useConnections() {
@@ -15734,7 +15735,7 @@ function StepCard(props) {
   const call = helperCallOf({ ...config, route }, props.helper);
   const lowTokens = route.provider === "helper" && call.maxTokens < LOW_TOKENS;
   const lore = stepLoreOf(config);
-  const recent = recentOf(config);
+  const recent = recentOf(purpose, config);
   const where = route.provider === "decision" ? `Decision · ${route.connectionId ? placeOf2(route, props.connections) : "the Decisions API's default"}` : `Helper · ${placeOf2(call, props.connections)} · ${paramsSummary(call)}`;
   const summary = config.enabled ? where : "Off";
   const setParam = (key, value) => {
@@ -15873,30 +15874,42 @@ function StepCard(props) {
             }, undefined, false, undefined, this)
           ]
         }, undefined, true, undefined, this) : null,
-        purpose === "interpret" ? /* @__PURE__ */ u3(Field, {
-          label: "Recent messages",
-          help: "The messages before yours it reads to work out what you mean (what she offered, there, him), newest first, up to both limits.",
+        isMindPurpose(purpose) ? null : /* @__PURE__ */ u3(Field, {
+          label: "Recent chat",
+          help: purpose === "interpret" ? "The messages before yours it reads to work out what you mean (what she offered, there, him), newest first, stopping at whichever limit comes first." : "The messages before this turn's it reads with its own input, newest first, stopping at whichever limit comes first.",
           children: [
-            /* @__PURE__ */ u3(NumberStepper, {
-              label: "Messages",
-              value: recent.messages,
-              min: 0,
-              step: 1,
-              integer: true,
+            /* @__PURE__ */ u3(HostSwitch, {
+              label: "Reads recent chat",
+              checked: recent.on,
               disabled: busy,
-              onChange: (messages) => update({ ...config, recent: { ...recent, messages } })
+              onChange: (on) => update({ ...config, recent: { ...recent, on } })
             }, undefined, false, undefined, this),
-            /* @__PURE__ */ u3(NumberStepper, {
-              label: "Tokens",
-              value: recent.tokens,
-              min: 0,
-              step: 500,
-              integer: true,
-              disabled: busy,
-              onChange: (tokens) => update({ ...config, recent: { ...recent, tokens } })
-            }, undefined, false, undefined, this)
+            recent.on ? /* @__PURE__ */ u3(M, {
+              children: [
+                /* @__PURE__ */ u3(LimitField, {
+                  label: "Messages",
+                  noneLabel: "no limit",
+                  value: recent.messages,
+                  min: 0,
+                  step: 1,
+                  fallback: DEFAULT_RECENT.messages,
+                  disabled: busy,
+                  onChange: (messages) => update({ ...config, recent: { ...recent, messages } })
+                }, undefined, false, undefined, this),
+                /* @__PURE__ */ u3(LimitField, {
+                  label: "Tokens",
+                  noneLabel: "no limit",
+                  value: recent.tokens,
+                  min: 0,
+                  step: 500,
+                  fallback: DEFAULT_RECENT.tokens,
+                  disabled: busy,
+                  onChange: (tokens) => update({ ...config, recent: { ...recent, tokens } })
+                }, undefined, false, undefined, this)
+              ]
+            }, undefined, true, undefined, this) : null
           ]
-        }, undefined, true, undefined, this) : null,
+        }, undefined, true, undefined, this),
         /* @__PURE__ */ u3(Disclosure, {
           summary: "Advanced: signals and lore",
           children: [
@@ -15924,7 +15937,7 @@ function StepCard(props) {
             }, undefined, true, undefined, this),
             isMindPurpose(purpose) ? /* @__PURE__ */ u3("div", {
               class: "lre-small lre-muted",
-              children: purpose === "mind" ? "What a mind reads, its lore included, is set in Settings → Minds → What a mind reads." : "Reads no world lore."
+              children: purpose === "mind" ? "What a mind reads, its lore included, is set in Settings → Minds → What a mind reads." : "Reads only the lore pinned to it in Build → Pinned lore."
             }, undefined, false, undefined, this) : /* @__PURE__ */ u3(M, {
               children: [
                 /* @__PURE__ */ u3(Field, {
