@@ -4209,11 +4209,14 @@ function isLorePin(v) {
   const keys = Object.keys(v).length;
   if (v.lore !== undefined)
     return typeof v.lore === "string" && v.lore !== "" && keys === 1;
-  return typeof v.book === "string" && v.book !== "" && typeof v.entry === "string" && v.entry !== "" && keys === 2;
+  if (typeof v.book !== "string" || v.book === "")
+    return false;
+  return v.entry === undefined ? keys === 1 : typeof v.entry === "string" && v.entry !== "" && keys === 2;
 }
 function lorePinKey(pin) {
-  return "lore" in pin ? `lore:${pin.lore}` : `book:${pin.book}/${pin.entry}`;
+  return "lore" in pin ? `lore:${pin.lore}` : ("entry" in pin) ? `book:${pin.book}/${pin.entry}` : `book:${pin.book}`;
 }
+var PIN_STEPS = LORE_AUDIENCE.filter((p) => p !== "memory" && p !== "skip" && p !== "consolidate");
 var pinsRead = new WeakMap;
 function loreTerm(text) {
   return text.trim().replace(/\s+/g, " ").toLowerCase();
@@ -8280,11 +8283,11 @@ function lintLorePins(world) {
     issues.push({ severity, path, code, message });
   };
   if (!isRecord(raw))
-    return [{ severity: "error", path: "lorePins", code: "pin_shape", message: "Lore pins are an object of characters and places; none are read." }];
+    return [{ severity: "error", path: "lorePins", code: "pin_shape", message: "Lore pins are an object of characters, places and steps; none are read." }];
   for (const key of Object.keys(raw))
-    if (key !== "characters" && key !== "places")
+    if (key !== "characters" && key !== "places" && key !== "steps")
       push("warning", `lorePins.${key}`, "pin_shape", `"${key}" isn't part of the lore pins; nothing reads it.`);
-  for (const part of ["characters", "places"]) {
+  for (const part of ["characters", "places", "steps"]) {
     const targets = raw[part];
     if (targets === undefined)
       continue;
@@ -8294,9 +8297,9 @@ function lintLorePins(world) {
     }
     for (const [id, list] of Object.entries(targets)) {
       const path = `lorePins.${part}.${id}`;
-      const name = part === "characters" ? hasOwn(world.entities, id) ? world.entities[id]?.name : undefined : hasOwn(world.places, id) ? world.places[id]?.name : undefined;
+      const name = part === "characters" ? hasOwn(world.entities, id) ? world.entities[id]?.name : undefined : part === "places" ? hasOwn(world.places, id) ? world.places[id]?.name : undefined : PIN_STEPS.includes(id) ? id : undefined;
       if (name === undefined)
-        push("warning", path, "pin_target", `"${id}" is not ${part === "characters" ? "an entity" : "a place"} in the world, so no call reads what is pinned to it.`);
+        push("warning", path, "pin_target", part === "steps" ? hasOwn(STEP_OUTPUTS, id) ? `The ${id} step reads no lore, so nothing pinned to it is read.` : `"${id}" is not a step, so no call reads what is pinned to it.` : `"${id}" is not ${part === "characters" ? "an entity" : "a place"} in the world, so no call reads what is pinned to it.`);
       if (!Array.isArray(list)) {
         push("error", path, "pin_shape", "The pins are a list; none are read.");
         continue;
@@ -8304,12 +8307,12 @@ function lintLorePins(world) {
       const seen = new Set;
       for (const [i, pin] of list.entries()) {
         if (!isLorePin(pin)) {
-          push("error", path, "pin_shape", `Pin ${i + 1} is neither {"lore": id} nor {"book": id, "entry": id}, so it is ignored.`);
+          push("error", path, "pin_shape", `Pin ${i + 1} is none of {"lore": id}, {"book": id, "entry": id} and {"book": id}, so it is ignored.`);
           continue;
         }
         const key = lorePinKey(pin);
         if (seen.has(key))
-          push("warning", path, "pin_duplicate", `${"lore" in pin ? `"${pin.lore}"` : "A book entry"} is pinned here twice; it is read once.`);
+          push("warning", path, "pin_duplicate", `${"lore" in pin ? `"${pin.lore}"` : ("entry" in pin) ? "A book entry" : "A book"} is pinned here twice; it is read once.`);
         seen.add(key);
         if (!("lore" in pin))
           continue;
@@ -56260,6 +56263,6 @@ function run(proc) {
   next(0);
 }
 export {
-  run as default,
-  CHECK_MAX_DAYS
+  CHECK_MAX_DAYS,
+  run as default
 };

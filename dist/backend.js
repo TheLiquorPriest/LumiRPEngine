@@ -3788,16 +3788,22 @@ function isLorePin(v) {
   const keys = Object.keys(v).length;
   if (v.lore !== undefined)
     return typeof v.lore === "string" && v.lore !== "" && keys === 1;
-  return typeof v.book === "string" && v.book !== "" && typeof v.entry === "string" && v.entry !== "" && keys === 2;
+  if (typeof v.book !== "string" || v.book === "")
+    return false;
+  return v.entry === undefined ? keys === 1 : typeof v.entry === "string" && v.entry !== "" && keys === 2;
 }
 function lorePinKey(pin) {
-  return "lore" in pin ? `lore:${pin.lore}` : `book:${pin.book}/${pin.entry}`;
+  return "lore" in pin ? `lore:${pin.lore}` : ("entry" in pin) ? `book:${pin.book}/${pin.entry}` : `book:${pin.book}`;
 }
+function pinJson(pin) {
+  return "lore" in pin ? { lore: pin.lore } : ("entry" in pin) ? { book: pin.book, entry: pin.entry } : { book: pin.book };
+}
+var PIN_STEPS = LORE_AUDIENCE.filter((p) => p !== "memory" && p !== "skip" && p !== "consolidate");
 var pinsRead = new WeakMap;
 function lorePinsOf(world) {
   const raw = world.lorePins;
   if (!isRecord(raw))
-    return { characters: {}, places: {} };
+    return { characters: {}, places: {}, steps: {} };
   const known = pinsRead.get(raw);
   if (known)
     return known;
@@ -3814,14 +3820,15 @@ function lorePinsOf(world) {
         if (!isLorePin(pin) || seen.has(lorePinKey(pin)))
           continue;
         seen.add(lorePinKey(pin));
-        pins.push("lore" in pin ? { lore: pin.lore } : { book: pin.book, entry: pin.entry });
+        pins.push(pinJson(pin));
       }
       if (pins.length > 0)
         out[id] = pins;
     }
     return out;
   };
-  const read = { characters: part(raw.characters), places: part(raw.places) };
+  const steps = part(raw.steps);
+  const read = { characters: part(raw.characters), places: part(raw.places), steps: Object.fromEntries(PIN_STEPS.flatMap((p) => hasOwn(steps, p) ? [[p, steps[p] ?? []]] : [])) };
   pinsRead.set(raw, read);
   return read;
 }
@@ -57121,11 +57128,11 @@ function lintLorePins(world) {
     issues.push({ severity, path, code, message });
   };
   if (!isRecord(raw))
-    return [{ severity: "error", path: "lorePins", code: "pin_shape", message: "Lore pins are an object of characters and places; none are read." }];
+    return [{ severity: "error", path: "lorePins", code: "pin_shape", message: "Lore pins are an object of characters, places and steps; none are read." }];
   for (const key of Object.keys(raw))
-    if (key !== "characters" && key !== "places")
+    if (key !== "characters" && key !== "places" && key !== "steps")
       push("warning", `lorePins.${key}`, "pin_shape", `"${key}" isn't part of the lore pins; nothing reads it.`);
-  for (const part of ["characters", "places"]) {
+  for (const part of ["characters", "places", "steps"]) {
     const targets = raw[part];
     if (targets === undefined)
       continue;
@@ -57135,9 +57142,9 @@ function lintLorePins(world) {
     }
     for (const [id, list] of Object.entries(targets)) {
       const path = `lorePins.${part}.${id}`;
-      const name = part === "characters" ? hasOwn(world.entities, id) ? world.entities[id]?.name : undefined : hasOwn(world.places, id) ? world.places[id]?.name : undefined;
+      const name = part === "characters" ? hasOwn(world.entities, id) ? world.entities[id]?.name : undefined : part === "places" ? hasOwn(world.places, id) ? world.places[id]?.name : undefined : PIN_STEPS.includes(id) ? id : undefined;
       if (name === undefined)
-        push("warning", path, "pin_target", `"${id}" is not ${part === "characters" ? "an entity" : "a place"} in the world, so no call reads what is pinned to it.`);
+        push("warning", path, "pin_target", part === "steps" ? hasOwn(STEP_OUTPUTS, id) ? `The ${id} step reads no lore, so nothing pinned to it is read.` : `"${id}" is not a step, so no call reads what is pinned to it.` : `"${id}" is not ${part === "characters" ? "an entity" : "a place"} in the world, so no call reads what is pinned to it.`);
       if (!Array.isArray(list)) {
         push("error", path, "pin_shape", "The pins are a list; none are read.");
         continue;
@@ -57145,12 +57152,12 @@ function lintLorePins(world) {
       const seen = new Set;
       for (const [i, pin2] of list.entries()) {
         if (!isLorePin(pin2)) {
-          push("error", path, "pin_shape", `Pin ${i + 1} is neither {"lore": id} nor {"book": id, "entry": id}, so it is ignored.`);
+          push("error", path, "pin_shape", `Pin ${i + 1} is none of {"lore": id}, {"book": id, "entry": id} and {"book": id}, so it is ignored.`);
           continue;
         }
         const key = lorePinKey(pin2);
         if (seen.has(key))
-          push("warning", path, "pin_duplicate", `${"lore" in pin2 ? `"${pin2.lore}"` : "A book entry"} is pinned here twice; it is read once.`);
+          push("warning", path, "pin_duplicate", `${"lore" in pin2 ? `"${pin2.lore}"` : ("entry" in pin2) ? "A book entry" : "A book"} is pinned here twice; it is read once.`);
         seen.add(key);
         if (!("lore" in pin2))
           continue;
@@ -64905,7 +64912,7 @@ function setPart(doc, part, value) {
   }
   if (part === "lorePins") {
     const pins = lorePinsOf({ lorePins: value });
-    if (Object.keys(pins.characters).length === 0 && Object.keys(pins.places).length === 0)
+    if (Object.keys(pins.characters).length === 0 && Object.keys(pins.places).length === 0 && Object.keys(pins.steps).length === 0)
       delete doc.lorePins;
     else
       doc.lorePins = structuredClone(pins);
@@ -65728,7 +65735,7 @@ function placeChain(world, place) {
     out.push(at);
   return out;
 }
-function pinsFor(world, place, who) {
+function pinsFor(world, place, who, step) {
   const pins = lorePinsOf(world);
   const out = [];
   const seen = new Set;
@@ -65743,6 +65750,8 @@ function pinsFor(world, place, who) {
   };
   if (who !== undefined)
     add(own(pins.characters, who), { character: who });
+  if (step !== undefined)
+    add(pins.steps[step], { step });
   for (const at of placeChain(world, place))
     add(own(pins.places, at), { place: at });
   return out;
@@ -65781,42 +65790,73 @@ function bookEntryTitle(e) {
   const words5 = e.content.replace(/\s+/g, " ").trim().split(" ").filter((w) => w !== "");
   return words5.length === 0 ? "Untitled entry" : words5.length > TITLE_WORDS ? `${words5.slice(0, TITLE_WORDS).join(" ")}\u2026` : words5.join(" ");
 }
-async function bookEntries(host, pins, userId) {
-  const out = new Map;
+function engineWrote(e) {
+  return isRecord(e.extensions[LEDGER_NAMESPACE]);
+}
+async function bookReads(host, pins, userId) {
+  const out = { entries: new Map, books: new Map };
+  const unread = (what, error) => host.log("warn", `[LumiRPEngine] ${what} wasn't read: ${error instanceof Error ? error.message : String(error)}`, userId);
   await Promise.all(pins.map(async (pin2) => {
     if ("lore" in pin2)
       return;
-    const key = lorePinKey(pin2);
-    if (out.has(key))
+    if (!("entry" in pin2)) {
+      if (out.books.has(pin2.book))
+        return;
+      out.books.set(pin2.book, null);
+      try {
+        out.books.set(pin2.book, (await host.books.entries(pin2.book, userId)).filter((e) => !engineWrote(e)));
+      } catch (error) {
+        unread(`a pinned World Info book (${pin2.book})`, error);
+      }
       return;
-    out.set(key, null);
+    }
+    const key = lorePinKey(pin2);
+    if (out.entries.has(key))
+      return;
+    out.entries.set(key, null);
     try {
       const e = await host.books.entry(pin2.entry, userId);
-      out.set(key, e && e.bookId === pin2.book ? e : null);
+      out.entries.set(key, e && e.bookId === pin2.book && !engineWrote(e) ? e : null);
     } catch (error) {
-      host.log("warn", `[LumiRPEngine] a pinned World Info entry (${pin2.book}/${pin2.entry}) wasn't read: ${error instanceof Error ? error.message : String(error)}`, userId);
+      unread(`a pinned World Info entry (${pin2.book}/${pin2.entry})`, error);
     }
   }));
   return out;
 }
-async function readPins(host, world, refs, userId) {
-  if (refs.length === 0)
-    return [];
-  const books = await bookEntries(host, refs.map((r) => r.pin), userId);
-  return refs.flatMap((ref) => {
-    if ("lore" in ref.pin) {
-      const text5 = worldPinText(world, ref);
-      return text5 ? [text5] : [];
+function bookText(e, on) {
+  return { key: lorePinKey({ book: e.bookId, entry: e.id }), on, title: bookEntryTitle(e), content: e.content, entry: null };
+}
+async function pinReader(host, world, refs, userId) {
+  const read = await bookReads(host, refs.map((r) => r.pin), userId);
+  return (some) => {
+    const out = [];
+    const seen = new Set;
+    const give2 = (t) => {
+      if (!t || seen.has(t.key))
+        return;
+      seen.add(t.key);
+      out.push(t);
+    };
+    for (const ref of some) {
+      if ("lore" in ref.pin)
+        give2(worldPinText(world, ref));
+      else if ("entry" in ref.pin) {
+        const e = read.entries.get(ref.key);
+        give2(e ? bookText(e, ref.on) : null);
+      } else
+        for (const e of read.books.get(ref.pin.book) ?? [])
+          if (!e.disabled)
+            give2(bookText(e, ref.on));
     }
-    const e = books.get(ref.key);
-    return e ? [{ key: ref.key, on: ref.on, title: bookEntryTitle(e), content: e.content, entry: null }] : [];
-  });
+    return out;
+  };
 }
 async function pinViews(host, world, userId) {
   const pins = lorePinsOf(world);
-  const all2 = [...Object.values(pins.characters), ...Object.values(pins.places)].flat();
-  const books = await bookEntries(host, all2, userId);
-  const names2 = all2.some((p) => !("lore" in p)) ? new Map((await host.books.list(userId).catch(() => [])).map((b) => [b.id, b.name])) : new Map;
+  const all2 = [...Object.values(pins.characters), ...Object.values(pins.places), ...Object.values(pins.steps)].flatMap((list) => list ?? []);
+  const read = await bookReads(host, all2, userId);
+  const books = all2.some((p) => !("lore" in p)) ? await host.books.list(userId).catch(() => []) : [];
+  const names2 = new Map(books.map((b) => [b.id, b.name]));
   const view = (pin2) => {
     const key = lorePinKey(pin2);
     if ("lore" in pin2) {
@@ -65826,12 +65866,20 @@ async function pinViews(host, world, userId) {
       const source2 = loreSourceOf(entry.source);
       return { key, pin: pin2, title: entry.title || pin2.lore, source: "World lore", status: source2.kind === "ai" && source2.status === "pending" ? "pending" : "ok", secret: loreIsSecret(entry) };
     }
-    const e = books.get(key) ?? null;
+    if (!("entry" in pin2)) {
+      const book = books.find((b) => b.id === pin2.book);
+      const entries2 = read.books.get(pin2.book);
+      if (!book || book.engine || !entries2)
+        return { key, pin: pin2, title: "A World Info book", source: "The whole book", status: "missing", secret: false };
+      const on = entries2.filter((e2) => !e2.disabled).length;
+      return { key, pin: pin2, title: book.name, source: `The whole book: ${on} ${on === 1 ? "entry" : "entries"} switched on`, status: "ok", secret: false };
+    }
+    const e = read.entries.get(key) ?? null;
     const source = names2.get(pin2.book) ?? "A World Info book";
     return e ? { key, pin: pin2, title: bookEntryTitle(e), source, status: e.disabled ? "off" : "ok", secret: false } : { key, pin: pin2, title: "A book entry", source, status: "missing", secret: false };
   };
-  const part = (record3) => Object.fromEntries(Object.entries(record3).map(([id, list]) => [id, list.map(view)]));
-  return { characters: part(pins.characters), places: part(pins.places) };
+  const part = (record3) => Object.fromEntries(Object.entries(record3).map(([id, list]) => [id, (list ?? []).map(view)]));
+  return { characters: part(pins.characters), places: part(pins.places), steps: part(pins.steps) };
 }
 async function pinBooks(host, chatId, userId) {
   const meta = chatId === null ? {} : await host.chats.chatMetadata(chatId, userId);
@@ -67599,7 +67647,7 @@ class StepLore {
     this.gateOpen = loreGateReader(reader.reg, reader.world, reader.state);
   }
   pin(texts2) {
-    if (texts2.length === 0 || this.setting.policy === "none")
+    if (texts2.length === 0)
       return;
     const { reg, world, state: state2 } = this.reader;
     const given = fitPins(this.reader, texts2, this.setting.tokens - this.pinTokens, (entry) => loreReadable(reg, world, state2, entry, this.purpose, this.effects, this.gateOpen));
@@ -68304,8 +68352,8 @@ async function runMinds(deps, input) {
   const messages = input.messages ?? await chatMessages(deps, input.chatId, userId);
   const reads = settings.minds.reads;
   const phase = input.phase ?? (input.moment.kind === "beat" ? "skip" : "pre");
-  const refs = new Map(input.who.map((who) => [who, reads.pinned.on ? pinsFor(world, placeOfEntity(state2, who), who) : []]));
-  const texts2 = new Map((await readPins(deps.host, world, [...refs.values()].flat(), userId)).map((t) => [t.key, t]));
+  const refs = new Map(input.who.map((who) => [who, reads.pinned.on ? pinsFor(world, placeOfEntity(state2, who), who, "mind") : []]));
+  const pinsOf = await pinReader(deps.host, world, [...refs.values()].flat(), userId);
   const open = loreGateReader(reg, world, state2);
   let screen = null;
   const shownTitle = (title) => {
@@ -68338,10 +68386,7 @@ async function runMinds(deps, input) {
     if (kept2)
       return { data: kept2, trace: { ...base, outcome: "recorded", ms: 0, tokens: 0, prompt: prompt.source }, entry: { entity: who, name, level, status: "recorded", ms: 0, tokens: 0 } };
     input.progress?.({ entity: who, name, level, status: "thinking" });
-    const pinned = (refs.get(who) ?? []).flatMap((r) => {
-      const t = texts2.get(r.key);
-      return t ? [{ ...t, on: r.on }] : [];
-    });
+    const pinned = pinsOf(refs.get(who) ?? []);
     const scope = { reg, world, state: state2, who, memory: memory2, messages, hideJson: settings.hideJsonBlocks, reads, moment: input.moment, pinned };
     const report = { pinned: [], activated: [] };
     const usage2 = { tokens: 0 };
@@ -69526,9 +69571,9 @@ function thisBuild(moduleUrl = import.meta.url) {
   const dir = moduleUrl.replace(/[^/]*$/, "");
   const path = pathOfFileUrl(`${dir}${KIT_FILE}`);
   const core = pathOfFileUrl(`${dir}${CORE_FILE}`);
-  const sha256 = "37fe96346779cff4ce5d9d96a474e27d4c1e5b3f0e9c102bf0ffa5c4b4d391a2";
-  const tools = ["b7811c5d8aa44b76256ccb4da8ea37d5", "9748f93066a93461e251d2677fe4f3b6"].filter((f) => f !== undefined);
-  return { id: "509264b7", kit: sha256 !== undefined && path !== null && core !== null ? { path, core, sha256, api: KIT_API } : null, tools };
+  const sha256 = "83880cbc244d4643475ef0b862d64c73b1abcb9bdeb6554567e42322d3f69421";
+  const tools = ["31de155b25748e794c9fe560150797f2", "d7e9a2e583dc5481df9d8ed8a432a934"].filter((f) => f !== undefined);
+  return { id: "ce78f09b", kit: sha256 !== undefined && path !== null && core !== null ? { path, core, sha256, api: KIT_API } : null, tools };
 }
 var BUILD_FILE = "agents/build.json";
 var USER_FILE = "agents.json";
@@ -72725,7 +72770,7 @@ class Runtime {
     this.steps.onCallStart = (userId, purpose) => this.diag.callStart(userId, purpose);
     this.toolSupport = new ToolSupport(this.host);
     this.minds = { host: this.host, registry: this.registry, steps: this.steps, settings: this.settings, presets: this.presets };
-    this.ledger = new LedgerService(this.host, (chatId, userId) => this.resolveEnv(chatId, userId), new LedgerFold(this.registry, { fingerprint: "509264b7" }), (chatId) => messages.forget(chatId));
+    this.ledger = new LedgerService(this.host, (chatId, userId) => this.resolveEnv(chatId, userId), new LedgerFold(this.registry, { fingerprint: "ce78f09b" }), (chatId) => messages.forget(chatId));
     this.studio = new StudioBridge(this.host, this.worlds);
     this.worlds.onChange = (worldId, userId) => this.studio.worldChanged(worldId, userId);
     this.agents = new Agents(this.host, options.build ?? thisBuild(), async (userId) => (await this.settings.get(userId)).timeouts.mcpReconnectMs);
@@ -73273,8 +73318,10 @@ ${answer}`, links: owner ? [owner] : [] }));
     return { agent: e?.name ?? t.agent, at: place ? world.places[place]?.name ?? place : null, time: formatClock(calendarOf(world), state2.clock), options: t.options };
   }
   async lorePhase(phase, key, userId, world, state2, budget, said2, guidance) {
-    const pinned = await readPins(this.host, world, pinsFor(world, placeOfEntity(state2, world.pov)), userId);
-    const at2 = { phase, key, userId, world, state: state2, budget, active: ACTIVE_CONNECTION, said: said2, guidance, pinned };
+    const here = pinsFor(world, placeOfEntity(state2, world.pov));
+    const own2 = PIN_STEPS.filter((step2) => !isMindPurpose(step2)).map((step2) => [step2, pinsFor(world, null, undefined, step2)]);
+    const textsOf = await pinReader(this.host, world, [...here, ...own2.flatMap(([, refs]) => refs)], userId);
+    const at2 = { phase, key, userId, world, state: state2, budget, active: ACTIVE_CONNECTION, said: said2, guidance, pinned: textsOf(here), steps: Object.fromEntries(own2.map(([step2, refs]) => [step2, textsOf(refs)])) };
     if (Object.keys(world.lore).length === 0)
       return at2;
     await this.toolSupport.ready(userId);
@@ -73282,10 +73329,11 @@ ${answer}`, links: owner ? [owner] : [] }));
   }
   stepLore(run2, at2, inputs, effects = false) {
     const { world, state: state2, userId } = at2;
-    if (Object.keys(world.lore).length === 0 && at2.pinned.length === 0)
+    const chosen = at2.steps[run2.purpose] ?? [];
+    if (Object.keys(world.lore).length === 0 && at2.pinned.length === 0 && chosen.length === 0)
       return null;
     const setting = stepLoreOf(run2.config);
-    if (setting.policy === "none")
+    if (setting.policy === "none" && chosen.length === 0)
       return null;
     const route = run2.config.route;
     const connection = route?.provider === "helper" && route.connectionId ? route.connectionId : at2.active;
@@ -73303,7 +73351,9 @@ ${answer}`, links: owner ? [owner] : [] }));
         (kindIs(this.registry, world, e.kind, "person") ? people : labels).push(e.name);
     const withheld = { text: unrevealedSecrets(this.registry, world, state2).filter(unsaid), people, labels, said: at2.said, names: secretLoreNames(this.registry, world, state2).filter(unsaid) };
     const lore2 = new StepLore(run2.purpose, setting, reader, at2.phase, withheld, { effects, counted: (texts2) => this.countLater(userId, texts2), lookups: { budget: at2.budget.lookup, transport, refused }, privateInputs: inputs.shown !== undefined });
-    lore2.pin(at2.pinned);
+    lore2.pin(chosen);
+    if (setting.policy !== "none")
+      lore2.pin(at2.pinned);
     lore2.prefetch(inputs);
     if (inputs.shown !== null)
       lruSet(this.loreTraces, at2.key, [...this.loreTraces.get(at2.key) ?? [], lore2.trace], 64);
