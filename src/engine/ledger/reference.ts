@@ -54,7 +54,7 @@ export function referenceFold(input: FoldInput, types: FoldTypes): FoldOutput {
     const text = m.swipes[m.swipeId] ?? "";
     if (m.isUser) {
       const path = hashParts("lre.path", parent, "u", textHash(text), "", "");
-      messages.push({ id: m.id, fold: "user", parentPath: parent, path });
+      messages.push({ id: m.id, fold: "user", parentPath: parent, path, clock: state.clock });
       parent = path;
       if (pausedAfter.has(m.id)) paused = true;
       continue;
@@ -210,7 +210,7 @@ export function referenceFold(input: FoldInput, types: FoldTypes): FoldOutput {
             }),
           );
     const path = hashParts("lre.path", parent, "a", content, recHash, markerHash);
-    messages.push({ id: m.id, fold, parentPath: parent, path });
+    messages.push({ id: m.id, fold, parentPath: parent, path, clock: state.clock });
     parent = path;
   }
   state = structuredClone(state);

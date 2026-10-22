@@ -32,7 +32,8 @@ interface Step {
 }
 
 interface Frame {
-  result: MessageResult;
+  /** Everything of the step's result but its clock, which only folding the state gives. */
+  result: Omit<MessageResult, "clock">;
   notes: JournalNote[];
   keep: KeepLine[];
   rec: Rec | null;
@@ -182,13 +183,14 @@ export class LedgerFold {
         for (const [i, x] of snapshot.notes) notes.set(i, [...(notes.get(i) ?? []), x]);
         for (const [i, x] of snapshot.keep) keep.set(i, [...(keep.get(i) ?? []), x]);
         for (const [i, x] of snapshot.violations) violations.set(i, [...(violations.get(i) ?? []), x]);
+        const clocks = new Map(snapshot.clocks ?? []);
         // Steps already cached keep their outputs; the rest come from their frames and the snapshot.
         // They are remembered, the snapshot's step with its state, so the next fold of this chain
         // walks the cache past the snapshot instead of starting from it again.
         for (let i = base + 1; i <= best; i++) {
           const f = frames[i - base - 1] as Frame;
           const k = frameKeys[i - base - 1] as string;
-          const step: Step = { state: null, result: f.result, notes: [...f.notes, ...(notes.get(i) ?? [])], keep: [...f.keep, ...(keep.get(i) ?? [])], violations: violations.get(i) ?? [], paused: false };
+          const step: Step = { state: null, result: { ...f.result, clock: clocks.get(i) ?? null }, notes: [...f.notes, ...(notes.get(i) ?? [])], keep: [...f.keep, ...(keep.get(i) ?? [])], violations: violations.get(i) ?? [], paused: false };
           this.remember(k, i === best ? { ...step, state: snapshot.state } : step, i === best, false);
           steps.push(step);
           keys.push(k);
@@ -232,11 +234,13 @@ export class LedgerFold {
   }
 
   private snapshotOf(key: string, steps: readonly Step[], state: WorldState): FoldSnapshot {
-    const snap: FoldSnapshot = { key, state: structuredClone(state), notes: [], keep: [], violations: [] };
+    const clocks: [number, number][] = [];
+    const snap: FoldSnapshot = { key, state: structuredClone(state), notes: [], keep: [], violations: [], clocks };
     steps.forEach((s, i) => {
       for (const x of s.notes) if (dependentNote(x)) snap.notes.push([i, x]);
       for (const x of s.keep) if (dependentKeep(x)) snap.keep.push([i, x]);
       for (const x of s.violations) snap.violations.push([i, x]);
+      if (s.result.clock !== null) clocks.push([i, s.result.clock]);
     });
     return snap;
   }
@@ -379,7 +383,7 @@ export class LedgerFold {
       }
       if (before !== null && violations.length === 0) this.digest(this.settled, settledKey, () => before);
     }
-    return { state, result: f.result, notes, keep, violations, paused: f.paused };
+    return { state, result: { ...f.result, clock: state.clock }, notes, keep, violations, paused: f.paused };
   }
 
   /** Everything about one message that doesn't need the state: its record, live entries, path, fold kind and inert notes. */

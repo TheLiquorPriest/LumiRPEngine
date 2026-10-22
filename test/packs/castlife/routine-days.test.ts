@@ -53,7 +53,7 @@ describe("a routine's blocks", () => {
     expect(whereabouts(met, "rosa")).toEqual(["pub", "drinks"]);
     // The GM sees it laid at its time, from her routine.
     const laid = routineGmView(w.ctx, "rosa", 0).day.blocks.find((b) => b.origin.type === "routine" && b.origin.block === "pub");
-    expect(laid).toMatchObject({ from: "19:00", to: "21:00", place: "pub" });
+    expect(laid).toMatchObject({ from: "7:00 PM", to: "9:00 PM", place: "pub" });
     // Saturday (day 1) is none of their days.
     const saturday: string[] = [];
     for (const t of ["09:30", "19:30"]) {

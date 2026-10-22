@@ -31,7 +31,7 @@ import { checkOf } from "../engine/checks";
 import { applyTimeAdvance, fightHoldsClock, IN_FIGHT, nextDayPart, parseOverrides, parseTarget, typedSpan } from "../engine/time";
 import { EXTERNAL_ACCOUNT_PREFIX } from "../engine/events";
 import { boundProposal } from "../engine/bounds";
-import { calendarOf, clockOfStamp, dateAt, formatClock, formatHHMM, placeOffset, weekdayName } from "../engine/calendar";
+import { calendarOf, clockOfStamp, dateAt, formatClock, formatHHMM, formatTimeOfDay, placeOffset, weekdayName } from "../engine/calendar";
 import type { ChainMessage } from "../engine/ledger/chain";
 import { LedgerFold } from "../engine/ledger/fold";
 import type { LedgerCore, LedgerEnv } from "../engine/ledger/journal";
@@ -2639,15 +2639,15 @@ function unfitReason(reg: Registry, world: WorldDoc, state: Readonly<WorldState>
 }
 
 /**
- * A clock time for a chip, local to where the POV is, as the HUD shows it: "07:00" later the same
- * day, else with its weekday ("Sat 07:00").
+ * A clock time for a chip, local to where the POV is, as the HUD shows it: "7:00 AM" later the same
+ * day, else with its weekday ("Sat 7:00 AM").
  */
 function shortClock(world: WorldDoc, state: Readonly<WorldState>, at: number): string {
   const cal = calendarOf(world);
   const place = placeOfEntity(state, world.pov);
   const d = dateAt(cal, at + placeOffset(world, at, place));
   const today = dateAt(cal, state.clock + placeOffset(world, state.clock, place)).dayIndex;
-  return d.dayIndex === today ? formatHHMM(d.minuteOfDay) : `${weekdayName(cal, d.weekday)} ${formatHHMM(d.minuteOfDay)}`;
+  return d.dayIndex === today ? formatTimeOfDay(d.minuteOfDay) : `${weekdayName(cal, d.weekday)} ${formatTimeOfDay(d.minuteOfDay)}`;
 }
 
 /** The Outline slot's lines: the brief, the engine's beats, then the outline step's prose. */

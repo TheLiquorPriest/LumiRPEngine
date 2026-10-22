@@ -35,7 +35,7 @@ describe("calendar pack", () => {
     const v = buildCalendarView(w2.ctx);
     expect([v.date, v.weekday]).toEqual(["16 Oct 2026", "Fri"]);
     expect(v.upcoming.find((u) => u.kind === "commitment")?.label).toBe("work shift");
-    expect(scene(w2)[0]).toMatch(/^Time: .*07:30.*\(morning\)\.$/);
+    expect(scene(w2)[0]).toMatch(/^Time: .*7:30 AM.*\(morning\)\.$/);
   });
 
   test("formulas: weekday, minutes and days until, weekends; holidays are days off at level 4 only", () => {

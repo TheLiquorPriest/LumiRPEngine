@@ -146,7 +146,7 @@ Every ✎ fix is checked before it is saved: a value outside the field's range (
 
 ### Under each reply
 
-Under each reply the engine tells you what it did and asks what it needs to ask. Each thing it says is a **chip**, and a chip shows in one of three ways:
+Under each reply the engine ran, a quiet line gives the world's date and time once that turn ended, for the swipe you're looking at, as the clock reads where your character is ("Tue 15 Sep 2026, 12:25 PM"). Times you see read on a 12-hour clock, and temperatures in °F. Under it the engine tells you what it did and asks what it needs to ask. Each thing it says is a **chip**, and a chip shows in one of three ways:
 
 - **The receipt**: one quiet line for what the turn did, at most three parts long (anything that went wrong first, then the time, money, the roll and the changes), then "n more". Tap it for the full list, where every chip shows with its own buttons (**Undo**, **Edit amount** and so on).
 - **Decision cards**: a card for each thing that needs your answer, with its buttons. A card marked **Answer before you send** lapses when you send your next message. The Keep report is a card of its own.

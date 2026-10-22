@@ -296,7 +296,7 @@ describe("the clock's ✎ fix (DESIGN §9.2, §12)", () => {
       return "code" in fix ? fix.reason : "applied";
     };
     expect(refusal(s0, "2026-02-30 10:00")).toContain("isn't a date and time of day");
-    expect(refusal(s0, "2026-10-16 07:59")).toBe("the story starts at Fri 16 Oct 2026, 08:00");
+    expect(refusal(s0, "2026-10-16 07:59")).toBe("the story starts at Fri 16 Oct 2026, 8:00 AM");
     const tight = structuredClone(s0);
     tight.time.unitCap = { agentDays: 1, events: 5000 };
     expect(refusal(tight, "2026-10-20 08:00")).toContain("a Timelapse to that time gets there in steps");

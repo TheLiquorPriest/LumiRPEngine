@@ -36,12 +36,19 @@ describe("calendar arithmetic", () => {
     const cal = calendarOf(world);
     const d = dateAt(cal, 0);
     expect([d.year, d.month, d.day, d.weekday]).toEqual([2026, 10, 16, 5]); // a Friday
-    expect(formatClock(cal, 8 * 60 + 5)).toBe("Fri 16 Oct 2026, 08:05");
+    expect(formatClock(cal, 8 * 60 + 5)).toBe("Fri 16 Oct 2026, 8:05 AM");
     expect(dateAt(cal, 16 * 1440 - 1).day).toBe(31);
     expect(dateAt(cal, 16 * 1440).month).toBe(11);
     expect(clockOfLocal(cal, "2026-10-17T07:00")).toBe(1440 + 420);
     expect(nextTimeOfDay(cal, 420, 420)).toBe(1440 + 420);
     expect(nextTimeOfDay(cal, 419, 420)).toBe(420);
+  });
+
+  test("the clock the player reads is on a 12-hour clock: midnight is 12 AM, noon 12 PM", () => {
+    const cal = calendarOf(baseWorld());
+    expect([formatClock(cal, 5), formatClock(cal, 12 * 60), formatClock(cal, 13 * 60 + 30)]).toEqual(["Fri 16 Oct 2026, 12:05 AM", "Fri 16 Oct 2026, 12:00 PM", "Fri 16 Oct 2026, 1:30 PM"]);
+    // A helper reads and writes 24-hour stamps still.
+    expect(formatStamp(cal, 13 * 60 + 30)).toBe("2026-10-16 13:30");
   });
 
   test("spoken times: a time of day, a span or another day, after now", () => {
@@ -51,10 +58,10 @@ describe("calendar arithmetic", () => {
       const c = clockOfPhrase(cal, now, text);
       return c === null ? null : formatClock(cal, c);
     };
-    expect([at("7 tonight"), at("7"), at("7pm"), at("7:30 p.m."), at("19:00")]).toEqual(["Fri 16 Oct 2026, 19:00", "Fri 16 Oct 2026, 19:00", "Fri 16 Oct 2026, 19:00", "Fri 16 Oct 2026, 19:30", "Fri 16 Oct 2026, 19:00"]);
-    expect([at("9 in the morning"), at("noon"), at("midnight"), at("tonight")]).toEqual(["Sat 17 Oct 2026, 09:00", "Sat 17 Oct 2026, 12:00", "Sat 17 Oct 2026, 00:00", "Fri 16 Oct 2026, 18:00"]);
-    expect([at("tomorrow"), at("tomorrow morning"), at("tomorrow at 7"), at("Monday"), at("Friday")]).toEqual(["Sat 17 Oct 2026, 17:37", "Sat 17 Oct 2026, 06:00", "Sat 17 Oct 2026, 07:00", "Mon 19 Oct 2026, 17:37", "Fri 23 Oct 2026, 17:37"]);
-    expect([at("for 3 hours"), at("two days"), at("half an hour")]).toEqual(["Fri 16 Oct 2026, 20:37", "Sun 18 Oct 2026, 17:37", "Fri 16 Oct 2026, 18:07"]);
+    expect([at("7 tonight"), at("7"), at("7pm"), at("7:30 p.m."), at("19:00")]).toEqual(["Fri 16 Oct 2026, 7:00 PM", "Fri 16 Oct 2026, 7:00 PM", "Fri 16 Oct 2026, 7:00 PM", "Fri 16 Oct 2026, 7:30 PM", "Fri 16 Oct 2026, 7:00 PM"]);
+    expect([at("9 in the morning"), at("noon"), at("midnight"), at("tonight")]).toEqual(["Sat 17 Oct 2026, 9:00 AM", "Sat 17 Oct 2026, 12:00 PM", "Sat 17 Oct 2026, 12:00 AM", "Fri 16 Oct 2026, 6:00 PM"]);
+    expect([at("tomorrow"), at("tomorrow morning"), at("tomorrow at 7"), at("Monday"), at("Friday")]).toEqual(["Sat 17 Oct 2026, 5:37 PM", "Sat 17 Oct 2026, 6:00 AM", "Sat 17 Oct 2026, 7:00 AM", "Mon 19 Oct 2026, 5:37 PM", "Fri 23 Oct 2026, 5:37 PM"]);
+    expect([at("for 3 hours"), at("two days"), at("half an hour")]).toEqual(["Fri 16 Oct 2026, 8:37 PM", "Sun 18 Oct 2026, 5:37 PM", "Fri 16 Oct 2026, 6:07 PM"]);
     expect([at("until the sun goes down"), at("a while")]).toEqual([null, null]);
   });
 

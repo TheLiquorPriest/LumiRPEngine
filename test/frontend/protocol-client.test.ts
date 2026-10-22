@@ -65,6 +65,7 @@ function view(chatId: string, minutes: number): StateView {
     hud: { clock: { minutes, label: "07:00", dayPart: "morning", paused: false, scale: 1 }, place: null, weather: null, cash: null, fixes: {} },
     scene: null,
     chips: [],
+    replyClocks: {},
     journal: [],
     keepReport: [],
     pending: [],

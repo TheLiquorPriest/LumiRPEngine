@@ -77,7 +77,8 @@ describe("player-facing event lines", () => {
     const temps: LedgerEvent[] = [9, 10.5, 12].map((t) => ({ type: "set", entity: "region_riverton", field: "temp_c", value: t }));
     const lines = playerLines(reg, world, state, "you", [{ type: "set", entity: "region_riverton", field: "weather", value: "rain" }, ...temps, { type: "set", entity: "far", field: "weather", value: "snow" }]);
     expect(lines.filter((l) => l.startsWith("Riverton area:")).length).toBe(2);
-    expect(lines.some((l) => l.includes("12"))).toBe(true);
+    // The latest temperature, kept in °C, reads in °F: 12 °C is 54 °F.
+    expect(lines.filter((l) => l.includes("Temperature"))).toEqual(["Riverton area: Temperature 54 °F"]);
     expect(lines.some((l) => l.includes("Far coast"))).toBe(false);
   });
 

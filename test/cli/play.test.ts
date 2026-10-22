@@ -72,7 +72,7 @@ describe("the chat tools", () => {
     expect(await call("lre_chip", { chatId, chip: undo?.id, choice: "undo" })).toMatchObject({ applied: true, pending: false });
     expect(await read("lre_chat_state", { pointer: "/hud/weather" })).toBe("Clear");
     await call("lre_fix", { chatId, time: "2026-09-14 09:30" });
-    expect(await read("lre_chat_state", { pointer: "/hud/clock/label" })).toBe("Mon 14 Sep 2026, 09:30");
+    expect(await read("lre_chat_state", { pointer: "/hud/clock/label" })).toBe("Mon 14 Sep 2026, 9:30 AM");
   });
 
   test("lre_gm and lre_gm_edit need spoilers; a GM edit shows in the GM view and in Play", async () => {

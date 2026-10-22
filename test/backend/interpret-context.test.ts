@@ -190,7 +190,7 @@ describe("interpret's catalog and scene", () => {
     expect(scene().some((l) => l.startsWith("Waiting on your answer"))).toBe(false);
     expect(accept()).toBeUndefined();
     w.applyAll([{ type: "castlife.invitation", data: { agent: "danny_okafor", place: "bluebird_coffee", at: w.state.clock + 60, text: "Danny Okafor invites you to Bluebird Coffee at 07:15.", key: "danny:test" } }]);
-    expect(scene()).toContain("Waiting on your answer: Danny Okafor invites you to Bluebird Coffee at 07:15. (host danny_okafor)");
+    expect(scene()).toContain("Waiting on your answer: Danny Okafor invites you to Bluebird Coffee at 7:15 AM. (host danny_okafor)");
     expect(accept()?.params).toEqual(["host (person: danny_okafor)"]);
   });
 });

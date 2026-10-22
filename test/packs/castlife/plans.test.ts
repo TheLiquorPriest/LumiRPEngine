@@ -7,7 +7,7 @@ import { describe, expect, test } from "bun:test";
 import type { LedgerEvent } from "../../../src/shared/ledger";
 import type { Fidelity, MindPlan } from "../../../src/shared/minds";
 import type { WorldDoc } from "../../../src/shared/world";
-import { calendarOf, clockAt, dateAt, dayIndexOf, formatHHMM, parseHHMM } from "../../../src/engine/calendar";
+import { calendarOf, clockAt, dateAt, dayIndexOf, formatTimeOfDay, parseHHMM } from "../../../src/engine/calendar";
 import type { PlanOption } from "../../../src/engine/plan-day";
 import { createRegistry } from "../../../src/engine/registry-impl";
 import { ALL_NOTE, advance, catchUp } from "../../../src/engine/simulate";
@@ -196,7 +196,7 @@ describe("castlife: characters' own plans", () => {
     };
     // Off screen (Far), her plan asks the POV along, its ground recorded with it.
     const w = riverton();
-    expect(invites("far")).toEqual([{ agent: "maya", place: "cafe", at: at(w, 0, "18:00"), text: "Maya Chen invites you to Daybreak Café at 18:00.", key: "maya:plan:p4", origin: "plan:p4" }]);
+    expect(invites("far")).toEqual([{ agent: "maya", place: "cafe", at: at(w, 0, "18:00"), text: "Maya Chen invites you to Daybreak Café at 6:00 PM.", key: "maya:plan:p4", origin: "plan:p4" }]);
     // A Live or Near character's asks no one: their mind and the scene speak for them.
     expect(invites("live")).toEqual([]);
     expect(invites("near")).toEqual([]);
@@ -213,8 +213,8 @@ describe("castlife: characters' own plans", () => {
       planEdit("maya", plan(w, "late", { kind: "meet", where: "maya_flat", with: ["you"], priority: 4, when: { from: at(w, 1, "02:00"), to: at(w, 1, "03:30") } })),
     ]);
     const asked = (): unknown[] => w.events.flatMap((e) => (e.type === "castlife.invitation" && "data" in e ? [[e.data.key, e.data.at, e.data.text]] : []));
-    const late = ["maya:plan:late", at(w, 1, "02:00"), "Maya Chen invites you to meet up at 02:00."];
-    const drinks = ["maya:plan:drinks", at(w, 1, "20:00"), "Maya Chen invites you to Daybreak Café at 20:00."];
+    const late = ["maya:plan:late", at(w, 1, "02:00"), "Maya Chen invites you to meet up at 2:00 AM."];
+    const drinks = ["maya:plan:drinks", at(w, 1, "20:00"), "Maya Chen invites you to Daybreak Café at 8:00 PM."];
     lapse(w, at(w, 0, "23:59"));
     expect(asked()).toEqual([]);
     lapse(w, at(w, 1, "00:01"));
@@ -297,7 +297,7 @@ describe("castlife: characters' own plans", () => {
     lapse(w, now + 10);
     expect([w.state.entities.jordan?.fields.place, w.state.entities.jordan?.fields.activity]).toEqual(["bank", "errand"]);
     const invites = w.events.flatMap((e) => (e.type === "castlife.invitation" && "data" in e ? [e.data] : []));
-    expect(invites).toEqual([{ agent: "maya", place: "cafe", at: now + 1, text: `Maya Chen invites you to Daybreak Café at ${formatHHMM(dateAt(calendarOf(w.world), now + 1).minuteOfDay)}.`, key: "maya:plan:coffee", origin: "plan:coffee" }]);
+    expect(invites).toEqual([{ agent: "maya", place: "cafe", at: now + 1, text: `Maya Chen invites you to Daybreak Café at ${formatTimeOfDay(dateAt(calendarOf(w.world), now + 1).minuteOfDay)}.`, key: "maya:plan:coffee", origin: "plan:coffee" }]);
   });
 
   test("a minded character who isn't an LOD1 agent follows routine only: their plan isn't laid or lived, and it is dropped once its window has passed", () => {

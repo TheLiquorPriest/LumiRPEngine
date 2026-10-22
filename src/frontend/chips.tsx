@@ -91,7 +91,8 @@ export function MessageChips(props: { messageId: MessageId }) {
   const view = useView();
   if (!view || view.status === "not_world") return null;
   const chips = view.chips.filter((chip) => chip.messageId === props.messageId);
-  if (chips.length === 0) return null;
+  const when = view.replyClocks[props.messageId];
+  if (chips.length === 0 && when === undefined) return null;
   // A pack's rendering for a kind replaces the default wherever that chip shows.
   const show = (chip: Chip, fallback: ComponentType<ChipProps>) => {
     const Chosen = app.catalog.chips.get(chip.kind) ?? fallback;
@@ -101,6 +102,12 @@ export function MessageChips(props: { messageId: MessageId }) {
   const offers = chips.filter((chip) => chipRole(chip) === "offer");
   return (
     <div class="lre-chips" data-lre-chips={props.messageId}>
+      {when !== undefined ? (
+        <span class="lre-chat-when lre-small lre-muted" data-lre-reply-clock>
+          <span class="lre-sr">World time after this turn: </span>
+          {when}
+        </span>
+      ) : null}
       {done.length > 0 ? <Receipt chips={done} show={(chip) => show(chip, DefaultChip)} /> : null}
       {chips.filter((chip) => chipRole(chip) === "decision").map((chip) => show(chip, chip.kind === "keep_report" ? KeepReportChip : DecisionCard))}
       {offers.length > 0 ? <div class="lre-chat-offers">{offers.map((chip) => show(chip, OfferChip))}</div> : null}

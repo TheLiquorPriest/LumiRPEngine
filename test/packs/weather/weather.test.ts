@@ -28,7 +28,7 @@ function history(w: Working): string[] {
 }
 
 describe("weather pack", () => {
-  test("level 1 shows only the season's mood; level 2 the region's state; level 3 temperatures", () => {
+  test("level 1 shows only the season's mood; level 2 the region's state; level 3 temperatures, in °F from the °C the region keeps", () => {
     const w1 = setup(1);
     expect(buildWeatherView(w1.ctx)).toMatchObject({ level: 1, label: "a crisp autumn", sky: null, tempC: null });
     const w3 = setup(3);
@@ -36,7 +36,9 @@ describe("weather pack", () => {
     const v = buildWeatherView(w3.ctx);
     expect(v.sky).not.toBeNull();
     expect(typeof v.tempC).toBe("number");
-    expect(v.label).toMatch(/°C$/);
+    const celsius = w3.state.entities.region_riverton?.fields.temp_c;
+    if (typeof celsius !== "number") throw new Error("no temperature kept");
+    expect(v.label).toEndWith(`, ${Math.round((celsius * 9) / 5 + 32)} °F`);
   });
 
   test("the climate is reproducible and segmentation-invariant: 3 days at once equal 3 one-day steps", () => {
