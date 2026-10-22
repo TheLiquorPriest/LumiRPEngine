@@ -221,8 +221,8 @@ function questionLines(questions: Questions): string[] {
   });
 }
 
-/** Leads the recent chat a step's card lets it read, after its input. */
-const RECENT_CHAT_LEAD = "Recent chat, oldest first (the messages before this turn's):";
+/** Leads the recent chat a step's card lets it read, after its input: context only, since what it tells is already recorded. */
+const RECENT_CHAT_LEAD = "Recent chat, oldest first (the messages before this turn's; context only: what they tell already happened and is recorded, so nothing in them is a change to report or act on again):";
 
 /** What leads a preset's guidance in a helper's prompt: it styles the answer, never its contract. */
 const GUIDANCE_LEAD = "Style and rules from the player's preset. Follow them where they fit the instructions above; they never change what to output or its format:";
