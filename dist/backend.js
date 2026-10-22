@@ -66320,11 +66320,11 @@ function appliedEvents(rec, fold, index) {
     if (n.kind === "dropped" && n.messageId === result.id && n.ref && "in" in n.ref)
       skipped.add(refKey(n.ref));
   const recPath = turnPath(rec);
-  const live = rec.post.filter((p) => isLive(p.at, result.parentPath, recPath)).sort((a, b) => a.seq - b.seq).map((p) => ({ seq: p.seq, kind: p.kind, events: p.events.filter((_, i) => !skipped.has(refKey({ in: "post", seq: p.seq, index: i }))) }));
+  const live = rec.post.filter((p) => isLive(p.at, result.parentPath, recPath)).sort((a, b) => a.seq - b.seq).map((p) => ({ seq: p.seq, kind: p.kind, events: p.events.filter((_, i) => !skipped.has(refKey({ in: "post", seq: p.seq, index: i }))), ...p.by ? { by: p.by } : {} }));
   return {
     events: rec.events.filter((_, i) => !skipped.has(refKey({ in: "events", index: i }))),
     post: live.filter((p) => p.kind !== "fix").flatMap((p) => p.events),
-    fixes: live.filter((p) => p.kind === "fix" && p.events.length > 0).map((p) => ({ seq: p.seq, events: p.events }))
+    fixes: live.filter((p) => p.kind === "fix" && p.events.length > 0).map((p) => ({ seq: p.seq, events: p.events, ...p.by ? { by: p.by } : {} }))
   };
 }
 function turnNotes(chain, fold, core, registry, world, state2) {
@@ -66492,7 +66492,7 @@ function derivedChips(chain, fold, keepReport, core, registry, world) {
 `) } : {}, actions: [], expires: "next_send" });
     for (const fix of applied.fixes) {
       const fixed = fixLines(registry, world, state2, fix.events);
-      chips.push({ id: `fix:${m.id}:${m.swipeId}:${fix.seq}`, kind: "fix", messageId: m.id, label: "Corrected", detail: fixed.length > 0 ? fixed.join(" \xB7 ") : "something you haven't come across", actions: [{ id: "undo", label: "Undo", style: "danger" }], expires: "next_send" });
+      chips.push({ id: `fix:${m.id}:${m.swipeId}:${fix.seq}`, kind: "fix", messageId: m.id, label: fix.by?.label ?? "Corrected", detail: fixed.length > 0 ? fixed.join(" \xB7 ") : "something you haven't come across", actions: [{ id: "undo", label: "Undo", style: "danger" }], expires: "next_send" });
     }
     chips.push(...overdueChips(m.id, ctx, state2, world));
   });
@@ -66630,7 +66630,7 @@ function buildGmView(core, observed, registry, minds) {
         return;
       for (const fix of appliedEvents(rec, fold, i).fixes) {
         const clock = clockFixLine(fix.events);
-        edits.push({ messageId: m.id, seq: fix.seq, lines: [...clock ? [clock] : [], ...authorLines(registry, render.world, render.state, fix.events, 12)] });
+        edits.push({ messageId: m.id, seq: fix.seq, lines: [...clock ? [clock] : [], ...authorLines(registry, render.world, render.state, fix.events, 12)], ...fix.by ? { by: fix.by.label } : {} });
       }
     });
     return {
@@ -69922,9 +69922,9 @@ function thisBuild(moduleUrl = import.meta.url) {
   const dir = moduleUrl.replace(/[^/]*$/, "");
   const path = pathOfFileUrl(`${dir}${KIT_FILE}`);
   const core = pathOfFileUrl(`${dir}${CORE_FILE}`);
-  const sha256 = "1d9e0772b04cd0d22146dd040e126caec7a8608d847dcd125ae531d829e9d586";
+  const sha256 = "bb8105fe1afc8eca7dde42e7076595a16efd5ad944bb90a333874e130caa9ddb";
   const tools = ["31de155b25748e794c9fe560150797f2", "d7e9a2e583dc5481df9d8ed8a432a934"].filter((f) => f !== undefined);
-  return { id: "ccdac825", kit: sha256 !== undefined && path !== null && core !== null ? { path, core, sha256, api: KIT_API } : null, tools };
+  return { id: "3806755d", kit: sha256 !== undefined && path !== null && core !== null ? { path, core, sha256, api: KIT_API } : null, tools };
 }
 var BUILD_FILE = "agents/build.json";
 var USER_FILE = "agents.json";
@@ -72910,7 +72910,7 @@ class Runtime {
     this.steps.onCallStart = (userId, purpose) => this.diag.callStart(userId, purpose);
     this.toolSupport = new ToolSupport(this.host);
     this.minds = { host: this.host, registry: this.registry, steps: this.steps, settings: this.settings, presets: this.presets };
-    this.ledger = new LedgerService(this.host, (chatId, userId) => this.resolveEnv(chatId, userId), new LedgerFold(this.registry, { fingerprint: "ccdac825" }), (chatId) => messages.forget(chatId));
+    this.ledger = new LedgerService(this.host, (chatId, userId) => this.resolveEnv(chatId, userId), new LedgerFold(this.registry, { fingerprint: "3806755d" }), (chatId) => messages.forget(chatId));
     this.studio = new StudioBridge(this.host, this.worlds);
     this.worlds.onChange = (worldId, userId) => this.studio.worldChanged(worldId, userId);
     this.agents = new Agents(this.host, options.build ?? thisBuild(), async (userId) => (await this.settings.get(userId)).timeouts.mcpReconnectMs);
@@ -73044,7 +73044,7 @@ class Runtime {
       await this.takeStaged(input.chatId, input.userId, lastUser.id);
     const recorded = lastUser ? (await this.host.chats.messages(input.chatId, input.userId)).find((m) => m.id === lastUser.id)?.metadata[LEDGER_NAMESPACE] : undefined;
     const all2 = [...this.registry.actions.values(), ...Object.values(render.world.actions)].filter((a) => offersAction(render.world, a));
-    const typed = text6.trim() !== "" && !(isRecord(recorded) && typeof recorded.action === "string");
+    const typed = text6.trim() !== "" && !(isRecord(recorded) && typeof recorded.action === "string" && !(recorded.staged === true && recorded.action !== TIMELAPSE_ACTION2));
     const described = typed || text6.trim() !== "" && isRecord(recorded) && recorded.described === true;
     const earlier = lastUser ? before.slice(0, before.indexOf(lastUser)) : before;
     const facts = {
@@ -73246,7 +73246,9 @@ class Runtime {
   }
   async readIntent(bridge, text6, recorded, render, all2, earlier, settings, facts, budget, at2, left) {
     const userId = at2.userId;
-    if (isRecord(recorded) && typeof recorded.action === "string") {
+    const staged = isRecord(recorded) && recorded.staged === true && typeof recorded.action === "string" && recorded.action !== TIMELAPSE_ACTION2 && text6.trim() !== "" ? { action: recorded.action, params: isRecord(recorded.params) ? JSON.parse(JSON.stringify(recorded.params)) : {} } : null;
+    const playStaged = () => bridge.setIntent(text6, staged ? { action: staged.action, params: staged.params, probabilities: { [staged.action]: 1 } } : null);
+    if (isRecord(recorded) && typeof recorded.action === "string" && !staged) {
       const params2 = isRecord(recorded.params) ? JSON.parse(JSON.stringify(recorded.params)) : {};
       const target = recorded.action === TIMELAPSE_ACTION2 ? parseTarget(params2.target) : null;
       const overrides = {};
@@ -73258,7 +73260,7 @@ class Runtime {
     }
     const run2 = runsOf(settings.modelUse, render.world, "interpret", facts, { guidance: at2.guidance })[0];
     if (!run2 || !budget.take()) {
-      bridge.setIntent(text6, null);
+      playStaged();
       return;
     }
     const mayKnow = (id) => povMayKnow(this.registry, render.world, render.state, id);
@@ -73295,11 +73297,21 @@ ${this.trackWords(render.world, render.state)}`, links: this.sceneLinks(render.w
       result = await interpret(this.steps, text6, context, catalog, run2.config, userId, budget.signal, run2.template ? renderTemplate(run2.template.template, { world: render.world.name, pov: render.state.entities[render.world.pov]?.name ?? render.world.pov }) : undefined, lore2, run2.guidance);
     }
     if (result === null) {
+      if (staged) {
+        playStaged();
+        return;
+      }
       this.host.log("warn", `[LumiRPEngine] interpret: couldn't read the player's action; the turn runs as plain roleplay`, userId);
       bridge.setOffer(text6, null);
       bridge.setNext(text6, null);
       bridge.setUnread(text6);
       return;
+    }
+    if (staged) {
+      const { thing: _thing, ...read } = result;
+      const then2 = result.then ?? (result.action === TIMELAPSE_ACTION2 ? result.params : undefined);
+      const own2 = result.action && result.action !== TIMELAPSE_ACTION2 && result.action !== staged.action ? [{ action: result.action, params: result.params, text: "", ...result.thing ? { thing: result.thing } : {} }] : [];
+      result = { ...read, action: staged.action, params: staged.params, probabilities: { [staged.action]: 1 }, ...then2 ? { then: then2 } : {}, queue: [...own2, ...result.queue ?? []] };
     }
     if (result.reason)
       this.host.log("info", `[LumiRPEngine] interpret: no action (${result.reason})`, userId);
@@ -73313,7 +73325,7 @@ ${this.trackWords(render.world, render.state)}`, links: this.sceneLinks(render.w
       this.host.log("info", `[LumiRPEngine] interpret: ${result.action ?? "no action"} carried an unrevealed secret; played as roleplay`, userId);
       bridge.setOffer(text6, null);
       bridge.setNext(text6, null);
-      bridge.setIntent(text6, null);
+      playStaged();
       return;
     }
     const chipText = (piece) => offeredNext(this.registry, render.world, render.state, piece, text6, secrets) ?? "";
@@ -74350,7 +74362,7 @@ ${rules}` });
       if (isRecord(own2) && typeof own2.action === "string")
         return;
       const words5 = (m.swipes[m.swipeId] ?? m.content).trim() !== "";
-      const intent2 = { action: staged.action, params: staged.params, source: staged.source, ...words5 ? { described: true } : {} };
+      const intent2 = { action: staged.action, params: staged.params, source: staged.source, staged: true, ...words5 ? { described: true } : {} };
       await this.host.chats.writeMetadata(chatId, messageId, { ...m.metadata, [LEDGER_NAMESPACE]: { ...isRecord(own2) ? own2 : {}, ...intent2 } }, userId);
       await this.staged.set(chatId, userId, null);
       this.push.changed(chatId, userId);
@@ -75036,7 +75048,7 @@ class Dispatcher {
               throw new RequestError("validation", refused.rejection.reason);
             if (res.events.length === 0)
               throw new RequestError("validation", "That changes nothing.");
-            const written = await this.write(r.chatId, userId, { kind: "post", id: this.nextId(), target: "head", entry: { kind: "fix", events: res.events } });
+            const written = await this.write(r.chatId, userId, { kind: "post", id: this.nextId(), target: "head", entry: { kind: "fix", events: res.events, by: { action: r.action, label: neutralizeMacros(label) } } });
             reply("lre.action", { applied: true, pending: written.pending });
             return;
           }

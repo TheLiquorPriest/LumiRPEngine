@@ -48662,8 +48662,9 @@ function EditsLog(props) {
         flush: true,
         children: /* @__PURE__ */ u3(List, {
           children: gm.edits.map((e3) => /* @__PURE__ */ u3(ListRow, {
-            icon: "edit",
-            title: e3.lines.join(" · ") || "Bookkeeping",
+            icon: e3.by ? "user" : "edit",
+            title: e3.by ?? (e3.lines.join(" · ") || "Bookkeeping"),
+            subtitle: e3.by ? `The player's action: ${e3.lines.join(" · ")}` : undefined,
             id: `${e3.messageId} · ${e3.seq}`
           }, `${e3.messageId}:${e3.seq}`, false, undefined, this))
         }, undefined, false, undefined, this)
