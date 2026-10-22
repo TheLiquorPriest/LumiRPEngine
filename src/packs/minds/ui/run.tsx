@@ -159,7 +159,7 @@ export function PinnedLore(props: { gm: GmView; chatId: string; who: EntityId; s
   const [pins, setPins] = useState<LorePinsView | null>(null);
   useEffect(() => {
     void props.send({ type: "lre.lore", op: "pins", chatId: props.chatId }).then((m) => {
-      if (m.type === "lre.result" && m.request === "lre.lore") setPins(m.body.pins ?? { characters: {}, places: {} });
+      if (m.type === "lre.result" && m.request === "lre.lore") setPins(m.body.pins ?? { characters: {}, places: {}, steps: {} });
     });
   }, [props.chatId]);
   const own = pins?.characters[props.who] ?? [];

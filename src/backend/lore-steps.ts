@@ -1,8 +1,8 @@
 // The world's lore for RPEngine's own helpers (DESIGN §5.4). Each step run gets a `StepLore`: its
 // lore policy and token budget, the reader it searches with (the step's purpose decides what it
-// may read, and `engine/lore.ts` enforces it), the lore pinned where the player character is
-// (§24.5, given first within the budget), the prefetch built from the step's own inputs at no
-// extra call, the lookups its model may ask for, and the trace the inspector shows (§6.5).
+// may read, and `engine/lore.ts` enforces it), the lore pinned to the step and where the player
+// character is (§24.5, given first within the budget), the prefetch built from the step's own
+// inputs at no extra call, the lookups its model may ask for, and the trace the inspector shows (§6.5).
 //
 // Lookups reach the model as native tools (`lore_search`, `lore_get`, `lore_list`) or, on a
 // connection seen refusing tools, as the two-phase `{"need": [...]}` form. The host has no tool-role
@@ -202,13 +202,14 @@ export class StepLore {
   }
 
   /**
-   * The lore pinned where the player character is (DESIGN §24.5), given before any search, nearest
-   * first, within the step's lore tokens: each cut at a word to what is left, or left out once not
-   * even its title and a few words fit. An entry this step may not read isn't given. The trace lists
-   * what the player may know of, marked pinned, and says what was cut or left out.
+   * Pinned lore (DESIGN §24.5): the step's own, or what is pinned where the player character is,
+   * given before any search, nearest first, within the step's lore tokens: each cut at a word to what
+   * is left, or left out once not even its title and a few words fit. Which pins a step reads, its
+   * policy aside, is the caller's. An entry this step may not read isn't given. The trace lists what
+   * the player may know of, marked pinned, and says what was cut or left out.
    */
   pin(texts: readonly PinnedText[]): void {
-    if (texts.length === 0 || this.setting.policy === "none") return;
+    if (texts.length === 0) return;
     const { reg, world, state } = this.reader;
     const given = fitPins(this.reader, texts, this.setting.tokens - this.pinTokens, (entry) => loreReadable(reg, world, state, entry, this.purpose, this.effects, this.gateOpen));
     let cut = 0;

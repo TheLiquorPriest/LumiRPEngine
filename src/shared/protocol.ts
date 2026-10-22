@@ -17,7 +17,7 @@ import type { EntityUpgradePick, EventRef, PathHash, ResolveScope, TimeControl, 
 import type { ExtractionType, UserSettings } from "./settings";
 import type { Activity, DiagRecord } from "./diagnostics";
 import type { GmView, SheetSectionView, StateView } from "./state-view";
-import type { AdjudicationDef, FacetId, FacetValueId, KindDef, LifeStateId, LorePin, MapDisplay, RelationTypeDef, RevisionNote, WorldDoc, WorldIndex } from "./world";
+import type { AdjudicationDef, FacetId, FacetValueId, KindDef, LifeStateId, LorePin, MapDisplay, RelationTypeDef, RevisionNote, StepPurpose, WorldDoc, WorldIndex } from "./world";
 
 export const PROTOCOL_VERSION = 1;
 
@@ -550,10 +550,11 @@ export interface LorePinView {
   secret: boolean;
 }
 
-/** Every pin of a world, read now (`lre.lore pins`), by character and by place, in order. */
+/** Every pin of a world, read now (`lre.lore pins`), by character, by place and by step, in order. */
 export interface LorePinsView {
   characters: Record<EntityId, LorePinView[]>;
   places: Record<PlaceId, LorePinView[]>;
+  steps: Partial<Record<StepPurpose, LorePinView[]>>;
 }
 
 /**
@@ -706,7 +707,8 @@ export interface ResultBodies {
   "lre.state.resync": { accepted: true };
   "lre.restart": { start: boolean };
   "lre.page": { accepted: true };
-  "lre.action": { messageId: MessageId };
+  /** The player's message the action plays as; or, for a mechanical action sent with no words (`ActionDef.mechanical`), its bookkeeping recorded on the head with no message and no reply (`pending` while a reply is in flight). */
+  "lre.action": { messageId: MessageId } | { applied: true; pending: boolean };
   "lre.chip": { applied: boolean; pending: boolean };
   "lre.view.open": { materialized: boolean; pending: boolean };
   "lre.fix": { pending: boolean };

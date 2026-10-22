@@ -27,7 +27,12 @@ export function usePlayerControls(chatId: ChatId, state: StateView): PlayerContr
       // A tap while one is in flight is dropped (useBusy), so it answers false rather than never.
       if (busy) return Promise.resolve(false);
       const { promise, resolve } = Promise.withResolvers<boolean>();
-      run(async () => resolve((await app.request(actionRequest(chatId, body))) !== null));
+      run(async () => {
+        const result = await app.request(actionRequest(chatId, body));
+        // Bookkeeping recorded at once (`mechanical`) waits for a reply already under way, as a ✎ fix does.
+        if (result && "pending" in result && result.pending) app.toast("Saved — it applies when the reply finishes.", "info");
+        resolve(result !== null);
+      });
       return promise;
     },
   };

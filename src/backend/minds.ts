@@ -35,7 +35,7 @@ import { capText } from "../packs/minds/core/edit";
 import { fidelityOf, pickMinds } from "../packs/minds/core/fidelity";
 import { faded, readCharacter, readSlice, salienceNow } from "../packs/minds/core/state";
 import type { HostMessage, HostPort } from "./host";
-import { readPins } from "./lore-pins";
+import { pinReader } from "./lore-pins";
 import { consolidateContext, memoryContext, mindContext, povLabel, type GivenLore, type MindContextReport, type MindScope } from "./minds-context";
 import type { PresetBinding } from "./preset-binding";
 import type { SettingsStore } from "./settings-store";
@@ -263,9 +263,10 @@ export async function runMinds(deps: MindsDeps, input: RunMindsInput): Promise<R
   const messages = input.messages ?? (await chatMessages(deps, input.chatId, userId));
   const reads = settings.minds.reads;
   const phase = input.phase ?? (input.moment.kind === "beat" ? "skip" : "pre");
-  // The lore pinned to each of them and to where they are (DESIGN §24.5), each book entry read once, when minds read it.
-  const refs = new Map(input.who.map((who) => [who, reads.pinned.on ? pinsFor(world, placeOfEntity(state, who), who) : []]));
-  const texts = new Map((await readPins(deps.host, world, [...refs.values()].flat(), userId)).map((t) => [t.key, t]));
+  // The lore pinned to each of them, to every mind (the mind step's) and to where they are (DESIGN
+  // §24.5), each book entry and whole book read once, when minds read it.
+  const refs = new Map(input.who.map((who) => [who, reads.pinned.on ? pinsFor(world, placeOfEntity(state, who), who, "mind") : []]));
+  const pinsOf = await pinReader(deps.host, world, [...refs.values()].flat(), userId);
   // What the inspector may name of a pin (§6.5): an entry the player may read, by a title that says
   // nothing the player doesn't know; a secret, or anything only the character may read, isn't listed.
   const open = loreGateReader(reg, world, state);
@@ -298,10 +299,7 @@ export async function runMinds(deps: MindsDeps, input: RunMindsInput): Promise<R
     const kept = input.kept?.get(who);
     if (kept) return { data: kept, trace: { ...base, outcome: "recorded", ms: 0, tokens: 0, prompt: prompt.source }, entry: { entity: who, name, level, status: "recorded", ms: 0, tokens: 0 } };
     input.progress?.({ entity: who, name, level, status: "thinking" });
-    const pinned = (refs.get(who) ?? []).flatMap((r) => {
-      const t = texts.get(r.key);
-      return t ? [{ ...t, on: r.on }] : [];
-    });
+    const pinned = pinsOf(refs.get(who) ?? []);
     const scope: MindScope = { reg, world, state, who, memory, messages, hideJson: settings.hideJsonBlocks, reads, moment: input.moment, pinned };
     const report: MindContextReport = { pinned: [], activated: [] };
     const usage = { tokens: 0 };

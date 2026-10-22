@@ -491,6 +491,8 @@ export function registerHoldings(r: FinanceRegistry): void {
     label: "Buy or sell investments",
     description: "Buy or sell investments: stocks, funds, bonds, crypto.",
     pack: "economy",
+    // A trade is the player's own bookkeeping: a panel tap records it at once.
+    mechanical: true,
     params: {
       side: { type: "text", label: "Buy or sell", optional: true },
       holding: { type: "ref", ref: "holding", optional: true },

@@ -60,7 +60,7 @@ export const PART_INFO: Readonly<Record<WorldPart, { label: string; hint: string
   ruleset: { label: "Ruleset", hint: "Character fields, checks, levels, the sheet and combat", icon: "shield" },
   loreIndex: { label: "Lore lookup table", hint: "Terms and topics that lead to lore entries", icon: "search" },
   minds: { label: "Minds", hint: "How closely characters think, what they remember, and their prompts", icon: "sparkle" },
-  lorePins: { label: "Pinned lore", hint: "Lore every call for a character, or at a place, always reads", icon: "pin" },
+  lorePins: { label: "Pinned lore", hint: "Lore every call for a character, at a place, or of a step always reads", icon: "pin" },
   routineSettings: { label: "Routines and the story", hint: "What routines are at each level, how firmly they hold against the story, and who invites whom", icon: "route" },
 };
 

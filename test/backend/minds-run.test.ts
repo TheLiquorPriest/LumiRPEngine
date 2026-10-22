@@ -1,7 +1,9 @@
 // GM → Minds on demand and lore pins on the fake host (DESIGN §24.5, §24.9): Run minds now records
 // the chosen characters' minds from the chat so far as one GM edit with its Undo; lore pinned to a
 // character and to a place reaches that character's mind and every helper and mind call there, and
-// a secret pinned there reaches none of them; a pin to a missing entry is linted.
+// a secret pinned there reaches none of them; a whole book pinned is read as the book is at each
+// call; a step's pins reach every call of that step and no other, the mind step's every mind; a pin
+// to a missing entry is linted.
 
 import { describe, expect, test } from "bun:test";
 import type { QuietRequest } from "../../src/backend/host";
@@ -150,9 +152,73 @@ describe("lore pins", () => {
     expect(records.flatMap((r) => r.lore ?? []).find((t) => t.step === "interpret")?.entries.filter((e) => e.pinned).map((e) => e.title)).toEqual(["House rules", "Town notice"]);
   });
 
+  test("a whole book pinned is read as the book is at each call: its switched-on entries, one added after pinning included, never one the engine wrote", async () => {
+    const rig = new Rig({ shipped: true, minds: true });
+    fakeModels(rig, { text: "TURN-MARK" });
+    const user = rig.host.userId;
+    const entry = (comment: string, content: string, disabled = false, extensions: JsonObject = {}) => ({ comment, content, keys: [], disabled, constant: false, position: 0, depth: 4, role: null, order: 100, extensions });
+    const chapters = await rig.host.books.create("Chat chapters", "", user);
+    await rig.host.books.createEntry(chapters, entry("Chapter 1", "CHAPTER-1: they met at the marina."), user);
+    await rig.host.books.createEntry(chapters, entry("Draft", "OFF-MARK: a chapter not finished.", true), user);
+    // A section the engine wrote, which holds what minds give the narrator, stays out whatever pins its book.
+    const sections = await rig.host.books.create("Sections", "", user);
+    await rig.host.books.createEntry(sections, entry("LRE · Minds", "ENGINE-MARK: another mind's depiction.", false, { lumi_rp_engine: { slot: "minds" } }), user);
+    const chatId = await alderChat(rig, async (worldId) => {
+      rig.body(await rig.send({ type: "lre.editor", op: "set", worldId, base: null, part: "lorePins", value: { characters: { danny_okafor: [{ book: chapters }, { book: sections }] }, places: {} } }));
+    });
+    const danny = (): string => mindCalls(rig).filter((c) => nameOf(c) === "Danny Okafor").at(-1)?.messages[1]?.content ?? "";
+    await rig.turn(chatId, "Morning, Danny.", "He nods.");
+    expect(danny()).toContain("CHAPTER-1");
+    expect(danny()).not.toContain("OFF-MARK");
+    // The next chapter is written into the book: no pin changes, no commit and no Upgrade.
+    await rig.host.books.createEntry(chapters, entry("Chapter 2", "CHAPTER-2: the storm came in."), user);
+    await rig.turn(chatId, "What happened next?", "The wind picks up.");
+    expect(danny()).toContain("CHAPTER-1");
+    expect(danny()).toContain("CHAPTER-2");
+    expect(danny()).not.toContain("OFF-MARK");
+    expect(JSON.stringify(rig.host.quietCalls)).not.toContain("ENGINE-MARK");
+  });
+
+  test("a step's pins reach every call of that step, whatever its lore setting, and no other step's", async () => {
+    const rig = new Rig({ shipped: true, minds: true });
+    fakeModels(rig, { text: "TURN-MARK" });
+    rig.body(await rig.send({ type: "lre.settings.set", patch: { modelUse: { preset: "full" } } }));
+    rig.body(await rig.send({ type: "lre.settings.set", patch: { modelUse: { preset: "custom", steps: { interpret: { enabled: true, signals: ["always"], lore: { policy: "none", tokens: 400 } } } } } }));
+    const chatId = await alderChat(rig, async (worldId) => {
+      rig.body(await rig.send({ type: "lre.editor", op: "put", worldId, base: null, collection: "lore", id: "step_note", value: { id: "step_note", title: "Step note", content: "STEP-PIN: typed words mean what the player says.", keys: [], links: [] } }));
+      rig.body(await rig.send({ type: "lre.editor", op: "set", worldId, base: null, part: "lorePins", value: { characters: {}, places: {}, steps: { interpret: [{ lore: "step_note" }] } } }));
+    });
+    await rig.turn(chatId, "I walk to the window and wait.", "The kettle clicks off.");
+    const interpret = (c: QuietRequest): boolean => (c.messages[0]?.content ?? "").includes("You map a player's typed input");
+    expect(rig.host.quietCalls.find(interpret)?.messages[0]?.content).toContain("STEP-PIN");
+    const others = rig.host.quietCalls.filter((c) => !interpret(c));
+    expect(others.length).toBeGreaterThan(0);
+    for (const c of others) expect(JSON.stringify(c.messages)).not.toContain("STEP-PIN");
+  });
+
+  test("the mind step's pins reach every mind, after what is pinned to each, and no helper", async () => {
+    const rig = new Rig({ shipped: true, minds: true });
+    fakeModels(rig, { text: "TURN-MARK" });
+    const chatId = await alderChat(rig, async (worldId) => {
+      const put = async (id: string, value: JsonObject): Promise<void> => void rig.body(await rig.send({ type: "lre.editor", op: "put", worldId, base: null, collection: "lore", id, value }));
+      await put("danny_ledger", { id: "danny_ledger", title: "Danny's ledger", content: "DANNY-PIN: Danny owes the bank three months.", keys: [], links: [] });
+      await put("every_mind", { id: "every_mind", title: "Town talk", content: "EVERY-MIND-PIN: the harbor festival is Saturday.", keys: [], links: [] });
+      rig.body(await rig.send({ type: "lre.editor", op: "set", worldId, base: null, part: "lorePins", value: { characters: { danny_okafor: [{ lore: "danny_ledger" }] }, places: {}, steps: { mind: [{ lore: "every_mind" }] } } }));
+    });
+    await rig.turn(chatId, "I walk to the window and wait.", "The kettle clicks off.");
+    const minds = new Map(mindCalls(rig).map((c) => [nameOf(c), c.messages[1]?.content ?? ""]));
+    for (const name of ["Danny Okafor", "Priya Nair"]) expect(minds.get(name)).toContain("EVERY-MIND-PIN");
+    const danny = minds.get("Danny Okafor") ?? "";
+    expect(danny.indexOf("DANNY-PIN")).toBeGreaterThanOrEqual(0);
+    expect(danny.indexOf("DANNY-PIN")).toBeLessThan(danny.indexOf("EVERY-MIND-PIN"));
+    const helpers = rig.host.quietCalls.filter((c) => !MIND.test(c.messages[0]?.content ?? ""));
+    expect(helpers.length).toBeGreaterThan(0);
+    for (const c of helpers) expect(JSON.stringify(c.messages)).not.toContain("EVERY-MIND-PIN");
+  });
+
   test("a pin to an entry the world doesn't have is linted where it is", () => {
     const world = newWorld("w_pins", "Pins");
-    const issues = lint({ ...world, lorePins: { characters: { [world.pov]: [{ lore: "no_such_entry" }] }, places: {} } });
+    const issues = lint({ ...world, lorePins: { characters: { [world.pov]: [{ lore: "no_such_entry" }] }, places: {}, steps: {} } });
     expect(issues.filter((i) => i.code === "pin_missing").map((i) => [i.path, i.severity])).toEqual([[`lorePins.characters.${world.pov}`, "warning"]]);
   });
 });

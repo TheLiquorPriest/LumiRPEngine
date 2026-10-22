@@ -465,7 +465,9 @@ function StepCard(props: { purpose: StepPurpose; config: StepConfig; helper: Hel
               <Field label="Lore">
                 <Seg<LorePolicy> label="Lore" value={lore.policy} options={LORE_POLICY} disabled={busy} onChange={(policy) => update({ ...config, lore: { ...lore, policy } })} />
               </Field>
-              {lore.policy !== "none" ? <NumberStepper label="Lore tokens" value={lore.tokens} min={0} step={100} integer disabled={busy} onChange={(tokens) => update({ ...config, lore: { ...lore, tokens } })} /> : null}
+              {/* Lore pinned to the step (Build → Pinned lore) is read within these tokens whatever the policy, so they stay settable with lore off. */}
+              <NumberStepper label="Lore tokens" value={lore.tokens} min={0} step={100} integer disabled={busy} onChange={(tokens) => update({ ...config, lore: { ...lore, tokens } })} />
+              {lore.policy === "none" ? <div class="lre-small lre-muted">With lore off it reads only what is pinned to it in Build → Pinned lore, within these tokens.</div> : null}
               {lore.policy === "lookup" || lore.policy === "prefetch+lookup" ? (
                 <Field label="Lookups by">
                   <Seg<LoreTransport> label="Lookups by" value={lore.transport ?? "auto"} options={LORE_TRANSPORT} disabled={busy} onChange={(transport) => update({ ...config, lore: { ...lore, transport } })} />
