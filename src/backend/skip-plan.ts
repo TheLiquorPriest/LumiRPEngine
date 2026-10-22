@@ -5,15 +5,16 @@
 // replay never asks again. A Continue inside a planned span reuses the plan. Anyone whose call fails or
 // runs out of time isn't planned: the event carries a note for the GM, and the skip still runs.
 
-import type { UserId } from "../shared/ids";
+import type { ChatId, UserId } from "../shared/ids";
 import type { JsonObject } from "../shared/json";
 import type { LedgerEvent } from "../shared/ledger";
 import { ROUTINE_EVENTS, routineSettingsOf, type SkipPlan } from "../shared/routines";
-import type { Limit } from "../shared/minds";
+import type { Limit, MindsReads } from "../shared/minds";
 import { firedTimeout, within } from "../shared/timeouts";
 import type { WorldDoc } from "../shared/world";
 import type { Registry } from "../engine/registry-impl";
 import { isGone, kindIs } from "../engine/scope";
+import { pinsFor } from "../engine/lore-pins";
 import type { WorldState } from "../engine/state";
 import type { InterpretOutput } from "../engine/steps";
 import { TimelapseRun } from "../engine/time";
@@ -23,6 +24,10 @@ import { checkSkipPlan, skipPlanBrief, skipPlanText } from "../packs/castlife/co
 import { skipLifeOf, skipPlanOf } from "../packs/castlife/core/routines";
 import { livesPlans } from "../packs/castlife/core/commitments";
 import { povSafe } from "../packs/castlife/core/usual";
+import type { HostPort } from "./host";
+import { readPins } from "./lore-pins";
+import { chatBefore } from "./minds";
+import { pinnedLines, recentChat } from "./minds-context";
 import type { Steps } from "./steps";
 
 /** The most of the latest reply the call reads. */
@@ -37,6 +42,7 @@ export const SKIP_PLAN_SYSTEM = [
 ].join("\n");
 
 export interface SkipPlanInput {
+  chatId: ChatId;
   userId: UserId;
   world: WorldDoc;
   /** The state the turn's plan starts from. */
@@ -46,6 +52,9 @@ export interface SkipPlanInput {
   /** The latest reply, and the Journal's recent lines (the chat's memory as the player may read it). */
   reply: string;
   journal: readonly string[];
+  /** What minds read (Settings → Minds): the `skip` step's pins within its pinned lore limit, and Recent chat while it's on. */
+  reads: MindsReads;
+  hideJson: boolean;
   /** The engine run's clock, and the call's own limit (`skipPlanMs`). */
   signal: AbortSignal;
   limit: Limit;
@@ -55,6 +64,8 @@ export interface SkipPlanDeps {
   registry: Registry;
   steps: Steps;
   log: (message: string) => void;
+  /** Where the lore pinned to the `skip` step and the recent chat come from (DESIGN §24.5). */
+  host: Pick<HostPort, "books" | "log" | "chats">;
 }
 
 /**
@@ -80,6 +91,13 @@ export async function planSkip(deps: SkipPlanDeps, input: SkipPlanInput): Promis
   const reply = input.reply.slice(-REPLY_CAP);
   const told = safe(reply) ? reply : "";
   const journal = input.journal.filter(safe);
+  // The `skip` step's pins, read as no one as the beats' call reads them, so a secret entry stays out.
+  const pinned = pinnedLines({ reg: deps.registry, world: input.world, state: input.state, reads: input.reads, pinned: await readPins(deps.host, input.world, pinsFor(input.world, null, undefined, ["skip"]), input.userId) }, "skip");
+  // Recent chat while minds read it: the chat before the skip's turn, less the latest reply the call
+  // already reads, each line held to the same check as the journal's.
+  const before = input.reads.history.on ? chatBefore(await deps.host.chats.messages(input.chatId, input.userId).catch(() => []), true) : [];
+  const chat = recentChat({ reads: input.reads, hideJson: input.hideJson, history: told !== "" && before.at(-1)?.isUser === false ? before.slice(0, -1) : before }).filter(safe);
+  const extra = [pinned.length > 0 ? `Pinned lore:\n${pinned.join("\n")}` : "", chat.length > 0 ? `Recent chat (as the player sees it):\n${chat.join("\n")}` : ""].filter((part) => part !== "");
   const signal = within(input.signal, "skipPlanMs", input.limit);
   const groups = routineSettingsOf(input.world).skipPlanCalls === "parallel" ? people.map((id) => [id]) : [people];
   // Each call is told only its own people; the calls run at once, each inside the same limit.
@@ -88,7 +106,7 @@ export async function planSkip(deps: SkipPlanDeps, input: SkipPlanInput): Promis
       const brief = skipPlanBrief(ctx, group, from, to);
       const failure = { reason: "" };
       // Spared: a failed plan leaves its people to their basic needs, and the skip runs without it.
-      const raw = signal.aborted ? null : await deps.steps.helperJson("skip", SKIP_PLAN_SYSTEM, skipPlanText(ctx, brief, told, journal), null, input.userId, signal, { failure, spared: true });
+      const raw = signal.aborted ? null : await deps.steps.helperJson("skip", SKIP_PLAN_SYSTEM, [skipPlanText(ctx, brief, told, journal), ...extra].join("\n\n"), null, input.userId, signal, { failure, spared: true });
       if (raw !== null) return { people: group.length, checked: checkSkipPlan(ctx, brief, raw), why: null };
       const fired = firedTimeout(signal);
       return { people: group.length, checked: null, why: fired ? fired.message : failure.reason || "the call didn't answer" };

@@ -916,7 +916,7 @@ export class Runtime implements TurnHooks {
         start.applyAll(bridge.prePlan(text));
         const journal = recentLines(input.core, input.observed, target < 0 ? input.observed.length : target, this.registry);
         const log = (message: string): void => this.host.log("info", `[LumiRPEngine] plan ${p.generationId.slice(0, 8)}: ${message}`, input.userId);
-        bridge.setSkipPlan(text, await planSkip({ registry: this.registry, steps: this.steps, log }, { userId: input.userId, world: from.world, state: start.state, intent, runSeed: bridge.runSeed, reply: lastReply ? (lastReply.swipes[lastReply.swipeId] ?? "") : "", journal, signal: budget.signal, limit: settings.timeouts.skipPlanMs }));
+        bridge.setSkipPlan(text, await planSkip({ registry: this.registry, steps: this.steps, log, host: this.host }, { chatId: input.chatId, userId: input.userId, world: from.world, state: start.state, intent, runSeed: bridge.runSeed, reply: lastReply ? (lastReply.swipes[lastReply.swipeId] ?? "") : "", journal, reads: settings.minds.reads, hideJson: settings.hideJsonBlocks, signal: budget.signal, limit: settings.timeouts.skipPlanMs }));
       }
     }
     // A timelapse with minds on is a time skip (DESIGN §24.7): its beats and the minds at them are

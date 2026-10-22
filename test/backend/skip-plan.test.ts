@@ -15,6 +15,7 @@ import { Working } from "../../src/engine/working";
 import type { JsonObject } from "../../src/shared/json";
 import type { LedgerEvent } from "../../src/shared/ledger";
 import { ROUTINE_EVENTS, routineSettingsOf, type SkipPlan, type SkipPlanCalls } from "../../src/shared/routines";
+import { DEFAULT_MIND_READS } from "../../src/shared/minds";
 import type { WorldDoc } from "../../src/shared/world";
 import { ALL_PACKS, STARTER_WORLDS } from "../../src/packs/index";
 import { FakeHost } from "../support/fake-host";
@@ -34,8 +35,8 @@ const follow = (skips: "model" | "stay"): LedgerEvent => ({ type: ROUTINE_EVENTS
 
 // ---------------------------------------------------------------- through the whole backend
 
-/** A Port Alder chat after one ordinary turn, with Danny's skip planned by the model; `plan` answers the skip plan call. */
-async function alder(plan: (req: QuietRequest) => string): Promise<{ rig: Rig; chatId: string; calls: () => number }> {
+/** A Port Alder chat after one ordinary turn, with Danny's skip planned by the model; `plan` answers the skip plan call, and `setup` edits the world first. */
+async function alder(plan: (req: QuietRequest) => string, setup?: (rig: Rig, worldId: string) => Promise<void>): Promise<{ rig: Rig; chatId: string; calls: () => number }> {
   const rig = new Rig({ shipped: true });
   let calls = 0;
   rig.host.quietReply = (req: QuietRequest) => {
@@ -46,6 +47,10 @@ async function alder(plan: (req: QuietRequest) => string): Promise<{ rig: Rig; c
     return (req.messages[0]?.content ?? "").includes(INTERPRET_MARK) ? JSON.stringify(NONE) : "{}";
   };
   const worldId = await rig.newWorld("Port Alder", "modern_slice_of_life");
+  if (setup) {
+    await setup(rig, worldId);
+    rig.body(await rig.send({ type: "lre.world", op: "commit", worldId, base: null }));
+  }
   const chatId = rig.host.createChat("Morning.");
   rig.body(await rig.send({ type: "lre.world", op: "attach", worldId, chatId }));
   await rig.turn(chatId, "I look around the shop.", "The shop is quiet.");
@@ -101,6 +106,46 @@ describe("a timelapse with someone the model plans", () => {
     expect(events.find((e) => e.type === "timelapse")).toMatchObject({ from: before.state.clock, to: before.state.clock + 120 });
     expect(state.clock).toBe(before.state.clock + 120);
   });
+
+  /** The part of a plan call's input under `title`, which runs to the next blank line. */
+  const partOf = (prompt: string, title: string): string => prompt.split("\n\n").find((part) => part.startsWith(`${title}\n`)) ?? "";
+
+  test("the lore pinned to the time-skip step reaches the plan's input, read as no one, so a secret entry pinned there stays out", async () => {
+    let prompt = "";
+    const { rig, chatId } = await alder(
+      (req) => {
+        prompt = req.messages[1]?.content ?? "";
+        return JSON.stringify({ plans: [] });
+      },
+      async (rig, worldId) => {
+        const put = async (id: string, value: JsonObject) => rig.body(await rig.send({ type: "lre.editor", op: "put", worldId, base: null, collection: "lore", id, value }));
+        await put("ferry_week", { id: "ferry_week", title: "Ferry week", content: "FERRY-MARK: the ferry runs late all week.", keys: [], links: [] });
+        await put("marina_debt", { id: "marina_debt", title: "The marina debt", content: "DEBT-MARK: Danny owes the marina.", keys: [], links: [], secret: true, gate: "false", audience: [] });
+        rig.body(await rig.send({ type: "lre.editor", op: "set", worldId, base: null, part: "lorePins", value: { characters: {}, places: {}, steps: { skip: [{ lore: "ferry_week" }, { lore: "marina_debt" }] } } }));
+      },
+    );
+    await lapse(rig, chatId);
+    const pinned = partOf(prompt, "Pinned lore:");
+    expect(pinned).toContain("FERRY-MARK: the ferry runs late all week.");
+    expect(prompt).not.toContain("DEBT-MARK");
+  });
+
+  test("Recent chat reaches the plan's input while minds read it: the chat before the skip's turn, less the latest reply it reads already; off by default, none", async () => {
+    let prompt = "";
+    const { rig, chatId } = await alder((req) => {
+      prompt = req.messages[1]?.content ?? "";
+      return JSON.stringify({ plans: [] });
+    });
+    await lapse(rig, chatId);
+    expect(prompt).not.toContain("Recent chat");
+    rig.body(await rig.send({ type: "lre.settings.set", patch: { minds: { reads: { history: { on: true } } } } }));
+    await lapse(rig, chatId);
+    const recent = partOf(prompt, "Recent chat (as the player sees it):").split("\n").slice(1);
+    expect(recent).toEqual(expect.arrayContaining(["Player: I look around the shop.", "Story: The shop is quiet."]));
+    expect(recent.indexOf("Player: I look around the shop.")).toBeLessThan(recent.indexOf("Story: The shop is quiet."));
+    expect(partOf(prompt, "The latest reply:")).toBe("The latest reply:\nTwo hours go by.");
+    expect(recent).not.toContain("Story: Two hours go by.");
+  });
 });
 
 // ---------------------------------------------------------------- the planner on its own
@@ -126,7 +171,7 @@ async function plan(world: WorldDoc, state: WorldState, answer: JsonObject): Pro
     return JSON.stringify(answer);
   };
   const intent = { action: "timelapse", params: { target: { type: "duration", minutes: 120 } }, probabilities: { timelapse: 1 } };
-  const event = await planSkip({ registry: reg, steps: new Steps(host, new CallMeter()), log: () => {} }, { userId: host.userId, world, state, intent, runSeed: "seed", reply: "", journal: [], signal: new AbortController().signal, limit: 60_000 });
+  const event = await planSkip({ registry: reg, steps: new Steps(host, new CallMeter()), log: () => {}, host }, { chatId: "chat", userId: host.userId, world, state, intent, runSeed: "seed", reply: "", journal: [], reads: DEFAULT_MIND_READS, hideJson: true, signal: new AbortController().signal, limit: 60_000 });
   return { event, calls };
 }
 
@@ -186,7 +231,7 @@ describe("the skip plan's checks", () => {
       throw new Error("the provider refused");
     };
     const intent = { action: "timelapse", params: { target: { type: "duration", minutes: 7 * 60 } }, probabilities: { timelapse: 1 } };
-    const event = await planSkip({ registry: reg, steps: new Steps(host, new CallMeter()), log: () => {} }, { userId: host.userId, world, state: w.state, intent, runSeed: "seed", reply: "", journal: [], signal: new AbortController().signal, limit: 60_000 });
+    const event = await planSkip({ registry: reg, steps: new Steps(host, new CallMeter()), log: () => {}, host }, { chatId: "chat", userId: host.userId, world, state: w.state, intent, runSeed: "seed", reply: "", journal: [], reads: DEFAULT_MIND_READS, hideJson: true, signal: new AbortController().signal, limit: 60_000 });
     if (!event) throw new Error("no plan recorded");
     expect(plannedOf(event)).toEqual([]);
     w.applyAll([event]);
@@ -222,7 +267,7 @@ async function planEach(world: WorldDoc, state: WorldState, stamp: (minutes: num
     return JSON.stringify({ plans: named.map((id) => ({ entity: id, blocks: [block(stamp(10), stamp(40), places[id] ?? "")] })) });
   };
   const intent = { action: "timelapse", params: { target: { type: "duration", minutes: 120 } }, probabilities: { timelapse: 1 } };
-  const event = await planSkip({ registry: reg, steps: new Steps(host, new CallMeter()), log: () => {} }, { userId: host.userId, world, state, intent, runSeed: "seed", reply: "", journal: [], signal: new AbortController().signal, limit: 60_000 });
+  const event = await planSkip({ registry: reg, steps: new Steps(host, new CallMeter()), log: () => {}, host }, { chatId: "chat", userId: host.userId, world, state, intent, runSeed: "seed", reply: "", journal: [], reads: DEFAULT_MIND_READS, hideJson: true, signal: new AbortController().signal, limit: 60_000 });
   return { event, calls };
 }
 
