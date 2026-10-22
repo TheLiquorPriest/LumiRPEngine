@@ -8,7 +8,7 @@ import type { ChatId, DomainId, EntityId, InterruptClass, InterruptPolicy, Level
 import type { EntityUpgradePick, KeepLine, ResolveScope, TimeControl, TimelapseTarget, TimeScope, UpgradePicks } from "../shared/ledger";
 import { parseMoneyInput } from "../shared/money";
 import type { EditOp, UpgradePreview } from "../shared/protocol";
-import type { Chip, FieldFixTarget, GmEntity, GmView, PaletteEntry, PaletteOption, TimelapseView } from "../shared/state-view";
+import type { Chip, FieldFixTarget, GmEntity, GmView, PaletteEntry, PaletteOption, StateView, TimelapseView } from "../shared/state-view";
 import { chipRegenerates } from "../shared/state-view";
 import type { AdjudicationDef, FacetId, FacetValueId, WorldCurrency } from "../shared/world";
 import type { RequestBody } from "./registry";
@@ -90,6 +90,11 @@ export function timelapseRequest(view: TimelapseView, target: TimelapseTarget, o
 /** A map tap on a travel option (move or drive). */
 export function travelRequest(action: string, params: JsonObject, chatId: ChatId): Req<"lre.action"> {
   return { type: "lre.action", chatId, action, params: { ...params }, source: "map" };
+}
+
+/** The staged action sent again (DESIGN §11): as tapped, which clears it, or with `now`, which plays it at once. */
+export function stagedRequest(chatId: ChatId, staged: NonNullable<StateView["staged"]>, now: boolean): Req<"lre.action"> {
+  return { type: "lre.action", chatId, action: staged.action, params: { ...staged.params }, source: staged.source, ...(now ? { now: true } : {}) };
 }
 
 export function fixRequest(target: FieldFixTarget, value: JsonValue, chatId: ChatId): Req<"lre.fix"> {

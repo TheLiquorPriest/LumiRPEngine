@@ -66,7 +66,7 @@ async function starterChat(rig: Rig, starter: string, name: string, patch?: (dra
 
 /** Plays `action` with `params` from the palette; the turn's decline chips, as "label | detail". */
 async function act(rig: Rig, chatId: string, action: string, params: JsonObject): Promise<string[]> {
-  rig.body(await rig.send({ type: "lre.action", chatId, action, params, source: "palette" }));
+  rig.body(await rig.send({ type: "lre.action", chatId, action, params, source: "palette", now: true }));
   const g = await rig.host.start(chatId, { type: "normal" });
   await rig.host.finish(g, "You try it.");
   return (await rig.rt.view(chatId, rig.host.userId)).chips.filter((c) => c.kind === "decline").map((c) => `${c.label} | ${c.detail ?? ""}`);
@@ -128,7 +128,7 @@ describe("a secret track on the player layer", () => {
     expect([masked.label, masked.stage, masked.hints]).toEqual(["Something is going on", "", []]);
     const sheet = async () => (await questLog(rig, chatId)).find((q) => q.id === masked.id);
     const answer = async (text: string) => {
-      rig.body(await rig.send({ type: "lre.action", chatId, action: "answer", params: { puzzle: masked.id, answer: text }, source: "palette" }));
+      rig.body(await rig.send({ type: "lre.action", chatId, action: "answer", params: { puzzle: masked.id, answer: text }, source: "palette", now: true }));
       const g = await rig.host.start(chatId, { type: "normal" });
       await rig.host.finish(g, "You try it.");
     };
@@ -147,7 +147,7 @@ describe("a secret track on the player layer", () => {
 describe("answering a puzzle as the player sees it", () => {
   /** Sends Answer with `params` and plays the turn; the turn's decline, if any. */
   async function answer(rig: Rig, chatId: string, params: JsonObject): Promise<{ decline: string; outcome: string }> {
-    rig.body(await rig.send({ type: "lre.action", chatId, action: "answer", params, source: "palette" }));
+    rig.body(await rig.send({ type: "lre.action", chatId, action: "answer", params, source: "palette", now: true }));
     const g = await rig.host.start(chatId, { type: "normal" });
     const outcome = rig.host.section("Outcome");
     await rig.host.finish(g, "You try it.");
@@ -402,7 +402,7 @@ describe("the narrator's sections", () => {
     const rig = new Rig({ shipped: true });
     const chatId = await starterChat(rig, "modern_slice_of_life", "Port Alder");
     // Read the past-due notice needs Port Alder's secret at its notice stage; the chat starts on its cue.
-    rig.body(await rig.send({ type: "lre.action", chatId, action: "read_past_due_notice", params: {}, source: "palette" }));
+    rig.body(await rig.send({ type: "lre.action", chatId, action: "read_past_due_notice", params: {}, source: "palette", now: true }));
     const g = await rig.host.start(chatId, { type: "normal" });
     const sections = rig.host.assembled.map((e) => e.content).join("\n");
     await rig.host.finish(g, "The desk is bare.");

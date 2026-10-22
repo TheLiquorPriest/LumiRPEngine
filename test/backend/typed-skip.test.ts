@@ -138,7 +138,7 @@ describe("an out-of-character instruction that states a span", () => {
     const palette = typed.rig.host.createChat("Morning.");
     typed.rig.body(await typed.rig.send({ type: "lre.world", op: "attach", worldId: typed.worldId, chatId: palette }));
     await typed.rig.turn(palette, "I look around the shop.", "The shop is quiet.");
-    typed.rig.body(await typed.rig.send({ type: "lre.action", chatId: palette, action: "timelapse", params: { target: { type: "duration", minutes: 60 } }, source: "palette" }));
+    typed.rig.body(await typed.rig.send({ type: "lre.action", chatId: palette, action: "timelapse", params: { target: { type: "duration", minutes: 60 } }, source: "palette", now: true }));
     const g = await typed.rig.host.start(palette, { type: "normal" });
     await typed.rig.host.finish(g, "An hour goes by.");
     const ran = await folded(typed.rig, palette);
@@ -257,7 +257,7 @@ describe("the palette's Timelapse", () => {
     const { rig, chatId } = await alder(() => NONE);
     const before = await folded(rig, chatId);
     const here = placeOfEntity(before.state, before.world.pov);
-    rig.body(await rig.send({ type: "lre.action", chatId, action: "timelapse", params: { target: { type: "duration", minutes: 240 }, overrides: { invitation: "note", decline: "note", incident: "note", quest: "note", arrival: "note" }, ...params }, source: "palette" }));
+    rig.body(await rig.send({ type: "lre.action", chatId, action: "timelapse", params: { target: { type: "duration", minutes: 240 }, overrides: { invitation: "note", decline: "note", incident: "note", quest: "note", arrival: "note" }, ...params }, source: "palette", now: true }));
     const sent = objOf(objOf((await rig.host.chats.messages(chatId, rig.host.userId)).at(-1)?.metadata[LEDGER_NAMESPACE]).params);
     const g = await rig.host.start(chatId, { type: "normal" });
     await rig.host.finish(g, "The hours go by.");

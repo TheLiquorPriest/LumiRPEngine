@@ -88,7 +88,7 @@ describe("backend runtime", () => {
     rig.body(await rig.send({ type: "lre.world", op: "commit", worldId, base: null }));
     const chatId = rig.host.createChat("Morning, Sam.");
     rig.body(await rig.send({ type: "lre.world", op: "attach", worldId, chatId }));
-    rig.body(await rig.send({ type: "lre.action", chatId, action: "flip_coin", params: {}, source: "palette" }));
+    rig.body(await rig.send({ type: "lre.action", chatId, action: "flip_coin", params: {}, source: "palette", now: true }));
     // As after a restart: the bridge that saw the request is gone; the intent comes from the message.
     rig.rt.forgetChat(chatId);
     const g = await rig.host.start(chatId, { type: "normal" });
@@ -489,7 +489,7 @@ describe("backend runtime", () => {
   test("a palette action appends a user message with its intent and triggers a turn", async () => {
     const rig = new Rig();
     const chatId = await rig.worldChat();
-    const reply = await rig.send({ type: "lre.action", chatId, action: "missing.action", params: {}, source: "palette" });
+    const reply = await rig.send({ type: "lre.action", chatId, action: "missing.action", params: {}, source: "palette", now: true });
     expect(reply.type).toBe("lre.error");
   });
 
@@ -775,7 +775,7 @@ describe("palette on the shipped packs", () => {
     expect(until !== undefined && until % 1440).toBe(19 * 60);
     // The palette sends days: one day from now, as before.
     const clock = Number(view.hud?.clock.minutes);
-    rig.body(await rig.send({ type: "lre.action", chatId, action: "lend", params: { item: "pov_atv", to: "danny_okafor", days: 1 }, source: "palette" }));
+    rig.body(await rig.send({ type: "lre.action", chatId, action: "lend", params: { item: "pov_atv", to: "danny_okafor", days: 1 }, source: "palette", now: true }));
     await rig.host.settle();
     const g = await rig.host.start(chatId, { type: "normal" });
     await rig.host.finish(g, "Danny nods.");

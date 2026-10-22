@@ -323,6 +323,8 @@ export interface StateView {
   /** Pack panel views keyed by `<packId>.<panel>`; each pack's `core/view.ts` owns the shape. */
   panels: Record<PanelId, JsonValue>;
   palette: PaletteView | null;
+  /** The action staged for the player's next message (DESIGN §11): its request as tapped, so ✕ and Send now resend it, and its words. Absent or null: none. */
+  staged?: { action: string; params: JsonObject; source: "palette" | "map" | "command" | "chip"; label: string } | null;
   controls: ControlsView | null;
   meter: CallMeterView | null;
   packs: Record<PackId, number>;

@@ -12,7 +12,7 @@ import { routineSettingsOf } from "../shared/routines";
 import type { EventRef, HeldWrite, LedgerEvent, MarkerBody } from "../shared/ledger";
 import { LEDGER_NAMESPACE } from "../shared/ledger";
 import type { RulesetDef, WorldDoc } from "../shared/world";
-import { WORLD_FORMAT } from "../shared/world";
+import { formatMoney, WORLD_FORMAT } from "../shared/world";
 import type { StudioOffer } from "../shared/studio-bridge";
 import { isWorldDoc, migrateWorld, previewSheet, previewSkills } from "../engine/authoring";
 import { parseEditOps, resolveEdit } from "../engine/edits";
@@ -224,9 +224,12 @@ export class Dispatcher {
         const said = r.text?.trim() ?? "";
         let text = said;
         let params = r.params;
+        // How a staged action reads on the status line: the action and what was picked for it.
+        let label = "";
         if (r.action === TIMELAPSE_ACTION) {
           const target = parseTarget(r.params.target);
           if (!target) throw new RequestError("bad_request", "a timelapse needs a target");
+          label = `Timelapse: ${targetLabel(target)}`;
           text ||= `(Timelapse: ${neutralizeMacros(targetLabel(target))})`;
           // "Follow my routine" (DESIGN §8, §9.2): the player's choice, else the world's default. Held, the
           // skip keeps the POV where the story has it, as a typed span does. The message records the
@@ -237,6 +240,12 @@ export class Dispatcher {
           const { world, state } = await this.head(r.chatId, userId);
           const action = (hasOwn(world.actions, r.action) ? world.actions[r.action] : undefined) ?? this.rt.registry.actions.get(r.action);
           if (!action) throw new RequestError("not_found", `unknown action ${r.action}`);
+          const picked = Object.entries(r.params).flatMap(([k, v]) => {
+            if (typeof v === "number") return [action.params[k]?.type === "money" ? formatMoney(v, world.currency) : String(v)];
+            if (typeof v !== "string" || v === "") return [];
+            return [state.entities[v]?.name ?? (hasOwn(world.places, v) ? world.places[v]?.name : undefined) ?? v];
+          });
+          label = picked.length > 0 ? `${action.label}: ${picked.join(", ")}` : action.label;
           // Bookkeeping the player does alone, tapped with no words, is no turn: nothing in it needs
           // telling, so it is recorded on the head as a ✎ fix is, with its Undo, and no message, reply or clock time.
           if (action.mechanical === true && said === "") {
@@ -252,6 +261,22 @@ export class Dispatcher {
             return;
           }
           text ||= `(${neutralizeMacros(action.label)})`;
+        }
+        // A tap from the palette, a panel or the map with no words never plays blind (DESIGN §11): it is
+        // staged for the player's next message, which plays it with its words as the approach. The same
+        // tap again clears it; `now` (the staged action's Send now), a chip and a command play at once.
+        const staged = await this.rt.staged.get(r.chatId, userId);
+        const same = staged !== null && staged.action === r.action && JSON.stringify(staged.request) === JSON.stringify(r.params);
+        if ((r.source === "palette" || r.source === "map") && said === "" && r.now !== true) {
+          const after = toChain(await this.rt.host.chats.messages(r.chatId, userId)).at(-1)?.id ?? null;
+          await this.rt.staged.set(r.chatId, userId, same ? null : { action: r.action, request: r.params, params, source: r.source, label: neutralizeMacros(label), after });
+          this.rt.push.changed(r.chatId, userId);
+          reply("lre.action", { staged: !same });
+          return;
+        }
+        if (same) {
+          await this.rt.staged.set(r.chatId, userId, null);
+          this.rt.push.changed(r.chatId, userId);
         }
         const messageId = await this.rt.host.chats.appendUserMessage(r.chatId, text, { [LEDGER_NAMESPACE]: { action: r.action, params, source: r.source, ...(said !== "" ? { described: true } : {}) } }, true, userId);
         reply("lre.action", { messageId });

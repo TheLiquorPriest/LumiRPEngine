@@ -75,7 +75,7 @@ async function stateOf(rig: Rig, chatId: string): Promise<{ state: WorldState; w
 async function timelapse(rig: Rig, chatId: string, minutes: number): Promise<void> {
   const palette = (await rig.rt.view(chatId, rig.host.userId)).palette?.timelapse;
   if (!palette) throw new Error("no Timelapse");
-  rig.body(await rig.send(timelapseRequest(palette, { type: "duration", minutes }, {}, chatId)));
+  rig.body(await rig.send({ ...timelapseRequest(palette, { type: "duration", minutes }, {}, chatId), now: true }));
   await rig.host.settle();
   const generation = await rig.host.start(chatId, { type: "normal" });
   await rig.host.finish(generation, "Time passes.");

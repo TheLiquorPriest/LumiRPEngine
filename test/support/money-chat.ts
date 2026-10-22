@@ -126,7 +126,8 @@ export class MoneyChat {
    * "didn't:" and the panel's error.
    */
   async play(body: ActionBody): Promise<string> {
-    const reply = await this.rig.send(actionRequest(this.chatId, body));
+    // Played at once, as the staged action's Send now does: a tap alone only stages it.
+    const reply = await this.rig.send({ ...actionRequest(this.chatId, body), now: true });
     if (reply.type === "lre.error") return `didn't: ${reply.message}`;
     if (this.rig.body(reply).applied === true) {
       await this.rig.rt.push.settle();
@@ -151,7 +152,7 @@ export class MoneyChat {
   async timelapse(minutes: number): Promise<void> {
     const timelapse = (await this.state()).palette?.timelapse;
     if (!timelapse) throw new Error("no Timelapse");
-    this.rig.body(await this.rig.send(timelapseRequest(timelapse, { type: "duration", minutes }, {}, this.chatId)));
+    this.rig.body(await this.rig.send({ ...timelapseRequest(timelapse, { type: "duration", minutes }, {}, this.chatId), now: true }));
     await this.rig.host.settle();
     const generation = await this.rig.host.start(this.chatId, { type: "normal" });
     await this.rig.host.finish(generation, "Time passes.");
