@@ -909,7 +909,6 @@ function lorePinKey(pin) {
 function pinJson(pin) {
   return "lore" in pin ? { lore: pin.lore } : ("entry" in pin) ? { book: pin.book, entry: pin.entry } : { book: pin.book };
 }
-var PIN_STEPS = LORE_AUDIENCE.filter((p3) => p3 !== "memory" && p3 !== "skip" && p3 !== "consolidate");
 var pinsRead = new WeakMap;
 function lorePinsOf(world) {
   const raw = world.lorePins;
@@ -939,7 +938,7 @@ function lorePinsOf(world) {
     return out;
   };
   const steps = part(raw.steps);
-  const read = { characters: part(raw.characters), places: part(raw.places), steps: Object.fromEntries(PIN_STEPS.flatMap((p3) => hasOwn(steps, p3) ? [[p3, steps[p3] ?? []]] : [])) };
+  const read = { characters: part(raw.characters), places: part(raw.places), steps: Object.fromEntries(LORE_AUDIENCE.flatMap((p3) => hasOwn(steps, p3) ? [[p3, steps[p3] ?? []]] : [])) };
   pinsRead.set(raw, read);
   return read;
 }
@@ -3726,12 +3725,13 @@ function isMindPurpose(purpose) {
 function worldMindTemplate(world, purpose) {
   return Object.values(world.steps).filter((t3) => t3.purpose === purpose && t3.template.trim() !== "").sort((a3, b3) => a3.id.localeCompare(b3.id))[0];
 }
-var MIND_SOURCES = ["pinned", "activated", "reply", "message", "summary", "memory", "thoughts", "recall", "routine", "life"];
+var MIND_SOURCES = ["pinned", "activated", "reply", "message", "history", "summary", "memory", "thoughts", "recall", "routine", "life"];
 var DEFAULT_MIND_READS = Object.freeze({
   pinned: { on: true, tokens: "none" },
   activated: { on: true, tokens: 1600 },
   reply: { on: true, tokens: "none" },
   message: { on: true, tokens: "none" },
+  history: { on: false, messages: 8, tokens: 3000 },
   summary: { on: false, tokens: "none" },
   memory: { on: false, tokens: "none" },
   thoughts: { on: false, tokens: "none" },
@@ -14592,6 +14592,7 @@ var READ_LABEL = {
   activated: "Lore the turn activates",
   reply: "The latest reply",
   message: "Your message",
+  history: "Recent chat",
   summary: "Their summary",
   memory: "Their notes and what they saw",
   thoughts: "Their last thoughts",
@@ -14604,6 +14605,7 @@ var READ_NOTE = {
   activated: "The world's lore entries the turn names, by a key, an alias, a title or a lookup-table term, as World Info activates them, read as the character: by your message and the latest reply when they were there for them, else by where they are.",
   reply: "How the latest reply ended, for those who were there for it; cut to a number, they read its end. The memory step reads the reply within this limit too.",
   message: "What you say and do, for those with you. The memory step reads it within this limit too.",
+  history: "The latest messages before the turn as you see them in the chat (hidden JSON blocks left out), oldest first, up to both limits, whichever comes first. It includes turns they weren't there for: the chat as the player sees it, not what they know. The memory step, consolidation and the time-skip step read it too while it's on.",
   summary: "The summary their memory keeps and folds their old notes into.",
   memory: "Their memory notes, most salient first, and what they saw happen. Never what someone's memory says they were told: that came from another mind.",
   thoughts: "Their own latest mind: what they thought, what they meant to do and how they felt.",
@@ -14611,16 +14613,17 @@ var READ_NOTE = {
   routine: "What they usually do, from their routine and schedules as the world and the story set them, while their routine isn't off: theirs to weigh, never what they must do. A private block only when it's their own, and never social life the planner made up.",
   life: "Their money, the rest of today as the planner lays it (with what it fills free time with: meals, friends, outings), their commitments and their plans. None of it is the story as it stands."
 };
-var READ_GROUP = { pinned: "story", activated: "story", reply: "story", message: "story", summary: "own", memory: "own", thoughts: "own", recall: "own", routine: "usual", life: "own" };
-var GROUP_TITLE = { story: "The story as it stands", usual: "What they usually do", own: "Their own memory and life" };
+var READ_GROUP = { pinned: "story", activated: "story", reply: "story", message: "story", history: "chat", summary: "own", memory: "own", thoughts: "own", recall: "own", routine: "usual", life: "own" };
+var GROUP_TITLE = { story: "The story as it stands", chat: "The chat as you see it", usual: "What they usually do", own: "Their own memory and life" };
 var GROUP_NOTE = {
   story: null,
+  chat: "Off unless you turn it on: it tells a mind of turns its character wasn't there for.",
   usual: "On unless you turn it off: their routine as context, so they can keep to their days without the planner deciding for them.",
   own: "Off unless you turn them on: each can carry what the story never set up, like a day the planner filled with meals and friends, or a plan their memory took from narration that showed another character's mind."
 };
 function ReadSources(props) {
   return /* @__PURE__ */ u3(M, {
-    children: ["story", "usual", "own"].map((group) => {
+    children: ["story", "chat", "usual", "own"].map((group) => {
       const note = GROUP_NOTE[group];
       return /* @__PURE__ */ u3("div", {
         class: "lre-minds-group",
@@ -14752,16 +14755,29 @@ function ReadRow(props) {
         memory: props.memory,
         busy,
         patch: props.patch
-      }, undefined, false, undefined, this) : null : /* @__PURE__ */ u3(LimitField, {
-        label: `${READ_LABEL[source]} (tokens)`,
-        noneLabel: "no limit",
-        value: reads[source].tokens,
-        min: 1,
-        step: 100,
-        fallback: DEFAULT_MIND_READS[source].tokens === "none" ? TOKENS_START : DEFAULT_MIND_READS[source].tokens,
-        disabled: busy,
-        onChange: (tokens) => props.patch(mindsReadPatch(source, { tokens }))
-      }, undefined, false, undefined, this),
+      }, undefined, false, undefined, this) : null : /* @__PURE__ */ u3(M, {
+        children: [
+          source === "history" ? /* @__PURE__ */ u3(LimitField, {
+            label: `${READ_LABEL.history} (messages)`,
+            noneLabel: "no limit",
+            value: reads.history.messages,
+            min: 1,
+            fallback: DEFAULT_MIND_READS.history.messages,
+            disabled: busy,
+            onChange: (messages) => props.patch(mindsReadPatch("history", { messages }))
+          }, undefined, false, undefined, this) : null,
+          /* @__PURE__ */ u3(LimitField, {
+            label: `${READ_LABEL[source]} (tokens)`,
+            noneLabel: "no limit",
+            value: reads[source].tokens,
+            min: 1,
+            step: 100,
+            fallback: DEFAULT_MIND_READS[source].tokens === "none" ? TOKENS_START : DEFAULT_MIND_READS[source].tokens,
+            disabled: busy,
+            onChange: (tokens) => props.patch(mindsReadPatch(source, { tokens }))
+          }, undefined, false, undefined, this)
+        ]
+      }, undefined, true, undefined, this),
       /* @__PURE__ */ u3(Note, {
         children: READ_NOTE[source]
       }, undefined, false, undefined, this)
@@ -15990,8 +16006,13 @@ function StepCard(props) {
 var HINT = {
   characters: "Their mind reads these first, every time they think, within the pinned lore a mind reads (Settings → Minds → What a mind reads).",
   places: "Every helper and mind call here, or in a place inside it, reads these first, within its lore tokens.",
-  steps: "Every call of this step reads these first, whatever its lore setting, within its lore tokens (Settings → Steps).",
-  mind: "Every character's mind reads these, after what is pinned to them, within the pinned lore a mind reads (Settings → Minds → What a mind reads)."
+  steps: "Every call of this step reads these first, whatever its lore setting, within its lore tokens (Settings → Steps)."
+};
+var MIND_STEP_HINT = {
+  mind: "Every character's mind reads these, after what is pinned to them, within the pinned lore a mind reads (Settings → Minds → What a mind reads).",
+  memory: "Each character's memory after the reply reads these, and no other lore, within the pinned lore a mind reads (Settings → Minds → What a mind reads).",
+  skip: "The call that looks for a time skip's beats reads these, and so does every mind at a beat, after what is pinned to them and to every mind; within the pinned lore a mind reads (Settings → Minds → What a mind reads).",
+  consolidate: "Each memory consolidation reads these, and no other lore, within the pinned lore a mind reads (Settings → Minds → What a mind reads)."
 };
 var WHOLE_BOOK = "lre:whole-book";
 function LorePinsSection(props) {
@@ -16051,7 +16072,7 @@ function LorePinsSection(props) {
   };
   const taken = new Set(list2.map(lorePinKey));
   const lore = Object.values(draft.doc.lore).filter((l3) => !taken.has(`lore:${l3.id}`)).sort((a3, b3) => a3.title.localeCompare(b3.title));
-  const hint = props.target === "steps" ? props.id === "mind" ? HINT.mind : HINT.steps : HINT[props.target];
+  const hint = props.target === "steps" ? isMindPurpose(props.id) ? MIND_STEP_HINT[props.id] : HINT.steps : HINT[props.target];
   return /* @__PURE__ */ u3("div", {
     "data-lre-lore-pins": `${props.target}:${props.id}`,
     children: /* @__PURE__ */ u3(Section, {
@@ -23896,7 +23917,7 @@ function PartView(props) {
           class: "lre-build-note",
           children: "Lore pinned to a character or a place is on its page. Lore pinned to a step below is read by every call of that step."
         }, undefined, false, undefined, this),
-        PIN_STEPS.map((step) => /* @__PURE__ */ u3(LorePinsSection, {
+        LORE_AUDIENCE.map((step) => /* @__PURE__ */ u3(LorePinsSection, {
           target: "steps",
           id: step
         }, step, false, undefined, this)),
@@ -40682,6 +40703,7 @@ function PinnedLore(props) {
     });
   }, [props.chatId]);
   const own2 = pins?.characters[props.who] ?? [];
+  const everyMind = (pins?.steps.mind ?? []).map((p3) => ({ ...p3, at: "every mind" }));
   const place = props.gm.entities.find((e3) => e3.id === props.who)?.place ?? null;
   const there = placesOf2(props.gm, place).flatMap((id) => (pins?.places[id] ?? []).map((p3) => ({ ...p3, at: props.gm.places.find((x2) => x2.id === id)?.name ?? id })));
   const row = (p3) => /* @__PURE__ */ u3(ListRow, {
@@ -40714,11 +40736,11 @@ function PinnedLore(props) {
     children: pins === null ? /* @__PURE__ */ u3("p", {
       class: "lre-gm-minds-none",
       children: "Reading the pins…"
-    }, undefined, false, undefined, this) : own2.length + there.length === 0 ? /* @__PURE__ */ u3("p", {
+    }, undefined, false, undefined, this) : own2.length + everyMind.length + there.length === 0 ? /* @__PURE__ */ u3("p", {
       class: "lre-gm-minds-none",
-      children: "Nothing is pinned to them or to where they are. Pins are the world's: Build → Entities or Places, Pinned lore. Commit, then Upgrade this chat, to use them here."
+      children: "Nothing is pinned to them, to every mind or to where they are. Pins are the world's: Build → Entities or Places, Pinned lore, or the Pinned lore page's Character minds. Commit, then Upgrade this chat, to use them here."
     }, undefined, false, undefined, this) : /* @__PURE__ */ u3(List, {
-      children: [...own2.map((p3) => row(p3)), ...there.map((p3) => row(p3))]
+      children: [...own2.map((p3) => row(p3)), ...everyMind.map((p3) => row(p3)), ...there.map((p3) => row(p3))]
     }, undefined, false, undefined, this)
   }, undefined, false, undefined, this);
 }
@@ -48129,6 +48151,7 @@ function decodeMinds(value) {
     pinned: list(t3.pinned, (p3) => ({ title: str(p3.title), tokens: num(p3.tokens), cut: p3.cut === true })),
     activated: list(t3.activated, (p3) => ({ title: str(p3.title), tokens: num(p3.tokens), cut: p3.cut === true })),
     ...num(t3.routine) > 0 ? { routine: num(t3.routine) } : {},
+    ...num(t3.history) > 0 ? { history: num(t3.history) } : {},
     notes: strings(t3.notes)
   }));
 }
@@ -48363,7 +48386,7 @@ function ContextPanel(props) {
                   tone: MIND_OUTCOME[m2.outcome].tone,
                   children: MIND_OUTCOME[m2.outcome].text
                 }, undefined, false, undefined, this),
-                children: (m2.pinned ?? []).length > 0 || (m2.activated ?? []).length > 0 || (m2.routine ?? 0) > 0 || (m2.notes ?? []).length > 0 ? /* @__PURE__ */ u3("div", {
+                children: (m2.pinned ?? []).length > 0 || (m2.activated ?? []).length > 0 || (m2.routine ?? 0) > 0 || (m2.history ?? 0) > 0 || (m2.notes ?? []).length > 0 ? /* @__PURE__ */ u3("div", {
                   class: "lre-gm-minds-pinned",
                   "data-lre-mind-pins": true,
                   children: [
@@ -48386,6 +48409,15 @@ function ContextPanel(props) {
                         m2.routine,
                         " line",
                         m2.routine === 1 ? "" : "s"
+                      ]
+                    }, undefined, true, undefined, this) : null,
+                    (m2.history ?? 0) > 0 ? /* @__PURE__ */ u3("span", {
+                      "data-lre-mind-history": true,
+                      children: [
+                        "Recent chat: ",
+                        m2.history,
+                        " message",
+                        m2.history === 1 ? "" : "s"
                       ]
                     }, undefined, true, undefined, this) : null,
                     (m2.notes ?? []).map((n2) => /* @__PURE__ */ u3("p", {

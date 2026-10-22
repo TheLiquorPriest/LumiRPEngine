@@ -194,6 +194,7 @@ var DEFAULT_MIND_READS = Object.freeze({
   activated: { on: true, tokens: 1600 },
   reply: { on: true, tokens: "none" },
   message: { on: true, tokens: "none" },
+  history: { on: false, messages: 8, tokens: 3000 },
   summary: { on: false, tokens: "none" },
   memory: { on: false, tokens: "none" },
   thoughts: { on: false, tokens: "none" },
@@ -919,7 +920,7 @@ var package_default = {
 // src/cli/version.ts
 var CLI_NAME = "lumirpengine";
 var CLI_VERSION = package_default.version;
-var BUILD = "abaffcd0";
+var BUILD = "5cddf594";
 function runtimeCannotFollow(bun) {
   if (bun === undefined)
     return null;

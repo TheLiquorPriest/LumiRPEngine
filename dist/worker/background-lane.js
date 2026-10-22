@@ -1431,6 +1431,7 @@ var DEFAULT_MIND_READS = Object.freeze({
   activated: { on: true, tokens: 1600 },
   reply: { on: true, tokens: "none" },
   message: { on: true, tokens: "none" },
+  history: { on: false, messages: 8, tokens: 3000 },
   summary: { on: false, tokens: "none" },
   memory: { on: false, tokens: "none" },
   thoughts: { on: false, tokens: "none" },
@@ -4225,7 +4226,6 @@ function isLorePin(v) {
 function lorePinKey(pin) {
   return "lore" in pin ? `lore:${pin.lore}` : ("entry" in pin) ? `book:${pin.book}/${pin.entry}` : `book:${pin.book}`;
 }
-var PIN_STEPS = LORE_AUDIENCE.filter((p) => p !== "memory" && p !== "skip" && p !== "consolidate");
 var pinsRead = new WeakMap;
 function loreTerm(text) {
   return text.trim().replace(/\s+/g, " ").toLowerCase();
@@ -8308,9 +8308,9 @@ function lintLorePins(world) {
     }
     for (const [id, list] of Object.entries(targets)) {
       const path = `lorePins.${part}.${id}`;
-      const name = part === "characters" ? hasOwn(world.entities, id) ? world.entities[id]?.name : undefined : part === "places" ? hasOwn(world.places, id) ? world.places[id]?.name : undefined : PIN_STEPS.includes(id) ? id : undefined;
+      const name = part === "characters" ? hasOwn(world.entities, id) ? world.entities[id]?.name : undefined : part === "places" ? hasOwn(world.places, id) ? world.places[id]?.name : undefined : hasOwn(STEP_OUTPUTS, id) ? id : undefined;
       if (name === undefined)
-        push("warning", path, "pin_target", part === "steps" ? hasOwn(STEP_OUTPUTS, id) ? `The ${id} step reads no lore, so nothing pinned to it is read.` : `"${id}" is not a step, so no call reads what is pinned to it.` : `"${id}" is not ${part === "characters" ? "an entity" : "a place"} in the world, so no call reads what is pinned to it.`);
+        push("warning", path, "pin_target", part === "steps" ? `"${id}" is not a step, so no call reads what is pinned to it.` : `"${id}" is not ${part === "characters" ? "an entity" : "a place"} in the world, so no call reads what is pinned to it.`);
       if (!Array.isArray(list)) {
         push("error", path, "pin_shape", "The pins are a list; none are read.");
         continue;
