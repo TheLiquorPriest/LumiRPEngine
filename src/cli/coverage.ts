@@ -58,6 +58,7 @@ export const COVERAGE: Coverage = {
   "lre.keep": { tools: ["lre_keep"] },
   "lre.minds": { run: { tools: ["lre_minds_run"] }, cancel: { tools: ["lre_minds_cancel"] }, status: { tools: ["lre_minds"] } },
   "lre.routine": { day: { tools: ["lre_day"] }, changed: { tools: ["lre_routine_changes"] } },
+  "lre.character": { get: { excluded: "The Character page's and sheet's read, shaped for their pickers: lre_draft reads the same person from the draft and lre_gm from the chat, with nothing this view adds that a tool needs." } },
   "lre.restart": { excluded: "A page claiming a reply the engine prepared before starting it with Lumiverse's own commands: only the page holding the turn can." },
   "lre.settings.get": { tools: ["lre_settings", "lre_settings_set"] },
   "lre.settings.set": { tools: ["lre_settings_set"] },

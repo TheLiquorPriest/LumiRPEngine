@@ -55,6 +55,8 @@ import { applyProposals } from "./turn-model";
 import { upgradePreview } from "./upgrade-preview";
 import { recentLines, TIMELAPSE_ACTION } from "./view";
 import { buildGmView } from "./gm";
+import { buildCharacter } from "../engine/character";
+import type { CharacterResult } from "../shared/character";
 import { type DraftNotice, macroReview, newChatRun, WORLD_COLLECTIONS, WorldError } from "./worlds";
 
 export class RequestError extends Error {
@@ -408,6 +410,23 @@ export class Dispatcher {
         const player = routinePlayerView(ctx, r.entity);
         if (!player) throw new RequestError("not_found", "no such character");
         reply("lre.routine", { player });
+        return;
+      }
+      case "lre.character": {
+        // A character as its own model (DESIGN §7): Build's from the world's draft, GM's from the
+        // chat's head behind the GM gate, as `lre.gm` is (everything, secrets included).
+        if (r.op !== "get" || typeof r.entity !== "string") throw new RequestError("bad_request", "name a character to get");
+        let found: CharacterResult | null;
+        if (r.scope === "build") {
+          if (typeof r.worldId !== "string") throw new RequestError("bad_request", "name the world");
+          found = buildCharacter(this.rt.registry, await this.rt.worlds.working(r.worldId, userId), r.entity);
+        } else if (r.scope === "gm") {
+          await this.requireWorldChat(r.chatId, userId);
+          const { state, world } = await this.head(r.chatId, userId);
+          found = buildCharacter(this.rt.registry, world, r.entity, state);
+        } else throw new RequestError("bad_request", "the scope is build or gm");
+        if (!found) throw new RequestError("not_found", "no such character");
+        reply("lre.character", found);
         return;
       }
       case "lre.state.get": {
