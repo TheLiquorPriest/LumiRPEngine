@@ -607,7 +607,7 @@ What meets a need meets it when it's done, so the need grows again from then:
 - **Sleep** meets fatigue as you sleep through it: **Go to bed** (until 07:00, or "I sleep for two hours"), then the Speed through or Timelapse offer; or any time skip your routine sleeps through. Going to bed and getting straight up again rests no one.
 - **Through a time skip**, what you live meets your needs: your meals and sleep, time out, and time with someone you know.
 
-**Beds.** Anyone can have a **bed**: a place, or an item such as a cot, wherever it stands. Their nights at home happen there, and Go to bed takes your character to yours. Set it in Build (the person's **Bed** field) or in GM mode (the person's page, **Where they sleep**). A bed in a secret place stays secret.
+**Beds.** Anyone can have a **bed**: a place, or an item such as a cot, wherever it stands. Their nights at home happen there, and Go to bed takes your character to yours. Set it in Build (the person's **Bed** field) or in GM mode (the person's page, **Where it is → Bed**). A bed in a secret place stays secret.
 
 **Needs settings** (**Build → Needs**): for each need, whether it's on, how much it grows an hour, the point it's told from and the point it alerts from. A world without settings plays as before: hunger 4, fatigue 3, social 1.5 and fun 1 an hour, told from 60 and alerting from 80. A setting the engine can't read is refused when you save it, and **Check world** warns about an alert set below the point its need is told from.
 
