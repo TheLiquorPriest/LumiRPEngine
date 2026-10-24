@@ -106,7 +106,7 @@ export class Harness {
     const noop = async (): Promise<void> => undefined;
     this.service.hooks = {
       beforePlan: async () => undefined,
-      afterPlan: noop,
+      afterPlan: async () => undefined,
       // No sections here: the engine run plans, and its reply starts again (DESIGN §5.1).
       deliver: async () => ({ bookId: "", fills: new Map(), placed: "", sources: [] }),
       fill: async () => "filled" as const,

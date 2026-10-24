@@ -182,6 +182,12 @@ export class TurnBridge implements TurnModel {
   private readonly held = new Map<string, HeldRead>();
   /** Routine changes a typed message states, keyed like `intents`: asked about once, when it is read (`takeRoutineAsks`). */
   private readonly routineAsks = new Map<string, RoutineAsk[]>();
+  /** Typed messages whose read the player let play from the intent gate (Settings → Steps and connections, DESIGN §5.2), keyed like `intents`. */
+  private readonly intentsPassed = new Set<string>();
+  /** Each text's own turn's last plan, kept with the path it was made at: what the turn plays once its outline is let through. */
+  private readonly ownPlans = new Map<string, { parentPath: PathHash; events: LedgerEvent[]; result: EngineTurnPlan }>();
+  /** The outline the player let through the outline gate for a text's turn, as edited: what its reply is told, with the plan it was shown for (`ownPlans`). */
+  private readonly outlines = new Map<string, string[]>();
   /**
    * The path each text's turn was read at (`begin`): what is kept for a text belongs to that turn
    * only, so a later turn with the same words, or the same turn after an earlier message changed,
@@ -201,8 +207,9 @@ export class TurnBridge implements TurnModel {
    */
   begin(userText: string, at: PathHash): void {
     if (this.readAt.get(userText) === at) return;
-    for (const kept of [this.intents, this.unfit, this.nexts, this.decisions, this.minds, this.offers, this.skips, this.skipPlans, this.held, this.routineAsks]) kept.delete(userText);
+    for (const kept of [this.intents, this.unfit, this.nexts, this.decisions, this.minds, this.offers, this.skips, this.skipPlans, this.held, this.routineAsks, this.ownPlans, this.outlines]) kept.delete(userText);
     this.interpreted.delete(userText);
+    this.intentsPassed.delete(userText);
     this.unread.delete(userText);
     this.readAt.set(userText, at);
     trim(this.readAt);
@@ -419,6 +426,13 @@ export class TurnBridge implements TurnModel {
     const last = input.userTexts.at(-1) ?? "";
     // Only what this turn's own pre phase kept: the same words read at another path are another turn's.
     const own = this.readAt.get(last) === input.parentPath;
+    // An outline the player let through plays the plan it was shown for, never a fresh one whose rolls could differ.
+    const shown = own && this.outlines.has(last) ? this.ownPlans.get(last) : undefined;
+    if (shown && shown.parentPath === input.parentPath) {
+      this.plans.set(input.seed, shown.result);
+      trim(this.plans);
+      return structuredClone(shown.events);
+    }
     // Decisions and minds first: the plan then follows the choices they record (DESIGN §5.2 npc.choose, §24).
     const w = new Working(this.registry, input.ctx.world, input.state);
     w.applyAll(own ? this.prePlan(last) : []);
@@ -435,7 +449,39 @@ export class TurnBridge implements TurnModel {
     });
     this.plans.set(input.seed, result);
     trim(this.plans);
-    return [...w.events, ...result.events];
+    const events = [...w.events, ...result.events];
+    // Kept by reference (a reuse clones it), so a turn that never meets the outline gate pays nothing for it.
+    if (own) {
+      this.ownPlans.set(last, { parentPath: input.parentPath, events, result });
+      trim(this.ownPlans);
+    }
+    return events;
+  }
+
+  /** The player let this text's read play from the intent gate (Play, or Edit's Apply with its params). */
+  passIntent(userText: string, params?: JsonObject): boolean {
+    const intent = this.intents.get(userText);
+    if (!intent) return false;
+    if (params) this.intents.set(userText, { ...intent, params });
+    this.intentsPassed.add(userText);
+    if (this.intentsPassed.size > 64) this.intentsPassed.delete(this.intentsPassed.values().next().value ?? "");
+    return true;
+  }
+
+  intentPassed(userText: string): boolean {
+    return this.intentsPassed.has(userText);
+  }
+
+  /** The outline the player let through the outline gate for this text's turn: its plan plays as shown, told this outline. False when no plan was shown for it. */
+  passOutline(userText: string, lines: string[]): boolean {
+    if (!this.ownPlans.has(userText)) return false;
+    this.outlines.set(userText, lines);
+    trim(this.outlines);
+    return true;
+  }
+
+  outlineOf(userText: string): readonly string[] | undefined {
+    return this.outlines.get(userText);
   }
 
   read(input: { state: WorldState; ctx: ReadContext; seed: string; text: string }): LedgerEvent[] {

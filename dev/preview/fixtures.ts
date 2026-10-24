@@ -1313,6 +1313,7 @@ export function settingsFixture(): UserSettings {
     minds: defaultMindsSettings(),
     timeouts: { ...defaultTimeouts(), requestMs: 600_000, laneHeartbeatMs: "none" },
     jobs: { routineLoreTokens: 8000 },
+    gates: { intent: false, outline: false },
   };
 }
 

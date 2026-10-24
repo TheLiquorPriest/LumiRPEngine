@@ -39,6 +39,7 @@ const SECTIONS: Readonly<Record<string, string>> = {
   extraction: 'Changes from the reply: a pinned mode per change type ("auto", "confirm", "never", maxDelta); null unpins one, so learning decides it again.',
   swipeDefault: 'Swipes: what a swipe does ("rerun" or "renarrate").',
   hideJsonBlocks: "Preset: hide each reply's <json> block in world chats.",
+  gates: "Steps and connections → Preview before playing: intent shows a typed message's read action before it plays, outline the turn's outline before the reply is written; each waits on Play, Edit or Cancel.",
 };
 
 /** Each change type's effective mode, which Changes from the reply shows: derived, so read-only. */

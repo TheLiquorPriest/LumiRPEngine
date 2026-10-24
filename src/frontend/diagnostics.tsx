@@ -40,6 +40,19 @@ function useActivity(): { activity: Activity | null; now: number } {
   return { activity, now };
 }
 
+/** Cancel on the activity line (DESIGN §5.1): stops the chat's engine run or reply read; a cancelled turn ends with no failure, and Regenerate runs it again. */
+function CancelTurn(props: { chatId: string | null }) {
+  const app = useApp();
+  const [busy, run] = useBusy();
+  if (!props.chatId) return null;
+  const chatId = props.chatId;
+  return (
+    <Button size="sm" variant="ghost" icon="close" label="Cancel the turn" disabled={busy} onClick={() => run(async () => void (await app.request({ type: "lre.cancel", chatId })))}>
+      Cancel
+    </Button>
+  );
+}
+
 /**
  * What the engine is doing now ("Asking 3 minds… 12 s"), or that the last turn failed, with a way to
  * Diagnostics. Nothing while idle. `compact` drops the words for the time (the HUD pill on a phone).
@@ -79,6 +92,7 @@ export function ActivityBanner() {
         <span class="lre-chat-pulse" aria-hidden="true" />
         <span class="lre-activity-label">{activity.label}</span>
         <span class="lre-num lre-activity-time">{elapsedText(now - activity.since)}</span>
+        <CancelTurn chatId={chatId} />
       </div>
     );
   return (

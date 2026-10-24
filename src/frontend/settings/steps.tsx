@@ -14,7 +14,7 @@ import type { ModelUsePresetId } from "../../shared/ids";
 import { PROSE_STEPS } from "../../shared/lore";
 import { isMindPurpose } from "../../shared/minds";
 import type { ComponentChildren } from "preact";
-import type { HelperDefault, JobSettings, LorePolicy, LoreTransport, ModelUseSettings, ReasoningChoice, SamplingParams, StepConfig, StepRoute } from "../../shared/settings";
+import type { GateSettings, HelperDefault, JobSettings, LorePolicy, LoreTransport, ModelUseSettings, ReasoningChoice, SamplingParams, StepConfig, StepRoute } from "../../shared/settings";
 import { DEFAULT_RECENT, helperCallOf, JOB_SETTINGS_DEFAULTS, REASONING_CHOICES, recentOf, SAMPLING_PARAMS, stepConfigOf, stepLoreOf } from "../../shared/settings";
 import { LimitField, MindPromptEditor } from "./minds";
 import type { MindsSettings } from "../../shared/minds";
@@ -320,7 +320,7 @@ export function HelperSection(props: { helper: HelperDefault; patch(patch: JsonO
   );
 }
 
-export function StepsSection(props: { modelUse: ModelUseSettings; helper: HelperDefault; jobs: JobSettings; prompts: MindsSettings["prompts"]; patch(patch: JsonObject): void; openHelper(): void; busy: boolean }) {
+export function StepsSection(props: { modelUse: ModelUseSettings; helper: HelperDefault; jobs: JobSettings; gates: GateSettings; prompts: MindsSettings["prompts"]; patch(patch: JsonObject): void; openHelper(): void; busy: boolean }) {
   const connections = useConnections();
   const update = (purpose: StepPurpose, next: StepConfig) => props.patch(stepUpdatePatch(purpose, next));
   return (
@@ -329,6 +329,14 @@ export function StepsSection(props: { modelUse: ModelUseSettings; helper: Helper
       <List>
         <ListRow icon="sliders" title="Helper model" subtitle={helperSummary(props.helper, connections)} chevron onClick={props.openHelper} />
       </List>
+      {/* The preview gates (DESIGN §5.1): where a turn waits on the player, off by default. */}
+      <Section title="Preview before playing">
+        <HostSwitch label="Show the action read from your message before it plays" checked={props.gates.intent} disabled={props.busy} onChange={(intent) => props.patch({ gates: { intent } })} />
+        <HostSwitch label="Show the turn's outline before the reply is written" checked={props.gates.outline} disabled={props.busy} onChange={(outline) => props.patch({ gates: { outline } })} />
+        <p class="lre-small lre-muted" style={{ margin: 0 }}>
+          The turn waits on your message with Play, Edit and Cancel, and nothing is generated until you play it. Edit changes the action's details, or the outline's lines; Cancel leaves the turn unplayed. An action you tap in the palette or on a chip plays at once.
+        </p>
+      </Section>
       {(Object.keys(STEP_LABEL) as StepPurpose[]).map((purpose) => (
         <StepCard key={purpose} purpose={purpose} config={stepConfigOf(props.modelUse.steps, purpose)} helper={props.helper} connections={connections} busy={props.busy} update={(next) => update(purpose, next)}>
           <StepPrompts purpose={purpose} config={stepConfigOf(props.modelUse.steps, purpose)} prompts={props.prompts} busy={props.busy} patch={props.patch} />

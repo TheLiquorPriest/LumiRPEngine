@@ -56,10 +56,12 @@ const CHIP_ICON: Record<ChipKind, IconName> = {
   routine_added: "calendar",
   fix: "edit",
   refused: "alert",
+  intent_gate: "pause",
+  outline_gate: "list",
 };
 
 /** Icons for the actions players reach for most; every button keeps its words. */
-const ACTION_ICON: Partial<Record<string, IconName>> = { undo: "undo", regenerate: "refresh", rerun: "refresh", send: "send", timelapse: "fast-forward" };
+const ACTION_ICON: Partial<Record<string, IconName>> = { undo: "undo", regenerate: "refresh", rerun: "refresh", send: "send", timelapse: "fast-forward", play: "play", edit: "edit" };
 
 /**
  * The receipt's order: what went wrong first, so it never hides behind "n more";
@@ -220,20 +222,20 @@ function ActionButton(props: { action: ChipAction; controls: ChipControls; pill?
   );
 }
 
-/** The small form an action with an input opens: an amount in the world's currency, or one of its options; Apply sends it as the chip's payload. */
+/** The small form an action with an input opens: an amount in the world's currency, one of its options, or text to edit; Apply sends it as the chip's payload. */
 function ChipInputForm(props: { action: ChipAction; input: ChipInput; currency: WorldCurrency; busy: boolean; onSend(payload: JsonObject): void; onCancel(): void }) {
   const { input } = props;
-  const [text, setText] = useState(() => (input.type === "money" && input.value !== undefined ? formatMoneyInput(input.value, props.currency) : ""));
+  const [text, setText] = useState(() => (input.type === "money" && input.value !== undefined ? formatMoneyInput(input.value, props.currency) : input.type === "text" ? input.value : ""));
   const [picked, setPicked] = useState(() => (input.type === "choice" ? (input.options[0]?.value ?? "") : ""));
   const cents = input.type === "money" ? parseMoneyInput(text, props.currency) : null;
-  const ok = input.type === "money" ? cents !== null && cents > 0 : picked !== "";
+  const ok = input.type === "money" ? cents !== null && cents > 0 : input.type === "text" ? text.trim() !== "" : picked !== "";
   return (
     <form
       class="lre-chat-form"
       data-lre-chip-input={props.action.id}
       onSubmit={(event) => {
         event.preventDefault();
-        if (ok) props.onSend(input.type === "money" ? { cents } : { value: picked });
+        if (ok) props.onSend(input.type === "money" ? { cents } : input.type === "text" ? { text } : { value: picked });
       }}
       onKeyDown={(event) => {
         if (event.key === "Escape") props.onCancel();
@@ -242,6 +244,8 @@ function ChipInputForm(props: { action: ChipAction; input: ChipInput; currency: 
       <Field label={input.label}>
         {input.type === "money" ? (
           <MoneyInput currency={props.currency} value={text} onInput={setText} label={input.label} invalid={text.trim() !== "" && !ok} autoFocus />
+        ) : input.type === "text" ? (
+          <textarea class="lre-input" aria-label={input.label} rows={Math.min(12, Math.max(3, text.split("\n").length))} value={text} onInput={(event) => setText(event.currentTarget.value)} autoFocus />
         ) : (
           <select class="lre-input" aria-label={input.label} value={picked} onChange={(event) => setPicked(event.currentTarget.value)}>
             {input.options.map((option) => (

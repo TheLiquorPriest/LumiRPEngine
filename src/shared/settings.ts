@@ -298,6 +298,16 @@ export interface ExtractionLearning {
   connections: Record<string, Partial<Record<ExtractionType, ExtractionTypeStats>>>;
 }
 
+/**
+ * Where a turn waits for the player before it goes on (DESIGN §5.1 preview gates), each off by
+ * default: `intent` shows a typed message's read action before it plays, `outline` the turn's
+ * outline before the reply is written. Each waits on Play, Edit or Cancel.
+ */
+export interface GateSettings {
+  intent: boolean;
+  outline: boolean;
+}
+
 export interface UserSettings {
   v: 1;
   /**
@@ -332,6 +342,8 @@ export interface UserSettings {
   timeouts: TimeoutSettings;
   /** Build's jobs (Settings → Steps and connections → Build jobs), apart from the presets. */
   jobs: JobSettings;
+  /** Preview gates (Settings → Steps and connections → Preview before playing, DESIGN §5.1): off, a turn plays as soon as it is read. */
+  gates: GateSettings;
 }
 
 /** The shipped defaults' revision (`UserSettings.defaults`). */

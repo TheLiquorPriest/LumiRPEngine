@@ -308,6 +308,8 @@ export interface TurnContext {
   kind: GenerationKind;
   /** For `beforeCommit`, the text the core will read (a Continue's suffix); for `afterCommit`, the saved content. */
   content: string;
+  /** The reply read's signal: Cancel on the activity line aborts it, and the reads still waiting are skipped. */
+  signal: AbortSignal;
 }
 
 /** What the pre phase leaves the engine run: nothing to say, or a question the chat now asks, on which the run waits (a claim under Ask first, DESIGN §9.4). */
@@ -341,8 +343,8 @@ export interface TurnHooks {
    * that part depends on, are unchanged.
    */
   beforePlan(input: { chatId: ChatId; userId: UserId; core: LedgerCore; observed: ChainMessage[]; generationId: string; connectionId: string | null; runKey: string; signal: AbortSignal }): Promise<PreOutcome | undefined>;
-  /** After the plan, before the reply: the plan-phase prose steps (DESIGN §5.2 brief, prose outline). */
-  afterPlan(input: { chatId: ChatId; userId: UserId; core: LedgerCore; observed: ChainMessage[]; generationId: string; signal: AbortSignal }): Promise<void>;
+  /** After the plan, before the reply: the plan-phase prose steps (DESIGN §5.2 brief, prose outline); a `waiting` outcome holds the reply on the player (the outline gate, §5.1). */
+  afterPlan(input: { chatId: ChatId; userId: UserId; core: LedgerCore; observed: ChainMessage[]; generationId: string; signal: AbortSignal }): Promise<PreOutcome | undefined>;
   /** The engine run's last step (DESIGN §6.4): the prepared turn's sections made, and the book's entries placed for them; nothing is written into the book yet. */
   deliver(input: { chatId: ChatId; userId: UserId; core: LedgerCore; observed: ChainMessage[]; generationId: string }): Promise<Delivered>;
   /**
@@ -503,6 +505,13 @@ class EngineFailure extends Error {
   }
 }
 
+/** Why a turn's signal aborted when the player cancelled it (`LedgerService.cancel`): its own end, never a failure. */
+export class TurnCancelled extends Error {
+  constructor() {
+    super("you cancelled the turn");
+  }
+}
+
 /** How the frontend starts the generation again for a halted one of `type`; `send` when only the player can (a new reply after a reply). */
 function restartAs(type: HostGenerationType, observed: readonly ChainMessage[]): GenerateAs {
   if (type === "normal") return observed.at(-1)?.isUser ? "regenerate" : "send";
@@ -529,6 +538,8 @@ export class LedgerService {
   private readonly damaged = new Map<string, Set<string>>();
   /** Each world chat's guard state (DESIGN §5.1). */
   private readonly gates = new Map<ChatId, Gate>();
+  /** Each chat's engine run or reply read under way, by the controller its steps' signals hang from: what Cancel aborts (DESIGN §5.1). */
+  private readonly inFlight = new Map<ChatId, AbortController>();
   /** Each of the users' pages: the chat it shows and whether on screen, newest report last (`page`). */
   private readonly pages = new Map<string, { userId: UserId; chatId: ChatId | null; viewing: boolean }>();
   /** The latest generation the host started in each chat, as its event arrived: the guard's generation. */
@@ -612,22 +623,28 @@ export class LedgerService {
           }
           const p = core.journal.pending[e.generationId];
           const swipeId = p?.swipeId ?? observed.find((m) => m.id === e.messageId)?.swipeId ?? 0;
-          const turn = p && e.messageId && userId ? { chatId: e.chatId, userId, core, observed, generationId: e.generationId, messageId: e.messageId, swipeId, kind: p.kind } : null;
+          const flight = this.flight(e.chatId);
+          const turn = p && e.messageId && userId ? { chatId: e.chatId, userId, core, observed, generationId: e.generationId, messageId: e.messageId, swipeId, kind: p.kind, signal: flight.signal } : null;
           const diag = at && turn ? this.diag : null;
           if (at && diag) diag.begin(at, STEP_LABEL.read);
-          if (this.hooks && turn && p && p.kind !== "impersonate") {
-            const hooks = this.hooks;
-            // A Continue reads only its suffix (L13): prepare that text.
-            const text = p.kind === "continue" ? (p.captured && e.content.length >= p.captured.len ? e.content.slice(p.captured.len) : "") : e.content;
-            if (text !== "") await (at && diag ? diag.step(at, "read", "read", () => hooks.beforeCommit({ ...turn, content: text })) : hooks.beforeCommit({ ...turn, content: text }));
-            else if (at && diag) diag.skipped(at, "read", "read", "the reply had no new text to read");
+          try {
+            if (this.hooks && turn && p && p.kind !== "impersonate") {
+              const hooks = this.hooks;
+              // A Continue reads only its suffix (L13): prepare that text.
+              const text = p.kind === "continue" ? (p.captured && e.content.length >= p.captured.len ? e.content.slice(p.captured.len) : "") : e.content;
+              if (text !== "") await (at && diag ? diag.step(at, "read", "read", () => hooks.beforeCommit({ ...turn, content: text })) : hooks.beforeCommit({ ...turn, content: text }));
+              else if (at && diag) diag.skipped(at, "read", "read", "the reply had no new text to read");
+            }
+            core.ended({ generationId: e.generationId, ...(e.messageId ? { messageId: e.messageId } : {}), content: e.content }, observed);
+            if (this.hooks && turn) {
+              const hooks = this.hooks;
+              await (at && diag ? diag.step(at, "memory", "memory", () => hooks.afterCommit({ ...turn, content: e.content })) : hooks.afterCommit({ ...turn, content: e.content }));
+            }
+          } finally {
+            this.landed(e.chatId, flight);
           }
-          core.ended({ generationId: e.generationId, ...(e.messageId ? { messageId: e.messageId } : {}), content: e.content }, observed);
-          if (this.hooks && turn) {
-            const hooks = this.hooks;
-            await (at && diag ? diag.step(at, "memory", "memory", () => hooks.afterCommit({ ...turn, content: e.content })) : hooks.afterCommit({ ...turn, content: e.content }));
-          }
-          if (at && diag) diag.end(at);
+          // A cancelled read is its own end: the reply stands, and Re-read reads it again.
+          if (at && diag) diag.end(at, flight.signal.aborted ? { status: "skipped", reason: "you cancelled reading the reply; Re-read reads it again" } : undefined);
         });
       }),
       h.on("GENERATION_STOPPED", (e, userId) => {
@@ -1116,7 +1133,12 @@ export class LedgerService {
       const head = observed.findLast((m) => !m.isUser);
       const swipeId = target ? target.swipes.length - (blank ? 1 : 0) : halt.type === "continue" ? (head?.swipeId ?? null) : 0;
       core.prepare({ generationId: halt.id, kind, targetMessageId: target?.id ?? null, targetSwipeId: swipeId }, observed);
-      const signal = new AbortController().signal;
+      const flight = this.flight(chatId);
+      const signal = flight.signal;
+      // A cancel between steps ends the run there; one inside a step aborts its calls through `signal`.
+      const going = (): void => {
+        if (signal.aborted) throw new TurnCancelled();
+      };
       const step = <T>(phase: "pre" | "plan" | "prose" | "sections", fn: () => Promise<T>): Promise<T> => (this.diag ? this.diag.step(at, phase, phase, fn) : fn());
       let delivered: Delivered | null = null;
       let claimed = false;
@@ -1125,15 +1147,19 @@ export class LedgerService {
         // in place, a swipe of an earlier reply) is refused before any model call, never sent to the last one.
         if (halt.target !== null && observed.at(-1)?.id !== target?.id) throw new EngineFailure("target", NOT_LAST_REPLY);
         const pre = await step("pre", () => hooks.beforePlan({ chatId, userId, core, observed, generationId: halt.id, connectionId: halt.connectionId, runKey: `${stamp}\u0000${epoch}`, signal }));
-        // The chat now asks the player something (a claim under Ask first, DESIGN §9.4): the run waits
-        // on the answer, with nothing generated and no restart; the answer's Regenerate runs it again.
-        if (pre) {
+        going();
+        // The chat now asks the player something (a claim under Ask first, DESIGN §9.4, or a preview
+        // gate, §5.1): the run waits on the answer, with nothing generated and no restart; the answer's
+        // Regenerate runs it again.
+        const waiting = (outcome: PreOutcome): void => {
           core.take(halt.id);
-          this.diag?.end(at, { status: "skipped", reason: pre.waiting });
-          return;
-        }
+          this.diag?.end(at, { status: "skipped", reason: outcome.waiting });
+        };
+        if (pre) return waiting(pre);
         await step("plan", async () => core.plan(halt.id, observed, false));
-        await step("prose", () => hooks.afterPlan({ chatId, userId, core, observed, generationId: halt.id, signal }));
+        const held = await step("prose", () => hooks.afterPlan({ chatId, userId, core, observed, generationId: halt.id, signal }));
+        going();
+        if (held) return waiting(held);
         this.failedStep(at);
         // The book is taken only while the run makes and places its entries: it writes no section.
         await this.claim(gate.worldId, chatId, halt.id, "turn", at);
@@ -1147,10 +1173,18 @@ export class LedgerService {
       } catch (error) {
         core.take(halt.id);
         if (claimed) this.letGo(gate.worldId, halt.id);
+        // Cancelled: its own end, not a failure. No flag and no Retry chip; the player's message
+        // stays, so Regenerate (or sending again) runs the turn anew.
+        if (signal.aborted) {
+          this.diag?.end(at, { status: "skipped", reason: "you cancelled the turn; nothing was generated" });
+          return;
+        }
         const failure = error instanceof EngineFailure ? error : new EngineFailure("engine", messageOf(error));
         this.diag?.end(at, { status: "failed", reason: `${failure.step}: ${failure.message}` });
         await hooks.failed({ chatId, userId, turn: halt.id, step: failure.step, reason: failure.message }).catch((e: unknown) => this.diag?.error(at, "engine", e, "the failure flag wasn't shown"));
         return;
+      } finally {
+        this.landed(chatId, flight);
       }
       const turn = core.take(halt.id);
       const as = restartAs(halt.type, observed);
@@ -1176,6 +1210,24 @@ export class LedgerService {
   private failedStep(at: { chatId: ChatId; userId: UserId; turn: string }): void {
     const failure = this.diag?.failure(at);
     if (failure) throw new EngineFailure(failure.step, failure.reason);
+  }
+
+  /** Stops the chat's engine run or reply read under way (DESIGN §5.1), when the chat is `userId`'s: false when nothing of theirs runs. */
+  cancel(chatId: ChatId, userId: UserId): boolean {
+    const flight = this.inFlight.get(chatId);
+    if (!flight || flight.signal.aborted || this.gates.get(chatId)?.userId !== userId) return false;
+    flight.abort(new TurnCancelled());
+    return true;
+  }
+
+  private flight(chatId: ChatId): AbortController {
+    const flight = new AbortController();
+    this.inFlight.set(chatId, flight);
+    return flight;
+  }
+
+  private landed(chatId: ChatId, flight: AbortController): void {
+    if (this.inFlight.get(chatId) === flight) this.inFlight.delete(chatId);
   }
 
   /** A message event's message, into the chat's mirror: the guard's chain (DESIGN §5.1). */
