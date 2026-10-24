@@ -12,6 +12,7 @@
 import { useMemo, useState } from "preact/hooks";
 import type { JsonValue } from "../../shared/json";
 import type { LintIssue } from "../../shared/protocol";
+import { NEED_WORDS } from "../../shared/needs";
 import type { Fidelity } from "../../shared/minds";
 import { FIDELITIES } from "../../shared/minds";
 import type { RoutineAwareness, RoutineInvitations, RoutinePlanBend, RoutineRole, RoutineSettings, RoutineSociability, SkipLife, SkipPlanCalls } from "../../shared/routines";
@@ -58,11 +59,11 @@ export const INVITATIONS_EXPLAINED: Record<RoutineInvitations, string> = {
   everyone: "Routine blocks may invite anyone, and people take each other's invitations.",
 };
 
-/** Each sociability in one plain line. */
+/** Each sociability in one plain line, naming the needs it scales as every surface does (`NEED_WORDS`). */
 export const SOCIABILITY_EXPLAINED: Record<RoutineSociability, string> = {
-  reserved: "The wish for company and fun grows half as fast.",
-  usual: "The wish for company and fun grows as it usually does.",
-  outgoing: "The wish for company and fun grows half again as fast.",
+  reserved: `${NEED_WORDS.social.name} and ${NEED_WORDS.fun.name.toLowerCase()} needs grow half as fast.`,
+  usual: `${NEED_WORDS.social.name} and ${NEED_WORDS.fun.name.toLowerCase()} needs grow as they usually do.`,
+  outgoing: `${NEED_WORDS.social.name} and ${NEED_WORDS.fun.name.toLowerCase()} needs grow half again as fast.`,
 };
 
 /** The draft write that saves the world's routine settings whole; the defaults leave the world without any. */

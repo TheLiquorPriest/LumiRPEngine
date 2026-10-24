@@ -17,6 +17,7 @@ import { useId, useMemo, useState } from "preact/hooks";
 import type { JsonObject, JsonValue } from "../../shared/json";
 import { hasOwn } from "../../shared/json";
 import type { LintIssue } from "../../shared/protocol";
+import { NEED_IDS, NEED_WORDS } from "../../shared/needs";
 import type { RoutineBlock, RoutineBlockKind, RoutineDays, RoutineDef, RoutineEntry, RoutinePlace, RoutineSeason, RoutineSource, WorldRoutineSource } from "../../shared/routines";
 import { AWARENESS_LABEL, BASIC_BLOCKS, INVITATIONS_LABEL, isOff, ROUTINE_BLOCK_KINDS, routineSettingsOf } from "../../shared/routines";
 import type { ScheduleSlot, WorldDoc } from "../../shared/world";
@@ -39,7 +40,6 @@ import { SelectorEditor, selectorOf } from "./selector-editor";
 const TIME = /^([01]\d|2[0-3]):[0-5]\d$/;
 const WEEKDAYS = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"];
 const SEASONS: readonly RoutineSeason[] = ["spring", "summer", "autumn", "winter"];
-const NEEDS: Record<string, string> = { hunger: "Hunger", fatigue: "Rest", social: "Company", fun: "Fun" };
 /** The activities every world knows, before its own. */
 const ACTIVITIES = ["sleep", "breakfast", "lunch", "dinner", "work", "socialize", "leisure"];
 
@@ -454,7 +454,7 @@ export function RoutineBlockForm(props: { value: RoutineBlock; doc: WorldDoc; pa
         <div class="lre-stack">
           <Field label="The needs it meets" help="None picked: the ones its activity meets.">
             <div class="lre-form-chips" role="group" aria-label="The needs it meets">
-              {Object.entries(NEEDS).map(([need, label]) => {
+              {NEED_IDS.map((need) => {
                 const on = block.needs?.includes(need) ?? false;
                 return (
                   <Chip key={need} pressed={on} onToggle={() => {
@@ -462,7 +462,7 @@ export function RoutineBlockForm(props: { value: RoutineBlock; doc: WorldDoc; pa
                     const { needs: _, ...rest } = block;
                     set(next.length === 0 ? rest : { ...rest, needs: next });
                   }}>
-                    {label}
+                    {NEED_WORDS[need].name}
                   </Chip>
                 );
               })}

@@ -9,18 +9,7 @@ import type { WorldCollection, WorldPart } from "../../shared/protocol";
 import { spawnTierOf } from "../../shared/tiers";
 import type { WorldDoc } from "../../shared/world";
 import { FEED_SCOPES } from "../../shared/world";
-import { NEED_IDS, type NeedId } from "../../shared/needs";
 import { STEP_LABEL, STEP_OUTPUT_LABEL } from "../../shared/steps";
-
-/** Each need as Build names it. */
-const NEED_LABELS: Record<NeedId, string> = { hunger: "Hunger", fatigue: "Fatigue", social: "Social", fun: "Fun" };
-/** One need's settings (DESIGN §8): on, its rate an hour and its two points on the 0 to 100 scale. */
-const NEED_FIELDS: FieldSpec[] = [
-  { kind: "bool", key: "on", label: "On", hint: "Off: it never grows, shows, is told or alerts" },
-  { kind: "number", key: "rate", label: "Grows an hour", min: 0, max: 100, step: 0.5, hint: "On its scale of 0 (met) to 100 (urgent)" },
-  { kind: "number", key: "tell", label: "Told from", min: 0, max: 100, step: 1, hint: "From here the narrator is told of it and Play marks it" },
-  { kind: "number", key: "alert", label: "Alerts from", min: 0, max: 100, step: 1, hint: "From here it raises the needs alert in a timelapse (Time → Interrupts says what that does)" },
-];
 
 export type RefCollection = "kinds" | "relations" | "entities" | "places" | "grids" | "checks" | "tracks" | "tables" | "lore";
 
@@ -539,8 +528,8 @@ export const COLLECTION_SPECS: Record<WorldCollection, FieldSpec[]> = {
   ],
 };
 
-/** The schema-driven singletons; Tiers, Ruleset, the lore lookup table, Minds and the routine settings have their own editors (`tiers-editor.tsx`, `ruleset-editor.tsx`, `lookup-editor.tsx`, `minds-editor.tsx`, `routine-settings.tsx`). */
-export const PART_SPECS: Record<Exclude<WorldPart, "tiers" | "loreIndex" | "ruleset" | "minds" | "lorePins" | "routineSettings">, FieldSpec[]> = {
+/** The schema-driven singletons; Tiers, Ruleset, the lore lookup table, Minds, the routine settings and Needs have their own editors (`tiers-editor.tsx`, `ruleset-editor.tsx`, `lookup-editor.tsx`, `minds-editor.tsx`, `routine-settings.tsx`, `needs-editor.tsx`). */
+export const PART_SPECS: Record<Exclude<WorldPart, "tiers" | "loreIndex" | "ruleset" | "minds" | "lorePins" | "routineSettings" | "needs">, FieldSpec[]> = {
   calendar: [
     { kind: "enum", key: "system", label: "System", values: ["gregorian", "custom"] },
     { kind: "localTime", key: "epoch", label: "Clock starts at (the epoch)", hint: "Minute 0 of the world's clock, in its own calendar" },
@@ -586,7 +575,6 @@ export const PART_SPECS: Record<Exclude<WorldPart, "tiers" | "loreIndex" | "rule
     { kind: "bandCaps", key: "tierCaps", label: "Band caps" },
     { kind: "claims", key: "claims", label: "Player claims" },
   ],
-  needs: NEED_IDS.map((need) => ({ kind: "object" as const, key: need, label: NEED_LABELS[need], fields: NEED_FIELDS })),
   time: [
     { kind: "record", key: "sceneTicks", label: "Default tick per scene type", keyLabel: "Scene type", item: { kind: "duration", key: "", label: "Tick" } },
     { kind: "json", key: "interrupts", label: "Interrupt policy" },

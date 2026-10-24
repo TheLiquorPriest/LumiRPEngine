@@ -9,6 +9,7 @@ import { useEffect, useId, useLayoutEffect, useRef, useState } from "preact/hook
 import type { WorldId } from "../../shared/ids";
 import { hasOwn, isRecord, safeKey } from "../../shared/json";
 import type { WorldCollection, WorldPart } from "../../shared/protocol";
+import { NEED_IDS, NEED_WORDS } from "../../shared/needs";
 import type { App, BuildRoute } from "../app";
 import { useApp } from "../app";
 import { Button, Disclosure, Field, IdText, PageHeader, useShowIds } from "../components";
@@ -50,6 +51,11 @@ export const COLLECTION_INFO: Readonly<Record<WorldCollection, CollectionInfo>> 
   packs: { label: "Packs", hint: "Enabled domain packs", noun: "pack", icon: "box" },
 };
 
+/** The needs by their one name, as a list ("Hunger, fatigue, social and fun"), so the hint names them as the page does. */
+const NEED_LIST = NEED_IDS.map((need, i) => (i === 0 ? NEED_WORDS[need].name : NEED_WORDS[need].name.toLowerCase()))
+  .join(", ")
+  .replace(/, ([^,]*)$/, " and $1");
+
 /** Each world part (the singletons) as Build names it. */
 export const PART_INFO: Readonly<Record<WorldPart, { label: string; hint: string; icon: IconName }>> = {
   meta: { label: "World", hint: "Name, point of view, start, currency and map", icon: "globe" },
@@ -62,7 +68,7 @@ export const PART_INFO: Readonly<Record<WorldPart, { label: string; hint: string
   minds: { label: "Minds", hint: "How closely characters think, what they remember, and their prompts", icon: "sparkle" },
   lorePins: { label: "Pinned lore", hint: "Lore every call for a character, at a place, or of a step always reads", icon: "pin" },
   routineSettings: { label: "Routines and the story", hint: "What routines are at each level, how firmly they hold against the story, and who invites whom", icon: "route" },
-  needs: { label: "Needs", hint: "Hunger, fatigue, company and fun: each on or off, how fast it grows, when it's told and when it alerts", icon: "sliders" },
+  needs: { label: "Needs", hint: `${NEED_LIST}: each on or off, how fast it grows, when the narrator is told and when it alerts`, icon: "sliders" },
 };
 
 /** A new item's page held open (`holdNew`): what Build asks before leaving it. */

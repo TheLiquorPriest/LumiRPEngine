@@ -28,6 +28,7 @@ import { runTimelapse } from "../../src/engine/time";
 import { Working } from "../../src/engine/working";
 import { ALL_PACKS, STARTER_WORLDS } from "../../src/packs/index";
 import { buildMapView } from "../../src/packs/space/core/view";
+import { NEED_DEFAULTS, NEED_IDS, NEED_WORDS } from "../../src/shared/needs";
 
 const interrupts = Object.fromEntries(INTERRUPT_CLASSES.map((cls) => [cls, ["invitation", "decline", "incident", "quest", "arrival"].includes(cls) ? "stop" : cls === "bill" ? "note" : "ignore"])) as Record<InterruptClass, InterruptPolicy>;
 
@@ -119,6 +120,13 @@ export function stateFixture(chatId: string): StateView {
           { id: "keys", name: "Car keys", children: [] },
         ],
         stored: [{ id: "tent", name: "2-person tent", condition: 90, children: [] }],
+      },
+      // Play → Me → Needs as the engine builds it (`buildNeedsView`): hunger past its point, the rest not.
+      "castlife.needs": {
+        needs: NEED_IDS.map((need) => {
+          const value = { hunger: 64, fatigue: 41, social: 22, fun: 9 }[need];
+          return { need, name: NEED_WORDS[need].name, label: NEED_WORDS[need].word, value, pressing: value >= NEED_DEFAULTS[need].tell, tell: NEED_DEFAULTS[need].tell, metBy: NEED_WORDS[need].metBy };
+        }),
       },
       "castlife.cast": {
         level: 3,
