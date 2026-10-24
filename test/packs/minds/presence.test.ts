@@ -32,7 +32,52 @@ function people(w: WorldDoc, state: WorldState): string[] {
   return reg.renderers.filter((r) => r.slot === "people" && !r.hint).flatMap((r) => r.render(ctx));
 }
 
+/**
+ * Riverton and, apart from it, Eastport: a town whose two halves only a drive joins, with a mill in
+ * its north drawn room by room, every room a one-minute walk from the next and the floors joined by
+ * stairs, and on the top floor a suite with a bath in it.
+ */
+function eastport(): WorldDoc {
+  const w = modernUsWorld("w", "R");
+  const place = (id: string, name: string, parent?: string): void => {
+    w.places[id] = { id, name, ...(parent ? { parent } : {}), fields: {} };
+  };
+  const walk = (from: string, to: string): void => {
+    const id = `walk_${from}_${to}`;
+    w.routes[id] = { id, from, to, modes: { walk: { minutes: 1 } }, bidirectional: true };
+  };
+  place("eastport", "Eastport");
+  place("eastport_north", "North Eastport", "eastport");
+  place("eastport_south", "South Eastport", "eastport");
+  w.routes.eastport_drive = { id: "eastport_drive", from: "eastport_north", to: "eastport_south", modes: { road: { minutes: 9, distanceKm: 7 } }, bidirectional: true };
+  place("mill", "The Mill", "eastport_north");
+  for (const floor of ["f1", "f2"]) {
+    place(`mill_${floor}`, `Floor ${floor}`, "mill");
+    for (let i = 1; i <= 6; i++) place(`mill_${floor}_room${i}`, `Room ${i}`, `mill_${floor}`);
+    for (let i = 1; i < 6; i++) walk(`mill_${floor}_room${i}`, `mill_${floor}_room${i + 1}`);
+  }
+  walk("mill_f1_room1", "mill_f2_room1");
+  place("mill_f2_suite", "The suite", "mill_f2");
+  place("mill_f2_bath", "The bath", "mill_f2_suite");
+  walk("mill_f2_room6", "mill_f2_suite");
+  walk("mill_f2_suite", "mill_f2_bath");
+  return w;
+}
+
 describe("who is with the player character", () => {
+  test("in a building drawn room by room, someone on the floor is with the player character in the bath of a suite on it; someone at the building isn't, nor is anyone across a town a drive joins", () => {
+    const w = eastport();
+    expect(together(w, "mill_f2_bath", "mill_f2")).toBe(true);
+    expect(together(w, "mill_f2_bath", "mill")).toBe(false);
+    expect(together(w, "eastport_north", "eastport")).toBe(false);
+    expect(together(w, "mill", "eastport")).toBe(false);
+    // As People reads it: Maya on the floor is with the POV in the bath, Jordan somewhere in the mill isn't.
+    const s = at(w, at(w, at(w, startState(w), w.pov, "mill_f2_bath"), "maya", "mill_f2"), "jordan", "mill");
+    const lines = people(w, s);
+    expect(lines.some((l) => l.includes("Maya Chen"))).toBe(true);
+    expect(lines.some((l) => l.includes("Jordan Price"))).toBe(false);
+  });
+
   test("a companion in a room inside the player character's place is with them: Minds and People tell of her", () => {
     const w = modernUsWorld("w", "R");
     // The POV placed coarsely, somewhere in Elm Street Apartments; Maya in the apartment inside it.

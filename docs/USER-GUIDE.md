@@ -754,7 +754,7 @@ Every turn, and at each beat of a time skip, each character gets a focus score a
 
 Who thinks follows your scene and what's in motion:
 
-- **Everyone in your scene** thinks every turn, best on the ladder first, up to your Live limit. Your scene is where you are, a room inside it, or the place holding it within the same building or site: someone the story put on the fourth floor is with you in its bathroom, while someone in the room next door, or somewhere in town, isn't.
+- **Everyone in your scene** thinks every turn, best on the ladder first, up to your Live limit. Your scene is where you are, or a place up to two levels inside or around it, as long as nothing between is spread out (a town or a region: places a drive, a boat or a walk of more than ten minutes joins). Someone the story put on the fourth floor is with you in the bath of a suite on it, even in a building drawn room by room with short walks between; someone in the room next door, somewhere else in a big building, or somewhere in town, isn't.
 - **Someone elsewhere** thinks only while they're caught up in something that could come up soon: a plan or appointment with you within the next day, an invitation to you, an agenda of their own under way, your intent for them in GM mode, a place or activity the story holds them to, or their interrupting a time skip. They think on their level's refresh, or every turn when they're Live, and what they thought is on record, though it never shows in the Minds section. Being named, idling or going about their routine makes no one think.
 - A mind that falls due while nothing calls it still keeps the level it fell due at, so a character's routine role never changes with who thinks.
 
