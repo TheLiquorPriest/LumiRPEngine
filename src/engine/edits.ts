@@ -14,6 +14,7 @@ import type { JsonObject, JsonValue } from "../shared/json";
 import { isRecord, safeKey } from "../shared/json";
 import type { LedgerEvent } from "../shared/ledger";
 import type { EditOp } from "../shared/protocol";
+import { EDIT_OPS_MAX } from "../shared/protocol";
 import type { ChatScheduleChange, RoutineEntry } from "../shared/routines";
 import { ROUTINE_AWARENESS, ROUTINE_MODES, ROUTINE_ROLES, SKIP_LIVES } from "../shared/routines";
 import { isBand, tierOf } from "../shared/tiers";
@@ -45,9 +46,6 @@ export type EditOutcome = { events: LedgerEvent[] } | { rejection: Rejection };
 
 /** The outside account GM money edits post against (DESIGN §9.2), shown as "Correction". */
 const CORRECTION = `${EXTERNAL_ACCOUNT_PREFIX}correction`;
-
-/** The most operations one submit may carry. */
-export const EDIT_OPS_MAX = 64;
 
 function reject(code: string, reason: string): Rejection {
   return { code, reason };
