@@ -880,7 +880,7 @@ function gmMinds(): MindsGmView {
 }
 
 export function gmFixture(): GmView {
-  const entity = (id: string, name: string, kind: string, tier: string, place: string | null, rest: Partial<GmEntity> = {}): GmEntity => ({ id, name, kind, tier, agent: false, pov: false, person: kind === "person", gone: false, spawned: false, visibility: "public", place, holder: null, claimed: false, fields: [], relations: [], levels: gmLevels(tier === "principal" ? LEADS : tier === "supporting" ? SUPPORTING : BACKGROUND), class: {}, tags: [], sheet: null, life: { state: "alive", label: "Alive", acts: true, everyone: true, aware: [], unaware: [] }, ...rest });
+  const entity = (id: string, name: string, kind: string, tier: string, place: string | null, rest: Partial<GmEntity> = {}): GmEntity => ({ id, name, kind, tier, agent: false, pov: false, person: kind === "person" || kind === "npc", gone: false, spawned: false, visibility: "public", place, holder: null, claimed: false, fields: [], relations: [], levels: gmLevels(tier === "principal" ? LEADS : tier === "supporting" ? SUPPORTING : BACKGROUND), class: {}, tags: [], sheet: null, life: { state: "alive", label: "Alive", acts: true, everyone: true, aware: [], unaware: [] }, ...rest });
   return {
     entities: [
       entity("pov", "Sam Rivera", "person", "principal", "diner", {

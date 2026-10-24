@@ -16,6 +16,7 @@ import { MoneyHub, type GmControls } from "./hub";
 import { possessive } from "./layout";
 import type { HubNav, HubPage } from "./nav";
 import { HubPageView, pageLabel } from "./pages";
+import { useGmFocus } from "../../../frontend/gm/ui";
 
 /**
  * The hub's GM pages as a stack (GM mode's `usePages` holds one page; the hub's go deeper: a
@@ -86,6 +87,8 @@ export function GmMoneySection(props: GmSectionProps) {
   const parties = props.gm.money.map((raw) => ({ raw, view: decodeFinanceView(raw) }));
   const [query, setQuery] = useState("");
   const [picked, setPicked] = useState<string | null>(null);
+  // A link from a character's sheet shows their money here.
+  useGmFocus(setPicked);
   if (parties.length === 0) return <Empty icon="coins">No one's money is tracked.</Empty>;
   const q = query.trim().toLowerCase();
   const shown = parties.filter((p) => q === "" || (p.view?.name ?? "").toLowerCase().includes(q) || (p.view?.party ?? "").toLowerCase().includes(q));

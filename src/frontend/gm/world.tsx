@@ -16,7 +16,8 @@ import { BatchPage } from "./batch";
 import type { Editor } from "./editor";
 import { claimedThings, findEntities } from "./editor";
 import { EntityBadges, EntityPage } from "./entity";
-import { BuildLink, GmPage, usePages } from "./ui";
+import { BuildLink, GmPage, useGmFocus, usePages } from "./ui";
+import { CharacterSheet } from "./character";
 
 type WorldPage = { entity: string } | "spawn" | "fight" | "batch";
 
@@ -95,11 +96,13 @@ function SpawnPage(props: { editor: Editor; onBack(): void }) {
   );
 }
 
-export function WorldSection(props: { editor: Editor }) {
+export function WorldSection(props: { editor: Editor; chatId: string }) {
   const { editor } = props;
   const [query, setQuery] = useState("");
   const [kind, setKind] = useState("");
   const pages = usePages<WorldPage>();
+  // A link from a character's Minds, Routines or Money page opens their sheet here.
+  useGmFocus((id) => pages.open({ entity: id }));
   // Choosing several to change at once: a row's tap picks it instead of opening its page.
   const selection = useSelection();
   const fight = editor.gm.encounter === null ? null : decodeEncounterView(editor.gm.encounter);
@@ -190,7 +193,7 @@ export function WorldSection(props: { editor: Editor }) {
           <EncounterCard view={fight} />
         </GmPage>
       ) : null}
-      {entity ? <EntityPage entity={entity} editor={editor} onBack={pages.back} /> : null}
+      {entity ? entity.person ? <CharacterSheet entity={entity} editor={editor} chatId={props.chatId} onBack={pages.back} onOpen={(id) => pages.open({ entity: id })} /> : <EntityPage entity={entity} editor={editor} onBack={pages.back} /> : null}
       {page === "batch" && chosen.length > 0 ? <BatchPage editor={editor} ids={chosen} onBack={pages.back} /> : null}
     </div>
   );

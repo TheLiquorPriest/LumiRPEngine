@@ -84,7 +84,7 @@ export function GmPanel(props: PanelProps) {
       ) : pack ? (
         <pack.component chatId={props.chatId} gm={editor.gm} currency={editor.currency} busy={editor.busy} edit={editor.edit} reload={load} send={props.send} />
       ) : (
-        <WorldSection editor={editor} />
+        <WorldSection editor={editor} chatId={props.chatId} />
       )}
     </div>
   );

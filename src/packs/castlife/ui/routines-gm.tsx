@@ -25,7 +25,7 @@ import { deriveId } from "../../../frontend/build/schema";
 import { Badge, Banner, Button, Empty, IdText, List, ListRow, NumberStepper, Section, Seg } from "../../../frontend/components";
 import { formatMinutes } from "../../../frontend/format";
 import { nameOf } from "../../../frontend/gm/editor";
-import { GmPage, usePages } from "../../../frontend/gm/ui";
+import { GmPage, SheetLink, useGmFocus, usePages } from "../../../frontend/gm/ui";
 import { Icon } from "../../../frontend/icons";
 import type { GmSectionProps, Send } from "../../../frontend/registry";
 import type { RoutineBinding, RoutineRow, StoryChange } from "./routines-ops";
@@ -100,6 +100,8 @@ export function GmRoutinesSection(props: GmSectionProps) {
   const app = useApp();
   const worldId = useView()?.worldId ?? null;
   const pages = usePages<EntityId>();
+  // A link from a character's sheet opens their routine here.
+  useGmFocus((id) => pages.open(id));
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<Filter>("");
   const [changed, setChanged] = useState<RoutineChangeSummary[] | null>(null);
@@ -248,6 +250,7 @@ function CharacterPages(props: { ctx: Ctx; row: RoutineRow; summary: RoutineChan
             </>
           }
           backLabel="Routines"
+          actions={<SheetLink entity={row.entity} />}
           onBack={props.onBack}
         >
           {error ? (

@@ -324,7 +324,7 @@ function relationDetail(r: GmRelation, gm: GmView): string | undefined {
   return parts.length > 0 ? parts.join(" · ") : undefined;
 }
 
-function Relations(props: { entity: GmEntity; editor: Editor }) {
+export function Relations(props: { entity: GmEntity; editor: Editor }) {
   const { entity, editor } = props;
   // Containment is Placement's (move, put), not a relation to add here.
   const types = editor.gm.relationTypes.filter((t) => t.id !== "in");
@@ -419,7 +419,7 @@ function Relations(props: { entity: GmEntity; editor: Editor }) {
 }
 
 /** Tier, agent flag and per-domain level overrides, saved together. */
-function Simulation(props: { entity: GmEntity; editor: Editor }) {
+export function Simulation(props: { entity: GmEntity; editor: Editor }) {
   const { entity, editor } = props;
   const [tier, setTier] = useState(entity.tier);
   const [agent, setAgent] = useState(entity.agent);
@@ -468,7 +468,7 @@ function Simulation(props: { entity: GmEntity; editor: Editor }) {
 }
 
 /** The life state, who knows it as it is, and who is told it with this save (DESIGN §8); everyone with them learns a change anyway. */
-function Life(props: { entity: GmEntity; editor: Editor }) {
+export function Life(props: { entity: GmEntity; editor: Editor }) {
   const { entity, editor } = props;
   const [to, setTo] = useState(entity.life.state);
   const [tell, setTell] = useState<string[]>([]);
@@ -523,7 +523,7 @@ function Life(props: { entity: GmEntity; editor: Editor }) {
 }
 
 /** Classes, every facet's (the GM sees the hidden ones too), and tags, saved together for this chat. */
-function Classification(props: { entity: GmEntity; editor: Editor }) {
+export function Classification(props: { entity: GmEntity; editor: Editor }) {
   const { entity, editor } = props;
   const [classes, setClasses] = useState(entity.class);
   const [tags, setTags] = useState(entity.tags);
