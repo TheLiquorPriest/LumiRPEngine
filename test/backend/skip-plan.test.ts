@@ -6,7 +6,8 @@
 import { describe, expect, test } from "bun:test";
 import type { QuietRequest } from "../../src/backend/host";
 import { toChain } from "../../src/backend/ledger-io";
-import { planSkip, SKIP_PLAN_SYSTEM } from "../../src/backend/skip-plan";
+import { planSkip } from "../../src/backend/skip-plan";
+import { SKIP_PLAN_ANSWER } from "../../src/shared/skip-plan";
 import { CallMeter, Steps } from "../../src/backend/steps";
 import { calendarOf, clockOfStamp, formatStamp } from "../../src/engine/calendar";
 import { createRegistry } from "../../src/engine/registry-impl";
@@ -28,7 +29,7 @@ import { livesPlans } from "../../src/packs/castlife/core/commitments";
 const reg = createRegistry(ALL_PACKS);
 const INTERPRET_MARK = "You map a player's typed input";
 const NONE: JsonObject = { action: null, params: {}, confidence: 0.9, reason: "no action" };
-const isPlanCall = (req: QuietRequest): boolean => (req.messages[0]?.content ?? "").includes(SKIP_PLAN_SYSTEM);
+const isPlanCall = (req: QuietRequest): boolean => (req.messages[0]?.content ?? "").includes(SKIP_PLAN_ANSWER);
 const block = (start: string, end: string, place: string, label = "Checks the moorings"): JsonObject => ({ label, start, end, place, activity: "work" });
 /** Danny's skip is the model's to plan: his routine informative, his skip life `model`. */
 const follow = (skips: "model" | "stay"): LedgerEvent => ({ type: ROUTINE_EVENTS.follow, data: { entity: "danny_okafor", follow: { mode: null, awareness: null, role: "informative", skips } } });
@@ -102,6 +103,19 @@ describe("a timelapse with someone the model plans", () => {
     rig.body(await rig.send({ type: "lre.settings.set", patch: { modelUse: { steps: { skip: { route: { connectionId: "skip-connection", model: "skip-model" }, maxTokens: 20_000 } } } } }));
     await lapse(rig, chatId);
     expect(asked).toMatchObject({ connectionId: "skip-connection", model: "skip-model", maxTokens: 20_000 });
+  });
+
+  test("its instructions are the user's own prompt for the time-skip step, with the answer format kept", async () => {
+    let system = "";
+    const { rig, chatId } = await alder((req) => {
+      system = req.messages[0]?.content ?? "";
+      return JSON.stringify({ plans: [] });
+    });
+    const mine = "Plan the skip in {{world}} as a slow-burn drama would.";
+    rig.body(await rig.send({ type: "lre.settings.set", patch: { modelUse: { steps: { skip: { template: mine } } } } }));
+    await lapse(rig, chatId);
+    expect(system.startsWith("Plan the skip in Port Alder as a slow-burn drama would.")).toBe(true);
+    expect(system).toContain(SKIP_PLAN_ANSWER);
   });
 
   test("a call that fails plans no one and leaves a note, and the skip still runs", async () => {
