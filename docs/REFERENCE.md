@@ -894,10 +894,6 @@ Its own: `relationships.regard`.
 |---|---|
 | `regard` | `number` |
 
-### Panels and slots
-
-Panels: none. Slots it writes: `people`.
-
 ### Lint codes
 
 `relationships.axes`.
@@ -1001,7 +997,9 @@ Extends `thing`.
 
 ### Formula functions
 
+- `can_go(from, to)`
 - `distance_km(from, to, mode)`
+- `go_minutes(from, to)`
 - `grid_minutes(place, x, y)`
 - `grid_reachable(place, x, y)`
 - `on_grid(thing)`
@@ -1015,7 +1013,7 @@ Extends `thing`.
 
 | Action | Label | Description | Parameters | Check | Outcomes | Minutes | Lexicon |
 |---|---|---|---|---|---|---|---|
-| `go` | Go to | Walk to another place: a room, a building, a street, another part of town. | `to: ref → place` |  | `default` | `level.space < 2 ? (level.space < 1 ? 0 : 15) : travel_minutes(here, to, 'walk')` | go to, walk to, head to, head over to, leave for |
+| `go` | Go to | Go to another place: a room, a building, a street, another part of town. | `to: ref → place` |  | `default` | `go_minutes(here, to)` | go to, walk to, head to, head over to, leave for |
 | `step` | Move on the map | Walk to a square of the grid you stand on. | `x: number`, `y: number` |  | `default` | `grid_minutes(here, x, y)` | walk over to, cross to, move to |
 
 ### Events
