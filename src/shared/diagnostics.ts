@@ -85,6 +85,8 @@ export interface Activity {
   label: string;
   /** Epoch ms the turn's work started (running) or the failure happened. */
   since: number;
+  /** A running line whose engine run or reply read Cancel can stop now (DESIGN §5.1); absent while it only waits for the reply or for Send. */
+  cancellable?: boolean;
 }
 
 /** What the chat, Settings and Diagnostics say when this Lumiverse can't stop a generation for the engine run (DESIGN §5.1). */

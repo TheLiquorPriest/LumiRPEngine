@@ -174,7 +174,8 @@ describe("diagnostics on a running chat", () => {
     const flagged = '"detail":"Reading your action: DIAG-SENTINEL failure"';
     expect(text).toContain(flagged);
     expect(text.split("DIAG-SENTINEL").length).toBe(text.split(flagged).length);
-    for (const m of pushed) if (m.type === "lre.activity" && m.activity) expect(Object.keys(m.activity).sort()).toEqual(["chatId", "label", "since", "state", "turn"]);
+    // The line carries its step's label and whether Cancel can stop it, nothing else.
+    for (const m of pushed) if (m.type === "lre.activity" && m.activity) expect(Object.keys(m.activity).filter((k) => k !== "cancellable").sort()).toEqual(["chatId", "label", "since", "state", "turn"]);
     for (const m of pushed) if (m.type === "lre.state.snapshot") expect(isRecord(m.view) && "diagnostics" in m.view).toBe(false);
   });
 });

@@ -100,6 +100,8 @@ export class Diagnostics {
   private readonly activities = new Map<ChatId, Activity>();
   /** Model calls under way per user, by purpose, latest last. */
   private readonly inflight = new Map<UserId, string[]>();
+  /** Whether the chat has an engine run or reply read Cancel can stop (the ledger's, `LedgerService.cancel`): what the running line offers Cancel by. */
+  cancellable: (chatId: ChatId) => boolean = () => false;
   private seq: number;
 
   constructor(
@@ -376,7 +378,7 @@ export class Diagnostics {
       const open = [...(this.open.get(turn.at.userId) ?? [])].reverse().find((s) => s.at.chatId === chatId);
       const asking = open ? this.inflight.get(turn.at.userId)?.at(-1) : undefined;
       const label = asking !== undefined ? callLabel(asking, this.inflight.get(turn.at.userId)?.filter((p) => p === asking).length ?? 1) : (open?.label ?? turn.rest);
-      return { chatId, turn: turn.at.turn, state: "running", label, since: turn.start };
+      return { chatId, turn: turn.at.turn, state: "running", label, since: turn.start, ...(this.cancellable(chatId) ? { cancellable: true } : {}) };
     }
     return this.activities.get(chatId) ?? null;
   }

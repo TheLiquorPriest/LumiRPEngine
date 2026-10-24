@@ -166,3 +166,21 @@ describe("cancelling a turn in flight", () => {
     expect(await flagOf(rig, chatId)).toBeUndefined();
   });
 });
+
+describe("Cancel on the activity line", () => {
+  test("is offered while the engine runs, and not once the turn only waits for its reply", async () => {
+    const rig = new Rig();
+    const chatId = await playedChat(rig);
+    let during: boolean | undefined;
+    rig.host.quietReply = () => {
+      during ??= rig.rt.diag.activityOf(chatId)?.cancellable;
+      return "{}";
+    };
+    const reply = await send(rig, chatId, "I wave.");
+    expect(during).toBe(true);
+    const waiting = rig.rt.diag.activityOf(chatId);
+    expect(waiting?.state).toBe("running");
+    expect(waiting?.cancellable).toBeUndefined();
+    await rig.host.finish(reply, "Someone waves back.");
+  });
+});

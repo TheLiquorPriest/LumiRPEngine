@@ -1220,6 +1220,12 @@ export class LedgerService {
     return true;
   }
 
+  /** Whether Cancel can stop something in the chat now: an engine run or reply read under way, not yet cancelled (the activity line's Cancel shows by it). */
+  cancellable(chatId: ChatId): boolean {
+    const flight = this.inFlight.get(chatId);
+    return flight !== undefined && !flight.signal.aborted;
+  }
+
   private flight(chatId: ChatId): AbortController {
     const flight = new AbortController();
     this.inFlight.set(chatId, flight);
