@@ -2547,8 +2547,8 @@ var COLLECTION_SPECS = {
     { kind: "life", key: "life", label: "Starts (life state)" },
     { kind: "refs", key: "lifeKnownBy", label: "Who knows how it starts (none: everyone)", collections: ["entities"] },
     { kind: "text", key: "characterId", label: "Lumiverse character id", optional: true },
-    { kind: "enum", key: "visibility", label: "Visibility", values: VISIBILITY, optional: true },
-    { kind: "selector", key: "knownBy", label: "Known by (besides a knows relation)", optional: true, when: { key: "visibility", values: ["known_by"] } },
+    { kind: "enum", key: "visibility", label: "Visibility", values: PLACE_VISIBILITY, optional: true },
+    { kind: "selector", key: "knownBy", label: "Known by (besides a knows relation)", optional: true, when: { key: "visibility", values: ["known_by", "discoverable"] } },
     {
       kind: "list",
       key: "cues",
@@ -23764,7 +23764,7 @@ var SPEED_ACTIVITIES = ["sleep", "work_shift", "travel", "waiting"];
 var SPEED_DEFAULT = Object.freeze({ mode: "offer", thresholdMinutes: 30 });
 var SPEED_THRESHOLD_MINUTES = [1, 7 * 1440];
 var TIMELAPSE_REACH_MINUTES = 366 * 1440;
-var EXTRACTION_TYPES = ["time_advance", "location", "condition", "knows", "give", "purchase", "transfer", "regard", "quantity", "spawn", "life", "routine"];
+var EXTRACTION_TYPES = ["time_advance", "location", "condition", "knows", "give", "purchase", "transfer", "regard", "quantity", "spawn", "life", "routine", "take", "drop", "use_up", "wear", "lose", "item_condition"];
 var EXTRACTION_DEFAULTS = Object.freeze({
   time_advance: "auto",
   location: "auto",
@@ -23776,7 +23776,13 @@ var EXTRACTION_DEFAULTS = Object.freeze({
   life: "confirm",
   knows: "confirm",
   give: "confirm",
-  purchase: "confirm"
+  purchase: "confirm",
+  take: "confirm",
+  drop: "confirm",
+  use_up: "confirm",
+  wear: "confirm",
+  lose: "confirm",
+  item_condition: "confirm"
 });
 var EXTRACTION_LEARNING = Object.freeze({
   promoteAt: 0.9,
@@ -25726,7 +25732,13 @@ var EXTRACTION_LABEL = {
   quantity: "Quantities",
   spawn: "New people",
   life: "Life and death (dying, dead, collapsed…)",
-  routine: "Routines (a new job, a habit, a move…)"
+  routine: "Routines (a new job, a habit, a move…)",
+  take: "Picking things up or finding them",
+  drop: "Putting things down",
+  use_up: "Using things up",
+  wear: "Putting on or taking off",
+  lose: "Losing things, or having them stolen",
+  item_condition: "Wear and damage to things"
 };
 var MODE_OPTIONS = [
   { value: "auto", label: "Auto" },

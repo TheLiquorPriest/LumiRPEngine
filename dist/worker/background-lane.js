@@ -1857,7 +1857,13 @@ var EXTRACTION_DEFAULTS = Object.freeze({
   life: "confirm",
   knows: "confirm",
   give: "confirm",
-  purchase: "confirm"
+  purchase: "confirm",
+  take: "confirm",
+  drop: "confirm",
+  use_up: "confirm",
+  wear: "confirm",
+  lose: "confirm",
+  item_condition: "confirm"
 });
 var EXTRACTION_LEARNING = Object.freeze({
   promoteAt: 0.9,
@@ -4352,10 +4358,13 @@ function canSeeEntity(reg, world, state, pov, id) {
     return true;
   if (!own(state.entities, id) || isGone(state, id))
     return false;
-  const v = entityVisibility(world, state, id);
+  const v = isDiscoverable(world, state, id) ? "known_by" : entityVisibility(world, state, id);
   if (v !== "known_by")
     return v === "public";
   return knows(state, pov, id) || granted(reg, world, state, pov, own(world.entities, id)?.knownBy ?? own(state.entities, id)?.fields.knownBy);
+}
+function isDiscoverable(world, state, id) {
+  return (own(world.entities, id)?.visibility ?? own(state.entities, id)?.fields.visibility) === "discoverable";
 }
 function canSeeField(reg, world, state, pov, id, field) {
   if (!canSeeEntity(reg, world, state, pov, id))
@@ -9693,19 +9702,19 @@ function lintStructure(world, reg) {
     }
   }
   const subjects = [
-    ...Object.entries(world.entities).map(([id, e]) => ({ path: `entities.${id}`, what: e.name, visibility: e.visibility, knownBy: e.knownBy, place: false })),
-    ...Object.entries(world.places).map(([id, p]) => ({ path: `places.${id}`, what: p.name, visibility: p.visibility, knownBy: p.knownBy, place: true })),
-    ...Object.entries(world.tracks).map(([id, t]) => ({ path: `tracks.${id}`, what: t.label, visibility: t.visibility, knownBy: t.knownBy, place: false })),
-    ...Object.entries(world.kinds).flatMap(([kid, k]) => Object.entries(k.fields).map(([fid, f]) => ({ path: `kinds.${kid}.fields.${fid}`, what: `${k.label}'s ${f.label ?? fid}`, visibility: f.visibility, knownBy: f.knownBy, place: false })))
+    ...Object.entries(world.entities).map(([id, e]) => ({ path: `entities.${id}`, what: e.name, visibility: e.visibility, knownBy: e.knownBy, findable: true })),
+    ...Object.entries(world.places).map(([id, p]) => ({ path: `places.${id}`, what: p.name, visibility: p.visibility, knownBy: p.knownBy, findable: true })),
+    ...Object.entries(world.tracks).map(([id, t]) => ({ path: `tracks.${id}`, what: t.label, visibility: t.visibility, knownBy: t.knownBy, findable: false })),
+    ...Object.entries(world.kinds).flatMap(([kid, k]) => Object.entries(k.fields).map(([fid, f]) => ({ path: `kinds.${kid}.fields.${fid}`, what: `${k.label}'s ${f.label ?? fid}`, visibility: f.visibility, knownBy: f.knownBy, findable: false })))
   ];
   for (const s of subjects) {
-    const understood = s.visibility === undefined || s.visibility === "public" || s.visibility === "known_by" || s.visibility === "secret" || s.place && s.visibility === "discoverable";
+    const understood = s.visibility === undefined || s.visibility === "public" || s.visibility === "known_by" || s.visibility === "secret" || s.findable && s.visibility === "discoverable";
     if (!understood)
-      err(`${s.path}.visibility`, "visibility", `${s.what} has visibility "${String(s.visibility)}", which isn't ${s.place ? "public, known_by, discoverable or secret" : "public, known_by or secret (discoverable is for places)"}; it stays hidden from the player.`);
+      err(`${s.path}.visibility`, "visibility", `${s.what} has visibility "${String(s.visibility)}", which isn't ${s.findable ? "public, known_by, discoverable or secret" : "public, known_by or secret (discoverable is for places and things)"}; it stays hidden from the player.`);
     if (s.knownBy === undefined)
       continue;
-    if (s.visibility !== "known_by" && !(s.place && s.visibility === "discoverable"))
-      warn(`${s.path}.knownBy`, "visibility", `${s.what} has a Known by, which only counts with ${s.place ? "known_by or discoverable" : "known_by"} visibility.`);
+    if (s.visibility !== "known_by" && !(s.findable && s.visibility === "discoverable"))
+      warn(`${s.path}.knownBy`, "visibility", `${s.what} has a Known by, which only counts with ${s.findable ? "known_by or discoverable" : "known_by"} visibility.`);
     const selector = knownBySelector(s.knownBy);
     if (!selector) {
       err(`${s.path}.knownBy`, "visibility", `${s.what}'s Known by names no constraint, or one this engine doesn't read, so it grants nobody.`);
@@ -23162,7 +23171,7 @@ function registerEffects(r, hooks) {
       const out = [...paid];
       const spawn = PHYSICAL.has(price.category) && args.keep !== false ? optionalService(ctx, "gear.spawn") : null;
       if (spawn && ctx.levelOf(payer, "gear") >= 1) {
-        const made = spawn(ctx, { name, owner: payer, holder: payer, ...row ? { catalog: row } : {}, category: price.category, qty, salt: `buy:${ctx.rng.seed}` });
+        const made = spawn(ctx, { name, owner: payer, holder: payer, ...row ? { catalog: row } : {}, category: price.category, qty, salt: `buy:${ctx.rng.seed}`, stack: true });
         if (Array.isArray(made))
           out.push(...made);
       }
@@ -23912,7 +23921,23 @@ var give = (ctx, item, from, to) => {
 function spawnId2(ctx, spec) {
   return `item:${hashParts(spec.name, spec.owner ?? "", spec.holder ?? "", spec.catalog ?? "", ctx.state.clock, spec.salt ?? "", Object.keys(ctx.state.entities).length).slice(0, 12)}`;
 }
+function stackFor(ctx, spec) {
+  if (!spec.holder || !own(ctx.state.entities, spec.holder))
+    return null;
+  const name = spec.name.trim().toLowerCase();
+  return carriedBy(ctx.state, spec.holder).find((id) => {
+    const e = own(ctx.state.entities, id);
+    if (!e || e.kind !== "item" || isGone(ctx.state, id) || e.relations.some((r) => r.type === "worn_by" || r.type === "equipped"))
+      return false;
+    if ((e.fields.owner ?? null) !== (spec.owner ?? null))
+      return false;
+    return spec.catalog ? e.fields.catalog === spec.catalog : e.fields.catalog === undefined && e.name.trim().toLowerCase() === name;
+  }) ?? null;
+}
 var spawn = (ctx, spec) => {
+  const stack = spec.stack ? stackFor(ctx, spec) : null;
+  if (stack)
+    return [{ type: "set", entity: stack, field: "qty", value: numOf(own(ctx.state.entities, stack)?.fields.qty, 1) + (spec.qty ?? 1) }];
   const row = spec.catalog ? rowOf(ctx, "gear.items", spec.catalog) ?? rowOf(ctx, "gear.containers", spec.catalog) : undefined;
   const fields = { notable: true };
   if (spec.owner)
@@ -23949,12 +23974,44 @@ function usedUp(ctx, item, done) {
   const e = own(ctx.state.entities, item);
   return done && e?.fields.claimed === true && e.fields.consumable === true && e.fields[GONE_FIELD] !== true ? [{ type: "set", entity: item, field: GONE_FIELD, value: true }] : [];
 }
+function search(ctx, who, target) {
+  if (!own(ctx.state.entities, who))
+    return reject9("missing_entity", `no searcher ${labelOf(ctx, who)}`);
+  const place = placeOfEntity(ctx.state, who);
+  if (target !== null) {
+    if (!own(ctx.state.entities, target))
+      return reject9("missing_entity", `no ${labelOf(ctx, target)} to search`);
+    if (placeOfEntity(ctx.state, target) !== place)
+      return reject9("not_here", `${labelOf(ctx, target)} isn't here`);
+  } else if (!place)
+    return reject9("no_place", `${labelOf(ctx, who)} is nowhere`);
+  const found = target !== null ? contentsOf(ctx.state, target) : Object.keys(ctx.state.entities).filter((id) => holderOf(ctx.state, id) === null && own(ctx.state.entities, id)?.fields.place === place).sort();
+  return found.filter((id) => id !== who && !isGone(ctx.state, id) && isDiscoverable(ctx.world, ctx.state, id) && !knows(ctx.state, who, id)).map((id) => ({ type: "link", rel: "knows", from: who, to: id }));
+}
 function heldItem(ctx, item, from) {
   if (own(ctx.state.entities, item) || from === "")
     return item;
   const name = item.trim().replace(/^(?:a|an|the|my|his|her|their|your|our)\s+/i, "").toLowerCase();
   const fits = carriedBy(ctx.state, from).filter((id) => !isGone(ctx.state, id) && own(ctx.state.entities, id)?.name.trim().toLowerCase() === name);
   return fits.length === 1 && fits[0] !== undefined ? fits[0] : item;
+}
+var USE_UP_MAX = 10;
+var CONDITION_STEP_MAX = 25;
+function lyingNamed(ctx, item, who) {
+  const place = placeOfEntity(ctx.state, who);
+  const name = item.trim().replace(/^(?:a|an|the|my|his|her|their|your|our)\s+/i, "").toLowerCase();
+  const fits = Object.keys(ctx.state.entities).filter((id) => !isGone(ctx.state, id) && !heldByPerson(ctx, id) && placeOfEntity(ctx.state, id) === place && canSeeEntity(ctx.registry, ctx.world, ctx.state, ctx.world.pov, id) && own(ctx.state.entities, id)?.name.trim().toLowerCase() === name);
+  return fits.length === 1 && fits[0] !== undefined ? fits[0] : item;
+}
+function heldByPerson(ctx, id) {
+  let cur = holderOf(ctx.state, id);
+  for (let guard = 0;cur && guard < 32; guard++) {
+    const e = own(ctx.state.entities, cur);
+    if (e && kindIs(ctx.registry, ctx.world, e.kind, "person"))
+      return true;
+    cur = holderOf(ctx.state, cur);
+  }
+  return false;
 }
 function claimId(ctx, c) {
   for (let n = 0;; n++) {
@@ -23967,6 +24024,11 @@ var claim = (ctx, c) => {
   if (!own(ctx.state.entities, c.by))
     return reject9("missing_entity", `no claimer ${labelOf(ctx, c.by)}`);
   const name = c.name.trim();
+  if (c.existing && own(ctx.state.entities, c.existing)) {
+    const place2 = placeOfEntity(ctx.state, c.by);
+    const moved = c.at === "held" ? transfer2(ctx, c.existing, c.by) : place2 ? drop(ctx, c.existing, place2) : reject9("no_place", `${labelOf(ctx, c.by)} is nowhere`);
+    return Array.isArray(moved) ? { entity: c.existing, events: moved } : moved;
+  }
   if (c.at === "held") {
     const held2 = carriedBy(ctx.state, c.by).find((id2) => {
       const e = own(ctx.state.entities, id2);
@@ -24133,7 +24195,8 @@ var gearPack = {
     });
     wrap("gear.drop", ["item", "place?"], (a, ctx) => drop(ctx, strOf(a.item), strOf(a.place) || (placeOfEntity(ctx.state, strOf(a.item)) ?? "")));
     wrap("gear.give", ["item", "from", "to"], (a, ctx) => give(ctx, strOf(a.item), strOf(a.from), strOf(a.to)));
-    wrap("gear.receive", ["name", "to", "from?"], (a, ctx) => spawn(ctx, { name: strOf(a.name), owner: strOf(a.to), holder: strOf(a.to), salt: `give:${strOf(a.from)}:${ctx.state.clock}` }));
+    wrap("gear.receive", ["name", "to", "from?"], (a, ctx) => spawn(ctx, { name: strOf(a.name), owner: strOf(a.to), holder: strOf(a.to), salt: `give:${strOf(a.from)}:${ctx.state.clock}`, stack: true }));
+    wrap("gear.search", ["who", "target?"], (a, ctx) => search(ctx, strOf(a.who) || ctx.world.pov, strOf(a.target) || null));
     wrap("gear.take_piece", ["kit", "piece", "to"], (a, ctx) => takePiece(ctx, strOf(a.kit), strOf(a.piece), strOf(a.to)));
     wrap("gear.lend", ["item", "to", "until?", "said?"], (a, ctx) => {
       const said2 = strOf(a.said);
@@ -24209,6 +24272,7 @@ var gearPack = {
     });
     r.action({ id: "lose", label: "Lose something", description: "Something you own or carry is lost or gone, whereabouts unknown.", pack: "gear", params: { item: { type: "ref", ref: "item" } }, requires: ["item.owner == self or carries(self, item)", "item.lost != true"], outcomes: { default: [{ type: "gear.lose", args: { item: "item" } }] }, duration: "1", lexicon: ["lost my", "lose", "can't find my", "is gone", "is missing"], observable: "searches their pockets" });
     r.action({ id: "drop", label: "Drop", description: "Put down something you carry, here.", pack: "gear", params: { item: { type: "ref", ref: "item", claim: "held" } }, requires: ["carries(self, item)"], outcomes: { default: [{ type: "gear.drop", args: { item: "item", place: "=here" } }] }, duration: "1", lexicon: ["drop", "put down", "leave"], observable: "puts something down" });
+    r.action({ id: "search", label: "Search", description: "Search where you are, or look through a container, for what isn't in plain sight.", pack: "gear", params: { target: { type: "ref", ref: "item", optional: true, label: "What to look through (none: around here)" } }, requires: [], outcomes: { default: [{ type: "gear.search", args: { who: "self", target: "=params.target" } }] }, duration: "5", lexicon: ["search", "look around", "examine", "look through", "look inside", "open", "rummage"], observable: "searches the place" });
     r.action({ id: "give", label: "Give", description: "Hand something you carry to someone here, for keeps.", pack: "gear", params: { item: { type: "ref", ref: "item", claim: "held" }, to: { type: "ref", ref: "person" } }, requires: ["carries(self, item)", "at(to, here)"], outcomes: { default: [{ type: "gear.give", args: { item: "item", from: "self", to: "to" } }] }, duration: "1", lexicon: ["give", "hand", "pass"], observable: "hands something over" });
     r.action({ id: "lend", label: "Lend", description: "Lend something of yours to someone, for some days or until a time.", pack: "gear", params: { item: { type: "ref", ref: "item" }, to: { type: "ref", ref: "person" }, days: { type: "number", optional: true }, until: { type: "text", optional: true, label: "Until (a time: 7 pm, tonight, tomorrow)" } }, requires: ["item.owner == self", "days > 0 or params.until != null", "at(to, here) or at(item, here)"], outcomes: { default: [{ type: "gear.lend", args: { item: "item", to: "to", until: "=days > 0 ? clock + days(days) : 0", said: "=params.until" } }] }, duration: "2", lexicon: ["lend", "loan", "let borrow"], observable: "lends something" });
     r.action({ id: "reclaim", label: "Take back", description: "Take back something of yours that you lent out.", pack: "gear", params: { item: { type: "ref", ref: "item" } }, requires: ["item.owner == self", "lent_out(item)"], outcomes: { default: [{ type: "gear.retrieve", args: { item: "item" } }] }, duration: "5", lexicon: ["take back", "get back", "reclaim"], observable: "takes something back" });
@@ -24322,6 +24386,141 @@ var gearPack = {
       toEffects: (p, ctx) => {
         const item = heldItem(ctx, strOf(p.item), strOf(p.from));
         return own(ctx.state.entities, item) ? [{ type: "gear.give", args: { item, from: strOf(p.from), to: strOf(p.to) } }] : [{ type: "gear.receive", args: { name: item, from: strOf(p.from), to: strOf(p.to) } }];
+      }
+    });
+    const itemFor = (p, ctx, who, near) => {
+      if (!own(ctx.state.entities, who))
+        return reject9("missing_entity", `no one ${labelOf(ctx, who)}`);
+      const named = heldItem(ctx, strOf(p.item), who);
+      const id = near && !own(ctx.state.entities, named) ? lyingNamed(ctx, strOf(p.item), who) : named;
+      const e = own(ctx.state.entities, id);
+      if (!e || isGone(ctx.state, id) || !kindIs(ctx.registry, ctx.world, e.kind, "item") || !canSeeEntity(ctx.registry, ctx.world, ctx.state, ctx.world.pov, id))
+        return reject9("missing_entity", `no item ${labelOf(ctx, strOf(p.item))}`);
+      if (e.kind === "account")
+        return reject9("is_money", "money changes hands as a transfer");
+      return { id, e };
+    };
+    r.proposal({
+      type: "take",
+      boundField: "ref",
+      validate(p, ctx) {
+        const who = strOf(p.entity) || ctx.world.pov;
+        const found = itemFor(p, ctx, who, true);
+        if ("code" in found)
+          return found;
+        if (isInside(ctx.state, found.id, who))
+          return reject9("already_held", `${labelOf(ctx, who)} already has ${found.e.name}`);
+        if (placeOfEntity(ctx.state, found.id) !== placeOfEntity(ctx.state, who) || heldByPerson(ctx, found.id))
+          return reject9("not_here", `${found.e.name} isn't lying where ${labelOf(ctx, who)} is`);
+        return null;
+      },
+      toEffects: (p, ctx) => {
+        const who = strOf(p.entity) || ctx.world.pov;
+        const found = itemFor(p, ctx, who, true);
+        return "code" in found ? [] : [{ type: "gear.transfer", args: { item: found.id, to: who } }];
+      }
+    });
+    r.proposal({
+      type: "drop",
+      boundField: "ref",
+      validate(p, ctx) {
+        const who = strOf(p.entity) || ctx.world.pov;
+        const found = itemFor(p, ctx, who, false);
+        if ("code" in found)
+          return found;
+        if (!isInside(ctx.state, found.id, who))
+          return reject9("not_held", `${labelOf(ctx, who)} doesn't have ${found.e.name}`);
+        return placeOfEntity(ctx.state, who) ? null : reject9("no_place", `${labelOf(ctx, who)} is nowhere`);
+      },
+      toEffects: (p, ctx) => {
+        const who = strOf(p.entity) || ctx.world.pov;
+        const found = itemFor(p, ctx, who, false);
+        return "code" in found ? [] : [{ type: "gear.drop", args: { item: found.id, place: placeOfEntity(ctx.state, who) ?? "" } }];
+      }
+    });
+    r.proposal({
+      type: "use_up",
+      boundField: "number",
+      validate(p, ctx) {
+        const who = strOf(p.entity) || ctx.world.pov;
+        const found = itemFor(p, ctx, who, false);
+        if ("code" in found)
+          return found;
+        if (!isInside(ctx.state, found.id, who))
+          return reject9("not_held", `${labelOf(ctx, who)} doesn't have ${found.e.name}`);
+        const n = p.qty === undefined ? 1 : p.qty;
+        if (typeof n !== "number" || !Number.isInteger(n) || n < 1 || n > USE_UP_MAX)
+          return reject9("bound", `using up is a whole number from 1 to ${USE_UP_MAX} at a time`);
+        return null;
+      },
+      toEffects: (p, ctx) => {
+        const who = strOf(p.entity) || ctx.world.pov;
+        const found = itemFor(p, ctx, who, false);
+        if ("code" in found)
+          return [];
+        const left = numOf(found.e.fields.qty, 1) - numOf(p.qty, 1);
+        return [left > 0 ? { type: "set", args: { entity: found.id, field: "qty", value: left } } : { type: "set", args: { entity: found.id, field: GONE_FIELD, value: true } }];
+      }
+    });
+    r.proposal({
+      type: "wear",
+      boundField: "ref",
+      validate(p, ctx) {
+        const who = strOf(p.entity) || ctx.world.pov;
+        const found = itemFor(p, ctx, who, true);
+        if ("code" in found)
+          return found;
+        const worn = found.e.relations.some((x) => (x.type === "worn_by" || x.type === "equipped") && x.to === who);
+        if (p.off === true)
+          return worn ? null : reject9("not_worn", `${labelOf(ctx, who)} isn't wearing ${found.e.name}`);
+        if (worn)
+          return reject9("already_worn", `${labelOf(ctx, who)} already wears ${found.e.name}`);
+        return isInside(ctx.state, found.id, who) || placeOfEntity(ctx.state, found.id) === placeOfEntity(ctx.state, who) ? null : reject9("not_held", `${labelOf(ctx, who)} doesn't have ${found.e.name}`);
+      },
+      toEffects: (p, ctx) => {
+        const who = strOf(p.entity) || ctx.world.pov;
+        const found = itemFor(p, ctx, who, true);
+        if ("code" in found)
+          return [];
+        return p.off === true ? [{ type: "gear.remove", args: { item: found.id } }] : [{ type: "gear.wear", args: { item: found.id, wearer: who } }];
+      }
+    });
+    r.proposal({
+      type: "lose",
+      boundField: "ref",
+      validate(p, ctx) {
+        const who = strOf(p.entity) || ctx.world.pov;
+        const found = itemFor(p, ctx, who, false);
+        if ("code" in found)
+          return found;
+        if (!isInside(ctx.state, found.id, who) && found.e.fields.owner !== who)
+          return reject9("not_held", `${labelOf(ctx, who)} doesn't have ${found.e.name}`);
+        const by = strOf(p.by);
+        return by === "" || own(ctx.state.entities, by) ? null : reject9("missing_entity", `no thief ${labelOf(ctx, by)}`);
+      },
+      toEffects: (p, ctx) => {
+        const who = strOf(p.entity) || ctx.world.pov;
+        const found = itemFor(p, ctx, who, false);
+        if ("code" in found)
+          return [];
+        return strOf(p.by) !== "" ? [{ type: "gear.transfer", args: { item: found.id, to: strOf(p.by) } }] : [{ type: "gear.lose", args: { item: found.id } }];
+      }
+    });
+    r.proposal({
+      type: "item_condition",
+      boundField: "number",
+      validate(p, ctx) {
+        const holder = strOf(p.entity) || ctx.world.pov;
+        const found = itemFor(p, ctx, holder, true);
+        if ("code" in found)
+          return found;
+        if (typeof p.delta !== "number" || !Number.isInteger(p.delta) || p.delta === 0 || Math.abs(p.delta) > CONDITION_STEP_MAX)
+          return reject9("bound", `an item's condition moves by a whole number up to ${CONDITION_STEP_MAX} a reply`);
+        return null;
+      },
+      toEffects: (p, ctx) => {
+        const found = itemFor(p, ctx, strOf(p.entity) || ctx.world.pov, true);
+        return "code" in found ? [] : [{ type: "add", args: { entity: found.id, field: "condition", delta: numOf(p.delta, 0) } }];
       }
     });
     r.proposal({
